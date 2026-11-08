@@ -178,6 +178,97 @@ test("UTF-16 edits, idempotency, revision restoration and stale-head conflicts",
   );
 });
 
+test("document saves advance persistent anchors atomically and revoke stale mention confirmation", async () => {
+  const project = await createProject(`anchor-follow-${randomUUID()}`);
+  const initial = await createDocument(project.id, "前文 東京 の後文");
+  const quoteStart = initial.revision.markdown.indexOf("東京");
+  const nodeId = randomUUID() as KnowledgeNodeId;
+  const evidenceId = randomUUID() as EvidenceId;
+  await persistence.transaction(async (transaction) => {
+    await transaction.saveKnowledgeNode({
+      projectId: project.id,
+      id: nodeId,
+      type: "character",
+      name: "東京",
+      attributes: {},
+      status: "confirmed",
+      expectedVersion: null,
+    });
+    await transaction.saveEvidenceAnchor({
+      projectId: project.id,
+      id: evidenceId,
+      documentId: initial.document.id,
+      revisionId: initial.revision.id,
+      fromUtf16: quoteStart,
+      toUtf16: quoteStart + "東京".length,
+      quoteSha256: sha256("東京"),
+      status: "confirmed",
+      expectedVersion: null,
+    });
+    await transaction.saveMentionLink({
+      projectId: project.id,
+      evidenceId,
+      nodeId,
+      status: "confirmed",
+      source: "author",
+      confidence: 1,
+      extractorVersion: null,
+    });
+  });
+
+  const prefix = "😀追記";
+  const afterPrefix = `${prefix}${initial.revision.markdown}`;
+  const prefixSave = saveCommand(project.id, initial.document.id, initial.revision.id, afterPrefix,
+    [{ fromUtf16: 0, toUtf16: 0, insert: prefix }], "anchor-shift");
+  const shifted = await persistence.transaction((transaction) => transaction.saveDocument(prefixSave));
+  let evidence = await persistence.read(async (reader) => ({
+    anchor: await reader.getEvidenceAnchor(project.id, evidenceId),
+    links: await reader.listMentionLinks(project.id, evidenceId),
+    history: await reader.listEvidenceHistory(project.id, evidenceId),
+    documentAnchors: await reader.listDocumentEvidence(project.id, initial.document.id, shifted.revision.id),
+  }));
+  assert.equal(evidence.anchor?.revisionId, shifted.revision.id);
+  assert.equal(evidence.anchor?.fromUtf16, quoteStart + prefix.length);
+  assert.equal(evidence.anchor?.toUtf16, quoteStart + prefix.length + "東京".length);
+  assert.equal(evidence.anchor?.status, "confirmed");
+  assert.equal(evidence.links[0]?.status, "confirmed");
+  assert.equal(evidence.history.length, 2);
+
+  const range = { fromUtf16: evidence.anchor!.fromUtf16, toUtf16: evidence.anchor!.toUtf16 };
+  const afterReplacement = `${afterPrefix.slice(0, range.fromUtf16)}大阪${afterPrefix.slice(range.toUtf16)}`;
+  const replacementSave = saveCommand(project.id, initial.document.id, shifted.revision.id, afterReplacement,
+    [{ ...range, insert: "大阪" }], "anchor-needs-review");
+  const reviewed = await persistence.transaction((transaction) => transaction.saveDocument(replacementSave));
+  evidence = await persistence.read(async (reader) => ({
+    anchor: await reader.getEvidenceAnchor(project.id, evidenceId),
+    links: await reader.listMentionLinks(project.id, evidenceId),
+    history: await reader.listEvidenceHistory(project.id, evidenceId),
+    documentAnchors: await reader.listDocumentEvidence(project.id, initial.document.id, reviewed.revision.id),
+  }));
+  assert.equal(evidence.anchor?.revisionId, reviewed.revision.id);
+  assert.equal(evidence.anchor?.status, "needs_review");
+  assert.equal(evidence.anchor?.quoteSha256, sha256("大阪"));
+  assert.equal(evidence.links[0]?.status, "proposed");
+  assert.equal(evidence.history.length, 3);
+
+  const currentAnchor = evidence.anchor!;
+  const afterDelete = `${afterReplacement.slice(0, currentAnchor.fromUtf16)}${afterReplacement.slice(currentAnchor.toUtf16)}`;
+  const deleteSave = saveCommand(project.id, initial.document.id, reviewed.revision.id, afterDelete,
+    [{ fromUtf16: currentAnchor.fromUtf16, toUtf16: currentAnchor.toUtf16, insert: "" }], "anchor-orphaned");
+  const deleted = await persistence.transaction((transaction) => transaction.saveDocument(deleteSave));
+  evidence = await persistence.read(async (reader) => ({
+    anchor: await reader.getEvidenceAnchor(project.id, evidenceId),
+    links: await reader.listMentionLinks(project.id, evidenceId),
+    history: await reader.listEvidenceHistory(project.id, evidenceId),
+    documentAnchors: await reader.listDocumentEvidence(project.id, initial.document.id, deleted.revision.id),
+  }));
+  assert.equal(evidence.anchor?.revisionId, deleted.revision.id);
+  assert.equal(evidence.anchor?.status, "orphaned");
+  assert.equal(evidence.anchor?.fromUtf16, evidence.anchor?.toUtf16);
+  assert.equal(evidence.history.length, 4);
+  assert.equal(evidence.documentAnchors[0]?.status, "orphaned");
+});
+
 test("concurrent exact retries replay one document creation and one edit", async () => {
   const project = await createProject(`retry-${randomUUID()}`);
   const creation: CreateDocumentCommand = {

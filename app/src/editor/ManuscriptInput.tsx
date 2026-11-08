@@ -13,7 +13,7 @@ import { editorCompositionExtension, isViewComposing } from "./cm/compositionGua
 import { ellipsisNormalizeExtension } from "./cm/ellipsisNormalize";
 import { refreshTermAdornments, termAdornmentsExtension } from "./cm/termAdornments";
 import { externalDocumentSync, setDocumentEvidence, textAnchorDecorationsExtension } from "./cm/textAnchorDecorations";
-import { emptyDocumentEvidence, markEvidenceNeedsReview, type DocumentEvidenceState } from "./evidence";
+import { emptyDocumentEvidence, markEvidenceNeedsReview, type DocumentEvidenceState, type TextChange } from "./evidence";
 import { planWritingSymbol, type WritingSymbolId } from "./writingSymbols";
 import { type ResolveEditorTerms } from "./terms";
 import { createUiSentencePositionIndexCache, type UiSentencePositionIndexCache } from "../resume/continueCandidates";
@@ -31,7 +31,7 @@ export interface ManuscriptInputProps {
   value: string;
   externalTextRevision: number;
   readOnly?: boolean;
-  onChange: (value: string) => void;
+  onChange: (value: string, changes: TextChange[]) => void;
   onSelectionLengthChange?: (length: number) => void;
   onCursorPositionChange?: (cursorSentenceIndex: number | null, scrollTop: number) => void;
   placeholder?: string;
@@ -178,12 +178,16 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
         }),
         EditorView.updateListener.of((update) => {
           const changedText = update.docChanged ? update.state.doc.toString() : null;
+          const textChanges: TextChange[] = [];
+          if (update.docChanged) update.changes.iterChanges((from, to, _newFrom, _newTo, inserted) => {
+            textChanges.push({ from, to, insert: inserted.toString() });
+          });
           const changedDocumentIndex = update.docChanged
             ? sentencePositionIndex(update.state.doc, changedText ?? undefined)
             : null;
           if (update.docChanged) {
             if (externalSyncRef.current) externalSyncRef.current = false;
-            else if (changedText !== null) latestRef.current.onChange(changedText);
+            else if (changedText !== null) latestRef.current.onChange(changedText, textChanges);
           }
           if (update.docChanged || update.selectionSet) {
             const selection = update.state.selection.main;

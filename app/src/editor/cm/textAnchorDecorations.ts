@@ -54,15 +54,19 @@ export function textAnchorDecorationsExtension(
       const ranges = state.anchors.flatMap((anchor) => {
         if (anchor.status === "orphaned" || anchor.status === "revision_conflict"
           || anchor.from < 0 || anchor.to <= anchor.from || anchor.to > view.state.doc.length) return [];
-        const statusText = anchor.status === "current" ? "確認済み" : "再確認が必要";
+        const statusText = anchor.status === "current" ? "確認済み"
+          : anchor.status === "proposed" ? "未確定"
+            : "再確認が必要";
         const attributes: Record<string, string> = {
           "data-anchor-id": anchor.id,
           "data-block-id": anchor.blockId,
-          "data-knowledge-id": anchor.target.id,
           "data-anchor-status": anchor.status,
-          "aria-label": `${anchor.target.label}への知識参照、${statusText}`,
+          "aria-label": anchor.target
+            ? `${anchor.target.label}への知識参照、${statusText}`
+            : `本文の根拠、${statusText}`,
         };
-        if (anchor.status === "current" && anchor.target.targetPath && navigateRef.current) {
+        if (anchor.target) attributes["data-knowledge-id"] = anchor.target.id;
+        if (anchor.status === "current" && anchor.target?.targetPath && navigateRef.current) {
           attributes.role = "link";
           attributes["aria-keyshortcuts"] = "Control+Enter Meta+Enter";
           attributes["data-target-path"] = anchor.target.targetPath;
@@ -88,11 +92,11 @@ export function textAnchorDecorationsExtension(
         const pluginInstance = view.plugin(plugin);
         const anchors = pluginInstance?.evidence.anchors ?? [];
         const selection = view.state.selection.main;
-        const anchor = anchors.find((item) => item.status === "current" && item.target.targetPath
+        const anchor = anchors.find((item) => item.status === "current" && item.target?.targetPath
           && (selection.empty
             ? item.from <= selection.head && selection.head < item.to
             : item.from <= selection.from && item.to >= selection.to));
-        if (!anchor?.target.targetPath || !navigateRef.current) return false;
+        if (!anchor?.target?.targetPath || !navigateRef.current) return false;
         navigateRef.current(anchor.target.targetPath, anchor.target.id);
         return true;
       },

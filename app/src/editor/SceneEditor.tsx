@@ -8,7 +8,7 @@ import { ManuscriptInput, type ManuscriptInputHandle } from "./ManuscriptInput";
 import { RubyText } from "./ruby";
 import { TermAwareRubyText } from "./TermAwareRubyText";
 import type { ResolveEditorTerms } from "./terms";
-import { assertEditorEvidenceSnapshot, initializeDocumentEvidence, invalidateDocumentEvidence, markEvidenceNeedsReview, type DocumentEvidenceState, type EditorEvidenceAdapter } from "./evidence";
+import { assertEditorEvidenceSnapshot, composeTextChanges, initializeDocumentEvidence, invalidateDocumentEvidence, markEvidenceNeedsReview, type DocumentEvidenceState, type EditorEvidenceAdapter, type EditorEvidenceIdentity, type EditorPersistenceSave, type TextChange } from "./evidence";
 import { loadTypographySettings, storeTypographySettings, typographyPresetValues, TYPOGRAPHY_PRESETS, type TypographySettings, type TypographyPresetId } from "./typography";
 import { WRITING_SYMBOLS } from "./writingSymbols";
 import { loadReadingPage, saveReadingPage } from "../resume/continueCandidates";
@@ -17,6 +17,18 @@ type Durability = "draft" | "checkpointing" | "checkpointed" | "publication_unkn
 
 interface EditorDurabilityStatusHandle {
   markPendingText: (text: string, revision: number) => void;
+}
+
+interface PendingPersistenceChange {
+  generation: number;
+  markdown: string;
+  changes: TextChange[];
+}
+
+interface PendingPersistenceRequest {
+  identity: EditorEvidenceIdentity;
+  request: EditorPersistenceSave;
+  throughGeneration: number;
 }
 
 const PendingEditorTextContext = createContext(false);
@@ -199,7 +211,7 @@ export function SceneEditor({
   textRevision: number;
   flushPendingReactPublish: () => void;
   readOnly?: boolean;
-  onTextChange: (next: string) => void;
+  onTextChange: (next: string, changes: TextChange[]) => void;
   onRetryDraft: () => void;
   onCursorPositionChange: (sceneId: string, cursorSentenceIndex: number | null, scrollTop: number) => void;
   onReadingPageChange: (sceneId: string, pageIndex: number) => void;
@@ -247,6 +259,17 @@ export function SceneEditor({
   const [evidenceLoadKey, setEvidenceLoadKey] = useState(0);
   const [evidenceLoadStatus, setEvidenceLoadStatus] = useState<"unavailable" | "loading" | "ready" | "failed">("unavailable");
   const [evidenceLoadError, setEvidenceLoadError] = useState("");
+  const [persistenceSaveStatus, setPersistenceSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const [persistenceSaveError, setPersistenceSaveError] = useState("");
+  const persistenceBaseMarkdownRef = useRef(baseText);
+  const persistenceRevisionIdRef = useRef(documentRevision ?? "");
+  const persistenceSnapshotMatchesRef = useRef(false);
+  const persistenceEventsRef = useRef<PendingPersistenceChange[]>([]);
+  const persistenceGenerationRef = useRef(0);
+  const persistenceSawDraftUnstoredRef = useRef(false);
+  const persistenceClientIdRef = useRef<string | null>(null);
+  const persistenceRequestRef = useRef<PendingPersistenceRequest | null>(null);
+  const persistenceInFlightRef = useRef(false);
   const latestTextRef = useRef(text);
   latestTextRef.current = text;
   const pendingEditorStatusRef = useRef<EditorDurabilityStatusHandle>(null);
@@ -268,18 +291,37 @@ export function SceneEditor({
     }
     const controller = new AbortController();
     const currentRevision = documentRevision;
+    persistenceBaseMarkdownRef.current = baseText;
+    persistenceRevisionIdRef.current = currentRevision;
+    persistenceSnapshotMatchesRef.current = false;
+    persistenceEventsRef.current = [];
+    persistenceGenerationRef.current = 0;
+    persistenceSawDraftUnstoredRef.current = false;
+    persistenceRequestRef.current = null;
+    setPersistenceSaveStatus("idle");
+    setPersistenceSaveError("");
     setEvidenceLoadStatus("loading");
     setEvidenceLoadError("");
     setEvidenceState(null);
     setEvidenceLoadKey((key) => key + 1);
-    void evidenceAdapter.read({ projectId, documentId: scene.id, revisionId: currentRevision }, controller.signal)
+    void evidenceAdapter.read({ projectId, documentId: scene.id, revisionId: currentRevision, markdown: baseText }, controller.signal)
       .then((rawSnapshot) => {
         if (controller.signal.aborted) return;
         const snapshot = assertEditorEvidenceSnapshot(rawSnapshot, baseText.length);
-        let next = initializeDocumentEvidence(baseText, documentRevision, snapshot);
-        if (conflict || snapshot.revisionId !== documentRevision) next = invalidateDocumentEvidence(next);
-        else if (latestTextRef.current !== baseText) next = markEvidenceNeedsReview(next);
+        const sourceMatches = snapshot.markdown !== undefined
+          ? snapshot.markdown === baseText
+          : snapshot.revisionId === documentRevision;
+        const editorStartsAtRevision = latestTextRef.current === baseText;
+        let next = initializeDocumentEvidence(baseText, snapshot.revisionId, snapshot);
+        if (conflict || !sourceMatches) next = invalidateDocumentEvidence(next);
+        else if (!editorStartsAtRevision) next = markEvidenceNeedsReview(next);
         setEvidenceState(next);
+        persistenceRevisionIdRef.current = snapshot.revisionId;
+        persistenceSnapshotMatchesRef.current = sourceMatches && editorStartsAtRevision && !conflict;
+        if (sourceMatches && !editorStartsAtRevision && evidenceAdapter.save) {
+          setPersistenceSaveStatus("failed");
+          setPersistenceSaveError("復旧したブラウザーDraftがPostgreSQLのbase Revisionと異なるため、本文を保護したまま自動保存を停止しています。");
+        }
         setEvidenceLoadStatus("ready");
         setEvidenceLoadKey((key) => key + 1);
       })
@@ -309,12 +351,95 @@ export function SceneEditor({
     return () => registerNavigationFlush(null);
   }, [registerNavigationFlush]);
 
-  const onEditorTextChange = useCallback((next: string) => {
+  const onEditorTextChange = useCallback((next: string, changes: TextChange[]) => {
     pendingEditorTextRef.current = next;
     pendingEditorTextRevisionRef.current = textRevision;
     pendingEditorStatusRef.current?.markPendingText(next, textRevision);
-    onTextChange(next);
-  }, [onTextChange, textRevision]);
+    if (evidenceAdapter?.save && evidenceLoadStatus === "ready" && persistenceSnapshotMatchesRef.current && !conflict) {
+      try {
+        persistenceEventsRef.current.push({
+          generation: ++persistenceGenerationRef.current,
+          markdown: next,
+          changes: [...changes],
+        });
+        persistenceSawDraftUnstoredRef.current = false;
+      } catch (error) {
+        setPersistenceSaveStatus("failed");
+        setPersistenceSaveError(error instanceof Error ? error.message : "CodeMirror ChangeSetを保存用にまとめられませんでした。");
+      }
+    }
+    onTextChange(next, changes);
+  }, [conflict, evidenceAdapter, evidenceLoadStatus, onTextChange, textRevision]);
+
+  const sendPersistenceRequest = useCallback(async (pending: PendingPersistenceRequest): Promise<void> => {
+    const save = evidenceAdapter?.save;
+    if (!save || persistenceInFlightRef.current) return;
+    persistenceInFlightRef.current = true;
+    setPersistenceSaveStatus("saving");
+    setPersistenceSaveError("");
+    try {
+      const result = await save(pending.identity, pending.request, new AbortController().signal);
+      if (result.markdown !== pending.request.markdown) throw new Error("PostgreSQLが保存した本文を確認できません。");
+      persistenceBaseMarkdownRef.current = result.markdown;
+      persistenceRevisionIdRef.current = result.revisionId;
+      persistenceEventsRef.current = persistenceEventsRef.current.filter((event) => event.generation > pending.throughGeneration);
+      persistenceRequestRef.current = null;
+      setEvidenceState((current) => current ? { ...current, revisionId: result.revisionId } : current);
+      setPersistenceSaveStatus("saved");
+    } catch (error) {
+      persistenceRequestRef.current = pending;
+      setPersistenceSaveStatus("failed");
+      setPersistenceSaveError(error instanceof Error ? error.message : "PostgreSQLへの保存を確認できませんでした。");
+    } finally {
+      persistenceInFlightRef.current = false;
+    }
+  }, [evidenceAdapter]);
+
+  const saveRecoveredText = useCallback(async (markdown: string): Promise<void> => {
+    if (!evidenceAdapter?.save || !documentRevision || !persistenceSnapshotMatchesRef.current || persistenceEventsRef.current.length === 0) return;
+    const events = persistenceEventsRef.current;
+    if (events.at(-1)?.markdown !== markdown) return;
+    const baseMarkdown = persistenceBaseMarkdownRef.current;
+    let changes: TextChange[] = [];
+    try {
+      for (const event of events) changes = composeTextChanges(baseMarkdown, changes, event.changes);
+    } catch (error) {
+      setPersistenceSaveStatus("failed");
+      setPersistenceSaveError(error instanceof Error ? error.message : "CodeMirror ChangeSetを保存用にまとめられませんでした。");
+      return;
+    }
+    if (changes.length === 0 && markdown === baseMarkdown) {
+      persistenceEventsRef.current = [];
+      persistenceSawDraftUnstoredRef.current = false;
+      setPersistenceSaveStatus("saved");
+      return;
+    }
+    if (!persistenceClientIdRef.current) persistenceClientIdRef.current = crypto.randomUUID();
+    const pending: PendingPersistenceRequest = {
+      identity: { projectId, documentId: scene.id, revisionId: persistenceRevisionIdRef.current },
+      request: {
+        baseMarkdown,
+        markdown,
+        changes,
+        idempotencyKey: crypto.randomUUID(),
+        clientId: persistenceClientIdRef.current,
+      },
+      throughGeneration: events.at(-1)!.generation,
+    };
+    persistenceSawDraftUnstoredRef.current = false;
+    persistenceRequestRef.current = pending;
+    await sendPersistenceRequest(pending);
+  }, [documentRevision, evidenceAdapter, projectId, scene.id, sendPersistenceRequest]);
+
+  useEffect(() => {
+    if (!draftStored) {
+      if (persistenceEventsRef.current.length > 0) persistenceSawDraftUnstoredRef.current = true;
+      return;
+    }
+    if (!evidenceAdapter?.save || evidenceLoadStatus !== "ready" || conflict || !persistenceSawDraftUnstoredRef.current
+      || persistenceSaveStatus === "failed" || persistenceSaveStatus === "saving") return;
+    void saveRecoveredText(text);
+  }, [conflict, draftStored, evidenceAdapter, evidenceLoadStatus, persistenceSaveStatus, saveRecoveredText, text]);
 
   useEffect(() => {
     saveReadingPage(authorScope, repositoryKey, scene.id, readingPage);
@@ -407,19 +532,31 @@ export function SceneEditor({
           <summary>Knowledge参照{evidenceState ? ` · ${evidenceState.anchors.length} 件` : ""}</summary>
           {evidenceLoadStatus === "loading" && <p role="status">この文書のText Anchorを読み込んでいます。</p>}
           {evidenceLoadStatus === "failed" && <p role="alert">{evidenceLoadError}</p>}
+          {evidenceAdapter.save && <p role={persistenceSaveStatus === "failed" ? "alert" : "status"} data-testid="postgres-save-status">
+            {persistenceSaveStatus === "saving" ? "ブラウザーDraft保護済み · PostgreSQLへ保存中"
+              : persistenceSaveStatus === "saved" ? "ブラウザーDraft保護済み · PostgreSQL Revision保存済み"
+                : persistenceSaveStatus === "failed" ? `ブラウザーDraftは保護されています。PostgreSQL保存を確認できません: ${persistenceSaveError}`
+                  : "変更はブラウザーDraftに保護してからPostgreSQLへ保存します。"}
+            {persistenceSaveStatus === "failed" && persistenceRequestRef.current && <button type="button" onClick={() => void sendPersistenceRequest(persistenceRequestRef.current!)}>同じ保存操作を再試行</button>}
+          </p>}
           {evidenceState?.revisionConflict && <p role="alert">AnchorのRevisionと現在の原稿が一致しません。参照先へ移動せず、最新Revisionで再確認してください。</p>}
           {evidenceState && evidenceLoadStatus === "ready" && evidenceState.anchors.length === 0 && <p>このRevisionにKnowledge参照はありません。</p>}
           {evidenceState && evidenceState.anchors.length > 0 && <ul className="text-anchor-list">
             {evidenceState.anchors.map((anchor) => {
-              const targetPath = anchor.target.targetPath;
+              const targetPath = anchor.target?.targetPath;
               const statusLabel = anchor.status === "current" ? "確認済み"
+                : anchor.status === "proposed" ? "未確定"
                 : anchor.status === "needs_review" ? "再確認"
                   : anchor.status === "orphaned" ? "失効" : "Revision不一致";
               return <li key={anchor.id} data-anchor-status={anchor.status}>
                 <span className={`text-anchor-status is-${anchor.status}`}>{statusLabel}</span>
-                {anchor.status === "current" && targetPath && onTermNavigate
-                  ? <button type="button" className="text-anchor-reference" onClick={() => onTermNavigate(targetPath, anchor.target.id)}>{anchor.target.label}</button>
-                  : <span className="text-anchor-reference">{anchor.target.label}</span>}
+                {anchor.target && anchor.status === "current" && targetPath && onTermNavigate
+                  ? <button type="button" className="text-anchor-reference" onClick={() => onTermNavigate(targetPath, anchor.target!.id)}>{anchor.target.label}</button>
+                  : <span className="text-anchor-reference">{anchor.target?.label ?? "本文の根拠"}</span>}
+                {anchor.candidates?.map((candidate) => <span key={candidate.id} className="text-anchor-candidate">候補（未承認）: {candidate.label}</span>)}
+                {anchor.assertions?.map((assertion) => <span key={assertion.id} className="text-anchor-assertion" data-assertion-status={assertion.status}>
+                  Assertion（{assertion.role === "supports" ? "支持" : assertion.role === "contradicts" ? "反証" : assertion.role === "quotes" ? "引用" : "文脈"}・{assertion.status === "confirmed" ? "作者確認済み" : "未確定"}）: {assertion.label}
+                </span>)}
                 <q>{anchor.quote}</q>
               </li>;
             })}
