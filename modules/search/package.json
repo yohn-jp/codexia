@@ -1,8 +1,8 @@
 {
-  "name": "@scriptorium/module-search",
+  "name": "@codexia/module-search",
   "private": true,
   "version": "0.1.0",
-  "scriptoriumDisplay": {
+  "codexiaDisplay": {
     "name": "Search and terminology",
     "description": "Search manuscript text, manage terminology aliases, and link terms to their references."
   },
@@ -26,10 +26,10 @@
     "test": "node --import tsx --test src/*.test.ts"
   },
   "dependencies": {
-    "@scriptorium/contracts": "workspace:*",
-    "@scriptorium/module-runtime": "workspace:*"
+    "@codexia/contracts": "workspace:*",
+    "@codexia/module-runtime": "workspace:*"
   },
-  "scriptoriumModule": {
+  "codexiaModule": {
     "id": "search",
     "version": "0.1.0",
     "contractVersion": 1,
@@ -38,7 +38,7 @@
     "requires": [],
     "optionalRequires": ["nlp.tokenizer", "semantic.embedding"],
     "serverEntry": "./dist/index.js",
-    "statePaths": ["meta/scriptorium/modules/search"],
+    "statePaths": ["meta/codexia/modules/search"],
     "locality": "local",
     "browserEntry": "./dist/browser.js"
   }

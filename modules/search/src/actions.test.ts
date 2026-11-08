@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { assertChangeOperation, type ChangeOperation, type ModuleAction, type ModuleActionContext, type ModuleContext, type SnapshotId, type SnapshotReader } from "@scriptorium/contracts";
+import { assertChangeOperation, type ChangeOperation, type ModuleAction, type ModuleActionContext, type ModuleContext, type SnapshotId, type SnapshotReader } from "@codexia/contracts";
 import { createSearchDefinition, createSearchActions } from "./actions.js";
 import { SnapshotIndexCache } from "./index-cache.js";
 import { TERM_REGISTRY_PATH } from "./terminology.js";

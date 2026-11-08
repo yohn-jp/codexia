@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import JSZip from "jszip";
 import YAML from "yaml";
-import type { ChangeOperation, ChangeProposal, ModuleActionContext, ModuleContext, SnapshotId, SnapshotReader } from "@scriptorium/contracts";
-import { createWorkspaceProducer, proposeMigrationImport, type LegacySourceReader, type MigrationContext, type MigrationInspection } from "@scriptorium/migration";
+import type { ChangeOperation, ChangeProposal, ModuleActionContext, ModuleContext, SnapshotId, SnapshotReader } from "@codexia/contracts";
+import { createWorkspaceProducer, proposeMigrationImport, type LegacySourceReader, type MigrationContext, type MigrationInspection } from "@codexia/migration";
 import { createModule } from "./index.js";
 import { readEpubBibleEntries } from "./bible.js";
 import { buildEpubExport } from "./epub.js";
@@ -130,7 +130,7 @@ test("source plaintext conversion and vertical print keep Japanese text and scen
 test("real EPUB ZIP contains EPUB3 manifest, Japanese XHTML, appendix, and binary cover bytes", async () => {
   const cover = Buffer.from([0xff, 0xd8, 0x00, 0x81, 0xfe, 0x00, 0xd9]);
   const files = fixtureFiles();
-  files.set("meta/scriptorium/modules/publishing/assets/cover.jpg", cover);
+  files.set("meta/codexia/modules/publishing/assets/cover.jpg", cover);
   files.set("bible/characters/character-ari/profile.yaml", YAML.stringify({
     id: "character-ari",
     name: "アリ",
@@ -157,7 +157,7 @@ test("real EPUB ZIP contains EPUB3 manifest, Japanese XHTML, appendix, and binar
   assert.equal(bibleEntries[0]!.id, "character-ari");
   const exported = await buildEpubExport(
     project,
-    { scope: "all", coverPath: "meta/scriptorium/modules/publishing/assets/cover.jpg", includeBibleAppendix: true },
+    { scope: "all", coverPath: "meta/codexia/modules/publishing/assets/cover.jpg", includeBibleAppendix: true },
     reader,
     bibleEntries,
   );
@@ -256,7 +256,7 @@ test("a share activates only on the remote published snapshot and revocation is 
   const publicBase = definition.http!.find((item) => item.id === "publishing.http.public-share")!;
   const publicScene = definition.http!.find((item) => item.id === "publishing.http.public-share-scene")!;
   const publicContext = (reader: SnapshotReader) => actionContext(reader, []);
-  const url = "https://scriptorium.invalid/api/public/repos/local-publishing-7/modules/publishing/share/" + encodeURIComponent(token);
+  const url = "https://codexia.invalid/api/public/repos/local-publishing-7/modules/publishing/share/" + encodeURIComponent(token);
   const beforePublish = await publicBase.handle(new Request(url), publicContext(remote));
   assert.equal(beforePublish.status, 404, "an unpushed checkpoint/proposal is not public");
 
@@ -360,8 +360,8 @@ test("publishing reactivation proposes retained episode bytes and safely merges 
     { id: "grant-z", projectId: repository.repositoryId, scope: { kind: "scene", id: "sc-1", token: "nested-reactivation-scope-secret" }, label: "scene", tokenHash: "f".repeat(64), createdAt: "2024-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z", revokedAt: "2024-02-01T00:00:00.000Z", ownerId: "must-not-return", tokenPrefix: "share_never-return", token: "raw-bearer-never-return" },
     { id: "grant-a", projectId: repository.repositoryId, scope: "ch-1", label: "chapter", tokenHash: "e".repeat(64), createdAt: "2024-03-01T00:00:00.000Z", expiresAt: "2030-03-01T00:00:00.000Z", lastUsedAt: "2024-04-01T00:00:00.000Z" },
   ];
-  const retainedEpisodePath = "meta/scriptorium/modules/publishing/legacy/files/meta/publish-episodes.yaml";
-  const retainedGrantPath = "meta/scriptorium/modules/publishing/legacy/share-grants.jsonl";
+  const retainedEpisodePath = "meta/codexia/modules/publishing/legacy/files/meta/publish-episodes.yaml";
+  const retainedGrantPath = "meta/codexia/modules/publishing/legacy/share-grants.jsonl";
   const retainedGrants = grantRows.map((grant) => JSON.stringify(grant)).join("\n") + "\n";
   const target = new MemoryReader(new Map([
     [retainedEpisodePath, episodeBytes],
@@ -464,8 +464,8 @@ test("publishing reactivation proposes retained episode bytes and safely merges 
 });
 
 test("publishing reactivation defers to live stores and does nothing while disabled", async () => {
-  const retainedEpisodePath = "meta/scriptorium/modules/publishing/legacy/files/meta/publish-episodes.yaml";
-  const retainedGrantPath = "meta/scriptorium/modules/publishing/legacy/share-grants.jsonl";
+  const retainedEpisodePath = "meta/codexia/modules/publishing/legacy/files/meta/publish-episodes.yaml";
+  const retainedGrantPath = "meta/codexia/modules/publishing/legacy/share-grants.jsonl";
   const target = new MemoryReader(new Map([
     [retainedEpisodePath, "episodes: []\n"],
     [retainedGrantPath, JSON.stringify({ id: "grant-1", projectId: repository.repositoryId, scope: "ch-1", label: "chapter", tokenHash: "e".repeat(64), createdAt: "2024-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z" }) + "\n"],
@@ -483,7 +483,7 @@ test("publishing reactivation defers to live stores and does nothing while disab
   const producer = createPublishingMigrationProducer();
   const live = await producer.inspect({ source, target, repository, snapshot: target.snapshot, enabledModules: new Set(["publishing"]) });
   assert.ok(!live.operations.some((operation) => operation.writes.some((write) => write.path === EPISODES_PATH || write.path === SHARE_GRANTS_PATH)));
-  assert.ok(!live.entries.some((entry) => entry.source.startsWith("meta/scriptorium/modules/publishing/legacy/")), "live source keeps ownership with its importer");
+  assert.ok(!live.entries.some((entry) => entry.source.startsWith("meta/codexia/modules/publishing/legacy/")), "live source keeps ownership with its importer");
 
   const disabled = await producer.inspect({
     source: { ...source, workspaceDataRoot: undefined, readProjectFile: async () => null, readWorkspaceFile: async () => null, listWorkspaceFiles: async () => [] } as LegacySourceReader,
