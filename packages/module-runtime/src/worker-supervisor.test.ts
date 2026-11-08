@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { MAX_JOB_INPUT_BYTES, MAX_JOB_OUTPUT_BYTES, type JobRequest, type ModuleId, type SnapshotId } from "@scriptorium/contracts";
+import { MAX_JOB_INPUT_BYTES, MAX_JOB_OUTPUT_BYTES, type JobRequest, type ModuleId, type SnapshotId } from "@codexia/contracts";
 import { WorkerSupervisor, type WorkerJobLifecycleSnapshot } from "./index.js";
 
 const workerEntry = fileURLToPath(new URL("./fixtures/worker.mjs", import.meta.url));

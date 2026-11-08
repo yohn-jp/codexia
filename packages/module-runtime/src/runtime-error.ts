@@ -1,4 +1,4 @@
-import { BUILTIN_MODULE_IDS, type ModuleId } from "@scriptorium/contracts";
+import { BUILTIN_MODULE_IDS, type ModuleId } from "@codexia/contracts";
 
 export const MODULE_IDS = BUILTIN_MODULE_IDS;
 
