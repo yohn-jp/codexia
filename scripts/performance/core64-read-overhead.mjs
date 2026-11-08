@@ -416,7 +416,7 @@ async function contentionProbe() {
     throw new Error(`Stale writer fence failed: ${JSON.stringify(staleResult.value)}`);
   }
 
-  const checkpointHead = git(join(setup.dataDir, 'projects', project.id), 'rev-parse', 'refs/scriptorium/checkpoint-head');
+  const checkpointHead = git(join(setup.dataDir, 'projects', project.id), 'rev-parse', 'refs/codexia/checkpoint-head');
   if (checkpointHead !== slowResult.value.localCommit) throw new Error('Stale writer moved the checkpoint head');
   const currentCheckpointScene = await setup.store.readSceneSnapshot(project.id, 'scene-1', 'checkpoint');
   const expectedCheckpointContent = `${originalScene.document.content}\nSynthetic read-overhead slow checkpoint.\n`;

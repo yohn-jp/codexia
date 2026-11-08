@@ -84,7 +84,7 @@ const manifest = {
   },
   dirtyProductionPaths: productionDirtyPaths,
   profile: 'core',
-  buildCommand: 'SCRIPTORIUM_PROFILE=core pnpm build',
+  buildCommand: 'CODEXIA_PROFILE=core pnpm build',
   toolchain: {
     node: process.version,
     pnpm: pnpmVersion,

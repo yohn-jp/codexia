@@ -69,7 +69,7 @@ async function bindCandidateRuntime(runtimeRoot, runtimeCommit) {
     commit: runtimeCommit,
     lockfileTree: git(runtimeRoot, 'rev-parse', `${runtimeCommit}:pnpm-lock.yaml`),
     sourceTrees,
-    buildCommand: 'pnpm --filter @scriptorium/api... build (contracts, module-runtime, core, api)',
+    buildCommand: 'pnpm --filter @codexia/api... build (contracts, module-runtime, core, api)',
     installCommand: 'pnpm install --offline --frozen-lockfile',
     node: process.version,
     packageManager: 'pnpm@12.10.1',
@@ -82,8 +82,8 @@ async function bindCandidateRuntime(runtimeRoot, runtimeCommit) {
 }
 
 async function bindRuntime() {
-  const requestedRoot = process.env.SCRIPTORIUM_PERF_RUNTIME_ROOT;
-  if (!requestedRoot) throw new Error('Set SCRIPTORIUM_PERF_RUNTIME_ROOT to the frozen C09 or committed candidate runtime root.');
+  const requestedRoot = process.env.CODEXIA_PERF_RUNTIME_ROOT;
+  if (!requestedRoot) throw new Error('Set CODEXIA_PERF_RUNTIME_ROOT to the frozen C09 or committed candidate runtime root.');
   const runtimeRoot = resolve(requestedRoot);
   const runtimeCommit = git(runtimeRoot, 'rev-parse', 'HEAD');
   if (runtimeRoot === sourceRoot) return await bindCandidateRuntime(runtimeRoot, runtimeCommit);
@@ -91,7 +91,7 @@ async function bindRuntime() {
 }
 
 async function bindFrozenRuntime(runtimeRoot, runtimeCommit) {
-  const manifestPath = resolve(process.env.SCRIPTORIUM_PERF_RUNTIME_MANIFEST ??
+  const manifestPath = resolve(process.env.CODEXIA_PERF_RUNTIME_MANIFEST ??
     join(sourceRoot, 'evidence/performance/resize-runtime-manifest.json'));
   if (runtimeCommit !== expectedRuntimeCommit) {
     throw new Error(`Expected frozen C09 runtime ${expectedRuntimeCommit}, found ${runtimeCommit} in ${runtimeRoot}`);
@@ -376,7 +376,7 @@ async function executeCase(testCase, datasetRoot, runRoot, runtimeRoot, sourceSe
   if (sourceSeedCommitBefore !== sourceSeedCommit) throw new Error('Generated source remote changed before this scenario.');
   const child = spawn(process.execPath, [workerScript, datasetRoot, workerRoot, runtimeRoot], {
     stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
-    env: { ...process.env, SCRIPTORIUM_PROFILE: 'core' },
+    env: { ...process.env, CODEXIA_PROFILE: 'core' },
   });
   const channel = messageChannel(child);
   let didExit = false;
@@ -474,7 +474,7 @@ async function main() {
       afterG0Lease: expectedCases('--with-heavy'),
       heavyLeaseGuard: 'CORE64_G0_LEASE=released is required for --with-heavy',
       persistence: 'Each case uses a separate real CoreStore dataDir and real API createScratch route over the shared read-only synthetic bare remote.',
-      runtime: 'SCRIPTORIUM_PERF_RUNTIME_ROOT must point to the pinned C09 baseline or the committed candidate worktree; relevant artifacts are verified before any request.',
+      runtime: 'CODEXIA_PERF_RUNTIME_ROOT must point to the pinned C09 baseline or the committed candidate worktree; relevant artifacts are verified before any request.',
     }, null, 2));
     return;
   }
@@ -484,7 +484,7 @@ async function main() {
   }
   const runtime = await bindRuntime();
 
-  const runRoot = await mkdtemp(join(tmpdir(), 'scriptorium-core64-payload-'));
+  const runRoot = await mkdtemp(join(tmpdir(), 'codexia-core64-payload-'));
   const datasetRoot = join(runRoot, 'dataset');
   const outputDirectory = join(sourceRoot, 'artifacts/performance/payload');
   await mkdir(outputDirectory, { recursive: true });
@@ -502,10 +502,10 @@ async function main() {
     probeScripts,
     runtime,
     executionContext: {
-      cpuAffinity: process.env.SCRIPTORIUM_PERF_CPUSET ?? 'unspecified',
-      affinityEnforcer: process.env.SCRIPTORIUM_PERF_CPUSET ? 'taskset' : 'unspecified',
-      hardTimeoutSeconds: Number(process.env.SCRIPTORIUM_PERF_HARD_TIMEOUT_SECONDS ?? 0) || null,
-      concurrentLanes: (process.env.SCRIPTORIUM_PERF_CONCURRENT_LANES ?? '').split(';').filter(Boolean),
+      cpuAffinity: process.env.CODEXIA_PERF_CPUSET ?? 'unspecified',
+      affinityEnforcer: process.env.CODEXIA_PERF_CPUSET ? 'taskset' : 'unspecified',
+      hardTimeoutSeconds: Number(process.env.CODEXIA_PERF_HARD_TIMEOUT_SECONDS ?? 0) || null,
+      concurrentLanes: (process.env.CODEXIA_PERF_CONCURRENT_LANES ?? '').split(';').filter(Boolean),
       latencyInterpretation: 'Concurrent measurement lanes make latency observational only; no adoption or comparative performance claim is supported.',
     },
     node: process.version,
