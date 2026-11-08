@@ -1,6 +1,6 @@
 import { isDialogue } from "../dialogueDetection.js";
 import { extractEnding, normalizeEnding } from "../sentenceEnding.js";
-import { splitIntoSentenceOffsets } from "@scriptorium/module-nlp";
+import { splitIntoSentenceOffsets } from "@codexia/module-nlp";
 import type {
   EndingRepetitionRule,
   LineSpacingRule,

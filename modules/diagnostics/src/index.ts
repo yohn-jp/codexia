@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { assertProjectPath, MAX_JOB_INPUT_BYTES, type ActionResult, type ChangeOperation, type ChangeProposal, type JobRequest, type ModuleAction, type ModuleActionContext, type ModuleContext, type ModuleDefinition, type ModuleManifest, type SnapshotId, type ValueSchema } from "@scriptorium/contracts";
-import type { NlpTokenizerCapability, MorphologyAnalysis } from "@scriptorium/module-nlp";
-import { NLP_MODEL_ID, NLP_MODEL_VERSION, NLP_TOKENIZER_CAPABILITY } from "@scriptorium/module-nlp";
-import { readCanonicalSnapshotEntities, splitIntoSentences } from "@scriptorium/module-nlp";
-import type { WorkerService } from "@scriptorium/contracts";
+import { assertProjectPath, MAX_JOB_INPUT_BYTES, type ActionResult, type ChangeOperation, type ChangeProposal, type JobRequest, type ModuleAction, type ModuleActionContext, type ModuleContext, type ModuleDefinition, type ModuleManifest, type SnapshotId, type ValueSchema } from "@codexia/contracts";
+import type { NlpTokenizerCapability, MorphologyAnalysis } from "@codexia/module-nlp";
+import { NLP_MODEL_ID, NLP_MODEL_VERSION, NLP_TOKENIZER_CAPABILITY } from "@codexia/module-nlp";
+import { readCanonicalSnapshotEntities, splitIntoSentences } from "@codexia/module-nlp";
+import type { WorkerService } from "@codexia/contracts";
 import YAML from "yaml";
 import { addSynonymDiagnosticIssues, DIAGNOSTICS_ENGINE_ID, DIAGNOSTICS_ENGINE_VERSION, DIAGNOSTICS_MODULE_VERSION, type DiagnosticsWorkerInput, type DiagnosticsWorkerOutput, type PlotSemanticWorkerInput, type StylometricDeviationWorkerInput, type VoiceDeviationWorkerInput, type VoiceWorkerInput } from "./analysis.js";
 import { loadLintRulesConfig, loadPlotLexiconConfig, loadToneLexiconConfig } from "./config.js";
@@ -42,7 +42,7 @@ const manifest: ModuleManifest = {
   id: "diagnostics", version: DIAGNOSTICS_MODULE_VERSION, contractVersion: 1,
   dependencies: ["nlp"], provides: [], requires: [NLP_TOKENIZER_CAPABILITY], optionalRequires: ["semantic.embedding"],
   serverEntry: "./dist/index.js", browserEntry: "./dist/browser.js", workerEntry: "./dist/worker.js",
-  statePaths: ["meta/scriptorium/modules/diagnostics"], locality: "local",
+  statePaths: ["meta/codexia/modules/diagnostics"], locality: "local",
 };
 
 const MAX_TEXT_LENGTH = 500_000;
@@ -52,10 +52,10 @@ const MAX_VOICE_CORPUS_CHARACTERS = 20_000;
 const MAX_VOICE_ATTRIBUTIONS = 100;
 const LINT_PATH_PREFIX = "manuscript/";
 const MAX_WORKER_TIME_MS = 120_000;
-const LINT_CONFIG_PATH = "meta/scriptorium/modules/diagnostics/lint-rules.yaml";
-const TONE_CONFIG_PATH = "meta/scriptorium/modules/diagnostics/tone-lexicon.yaml";
-const PLOT_CONFIG_PATH = "meta/scriptorium/modules/diagnostics/plot-lexicon.yaml";
-const SYNONYMS_PATH = "meta/scriptorium/modules/nlp/synonyms.yaml";
+const LINT_CONFIG_PATH = "meta/codexia/modules/diagnostics/lint-rules.yaml";
+const TONE_CONFIG_PATH = "meta/codexia/modules/diagnostics/tone-lexicon.yaml";
+const PLOT_CONFIG_PATH = "meta/codexia/modules/diagnostics/plot-lexicon.yaml";
+const SYNONYMS_PATH = "meta/codexia/modules/nlp/synonyms.yaml";
 
 type RecordValue = Record<string, unknown>;
 function record(value: unknown, label: string): RecordValue {
