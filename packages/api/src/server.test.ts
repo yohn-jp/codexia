@@ -8,9 +8,9 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, it } from "node:test";
 import { promisify } from "node:util";
-import { MODEL_USAGE_CAPABILITY, type ActionResult, type ChangeOperation, type ChangeProposal, type JobRequest, type ModelUsageEvent, type ModelUsageStore, type ModuleAction, type ModuleContext, type ModuleDefinition, type ModuleManifest, type ProposalStatus, type RepositoryIdentity, type SnapshotId, type ValueSchema } from "@scriptorium/contracts";
-import { CoreStore, type CoreStore as CoreStoreShape } from "@scriptorium/core";
-import { ModuleRuntime, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleListener, type WorkerJobLifecycleSnapshot } from "@scriptorium/module-runtime";
+import { MODEL_USAGE_CAPABILITY, type ActionResult, type ChangeOperation, type ChangeProposal, type JobRequest, type ModelUsageEvent, type ModelUsageStore, type ModuleAction, type ModuleContext, type ModuleDefinition, type ModuleManifest, type ProposalStatus, type RepositoryIdentity, type SnapshotId, type ValueSchema } from "@codexia/contracts";
+import { CoreStore, type CoreStore as CoreStoreShape } from "@codexia/core";
+import { ModuleRuntime, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleListener, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 import { createHostedAuthorizationPolicy } from "./hosted-policy.js";
 import { HistoricalModelUsageError, HistoricalModelUsageStore } from "./historical-store.js";
 import { JobHistoryError, JobHistoryStore, type WorkerJobLifecycle } from "./job-history-store.js";
@@ -26,7 +26,7 @@ const SNAPSHOT: SnapshotId = {
   remoteCommit: "a".repeat(40),
 };
 const HOSTED_ASSIGNMENT: RuntimeAssignment = {
-  contractVersion: "scriptorium-platform/v1",
+  contractVersion: "codexia-platform/v1",
   instanceId: "instance-1",
   repositoryId: 123,
   repositoryLocator: "https://github.com/owner/work",
@@ -133,13 +133,13 @@ async function runGit(cwd: string, ...args: string[]): Promise<string> {
 }
 
 async function makeBareRemote(): Promise<{ root: string; remote: string }> {
-  const root = await mkdtemp(resolve(tmpdir(), "scriptorium-api-project-remote-"));
+  const root = await mkdtemp(resolve(tmpdir(), "codexia-api-project-remote-"));
   const remote = resolve(root, "remote.git");
   const seed = resolve(root, "seed");
   await mkdir(seed);
   await runGit(root, "init", "--bare", "--initial-branch=main", remote);
   await runGit(seed, "init", "--initial-branch=main");
-  await runGit(seed, "config", "user.name", "Scriptorium API Test");
+  await runGit(seed, "config", "user.name", "Codexia API Test");
   await runGit(seed, "config", "user.email", "api-test@example.invalid");
   await writeFile(resolve(seed, "README.md"), "Project workspace remains intact.\n", "utf8");
   await runGit(seed, "add", ".");
@@ -627,9 +627,9 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-describe("Scriptorium HTTP boundary", () => {
+describe("Codexia HTTP boundary", () => {
   it("binds hosted API access and signed lifecycle controls to one repository and runtime epoch", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-hosted-api-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-api-"));
     tempDirs.push(staticDir);
     let pending: Awaited<ReturnType<CoreStore["observe"]>>["pending"] = [];
     let pendingProposalCount = 0;
@@ -743,7 +743,7 @@ describe("Scriptorium HTTP boundary", () => {
       instanceId: HOSTED_ASSIGNMENT.instanceId,
       runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
       reason: "redeploy",
-      contractVersion: "scriptorium-platform/v1",
+      contractVersion: "codexia-platform/v1",
       deadline: new Date(Date.now() + 60_000).toISOString(),
     };
     const exactQuiesceBody = JSON.stringify(quiesceRequest);
@@ -814,7 +814,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("keeps a quiesce census unverified when a worker job starts and finishes during its local scan, then permits a stable retry", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-hosted-activity-race-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-activity-race-"));
     tempDirs.push(staticDir);
     const fixture = makeSnapshotStore();
     const runtime = new InterleavingLifecycleRuntime({ manifests: [], enabled: [], cacheDirectory: resolve(staticDir, "module-cache") });
@@ -880,7 +880,7 @@ describe("Scriptorium HTTP boundary", () => {
       instanceId: HOSTED_ASSIGNMENT.instanceId,
       runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
       reason: "redeploy",
-      contractVersion: "scriptorium-platform/v1",
+      contractVersion: "codexia-platform/v1",
       deadline: new Date(Date.now() + 60_000).toISOString(),
     };
     const body = JSON.stringify(request);
@@ -916,7 +916,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("waits for accepted private job-history writes before certifying safe quiesce", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-hosted-history-quiesce-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-history-quiesce-"));
     tempDirs.push(staticDir);
     const usageDirectory = resolve(staticDir, "usage");
     const migratedDirectory = resolve(staticDir, "migrated-usage");
@@ -986,7 +986,7 @@ describe("Scriptorium HTTP boundary", () => {
         instanceId: HOSTED_ASSIGNMENT.instanceId,
         runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
         reason: "migrate private history",
-        contractVersion: "scriptorium-platform/v1",
+        contractVersion: "codexia-platform/v1",
         deadline: new Date(Date.now() + 60_000).toISOString(),
       };
       const body = JSON.stringify(request);
@@ -1033,7 +1033,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("does not certify safe quiesce when a domain job terminal history write and fallback both fail", async (t) => {
-    const root = await mkdtemp(resolve(tmpdir(), "scriptorium-hosted-domain-history-quiesce-"));
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-hosted-domain-history-quiesce-"));
     tempDirs.push(root);
     const staticDir = resolve(root, "static");
     await mkdir(staticDir);
@@ -1076,14 +1076,14 @@ describe("Scriptorium HTTP boundary", () => {
         body: JSON.stringify({ input: {} }),
       });
       assert.equal(action.status, 200);
-      assert.ok(action.headers.get("x-scriptorium-job-id"));
+      assert.ok(action.headers.get("x-codexia-job-id"));
       assert.equal(failedTerminalWrites, 2, "both the result and explicit retention-failure fallback writes must be exercised");
       const request = {
         operationId: "quiesce-domain-history-failure",
         instanceId: HOSTED_ASSIGNMENT.instanceId,
         runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
         reason: "migrate private domain history",
-        contractVersion: "scriptorium-platform/v1",
+        contractVersion: "codexia-platform/v1",
         deadline: new Date(Date.now() + 60_000).toISOString(),
       };
       const body = JSON.stringify(request);
@@ -1105,7 +1105,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("reports unknown when accepted private job history cannot drain before the quiesce deadline", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-hosted-history-deadline-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-history-deadline-"));
     tempDirs.push(staticDir);
     const usageDirectory = resolve(staticDir, "usage");
     const fixture = makeSnapshotStore();
@@ -1169,7 +1169,7 @@ describe("Scriptorium HTTP boundary", () => {
         instanceId: HOSTED_ASSIGNMENT.instanceId,
         runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
         reason: "migrate private history",
-        contractVersion: "scriptorium-platform/v1",
+        contractVersion: "codexia-platform/v1",
         deadline: new Date(Date.now() + 100).toISOString(),
       };
       const body = JSON.stringify(request);
@@ -1198,7 +1198,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("safely quiesces an untouched empty remote using the lifecycle request property order", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-hosted-empty-remote-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-empty-remote-"));
     tempDirs.push(staticDir);
     const fixture = makeSnapshotStore();
     const emptySnapshot: SnapshotId = { ...SNAPSHOT, remoteCommit: "" };
@@ -1215,7 +1215,7 @@ describe("Scriptorium HTTP boundary", () => {
         return {
           snapshot: emptySnapshot,
           async read() { return null; },
-          async list(prefix: string) { assert.equal(prefix, "meta/scriptorium"); return []; },
+          async list(prefix: string) { assert.equal(prefix, "meta/codexia"); return []; },
         };
       },
       async registeredRepositoryIdentity() { return SNAPSHOT.repository; },
@@ -1227,7 +1227,7 @@ describe("Scriptorium HTTP boundary", () => {
           reader: {
             snapshot: emptySnapshot,
             async read() { return null; },
-            async list(prefix: string) { assert.equal(prefix, "meta/scriptorium"); return []; },
+            async list(prefix: string) { assert.equal(prefix, "meta/codexia"); return []; },
           },
           pendingCheckpoints: [], pendingProposals: 0, localWorkspaceDirty: false,
         };
@@ -1258,7 +1258,7 @@ describe("Scriptorium HTTP boundary", () => {
       instanceId: HOSTED_ASSIGNMENT.instanceId,
       runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
       reason: "redeploy",
-      contractVersion: "scriptorium-platform/v1",
+      contractVersion: "codexia-platform/v1",
       deadline: new Date(Date.now() + 60_000).toISOString(),
     };
     const body = JSON.stringify(request);
@@ -1278,9 +1278,9 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("keeps health public, protects project data, and serves the app shell", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-"));
     tempDirs.push(staticDir);
-    await writeFile(resolve(staticDir, "index.html"), '<meta name="scriptorium-style-nonce" content="__SCRIPTORIUM_STYLE_NONCE__"><h1>Scriptorium</h1>');
+    await writeFile(resolve(staticDir, "index.html"), '<meta name="codexia-style-nonce" content="__CODEXIA_STYLE_NONCE__"><h1>Codexia</h1>');
     await Promise.all(["main.js", "api.js", "drafts.js", "styles.css"].map((name) => writeFile(resolve(staticDir, name), name)));
     await writeFile(resolve(staticDir, "server.test.js"), "private test file");
     await mkdir(resolve(staticDir, "assets"));
@@ -1288,7 +1288,7 @@ describe("Scriptorium HTTP boundary", () => {
     await symlink(resolve(staticDir, "server.test.js"), resolve(staticDir, "assets", "leak-a1b2.js"));
     for (const ui of ["desktop", "mobile"]) {
       await mkdir(resolve(staticDir, ui, "assets"), { recursive: true });
-      await writeFile(resolve(staticDir, ui, "index.html"), `<meta name="scriptorium-style-nonce" content="__SCRIPTORIUM_STYLE_NONCE__"><h1>${ui}</h1>`);
+      await writeFile(resolve(staticDir, ui, "index.html"), `<meta name="codexia-style-nonce" content="__CODEXIA_STYLE_NONCE__"><h1>${ui}</h1>`);
       await writeFile(resolve(staticDir, ui, "main.js"), `${ui} bundle`);
       await writeFile(resolve(staticDir, ui, "assets", "chunk.js"), `${ui} chunk`);
     }
@@ -1322,9 +1322,9 @@ describe("Scriptorium HTTP boundary", () => {
     const shell = await fetch(`${apiServer.base}/`);
     assert.equal(shell.status, 200);
     const html = await shell.text();
-    assert.match(html, /Scriptorium/u);
-    const nonce = /name="scriptorium-style-nonce" content="([^"]+)"/u.exec(html)?.[1];
-    assert.ok(nonce && nonce !== "__SCRIPTORIUM_STYLE_NONCE__");
+    assert.match(html, /Codexia/u);
+    const nonce = /name="codexia-style-nonce" content="([^"]+)"/u.exec(html)?.[1];
+    assert.ok(nonce && nonce !== "__CODEXIA_STYLE_NONCE__");
     assert.ok(shell.headers.get("content-security-policy")?.includes(`style-src 'self' 'nonce-${nonce}'`));
     assert.ok(!shell.headers.get("content-security-policy")?.includes("unsafe-inline"));
     const nextShell = await fetch(`${apiServer.base}/`);
@@ -1334,7 +1334,7 @@ describe("Scriptorium HTTP boundary", () => {
     assert.match(publicReader.headers.get("content-type") ?? "", /text\/html/u);
     assert.equal(publicReader.headers.get("referrer-policy"), "no-referrer");
     assert.equal(publicReader.headers.get("x-robots-tag"), "noindex, nofollow");
-    assert.match(await publicReader.text(), /Scriptorium/u);
+    assert.match(await publicReader.text(), /Codexia/u);
     assert.equal((await fetch(`${apiServer.base}/r/unknown/123/e2e-invalid-token`)).status, 404);
     assert.equal((await fetch(`${apiServer.base}/r/publishing/not-numeric/e2e-invalid-token`)).status, 404);
     assert.equal((await fetch(`${apiServer.base}/r/publishing/123/e2e-invalid-token/extra`)).status, 404);
@@ -1352,7 +1352,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("keeps fixed UI aliases fresh while caching only content-hashed JS and CSS", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-static-manifest-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-static-manifest-"));
     tempDirs.push(staticDir);
     await writeFile(resolve(staticDir, "server.test.js"), "private test file");
     const fixtures = new Map<string, { entry: string; stylesheet: string; scriptBody: string; styleBody: string }>();
@@ -1369,7 +1369,7 @@ describe("Scriptorium HTTP boundary", () => {
         mkdir(resolve(uiRoot, "assets"), { recursive: true }),
       ]);
       await writeFile(resolve(uiRoot, "index.html"),
-        `<meta name="scriptorium-style-nonce" content="__SCRIPTORIUM_STYLE_NONCE__"><link rel="stylesheet" href="${prefix}/assets/${stylesheet}"><script type="module" src="${prefix}/assets/${entry}"></script>`);
+        `<meta name="codexia-style-nonce" content="__CODEXIA_STYLE_NONCE__"><link rel="stylesheet" href="${prefix}/assets/${stylesheet}"><script type="module" src="${prefix}/assets/${entry}"></script>`);
       await writeFile(resolve(uiRoot, "main.js"), `${ui} legacy bundle`);
       await writeFile(resolve(uiRoot, "styles.css"), `${ui} legacy styles`);
       await writeFile(resolve(uiRoot, "assets", entry), scriptBody);
@@ -1390,10 +1390,10 @@ describe("Scriptorium HTTP boundary", () => {
       const route = `${prefix}/`;
       const shell = await fetch(`${apiServer.base}${route}`);
       const shellHtml = await shell.text();
-      const nonce = /name="scriptorium-style-nonce" content="([^"]+)"/u.exec(shellHtml)?.[1];
+      const nonce = /name="codexia-style-nonce" content="([^"]+)"/u.exec(shellHtml)?.[1];
       assert.equal(shell.status, 200);
       assert.equal(shell.headers.get("cache-control"), "no-store");
-      assert.ok(nonce && nonce !== "__SCRIPTORIUM_STYLE_NONCE__");
+      assert.ok(nonce && nonce !== "__CODEXIA_STYLE_NONCE__");
       assert.ok(shell.headers.get("content-security-policy")?.includes(`style-src 'self' 'nonce-${nonce}'`));
       assert.ok(shellHtml.includes(`src="${prefix}/assets/${fixture.entry}"`));
       assert.ok(shellHtml.includes(`href="${prefix}/assets/${fixture.stylesheet}"`));
@@ -1456,7 +1456,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("stores bounded immutable model usage with complete paginated history and no symlink traversal", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "scriptorium-api-model-history-"));
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-api-model-history-"));
     tempDirs.push(root);
     const usageDirectory = resolve(root, "host-history");
     const coreDataDirectory = resolve(root, "core-data");
@@ -1515,7 +1515,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("stores only bounded worker lifecycle metadata and durable completion inbox state", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "scriptorium-api-job-history-"));
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-api-job-history-"));
     tempDirs.push(root);
     const usageDirectory = resolve(root, "host-history");
     const store = new JobHistoryStore(usageDirectory);
@@ -1569,7 +1569,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("retains exact declared domain action data and machine errors across host-history reopen", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "scriptorium-api-domain-job-history-"));
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-api-domain-job-history-"));
     tempDirs.push(root);
     const usageDirectory = resolve(root, "history");
     const store = new JobHistoryStore(usageDirectory);
@@ -1629,7 +1629,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("tracks exact source job results through direct actions and nested HTTP MCP invokes", async (t) => {
-    const root = await mkdtemp(resolve(tmpdir(), "scriptorium-api-domain-job-runtime-"));
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-api-domain-job-runtime-"));
     tempDirs.push(root);
     const staticDir = resolve(root, "static");
     await mkdir(staticDir);
@@ -1683,7 +1683,7 @@ describe("Scriptorium HTTP boundary", () => {
       method: "POST", headers: ownerHeaders, body: JSON.stringify({ input: { requestSecret: "must-not-be-captured", progress: [0.7] } }),
     });
     assert.equal(directResponse.status, 200);
-    const directJobId = directResponse.headers.get("x-scriptorium-job-id");
+    const directJobId = directResponse.headers.get("x-codexia-job-id");
     assert.ok(directJobId);
     const directResult = await directResponse.json() as ActionResult;
     assert.deepEqual(directResult, { ok: true, snapshot: SNAPSHOT, data: expectedData });
@@ -1697,7 +1697,7 @@ describe("Scriptorium HTTP boundary", () => {
       method: "POST", headers: ownerHeaders, body: JSON.stringify({ nested: true, progress: [0.4, 0.1] }),
     });
     assert.equal(nestedResponse.status, 200);
-    const nestedJobId = nestedResponse.headers.get("x-scriptorium-job-id");
+    const nestedJobId = nestedResponse.headers.get("x-codexia-job-id");
     assert.ok(nestedJobId);
     assert.notEqual(nestedJobId, directJobId);
     assert.deepEqual(await nestedResponse.json(), { ok: true, snapshot: SNAPSHOT, data: expectedData });
@@ -1708,7 +1708,7 @@ describe("Scriptorium HTTP boundary", () => {
       method: "POST", headers: ownerHeaders, body: JSON.stringify({ input: { fail: true } }),
     });
     assert.equal(failedResponse.status, 200);
-    const failedJobId = failedResponse.headers.get("x-scriptorium-job-id");
+    const failedJobId = failedResponse.headers.get("x-codexia-job-id");
     assert.ok(failedJobId);
     const failedResult = await failedResponse.json() as Extract<ActionResult, { ok: false }>;
     const failedJobResponse = await fetch(`${api.base}/api/jobs/${failedJobId}`, { headers: { Cookie: owner.cookie } });
@@ -1726,7 +1726,7 @@ describe("Scriptorium HTTP boundary", () => {
     const asyncResponse = await asyncResponsePromise;
     assert.equal(asyncResponse.status, 202);
     assert.equal(asyncResponse.headers.get("preference-applied"), "respond-async");
-    const asyncJobId = asyncResponse.headers.get("x-scriptorium-job-id");
+    const asyncJobId = asyncResponse.headers.get("x-codexia-job-id");
     assert.ok(asyncJobId);
     assert.equal((await asyncResponse.json() as { id: string }).id, asyncJobId);
     await domain.asyncStarted;
@@ -1758,8 +1758,8 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("archives exact legacy jobs outside Core data and exposes only explicitly mapped owner history", async (t) => {
-    const root = await mkdtemp(resolve(tmpdir(), "scriptorium-api-legacy-jobs-"));
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-legacy-jobs-app-"));
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-api-legacy-jobs-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-legacy-jobs-app-"));
     tempDirs.push(root, staticDir);
     const workspaceDataRoot = resolve(root, "core-data");
     const appState = resolve(workspaceDataRoot, "app-state");
@@ -1872,9 +1872,9 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("publishes real supervised worker jobs through owner-only history routes and SSE", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-worker-history-app-"));
-    const cacheDirectory = await mkdtemp(resolve(tmpdir(), "scriptorium-api-worker-history-cache-"));
-    const usageDirectory = await mkdtemp(resolve(tmpdir(), "scriptorium-api-worker-history-store-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-worker-history-app-"));
+    const cacheDirectory = await mkdtemp(resolve(tmpdir(), "codexia-api-worker-history-cache-"));
+    const usageDirectory = await mkdtemp(resolve(tmpdir(), "codexia-api-worker-history-store-"));
     tempDirs.push(staticDir, cacheDirectory, usageDirectory);
     const runtime = jobHistoryRuntime(cacheDirectory);
     const apiServer = await startCustomApi(makeSnapshotStore().store, staticDir, { runtime, usageDirectory });
@@ -1937,9 +1937,9 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("propagates a disconnected owner action to a real running worker and records cancellation", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-worker-cancel-app-"));
-    const cacheDirectory = await mkdtemp(resolve(tmpdir(), "scriptorium-api-worker-cancel-cache-"));
-    const usageDirectory = await mkdtemp(resolve(tmpdir(), "scriptorium-api-worker-cancel-store-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-worker-cancel-app-"));
+    const cacheDirectory = await mkdtemp(resolve(tmpdir(), "codexia-api-worker-cancel-cache-"));
+    const usageDirectory = await mkdtemp(resolve(tmpdir(), "codexia-api-worker-cancel-store-"));
     tempDirs.push(staticDir, cacheDirectory, usageDirectory);
     const apiServer = await startCustomApi(makeSnapshotStore().store, staticDir, {
       runtime: jobHistoryRuntime(cacheDirectory), usageDirectory,
@@ -2003,7 +2003,7 @@ describe("Scriptorium HTTP boundary", () => {
   it("wires model usage lazily into the host and retains it after Core data-root deletion and reconstruction", async (t) => {
     const { root, remote } = await makeBareRemote();
     tempDirs.push(root);
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-model-history-app-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-model-history-app-"));
     tempDirs.push(staticDir);
     const coreDataDirectory = resolve(root, "core-data");
     const usageDirectory = resolve(root, "history");
@@ -2069,7 +2069,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("uses an HttpOnly same-site session and enforces same-origin writes", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-"));
     tempDirs.push(staticDir);
     let directSaveCalls = 0;
     const apiServer = await startCustomApi(makeStore(() => { directSaveCalls += 1; }), staticDir);
@@ -2129,7 +2129,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("keeps hosted repository service failures separate from an expired Browser Grant", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-hosted-auth-boundary-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-hosted-auth-boundary-"));
     tempDirs.push(staticDir);
     let failRemoteObservation = true;
     const store = Object.assign(makeStore(), {
@@ -2178,7 +2178,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("marks a session cookie Secure when HTTPS is asserted by a trusted proxy", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-"));
     tempDirs.push(staticDir);
     const apiServer = await startApi(staticDir, true);
     t.after(apiServer.close);
@@ -2201,15 +2201,15 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("serves immutable runtime metadata publicly in standalone mode", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-metadata-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-metadata-"));
     tempDirs.push(staticDir);
-    const previousRevision = process.env.SCRIPTORIUM_PRODUCER_REVISION;
-    process.env.SCRIPTORIUM_PRODUCER_REVISION = "a".repeat(40);
+    const previousRevision = process.env.CODEXIA_PRODUCER_REVISION;
+    process.env.CODEXIA_PRODUCER_REVISION = "a".repeat(40);
     const apiServer = await startCustomApi(makeStore(), staticDir);
     t.after(async () => {
       await apiServer.close();
-      if (previousRevision === undefined) delete process.env.SCRIPTORIUM_PRODUCER_REVISION;
-      else process.env.SCRIPTORIUM_PRODUCER_REVISION = previousRevision;
+      if (previousRevision === undefined) delete process.env.CODEXIA_PRODUCER_REVISION;
+      else process.env.CODEXIA_PRODUCER_REVISION = previousRevision;
     });
     const response = await fetch(`${apiServer.base}/api/platform/v1/metadata`);
     assert.equal(response.status, 200);
@@ -2227,7 +2227,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("exposes the source Core read surface through pinned routes and composed host actions", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-core-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-core-"));
     tempDirs.push(staticDir);
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir);
@@ -2326,7 +2326,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("assigns proposal source at the host and keeps approval exclusive to same-origin owner sessions", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-proposals-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-proposals-"));
     tempDirs.push(staticDir);
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir);
@@ -2364,7 +2364,7 @@ describe("Scriptorium HTTP boundary", () => {
   it("keeps a strict Core proposal after an owner request is aborted following its durable write", async (t) => {
     const { root, remote } = await makeBareRemote();
     tempDirs.push(root);
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-aborted-proposal-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-aborted-proposal-"));
     tempDirs.push(staticDir);
     const dataDir = resolve(root, "state");
     const store = new CoreStore({ dataDir, allowLocalRemotes: true });
@@ -2381,7 +2381,7 @@ describe("Scriptorium HTTP boundary", () => {
     const operation: ChangeOperation = {
       id: "aborted_response_operation", generation: 1, repository: snapshot.repository,
       baseRemoteCommit: snapshot.remoteCommit, effect: "metadata", reads: [],
-      writes: [{ path: "meta/scriptorium/modules/publishing/aborted-response.md", revision: null, content: "Pending author decision.\n" }],
+      writes: [{ path: "meta/codexia/modules/publishing/aborted-response.md", revision: null, content: "Pending author decision.\n" }],
       message: "proposal retained across lost response",
     };
     const proposal: ChangeProposal = {
@@ -2422,7 +2422,7 @@ describe("Scriptorium HTTP boundary", () => {
   it("restores a partial MCP proposal through an exact owner retry after Core data loss", async (t) => {
     const { root, remote } = await makeBareRemote();
     tempDirs.push(root);
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-proposal-recovery-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-proposal-recovery-"));
     tempDirs.push(staticDir);
     const dataDir = resolve(root, "state");
     let store = new CoreStore({ dataDir, allowLocalRemotes: true });
@@ -2555,7 +2555,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("streams owner-scoped events only for actual manual sync outcomes and closes streams on shutdown", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-project-events-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-project-events-"));
     tempDirs.push(staticDir);
     let syncCount = 0;
     let observationCount = 0;
@@ -2619,7 +2619,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("routes project reconstruction and detachment only through the guarded Core ports", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-project-management-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-project-management-"));
     tempDirs.push(staticDir);
     const project = { id: "project-1", url: "https://github.com/owner/work.git", branch: "main" };
     const reconstructed: string[] = [];
@@ -2697,7 +2697,7 @@ describe("Scriptorium HTTP boundary", () => {
   it("keeps the real Core clone unchanged on URL mismatch and honors its detach guard", async (t) => {
     const { root, remote } = await makeBareRemote();
     tempDirs.push(root);
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-real-project-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-real-project-"));
     tempDirs.push(staticDir);
     const dataDir = resolve(root, "state");
     const store = new CoreStore({ dataDir, allowLocalRemotes: true });
@@ -2744,8 +2744,8 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("allows bearer compute under runtime effect limits and host-assigns MCP proposal source", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-effects-"));
-    const cacheDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-effects-cache-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-effects-"));
+    const cacheDir = await mkdtemp(resolve(tmpdir(), "codexia-api-effects-cache-"));
     tempDirs.push(staticDir, cacheDir);
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir, { runtime: actionBoundaryRuntime(cacheDir) });
@@ -2804,8 +2804,8 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("passes public module requests through the registered relative route with a fresh remote reader", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-module-"));
-    const cacheDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-module-cache-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-module-"));
+    const cacheDir = await mkdtemp(resolve(tmpdir(), "codexia-api-module-cache-"));
     tempDirs.push(staticDir, cacheDir);
     const observed: PublishingObservations = { paths: [] };
     const runtime = publishingRuntime(cacheDir, observed);
@@ -2853,8 +2853,8 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("bounds shutdown when an in-flight module handler ignores cancellation", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-drain-"));
-    const cacheDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-drain-cache-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-drain-"));
+    const cacheDir = await mkdtemp(resolve(tmpdir(), "codexia-api-drain-cache-"));
     tempDirs.push(staticDir, cacheDir);
     const manifest: ModuleManifest = {
       id: "mcp", version: "0.1.0", contractVersion: 1,
@@ -2890,7 +2890,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("stores scratch text and bounded attachments only through Core proposal/checkpoint operations", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-scratch-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-scratch-"));
     tempDirs.push(staticDir);
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir);
@@ -2914,7 +2914,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("passes a large canonical base64 attachment through the bounded validator unchanged", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-large-scratch-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-large-scratch-"));
     tempDirs.push(staticDir);
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir);
@@ -2938,7 +2938,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("rejects malformed large base64 attachments before calling Core", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-invalid-large-scratch-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-invalid-large-scratch-"));
     tempDirs.push(staticDir);
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir);
@@ -2964,7 +2964,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("rejects an attachment one byte over the raw cap before calling Core", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "scriptorium-api-oversize-scratch-"));
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-oversize-scratch-"));
     tempDirs.push(staticDir);
     const fixture = makeSnapshotStore();
     const apiServer = await startCustomApi(fixture.store, staticDir);
@@ -2983,7 +2983,7 @@ describe("Scriptorium HTTP boundary", () => {
   });
 
   it("stores project recent activity for cookie owners across API restarts and rejects bearer or cross-origin writes", async (t) => {
-    const root = await mkdtemp(resolve(tmpdir(), "scriptorium-api-recent-activity-"));
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-api-recent-activity-"));
     const staticDir = resolve(root, "static");
     const usageDirectory = resolve(root, "host-history");
     await mkdir(staticDir);
@@ -3071,7 +3071,7 @@ describe("Scriptorium HTTP boundary", () => {
 for (const status of [502, 503] as const) {
   for (const phase of ["read", "write"] as const) {
     it(`audit Hosted ${phase} dependency HTTP ${status} is not authentication denial`, async () => {
-      const directory = await mkdtemp(resolve(tmpdir(), "scriptorium-auth-outage-"));
+      const directory = await mkdtemp(resolve(tmpdir(), "codexia-auth-outage-"));
       const normal = hostedTestPolicy();
       const policy: HostedAuthorizationPolicy = {
         ...normal,

@@ -6,7 +6,7 @@ import type {
   GitCredentialRequest,
   HostedGitCredential,
   PublicationAuthorizationRequest,
-} from "@scriptorium/core";
+} from "@codexia/core";
 
 const MAX_JWKS_BYTES = 16 * 1024;
 const MAX_BROKER_RESPONSE_BYTES = 8 * 1024;
@@ -113,7 +113,7 @@ const GitCredentialSchema = z.strictObject({
 });
 
 export interface HostedRuntimeAssignment {
-  readonly contractVersion: "scriptorium-platform/v1";
+  readonly contractVersion: "codexia-platform/v1";
   readonly instanceId: string;
   readonly repositoryId: number;
   readonly repositoryLocator: string;
@@ -316,7 +316,7 @@ export async function verifyCompactJwt(
 }
 
 function validateAssignment(assignment: HostedRuntimeAssignment): HostedRuntimeAssignment {
-  if (!assignment || assignment.contractVersion !== "scriptorium-platform/v1" ||
+  if (!assignment || assignment.contractVersion !== "codexia-platform/v1" ||
       typeof assignment.instanceId !== "string" || assignment.instanceId.length < 1 || assignment.instanceId.length > 128 ||
       !Number.isSafeInteger(assignment.repositoryId) || assignment.repositoryId <= 0 ||
       !Number.isSafeInteger(assignment.runtimeEpoch) || assignment.runtimeEpoch <= 0 ||
@@ -483,7 +483,7 @@ export function createHostedGitCredentialProvider(options: {
   const assignment = validateAssignment(options.assignment);
   const fetcher = options.fetch ?? fetch;
   const now = options.now ?? Date.now;
-  const runtimeIdentityPath = options.runtimeIdentityPath ?? "/run/scriptorium/runtime-identity.jwt";
+  const runtimeIdentityPath = options.runtimeIdentityPath ?? "/run/codexia/runtime-identity.jwt";
 
   async function runtimeProof() {
     let token: string;

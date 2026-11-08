@@ -76,7 +76,7 @@ function accessGrant(overrides: Record<string, unknown> = {}): string {
 
 function assignment(overrides: Partial<HostedRuntimeAssignment> = {}): HostedRuntimeAssignment {
   return {
-    contractVersion: "scriptorium-platform/v1",
+    contractVersion: "codexia-platform/v1",
     instanceId: INSTANCE_ID,
     repositoryId: REPOSITORY_ID,
     repositoryLocator: "https://github.com/yohn-jp/novel",
@@ -86,7 +86,7 @@ function assignment(overrides: Partial<HostedRuntimeAssignment> = {}): HostedRun
     controlServicePolicy: {
       issuer: CONTROL_ISSUER,
       jwksUrl: `${CONTROL_ISSUER}/.well-known/control-jwks.json`,
-      audience: "scriptorium-platform-control",
+      audience: "codexia-platform-control",
     },
     grantPolicy: {
       issuer: ISSUER,
@@ -244,7 +244,7 @@ test("publication rechecks current Gateway authorization and rejects a receipt w
 });
 
 test("broker provider rereads runtime identity and asks the assigned Gateway for read and write credentials", async (context) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-hosted-auth-"));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-hosted-auth-"));
   context.after(() => fs.rm(directory, { recursive: true, force: true }));
   const identityPath = path.join(directory, "runtime-identity.jwt");
   await fs.writeFile(identityPath, runtimeIdentityJwt({
@@ -309,7 +309,7 @@ test("broker provider rereads runtime identity and asks the assigned Gateway for
 
 test("broker refuses a different repository binding before contacting the credential endpoint", async () => {
   let contactedBroker = false;
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-hosted-auth-binding-"));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-hosted-auth-binding-"));
   try {
     const identityPath = path.join(directory, "runtime-identity.jwt");
     await fs.writeFile(identityPath, "unused");
@@ -335,7 +335,7 @@ test("broker refuses a different repository binding before contacting the creden
 });
 
 test("invalid runtime identity is a service failure, not a browser access grant failure", async (context) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-hosted-auth-expired-identity-"));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-hosted-auth-expired-identity-"));
   context.after(() => fs.rm(directory, { recursive: true, force: true }));
   const identityPath = path.join(directory, "runtime-identity.jwt");
   await fs.writeFile(identityPath, runtimeIdentityJwt({
@@ -377,7 +377,7 @@ test("invalid runtime identity is a service failure, not a browser access grant 
 });
 
 test("broker refuses a renewed runtime proof from an old epoch before issuing a GitHub credential", async (context) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-hosted-auth-old-proof-"));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-hosted-auth-old-proof-"));
   context.after(() => fs.rm(directory, { recursive: true, force: true }));
   const identityPath = path.join(directory, "runtime-identity.jwt");
   await fs.writeFile(identityPath, runtimeIdentityJwt({

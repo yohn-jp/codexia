@@ -2,8 +2,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { link, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
-import type { ActionResult, ModuleId, RepositoryIdentity } from "@scriptorium/contracts";
-import type { WorkerJobLifecycleSnapshot } from "@scriptorium/module-runtime";
+import type { ActionResult, ModuleId, RepositoryIdentity } from "@codexia/contracts";
+import type { WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 
 const MAX_RETAINED_JOBS = 500;
 const MAX_RETAINED_INBOX = 200;

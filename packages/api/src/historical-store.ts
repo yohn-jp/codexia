@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { link, lstat, mkdir, open, readdir, unlink } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
-import type { ModelUsageEvent, ModelUsageStore, RepositoryIdentity } from "@scriptorium/contracts";
+import type { ModelUsageEvent, ModelUsageStore, RepositoryIdentity } from "@codexia/contracts";
 
 const DEFAULT_PAGE_SIZE = 100;
 const MAX_PAGE_SIZE = 1_000;

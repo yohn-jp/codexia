@@ -7,9 +7,9 @@ import { lstat, readFile, realpath } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
-import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type RecentActivityInput, type RepositoryIdentity, type SnapshotId, type ValueSchema } from "@scriptorium/contracts";
-import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ReorderHierarchyInput } from "@scriptorium/core";
-import { ModuleRuntime, type ActionHostContext, type DomainJobActionExecutor, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleSnapshot } from "@scriptorium/module-runtime";
+import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type RecentActivityInput, type RepositoryIdentity, type SnapshotId, type ValueSchema } from "@codexia/contracts";
+import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ReorderHierarchyInput } from "@codexia/core";
+import { ModuleRuntime, type ActionHostContext, type DomainJobActionExecutor, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 import { HistoricalModelUsageStore } from "./historical-store.js";
 import { JobHistoryError, JobHistoryStore, type JobEvent } from "./job-history-store.js";
 import { RecentActivityStore } from "./recent-activity-store.js";
@@ -45,7 +45,7 @@ import {
 export { importLegacyJobHistory, type LegacyJobHistoryImportOptions, type LegacyJobHistoryImportReport } from "./job-history-store.js";
 export { importLegacyRecentActivity, type LegacyRecentActivityImportOptions, type LegacyRecentActivityImportReport } from "./recent-activity-store.js";
 
-const SESSION_COOKIE = "scriptorium_session";
+const SESSION_COOKIE = "codexia_session";
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const RUNTIME_CONTROL_CENSUS_TIMEOUT_MS = 3_500;
 const RUNTIME_CONTROL_JWKS_TIMEOUT_MS = 1_000;
@@ -269,7 +269,7 @@ function sendError(response: ServerResponse, error: unknown): void {
     sendJson(response, error.status, { error: error.message, code: error.code });
     return;
   }
-  console.error("Unhandled Scriptorium API error", error);
+  console.error("Unhandled Codexia API error", error);
   sendJson(response, 500, { error: "Internal server error", code: "INTERNAL_ERROR" });
 }
 
@@ -420,7 +420,7 @@ async function serveStatic(
     }
     const original = await readFile(resolvedTarget);
     const content = file.contentType.startsWith("text/html")
-      ? Buffer.from(original.toString("utf8").replaceAll("__SCRIPTORIUM_STYLE_NONCE__", styleNonce))
+      ? Buffer.from(original.toString("utf8").replaceAll("__CODEXIA_STYLE_NONCE__", styleNonce))
       : original;
     if (publicReaderPath) {
       response.setHeader("Referrer-Policy", "no-referrer");
@@ -496,7 +496,7 @@ type ProposalStatus = {
   proposal: ChangeProposal;
   state: "proposed" | "partially_approved" | "approved" | "checkpointed";
   approvedOperationIds: string[];
-  checkpoints: import("@scriptorium/contracts").CheckpointReceipt[];
+  checkpoints: import("@codexia/contracts").CheckpointReceipt[];
   stale: boolean;
 };
 
@@ -554,7 +554,7 @@ type ApiActionHost = Omit<ActionHostContext, "propose"> & {
 export function createServer(options: ApiServerOptions): Server {
   const hosted = options.hosted;
   if (!hosted && (!options.authToken || options.authToken.length < 32 || options.authToken.trim() !== options.authToken)) {
-    throw new Error("SCRIPTORIUM_AUTH_TOKEN must contain at least 32 characters");
+    throw new Error("CODEXIA_AUTH_TOKEN must contain at least 32 characters");
   }
   if (hosted && (options.authToken !== undefined || !hosted.projectId || hosted.authorization === undefined)) {
     throw new Error("Hosted runtime requires an assignment, assigned project, and grant policy without a standalone token");
@@ -565,7 +565,7 @@ export function createServer(options: ApiServerOptions): Server {
   }
   const staticDir = options.staticDir ?? resolve(process.cwd(), "app/dist");
   const trustProxy = options.trustProxy ?? false;
-  const configuredUsageDirectory = options.usageDirectory ?? process.env.SCRIPTORIUM_USAGE_DIR ?? resolve(process.env.SCRIPTORIUM_DATA_DIR ?? "./data", "host-history");
+  const configuredUsageDirectory = options.usageDirectory ?? process.env.CODEXIA_USAGE_DIR ?? resolve(process.env.CODEXIA_DATA_DIR ?? "./data", "host-history");
   if (!configuredUsageDirectory.trim()) throw new Error("Model usage history requires a non-empty usage directory");
   const usageDirectory = resolve(configuredUsageDirectory);
   const jobHistory = new JobHistoryStore(usageDirectory);
@@ -631,7 +631,7 @@ export function createServer(options: ApiServerOptions): Server {
     capabilityProviders,
     cacheDirectory: options.runtimeOptions?.cacheDirectory ?? resolve(process.cwd(), "data/module-cache"),
   });
-  const profile = options.profile ?? process.env.SCRIPTORIUM_PROFILE ?? "core";
+  const profile = options.profile ?? process.env.CODEXIA_PROFILE ?? "core";
   if (profile === "full" && !options.runtime && !options.runtimeOptions) {
     throw new Error("The full profile requires trusted runtime manifests and lazy loaders");
   }
@@ -678,7 +678,7 @@ export function createServer(options: ApiServerOptions): Server {
     } catch (error) {
       privateHistoryUncertaintyIds.add(historyId);
       const code = error instanceof JobHistoryError ? error.code : "storage_failure";
-      console.error(`Scriptorium worker lifecycle history was not retained (${code}).`);
+      console.error(`Codexia worker lifecycle history was not retained (${code}).`);
     } finally {
       if (lifecycle.state === "succeeded" || lifecycle.state === "failed" || lifecycle.state === "cancelled") {
         workerJobLifecycleStates.delete(lifecycle.jobId);
@@ -1065,7 +1065,7 @@ export function createServer(options: ApiServerOptions): Server {
           }
           if (activeDomainJobIds.delete(id)) recordRuntimeActivity();
           const code = error instanceof JobHistoryError ? error.code : "job_history_unavailable";
-          console.error(`Scriptorium domain job was not started (${code}).`);
+          console.error(`Codexia domain job was not started (${code}).`);
           return actionFailure(snapshot, { code: "job_history_unavailable", message: "The host could not safely register this job" }, "job_history_unavailable");
         }
         let result: ActionResult;
@@ -1085,7 +1085,7 @@ export function createServer(options: ApiServerOptions): Server {
         catch (error) {
           privateHistoryUncertaintyIds.add(historyId);
           const code = error instanceof JobHistoryError ? error.code : "storage_failure";
-          console.error(`Scriptorium domain job result was not retained (${code}).`);
+          console.error(`Codexia domain job result was not retained (${code}).`);
           try {
             const failed = actionFailure(snapshot, {
               code: "domain_job_result_not_retained",
@@ -1298,7 +1298,7 @@ export function createServer(options: ApiServerOptions): Server {
     const observedAt = new Date().toISOString();
     const activeJobs = new Set([...activeWorkerJobIds, ...activeDomainJobIds]).size;
     const status: RuntimeStatus = {
-      contractVersion: "scriptorium-platform/v1",
+      contractVersion: "codexia-platform/v1",
       instanceId: assignment.instanceId,
       repositoryId: assignment.repositoryId,
       runtimeEpoch: assignment.runtimeEpoch,
@@ -1326,7 +1326,7 @@ export function createServer(options: ApiServerOptions): Server {
   const unavailableHostedRuntimeStatus = (): { status: RuntimeStatus; pendingProposals: number; complete: false; localWorkspaceDirty: false } => {
     if (!hosted || !assignment) throw httpFailure(404, "PLATFORM_CONTROL_UNAVAILABLE", "Hosted runtime controls are unavailable");
     const status: RuntimeStatus = {
-      contractVersion: "scriptorium-platform/v1",
+      contractVersion: "codexia-platform/v1",
       instanceId: assignment.instanceId,
       repositoryId: assignment.repositoryId,
       runtimeEpoch: assignment.runtimeEpoch,
@@ -1492,7 +1492,7 @@ export function createServer(options: ApiServerOptions): Server {
       quiesceOperationId = undefined;
     }
     const result: QuiesceResult = {
-      contractVersion: "scriptorium-platform/v1",
+      contractVersion: "codexia-platform/v1",
       operationId: body.operationId,
       instanceId: hosted.assignment.instanceId,
       runtimeEpoch: hosted.assignment.runtimeEpoch,
@@ -1570,7 +1570,7 @@ export function createServer(options: ApiServerOptions): Server {
     if (routePath === RUNTIME_METADATA_PATH && method === "GET") {
       try {
         sendJson(response, 200, metadataForRuntime({
-          producerRevision: hosted?.producerRevision ?? process.env.SCRIPTORIUM_PRODUCER_REVISION ?? "",
+          producerRevision: hosted?.producerRevision ?? process.env.CODEXIA_PRODUCER_REVISION ?? "",
           port: parsePositivePort(process.env.PORT),
           shutdownTimeoutSeconds: 25,
         }));
@@ -1606,9 +1606,9 @@ export function createServer(options: ApiServerOptions): Server {
     }
     if (routePath === "/api/version" && isRead) {
       sendJson(response, 200, {
-        name: "scriptorium", version: API_VERSION, contractVersion: CONTRACT_VERSION,
+        name: "codexia", version: API_VERSION, contractVersion: CONTRACT_VERSION,
         hosted: Boolean(hosted),
-        profile, auth: ["cookie-owner", "bearer-read-compute-propose"], runtime: { name: "@scriptorium/module-runtime", contractVersion: CONTRACT_VERSION, ...(runtime.metadata ? { metadata: runtime.metadata() } : {}) },
+        profile, auth: ["cookie-owner", "bearer-read-compute-propose"], runtime: { name: "@codexia/module-runtime", contractVersion: CONTRACT_VERSION, ...(runtime.metadata ? { metadata: runtime.metadata() } : {}) },
         modules: await enabledStatuses(),
       });
       return;
@@ -1643,7 +1643,7 @@ export function createServer(options: ApiServerOptions): Server {
       response.setHeader("WWW-Authenticate",
         hosted && routePath.endsWith("/modules/mcp/streamable")
           ? `Bearer resource_metadata="${assignment!.grantPolicy.audience}/.well-known/oauth-protected-resource", scope="read"`
-          : 'Bearer realm="scriptorium", Cookie realm="scriptorium"');
+          : 'Bearer realm="codexia", Cookie realm="codexia"');
       fail(response, 401, "UNAUTHORIZED", "Authentication required");
       return;
     }
@@ -2184,20 +2184,20 @@ export function createServer(options: ApiServerOptions): Server {
           if (outcome.kind === "started") {
             const job = await jobHistory.getJob(outcome.id);
             if (!job) throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "The registered job could not be read back");
-            response.setHeader("X-Scriptorium-Job-Id", job.id);
+            response.setHeader("X-Codexia-Job-Id", job.id);
             response.setHeader("Location", `/api/jobs/${encodeURIComponent(job.id)}`);
             response.setHeader("Preference-Applied", "respond-async");
             sendJson(response, 202, job);
             return;
           }
           if (outcome.settled.kind === "error") throw outcome.settled.error;
-          if (domainJobId) response.setHeader("X-Scriptorium-Job-Id", domainJobId);
+          if (domainJobId) response.setHeader("X-Codexia-Job-Id", domainJobId);
           sendJson(response, 200, outcome.settled.result);
           return;
         }
         const outcome = await settledInvocation;
         if (outcome.kind === "error") throw outcome.error;
-        if (domainJobId) response.setHeader("X-Scriptorium-Job-Id", domainJobId);
+        if (domainJobId) response.setHeader("X-Codexia-Job-Id", domainJobId);
         sendJson(response, 200, outcome.result); return;
       }
       const snapshotsMatch = suffix.match(/^manuscripts\/([^/]+)\/snapshots$/u);
@@ -2239,7 +2239,7 @@ export function createServer(options: ApiServerOptions): Server {
         const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, async () => { await requireWritePermission(); });
         const webRequest = makeWebRequest(request, parsedBody, signal, moduleRoute[2] ?? "");
         const moduleResponse = await runtime.invokeHttp(moduleId, contribution.id, webRequest, host);
-        if (domainJobId) response.setHeader("X-Scriptorium-Job-Id", domainJobId);
+        if (domainJobId) response.setHeader("X-Codexia-Job-Id", domainJobId);
         await serveModuleResponse(moduleResponse, response, signal);
         return;
       }
@@ -2397,7 +2397,7 @@ export function createServer(options: ApiServerOptions): Server {
         () => undefined,
         (error: unknown) => {
           const failure = error instanceof Error ? error : new Error("Module runtime shutdown failed");
-          console.error("Scriptorium module runtime shutdown failed", error);
+          console.error("Codexia module runtime shutdown failed", error);
           return failure;
         },
       );
@@ -2411,7 +2411,7 @@ export function createServer(options: ApiServerOptions): Server {
         if ("error" in runtimeOutcome) closeError ??= runtimeOutcome.error;
         if (deadlineExpired || "timedOut" in nodeOutcome || "timedOut" in runtimeOutcome) {
           forceClose();
-          console.warn(`Scriptorium API shutdown exceeded ${API_DRAIN_TIMEOUT_MS} ms; remaining HTTP connections were closed.`);
+          console.warn(`Codexia API shutdown exceeded ${API_DRAIN_TIMEOUT_MS} ms; remaining HTTP connections were closed.`);
         }
 
         let pending = 0;
@@ -2425,8 +2425,8 @@ export function createServer(options: ApiServerOptions): Server {
           unknown = !checked;
         }
         lastPendingLocalCheckpoints = unknown ? null : pending;
-        if (pending > 0 && !unknown) console.info(`Scriptorium is shutting down with ${pending} local checkpoint(s) pending; no publish was attempted.`);
-        if (unknown) console.warn("Scriptorium could not determine whether local checkpoints remain pending during shutdown.");
+        if (pending > 0 && !unknown) console.info(`Codexia is shutting down with ${pending} local checkpoint(s) pending; no publish was attempted.`);
+        if (unknown) console.warn("Codexia could not determine whether local checkpoints remain pending during shutdown.");
 
         const appClose = app.close().then(() => undefined, (error: unknown) => {
           closeError ??= error instanceof Error ? error : new Error("Fastify shutdown failed");
@@ -2445,7 +2445,7 @@ export function createServer(options: ApiServerOptions): Server {
     if (callback) void closePromise.then((error) => callback(error));
     return server;
   }) as Server["close"];
-  Object.defineProperty(server, "scriptorium", { value: { fastify: app, runtime, profile }, enumerable: false });
+  Object.defineProperty(server, "codexia", { value: { fastify: app, runtime, profile }, enumerable: false });
   return server;
 }
 
@@ -2458,20 +2458,20 @@ function parsePositivePort(value: string | undefined): number {
 
 export async function start(options?: ApiServerOptions): Promise<Server> {
   if (options) return startServer(options);
-  const { CoreStore } = await import("@scriptorium/core");
-  const cacheDirectory = resolve(process.env.SCRIPTORIUM_MODULE_CACHE_DIR ?? "./data/module-cache");
-  const dataDirectory = process.env.SCRIPTORIUM_DATA_DIR ?? "./data";
-  const hostedModeValue = process.env.SCRIPTORIUM_HOSTED_MODE;
+  const { CoreStore } = await import("@codexia/core");
+  const cacheDirectory = resolve(process.env.CODEXIA_MODULE_CACHE_DIR ?? "./data/module-cache");
+  const dataDirectory = process.env.CODEXIA_DATA_DIR ?? "./data";
+  const hostedModeValue = process.env.CODEXIA_HOSTED_MODE;
   if (hostedModeValue !== undefined && hostedModeValue !== "0" && hostedModeValue !== "1") {
-    throw new Error("SCRIPTORIUM_HOSTED_MODE must be 1 or 0");
+    throw new Error("CODEXIA_HOSTED_MODE must be 1 or 0");
   }
   const hostedMode = hostedModeValue === "1";
   if (hostedMode) {
-    if (process.env.SCRIPTORIUM_AUTH_TOKEN !== undefined || process.env.SCRIPTORIUM_GITHUB_TOKEN !== undefined) {
-      throw new Error("Static Scriptorium access and GitHub tokens are forbidden in hosted mode");
+    if (process.env.CODEXIA_AUTH_TOKEN !== undefined || process.env.CODEXIA_GITHUB_TOKEN !== undefined) {
+      throw new Error("Static Codexia access and GitHub tokens are forbidden in hosted mode");
     }
-    const assignment = await readRuntimeAssignment(process.env.SCRIPTORIUM_RUNTIME_ASSIGNMENT_PATH ?? HOSTED_ASSIGNMENT_PATH);
-    const profile = process.env.SCRIPTORIUM_PROFILE ?? "hosted";
+    const assignment = await readRuntimeAssignment(process.env.CODEXIA_RUNTIME_ASSIGNMENT_PATH ?? HOSTED_ASSIGNMENT_PATH);
+    const profile = process.env.CODEXIA_PROFILE ?? "hosted";
     if (profile !== "hosted") throw new Error("Hosted runtime requires the generated hosted profile");
     const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory, assignment.enabledModuleIds);
     const manifestIds = new Set<string>(runtimeOptions.manifests.map((manifest) => manifest.id));
@@ -2507,33 +2507,33 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     if (identity.provider !== "github" || identity.repositoryId !== String(assignment.repositoryId)) {
       throw new Error("Hosted Core repository identity does not match the signed assignment");
     }
-    const producerRevision = process.env.SCRIPTORIUM_PRODUCER_REVISION;
+    const producerRevision = process.env.CODEXIA_PRODUCER_REVISION;
     if (!producerRevision || !/^[a-f0-9]{40}$/u.test(producerRevision)) {
-      throw new Error("SCRIPTORIUM_PRODUCER_REVISION must be an immutable 40-character source revision");
+      throw new Error("CODEXIA_PRODUCER_REVISION must be an immutable 40-character source revision");
     }
     return startServer({
       store,
       hosted: { assignment, projectId: project.id, authorization, producerRevision },
-      trustProxy: process.env.SCRIPTORIUM_TRUST_PROXY === "1",
+      trustProxy: process.env.CODEXIA_TRUST_PROXY === "1",
       runtimeOptions,
-      usageDirectory: process.env.SCRIPTORIUM_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
+      usageDirectory: process.env.CODEXIA_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
       profile,
     });
   }
-  const authToken = process.env.SCRIPTORIUM_AUTH_TOKEN?.trim();
-  if (!authToken || authToken.length < 32) throw new Error("SCRIPTORIUM_AUTH_TOKEN is required and must contain at least 32 characters");
-  const profile = process.env.SCRIPTORIUM_PROFILE ?? "core";
+  const authToken = process.env.CODEXIA_AUTH_TOKEN?.trim();
+  if (!authToken || authToken.length < 32) throw new Error("CODEXIA_AUTH_TOKEN is required and must contain at least 32 characters");
+  const profile = process.env.CODEXIA_PROFILE ?? "core";
   const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory);
   const store = new CoreStore({
     dataDir: dataDirectory,
-    ...(process.env.SCRIPTORIUM_GITHUB_TOKEN ? { githubToken: process.env.SCRIPTORIUM_GITHUB_TOKEN } : {}),
+    ...(process.env.CODEXIA_GITHUB_TOKEN ? { githubToken: process.env.CODEXIA_GITHUB_TOKEN } : {}),
   });
   return startServer({
     store,
     authToken,
-    trustProxy: process.env.SCRIPTORIUM_TRUST_PROXY === "1",
+    trustProxy: process.env.CODEXIA_TRUST_PROXY === "1",
     runtimeOptions,
-    usageDirectory: process.env.SCRIPTORIUM_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
+    usageDirectory: process.env.CODEXIA_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
     profile,
   });
 }
@@ -2543,8 +2543,8 @@ async function loadProfileRuntimeOptions(
   cacheDirectory: string,
   assignedEnabledModuleIds?: readonly string[],
 ): Promise<Omit<ModuleRuntimeOptions, "cacheDirectory"> & { cacheDirectory: string }> {
-  if (!/^[a-z][a-z0-9-]{0,31}$/u.test(profile)) throw new Error("SCRIPTORIUM_PROFILE must be a valid profile name");
-  const generated = process.env.SCRIPTORIUM_MODULE_PROFILE_PATH ?? resolve(process.cwd(), "profiles", profile, "generated/server.mjs");
+  if (!/^[a-z][a-z0-9-]{0,31}$/u.test(profile)) throw new Error("CODEXIA_PROFILE must be a valid profile name");
+  const generated = process.env.CODEXIA_MODULE_PROFILE_PATH ?? resolve(process.cwd(), "profiles", profile, "generated/server.mjs");
   let composition: {
     profile?: unknown;
     moduleManifests?: ModuleRuntimeOptions["manifests"];
@@ -2561,7 +2561,7 @@ async function loadProfileRuntimeOptions(
     throw new Error(`Unable to load trusted ${profile} module composition from ${generated}: ${error instanceof Error ? error.message : String(error)}`);
   }
   if (composition?.profile !== profile || !Array.isArray(composition.moduleManifests)) throw new Error(`Generated composition does not match profile ${profile}`);
-  const enabledByEnvironment = process.env.SCRIPTORIUM_ENABLED_MODULES;
+  const enabledByEnvironment = process.env.CODEXIA_ENABLED_MODULES;
   const enabled = assignedEnabledModuleIds !== undefined
     ? [...assignedEnabledModuleIds]
     : enabledByEnvironment === undefined
@@ -2592,13 +2592,13 @@ async function startServer(options: ApiServerOptions): Promise<Server> {
       resolveListen();
     });
   });
-  console.info(`Scriptorium is listening on http://${host}:${port}`);
+  console.info(`Codexia is listening on http://${host}:${port}`);
   return server;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   void start().catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : "Scriptorium failed to start");
+    console.error(error instanceof Error ? error.message : "Codexia failed to start");
     process.exitCode = 1;
   });
 }

@@ -27,7 +27,7 @@ function sourceItem(deviceType: "desktop" | "mobile", overrides: Partial<RecentA
 
 describe("RecentActivityStore", () => {
   it("keeps per-device cursors private, owner/repository scoped, and durable across store instances", async (t) => {
-    const root = await mkdtemp(resolve(tmpdir(), "scriptorium-recent-activity-"));
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-recent-activity-"));
     const usageDirectory = resolve(root, "host-history");
     t.after(() => rm(root, { recursive: true, force: true }));
     const first = new RecentActivityStore(usageDirectory);
@@ -49,7 +49,7 @@ describe("RecentActivityStore", () => {
   });
 
   it("archives exact canonical bytes and adopts only explicitly mapped rows without regressing live cursors", async (t) => {
-    const root = await mkdtemp(resolve(tmpdir(), "scriptorium-recent-import-"));
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-recent-import-"));
     const workspaceDataRoot = resolve(root, "workspace");
     const usageDirectory = resolve(root, "host-history");
     const appState = resolve(workspaceDataRoot, "app-state");
@@ -92,7 +92,7 @@ describe("RecentActivityStore", () => {
   });
 
   it("uses the root alias when canonical is absent and imports both archived sources by their cursor timestamps", async (t) => {
-    const root = await mkdtemp(resolve(tmpdir(), "scriptorium-recent-alias-"));
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-recent-alias-"));
     const workspaceDataRoot = resolve(root, "workspace");
     const usageDirectory = resolve(root, "host-history");
     await mkdir(workspaceDataRoot, { mode: 0o700 });
@@ -135,7 +135,7 @@ describe("RecentActivityStore", () => {
   });
 
   it("archives equal-time conflicting aliases and blocks adoption", async (t) => {
-    const root = await mkdtemp(resolve(tmpdir(), "scriptorium-recent-conflict-"));
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-recent-conflict-"));
     const workspaceDataRoot = resolve(root, "workspace");
     const appState = resolve(workspaceDataRoot, "app-state");
     const usageDirectory = resolve(root, "host-history");

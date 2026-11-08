@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { SnapshotReader } from "@scriptorium/contracts";
+import type { SnapshotReader } from "@codexia/contracts";
 import {
   metadataForRuntime,
   normalizeRemoteRevision,
@@ -12,7 +12,7 @@ import {
 } from "./platform-runtime.js";
 
 const ASSIGNMENT = {
-  contractVersion: "scriptorium-platform/v1",
+  contractVersion: "codexia-platform/v1",
   instanceId: "instance-1",
   repositoryId: 42,
   repositoryLocator: "https://github.com/owner/book",
@@ -30,7 +30,7 @@ const ASSIGNMENT = {
   grantPolicy: {
     issuer: "https://praetorium.example",
     jwksUrl: "https://praetorium.example/.well-known/grant-jwks.json",
-    audience: "https://praetorium.example/scriptorium",
+    audience: "https://praetorium.example/codexia",
   },
 } as const;
 
@@ -62,7 +62,7 @@ describe("hosted runtime platform contract", () => {
     assert.throws(() => parseRuntimeAssignment({ ...ASSIGNMENT, githubToken: "secret" }), /assignment is invalid/u);
 
     const request = parseQuiesceRequest({
-      contractVersion: "scriptorium-platform/v1",
+      contractVersion: "codexia-platform/v1",
       operationId: "operation-1",
       instanceId: "instance-1",
       runtimeEpoch: 3,
@@ -116,31 +116,31 @@ describe("hosted runtime platform contract", () => {
 
   it("reports the exact remote metadata format pairs only after a complete scan", async () => {
     const files = {
-      "meta/scriptorium/operations/v1/op-1.json": JSON.stringify({ version: 1, operation: { id: "op-1" } }),
-      "meta/scriptorium/publications/v1/batch-1.json": JSON.stringify({ version: 1, batchId: "batch-1" }),
-      "meta/scriptorium/proposals/v1/proposal-legacy.json": JSON.stringify({ version: 1, proposalId: "proposal-legacy" }),
-      "meta/scriptorium/proposals/v2/bindings/proposal-binding.json": JSON.stringify({ version: 2, proposalId: "proposal-binding" }),
-      "meta/scriptorium/proposals/v2/complete/proposal-complete.json": JSON.stringify({ version: 2, proposalId: "proposal-complete" }),
+      "meta/codexia/operations/v1/op-1.json": JSON.stringify({ version: 1, operation: { id: "op-1" } }),
+      "meta/codexia/publications/v1/batch-1.json": JSON.stringify({ version: 1, batchId: "batch-1" }),
+      "meta/codexia/proposals/v1/proposal-legacy.json": JSON.stringify({ version: 1, proposalId: "proposal-legacy" }),
+      "meta/codexia/proposals/v2/bindings/proposal-binding.json": JSON.stringify({ version: 2, proposalId: "proposal-binding" }),
+      "meta/codexia/proposals/v2/complete/proposal-complete.json": JSON.stringify({ version: 2, proposalId: "proposal-complete" }),
     };
     const commit = "c".repeat(40);
     const observed = await scanRemotePersistence(snapshotReader(files), commit);
     assert.equal(observed.state, "verified");
     assert.equal(observed.observedRemoteCommit, commit);
     assert.deepEqual(observed.formats, [
-      { formatId: "scriptorium.git-operations", version: 1 },
-      { formatId: "scriptorium.git-proposal-binding", version: 2 },
-      { formatId: "scriptorium.git-proposal-complete", version: 2 },
-      { formatId: "scriptorium.git-proposal-legacy", version: 1 },
-      { formatId: "scriptorium.git-publications", version: 1 },
+      { formatId: "codexia.git-operations", version: 1 },
+      { formatId: "codexia.git-proposal-binding", version: 2 },
+      { formatId: "codexia.git-proposal-complete", version: 2 },
+      { formatId: "codexia.git-proposal-legacy", version: 1 },
+      { formatId: "codexia.git-publications", version: 1 },
     ]);
 
     const malformed = await scanRemotePersistence(snapshotReader({
       ...files,
-      "meta/scriptorium/proposals/v2/other/proposal.json": "{}",
+      "meta/codexia/proposals/v2/other/proposal.json": "{}",
     }), commit);
     assert.equal(malformed.state, "unknown");
     const wrongIdentity = await scanRemotePersistence(snapshotReader({
-      "meta/scriptorium/operations/v1/op-1.json": JSON.stringify({ version: 1, operation: { id: "different" } }),
+      "meta/codexia/operations/v1/op-1.json": JSON.stringify({ version: 1, operation: { id: "different" } }),
     }), commit);
     assert.equal(wrongIdentity.state, "unknown");
     assert.equal((await scanRemotePersistence(snapshotReader(files), "not-a-commit")).state, "unknown");
@@ -160,37 +160,37 @@ describe("hosted runtime platform contract", () => {
   it("classifies supported module-owned formats and fails closed on unknown paths or versions", async () => {
     const commit = "e".repeat(40);
     const files = {
-      "meta/scriptorium/modules/assistant/model-settings.json": JSON.stringify({ defaultPresetId: "default", presets: [{ id: "default", model: "local" }] }),
-      "meta/scriptorium/modules/diagnostics/lint-rules.yaml": "rules: []\n",
-      "meta/scriptorium/modules/nlp/feature-settings.json": JSON.stringify({ externalEnabled: {} }),
-      "meta/scriptorium/modules/publishing/share-grants.jsonl": JSON.stringify({ version: 1, id: "grant-1" }),
-      "meta/scriptorium/modules/semantic/settings.json": JSON.stringify({ schemaVersion: 1, rerankerEnabled: false }),
-      "meta/scriptorium/modules/speaker/adopted-model.json": JSON.stringify({ version: 1, featureNames: ["x"], weights: [0], bias: 0, highProbabilityThreshold: 0.5, trainedAt: "2026-10-17T00:00:00.000Z" }),
-      "meta/scriptorium/modules/story/v1/series.json": JSON.stringify({ version: 1, series: [], bindings: [] }),
-      "meta/scriptorium/modules/story/legacy/files/meta/old.json": "opaque legacy bytes",
+      "meta/codexia/modules/assistant/model-settings.json": JSON.stringify({ defaultPresetId: "default", presets: [{ id: "default", model: "local" }] }),
+      "meta/codexia/modules/diagnostics/lint-rules.yaml": "rules: []\n",
+      "meta/codexia/modules/nlp/feature-settings.json": JSON.stringify({ externalEnabled: {} }),
+      "meta/codexia/modules/publishing/share-grants.jsonl": JSON.stringify({ version: 1, id: "grant-1" }),
+      "meta/codexia/modules/semantic/settings.json": JSON.stringify({ schemaVersion: 1, rerankerEnabled: false }),
+      "meta/codexia/modules/speaker/adopted-model.json": JSON.stringify({ version: 1, featureNames: ["x"], weights: [0], bias: 0, highProbabilityThreshold: 0.5, trainedAt: "2026-10-17T00:00:00.000Z" }),
+      "meta/codexia/modules/story/v1/series.json": JSON.stringify({ version: 1, series: [], bindings: [] }),
+      "meta/codexia/modules/story/legacy/files/meta/old.json": "opaque legacy bytes",
     };
     const observed = await scanRemotePersistence(snapshotReader(files), commit);
     assert.equal(observed.state, "verified");
     assert.equal(observed.observedRemoteCommit, commit);
     assert.deepEqual(observed.formats.map(({ formatId, version }) => ({ formatId, version })), [
-      { formatId: "scriptorium.module-assistant.model-settings", version: 1 },
-      { formatId: "scriptorium.module-diagnostics.lint-rules", version: 1 },
-      { formatId: "scriptorium.module-nlp.feature-settings", version: 1 },
-      { formatId: "scriptorium.module-publishing.share-grants", version: 1 },
-      { formatId: "scriptorium.module-semantic.settings", version: 1 },
-      { formatId: "scriptorium.module-speaker.adopted-model", version: 1 },
-      { formatId: "scriptorium.module-story.legacy-files", version: 1 },
-      { formatId: "scriptorium.module-story.series", version: 1 },
+      { formatId: "codexia.module-assistant.model-settings", version: 1 },
+      { formatId: "codexia.module-diagnostics.lint-rules", version: 1 },
+      { formatId: "codexia.module-nlp.feature-settings", version: 1 },
+      { formatId: "codexia.module-publishing.share-grants", version: 1 },
+      { formatId: "codexia.module-semantic.settings", version: 1 },
+      { formatId: "codexia.module-speaker.adopted-model", version: 1 },
+      { formatId: "codexia.module-story.legacy-files", version: 1 },
+      { formatId: "codexia.module-story.series", version: 1 },
     ]);
 
     assert.equal((await scanRemotePersistence(snapshotReader({
       ...files,
-      "meta/scriptorium/modules/story/future-data.json": "{}",
+      "meta/codexia/modules/story/future-data.json": "{}",
     }), commit)).state, "unknown");
     assert.equal((await scanRemotePersistence(snapshotReader({
-      "meta/scriptorium/modules/story/v1/series.json": JSON.stringify({ version: 2, series: [], bindings: [] }),
+      "meta/codexia/modules/story/v1/series.json": JSON.stringify({ version: 2, series: [], bindings: [] }),
     }), commit)).state, "unknown");
-    assert.equal((await scanRemotePersistence(snapshotReader({ "meta/scriptorium/unclassified.json": "{}" }), commit)).state, "unknown");
+    assert.equal((await scanRemotePersistence(snapshotReader({ "meta/codexia/unclassified.json": "{}" }), commit)).state, "unknown");
   });
 
   it("declares the actual hosted listener and quiesce shutdown action", () => {
