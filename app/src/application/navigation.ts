@@ -1,6 +1,6 @@
 import type { UiMode } from "./contracts";
 
-export const UI_MODE_PREFERENCE_KEY = "codexia:ui-mode";
+export const UI_MODE_PREFERENCE_KEY = "scriptorium:ui-mode";
 
 export interface ApplicationResource {
   projectId?: string;

@@ -1026,7 +1026,7 @@ export function installWorkerHandler<TInput = unknown, TOutput = unknown>(
   handler: (request: JobRequest<TInput>, signal: AbortSignal) => TOutput | Promise<TOutput>,
 ): void {
   const active = new Map<string, AbortController>();
-  const persistent = process.env.CODEXIA_WORKER_MODE === "service";
+  const persistent = (process.env.CODEXIA_WORKER_MODE ?? process.env.SCRIPTORIUM_WORKER_MODE) === "service";
   let shuttingDown = false;
   const finishIfIdle = () => {
     if (shuttingDown && active.size === 0 && process.connected) process.disconnect();

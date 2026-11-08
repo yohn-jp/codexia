@@ -11,7 +11,7 @@ export const publishingManifest: ModuleManifest = {
   requires: [],
   serverEntry: "./dist/index.js",
   browserEntry: "./dist/browser.js",
-  statePaths: ["meta/codexia/modules/publishing"],
+  statePaths: ["meta/scriptorium/modules/publishing"],
   locality: "local",
 };
 

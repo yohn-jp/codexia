@@ -14,7 +14,7 @@ export const semanticManifest: ModuleManifest = {
   serverEntry: "./dist/index.js",
   browserEntry: "./dist/browser.js",
   workerEntry: "./dist/worker.js",
-  statePaths: ["meta/codexia/modules/semantic"],
+  statePaths: ["meta/scriptorium/modules/semantic"],
   locality: "local",
 };
 

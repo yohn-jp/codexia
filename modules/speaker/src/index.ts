@@ -57,12 +57,12 @@ const manifest: ModuleManifest = {
   serverEntry: "./dist/index.js",
   browserEntry: "./dist/browser.js",
   workerEntry: "./dist/worker.js",
-  statePaths: ["meta/codexia/modules/speaker", "plot/volumes"],
+  statePaths: ["meta/scriptorium/modules/speaker", "plot/volumes"],
   locality: "local",
 };
 
-const CORRECTIONS_PATH = "meta/codexia/modules/speaker/corrections.jsonl";
-const ADOPTED_MODEL_PATH = "meta/codexia/modules/speaker/adopted-model.json";
+const CORRECTIONS_PATH = "meta/scriptorium/modules/speaker/corrections.jsonl";
+const ADOPTED_MODEL_PATH = "meta/scriptorium/modules/speaker/adopted-model.json";
 const MAX_SCENE_CHARACTERS = 500_000;
 const MAX_SCENES = 500;
 const MAX_DIALOGUES = 500;

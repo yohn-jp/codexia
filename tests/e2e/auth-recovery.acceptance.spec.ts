@@ -271,7 +271,12 @@ test("direct-link, active scene, and project activation resume after persisted p
   await expect(editor).toBeVisible({ timeout: 15_000 });
   await expect(editor).toContainText("The first line of the story.");
   await expect(page.locator('[data-recovery-status="ready"]')).toBeVisible();
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  try {
+    await expect(page.getByRole("alert")).toHaveCount(0);
+  } catch (cause) {
+    const alertTexts = await page.getByRole("alert").allTextContents();
+    throw new Error(`Unexpected alert after direct-link scene resumed: ${JSON.stringify(alertTexts)}`, { cause });
+  }
   expect(viewsRequests, "pageshow should resume the interrupted direct-link scene read").toBeGreaterThanOrEqual(2);
 
   let releaseSecondViews!: () => void;

@@ -1,4 +1,5 @@
 import { authorizationFailure } from "./authorization-error.js";
+import { readCodexiaEnvironment } from "./environment.js";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable } from "node:stream";
@@ -45,7 +46,7 @@ import {
 export { importLegacyJobHistory, type LegacyJobHistoryImportOptions, type LegacyJobHistoryImportReport } from "./job-history-store.js";
 export { importLegacyRecentActivity, type LegacyRecentActivityImportOptions, type LegacyRecentActivityImportReport } from "./recent-activity-store.js";
 
-const SESSION_COOKIE = "codexia_session";
+const SESSION_COOKIE = "scriptorium_session";
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const RUNTIME_CONTROL_CENSUS_TIMEOUT_MS = 3_500;
 const RUNTIME_CONTROL_JWKS_TIMEOUT_MS = 1_000;
@@ -565,7 +566,9 @@ export function createServer(options: ApiServerOptions): Server {
   }
   const staticDir = options.staticDir ?? resolve(process.cwd(), "app/dist");
   const trustProxy = options.trustProxy ?? false;
-  const configuredUsageDirectory = options.usageDirectory ?? process.env.CODEXIA_USAGE_DIR ?? resolve(process.env.CODEXIA_DATA_DIR ?? "./data", "host-history");
+  const dataDirectory = readCodexiaEnvironment("DATA_DIR") ?? process.env.CODEXIA_BUILD_DATA_DIR ?? "./data";
+  const defaultUsageDirectory = process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history");
+  const configuredUsageDirectory = options.usageDirectory ?? readCodexiaEnvironment("USAGE_DIR") ?? defaultUsageDirectory;
   if (!configuredUsageDirectory.trim()) throw new Error("Model usage history requires a non-empty usage directory");
   const usageDirectory = resolve(configuredUsageDirectory);
   const jobHistory = new JobHistoryStore(usageDirectory);
@@ -631,7 +634,7 @@ export function createServer(options: ApiServerOptions): Server {
     capabilityProviders,
     cacheDirectory: options.runtimeOptions?.cacheDirectory ?? resolve(process.cwd(), "data/module-cache"),
   });
-  const profile = options.profile ?? process.env.CODEXIA_PROFILE ?? "core";
+  const profile = options.profile ?? readCodexiaEnvironment("PROFILE") ?? process.env.CODEXIA_BUILD_PROFILE ?? "core";
   if (profile === "full" && !options.runtime && !options.runtimeOptions) {
     throw new Error("The full profile requires trusted runtime manifests and lazy loaders");
   }
@@ -1298,7 +1301,7 @@ export function createServer(options: ApiServerOptions): Server {
     const observedAt = new Date().toISOString();
     const activeJobs = new Set([...activeWorkerJobIds, ...activeDomainJobIds]).size;
     const status: RuntimeStatus = {
-      contractVersion: "codexia-platform/v1",
+      contractVersion: "scriptorium-platform/v1",
       instanceId: assignment.instanceId,
       repositoryId: assignment.repositoryId,
       runtimeEpoch: assignment.runtimeEpoch,
@@ -1326,7 +1329,7 @@ export function createServer(options: ApiServerOptions): Server {
   const unavailableHostedRuntimeStatus = (): { status: RuntimeStatus; pendingProposals: number; complete: false; localWorkspaceDirty: false } => {
     if (!hosted || !assignment) throw httpFailure(404, "PLATFORM_CONTROL_UNAVAILABLE", "Hosted runtime controls are unavailable");
     const status: RuntimeStatus = {
-      contractVersion: "codexia-platform/v1",
+      contractVersion: "scriptorium-platform/v1",
       instanceId: assignment.instanceId,
       repositoryId: assignment.repositoryId,
       runtimeEpoch: assignment.runtimeEpoch,
@@ -1492,7 +1495,7 @@ export function createServer(options: ApiServerOptions): Server {
       quiesceOperationId = undefined;
     }
     const result: QuiesceResult = {
-      contractVersion: "codexia-platform/v1",
+      contractVersion: "scriptorium-platform/v1",
       operationId: body.operationId,
       instanceId: hosted.assignment.instanceId,
       runtimeEpoch: hosted.assignment.runtimeEpoch,
@@ -1570,7 +1573,7 @@ export function createServer(options: ApiServerOptions): Server {
     if (routePath === RUNTIME_METADATA_PATH && method === "GET") {
       try {
         sendJson(response, 200, metadataForRuntime({
-          producerRevision: hosted?.producerRevision ?? process.env.CODEXIA_PRODUCER_REVISION ?? "",
+          producerRevision: hosted?.producerRevision ?? readCodexiaEnvironment("PRODUCER_REVISION") ?? "",
           port: parsePositivePort(process.env.PORT),
           shutdownTimeoutSeconds: 25,
         }));
@@ -2459,19 +2462,19 @@ function parsePositivePort(value: string | undefined): number {
 export async function start(options?: ApiServerOptions): Promise<Server> {
   if (options) return startServer(options);
   const { CoreStore } = await import("@codexia/core");
-  const cacheDirectory = resolve(process.env.CODEXIA_MODULE_CACHE_DIR ?? "./data/module-cache");
-  const dataDirectory = process.env.CODEXIA_DATA_DIR ?? "./data";
-  const hostedModeValue = process.env.CODEXIA_HOSTED_MODE;
+  const cacheDirectory = resolve(readCodexiaEnvironment("MODULE_CACHE_DIR") ?? "./data/module-cache");
+  const dataDirectory = readCodexiaEnvironment("DATA_DIR") ?? process.env.CODEXIA_BUILD_DATA_DIR ?? "./data";
+  const hostedModeValue = readCodexiaEnvironment("HOSTED_MODE");
   if (hostedModeValue !== undefined && hostedModeValue !== "0" && hostedModeValue !== "1") {
     throw new Error("CODEXIA_HOSTED_MODE must be 1 or 0");
   }
   const hostedMode = hostedModeValue === "1";
   if (hostedMode) {
-    if (process.env.CODEXIA_AUTH_TOKEN !== undefined || process.env.CODEXIA_GITHUB_TOKEN !== undefined) {
+    if (readCodexiaEnvironment("AUTH_TOKEN") !== undefined || readCodexiaEnvironment("GITHUB_TOKEN") !== undefined) {
       throw new Error("Static Codexia access and GitHub tokens are forbidden in hosted mode");
     }
-    const assignment = await readRuntimeAssignment(process.env.CODEXIA_RUNTIME_ASSIGNMENT_PATH ?? HOSTED_ASSIGNMENT_PATH);
-    const profile = process.env.CODEXIA_PROFILE ?? "hosted";
+    const assignment = await readRuntimeAssignment(readCodexiaEnvironment("RUNTIME_ASSIGNMENT_PATH") ?? HOSTED_ASSIGNMENT_PATH);
+    const profile = readCodexiaEnvironment("PROFILE") ?? process.env.CODEXIA_BUILD_PROFILE ?? "hosted";
     if (profile !== "hosted") throw new Error("Hosted runtime requires the generated hosted profile");
     const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory, assignment.enabledModuleIds);
     const manifestIds = new Set<string>(runtimeOptions.manifests.map((manifest) => manifest.id));
@@ -2507,33 +2510,33 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     if (identity.provider !== "github" || identity.repositoryId !== String(assignment.repositoryId)) {
       throw new Error("Hosted Core repository identity does not match the signed assignment");
     }
-    const producerRevision = process.env.CODEXIA_PRODUCER_REVISION;
+    const producerRevision = readCodexiaEnvironment("PRODUCER_REVISION");
     if (!producerRevision || !/^[a-f0-9]{40}$/u.test(producerRevision)) {
       throw new Error("CODEXIA_PRODUCER_REVISION must be an immutable 40-character source revision");
     }
     return startServer({
       store,
       hosted: { assignment, projectId: project.id, authorization, producerRevision },
-      trustProxy: process.env.CODEXIA_TRUST_PROXY === "1",
+      trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
       runtimeOptions,
-      usageDirectory: process.env.CODEXIA_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
+      usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
       profile,
     });
   }
-  const authToken = process.env.CODEXIA_AUTH_TOKEN?.trim();
+  const authToken = readCodexiaEnvironment("AUTH_TOKEN")?.trim();
   if (!authToken || authToken.length < 32) throw new Error("CODEXIA_AUTH_TOKEN is required and must contain at least 32 characters");
-  const profile = process.env.CODEXIA_PROFILE ?? "core";
+  const profile = readCodexiaEnvironment("PROFILE") ?? process.env.CODEXIA_BUILD_PROFILE ?? "core";
   const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory);
   const store = new CoreStore({
     dataDir: dataDirectory,
-    ...(process.env.CODEXIA_GITHUB_TOKEN ? { githubToken: process.env.CODEXIA_GITHUB_TOKEN } : {}),
+    ...(readCodexiaEnvironment("GITHUB_TOKEN") ? { githubToken: readCodexiaEnvironment("GITHUB_TOKEN") } : {}),
   });
   return startServer({
     store,
     authToken,
-    trustProxy: process.env.CODEXIA_TRUST_PROXY === "1",
+    trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
     runtimeOptions,
-    usageDirectory: process.env.CODEXIA_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
+    usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
     profile,
   });
 }
@@ -2544,7 +2547,7 @@ async function loadProfileRuntimeOptions(
   assignedEnabledModuleIds?: readonly string[],
 ): Promise<Omit<ModuleRuntimeOptions, "cacheDirectory"> & { cacheDirectory: string }> {
   if (!/^[a-z][a-z0-9-]{0,31}$/u.test(profile)) throw new Error("CODEXIA_PROFILE must be a valid profile name");
-  const generated = process.env.CODEXIA_MODULE_PROFILE_PATH ?? resolve(process.cwd(), "profiles", profile, "generated/server.mjs");
+  const generated = readCodexiaEnvironment("MODULE_PROFILE_PATH") ?? process.env.CODEXIA_BUILD_MODULE_PROFILE_PATH ?? resolve(process.cwd(), "profiles", profile, "generated/server.mjs");
   let composition: {
     profile?: unknown;
     moduleManifests?: ModuleRuntimeOptions["manifests"];
@@ -2561,7 +2564,7 @@ async function loadProfileRuntimeOptions(
     throw new Error(`Unable to load trusted ${profile} module composition from ${generated}: ${error instanceof Error ? error.message : String(error)}`);
   }
   if (composition?.profile !== profile || !Array.isArray(composition.moduleManifests)) throw new Error(`Generated composition does not match profile ${profile}`);
-  const enabledByEnvironment = process.env.CODEXIA_ENABLED_MODULES;
+  const enabledByEnvironment = readCodexiaEnvironment("ENABLED_MODULES");
   const enabled = assignedEnabledModuleIds !== undefined
     ? [...assignedEnabledModuleIds]
     : enabledByEnvironment === undefined

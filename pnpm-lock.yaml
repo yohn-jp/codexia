@@ -488,6 +488,9 @@ importers:
       '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@codexia/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@codexia/migration':
         specifier: workspace:*
         version: link:../../packages/migration

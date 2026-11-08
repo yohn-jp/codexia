@@ -20,9 +20,9 @@ const modelCache = resolve(process.env.CODEXIA_P13_MODEL_CACHE ?? defaultModelCa
 const semanticCapability = "semantic.embedding";
 const capabilityValueIds = new WeakMap();
 let nextCapabilityValueId = 1;
-const semanticSettingsPath = "meta/codexia/modules/semantic/settings.json";
-const semanticDismissalsPath = "meta/codexia/modules/semantic/contradiction-dismissals.jsonl";
-const nlpSettingsPath = "meta/codexia/modules/nlp/feature-settings.json";
+const semanticSettingsPath = "meta/scriptorium/modules/semantic/settings.json";
+const semanticDismissalsPath = "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl";
+const nlpSettingsPath = "meta/scriptorium/modules/nlp/feature-settings.json";
 const workerFiles = {
   story: join(root, "modules/story/dist/worker.js"),
   nlp: join(root, "modules/nlp/dist/worker.js"),

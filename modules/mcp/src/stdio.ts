@@ -4,15 +4,15 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { ApiClient } from "./api-client.js";
 import { registerMcpTools } from "./tools.js";
 
-const token = process.env.CODEXIA_AUTH_TOKEN;
+const token = process.env.CODEXIA_AUTH_TOKEN ?? process.env.SCRIPTORIUM_AUTH_TOKEN;
 if (!token) {
-  process.stderr.write("Set CODEXIA_AUTH_TOKEN to connect to the Codexia owner API.\n");
+  process.stderr.write("Set CODEXIA_AUTH_TOKEN (or the existing SCRIPTORIUM_AUTH_TOKEN alias) to connect to the Codexia owner API.\n");
   process.exitCode = 1;
 } else {
   const client = new ApiClient({
-    baseUrl: process.env.CODEXIA_API_URL ?? "http://127.0.0.1:3000",
+    baseUrl: process.env.CODEXIA_API_URL ?? process.env.SCRIPTORIUM_API_URL ?? "http://127.0.0.1:3000",
     token,
-    projectId: process.env.CODEXIA_PROJECT_ID || undefined,
+    projectId: (process.env.CODEXIA_PROJECT_ID ?? process.env.SCRIPTORIUM_PROJECT_ID) || undefined,
   });
   const server = new McpServer({ name: "codexia-mcp", version: "0.1.0" });
   registerMcpTools(server, client);

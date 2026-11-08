@@ -11,7 +11,7 @@ export const assistantManifest: ModuleManifest = {
   optionalRequires: ["host.model-usage", "nlp.token-counter"],
   serverEntry: "./dist/index.js",
   browserEntry: "./dist/browser.js",
-  statePaths: ["meta/codexia/modules/assistant"],
+  statePaths: ["meta/scriptorium/modules/assistant"],
   locality: "optional-external",
 };
 

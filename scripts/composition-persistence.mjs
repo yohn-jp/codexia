@@ -1,19 +1,19 @@
 /** Shared pure declaration builder; consumed by the Build Kit and its trusted consumer bundle. */
 const baseReadablePersistence = [
-  { formatId: 'codexia.browser-recovery-indexeddb', version: 3 },
-  { formatId: 'codexia.git-operations', version: 1 },
-  { formatId: 'codexia.git-proposal-binding', version: 2 },
-  { formatId: 'codexia.git-proposal-complete', version: 2 },
-  { formatId: 'codexia.git-proposal-legacy', version: 1 },
-  { formatId: 'codexia.git-publications', version: 1 },
+  { formatId: 'scriptorium.browser-recovery-indexeddb', version: 3 },
+  { formatId: 'scriptorium.git-operations', version: 1 },
+  { formatId: 'scriptorium.git-proposal-binding', version: 2 },
+  { formatId: 'scriptorium.git-proposal-complete', version: 2 },
+  { formatId: 'scriptorium.git-proposal-legacy', version: 1 },
+  { formatId: 'scriptorium.git-publications', version: 1 },
 ];
 
 const baseWritablePersistence = [
-  { formatId: 'codexia.browser-recovery-indexeddb', version: 3 },
-  { formatId: 'codexia.git-operations', version: 1 },
-  { formatId: 'codexia.git-proposal-binding', version: 2 },
-  { formatId: 'codexia.git-proposal-complete', version: 2 },
-  { formatId: 'codexia.git-publications', version: 1 },
+  { formatId: 'scriptorium.browser-recovery-indexeddb', version: 3 },
+  { formatId: 'scriptorium.git-operations', version: 1 },
+  { formatId: 'scriptorium.git-proposal-binding', version: 2 },
+  { formatId: 'scriptorium.git-proposal-complete', version: 2 },
+  { formatId: 'scriptorium.git-publications', version: 1 },
 ];
 
 export function persistenceForModules(selectedModuleIds, moduleFormats) {

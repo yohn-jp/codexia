@@ -17,10 +17,10 @@ const STORY_SOURCE_ROOTS = [
   { prefix: "manuscript", extension: ".md" },
 ] as const;
 
-const LEGACY_STORY_PREFIX = "meta/codexia/modules/story/legacy/files/";
-const STORY_CHANGE_SETS = "meta/codexia/modules/story/change-sets/";
-const STORY_LOCAL_SNAPSHOTS = "meta/codexia/modules/story/local-snapshots/";
-const STORY_SERIES_SETTINGS = "meta/codexia/modules/story/v1/series.json";
+const LEGACY_STORY_PREFIX = "meta/scriptorium/modules/story/legacy/files/";
+const STORY_CHANGE_SETS = "meta/scriptorium/modules/story/change-sets/";
+const STORY_LOCAL_SNAPSHOTS = "meta/scriptorium/modules/story/local-snapshots/";
+const STORY_SERIES_SETTINGS = "meta/scriptorium/modules/story/v1/series.json";
 const SERIES_SOURCE_PATHS = ["app-state/series.json", "series.json"] as const;
 const MAX_RESTORABLE_TEXT_BYTES = 8 * 1024 * 1024;
 const MODULE_OWNED_META_FILES = new Set([
@@ -33,7 +33,7 @@ const MODULE_OWNED_META_FILES = new Set([
 ]);
 
 function isStorySourceFile(file: string): boolean {
-  if (file.startsWith("meta/codexia/modules/") || MODULE_OWNED_META_FILES.has(file)) return false;
+  if (file.startsWith("meta/scriptorium/modules/") || MODULE_OWNED_META_FILES.has(file)) return false;
   if (file.startsWith("meta/scratch/")) return true;
   if (file === "app-state/series.json" || file === "series.json") return true;
   return STORY_SOURCE_ROOTS.some(

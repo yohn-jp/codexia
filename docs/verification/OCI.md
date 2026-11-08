@@ -7,12 +7,12 @@ podman build --format oci --build-arg PROFILE=core --tag codexia:local .
 export CODEXIA_AUTH_TOKEN="$(openssl rand -hex 32)"
 podman run --rm --publish 127.0.0.1:3000:3000 \
   --env CODEXIA_AUTH_TOKEN --env CODEXIA_GITHUB_TOKEN \
-  --mount type=volume,src=codexia-data,dst=/data \
-  --mount type=volume,src=codexia-history,dst=/history \
+  --mount type=volume,src=scriptorium-data,dst=/data \
+  --mount type=volume,src=scriptorium-history,dst=/history \
   codexia:local
 ```
 
-Use `PROFILE=full` for the Full build. Standalone startup requires an owner token; the GitHub token is optional for public reads and required for authorized private access or publication. Mount directories must be writable by UID 1000. `/data` holds project state; `/history` holds private usage/job history outside Git. Do not share one writable workspace between containers. Use a trusted HTTPS reverse proxy for access beyond localhost.
+Use `PROFILE=full` for the Full build. The existing volume names are retained for upgrades. Standalone startup requires an owner token; the GitHub token is optional for public reads and required for authorized private access or publication. Mount directories must be writable by UID 1000. `/data` holds project state; `/history` holds private usage/job history outside Git. Do not share one writable workspace between containers. Use a trusted HTTPS reverse proxy for access beyond localhost.
 
 Run the local acceptance probe for each profile:
 

@@ -662,7 +662,7 @@ async function writeComposition(input, catalog, selection, runtimeDirectory, tru
   const indexedDbVersion = Number(journalSource.match(/const DATABASE_VERSION = ([1-9][0-9]*);/u)?.[1]);
   if (indexedDbVersion !== 3) throw new Error('Browser recovery persistence version differs from the hosted compatibility declaration');
   const runtimeMetadata = {
-    contractVersion: 'codexia-platform/v1',
+    contractVersion: 'scriptorium-platform/v1',
     producerRevision: input.producerRevision,
     listener: { port: 3000 },
     paths: {

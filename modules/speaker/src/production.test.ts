@@ -324,14 +324,14 @@ test("speaker actions run real CPU attribution, propose corrections/model adopti
       const proposal: ChangeProposal | undefined = proposed.ok ? proposed.proposals?.[0] : undefined;
       assert.ok(proposal, JSON.stringify(proposalData));
       assert.deepEqual(proposal.operations[0]?.writes.map((write) => write.path).sort(), [
-        `meta/codexia/modules/speaker/corrections.jsonl`,
+        `meta/scriptorium/modules/speaker/corrections.jsonl`,
         `plot/volumes/volume-1/chapters/chapter-1/scenes/${currentSceneId}.yaml`,
       ].sort());
       applyReviewedProposal(proposal, files, () => snapshot, (next) => { snapshot = next; });
       assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, [], "each action releases both supervised CPU processes");
     }
 
-    const correctionPath = "meta/codexia/modules/speaker/corrections.jsonl";
+    const correctionPath = "meta/scriptorium/modules/speaker/corrections.jsonl";
     const corrections = files.get(correctionPath)?.content ?? "";
     assert.equal(corrections.trim().split("\n").length, 14);
     assert.ok(corrections.includes('"speakerEntityId":null'));
@@ -349,18 +349,18 @@ test("speaker actions run real CPU attribution, propose corrections/model adopti
     assert.equal(trainingProvenance.engineVersion, "1.0.0");
     assert.equal(trainingProvenance.moduleVersion, "0.1.0");
     assert.ok(Array.isArray(trainingData.model && (trainingData.model as Record<string, unknown>).weights));
-    const modelProposal = trained.ok ? trained.proposals?.find((proposal) => proposal.operations.some((operation) => operation.writes.some((write) => write.path === "meta/codexia/modules/speaker/adopted-model.json"))) : undefined;
+    const modelProposal = trained.ok ? trained.proposals?.find((proposal) => proposal.operations.some((operation) => operation.writes.some((write) => write.path === "meta/scriptorium/modules/speaker/adopted-model.json"))) : undefined;
     assert.ok(modelProposal, "only the host proposal boundary receives the adopted CPU model");
     const modelOperation = modelProposal.operations[0]!;
     assert.equal(modelOperation.effect, "settings");
-    assert.deepEqual(modelOperation.writes.map((write) => write.path), ["meta/codexia/modules/speaker/adopted-model.json"]);
+    assert.deepEqual(modelOperation.writes.map((write) => write.path), ["meta/scriptorium/modules/speaker/adopted-model.json"]);
     applyReviewedProposal(modelProposal, files, () => snapshot, (next) => { snapshot = next; });
 
     addModelProbeScene(files);
     snapshot = snapshotFor(files);
     const applied = await runtime.invokeAction("speaker", "speaker.attribute", { sceneId: "sc-synthetic-model-probe" }, host);
     const appliedData = dataOf(applied);
-    const adoptedModelRevision = files.get("meta/codexia/modules/speaker/adopted-model.json")!.revision;
+    const adoptedModelRevision = files.get("meta/scriptorium/modules/speaker/adopted-model.json")!.revision;
     assertSpeakerIdentity(appliedData, adoptedModelRevision);
     const appliedRow = (appliedData.attributions as typeof attributions)[0]!;
     assert.equal(appliedRow.speakerEntityId, null, JSON.stringify(appliedRow));
@@ -411,7 +411,7 @@ test("speaker actions run real CPU attribution, propose corrections/model adopti
 
     await runtime.shutdown();
     runtime = undefined;
-    assert.deepEqual(files.get("meta/codexia/modules/speaker/adopted-model.json") && JSON.parse(files.get("meta/codexia/modules/speaker/adopted-model.json")!.content).weights, (trainingData.model as Record<string, unknown>).weights);
+    assert.deepEqual(files.get("meta/scriptorium/modules/speaker/adopted-model.json") && JSON.parse(files.get("meta/scriptorium/modules/speaker/adopted-model.json")!.content).weights, (trainingData.model as Record<string, unknown>).weights);
 
     const restarted = await createRuntime(files, () => snapshot, cacheDirectory);
     runtime = restarted.runtime;

@@ -347,7 +347,7 @@ async function openFixtureScene(page: Page, mode: "desktop" | "mobile", sceneId 
 async function readJournal(page: Page): Promise<DraftRecord[]> {
   return page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("codexia-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 3);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -425,7 +425,7 @@ async function closePanelMenu(page: Page): Promise<void> {
 
 async function workspaceStorage(page: Page, mode: "desktop" | "mobile"): Promise<{ key: string; raw: string | null }> {
   return page.evaluate((expectedMode) => {
-    const prefix = "codexia:workspace:v2:";
+    const prefix = "scriptorium:workspace:v2:";
     const key = Object.keys(localStorage).find((candidate) => candidate.startsWith(prefix) && candidate.endsWith(`:${expectedMode}`));
     return { key: key ?? "", raw: key ? localStorage.getItem(key) : null };
   }, mode);
@@ -670,7 +670,7 @@ test("editor stays read-only until delayed browser recovery is reconciled", asyn
         descriptor.set!.call(this, function (this: IDBRequest, event: Event) {
           const currentGate = (window as GatedWindow).__workspaceRecoveryGate;
           const database = request.result as IDBDatabase | undefined;
-          if (database?.name === "codexia-recovery" && currentGate && !currentGate.opened) {
+          if (database?.name === "scriptorium-recovery" && currentGate && !currentGate.opened) {
             currentGate.opened = true;
             currentGate.release = () => handler.call(request, event);
             return;
@@ -721,7 +721,7 @@ test("failed IndexedDB open before login keeps the scene readable and the existi
     const nativeOpen = IDBFactory.prototype.open;
     type RecoveryWindow = Window & { __readNativeRecoveryJournal?: () => Promise<Array<{ sceneId: string; state: string; text: string; operationId: string; generation: number }>> };
     (window as RecoveryWindow).__readNativeRecoveryJournal = async () => {
-      const request = Reflect.apply(nativeOpen, indexedDB, ["codexia-recovery", 3]) as IDBOpenDBRequest;
+      const request = Reflect.apply(nativeOpen, indexedDB, ["scriptorium-recovery", 3]) as IDBOpenDBRequest;
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error ?? new Error("Native IndexedDB journal open failed"));
@@ -747,7 +747,7 @@ test("failed IndexedDB open before login keeps the scene readable and the existi
       configurable: true,
       writable: true,
       value: function (this: IDBFactory, name: string, version?: number) {
-        if (name === "codexia-recovery") throw new DOMException("Synthetic IndexedDB open denial", "SecurityError");
+        if (name === "scriptorium-recovery") throw new DOMException("Synthetic IndexedDB open denial", "SecurityError");
         return version === undefined ? nativeOpen.call(this, name) : nativeOpen.call(this, name, version);
       },
     });

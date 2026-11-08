@@ -263,7 +263,7 @@ async function readWorkspaceState(targetPage, mode = 'desktop') {
       const content = document.querySelector(`[data-workspace-panel="${panelId}"]`);
       return box(content?.closest('[data-panel]') ?? content);
     };
-    const keys = Object.keys(localStorage).filter(key => key.startsWith('codexia:workspace:v1:'));
+    const keys = Object.keys(localStorage).filter(key => key.startsWith('scriptorium:workspace:v1:'));
     const layoutKey = keys.find(key => key.endsWith(`:${expectedMode}`)) ?? null;
     const rawLayout = layoutKey ? localStorage.getItem(layoutKey) : null;
     return {
@@ -358,7 +358,7 @@ try {
   report.browser = { version: browser.version(), executable: process.env.CODEXIA_E2E_CHROMIUM ?? 'Playwright default' };
   const base = `http://127.0.0.1:${ready.port}`;
   const repositoryUrl = pathToFileURL(ready.remote).href;
-  const workspaceKeyPrefix = 'codexia:workspace:v1:';
+  const workspaceKeyPrefix = 'scriptorium:workspace:v1:';
 
   desktopContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   await desktopContext.addInitScript({ content: injectedProbes });

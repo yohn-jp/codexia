@@ -320,7 +320,7 @@ test("recent activity hands off only numeric positions across devices, projects,
     await expect.poll(async () => ownerDesktop.page.evaluate(() => {
       for (let index = 0; index < localStorage.length; index++) {
         const key = localStorage.key(index);
-        if (!key?.startsWith("codexia:writing-resume:")) continue;
+        if (!key?.startsWith("scriptorium:writing-resume:")) continue;
         try {
           const record = JSON.parse(localStorage.getItem(key) ?? "null") as { sceneId?: string; scrollTop?: number } | null;
           if (record?.sceneId === "scene-1") return record.scrollTop ?? null;

@@ -3,14 +3,14 @@ import { readFile } from "node:fs/promises";
 import type { SnapshotReader } from "@codexia/contracts";
 import { MODULE_PERSISTENCE_FORMATS, type ModulePersistenceFormat } from "@codexia/module-runtime";
 
-export const PLATFORM_CONTRACT_VERSION = "codexia-platform/v1" as const;
+export const PLATFORM_CONTRACT_VERSION = "scriptorium-platform/v1" as const;
 export const RUNTIME_CONTROL_CONTRACT_VERSION = "praetorium-runtime-control/v1" as const;
 export const RUNTIME_STATUS_PATH = "/api/platform/v1/status" as const;
 export const RUNTIME_QUIESCE_PATH = "/api/platform/v1/quiesce" as const;
 export const RUNTIME_RESUME_PATH = "/api/platform/v1/resume" as const;
 export const RUNTIME_METADATA_PATH = "/api/platform/v1/metadata" as const;
-export const HOSTED_ASSIGNMENT_PATH = "/run/codexia/runtime-assignment.json" as const;
-export const HOSTED_RUNTIME_IDENTITY_PATH = "/run/codexia/runtime-identity.jwt" as const;
+export const HOSTED_ASSIGNMENT_PATH = "/run/scriptorium/runtime-assignment.json" as const;
+export const HOSTED_RUNTIME_IDENTITY_PATH = "/run/scriptorium/runtime-identity.jwt" as const;
 export const HOSTED_ACCESS_COOKIE = "__Host-praetorium_access" as const;
 export const HOSTED_CSRF_COOKIE = "__Host-praetorium_csrf" as const;
 
@@ -19,13 +19,13 @@ const REVISION = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u;
 const PRODUCER_REVISION = /^[a-f0-9]{40}$/u;
 const MODULE_ID = /^[a-z][a-z0-9-]{0,63}$/u;
 const CONTROL_ACTIONS = new Set(["status", "quiesce", "resume"]);
-const CODEXIA_META_ROOT = "meta/codexia/";
+const CODEXIA_META_ROOT = "meta/scriptorium/";
 const FORMAT_PATHS = [
-  { formatId: "codexia.git-operations", prefix: "meta/codexia/operations", pattern: /^meta\/codexia\/operations\/v1\/([A-Za-z0-9_-]{1,128})\.json$/u, version: 1 },
-  { formatId: "codexia.git-publications", prefix: "meta/codexia/publications", pattern: /^meta\/codexia\/publications\/v1\/([A-Za-z0-9_-]{1,128})\.json$/u, version: 1 },
-  { formatId: "codexia.git-proposal-legacy", prefix: "meta/codexia/proposals/v1", pattern: /^meta\/codexia\/proposals\/v1\/([A-Za-z0-9_-]{1,128})\.json$/u, version: 1 },
-  { formatId: "codexia.git-proposal-binding", prefix: "meta/codexia/proposals/v2/bindings", pattern: /^meta\/codexia\/proposals\/v2\/bindings\/([A-Za-z0-9_-]{1,128})\.json$/u, version: 2 },
-  { formatId: "codexia.git-proposal-complete", prefix: "meta/codexia/proposals/v2/complete", pattern: /^meta\/codexia\/proposals\/v2\/complete\/([A-Za-z0-9_-]{1,128})\.json$/u, version: 2 },
+  { formatId: "scriptorium.git-operations", prefix: "meta/scriptorium/operations", pattern: /^meta\/scriptorium\/operations\/v1\/([A-Za-z0-9_-]{1,128})\.json$/u, version: 1 },
+  { formatId: "scriptorium.git-publications", prefix: "meta/scriptorium/publications", pattern: /^meta\/scriptorium\/publications\/v1\/([A-Za-z0-9_-]{1,128})\.json$/u, version: 1 },
+  { formatId: "scriptorium.git-proposal-legacy", prefix: "meta/scriptorium/proposals/v1", pattern: /^meta\/scriptorium\/proposals\/v1\/([A-Za-z0-9_-]{1,128})\.json$/u, version: 1 },
+  { formatId: "scriptorium.git-proposal-binding", prefix: "meta/scriptorium/proposals/v2/bindings", pattern: /^meta\/scriptorium\/proposals\/v2\/bindings\/([A-Za-z0-9_-]{1,128})\.json$/u, version: 2 },
+  { formatId: "scriptorium.git-proposal-complete", prefix: "meta/scriptorium/proposals/v2/complete", pattern: /^meta\/scriptorium\/proposals\/v2\/complete\/([A-Za-z0-9_-]{1,128})\.json$/u, version: 2 },
 ] as const;
 
 export interface RuntimePolicy {
@@ -317,7 +317,7 @@ export async function scanRemotePersistence(reader: SnapshotReader, remoteCommit
   const unknown = (): PersistenceObservation => ({ state: "unknown", observedRemoteCommit: remoteCommit, formats: [] });
   if (!isRevision(remoteCommit)) return unknown();
   try {
-    const paths = await reader.list("meta/codexia");
+    const paths = await reader.list("meta/scriptorium");
     if (paths.length > 10_000) return unknown();
     const found = new Map<string, PersistenceFormat>();
     let bytes = 0;
@@ -336,12 +336,12 @@ export async function scanRemotePersistence(reader: SnapshotReader, remoteCommit
       if (spec) {
         const metadata = JSON.parse(file.content) as unknown;
         if (!record(metadata) || metadata.version !== spec.version) return unknown();
-        if (spec.formatId === "codexia.git-operations" &&
+        if (spec.formatId === "scriptorium.git-operations" &&
             (!record(metadata.operation) || metadata.operation.id !== match![1])) return unknown();
-        if (spec.formatId === "codexia.git-publications" && metadata.batchId !== match![1]) return unknown();
-        if ((spec.formatId === "codexia.git-proposal-legacy" ||
-             spec.formatId === "codexia.git-proposal-binding" ||
-             spec.formatId === "codexia.git-proposal-complete") && metadata.proposalId !== match![1]) return unknown();
+        if (spec.formatId === "scriptorium.git-publications" && metadata.batchId !== match![1]) return unknown();
+        if ((spec.formatId === "scriptorium.git-proposal-legacy" ||
+             spec.formatId === "scriptorium.git-proposal-binding" ||
+             spec.formatId === "scriptorium.git-proposal-complete") && metadata.proposalId !== match![1]) return unknown();
         found.set(`${spec.formatId}:${spec.version}`, { formatId: spec.formatId, version: spec.version });
         continue;
       }

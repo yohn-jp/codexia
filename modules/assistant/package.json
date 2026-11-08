@@ -65,7 +65,7 @@
     "serverEntry": "./dist/index.js",
     "browserEntry": "./dist/browser.js",
     "statePaths": [
-      "meta/codexia/modules/assistant"
+      "meta/scriptorium/modules/assistant"
     ],
     "locality": "optional-external",
     "optionalRequires": [

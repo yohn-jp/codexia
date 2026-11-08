@@ -5,15 +5,16 @@ import { defineConfig } from "vite";
 
 const appRoot = fileURLToPath(new URL(".", import.meta.url));
 const workspaceRoot = resolve(appRoot, "..");
-const profile = process.env.CODEXIA_PROFILE ?? "core";
+const profile = process.env.CODEXIA_PROFILE ?? process.env.SCRIPTORIUM_PROFILE ?? "core";
 if (!/^[a-z][a-z0-9-]{0,31}$/u.test(profile)) {
   throw new Error("CODEXIA_PROFILE must be a valid profile name");
 }
-const generatedBrowserModules = process.env.CODEXIA_BROWSER_MODULE_PROFILE_PATH
-  ? resolve(process.env.CODEXIA_BROWSER_MODULE_PROFILE_PATH)
+const browserModuleProfilePath = process.env.CODEXIA_BROWSER_MODULE_PROFILE_PATH ?? process.env.SCRIPTORIUM_BROWSER_MODULE_PROFILE_PATH;
+const generatedBrowserModules = browserModuleProfilePath
+  ? resolve(browserModuleProfilePath)
   : resolve(workspaceRoot, "profiles", profile, "generated", "browser.mjs");
 
-const ui = process.env.CODEXIA_UI ?? "launcher";
+const ui = process.env.CODEXIA_UI ?? process.env.SCRIPTORIUM_UI ?? "launcher";
 if (!["launcher", "desktop", "mobile"].includes(ui)) throw new Error("Invalid CODEXIA_UI");
 const uiDirectory = ui === "launcher" ? "" : ui;
 

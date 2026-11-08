@@ -304,7 +304,7 @@ async function assertSyntheticFixture(github, branch) {
 async function readJournal(page) {
   return page.evaluate(async () => {
     const database = await new Promise((resolvePromise, reject) => {
-      const request = indexedDB.open("codexia-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 3);
       request.onsuccess = () => resolvePromise(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -358,7 +358,7 @@ async function readJournal(page) {
 async function readJournalEntry(page, key) {
   return page.evaluate(async (entryKey) => {
     const database = await new Promise((resolvePromise, reject) => {
-      const request = indexedDB.open("codexia-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 3);
       request.onsuccess = () => resolvePromise(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -412,7 +412,7 @@ async function readJournalEntry(page, key) {
 async function readDocumentJournal(page, documentKey, authorScope, expectedText) {
   return page.evaluate(async ({ key, scope, text }) => {
     const database = await new Promise((resolvePromise, reject) => {
-      const request = indexedDB.open("codexia-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 3);
       request.onsuccess = () => resolvePromise(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -459,7 +459,7 @@ async function readDocumentJournal(page, documentKey, authorScope, expectedText)
 async function readPublicationReceipts(page) {
   return page.evaluate(async () => {
     const database = await new Promise((resolvePromise, reject) => {
-      const request = indexedDB.open("codexia-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 3);
       request.onsuccess = () => resolvePromise(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -544,7 +544,7 @@ async function reportConflictDiagnostics(page, diagnostics, project, expectedHea
     expectedRemoteHead: expectedHead,
     coreObservedHead,
     ui,
-    journalStore: "codexia-recovery.operations",
+    journalStore: "scriptorium-recovery.operations",
     expectedOperationId: authorDraftEntry.operationId,
     expectedGeneration: authorDraftEntry.generation,
     expectedAuthorTextLength: expectedAuthorText.length,
@@ -575,7 +575,7 @@ async function dispatchRemoteRefresh(page) {
 }
 
 function operationPath(operationId) {
-  return `meta/codexia/operations/v1/${operationId}.json`;
+  return `meta/scriptorium/operations/v1/${operationId}.json`;
 }
 
 async function main() {

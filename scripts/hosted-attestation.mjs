@@ -13,7 +13,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const inTotoStatementV1 = 'https://in-toto.io/Statement/v1';
 const slsaProvenanceV1 = 'https://slsa.dev/provenance/v1';
 const catalogSubjectName = 'codexia-build/v1/catalog.json';
-const runtimeMetadataSubjectName = 'codexia-platform/v1/runtime-metadata.json';
+const runtimeMetadataSubjectName = 'scriptorium-platform/v1/runtime-metadata.json';
 const sourceOrigin = 'https://github.com/yohn-jp/codexia';
 const revisionPattern = /^[a-f0-9]{40}$/u;
 const sha256Pattern = /^sha256:[a-f0-9]{64}$/u;
@@ -88,7 +88,7 @@ export function createSlsaStatement(input) {
       catalog.runtimeBaseDigest !== runtimeBase.digest || catalog.buildKitDigest !== buildKit.digest) {
     fail('catalog does not bind the requested producer revision and immutable image digests');
   }
-  if (!runtimeMetadata || runtimeMetadata.contractVersion !== 'codexia-platform/v1' || runtimeMetadata.producerRevision !== producerRevision) {
+  if (!runtimeMetadata || runtimeMetadata.contractVersion !== 'scriptorium-platform/v1' || runtimeMetadata.producerRevision !== producerRevision) {
     fail('runtime metadata does not bind the requested producer revision');
   }
   for (const key of ['sourceDigest', 'recipeDigest', 'lockDigest']) {

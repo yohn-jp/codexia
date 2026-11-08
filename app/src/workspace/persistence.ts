@@ -26,12 +26,12 @@ export interface WorkspaceSnapshot {
 }
 
 export function workspaceStorageKey(scope: string, mode: "desktop" | "mobile"): string {
-  return `codexia:workspace:v1:${encodeURIComponent(scope)}:${mode}`;
+  return `scriptorium:workspace:v1:${encodeURIComponent(scope)}:${mode}`;
 }
 
 /** One localStorage value is the commit point for a complete workspace layout. */
 export function workspaceSnapshotStorageKey(scope: string, mode: "desktop" | "mobile"): string {
-  return `codexia:workspace:v2:${encodeURIComponent(scope)}:${mode}`;
+  return `scriptorium:workspace:v2:${encodeURIComponent(scope)}:${mode}`;
 }
 
 function workspacePanelIds(layout: WorkspaceLayout): string[] {

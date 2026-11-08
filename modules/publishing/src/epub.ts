@@ -10,7 +10,7 @@ const RUBY_RE = /[|｜]([^《|\n｜]+?)《([^》]+)》/g;
 const BOUTEN_RE = /《《([^》]+)》》/g;
 
 /** 既定の表紙パス（プロジェクトルート相対）。 */
-export const DEFAULT_EPUB_COVER_PATH = "meta/codexia/modules/publishing/assets/cover.jpg";
+export const DEFAULT_EPUB_COVER_PATH = "meta/scriptorium/modules/publishing/assets/cover.jpg";
 
 /** 図鑑付録に載せる entity type（character 必須、lore/location は余裕分）。 */
 const BIBLE_APPENDIX_TYPES = ["character", "lore", "location"] as const;

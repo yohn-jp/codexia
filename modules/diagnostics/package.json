@@ -54,7 +54,7 @@
     ],
     "serverEntry": "./dist/index.js",
     "statePaths": [
-      "meta/codexia/modules/diagnostics"
+      "meta/scriptorium/modules/diagnostics"
     ],
     "locality": "local",
     "browserEntry": "./dist/browser.js",

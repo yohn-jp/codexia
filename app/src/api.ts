@@ -343,7 +343,7 @@ async function fetchHostedResponseForLifecycle(path: string, init: RequestInit, 
   // tab may already have refreshed while this request waited.
   const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
   if (locks) {
-    return locks.request("codexia-hosted-grant-refresh", async () => {
+    return locks.request("scriptorium-hosted-grant-refresh", async () => {
       if (hasLeftDocumentLifecycle(lifecycle)) return returnOrAbortAfterDeparture(response, lifecycle, init);
       const current = await fetchHostedRequest(path, init);
       if (hasLeftDocumentLifecycle(lifecycle)) return returnOrAbortAfterDeparture(current, lifecycle, init);

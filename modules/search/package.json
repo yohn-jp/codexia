@@ -38,7 +38,7 @@
     "requires": [],
     "optionalRequires": ["nlp.tokenizer", "semantic.embedding"],
     "serverEntry": "./dist/index.js",
-    "statePaths": ["meta/codexia/modules/search"],
+    "statePaths": ["meta/scriptorium/modules/search"],
     "locality": "local",
     "browserEntry": "./dist/browser.js"
   }

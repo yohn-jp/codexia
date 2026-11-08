@@ -33,8 +33,10 @@ COPY buildkit/frontend/main.go ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o /codexia-buildkit-frontend .
 
 FROM source AS buildkit
-ARG CODEXIA_PRODUCER_REVISION
-ARG CODEXIA_DOCKERFILE_SHA256
+ARG SCRIPTORIUM_PRODUCER_REVISION
+ARG CODEXIA_PRODUCER_REVISION=${SCRIPTORIUM_PRODUCER_REVISION}
+ARG SCRIPTORIUM_DOCKERFILE_SHA256
+ARG CODEXIA_DOCKERFILE_SHA256=${SCRIPTORIUM_DOCKERFILE_SHA256}
 ENV CODEXIA_PRODUCER_REVISION=${CODEXIA_PRODUCER_REVISION} \
     CODEXIA_DOCKERFILE_SHA256=${CODEXIA_DOCKERFILE_SHA256}
 LABEL org.opencontainers.image.revision=${CODEXIA_PRODUCER_REVISION}
@@ -48,14 +50,15 @@ COPY --from=frontend-build /codexia-buildkit-frontend /usr/local/bin/codexia-bui
 ENTRYPOINT ["/usr/local/bin/codexia-buildkit-frontend"]
 
 FROM ${NODE_IMAGE} AS runtime-base
-ARG CODEXIA_PRODUCER_REVISION
+ARG SCRIPTORIUM_PRODUCER_REVISION
+ARG CODEXIA_PRODUCER_REVISION=${SCRIPTORIUM_PRODUCER_REVISION}
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
-    CODEXIA_PROFILE=hosted \
-    CODEXIA_MODULE_PROFILE_PATH=/app/generated/server.mjs \
-    CODEXIA_DATA_DIR=/data \
-    CODEXIA_USAGE_DIR=/history \
+    CODEXIA_BUILD_PROFILE=hosted \
+    CODEXIA_BUILD_MODULE_PROFILE_PATH=/app/generated/server.mjs \
+    CODEXIA_BUILD_DATA_DIR=/data \
+    CODEXIA_BUILD_USAGE_DIR=/history \
     HOME=/data \
     CODEXIA_PRODUCER_REVISION=${CODEXIA_PRODUCER_REVISION}
 LABEL org.opencontainers.image.revision=${CODEXIA_PRODUCER_REVISION}
@@ -77,10 +80,10 @@ ARG PROFILE
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
-    CODEXIA_PROFILE=${PROFILE} \
-    CODEXIA_MODULE_PROFILE_PATH=/app/generated/server.mjs \
-    CODEXIA_DATA_DIR=/data \
-    CODEXIA_USAGE_DIR=/history \
+    CODEXIA_BUILD_PROFILE=${PROFILE} \
+    CODEXIA_BUILD_MODULE_PROFILE_PATH=/app/generated/server.mjs \
+    CODEXIA_BUILD_DATA_DIR=/data \
+    CODEXIA_BUILD_USAGE_DIR=/history \
     HOME=/data \
     TMPDIR=/tmp
 RUN apt-get update \

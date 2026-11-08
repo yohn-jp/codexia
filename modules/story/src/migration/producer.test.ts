@@ -127,13 +127,13 @@ test("preserves source Story files opaquely while the module is disabled", async
   assert.equal(result.entries[0]?.source, source);
   assert.equal(
     result.entries[0]?.target,
-    "meta/codexia/modules/story/legacy/files/bible/locations/harbor.yaml",
+    "meta/scriptorium/modules/story/legacy/files/bible/locations/harbor.yaml",
   );
   assert.equal(result.entries[0]?.category, "authoritative");
   assert.equal(result.entries[0]?.disposition, "preserved-unreadable");
   assert.equal(result.operations.length, 1);
   assert.deepEqual(result.operations[0]?.writes[0], {
-    path: "meta/codexia/modules/story/legacy/files/bible/locations/harbor.yaml",
+    path: "meta/scriptorium/modules/story/legacy/files/bible/locations/harbor.yaml",
     revision: null,
     content,
   });
@@ -186,9 +186,9 @@ test("retains committed scratch notes and binary attachments at their original p
     enabled: false,
   }));
   const writes = new Map(result.operations.flatMap((operation) => operation.writes.map((write) => [write.path, write])));
-  assert.equal(writes.get(`meta/codexia/modules/story/legacy/files/${notePath}`)?.content, note.toString("utf8"));
-  assert.equal(writes.get(`meta/codexia/modules/story/legacy/files/${assetPath}`)?.content, asset.toString("base64"));
-  assert.equal(writes.get(`meta/codexia/modules/story/legacy/files/${assetPath}`)?.encoding, "base64");
+  assert.equal(writes.get(`meta/scriptorium/modules/story/legacy/files/${notePath}`)?.content, note.toString("utf8"));
+  assert.equal(writes.get(`meta/scriptorium/modules/story/legacy/files/${assetPath}`)?.content, asset.toString("base64"));
+  assert.equal(writes.get(`meta/scriptorium/modules/story/legacy/files/${assetPath}`)?.encoding, "base64");
   assert.ok(result.entries.every((entry) => entry.category === "authoritative" && entry.disposition === "preserved-unreadable"));
 });
 
@@ -202,14 +202,14 @@ test("reactivates opaque scratch, committed change-set history, and local snapsh
   const snapshotText = Buffer.from("# Local snapshot\n", "utf8");
   const snapshotAsset = Buffer.from([0, 128, 9, 255]);
   const opaque = {
-    "meta/codexia/modules/story/legacy/files/meta/scratch/idea-stable.md": scratchNote,
-    "meta/codexia/modules/story/legacy/files/meta/scratch/files/idea-stable/diagram.bin": scratchAsset,
-    "meta/codexia/modules/story/legacy/files/.arcadia/change-sets/applied.json": applied,
-    "meta/codexia/modules/story/legacy/files/.arcadia/change-sets/partial.json": partial,
-    "meta/codexia/modules/story/legacy/files/.arcadia/change-sets/rejected.json": rejected,
-    "meta/codexia/modules/story/legacy/files/.arcadia/change-sets/pending.json": pending,
-    "meta/codexia/modules/story/legacy/files/.arcadia/snapshots/scene-before.md": snapshotText,
-    "meta/codexia/modules/story/legacy/files/.arcadia/snapshots/attachments/diagram.bin": snapshotAsset,
+    "meta/scriptorium/modules/story/legacy/files/meta/scratch/idea-stable.md": scratchNote,
+    "meta/scriptorium/modules/story/legacy/files/meta/scratch/files/idea-stable/diagram.bin": scratchAsset,
+    "meta/scriptorium/modules/story/legacy/files/.arcadia/change-sets/applied.json": applied,
+    "meta/scriptorium/modules/story/legacy/files/.arcadia/change-sets/partial.json": partial,
+    "meta/scriptorium/modules/story/legacy/files/.arcadia/change-sets/rejected.json": rejected,
+    "meta/scriptorium/modules/story/legacy/files/.arcadia/change-sets/pending.json": pending,
+    "meta/scriptorium/modules/story/legacy/files/.arcadia/snapshots/scene-before.md": snapshotText,
+    "meta/scriptorium/modules/story/legacy/files/.arcadia/snapshots/attachments/diagram.bin": snapshotAsset,
   };
   const context = contextFor({ targets: opaque, targetFiles: Object.keys(opaque) });
   const producer = createStoryMigrationProducer();
@@ -219,13 +219,13 @@ test("reactivates opaque scratch, committed change-set history, and local snapsh
   assert.equal(byPath.get("meta/scratch/idea-stable.md")?.content, scratchNote.toString("utf8"));
   assert.equal(byPath.get("meta/scratch/files/idea-stable/diagram.bin")?.content, scratchAsset.toString("base64"));
   assert.equal(byPath.get("meta/scratch/files/idea-stable/diagram.bin")?.encoding, "base64");
-  assert.equal(byPath.get("meta/codexia/modules/story/change-sets/applied.json")?.content, applied.toString("utf8"));
-  assert.equal(byPath.get("meta/codexia/modules/story/change-sets/partial.json")?.content, partial.toString("utf8"));
-  assert.equal(byPath.get("meta/codexia/modules/story/change-sets/rejected.json")?.content, rejected.toString("utf8"));
-  assert.equal(byPath.get("meta/codexia/modules/story/local-snapshots/scene-before.md")?.content, snapshotText.toString("utf8"));
-  assert.equal(byPath.get("meta/codexia/modules/story/local-snapshots/attachments/diagram.bin")?.content, snapshotAsset.toString("base64"));
-  assert.equal(byPath.get("meta/codexia/modules/story/local-snapshots/attachments/diagram.bin")?.encoding, "base64");
-  assert.equal(byPath.has("meta/codexia/modules/story/change-sets/pending.json"), false);
+  assert.equal(byPath.get("meta/scriptorium/modules/story/change-sets/applied.json")?.content, applied.toString("utf8"));
+  assert.equal(byPath.get("meta/scriptorium/modules/story/change-sets/partial.json")?.content, partial.toString("utf8"));
+  assert.equal(byPath.get("meta/scriptorium/modules/story/change-sets/rejected.json")?.content, rejected.toString("utf8"));
+  assert.equal(byPath.get("meta/scriptorium/modules/story/local-snapshots/scene-before.md")?.content, snapshotText.toString("utf8"));
+  assert.equal(byPath.get("meta/scriptorium/modules/story/local-snapshots/attachments/diagram.bin")?.content, snapshotAsset.toString("base64"));
+  assert.equal(byPath.get("meta/scriptorium/modules/story/local-snapshots/attachments/diagram.bin")?.encoding, "base64");
+  assert.equal(byPath.has("meta/scriptorium/modules/story/change-sets/pending.json"), false);
   for (const file of ["applied.json", "partial.json", "rejected.json"]) {
     assert.equal(result.entries.find((entry) => entry.source.endsWith(`/change-sets/${file}`))?.category, "authoritative");
   }
@@ -237,10 +237,10 @@ test("reactivates opaque scratch, committed change-set history, and local snapsh
     content: pending.toString("base64"),
     encoding: "base64",
   }]);
-  assert.ok(result.operations.every((operation) => operation.reads.some((read) => read.path.startsWith("meta/codexia/modules/story/legacy/files/"))));
-  const appliedOperation = result.operations.find((operation) => operation.writes.some((write) => write.path === "meta/codexia/modules/story/change-sets/applied.json"));
-  assert.ok(appliedOperation?.reads.some((read) => read.path === "meta/codexia/modules/story/change-sets/applied.json" && read.revision === null));
-  assert.ok(appliedOperation?.reads.some((read) => read.path === "meta/codexia/modules/story/legacy/files/.arcadia/change-sets/applied.json" && read.revision === revision));
+  assert.ok(result.operations.every((operation) => operation.reads.some((read) => read.path.startsWith("meta/scriptorium/modules/story/legacy/files/"))));
+  const appliedOperation = result.operations.find((operation) => operation.writes.some((write) => write.path === "meta/scriptorium/modules/story/change-sets/applied.json"));
+  assert.ok(appliedOperation?.reads.some((read) => read.path === "meta/scriptorium/modules/story/change-sets/applied.json" && read.revision === null));
+  assert.ok(appliedOperation?.reads.some((read) => read.path === "meta/scriptorium/modules/story/legacy/files/.arcadia/change-sets/applied.json" && read.revision === revision));
   const repeated = await producer.inspect(context);
   assert.deepEqual(repeated.operations.map((operation) => operation.id), result.operations.map((operation) => operation.id));
   assert.equal(repeated.recovery[0]?.id, result.recovery[0]?.id);
@@ -248,13 +248,13 @@ test("reactivates opaque scratch, committed change-set history, and local snapsh
 
 test("uses nested changeSet IDs and supports top-level IDs when restoring committed history", async () => {
   const source = ".arcadia/change-sets/top-level-id.json";
-  const opaquePath = `meta/codexia/modules/story/legacy/files/${source}`;
+  const opaquePath = `meta/scriptorium/modules/story/legacy/files/${source}`;
   const bytes = Buffer.from('{"id":"top-level-stable-id","status":"rejected","future":true}\n', "utf8");
   const result = await createStoryMigrationProducer().inspect(contextFor({
     targets: { [opaquePath]: bytes },
     targetFiles: [opaquePath],
   }));
-  const write = result.operations.flatMap((operation) => operation.writes).find((item) => item.path === "meta/codexia/modules/story/change-sets/top-level-id.json");
+  const write = result.operations.flatMap((operation) => operation.writes).find((item) => item.path === "meta/scriptorium/modules/story/change-sets/top-level-id.json");
   assert.equal(write?.content, bytes.toString("utf8"));
   assert.equal(result.entries.find((entry) => entry.source === opaquePath)?.disposition, "planned");
 });
@@ -264,8 +264,8 @@ test("defers matching live change-set and snapshot sources to the filesystem imp
   const snapshotPath = ".arcadia/snapshots/scene-before.md";
   const applied = Buffer.from('{"changeSet":{"id":"applied-stable"},"status":"applied"}\n', "utf8");
   const snapshot = Buffer.from("# Current snapshot\n", "utf8");
-  const opaqueApplied = `meta/codexia/modules/story/legacy/files/${appliedPath}`;
-  const opaqueSnapshot = `meta/codexia/modules/story/legacy/files/${snapshotPath}`;
+  const opaqueApplied = `meta/scriptorium/modules/story/legacy/files/${appliedPath}`;
+  const opaqueSnapshot = `meta/scriptorium/modules/story/legacy/files/${snapshotPath}`;
   const result = await createStoryMigrationProducer().inspect(contextFor({
     files: { [appliedPath]: applied, [snapshotPath]: snapshot },
     targets: { [opaqueApplied]: applied, [opaqueSnapshot]: snapshot },
@@ -283,8 +283,8 @@ test("reports changed live change-set and snapshot sources as conflicts", async 
   const currentApplied = Buffer.from('{"changeSet":{"id":"applied-stable"},"status":"partially-applied"}\n', "utf8");
   const retainedSnapshot = Buffer.from("# Retained snapshot\n", "utf8");
   const currentSnapshot = Buffer.from("# Current snapshot\n", "utf8");
-  const opaqueApplied = `meta/codexia/modules/story/legacy/files/${appliedPath}`;
-  const opaqueSnapshot = `meta/codexia/modules/story/legacy/files/${snapshotPath}`;
+  const opaqueApplied = `meta/scriptorium/modules/story/legacy/files/${appliedPath}`;
+  const opaqueSnapshot = `meta/scriptorium/modules/story/legacy/files/${snapshotPath}`;
   const result = await createStoryMigrationProducer().inspect(contextFor({
     files: { [appliedPath]: currentApplied, [snapshotPath]: currentSnapshot },
     targets: { [opaqueApplied]: retainedApplied, [opaqueSnapshot]: retainedSnapshot },
@@ -298,7 +298,7 @@ test("reports changed live change-set and snapshot sources as conflicts", async 
 test("does not duplicate a live scratch import when the retained copy has the same bytes", async () => {
   const source = "meta/scratch/idea-stable.md";
   const note = Buffer.from("# Stable idea\n", "utf8");
-  const opaquePath = `meta/codexia/modules/story/legacy/files/${source}`;
+  const opaquePath = `meta/scriptorium/modules/story/legacy/files/${source}`;
   const result = await createStoryMigrationProducer().inspect(contextFor({
     files: { [source]: note },
     targets: { [source]: note, [opaquePath]: note },
@@ -310,7 +310,7 @@ test("does not duplicate a live scratch import when the retained copy has the sa
 
 test("restores opaque Story documents to canonical paths after re-enabling the module", async () => {
   const source = "plot/threads/thread-3.yaml";
-  const opaquePath = `meta/codexia/modules/story/legacy/files/${source}`;
+  const opaquePath = `meta/scriptorium/modules/story/legacy/files/${source}`;
   const content = "id: thread-3\nunknown_thread_field: retained\n";
   const result = await createStoryMigrationProducer().inspect(
     contextFor({
@@ -331,8 +331,8 @@ test("restores opaque Story documents to canonical paths after re-enabling the m
 });
 
 test("blocks an unreadable legacy symlink path while preserving valid siblings and revision guards", async () => {
-  const unsafeSource = "meta/codexia/modules/story/legacy/files/bible/characters/unsafe.yaml";
-  const siblingSource = "meta/codexia/modules/story/legacy/files/plot/threads/thread-3.yaml";
+  const unsafeSource = "meta/scriptorium/modules/story/legacy/files/bible/characters/unsafe.yaml";
+  const siblingSource = "meta/scriptorium/modules/story/legacy/files/plot/threads/thread-3.yaml";
   const siblingBytes = Buffer.from("id: thread-3\nfuture_field: retained\n", "utf8");
   const result = await createStoryMigrationProducer().inspect(contextFor({
     targetFiles: [unsafeSource, siblingSource],
@@ -360,9 +360,9 @@ test("blocks an unreadable legacy symlink path while preserving valid siblings a
 
 test("blocks an unsafe canonical destination while preserving archived siblings and revision guards", async () => {
   const unsafeDestination = "bible/characters/unsafe.yaml";
-  const unsafeSource = `meta/codexia/modules/story/legacy/files/${unsafeDestination}`;
+  const unsafeSource = `meta/scriptorium/modules/story/legacy/files/${unsafeDestination}`;
   const siblingDestination = "plot/threads/thread-3.yaml";
-  const siblingSource = `meta/codexia/modules/story/legacy/files/${siblingDestination}`;
+  const siblingSource = `meta/scriptorium/modules/story/legacy/files/${siblingDestination}`;
   const unsafeBytes = Buffer.from("id: unsafe\n", "utf8");
   const siblingBytes = Buffer.from("id: thread-3\nfuture_field: retained\n", "utf8");
   const result = await createStoryMigrationProducer().inspect(contextFor({
@@ -416,7 +416,7 @@ test("maps legacy series project IDs to stable repository IDs and preserves sour
       "old-work": { provider: "github", repositoryId: "456", defaultBranch: "main", ownerScope: "owner", url: "https://github.com/o/work" },
     },
   }));
-  const write = result.operations.flatMap((operation) => operation.writes).find((item) => item.path === "meta/codexia/modules/story/v1/series.json");
+  const write = result.operations.flatMap((operation) => operation.writes).find((item) => item.path === "meta/scriptorium/modules/story/v1/series.json");
   assert.ok(write);
   const settings = JSON.parse(write.content!) as Record<string, unknown>;
   assert.deepEqual(settings.futureTopLevel, ["keep"]);
@@ -436,7 +436,7 @@ test("retains unresolved series IDs with an explicit author-review marker", asyn
   const result = await createStoryMigrationProducer().inspect(contextFor({
     workspaceFiles: { "app-state/series.json": JSON.stringify({ version: 1, series: [{ id: "series-one", name: "One", ownerId: "author", bibleProjectId: "old-bible", memberProjectIds: ["old-work"], createdAt: "2026-01-01T00:00:00.000Z" }], bindings: [{ projectId: "old-work", seriesId: "series-one" }] }) },
   }));
-  const write = result.operations.flatMap((operation) => operation.writes).find((item) => item.path === "meta/codexia/modules/story/v1/series.json");
+  const write = result.operations.flatMap((operation) => operation.writes).find((item) => item.path === "meta/scriptorium/modules/story/v1/series.json");
   assert.ok(write);
   const settings = JSON.parse(write.content!) as { series: Array<Record<string, unknown>>; bindings: Array<Record<string, unknown>>; migration: { storySeriesReview: string[] } };
   assert.equal(settings.series[0]?.bibleProjectId, "old-bible");
@@ -450,8 +450,8 @@ test("retains unresolved series IDs with an explicit author-review marker", asyn
 test("preserves disabled series registry bytes in Story's opaque legacy namespace", async () => {
   const content = '{"version":1,"series":[],"bindings":[],"future":true}\n';
   const result = await createStoryMigrationProducer().inspect(contextFor({ workspaceFiles: { "app-state/series.json": content }, enabled: false }));
-  assert.deepEqual(result.operations.flatMap((operation) => operation.writes).find((item) => item.path === "meta/codexia/modules/story/legacy/files/app-state/series.json"), {
-    path: "meta/codexia/modules/story/legacy/files/app-state/series.json", revision: null, content,
+  assert.deepEqual(result.operations.flatMap((operation) => operation.writes).find((item) => item.path === "meta/scriptorium/modules/story/legacy/files/app-state/series.json"), {
+    path: "meta/scriptorium/modules/story/legacy/files/app-state/series.json", revision: null, content,
   });
   assert.equal(result.entries.find((entry) => entry.source === "app-state/series.json")?.disposition, "preserved-unreadable");
 });
@@ -476,8 +476,8 @@ test("converts source workflow tables to Story JSONL with decisions, unknown fie
     sqliteWorkspace: { zukan_suggestions: [zukan] },
   }));
   const writes = result.operations.flatMap((operation) => operation.writes);
-  const stateWrite = writes.find((write) => write.path === "meta/codexia/modules/story/state-proposals.jsonl");
-  const zukanWrite = writes.find((write) => write.path === "meta/codexia/modules/story/zukan-suggestions.jsonl");
+  const stateWrite = writes.find((write) => write.path === "meta/scriptorium/modules/story/state-proposals.jsonl");
+  const zukanWrite = writes.find((write) => write.path === "meta/scriptorium/modules/story/zukan-suggestions.jsonl");
   assert.ok(stateWrite?.content);
   assert.ok(zukanWrite?.content);
   const stateRecord = JSON.parse(stateWrite.content.trim()) as Record<string, unknown>;
@@ -507,7 +507,7 @@ test("withholds divergent workflow IDs and emits explicit local review recovery"
     sqliteProject: { state_proposals: [base] },
     sqliteWorkspace: { state_proposals: [{ ...base, status: "approved" }] },
   }));
-  assert.equal(result.operations.some((operation) => operation.writes.some((write) => write.path === "meta/codexia/modules/story/state-proposals.jsonl")), false);
+  assert.equal(result.operations.some((operation) => operation.writes.some((write) => write.path === "meta/scriptorium/modules/story/state-proposals.jsonl")), false);
   assert.ok(result.entries.some((entry) => entry.disposition === "conflict" && /divergent values/.test(entry.detail ?? "")));
   assert.equal(result.recovery.length, 2);
   assert.ok(result.recovery.every((record) => record.category === "provisional" && /explicit author review/.test(record.detail)));

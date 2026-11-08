@@ -217,7 +217,7 @@ export const searchManifest: ModuleManifest = {
   dependencies: [], provides: [], requires: [],
   optionalRequires: [NLP_TOKENIZER_CAPABILITY, SEMANTIC_EMBEDDING_CAPABILITY],
   serverEntry: "./dist/index.js", browserEntry: "./dist/browser.js",
-  statePaths: ["meta/codexia/modules/search"], locality: "local",
+  statePaths: ["meta/scriptorium/modules/search"], locality: "local",
 };
 
 export function createSearchDefinition(context: ModuleContext): ModuleDefinition {

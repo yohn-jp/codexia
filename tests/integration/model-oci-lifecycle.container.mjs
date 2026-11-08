@@ -15,9 +15,9 @@ const MODEL_IDS = {
 };
 const EXPECTED_MODULES = ["story", "nlp", "diagnostics", "semantic", "speaker", "assistant", "publishing", "mcp"];
 const SETTINGS_PATHS = [
-  "meta/codexia/modules/nlp/feature-settings.json",
-  "meta/codexia/modules/semantic/settings.json",
-  "meta/codexia/modules/semantic/contradiction-dismissals.jsonl",
+  "meta/scriptorium/modules/nlp/feature-settings.json",
+  "meta/scriptorium/modules/semantic/settings.json",
+  "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl",
 ];
 
 assert.ok(PROJECT_ID && /^[0-9a-f-]{36}$/iu.test(PROJECT_ID), "project fixture ID is required");

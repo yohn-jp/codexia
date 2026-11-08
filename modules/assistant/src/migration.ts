@@ -4,14 +4,14 @@ import { stableMigrationId } from "@codexia/migration";
 const FILES = [
   {
     source: ".arcadia/llm-model-settings.json",
-    legacy: "meta/codexia/modules/assistant/legacy/files/.arcadia/llm-model-settings.json",
-    target: "meta/codexia/modules/assistant/model-settings.json",
+    legacy: "meta/scriptorium/modules/assistant/legacy/files/.arcadia/llm-model-settings.json",
+    target: "meta/scriptorium/modules/assistant/model-settings.json",
     label: "non-secret model settings",
   },
   {
     source: ".arcadia/llm-usage.jsonl",
-    legacy: "meta/codexia/modules/assistant/legacy/files/.arcadia/llm-usage.jsonl",
-    target: "meta/codexia/modules/assistant/usage.jsonl",
+    legacy: "meta/scriptorium/modules/assistant/legacy/files/.arcadia/llm-usage.jsonl",
+    target: "meta/scriptorium/modules/assistant/usage.jsonl",
     label: "historical model usage records",
   },
 ] as const;

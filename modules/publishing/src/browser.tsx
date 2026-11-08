@@ -26,7 +26,7 @@ interface ShareInfo {
   active: boolean;
 }
 
-const DEFAULT_COVER = "meta/codexia/modules/publishing/assets/cover.jpg";
+const DEFAULT_COVER = "meta/scriptorium/modules/publishing/assets/cover.jpg";
 
 function buttonStyle(danger = false): React.CSSProperties {
   return {

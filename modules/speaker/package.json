@@ -59,7 +59,7 @@
     "browserEntry": "./dist/browser.js",
     "workerEntry": "./dist/worker.js",
     "statePaths": [
-      "meta/codexia/modules/speaker",
+      "meta/scriptorium/modules/speaker",
       "plot/volumes"
     ],
     "locality": "local"

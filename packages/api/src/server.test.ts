@@ -26,7 +26,7 @@ const SNAPSHOT: SnapshotId = {
   remoteCommit: "a".repeat(40),
 };
 const HOSTED_ASSIGNMENT: RuntimeAssignment = {
-  contractVersion: "codexia-platform/v1",
+  contractVersion: "scriptorium-platform/v1",
   instanceId: "instance-1",
   repositoryId: 123,
   repositoryLocator: "https://github.com/owner/work",
@@ -743,7 +743,7 @@ describe("Codexia HTTP boundary", () => {
       instanceId: HOSTED_ASSIGNMENT.instanceId,
       runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
       reason: "redeploy",
-      contractVersion: "codexia-platform/v1",
+      contractVersion: "scriptorium-platform/v1",
       deadline: new Date(Date.now() + 60_000).toISOString(),
     };
     const exactQuiesceBody = JSON.stringify(quiesceRequest);
@@ -880,7 +880,7 @@ describe("Codexia HTTP boundary", () => {
       instanceId: HOSTED_ASSIGNMENT.instanceId,
       runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
       reason: "redeploy",
-      contractVersion: "codexia-platform/v1",
+      contractVersion: "scriptorium-platform/v1",
       deadline: new Date(Date.now() + 60_000).toISOString(),
     };
     const body = JSON.stringify(request);
@@ -986,7 +986,7 @@ describe("Codexia HTTP boundary", () => {
         instanceId: HOSTED_ASSIGNMENT.instanceId,
         runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
         reason: "migrate private history",
-        contractVersion: "codexia-platform/v1",
+        contractVersion: "scriptorium-platform/v1",
         deadline: new Date(Date.now() + 60_000).toISOString(),
       };
       const body = JSON.stringify(request);
@@ -1083,7 +1083,7 @@ describe("Codexia HTTP boundary", () => {
         instanceId: HOSTED_ASSIGNMENT.instanceId,
         runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
         reason: "migrate private domain history",
-        contractVersion: "codexia-platform/v1",
+        contractVersion: "scriptorium-platform/v1",
         deadline: new Date(Date.now() + 60_000).toISOString(),
       };
       const body = JSON.stringify(request);
@@ -1169,7 +1169,7 @@ describe("Codexia HTTP boundary", () => {
         instanceId: HOSTED_ASSIGNMENT.instanceId,
         runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
         reason: "migrate private history",
-        contractVersion: "codexia-platform/v1",
+        contractVersion: "scriptorium-platform/v1",
         deadline: new Date(Date.now() + 100).toISOString(),
       };
       const body = JSON.stringify(request);
@@ -1215,7 +1215,7 @@ describe("Codexia HTTP boundary", () => {
         return {
           snapshot: emptySnapshot,
           async read() { return null; },
-          async list(prefix: string) { assert.equal(prefix, "meta/codexia"); return []; },
+          async list(prefix: string) { assert.equal(prefix, "meta/scriptorium"); return []; },
         };
       },
       async registeredRepositoryIdentity() { return SNAPSHOT.repository; },
@@ -1227,7 +1227,7 @@ describe("Codexia HTTP boundary", () => {
           reader: {
             snapshot: emptySnapshot,
             async read() { return null; },
-            async list(prefix: string) { assert.equal(prefix, "meta/codexia"); return []; },
+            async list(prefix: string) { assert.equal(prefix, "meta/scriptorium"); return []; },
           },
           pendingCheckpoints: [], pendingProposals: 0, localWorkspaceDirty: false,
         };
@@ -1258,7 +1258,7 @@ describe("Codexia HTTP boundary", () => {
       instanceId: HOSTED_ASSIGNMENT.instanceId,
       runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
       reason: "redeploy",
-      contractVersion: "codexia-platform/v1",
+      contractVersion: "scriptorium-platform/v1",
       deadline: new Date(Date.now() + 60_000).toISOString(),
     };
     const body = JSON.stringify(request);
@@ -2381,7 +2381,7 @@ describe("Codexia HTTP boundary", () => {
     const operation: ChangeOperation = {
       id: "aborted_response_operation", generation: 1, repository: snapshot.repository,
       baseRemoteCommit: snapshot.remoteCommit, effect: "metadata", reads: [],
-      writes: [{ path: "meta/codexia/modules/publishing/aborted-response.md", revision: null, content: "Pending author decision.\n" }],
+      writes: [{ path: "meta/scriptorium/modules/publishing/aborted-response.md", revision: null, content: "Pending author decision.\n" }],
       message: "proposal retained across lost response",
     };
     const proposal: ChangeProposal = {

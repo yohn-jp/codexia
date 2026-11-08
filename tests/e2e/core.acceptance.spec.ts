@@ -133,7 +133,7 @@ async function openWorkspaceContributionPanel(page: Page, id: string, title: str
 async function readJournal(page: Page): Promise<JournalSummary[]> {
   return page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("codexia-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 3);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -177,7 +177,7 @@ async function resetLocalCore(): Promise<void> {
 async function readPublicationReceipts(page: Page): Promise<PublicationReceiptSummary[]> {
   return page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("codexia-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 3);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -203,7 +203,7 @@ async function readPublicationReceipts(page: Page): Promise<PublicationReceiptSu
 }
 
 async function readRemoteSceneContent(page: Page, sceneId: string): Promise<string | null> {
-  const projectId = await page.evaluate(() => localStorage.getItem("codexia:active-project"));
+  const projectId = await page.evaluate(() => localStorage.getItem("scriptorium:active-project"));
   if (!projectId) return null;
   const origin = new URL(page.url()).origin;
   const projectPath = "/api/projects/" + encodeURIComponent(projectId);
@@ -241,7 +241,7 @@ async function expectPublishedOperation(
 async function readProposalJournal(page: Page): Promise<ProposalJournalSummary[]> {
   return page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("codexia-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 3);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -530,7 +530,7 @@ test("coalesced typing restores to its unchanged React value without reviving th
   await editor.fill(stagingText);
   await expect.poll(async () => (await readJournal(page)).some((entry) => entry.text === stagingText && entry.state === "draft")).toBe(true);
   await page.evaluate(({ originalText, stagingText }) => new Promise<void>((resolve, reject) => {
-    const open = indexedDB.open("codexia-recovery", 3);
+    const open = indexedDB.open("scriptorium-recovery", 3);
     open.onerror = () => reject(open.error ?? new Error("IndexedDB open failed"));
     open.onsuccess = () => {
       const database = open.result;
@@ -957,7 +957,7 @@ test("browser recovery is author-scoped and foreign records remain untouched", a
 
   const foreignText = "FOREIGN AUTHOR RECOVERY MUST NOT OPEN";
   await page.evaluate(({ ownerText, foreignText }) => new Promise<void>((resolve, reject) => {
-    const request = indexedDB.open("codexia-recovery", 3);
+    const request = indexedDB.open("scriptorium-recovery", 3);
     request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     request.onsuccess = () => {
       const database = request.result;
@@ -1006,8 +1006,8 @@ test("one malformed legacy key does not hide later recoverable drafts", async ({
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   expect(repositoryUrl).not.toBe("");
   await page.addInitScript(() => {
-    localStorage.setItem("codexia:draft:malformed", "{");
-    localStorage.setItem("codexia:draft:recoverable", JSON.stringify({
+    localStorage.setItem("scriptorium:draft:malformed", "{");
+    localStorage.setItem("scriptorium:draft:recoverable", JSON.stringify({
       version: 1,
       projectId: "removed-project-id",
       sceneId: "removed-scene-id",
@@ -1524,7 +1524,7 @@ test("project details, reconstruction, and guarded removal preserve browser reco
   const isolatedWorktree = join(isolatedDirectory, "worktree");
   execFileSync("git", ["clone", "--quiet", repositoryUrl, isolatedWorktree], { stdio: "ignore" });
   execFileSync("git", ["checkout", "--quiet", "--orphan", "lifecycle-clean"], { cwd: isolatedWorktree, stdio: "ignore" });
-  await rm(join(isolatedWorktree, "meta", "codexia"), { recursive: true, force: true });
+  await rm(join(isolatedWorktree, "meta", "scriptorium"), { recursive: true, force: true });
   execFileSync("git", ["add", "--all"], { cwd: isolatedWorktree, stdio: "ignore" });
   execFileSync("git", [
     "-c", "user.name=Codexia E2E", "-c", "user.email=codexia-e2e@example.invalid",
@@ -1694,7 +1694,7 @@ test("failed scratch protection refuses recovery selection and keeps the current
     IDBObjectStore.prototype.put = function (this: IDBObjectStore, value: unknown, key?: IDBValidKey): IDBRequest<IDBValidKey> {
       const text = value && typeof value === "object" && "text" in value && typeof value.text === "string" ? value.text : "";
       const currentWindow = window as FailureWindow;
-      if (this.transaction.db.name === "codexia-recovery" && this.name === "operations" &&
+      if (this.transaction.db.name === "scriptorium-recovery" && this.name === "operations" &&
           currentWindow.__failCurrentScratchWrite && text.includes("forced scratch protection failure")) {
         currentWindow.__failedCurrentScratchWrites = (currentWindow.__failedCurrentScratchWrites ?? 0) + 1;
         const transaction = this.transaction;
@@ -1810,7 +1810,7 @@ test("scratch text and image selection pause while a recovery entry is being res
     IDBObjectStore.prototype.put = function (this: IDBObjectStore, value: unknown, key?: IDBValidKey): IDBRequest<IDBValidKey> {
       const text = value && typeof value === "object" && "text" in value && typeof value.text === "string" ? value.text : "";
       const currentGate = (window as GateWindow).__scratchResumeGate;
-      if (this.transaction.db.name === "codexia-recovery" && this.name === "operations" &&
+      if (this.transaction.db.name === "scriptorium-recovery" && this.name === "operations" &&
           currentGate?.armed && text.includes("Current scratch write held during resume.")) {
         currentGate.armed = false;
         currentGate.target = this.transaction;

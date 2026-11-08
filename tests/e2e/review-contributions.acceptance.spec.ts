@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const branch = "main";
-const zukanPath = "meta/codexia/modules/story/zukan-suggestions.jsonl";
+const zukanPath = "meta/scriptorium/modules/story/zukan-suggestions.jsonl";
 const scenePath = "plot/volumes/vol-review/chapters/ch-review/scenes/scene-review.yaml";
 
 interface Project {
@@ -248,7 +248,7 @@ test("full profile renders Story and Speaker review queues and turns both author
     expect(speakerStatus.checkpoints).toEqual([]);
     expect(speakerStatus.proposal.operations[0]?.writes.map((write) => write.path)).toEqual(expect.arrayContaining([
       scenePath,
-      "meta/codexia/modules/speaker/corrections.jsonl",
+      "meta/scriptorium/modules/speaker/corrections.jsonl",
     ]));
     await expect(speakerPanel.getByText("確定案をレビューキューに作成しました。承認後に正本へ反映されます。")).toBeVisible();
 
@@ -257,7 +257,7 @@ test("full profile renders Story and Speaker review queues and turns both author
     expect(remoteSuggestion.status).toBe("pending");
     const remoteScene = git(fixture.remote, "show", `refs/heads/${branch}:${scenePath}`);
     expect(remoteScene).not.toMatch(/^speakerOverrides:/mu);
-    expect(() => git(fixture.remote, "cat-file", "-e", `refs/heads/${branch}:meta/codexia/modules/speaker/corrections.jsonl`)).toThrow();
+    expect(() => git(fixture.remote, "cat-file", "-e", `refs/heads/${branch}:meta/scriptorium/modules/speaker/corrections.jsonl`)).toThrow();
 
     await page.getByRole("tablist", { name: "Panel tabs" }).getByRole("tab", { name: "Outline", exact: true }).click();
     await page.getByRole("navigation", { name: "作品構成" })

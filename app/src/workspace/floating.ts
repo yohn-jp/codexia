@@ -9,7 +9,7 @@ export interface FloatingPanelLayout {
 }
 const panelIdPattern = /^[A-Za-z][A-Za-z0-9._:-]{0,159}$/u;
 export function floatingStorageKey(scope: string): string {
-  return "codexia:workspace:floating:v1:" + encodeURIComponent(scope) + ":desktop";
+  return "scriptorium:workspace:floating:v1:" + encodeURIComponent(scope) + ":desktop";
 }
 export function validateFloatingPanels(value: unknown, knownIds: readonly string[], hiddenIds: readonly string[]): value is FloatingPanelLayout[] {
   if (!Array.isArray(value) || value.length > 12) return false;

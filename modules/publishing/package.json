@@ -46,7 +46,7 @@
     "requires": [],
     "serverEntry": "./dist/index.js",
     "statePaths": [
-      "meta/codexia/modules/publishing"
+      "meta/scriptorium/modules/publishing"
     ],
     "locality": "local",
     "browserEntry": "./dist/browser.js"

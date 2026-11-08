@@ -17,6 +17,7 @@ import { workspaceContributions } from "../contributions/catalog";
 import { Workspace } from "../workspace/Workspace";
 import { ManuscriptHistoryPanel } from "../editor/ManuscriptHistoryPanel";
 import type { EditorTermSpan } from "../editor/terms";
+import type { EditorEvidenceAdapter } from "../editor/evidence";
 import { ProposalReview } from "../contributions/ProposalReview";
 import { PublicModuleView, publicModuleIdForPath } from "../contributions/PublicModuleView";
 import { ThemeControl } from "../components/ThemeControl";
@@ -48,7 +49,7 @@ import {
   type JournalProposal,
 } from "../storage/journal";
 
-const ACTIVE_PROJECT_KEY = "codexia:active-project";
+const ACTIVE_PROJECT_KEY = "scriptorium:active-project";
 
 function isDocumentDepartureAbort(error: unknown): boolean {
   return error instanceof DocumentDepartureError;
@@ -60,7 +61,7 @@ function readLegacyDrafts(): LegacyDraftRecord[] {
     for (let index = 0; index < window.localStorage.length; index++) {
       try {
         const key = window.localStorage.key(index);
-        if (!key?.startsWith("codexia:draft:")) continue;
+        if (!key?.startsWith("scriptorium:draft:")) continue;
         const raw = window.localStorage.getItem(key);
         if (!raw) continue;
         const value: unknown = JSON.parse(raw);
@@ -302,21 +303,23 @@ function buildScratchOperation(read: SceneRead, draft: ScratchDraftPayload): { o
   return { operation, path };
 }
 
-export function App({ initialTheme }: { initialTheme?: ThemeMode } = {}) {
+export function App({ initialTheme, editorEvidenceAdapter }: { initialTheme?: ThemeMode; editorEvidenceAdapter?: EditorEvidenceAdapter } = {}) {
   const mode = parseApplicationLocation(window.location.pathname)?.mode ?? readUiModePreference() ?? "desktop";
-  return <ThemedApplication initialTheme={initialTheme} mode={mode} Shell={DefaultApplicationShell} allowPublicModule />;
+  return <ThemedApplication initialTheme={initialTheme} editorEvidenceAdapter={editorEvidenceAdapter} mode={mode} Shell={DefaultApplicationShell} allowPublicModule />;
 }
 
 export function SharedApplication({
   mode,
   Shell,
   initialTheme,
+  editorEvidenceAdapter,
 }: {
   mode: UiMode;
   Shell: ApplicationShell;
   initialTheme?: ThemeMode;
+  editorEvidenceAdapter?: EditorEvidenceAdapter;
 }) {
-  return <ThemedApplication initialTheme={initialTheme} mode={mode} Shell={Shell} allowPublicModule={false} />;
+  return <ThemedApplication initialTheme={initialTheme} editorEvidenceAdapter={editorEvidenceAdapter} mode={mode} Shell={Shell} allowPublicModule={false} />;
 }
 
 function DefaultApplicationShell({ mode, header, library, editor, tools, status, onSwitchMode, panels, workspaceScope, beforeLayoutChange, requestedPanel }: ApplicationShellProps) {
@@ -346,11 +349,13 @@ function ThemedApplication({
   mode,
   Shell,
   allowPublicModule,
+  editorEvidenceAdapter,
 }: {
   initialTheme?: ThemeMode;
   mode: UiMode;
   Shell: ApplicationShell;
   allowPublicModule: boolean;
+  editorEvidenceAdapter?: EditorEvidenceAdapter;
 }) {
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => initialTheme ?? loadThemeMode());
   const [themeError, setThemeError] = useState("");
@@ -366,7 +371,7 @@ function ThemedApplication({
   const publicModuleId = allowPublicModule ? publicModuleIdForPath(window.location.pathname) : null;
   return publicModuleId
     ? <PublicModuleView moduleId={publicModuleId} themeMode={themeMode} onThemeChange={changeTheme} themeError={themeError} />
-    : <AuthorWorkspace themeMode={themeMode} onThemeChange={changeTheme} themeError={themeError} mode={mode} Shell={Shell} />;
+    : <AuthorWorkspace themeMode={themeMode} onThemeChange={changeTheme} themeError={themeError} mode={mode} Shell={Shell} editorEvidenceAdapter={editorEvidenceAdapter} />;
 }
 
 function AuthorWorkspace({
@@ -375,12 +380,14 @@ function AuthorWorkspace({
   themeError,
   mode,
   Shell,
+  editorEvidenceAdapter,
 }: {
   themeMode: ThemeMode;
   onThemeChange: (mode: ThemeMode) => void;
   themeError: string;
   mode: UiMode;
   Shell: ApplicationShell;
+  editorEvidenceAdapter?: EditorEvidenceAdapter;
 }) {
   const [authState, setAuthState] = useState<"checking" | "signed-out" | "ready">("checking");
   const [hostedMode, setHostedMode] = useState(false);
@@ -2701,6 +2708,9 @@ function AuthorWorkspace({
           historySnapshot={work.observation.snapshot}
           scene={scene}
           path={editor.read.document.path}
+          documentRevision={editor.read.document.revision}
+          baseText={editor.read.document.content}
+          evidenceAdapter={editorEvidenceAdapter}
           breadcrumb={breadcrumbFor(tree, scene.id)}
           text={editor.text}
           textRevision={editor.textRevision}

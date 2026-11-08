@@ -118,7 +118,7 @@ function proposalOperation(currentSnapshot: SnapshotId): ChangeOperation {
     effect: "metadata",
     reads: [],
     writes: [{
-      path: "meta/codexia/modules/publishing/lifecycle-late-callback.md",
+      path: "meta/scriptorium/modules/publishing/lifecycle-late-callback.md",
       revision: null,
       content: "This callback belongs to a disposed author scope.\n",
     }],
@@ -190,7 +190,7 @@ const journal = {
 };
 
 async function seedLegacyProposal(): Promise<void> {
-  const request = indexedDB.open("codexia-recovery", 3);
+  const request = indexedDB.open("scriptorium-recovery", 3);
   const database = await new Promise<IDBDatabase>((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);

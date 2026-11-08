@@ -33,10 +33,10 @@ const nlpWorker = fileURLToPath(new URL("../../nlp/dist/worker.js", import.meta.
 const diagnosticsWorker = fileURLToPath(new URL("../dist/worker.js", import.meta.url));
 const speakerWorker = fileURLToPath(new URL("../../speaker/dist/worker.js", import.meta.url));
 
-const synonymsPath = "meta/codexia/modules/nlp/synonyms.yaml";
-const ignoredPath = "meta/codexia/modules/nlp/candidate-ignore-list.yaml";
-const featureSettingsPath = "meta/codexia/modules/nlp/feature-settings.json";
-const lintConfigPath = "meta/codexia/modules/diagnostics/lint-rules.yaml";
+const synonymsPath = "meta/scriptorium/modules/nlp/synonyms.yaml";
+const ignoredPath = "meta/scriptorium/modules/nlp/candidate-ignore-list.yaml";
+const featureSettingsPath = "meta/scriptorium/modules/nlp/feature-settings.json";
+const lintConfigPath = "meta/scriptorium/modules/diagnostics/lint-rules.yaml";
 const firstScenePath = "manuscript/vol-one/ch-one/sc-one.md";
 
 async function git(cwd, ...args) {

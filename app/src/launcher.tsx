@@ -9,7 +9,7 @@ const theme = loadThemeMode();
 applyThemeMode(theme);
 const isReader = window.location.pathname.startsWith("/r/");
 let remembered: string | null = null;
-try { remembered = localStorage.getItem("codexia:ui-mode"); } catch { /* A choice remains available without storage. */ }
+try { remembered = localStorage.getItem("scriptorium:ui-mode"); } catch { /* A choice remains available without storage. */ }
 if (!isReader && (remembered === "desktop" || remembered === "mobile")) {
   window.location.replace(`/${remembered}/${window.location.search}${window.location.hash}`);
 } else {
@@ -18,7 +18,7 @@ if (!isReader && (remembered === "desktop" || remembered === "mobile")) {
 
 function InterfaceChoice() {
   const choose = (mode: "desktop" | "mobile") => {
-    try { localStorage.setItem("codexia:ui-mode", mode); } catch { /* Direct links remain usable. */ }
+    try { localStorage.setItem("scriptorium:ui-mode", mode); } catch { /* Direct links remain usable. */ }
     window.location.assign(`/${mode}/${window.location.search}${window.location.hash}`);
   };
   return <section className="empty-state" aria-labelledby="interface-title">

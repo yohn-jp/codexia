@@ -119,7 +119,7 @@ test("semantic reranker setting is returned as a revision-guarded author proposa
     reader: {
       snapshot,
       async read(path: string) {
-        return path === "meta/codexia/modules/semantic/settings.json"
+        return path === "meta/scriptorium/modules/semantic/settings.json"
           ? { content: '{"schemaVersion":1,"rerankerEnabled":false}\n', revision: "settings-rev-1" }
           : null;
       },
@@ -139,8 +139,8 @@ test("semantic reranker setting is returned as a revision-guarded author proposa
   assert.equal(result.ok, true);
   assert.equal(proposed.length, 1);
   assert.equal(proposed[0]?.effect, "settings");
-  assert.deepEqual(proposed[0]?.reads, [{ path: "meta/codexia/modules/semantic/settings.json", revision: "settings-rev-1" }]);
-  assert.equal(proposed[0]?.writes[0]?.path, "meta/codexia/modules/semantic/settings.json");
+  assert.deepEqual(proposed[0]?.reads, [{ path: "meta/scriptorium/modules/semantic/settings.json", revision: "settings-rev-1" }]);
+  assert.equal(proposed[0]?.writes[0]?.path, "meta/scriptorium/modules/semantic/settings.json");
   assert.equal(proposed[0]?.writes[0]?.revision, "settings-rev-1");
   assert.equal(JSON.parse(proposed[0]!.writes[0]!.content!).rerankerEnabled, true);
   assert.equal(proposalSignal, controller.signal);
