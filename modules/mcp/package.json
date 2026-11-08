@@ -1,10 +1,10 @@
 {
-  "name": "@scriptorium/module-mcp",
+  "name": "@codexia/module-mcp",
   "private": true,
   "version": "0.1.0",
-  "scriptoriumDisplay": {
+  "codexiaDisplay": {
     "name": "MCP connections",
-    "description": "Connect an authorized MCP client to Scriptorium tools through Praetorium OAuth; proposed changes still require author approval."
+    "description": "Connect an authorized MCP client to Codexia tools through Praetorium OAuth; proposed changes still require author approval."
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -25,11 +25,11 @@
     "test": "node --import tsx --test src/*.test.ts"
   },
   "dependencies": {
-    "@scriptorium/contracts": "workspace:*",
+    "@codexia/contracts": "workspace:*",
     "@modelcontextprotocol/sdk": "1.29.0",
     "zod": "3.25.76"
   },
-  "scriptoriumModule": {
+  "codexiaModule": {
     "id": "mcp",
     "version": "0.1.0",
     "contractVersion": 1,
@@ -41,6 +41,6 @@
     "locality": "local"
   },
   "bin": {
-    "scriptorium-mcp": "./dist/stdio.js"
+    "codexia-mcp": "./dist/stdio.js"
   }
 }

@@ -1,5 +1,5 @@
-import type { JobRequest } from "@scriptorium/contracts";
-import { installWorkerHandler } from "@scriptorium/module-runtime";
+import type { JobRequest } from "@codexia/contracts";
+import { installWorkerHandler } from "@codexia/module-runtime";
 import { analyzeDiagnostics, analyzePlotSemantics, analyzeStylometricDeviations, analyzeVoiceDeviations, analyzeVoiceProfiles, DIAGNOSTICS_ENGINE_ID, DIAGNOSTICS_ENGINE_VERSION, DIAGNOSTICS_MODULE_VERSION, type DiagnosticsWorkerInput, type PlotSemanticWorkerInput, type StylometricDeviationWorkerInput, type VoiceDeviationWorkerInput, type VoiceWorkerInput } from "./analysis.js";
 
 type DiagnosticsWorkerRequest = DiagnosticsWorkerInput | PlotSemanticWorkerInput | StylometricDeviationWorkerInput | VoiceDeviationWorkerInput | VoiceWorkerInput;

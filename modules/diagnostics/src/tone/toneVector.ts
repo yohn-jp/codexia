@@ -1,5 +1,5 @@
-import type { Token } from "@scriptorium/module-nlp";
-import { tokenBase } from "@scriptorium/module-nlp";
+import type { Token } from "@codexia/module-nlp";
+import { tokenBase } from "@codexia/module-nlp";
 import type { ToneLexiconConfig, ToneVector } from "./types.js";
 
 /**

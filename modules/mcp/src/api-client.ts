@@ -4,7 +4,7 @@ import type {
   ChangeProposal,
   ProposalEvidence,
   RemoteObservation,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 
 export interface McpActionClient {
   readonly projectId?: string;
@@ -94,7 +94,7 @@ export class ApiClient implements McpActionClient {
 
   private projectPath(path: string): string {
     if (!this.options.projectId) {
-      throw new McpApiError(400, "INVALID_PROJECT", "Set SCRIPTORIUM_PROJECT_ID or pass project_id");
+      throw new McpApiError(400, "INVALID_PROJECT", "Set CODEXIA_PROJECT_ID or pass project_id");
     }
     return `/api/projects/${encodeURIComponent(this.options.projectId)}${path}`;
   }
