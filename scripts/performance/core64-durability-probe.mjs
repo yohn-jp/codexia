@@ -275,7 +275,7 @@ try {
   async function readDraft(sceneId, expectedMarker) {
     return page.evaluate(async ({ sceneId, expectedMarker }) => {
       const database = await new Promise((resolveOpen, rejectOpen) => {
-        const request = indexedDB.open('codexia-recovery', 3);
+        const request = indexedDB.open('scriptorium-recovery', 3);
         request.onsuccess = () => resolveOpen(request.result);
         request.onerror = () => rejectOpen(request.error ?? new Error('IndexedDB open failed'));
       });

@@ -90,15 +90,15 @@ test('composition persistence declares base and selected module readers/writers 
   const readable = new Map(persistence.readable.map(({ formatId, versions }) => [formatId, versions]));
   const writable = new Set(persistence.writable.map(({ formatId, version }) => `${formatId}@${version}`));
 
-  assert.deepEqual(readable.get('codexia.git-operations'), [1]);
-  assert.deepEqual(readable.get('codexia.git-proposal-legacy'), [1]);
-  assert.deepEqual(readable.get('codexia.browser-recovery-indexeddb'), [3]);
-  assert.deepEqual(readable.get('codexia.module-story.series'), [1]);
-  assert.deepEqual(readable.get('codexia.module-publishing.cover'), [1]);
-  assert.equal(readable.has('codexia.module-story.change-sets'), false);
-  assert.equal(readable.has('codexia.module-assistant.model-settings'), false);
-  assert.equal(writable.has('codexia.module-publishing.cover@1'), false);
-  assert.equal(writable.has('codexia.module-story.series@1'), true);
+  assert.deepEqual(readable.get('scriptorium.git-operations'), [1]);
+  assert.deepEqual(readable.get('scriptorium.git-proposal-legacy'), [1]);
+  assert.deepEqual(readable.get('scriptorium.browser-recovery-indexeddb'), [3]);
+  assert.deepEqual(readable.get('scriptorium.module-story.series'), [1]);
+  assert.deepEqual(readable.get('scriptorium.module-publishing.cover'), [1]);
+  assert.equal(readable.has('scriptorium.module-story.change-sets'), false);
+  assert.equal(readable.has('scriptorium.module-assistant.model-settings'), false);
+  assert.equal(writable.has('scriptorium.module-publishing.cover@1'), false);
+  assert.equal(writable.has('scriptorium.module-story.series@1'), true);
   assert.equal(persistence.contractVersion, 'codexia-persistence/v1');
 });
 
@@ -174,7 +174,7 @@ function hostedAttestationFixture() {
     recipeDigest,
     lockDigest,
   };
-  const runtimeMetadata = { contractVersion: 'codexia-platform/v1', producerRevision: hostedRevision };
+  const runtimeMetadata = { contractVersion: 'scriptorium-platform/v1', producerRevision: hostedRevision };
   const catalogBytes = Buffer.from(canonicalJson(catalog), 'utf8');
   const runtimeMetadataBytes = Buffer.from(canonicalJson(runtimeMetadata), 'utf8');
   const statement = createSlsaStatement({
@@ -199,7 +199,7 @@ test('SLSA statement has exactly the signed Runtime Base and canonical metadata 
   assert.deepEqual(statement.subject, [
     { name: 'ghcr.io/yohn-jp/codexia/runtime-base', digest: { sha256: 'a'.repeat(64) } },
     { name: 'codexia-build/v1/catalog.json', digest: { sha256: digest(catalogBytes) } },
-    { name: 'codexia-platform/v1/runtime-metadata.json', digest: { sha256: digest(runtimeMetadataBytes) } },
+    { name: 'scriptorium-platform/v1/runtime-metadata.json', digest: { sha256: digest(runtimeMetadataBytes) } },
   ]);
   assert.equal(statement._type, 'https://in-toto.io/Statement/v1');
   assert.equal(statement.predicateType, 'https://slsa.dev/provenance/v1');

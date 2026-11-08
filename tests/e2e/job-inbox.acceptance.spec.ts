@@ -20,7 +20,7 @@ function fixtureJob(overrides: Record<string, unknown>) {
 
 async function assertOwnerCookie(route: Route): Promise<void> {
   const headers = await route.request().allHeaders();
-  expect(headers.cookie).toContain("codexia_session=");
+  expect(headers.cookie).toContain("scriptorium_session=");
 }
 
 async function emitJobEvent(page: Page, event: Record<string, unknown>): Promise<void> {

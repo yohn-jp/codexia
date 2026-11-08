@@ -48,7 +48,7 @@ import {
   type JournalProposal,
 } from "../storage/journal";
 
-const ACTIVE_PROJECT_KEY = "codexia:active-project";
+const ACTIVE_PROJECT_KEY = "scriptorium:active-project";
 
 function isDocumentDepartureAbort(error: unknown): boolean {
   return error instanceof DocumentDepartureError;
@@ -60,7 +60,7 @@ function readLegacyDrafts(): LegacyDraftRecord[] {
     for (let index = 0; index < window.localStorage.length; index++) {
       try {
         const key = window.localStorage.key(index);
-        if (!key?.startsWith("codexia:draft:")) continue;
+        if (!key?.startsWith("scriptorium:draft:")) continue;
         const raw = window.localStorage.getItem(key);
         if (!raw) continue;
         const value: unknown = JSON.parse(raw);

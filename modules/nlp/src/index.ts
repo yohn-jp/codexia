@@ -30,13 +30,13 @@ const manifest: ModuleManifest = {
   id: "nlp", version: NLP_MODULE_VERSION, contractVersion: 1,
   dependencies: [], provides: [NLP_TOKENIZER_CAPABILITY, NLP_TOKEN_COUNTER_CAPABILITY], requires: [],
   serverEntry: "./dist/index.js", browserEntry: "./dist/browser.js", workerEntry: "./dist/worker.js",
-  statePaths: ["meta/codexia/modules/nlp"], locality: "local",
+  statePaths: ["meta/scriptorium/modules/nlp"], locality: "local",
 };
 
 const MAX_TEXT_LENGTH = 1_000_000;
-const SYNONYMS_PATH = "meta/codexia/modules/nlp/synonyms.yaml";
-const IGNORED_PATH = "meta/codexia/modules/nlp/candidate-ignore-list.yaml";
-const FEATURE_SETTINGS_PATH = "meta/codexia/modules/nlp/feature-settings.json";
+const SYNONYMS_PATH = "meta/scriptorium/modules/nlp/synonyms.yaml";
+const IGNORED_PATH = "meta/scriptorium/modules/nlp/candidate-ignore-list.yaml";
+const FEATURE_SETTINGS_PATH = "meta/scriptorium/modules/nlp/feature-settings.json";
 
 type ObjectValue = Record<string, unknown>;
 function record(value: unknown, label: string): ObjectValue {

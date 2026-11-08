@@ -50,7 +50,7 @@ import {
 } from "./continuation-context.js";
 
 const ASSISTANT_MODULE_VERSION = "0.1.0";
-const USAGE_PATH = "meta/codexia/modules/assistant/usage.jsonl";
+const USAGE_PATH = "meta/scriptorium/modules/assistant/usage.jsonl";
 const EXTERNAL_FEATURES: Readonly<Record<string, string>> = {
   rewrite: "rewrite",
   "scene-summary": "scene-summary",

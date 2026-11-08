@@ -28,7 +28,7 @@ Core does not import optional module packages, model engines or provider SDKs. M
 
 ## Canonical state and snapshots
 
-Git-controlled YAML and Markdown are the durable work format. Approved module settings, dictionaries, corrections and other authoritative decisions use versioned work metadata, including `meta/codexia/modules/<module-id>/`. Unsupported data is preserved even when its module is disabled.
+Git-controlled YAML and Markdown are the durable work format. Approved module settings, dictionaries, corrections and other authoritative decisions use versioned work metadata, including the existing `meta/scriptorium/modules/<module-id>/` paths. Those persisted identifiers remain stable across the product rename. Unsupported data is preserved even when its module is disabled.
 
 A `SnapshotId` binds repository, branch, commit and checkpoint overlay identity. Readers use pinned immutable objects rather than mutable checkout paths. Hierarchy caches, search indexes, graphs, downloaded weights and diagnostics are reconstructible derivatives keyed by their source revision and model or schema identity. A response assembled from mismatched snapshots is invalid.
 

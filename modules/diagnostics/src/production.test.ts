@@ -25,9 +25,9 @@ const initialFiles = new Map<string, { content: string; revision: string }>([
   ["bible/characters/hero/profile.yaml", { content: "id: char-hero\nname: 星野\naliases:\n  - 星の剣士\nnotes: 星の剣士は古い遺跡を調べる。\n", revision: "hero-r1" }],
   ["plot/volumes/v1/scenes/scene-1.yaml", { content: "id: scene-1\ntype: scene\nname: 遺跡\nintended_tone: suspense\ngoal: 鍵を見つけて扉を開ける\nconflict: 黒い霧が道を塞ぐ\nmanuscript: manuscript/v1/scene-1.md\n", revision: "scene-r1" }],
   ["manuscript/v1/scene-1.md", { content: "---\ntitle: 遺跡\n---\n「……」\n星野は古い遺跡へ走った。黒い霧が道を塞ぐ。\n", revision: "manuscript-r1" }],
-  ["meta/codexia/modules/nlp/synonyms.yaml", { content: "ownerNote: preserve\ngroups:\n  - words: [強い, 力強い]\n    context: positive\n", revision: "synonyms-r1" }],
-  ["meta/codexia/modules/nlp/candidate-ignore-list.yaml", { content: "ownerNote: preserve\nignored:\n  - 既存語\n", revision: "ignored-r1" }],
-  ["meta/codexia/modules/nlp/feature-settings.json", { content: "{\"externalEnabled\":{\"setting-qa\":false}}\n", revision: "features-r1" }],
+  ["meta/scriptorium/modules/nlp/synonyms.yaml", { content: "ownerNote: preserve\ngroups:\n  - words: [強い, 力強い]\n    context: positive\n", revision: "synonyms-r1" }],
+  ["meta/scriptorium/modules/nlp/candidate-ignore-list.yaml", { content: "ownerNote: preserve\nignored:\n  - 既存語\n", revision: "ignored-r1" }],
+  ["meta/scriptorium/modules/nlp/feature-settings.json", { content: "{\"externalEnabled\":{\"setting-qa\":false}}\n", revision: "features-r1" }],
 ]);
 
 async function createRuntime(files: Map<string, { content: string; revision: string }>, proposals: ChangeProposal[], capabilityProviders: Record<string, { create(): unknown; dispose?(value: unknown): void | Promise<void> }> = {}) {
@@ -258,14 +258,14 @@ test("public actions read namespaced dictionaries/settings and lint changes rema
     const synonymUpdate = await runtime.invokeAction("nlp", "nlp.saveSynonymGroup", { words: ["剛健"], mergeGroupIndex: 0 }, host);
     assert.equal(synonymUpdate.ok, true, JSON.stringify(synonymUpdate));
     assert.equal(proposals.length, 1);
-    assert.equal(proposals[0]?.operations[0]?.writes[0]?.path, "meta/codexia/modules/nlp/synonyms.yaml");
+    assert.equal(proposals[0]?.operations[0]?.writes[0]?.path, "meta/scriptorium/modules/nlp/synonyms.yaml");
     assert.match(proposals[0]?.operations[0]?.writes[0]?.content ?? "", /ownerNote: preserve/u);
     assert.match(proposals[0]?.operations[0]?.writes[0]?.content ?? "", /剛健/u, "a single word can be added to an existing source group");
 
     const ignoreUpdate = await runtime.invokeAction("nlp", "nlp.ignoreCandidates", { terms: ["新候補"] }, host);
     assert.equal(ignoreUpdate.ok, true, JSON.stringify(ignoreUpdate));
     assert.equal(proposals.length, 2);
-    assert.equal(proposals[1]?.operations[0]?.writes[0]?.path, "meta/codexia/modules/nlp/candidate-ignore-list.yaml");
+    assert.equal(proposals[1]?.operations[0]?.writes[0]?.path, "meta/scriptorium/modules/nlp/candidate-ignore-list.yaml");
     assert.match(proposals[1]?.operations[0]?.writes[0]?.content ?? "", /ownerNote: preserve/u);
     assert.match(proposals[1]?.operations[0]?.writes[0]?.content ?? "", /既存語/u);
     assert.match(proposals[1]?.operations[0]?.writes[0]?.content ?? "", /新候補/u);
@@ -295,7 +295,7 @@ test("public actions read namespaced dictionaries/settings and lint changes rema
     const consent = await runtime.invokeAction("nlp", "nlp.updateExternalConsent", { externalEnabled: { "setting-qa": true } }, host);
     assert.equal(consent.ok, true, JSON.stringify(consent));
     assert.equal(proposals.length, 4);
-    assert.equal(proposals[3].operations[0].writes[0].path, "meta/codexia/modules/nlp/feature-settings.json");
+    assert.equal(proposals[3].operations[0].writes[0].path, "meta/scriptorium/modules/nlp/feature-settings.json");
     const consentBeforeApproval = await runtime.invokeAction("nlp", "nlp.features", {}, host);
     assert.equal(consentBeforeApproval.ok, true, JSON.stringify(consentBeforeApproval));
     if (consentBeforeApproval.ok) {

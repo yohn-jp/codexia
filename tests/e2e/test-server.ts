@@ -31,7 +31,7 @@ async function createLocalFixture(targetRepositoryUrl = repositoryUrl): Promise<
   await mkdir(workingCopy, { recursive: true });
   await mkdir(join(workingCopy, "plot/volumes/vol-1/chapters/ch-1/scenes"), { recursive: true });
   await mkdir(join(workingCopy, "manuscript/vol-1/ch-1"), { recursive: true });
-  await mkdir(join(workingCopy, "meta/codexia/modules/search"), { recursive: true });
+  await mkdir(join(workingCopy, "meta/scriptorium/modules/search"), { recursive: true });
 
   await writeFile(join(workingCopy, "plot/volumes/vol-1/volume.yaml"), "id: vol-1\ntitle: Volume One\n", "utf8");
   await writeFile(
@@ -60,7 +60,7 @@ async function createLocalFixture(targetRepositoryUrl = repositoryUrl): Promise<
     "utf8",
   );
   await writeFile(
-    join(workingCopy, "meta/codexia/modules/search/terms.json"),
+    join(workingCopy, "meta/scriptorium/modules/search/terms.json"),
     JSON.stringify({
       schemaVersion: 1,
       terms: [{

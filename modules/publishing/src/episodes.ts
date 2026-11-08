@@ -1,7 +1,7 @@
 import type { SnapshotReader } from "@codexia/contracts";
 import YAML from "yaml";
 
-export const EPISODES_PATH = "meta/codexia/modules/publishing/episodes.yaml";
+export const EPISODES_PATH = "meta/scriptorium/modules/publishing/episodes.yaml";
 
 export interface PublishEpisodeRecord extends Record<string, unknown> {
   id: string;

@@ -86,7 +86,7 @@ export function formatHandoffHint(
 }
 
 export function writingResumeStorageKey(authorScope: string, repositoryKey: string): string {
-  return `codexia:writing-resume:${encodeURIComponent(JSON.stringify([authorScope, repositoryKey]))}`;
+  return `scriptorium:writing-resume:${encodeURIComponent(JSON.stringify([authorScope, repositoryKey]))}`;
 }
 
 export function loadWritingResume(authorScope: string, repositoryKey: string): WritingResumePosition | null {
@@ -118,7 +118,7 @@ export function saveWritingResume(authorScope: string, repositoryKey: string, po
 }
 
 export function readingResumeStorageKey(authorScope: string, repositoryKey: string, sceneId: string): string {
-  return `codexia:reading-resume:${encodeURIComponent(JSON.stringify([authorScope, repositoryKey, sceneId]))}`;
+  return `scriptorium:reading-resume:${encodeURIComponent(JSON.stringify([authorScope, repositoryKey, sceneId]))}`;
 }
 
 export function loadReadingPage(authorScope: string, repositoryKey: string, sceneId: string): number {

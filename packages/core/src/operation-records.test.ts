@@ -88,6 +88,6 @@ test("persisted proposal validation enforces record binding and safe content", (
   assert.throws(() => assertPersistedProposal(missingEvidence), /Missing proposal evidence reference/);
 
   const reservedPath = goldenOperation();
-  reservedPath.writes[0] = { ...reservedPath.writes[0]!, path: "meta/codexia/operations/v1/forged.json" };
+  reservedPath.writes[0] = { ...reservedPath.writes[0]!, path: "meta/scriptorium/operations/v1/forged.json" };
   assert.throws(() => assertPersistedProposal({ ...proposal, operations: [reservedPath] }), /Core authority metadata/);
 });

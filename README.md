@@ -6,6 +6,8 @@ Connect a GitHub work repository, browse volumes, chapters and scenes, edit Mark
 
 [Documentation](docs/README.md) covers authoring, architecture, deployment and verification. The [external Plugin Platform proposal](docs/architecture/PLUGIN-PLATFORM.md) specifies a separate isolation and distribution design; built-in modules execute as trusted application code.
 
+The [Codexia reboot RFC](docs/architecture/CODEXIA-REBOOT-RFC.md) is a design proposal; its database and deployment migration work is not implemented by this product rename.
+
 ## Run locally
 
 Requires Node.js 24+, Git, and pnpm 12.10.1.
@@ -67,12 +69,12 @@ rather than implementing an application-specific OAuth issuer.
 podman build --format oci --build-arg PROFILE=core -t codexia:local .
 podman run --rm -p 127.0.0.1:3000:3000 \
   --env CODEXIA_AUTH_TOKEN --env CODEXIA_GITHUB_TOKEN \
-  --mount type=volume,src=codexia-data,dst=/data \
-  --mount type=volume,src=codexia-history,dst=/history \
+  --mount type=volume,src=scriptorium-data,dst=/data \
+  --mount type=volume,src=scriptorium-history,dst=/history \
   codexia:local
 ```
 
-Use `PROFILE=full` with the same Dockerfile for the full composition. Keep `/data` and `/history` persistent: `/history` holds private usage and job history separately from Git work repositories. Use HTTPS through a trusted reverse proxy when accessing the instance beyond localhost. Do not run multiple containers against one workspace volume. This is a single-owner application.
+Use `PROFILE=full` with the same Dockerfile for the full composition. The existing volume names are retained for upgrades. Keep `/data` and `/history` persistent: `/history` holds private usage and job history separately from Git work repositories. Use HTTPS through a trusted reverse proxy when accessing the instance beyond localhost. Do not run multiple containers against one workspace volume. This is a single-owner application.
 
 ## Development and verification
 

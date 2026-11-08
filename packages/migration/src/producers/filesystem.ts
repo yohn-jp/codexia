@@ -13,70 +13,70 @@ interface FileMapping {
 const FILE_MAPPINGS: FileMapping[] = [
   {
     source: "meta/speaker-corrections.jsonl",
-    target: "meta/codexia/modules/speaker/corrections.jsonl",
+    target: "meta/scriptorium/modules/speaker/corrections.jsonl",
     category: "authoritative",
     moduleId: "speaker",
     label: "human speaker corrections",
   },
   {
     source: "meta/speaker-model.json",
-    target: "meta/codexia/modules/speaker/adopted-model.json",
+    target: "meta/scriptorium/modules/speaker/adopted-model.json",
     category: "authoritative",
     moduleId: "speaker",
     label: "adopted small speaker model parameters",
   },
   {
     source: "meta/synonyms.yaml",
-    target: "meta/codexia/modules/nlp/synonyms.yaml",
+    target: "meta/scriptorium/modules/nlp/synonyms.yaml",
     category: "authoritative",
     moduleId: "nlp",
     label: "custom synonym dictionary",
   },
   {
     source: "meta/candidate-ignore-list.yaml",
-    target: "meta/codexia/modules/nlp/candidate-ignore-list.yaml",
+    target: "meta/scriptorium/modules/nlp/candidate-ignore-list.yaml",
     category: "authoritative",
     moduleId: "nlp",
     label: "ignored candidate terms",
   },
   {
     source: "meta/contradiction-dismissals.jsonl",
-    target: "meta/codexia/modules/semantic/contradiction-dismissals.jsonl",
+    target: "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl",
     category: "authoritative",
     moduleId: "semantic",
     label: "author contradiction dismissals",
   },
   {
     source: "meta/publish-episodes.yaml",
-    target: "meta/codexia/modules/publishing/episodes.yaml",
+    target: "meta/scriptorium/modules/publishing/episodes.yaml",
     category: "authoritative",
     moduleId: "publishing",
     label: "publication episode mapping",
   },
   {
     source: ".arcadia/llm-model-settings.json",
-    target: "meta/codexia/modules/assistant/model-settings.json",
+    target: "meta/scriptorium/modules/assistant/model-settings.json",
     category: "authoritative",
     moduleId: "assistant",
     label: "non-secret model routing and budget settings",
   },
   {
     source: ".arcadia/nlp-feature-settings.json",
-    target: "meta/codexia/modules/nlp/feature-settings.json",
+    target: "meta/scriptorium/modules/nlp/feature-settings.json",
     category: "authoritative",
     moduleId: "nlp",
     label: "per-work feature privacy settings",
   },
   {
     source: ".arcadia/llm-usage.jsonl",
-    target: "meta/codexia/modules/assistant/usage.jsonl",
+    target: "meta/scriptorium/modules/assistant/usage.jsonl",
     category: "authoritative",
     moduleId: "assistant",
     label: "historical model usage records",
   },
   {
     source: ".arcadia/cover.jpg",
-    target: "meta/codexia/modules/publishing/assets/cover.jpg",
+    target: "meta/scriptorium/modules/publishing/assets/cover.jpg",
     category: "authoritative",
     moduleId: "publishing",
     label: "local publication cover asset",
@@ -106,7 +106,7 @@ async function planDisabledFile(input: {
   bytes: Buffer;
   label: string;
 }) {
-  const target = "meta/codexia/modules/" + input.moduleId + "/legacy/files/" + input.source;
+  const target = "meta/scriptorium/modules/" + input.moduleId + "/legacy/files/" + input.source;
   const planned = await planExactFileImport({
     context: input.context,
     producerId: "filesystem-disabled",
@@ -166,7 +166,7 @@ async function inspectChangeSets(context: MigrationContext): Promise<MigrationCo
     const status = (parsed as Record<string, unknown>).status;
     if (status === "applied" || status === "partially-applied" || status === "rejected") {
       const suffix = source.slice(".arcadia/change-sets/".length);
-      const target = `meta/codexia/modules/story/change-sets/${suffix}`;
+      const target = `meta/scriptorium/modules/story/change-sets/${suffix}`;
       if (!context.enabledModules.has("story")) {
         const opaque = await planDisabledFile({
           context,
@@ -251,7 +251,7 @@ async function inspectSnapshots(context: MigrationContext): Promise<MigrationCon
     const bytes = await context.source.readProjectFile(source);
     if (!bytes) continue;
     const suffix = source.slice(".arcadia/snapshots/".length);
-    const target = `meta/codexia/modules/story/local-snapshots/${suffix}`;
+    const target = `meta/scriptorium/modules/story/local-snapshots/${suffix}`;
     if (!context.enabledModules.has("story")) {
       const opaque = await planDisabledFile({
         context,
@@ -392,7 +392,7 @@ export function createFilesystemProducer(): MigrationProducer {
 
 export function relativeSnapshotTarget(source: string): string {
   return path.posix.join(
-    "meta/codexia/modules/story/local-snapshots",
+    "meta/scriptorium/modules/story/local-snapshots",
     source.slice(".arcadia/snapshots/".length),
   );
 }

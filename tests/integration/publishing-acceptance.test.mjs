@@ -27,9 +27,9 @@ const YAML = publishingRequire("yaml");
 const appStaticDirectory = resolve(fileURLToPath(new URL("../../app/dist", import.meta.url)));
 
 const profileName = "publishing-integration";
-const episodePath = "meta/codexia/modules/publishing/episodes.yaml";
-const grantsPath = "meta/codexia/modules/publishing/share-grants.jsonl";
-const coverPath = "meta/codexia/modules/publishing/assets/p13-acceptance-cover.jpg";
+const episodePath = "meta/scriptorium/modules/publishing/episodes.yaml";
+const grantsPath = "meta/scriptorium/modules/publishing/share-grants.jsonl";
+const coverPath = "meta/scriptorium/modules/publishing/assets/p13-acceptance-cover.jpg";
 const episodeId = "p13-acceptance-episode";
 const manuscriptMarker = "星の灯りが、静かな港を照らした。｜星《ほし》の物語 & <夜>。";
 const voiceMarker = "P13_VOICE_HELPER_ONLY";

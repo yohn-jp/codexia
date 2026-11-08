@@ -9,7 +9,7 @@ import {
   type SqliteTableInfo,
 } from "@codexia/migration";
 
-const ROOT = "meta/codexia/modules/story";
+const ROOT = "meta/scriptorium/modules/story";
 const SQLITE_LEGACY = `${ROOT}/legacy/sqlite`;
 const STATE_PROPOSALS_PATH = `${ROOT}/state-proposals.jsonl`;
 const ZUKAN_SUGGESTIONS_PATH = `${ROOT}/zukan-suggestions.jsonl`;

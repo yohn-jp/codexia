@@ -51,8 +51,8 @@ function fixtureFiles() {
       "id: char-haru", "name: Haru", "type: character", "aliases: []", "tags: []", "relations: []", "",
     ].join("\n"),
     "bible/locations/loc-cafe.yaml": "id: loc-cafe\nname: Cafe\ntype: location\n",
-    "meta/codexia/modules/nlp/feature-settings.json": JSON.stringify({ externalEnabled: { rewrite: true, "setting-qa": true } }) + "\n",
-    "meta/codexia/modules/assistant/model-settings.json": JSON.stringify({
+    "meta/scriptorium/modules/nlp/feature-settings.json": JSON.stringify({ externalEnabled: { rewrite: true, "setting-qa": true } }) + "\n",
+    "meta/scriptorium/modules/assistant/model-settings.json": JSON.stringify({
       defaultPresetId: "env-default",
       presets: [{ id: "env-default", label: "Acceptance provider", model: "" }],
       featurePresetIds: { rewrite: "env-default", "setting-qa": "env-default" },

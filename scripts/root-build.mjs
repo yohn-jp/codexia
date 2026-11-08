@@ -28,7 +28,7 @@ function run(command, args, env = process.env) {
 }
 
 async function main() {
-  const profileName = process.env.CODEXIA_PROFILE || 'core';
+  const profileName = process.env.CODEXIA_PROFILE ?? process.env.SCRIPTORIUM_PROFILE ?? 'core';
   const profile = profileName === 'core'
     ? JSON.parse(await readFile(path.join(root, 'profiles/core.json'), 'utf8'))
     : undefined;

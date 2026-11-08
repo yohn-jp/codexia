@@ -54,7 +54,7 @@
     "requires": [],
     "serverEntry": "./dist/index.js",
     "statePaths": [
-      "meta/codexia/modules/nlp"
+      "meta/scriptorium/modules/nlp"
     ],
     "locality": "local",
     "browserEntry": "./dist/browser.js",

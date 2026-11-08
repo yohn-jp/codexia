@@ -76,7 +76,7 @@ function accessGrant(overrides: Record<string, unknown> = {}): string {
 
 function assignment(overrides: Partial<HostedRuntimeAssignment> = {}): HostedRuntimeAssignment {
   return {
-    contractVersion: "codexia-platform/v1",
+    contractVersion: "scriptorium-platform/v1",
     instanceId: INSTANCE_ID,
     repositoryId: REPOSITORY_ID,
     repositoryLocator: "https://github.com/yohn-jp/novel",

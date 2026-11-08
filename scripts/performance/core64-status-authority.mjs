@@ -34,7 +34,7 @@ const { createServer } = await import(pathToFileURL(path.join(runtimeRoot, "pack
 const { RUNTIME_STATUS_PATH, sha256Digest } = await import(pathToFileURL(path.join(runtimeRoot, "packages/api/dist/platform-runtime.js")).href);
 
 const assignment = {
-  contractVersion: "codexia-platform/v1",
+  contractVersion: "scriptorium-platform/v1",
   instanceId: "c64-status-synthetic-instance",
   repositoryId: 64001,
   repositoryLocator: "https://github.com/codexia-perf/status-fixture",
@@ -117,7 +117,7 @@ function makeFakeStore(recordCount, race = false) {
   const remoteRevision = "a".repeat(40);
   const changedRevision = "b".repeat(40);
   const paths = Array.from({ length: recordCount }, (_, index) =>
-    "meta/codexia/operations/v1/op-" + index + ".json");
+    "meta/scriptorium/operations/v1/op-" + index + ".json");
   const records = new Map(paths.map((recordPath, index) => [
     recordPath,
     JSON.stringify({ version: 1, operation: { id: "op-" + index } }),
@@ -145,7 +145,7 @@ function makeFakeStore(recordCount, race = false) {
         snapshot,
         async list(prefix) {
           listCalls += 1;
-          assert.equal(prefix, "meta/codexia");
+          assert.equal(prefix, "meta/scriptorium");
           return [...paths];
         },
         async read(recordPath) {

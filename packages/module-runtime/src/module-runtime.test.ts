@@ -55,7 +55,7 @@ function proposalOperation(): ChangeOperation {
     baseRemoteCommit: snapshot.remoteCommit,
     effect: "metadata",
     reads: [],
-    writes: [{ path: "meta/codexia/modules/story/settings.yaml", revision: null, content: "setting: true\n" }],
+    writes: [{ path: "meta/scriptorium/modules/story/settings.yaml", revision: null, content: "setting: true\n" }],
     message: "Update story setting",
   };
 }
@@ -459,7 +459,7 @@ test("cancellation during progress delivery stops the action before it continues
 });
 
 test("enabled idle modules import no heavy capability; proposals are host-issued and attached to success", async () => {
-  const metadata = manifest("story", { statePaths: ["meta/codexia/modules/story"], requires: ["model:test"] });
+  const metadata = manifest("story", { statePaths: ["meta/scriptorium/modules/story"], requires: ["model:test"] });
   let loaded = 0;
   let created = 0;
   let forwardedProposalId: string | undefined;
@@ -735,7 +735,7 @@ test("a per-call abort cancels a real nested worker while its outer action remai
   const nlp = manifest("nlp", { provides: ["nlp.tokenizer"], workerEntry: "worker-service.mjs" });
   const story = manifest("story", {
     optionalRequires: ["nlp.tokenizer"],
-    statePaths: ["bible", "plot", "manuscript", "meta/codexia/modules/story"],
+    statePaths: ["bible", "plot", "manuscript", "meta/scriptorium/modules/story"],
     serverEntry: "./dist/index.js",
     browserEntry: "./dist/browser.js",
   });

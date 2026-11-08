@@ -109,7 +109,7 @@ async function openFixtureScene(page: Page, mode: "desktop" | "mobile", sceneId 
 }
 
 async function seedLegacyDraft(page: Page, text: string): Promise<string> {
-  const key = "codexia:draft:issue-41";
+  const key = "scriptorium:draft:issue-41";
   await page.addInitScript(({ key, text }) => {
     localStorage.setItem(key, JSON.stringify({
       version: 1,
@@ -130,7 +130,7 @@ async function failNextJournalWriteForText(page: Page, text: string): Promise<vo
     (window as Window & { __failedIssue41JournalPuts?: number }).__failedIssue41JournalPuts = 0;
     IDBObjectStore.prototype.put = function (this: IDBObjectStore, value: unknown, key?: IDBValidKey): IDBRequest<IDBValidKey> {
       const entryText = value && typeof value === "object" && "text" in value && typeof value.text === "string" ? value.text : "";
-      if (failurePending && this.transaction.db.name === "codexia-recovery" && this.name === "operations" && entryText === targetText) {
+      if (failurePending && this.transaction.db.name === "scriptorium-recovery" && this.name === "operations" && entryText === targetText) {
         failurePending = false;
         const transaction = this.transaction;
         const request = originalPut.call(this, value, key);
@@ -211,7 +211,7 @@ async function rejectNextCompositionFlush(page: Page): Promise<void> {
 async function readJournal(page: Page): Promise<JournalDraft[]> {
   return page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("codexia-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 3);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -242,7 +242,7 @@ interface JournalDraftDiagnosticContext {
 async function journalDraftDiagnostic(page: Page, sceneId: string, expectedText: string): Promise<unknown> {
   return page.evaluate(async ({ sceneId, expectedText }) => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("codexia-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 3);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -334,7 +334,7 @@ async function expectJournalState(page: Page, sceneId: string, text: string, sta
 async function readJournalEntry(page: Page, sceneId: string, text: string): Promise<JournalEntryRecord> {
   return page.evaluate(async ({ sceneId, text }) => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("codexia-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 3);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -357,7 +357,7 @@ async function readJournalEntry(page: Page, sceneId: string, text: string): Prom
 async function readConfirmedPublicationReceipt(page: Page, entry: JournalEntryRecord): Promise<ConfirmedPublicationReceipt> {
   return page.evaluate(async ({ operationId, generation }) => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("codexia-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 3);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -381,7 +381,7 @@ async function readConfirmedPublicationReceipt(page: Page, entry: JournalEntryRe
 async function restorePublicationUnknownEntry(page: Page, entry: JournalEntryRecord, receipt: ConfirmedPublicationReceipt): Promise<void> {
   await page.evaluate(async ({ entry, batchId }) => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("codexia-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 3);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -403,7 +403,7 @@ async function restorePublicationUnknownEntry(page: Page, entry: JournalEntryRec
 async function hasJournalEntryForOperation(page: Page, operationId: string, generation: number): Promise<boolean> {
   return page.evaluate(async ({ operationId, generation }) => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("codexia-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 3);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -671,13 +671,13 @@ test("the launcher remembers an explicit choice while direct Shell links keep th
 
   await page.getByRole("button", { name: /Mobile/u }).click();
   await expect(page).toHaveURL(new RegExp("/mobile/"));
-  await expect.poll(() => page.evaluate(() => localStorage.getItem("codexia:ui-mode"))).toBe("mobile");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("scriptorium:ui-mode"))).toBe("mobile");
   await page.reload();
   await expect(page).toHaveURL(new RegExp("/mobile/"));
 
   await page.goto("/desktop/");
   await expect(page).toHaveURL(new RegExp("/desktop/"));
-  await expect.poll(() => page.evaluate(() => localStorage.getItem("codexia:ui-mode"))).toBe("mobile");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("scriptorium:ui-mode"))).toBe("mobile");
   await page.goto("/");
   await expect(page).toHaveURL(new RegExp("/mobile/"));
 });
@@ -968,7 +968,7 @@ test("both production Shells preserve recoverable Japanese drafts and the Mobile
     await expect(page.locator("html")).toHaveAttribute("data-zp-theme", mode);
   }
   await expectJournalDraft(page, "scene-1", longReadingDraft);
-  await expect.poll(() => page.evaluate(() => localStorage.getItem("codexia:ui-mode"))).toBe("desktop");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("scriptorium:ui-mode"))).toBe("desktop");
   const desktopScriptPaths = await page.locator("script[src]").evaluateAll((scripts) =>
     scripts.map((script) => {
       const url = new URL((script as HTMLScriptElement).src);
@@ -1010,7 +1010,7 @@ test("both production Shells preserve recoverable Japanese drafts and the Mobile
     const originalPut = IDBObjectStore.prototype.put;
     IDBObjectStore.prototype.put = function (this: IDBObjectStore, value: unknown, key?: IDBValidKey): IDBRequest<IDBValidKey> {
       const draftText = value && typeof value === "object" && "text" in value && typeof value.text === "string" ? value.text : "";
-      if (this.transaction.db.name === "codexia-recovery" && this.name === "operations" && draftText.includes("回復記録の障害") && (window as Window & { __failRecoveryJournalWrites?: boolean }).__failRecoveryJournalWrites) {
+      if (this.transaction.db.name === "scriptorium-recovery" && this.name === "operations" && draftText.includes("回復記録の障害") && (window as Window & { __failRecoveryJournalWrites?: boolean }).__failRecoveryJournalWrites) {
         const testWindow = window as Window & { __failedRecoveryJournalPuts?: number };
         testWindow.__failedRecoveryJournalPuts = (testWindow.__failedRecoveryJournalPuts ?? 0) + 1;
         const transaction = this.transaction;
@@ -1088,7 +1088,7 @@ test("both production Shells preserve recoverable Japanese drafts and the Mobile
   await expect(page).toHaveURL(new RegExp("/mobile/projects/.+/scenes/scene-2"));
   await expect(page.locator(".cm-content")).toHaveText(protectedDraft);
   await expect(page.getByLabel("外観")).toHaveValue("light");
-  await expect.poll(() => page.evaluate(() => localStorage.getItem("codexia:ui-mode"))).toBe("mobile");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("scriptorium:ui-mode"))).toBe("mobile");
 
   const mobileCompositionBase = "Mobile editor composition keeps ";
   await mobileEditor.fill(mobileCompositionBase);

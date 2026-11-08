@@ -41,6 +41,7 @@
     "locality": "local"
   },
   "bin": {
-    "codexia-mcp": "./dist/stdio.js"
+    "codexia-mcp": "./dist/stdio.js",
+    "scriptorium-mcp": "./dist/stdio.js"
   }
 }

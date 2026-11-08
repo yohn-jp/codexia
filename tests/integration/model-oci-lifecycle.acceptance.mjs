@@ -114,9 +114,9 @@ async function createFixture(directory, sceneCount = 240) {
   }, null, 2) + "\n";
   const semanticSettings = JSON.stringify({ schemaVersion: 1, rerankerEnabled: false }, null, 2) + "\n";
   const dismissals = JSON.stringify({ candidateId: "author-dismissed-p13-oci-fixture", timestamp: "2026-10-17T00:00:00.000Z" }) + "\n";
-  await writeText(seed, "meta/codexia/modules/nlp/feature-settings.json", nlpSettings);
-  await writeText(seed, "meta/codexia/modules/semantic/settings.json", semanticSettings);
-  await writeText(seed, "meta/codexia/modules/semantic/contradiction-dismissals.jsonl", dismissals);
+  await writeText(seed, "meta/scriptorium/modules/nlp/feature-settings.json", nlpSettings);
+  await writeText(seed, "meta/scriptorium/modules/semantic/settings.json", semanticSettings);
+  await writeText(seed, "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl", dismissals);
 
   await git(seed, "add", ".");
   await git(seed, "commit", "-m", "Seed synthetic P13 OCI acceptance work");
@@ -284,9 +284,9 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
 
     const projectDirectory = join(dataDirectory, "projects", project.id);
     const preserved = {
-      "meta/codexia/modules/nlp/feature-settings.json": fixture.nlpSettings,
-      "meta/codexia/modules/semantic/settings.json": fixture.semanticSettings,
-      "meta/codexia/modules/semantic/contradiction-dismissals.jsonl": fixture.dismissals,
+      "meta/scriptorium/modules/nlp/feature-settings.json": fixture.nlpSettings,
+      "meta/scriptorium/modules/semantic/settings.json": fixture.semanticSettings,
+      "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl": fixture.dismissals,
     };
     for (const [relative, expected] of Object.entries(preserved)) {
       const actual = await readFile(join(projectDirectory, relative), "utf8");

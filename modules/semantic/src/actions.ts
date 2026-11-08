@@ -46,7 +46,7 @@ import {
 import { scoreBreakdown, searchSnapshotLexically, type LexicalHit, type SemanticSearchHit, type SemanticSearchMode } from "./search.js";
 import { clusterSimilarTerms } from "./termClustering.js";
 
-const STATE_ROOT = "meta/codexia/modules/semantic";
+const STATE_ROOT = "meta/scriptorium/modules/semantic";
 const SETTINGS_PATH = `${STATE_ROOT}/settings.json`;
 const DISMISSALS_PATH = `${STATE_ROOT}/contradiction-dismissals.jsonl`;
 const MAX_QUERY_LENGTH = 8192;

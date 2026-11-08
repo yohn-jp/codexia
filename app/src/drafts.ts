@@ -26,7 +26,7 @@ export interface RestoredDraft {
 }
 
 export function draftKey(projectId: string, sceneId: string): string {
-  return `codexia:draft:${encodeURIComponent(projectId)}:${encodeURIComponent(sceneId)}`;
+  return `scriptorium:draft:${encodeURIComponent(projectId)}:${encodeURIComponent(sceneId)}`;
 }
 
 function isDraft(value: unknown, projectId: string, sceneId: string): value is LocalDraft {

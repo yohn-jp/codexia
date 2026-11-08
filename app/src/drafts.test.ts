@@ -48,7 +48,7 @@ describe("local writing drafts", () => {
 
     clearDraft(storage, "project-a", "scene/1");
     assert.equal(loadDraft(storage, "project-a", "scene/1"), null);
-    assert.equal(draftKey("project-a", "scene/1"), "codexia:draft:project-a:scene%2F1");
+    assert.equal(draftKey("project-a", "scene/1"), "scriptorium:draft:project-a:scene%2F1");
   });
 
   it("ignores malformed or foreign-key data", () => {

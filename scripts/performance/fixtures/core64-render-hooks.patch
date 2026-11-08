@@ -4,7 +4,7 @@ diff --git a/app/src/application/SharedApplication.tsx b/app/src/application/Sha
 @@ -45,6 +45,23 @@
  } from "../storage/journal";
  
- const ACTIVE_PROJECT_KEY = "codexia:active-project";
+ const ACTIVE_PROJECT_KEY = "scriptorium:active-project";
 +
 +type Core64RenderProbeWindow = Window & {
 +  __codexiaCore64RenderProbe?: {

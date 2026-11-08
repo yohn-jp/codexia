@@ -25,7 +25,7 @@ const files = new Map([
   ["plot/volumes/vol-1/chapters/ch-1/scenes/sc-2.yaml", "id: sc-2\ntitle: 朝の港\norder: 2\nmanuscript: manuscript/vol-1/ch-1/sc-2.md\n"],
   ["manuscript/vol-1/ch-1/sc-1.md", "夜の駅。\n"],
   ["manuscript/vol-1/ch-1/sc-2.md", "朝の港。\n"],
-  ["meta/codexia/modules/publishing/episodes.yaml", YAML.stringify({
+  ["meta/scriptorium/modules/publishing/episodes.yaml", YAML.stringify({
     episodes: [{
       id: "episode-1",
       number: 1,

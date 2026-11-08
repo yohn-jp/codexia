@@ -42,7 +42,7 @@ const manifest: ModuleManifest = {
   id: "diagnostics", version: DIAGNOSTICS_MODULE_VERSION, contractVersion: 1,
   dependencies: ["nlp"], provides: [], requires: [NLP_TOKENIZER_CAPABILITY], optionalRequires: ["semantic.embedding"],
   serverEntry: "./dist/index.js", browserEntry: "./dist/browser.js", workerEntry: "./dist/worker.js",
-  statePaths: ["meta/codexia/modules/diagnostics"], locality: "local",
+  statePaths: ["meta/scriptorium/modules/diagnostics"], locality: "local",
 };
 
 const MAX_TEXT_LENGTH = 500_000;
@@ -52,10 +52,10 @@ const MAX_VOICE_CORPUS_CHARACTERS = 20_000;
 const MAX_VOICE_ATTRIBUTIONS = 100;
 const LINT_PATH_PREFIX = "manuscript/";
 const MAX_WORKER_TIME_MS = 120_000;
-const LINT_CONFIG_PATH = "meta/codexia/modules/diagnostics/lint-rules.yaml";
-const TONE_CONFIG_PATH = "meta/codexia/modules/diagnostics/tone-lexicon.yaml";
-const PLOT_CONFIG_PATH = "meta/codexia/modules/diagnostics/plot-lexicon.yaml";
-const SYNONYMS_PATH = "meta/codexia/modules/nlp/synonyms.yaml";
+const LINT_CONFIG_PATH = "meta/scriptorium/modules/diagnostics/lint-rules.yaml";
+const TONE_CONFIG_PATH = "meta/scriptorium/modules/diagnostics/tone-lexicon.yaml";
+const PLOT_CONFIG_PATH = "meta/scriptorium/modules/diagnostics/plot-lexicon.yaml";
+const SYNONYMS_PATH = "meta/scriptorium/modules/nlp/synonyms.yaml";
 
 type RecordValue = Record<string, unknown>;
 function record(value: unknown, label: string): RecordValue {

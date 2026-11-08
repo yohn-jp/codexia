@@ -123,9 +123,9 @@ async function restoreDefaultBranch({ root, label, url, files, token, askpass })
     "bible/locations/loc-p05-garden.yaml",
     "plot/volumes/vol-main/chapters/ch-main-1/scenes/sc-p05-garden.yaml",
     "manuscript/vol-main/ch-main-1/sc-p05-garden.md",
-    "meta/codexia/modules/story/zukan-suggestions.jsonl",
-    "meta/codexia/modules/story/v1/series.json",
-    "meta/codexia/modules/story/p05-acceptance-remote-advance.txt",
+    "meta/scriptorium/modules/story/zukan-suggestions.jsonl",
+    "meta/scriptorium/modules/story/v1/series.json",
+    "meta/scriptorium/modules/story/p05-acceptance-remote-advance.txt",
   ];
   for (const relative of generatedFiles) {
     if (Object.hasOwn(files, relative)) continue;
@@ -361,7 +361,7 @@ test("Story actions compose with Core over GitHub snapshots, approvals, recovery
     assert.equal(persistedZukan.ok, true, persistedZukan.ok ? undefined : persistedZukan.error.message);
     assert.ok(persistedZukan.data.suggestions.some((suggestion) => suggestion.id === zukanCreated.data.suggestion.id), "the checkpointed proposal persists the source-validated pending row");
 
-    const remoteAdvancePath = "meta/codexia/modules/story/p05-acceptance-remote-advance.txt";
+    const remoteAdvancePath = "meta/scriptorium/modules/story/p05-acceptance-remote-advance.txt";
     await pushSyntheticDefaultBranchFile({
       directory: workSeed,
       branch: workBranch,
@@ -388,7 +388,7 @@ test("Story actions compose with Core over GitHub snapshots, approvals, recovery
     await pushSyntheticDefaultBranchFile({
       directory: workSeed,
       branch: workBranch,
-      relative: "meta/codexia/modules/story/zukan-suggestions.jsonl",
+      relative: "meta/scriptorium/modules/story/zukan-suggestions.jsonl",
       remove: true,
       token: githubToken,
       askpass,

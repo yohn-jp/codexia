@@ -502,21 +502,21 @@ test("composed legacy import preserves disabled data and reactivates after a ful
       entry.target === SPEAKER_OVERRIDE_SCENE_PATH && entry.category === "provisional" && entry.disposition === "planned"),
     "the existing pending-Git producer must expose the scene-level override as a reviewable operation");
     for (const target of [
-      "meta/codexia/modules/speaker/legacy/files/meta/speaker-corrections.jsonl",
-      "meta/codexia/modules/speaker/legacy/files/meta/speaker-model.json",
-      "meta/codexia/modules/nlp/legacy/files/meta/synonyms.yaml",
-      "meta/codexia/modules/semantic/legacy/files/meta/contradiction-dismissals.jsonl",
-      "meta/codexia/modules/diagnostics/legacy/files/meta/lint-rules.yaml",
-      "meta/codexia/modules/assistant/legacy/files/.arcadia/llm-model-settings.json",
-      "meta/codexia/modules/story/legacy/files/.arcadia/change-sets/applied.json",
-      "meta/codexia/modules/story/legacy/files/.arcadia/change-sets/pending.json",
-      "meta/codexia/modules/story/legacy/files/.arcadia/snapshots/scene-before.md",
-      "meta/codexia/modules/story/legacy/files/meta/scratch/idea-stable.md",
-      "meta/codexia/modules/story/legacy/files/meta/scratch/files/idea-stable/diagram.bin",
-      "meta/codexia/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl",
-      "meta/codexia/modules/story/legacy/sqlite/workspace-index/zukan_suggestions.jsonl",
-      "meta/codexia/modules/publishing/legacy/files/.arcadia/cover.jpg",
-      "meta/codexia/modules/publishing/legacy/share-grants.jsonl",
+      "meta/scriptorium/modules/speaker/legacy/files/meta/speaker-corrections.jsonl",
+      "meta/scriptorium/modules/speaker/legacy/files/meta/speaker-model.json",
+      "meta/scriptorium/modules/nlp/legacy/files/meta/synonyms.yaml",
+      "meta/scriptorium/modules/semantic/legacy/files/meta/contradiction-dismissals.jsonl",
+      "meta/scriptorium/modules/diagnostics/legacy/files/meta/lint-rules.yaml",
+      "meta/scriptorium/modules/assistant/legacy/files/.arcadia/llm-model-settings.json",
+      "meta/scriptorium/modules/story/legacy/files/.arcadia/change-sets/applied.json",
+      "meta/scriptorium/modules/story/legacy/files/.arcadia/change-sets/pending.json",
+      "meta/scriptorium/modules/story/legacy/files/.arcadia/snapshots/scene-before.md",
+      "meta/scriptorium/modules/story/legacy/files/meta/scratch/idea-stable.md",
+      "meta/scriptorium/modules/story/legacy/files/meta/scratch/files/idea-stable/diagram.bin",
+      "meta/scriptorium/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl",
+      "meta/scriptorium/modules/story/legacy/sqlite/workspace-index/zukan_suggestions.jsonl",
+      "meta/scriptorium/modules/publishing/legacy/files/.arcadia/cover.jpg",
+      "meta/scriptorium/modules/publishing/legacy/share-grants.jsonl",
     ]) assert.ok(disabledByPath.has(target), `disabled modules must retain opaque state at ${target}`);
 
     for (const moduleOwnedSource of [
@@ -527,7 +527,7 @@ test("composed legacy import preserves disabled data and reactivates after a ful
       "meta/tone-lexicon.yaml",
       "meta/plot-lexicon.yaml",
     ]) {
-      assert.ok(!disabledByPath.has(`meta/codexia/modules/story/legacy/files/${moduleOwnedSource}`),
+      assert.ok(!disabledByPath.has(`meta/scriptorium/modules/story/legacy/files/${moduleOwnedSource}`),
         `${moduleOwnedSource} must have one semantic module owner while Story is disabled`);
     }
 
@@ -550,7 +550,7 @@ test("composed legacy import preserves disabled data and reactivates after a ful
     assert.ok(disabled.entries.some((entry) => entry.source === ".npmrc" && entry.category === "secret" && entry.disposition === "excluded"));
     assert.ok(disabled.entries.some((entry) => entry.source === ".ssh/id_ed25519" && entry.category === "secret" && entry.disposition === "excluded"));
     assert.ok(disabled.recovery.some((record) => recoveryText(record).includes("pending-changeset-stable")));
-    assert.ok(!disabledWrites.some((write) => /^meta\/codexia\/modules\/(?:story|diagnostics|nlp|semantic|speaker|assistant|publishing)\/(?!legacy\/)/u.test(write.path)),
+    assert.ok(!disabledWrites.some((write) => /^meta\/scriptorium\/modules\/(?:story|diagnostics|nlp|semantic|speaker|assistant|publishing)\/(?!legacy\/)/u.test(write.path)),
       "disabled modules must not receive canonical state writes");
     assert.ok(!JSON.stringify(disabled).includes("DO_NOT_EXPORT_"), "secret and derived sentinel bytes must not enter the import plan");
     assert.ok(!JSON.stringify(disabled).includes("DO_NOT_PUBLISH_"), "derived index rows must never enter the import plan");
@@ -560,9 +560,9 @@ test("composed legacy import preserves disabled data and reactivates after a ful
     assert.ok(!JSON.stringify(disabled).includes("DO_NOT_PUBLISH_RAW_CURSOR_EXTENSION"),
       "unknown host source fields must stay outside repository import operations");
 
-    const projectRows = disabledByPath.get("meta/codexia/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl").content;
-    const workspaceRows = disabledByPath.get("meta/codexia/modules/story/legacy/sqlite/workspace-index/state_proposals.jsonl").content;
-    const disabledGrants = disabledByPath.get("meta/codexia/modules/publishing/legacy/share-grants.jsonl").content;
+    const projectRows = disabledByPath.get("meta/scriptorium/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl").content;
+    const workspaceRows = disabledByPath.get("meta/scriptorium/modules/story/legacy/sqlite/workspace-index/state_proposals.jsonl").content;
+    const disabledGrants = disabledByPath.get("meta/scriptorium/modules/publishing/legacy/share-grants.jsonl").content;
     assert.ok(!disabledGrants.includes("foreign-share-grant"), "grants for other projects are outside the explicit import scope");
     assert.ok(projectRows.includes("state-project-pending"));
     assert.ok(projectRows.includes('"vendor_extension":"unknown-state:state-project-approved"'));
@@ -571,8 +571,8 @@ test("composed legacy import preserves disabled data and reactivates after a ful
     assert.ok(!workspaceRows.includes("DO_NOT_EXPORT_SQLITE_SECRET"));
     assert.ok(!JSON.stringify(disabled).includes("job-mapped-stable"), "private job results must stay outside repository operations");
     for (const binaryPath of [
-      "meta/codexia/modules/story/legacy/files/.arcadia/snapshots/attachments/diagram.bin",
-      "meta/codexia/modules/publishing/legacy/files/.arcadia/cover.jpg",
+      "meta/scriptorium/modules/story/legacy/files/.arcadia/snapshots/attachments/diagram.bin",
+      "meta/scriptorium/modules/publishing/legacy/files/.arcadia/cover.jpg",
     ]) assert.equal(disabledByPath.get(binaryPath)?.encoding, "base64", `${binaryPath} must use the contract base64 encoding`);
 
     const repeatedDisabled = await inspect(core, project.id, sourceRoot, workspaceRoot, registry, reader, [], identity);
@@ -761,25 +761,25 @@ test("composed legacy import preserves disabled data and reactivates after a ful
     const enabledWrites = writesOf(enabled);
     const enabledByPath = new Map(enabledWrites.map((write) => [write.path, write]));
     for (const target of [
-      "meta/codexia/modules/speaker/corrections.jsonl",
-      "meta/codexia/modules/speaker/adopted-model.json",
-      "meta/codexia/modules/nlp/synonyms.yaml",
-      "meta/codexia/modules/nlp/candidate-ignore-list.yaml",
-      "meta/codexia/modules/nlp/feature-settings.json",
-      "meta/codexia/modules/semantic/contradiction-dismissals.jsonl",
-      "meta/codexia/modules/diagnostics/lint-rules.yaml",
-      "meta/codexia/modules/diagnostics/tone-lexicon.yaml",
-      "meta/codexia/modules/diagnostics/plot-lexicon.yaml",
-      "meta/codexia/modules/assistant/model-settings.json",
-      "meta/codexia/modules/assistant/usage.jsonl",
-      "meta/codexia/modules/publishing/episodes.yaml",
-      "meta/codexia/modules/publishing/share-grants.jsonl",
-      "meta/codexia/modules/story/v1/series.json",
-      "meta/codexia/modules/story/change-sets/applied.json",
-      "meta/codexia/modules/story/local-snapshots/scene-before.md",
-      "meta/codexia/modules/story/local-snapshots/attachments/diagram.bin",
-      "meta/codexia/modules/story/state-proposals.jsonl",
-      "meta/codexia/modules/story/zukan-suggestions.jsonl",
+      "meta/scriptorium/modules/speaker/corrections.jsonl",
+      "meta/scriptorium/modules/speaker/adopted-model.json",
+      "meta/scriptorium/modules/nlp/synonyms.yaml",
+      "meta/scriptorium/modules/nlp/candidate-ignore-list.yaml",
+      "meta/scriptorium/modules/nlp/feature-settings.json",
+      "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl",
+      "meta/scriptorium/modules/diagnostics/lint-rules.yaml",
+      "meta/scriptorium/modules/diagnostics/tone-lexicon.yaml",
+      "meta/scriptorium/modules/diagnostics/plot-lexicon.yaml",
+      "meta/scriptorium/modules/assistant/model-settings.json",
+      "meta/scriptorium/modules/assistant/usage.jsonl",
+      "meta/scriptorium/modules/publishing/episodes.yaml",
+      "meta/scriptorium/modules/publishing/share-grants.jsonl",
+      "meta/scriptorium/modules/story/v1/series.json",
+      "meta/scriptorium/modules/story/change-sets/applied.json",
+      "meta/scriptorium/modules/story/local-snapshots/scene-before.md",
+      "meta/scriptorium/modules/story/local-snapshots/attachments/diagram.bin",
+      "meta/scriptorium/modules/story/state-proposals.jsonl",
+      "meta/scriptorium/modules/story/zukan-suggestions.jsonl",
     ]) assert.ok(enabledByPath.has(target), `re-enabled module must produce reviewable canonical write ${target}`);
     for (const moduleOwnedSource of [
       "meta/synonyms.yaml",
@@ -790,8 +790,8 @@ test("composed legacy import preserves disabled data and reactivates after a ful
       "meta/plot-lexicon.yaml",
     ]) assert.ok(!enabledByPath.has(moduleOwnedSource), `${moduleOwnedSource} must not be re-imported as raw Story document data`);
 
-    const stateProposals = enabledByPath.get("meta/codexia/modules/story/state-proposals.jsonl").content;
-    const zukanSuggestions = enabledByPath.get("meta/codexia/modules/story/zukan-suggestions.jsonl").content;
+    const stateProposals = enabledByPath.get("meta/scriptorium/modules/story/state-proposals.jsonl").content;
+    const zukanSuggestions = enabledByPath.get("meta/scriptorium/modules/story/zukan-suggestions.jsonl").content;
     assert.ok(stateProposals.includes("state-project-approved") && stateProposals.includes("state-workspace-rejected"));
     assert.ok(stateProposals.includes("state-project-pending") && stateProposals.includes("state-workspace-stale"));
     assert.ok(stateProposals.includes('"vendor_extension":"unknown-state:state-project-approved"'));
@@ -808,32 +808,32 @@ test("composed legacy import preserves disabled data and reactivates after a ful
     assert.ok(enabled.recovery.some((record) => record.content.includes("zukan-divergent")), "divergent suggestion versions remain available for review");
     assert.ok(enabled.recovery.some((record) => recoveryText(record).includes("pending-changeset-stable")),
       "unaccepted ChangeSets remain recovery records after re-enable");
-    assert.ok(!enabledByPath.has("meta/codexia/modules/story/change-sets/pending.json"), "pending ChangeSets must not become canonical Story history");
+    assert.ok(!enabledByPath.has("meta/scriptorium/modules/story/change-sets/pending.json"), "pending ChangeSets must not become canonical Story history");
 
     for (const [target, expected] of [
-      ["meta/codexia/modules/story/change-sets/applied.json", "{\"changeSet\":{\"id\":\"applied-changeset-stable\"},\"status\":\"applied\",\"unknownField\":{\"retain\":true}}\n"],
-      ["meta/codexia/modules/story/local-snapshots/scene-before.md", "---\nauthor_note: preserve\n---\nSynthetic local snapshot\n"],
+      ["meta/scriptorium/modules/story/change-sets/applied.json", "{\"changeSet\":{\"id\":\"applied-changeset-stable\"},\"status\":\"applied\",\"unknownField\":{\"retain\":true}}\n"],
+      ["meta/scriptorium/modules/story/local-snapshots/scene-before.md", "---\nauthor_note: preserve\n---\nSynthetic local snapshot\n"],
     ]) assert.equal(enabledByPath.get(target).content, expected, `Story recovery bytes must remain exact at ${target}`);
     assert.ok(enabled.entries.some((entry) =>
-      entry.source === "meta/codexia/modules/story/legacy/files/meta/scratch/idea-stable.md" && entry.disposition === "unchanged"),
+      entry.source === "meta/scriptorium/modules/story/legacy/files/meta/scratch/idea-stable.md" && entry.disposition === "unchanged"),
     "an exact scratch file already present in the remote must not produce a duplicate write");
-    assert.equal(enabledByPath.get("meta/codexia/modules/story/local-snapshots/attachments/diagram.bin")?.encoding, "base64",
+    assert.equal(enabledByPath.get("meta/scriptorium/modules/story/local-snapshots/attachments/diagram.bin")?.encoding, "base64",
       "snapshot attachments must preserve binary encoding");
 
-    const series = JSON.parse(enabledByPath.get("meta/codexia/modules/story/v1/series.json").content);
+    const series = JSON.parse(enabledByPath.get("meta/scriptorium/modules/story/v1/series.json").content);
     assert.equal(series.series[0].bibleRepositoryId, restoredIdentity.repositoryId);
     assert.deepEqual(series.series[0].memberRepositoryIds, [restoredIdentity.repositoryId]);
     assert.equal(series.series[0].unknownField, "retain");
     assert.equal(series.bindings[0].repositoryId, restoredIdentity.repositoryId);
     assert.equal(series.bindings[0].unknownBinding, true);
 
-    const grant = JSON.parse(enabledByPath.get("meta/codexia/modules/publishing/share-grants.jsonl").content.trim());
+    const grant = JSON.parse(enabledByPath.get("meta/scriptorium/modules/publishing/share-grants.jsonl").content.trim());
     assert.equal(grant.id, "share-grant-stable");
     assert.equal(grant.projectId, restoredIdentity.repositoryId);
     assert.equal(grant.tokenHash, "b".repeat(64));
     assert.ok(!JSON.stringify(grant).includes("synthetic-private-owner"));
     assert.ok(!JSON.stringify(grant).includes("DO_NOT_EXPORT_BEARER"));
-    assert.ok(!enabledByPath.get("meta/codexia/modules/publishing/share-grants.jsonl").content.includes("foreign-share-grant"));
+    assert.ok(!enabledByPath.get("meta/scriptorium/modules/publishing/share-grants.jsonl").content.includes("foreign-share-grant"));
     assert.ok(!JSON.stringify(enabled).includes("DO_NOT_PUBLISH_"));
 
     const enabledPublishedReader = await approveCheckpointPublish(replacement, restoredProject.id, enabled, "p12-module-reactivation");
@@ -850,12 +850,12 @@ test("composed legacy import preserves disabled data and reactivates after a ful
     assert.equal((await finalReader.read(SPEAKER_OVERRIDE_SCENE_PATH))?.content, SPEAKER_OVERRIDE_SCENE,
       "the manual scene override must survive the second complete Core data-root replacement");
     const allPaths = await finalReader.list("");
-    assert.ok(allPaths.includes("meta/codexia/modules/story/state-proposals.jsonl"));
-    assert.ok(allPaths.includes("meta/codexia/modules/story/zukan-suggestions.jsonl"));
-    assert.ok(allPaths.includes("meta/codexia/modules/story/change-sets/applied.json"));
-    assert.ok(allPaths.includes("meta/codexia/modules/story/local-snapshots/attachments/diagram.bin"));
+    assert.ok(allPaths.includes("meta/scriptorium/modules/story/state-proposals.jsonl"));
+    assert.ok(allPaths.includes("meta/scriptorium/modules/story/zukan-suggestions.jsonl"));
+    assert.ok(allPaths.includes("meta/scriptorium/modules/story/change-sets/applied.json"));
+    assert.ok(allPaths.includes("meta/scriptorium/modules/story/local-snapshots/attachments/diagram.bin"));
     assert.ok(allPaths.includes("meta/scratch/files/idea-stable/diagram.bin"));
-    assert.ok(allPaths.includes("meta/codexia/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl"));
+    assert.ok(allPaths.includes("meta/scriptorium/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl"));
     assert.ok(allPaths.includes("notes/from-unpublished-commit.md"));
     assert.ok(allPaths.includes("notes/staged-add.md"));
     assert.ok(allPaths.includes("notes/story-clue.md"));
@@ -865,10 +865,10 @@ test("composed legacy import preserves disabled data and reactivates after a ful
     assert.ok(!allPaths.some((file) => /recent-activity|sc-cursor/u.test(file)),
       "private cross-device cursor state must never be published to repository Git");
 
-    const finalState = (await finalReader.read("meta/codexia/modules/story/state-proposals.jsonl")).content;
+    const finalState = (await finalReader.read("meta/scriptorium/modules/story/state-proposals.jsonl")).content;
     assert.equal(finalState, stateProposals, "canonical workflow IDs and rows survive a second complete Core data-root replacement");
-    const finalGrant = (await finalReader.read("meta/codexia/modules/publishing/share-grants.jsonl")).content;
-    assert.equal(finalGrant, enabledByPath.get("meta/codexia/modules/publishing/share-grants.jsonl").content);
+    const finalGrant = (await finalReader.read("meta/scriptorium/modules/publishing/share-grants.jsonl")).content;
+    assert.equal(finalGrant, enabledByPath.get("meta/scriptorium/modules/publishing/share-grants.jsonl").content);
     assert.equal((await finalReader.read("meta/scratch/idea-stable.md")).content, "A synthetic published scratch note.\n");
     assert.equal((await finalReader.read("meta/scratch/files/idea-stable/diagram.bin", "base64")).content,
       Buffer.from([7, 0, 249, 33]).toString("base64"));

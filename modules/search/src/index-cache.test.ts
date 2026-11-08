@@ -61,8 +61,8 @@ test("index cache filters project data to canonical textual document roots", asy
     "plot/v1/c1/s1.yaml": "name: harbor",
     "bible/places/harbor.yaml": "description: moonlit",
     "meta/scratch/notes.md": "local note",
-    "meta/codexia/modules/search/terms.json": "private term state",
-    "meta/codexia/operations/checkpoint.json": "private operation state",
+    "meta/scriptorium/modules/search/terms.json": "private term state",
+    "meta/scriptorium/operations/checkpoint.json": "private operation state",
     "attachments/cover.png": "binary",
     "unrelated/readme.md": "unrelated text",
     "plot/.hidden/source.md": "hidden text",
@@ -73,9 +73,9 @@ test("index cache filters project data to canonical textual document roots", asy
   assert.deepEqual([...indexed.documents.keys()].sort(), [
     "bible/places/harbor.yaml", "manuscript/v1/c1/s1.md", "meta/scratch/notes.md", "plot/v1/c1/s1.yaml",
   ]);
-  assert.equal(counters.readPaths.some((path) => path.startsWith("meta/codexia/")), false);
+  assert.equal(counters.readPaths.some((path) => path.startsWith("meta/scriptorium/")), false);
   assert.equal(counters.readPaths.some((path) => path.startsWith("attachments/")), false);
-  assert.equal(isSearchableDocumentPath("meta/codexia/modules/search/terms.json"), false);
+  assert.equal(isSearchableDocumentPath("meta/scriptorium/modules/search/terms.json"), false);
 });
 
 test("unchanged snapshots reuse the index and changed revisions update and remove only their entries", async () => {

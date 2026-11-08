@@ -10,7 +10,7 @@ function lateOperation(context: BrowserModuleContext): ChangeOperation {
     effect: "metadata",
     reads: [],
     writes: [{
-      path: "meta/codexia/modules/publishing/lifecycle-late-callback.md",
+      path: "meta/scriptorium/modules/publishing/lifecycle-late-callback.md",
       revision: null,
       content: "This callback belongs to a disposed author scope.\n",
     }],

@@ -344,11 +344,11 @@ interface StoredOperation extends OperationMetadata {
   receipt: CheckpointReceipt;
 }
 
-const OPERATION_DIRECTORY = "meta/codexia/operations/v1";
-const PUBLICATION_DIRECTORY = "meta/codexia/publications/v1";
-const PROPOSAL_V1_DIRECTORY = "meta/codexia/proposals/v1";
-const PROPOSAL_BINDING_DIRECTORY = "meta/codexia/proposals/v2/bindings";
-const PROPOSAL_COMPLETE_DIRECTORY = "meta/codexia/proposals/v2/complete";
+const OPERATION_DIRECTORY = "meta/scriptorium/operations/v1";
+const PUBLICATION_DIRECTORY = "meta/scriptorium/publications/v1";
+const PROPOSAL_V1_DIRECTORY = "meta/scriptorium/proposals/v1";
+const PROPOSAL_BINDING_DIRECTORY = "meta/scriptorium/proposals/v2/bindings";
+const PROPOSAL_COMPLETE_DIRECTORY = "meta/scriptorium/proposals/v2/complete";
 const MAX_PROPOSAL_JOURNAL_BYTES = 8 * 1024 * 1024;
 const MAX_PUSH_ATTEMPTS = 3;
 const HISTORICAL_METADATA_CACHE_MAX_BYTES = 64 * 1024 * 1024;
@@ -953,7 +953,7 @@ export class CoreStore implements MutationCoordinator {
 
   constructor(options: CoreStoreOptions) {
     if (!options?.dataDir) throw new TypeError("CoreStore requires dataDir");
-    const configuredToken = options.githubToken ?? process.env.CODEXIA_GITHUB_TOKEN;
+    const configuredToken = options.githubToken ?? process.env.CODEXIA_GITHUB_TOKEN ?? process.env.SCRIPTORIUM_GITHUB_TOKEN;
     if (options.hostedRepository) {
       const binding = options.hostedRepository;
       if (!Number.isSafeInteger(binding.repositoryId) || binding.repositoryId <= 0 ||
@@ -2165,7 +2165,7 @@ export class CoreStore implements MutationCoordinator {
     const operations: StoredOperation[] = [];
     const foundReceipts = new Set<string>();
     for (const { metadata, path: filePath, commit: changedAt } of operationMetadata.values()) {
-      const originalCommit = await this.getRef(root, `refs/codexia/checkpoints/${metadata.operation.id}`);
+      const originalCommit = await this.getRef(root, `refs/scriptorium/checkpoints/${metadata.operation.id}`);
       const reconstructedReceipt: CheckpointReceipt = {
         operationId: metadata.operation.id,
         generation: metadata.operation.generation,
@@ -2197,11 +2197,11 @@ export class CoreStore implements MutationCoordinator {
   }
 
   private async readLocalOperationRecords(root: string): Promise<StoredOperation[]> {
-    const refs = (await git(root, ["for-each-ref", "--format=%(refname)", "refs/codexia/checkpoints/"]))
+    const refs = (await git(root, ["for-each-ref", "--format=%(refname)", "refs/scriptorium/checkpoints/"]))
       .trim().split(/\r?\n/).filter(Boolean);
     const byId = new Map<string, StoredOperation>();
     for (const ref of refs) {
-      const id = ref.slice("refs/codexia/checkpoints/".length);
+      const id = ref.slice("refs/scriptorium/checkpoints/".length);
       if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) continue;
       const commit = await this.getRef(root, ref);
       if (!commit) continue;
@@ -2212,12 +2212,12 @@ export class CoreStore implements MutationCoordinator {
   }
 
   private async readLocalOperationRecordsForDurability(root: string): Promise<StoredOperation[]> {
-    const refs = (await git(root, ["for-each-ref", "--format=%(refname)", "refs/codexia/checkpoints/"]))
+    const refs = (await git(root, ["for-each-ref", "--format=%(refname)", "refs/scriptorium/checkpoints/"]))
       .trim().split(/\r?\n/).filter(Boolean);
     const byId = new Map<string, StoredOperation>();
     for (const ref of refs) {
-      const id = ref.slice("refs/codexia/checkpoints/".length);
-      if (!ref.startsWith("refs/codexia/checkpoints/") || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
+      const id = ref.slice("refs/scriptorium/checkpoints/".length);
+      if (!ref.startsWith("refs/scriptorium/checkpoints/") || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
         throw coreError(409, "local_durability_unknown", "A local checkpoint reference cannot be classified safely");
       }
       const commit = await this.getRef(root, ref);
@@ -2303,17 +2303,17 @@ export class CoreStore implements MutationCoordinator {
     const remoteBatches = remoteCommit ? await this.readPublicationRecords(root, remoteCommit) : new Map<string, PublicationMetadata>();
     for (const ref of refs) {
       if (ref === `refs/heads/${branch}` || ref === `refs/remotes/origin/${branch}` ||
-          ref === "refs/codexia/checkpoint-head" || ref === "refs/codexia/reconciled-head") continue;
+          ref === "refs/scriptorium/checkpoint-head" || ref === "refs/scriptorium/reconciled-head") continue;
       if (ref === "refs/remotes/origin/HEAD") {
         const target = (await git(root, ["symbolic-ref", "-q", ref]).catch(() => "")).trim();
         if (target === `refs/remotes/origin/${branch}`) continue;
         return true;
       }
-      const checkpoint = ref.match(/^refs\/codexia\/checkpoints\/([A-Za-z0-9_-]{1,128})$/u);
+      const checkpoint = ref.match(/^refs\/scriptorium\/checkpoints\/([A-Za-z0-9_-]{1,128})$/u);
       if (checkpoint && localOperationIds.has(checkpoint[1]!)) continue;
-      const reconciliation = ref.match(/^refs\/codexia\/reconciliations\/([A-Za-z0-9_-]{1,128})$/u);
+      const reconciliation = ref.match(/^refs\/scriptorium\/reconciliations\/([A-Za-z0-9_-]{1,128})$/u);
       if (reconciliation && localOperationIds.has(reconciliation[1]!)) continue;
-      const publication = ref.match(/^refs\/codexia\/publications\/([A-Za-z0-9_-]{1,128})$/u);
+      const publication = ref.match(/^refs\/scriptorium\/publications\/([A-Za-z0-9_-]{1,128})$/u);
       if (publication && remoteBatches.has(publication[1]!)) continue;
       return true;
     }
@@ -2321,22 +2321,22 @@ export class CoreStore implements MutationCoordinator {
   }
 
   private async checkpointHead(root: string): Promise<string> {
-    const tracked = await this.getRef(root, "refs/codexia/checkpoint-head");
+    const tracked = await this.getRef(root, "refs/scriptorium/checkpoint-head");
     if (tracked) return tracked;
     return this.getRef(root, "HEAD");
   }
 
   private async operationRefsKey(root: string): Promise<string> {
-    const refs = await git(root, ["for-each-ref", "--format=%(refname) %(objectname)", "refs/codexia/checkpoints/"]);
+    const refs = await git(root, ["for-each-ref", "--format=%(refname) %(objectname)", "refs/scriptorium/checkpoints/"]);
     return JSON.stringify([
-      await this.getRef(root, "refs/codexia/checkpoint-head") ?? "",
+      await this.getRef(root, "refs/scriptorium/checkpoint-head") ?? "",
       await this.getRef(root, "HEAD") ?? "",
       refs.trim(),
     ]);
   }
 
   private async reconciliationStateKey(root: string, observation: RemoteObservation): Promise<string> {
-    const refs = await git(root, ["for-each-ref", "--format=%(refname) %(objectname)", "refs/codexia/"]);
+    const refs = await git(root, ["for-each-ref", "--format=%(refname) %(objectname)", "refs/scriptorium/"]);
     return JSON.stringify([
       path.resolve(root),
       snapshotKey(observation.snapshot),
@@ -3886,9 +3886,9 @@ export class CoreStore implements MutationCoordinator {
         revision: write.content === null ? null : revisionForBytes(write.encoding === "base64" ? Buffer.from(write.content, "base64") : Buffer.from(write.content, "utf8")),
       })),
     };
-    await git(root, ["update-ref", `refs/codexia/checkpoints/${operation.id}`, commit]);
-    const oldCheckpointHead = await this.getRef(root, "refs/codexia/checkpoint-head");
-    await git(root, ["update-ref", "refs/codexia/checkpoint-head", commit, ...(oldCheckpointHead ? [oldCheckpointHead] : [])]);
+    await git(root, ["update-ref", `refs/scriptorium/checkpoints/${operation.id}`, commit]);
+    const oldCheckpointHead = await this.getRef(root, "refs/scriptorium/checkpoint-head");
+    await git(root, ["update-ref", "refs/scriptorium/checkpoint-head", commit, ...(oldCheckpointHead ? [oldCheckpointHead] : [])]);
     const head = await this.getRef(root, "HEAD");
     const branch = (await git(root, ["branch", "--show-current"])).trim();
     if (head === parent && branch === record.branch) {
@@ -4022,7 +4022,7 @@ export class CoreStore implements MutationCoordinator {
         const manifest: PublicationMetadata = { version: 1, batchId, digest, operations: rows };
         const parent = reconciled.snapshot.overlayCommit ?? remoteHead;
         const commit = await this.createCommit(root, parent, [], [{ path: manifestPath, content: `${JSON.stringify(manifest, null, 2)}\n` }], `Publish checkpoint batch ${batchId}`);
-        const publicationRef = `refs/codexia/publications/${batchId}`;
+        const publicationRef = `refs/scriptorium/publications/${batchId}`;
         const previous = await this.getRef(root, publicationRef);
         await git(root, ["update-ref", publicationRef, commit, ...(previous ? [previous] : [])]);
         const askpassDir = path.join(this.dataDir, `.askpass-${record.id}`);
@@ -4080,8 +4080,8 @@ export class CoreStore implements MutationCoordinator {
     if (snapshot.overlayCommit) {
       try { await git(root, ["cat-file", "-e", `${snapshot.overlayCommit}^{commit}`]); }
       catch { throw coreError(409, "snapshot_unavailable", "The requested checkpoint snapshot is unavailable"); }
-      const candidates = [currentRemote, await this.checkpointHead(root), await this.getRef(root, "refs/codexia/reconciled-head")];
-      const refs = (await git(root, ["for-each-ref", "--format=%(refname)", "refs/codexia/checkpoints/", "refs/codexia/reconciliations/"])).trim().split(/\r?\n/).filter(Boolean);
+      const candidates = [currentRemote, await this.checkpointHead(root), await this.getRef(root, "refs/scriptorium/reconciled-head")];
+      const refs = (await git(root, ["for-each-ref", "--format=%(refname)", "refs/scriptorium/checkpoints/", "refs/scriptorium/reconciliations/"])).trim().split(/\r?\n/).filter(Boolean);
       for (const ref of refs) candidates.push(await this.getRef(root, ref));
       let reachable = snapshot.overlayCommit === snapshot.remoteCommit;
       for (const candidate of candidates.filter(Boolean)) {
@@ -4116,11 +4116,11 @@ export class CoreStore implements MutationCoordinator {
       else if (published.digest !== local.digest) throw coreError(409, "operation_id_reused", "An operation ID is already bound to a different payload");
     }
     if (!pending.length && remoteHead) {
-      const checkpointRef = await this.getRef(root, "refs/codexia/checkpoint-head");
+      const checkpointRef = await this.getRef(root, "refs/scriptorium/checkpoint-head");
       const trackedHead = checkpointRef || await this.getRef(root, "HEAD");
       const trackedAsCheckpoint = localOperations.some((item) => item.receipt.localCommit === trackedHead);
       if (!trackedHead || trackedAsCheckpoint || await this.isAncestor(root, trackedHead, remoteHead)) {
-        await git(root, ["update-ref", "refs/codexia/checkpoint-head", remoteHead, ...(checkpointRef ? [checkpointRef] : [])]);
+        await git(root, ["update-ref", "refs/scriptorium/checkpoint-head", remoteHead, ...(checkpointRef ? [checkpointRef] : [])]);
         localHead = remoteHead;
       }
     }
@@ -4350,15 +4350,15 @@ export class CoreStore implements MutationCoordinator {
         }
       }
       const replayCommit = await this.createCommit(root, replayHead, operation.writes, metadataFiles, operation.message);
-      const ref = `refs/codexia/reconciliations/${operation.id}`;
+      const ref = `refs/scriptorium/reconciliations/${operation.id}`;
       const previous = await this.getRef(root, ref);
       await git(root, ["update-ref", ref, replayCommit, ...(previous ? [previous] : [])]);
       replayHead = replayCommit;
       outcomes.push({ operationId: operation.id, state: "replayed", receipt: stored.receipt, paths });
     }
-    const previous = await this.getRef(root, "refs/codexia/reconciled-head");
-    if (replayHead) await git(root, ["update-ref", "refs/codexia/reconciled-head", replayHead, ...(previous ? [previous] : [])]);
-    else if (previous) await git(root, ["update-ref", "-d", "refs/codexia/reconciled-head", previous]);
+    const previous = await this.getRef(root, "refs/scriptorium/reconciled-head");
+    if (replayHead) await git(root, ["update-ref", "refs/scriptorium/reconciled-head", replayHead, ...(previous ? [previous] : [])]);
+    else if (previous) await git(root, ["update-ref", "-d", "refs/scriptorium/reconciled-head", previous]);
     const result: ReconcileResult = {
       snapshot: { ...observation.snapshot, ...(replayHead && replayHead !== remoteHead ? { overlayCommit: replayHead } : {}) },
       operations: outcomes,
@@ -5100,7 +5100,7 @@ export class CoreStore implements MutationCoordinator {
         if (head !== remoteHead) await git(root, ["merge", "--ff-only", remoteHead]);
       } else if (!(await this.isAncestor(root, remoteHead, head))) {
         const localOnly = (await git(root, ["rev-list", head, `^${remoteHead}`])).trim().split(/\r?\n/).filter(Boolean);
-        const checkpointRefs = (await git(root, ["for-each-ref", "--format=%(objectname)", "refs/codexia/checkpoints/"])).trim().split(/\r?\n/).filter(Boolean);
+        const checkpointRefs = (await git(root, ["for-each-ref", "--format=%(objectname)", "refs/scriptorium/checkpoints/"])).trim().split(/\r?\n/).filter(Boolean);
         const checkpointCommits = new Set(checkpointRefs);
         if (localOnly.some((commit) => !checkpointCommits.has(commit))) throw coreError(409, "sync_conflict", "Unregistered local commits are preserved and need explicit reconciliation");
         await git(root, ["reset", "--keep", remoteHead]);

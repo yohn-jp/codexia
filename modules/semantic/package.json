@@ -61,7 +61,7 @@
     "browserEntry": "./dist/browser.js",
     "workerEntry": "./dist/worker.js",
     "statePaths": [
-      "meta/codexia/modules/semantic"
+      "meta/scriptorium/modules/semantic"
     ],
     "locality": "local"
   }

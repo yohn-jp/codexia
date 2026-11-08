@@ -751,7 +751,7 @@ test("local durability does not hide a manual parent of an acknowledged replay c
     await git(clonePath, "add", "manual-only.txt");
     await git(clonePath, "commit", "-m", "Keep unrelated local work");
     const manualCommit = await git(clonePath, "rev-parse", "HEAD");
-    await git(clonePath, "update-ref", "refs/codexia/checkpoint-head", manualCommit);
+    await git(clonePath, "update-ref", "refs/scriptorium/checkpoint-head", manualCommit);
 
     const op = operation(snapshot, "manuscript/acknowledged-replay.md", "This exact operation is later published.\n", null, "manual_parent_replay_operation");
     const receipt = await approveAndCheckpoint(store, project.id, snapshot, op);
@@ -816,7 +816,7 @@ test("deleted publication metadata cannot release a batch ID for different opera
 
     await git(fixture.seed, "fetch", "origin", "main");
     await git(fixture.seed, "reset", "--hard", "origin/main");
-    await git(fixture.seed, "rm", "meta/codexia/publications/v1/batch_deleted_metadata.json");
+    await git(fixture.seed, "rm", "meta/scriptorium/publications/v1/batch_deleted_metadata.json");
     await git(fixture.seed, "commit", "-m", "Remove visible publication metadata");
     await git(fixture.seed, "push", "origin", "main");
     const deletedMetadataHead = await git(fixture.root, "--git-dir", fixture.remote, "rev-parse", "refs/heads/main");
@@ -1645,7 +1645,7 @@ test("historical metadata scans batch immutable blobs and reuse their bounded co
 
     await git(fixture.seed, "fetch", "origin", "main");
     await git(fixture.seed, "reset", "--hard", "origin/main");
-    const metadataPath = `meta/codexia/operations/v1/${op.id}.json`;
+    const metadataPath = `meta/scriptorium/operations/v1/${op.id}.json`;
     const metadata = JSON.parse(await git(fixture.seed, "show", `HEAD:${metadataPath}`)) as unknown;
     for (let version = 0; version < 18; version += 1) {
       const indentation = version % 2 === 0 ? 2 : 4;
@@ -1744,7 +1744,7 @@ test("partial proposal checkpoints persist only accepted payload and reconstruct
     assert.equal(await git(fixture.root, "--git-dir", fixture.remote, "show", `${published.remoteCommit}:manuscript/selected.md`), "Selected effect.");
     assert.equal(await git(fixture.root, "--git-dir", fixture.remote, "show", `${published.remoteCommit}:remote-note.txt`), "Upstream disjoint change.");
     await assert.rejects(git(fixture.root, "--git-dir", fixture.remote, "show", `${published.remoteCommit}:manuscript/unselected.md`));
-    const bindingText = await git(fixture.root, "--git-dir", fixture.remote, "show", `${published.remoteCommit}:meta/codexia/proposals/v2/bindings/${proposal.id}.json`);
+    const bindingText = await git(fixture.root, "--git-dir", fixture.remote, "show", `${published.remoteCommit}:meta/scriptorium/proposals/v2/bindings/${proposal.id}.json`);
     const binding = JSON.parse(bindingText) as Record<string, unknown>;
     assert.equal(binding.version, 2);
     assert.equal(binding.digest !== undefined, true);
@@ -1753,12 +1753,12 @@ test("partial proposal checkpoints persist only accepted payload and reconstruct
     assert.equal(bindingText.includes("source_ncs_map"), false);
     assert.equal(bindingText.includes("Unselected workflow data"), false);
     assert.equal(bindingText.includes("pendingGoal"), false);
-    await assert.rejects(git(fixture.root, "--git-dir", fixture.remote, "grep", "-n", "source_ncs_map", published.remoteCommit, "--", "meta/codexia"));
-    await assert.rejects(git(fixture.root, "--git-dir", fixture.remote, "grep", "-n", "Unselected workflow data", published.remoteCommit, "--", "meta/codexia"));
+    await assert.rejects(git(fixture.root, "--git-dir", fixture.remote, "grep", "-n", "source_ncs_map", published.remoteCommit, "--", "meta/scriptorium"));
+    await assert.rejects(git(fixture.root, "--git-dir", fixture.remote, "grep", "-n", "Unselected workflow data", published.remoteCommit, "--", "meta/scriptorium"));
 
     await git(fixture.seed, "fetch", "origin", "main");
     await git(fixture.seed, "reset", "--hard", "origin/main");
-    await git(fixture.seed, "rm", `meta/codexia/proposals/v2/bindings/${proposal.id}.json`);
+    await git(fixture.seed, "rm", `meta/scriptorium/proposals/v2/bindings/${proposal.id}.json`);
     await git(fixture.seed, "commit", "-m", "Remove visible accepted proposal metadata");
     await git(fixture.seed, "push", "origin", "main");
     await fs.rm(dataDir, { recursive: true, force: true });
@@ -1823,9 +1823,9 @@ test("a complete accepted proposal payload is persisted only after every operati
     await store.propose(project.id, proposal);
     await store.approve(project.id, { proposalId: proposal.id, operationIds: [first.id, second.id], authorScope: "owner" });
     await store.checkpoint(project.id, first);
-    assert.equal(await (await store.reader(project.id, "checkpoint")).read(`meta/codexia/proposals/v2/complete/${proposal.id}.json`), null);
+    assert.equal(await (await store.reader(project.id, "checkpoint")).read(`meta/scriptorium/proposals/v2/complete/${proposal.id}.json`), null);
     await store.checkpoint(project.id, second);
-    const checkpointManifest = await (await store.reader(project.id, "checkpoint")).read(`meta/codexia/proposals/v2/complete/${proposal.id}.json`);
+    const checkpointManifest = await (await store.reader(project.id, "checkpoint")).read(`meta/scriptorium/proposals/v2/complete/${proposal.id}.json`);
     assert.ok(checkpointManifest);
     assert.equal(checkpointManifest.content.includes("complete_source_evidence"), true);
 
@@ -2106,7 +2106,7 @@ test("batched temporary-index updates preserve legacy file-directory conflict se
         name: "user meta file before internal metadata",
         changes: [
           { path: "meta", content: Buffer.from("User file at metadata root.\n") },
-          { path: "meta/codexia/operations/prefix_user_metadata.json", content: Buffer.from("Internal operation metadata.\n") },
+          { path: "meta/scriptorium/operations/prefix_user_metadata.json", content: Buffer.from("Internal operation metadata.\n") },
         ],
         expected: "error",
         unguardedBatch: "tree",
@@ -2162,7 +2162,7 @@ test("batched temporary-index updates preserve legacy file-directory conflict se
     const workspace = path.join(dataDir, "projects", project.id);
     const headBefore = await git(workspace, "rev-parse", "HEAD");
     const branchBefore = await git(workspace, "rev-parse", "refs/heads/main");
-    const checkpointHeadBefore = await git(workspace, "rev-parse", "refs/codexia/checkpoint-head");
+    const checkpointHeadBefore = await git(workspace, "rev-parse", "refs/scriptorium/checkpoint-head");
     const rejectedOperations: Array<{ id: string; writes: ChangeOperation["writes"]; code: string }> = [
       {
         id: "prefix_new_parent_first",
@@ -2235,8 +2235,8 @@ test("batched temporary-index updates preserve legacy file-directory conflict se
         (error: unknown) => error instanceof CoreError && error.code === code, id);
       assert.equal(await git(workspace, "rev-parse", "HEAD"), headBefore, `${id}: HEAD changed`);
       assert.equal(await git(workspace, "rev-parse", "refs/heads/main"), branchBefore, `${id}: branch changed`);
-      assert.equal(await git(workspace, "rev-parse", "refs/codexia/checkpoint-head"), checkpointHeadBefore, `${id}: checkpoint head changed`);
-      assert.equal(await git(workspace, "for-each-ref", "--format=%(refname)", "refs/codexia/checkpoints/"), "", `${id}: checkpoint receipt ref created`);
+      assert.equal(await git(workspace, "rev-parse", "refs/scriptorium/checkpoint-head"), checkpointHeadBefore, `${id}: checkpoint head changed`);
+      assert.equal(await git(workspace, "for-each-ref", "--format=%(refname)", "refs/scriptorium/checkpoints/"), "", `${id}: checkpoint receipt ref created`);
       assert.deepEqual((await store.observe(project.id)).pending, [], `${id}: uncommitted operation became pending`);
     }
   } finally {
@@ -2314,17 +2314,17 @@ test("generic operations cannot replace Core authority metadata but may write mo
     const store = new CoreStore({ dataDir: path.join(fixture.root, "state"), allowLocalRemotes: true });
     const project = await store.registerProject({ url: fixture.remote });
     const snapshot = (await store.observe(project.id)).snapshot;
-    const reserved = operation(snapshot, "meta/codexia/operations/v1/forged.json", "{}\n", null, "reserved_metadata_op");
+    const reserved = operation(snapshot, "meta/scriptorium/operations/v1/forged.json", "{}\n", null, "reserved_metadata_op");
     await assert.rejects(
       store.propose(project.id, { id: "proposal_reserved", snapshot, operations: [reserved], source: "module" }),
       (error: unknown) => error instanceof CoreError && error.code === "invalid_change_operation",
     );
-    const forgedProposalBinding = operation(snapshot, "meta/codexia/proposals/v1/forged.json", "{}\n", null, "reserved_proposal_metadata_op");
+    const forgedProposalBinding = operation(snapshot, "meta/scriptorium/proposals/v1/forged.json", "{}\n", null, "reserved_proposal_metadata_op");
     await assert.rejects(
       store.propose(project.id, { id: "proposal_reserved_binding", snapshot, operations: [forgedProposalBinding], source: "module" }),
       (error: unknown) => error instanceof CoreError && error.code === "invalid_change_operation",
     );
-    const moduleData = operation(snapshot, "meta/codexia/modules/assistant/settings.yaml", "enabled: true\n", null, "module_settings_op");
+    const moduleData = operation(snapshot, "meta/scriptorium/modules/assistant/settings.yaml", "enabled: true\n", null, "module_settings_op");
     const evidence = {
       id: "evidence_module_read",
       snapshot,
@@ -2367,7 +2367,7 @@ test("reachable Git history keeps operation IDs bound after authority metadata i
 
     await git(fixture.seed, "fetch", "origin", "main");
     await git(fixture.seed, "reset", "--hard", "origin/main");
-    await git(fixture.seed, "rm", `meta/codexia/operations/v1/${op.id}.json`, "meta/codexia/publications/v1/batch_history_binding.json");
+    await git(fixture.seed, "rm", `meta/scriptorium/operations/v1/${op.id}.json`, "meta/scriptorium/publications/v1/batch_history_binding.json");
     await git(fixture.seed, "commit", "-m", "Remove visible authority metadata");
     await git(fixture.seed, "push", "origin", "main");
 
