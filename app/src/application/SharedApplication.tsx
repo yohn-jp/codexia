@@ -11,7 +11,7 @@ import {
   type RepositoryIdentity,
   type SnapshotId,
   type UiContribution,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 import { ApiError, api, DocumentDepartureError, type Project, type SceneRead, type Tree, type TreeRead } from "../api";
 import { workspaceContributions } from "../contributions/catalog";
 import { Workspace } from "../workspace/Workspace";
@@ -48,7 +48,7 @@ import {
   type JournalProposal,
 } from "../storage/journal";
 
-const ACTIVE_PROJECT_KEY = "scriptorium:active-project";
+const ACTIVE_PROJECT_KEY = "codexia:active-project";
 
 function isDocumentDepartureAbort(error: unknown): boolean {
   return error instanceof DocumentDepartureError;
@@ -60,7 +60,7 @@ function readLegacyDrafts(): LegacyDraftRecord[] {
     for (let index = 0; index < window.localStorage.length; index++) {
       try {
         const key = window.localStorage.key(index);
-        if (!key?.startsWith("scriptorium:draft:")) continue;
+        if (!key?.startsWith("codexia:draft:")) continue;
         const raw = window.localStorage.getItem(key);
         if (!raw) continue;
         const value: unknown = JSON.parse(raw);
@@ -2442,7 +2442,7 @@ function AuthorWorkspace({
     const blob = new Blob([JSON.stringify(legacyDrafts, null, 2)], { type: "application/json" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = "scriptorium-legacy-drafts.json";
+    link.download = "codexia-legacy-drafts.json";
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(link.href), 0);
   }
@@ -2602,11 +2602,11 @@ function AuthorWorkspace({
     void navigateDocument(path).catch((error) => setStatus({ message: messageOf(error), kind: "error" }));
   }, [navigateDocument]);
 
-  if (authState === "checking") return <main className="loading" role="status">Scriptorium を開いています…</main>;
+  if (authState === "checking") return <main className="loading" role="status">Codexia を開いています…</main>;
   if (authState === "signed-out") {
     return (
       <main className="login-panel">
-        <p className="eyebrow">Scriptorium · 執筆ワークスペース</p>
+        <p className="eyebrow">Codexia · 執筆ワークスペース</p>
         {hostedMode ? <>
           <h1>Praetorium から開いてください</h1>
           <p>この Hosted ワークスペースへのアクセスは Praetorium が管理しています。</p>
@@ -2628,7 +2628,7 @@ function AuthorWorkspace({
 
   const header = (
     <header className="topbar">
-      <a className="brand" href="/" aria-label="Scriptorium ホーム">Scriptorium</a>
+      <a className="brand" href="/" aria-label="Codexia ホーム">Codexia</a>
       <JobInbox canWrite={canWrite} />
       <ThemeControl mode={themeMode} onChange={onThemeChange} error={themeError} />
       <button type="button" className="quiet-button" onClick={() => void signOut()}>ログアウト</button>
@@ -2679,7 +2679,7 @@ function AuthorWorkspace({
       {!work && (
         <section className="empty-state">
           <p className="eyebrow">読む・書く・育てる</p>
-          <h1>Scriptorium</h1>
+          <h1>Codexia</h1>
           <p>Git リポジトリを登録すると、原稿を確認しながら安全に書き進められます。</p>
           {recoverableEntries.length > 0 && <><h2>保存された回復記録</h2><RecoveryList entries={recoverableEntries} /></>}
         </section>

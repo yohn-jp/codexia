@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement, Fragment } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { UiContribution } from "@scriptorium/contracts";
+import type { UiContribution } from "@codexia/contracts";
 import { ApplicationStatus, hasApplicationStatus } from "./ApplicationStatus";
 import { availableModulePanels } from "./AvailableModulePanels";
 import { DocumentInspector } from "./DocumentInspector";

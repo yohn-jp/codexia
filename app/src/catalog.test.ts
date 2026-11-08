@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ModuleStatus, UiContribution } from "@scriptorium/contracts";
+import type { ModuleStatus, UiContribution } from "@codexia/contracts";
 import { discoverableContributions, workspaceContributions } from "./contributions/catalog";
 
 const contributions: UiContribution[] = [

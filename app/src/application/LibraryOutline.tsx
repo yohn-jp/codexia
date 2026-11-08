@@ -1,5 +1,5 @@
 import type { FormEvent } from "react";
-import type { RecentActivityDeviceType, RepositoryIdentity } from "@scriptorium/contracts";
+import type { RecentActivityDeviceType, RepositoryIdentity } from "@codexia/contracts";
 import type { Project, Tree } from "../api";
 import { formatHandoffHint, sceneTitleInTree, type ContinueCandidate } from "../resume/continueCandidates";
 import type { JournalEntry } from "../storage/journal";
