@@ -1,11 +1,11 @@
-import { assertChangeOperation } from "@scriptorium/contracts";
-import { planGeneratedFileImport, stableMigrationId, type MigrationContribution, type MigrationContext, type MigrationProducer } from "@scriptorium/migration";
+import { assertChangeOperation } from "@codexia/contracts";
+import { planGeneratedFileImport, stableMigrationId, type MigrationContribution, type MigrationContext, type MigrationProducer } from "@codexia/migration";
 import YAML from "yaml";
 import { EPISODES_PATH } from "./episodes.js";
 import { normalizeShareScope, readShareGrants, SHARE_GRANTS_PATH } from "./grants.js";
 
-const LEGACY_EPISODES_PATH = "meta/scriptorium/modules/publishing/legacy/files/meta/publish-episodes.yaml";
-const LEGACY_GRANTS_PATH = "meta/scriptorium/modules/publishing/legacy/share-grants.jsonl";
+const LEGACY_EPISODES_PATH = "meta/codexia/modules/publishing/legacy/files/meta/publish-episodes.yaml";
+const LEGACY_GRANTS_PATH = "meta/codexia/modules/publishing/legacy/share-grants.jsonl";
 const EPISODE_SOURCE_PATH = "meta/publish-episodes.yaml";
 const SHARE_SOURCE_PATHS = ["app-state/share-tokens.json", "share-tokens.json"] as const;
 const MAX_MIGRATION_OPERATION_LENGTH = 8 * 1024 * 1024;
@@ -43,7 +43,7 @@ async function inspectEpisodeMap(context: MigrationContext): Promise<MigrationCo
       entries: [{
         producerId: "publishing",
         source: EPISODE_SOURCE_PATH,
-        target: context.enabledModules.has("publishing") ? EPISODES_PATH : "meta/scriptorium/modules/publishing/legacy/files/meta/publish-episodes.yaml",
+        target: context.enabledModules.has("publishing") ? EPISODES_PATH : "meta/codexia/modules/publishing/legacy/files/meta/publish-episodes.yaml",
         category: "authoritative",
         disposition: "blocked",
         detail: error instanceof Error ? error.message : "Publication map cannot be read semantically; exact source bytes remain available for review.",
@@ -55,7 +55,7 @@ async function inspectEpisodeMap(context: MigrationContext): Promise<MigrationCo
 
   const target = context.enabledModules.has("publishing")
     ? EPISODES_PATH
-    : "meta/scriptorium/modules/publishing/legacy/files/meta/publish-episodes.yaml";
+    : "meta/codexia/modules/publishing/legacy/files/meta/publish-episodes.yaml";
   const existing = await context.target.read(target);
   const exact = existing?.content === source.toString("utf8");
   return {
@@ -124,7 +124,7 @@ function safeRetainedGrant(value: unknown, repositoryId: string): Record<string,
 }
 
 function withRetainedSourceGuard(
-  operation: import("@scriptorium/contracts").ChangeOperation,
+  operation: import("@codexia/contracts").ChangeOperation,
   sourcePath: string,
   sourceRevision: string,
 ) {
@@ -432,8 +432,8 @@ async function inspectShareStore(context: MigrationContext): Promise<MigrationCo
   const selected = parsed.filter((record) => isRecord(record) && record.projectId === context.workspaceProjectId);
   const invalid = selected.filter((record) => !isLegacyShare(record));
   const target = context.enabledModules.has("publishing")
-    ? "meta/scriptorium/modules/publishing/share-grants.jsonl"
-    : "meta/scriptorium/modules/publishing/legacy/share-grants.jsonl";
+    ? "meta/codexia/modules/publishing/share-grants.jsonl"
+    : "meta/codexia/modules/publishing/legacy/share-grants.jsonl";
   if (invalid.length) {
     return {
       entries: [{ producerId: "publishing", source: sourcePath, target, category: "authoritative", disposition: "blocked", recordCount: invalid.length, detail: "One or more selected grants lack the source contract's bounded scope, token hash, or valid dates; no publishing grants were activated." }],

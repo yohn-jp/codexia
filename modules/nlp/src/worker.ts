@@ -1,5 +1,5 @@
 import { isAbsolute } from "node:path";
-import { installWorkerHandler } from "@scriptorium/module-runtime";
+import { installWorkerHandler } from "@codexia/module-runtime";
 import { analyze } from "./analyze/index.js";
 import {
   NLP_APPROX_TOKEN_COUNTER_VERSION,

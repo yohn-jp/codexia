@@ -1,6 +1,6 @@
 import { createElement, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import type { BrowserModuleContext, BrowserModuleDefinition } from "@scriptorium/contracts";
+import type { BrowserModuleContext, BrowserModuleDefinition } from "@codexia/contracts";
 
 interface SceneItem { id: string; title: string }
 interface ChapterItem { id: string; title: string; scenes: SceneItem[] }
@@ -26,7 +26,7 @@ interface ShareInfo {
   active: boolean;
 }
 
-const DEFAULT_COVER = "meta/scriptorium/modules/publishing/assets/cover.jpg";
+const DEFAULT_COVER = "meta/codexia/modules/publishing/assets/cover.jpg";
 
 function buttonStyle(danger = false): React.CSSProperties {
   return {

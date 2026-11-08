@@ -1,4 +1,4 @@
-import { CONTRACT_VERSION, type ModuleContext, type ModuleDefinition, type ModuleManifest } from "@scriptorium/contracts";
+import { CONTRACT_VERSION, type ModuleContext, type ModuleDefinition, type ModuleManifest } from "@codexia/contracts";
 import { createPublishingActions } from "./actions.js";
 import { createPublishingHttpContributions } from "./http.js";
 
@@ -11,7 +11,7 @@ export const publishingManifest: ModuleManifest = {
   requires: [],
   serverEntry: "./dist/index.js",
   browserEntry: "./dist/browser.js",
-  statePaths: ["meta/scriptorium/modules/publishing"],
+  statePaths: ["meta/codexia/modules/publishing"],
   locality: "local",
 };
 

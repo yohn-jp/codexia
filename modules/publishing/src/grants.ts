@@ -1,8 +1,8 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import type { SnapshotReader } from "@scriptorium/contracts";
+import type { SnapshotReader } from "@codexia/contracts";
 import type { ShareScope, ShareScopeKind } from "./project.js";
 
-export const SHARE_GRANTS_PATH = "meta/scriptorium/modules/publishing/share-grants.jsonl";
+export const SHARE_GRANTS_PATH = "meta/codexia/modules/publishing/share-grants.jsonl";
 export const MAX_SHARE_EXPIRY_HOURS = 3650 * 24;
 
 export interface ShareGrant {

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ActionResult, ChangeOperation, ModuleAction, ModuleActionContext, ValueSchema } from "@scriptorium/contracts";
+import type { ActionResult, ChangeOperation, ModuleAction, ModuleActionContext, ValueSchema } from "@codexia/contracts";
 import { readEpubBibleEntries } from "./bible.js";
 import { buildEpubExport, DEFAULT_EPUB_COVER_PATH, type EpubExportOptions } from "./epub.js";
 import { readEpisodeMap, mergeEpisodeMap, EPISODES_PATH } from "./episodes.js";
