@@ -17,7 +17,7 @@ on:
       - pnpm-workspace.yaml
       - .github/workflows/backend-release.yml
   push:
-    branches: [chore/codexia-bootstrap-20261108]
+    branches: [main]
     paths:
       - Dockerfile.backend
       - deploy/backend/**
@@ -76,7 +76,7 @@ jobs:
   publish:
     name: Publish immutable GHCR image
     needs: build-test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/chore/codexia-bootstrap-20261108'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

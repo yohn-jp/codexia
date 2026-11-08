@@ -62,4 +62,15 @@ jobs:
           terraform_version: 1.17.1
       - name: Validate Cloudflare Terraform
         working-directory: deploy/cloudflare/terraform
-        run: terraform fmt -check -recursive && terraform init -backend=false && terraform validate
+        run: |
+          terraform fmt -check -recursive
+          # Provider distribution is external to this repository. Retry only
+          # its download; do not skip or weaken the schema validation gate.
+          for attempt in 1 2 3; do
+            if terraform init -backend=false; then
+              terraform validate
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep $((attempt * 10))
+          done

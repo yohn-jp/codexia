@@ -18,7 +18,7 @@ on:
       - pnpm-workspace.yaml
       - .github/workflows/frontend-release.yml
   push:
-    branches: [chore/codexia-bootstrap-20261108]
+    branches: [main]
     paths:
       - app/**
       - app/public/**
@@ -78,7 +78,7 @@ jobs:
   deploy:
     name: Deploy UI Static Assets
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/chore/codexia-bootstrap-20261108'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: codexia-production
