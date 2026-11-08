@@ -8,6 +8,7 @@ import { ManuscriptInput, type ManuscriptInputHandle } from "./ManuscriptInput";
 import { RubyText } from "./ruby";
 import { TermAwareRubyText } from "./TermAwareRubyText";
 import type { ResolveEditorTerms } from "./terms";
+import { assertEditorEvidenceSnapshot, initializeDocumentEvidence, invalidateDocumentEvidence, markEvidenceNeedsReview, type DocumentEvidenceState, type EditorEvidenceAdapter } from "./evidence";
 import { loadTypographySettings, storeTypographySettings, typographyPresetValues, TYPOGRAPHY_PRESETS, type TypographySettings, type TypographyPresetId } from "./typography";
 import { WRITING_SYMBOLS } from "./writingSymbols";
 import { loadReadingPage, saveReadingPage } from "../resume/continueCandidates";
@@ -140,6 +141,9 @@ export function SceneEditor({
   historySnapshot,
   scene,
   path,
+  documentRevision,
+  baseText,
+  evidenceAdapter,
   breadcrumb,
   text,
   textRevision,
@@ -186,6 +190,10 @@ export function SceneEditor({
   historySnapshot: SnapshotId;
   scene: Scene;
   path: string;
+  documentRevision: string | null;
+  /** Text at documentRevision. Recovered editor text may differ and cannot inherit its anchors blindly. */
+  baseText: string;
+  evidenceAdapter?: EditorEvidenceAdapter;
   breadcrumb: string;
   text: string;
   textRevision: number;
@@ -235,6 +243,12 @@ export function SceneEditor({
   const [typography, setTypography] = useState<TypographySettings>(loadTypographySettings);
   const [readingPage, setReadingPage] = useState(() => loadReadingPage(authorScope, repositoryKey, scene.id));
   const [selectionLength, setSelectionLength] = useState(0);
+  const [evidenceState, setEvidenceState] = useState<DocumentEvidenceState | null>(null);
+  const [evidenceLoadKey, setEvidenceLoadKey] = useState(0);
+  const [evidenceLoadStatus, setEvidenceLoadStatus] = useState<"unavailable" | "loading" | "ready" | "failed">("unavailable");
+  const [evidenceLoadError, setEvidenceLoadError] = useState("");
+  const latestTextRef = useRef(text);
+  latestTextRef.current = text;
   const pendingEditorStatusRef = useRef<EditorDurabilityStatusHandle>(null);
   const pendingEditorTextRef = useRef<string | null>(null);
   const pendingEditorTextRevisionRef = useRef<number | null>(null);
@@ -243,6 +257,41 @@ export function SceneEditor({
   const displayText = pendingEditorTextRevisionRef.current === textRevision
     ? pendingEditorTextRef.current ?? text
     : text;
+
+  useEffect(() => {
+    if (!evidenceAdapter || !documentRevision) {
+      setEvidenceState(null);
+      setEvidenceLoadStatus("unavailable");
+      setEvidenceLoadError("");
+      setEvidenceLoadKey((key) => key + 1);
+      return;
+    }
+    const controller = new AbortController();
+    const currentRevision = documentRevision;
+    setEvidenceLoadStatus("loading");
+    setEvidenceLoadError("");
+    setEvidenceState(null);
+    setEvidenceLoadKey((key) => key + 1);
+    void evidenceAdapter.read({ projectId, documentId: scene.id, revisionId: currentRevision }, controller.signal)
+      .then((rawSnapshot) => {
+        if (controller.signal.aborted) return;
+        const snapshot = assertEditorEvidenceSnapshot(rawSnapshot, baseText.length);
+        let next = initializeDocumentEvidence(baseText, documentRevision, snapshot);
+        if (conflict || snapshot.revisionId !== documentRevision) next = invalidateDocumentEvidence(next);
+        else if (latestTextRef.current !== baseText) next = markEvidenceNeedsReview(next);
+        setEvidenceState(next);
+        setEvidenceLoadStatus("ready");
+        setEvidenceLoadKey((key) => key + 1);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setEvidenceState(null);
+        setEvidenceLoadStatus("failed");
+        setEvidenceLoadError(error instanceof Error ? error.message : "Text Anchorを読み込めませんでした。");
+        setEvidenceLoadKey((key) => key + 1);
+      });
+    return () => controller.abort();
+  }, [evidenceAdapter, projectId, scene.id, path, documentRevision, baseText, conflict?.document.revision, conflict]);
 
   useEffect(() => {
     if (!zen) return;
@@ -353,6 +402,31 @@ export function SceneEditor({
         </section>
       )}
 
+      {evidenceAdapter && (
+        <details className="text-anchor-panel" data-testid="text-anchor-panel" open={Boolean(evidenceState?.revisionConflict || evidenceState?.anchors.some((anchor) => anchor.status !== "current")) || undefined}>
+          <summary>Knowledge参照{evidenceState ? ` · ${evidenceState.anchors.length} 件` : ""}</summary>
+          {evidenceLoadStatus === "loading" && <p role="status">この文書のText Anchorを読み込んでいます。</p>}
+          {evidenceLoadStatus === "failed" && <p role="alert">{evidenceLoadError}</p>}
+          {evidenceState?.revisionConflict && <p role="alert">AnchorのRevisionと現在の原稿が一致しません。参照先へ移動せず、最新Revisionで再確認してください。</p>}
+          {evidenceState && evidenceLoadStatus === "ready" && evidenceState.anchors.length === 0 && <p>このRevisionにKnowledge参照はありません。</p>}
+          {evidenceState && evidenceState.anchors.length > 0 && <ul className="text-anchor-list">
+            {evidenceState.anchors.map((anchor) => {
+              const targetPath = anchor.target.targetPath;
+              const statusLabel = anchor.status === "current" ? "確認済み"
+                : anchor.status === "needs_review" ? "再確認"
+                  : anchor.status === "orphaned" ? "失効" : "Revision不一致";
+              return <li key={anchor.id} data-anchor-status={anchor.status}>
+                <span className={`text-anchor-status is-${anchor.status}`}>{statusLabel}</span>
+                {anchor.status === "current" && targetPath && onTermNavigate
+                  ? <button type="button" className="text-anchor-reference" onClick={() => onTermNavigate(targetPath, anchor.target.id)}>{anchor.target.label}</button>
+                  : <span className="text-anchor-reference">{anchor.target.label}</span>}
+                <q>{anchor.quote}</q>
+              </li>;
+            })}
+          </ul>}
+        </details>
+      )}
+
       <nav className="writing-toolbar" aria-label="執筆と閲覧">
         <button type="button" className="quiet-button" onClick={() => { flushPendingReactPublish(); setReading((current) => !current); }} aria-pressed={reading}>{reading ? "編集に戻る" : "読書モード"}</button>
         <button type="button" className="quiet-button" onClick={() => setVertical((current) => !current)} aria-pressed={vertical}>{vertical ? "横書き" : "縦書き"}</button>
@@ -426,6 +500,11 @@ export function SceneEditor({
               resolveTerms={reading ? undefined : resolveTerms}
               onTermNavigate={onTermNavigate}
               termResolutionKey={`${repositoryKey}:${snapshotIdentity}:${scene.id}:${path}`}
+              documentRevision={documentRevision ?? ""}
+              evidenceState={evidenceState}
+              evidenceLoadKey={evidenceLoadKey}
+              evidenceSourceText={baseText}
+              onEvidenceChange={setEvidenceState}
               labelledBy="manuscript-label"
               placeholder="物語の続きを書く"
               style={{

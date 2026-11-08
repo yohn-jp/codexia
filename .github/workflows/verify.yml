@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - chore/codexia-bootstrap-20261108
   workflow_dispatch: null
 permissions:
   contents: read
@@ -49,6 +48,22 @@ jobs:
     if: needs.plan.result == 'success' && needs.plan.outputs.unit != '[]'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      CODEXIA_TEST_DATABASE_URL: postgres://codexia:codexia@127.0.0.1:5432/codexia_test
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: codexia_test
+          POSTGRES_USER: codexia
+          POSTGRES_PASSWORD: codexia
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U codexia -d codexia_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     strategy:
       fail-fast: false
       matrix:

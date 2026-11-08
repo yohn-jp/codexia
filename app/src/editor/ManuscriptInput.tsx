@@ -12,6 +12,8 @@ import { bracketPairsExtension } from "./cm/bracketPairs";
 import { editorCompositionExtension, isViewComposing } from "./cm/compositionGuard";
 import { ellipsisNormalizeExtension } from "./cm/ellipsisNormalize";
 import { refreshTermAdornments, termAdornmentsExtension } from "./cm/termAdornments";
+import { externalDocumentSync, setDocumentEvidence, textAnchorDecorationsExtension } from "./cm/textAnchorDecorations";
+import { emptyDocumentEvidence, markEvidenceNeedsReview, type DocumentEvidenceState } from "./evidence";
 import { planWritingSymbol, type WritingSymbolId } from "./writingSymbols";
 import { type ResolveEditorTerms } from "./terms";
 import { createUiSentencePositionIndexCache, type UiSentencePositionIndexCache } from "../resume/continueCandidates";
@@ -38,6 +40,11 @@ export interface ManuscriptInputProps {
   resolveTerms?: ResolveEditorTerms;
   onTermNavigate?: (targetPath: string, termId: string) => void;
   termResolutionKey?: string;
+  documentRevision?: string;
+  evidenceState?: DocumentEvidenceState | null;
+  evidenceLoadKey?: number;
+  evidenceSourceText?: string;
+  onEvidenceChange?: (state: DocumentEvidenceState) => void;
 }
 
 /** CodeMirror adapter retaining IME-safe editing, source bracket/ellipsis rules and history keymaps. */
@@ -54,6 +61,11 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
   resolveTerms,
   onTermNavigate,
   termResolutionKey,
+  documentRevision = "",
+  evidenceState = null,
+  evidenceLoadKey = 0,
+  evidenceSourceText = value,
+  onEvidenceChange,
 }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -63,8 +75,15 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
   const suppressPositionRef = useRef(false);
   const resolverRef = useRef<ResolveEditorTerms | undefined>(resolveTerms);
   const navigatorRef = useRef<((targetPath: string, termId: string) => void) | undefined>(onTermNavigate);
+  const evidenceRef = useRef<DocumentEvidenceState | null>(evidenceState);
+  const documentRevisionRef = useRef(documentRevision);
+  const evidenceCallbackRef = useRef(onEvidenceChange);
+  const lastEvidenceLoadKeyRef = useRef(evidenceLoadKey);
   resolverRef.current = resolveTerms;
   navigatorRef.current = onTermNavigate;
+  evidenceRef.current = evidenceState;
+  documentRevisionRef.current = documentRevision;
+  evidenceCallbackRef.current = onEvidenceChange;
   const latestRef = useRef({ onChange, onSelectionLengthChange, onCursorPositionChange });
   latestRef.current = { onChange, onSelectionLengthChange, onCursorPositionChange };
 
@@ -145,6 +164,7 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
         ellipsisNormalizeExtension(),
         editorCompositionExtension(),
         termAdornmentsExtension(resolverRef, navigatorRef),
+        textAnchorDecorationsExtension(evidenceRef, documentRevisionRef, evidenceCallbackRef, navigatorRef),
         styleNonceExtension(),
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({
@@ -205,11 +225,21 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
 
   useEffect(() => {
     const view = viewRef.current;
+    if (!view || lastEvidenceLoadKeyRef.current === evidenceLoadKey) return;
+    lastEvidenceLoadKeyRef.current = evidenceLoadKey;
+    const next = evidenceState?.positionsTrusted && view.state.doc.toString() !== evidenceSourceText
+      ? markEvidenceNeedsReview(evidenceState)
+      : evidenceState ?? emptyDocumentEvidence(value, documentRevision);
+    view.dispatch({ effects: setDocumentEvidence.of(next) });
+  }, [evidenceLoadKey, evidenceState, evidenceSourceText, value, documentRevision]);
+
+  useEffect(() => {
+    const view = viewRef.current;
     if (!view || view.state.doc.toString() === value) return;
     externalSyncRef.current = true;
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: value },
-      annotations: Transaction.addToHistory.of(false),
+      annotations: [Transaction.addToHistory.of(false), externalDocumentSync.of(true)],
     });
   }, [externalTextRevision, value]);
 
