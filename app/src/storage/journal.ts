@@ -7,9 +7,9 @@ import {
   type ProposalStatus,
   type RepositoryIdentity,
   type SnapshotId,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 
-const DATABASE_NAME = "scriptorium-recovery";
+const DATABASE_NAME = "codexia-recovery";
 const DATABASE_VERSION = 3;
 const ENTRY_STORE = "operations";
 const SCRATCH_STORE = "scratch";

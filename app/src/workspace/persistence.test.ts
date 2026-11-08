@@ -27,7 +27,7 @@ const panelIds = ["editor", "outline", "inspector", "history", "review"];
 test("layout persistence is separate by author scope and device class", () => {
   assert.notEqual(workspaceStorageKey("author:one", "desktop"), workspaceStorageKey("author:one", "mobile"));
   assert.notEqual(workspaceStorageKey("author:one", "desktop"), workspaceStorageKey("author:two", "desktop"));
-  assert.equal(workspaceStorageKey("author:one", "mobile"), "scriptorium:workspace:v1:author%3Aone:mobile");
+  assert.equal(workspaceStorageKey("author:one", "mobile"), "codexia:workspace:v1:author%3Aone:mobile");
   assert.notEqual(workspaceSnapshotStorageKey("author:one", "desktop"), workspaceSnapshotStorageKey("author:one", "mobile"));
   assert.notEqual(workspaceSnapshotStorageKey("author:one", "desktop"), workspaceSnapshotStorageKey("author:two", "desktop"));
 });
