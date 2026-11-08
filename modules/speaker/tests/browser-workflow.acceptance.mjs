@@ -39,7 +39,7 @@ const actionData = {
   "speaker.dialogue.list": { characterId: "char-hero", count: 1, minConfidence: "low", lines: [{ sceneId: "sc-1", sceneName: "夜の駅", sentenceIndex: 1, text: "『俺が行く。』", confidence: "high", reason: "preceding-narration" }] },
   "speaker.voice.profiles": {
     tokenizerModel: "lindera-wasm-nodejs-ipadic", tokenizerModelVersion: "2.0.0",
-    diagnosticsEngine: "scriptorium-diagnostics-cpu", diagnosticsEngineVersion: "1.0.0",
+    diagnosticsEngine: "codexia-diagnostics-cpu", diagnosticsEngineVersion: "1.0.0",
     fingerprints: [
       { entityId: "char-hero", dialogueCount: 10, firstPersonDist: { 俺: 0.8, 僕: 0.2 }, endingBigramDist: { "行|く": 0.6 }, particleDist: { が: 0.4 }, exclamationRate: 0.2, questionRate: 0.1, politeRatio: 0.15, katakanaRate: 0.03, avgDialogueLength: 12, dialogueLengthVariance: 4 },
       { entityId: "char-rival", dialogueCount: 10, firstPersonDist: { 私: 0.9 }, endingBigramDist: { "です|ね": 0.7 }, particleDist: { は: 0.5 }, exclamationRate: 0.1, questionRate: 0.1, politeRatio: 0.8, katakanaRate: 0.02, avgDialogueLength: 13, dialogueLengthVariance: 3 },
@@ -50,7 +50,7 @@ const actionData = {
   "speaker.attribute": {
     estimatedN: 1,
     fromManual: false,
-    model: "scriptorium-speaker-cpu",
+    model: "codexia-speaker-cpu",
     modelVersion: "1.0.0",
     tokenizerModel: "lindera-wasm-nodejs-ipadic",
     tokenizerModelVersion: "2.0.0",
@@ -92,7 +92,7 @@ let browser;
 try {
   browser = await chromium.launch({
     headless: true,
-    ...(process.env.SCRIPTORIUM_E2E_CHROMIUM ? { executablePath: process.env.SCRIPTORIUM_E2E_CHROMIUM } : {}),
+    ...(process.env.CODEXIA_E2E_CHROMIUM ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM } : {}),
   });
   await server.listen();
   const address = server.httpServer.address();
@@ -128,7 +128,7 @@ try {
   await scene.locator('option[value="sc-1"]').waitFor({ state: "attached" });
   await scene.selectOption("sc-1");
   await page.getByRole("button", { name: "話者を推定" }).click();
-  await page.getByText("話者モデル scriptorium-speaker-cpu@1.0.0", { exact: false }).waitFor();
+  await page.getByText("話者モデル codexia-speaker-cpu@1.0.0", { exact: false }).waitFor();
   assert.ok((await page.locator("main").innerText()).includes("共有 tokenizer lindera-wasm-nodejs-ipadic@2.0.0"));
   await page.getByRole("button", { name: "口調・文体を診断" }).click();
   await page.getByText("想定外の一人称", { exact: false }).waitFor();

@@ -17,12 +17,12 @@ import {
   type SnapshotId,
   type ValueSchema,
   type WorkerService,
-} from "@scriptorium/contracts";
-import type { StoryEntity } from "@scriptorium/module-story";
-import type { MorphologyAnalysis, Token } from "@scriptorium/module-nlp";
-import type { StylometricProfile } from "@scriptorium/module-diagnostics";
-import { NLP_MODEL_ID, NLP_MODEL_VERSION, NLP_TOKENIZER_CAPABILITY, type NlpTokenizerCapability } from "@scriptorium/module-nlp";
-import { removeDialogueBrackets } from "@scriptorium/module-diagnostics";
+} from "@codexia/contracts";
+import type { StoryEntity } from "@codexia/module-story";
+import type { MorphologyAnalysis, Token } from "@codexia/module-nlp";
+import type { StylometricProfile } from "@codexia/module-diagnostics";
+import { NLP_MODEL_ID, NLP_MODEL_VERSION, NLP_TOKENIZER_CAPABILITY, type NlpTokenizerCapability } from "@codexia/module-nlp";
+import { removeDialogueBrackets } from "@codexia/module-diagnostics";
 import YAML from "yaml";
 import { parseSpeakerCorrections, type SpeakerCorrectionRecord } from "./algorithms/speakerCorrectionLog.js";
 import { parseSpeakerModel, type SpeakerModel } from "./algorithms/speakerReranker.js";
@@ -57,12 +57,12 @@ const manifest: ModuleManifest = {
   serverEntry: "./dist/index.js",
   browserEntry: "./dist/browser.js",
   workerEntry: "./dist/worker.js",
-  statePaths: ["meta/scriptorium/modules/speaker", "plot/volumes"],
+  statePaths: ["meta/codexia/modules/speaker", "plot/volumes"],
   locality: "local",
 };
 
-const CORRECTIONS_PATH = "meta/scriptorium/modules/speaker/corrections.jsonl";
-const ADOPTED_MODEL_PATH = "meta/scriptorium/modules/speaker/adopted-model.json";
+const CORRECTIONS_PATH = "meta/codexia/modules/speaker/corrections.jsonl";
+const ADOPTED_MODEL_PATH = "meta/codexia/modules/speaker/adopted-model.json";
 const MAX_SCENE_CHARACTERS = 500_000;
 const MAX_SCENES = 500;
 const MAX_DIALOGUES = 500;

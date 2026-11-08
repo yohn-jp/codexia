@@ -1,15 +1,15 @@
-import { planExactFileImport } from "@scriptorium/migration";
-import type { MigrationContribution, MigrationProducer } from "@scriptorium/migration";
+import { planExactFileImport } from "@codexia/migration";
+import type { MigrationContribution, MigrationProducer } from "@codexia/migration";
 
 const SPEAKER_FILES = [
   {
     source: "meta/speaker-corrections.jsonl",
-    target: "meta/scriptorium/modules/speaker/corrections.jsonl",
+    target: "meta/codexia/modules/speaker/corrections.jsonl",
     label: "speaker correction decisions",
   },
   {
     source: "meta/speaker-model.json",
-    target: "meta/scriptorium/modules/speaker/adopted-model.json",
+    target: "meta/codexia/modules/speaker/adopted-model.json",
     label: "adopted speaker model parameters",
   },
 ] as const;
@@ -31,7 +31,7 @@ export function createSpeakerMigrationProducer(): MigrationProducer {
         // The generic filesystem producer owns a still-present source file.
         if (await context.source.readProjectFile(file.source)) continue;
 
-        const legacyPath = `meta/scriptorium/modules/speaker/legacy/files/${file.source}`;
+        const legacyPath = `meta/codexia/modules/speaker/legacy/files/${file.source}`;
         const legacy = await context.target.read(legacyPath);
         if (!legacy) continue;
 

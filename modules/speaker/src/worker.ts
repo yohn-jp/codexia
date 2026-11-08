@@ -1,5 +1,5 @@
-import type { JobRequest } from "@scriptorium/contracts";
-import { installWorkerHandler } from "@scriptorium/module-runtime";
+import type { JobRequest } from "@codexia/contracts";
+import { installWorkerHandler } from "@codexia/module-runtime";
 import { SPEAKER_ENGINE_ID, SPEAKER_ENGINE_VERSION, SPEAKER_MODULE_VERSION, type SpeakerTrainingResult, type SpeakerWorkerInput } from "./engine.js";
 import {
   attributionAccuracyFromPairs,

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { MigrationContext } from "@scriptorium/migration";
+import type { MigrationContext } from "@codexia/migration";
 import { createSpeakerMigrationProducer } from "./migration.js";
 
 const repository = {
@@ -14,13 +14,13 @@ const snapshot = { repository, remoteCommit: "b".repeat(40) };
 const fileCases = [
   {
     source: "meta/speaker-corrections.jsonl",
-    legacy: "meta/scriptorium/modules/speaker/legacy/files/meta/speaker-corrections.jsonl",
-    canonical: "meta/scriptorium/modules/speaker/corrections.jsonl",
+    legacy: "meta/codexia/modules/speaker/legacy/files/meta/speaker-corrections.jsonl",
+    canonical: "meta/codexia/modules/speaker/corrections.jsonl",
   },
   {
     source: "meta/speaker-model.json",
-    legacy: "meta/scriptorium/modules/speaker/legacy/files/meta/speaker-model.json",
-    canonical: "meta/scriptorium/modules/speaker/adopted-model.json",
+    legacy: "meta/codexia/modules/speaker/legacy/files/meta/speaker-model.json",
+    canonical: "meta/codexia/modules/speaker/adopted-model.json",
   },
 ] as const;
 
