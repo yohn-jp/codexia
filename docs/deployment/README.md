@@ -32,7 +32,7 @@ The UI uses relative `/api/...` URLs, so production has no `VITE_API_URL` or API
 - Backend changes build `Dockerfile.backend`, test the resulting image, and publish `ghcr.io/yohn-jp/codexia-backend:sha-<40-character-commit>` only after a push to the configured base branch. The image contains the API profile and runtime dependencies, not `app/dist`.
 - Changes shared by both build lanes may select both. PR jobs build and validate but do not publish or deploy.
 - The VM operator updates the Quadlet image to the exact published commit tag (or its recorded registry digest), reviews it, and performs the service restart. CI does not SSH to or deploy to the VM.
-- `CLOUDFLARE_API_TOKEN` is only available to the protected production Worker job. `CLOUDFLARE_ACCOUNT_ID` is a non-secret GitHub Environment variable. GHCR publication uses the job-scoped `GITHUB_TOKEN` with `packages: write`.
+- `CLOUDFLARE_API_TOKEN` is only available to the protected production Worker job. `CLOUDFLARE_ACCOUNT_ID` is a GitHub Environment secret. GHCR publication uses the job-scoped `GITHUB_TOKEN` with `packages: write`.
 
 The Cloudflare Terraform example creates an Access application, remotely managed Tunnel, DNS record, and disabled-by-default UI Routes. Supply account, zone, identity-provider, and author allowlist values in a private tfvars file. Keep Terraform state in an encrypted remote backend. The operator supplies `CLOUDFLARE_API_TOKEN` locally with only the Tunnel, Access, DNS and Worker Route permissions this configuration needs. Review imports and live state before applying; CI runs `fmt`, `init -backend=false`, and `validate`, never `apply`.
 
