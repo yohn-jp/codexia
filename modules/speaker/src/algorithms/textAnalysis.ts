@@ -1,4 +1,4 @@
-import { splitIntoSentences } from "@scriptorium/module-nlp";
+import { splitIntoSentences } from "@codexia/module-nlp";
 
 export { splitIntoSentences };
 
