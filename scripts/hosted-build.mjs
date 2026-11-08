@@ -536,7 +536,9 @@ export async function runtimePackageRecords(deployedDirectory, serverIds) {
 
 export async function browserArtifactRecords(deployedDirectory, browserIds) {
   const records = await Promise.all(['', 'desktop', 'mobile'].map((ui) =>
-    browserUiArtifactRecords(path.join(deployedDirectory, 'app/dist', ui), browserIds, ui)));
+    // PostgreSQL authoring shells do not mount Git module contributions.
+    // Public module readers remain reachable from the launcher entry.
+    browserUiArtifactRecords(path.join(deployedDirectory, 'app/dist', ui), ui ? [] : browserIds, ui)));
   return {
     files: records.flatMap(({ files }) => files).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
     entryFile: records[0].entryFile,

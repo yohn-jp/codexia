@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { MODULE_PERSISTENCE_FORMATS, resolveBuildCatalogSelection } from '../packages/module-runtime/dist/index.js';
-import { assertCleanRevisionSnapshot, browserManifestEntryFiles, calculateBuildDigests, canonicalJson, catalogFor, persistenceForModules, resourceDeclarationFor } from './hosted-build.mjs';
+import { assertCleanRevisionSnapshot, browserArtifactRecords, browserManifestEntryFiles, calculateBuildDigests, canonicalJson, catalogFor, persistenceForModules, resourceDeclarationFor } from './hosted-build.mjs';
 import { assertSigstoreBundleMatches, assertSupportedCosignVersion, createSlsaStatement } from './hosted-attestation.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -265,4 +266,42 @@ test('Cosign identity verification rejects versions affected by GHSA-fx35-mq7g-6
   assert.doesNotThrow(() => assertSupportedCosignVersion('v3.2.0'));
   assert.throws(() => assertSupportedCosignVersion('v2.6.5-rc.1'), /GHSA-fx35-mq7g-6g98/u);
   assert.throws(() => assertSupportedCosignVersion('v4.0.0'), /GHSA-fx35-mq7g-6g98/u);
+});
+
+
+test('browser artifacts bind public modules to the launcher and exclude them from PostgreSQL shells', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-browser-closure-'));
+  const source = '../modules/story/dist/browser.js';
+  const manifests = new Map();
+  async function emit(ui, withModule) {
+    const output = path.join(directory, 'app/dist', ui);
+    await mkdir(path.join(output, '.vite'), { recursive: true });
+    await mkdir(path.join(output, 'assets'), { recursive: true });
+    const manifest = {
+      'index.html': { file: 'assets/index-AbCd1234.js', isEntry: true, css: ['assets/styles-EfGh5678.css'], dynamicImports: withModule ? [source] : [] },
+      ...(withModule ? { [source]: { file: 'assets/story-AbCd1234.js', isDynamicEntry: true, src: source } } : {}),
+    };
+    for (const file of ['assets/index-AbCd1234.js', 'assets/styles-EfGh5678.css', ...(withModule ? ['assets/story-AbCd1234.js'] : [])]) {
+      await writeFile(path.join(output, file), '/* fixture */');
+    }
+    await writeFile(path.join(output, '.vite/manifest.json'), JSON.stringify(manifest));
+    manifests.set(ui, manifest);
+  }
+  try {
+    await emit('', true);
+    await emit('desktop', false);
+    await emit('mobile', false);
+    const records = await browserArtifactRecords(directory, ['story']);
+    assert.equal(records.files.length, 7);
+    await emit('desktop', true);
+    await assert.rejects(browserArtifactRecords(directory, ['story']), /different browser module closure/);
+    await rm(path.join(directory, 'app/dist/desktop/assets/story-AbCd1234.js'));
+    await emit('desktop', false);
+    const launcher = manifests.get('');
+    launcher['index.html'].dynamicImports = [];
+    await writeFile(path.join(directory, 'app/dist/.vite/manifest.json'), JSON.stringify(launcher));
+    await assert.rejects(browserArtifactRecords(directory, ['story']), /different browser module closure/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
