@@ -14,7 +14,7 @@ export const TYPOGRAPHY_PRESETS: Record<TypographyPresetId, { label: string; val
   genko: { label: "原稿用紙風", values: { fontFamily: "mincho", lineHeight: 2.2, maxWidth: 480, letterSpacing: 0.04 } },
 };
 
-const STORAGE_KEY = "scriptorium:editor-typography";
+const STORAGE_KEY = "codexia:editor-typography";
 
 const DEFAULTS: TypographySettings = {
   fontSize: 16,

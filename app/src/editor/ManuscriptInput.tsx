@@ -217,8 +217,8 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
 });
 
 function styleNonceExtension() {
-  const nonce = document.querySelector<HTMLMetaElement>('meta[name="scriptorium-style-nonce"]')?.content;
-  return nonce && nonce !== "__SCRIPTORIUM_STYLE_NONCE__" ? EditorView.cspNonce.of(nonce) : [];
+  const nonce = document.querySelector<HTMLMetaElement>('meta[name="codexia-style-nonce"]')?.content;
+  return nonce && nonce !== "__CODEXIA_STYLE_NONCE__" ? EditorView.cspNonce.of(nonce) : [];
 }
 
 function editabilityExtensions(readOnly: boolean) {
