@@ -1,5 +1,5 @@
 import YAML from "yaml";
-import { assertProjectPath, type SnapshotReader } from "@scriptorium/contracts";
+import { assertProjectPath, type SnapshotReader } from "@codexia/contracts";
 import type { StoryEntity, StoryGraphInput, StoryLink } from "./domain/index.js";
 
 const ENTITY_DIRS: ReadonlyArray<[string, StoryEntity["type"]]> = [

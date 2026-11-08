@@ -12,12 +12,12 @@ import { CoreStore } from "../../../packages/core/dist/index.js";
 import { ModuleRuntime } from "../../../packages/module-runtime/dist/index.js";
 
 const execFile = promisify(execFileCallback);
-const workUrl = process.env.SCRIPTORIUM_P05_ACCEPTANCE_WORK_URL?.trim() ?? "";
-const bibleUrl = process.env.SCRIPTORIUM_P05_ACCEPTANCE_BIBLE_URL?.trim() ?? "";
+const workUrl = process.env.CODEXIA_P05_ACCEPTANCE_WORK_URL?.trim() ?? "";
+const bibleUrl = process.env.CODEXIA_P05_ACCEPTANCE_BIBLE_URL?.trim() ?? "";
 const authToken = randomBytes(32).toString("base64url");
 const modulePackageUrl = new URL("../package.json", import.meta.url);
 const storyPackage = JSON.parse(await readFile(modulePackageUrl, "utf8"));
-const storyManifest = storyPackage.scriptoriumModule;
+const storyManifest = storyPackage.codexiaModule;
 const storyEntryUrl = new URL("../dist/index.js", import.meta.url).href;
 const profileName = "story-production-acceptance";
 
@@ -32,13 +32,13 @@ function requireGitHubUrl(value, label) {
 }
 
 async function getGitHubToken() {
-  const configured = process.env.SCRIPTORIUM_P05_GITHUB_TOKEN?.trim() || process.env.SCRIPTORIUM_GITHUB_TOKEN?.trim();
+  const configured = process.env.CODEXIA_P05_GITHUB_TOKEN?.trim() || process.env.CODEXIA_GITHUB_TOKEN?.trim();
   if (configured) return configured;
   try {
     const { stdout } = await execFile("gh", ["auth", "token"], { encoding: "utf8", maxBuffer: 1024 * 1024 });
     if (stdout.trim()) return stdout.trim();
   } catch { /* Use one generic error without exposing CLI output. */ }
-  throw new Error("Set SCRIPTORIUM_P05_GITHUB_TOKEN or authenticate gh before running this acceptance");
+  throw new Error("Set CODEXIA_P05_GITHUB_TOKEN or authenticate gh before running this acceptance");
 }
 
 async function git(cwd, args, { token, askpass } = {}) {
@@ -53,7 +53,7 @@ async function git(cwd, args, { token, askpass } = {}) {
         GIT_CONFIG_NOSYSTEM: "1",
         GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
         GIT_TERMINAL_PROMPT: "0",
-        ...(token ? { SCRIPTORIUM_ACCEPTANCE_TOKEN: token } : {}),
+        ...(token ? { CODEXIA_ACCEPTANCE_TOKEN: token } : {}),
         ...(askpass ? { GIT_ASKPASS: askpass, GIT_ASKPASS_REQUIRE: "force" } : {}),
       },
     });
@@ -66,7 +66,7 @@ async function git(cwd, args, { token, askpass } = {}) {
 async function makeAskpass(root) {
   const askpass = resolve(root, "acceptance-askpass");
   await writeFile(askpass,
-    "#!/bin/sh\ncase \"$1\" in\n  *sername*) printf '%s\\n' 'x-access-token' ;;\n  *) printf '%s\\n' \"$SCRIPTORIUM_ACCEPTANCE_TOKEN\" ;;\nesac\n",
+    "#!/bin/sh\ncase \"$1\" in\n  *sername*) printf '%s\\n' 'x-access-token' ;;\n  *) printf '%s\\n' \"$CODEXIA_ACCEPTANCE_TOKEN\" ;;\nesac\n",
     { mode: 0o700 });
   return askpass;
 }
@@ -117,15 +117,15 @@ async function restoreDefaultBranch({ root, label, url, files, token, askpass })
   const branch = await githubDefaultBranch(url, token);
   const directory = resolve(root, `seed-${label}`);
   await git(root, ["clone", "--quiet", "--single-branch", "--branch", branch, url, directory], { token, askpass });
-  await git(directory, ["config", "user.name", "Scriptorium Acceptance"]);
-  await git(directory, ["config", "user.email", "scriptorium-acceptance@example.invalid"]);
+  await git(directory, ["config", "user.name", "Codexia Acceptance"]);
+  await git(directory, ["config", "user.email", "codexia-acceptance@example.invalid"]);
   const generatedFiles = [
     "bible/locations/loc-p05-garden.yaml",
     "plot/volumes/vol-main/chapters/ch-main-1/scenes/sc-p05-garden.yaml",
     "manuscript/vol-main/ch-main-1/sc-p05-garden.md",
-    "meta/scriptorium/modules/story/zukan-suggestions.jsonl",
-    "meta/scriptorium/modules/story/v1/series.json",
-    "meta/scriptorium/modules/story/p05-acceptance-remote-advance.txt",
+    "meta/codexia/modules/story/zukan-suggestions.jsonl",
+    "meta/codexia/modules/story/v1/series.json",
+    "meta/codexia/modules/story/p05-acceptance-remote-advance.txt",
   ];
   for (const relative of generatedFiles) {
     if (Object.hasOwn(files, relative)) continue;
@@ -291,11 +291,11 @@ function proposalStatusPath(projectId, proposalId) {
 test("Story actions compose with Core over GitHub snapshots, approvals, recovery, and read-only Bible overlay", {
   skip: !workUrl || !bibleUrl,
 }, async (t) => {
-  requireGitHubUrl(workUrl, "SCRIPTORIUM_P05_ACCEPTANCE_WORK_URL");
-  requireGitHubUrl(bibleUrl, "SCRIPTORIUM_P05_ACCEPTANCE_BIBLE_URL");
+  requireGitHubUrl(workUrl, "CODEXIA_P05_ACCEPTANCE_WORK_URL");
+  requireGitHubUrl(bibleUrl, "CODEXIA_P05_ACCEPTANCE_BIBLE_URL");
   assert.notEqual(workUrl, bibleUrl, "Work and Bible fixtures must be separate repositories");
   const githubToken = await getGitHubToken();
-  const root = await mkdtemp(resolve(tmpdir(), "scriptorium-p05-production-"));
+  const root = await mkdtemp(resolve(tmpdir(), "codexia-p05-production-"));
   const dataDir = resolve(root, "core-data");
   const cacheDir = resolve(root, "module-cache");
   const staticDir = resolve(root, "static");
@@ -361,7 +361,7 @@ test("Story actions compose with Core over GitHub snapshots, approvals, recovery
     assert.equal(persistedZukan.ok, true, persistedZukan.ok ? undefined : persistedZukan.error.message);
     assert.ok(persistedZukan.data.suggestions.some((suggestion) => suggestion.id === zukanCreated.data.suggestion.id), "the checkpointed proposal persists the source-validated pending row");
 
-    const remoteAdvancePath = "meta/scriptorium/modules/story/p05-acceptance-remote-advance.txt";
+    const remoteAdvancePath = "meta/codexia/modules/story/p05-acceptance-remote-advance.txt";
     await pushSyntheticDefaultBranchFile({
       directory: workSeed,
       branch: workBranch,
@@ -388,7 +388,7 @@ test("Story actions compose with Core over GitHub snapshots, approvals, recovery
     await pushSyntheticDefaultBranchFile({
       directory: workSeed,
       branch: workBranch,
-      relative: "meta/scriptorium/modules/story/zukan-suggestions.jsonl",
+      relative: "meta/codexia/modules/story/zukan-suggestions.jsonl",
       remove: true,
       token: githubToken,
       askpass,

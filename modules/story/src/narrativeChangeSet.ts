@@ -6,7 +6,7 @@ import {
   type ModuleActionContext,
   type ProposalEvidence,
   type SnapshotReader,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 import { readStorySnapshot, type LoadedStorySnapshot } from "./snapshot.js";
 import { listRuleStateEvents } from "./domain/index.js";
 import type { StoryEntity, StoryEntityType } from "./domain/types.js";
@@ -46,7 +46,7 @@ const ENTITY_PREFIX: Partial<Record<StoryEntityType, string>> = {
   event: "bible/timeline/events", lore: "bible/lore", thread: "plot/threads", arc: "plot/arcs",
   dialogue_sketch: "bible/dialogue_sketches",
 };
-const STATE_PROPOSALS_PATH = "meta/scriptorium/modules/story/state-proposals.jsonl";
+const STATE_PROPOSALS_PATH = "meta/codexia/modules/story/state-proposals.jsonl";
 
 function fail(message: string, code = "invalid_input"): never {
   throw Object.assign(new TypeError(message), { code });

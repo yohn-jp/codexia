@@ -1,5 +1,5 @@
 {
-  "name": "@scriptorium/api",
+  "name": "@codexia/api",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -13,9 +13,9 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
-    "@scriptorium/core": "workspace:*",
-    "@scriptorium/contracts": "workspace:*",
-    "@scriptorium/module-runtime": "workspace:*",
+    "@codexia/core": "workspace:*",
+    "@codexia/contracts": "workspace:*",
+    "@codexia/module-runtime": "workspace:*",
     "fastify": "^5.3.2",
     "zod": "3.25.76"
   },
