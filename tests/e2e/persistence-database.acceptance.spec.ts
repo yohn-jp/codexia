@@ -3,6 +3,34 @@ import { expect, test } from "@playwright/test";
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
 
+
+test("Git store selector cannot bypass PostgreSQL-only authoring", async ({ page }) => {
+  await page.route("**/api/v1/persistence/status", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ available: false, provider: null }) });
+  });
+  await page.goto("/desktop/?store=git");
+  await page.getByLabel("アクセス・トークン").fill(authToken);
+  await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
+  await expect(page.getByRole("heading", { name: "PostgreSQLへ接続できません" })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("Gitワークスペースへの切替は提供していません");
+  await expect(page.getByRole("heading", { name: "Database workspace" })).toHaveCount(0);
+});
+
+test("Hosted permission metadata does not force Git workspace fallback", async ({ page }) => {
+  expect(databaseUrl).toBeTruthy();
+  await page.route("**/api/session", async (route) => {
+    const response = await route.fetch();
+    if (!response.ok()) { await route.fulfill({ response }); return; }
+    const body = await response.json() as Record<string, unknown>;
+    await route.fulfill({ response, body: JSON.stringify({ ...body, authorScope: "hosted:acceptance", permissions: ["write"] }) });
+  });
+  await page.goto("/mobile/?store=git");
+  await page.getByLabel("アクセス・トークン").fill(authToken);
+  await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
+  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Git作品を開く" })).toHaveCount(0);
+});
+
 test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowledge to Text Anchors", async ({ page }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const contentSecurityPolicyViolations: string[] = [];
@@ -15,7 +43,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   const documentTitle = `Scene ${crypto.randomUUID()}`;
   const firstDraft = "第一稿😀\n人物は青い塔を見た。";
 
-  await page.goto("/desktop/?store=postgres&acceptance=database");
+  await page.goto("/desktop/?acceptance=database");
   await page.getByLabel("アクセス・トークン").fill(authToken);
   await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
