@@ -4,14 +4,14 @@ This proposal specifies external plugin protocols, packaging and enforced isolat
 
 ## 1. 製品の定義と品質目標
 
-**Scriptoriumは、プラグインによって自由に構成できる、Gitネイティブなライティングアプリケーション基盤である。**
+**Codexiaは、プラグインによって自由に構成できる、Gitネイティブなライティングアプリケーション基盤である。**
 
 執筆を第一用途とするが、Coreの保存モデルを小説の「巻・章・シーン」に固定しない。Markdown、図面、参考資料、独自形式は、最終的には同じGit-backed Workspaceに置くファイルとして扱う。文章の意味づけ・編集体験はCoreが提供する既定UIまたは拡張に委ねる。
 
 **固定する品質条件:**
 
 1. **Always usable:** 全Pluginが存在しない／停止していても、Coreの起動、既定Markdownの閲覧・編集、回復記録の確認、認可済みGit保存・同期は成立する。
-2. **Fault containment:** Pluginのtrap、例外、無限ループ、メモリ超過、クラッシュ、壊れたRPC、ハング、任意の停止操作が**Scriptorium Coreと他の無関係なPluginの稼働に波及しない**。これを満たさない実行モードは隔離保証を掲げない。
+2. **Fault containment:** Pluginのtrap、例外、無限ループ、メモリ超過、クラッシュ、壊れたRPC、ハング、任意の停止操作が**Codexia Coreと他の無関係なPluginの稼働に波及しない**。これを満たさない実行モードは隔離保証を掲げない。
 3. **No authority transfer:** PluginはGitの正本、認可、単一Writer、Recovery Journal、Checkpoints、Publishを所有しない。Pluginが起こせる永続変更は原則「検証付き提案」までである。
 4. **Pay only when used:** 未インストール・無効・有効だが非アクティブという各状態を区別し、無使用の機能がCPU、実行プロセス、索引更新、ブラウザJS、定期通信を消費しない。
 5. **Public, language-neutral contract:** Rust/WASM、TypeScript、別言語でPluginを書けるように、境界はシリアライズ可能なVersioned Protocolで固定する。CoreをRustへ全面移植することは前提にしない。
@@ -75,7 +75,7 @@ WASM Component Model/WITは異言語間IFとして第一候補、RustはPlugin�
 
 ~~~json
 {
-  "schema": "scriptorium.plugin/v1",
+  "schema": "codexia.plugin/v1",
   "id": "example.diagram",
   "version": "1.0.0",
   "sdk": { "min": "1.0.0", "maxExclusive": "2.0.0" },
@@ -176,7 +176,7 @@ Optional Plugin UI / Compute
 
 | 実行コード | 許容条件 | 壊れた場合 |
 | --- | --- | --- |
-| Core built-in | Scriptorium TCB。変更はCore検証対象 | 通常のCore障害として扱う |
+| Core built-in | Codexia TCB。変更はCore検証対象 | 通常のCore障害として扱う |
 | Trusted built-in Module | 既存内蔵・レビュー済み。**安全隔離保証なし**を明記 | 同一プロセスの不具合がHostへ影響する可能性を認める |
 | 外部Plugin UI | **独立originのsandboxed iframeが必須** | HostがFrameを切り離し、エラーPanel/標準Editor fallbackを表示。別Panelの状態は維持 |
 | 外部Plugin compute | **WASI Sandbox + 独立OSプロセス + 実証済みResource/Filesystem/Network制御**が必須 | 対象子プロセスだけterminate/quarantine。他のPluginとCoreは保持 |
@@ -262,10 +262,10 @@ MiB、ms、同時起動数の上限は対象Hostの実測と故障注入で検�
 
 ### 7.4 Praetorium Runtime / Quiesceとの連動
 
-Pluginが止まることと、**Scriptorium Writerを安全に停止できることは別**。Hosted Runtimeの`/api/platform/v1/status`、`quiesce`、`resume`契約（[platform-runtime](../../packages/api/src/platform-runtime.ts)）に従い、Plugin Hostも活動・保存状態に参加する。
+Pluginが止まることと、**Codexia Writerを安全に停止できることは別**。Hosted Runtimeの`/api/platform/v1/status`、`quiesce`、`resume`契約（[platform-runtime](../../packages/api/src/platform-runtime.ts)）に従い、Plugin Hostも活動・保存状態に参加する。
 
 - **Activity/Status:** Plugin Workerの実行中Job、未DrainのRPC、Plugin UIからHostへ受領した未保存Draft、未確定Proposal/Operationを、Host側の観測に反映する。失敗や接続断は`unknown`として扱い、単に「Pluginプロセスがない = safe」と判定しない。
-- **Quiesce:** Hostは新規Plugin編集/書込提案を停止し、進行中UI変更を確定済みBrowser Journalへflushする。Browserが不在でFlushを確認できない場合や、Pluginがクラッシュ中の場合は、元のScriptorium/Writer不在証明・Checkpoint契約に沿って停止可否を決める。
+- **Quiesce:** Hostは新規Plugin編集/書込提案を停止し、進行中UI変更を確定済みBrowser Journalへflushする。Browserが不在でFlushを確認できない場合や、Pluginがクラッシュ中の場合は、元のCodexia/Writer不在証明・Checkpoint契約に沿って停止可否を決める。
 - **Shutdown:** Deadline以内に停止しないPluginは当該Sandboxだけterminateする。ただし未保存編集の消失、未確定Publish、旧Writerが生存していないかを別条件として確認し、単なるProcess killで`quiesced`を確定しない。
 - **Resume/Replacement:** PluginのActivation EpochとRuntime Epochを更新し、旧Sandboxから遅延到着したResponse/Event/Proposalを無効化する。新Runtime/新Pluginが旧Writerと同時に同じRepositoryへ書き込まない。
 - **プラットフォームの正本:** [Praetorium](https://github.com/yohn-jp/praetorium)のD1・Operation FenceとGitHub履歴をPlugin独自のローカル状態で置き換えない。Pod Ready/Worker停止をGitHubへの出版成功証明として扱わない。
@@ -280,12 +280,12 @@ independent Git repository
   -> immutable package artifact (manifest, WASM, UI assets, schemas)
   -> Digest + provenance + signature + optional SBOM
   -> operator-approved install/catalog
-  -> Praetorium / Scriptorium producer composition
+  -> Praetorium / Codexia producer composition
   -> exact plugin digest pinned in runtime image/manifest
   -> metadata-only discovery; lazy sandbox execution
 ~~~
 
-- Core/SDK/Plugin Hostは`yohn-jp/scriptorium`に置く。Pluginは独立リポジトリから開発でき、機能内の任意依存関係はCore本体へ展開しない。
+- Core/SDK/Plugin Hostは`yohn-jp/codexia`に置く。Pluginは独立リポジトリから開発でき、機能内の任意依存関係はCore本体へ展開しない。
 - 配布形式の第一候補は**OCI Artifact**（Digest pinning、Producer/Registryと再利用しやすい）。npm配布やWIT SDK bindingも選択できるが、Registry名でなく**承認された内容Digest**を最終識別子とする。
 - Plugin Artifactの`manifest`、WASM、Browser UI、Resourceアセット、API SchemaはBuild時に同一Digestへ束縛。Manifest内容とEntry Pathは署名済みBundle内だけ参照する。
 - **インストール/許可はHost管理**。Git作業リポジトリのYAMLやMarkdownから任意のPlugin URL/Packageを実行することはない。Work repositoryは「承認済みPlugin IDと設定」だけ指定できる。
@@ -297,7 +297,7 @@ independent Git repository
 
 Pluginが依存してよいのは、Versioned Manifest Schema、生成されたSDK/WIT binding、Capability schemas、UI Bridge、公開conformance fixtureのみ。**`packages/core/src/index.ts`、`packages/api/src/server.ts`、ホストのプライベートEnv、ブラウザの`SharedApplication`状態へ直接依存させない。**
 
-既存の内部`@scriptorium/contracts`全部を無条件にpublic npm SDKへ再輸出しない。単一のTransport非依存な公開Contract subsetを明示し、内部契約とはAdapterを通す。非互換な内部RefactorでもPluginが壊れないよう、公開ABI側にcompatibility gatesを置く。
+既存の内部`@codexia/contracts`全部を無条件にpublic npm SDKへ再輸出しない。単一のTransport非依存な公開Contract subsetを明示し、内部契約とはAdapterを通す。非互換な内部RefactorでもPluginが壊れないよう、公開ABI側にcompatibility gatesを置く。
 
 ## 9. 最小垂直スライス：図面エディタを例に契約を検証
 
@@ -357,4 +357,4 @@ Decisions that require evidence before selecting a concrete implementation: whet
 - [Wasmtime Security](https://docs.wasmtime.dev/security.html)、[Wasmtime Introduction](https://docs.wasmtime.dev/introduction.html)、[WIT Component Model](https://github.com/WebAssembly/component-model/blob/main/design/mvp/WIT.md)
 - [MDN iframe Sandbox](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/iframe)、[MDN CSP sandbox](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/sandbox)
 
-**設計の到達点:** ScriptoriumのCoreは小さく、Gitと回復を堅牢に保ち、Pluginは公開された能力を通して自由にアプリケーションを構成できる。ただし自由な拡張は、HostのAuthor認可、データ正本、OS/Browserの隔離境界を超えない。
+**設計の到達点:** CodexiaのCoreは小さく、Gitと回復を堅牢に保ち、Pluginは公開された能力を通して自由にアプリケーションを構成できる。ただし自由な拡張は、HostのAuthor認可、データ正本、OS/Browserの隔離境界を超えない。

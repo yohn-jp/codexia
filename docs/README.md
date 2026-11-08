@@ -1,6 +1,6 @@
-# Scriptorium documentation
+# Codexia documentation
 
-Scriptorium is a Git-backed writing workspace with a minimal Core and optional trusted modules.
+Codexia is a Git-backed writing workspace with a minimal Core and optional trusted modules.
 
 | Topic | Reference |
 | --- | --- |

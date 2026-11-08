@@ -25,7 +25,7 @@ A checkpoint is not confirmation of remote storage. Use the explicit publication
 
 The browser reconciles its journal before presenting an editor as recovered and writable. Changing scenes, switching shells or refreshing must preserve recoverable input. A storage error is shown to the author; it is not reported as a saved draft. Clearing browser storage removes the browser recovery copy. Keep pending work in the same browser and origin until publication succeeds.
 
-Remote observation follows the repository's default branch. Clean views can follow remote changes while local drafts and checkpoints remain separate. Conflicts preserve the author's text and require review. Scriptorium does not automatically merge conflicting manuscript prose or force-push history.
+Remote observation follows the repository's default branch. Clean views can follow remote changes while local drafts and checkpoints remain separate. Conflicts preserve the author's text and require review. Codexia does not automatically merge conflicting manuscript prose or force-push history.
 
 ## Desktop and mobile
 

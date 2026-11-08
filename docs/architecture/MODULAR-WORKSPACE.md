@@ -2,7 +2,7 @@
 
 ## 1. Product decision
 
-Scriptorium is a Git-backed writing environment whose interface is assembled from movable, replaceable components. It ships usable workspace presets and allows users to construct and persist arbitrary layouts. Search, terminology linking, NLP, Semantic and other advanced features are optional modules on top of a small, usable Core.
+Codexia is a Git-backed writing environment whose interface is assembled from movable, replaceable components. It ships usable workspace presets and allows users to construct and persist arbitrary layouts. Search, terminology linking, NLP, Semantic and other advanced features are optional modules on top of a small, usable Core.
 
 The three product goals are:
 
