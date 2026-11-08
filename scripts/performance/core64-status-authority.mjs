@@ -34,10 +34,10 @@ const { createServer } = await import(pathToFileURL(path.join(runtimeRoot, "pack
 const { RUNTIME_STATUS_PATH, sha256Digest } = await import(pathToFileURL(path.join(runtimeRoot, "packages/api/dist/platform-runtime.js")).href);
 
 const assignment = {
-  contractVersion: "scriptorium-platform/v1",
+  contractVersion: "codexia-platform/v1",
   instanceId: "c64-status-synthetic-instance",
   repositoryId: 64001,
-  repositoryLocator: "https://github.com/scriptorium-perf/status-fixture",
+  repositoryLocator: "https://github.com/codexia-perf/status-fixture",
   defaultBranchPolicy: "repository-default",
   runtimeEpoch: 3,
   imageDigest: "sha256:" + "a".repeat(64),
@@ -59,8 +59,8 @@ const repository = {
   provider: "github",
   repositoryId: "64001",
   defaultBranch: "main",
-  ownerScope: "scriptorium-perf",
-  url: "https://github.com/scriptorium-perf/status-fixture.git",
+  ownerScope: "codexia-perf",
+  url: "https://github.com/codexia-perf/status-fixture.git",
 };
 const keyPair = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
 const publicJwk = {
@@ -117,7 +117,7 @@ function makeFakeStore(recordCount, race = false) {
   const remoteRevision = "a".repeat(40);
   const changedRevision = "b".repeat(40);
   const paths = Array.from({ length: recordCount }, (_, index) =>
-    "meta/scriptorium/operations/v1/op-" + index + ".json");
+    "meta/codexia/operations/v1/op-" + index + ".json");
   const records = new Map(paths.map((recordPath, index) => [
     recordPath,
     JSON.stringify({ version: 1, operation: { id: "op-" + index } }),
@@ -145,7 +145,7 @@ function makeFakeStore(recordCount, race = false) {
         snapshot,
         async list(prefix) {
           listCalls += 1;
-          assert.equal(prefix, "meta/scriptorium");
+          assert.equal(prefix, "meta/codexia");
           return [...paths];
         },
         async read(recordPath) {
@@ -269,7 +269,7 @@ async function verifyUnknownOnRace(temporaryRoot) {
 const [outputPath = path.join(os.tmpdir(), "core64-status-authority.json"), sampleText = "20"] = positionalArgs;
 const samples = Number(sampleText);
 assert.ok(Number.isSafeInteger(samples) && samples >= 5 && samples <= 100, "sample count must be between 5 and 100");
-const temporaryRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "scriptorium-c64-status-authority-"));
+const temporaryRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "codexia-c64-status-authority-"));
 try {
   const fixtures = [];
   for (const recordCount of [1, 100]) fixtures.push(await measureFixture(recordCount, samples, temporaryRoot));

@@ -38,10 +38,10 @@ const repository = {
   provider: "github",
   repositoryId: "perf-status",
   defaultBranch: "main",
-  ownerScope: "scriptorium-perf",
-  url: "https://github.com/scriptorium-perf/status-fixture.git",
+  ownerScope: "codexia-perf",
+  url: "https://github.com/codexia-perf/status-fixture.git",
 };
-const temporaryRootPrefix = path.join(os.tmpdir(), "scriptorium-c64-status-");
+const temporaryRootPrefix = path.join(os.tmpdir(), "codexia-c64-status-");
 
 function newMetrics() {
   return {

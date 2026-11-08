@@ -6,11 +6,11 @@ or changes production source, dependencies, authentication or writer guarantees.
 
 ```sh
 pnpm install --frozen-lockfile
-SCRIPTORIUM_PROFILE=core pnpm build
-# On hosts needing a system browser, export SCRIPTORIUM_E2E_CHROMIUM first.
+CODEXIA_PROFILE=core pnpm build
+# On hosts needing a system browser, export CODEXIA_E2E_CHROMIUM first.
 node --test scripts/performance/*.test.mjs
-node scripts/performance/run.mjs /tmp/scriptorium-benchmark
-node scripts/performance/summarize.mjs /tmp/scriptorium-benchmark/results
+node scripts/performance/run.mjs /tmp/codexia-benchmark
+node scripts/performance/summarize.mjs /tmp/codexia-benchmark/results
 ```
 
 The output root must not exist. Every worker uses a fresh process, Core store and
@@ -23,7 +23,7 @@ worker's local synthetic remote. Sizes run sequentially to avoid competing load.
 | `BENCH_REPEATS` | `20` | Read/input/switch repetitions; mutation has at most five |
 | `BENCH_TIMEOUT_MS` | `180000` | Entire worker time budget |
 | `BENCH_IDLE_MS` | `35000` | Visible/available hidden idle window |
-| `SCRIPTORIUM_E2E_CHROMIUM` | Playwright default | Optional system executable |
+| `CODEXIA_E2E_CHROMIUM` | Playwright default | Optional system executable |
 
 Workers have a time budget, retain completed result snapshots atomically, and
 terminate their process tree on timeout, including detached Chromium children.

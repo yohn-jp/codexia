@@ -3,7 +3,7 @@ set -euo pipefail
 
 # C62-only rootless Podman store. Keep graphroot, runroot, and temporary files
 # separate from the host's default storage and from other OCI acceptance runs.
-readonly store=/data/scriptorium-c64-oci
+readonly store=/data/codexia-c64-oci
 readonly graphroot="$store/storage"
 readonly runroot="$store/runroot"
 readonly tmpdir="$store/tmp"

@@ -152,9 +152,9 @@ async function executeContainer(index, idle) {
     runEngine([
       'run', '--detach', '--name', name, '--stop-timeout', '30',
       '--publish', '127.0.0.1::3000/tcp',
-      '--env', `SCRIPTORIUM_AUTH_TOKEN=${token}`,
-      '--env', 'SCRIPTORIUM_DATA_DIR=/data',
-      '--env', 'SCRIPTORIUM_USAGE_DIR=/history',
+      '--env', `CODEXIA_AUTH_TOKEN=${token}`,
+      '--env', 'CODEXIA_DATA_DIR=/data',
+      '--env', 'CODEXIA_USAGE_DIR=/history',
       image,
     ]);
     started = true;
@@ -195,7 +195,7 @@ async function executeContainer(index, idle) {
     const logResult = runEngine(['logs', name]);
     const logs = logResult.stdout + logResult.stderr;
     assert.equal(exitCodeText, '0', `SIGTERM exits cleanly (exit ${exitCodeText})`);
-    assert.ok(logs.includes('Scriptorium shutdown complete'), 'SIGTERM completed the API drain callback');
+    assert.ok(logs.includes('Codexia shutdown complete'), 'SIGTERM completed the API drain callback');
     assertions.sigtermDrain = 'PASS';
     assertions.sigtermExitCode = Number(exitCodeText);
 
@@ -230,9 +230,9 @@ const result = {
     name: 'Podman',
     version: engineVersion,
     rootless: true,
-    graphroot: '/data/scriptorium-c64-oci/storage',
-    runroot: '/data/scriptorium-c64-oci/runroot',
-    tmpdir: '/data/scriptorium-c64-oci/tmp',
+    graphroot: '/data/codexia-c64-oci/storage',
+    runroot: '/data/codexia-c64-oci/runroot',
+    tmpdir: '/data/codexia-c64-oci/tmp',
     cgroupManager: 'cgroupfs',
   },
   image: imageInfo,
