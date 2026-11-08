@@ -610,6 +610,8 @@ export const api = {
     const suffix = query.size ? `?${query}` : "";
     return request(dto.persistenceDocuments, persistencePath(projectId, `documents${suffix}`), { ...(signal ? { signal } : {}) });
   },
+  persistenceNodes: (projectId: string, limit = 200, signal?: AbortSignal) => request(dto.persistenceNodes,
+    persistencePath(projectId, `nodes?${new URLSearchParams({ limit: String(limit) })}`), { ...(signal ? { signal } : {}) }),
   createPersistenceDocument: (
     projectId: string,
     command: Omit<CreateDocumentCommand, "projectId" | "authorId">,

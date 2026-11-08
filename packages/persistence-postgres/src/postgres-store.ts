@@ -521,6 +521,14 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows[0] ? mapKnowledgeNode(result.rows[0]) : undefined;
   }
 
+  async listKnowledgeNodes(projectId: ProjectId, limit = 100): Promise<readonly KnowledgeNode[]> {
+    const result = await this.query(
+      "SELECT * FROM knowledge_node WHERE project_id = $1 AND deleted_at IS NULL ORDER BY name, id LIMIT $2",
+      [projectId, limit],
+    );
+    return result.rows.map(mapKnowledgeNode);
+  }
+
   async listKnowledgeAliases(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<readonly KnowledgeAlias[]> {
     const result = await this.query(
       "SELECT * FROM knowledge_alias WHERE project_id = $1 AND node_id = $2 ORDER BY normalized, id",
@@ -1393,6 +1401,10 @@ export class PostgresPersistence implements Persistence {
 
   constructor(config: PoolConfig | string) {
     this.pool = new Pool(typeof config === "string" ? { connectionString: config } : config);
+  }
+
+  async checkHealth(): Promise<void> {
+    await this.pool.query("SELECT 1");
   }
 
   async read<T>(work: (reader: PersistenceReader) => Promise<T>): Promise<T> {

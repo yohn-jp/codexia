@@ -87,6 +87,7 @@ export const responseContracts = {
   persistenceProjects: array(persistenceProject),
   persistenceProject: (v: unknown): v is { project: PersistenceProject } => record(v) && persistenceProject(v.project),
   persistenceDocuments: (v: unknown): v is { documents: PersistenceDocument[] } => record(v) && array(persistenceDocument)(v.documents),
+  persistenceNodes: (v: unknown): v is { nodes: KnowledgeNode[] } => record(v) && array(persistenceKnowledgeNode)(v.nodes),
   persistenceDocument: (v: unknown): v is PersistenceDocumentRead => record(v) && persistenceDocument(v.document) && (v.revision === null || persistenceRevision(v.revision)),
   persistenceWrite,
   persistenceRevisionPage,

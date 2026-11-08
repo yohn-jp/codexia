@@ -347,7 +347,7 @@ async function openFixtureScene(page: Page, mode: "desktop" | "mobile", sceneId 
 async function readJournal(page: Page): Promise<DraftRecord[]> {
   return page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 4);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -721,7 +721,7 @@ test("failed IndexedDB open before login keeps the scene readable and the existi
     const nativeOpen = IDBFactory.prototype.open;
     type RecoveryWindow = Window & { __readNativeRecoveryJournal?: () => Promise<Array<{ sceneId: string; state: string; text: string; operationId: string; generation: number }>> };
     (window as RecoveryWindow).__readNativeRecoveryJournal = async () => {
-      const request = Reflect.apply(nativeOpen, indexedDB, ["scriptorium-recovery", 3]) as IDBOpenDBRequest;
+      const request = Reflect.apply(nativeOpen, indexedDB, ["scriptorium-recovery", 4]) as IDBOpenDBRequest;
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error ?? new Error("Native IndexedDB journal open failed"));

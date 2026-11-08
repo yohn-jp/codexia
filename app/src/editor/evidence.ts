@@ -1,3 +1,5 @@
+import type { Document as PersistenceDocument, DocumentRevision as PersistenceRevision } from "@codexia/persistence-contracts";
+
 /** UI-facing text evidence types. The persistence adapter translates these to the published API contract. */
 export type TextAnchorStatus = "proposed" | "current" | "needs_review" | "orphaned" | "revision_conflict";
 
@@ -167,6 +169,8 @@ export interface EditorPersistenceSave {
 export interface EditorPersistenceSaveResult {
   revisionId: string;
   markdown: string;
+  document?: PersistenceDocument;
+  revision?: PersistenceRevision;
 }
 
 /** Host adapter for a revision-pinned PostgreSQL document binding used by the existing Editor. */

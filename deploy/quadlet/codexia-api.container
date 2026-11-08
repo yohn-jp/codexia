@@ -1,17 +1,26 @@
 [Unit]
 Description=Codexia API backend
-After=network-online.target
+Requires=codexia-db.service
+After=network-online.target codexia-db.service
 
 [Container]
 Image=ghcr.io/yohn-jp/codexia-backend:sha-REPLACE_WITH_40_HEX_COMMIT_SHA
 ContainerName=codexia-api
 Network=codexia.network
+Network=codexia-data.network
 Volume=codexia-data.volume:/data
 Volume=codexia-history.volume:/history
 Secret=codexia-auth-token,type=mount,target=/run/secrets/codexia-auth-token
 Secret=codexia-github-token,type=mount,target=/run/secrets/codexia-github-token
+Secret=codexia-postgres-app-password,type=mount,target=/run/secrets/app-password
 Environment=CODEXIA_AUTH_TOKEN_FILE=/run/secrets/codexia-auth-token
 Environment=CODEXIA_GITHUB_TOKEN_FILE=/run/secrets/codexia-github-token
+Environment=CODEXIA_DATABASE_PASSWORD_FILE=/run/secrets/app-password
+Environment=CODEXIA_DATABASE_USER=codexia
+Environment=CODEXIA_DATABASE_NAME=codexia
+Environment=CODEXIA_DATABASE_HOST=codexia-db
+Environment=CODEXIA_REQUIRE_POSTGRES=1
+Environment=CODEXIA_DATABASE_MIGRATE_ON_START=1
 Environment=CODEXIA_TRUST_PROXY=1
 Environment=CODEXIA_PROFILE=core
 Environment=HOST=0.0.0.0

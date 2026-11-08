@@ -429,7 +429,7 @@ function sourceDomainJobRuntime(cacheDirectory: string): {
 async function startCustomApi(
   store: CoreStore,
   staticDir: string,
-  options: Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory"> = {},
+  options: Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence"> = {},
 ) {
   const server = createServer({ store, authToken: ACCESS_TOKEN, staticDir, ...options });
   await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
@@ -1300,7 +1300,8 @@ describe("Codexia HTTP boundary", () => {
         const page = await fetch(`${apiServer.base}${route}`);
         assert.equal(page.status, 200);
         assert.match(await page.text(), new RegExp(`<h1>${ui}</h1>`));
-        assert.ok(!page.headers.get("content-security-policy")?.includes("unsafe-inline"));
+      assert.ok(page.headers.get("content-security-policy")?.includes("style-src-attr 'unsafe-inline'"));
+      assert.ok(!page.headers.get("content-security-policy")?.includes("script-src 'unsafe-inline'"));
       }
       assert.equal(await (await fetch(`${apiServer.base}/${ui}/main.js`)).text(), `${ui} bundle`);
       assert.equal(await (await fetch(`${apiServer.base}/${ui}/assets/chunk.js`)).text(), `${ui} chunk`);
@@ -1326,7 +1327,8 @@ describe("Codexia HTTP boundary", () => {
     const nonce = /name="codexia-style-nonce" content="([^"]+)"/u.exec(html)?.[1];
     assert.ok(nonce && nonce !== "__CODEXIA_STYLE_NONCE__");
     assert.ok(shell.headers.get("content-security-policy")?.includes(`style-src 'self' 'nonce-${nonce}'`));
-    assert.ok(!shell.headers.get("content-security-policy")?.includes("unsafe-inline"));
+    assert.ok(shell.headers.get("content-security-policy")?.includes("style-src-attr 'unsafe-inline'"));
+    assert.ok(!shell.headers.get("content-security-policy")?.includes("script-src 'unsafe-inline'"));
     const nextShell = await fetch(`${apiServer.base}/`);
     assert.notEqual(nextShell.headers.get("content-security-policy"), shell.headers.get("content-security-policy"));
     const publicReader = await fetch(`${apiServer.base}/r/publishing/123/e2e-invalid-token`);
@@ -1395,6 +1397,7 @@ describe("Codexia HTTP boundary", () => {
       assert.equal(shell.headers.get("cache-control"), "no-store");
       assert.ok(nonce && nonce !== "__CODEXIA_STYLE_NONCE__");
       assert.ok(shell.headers.get("content-security-policy")?.includes(`style-src 'self' 'nonce-${nonce}'`));
+      assert.ok(shell.headers.get("content-security-policy")?.includes("style-src-attr 'unsafe-inline'"));
       assert.ok(shellHtml.includes(`src="${prefix}/assets/${fixture.entry}"`));
       assert.ok(shellHtml.includes(`href="${prefix}/assets/${fixture.stylesheet}"`));
       const nextShell = await fetch(`${apiServer.base}${route}`);
@@ -2198,6 +2201,26 @@ describe("Codexia HTTP boundary", () => {
 
   it("rejects short access tokens before opening a listener", () => {
     assert.throws(() => createServer({ store: makeStore(), authToken: "too-short" }), /at least 32/u);
+  });
+
+  it("fails API readiness and persistence status while PostgreSQL is unavailable", async (t) => {
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-postgres-ready-"));
+    tempDirs.push(staticDir);
+    const persistence = {
+      async checkHealth() { throw new Error("database unavailable"); },
+    } as unknown as ApiServerOptions["persistence"];
+    const apiServer = await startCustomApi(makeStore(), staticDir, { persistence });
+    t.after(apiServer.close);
+
+    const readiness = await fetch(`${apiServer.base}/health/ready`);
+    assert.equal(readiness.status, 503);
+    assert.equal((await readiness.json() as { ok: boolean }).ok, false);
+
+    const status = await fetch(`${apiServer.base}/api/v1/persistence/status`, {
+      headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+    });
+    assert.equal(status.status, 503);
+    assert.deepEqual(await status.json(), { error: "PostgreSQL persistence is not ready", code: "PERSISTENCE_UNAVAILABLE" });
   });
 
   it("serves immutable runtime metadata publicly in standalone mode", async (t) => {

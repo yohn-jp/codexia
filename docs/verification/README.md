@@ -24,6 +24,8 @@ Install the configured browsers and run acceptance against each profile:
 
 ```sh
 pnpm exec playwright install chromium webkit
+export CODEXIA_E2E_DATABASE_URL='postgres://user:password@127.0.0.1:5432/codexia_e2e'
+# The database above must be disposable; browser tests persist fixtures and do not clean the database.
 CODEXIA_PROFILE=core pnpm test:e2e
 CODEXIA_PROFILE=full pnpm test:e2e
 ```

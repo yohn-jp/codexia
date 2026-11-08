@@ -133,7 +133,7 @@ async function openWorkspaceContributionPanel(page: Page, id: string, title: str
 async function readJournal(page: Page): Promise<JournalSummary[]> {
   return page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 4);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -177,7 +177,7 @@ async function resetLocalCore(): Promise<void> {
 async function readPublicationReceipts(page: Page): Promise<PublicationReceiptSummary[]> {
   return page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 4);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -241,7 +241,7 @@ async function expectPublishedOperation(
 async function readProposalJournal(page: Page): Promise<ProposalJournalSummary[]> {
   return page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 4);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -530,7 +530,7 @@ test("coalesced typing restores to its unchanged React value without reviving th
   await editor.fill(stagingText);
   await expect.poll(async () => (await readJournal(page)).some((entry) => entry.text === stagingText && entry.state === "draft")).toBe(true);
   await page.evaluate(({ originalText, stagingText }) => new Promise<void>((resolve, reject) => {
-    const open = indexedDB.open("scriptorium-recovery", 3);
+    const open = indexedDB.open("scriptorium-recovery", 4);
     open.onerror = () => reject(open.error ?? new Error("IndexedDB open failed"));
     open.onsuccess = () => {
       const database = open.result;
@@ -957,7 +957,7 @@ test("browser recovery is author-scoped and foreign records remain untouched", a
 
   const foreignText = "FOREIGN AUTHOR RECOVERY MUST NOT OPEN";
   await page.evaluate(({ ownerText, foreignText }) => new Promise<void>((resolve, reject) => {
-    const request = indexedDB.open("scriptorium-recovery", 3);
+    const request = indexedDB.open("scriptorium-recovery", 4);
     request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     request.onsuccess = () => {
       const database = request.result;

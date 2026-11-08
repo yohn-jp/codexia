@@ -1,12 +1,12 @@
 # Codexia
 
-A modular Git-backed writing workspace. Git-controlled YAML and Markdown remain the source of truth. The Core profile runs without optional analysis or model dependencies; the full profile composes nine independent add-ons.
+A modular writing workspace with an existing Git repository mode and an additive PostgreSQL Database mode. Git workspaces keep Git-controlled YAML and Markdown as their source of truth; Database workspaces store projects, documents, revisions, Knowledge and Evidence in PostgreSQL. The Core profile runs without optional analysis or model dependencies; the full profile composes nine independent add-ons.
 
-Connect a GitHub work repository, browse volumes, chapters and scenes, edit Markdown, save with revision checks, inspect Git commits, and explicitly synchronize with GitHub. The editor keeps unsaved drafts in this browser and offers Japanese vertical preview. One server instance serves one trusted owner; all registered projects belong to that owner.
+Connect a GitHub work repository, browse volumes, chapters and scenes, edit Markdown, save with revision checks, inspect Git commits, and explicitly synchronize with GitHub. The PostgreSQL Database workspace also supports project/document creation, revision history and restore, conflict comparison and recovery, Knowledge, and UTF-16 Text Anchor/Evidence links in the shared CodeMirror editor. Both modes keep browser recovery separate from their canonical store. One server instance serves one trusted owner; all registered projects belong to that owner.
 
 [Documentation](docs/README.md) covers authoring, architecture, deployment and verification. The [external Plugin Platform proposal](docs/architecture/PLUGIN-PLATFORM.md) specifies a separate isolation and distribution design; built-in modules execute as trusted application code.
 
-The [Codexia reboot RFC](docs/architecture/CODEXIA-REBOOT-RFC.md) is a design proposal; its database and deployment migration work is not implemented by this product rename.
+The [Codexia reboot RFC](docs/architecture/CODEXIA-REBOOT-RFC.md) remains a broader design proposal. PostgreSQL persistence and a separate Database workspace/deployment path are implemented additively; the existing Git workspace contract remains in force for Git projects.
 
 ## Run locally
 
@@ -21,6 +21,8 @@ pnpm start
 ```
 
 Open `http://127.0.0.1:3000` and sign in with `CODEXIA_AUTH_TOKEN`. Public repository reads need no GitHub token. For private repositories and synchronization, provide a GitHub token with access only to the intended work repositories. Credentials stay on the server; do not put them in a repository URL. See [.env.example](.env.example) for configuration names; environment files are not automatically loaded.
+
+To enable PostgreSQL Database workspaces locally, set `CODEXIA_DATABASE_URL`, apply the existing checked migrations with `pnpm --filter @codexia/persistence-postgres migrate`, and set `CODEXIA_REQUIRE_POSTGRES=1` when PostgreSQL must be available for startup. Set `CODEXIA_DATABASE_MIGRATE_ON_START=1` only when the API role is intended to apply checked migrations at startup. The default Git workspace can run without a database.
 
 The work repository must use the existing Arcadia layout:
 

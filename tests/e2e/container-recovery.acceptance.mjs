@@ -304,7 +304,7 @@ async function assertSyntheticFixture(github, branch) {
 async function readJournal(page) {
   return page.evaluate(async () => {
     const database = await new Promise((resolvePromise, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 4);
       request.onsuccess = () => resolvePromise(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -358,7 +358,7 @@ async function readJournal(page) {
 async function readJournalEntry(page, key) {
   return page.evaluate(async (entryKey) => {
     const database = await new Promise((resolvePromise, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 4);
       request.onsuccess = () => resolvePromise(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -412,7 +412,7 @@ async function readJournalEntry(page, key) {
 async function readDocumentJournal(page, documentKey, authorScope, expectedText) {
   return page.evaluate(async ({ key, scope, text }) => {
     const database = await new Promise((resolvePromise, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 4);
       request.onsuccess = () => resolvePromise(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -459,7 +459,7 @@ async function readDocumentJournal(page, documentKey, authorScope, expectedText)
 async function readPublicationReceipts(page) {
   return page.evaluate(async () => {
     const database = await new Promise((resolvePromise, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 4);
       request.onsuccess = () => resolvePromise(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });

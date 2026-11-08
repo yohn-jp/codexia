@@ -190,7 +190,7 @@ const journal = {
 };
 
 async function seedLegacyProposal(): Promise<void> {
-  const request = indexedDB.open("scriptorium-recovery", 3);
+  const request = indexedDB.open("scriptorium-recovery", 4);
   const database = await new Promise<IDBDatabase>((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);

@@ -1,0 +1,4 @@
+[Network]
+NetworkName=codexia-data
+Driver=bridge
+Internal=true

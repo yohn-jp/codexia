@@ -1,6 +1,6 @@
 # Core architecture
 
-Codexia is a TypeScript/Node application with a Git-backed canonical file store, a Fastify API and React browser shells. Core authoring works without optional modules or model credentials.
+This document defines the existing Git repository workspace: a TypeScript/Node application with a Git-backed canonical file store, a Fastify API and React browser shells. Core authoring works without optional modules or model credentials. The additive PostgreSQL Database workspace has a separate canonical record store and API; it reuses the CodeMirror authoring and evidence contracts without copying Git workspace data.
 
 ## Ownership and dependency direction
 

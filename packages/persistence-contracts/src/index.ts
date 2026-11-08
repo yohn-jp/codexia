@@ -405,6 +405,7 @@ export interface PersistenceReader {
   getRevision(projectId: ProjectId, documentId: DocumentId, revisionId: RevisionId): Promise<DocumentRevision | undefined>;
   listRevisions(projectId: ProjectId, documentId: DocumentId, limit: number, before?: string): Promise<DocumentRevisionPage>;
   getKnowledgeNode(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<KnowledgeNode | undefined>;
+  listKnowledgeNodes(projectId: ProjectId, limit?: number): Promise<readonly KnowledgeNode[]>;
   listKnowledgeAliases(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<readonly KnowledgeAlias[]>;
   listKnowledgeRelations(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<readonly KnowledgeRelation[]>;
   getEvidenceAnchor(projectId: ProjectId, evidenceId: EvidenceId): Promise<EvidenceAnchor | undefined>;
@@ -455,6 +456,8 @@ export interface Persistence {
   read<T>(work: (reader: PersistenceReader) => Promise<T>): Promise<T>;
   /** All writes in the callback commit together or roll back together. */
   transaction<T>(work: (transaction: PersistenceTransaction) => Promise<T>): Promise<T>;
+  /** Resolve only when the backing database accepts a lightweight query. */
+  checkHealth?(): Promise<void>;
   close(): Promise<void>;
 }
 

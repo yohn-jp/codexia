@@ -44,3 +44,39 @@ test("hosted PostgreSQL routes are scoped to the assigned project", async () => 
   const creation = await handlePersistenceRoute({ ...base, method: "POST", url: "/api/v1/persistence/projects" });
   assert.equal(creation?.status, 403);
 });
+
+test("persistence status reports database health and knowledge lists are bounded", async () => {
+  const projectId = "knowledge-project" as ProjectId;
+  let requestedLimit = 0;
+  const persistence = {
+    async checkHealth() { throw new Error("database unavailable"); },
+    async read<T>(work: (reader: unknown) => Promise<T>) {
+      return work({
+        async listKnowledgeNodes(selectedProjectId: ProjectId, limit: number) {
+          assert.equal(selectedProjectId, projectId);
+          requestedLimit = limit;
+          return [];
+        },
+      });
+    },
+  } as unknown as Persistence;
+  const base = { persistence, body: null, requestHeaders: {}, async requireAuthor() { return "author"; } };
+
+  const status = await handlePersistenceRoute({ ...base, method: "GET", url: "/api/v1/persistence/status" });
+  assert.equal(status?.status, 503);
+
+  const nodes = await handlePersistenceRoute({
+    ...base,
+    method: "GET",
+    url: `/api/v1/persistence/projects/${projectId}/nodes?limit=500`,
+  });
+  assert.equal(nodes?.status, 200);
+  assert.deepEqual(nodes?.body, { nodes: [] });
+  assert.equal(requestedLimit, 500);
+  const overLimit = await handlePersistenceRoute({
+    ...base,
+    method: "GET",
+    url: `/api/v1/persistence/projects/${projectId}/nodes?limit=501`,
+  });
+  assert.equal(overLimit?.status, 400);
+});

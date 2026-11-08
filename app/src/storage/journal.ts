@@ -10,11 +10,12 @@ import {
 } from "@codexia/contracts";
 
 const DATABASE_NAME = "scriptorium-recovery";
-const DATABASE_VERSION = 3;
+const DATABASE_VERSION = 4;
 const ENTRY_STORE = "operations";
 const SCRATCH_STORE = "scratch";
 const PROPOSAL_STORE = "proposals";
 const RECEIPT_STORE = "publicationReceipts";
+const PERSISTENCE_DRAFT_STORE = "persistenceDrafts";
 
 export type JournalState = "draft" | "checkpointing" | "checkpointed" | "publication_unknown" | "conflict";
 
@@ -59,6 +60,23 @@ export interface JournalProposal {
 export interface JournalProposalOwnership {
   token: string;
   proposal: ChangeProposal;
+}
+
+export interface PersistenceDraftEntry {
+  version: 1;
+  key: string;
+  projectId: string;
+  documentId: string;
+  authorScope: string;
+  baseRevisionId: string;
+  baseMarkdown: string;
+  markdown: string;
+  generation: number;
+  updatedAt: number;
+}
+
+export function persistenceDraftKey(projectId: string, documentId: string, authorScope: string): string {
+  return JSON.stringify([authorScope, projectId, documentId]);
 }
 
 interface ScratchRecord {
@@ -203,6 +221,9 @@ export class BrowserJournal {
           const receipts = database.createObjectStore(RECEIPT_STORE, { keyPath: "key" });
           receipts.createIndex("repositoryKey", "repositoryKey", { unique: false });
         }
+        if (!database.objectStoreNames.contains(PERSISTENCE_DRAFT_STORE)) {
+          database.createObjectStore(PERSISTENCE_DRAFT_STORE, { keyPath: "key" });
+        }
       };
       const database = await requestValue(request);
       database.onversionchange = () => database.close();
@@ -214,6 +235,67 @@ export class BrowserJournal {
 
   close(): void {
     this.database.close();
+  }
+
+  async getPersistenceDraft(projectId: string, documentId: string, authorScope: string): Promise<PersistenceDraftEntry | undefined> {
+    const key = persistenceDraftKey(projectId, documentId, authorScope);
+    try {
+      const transaction = this.database.transaction(PERSISTENCE_DRAFT_STORE, "readonly");
+      const done = transactionDone(transaction);
+      const value = await requestValue(transaction.objectStore(PERSISTENCE_DRAFT_STORE).get(key)) as PersistenceDraftEntry | undefined;
+      await done;
+      if (!value || value.version !== 1 || value.key !== key || value.projectId !== projectId || value.documentId !== documentId || value.authorScope !== authorScope) {
+        return undefined;
+      }
+      return value;
+    } catch (error) {
+      throw storageMessage(error, "database draft");
+    }
+  }
+
+  /** Persist PostgreSQL recovery state before attempting any remote write. */
+  async putPersistenceDraft(entry: Omit<PersistenceDraftEntry, "version" | "key" | "updatedAt">): Promise<boolean> {
+    try {
+      if (!entry.projectId || !entry.documentId || !entry.authorScope || !entry.baseRevisionId ||
+          !Number.isSafeInteger(entry.generation) || entry.generation < 1) {
+        throw new JournalError("The database recovery record is incomplete.");
+      }
+      const key = persistenceDraftKey(entry.projectId, entry.documentId, entry.authorScope);
+      const transaction = this.database.transaction(PERSISTENCE_DRAFT_STORE, "readwrite", { durability: "strict" });
+      const done = transactionDone(transaction);
+      const store = transaction.objectStore(PERSISTENCE_DRAFT_STORE);
+      const existing = await requestValue(store.get(key)) as PersistenceDraftEntry | undefined;
+      if (existing && existing.generation >= entry.generation) {
+        const sameGeneration = existing.generation === entry.generation && existing.baseRevisionId === entry.baseRevisionId && existing.markdown === entry.markdown;
+        await done;
+        return sameGeneration;
+      }
+      store.put({ ...entry, version: 1, key, updatedAt: Date.now() } satisfies PersistenceDraftEntry);
+      await done;
+      return true;
+    } catch (error) {
+      if (error instanceof JournalError) throw error;
+      throw storageMessage(error, "database draft");
+    }
+  }
+
+  async removePersistenceDraft(projectId: string, documentId: string, authorScope: string, expectedGeneration?: number): Promise<boolean> {
+    const key = persistenceDraftKey(projectId, documentId, authorScope);
+    try {
+      const transaction = this.database.transaction(PERSISTENCE_DRAFT_STORE, "readwrite", { durability: "strict" });
+      const done = transactionDone(transaction);
+      const store = transaction.objectStore(PERSISTENCE_DRAFT_STORE);
+      const existing = await requestValue(store.get(key)) as PersistenceDraftEntry | undefined;
+      if (!existing || (expectedGeneration !== undefined && existing.generation !== expectedGeneration)) {
+        await done;
+        return false;
+      }
+      store.delete(key);
+      await done;
+      return true;
+    } catch (error) {
+      throw storageMessage(error, "database draft");
+    }
   }
 
   async put(entry: JournalEntry): Promise<void> {

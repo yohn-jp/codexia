@@ -78,7 +78,7 @@ export function createPostgresEditorEvidenceAdapter(
         idempotencyKey: request.idempotencyKey,
         clientId: request.clientId || clientId,
       }, signal);
-      return { revisionId: saved.revision.id, markdown: saved.revision.markdown };
+      return { revisionId: saved.revision.id, markdown: saved.revision.markdown, document: saved.document, revision: saved.revision };
     },
   };
 }

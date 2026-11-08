@@ -1,0 +1,33 @@
+[Unit]
+Description=Codexia PostgreSQL persistence
+After=network-online.target
+
+[Container]
+Image=docker.io/library/postgres:17-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
+ContainerName=codexia-db
+Network=codexia-data.network
+Volume=codexia-postgres.volume:/var/lib/postgresql/data
+Volume=/etc/codexia/postgres/010-create-app-role.sh:/docker-entrypoint-initdb.d/010-create-app-role.sh:ro,Z
+Secret=codexia-postgres-admin-password,type=mount,target=/run/secrets/admin-password
+Secret=codexia-postgres-app-password,type=mount,target=/run/secrets/app-password
+Environment=POSTGRES_DB=codexia
+Environment=POSTGRES_USER=codexia_admin
+Environment=POSTGRES_PASSWORD_FILE=/run/secrets/admin-password
+Environment=PGDATA=/var/lib/postgresql/data/pgdata
+ReadOnly=true
+Tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m
+Tmpfs=/var/run/postgresql:rw,nosuid,nodev,noexec,size=16m
+NoNewPrivileges=true
+HealthCmd=pg_isready -U codexia -d codexia
+HealthInterval=15s
+HealthTimeout=5s
+HealthStartPeriod=30s
+HealthRetries=6
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

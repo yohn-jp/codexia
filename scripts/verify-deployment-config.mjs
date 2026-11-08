@@ -12,13 +12,16 @@ const edgePackage = JSON.parse(await read('edge/frontend/package.json'));
 const edgeLock = JSON.parse(await read('edge/frontend/package-lock.json'));
 const uiRoutes = JSON.parse(await read('deploy/cloudflare/ui-routes.json'));
 const publicFiles = await listFiles('app/public');
-const [workerSource, apiSource, apiClient, terraformMain, terraformVariables, apiQuadlet, tunnelQuadlet, backendDockerfile, deploymentDocs] = await Promise.all([
+const [workerSource, apiSource, apiClient, terraformMain, terraformVariables, apiQuadlet, databaseQuadlet, databaseNetwork, databaseVolume, tunnelQuadlet, backendDockerfile, deploymentDocs] = await Promise.all([
   read('edge/frontend/src/index.ts'),
   read('packages/api/src/server.ts'),
   read('app/src/api.ts'),
   read('deploy/cloudflare/terraform/main.tf'),
   read('deploy/cloudflare/terraform/variables.tf'),
   read('deploy/quadlet/codexia-api.container'),
+  read('deploy/quadlet/codexia-db.container'),
+  read('deploy/quadlet/codexia-data.network'),
+  read('deploy/quadlet/codexia-postgres.volume'),
   read('deploy/quadlet/codexia-tunnel.container'),
   read('Dockerfile.backend'),
   read('docs/deployment/README.md'),
@@ -54,6 +57,8 @@ assert.match(terraformVariables, /http:\/\/codexia-api:3000/u);
 
 assert.match(workerSource, /Content-Security-Policy/u);
 assert.match(workerSource, /__CODEXIA_STYLE_NONCE__/u);
+assert.match(workerSource, /style-src-attr 'unsafe-inline'/u);
+assert.match(apiSource, /style-src-attr 'unsafe-inline'/u);
 assert.match(workerSource, /env\.ASSETS\.fetch/u);
 assert.doesNotMatch(workerSource, /(?<!ASSETS\.)fetch\(request\)/u, 'the UI Worker must not proxy requests to the origin');
 assert.ok(apiClient.includes('"/api/login"'), 'the UI API client must keep using same-origin API paths');
@@ -64,15 +69,35 @@ assert.match(apiSource, /sameOrigin\(request, trustProxy\)/u);
 assert.match(apiQuadlet, /Image=ghcr\.io\/yohn-jp\/codexia-backend:sha-/u);
 assert.match(apiQuadlet, /CODEXIA_AUTH_TOKEN_FILE=\/run\/secrets\/codexia-auth-token/u);
 assert.match(apiQuadlet, /CODEXIA_GITHUB_TOKEN_FILE=\/run\/secrets\/codexia-github-token/u);
+assert.match(apiQuadlet, /CODEXIA_DATABASE_PASSWORD_FILE=\/run\/secrets\/app-password/u);
+assert.match(apiQuadlet, /CODEXIA_REQUIRE_POSTGRES=1/u);
+assert.match(apiQuadlet, /CODEXIA_DATABASE_MIGRATE_ON_START=1/u);
+assert.match(apiQuadlet, /Requires=codexia-db\.service/u);
+assert.match(apiQuadlet, /Network=codexia-data\.network/u);
 assert.match(apiQuadlet, /HealthCmd=.*\/health\/ready/u);
 assert.match(apiQuadlet, /Network=codexia\.network/u);
 assert.doesNotMatch(apiQuadlet, /^PublishPort=/mu, 'the API must not publish a host port');
+assert.match(databaseQuadlet, /Image=docker\.io\/library\/postgres:17-bookworm@sha256:[a-f0-9]{64}/u);
+assert.match(databaseQuadlet, /Network=codexia-data\.network/u);
+assert.match(databaseQuadlet, /Volume=codexia-postgres\.volume:\/var\/lib\/postgresql\/data/u);
+assert.match(databaseQuadlet, /POSTGRES_USER=codexia_admin/u);
+assert.match(databaseQuadlet, /POSTGRES_PASSWORD_FILE=\/run\/secrets\/admin-password/u);
+assert.match(databaseQuadlet, /\/etc\/codexia\/postgres\/010-create-app-role\.sh:\/docker-entrypoint-initdb\.d\/010-create-app-role\.sh:ro,Z/u);
+assert.match(databaseQuadlet, /codexia-postgres-app-password/u);
+assert.doesNotMatch(databaseQuadlet, /^PublishPort=/mu, 'PostgreSQL must not publish a host port');
+assert.match(await read('deploy/postgres/010-create-app-role.sh'), /CREATE ROLE codexia LOGIN/u);
+assert.match(await read('deploy/postgres/010-create-app-role.sh'), /ALTER DATABASE codexia OWNER TO codexia/u);
+assert.match(databaseQuadlet, /HealthCmd=pg_isready -U codexia -d codexia/u);
+assert.match(databaseNetwork, /Internal=true/u, 'PostgreSQL must be isolated from the Tunnel network');
+assert.match(databaseVolume, /VolumeName=codexia-postgres/u);
 assert.match(tunnelQuadlet, /Secret=codexia-tunnel-token/u);
 assert.match(tunnelQuadlet, /Network=codexia\.network/u);
 assert.match(tunnelQuadlet, /PublishPort=127\.0\.0\.1:2000:2000\/tcp/u, 'Tunnel metrics must bind to host loopback only');
 assert.doesNotMatch(tunnelQuadlet, /^PublishPort=(?!127\.0\.0\.1:2000:2000\/tcp)/mu, 'the Tunnel must not publish a public host port');
 assert.match(backendDockerfile, /--server-only/u);
 assert.match(deploymentDocs, /pg_dump/u);
+assert.match(deploymentDocs, /codexia-db\.service/u);
+assert.match(deploymentDocs, /codexia-postgres/u);
 assert.match(deploymentDocs, /VITE_API_URL/u);
 assert.match(deploymentDocs, /CORS/u);
 assert.match(deploymentDocs, /restore/u);

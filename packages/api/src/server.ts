@@ -11,7 +11,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type RecentActivityInput, type RepositoryIdentity, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ReorderHierarchyInput } from "@codexia/core";
 import type { Persistence } from "@codexia/persistence-contracts";
-import { createPostgresPersistence } from "@codexia/persistence-postgres";
+import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import { ModuleRuntime, type ActionHostContext, type DomainJobActionExecutor, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 import { HistoricalModelUsageStore } from "./historical-store.js";
 import { JobHistoryError, JobHistoryStore, type JobEvent } from "./job-history-store.js";
@@ -228,7 +228,7 @@ function setSecurityHeaders(response: ServerResponse, styleNonce: string): void 
   response.setHeader("X-Content-Type-Options", "nosniff");
   response.setHeader("Referrer-Policy", "same-origin");
   response.setHeader("X-Frame-Options", "DENY");
-  response.setHeader("Content-Security-Policy", `default-src 'self'; style-src 'self' 'nonce-${styleNonce}'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`);
+  response.setHeader("Content-Security-Policy", `default-src 'self'; style-src 'self' 'nonce-${styleNonce}'; style-src-attr 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`);
   response.setHeader("Cache-Control", "no-store");
 }
 
@@ -1601,10 +1601,20 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
     if (routePath === "/api/health" && isRead) { sendJson(response, 200, { status: "ok" }); return; }
-    if (routePath === "/api/ready" && isRead) { sendJson(response, shuttingDown ? 503 : 200, { ok: !shuttingDown, pendingRequests: activeRequests, pendingLocalCheckpoints: lastPendingLocalCheckpoints }); return; }
+    if (routePath === "/api/ready" && isRead) {
+      const databaseReady = await postgresReady(options.persistence);
+      const ready = !shuttingDown && databaseReady;
+      sendJson(response, ready ? 200 : 503, { ok: ready, pendingRequests: activeRequests, pendingLocalCheckpoints: lastPendingLocalCheckpoints });
+      return;
+    }
     if (routePath === "/health/live" && isRead) { sendJson(response, 200, { ok: true }); return; }
     if (routePath === "/health/startup" && isRead) { sendJson(response, started && !closed ? 200 : 503, { ok: started && !closed, started }); return; }
-    if (routePath === "/health/ready" && isRead) { sendJson(response, shuttingDown ? 503 : 200, { ok: !shuttingDown, pendingRequests: activeRequests, pendingLocalCheckpoints: lastPendingLocalCheckpoints }); return; }
+    if (routePath === "/health/ready" && isRead) {
+      const databaseReady = await postgresReady(options.persistence);
+      const ready = !shuttingDown && databaseReady;
+      sendJson(response, ready ? 200 : 503, { ok: ready, pendingRequests: activeRequests, pendingLocalCheckpoints: lastPendingLocalCheckpoints });
+      return;
+    }
 
     if (routePath === "/api/login" && method === "POST") {
       if (!sameOrigin(request, trustProxy)) { fail(response, 403, "CROSS_ORIGIN_REQUEST", "Request origin must match this application"); return; }
@@ -2543,7 +2553,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     }
     return startServer({
       store,
-      ...postgresPersistenceOptions(),
+      ...await postgresPersistenceOptions(),
       hosted: { assignment, projectId: project.id, authorization, producerRevision },
       trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
       runtimeOptions,
@@ -2561,7 +2571,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   });
   return startServer({
     store,
-    ...postgresPersistenceOptions(),
+    ...await postgresPersistenceOptions(),
     authToken,
     trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
     runtimeOptions,
@@ -2570,8 +2580,33 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   });
 }
 
-function postgresPersistenceOptions(): Pick<ApiServerOptions, "persistence" | "closePersistenceOnShutdown"> {
+async function postgresReady(persistence: Persistence | undefined): Promise<boolean> {
+  if (!persistence?.checkHealth) return true;
+  try {
+    await persistence.checkHealth();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function postgresPersistenceOptions(): Promise<Pick<ApiServerOptions, "persistence" | "closePersistenceOnShutdown">> {
   const connectionString = readCodexiaEnvironment("DATABASE_URL");
+  const required = readCodexiaEnvironment("REQUIRE_POSTGRES");
+  if (required !== undefined && required !== "0" && required !== "1") {
+    throw new Error("CODEXIA_REQUIRE_POSTGRES must be 1 or 0");
+  }
+  if (required === "1" && !connectionString) {
+    throw new Error("CODEXIA_DATABASE_URL is required when CODEXIA_REQUIRE_POSTGRES=1");
+  }
+  const migrateOnStart = readCodexiaEnvironment("DATABASE_MIGRATE_ON_START");
+  if (migrateOnStart !== undefined && migrateOnStart !== "0" && migrateOnStart !== "1") {
+    throw new Error("CODEXIA_DATABASE_MIGRATE_ON_START must be 1 or 0");
+  }
+  if (migrateOnStart === "1" && !connectionString) {
+    throw new Error("CODEXIA_DATABASE_URL is required when CODEXIA_DATABASE_MIGRATE_ON_START=1");
+  }
+  if (connectionString && migrateOnStart === "1") await migratePostgresDatabase(connectionString);
   return connectionString
     ? { persistence: createPostgresPersistence(connectionString), closePersistenceOnShutdown: true }
     : {};

@@ -25,6 +25,7 @@ export interface ManuscriptInputHandle {
   insert(symbol: WritingSymbolId): void;
   restorePosition(position: { cursorSentenceIndex: number | null; scrollTop: number }): void;
   getScrollTop(): number;
+  getSelection(): { from: number; to: number; text: string } | null;
 }
 
 export interface ManuscriptInputProps {
@@ -146,6 +147,13 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
     },
     getScrollTop() {
       return Math.max(0, viewRef.current?.scrollDOM.scrollTop ?? 0);
+    },
+    getSelection() {
+      const view = viewRef.current;
+      if (!view) return null;
+      const selection = view.state.selection.main;
+      if (selection.empty) return null;
+      return { from: selection.from, to: selection.to, text: view.state.sliceDoc(selection.from, selection.to) };
     },
   }), []);
 
