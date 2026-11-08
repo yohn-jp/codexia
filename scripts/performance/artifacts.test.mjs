@@ -17,7 +17,7 @@ test('artifact round trip reproduces archives and rejects corrupt archive, gzip 
     const manifest = { schemaVersion: 1, artifacts: [{ file: 'raw/result.json.gz', sourceFile: 'result.json',
       sourceBytes: data.length, gzipBytes: gzip.length, sha256: hash(data), gzipSha256: hash(gzip), diagnostic: false }] };
     await writeFile(index, JSON.stringify(manifest));
-    const url = 'https://github.com/yohn-jp/scriptorium/releases/download/test/evidence.tar';
+    const url = 'https://github.com/yohn-jp/codexia/releases/download/test/evidence.tar';
     const a = await pack(index, source, join(root, 'a'), url);
     const b = await pack(join(root, 'a/INDEX.json'), source, join(root, 'b'), url);
     assert.deepEqual(a, b);

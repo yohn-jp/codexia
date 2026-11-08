@@ -69,8 +69,8 @@ for (const size of sizes) {
     for (let repeat = 1; repeat <= repeats; repeat += 1) {
       const output = join(resultRoot, `${mode}-${size}-r${repeat}.json`);
       const report = await runWorker(workerPath, [datasetPath, output, mode], output, timeoutMs, {
-        SCRIPTORIUM_PROFILE: 'core',
-        SCRIPTORIUM_CORE64_ENTRY: coreEntry,
+        CODEXIA_PROFILE: 'core',
+        CODEXIA_CORE64_ENTRY: coreEntry,
       });
       runRecords.push({ size, mode, repeat, output, status: report.status, report });
       process.stdout.write(`${size}/${mode}/r${repeat}: ${report.status}\n`);

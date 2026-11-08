@@ -11,10 +11,10 @@ import { distribution, save } from './common.mjs';
 import { installBrowserProbes } from './browser-probes.mjs';
 
 const [runtimeRootArg, fixtureRootArg, scratchParentArg, outputArg, navigationRepeatsArg = '8'] = process.argv.slice(2);
-const expectedRuntimeSource = process.env.SCRIPTORIUM_C64_EXPECTED_RUNTIME_SHA ?? 'ffd02739ab095dfda2854a3ff487434c84f6b536';
+const expectedRuntimeSource = process.env.CODEXIA_C64_EXPECTED_RUNTIME_SHA ?? 'ffd02739ab095dfda2854a3ff487434c84f6b536';
 
 function usage() {
-  return 'Usage: node scripts/performance/core64-durability-probe.mjs <runtime-repo-root> <canonical-small-fixture> <scratch-parent> <output.json> [navigation-repeats=8] (SCRIPTORIUM_C64_RUNTIME_ROOT and SCRIPTORIUM_C64_RUNTIME_MANIFEST override runtime paths)';
+  return 'Usage: node scripts/performance/core64-durability-probe.mjs <runtime-repo-root> <canonical-small-fixture> <scratch-parent> <output.json> [navigation-repeats=8] (CODEXIA_C64_RUNTIME_ROOT and CODEXIA_C64_RUNTIME_MANIFEST override runtime paths)';
 }
 
 if (!runtimeRootArg || runtimeRootArg === '--help') {
@@ -26,7 +26,7 @@ if (process.argv.length < 6) {
   process.exit(2);
 }
 
-const runtimeRoot = resolve(process.env.SCRIPTORIUM_C64_RUNTIME_ROOT ?? runtimeRootArg);
+const runtimeRoot = resolve(process.env.CODEXIA_C64_RUNTIME_ROOT ?? runtimeRootArg);
 const fixtureRoot = resolve(fixtureRootArg);
 const scratchParent = resolve(scratchParentArg);
 const output = resolve(outputArg);
@@ -38,7 +38,7 @@ if (!fixtureRootArg || !scratchParentArg || !outputArg || !Number.isInteger(navi
 const datasetFile = join(fixtureRoot, 'dataset.json');
 const origin = join(fixtureRoot, 'origin.git');
 const serverScript = join(runtimeRoot, 'scripts/performance/server.mjs');
-const runtimeManifestPath = resolve(process.env.SCRIPTORIUM_C64_RUNTIME_MANIFEST ?? fileURLToPath(new URL('../../evidence/performance/resize-runtime-manifest.json', import.meta.url)));
+const runtimeManifestPath = resolve(process.env.CODEXIA_C64_RUNTIME_MANIFEST ?? fileURLToPath(new URL('../../evidence/performance/resize-runtime-manifest.json', import.meta.url)));
 for (const required of [
   join(runtimeRoot, 'package.json'),
   join(runtimeRoot, 'app/dist/index.html'),
@@ -65,7 +65,7 @@ const { chromium, expect: playwrightExpect } = runtimeRequire('@playwright/test'
 const expect = playwrightExpect.configure({ timeout: 60_000 });
 const runtimeSource = await runtimeRequire('node:child_process').execFileSync('git', ['-C', runtimeRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 if (runtimeSource !== expectedRuntimeSource) {
-  throw new Error(`Runtime source mismatch: expected ${expectedRuntimeSource}, received ${runtimeSource}. Set SCRIPTORIUM_C64_EXPECTED_RUNTIME_SHA only for an explicitly approved runtime.`);
+  throw new Error(`Runtime source mismatch: expected ${expectedRuntimeSource}, received ${runtimeSource}. Set CODEXIA_C64_EXPECTED_RUNTIME_SHA only for an explicitly approved runtime.`);
 }
 const runtimeManifestBytes = await readFile(runtimeManifestPath).catch(() => {
   throw new Error(`Shared runtime manifest is unavailable: ${runtimeManifestPath}`);
@@ -90,7 +90,7 @@ if (runtimeManifest.schemaVersion !== 1
   || resolve(runtimeManifest.runtimeRoot ?? '') !== runtimeRoot
   || runtimeManifest.sourceCommit !== runtimeSource
   || runtimeManifest.profile !== 'core'
-  || runtimeManifest.buildCommand !== 'SCRIPTORIUM_PROFILE=core pnpm build'
+  || runtimeManifest.buildCommand !== 'CODEXIA_PROFILE=core pnpm build'
   || runtimeManifest.productionIdentity?.referenceCommit !== 'e8aa3ecd7d1e0bfb3d81a003a2bc0320c9cc6d47'
   || runtimeManifest.productionIdentity?.identical !== true
   || !Array.isArray(runtimeManifest.productionIdentity?.comparedPaths)
@@ -230,14 +230,14 @@ let context;
 let page;
 try {
   await mkdir(resolve(output, '..'), { recursive: true });
-  server = fork(serverScript, [scratch], { cwd: runtimeRoot, stdio: ['ignore', 'ignore', 'inherit', 'ipc'], env: { ...process.env, SCRIPTORIUM_PROFILE: 'core' } });
+  server = fork(serverScript, [scratch], { cwd: runtimeRoot, stdio: ['ignore', 'ignore', 'inherit', 'ipc'], env: { ...process.env, CODEXIA_PROFILE: 'core' } });
   const [ready] = await once(server, 'message');
   if (!ready?.port || !ready?.remote) throw new Error('Canonical local performance server did not become ready.');
   report.serverStartupMs = ready.startupMs;
   report.serverScriptSha256 = createHash('sha256').update(await readFile(serverScript)).digest('hex');
 
   browser = await chromium.launch({ headless: true,
-    ...(process.env.SCRIPTORIUM_E2E_CHROMIUM ? { executablePath: process.env.SCRIPTORIUM_E2E_CHROMIUM } : {}) });
+    ...(process.env.CODEXIA_E2E_CHROMIUM ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM } : {}) });
   report.browser = browser.version();
   context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   await context.addInitScript({ content: injectedProbe });
@@ -275,7 +275,7 @@ try {
   async function readDraft(sceneId, expectedMarker) {
     return page.evaluate(async ({ sceneId, expectedMarker }) => {
       const database = await new Promise((resolveOpen, rejectOpen) => {
-        const request = indexedDB.open('scriptorium-recovery', 3);
+        const request = indexedDB.open('codexia-recovery', 3);
         request.onsuccess = () => resolveOpen(request.result);
         request.onerror = () => rejectOpen(request.error ?? new Error('IndexedDB open failed'));
       });
