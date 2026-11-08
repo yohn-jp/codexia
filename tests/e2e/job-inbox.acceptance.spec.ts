@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-const authToken = process.env.SCRIPTORIUM_E2E_AUTH_TOKEN ?? "";
+const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const now = "2026-10-17T00:00:00.000Z";
 
 function fixtureJob(overrides: Record<string, unknown>) {
@@ -20,7 +20,7 @@ function fixtureJob(overrides: Record<string, unknown>) {
 
 async function assertOwnerCookie(route: Route): Promise<void> {
   const headers = await route.request().allHeaders();
-  expect(headers.cookie).toContain("scriptorium_session=");
+  expect(headers.cookie).toContain("codexia_session=");
 }
 
 async function emitJobEvent(page: Page, event: Record<string, unknown>): Promise<void> {

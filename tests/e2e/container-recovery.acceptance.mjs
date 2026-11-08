@@ -7,9 +7,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, expect } from "@playwright/test";
 
-const repositoryUrl = process.env.SCRIPTORIUM_E2E_REPOSITORY_URL ?? "";
-const chromiumPath = process.env.SCRIPTORIUM_E2E_CHROMIUM;
-const keepFailureArtifacts = process.env.SCRIPTORIUM_KEEP_FAILURE_ARTIFACTS === "1";
+const repositoryUrl = process.env.CODEXIA_E2E_REPOSITORY_URL ?? "";
+const chromiumPath = process.env.CODEXIA_E2E_CHROMIUM;
+const keepFailureArtifacts = process.env.CODEXIA_KEEP_FAILURE_ARTIFACTS === "1";
 const appToken = randomBytes(32).toString("hex");
 const runtimeSourcePaths = [
   "Dockerfile", "LICENSE", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.base.json",
@@ -35,15 +35,15 @@ const fixtureContents = new Map([
 ]);
 
 function requiredRepository() {
-  if (!repositoryUrl) throw new Error("Set SCRIPTORIUM_E2E_REPOSITORY_URL to the dedicated private synthetic GitHub fixture.");
+  if (!repositoryUrl) throw new Error("Set CODEXIA_E2E_REPOSITORY_URL to the dedicated private synthetic GitHub fixture.");
   let parsed;
   try { parsed = new URL(repositoryUrl); }
-  catch { throw new Error("SCRIPTORIUM_E2E_REPOSITORY_URL must be an HTTPS GitHub repository URL."); }
+  catch { throw new Error("CODEXIA_E2E_REPOSITORY_URL must be an HTTPS GitHub repository URL."); }
   if (parsed.protocol !== "https:" || parsed.hostname.toLowerCase() !== "github.com") {
-    throw new Error("SCRIPTORIUM_E2E_REPOSITORY_URL must be an HTTPS GitHub repository URL.");
+    throw new Error("CODEXIA_E2E_REPOSITORY_URL must be an HTTPS GitHub repository URL.");
   }
   const parts = parsed.pathname.split("/").filter(Boolean);
-  if (parts.length !== 2 || parts[1].replace(/\.git$/u, "") === "scriptorium-epic7-acceptance-20261017-db517d") {
+  if (parts.length !== 2 || parts[1].replace(/\.git$/u, "") === "codexia-epic7-acceptance-20261017-db517d") {
     throw new Error("Use a dedicated repository for this P13 run; the P07 acceptance fixture is not permitted.");
   }
   return parsed;
@@ -93,11 +93,11 @@ function assertImageInputsMatchHead() {
 }
 
 function githubToken() {
-  const configured = process.env.SCRIPTORIUM_GITHUB_TOKEN?.trim();
+  const configured = process.env.CODEXIA_GITHUB_TOKEN?.trim();
   const token = configured || execFileSync("gh", ["auth", "token", "--hostname", "github.com"], {
     encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
   }).trim();
-  if (!token) throw new Error("Set SCRIPTORIUM_GITHUB_TOKEN or authenticate gh; the token is held in memory and never printed.");
+  if (!token) throw new Error("Set CODEXIA_GITHUB_TOKEN or authenticate gh; the token is held in memory and never printed.");
   return token;
 }
 
@@ -204,15 +204,15 @@ async function browserUiState(page, expectedAuthorText = "") {
 async function startContainer(engine, options) {
   const env = {
     ...process.env,
-    SCRIPTORIUM_AUTH_TOKEN: options.authToken,
-    SCRIPTORIUM_GITHUB_TOKEN: options.githubToken,
+    CODEXIA_AUTH_TOKEN: options.authToken,
+    CODEXIA_GITHUB_TOKEN: options.githubToken,
   };
   run(engine, [
     "run", "--detach", "--name", options.name, "--stop-timeout", "30",
     "--publish", `127.0.0.1:${options.port}:3000`,
     "--volume", `${options.volume}:/data`,
-    "--env", "SCRIPTORIUM_AUTH_TOKEN", "--env", "SCRIPTORIUM_GITHUB_TOKEN",
-    "--env", "SCRIPTORIUM_DATA_DIR=/data", options.image,
+    "--env", "CODEXIA_AUTH_TOKEN", "--env", "CODEXIA_GITHUB_TOKEN",
+    "--env", "CODEXIA_DATA_DIR=/data", options.image,
   ], { env, capture: true });
   const baseUrl = `http://127.0.0.1:${options.port}`;
   await waitFor("the real Core image health endpoint", async () => {
@@ -304,7 +304,7 @@ async function assertSyntheticFixture(github, branch) {
 async function readJournal(page) {
   return page.evaluate(async () => {
     const database = await new Promise((resolvePromise, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("codexia-recovery", 3);
       request.onsuccess = () => resolvePromise(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -358,7 +358,7 @@ async function readJournal(page) {
 async function readJournalEntry(page, key) {
   return page.evaluate(async (entryKey) => {
     const database = await new Promise((resolvePromise, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("codexia-recovery", 3);
       request.onsuccess = () => resolvePromise(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -412,7 +412,7 @@ async function readJournalEntry(page, key) {
 async function readDocumentJournal(page, documentKey, authorScope, expectedText) {
   return page.evaluate(async ({ key, scope, text }) => {
     const database = await new Promise((resolvePromise, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("codexia-recovery", 3);
       request.onsuccess = () => resolvePromise(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -459,7 +459,7 @@ async function readDocumentJournal(page, documentKey, authorScope, expectedText)
 async function readPublicationReceipts(page) {
   return page.evaluate(async () => {
     const database = await new Promise((resolvePromise, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("codexia-recovery", 3);
       request.onsuccess = () => resolvePromise(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -544,7 +544,7 @@ async function reportConflictDiagnostics(page, diagnostics, project, expectedHea
     expectedRemoteHead: expectedHead,
     coreObservedHead,
     ui,
-    journalStore: "scriptorium-recovery.operations",
+    journalStore: "codexia-recovery.operations",
     expectedOperationId: authorDraftEntry.operationId,
     expectedGeneration: authorDraftEntry.generation,
     expectedAuthorTextLength: expectedAuthorText.length,
@@ -575,13 +575,13 @@ async function dispatchRemoteRefresh(page) {
 }
 
 function operationPath(operationId) {
-  return `meta/scriptorium/operations/v1/${operationId}.json`;
+  return `meta/codexia/operations/v1/${operationId}.json`;
 }
 
 async function main() {
   const parsedUrl = requiredRepository();
   const { owner, name } = parseRepository(parsedUrl);
-  const branchOverride = process.env.SCRIPTORIUM_E2E_REPOSITORY_BRANCH;
+  const branchOverride = process.env.CODEXIA_E2E_REPOSITORY_BRANCH;
   const githubCredential = githubToken();
   const github = createGithubApi(githubCredential, owner, name);
   const repository = await github.metadata();
@@ -598,14 +598,14 @@ async function main() {
   ];
   const sourceHead = assertImageInputsMatchHead();
   const engine = requiredEngine();
-  const tempRoot = await mkdtemp(join(tmpdir(), "scriptorium-p13-recovery-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "codexia-p13-recovery-"));
   const profileDir = join(tempRoot, "browser-profile");
   const port = await freePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const suffix = randomBytes(5).toString("hex");
-  const image = `localhost/scriptorium:p13-recovery-${sourceHead.slice(0, 8)}-${suffix}`;
-  const container = `scriptorium-p13-recovery-${suffix}`;
-  const volume = `scriptorium-p13-recovery-${suffix}`;
+  const image = `localhost/codexia:p13-recovery-${sourceHead.slice(0, 8)}-${suffix}`;
+  const container = `codexia-p13-recovery-${suffix}`;
+  const volume = `codexia-p13-recovery-${suffix}`;
   let volumeCreated = false;
   let context;
   let diagnostics;
@@ -833,7 +833,7 @@ async function main() {
     if (keepFailureArtifacts && !result) {
       const profileExists = await stat(profileDir).then(() => true, () => false);
       if (profileExists) {
-        const artifactDirectory = join(tmpdir(), `scriptorium-p13-failure-${suffix}`);
+        const artifactDirectory = join(tmpdir(), `codexia-p13-failure-${suffix}`);
         try {
           if (!profileCookiesCleared) {
             const scrubContext = await chromium.launchPersistentContext(profileDir, chromiumOptions);

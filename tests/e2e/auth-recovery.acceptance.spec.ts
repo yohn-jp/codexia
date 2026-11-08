@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { pathToFileURL } from "node:url";
 
-const authToken = process.env.SCRIPTORIUM_E2E_AUTH_TOKEN ?? "";
-const repositoryUrl = process.env.SCRIPTORIUM_E2E_REPOSITORY_URL ?? "";
+const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
+const repositoryUrl = process.env.CODEXIA_E2E_REPOSITORY_URL ?? "";
 
 test("an unknown hosted grant requests refresh and retries the initial session check", async ({ page }) => {
   let sessionRequests = 0;
@@ -13,7 +13,7 @@ test("an unknown hosted grant requests refresh and retries the initial session c
   await page.route("**/api/version", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
-    body: JSON.stringify({ name: "scriptorium", version: "test", hosted: true, profile: "hosted" }),
+    body: JSON.stringify({ name: "codexia", version: "test", hosted: true, profile: "hosted" }),
   }));
   await page.route("**/api/session", (route) => {
     sessionRequests += 1;
@@ -77,7 +77,7 @@ test("concurrent tabs serialize a rotated hosted grant through the browser lock"
   await context.route("**/api/version", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
-    body: JSON.stringify({ name: "scriptorium", version: "test", hosted: true, profile: "hosted" }),
+    body: JSON.stringify({ name: "codexia", version: "test", hosted: true, profile: "hosted" }),
   }));
   await context.route("**/api/session", async (route) => {
     totalSessionRequests += 1;
@@ -136,7 +136,7 @@ test("concurrent tabs serialize a rotated hosted grant through the browser lock"
 });
 
 test("an interrupted initial project bootstrap resumes after persisted pageshow", async ({ page }) => {
-  test.skip(Boolean(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1" || process.env.SCRIPTORIUM_E2E_BASE_URL || process.env.SCRIPTORIUM_BASE_URL),
+  test.skip(Boolean(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1" || process.env.CODEXIA_E2E_BASE_URL || process.env.CODEXIA_BASE_URL),
     "The bootstrap lifecycle regression requires the generated local owner repository fixture.");
   expect(authToken).not.toBe("");
   expect(repositoryUrl).not.toBe("");
@@ -215,7 +215,7 @@ test("an interrupted initial project bootstrap resumes after persisted pageshow"
 });
 
 test("direct-link, active scene, and project activation resume after persisted pageshow", async ({ page }) => {
-  test.skip(Boolean(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1" || process.env.SCRIPTORIUM_E2E_BASE_URL || process.env.SCRIPTORIUM_BASE_URL),
+  test.skip(Boolean(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1" || process.env.CODEXIA_E2E_BASE_URL || process.env.CODEXIA_BASE_URL),
     "The scene lifecycle regression requires the generated local owner repository fixture.");
   expect(authToken).not.toBe("");
   expect(repositoryUrl).not.toBe("");

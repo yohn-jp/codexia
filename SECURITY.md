@@ -1,6 +1,6 @@
 # Security Policy
 
-Scriptorium Core is a single-owner writing application. No supported public release or external hosting service is claimed by this initial source delivery.
+Codexia Core is a single-owner writing application. No supported public release or external hosting service is claimed by this initial source delivery.
 
 ## Reporting
 
@@ -8,11 +8,11 @@ Report suspected vulnerabilities through private GitHub Security Advisories. Do 
 
 ## Deployment boundary
 
-Set a unique `SCRIPTORIUM_AUTH_TOKEN` of at least 32 characters. The browser exchanges it for an HttpOnly, SameSite=Strict session cookie; session state lives in server memory. Restarting the server requires signing in again. Every authenticated session can access all projects registered with that instance. Separate tenants require separate instances and data directories.
+Set a unique `CODEXIA_AUTH_TOKEN` of at least 32 characters. The browser exchanges it for an HttpOnly, SameSite=Strict session cookie; session state lives in server memory. Restarting the server requires signing in again. Every authenticated session can access all projects registered with that instance. Separate tenants require separate instances and data directories.
 
-The default local listener is localhost. The OCI image listens on all container interfaces; bind its published port to localhost or put it behind a trusted HTTPS reverse proxy. Set `SCRIPTORIUM_TRUST_PROXY=1` only when that proxy controls and replaces `X-Forwarded-Proto`; this enables Secure cookies for externally HTTPS requests. Mutating API requests require a matching Origin. Never expose the instance through plain HTTP on an untrusted network.
+The default local listener is localhost. The OCI image listens on all container interfaces; bind its published port to localhost or put it behind a trusted HTTPS reverse proxy. Set `CODEXIA_TRUST_PROXY=1` only when that proxy controls and replaces `X-Forwarded-Proto`; this enables Secure cookies for externally HTTPS requests. Mutating API requests require a matching Origin. Never expose the instance through plain HTTP on an untrusted network.
 
-Use a least-privilege `SCRIPTORIUM_GITHUB_TOKEN` for the intended work repositories. The token stays in server process state and Git authentication environment, outside clone URLs, Git configuration, browser assets, and image layers. Do not use token-bearing URLs. Work repositories and the persistent data directory contain private writing: restrict filesystem access and protect backups accordingly.
+Use a least-privilege `CODEXIA_GITHUB_TOKEN` for the intended work repositories. The token stays in server process state and Git authentication environment, outside clone URLs, Git configuration, browser assets, and image layers. Do not use token-bearing URLs. Work repositories and the persistent data directory contain private writing: restrict filesystem access and protect backups accordingly.
 
 ## Persistence and recovery
 

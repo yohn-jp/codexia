@@ -3,7 +3,7 @@
 import { assertImageTagAbsent, assertReleaseIdentity } from './release-policy.mjs';
 
 const { IMAGE: image, TAG: tag, GITHUB_ACTOR: actor, GH_TOKEN: token, GITHUB_SHA: sha } = process.env;
-if (!image || !/^ghcr\.io\/yohn-jp\/scriptorium\/(core|full)$/.test(image) || !tag || !actor || !token || !sha) {
+if (!image || !/^ghcr\.io\/yohn-jp\/codexia\/(core|full)$/.test(image) || !tag || !actor || !token || !sha) {
   throw new Error('OCI immutability check requires the exact release image, tag and registry read credentials');
 }
 assertReleaseIdentity(tag, sha, sha);
