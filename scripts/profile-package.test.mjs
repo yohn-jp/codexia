@@ -20,6 +20,14 @@ test('Core package depends on the API and builds no optional module package', ()
     false,
   );
   assert.deepEqual(commands.find(({ args }) => args.includes('@codexia/app'))?.env, { CODEXIA_PROFILE: 'core' });
+
+  const backendCommands = createBuildCommands('core', profile, { includeUi: false });
+  assert.equal(backendCommands.some(({ args }) => args.includes('@codexia/app')), false);
+  assert.equal(backendCommands.some(({ args }) => args.some((argument) => argument.includes('@codexia/api'))), true);
+
+  const frontendCommands = createBuildCommands('core', profile, { includeApi: false });
+  assert.equal(frontendCommands.some(({ args }) => args.some((argument) => argument.includes('@codexia/api'))), false);
+  assert.equal(frontendCommands.some(({ args }) => args.includes('@codexia/app')), true);
 });
 
 test('Full package waits for selected module producers and exact package dependencies', () => {

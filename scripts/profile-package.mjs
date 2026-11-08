@@ -12,7 +12,7 @@ const modulePackagePrefix = '@codexia/module-';
 const knownModules = ['story', 'diagnostics', 'nlp', 'semantic', 'speaker', 'assistant', 'publishing', 'mcp', 'search'];
 
 function usage() {
-  console.error('Usage: node scripts/profile-package.mjs (--profile <core|full> | --modules-json <json-array>) --out <new-directory> [--prebuilt] [--prime-deploy-cache]');
+  console.error('Usage: node scripts/profile-package.mjs (--profile <core|full> | --modules-json <json-array>) --out <new-directory> [--server-only] [--prebuilt] [--prime-deploy-cache]');
   process.exit(2);
 }
 
@@ -45,7 +45,7 @@ export function validateProfilePackage(profileName, profile, packageManifest, in
   return { profileName, moduleIds: [...profile.modules] };
 }
 
-export function createBuildCommands(profileName, profile) {
+export function createBuildCommands(profileName, profile, { includeUi = true, includeApi = true } = {}) {
   const commands = [
     { command: 'pnpm', args: ['--filter', '@codexia/contracts', 'run', 'build'] },
     { command: 'pnpm', args: ['--filter', '@codexia/module-runtime', 'run', 'build'] },
@@ -54,11 +54,11 @@ export function createBuildCommands(profileName, profile) {
     const filters = profile.modules.flatMap((id) => ['--filter', `${modulePackagePrefix}${id}...`]);
     commands.push({ command: 'pnpm', args: [...filters, 'run', 'build'] });
   }
-  commands.push(
-    { command: process.execPath, args: [path.join(root, 'scripts/profile-build.mjs'), '--profile', profileName] },
-    { command: 'pnpm', args: ['--filter', '@codexia/app', 'run', 'build'], env: { CODEXIA_PROFILE: profileName } },
-    { command: 'pnpm', args: ['--filter', '@codexia/api...', 'run', 'build'] },
-  );
+  commands.push({ command: process.execPath, args: [path.join(root, 'scripts/profile-build.mjs'), '--profile', profileName] });
+  if (includeUi) {
+    commands.push({ command: 'pnpm', args: ['--filter', '@codexia/app', 'run', 'build'], env: { CODEXIA_PROFILE: profileName } });
+  }
+  if (includeApi) commands.push({ command: 'pnpm', args: ['--filter', '@codexia/api...', 'run', 'build'] });
   return commands;
 }
 
@@ -67,6 +67,7 @@ function parseArgs(argv) {
   let requestedModuleIds;
   let prebuilt = false;
   let primeDeployCache = false;
+  let serverOnly = false;
   let outputDirectory;
   for (let index = 0; index < argv.length; index += 1) {
     if (argv[index] === '--profile' && argv[index + 1]) profileName = argv[++index];
@@ -77,6 +78,7 @@ function parseArgs(argv) {
     else if (argv[index] === '--out' && argv[index + 1]) outputDirectory = path.resolve(argv[++index]);
     else if (argv[index] === '--prebuilt') prebuilt = true;
     else if (argv[index] === '--prime-deploy-cache') primeDeployCache = true;
+    else if (argv[index] === '--server-only') serverOnly = true;
     else if (argv[index] === '--help') usage();
     else usage();
   }
@@ -86,8 +88,9 @@ function parseArgs(argv) {
         requestedModuleIds.some((id) => typeof id !== 'string' || !knownModules.includes(id)) ||
         new Set(requestedModuleIds).size !== requestedModuleIds.length)) ||
       (prebuilt && requestedModuleIds === undefined) ||
+      (serverOnly && (profileName === undefined || requestedModuleIds !== undefined || prebuilt || primeDeployCache)) ||
       (primeDeployCache && (!prebuilt || requestedModuleIds === undefined))) usage();
-  return { profileName, requestedModuleIds, prebuilt, primeDeployCache, outputDirectory };
+  return { profileName, requestedModuleIds, prebuilt, primeDeployCache, serverOnly, outputDirectory };
 }
 
 async function readJson(filename) {
@@ -153,7 +156,7 @@ async function ensureNewOutputDirectory(directory) {
 }
 
 async function main() {
-  const { profileName, requestedModuleIds, prebuilt, primeDeployCache, outputDirectory } = parseArgs(process.argv.slice(2));
+  const { profileName, requestedModuleIds, prebuilt, primeDeployCache, serverOnly, outputDirectory } = parseArgs(process.argv.slice(2));
   const hostedComposition = requestedModuleIds !== undefined;
   const sourceProfile = hostedComposition ? 'full' : profileName;
   const profile = await readJson(path.join(root, 'profiles', `${sourceProfile}.json`));
@@ -188,13 +191,13 @@ async function main() {
       });
       if (!prebuilt) run('pnpm', ['--filter', '@codexia/api...', 'run', 'build']);
     } else {
-      for (const step of createBuildCommands(profileName, profile)) run(step.command, step.args, step.env);
+      for (const step of createBuildCommands(profileName, profile, { includeUi: !serverOnly })) run(step.command, step.args, step.env);
     }
 
     deployStarted = true;
     run('pnpm', ['--filter', packageManifest.name, 'deploy', '--prod', ...(hostedComposition && !primeDeployCache ? ['--offline'] : []), '--frozen-lockfile', outputDirectory]);
     await cp(path.join(root, 'profiles/launch.mjs'), path.join(outputDirectory, 'launch.mjs'));
-    await cp(path.join(root, 'app/dist'), path.join(outputDirectory, 'app/dist'), { recursive: true });
+    if (!serverOnly) await cp(path.join(root, 'app/dist'), path.join(outputDirectory, 'app/dist'), { recursive: true });
     if (hostedComposition) {
       await cp(path.join(temporaryDirectory, 'generated'), path.join(outputDirectory, 'generated'), { recursive: true });
       await pruneRuntimeDependencies(outputDirectory, new Set(selectedModuleIds));
@@ -214,7 +217,7 @@ async function main() {
           const packageDirectory = await realpath(path.join(outputDirectory, 'node_modules/.pnpm/node_modules/@codexia', name));
           return path.join(packageDirectory, 'dist');
         })),
-        path.join(outputDirectory, 'app/dist'),
+        ...(!serverOnly ? [path.join(outputDirectory, 'app/dist')] : []),
       ];
       run(process.execPath, [
         path.join(root, 'scripts/audit-runtime-deps.mjs'),

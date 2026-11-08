@@ -1,0 +1,65 @@
+name: Verify Deployment Configuration
+on:
+  pull_request:
+    branches: [chore/codexia-bootstrap-20261108]
+    paths:
+      - deploy/**
+      - edge/frontend/**
+      - Dockerfile.backend
+      - app/public/**
+      - scripts/build-frontend.mjs
+      - scripts/verify-deployment-config.mjs
+      - scripts/profile-package.mjs
+      - scripts/profile-package.test.mjs
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - docs/deployment/**
+      - .github/workflows/**
+  push:
+    branches: [main, chore/codexia-bootstrap-20261108]
+    paths:
+      - deploy/**
+      - edge/frontend/**
+      - Dockerfile.backend
+      - app/public/**
+      - scripts/build-frontend.mjs
+      - scripts/verify-deployment-config.mjs
+      - scripts/profile-package.mjs
+      - scripts/profile-package.test.mjs
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - docs/deployment/**
+      - .github/workflows/**
+permissions:
+  contents: read
+jobs:
+  configuration:
+    name: Verify route and service contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.0'
+      - name: Prepare locked pnpm toolchain
+        run: |
+          corepack enable
+          corepack pnpm@12.10.1 --version
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check deployment configuration consistency
+        run: pnpm run verify:deployment
+      - name: Typecheck and test the Static Assets Worker
+        run: pnpm run typecheck:deployment && pnpm run test:deployment
+      - name: Check all Terraform files
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.17.1
+      - name: Validate Cloudflare Terraform
+        working-directory: deploy/cloudflare/terraform
+        run: terraform fmt -check -recursive && terraform init -backend=false && terraform validate

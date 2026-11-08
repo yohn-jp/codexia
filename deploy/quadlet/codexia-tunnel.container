@@ -1,0 +1,24 @@
+[Unit]
+Description=Cloudflare Tunnel to the Codexia API
+Requires=codexia-api.service
+After=codexia-api.service
+
+[Container]
+Image=docker.io/cloudflare/cloudflared:REPLACE_WITH_VERIFIED_VERSION
+ContainerName=codexia-tunnel
+Network=codexia.network
+Secret=codexia-tunnel-token,type=mount,target=/run/secrets/token
+Exec=tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token-file /run/secrets/token
+PublishPort=127.0.0.1:2000:2000/tcp
+ReadOnly=true
+Tmpfs=/tmp:rw,nosuid,nodev,noexec,size=16m
+NoNewPrivileges=true
+DropCapability=all
+
+[Service]
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,11 @@
+{
+  "routes": [
+    "/",
+    "/index.html*",
+    "/assets/*",
+    "/desktop*",
+    "/mobile*",
+    "/r/*"
+  ],
+  "apiPrefix": "/api/"
+}

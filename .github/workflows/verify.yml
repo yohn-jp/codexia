@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - chore/codexia-bootstrap-20261108
   workflow_dispatch: null
 permissions:
   contents: read
