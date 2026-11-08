@@ -1,4 +1,4 @@
-import { CONTRACT_VERSION, type ModuleContext, type ModuleDefinition, type ModuleManifest } from "@scriptorium/contracts";
+import { CONTRACT_VERSION, type ModuleContext, type ModuleDefinition, type ModuleManifest } from "@codexia/contracts";
 import { createAssistantActions, createAssistantQaStreamHttpContribution, createRewriteStreamHttpContribution } from "./actions.js";
 
 export const assistantManifest: ModuleManifest = {
@@ -11,7 +11,7 @@ export const assistantManifest: ModuleManifest = {
   optionalRequires: ["host.model-usage", "nlp.token-counter"],
   serverEntry: "./dist/index.js",
   browserEntry: "./dist/browser.js",
-  statePaths: ["meta/scriptorium/modules/assistant"],
+  statePaths: ["meta/codexia/modules/assistant"],
   locality: "optional-external",
 };
 

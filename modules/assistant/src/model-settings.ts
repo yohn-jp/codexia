@@ -1,6 +1,6 @@
-import type { SnapshotReader } from "@scriptorium/contracts";
+import type { SnapshotReader } from "@codexia/contracts";
 
-export const ASSISTANT_SETTINGS_PATH = "meta/scriptorium/modules/assistant/model-settings.json";
+export const ASSISTANT_SETTINGS_PATH = "meta/codexia/modules/assistant/model-settings.json";
 
 export interface AssistantSampling {
   temperature?: number;

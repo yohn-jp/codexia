@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { MigrationContext } from "@scriptorium/migration";
+import type { MigrationContext } from "@codexia/migration";
 import { createAssistantMigrationProducer } from "./migration.js";
 
 const repository = {
@@ -13,10 +13,10 @@ const repository = {
 const snapshot = { repository, remoteCommit: "b".repeat(40) };
 const settingsSourcePath = ".arcadia/llm-model-settings.json";
 const usageSourcePath = ".arcadia/llm-usage.jsonl";
-const settingsLegacyPath = "meta/scriptorium/modules/assistant/legacy/files/.arcadia/llm-model-settings.json";
-const usageLegacyPath = "meta/scriptorium/modules/assistant/legacy/files/.arcadia/llm-usage.jsonl";
-const settingsTargetPath = "meta/scriptorium/modules/assistant/model-settings.json";
-const usageTargetPath = "meta/scriptorium/modules/assistant/usage.jsonl";
+const settingsLegacyPath = "meta/codexia/modules/assistant/legacy/files/.arcadia/llm-model-settings.json";
+const usageLegacyPath = "meta/codexia/modules/assistant/legacy/files/.arcadia/llm-usage.jsonl";
+const settingsTargetPath = "meta/codexia/modules/assistant/model-settings.json";
+const usageTargetPath = "meta/codexia/modules/assistant/usage.jsonl";
 const revision = "a".repeat(64);
 
 function contextFor(input: {
