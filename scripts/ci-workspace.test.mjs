@@ -101,12 +101,14 @@ test('grouped unit preparation builds shared dependencies once and retains root 
     const prepared = runProject(fixture.projectRoot, ['prepare', 'unit-group', 'contracts,persistence-contracts,persistence-postgres,module-runtime,migration,core,api,root'], fixture.env);
     assert.equal(prepared.status, 0, prepared.stderr);
     const commands = (await readFile(fixture.record, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
-    const packages = commands.map(command => command[1]);
+    const packages = commands.flatMap(command => command.flatMap((arg, index) => arg === '--filter' ? [command[index + 1]] : []));
     assert.equal(new Set(packages).size, packages.length);
     assert.ok(packages.includes('@codexia/contracts'));
     assert.ok(packages.includes('@codexia/core'));
     assert.equal(packages.at(-1), '@codexia/api');
-    assert.ok(commands.every(command => command.slice(2).join(' ') === 'run build'));
+    assert.equal(commands.length, 1);
+    assert.deepEqual(commands[0].slice(0, 3), ['--recursive', '--sort', '--workspace-concurrency=2']);
+    assert.deepEqual(commands[0].slice(-2), ['run', 'build']);
   } finally {
     await rm(fixture.projectRoot, { recursive: true, force: true });
   }
@@ -134,7 +136,7 @@ test('speaker unit tests own their worker build while preparation follows worksp
     assert.equal(executed.status, 0, executed.stderr);
 
     const commands = (await readFile(record, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
-    const builtPackages = commands.filter((command) => command.includes('build')).map((command) => command[1]);
+    const builtPackages = commands.filter(command => command.includes('build')).flatMap(command => command.flatMap((arg, index) => arg === '--filter' ? [command[index + 1]] : []));
     assert.ok(builtPackages.includes('@codexia/module-nlp'));
     assert.ok(builtPackages.includes('@codexia/module-diagnostics'));
     assert.equal(builtPackages.includes('@codexia/module-speaker'), false);
@@ -189,5 +191,55 @@ test('coverage and test typecheck reject TypeScript tests outside workspace src'
     assert.match(`${typecheck.stdout}\n${typecheck.stderr}`, /unregistered\.test\.ts/u);
   } finally {
     await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test('real workspace preparation overlaps independent builds and blocks dependents after failure', async () => {
+  const fixture = await makeWorkspaceFixture('pnpm run test:scripts');
+  try {
+    await copyFile(path.join(root, 'pnpm-workspace.yaml'), path.join(fixture.projectRoot, 'pnpm-workspace.yaml'));
+    const probe = path.join(fixture.projectRoot, 'probe.cjs');
+    const events = path.join(fixture.projectRoot, 'events.jsonl');
+    await writeFile(probe, `
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const id = process.argv[2];
+      const log = event => fs.appendFileSync(${JSON.stringify(events)}, JSON.stringify({id, event}) + '\\n');
+      log('start');
+      if (id === 'persistence-postgres' && !fs.existsSync(path.join(__dirname, 'persistence-contracts.done'))) process.exit(3);
+      setTimeout(() => {
+        if (process.env.CODEXIA_FAIL_BUILD === id) process.exit(2);
+        fs.writeFileSync(path.join(__dirname, id + '.done'), '');
+        log('end');
+      }, 100);
+    `);
+    for (const workspace of WORKSPACES) {
+      const manifestPath = path.join(fixture.projectRoot, workspace.path, 'package.json');
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+      manifest.scripts.build = `node ${probe} ${workspace.id}`;
+      await writeFile(manifestPath, JSON.stringify(manifest));
+    }
+    const env = { ...process.env };
+    const args = ['prepare', 'unit-group', 'api,root'];
+    const success = runProject(fixture.projectRoot, args, env);
+    assert.equal(success.status, 0, success.stderr);
+    const observed = (await readFile(events, 'utf8')).trim().split('\n').map(JSON.parse);
+    assert.ok(observed.some(event => event.id === 'persistence-postgres' && event.event === 'end'));
+    let active = 0;
+    let maximum = 0;
+    for (const event of observed) {
+      active += event.event === 'start' ? 1 : -1;
+      maximum = Math.max(maximum, active);
+    }
+    assert.equal(maximum, 2, 'independent builds overlap within the two-workspace limit');
+    assert.equal(active, 0);
+    for (const workspace of WORKSPACES) await rm(path.join(fixture.projectRoot, `${workspace.id}.done`), { force: true });
+    await rm(events);
+    const failed = runProject(fixture.projectRoot, args, { ...env, CODEXIA_FAIL_BUILD: 'persistence-contracts' });
+    assert.notEqual(failed.status, 0);
+    const failureEvents = (await readFile(events, 'utf8')).trim().split('\n').map(JSON.parse);
+    assert.equal(failureEvents.some(event => event.id === 'persistence-postgres'), false);
+  } finally {
+    await rm(fixture.projectRoot, { recursive: true, force: true });
   }
 });

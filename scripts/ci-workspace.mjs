@@ -91,8 +91,11 @@ function buildWorkspaceTargets(targets) {
   for (const id of targets) {
     const manifest = packageManifests.get(id);
     if (!manifest.scripts?.build) fail(`Workspace dependency ${manifest.name} has no build script`);
-    run('pnpm', ['--filter', manifest.name, 'run', 'build']);
   }
+  if (targets.length === 0) return;
+  // pnpm schedules only the selected closure, respecting workspace dependency edges.
+  run('pnpm', ['--recursive', '--sort', '--workspace-concurrency=2',
+    ...targets.flatMap(id => ['--filter', packageManifests.get(id).name]), 'run', 'build']);
 }
 
 function getUnitTarget(targetId) {
