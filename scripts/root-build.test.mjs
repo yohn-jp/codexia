@@ -22,6 +22,14 @@ test('default and explicit Core root builds select the existing selective profil
   });
   assert.deepEqual(commands[1], {
     command: 'pnpm',
+    args: ['--filter', '@codexia/persistence-contracts', 'run', 'build'],
+  });
+  assert.deepEqual(commands[2], {
+    command: 'pnpm',
+    args: ['--filter', '@codexia/persistence-postgres', 'run', 'build'],
+  });
+  assert.deepEqual(commands[3], {
+    command: 'pnpm',
     args: ['--filter', '@codexia/module-runtime', 'run', 'build'],
   });
   assert.equal(commands.some(({ args }) => args.includes('--profile') && args.includes('core')), true);
@@ -42,6 +50,7 @@ test('default and explicit Core root builds select the existing selective profil
 test('Full root builds keep the existing workspace graph', () => {
   assert.equal(packageManifest.scripts.build, 'node scripts/root-build.mjs');
   assert.match(packageManifest.scripts['build:workspace'], /@codexia\/migration build/);
+  assert.match(packageManifest.scripts['build:workspace'], /@codexia\/persistence-postgres build/);
   assert.match(packageManifest.scripts['build:workspace'], /@codexia\/module-assistant build/);
   assert.deepEqual(createRootBuildCommands('full'), [{
     command: 'pnpm',

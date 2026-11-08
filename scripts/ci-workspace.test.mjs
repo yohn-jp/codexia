@@ -59,7 +59,7 @@ async function makeWorkspaceFixture(rootTestScript) {
 test('coverage maps every workspace test and typecheck scope to an executable target', () => {
   const result = run(['coverage']);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /15 workspaces, 16 unit targets, 5 production typecheck groups, 3 test typecheck scopes/u);
+  assert.match(result.stdout, /17 workspaces, 18 unit targets, 5 production typecheck groups, 3 test typecheck scopes/u);
   assert.match(result.stdout, /test\/spec files mapped to package scripts/u);
 });
 
@@ -98,7 +98,7 @@ test('root unit preparation builds the API dependency closure before invoking ro
 test('grouped unit preparation builds shared dependencies once and retains root API preparation', async () => {
   const fixture = await makeWorkspaceFixture('pnpm run test:scripts');
   try {
-    const prepared = runProject(fixture.projectRoot, ['prepare', 'unit-group', 'contracts,module-runtime,migration,core,api,root'], fixture.env);
+    const prepared = runProject(fixture.projectRoot, ['prepare', 'unit-group', 'contracts,persistence-contracts,persistence-postgres,module-runtime,migration,core,api,root'], fixture.env);
     assert.equal(prepared.status, 0, prepared.stderr);
     const commands = (await readFile(fixture.record, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
     const packages = commands.map(command => command[1]);

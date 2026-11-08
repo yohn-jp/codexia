@@ -38,7 +38,10 @@ test('main, manual, shared contracts, lockfiles, manifests and unknown files fai
   const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
   for (const [files, event] of [
     [['modules/search/src/browser.ts'], 'push'], [[], 'workflow_dispatch'],
-    [['packages/contracts/src/index.ts'], 'pull_request'], [['pnpm-lock.yaml'], 'pull_request'],
+    [['packages/contracts/src/index.ts'], 'pull_request'],
+    [['packages/persistence-contracts/src/index.ts'], 'pull_request'],
+    [['packages/persistence-postgres/src/postgres-store.ts'], 'pull_request'],
+    [['pnpm-lock.yaml'], 'pull_request'],
     [['modules/search/package.json'], 'pull_request'], [['new-root-file'], 'pull_request'],
     [null, 'pull_request'],
   ]) {
