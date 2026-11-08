@@ -314,10 +314,13 @@ export type ChangeSetResource =
 export interface ChangeSetReadSetEntry {
   resource: ChangeSetResource;
   id: string;
+  /** null asserts absence; unversioned link records use 1 to assert presence. */
   expectedVersion: number | null;
+  /** Used with document resources to bind the exact observed body. */
   expectedRevisionId?: RevisionId | null;
 }
 
+/** The declared set of identities written by the ChangeSet operations. */
 export interface ChangeSetWriteSetEntry {
   resource: ChangeSetResource;
   id: string;
@@ -366,7 +369,9 @@ export interface CreateChangeSetCommand {
   authorId: ActorId;
   idempotencyKey: IdempotencyKey;
   operations: readonly ChangeSetOperation[];
+  /** Preconditions are rechecked while applying the approved ChangeSet. */
   readSet: readonly ChangeSetReadSetEntry[];
+  /** Must exactly match the resource identities targeted by operations. */
   writeSet: readonly ChangeSetWriteSetEntry[];
   provenance: ChangeSetProvenance;
 }

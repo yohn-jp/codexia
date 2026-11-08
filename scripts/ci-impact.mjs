@@ -17,7 +17,7 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
     if (file === 'AGENTS.md' || file === 'CONTRIBUTING.md' || file === 'LICENSE' || /^docs\/.*\.md$/u.test(file) || /^README(?:\.[a-z-]+)?\.md$/iu.test(file)) continue;
     // Workspace manifests/configuration, shared contracts and unknown files are global inputs.
     const owner = WORKSPACES.find(item => file.startsWith(`${item.path}/src/`));
-    if (!owner || ['contracts', 'module-runtime', 'migration', 'core', 'api'].includes(owner.id)) {
+    if (!owner || ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'migration', 'core', 'api'].includes(owner.id)) {
       const spec = BROWSER_SHARDS.find(item => file === `tests/e2e/${item.file}`);
       if (spec) {
         add('test-types-app-e2e');

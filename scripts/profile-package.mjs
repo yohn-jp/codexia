@@ -48,6 +48,8 @@ export function validateProfilePackage(profileName, profile, packageManifest, in
 export function createBuildCommands(profileName, profile) {
   const commands = [
     { command: 'pnpm', args: ['--filter', '@codexia/contracts', 'run', 'build'] },
+    { command: 'pnpm', args: ['--filter', '@codexia/persistence-contracts', 'run', 'build'] },
+    { command: 'pnpm', args: ['--filter', '@codexia/persistence-postgres', 'run', 'build'] },
     { command: 'pnpm', args: ['--filter', '@codexia/module-runtime', 'run', 'build'] },
   ];
   if (profile.modules.length) {

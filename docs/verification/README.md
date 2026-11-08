@@ -14,6 +14,10 @@ pnpm audit:core
 
 `pnpm test` runs workspace suites and root script tests. `typecheck:tests` includes test sources, and `typecheck:safety` applies stricter scoped compiler checks. Core dependency auditing requires a Core build; use `CODEXIA_PROFILE=core pnpm build` if a Full build replaced the outputs.
 
+The PostgreSQL persistence suite is part of `pnpm test` and requires a disposable PostgreSQL database in `CODEXIA_TEST_DATABASE_URL`. It runs the migrations and exercises persistence transactions; it does not clean the database after the run. For example, start a disposable local server, then run `CODEXIA_TEST_DATABASE_URL=postgres://codexia:codexia@127.0.0.1:55440/codexia_test pnpm test`. The verification workflow supplies its own PostgreSQL service.
+
+For an application database, apply the schema with `CODEXIA_DATABASE_URL='postgres://user:password@host:5432/database' pnpm --filter @codexia/persistence-postgres migrate`. Migration files are checksum-checked and applied transactionally.
+
 ## Browser checks
 
 Install the configured browsers and run acceptance against each profile:
