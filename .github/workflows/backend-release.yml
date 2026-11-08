@@ -1,0 +1,106 @@
+name: Codexia Backend Image
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - Dockerfile.backend
+      - deploy/backend/**
+      - packages/**
+      - modules/**
+      - profiles/**
+      - scripts/profile-build.mjs
+      - scripts/profile-package.mjs
+      - scripts/runtime-package-closure.mjs
+      - scripts/verify-backend-image.sh
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .github/workflows/backend-release.yml
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile.backend
+      - deploy/backend/**
+      - packages/**
+      - modules/**
+      - profiles/**
+      - scripts/profile-build.mjs
+      - scripts/profile-package.mjs
+      - scripts/runtime-package-closure.mjs
+      - scripts/verify-backend-image.sh
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .github/workflows/backend-release.yml
+permissions:
+  contents: read
+concurrency:
+  group: codexia-backend-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  build-test:
+    name: Build and test backend OCI image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.0'
+      - name: Prepare locked pnpm toolchain
+        run: |
+          corepack enable
+          corepack pnpm@12.10.1 --version
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - uses: docker/setup-buildx-action@v3
+      - name: Build API-only image
+        run: docker buildx build --platform linux/amd64 --load --build-arg "CODEXIA_PRODUCER_REVISION=$GITHUB_SHA" --tag codexia-backend-ci --file Dockerfile.backend .
+      - name: Verify API image before publication
+        run: bash scripts/verify-backend-image.sh docker codexia-backend-ci
+      - name: Save the exact tested image for publication
+        if: github.event_name == 'push'
+        run: docker save codexia-backend-ci | gzip > "$RUNNER_TEMP/codexia-backend-image.tar.gz"
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push'
+        with:
+          name: codexia-backend-image-${{ github.sha }}
+          path: ${{ runner.temp }}/codexia-backend-image.tar.gz
+          if-no-files-found: error
+          retention-days: 2
+  publish:
+    name: Publish immutable GHCR image
+    needs: build-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: codexia-backend-image-${{ github.sha }}
+          path: ${{ runner.temp }}
+      - name: Load the tested image
+        run: gzip -dc "$RUNNER_TEMP/codexia-backend-image.tar.gz" | docker load
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish commit-addressed image
+        env:
+          IMAGE: ghcr.io/yohn-jp/codexia-backend
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker tag codexia-backend-ci "$IMAGE:sha-$SOURCE_SHA"
+          docker push "$IMAGE:sha-$SOURCE_SHA"
+          docker buildx imagetools inspect "$IMAGE:sha-$SOURCE_SHA"
+          echo "Published $IMAGE:sha-$SOURCE_SHA from $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"

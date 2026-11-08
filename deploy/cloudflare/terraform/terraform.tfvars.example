@@ -1,0 +1,8 @@
+account_id = "00000000000000000000000000000000"
+zone_id    = "00000000000000000000000000000000"
+zone_name  = "example.invalid"
+app_hostname = "codexia.example.invalid"
+team_name = "replace-with-access-team"
+allowed_emails = ["author@example.invalid"]
+allowed_idps = ["replace-with-existing-idp-id"]
+frontend_route_enabled = false

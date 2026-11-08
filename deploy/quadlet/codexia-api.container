@@ -1,0 +1,37 @@
+[Unit]
+Description=Codexia API backend
+After=network-online.target
+
+[Container]
+Image=ghcr.io/yohn-jp/codexia-backend:sha-REPLACE_WITH_40_HEX_COMMIT_SHA
+ContainerName=codexia-api
+Network=codexia.network
+Volume=codexia-data.volume:/data
+Volume=codexia-history.volume:/history
+Secret=codexia-auth-token,type=mount,target=/run/secrets/codexia-auth-token
+Secret=codexia-github-token,type=mount,target=/run/secrets/codexia-github-token
+Environment=CODEXIA_AUTH_TOKEN_FILE=/run/secrets/codexia-auth-token
+Environment=CODEXIA_GITHUB_TOKEN_FILE=/run/secrets/codexia-github-token
+Environment=CODEXIA_TRUST_PROXY=1
+Environment=CODEXIA_PROFILE=core
+Environment=HOST=0.0.0.0
+Environment=PORT=3000
+Environment=CODEXIA_DATA_DIR=/data
+Environment=CODEXIA_USAGE_DIR=/history
+ReadOnly=true
+Tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m
+NoNewPrivileges=true
+DropCapability=all
+HealthCmd=node -e 'fetch("http://127.0.0.1:3000/health/ready").then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'
+HealthInterval=30s
+HealthTimeout=5s
+HealthStartPeriod=60s
+HealthRetries=3
+
+[Service]
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,107 @@
+name: Codexia UI Static Assets
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - app/**
+      - app/public/**
+      - edge/frontend/**
+      - profiles/**
+      - modules/**
+      - packages/contracts/**
+      - deploy/cloudflare/ui-routes.json
+      - scripts/build-frontend.mjs
+      - scripts/profile-build.mjs
+      - scripts/profile-package.mjs
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .github/workflows/frontend-release.yml
+  push:
+    branches: [main]
+    paths:
+      - app/**
+      - app/public/**
+      - edge/frontend/**
+      - profiles/**
+      - modules/**
+      - packages/contracts/**
+      - deploy/cloudflare/ui-routes.json
+      - scripts/build-frontend.mjs
+      - scripts/profile-build.mjs
+      - scripts/profile-package.mjs
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .github/workflows/frontend-release.yml
+permissions:
+  contents: read
+concurrency:
+  group: codexia-frontend-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  build:
+    name: Build and verify UI assets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.0'
+      - name: Prepare locked pnpm toolchain
+        run: |
+          corepack enable
+          corepack pnpm@12.10.1 --version
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build UI without building the API
+        run: pnpm run build:frontend
+      - name: Check Worker types and request routing
+        run: pnpm run typecheck:deployment && pnpm run test:deployment
+      - name: Verify route and runtime configuration
+        run: pnpm run verify:deployment
+      - name: Install pinned Wrangler
+        run: npm ci --prefix edge/frontend
+      - name: Validate Wrangler Worker and Static Assets bundle
+        run: edge/frontend/node_modules/.bin/wrangler deploy --dry-run --config edge/frontend/wrangler.jsonc --outdir "$RUNNER_TEMP/codexia-frontend-worker"
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push'
+        with:
+          name: codexia-frontend-${{ github.sha }}
+          path: app/dist
+          if-no-files-found: error
+          retention-days: 2
+  deploy:
+    name: Deploy UI Static Assets
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: codexia-production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.0'
+      - name: Install pinned Wrangler
+        run: npm ci --prefix edge/frontend
+      - uses: actions/download-artifact@v4
+        with:
+          name: codexia-frontend-${{ github.sha }}
+          path: app/dist
+      - name: Deploy static assets only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: edge/frontend/node_modules/.bin/wrangler deploy --config edge/frontend/wrangler.jsonc
+      - name: Record asset release source
+        run: echo "Deployed codexia-frontend static assets from $GITHUB_SHA. Terraform Routes were not changed." >> "$GITHUB_STEP_SUMMARY"

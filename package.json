@@ -19,7 +19,11 @@
     "test:e2e": "pnpm build && playwright test --config tests/e2e/playwright.config.ts",
     "verify:hosted": "node scripts/verify-hosted-native.mjs",
     "verify": "node scripts/verify.mjs",
-    "test:scripts": "node --test 'scripts/**/*.test.mjs'"
+    "test:scripts": "node --test 'scripts/**/*.test.mjs'",
+    "build:frontend": "node scripts/build-frontend.mjs",
+    "typecheck:deployment": "tsc -p edge/frontend/tsconfig.json --noEmit",
+    "test:deployment": "node --import tsx --test 'edge/frontend/test/*.test.ts'",
+    "verify:deployment": "node scripts/verify-deployment-config.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",

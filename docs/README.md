@@ -16,6 +16,7 @@ Codexia is a Git-backed writing workspace with a minimal Core and optional trust
 | Source ownership and licensing | [Source provenance](architecture/SOURCE-PROVENANCE.md) |
 | Standalone image checks | [OCI verification](verification/OCI.md) |
 | Hosted builds and runtime configuration | [Hosted deployment](HOSTED-DEPLOYMENT.md) |
+| Edge UI, API service and operations | [Deployment](deployment/README.md) |
 | Hosted producer signing | [Producer attestation](hosted-producer-attestation.md) |
 | Development and verification commands | [Verification](verification/README.md) |
 | Recovery, MCP and model acceptance | [Integration verification](verification/INTEGRATION.md) |
