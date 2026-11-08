@@ -32,6 +32,7 @@
     "test": "node --import tsx --test src/*.test.ts src/domain/*.test.ts src/migration/*.test.ts"
   },
   "dependencies": {
+    "@codexia/core": "workspace:*",
     "@codexia/contracts": "workspace:*",
     "@codexia/migration": "workspace:*",
     "yaml": "^2.8.1",
