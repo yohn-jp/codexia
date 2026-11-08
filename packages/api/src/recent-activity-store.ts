@@ -7,9 +7,9 @@ import type {
   RecentActivityInput as ContractRecentActivityInput,
   RecentActivityItem as ContractRecentActivityItem,
   RepositoryIdentity,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 
-export type { RecentActivityDeviceType } from "@scriptorium/contracts";
+export type { RecentActivityDeviceType } from "@codexia/contracts";
 export type RecentActivityDevice = RecentActivityDeviceType;
 export type RecentActivityInput = ContractRecentActivityInput;
 export type RecentActivityItem = ContractRecentActivityItem;

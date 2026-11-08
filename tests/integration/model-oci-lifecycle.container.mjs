@@ -8,7 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 const OUTPUT_DIRECTORY = "/p13-output";
 const API_ORIGIN = "http://127.0.0.1:3000";
 const PROJECT_ID = process.env.P13_PROJECT_ID;
-const AUTH_TOKEN = process.env.SCRIPTORIUM_AUTH_TOKEN;
+const AUTH_TOKEN = process.env.CODEXIA_AUTH_TOKEN;
 const MODEL_IDS = {
   embedding: { id: "Xenova/multilingual-e5-small", revision: "761b726dd34fb83930e26aab4e9ac3899aa1fa78" },
   reranker: { id: "mogolloni/bge-reranker-v2-m3-onnx", revision: "e5023553f6c47f09057da7a19cdd79ef850a4985" },
@@ -364,10 +364,10 @@ async function runLifecycle() {
   await symlink("/models", "/data/.arcadia/models", "dir");
 
   const [{ CoreStore }, { ModuleRuntime }, { start }, { MODEL_USAGE_CAPABILITY }, composition] = await Promise.all([
-    import("/app/node_modules/.pnpm/node_modules/@scriptorium/core/dist/index.js"),
-    import("/app/node_modules/.pnpm/node_modules/@scriptorium/module-runtime/dist/index.js"),
-    import("/app/node_modules/@scriptorium/api/dist/server.js"),
-    import("/app/node_modules/.pnpm/node_modules/@scriptorium/contracts/dist/index.js"),
+    import("/app/node_modules/.pnpm/node_modules/@codexia/core/dist/index.js"),
+    import("/app/node_modules/.pnpm/node_modules/@codexia/module-runtime/dist/index.js"),
+    import("/app/node_modules/@codexia/api/dist/server.js"),
+    import("/app/node_modules/.pnpm/node_modules/@codexia/contracts/dist/index.js"),
     import("/app/generated/server.mjs"),
   ]);
   assert.equal(composition.profile, "full");
@@ -391,7 +391,7 @@ async function runLifecycle() {
     diagnostics: async (context) => composition.moduleLoaders.diagnostics(createObservationGate("diagnostics", context, diagnosticGate, capabilityEvents, valueIds, sharedUseObservation)),
     semantic: async (context) => composition.moduleLoaders.semantic(createObservationGate("semantic", context, undefined, capabilityEvents, valueIds, sharedUseObservation)),
   };
-  const apiUrl = new URL("file:///app/node_modules/@scriptorium/api/dist/server.js");
+  const apiUrl = new URL("file:///app/node_modules/@codexia/api/dist/server.js");
   const { HistoricalModelUsageStore } = await import(new URL("./historical-store.js", apiUrl).href);
   const usageStore = new HistoricalModelUsageStore("/history");
   const runtime = new ModuleRuntime({
@@ -417,7 +417,7 @@ async function runLifecycle() {
   assert.ok((await fs.readdir(bgeModelDirectory)).length > 0);
   const store = new CoreStore({ dataDir: "/data", allowLocalRemotes: true });
   const server = await start({ store, authToken: AUTH_TOKEN, runtime, profile: "full", usageDirectory: "/history", staticDir: "/app/app/dist" });
-  const productionRuntime = server.scriptorium.runtime;
+  const productionRuntime = server.codexia.runtime;
   assert.equal(productionRuntime, runtime);
 
   const sampler = createSampler(runtime, composition.moduleWorkerEntries);
@@ -478,7 +478,7 @@ async function runLifecycle() {
 
     const fallbackTokenResult = await invoke("nlp.countTokens", {
       texts: ["駅abc", "abcdef", ""],
-      modelId: "scriptorium-p13/no-such-tokenizer",
+      modelId: "codexia-p13/no-such-tokenizer",
     });
     const fallbackTokens = actionData(fallbackTokenResult, "nlp.countTokens unavailable fallback");
     assert.deepEqual(fallbackTokens.counts, [2, 2, 0], "an unavailable local tokenizer must report the source approximation");
@@ -488,7 +488,7 @@ async function runLifecycle() {
       exact: false,
       engine: "source-approx",
       engineVersion: "source-approx-v1",
-      requestedModelId: "scriptorium-p13/no-such-tokenizer",
+      requestedModelId: "codexia-p13/no-such-tokenizer",
       fallbackReason: "tokenizer_unavailable",
     });
     assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, [], "the approximate token-counter child must release after its API lease");
@@ -502,7 +502,7 @@ async function runLifecycle() {
     assert.equal(runtime.status("speaker").availability, "enabled-idle");
     sampler.setPhase("actual-speaker-and-lindera-children");
     const speaker = actionData(await invoke("speaker.attribute", { sceneId: "sc-synthetic-01" }), "speaker.attribute");
-    assert.equal(speaker.speakerEngine, "scriptorium-speaker-cpu");
+    assert.equal(speaker.speakerEngine, "codexia-speaker-cpu");
     assert.equal(speaker.speakerEngineVersion, "1.0.0");
     assert.equal(speaker.tokenizerModel, "lindera-wasm-nodejs-ipadic");
     assert.equal(speaker.tokenizerModelVersion, "2.0.0");

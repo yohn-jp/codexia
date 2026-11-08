@@ -6,10 +6,10 @@ import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium, expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 
-const authToken = process.env.SCRIPTORIUM_E2E_AUTH_TOKEN ?? "";
-const defaultRepository = process.env.SCRIPTORIUM_E2E_REPOSITORY_URL ?? "";
-const configuredBaseURL = process.env.SCRIPTORIUM_E2E_BASE_URL ?? process.env.SCRIPTORIUM_BASE_URL ??
-  `http://127.0.0.1:${process.env.SCRIPTORIUM_E2E_PORT ?? "4173"}`;
+const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
+const defaultRepository = process.env.CODEXIA_E2E_REPOSITORY_URL ?? "";
+const configuredBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ??
+  `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
 
 function repositoryInputValue(value: string): string {
   return value.startsWith("https://") || value.startsWith("file://") ? value : pathToFileURL(value).href;
@@ -91,7 +91,7 @@ async function selectScene(page: Page, label = "Chapter One: Scene One"): Promis
 }
 
 async function makeLongReadingRepository(repetitionCount = 160): Promise<{ root: string; remote: string }> {
-  const root = await mkdtemp(join(tmpdir(), "scriptorium-recent-activity-"));
+  const root = await mkdtemp(join(tmpdir(), "codexia-recent-activity-"));
   const remote = join(root, "reading.git");
   const working = join(root, "seed");
   const git = (cwd: string, ...args: string[]) => execFileSync("git", args, {
@@ -99,9 +99,9 @@ async function makeLongReadingRepository(repetitionCount = 160): Promise<{ root:
     stdio: "ignore",
     env: {
       ...process.env,
-      GIT_AUTHOR_NAME: "Scriptorium Recent Activity Acceptance",
+      GIT_AUTHOR_NAME: "Codexia Recent Activity Acceptance",
       GIT_AUTHOR_EMAIL: "recent-activity@example.invalid",
-      GIT_COMMITTER_NAME: "Scriptorium Recent Activity Acceptance",
+      GIT_COMMITTER_NAME: "Codexia Recent Activity Acceptance",
       GIT_COMMITTER_EMAIL: "recent-activity@example.invalid",
     },
   });
@@ -181,9 +181,9 @@ async function createNativeHeadfulContext(width: number): Promise<{
   page: Page;
   close: () => Promise<void>;
 }> {
-  const executable = process.env.SCRIPTORIUM_E2E_CHROMIUM;
-  if (!executable) throw new Error("Native visibility coverage requires SCRIPTORIUM_E2E_CHROMIUM");
-  const profile = await mkdtemp(join(tmpdir(), "scriptorium-native-chromium-"));
+  const executable = process.env.CODEXIA_E2E_CHROMIUM;
+  if (!executable) throw new Error("Native visibility coverage requires CODEXIA_E2E_CHROMIUM");
+  const profile = await mkdtemp(join(tmpdir(), "codexia-native-chromium-"));
   const port = await unusedTcpPort();
   const child = spawn(executable, [
     "--no-sandbox",
@@ -237,9 +237,9 @@ async function createNativeHeadfulContext(width: number): Promise<{
 
 function requireNativeVisibilityCoverage(): void {
   const missing = [
-    process.env.SCRIPTORIUM_E2E_NATIVE_VISIBILITY === "1" ? "" : "SCRIPTORIUM_E2E_NATIVE_VISIBILITY=1",
+    process.env.CODEXIA_E2E_NATIVE_VISIBILITY === "1" ? "" : "CODEXIA_E2E_NATIVE_VISIBILITY=1",
     process.env.DISPLAY ? "" : "DISPLAY",
-    process.env.SCRIPTORIUM_E2E_CHROMIUM ? "" : "SCRIPTORIUM_E2E_CHROMIUM",
+    process.env.CODEXIA_E2E_CHROMIUM ? "" : "CODEXIA_E2E_CHROMIUM",
   ].filter(Boolean);
   if (missing.length === 0) return;
   test.info().annotations.push({
@@ -250,7 +250,7 @@ function requireNativeVisibilityCoverage(): void {
 }
 
 test("recent activity hands off only numeric positions across devices, projects, and API restart", async ({ browser }) => {
-  test.skip(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1", "This acceptance creates a disposable local Git repository for paged reader coverage.");
+  test.skip(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1", "This acceptance creates a disposable local Git repository for paged reader coverage.");
   const fixture = await makeLongReadingRepository();
   const secondFixture = await makeLongReadingRepository();
   const ownerDesktop = await createContext(browser, 1280);
@@ -293,8 +293,8 @@ test("recent activity hands off only numeric positions across devices, projects,
 
     // Local resume must restore the real CodeMirror scroll DOM together with its cursor.
     const scrollStyleInjected = await ownerDesktop.page.evaluate(() => {
-      const nonce = document.querySelector<HTMLMetaElement>('meta[name="scriptorium-style-nonce"]')?.content;
-      if (!nonce || nonce === "__SCRIPTORIUM_STYLE_NONCE__") return false;
+      const nonce = document.querySelector<HTMLMetaElement>('meta[name="codexia-style-nonce"]')?.content;
+      if (!nonce || nonce === "__CODEXIA_STYLE_NONCE__") return false;
       const style = document.createElement("style");
       style.nonce = nonce;
       style.textContent = ".cm-editor .cm-scroller { height: 400px !important; overflow-y: auto !important; }";
@@ -428,7 +428,7 @@ test("recent activity hands off only numeric positions across devices, projects,
     await Promise.all([ownerDesktop, ownerMobile, readerMobile].map(({ page }) => page.goto("about:blank")));
     await Promise.all([ownerDesktop, ownerMobile, readerMobile].map(({ context }) => context.close()));
     contextsClosed = true;
-    const controlPort = Number.parseInt(process.env.SCRIPTORIUM_E2E_PORT ?? "4173", 10) + 1;
+    const controlPort = Number.parseInt(process.env.CODEXIA_E2E_PORT ?? "4173", 10) + 1;
     const restart = await fetch(`http://127.0.0.1:${controlPort}/__e2e/restart-api`, { method: "POST" });
     expect(restart.status).toBe(204);
     postRestartReader = await createContext(browser, 390);
@@ -457,8 +457,8 @@ test("recent activity hands off only numeric positions across devices, projects,
     });
     expect(removePrimary.status()).toBe(204);
   } finally {
-    const configuredBase = process.env.SCRIPTORIUM_E2E_BASE_URL ?? process.env.SCRIPTORIUM_BASE_URL ??
-      `http://127.0.0.1:${process.env.SCRIPTORIUM_E2E_PORT ?? "4173"}`;
+    const configuredBase = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ??
+      `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
     const cleanupOrigin = new URL(configuredBase).origin;
     for (const projectId of [secondProjectId, primaryProjectId]) {
       if (!projectId) continue;
@@ -479,7 +479,7 @@ test("recent activity hands off only numeric positions across devices, projects,
 });
 
 test("recent activity polling pauses while naturally hidden and resumes when visible", async () => {
-  test.skip(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1", "This visibility acceptance uses a disposable local Git fixture.");
+  test.skip(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1", "This visibility acceptance uses a disposable local Git fixture.");
   requireNativeVisibilityCoverage();
   const fixture = await makeLongReadingRepository();
   const native = await createNativeHeadfulContext(1280);
@@ -534,7 +534,7 @@ test("recent activity polling pauses while naturally hidden and resumes when vis
       type: "c39-hidden-poll-count",
       description: `${hiddenPollCount} GET(s) in 15.5 seconds after Chromium naturally reported hidden.`,
     });
-    if (process.env.SCRIPTORIUM_E2E_EXPECT_C39_PAUSED === "1") {
+    if (process.env.CODEXIA_E2E_EXPECT_C39_PAUSED === "1") {
       expect(recentActivityGets, "hidden pages should issue no recent-activity poll").toBe(hiddenCount);
     }
 
@@ -547,7 +547,7 @@ test("recent activity polling pauses while naturally hidden and resumes when vis
     );
     expect(remoteUpdate.ok(), "the other-device cursor should be stored while this page is hidden").toBe(true);
 
-    const expectsPause = process.env.SCRIPTORIUM_E2E_EXPECT_C39_PAUSED === "1";
+    const expectsPause = process.env.CODEXIA_E2E_EXPECT_C39_PAUSED === "1";
     await page.bringToFront();
     await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("visible");
     const handoff = page.getByText(/スマホでたった今まで編集していました/u);
@@ -577,7 +577,7 @@ test("recent activity polling pauses while naturally hidden and resumes when vis
 });
 
 test("recent activity ignores a refresh response invalidated by natural hide", async () => {
-  test.skip(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1", "This visibility acceptance uses a disposable local Git fixture.");
+  test.skip(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1", "This visibility acceptance uses a disposable local Git fixture.");
   requireNativeVisibilityCoverage();
   const fixture = await makeLongReadingRepository();
   const native = await createNativeHeadfulContext(1280);
@@ -645,7 +645,7 @@ test("recent activity ignores a refresh response invalidated by natural hide", a
     await heldResponseCompleted;
     await page.waitForTimeout(200);
     const staleHandoff = page.getByText(/スマホで.*編集していました/u);
-    const expectsInvalidation = process.env.SCRIPTORIUM_E2E_EXPECT_C39_PAUSED === "1";
+    const expectsInvalidation = process.env.CODEXIA_E2E_EXPECT_C39_PAUSED === "1";
     if (expectsInvalidation) await expect(staleHandoff).toHaveCount(0);
     else await expect(staleHandoff).toBeVisible();
     test.info().annotations.push({
@@ -677,7 +677,7 @@ test("recent activity ignores a refresh response invalidated by natural hide", a
 });
 
 test("recent activity coalesces repeated positions and records 50 input reports", async ({ browser }) => {
-  test.skip(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1", "This debounce acceptance uses a disposable local Git fixture.");
+  test.skip(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1", "This debounce acceptance uses a disposable local Git fixture.");
   const fixture = await makeLongReadingRepository(5);
   const { context, page } = await createContext(browser, 1280);
   let projectId: string | null = null;

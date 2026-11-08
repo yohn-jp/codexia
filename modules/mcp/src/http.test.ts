@@ -3,7 +3,7 @@ import test from "node:test";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { ActionDescriptor, ActionResult, ChangeProposal, ModuleActionContext, SnapshotId } from "@scriptorium/contracts";
+import type { ActionDescriptor, ActionResult, ChangeProposal, ModuleActionContext, SnapshotId } from "@codexia/contracts";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -198,7 +198,7 @@ test("SDK Streamable HTTP transport lists and invokes tools through the host act
   const contribution = createMcpHttpContribution(new Map());
   const fetch: FetchLike = async (url, init) => contribution.handle(new Request(url, init), host);
   const transport = new StreamableHTTPClientTransport(
-    new URL("http://scriptorium.test/api/projects/project-one/modules/mcp/streamable"),
+    new URL("http://codexia.test/api/projects/project-one/modules/mcp/streamable"),
     { fetch },
   );
   const client = new Client({ name: "mcp-module-test", version: "1.0.0" });
@@ -238,7 +238,7 @@ test("reload delegates to Story's pinned canonical snapshot materializer", async
   const contribution = createMcpHttpContribution(new Map());
   const fetch: FetchLike = async (url, init) => contribution.handle(new Request(url, init), host);
   const transport = new StreamableHTTPClientTransport(
-    new URL("http://scriptorium.test/api/projects/project-one/modules/mcp/streamable"),
+    new URL("http://codexia.test/api/projects/project-one/modules/mcp/streamable"),
     { fetch },
   );
   const client = new Client({ name: "mcp-module-test", version: "1.0.0" });
@@ -263,7 +263,7 @@ test("MCP refuses action names that could approve or publish author changes", as
   const contribution = createMcpHttpContribution(new Map());
   const fetch: FetchLike = async (url, init) => contribution.handle(new Request(url, init), host);
   const transport = new StreamableHTTPClientTransport(
-    new URL("http://scriptorium.test/api/projects/project-one/modules/mcp/streamable"),
+    new URL("http://codexia.test/api/projects/project-one/modules/mcp/streamable"),
     { fetch },
   );
   const client = new Client({ name: "mcp-module-test", version: "1.0.0" });
@@ -288,7 +288,7 @@ test("compute_cooccurrence maps to the Story co-occurrence action without extra 
   const contribution = createMcpHttpContribution(new Map());
   const fetch: FetchLike = async (url, init) => contribution.handle(new Request(url, init), host);
   const transport = new StreamableHTTPClientTransport(
-    new URL("http://scriptorium.test/api/projects/project-one/modules/mcp/streamable"),
+    new URL("http://codexia.test/api/projects/project-one/modules/mcp/streamable"),
     { fetch },
   );
   const client = new Client({ name: "mcp-module-test", version: "1.0.0" });
@@ -317,7 +317,7 @@ test("consistency and continuity use their exact project-level diagnostics actio
   const contribution = createMcpHttpContribution(new Map());
   const fetch: FetchLike = async (url, init) => contribution.handle(new Request(url, init), host);
   const transport = new StreamableHTTPClientTransport(
-    new URL("http://scriptorium.test/api/projects/project-one/modules/mcp/streamable"),
+    new URL("http://codexia.test/api/projects/project-one/modules/mcp/streamable"),
     { fetch },
   );
   const client = new Client({ name: "mcp-module-test", version: "1.0.0" });
@@ -350,7 +350,7 @@ test("submit_change_set returns a source ChangeSetRecord with its source ID", as
   const contribution = createMcpHttpContribution(new Map());
   const fetch: FetchLike = async (url, init) => contribution.handle(new Request(url, init), host);
   const transport = new StreamableHTTPClientTransport(
-    new URL("http://scriptorium.test/api/projects/project-one/modules/mcp/streamable"),
+    new URL("http://codexia.test/api/projects/project-one/modules/mcp/streamable"),
     { fetch },
   );
   const client = new Client({ name: "mcp-module-test", version: "1.0.0" });
@@ -422,7 +422,7 @@ test("ChangeSet readback preserves approved IDs while selected checkpoints are p
   const contribution = createMcpHttpContribution(new Map());
   const fetch: FetchLike = async (url, init) => contribution.handle(new Request(url, init), host);
   const transport = new StreamableHTTPClientTransport(
-    new URL("http://scriptorium.test/api/projects/project-one/modules/mcp/streamable"),
+    new URL("http://codexia.test/api/projects/project-one/modules/mcp/streamable"),
     { fetch },
   );
   const client = new Client({ name: "mcp-module-test", version: "1.0.0" });
@@ -559,7 +559,7 @@ test("submit_change_set maps source IDs outside Core's proposal ID alphabet and 
   const contribution = createMcpHttpContribution(new Map());
   const fetch: FetchLike = async (url, init) => contribution.handle(new Request(url, init), host);
   const transport = new StreamableHTTPClientTransport(
-    new URL("http://scriptorium.test/api/projects/project-one/modules/mcp/streamable"),
+    new URL("http://codexia.test/api/projects/project-one/modules/mcp/streamable"),
     { fetch },
   );
   const client = new Client({ name: "mcp-module-test", version: "1.0.0" });
@@ -604,7 +604,7 @@ test("HTTP MCP session rejects cross-project tool calls with a machine scope err
   const contribution = createMcpHttpContribution(new Map());
   const fetch: FetchLike = async (url, init) => contribution.handle(new Request(url, init), host);
   const transport = new StreamableHTTPClientTransport(
-    new URL("http://scriptorium.test/api/projects/project-one/modules/mcp/streamable"),
+    new URL("http://codexia.test/api/projects/project-one/modules/mcp/streamable"),
     { fetch },
   );
   const client = new Client({ name: "mcp-module-test", version: "1.0.0" });
@@ -724,7 +724,7 @@ test("submit_change_set rejects source records that are not proposed before host
   const contribution = createMcpHttpContribution(new Map());
   const fetch: FetchLike = async (url, init) => contribution.handle(new Request(url, init), host);
   const transport = new StreamableHTTPClientTransport(
-    new URL("http://scriptorium.test/api/projects/project-one/modules/mcp/streamable"),
+    new URL("http://codexia.test/api/projects/project-one/modules/mcp/streamable"),
     { fetch },
   );
   const client = new Client({ name: "mcp-module-test", version: "1.0.0" });
@@ -769,7 +769,7 @@ test("source tools fail with a module availability error when their producer is 
   const contribution = createMcpHttpContribution(new Map());
   const fetch: FetchLike = async (url, init) => contribution.handle(new Request(url, init), host);
   const transport = new StreamableHTTPClientTransport(
-    new URL("http://scriptorium.test/api/projects/project-one/modules/mcp/streamable"),
+    new URL("http://codexia.test/api/projects/project-one/modules/mcp/streamable"),
     { fetch },
   );
   const client = new Client({ name: "mcp-module-test", version: "1.0.0" });
@@ -823,7 +823,7 @@ test("hybrid search stays unavailable while full diagnostics invoke the canonica
   const contribution = createMcpHttpContribution(new Map());
   const fetch: FetchLike = async (url, init) => contribution.handle(new Request(url, init), host);
   const transport = new StreamableHTTPClientTransport(
-    new URL("http://scriptorium.test/api/projects/project-one/modules/mcp/streamable"),
+    new URL("http://codexia.test/api/projects/project-one/modules/mcp/streamable"),
     { fetch },
   );
   const client = new Client({ name: "mcp-module-test", version: "1.0.0" });
@@ -859,7 +859,7 @@ test("audit MCP capacity reserves concurrent initialization and bounds abandoned
   const sessions = new Map();
   const contribution = createMcpHttpContribution(sessions, { maxSessions: 1, idleTimeoutMs: 60_000 });
   const host = actionContext([]);
-  const initialize = (id: number) => new Request("http://scriptorium.test/streamable", {
+  const initialize = (id: number) => new Request("http://codexia.test/streamable", {
     method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
     body: JSON.stringify({ jsonrpc: "2.0", id, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "limits", version: "1" } } }),
   });
@@ -880,7 +880,7 @@ test("audit MCP expires idle SDK sessions and cannot allocate after disposal", a
   const sessions = new Map();
   const contribution = createMcpHttpContribution(sessions, { maxSessions: 1, idleTimeoutMs: 100, now: () => now });
   const host = actionContext([]);
-  const initialize = () => new Request("http://scriptorium.test/streamable", {
+  const initialize = () => new Request("http://codexia.test/streamable", {
     method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "expiry", version: "1" } } }),
   });
@@ -891,7 +891,7 @@ test("audit MCP expires idle SDK sessions and cannot allocate after disposal", a
     assert.ok(oldId);
     await first.text();
     now = 101;
-    const old = await contribution.handle(new Request("http://scriptorium.test/streamable", { headers: { "mcp-session-id": oldId, Accept: "text/event-stream" } }), host);
+    const old = await contribution.handle(new Request("http://codexia.test/streamable", { headers: { "mcp-session-id": oldId, Accept: "text/event-stream" } }), host);
     assert.equal(old.status, 404);
     await old.text();
     assert.equal(sessions.size, 0);
@@ -909,7 +909,7 @@ test("audit actual SDK event stream reserves capacity past idle expiry and relea
   const sessions = new Map<string, import("./http.js").McpSession>();
   const contribution = createMcpHttpContribution(sessions, { maxSessions: 1, idleTimeoutMs: 100, now: () => now });
   const host = actionContext([]);
-  const initialize = () => new Request("http://scriptorium.test/streamable", {
+  const initialize = () => new Request("http://codexia.test/streamable", {
     method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "active-stream", version: "1" } } }),
   });
@@ -920,7 +920,7 @@ test("audit actual SDK event stream reserves capacity past idle expiry and relea
     const id = initialized.headers.get("mcp-session-id");
     assert.ok(id);
     await initialized.text();
-    stream = await contribution.handle(new Request("http://scriptorium.test/streamable", {
+    stream = await contribution.handle(new Request("http://codexia.test/streamable", {
       headers: { "mcp-session-id": id, Accept: "text/event-stream" },
     }), host);
     assert.equal(stream.status, 200);
@@ -938,7 +938,7 @@ test("audit actual SDK event stream reserves capacity past idle expiry and relea
     assert.equal(session.activeRequests, 0);
     assert.equal(session.lastUsedAt, now);
     now = 202;
-    const expired = await contribution.handle(new Request("http://scriptorium.test/streamable", {
+    const expired = await contribution.handle(new Request("http://codexia.test/streamable", {
       headers: { "mcp-session-id": id, Accept: "text/event-stream" },
     }), host);
     assert.equal(expired.status, 404);

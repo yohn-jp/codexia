@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import JSZip from "jszip";
 import YAML from "yaml";
-import type { ChangeOperation, ChangeProposal, ModuleActionContext, ModuleContext, SnapshotId, SnapshotReader } from "@scriptorium/contracts";
-import { createWorkspaceProducer, proposeMigrationImport, type LegacySourceReader, type MigrationContext, type MigrationInspection } from "@scriptorium/migration";
+import type { ChangeOperation, ChangeProposal, ModuleActionContext, ModuleContext, SnapshotId, SnapshotReader } from "@codexia/contracts";
+import { createWorkspaceProducer, proposeMigrationImport, type LegacySourceReader, type MigrationContext, type MigrationInspection } from "@codexia/migration";
 import { createModule } from "./index.js";
 import { readEpubBibleEntries } from "./bible.js";
 import { buildEpubExport } from "./epub.js";
@@ -256,7 +256,7 @@ test("a share activates only on the remote published snapshot and revocation is 
   const publicBase = definition.http!.find((item) => item.id === "publishing.http.public-share")!;
   const publicScene = definition.http!.find((item) => item.id === "publishing.http.public-share-scene")!;
   const publicContext = (reader: SnapshotReader) => actionContext(reader, []);
-  const url = "https://scriptorium.invalid/api/public/repos/local-publishing-7/modules/publishing/share/" + encodeURIComponent(token);
+  const url = "https://codexia.invalid/api/public/repos/local-publishing-7/modules/publishing/share/" + encodeURIComponent(token);
   const beforePublish = await publicBase.handle(new Request(url), publicContext(remote));
   assert.equal(beforePublish.status, 404, "an unpushed checkpoint/proposal is not public");
 

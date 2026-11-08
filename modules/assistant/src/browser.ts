@@ -1,4 +1,4 @@
-import type { BrowserEditorDocument, BrowserModuleContext, BrowserModuleDefinition } from "@scriptorium/contracts";
+import type { BrowserEditorDocument, BrowserModuleContext, BrowserModuleDefinition } from "@codexia/contracts";
 
 type Data = Record<string, unknown>;
 type ActionCall = { data: unknown; proposals: unknown[] };

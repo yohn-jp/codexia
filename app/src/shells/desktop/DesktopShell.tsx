@@ -9,7 +9,7 @@ import "../editorial.css";
 import "./studio.css";
 import "../authoring.css";
 
-const styleNonce = document.querySelector<HTMLMetaElement>('meta[name="scriptorium-style-nonce"]')?.content;
+const styleNonce = document.querySelector<HTMLMetaElement>('meta[name="codexia-style-nonce"]')?.content;
 if (styleNonce) setNonce(styleNonce);
 
 function describeFailure(reason: unknown): string {
@@ -65,7 +65,7 @@ export function DesktopShell({
   return (
     <div className="st-desktop-shell st-studio-shell">
       <aside className="st-studio-rail" aria-label="デスクトップ操作">
-        <a href="/" className="st-studio-monogram" aria-label="Scriptorium ホーム">S<span>.</span></a>
+        <a href="/" className="st-studio-monogram" aria-label="Codexia ホーム">S<span>.</span></a>
         <nav aria-label="パネルを開く" className="st-studio-rail-nav">
           {rail.map((item) => <button key={item.id} type="button"
             className={"st-studio-rail-item" + (activeRequest?.id === item.id || (!activeRequest && item.id === "editor") ? " is-current" : "")}
@@ -81,7 +81,7 @@ export function DesktopShell({
       <div className="st-studio-main">
         <div className="st-studio-topbar">
           <div className="st-studio-identity">
-            <a className="st-studio-wordmark" href="/">scriptorium<span>.</span></a>
+            <a className="st-studio-wordmark" href="/">codexia<span>.</span></a>
             <div className="st-studio-breadcrumb" aria-label="現在の原稿">
               <span>{documentContext || "作品ライブラリ"}</span>
               {documentTitle ? <><span aria-hidden="true">/</span><strong>{documentTitle}</strong></> : null}
@@ -96,9 +96,9 @@ export function DesktopShell({
         {workspaceScope && panels?.length ? (
           <Workspace scope={workspaceScope} mode="desktop" panels={panels}
             beforeLayoutChange={beforeLayoutChange} requestedPanel={effectiveRequest} />
-        ) : <PanelGroup className="st-desktop-workbench" direction="horizontal" id="scriptorium-desktop-workbench">
+        ) : <PanelGroup className="st-desktop-workbench" direction="horizontal" id="codexia-desktop-workbench">
           <Panel className="st-desktop-navigation-panel" defaultSize={28} minSize={18} maxSize={46}
-            id="scriptorium-desktop-navigation" order={1}>
+            id="codexia-desktop-navigation" order={1}>
             <Tabs.Root className="st-desktop-navigation" defaultValue="library" orientation="horizontal">
               <Tabs.List className="st-desktop-panel-tabs" aria-label="ナビゲーションとツール">
                 <Tabs.Trigger className="st-desktop-panel-tab" value="library">作品ライブラリ</Tabs.Trigger>
@@ -117,7 +117,7 @@ export function DesktopShell({
             <Separator.Root className="st-desktop-resize-line" decorative orientation="vertical" />
           </PanelResizeHandle>
           <Panel className="st-desktop-editor-panel" defaultSize={72} minSize={42}
-            id="scriptorium-desktop-editor" order={2}>
+            id="codexia-desktop-editor" order={2}>
             <main className="st-desktop-editor-slot" aria-label="原稿の編集と読書" tabIndex={-1}>{editor}</main>
           </Panel>
         </PanelGroup>}

@@ -232,7 +232,7 @@ function readOperationWrites(inspection) {
 }
 
 test("legacy import survives author-approved publication and complete Core dataDir replacement", async () => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-import-recovery-"));
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-import-recovery-"));
   const workspaceRoot = path.join(tempRoot, "legacy-data");
   const targetDataDir = path.join(tempRoot, "core-data");
   const databases = [];

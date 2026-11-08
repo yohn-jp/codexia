@@ -12,7 +12,7 @@ import { productionClosure } from './runtime-package-closure.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const moduleIds = ['story', 'diagnostics', 'nlp', 'semantic', 'speaker', 'assistant', 'publishing', 'mcp', 'search'];
-const modulePrefix = '@scriptorium/module-';
+const modulePrefix = '@codexia/module-';
 const sha256Pattern = /^sha256:[a-f0-9]{64}$/u;
 const revisionPattern = /^[a-f0-9]{40}$/u;
 const zeroResources = Object.freeze({ cpuMilli: 0, memoryMiB: 0, ephemeralStorageMiB: 0 });
@@ -145,7 +145,7 @@ export async function calculateBuildDigests() {
       return { path: relative, sha256: createHash('sha256').update(await readFile(absolute)).digest('hex') };
     } catch (error) {
       if (relative !== 'Dockerfile' || error?.code !== 'ENOENT') throw error;
-      const bakedDockerfileDigest = process.env.SCRIPTORIUM_DOCKERFILE_SHA256;
+      const bakedDockerfileDigest = process.env.CODEXIA_DOCKERFILE_SHA256;
       if (!/^[a-f0-9]{64}$/u.test(bakedDockerfileDigest ?? '')) throw new Error('Build Kit image is missing its Dockerfile source digest');
       return { path: relative, sha256: bakedDockerfileDigest };
     }
@@ -199,8 +199,8 @@ export async function trustedModuleData() {
   for (const id of moduleIds) {
     const packageDirectory = path.join(root, 'modules', id);
     const packageManifest = JSON.parse(await readFile(path.join(packageDirectory, 'package.json'), 'utf8'));
-    const manifest = packageManifest.scriptoriumModule;
-    const display = packageManifest.scriptoriumDisplay;
+    const manifest = packageManifest.codexiaModule;
+    const display = packageManifest.codexiaDisplay;
     if (packageManifest.name !== `${modulePrefix}${id}` || manifest?.id !== id || typeof manifest.version !== 'string' ||
         !display || Object.keys(display).sort().join(',') !== 'description,name' ||
         typeof display.name !== 'string' || !display.name.trim() || display.name.length > 120 ||
@@ -226,13 +226,13 @@ async function moduleRuntimeResolver() {
     if (typeof imported.resolveBuildCatalogSelection !== 'function') throw new Error('catalog resolver export is absent');
     return imported.resolveBuildCatalogSelection;
   } catch (error) {
-    throw new Error(`Build @scriptorium/module-runtime before hosted catalog generation: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Build @codexia/module-runtime before hosted catalog generation: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
 export function catalogFor(input, trustedModules) {
   return {
-    contractVersion: 'scriptorium-build/v1',
+    contractVersion: 'codexia-build/v1',
     producerRevision: input.producerRevision,
     runtimeBaseDigest: input.runtimeBaseDigest,
     buildKitDigest: input.buildKitDigest,
@@ -265,9 +265,9 @@ export function catalogFor(input, trustedModules) {
 function validateBuildInput(value) {
   const keys = ['contractVersion', 'producerRevision', 'runtimeBaseDigest', 'buildKitDigest', 'recipeDigest', 'sourceDigest', 'lockDigest', 'requestedModules', 'resolvedModules', 'platform', 'options'];
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== [...keys].sort().join(',')) {
-    throw new Error('BuildInput must match scriptorium-build/v1 exactly');
+    throw new Error('BuildInput must match codexia-build/v1 exactly');
   }
-  if (value.contractVersion !== 'scriptorium-build/v1' || !revisionPattern.test(value.producerRevision) ||
+  if (value.contractVersion !== 'codexia-build/v1' || !revisionPattern.test(value.producerRevision) ||
       ['runtimeBaseDigest', 'buildKitDigest', 'recipeDigest', 'sourceDigest', 'lockDigest'].some((key) => !sha256Pattern.test(value[key])) ||
       value.platform !== 'linux/amd64' || !value.options || Object.keys(value.options).length !== 0 ||
       !Array.isArray(value.requestedModules) || !Array.isArray(value.resolvedModules) ||
@@ -343,7 +343,7 @@ function buildInputForCatalog(args, digests) {
   if (!revisionPattern.test(producerRevision ?? '') || !sha256Pattern.test(runtimeBaseDigest ?? '') || !sha256Pattern.test(buildKitDigest ?? '')) {
     throw new Error('Catalog requires immutable producer revision and image digests');
   }
-  return { contractVersion: 'scriptorium-build/v1', producerRevision, runtimeBaseDigest, buildKitDigest, ...digests };
+  return { contractVersion: 'codexia-build/v1', producerRevision, runtimeBaseDigest, buildKitDigest, ...digests };
 }
 
 export function assertCleanRevisionSnapshot({ head, status, producerRevision }) {
@@ -440,13 +440,13 @@ async function scanNativeDependencies(nodeModulesDirectory) {
 async function moduleRecords(deployedDirectory, selectedIds) {
   const records = [];
   for (const id of selectedIds) {
-    const packageDirectory = path.join(deployedDirectory, 'node_modules', '@scriptorium', `module-${id}`);
+    const packageDirectory = path.join(deployedDirectory, 'node_modules', '@codexia', `module-${id}`);
     const resolved = await realpath(packageDirectory);
     records.push({
       id,
       version: JSON.parse(await readFile(path.join(resolved, 'package.json'), 'utf8')).version,
       artifactDigest: await packageArtifactDigest(resolved),
-      packagePath: `/app/node_modules/@scriptorium/module-${id}`,
+      packagePath: `/app/node_modules/@codexia/module-${id}`,
     });
   }
   return records.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -454,8 +454,8 @@ async function moduleRecords(deployedDirectory, selectedIds) {
 
 export async function runtimePackageRecords(deployedDirectory, serverIds) {
   const nodeModules = path.join(deployedDirectory, 'node_modules');
-  const roots = [path.join(nodeModules, '@scriptorium/api'),
-    ...serverIds.map((id) => path.join(nodeModules, '@scriptorium', `module-${id}`))];
+  const roots = [path.join(nodeModules, '@codexia/api'),
+    ...serverIds.map((id) => path.join(nodeModules, '@codexia', `module-${id}`))];
   const closure = await productionClosure(roots);
   const lockBytes = await readFile(path.join(root, 'pnpm-lock.yaml'));
   const yamlUrl = pathToFileURL(path.join(root, 'node_modules/.pnpm/node_modules/yaml/dist/index.js'));
@@ -682,7 +682,7 @@ async function writeComposition(input, catalog, selection, runtimeDirectory, tru
   const canonicalInput = canonicalBuildInput(input);
   const buildKey = sha256(Buffer.from(canonicalInput, 'utf8'));
   const compositionManifest = {
-    schemaVersion: 'scriptorium-composition/v1',
+    schemaVersion: 'codexia-composition/v1',
     buildInput: JSON.parse(canonicalInput),
     buildKey,
     producerRevision: input.producerRevision,
@@ -692,19 +692,19 @@ async function writeComposition(input, catalog, selection, runtimeDirectory, tru
     browser: { entry: `app/app/dist/${browserEntryFile}`, moduleIds: browserIds },
     nativeDependencies,
     persistence,
-    smoke: { id: 'scriptorium-hosted-runtime-v1', healthPath: '/health/ready', timeoutSeconds: 60 },
+    smoke: { id: 'codexia-hosted-runtime-v1', healthPath: '/health/ready', timeoutSeconds: 60 },
   };
   const report = {
-    schemaVersion: 'scriptorium-build-report/v1',
+    schemaVersion: 'codexia-build-report/v1',
     producerRevision: input.producerRevision,
     buildKey,
-    catalogPath: '/usr/share/scriptorium/build-catalog.json',
+    catalogPath: '/usr/share/codexia/build-catalog.json',
     catalogDigest: sha256(Buffer.from(canonicalJson(catalog), 'utf8')),
-    lockPath: '/usr/share/scriptorium/pnpm-lock.yaml',
+    lockPath: '/usr/share/codexia/pnpm-lock.yaml',
     lockDigest: input.lockDigest,
-    runtimeMetadataPath: '/usr/share/scriptorium/runtime-metadata.json',
+    runtimeMetadataPath: '/usr/share/codexia/runtime-metadata.json',
     runtimeMetadataDigest: sha256(Buffer.from(canonicalJson(runtimeMetadata), 'utf8')),
-    compositionManifestPath: '/usr/share/scriptorium/composition-manifest.json',
+    compositionManifestPath: '/usr/share/codexia/composition-manifest.json',
     persistence,
     browserPersistence: { indexedDbVersion, sourceDigest: sha256(journalSource) },
     modulePackages: moduleReports,
@@ -719,7 +719,7 @@ async function writeComposition(input, catalog, selection, runtimeDirectory, tru
     browserFiles,
     nativeDependencies,
   };
-  const metadataDirectory = path.join(runtimeDirectory, 'usr/share/scriptorium');
+  const metadataDirectory = path.join(runtimeDirectory, 'usr/share/codexia');
   await mkdir(metadataDirectory, { recursive: true });
   await writeFile(path.join(metadataDirectory, 'pnpm-lock.yaml'), lockBytes);
   for (const [name, value] of Object.entries({
@@ -734,7 +734,7 @@ async function writeComposition(input, catalog, selection, runtimeDirectory, tru
 async function compose(inputBase64url, sourceRef) {
   const input = decodeInput(inputBase64url);
   const repository = validateRepositorySource(sourceRef, input.buildKitDigest);
-  const bakedRevision = process.env.SCRIPTORIUM_PRODUCER_REVISION;
+  const bakedRevision = process.env.CODEXIA_PRODUCER_REVISION;
   if (!revisionPattern.test(bakedRevision ?? '') || bakedRevision !== input.producerRevision) {
     throw new Error('BuildInput producerRevision differs from the immutable Build Kit image revision');
   }
@@ -760,7 +760,7 @@ async function compose(inputBase64url, sourceRef) {
 }
 
 async function makeHostedRuntime(input, selection) {
-  const runtimeDirectory = '/tmp/scriptorium-hosted-artifact';
+  const runtimeDirectory = '/tmp/codexia-hosted-artifact';
   const appDirectory = path.join(runtimeDirectory, 'app');
   await rm(runtimeDirectory, { recursive: true, force: true });
   const result = spawnSync(process.execPath, [
@@ -771,7 +771,7 @@ async function makeHostedRuntime(input, selection) {
   ], { cwd: root, env: process.env, stdio: 'inherit' });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`Hosted profile package exited with status ${String(result.status)}`);
-  await mkdir(path.join(runtimeDirectory, 'usr/share/scriptorium'), { recursive: true });
+  await mkdir(path.join(runtimeDirectory, 'usr/share/codexia'), { recursive: true });
   return runtimeDirectory;
 }
 

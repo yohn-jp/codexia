@@ -40,7 +40,7 @@ const GIT_ENV = {
   GIT_AUTHOR_DATE: '2026-01-01T00:00:00Z',
   GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z',
 };
-delete GIT_ENV.SCRIPTORIUM_GITHUB_TOKEN;
+delete GIT_ENV.CODEXIA_GITHUB_TOKEN;
 for (const name of ['GIT_CONFIG', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) {
   delete GIT_ENV[name];
 }
@@ -242,7 +242,7 @@ async function spawnWorker(mode, args, output, timeoutMs) {
   if (remainingMs <= 0) throw new Error('Memory probe cohort wall-time budget expired before worker launch');
   const boundedTimeoutMs = Math.min(timeoutMs, remainingMs);
   const workerEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' };
-  delete workerEnv.SCRIPTORIUM_GITHUB_TOKEN;
+  delete workerEnv.CODEXIA_GITHUB_TOKEN;
   delete workerEnv.NODE_OPTIONS;
   for (const name of ['GIT_CONFIG', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) {
     delete workerEnv[name];
@@ -758,7 +758,7 @@ async function hashBase64InChunks(content, chunkCharacters = 256 * 1024) {
 }
 
 async function loadWorkerRuntime(coreModule) {
-  delete process.env.SCRIPTORIUM_GITHUB_TOKEN;
+  delete process.env.CODEXIA_GITHUB_TOKEN;
   const instrumentation = await import('./instrument-node.mjs');
   instrumentedCounters = instrumentation.counts;
   commonHelpers = await import('./common.mjs');

@@ -6,7 +6,7 @@ import {
   type ModuleActionContext,
   type ProposalEvidence,
   type SnapshotReader,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 import { readStorySnapshot, type LoadedStorySnapshot } from "./snapshot.js";
 import { listRuleStateEvents } from "./domain/index.js";
 import type { StoryEntity, StoryEntityType } from "./domain/types.js";

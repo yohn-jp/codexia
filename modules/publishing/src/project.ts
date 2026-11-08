@@ -1,4 +1,4 @@
-import { assertProjectPath, type SnapshotReader } from "@scriptorium/contracts";
+import { assertProjectPath, type SnapshotReader } from "@codexia/contracts";
 import YAML from "yaml";
 
 export type PublishingScope = "all" | "volume" | "chapter";

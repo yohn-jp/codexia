@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { productionClosure, pruneToProductionClosure } from './runtime-package-closure.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const modulePackagePrefix = '@scriptorium/module-';
+const modulePackagePrefix = '@codexia/module-';
 const knownModules = ['story', 'diagnostics', 'nlp', 'semantic', 'speaker', 'assistant', 'publishing', 'mcp', 'search'];
 
 function usage() {
@@ -27,13 +27,13 @@ export function validateProfilePackage(profileName, profile, packageManifest, in
   if (missing.length) {
     throw new Error(`Profile ${profileName} requires module packages that have not been produced: ${missing.join(', ')}`);
   }
-  if (packageManifest?.name !== `@scriptorium/profile-${profileName}`) {
-    throw new Error(`Profile ${profileName} package must be named @scriptorium/profile-${profileName}`);
+  if (packageManifest?.name !== `@codexia/profile-${profileName}`) {
+    throw new Error(`Profile ${profileName} package must be named @codexia/profile-${profileName}`);
   }
 
   const dependencies = { ...packageManifest.dependencies, ...packageManifest.optionalDependencies };
-  if (dependencies['@scriptorium/api'] === undefined) {
-    throw new Error(`Profile ${profileName} package must depend on @scriptorium/api`);
+  if (dependencies['@codexia/api'] === undefined) {
+    throw new Error(`Profile ${profileName} package must depend on @codexia/api`);
   }
   const directModuleDependencies = Object.keys(dependencies)
     .filter((name) => knownModules.includes(name.startsWith(modulePackagePrefix) ? name.slice(modulePackagePrefix.length) : ''))
@@ -47,8 +47,8 @@ export function validateProfilePackage(profileName, profile, packageManifest, in
 
 export function createBuildCommands(profileName, profile) {
   const commands = [
-    { command: 'pnpm', args: ['--filter', '@scriptorium/contracts', 'run', 'build'] },
-    { command: 'pnpm', args: ['--filter', '@scriptorium/module-runtime', 'run', 'build'] },
+    { command: 'pnpm', args: ['--filter', '@codexia/contracts', 'run', 'build'] },
+    { command: 'pnpm', args: ['--filter', '@codexia/module-runtime', 'run', 'build'] },
   ];
   if (profile.modules.length) {
     const filters = profile.modules.flatMap((id) => ['--filter', `${modulePackagePrefix}${id}...`]);
@@ -56,8 +56,8 @@ export function createBuildCommands(profileName, profile) {
   }
   commands.push(
     { command: process.execPath, args: [path.join(root, 'scripts/profile-build.mjs'), '--profile', profileName] },
-    { command: 'pnpm', args: ['--filter', '@scriptorium/app', 'run', 'build'], env: { SCRIPTORIUM_PROFILE: profileName } },
-    { command: 'pnpm', args: ['--filter', '@scriptorium/api...', 'run', 'build'] },
+    { command: 'pnpm', args: ['--filter', '@codexia/app', 'run', 'build'], env: { CODEXIA_PROFILE: profileName } },
+    { command: 'pnpm', args: ['--filter', '@codexia/api...', 'run', 'build'] },
   );
   return commands;
 }
@@ -121,8 +121,8 @@ function isWithin(rootDirectory, candidate) {
 
 export async function pruneRuntimeDependencies(directory, selectedIds) {
   const nodeModules = path.join(directory, 'node_modules');
-  const roots = [path.join(nodeModules, '@scriptorium/api'),
-    ...[...selectedIds].map((id) => path.join(nodeModules, '@scriptorium', `module-${id}`))];
+  const roots = [path.join(nodeModules, '@codexia/api'),
+    ...[...selectedIds].map((id) => path.join(nodeModules, '@codexia', `module-${id}`))];
   const expected = await productionClosure(roots);
   const rootDirectory = await realpath(nodeModules);
   for (const item of expected.values()) {
@@ -174,7 +174,7 @@ async function main() {
       if (!prebuilt) {
         for (const step of createBuildCommands(sourceProfile, profile)) run(step.command, step.args, step.env);
       }
-      temporaryDirectory = await mkdtemp(path.join(root, '.scriptorium-hosted-profile-'));
+      temporaryDirectory = await mkdtemp(path.join(root, '.codexia-hosted-profile-'));
       const generatedDirectory = path.join(temporaryDirectory, 'generated');
       run(process.execPath, [
         path.join(root, 'scripts/profile-build.mjs'), '--modules-json', JSON.stringify(requestedModuleIds),
@@ -182,11 +182,11 @@ async function main() {
       ]);
       selectedModuleIds = JSON.parse(await readFile(path.join(generatedDirectory, 'module-manifests.json'), 'utf8'))
         .modules.map(({ id }) => id);
-      run('pnpm', ['--filter', '@scriptorium/app', 'run', 'build'], {
-        SCRIPTORIUM_PROFILE: 'hosted',
-        SCRIPTORIUM_BROWSER_MODULE_PROFILE_PATH: path.join(generatedDirectory, 'browser.mjs'),
+      run('pnpm', ['--filter', '@codexia/app', 'run', 'build'], {
+        CODEXIA_PROFILE: 'hosted',
+        CODEXIA_BROWSER_MODULE_PROFILE_PATH: path.join(generatedDirectory, 'browser.mjs'),
       });
-      if (!prebuilt) run('pnpm', ['--filter', '@scriptorium/api...', 'run', 'build']);
+      if (!prebuilt) run('pnpm', ['--filter', '@codexia/api...', 'run', 'build']);
     } else {
       for (const step of createBuildCommands(profileName, profile)) run(step.command, step.args, step.env);
     }
@@ -207,11 +207,11 @@ async function main() {
       path.join(root, 'scripts/profile-build.mjs'), ...verifyArgs, '--verify-deploy', outputDirectory,
     ]);
     if (sourceProfile === 'core') {
-      const apiPackage = await realpath(path.join(outputDirectory, 'node_modules/@scriptorium/api'));
+      const apiPackage = await realpath(path.join(outputDirectory, 'node_modules/@codexia/api'));
       const runtimeDists = [
         path.join(apiPackage, 'dist'),
         ...await Promise.all(['core', 'contracts', 'module-runtime'].map(async (name) => {
-          const packageDirectory = await realpath(path.join(outputDirectory, 'node_modules/.pnpm/node_modules/@scriptorium', name));
+          const packageDirectory = await realpath(path.join(outputDirectory, 'node_modules/.pnpm/node_modules/@codexia', name));
           return path.join(packageDirectory, 'dist');
         })),
         path.join(outputDirectory, 'app/dist'),

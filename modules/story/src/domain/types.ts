@@ -1,4 +1,4 @@
-import type { SnapshotId } from "@scriptorium/contracts";
+import type { SnapshotId } from "@codexia/contracts";
 
 export type StoryEntityType =
   | "character"

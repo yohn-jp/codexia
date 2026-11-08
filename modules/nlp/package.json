@@ -1,8 +1,8 @@
 {
-  "name": "@scriptorium/module-nlp",
+  "name": "@codexia/module-nlp",
   "private": true,
   "version": "0.1.0",
-  "scriptoriumDisplay": {
+  "codexiaDisplay": {
     "name": "Language analysis",
     "description": "Provide tokenization and linguistic analysis shared by optional writing tools."
   },
@@ -33,16 +33,16 @@
     "test": "node --import tsx --test src/*.test.ts"
   },
   "dependencies": {
-    "@scriptorium/contracts": "workspace:*",
-    "@scriptorium/migration": "workspace:*",
+    "@codexia/contracts": "workspace:*",
+    "@codexia/migration": "workspace:*",
     "lindera-wasm-nodejs-ipadic": "2.0.0",
     "yaml": "^2.8.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "@scriptorium/module-runtime": "workspace:*",
+    "@codexia/module-runtime": "workspace:*",
     "@huggingface/transformers": "3.8.1"
   },
-  "scriptoriumModule": {
+  "codexiaModule": {
     "id": "nlp",
     "version": "0.1.0",
     "contractVersion": 1,

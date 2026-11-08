@@ -1,1 +1,1 @@
-export { computeEndingCategory, removeDialogueBrackets } from "@scriptorium/module-diagnostics";
+export { computeEndingCategory, removeDialogueBrackets } from "@codexia/module-diagnostics";

@@ -12,7 +12,7 @@ pnpm build
 pnpm audit:core
 ```
 
-`pnpm test` runs workspace suites and root script tests. `typecheck:tests` includes test sources, and `typecheck:safety` applies stricter scoped compiler checks. Core dependency auditing requires a Core build; use `SCRIPTORIUM_PROFILE=core pnpm build` if a Full build replaced the outputs.
+`pnpm test` runs workspace suites and root script tests. `typecheck:tests` includes test sources, and `typecheck:safety` applies stricter scoped compiler checks. Core dependency auditing requires a Core build; use `CODEXIA_PROFILE=core pnpm build` if a Full build replaced the outputs.
 
 ## Browser checks
 
@@ -20,11 +20,11 @@ Install the configured browsers and run acceptance against each profile:
 
 ```sh
 pnpm exec playwright install chromium webkit
-SCRIPTORIUM_PROFILE=core pnpm test:e2e
-SCRIPTORIUM_PROFILE=full pnpm test:e2e
+CODEXIA_PROFILE=core pnpm test:e2e
+CODEXIA_PROFILE=full pnpm test:e2e
 ```
 
-On a supported host, `SCRIPTORIUM_E2E_CHROMIUM` selects a system Chromium executable. The Playwright configuration and test sources define browser/display requirements and conditional cases. A skipped case is not a passed check. Physical-device keyboards, OS IME and native gestures require device testing beyond synthetic composition events.
+On a supported host, `CODEXIA_E2E_CHROMIUM` selects a system Chromium executable. The Playwright configuration and test sources define browser/display requirements and conditional cases. A skipped case is not a passed check. Physical-device keyboards, OS IME and native gestures require device testing beyond synthetic composition events.
 
 Browser acceptance covers editing, conflicts, recovery, shell switching, module contributions, workspace layouts, terminology and job review. Tests use generated repositories and isolated browser state. Do not point fixture-driven tests at author work.
 

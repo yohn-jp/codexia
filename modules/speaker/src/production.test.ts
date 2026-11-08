@@ -7,11 +7,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
-import { assertChangeOperation, type ChangeOperation, type ChangeProposal, type ModuleContext, type ModuleManifest, type SnapshotId } from "@scriptorium/contracts";
-import { ModuleRuntime } from "@scriptorium/module-runtime";
-import { createModule as createStoryModule } from "@scriptorium/module-story";
-import { createModule as createNlpModule } from "@scriptorium/module-nlp";
-import { createModule as createDiagnosticsModule } from "@scriptorium/module-diagnostics";
+import { assertChangeOperation, type ChangeOperation, type ChangeProposal, type ModuleContext, type ModuleManifest, type SnapshotId } from "@codexia/contracts";
+import { ModuleRuntime } from "@codexia/module-runtime";
+import { createModule as createStoryModule } from "@codexia/module-story";
+import { createModule as createNlpModule } from "@codexia/module-nlp";
+import { createModule as createDiagnosticsModule } from "@codexia/module-diagnostics";
 import { createModule as createSpeakerModule } from "./index.js";
 
 const repository = {
@@ -104,7 +104,7 @@ function initialFiles(sceneCount = 14): Map<string, { content: string; revision:
 
 function moduleContext(): ModuleContext {
   return {
-    cacheDirectory: "/tmp/scriptorium-p10-test-cache",
+    cacheDirectory: "/tmp/codexia-p10-test-cache",
     signal: new AbortController().signal,
     async acquireCapability() { throw new Error("Capability leases are supplied by ModuleRuntime"); },
     async createWorkerService() { throw new Error("Worker services are supplied by ModuleRuntime"); },
@@ -112,7 +112,7 @@ function moduleContext(): ModuleContext {
 }
 
 function readManifest(url: URL): ModuleManifest {
-  return JSON.parse(readFileSync(url, "utf8")).scriptoriumModule as ModuleManifest;
+  return JSON.parse(readFileSync(url, "utf8")).codexiaModule as ModuleManifest;
 }
 
 async function createRuntime(
@@ -205,7 +205,7 @@ function dataOf(result: Awaited<ReturnType<ModuleRuntime["invokeAction"]>>): Rec
 }
 
 function assertSpeakerIdentity(data: Record<string, unknown>, adoptedModelRevision: string | null): void {
-  assert.equal(data.speakerEngine, "scriptorium-speaker-cpu");
+  assert.equal(data.speakerEngine, "codexia-speaker-cpu");
   assert.equal(data.speakerEngineVersion, "1.0.0");
   assert.equal(data.speakerModuleVersion, "0.1.0");
   assert.equal(data.tokenizerModel, "lindera-wasm-nodejs-ipadic");
@@ -234,7 +234,7 @@ test("evaluation and retraining actions advertise their source job types", async
 test("speaker actions run real CPU attribution, propose corrections/model adoption, and reload from the reviewed snapshot", { timeout: 180_000 }, async () => {
   const files = initialFiles();
   let snapshot = snapshotFor(files);
-  const cacheDirectory = await mkdtemp(path.join(os.tmpdir(), "scriptorium-p10-cache-"));
+  const cacheDirectory = await mkdtemp(path.join(os.tmpdir(), "codexia-p10-cache-"));
   let runtime: ModuleRuntime | undefined;
   try {
     const first = await createRuntime(files, () => snapshot, cacheDirectory);
@@ -297,7 +297,7 @@ test("speaker actions run real CPU attribution, propose corrections/model adopti
     const heroStylometric = (voiceProfileData.stylometricProfiles as Array<{ entityId: string; dialogueCount: number }>).find((row) => row.entityId === "char-hero");
     assert.equal(heroFingerprint?.dialogueCount, 15);
     assert.equal(heroStylometric?.dialogueCount, 15);
-    assert.equal(voiceProfileData.diagnosticsEngine, "scriptorium-diagnostics-cpu");
+    assert.equal(voiceProfileData.diagnosticsEngine, "codexia-diagnostics-cpu");
     assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, []);
 
     const review = await runtime.invokeAction("speaker", "speaker.review.queue", {}, host);
@@ -345,7 +345,7 @@ test("speaker actions run real CPU attribution, propose corrections/model adopti
     assert.ok(Number(trainingData.deltaPt) >= 5, JSON.stringify(trainingData));
     assert.ok(Number(trainingData.trainExampleCount) >= 10);
     const trainingProvenance = trainingData.provenance as Record<string, unknown>;
-    assert.equal(trainingProvenance.engineId, "scriptorium-speaker-cpu");
+    assert.equal(trainingProvenance.engineId, "codexia-speaker-cpu");
     assert.equal(trainingProvenance.engineVersion, "1.0.0");
     assert.equal(trainingProvenance.moduleVersion, "0.1.0");
     assert.ok(Array.isArray(trainingData.model && (trainingData.model as Record<string, unknown>).weights));
@@ -373,9 +373,9 @@ test("speaker actions run real CPU attribution, propose corrections/model adopti
     assertSpeakerIdentity(evaluationData, adoptedModelRevision);
     assert.equal(evaluationData.gatesUpdated, true);
     const evaluationProvenance = evaluationData.provenance as Record<string, unknown>;
-    assert.equal(evaluationProvenance.speakerEngine, "scriptorium-speaker-cpu");
+    assert.equal(evaluationProvenance.speakerEngine, "codexia-speaker-cpu");
     assert.deepEqual(evaluationProvenance.adoptedModelIdentity, { revision: adoptedModelRevision });
-    assert.equal(evaluationProvenance.engineId, "scriptorium-speaker-cpu");
+    assert.equal(evaluationProvenance.engineId, "codexia-speaker-cpu");
     assert.equal(evaluationProvenance.engineVersion, "1.0.0");
     assert.equal(evaluationProvenance.tokenizerModel, "lindera-wasm-nodejs-ipadic");
     assert.equal(typeof evaluationProvenance.adoptedModelRevision, "string");

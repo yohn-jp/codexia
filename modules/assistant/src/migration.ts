@@ -1,5 +1,5 @@
-import type { MigrationContribution, MigrationContext, MigrationProducer } from "@scriptorium/migration";
-import { stableMigrationId } from "@scriptorium/migration";
+import type { MigrationContribution, MigrationContext, MigrationProducer } from "@codexia/migration";
+import { stableMigrationId } from "@codexia/migration";
 
 const FILES = [
   {

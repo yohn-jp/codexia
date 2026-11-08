@@ -60,7 +60,7 @@ const VIEWS: ReadonlyArray<{ id: MobileView; label: string; title: string; mark:
 ];
 
 const MOBILE_VIEW_PARAM = "view";
-const MOBILE_PREVIOUS_VIEW_STATE = "scriptoriumMobilePreviousView";
+const MOBILE_PREVIOUS_VIEW_STATE = "codexiaMobilePreviousView";
 
 function isMobileView(value: unknown): value is MobileView {
   return value === "library" || value === "writing" || value === "inspection" || value === "tools" || value === "settings";
@@ -84,8 +84,8 @@ function historyState(value: unknown): Record<string, unknown> {
 
 function initializeIonicRuntime(): void {
   if (typeof document === "undefined") return;
-  const nonce = document.querySelector<HTMLMetaElement>('meta[name="scriptorium-style-nonce"]')?.content;
-  if (nonce && nonce !== "__SCRIPTORIUM_STYLE_NONCE__") setNonce(nonce);
+  const nonce = document.querySelector<HTMLMetaElement>('meta[name="codexia-style-nonce"]')?.content;
+  if (nonce && nonce !== "__CODEXIA_STYLE_NONCE__") setNonce(nonce);
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
   setupIonicReact({ mode: "md", animated: !reducedMotion });
 }
@@ -390,7 +390,7 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
     && Boolean(panels?.some((panel) => panel.id === "outline"))
     && Boolean(panels?.some((panel) => panel.id === "inspector"));
 
-  const title = VIEWS.find((view) => view.id === activeView)?.title ?? "Scriptorium";
+  const title = VIEWS.find((view) => view.id === activeView)?.title ?? "Codexia";
   const mobileTitle = activeView === "writing" && documentTitle ? documentTitle : title;
   return (
     <IonApp className={"mobile-shell" + (writingKeyboardVisible ? " mobile-shell-keyboard-open" : "")}>
@@ -399,7 +399,7 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
           <div className="mobile-shell-identity-bar">
             <IonButton type="button" className="mobile-shell-back" fill="clear" aria-label="前の画面に戻る" onClick={goBack}>‹</IonButton>
             <div className="mobile-shell-identity-copy">
-              <span className="mobile-shell-wordmark">scriptorium<span>.</span></span>
+              <span className="mobile-shell-wordmark">codexia<span>.</span></span>
               <strong className="mobile-shell-current-title">{mobileTitle}</strong>
               {documentContext && activeView === "writing" ? <small className="mobile-shell-context">{documentContext}</small> : null}
             </div>

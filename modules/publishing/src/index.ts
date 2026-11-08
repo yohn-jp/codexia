@@ -1,4 +1,4 @@
-import { CONTRACT_VERSION, type ModuleContext, type ModuleDefinition, type ModuleManifest } from "@scriptorium/contracts";
+import { CONTRACT_VERSION, type ModuleContext, type ModuleDefinition, type ModuleManifest } from "@codexia/contracts";
 import { createPublishingActions } from "./actions.js";
 import { createPublishingHttpContributions } from "./http.js";
 

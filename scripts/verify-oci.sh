@@ -25,15 +25,15 @@ command -v od >/dev/null 2>&1 || {
   exit 2
 }
 
-image="${SCRIPTORIUM_OCI_IMAGE:-scriptorium:verification}"
-port="${SCRIPTORIUM_OCI_PORT:-3040}"
-profile="${SCRIPTORIUM_PROFILE:-core}"
-container="scriptorium-verify-$$"
+image="${CODEXIA_OCI_IMAGE:-codexia:verification}"
+port="${CODEXIA_OCI_PORT:-3040}"
+profile="${CODEXIA_PROFILE:-core}"
+container="codexia-verify-$$"
 verification_token="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
 
 case "$profile" in
   core|full) ;;
-  *) echo "SCRIPTORIUM_PROFILE must be core or full." >&2; exit 2 ;;
+  *) echo "CODEXIA_PROFILE must be core or full." >&2; exit 2 ;;
 esac
 
 cleanup() {
@@ -50,8 +50,8 @@ fi
   --name "$container" \
   --stop-timeout 30 \
   --publish "127.0.0.1:${port}:3000" \
-  --env "SCRIPTORIUM_AUTH_TOKEN=$verification_token" \
-  --env SCRIPTORIUM_DATA_DIR=/data \
+  --env "CODEXIA_AUTH_TOKEN=$verification_token" \
+  --env CODEXIA_DATA_DIR=/data \
   "$image" >/dev/null
 
 ready=0
@@ -106,7 +106,7 @@ exit_code="$("$engine" wait "$container")"
   exit 1
 }
 logs="$("$engine" logs "$container" 2>&1)"
-if ! grep -Fq "Scriptorium shutdown complete" <<<"$logs"; then
+if ! grep -Fq "Codexia shutdown complete" <<<"$logs"; then
   echo "The OCI process exited without completing the API drain callback." >&2
   printf '%s\n' "$logs" >&2
   exit 1

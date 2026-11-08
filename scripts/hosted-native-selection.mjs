@@ -26,7 +26,7 @@ export function hostedNativeComposeCases(selection) {
 
 export function createHostedNativeReport({ selection, sourceSha, dockerfileSha256, runtimeBaseDigest, buildKitDigest, catalog, compositions }) {
   return {
-    schemaVersion: 'scriptorium-hosted-native-verification/v1',
+    schemaVersion: 'codexia-hosted-native-verification/v1',
     acceptanceLevel: 'DISPOSABLE_NATIVE_PRODUCER',
     selection,
     sourceSha,

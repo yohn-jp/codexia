@@ -1,4 +1,4 @@
-import type { BrowserModuleContext, BrowserModuleDefinition, ChangeOperation } from "@scriptorium/contracts";
+import type { BrowserModuleContext, BrowserModuleDefinition, ChangeOperation } from "@codexia/contracts";
 
 
 function lateOperation(context: BrowserModuleContext): ChangeOperation {

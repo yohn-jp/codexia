@@ -1,4 +1,4 @@
-import type { HttpContribution, ModuleActionContext } from "@scriptorium/contracts";
+import type { HttpContribution, ModuleActionContext } from "@codexia/contracts";
 import { grantIsActive, hashShareToken, constantTimeHashMatches, normalizeShareScope, readShareGrants } from "./grants.js";
 import { readPublishingProject, resolveShareScope, type PublishingScene } from "./project.js";
 

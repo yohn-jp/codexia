@@ -44,15 +44,15 @@ test('selected groups depend only on planning and failed groups cannot cancel ot
   assert.ok(planDownload);
   assert.match(planSelector.run, /node scripts\/select-ci-plan\.mjs/);
   assert.equal(planSelector.env.GITHUB_RUN_ID, '${{ github.run_id }}');
-  assert.equal(planSelector.env.SCRIPTORIUM_EXPECTED_SHA, '${{ github.event.pull_request.head.sha || github.sha }}');
+  assert.equal(planSelector.env.CODEXIA_EXPECTED_SHA, '${{ github.event.pull_request.head.sha || github.sha }}');
   assert.equal(planDownload.with['merge-multiple'], true);
   assert.equal(planDownload.with['run-id'], '${{ github.run_id }}');
   assert.equal(planDownload.with.repository, '${{ github.repository }}');
   assert.ok(evidenceSelector);
   assert.match(evidenceSelector.run, /node scripts\/select-ci-evidence\.mjs/);
   assert.equal(evidenceSelector.env.GITHUB_RUN_ID, '${{ github.run_id }}');
-  assert.equal(evidenceSelector.env.SCRIPTORIUM_CI_INVENTORY_PATH, '${{ steps.select-plan.outputs.inventory-path }}');
-  assert.equal(evidenceSelector.env.SCRIPTORIUM_EXPECTED_SHA, '${{ github.event.pull_request.head.sha || github.sha }}');
+  assert.equal(evidenceSelector.env.CODEXIA_CI_INVENTORY_PATH, '${{ steps.select-plan.outputs.inventory-path }}');
+  assert.equal(evidenceSelector.env.CODEXIA_EXPECTED_SHA, '${{ github.event.pull_request.head.sha || github.sha }}');
   assert.ok(evidenceDownload);
   assert.equal(evidenceDownload.with['artifact-ids'], '${{ steps.select-evidence.outputs.artifact-ids }}');
   assert.equal(evidenceDownload.with['run-id'], '${{ github.run_id }}');
@@ -89,7 +89,7 @@ test('all source checkouts bind exact PR head/main source without persisted cred
     assert.equal(checkout.with.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
     assert.equal(checkout.with['persist-credentials'], false);
     const execution = job.steps.find(step => /node scripts\/(?:ci-impact|ci-group|certify-ci)\.mjs/.test(step.run ?? ''));
-    assert.equal(execution.env.SCRIPTORIUM_CI_PLAN_PATH, '${{ runner.temp }}/ci-plan/ci-plan.json');
+    assert.equal(execution.env.CODEXIA_CI_PLAN_PATH, '${{ runner.temp }}/ci-plan/ci-plan.json');
     for (const step of job.steps.filter(step => step.uses === 'actions/download-artifact@v4' && step.with.name === 'ci-plan')) {
       assert.equal(step.with.path, '${{ runner.temp }}/ci-plan');
     }

@@ -9,8 +9,8 @@ import type {
   ProposalEvidence,
   SnapshotId,
   ValueSchema,
-} from "@scriptorium/contracts";
-import { snapshotScopeRevision } from "@scriptorium/contracts";
+} from "@codexia/contracts";
+import { snapshotScopeRevision } from "@codexia/contracts";
 import {
   NLP_TOKENIZER_CAPABILITY,
   isAdjective,
@@ -19,9 +19,9 @@ import {
   readCanonicalSnapshotEntities,
   type CandidateTerm,
   type NlpTokenizerCapability,
-} from "@scriptorium/module-nlp";
-import { readStorySnapshot } from "@scriptorium/module-story";
-import type { StoryEntity } from "@scriptorium/module-story";
+} from "@codexia/module-nlp";
+import { readStorySnapshot } from "@codexia/module-story";
+import type { StoryEntity } from "@codexia/module-story";
 import {
   EMBEDDING_DIMENSIONS,
   EMBEDDING_MODEL_ID,

@@ -1,4 +1,4 @@
-# Mobile writing interactions — Scriptorium
+# Mobile writing interactions — Codexia
 
 The Ionic React mobile shell is selected by the explicit `/mobile/` route. Desktop and mobile share Git, approval and recovery services.
 

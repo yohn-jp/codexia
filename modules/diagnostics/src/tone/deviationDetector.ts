@@ -1,4 +1,4 @@
-import type { Token } from "@scriptorium/module-nlp";
+import type { Token } from "@codexia/module-nlp";
 import { computeToneVector } from "./toneVector.js";
 import type { ToneDeviationWarning, ToneLexiconConfig, ToneVector } from "./types.js";
 

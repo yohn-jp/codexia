@@ -1,4 +1,4 @@
-import { assertProjectPath, createDocumentSource, snapshotKey, type DocumentSource, type FileRevision, type SnapshotId, type SnapshotReader } from "@scriptorium/contracts";
+import { assertProjectPath, createDocumentSource, snapshotKey, type DocumentSource, type FileRevision, type SnapshotId, type SnapshotReader } from "@codexia/contracts";
 import { createSearchDocument, type SearchDocument } from "./search-ranking.js";
 
 const MAX_INDEXES = 4;

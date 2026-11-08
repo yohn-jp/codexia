@@ -1,4 +1,4 @@
-import { start } from "@scriptorium/api";
+import { start } from "@codexia/api";
 
 try {
   let server;
@@ -11,10 +11,10 @@ try {
     shutdownStarted = true;
     server.close((error) => {
       if (error) {
-        console.error("Scriptorium shutdown failed");
+        console.error("Codexia shutdown failed");
         process.exitCode = 1;
       } else {
-        console.info("Scriptorium shutdown complete");
+        console.info("Codexia shutdown complete");
       }
     });
   };
@@ -24,6 +24,6 @@ try {
   server = await start();
   if (shutdownRequested) shutdown();
 } catch (error) {
-  console.error(error instanceof Error ? error.message : "Scriptorium failed to start");
+  console.error(error instanceof Error ? error.message : "Codexia failed to start");
   process.exitCode = 1;
 }

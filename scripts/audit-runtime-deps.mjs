@@ -80,7 +80,7 @@ if (installed.size === 0) {
 const productionPackages = production ? [...installed].map(([identity, name]) => ({ identity, name })) : await productionClosure([
   path.resolve('packages/core'), path.resolve('packages/api'), path.resolve('app'),
 ]).then(closure => [...closure.values()].map(({ name, version }) => ({ identity: `${name}@${version}`, name })));
-const forbidden = name => deniedCorePackage.test(name) || /^@scriptorium\/module-(?!runtime$)/.test(name);
+const forbidden = name => deniedCorePackage.test(name) || /^@codexia\/module-(?!runtime$)/.test(name);
 const violations = [];
 for (const { identity, name } of productionPackages) {
   if (forbidden(name) || (production && deniedBuildPackage.test(name))) {

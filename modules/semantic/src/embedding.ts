@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { snapshotKey, type CapabilityDefinition, type JobRequest, type ModuleContext, type SnapshotId, type WorkerService } from "@scriptorium/contracts";
+import { snapshotKey, type CapabilityDefinition, type JobRequest, type ModuleContext, type SnapshotId, type WorkerService } from "@codexia/contracts";
 import {
   EMBEDDING_DIMENSIONS,
   EMBEDDING_MODEL_ID,

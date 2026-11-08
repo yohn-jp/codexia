@@ -4,8 +4,8 @@ import {
   DEVIATION_DISTANCE_THRESHOLD,
   MIN_DIALOGUE_FOR_DEVIATION_CHECK,
   type StylometricProfile,
-} from "@scriptorium/module-diagnostics";
-import type { Tokenizer } from "@scriptorium/module-nlp";
+} from "@codexia/module-diagnostics";
+import type { Tokenizer } from "@codexia/module-nlp";
 import type { SpeakerAttribution } from "./speakerAttribution.js";
 
 interface NearestProfile {

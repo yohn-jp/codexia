@@ -1,8 +1,8 @@
 {
-  "name": "@scriptorium/module-story",
+  "name": "@codexia/module-story",
   "private": true,
   "version": "0.1.0",
-  "scriptoriumDisplay": {
+  "codexiaDisplay": {
     "name": "Story",
     "description": "Organize narrative entities, hierarchy, reference material, plots, and related proposals."
   },
@@ -32,13 +32,13 @@
     "test": "node --import tsx --test src/*.test.ts src/domain/*.test.ts src/migration/*.test.ts"
   },
   "dependencies": {
-    "@scriptorium/contracts": "workspace:*",
-    "@scriptorium/migration": "workspace:*",
+    "@codexia/contracts": "workspace:*",
+    "@codexia/migration": "workspace:*",
     "yaml": "^2.8.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
-  "scriptoriumModule": {
+  "codexiaModule": {
     "id": "story",
     "version": "0.1.0",
     "contractVersion": 1,

@@ -1,4 +1,4 @@
-# Scriptorium — Internal Boundaries and Maintainability Contract
+# Codexia — Internal Boundaries and Maintainability Contract
 
 > This is a normative architecture contract, not an audit log or implementation-status report. It defines the desired responsibility boundaries regardless of branch, release or verification date. Execution evidence belongs in tests, Issues, PRs and verification records.
 
@@ -72,7 +72,7 @@ Minimal design target: the authoring coordinator chooses *what* state and comman
 
 ## 5. Built-in module identity and extensibility
 
-Define a single `BUILTIN_MODULE_IDS` readonly tuple in `@scriptorium/contracts` and derive the internal `ModuleId` union from its values. The existing IDs and contract wire values remain compatible.
+Define a single `BUILTIN_MODULE_IDS` readonly tuple in `@codexia/contracts` and derive the internal `ModuleId` union from its values. The existing IDs and contract wire values remain compatible.
 
 - Module Runtime's membership validation and browser HTTP DTO guards consume this value rather than independently maintaining a list of recognized built-in IDs.
 - Build profiles, manifests, registered workspaces and CI inventories may retain their own *responsibilities*; where they enumerate the installed built-ins, executable conformance checks must reject missing or extra IDs. Do not rely on `satisfies readonly ModuleId[]` alone as proof that every ID is registered.

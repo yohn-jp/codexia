@@ -14,8 +14,8 @@ const execFile = promisify(execFileCallback);
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const helperDirectory = dirname(fileURLToPath(import.meta.url));
 const helperFilename = join(helperDirectory, "model-oci-lifecycle.container.mjs");
-const defaultModelCache = "/tmp/scriptorium-model-runtime-edc033c/home/.arcadia/models";
-const modelCache = resolve(process.env.SCRIPTORIUM_P13_MODEL_CACHE ?? defaultModelCache);
+const defaultModelCache = "/tmp/codexia-model-runtime-edc033c/home/.arcadia/models";
+const modelCache = resolve(process.env.CODEXIA_P13_MODEL_CACHE ?? defaultModelCache);
 const modelRefs = {
   embedding: { id: "Xenova/multilingual-e5-small", revision: "761b726dd34fb83930e26aab4e9ac3899aa1fa78" },
   reranker: { id: "mogolloni/bge-reranker-v2-m3-onnx", revision: "e5023553f6c47f09057da7a19cdd79ef850a4985" },
@@ -153,14 +153,14 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
   const podman = process.env.OCI_ENGINE ?? "podman";
   const commit = await git(root, "rev-parse", "HEAD");
   const tree = await git(root, "rev-parse", "HEAD^{tree}");
-  const image = process.env.SCRIPTORIUM_P13_IMAGE ?? "localhost/scriptorium:p13-full-" + commit.slice(0, 7);
+  const image = process.env.CODEXIA_P13_IMAGE ?? "localhost/codexia:p13-full-" + commit.slice(0, 7);
   const port = await choosePort();
   const verifyEnvironment = {
     ...safeBuildEnvironment(),
     OCI_ENGINE: podman,
-    SCRIPTORIUM_PROFILE: "full",
-    SCRIPTORIUM_OCI_IMAGE: image,
-    SCRIPTORIUM_OCI_PORT: String(port),
+    CODEXIA_PROFILE: "full",
+    CODEXIA_OCI_IMAGE: image,
+    CODEXIA_OCI_PORT: String(port),
   };
   const verifyOutput = await run("bash", ["scripts/verify-oci.sh"], { env: verifyEnvironment, timeout: 600_000 });
   const verificationLines = verifyOutput.split("\n").filter((line) =>
@@ -187,12 +187,12 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
     assert.equal(await run("stat", ["-c", "%F", modelDir]), "directory");
   }
 
-  const temporaryRoot = await mkdtemp(join(tmpdir(), "scriptorium-p13-full-oci-"));
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "codexia-p13-full-oci-"));
   const dataDirectory = join(temporaryRoot, "data");
   const outputDirectory = join(temporaryRoot, "output");
   const envFilename = join(temporaryRoot, "container.env");
-  const customName = "scriptorium-p13-lifecycle-" + process.pid + "-" + randomBytes(4).toString("hex");
-  const replacementName = "scriptorium-p13-replacement-" + process.pid + "-" + randomBytes(4).toString("hex");
+  const customName = "codexia-p13-lifecycle-" + process.pid + "-" + randomBytes(4).toString("hex");
+  const replacementName = "codexia-p13-replacement-" + process.pid + "-" + randomBytes(4).toString("hex");
   const token = randomBytes(32).toString("hex");
   let customStarted = false;
   let replacementStarted = false;
@@ -211,7 +211,7 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
     await symlink("/models", modelLink);
 
     await writeFile(envFilename, [
-      "SCRIPTORIUM_AUTH_TOKEN=" + token,
+      "CODEXIA_AUTH_TOKEN=" + token,
       "P13_PROJECT_ID=" + project.id,
       "",
     ].join("\n"), { mode: 0o600 });
@@ -228,10 +228,10 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
       "--env-file", envFilename,
       "--env", "HOST=0.0.0.0",
       "--env", "PORT=3000",
-      "--env", "SCRIPTORIUM_PROFILE=full",
-      "--env", "SCRIPTORIUM_DATA_DIR=/data",
-      "--env", "SCRIPTORIUM_USAGE_DIR=/history",
-      "--env", "SCRIPTORIUM_MODULE_CACHE_DIR=/data/module-cache",
+      "--env", "CODEXIA_PROFILE=full",
+      "--env", "CODEXIA_DATA_DIR=/data",
+      "--env", "CODEXIA_USAGE_DIR=/history",
+      "--env", "CODEXIA_MODULE_CACHE_DIR=/data/module-cache",
       "--env", "ARCADIA_TOKENIZER_BACKEND=auto",
       "--env", "HF_HUB_OFFLINE=1",
     ];
@@ -316,7 +316,7 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
     const replacementExit = await run(podman, ["wait", replacementName], { timeout: 45_000 });
     assert.equal(replacementExit, "0");
     const replacementLogs = await run(podman, ["logs", replacementName], { timeout: 10_000, maxBuffer: 2 * 1024 * 1024 });
-    assert.ok(replacementLogs.includes("Scriptorium shutdown complete"), "production replacement must finish its SIGTERM drain");
+    assert.ok(replacementLogs.includes("Codexia shutdown complete"), "production replacement must finish its SIGTERM drain");
 
     const candidateEvidence = {
       sourceCommit: commit,
@@ -336,7 +336,7 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
   } finally {
     if (customStarted) await run(podman, ["rm", "--volumes", "--force", customName], { timeout: 30_000 }).catch(() => {});
     if (replacementStarted) await run(podman, ["rm", "--volumes", "--force", replacementName], { timeout: 30_000 }).catch(() => {});
-    if (candidatePassed || process.env.SCRIPTORIUM_P13_KEEP_FAILED !== "1") {
+    if (candidatePassed || process.env.CODEXIA_P13_KEEP_FAILED !== "1") {
       await rm(temporaryRoot, { recursive: true, force: true });
     } else {
       console.error("P13 synthetic acceptance data retained for diagnosis at " + temporaryRoot);

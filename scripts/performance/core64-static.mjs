@@ -129,8 +129,8 @@ function scriptEntry(html) {
     .map((match) => match[1])
     .find(Boolean);
   if (!entry) throw new Error('Built index.html has no JavaScript entry script');
-  const url = new URL(entry, 'http://scriptorium.invalid/');
-  if (url.origin !== 'http://scriptorium.invalid' || !url.pathname.startsWith('/')) {
+  const url = new URL(entry, 'http://codexia.invalid/');
+  if (url.origin !== 'http://codexia.invalid' || !url.pathname.startsWith('/')) {
     throw new Error('Built JavaScript entry is not same-origin');
   }
   return url.pathname;
@@ -157,13 +157,13 @@ async function inspectUiArtifacts(staticDir, profile, sourceSha) {
     const entry = manifest['index.html'];
     if (!entry || typeof entry.file !== 'string') throw new Error(`${ui} manifest has no index.html entry`);
     const html = await readFile(join(uiRoot, 'index.html'), 'utf8');
-    const uiBase = ui === 'launcher' ? 'http://scriptorium.invalid/' : `http://scriptorium.invalid/${ui}/`;
+    const uiBase = ui === 'launcher' ? 'http://codexia.invalid/' : `http://codexia.invalid/${ui}/`;
     const htmlCssFiles = [...html.matchAll(/<link\b[^>]*>/giu)].flatMap(([tag]) => {
       const rel = /\brel=["']([^"']+)["']/iu.exec(tag)?.[1];
       const href = /\bhref=["']([^"']+\.css(?:\?[^"']*)?)["']/iu.exec(tag)?.[1];
       if (!rel?.split(/\s+/u).includes('stylesheet') || !href) return [];
       const url = new URL(href, uiBase);
-      if (url.origin !== 'http://scriptorium.invalid') throw new Error(`${ui} stylesheet must be same-origin`);
+      if (url.origin !== 'http://codexia.invalid') throw new Error(`${ui} stylesheet must be same-origin`);
       let path = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
       if (ui !== 'launcher' && path.startsWith(`${ui}/`)) path = path.slice(ui.length + 1);
       return [path];
@@ -200,7 +200,7 @@ async function measureBrowser(base) {
   const { chromium } = await import('@playwright/test');
   const browser = await chromium.launch({
     headless: true,
-    ...(process.env.SCRIPTORIUM_E2E_CHROMIUM ? { executablePath: process.env.SCRIPTORIUM_E2E_CHROMIUM } : {}),
+    ...(process.env.CODEXIA_E2E_CHROMIUM ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM } : {}),
   });
   try {
     const context = await browser.newContext();
@@ -222,7 +222,7 @@ async function measureBrowser(base) {
           }));
           const assets = resources.filter(({ name }) => /\.(?:js|css|svg|png|jpe?g|webp|avif|gif|woff2?|ttf|otf)(?:\?|$)/iu.test(name));
           return {
-            nonce: document.querySelector('meta[name="scriptorium-style-nonce"]')?.getAttribute('content') ?? null,
+            nonce: document.querySelector('meta[name="codexia-style-nonce"]')?.getAttribute('content') ?? null,
             document: {
               transferBytes: navigation?.transferSize ?? null,
               encodedBodyBytes: navigation?.encodedBodySize ?? null,
@@ -380,7 +380,7 @@ async function runProbe(outputDir, staticDir, profile, uiSourceSha) {
 if (serverMode) {
   await runServer(resolve(process.argv[3]), resolve(process.argv[4]));
 } else {
-  const outputDir = process.argv[2] ?? join('/data', `scriptorium-core64-static-${Date.now()}-${randomUUID().slice(0, 8)}`);
+  const outputDir = process.argv[2] ?? join('/data', `codexia-core64-static-${Date.now()}-${randomUUID().slice(0, 8)}`);
   const staticDir = process.argv[3] ?? resolve('app/dist');
   const profile = process.argv[4] ?? 'core';
   const uiSourceSha = process.argv[5] ?? git(process.cwd(), 'rev-parse', 'HEAD');

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { MigrationContext } from "@scriptorium/migration";
+import type { MigrationContext } from "@codexia/migration";
 import { createSemanticMigrationProducer } from "./migration.js";
 
 const repository = {

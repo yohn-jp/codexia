@@ -52,7 +52,7 @@ export function rememberUiMode(mode: UiMode, storage: StorageWriter | null = bro
 export function parseApplicationLocation(pathname: string): ApplicationLocation | null {
   let url: URL;
   try {
-    url = new URL(pathname, "http://scriptorium.invalid");
+    url = new URL(pathname, "http://codexia.invalid");
   } catch {
     return null;
   }
@@ -98,7 +98,7 @@ export function switchApplicationPath(pathname: string, mode: UiMode): string {
   let search = "";
   const resource = parseApplicationLocation(pathname)?.resource ?? null;
   try {
-    const params = new URL(pathname, "http://scriptorium.invalid").searchParams;
+    const params = new URL(pathname, "http://codexia.invalid").searchParams;
     if (mode === "mobile") params.set("view", resource?.sceneId ? "writing" : "library");
     else params.delete("view");
     search = params.toString();

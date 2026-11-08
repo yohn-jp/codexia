@@ -1,4 +1,4 @@
-import type { ActionResult, BrowserModuleContext, BrowserModuleDefinition } from "@scriptorium/contracts";
+import type { ActionResult, BrowserModuleContext, BrowserModuleDefinition } from "@codexia/contracts";
 
 type Data = Record<string, unknown>;
 type SearchBrowserContext = BrowserModuleContext & { navigateDocument?(path: string): Promise<void> };

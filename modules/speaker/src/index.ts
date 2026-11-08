@@ -17,12 +17,12 @@ import {
   type SnapshotId,
   type ValueSchema,
   type WorkerService,
-} from "@scriptorium/contracts";
-import type { StoryEntity } from "@scriptorium/module-story";
-import type { MorphologyAnalysis, Token } from "@scriptorium/module-nlp";
-import type { StylometricProfile } from "@scriptorium/module-diagnostics";
-import { NLP_MODEL_ID, NLP_MODEL_VERSION, NLP_TOKENIZER_CAPABILITY, type NlpTokenizerCapability } from "@scriptorium/module-nlp";
-import { removeDialogueBrackets } from "@scriptorium/module-diagnostics";
+} from "@codexia/contracts";
+import type { StoryEntity } from "@codexia/module-story";
+import type { MorphologyAnalysis, Token } from "@codexia/module-nlp";
+import type { StylometricProfile } from "@codexia/module-diagnostics";
+import { NLP_MODEL_ID, NLP_MODEL_VERSION, NLP_TOKENIZER_CAPABILITY, type NlpTokenizerCapability } from "@codexia/module-nlp";
+import { removeDialogueBrackets } from "@codexia/module-diagnostics";
 import YAML from "yaml";
 import { parseSpeakerCorrections, type SpeakerCorrectionRecord } from "./algorithms/speakerCorrectionLog.js";
 import { parseSpeakerModel, type SpeakerModel } from "./algorithms/speakerReranker.js";

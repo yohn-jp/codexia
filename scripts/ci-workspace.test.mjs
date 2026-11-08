@@ -23,7 +23,7 @@ function runProject(projectRoot, args, env = process.env) {
 }
 
 async function makeWorkspaceFixture(rootTestScript) {
-  const projectRoot = await mkdtemp(path.join(tmpdir(), 'scriptorium-ci-workspace-fixture-'));
+  const projectRoot = await mkdtemp(path.join(tmpdir(), 'codexia-ci-workspace-fixture-'));
   await mkdir(path.join(projectRoot, 'scripts'), { recursive: true });
   await copyFile(runner, path.join(projectRoot, 'scripts/ci-workspace.mjs'));
   await copyFile(path.join(root, 'scripts/ci-contract.mjs'), path.join(projectRoot, 'scripts/ci-contract.mjs'));
@@ -42,7 +42,7 @@ async function makeWorkspaceFixture(rootTestScript) {
   const pnpm = path.join(bin, 'pnpm');
   const record = path.join(projectRoot, 'pnpm-commands.jsonl');
   await mkdir(bin);
-  await writeFile(pnpm, '#!/usr/bin/env node\nconst fs = require("node:fs");\nfs.appendFileSync(process.env.SCRIPTORIUM_CI_PNPM_RECORD, JSON.stringify(process.argv.slice(2)) + "\\n");\n');
+  await writeFile(pnpm, '#!/usr/bin/env node\nconst fs = require("node:fs");\nfs.appendFileSync(process.env.CODEXIA_CI_PNPM_RECORD, JSON.stringify(process.argv.slice(2)) + "\\n");\n');
   await chmod(pnpm, 0o755);
 
   return {
@@ -51,7 +51,7 @@ async function makeWorkspaceFixture(rootTestScript) {
     env: {
       ...process.env,
       PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
-      SCRIPTORIUM_CI_PNPM_RECORD: record,
+      CODEXIA_CI_PNPM_RECORD: record,
     },
   };
 }
@@ -64,17 +64,17 @@ test('coverage maps every workspace test and typecheck scope to an executable ta
 });
 
 test('root unit preparation builds the API dependency closure before invoking root script tests', async () => {
-  const temporary = await mkdtemp(path.join(tmpdir(), 'scriptorium-ci-workspace-'));
+  const temporary = await mkdtemp(path.join(tmpdir(), 'codexia-ci-workspace-'));
   const bin = path.join(temporary, 'bin');
   const pnpm = path.join(bin, 'pnpm');
   const record = path.join(temporary, 'pnpm-commands.jsonl');
   await mkdir(bin);
-  await writeFile(pnpm, '#!/usr/bin/env node\nconst fs = require("node:fs");\nfs.appendFileSync(process.env.SCRIPTORIUM_CI_PNPM_RECORD, JSON.stringify(process.argv.slice(2)) + "\\n");\n');
+  await writeFile(pnpm, '#!/usr/bin/env node\nconst fs = require("node:fs");\nfs.appendFileSync(process.env.CODEXIA_CI_PNPM_RECORD, JSON.stringify(process.argv.slice(2)) + "\\n");\n');
   await chmod(pnpm, 0o755);
   const env = {
     ...process.env,
     PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
-    SCRIPTORIUM_CI_PNPM_RECORD: record,
+    CODEXIA_CI_PNPM_RECORD: record,
   };
   try {
     const prepared = run(['prepare', 'unit', 'root'], env);
@@ -87,7 +87,7 @@ test('root unit preparation builds the API dependency closure before invoking ro
 
     const commands = (await readFile(record, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
     assert.deepEqual(commands, [
-      ['--filter', '@scriptorium/api...', 'build'],
+      ['--filter', '@codexia/api...', 'build'],
       ['run', 'test:scripts'],
     ]);
   } finally {
@@ -103,9 +103,9 @@ test('grouped unit preparation builds shared dependencies once and retains root 
     const commands = (await readFile(fixture.record, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
     const packages = commands.map(command => command[1]);
     assert.equal(new Set(packages).size, packages.length);
-    assert.ok(packages.includes('@scriptorium/contracts'));
-    assert.ok(packages.includes('@scriptorium/core'));
-    assert.equal(packages.at(-1), '@scriptorium/api');
+    assert.ok(packages.includes('@codexia/contracts'));
+    assert.ok(packages.includes('@codexia/core'));
+    assert.equal(packages.at(-1), '@codexia/api');
     assert.ok(commands.every(command => command.slice(2).join(' ') === 'run build'));
   } finally {
     await rm(fixture.projectRoot, { recursive: true, force: true });
@@ -113,17 +113,17 @@ test('grouped unit preparation builds shared dependencies once and retains root 
 });
 
 test('speaker unit tests own their worker build while preparation follows workspace dependencies', async () => {
-  const temporary = await mkdtemp(path.join(tmpdir(), 'scriptorium-ci-workspace-'));
+  const temporary = await mkdtemp(path.join(tmpdir(), 'codexia-ci-workspace-'));
   const bin = path.join(temporary, 'bin');
   const pnpm = path.join(bin, 'pnpm');
   const record = path.join(temporary, 'pnpm-commands.jsonl');
   await mkdir(bin);
-  await writeFile(pnpm, '#!/usr/bin/env node\nconst fs = require("node:fs");\nfs.appendFileSync(process.env.SCRIPTORIUM_CI_PNPM_RECORD, JSON.stringify(process.argv.slice(2)) + "\\n");\n');
+  await writeFile(pnpm, '#!/usr/bin/env node\nconst fs = require("node:fs");\nfs.appendFileSync(process.env.CODEXIA_CI_PNPM_RECORD, JSON.stringify(process.argv.slice(2)) + "\\n");\n');
   await chmod(pnpm, 0o755);
   const env = {
     ...process.env,
     PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
-    SCRIPTORIUM_CI_PNPM_RECORD: record,
+    CODEXIA_CI_PNPM_RECORD: record,
   };
   try {
     const prepared = run(['prepare', 'unit', 'speaker'], env);
@@ -135,10 +135,10 @@ test('speaker unit tests own their worker build while preparation follows worksp
 
     const commands = (await readFile(record, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
     const builtPackages = commands.filter((command) => command.includes('build')).map((command) => command[1]);
-    assert.ok(builtPackages.includes('@scriptorium/module-nlp'));
-    assert.ok(builtPackages.includes('@scriptorium/module-diagnostics'));
-    assert.equal(builtPackages.includes('@scriptorium/module-speaker'), false);
-    assert.deepEqual(commands.at(-1), ['--filter', '@scriptorium/module-speaker', 'run', 'test']);
+    assert.ok(builtPackages.includes('@codexia/module-nlp'));
+    assert.ok(builtPackages.includes('@codexia/module-diagnostics'));
+    assert.equal(builtPackages.includes('@codexia/module-speaker'), false);
+    assert.deepEqual(commands.at(-1), ['--filter', '@codexia/module-speaker', 'run', 'test']);
     const speakerManifest = JSON.parse(await readFile(path.join(root, 'modules/speaker/package.json'), 'utf8'));
     assert.match(speakerManifest.scripts.test, /^pnpm run build && /u);
   } finally {
@@ -148,8 +148,8 @@ test('speaker unit tests own their worker build while preparation follows worksp
 
 test('unit preparation is unchanged when root test orchestration order changes', async () => {
   const rootTestScripts = [
-    'pnpm --filter @scriptorium/module-speaker build && pnpm --filter @scriptorium/module-speaker test && pnpm --filter @scriptorium/module-runtime test',
-    'pnpm --filter @scriptorium/module-speaker build && pnpm --filter @scriptorium/module-runtime test && pnpm --filter @scriptorium/module-speaker test',
+    'pnpm --filter @codexia/module-speaker build && pnpm --filter @codexia/module-speaker test && pnpm --filter @codexia/module-runtime test',
+    'pnpm --filter @codexia/module-speaker build && pnpm --filter @codexia/module-runtime test && pnpm --filter @codexia/module-speaker test',
   ];
   const observed = [];
   const fixtures = [];
@@ -164,7 +164,7 @@ test('unit preparation is unchanged when root test orchestration order changes',
       observed.push((await readFile(fixture.record, 'utf8')).trim().split('\n').map((line) => JSON.parse(line)));
     }
     assert.deepEqual(observed[0], observed[1]);
-    assert.deepEqual(observed[0].at(-1), ['--filter', '@scriptorium/module-speaker', 'run', 'test']);
+    assert.deepEqual(observed[0].at(-1), ['--filter', '@codexia/module-speaker', 'run', 'test']);
   } finally {
     await Promise.all(fixtures.map((fixture) => rm(fixture, { recursive: true, force: true })));
   }

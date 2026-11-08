@@ -70,7 +70,7 @@ try {
   const [ready] = await once(server, "message");
   report.serverStartupMs = ready.startupMs;
   browser = await chromium.launch({ headless: true,
-    ...(process.env.SCRIPTORIUM_E2E_CHROMIUM ? { executablePath: process.env.SCRIPTORIUM_E2E_CHROMIUM } : {}) });
+    ...(process.env.CODEXIA_E2E_CHROMIUM ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM } : {}) });
   report.browser = browser.version();
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   const initSource = `(${installBrowserProbes.toString()})();\n(${installCore64RenderProbe.toString()})();`;
@@ -103,7 +103,7 @@ try {
   }
 
   async function setPhase(name, cohort = name) {
-    await page.evaluate(([value, group]) => window.__scriptoriumCore64RenderProbe.setPhase(value, group), [name, cohort]);
+    await page.evaluate(([value, group]) => window.__codexiaCore64RenderProbe.setPhase(value, group), [name, cohort]);
   }
 
   async function stats() {
@@ -144,7 +144,7 @@ try {
     await setPhase("between", "between");
     const cdpAfter = await cdp.send("Performance.getMetrics");
     const snapshot = await page.evaluate(() => ({
-      render: window.__scriptoriumCore64RenderProbe.snapshot(),
+      render: window.__codexiaCore64RenderProbe.snapshot(),
       browser: structuredClone(window.__wave0),
     }));
     const keyFrames = snapshot.browser.inputs.filter((row) => row.start >= start && row.start <= end && row.type === "keydown")
@@ -180,7 +180,7 @@ try {
   await page.getByRole("tab", { name: "Outline", exact: true }).click();
   await expect(page.locator('[data-workspace-panel="outline"]')).toHaveCount(1);
   await setPhase("complete");
-  const render = await page.evaluate(() => window.__scriptoriumCore64RenderProbe.snapshot());
+  const render = await page.evaluate(() => window.__codexiaCore64RenderProbe.snapshot());
   report.workspaceActivation = {
     inspector: summarizeCore64RenderProbe(render, "workspace.activate.inspector"),
     outline: summarizeCore64RenderProbe(render, "workspace.activate.outline"),
@@ -200,7 +200,7 @@ try {
   report.status = "failed";
   report.error = error instanceof Error ? error.stack : String(error);
   if (page && !page.isClosed()) {
-    report.renderProbe = await page.evaluate(() => window.__scriptoriumCore64RenderProbe?.snapshot()).catch(() => null);
+    report.renderProbe = await page.evaluate(() => window.__codexiaCore64RenderProbe?.snapshot()).catch(() => null);
     report.browserMetrics = await page.evaluate(() => structuredClone(window.__wave0)).catch(() => null);
   }
   if (profilerStarted && cdp) {

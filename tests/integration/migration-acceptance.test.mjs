@@ -7,7 +7,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
-import { createServer as createApiServer, importLegacyJobHistory, importLegacyRecentActivity } from "@scriptorium/api";
+import { createServer as createApiServer, importLegacyJobHistory, importLegacyRecentActivity } from "@codexia/api";
 import { CoreStore } from "../../packages/core/dist/index.js";
 import {
   createMigrationProducerRegistry,
@@ -15,14 +15,14 @@ import {
   proposeMigrationImport,
   registerMigrationProducer,
 } from "../../packages/migration/dist/index.js";
-import { createStoryMigrationProducer } from "@scriptorium/module-story/migration";
-import { createDiagnosticsMigrationProducer } from "@scriptorium/module-diagnostics/migration";
-import { createNlpMigrationProducer } from "@scriptorium/module-nlp/migration";
-import { createSemanticMigrationProducer } from "@scriptorium/module-semantic/migration";
-import { createSpeakerMigrationProducer } from "@scriptorium/module-speaker/migration";
-import { createAssistantMigrationProducer } from "@scriptorium/module-assistant/migration";
-import { createPublishingMigrationProducer } from "@scriptorium/module-publishing/migration";
-import { hashDialogueText } from "@scriptorium/module-speaker";
+import { createStoryMigrationProducer } from "@codexia/module-story/migration";
+import { createDiagnosticsMigrationProducer } from "@codexia/module-diagnostics/migration";
+import { createNlpMigrationProducer } from "@codexia/module-nlp/migration";
+import { createSemanticMigrationProducer } from "@codexia/module-semantic/migration";
+import { createSpeakerMigrationProducer } from "@codexia/module-speaker/migration";
+import { createAssistantMigrationProducer } from "@codexia/module-assistant/migration";
+import { createPublishingMigrationProducer } from "@codexia/module-publishing/migration";
+import { hashDialogueText } from "@codexia/module-speaker";
 
 const ALL_MODULES = ["story", "diagnostics", "nlp", "semantic", "speaker", "assistant", "publishing", "mcp"];
 const SPEAKER_OVERRIDE_SCENE_PATH = "plot/volumes/volume-1/chapters/chapter-1/scenes/sc-speaker-override-stable.yaml";
@@ -458,7 +458,7 @@ async function assertPublishedWrites(reader, writes) {
 }
 
 test("composed legacy import preserves disabled data and reactivates after a full Core data-root replacement", async () => {
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-p12-migration-"));
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-p12-migration-"));
   const sourceRoot = path.join(temporary, "legacy-project");
   const workspaceRoot = path.join(temporary, "legacy-data");
   const targetDataDir = path.join(temporary, "core-data");

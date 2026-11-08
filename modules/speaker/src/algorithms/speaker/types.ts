@@ -1,5 +1,5 @@
 import type { ClusterTrailCollector } from "../clusterAssignmentTrail.js";
-import type { Tokenizer } from "@scriptorium/module-nlp";
+import type { Tokenizer } from "@codexia/module-nlp";
 import type { Entity } from "../types.js";
 import type { VoiceProfile } from "../voice/index.js";
 

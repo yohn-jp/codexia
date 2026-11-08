@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { assertProjectPath, snapshotKey, type ActionResult, type ChangeOperation, type ModuleAction, type ModuleActionContext, type ModuleContext, type ModuleDefinition, type ModuleManifest, type SnapshotReader, type ValueSchema } from "@scriptorium/contracts";
+import { assertProjectPath, snapshotKey, type ActionResult, type ChangeOperation, type ModuleAction, type ModuleActionContext, type ModuleContext, type ModuleDefinition, type ModuleManifest, type SnapshotReader, type ValueSchema } from "@codexia/contracts";
 import { SnapshotIndexCache } from "./index-cache.js";
 import { normalizeSearchText, searchDocuments, searchTerms, type SearchMode } from "./search-ranking.js";
 import { normalizeTerm, parseTermRegistry, resolveTermSpans, TERM_REGISTRY_PATH, type SearchTerm, type TermRegistry } from "./terminology.js";

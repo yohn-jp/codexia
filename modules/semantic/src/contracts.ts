@@ -1,4 +1,4 @@
-import type { SnapshotId } from "@scriptorium/contracts";
+import type { SnapshotId } from "@codexia/contracts";
 
 export const SEMANTIC_MODULE_VERSION = "0.1.0";
 export const SEMANTIC_EMBEDDING_CAPABILITY = "semantic.embedding";

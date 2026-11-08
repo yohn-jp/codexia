@@ -1,4 +1,4 @@
-import type { ModuleContext, ModuleDefinition, ModuleManifest } from "@scriptorium/contracts";
+import type { ModuleContext, ModuleDefinition, ModuleManifest } from "@codexia/contracts";
 import { createStoryActions } from "./actions.js";
 
 export const storyManifest: ModuleManifest = {

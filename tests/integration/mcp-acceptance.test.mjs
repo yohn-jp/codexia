@@ -32,7 +32,7 @@ const SOURCE_TOOL_NAMES = [
   "check_style_deviations", "get_writing_context", "get_context_manifest", "lint_manuscript",
   "submit_change_set", "get_change_set", "list_change_sets",
 ];
-const READY_MODULES = (process.env.SCRIPTORIUM_MCP_ACCEPTANCE_MODULES ?? "story,nlp,diagnostics,semantic,speaker,publishing,mcp")
+const READY_MODULES = (process.env.CODEXIA_MCP_ACCEPTANCE_MODULES ?? "story,nlp,diagnostics,semantic,speaker,publishing,mcp")
   .split(",")
   .map((id) => id.trim())
   .filter(Boolean);
@@ -73,9 +73,9 @@ async function git(cwd, ...args) {
     maxBuffer: 4 * 1024 * 1024,
     env: {
       ...process.env,
-      GIT_AUTHOR_NAME: "Scriptorium MCP acceptance",
+      GIT_AUTHOR_NAME: "Codexia MCP acceptance",
       GIT_AUTHOR_EMAIL: "mcp-acceptance@example.invalid",
-      GIT_COMMITTER_NAME: "Scriptorium MCP acceptance",
+      GIT_COMMITTER_NAME: "Codexia MCP acceptance",
       GIT_COMMITTER_EMAIL: "mcp-acceptance@example.invalid",
     },
   });
@@ -88,7 +88,7 @@ async function createSyntheticRemote(rootDir) {
   await mkdir(seed, { recursive: true });
   await git(rootDir, "init", "--bare", "--initial-branch=main", remote);
   await git(seed, "init", "--initial-branch=main");
-  await git(seed, "config", "user.name", "Scriptorium MCP acceptance");
+  await git(seed, "config", "user.name", "Codexia MCP acceptance");
   await git(seed, "config", "user.email", "mcp-acceptance@example.invalid");
   for (const [path, content] of Object.entries(fixtureFiles())) {
     const filename = resolve(seed, path);
@@ -110,7 +110,7 @@ async function runtimeOptions(cacheDirectory, usageDirectory) {
   const workerEntries = {};
   for (const id of READY_MODULES) {
     const directory = resolve(root, "modules", id);
-    const metadata = JSON.parse(await readFile(resolve(directory, "package.json"), "utf8")).scriptoriumModule;
+    const metadata = JSON.parse(await readFile(resolve(directory, "package.json"), "utf8")).codexiaModule;
     assert.equal(metadata.id, id, `Missing real ${id} module manifest`);
     manifests.push(metadata);
     moduleDirectories[id] = directory;
@@ -268,9 +268,9 @@ function errorCode(result, name) {
 async function startStdioClient(host, projectId) {
   const environment = {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
-    SCRIPTORIUM_API_URL: host.base,
-    SCRIPTORIUM_AUTH_TOKEN: ACCESS_TOKEN,
-    SCRIPTORIUM_PROJECT_ID: projectId,
+    CODEXIA_API_URL: host.base,
+    CODEXIA_AUTH_TOKEN: ACCESS_TOKEN,
+    CODEXIA_PROJECT_ID: projectId,
   };
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -279,7 +279,7 @@ async function startStdioClient(host, projectId) {
     cwd: root,
     stderr: "inherit",
   });
-  const client = new Client({ name: "scriptorium-mcp-acceptance-stdio", version: "1.0.0" });
+  const client = new Client({ name: "codexia-mcp-acceptance-stdio", version: "1.0.0" });
   await client.connect(transport);
   return { client, transport };
 }
@@ -294,7 +294,7 @@ async function startHttpClient(host, projectId) {
     },
     reconnectionOptions: { maxReconnectionDelay: 100, initialReconnectionDelay: 10, reconnectionDelayGrowFactor: 1, maxRetries: 0 },
   });
-  const client = new Client({ name: "scriptorium-mcp-acceptance-http", version: "1.0.0" });
+  const client = new Client({ name: "codexia-mcp-acceptance-http", version: "1.0.0" });
   await client.connect(transport);
   return { client, transport };
 }
@@ -383,7 +383,7 @@ test("spawned stdio and production HTTP MCP preserve Core review boundaries thro
   timeout: 240_000,
 }, async (t) => {
   assert.equal(SOURCE_TOOL_NAMES.length, 27);
-  const rootDir = await mkdtemp(resolve(tmpdir(), "scriptorium-p08-mcp-acceptance-"));
+  const rootDir = await mkdtemp(resolve(tmpdir(), "codexia-p08-mcp-acceptance-"));
   const dataDirectory = resolve(rootDir, "core-data");
   const staticDirectory = resolve(rootDir, "static");
   await mkdir(staticDirectory, { recursive: true });
@@ -662,7 +662,7 @@ test("spawned stdio and production HTTP MCP preserve Core review boundaries thro
     }), "format_manuscript without diagnostics module"), "MODULE_UNAVAILABLE");
   }
 
-  const rewriteProvider = process.env.SCRIPTORIUM_MCP_ACCEPTANCE_REWRITE_PROVIDER;
+  const rewriteProvider = process.env.CODEXIA_MCP_ACCEPTANCE_REWRITE_PROVIDER;
   if (rewriteProvider === "qwen-local") {
     assert.ok(READY_MODULES.includes("assistant"), "Qwen rewrite acceptance requires the real Assistant module");
     assert.equal(process.env.ARCADIA_LLM_PROVIDER, "openai-compatible");
@@ -709,7 +709,7 @@ test("spawned stdio and production HTTP MCP preserve Core review boundaries thro
       "Rewrite computation changed persistent manuscript data");
   } else {
     assert.ok(!process.env.ARCADIA_LLM_PROVIDER || process.env.ARCADIA_LLM_PROVIDER === "none",
-      "Set SCRIPTORIUM_MCP_ACCEPTANCE_REWRITE_PROVIDER=qwen-local to opt in to the local provider acceptance");
+      "Set CODEXIA_MCP_ACCEPTANCE_REWRITE_PROVIDER=qwen-local to opt in to the local provider acceptance");
     const rewrite = await stdio.client.callTool({
       name: "suggest_rewrite", arguments: { project_id: projectId, scene_id: "sc-1", sentence_index: 2 },
     });
@@ -927,13 +927,13 @@ test("spawned stdio and production HTTP MCP preserve Core review boundaries thro
   assert.equal(finalRecord.status, "partially-applied");
 });
 
-const RUN_ASSISTANT_REFERENCE = process.env.SCRIPTORIUM_ASSISTANT_REFERENCE_PROVIDER === "qwen-local";
+const RUN_ASSISTANT_REFERENCE = process.env.CODEXIA_ASSISTANT_REFERENCE_PROVIDER === "qwen-local";
 
 test("Assistant continuation prompt preview runs as a host-owned compute action without provider usage", {
   skip: !READY_MODULES.includes("assistant") || !READY_MODULES.includes("story") || !READY_MODULES.includes("nlp") || !READY_MODULES.includes("semantic"),
   timeout: 120_000,
 }, async (t) => {
-  const rootDir = await mkdtemp(resolve(tmpdir(), "scriptorium-p11-continuation-preview-"));
+  const rootDir = await mkdtemp(resolve(tmpdir(), "codexia-p11-continuation-preview-"));
   const dataDirectory = resolve(rootDir, "core-data");
   const fixture = await createSyntheticRemote(rootDir);
   let host;
@@ -981,7 +981,7 @@ test("P11 local provider streams, records usage, proposes through Core review, p
     "P11 provider reference must use the pinned loopback endpoint");
   assert.equal(process.env.ARCADIA_LLM_API_KEY, "local-only-placeholder");
 
-  const rootDir = await mkdtemp(resolve(tmpdir(), "scriptorium-p11-assistant-reference-"));
+  const rootDir = await mkdtemp(resolve(tmpdir(), "codexia-p11-assistant-reference-"));
   const dataDirectory = resolve(rootDir, "core-data");
   const usageDirectory = resolve(rootDir, "host-history");
   const fixture = await createSyntheticRemote(rootDir);

@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { assertProjectPath, MAX_JOB_INPUT_BYTES, type ActionResult, type ChangeOperation, type ChangeProposal, type JobRequest, type ModuleAction, type ModuleActionContext, type ModuleContext, type ModuleDefinition, type ModuleManifest, type SnapshotId, type ValueSchema } from "@scriptorium/contracts";
-import type { NlpTokenizerCapability, MorphologyAnalysis } from "@scriptorium/module-nlp";
-import { NLP_MODEL_ID, NLP_MODEL_VERSION, NLP_TOKENIZER_CAPABILITY } from "@scriptorium/module-nlp";
-import { readCanonicalSnapshotEntities, splitIntoSentences } from "@scriptorium/module-nlp";
-import type { WorkerService } from "@scriptorium/contracts";
+import { assertProjectPath, MAX_JOB_INPUT_BYTES, type ActionResult, type ChangeOperation, type ChangeProposal, type JobRequest, type ModuleAction, type ModuleActionContext, type ModuleContext, type ModuleDefinition, type ModuleManifest, type SnapshotId, type ValueSchema } from "@codexia/contracts";
+import type { NlpTokenizerCapability, MorphologyAnalysis } from "@codexia/module-nlp";
+import { NLP_MODEL_ID, NLP_MODEL_VERSION, NLP_TOKENIZER_CAPABILITY } from "@codexia/module-nlp";
+import { readCanonicalSnapshotEntities, splitIntoSentences } from "@codexia/module-nlp";
+import type { WorkerService } from "@codexia/contracts";
 import YAML from "yaml";
 import { addSynonymDiagnosticIssues, DIAGNOSTICS_ENGINE_ID, DIAGNOSTICS_ENGINE_VERSION, DIAGNOSTICS_MODULE_VERSION, type DiagnosticsWorkerInput, type DiagnosticsWorkerOutput, type PlotSemanticWorkerInput, type StylometricDeviationWorkerInput, type VoiceDeviationWorkerInput, type VoiceWorkerInput } from "./analysis.js";
 import { loadLintRulesConfig, loadPlotLexiconConfig, loadToneLexiconConfig } from "./config.js";

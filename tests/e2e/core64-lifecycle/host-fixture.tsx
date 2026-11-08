@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { ChangeOperation, ChangeProposal, ModuleStatus, ProposalStatus, RepositoryIdentity, SnapshotId, UiContribution } from "@scriptorium/contracts";
+import type { ChangeOperation, ChangeProposal, ModuleStatus, ProposalStatus, RepositoryIdentity, SnapshotId, UiContribution } from "@codexia/contracts";
 import { ContributionHost } from "../../../app/src/contributions/ContributionHost";
 import { BrowserJournal, repositoryKey, type JournalProposalOwnership } from "../../../app/src/storage/journal";
 

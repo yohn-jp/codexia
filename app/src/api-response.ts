@@ -1,4 +1,4 @@
-import { assertChangeOperation, BUILTIN_MODULE_IDS, type ActionResult, type ChangeProposal, type CheckpointReceipt, type ModuleStatus, type PublishReceipt, type ProposalStatus, type RecentActivityResponse, type ReconcileResult, type RemoteObservation, type RepositoryIdentity, type SnapshotId, type UiContribution } from "@scriptorium/contracts";
+import { assertChangeOperation, BUILTIN_MODULE_IDS, type ActionResult, type ChangeProposal, type CheckpointReceipt, type ModuleStatus, type PublishReceipt, type ProposalStatus, type RecentActivityResponse, type ReconcileResult, type RemoteObservation, type RepositoryIdentity, type SnapshotId, type UiContribution } from "@codexia/contracts";
 import type { Commit, FileDocument, InboxItem, InboxListResponse, ManuscriptSnapshot, ManuscriptSnapshotList, ManuscriptSnapshotMeta, ManuscriptSnapshotRead, Project, ProjectDetails, PublicJob, RuntimeVersion, Scene, SceneRead, Session, SnapshotRead, SyncStatus, Tree, TreeRead } from "./api";
 import { ApiError } from "./api-error";
 

@@ -1,6 +1,6 @@
 import type { ClusterTrailCollector } from "../clusterAssignmentTrail.js";
 import { pushGroupIdChangeEvents } from "../clusterAssignmentTrail.js";
-import type { Tokenizer } from "@scriptorium/module-nlp";
+import type { Tokenizer } from "@codexia/module-nlp";
 import type { SpeakerAttribution } from "../speakerAttribution.js";
 import { detachSoftSpeakerLabels, reattachSoftSpeakerLabels } from "../speakerAttribution.js";
 import type { Entity } from "../types.js";

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { assertChangeOperation, assertProjectPath } from "@scriptorium/contracts";
-import type { ChangeOperation, FileChange, ModuleId } from "@scriptorium/contracts";
+import { assertChangeOperation, assertProjectPath } from "@codexia/contracts";
+import type { ChangeOperation, FileChange, ModuleId } from "@codexia/contracts";
 import type { MigrationContext, MigrationEntry, PersistenceCategory } from "./types.js";
 
 export interface PlannedFileImport {

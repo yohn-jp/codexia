@@ -37,7 +37,7 @@ import {
   type RepositoryIdentity,
   type SnapshotId,
   type SnapshotReader,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 import {
   MAX_PROPOSAL_BYTES,
   asRecord,
@@ -563,7 +563,7 @@ function parseOperationMetadata(text: string, metadataPath: string): OperationMe
       ...(typeof value.proposalId === "string" ? { proposalId: value.proposalId } : {}),
     };
   } catch {
-    throw coreError(409, "operation_metadata_invalid", "The repository contains invalid Scriptorium operation metadata");
+    throw coreError(409, "operation_metadata_invalid", "The repository contains invalid Codexia operation metadata");
   }
 }
 
@@ -582,7 +582,7 @@ async function githubIdentity(
   const headers = new Headers({
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
-    "User-Agent": "Scriptorium-Core",
+    "User-Agent": "Codexia-Core",
   });
   if (token) headers.set("Authorization", `Bearer ${token}`);
   let response: Response;
@@ -691,14 +691,14 @@ function sanitizedEnvironment(token?: string): NodeJS.ProcessEnv {
   env.GIT_CONFIG_NOSYSTEM = "1";
   env.GIT_CONFIG_GLOBAL = process.platform === "win32" ? "NUL" : "/dev/null";
   env.GIT_TERMINAL_PROMPT = "0";
-  if (token) env.SCRIPTORIUM_GIT_TOKEN = token;
-  else delete env.SCRIPTORIUM_GIT_TOKEN;
+  if (token) env.CODEXIA_GIT_TOKEN = token;
+  else delete env.CODEXIA_GIT_TOKEN;
   return env;
 }
 
 function makeAskpassScript(directory: string): Promise<string> {
   const scriptPath = path.join(directory, "askpass");
-  const script = "#!/bin/sh\ncase \"$1\" in\n  *sername*) printf '%s\\n' 'x-access-token' ;;\n  *) printf '%s\\n' \"$SCRIPTORIUM_GIT_TOKEN\" ;;\nesac\n";
+  const script = "#!/bin/sh\ncase \"$1\" in\n  *sername*) printf '%s\\n' 'x-access-token' ;;\n  *) printf '%s\\n' \"$CODEXIA_GIT_TOKEN\" ;;\nesac\n";
   return fs.writeFile(scriptPath, script, { mode: 0o700 }).then(() => scriptPath);
 }
 
@@ -953,7 +953,7 @@ export class CoreStore implements MutationCoordinator {
 
   constructor(options: CoreStoreOptions) {
     if (!options?.dataDir) throw new TypeError("CoreStore requires dataDir");
-    const configuredToken = options.githubToken ?? process.env.SCRIPTORIUM_GITHUB_TOKEN;
+    const configuredToken = options.githubToken ?? process.env.CODEXIA_GITHUB_TOKEN ?? process.env.SCRIPTORIUM_GITHUB_TOKEN;
     if (options.hostedRepository) {
       const binding = options.hostedRepository;
       if (!Number.isSafeInteger(binding.repositoryId) || binding.repositoryId <= 0 ||
@@ -1666,8 +1666,8 @@ export class CoreStore implements MutationCoordinator {
       await flushIndexInfo();
       const tree = (await git(root, ["write-tree"], { env })).trim();
       const commit = (await git(root, [
-        "-c", "user.name=Scriptorium",
-        "-c", "user.email=scriptorium@localhost",
+        "-c", "user.name=Codexia",
+        "-c", "user.email=codexia@localhost",
         "commit-tree", tree,
         ...(parent ? ["-p", parent] : []),
         "-m", message.replace(/\r\n?/g, "\n").replace(/\0/g, "").slice(0, 1024),
@@ -2124,7 +2124,7 @@ export class CoreStore implements MutationCoordinator {
     const operationMetadata = new Map<string, { metadata: OperationMetadata; path: string; commit: string }>();
     for (const version of operationVersions) {
       if (version.content.length > 16 * 1024 * 1024) {
-        throw coreError(409, "operation_metadata_invalid", "The repository contains invalid Scriptorium operation metadata");
+        throw coreError(409, "operation_metadata_invalid", "The repository contains invalid Codexia operation metadata");
       }
       const metadata = parseOperationMetadata(version.content, version.path);
       const existing = operationMetadata.get(metadata.operation.id);
@@ -3973,7 +3973,7 @@ export class CoreStore implements MutationCoordinator {
     projectId: string,
     batchId: string,
     authorization?: PublicationAuthorization,
-  ): Promise<import("@scriptorium/contracts").PublishReceipt> {
+  ): Promise<import("@codexia/contracts").PublishReceipt> {
     return this.withProjectLock(projectId, async () => {
       if (typeof batchId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(batchId)) throw coreError(400, "invalid_batch_id", "The publication batch ID is invalid");
       const { record, root } = await this.getProject(projectId);
@@ -4087,7 +4087,7 @@ export class CoreStore implements MutationCoordinator {
       for (const candidate of candidates.filter(Boolean)) {
         if (await this.isAncestor(root, snapshot.overlayCommit, candidate)) { reachable = true; break; }
       }
-      if (!reachable) throw coreError(409, "snapshot_unavailable", "The requested checkpoint snapshot is not a recognized Scriptorium checkpoint");
+      if (!reachable) throw coreError(409, "snapshot_unavailable", "The requested checkpoint snapshot is not a recognized Codexia checkpoint");
     }
   }
 
@@ -4431,12 +4431,12 @@ export class CoreStore implements MutationCoordinator {
             throw coreError(500, "unsafe_project_lock", "The project lock path is unsafe");
           }
           if (sameHost && pid !== null && !alive) {
-            throw coreError(423, "stale_project_lock", `An abandoned lock remains at dataDir/.locks/${projectId}; stop all Scriptorium processes and remove that directory before retrying`);
+            throw coreError(423, "stale_project_lock", `An abandoned lock remains at dataDir/.locks/${projectId}; stop all Codexia processes and remove that directory before retrying`);
           }
-          throw coreError(423, "project_busy", "Another Scriptorium process is using this project; retry shortly");
+          throw coreError(423, "project_busy", "Another Codexia process is using this project; retry shortly");
         }
       }
-      if (!ownsLock) throw coreError(423, "project_busy", "Another Scriptorium process is using this project; retry shortly");
+      if (!ownsLock) throw coreError(423, "project_busy", "Another Codexia process is using this project; retry shortly");
       return await action();
     } finally {
       if (ownsLock) {

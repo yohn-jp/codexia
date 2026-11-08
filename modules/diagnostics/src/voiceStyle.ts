@@ -1,5 +1,5 @@
-import type { Token } from "@scriptorium/module-nlp";
-import { isFinalParticle, isNoun, isParticle, isPronoun, isSymbol } from "@scriptorium/module-nlp";
+import type { Token } from "@codexia/module-nlp";
+import { isFinalParticle, isNoun, isParticle, isPronoun, isSymbol } from "@codexia/module-nlp";
 
 export const COMMON_FIRST_PERSON = ["俺", "俺様", "私", "わたし", "わたくし", "僕", "自分", "うち"] as const;
 export const POLITE_FORM_RE = /(です|ます|でした|ました|でしょう|ましょう|ございます)/;

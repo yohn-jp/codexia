@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import type { ActionDescriptor, ActionResult, ChangeOperation, ChangeProposal, ProposalEvidence, JobRequest, ModuleAction, ModuleActionContext, ModuleDefinition, ModuleId, ModuleManifest, SnapshotId, ValueSchema, WorkerService } from "@scriptorium/contracts";
+import type { ActionDescriptor, ActionResult, ChangeOperation, ChangeProposal, ProposalEvidence, JobRequest, ModuleAction, ModuleActionContext, ModuleDefinition, ModuleId, ModuleManifest, SnapshotId, ValueSchema, WorkerService } from "@codexia/contracts";
 import { createStoryActions } from "../../../modules/story/src/actions.js";
 import { ModuleRuntime, ModuleRuntimeError, resolveModulePlan, SharedCapabilityPool, type DomainJobProgressSink, type WorkerJobLifecycleSnapshot } from "./index.js";
 
@@ -89,7 +89,7 @@ test("disabled modules are not imported; enabling an absent module reports redep
   const metadata = manifest("story");
   let imports = 0;
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: [], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [metadata], enabled: [], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: { story: async () => { imports += 1; throw new Error("must remain lazy"); } },
   });
   assert.equal(runtime.status("story").availability, "disabled");
@@ -110,7 +110,7 @@ test("authenticated action catalogs expose only a cloned module domain job descr
     async invoke(_input, context) { return { ok: true, snapshot: context.reader.snapshot, data: { accepted: true } }; },
   };
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: { speaker: async () => definition(metadata, action) },
   });
   try {
@@ -140,7 +140,7 @@ test("module job descriptors reject read actions and malformed ASCII types", asy
   for (const [index, item] of cases.entries()) {
     const metadata = manifest("speaker");
     const runtime = new ModuleRuntime({
-      manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+      manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/codexia-runtime-test",
       loaders: { speaker: async () => definition(metadata, {
         id: `invalid-job-${index}`, effect: item.effect, job: { type: item.type },
         inputSchema: schema, outputSchema: schema,
@@ -163,7 +163,7 @@ test("declared module jobs pass the exact validated action result and proposals 
   let tracks = 0;
   let observed: { descriptor: ActionDescriptor; snapshot: SnapshotId; signal: AbortSignal } | undefined;
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["story"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [metadata], enabled: ["story"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: { story: async () => definition(metadata, {
       id: "refresh-summary", effect: "propose", job: { type: "summary-refresh" },
       inputSchema: schema, outputSchema: schema,
@@ -232,7 +232,7 @@ test("nested module invocation retains the host tracker and suppresses duplicate
     async invoke(_input, context) { return { ok: true, snapshot: context.reader.snapshot, data: { trained: true } }; },
   };
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: { speaker: async () => ({ manifest: metadata, actions: [plainOuter, jobOuter, jobInner], ui: [], async dispose() {} }) },
   });
   const tracked: string[] = [];
@@ -262,7 +262,7 @@ test("tracked module action receives abort cancellation and returns the cancelle
   const began = new Promise<void>((resolve) => { started = resolve; });
   let trackedSignal: AbortSignal | undefined;
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: { speaker: async () => definition(metadata, {
       id: "evaluate", effect: "compute", job: { type: "speaker-eval" }, inputSchema: schema, outputSchema: schema,
       async invoke(_input, context) {
@@ -299,7 +299,7 @@ test("abort while the host creates a queued record prevents the module action fr
   const queued = new Promise<void>((resolve) => { announceQueued = resolve; });
   let executions = 0;
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: { speaker: async () => definition(metadata, {
       id: "evaluate", effect: "compute", job: { type: "speaker-eval" }, inputSchema: schema, outputSchema: schema,
       async invoke(_input, context) {
@@ -360,7 +360,7 @@ test("domain progress stays scoped to its host job through nested and overlappin
     },
   };
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: { speaker: async () => ({ manifest: metadata, actions: [makeOuter("outer-a", "speaker-eval"), makeOuter("outer-b", "retrain"), inner], ui: [], async dispose() {} }) },
   });
   const tracked: string[] = [];
@@ -391,7 +391,7 @@ test("domain progress rejects non-finite values and clamps finite values to the 
   const metadata = manifest("speaker");
   const delivered: number[] = [];
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: { speaker: async () => definition(metadata, {
       id: "evaluate", effect: "compute", job: { type: "speaker-eval" }, inputSchema: schema, outputSchema: schema,
       async invoke(_input, context) {
@@ -425,7 +425,7 @@ test("cancellation during progress delivery stops the action before it continues
   const reported = new Promise<void>((resolve) => { progressStarted = resolve; });
   let continued = false;
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: { speaker: async () => definition(metadata, {
       id: "evaluate", effect: "compute", job: { type: "speaker-eval" }, inputSchema: schema, outputSchema: schema,
       async invoke(_input, context) {
@@ -465,7 +465,7 @@ test("enabled idle modules import no heavy capability; proposals are host-issued
   let forwardedProposalId: string | undefined;
   const operation = proposalOperation();
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["story"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [metadata], enabled: ["story"], cacheDirectory: "/tmp/codexia-runtime-test",
     capabilityProviders: { "model:test": { create: () => { created += 1; return { id: "shared-model" }; } } },
     loaders: { story: async (context) => {
       loaded += 1;
@@ -515,7 +515,7 @@ test("per-call proposal cancellation reaches the host and prevents a late propos
   const callController = new AbortController();
   const operation = proposalOperation();
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["story"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [metadata], enabled: ["story"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: { story: async () => definition(metadata, {
       id: "propose",
       effect: "propose",
@@ -555,7 +555,7 @@ test("two enabled consumers share one capability until the final module disables
   let creates = 0;
   let disposals = 0;
   const leases = new Map<ModuleId, { release(): Promise<void> }>();
-  const makeLoader = (metadata: ModuleManifest) => async (context: import("@scriptorium/contracts").ModuleContext) => definition(metadata, {
+  const makeLoader = (metadata: ModuleManifest) => async (context: import("@codexia/contracts").ModuleContext) => definition(metadata, {
     id: "use-model",
     effect: "compute",
     inputSchema: schema,
@@ -566,7 +566,7 @@ test("two enabled consumers share one capability until the final module disables
     },
   });
   const runtime = new ModuleRuntime({
-    manifests: [story, diagnostics], enabled: ["story", "diagnostics"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [story, diagnostics], enabled: ["story", "diagnostics"], cacheDirectory: "/tmp/codexia-runtime-test",
     capabilityProviders: { "shared:model:v1": {
       create: () => { creates += 1; return { loaded: true }; },
       dispose: () => { disposals += 1; },
@@ -595,7 +595,7 @@ test("module-owned capability shares one supervised worker across two consumers 
   let creates = 0;
   let disposals = 0;
   const held = new Map<ModuleId, { release(): Promise<void> }>();
-  const makeDefinition = (metadata: ModuleManifest, context: import("@scriptorium/contracts").ModuleContext): ModuleDefinition => ({
+  const makeDefinition = (metadata: ModuleManifest, context: import("@codexia/contracts").ModuleContext): ModuleDefinition => ({
     manifest: metadata,
     actions: [{
       id: "tokenize",
@@ -611,10 +611,10 @@ test("module-owned capability shares one supervised worker across two consumers 
       },
     }], ui: [], async dispose() {},
   });
-  const makeConsumer = (metadata: ModuleManifest) => async (context: import("@scriptorium/contracts").ModuleContext): Promise<ModuleDefinition> => makeDefinition(metadata, context);
+  const makeConsumer = (metadata: ModuleManifest) => async (context: import("@codexia/contracts").ModuleContext): Promise<ModuleDefinition> => makeDefinition(metadata, context);
   const runtime = new ModuleRuntime({
     manifests: [nlp, diagnostics, story], enabled: ["nlp", "diagnostics", "story"],
-    cacheDirectory: "/tmp/scriptorium-runtime-test", workerEntries: { nlp: fileURLToPath(new URL("./fixtures/worker-service.mjs", import.meta.url)) },
+    cacheDirectory: "/tmp/codexia-runtime-test", workerEntries: { nlp: fileURLToPath(new URL("./fixtures/worker-service.mjs", import.meta.url)) },
     loaders: {
       nlp: async (context) => {
         const definition = makeDefinition(nlp, context);
@@ -668,7 +668,7 @@ test("disabling a consumer cancels its provider-owned job and keeps the shared c
     }],
     async dispose() {},
   };
-  const consumerLoader = (metadata: ModuleManifest, makeRequest: boolean) => async (context: import("@scriptorium/contracts").ModuleContext): Promise<ModuleDefinition> => definition(metadata, {
+  const consumerLoader = (metadata: ModuleManifest, makeRequest: boolean) => async (context: import("@codexia/contracts").ModuleContext): Promise<ModuleDefinition> => definition(metadata, {
     id: `${metadata.id}.tokenize`,
     effect: "compute",
     inputSchema: schema,
@@ -686,7 +686,7 @@ test("disabling a consumer cancels its provider-owned job and keeps the shared c
   });
   const runtime = new ModuleRuntime({
     manifests: [nlp, diagnostics, story], enabled: ["nlp", "diagnostics", "story"],
-    cacheDirectory: "/tmp/scriptorium-runtime-test",
+    cacheDirectory: "/tmp/codexia-runtime-test",
     workerEntries: { nlp: fileURLToPath(new URL("./fixtures/worker-service.mjs", import.meta.url)) },
     loaders: {
       nlp: async () => providerDefinition,
@@ -745,7 +745,7 @@ test("a per-call abort cancels a real nested worker while its outer action remai
   let markNestedFinished!: (value: { result: ActionResult; outerAborted: boolean }) => void;
   const nestedFinished = new Promise<{ result: ActionResult; outerAborted: boolean }>((resolve) => { markNestedFinished = resolve; });
   const runtime = new ModuleRuntime({
-    manifests: [nlp, story, speaker], enabled: ["nlp", "story", "speaker"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [nlp, story, speaker], enabled: ["nlp", "story", "speaker"], cacheDirectory: "/tmp/codexia-runtime-test",
     workerEntries: { nlp: fileURLToPath(new URL("./fixtures/worker-service.mjs", import.meta.url)) },
     loaders: {
       nlp: async () => ({
@@ -850,7 +850,7 @@ test("runtime module version mismatch is rejected before the worker starts", asy
   const metadata = manifest("speaker", { workerEntry: "worker.mjs" });
   let imports = 0;
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/codexia-runtime-test",
     workerEntries: { speaker: "/does/not/exist.mjs" },
     loaders: { speaker: async () => { imports += 1; return definition(metadata, {
       id: "unused", effect: "compute", inputSchema: schema, outputSchema: schema,
@@ -870,7 +870,7 @@ test("disabling a module drains its real child process and leaves author data un
   let disposed = 0;
   const authorData = { correction: "keep this author-owned value" };
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [metadata], enabled: ["speaker"], cacheDirectory: "/tmp/codexia-runtime-test",
     workerEntries: { speaker: workerEntry },
     loaders: { speaker: async () => definition(metadata, {
       id: "train",
@@ -934,7 +934,7 @@ test("module actions compose through namespaced host actions and owner-checked l
   };
   let loaderCalls = 0;
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["story"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [metadata], enabled: ["story"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: { story: async () => {
       loaderCalls += 1;
       return definition(metadata, {
@@ -993,7 +993,7 @@ test("optional capabilities do not block profile resolution and cannot activate 
 
   let providerImports = 0;
   let held: { release(): Promise<void> } | undefined;
-  const storyLoader = async (context: import("@scriptorium/contracts").ModuleContext): Promise<ModuleDefinition> => definition(story, {
+  const storyLoader = async (context: import("@codexia/contracts").ModuleContext): Promise<ModuleDefinition> => definition(story, {
     id: "suggest-tags",
     effect: "compute",
     inputSchema: schema,
@@ -1004,7 +1004,7 @@ test("optional capabilities do not block profile resolution and cannot activate 
     },
   });
   const missingRuntime = new ModuleRuntime({
-    manifests: [story], enabled: ["story"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [story], enabled: ["story"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: { story: storyLoader },
   });
   const missing = await missingRuntime.invokeAction("story", "suggest-tags", {}, readContext());
@@ -1013,7 +1013,7 @@ test("optional capabilities do not block profile resolution and cannot activate 
   await missingRuntime.shutdown();
 
   const runtime = new ModuleRuntime({
-    manifests: [nlp, story], enabled: ["story"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [nlp, story], enabled: ["story"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: {
       nlp: async () => {
         providerImports += 1;
@@ -1047,7 +1047,7 @@ test("HTTP contributions are hidden until activation and public reads cannot pro
   let storyImports = 0;
   let linkedReaderCalls = 0;
   const runtime = new ModuleRuntime({
-    manifests: [metadata, story], enabled: ["publishing", "story"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [metadata, story], enabled: ["publishing", "story"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: {
       story: async () => {
         storyImports += 1;
@@ -1137,7 +1137,7 @@ test("owner compute HTTP contributions can compose reads, compute, and jobs but 
   let hostProposalCalls = 0;
   // Exercise the registered module HTTP contribution through the production context ports.
   const handlerRuntime = new ModuleRuntime({
-    manifests: [publishing, story], enabled: ["publishing", "story"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [publishing, story], enabled: ["publishing", "story"], cacheDirectory: "/tmp/codexia-runtime-test",
     workerEntries: { publishing: workerEntry },
     loaders: {
       story: async () => ({
@@ -1212,7 +1212,7 @@ test("owner compute HTTP contributions can compose reads, compute, and jobs but 
 test("public compute HTTP contribution definitions are rejected", async () => {
   const metadata = manifest("publishing");
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["publishing"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [metadata], enabled: ["publishing"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: { publishing: async () => ({
       manifest: metadata, actions: [], ui: [],
       http: [{ id: "public-compute", path: "public/qa", methods: ["POST"], access: "public", effect: "compute", async handle() { return Response.json({}); } }],
@@ -1231,7 +1231,7 @@ test("owner compute HTTP contributions cannot use GET or HEAD", async () => {
   for (const method of ["GET", "HEAD"] as const) {
     const metadata = manifest("publishing");
     const runtime = new ModuleRuntime({
-      manifests: [metadata], enabled: ["publishing"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+      manifests: [metadata], enabled: ["publishing"], cacheDirectory: "/tmp/codexia-runtime-test",
       loaders: { publishing: async () => ({
         manifest: metadata, actions: [], ui: [],
         http: [{
@@ -1275,7 +1275,7 @@ async function readMcpSseResult(response: Response): Promise<{
 test("the production MCP module activates and serves tools through Streamable HTTP", async () => {
   const metadata = manifest("mcp", { serverEntry: "./dist/index.js" });
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["mcp"], cacheDirectory: "/tmp/scriptorium-runtime-test",
+    manifests: [metadata], enabled: ["mcp"], cacheDirectory: "/tmp/codexia-runtime-test",
     loaders: { mcp: async (context) => {
       const { createModule } = await import("../../../modules/mcp/src/index.js");
       return createModule(context);
@@ -1287,7 +1287,7 @@ test("the production MCP module activates and serves tools through Streamable HT
     assert.deepEqual(runtime.httpContributions("mcp"), [{
       id: "streamable", path: "streamable", methods: ["GET", "POST", "DELETE"], access: "owner", effect: "propose",
     }]);
-    const endpoint = "http://scriptorium.test/api/projects/project-1/modules/mcp/streamable";
+    const endpoint = "http://codexia.test/api/projects/project-1/modules/mcp/streamable";
     const post = (message: unknown, sessionId?: string) => runtime.invokeHttp("mcp", "streamable", new Request(endpoint, {
       method: "POST",
       headers: {
@@ -1304,7 +1304,7 @@ test("the production MCP module activates and serves tools through Streamable HT
     const sessionId = initialize.headers.get("mcp-session-id");
     assert.ok(sessionId);
     const initialization = await readMcpSseResult(initialize);
-    assert.equal(initialization.result.serverInfo?.name, "scriptorium-mcp");
+    assert.equal(initialization.result.serverInfo?.name, "codexia-mcp");
 
     const initialized = await post({ jsonrpc: "2.0", method: "notifications/initialized" }, sessionId);
     assert.equal(initialized.status, 202);
@@ -1330,7 +1330,7 @@ test("module disable bounds a non-cooperative action drain and rejects late prop
   let proposalCalls = 0;
   let finishAction: (() => void) | undefined;
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["assistant"], cacheDirectory: "/tmp/scriptorium-runtime-test", moduleDrainTimeoutMs: 20,
+    manifests: [metadata], enabled: ["assistant"], cacheDirectory: "/tmp/codexia-runtime-test", moduleDrainTimeoutMs: 20,
     loaders: { assistant: async () => definition(metadata, {
       id: "assistant.wait",
       effect: "propose",
@@ -1365,7 +1365,7 @@ test("a late non-cooperative action cannot return success after disable times ou
   let markStarted!: () => void;
   const started = new Promise<void>((resolve) => { markStarted = resolve; });
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["assistant"], cacheDirectory: "/tmp/scriptorium-runtime-test", moduleDrainTimeoutMs: 20,
+    manifests: [metadata], enabled: ["assistant"], cacheDirectory: "/tmp/codexia-runtime-test", moduleDrainTimeoutMs: 20,
     loaders: { assistant: async () => definition(metadata, {
       id: "assistant.late-data",
       effect: "compute",
@@ -1397,7 +1397,7 @@ test("a late HTTP handler cannot return a response after module disable", async 
   let markStarted!: () => void;
   const started = new Promise<void>((resolve) => { markStarted = resolve; });
   const runtime = new ModuleRuntime({
-    manifests: [metadata], enabled: ["assistant"], cacheDirectory: "/tmp/scriptorium-runtime-test", moduleDrainTimeoutMs: 20,
+    manifests: [metadata], enabled: ["assistant"], cacheDirectory: "/tmp/codexia-runtime-test", moduleDrainTimeoutMs: 20,
     loaders: { assistant: async () => ({
       manifest: metadata,
       actions: [],
@@ -1440,7 +1440,7 @@ test("composition contributions validate kind and host contexts independently of
   const action: ModuleAction = { id: "lookup", effect: "read", inputSchema: schema, outputSchema: schema,
     async invoke(_input, context) { return { ok: true, snapshot: context.reader.snapshot, data: {} }; } };
   for (const invalid of [null, { contractVersion: 2 }, { kind: "script" }, { contexts: [] }, { contexts: ["editor", "editor"] }, { contexts: ["foreign"] }, { multipleInstances: "yes" }]) {
-    const runtime = new ModuleRuntime({ manifests: [metadata], enabled: ["search"], cacheDirectory: "/tmp/scriptorium-composition-test",
+    const runtime = new ModuleRuntime({ manifests: [metadata], enabled: ["search"], cacheDirectory: "/tmp/codexia-composition-test",
       loaders: { search: async () => ({ ...definition(metadata, action), ui: [{
         id: "search.terms", module: "search", slot: "editor", title: "Terms", action: "lookup",
         contractVersion: 1, kind: "editor-adornment", contexts: ["editor", "reading"], ...(invalid ?? {}),

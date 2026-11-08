@@ -1,5 +1,5 @@
-import type { MigrationContribution, MigrationProducer } from "@scriptorium/migration";
-import { stableMigrationId } from "@scriptorium/migration";
+import type { MigrationContribution, MigrationProducer } from "@codexia/migration";
+import { stableMigrationId } from "@codexia/migration";
 
 const NLP_FILES = [
   { source: "meta/synonyms.yaml", target: "meta/scriptorium/modules/nlp/synonyms.yaml" },

@@ -1,6 +1,6 @@
 import sentimentLexicon from "./data/sentimentLexicon.json" with { type: "json" };
-import type { Token } from "@scriptorium/module-nlp";
-import { tokenBase } from "@scriptorium/module-nlp";
+import type { Token } from "@codexia/module-nlp";
+import { tokenBase } from "@codexia/module-nlp";
 import { isDialogue } from "./textAnalysis.js";
 
 /** 感情アーク上の1文分のスコア。 */

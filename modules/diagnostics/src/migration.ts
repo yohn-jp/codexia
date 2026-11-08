@@ -1,6 +1,6 @@
-import { planExactFileImport } from "@scriptorium/migration";
-import type { MigrationContribution, MigrationProducer } from "@scriptorium/migration";
-import { stableMigrationId } from "@scriptorium/migration";
+import { planExactFileImport } from "@codexia/migration";
+import type { MigrationContribution, MigrationProducer } from "@codexia/migration";
+import { stableMigrationId } from "@codexia/migration";
 
 const DIAGNOSTICS_FILES = [
   { source: "meta/lint-rules.yaml", target: "meta/scriptorium/modules/diagnostics/lint-rules.yaml", label: "declarative lint rules" },

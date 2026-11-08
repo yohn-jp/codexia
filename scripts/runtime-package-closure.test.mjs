@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { productionClosure, pruneToProductionClosure } from './runtime-package-closure.mjs';
 
 test('hosted pruning retains only the actual transitive package closure and removes excluded native packages', async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'scriptorium-runtime-closure-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'codexia-runtime-closure-'));
   const nodeModules = path.join(root, 'node_modules');
   const store = path.join(nodeModules, '.pnpm');
   const packageRoot = async (storeName, name) => path.join(store, storeName, 'node_modules', ...name.split('/'));
@@ -33,11 +33,11 @@ test('hosted pruning retains only the actual transitive package closure and remo
   };
 
   try {
-    const api = await makePackage('@scriptorium+api@1.0.0', '@scriptorium/api', { 'runtime-leaf': '1.0.0' });
+    const api = await makePackage('@codexia+api@1.0.0', '@codexia/api', { 'runtime-leaf': '1.0.0' });
     const leaf = await makePackage('runtime-leaf@1.0.0', 'runtime-leaf', { 'runtime-deep': '1.0.0' });
     const deep = await makePackage('runtime-deep@1.0.0', 'runtime-deep');
     const excluded = await makePackage('onnxruntime-node@1.0.0', 'onnxruntime-node', {}, { 'native.node': 'excluded-by-selection' });
-    await rootLink('@scriptorium/api', api);
+    await rootLink('@codexia/api', api);
     await rootLink('runtime-leaf', leaf);
     await linkPackage(leaf, 'runtime-deep', deep);
     await rootLink('onnxruntime-node', excluded);
@@ -46,9 +46,9 @@ test('hosted pruning retains only the actual transitive package closure and remo
     await linkPackage(path.join(store), 'runtime-deep', deep);
     await linkPackage(path.join(store), 'onnxruntime-node', excluded);
 
-    const expected = await productionClosure([path.join(nodeModules, '@scriptorium/api')]);
+    const expected = await productionClosure([path.join(nodeModules, '@codexia/api')]);
     assert.deepEqual(new Set([...expected.values()].map(({ name }) => name)), new Set([
-      '@scriptorium/api', 'runtime-leaf', 'runtime-deep',
+      '@codexia/api', 'runtime-leaf', 'runtime-deep',
     ]));
     await pruneToProductionClosure(nodeModules, expected);
 
@@ -56,7 +56,7 @@ test('hosted pruning retains only the actual transitive package closure and remo
     assert.equal(await lstat(path.join(nodeModules, 'onnxruntime-node')).then(() => true, () => false), false);
     assert.equal(await lstat(path.join(store, 'onnxruntime-node@1.0.0')).then(() => true, () => false), false);
     assert.equal(await readFile(path.join(leaf, 'package.json'), 'utf8').then(() => true), true);
-    const actual = await productionClosure([path.join(nodeModules, '@scriptorium/api')]);
+    const actual = await productionClosure([path.join(nodeModules, '@codexia/api')]);
     assert.deepEqual([...actual.keys()].sort(), [...expected.keys()].sort());
   } finally {
     await rm(root, { recursive: true, force: true });

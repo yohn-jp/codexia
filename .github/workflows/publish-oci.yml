@@ -1,11 +1,11 @@
-name: Publish Scriptorium OCI
+name: Publish Codexia OCI
 on:
   push:
     tags: ['v*']
 permissions:
   contents: read
 concurrency:
-  group: scriptorium-oci-${{ github.ref }}
+  group: codexia-oci-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   verify-source:
@@ -68,14 +68,14 @@ jobs:
           PROFILE: ${{ matrix.profile }}
         run: |
           docker buildx build --platform linux/amd64 --load \
-            --build-arg "PROFILE=$PROFILE" --tag "scriptorium-ci:$PROFILE" .
+            --build-arg "PROFILE=$PROFILE" --tag "codexia-ci:$PROFILE" .
       - name: Verify image before publication
         env:
           PROFILE: ${{ matrix.profile }}
         run: |
           set -euo pipefail
           token="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-          cid="$(docker run -d --publish 127.0.0.1::3000 --env "SCRIPTORIUM_AUTH_TOKEN=$token" --env SCRIPTORIUM_DATA_DIR=/data "scriptorium-ci:$PROFILE")"
+          cid="$(docker run -d --publish 127.0.0.1::3000 --env "CODEXIA_AUTH_TOKEN=$token" --env CODEXIA_DATA_DIR=/data "codexia-ci:$PROFILE")"
           trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
           port="$(docker port "$cid" 3000/tcp | sed -n 's/.*://p')"
           test -n "$port"
@@ -91,7 +91,7 @@ jobs:
           docker exec "$cid" node -e "require('node:fs').writeFileSync('/data/.ci-smoke', 'ok'); require('node:fs').unlinkSync('/data/.ci-smoke')"
           docker kill --signal TERM "$cid" >/dev/null
           test "$(docker wait "$cid")" = 0
-          docker logs "$cid" 2>&1 | grep -Fq 'Scriptorium shutdown complete'
+          docker logs "$cid" 2>&1 | grep -Fq 'Codexia shutdown complete'
       - name: Recheck immutable tag before publication
         env:
           GH_TOKEN: ${{ github.token }}
@@ -109,7 +109,7 @@ jobs:
           PROFILE: ${{ matrix.profile }}
         run: |
           node scripts/verify-unpublished-image.mjs
-          docker tag "scriptorium-ci:$PROFILE" "$IMAGE:$TAG"
+          docker tag "codexia-ci:$PROFILE" "$IMAGE:$TAG"
           docker push "$IMAGE:$TAG"
           docker buildx imagetools inspect "$IMAGE:$TAG"
           echo "Published $IMAGE:$TAG from $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"

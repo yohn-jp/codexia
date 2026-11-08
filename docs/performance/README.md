@@ -6,10 +6,10 @@ Run the [benchmark harness](../../scripts/performance/README.md) from the reposi
 
 ```sh
 pnpm install --frozen-lockfile
-SCRIPTORIUM_PROFILE=core pnpm build
+CODEXIA_PROFILE=core pnpm build
 node --test scripts/performance/*.test.mjs
-node scripts/performance/run.mjs /tmp/scriptorium-benchmark
-node scripts/performance/summarize.mjs /tmp/scriptorium-benchmark/results
+node scripts/performance/run.mjs /tmp/codexia-benchmark
+node scripts/performance/summarize.mjs /tmp/codexia-benchmark/results
 ```
 
 The output root must be new. Workers use generated fixtures, fresh processes and local synthetic bare remotes. Publish workloads write only to those remotes. Retain raw results outside the checkout or under ignored `artifacts/`; product documentation must not accumulate benchmark snapshots, execution logs or candidate progress tables.
@@ -27,10 +27,10 @@ The retained `evidence/performance/wave0/INDEX.json` is the exact manifest for t
 ```sh
 index=evidence/performance/wave0/INDEX.json
 evidence=$(mktemp -d)
-gh release download perf-wave0-2026-10-20 --repo yohn-jp/scriptorium \
-  --pattern scriptorium-wave0-2026-10-20.tar --dir "$evidence"
+gh release download perf-wave0-2026-10-20 --repo yohn-jp/codexia \
+  --pattern codexia-wave0-2026-10-20.tar --dir "$evidence"
 node scripts/performance/artifacts.mjs verify-archive "$index" "$evidence"
-tar -xf "$evidence/scriptorium-wave0-2026-10-20.tar" -C "$evidence"
+tar -xf "$evidence/codexia-wave0-2026-10-20.tar" -C "$evidence"
 node scripts/performance/artifacts.mjs verify "$index" "$evidence"
 ```
 

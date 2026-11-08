@@ -12,7 +12,7 @@ import type {
   RepositoryIdentity,
   SnapshotId,
   SnapshotReader,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 import type { StoryVolumeTree } from "./domain/graph.js";
 
 import { createStoryActions } from "./actions.js";

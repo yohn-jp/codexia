@@ -1,5 +1,5 @@
 {
-  "name": "@scriptorium/profile-full",
+  "name": "@codexia/profile-full",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -7,15 +7,15 @@
     "generated"
   ],
   "dependencies": {
-    "@scriptorium/api": "workspace:*",
-    "@scriptorium/module-diagnostics": "workspace:*",
-    "@scriptorium/module-mcp": "workspace:*",
-    "@scriptorium/module-nlp": "workspace:*",
-    "@scriptorium/module-publishing": "workspace:*",
-    "@scriptorium/module-story": "workspace:*",
-    "@scriptorium/module-semantic": "workspace:*",
-    "@scriptorium/module-speaker": "workspace:*",
-    "@scriptorium/module-assistant": "workspace:*",
-    "@scriptorium/module-search": "workspace:*"
+    "@codexia/api": "workspace:*",
+    "@codexia/module-diagnostics": "workspace:*",
+    "@codexia/module-mcp": "workspace:*",
+    "@codexia/module-nlp": "workspace:*",
+    "@codexia/module-publishing": "workspace:*",
+    "@codexia/module-story": "workspace:*",
+    "@codexia/module-semantic": "workspace:*",
+    "@codexia/module-speaker": "workspace:*",
+    "@codexia/module-assistant": "workspace:*",
+    "@codexia/module-search": "workspace:*"
   }
 }

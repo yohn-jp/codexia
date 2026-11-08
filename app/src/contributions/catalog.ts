@@ -1,4 +1,4 @@
-import type { ModuleStatus, UiContribution } from "@scriptorium/contracts";
+import type { ModuleStatus, UiContribution } from "@codexia/contracts";
 
 const callableAvailability = new Set<ModuleStatus["availability"]>(["enabled-idle", "active"]);
 

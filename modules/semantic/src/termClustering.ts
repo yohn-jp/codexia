@@ -1,5 +1,5 @@
-import type { SnapshotId } from "@scriptorium/contracts";
-import type { CandidateTerm } from "@scriptorium/module-nlp";
+import type { SnapshotId } from "@codexia/contracts";
+import type { CandidateTerm } from "@codexia/module-nlp";
 import { cosineSimilarityDense } from "./cosine.js";
 import type { SemanticEmbeddingCapability } from "./contracts.js";
 

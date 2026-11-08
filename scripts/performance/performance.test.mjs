@@ -96,10 +96,10 @@ test('current author pipeline records receipts and leaves the generated seed rem
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('browser probes retain strict IDB semantics and count document index reads', { skip: !process.env.SCRIPTORIUM_E2E_CHROMIUM }, async () => {
+test('browser probes retain strict IDB semantics and count document index reads', { skip: !process.env.CODEXIA_E2E_CHROMIUM }, async () => {
   const { chromium } = await import('@playwright/test');
   const { installBrowserProbes } = await import('./browser-probes.mjs');
-  const browser = await chromium.launch({ headless: true, executablePath: process.env.SCRIPTORIUM_E2E_CHROMIUM });
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.CODEXIA_E2E_CHROMIUM });
   try {
     const context = await browser.newContext();
     await context.addInitScript(installBrowserProbes);

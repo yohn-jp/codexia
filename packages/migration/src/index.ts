@@ -1,5 +1,5 @@
-import { assertChangeOperation, snapshotKey } from "@scriptorium/contracts";
-import type { ChangeOperation, ModuleId } from "@scriptorium/contracts";
+import { assertChangeOperation, snapshotKey } from "@codexia/contracts";
+import type { ChangeOperation, ModuleId } from "@codexia/contracts";
 import { createLegacySourceReader } from "./source.js";
 import { createMigrationProducerRegistry } from "./registry.js";
 import { stableMigrationId } from "./operations.js";

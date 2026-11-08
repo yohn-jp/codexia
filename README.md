@@ -1,10 +1,12 @@
-# Scriptorium
+# Codexia
 
 A modular Git-backed writing workspace. Git-controlled YAML and Markdown remain the source of truth. The Core profile runs without optional analysis or model dependencies; the full profile composes nine independent add-ons.
 
 Connect a GitHub work repository, browse volumes, chapters and scenes, edit Markdown, save with revision checks, inspect Git commits, and explicitly synchronize with GitHub. The editor keeps unsaved drafts in this browser and offers Japanese vertical preview. One server instance serves one trusted owner; all registered projects belong to that owner.
 
 [Documentation](docs/README.md) covers authoring, architecture, deployment and verification. The [external Plugin Platform proposal](docs/architecture/PLUGIN-PLATFORM.md) specifies a separate isolation and distribution design; built-in modules execute as trusted application code.
+
+The [Codexia reboot RFC](docs/architecture/CODEXIA-REBOOT-RFC.md) is a design proposal; its database and deployment migration work is not implemented by this product rename.
 
 ## Run locally
 
@@ -13,12 +15,12 @@ Requires Node.js 24+, Git, and pnpm 12.10.1.
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
-export SCRIPTORIUM_AUTH_TOKEN="$(openssl rand -hex 32)"
-# Set SCRIPTORIUM_GITHUB_TOKEN separately for private repositories and push access.
+export CODEXIA_AUTH_TOKEN="$(openssl rand -hex 32)"
+# Set CODEXIA_GITHUB_TOKEN separately for private repositories and push access.
 pnpm start
 ```
 
-Open `http://127.0.0.1:3000` and sign in with `SCRIPTORIUM_AUTH_TOKEN`. Public repository reads need no GitHub token. For private repositories and synchronization, provide a GitHub token with access only to the intended work repositories. Credentials stay on the server; do not put them in a repository URL. See [.env.example](.env.example) for configuration names; environment files are not automatically loaded.
+Open `http://127.0.0.1:3000` and sign in with `CODEXIA_AUTH_TOKEN`. Public repository reads need no GitHub token. For private repositories and synchronization, provide a GitHub token with access only to the intended work repositories. Credentials stay on the server; do not put them in a repository URL. See [.env.example](.env.example) for configuration names; environment files are not automatically loaded.
 
 The work repository must use the existing Arcadia layout:
 
@@ -37,7 +39,7 @@ Writing, Research, and Review presets assemble independent Editor, Outline, Insp
 
 Search/Terminology is optional: it indexes snapshot revisions, including local checkpoints, and supports lexical, exact, prefix, and scoped queries. The term dictionary is changed through reviewable proposals. Automatic term links are temporary editor/reading decorations and never insert links into Markdown; use Ctrl/Command-click or Ctrl/Command-Enter on an editor term to navigate. Ambiguous aliases remain plain text and can be inspected in the terminology panel. Search can explicitly request existing NLP or Semantic capabilities; ordinary search does not load models. Core-only builds retain authoring without this plugin.
 
-To build and run the full composition, use `SCRIPTORIUM_PROFILE=full pnpm build` and `SCRIPTORIUM_PROFILE=full pnpm start`. It includes Story, Diagnostics, NLP, Semantic, Speaker, Assistant, Publishing, MCP, and Search/Terminology. Module settings distinguish absent, disabled, enabled-idle, and active modules. Heavy engines run in supervised child processes. Assistant provider execution requires provider configuration and author consent; selecting no provider keeps local writing and review available.
+To build and run the full composition, use `CODEXIA_PROFILE=full pnpm build` and `CODEXIA_PROFILE=full pnpm start`. It includes Story, Diagnostics, NLP, Semantic, Speaker, Assistant, Publishing, MCP, and Search/Terminology. Module settings distinguish absent, disabled, enabled-idle, and active modules. Heavy engines run in supervised child processes. Assistant provider execution requires provider configuration and author consent; selecting no provider keeps local writing and review available.
 
 ## Hosted MCP access
 
@@ -48,7 +50,7 @@ available at `/.well-known/oauth-protected-resource/mcp` for endpoint-path disco
 Configure a remote MCP client with `https://<stable-application-origin>/mcp`,
 not the physical Pod hostname or the Praetorium browser entry URL.
 The resource metadata points to Praetorium for GitHub-based OAuth login,
-explicit client consent, PKCE token exchange and refresh. Scriptorium validates
+explicit client consent, PKCE token exchange and refresh. Codexia validates
 the issued short-lived repository/instance/epoch-bound bearer grant and retains
 the existing proposal/author approval boundary.
 
@@ -64,15 +66,15 @@ rather than implementing an application-specific OAuth issuer.
 ## Single OCI image
 
 ```sh
-podman build --format oci --build-arg PROFILE=core -t scriptorium:local .
+podman build --format oci --build-arg PROFILE=core -t codexia:local .
 podman run --rm -p 127.0.0.1:3000:3000 \
-  --env SCRIPTORIUM_AUTH_TOKEN --env SCRIPTORIUM_GITHUB_TOKEN \
+  --env CODEXIA_AUTH_TOKEN --env CODEXIA_GITHUB_TOKEN \
   --mount type=volume,src=scriptorium-data,dst=/data \
   --mount type=volume,src=scriptorium-history,dst=/history \
-  scriptorium:local
+  codexia:local
 ```
 
-Use `PROFILE=full` with the same Dockerfile for the full composition. Keep `/data` and `/history` persistent: `/history` holds private usage and job history separately from Git work repositories. Use HTTPS through a trusted reverse proxy when accessing the instance beyond localhost. Do not run multiple containers against one workspace volume. This is a single-owner application.
+Use `PROFILE=full` with the same Dockerfile for the full composition. The existing volume names are retained for upgrades. Keep `/data` and `/history` persistent: `/history` holds private usage and job history separately from Git work repositories. Use HTTPS through a trusted reverse proxy when accessing the instance beyond localhost. Do not run multiple containers against one workspace volume. This is a single-owner application.
 
 ## Development and verification
 

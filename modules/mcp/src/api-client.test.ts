@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ChangeOperation, RemoteObservation, SnapshotId } from "@scriptorium/contracts";
+import type { ChangeOperation, RemoteObservation, SnapshotId } from "@codexia/contracts";
 import { ApiClient } from "./api-client.js";
 
 const snapshot: SnapshotId = {
@@ -42,7 +42,7 @@ test("stdio API client uses bearer actions and host-sourced proposals only", asy
     return Response.json({ error: "missing" }, { status: 404 });
   };
   const client = new ApiClient({
-    baseUrl: "https://scriptorium.test/",
+    baseUrl: "https://codexia.test/",
     token: "test-token",
     projectId: "project-one",
     fetch: fetcher,
@@ -88,7 +88,7 @@ test("stdio API client forwards MCP cancellation to each fetch", async () => {
     return Response.json({ actions: [] });
   };
   const client = new ApiClient({
-    baseUrl: "https://scriptorium.test",
+    baseUrl: "https://codexia.test",
     token: "test-token",
     projectId: "project-one",
     fetch: fetcher,

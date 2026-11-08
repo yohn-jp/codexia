@@ -5,7 +5,7 @@ import {
   type StoryGraphInput,
   type StorySnapshotResult,
 } from "./types.js";
-import type { SnapshotId } from "@scriptorium/contracts";
+import type { SnapshotId } from "@codexia/contracts";
 
 export type SceneStateEventKind = "location" | "acquaintance" | "ownership" | "knowledge";
 export type SceneStateEventSource = "rule" | "llm-draft" | "manual";

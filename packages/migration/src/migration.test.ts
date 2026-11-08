@@ -6,8 +6,8 @@ import path from "node:path";
 import os from "node:os";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import type { ChangeOperation, RepositoryIdentity, SnapshotId, SnapshotReader } from "@scriptorium/contracts";
-import { assertChangeOperation } from "@scriptorium/contracts";
+import type { ChangeOperation, RepositoryIdentity, SnapshotId, SnapshotReader } from "@codexia/contracts";
+import { assertChangeOperation } from "@codexia/contracts";
 import { createLegacySourceReader, inspectLegacyProject, isSecretLegacyPath, proposeMigrationImport } from "./index.js";
 
 const repository: RepositoryIdentity = {
@@ -336,7 +336,7 @@ test("legacy inspection preserves scoped data, both SQLite stores, and pending G
   assert.equal(isSecretLegacyPath(".ssh/id_ed25519"), true);
   assert.equal(isSecretLegacyPath(".ssh/id_ed25519.pub"), false, "public SSH keys are not private credential files");
   assert.equal(isSecretLegacyPath("story/secret-ritual.md"), false, "ordinary manuscript paths are not scanned by body text");
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-p04-test-"));
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-p04-test-"));
   const sourceRoot = path.join(temporary, "project");
   const workspaceRoot = path.join(temporary, "data");
   await seedGitHistory(sourceRoot);

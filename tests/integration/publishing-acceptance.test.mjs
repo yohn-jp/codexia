@@ -15,11 +15,11 @@ import { CoreStore } from "../../packages/core/dist/index.js";
 import { ModuleRuntime } from "../../packages/module-runtime/dist/index.js";
 
 const execFile = promisify(execFileCallback);
-const repositoryUrl = process.env.SCRIPTORIUM_ACCEPTANCE_GITHUB_URL?.trim() ?? "";
+const repositoryUrl = process.env.CODEXIA_ACCEPTANCE_GITHUB_URL?.trim() ?? "";
 const accessToken = randomBytes(32).toString("base64url");
 const modulePackageUrl = new URL("../../modules/publishing/package.json", import.meta.url);
 const modulePackage = JSON.parse(await readFile(modulePackageUrl, "utf8"));
-const publishingManifest = modulePackage.scriptoriumModule;
+const publishingManifest = modulePackage.codexiaModule;
 const publishingEntryUrl = new URL("../../modules/publishing/dist/index.js", import.meta.url).href;
 const publishingRequire = createRequire(modulePackageUrl);
 const JSZip = publishingRequire("jszip");
@@ -71,7 +71,7 @@ async function ownerJson(host, cookie, route, { method = "GET", body, status = 2
 }
 
 async function githubToken() {
-  const configured = process.env.SCRIPTORIUM_GITHUB_TOKEN?.trim();
+  const configured = process.env.CODEXIA_GITHUB_TOKEN?.trim();
   if (configured) return configured;
   try {
     const { stdout } = await execFile("gh", ["auth", "token"], { encoding: "utf8", maxBuffer: 1024 * 1024 });
@@ -80,26 +80,26 @@ async function githubToken() {
   } catch {
     // The error below is intentionally independent of gh output.
   }
-  throw new Error("Set SCRIPTORIUM_GITHUB_TOKEN or authenticate gh before running the GitHub acceptance");
+  throw new Error("Set CODEXIA_GITHUB_TOKEN or authenticate gh before running the GitHub acceptance");
 }
 
 async function githubRepositoryInfo(url, token) {
   let parsed;
   try { parsed = new URL(url); }
-  catch { throw new Error("SCRIPTORIUM_ACCEPTANCE_GITHUB_URL must be a GitHub repository URL"); }
+  catch { throw new Error("CODEXIA_ACCEPTANCE_GITHUB_URL must be a GitHub repository URL"); }
   const segments = parsed.pathname.split("/").filter(Boolean);
   const owner = segments[0];
   const repository = segments[1]?.replace(/\.git$/iu, "");
   assert.ok(parsed.protocol === "https:" && parsed.hostname === "github.com" && segments.length === 2 &&
     !parsed.search && !parsed.hash && owner && repository,
-  "SCRIPTORIUM_ACCEPTANCE_GITHUB_URL must identify an HTTPS GitHub repository");
+  "CODEXIA_ACCEPTANCE_GITHUB_URL must identify an HTTPS GitHub repository");
   let response;
   try {
     response = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`, {
       headers: {
         Accept: "application/vnd.github+json",
         Authorization: `Bearer ${token}`,
-        "User-Agent": "Scriptorium-P13-Publishing-Acceptance",
+        "User-Agent": "Codexia-P13-Publishing-Acceptance",
         "X-GitHub-Api-Version": "2022-11-28",
       },
     });
@@ -120,14 +120,14 @@ async function githubBranchHead(url, branch, token) {
   try {
     parsed = new URL(url);
   } catch {
-    throw new Error("SCRIPTORIUM_ACCEPTANCE_GITHUB_URL must be a GitHub repository URL");
+    throw new Error("CODEXIA_ACCEPTANCE_GITHUB_URL must be a GitHub repository URL");
   }
   const segments = parsed.pathname.split("/").filter(Boolean);
   const owner = segments[0];
   const repository = segments[1]?.replace(/\.git$/iu, "");
   assert.ok(parsed.protocol === "https:" && parsed.hostname === "github.com" && segments.length === 2 &&
     !parsed.search && !parsed.hash && owner && repository,
-    "SCRIPTORIUM_ACCEPTANCE_GITHUB_URL must identify an HTTPS GitHub repository");
+    "CODEXIA_ACCEPTANCE_GITHUB_URL must identify an HTTPS GitHub repository");
   const ref = branch.split("/").map(encodeURIComponent).join("/");
   const endpoint = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/git/ref/heads/${ref}`;
   let response;
@@ -136,7 +136,7 @@ async function githubBranchHead(url, branch, token) {
       headers: {
         Accept: "application/vnd.github+json",
         Authorization: `Bearer ${token}`,
-        "User-Agent": "Scriptorium-P13-Publishing-Acceptance",
+        "User-Agent": "Codexia-P13-Publishing-Acceptance",
         "X-GitHub-Api-Version": "2022-11-28",
       },
     });
@@ -443,19 +443,19 @@ async function openBrowserShare(browser, host, repositoryId, token) {
 }
 
 test("Publishing exports and share lifecycle survive real GitHub publication and a complete Core data-root replacement", {
-  skip: repositoryUrl ? false : "NOT_CHECKED: set SCRIPTORIUM_ACCEPTANCE_GITHUB_URL to the authorized synthetic repository",
+  skip: repositoryUrl ? false : "NOT_CHECKED: set CODEXIA_ACCEPTANCE_GITHUB_URL to the authorized synthetic repository",
   timeout: 600_000,
 }, async (t) => {
   let parsedUrl;
   try { parsedUrl = new URL(repositoryUrl); }
-  catch { throw new Error("SCRIPTORIUM_ACCEPTANCE_GITHUB_URL must be an HTTPS GitHub repository URL"); }
+  catch { throw new Error("CODEXIA_ACCEPTANCE_GITHUB_URL must be an HTTPS GitHub repository URL"); }
   assert.ok(parsedUrl.protocol === "https:" && parsedUrl.hostname === "github.com" &&
     parsedUrl.pathname.split("/").filter(Boolean).length === 2 && !parsedUrl.search && !parsedUrl.hash,
-    "SCRIPTORIUM_ACCEPTANCE_GITHUB_URL must be an HTTPS GitHub repository URL");
+    "CODEXIA_ACCEPTANCE_GITHUB_URL must be an HTTPS GitHub repository URL");
   const token = await githubToken();
   const githubRepository = await githubRepositoryInfo(repositoryUrl, token);
   assert.ok(githubRepository.private, "Publishing acceptance requires the authorized private synthetic GitHub repository");
-  const root = await mkdtemp(resolve(tmpdir(), "scriptorium-p13-publishing-"));
+  const root = await mkdtemp(resolve(tmpdir(), "codexia-p13-publishing-"));
   const dataDir = resolve(root, "data");
   let host;
   t.after(async () => {
@@ -597,7 +597,7 @@ test("Publishing exports and share lifecycle survive real GitHub publication and
 
   browser = await chromium.launch({
     headless: true,
-    ...(process.env.SCRIPTORIUM_E2E_CHROMIUM ? { executablePath: process.env.SCRIPTORIUM_E2E_CHROMIUM } : {}),
+    ...(process.env.CODEXIA_E2E_CHROMIUM ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM } : {}),
   });
   const browserShare = await openBrowserShare(browser, host, identity.repositoryId, shareToken);
   try {

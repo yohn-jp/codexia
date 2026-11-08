@@ -1,4 +1,4 @@
-module github.com/yohn-jp/scriptorium/buildkit/frontend
+module github.com/yohn-jp/codexia/buildkit/frontend
 
 go 1.25.5
 

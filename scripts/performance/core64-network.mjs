@@ -20,7 +20,7 @@ const runtimeRoot = resolve(runtimeRootArg);
 const runtimeManifestPath = resolve(runtimeManifestArg);
 const expectedRuntimeSource = expectedSourceArg.toLowerCase();
 const output = resolve(outputArg);
-const taskTmpRoot = '/data/scriptorium-c64-network-tmp';
+const taskTmpRoot = '/data/codexia-c64-network-tmp';
 const idleMs = Number(idleArg);
 const addedRttMs = Number(addedRttArg);
 const streamWindowMs = Number(streamWindowArg);
@@ -51,7 +51,7 @@ if (runtimeHead !== runtimeManifest.sourceCommit) {
   throw new Error(`Runtime checkout HEAD ${runtimeHead} differs from manifest sourceCommit ${runtimeManifest.sourceCommit}`);
 }
 if (runtimeManifest.schemaVersion !== 1 || runtimeManifest.profile !== 'core' ||
-    runtimeManifest.buildCommand !== 'SCRIPTORIUM_PROFILE=core pnpm build') {
+    runtimeManifest.buildCommand !== 'CODEXIA_PROFILE=core pnpm build') {
   throw new Error('Runtime manifest does not describe the pinned Core build profile and command');
 }
 const requiredRoots = [
@@ -154,9 +154,9 @@ const report = {
   runtime: runtimeArtifactVerification,
   node: process.version,
   visibilitySetup: {
-    requested: process.env.SCRIPTORIUM_E2E_NATIVE_VISIBILITY === '1',
+    requested: process.env.CODEXIA_E2E_NATIVE_VISIBILITY === '1',
     display: process.env.DISPLAY ?? null,
-    status: process.env.SCRIPTORIUM_E2E_NATIVE_VISIBILITY === '1'
+    status: process.env.CODEXIA_E2E_NATIVE_VISIBILITY === '1'
       ? 'pending raw headful Chromium + CDP noDefaults setup'
       : 'NOT_CHECKED: native headful visibility environment was not passed',
   },
@@ -241,14 +241,14 @@ async function stopBrowserProcess(child) {
 }
 
 async function connectNativeHeadfulContext() {
-  if (process.env.SCRIPTORIUM_E2E_NATIVE_VISIBILITY !== '1') {
-    throw new Error('Native hidden/focus measurement requires SCRIPTORIUM_E2E_NATIVE_VISIBILITY=1');
+  if (process.env.CODEXIA_E2E_NATIVE_VISIBILITY !== '1') {
+    throw new Error('Native hidden/focus measurement requires CODEXIA_E2E_NATIVE_VISIBILITY=1');
   }
   if (!/^:97(?:\.0)?$/.test(process.env.DISPLAY ?? '')) {
     throw new Error(`Native hidden/focus measurement requires the validated Xvfb :97 display; got ${process.env.DISPLAY ?? 'unset'}`);
   }
-  const executable = process.env.SCRIPTORIUM_E2E_CHROMIUM;
-  if (!executable) throw new Error('Native hidden/focus measurement requires SCRIPTORIUM_E2E_CHROMIUM');
+  const executable = process.env.CODEXIA_E2E_CHROMIUM;
+  if (!executable) throw new Error('Native hidden/focus measurement requires CODEXIA_E2E_CHROMIUM');
 
   await mkdir(taskTmpRoot, { recursive: true });
   const profile = await mkdtemp(join(taskTmpRoot, 'native-chromium-'));
@@ -509,7 +509,7 @@ async function externalPush(remote, datasetPath, revision) {
   try {
     git(scratch, 'clone', remote, clone);
     const branch = git(clone, 'branch', '--show-current');
-    git(clone, 'config', 'user.name', 'Scriptorium C64 Network Probe');
+    git(clone, 'config', 'user.name', 'Codexia C64 Network Probe');
     git(clone, 'config', 'user.email', 'c64-network@example.invalid');
     await writeFile(join(clone, 'network-external-push.txt'), `synthetic external push ${revision}\n`);
     git(clone, 'add', 'network-external-push.txt');
@@ -632,7 +632,7 @@ try {
     workerRemoteCreatedBy: 'existing scripts/performance/server.mjs per-run bare clone',
   };
   browser = await chromium.launch({ headless: true,
-    ...(process.env.SCRIPTORIUM_E2E_CHROMIUM ? { executablePath: process.env.SCRIPTORIUM_E2E_CHROMIUM } : {}) });
+    ...(process.env.CODEXIA_E2E_CHROMIUM ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM } : {}) });
   report.browser = browser.version();
 
   const projectId = await makeProject();
@@ -690,7 +690,7 @@ try {
   await local.context.close();
   currentContext = undefined;
 
-  if (process.env.SCRIPTORIUM_E2E_NATIVE_VISIBILITY === '1') {
+  if (process.env.CODEXIA_E2E_NATIVE_VISIBILITY === '1') {
     try {
       nativeVisibility = await connectNativeHeadfulContext();
       report.visibilitySetup = {
@@ -809,7 +809,7 @@ try {
   } else {
     report.polling.hiddenAndFocus = {
       status: 'NOT_CHECKED',
-      reason: 'SCRIPTORIUM_E2E_NATIVE_VISIBILITY=1, DISPLAY=:97, and SCRIPTORIUM_E2E_CHROMIUM were not all provided.',
+      reason: 'CODEXIA_E2E_NATIVE_VISIBILITY=1, DISPLAY=:97, and CODEXIA_E2E_CHROMIUM were not all provided.',
     };
     report.notChecked.push('Natural hidden polling and focus-return freshness: the validated native headful Chromium environment was not requested.');
     await stopDirectStream(projectHintStream);

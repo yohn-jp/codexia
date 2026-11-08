@@ -1,4 +1,4 @@
-import { assertProjectPath } from "@scriptorium/contracts";
+import { assertProjectPath } from "@codexia/contracts";
 
 export const TERM_REGISTRY_PATH = "meta/scriptorium/modules/search/terms.json";
 export const MAX_TERMS = 5_000;

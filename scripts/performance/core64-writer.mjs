@@ -16,8 +16,8 @@ if (!outputRootArg) throw new Error('Usage: node scripts/performance/core64-writ
 const outputRoot = resolve(outputRootArg);
 const resultsRoot = join(outputRoot, 'results');
 const scratchRoot = join(outputRoot, 'scratch');
-const fixtureRoot = resolve(process.env.CORE64_WRITER_G0_FIXTURE ?? '/tmp/scriptorium-wave0-baseline-20261020/small');
-const runtimeRoot = resolve(process.env.CORE64_WRITER_RUNTIME_ROOT ?? '/home/sophia/src/scriptorium-c64-derived');
+const fixtureRoot = resolve(process.env.CORE64_WRITER_G0_FIXTURE ?? '/tmp/codexia-wave0-baseline-20261020/small');
+const runtimeRoot = resolve(process.env.CORE64_WRITER_RUNTIME_ROOT ?? '/home/sophia/src/codexia-c64-derived');
 const runtimeEntry = join(runtimeRoot, 'packages/core/dist/index.js');
 const runtimeSourceCommit = 'f633da0b3f133ad812953c284aab35a4956d2507';
 const runtimeIndexSha256 = 'a7b83895e2c239d85a3f4d973cf7458e64cc7415c418a4844ff33f700a52d4a3';
@@ -160,7 +160,7 @@ for (const item of cases) {
     [fixtureRoot, scratchRoot, output, item.kind, String(item.scale), String(item.repeats), runtimeEntry, runtimeSourceCommit],
     output,
     item.timeoutMs,
-    { SCRIPTORIUM_PROFILE: 'core', GITHUB_TOKEN: '', GH_TOKEN: '', SCRIPTORIUM_GITHUB_TOKEN: '' });
+    { CODEXIA_PROFILE: 'core', GITHUB_TOKEN: '', GH_TOKEN: '', CODEXIA_GITHUB_TOKEN: '' });
   run.results.push({ name, status: result.status, timeout: result.execution?.timeout ?? false,
     completedSamples: result.samples?.length ?? 0, output: `${name}.json` });
   run.status = run.results.every(({ status }) => status === 'complete') ? 'complete' : 'NOT_CHECKED';

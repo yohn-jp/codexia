@@ -1,4 +1,4 @@
-import { CONTRACT_VERSION, type ModuleId, type ModuleManifest } from "@scriptorium/contracts";
+import { CONTRACT_VERSION, type ModuleId, type ModuleManifest } from "@codexia/contracts";
 import { ModuleRuntimeError, isModuleId, MODULE_IDS } from "./runtime-error.js";
 
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/;

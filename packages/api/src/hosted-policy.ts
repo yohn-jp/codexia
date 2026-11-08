@@ -6,7 +6,7 @@ import type {
   GitCredentialRequest,
   HostedGitCredential,
   PublicationAuthorizationRequest,
-} from "@scriptorium/core";
+} from "@codexia/core";
 
 const MAX_JWKS_BYTES = 16 * 1024;
 const MAX_BROKER_RESPONSE_BYTES = 8 * 1024;

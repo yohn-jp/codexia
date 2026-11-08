@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { MigrationContext, SqliteRow, SqliteTableInfo } from "@scriptorium/migration";
+import type { MigrationContext, SqliteRow, SqliteTableInfo } from "@codexia/migration";
 import { createStoryMigrationProducer } from "./producer.js";
 
 const yaml = "id: scene-17\ntype: scene\nfuture_story_field:\n  nested: preserved\n";

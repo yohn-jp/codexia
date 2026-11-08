@@ -1,8 +1,8 @@
 {
-  "name": "@scriptorium/module-semantic",
+  "name": "@codexia/module-semantic",
   "private": true,
   "version": "0.1.0",
-  "scriptoriumDisplay": {
+  "codexiaDisplay": {
     "name": "Semantic search",
     "description": "Find related passages with embeddings, vector indexes, retrieval, and reranking."
   },
@@ -33,17 +33,17 @@
     "test": "pnpm run build && node --import tsx --test src/*.test.ts"
   },
   "dependencies": {
-    "@scriptorium/contracts": "workspace:*",
-    "@scriptorium/migration": "workspace:*",
-    "@scriptorium/module-runtime": "workspace:*",
-    "@scriptorium/module-story": "workspace:*",
-    "@scriptorium/module-nlp": "workspace:*",
+    "@codexia/contracts": "workspace:*",
+    "@codexia/migration": "workspace:*",
+    "@codexia/module-runtime": "workspace:*",
+    "@codexia/module-story": "workspace:*",
+    "@codexia/module-nlp": "workspace:*",
     "yaml": "^2.8.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "@huggingface/transformers": "3.8.1"
   },
-  "scriptoriumModule": {
+  "codexiaModule": {
     "id": "semantic",
     "version": "0.1.0",
     "contractVersion": 1,

@@ -1,4 +1,4 @@
-import { expandSearchTerms, type CanonicalSnapshotEntity } from "@scriptorium/module-nlp";
+import { expandSearchTerms, type CanonicalSnapshotEntity } from "@codexia/module-nlp";
 
 export type SemanticSearchMode = "scene" | "sentence" | "expression";
 export interface SemanticScoreBreakdown {

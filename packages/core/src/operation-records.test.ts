@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ChangeOperation, ChangeProposal, RepositoryIdentity, SnapshotId } from "@scriptorium/contracts";
+import type { ChangeOperation, ChangeProposal, RepositoryIdentity, SnapshotId } from "@codexia/contracts";
 import {
   assertPersistedProposal,
   normalizedOperation,

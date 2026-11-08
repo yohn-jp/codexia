@@ -1,4 +1,4 @@
-# Contributing to Scriptorium
+# Contributing to Codexia
 
 Start with the [documentation index](docs/README.md), [Core architecture](docs/architecture/CORE.md) and the contract for the area being changed.
 

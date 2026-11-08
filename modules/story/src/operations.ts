@@ -7,7 +7,7 @@ import type {
   SnapshotReader,
   ScopeRevision,
   ValueSchema,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 
 export type ObjectValue = Record<string, unknown>;
 

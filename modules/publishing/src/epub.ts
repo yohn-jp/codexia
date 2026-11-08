@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import JSZip from "jszip";
-import type { SnapshotReader } from "@scriptorium/contracts";
+import type { SnapshotReader } from "@codexia/contracts";
 import type { PublishingProject, PublishingScope } from "./project.js";
 
 /** Aozora / カクヨム系: `|漢字《かんじ》` または全角 `｜`（plaintextExport と同型）。 */
@@ -564,7 +564,7 @@ export async function buildEpubExport(
   const { chapters, label } = collectChapterTree(project, scope, id);
   const titleValue = titleOpt?.trim() || project.title;
   const subtitle = subtitleOpt?.trim() || project.subtitle;
-  const bookTitle = (titleValue || label || "Scriptorium").trim();
+  const bookTitle = (titleValue || label || "Codexia").trim();
   const includeColophon = Boolean(titleValue?.trim() || subtitle?.trim());
   const uuid = createHash("sha1").update("arcadia-epub:" + bookTitle + ":" + label).digest("hex");
   const uuidFmt = [
@@ -625,7 +625,7 @@ ${subtitle?.trim() ? `    <p>${escapeXml(subtitle.trim())}</p>\n` : ""}  </div>`
         `  <div class="colophon" epub:type="colophon">
     <h1>奥付</h1>
     <p>${escapeXml(bookTitle)}</p>
-${subtitle?.trim() ? `    <p>${escapeXml(subtitle.trim())}</p>\n` : ""}    <p>Exported from Scriptorium</p>
+${subtitle?.trim() ? `    <p>${escapeXml(subtitle.trim())}</p>\n` : ""}    <p>Exported from Codexia</p>
   </div>`,
       ),
     );

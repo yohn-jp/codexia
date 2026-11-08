@@ -7,7 +7,7 @@ import {
   type ChangeOperation,
   type ChangeProposal,
   type SnapshotId,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 
 export const MAX_PROPOSAL_BYTES = 8 * 1024 * 1024;
 

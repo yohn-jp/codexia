@@ -1,4 +1,4 @@
-import type { ActionResult, ModuleActionContext, SnapshotId } from "@scriptorium/contracts";
+import type { ActionResult, ModuleActionContext, SnapshotId } from "@codexia/contracts";
 import type { DiagnosticIssue, DiagnosticsWorkerOutput } from "./analysis.js";
 import type { ProseBalanceResult } from "./proseBalance/index.js";
 import type { PlotSemanticWarning } from "./plot/types.js";
@@ -9,7 +9,7 @@ import type { VoiceConsistencyWarning } from "./declaredVoice.js";
 import type { StyleDeviationWarning } from "./voiceStyle.js";
 import { collectDiagnosticIssues } from "./issueNormalization.js";
 import { loadLintRulesConfig } from "./config.js";
-import { readCanonicalSnapshotEntities } from "@scriptorium/module-nlp";
+import { readCanonicalSnapshotEntities } from "@codexia/module-nlp";
 
 type DataRecord = Record<string, unknown>;
 interface CanonicalEntity {

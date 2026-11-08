@@ -14,7 +14,7 @@ import { ModuleRuntime } from "../../../packages/module-runtime/dist/index.js";
 const execFile = promisify(execFileCallback);
 const packageUrl = new URL("../package.json", import.meta.url);
 const storyPackage = JSON.parse(await readFile(packageUrl, "utf8"));
-const manifest = storyPackage.scriptoriumModule;
+const manifest = storyPackage.codexiaModule;
 const storyEntry = new URL("../dist/index.js", import.meta.url).href;
 
 async function git(cwd, args) {
@@ -126,7 +126,7 @@ async function stopHost(host) {
 }
 
 test("Zukan suggestion creation runs through Story, Core review, checkpoint, publish, and reclone", async (t) => {
-  const root = await mkdtemp(resolve(tmpdir(), "scriptorium-story-zukan-core-"));
+  const root = await mkdtemp(resolve(tmpdir(), "codexia-story-zukan-core-"));
   const authToken = randomBytes(32).toString("base64url");
   let host;
   try {

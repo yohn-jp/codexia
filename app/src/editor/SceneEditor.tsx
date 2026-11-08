@@ -1,6 +1,6 @@
 import { createContext, forwardRef, memo, useCallback, useContext, useEffect, useImperativeHandle, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { Scene, SceneRead } from "../api";
-import { snapshotKey, type SnapshotId } from "@scriptorium/contracts";
+import { snapshotKey, type SnapshotId } from "@codexia/contracts";
 import type { JournalEntry } from "../storage/journal";
 import { ManuscriptHistoryPanel } from "./ManuscriptHistoryPanel";
 import { MobileReadingPager } from "./MobileReadingPager";

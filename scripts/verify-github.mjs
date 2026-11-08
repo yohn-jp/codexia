@@ -9,12 +9,12 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { CoreStore } from '../packages/core/dist/index.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
-const fixture = { url: process.env.SCRIPTORIUM_ACCEPTANCE_GITHUB_URL };
+const fixture = { url: process.env.CODEXIA_ACCEPTANCE_GITHUB_URL };
 if (!fixture.url || !/^https:\/\/github\.com\/[^/]+\/[^/]+(?:\.git)?$/.test(fixture.url)) {
-  throw new Error('Set SCRIPTORIUM_ACCEPTANCE_GITHUB_URL to an authorized disposable synthetic GitHub repository. This check commits and pushes synthetic metadata.');
+  throw new Error('Set CODEXIA_ACCEPTANCE_GITHUB_URL to an authorized disposable synthetic GitHub repository. This check commits and pushes synthetic metadata.');
 }
-const githubToken = process.env.SCRIPTORIUM_GITHUB_TOKEN ?? execFileSync('gh',['auth','token'],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
-const dataDir = await fs.mkdtemp(path.join(os.tmpdir(),'scriptorium-live-p01-'));
+const githubToken = process.env.CODEXIA_GITHUB_TOKEN ?? execFileSync('gh',['auth','token'],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
+const dataDir = await fs.mkdtemp(path.join(os.tmpdir(),'codexia-live-p01-'));
 const sourceCommit = execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
 try {
   let store = new CoreStore({dataDir,githubToken});
@@ -53,6 +53,6 @@ try {
   assert.equal(existing.operationId,checkpoint.operationId);
   assert.equal((await store.observe(project.id)).snapshot.remoteCommit,beforeReplay);
   const result={sourceCommit,repositoryId:first.snapshot.repository.repositoryId,defaultBranch:'main',checkpointCommit:checkpoint.localCommit,publishedRemoteCommit:published.remoteCommit,reconstructedRemoteCommit:restored.snapshot.remoteCommit,operationId,batchId,checks:{actualGitHubMetadata:true,actualCloneFetchPush:true,remoteAndCheckpointSeparated:true,checkpointPendingBeforePush:true,confirmedPublish:true,completeDataRootDeletion:true,stableIdentityAfterReclone:true,batchReceiptFromGitHistory:true,noDuplicateOperationReplay:true}};
-  if (process.env.SCRIPTORIUM_ACCEPTANCE_RESULT) await fs.writeFile(process.env.SCRIPTORIUM_ACCEPTANCE_RESULT,JSON.stringify(result,null,2)+'\n');
+  if (process.env.CODEXIA_ACCEPTANCE_RESULT) await fs.writeFile(process.env.CODEXIA_ACCEPTANCE_RESULT,JSON.stringify(result,null,2)+'\n');
   console.log(JSON.stringify(result));
 } finally {await fs.rm(dataDir,{recursive:true,force:true});}

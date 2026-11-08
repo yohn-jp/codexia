@@ -6,8 +6,8 @@ import {
   type MigrationContext,
   type MigrationContribution,
   type MigrationProducer,
-} from "@scriptorium/migration";
-import type { RepositoryIdentity } from "@scriptorium/contracts";
+} from "@codexia/migration";
+import type { RepositoryIdentity } from "@codexia/contracts";
 import { planStorySqliteWorkflow } from "./workflowRows.js";
 
 const STORY_SOURCE_ROOTS = [

@@ -45,6 +45,6 @@ export function persistenceForModules(selectedModuleIds, moduleFormats) {
   const writableDeclarations = [...writable]
     .flatMap(([formatId, versions]) => [...versions].map((version) => ({ formatId, version })))
     .sort((left, right) => left.formatId < right.formatId ? -1 : left.formatId > right.formatId ? 1 : left.version - right.version);
-  return { contractVersion: 'scriptorium-persistence/v1', readable: readableDeclarations, writable: writableDeclarations };
+  return { contractVersion: 'codexia-persistence/v1', readable: readableDeclarations, writable: writableDeclarations };
 }
 

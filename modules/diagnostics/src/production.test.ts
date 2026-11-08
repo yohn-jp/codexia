@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import type { ChangeOperation, ChangeProposal, ModuleContext, SnapshotId } from "@scriptorium/contracts";
-import { ModuleRuntime } from "@scriptorium/module-runtime";
-import { createModule as createNlpModule } from "@scriptorium/module-nlp";
+import type { ChangeOperation, ChangeProposal, ModuleContext, SnapshotId } from "@codexia/contracts";
+import { ModuleRuntime } from "@codexia/module-runtime";
+import { createModule as createNlpModule } from "@codexia/module-nlp";
 import { createModule as createDiagnosticsModule } from "./index.js";
 
 const snapshot: SnapshotId = {
@@ -14,7 +14,7 @@ const snapshot: SnapshotId = {
 
 function moduleContext(): ModuleContext {
   return {
-    cacheDirectory: "/tmp/scriptorium-p06-test-cache",
+    cacheDirectory: "/tmp/codexia-p06-test-cache",
     signal: new AbortController().signal,
     async acquireCapability() { throw new Error("module context capability is available only during runtime invocation"); },
     async createWorkerService() { throw new Error("module context worker service is available only during runtime invocation"); },
@@ -34,7 +34,7 @@ async function createRuntime(files: Map<string, { content: string; revision: str
   const stub = moduleContext();
   const nlpDefinition = await createNlpModule(stub);
   const diagnosticsDefinition = await createDiagnosticsModule(stub);
-  const packageManifest = (url: URL) => JSON.parse(readFileSync(url, "utf8")).scriptoriumModule;
+  const packageManifest = (url: URL) => JSON.parse(readFileSync(url, "utf8")).codexiaModule;
   const nlpManifest = packageManifest(new URL("../../nlp/package.json", import.meta.url));
   const diagnosticsManifest = packageManifest(new URL("../package.json", import.meta.url));
   assert.deepEqual(nlpDefinition.manifest, nlpManifest, "NLP factory metadata must match installed package metadata");
@@ -46,7 +46,7 @@ async function createRuntime(files: Map<string, { content: string; revision: str
     manifests,
     enabled: ["diagnostics"],
     capabilityProviders,
-    cacheDirectory: "/tmp/scriptorium-p06-test-cache",
+    cacheDirectory: "/tmp/codexia-p06-test-cache",
     loaders: {
       nlp: (context) => createNlpModule(context),
       diagnostics: (context) => createDiagnosticsModule(context),
@@ -120,7 +120,7 @@ test("production modules lazily run the real Lindera child and preserve snapshot
     const data = diagnostics.data as { analysis: { charCount: number; sentenceCount: number; sentimentArc: { points: unknown[] } }; plotSemanticWarnings: unknown[]; synonymSuggestions: unknown[]; model: string; modelVersion: string; diagnosticsEngine: string };
     assert.equal(data.model, "lindera-wasm-nodejs-ipadic");
     assert.equal(data.modelVersion, "2.0.0");
-    assert.equal(data.diagnosticsEngine, "scriptorium-diagnostics-cpu");
+    assert.equal(data.diagnosticsEngine, "codexia-diagnostics-cpu");
     assert.equal(data.analysis.charCount, diagnosticsText.length);
     assert.equal(data.analysis.sentenceCount, 2);
     assert.ok(data.analysis.sentimentArc.points.length > 0);

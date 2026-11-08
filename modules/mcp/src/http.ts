@@ -1,10 +1,10 @@
 import { sessionLimits, clearIdleTimer, armIdleTimer, trackSessionStream, type SessionLifetime, type SessionLimits } from "./session-lifetime.js";
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { ActionDescriptor, ChangeOperation, ChangeProposal, ModuleActionContext, ProposalEvidence } from "@scriptorium/contracts";
+import type { ActionDescriptor, ChangeOperation, ChangeProposal, ModuleActionContext, ProposalEvidence } from "@codexia/contracts";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import type { HttpContribution } from "@scriptorium/contracts";
+import type { HttpContribution } from "@codexia/contracts";
 import { McpApiError, type McpActionClient } from "./api-client.js";
 import { registerMcpTools } from "./tools.js";
 
@@ -88,7 +88,7 @@ function closeSession(session: McpSession, sessions: Map<string, McpSession>): P
 
 function createSession(projectId: string, sessions: Map<string, McpSession>, now: number): McpSession {
   const actionContext = new AsyncLocalStorage<ModuleActionContext>();
-  const server = new McpServer({ name: "scriptorium-mcp", version: "0.1.0" });
+  const server = new McpServer({ name: "codexia-mcp", version: "0.1.0" });
   registerMcpTools(server, requestClient(actionContext));
   const sessionId = globalThis.crypto.randomUUID();
   let session: McpSession;

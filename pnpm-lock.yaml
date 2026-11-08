@@ -169,40 +169,40 @@ importers:
       '@playwright/test':
         specifier: ^1.64.1
         version: 1.64.1
-      '@scriptorium/api':
+      '@codexia/api':
         specifier: workspace:*
         version: link:packages/api
-      '@scriptorium/contracts':
+      '@codexia/contracts':
         specifier: workspace:*
         version: link:packages/contracts
-      '@scriptorium/module-assistant':
+      '@codexia/module-assistant':
         specifier: workspace:*
         version: link:modules/assistant
-      '@scriptorium/module-diagnostics':
+      '@codexia/module-diagnostics':
         specifier: workspace:*
         version: link:modules/diagnostics
-      '@scriptorium/module-mcp':
+      '@codexia/module-mcp':
         specifier: workspace:*
         version: link:modules/mcp
-      '@scriptorium/module-nlp':
+      '@codexia/module-nlp':
         specifier: workspace:*
         version: link:modules/nlp
-      '@scriptorium/module-publishing':
+      '@codexia/module-publishing':
         specifier: workspace:*
         version: link:modules/publishing
-      '@scriptorium/module-runtime':
+      '@codexia/module-runtime':
         specifier: workspace:*
         version: link:packages/module-runtime
-      '@scriptorium/module-search':
+      '@codexia/module-search':
         specifier: workspace:*
         version: link:modules/search
-      '@scriptorium/module-semantic':
+      '@codexia/module-semantic':
         specifier: workspace:*
         version: link:modules/semantic
-      '@scriptorium/module-speaker':
+      '@codexia/module-speaker':
         specifier: workspace:*
         version: link:modules/speaker
-      '@scriptorium/module-story':
+      '@codexia/module-story':
         specifier: workspace:*
         version: link:modules/story
       '@types/node':
@@ -247,7 +247,7 @@ importers:
       '@radix-ui/react-tabs':
         specifier: 1.2.1
         version: 1.2.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@scriptorium/contracts':
+      '@codexia/contracts':
         specifier: workspace:*
         version: link:../packages/contracts
       react:
@@ -284,28 +284,28 @@ importers:
       '@ai-sdk/openai-compatible':
         specifier: 2.0.62
         version: 2.0.62(zod@3.25.76)
-      '@scriptorium/contracts':
+      '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@scriptorium/migration':
+      '@codexia/migration':
         specifier: workspace:*
         version: link:../../packages/migration
-      '@scriptorium/module-diagnostics':
+      '@codexia/module-diagnostics':
         specifier: workspace:*
         version: link:../diagnostics
-      '@scriptorium/module-nlp':
+      '@codexia/module-nlp':
         specifier: workspace:*
         version: link:../nlp
-      '@scriptorium/module-runtime':
+      '@codexia/module-runtime':
         specifier: workspace:*
         version: link:../../packages/module-runtime
-      '@scriptorium/module-semantic':
+      '@codexia/module-semantic':
         specifier: workspace:*
         version: link:../semantic
-      '@scriptorium/module-speaker':
+      '@codexia/module-speaker':
         specifier: workspace:*
         version: link:../speaker
-      '@scriptorium/module-story':
+      '@codexia/module-story':
         specifier: workspace:*
         version: link:../story
       ai:
@@ -329,16 +329,16 @@ importers:
 
   modules/diagnostics:
     dependencies:
-      '@scriptorium/contracts':
+      '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@scriptorium/migration':
+      '@codexia/migration':
         specifier: workspace:*
         version: link:../../packages/migration
-      '@scriptorium/module-nlp':
+      '@codexia/module-nlp':
         specifier: workspace:*
         version: link:../nlp
-      '@scriptorium/module-runtime':
+      '@codexia/module-runtime':
         specifier: workspace:*
         version: link:../../packages/module-runtime
       react:
@@ -356,7 +356,7 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.29.0
         version: 1.29.0(zod@3.25.76)
-      '@scriptorium/contracts':
+      '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
       zod:
@@ -368,13 +368,13 @@ importers:
       '@huggingface/transformers':
         specifier: 3.8.1
         version: 3.8.1
-      '@scriptorium/contracts':
+      '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@scriptorium/migration':
+      '@codexia/migration':
         specifier: workspace:*
         version: link:../../packages/migration
-      '@scriptorium/module-runtime':
+      '@codexia/module-runtime':
         specifier: workspace:*
         version: link:../../packages/module-runtime
       lindera-wasm-nodejs-ipadic:
@@ -392,10 +392,10 @@ importers:
 
   modules/publishing:
     dependencies:
-      '@scriptorium/contracts':
+      '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@scriptorium/migration':
+      '@codexia/migration':
         specifier: workspace:*
         version: link:../../packages/migration
       jszip:
@@ -413,10 +413,10 @@ importers:
 
   modules/search:
     dependencies:
-      '@scriptorium/contracts':
+      '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@scriptorium/module-runtime':
+      '@codexia/module-runtime':
         specifier: workspace:*
         version: link:../../packages/module-runtime
 
@@ -425,19 +425,19 @@ importers:
       '@huggingface/transformers':
         specifier: 3.8.1
         version: 3.8.1
-      '@scriptorium/contracts':
+      '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@scriptorium/migration':
+      '@codexia/migration':
         specifier: workspace:*
         version: link:../../packages/migration
-      '@scriptorium/module-nlp':
+      '@codexia/module-nlp':
         specifier: workspace:*
         version: link:../nlp
-      '@scriptorium/module-runtime':
+      '@codexia/module-runtime':
         specifier: workspace:*
         version: link:../../packages/module-runtime
-      '@scriptorium/module-story':
+      '@codexia/module-story':
         specifier: workspace:*
         version: link:../story
       react:
@@ -452,22 +452,22 @@ importers:
 
   modules/speaker:
     dependencies:
-      '@scriptorium/contracts':
+      '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@scriptorium/migration':
+      '@codexia/migration':
         specifier: workspace:*
         version: link:../../packages/migration
-      '@scriptorium/module-diagnostics':
+      '@codexia/module-diagnostics':
         specifier: workspace:*
         version: link:../diagnostics
-      '@scriptorium/module-nlp':
+      '@codexia/module-nlp':
         specifier: workspace:*
         version: link:../nlp
-      '@scriptorium/module-runtime':
+      '@codexia/module-runtime':
         specifier: workspace:*
         version: link:../../packages/module-runtime
-      '@scriptorium/module-story':
+      '@codexia/module-story':
         specifier: workspace:*
         version: link:../story
       yaml:
@@ -479,10 +479,10 @@ importers:
 
   modules/story:
     dependencies:
-      '@scriptorium/contracts':
+      '@codexia/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@scriptorium/migration':
+      '@codexia/migration':
         specifier: workspace:*
         version: link:../../packages/migration
       react:
@@ -497,13 +497,13 @@ importers:
 
   packages/api:
     dependencies:
-      '@scriptorium/contracts':
+      '@codexia/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@scriptorium/core':
+      '@codexia/core':
         specifier: workspace:*
         version: link:../core
-      '@scriptorium/module-runtime':
+      '@codexia/module-runtime':
         specifier: workspace:*
         version: link:../module-runtime
       fastify:
@@ -517,7 +517,7 @@ importers:
 
   packages/core:
     dependencies:
-      '@scriptorium/contracts':
+      '@codexia/contracts':
         specifier: workspace:*
         version: link:../contracts
       yaml:
@@ -526,52 +526,52 @@ importers:
 
   packages/migration:
     dependencies:
-      '@scriptorium/contracts':
+      '@codexia/contracts':
         specifier: workspace:*
         version: link:../contracts
 
   packages/module-runtime:
     dependencies:
-      '@scriptorium/contracts':
+      '@codexia/contracts':
         specifier: workspace:*
         version: link:../contracts
 
   profiles/core:
     dependencies:
-      '@scriptorium/api':
+      '@codexia/api':
         specifier: workspace:*
         version: link:../../packages/api
 
   profiles/full:
     dependencies:
-      '@scriptorium/api':
+      '@codexia/api':
         specifier: workspace:*
         version: link:../../packages/api
-      '@scriptorium/module-assistant':
+      '@codexia/module-assistant':
         specifier: workspace:*
         version: link:../../modules/assistant
-      '@scriptorium/module-diagnostics':
+      '@codexia/module-diagnostics':
         specifier: workspace:*
         version: link:../../modules/diagnostics
-      '@scriptorium/module-mcp':
+      '@codexia/module-mcp':
         specifier: workspace:*
         version: link:../../modules/mcp
-      '@scriptorium/module-nlp':
+      '@codexia/module-nlp':
         specifier: workspace:*
         version: link:../../modules/nlp
-      '@scriptorium/module-publishing':
+      '@codexia/module-publishing':
         specifier: workspace:*
         version: link:../../modules/publishing
-      '@scriptorium/module-search':
+      '@codexia/module-search':
         specifier: workspace:*
         version: link:../../modules/search
-      '@scriptorium/module-semantic':
+      '@codexia/module-semantic':
         specifier: workspace:*
         version: link:../../modules/semantic
-      '@scriptorium/module-speaker':
+      '@codexia/module-speaker':
         specifier: workspace:*
         version: link:../../modules/speaker
-      '@scriptorium/module-story':
+      '@codexia/module-story':
         specifier: workspace:*
         version: link:../../modules/story
 

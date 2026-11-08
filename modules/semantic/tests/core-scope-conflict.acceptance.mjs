@@ -10,7 +10,7 @@ import { CoreError, CoreStore } from "../../../packages/core/dist/index.js";
 import { ModuleRuntime } from "../../../packages/module-runtime/dist/index.js";
 
 const execFile = promisify(execFileCallback);
-const root = await mkdtemp(join(tmpdir(), "scriptorium-semantic-scope-"));
+const root = await mkdtemp(join(tmpdir(), "codexia-semantic-scope-"));
 const remote = join(root, "remote.git");
 const seed = join(root, "seed");
 let runtime;
@@ -58,7 +58,7 @@ try {
   const semanticEntry = new URL("../dist/index.js", import.meta.url).href;
   const runtimeCache = join(root, "runtime-cache");
   runtime = new ModuleRuntime({
-    manifests: [storyPackage.scriptoriumModule, nlpPackage.scriptoriumModule, semanticPackage.scriptoriumModule],
+    manifests: [storyPackage.codexiaModule, nlpPackage.codexiaModule, semanticPackage.codexiaModule],
     enabled: ["semantic"],
     cacheDirectory: runtimeCache,
     workerEntries: {

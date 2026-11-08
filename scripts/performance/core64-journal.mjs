@@ -9,17 +9,17 @@ const [outputPath, repeatsArgument = '20', modeArgument] = process.argv.slice(2)
 const repeats = Number(repeatsArgument);
 const scopedOnly = modeArgument === '--scoped-only';
 if (!outputPath || !Number.isInteger(repeats) || repeats < 5 || repeats > 50 || (modeArgument !== undefined && !scopedOnly)) {
-  throw new Error('Usage: SCRIPTORIUM_CORE64_RUNTIME_ROOT=<frozen-root> node scripts/performance/core64-journal.mjs <output.json> [5..50 repeats] [--scoped-only]');
+  throw new Error('Usage: CODEXIA_CORE64_RUNTIME_ROOT=<frozen-root> node scripts/performance/core64-journal.mjs <output.json> [5..50 repeats] [--scoped-only]');
 }
 
-const runtimeRoot = resolve(process.env.SCRIPTORIUM_CORE64_RUNTIME_ROOT ?? process.cwd());
+const runtimeRoot = resolve(process.env.CODEXIA_CORE64_RUNTIME_ROOT ?? process.cwd());
 const worktreeRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const requireFromRuntime = createRequire(resolve(runtimeRoot, 'package.json'));
 const requireFromApp = createRequire(resolve(runtimeRoot, 'app/package.json'));
 const { chromium } = requireFromRuntime('@playwright/test');
 const { createServer } = await import(pathToFileURL(requireFromApp.resolve('vite')).href);
-const chromiumPath = process.env.SCRIPTORIUM_E2E_CHROMIUM;
-if (!chromiumPath) throw new Error('Set SCRIPTORIUM_E2E_CHROMIUM to the accepted Chromium executable.');
+const chromiumPath = process.env.CODEXIA_E2E_CHROMIUM;
+if (!chromiumPath) throw new Error('Set CODEXIA_E2E_CHROMIUM to the accepted Chromium executable.');
 
 const probeHtmlPath = resolve(worktreeRoot, 'scripts/performance/core64-journal-probe.html');
 const probeScriptPath = fileURLToPath(import.meta.url);
@@ -146,10 +146,10 @@ try {
   vite = await createServer({
     root: appRoot,
     configFile: appConfig,
-    cacheDir: resolve(process.env.SCRIPTORIUM_CORE64_CACHE_DIR ?? '/tmp/scriptorium-core64-journal-vite-cache'),
+    cacheDir: resolve(process.env.CODEXIA_CORE64_CACHE_DIR ?? '/tmp/codexia-core64-journal-vite-cache'),
     mode: 'development',
     clearScreen: false,
-    server: { host: '127.0.0.1', port: Number(process.env.SCRIPTORIUM_CORE64_PORT ?? 30000 + (process.pid % 20000)), strictPort: false, hmr: false, open: false },
+    server: { host: '127.0.0.1', port: Number(process.env.CODEXIA_CORE64_PORT ?? 30000 + (process.pid % 20000)), strictPort: false, hmr: false, open: false },
     plugins: [probePlugin],
   });
   await vite.listen();

@@ -8,19 +8,19 @@ const commands = [
   ["pnpm", ["typecheck:tests"]],
   ["pnpm", ["typecheck:safety"]],
   ["pnpm", ["test"]],
-  ["pnpm", ["build"], { SCRIPTORIUM_PROFILE: "core" }],
-  ["pnpm", ["audit:core"], { SCRIPTORIUM_PROFILE: "core" }],
-  ["pnpm", ["exec", "playwright", "test", "--config", "tests/e2e/playwright.config.ts"], { SCRIPTORIUM_PROFILE: "core" }],
-  ["bash", ["scripts/verify-oci.sh"], { SCRIPTORIUM_PROFILE: "core", SCRIPTORIUM_OCI_IMAGE: process.env.SCRIPTORIUM_OCI_CORE_IMAGE ?? "scriptorium:verification-core" }],
-  ["pnpm", ["build"], { SCRIPTORIUM_PROFILE: "full" }],
-  ["pnpm", ["exec", "playwright", "test", "--config", "tests/e2e/playwright.config.ts"], { SCRIPTORIUM_PROFILE: "full" }],
-  ["node", ["--test", "tests/integration/mcp-acceptance.test.mjs"], { SCRIPTORIUM_MCP_ACCEPTANCE_MODULES: "story,nlp,diagnostics,semantic,speaker,assistant,publishing,mcp" }],
+  ["pnpm", ["build"], { CODEXIA_PROFILE: "core" }],
+  ["pnpm", ["audit:core"], { CODEXIA_PROFILE: "core" }],
+  ["pnpm", ["exec", "playwright", "test", "--config", "tests/e2e/playwright.config.ts"], { CODEXIA_PROFILE: "core" }],
+  ["bash", ["scripts/verify-oci.sh"], { CODEXIA_PROFILE: "core", CODEXIA_OCI_IMAGE: process.env.CODEXIA_OCI_CORE_IMAGE ?? "codexia:verification-core" }],
+  ["pnpm", ["build"], { CODEXIA_PROFILE: "full" }],
+  ["pnpm", ["exec", "playwright", "test", "--config", "tests/e2e/playwright.config.ts"], { CODEXIA_PROFILE: "full" }],
+  ["node", ["--test", "tests/integration/mcp-acceptance.test.mjs"], { CODEXIA_MCP_ACCEPTANCE_MODULES: "story,nlp,diagnostics,semantic,speaker,assistant,publishing,mcp" }],
   ["node", ["--test", "modules/diagnostics/tests/production.acceptance.mjs"]],
   ["node", ["--test", "tests/integration/migration-acceptance.test.mjs"]],
-  ["bash", ["scripts/verify-oci.sh"], { SCRIPTORIUM_PROFILE: "full", SCRIPTORIUM_OCI_IMAGE: process.env.SCRIPTORIUM_OCI_FULL_IMAGE ?? "scriptorium:verification-full" }],
+  ["bash", ["scripts/verify-oci.sh"], { CODEXIA_PROFILE: "full", CODEXIA_OCI_IMAGE: process.env.CODEXIA_OCI_FULL_IMAGE ?? "codexia:verification-full" }],
 ];
 for (const [command, args, overrides = {}] of commands) {
-  const profile = overrides.SCRIPTORIUM_PROFILE;
+  const profile = overrides.CODEXIA_PROFILE;
   console.info(`\nRunning ${command} ${args.join(" ")}${profile ? ` (profile=${profile})` : ""}`);
   const code = await new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: "inherit", env: { ...process.env, ...overrides } });

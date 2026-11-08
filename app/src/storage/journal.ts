@@ -7,7 +7,7 @@ import {
   type ProposalStatus,
   type RepositoryIdentity,
   type SnapshotId,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 
 const DATABASE_NAME = "scriptorium-recovery";
 const DATABASE_VERSION = 3;

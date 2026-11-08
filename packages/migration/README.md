@@ -1,4 +1,4 @@
-# `@scriptorium/migration`
+# `@codexia/migration`
 
 This package inspects an explicitly selected legacy project and workspace data root, then returns a deterministic, reviewable `ChangeOperation[]`. Inspection does not write to the legacy project, Git history, SQLite databases, or target snapshot. The returned operations are proposals for the normal author review flow; they do not approve, checkpoint, or publish changes.
 
@@ -8,7 +8,7 @@ This package inspects an explicitly selected legacy project and workspace data r
 import {
   inspectLegacyProject,
   proposeMigrationImport,
-} from "@scriptorium/migration";
+} from "@codexia/migration";
 
 const inspection = await inspectLegacyProject({
   sourceRoot: "/data/legacy/project",
@@ -34,7 +34,7 @@ Modules can register domain-owned migration producers when composing the generic
 import {
   createMigrationProducerRegistry,
   registerMigrationProducer,
-} from "@scriptorium/migration";
+} from "@codexia/migration";
 
 const registry = createMigrationProducerRegistry();
 registerMigrationProducer(registry, {

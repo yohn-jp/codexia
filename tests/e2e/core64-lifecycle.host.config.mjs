@@ -2,12 +2,12 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
-const chromium = process.env.SCRIPTORIUM_E2E_CHROMIUM;
+const chromium = process.env.CODEXIA_E2E_CHROMIUM;
 
 export default {
   testDir: resolve(repositoryRoot, "tests/e2e"),
   testMatch: "core64-lifecycle.host.acceptance.spec.ts",
-  outputDir: process.env.SCRIPTORIUM_C64_LIFECYCLE_RESULTS ?? "/tmp/scriptorium-core64-lifecycle-host-results",
+  outputDir: process.env.CODEXIA_C64_LIFECYCLE_RESULTS ?? "/tmp/codexia-core64-lifecycle-host-results",
   fullyParallel: false,
   workers: 1,
   timeout: 45_000,

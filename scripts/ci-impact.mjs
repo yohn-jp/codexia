@@ -62,7 +62,7 @@ export function validateVerificationPlan(plan) {
 export function planDigest(plan) { return createHash('sha256').update(JSON.stringify(validateVerificationPlan(plan))).digest('hex'); }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const sha = process.env.SCRIPTORIUM_EXPECTED_SHA ?? execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const sha = process.env.CODEXIA_EXPECTED_SHA ?? execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const event = process.env.GITHUB_EVENT_NAME ?? 'workflow_dispatch';
   const payload = process.env.GITHUB_EVENT_PATH ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')) : {};
   const base = payload.pull_request?.base?.sha ?? null;
@@ -73,7 +73,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     } catch { /* Missing history must run full verification, never an empty selection. */ }
   }
   const plan = createVerificationPlan({ files, event, sha, base });
-  const planPath = process.env.SCRIPTORIUM_CI_PLAN_PATH ?? 'ci-plan.json';
+  const planPath = process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json';
   mkdirSync(path.dirname(planPath), { recursive: true });
   writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`);
   if (process.env.GITHUB_OUTPUT) {

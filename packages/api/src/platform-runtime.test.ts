@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { SnapshotReader } from "@scriptorium/contracts";
+import type { SnapshotReader } from "@codexia/contracts";
 import {
   metadataForRuntime,
   normalizeRemoteRevision,
@@ -30,7 +30,7 @@ const ASSIGNMENT = {
   grantPolicy: {
     issuer: "https://praetorium.example",
     jwksUrl: "https://praetorium.example/.well-known/grant-jwks.json",
-    audience: "https://praetorium.example/scriptorium",
+    audience: "https://praetorium.example/codexia",
   },
 } as const;
 

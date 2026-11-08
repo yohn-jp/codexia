@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { ChangeOperation } from "@scriptorium/contracts";
+import type { ChangeOperation } from "@codexia/contracts";
 import type {
   MigrationContext,
   MigrationContribution,

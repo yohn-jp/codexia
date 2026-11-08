@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { snapshotKey, type BrowserEditorDocument, type BrowserModuleContext, type BrowserModuleDefinition, type ChangeOperation, type ChangeProposal, type ModuleStatus, type SnapshotId, type UiContribution } from "@scriptorium/contracts";
+import { snapshotKey, type BrowserEditorDocument, type BrowserModuleContext, type BrowserModuleDefinition, type ChangeOperation, type ChangeProposal, type ModuleStatus, type SnapshotId, type UiContribution } from "@codexia/contracts";
 import { api } from "../api";
 import { moduleBrowserLoaders } from "../generated/browser-modules";
 import type { BrowserJournal, JournalProposalOwnership } from "../storage/journal";

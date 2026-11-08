@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ChangeOperation, ChangeProposal, ModuleActionContext, ModuleContext, SnapshotId } from "@scriptorium/contracts";
+import type { ChangeOperation, ChangeProposal, ModuleActionContext, ModuleContext, SnapshotId } from "@codexia/contracts";
 import { createModule } from "./index.js";
 
 const snapshot: SnapshotId = {
@@ -10,7 +10,7 @@ const snapshot: SnapshotId = {
 
 test("source LLM reactions are external features with deny-by-default and explicit proposal consent", async () => {
   const moduleContext = {
-    cacheDirectory: "/tmp/scriptorium-nlp-feature-consent-test",
+    cacheDirectory: "/tmp/codexia-nlp-feature-consent-test",
     signal: new AbortController().signal,
     async acquireCapability() { throw new Error("tokenizer is not used by feature-consent actions"); },
     async createWorkerService() { throw new Error("tokenizer worker is not used by feature-consent actions"); },

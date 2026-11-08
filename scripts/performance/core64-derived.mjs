@@ -229,7 +229,7 @@ function summarizeStats(result) {
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = resolve(dirname(scriptPath), '../..');
-const coreEntry = resolve(process.env.SCRIPTORIUM_CORE64_ENTRY ?? join(repoRoot, 'packages/core/dist/index.js'));
+const coreEntry = resolve(process.env.CODEXIA_CORE64_ENTRY ?? join(repoRoot, 'packages/core/dist/index.js'));
 const runtimeSource = git(dirname(coreEntry), 'rev-parse', 'HEAD');
 const runId = createHash('sha256').update(`${dataset.commit}\0${mode}\0${Date.now()}\0${process.pid}`).digest('hex').slice(0, 16);
 const report = {
@@ -267,7 +267,7 @@ function addCounters(samples) {
   return totals;
 }
 
-const temporaryRoot = await mkdtemp(join(tmpdir(), `scriptorium-core64-derived-${runId}-`));
+const temporaryRoot = await mkdtemp(join(tmpdir(), `codexia-core64-derived-${runId}-`));
 let store;
 await save(output, report);
 try {

@@ -1,5 +1,5 @@
 {
-  "name": "@scriptorium/profile-core",
+  "name": "@codexia/profile-core",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -7,6 +7,6 @@
     "generated"
   ],
   "dependencies": {
-    "@scriptorium/api": "workspace:*"
+    "@codexia/api": "workspace:*"
   }
 }

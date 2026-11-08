@@ -5,11 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { assertChangeOperation, snapshotScopeRevision } from "@scriptorium/contracts";
-import type { ChangeOperation, ModuleActionContext, ModuleContext, ModuleManifest, SnapshotId } from "@scriptorium/contracts";
-import type { CandidateTerm, CanonicalSnapshotEntity } from "@scriptorium/module-nlp";
-import { ModuleRuntime } from "@scriptorium/module-runtime";
-import type { StoryEntity } from "@scriptorium/module-story";
+import { assertChangeOperation, snapshotScopeRevision } from "@codexia/contracts";
+import type { ChangeOperation, ModuleActionContext, ModuleContext, ModuleManifest, SnapshotId } from "@codexia/contracts";
+import type { CandidateTerm, CanonicalSnapshotEntity } from "@codexia/module-nlp";
+import { ModuleRuntime } from "@codexia/module-runtime";
+import type { StoryEntity } from "@codexia/module-story";
 import {
   EMBEDDING_DIMENSIONS,
   EMBEDDING_MODEL_ID,
@@ -258,24 +258,24 @@ test("source rule contradictions preserve pre-scene ownership boundaries and val
 });
 
 test("default ModuleRuntime composes semantic status, real CPU rebuild/search/rerank, and cache recovery", {
-  skip: !process.env.SCRIPTORIUM_SEMANTIC_MODEL_CACHE,
+  skip: !process.env.CODEXIA_SEMANTIC_MODEL_CACHE,
   timeout: 300_000,
 }, async () => {
-  const modelCache = process.env.SCRIPTORIUM_SEMANTIC_MODEL_CACHE!;
-  const cacheDirectory = await mkdtemp(path.join(os.tmpdir(), "scriptorium-semantic-p09-"));
+  const modelCache = process.env.CODEXIA_SEMANTIC_MODEL_CACHE!;
+  const cacheDirectory = await mkdtemp(path.join(os.tmpdir(), "codexia-semantic-p09-"));
   const modelDirectory = path.join(cacheDirectory, "semantic", "semantic", "models");
   await mkdir(path.dirname(modelDirectory), { recursive: true });
   await symlink(modelCache, modelDirectory, "dir");
   const [storyPackage, nlpPackage, semanticPackage] = await Promise.all([
-    readFile(new URL("../../story/package.json", import.meta.url), "utf8").then((value) => JSON.parse(value) as { scriptoriumModule: ModuleManifest }),
-    readFile(new URL("../../nlp/package.json", import.meta.url), "utf8").then((value) => JSON.parse(value) as { scriptoriumModule: ModuleManifest }),
-    readFile(new URL("../package.json", import.meta.url), "utf8").then((value) => JSON.parse(value) as { scriptoriumModule: ModuleManifest }),
+    readFile(new URL("../../story/package.json", import.meta.url), "utf8").then((value) => JSON.parse(value) as { codexiaModule: ModuleManifest }),
+    readFile(new URL("../../nlp/package.json", import.meta.url), "utf8").then((value) => JSON.parse(value) as { codexiaModule: ModuleManifest }),
+    readFile(new URL("../package.json", import.meta.url), "utf8").then((value) => JSON.parse(value) as { codexiaModule: ModuleManifest }),
   ]);
   const storyEntry = new URL("../../story/dist/index.js", import.meta.url).href;
   const nlpEntry = new URL("../../nlp/dist/index.js", import.meta.url).href;
   const semanticEntry = new URL("../dist/index.js", import.meta.url).href;
   const runtime = new ModuleRuntime({
-    manifests: [storyPackage.scriptoriumModule, nlpPackage.scriptoriumModule, semanticPackage.scriptoriumModule],
+    manifests: [storyPackage.codexiaModule, nlpPackage.codexiaModule, semanticPackage.codexiaModule],
     enabled: ["semantic"],
     cacheDirectory,
     workerEntries: {

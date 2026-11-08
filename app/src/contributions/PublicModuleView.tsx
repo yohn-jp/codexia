@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ModuleId } from "@scriptorium/contracts";
+import type { ModuleId } from "@codexia/contracts";
 import { ThemeControl } from "../components/ThemeControl";
 import type { ThemeMode } from "../theme";
 import { moduleBrowserLoaders } from "../generated/browser-modules";
@@ -87,7 +87,7 @@ export function PublicModuleView({
   return (
     <main className="public-module-shell" aria-label="共有された読書ビュー">
       <header className="public-module-header">
-        <span>Scriptorium</span>
+        <span>Codexia</span>
         <span>公開読書ビュー</span>
         <ThemeControl mode={themeMode} onChange={onThemeChange} error={themeError} />
       </header>

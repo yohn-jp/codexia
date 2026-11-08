@@ -12,7 +12,7 @@ import {
   type ModuleActionContext,
   type ModuleContext,
   type SnapshotId,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 import { createAssistantActions } from "./actions.js";
 import { createModule } from "./index.js";
 

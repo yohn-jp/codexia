@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BUILTIN_MODULE_IDS } from "@scriptorium/contracts";
+import { BUILTIN_MODULE_IDS } from "@codexia/contracts";
 import { isModuleId, MODULE_IDS } from "./runtime-error.js";
 
 test("runtime module membership uses the canonical built-in IDs", () => {

@@ -21,10 +21,10 @@ const nlpPackage = JSON.parse(await readFile(nlpPackageUrl, "utf8"));
 const diagnosticsPackage = JSON.parse(await readFile(diagnosticsPackageUrl, "utf8"));
 const storyPackage = JSON.parse(await readFile(storyPackageUrl, "utf8"));
 const speakerPackage = JSON.parse(await readFile(speakerPackageUrl, "utf8"));
-const nlpManifest = nlpPackage.scriptoriumModule;
-const diagnosticsManifest = diagnosticsPackage.scriptoriumModule;
-const storyManifest = storyPackage.scriptoriumModule;
-const speakerManifest = speakerPackage.scriptoriumModule;
+const nlpManifest = nlpPackage.codexiaModule;
+const diagnosticsManifest = diagnosticsPackage.codexiaModule;
+const storyManifest = storyPackage.codexiaModule;
+const speakerManifest = speakerPackage.codexiaModule;
 const nlpEntry = new URL("../../nlp/dist/index.js", import.meta.url).href;
 const diagnosticsEntry = new URL("../dist/index.js", import.meta.url).href;
 const storyEntry = new URL("../../story/dist/index.js", import.meta.url).href;
@@ -232,7 +232,7 @@ test("P06 public actions survive Core-approved publish, data-root deletion, and 
   assert.ok(nlpManifest && diagnosticsManifest, "installed NLP and diagnostics module metadata must be present");
   assert.deepEqual(diagnosticsManifest.optionalRequires, ["semantic.embedding"], "diagnostics retains its optional semantic provider contract");
 
-  const root = await mkdtemp(join(tmpdir(), "scriptorium-p06-production-"));
+  const root = await mkdtemp(join(tmpdir(), "codexia-p06-production-"));
   const remote = await createSyntheticRepository(root);
   const dataDirectory = join(root, "data-root");
   let runtime;
@@ -258,7 +258,7 @@ test("P06 public actions survive Core-approved publish, data-root deletion, and 
     for (const sentence of nlp.sentences) assert.equal(nlp.text.slice(sentence.start, sentence.end), sentence.text);
     assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, [], "the actual NLP child exits after its final tokenizer lease");
 
-    const cachedTokenizerModels = process.env.SCRIPTORIUM_TOKENIZER_MODELS_DIR ?? "/tmp/scriptorium-model-runtime-edc033c/home/.arcadia/models";
+    const cachedTokenizerModels = process.env.CODEXIA_TOKENIZER_MODELS_DIR ?? "/tmp/codexia-model-runtime-edc033c/home/.arcadia/models";
     await stat(join(cachedTokenizerModels, "Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer.json"));
     const originalHome = process.env.HOME;
     const originalBackend = process.env.ARCADIA_TOKENIZER_BACKEND;
@@ -298,7 +298,7 @@ test("P06 public actions survive Core-approved publish, data-root deletion, and 
       await mkdir(emptyTokenizerHome, { recursive: true });
       process.env.HOME = emptyTokenizerHome;
       const fallbackTokenResult = await runtime.invokeAction("nlp", "nlp.countTokens", {
-        texts: ["駅abc", "abcdef", ""], modelId: "scriptorium-p06/no-such-tokenizer",
+        texts: ["駅abc", "abcdef", ""], modelId: "codexia-p06/no-such-tokenizer",
       }, host);
       const fallbackTokens = actionData(fallbackTokenResult, "nlp.countTokens unavailable fallback", reader);
       assert.deepEqual(fallbackTokens.counts, [2, 2, 0], "an unavailable local tokenizer uses the source CJK/three-character formula");
@@ -307,7 +307,7 @@ test("P06 public actions survive Core-approved publish, data-root deletion, and 
         exact: false,
         engine: "source-approx",
         engineVersion: "source-approx-v1",
-        requestedModelId: "scriptorium-p06/no-such-tokenizer",
+        requestedModelId: "codexia-p06/no-such-tokenizer",
         fallbackReason: "tokenizer_unavailable",
       });
       assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, [], "the unavailable-tokenizer child exits after its lease is released");
@@ -337,7 +337,7 @@ test("P06 public actions survive Core-approved publish, data-root deletion, and 
     const diagnostics = actionData(diagnosticsResult, "diagnostics.analyze", reader);
     assert.equal(diagnostics.model, "lindera-wasm-nodejs-ipadic");
     assert.equal(diagnostics.modelVersion, "2.0.0");
-    assert.equal(diagnostics.diagnosticsEngine, "scriptorium-diagnostics-cpu");
+    assert.equal(diagnostics.diagnosticsEngine, "codexia-diagnostics-cpu");
     assert.ok(diagnostics.analysis.sentimentArc.points.length > 0);
     assert.ok(diagnostics.semanticEmbedding === undefined, "this P06 acceptance run does not claim P09 embedding-engine certification");
 
@@ -554,7 +554,7 @@ test("P06 public actions survive Core-approved publish, data-root deletion, and 
     }, host);
     const rebuiltDiagnostics = actionData(rebuiltAnalysis, "recloned diagnostics.analyze", rebuiltReader);
     assert.equal(rebuiltDiagnostics.model, "lindera-wasm-nodejs-ipadic");
-    assert.equal(rebuiltDiagnostics.diagnosticsEngine, "scriptorium-diagnostics-cpu");
+    assert.equal(rebuiltDiagnostics.diagnosticsEngine, "codexia-diagnostics-cpu");
     assert.ok(rebuiltDiagnostics.analysis.sentimentArc.points.length > 0, "diagnostics recompute from the recloned snapshot with the actual CPU engines");
     assert.deepEqual(restartedRuntime.workerSupervisor.activeWorkerPids, [], "the rebuilt real tokenizer child exits after its final action lease");
   } finally {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import type { ChangeOperation } from "@scriptorium/contracts";
+import type { ChangeOperation } from "@codexia/contracts";
 import { api, ApiError } from "./api.js";
 
 const originalFetch = globalThis.fetch;

@@ -1,6 +1,6 @@
 import { mineFrequentPhrases } from "../phraseMining.js";
 import type { SentimentArc } from "../sentimentArc.js";
-import type { Token } from "@scriptorium/module-nlp";
+import type { Token } from "@codexia/module-nlp";
 import type { HabitualPhraseWarning, SentimentContextBand } from "./types.js";
 
 /**

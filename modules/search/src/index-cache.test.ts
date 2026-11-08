@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { DocumentSource, SnapshotId, SnapshotReader } from "@scriptorium/contracts";
+import type { DocumentSource, SnapshotId, SnapshotReader } from "@codexia/contracts";
 import { isSearchableDocumentPath, SnapshotIndexCache, type DocumentSourceFactory } from "./index-cache.js";
 
 type StoredFile = { content: string; revision: string };

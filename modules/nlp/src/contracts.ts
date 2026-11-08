@@ -1,5 +1,5 @@
 import type { MorphologyAnalysis } from "./tokenizer/types.js";
-import type { SnapshotId } from "@scriptorium/contracts";
+import type { SnapshotId } from "@codexia/contracts";
 
 export const NLP_MODULE_VERSION = "0.1.0";
 export const NLP_TOKENIZER_CAPABILITY = "nlp.tokenizer";
@@ -13,7 +13,7 @@ export const NLP_APPROX_TOKEN_COUNTER_VERSION = "source-approx-v1";
 
 export interface NlpTokenizerCapability {
   model: { id: typeof NLP_MODEL_ID; version: typeof NLP_MODEL_VERSION };
-  analyze(text: string, snapshot: import("@scriptorium/contracts").SnapshotId, signal: AbortSignal): Promise<MorphologyAnalysis>;
+  analyze(text: string, snapshot: import("@codexia/contracts").SnapshotId, signal: AbortSignal): Promise<MorphologyAnalysis>;
 }
 
 export interface NlpTokenCounterIdentity {

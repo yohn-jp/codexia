@@ -1,5 +1,5 @@
 export function installCore64RenderProbe(target = window) {
-  const probeKey = "__scriptoriumCore64RenderProbe";
+  const probeKey = "__codexiaCore64RenderProbe";
   const panelDefinitions = (value) => Array.isArray(value) && value.every((panel) => panel &&
     typeof panel.id === "string" && typeof panel.title === "string" && typeof panel.render === "function") ? value : null;
   const definitionRow = (current, previous) => {

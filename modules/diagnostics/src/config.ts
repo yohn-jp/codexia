@@ -1,4 +1,4 @@
-import type { SnapshotReader } from "@scriptorium/contracts";
+import type { SnapshotReader } from "@codexia/contracts";
 import YAML from "yaml";
 import type { LintRule, LintRulesConfig, DiagnosticSeverityThresholds, CountSeverityThresholds } from "./linter/types.js";
 import { DEFAULT_DIAGNOSTIC_SEVERITY_THRESHOLDS, DEFAULT_LINT_RULES } from "./linter/types.js";

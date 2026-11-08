@@ -17,7 +17,7 @@ import type {
   ReconcileResult,
   SnapshotId,
   UiContribution,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 
 export class DocumentDepartureError extends DOMException {
   constructor() {

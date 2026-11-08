@@ -17,9 +17,9 @@ if (!datasetArg || !outputArg) {
 
 const seedPath = resolve(datasetArg);
 const output = resolve(outputArg);
-const runtimeRoot = resolve(process.env.SCRIPTORIUM_PERF_RUNTIME_ROOT ?? process.cwd());
+const runtimeRoot = resolve(process.env.CODEXIA_PERF_RUNTIME_ROOT ?? process.cwd());
 const runtimeCommit = git(runtimeRoot, 'rev-parse', 'HEAD');
-const expectedRuntimeCommit = process.env.SCRIPTORIUM_PERF_EXPECTED_RUNTIME_COMMIT;
+const expectedRuntimeCommit = process.env.CODEXIA_PERF_EXPECTED_RUNTIME_COMMIT;
 if (expectedRuntimeCommit && !runtimeCommit.startsWith(expectedRuntimeCommit)) {
   throw new Error(`Expected Core runtime ${expectedRuntimeCommit}, found ${runtimeCommit} in ${runtimeRoot}`);
 }
@@ -34,7 +34,7 @@ try {
   if (error?.code !== 'ENOENT') throw error;
 }
 await mkdir(dirname(output), { recursive: true });
-const scratchBase = resolve(process.env.SCRIPTORIUM_PERF_TMPDIR ?? process.env.TMPDIR ?? '/data/tmp');
+const scratchBase = resolve(process.env.CODEXIA_PERF_TMPDIR ?? process.env.TMPDIR ?? '/data/tmp');
 await mkdir(scratchBase, { recursive: true });
 const scratchRoot = await mkdtemp(join(scratchBase, 'c64-rz-'));
 const datasetPath = join(scratchRoot, 'small');
@@ -353,9 +353,9 @@ try {
   report.serverStartupMs = ready.startupMs;
   browser = await chromium.launch({
     headless: true,
-    ...(process.env.SCRIPTORIUM_E2E_CHROMIUM ? { executablePath: process.env.SCRIPTORIUM_E2E_CHROMIUM } : {}),
+    ...(process.env.CODEXIA_E2E_CHROMIUM ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM } : {}),
   });
-  report.browser = { version: browser.version(), executable: process.env.SCRIPTORIUM_E2E_CHROMIUM ?? 'Playwright default' };
+  report.browser = { version: browser.version(), executable: process.env.CODEXIA_E2E_CHROMIUM ?? 'Playwright default' };
   const base = `http://127.0.0.1:${ready.port}`;
   const repositoryUrl = pathToFileURL(ready.remote).href;
   const workspaceKeyPrefix = 'scriptorium:workspace:v1:';

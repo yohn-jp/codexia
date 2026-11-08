@@ -1,8 +1,8 @@
-# Scriptorium — Design and UX contract
+# Codexia — Design and UX contract
 
 ## 1. この文書の位置付け
 
-本書はScriptoriumが作者に保証する体験の正本であり、実装済み機能や本番受入の報告ではない。MUST／禁止は受入条件、SHOULDは例外理由と代替の証拠を要する設計原則とする。画像モックや外部製品の外観は仕様ではない。
+本書はCodexiaが作者に保証する体験の正本であり、実装済み機能や本番受入の報告ではない。MUST／禁止は受入条件、SHOULDは例外理由と代替の証拠を要する設計原則とする。画像モックや外部製品の外観は仕様ではない。
 
 最新の明示的なオーナー指示と受入済み製品契約を優先する。本書は情報設計・表示・操作の判断を固定し、[Core](../architecture/CORE.md)、[Internal boundaries](../architecture/INTERNAL-BOUNDARIES.md)、[Modular workspace](../architecture/MODULAR-WORKSPACE.md)、[Modules](../architecture/MODULES.md)の正本・保存・認可の意味を変更しない。[Authoring](../authoring.md)と[Mobile interactions](../architecture/MOBILE-INTERACTION-UX.md)も併読する。
 
@@ -14,7 +14,7 @@
 
 **作者が、どの作品のどの文章を書いているか、変更がどこまで保護されているかを見失わず、参照・整理・レビューを挟んでも同じ思考へ戻れる。**
 
-Scriptoriumは、巻・章・シーンと日本語原稿を中心とするGit-backed writing workspaceである。Gitクライアントでも、汎用の社内Wiki／プロジェクト管理ダッシュボードでもない。Git、検索、解析は執筆を支えるが、作者の文章より前に立たない。
+Codexiaは、巻・章・シーンと日本語原稿を中心とするGit-backed writing workspaceである。Gitクライアントでも、汎用の社内Wiki／プロジェクト管理ダッシュボードでもない。Git、検索、解析は執筆を支えるが、作者の文章より前に立たない。
 
 | 作者の仕事 | 第一に必要な情報 | 周辺に呼び出す道具 |
 | --- | --- | --- |
@@ -145,7 +145,7 @@ INP p75 200ms以下、CLS p75 0.1以下を外部の品質目安として参照�
 
 ## 8. 視覚デザインとアクセシビリティ
 
-**原稿と現在位置が第一の視覚的重心であり、道具と保存状態は必要な時に確実に見つかる。** これをScriptoriumのデザイン命題とする。
+**原稿と現在位置が第一の視覚的重心であり、道具と保存状態は必要な時に確実に見つかる。** これをCodexiaのデザイン命題とする。
 
 大きなロゴ、全機能toolbar、均等なcard群、常時点滅する保存表示で本文と競合しない。本文の読み幅・行間を軸に、構成、参照、状態の階層を作る。余白は読み順と集中のために使い、原稿を小さな中央枠へ追いやらない。
 

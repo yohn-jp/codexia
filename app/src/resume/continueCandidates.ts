@@ -1,4 +1,4 @@
-import type { RecentActivityDeviceType, RecentActivityItem } from "@scriptorium/contracts";
+import type { RecentActivityDeviceType, RecentActivityItem } from "@codexia/contracts";
 import type { Tree } from "../api";
 
 export interface WritingResumePosition {

@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const authToken = process.env.SCRIPTORIUM_E2E_AUTH_TOKEN ?? "";
-const repositoryUrl = process.env.SCRIPTORIUM_E2E_REPOSITORY_URL ?? "";
+const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
+const repositoryUrl = process.env.CODEXIA_E2E_REPOSITORY_URL ?? "";
 
 interface JournalSummary {
   documentPath: string;
@@ -169,7 +169,7 @@ async function readJournal(page: Page): Promise<JournalSummary[]> {
 }
 
 async function resetLocalCore(): Promise<void> {
-  const e2ePort = Number.parseInt(process.env.SCRIPTORIUM_E2E_PORT ?? "4173", 10);
+  const e2ePort = Number.parseInt(process.env.CODEXIA_E2E_PORT ?? "4173", 10);
   const response = await fetch(`http://127.0.0.1:${e2ePort + 1}/__e2e/reset-core`, { method: "POST" });
   expect(response.status).toBe(204);
 }
@@ -352,7 +352,7 @@ test("history keeps its pinned response through a foreground observation without
 });
 
 test("same-origin stale tabs cannot replace an equal-generation journal draft", async ({ page }) => {
-  test.skip(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1", "The journal acceptance uses only the disposable local browser and Git fixtures.");
+  test.skip(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1", "The journal acceptance uses only the disposable local browser and Git fixtures.");
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   expect(repositoryUrl).not.toBe("");
   await resetLocalCore();
@@ -405,12 +405,12 @@ test("same-origin stale tabs cannot replace an equal-generation journal draft", 
 });
 
 test("coalesced editor state is current for immediate print and history actions", async ({ page }) => {
-  test.skip(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1", "The history acceptance writes only to the disposable local Git fixture.");
+  test.skip(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1", "The history acceptance writes only to the disposable local Git fixture.");
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   expect(repositoryUrl).not.toBe("");
-  const fixtureRoot = await mkdtemp(join(tmpdir(), "scriptorium-e2e-history-"));
+  const fixtureRoot = await mkdtemp(join(tmpdir(), "codexia-e2e-history-"));
   const workingCopy = join(fixtureRoot, "work");
-  const fixtureBranch = process.env.SCRIPTORIUM_E2E_REPOSITORY_BRANCH ?? "main";
+  const fixtureBranch = process.env.CODEXIA_E2E_REPOSITORY_BRANCH ?? "main";
   let initialRemoteCommit: string | null = null;
   try {
     execFileSync("git", ["clone", "--quiet", repositoryUrl, workingCopy], { stdio: "ignore" });
@@ -420,9 +420,9 @@ test("coalesced editor state is current for immediate print and history actions"
     await writeFile(join(workingCopy, manuscriptPath), historyBody, "utf8");
     const gitEnv = {
       ...process.env,
-      GIT_AUTHOR_NAME: "Scriptorium Acceptance",
+      GIT_AUTHOR_NAME: "Codexia Acceptance",
       GIT_AUTHOR_EMAIL: "acceptance@example.invalid",
-      GIT_COMMITTER_NAME: "Scriptorium Acceptance",
+      GIT_COMMITTER_NAME: "Codexia Acceptance",
       GIT_COMMITTER_EMAIL: "acceptance@example.invalid",
     };
     execFileSync("git", ["add", manuscriptPath], { cwd: workingCopy, stdio: "ignore" });
@@ -478,14 +478,14 @@ test("coalesced editor state is current for immediate print and history actions"
 });
 
 test("coalesced typing restores to its unchanged React value without reviving the deleted draft", async ({ page }) => {
-  test.skip(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1", "The recovery acceptance changes only the disposable local browser journal.");
+  test.skip(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1", "The recovery acceptance changes only the disposable local browser journal.");
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   expect(repositoryUrl).not.toBe("");
   await page.addInitScript(() => {
-    type GatedTransaction = IDBTransaction & { __scriptoriumHoldComplete?: boolean };
-    type GatedWindow = Window & { __scriptoriumRestoreGate?: RestoreGate };
+    type GatedTransaction = IDBTransaction & { __codexiaHoldComplete?: boolean };
+    type GatedWindow = Window & { __codexiaRestoreGate?: RestoreGate };
     const gate: RestoreGate = { targetOperationId: null, armed: false, started: false };
-    (window as GatedWindow).__scriptoriumRestoreGate = gate;
+    (window as GatedWindow).__codexiaRestoreGate = gate;
 
     const transactionDescriptor = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, "oncomplete");
     const originalDelete = IDBObjectStore.prototype.delete;
@@ -501,8 +501,8 @@ test("coalesced typing restores to its unchanged React value without reviving th
         }
         const transaction = this as GatedTransaction;
         transactionDescriptor.set!.call(this, function (this: IDBTransaction, event: Event) {
-          const currentGate = (window as GatedWindow).__scriptoriumRestoreGate;
-          if (currentGate?.armed && transaction.__scriptoriumHoldComplete) {
+          const currentGate = (window as GatedWindow).__codexiaRestoreGate;
+          if (currentGate?.armed && transaction.__codexiaHoldComplete) {
             currentGate.started = true;
             currentGate.release = () => {
               currentGate.armed = false;
@@ -515,9 +515,9 @@ test("coalesced typing restores to its unchanged React value without reviving th
       },
     });
     IDBObjectStore.prototype.delete = function (this: IDBObjectStore, key: IDBValidKey): IDBRequest<undefined> {
-      const currentGate = (window as GatedWindow).__scriptoriumRestoreGate;
+      const currentGate = (window as GatedWindow).__codexiaRestoreGate;
       if (this.name === "operations" && currentGate?.armed && currentGate.targetOperationId && String(key).includes(currentGate.targetOperationId)) {
-        (this.transaction as GatedTransaction).__scriptoriumHoldComplete = true;
+        (this.transaction as GatedTransaction).__codexiaHoldComplete = true;
       }
       return originalDelete.call(this, key);
     };
@@ -587,19 +587,19 @@ test("coalesced typing restores to its unchanged React value without reviving th
   await expect(page.locator(".durability-message")).toContainText("保存を確認できていません");
   expect((await readJournal(page)).find((entry) => entry.operationId === prior!.operationId)?.text).toBe(originalText);
   await page.evaluate((operationId) => {
-    const gate = (window as Window & { __scriptoriumRestoreGate?: RestoreGate }).__scriptoriumRestoreGate;
+    const gate = (window as Window & { __codexiaRestoreGate?: RestoreGate }).__codexiaRestoreGate;
     if (!gate) throw new Error("Restore gate was not installed.");
     gate.targetOperationId = operationId;
     gate.armed = true;
   }, prior!.operationId);
   page.on("dialog", (dialog) => { void dialog.accept(); });
   await page.getByRole("button", { name: "この文書の未チェックポイント下書きを削除して GitHub 版に戻す" }).click();
-  await expect.poll(() => page.evaluate(() => Boolean((window as Window & { __scriptoriumRestoreGate?: RestoreGate }).__scriptoriumRestoreGate?.started))).toBe(true);
+  await expect.poll(() => page.evaluate(() => Boolean((window as Window & { __codexiaRestoreGate?: RestoreGate }).__codexiaRestoreGate?.started))).toBe(true);
   await expect(editor).toHaveAttribute("contenteditable", "false");
   await editor.press("End");
   expect(await editor.textContent()).toBe(pendingText);
   await page.evaluate(() => {
-    const gate = (window as Window & { __scriptoriumRestoreGate?: RestoreGate }).__scriptoriumRestoreGate;
+    const gate = (window as Window & { __codexiaRestoreGate?: RestoreGate }).__codexiaRestoreGate;
     if (!gate?.release) throw new Error("Draft removal transaction was not held.");
     gate.release();
   });
@@ -620,9 +620,9 @@ test("writing UI recovers multi-document drafts and separates Draft, Checkpoint,
   });
 
   await openFixtureProject(page, await signIn(page));
-  const nonce = await page.locator('meta[name="scriptorium-style-nonce"]').getAttribute("content");
+  const nonce = await page.locator('meta[name="codexia-style-nonce"]').getAttribute("content");
   expect(nonce).toBeTruthy();
-  expect(nonce).not.toBe("__SCRIPTORIUM_STYLE_NONCE__");
+  expect(nonce).not.toBe("__CODEXIA_STYLE_NONCE__");
 
   const editor = page.locator(".cm-content");
   await editor.fill("彼は|東京《とうきょう》へ行く。");
@@ -821,10 +821,10 @@ test("new typing survives a gated browser-draft rebase during checkpoint recover
       matchedTransactions: string[];
       heldOnce: boolean;
     };
-    type GatedTransaction = IDBTransaction & { __scriptoriumHoldComplete?: boolean };
-    type GatedWindow = Window & { __scriptoriumDraftGate?: DraftGate };
+    type GatedTransaction = IDBTransaction & { __codexiaHoldComplete?: boolean };
+    type GatedWindow = Window & { __codexiaDraftGate?: DraftGate };
     const gate: DraftGate = { targetOperationId: null, armed: false, started: false, matchedTransactions: [], heldOnce: false };
-    (window as GatedWindow).__scriptoriumDraftGate = gate;
+    (window as GatedWindow).__codexiaDraftGate = gate;
 
     const requestDescriptor = Object.getOwnPropertyDescriptor(IDBRequest.prototype, "onsuccess");
     const transactionDescriptor = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, "oncomplete");
@@ -844,7 +844,7 @@ test("new typing survives a gated browser-draft rebase during checkpoint recover
         }
         const request = this;
         requestDescriptor.set!.call(this, function (this: IDBRequest, event: Event) {
-          const currentGate = (window as GatedWindow).__scriptoriumDraftGate;
+          const currentGate = (window as GatedWindow).__codexiaDraftGate;
           const source = request.source;
           const transaction = source instanceof IDBIndex
             ? source.objectStore.transaction
@@ -855,7 +855,7 @@ test("new typing survives a gated browser-draft rebase during checkpoint recover
             currentGate.matchedTransactions.push(transaction?.mode ?? "unknown");
             if (transaction?.mode === "readwrite") {
               currentGate.heldOnce = true;
-              (transaction as GatedTransaction).__scriptoriumHoldComplete = true;
+              (transaction as GatedTransaction).__codexiaHoldComplete = true;
             }
           }
           return handler.call(this, event);
@@ -875,8 +875,8 @@ test("new typing survives a gated browser-draft rebase during checkpoint recover
         }
         const transaction = this as GatedTransaction;
         transactionDescriptor.set!.call(this, function (this: IDBTransaction, event: Event) {
-          const currentGate = (window as GatedWindow).__scriptoriumDraftGate;
-          if (currentGate?.armed && transaction.__scriptoriumHoldComplete) {
+          const currentGate = (window as GatedWindow).__codexiaDraftGate;
+          if (currentGate?.armed && transaction.__codexiaHoldComplete) {
             currentGate.started = true;
             currentGate.release = () => {
               currentGate.armed = false;
@@ -914,19 +914,19 @@ test("new typing survives a gated browser-draft rebase during checkpoint recover
   const staleDraft = (await readJournal(page)).find((entry) => entry.text === staleDraftText);
   expect(staleDraft).toBeTruthy();
   await page.evaluate((operationId) => {
-    const gate = (window as Window & { __scriptoriumDraftGate?: { targetOperationId: string | null; armed: boolean; started: boolean } }).__scriptoriumDraftGate;
+    const gate = (window as Window & { __codexiaDraftGate?: { targetOperationId: string | null; armed: boolean; started: boolean } }).__codexiaDraftGate;
     if (!gate) throw new Error("Draft gate was not installed.");
     gate.targetOperationId = operationId;
     gate.armed = true;
   }, staleDraft!.operationId);
   releaseCheckpointRead();
 
-  await expect.poll(() => page.evaluate(() => JSON.stringify((window as Window & { __scriptoriumDraftGate?: { started: boolean; matchedTransactions: string[] } }).__scriptoriumDraftGate)))
+  await expect.poll(() => page.evaluate(() => JSON.stringify((window as Window & { __codexiaDraftGate?: { started: boolean; matchedTransactions: string[] } }).__codexiaDraftGate)))
     .toContain('"started":true');
   await page.locator(".cm-content").fill(newestText);
   await expect.poll(async () => (await readJournal(page)).some((entry) => entry.text === newestText && entry.state === "draft")).toBe(true);
   await page.evaluate(() => {
-    const gate = (window as Window & { __scriptoriumDraftGate?: { release?: () => void } }).__scriptoriumDraftGate;
+    const gate = (window as Window & { __codexiaDraftGate?: { release?: () => void } }).__codexiaDraftGate;
     if (!gate?.release) throw new Error("Draft rebase transaction was not held.");
     gate.release();
   });
@@ -1142,7 +1142,7 @@ test("external MCP proposals enter owner review before approval, then checkpoint
 
 
 test("full browser MCP proposal payload is restored after Core data loss before review", async ({ page }) => {
-  test.skip(Boolean(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1" || process.env.SCRIPTORIUM_E2E_BASE_URL || process.env.SCRIPTORIUM_BASE_URL),
+  test.skip(Boolean(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1" || process.env.CODEXIA_E2E_BASE_URL || process.env.CODEXIA_BASE_URL),
     "This recovery acceptance resets only the disposable local Core data directory.");
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   expect(repositoryUrl).not.toBe("");
@@ -1247,7 +1247,7 @@ test("full browser MCP proposal payload is restored after Core data loss before 
 
   // Preserve IndexedDB and the synthetic Git remote while deleting the only Core copy of private data.
   await page.goto("about:blank");
-  const e2ePort = Number.parseInt(process.env.SCRIPTORIUM_E2E_PORT ?? "4173", 10);
+  const e2ePort = Number.parseInt(process.env.CODEXIA_E2E_PORT ?? "4173", 10);
   const resetResponse = await fetch(`http://127.0.0.1:${e2ePort + 1}/__e2e/reset-core`, { method: "POST" });
   expect(resetResponse.status).toBe(204);
   const resetHealth = await fetch(new URL("/api/health", origin));
@@ -1361,7 +1361,7 @@ test("full browser MCP proposal payload is restored after Core data loss before 
 });
 
 test("a remote update during author approval keeps the conflicting editor draft visible", async ({ page }) => {
-  test.skip(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1", "This conflict acceptance pushes only to the disposable local Git fixture.");
+  test.skip(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1", "This conflict acceptance pushes only to the disposable local Git fixture.");
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   expect(repositoryUrl).not.toBe("");
   await openFixtureProject(page, await signIn(page));
@@ -1406,9 +1406,9 @@ test("a remote update during author approval keeps the conflicting editor draft 
 
   const checkpointClick = page.getByRole("button", { name: "Checkpoint", exact: true }).click();
   await approvalStarted;
-  const repositoryRoot = await mkdtemp(join(tmpdir(), "scriptorium-e2e-conflict-"));
+  const repositoryRoot = await mkdtemp(join(tmpdir(), "codexia-e2e-conflict-"));
   const workingCopy = join(repositoryRoot, "work");
-  const fixtureBranch = process.env.SCRIPTORIUM_E2E_REPOSITORY_BRANCH ?? "main";
+  const fixtureBranch = process.env.CODEXIA_E2E_REPOSITORY_BRANCH ?? "main";
   let initialRemoteCommit: string | null = null;
   try {
     execFileSync("git", ["clone", "--quiet", repositoryUrl, workingCopy], { stdio: "ignore" });
@@ -1418,9 +1418,9 @@ test("a remote update during author approval keeps the conflicting editor draft 
     await writeFile(manuscriptPath, `# Scene One\n\nThe first line of the story.\n\n${remoteText}\n`, "utf8");
     const gitEnv = {
       ...process.env,
-      GIT_AUTHOR_NAME: "Scriptorium Acceptance",
+      GIT_AUTHOR_NAME: "Codexia Acceptance",
       GIT_AUTHOR_EMAIL: "acceptance@example.invalid",
-      GIT_COMMITTER_NAME: "Scriptorium Acceptance",
+      GIT_COMMITTER_NAME: "Codexia Acceptance",
       GIT_COMMITTER_EMAIL: "acceptance@example.invalid",
     };
     execFileSync("git", ["add", "manuscript/vol-1/ch-1/scene-1.md"], { cwd: workingCopy, stdio: "ignore" });
@@ -1475,8 +1475,8 @@ test("a remote update during author approval keeps the conflicting editor draft 
       await rm(repositoryRoot, { recursive: true, force: true });
       // Core has also observed the temporary conflict commit; clear that disposable project cache
       // after restoring the bare ref so later tests start from the seed manuscript snapshot.
-      if (process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY !== "1") {
-        const e2ePort = Number.parseInt(process.env.SCRIPTORIUM_E2E_PORT ?? "4173", 10);
+      if (process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY !== "1") {
+        const e2ePort = Number.parseInt(process.env.CODEXIA_E2E_PORT ?? "4173", 10);
         const resetCore = await fetch(`http://127.0.0.1:${e2ePort + 1}/__e2e/reset-core`, { method: "POST" });
         expect(resetCore.status).toBe(204);
       }
@@ -1513,13 +1513,13 @@ test("IndexedDB quota failures remain visible and block checkpointing", async ({
 });
 
 test("project details, reconstruction, and guarded removal preserve browser recovery", async ({ page }) => {
-  test.skip(Boolean(process.env.SCRIPTORIUM_E2E_BASE_URL || process.env.SCRIPTORIUM_BASE_URL),
+  test.skip(Boolean(process.env.CODEXIA_E2E_BASE_URL || process.env.CODEXIA_BASE_URL),
     "This lifecycle acceptance mutates only the local disposable Core data directory.");
   test.skip(/^(?:https?|file):/u.test(repositoryUrl),
     "The lifecycle acceptance needs a disposable local bare-repository fixture.");
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   expect(repositoryUrl).not.toBe("");
-  const isolatedDirectory = await mkdtemp(join(tmpdir(), "scriptorium-e2e-lifecycle-"));
+  const isolatedDirectory = await mkdtemp(join(tmpdir(), "codexia-e2e-lifecycle-"));
   const isolatedRepository = join(isolatedDirectory, "origin.git");
   const isolatedWorktree = join(isolatedDirectory, "worktree");
   execFileSync("git", ["clone", "--quiet", repositoryUrl, isolatedWorktree], { stdio: "ignore" });
@@ -1527,7 +1527,7 @@ test("project details, reconstruction, and guarded removal preserve browser reco
   await rm(join(isolatedWorktree, "meta", "scriptorium"), { recursive: true, force: true });
   execFileSync("git", ["add", "--all"], { cwd: isolatedWorktree, stdio: "ignore" });
   execFileSync("git", [
-    "-c", "user.name=Scriptorium E2E", "-c", "user.email=scriptorium-e2e@example.invalid",
+    "-c", "user.name=Codexia E2E", "-c", "user.email=codexia-e2e@example.invalid",
     "commit", "--quiet", "-m", "Create isolated lifecycle fixture",
   ], { cwd: isolatedWorktree, stdio: "ignore" });
   execFileSync("git", ["init", "--quiet", "--bare", "--initial-branch=main", isolatedRepository], { stdio: "ignore" });
@@ -1570,7 +1570,7 @@ test("project details, reconstruction, and guarded removal preserve browser reco
     await expect(page.locator(".topbar-status")).toContainText("に確認");
     await expect.poll(async () => (await readJournal(page)).some((entry) => entry.text === recoverableText && entry.state === "draft")).toBe(true);
 
-    const stateDir = process.env.SCRIPTORIUM_E2E_STATE_DIR;
+    const stateDir = process.env.CODEXIA_E2E_STATE_DIR;
     expect(stateDir).toBeTruthy();
     const dirtyMarker = join(stateDir!, "store", "projects", projectId!, "e2e-dirty-guard.md");
     await writeFile(dirtyMarker, "preserve local data\n", "utf8");
@@ -1599,7 +1599,7 @@ test("project details, reconstruction, and guarded removal preserve browser reco
 });
 
 test("unmounting a contribution aborts its in-flight action request", async ({ page }) => {
-  test.skip(process.env.SCRIPTORIUM_PROFILE !== "full", "The publishing contribution is selected by the full profile.");
+  test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing contribution is selected by the full profile.");
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   expect(repositoryUrl).not.toBe("");
 
@@ -1874,7 +1874,7 @@ test("scratch text and image selection pause while a recovery entry is being res
 });
 
 test("public publishing route mounts its source reader without an owner session", async ({ page }) => {
-  test.skip(process.env.SCRIPTORIUM_PROFILE !== "full", "The publishing browser module is selected by the full profile.");
+  test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing browser module is selected by the full profile.");
   const ownerSessionRequests: string[] = [];
   const publicReadRequests: string[] = [];
   page.on("request", (request) => {
@@ -1955,22 +1955,22 @@ function issue42Git(cwd: string, ...args: string[]): string {
 function issue42GitIdentity(): NodeJS.ProcessEnv {
   return {
     ...process.env,
-    GIT_AUTHOR_NAME: "Scriptorium Issue 42 Acceptance",
+    GIT_AUTHOR_NAME: "Codexia Issue 42 Acceptance",
     GIT_AUTHOR_EMAIL: "issue-42@example.invalid",
-    GIT_COMMITTER_NAME: "Scriptorium Issue 42 Acceptance",
+    GIT_COMMITTER_NAME: "Codexia Issue 42 Acceptance",
     GIT_COMMITTER_EMAIL: "issue-42@example.invalid",
   };
 }
 
 async function issue42CreateDisposableRemote(): Promise<Issue42DisposableRemote> {
-  const root = await mkdtemp(join(tmpdir(), "scriptorium-e2e-refresh-navigation-"));
+  const root = await mkdtemp(join(tmpdir(), "codexia-e2e-refresh-navigation-"));
   const bare = join(root, "origin.git");
   const writer = join(root, "writer");
   try {
     execFileSync("git", ["clone", "--quiet", "--bare", repositoryUrl, bare], { stdio: "ignore" });
     execFileSync("git", ["clone", "--quiet", bare, writer], { stdio: "ignore" });
     const actualBranch = issue42Git(writer, "rev-parse", "--abbrev-ref", "HEAD");
-    if (actualBranch !== (process.env.SCRIPTORIUM_E2E_REPOSITORY_BRANCH ?? "main")) {
+    if (actualBranch !== (process.env.CODEXIA_E2E_REPOSITORY_BRANCH ?? "main")) {
       throw new Error(`Unexpected disposable fixture branch ${actualBranch}`);
     }
     return { root, bare, writer };
@@ -2002,10 +2002,10 @@ async function issue42RegisterDisposableProject(page: Page, remote: Issue42Dispo
 
 async function issue42InstallJournalGate(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    type GatedTransaction = IDBTransaction & { __scriptoriumHoldComplete?: boolean };
-    type GateWindow = Window & { __scriptoriumIssue42JournalGate?: Issue42JournalGate };
+    type GatedTransaction = IDBTransaction & { __codexiaHoldComplete?: boolean };
+    type GateWindow = Window & { __codexiaIssue42JournalGate?: Issue42JournalGate };
     const gate: Issue42JournalGate = { targetText: null, armed: false, started: false };
-    (window as GateWindow).__scriptoriumIssue42JournalGate = gate;
+    (window as GateWindow).__codexiaIssue42JournalGate = gate;
 
     const transactionDescriptor = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, "oncomplete");
     const originalPut = IDBObjectStore.prototype.put;
@@ -2023,8 +2023,8 @@ async function issue42InstallJournalGate(page: Page): Promise<void> {
         }
         const transaction = this as GatedTransaction;
         transactionDescriptor.set!.call(this, function (this: IDBTransaction, event: Event) {
-          const currentGate = (window as GateWindow).__scriptoriumIssue42JournalGate;
-          if (currentGate?.armed && transaction.__scriptoriumHoldComplete) {
+          const currentGate = (window as GateWindow).__codexiaIssue42JournalGate;
+          if (currentGate?.armed && transaction.__codexiaHoldComplete) {
             currentGate.started = true;
             currentGate.release = () => {
               currentGate.armed = false;
@@ -2037,10 +2037,10 @@ async function issue42InstallJournalGate(page: Page): Promise<void> {
       },
     });
     IDBObjectStore.prototype.put = function (this: IDBObjectStore, value: unknown, key?: IDBValidKey): IDBRequest<IDBValidKey> {
-      const currentGate = (window as GateWindow).__scriptoriumIssue42JournalGate;
+      const currentGate = (window as GateWindow).__codexiaIssue42JournalGate;
       if (this.name === "operations" && currentGate?.armed && currentGate.targetText &&
           typeof value === "object" && value !== null && "text" in value && value.text === currentGate.targetText) {
-        (this.transaction as GatedTransaction).__scriptoriumHoldComplete = true;
+        (this.transaction as GatedTransaction).__codexiaHoldComplete = true;
       }
       return originalPut.call(this, value, key);
     };
@@ -2055,7 +2055,7 @@ async function issue42PushRemoteSceneUpdate(remote: Issue42DisposableRemote, pat
     env: issue42GitIdentity(),
     stdio: "ignore",
   });
-  execFileSync("git", ["push", "--quiet", "origin", `HEAD:${process.env.SCRIPTORIUM_E2E_REPOSITORY_BRANCH ?? "main"}`], {
+  execFileSync("git", ["push", "--quiet", "origin", `HEAD:${process.env.CODEXIA_E2E_REPOSITORY_BRANCH ?? "main"}`], {
     cwd: remote.writer,
     stdio: "ignore",
   });
@@ -2070,13 +2070,13 @@ function issue42Deferred(): { promise: Promise<void>; release: () => void } {
 
 function issue42ReleaseJournalGate(page: Page): void {
   void page.evaluate(() => {
-    const gate = (window as Window & { __scriptoriumIssue42JournalGate?: Issue42JournalGate }).__scriptoriumIssue42JournalGate;
+    const gate = (window as Window & { __codexiaIssue42JournalGate?: Issue42JournalGate }).__codexiaIssue42JournalGate;
     gate?.release?.();
   }).catch(() => undefined);
 }
 
 test("Issue 42: an updated remote cannot supersede explicit scene navigation during draft flush", async ({ page }) => {
-  test.skip(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1", "This acceptance pushes only to a generated disposable local bare remote.");
+  test.skip(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1", "This acceptance pushes only to a generated disposable local bare remote.");
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   expect(repositoryUrl).not.toBe("");
   await issue42InstallJournalGate(page);
@@ -2106,14 +2106,14 @@ test("Issue 42: an updated remote cannot supersede explicit scene navigation dur
 
     const pendingText = "A protected draft while the remote refresh waits.";
     await page.evaluate((text) => {
-      const gate = (window as Window & { __scriptoriumIssue42JournalGate?: Issue42JournalGate }).__scriptoriumIssue42JournalGate;
+      const gate = (window as Window & { __codexiaIssue42JournalGate?: Issue42JournalGate }).__codexiaIssue42JournalGate;
       if (!gate) throw new Error("The Issue 42 IndexedDB gate is missing.");
       gate.targetText = text;
       gate.armed = true;
     }, pendingText);
     await page.locator(".cm-content").fill(pendingText);
     await expect.poll(() => page.evaluate(() => Boolean(
-      (window as Window & { __scriptoriumIssue42JournalGate?: Issue42JournalGate }).__scriptoriumIssue42JournalGate?.started,
+      (window as Window & { __codexiaIssue42JournalGate?: Issue42JournalGate }).__codexiaIssue42JournalGate?.started,
     ))).toBe(true);
     await expect.poll(async () => (await readJournal(page)).some((entry) => entry.text === pendingText && entry.state === "draft")).toBe(true);
 
@@ -2127,7 +2127,7 @@ test("Issue 42: an updated remote cannot supersede explicit scene navigation dur
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
     await page.getByRole("button", { name: "Chapter One: Scene Two", exact: true }).click();
     await page.evaluate(() => {
-      const gate = (window as Window & { __scriptoriumIssue42JournalGate?: Issue42JournalGate }).__scriptoriumIssue42JournalGate;
+      const gate = (window as Window & { __codexiaIssue42JournalGate?: Issue42JournalGate }).__codexiaIssue42JournalGate;
       if (!gate?.release) throw new Error("The real browser journal completion is not held.");
       gate.release();
     });
@@ -2143,7 +2143,7 @@ test("Issue 42: an updated remote cannot supersede explicit scene navigation dur
 });
 
 test("Issue 42: an unmodified remote observation leaves a newer explicit scene selection alone", async ({ page }) => {
-  test.skip(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1", "This acceptance uses a generated disposable local bare remote.");
+  test.skip(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1", "This acceptance uses a generated disposable local bare remote.");
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   expect(repositoryUrl).not.toBe("");
   const remote = await issue42CreateDisposableRemote();
@@ -2190,7 +2190,7 @@ test("Issue 42: an unmodified remote observation leaves a newer explicit scene s
 });
 
 test("Issue 42: a failed hosted credential observation keeps the author session and recovers on a fresh observation", async ({ page }) => {
-  test.skip(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1", "This acceptance uses a generated disposable local bare remote.");
+  test.skip(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1", "This acceptance uses a generated disposable local bare remote.");
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   expect(repositoryUrl).not.toBe("");
   const remote = await issue42CreateDisposableRemote();
@@ -2201,7 +2201,7 @@ test("Issue 42: a failed hosted credential observation keeps the author session 
     await page.route("**/api/version", (route) => route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ name: "scriptorium", version: "test", hosted: true, profile: "hosted" }),
+      body: JSON.stringify({ name: "codexia", version: "test", hosted: true, profile: "hosted" }),
     }));
     const observationStarted = issue42Deferred();
     const observationFinished = issue42Deferred();

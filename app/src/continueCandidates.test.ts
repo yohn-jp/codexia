@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { EditorState } from "@codemirror/state";
-import type { RecentActivityItem } from "@scriptorium/contracts";
+import type { RecentActivityItem } from "@codexia/contracts";
 import type { Tree } from "./api";
 import {
   createUiSentencePositionIndexCache,

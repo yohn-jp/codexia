@@ -3,7 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BUILTIN_MODULE_IDS } from '@scriptorium/contracts';
+import { BUILTIN_MODULE_IDS } from '@codexia/contracts';
 import {
   PROFILES,
   TYPECHECK_TARGETS,
@@ -12,7 +12,7 @@ import {
 } from './ci-contract.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const modulePackagePrefix = '@scriptorium/module-';
+const modulePackagePrefix = '@codexia/module-';
 const builtinSet = new Set(BUILTIN_MODULE_IDS);
 const expectedIds = [...BUILTIN_MODULE_IDS].sort();
 
@@ -49,7 +49,7 @@ test('module manifests exactly register the canonical built-ins', async () => {
     const manifest = await readJson(path.join(moduleRoot, directory.name, 'package.json'));
     const expectedId = directory.name;
     assert.equal(manifest.name, `${modulePackagePrefix}${expectedId}`);
-    assert.equal(manifest.scriptoriumModule?.id, expectedId);
+    assert.equal(manifest.codexiaModule?.id, expectedId);
     ids.push(expectedId);
   }
 

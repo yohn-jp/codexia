@@ -1,5 +1,5 @@
-import type { SnapshotReader } from "@scriptorium/contracts";
-import { readCanonicalSnapshotEntities } from "@scriptorium/module-nlp";
+import type { SnapshotReader } from "@codexia/contracts";
+import { readCanonicalSnapshotEntities } from "@codexia/module-nlp";
 
 // Source-derived from Arcadia Loom's core-shared validate.ts, graph.ts,
 // continuityCheck.ts, timeline/timeExpressions.ts, and tracker/ implementations

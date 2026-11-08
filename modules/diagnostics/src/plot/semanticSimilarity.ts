@@ -1,5 +1,5 @@
-import type { Token } from "@scriptorium/module-nlp";
-import { tokenBase, isAdjective, isAdverb, isNoun, isVerb } from "@scriptorium/module-nlp";
+import type { Token } from "@codexia/module-nlp";
+import { tokenBase, isAdjective, isAdverb, isNoun, isVerb } from "@codexia/module-nlp";
 
 /** 内容語（名詞・動詞・形容詞・副詞）か。nlp/stylometry/metrics.ts と同一方針。 */
 function isContentWord(t: Token): boolean {

@@ -10,7 +10,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const generator = path.join(root, 'scripts', 'profile-build.mjs');
 
 test('Core profile generation and deployed-closure verification exclude optional module packages', async () => {
-  const temporary = await mkdtemp(path.join(tmpdir(), 'scriptorium-profile-core-'));
+  const temporary = await mkdtemp(path.join(tmpdir(), 'codexia-profile-core-'));
   const output = path.join(temporary, 'generated');
   const deploy = path.join(temporary, 'deploy');
   await mkdir(path.join(deploy, 'node_modules'), { recursive: true });
@@ -26,46 +26,46 @@ test('Core profile generation and deployed-closure verification exclude optional
     const browser = await readFile(path.join(output, 'browser.mjs'), 'utf8');
     assert.match(server, /moduleLoaders = Object\.freeze\(\{\s*\}\)/);
     assert.match(browser, /moduleBrowserLoaders = Object\.freeze\(\{\s*\}\)/);
-    assert.doesNotMatch(`${server}\n${browser}`, /@scriptorium\/module-(?:story|diagnostics|nlp|semantic|speaker|assistant|publishing|mcp)/);
+    assert.doesNotMatch(`${server}\n${browser}`, /@codexia\/module-(?:story|diagnostics|nlp|semantic|speaker|assistant|publishing|mcp)/);
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
 });
 
 test('deployed-closure verification follows pnpm package symlinks and checks their built imports', async () => {
-  const temporary = await mkdtemp(path.join(tmpdir(), 'scriptorium-profile-symlink-'));
+  const temporary = await mkdtemp(path.join(tmpdir(), 'codexia-profile-symlink-'));
   const output = path.join(temporary, 'generated');
   const deploy = path.join(temporary, 'deploy');
   const nodeModules = path.join(deploy, 'node_modules');
   const storePackage = path.join(deploy, 'store', 'module-runtime');
   try {
-    await mkdir(path.join(nodeModules, '@scriptorium'), { recursive: true });
+    await mkdir(path.join(nodeModules, '@codexia'), { recursive: true });
     await mkdir(storePackage, { recursive: true });
-    await writeFile(path.join(storePackage, 'package.json'), JSON.stringify({ name: '@scriptorium/module-runtime' }));
-    await writeFile(path.join(storePackage, 'index.mjs'), 'import "@scriptorium/module-story";\n');
-    await symlink(storePackage, path.join(nodeModules, '@scriptorium', 'module-runtime'), 'dir');
+    await writeFile(path.join(storePackage, 'package.json'), JSON.stringify({ name: '@codexia/module-runtime' }));
+    await writeFile(path.join(storePackage, 'index.mjs'), 'import "@codexia/module-story";\n');
+    await symlink(storePackage, path.join(nodeModules, '@codexia', 'module-runtime'), 'dir');
 
     const result = spawnSync(process.execPath, [generator, '--profile', 'core', '--out', output, '--verify-deploy', deploy], {
       cwd: root,
       encoding: 'utf8',
     });
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /imports excluded optional module @scriptorium\/module-story/);
+    assert.match(result.stderr, /imports excluded optional module @codexia\/module-story/);
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
 });
 
 test('deployed-closure verification counts an installed module package reached through a symlink', async () => {
-  const temporary = await mkdtemp(path.join(tmpdir(), 'scriptorium-profile-package-link-'));
+  const temporary = await mkdtemp(path.join(tmpdir(), 'codexia-profile-package-link-'));
   const output = path.join(temporary, 'generated');
   const deploy = path.join(temporary, 'deploy');
   const linkedPackage = path.join(deploy, 'store', 'module-story');
   try {
-    await mkdir(path.join(deploy, 'node_modules', '@scriptorium'), { recursive: true });
+    await mkdir(path.join(deploy, 'node_modules', '@codexia'), { recursive: true });
     await mkdir(linkedPackage, { recursive: true });
-    await writeFile(path.join(linkedPackage, 'package.json'), JSON.stringify({ name: '@scriptorium/module-story' }));
-    await symlink(linkedPackage, path.join(deploy, 'node_modules', '@scriptorium', 'module-story'), 'dir');
+    await writeFile(path.join(linkedPackage, 'package.json'), JSON.stringify({ name: '@codexia/module-story' }));
+    await symlink(linkedPackage, path.join(deploy, 'node_modules', '@codexia', 'module-story'), 'dir');
 
     const result = spawnSync(process.execPath, [generator, '--profile', 'core', '--out', output, '--verify-deploy', deploy], {
       cwd: root,

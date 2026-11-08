@@ -7,7 +7,7 @@ diff --git a/app/src/application/SharedApplication.tsx b/app/src/application/Sha
  const ACTIVE_PROJECT_KEY = "scriptorium:active-project";
 +
 +type Core64RenderProbeWindow = Window & {
-+  __scriptoriumCore64RenderProbe?: {
++  __codexiaCore64RenderProbe?: {
 +    measure(name: string, durationMs: number, itemCount: number): void;
 +  };
 +};
@@ -15,7 +15,7 @@ diff --git a/app/src/application/SharedApplication.tsx b/app/src/application/Sha
 +function measureCore64BuildOperation<T>(itemCount: number, build: () => T): T {
 +  const probe = typeof window === "undefined"
 +    ? undefined
-+    : (window as Core64RenderProbeWindow).__scriptoriumCore64RenderProbe;
++    : (window as Core64RenderProbeWindow).__codexiaCore64RenderProbe;
 +  if (!probe) return build();
 +  const start = performance.now();
 +  const value = build();
@@ -45,7 +45,7 @@ diff --git a/app/src/workspace/Workspace.tsx b/app/src/workspace/Workspace.tsx
 +}
 +
 +type Core64RenderProbeWindow = Window & {
-+  __scriptoriumCore64RenderProbe?: {
++  __codexiaCore64RenderProbe?: {
 +    measure(name: string, durationMs: number, itemCount: number): void;
 +  };
 +};
@@ -53,7 +53,7 @@ diff --git a/app/src/workspace/Workspace.tsx b/app/src/workspace/Workspace.tsx
 +function measureWorkspaceDerivation<T>(name: string, itemCount: number, derive: () => T): T {
 +  const probe = typeof window === "undefined"
 +    ? undefined
-+    : (window as Core64RenderProbeWindow).__scriptoriumCore64RenderProbe;
++    : (window as Core64RenderProbeWindow).__codexiaCore64RenderProbe;
 +  if (!probe) return derive();
 +  const start = performance.now();
 +  const value = derive();

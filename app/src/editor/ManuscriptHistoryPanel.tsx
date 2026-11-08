@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { snapshotKey, type SnapshotId } from "@scriptorium/contracts";
+import { snapshotKey, type SnapshotId } from "@codexia/contracts";
 import { api, type ManuscriptSnapshot, type ManuscriptSnapshotMeta } from "../api";
 
 interface DiffLine { type: "same" | "add" | "remove"; text: string }

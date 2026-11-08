@@ -1,5 +1,5 @@
-import { planExactFileImport } from "@scriptorium/migration";
-import type { MigrationContribution, MigrationProducer } from "@scriptorium/migration";
+import { planExactFileImport } from "@codexia/migration";
+import type { MigrationContribution, MigrationProducer } from "@codexia/migration";
 
 const SPEAKER_FILES = [
   {

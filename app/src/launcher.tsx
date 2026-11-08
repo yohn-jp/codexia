@@ -22,7 +22,7 @@ function InterfaceChoice() {
     window.location.assign(`/${mode}/${window.location.search}${window.location.hash}`);
   };
   return <section className="empty-state" aria-labelledby="interface-title">
-    <p className="eyebrow">Scriptorium</p>
+    <p className="eyebrow">Codexia</p>
     <h1 id="interface-title">執筆画面を選ぶ</h1>
     <p>同じ作品と回復記録を、使いやすい画面で開きます。</p>
     <p><button type="button" onClick={() => choose("desktop")}>Desktop — キーボードで執筆</button></p>

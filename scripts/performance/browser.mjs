@@ -36,7 +36,7 @@ async function phase(name, action) {
 try {
   const [ready] = await once(server, 'message');
   report.serverStartupMs = ready.startupMs;
-  browser = await chromium.launch({ headless: true, ...(process.env.SCRIPTORIUM_E2E_CHROMIUM ? { executablePath: process.env.SCRIPTORIUM_E2E_CHROMIUM } : {}) });
+  browser = await chromium.launch({ headless: true, ...(process.env.CODEXIA_E2E_CHROMIUM ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM } : {}) });
   report.browser = browser.version();
   browserCDP = await browser.newBrowserCDPSession();
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });

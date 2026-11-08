@@ -1,4 +1,4 @@
-import type { SnapshotReader } from "@scriptorium/contracts";
+import type { SnapshotReader } from "@codexia/contracts";
 import YAML from "yaml";
 
 export const EPISODES_PATH = "meta/scriptorium/modules/publishing/episodes.yaml";

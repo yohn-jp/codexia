@@ -37,7 +37,7 @@ const assignment = {
   contractVersion: "scriptorium-platform/v1",
   instanceId: "c64-status-synthetic-instance",
   repositoryId: 64001,
-  repositoryLocator: "https://github.com/scriptorium-perf/status-fixture",
+  repositoryLocator: "https://github.com/codexia-perf/status-fixture",
   defaultBranchPolicy: "repository-default",
   runtimeEpoch: 3,
   imageDigest: "sha256:" + "a".repeat(64),
@@ -59,8 +59,8 @@ const repository = {
   provider: "github",
   repositoryId: "64001",
   defaultBranch: "main",
-  ownerScope: "scriptorium-perf",
-  url: "https://github.com/scriptorium-perf/status-fixture.git",
+  ownerScope: "codexia-perf",
+  url: "https://github.com/codexia-perf/status-fixture.git",
 };
 const keyPair = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
 const publicJwk = {
@@ -269,7 +269,7 @@ async function verifyUnknownOnRace(temporaryRoot) {
 const [outputPath = path.join(os.tmpdir(), "core64-status-authority.json"), sampleText = "20"] = positionalArgs;
 const samples = Number(sampleText);
 assert.ok(Number.isSafeInteger(samples) && samples >= 5 && samples <= 100, "sample count must be between 5 and 100");
-const temporaryRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "scriptorium-c64-status-authority-"));
+const temporaryRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "codexia-c64-status-authority-"));
 try {
   const fixtures = [];
   for (const recordCount of [1, 100]) fixtures.push(await measureFixture(recordCount, samples, temporaryRoot));

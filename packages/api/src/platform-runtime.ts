@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import type { SnapshotReader } from "@scriptorium/contracts";
-import { MODULE_PERSISTENCE_FORMATS, type ModulePersistenceFormat } from "@scriptorium/module-runtime";
+import type { SnapshotReader } from "@codexia/contracts";
+import { MODULE_PERSISTENCE_FORMATS, type ModulePersistenceFormat } from "@codexia/module-runtime";
 
 export const PLATFORM_CONTRACT_VERSION = "scriptorium-platform/v1" as const;
 export const RUNTIME_CONTROL_CONTRACT_VERSION = "praetorium-runtime-control/v1" as const;
@@ -19,7 +19,7 @@ const REVISION = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u;
 const PRODUCER_REVISION = /^[a-f0-9]{40}$/u;
 const MODULE_ID = /^[a-z][a-z0-9-]{0,63}$/u;
 const CONTROL_ACTIONS = new Set(["status", "quiesce", "resume"]);
-const SCRIPTORIUM_META_ROOT = "meta/scriptorium/";
+const CODEXIA_META_ROOT = "meta/scriptorium/";
 const FORMAT_PATHS = [
   { formatId: "scriptorium.git-operations", prefix: "meta/scriptorium/operations", pattern: /^meta\/scriptorium\/operations\/v1\/([A-Za-z0-9_-]{1,128})\.json$/u, version: 1 },
   { formatId: "scriptorium.git-publications", prefix: "meta/scriptorium/publications", pattern: /^meta\/scriptorium\/publications\/v1\/([A-Za-z0-9_-]{1,128})\.json$/u, version: 1 },
@@ -322,7 +322,7 @@ export async function scanRemotePersistence(reader: SnapshotReader, remoteCommit
     const found = new Map<string, PersistenceFormat>();
     let bytes = 0;
     for (const path of paths) {
-      if (!path.startsWith(SCRIPTORIUM_META_ROOT)) return unknown();
+      if (!path.startsWith(CODEXIA_META_ROOT)) return unknown();
       const spec = FORMAT_PATHS.find((candidate) => path.startsWith(`${candidate.prefix}/`));
       const moduleFormat = spec ? undefined : modulePersistenceFormatForPath(path);
       if (!spec && !moduleFormat) return unknown();

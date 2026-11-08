@@ -56,7 +56,7 @@ function sourceStatus() {
 function buildWorkspace() {
   const result = spawnSync('corepack', ['pnpm', 'build'], {
     cwd: root,
-    env: { ...process.env, SCRIPTORIUM_PROFILE: 'core' },
+    env: { ...process.env, CODEXIA_PROFILE: 'core' },
     stdio: 'inherit',
   });
   if (result.error) throw result.error;
@@ -107,7 +107,7 @@ async function createBundle(outputDirectory, producerRevision, sourceTreeClean) 
       format: 'esm',
       platform: 'neutral',
       target: 'es2022',
-      alias: { '@scriptorium/contracts': path.join(root, 'packages/contracts/src/index.ts') },
+      alias: { '@codexia/contracts': path.join(root, 'packages/contracts/src/index.ts') },
       treeShaking: true,
       legalComments: 'none',
       charset: 'ascii',
@@ -138,7 +138,7 @@ async function createBundle(outputDirectory, producerRevision, sourceTreeClean) 
       '  requestedModuleIds: readonly string[],',
       '): ProducerBuildCatalogSelection;',
       'export declare function resolveCompositionPersistence(selectedModuleIds: readonly string[]): {',
-      '  contractVersion: "scriptorium-persistence/v1";',
+      '  contractVersion: "codexia-persistence/v1";',
       '  readable: { formatId: string; versions: number[] }[];',
       '  writable: { formatId: string; version: number }[];',
       '};',
@@ -162,7 +162,7 @@ async function createBundle(outputDirectory, producerRevision, sourceTreeClean) 
       digest: sha256(await readFile(path.join(root, sourcePath))),
     })));
     const provenance = {
-      schemaVersion: 'scriptorium-build-catalog-resolver-provenance/v1',
+      schemaVersion: 'codexia-build-catalog-resolver-provenance/v1',
       producerRevision,
       sourceTreeClean,
       bundlePath: 'build-catalog.mjs',

@@ -1,10 +1,10 @@
 {
-  "name": "@scriptorium/app",
+  "name": "@codexia/app",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit -p tsconfig.json && vite build && SCRIPTORIUM_UI=desktop vite build && SCRIPTORIUM_UI=mobile vite build",
+    "build": "tsc --noEmit -p tsconfig.json && vite build && CODEXIA_UI=desktop vite build && CODEXIA_UI=mobile vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test 'src/**/*.test.ts'"
   },
@@ -17,7 +17,7 @@
     "@ionic/react-router": "9.0.8",
     "@radix-ui/react-separator": "1.2.0",
     "@radix-ui/react-tabs": "1.2.1",
-    "@scriptorium/contracts": "workspace:*",
+    "@codexia/contracts": "workspace:*",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-resizable-panels": "2.1.9",

@@ -1,7 +1,7 @@
 import { isDialogue } from "../textAnalysis.js";
-import { splitIntoSentences } from "@scriptorium/module-nlp";
-import type { Token } from "@scriptorium/module-nlp";
-import { isAdjective, isAdverb, isVerb } from "@scriptorium/module-nlp";
+import { splitIntoSentences } from "@codexia/module-nlp";
+import type { Token } from "@codexia/module-nlp";
+import { isAdjective, isAdverb, isVerb } from "@codexia/module-nlp";
 
 export interface ProseBalanceWarning {
   metric: "dialogue-ratio" | "narration-ratio" | "adjective-density" | "adverb-density";

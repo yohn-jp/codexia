@@ -2,7 +2,7 @@ import { fork, type ChildProcess } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { availableParallelism } from "node:os";
 import path from "node:path";
-import { MAX_JOB_INPUT_BYTES, MAX_JOB_OUTPUT_BYTES, snapshotKey, type JobOutcome, type JobRequest, type JobResult, type MachineError, type ModuleId, type WorkerService } from "@scriptorium/contracts";
+import { MAX_JOB_INPUT_BYTES, MAX_JOB_OUTPUT_BYTES, snapshotKey, type JobOutcome, type JobRequest, type JobResult, type MachineError, type ModuleId, type WorkerService } from "@codexia/contracts";
 import { isModuleId, ModuleRuntimeError } from "./runtime-error.js";
 
 type WorkerResponse =
@@ -154,7 +154,7 @@ function workerEnvironment(mode: "job" | "service" = "job"): NodeJS.ProcessEnv {
     const value = process.env[key];
     if (typeof value === "string") env[key] = value;
   }
-  env.SCRIPTORIUM_WORKER_MODE = mode;
+  env.CODEXIA_WORKER_MODE = mode;
   return env;
 }
 
@@ -1026,7 +1026,7 @@ export function installWorkerHandler<TInput = unknown, TOutput = unknown>(
   handler: (request: JobRequest<TInput>, signal: AbortSignal) => TOutput | Promise<TOutput>,
 ): void {
   const active = new Map<string, AbortController>();
-  const persistent = process.env.SCRIPTORIUM_WORKER_MODE === "service";
+  const persistent = (process.env.CODEXIA_WORKER_MODE ?? process.env.SCRIPTORIUM_WORKER_MODE) === "service";
   let shuttingDown = false;
   const finishIfIdle = () => {
     if (shuttingDown && active.size === 0 && process.connected) process.disconnect();

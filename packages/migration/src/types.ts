@@ -5,7 +5,7 @@ import type {
   RepositoryIdentity,
   SnapshotId,
   SnapshotReader,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 
 export type PersistenceCategory =
   | "authoritative"

@@ -5,7 +5,7 @@ import {
   type ChangeProposal,
   type CheckpointReceipt,
   type RepositoryIdentity,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 import {
   documentKey,
   journalEntryKey,

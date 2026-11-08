@@ -8,7 +8,7 @@ import {
   parseJapaneseNumber,
   type StoryTokenizer,
 } from "./timeline.js";
-import type { SnapshotId } from "@scriptorium/contracts";
+import type { SnapshotId } from "@codexia/contracts";
 
 const snapshot: SnapshotId = {
   repository: {

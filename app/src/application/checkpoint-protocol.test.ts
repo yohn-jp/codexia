@@ -6,7 +6,7 @@ import type {
   ChangeProposal,
   CheckpointReceipt,
   RepositoryIdentity,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 import { runCheckpointProtocol, CheckpointConflictError, type CheckpointApi, type CheckpointJournal } from "./checkpoint-protocol.js";
 import { documentKey, journalEntryKey, repositoryKey, type JournalEntry, type JournalState } from "../storage/journal.js";
 

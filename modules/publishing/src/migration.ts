@@ -1,5 +1,5 @@
-import { assertChangeOperation } from "@scriptorium/contracts";
-import { planGeneratedFileImport, stableMigrationId, type MigrationContribution, type MigrationContext, type MigrationProducer } from "@scriptorium/migration";
+import { assertChangeOperation } from "@codexia/contracts";
+import { planGeneratedFileImport, stableMigrationId, type MigrationContribution, type MigrationContext, type MigrationProducer } from "@codexia/migration";
 import YAML from "yaml";
 import { EPISODES_PATH } from "./episodes.js";
 import { normalizeShareScope, readShareGrants, SHARE_GRANTS_PATH } from "./grants.js";
@@ -124,7 +124,7 @@ function safeRetainedGrant(value: unknown, repositoryId: string): Record<string,
 }
 
 function withRetainedSourceGuard(
-  operation: import("@scriptorium/contracts").ChangeOperation,
+  operation: import("@codexia/contracts").ChangeOperation,
   sourcePath: string,
   sourceRevision: string,
 ) {

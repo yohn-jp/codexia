@@ -13,7 +13,7 @@ import {
   type SnapshotId,
   type ValueSchema,
   snapshotKey,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 import {
   analyzeThreadLifecycles,
   buildLocationMap,

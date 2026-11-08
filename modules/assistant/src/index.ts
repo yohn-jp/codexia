@@ -1,4 +1,4 @@
-import { CONTRACT_VERSION, type ModuleContext, type ModuleDefinition, type ModuleManifest } from "@scriptorium/contracts";
+import { CONTRACT_VERSION, type ModuleContext, type ModuleDefinition, type ModuleManifest } from "@codexia/contracts";
 import { createAssistantActions, createAssistantQaStreamHttpContribution, createRewriteStreamHttpContribution } from "./actions.js";
 
 export const assistantManifest: ModuleManifest = {

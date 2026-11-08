@@ -21,9 +21,9 @@ import {
   type ModuleContext,
   type SnapshotId,
   type ValueSchema,
-} from "@scriptorium/contracts";
-import { readStorySnapshot, type StoryEntity } from "@scriptorium/module-story";
-import { splitIntoSentenceOffsets, splitIntoSentences } from "@scriptorium/module-nlp";
+} from "@codexia/contracts";
+import { readStorySnapshot, type StoryEntity } from "@codexia/module-story";
+import { splitIntoSentenceOffsets, splitIntoSentences } from "@codexia/module-nlp";
 import {
   resolveAssistantModel,
   streamAssistantModel,
@@ -1090,7 +1090,7 @@ async function runRewrite(
   const resultProvenance = generated?.provenance ?? {
     snapshot: context.reader.snapshot,
     provider: "local",
-    model: "scriptorium-rewrite-heuristics",
+    model: "codexia-rewrite-heuristics",
     modelVersion: "source-heuristic-v1",
     moduleVersion: ASSISTANT_MODULE_VERSION,
     promptVersion: `${CUSTOM_PROMPT_VERSIONS.rewrite}:local-fallback-v1`,

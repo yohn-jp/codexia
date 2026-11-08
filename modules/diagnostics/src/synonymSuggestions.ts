@@ -1,6 +1,6 @@
-import type { SnapshotId } from "@scriptorium/contracts";
-import type { NlpTokenizerCapability, MorphologyAnalysis, MorphToken, Token } from "@scriptorium/module-nlp";
-import { isAuxiliaryVerb, isParticle, isSymbol, isTaConjunctive, isUnknown, isVerb, splitIntoSentenceOffsets } from "@scriptorium/module-nlp";
+import type { SnapshotId } from "@codexia/contracts";
+import type { NlpTokenizerCapability, MorphologyAnalysis, MorphToken, Token } from "@codexia/module-nlp";
+import { isAuxiliaryVerb, isParticle, isSymbol, isTaConjunctive, isUnknown, isVerb, splitIntoSentenceOffsets } from "@codexia/module-nlp";
 import { detectRhythmWarnings, isDialogue } from "./textAnalysis.js";
 import type { HabitualPhraseWarning } from "./mining/types.js";
 import type { RhythmWarning } from "./textAnalysis.js";

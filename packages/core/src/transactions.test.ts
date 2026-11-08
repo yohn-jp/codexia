@@ -6,7 +6,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { snapshotScopeRevision, type ChangeOperation, type ChangeProposal, type SnapshotId } from "@scriptorium/contracts";
+import { snapshotScopeRevision, type ChangeOperation, type ChangeProposal, type SnapshotId } from "@codexia/contracts";
 import { CoreError, CoreStore } from "./index.js";
 
 const execFile = promisify(execFileCallback);
@@ -99,7 +99,7 @@ async function runIndexStrategy(
 }
 
 async function remoteFixture(): Promise<{ root: string; remote: string; seed: string }> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-transactions-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-transactions-"));
   const remote = path.join(root, "remote.git");
   const seed = path.join(root, "seed");
   await fs.mkdir(seed);
@@ -1429,7 +1429,7 @@ test("a non-fast-forward push race retries from the new remote head", async () =
     await git(fixture.seed, "commit", "-m", "Racing upstream change");
     const competing = await git(fixture.seed, "rev-parse", "HEAD");
     await git(fixture.seed, "push", "origin", `${competing}:refs/race/competing`);
-    const marker = path.join(fixture.remote, "scriptorium-race-fired");
+    const marker = path.join(fixture.remote, "codexia-race-fired");
     const hookPath = path.join(fixture.remote, "hooks", "post-receive");
     await fs.writeFile(hookPath, `#!/bin/sh\nwhile read old new ref; do\n  if [ "$ref" = "refs/heads/main" ] && [ ! -f "${marker}" ]; then\n    git --git-dir="$GIT_DIR" update-ref "$ref" "${competing}" "$new" || exit 1\n    : > "${marker}"\n  fi\ndone\n`, "utf8");
     await fs.chmod(hookPath, 0o755);
@@ -1630,8 +1630,8 @@ test("historical metadata scans batch immutable blobs and reuse their bounded co
   if (process.platform === "win32") return t.skip("the test uses a temporary POSIX Git wrapper");
   const fixture = await remoteFixture();
   const originalPath = process.env.PATH;
-  const originalGit = process.env.SCRIPTORIUM_TEST_REAL_GIT;
-  const originalLog = process.env.SCRIPTORIUM_TEST_GIT_LOG;
+  const originalGit = process.env.CODEXIA_TEST_REAL_GIT;
+  const originalLog = process.env.CODEXIA_TEST_GIT_LOG;
   try {
     const dataDir = path.join(fixture.root, "state");
     const store = new CoreStore({ dataDir, allowLocalRemotes: true });
@@ -1666,15 +1666,15 @@ for argument in "$@"; do
   if [ -z "$command" ] && { [ "$argument" = "show" ] || [ "$argument" = "cat-file" ]; }; then command="$argument"; fi
   if [ "$command" = "cat-file" ] && [ "$argument" = "--batch" ]; then batch="yes"; fi
 done
-if [ "$command" = "show" ]; then printf '%s\\n' show >> "$SCRIPTORIUM_TEST_GIT_LOG"; fi
-if [ "$command" = "cat-file" ] && [ "$batch" = "yes" ]; then printf '%s\\n' cat-file-batch >> "$SCRIPTORIUM_TEST_GIT_LOG"; fi
-exec "$SCRIPTORIUM_TEST_REAL_GIT" "$@"
+if [ "$command" = "show" ]; then printf '%s\\n' show >> "$CODEXIA_TEST_GIT_LOG"; fi
+if [ "$command" = "cat-file" ] && [ "$batch" = "yes" ]; then printf '%s\\n' cat-file-batch >> "$CODEXIA_TEST_GIT_LOG"; fi
+exec "$CODEXIA_TEST_REAL_GIT" "$@"
 `;
     const wrapperPath = path.join(wrapperDir, "git");
     await fs.writeFile(wrapperPath, wrapper, { mode: 0o700 });
     process.env.PATH = `${wrapperDir}${path.delimiter}${originalPath ?? ""}`;
-    process.env.SCRIPTORIUM_TEST_REAL_GIT = realGit;
-    process.env.SCRIPTORIUM_TEST_GIT_LOG = gitLog;
+    process.env.CODEXIA_TEST_REAL_GIT = realGit;
+    process.env.CODEXIA_TEST_GIT_LOG = gitLog;
 
     const restarted = new CoreStore({ dataDir, allowLocalRemotes: true });
     const recovered = await restarted.getProposal(project.id, proposal.id);
@@ -1697,10 +1697,10 @@ exec "$SCRIPTORIUM_TEST_REAL_GIT" "$@"
   } finally {
     if (originalPath === undefined) delete process.env.PATH;
     else process.env.PATH = originalPath;
-    if (originalGit === undefined) delete process.env.SCRIPTORIUM_TEST_REAL_GIT;
-    else process.env.SCRIPTORIUM_TEST_REAL_GIT = originalGit;
-    if (originalLog === undefined) delete process.env.SCRIPTORIUM_TEST_GIT_LOG;
-    else process.env.SCRIPTORIUM_TEST_GIT_LOG = originalLog;
+    if (originalGit === undefined) delete process.env.CODEXIA_TEST_REAL_GIT;
+    else process.env.CODEXIA_TEST_REAL_GIT = originalGit;
+    if (originalLog === undefined) delete process.env.CODEXIA_TEST_GIT_LOG;
+    else process.env.CODEXIA_TEST_GIT_LOG = originalLog;
     await fs.rm(fixture.root, { recursive: true, force: true });
   }
 });

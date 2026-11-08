@@ -3,8 +3,8 @@ import { execFileSync } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const authToken = process.env.SCRIPTORIUM_E2E_AUTH_TOKEN ?? "";
-const repositoryUrl = process.env.SCRIPTORIUM_E2E_REPOSITORY_URL ?? "";
+const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
+const repositoryUrl = process.env.CODEXIA_E2E_REPOSITORY_URL ?? "";
 
 test.use({ hasTouch: true });
 
@@ -649,7 +649,7 @@ test("legacy draft composition cannot write old scene text into a newly selected
 function readLocalRemoteDocument(path: string): string | null {
   if (repositoryUrl.startsWith("https://") || repositoryUrl.startsWith("http://")) return null;
   const repositoryPath = repositoryUrl.startsWith("file://") ? fileURLToPath(repositoryUrl) : repositoryUrl;
-  const branch = process.env.SCRIPTORIUM_E2E_REPOSITORY_BRANCH ?? "main";
+  const branch = process.env.CODEXIA_E2E_REPOSITORY_BRANCH ?? "main";
   return execFileSync("git", ["--git-dir", repositoryPath, "show", `refs/heads/${branch}:${path}`], { encoding: "utf8" });
 }
 
@@ -684,7 +684,7 @@ test("the launcher remembers an explicit choice while direct Shell links keep th
 
 for (const departure of ["reload", "pagehide"] as const) {
   test(`recovery reconciliation is cancelled at ${departure} and retried without losing its checkpoint`, async ({ page }, testInfo) => {
-    test.skip(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1" || Boolean(process.env.SCRIPTORIUM_E2E_BASE_URL ?? process.env.SCRIPTORIUM_BASE_URL),
+    test.skip(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1" || Boolean(process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL),
       "This case controls the generated local server and isolated browser journal.");
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -713,7 +713,7 @@ for (const departure of ["reload", "pagehide"] as const) {
         document.addEventListener(type, recordInput, true);
       }
       for (const type of ["beforeunload", "pagehide", "unload"]) window.addEventListener(type, () => {
-        const key = "scriptorium:e2e:reconcile-lifecycle";
+        const key = "codexia:e2e:reconcile-lifecycle";
         const events = JSON.parse(localStorage.getItem(key) ?? "[]") as unknown[];
         localStorage.setItem(key, JSON.stringify([...events, { event: type }]));
       });
@@ -721,7 +721,7 @@ for (const departure of ["reload", "pagehide"] as const) {
       window.fetch = function (input, init) {
         if (String(input).endsWith("/reconcile")) {
           const record = (event: { event: string; signal?: boolean }) => {
-            const key = "scriptorium:e2e:reconcile-lifecycle";
+            const key = "codexia:e2e:reconcile-lifecycle";
             const events = JSON.parse(localStorage.getItem(key) ?? "[]") as unknown[];
             localStorage.setItem(key, JSON.stringify([...events, event]));
           };
@@ -752,17 +752,17 @@ for (const departure of ["reload", "pagehide"] as const) {
         event.preventDefault();
         window.dispatchEvent(event);
       });
-      expect(await page.evaluate(() => localStorage.getItem("scriptorium:e2e:reconcile-lifecycle"))).not.toContain('"event":"abort"');
+      expect(await page.evaluate(() => localStorage.getItem("codexia:e2e:reconcile-lifecycle"))).not.toContain('"event":"abort"');
       if (departure === "reload") await page.reload();
       else await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
       expect((await page.request.post(release)).ok()).toBe(true);
       if (departure === "pagehide") {
-        await expect.poll(() => page.evaluate(() => localStorage.getItem("scriptorium:e2e:reconcile-lifecycle"))).toContain('"event":"abort"');
+        await expect.poll(() => page.evaluate(() => localStorage.getItem("codexia:e2e:reconcile-lifecycle"))).toContain('"event":"abort"');
         await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
       }
       await expect(page.locator(".cm-content[contenteditable=true]")).toHaveText(draft);
       await expectJournalState(page, "scene-1", draft, "checkpointed");
-      const requests = await page.evaluate(() => JSON.parse(localStorage.getItem("scriptorium:e2e:reconcile-lifecycle") ?? "[]") as Array<{ event: string; signal?: boolean }>);
+      const requests = await page.evaluate(() => JSON.parse(localStorage.getItem("codexia:e2e:reconcile-lifecycle") ?? "[]") as Array<{ event: string; signal?: boolean }>);
       const recovered = await readJournalEntry(page, "scene-1", draft);
       expect(recovered.operation).toEqual(checkpoint.operation);
       expect(recovered.checkpoint).toEqual(checkpoint.checkpoint);
@@ -1187,10 +1187,10 @@ test("profile-selected workspace panels match contribution kinds and mount one a
   const contributions = await contributionResponse.json() as UiContribution[];
   const enabled = modules.filter((module) => module.availability === "enabled-idle" || module.availability === "active");
   const enabledIds = enabled.map((module) => module.id).sort();
-  const expectedModules = process.env.SCRIPTORIUM_E2E_EXPECTED_MODULES?.split(",").filter(Boolean).sort();
+  const expectedModules = process.env.CODEXIA_E2E_EXPECTED_MODULES?.split(",").filter(Boolean).sort();
   if (expectedModules) expect(enabledIds).toEqual(expectedModules);
-  if ((process.env.SCRIPTORIUM_PROFILE ?? "core") === "core") expect(enabledIds).toEqual([]);
-  if ((process.env.SCRIPTORIUM_PROFILE ?? "core") === "full") {
+  if ((process.env.CODEXIA_PROFILE ?? "core") === "core") expect(enabledIds).toEqual([]);
+  if ((process.env.CODEXIA_PROFILE ?? "core") === "full") {
     expect(enabledIds).toEqual(["assistant", "diagnostics", "mcp", "nlp", "publishing", "search", "semantic", "speaker", "story"]);
   }
 
@@ -1408,7 +1408,7 @@ test("UX canon keeps explicit shells usable with long Japanese titles and enlarg
 
 // Lifecycle events are synthetic; this verifies optional work ownership, not OS input.
 test("optional terminology cancels work at pagehide and resumes at pageshow", async ({ page }) => {
-  test.skip(process.env.SCRIPTORIUM_PROFILE !== "full", "Terminology is an optional Full contribution.");
+  test.skip(process.env.CODEXIA_PROFILE !== "full", "Terminology is an optional Full contribution.");
   await signIn(page, "desktop");
   await openFixtureScene(page, "desktop");
   const editor = page.locator(".cm-content[contenteditable=true]");
@@ -1454,9 +1454,9 @@ test("optional terminology cancels work at pagehide and resumes at pageshow", as
 });
 
 test("Full WebKit terminology stays safe across a held native Shell departure window", async ({ page }, testInfo) => {
-  test.skip(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1" || Boolean(process.env.SCRIPTORIUM_E2E_BASE_URL ?? process.env.SCRIPTORIUM_BASE_URL),
+  test.skip(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1" || Boolean(process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL),
     "This timing harness is limited to the generated local fixture.");
-  test.skip(process.env.SCRIPTORIUM_PROFILE !== "full", "Terminology is an optional Full contribution.");
+  test.skip(process.env.CODEXIA_PROFILE !== "full", "Terminology is an optional Full contribution.");
   test.skip(testInfo.project.name !== "webkit", "The access-control diagnostic under test is WebKit-specific.");
 
   const pageErrors: string[] = [];
