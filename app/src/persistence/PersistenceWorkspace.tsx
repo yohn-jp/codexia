@@ -57,6 +57,7 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
   const saveDocumentRef = useRef<() => Promise<void>>(async () => undefined);
   const editorRef = useRef<ManuscriptInputHandle>(null);
   const clientIdRef = useRef("");
+  const openSequenceRef = useRef(0);
   const [loading, setLoading] = useState(false);
   const [pageError, setPageError] = useState("");
   const [notice, setNotice] = useState("");
@@ -144,6 +145,7 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
     const currentProject = projects.find((item) => item.id === projectId);
     const currentJournal = journalRef.current;
     if (!currentProject || !currentJournal || !nextDocumentId) return;
+    const openSequence = ++openSequenceRef.current;
     setLoading(true);
     setPageError("");
     setNotice("");
@@ -162,6 +164,7 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
         markdown: revision.markdown,
       }, new AbortController().signal);
       const evidence = initializeDocumentEvidence(revision.markdown, revision.id, snapshot);
+      if (openSequence !== openSequenceRef.current) return;
       const staleDraft = Boolean(draft && (draft.baseRevisionId !== revision.id || draft.baseMarkdown !== revision.markdown));
       const markdown = draft?.markdown ?? revision.markdown;
       const baseMarkdown = draft?.baseMarkdown ?? revision.markdown;
@@ -186,9 +189,9 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
       setRevisions([]);
       setShowRevisions(false);
     } catch (error) {
-      setPageError(error instanceof Error ? error.message : "文書を開けませんでした。");
+      if (openSequence === openSequenceRef.current) setPageError(error instanceof Error ? error.message : "文書を開けませんでした。");
     } finally {
-      setLoading(false);
+      if (openSequence === openSequenceRef.current) setLoading(false);
     }
   }, [authorScope, projectId, projects, publishEditor]);
 
@@ -293,7 +296,10 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
           baseRevisionId: result.revision.id,
           baseMarkdown: pending.markdown,
           dirty: hasNewerText,
-          recovery: hasNewerText ? latest.recovery : "stored",
+          // A newer draft may already exist under the old base Revision at this generation.
+          // Advance the generation so IndexedDB can persist the rebased record before retrying.
+          generation: hasNewerText ? latest.generation + 1 : latest.generation,
+          recovery: hasNewerText ? "pending" : "stored",
           save: hasNewerText ? "idle" : "saved",
           error: !removed && !hasNewerText ? "この文書のより新しい回復記録が別タブに残っています。" : "",
           remoteConflict: null,
@@ -387,6 +393,7 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
         return;
       }
     }
+    openSequenceRef.current += 1;
     publishEditor(null);
     setDocumentId(nextId);
   }
@@ -402,7 +409,9 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
     }, new AbortController().signal);
     const evidence = initializeDocumentEvidence(value.revision.markdown, value.revision.id, snapshot);
     const latest = activeRef.current;
-    if (latest?.document.id === value.document.id) publishEditor({ ...latest, evidence, evidenceLoadKey: latest.evidenceLoadKey + 1 });
+    if (latest?.document.id === value.document.id && latest.revision.id === value.revision.id) {
+      publishEditor({ ...latest, evidence, evidenceLoadKey: latest.evidenceLoadKey + 1 });
+    }
   }
 
   async function createAnchor(): Promise<void> {
@@ -600,7 +609,17 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
     publishEditor({ ...current, markdown, generation: current.generation + 1, dirty: markdown !== current.baseMarkdown, recovery: "pending", save: "idle", error: "" });
   }, [publishEditor]);
 
-  const selectProject = (nextProjectId: string) => {
+  const selectProject = async (nextProjectId: string): Promise<void> => {
+    const current = activeRef.current;
+    if (current?.dirty) {
+      try {
+        if (!await persistDraft(current)) throw new Error("別タブの新しい回復記録があるため、作品を切り替えませんでした。");
+      } catch (error) {
+        setPageError(error instanceof Error ? error.message : "回復Journalへ保存できませんでした。");
+        return;
+      }
+    }
+    openSequenceRef.current += 1;
     publishEditor(null);
     setDocumentId("");
     setProjectId(nextProjectId);
@@ -621,7 +640,7 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
         <section>
           <h2>作品</h2>
           {projects.length > 0 && <label htmlFor="pg-project">開く作品</label>}
-          {projects.length > 0 && <select id="pg-project" value={projectId} onChange={(event) => selectProject(event.target.value)}>
+          {projects.length > 0 && <select id="pg-project" value={projectId} onChange={(event) => void selectProject(event.target.value)}>
             {projects.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
           </select>}
           <form onSubmit={(event) => void createProject(event)}>
