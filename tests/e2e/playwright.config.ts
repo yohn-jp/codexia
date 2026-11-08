@@ -3,34 +3,34 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-const externalRepository = Boolean(process.env.SCRIPTORIUM_E2E_REPOSITORY_URL);
-const selectedTestFile = process.env.SCRIPTORIUM_E2E_TEST_FILE;
-const coverageFile = process.env.SCRIPTORIUM_E2E_COVERAGE_FILE;
-const configuredBaseURL = process.env.SCRIPTORIUM_E2E_BASE_URL ?? process.env.SCRIPTORIUM_BASE_URL;
-const baseURL = configuredBaseURL ?? `http://127.0.0.1:${process.env.SCRIPTORIUM_E2E_PORT ?? "4173"}`;
+const externalRepository = Boolean(process.env.CODEXIA_E2E_REPOSITORY_URL);
+const selectedTestFile = process.env.CODEXIA_E2E_TEST_FILE;
+const coverageFile = process.env.CODEXIA_E2E_COVERAGE_FILE;
+const configuredBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL;
+const baseURL = configuredBaseURL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
 const externalServer = Boolean(configuredBaseURL);
-const isTemporaryStateDir = !process.env.SCRIPTORIUM_E2E_STATE_DIR && !externalServer;
-const stateDir = process.env.SCRIPTORIUM_E2E_STATE_DIR
-  ?? (externalServer ? tmpdir() : mkdtempSync(join(tmpdir(), "scriptorium-e2e-")));
-const authToken = process.env.SCRIPTORIUM_E2E_AUTH_TOKEN
-  ?? (configuredBaseURL ? process.env.SCRIPTORIUM_AUTH_TOKEN : undefined)
-  ?? "scriptorium-e2e-token-for-local-testing-only";
+const isTemporaryStateDir = !process.env.CODEXIA_E2E_STATE_DIR && !externalServer;
+const stateDir = process.env.CODEXIA_E2E_STATE_DIR
+  ?? (externalServer ? tmpdir() : mkdtempSync(join(tmpdir(), "codexia-e2e-")));
+const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN
+  ?? (configuredBaseURL ? process.env.CODEXIA_AUTH_TOKEN : undefined)
+  ?? "codexia-e2e-token-for-local-testing-only";
 
-process.env.SCRIPTORIUM_E2E_STATE_DIR = stateDir;
-process.env.SCRIPTORIUM_E2E_REPOSITORY_URL ??= resolve(stateDir, "origin.git");
+process.env.CODEXIA_E2E_STATE_DIR = stateDir;
+process.env.CODEXIA_E2E_REPOSITORY_URL ??= resolve(stateDir, "origin.git");
 if (!configuredBaseURL && !externalRepository) {
-  process.env.SCRIPTORIUM_E2E_MODULAR_REPOSITORY_URL ??= resolve(stateDir, "modular-origin.git");
+  process.env.CODEXIA_E2E_MODULAR_REPOSITORY_URL ??= resolve(stateDir, "modular-origin.git");
 }
-process.env.SCRIPTORIUM_E2E_REPOSITORY_BRANCH ??= "main";
-process.env.SCRIPTORIUM_E2E_AUTH_TOKEN = authToken;
-process.env.SCRIPTORIUM_E2E_PORT ??= "4173";
-process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY ??= externalRepository ? "1" : "";
-process.env.SCRIPTORIUM_E2E_TEMP_STATE_DIR = isTemporaryStateDir ? "1" : "";
+process.env.CODEXIA_E2E_REPOSITORY_BRANCH ??= "main";
+process.env.CODEXIA_E2E_AUTH_TOKEN = authToken;
+process.env.CODEXIA_E2E_PORT ??= "4173";
+process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY ??= externalRepository ? "1" : "";
+process.env.CODEXIA_E2E_TEMP_STATE_DIR = isTemporaryStateDir ? "1" : "";
 if (externalServer && !externalRepository) {
-  throw new Error("Set SCRIPTORIUM_E2E_REPOSITORY_URL to a disposable HTTPS GitHub fixture when targeting an external app");
+  throw new Error("Set CODEXIA_E2E_REPOSITORY_URL to a disposable HTTPS GitHub fixture when targeting an external app");
 }
 if (selectedTestFile && !/^[a-z0-9-]+\.acceptance\.spec\.ts$/u.test(selectedTestFile)) {
-  throw new Error("SCRIPTORIUM_E2E_TEST_FILE must name one acceptance spec");
+  throw new Error("CODEXIA_E2E_TEST_FILE must name one acceptance spec");
 }
 
 export default defineConfig({
@@ -57,8 +57,8 @@ export default defineConfig({
       name: "chromium",
       use: {
         browserName: "chromium",
-        launchOptions: process.env.SCRIPTORIUM_E2E_CHROMIUM
-          ? { executablePath: process.env.SCRIPTORIUM_E2E_CHROMIUM }
+        launchOptions: process.env.CODEXIA_E2E_CHROMIUM
+          ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM }
           : undefined,
       },
     },
@@ -67,8 +67,8 @@ export default defineConfig({
       testMatch: "**/ui-v1.acceptance.spec.ts",
       use: {
         browserName: "webkit",
-        launchOptions: process.env.SCRIPTORIUM_E2E_WEBKIT
-          ? { executablePath: process.env.SCRIPTORIUM_E2E_WEBKIT }
+        launchOptions: process.env.CODEXIA_E2E_WEBKIT
+          ? { executablePath: process.env.CODEXIA_E2E_WEBKIT }
           : undefined,
       },
     },

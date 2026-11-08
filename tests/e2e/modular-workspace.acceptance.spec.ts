@@ -4,12 +4,12 @@ import { createServer } from "node:net";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
-const authToken = process.env.SCRIPTORIUM_E2E_AUTH_TOKEN ?? "";
-const repositoryUrl = process.env.SCRIPTORIUM_E2E_MODULAR_REPOSITORY_URL ?? process.env.SCRIPTORIUM_E2E_REPOSITORY_URL ?? "";
-const profile = process.env.SCRIPTORIUM_PROFILE ?? "core";
+const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
+const repositoryUrl = process.env.CODEXIA_E2E_MODULAR_REPOSITORY_URL ?? process.env.CODEXIA_E2E_REPOSITORY_URL ?? "";
+const profile = process.env.CODEXIA_PROFILE ?? "core";
 
 async function startMobileTransitionFixture(): Promise<{ url: string; stop(): Promise<void> }> {
-  const configuredPort = process.env.SCRIPTORIUM_MOBILE_TRANSITION_PORT;
+  const configuredPort = process.env.CODEXIA_MOBILE_TRANSITION_PORT;
   const port = configuredPort ? Number.parseInt(configuredPort, 10) : await findAvailablePort();
   if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("Mobile transition fixture port must be valid");
   const url = `http://127.0.0.1:${port}`;
@@ -347,7 +347,7 @@ async function openFixtureScene(page: Page, mode: "desktop" | "mobile", sceneId 
 async function readJournal(page: Page): Promise<DraftRecord[]> {
   return page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("codexia-recovery", 3);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -396,7 +396,7 @@ async function readRemoteScene(page: Page, projectId: string, sceneId: string): 
 }
 
 async function resetLocalCore(): Promise<void> {
-  const e2ePort = Number.parseInt(process.env.SCRIPTORIUM_E2E_PORT ?? "4173", 10);
+  const e2ePort = Number.parseInt(process.env.CODEXIA_E2E_PORT ?? "4173", 10);
   const origin = `http://127.0.0.1:${e2ePort}`;
   const reset = await fetch(`http://127.0.0.1:${e2ePort + 1}/__e2e/reset-core`, { method: "POST" });
   expect(reset.status).toBe(204);
@@ -425,7 +425,7 @@ async function closePanelMenu(page: Page): Promise<void> {
 
 async function workspaceStorage(page: Page, mode: "desktop" | "mobile"): Promise<{ key: string; raw: string | null }> {
   return page.evaluate((expectedMode) => {
-    const prefix = "scriptorium:workspace:v2:";
+    const prefix = "codexia:workspace:v2:";
     const key = Object.keys(localStorage).find((candidate) => candidate.startsWith(prefix) && candidate.endsWith(`:${expectedMode}`));
     return { key: key ?? "", raw: key ? localStorage.getItem(key) : null };
   }, mode);
@@ -670,7 +670,7 @@ test("editor stays read-only until delayed browser recovery is reconciled", asyn
         descriptor.set!.call(this, function (this: IDBRequest, event: Event) {
           const currentGate = (window as GatedWindow).__workspaceRecoveryGate;
           const database = request.result as IDBDatabase | undefined;
-          if (database?.name === "scriptorium-recovery" && currentGate && !currentGate.opened) {
+          if (database?.name === "codexia-recovery" && currentGate && !currentGate.opened) {
             currentGate.opened = true;
             currentGate.release = () => handler.call(request, event);
             return;
@@ -721,7 +721,7 @@ test("failed IndexedDB open before login keeps the scene readable and the existi
     const nativeOpen = IDBFactory.prototype.open;
     type RecoveryWindow = Window & { __readNativeRecoveryJournal?: () => Promise<Array<{ sceneId: string; state: string; text: string; operationId: string; generation: number }>> };
     (window as RecoveryWindow).__readNativeRecoveryJournal = async () => {
-      const request = Reflect.apply(nativeOpen, indexedDB, ["scriptorium-recovery", 3]) as IDBOpenDBRequest;
+      const request = Reflect.apply(nativeOpen, indexedDB, ["codexia-recovery", 3]) as IDBOpenDBRequest;
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error ?? new Error("Native IndexedDB journal open failed"));
@@ -747,7 +747,7 @@ test("failed IndexedDB open before login keeps the scene readable and the existi
       configurable: true,
       writable: true,
       value: function (this: IDBFactory, name: string, version?: number) {
-        if (name === "scriptorium-recovery") throw new DOMException("Synthetic IndexedDB open denial", "SecurityError");
+        if (name === "codexia-recovery") throw new DOMException("Synthetic IndexedDB open denial", "SecurityError");
         return version === undefined ? nativeOpen.call(this, name) : nativeOpen.call(this, name, version);
       },
     });
@@ -775,7 +775,7 @@ test("failed IndexedDB open before login keeps the scene readable and the existi
 });
 
 test("Core loss replays an exact checkpointed author entry before enabling the recovered editor", async ({ page }) => {
-  test.skip(Boolean(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1" || process.env.SCRIPTORIUM_E2E_BASE_URL || process.env.SCRIPTORIUM_BASE_URL),
+  test.skip(Boolean(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1" || process.env.CODEXIA_E2E_BASE_URL || process.env.CODEXIA_BASE_URL),
     "This recovery acceptance resets only the disposable local Core data directory.");
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   expect(repositoryUrl).not.toBe("");
@@ -901,7 +901,7 @@ test("Core loss replays an exact checkpointed author entry before enabling the r
     releaseCheckpoint();
     releaseSceneRead();
     releaseReconcile();
-    if (process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY !== "1" && !process.env.SCRIPTORIUM_E2E_BASE_URL && !process.env.SCRIPTORIUM_BASE_URL) {
+    if (process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY !== "1" && !process.env.CODEXIA_E2E_BASE_URL && !process.env.CODEXIA_BASE_URL) {
       await page.close().catch(() => undefined);
       await resetLocalCore();
     }
@@ -909,7 +909,7 @@ test("Core loss replays an exact checkpointed author entry before enabling the r
 });
 
 test("Core-only workspace keeps authoring available without search or terminology panels", async ({ page }) => {
-  test.skip(profile !== "core", "Run this acceptance with SCRIPTORIUM_PROFILE=core.");
+  test.skip(profile !== "core", "Run this acceptance with CODEXIA_PROFILE=core.");
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   expect(repositoryUrl).not.toBe("");
   const projectId = await (async () => {
@@ -930,7 +930,7 @@ test("Core-only workspace keeps authoring available without search or terminolog
 });
 
 test("full profile exposes optional lexical search and terminology without changing manuscript source", async ({ page }) => {
-  test.skip(profile !== "full", "Run this acceptance with SCRIPTORIUM_PROFILE=full.");
+  test.skip(profile !== "full", "Run this acceptance with CODEXIA_PROFILE=full.");
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   expect(repositoryUrl).not.toBe("");
   const projectId = await (async () => {

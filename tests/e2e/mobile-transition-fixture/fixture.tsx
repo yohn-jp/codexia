@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
-import type { ChangeOperation, RepositoryIdentity } from "@scriptorium/contracts";
+import type { ChangeOperation, RepositoryIdentity } from "@codexia/contracts";
 import { MobileShell } from "../../../app/src/shells/mobile/MobileShell";
 import type { WorkspacePanel } from "../../../app/src/application/contracts";
 import { BrowserJournal, documentKey, journalEntryKey, repositoryKey, type JournalEntry } from "../../../app/src/storage/journal";

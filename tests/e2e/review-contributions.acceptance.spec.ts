@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const authToken = process.env.SCRIPTORIUM_E2E_AUTH_TOKEN ?? "";
+const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const branch = "main";
-const zukanPath = "meta/scriptorium/modules/story/zukan-suggestions.jsonl";
+const zukanPath = "meta/codexia/modules/story/zukan-suggestions.jsonl";
 const scenePath = "plot/volumes/vol-review/chapters/ch-review/scenes/scene-review.yaml";
 
 interface Project {
@@ -39,9 +39,9 @@ function git(cwd: string, ...args: string[]): string {
     stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...process.env,
-      GIT_AUTHOR_NAME: "Scriptorium Review Acceptance",
+      GIT_AUTHOR_NAME: "Codexia Review Acceptance",
       GIT_AUTHOR_EMAIL: "review-acceptance@example.invalid",
-      GIT_COMMITTER_NAME: "Scriptorium Review Acceptance",
+      GIT_COMMITTER_NAME: "Codexia Review Acceptance",
       GIT_COMMITTER_EMAIL: "review-acceptance@example.invalid",
     },
   }).trim();
@@ -56,7 +56,7 @@ async function writeFixture(seed: string, files: Record<string, string>): Promis
 }
 
 async function createReviewProject(): Promise<{ root: string; remote: string; remoteUrl: string; initialHead: string }> {
-  const root = await mkdtemp(join(tmpdir(), "scriptorium-review-contributions-"));
+  const root = await mkdtemp(join(tmpdir(), "codexia-review-contributions-"));
   const remote = join(root, "review.git");
   const seed = join(root, "seed");
   await mkdir(seed, { recursive: true });
@@ -167,8 +167,8 @@ async function readProposalStatus(page: Page, projectId: string, proposalId: str
 
 test("full profile renders Story and Speaker review queues and turns both author decisions into unapproved Core proposals", async ({ page }) => {
   test.setTimeout(180_000);
-  test.skip(process.env.SCRIPTORIUM_PROFILE !== "full", "Story and Speaker review contributions are selected by the full profile.");
-  test.skip(Boolean(process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY === "1" || process.env.SCRIPTORIUM_E2E_BASE_URL || process.env.SCRIPTORIUM_BASE_URL),
+  test.skip(process.env.CODEXIA_PROFILE !== "full", "Story and Speaker review contributions are selected by the full profile.");
+  test.skip(Boolean(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1" || process.env.CODEXIA_E2E_BASE_URL || process.env.CODEXIA_BASE_URL),
     "This acceptance registers and writes only to an owned temporary local bare Git fixture.");
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   const fixture = await createReviewProject();
@@ -248,7 +248,7 @@ test("full profile renders Story and Speaker review queues and turns both author
     expect(speakerStatus.checkpoints).toEqual([]);
     expect(speakerStatus.proposal.operations[0]?.writes.map((write) => write.path)).toEqual(expect.arrayContaining([
       scenePath,
-      "meta/scriptorium/modules/speaker/corrections.jsonl",
+      "meta/codexia/modules/speaker/corrections.jsonl",
     ]));
     await expect(speakerPanel.getByText("確定案をレビューキューに作成しました。承認後に正本へ反映されます。")).toBeVisible();
 
@@ -257,7 +257,7 @@ test("full profile renders Story and Speaker review queues and turns both author
     expect(remoteSuggestion.status).toBe("pending");
     const remoteScene = git(fixture.remote, "show", `refs/heads/${branch}:${scenePath}`);
     expect(remoteScene).not.toMatch(/^speakerOverrides:/mu);
-    expect(() => git(fixture.remote, "cat-file", "-e", `refs/heads/${branch}:meta/scriptorium/modules/speaker/corrections.jsonl`)).toThrow();
+    expect(() => git(fixture.remote, "cat-file", "-e", `refs/heads/${branch}:meta/codexia/modules/speaker/corrections.jsonl`)).toThrow();
 
     await page.getByRole("tablist", { name: "Panel tabs" }).getByRole("tab", { name: "Outline", exact: true }).click();
     await page.getByRole("navigation", { name: "作品構成" })

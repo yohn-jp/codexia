@@ -4,8 +4,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { ModuleId, ModuleManifest } from "@scriptorium/contracts";
-import type { ModuleLoader, ModuleRuntimeOptions } from "@scriptorium/module-runtime";
+import type { ModuleId, ModuleManifest } from "@codexia/contracts";
+import type { ModuleLoader, ModuleRuntimeOptions } from "@codexia/module-runtime";
 import { createServer } from "../../packages/api/dist/server.js";
 import { CoreStore } from "../../packages/core/dist/index.js";
 
@@ -15,23 +15,23 @@ function requiredSetting(name: string): string {
   return value;
 }
 
-const stateDir = requiredSetting("SCRIPTORIUM_E2E_STATE_DIR");
-const repositoryUrl = requiredSetting("SCRIPTORIUM_E2E_REPOSITORY_URL");
-const branch = process.env.SCRIPTORIUM_E2E_REPOSITORY_BRANCH ?? "main";
-const port = Number.parseInt(process.env.SCRIPTORIUM_E2E_PORT ?? "4173", 10);
-const authToken = process.env.SCRIPTORIUM_E2E_AUTH_TOKEN ?? "";
+const stateDir = requiredSetting("CODEXIA_E2E_STATE_DIR");
+const repositoryUrl = requiredSetting("CODEXIA_E2E_REPOSITORY_URL");
+const branch = process.env.CODEXIA_E2E_REPOSITORY_BRANCH ?? "main";
+const port = Number.parseInt(process.env.CODEXIA_E2E_PORT ?? "4173", 10);
+const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 
-if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("SCRIPTORIUM_E2E_PORT must be a valid TCP port");
-if (authToken.length < 32) throw new Error("SCRIPTORIUM_E2E_AUTH_TOKEN must contain at least 32 characters");
+if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("CODEXIA_E2E_PORT must be a valid TCP port");
+if (authToken.length < 32) throw new Error("CODEXIA_E2E_AUTH_TOKEN must contain at least 32 characters");
 
 async function createLocalFixture(targetRepositoryUrl = repositoryUrl): Promise<void> {
-  const fixtureRoot = await mkdtemp(join(tmpdir(), "scriptorium-e2e-repo-"));
+  const fixtureRoot = await mkdtemp(join(tmpdir(), "codexia-e2e-repo-"));
   const bareRemote = resolve(targetRepositoryUrl);
   const workingCopy = join(fixtureRoot, "seed");
   await mkdir(workingCopy, { recursive: true });
   await mkdir(join(workingCopy, "plot/volumes/vol-1/chapters/ch-1/scenes"), { recursive: true });
   await mkdir(join(workingCopy, "manuscript/vol-1/ch-1"), { recursive: true });
-  await mkdir(join(workingCopy, "meta/scriptorium/modules/search"), { recursive: true });
+  await mkdir(join(workingCopy, "meta/codexia/modules/search"), { recursive: true });
 
   await writeFile(join(workingCopy, "plot/volumes/vol-1/volume.yaml"), "id: vol-1\ntitle: Volume One\n", "utf8");
   await writeFile(
@@ -60,7 +60,7 @@ async function createLocalFixture(targetRepositoryUrl = repositoryUrl): Promise<
     "utf8",
   );
   await writeFile(
-    join(workingCopy, "meta/scriptorium/modules/search/terms.json"),
+    join(workingCopy, "meta/codexia/modules/search/terms.json"),
     JSON.stringify({
       schemaVersion: 1,
       terms: [{
@@ -79,9 +79,9 @@ async function createLocalFixture(targetRepositoryUrl = repositoryUrl): Promise<
       stdio: "ignore",
       env: {
         ...process.env,
-        GIT_AUTHOR_NAME: "Scriptorium Acceptance",
+        GIT_AUTHOR_NAME: "Codexia Acceptance",
         GIT_AUTHOR_EMAIL: "acceptance@example.invalid",
-        GIT_COMMITTER_NAME: "Scriptorium Acceptance",
+        GIT_COMMITTER_NAME: "Codexia Acceptance",
         GIT_COMMITTER_EMAIL: "acceptance@example.invalid",
       },
     });
@@ -117,15 +117,15 @@ async function close(server: Server): Promise<void> {
 }
 
 async function startTestServer(): Promise<void> {
-  if (process.env.SCRIPTORIUM_E2E_EXTERNAL_REPOSITORY !== "1") {
+  if (process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY !== "1") {
     await createLocalFixture();
-    const modularRepositoryUrl = process.env.SCRIPTORIUM_E2E_MODULAR_REPOSITORY_URL;
+    const modularRepositoryUrl = process.env.CODEXIA_E2E_MODULAR_REPOSITORY_URL;
     if (modularRepositoryUrl && resolve(modularRepositoryUrl) !== resolve(repositoryUrl)) {
       await createLocalFixture(modularRepositoryUrl);
     }
   }
 
-  const profile = process.env.SCRIPTORIUM_PROFILE ?? "core";
+  const profile = process.env.CODEXIA_PROFILE ?? "core";
   let runtimeOptions: ModuleRuntimeOptions | undefined;
   if (profile !== "core") {
     const generatedPath = resolve("profiles", profile, "generated", "server.mjs");
@@ -238,7 +238,7 @@ async function startTestServer(): Promise<void> {
     heldReconcile?.release();
     void close(controlServer);
     void close(apiServer).finally(() => {
-      if (process.env.SCRIPTORIUM_E2E_TEMP_STATE_DIR === "1") {
+      if (process.env.CODEXIA_E2E_TEMP_STATE_DIR === "1") {
         void rm(stateDir, { recursive: true, force: true });
       }
     });
@@ -248,6 +248,6 @@ async function startTestServer(): Promise<void> {
 }
 
 void startTestServer().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : "Scriptorium E2E test server failed");
+  console.error(error instanceof Error ? error.message : "Codexia E2E test server failed");
   process.exitCode = 1;
 });
