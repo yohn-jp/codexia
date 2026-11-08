@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ModuleId, ModuleManifest } from "@codexia/contracts";
 import type { ModuleLoader, ModuleRuntimeOptions } from "@codexia/module-runtime";
+import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import { createServer } from "../../packages/api/dist/server.js";
 import { CoreStore } from "../../packages/core/dist/index.js";
 
@@ -20,6 +21,7 @@ const repositoryUrl = requiredSetting("CODEXIA_E2E_REPOSITORY_URL");
 const branch = process.env.CODEXIA_E2E_REPOSITORY_BRANCH ?? "main";
 const port = Number.parseInt(process.env.CODEXIA_E2E_PORT ?? "4173", 10);
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
+const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
 
 if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("CODEXIA_E2E_PORT must be a valid TCP port");
 if (authToken.length < 32) throw new Error("CODEXIA_E2E_AUTH_TOKEN must contain at least 32 characters");
@@ -150,6 +152,8 @@ async function startTestServer(): Promise<void> {
   let heldReconcile: { started: boolean; wait: Promise<void>; release(): void } | undefined;
   const startApi = async (): Promise<Server> => {
     const store = new CoreStore({ dataDir: join(stateDir, "store"), allowLocalRemotes: true });
+    const persistence = databaseUrl ? createPostgresPersistence(databaseUrl) : undefined;
+    if (databaseUrl) await migratePostgresDatabase(databaseUrl);
     const reconcile = store.reconcile.bind(store);
     store.reconcile = async (...args) => {
       const result = await reconcile(...args);
@@ -166,6 +170,7 @@ async function startTestServer(): Promise<void> {
       staticDir: resolve("app/dist"),
       usageDirectory: join(stateDir, "host-history"),
       profile,
+      ...(persistence ? { persistence, closePersistenceOnShutdown: true } : {}),
       ...(runtimeOptions ? { runtimeOptions } : {}),
     });
     await listen(server, port);

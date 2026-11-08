@@ -961,14 +961,6 @@ function AuthorWorkspace({
     const running = reconciliationRef.current.get(key);
     if (running) return running;
     const controller = new AbortController();
-    const leaveDocument = () => controller.abort();
-    // WebKit can cancel fetch before pagehide. Respect the draft guard if it
-    // keeps this document open, otherwise abort before native teardown starts.
-    const beforeLeaveDocument = (event: BeforeUnloadEvent) => {
-      if (!event.defaultPrevented) leaveDocument();
-    };
-    window.addEventListener("beforeunload", beforeLeaveDocument);
-    window.addEventListener("pagehide", leaveDocument, { once: true });
     const isCurrent = () => !controller.signal.aborted && navigationRef.current === nav && authorScopeRef.current === author &&
       workRef.current?.project.id === projectId &&
       sameRepository(workRef.current.observation.snapshot.repository, repository);
@@ -1034,6 +1026,19 @@ function AuthorWorkspace({
       }
     })();
     reconciliationRef.current.set(key, task);
+    const leaveDocument = () => {
+      controller.abort();
+      // A pageshow can arrive before the aborted task's finally callback runs.
+      // Remove it synchronously so the foreground retry starts a new request.
+      if (reconciliationRef.current.get(key) === task) reconciliationRef.current.delete(key);
+    };
+    // WebKit can cancel fetch before pagehide. Respect the draft guard if it
+    // keeps this document open, otherwise abort before native teardown starts.
+    const beforeLeaveDocument = (event: BeforeUnloadEvent) => {
+      if (!event.defaultPrevented) leaveDocument();
+    };
+    window.addEventListener("beforeunload", beforeLeaveDocument);
+    window.addEventListener("pagehide", leaveDocument, { once: true });
     void task.finally(() => {
       window.removeEventListener("beforeunload", beforeLeaveDocument);
       window.removeEventListener("pagehide", leaveDocument);

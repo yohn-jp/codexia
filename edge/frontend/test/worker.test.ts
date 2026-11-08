@@ -46,6 +46,7 @@ test("HTML gets a per-response style nonce and the API security policy", async (
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal(response.headers.get("etag"), null);
   assert.ok((response.headers.get("content-security-policy") ?? "").includes(`\'nonce-${nonce}\'`));
+  assert.ok((response.headers.get("content-security-policy") ?? "").includes("style-src-attr 'unsafe-inline'"));
 });
 
 test("API requests never reach the static asset binding", async () => {

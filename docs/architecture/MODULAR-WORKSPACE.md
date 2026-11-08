@@ -2,7 +2,7 @@
 
 ## 1. Product decision
 
-Codexia is a Git-backed writing environment whose interface is assembled from movable, replaceable components. It ships usable workspace presets and allows users to construct and persist arbitrary layouts. Search, terminology linking, NLP, Semantic and other advanced features are optional modules on top of a small, usable Core.
+This contract describes the Git repository workspace. Its interface is assembled from movable, replaceable components. It ships usable workspace presets and allows users to construct and persist arbitrary layouts. Search, terminology linking, NLP, Semantic and other advanced features are optional modules on top of a small, usable Core. The separate PostgreSQL Database workspace is additive: PostgreSQL is authoritative for its own projects, documents, revisions, Knowledge and Evidence, and no data is copied between workspace modes.
 
 The three product goals are:
 

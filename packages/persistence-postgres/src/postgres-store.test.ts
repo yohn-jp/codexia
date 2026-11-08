@@ -86,6 +86,24 @@ test("migrations are repeatable and document revisions stay immutable", async ()
   );
 });
 
+test("PostgreSQL health checks and Knowledge lists use the canonical project records", async () => {
+  const project = await createProject(`knowledge-list-${randomUUID()}`);
+  const nodeIds = [randomUUID() as KnowledgeNodeId, randomUUID() as KnowledgeNodeId];
+  await persistence.transaction(async (transaction) => {
+    await transaction.saveKnowledgeNode({
+      projectId: project.id, id: nodeIds[0]!, type: "character", name: "Zebra", attributes: {}, status: "proposed", expectedVersion: null,
+    });
+    await transaction.saveKnowledgeNode({
+      projectId: project.id, id: nodeIds[1]!, type: "character", name: "Apple", attributes: {}, status: "confirmed", expectedVersion: null,
+    });
+  });
+
+  await persistence.checkHealth();
+  const nodes = await persistence.read((reader) => reader.listKnowledgeNodes(project.id));
+  assert.deepEqual(nodes.map((node) => node.name), ["Apple", "Zebra"]);
+  assert.deepEqual((await persistence.read((reader) => reader.listKnowledgeNodes(project.id, 1))).map((node) => node.name), ["Apple"]);
+});
+
 test("database foreign keys prevent Knowledge relations from crossing projects", async () => {
   const firstProject = await createProject(`scope-a-${randomUUID()}`);
   const secondProject = await createProject(`scope-b-${randomUUID()}`);

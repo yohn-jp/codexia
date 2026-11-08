@@ -211,7 +211,7 @@ async function rejectNextCompositionFlush(page: Page): Promise<void> {
 async function readJournal(page: Page): Promise<JournalDraft[]> {
   return page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 4);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -242,7 +242,7 @@ interface JournalDraftDiagnosticContext {
 async function journalDraftDiagnostic(page: Page, sceneId: string, expectedText: string): Promise<unknown> {
   return page.evaluate(async ({ sceneId, expectedText }) => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 4);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -334,7 +334,7 @@ async function expectJournalState(page: Page, sceneId: string, text: string, sta
 async function readJournalEntry(page: Page, sceneId: string, text: string): Promise<JournalEntryRecord> {
   return page.evaluate(async ({ sceneId, text }) => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 4);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -357,7 +357,7 @@ async function readJournalEntry(page: Page, sceneId: string, text: string): Prom
 async function readConfirmedPublicationReceipt(page: Page, entry: JournalEntryRecord): Promise<ConfirmedPublicationReceipt> {
   return page.evaluate(async ({ operationId, generation }) => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 4);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -381,7 +381,7 @@ async function readConfirmedPublicationReceipt(page: Page, entry: JournalEntryRe
 async function restorePublicationUnknownEntry(page: Page, entry: JournalEntryRecord, receipt: ConfirmedPublicationReceipt): Promise<void> {
   await page.evaluate(async ({ entry, batchId }) => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 4);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -403,7 +403,7 @@ async function restorePublicationUnknownEntry(page: Page, entry: JournalEntryRec
 async function hasJournalEntryForOperation(page: Page, operationId: string, generation: number): Promise<boolean> {
   return page.evaluate(async ({ operationId, generation }) => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 3);
+      const request = indexedDB.open("scriptorium-recovery", 4);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
@@ -670,16 +670,19 @@ test("the launcher remembers an explicit choice while direct Shell links keep th
   await expect(page.getByRole("button", { name: /Mobile/u })).toBeVisible();
 
   await page.getByRole("button", { name: /Mobile/u }).click();
-  await expect(page).toHaveURL(new RegExp("/mobile/"));
+  await expect.poll(() => page.evaluate(() => location.pathname)).toBe("/mobile");
+  await expect.poll(() => page.evaluate(() => new URLSearchParams(location.search).get("store"))).toBe("postgres");
   await expect.poll(() => page.evaluate(() => localStorage.getItem("scriptorium:ui-mode"))).toBe("mobile");
   await page.reload();
-  await expect(page).toHaveURL(new RegExp("/mobile/"));
+  await expect.poll(() => page.evaluate(() => location.pathname)).toBe("/mobile");
+  await expect.poll(() => page.evaluate(() => new URLSearchParams(location.search).get("store"))).toBe("postgres");
 
   await page.goto("/desktop/");
-  await expect(page).toHaveURL(new RegExp("/desktop/"));
+  await expect.poll(() => page.evaluate(() => location.pathname.replace(/\/$/u, ""))).toBe("/desktop");
   await expect.poll(() => page.evaluate(() => localStorage.getItem("scriptorium:ui-mode"))).toBe("mobile");
   await page.goto("/");
-  await expect(page).toHaveURL(new RegExp("/mobile/"));
+  await expect.poll(() => page.evaluate(() => location.pathname)).toBe("/mobile");
+  await expect.poll(() => page.evaluate(() => new URLSearchParams(location.search).get("store"))).toBe("postgres");
 });
 
 for (const departure of ["reload", "pagehide"] as const) {

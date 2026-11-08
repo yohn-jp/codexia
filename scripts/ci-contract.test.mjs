@@ -8,10 +8,10 @@ import { REQUIRED_VERIFICATION_JOBS, VERIFICATION_LEAF_JOBS, UNIT_TARGETS, TYPEC
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8'));
-test('twenty execution jobs retain all fifty-three validation obligations exactly once', () => {
+test('twenty execution jobs retain all fifty-five validation obligations exactly once', () => {
   assert.equal(REQUIRED_VERIFICATION_JOBS.length, 20);
   assert.equal(VERIFICATION_LEAF_JOBS.length, 19);
-  assert.equal(VERIFICATION_TASKS.length, 53);
+  assert.equal(VERIFICATION_TASKS.length, 55);
   const tasks = Object.values(VERIFICATION_GROUPS).flat();
   assert.equal(new Set(tasks).size, tasks.length);
   assert.deepEqual(tasks.toSorted(), VERIFICATION_TASKS.toSorted());
@@ -104,7 +104,7 @@ test('every default browser spec is assigned a Chromium shard and WebKit UI is p
       ? discover(full)
       : entry.isFile() && /\.spec\.tsx?$/.test(entry.name) ? [path.relative(directory, full)] : [];
   });
-  // This pre-existing host acceptance requires a separate external lifecycle environment.
+  // This host acceptance requires a separate external lifecycle environment.
   const hostOnly = 'core64-lifecycle.host.acceptance.spec.ts';
   const specs = discover(directory).filter(file => file !== hostOnly);
   assert.deepEqual(specs.toSorted(), BROWSER_SHARDS.filter(shard => shard.project === 'chromium').map(shard => shard.file).toSorted());

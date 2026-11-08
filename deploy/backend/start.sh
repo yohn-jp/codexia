@@ -27,4 +27,17 @@ if [ -n "${CODEXIA_GITHUB_TOKEN_FILE:-}" ]; then
   unset CODEXIA_GITHUB_TOKEN_FILE
 fi
 
+if [ -n "${CODEXIA_DATABASE_PASSWORD_FILE:-}" ]; then
+  database_password=$(read_secret_file "$CODEXIA_DATABASE_PASSWORD_FILE")
+  database_user=${CODEXIA_DATABASE_USER:-codexia}
+  database_name=${CODEXIA_DATABASE_NAME:-codexia}
+  database_host=${CODEXIA_DATABASE_HOST:-codexia-db}
+  case "$database_user$database_name" in *[!A-Za-z0-9_-]*|'') echo "Database user and name must be URL-safe identifiers" >&2; exit 1 ;; esac
+  case "$database_host" in *[!A-Za-z0-9.-]*|'') echo "Database host must be a hostname" >&2; exit 1 ;; esac
+  case "$database_password" in *[!A-Fa-f0-9]*|'') echo "Database password must be a non-empty hexadecimal secret" >&2; exit 1 ;; esac
+  CODEXIA_DATABASE_URL="postgres://${database_user}:${database_password}@${database_host}:5432/${database_name}"
+  export CODEXIA_DATABASE_URL
+  unset CODEXIA_DATABASE_PASSWORD_FILE database_password
+fi
+
 exec node /app/launch.mjs

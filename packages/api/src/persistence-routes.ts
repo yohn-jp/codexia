@@ -136,6 +136,13 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
   const url = new URL(input.url, "http://codexia.invalid");
   if (!url.pathname.startsWith("/api/v1/persistence/")) return null;
   if (input.method === "GET" && url.pathname === "/api/v1/persistence/status") {
+    if (input.persistence?.checkHealth) {
+      try {
+        await input.persistence.checkHealth();
+      } catch {
+        return { status: 503, body: { error: "PostgreSQL persistence is not ready", code: "PERSISTENCE_UNAVAILABLE" } };
+      }
+    }
     return { status: 200, body: { available: Boolean(input.persistence), provider: input.persistence ? "postgres" : null } };
   }
   if (!input.persistence) return { status: 503, body: { error: "PostgreSQL persistence is not configured", code: "PERSISTENCE_UNAVAILABLE" } };
@@ -203,6 +210,12 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
         idempotencyKey: idempotencyKey(input.requestHeaders?.["idempotency-key"]),
       }));
       return { status: 201, body: result };
+    }
+
+    if (suffix === "nodes" && input.method === "GET") {
+      const limit = requestLimit(url.searchParams.get("limit"), 100, 500);
+      const nodes = await persistence.read((reader) => reader.listKnowledgeNodes(projectId, limit));
+      return { status: 200, body: { nodes } };
     }
 
     const documentPath = suffix.match(/^documents\/([^/]+)(?:\/(.*))?$/u);

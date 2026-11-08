@@ -101,7 +101,7 @@ jobs:
       - name: Deploy static assets only
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: edge/frontend/node_modules/.bin/wrangler deploy --config edge/frontend/wrangler.jsonc
       - name: Record asset release source
         run: echo "Deployed codexia-frontend static assets from $GITHUB_SHA. Terraform Routes were not changed." >> "$GITHUB_STEP_SUMMARY"

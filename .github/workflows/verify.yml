@@ -258,6 +258,18 @@ jobs:
     if: needs.plan.result == 'success' && needs.plan.outputs.browser != '[]'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: codexia_test
+          POSTGRES_USER: codexia
+          POSTGRES_PASSWORD: codexia
+        options: >-
+          --health-cmd "pg_isready -U codexia -d codexia_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     strategy:
       fail-fast: false
       matrix:
@@ -320,6 +332,7 @@ jobs:
     env:
       CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       CODEXIA_PLAYWRIGHT_IMAGE_DIGEST: sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8
+      CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@postgres:5432/codexia_test
   hosted:
     name: hosted-native-${{ matrix.selection }}
     needs:

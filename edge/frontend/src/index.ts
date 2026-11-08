@@ -94,7 +94,7 @@ async function serveHtml(request: Request, env: Env, assetPath: string, reader: 
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("Referrer-Policy", reader ? "no-referrer" : "same-origin");
   headers.set("X-Frame-Options", "DENY");
-  headers.set("Content-Security-Policy", `default-src 'self'; style-src 'self' 'nonce-${nonce}'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`);
+  headers.set("Content-Security-Policy", `default-src 'self'; style-src 'self' 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`);
   headers.set("Cache-Control", "no-store");
   headers.delete("Content-Length");
   headers.delete("ETag");

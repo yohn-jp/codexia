@@ -536,7 +536,9 @@ export async function runtimePackageRecords(deployedDirectory, serverIds) {
 
 export async function browserArtifactRecords(deployedDirectory, browserIds) {
   const records = await Promise.all(['', 'desktop', 'mobile'].map((ui) =>
-    browserUiArtifactRecords(path.join(deployedDirectory, 'app/dist', ui), browserIds, ui)));
+    // PostgreSQL authoring shells do not mount Git module contributions.
+    // Public module readers remain reachable from the launcher entry.
+    browserUiArtifactRecords(path.join(deployedDirectory, 'app/dist', ui), ui ? [] : browserIds, ui)));
   return {
     files: records.flatMap(({ files }) => files).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
     entryFile: records[0].entryFile,
@@ -660,7 +662,7 @@ async function writeComposition(input, catalog, selection, runtimeDirectory, tru
   const browserBundleDigest = sha256(await readFile(browserEntryPath));
   const journalSource = await readFile(path.join(root, 'app/src/storage/journal.ts'), 'utf8');
   const indexedDbVersion = Number(journalSource.match(/const DATABASE_VERSION = ([1-9][0-9]*);/u)?.[1]);
-  if (indexedDbVersion !== 3) throw new Error('Browser recovery persistence version differs from the hosted compatibility declaration');
+  if (indexedDbVersion !== 4) throw new Error('Browser recovery persistence version differs from the hosted compatibility declaration');
   const runtimeMetadata = {
     contractVersion: 'scriptorium-platform/v1',
     producerRevision: input.producerRevision,
