@@ -19,7 +19,7 @@ import "./workspace.css";
 import type { FloatingPanelLayout } from "./floating";
 
 const styleNonce = typeof document === "undefined" ? undefined
-  : document.querySelector<HTMLMetaElement>('meta[name="scriptorium-style-nonce"]')?.content;
+  : document.querySelector<HTMLMetaElement>('meta[name="codexia-style-nonce"]')?.content;
 if (styleNonce) setNonce(styleNonce);
 
 interface WorkspaceProps {

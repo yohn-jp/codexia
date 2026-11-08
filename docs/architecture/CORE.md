@@ -1,6 +1,6 @@
 # Core architecture
 
-Scriptorium is a TypeScript/Node application with a Git-backed canonical file store, a Fastify API and React browser shells. Core authoring works without optional modules or model credentials.
+Codexia is a TypeScript/Node application with a Git-backed canonical file store, a Fastify API and React browser shells. Core authoring works without optional modules or model credentials.
 
 ## Ownership and dependency direction
 
@@ -28,7 +28,7 @@ Core does not import optional module packages, model engines or provider SDKs. M
 
 ## Canonical state and snapshots
 
-Git-controlled YAML and Markdown are the durable work format. Approved module settings, dictionaries, corrections and other authoritative decisions use versioned work metadata, including `meta/scriptorium/modules/<module-id>/`. Unsupported data is preserved even when its module is disabled.
+Git-controlled YAML and Markdown are the durable work format. Approved module settings, dictionaries, corrections and other authoritative decisions use versioned work metadata, including `meta/codexia/modules/<module-id>/`. Unsupported data is preserved even when its module is disabled.
 
 A `SnapshotId` binds repository, branch, commit and checkpoint overlay identity. Readers use pinned immutable objects rather than mutable checkout paths. Hierarchy caches, search indexes, graphs, downloaded weights and diagnostics are reconstructible derivatives keyed by their source revision and model or schema identity. A response assembled from mismatched snapshots is invalid.
 
@@ -52,11 +52,11 @@ The active author workspace observes the remote at project entry, foreground/rec
 
 Browser recovery is scoped to repository, author and origin. Journal records retain operation identities, generations and checkpoint/publication receipts. Reconciliation must complete before an editor is represented as fully recovered and writable. Quota, storage and conflict failures preserve recoverable work and surface their state.
 
-GitHub supplies confirmed shared work history. The local clone and pending checkpoints require recovery until publication. Private host usage/job history lives under `SCRIPTORIUM_USAGE_DIR` independently of Git; replacing a deployment must retain it. Secrets come from host configuration or credential brokers and never enter Git, browser assets or images.
+GitHub supplies confirmed shared work history. The local clone and pending checkpoints require recovery until publication. Private host usage/job history lives under `CODEXIA_USAGE_DIR` independently of Git; replacing a deployment must retain it. Secrets come from host configuration or credential brokers and never enter Git, browser assets or images.
 
 ## Authentication and isolation
 
-Standalone mode has one trusted owner. Every authenticated session can access that owner's registered projects; this is not a multi-tenant ACL service. `SCRIPTORIUM_AUTH_TOKEN` authenticates the owner, and an optional server-side `SCRIPTORIUM_GITHUB_TOKEN` supplies repository access. Registry entries cannot select arbitrary filesystem roots.
+Standalone mode has one trusted owner. Every authenticated session can access that owner's registered projects; this is not a multi-tenant ACL service. `CODEXIA_AUTH_TOKEN` authenticates the owner, and an optional server-side `CODEXIA_GITHUB_TOKEN` supplies repository access. Registry entries cannot select arbitrary filesystem roots.
 
 Hosted mode binds an assigned repository, runtime identity, instance and epoch. Browser/API grants, MCP bearer grants and runtime-control credentials have distinct validation boundaries. Hosted Git credentials are short-lived and repository-scoped; publication rechecks the author's write permission for the exact operation. See [Hosted deployment](../HOSTED-DEPLOYMENT.md).
 

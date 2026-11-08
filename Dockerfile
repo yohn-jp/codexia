@@ -9,56 +9,56 @@ ARG PNPM_VERSION
 ENV CI=true
 RUN corepack enable \
  && corepack prepare pnpm@${PNPM_VERSION} --activate
-WORKDIR /opt/scriptorium
+WORKDIR /opt/codexia
 
 FROM pnpm-base AS source
 # Fetch the locked external packages before copying frequently changed source.
 # The shared cache mount is usable by both BuildKit and Podman/Buildah.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN --mount=type=cache,id=scriptorium-pnpm-store,target=/pnpm/store,sharing=locked \
+RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
     pnpm fetch --store-dir=/pnpm/store
 COPY . ./
-RUN --mount=type=cache,id=scriptorium-pnpm-store,target=/pnpm/store,sharing=locked \
+RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
     pnpm install --offline --frozen-lockfile --store-dir=/pnpm/store --package-import-method=copy
 
 FROM source AS build
 ARG PROFILE
-ENV SCRIPTORIUM_PROFILE=${PROFILE}
+ENV CODEXIA_PROFILE=${PROFILE}
 RUN node scripts/profile-package.mjs --profile "${PROFILE}" --out /runtime
 
 FROM ${GO_IMAGE} AS frontend-build
 WORKDIR /src
 COPY buildkit/frontend/go.mod buildkit/frontend/go.sum ./
 COPY buildkit/frontend/main.go ./
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o /scriptorium-buildkit-frontend .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o /codexia-buildkit-frontend .
 
 FROM source AS buildkit
-ARG SCRIPTORIUM_PRODUCER_REVISION
-ARG SCRIPTORIUM_DOCKERFILE_SHA256
-ENV SCRIPTORIUM_PRODUCER_REVISION=${SCRIPTORIUM_PRODUCER_REVISION} \
-    SCRIPTORIUM_DOCKERFILE_SHA256=${SCRIPTORIUM_DOCKERFILE_SHA256}
-LABEL org.opencontainers.image.revision=${SCRIPTORIUM_PRODUCER_REVISION}
-RUN test "${#SCRIPTORIUM_PRODUCER_REVISION}" -eq 40 \
- && printf '%s' "${SCRIPTORIUM_PRODUCER_REVISION}" | grep -Eq '^[a-f0-9]{40}$' \
- && printf '%s' "${SCRIPTORIUM_DOCKERFILE_SHA256}" | grep -Eq '^[a-f0-9]{64}$'
+ARG CODEXIA_PRODUCER_REVISION
+ARG CODEXIA_DOCKERFILE_SHA256
+ENV CODEXIA_PRODUCER_REVISION=${CODEXIA_PRODUCER_REVISION} \
+    CODEXIA_DOCKERFILE_SHA256=${CODEXIA_DOCKERFILE_SHA256}
+LABEL org.opencontainers.image.revision=${CODEXIA_PRODUCER_REVISION}
+RUN test "${#CODEXIA_PRODUCER_REVISION}" -eq 40 \
+ && printf '%s' "${CODEXIA_PRODUCER_REVISION}" | grep -Eq '^[a-f0-9]{40}$' \
+ && printf '%s' "${CODEXIA_DOCKERFILE_SHA256}" | grep -Eq '^[a-f0-9]{64}$'
 RUN pnpm build:workspace
-RUN node scripts/profile-package.mjs --modules-json '[]' --prebuilt --prime-deploy-cache --out /tmp/scriptorium-hosted-artifact/app \
- && rm -rf /tmp/scriptorium-hosted-artifact
-COPY --from=frontend-build /scriptorium-buildkit-frontend /usr/local/bin/scriptorium-buildkit-frontend
-ENTRYPOINT ["/usr/local/bin/scriptorium-buildkit-frontend"]
+RUN node scripts/profile-package.mjs --modules-json '[]' --prebuilt --prime-deploy-cache --out /tmp/codexia-hosted-artifact/app \
+ && rm -rf /tmp/codexia-hosted-artifact
+COPY --from=frontend-build /codexia-buildkit-frontend /usr/local/bin/codexia-buildkit-frontend
+ENTRYPOINT ["/usr/local/bin/codexia-buildkit-frontend"]
 
 FROM ${NODE_IMAGE} AS runtime-base
-ARG SCRIPTORIUM_PRODUCER_REVISION
+ARG CODEXIA_PRODUCER_REVISION
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
-    SCRIPTORIUM_PROFILE=hosted \
-    SCRIPTORIUM_MODULE_PROFILE_PATH=/app/generated/server.mjs \
-    SCRIPTORIUM_DATA_DIR=/data \
-    SCRIPTORIUM_USAGE_DIR=/history \
+    CODEXIA_PROFILE=hosted \
+    CODEXIA_MODULE_PROFILE_PATH=/app/generated/server.mjs \
+    CODEXIA_DATA_DIR=/data \
+    CODEXIA_USAGE_DIR=/history \
     HOME=/data \
-    SCRIPTORIUM_PRODUCER_REVISION=${SCRIPTORIUM_PRODUCER_REVISION}
-LABEL org.opencontainers.image.revision=${SCRIPTORIUM_PRODUCER_REVISION}
+    CODEXIA_PRODUCER_REVISION=${CODEXIA_PRODUCER_REVISION}
+LABEL org.opencontainers.image.revision=${CODEXIA_PRODUCER_REVISION}
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates git tini \
  && rm -rf /var/lib/apt/lists/* \
@@ -77,10 +77,10 @@ ARG PROFILE
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
-    SCRIPTORIUM_PROFILE=${PROFILE} \
-    SCRIPTORIUM_MODULE_PROFILE_PATH=/app/generated/server.mjs \
-    SCRIPTORIUM_DATA_DIR=/data \
-    SCRIPTORIUM_USAGE_DIR=/history \
+    CODEXIA_PROFILE=${PROFILE} \
+    CODEXIA_MODULE_PROFILE_PATH=/app/generated/server.mjs \
+    CODEXIA_DATA_DIR=/data \
+    CODEXIA_USAGE_DIR=/history \
     HOME=/data \
     TMPDIR=/tmp
 RUN apt-get update \
