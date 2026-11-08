@@ -1,9 +1,9 @@
-import type { MigrationContribution, MigrationProducer } from "@scriptorium/migration";
-import { stableMigrationId } from "@scriptorium/migration";
+import type { MigrationContribution, MigrationProducer } from "@codexia/migration";
+import { stableMigrationId } from "@codexia/migration";
 
 const SOURCE_PATH = "meta/contradiction-dismissals.jsonl";
-const LEGACY_PATH = "meta/scriptorium/modules/semantic/legacy/files/meta/contradiction-dismissals.jsonl";
-const TARGET_PATH = "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl";
+const LEGACY_PATH = "meta/codexia/modules/semantic/legacy/files/meta/contradiction-dismissals.jsonl";
+const TARGET_PATH = "meta/codexia/modules/semantic/contradiction-dismissals.jsonl";
 
 function emptyContribution(): MigrationContribution { return { entries: [], operations: [], recovery: [] }; }
 

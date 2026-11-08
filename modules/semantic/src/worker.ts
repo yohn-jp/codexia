@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { JobRequest, SnapshotId } from "@scriptorium/contracts";
-import { installWorkerHandler } from "@scriptorium/module-runtime";
+import type { JobRequest, SnapshotId } from "@codexia/contracts";
+import { installWorkerHandler } from "@codexia/module-runtime";
 import {
   EMBEDDING_DIMENSIONS,
   EMBEDDING_MODEL_ID,

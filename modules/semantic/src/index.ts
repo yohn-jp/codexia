@@ -1,4 +1,4 @@
-import type { ModuleContext, ModuleDefinition, ModuleManifest } from "@scriptorium/contracts";
+import type { ModuleContext, ModuleDefinition, ModuleManifest } from "@codexia/contracts";
 import { createSemanticActions } from "./actions.js";
 import { SEMANTIC_MODULE_VERSION, SEMANTIC_EMBEDDING_CAPABILITY } from "./contracts.js";
 import { semanticEmbeddingCapability } from "./embedding.js";
@@ -14,7 +14,7 @@ export const semanticManifest: ModuleManifest = {
   serverEntry: "./dist/index.js",
   browserEntry: "./dist/browser.js",
   workerEntry: "./dist/worker.js",
-  statePaths: ["meta/scriptorium/modules/semantic"],
+  statePaths: ["meta/codexia/modules/semantic"],
   locality: "local",
 };
 

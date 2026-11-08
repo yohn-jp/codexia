@@ -1,5 +1,5 @@
-import type { CanonicalSnapshotEntity } from "@scriptorium/module-nlp";
-import { splitIntoSentences } from "@scriptorium/module-nlp";
+import type { CanonicalSnapshotEntity } from "@codexia/module-nlp";
+import { splitIntoSentences } from "@codexia/module-nlp";
 import type { SemanticPassage } from "./contracts.js";
 
 const EMBEDDABLE_TYPES = new Set([

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { MigrationContext } from "@scriptorium/migration";
+import type { MigrationContext } from "@codexia/migration";
 import { createSemanticMigrationProducer } from "./migration.js";
 
 const repository = {
@@ -11,8 +11,8 @@ const repository = {
   url: "file:///legacy/semantic",
 };
 const snapshot = { repository, remoteCommit: "b".repeat(40) };
-const legacyPath = "meta/scriptorium/modules/semantic/legacy/files/meta/contradiction-dismissals.jsonl";
-const canonicalPath = "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl";
+const legacyPath = "meta/codexia/modules/semantic/legacy/files/meta/contradiction-dismissals.jsonl";
+const canonicalPath = "meta/codexia/modules/semantic/contradiction-dismissals.jsonl";
 const revision = "a".repeat(64);
 
 function contextFor(input: { source?: string; targets?: Record<string, string>; enabled?: boolean }): MigrationContext {
