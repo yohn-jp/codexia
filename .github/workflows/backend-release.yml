@@ -12,6 +12,9 @@ on:
       - scripts/profile-package.mjs
       - scripts/runtime-package-closure.mjs
       - scripts/verify-backend-image.sh
+      - scripts/verify-release-source.mjs
+      - scripts/release-policy.mjs
+      - scripts/ci-contract.mjs
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
@@ -28,6 +31,9 @@ on:
       - scripts/profile-package.mjs
       - scripts/runtime-package-closure.mjs
       - scripts/verify-backend-image.sh
+      - scripts/verify-release-source.mjs
+      - scripts/release-policy.mjs
+      - scripts/ci-contract.mjs
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
@@ -78,11 +84,24 @@ jobs:
     needs: build-test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 70
     permissions:
       contents: read
       packages: write
+      actions: read
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.0'
+      - name: Require complete exact-source main verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_COMMIT_RELEASE: '1'
+        run: node scripts/verify-release-source.mjs
       - uses: actions/download-artifact@v4
         with:
           name: codexia-backend-image-${{ github.sha }}
