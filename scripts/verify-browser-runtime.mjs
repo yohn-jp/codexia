@@ -16,7 +16,7 @@ assert.equal(process.platform, "linux", "Browser verification requires the Linux
 assert.equal(process.arch, "x64", "The pinned Playwright image digest is the Linux amd64 image");
 assert.equal(process.versions.node.split(".")[0], "24", "The browser runner must use Node 24");
 assert.equal(
-  process.env.SCRIPTORIUM_PLAYWRIGHT_IMAGE_DIGEST,
+  process.env.CODEXIA_PLAYWRIGHT_IMAGE_DIGEST,
   expectedImageDigest,
   "The browser job must declare the pinned Playwright 1.64.1 Noble image digest",
 );
@@ -35,7 +35,7 @@ async function verifyBrowser(name, browserType) {
   const browser = await browserType.launch({ headless: true });
   try {
     const page = await browser.newPage();
-    await page.setContent("<!doctype html><title>Scriptorium browser runtime</title><main>browser-ready</main>");
+    await page.setContent("<!doctype html><title>Codexia browser runtime</title><main>browser-ready</main>");
     const content = await page.locator("main").textContent();
     assert.equal(content, "browser-ready", `${name} must render and read a real page`);
     return browser.version();

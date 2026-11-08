@@ -35,7 +35,7 @@ assert.deepEqual(await health.json(), { status: 'ok' });
 
 const versionResponse = await get('/api/version');
 const version = await versionResponse.json();
-assert.equal(version.name, 'scriptorium');
+assert.equal(version.name, 'codexia');
 assert.equal(version.profile, profileName);
 assert.equal(version.contractVersion, 1);
 assert.ok(Array.isArray(version.modules));
@@ -49,9 +49,9 @@ for (const entry of ['/', '/desktop/', '/mobile/']) {
   const htmlResponse = await get(entry);
   assert.match(htmlResponse.headers.get('content-type') ?? '', /^text\/html(?:;|$)/u);
   const html = await htmlResponse.text();
-  assert.match(html, /<title>Scriptorium<\/title>/u);
-  const nonce = html.match(/<meta name="scriptorium-style-nonce" content="([^"]+)"/u)?.[1];
-  assert.ok(nonce && nonce !== '__SCRIPTORIUM_STYLE_NONCE__', `${entry} has a request-specific style nonce`);
+  assert.match(html, /<title>Codexia<\/title>/u);
+  const nonce = html.match(/<meta name="codexia-style-nonce" content="([^"]+)"/u)?.[1];
+  assert.ok(nonce && nonce !== '__CODEXIA_STYLE_NONCE__', `${entry} has a request-specific style nonce`);
   assert.ok(htmlResponse.headers.get('content-security-policy')?.includes(`'nonce-${nonce}'`));
   const entryAssets = [];
   for (const match of html.matchAll(/<(?:script|link)\b[^>]*>/gu)) {

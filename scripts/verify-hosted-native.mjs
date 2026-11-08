@@ -18,8 +18,8 @@ const run = (command, args, options = {}) => execFileSync(command, args, { cwd: 
 const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
 assert.match(sha, /^[a-f0-9]{40}$/u);
 assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }), '');
-const output = await mkdtemp(path.join(tmpdir(), 'scriptorium-hosted-verification-'));
-const artifact = '/tmp/scriptorium-hosted-artifact';
+const output = await mkdtemp(path.join(tmpdir(), 'codexia-hosted-verification-'));
+const artifact = '/tmp/codexia-hosted-artifact';
 const hash = bytes => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 const dockerfileHash = createHash('sha256').update(await readFile(path.join(root, 'Dockerfile'))).digest('hex');
 
@@ -34,8 +34,8 @@ async function buildImage(target) {
   const archive = path.join(output, `${target}.tar`);
   const metadata = path.join(output, `${target}.json`);
   run('docker', ['buildx', 'build', '--platform', 'linux/amd64', '--target', target,
-    '--build-arg', `SCRIPTORIUM_PRODUCER_REVISION=${sha}`,
-    '--build-arg', `SCRIPTORIUM_DOCKERFILE_SHA256=${dockerfileHash}`,
+    '--build-arg', `CODEXIA_PRODUCER_REVISION=${sha}`,
+    '--build-arg', `CODEXIA_DOCKERFILE_SHA256=${dockerfileHash}`,
     '--provenance=false', '--output', `type=oci,dest=${archive}`, '--metadata-file', metadata, '.']);
   const result = JSON.parse(await readFile(metadata, 'utf8'));
   const digest = result['containerimage.digest'];
@@ -87,9 +87,9 @@ try {
     };
     const encoded = Buffer.from(JSON.stringify(input)).toString('base64url');
     run(process.execPath, ['scripts/hosted-build.mjs', 'compose', '--input-base64url', encoded,
-      '--source', `ghcr.io/yohn-jp/scriptorium/verification@${buildKitDigest}`],
-      { env: { ...process.env, SCRIPTORIUM_PRODUCER_REVISION: sha } });
-    const metadataDir = path.join(artifact, 'usr/share/scriptorium');
+      '--source', `ghcr.io/yohn-jp/codexia/verification@${buildKitDigest}`],
+      { env: { ...process.env, CODEXIA_PRODUCER_REVISION: sha } });
+    const metadataDir = path.join(artifact, 'usr/share/codexia');
     const report = JSON.parse(await readFile(path.join(metadataDir, 'build-artifact-report.json'), 'utf8'));
     assert.equal(report.buildKey, hash(Buffer.from(JSON.stringify(input))));
     const composedCatalog = JSON.parse(await readFile(path.join(metadataDir, 'build-catalog.json'), 'utf8'));
@@ -125,7 +125,7 @@ try {
     },
     compositions: compositionResults,
   });
-  const reportPath = path.resolve(process.env.SCRIPTORIUM_NATIVE_REPORT_PATH ?? path.join(tmpdir(), `scriptorium-hosted-native-${sha}-${selection}.json`));
+  const reportPath = path.resolve(process.env.CODEXIA_NATIVE_REPORT_PATH ?? path.join(tmpdir(), `codexia-hosted-native-${sha}-${selection}.json`));
   await mkdir(path.dirname(reportPath), { recursive: true });
   await writeFile(reportPath, `${JSON.stringify(result, null, 2)}\n`);
   console.log(JSON.stringify({ ...result, reportPath }));

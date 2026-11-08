@@ -88,7 +88,7 @@ async function main() {
   for (const ui of ['desktop', 'mobile']) await readFile(path.join(distributionRoot, ui, 'index.html'));
 
   const token = randomBytes(32).toString('hex');
-  const dataDirectory = await mkdtemp(path.join(os.tmpdir(), 'scriptorium-ui-hosted-acceptance-'));
+  const dataDirectory = await mkdtemp(path.join(os.tmpdir(), 'codexia-ui-hosted-acceptance-'));
   const baseUrl = new URL('http://127.0.0.1:' + port);
   const child = spawn(process.execPath, [launchPath], {
     cwd: packageDirectory,
@@ -97,13 +97,13 @@ async function main() {
       ...process.env,
       HOST: '127.0.0.1',
       PORT: String(port),
-      SCRIPTORIUM_AUTH_TOKEN: token,
-      SCRIPTORIUM_HOSTED_MODE: '0',
-      SCRIPTORIUM_PROFILE: 'hosted',
-      SCRIPTORIUM_DATA_DIR: path.join(dataDirectory, 'data'),
-      SCRIPTORIUM_USAGE_DIR: path.join(dataDirectory, 'history'),
-      SCRIPTORIUM_MODULE_CACHE_DIR: path.join(dataDirectory, 'module-cache'),
-      SCRIPTORIUM_MODULE_PROFILE_PATH: path.join(packageDirectory, 'generated/server.mjs'),
+      CODEXIA_AUTH_TOKEN: token,
+      CODEXIA_HOSTED_MODE: '0',
+      CODEXIA_PROFILE: 'hosted',
+      CODEXIA_DATA_DIR: path.join(dataDirectory, 'data'),
+      CODEXIA_USAGE_DIR: path.join(dataDirectory, 'history'),
+      CODEXIA_MODULE_CACHE_DIR: path.join(dataDirectory, 'module-cache'),
+      CODEXIA_MODULE_PROFILE_PATH: path.join(packageDirectory, 'generated/server.mjs'),
     },
   });
 
@@ -169,8 +169,8 @@ async function main() {
       assert.match(response.headers.get('content-type') ?? '', /^text\/html(?:;|$)/u);
       const html = await response.text();
       assert.match(html, /<title>[^<]+<\/title>/u);
-      const nonce = html.match(/<meta name="scriptorium-style-nonce" content="([^"]+)"/u)?.[1];
-      assert.ok(nonce && nonce !== '__SCRIPTORIUM_STYLE_NONCE__', entry + ' has a request-specific style nonce');
+      const nonce = html.match(/<meta name="codexia-style-nonce" content="([^"]+)"/u)?.[1];
+      assert.ok(nonce && nonce !== '__CODEXIA_STYLE_NONCE__', entry + ' has a request-specific style nonce');
       assert.ok(response.headers.get('content-security-policy')?.includes("'nonce-" + nonce + "'"));
       const entryAssets = [];
       for (const match of html.matchAll(/<(?:script|link)\b[^>]*>/gu)) {
@@ -225,7 +225,7 @@ async function main() {
   }
 
   assert.equal(child.exitCode, 0, 'Hosted production package exited unsuccessfully: ' + output);
-  assert.ok(output.includes('Scriptorium shutdown complete'), 'Hosted package did not complete API shutdown: ' + output);
+  assert.ok(output.includes('Codexia shutdown complete'), 'Hosted package did not complete API shutdown: ' + output);
 }
 
 main().catch((error) => {
