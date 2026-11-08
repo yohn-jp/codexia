@@ -1,4 +1,4 @@
-import type { ModuleContext } from "@scriptorium/contracts";
+import type { ModuleContext } from "@codexia/contracts";
 import { createSearchDefinition, searchManifest } from "./actions.js";
 
 export function createModule(context: ModuleContext) {

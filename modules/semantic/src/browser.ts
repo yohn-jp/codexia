@@ -1,4 +1,4 @@
-import type { BrowserModuleContext, BrowserModuleDefinition } from "@scriptorium/contracts";
+import type { BrowserModuleContext, BrowserModuleDefinition } from "@codexia/contracts";
 
 type Data = Record<string, unknown>;
 function node<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] {

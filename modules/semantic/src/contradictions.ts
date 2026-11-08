@@ -1,4 +1,4 @@
-import { buildSceneLocationInfos, findMentions, buildMentionDictionary, type StoryEntity, type StoryGraphInput } from "@scriptorium/module-story";
+import { buildSceneLocationInfos, findMentions, buildMentionDictionary, type StoryEntity, type StoryGraphInput } from "@codexia/module-story";
 import type { SemanticMentionPair, SemanticPassage } from "./contracts.js";
 
 export type ContradictionKind = "embedding_midband" | "rule_ownership" | "rule_location";

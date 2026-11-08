@@ -9,8 +9,8 @@ import type {
   ProposalEvidence,
   SnapshotId,
   ValueSchema,
-} from "@scriptorium/contracts";
-import { snapshotScopeRevision } from "@scriptorium/contracts";
+} from "@codexia/contracts";
+import { snapshotScopeRevision } from "@codexia/contracts";
 import {
   NLP_TOKENIZER_CAPABILITY,
   isAdjective,
@@ -19,9 +19,9 @@ import {
   readCanonicalSnapshotEntities,
   type CandidateTerm,
   type NlpTokenizerCapability,
-} from "@scriptorium/module-nlp";
-import { readStorySnapshot } from "@scriptorium/module-story";
-import type { StoryEntity } from "@scriptorium/module-story";
+} from "@codexia/module-nlp";
+import { readStorySnapshot } from "@codexia/module-story";
+import type { StoryEntity } from "@codexia/module-story";
 import {
   EMBEDDING_DIMENSIONS,
   EMBEDDING_MODEL_ID,
@@ -46,7 +46,7 @@ import {
 import { scoreBreakdown, searchSnapshotLexically, type LexicalHit, type SemanticSearchHit, type SemanticSearchMode } from "./search.js";
 import { clusterSimilarTerms } from "./termClustering.js";
 
-const STATE_ROOT = "meta/scriptorium/modules/semantic";
+const STATE_ROOT = "meta/codexia/modules/semantic";
 const SETTINGS_PATH = `${STATE_ROOT}/settings.json`;
 const DISMISSALS_PATH = `${STATE_ROOT}/contradiction-dismissals.jsonl`;
 const MAX_QUERY_LENGTH = 8192;
