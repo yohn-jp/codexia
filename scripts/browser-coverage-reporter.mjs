@@ -23,10 +23,10 @@ export default class BrowserCoverageReporter {
       if (test.results.length === 0) return "notRun";
       return test.outcome();
     });
-    const profile = process.env.SCRIPTORIUM_E2E_PROFILE ?? "";
-    const shard = process.env.SCRIPTORIUM_E2E_SHARD ?? "";
-    const project = process.env.SCRIPTORIUM_E2E_PROJECT ?? "";
-    const file = process.env.SCRIPTORIUM_E2E_TEST_FILE ?? "";
+    const profile = process.env.CODEXIA_E2E_PROFILE ?? "";
+    const shard = process.env.CODEXIA_E2E_SHARD ?? "";
+    const project = process.env.CODEXIA_E2E_PROJECT ?? "";
+    const file = process.env.CODEXIA_E2E_TEST_FILE ?? "";
     let summary;
     let error;
     try {
@@ -40,7 +40,7 @@ export default class BrowserCoverageReporter {
       && summary.notRun === 0;
     const report = {
       schemaVersion: 1,
-      sourceSha: process.env.SCRIPTORIUM_EXPECTED_SHA ?? null,
+      sourceSha: process.env.CODEXIA_EXPECTED_SHA ?? null,
       outcome: complete ? "PASS" : "FAIL",
       runStatus: result.status,
       profile,
