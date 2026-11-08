@@ -8,7 +8,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { setTimeout as delay } from 'node:timers/promises';
 
-const metadataPath = '/usr/share/scriptorium/composition-manifest.json';
+const metadataPath = '/usr/share/codexia/composition-manifest.json';
 const manifest = JSON.parse(await readFile(metadataPath, 'utf8'));
 const expectedModules = [...manifest.resolvedModules.map(({ id }) => id)].sort();
 
@@ -38,17 +38,17 @@ const launcherFiles = browserFiles.get('');
 if (manifest.browser?.entry !== `app/app/dist/${launcherFiles.entryFile}`) {
   throw new Error('Composition manifest does not bind the launcher browser entry to its Vite manifest');
 }
-const buildReport = JSON.parse(await readFile('/usr/share/scriptorium/build-artifact-report.json', 'utf8'));
+const buildReport = JSON.parse(await readFile('/usr/share/codexia/build-artifact-report.json', 'utf8'));
 const launcherBytes = await readFile(path.join(launcherFiles.distribution, launcherFiles.entryFile));
 const launcherDigest = `sha256:${createHash('sha256').update(launcherBytes).digest('hex')}`;
 if (buildReport.browserEntryPath !== `/app/app/dist/${launcherFiles.entryFile}` || buildReport.browserBundleDigest !== launcherDigest) {
   throw new Error('Build report does not bind the browser entry digest to the packaged Vite asset');
 }
-const token = process.env.SCRIPTORIUM_AUTH_TOKEN;
+const token = process.env.CODEXIA_AUTH_TOKEN;
 if (typeof token !== 'string' || !/^[a-f0-9]{64}$/u.test(token)) {
   throw new Error('Runtime smoke requires a fresh ephemeral token');
 }
-const dataDirectory = await mkdtemp(path.join(os.tmpdir(), 'scriptorium-runtime-smoke-'));
+const dataDirectory = await mkdtemp(path.join(os.tmpdir(), 'codexia-runtime-smoke-'));
 const port = 34117;
 const child = spawn(process.execPath, ['/app/launch.mjs'], {
   cwd: '/app',
@@ -57,13 +57,13 @@ const child = spawn(process.execPath, ['/app/launch.mjs'], {
     ...process.env,
     HOST: '127.0.0.1',
     PORT: String(port),
-    SCRIPTORIUM_AUTH_TOKEN: token,
-    SCRIPTORIUM_HOSTED_MODE: '0',
-    SCRIPTORIUM_PROFILE: 'hosted',
-    SCRIPTORIUM_DATA_DIR: path.join(dataDirectory, 'data'),
-    SCRIPTORIUM_USAGE_DIR: path.join(dataDirectory, 'history'),
-    SCRIPTORIUM_MODULE_CACHE_DIR: path.join(dataDirectory, 'module-cache'),
-    SCRIPTORIUM_MODULE_PROFILE_PATH: '/app/generated/server.mjs',
+    CODEXIA_AUTH_TOKEN: token,
+    CODEXIA_HOSTED_MODE: '0',
+    CODEXIA_PROFILE: 'hosted',
+    CODEXIA_DATA_DIR: path.join(dataDirectory, 'data'),
+    CODEXIA_USAGE_DIR: path.join(dataDirectory, 'history'),
+    CODEXIA_MODULE_CACHE_DIR: path.join(dataDirectory, 'module-cache'),
+    CODEXIA_MODULE_PROFILE_PATH: '/app/generated/server.mjs',
   },
 });
 let output = '';

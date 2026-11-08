@@ -48,8 +48,8 @@ async function shippedModuleData() {
   const trustedModules = await Promise.all(moduleIds.map(async (id) => {
     const bytes = await readFile(path.join(root, 'modules', id, 'package.json'));
     const packageManifest = JSON.parse(bytes.toString('utf8'));
-    const manifest = packageManifest.scriptoriumModule;
-    const display = packageManifest.scriptoriumDisplay;
+    const manifest = packageManifest.codexiaModule;
+    const display = packageManifest.codexiaDisplay;
     return {
       manifest,
       display,
@@ -90,16 +90,16 @@ test('composition persistence declares base and selected module readers/writers 
   const readable = new Map(persistence.readable.map(({ formatId, versions }) => [formatId, versions]));
   const writable = new Set(persistence.writable.map(({ formatId, version }) => `${formatId}@${version}`));
 
-  assert.deepEqual(readable.get('scriptorium.git-operations'), [1]);
-  assert.deepEqual(readable.get('scriptorium.git-proposal-legacy'), [1]);
-  assert.deepEqual(readable.get('scriptorium.browser-recovery-indexeddb'), [3]);
-  assert.deepEqual(readable.get('scriptorium.module-story.series'), [1]);
-  assert.deepEqual(readable.get('scriptorium.module-publishing.cover'), [1]);
-  assert.equal(readable.has('scriptorium.module-story.change-sets'), false);
-  assert.equal(readable.has('scriptorium.module-assistant.model-settings'), false);
-  assert.equal(writable.has('scriptorium.module-publishing.cover@1'), false);
-  assert.equal(writable.has('scriptorium.module-story.series@1'), true);
-  assert.equal(persistence.contractVersion, 'scriptorium-persistence/v1');
+  assert.deepEqual(readable.get('codexia.git-operations'), [1]);
+  assert.deepEqual(readable.get('codexia.git-proposal-legacy'), [1]);
+  assert.deepEqual(readable.get('codexia.browser-recovery-indexeddb'), [3]);
+  assert.deepEqual(readable.get('codexia.module-story.series'), [1]);
+  assert.deepEqual(readable.get('codexia.module-publishing.cover'), [1]);
+  assert.equal(readable.has('codexia.module-story.change-sets'), false);
+  assert.equal(readable.has('codexia.module-assistant.model-settings'), false);
+  assert.equal(writable.has('codexia.module-publishing.cover@1'), false);
+  assert.equal(writable.has('codexia.module-story.series@1'), true);
+  assert.equal(persistence.contractVersion, 'codexia-persistence/v1');
 });
 
 test('composition persistence rejects duplicate module selections', () => {
@@ -166,7 +166,7 @@ const lockDigest = `sha256:${'e'.repeat(64)}`;
 
 function hostedAttestationFixture() {
   const catalog = {
-    contractVersion: 'scriptorium-build/v1',
+    contractVersion: 'codexia-build/v1',
     producerRevision: hostedRevision,
     runtimeBaseDigest,
     buildKitDigest,
@@ -174,13 +174,13 @@ function hostedAttestationFixture() {
     recipeDigest,
     lockDigest,
   };
-  const runtimeMetadata = { contractVersion: 'scriptorium-platform/v1', producerRevision: hostedRevision };
+  const runtimeMetadata = { contractVersion: 'codexia-platform/v1', producerRevision: hostedRevision };
   const catalogBytes = Buffer.from(canonicalJson(catalog), 'utf8');
   const runtimeMetadataBytes = Buffer.from(canonicalJson(runtimeMetadata), 'utf8');
   const statement = createSlsaStatement({
     producerRevision: hostedRevision,
-    runtimeBaseImage: `ghcr.io/yohn-jp/scriptorium/runtime-base@${runtimeBaseDigest}`,
-    buildKitImage: `ghcr.io/yohn-jp/scriptorium/build-kit@${buildKitDigest}`,
+    runtimeBaseImage: `ghcr.io/yohn-jp/codexia/runtime-base@${runtimeBaseDigest}`,
+    buildKitImage: `ghcr.io/yohn-jp/codexia/build-kit@${buildKitDigest}`,
     catalog,
     runtimeMetadata,
     catalogBytes,
@@ -197,27 +197,27 @@ test('SLSA statement has exactly the signed Runtime Base and canonical metadata 
   const { catalogBytes, runtimeMetadataBytes, statement } = hostedAttestationFixture();
   const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
   assert.deepEqual(statement.subject, [
-    { name: 'ghcr.io/yohn-jp/scriptorium/runtime-base', digest: { sha256: 'a'.repeat(64) } },
-    { name: 'scriptorium-build/v1/catalog.json', digest: { sha256: digest(catalogBytes) } },
-    { name: 'scriptorium-platform/v1/runtime-metadata.json', digest: { sha256: digest(runtimeMetadataBytes) } },
+    { name: 'ghcr.io/yohn-jp/codexia/runtime-base', digest: { sha256: 'a'.repeat(64) } },
+    { name: 'codexia-build/v1/catalog.json', digest: { sha256: digest(catalogBytes) } },
+    { name: 'codexia-platform/v1/runtime-metadata.json', digest: { sha256: digest(runtimeMetadataBytes) } },
   ]);
   assert.equal(statement._type, 'https://in-toto.io/Statement/v1');
   assert.equal(statement.predicateType, 'https://slsa.dev/provenance/v1');
-  assert.equal(statement.predicate.buildDefinition.buildType, `https://github.com/yohn-jp/scriptorium/blob/${hostedRevision}/Dockerfile`);
+  assert.equal(statement.predicate.buildDefinition.buildType, `https://github.com/yohn-jp/codexia/blob/${hostedRevision}/Dockerfile`);
   assert.ok(statement.predicate.buildDefinition.resolvedDependencies.some((item) =>
-    item.uri === 'git+https://github.com/yohn-jp/scriptorium' && item.digest.gitCommit === hostedRevision));
+    item.uri === 'git+https://github.com/yohn-jp/codexia' && item.digest.gitCommit === hostedRevision));
   assert.ok(statement.predicate.buildDefinition.resolvedDependencies.some((item) =>
-    item.uri === 'https://github.com/yohn-jp/scriptorium/source-inventory/v1' && item.digest.sha256 === 'c'.repeat(64)));
+    item.uri === 'https://github.com/yohn-jp/codexia/source-inventory/v1' && item.digest.sha256 === 'c'.repeat(64)));
   assert.ok(statement.predicate.buildDefinition.resolvedDependencies.some((item) =>
-    item.uri === 'oci://ghcr.io/yohn-jp/scriptorium/build-kit' && item.digest.sha256 === 'b'.repeat(64)));
+    item.uri === 'oci://ghcr.io/yohn-jp/codexia/build-kit' && item.digest.sha256 === 'b'.repeat(64)));
 });
 
 test('SLSA construction rejects image, metadata, source digest, or revision mismatches', () => {
   const input = hostedAttestationFixture();
   const make = (changes = {}) => createSlsaStatement({
     producerRevision: hostedRevision,
-    runtimeBaseImage: `ghcr.io/yohn-jp/scriptorium/runtime-base@${runtimeBaseDigest}`,
-    buildKitImage: `ghcr.io/yohn-jp/scriptorium/build-kit@${buildKitDigest}`,
+    runtimeBaseImage: `ghcr.io/yohn-jp/codexia/runtime-base@${runtimeBaseDigest}`,
+    buildKitImage: `ghcr.io/yohn-jp/codexia/build-kit@${buildKitDigest}`,
     catalog: input.catalog,
     runtimeMetadata: input.runtimeMetadata,
     catalogBytes: input.catalogBytes,
@@ -226,8 +226,8 @@ test('SLSA construction rejects image, metadata, source digest, or revision mism
     ...changes,
   });
   assert.throws(() => make({ producerRevision: '2'.repeat(40) }), /producer revision|catalog does not bind/u);
-  assert.throws(() => make({ runtimeBaseImage: `ghcr.io/yohn-jp/scriptorium/runtime-base@sha256:${'f'.repeat(64)}` }), /catalog does not bind/u);
-  assert.throws(() => make({ buildKitImage: `ghcr.io/yohn-jp/scriptorium/build-kit@sha256:${'f'.repeat(64)}` }), /catalog does not bind/u);
+  assert.throws(() => make({ runtimeBaseImage: `ghcr.io/yohn-jp/codexia/runtime-base@sha256:${'f'.repeat(64)}` }), /catalog does not bind/u);
+  assert.throws(() => make({ buildKitImage: `ghcr.io/yohn-jp/codexia/build-kit@sha256:${'f'.repeat(64)}` }), /catalog does not bind/u);
   assert.throws(() => make({ sourceDigests: { sourceDigest: `sha256:${'f'.repeat(64)}`, recipeDigest, lockDigest } }), /sourceDigest/u);
   assert.throws(() => make({ runtimeMetadata: { ...input.runtimeMetadata, producerRevision: '2'.repeat(40) } }), /runtime metadata/u);
 });

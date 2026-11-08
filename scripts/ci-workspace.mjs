@@ -112,8 +112,8 @@ async function prepareUnit(targetId) {
   if (target.path === '.') {
     if (target.id !== 'root' || !rootManifest.scripts?.['test:scripts']) fail('Root unit target requires package.json scripts.test:scripts');
     if (!rootManifest.scripts.test?.includes('pnpm run test:scripts')) fail('Root pnpm test must include the scripts test target');
-    if (rootManifest.devDependencies?.['@scriptorium/api'] !== 'workspace:*') fail('Root scripts tests require the API workspace dependency');
-    run('pnpm', ['--filter', '@scriptorium/api...', 'build']);
+    if (rootManifest.devDependencies?.['@codexia/api'] !== 'workspace:*') fail('Root scripts tests require the API workspace dependency');
+    run('pnpm', ['--filter', '@codexia/api...', 'build']);
     console.log('Unit target root: built API and its declared workspace dependencies.');
     return;
   }
@@ -186,8 +186,8 @@ function testTypecheckWorkspaceIds(scope) {
 
 async function prepareTestTypecheck(scope) {
   if (scope === 'app-e2e') {
-    if (rootManifest.devDependencies?.['@scriptorium/api'] !== 'workspace:*') fail('App/E2E typecheck requires the API workspace dependency');
-    run('pnpm', ['--filter', '@scriptorium/api...', 'build']);
+    if (rootManifest.devDependencies?.['@codexia/api'] !== 'workspace:*') fail('App/E2E typecheck requires the API workspace dependency');
+    run('pnpm', ['--filter', '@codexia/api...', 'build']);
     console.log('Test typecheck app-e2e: built API and its declared workspace dependencies.');
     return;
   }

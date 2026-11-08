@@ -12,9 +12,9 @@ import { assertCleanRevision, assertCleanRevisionSnapshot, calculateBuildDigests
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const inTotoStatementV1 = 'https://in-toto.io/Statement/v1';
 const slsaProvenanceV1 = 'https://slsa.dev/provenance/v1';
-const catalogSubjectName = 'scriptorium-build/v1/catalog.json';
-const runtimeMetadataSubjectName = 'scriptorium-platform/v1/runtime-metadata.json';
-const sourceOrigin = 'https://github.com/yohn-jp/scriptorium';
+const catalogSubjectName = 'codexia-build/v1/catalog.json';
+const runtimeMetadataSubjectName = 'codexia-platform/v1/runtime-metadata.json';
+const sourceOrigin = 'https://github.com/yohn-jp/codexia';
 const revisionPattern = /^[a-f0-9]{40}$/u;
 const sha256Pattern = /^sha256:[a-f0-9]{64}$/u;
 const registryPattern = /^(?:[a-z0-9.-]+(?::[0-9]{1,5})?\/)?[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$/u;
@@ -72,11 +72,11 @@ function gitOutput(args) {
 }
 
 function assertCanonicalOrigin(remote) {
-  const canonical = remote === 'git@github.com:yohn-jp/scriptorium.git' ||
-    remote === 'ssh://git@github.com/yohn-jp/scriptorium.git' ||
-    remote === 'https://github.com/yohn-jp/scriptorium' ||
-    remote === 'https://github.com/yohn-jp/scriptorium.git';
-  if (!canonical) fail('origin must be the canonical yohn-jp/scriptorium GitHub repository');
+  const canonical = remote === 'git@github.com:yohn-jp/codexia.git' ||
+    remote === 'ssh://git@github.com/yohn-jp/codexia.git' ||
+    remote === 'https://github.com/yohn-jp/codexia' ||
+    remote === 'https://github.com/yohn-jp/codexia.git';
+  if (!canonical) fail('origin must be the canonical yohn-jp/codexia GitHub repository');
 }
 
 export function createSlsaStatement(input) {
@@ -84,11 +84,11 @@ export function createSlsaStatement(input) {
   if (!revisionPattern.test(producerRevision ?? '')) fail('producer revision must be a full immutable Git commit');
   const runtimeBase = parseImmutableImageRef(runtimeBaseImage, 'Runtime Base image');
   const buildKit = parseImmutableImageRef(buildKitImage, 'Build Kit image');
-  if (!catalog || catalog.contractVersion !== 'scriptorium-build/v1' || catalog.producerRevision !== producerRevision ||
+  if (!catalog || catalog.contractVersion !== 'codexia-build/v1' || catalog.producerRevision !== producerRevision ||
       catalog.runtimeBaseDigest !== runtimeBase.digest || catalog.buildKitDigest !== buildKit.digest) {
     fail('catalog does not bind the requested producer revision and immutable image digests');
   }
-  if (!runtimeMetadata || runtimeMetadata.contractVersion !== 'scriptorium-platform/v1' || runtimeMetadata.producerRevision !== producerRevision) {
+  if (!runtimeMetadata || runtimeMetadata.contractVersion !== 'codexia-platform/v1' || runtimeMetadata.producerRevision !== producerRevision) {
     fail('runtime metadata does not bind the requested producer revision');
   }
   for (const key of ['sourceDigest', 'recipeDigest', 'lockDigest']) {
