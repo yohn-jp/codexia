@@ -557,6 +557,11 @@ class PostgresTransaction implements PersistenceTransaction {
     return mapProject(result.rows[0]!);
   }
 
+  /** Serialize same-project retries before checking the durable idempotency receipt. */
+  private async lockIdempotencyKey(projectId: ProjectId, key: IdempotencyKey): Promise<void> {
+    await this.query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))", [JSON.stringify([projectId, key])]);
+  }
+
   private async existingIdempotentWrite(
     projectId: ProjectId,
     idempotencyKey: IdempotencyKey,
@@ -657,6 +662,7 @@ class PostgresTransaction implements PersistenceTransaction {
       markdown: command.markdown,
       authorId: command.authorId,
     });
+    await this.lockIdempotencyKey(command.projectId, command.idempotencyKey);
     const replay = await this.existingIdempotentWrite(command.projectId, command.idempotencyKey, requestSha256);
     if (replay) return replay;
     if (!(await this.getProject(command.projectId))) throw notFound("project", command.projectId);
@@ -717,6 +723,7 @@ class PostgresTransaction implements PersistenceTransaction {
       authorId: command.authorId,
       clientId: command.clientId,
     });
+    await this.lockIdempotencyKey(command.projectId, command.idempotencyKey);
     const replay = await this.existingIdempotentWrite(command.projectId, command.idempotencyKey, requestSha256);
     if (replay) return replay;
 
@@ -766,6 +773,7 @@ class PostgresTransaction implements PersistenceTransaction {
       sourceRevisionId: command.sourceRevisionId,
       authorId: command.authorId,
     });
+    await this.lockIdempotencyKey(command.projectId, command.idempotencyKey);
     const replay = await this.existingIdempotentWrite(command.projectId, command.idempotencyKey, requestSha256);
     if (replay) return replay;
 
@@ -882,8 +890,9 @@ class PostgresTransaction implements PersistenceTransaction {
     }
     const revision = await this.getRevision(command.projectId, command.documentId, command.revisionId);
     if (!revision) throw notFound("evidence document revision", command.revisionId);
-    const document = await this.getDocument(command.projectId, command.documentId);
-    if (!document) throw notFound("evidence document", command.documentId);
+    // Serialize head validation with document saves; an anchor must not be
+    // created against an already-superseded revision in a concurrent writer.
+    const document = await this.lockedHead(command.projectId, command.documentId);
     if (document.headRevisionId !== command.revisionId) {
       throw conflict("document_revision", command.documentId, command.revisionId, document.headRevisionId);
     }
@@ -1004,6 +1013,7 @@ class PostgresTransaction implements PersistenceTransaction {
       writeSet: command.writeSet,
       provenance: command.provenance,
     });
+    await this.lockIdempotencyKey(command.projectId, command.idempotencyKey);
     const existing = await this.query(
       "SELECT * FROM change_set WHERE project_id = $1 AND idempotency_key = $2",
       [command.projectId, command.idempotencyKey],

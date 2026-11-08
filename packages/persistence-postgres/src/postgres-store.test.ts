@@ -178,6 +178,38 @@ test("UTF-16 edits, idempotency, revision restoration and stale-head conflicts",
   );
 });
 
+test("concurrent exact retries replay one document creation and one edit", async () => {
+  const project = await createProject(`retry-${randomUUID()}`);
+  const creation: CreateDocumentCommand = {
+    projectId: project.id,
+    kind: "scene",
+    title: "Retry-safe",
+    orderKey: "0001",
+    markdown: "original",
+    authorId: "author",
+    idempotencyKey: `create-${randomUUID()}`,
+  };
+  const created = await Promise.all([
+    persistence.transaction((tx) => tx.createDocument(creation)),
+    persistence.transaction((tx) => tx.createDocument(creation)),
+  ]);
+  assert.equal(created[0]!.document.id, created[1]!.document.id);
+  assert.equal(created[0]!.revision.id, created[1]!.revision.id);
+  assert.deepEqual(created.map((x) => x.replayed).sort(), [false, true]);
+
+  const command = saveCommand(project.id, created[0]!.document.id, created[0]!.revision.id,
+    "original edited", [{ fromUtf16: 8, toUtf16: 8, insert: " edited" }],
+    `save-${randomUUID()}`);
+  const saved = await Promise.all([
+    persistence.transaction((tx) => tx.saveDocument(command)),
+    persistence.transaction((tx) => tx.saveDocument(command)),
+  ]);
+  assert.equal(saved[0]!.revision.id, saved[1]!.revision.id);
+  assert.deepEqual(saved.map((x) => x.replayed).sort(), [false, true]);
+  const history = await persistence.read((reader) => reader.listRevisions(project.id, created[0]!.document.id, 10));
+  assert.equal(history.revisions.length, 2);
+});
+
 test("concurrent document saves use compare-and-swap on the observed revision", async () => {
   const project = await createProject(`concurrency-${randomUUID()}`);
   const initial = await createDocument(project.id, "base");
