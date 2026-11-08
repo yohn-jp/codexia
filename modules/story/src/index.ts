@@ -1,4 +1,4 @@
-import type { ModuleContext, ModuleDefinition, ModuleManifest } from "@scriptorium/contracts";
+import type { ModuleContext, ModuleDefinition, ModuleManifest } from "@codexia/contracts";
 import { createStoryActions } from "./actions.js";
 
 export const storyManifest: ModuleManifest = {
@@ -11,7 +11,7 @@ export const storyManifest: ModuleManifest = {
   optionalRequires: ["nlp.tokenizer"],
   serverEntry: "./dist/index.js",
   browserEntry: "./dist/browser.js",
-  statePaths: ["bible", "plot", "manuscript", "meta/scriptorium/modules/story"],
+  statePaths: ["bible", "plot", "manuscript", "meta/codexia/modules/story"],
   locality: "local",
 };
 

@@ -1,5 +1,5 @@
 import { snapshotResult, type StorySnapshotResult } from "./types.js";
-import type { SnapshotId } from "@scriptorium/contracts";
+import type { SnapshotId } from "@codexia/contracts";
 
 export type TimeOfDay = "dawn" | "morning" | "noon" | "evening" | "dusk" | "night";
 export type TimeExpressionKind = "relative-forward" | "relative-backward" | "time-of-day" | "unknown";

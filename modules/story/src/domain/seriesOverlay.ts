@@ -1,5 +1,5 @@
 import { snapshotResult, type StoryEntity, type StoryLink, type StorySnapshotResult } from "./types.js";
-import type { SnapshotId } from "@scriptorium/contracts";
+import type { SnapshotId } from "@codexia/contracts";
 
 /**
  * Read-only work ∪ series-bible overlay. A work entity with the same id wins;
