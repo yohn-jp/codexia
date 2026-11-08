@@ -6,9 +6,9 @@ import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const modulePackagePrefix = '@scriptorium/module-';
+const modulePackagePrefix = '@codexia/module-';
 const moduleIds = ['story', 'diagnostics', 'nlp', 'semantic', 'speaker', 'assistant', 'publishing', 'mcp', 'search'];
-const sourceSpecifier = /\b(?:from\s*|import\s*(?:\(\s*)?|require\s*\(\s*)["'](@scriptorium\/module-[^"']+)["']/g;
+const sourceSpecifier = /\b(?:from\s*|import\s*(?:\(\s*)?|require\s*\(\s*)["'](@codexia\/module-[^"']+)["']/g;
 
 function usage() {
   console.error('Usage: node scripts/profile-build.mjs (--profile <core|full> | --modules-json <json-array>) [--out <dir>] [--verify-deploy <dir>]');
@@ -67,10 +67,10 @@ while (pendingIds.length > 0) {
     throw new Error(`Profile ${selectedProfileName} selects ${id}, but ${packagePath} is not installed`);
   }
   const expectedName = `${modulePackagePrefix}${id}`;
-  if (packageManifest.name !== expectedName || !packageManifest.scriptoriumModule || packageManifest.scriptoriumModule.id !== id) {
-    throw new Error(`${packagePath} must declare name ${expectedName} and scriptoriumModule metadata for ${id}`);
+  if (packageManifest.name !== expectedName || !packageManifest.codexiaModule || packageManifest.codexiaModule.id !== id) {
+    throw new Error(`${packagePath} must declare name ${expectedName} and codexiaModule metadata for ${id}`);
   }
-  const metadata = packageManifest.scriptoriumModule;
+  const metadata = packageManifest.codexiaModule;
   if ((metadata.serverEntry !== undefined && !packageManifest.exports?.['.']) ||
       (metadata.browserEntry !== undefined && !packageManifest.exports?.['./browser'])) {
     throw new Error(`${packagePath} must export the declared server and browser entry points`);
@@ -91,7 +91,7 @@ let resolveModulePlan;
 try {
   ({ resolveModulePlan } = await import(runtimePath));
 } catch (error) {
-  throw new Error(`Build @scriptorium/module-runtime before generating profiles: ${error instanceof Error ? error.message : String(error)}`);
+  throw new Error(`Build @codexia/module-runtime before generating profiles: ${error instanceof Error ? error.message : String(error)}`);
 }
 const plan = resolveModulePlan(packageManifests, requestedIds);
 const includedIds = [...plan.order];
@@ -206,7 +206,7 @@ async function findInstalledModulePackages(nodeModules) {
     visited.add(resolvedDirectory);
     for (const entry of await readdir(directory, { withFileTypes: true }).catch(() => [])) {
       const itemPath = path.join(directory, entry.name);
-      if (path.basename(directory) === '@scriptorium' && entry.name.startsWith('module-')) {
+      if (path.basename(directory) === '@codexia' && entry.name.startsWith('module-')) {
         const manifest = await readPackageManifest(itemPath);
         if (manifest?.name?.startsWith(modulePackagePrefix)) {
           const id = manifest.name.slice(modulePackagePrefix.length);

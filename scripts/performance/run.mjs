@@ -41,7 +41,7 @@ export async function runWorker(script, args, output, timeoutMs, env = {}) {
   return report;
 }
 async function main() {
-  const root = resolve(process.argv[2] ?? '/tmp/scriptorium-wave0-run');
+  const root = resolve(process.argv[2] ?? '/tmp/codexia-wave0-run');
   const repeats = Number(process.env.BENCH_REPEATS ?? 20), timeoutMs = Number(process.env.BENCH_TIMEOUT_MS ?? 180000);
   if (!Number.isInteger(repeats) || repeats < 1 || !Number.isFinite(timeoutMs) || timeoutMs < 1000) throw new Error('Invalid repeat count or timeout');
   await mkdir(root); // fresh run only; never silently reuse mutated fixtures/results
@@ -52,7 +52,7 @@ async function main() {
     git: command('git', '--version'), os: { platform: os.platform(), release: os.release(), arch: os.arch() },
     cpus: os.cpus(), totalMemoryBytes: os.totalmem(), freeMemoryBytes: os.freemem(),
     loadAverage: os.loadavg(), profile: 'core', repeats, timeoutMs,
-    chromiumExecutable: process.env.SCRIPTORIUM_E2E_CHROMIUM ?? 'Playwright default',
+    chromiumExecutable: process.env.CODEXIA_E2E_CHROMIUM ?? 'Playwright default',
     instrumentation: 'opt-in process wrappers, proc IO, browser DevTools commit hook, IDB wrappers, Long Tasks, CDP CPU sampling; no production edits' };
   await save(join(results, 'environment.json'), environment);
   const selected = (process.env.BENCH_SIZES ?? Object.keys(sizes).join(',')).split(',');
@@ -69,7 +69,7 @@ async function main() {
         ? [datasetPath, output, String(repeats), process.env.BENCH_IDLE_MS ?? '35000']
         : [datasetPath, output, String(repeats), workload];
       const report = await runWorker(script, args, output, timeoutMs,
-        { SCRIPTORIUM_PROFILE: 'core', GIT_TRACE2_EVENT: join(results, `${workload}-${size}.git-trace.jsonl`) });
+        { CODEXIA_PROFILE: 'core', GIT_TRACE2_EVENT: join(results, `${workload}-${size}.git-trace.jsonl`) });
       console.log(`${size}/${workload}: ${report.status}`);
     }
   }

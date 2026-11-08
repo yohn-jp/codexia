@@ -18,31 +18,31 @@ test('default and explicit Core root builds select the existing selective profil
   assert.deepEqual(commands, createBuildCommands('core', profile));
   assert.deepEqual(commands[0], {
     command: 'pnpm',
-    args: ['--filter', '@scriptorium/contracts', 'run', 'build'],
+    args: ['--filter', '@codexia/contracts', 'run', 'build'],
   });
   assert.deepEqual(commands[1], {
     command: 'pnpm',
-    args: ['--filter', '@scriptorium/module-runtime', 'run', 'build'],
+    args: ['--filter', '@codexia/module-runtime', 'run', 'build'],
   });
   assert.equal(commands.some(({ args }) => args.includes('--profile') && args.includes('core')), true);
-  assert.deepEqual(commands.find(({ args }) => args.includes('@scriptorium/app'))?.env, {
-    SCRIPTORIUM_PROFILE: 'core',
+  assert.deepEqual(commands.find(({ args }) => args.includes('@codexia/app'))?.env, {
+    CODEXIA_PROFILE: 'core',
   });
   assert.deepEqual(commands.at(-1), {
     command: 'pnpm',
-    args: ['--filter', '@scriptorium/api...', 'run', 'build'],
+    args: ['--filter', '@codexia/api...', 'run', 'build'],
   });
 
   const optionalModuleFilters = commands.flatMap(({ args }) => args)
-    .filter((argument) => argument.startsWith('@scriptorium/module-') && argument !== '@scriptorium/module-runtime');
+    .filter((argument) => argument.startsWith('@codexia/module-') && argument !== '@codexia/module-runtime');
   assert.deepEqual(optionalModuleFilters, []);
-  assert.equal(commands.some(({ args }) => args.includes('@scriptorium/migration')), false);
+  assert.equal(commands.some(({ args }) => args.includes('@codexia/migration')), false);
 });
 
 test('Full root builds keep the existing workspace graph', () => {
   assert.equal(packageManifest.scripts.build, 'node scripts/root-build.mjs');
-  assert.match(packageManifest.scripts['build:workspace'], /@scriptorium\/migration build/);
-  assert.match(packageManifest.scripts['build:workspace'], /@scriptorium\/module-assistant build/);
+  assert.match(packageManifest.scripts['build:workspace'], /@codexia\/migration build/);
+  assert.match(packageManifest.scripts['build:workspace'], /@codexia\/module-assistant build/);
   assert.deepEqual(createRootBuildCommands('full'), [{
     command: 'pnpm',
     args: ['run', 'build:workspace'],

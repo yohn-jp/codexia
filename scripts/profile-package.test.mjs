@@ -5,8 +5,8 @@ import { createBuildCommands, validateProfilePackage } from './profile-package.m
 test('Core package depends on the API and builds no optional module package', () => {
   const profile = { profile: 'core', modules: [] };
   const packageManifest = {
-    name: '@scriptorium/profile-core',
-    dependencies: { '@scriptorium/api': 'workspace:*' },
+    name: '@codexia/profile-core',
+    dependencies: { '@codexia/api': 'workspace:*' },
   };
   assert.deepEqual(validateProfilePackage('core', profile, packageManifest, new Set()), {
     profileName: 'core',
@@ -16,21 +16,21 @@ test('Core package depends on the API and builds no optional module package', ()
   const commands = createBuildCommands('core', profile);
   assert.equal(
     commands.some(({ args }) => args.some((argument) =>
-      argument.startsWith('@scriptorium/module-') && argument !== '@scriptorium/module-runtime')),
+      argument.startsWith('@codexia/module-') && argument !== '@codexia/module-runtime')),
     false,
   );
-  assert.deepEqual(commands.find(({ args }) => args.includes('@scriptorium/app'))?.env, { SCRIPTORIUM_PROFILE: 'core' });
+  assert.deepEqual(commands.find(({ args }) => args.includes('@codexia/app'))?.env, { CODEXIA_PROFILE: 'core' });
 });
 
 test('Full package waits for selected module producers and exact package dependencies', () => {
   const profile = { profile: 'full', modules: ['story', 'semantic', 'search'] };
   const packageManifest = {
-    name: '@scriptorium/profile-full',
+    name: '@codexia/profile-full',
     dependencies: {
-      '@scriptorium/api': 'workspace:*',
-      '@scriptorium/module-story': 'workspace:*',
-      '@scriptorium/module-semantic': 'workspace:*',
-      '@scriptorium/module-search': 'workspace:*',
+      '@codexia/api': 'workspace:*',
+      '@codexia/module-story': 'workspace:*',
+      '@codexia/module-semantic': 'workspace:*',
+      '@codexia/module-search': 'workspace:*',
     },
   };
   assert.deepEqual(validateProfilePackage('full', profile, packageManifest, new Set(['story', 'semantic', 'search'])), {
@@ -42,13 +42,13 @@ test('Full package waits for selected module producers and exact package depende
     /not been produced: search/u,
   );
   assert.throws(
-    () => validateProfilePackage('full', profile, { ...packageManifest, dependencies: { '@scriptorium/api': 'workspace:*', '@scriptorium/module-story': 'workspace:*' } }, new Set(['story', 'semantic', 'search'])),
+    () => validateProfilePackage('full', profile, { ...packageManifest, dependencies: { '@codexia/api': 'workspace:*', '@codexia/module-story': 'workspace:*' } }, new Set(['story', 'semantic', 'search'])),
     /dependencies do not match/u,
   );
 
   const commands = createBuildCommands('full', profile);
-  const moduleBuild = commands.find(({ args }) => args.includes('build') && args.some((argument) => argument.includes('@scriptorium/module-story')));
+  const moduleBuild = commands.find(({ args }) => args.includes('build') && args.some((argument) => argument.includes('@codexia/module-story')));
   assert.ok(moduleBuild);
-  assert.ok(moduleBuild.args.includes('@scriptorium/module-semantic...'));
-  assert.ok(moduleBuild.args.includes('@scriptorium/module-search...'));
+  assert.ok(moduleBuild.args.includes('@codexia/module-semantic...'));
+  assert.ok(moduleBuild.args.includes('@codexia/module-search...'));
 });

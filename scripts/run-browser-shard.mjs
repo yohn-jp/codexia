@@ -44,8 +44,8 @@ function run(command, args, env) {
 async function main() {
   const { profile, suite, prebuilt } = parseArguments(process.argv.slice(2));
   const shard = resolveBrowserShard(profile, suite);
-  const reportDirectory = process.env.SCRIPTORIUM_CI_REPORT_DIR
-    ? path.resolve(process.env.SCRIPTORIUM_CI_REPORT_DIR)
+  const reportDirectory = process.env.CODEXIA_CI_REPORT_DIR
+    ? path.resolve(process.env.CODEXIA_CI_REPORT_DIR)
     : path.resolve(root, "tests/e2e/test-results");
   const coverageFile = path.join(reportDirectory, "browser-coverage.json");
   await mkdir(reportDirectory, { recursive: true });
@@ -53,12 +53,12 @@ async function main() {
 
   const env = {
     ...process.env,
-    SCRIPTORIUM_PROFILE: profile,
-    SCRIPTORIUM_E2E_PROFILE: profile,
-    SCRIPTORIUM_E2E_SHARD: shard.id,
-    SCRIPTORIUM_E2E_PROJECT: shard.project,
-    SCRIPTORIUM_E2E_TEST_FILE: shard.file,
-    SCRIPTORIUM_E2E_COVERAGE_FILE: coverageFile,
+    CODEXIA_PROFILE: profile,
+    CODEXIA_E2E_PROFILE: profile,
+    CODEXIA_E2E_SHARD: shard.id,
+    CODEXIA_E2E_PROJECT: shard.project,
+    CODEXIA_E2E_TEST_FILE: shard.file,
+    CODEXIA_E2E_COVERAGE_FILE: coverageFile,
   };
   if (!prebuilt) {
     const buildStatus = run("pnpm", ["build"], env);
