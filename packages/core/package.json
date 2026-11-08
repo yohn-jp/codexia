@@ -1,5 +1,5 @@
 {
-  "name": "@scriptorium/core",
+  "name": "@codexia/core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "yaml": "^2.8.1",
-    "@scriptorium/contracts": "workspace:*"
+    "@codexia/contracts": "workspace:*"
   },
   "files": [
     "dist"

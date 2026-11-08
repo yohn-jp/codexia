@@ -7,7 +7,7 @@ import {
   type ChangeOperation,
   type ChangeProposal,
   type SnapshotId,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 
 export const MAX_PROPOSAL_BYTES = 8 * 1024 * 1024;
 
@@ -57,7 +57,7 @@ export function isJsonValue(value: unknown, active = new WeakSet<object>(), dept
 }
 
 export function assertUserOperationPaths(operation: ChangeOperation): void {
-  const reserved = ["meta/scriptorium/operations", "meta/scriptorium/publications", "meta/scriptorium/proposals"];
+  const reserved = ["meta/codexia/operations", "meta/codexia/publications", "meta/codexia/proposals"];
   for (const write of operation.writes) {
     const filePath = write.path.toLowerCase();
     if (reserved.some((root) => filePath === root || filePath.startsWith(`${root}/`))) {

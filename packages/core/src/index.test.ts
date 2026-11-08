@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import YAML from "yaml";
-import { createDocumentSource } from "@scriptorium/contracts";
+import { createDocumentSource } from "@codexia/contracts";
 import { CoreError, CoreStore } from "./index.js";
 
 const execFile = promisify(execFileCallback);
@@ -47,7 +47,7 @@ async function makeProjectFiles(root: string): Promise<void> {
 }
 
 async function makeRemote(withProject = true): Promise<{ tempDir: string; remote: string; seed: string }> {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-core-test-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-core-test-"));
   const remote = path.join(tempDir, "remote.git");
   const seed = path.join(tempDir, "seed");
   await fs.mkdir(seed);
@@ -374,7 +374,7 @@ test("serializes saves from separate CoreStore instances sharing one data direct
 });
 
 test("loads a truly empty remote and protects project paths from traversal and symlinks", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-empty-test-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-empty-test-"));
   const remote = path.join(tempDir, "empty.git");
   try {
     await runGit(tempDir, "init", "--bare", "--initial-branch=main", remote);
@@ -447,7 +447,7 @@ test("uses literal manuscript paths for commits so wildcard names cannot capture
 });
 
 test("rejects an invalid project ID before creating a project lock path", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-id-test-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-id-test-"));
   const dataDir = path.join(tempDir, "state");
   const store = new CoreStore({ dataDir, allowLocalRemotes: true });
   const invalidId = `../${"x".repeat(33)}`;
@@ -497,7 +497,7 @@ test("rejects manuscript paths that escape the project or pass through a symlink
 });
 
 test("remembers when an initially empty remote acquires a branch", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-empty-remote-test-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-empty-remote-test-"));
   const remote = path.join(tempDir, "remote.git");
   const seed = path.join(tempDir, "seed");
   try {
@@ -564,7 +564,7 @@ test("rejects .git manuscript paths without corrupting an active dotted branch r
 });
 
 test("requires a GitHub HTTPS URL in production mode", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-url-test-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-url-test-"));
   try {
     const store = new CoreStore({ dataDir: path.join(tempDir, "state") });
     await assert.rejects(
@@ -581,7 +581,7 @@ test("requires a GitHub HTTPS URL in production mode", async () => {
 });
 
 test("hosted CoreStore has no shared-token or local-remote fallback and rejects unassigned repositories before network access", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-hosted-core-test-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-hosted-core-test-"));
   const binding = {
     repositoryId: 342_100_801,
     repositoryLocator: "https://github.com/yohn-jp/assigned-work",
@@ -602,9 +602,9 @@ test("hosted CoreStore has no shared-token or local-remote fallback and rejects 
       };
     },
   };
-  const previousToken = process.env.SCRIPTORIUM_GITHUB_TOKEN;
+  const previousToken = process.env.CODEXIA_GITHUB_TOKEN;
   try {
-    delete process.env.SCRIPTORIUM_GITHUB_TOKEN;
+    delete process.env.CODEXIA_GITHUB_TOKEN;
     assert.throws(
       () => new CoreStore({ dataDir: path.join(tempDir, "missing-provider"), hostedRepository: binding }),
       /requires a GitCredentialProvider/u,
@@ -613,12 +613,12 @@ test("hosted CoreStore has no shared-token or local-remote fallback and rejects 
       () => new CoreStore({ dataDir: path.join(tempDir, "static-option"), hostedRepository: binding, githubToken: "static-token", gitCredentialProvider: provider }),
       /Shared GitHub tokens are forbidden/u,
     );
-    process.env.SCRIPTORIUM_GITHUB_TOKEN = "static-environment-token";
+    process.env.CODEXIA_GITHUB_TOKEN = "static-environment-token";
     assert.throws(
       () => new CoreStore({ dataDir: path.join(tempDir, "static-environment"), hostedRepository: binding, gitCredentialProvider: provider }),
       /Shared GitHub tokens are forbidden/u,
     );
-    delete process.env.SCRIPTORIUM_GITHUB_TOKEN;
+    delete process.env.CODEXIA_GITHUB_TOKEN;
     assert.throws(
       () => new CoreStore({ dataDir: path.join(tempDir, "local-remote"), hostedRepository: binding, gitCredentialProvider: provider, allowLocalRemotes: true }),
       /Local remotes are forbidden/u,
@@ -631,14 +631,14 @@ test("hosted CoreStore has no shared-token or local-remote fallback and rejects 
     );
     assert.equal(credentialRequests, 0);
   } finally {
-    if (previousToken === undefined) delete process.env.SCRIPTORIUM_GITHUB_TOKEN;
-    else process.env.SCRIPTORIUM_GITHUB_TOKEN = previousToken;
+    if (previousToken === undefined) delete process.env.CODEXIA_GITHUB_TOKEN;
+    else process.env.CODEXIA_GITHUB_TOKEN = previousToken;
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 });
 
 test("hosted Git credential provider authentication failures do not become browser authentication failures", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-hosted-credential-failure-test-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-hosted-credential-failure-test-"));
   const binding = {
     repositoryId: 342_100_803,
     repositoryLocator: "https://github.com/yohn-jp/credential-failure-work",
@@ -673,9 +673,9 @@ test("hosted clones omit remote tags but keep manually created tags unsafe", asy
     instanceId: "instance_tagged_test",
     runtimeEpoch: 8,
   };
-  const previousToken = process.env.SCRIPTORIUM_GITHUB_TOKEN;
+  const previousToken = process.env.CODEXIA_GITHUB_TOKEN;
   try {
-    delete process.env.SCRIPTORIUM_GITHUB_TOKEN;
+    delete process.env.CODEXIA_GITHUB_TOKEN;
     await runGit(seed, "tag", "remote-release-v1");
     await runGit(seed, "push", "origin", "refs/tags/remote-release-v1");
 
@@ -746,8 +746,8 @@ test("hosted clones omit remote tags but keep manually created tags unsafe", asy
     assert.equal(manualTagCensus.localWorkspaceDirty, true,
       "a user-created tag remains an unknown local durability reference");
   } finally {
-    if (previousToken === undefined) delete process.env.SCRIPTORIUM_GITHUB_TOKEN;
-    else process.env.SCRIPTORIUM_GITHUB_TOKEN = previousToken;
+    if (previousToken === undefined) delete process.env.CODEXIA_GITHUB_TOKEN;
+    else process.env.CODEXIA_GITHUB_TOKEN = previousToken;
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 });

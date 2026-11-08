@@ -1,4 +1,4 @@
-# `@scriptorium/migration`
+# `@codexia/migration`
 
 This package inspects an explicitly selected legacy project and workspace data root, then returns a deterministic, reviewable `ChangeOperation[]`. Inspection does not write to the legacy project, Git history, SQLite databases, or target snapshot. The returned operations are proposals for the normal author review flow; they do not approve, checkpoint, or publish changes.
 
@@ -8,7 +8,7 @@ This package inspects an explicitly selected legacy project and workspace data r
 import {
   inspectLegacyProject,
   proposeMigrationImport,
-} from "@scriptorium/migration";
+} from "@codexia/migration";
 
 const inspection = await inspectLegacyProject({
   sourceRoot: "/data/legacy/project",
@@ -34,7 +34,7 @@ Modules can register domain-owned migration producers when composing the generic
 import {
   createMigrationProducerRegistry,
   registerMigrationProducer,
-} from "@scriptorium/migration";
+} from "@codexia/migration";
 
 const registry = createMigrationProducerRegistry();
 registerMigrationProducer(registry, {
@@ -53,7 +53,7 @@ const inspection = await inspectLegacyProject({
 });
 ```
 
-The producer owns its source classification and must preserve stable IDs and unknown data. A disabled module's generic records are copied under `meta/scriptorium/modules/<module-id>/legacy/` with disposition `preserved-unreadable`; they are not imported to the module's canonical readable paths. The owning module migration consumes that namespace when enabled. The P12 integration check composes these producers with Core's normal author approval, checkpoint, and publication flow.
+The producer owns its source classification and must preserve stable IDs and unknown data. A disabled module's generic records are copied under `meta/codexia/modules/<module-id>/legacy/` with disposition `preserved-unreadable`; they are not imported to the module's canonical readable paths. The owning module migration consumes that namespace when enabled. The P12 integration check composes these producers with Core's normal author approval, checkpoint, and publication flow.
 
 ## Generic source coverage
 
@@ -66,7 +66,7 @@ The producer owns its source classification and must preserve stable IDs and unk
 | `.arcadia/llm-model-settings.json`, `.arcadia/nlp-feature-settings.json`, `.arcadia/llm-usage.jsonl` | Non-secret model selection, feature privacy settings, and historical usage. Secret-like files and credentials are excluded. |
 | `.arcadia/change-sets/*.json` | Applied, partially applied, and rejected stable-ID history is retained. Pending records stay in same-origin recovery; disabled story records are also preserved opaquely. |
 | `.arcadia/snapshots/**` | Local scratch snapshots and attachments retain relative paths and bytes. Binary payloads use the contract's base64 encoding. |
-| `.arcadia/index.sqlite` and `<workspaceDataRoot>/index/<project-basename>/index.sqlite` | Both stores are inspected read-only. Every non-secret `state_proposals` and `zukan_suggestions` row, including every workflow status and unknown non-secret column, is copied to `meta/scriptorium/modules/story/legacy/sqlite/{project-arcadia,workspace-index}/<table>.jsonl`. The generic producer reports semantic conversion as deferred and writes no canonical Story records; the registered Story producer owns status interpretation, ID reconciliation, and author review of divergent IDs. Credential-like columns are redacted and named in the report without exposing values. |
+| `.arcadia/index.sqlite` and `<workspaceDataRoot>/index/<project-basename>/index.sqlite` | Both stores are inspected read-only. Every non-secret `state_proposals` and `zukan_suggestions` row, including every workflow status and unknown non-secret column, is copied to `meta/codexia/modules/story/legacy/sqlite/{project-arcadia,workspace-index}/<table>.jsonl`. The generic producer reports semantic conversion as deferred and writes no canonical Story records; the registered Story producer owns status interpretation, ID reconciliation, and author review of divergent IDs. Credential-like columns are redacted and named in the report without exposing values. |
 | SQLite derived tables such as `entities`, `links`, `scene_state_events`, `reader_knowledge_events`, embeddings, and fingerprints | Reported as derived/rebuild-only; row contents are not imported. Tables with secret-like names or columns are excluded without reading rows. Unknown tables are reported unclassified and left untouched. |
 | Pending Git commits and worktree changes | Final file contents/deletions are represented as provisional guarded operations; credential-like paths are excluded. Git history and the old checkout remain intact. |
 | Explicit workspace `app-state` stores | Share grant descriptors are selected by the supplied legacy project ID; only hashed, non-owner descriptors are migrated. Story owns `app-state/series.json` and its root alias using the verified mapping; host project/user/session/token records remain host-owned or excluded. |
