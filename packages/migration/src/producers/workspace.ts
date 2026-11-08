@@ -109,7 +109,7 @@ async function inspectShareGrants(context: MigrationContext): Promise<MigrationC
     result.entries.push({
       producerId: "workspace",
       source: sourcePath,
-      target: "meta/scriptorium/modules/publishing/share-grants.jsonl",
+      target: "meta/codexia/modules/publishing/share-grants.jsonl",
       category: "authoritative",
       disposition: invalid > 0 ? "blocked" : "unchanged",
       recordCount: 0,
@@ -119,7 +119,7 @@ async function inspectShareGrants(context: MigrationContext): Promise<MigrationC
   }
 
   if (!context.enabledModules.has("publishing")) {
-    const target = "meta/scriptorium/modules/publishing/legacy/share-grants.jsonl";
+    const target = "meta/codexia/modules/publishing/legacy/share-grants.jsonl";
     const content = grants.map((grant) => JSON.stringify(grant)).join("\n") + "\n";
     const opaque = await planGeneratedFileImport({
       context,
@@ -147,7 +147,7 @@ async function inspectShareGrants(context: MigrationContext): Promise<MigrationC
     return result;
   }
 
-  const target = "meta/scriptorium/modules/publishing/share-grants.jsonl";
+  const target = "meta/codexia/modules/publishing/share-grants.jsonl";
   const existing = await context.target.read(target);
   const records = new Map<string, string>();
   try {

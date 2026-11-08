@@ -232,7 +232,7 @@ function readOperationWrites(inspection) {
 }
 
 test("legacy import survives author-approved publication and complete Core dataDir replacement", async () => {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-import-recovery-"));
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-import-recovery-"));
   const workspaceRoot = path.join(tempRoot, "legacy-data");
   const targetDataDir = path.join(tempRoot, "core-data");
   const databases = [];
@@ -278,23 +278,23 @@ test("legacy import survives author-approved publication and complete Core dataD
     const writes = readOperationWrites(inspection);
     const writeByPath = new Map(writes.map((write) => [write.path, write]));
     for (const targetPath of [
-      "meta/scriptorium/modules/speaker/corrections.jsonl",
-      "meta/scriptorium/modules/speaker/adopted-model.json",
-      "meta/scriptorium/modules/nlp/synonyms.yaml",
-      "meta/scriptorium/modules/nlp/candidate-ignore-list.yaml",
-      "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl",
-      "meta/scriptorium/modules/publishing/episodes.yaml",
-      "meta/scriptorium/modules/publishing/assets/cover.jpg",
-      "meta/scriptorium/modules/assistant/model-settings.json",
-      "meta/scriptorium/modules/assistant/usage.jsonl",
-      "meta/scriptorium/modules/story/change-sets/applied.json",
-      "meta/scriptorium/modules/story/local-snapshots/scene-before.md",
-      "meta/scriptorium/modules/story/local-snapshots/attachments/diagram.bin",
-      "meta/scriptorium/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl",
-      "meta/scriptorium/modules/story/legacy/sqlite/project-arcadia/zukan_suggestions.jsonl",
-      "meta/scriptorium/modules/story/legacy/sqlite/workspace-index/state_proposals.jsonl",
-      "meta/scriptorium/modules/story/legacy/sqlite/workspace-index/zukan_suggestions.jsonl",
-      "meta/scriptorium/modules/publishing/share-grants.jsonl",
+      "meta/codexia/modules/speaker/corrections.jsonl",
+      "meta/codexia/modules/speaker/adopted-model.json",
+      "meta/codexia/modules/nlp/synonyms.yaml",
+      "meta/codexia/modules/nlp/candidate-ignore-list.yaml",
+      "meta/codexia/modules/semantic/contradiction-dismissals.jsonl",
+      "meta/codexia/modules/publishing/episodes.yaml",
+      "meta/codexia/modules/publishing/assets/cover.jpg",
+      "meta/codexia/modules/assistant/model-settings.json",
+      "meta/codexia/modules/assistant/usage.jsonl",
+      "meta/codexia/modules/story/change-sets/applied.json",
+      "meta/codexia/modules/story/local-snapshots/scene-before.md",
+      "meta/codexia/modules/story/local-snapshots/attachments/diagram.bin",
+      "meta/codexia/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl",
+      "meta/codexia/modules/story/legacy/sqlite/project-arcadia/zukan_suggestions.jsonl",
+      "meta/codexia/modules/story/legacy/sqlite/workspace-index/state_proposals.jsonl",
+      "meta/codexia/modules/story/legacy/sqlite/workspace-index/zukan_suggestions.jsonl",
+      "meta/codexia/modules/publishing/share-grants.jsonl",
       "notes/from-local-commit.md",
       "story/scene.md",
       "notes/staged-add.md",
@@ -303,7 +303,7 @@ test("legacy import survives author-approved publication and complete Core dataD
     const typeChange = inspection.entries.find((entry) => entry.source === "docs/typechange.md");
     assert.equal(typeChange?.disposition, "blocked", "Core must withhold a symlink replacement it cannot safely read");
     assert.equal(writeByPath.get("notes/delete-me.md").content, null, "the staged deletion must be preserved");
-    assert.ok(["meta/scriptorium/modules/publishing/assets/cover.jpg", "meta/scriptorium/modules/story/local-snapshots/attachments/diagram.bin"]
+    assert.ok(["meta/codexia/modules/publishing/assets/cover.jpg", "meta/codexia/modules/story/local-snapshots/attachments/diagram.bin"]
       .every((targetPath) => writeByPath.get(targetPath).encoding === "base64"), "binary assets must retain base64 encoding");
 
     for (const sourcePath of [
@@ -319,10 +319,10 @@ test("legacy import survives author-approved publication and complete Core dataD
     assert.ok(inspection.entries.some((entry) => entry.source.includes("#state_proposals") && entry.category === "provisional" && entry.disposition === "deferred"));
     assert.ok(inspection.entries.some((entry) => entry.source.includes("#zukan_suggestions") && entry.category === "provisional" && entry.disposition === "deferred"));
     assert.ok(!inspection.operations.some((operation) => operation.writes.some((write) => /entities|scene_state_events|reader_knowledge_events/u.test(write.path))));
-    const projectProposalRows = writeByPath.get("meta/scriptorium/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl").content;
-    const workspaceProposalRows = writeByPath.get("meta/scriptorium/modules/story/legacy/sqlite/workspace-index/state_proposals.jsonl").content;
-    const projectSuggestionRows = writeByPath.get("meta/scriptorium/modules/story/legacy/sqlite/project-arcadia/zukan_suggestions.jsonl").content;
-    const workspaceSuggestionRows = writeByPath.get("meta/scriptorium/modules/story/legacy/sqlite/workspace-index/zukan_suggestions.jsonl").content;
+    const projectProposalRows = writeByPath.get("meta/codexia/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl").content;
+    const workspaceProposalRows = writeByPath.get("meta/codexia/modules/story/legacy/sqlite/workspace-index/state_proposals.jsonl").content;
+    const projectSuggestionRows = writeByPath.get("meta/codexia/modules/story/legacy/sqlite/project-arcadia/zukan_suggestions.jsonl").content;
+    const workspaceSuggestionRows = writeByPath.get("meta/codexia/modules/story/legacy/sqlite/workspace-index/zukan_suggestions.jsonl").content;
     assert.deepEqual(projectProposalRows.trim().split("\n").map((line) => JSON.parse(line).id).sort(),
       ["state-approved-project", "state-conflict", "state-pending-project"]);
     assert.deepEqual(workspaceProposalRows.trim().split("\n").map((line) => JSON.parse(line).id).sort(),
@@ -337,8 +337,8 @@ test("legacy import survives author-approved publication and complete Core dataD
       assert.ok(!payload.includes("api_token"));
       assert.ok(!payload.includes("DO_NOT_EXPORT_SQLITE_SECRET"));
     }
-    assert.ok(!writeByPath.has("meta/scriptorium/modules/story/state-proposals.jsonl"), "generic SQLite preservation must not write canonical Story records");
-    assert.ok(!writeByPath.has("meta/scriptorium/modules/story/zukan-suggestions.jsonl"));
+    assert.ok(!writeByPath.has("meta/codexia/modules/story/state-proposals.jsonl"), "generic SQLite preservation must not write canonical Story records");
+    assert.ok(!writeByPath.has("meta/codexia/modules/story/zukan-suggestions.jsonl"));
     assert.ok(!JSON.stringify(inspection).includes("DO_NOT_EXPORT_"), "synthetic credential/derived sentinels must not enter inspection output");
 
     const repeatedPlan = await inspect();
@@ -368,7 +368,7 @@ test("legacy import survives author-approved publication and complete Core dataD
       else assert.equal(recovered?.content, write.content, `published bytes must survive target dataDir replacement at ${write.path}`);
     }
 
-    const grants = await restoredReader.read("meta/scriptorium/modules/publishing/share-grants.jsonl");
+    const grants = await restoredReader.read("meta/codexia/modules/publishing/share-grants.jsonl");
     const grant = JSON.parse(grants.content.trim());
     assert.equal(grant.id, "share-grant-stable");
     assert.equal(grant.projectId, targetIdentity.repositoryId);
@@ -376,32 +376,32 @@ test("legacy import survives author-approved publication and complete Core dataD
     assert.ok(!grants.content.includes("synthetic-private-owner"));
     assert.ok(!grants.content.includes("DO_NOT_EXPORT_BEARER"));
 
-    const restoredProjectRows = (await restoredReader.read("meta/scriptorium/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl")).content;
-    const restoredWorkspaceRows = (await restoredReader.read("meta/scriptorium/modules/story/legacy/sqlite/workspace-index/state_proposals.jsonl")).content;
+    const restoredProjectRows = (await restoredReader.read("meta/codexia/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl")).content;
+    const restoredWorkspaceRows = (await restoredReader.read("meta/codexia/modules/story/legacy/sqlite/workspace-index/state_proposals.jsonl")).content;
     assert.deepEqual(restoredProjectRows, projectProposalRows, "all project database workflow rows and unknown fields survive a real clone");
     assert.deepEqual(restoredWorkspaceRows, workspaceProposalRows, "all workspace database workflow rows and divergent IDs survive a real clone");
     assert.ok(!restoredProjectRows.includes("api_token"));
     assert.ok(!restoredWorkspaceRows.includes("DO_NOT_EXPORT_SQLITE_SECRET"));
     const allTargetPaths = await restoredReader.list("");
-    assert.ok(!allTargetPaths.includes("meta/scriptorium/modules/story/state-proposals.jsonl"));
-    assert.ok(!allTargetPaths.includes("meta/scriptorium/modules/story/zukan-suggestions.jsonl"));
-    assert.ok(!allTargetPaths.some((filePath) => filePath.startsWith("meta/scriptorium/modules/story/legacy/sqlite-conflicts/")));
+    assert.ok(!allTargetPaths.includes("meta/codexia/modules/story/state-proposals.jsonl"));
+    assert.ok(!allTargetPaths.includes("meta/codexia/modules/story/zukan-suggestions.jsonl"));
+    assert.ok(!allTargetPaths.some((filePath) => filePath.startsWith("meta/codexia/modules/story/legacy/sqlite-conflicts/")));
     assert.ok(!allTargetPaths.some((filePath) => filePath === ".npmrc" || filePath.endsWith("/.ssh/id_ed25519")));
     assert.ok(!allTargetPaths.some((filePath) => /scene_state_events|reader_knowledge_events/u.test(filePath)));
     const exactFileMappings = [
-      ["meta/speaker-corrections.jsonl", "meta/scriptorium/modules/speaker/corrections.jsonl"],
-      ["meta/speaker-model.json", "meta/scriptorium/modules/speaker/adopted-model.json"],
-      ["meta/synonyms.yaml", "meta/scriptorium/modules/nlp/synonyms.yaml"],
-      ["meta/candidate-ignore-list.yaml", "meta/scriptorium/modules/nlp/candidate-ignore-list.yaml"],
-      ["meta/contradiction-dismissals.jsonl", "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl"],
-      ["meta/publish-episodes.yaml", "meta/scriptorium/modules/publishing/episodes.yaml"],
-      [".arcadia/llm-model-settings.json", "meta/scriptorium/modules/assistant/model-settings.json"],
-      [".arcadia/nlp-feature-settings.json", "meta/scriptorium/modules/nlp/feature-settings.json"],
-      [".arcadia/llm-usage.jsonl", "meta/scriptorium/modules/assistant/usage.jsonl"],
-      [".arcadia/change-sets/applied.json", "meta/scriptorium/modules/story/change-sets/applied.json"],
-      [".arcadia/snapshots/scene-before.md", "meta/scriptorium/modules/story/local-snapshots/scene-before.md"],
-      [".arcadia/cover.jpg", "meta/scriptorium/modules/publishing/assets/cover.jpg"],
-      [".arcadia/snapshots/attachments/diagram.bin", "meta/scriptorium/modules/story/local-snapshots/attachments/diagram.bin"],
+      ["meta/speaker-corrections.jsonl", "meta/codexia/modules/speaker/corrections.jsonl"],
+      ["meta/speaker-model.json", "meta/codexia/modules/speaker/adopted-model.json"],
+      ["meta/synonyms.yaml", "meta/codexia/modules/nlp/synonyms.yaml"],
+      ["meta/candidate-ignore-list.yaml", "meta/codexia/modules/nlp/candidate-ignore-list.yaml"],
+      ["meta/contradiction-dismissals.jsonl", "meta/codexia/modules/semantic/contradiction-dismissals.jsonl"],
+      ["meta/publish-episodes.yaml", "meta/codexia/modules/publishing/episodes.yaml"],
+      [".arcadia/llm-model-settings.json", "meta/codexia/modules/assistant/model-settings.json"],
+      [".arcadia/nlp-feature-settings.json", "meta/codexia/modules/nlp/feature-settings.json"],
+      [".arcadia/llm-usage.jsonl", "meta/codexia/modules/assistant/usage.jsonl"],
+      [".arcadia/change-sets/applied.json", "meta/codexia/modules/story/change-sets/applied.json"],
+      [".arcadia/snapshots/scene-before.md", "meta/codexia/modules/story/local-snapshots/scene-before.md"],
+      [".arcadia/cover.jpg", "meta/codexia/modules/publishing/assets/cover.jpg"],
+      [".arcadia/snapshots/attachments/diagram.bin", "meta/codexia/modules/story/local-snapshots/attachments/diagram.bin"],
     ];
     for (const [sourcePath, targetPath] of exactFileMappings) {
       const sourceBytes = await fs.readFile(path.join(sourceRoot, sourcePath));

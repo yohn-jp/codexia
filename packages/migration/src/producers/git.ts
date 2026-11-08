@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { assertChangeOperation, assertProjectPath } from "@scriptorium/contracts";
-import type { ChangeOperation, FileChange } from "@scriptorium/contracts";
+import { assertChangeOperation, assertProjectPath } from "@codexia/contracts";
+import type { ChangeOperation, FileChange } from "@codexia/contracts";
 import { isSecretLegacyPath } from "../classification.js";
 import { decodeLegacyBytes, stableMigrationId } from "../operations.js";
 import type { GitPendingFile, MigrationContext, MigrationContribution, MigrationProducer } from "../types.js";

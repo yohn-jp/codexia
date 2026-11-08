@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { DatabaseSync } from "node:sqlite";
-import { assertProjectPath } from "@scriptorium/contracts";
+import { assertProjectPath } from "@codexia/contracts";
 import { isSecretLegacyPath } from "./classification.js";
 import type {
   GitWorktreeInspection,
@@ -119,7 +119,7 @@ async function openReadonlyDatabase(root: string, relativePath: string): Promise
   if (!filePath) return null;
   const info = await fs.lstat(filePath);
   if (!info.isFile()) return null;
-  const tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-migration-sqlite-"));
+  const tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-migration-sqlite-"));
   const copyPath = path.join(tempDirectory, path.basename(relativePath));
   try {
     await fs.copyFile(filePath, copyPath);

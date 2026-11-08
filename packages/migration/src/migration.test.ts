@@ -6,8 +6,8 @@ import path from "node:path";
 import os from "node:os";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import type { ChangeOperation, RepositoryIdentity, SnapshotId, SnapshotReader } from "@scriptorium/contracts";
-import { assertChangeOperation } from "@scriptorium/contracts";
+import type { ChangeOperation, RepositoryIdentity, SnapshotId, SnapshotReader } from "@codexia/contracts";
+import { assertChangeOperation } from "@codexia/contracts";
 import { createLegacySourceReader, inspectLegacyProject, isSecretLegacyPath, proposeMigrationImport } from "./index.js";
 
 const repository: RepositoryIdentity = {
@@ -336,7 +336,7 @@ test("legacy inspection preserves scoped data, both SQLite stores, and pending G
   assert.equal(isSecretLegacyPath(".ssh/id_ed25519"), true);
   assert.equal(isSecretLegacyPath(".ssh/id_ed25519.pub"), false, "public SSH keys are not private credential files");
   assert.equal(isSecretLegacyPath("story/secret-ritual.md"), false, "ordinary manuscript paths are not scanned by body text");
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "scriptorium-p04-test-"));
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-p04-test-"));
   const sourceRoot = path.join(temporary, "project");
   const workspaceRoot = path.join(temporary, "data");
   await seedGitHistory(sourceRoot);
@@ -393,23 +393,23 @@ test("legacy inspection preserves scoped data, both SQLite stores, and pending G
   const writePaths = new Set(writes.map(({ path: writePath }) => writePath));
   for (const pathName of excludedGitCredentialPaths) assert.ok(!writePaths.has(pathName), `${pathName} must not become a migration operation`);
   for (const expected of [
-    "meta/scriptorium/modules/speaker/corrections.jsonl",
-    "meta/scriptorium/modules/speaker/adopted-model.json",
-    "meta/scriptorium/modules/nlp/synonyms.yaml",
-    "meta/scriptorium/modules/nlp/candidate-ignore-list.yaml",
-    "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl",
-    "meta/scriptorium/modules/publishing/episodes.yaml",
-    "meta/scriptorium/modules/assistant/model-settings.json",
-    "meta/scriptorium/modules/assistant/usage.jsonl",
-    "meta/scriptorium/modules/publishing/assets/cover.jpg",
-    "meta/scriptorium/modules/story/change-sets/applied.json",
-    "meta/scriptorium/modules/story/local-snapshots/scene-before.md",
-    "meta/scriptorium/modules/story/local-snapshots/attachments/audio.bin",
-    "meta/scriptorium/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl",
-    "meta/scriptorium/modules/story/legacy/sqlite/project-arcadia/zukan_suggestions.jsonl",
-    "meta/scriptorium/modules/story/legacy/sqlite/workspace-index/state_proposals.jsonl",
-    "meta/scriptorium/modules/story/legacy/sqlite/workspace-index/zukan_suggestions.jsonl",
-    "meta/scriptorium/modules/publishing/share-grants.jsonl",
+    "meta/codexia/modules/speaker/corrections.jsonl",
+    "meta/codexia/modules/speaker/adopted-model.json",
+    "meta/codexia/modules/nlp/synonyms.yaml",
+    "meta/codexia/modules/nlp/candidate-ignore-list.yaml",
+    "meta/codexia/modules/semantic/contradiction-dismissals.jsonl",
+    "meta/codexia/modules/publishing/episodes.yaml",
+    "meta/codexia/modules/assistant/model-settings.json",
+    "meta/codexia/modules/assistant/usage.jsonl",
+    "meta/codexia/modules/publishing/assets/cover.jpg",
+    "meta/codexia/modules/story/change-sets/applied.json",
+    "meta/codexia/modules/story/local-snapshots/scene-before.md",
+    "meta/codexia/modules/story/local-snapshots/attachments/audio.bin",
+    "meta/codexia/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl",
+    "meta/codexia/modules/story/legacy/sqlite/project-arcadia/zukan_suggestions.jsonl",
+    "meta/codexia/modules/story/legacy/sqlite/workspace-index/state_proposals.jsonl",
+    "meta/codexia/modules/story/legacy/sqlite/workspace-index/zukan_suggestions.jsonl",
+    "meta/codexia/modules/publishing/share-grants.jsonl",
     "story/scene.md",
     "story/delete-me.md",
     "docs/typechange.md",
@@ -466,10 +466,10 @@ test("legacy inspection preserves scoped data, both SQLite stores, and pending G
   assert.equal(binaryWrites.length, 3);
   assert.ok(binaryWrites.every((write) => write.encoding === "base64"));
   const operationFiles = new Map(writes.map((write) => [write.path, { content: write.content ?? "", revision: "" }]));
-  const projectProposalRecords = operationContent(operationFiles, "meta/scriptorium/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl");
-  const workspaceProposalRecords = operationContent(operationFiles, "meta/scriptorium/modules/story/legacy/sqlite/workspace-index/state_proposals.jsonl");
-  const projectSuggestions = operationContent(operationFiles, "meta/scriptorium/modules/story/legacy/sqlite/project-arcadia/zukan_suggestions.jsonl");
-  const workspaceSuggestions = operationContent(operationFiles, "meta/scriptorium/modules/story/legacy/sqlite/workspace-index/zukan_suggestions.jsonl");
+  const projectProposalRecords = operationContent(operationFiles, "meta/codexia/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl");
+  const workspaceProposalRecords = operationContent(operationFiles, "meta/codexia/modules/story/legacy/sqlite/workspace-index/state_proposals.jsonl");
+  const projectSuggestions = operationContent(operationFiles, "meta/codexia/modules/story/legacy/sqlite/project-arcadia/zukan_suggestions.jsonl");
+  const workspaceSuggestions = operationContent(operationFiles, "meta/codexia/modules/story/legacy/sqlite/workspace-index/zukan_suggestions.jsonl");
   assert.deepEqual(projectProposalRecords.trim().split("\n").map((line) => JSON.parse(line).id).sort(),
     ["identical-proposal", "project-approved", "project-pending", "shared-conflict"]);
   assert.deepEqual(workspaceProposalRecords.trim().split("\n").map((line) => JSON.parse(line).id).sort(),
@@ -487,8 +487,8 @@ test("legacy inspection preserves scoped data, both SQLite stores, and pending G
     assert.ok(!payload.includes("api_token"));
     assert.ok(!payload.includes("DO_NOT_EXPORT_SQLITE_SECRET_SENTINEL"));
   }
-  assert.ok(!writePaths.has("meta/scriptorium/modules/story/state-proposals.jsonl"));
-  assert.ok(!writePaths.has("meta/scriptorium/modules/story/zukan-suggestions.jsonl"));
+  assert.ok(!writePaths.has("meta/codexia/modules/story/state-proposals.jsonl"));
+  assert.ok(!writePaths.has("meta/codexia/modules/story/zukan-suggestions.jsonl"));
   assert.equal(writes.find(({ path: writePath }) => writePath.endsWith("speaker/adopted-model.json"))?.content,
     '{"version":1,"featureNames":["manual"],"weights":[0.5],"bias":0,"highProbabilityThreshold":0.7,"trainedAt":"2025-01-01T00:00:00.000Z","vendorExtension":{"preserve":true}}\n');
   assert.equal(writes.find(({ path: writePath }) => writePath.endsWith("nlp/synonyms.yaml"))?.content,
@@ -547,13 +547,13 @@ test("legacy inspection preserves scoped data, both SQLite stores, and pending G
     target: targetReader(disabledFiles),
   });
   const disabledWrites = disabled.operations.flatMap((operation) => operation.writes);
-  assert.ok(disabledWrites.some(({ path: writePath }) => writePath === "meta/scriptorium/modules/speaker/legacy/files/meta/speaker-corrections.jsonl"));
-  assert.ok(disabledWrites.some(({ path: writePath }) => writePath === "meta/scriptorium/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl"));
-  assert.ok(disabledWrites.some(({ path: writePath }) => writePath === "meta/scriptorium/modules/publishing/legacy/share-grants.jsonl"));
+  assert.ok(disabledWrites.some(({ path: writePath }) => writePath === "meta/codexia/modules/speaker/legacy/files/meta/speaker-corrections.jsonl"));
+  assert.ok(disabledWrites.some(({ path: writePath }) => writePath === "meta/codexia/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl"));
+  assert.ok(disabledWrites.some(({ path: writePath }) => writePath === "meta/codexia/modules/publishing/legacy/share-grants.jsonl"));
   assert.ok(disabled.entries.some((entry) => entry.source === "meta/speaker-corrections.jsonl" && entry.disposition === "preserved-unreadable"));
   assert.ok(disabled.entries.some((entry) => entry.source.endsWith("#state_proposals") && entry.disposition === "preserved-unreadable"));
   assert.ok(disabled.entries.some((entry) => entry.source === "app-state/share-tokens.json" && entry.disposition === "preserved-unreadable"));
-  assert.ok(disabledWrites.every(({ path: writePath }) => !/^meta\/scriptorium\/modules\/(?:speaker|story|publishing)\/(?!legacy\/)/.test(writePath)), "disabled module records must not be written to canonical readable paths");
+  assert.ok(disabledWrites.every(({ path: writePath }) => !/^meta\/codexia\/modules\/(?:speaker|story|publishing)\/(?!legacy\/)/.test(writePath)), "disabled module records must not be written to canonical readable paths");
   applyOperations(disabledFiles, disabled.operations);
   const disabledAgain = await inspectLegacyProject({
     sourceRoot,

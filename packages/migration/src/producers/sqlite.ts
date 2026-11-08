@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { ChangeOperation } from "@scriptorium/contracts";
+import type { ChangeOperation } from "@codexia/contracts";
 import type {
   MigrationContext,
   MigrationContribution,
@@ -91,7 +91,7 @@ async function planOpaqueRows(
   location: DatabaseLocation,
   rows: SqliteRow[],
 ): Promise<{ entry: MigrationContribution["entries"][number]; operation?: ChangeOperation }> {
-  const target = "meta/scriptorium/modules/story/legacy/sqlite/" + location.id + "/" + table + ".jsonl";
+  const target = "meta/codexia/modules/story/legacy/sqlite/" + location.id + "/" + table + ".jsonl";
   const source = location.path + "#" + table;
   const content = rows.map((row) => JSON.stringify(row)).join("\n") + (rows.length > 0 ? "\n" : "");
   const moduleEnabled = context.enabledModules.has("story");
@@ -194,7 +194,7 @@ export function createSqliteProducer(): MigrationProducer {
             .map((row) => Object.fromEntries(Object.entries(row).filter(([name]) => !secretColumnNames.has(name))) as SqliteRow)
             .sort((a, b) => rowIdentity(a).localeCompare(rowIdentity(b)) || stableJson(a).localeCompare(stableJson(b)));
           const source = location.path + "#" + tableName;
-          const target = "meta/scriptorium/modules/story/legacy/sqlite/" + location.id + "/" + tableName + ".jsonl";
+          const target = "meta/codexia/modules/story/legacy/sqlite/" + location.id + "/" + tableName + ".jsonl";
           if (safeRows.length === 0) {
             result.entries.push({
               producerId: "sqlite-opaque",
