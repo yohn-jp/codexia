@@ -1,8 +1,8 @@
 {
-  "name": "@scriptorium/module-diagnostics",
+  "name": "@codexia/module-diagnostics",
   "private": true,
   "version": "0.1.0",
-  "scriptoriumDisplay": {
+  "codexiaDisplay": {
     "name": "Diagnostics",
     "description": "Review snapshot-based narrative findings and prose patterns without changing the source text."
   },
@@ -33,15 +33,15 @@
     "test": "pnpm run build && node --import tsx --test src/*.test.ts"
   },
   "dependencies": {
-    "@scriptorium/contracts": "workspace:*",
-    "@scriptorium/migration": "workspace:*",
-    "@scriptorium/module-nlp": "workspace:*",
+    "@codexia/contracts": "workspace:*",
+    "@codexia/migration": "workspace:*",
+    "@codexia/module-nlp": "workspace:*",
     "yaml": "^2.8.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "@scriptorium/module-runtime": "workspace:*"
+    "@codexia/module-runtime": "workspace:*"
   },
-  "scriptoriumModule": {
+  "codexiaModule": {
     "id": "diagnostics",
     "version": "0.1.0",
     "contractVersion": 1,
@@ -54,7 +54,7 @@
     ],
     "serverEntry": "./dist/index.js",
     "statePaths": [
-      "meta/scriptorium/modules/diagnostics"
+      "meta/codexia/modules/diagnostics"
     ],
     "locality": "local",
     "browserEntry": "./dist/browser.js",

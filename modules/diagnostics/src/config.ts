@@ -1,4 +1,4 @@
-import type { SnapshotReader } from "@scriptorium/contracts";
+import type { SnapshotReader } from "@codexia/contracts";
 import YAML from "yaml";
 import type { LintRule, LintRulesConfig, DiagnosticSeverityThresholds, CountSeverityThresholds } from "./linter/types.js";
 import { DEFAULT_DIAGNOSTIC_SEVERITY_THRESHOLDS, DEFAULT_LINT_RULES } from "./linter/types.js";
@@ -7,9 +7,9 @@ import { DEFAULT_TONE_LEXICON } from "./tone/types.js";
 import type { PlotArchetype, PlotLexiconConfig } from "./plot/types.js";
 import { DEFAULT_PLOT_LEXICON } from "./plot/types.js";
 
-export const LINT_CONFIG_PATH = "meta/scriptorium/modules/diagnostics/lint-rules.yaml";
-export const TONE_CONFIG_PATH = "meta/scriptorium/modules/diagnostics/tone-lexicon.yaml";
-export const PLOT_CONFIG_PATH = "meta/scriptorium/modules/diagnostics/plot-lexicon.yaml";
+export const LINT_CONFIG_PATH = "meta/codexia/modules/diagnostics/lint-rules.yaml";
+export const TONE_CONFIG_PATH = "meta/codexia/modules/diagnostics/tone-lexicon.yaml";
+export const PLOT_CONFIG_PATH = "meta/codexia/modules/diagnostics/plot-lexicon.yaml";
 
 function object(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`${label} must be an object`);

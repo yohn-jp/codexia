@@ -1,4 +1,4 @@
-import type { MorphologyAnalysis, Token } from "@scriptorium/module-nlp";
+import type { MorphologyAnalysis, Token } from "@codexia/module-nlp";
 import { computeProseBalance, type ProseBalanceResult } from "./proseBalance/index.js";
 import { detectPlotSemanticWarnings } from "./plot/deviationDetector.js";
 import type { PlotLexiconConfig, PlotSemanticWarning } from "./plot/types.js";
@@ -15,7 +15,7 @@ import { computeStyleFingerprints, computeVoiceSeparationMatrix, detectStyleDevi
 import { appendSynonymDiagnosticIssues, collectDiagnosticIssues } from "./issueNormalization.js";
 
 export const DIAGNOSTICS_MODULE_VERSION = "0.1.0";
-export const DIAGNOSTICS_ENGINE_ID = "scriptorium-diagnostics-cpu";
+export const DIAGNOSTICS_ENGINE_ID = "codexia-diagnostics-cpu";
 export const DIAGNOSTICS_ENGINE_VERSION = "1.0.0";
 export const DIAGNOSTICS_ANALYZER_VERSION = "1";
 
