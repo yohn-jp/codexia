@@ -1,7 +1,7 @@
 name: Codexia UI Static Assets
 on:
   pull_request:
-    branches: [chore/codexia-bootstrap-20261108]
+    branches: [main]
     paths:
       - app/**
       - app/public/**

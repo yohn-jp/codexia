@@ -1,7 +1,7 @@
 name: Verify Deployment Configuration
 on:
   pull_request:
-    branches: [chore/codexia-bootstrap-20261108]
+    branches: [main]
     paths:
       - deploy/**
       - edge/frontend/**
@@ -17,7 +17,7 @@ on:
       - docs/deployment/**
       - .github/workflows/**
   push:
-    branches: [main, chore/codexia-bootstrap-20261108]
+    branches: [main]
     paths:
       - deploy/**
       - edge/frontend/**
