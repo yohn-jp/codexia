@@ -1,17 +1,17 @@
-import { extractCompoundNouns, isEligibleTerm, suggestTermVariants, splitIntoSentences, splitIntoSentenceOffsets } from "@scriptorium/module-nlp";
+import { extractCompoundNouns, isEligibleTerm, suggestTermVariants, splitIntoSentences, splitIntoSentenceOffsets } from "@codexia/module-nlp";
 import { isDialogue } from "./dialogueDetection.js";
 import { extractEnding, normalizeEnding } from "./sentenceEnding.js";
 
 export { DIALOGUE_RE, isDialogue } from "./dialogueDetection.js";
-export type { SentenceOffset } from "@scriptorium/module-nlp";
-export { splitIntoSentenceOffsets, splitIntoSentences } from "@scriptorium/module-nlp";
+export type { SentenceOffset } from "@codexia/module-nlp";
+export { splitIntoSentenceOffsets, splitIntoSentences } from "@codexia/module-nlp";
 
 import { evaluateLintRules } from "./linter/rulesEvaluator.js";
 import type { LintRule, LintWarning } from "./linter/types.js";
 import { DEFAULT_LINT_RULES } from "./linter/types.js";
 import type { HabitualPhraseWarning } from "./mining/index.js";
 import { mineContextualHabitualPhrases } from "./mining/index.js";
-import type { MorphologyAnalysis } from "@scriptorium/module-nlp";
+import type { MorphologyAnalysis } from "@codexia/module-nlp";
 import { detectToneDeviation } from "./tone/deviationDetector.js";
 import type { ToneDeviationWarning, ToneLexiconConfig } from "./tone/types.js";
 import { DEFAULT_TONE_LEXICON } from "./tone/types.js";
@@ -19,7 +19,7 @@ import type { FrequentPhrase } from "./phraseMining.js";
 import { mineFrequentPhrases } from "./phraseMining.js";
 import type { SentimentArc } from "./sentimentArc.js";
 import { computeSentimentArc } from "./sentimentArc.js";
-import type { TermVariantSuggestion } from "@scriptorium/module-nlp";
+import type { TermVariantSuggestion } from "@codexia/module-nlp";
 
 export interface TextAnalysisResult {
   charCount: number;

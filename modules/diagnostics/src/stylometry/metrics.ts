@@ -1,5 +1,5 @@
-import type { Token } from "@scriptorium/module-nlp";
-import { tokenBase, isAdjective, isAdverb, isComma, isNoun, isSymbol, isVerb } from "@scriptorium/module-nlp";
+import type { Token } from "@codexia/module-nlp";
+import { tokenBase, isAdjective, isAdverb, isComma, isNoun, isSymbol, isVerb } from "@codexia/module-nlp";
 import type { PosBias, StylometricMetrics } from "./types.js";
 
 /** 品詞バイアス判定で「偏向あり」とみなす形容詞比率と動詞比率の差の閾値。 */

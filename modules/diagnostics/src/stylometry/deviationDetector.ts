@@ -1,4 +1,4 @@
-import type { Token } from "@scriptorium/module-nlp";
+import type { Token } from "@codexia/module-nlp";
 import { computeDialogueMetrics } from "./metrics.js";
 import type {
   StylometricDeviationWarning,
