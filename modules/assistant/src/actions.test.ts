@@ -12,7 +12,7 @@ import {
   type ModuleActionContext,
   type ModuleContext,
   type SnapshotId,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 import { createAssistantActions } from "./actions.js";
 import { createModule } from "./index.js";
 
@@ -24,8 +24,8 @@ const repository = {
   url: "file:///assistant-actions-test",
 };
 const snapshot: SnapshotId = { repository, remoteCommit: "c".repeat(40) };
-const assistantSettingsPath = "meta/scriptorium/modules/assistant/model-settings.json";
-const usagePath = "meta/scriptorium/modules/assistant/usage.jsonl";
+const assistantSettingsPath = "meta/codexia/modules/assistant/model-settings.json";
+const usagePath = "meta/codexia/modules/assistant/usage.jsonl";
 const revision = "a".repeat(64);
 
 function reader(files: Record<string, string> = {}) {
