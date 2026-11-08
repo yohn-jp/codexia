@@ -1,6 +1,10 @@
-# Verification
+# PostgreSQL-only verification
 
-Run from the repository root with Node.js and pnpm versions satisfying `package.json`.
+Verification is defined by the actual PostgreSQL runtime, the browser acceptance tests, and CI evidence. Git/Core, module-composition and legacy publication tests are not the current runtime's verification contract.
+
+## Local commands
+
+Use Node.js 24+ and pnpm 12.10.1:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -10,46 +14,29 @@ pnpm typecheck:safety
 pnpm test
 pnpm build
 pnpm audit:core
+pnpm typecheck:deployment
+pnpm test:deployment
+pnpm verify:deployment
 ```
 
-`pnpm test` runs workspace suites and root script tests. `typecheck:tests` includes test sources, and `typecheck:safety` applies stricter scoped compiler checks. Core dependency auditing requires a Core build; use `CODEXIA_PROFILE=core pnpm build` if a Full build replaced the outputs.
+Set `CODEXIA_TEST_DATABASE_URL` to a **disposable PostgreSQL 17 database** before `pnpm test`. Integration tests apply checksum-verified migrations and may leave test fixtures behind. Do not use a production URL for any test.
 
-The PostgreSQL persistence suite is part of `pnpm test` and requires a disposable PostgreSQL database in `CODEXIA_TEST_DATABASE_URL`. It runs the migrations and exercises persistence transactions; it does not clean the database after the run. For example, start a disposable local server, then run `CODEXIA_TEST_DATABASE_URL=postgres://codexia:codexia@127.0.0.1:55440/codexia_test pnpm test`. The verification workflow supplies its own PostgreSQL service.
+## Chromium and WebKit acceptance
 
-For an application database, apply the schema with `CODEXIA_DATABASE_URL='postgres://user:password@host:5432/database' pnpm --filter @codexia/persistence-postgres migrate`. Migration files are checksum-checked and applied transactionally.
-
-## Browser checks
-
-Install the configured browsers and run acceptance against each profile:
+Use another disposable database for UI tests, with Playwright browsers installed:
 
 ```sh
 pnpm exec playwright install chromium webkit
-export CODEXIA_E2E_DATABASE_URL='postgres://user:password@127.0.0.1:5432/codexia_e2e'
-# The database above must be disposable; browser tests persist fixtures and do not clean the database.
-CODEXIA_PROFILE=core pnpm test:e2e
-CODEXIA_PROFILE=full pnpm test:e2e
+export CODEXIA_E2E_DATABASE_URL="postgres://codexia:password@127.0.0.1:5432/codexia_e2e"
+pnpm build
+pnpm exec playwright test --config tests/e2e/playwright.config.ts --project chromium
+pnpm exec playwright test --config tests/e2e/playwright.config.ts --project webkit
 ```
 
-On a supported host, `CODEXIA_E2E_CHROMIUM` selects a system Chromium executable. The Playwright configuration and test sources define browser/display requirements and conditional cases. A skipped case is not a passed check. Physical-device keyboards, OS IME and native gestures require device testing beyond synthetic composition events.
+`tests/e2e/persistence-database.acceptance.spec.ts` covers PostgreSQL-only entry routing, same-origin authentication, project and document creation, Markdown saves, IndexedDB recovery, concurrent Revision conflicts, Revision restore and Knowledge/Text Anchor links. Both browsers must actually start and pass; a green build or lint does not substitute for an E2E result. Physical Japanese IME, native mobile keyboard and accessibility behaviors still require separate on-device checks.
 
-Browser acceptance covers editing, conflicts, recovery, shell switching, module contributions, workspace layouts, terminology and job review. Tests use generated repositories and isolated browser state. Do not point fixture-driven tests at author work.
+## CI and release evidence
 
-## OCI and integration checks
+`.github/workflows/verify.yml` runs plan, unit, types, build, Chromium, WebKit, OCI and certification jobs. The certification job checks the actual jobs and commit SHA. A failing or cancelled browser check blocks certification and release. `scripts/verify-release-source.mjs` requires a successful exact-source main run before the backend image or Cloudflare UI is published. Deployment is never a substitute for verification.
 
-[OCI verification](OCI.md) checks packaging and startup. [Integration verification](INTEGRATION.md) describes MCP, import, actual model execution and GitHub/container recovery. Hosted producer checks run with:
-
-```sh
-pnpm verify:hosted
-```
-
-That command verifies local producer/catalog/build composition contracts; it does not certify a deployed Hosted instance or publish a release. It requires a usable OCI engine and capacity for disposable local builds.
-
-`pnpm verify` runs frozen installation, production/test-source/safety type checks, tests, Core and Full builds, Core auditing, browser and OCI checks, MCP, Diagnostics persistence and legacy import acceptance. It requires the configured browsers, OCI engine and tokenizer artifacts. Separate real-provider, real-model and remote/container recovery checks require their own inputs and commands.
-
-## Repository CI and release
-
-`.github/workflows/verify.yml` groups workspace unit tests, type checks, safety, builds, auditing, browser tests, OCI checks and Hosted Native composition into at most twenty jobs, including impact planning and the final gate. `scripts/ci-contract.mjs` defines both the execution groups and the complete validation inventory; coverage checks reject omitted workspaces and test sources.
-
-Pull requests select affected validations using `scripts/ci-impact.mjs`. Shared contracts, build inputs, unknown paths and unavailable diff history select full verification. Main pushes and manual runs always execute the full inventory. Plans record the base/head identities, changed paths, selected validations and explicit `NOT_SELECTED` reasons; exclusions are not passing test evidence. Each execution group records individual results and continues independent checks after a failure. The final gate requires every selected validation and its execution group to succeed at the exact source SHA. Release eligibility still requires complete successful main-push verification, including every execution group and certification.
-
-Local verification and CI are separate results. Record exact commands, source identity, exits and skipped or blocked cases in PR checks and machine artifacts. Keep logs, traces and generated reports outside product documentation. Verification does not publish or deploy; [release publication](OCI-RELEASE.md) uses the gated workflow.
+Backups require a separate **real isolated PostgreSQL restore** as described in [deployment](../deployment/README.md). Source-code or CI success alone does not certify RPO/RTO or disaster recovery.
