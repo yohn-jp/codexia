@@ -1,26 +1,17 @@
 # Codexia documentation
 
-Codexia is a Git-backed writing workspace with a minimal Core and optional trusted modules.
+**Active runtime:** PostgreSQL-backed authoring. Git is used for application source control only, never as a manuscript authority. The retired Git/Core workspaces and their module runtime have no supported authoring route.
 
-| Topic | Reference |
+| Subject | Current source |
 | --- | --- |
-| Design, information architecture and UX acceptance | [Design and UX contract](design/UX-CONTRACT.md) — normative target, not a runtime certification |
-| Installation and local startup | [Repository README](../README.md) |
-| Editing, recovery, publication and layouts | [Authoring](authoring.md) |
-| Shared internal ownership and maintainability | [Internal boundaries](architecture/INTERNAL-BOUNDARIES.md) |
-| Storage, snapshots, mutation and authentication | [Core architecture](architecture/CORE.md) |
-| Panels, foreground reads, search and terminology | [Modular workspace](architecture/MODULAR-WORKSPACE.md) |
-| Optional module ownership and lifecycle | [Modules](architecture/MODULES.md) |
-| Mobile interaction rules | [Mobile interactions](architecture/MOBILE-INTERACTION-UX.md) |
-| External plugin design requirements | [Plugin platform proposal](architecture/PLUGIN-PLATFORM.md) |
-| Source ownership and licensing | [Source provenance](architecture/SOURCE-PROVENANCE.md) |
-| Standalone image checks | [OCI verification](verification/OCI.md) |
-| Hosted builds and runtime configuration | [Hosted deployment](HOSTED-DEPLOYMENT.md) |
-| Edge UI, API service and operations | [Deployment](deployment/README.md) |
-| Hosted producer signing | [Producer attestation](hosted-producer-attestation.md) |
-| Development and verification commands | [Verification](verification/README.md) |
-| Recovery, MCP and model acceptance | [Integration verification](verification/INTEGRATION.md) |
-| Performance measurement | [Performance](performance/README.md) |
-| Release gates | [OCI releases](verification/OCI-RELEASE.md) |
+| Installation, supported capability and known non-parity | [Repository README](../README.md) |
+| PostgreSQL projects, revisions, Knowledge and Evidence | [PostgreSQL persistence contracts](../packages/persistence-contracts/src/index.ts) and [Postgres adapter](../packages/persistence-postgres/src/postgres-store.ts) |
+| Authenticated API | [Persistence routes](../packages/api/src/persistence-routes.ts) and [server](../packages/api/src/server.ts) |
+| Desktop/Mobile manuscript editing and recovery | [PersistenceWorkspace](../app/src/persistence/PersistenceWorkspace.tsx) and [browser Journal](../app/src/storage/journal.ts) |
+| Deployment, secrets, database and backup | [Deployment operations](deployment/README.md) |
+| Real verification gates | [Verification](verification/README.md) |
+| PostgreSQL design intent and future capabilities | [Reboot RFC](architecture/CODEXIA-REBOOT-RFC.md) |
 
-Documentation describes supported behavior, contracts, procedures and explicitly identified design proposals. Execution results belong to test reports and build artifacts; contribution rules are in [CONTRIBUTING.md](../CONTRIBUTING.md).
+The remaining Scriptorium-era Git/Core architecture, modular-workspace, hosted, authoring and UX documents are **historical references** until reconciled with the PostgreSQL-only runtime. They must not be cited as proof that a deleted module, Git-backed publication, public reader or missing export/import feature is implemented.
+
+Execution outcomes belong in CI, PRs and test artifacts, not normative documentation. Follow [AGENTS.md](../AGENTS.md) and [CONTRIBUTING.md](../CONTRIBUTING.md).

@@ -1,17 +1,21 @@
-# Codexia
-
-Read [Codexia reboot RFC](docs/architecture/CODEXIA-REBOOT-RFC.md) as a broader design proposal. The additive PostgreSQL Database workspace and deployment path are implemented; existing Git workspace contracts remain applicable to Git projects. Read [Internal boundaries](docs/architecture/INTERNAL-BOUNDARIES.md) for shared ownership and refactoring invariants. Read [Core architecture](docs/architecture/CORE.md), [Modular Workspace](docs/architecture/MODULAR-WORKSPACE.md) and [Modules](docs/architecture/MODULES.md) for application contracts. [Plugin Platform](docs/architecture/PLUGIN-PLATFORM.md) is a design proposal for external code, not the trusted module runtime contract. Follow the organization-wide `yohn-jp/.github/.github/agent-governance/AGENTS.md` and applicable skills.
-
-For UI and interaction work, read [Design and UX contract](docs/design/UX-CONTRACT.md). It is the canonical presentation and experience contract, including acceptance scenarios; it preserves the existing stack, distinct Desktop/Mobile shells and shared authoring, durability and authorization boundaries. Mockups are not specifications. Keep execution prompts and verification results in PRs or test artifacts, not in maintained product documentation.
+# Codexia repository instructions
 
 ## Authority
 
-Explicit user instructions and the accepted implementation contract take precedence over repository architecture, source contracts and scoped rules. Do not expand scope into unrelated Arcadia features or publish private project data. Preserve the closed migration verification inputs under `evidence/migration`; do not reopen the ledger.
+Follow the latest explicit owner instructions, this repository's current PostgreSQL-only code and acceptance tests, and the organization-wide `yohn-jp/.github/.github/agent-governance/AGENTS.md`. The [reboot RFC](docs/architecture/CODEXIA-REBOOT-RFC.md) defines the PostgreSQL data model and long-term product intent. Its historical Git migration phases and inherited Git-only contracts must not override the explicit PostgreSQL-only decision.
 
-## Execution
+## Canonical implementation
 
-Use an isolated branch/worktree and submit a PR. Do not write directly to `main`, merge, publish or deploy without explicit authorization. Follow the organization's Inari suspension; use repository contracts and organization skills directly.
+- PostgreSQL is the **only manuscript authority**. The `@codexia/persistence-contracts` domain model and `@codexia/persistence-postgres` adapter own document/revision and Knowledge/Evidence persistence.
+- The authenticated `packages/api` HTTP admission is the sole server mutation path. Browser editors use `app/src/persistence/`, the CodeMirror editor adapter, and the IndexedDB recovery journal.
+- Do not reintroduce `CoreStore`, repository registration, Git snapshots, GitHub publication, Git-writer fallback, a second persistence authority, or the retired browser module composition simply to make a test pass.
+- Removal of Git-coupled Story, Search, Assistant, Publishing or other modules must not be reported as their feature migration. Each future feature needs PostgreSQL-native contracts and actual verification.
+- Do not mutate or reopen the closed migration evidence under `evidence/migration`; `white-sigil` is a later explicit, one-time user action, not an automatic import.
+- Preserve separate Desktop/Mobile presentation and shared Markdown/Revision/Evidence semantics. Maintain exact UTF-8 manuscript bytes and UTF-16 Anchor positions; never treat a browser Draft Journal as server-saved data.
+- Neither source-control Git nor a portable export substitutes for PostgreSQL database backup/restore.
 
-## Validation
+## Execution and validation
 
-Use `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm test`, `pnpm build` and `pnpm audit:core`. Follow [verification](docs/verification/README.md) for test-source/safety, browser, integration and OCI checks when their paths change. Verification never publishes or deploys; only the gated release workflow publishes. Do not synchronize organization templates or change production resources. Follow the [documentation rules](CONTRIBUTING.md#documentation).
+Use an isolated branch and PR. Do not alter `main`, merge, or deploy without authorization. Keep changes limited to the request; correct the implementation rather than suppressing checks. Verify frozen install, `pnpm typecheck`, `pnpm typecheck:tests`, `pnpm typecheck:safety`, `pnpm test`, `pnpm build`, `pnpm audit:core`, and relevant PostgreSQL/Chromium/WebKit/OCI checks. Browser E2E must use a disposable database. For any CI or live deployment claim, report the observed result; never infer success from an unrun test or a build alone.
+
+Read [the deployment runbook](docs/deployment/README.md) for the API/Worker/DB split, and [verification](docs/verification/README.md) for exact checks. Historical Git-based documentation may be used to understand old design but is **not** the PostgreSQL runtime contract.
