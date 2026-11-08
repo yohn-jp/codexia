@@ -74,7 +74,7 @@ test("ordinary API requests stop at document departure while keepalive cursor wr
     globalThis.fetch = async (input, init) => {
       requests.push({ input: String(input), keepalive: init?.keepalive === true });
       if (String(input) === "/api/version") {
-        return Response.json({ name: "scriptorium", version: "0.1.0", hosted: true, profile: "hosted" });
+        return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
       }
       if (String(input) === "/api/projects" && holdInitialProject) {
         initialProjectStarted();

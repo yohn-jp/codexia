@@ -1,4 +1,4 @@
-import type { RemoteObservation } from "@scriptorium/contracts";
+import type { RemoteObservation } from "@codexia/contracts";
 
 export interface ApplicationStatusProps {
   status: { message: string; kind: "normal" | "error" | "success" };

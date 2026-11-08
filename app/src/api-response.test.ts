@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BUILTIN_MODULE_IDS } from "@scriptorium/contracts";
+import { BUILTIN_MODULE_IDS } from "@codexia/contracts";
 import { responseContracts } from "./api-response.js";
 
 const snapshot = {

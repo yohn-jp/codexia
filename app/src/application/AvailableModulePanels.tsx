@@ -1,4 +1,4 @@
-import type { BrowserEditorDocument, ModuleStatus, SnapshotId, UiContribution } from "@scriptorium/contracts";
+import type { BrowserEditorDocument, ModuleStatus, SnapshotId, UiContribution } from "@codexia/contracts";
 import type { WorkspacePanel } from "./contracts";
 import { WorkspaceContribution } from "../contributions/ContributionHost";
 import type { BrowserJournal } from "../storage/journal";
