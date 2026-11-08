@@ -45,7 +45,7 @@ test("HTML gets a per-response style nonce and the API security policy", async (
   assert.deepEqual(fetched, ["/desktop/index.html"]);
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal(response.headers.get("etag"), null);
-  assert.match(response.headers.get("content-security-policy") ?? "", new RegExp(`'nonce-${nonce}'`, "u"));
+  assert.ok((response.headers.get("content-security-policy") ?? "").includes(`\'nonce-${nonce}\'`));
 });
 
 test("API requests never reach the static asset binding", async () => {
