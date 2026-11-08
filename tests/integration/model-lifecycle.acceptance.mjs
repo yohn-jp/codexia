@@ -15,14 +15,14 @@ import { ModuleRuntime } from "../../packages/module-runtime/dist/index.js";
 
 const execFile = promisify(execFileCallback);
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
-const defaultModelCache = "/tmp/scriptorium-model-runtime-edc033c/home/.arcadia/models";
-const modelCache = resolve(process.env.SCRIPTORIUM_P13_MODEL_CACHE ?? defaultModelCache);
+const defaultModelCache = "/tmp/codexia-model-runtime-edc033c/home/.arcadia/models";
+const modelCache = resolve(process.env.CODEXIA_P13_MODEL_CACHE ?? defaultModelCache);
 const semanticCapability = "semantic.embedding";
 const capabilityValueIds = new WeakMap();
 let nextCapabilityValueId = 1;
-const semanticSettingsPath = "meta/scriptorium/modules/semantic/settings.json";
-const semanticDismissalsPath = "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl";
-const nlpSettingsPath = "meta/scriptorium/modules/nlp/feature-settings.json";
+const semanticSettingsPath = "meta/codexia/modules/semantic/settings.json";
+const semanticDismissalsPath = "meta/codexia/modules/semantic/contradiction-dismissals.jsonl";
+const nlpSettingsPath = "meta/codexia/modules/nlp/feature-settings.json";
 const workerFiles = {
   story: join(root, "modules/story/dist/worker.js"),
   nlp: join(root, "modules/nlp/dist/worker.js"),
@@ -59,7 +59,7 @@ async function createSyntheticRepository(directory) {
   await writeYaml(seed, "plot/volumes/v1/volume.yaml", { id: "vol-one", name: "第一巻", order: 1 });
   await writeYaml(seed, "plot/volumes/v1/chapters/c1/chapter.yaml", { id: "ch-one", title: "第一章", volume: "vol-one", order: 1 });
 
-  const sceneCount = Number(process.env.SCRIPTORIUM_P13_SCENE_COUNT ?? 240);
+  const sceneCount = Number(process.env.CODEXIA_P13_SCENE_COUNT ?? 240);
   assert.ok(Number.isSafeInteger(sceneCount) && sceneCount >= 16 && sceneCount <= 1200, "scene count must be between 16 and 1200");
   for (let index = 0; index < sceneCount; index += 1) {
     const suffix = String(index).padStart(4, "0");
@@ -92,9 +92,9 @@ async function createSyntheticRepository(directory) {
 async function packageManifest(id) {
   const path = join(root, "modules", id, "package.json");
   const parsed = JSON.parse(await readFile(path, "utf8"));
-  assert.equal(parsed.name, `@scriptorium/module-${id}`);
-  assert.equal(parsed.scriptoriumModule?.id, id);
-  return parsed.scriptoriumModule;
+  assert.equal(parsed.name, `@codexia/module-${id}`);
+  assert.equal(parsed.codexiaModule?.id, id);
+  return parsed.codexiaModule;
 }
 
 function moduleLoader(id) {
@@ -290,7 +290,7 @@ async function requireModelArtifacts() {
 
 test("P13 actual module consumers share and release pinned CPU model workers", { timeout: 15 * 60_000 }, async () => {
   await requireModelArtifacts();
-  const rootDirectory = await mkdtemp(join(tmpdir(), "scriptorium-p13-lifecycle-"));
+  const rootDirectory = await mkdtemp(join(tmpdir(), "codexia-p13-lifecycle-"));
   const remote = await createSyntheticRepository(rootDirectory);
   const dataDirectory = join(rootDirectory, "core-data");
   const runtimeCache = join(rootDirectory, "runtime-cache");
