@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ChangeOperation, ProposalStatus, RepositoryIdentity } from "@scriptorium/contracts";
+import type { ChangeOperation, ProposalStatus, RepositoryIdentity } from "@codexia/contracts";
 import { api } from "../api";
 import { BrowserJournal, proposalOperationEntry, stableJson, type JournalEntry, type JournalProposal } from "../storage/journal";
 
