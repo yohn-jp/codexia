@@ -1,5 +1,5 @@
-import type { Token } from "@scriptorium/module-nlp";
-import { tokenBase } from "@scriptorium/module-nlp";
+import type { Token } from "@codexia/module-nlp";
+import { tokenBase } from "@codexia/module-nlp";
 import {
   isAdverb,
   isAuxiliaryVerb,
@@ -7,7 +7,7 @@ import {
   isParticle,
   isSymbol,
   isVerb,
-} from "@scriptorium/module-nlp";
+} from "@codexia/module-nlp";
 
 /** 検知した頻出フレーズ1件分。 */
 export interface FrequentPhrase {

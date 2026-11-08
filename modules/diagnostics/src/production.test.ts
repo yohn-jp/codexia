@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import type { ChangeOperation, ChangeProposal, ModuleContext, SnapshotId } from "@scriptorium/contracts";
-import { ModuleRuntime } from "@scriptorium/module-runtime";
-import { createModule as createNlpModule } from "@scriptorium/module-nlp";
+import type { ChangeOperation, ChangeProposal, ModuleContext, SnapshotId } from "@codexia/contracts";
+import { ModuleRuntime } from "@codexia/module-runtime";
+import { createModule as createNlpModule } from "@codexia/module-nlp";
 import { createModule as createDiagnosticsModule } from "./index.js";
 
 const snapshot: SnapshotId = {
@@ -14,7 +14,7 @@ const snapshot: SnapshotId = {
 
 function moduleContext(): ModuleContext {
   return {
-    cacheDirectory: "/tmp/scriptorium-p06-test-cache",
+    cacheDirectory: "/tmp/codexia-p06-test-cache",
     signal: new AbortController().signal,
     async acquireCapability() { throw new Error("module context capability is available only during runtime invocation"); },
     async createWorkerService() { throw new Error("module context worker service is available only during runtime invocation"); },
@@ -25,16 +25,16 @@ const initialFiles = new Map<string, { content: string; revision: string }>([
   ["bible/characters/hero/profile.yaml", { content: "id: char-hero\nname: 星野\naliases:\n  - 星の剣士\nnotes: 星の剣士は古い遺跡を調べる。\n", revision: "hero-r1" }],
   ["plot/volumes/v1/scenes/scene-1.yaml", { content: "id: scene-1\ntype: scene\nname: 遺跡\nintended_tone: suspense\ngoal: 鍵を見つけて扉を開ける\nconflict: 黒い霧が道を塞ぐ\nmanuscript: manuscript/v1/scene-1.md\n", revision: "scene-r1" }],
   ["manuscript/v1/scene-1.md", { content: "---\ntitle: 遺跡\n---\n「……」\n星野は古い遺跡へ走った。黒い霧が道を塞ぐ。\n", revision: "manuscript-r1" }],
-  ["meta/scriptorium/modules/nlp/synonyms.yaml", { content: "ownerNote: preserve\ngroups:\n  - words: [強い, 力強い]\n    context: positive\n", revision: "synonyms-r1" }],
-  ["meta/scriptorium/modules/nlp/candidate-ignore-list.yaml", { content: "ownerNote: preserve\nignored:\n  - 既存語\n", revision: "ignored-r1" }],
-  ["meta/scriptorium/modules/nlp/feature-settings.json", { content: "{\"externalEnabled\":{\"setting-qa\":false}}\n", revision: "features-r1" }],
+  ["meta/codexia/modules/nlp/synonyms.yaml", { content: "ownerNote: preserve\ngroups:\n  - words: [強い, 力強い]\n    context: positive\n", revision: "synonyms-r1" }],
+  ["meta/codexia/modules/nlp/candidate-ignore-list.yaml", { content: "ownerNote: preserve\nignored:\n  - 既存語\n", revision: "ignored-r1" }],
+  ["meta/codexia/modules/nlp/feature-settings.json", { content: "{\"externalEnabled\":{\"setting-qa\":false}}\n", revision: "features-r1" }],
 ]);
 
 async function createRuntime(files: Map<string, { content: string; revision: string }>, proposals: ChangeProposal[], capabilityProviders: Record<string, { create(): unknown; dispose?(value: unknown): void | Promise<void> }> = {}) {
   const stub = moduleContext();
   const nlpDefinition = await createNlpModule(stub);
   const diagnosticsDefinition = await createDiagnosticsModule(stub);
-  const packageManifest = (url: URL) => JSON.parse(readFileSync(url, "utf8")).scriptoriumModule;
+  const packageManifest = (url: URL) => JSON.parse(readFileSync(url, "utf8")).codexiaModule;
   const nlpManifest = packageManifest(new URL("../../nlp/package.json", import.meta.url));
   const diagnosticsManifest = packageManifest(new URL("../package.json", import.meta.url));
   assert.deepEqual(nlpDefinition.manifest, nlpManifest, "NLP factory metadata must match installed package metadata");
@@ -46,7 +46,7 @@ async function createRuntime(files: Map<string, { content: string; revision: str
     manifests,
     enabled: ["diagnostics"],
     capabilityProviders,
-    cacheDirectory: "/tmp/scriptorium-p06-test-cache",
+    cacheDirectory: "/tmp/codexia-p06-test-cache",
     loaders: {
       nlp: (context) => createNlpModule(context),
       diagnostics: (context) => createDiagnosticsModule(context),
@@ -120,7 +120,7 @@ test("production modules lazily run the real Lindera child and preserve snapshot
     const data = diagnostics.data as { analysis: { charCount: number; sentenceCount: number; sentimentArc: { points: unknown[] } }; plotSemanticWarnings: unknown[]; synonymSuggestions: unknown[]; model: string; modelVersion: string; diagnosticsEngine: string };
     assert.equal(data.model, "lindera-wasm-nodejs-ipadic");
     assert.equal(data.modelVersion, "2.0.0");
-    assert.equal(data.diagnosticsEngine, "scriptorium-diagnostics-cpu");
+    assert.equal(data.diagnosticsEngine, "codexia-diagnostics-cpu");
     assert.equal(data.analysis.charCount, diagnosticsText.length);
     assert.equal(data.analysis.sentenceCount, 2);
     assert.ok(data.analysis.sentimentArc.points.length > 0);
@@ -258,14 +258,14 @@ test("public actions read namespaced dictionaries/settings and lint changes rema
     const synonymUpdate = await runtime.invokeAction("nlp", "nlp.saveSynonymGroup", { words: ["剛健"], mergeGroupIndex: 0 }, host);
     assert.equal(synonymUpdate.ok, true, JSON.stringify(synonymUpdate));
     assert.equal(proposals.length, 1);
-    assert.equal(proposals[0]?.operations[0]?.writes[0]?.path, "meta/scriptorium/modules/nlp/synonyms.yaml");
+    assert.equal(proposals[0]?.operations[0]?.writes[0]?.path, "meta/codexia/modules/nlp/synonyms.yaml");
     assert.match(proposals[0]?.operations[0]?.writes[0]?.content ?? "", /ownerNote: preserve/u);
     assert.match(proposals[0]?.operations[0]?.writes[0]?.content ?? "", /剛健/u, "a single word can be added to an existing source group");
 
     const ignoreUpdate = await runtime.invokeAction("nlp", "nlp.ignoreCandidates", { terms: ["新候補"] }, host);
     assert.equal(ignoreUpdate.ok, true, JSON.stringify(ignoreUpdate));
     assert.equal(proposals.length, 2);
-    assert.equal(proposals[1]?.operations[0]?.writes[0]?.path, "meta/scriptorium/modules/nlp/candidate-ignore-list.yaml");
+    assert.equal(proposals[1]?.operations[0]?.writes[0]?.path, "meta/codexia/modules/nlp/candidate-ignore-list.yaml");
     assert.match(proposals[1]?.operations[0]?.writes[0]?.content ?? "", /ownerNote: preserve/u);
     assert.match(proposals[1]?.operations[0]?.writes[0]?.content ?? "", /既存語/u);
     assert.match(proposals[1]?.operations[0]?.writes[0]?.content ?? "", /新候補/u);
@@ -295,7 +295,7 @@ test("public actions read namespaced dictionaries/settings and lint changes rema
     const consent = await runtime.invokeAction("nlp", "nlp.updateExternalConsent", { externalEnabled: { "setting-qa": true } }, host);
     assert.equal(consent.ok, true, JSON.stringify(consent));
     assert.equal(proposals.length, 4);
-    assert.equal(proposals[3].operations[0].writes[0].path, "meta/scriptorium/modules/nlp/feature-settings.json");
+    assert.equal(proposals[3].operations[0].writes[0].path, "meta/codexia/modules/nlp/feature-settings.json");
     const consentBeforeApproval = await runtime.invokeAction("nlp", "nlp.features", {}, host);
     assert.equal(consentBeforeApproval.ok, true, JSON.stringify(consentBeforeApproval));
     if (consentBeforeApproval.ok) {

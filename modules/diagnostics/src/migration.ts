@@ -1,11 +1,11 @@
-import { planExactFileImport } from "@scriptorium/migration";
-import type { MigrationContribution, MigrationProducer } from "@scriptorium/migration";
-import { stableMigrationId } from "@scriptorium/migration";
+import { planExactFileImport } from "@codexia/migration";
+import type { MigrationContribution, MigrationProducer } from "@codexia/migration";
+import { stableMigrationId } from "@codexia/migration";
 
 const DIAGNOSTICS_FILES = [
-  { source: "meta/lint-rules.yaml", target: "meta/scriptorium/modules/diagnostics/lint-rules.yaml", label: "declarative lint rules" },
-  { source: "meta/tone-lexicon.yaml", target: "meta/scriptorium/modules/diagnostics/tone-lexicon.yaml", label: "tone lexicon" },
-  { source: "meta/plot-lexicon.yaml", target: "meta/scriptorium/modules/diagnostics/plot-lexicon.yaml", label: "plot lexicon" },
+  { source: "meta/lint-rules.yaml", target: "meta/codexia/modules/diagnostics/lint-rules.yaml", label: "declarative lint rules" },
+  { source: "meta/tone-lexicon.yaml", target: "meta/codexia/modules/diagnostics/tone-lexicon.yaml", label: "tone lexicon" },
+  { source: "meta/plot-lexicon.yaml", target: "meta/codexia/modules/diagnostics/plot-lexicon.yaml", label: "plot lexicon" },
 ] as const;
 
 function emptyContribution(): MigrationContribution {
@@ -27,7 +27,7 @@ export function createDiagnosticsMigrationProducer(): MigrationProducer {
       for (const file of DIAGNOSTICS_FILES) {
         const bytes = await context.source.readProjectFile(file.source);
         if (bytes) {
-          const legacyTarget = `meta/scriptorium/modules/diagnostics/legacy/files/${file.source}`;
+          const legacyTarget = `meta/codexia/modules/diagnostics/legacy/files/${file.source}`;
           const planned = await planExactFileImport({
             context,
             producerId: "diagnostics-config-v1",
@@ -49,7 +49,7 @@ export function createDiagnosticsMigrationProducer(): MigrationProducer {
         }
 
         if (!enabled) continue;
-        const legacyPath = `meta/scriptorium/modules/diagnostics/legacy/files/${file.source}`;
+        const legacyPath = `meta/codexia/modules/diagnostics/legacy/files/${file.source}`;
         const legacy = await context.target.read(legacyPath);
         if (!legacy) continue;
         const existing = await context.target.read(file.target);
