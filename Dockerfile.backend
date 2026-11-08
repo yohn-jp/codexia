@@ -1,54 +1,22 @@
 # syntax=docker/dockerfile:1.7
 ARG NODE_IMAGE=docker.io/library/node:24-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5
-ARG PNPM_VERSION=12.10.1
-ARG PROFILE=core
-
-FROM ${NODE_IMAGE} AS pnpm-base
-ARG PNPM_VERSION
-ENV CI=true
-RUN corepack enable \
- && corepack prepare pnpm@${PNPM_VERSION} --activate
-WORKDIR /opt/codexia
-
-FROM pnpm-base AS source
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
-    pnpm fetch --store-dir=/pnpm/store
-COPY . ./
-RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
-    pnpm install --offline --frozen-lockfile --store-dir=/pnpm/store --package-import-method=copy
-
-FROM source AS build
-ARG PROFILE
-ENV CODEXIA_PROFILE=${PROFILE}
-RUN node scripts/profile-package.mjs --profile "${PROFILE}" --server-only --out /runtime
-
-FROM ${NODE_IMAGE} AS backend
+FROM ${NODE_IMAGE} AS build
+RUN corepack enable && corepack prepare pnpm@12.10.1 --activate
+WORKDIR /src
+COPY . .
+RUN pnpm install --frozen-lockfile
+RUN pnpm build:backend
+RUN pnpm --filter @codexia/api deploy --legacy --prod /runtime
+FROM ${NODE_IMAGE}
 ARG CODEXIA_PRODUCER_REVISION
-ENV NODE_ENV=production \
-    HOST=0.0.0.0 \
-    PORT=3000 \
-    CODEXIA_PROFILE=core \
-    CODEXIA_MODULE_PROFILE_PATH=/app/generated/server.mjs \
-    CODEXIA_DATA_DIR=/data \
-    CODEXIA_USAGE_DIR=/history \
-    HOME=/data \
-    TMPDIR=/tmp \
-    CODEXIA_PRODUCER_REVISION=${CODEXIA_PRODUCER_REVISION}
+ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000 HOME=/tmp CODEXIA_PRODUCER_REVISION=${CODEXIA_PRODUCER_REVISION}
 LABEL org.opencontainers.image.revision=${CODEXIA_PRODUCER_REVISION}
-RUN test "${#CODEXIA_PRODUCER_REVISION}" -eq 40 \
- && printf '%s' "${CODEXIA_PRODUCER_REVISION}" | grep -Eq '^[a-f0-9]{40}$'
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates git tini \
- && rm -rf /var/lib/apt/lists/* \
- && mkdir -p /data /history \
- && chmod 0700 /history \
- && chown node:node /data /history
+RUN test "${#CODEXIA_PRODUCER_REVISION}" -eq 40 && printf '%s' "${CODEXIA_PRODUCER_REVISION}" | grep -Eq '^[a-f0-9]{40}$'
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tini && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY --chown=node:node --from=build /runtime/ ./
-COPY --chown=node:node --chmod=0755 deploy/backend/start.sh /usr/local/bin/codexia-backend-start
+COPY --from=build --chown=node:node /runtime/ ./
+COPY --chmod=0755 deploy/backend/start.sh /usr/local/bin/codexia-backend-start
 USER node
-VOLUME ["/data", "/history"]
 EXPOSE 3000
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/usr/local/bin/codexia-backend-start"]

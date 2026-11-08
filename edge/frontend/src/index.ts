@@ -3,13 +3,10 @@ export interface Env {
 }
 
 export type Destination =
-  | { kind: "index"; assetPath: string; reader: boolean }
+  | { kind: "index"; assetPath: string }
   | { kind: "asset" }
   | { kind: "not-found" };
 
-const PUBLIC_READER_MODULES = new Set([
-  "story", "diagnostics", "nlp", "semantic", "speaker", "assistant", "publishing", "mcp",
-]);
 const CONTENT_ASSET = /\.(?:js|css|svg|png|jpe?g|webp|avif|gif|woff2?|ttf|otf|ico)$/u;
 
 function safePath(pathname: string, rawPath: string): boolean {
@@ -34,13 +31,6 @@ function desktopOrMobileEntry(pathname: string): string | undefined {
   return knownEntry ? `/${ui}/index.html` : undefined;
 }
 
-function publicReaderPath(pathname: string): boolean {
-  const parts = pathname.split("/");
-  return parts.length === 5 && parts[0] === "" && parts[1] === "r" &&
-    PUBLIC_READER_MODULES.has(parts[2] ?? "") && /^\d{1,32}$/u.test(parts[3] ?? "") &&
-    /^[A-Za-z0-9._~-]{1,128}$/u.test(parts[4] ?? "");
-}
-
 export function classify(request: Request): Destination {
   const url = new URL(request.url);
   const rawPath = request.url.match(/^https:\/\/[^/?#]+([^?#]*)/u)?.[1] || "/";
@@ -51,11 +41,10 @@ export function classify(request: Request): Destination {
 
   const pathname = url.pathname;
   if (pathname === "/" || pathname === "/index.html") {
-    return { kind: "index", assetPath: "/index.html", reader: false };
+    return { kind: "index", assetPath: "/index.html" };
   }
   const uiEntry = desktopOrMobileEntry(pathname);
-  if (uiEntry) return { kind: "index", assetPath: uiEntry, reader: false };
-  if (publicReaderPath(pathname)) return { kind: "index", assetPath: "/index.html", reader: true };
+  if (uiEntry) return { kind: "index", assetPath: uiEntry };
 
   if (/^\/(?:assets|desktop\/assets|mobile\/assets)\/[A-Za-z0-9._-]{1,180}$/u.test(pathname) && CONTENT_ASSET.test(pathname)) {
     return { kind: "asset" };
@@ -83,7 +72,7 @@ function styleNonce(): string {
   return btoa(binary);
 }
 
-async function serveHtml(request: Request, env: Env, assetPath: string, reader: boolean): Promise<Response> {
+async function serveHtml(request: Request, env: Env, assetPath: string): Promise<Response> {
   const assetUrl = new URL(request.url);
   assetUrl.pathname = assetPath;
   const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
@@ -92,7 +81,7 @@ async function serveHtml(request: Request, env: Env, assetPath: string, reader: 
   const nonce = styleNonce();
   const headers = new Headers(assetResponse.headers);
   headers.set("X-Content-Type-Options", "nosniff");
-  headers.set("Referrer-Policy", reader ? "no-referrer" : "same-origin");
+  headers.set("Referrer-Policy", "same-origin");
   headers.set("X-Frame-Options", "DENY");
   headers.set("Content-Security-Policy", `default-src 'self'; style-src 'self' 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`);
   headers.set("Cache-Control", "no-store");
@@ -101,7 +90,6 @@ async function serveHtml(request: Request, env: Env, assetPath: string, reader: 
   headers.delete("Content-Encoding");
   headers.delete("CDN-Cache-Control");
   headers.delete("Cloudflare-CDN-Cache-Control");
-  if (reader) headers.set("X-Robots-Tag", "noindex, nofollow");
   const html = (await assetResponse.text()).replaceAll("__CODEXIA_STYLE_NONCE__", nonce);
   return new Response(request.method === "HEAD" ? null : html, {
     status: assetResponse.status,
@@ -114,7 +102,7 @@ export async function dispatch(request: Request, env: Env): Promise<Response> {
   const destination = classify(request);
   if (destination.kind === "not-found") return notFound(request.method);
   if (destination.kind === "asset") return env.ASSETS.fetch(request);
-  return serveHtml(request, env, destination.assetPath, destination.reader);
+  return serveHtml(request, env, destination.assetPath);
 }
 
 export default {

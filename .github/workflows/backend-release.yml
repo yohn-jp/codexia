@@ -6,11 +6,6 @@ on:
       - Dockerfile.backend
       - deploy/backend/**
       - packages/**
-      - modules/**
-      - profiles/**
-      - scripts/profile-build.mjs
-      - scripts/profile-package.mjs
-      - scripts/runtime-package-closure.mjs
       - scripts/verify-backend-image.sh
       - scripts/verify-release-source.mjs
       - scripts/release-policy.mjs
@@ -25,11 +20,6 @@ on:
       - Dockerfile.backend
       - deploy/backend/**
       - packages/**
-      - modules/**
-      - profiles/**
-      - scripts/profile-build.mjs
-      - scripts/profile-package.mjs
-      - scripts/runtime-package-closure.mjs
       - scripts/verify-backend-image.sh
       - scripts/verify-release-source.mjs
       - scripts/release-policy.mjs
@@ -48,6 +38,17 @@ jobs:
     name: Build and test backend OCI image
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: codexia_test
+          POSTGRES_USER: codexia
+          POSTGRES_PASSWORD: codexia
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U codexia -d codexia_test" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      CODEXIA_TEST_DATABASE_URL: postgres://codexia:codexia@127.0.0.1:5432/codexia_test
     permissions:
       contents: read
     steps:
@@ -66,7 +67,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - uses: docker/setup-buildx-action@v3
       - name: Build API-only image
-        run: docker buildx build --platform linux/amd64 --load --build-arg "CODEXIA_PRODUCER_REVISION=$GITHUB_SHA" --tag codexia-backend-ci --file Dockerfile.backend .
+        run: docker buildx build --platform linux/amd64 --load --build-arg "CODEXIA_PRODUCER_REVISION=${{ github.event.pull_request.head.sha || github.sha }}" --tag codexia-backend-ci --file Dockerfile.backend .
       - name: Verify API image before publication
         run: bash scripts/verify-backend-image.sh docker codexia-backend-ci
       - name: Save the exact tested image for publication

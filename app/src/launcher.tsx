@@ -1,5 +1,4 @@
 import { createRoot } from "react-dom/client";
-import { App } from "./App";
 import { applyThemeMode, loadThemeMode } from "./theme";
 import "../styles.css";
 
@@ -8,17 +7,14 @@ if (!root) throw new Error("Missing React root");
 const theme = loadThemeMode();
 applyThemeMode(theme);
 
-// The public reader remains a distinct read-only presentation. No Git authoring
-// workspace or automatic fallback is reachable through the launcher.
-const isReader = window.location.pathname.startsWith("/r/");
 let remembered: string | null = null;
 try { remembered = localStorage.getItem("scriptorium:ui-mode"); } catch { /* The picker works without local storage. */ }
-if (!isReader && (remembered === "desktop" || remembered === "mobile")) {
+if (remembered === "desktop" || remembered === "mobile") {
   const search = new URLSearchParams(window.location.search);
   search.delete("store");
   window.location.replace(`/${remembered}${search.size ? `?${search}` : ""}${window.location.hash}`);
 } else {
-  createRoot(root).render(isReader ? <App initialTheme={theme} /> : <InterfaceChoice />);
+  createRoot(root).render(<InterfaceChoice />);
 }
 
 function InterfaceChoice() {

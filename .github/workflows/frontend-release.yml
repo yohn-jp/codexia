@@ -6,13 +6,8 @@ on:
       - app/**
       - app/public/**
       - edge/frontend/**
-      - profiles/**
-      - modules/**
-      - packages/contracts/**
       - deploy/cloudflare/ui-routes.json
       - scripts/build-frontend.mjs
-      - scripts/profile-build.mjs
-      - scripts/profile-package.mjs
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
@@ -23,13 +18,8 @@ on:
       - app/**
       - app/public/**
       - edge/frontend/**
-      - profiles/**
-      - modules/**
-      - packages/contracts/**
       - deploy/cloudflare/ui-routes.json
       - scripts/build-frontend.mjs
-      - scripts/profile-build.mjs
-      - scripts/profile-package.mjs
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
@@ -80,10 +70,11 @@ jobs:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 70
     environment: codexia-production
     permissions:
       contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -92,6 +83,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24.22.0'
+      - name: Require complete exact-source main verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_COMMIT_RELEASE: '1'
+        run: node scripts/verify-release-source.mjs
       - name: Install pinned Wrangler
         run: npm ci --prefix edge/frontend
       - uses: actions/download-artifact@v4

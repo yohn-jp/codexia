@@ -9,8 +9,6 @@ on:
       - app/public/**
       - scripts/build-frontend.mjs
       - scripts/verify-deployment-config.mjs
-      - scripts/profile-package.mjs
-      - scripts/profile-package.test.mjs
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
@@ -25,8 +23,6 @@ on:
       - app/public/**
       - scripts/build-frontend.mjs
       - scripts/verify-deployment-config.mjs
-      - scripts/profile-package.mjs
-      - scripts/profile-package.test.mjs
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml

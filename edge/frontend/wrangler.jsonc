@@ -13,7 +13,6 @@
       "/index.html",
       "/desktop*",
       "/mobile*",
-      "/r/*",
       "!/assets/*",
       "!/desktop/assets/*",
       "!/mobile/assets/*"

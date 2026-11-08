@@ -5,16 +5,14 @@ import { classify, dispatch, type Env } from "../src/index.ts";
 const request = (path: string, method = "GET") => new Request(`https://codexia.example.invalid${path}`, { method });
 
 test("only known Codexia UI shells and supported assets are served", () => {
-  assert.deepEqual(classify(request("/")), { kind: "index", assetPath: "/index.html", reader: false });
+  assert.deepEqual(classify(request("/")), { kind: "index", assetPath: "/index.html" });
   assert.deepEqual(classify(request("/desktop/projects/work/scenes/scene-1")), {
-    kind: "index", assetPath: "/desktop/index.html", reader: false,
+    kind: "index", assetPath: "/desktop/index.html",
   });
   assert.deepEqual(classify(request("/mobile/settings/")), {
-    kind: "index", assetPath: "/mobile/index.html", reader: false,
+    kind: "index", assetPath: "/mobile/index.html",
   });
-  assert.deepEqual(classify(request("/r/story/123/reader")), {
-    kind: "index", assetPath: "/index.html", reader: true,
-  });
+  assert.deepEqual(classify(request("/r/story/123/reader")), { kind: "not-found" });
   assert.deepEqual(classify(request("/desktop/assets/main-a1b2c3d4.js")), { kind: "asset" });
   assert.deepEqual(classify(request("/assets/missing.js")), { kind: "asset" });
 });

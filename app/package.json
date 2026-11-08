@@ -15,13 +15,9 @@
     "@ionic/core": "9.0.8",
     "@ionic/react": "9.0.8",
     "@ionic/react-router": "9.0.8",
-    "@radix-ui/react-separator": "1.2.0",
-    "@radix-ui/react-tabs": "1.2.1",
-    "@codexia/contracts": "workspace:*",
     "@codexia/persistence-contracts": "workspace:*",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-resizable-panels": "2.1.9",
     "react-router-dom": "6.30.6"
   },
   "devDependencies": {

@@ -4,8 +4,7 @@
     "/index.html*",
     "/assets/*",
     "/desktop*",
-    "/mobile*",
-    "/r/*"
+    "/mobile*"
   ],
   "apiPrefix": "/api/"
 }

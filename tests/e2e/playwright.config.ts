@@ -1,85 +1,15 @@
 import { defineConfig } from "@playwright/test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-
-const externalRepository = Boolean(process.env.CODEXIA_E2E_REPOSITORY_URL);
-const selectedTestFile = process.env.CODEXIA_E2E_TEST_FILE;
-const coverageFile = process.env.CODEXIA_E2E_COVERAGE_FILE;
-const configuredBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL;
-const baseURL = configuredBaseURL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
-const externalServer = Boolean(configuredBaseURL);
-const isTemporaryStateDir = !process.env.CODEXIA_E2E_STATE_DIR && !externalServer;
-const stateDir = process.env.CODEXIA_E2E_STATE_DIR
-  ?? (externalServer ? tmpdir() : mkdtempSync(join(tmpdir(), "codexia-e2e-")));
-const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN
-  ?? (configuredBaseURL ? process.env.CODEXIA_AUTH_TOKEN : undefined)
-  ?? "codexia-e2e-token-for-local-testing-only";
-
-process.env.CODEXIA_E2E_STATE_DIR = stateDir;
-process.env.CODEXIA_E2E_REPOSITORY_URL ??= resolve(stateDir, "origin.git");
-if (!configuredBaseURL && !externalRepository) {
-  process.env.CODEXIA_E2E_MODULAR_REPOSITORY_URL ??= resolve(stateDir, "modular-origin.git");
-}
-process.env.CODEXIA_E2E_REPOSITORY_BRANCH ??= "main";
-process.env.CODEXIA_E2E_AUTH_TOKEN = authToken;
-process.env.CODEXIA_E2E_PORT ??= "4173";
-process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY ??= externalRepository ? "1" : "";
-process.env.CODEXIA_E2E_TEMP_STATE_DIR = isTemporaryStateDir ? "1" : "";
-if (externalServer && !externalRepository) {
-  throw new Error("Set CODEXIA_E2E_REPOSITORY_URL to a disposable HTTPS GitHub fixture when targeting an external app");
-}
-if (selectedTestFile && !/^[a-z0-9-]+\.acceptance\.spec\.ts$/u.test(selectedTestFile)) {
-  throw new Error("CODEXIA_E2E_TEST_FILE must name one acceptance spec");
-}
-
+import { resolve } from "node:path";
+const baseURL = `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
+process.env.CODEXIA_E2E_AUTH_TOKEN ??= "codexia-e2e-token-for-local-testing-only";
+if (!process.env.CODEXIA_E2E_DATABASE_URL) throw new Error("A disposable CODEXIA_E2E_DATABASE_URL is required");
 export default defineConfig({
-  testDir: ".",
-  testMatch: selectedTestFile ? `**/${selectedTestFile}` : "**/*.spec.ts",
-  testIgnore: "**/core64-lifecycle.host.acceptance.spec.ts",
-  fullyParallel: false,
-  workers: 1,
-  timeout: 90_000,
-  expect: { timeout: 8_000 },
-  reporter: coverageFile
-    ? [
-        ["list"],
-        [resolve("scripts/browser-coverage-reporter.mjs"), { outputFile: coverageFile }],
-      ]
-    : "list",
-  use: {
-    baseURL,
-    headless: true,
-    trace: "retain-on-failure",
-  },
+  testDir: ".", testMatch: "persistence-database.acceptance.spec.ts", workers: 1, fullyParallel: false,
+  timeout: 90_000, expect: { timeout: 8_000 },
+  use: { baseURL, headless: true, trace: "retain-on-failure" },
   projects: [
-    {
-      name: "chromium",
-      use: {
-        browserName: "chromium",
-        launchOptions: process.env.CODEXIA_E2E_CHROMIUM
-          ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM }
-          : undefined,
-      },
-    },
-    {
-      name: "webkit",
-      testMatch: "**/ui-v1.acceptance.spec.ts",
-      use: {
-        browserName: "webkit",
-        launchOptions: process.env.CODEXIA_E2E_WEBKIT
-          ? { executablePath: process.env.CODEXIA_E2E_WEBKIT }
-          : undefined,
-      },
-    },
+    { name: "chromium", use: { browserName: "chromium", ...(process.env.CODEXIA_E2E_CHROMIUM ? { launchOptions: { executablePath: process.env.CODEXIA_E2E_CHROMIUM } } : {}) } },
+    { name: "webkit", use: { browserName: "webkit" } },
   ],
-  webServer: externalServer
-    ? undefined
-    : {
-        command: "node --import tsx/esm tests/e2e/test-server.ts",
-        cwd: resolve("."),
-        url: `${baseURL}/api/health`,
-        reuseExistingServer: false,
-        timeout: 120_000,
-      },
+  webServer: { command: "node --import tsx tests/e2e/test-server.ts", cwd: resolve("."), url: `${baseURL}/health/ready`, reuseExistingServer: false, timeout: 120_000 },
 });

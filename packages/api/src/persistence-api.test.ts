@@ -4,7 +4,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { test } from "node:test";
-import type { CoreStore } from "@codexia/core";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import { createServer } from "./server.js";
 
@@ -19,12 +18,9 @@ test("authenticated PostgreSQL API saves, replays, follows Evidence, conflicts a
   await migratePostgresDatabase(connectionString!);
   const persistence = createPostgresPersistence(connectionString!);
   const temporaryRoot = await mkdtemp(resolve(tmpdir(), "codexia-postgres-api-"));
-  const store = { async listProjects() { return []; } } as unknown as CoreStore;
   const server = createServer({
-    store,
     authToken: ACCESS_TOKEN,
     staticDir: temporaryRoot,
-    usageDirectory: temporaryRoot,
     persistence,
   });
   await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
