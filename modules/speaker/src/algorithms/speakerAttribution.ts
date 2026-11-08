@@ -1,7 +1,7 @@
 import type { MentionDictionary } from "./mentionIndex.js";
 import { findMentions } from "./mentionIndex.js";
-import type { Token, Tokenizer } from "@scriptorium/module-nlp";
-import { isParticle, isVerb } from "@scriptorium/module-nlp";
+import type { Token, Tokenizer } from "@codexia/module-nlp";
+import { isParticle, isVerb } from "@codexia/module-nlp";
 import { isDialogue, splitIntoSentences } from "./textAnalysis.js";
 import { hashDialogueText } from "./textHash.js";
 import type { Entity } from "./types.js";

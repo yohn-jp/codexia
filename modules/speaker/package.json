@@ -1,8 +1,8 @@
 {
-  "name": "@scriptorium/module-speaker",
+  "name": "@codexia/module-speaker",
   "private": true,
   "version": "0.1.0",
-  "scriptoriumDisplay": {
+  "codexiaDisplay": {
     "name": "Speaker analysis",
     "description": "Attribute dialogue to speakers, review corrections, and support statistical training."
   },
@@ -33,16 +33,16 @@
     "test": "pnpm run build && node --import tsx --test src/*.test.ts"
   },
   "dependencies": {
-    "@scriptorium/contracts": "workspace:*",
-    "@scriptorium/module-runtime": "workspace:*",
-    "@scriptorium/module-story": "workspace:*",
-    "@scriptorium/module-nlp": "workspace:*",
+    "@codexia/contracts": "workspace:*",
+    "@codexia/module-runtime": "workspace:*",
+    "@codexia/module-story": "workspace:*",
+    "@codexia/module-nlp": "workspace:*",
     "yaml": "^2.8.1",
-    "@scriptorium/module-diagnostics": "workspace:*",
+    "@codexia/module-diagnostics": "workspace:*",
     "zod": "3.25.76",
-    "@scriptorium/migration": "workspace:*"
+    "@codexia/migration": "workspace:*"
   },
-  "scriptoriumModule": {
+  "codexiaModule": {
     "id": "speaker",
     "version": "0.1.0",
     "contractVersion": 1,
@@ -59,7 +59,7 @@
     "browserEntry": "./dist/browser.js",
     "workerEntry": "./dist/worker.js",
     "statePaths": [
-      "meta/scriptorium/modules/speaker",
+      "meta/codexia/modules/speaker",
       "plot/volumes"
     ],
     "locality": "local"

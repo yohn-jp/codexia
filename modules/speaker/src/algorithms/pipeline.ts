@@ -1,5 +1,5 @@
-import type { Token, Tokenizer } from "@scriptorium/module-nlp";
-import type { StylometricProfile } from "@scriptorium/module-diagnostics";
+import type { Token, Tokenizer } from "@codexia/module-nlp";
+import type { StylometricProfile } from "@codexia/module-diagnostics";
 import { createClusterTrailCollector, pushGroupIdChangeEvents } from "./clusterAssignmentTrail.js";
 import { buildMentionDictionary } from "./mentionIndex.js";
 import {

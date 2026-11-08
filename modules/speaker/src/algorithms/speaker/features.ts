@@ -1,5 +1,5 @@
-import type { Tokenizer } from "@scriptorium/module-nlp";
-import { isNoun, isPronoun } from "@scriptorium/module-nlp";
+import type { Tokenizer } from "@codexia/module-nlp";
+import { isNoun, isPronoun } from "@codexia/module-nlp";
 import type { SpeakerAttribution } from "../speakerAttribution.js";
 import { computeEndingCategory, removeDialogueBrackets } from "../styleFingerprint.js";
 import type { Entity } from "../types.js";
