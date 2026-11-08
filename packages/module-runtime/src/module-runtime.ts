@@ -1,5 +1,5 @@
 import path from "node:path";
-import { snapshotKey, type ActionDescriptor, type ActionResult, type CapabilityDefinition, type ChangeOperation, type ChangeProposal, type HttpContribution, type JobOutcome, type JobRequest, type MachineError, type ModuleAction, type ModuleActionContext, type ModuleAvailability, type ModuleContext, type ModuleDefinition, type ModuleId, type ModuleManifest, type ModuleStatus, type SnapshotId, type WorkerService } from "@scriptorium/contracts";
+import { snapshotKey, type ActionDescriptor, type ActionResult, type CapabilityDefinition, type ChangeOperation, type ChangeProposal, type HttpContribution, type JobOutcome, type JobRequest, type MachineError, type ModuleAction, type ModuleActionContext, type ModuleAvailability, type ModuleContext, type ModuleDefinition, type ModuleId, type ModuleManifest, type ModuleStatus, type SnapshotId, type WorkerService } from "@codexia/contracts";
 import { CapabilityProvider, SharedCapabilityPool } from "./capability-pool.js";
 import { resolveModulePlan, type ResolvedModulePlan } from "./module-plan.js";
 import { isModuleId, MODULE_IDS, ModuleRuntimeError } from "./runtime-error.js";

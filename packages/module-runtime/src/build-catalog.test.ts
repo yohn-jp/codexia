@@ -68,7 +68,7 @@ const trustedModules: TrustedBuildModule[] = [
 
 function catalogFor(modules: readonly TrustedBuildModule[]): ProducerBuildCatalog {
   return {
-    contractVersion: "scriptorium-build/v1",
+    contractVersion: "codexia-build/v1",
     producerRevision: "1".repeat(40),
     runtimeBaseDigest: digest("1"),
     buildKitDigest: digest("2"),

@@ -1,4 +1,4 @@
-import type { ModuleId, ModuleManifest } from "@scriptorium/contracts";
+import type { ModuleId, ModuleManifest } from "@codexia/contracts";
 import { resolveModulePlan } from "./module-plan.js";
 import { isModuleId, ModuleRuntimeError } from "./runtime-error.js";
 
@@ -10,7 +10,7 @@ type ResourceAmounts = {
 
 /** The wire fields are the strict `BuildCatalogSchema` in Praetorium's contracts. */
 export type ProducerBuildCatalog = {
-  contractVersion: "scriptorium-build/v1";
+  contractVersion: "codexia-build/v1";
   producerRevision: string;
   runtimeBaseDigest: string;
   buildKitDigest: string;
@@ -119,7 +119,7 @@ function addResources(target: ResourceAmounts, value: ResourceAmounts): void {
 /**
  * Resolves an immutable producer catalog using the exact installed module
  * manifests that were embedded by the producer build. The output is sorted
- * for the `scriptorium-build/v1` canonical input and carries dependency order
+ * for the `codexia-build/v1` canonical input and carries dependency order
  * separately for execution.
  */
 export function resolveBuildCatalogSelection(
@@ -127,7 +127,7 @@ export function resolveBuildCatalogSelection(
   requestedModuleIds: readonly string[],
   trustedModules: readonly TrustedBuildModule[],
 ): ResolvedBuildCatalogSelection {
-  if (!isRecord(catalogValue) || catalogValue.contractVersion !== "scriptorium-build/v1") {
+  if (!isRecord(catalogValue) || catalogValue.contractVersion !== "codexia-build/v1") {
     fail("Build catalog contract version is unsupported");
   }
   if (!Array.isArray(requestedModuleIds) || requestedModuleIds.length > 256 ||
