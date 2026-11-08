@@ -19,7 +19,7 @@ test("published performance archive retains its complete immutable manifest", as
   const evidenceRoot = resolve(root, "evidence/performance/wave0");
   const manifest = JSON.parse(await readFile(resolve(evidenceRoot, "INDEX.json"), "utf8"));
   assert.equal(manifest.schemaVersion, 2);
-  assert.match(manifest.storage.url, /^https:\/\/github\.com\/yohn-jp\/codexia\/releases\/download\//u);
+  assert.match(manifest.storage.url, /^https:\/\/github\.com\/yohn-jp\/scriptorium\/releases\/download\//u);
   assert.match(manifest.storage.sha256, /^[a-f0-9]{64}$/u);
   assert.ok(Array.isArray(manifest.artifacts) && manifest.artifacts.length > 0);
   assert.equal(new Set(manifest.artifacts.map(x => x.file)).size, manifest.artifacts.length);

@@ -632,6 +632,9 @@ function AuthorWorkspace({
           currentJournal.getProposals(repository, scope),
         ]);
       } catch (error) {
+        // A pagehide invalidates in-flight reads. The foreground/pageshow path
+        // re-issues proposal observation; departure is not a proposal failure.
+        if (isDocumentDepartureAbort(error)) return;
         if (expectedNavigation === undefined || isCurrentProject(expectedNavigation, projectId, repository)) {
           setStatus({ message: `外部提案を確認できませんでした。${messageOf(error)}`, kind: "error" });
         }
