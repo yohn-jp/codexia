@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, type PersistenceStatus } from "../api";
 import { ApiError } from "../api-error";
 import { PersistenceWorkspace } from "./PersistenceWorkspace";
 
-type EntryState = "checking" | "signed-out" | "database" | "legacy" | "failed";
+type EntryState = "checking" | "signed-out" | "database" | "failed";
 
-export function PersistenceEntry({ mode, fallback }: { mode: "desktop" | "mobile"; fallback: ReactNode }) {
+export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
   const [state, setState] = useState<EntryState>("checking");
   const [authorScope, setAuthorScope] = useState("owner");
   const [token, setToken] = useState("");
@@ -18,8 +18,14 @@ export function PersistenceEntry({ mode, fallback }: { mode: "desktop" | "mobile
     try {
       const session = await api.session();
       const persistence: PersistenceStatus = await api.persistenceStatus();
+      if (!persistence.available || persistence.provider !== "postgres") {
+        throw new Error("PostgreSQL保存基盤が利用できません。Gitワークスペースへの切替は提供していません。");
+      }
+      if (session.permissions && !session.permissions.some((permission) => permission === "write" || permission === "maintain" || permission === "admin")) {
+        throw new Error("このアカウントには原稿編集権限がありません。");
+      }
       setAuthorScope(session.authorScope || "owner");
-      setState(persistence.available && persistence.provider === "postgres" && session.permissions === undefined ? "database" : "legacy");
+      setState("database");
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         setState("signed-out");
@@ -52,8 +58,7 @@ export function PersistenceEntry({ mode, fallback }: { mode: "desktop" | "mobile
   if (state === "database") return <PersistenceWorkspace mode={mode} authorScope={authorScope} onSignOut={() => {
     void api.logout().finally(() => setState("signed-out"));
   }} />;
-  if (state === "legacy") return fallback;
-  if (state === "checking") return <main className={`pg-entry pg-${mode}`}><p role="status">Codexiaの保存先を確認しています。</p></main>;
+  if (state === "checking") return <main className={`pg-entry pg-${mode}`}><p role="status">PostgreSQL保存基盤を確認しています。</p></main>;
   if (state === "failed") return <main className={`pg-entry pg-${mode}`}>
     <section className="pg-login" aria-labelledby="pg-entry-title">
       <p className="eyebrow">Codexia</p>

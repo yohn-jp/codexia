@@ -606,14 +606,13 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
     setProjectId(nextProjectId);
   };
 
-  const switchPath = `/${mode === "desktop" ? "mobile" : "desktop"}?store=postgres`;
+  const switchPath = `/${mode === "desktop" ? "mobile" : "desktop"}`;
 
   return <div className={`pg-workspace pg-${mode}`}>
     <header className="pg-header">
       <div><p className="eyebrow">Codexia · PostgreSQL</p><h1>Database workspace</h1></div>
       <nav aria-label="Workspace controls">
         <a href={switchPath}>{mode === "desktop" ? "Mobileへ" : "Desktopへ"}</a>
-        <a href={`/${mode}`}>Git作品を開く</a>
         <button type="button" onClick={onSignOut}>ログアウト</button>
       </nav>
     </header>

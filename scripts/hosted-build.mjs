@@ -660,7 +660,7 @@ async function writeComposition(input, catalog, selection, runtimeDirectory, tru
   const browserBundleDigest = sha256(await readFile(browserEntryPath));
   const journalSource = await readFile(path.join(root, 'app/src/storage/journal.ts'), 'utf8');
   const indexedDbVersion = Number(journalSource.match(/const DATABASE_VERSION = ([1-9][0-9]*);/u)?.[1]);
-  if (indexedDbVersion !== 3) throw new Error('Browser recovery persistence version differs from the hosted compatibility declaration');
+  if (indexedDbVersion !== 4) throw new Error('Browser recovery persistence version differs from the hosted compatibility declaration');
   const runtimeMetadata = {
     contractVersion: 'scriptorium-platform/v1',
     producerRevision: input.producerRevision,
