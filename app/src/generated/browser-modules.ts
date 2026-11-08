@@ -1,4 +1,4 @@
-import type { BrowserModuleDefinition, ModuleId } from "@scriptorium/contracts";
+import type { BrowserModuleDefinition, ModuleId } from "@codexia/contracts";
 
 /** Replaced by the selected production profile when optional browser modules are included. */
 export type ModuleBrowserLoaders = Partial<Record<ModuleId, () => Promise<BrowserModuleDefinition>>>;

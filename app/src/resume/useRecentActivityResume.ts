@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { RecentActivityDeviceType, RecentActivityInput, RecentActivityItem } from "@scriptorium/contracts";
+import type { RecentActivityDeviceType, RecentActivityInput, RecentActivityItem } from "@codexia/contracts";
 import { api } from "../api";
 import {
   loadWritingResume,

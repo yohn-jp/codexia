@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ChangeOperation, RepositoryIdentity } from "@scriptorium/contracts";
+import type { ChangeOperation, RepositoryIdentity } from "@codexia/contracts";
 import { documentKey, journalEntryKey, publicationReceiptKey, repositoryKey } from "./storage/journal";
 
 const repository: RepositoryIdentity = {
