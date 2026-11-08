@@ -5,7 +5,7 @@ import {
   type StoryGraphInput,
   type StorySnapshotResult,
 } from "./types.js";
-import type { SnapshotId } from "@scriptorium/contracts";
+import type { SnapshotId } from "@codexia/contracts";
 import type { SceneStateEvent } from "./worldState.js";
 import type { ThreadLifecycleSnapshot } from "./threadLifecycle.js";
 

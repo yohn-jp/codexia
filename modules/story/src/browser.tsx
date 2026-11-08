@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import type { ActionResult, BrowserModuleContext, BrowserModuleDefinition, SnapshotId } from "@scriptorium/contracts";
+import type { ActionResult, BrowserModuleContext, BrowserModuleDefinition, SnapshotId } from "@codexia/contracts";
 import { normalizeNotes, type NotesBlock, type NotesSection, type StructuredNotes } from "./notes.js";
 
 type DataResult = Extract<ActionResult, { ok: true }>;

@@ -13,7 +13,7 @@ import {
   type SnapshotId,
   type ValueSchema,
   snapshotKey,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 import {
   analyzeThreadLifecycles,
   buildLocationMap,
@@ -55,7 +55,7 @@ import {
   type ProposedWrite,
 } from "./operations.js";
 
-const STORY_STATE_ROOT = "meta/scriptorium/modules/story";
+const STORY_STATE_ROOT = "meta/codexia/modules/story";
 const SERIES_SETTINGS_PATH = `${STORY_STATE_ROOT}/v1/series.json`;
 const STATE_PROPOSALS_PATH = `${STORY_STATE_ROOT}/state-proposals.jsonl`;
 const ZUKAN_SUGGESTIONS_PATH = `${STORY_STATE_ROOT}/zukan-suggestions.jsonl`;

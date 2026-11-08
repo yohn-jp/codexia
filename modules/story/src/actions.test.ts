@@ -12,16 +12,16 @@ import type {
   RepositoryIdentity,
   SnapshotId,
   SnapshotReader,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 import type { StoryVolumeTree } from "./domain/graph.js";
 
 import { createStoryActions } from "./actions.js";
 
 interface ZukanSuggestion { id: string; entityRevision?: string }
 
-const SERIES_PATH = "meta/scriptorium/modules/story/v1/series.json";
-const STATE_PROPOSALS_PATH = "meta/scriptorium/modules/story/state-proposals.jsonl";
-const ZUKAN_SUGGESTIONS_PATH = "meta/scriptorium/modules/story/zukan-suggestions.jsonl";
+const SERIES_PATH = "meta/codexia/modules/story/v1/series.json";
+const STATE_PROPOSALS_PATH = "meta/codexia/modules/story/state-proposals.jsonl";
+const ZUKAN_SUGGESTIONS_PATH = "meta/codexia/modules/story/zukan-suggestions.jsonl";
 
 function revision(content: string): string {
   return createHash("sha256").update(content).digest("hex");
