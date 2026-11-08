@@ -1,4 +1,4 @@
-import type { ModuleContext, ModuleDefinition, ModuleManifest } from "@scriptorium/contracts";
+import type { ModuleContext, ModuleDefinition, ModuleManifest } from "@codexia/contracts";
 import { closeMcpSessions, createMcpHttpContribution, type McpSession } from "./http.js";
 
 export const mcpManifest: ModuleManifest = {

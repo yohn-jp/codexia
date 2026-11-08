@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import {
   type ActionResult,
-} from "@scriptorium/contracts";
+} from "@codexia/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { McpApiError, type McpActionClient } from "./api-client.js";
@@ -139,7 +139,7 @@ function signalAwareClient(client: McpActionClient): McpActionClient {
 
 function scopedClient(client: McpActionClient, requestedProjectId?: string): McpActionClient {
   const projectId = requestedProjectId || client.projectId;
-  if (!projectId) throw new ToolFailure("INVALID_PROJECT", "Pass project_id or set SCRIPTORIUM_PROJECT_ID");
+  if (!projectId) throw new ToolFailure("INVALID_PROJECT", "Pass project_id or set CODEXIA_PROJECT_ID");
   if (client.forProject) return client.forProject(projectId);
   if (client.projectId && client.projectId !== projectId) {
     throw new ToolFailure("PROJECT_SCOPE_MISMATCH", "The requested project does not match this MCP session");
