@@ -5,6 +5,80 @@
   text-underline-offset: 0.18em;
 }
 
+.cm-text-anchor {
+  border-radius: 0.12em;
+  padding-inline: 0.02em;
+}
+
+.cm-text-anchor-current {
+  border-bottom: 1px solid color-mix(in srgb, currentColor 55%, transparent);
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+
+.cm-text-anchor-current[role="link"] {
+  cursor: pointer;
+}
+
+.cm-text-anchor-needs_review {
+  border-bottom: 1px dashed #9a6700;
+  background: color-mix(in srgb, #e7a520 15%, transparent);
+  text-decoration: underline wavy #9a6700;
+  text-underline-offset: 0.2em;
+}
+
+.text-anchor-panel {
+  margin-block: 0.75rem;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 0.45rem;
+  padding: 0.45rem 0.7rem;
+  color: inherit;
+  background: color-mix(in srgb, currentColor 3%, transparent);
+}
+
+.text-anchor-panel > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.text-anchor-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.text-anchor-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 0.65rem;
+  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  padding-top: 0.5rem;
+}
+
+.text-anchor-status {
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+  background: color-mix(in srgb, currentColor 9%, transparent);
+  font-size: 0.8em;
+}
+
+.text-anchor-status.is-needs_review,
+.text-anchor-status.is-revision_conflict,
+.text-anchor-status.is-orphaned {
+  color: color-mix(in srgb, currentColor 76%, #9a6700);
+  background: color-mix(in srgb, #e7a520 16%, transparent);
+}
+
+.text-anchor-reference {
+  font-weight: 600;
+}
+
+.text-anchor-list q {
+  color: color-mix(in srgb, currentColor 75%, transparent);
+}
+
 .term-navigation {
   display: inline;
   min-height: 0;
