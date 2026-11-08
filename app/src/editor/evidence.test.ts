@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertEditorEvidenceSnapshot, emptyDocumentEvidence, initializeDocumentEvidence, markRevisionConflict, parseMarkdownBlocks, trackTextChanges, type TextAnchor } from "./evidence";
+import { assertEditorEvidenceSnapshot, composeTextChanges, emptyDocumentEvidence, initializeDocumentEvidence, markRevisionConflict, parseMarkdownBlocks, trackTextChanges, type TextAnchor, type TextChange } from "./evidence";
 
 function makeIds() {
   let sequence = 0;
@@ -20,6 +20,33 @@ function anchorFor(text: string, quote: string, blockId: string, status: TextAnc
     revisionId: "revision-1",
     status,
   };
+}
+
+test("sequential CodeMirror changes compose against the saved UTF-16 revision", () => {
+  const source = "🙂猫は東京。";
+  const first = [{ from: 2, to: 2, insert: "追" }];
+  const afterFirst = applyChanges(source, first);
+  const second = [{ from: 5, to: 7, insert: "大阪" }];
+  const third = [{ from: 0, to: 0, insert: "章" }, { from: 7, to: 8, insert: "!" }];
+  const afterSecond = applyChanges(afterFirst, second);
+  const afterThird = applyChanges(afterSecond, third);
+  const composed = composeTextChanges(source, first, second);
+  const allComposed = composeTextChanges(source, composed, third);
+
+  assert.equal(applyChanges(source, composed), afterSecond);
+  assert.equal(applyChanges(source, allComposed), afterThird);
+  assert.deepEqual(composed, [
+    { from: 2, to: 2, insert: "追" },
+    { from: 4, to: 6, insert: "大阪" },
+  ]);
+});
+
+function applyChanges(source: string, changes: readonly TextChange[]): string {
+  let result = source;
+  for (const change of [...changes].reverse()) {
+    result = `${result.slice(0, change.from)}${change.insert}${result.slice(change.to)}`;
+  }
+  return result;
 }
 
 test("insertion before an anchor shifts UTF-16 offsets and keeps its block identity", () => {
@@ -172,6 +199,26 @@ test("revision-pinned snapshot failures stay visible as stale entries without be
     revisionId: "revision-1", blocks: base.blocks, anchors: [collapsedOrphan],
   }, baseText.length);
   assert.equal(validated.anchors[0]!.from, validated.anchors[0]!.to);
+});
+
+test("Text Anchors without Knowledge links and proposed candidates stay distinct", () => {
+  const text = "東京へ行く。";
+  const base = emptyDocumentEvidence(text, "revision-1", makeIds());
+  const unlinked: TextAnchor = {
+    id: "anchor-body-mention",
+    blockId: base.blocks[0]!.id,
+    from: 0,
+    to: 2,
+    quote: "東京",
+    revisionId: "revision-1",
+    status: "proposed",
+    candidates: [{ id: "node-1", label: "東京（未承認）" }],
+  };
+
+  const snapshot = assertEditorEvidenceSnapshot({ revisionId: "revision-1", blocks: base.blocks, anchors: [unlinked] }, text.length);
+  assert.equal(snapshot.anchors[0]!.target, undefined);
+  assert.equal(snapshot.anchors[0]!.candidates?.[0]?.id, "node-1");
+  assert.equal(snapshot.anchors[0]!.status, "proposed");
 });
 
 test("Markdown source remains byte-for-byte text and offsets use UTF-16 around surrogate pairs", () => {

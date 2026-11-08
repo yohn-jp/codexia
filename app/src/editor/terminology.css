@@ -26,6 +26,11 @@
   text-underline-offset: 0.2em;
 }
 
+.cm-text-anchor-proposed {
+  border-bottom: 1px dotted color-mix(in srgb, currentColor 55%, transparent);
+  background: color-mix(in srgb, currentColor 4%, transparent);
+}
+
 .text-anchor-panel {
   margin-block: 0.75rem;
   border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
@@ -69,6 +74,17 @@
 .text-anchor-status.is-orphaned {
   color: color-mix(in srgb, currentColor 76%, #9a6700);
   background: color-mix(in srgb, #e7a520 16%, transparent);
+}
+
+.text-anchor-status.is-proposed,
+.text-anchor-candidate,
+.text-anchor-assertion {
+  color: color-mix(in srgb, currentColor 78%, #805500);
+}
+
+.text-anchor-candidate,
+.text-anchor-assertion {
+  font-size: 0.9em;
 }
 
 .text-anchor-reference {

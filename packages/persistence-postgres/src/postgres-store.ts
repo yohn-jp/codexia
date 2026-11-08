@@ -308,6 +308,37 @@ function applyTextChanges(markdown: string, changes: readonly TextChange[]): str
   return result.join("");
 }
 
+function mapTextOffset(offset: number, changes: readonly TextChange[], association: -1 | 1): number {
+  let delta = 0;
+  for (const change of changes) {
+    const insertedLength = change.insert.length;
+    const removedLength = change.toUtf16 - change.fromUtf16;
+    if (offset < change.fromUtf16) return offset + delta;
+    if (offset > change.toUtf16) {
+      delta += insertedLength - removedLength;
+      continue;
+    }
+    if (change.fromUtf16 === change.toUtf16) {
+      if (association < 0) return change.fromUtf16 + delta;
+      delta += insertedLength;
+      continue;
+    }
+    if (offset === change.fromUtf16 && association < 0) return change.fromUtf16 + delta;
+    if (offset === change.toUtf16 && association > 0) {
+      delta += insertedLength - removedLength;
+      continue;
+    }
+    return change.fromUtf16 + delta + (association > 0 ? insertedLength : 0);
+  }
+  return offset + delta;
+}
+
+function textAnchorWasTouched(anchor: Pick<EvidenceAnchor, "fromUtf16" | "toUtf16">, changes: readonly TextChange[]): boolean {
+  return changes.some((change) => change.fromUtf16 === change.toUtf16
+    ? change.fromUtf16 > anchor.fromUtf16 && change.fromUtf16 < anchor.toUtf16
+    : change.fromUtf16 < anchor.toUtf16 && change.toUtf16 > anchor.fromUtf16);
+}
+
 function encodeCursor(value: unknown): string {
   return asString(value);
 }
@@ -438,15 +469,22 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows[0] ? mapProject(result.rows[0]) : undefined;
   }
 
+  async listProjects(limit = 100): Promise<readonly Project[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError("Project page size must be between 1 and 200");
+    const result = await this.query("SELECT * FROM project ORDER BY updated_at DESC, id LIMIT $1", [limit]);
+    return result.rows.map(mapProject);
+  }
+
   async getDocument(projectId: ProjectId, documentId: DocumentId): Promise<Document | undefined> {
     const result = await this.query("SELECT * FROM document WHERE project_id = $1 AND id = $2", [projectId, documentId]);
     return result.rows[0] ? mapDocument(result.rows[0]) : undefined;
   }
 
-  async listDocuments(projectId: ProjectId, parentId?: DocumentId | null): Promise<readonly Document[]> {
+  async listDocuments(projectId: ProjectId, parentId?: DocumentId | null, limit = 500): Promise<readonly Document[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Document page size must be between 1 and 1000");
     const result = parentId === undefined
-      ? await this.query("SELECT * FROM document WHERE project_id = $1 ORDER BY parent_id NULLS FIRST, order_key, id", [projectId])
-      : await this.query("SELECT * FROM document WHERE project_id = $1 AND parent_id IS NOT DISTINCT FROM $2 ORDER BY order_key, id", [projectId, parentId]);
+      ? await this.query("SELECT * FROM document WHERE project_id = $1 ORDER BY parent_id NULLS FIRST, order_key, id LIMIT $2", [projectId, limit])
+      : await this.query("SELECT * FROM document WHERE project_id = $1 AND parent_id IS NOT DISTINCT FROM $2 ORDER BY order_key, id LIMIT $3", [projectId, parentId, limit]);
     return result.rows.map(mapDocument);
   }
 
@@ -504,6 +542,17 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows[0] ? mapEvidenceAnchor(result.rows[0]) : undefined;
   }
 
+  async listDocumentEvidence(projectId: ProjectId, documentId: DocumentId, revisionId?: RevisionId, limit = 200): Promise<readonly EvidenceAnchor[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw validationError("Evidence page size must be between 1 and 500");
+    const result = await this.query(
+      `SELECT * FROM text_anchor
+       WHERE project_id = $1 AND document_id = $2 AND ($3::uuid IS NULL OR current_revision_id = $3)
+       ORDER BY from_utf16, id LIMIT $4`,
+      [projectId, documentId, revisionId ?? null, limit],
+    );
+    return result.rows.map(mapEvidenceAnchor);
+  }
+
   async listEvidenceHistory(projectId: ProjectId, evidenceId: EvidenceId): Promise<readonly EvidenceAnchorHistory[]> {
     const result = await this.query(
       `SELECT evidence_id, revision_id, from_utf16, to_utf16, status, recorded_at
@@ -528,6 +577,16 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows.map(mapMentionLink);
   }
 
+  async listNodeMentions(projectId: ProjectId, nodeId: KnowledgeNodeId, limit = 200): Promise<readonly MentionLink[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw validationError("Mention page size must be between 1 and 500");
+    const result = await this.query(
+      `SELECT * FROM mention_link WHERE project_id = $1 AND node_id = $2
+       ORDER BY updated_at DESC, evidence_id LIMIT $3`,
+      [projectId, nodeId, limit],
+    );
+    return result.rows.map(mapMentionLink);
+  }
+
   async getAssertion(projectId: ProjectId, assertionId: AssertionId): Promise<Assertion | undefined> {
     const result = await this.query("SELECT * FROM assertion WHERE project_id = $1 AND id = $2", [projectId, assertionId]);
     return result.rows[0] ? mapAssertion(result.rows[0]) : undefined;
@@ -537,6 +596,15 @@ class PostgresTransaction implements PersistenceTransaction {
     const result = await this.query(
       "SELECT * FROM assertion_evidence WHERE project_id = $1 AND assertion_id = $2 ORDER BY evidence_id",
       [projectId, assertionId],
+    );
+    return result.rows.map(mapAssertionEvidence);
+  }
+
+  async listEvidenceAssertions(projectId: ProjectId, evidenceId: EvidenceId, limit = 100): Promise<readonly AssertionEvidence[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError("Assertion evidence page size must be between 1 and 200");
+    const result = await this.query(
+      "SELECT * FROM assertion_evidence WHERE project_id = $1 AND evidence_id = $2 ORDER BY assertion_id, evidence_role LIMIT $3",
+      [projectId, evidenceId, limit],
     );
     return result.rows.map(mapAssertionEvidence);
   }
@@ -707,6 +775,58 @@ class PostgresTransaction implements PersistenceTransaction {
     return mapDocument(result.rows[0]);
   }
 
+  private async advanceEvidenceAnchors(
+    projectId: ProjectId,
+    documentId: DocumentId,
+    baseRevisionId: RevisionId,
+    nextRevisionId: RevisionId,
+    nextMarkdown: string,
+    changes: readonly TextChange[],
+  ): Promise<void> {
+    const result = await this.query(
+      `SELECT * FROM text_anchor
+       WHERE project_id = $1 AND document_id = $2 AND current_revision_id = $3
+       ORDER BY id FOR UPDATE`,
+      [projectId, documentId, baseRevisionId],
+    );
+    for (const row of result.rows) {
+      const anchor = mapEvidenceAnchor(row);
+      const wasOrphaned = anchor.status === "orphaned";
+      const touched = !wasOrphaned && textAnchorWasTouched(anchor, changes);
+      let fromUtf16 = mapTextOffset(anchor.fromUtf16, changes, touched ? -1 : 1);
+      let toUtf16 = mapTextOffset(anchor.toUtf16, changes, touched ? 1 : -1);
+      fromUtf16 = Math.min(nextMarkdown.length, Math.max(0, fromUtf16));
+      toUtf16 = Math.min(nextMarkdown.length, Math.max(fromUtf16, toUtf16));
+      const status: EvidenceAnchor["status"] = wasOrphaned || fromUtf16 === toUtf16
+        ? "orphaned"
+        : touched
+          ? "needs_review"
+          : anchor.status;
+      const quoteSha256 = fromUtf16 < toUtf16
+        ? bodyDigest(nextMarkdown.slice(fromUtf16, toUtf16))
+        : anchor.quoteSha256;
+      const updated = await this.query(
+        `UPDATE text_anchor SET current_revision_id = $4, from_utf16 = $5, to_utf16 = $6,
+           quote_sha256 = $7, status = $8, version = version + 1, updated_at = clock_timestamp()
+         WHERE project_id = $1 AND id = $2 AND version = $3 RETURNING version`,
+        [projectId, anchor.id, anchor.version, nextRevisionId, fromUtf16, toUtf16, quoteSha256, status],
+      );
+      const version = asNumber(updated.rows[0]!.version);
+      await this.query(
+        `INSERT INTO anchor_history(project_id, evidence_id, document_id, version, revision_id, from_utf16, to_utf16, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [projectId, anchor.id, documentId, version, nextRevisionId, fromUtf16, toUtf16, status],
+      );
+      if (touched || status === "orphaned") {
+        await this.query(
+          `UPDATE mention_link SET status = 'proposed', updated_at = clock_timestamp()
+           WHERE project_id = $1 AND evidence_id = $2 AND status = 'confirmed'`,
+          [projectId, anchor.id],
+        );
+      }
+    }
+  }
+
   async saveDocument(command: SaveDocumentCommand): Promise<DocumentWriteResult> {
     this.ensureWritable();
     assertNonEmpty(command.idempotencyKey, "Idempotency key");
@@ -746,6 +866,7 @@ class PostgresTransaction implements PersistenceTransaction {
       authorId: command.authorId,
     });
     const document = await this.updateDocumentHead(command.projectId, command.documentId, base.id, revision.id);
+    await this.advanceEvidenceAnchors(command.projectId, command.documentId, base.id, revision.id, markdown, command.changes);
     await this.recordDocumentOperation({
       projectId: command.projectId,
       documentId: command.documentId,
@@ -791,6 +912,14 @@ class PostgresTransaction implements PersistenceTransaction {
       authorId: command.authorId,
     });
     const document = await this.updateDocumentHead(command.projectId, command.documentId, command.baseRevisionId, revision.id);
+    const base = await this.getRevision(command.projectId, command.documentId, command.baseRevisionId);
+    if (!base) throw notFound("base document revision", command.baseRevisionId);
+    const restoreChanges: TextChange[] = base.markdown === source.markdown ? [] : [{
+      fromUtf16: 0,
+      toUtf16: base.markdown.length,
+      insert: source.markdown,
+    }];
+    await this.advanceEvidenceAnchors(command.projectId, command.documentId, base.id, revision.id, source.markdown, restoreChanges);
     await this.recordDocumentOperation({
       projectId: command.projectId,
       documentId: command.documentId,

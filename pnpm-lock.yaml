@@ -241,6 +241,9 @@ importers:
       '@codexia/contracts':
         specifier: workspace:*
         version: link:../packages/contracts
+      '@codexia/persistence-contracts':
+        specifier: workspace:*
+        version: link:../packages/persistence-contracts
       '@ionic/core':
         specifier: 9.0.8
         version: 9.0.8
@@ -515,6 +518,12 @@ importers:
       '@codexia/module-runtime':
         specifier: workspace:*
         version: link:../module-runtime
+      '@codexia/persistence-contracts':
+        specifier: workspace:*
+        version: link:../persistence-contracts
+      '@codexia/persistence-postgres':
+        specifier: workspace:*
+        version: link:../persistence-postgres
       fastify:
         specifier: ^5.3.2
         version: 5.12.7

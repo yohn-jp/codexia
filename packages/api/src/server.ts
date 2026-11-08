@@ -10,10 +10,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type RecentActivityInput, type RepositoryIdentity, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ReorderHierarchyInput } from "@codexia/core";
+import type { Persistence } from "@codexia/persistence-contracts";
+import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import { ModuleRuntime, type ActionHostContext, type DomainJobActionExecutor, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 import { HistoricalModelUsageStore } from "./historical-store.js";
 import { JobHistoryError, JobHistoryStore, type JobEvent } from "./job-history-store.js";
 import { RecentActivityStore } from "./recent-activity-store.js";
+import { handlePersistenceRoute } from "./persistence-routes.js";
 import {
   createHostedAuthorizationPolicy,
   createHostedGitCredentialProvider,
@@ -86,6 +89,10 @@ interface Session {
 
 export interface ApiServerOptions {
   store: CoreStore;
+  /** Optional PostgreSQL canonical-state adapter; legacy CoreStore remains available during migration. */
+  persistence?: Persistence;
+  /** Set only by `start()` when it created the PostgreSQL pool itself. */
+  closePersistenceOnShutdown?: boolean;
   authToken?: string;
   /** Defaults to `<cwd>/app/dist`. */
   staticDir?: string;
@@ -719,7 +726,11 @@ export function createServer(options: ApiServerOptions): Server {
     else sendError(reply.raw, error);
   });
   app.addHook("onClose", async () => {
-    if (!closed) await shutdownRuntime();
+    try {
+      if (!closed) await shutdownRuntime();
+    } finally {
+      if (options.closePersistenceOnShutdown) await options.persistence?.close();
+    }
   });
 
   const fail = (response: ServerResponse, status: number, code: string, message: string): void => {
@@ -1699,6 +1710,22 @@ export function createServer(options: ApiServerOptions): Server {
     }
 
     const signal = abortSignalFor(request, response);
+    const persistenceResponse = await handlePersistenceRoute({
+      persistence: options.persistence,
+      ...(hosted ? { assignedProjectId: hosted.projectId } : {}),
+      method,
+      url: request.url ?? routePath,
+      body: parsedBody,
+      requestHeaders: request.headers,
+      requireAuthor: async () => {
+        const principal = await requireWritePermission();
+        return principal?.userId ?? "owner";
+      },
+    });
+    if (persistenceResponse) {
+      sendJson(response, persistenceResponse.status, persistenceResponse.body);
+      return;
+    }
     if (routePath === "/api/nlp/features" && method === "GET") {
       const modules = await enabledStatuses();
       const nlpModules = modules.filter((module) => ["nlp", "semantic", "speaker", "assistant"].includes(module.id));
@@ -2516,6 +2543,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     }
     return startServer({
       store,
+      ...postgresPersistenceOptions(),
       hosted: { assignment, projectId: project.id, authorization, producerRevision },
       trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
       runtimeOptions,
@@ -2533,12 +2561,20 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   });
   return startServer({
     store,
+    ...postgresPersistenceOptions(),
     authToken,
     trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
     runtimeOptions,
     usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
     profile,
   });
+}
+
+function postgresPersistenceOptions(): Pick<ApiServerOptions, "persistence" | "closePersistenceOnShutdown"> {
+  const connectionString = readCodexiaEnvironment("DATABASE_URL");
+  return connectionString
+    ? { persistence: createPostgresPersistence(connectionString), closePersistenceOnShutdown: true }
+    : {};
 }
 
 async function loadProfileRuntimeOptions(

@@ -1,5 +1,5 @@
 /** UI-facing text evidence types. The persistence adapter translates these to the published API contract. */
-export type TextAnchorStatus = "current" | "needs_review" | "orphaned" | "revision_conflict";
+export type TextAnchorStatus = "proposed" | "current" | "needs_review" | "orphaned" | "revision_conflict";
 
 export interface MarkdownBlockIdentity {
   id: string;
@@ -15,13 +15,24 @@ export interface KnowledgeReference {
   targetPath?: string;
 }
 
+export interface AssertionReference {
+  id: string;
+  label: string;
+  role: "supports" | "contradicts" | "quotes" | "context";
+  status: "proposed" | "confirmed" | "rejected" | "retired";
+}
+
 export interface TextAnchor {
   id: string;
   blockId: string;
   from: number;
   to: number;
   quote: string;
-  target: KnowledgeReference;
+  /** Author-confirmed Knowledge target. A body mention may have no target. */
+  target?: KnowledgeReference;
+  /** Unconfirmed link candidates; these are never treated as canon references. */
+  candidates?: KnowledgeReference[];
+  assertions?: AssertionReference[];
   revisionId: string;
   status: TextAnchorStatus;
 }
@@ -32,6 +43,93 @@ export interface TextChange {
   /** Exclusive UTF-16 offset in the document before this ChangeSet. */
   to: number;
   insert: string;
+}
+
+interface TextPiece {
+  kind: "source" | "inserted";
+  from: number;
+  to: number;
+  text?: string;
+}
+
+/** Compose sequential CodeMirror changes into UTF-16 ranges against one saved revision. */
+export function composeTextChanges(
+  sourceText: string,
+  previous: readonly TextChange[],
+  next: readonly TextChange[],
+): TextChange[] {
+  const pieces: TextPiece[] = sourceText.length > 0 ? [{ kind: "source", from: 0, to: sourceText.length }] : [];
+  applyChangesToPieces(pieces, previous, sourceText.length);
+  const currentLength = pieces.reduce((total, piece) => total + pieceLength(piece), 0);
+  applyChangesToPieces(pieces, next, currentLength);
+
+  const composed: TextChange[] = [];
+  let sourceOffset = 0;
+  let inserted = "";
+  for (const piece of pieces) {
+    if (piece.kind === "inserted") {
+      inserted += piece.text ?? "";
+      continue;
+    }
+    if (piece.from < sourceOffset) throw new RangeError("Text changes reordered source text.");
+    if (piece.from > sourceOffset || inserted.length > 0) {
+      composed.push({ from: sourceOffset, to: piece.from, insert: inserted });
+      inserted = "";
+    }
+    sourceOffset = piece.to;
+  }
+  if (sourceOffset < sourceText.length || inserted.length > 0) {
+    composed.push({ from: sourceOffset, to: sourceText.length, insert: inserted });
+  }
+  return composed;
+}
+
+function pieceLength(piece: TextPiece): number {
+  return piece.kind === "source" ? piece.to - piece.from : (piece.text ?? "").length;
+}
+
+function splitPiecesAt(pieces: TextPiece[], offset: number): number {
+  let cursor = 0;
+  for (let index = 0; index < pieces.length; index += 1) {
+    const piece = pieces[index]!;
+    const length = pieceLength(piece);
+    if (offset === cursor) return index;
+    if (offset === cursor + length) return index + 1;
+    if (offset > cursor && offset < cursor + length) {
+      const leftLength = offset - cursor;
+      const left: TextPiece = piece.kind === "source"
+        ? { kind: "source", from: piece.from, to: piece.from + leftLength }
+        : { kind: "inserted", from: 0, to: 0, text: piece.text!.slice(0, leftLength) };
+      const right: TextPiece = piece.kind === "source"
+        ? { kind: "source", from: piece.from + leftLength, to: piece.to }
+        : { kind: "inserted", from: 0, to: 0, text: piece.text!.slice(leftLength) };
+      pieces.splice(index, 1, left, right);
+      return index + 1;
+    }
+    cursor += length;
+  }
+  if (offset === cursor) return pieces.length;
+  throw new RangeError("Text change offset is outside its source revision.");
+}
+
+function applyChangesToPieces(pieces: TextPiece[], changes: readonly TextChange[], sourceLength: number): void {
+  const ordered = [...changes].sort((left, right) => left.from - right.from || left.to - right.to);
+  let previousEnd = 0;
+  for (const change of ordered) {
+    if (!Number.isInteger(change.from) || !Number.isInteger(change.to) || change.from < previousEnd
+      || change.to < change.from || change.to > sourceLength || typeof change.insert !== "string") {
+      throw new RangeError("Text changes must be ordered, non-overlapping UTF-16 ranges.");
+    }
+    previousEnd = change.to;
+  }
+  for (const change of [...ordered].reverse()) {
+    const startIndex = splitPiecesAt(pieces, change.from);
+    const endIndex = splitPiecesAt(pieces, change.to);
+    const replacement = change.insert.length > 0
+      ? [{ kind: "inserted", from: 0, to: 0, text: change.insert } satisfies TextPiece]
+      : [];
+    pieces.splice(startIndex, endIndex - startIndex, ...replacement);
+  }
 }
 
 export interface DocumentEvidenceState {
@@ -47,26 +145,42 @@ export interface EditorEvidenceIdentity {
   projectId: string;
   documentId: string;
   revisionId: string;
+  /** Exact source text lets adapters reject a stale or unmapped revision before decorating. */
+  markdown?: string;
 }
 
 export interface EditorEvidenceSnapshot {
   revisionId: string;
+  markdown?: string;
   blocks: MarkdownBlockIdentity[];
   anchors: TextAnchor[];
 }
 
-/**
- * Host adapter for revision-pinned evidence reads. Mutations remain with the document save
- * transaction so the UI cannot create an independent persistence/write contract.
- */
+export interface EditorPersistenceSave {
+  baseMarkdown: string;
+  markdown: string;
+  changes: TextChange[];
+  idempotencyKey: string;
+  clientId: string;
+}
+
+export interface EditorPersistenceSaveResult {
+  revisionId: string;
+  markdown: string;
+}
+
+/** Host adapter for a revision-pinned PostgreSQL document binding used by the existing Editor. */
 export interface EditorEvidenceAdapter {
   read(identity: EditorEvidenceIdentity, signal: AbortSignal): Promise<EditorEvidenceSnapshot>;
+  /** Optional writer for a PG-backed Editor binding; invoked only after the browser Draft Journal stores the text. */
+  save?(identity: EditorEvidenceIdentity, request: EditorPersistenceSave, signal: AbortSignal): Promise<EditorPersistenceSaveResult>;
 }
 
 /** Validates host adapter data before offsets become CodeMirror decorations. */
 export function assertEditorEvidenceSnapshot(value: unknown, documentLength: number): EditorEvidenceSnapshot {
   const record = (input: unknown): input is Record<string, unknown> => typeof input === "object" && input !== null && !Array.isArray(input);
   if (!record(value) || typeof value.revisionId !== "string" || value.revisionId.length === 0
+    || (value.markdown !== undefined && typeof value.markdown !== "string")
     || !Array.isArray(value.blocks) || !Array.isArray(value.anchors)) throw new TypeError("Text Anchor adapter returned an invalid snapshot.");
   const blockKinds = new Set(["frontmatter", "code", "heading", "list", "quote", "paragraph"]);
   const blocks = value.blocks.map((item) => {
@@ -77,7 +191,7 @@ export function assertEditorEvidenceSnapshot(value: unknown, documentLength: num
     return item as unknown as MarkdownBlockIdentity;
   });
   if (!validBlocksOfLength(blocks, documentLength)) throw new TypeError("Text Anchor adapter returned duplicate or unordered block identities.");
-  const statuses = new Set(["current", "needs_review", "orphaned", "revision_conflict"]);
+  const statuses = new Set(["proposed", "current", "needs_review", "orphaned", "revision_conflict"]);
   const anchors = value.anchors.map((item) => {
     if (!record(item) || typeof item.id !== "string" || item.id.length === 0
       || typeof item.blockId !== "string" || item.blockId.length === 0
@@ -86,9 +200,9 @@ export function assertEditorEvidenceSnapshot(value: unknown, documentLength: num
       || typeof item.quote !== "string" || item.quote.length === 0
       || typeof item.revisionId !== "string" || item.revisionId.length === 0 || typeof item.status !== "string" || !statuses.has(item.status)
       || ((item.to as number) === (item.from as number) && item.status !== "orphaned")
-      || !record(item.target) || typeof item.target.id !== "string" || item.target.id.length === 0
-      || typeof item.target.label !== "string" || item.target.label.length === 0
-      || (item.target.targetPath !== undefined && typeof item.target.targetPath !== "string")) {
+      || (item.target !== undefined && !validKnowledgeReference(item.target))
+      || (item.candidates !== undefined && (!Array.isArray(item.candidates) || !item.candidates.every(validKnowledgeReference)))
+      || (item.assertions !== undefined && (!Array.isArray(item.assertions) || !item.assertions.every(validAssertionReference)))) {
       throw new TypeError("Text Anchor adapter returned an invalid anchor.");
     }
     if ((item.to as number) > documentLength && item.status !== "orphaned" && item.status !== "revision_conflict") {
@@ -96,7 +210,24 @@ export function assertEditorEvidenceSnapshot(value: unknown, documentLength: num
     }
     return item as unknown as TextAnchor;
   });
-  return { revisionId: value.revisionId, blocks, anchors };
+  return { revisionId: value.revisionId, ...(typeof value.markdown === "string" ? { markdown: value.markdown } : {}), blocks, anchors };
+}
+
+function validKnowledgeReference(value: unknown): value is KnowledgeReference {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const reference = value as Record<string, unknown>;
+  return typeof reference.id === "string" && reference.id.length > 0
+    && typeof reference.label === "string" && reference.label.length > 0
+    && (reference.targetPath === undefined || typeof reference.targetPath === "string");
+}
+
+function validAssertionReference(value: unknown): value is AssertionReference {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const reference = value as Record<string, unknown>;
+  return typeof reference.id === "string" && reference.id.length > 0
+    && typeof reference.label === "string" && reference.label.length > 0
+    && ["supports", "contradicts", "quotes", "context"].includes(String(reference.role))
+    && ["proposed", "confirmed", "rejected", "retired"].includes(String(reference.status));
 }
 
 export type CreateBlockId = () => string;
