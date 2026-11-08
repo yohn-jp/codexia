@@ -23,6 +23,7 @@ export type JsonObject = { [key: string]: JsonValue };
 export interface Project {
   id: ProjectId;
   title: string;
+  settings: JsonObject;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -31,6 +32,7 @@ export interface Project {
 export interface CreateProjectCommand {
   id?: ProjectId;
   title: string;
+  settings?: JsonObject;
 }
 
 export type DocumentKind = string;
@@ -299,6 +301,34 @@ export interface LinkAssertionEvidenceCommand {
 
 export type ChangeSetStatus = "proposed" | "approved" | "applied" | "rejected";
 
+export type ChangeSetResource =
+  | "document"
+  | "knowledge_node"
+  | "knowledge_alias"
+  | "knowledge_relation"
+  | "evidence_anchor"
+  | "mention_link"
+  | "assertion"
+  | "assertion_evidence";
+
+export interface ChangeSetReadSetEntry {
+  resource: ChangeSetResource;
+  id: string;
+  expectedVersion: number | null;
+  expectedRevisionId?: RevisionId | null;
+}
+
+export interface ChangeSetWriteSetEntry {
+  resource: ChangeSetResource;
+  id: string;
+}
+
+export interface ChangeSetProvenance {
+  source: string;
+  actorId: ActorId | null;
+  details: JsonObject;
+}
+
 export type ChangeSetOperation =
   | { type: "document.create"; command: CreateDocumentCommand }
   | { type: "document.save"; command: SaveDocumentCommand }
@@ -317,6 +347,9 @@ export interface ChangeSet {
   authorId: ActorId;
   status: ChangeSetStatus;
   operations: readonly ChangeSetOperation[];
+  readSet: readonly ChangeSetReadSetEntry[];
+  writeSet: readonly ChangeSetWriteSetEntry[];
+  provenance: ChangeSetProvenance;
   version: number;
   idempotencyKey: IdempotencyKey;
   createdAt: string;
@@ -333,6 +366,9 @@ export interface CreateChangeSetCommand {
   authorId: ActorId;
   idempotencyKey: IdempotencyKey;
   operations: readonly ChangeSetOperation[];
+  readSet: readonly ChangeSetReadSetEntry[];
+  writeSet: readonly ChangeSetWriteSetEntry[];
+  provenance: ChangeSetProvenance;
 }
 
 export interface ChangeSetResult {
