@@ -29,7 +29,7 @@ The UI uses relative `/api/...` URLs, so production has no `VITE_API_URL` or API
 ## Build and release ownership
 
 - UI changes build `app/dist` with `pnpm run build:frontend`, check and test the static Worker, then upload only the `codexia-frontend` asset Worker. The release job runs only after a push to the configured base branch and uses the `codexia-production` GitHub Environment. Zone Routes remain Terraform-owned and are never changed by Wrangler.
-- Backend changes build `Dockerfile.backend`, test the resulting image, and publish `ghcr.io/yohn-jp/codexia-backend:sha-<40-character-commit>` only after a push to the configured base branch. The image contains the API profile and runtime dependencies, not `app/dist`.
+- Backend changes build `Dockerfile.backend`, test the resulting image, and publish `ghcr.io/yohn-jp/codexia-backend:sha-<40-character-commit>` only after a push to the configured base branch and successful complete main-push verification for that exact commit, including certification. The publication gate waits up to one hour and fails closed if verification is unavailable or unsuccessful. The image contains the API profile and runtime dependencies, not `app/dist`.
 - Changes shared by both build lanes may select both. PR jobs build and validate but do not publish or deploy.
 - The VM operator updates the Quadlet image to the exact published commit tag (or its recorded registry digest), reviews it, and performs the service restart. CI does not SSH to or deploy to the VM.
 - `CLOUDFLARE_API_TOKEN` is only available to the protected production Worker job. `CLOUDFLARE_ACCOUNT_ID` is a non-secret GitHub Environment variable. GHCR publication uses the job-scoped `GITHUB_TOKEN` with `packages: write`.
