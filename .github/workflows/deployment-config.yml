@@ -62,15 +62,30 @@ jobs:
           terraform_version: 1.17.1
       - name: Validate Cloudflare Terraform
         working-directory: deploy/cloudflare/terraform
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           terraform fmt -check -recursive
-          # Provider distribution is external to this repository. Retry only
-          # its download; do not skip or weaken the schema validation gate.
-          for attempt in 1 2 3; do
-            if terraform init -backend=false; then
-              terraform validate
-              exit 0
-            fi
-            if [ "$attempt" -eq 3 ]; then exit 1; fi
-            sleep $((attempt * 10))
-          done
+          # The Registry's release signature URL can return GitHub 504.
+          # Keep real provider-schema validation: fall back to the official
+          # GitHub API release asset and verify its pinned publisher digest.
+          if terraform init -backend=false; then
+            terraform validate
+            exit 0
+          fi
+          provider_dir="$(mktemp -d)"
+          trap 'rm -rf "$provider_dir"' EXIT
+          archive="$provider_dir/cloudflare-provider.zip"
+          curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+            -H "Accept: application/octet-stream" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/cloudflare/terraform-provider-cloudflare/releases/assets/528010301" \
+            --output "$archive"
+          echo "2390fc5df95addfd47d3f638964a1f9f6192a8c84ad3b1eab554ef88e0ac4091  $archive" | sha256sum --check -
+          plugin_path="$provider_dir/registry.terraform.io/cloudflare/cloudflare/5.24.0/linux_amd64"
+          mkdir -p "$plugin_path"
+          unzip -oq "$archive" -d "$plugin_path"
+          terraform init -backend=false -plugin-dir="$provider_dir"
+          terraform validate
