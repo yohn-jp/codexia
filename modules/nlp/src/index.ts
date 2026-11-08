@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { ActionResult, ChangeOperation, JobRequest, ModuleAction, ModuleContext, ModuleDefinition, ModuleManifest, ModuleActionContext, SnapshotId, ValueSchema } from "@scriptorium/contracts";
-import type { WorkerService } from "@scriptorium/contracts";
+import type { ActionResult, ChangeOperation, JobRequest, ModuleAction, ModuleContext, ModuleDefinition, ModuleManifest, ModuleActionContext, SnapshotId, ValueSchema } from "@codexia/contracts";
+import type { WorkerService } from "@codexia/contracts";
 import { NLP_TOKENIZER_CAPABILITY, NLP_TOKENIZER_CAPABILITY_VERSION, NLP_TOKEN_COUNTER_CAPABILITY, NLP_TOKEN_COUNTER_CAPABILITY_VERSION, NLP_TOKENIZER_ENGINE_VERSION, NLP_APPROX_TOKEN_COUNTER_VERSION, NLP_MODEL_ID, NLP_MODEL_VERSION, NLP_MODULE_VERSION, type NlpTokenCountBatch, type NlpTokenCounterCapability, type NlpTokenizerCapability } from "./contracts.js";
 import { aggregateCandidateTerms, collectEntityTexts, type CandidateEntityInput } from "./candidateDiscovery.js";
 import { readCanonicalSnapshotEntities } from "./canonicalSnapshot.js";
@@ -30,13 +30,13 @@ const manifest: ModuleManifest = {
   id: "nlp", version: NLP_MODULE_VERSION, contractVersion: 1,
   dependencies: [], provides: [NLP_TOKENIZER_CAPABILITY, NLP_TOKEN_COUNTER_CAPABILITY], requires: [],
   serverEntry: "./dist/index.js", browserEntry: "./dist/browser.js", workerEntry: "./dist/worker.js",
-  statePaths: ["meta/scriptorium/modules/nlp"], locality: "local",
+  statePaths: ["meta/codexia/modules/nlp"], locality: "local",
 };
 
 const MAX_TEXT_LENGTH = 1_000_000;
-const SYNONYMS_PATH = "meta/scriptorium/modules/nlp/synonyms.yaml";
-const IGNORED_PATH = "meta/scriptorium/modules/nlp/candidate-ignore-list.yaml";
-const FEATURE_SETTINGS_PATH = "meta/scriptorium/modules/nlp/feature-settings.json";
+const SYNONYMS_PATH = "meta/codexia/modules/nlp/synonyms.yaml";
+const IGNORED_PATH = "meta/codexia/modules/nlp/candidate-ignore-list.yaml";
+const FEATURE_SETTINGS_PATH = "meta/codexia/modules/nlp/feature-settings.json";
 
 type ObjectValue = Record<string, unknown>;
 function record(value: unknown, label: string): ObjectValue {

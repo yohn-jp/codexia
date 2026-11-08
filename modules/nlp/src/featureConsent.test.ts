@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ChangeOperation, ChangeProposal, ModuleActionContext, ModuleContext, SnapshotId } from "@scriptorium/contracts";
+import type { ChangeOperation, ChangeProposal, ModuleActionContext, ModuleContext, SnapshotId } from "@codexia/contracts";
 import { createModule } from "./index.js";
 
 const snapshot: SnapshotId = {
@@ -10,7 +10,7 @@ const snapshot: SnapshotId = {
 
 test("source LLM reactions are external features with deny-by-default and explicit proposal consent", async () => {
   const moduleContext = {
-    cacheDirectory: "/tmp/scriptorium-nlp-feature-consent-test",
+    cacheDirectory: "/tmp/codexia-nlp-feature-consent-test",
     signal: new AbortController().signal,
     async acquireCapability() { throw new Error("tokenizer is not used by feature-consent actions"); },
     async createWorkerService() { throw new Error("tokenizer worker is not used by feature-consent actions"); },
@@ -25,7 +25,7 @@ test("source LLM reactions are external features with deny-by-default and explic
   let settingsContent = `${JSON.stringify({ externalEnabled: { "setting-qa": false } })}\n`;
   const reader = {
     get snapshot() { return selectedSnapshot; },
-    async read(path: string) { return path === "meta/scriptorium/modules/nlp/feature-settings.json" ? { content: settingsContent, revision: `revision-${selectedSnapshot.remoteCommit}` } : null; },
+    async read(path: string) { return path === "meta/codexia/modules/nlp/feature-settings.json" ? { content: settingsContent, revision: `revision-${selectedSnapshot.remoteCommit}` } : null; },
     async list() { return []; },
   };
   const proposals: ChangeProposal[] = [];
@@ -64,7 +64,7 @@ test("source LLM reactions are external features with deny-by-default and explic
   assert.equal(consent.ok, true);
   assert.equal(proposals.length, 1);
   const write = proposals[0]?.operations[0]?.writes[0];
-  assert.equal(write?.path, "meta/scriptorium/modules/nlp/feature-settings.json");
+  assert.equal(write?.path, "meta/codexia/modules/nlp/feature-settings.json");
   const proposedSettings = JSON.parse(write?.content ?? "{}") as { externalEnabled: Record<string, boolean> };
   assert.deepEqual(proposedSettings.externalEnabled, {
     "setting-qa": false,

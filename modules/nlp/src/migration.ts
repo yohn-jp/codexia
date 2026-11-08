@@ -1,10 +1,10 @@
-import type { MigrationContribution, MigrationProducer } from "@scriptorium/migration";
-import { stableMigrationId } from "@scriptorium/migration";
+import type { MigrationContribution, MigrationProducer } from "@codexia/migration";
+import { stableMigrationId } from "@codexia/migration";
 
 const NLP_FILES = [
-  { source: "meta/synonyms.yaml", target: "meta/scriptorium/modules/nlp/synonyms.yaml" },
-  { source: "meta/candidate-ignore-list.yaml", target: "meta/scriptorium/modules/nlp/candidate-ignore-list.yaml" },
-  { source: ".arcadia/nlp-feature-settings.json", target: "meta/scriptorium/modules/nlp/feature-settings.json" },
+  { source: "meta/synonyms.yaml", target: "meta/codexia/modules/nlp/synonyms.yaml" },
+  { source: "meta/candidate-ignore-list.yaml", target: "meta/codexia/modules/nlp/candidate-ignore-list.yaml" },
+  { source: ".arcadia/nlp-feature-settings.json", target: "meta/codexia/modules/nlp/feature-settings.json" },
 ] as const;
 
 function emptyContribution(): MigrationContribution {
@@ -25,7 +25,7 @@ export function createNlpMigrationProducer(): MigrationProducer {
       for (const file of NLP_FILES) {
         // If the legacy source is still available, P04's exact-byte producer owns it.
         if (await context.source.readProjectFile(file.source)) continue;
-        const legacyPath = `meta/scriptorium/modules/nlp/legacy/files/${file.source}`;
+        const legacyPath = `meta/codexia/modules/nlp/legacy/files/${file.source}`;
         const legacy = await context.target.read(legacyPath);
         if (!legacy) continue;
 
