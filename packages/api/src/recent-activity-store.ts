@@ -6,7 +6,6 @@ import type {
   RecentActivityDeviceType,
   RecentActivityInput as ContractRecentActivityInput,
   RecentActivityItem as ContractRecentActivityItem,
-  RepositoryIdentity,
 } from "@codexia/contracts";
 
 export type { RecentActivityDeviceType } from "@codexia/contracts";
@@ -22,14 +21,13 @@ const MAX_ITEMS_PER_KEY = 100;
 const ITEM_FIELDS = new Set(["sceneId", "sentenceOffset", "pageIndex", "deviceType", "updatedAt"]);
 const INPUT_FIELDS = new Set(["sceneId", "sentenceOffset", "pageIndex", "deviceType"]);
 const STATE_FIELDS = new Set(["version", "entries", "legacySources"]);
-const ENTRY_FIELDS = new Set(["key", "ownerKey", "repository", "items"]);
-const REPOSITORY_FIELDS = new Set(["provider", "repositoryId", "defaultBranch", "ownerScope", "url"]);
+const ENTRY_FIELDS = new Set(["key", "ownerKey", "projectId", "items"]);
 
 export interface LegacyRecentActivityImportOptions {
   workspaceDataRoot: string;
   usageDirectory: string;
-  /** Exact source project ID to a host-verified stable repository identity. */
-  legacyRepositoryMappings: Readonly<Record<string, RepositoryIdentity>>;
+  /** Exact source project ID to a host-verified stable PostgreSQL project identity. */
+  legacyProjectMappings: Readonly<Record<string, string>>;
   /** Exact source user ID to the current single API owner. */
   legacyUserMappings: Readonly<Record<string, "owner">>;
 }
@@ -50,7 +48,7 @@ export interface LegacyRecentActivityImportReport {
 interface StoredEntry {
   key: string;
   ownerKey: string;
-  repository: RepositoryIdentity;
+  projectId: string;
   items: RecentActivityItem[];
 }
 
@@ -62,7 +60,7 @@ interface StoredState {
 
 interface LegacyCandidate {
   ownerScope: string;
-  repository: RepositoryIdentity;
+  projectId: string;
   items: Map<RecentActivityDevice, RecentActivityItem>;
 }
 
@@ -90,9 +88,9 @@ export class RecentActivityStore {
     this.filePath = join(this.directory, "recent-activity-state.json");
   }
 
-  async list(ownerScope: string, repository: RepositoryIdentity): Promise<RecentActivityItem[]> {
+  async list(ownerScope: string, projectId: string): Promise<RecentActivityItem[]> {
     const ownerKey = hash(validateOwnerScope(ownerScope));
-    const identity = normalizeRepository(repository);
+    const identity = normalizeProjectId(projectId);
     const key = partitionKey(ownerKey, identity);
     const state = await this.readState();
     const entry = state.entries.find((candidate) => candidate.key === key);
@@ -101,10 +99,10 @@ export class RecentActivityStore {
     return entry.items.map((item) => ({ ...item })).sort(newestFirst);
   }
 
-  async upsert(ownerScope: string, repository: RepositoryIdentity, input: RecentActivityInput): Promise<RecentActivityItem[]> {
+  async upsert(ownerScope: string, projectId: string, input: RecentActivityInput): Promise<RecentActivityItem[]> {
     const owner = validateOwnerScope(ownerScope);
     const ownerKey = hash(owner);
-    const identity = normalizeRepository(repository);
+    const identity = normalizeProjectId(projectId);
     const normalizedInput = normalizeInput(input);
     return exclusive(this.filePath, async () => {
       const state = await this.readState();
@@ -112,9 +110,9 @@ export class RecentActivityStore {
       let entry = state.entries.find((candidate) => candidate.key === key);
       if (entry) {
         assertEntryScope(entry, ownerKey, identity);
-        entry.repository = identity;
+        entry.projectId = identity;
       } else {
-        entry = { key, ownerKey, repository: identity, items: [] };
+        entry = { key, ownerKey, projectId: identity, items: [] };
         state.entries.push(entry);
       }
       const existing = entry.items.find((item) => item.deviceType === normalizedInput.deviceType);
@@ -134,15 +132,15 @@ export class RecentActivityStore {
 
   async adoptArchivedLegacy(
     sourceHash: string,
-    legacyRepositoryMappings: Readonly<Record<string, RepositoryIdentity>>,
+    legacyProjectMappings: Readonly<Record<string, string>>,
     legacyUserMappings: Readonly<Record<string, "owner">>,
   ): Promise<LegacyRecentActivityImportReport> {
-    return this.adoptArchivedLegacySources([sourceHash], legacyRepositoryMappings, legacyUserMappings);
+    return this.adoptArchivedLegacySources([sourceHash], legacyProjectMappings, legacyUserMappings);
   }
 
   async adoptArchivedLegacySources(
     sourceHashes: readonly string[],
-    legacyRepositoryMappings: Readonly<Record<string, RepositoryIdentity>>,
+    legacyProjectMappings: Readonly<Record<string, string>>,
     legacyUserMappings: Readonly<Record<string, "owner">>,
   ): Promise<LegacyRecentActivityImportReport> {
     return exclusive(this.filePath, async () => {
@@ -190,9 +188,9 @@ export class RecentActivityStore {
           const values = Array.isArray(rawItems) ? rawItems : null;
           if (!values || values.length > MAX_ITEMS_PER_KEY) { invalidRecords += 1; continue; }
           const count = values.length;
-          const repositoryValue = projectKey === null ? undefined : ownValue(legacyRepositoryMappings, projectKey);
+          const repositoryValue = projectKey === null ? undefined : ownValue(legacyProjectMappings, projectKey);
           const ownerValue = userId === null ? undefined : ownValue(legacyUserMappings, userId);
-          if (ownerValue !== "owner" || !isRepositoryIdentity(repositoryValue)) {
+          if (ownerValue !== "owner" || !isProjectId(repositoryValue)) {
             const mappingKey = JSON.stringify([projectKey, userId]);
             const current = required.get(mappingKey) ?? { projectKey, userId, itemCount: 0 };
             current.itemCount += count;
@@ -208,12 +206,12 @@ export class RecentActivityStore {
             invalidRecords += 1;
             continue;
           }
-          const repository = normalizeRepository(repositoryValue);
+          const repository = normalizeProjectId(repositoryValue);
           const ownerKey = hash("owner");
           const key = partitionKey(ownerKey, repository);
           let candidate = candidates.get(key);
           if (!candidate) {
-            candidate = { ownerScope: "owner", repository, items: new Map() };
+            candidate = { ownerScope: "owner", projectId: repository, items: new Map() };
             candidates.set(key, candidate);
           }
           for (const item of items) {
@@ -232,14 +230,14 @@ export class RecentActivityStore {
 
       for (const candidate of candidates.values()) {
         const ownerKey = hash(candidate.ownerScope);
-        const key = partitionKey(ownerKey, candidate.repository);
+        const key = partitionKey(ownerKey, candidate.projectId);
         let entry = state.entries.find((value) => value.key === key);
         if (!entry) {
-          entry = { key, ownerKey, repository: candidate.repository, items: [] };
+          entry = { key, ownerKey, projectId: candidate.projectId, items: [] };
           state.entries.push(entry);
         } else {
-          assertEntryScope(entry, ownerKey, candidate.repository);
-          entry.repository = candidate.repository;
+          assertEntryScope(entry, ownerKey, candidate.projectId);
+          entry.projectId = candidate.projectId;
         }
         for (const item of candidate.items.values()) {
           const existing = entry.items.find((value) => value.deviceType === item.deviceType);
@@ -301,13 +299,13 @@ export class RecentActivityStore {
   }
 }
 
-/** Archives the source bytes exactly and imports only explicitly mapped owner/repository rows. */
+/** Archives the source bytes exactly and imports only explicitly mapped owner/project rows. */
 export async function importLegacyRecentActivity(options: LegacyRecentActivityImportOptions): Promise<LegacyRecentActivityImportReport> {
   if (!options.workspaceDataRoot?.trim() || !options.usageDirectory?.trim()) {
     throw new RecentActivityStoreError("legacy_recent_activity_path_invalid", "Legacy and host history directories are required");
   }
-  if (!isRecord(options.legacyRepositoryMappings) || !isRecord(options.legacyUserMappings)) {
-    throw new RecentActivityStoreError("legacy_recent_activity_mapping_invalid", "Explicit legacy repository and owner mappings are required");
+  if (!isRecord(options.legacyProjectMappings) || !isRecord(options.legacyUserMappings)) {
+    throw new RecentActivityStoreError("legacy_recent_activity_mapping_invalid", "Explicit legacy project and owner mappings are required");
   }
   const workspaceDataRoot = resolve(options.workspaceDataRoot);
   const usageDirectory = resolve(options.usageDirectory);
@@ -333,7 +331,7 @@ export async function importLegacyRecentActivity(options: LegacyRecentActivityIm
 
   const store = new RecentActivityStore(usageDirectory);
   const sourceHashes = sourceFiles.map(({ sourceHash }) => sourceHash);
-  const report = await store.adoptArchivedLegacySources(sourceHashes, options.legacyRepositoryMappings, options.legacyUserMappings);
+  const report = await store.adoptArchivedLegacySources(sourceHashes, options.legacyProjectMappings, options.legacyUserMappings);
   return {
     ...report,
     bytes: sourceFiles.reduce((sum, source) => sum + source.bytes, 0),
@@ -397,12 +395,12 @@ function normalizeState(value: unknown): StoredState {
   }
   const entries = value.entries.map((raw): StoredEntry => {
     if (!isRecord(raw) || !hasOnlyKeys(raw, ENTRY_FIELDS) || typeof raw.key !== "string" || !/^[a-f0-9]{64}$/u.test(raw.key) ||
-        typeof raw.ownerKey !== "string" || !/^[a-f0-9]{64}$/u.test(raw.ownerKey) || !isRepositoryIdentity(raw.repository) ||
+        typeof raw.ownerKey !== "string" || !/^[a-f0-9]{64}$/u.test(raw.ownerKey) || !isProjectId(raw.projectId) ||
         !Array.isArray(raw.items) || raw.items.length > 2) corruptState();
-    const repository = normalizeRepository(raw.repository);
+    const repository = normalizeProjectId(raw.projectId);
     const items = raw.items.map((item) => normalizeLegacyItem(item));
     if (new Set(items.map(({ deviceType }) => deviceType)).size !== items.length || raw.key !== partitionKey(raw.ownerKey, repository)) corruptState();
-    return { key: raw.key, ownerKey: raw.ownerKey, repository, items };
+    return { key: raw.key, ownerKey: raw.ownerKey, projectId: repository, items };
   });
   if (new Set(entries.map(({ key }) => key)).size !== entries.length) corruptState();
   const legacySources = value.legacySources.map((source) => {
@@ -413,45 +411,28 @@ function normalizeState(value: unknown): StoredState {
   return { version: 1, entries, legacySources };
 }
 
-function assertEntryScope(entry: StoredEntry, ownerKey: string, repository: RepositoryIdentity): void {
-  if (entry.ownerKey !== ownerKey || partitionKey(entry.ownerKey, entry.repository) !== entry.key ||
-      partitionKey(ownerKey, repository) !== entry.key) {
-    throw new RecentActivityStoreError("recent_activity_identity_conflict", "Recent activity belongs to a different owner or repository identity");
+function assertEntryScope(entry: StoredEntry, ownerKey: string, projectId: string): void {
+  if (entry.ownerKey !== ownerKey || partitionKey(entry.ownerKey, entry.projectId) !== entry.key ||
+      partitionKey(ownerKey, projectId) !== entry.key) {
+    throw new RecentActivityStoreError("recent_activity_identity_conflict", "Recent activity belongs to a different owner or project identity");
   }
 }
 
-function normalizeRepository(value: RepositoryIdentity): RepositoryIdentity {
-  if (!isRepositoryIdentity(value)) invalidRecord("Repository identity is invalid");
-  const identity: RepositoryIdentity = {
-    provider: value.provider,
-    repositoryId: boundedText(value.repositoryId, 1, 256, /^[A-Za-z0-9._:-]+$/u, "repository ID"),
-    defaultBranch: boundedText(value.defaultBranch, 1, 256, /^[^\x00-\x1f\x7f]+$/u, "default branch"),
-    ownerScope: boundedText(value.ownerScope, 1, 256, /^[^\x00-\x1f\x7f]+$/u, "repository owner scope"),
-    url: boundedText(value.url, 1, 2_048, /^[^\x00-\x1f\x7f]+$/u, "repository URL"),
-  };
-  if (identity.provider === "github") {
-    let parsed: URL;
-    try { parsed = new URL(identity.url); } catch { invalidRecord("Repository URL is invalid"); }
-    if (parsed!.protocol !== "https:" || parsed!.hostname !== "github.com" || parsed!.username || parsed!.password || parsed!.search || parsed!.hash) {
-      invalidRecord("GitHub repository identity is invalid");
-    }
-  }
-  return identity;
+function normalizeProjectId(value: unknown): string {
+  if (!isProjectId(value)) invalidRecord("Project identity is invalid");
+  return value;
 }
 
-function isRepositoryIdentity(value: unknown): value is RepositoryIdentity {
-  return isRecord(value) && hasOnlyKeys(value, REPOSITORY_FIELDS) &&
-    (value.provider === "github" || value.provider === "local") &&
-    typeof value.repositoryId === "string" && typeof value.defaultBranch === "string" &&
-    typeof value.ownerScope === "string" && typeof value.url === "string";
+function isProjectId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9._:-]{1,256}$/u.test(value);
 }
 
 function validateOwnerScope(value: unknown): string {
   return boundedText(value, 1, 256, /^[^\x00-\x1f\x7f]+$/u, "owner scope");
 }
 
-function partitionKey(ownerKey: string, repository: RepositoryIdentity): string {
-  return hash(`${ownerKey}\0${repository.provider}\0${repository.ownerScope}\0${repository.repositoryId}`);
+function partitionKey(ownerKey: string, projectId: string): string {
+  return hash(`${ownerKey}\0postgres-project\0${projectId}`);
 }
 
 function newestFirst(left: RecentActivityItem, right: RecentActivityItem): number {
