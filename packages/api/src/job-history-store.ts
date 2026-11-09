@@ -273,35 +273,35 @@ export class JobHistoryStore {
     });
   }
 
-  async listJobs(): Promise<PublicJob[]> {
+  async listJobs(projectId?: string): Promise<PublicJob[]> {
     return this.exclusive(async () => {
       await this.load();
-      return this.state.jobs.map(({ job }) => clonePublicJob(job)).sort(newestFirst);
+      return this.state.jobs.filter((entry) => projectId === undefined || entry.projectKey === projectKeyFor(projectId)).map(({ job }) => clonePublicJob(job)).sort(newestFirst);
     });
   }
 
-  async getJob(id: string): Promise<PublicJob | undefined> {
+  async getJob(id: string, projectId?: string): Promise<PublicJob | undefined> {
     return this.exclusive(async () => {
       await this.load();
-      const record = this.state.jobs.find(({ job }) => job.id === id);
+      const record = this.state.jobs.find((entry) => entry.job.id === id && (projectId === undefined || entry.projectKey === projectKeyFor(projectId)));
       return record ? clonePublicJob(record.job) : undefined;
     });
   }
 
-  async listInbox(options: { unreadOnly?: boolean } = {}): Promise<{ items: InboxItem[]; unreadCount: number }> {
+  async listInbox(options: { unreadOnly?: boolean; projectId?: string } = {}): Promise<{ items: InboxItem[]; unreadCount: number }> {
     return this.exclusive(async () => {
       await this.load();
-      const items = this.state.inbox.filter((item) => !options.unreadOnly || !item.read)
+      const items = this.state.inbox.filter((item) => (options.projectId === undefined || item.projectKey === projectKeyFor(options.projectId)) && (!options.unreadOnly || !item.read))
         .map((item) => ({ ...item })).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-      const unreadCount = this.state.inbox.reduce((count, item) => count + Number(!item.read), 0);
+      const unreadCount = this.state.inbox.reduce((count, item) => count + Number(!item.read && (options.projectId === undefined || item.projectKey === projectKeyFor(options.projectId))), 0);
       return { items, unreadCount };
     });
   }
 
-  async markInboxRead(id: string): Promise<InboxItem | undefined> {
+  async markInboxRead(id: string, projectId?: string): Promise<InboxItem | undefined> {
     return this.exclusive(async () => {
       await this.load();
-      const index = this.state.inbox.findIndex((item) => item.id === id);
+      const index = this.state.inbox.findIndex((item) => item.id === id && (projectId === undefined || item.projectKey === projectKeyFor(projectId)));
       if (index < 0) return undefined;
       const next = cloneState(this.state);
       const item = next.inbox[index]!;
@@ -312,13 +312,13 @@ export class JobHistoryStore {
     });
   }
 
-  async markAllInboxRead(): Promise<number> {
+  async markAllInboxRead(projectId?: string): Promise<number> {
     return this.exclusive(async () => {
       await this.load();
       const next = cloneState(this.state);
       let marked = 0;
       for (const item of next.inbox) {
-        if (!item.read) { item.read = true; marked += 1; }
+        if (!item.read && (projectId === undefined || item.projectKey === projectKeyFor(projectId))) { item.read = true; marked += 1; }
       }
       if (marked > 0) {
         await this.persist(next);
