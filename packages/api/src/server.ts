@@ -52,6 +52,7 @@ const RUNTIME_CONTROL_JWKS_TIMEOUT_MS = 1_000;
 const MAX_JSON_BYTES = 12 * 1024 * 1024;
 const MAX_SNAPSHOT_FILES = 1000;
 const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
+const POSTGRES_REVISION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const MAX_SCRATCH_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const API_DRAIN_TIMEOUT_MS = 5_000;
 const MAX_ACTIVE_DOMAIN_JOBS = 32;
@@ -290,6 +291,10 @@ function parseProjectId(value: string): string {
   }
 }
 
+function isPostgresRevisionId(value: unknown): value is string {
+  return typeof value === "string" && POSTGRES_REVISION_ID.test(value);
+}
+
 function parseSceneId(value: string): string {
   try {
     return decodeURIComponent(value);
@@ -517,6 +522,7 @@ type ApiActionHost = Omit<ActionHostContext, "propose"> & {
 };
 
 export function createServer(options: ApiServerOptions): Server {
+  if (!options.persistence) throw new Error("PostgreSQL persistence is required for Codexia authoring");
   const hosted = options.hosted;
   if (!hosted && (!options.authToken || options.authToken.length < 32 || options.authToken.trim() !== options.authToken)) {
     throw new Error("CODEXIA_AUTH_TOKEN must contain at least 32 characters");
@@ -562,10 +568,9 @@ export function createServer(options: ApiServerOptions): Server {
   let lastMeaningfulActivityAt: string | null = null;
   const recordRuntimeActivity = (): void => { runtimeActivityVersion += 1; };
   const listProjects = async (): Promise<Project[]> => {
-    const projects = await options.store.listProjects();
-    if (!hosted) return projects;
-    const assigned = projects.find((project) => project.id === hosted.projectId);
-    if (!assigned) throw httpFailure(503, "HOSTED_PROJECT_BINDING_INVALID", "Assigned PostgreSQL project is unavailable");
+    if (!hosted) return options.store.listProjects();
+    const assigned = await options.persistence.read((reader) => reader.getProject(hosted.projectId as import("@codexia/persistence-contracts").ProjectId));
+    if (!assigned || assigned.id !== hosted.projectId) throw httpFailure(503, "HOSTED_PROJECT_BINDING_INVALID", "Assigned PostgreSQL project is unavailable");
     return [assigned];
   };
   const assertAssignedProject = (projectId: string): void => {
@@ -735,8 +740,8 @@ export function createServer(options: ApiServerOptions): Server {
     } };
     const manuscriptSnapshotInput: ValueSchema = { parse(value: unknown) {
       if (!isRecord(value) || typeof value.manuscriptId !== "string" || !value.manuscriptId || value.manuscriptId.length > 256 ||
-          typeof value.snapshotId !== "string" || !value.snapshotId || value.snapshotId.length > 256) {
-        throw new Error("manuscriptId and a full snapshotId are required");
+          !isPostgresRevisionId(value.snapshotId)) {
+        throw new Error("manuscriptId and a canonical PostgreSQL revision ID are required");
       }
       return { manuscriptId: value.manuscriptId, snapshotId: value.snapshotId };
     } };
@@ -789,7 +794,7 @@ export function createServer(options: ApiServerOptions): Server {
       return { kind: value.kind, volumeId: value.volumeId, chapterId: value.chapterId, orderedIds: value.orderedIds, ...(proposalId ? { proposalId } : {}) };
     } };
     const restoreInput: ValueSchema = { parse(value: unknown) {
-      if (!isRecord(value) || typeof value.sceneId !== "string" || !value.sceneId || typeof value.snapshotId !== "string" || !value.snapshotId) throw new Error("sceneId and snapshotId are required for restore");
+      if (!isRecord(value) || typeof value.sceneId !== "string" || !value.sceneId || !isPostgresRevisionId(value.snapshotId)) throw new Error("sceneId and a canonical PostgreSQL revision ID are required for restore");
       const proposalId = optionalProposalId(value);
       return { sceneId: value.sceneId, snapshotId: value.snapshotId, ...(proposalId ? { proposalId } : {}) };
     } };
@@ -1199,12 +1204,15 @@ export function createServer(options: ApiServerOptions): Server {
     const result = unavailableHostedRuntimeStatus();
     const activityVersion = runtimeActivityVersion;
     try {
-      const observation = await observePostgresPersistence(options.persistence, hosted!.projectId);
+      if (!coreStore.listProposals) throw new Error("Core proposal status is unavailable");
+      const [observation, proposals] = await Promise.all([
+        observePostgresPersistence(options.persistence, hosted!.projectId),
+        coreStore.listProposals(hosted!.projectId),
+      ]);
       result.complete = observation.state === "verified" && activityVersion === runtimeActivityVersion;
       result.status.persistence = { ...observation, state: result.complete ? "verified" : "unknown" };
       result.status.ready = result.complete && started && !closed && !shuttingDown && !quiesceGate;
-      // Unapplied proposals are themselves durably stored in PostgreSQL.
-      result.pendingProposals = 0;
+      result.pendingProposals = proposals.filter((proposal) => proposal.state !== "applied").length;
     } catch { /* A failed database observation cannot establish durability. */ }
     return result;
   };
@@ -1227,7 +1235,7 @@ export function createServer(options: ApiServerOptions): Server {
     }
     if (maximumWaitMs === undefined) return scan;
     let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<{ status: RuntimeStatus; pendingProposals: number; complete: false; localWorkspaceDirty: false }>((resolveTimeout) => {
+    const timeout: Promise<{ status: RuntimeStatus; pendingProposals: number; complete: boolean; localWorkspaceDirty: boolean }> = new Promise((resolveTimeout) => {
       timer = setTimeout(() => resolveTimeout(unavailableHostedRuntimeStatus()), Math.max(0, maximumWaitMs));
       timer.unref();
     });
@@ -1322,7 +1330,7 @@ export function createServer(options: ApiServerOptions): Server {
       historyTimer = setTimeout(() => resolveDeadline(false), Math.max(0, controlDeadline - Date.now()));
       historyTimer.unref();
     });
-    const historyBarrier = jobHistory.listJobs()
+    const historyBarrier = jobHistory.listJobs(hosted.projectId)
       .then(() => jobHistory.flush())
       .then(() => privateHistoryUncertaintyIds.size === 0, () => false);
     let historyDurable = false;
@@ -1643,7 +1651,7 @@ export function createServer(options: ApiServerOptions): Server {
     }
     if (routePath === "/api/jobs" && method === "GET") {
       if (!isCookie) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job history requires an owner session"); return; }
-      try { sendJson(response, 200, await jobHistory.listJobs()); }
+      try { sendJson(response, 200, await jobHistory.listJobs(hosted?.projectId)); }
       catch { throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "Job history is temporarily unavailable"); }
       return;
     }
@@ -1652,7 +1660,7 @@ export function createServer(options: ApiServerOptions): Server {
       if (!isCookie) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job history requires an owner session"); return; }
       const jobId = parseProjectId(jobMatch[1]!);
       try {
-        const job = await jobHistory.getJob(jobId);
+        const job = await jobHistory.getJob(jobId, hosted?.projectId);
         if (!job) throw httpFailure(404, "JOB_NOT_FOUND", "Job was not found");
         sendJson(response, 200, job);
       } catch (error) {
@@ -1663,13 +1671,13 @@ export function createServer(options: ApiServerOptions): Server {
     }
     if (routePath === "/api/inbox" && method === "GET") {
       if (!isCookie) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Inbox requires an owner session"); return; }
-      try { sendJson(response, 200, await jobHistory.listInbox({ unreadOnly: query.get("unread") === "1" })); }
+      try { sendJson(response, 200, await jobHistory.listInbox({ unreadOnly: query.get("unread") === "1", ...(hosted ? { projectId: hosted.projectId } : {}) })); }
       catch { throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "Inbox is temporarily unavailable"); }
       return;
     }
     if (routePath === "/api/inbox/read-all" && method === "POST") {
       await requireWritePermission();
-      try { sendJson(response, 200, { marked: await jobHistory.markAllInboxRead() }); }
+      try { sendJson(response, 200, { marked: await jobHistory.markAllInboxRead(hosted?.projectId) }); }
       catch { throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "Inbox is temporarily unavailable"); }
       return;
     }
@@ -1678,7 +1686,7 @@ export function createServer(options: ApiServerOptions): Server {
       await requireWritePermission();
       const inboxId = parseProjectId(inboxReadMatch[1]!);
       try {
-        const item = await jobHistory.markInboxRead(inboxId);
+        const item = await jobHistory.markInboxRead(inboxId, hosted?.projectId);
         if (!item) throw httpFailure(404, "INBOX_ITEM_NOT_FOUND", "Inbox item was not found");
         sendJson(response, 200, { item });
       } catch (error) {
@@ -1689,7 +1697,7 @@ export function createServer(options: ApiServerOptions): Server {
     }
     if (routePath === "/api/projects" && method === "GET") { sendJson(response, 200, await listProjects()); return; }
     if (routePath === "/api/projects" && method === "POST") {
-      if (hosted) throw httpFailure(403, "HOSTED_ASSIGNMENT_IMMUTABLE", "Hosted runtimes can only use their assigned repository");
+      if (hosted) throw httpFailure(403, "HOSTED_ASSIGNMENT_IMMUTABLE", "Hosted runtimes can only use their assigned project");
       await requireWritePermission();
       const body = await readJson(request, parsedBody);
       if (!isRecord(body) || typeof body.title !== "string" || !body.title.trim()) throw httpFailure(400, "INVALID_PROJECT", "Project title is required");
@@ -1759,7 +1767,7 @@ export function createServer(options: ApiServerOptions): Server {
         return;
       }
       if (sceneMatch && method === "PUT") {
-        throw httpFailure(410, "SCENE_PROPOSAL_REQUIRED", "Direct scene saves are retired. Submit a revision-bound proposal, then approve and checkpoint it.");
+        throw httpFailure(410, "SCENE_PROPOSAL_REQUIRED", "Direct scene saves are retired. Submit a revision-bound proposal, then approve and apply it.");
       }
       if (suffix === "snapshot" && method === "GET") {
         const selected = optionalSnapshot(query, projectId);
@@ -1926,7 +1934,7 @@ export function createServer(options: ApiServerOptions): Server {
             settledInvocation.then((settled) => ({ kind: "settled" as const, settled })),
           ]);
           if (outcome.kind === "started") {
-            const job = await jobHistory.getJob(outcome.id);
+            const job = await jobHistory.getJob(outcome.id, hosted?.projectId);
             if (!job) throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "The registered job could not be read back");
             response.setHeader("X-Codexia-Job-Id", job.id);
             response.setHeader("Location", `/api/jobs/${encodeURIComponent(job.id)}`);
@@ -1958,9 +1966,9 @@ export function createServer(options: ApiServerOptions): Server {
         if (!coreStore.readManuscriptSnapshot) throw httpFailure(503, "SNAPSHOT_HISTORY_UNAVAILABLE", "Manuscript snapshot history is not available in this Core version");
         const selected = optionalSnapshot(query, projectId);
         const snapshotId = parseProjectId(snapshotMatch[2]!);
-        if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(snapshotId)) throw httpFailure(400, "INVALID_SNAPSHOT", "Manuscript snapshot ID must be a full Git commit ID");
+        if (!isPostgresRevisionId(snapshotId)) throw httpFailure(400, "INVALID_SNAPSHOT", "Manuscript revision ID must be a canonical PostgreSQL revision UUID");
         const result = await coreStore.readManuscriptSnapshot(projectId, snapshotId, parseProjectId(snapshotMatch[1]!), undefined, selected.pinned);
-        if (!result) throw httpFailure(404, "MANUSCRIPT_SNAPSHOT_NOT_FOUND", "Manuscript snapshot is not reachable from the selected commit");
+        if (!result) throw httpFailure(404, "MANUSCRIPT_SNAPSHOT_NOT_FOUND", "Manuscript revision is not reachable from the selected PostgreSQL project version");
         if (Buffer.byteLength(JSON.stringify(result), "utf8") > MAX_SNAPSHOT_BYTES) throw httpFailure(413, "SNAPSHOT_TOO_LARGE", "Manuscript snapshot exceeds the response size limit");
         sendJson(response, 200, result); return;
       }
@@ -2201,42 +2209,51 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
       throw new Error("Hosted assignment enables modules absent from the immutable composition");
     }
     const authorization = createHostedAuthorizationPolicy({ assignment });
-    const persistenceOptions = await postgresPersistenceOptions();
-    const store = new CoreStore({ persistence: persistenceOptions.persistence! });
     const projectId = readCodexiaEnvironment("HOSTED_PROJECT_ID");
-    if (!projectId || !(await store.listProjects()).some((project) => project.id === projectId)) {
-      await persistenceOptions.persistence?.close();
-      throw new Error("CODEXIA_HOSTED_PROJECT_ID must identify an existing PostgreSQL project");
-    }
     const producerRevision = readCodexiaEnvironment("PRODUCER_REVISION");
     if (!producerRevision || !/^[a-f0-9]{40}$/u.test(producerRevision)) {
       throw new Error("CODEXIA_PRODUCER_REVISION must be an immutable 40-character source revision");
     }
-    return startServer({
-      store,
-      ...persistenceOptions,
-      hosted: { assignment, projectId, authorization, producerRevision },
-      trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
-      runtimeOptions,
-      usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
-      profile,
-    });
+    if (!projectId) throw new Error("CODEXIA_HOSTED_PROJECT_ID must identify an existing PostgreSQL project");
+    const persistenceOptions = await postgresPersistenceOptions();
+    try {
+      const assignedProject = await persistenceOptions.persistence!.read((reader) => reader.getProject(projectId as import("@codexia/persistence-contracts").ProjectId));
+      if (assignedProject?.id !== projectId) throw new Error("CODEXIA_HOSTED_PROJECT_ID must identify an existing PostgreSQL project");
+      const store = new CoreStore({ persistence: persistenceOptions.persistence! });
+      return await startServer({
+        store,
+        ...persistenceOptions,
+        hosted: { assignment, projectId, authorization, producerRevision },
+        trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
+        runtimeOptions,
+        usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
+        profile,
+      });
+    } catch (error) {
+      await persistenceOptions.persistence!.close().catch(() => undefined);
+      throw error;
+    }
   }
   const authToken = readCodexiaEnvironment("AUTH_TOKEN")?.trim();
   if (!authToken || authToken.length < 32) throw new Error("CODEXIA_AUTH_TOKEN is required and must contain at least 32 characters");
   const profile = readCodexiaEnvironment("PROFILE") ?? process.env.CODEXIA_BUILD_PROFILE ?? "core";
   const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory);
   const persistenceOptions = await postgresPersistenceOptions();
-  const store = new CoreStore({ persistence: persistenceOptions.persistence! });
-  return startServer({
-    store,
-    ...persistenceOptions,
-    authToken,
-    trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
-    runtimeOptions,
-    usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
-    profile,
-  });
+  try {
+    const store = new CoreStore({ persistence: persistenceOptions.persistence! });
+    return await startServer({
+      store,
+      ...persistenceOptions,
+      authToken,
+      trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
+      runtimeOptions,
+      usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
+      profile,
+    });
+  } catch (error) {
+    await persistenceOptions.persistence!.close().catch(() => undefined);
+    throw error;
+  }
 }
 
 async function postgresReady(persistence: Persistence | undefined): Promise<boolean> {
@@ -2251,24 +2268,23 @@ async function postgresReady(persistence: Persistence | undefined): Promise<bool
 
 async function postgresPersistenceOptions(): Promise<Pick<ApiServerOptions, "persistence" | "closePersistenceOnShutdown">> {
   const connectionString = readCodexiaEnvironment("DATABASE_URL");
-  const required = readCodexiaEnvironment("REQUIRE_POSTGRES");
-  if (required !== undefined && required !== "0" && required !== "1") {
-    throw new Error("CODEXIA_REQUIRE_POSTGRES must be 1 or 0");
-  }
-  if (required === "1" && !connectionString) {
-    throw new Error("CODEXIA_DATABASE_URL is required when CODEXIA_REQUIRE_POSTGRES=1");
+  // PostgreSQL is the only manuscript authority; startup never has a local or Git fallback.
+  if (!connectionString) {
+    throw new Error("CODEXIA_DATABASE_URL is required for Codexia authoring");
   }
   const migrateOnStart = readCodexiaEnvironment("DATABASE_MIGRATE_ON_START");
   if (migrateOnStart !== undefined && migrateOnStart !== "0" && migrateOnStart !== "1") {
     throw new Error("CODEXIA_DATABASE_MIGRATE_ON_START must be 1 or 0");
   }
-  if (migrateOnStart === "1" && !connectionString) {
-    throw new Error("CODEXIA_DATABASE_URL is required when CODEXIA_DATABASE_MIGRATE_ON_START=1");
+  if (migrateOnStart === "1") await migratePostgresDatabase(connectionString);
+  const persistence = createPostgresPersistence(connectionString);
+  try {
+    await persistence.checkHealth();
+  } catch (error) {
+    await persistence.close();
+    throw new Error("Codexia PostgreSQL is unavailable at startup", { cause: error });
   }
-  if (connectionString && migrateOnStart === "1") await migratePostgresDatabase(connectionString);
-  return connectionString
-    ? { persistence: createPostgresPersistence(connectionString), closePersistenceOnShutdown: true }
-    : {};
+  return { persistence, closePersistenceOnShutdown: true };
 }
 
 async function loadProfileRuntimeOptions(
