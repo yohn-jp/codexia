@@ -43,3 +43,20 @@ test("worker lifecycle validates PostgreSQL snapshots and prevents cross-project
   await assert.rejects(store.record({ ...lifecycle, snapshot: { projectId: "project-one", projectVersion: -1 } }), { code: "job_event_invalid" });
   assert.equal((await new JobHistoryStore(root).listJobs()).length, 1);
 });
+
+test("hosted job and inbox reads and acknowledgements stay within the assigned project", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "codexia-hosted-history-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = new JobHistoryStore(root);
+  for (const projectId of ["project-one", "project-two"]) {
+    await store.beginDomainJob({ id: projectId, type: "assistant", projectId });
+    await store.finishDomainJob(projectId, { ok: true, snapshot: { projectId, projectVersion: 1 }, data: projectId });
+  }
+  assert.equal((await store.listJobs("project-one")).length, 1);
+  assert.equal(await store.getJob("project-two", "project-one"), undefined);
+  const other = (await store.listInbox({ projectId: "project-two" })).items[0]!;
+  assert.equal(await store.markInboxRead(other.id, "project-one"), undefined);
+  assert.equal(await store.markAllInboxRead("project-one"), 1);
+  assert.equal((await store.listInbox({ projectId: "project-two", unreadOnly: true })).unreadCount, 1);
+  assert.equal((await store.listInbox({ projectId: "project-one", unreadOnly: true })).unreadCount, 0);
+});
