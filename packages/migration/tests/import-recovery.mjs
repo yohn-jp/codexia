@@ -7,6 +7,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
+import { createPostgresPersistence, migratePostgresDatabase } from "../../persistence-postgres/dist/index.js";
 import { CoreStore } from "../../core/dist/index.js";
 import {
   createMigrationProducerRegistry,
@@ -231,7 +232,12 @@ function readOperationWrites(inspection) {
   return inspection.operations.flatMap((operation) => operation.writes);
 }
 
-test("legacy import survives author-approved publication and complete Core dataDir replacement", async () => {
+test("legacy import survives approved PostgreSQL application and complete API state replacement", async () => {
+  const connectionString = process.env.CODEXIA_TEST_DATABASE_URL;
+  assert.ok(connectionString, "CODEXIA_TEST_DATABASE_URL must select a disposable PostgreSQL database");
+  await migratePostgresDatabase(connectionString);
+  const persistence = createPostgresPersistence(connectionString);
+  let persistenceClosed = false;
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-import-recovery-"));
   const workspaceRoot = path.join(tempRoot, "legacy-data");
   const targetDataDir = path.join(tempRoot, "core-data");
@@ -244,17 +250,23 @@ test("legacy import survives author-approved publication and complete Core dataD
 
     const sourceBefore = await treeState(sourceRoot);
     const workspaceBefore = await treeState(workspaceRoot);
-    const core = new CoreStore({ dataDir: targetDataDir, allowLocalRemotes: true });
-    const project = await core.registerProject({ url: remote });
+    const core = new CoreStore({ persistence });
+    const project = await core.createProject({ title: "Legacy migration recovery fixture" });
+    const seedSnapshot = (await core.observe(project.id)).snapshot;
+    const seedWrites = ["story/scene.md", "notes/delete-me.md", "docs/typechange-target.txt"].map((filePath) => ({ path: filePath, revision: null, content: execFileSync("git", ["--git-dir", remote, "show", `HEAD:${filePath}`], { encoding: "utf8" }) }));
+    const seedOperation = { id: "baseline", generation: 0, projectId: project.id, baseProjectVersion: seedSnapshot.projectVersion, effect: "migration", reads: seedWrites.map(({path}) => ({path, revision: null})), writes: seedWrites, message: "Seed existing canonical fixture records" };
+    await core.propose(project.id, { id: "baseline-proposal", snapshot: seedSnapshot, operations: [seedOperation], source: "author" });
+    await core.approve(project.id, { proposalId: "baseline-proposal", operationIds: [seedOperation.id], authorScope: "synthetic-author" });
+    await core.apply(project.id, seedOperation);
     const reader = await core.reader(project.id);
-    const targetIdentity = reader.snapshot.repository;
+    const targetIdentity = reader.snapshot.projectId;
     const inputMapping = { "legacy-project-id": targetIdentity };
     let producerMapping;
     const registry = createMigrationProducerRegistry();
     registerMigrationProducer(registry, {
       id: "mapping-contract-probe",
       async inspect(context) {
-        producerMapping = context.legacyRepositoryMappings;
+        producerMapping = context.legacyProjectMappings;
         return { entries: [], operations: [], recovery: [] };
       },
     });
@@ -262,7 +274,7 @@ test("legacy import survives author-approved publication and complete Core dataD
       sourceRoot,
       workspaceDataRoot: workspaceRoot,
       workspaceProjectId: "legacy-project-id",
-      legacyRepositoryMappings: inputMapping,
+      legacyProjectMappings: inputMapping,
       target: reader,
       registry,
     });
@@ -271,9 +283,8 @@ test("legacy import survives author-approved publication and complete Core dataD
     assert.equal(inspection.pendingWorkspace.pendingCommitCount, 1, "the unpublished local commit must be detected");
     assert.ok(inspection.pendingWorkspace.stagedPaths.includes("notes/staged-add.md"), "staged additions must be reported");
     assert.ok(inspection.pendingWorkspace.stagedPaths.includes("docs/typechange.md"), "staged type changes must be reported");
-    assert.equal(producerMapping["legacy-project-id"].repositoryId, targetIdentity.repositoryId);
+    assert.equal(producerMapping["legacy-project-id"], targetIdentity);
     assert.notEqual(producerMapping, inputMapping, "the producer receives a defensive mapping copy");
-    assert.notEqual(producerMapping["legacy-project-id"], inputMapping["legacy-project-id"], "repository identities are copied too");
 
     const writes = readOperationWrites(inspection);
     const writeByPath = new Map(writes.map((write) => [write.path, write]));
@@ -301,7 +312,8 @@ test("legacy import survives author-approved publication and complete Core dataD
       "notes/story-clue.md",
     ]) assert.ok(writeByPath.has(targetPath), `expected reviewable import write for ${targetPath}`);
     const typeChange = inspection.entries.find((entry) => entry.source === "docs/typechange.md");
-    assert.equal(typeChange?.disposition, "blocked", "Core must withhold a symlink replacement it cannot safely read");
+    assert.equal(typeChange?.disposition, "planned", "a source symlink replaced by a verified regular file can be imported into an empty PostgreSQL target");
+    assert.equal(writeByPath.get("docs/typechange.md").content, await fs.readFile(path.join(sourceRoot, "docs/typechange.md"), "utf8"));
     assert.equal(writeByPath.get("notes/delete-me.md").content, null, "the staged deletion must be preserved");
     assert.ok(["meta/scriptorium/modules/publishing/assets/cover.jpg", "meta/scriptorium/modules/story/local-snapshots/attachments/diagram.bin"]
       .every((targetPath) => writeByPath.get(targetPath).encoding === "base64"), "binary assets must retain base64 encoding");
@@ -353,33 +365,34 @@ test("legacy import survives author-approved publication and complete Core dataD
       operationIds: proposal.operations.map((operation) => operation.id),
       authorScope: "synthetic-author",
     });
-    for (const operation of proposal.operations) await core.checkpoint(project.id, operation);
-    const publication = await core.publish(project.id, "legacy-import-recovery");
-    assert.equal(publication.state, "confirmed", "the actual bare remote must acknowledge publication");
-    assert.ok(publication.remoteCommit);
-
+    for (const operation of proposal.operations) await core.apply(project.id, operation);
+    await persistence.close();
+    persistenceClosed = true;
     await fs.rm(targetDataDir, { recursive: true, force: true });
-    const replacement = new CoreStore({ dataDir: targetDataDir, allowLocalRemotes: true });
-    const restoredProject = await replacement.registerProject({ url: remote });
+    const replacementPersistence = createPostgresPersistence(connectionString);
+    try {
+    const replacement = new CoreStore({ persistence: replacementPersistence });
+    const restoredProject = await replacementPersistence.read((reader) => reader.getProject(project.id));
+    assert.ok(restoredProject, "project must survive replacement without filesystem state");
     const restoredReader = await replacement.reader(restoredProject.id);
     for (const write of writes) {
       const recovered = await restoredReader.read(write.path, write.encoding ?? "utf8");
       if (write.content === null) assert.equal(recovered, null, `deleted path ${write.path} must stay deleted`);
-      else assert.equal(recovered?.content, write.content, `published bytes must survive target dataDir replacement at ${write.path}`);
+      else assert.equal(recovered?.content, write.content, `published bytes must survive API state replacement at ${write.path}`);
     }
 
     const grants = await restoredReader.read("meta/scriptorium/modules/publishing/share-grants.jsonl");
     const grant = JSON.parse(grants.content.trim());
     assert.equal(grant.id, "share-grant-stable");
-    assert.equal(grant.projectId, targetIdentity.repositoryId);
+    assert.equal(grant.projectId, targetIdentity);
     assert.equal(grant.tokenHash, "b".repeat(64));
     assert.ok(!grants.content.includes("synthetic-private-owner"));
     assert.ok(!grants.content.includes("DO_NOT_EXPORT_BEARER"));
 
     const restoredProjectRows = (await restoredReader.read("meta/scriptorium/modules/story/legacy/sqlite/project-arcadia/state_proposals.jsonl")).content;
     const restoredWorkspaceRows = (await restoredReader.read("meta/scriptorium/modules/story/legacy/sqlite/workspace-index/state_proposals.jsonl")).content;
-    assert.deepEqual(restoredProjectRows, projectProposalRows, "all project database workflow rows and unknown fields survive a real clone");
-    assert.deepEqual(restoredWorkspaceRows, workspaceProposalRows, "all workspace database workflow rows and divergent IDs survive a real clone");
+    assert.deepEqual(restoredProjectRows, projectProposalRows, "all project database workflow rows and unknown fields survive a real database connection replacement");
+    assert.deepEqual(restoredWorkspaceRows, workspaceProposalRows, "all workspace database workflow rows and divergent IDs survive a real database connection replacement");
     assert.ok(!restoredProjectRows.includes("api_token"));
     assert.ok(!restoredWorkspaceRows.includes("DO_NOT_EXPORT_SQLITE_SECRET"));
     const allTargetPaths = await restoredReader.list("");
@@ -415,14 +428,16 @@ test("legacy import survives author-approved publication and complete Core dataD
       sourceRoot,
       workspaceDataRoot: workspaceRoot,
       workspaceProjectId: "legacy-project-id",
-      legacyRepositoryMappings: inputMapping,
+      legacyProjectMappings: inputMapping,
       target: restoredReader,
       registry,
     });
     assert.deepEqual(afterRecovery.operations, [], "a completed import must be idempotent after deleting all local Core state");
     assert.deepEqual(await treeState(sourceRoot), sourceBefore, "the source Git repository remains untouched after import and recovery");
     assert.deepEqual(await treeState(workspaceRoot), workspaceBefore, "the source workspace and SQLite stores remain untouched after import and recovery");
+    } finally { await replacementPersistence.close(); }
   } finally {
+    if (!persistenceClosed) await persistence.close();
     for (const database of databases) database.close();
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

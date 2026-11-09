@@ -164,8 +164,8 @@ function parseSynonymGroups(value: ObjectValue): Array<Record<string, unknown> &
 
 function operation(context: ModuleActionContext, path: string, revision: string | null, content: string, message: string): ChangeOperation {
   return {
-    id: randomUUID(), generation: 0, repository: context.reader.snapshot.repository,
-    baseRemoteCommit: context.reader.snapshot.remoteCommit, effect: "settings",
+    id: randomUUID(), generation: 0, projectId: context.reader.snapshot.projectId,
+    baseProjectVersion: context.reader.snapshot.projectVersion, effect: "settings",
     reads: [{ path, revision }], writes: [{ path, revision, content }], message,
   };
 }

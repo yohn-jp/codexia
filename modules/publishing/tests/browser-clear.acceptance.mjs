@@ -9,14 +9,8 @@ import { createModule } from "../dist/index.js";
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const workspaceRoot = resolve(packageRoot, "../..");
 const { createServer } = await import(pathToFileURL(resolve(workspaceRoot, "app/node_modules/vite/dist/node/index.js")).href);
-const repository = {
-  provider: "local",
-  repositoryId: "publishing-browser-fixture",
-  defaultBranch: "main",
-  ownerScope: "owner-1",
-  url: "file:///synthetic/publishing-browser-fixture",
-};
-const snapshot = { repository, remoteCommit: "a".repeat(40) };
+const projectId = "browser-module-fixture";
+const snapshot = { projectId, projectVersion: 1 };
 const files = new Map([
   ["meta/project.yaml", "title: 星の図書館\n"],
   ["plot/volumes/vol-1/volume.yaml", "id: vol-1\ntitle: 第一巻\norder: 1\n"],

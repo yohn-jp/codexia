@@ -1,9 +1,9 @@
-import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createServer as createControlServer, type Server } from "node:http";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { DocumentId } from "@codexia/persistence-contracts";
 import type { ModuleId, ModuleManifest } from "@codexia/contracts";
 import type { ModuleLoader, ModuleRuntimeOptions } from "@codexia/module-runtime";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
@@ -17,87 +17,26 @@ function requiredSetting(name: string): string {
 }
 
 const stateDir = requiredSetting("CODEXIA_E2E_STATE_DIR");
-const repositoryUrl = requiredSetting("CODEXIA_E2E_REPOSITORY_URL");
-const branch = process.env.CODEXIA_E2E_REPOSITORY_BRANCH ?? "main";
 const port = Number.parseInt(process.env.CODEXIA_E2E_PORT ?? "4173", 10);
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
-const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
+const databaseUrl = requiredSetting("CODEXIA_E2E_DATABASE_URL");
 
 if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("CODEXIA_E2E_PORT must be a valid TCP port");
 if (authToken.length < 32) throw new Error("CODEXIA_E2E_AUTH_TOKEN must contain at least 32 characters");
 
-async function createLocalFixture(targetRepositoryUrl = repositoryUrl): Promise<void> {
-  const fixtureRoot = await mkdtemp(join(tmpdir(), "codexia-e2e-repo-"));
-  const bareRemote = resolve(targetRepositoryUrl);
-  const workingCopy = join(fixtureRoot, "seed");
-  await mkdir(workingCopy, { recursive: true });
-  await mkdir(join(workingCopy, "plot/volumes/vol-1/chapters/ch-1/scenes"), { recursive: true });
-  await mkdir(join(workingCopy, "manuscript/vol-1/ch-1"), { recursive: true });
-  await mkdir(join(workingCopy, "meta/scriptorium/modules/search"), { recursive: true });
-
-  await writeFile(join(workingCopy, "plot/volumes/vol-1/volume.yaml"), "id: vol-1\ntitle: Volume One\n", "utf8");
-  await writeFile(
-    join(workingCopy, "plot/volumes/vol-1/chapters/ch-1/chapter.yaml"),
-    "id: ch-1\nvolume: vol-1\ntitle: Chapter One\n",
-    "utf8",
-  );
-  await writeFile(
-    join(workingCopy, "plot/volumes/vol-1/chapters/ch-1/scenes/scene-1.yaml"),
-    "id: scene-1\ntitle: Scene One\nvolume: vol-1\nchapter: ch-1\nmanuscript: manuscript/vol-1/ch-1/scene-1.md\n",
-    "utf8",
-  );
-  await writeFile(
-    join(workingCopy, "manuscript/vol-1/ch-1/scene-1.md"),
-    "# Scene One\n\nThe first line of the story.\nBeacon Quay appears in this scene.\n",
-    "utf8",
-  );
-  await writeFile(
-    join(workingCopy, "plot/volumes/vol-1/chapters/ch-1/scenes/scene-2.yaml"),
-    "id: scene-2\ntitle: Scene Two\nvolume: vol-1\nchapter: ch-1\nmanuscript: manuscript/vol-1/ch-1/scene-2.md\n",
-    "utf8",
-  );
-  await writeFile(
-    join(workingCopy, "manuscript/vol-1/ch-1/scene-2.md"),
-    "# Scene Two\n\nThe second line of the story.\nA submerged brass archive waits below Lantern Harbor.\n",
-    "utf8",
-  );
-  await writeFile(
-    join(workingCopy, "meta/scriptorium/modules/search/terms.json"),
-    JSON.stringify({
-      schemaVersion: 1,
-      terms: [{
-        id: "lantern-harbor",
-        canonical: "Lantern Harbor",
-        aliases: ["Beacon Quay"],
-        targetPath: "manuscript/vol-1/ch-1/scene-2.md",
-      }],
-    }, null, 2) + "\n",
-    "utf8",
-  );
-
-  const runGit = (cwd: string, ...args: string[]) =>
-    execFileSync("git", args, {
-      cwd,
-      stdio: "ignore",
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: "Codexia Acceptance",
-        GIT_AUTHOR_EMAIL: "acceptance@example.invalid",
-        GIT_COMMITTER_NAME: "Codexia Acceptance",
-        GIT_COMMITTER_EMAIL: "acceptance@example.invalid",
-      },
-    });
-
+/** Seed only the disposable database explicitly supplied by the browser harness. */
+async function createDatabaseFixture(): Promise<void> {
+  const persistence = createPostgresPersistence(databaseUrl);
   try {
-    await mkdir(resolve(bareRemote), { recursive: true });
-    execFileSync("git", ["init", "--bare", "--initial-branch", branch, bareRemote], { stdio: "ignore" });
-    runGit(workingCopy, "init", "--initial-branch", branch);
-    runGit(workingCopy, "add", ".");
-    runGit(workingCopy, "commit", "-m", "Add acceptance manuscript fixture");
-    runGit(workingCopy, "remote", "add", "origin", bareRemote);
-    runGit(workingCopy, "push", "--set-upstream", "origin", branch);
+    await persistence.transaction(async (transaction) => {
+      const project = await transaction.createProject({ title: process.env.CODEXIA_E2E_PROJECT_TITLE ?? "Acceptance manuscript" });
+      const volume = await transaction.createDocument({ projectId: project.id, documentId: randomUUID() as DocumentId, kind: "volume", title: "Volume One", orderKey: "a", markdown: "", authorId: "owner", idempotencyKey: randomUUID() });
+      const chapter = await transaction.createDocument({ projectId: project.id, parentId: volume.document.id, kind: "chapter", title: "Chapter One", orderKey: "a", markdown: "", authorId: "owner", idempotencyKey: randomUUID() });
+      await transaction.createDocument({ projectId: project.id, parentId: chapter.document.id, kind: "scene", title: "Scene One", orderKey: "a", markdown: "# Scene One\n\nThe first line of the story.\nBeacon Quay appears in this scene.\n", authorId: "owner", idempotencyKey: randomUUID() });
+      await transaction.createDocument({ projectId: project.id, parentId: chapter.document.id, kind: "scene", title: "Scene Two", orderKey: "b", markdown: "# Scene Two\n\nThe second line of the story.\nA submerged brass archive waits below Lantern Harbor.\n", authorId: "owner", idempotencyKey: randomUUID() });
+    });
   } finally {
-    await rm(fixtureRoot, { recursive: true, force: true });
+    await persistence.close();
   }
 }
 
@@ -119,13 +58,8 @@ async function close(server: Server): Promise<void> {
 }
 
 async function startTestServer(): Promise<void> {
-  if (process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY !== "1") {
-    await createLocalFixture();
-    const modularRepositoryUrl = process.env.CODEXIA_E2E_MODULAR_REPOSITORY_URL;
-    if (modularRepositoryUrl && resolve(modularRepositoryUrl) !== resolve(repositoryUrl)) {
-      await createLocalFixture(modularRepositoryUrl);
-    }
-  }
+  await migratePostgresDatabase(databaseUrl);
+  if (process.env.CODEXIA_E2E_EXTERNAL_DATABASE !== "1") await createDatabaseFixture();
 
   const profile = process.env.CODEXIA_PROFILE ?? "core";
   let runtimeOptions: ModuleRuntimeOptions | undefined;
@@ -149,28 +83,16 @@ async function startTestServer(): Promise<void> {
     };
   }
 
-  let heldReconcile: { started: boolean; wait: Promise<void>; release(): void } | undefined;
   const startApi = async (): Promise<Server> => {
-    const store = new CoreStore({ dataDir: join(stateDir, "store"), allowLocalRemotes: true });
-    const persistence = databaseUrl ? createPostgresPersistence(databaseUrl) : undefined;
-    if (databaseUrl) await migratePostgresDatabase(databaseUrl);
-    const reconcile = store.reconcile.bind(store);
-    store.reconcile = async (...args) => {
-      const result = await reconcile(...args);
-      const held = heldReconcile;
-      if (held && !held.started) {
-        held.started = true;
-        await held.wait;
-      }
-      return result;
-    };
+    const persistence = createPostgresPersistence(databaseUrl);
+    const store = new CoreStore({ persistence });
     const server = createServer({
       store,
       authToken,
       staticDir: resolve("app/dist"),
       usageDirectory: join(stateDir, "host-history"),
       profile,
-      ...(persistence ? { persistence, closePersistenceOnShutdown: true } : {}),
+      persistence, closePersistenceOnShutdown: true,
       ...(runtimeOptions ? { runtimeOptions } : {}),
     });
     await listen(server, port);
@@ -184,31 +106,10 @@ async function startTestServer(): Promise<void> {
       response.writeHead(403).end();
       return;
     }
-    if (request.method === "POST" && request.url === "/__e2e/hold-reconcile") {
-      heldReconcile?.release();
-      let release!: () => void;
-      const wait = new Promise<void>((resolve) => { release = resolve; });
-      heldReconcile = { started: false, wait, release };
-      request.resume();
-      response.writeHead(204).end();
-      return;
-    }
-    if (request.method === "POST" && request.url === "/__e2e/release-reconcile") {
-      heldReconcile?.release();
-      heldReconcile = undefined;
-      request.resume();
-      response.writeHead(204).end();
-      return;
-    }
-    if (request.method === "GET" && request.url === "/__e2e/reconcile-state") {
-      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ started: heldReconcile?.started ?? false }));
-      return;
-    }
     if (request.method !== "POST" || (request.url !== "/__e2e/reset-core" && request.url !== "/__e2e/restart-api")) {
       response.writeHead(404).end();
       return;
     }
-    const resetCore = request.url === "/__e2e/reset-core";
     request.resume();
     if (resetting) {
       response.writeHead(409).end("Core reset is already in progress");
@@ -218,10 +119,8 @@ async function startTestServer(): Promise<void> {
     void (async () => {
       try {
         await close(apiServer);
-        if (resetCore) {
-          // The disposable Git remote and private host usage store intentionally survive Core loss.
-          await rm(join(stateDir, "store"), { recursive: true, force: true });
-        }
+        // PostgreSQL revisions remain authoritative across process and cache loss.
+        await rm(join(stateDir, "module-cache"), { recursive: true, force: true });
         apiServer = await startApi();
         response.writeHead(204).end();
       } catch (error) {
@@ -240,7 +139,6 @@ async function startTestServer(): Promise<void> {
   const stop = () => {
     if (stopped) return;
     stopped = true;
-    heldReconcile?.release();
     void close(controlServer);
     void close(apiServer).finally(() => {
       if (process.env.CODEXIA_E2E_TEMP_STATE_DIR === "1") {

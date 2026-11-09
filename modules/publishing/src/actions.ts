@@ -129,8 +129,8 @@ async function makeMetadataOperation(context: ModuleActionContext, path: string,
   return {
     id: randomUUID().replaceAll("-", ""),
     generation: 0,
-    repository: snapshot.repository,
-    baseRemoteCommit: snapshot.remoteCommit,
+    projectId: snapshot.projectId,
+    baseProjectVersion: snapshot.projectVersion,
     effect: "metadata",
     reads: [{ path, revision: current?.revision ?? null }],
     writes: [{ path, revision: current?.revision ?? null, content }],
@@ -194,7 +194,7 @@ export function createPublishingActions(): ModuleAction[] {
     const merged = mergeEpisodeMap(existing, input.episodes);
     const operation = await makeMetadataOperation(context, EPISODES_PATH, merged.content, "Update publication episode mapping");
     const proposal = await context.propose([operation]);
-    return { episodes: merged.episodes, proposalId: proposal.id, activation: "requires author approval, checkpoint, and confirmed publish" };
+    return { episodes: merged.episodes, proposalId: proposal.id, activation: "requires author approval and PostgreSQL apply" };
   }));
 
   actions.push(defineAction(valueSchema((value) => object(value)), "publishing.shares.list", "read", async (_input, context) => {
@@ -215,7 +215,7 @@ export function createPublishingActions(): ModuleAction[] {
       share: safeShareGrant(grant),
       token: rawToken,
       proposalId: proposal.id,
-      activation: "This link becomes readable only after author approval and a confirmed publish.",
+      activation: "This link becomes readable only after author approval and PostgreSQL apply.",
     };
   }));
 
@@ -234,7 +234,7 @@ export function createPublishingActions(): ModuleAction[] {
     }
     const operation = await makeMetadataOperation(context, SHARE_GRANTS_PATH, sortedGrantContent(existing.grants), "Revoke read-only publication share");
     const proposal = await context.propose([operation]);
-    return { id: input.id, revokedAt: existing.grants[index]!.revokedAt, proposalId: proposal.id, activation: "Revocation reaches public readers after the change is approved and published." };
+    return { id: input.id, revokedAt: existing.grants[index]!.revokedAt, proposalId: proposal.id, activation: "Revocation reaches public readers after the change is approved and applied." };
   }));
 
   return actions;

@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { MAX_JOB_INPUT_BYTES, MAX_JOB_OUTPUT_BYTES, type JobRequest, type ModuleId, type SnapshotId } from "@codexia/contracts";
@@ -9,8 +12,8 @@ const workerServiceEntry = fileURLToPath(new URL("./fixtures/worker-service.mjs"
 const unreadyWorkerServiceEntry = fileURLToPath(new URL("./fixtures/worker-service-unready.mjs", import.meta.url));
 const missingNodeExecutable = fileURLToPath(new URL("./fixtures/node-executable-missing", import.meta.url));
 const snapshot: SnapshotId = {
-  repository: { provider: "github", repositoryId: "repo-1", defaultBranch: "main", ownerScope: "owner", url: "https://github.com/owner/repo" },
-  remoteCommit: "b".repeat(40),
+  projectId: "repo-1",
+  projectVersion: 12,
 };
 
 function request(task = "echo", input: unknown = { value: "hello" }, options: Partial<JobRequest> = {}): JobRequest {
@@ -423,16 +426,32 @@ test("spawn errors close one-shot and persistent worker records and release thei
 });
 
 test("a timed-out unready service keeps its process slot until its resistant child exits", async () => {
-  const supervisor = new WorkerSupervisor({ maxWorkerServices: 1, maxJobDurationMs: 100, cancellationGraceMs: 250 });
+  const supervisor = new WorkerSupervisor({ maxWorkerServices: 1, maxJobDurationMs: 1000, cancellationGraceMs: 250 });
   let pid: number | undefined;
   let startupFailure: Promise<unknown> | undefined;
   try {
+    const startedAt = Date.now();
     startupFailure = supervisor.createService("nlp", "0.1.0", unreadyWorkerServiceEntry).then(
       () => undefined,
       (error: unknown) => error,
     );
     pid = await waitForPid(supervisor);
-    await new Promise((resolve) => setTimeout(resolve, 125));
+    const initialized = join(tmpdir(), `codexia-unready-worker-${pid}`);
+    const readinessDeadline = startedAt + 800;
+    let ready = false;
+    try {
+      while (Date.now() < readinessDeadline) {
+        try {
+          const marker = /^initialized:(\d+):(\d+)$/u.exec(await readFile(initialized, "utf8"));
+          if (Number(marker?.[1]) === pid && Number(marker?.[2]) >= startedAt) { ready = true; break; }
+        } catch { /* The worker may not have installed its SIGTERM handler yet. */ }
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      assert.ok(ready, "the child must report that its SIGTERM handler is installed before the startup timeout");
+    } finally {
+      await rm(initialized, { force: true });
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, 1025 - (Date.now() - startedAt))));
     assert.doesNotThrow(() => process.kill(pid!, 0), "the startup timeout should still be draining the SIGTERM-resistant process");
 
     const replacement = await supervisor.createService("story", "0.1.0", workerServiceEntry).then(

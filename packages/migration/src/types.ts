@@ -2,7 +2,6 @@ import type {
   ChangeOperation,
   ModuleId,
   MutationCoordinator,
-  RepositoryIdentity,
   SnapshotId,
   SnapshotReader,
 } from "@codexia/contracts";
@@ -114,11 +113,11 @@ export interface LegacySourceReader {
 export interface MigrationContext {
   source: LegacySourceReader;
   target: SnapshotReader;
-  repository: RepositoryIdentity;
+  projectId: string;
   snapshot: SnapshotId;
   enabledModules: ReadonlySet<ModuleId>;
-  /** Explicit legacy workspace project ID -> verified current repository identity bindings. */
-  legacyRepositoryMappings?: Readonly<Record<string, RepositoryIdentity>>;
+  /** Explicit legacy workspace project ID -> verified PostgreSQL project ID bindings. */
+  legacyProjectMappings?: Readonly<Record<string, string>>;
   workspaceProjectId?: string;
 }
 
@@ -150,7 +149,7 @@ export interface InspectLegacyOptions {
   /** Old workspace project ID used to select its share grants and project-owned records. */
   workspaceProjectId?: string;
   /** Explicitly resolved legacy project IDs; the host verifies mappings before inspection. */
-  legacyRepositoryMappings?: Readonly<Record<string, RepositoryIdentity>>;
+  legacyProjectMappings?: Readonly<Record<string, string>>;
   enabledModules?: readonly ModuleId[];
   registry?: MigrationProducerRegistryLike;
 }

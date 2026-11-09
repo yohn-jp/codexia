@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import type { SnapshotReader } from "@codexia/contracts";
-import { MODULE_PERSISTENCE_FORMATS, type ModulePersistenceFormat } from "@codexia/module-runtime";
 
 export const PLATFORM_CONTRACT_VERSION = "scriptorium-platform/v1" as const;
 export const RUNTIME_CONTROL_CONTRACT_VERSION = "praetorium-runtime-control/v1" as const;
@@ -15,19 +13,9 @@ export const HOSTED_ACCESS_COOKIE = "__Host-praetorium_access" as const;
 export const HOSTED_CSRF_COOKIE = "__Host-praetorium_csrf" as const;
 
 const DIGEST = /^sha256:[a-f0-9]{64}$/u;
-const REVISION = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u;
 const PRODUCER_REVISION = /^[a-f0-9]{40}$/u;
 const MODULE_ID = /^[a-z][a-z0-9-]{0,63}$/u;
 const CONTROL_ACTIONS = new Set(["status", "quiesce", "resume"]);
-const CODEXIA_META_ROOT = "meta/scriptorium/";
-const FORMAT_PATHS = [
-  { formatId: "scriptorium.git-operations", prefix: "meta/scriptorium/operations", pattern: /^meta\/scriptorium\/operations\/v1\/([A-Za-z0-9_-]{1,128})\.json$/u, version: 1 },
-  { formatId: "scriptorium.git-publications", prefix: "meta/scriptorium/publications", pattern: /^meta\/scriptorium\/publications\/v1\/([A-Za-z0-9_-]{1,128})\.json$/u, version: 1 },
-  { formatId: "scriptorium.git-proposal-legacy", prefix: "meta/scriptorium/proposals/v1", pattern: /^meta\/scriptorium\/proposals\/v1\/([A-Za-z0-9_-]{1,128})\.json$/u, version: 1 },
-  { formatId: "scriptorium.git-proposal-binding", prefix: "meta/scriptorium/proposals/v2/bindings", pattern: /^meta\/scriptorium\/proposals\/v2\/bindings\/([A-Za-z0-9_-]{1,128})\.json$/u, version: 2 },
-  { formatId: "scriptorium.git-proposal-complete", prefix: "meta/scriptorium/proposals/v2/complete", pattern: /^meta\/scriptorium\/proposals\/v2\/complete\/([A-Za-z0-9_-]{1,128})\.json$/u, version: 2 },
-] as const;
-
 export interface RuntimePolicy {
   issuer: string;
   jwksUrl: string;
@@ -83,9 +71,8 @@ export interface PersistenceFormat {
 
 export interface PersistenceObservation {
   state: "verified" | "unknown";
-  observedRemoteCommit: string | null;
-  remoteObservedAt?: string | null;
-  formats: PersistenceFormat[];
+  provider: "postgres";
+  projectVersion: number | null;
 }
 
 export interface RuntimeMetadata {
@@ -105,42 +92,30 @@ export interface RuntimeMetadata {
 }
 
 export interface RuntimeStatus {
-  contractVersion: typeof PLATFORM_CONTRACT_VERSION;
+  contractVersion: "codexia-runtime-status/v2";
   instanceId: string;
-  repositoryId: number;
+  projectId: string;
   runtimeEpoch: number;
   imageDigest: string;
   compositionManifestDigest: string;
   enabledModuleIds: string[];
   ready: boolean;
-  activity: {
-    lastMeaningfulActivityAt: string | null;
-    activeApiRequests: number;
-    activeMcpRequests: number;
-    activeMutations: number;
-    activeJobs: number;
-    restartableJobs: number;
-    pendingCheckpoints: number;
-    uncertainPublication: boolean;
-  };
-  lastConfirmedRemoteRevision: string | null;
+  activity: { lastMeaningfulActivityAt: string | null; activeApiRequests: number; activeMcpRequests: number; activeMutations: number; activeJobs: number; restartableJobs: number };
   persistence: PersistenceObservation;
   observedAt: string;
 }
-
 export interface QuiesceResult {
-  contractVersion: typeof PLATFORM_CONTRACT_VERSION;
+  contractVersion: "codexia-runtime-status/v2";
   operationId: string;
   instanceId: string;
+  projectId: string;
   runtimeEpoch: number;
-  quiesceRevision: string;
+  quiesceRevision: string | null;
+  projectVersion: number | null;
   disposition: "safe" | "blocked" | "unknown";
   activeMutations: number;
   activeJobs: number;
   restartableJobs: number;
-  pendingCheckpoints: number;
-  uncertainPublication: boolean;
-  lastConfirmedRemoteRevision: string | null;
   reasonCodes: string[];
   observedAt: string;
 }
@@ -313,91 +288,15 @@ export function metadataForRuntime(input: { producerRevision: string; port: numb
   };
 }
 
-export async function scanRemotePersistence(reader: SnapshotReader, remoteCommit: string | null): Promise<PersistenceObservation> {
-  const unknown = (): PersistenceObservation => ({ state: "unknown", observedRemoteCommit: remoteCommit, formats: [] });
-  if (!isRevision(remoteCommit)) return unknown();
+
+/** Observe only durable PostgreSQL state; failure never falls back to workspace files. */
+export async function observePostgresPersistence(persistence: import("@codexia/persistence-contracts").Persistence, projectId: string): Promise<PersistenceObservation> {
+  const unknown = { state: "unknown" as const, provider: "postgres" as const, projectVersion: null };
   try {
-    const paths = await reader.list("meta/scriptorium");
-    if (paths.length > 10_000) return unknown();
-    const found = new Map<string, PersistenceFormat>();
-    let bytes = 0;
-    for (const path of paths) {
-      if (!path.startsWith(CODEXIA_META_ROOT)) return unknown();
-      const spec = FORMAT_PATHS.find((candidate) => path.startsWith(`${candidate.prefix}/`));
-      const moduleFormat = spec ? undefined : modulePersistenceFormatForPath(path);
-      if (!spec && !moduleFormat) return unknown();
-      const match = spec?.pattern.exec(path);
-      if (spec && !match) return unknown();
-      const encoding = moduleFormat?.preserveOnly || moduleFormat?.content === "binary" ? "base64" : "utf8";
-      const file = await reader.read(path, encoding);
-      if (!file) return unknown();
-      bytes += encoding === "base64" ? Buffer.from(file.content, "base64").byteLength : Buffer.byteLength(file.content, "utf8");
-      if (bytes > 32 * 1024 * 1024) return unknown();
-      if (spec) {
-        const metadata = JSON.parse(file.content) as unknown;
-        if (!record(metadata) || metadata.version !== spec.version) return unknown();
-        if (spec.formatId === "scriptorium.git-operations" &&
-            (!record(metadata.operation) || metadata.operation.id !== match![1])) return unknown();
-        if (spec.formatId === "scriptorium.git-publications" && metadata.batchId !== match![1]) return unknown();
-        if ((spec.formatId === "scriptorium.git-proposal-legacy" ||
-             spec.formatId === "scriptorium.git-proposal-binding" ||
-             spec.formatId === "scriptorium.git-proposal-complete") && metadata.proposalId !== match![1]) return unknown();
-        found.set(`${spec.formatId}:${spec.version}`, { formatId: spec.formatId, version: spec.version });
-        continue;
-      }
-      if (!moduleFormat || !validModuleFormatContent(file.content, moduleFormat)) return unknown();
-      found.set(`${moduleFormat.formatId}:${moduleFormat.version}`, { formatId: moduleFormat.formatId, version: moduleFormat.version });
-    }
-    return {
-      state: "verified",
-      observedRemoteCommit: remoteCommit,
-      formats: [...found.values()].sort((left, right) => left.formatId.localeCompare(right.formatId) || left.version - right.version),
-    };
-  } catch {
-    return unknown();
-  }
-}
-
-function modulePersistenceFormatForPath(path: string): ModulePersistenceFormat | undefined {
-  return MODULE_PERSISTENCE_FORMATS.find((format) => format.paths.some((candidate) => {
-    if (candidate.kind === "exact") return path === candidate.path;
-    if (!candidate.path.endsWith("/") || !path.startsWith(candidate.path)) return false;
-    const suffix = path.slice(candidate.path.length);
-    return suffix.length > 0 && suffix.split("/").every((part) => part.length > 0 && part !== "." && part !== "..");
-  }));
-}
-
-function hasSupportedEmbeddedVersion(value: unknown, version: number): boolean {
-  if (!record(value)) return false;
-  for (const key of ["version", "schemaVersion"]) {
-    if (Object.prototype.hasOwnProperty.call(value, key) && value[key] !== version) return false;
-  }
-  return true;
-}
-
-function validModuleFormatContent(content: string, format: ModulePersistenceFormat): boolean {
-  if (format.preserveOnly || format.content === "text" || format.content === "binary" || format.content === "opaque") return true;
-  try {
-    if (format.content === "json") return hasSupportedEmbeddedVersion(JSON.parse(content) as unknown, format.version);
-    if (format.content === "jsonl") {
-      for (const line of content.split(/\r?\n/u)) {
-        if (!line.trim()) continue;
-        if (!hasSupportedEmbeddedVersion(JSON.parse(line) as unknown, format.version)) return false;
-      }
-      return true;
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-export function isRevision(value: unknown): value is string | null {
-  return value === null || (typeof value === "string" && REVISION.test(value));
-}
-
-/** Core uses the empty string for an uninitialized remote; the contract uses null. */
-export function normalizeRemoteRevision(value: unknown): string | null | undefined {
-  if (value === "") return null;
-  return isRevision(value) ? value : undefined;
+    if (!persistence.checkHealth) return unknown;
+    await persistence.checkHealth();
+    const project = await persistence.read((reader) => reader.getProject(projectId as import("@codexia/persistence-contracts").ProjectId));
+    if (!project || project.id !== projectId || !Number.isSafeInteger(project.version) || project.version < 1) return unknown;
+    return { state: "verified", provider: "postgres", projectVersion: project.version };
+  } catch { return unknown; }
 }

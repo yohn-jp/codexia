@@ -58,8 +58,8 @@ export function buildOperation(input: {
   return {
     id,
     generation: 0,
-    repository: input.reader.snapshot.repository,
-    baseRemoteCommit: input.reader.snapshot.remoteCommit,
+    projectId: input.reader.snapshot.projectId,
+    baseProjectVersion: input.reader.snapshot.projectVersion,
     effect: input.effect,
     reads: input.reads,
     ...(input.readScopes ? { readScopes: input.readScopes } : {}),

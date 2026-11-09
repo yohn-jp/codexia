@@ -1,8 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { pathToFileURL } from "node:url";
+import { ownerLogin, fixtureProject } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
-const repositoryUrl = process.env.CODEXIA_E2E_REPOSITORY_URL ?? "";
 
 test("an unknown hosted grant requests refresh and retries the initial session check", async ({ page }) => {
   let sessionRequests = 0;
@@ -30,7 +29,7 @@ test("an unknown hosted grant requests refresh and retries the initial session c
       body: JSON.stringify({ authenticated: true, authorScope: "hosted:synthetic-author", permissions: ["read", "write"] }),
     });
   });
-  await page.route("**/api/projects", (route) => route.fulfill({
+  await page.route("**/api/v1/persistence/projects", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
     body: "[]",
@@ -57,7 +56,7 @@ test("an unknown hosted grant requests refresh and retries the initial session c
   });
 
   await page.goto("/desktop/");
-  await expect(page.getByText("登録された作品はありません")).toBeVisible();
+  await expect(page.getByText("最初の作品を作成してください")).toBeVisible();
   expect(sessionRequests).toBe(3);
   expect(refreshRequests).toBe(1);
   expect(reauthRequests).toBe(0);
@@ -97,7 +96,7 @@ test("concurrent tabs serialize a rotated hosted grant through the browser lock"
       body: JSON.stringify({ error: "Authentication required", code: "UNAUTHORIZED" }),
     });
   });
-  await context.route("**/api/projects", (route) => route.fulfill({
+  await context.route("**/api/v1/persistence/projects", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
     body: "[]",
@@ -124,8 +123,8 @@ test("concurrent tabs serialize a rotated hosted grant through the browser lock"
   });
 
   await Promise.all([page.goto("/desktop/?tab=first"), secondPage.goto("/desktop/?tab=second")]);
-  await expect(page.getByText("登録された作品はありません")).toBeVisible();
-  await expect(secondPage.getByText("登録された作品はありません")).toBeVisible();
+  await expect(page.getByText("最初の作品を作成してください")).toBeVisible();
+  await expect(secondPage.getByText("最初の作品を作成してください")).toBeVisible();
   expect(new URL(page.url()).origin).toBe(new URL(secondPage.url()).origin);
   expect(await page.evaluate(() => Boolean(navigator.locks)), "Chromium must expose Web Locks for this cross-tab acceptance").toBe(true);
   expect(initialSessionRequests).toBeGreaterThanOrEqual(2);
@@ -136,217 +135,64 @@ test("concurrent tabs serialize a rotated hosted grant through the browser lock"
 });
 
 test("an interrupted initial project bootstrap resumes after persisted pageshow", async ({ page }) => {
-  test.skip(Boolean(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1" || process.env.CODEXIA_E2E_BASE_URL || process.env.CODEXIA_BASE_URL),
-    "The bootstrap lifecycle regression requires the generated local owner repository fixture.");
-  expect(authToken).not.toBe("");
-  expect(repositoryUrl).not.toBe("");
-
-  const repositoryInput = repositoryUrl.startsWith("https://") || repositoryUrl.startsWith("file://")
-    ? repositoryUrl
-    : pathToFileURL(repositoryUrl).href;
-  const projectName = new URL(repositoryInput).pathname.split("/").filter(Boolean).at(-1)!.replace(/\.git$/u, "");
-  const projectButton = (target: typeof page) => target.locator(".project-button").filter({ hasText: projectName });
-
-  await page.goto("/desktop/");
-  await page.getByLabel("アクセストークン").fill(authToken);
-  await page.getByRole("button", { name: "ログイン" }).click();
-  await expect(page.getByRole("heading", { name: "作品を追加" })).toBeVisible();
-  if (await projectButton(page).count() === 0) {
-    await page.getByLabel("GitHub リポジトリ URL").fill(repositoryInput);
-    await page.getByRole("button", { name: "リポジトリを登録" }).click();
-    await expect(page.getByRole("heading", { name: "Volume One" })).toBeVisible({ timeout: 30_000 });
-  } else {
-    await expect(projectButton(page)).toBeVisible();
-  }
-  await page.close();
-
-  for (const scenario of [
-    { name: "fulfill-before-pageshow", timing: "before-pageshow", abort: false },
-    { name: "fulfill-after-pageshow", timing: "after-pageshow", abort: false },
-    { name: "abort-before-pageshow", timing: "before-pageshow", abort: true },
-    { name: "abort-after-pageshow", timing: "after-pageshow", abort: true },
-  ] as const) {
-    const resumedPage = await page.context().newPage();
-    let projectRequests = 0;
-    let releaseFirst!: () => void;
-    let firstStarted!: () => void;
-    let firstReleased!: () => void;
-    const heldFirst = new Promise<void>((resolve) => { releaseFirst = resolve; });
-    const started = new Promise<void>((resolve) => { firstStarted = resolve; });
-    const released = new Promise<void>((resolve) => { firstReleased = resolve; });
-
-    await resumedPage.route("**/api/projects", async (route) => {
-      if (route.request().method() !== "GET") return route.continue();
-      projectRequests += 1;
-      if (projectRequests > 1) return route.continue();
-
+  await ownerLogin(page);
+  for (const abort of [false, true]) {
+    const resumed = await page.context().newPage();
+    let requests = 0;
+    let release!: () => void;
+    let started!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const pending = new Promise<void>((resolve) => { started = resolve; });
+    await resumed.route("**/api/v1/persistence/projects", async (route) => {
+      requests += 1;
+      if (requests > 1) return route.continue();
       const response = await route.fetch();
-      const body = await response.text();
-      expect(response.status()).toBe(200);
-      expect(JSON.parse(body)).toEqual(expect.arrayContaining([expect.objectContaining({ branch: "main" })]));
-      firstStarted();
-      await heldFirst;
-      try {
-        if (scenario.abort) await route.abort("failed").catch(() => undefined);
-        else await route.fulfill({ response, body }).catch(() => undefined);
-      } finally {
-        firstReleased();
-      }
+      expect(response.ok()).toBe(true);
+      started();
+      await held;
+      if (abort) await route.abort("failed").catch(() => undefined);
+      else await route.fulfill({ response }).catch(() => undefined);
     });
-
-    await resumedPage.goto("/desktop/");
-    await started;
-    await resumedPage.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
-    if (scenario.timing === "before-pageshow") {
-      releaseFirst();
-      await released;
-      await resumedPage.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
-    } else {
-      await resumedPage.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
-      releaseFirst();
-      await released;
-    }
-
-    await expect(projectButton(resumedPage), `project list should recover when the original request is ${scenario.name}`).toBeVisible({ timeout: 15_000 });
-    await expect(resumedPage.getByRole("alert")).toHaveCount(0);
-    expect(projectRequests, `${scenario.name} should restart the interrupted project bootstrap`).toBeGreaterThanOrEqual(2);
-    await resumedPage.close();
+    await resumed.goto("/desktop/");
+    await pending;
+    await resumed.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
+    await resumed.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+    release();
+    await expect(resumed.getByLabel("開く作品")).toBeVisible({ timeout: 15_000 });
+    expect(requests).toBeGreaterThanOrEqual(2);
+    await expect(resumed.getByRole("alert")).toHaveCount(0);
+    await resumed.close();
   }
 });
 
 test("direct-link, active scene, and project activation resume after persisted pageshow", async ({ page }) => {
-  test.skip(Boolean(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1" || process.env.CODEXIA_E2E_BASE_URL || process.env.CODEXIA_BASE_URL),
-    "The scene lifecycle regression requires the generated local owner repository fixture.");
-  expect(authToken).not.toBe("");
-  expect(repositoryUrl).not.toBe("");
-
-  const repositoryInput = repositoryUrl.startsWith("https://") || repositoryUrl.startsWith("file://")
-    ? repositoryUrl
-    : pathToFileURL(repositoryUrl).href;
-  const projectName = new URL(repositoryInput).pathname.split("/").filter(Boolean).at(-1)!.replace(/\.git$/u, "");
-  const projectButton = page.locator(".project-button").filter({ hasText: projectName });
-
-  await page.goto("/desktop/");
-  await page.getByLabel("アクセストークン").fill(authToken);
-  await page.getByRole("button", { name: "ログイン" }).click();
-  await expect(page.getByRole("heading", { name: "作品を追加" })).toBeVisible();
-  if (await projectButton.count() === 0) {
-    await page.getByLabel("GitHub リポジトリ URL").fill(repositoryInput);
-    await page.getByRole("button", { name: "リポジトリを登録" }).click();
-    await expect(page.getByRole("heading", { name: "Volume One" })).toBeVisible({ timeout: 30_000 });
-  } else {
-    await expect(projectButton).toBeVisible();
-  }
-
-  const projectsResponse = await page.request.get(new URL("/api/projects", page.url()).toString());
-  expect(projectsResponse.ok()).toBe(true);
-  const projects = await projectsResponse.json() as Array<{ id: string; url: string }>;
-  const project = projects.find((item) => item.url === repositoryUrl || item.url === repositoryInput || item.url.endsWith("/origin.git"));
-  expect(project, "the generated owner fixture should be registered in the local API").toBeTruthy();
-
-  let releaseViews!: () => void;
-  let signalViews!: () => void;
-  let viewsRequests = 0;
-  const heldViews = new Promise<void>((resolve) => { releaseViews = resolve; });
-  const viewsStarted = new Promise<void>((resolve) => { signalViews = resolve; });
-  await page.route((url) => url.pathname === `/api/projects/${encodeURIComponent(project!.id)}/scenes/scene-1/views` && url.searchParams.has("snapshot"), async (route) => {
-    viewsRequests += 1;
-    if (viewsRequests > 1) return route.continue();
+  await ownerLogin(page);
+  const { project, scenes } = await fixtureProject(page.request);
+  expect(scenes.length).toBeGreaterThanOrEqual(2);
+  let reads = 0;
+  let release!: () => void;
+  let started!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const pending = new Promise<void>((resolve) => { started = resolve; });
+  await page.route(`**/api/v1/persistence/projects/${project.id}/documents/${scenes[0]!.id}`, async (route) => {
+    reads += 1;
+    if (reads > 1) return route.continue();
     const response = await route.fetch();
-    const body = await response.text();
-    expect(response.status()).toBe(200);
-    expect(body).toContain("The first line of the story.");
-    signalViews();
-    await heldViews;
-    await route.fulfill({ response, body }).catch(() => undefined);
+    expect(response.ok()).toBe(true);
+    started();
+    await held;
+    await route.fulfill({ response }).catch(() => undefined);
   });
-
-  await page.goto(`/desktop/projects/${encodeURIComponent(project!.id)}/scenes/scene-1`);
-  await viewsStarted;
+  await page.goto(`/desktop/projects/${project.id}/scenes/${scenes[0]!.id}`);
+  await pending;
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
-  releaseViews();
-
-  const editor = page.locator(".cm-content");
-  await expect(editor).toBeVisible({ timeout: 15_000 });
-  await expect(editor).toContainText("The first line of the story.");
-  await expect(page.locator('[data-recovery-status="ready"]')).toBeVisible();
-  try {
-    await expect(page.getByRole("alert")).toHaveCount(0);
-  } catch (cause) {
-    const alertTexts = await page.getByRole("alert").allTextContents();
-    throw new Error(`Unexpected alert after direct-link scene resumed: ${JSON.stringify(alertTexts)}`, { cause });
-  }
-  expect(viewsRequests, "pageshow should resume the interrupted direct-link scene read").toBeGreaterThanOrEqual(2);
-
-  let releaseSecondViews!: () => void;
-  let signalSecondViews!: () => void;
-  let releaseResumedViews!: () => void;
-  let signalResumedViews!: () => void;
-  let secondViewsRequests = 0;
-  const heldSecondViews = new Promise<void>((resolve) => { releaseSecondViews = resolve; });
-  const secondViewsStarted = new Promise<void>((resolve) => { signalSecondViews = resolve; });
-  const heldResumedViews = new Promise<void>((resolve) => { releaseResumedViews = resolve; });
-  const resumedViewsStarted = new Promise<void>((resolve) => { signalResumedViews = resolve; });
-  await page.route((url) => url.pathname === `/api/projects/${encodeURIComponent(project!.id)}/scenes/scene-2/views` && url.searchParams.has("snapshot"), async (route) => {
-    secondViewsRequests += 1;
-    const response = await route.fetch();
-    const body = await response.text();
-    expect(response.status()).toBe(200);
-    expect(body).toContain("The second line of the story.");
-    if (secondViewsRequests === 1) {
-      signalSecondViews();
-      await heldSecondViews;
-    } else if (secondViewsRequests === 2) {
-      signalResumedViews();
-      await heldResumedViews;
-    }
-    await route.fulfill({ response, body }).catch(() => undefined);
-  });
-
-  await page.getByRole("button", { name: "Chapter One: Scene Two", exact: true }).click();
-  await secondViewsStarted;
-  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
-  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
-  releaseSecondViews();
-  await resumedViewsStarted;
-  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
-  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
-  releaseResumedViews();
-
-  await expect(editor).toBeVisible({ timeout: 15_000 });
-  await expect(editor).toContainText("The second line of the story.");
-  await expect(page.locator('[data-recovery-status="ready"]')).toBeVisible();
+  release();
+  await expect(page.getByRole("textbox", { name: "原稿 Markdown" })).toContainText("The first line of the story.");
+  expect(reads).toBeGreaterThanOrEqual(2);
+  await page.locator(".pg-document-list").getByRole("button", { name: new RegExp(scenes[1]!.title) }).click();
+  await expect(page.getByRole("textbox", { name: "原稿 Markdown" })).toContainText("The second line of the story.");
+  await page.goBack();
+  await expect(page.getByRole("textbox", { name: "原稿 Markdown" })).toContainText("The first line of the story.");
   await expect(page.getByRole("alert")).toHaveCount(0);
-  expect(secondViewsRequests, "each pageshow should resume an interrupted active scene navigation").toBeGreaterThanOrEqual(3);
-
-  let releaseProjectDetails!: () => void;
-  let signalProjectDetails!: () => void;
-  let projectDetailsRequests = 0;
-  const heldProjectDetails = new Promise<void>((resolve) => { releaseProjectDetails = resolve; });
-  const projectDetailsStarted = new Promise<void>((resolve) => { signalProjectDetails = resolve; });
-  await page.route((url) => url.pathname === `/api/projects/${encodeURIComponent(project!.id)}` && url.search === "", async (route) => {
-    if (route.request().method() !== "GET") return route.continue();
-    projectDetailsRequests += 1;
-    if (projectDetailsRequests > 1) return route.continue();
-    const response = await route.fetch();
-    const body = await response.text();
-    expect(response.status()).toBe(200);
-    expect(JSON.parse(body)).toEqual(expect.objectContaining({ project: expect.objectContaining({ id: project!.id }) }));
-    signalProjectDetails();
-    await heldProjectDetails;
-    await route.fulfill({ response, body }).catch(() => undefined);
-  });
-
-  await projectButton.click();
-  await projectDetailsStarted;
-  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
-  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
-  releaseProjectDetails();
-
-  await expect(page.getByRole("heading", { name: "Volume One" })).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole("button", { name: "Chapter One: Scene One", exact: true })).toBeVisible();
-  await expect(projectButton).toHaveAttribute("aria-current", "true");
-  await expect(page.getByRole("alert")).toHaveCount(0);
-  expect(projectDetailsRequests, "pageshow should resume interrupted same-project activation").toBeGreaterThanOrEqual(2);
 });

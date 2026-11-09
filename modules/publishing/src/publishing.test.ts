@@ -15,18 +15,12 @@ import { hashShareToken, SHARE_GRANTS_PATH, type ShareGrant } from "./grants.js"
 import { EPISODES_PATH } from "./episodes.js";
 import type { PublishingProject } from "./project.js";
 
-const BASE_COMMIT = "a".repeat(40);
-const NEXT_COMMIT = "b".repeat(40);
-const repository = {
-  provider: "local" as const,
-  repositoryId: "local-publishing-7",
-  defaultBranch: "main",
-  ownerScope: "owner-1",
-  url: "file:///synthetic/publishing",
-};
+const BASE_VERSION = 1;
+const NEXT_VERSION = 2;
+const repository = "local-publishing-7";
 
-function makeSnapshot(remoteCommit = BASE_COMMIT, overlayCommit?: string): SnapshotId {
-  return { repository, remoteCommit, ...(overlayCommit ? { overlayCommit } : {}) };
+function makeSnapshot(projectVersion = BASE_VERSION, updatedVersion?: number): SnapshotId {
+  return { projectId: repository, projectVersion, ...(updatedVersion ? { projectVersion: updatedVersion } : {}) };
 }
 
 class MemoryReader implements SnapshotReader {
@@ -105,13 +99,13 @@ async function invokeAction(definition: Awaited<ReturnType<typeof createModule>>
   return result.data as Record<string, unknown>;
 }
 
-function applyOperation(reader: MemoryReader, operation: ChangeOperation, newCommit: string, overlay = false): MemoryReader {
+function applyOperation(reader: MemoryReader, operation: ChangeOperation, newCommit: number, overlay = false): MemoryReader {
   const files = new Map([...reader.files].map(([path, content]) => [path, Buffer.from(content)]));
   for (const write of operation.writes) {
     if (write.content === null) files.delete(write.path);
     else files.set(write.path, write.encoding === "base64" ? Buffer.from(write.content, "base64") : Buffer.from(write.content, "utf8"));
   }
-  return new MemoryReader(files, makeSnapshot(newCommit, overlay ? "checkpoint-1" : undefined));
+  return new MemoryReader(files, makeSnapshot(newCommit));
 }
 
 test("source plaintext conversion and vertical print keep Japanese text and scene order", () => {
@@ -239,7 +233,7 @@ test("episode edits propose metadata operations and preserve unknown YAML and pu
   assert.deepEqual(clearedYaml.episodes[0].futureEpisodeField, { retain: "yes" }, "unknown episode fields remain preserved on clear");
 });
 
-test("a share activates only on the remote published snapshot and revocation is checked on every public read", async () => {
+test("a share activates only after its PostgreSQL apply and revocation is checked on every public read", async () => {
   const definition = await createPublishing();
   const proposals: ChangeProposal[] = [];
   let remote = new MemoryReader(fixtureFiles());
@@ -256,14 +250,13 @@ test("a share activates only on the remote published snapshot and revocation is 
   const publicBase = definition.http!.find((item) => item.id === "publishing.http.public-share")!;
   const publicScene = definition.http!.find((item) => item.id === "publishing.http.public-share-scene")!;
   const publicContext = (reader: SnapshotReader) => actionContext(reader, []);
-  const url = "https://codexia.invalid/api/public/repos/local-publishing-7/modules/publishing/share/" + encodeURIComponent(token);
+  const url = "https://codexia.invalid/api/public/projects/local-publishing-7/modules/publishing/share/" + encodeURIComponent(token);
   const beforePublish = await publicBase.handle(new Request(url), publicContext(remote));
   assert.equal(beforePublish.status, 404, "an unpushed checkpoint/proposal is not public");
 
-  const checkpoint = applyOperation(remote, createOperation, BASE_COMMIT, true);
-  assert.equal((await publicBase.handle(new Request(url), publicContext(checkpoint))).status, 503, "public readers reject a checkpoint overlay");
+  assert.equal((await publicBase.handle(new Request(url), publicContext(remote))).status, 404, "proposing a share does not apply it");
 
-  remote = applyOperation(remote, createOperation, NEXT_COMMIT);
+  remote = applyOperation(remote, createOperation, NEXT_VERSION);
   const metadataResponse = await publicBase.handle(new Request(url), publicContext(remote));
   assert.equal(metadataResponse.status, 200);
   assert.equal(metadataResponse.headers.get("x-robots-tag"), "noindex, nofollow");
@@ -284,7 +277,7 @@ test("a share activates only on the remote published snapshot and revocation is 
   const revokeOperation = proposals.at(-1)!.operations[0]!;
   assert.ok(revoked.proposalId);
   assert.equal((await publicBase.handle(new Request(url), publicContext(remote))).status, 200, "local revocation does not alter the current remote snapshot");
-  remote = applyOperation(remote, revokeOperation, "c".repeat(40));
+  remote = applyOperation(remote, revokeOperation, 3);
   assert.equal((await publicBase.handle(new Request(url), publicContext(remote))).status, 404, "confirmed remote revocation blocks the next read");
 
   const expiredToken = "share_" + "x".repeat(43);
@@ -319,7 +312,7 @@ test("publishing migration hook validates the exact-byte episode map and selecte
   const migrationContext: MigrationContext = {
     source,
     target,
-    repository,
+    projectId: repository,
     snapshot: target.snapshot,
     enabledModules: new Set(["publishing"]),
     workspaceProjectId: "legacy-project",
@@ -357,8 +350,8 @@ test("publishing migration hook validates the exact-byte episode map and selecte
 test("publishing reactivation proposes retained episode bytes and safely merges hashed grants", async () => {
   const episodeBytes = "# author comment stays byte-for-byte\nepisodes:\n  - id: ep-kept\n    number: 4\n    title: 保存された話\n    publishedAt: 2024-05-06\n    scope: chapter\n    scopeId: ch-1\n    vendorField: keep-me\n";
   const grantRows = [
-    { id: "grant-z", projectId: repository.repositoryId, scope: { kind: "scene", id: "sc-1", token: "nested-reactivation-scope-secret" }, label: "scene", tokenHash: "f".repeat(64), createdAt: "2024-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z", revokedAt: "2024-02-01T00:00:00.000Z", ownerId: "must-not-return", tokenPrefix: "share_never-return", token: "raw-bearer-never-return" },
-    { id: "grant-a", projectId: repository.repositoryId, scope: "ch-1", label: "chapter", tokenHash: "e".repeat(64), createdAt: "2024-03-01T00:00:00.000Z", expiresAt: "2030-03-01T00:00:00.000Z", lastUsedAt: "2024-04-01T00:00:00.000Z" },
+    { id: "grant-z", projectId: repository, scope: { kind: "scene", id: "sc-1", token: "nested-reactivation-scope-secret" }, label: "scene", tokenHash: "f".repeat(64), createdAt: "2024-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z", revokedAt: "2024-02-01T00:00:00.000Z", ownerId: "must-not-return", tokenPrefix: "share_never-return", token: "raw-bearer-never-return" },
+    { id: "grant-a", projectId: repository, scope: "ch-1", label: "chapter", tokenHash: "e".repeat(64), createdAt: "2024-03-01T00:00:00.000Z", expiresAt: "2030-03-01T00:00:00.000Z", lastUsedAt: "2024-04-01T00:00:00.000Z" },
   ];
   const retainedEpisodePath = "meta/scriptorium/modules/publishing/legacy/files/meta/publish-episodes.yaml";
   const retainedGrantPath = "meta/scriptorium/modules/publishing/legacy/share-grants.jsonl";
@@ -378,7 +371,7 @@ test("publishing reactivation proposes retained episode bytes and safely merges 
   const migrationContext: MigrationContext = {
     source,
     target,
-    repository,
+    projectId: repository,
     snapshot: target.snapshot,
     enabledModules: new Set(["publishing"]),
   };
@@ -398,7 +391,7 @@ test("publishing reactivation proposes retained episode bytes and safely merges 
   }
   const mergedRows = grantsOperation.writes[0]!.content!.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
   assert.deepEqual(mergedRows.map((grant) => grant.id), ["grant-a", "grant-z"], "new grants are appended in stable ID order");
-  assert.equal(mergedRows[0]!.projectId, repository.repositoryId);
+  assert.equal(mergedRows[0]!.projectId, repository);
   assert.equal(mergedRows[0]!.lastUsedAt, "2024-04-01T00:00:00.000Z");
   assert.equal(mergedRows[1]!.revokedAt, "2024-02-01T00:00:00.000Z");
   assert.deepEqual(mergedRows[1]!.scope, { kind: "scene", id: "sc-1" }, "reactivated object scopes retain only the supported kind and ID");
@@ -428,8 +421,8 @@ test("publishing reactivation proposes retained episode bytes and safely merges 
   assert.deepEqual(submitted?.operations.map((operation) => operation.id), inspection.operations.map((operation) => operation.id));
   assert.ok(!JSON.stringify(submitted).includes("nested-reactivation-scope-secret"), "Core proposal payload excludes nested scope secrets");
 
-  const appliedEpisodes = applyOperation(target, episodeOperation, NEXT_COMMIT);
-  const appliedAll = applyOperation(appliedEpisodes, grantsOperation, NEXT_COMMIT);
+  const appliedEpisodes = applyOperation(target, episodeOperation, NEXT_VERSION);
+  const appliedAll = applyOperation(appliedEpisodes, grantsOperation, NEXT_VERSION);
   const alreadyRestored = await producer.inspect({ ...migrationContext, target: appliedAll, snapshot: appliedAll.snapshot });
   assert.deepEqual(alreadyRestored.operations, [], "reinspection after applying the proposal is idempotent");
   assert.ok(alreadyRestored.entries.some((entry) => entry.target === EPISODES_PATH && entry.disposition === "unchanged"));
@@ -468,7 +461,7 @@ test("publishing reactivation defers to live stores and does nothing while disab
   const retainedGrantPath = "meta/scriptorium/modules/publishing/legacy/share-grants.jsonl";
   const target = new MemoryReader(new Map([
     [retainedEpisodePath, "episodes: []\n"],
-    [retainedGrantPath, JSON.stringify({ id: "grant-1", projectId: repository.repositoryId, scope: "ch-1", label: "chapter", tokenHash: "e".repeat(64), createdAt: "2024-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z" }) + "\n"],
+    [retainedGrantPath, JSON.stringify({ id: "grant-1", projectId: repository, scope: "ch-1", label: "chapter", tokenHash: "e".repeat(64), createdAt: "2024-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z" }) + "\n"],
   ]));
   const projectFiles = new Map([["meta/publish-episodes.yaml", Buffer.from("episodes: []\n")]]);
   const workspaceFiles = new Map([["share-tokens.json", Buffer.from("[]")]]);
@@ -481,14 +474,14 @@ test("publishing reactivation defers to live stores and does nothing while disab
     listWorkspaceFiles: async () => [...workspaceFiles.keys()],
   } as unknown as LegacySourceReader;
   const producer = createPublishingMigrationProducer();
-  const live = await producer.inspect({ source, target, repository, snapshot: target.snapshot, enabledModules: new Set(["publishing"]) });
+  const live = await producer.inspect({ source, target, projectId: repository, snapshot: target.snapshot, enabledModules: new Set(["publishing"]) });
   assert.ok(!live.operations.some((operation) => operation.writes.some((write) => write.path === EPISODES_PATH || write.path === SHARE_GRANTS_PATH)));
   assert.ok(!live.entries.some((entry) => entry.source.startsWith("meta/scriptorium/modules/publishing/legacy/")), "live source keeps ownership with its importer");
 
   const disabled = await producer.inspect({
     source: { ...source, workspaceDataRoot: undefined, readProjectFile: async () => null, readWorkspaceFile: async () => null, listWorkspaceFiles: async () => [] } as LegacySourceReader,
     target,
-    repository,
+    projectId: repository,
     snapshot: target.snapshot,
     enabledModules: new Set(),
   });

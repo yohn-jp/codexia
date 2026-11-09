@@ -5,10 +5,10 @@ function lateOperation(context: BrowserModuleContext): ChangeOperation {
   return {
     id: "late-contribution-operation",
     generation: 1,
-    repository: context.snapshot.repository,
-    baseRemoteCommit: context.snapshot.remoteCommit,
+    projectId: context.snapshot.projectId,
+    baseProjectVersion: context.snapshot.projectVersion,
     effect: "metadata",
-    reads: [],
+    reads: [{ path: "meta/scriptorium/modules/publishing/lifecycle-late-callback.md", revision: null }],
     writes: [{
       path: "meta/scriptorium/modules/publishing/lifecycle-late-callback.md",
       revision: null,

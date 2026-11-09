@@ -1,45 +1,33 @@
 # Codexia
 
-A modular writing workspace with an existing Git repository mode and an additive PostgreSQL Database mode. Git workspaces keep Git-controlled YAML and Markdown as their source of truth; Database workspaces store projects, documents, revisions, Knowledge and Evidence in PostgreSQL. The Core profile runs without optional analysis or model dependencies; the full profile composes nine independent add-ons.
+A modular writing workspace with PostgreSQL as the sole authority for projects, hierarchy, Markdown documents, immutable revisions, Knowledge, Evidence and Text Anchors. Desktop and Mobile share authoring and browser recovery while retaining their own shells. The Core profile runs without optional analysis or model dependencies; the full profile composes nine independent add-ons.
 
-Connect a GitHub work repository, browse volumes, chapters and scenes, edit Markdown, save with revision checks, inspect Git commits, and explicitly synchronize with GitHub. The PostgreSQL Database workspace also supports project/document creation, revision history and restore, conflict comparison and recovery, Knowledge, and UTF-16 Text Anchor/Evidence links in the shared CodeMirror editor. Both modes keep browser recovery separate from their canonical store. One server instance serves one trusted owner; all registered projects belong to that owner.
+Edit with revision checks, compare conflicts without losing drafts, restore earlier revisions, review module proposals, and export from consistent database snapshots. One standalone server serves one trusted owner. Hosted access remains bound to verified assignment, permissions and an explicitly configured PostgreSQL project.
 
 [Documentation](docs/README.md) covers authoring, architecture, deployment and verification. The [external Plugin Platform proposal](docs/architecture/PLUGIN-PLATFORM.md) specifies a separate isolation and distribution design; built-in modules execute as trusted application code.
 
-The [Codexia reboot RFC](docs/architecture/CODEXIA-REBOOT-RFC.md) remains a broader design proposal. PostgreSQL persistence and a separate Database workspace/deployment path are implemented additively; the existing Git workspace contract remains in force for Git projects.
+The [Codexia reboot RFC](docs/architecture/CODEXIA-REBOOT-RFC.md) contains broader design proposals; [Core architecture](docs/architecture/CORE.md) defines the supported persistence contract.
 
 ## Run locally
 
-Requires Node.js 24+, Git, and pnpm 12.10.1.
+Requires Node.js 24+, pnpm 12.10.1 and PostgreSQL.
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
 export CODEXIA_AUTH_TOKEN="$(openssl rand -hex 32)"
-# Set CODEXIA_GITHUB_TOKEN separately for private repositories and push access.
+export CODEXIA_DATABASE_URL='postgres://codexia:password@127.0.0.1:5432/codexia'
+pnpm --filter @codexia/persistence-postgres migrate
 pnpm start
 ```
 
-Open `http://127.0.0.1:3000` and sign in with `CODEXIA_AUTH_TOKEN`. Public repository reads need no GitHub token. For private repositories and synchronization, provide a GitHub token with access only to the intended work repositories. Credentials stay on the server; do not put them in a repository URL. See [.env.example](.env.example) for configuration names; environment files are not automatically loaded.
+Open `http://127.0.0.1:3000` and sign in with `CODEXIA_AUTH_TOKEN`. Configuration names are in [.env.example](.env.example); environment files are not automatically loaded. Startup requires a reachable PostgreSQL database. Apply checked migrations explicitly, or set `CODEXIA_DATABASE_MIGRATE_ON_START=1` only when the API role is intended to apply migrations. No Git fallback exists.
 
-To enable PostgreSQL Database workspaces locally, set `CODEXIA_DATABASE_URL`, apply the existing checked migrations with `pnpm --filter @codexia/persistence-postgres migrate`, and set `CODEXIA_REQUIRE_POSTGRES=1` when PostgreSQL must be available for startup. Set `CODEXIA_DATABASE_MIGRATE_ON_START=1` only when the API role is intended to apply checked migrations at startup. The default Git workspace can run without a database.
+Create projects and documents in the workspace. Local drafts live in IndexedDB until the server confirms a database revision. Stale saves preserve the draft and expose conflict recovery. Browser recovery belongs to the same browser/origin; clearing its storage removes that recovery copy. Back up PostgreSQL and private host history separately, following [deployment](docs/deployment/README.md).
 
-The work repository must use the existing Arcadia layout:
+Writing, Research, and Review presets assemble independent Editor, Outline, Inspector, History, and Review panels. Use panel grips and dock targets on desktop, or the keyboard-accessible move controls, to split, tab, reorder, resize, show, and hide panels. **Save layout** stores the arrangement for the current author and desktop/mobile device class in this browser, separately from draft recovery and PostgreSQL. Invalid saved layouts fall back without erasing the prior setting until an explicit save.
 
-```text
-plot/volumes/<volume>/volume.yaml
-plot/volumes/<volume>/chapters/<chapter>/chapter.yaml
-plot/volumes/<volume>/chapters/<chapter>/scenes/<scene>.yaml
-manuscript/<volume>/<chapter>/<scene>.md
-```
-
-Scene YAML identifies its Markdown file with `manuscript: manuscript/.../scene.md`. Unsupported metadata and files are preserved. The writing UI can create and reorder volumes, chapters, and scenes through reviewed Core operations.
-
-Draft means browser recovery storage; Checkpoint means a local Git commit; Saved means publication to GitHub has been confirmed. Checkpoint retains the browser recovery record. Remote observation probes the repository's default branch and fetches when its HEAD changes; canonical snapshots remain separate from unpublished local work. Revision checks protect editing and report conflicts without automatically resolving manuscript text. Retried operations retain their identities across response loss and clone reconstruction. Browser recovery uses the same browser and origin; clearing browser storage removes that recovery copy.
-
-Writing, Research, and Review presets assemble independent Editor, Outline, Inspector, History, and Review panels. Use panel grips and dock targets on desktop, or the keyboard-accessible move controls, to split, tab, reorder, resize, show, and hide panels. **Save layout** stores the arrangement for the current author and desktop/mobile device class in this browser, separately from draft recovery and Git. Invalid saved layouts fall back without erasing the prior setting until an explicit save.
-
-Search/Terminology is optional: it indexes snapshot revisions, including local checkpoints, and supports lexical, exact, prefix, and scoped queries. The term dictionary is changed through reviewable proposals. Automatic term links are temporary editor/reading decorations and never insert links into Markdown; use Ctrl/Command-click or Ctrl/Command-Enter on an editor term to navigate. Ambiguous aliases remain plain text and can be inspected in the terminology panel. Search can explicitly request existing NLP or Semantic capabilities; ordinary search does not load models. Core-only builds retain authoring without this plugin.
+Search/Terminology is optional: it indexes snapshot revisions, using PostgreSQL project/document revisions, and supports lexical, exact, prefix, and scoped queries. The term dictionary is changed through reviewable proposals. Automatic term links are temporary editor/reading decorations and never insert links into Markdown; use Ctrl/Command-click or Ctrl/Command-Enter on an editor term to navigate. Ambiguous aliases remain plain text and can be inspected in the terminology panel. Search can explicitly request existing NLP or Semantic capabilities; ordinary search does not load models. Core-only builds retain authoring without this plugin.
 
 To build and run the full composition, use `CODEXIA_PROFILE=full pnpm build` and `CODEXIA_PROFILE=full pnpm start`. It includes Story, Diagnostics, NLP, Semantic, Speaker, Assistant, Publishing, MCP, and Search/Terminology. Module settings distinguish absent, disabled, enabled-idle, and active modules. Heavy engines run in supervised child processes. Assistant provider execution requires provider configuration and author consent; selecting no provider keeps local writing and review available.
 
@@ -70,13 +58,13 @@ rather than implementing an application-specific OAuth issuer.
 ```sh
 podman build --format oci --build-arg PROFILE=core -t codexia:local .
 podman run --rm -p 127.0.0.1:3000:3000 \
-  --env CODEXIA_AUTH_TOKEN --env CODEXIA_GITHUB_TOKEN \
+  --env CODEXIA_AUTH_TOKEN --env CODEXIA_DATABASE_URL \
   --mount type=volume,src=scriptorium-data,dst=/data \
   --mount type=volume,src=scriptorium-history,dst=/history \
   codexia:local
 ```
 
-Use `PROFILE=full` with the same Dockerfile for the full composition. The existing volume names are retained for upgrades. Keep `/data` and `/history` persistent: `/history` holds private usage and job history separately from Git work repositories. Use HTTPS through a trusted reverse proxy when accessing the instance beyond localhost. Do not run multiple containers against one workspace volume. This is a single-owner application.
+Use `PROFILE=full` with the same Dockerfile for the full composition. The existing volume names are retained for upgrades. Keep `/data` and `/history` persistent: `/history` holds private usage and job history separately from PostgreSQL manuscript records. Use HTTPS through a trusted reverse proxy when accessing the instance beyond localhost. Do not run multiple containers against one workspace volume. This is a single-owner application.
 
 ## Development and verification
 

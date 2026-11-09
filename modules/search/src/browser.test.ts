@@ -64,7 +64,7 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void; reject(e
 
 function actionResult(
   data: Record<string, unknown>,
-  snapshot: Record<string, unknown> = { remoteCommit: "requested-snapshot-123456" },
+  snapshot: Record<string, unknown> = { projectId: "project-one", projectVersion: 12 },
 ): unknown {
   return { ok: true, snapshot, data };
 }
@@ -157,15 +157,15 @@ test("repeated submissions keep the latest empty response and its submitted snap
     assert.equal(inputs[1]?.input.useNlp, false);
     assert.equal(inputs[1]?.input.includeSemantic, false);
 
-    second.resolve(actionResult({ results: [], indexedDocuments: 0, semanticResults: [], warnings: [], indexSnapshot: { remoteCommit: "index-snapshot-987654" } }));
+    second.resolve(actionResult({ results: [], indexedDocuments: 0, semanticResults: [], warnings: [], indexSnapshot: { projectId: "project-one", projectVersion: 10 } }));
     await settle();
     assert.equal(panel.results.children.length, 0);
     assert.match(panel.status.textContent, /0 件/u);
     assert.match(panel.status.textContent, /query B/u);
     assert.match(panel.status.textContent, /完全一致/u);
     assert.match(panel.status.textContent, /manuscript\/vol-1/u);
-    assert.match(panel.status.textContent, /requested-sn/u);
-    assert.match(panel.status.textContent, /index-snapsh/u);
+    assert.match(panel.status.textContent, /project-one@12/u);
+    assert.match(panel.status.textContent, /project-one@10/u);
 
     first.resolve(actionResult({ results: [{ title: "Stale result from A", path: "manuscript/a.md", kind: "document" }], indexedDocuments: 1 }));
     await settle();

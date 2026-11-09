@@ -1,9 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { defineConfig } from "@playwright/test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-const externalRepository = Boolean(process.env.CODEXIA_E2E_REPOSITORY_URL);
+const externalDatabase = process.env.CODEXIA_E2E_EXTERNAL_DATABASE === "1";
 const selectedTestFile = process.env.CODEXIA_E2E_TEST_FILE;
 const coverageFile = process.env.CODEXIA_E2E_COVERAGE_FILE;
 const configuredBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL;
@@ -17,17 +18,15 @@ const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN
   ?? "codexia-e2e-token-for-local-testing-only";
 
 process.env.CODEXIA_E2E_STATE_DIR = stateDir;
-process.env.CODEXIA_E2E_REPOSITORY_URL ??= resolve(stateDir, "origin.git");
-if (!configuredBaseURL && !externalRepository) {
-  process.env.CODEXIA_E2E_MODULAR_REPOSITORY_URL ??= resolve(stateDir, "modular-origin.git");
-}
-process.env.CODEXIA_E2E_REPOSITORY_BRANCH ??= "main";
+process.env.CODEXIA_E2E_PROJECT_TITLE ??= `Acceptance manuscript ${randomUUID()}`;
 process.env.CODEXIA_E2E_AUTH_TOKEN = authToken;
 process.env.CODEXIA_E2E_PORT ??= "4173";
-process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY ??= externalRepository ? "1" : "";
 process.env.CODEXIA_E2E_TEMP_STATE_DIR = isTemporaryStateDir ? "1" : "";
-if (externalServer && !externalRepository) {
-  throw new Error("Set CODEXIA_E2E_REPOSITORY_URL to a disposable HTTPS GitHub fixture when targeting an external app");
+if (!externalServer && !process.env.CODEXIA_E2E_DATABASE_URL) {
+  throw new Error("Set CODEXIA_E2E_DATABASE_URL to an isolated disposable PostgreSQL database or schema");
+}
+if (externalServer && !externalDatabase) {
+  throw new Error("Set CODEXIA_E2E_EXTERNAL_DATABASE=1 to acknowledge a disposable PostgreSQL fixture when targeting an external app");
 }
 if (selectedTestFile && !/^[a-z0-9-]+\.acceptance\.spec\.ts$/u.test(selectedTestFile)) {
   throw new Error("CODEXIA_E2E_TEST_FILE must name one acceptance spec");

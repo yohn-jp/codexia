@@ -14,14 +14,14 @@
 
 **作者が、どの作品のどの文章を書いているか、変更がどこまで保護されているかを見失わず、参照・整理・レビューを挟んでも同じ思考へ戻れる。**
 
-Codexiaは、巻・章・シーンと日本語原稿を中心とするGit-backed writing workspaceである。Gitクライアントでも、汎用の社内Wiki／プロジェクト管理ダッシュボードでもない。Git、検索、解析は執筆を支えるが、作者の文章より前に立たない。
+Codexiaは、巻・章・シーンと日本語原稿を中心とするPostgreSQLを正本とする執筆環境である。Gitクライアントでも、汎用の社内Wiki／プロジェクト管理ダッシュボードでもない。保存、検索、解析は執筆を支えるが、作者の文章より前に立たない。
 
 | 作者の仕事 | 第一に必要な情報 | 周辺に呼び出す道具 |
 | --- | --- | --- |
 | 続きを書く | 作品・シーン、最新の回復可能な本文、入力可否、保護状態 | 構成、保存状態、必要な書式操作 |
 | 読み直す | 読み位置、本文とルビ、選択した組版 | 構成移動、表示調整、編集への復帰 |
 | 調べながら書く | 現在の本文と参照箇所の関係 | 検索、用語、関連する文書、任意の解析 |
-| 変更を確かめる | 変更対象、差分、適用先、保存範囲 | 提案レビュー、履歴、Checkpoint、GitHubへの保存 |
+| 変更を確かめる | 変更対象、差分、適用先、保存範囲 | 提案レビュー、履歴、Revision履歴、保存と復元 |
 
 最初から執筆できる完成した初期配置を提供し、設定やパネル組立てを利用開始の前提にしない。一方で、熟練者の任意配置・分割・複数パネルを制限して「シンプルさ」を作らない。
 
@@ -29,7 +29,7 @@ Codexiaは、巻・章・シーンと日本語原稿を中心とするGit-backed
 
 ### 作業の軸
 
-作者／リポジトリのscope、作品の構成、現在のシーン、本文、参照対象を区別する。同名シーンでも文脈から識別でき、ライブラリから本文へ、参照から執筆へ戻れる。ファイルpathやGit SHAは調査・差分に必要な時に示し、常時それだけで対象を説明しない。
+作者／プロジェクトのscope、作品の構成、現在のシーン、本文、参照対象を区別する。同名シーンでも文脈から識別でき、ライブラリから本文へ、参照から執筆へ戻れる。文書pathやRevision IDは調査・差分に必要な時に示し、常時それだけで対象を説明しない。
 
 執筆・調査・レビューは別のデータ正本ではない。Writing／Research／Reviewは同じ作業状態を使う編集可能なレイアウトの出発点であり、文書のコピーや新しい保存セッションを作らない。
 
@@ -39,23 +39,25 @@ Codexiaは、巻・章・シーンと日本語原稿を中心とするGit-backed
 | --- | --- | --- |
 | 入力と保護 | 現在の入力、journal書込み中／成功／失敗、復旧照合中 | タイピングしただけでDraft保存済みとする |
 | Draft | 同じbrowser・author・originの回復journalに保持された内容 | サーバーや別端末にも保存済みと示す |
-| Checkpoint | 承認済み変更がサーバーのlocal Gitに確定した内容 | GitHub保存の完了と示す |
-| GitHubへの保存 | 対象revisionのremote反映を確認できた内容 | 要求受付、local commit、応答不明を成功にする |
-| Remote観測 | fresh／stale／unknownなど、外部状態を確認できた範囲 | 接続不能を原稿消失や保存失敗と即断する |
+| 保存中 | observed Revisionと操作IDに結び付くDB保存要求 | 要求の受付だけで保存完了とする |
+| 保存済みRevision | PostgreSQLが確定した本文と対応するreceipt | 後続の未保存入力まで保存済みとする |
+| 接続と応答 | DBの利用可否、結果を照合できた範囲 | 応答不明を成功や原稿消失と即断する |
 
-これらは同時に存在する。Checkpoint後の新しい編集はそのCheckpointに含まれない。GitHubに保存したrevisionと現在の未反映編集を混同しない。通常表示は短くても、どの範囲がどこに残っているかを展開して確認できること。全状態を巨大なバッジ列に常時並べる必要はない。
+これらの状態は同時に存在する。
+保存要求を送った後の入力は、その要求で確定したRevisionに含まれない。
+通常表示は短くても、どの範囲がブラウザーとPostgreSQLに残っているかを確認できること。
 
 ## 4. 執筆・参照の契約
 
 ### S-01 — 安全に続きを始められる
 
-最後の作業対象へ戻る時、現在のauthor／repositoryに結び付く正規の回復記録と本文を照合する。表示を先に出す場合も、照合が終わるまでは「回復済み・編集可能」と偽装しない。別作者のDraftを混ぜない。
+最後の作業対象へ戻る時、現在のauthor／projectに結び付く正規の回復記録と本文を照合する。表示を先に出す場合も、照合が終わるまでは「回復済み・編集可能」と偽装しない。別作者のDraftを混ぜない。
 
-現在のシーンが利用できる時、remote HEAD、検索index、モデル、非表示パネルの完了を待たせない。遅れて届いた前のシーンや古いsnapshotが新しい本文を上書きしない。作品が空、シーン未選択、削除済み、権限拒否、取得失敗、回復に判断が必要な状態には別の説明と正規の次の行動を用意する。[R2]
+現在のシーンが利用できる時、検索index、モデル、非表示パネルの完了を待たせない。遅れて届いた前のシーンや古いsnapshotが新しい本文を上書きしない。作品が空、シーン未選択、削除済み、権限拒否、取得失敗、回復に判断が必要な状態には別の説明と正規の次の行動を用意する。[R2]
 
 ### S-02 — 日本語入力と編集状態が主役であり続ける
 
-CodeMirrorが保持する入力、IME変換、caret、selection、undo、scrollを、状態通知、remote観測、パネル開閉、解析結果、レイアウト変更のために失わない。表示用React stateを最新の入力の代わりの正本にしない。[R7]
+CodeMirrorが保持する入力、IME変換、caret、selection、undo、scrollを、状態通知、Revision観測、パネル開閉、解析結果、レイアウト変更のために失わない。表示用React stateを最新の入力の代わりの正本にしない。[R7]
 
 変更でeditorをunmountする必要がある場合は、既存のcomposition／journal／navigation guardを通す。変換中や保護できない入力がある場合は安全に遷移を止め、理由をその場で説明する。強制的に変換確定したり、古い読み出し結果へ戻したりしない。guardの拒否を単なるクリック無反応にしない。
 
@@ -77,15 +79,20 @@ CodeMirrorが保持する入力、IME変換、caret、selection、undo、scroll�
 
 ### S-05 — 今の文章がどこに残っているか分かる
 
-Draft、Checkpoint、GitHub保存、未確認の反映を一つの「Saved」へ統合しない。成功表示は対応するjournal書込み、receipt、remote確認の後だけ出す。journal容量不足や書込み失敗は回復上のリスクとして残し、消えるトーストだけで知らせない。
+Draft、保存中、確定Revision、応答不明を一つの「保存済み」へ統合しない。
+成功表示は対応するjournal書込みとPostgreSQLのreceiptを確認した後だけ出す。journal容量不足や書込み失敗は回復上のリスクとして残し、消えるトーストだけで知らせない。
 
 保存中にも安全に入力できる経路では、処理対象revisionと後続入力を分ける。後続入力まで保存済みと表示しない。処理中の制約が必要なら対象操作と理由を明示し、関係のない閲覧・入力まで止めない。
 
-### S-06 — CheckpointとGitHub保存を意図して実行できる
+### S-06 保存と作者承認の対象を確認できる
 
-作者は対象の変更、必要な承認、local確定とremote反映の違いを理解して実行できる。Checkpointを作成しただけで自動publishしない。GitHubへの保存は明示的な操作であり、画面移動やレイアウト保存で発生させない。
+作者は保存対象の本文とRevision、提案の変更内容を確認できる。
+通常の原稿保存は自動保存と明示的な保存を提供し、提案による変更には既存の作者承認を要求する。
+レイアウト保存を原稿変更や提案承認の契機にしない。
 
-通常のCheckpointと回復再実行は既存の同一protocolを使う。二重押下・再読み込み・応答損失に対し、operation ID、generation、author／repository、proposal、receiptの束縛を維持する。表示を速くするためにreceipt保存や承認を省略しない。
+通常保存と回復再実行は同じ保存規則を使う。
+二重押下、再読み込み、応答損失に対して、操作ID、世代、作者とプロジェクト、提案、receiptの束縛を維持する。
+receiptの記録や作者承認を表示速度のために省略しない。
 
 ### S-07 — 失敗しても文章と復旧判断を失わない
 
@@ -107,15 +114,15 @@ Draft、Checkpoint、GitHub保存、未確認の反映を一つの「Saved」へ
 
 Writing／Research／Reviewからすぐ使え、各panelを許された範囲で並べ替え・分割・tab化・resize・非表示にできる。固定3カラムや固定モードだけへ縮退させない。キーボード／ボタンによる移動とfocus復帰を用意する。[R9]
 
-配置はauthorとdevice classのbrowser設定で、原稿Gitやdraft journalとは独立する。DesktopとMobileの配置を相互に上書きしない。壊れたlayoutはCoreの利用可能な配置にfallbackし、明示的に置換保存するまで元の設定を消さない。
+配置はauthorとdevice classのbrowser設定で、PostgreSQLの原稿やdraft journalとは独立する。DesktopとMobileの配置を相互に上書きしない。壊れたlayoutはCoreの利用可能な配置にfallbackし、明示的に置換保存するまで元の設定を消さない。
 
 panelを閉じても原稿は破棄されない。未導入／無効moduleのpanelは説明付きの回復可能なfallbackとし、他panelを止めない。不要なmount・worker・requestは解放し、隠れたpanelが無制限の仕事を継続しない。
 
 ### S-10 — Optionalな道具が執筆の前提にならない
 
-検索・用語・NLP・Semantic・Assistantは既存module境界を使う。未導入、無効、利用可能だが未起動、実行中、失敗、結果が古い、を区別する。enableはpackageのinstallではない。Core-onlyでも構成移動、編集、履歴、Checkpoint、GitHub保存を維持する。
+検索・用語・NLP・Semantic・Assistantは既存module境界を使う。未導入、無効、利用可能だが未起動、実行中、失敗、結果が古い、を区別する。enableはpackageのinstallではない。Core-onlyでも構成移動、編集、履歴、保存、復元を維持する。
 
-通常の語句検索にモデルを暗黙に読み込まない。用語リンクは非破壊的な装飾で、MarkdownやGitを自動変更しない。曖昧な候補を正解と決め付けず、IME・ルビ・selectionを乱さない。moduleの処理や結果はsnapshot／scopeへ拘束する。
+通常の語句検索にモデルを暗黙に読み込まない。用語リンクは非破壊的な装飾で、Markdownを自動変更しない。曖昧な候補を正解と決め付けず、IME・ルビ・selectionを乱さない。moduleの処理や結果はsnapshot／scopeへ拘束する。
 
 外部Assistant等へ原稿を送る操作は、送信先、対象範囲、目的を確認でき、既存の明示同意を満たす。provider未設定・未同意でもlocal執筆を妨げない。UI刷新はuntrusted plugin、marketplace、別のwriter、外部送信の既定有効化を許可しない。
 
@@ -137,9 +144,9 @@ Desktopは本文と構成・参照・差分の並行作業を支える。Mobile�
 
 ### S-13 — 速さは保護を省くことで作らない
 
-入力・現在sceneの表示・navigation・panel操作をremote観測やindex作成と直列化しない。可視作業を優先し、不要な背景処理を停止・遅延できる。復旧照合が必要な時だけは正しく待ち、その理由を示す。
+入力・現在sceneの表示・navigation・panel操作をRevision観測やindex作成と直列化しない。可視作業を優先し、不要な背景処理を停止・遅延できる。復旧照合が必要な時だけは正しく待ち、その理由を示す。
 
-測定は入力反応、scene切替え、journal書込み、Checkpoint、GitHub保存、検索を別々に扱い、[Performance](../performance/README.md)に従う。cold／warm、同じfixture・profile・browser・host条件と試行数を記録する。ネットワーク完了時間を入力反応時間と呼ばない。
+測定は入力反応、scene切替え、journal書込み、DB保存、Revision復元、検索を別々に扱い、[Performance](../performance/README.md)に従う。cold／warm、同じfixture・profile・browser・host条件と試行数を記録する。ネットワーク完了時間を入力反応時間と呼ばない。
 
 INP p75 200ms以下、CLS p75 0.1以下を外部の品質目安として参照する。フィールド値がなければ未計測であり、単発のブラウザ測定から達成を主張しない。本文・caret・focusの位置安定は別途直接検証する。認可、journal、revision、receiptを省略した高速化は不合格。[R4][R5]
 
@@ -167,11 +174,11 @@ INP p75 200ms以下、CLS p75 0.1以下を外部の品質目安として参照�
 | S-A02 | 日本語入力・変換・selection・undo中に通知、panel開閉、背景観測 | 本文・caret・selection・undoを保持。unmountを伴う操作は正規guardで拒否／実行 | S-02,12 |
 | S-A03 | 横書き／縦書き閲覧、ルビ、括弧、長文、表示切替え | 原稿・metadataを変更せず、読みと編集へ復帰できる | S-03 |
 | S-A04 | scene A→Bへ移動後にAの応答到着、別authorへ切替え | Bや別authorの本文・回復記録へ古い応答を適用しない | S-01,02,04 |
-| S-A05 | Draft書込み中／失敗、Checkpoint後に追加入力、GitHub保存 | 各revisionの保護範囲が正しい。新入力まで保存済みにならない | S-05,06 |
+| S-A05 | Draft書込み中／失敗、保存要求後に追加入力、DB確定 | 各revisionの保護範囲が正しい。新入力まで保存済みにならない | S-05,06 |
 | S-A06 | Checkpoint／pushの応答損失、二重操作、reload後に照合 | 同じoperation／receiptを照合、重複適用・記録の早期削除・偽successなし | S-06,07 |
 | S-A07 | remote更新との競合、認可拒否、認証依存障害 | 原稿を保持し、競合／拒否／unknownを区別。forceや自動prose mergeなし | S-07,08 |
 | S-A08 | 履歴参照、古いmodule提案、適用前後の編集 | 閲覧は非変更、承認とrevision検査、変更範囲を理解して戻れる | S-08,10 |
-| S-A09 | preset適用、任意配置、keyboard移動、layout保存、壊れたlayout | 自由配置とfocus保持、Git非変更、復旧可能fallback、draftは独立保持 | S-09 |
+| S-A09 | preset適用、任意配置、keyboard移動、layout保存、壊れたlayout | 自由配置とfocus保持、原稿非変更、復旧可能fallback、draftは独立保持 | S-09 |
 | S-A10 | 検索無効／index更新中／古い結果／曖昧用語、Core-only起動 | 執筆を妨げず、結果のscopeと鮮度を明示、勝手なモデル起動・source変更なし | S-04,10 |
 | S-A11 | 外部provider未設定・未同意・送信scope確認 | local作業可能、同意前の原稿送信なし、提案の直接書込みなし | S-10 |
 | S-A12 | Mobileで原稿から構成／保存sheetを開閉、back、scene選択、keyboard | 通常参照でeditor再mountなし、guard・focus復帰・safe area、突然のkeyboardなし | S-02,11,12 |
@@ -180,7 +187,7 @@ INP p75 200ms以下、CLS p75 0.1以下を外部の品質目安として参照�
 
 Desktopは1440／1920、Mobileは320／375／390／430 CSS pxを基本とし、狭いDesktop、拡大、長文とkeyboard条件を加える。幅とは独立にshellを指定する。
 
-検証は **視覚・情報階層／操作・accessibility／入力・保存・認可** の別gateで報告する。fixtureで失敗状態を再現することと、正規Core／journal／Gitを通した保存の成功は別の証拠。テストは生成した作品・隔離browserで行い、作者の実原稿や本番remoteへ書き込まない。
+検証は **視覚・情報階層／操作・accessibility／入力・保存・認可** の別gateで報告する。fixtureで失敗状態を再現することと、正規Core／journal／PostgreSQLを通した保存の成功は別の証拠。テストは生成した作品・隔離browserで行い、作者の実原稿や本番remoteへ書き込まない。
 
 Playwright CLIで画面を開き、操作前・受付・遅延・結果・復帰を観察し、回帰条件は既存Playwright Testへ残す。画像の存在だけで合格にしない。DOM／操作／networkの確認、画像の目視、keyboard・支援技術による評価を組み合わせる。[R12][R13]
 
@@ -192,7 +199,7 @@ Synthetic composition eventやWebKit emulationは、物理iPhone、OSの日本�
 
 SharedApplicationは作業状態と許可されたcommandを調整し、Desktop／Mobileはその表示・操作を担う。Checkpoint protocol、browser journal、CoreStore、HTTP admission、module hostは既存の唯一の責務を維持する。UIのための第二のsave state machineやwriterを作らない。
 
-本書は新規NLP機能、任意外部plugin sandbox、別のGit運用、cloud同期、共同編集、完全offline保証、CI省略、公開・本番デプロイを追加しない。既存能力の不足は最小の正規境界の差分として示し、モックの成功値や架空の操作で埋めない。
+本書は新規NLP機能、任意外部plugin sandbox、Git互換運用、別のcloud同期、共同編集、完全offline保証、CI省略、公開・本番デプロイを追加しない。既存能力の不足は最小の正規境界の差分として示し、モックの成功値や架空の操作で埋めない。
 
 ## 11. 調査根拠と採用範囲
 

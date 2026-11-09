@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { link, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
-import type { ActionResult, ModuleId, RepositoryIdentity } from "@codexia/contracts";
+import type { ActionResult, ModuleId } from "@codexia/contracts";
 import type { WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 
 const MAX_RETAINED_JOBS = 500;
@@ -87,8 +87,8 @@ interface PersistedState {
 export interface LegacyJobHistoryImportOptions {
   workspaceDataRoot: string;
   usageDirectory: string;
-  /** Explicit source project key to host-verified stable repository identity mapping. */
-  legacyRepositoryMappings: Readonly<Record<string, RepositoryIdentity>>;
+  /** Explicit source project key to host-verified stable PostgreSQL project identity mapping. */
+  legacyProjectMappings: Readonly<Record<string, string>>;
   /** Only source-user to the single current API owner can be adopted. */
   legacyUserMappings: Readonly<Record<string, "owner">>;
 }
@@ -133,7 +133,7 @@ export class JobHistoryStore {
       await this.load();
       const normalized = normalizeLifecycle(lifecycle);
       const ownerKey = hash("owner");
-      const projectKey = repositoryKey({ provider: normalized.provider, ownerScope: normalized.ownerScope, repositoryId: normalized.repositoryId });
+      const projectKey = projectKeyFor(normalized.projectId);
       const job = publicJob(normalized);
       const index = this.state.jobs.findIndex((entry) => entry.job.id === job.id);
       const current = index < 0 ? undefined : this.state.jobs[index];
@@ -141,7 +141,7 @@ export class JobHistoryStore {
         throw new JobHistoryError("job_identity_conflict", "A worker lifecycle ID cannot replace a different host job record");
       }
       if (current && (current.ownerKey !== ownerKey || current.projectKey !== projectKey || current.job.type !== job.type)) {
-        throw new JobHistoryError("job_identity_conflict", "A worker job ID was reused for another owner, repository, or task");
+        throw new JobHistoryError("job_identity_conflict", "A worker job ID was reused for another owner, project, or task");
       }
       if (current && isFinalStatus(current.job.status)) {
         if (JSON.stringify(current.job) !== JSON.stringify(job)) {
@@ -169,18 +169,18 @@ export class JobHistoryStore {
   }
 
   /** Register a source domain task before invoking its action. No action input is retained. */
-  async beginDomainJob(input: { id: string; type: string; repository: RepositoryIdentity }): Promise<JobEvent> {
+  async beginDomainJob(input: { id: string; type: string; projectId: string }): Promise<JobEvent> {
     return this.exclusive(async () => {
       await this.load();
       const id = boundedText(input.id, 1, 128, /^[A-Za-z0-9_-]+$/u, "job ID");
       const type = boundedText(input.type, 1, 64, /^[a-z][a-z0-9-]*$/u, "domain job type");
-      if (!isRepositoryIdentity(input.repository)) throw new JobHistoryError("job_identity_invalid", "Domain job repository identity is invalid");
+      if (!isProjectId(input.projectId)) throw new JobHistoryError("job_identity_invalid", "Domain job project identity is invalid");
       const ownerKey = hash("owner");
-      const projectKey = repositoryKey({ provider: input.repository.provider, ownerScope: input.repository.ownerScope, repositoryId: input.repository.repositoryId });
+      const projectKey = projectKeyFor(input.projectId);
       const existing = this.state.jobs.find((entry) => entry.job.id === id);
       if (existing) {
         if (existing.kind !== "domain" || existing.ownerKey !== ownerKey || existing.projectKey !== projectKey || existing.job.type !== type) {
-          throw new JobHistoryError("job_identity_conflict", "A domain job ID was reused for another owner, repository, or task");
+          throw new JobHistoryError("job_identity_conflict", "A domain job ID was reused for another owner, project, or task");
         }
         return jobEvent(existing.job);
       }
@@ -273,35 +273,35 @@ export class JobHistoryStore {
     });
   }
 
-  async listJobs(): Promise<PublicJob[]> {
+  async listJobs(projectId?: string): Promise<PublicJob[]> {
     return this.exclusive(async () => {
       await this.load();
-      return this.state.jobs.map(({ job }) => clonePublicJob(job)).sort(newestFirst);
+      return this.state.jobs.filter((entry) => projectId === undefined || entry.projectKey === projectKeyFor(projectId)).map(({ job }) => clonePublicJob(job)).sort(newestFirst);
     });
   }
 
-  async getJob(id: string): Promise<PublicJob | undefined> {
+  async getJob(id: string, projectId?: string): Promise<PublicJob | undefined> {
     return this.exclusive(async () => {
       await this.load();
-      const record = this.state.jobs.find(({ job }) => job.id === id);
+      const record = this.state.jobs.find((entry) => entry.job.id === id && (projectId === undefined || entry.projectKey === projectKeyFor(projectId)));
       return record ? clonePublicJob(record.job) : undefined;
     });
   }
 
-  async listInbox(options: { unreadOnly?: boolean } = {}): Promise<{ items: InboxItem[]; unreadCount: number }> {
+  async listInbox(options: { unreadOnly?: boolean; projectId?: string } = {}): Promise<{ items: InboxItem[]; unreadCount: number }> {
     return this.exclusive(async () => {
       await this.load();
-      const items = this.state.inbox.filter((item) => !options.unreadOnly || !item.read)
+      const items = this.state.inbox.filter((item) => (options.projectId === undefined || item.projectKey === projectKeyFor(options.projectId)) && (!options.unreadOnly || !item.read))
         .map((item) => ({ ...item })).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-      const unreadCount = this.state.inbox.reduce((count, item) => count + Number(!item.read), 0);
+      const unreadCount = this.state.inbox.reduce((count, item) => count + Number(!item.read && (options.projectId === undefined || item.projectKey === projectKeyFor(options.projectId))), 0);
       return { items, unreadCount };
     });
   }
 
-  async markInboxRead(id: string): Promise<InboxItem | undefined> {
+  async markInboxRead(id: string, projectId?: string): Promise<InboxItem | undefined> {
     return this.exclusive(async () => {
       await this.load();
-      const index = this.state.inbox.findIndex((item) => item.id === id);
+      const index = this.state.inbox.findIndex((item) => item.id === id && (projectId === undefined || item.projectKey === projectKeyFor(projectId)));
       if (index < 0) return undefined;
       const next = cloneState(this.state);
       const item = next.inbox[index]!;
@@ -312,13 +312,13 @@ export class JobHistoryStore {
     });
   }
 
-  async markAllInboxRead(): Promise<number> {
+  async markAllInboxRead(projectId?: string): Promise<number> {
     return this.exclusive(async () => {
       await this.load();
       const next = cloneState(this.state);
       let marked = 0;
       for (const item of next.inbox) {
-        if (!item.read) { item.read = true; marked += 1; }
+        if (!item.read && (projectId === undefined || item.projectKey === projectKeyFor(projectId))) { item.read = true; marked += 1; }
       }
       if (marked > 0) {
         await this.persist(next);
@@ -330,7 +330,7 @@ export class JobHistoryStore {
 
   async adoptArchivedLegacyState(
     sourceHash: string,
-    legacyRepositoryMappings: Readonly<Record<string, RepositoryIdentity>>,
+    legacyProjectMappings: Readonly<Record<string, string>>,
     legacyUserMappings: Readonly<Record<string, "owner">>,
   ): Promise<LegacyJobHistoryImportReport> {
     return this.exclusive(async () => {
@@ -359,9 +359,9 @@ export class JobHistoryStore {
       const mapPair = (entry: unknown): { projectKey: string | null; userId: string | null; ownerKey: string; targetProjectKey: string } | undefined => {
         const projectKey = isRecord(entry) && typeof entry.projectKey === "string" && entry.projectKey.length <= 1024 ? entry.projectKey : null;
         const userId = isRecord(entry) && typeof entry.userId === "string" && entry.userId.length <= 512 ? entry.userId : null;
-        const repository = projectKey === null ? undefined : ownValue(legacyRepositoryMappings, projectKey);
+        const repository = projectKey === null ? undefined : ownValue(legacyProjectMappings, projectKey);
         const ownerMapping = userId === null ? undefined : ownValue(legacyUserMappings, userId);
-        if (!isRepositoryIdentity(repository) || ownerMapping !== "owner") {
+        if (!isProjectId(repository) || ownerMapping !== "owner") {
           const key = JSON.stringify([projectKey, userId]);
           const row = required.get(key) ?? { projectKey, userId, jobCount: 0, inboxCount: 0 };
           if (isRecord(entry) && "kind" in entry) row.inboxCount += 1;
@@ -371,7 +371,7 @@ export class JobHistoryStore {
         }
         return {
           projectKey, userId, ownerKey: hash("owner"),
-          targetProjectKey: repositoryKey({ provider: repository.provider, ownerScope: repository.ownerScope, repositoryId: repository.repositoryId }),
+          targetProjectKey: projectKeyFor(repository),
         };
       };
 
@@ -515,8 +515,8 @@ export async function importLegacyJobHistory(options: LegacyJobHistoryImportOpti
   if (!options.workspaceDataRoot?.trim() || !options.usageDirectory?.trim()) {
     throw new JobHistoryError("legacy_jobs_path_invalid", "Legacy and host history directories are required");
   }
-  if (!isRecord(options.legacyRepositoryMappings) || !isRecord(options.legacyUserMappings)) {
-    throw new JobHistoryError("legacy_jobs_mapping_invalid", "Explicit legacy repository and owner mappings are required");
+  if (!isRecord(options.legacyProjectMappings) || !isRecord(options.legacyUserMappings)) {
+    throw new JobHistoryError("legacy_jobs_mapping_invalid", "Explicit legacy project and owner mappings are required");
   }
   const workspaceDataRoot = resolve(options.workspaceDataRoot);
   const usageDirectory = resolve(options.usageDirectory);
@@ -545,11 +545,11 @@ export async function importLegacyJobHistory(options: LegacyJobHistoryImportOpti
   const targetPath = join(legacyDirectory, `${sourceHash}.json`);
   await archiveImmutable(targetPath, legacyDirectory, sourceBytes);
   return new JobHistoryStore(historyRoot).adoptArchivedLegacyState(
-    sourceHash, options.legacyRepositoryMappings, options.legacyUserMappings,
+    sourceHash, options.legacyProjectMappings, options.legacyUserMappings,
   );
 }
 
-function normalizeLifecycle(value: unknown): WorkerJobLifecycle & { ownerScope: string; provider: RepositoryIdentity["provider"]; repositoryId: string } {
+function normalizeLifecycle(value: unknown): WorkerJobLifecycle & { projectId: string } {
   if (!isRecord(value) || !hasOnlyKeys(value, new Set(["jobId", "module", "task", "snapshot", "state", "createdAt", "updatedAt", "startedAt", "finishedAt", "errorCode"]))) {
     throw new JobHistoryError("job_event_invalid", "Worker lifecycle metadata is invalid");
   }
@@ -558,12 +558,8 @@ function normalizeLifecycle(value: unknown): WorkerJobLifecycle & { ownerScope: 
   if (!MODULES.has(module)) throw new JobHistoryError("job_event_invalid", "Worker module is invalid");
   const task = boundedText(value.task, 1, 128, /^[A-Za-z0-9._:-]+$/u, "task");
   const snapshot = value.snapshot;
-  if (!isRecord(snapshot) || !isRecord(snapshot.repository)) throw new JobHistoryError("job_event_invalid", "Worker snapshot identity is invalid");
-  const repository = snapshot.repository;
-  const provider = repository.provider;
-  if (provider !== "github" && provider !== "local") throw new JobHistoryError("job_event_invalid", "Worker repository provider is invalid");
-  const ownerScope = boundedText(repository.ownerScope, 1, 256, /^[^\x00-\x1f\x7f]+$/u, "owner scope");
-  const repositoryId = boundedText(repository.repositoryId, 1, 256, /^[A-Za-z0-9._:-]+$/u, "repository ID");
+  if (!isRecord(snapshot) || !isProjectId(snapshot.projectId) || !Number.isSafeInteger(snapshot.projectVersion) || (snapshot.projectVersion as number) < 0) throw new JobHistoryError("job_event_invalid", "Worker snapshot identity is invalid");
+  const projectId = snapshot.projectId;
   if (value.state !== "queued" && value.state !== "running" && value.state !== "succeeded" && value.state !== "failed" && value.state !== "cancelled") {
     throw new JobHistoryError("job_event_invalid", "Worker state is invalid");
   }
@@ -575,7 +571,7 @@ function normalizeLifecycle(value: unknown): WorkerJobLifecycle & { ownerScope: 
   const normalizedSnapshot = snapshot as unknown as WorkerJobLifecycle["snapshot"];
   return {
     jobId, module, task, snapshot: normalizedSnapshot, state: value.state, createdAt, updatedAt, startedAt, finishedAt,
-    ...(errorCode ? { errorCode } : {}), ownerScope, provider, repositoryId,
+    ...(errorCode ? { errorCode } : {}), projectId,
   };
 }
 
@@ -842,20 +838,16 @@ function boundedJson(value: unknown): unknown {
   catch { historyCorrupt(); }
 }
 
-function isRepositoryIdentity(value: unknown): value is RepositoryIdentity {
-  return isRecord(value) && (value.provider === "github" || value.provider === "local") &&
-    typeof value.repositoryId === "string" && /^[A-Za-z0-9._:-]{1,256}$/u.test(value.repositoryId) &&
-    typeof value.ownerScope === "string" && /^[^\x00-\x1f\x7f]{1,256}$/u.test(value.ownerScope) &&
-    typeof value.defaultBranch === "string" && value.defaultBranch.length > 0 && value.defaultBranch.length <= 256 &&
-    typeof value.url === "string" && value.url.length > 0 && value.url.length <= 512;
+function isProjectId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9._:-]{1,256}$/u.test(value);
 }
 
 function ownValue<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
   return Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined;
 }
 
-function repositoryKey(repository: Pick<RepositoryIdentity, "provider" | "ownerScope" | "repositoryId">): string {
-  return hash(`${repository.provider}\0${repository.ownerScope}\0${repository.repositoryId}`);
+function projectKeyFor(projectId: string): string {
+  return hash(`postgres-project\0${projectId}`);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

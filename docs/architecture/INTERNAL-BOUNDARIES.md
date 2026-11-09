@@ -4,59 +4,41 @@
 
 ## 1. Authority and architectural decision
 
-This contract refines the internal implementation boundaries of [Core](CORE.md), [Full Migration](FULL-MIGRATION.md) and [Modular Workspace](MODULAR-WORKSPACE.md). It does not replace their canonical Git, recovery, module, authorization or presentation contracts. The independently planned [Public Plugin Platform](PLUGIN-PLATFORM.md) is a separate architectural capability; an internal refactor does not confer untrusted-plugin isolation.
+This contract refines the internal implementation boundaries of [Core](CORE.md), [Full Migration](FULL-MIGRATION.md) and [Modular Workspace](MODULAR-WORKSPACE.md). It does not replace their canonical persistence, recovery, module, authorization or presentation contracts. The independently planned [Public Plugin Platform](PLUGIN-PLATFORM.md) is a separate architectural capability; an internal refactor does not confer untrusted-plugin isolation.
 
-**Decision:** retain one Git authority, one browser recovery authority, one HTTP admission boundary and one shared authoring coordinator. Reduce complexity by removing duplicated behavior and separating pure computation from effects and presentation. Do not introduce a second state owner or a new framework to accomplish the separation.
+**Decision:** retain one PostgreSQL manuscript authority, one browser recovery authority, one HTTP admission boundary and one shared authoring coordinator. Presentation and module algorithms consume these boundaries without owning competing writers.
 
 ### Dependency direction
 
 ```text
-DesktopShell / MobileShell / Workspace presentation
-                   |
-     Shared authoring coordinator
-       |             |             |
-  browser journal  checkpoint   typed HTTP client
-  (draft authority)  protocol          |
-       |             |          Fastify admission
-       +-------------+                 |
-                                 CoreStore (writer)
-                                       |
-                           immutable Git snapshots / Git
-
-Built-in module registry (contracts) -> Module Runtime and browser DTO validation
-Optional modules -> host capabilities / proposals -> the same Core writer
-Workspace manifests + CI inventory -> verification -> exact-source certification
+DesktopShell / MobileShell / Workspace
+                 |
+Shared PostgreSQL authoring and recovery coordinator
+       |                         |
+IndexedDB draft journal      typed HTTP client
+                                 |
+                      authenticated API admission
+                                 |
+                Persistence / Core module coordinator
+                                 |
+                    PostgreSQL transactions/revisions
 ```
 
-Dependency arrows express authority, not direct package imports: the browser does not import server Core. Module code is never an owner of Git writes, browser recovery, authentication or HTTP admission.
+## 2. Invariants every refactor preserves
 
-## 2. Invariants that every refactor preserves
+1. **Canonical data:** PostgreSQL holds projects, hierarchy, immutable document revisions, Knowledge, Evidence, Text Anchors and module records. IndexedDB holds recoverable local drafts. Layouts, caches and analysis indexes are not manuscript authorities.
+2. **Durability:** input, journaled draft, in-flight write and confirmed database revision are distinct. An optimistic UI transition is not a save receipt.
+3. **Concurrency:** mutations require project authorization, exact revision/version preconditions and stable operation identities. Module proposals require authenticated author approval. No automatic prose merge or hidden mutation.
+4. **Recoverability:** retries retain operation identity, generation, project/author scope and proposal bindings. Abort, response loss, conflicts, IndexedDB failure and container replacement never silently discard recovery records.
+5. **Foreground correctness:** CodeMirror input/IME remains immediately authoritative. Slow network, background refresh, deferred rendering and stale navigation responses cannot replace current input.
+6. **Profiles and trust:** Core authoring has no optional model dependency. Built-in modules remain trusted; worker supervision is not a third-party security sandbox.
+7. **Verification truth:** checks apply to the submitted source revision. Missing, skipped, stale or blocked validation is not passing evidence. Keep the canonical CI inventory, coverage detection, exact-source certification and gated release requirements.
 
-1. **Canonical data:** Git-controlled project files and immutable snapshots are the document authority. Browser IndexedDB is the authority for the local recoverable draft until its durable transition is confirmed; caches, layouts and derived indexes are not manuscript authorities.
-2. **Separate durability states:** Draft, local Checkpoint, confirmed GitHub publication and publication-unknown remain distinct. A local commit, network acknowledgement or optimistic UI does not mean remote publication.
-3. **Single writer and optimistic concurrency:** project mutations pass through the existing Core lock, authorization, repository identity, read/write preconditions, proposal approval and safe normal Git push. No forced publish, prose auto-merge or hidden mutation.
-4. **Recoverability:** retry retains operation ID, generation, repository/author scope, proposal binding and receipt semantics. Abort, response loss, stale snapshot, IndexedDB error and container replacement do not silently discard outstanding records.
-5. **Foreground correctness:** CodeMirror input/IME and the latest editable text remain immediately authoritative. Slow network, background polling, deferred React publication or stale navigation responses cannot replace that text.
-6. **Profiles and trust:** Core-only authoring has no dependency on optional model or module execution. Built-in modules remain trusted; supervised child processes and dynamic browser imports are not third-party security sandboxes.
-7. **Verification truth:** PR verification must satisfy every validation selected by the canonical change-impact plan at the same submitted source revision; excluded validations remain explicitly unexecuted. Main and release certification require the complete source, test, browser, OCI and native Hosted inventory at the exact source revision. Conditional skips and external acceptance not exercised are not passing evidence.
+## 3. One durable save protocol
 
-## 3. Browser checkpoint protocol: one side-effect sequence
+The authoring coordinator journals the current draft before a server write, binds the save to its observed revision and stable idempotency key, then records the confirmed result before clearing redundant recovery data. Proposal review follows the same principle: preserve the exact payload and approval binding until its durable application receipt is reconciled.
 
-The normal user checkpoint and recovery of an authorized pending entry shall invoke **one internal checkpoint protocol**. This is an orchestration of existing IndexedDB and HTTP effects, not a fictional atomic transaction across the browser, server and Git.
-
-The protocol owns exactly this ordered effect chain:
-
-1. Confirm the caller-provided entry, immutable repository identity and author scope are the ones authorized for this attempt. The normal and recovery callers retain their own eligibility checks.
-2. Persist the existing journal entry as `checkpointing`, retaining its operation ID, generation, proposal identity and recovery metadata. Emit the state transition to presentation only *after* the IndexedDB write resolves.
-3. Propose the unchanged operation through the existing typed API; durably retain the accepted proposal in the browser journal and its binding to the entry.
-4. Request author approval through the existing boundary, then checkpoint that exact operation.
-5. Persist the returned checkpoint receipt and `checkpointed` state before removing the now-redundant local proposal record. Proposal cleanup is best effort, never the source of a false save confirmation.
-
-The checkpoint protocol should be a small non-React application module (for example `app/src/application/checkpoint-protocol.ts`) receiving the existing API and BrowserJournal interfaces. It must not independently construct a Core writer, maintain a second global edit store, or implement a parallel save/recovery state machine.
-
-The normal checkpoint caller owns busy/status and immediate editor presentation. Recovery owns replay eligibility, error preservation and reconciling remote operation receipts. The coordinator owns navigation/author-generation fencing. Network effects in flight may complete after navigation; only still-current results may update the visible scene. An unused generation argument must either acquire a defined purpose at the caller boundary or be removed.
-
-Any ambiguous checkpoint result remains recoverable and must be reconciled against existing operation/receipt identity. A 409/412 conflict is projected as a conflict only under the existing validated contract; transient errors and lost responses must not be interpreted as successful publication. Replay must never allocate a new semantic operation identity or double-apply a completed operation.
+A 409 conflict preserves the current draft for explicit author recovery. A lost response is reconciled against the original operation identity. Navigation generations fence presentation; they cannot undo a database write that already committed. Normal saves and recovery must share these rules rather than maintaining independent state machines.
 
 ## 4. Shared authoring coordinator and presentation
 
@@ -66,9 +48,9 @@ Any ambiguous checkpoint result remains recoverable and must be reconciled again
 - Extract **presentation-only** sections (library/outline, document/inspector, status/recovery visibility, and available panels) into small components receiving explicit data and callbacks. A component extracted solely for its line count is not an improvement.
 - Keep the existing Desktop and Mobile entrypoints and distinct Shell implementations. Sharing behavior must not collapse touch/keyboard and desktop interactions into a viewport-switched component.
 - Keep journal reconciliation and navigation guards owned once. If a self-contained application hook is extracted, it must not duplicate the session, timers, abort signals, author scope or polling across hooks.
-- Workspace layout and module panels consume permission-checked host contributions; they do not own manuscript durability, write receipts, repository synchronization or Git authority.
+- Workspace layout and module panels consume permission-checked host contributions; they do not own manuscript durability, write receipts, database transactions or revision authority.
 
-Minimal design target: the authoring coordinator chooses *what* state and commands are available; presentational components decide *how* to render them; the checkpoint protocol decides *how one checkpoint attempt proceeds*. Do not add Redux, an event bus, a DI container or new observable state infrastructure.
+Minimal design target: the authoring coordinator chooses *what* state and commands are available; presentational components decide *how* to render them; the save protocol decides *how one save attempt proceeds*. Do not add Redux, an event bus, a DI container or new observable state infrastructure.
 
 ## 5. Built-in module identity and extensibility
 
@@ -79,15 +61,11 @@ Define a single `BUILTIN_MODULE_IDS` readonly tuple in `@codexia/contracts` and 
 - Importing the identifier metadata must not load module implementations, native models or workers into the Core-only dependency closure. Runtime activation stays lazy and capability-scoped.
 - This internal, closed built-in vocabulary is not the public Plugin ID namespace. Public manifest/ABI negotiation and untrusted execution isolation remain governed by `PLUGIN-PLATFORM.md` and require separate acceptance.
 
-## 6. Core computation versus Git effects
+## 6. Core computation and persistence effects
 
-`CoreStore` remains the sole owner of project registry, identity, Git I/O, immutable snapshot lookup, lock, proposal lifecycle, approval, reconciliation, checkpoint, publish and failure projection. Its large size does not authorize splitting these effects across multiple competing services.
+Core owns consistent module snapshots, domain projections, approved proposal coordination and receipt lookup through the existing Persistence boundary. PostgreSQL transactions own canonical writes. Keep normalization, digest and read-set validation deterministic; do not duplicate authorities or replace durable records with process-local state.
 
-Extract a cohesive internal pure operation/proposal-record module when reorganizing Core (for example `packages/core/src/operation-records.ts`): canonical normalization, record validation and deterministic digest helpers. Import these helpers back into `CoreStore`; do not change the public Core API or persist a second copy of the record.
-
-**Byte identity is a contract:** preserve operation normalization field order and `JSON.stringify` hashing semantics where used; preserve canonical JSON semantics for proposal digests. The two algorithms must not be unified for style. Persisted metadata, receipts, revision hashes and reconciliation must remain readable across old/new binaries. Locking and cached immutable read-model behavior must remain unchanged.
-
-Do not use this extraction to rework `observe`, `reconcile`, snapshot caching, the Git process layer, the HTTP routes or performance candidates already declined by evidence. Those changes require their own contract and measured need.
+Document and module revisions, project version fences, scope membership guards and approval identity must be checked in the same transaction as application. A pinned historical reader must not silently read current records. Module paths are validated domain identifiers over database records, never filesystem paths for manuscript storage.
 
 ## 7. API admission stays centralized
 
@@ -107,7 +85,7 @@ Preserve mandatory coverage detection, frozen installs, production and test-sour
 
 | Boundary | Executable proof required |
 | --- | --- |
-| Checkpoint protocol | Normal and recovery entrypoints use one effect sequence; injected failures at journal/propose/approve/checkpoint/receipt/cleanup preserve recovery, ID and scope; lost response is reconcilable; existing real browser/Core durability tests pass |
+| Revision protocol | Normal and recovery entrypoints use one effect sequence; injected failures at journal/propose/approve/save/receipt/cleanup preserve recovery, ID and scope; lost response is reconcilable; existing real browser/Core durability tests pass |
 | Shared authoring UI | Desktop and Mobile use the same session and authorized commands without shared layout; editor/IME, scene-navigation generations, replay after reload, panel unmount and error/status visibility retain their behavior in real browser cases |
 | Built-in registration | Type derives from one canonical value; Runtime and DTO guard accept exactly the known built-ins; all supported profiles, manifests and CI registrations are checked for omissions and extras; Core-only closure stays clean |
 | Core pure helpers | Golden operation/proposal digests, serialized records, stale preconditions, replay, conflict, path safety and one-writer semantics match the prior behavior and acceptance fixtures |
@@ -117,7 +95,7 @@ Run focused assertions at each changed boundary before full integrated verificat
 
 ## 10. Implementation and evolution rules
 
-- Consolidate the checkpoint protocol before extracting UI presentation that depends on it. The built-in ID, Core pure helper and CI workspace-preparation changes are otherwise independent and may be implemented in isolated worktrees.
+- Consolidate the save protocol before extracting UI presentation that depends on it. The built-in ID, Core pure helper and CI workspace-preparation changes are otherwise independent and may be implemented in isolated worktrees.
 - Assign exactly one owner to each shared contract or touched implementation file. Integrate dependent changes against the actual accepted producer SHA, not sibling uncommitted files. Keep the set of changes bounded; finish each boundary with its focused tests before composing the next.
 - Prefer deletion of duplicate code and dependencies to new interfaces. If an extraction adds more concepts than it removes, keep the existing owner and narrow the extraction.
 - Issue state, implementation state and verification state are separate. Resolve historical lifecycle Issues by mapping each original criterion to real evidence; an open Issue alone does not mean an absent feature. Do not reopen completed migration work or silently claim previously unexecuted external validation.
@@ -125,4 +103,4 @@ Run focused assertions at each changed boundary before full integrated verificat
 
 ## 11. Non-goals
 
-Rewriting Core Git persistence, adding an ORM or database authority, changing user-visible checkpoint semantics, automatically publishing a checkpoint, unifying Desktop/Mobile visual shells, creating a new routing framework, introducing a state-management platform, implementing the public third-party Plugin SDK/sandbox/marketplace, re-running completed migration phases, changing production resources or publishing OCI images solely because of this refactor.
+Adding an ORM or a second manuscript authority, automatically approving module proposals, unifying Desktop/Mobile visual shells, creating a new routing framework, introducing a state-management platform, implementing the public third-party Plugin SDK/sandbox/marketplace, re-running completed migration phases, changing production resources or publishing OCI images solely because of this refactor.

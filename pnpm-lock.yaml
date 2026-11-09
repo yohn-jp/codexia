@@ -538,9 +538,16 @@ importers:
       '@codexia/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@codexia/persistence-contracts':
+        specifier: workspace:*
+        version: link:../persistence-contracts
       yaml:
         specifier: ^2.8.1
         version: 2.9.1
+    devDependencies:
+      '@codexia/persistence-postgres':
+        specifier: workspace:*
+        version: link:../persistence-postgres
 
   packages/migration:
     dependencies:

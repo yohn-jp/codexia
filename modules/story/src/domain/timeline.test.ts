@@ -11,14 +11,8 @@ import {
 import type { SnapshotId } from "@codexia/contracts";
 
 const snapshot: SnapshotId = {
-  repository: {
-    provider: "local",
-    repositoryId: "repo-time",
-    defaultBranch: "main",
-    ownerScope: "owner-1",
-    url: "file:///repo-time",
-  },
-  remoteCommit: "c".repeat(40),
+  projectId: "repo-time",
+  projectVersion: 13,
 };
 
 test("Japanese number and time extraction retain source surfaces and offsets", () => {

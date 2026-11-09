@@ -79,7 +79,7 @@ test('worker timeout also terminates a detached descendant', { skip: process.pla
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('current author pipeline records receipts and leaves the generated seed remote immutable', async () => {
+test('PostgreSQL author pipeline records receipts without manuscript Git processes and leaves the import source immutable', async () => {
   const root = await mkdtemp(join(tmpdir(), 'wave0-pipeline-'));
   try {
     const datasetPath = join(root, 'fixture'), output = join(root, 'result.json');
@@ -88,9 +88,9 @@ test('current author pipeline records receipts and leaves the generated seed rem
       [datasetPath, output, '1', 'mutation'], output, 30000);
     assert.equal(result.status, 'complete', JSON.stringify(result.error));
     assert.equal(result.execution.code, 0);
-    for (const name of ['proposal', 'approval', 'checkpoint', 'publish']) {
+    for (const name of ['proposal', 'approval', 'apply']) {
       const sample = result.samples.find(row => row.name === name);
-      assert.ok(sample && sample.ms > 0 && sample.counters.gitProcesses > 0, name);
+      assert.ok(sample && sample.ms > 0 && sample.counters.gitProcesses === 0, name);
     }
     assert.equal(git(root, '--git-dir', fixture.remote, 'rev-parse', 'main'), fixture.commit);
   } finally { await rm(root, { recursive: true, force: true }); }

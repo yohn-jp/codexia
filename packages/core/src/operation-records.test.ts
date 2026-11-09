@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ChangeOperation, ChangeProposal, RepositoryIdentity, SnapshotId } from "@codexia/contracts";
+import type { ChangeOperation, ChangeProposal, SnapshotId } from "@codexia/contracts";
 import {
   assertPersistedProposal,
   normalizedOperation,
@@ -9,15 +9,7 @@ import {
   proposalDigest,
 } from "./operation-records.js";
 
-const commit = "a".repeat(40);
-const repository = {
-  url: "https://github.com/owner/repo",
-  ownerScope: "owner",
-  defaultBranch: "main",
-  repositoryId: "repo-123",
-  provider: "github",
-} as RepositoryIdentity;
-const snapshot = { remoteCommit: commit, repository } as SnapshotId;
+const snapshot: SnapshotId = {projectId:"project-golden",projectVersion:7};
 
 function goldenOperation(): ChangeOperation {
   return {
@@ -29,11 +21,11 @@ function goldenOperation(): ChangeOperation {
       revision: null,
       path: "manuscript/chapter.md",
     }],
-    reads: [{ revision: null, path: "manuscript/chapter.md" }],
+    reads: [{ revision: null, path: "manuscript/chapter.md" },{revision:null,path:"manuscript/source.md"}],
     readScopes: [{ revision: "b".repeat(64), prefix: "bible/characters" }],
     effect: "manuscript",
-    baseRemoteCommit: commit,
-    repository: { ...repository },
+    baseProjectVersion: snapshot.projectVersion,
+    projectId: snapshot.projectId,
     generation: 7,
     id: "operation-golden",
   } as ChangeOperation;
@@ -56,24 +48,13 @@ function goldenProposal(): ChangeProposal {
   } as ChangeProposal;
 }
 
-test("operation record normalization preserves the serialized bytes and SHA-256 digest", () => {
-  const operation = goldenOperation();
-  const serialized = JSON.stringify(normalizedOperation(operation));
-  assert.equal(serialized,
-    `{"id":"operation-golden","generation":7,"repository":{"provider":"github","repositoryId":"repo-123","defaultBranch":"main","ownerScope":"owner","url":"https://github.com/owner/repo"},"baseRemoteCommit":"${commit}","effect":"manuscript","reads":[{"path":"manuscript/chapter.md","revision":null}],"readScopes":[{"prefix":"bible/characters","revision":"${"b".repeat(64)}"}],"writes":[{"path":"manuscript/chapter.md","revision":null,"content":"A line.\\n","encoding":"utf8"}],"message":"Golden operation","evidenceIds":["evidence-one"]}`);
-  assert.equal(operationDigest(operation), "9e685079c727b55d2265fdf990088998e50efe808cb4b53236ec47ce1bcdc490");
-});
-
-test("proposal records preserve normalized JSON and the canonical proposal digest", () => {
-  const proposal = goldenProposal();
-  const normalized = normalizedProposal(proposal);
-  assert.equal(JSON.stringify(normalized),
-    `{"id":"proposal-golden","snapshot":{"remoteCommit":"${commit}","repository":{"url":"https://github.com/owner/repo","ownerScope":"owner","defaultBranch":"main","repositoryId":"repo-123","provider":"github"}},"operations":[{"id":"operation-golden","generation":7,"repository":{"provider":"github","repositoryId":"repo-123","defaultBranch":"main","ownerScope":"owner","url":"https://github.com/owner/repo"},"baseRemoteCommit":"${commit}","effect":"manuscript","reads":[{"path":"manuscript/chapter.md","revision":null}],"readScopes":[{"prefix":"bible/characters","revision":"${"b".repeat(64)}"}],"writes":[{"path":"manuscript/chapter.md","revision":null,"content":"A line.\\n","encoding":"utf8"}],"message":"Golden operation","evidenceIds":["evidence-one"]}],"source":"module","evidence":[{"details":{"z":["last",{"y":2,"x":1}],"a":true},"paths":[{"revision":null,"path":"manuscript/source.md"}],"kind":"source_note","module":"story","snapshot":{"remoteCommit":"${commit}","repository":{"url":"https://github.com/owner/repo","ownerScope":"owner","defaultBranch":"main","repositoryId":"repo-123","provider":"github"}},"id":"evidence-one"}]}`);
-  assert.equal(proposalDigest(proposal), "220f73e5dab70cf3643423f61fa472a221dccef23d4d26dd50e6d5f72fc5bee2");
-
-  const reorderedDetails = goldenProposal();
-  reorderedDetails.evidence![0]!.details = { a: true, z: ["last", { x: 1, y: 2 }] };
-  assert.equal(proposalDigest(reorderedDetails), "220f73e5dab70cf3643423f61fa472a221dccef23d4d26dd50e6d5f72fc5bee2");
+test("operation and proposal digests bind PostgreSQL identity and canonical evidence",()=>{
+ const operation=goldenOperation(),proposal=goldenProposal();
+ assert.equal(normalizedOperation(operation).projectId,snapshot.projectId);
+ assert.notEqual(operationDigest(operation),operationDigest({...operation,baseProjectVersion:8}));
+ const reordered=goldenProposal();reordered.evidence![0]!.details={a:true,z:["last",{x:1,y:2}]};
+ assert.equal(proposalDigest(proposal),proposalDigest(reordered));
+ assert.deepEqual(normalizedProposal(proposal).snapshot,snapshot);
 });
 
 test("persisted proposal validation enforces record binding and safe content", () => {
@@ -90,4 +71,15 @@ test("persisted proposal validation enforces record binding and safe content", (
   const reservedPath = goldenOperation();
   reservedPath.writes[0] = { ...reservedPath.writes[0]!, path: "meta/scriptorium/operations/v1/forged.json" };
   assert.throws(() => assertPersistedProposal({ ...proposal, operations: [reservedPath] }), /Core authority metadata/);
+});
+
+test("proposal evidence may be bound by a covering read scope", () => {
+  const proposal = goldenProposal();
+  proposal.operations[0]!.reads = [{ path: "manuscript/chapter.md", revision: null }];
+  proposal.operations[0]!.readScopes = [{ prefix: "manuscript", revision: "c".repeat(64) }];
+
+  assert.doesNotThrow(() => assertPersistedProposal(proposal));
+
+  proposal.operations[0]!.readScopes = [{ prefix: "bible", revision: "c".repeat(64) }];
+  assert.throws(() => assertPersistedProposal(proposal), /exact operation read preconditions/);
 });

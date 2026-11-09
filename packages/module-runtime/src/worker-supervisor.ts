@@ -126,14 +126,11 @@ function validRequest(value: unknown): value is JobRequest {
   if (!value || typeof value !== "object") return false;
   const request = value as JobRequest;
   const snapshot = request.snapshot;
-  const repository = snapshot?.repository;
   return typeof request.id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(request.id) &&
     isModuleId(request.module) && typeof request.task === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(request.task) &&
-    !!snapshot && typeof snapshot === "object" && !!snapshot.repository && typeof snapshot.remoteCommit === "string" &&
-    (repository.provider === "github" || repository.provider === "local") &&
-    [repository.repositoryId, repository.defaultBranch, repository.ownerScope, repository.url].every((item) => typeof item === "string" && item.length > 0 && item.length <= 512) &&
-    /^(?:[a-f0-9]{40}|[a-f0-9]{64}|)$/.test(snapshot.remoteCommit) &&
-    (snapshot.overlayCommit === undefined || /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(snapshot.overlayCommit)) &&
+    !!snapshot && typeof snapshot === "object" && typeof snapshot.projectId === "string" &&
+    snapshot.projectId.length > 0 && snapshot.projectId.length <= 512 &&
+    Number.isSafeInteger(snapshot.projectVersion) && snapshot.projectVersion >= 0 &&
     typeof request.model === "string" && request.model.length > 0 && request.model.length <= 128 &&
     typeof request.modelVersion === "string" && request.modelVersion.length > 0 && request.modelVersion.length <= 128 &&
     typeof request.moduleVersion === "string" && request.moduleVersion.length > 0 && request.moduleVersion.length <= 128 &&

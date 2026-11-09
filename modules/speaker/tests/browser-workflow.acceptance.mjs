@@ -7,14 +7,8 @@ import { createModule } from "../dist/index.js";
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const workspaceRoot = resolve(packageRoot, "../..");
 const { createServer } = await import(pathToFileURL(resolve(workspaceRoot, "app/node_modules/vite/dist/node/index.js")).href);
-const repository = {
-  provider: "local",
-  repositoryId: "speaker-browser-fixture",
-  defaultBranch: "main",
-  ownerScope: "owner-1",
-  url: "file:///synthetic/speaker-browser-fixture",
-};
-const snapshot = { repository, remoteCommit: "a".repeat(40) };
+const projectId = "browser-module-fixture";
+const snapshot = { projectId, projectVersion: 1 };
 const calls = [];
 const report = {
   generatedAt: "2026-10-17T00:00:00.000Z",

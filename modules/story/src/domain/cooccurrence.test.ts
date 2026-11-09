@@ -4,8 +4,8 @@ import { buildStoryCooccurrence } from "./cooccurrence.js";
 import type { StoryEntity, StoryGraphInput } from "./types.js";
 
 const snapshot = {
-  repository: { provider: "local" as const, repositoryId: "cooccurrence", defaultBranch: "main", ownerScope: "test", url: "file:///cooccurrence" },
-  remoteCommit: "a".repeat(40),
+  projectId: "cooccurrence",
+  projectVersion: 11,
 };
 function entity(id: string, type: StoryEntity["type"], raw: Record<string, unknown> = {}): StoryEntity {
   return { id, type, filePath: `${type}/${id}.yaml`, raw };

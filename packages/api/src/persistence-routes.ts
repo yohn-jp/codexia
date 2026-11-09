@@ -182,6 +182,16 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
     }
     const suffix = projectPath[2] ?? "";
     if (!suffix) {
+      if (input.method === "PATCH") {
+        await input.requireAuthor();
+        const body = bodyRecord(input.body);
+        const project = await persistence.transaction((transaction) => transaction.updateProject({
+          projectId, expectedVersion: integer(body.expectedVersion, "expectedVersion", 1),
+          ...(body.title === undefined ? {} : { title: requiredString(body.title, "title", 256) }),
+          ...(body.settings === undefined ? {} : { settings: (isRecord(body.settings) ? body.settings : failure(400, "INVALID_BODY", "settings must be an object")) as JsonObject }),
+        }));
+        return { status: 200, body: { project } };
+      }
       if (input.method !== "GET") return { status: 405, body: { error: "Method not allowed", code: "METHOD_NOT_ALLOWED" } };
       const project = await persistence.read((reader) => reader.getProject(projectId));
       return project ? { status: 200, body: { project } } : { status: 404, body: { error: "Project was not found", code: "PERSISTENCE_NOT_FOUND" } };
@@ -222,6 +232,25 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
     if (documentPath) {
       const documentId = decoded(documentPath[1]!, "Document id") as DocumentId;
       const documentSuffix = documentPath[2] ?? "";
+      if (documentSuffix === "metadata" && input.method === "PATCH") {
+        await input.requireAuthor();
+        const body = bodyRecord(input.body);
+        const document = await persistence.transaction((transaction) => transaction.updateDocument({
+          projectId, documentId, expectedVersion: integer(body.expectedVersion, "expectedVersion", 1),
+          ...(body.title === undefined ? {} : { title: requiredString(body.title, "title", 256) }),
+          ...(body.orderKey === undefined ? {} : { orderKey: requiredString(body.orderKey, "orderKey", 256) }),
+          ...(body.parentId === undefined ? {} : { parentId: body.parentId === null ? null : requiredString(body.parentId, "parentId") as DocumentId }),
+        }));
+        return { status: 200, body: { document } };
+      }
+      if (!documentSuffix && input.method === "DELETE") {
+        await input.requireAuthor();
+        const body = bodyRecord(input.body);
+        const document = await persistence.transaction((transaction) => transaction.deleteDocument({
+          projectId, documentId, expectedVersion: integer(body.expectedVersion, "expectedVersion", 1),
+        }));
+        return { status: 200, body: { document } };
+      }
       if (!documentSuffix && input.method === "GET") {
         const selectedRevisionId = url.searchParams.get("revision");
         const value = await persistence.read(async (reader) => {
