@@ -135,10 +135,10 @@ export async function planGeneratedFileImport(input: {
     ...(input.encoding === "base64" ? { encoding: input.encoding } : {}),
   };
   const operation: ChangeOperation = {
-    id: stableMigrationId(`${input.producerId}\0${input.context.repository.repositoryId}\0${input.target}\0${createHash("sha256").update(input.content).digest("hex")}`),
+    id: stableMigrationId(`${input.producerId}\0${input.context.projectId}\0${input.target}\0${createHash("sha256").update(input.content).digest("hex")}`),
     generation: 0,
-    repository: input.context.repository,
-    baseRemoteCommit: input.context.snapshot.remoteCommit,
+    projectId: input.context.projectId,
+    baseProjectVersion: input.context.snapshot.projectVersion,
     effect: "migration",
     reads: [{ path: input.target, revision }],
     writes: [write],

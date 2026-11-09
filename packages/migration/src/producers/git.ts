@@ -38,10 +38,10 @@ function operationForFile(
     .update(sourceBytes ?? Buffer.from("deleted"))
     .digest("hex");
   const operation: ChangeOperation = {
-    id: stableMigrationId(`git-pending\0${context.repository.repositoryId}\0${context.snapshot.remoteCommit}\0${digest}`),
+    id: stableMigrationId(`git-pending\0${context.projectId}\0${context.snapshot.projectVersion}\0${digest}`),
     generation: 0,
-    repository: context.repository,
-    baseRemoteCommit: context.snapshot.remoteCommit,
+    projectId: context.projectId,
+    baseProjectVersion: context.snapshot.projectVersion,
     effect: "migration",
     reads: [{ path: file.path, revision: existing?.revision ?? null }],
     writes: [write],
