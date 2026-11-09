@@ -35,6 +35,7 @@ export interface ManuscriptInputProps {
   readOnly?: boolean;
   onChange: (value: string, changes: TextChange[]) => void;
   onSelectionLengthChange?: (length: number) => void;
+  onSelectionChange?: (selection: { from: number; to: number; text: string } | null) => void;
   onCursorPositionChange?: (cursorSentenceIndex: number | null, scrollTop: number) => void;
   placeholder?: string;
   labelledBy: string;
@@ -56,6 +57,7 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
   readOnly = false,
   onChange,
   onSelectionLengthChange,
+  onSelectionChange,
   onCursorPositionChange,
   placeholder,
   labelledBy,
@@ -86,8 +88,8 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
   evidenceRef.current = evidenceState;
   documentRevisionRef.current = documentRevision;
   evidenceCallbackRef.current = onEvidenceChange;
-  const latestRef = useRef({ onChange, onSelectionLengthChange, onCursorPositionChange });
-  latestRef.current = { onChange, onSelectionLengthChange, onCursorPositionChange };
+  const latestRef = useRef({ onChange, onSelectionLengthChange, onSelectionChange, onCursorPositionChange });
+  latestRef.current = { onChange, onSelectionLengthChange, onSelectionChange, onCursorPositionChange };
 
   function sentencePositionIndex(doc: EditorState["doc"], text?: string) {
     const cache = sentencePositionIndexRef.current ??= createUiSentencePositionIndexCache<EditorState["doc"]>();
@@ -206,6 +208,11 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
           if (update.docChanged || update.selectionSet) {
             const selection = update.state.selection.main;
             latestRef.current.onSelectionLengthChange?.(selection.empty ? 0 : Math.abs(selection.to - selection.from));
+            latestRef.current.onSelectionChange?.(selection.empty ? null : {
+              from: Math.min(selection.anchor, selection.head),
+              to: Math.max(selection.anchor, selection.head),
+              text: update.state.sliceDoc(Math.min(selection.anchor, selection.head), Math.max(selection.anchor, selection.head)),
+            });
             if (!externalSyncRef.current) {
               latestRef.current.onCursorPositionChange?.(
                 (changedDocumentIndex ?? sentencePositionIndex(update.state.doc)).indexAtOffset(selection.head),

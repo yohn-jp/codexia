@@ -15,7 +15,7 @@ const REFRESH_INTERVAL_MS = 15_000;
 interface Binding {
   projectId: string;
   authorScope: string;
-  repositoryKey: string;
+  projectScopeKey: string;
   identityKey: string;
 }
 
@@ -56,7 +56,7 @@ export function useRecentActivityResume({
   binding: Omit<Binding, "identityKey"> | null;
   enabled: boolean;
 }): RecentActivityResumeState {
-  const identityKey = binding ? JSON.stringify([binding.authorScope, binding.repositoryKey, binding.projectId]) : "";
+  const identityKey = binding ? JSON.stringify([binding.authorScope, binding.projectScopeKey, binding.projectId]) : "";
   const currentBinding: Binding | null = binding ? { ...binding, identityKey } : null;
   const bindingRef = useRef<Binding | null>(currentBinding);
   bindingRef.current = currentBinding;
@@ -83,11 +83,11 @@ export function useRecentActivityResume({
     const captured = pending.binding;
     if (!captured) return;
     if (pending.writing) {
-      saveWritingResume(captured.authorScope, captured.repositoryKey, pending.writing);
+      saveWritingResume(captured.authorScope, captured.projectScopeKey, pending.writing);
       lastWritingRef.current = { bindingKey: captured.identityKey, position: pending.writing };
       if (bindingRef.current?.identityKey === captured.identityKey) setLocalWriting(pending.writing);
     }
-    if (pending.reading) saveReadingPage(captured.authorScope, captured.repositoryKey, pending.reading.sceneId, pending.reading.pageIndex);
+    if (pending.reading) saveReadingPage(captured.authorScope, captured.projectScopeKey, pending.reading.sceneId, pending.reading.pageIndex);
   };
 
   serverFlushRef.current = (keepalive = false) => {
@@ -133,11 +133,12 @@ export function useRecentActivityResume({
     let alive = true;
     setItems([]);
     setProjectKey(captured.identityKey);
-    const local = loadWritingResume(captured.authorScope, captured.repositoryKey);
+    const local = loadWritingResume(captured.authorScope, captured.projectScopeKey);
     lastWritingRef.current = local ? { bindingKey: captured.identityKey, position: local } : null;
     setLocalWriting(local);
 
     let refreshTimer: number | null = null;
+    let pageHidden = false;
     const stopRefreshTimer = () => {
       if (refreshTimer !== null) window.clearInterval(refreshTimer);
       refreshTimer = null;
@@ -180,10 +181,22 @@ export function useRecentActivityResume({
         flush(true);
       }
     };
-    const onPageHide = () => flush(true);
+    const onPageHide = () => {
+      pageHidden = true;
+      flush(true);
+    };
+    const onPageShow = () => {
+      if (!pageHidden) return;
+      pageHidden = false;
+      if (document.visibilityState === "visible") {
+        void refresh();
+        startRefreshTimer();
+      }
+    };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("beforeunload", onPageHide);
     window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pageshow", onPageShow);
     return () => {
       alive = false;
       controller.abort();
@@ -191,6 +204,7 @@ export function useRecentActivityResume({
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("beforeunload", onPageHide);
       window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pageshow", onPageShow);
       flush(true);
     };
   // identityKey captures author/project/repository; enabled controls authenticated lifecycle.

@@ -17,6 +17,8 @@ export interface ContinueCandidate {
   scrollTop?: number;
 }
 
+export type ContinueSceneSource = Tree | { documents: ReadonlyArray<{ id: string }> };
+
 export function sceneExistsInTree(tree: Tree, sceneId: string): boolean {
   return tree.volumes.some((volume) => volume.chapters.some((chapter) => chapter.scenes.some((scene) => scene.id === sceneId)));
 }
@@ -35,11 +37,14 @@ export function sceneTitleInTree(tree: Tree, sceneId: string): string {
 export function mergeContinueCandidates(
   local: WritingResumePosition | null,
   serverItems: RecentActivityItem[],
-  tree: Tree,
+  source: ContinueSceneSource,
 ): ContinueCandidate[] {
+  const exists = (sceneId: string) => "volumes" in source
+    ? sceneExistsInTree(source, sceneId)
+    : source.documents.some((document) => document.id === sceneId);
   const byScene = new Map<string, ContinueCandidate>();
   for (const item of serverItems) {
-    if (!sceneExistsInTree(tree, item.sceneId)) continue;
+    if (!exists(item.sceneId)) continue;
     const previous = byScene.get(item.sceneId);
     if (previous && (previous.updatedAt ?? "") >= item.updatedAt) continue;
     byScene.set(item.sceneId, {
@@ -51,7 +56,7 @@ export function mergeContinueCandidates(
       updatedAt: item.updatedAt,
     });
   }
-  if (local && sceneExistsInTree(tree, local.sceneId)) {
+  if (local && exists(local.sceneId)) {
     const previous = byScene.get(local.sceneId);
     byScene.set(local.sceneId, {
       sceneId: local.sceneId,
