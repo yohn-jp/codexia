@@ -2596,8 +2596,10 @@ async function postgresPersistenceOptions(): Promise<Pick<ApiServerOptions, "per
   if (required !== undefined && required !== "0" && required !== "1") {
     throw new Error("CODEXIA_REQUIRE_POSTGRES must be 1 or 0");
   }
-  if (required === "1" && !connectionString) {
-    throw new Error("CODEXIA_DATABASE_URL is required when CODEXIA_REQUIRE_POSTGRES=1");
+  // PostgreSQL is the only manuscript authority. A missing connection must not
+  // silently start a Git-only API while the browser expects PostgreSQL.
+  if (!connectionString) {
+    throw new Error("CODEXIA_DATABASE_URL is required for Codexia authoring");
   }
   const migrateOnStart = readCodexiaEnvironment("DATABASE_MIGRATE_ON_START");
   if (migrateOnStart !== undefined && migrateOnStart !== "0" && migrateOnStart !== "1") {
@@ -2607,9 +2609,14 @@ async function postgresPersistenceOptions(): Promise<Pick<ApiServerOptions, "per
     throw new Error("CODEXIA_DATABASE_URL is required when CODEXIA_DATABASE_MIGRATE_ON_START=1");
   }
   if (connectionString && migrateOnStart === "1") await migratePostgresDatabase(connectionString);
-  return connectionString
-    ? { persistence: createPostgresPersistence(connectionString), closePersistenceOnShutdown: true }
-    : {};
+  const persistence = createPostgresPersistence(connectionString);
+  try {
+    await persistence.checkHealth();
+  } catch (error) {
+    await persistence.close();
+    throw new Error("Codexia PostgreSQL is unavailable at startup", { cause: error });
+  }
+  return { persistence, closePersistenceOnShutdown: true };
 }
 
 async function loadProfileRuntimeOptions(
