@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { api, type PersistenceStatus } from "../api";
 import { ApiError } from "../api-error";
 import { PersistenceWorkspace } from "./PersistenceWorkspace";
@@ -11,11 +11,13 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const pageWasHiddenRef = useRef(false);
 
   const inspect = useCallback(async () => {
     setBusy(true);
     setMessage("");
     try {
+      await api.version();
       const session = await api.session();
       const persistence: PersistenceStatus = await api.persistenceStatus();
       if (!persistence.available || persistence.provider !== "postgres") {
@@ -38,7 +40,18 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
     }
   }, []);
 
-  useEffect(() => { void inspect(); }, [inspect]);
+  useEffect(() => {
+    void inspect();
+    const hide = () => { pageWasHiddenRef.current = true; };
+    const resume = (event: PageTransitionEvent) => {
+      if (!pageWasHiddenRef.current && !event.persisted) return;
+      pageWasHiddenRef.current = false;
+      void inspect();
+    };
+    window.addEventListener("pagehide", hide);
+    window.addEventListener("pageshow", resume);
+    return () => { window.removeEventListener("pagehide", hide); window.removeEventListener("pageshow", resume); };
+  }, [inspect]);
 
   async function signIn(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
