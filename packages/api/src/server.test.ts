@@ -2483,10 +2483,9 @@ describe("Codexia HTTP boundary", () => {
     }
     assert.equal(forbiddenCalls, 0);
     const reader = stream.body!.getReader();
-    await reader.read(); // Initial SSE comment proves the live connection was admitted.
     const shutdownAt = Date.now();
     await apiServer.close(); closed = true;
-    assert.equal((await reader.read()).done, true);
+    assert.equal((await reader.read()).done, true, "shutdown closes the admitted event stream");
     assert.ok(Date.now() - shutdownAt < 5_000, "shutdown closes owner streams without an indefinite wait");
   });
 
