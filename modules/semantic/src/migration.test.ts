@@ -3,14 +3,8 @@ import test from "node:test";
 import type { MigrationContext } from "@codexia/migration";
 import { createSemanticMigrationProducer } from "./migration.js";
 
-const repository = {
-  provider: "local" as const,
-  repositoryId: "semantic-migration-test",
-  defaultBranch: "main",
-  ownerScope: "test-owner",
-  url: "file:///legacy/semantic",
-};
-const snapshot = { repository, remoteCommit: "b".repeat(40) };
+const repository = "semantic-migration-test";
+const snapshot = { projectId: repository, projectVersion: 12 };
 const legacyPath = "meta/scriptorium/modules/semantic/legacy/files/meta/contradiction-dismissals.jsonl";
 const canonicalPath = "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl";
 const revision = "a".repeat(64);
@@ -39,7 +33,7 @@ function contextFor(input: { source?: string; targets?: Record<string, string>; 
       },
       async list(prefix) { return [...targets.keys()].filter((path) => path.startsWith(`${prefix}/`)).sort(); },
     },
-    repository,
+    projectId: repository,
     snapshot,
     enabledModules: new Set(input.enabled === false ? [] : ["semantic"]),
   };

@@ -79,15 +79,15 @@ type SeriesRecord = {
   id: string;
   name: string;
   ownerId: string;
-  bibleRepositoryId?: string;
-  memberRepositoryIds?: string[];
-  /** Legacy owner-local IDs stay explicit until migration resolves them for review. */
   bibleProjectId?: string;
   memberProjectIds?: string[];
+  /** Legacy owner-local IDs stay explicit until migration resolves them for review. */
+  legacyBibleProjectId?: string;
+  legacyMemberProjectIds?: string[];
   createdAt: string;
   [key: string]: unknown;
 };
-type WorkSeriesBinding = { repositoryId?: string; projectId?: string; seriesId: string; bibleRev?: string; coverLabel?: string; [key: string]: unknown };
+type WorkSeriesBinding = { projectId?: string; legacyProjectId?: string; seriesId: string; bibleRev?: string; coverLabel?: string; [key: string]: unknown };
 type SeriesSettings = { version: 1; series: SeriesRecord[]; bindings: WorkSeriesBinding[]; [key: string]: unknown };
 type StoredStateProposal = {
   id: string;
@@ -128,7 +128,7 @@ type StoredZukanSuggestion = ObjectValue & {
   createdAt: string;
   updatedAt: string;
   sourceHash?: string;
-  sourceSnapshot?: string;
+  sourceSnapshot?: number;
 };
 type StoryCapabilityContext = ModuleContext & {
   acquireCapability<T>(id: string): Promise<{ value: T; release(): Promise<void> }>;
@@ -273,7 +273,7 @@ function normalizeZukanSuggestion(value: ObjectValue): StoredZukanSuggestion {
       (confidence !== null && !new Set(["high", "low", "none"]).has(String(confidence))) ||
       typeof createdAt !== "string" || typeof updatedAt !== "string" ||
       (value.sourceHash !== undefined && (typeof value.sourceHash !== "string" || !/^[a-f0-9]{64}$/u.test(value.sourceHash))) ||
-      (value.sourceSnapshot !== undefined && typeof value.sourceSnapshot !== "string")) {
+      (value.sourceSnapshot !== undefined && !Number.isSafeInteger(value.sourceSnapshot))) {
     throw new TypeError("Story zukan-suggestions JSONL contains a malformed suggestion row");
   }
   return {
@@ -830,18 +830,18 @@ async function readSeriesSettings(context: ModuleActionContext): Promise<{ setti
 
 function assertSeriesSettings(settings: SeriesSettings): void {
   for (const series of settings.series) {
-    if (!series.id || !series.name?.trim() || !series.ownerId?.trim() || (!series.bibleRepositoryId?.trim() && !series.bibleProjectId?.trim()) ||
-      (series.bibleRepositoryId !== undefined && !series.bibleRepositoryId.trim()) ||
+    if (!series.id || !series.name?.trim() || !series.ownerId?.trim() || (!series.bibleProjectId?.trim() && !series.legacyBibleProjectId?.trim()) ||
       (series.bibleProjectId !== undefined && !series.bibleProjectId.trim()) ||
-      (series.memberRepositoryIds !== undefined && (!Array.isArray(series.memberRepositoryIds) || series.memberRepositoryIds.some((id) => typeof id !== "string"))) ||
-      (series.memberProjectIds !== undefined && (!Array.isArray(series.memberProjectIds) || series.memberProjectIds.some((id) => typeof id !== "string")))) {
+      (series.legacyBibleProjectId !== undefined && !series.legacyBibleProjectId.trim()) ||
+      (series.memberProjectIds !== undefined && (!Array.isArray(series.memberProjectIds) || series.memberProjectIds.some((id) => typeof id !== "string"))) ||
+      (series.legacyMemberProjectIds !== undefined && (!Array.isArray(series.legacyMemberProjectIds) || series.legacyMemberProjectIds.some((id) => typeof id !== "string")))) {
       throw new TypeError("Story series records require id, name, ownerId, and valid repository bindings");
     }
   }
   const ids = settings.series.map((series) => series.id);
   if (new Set(ids).size !== ids.length) throw new TypeError("Story series IDs must be unique");
   for (const binding of settings.bindings) {
-    if ((!binding.repositoryId?.trim() && !binding.projectId?.trim()) || !binding.seriesId?.trim() || !settings.series.some((series) => series.id === binding.seriesId)) {
+    if ((!binding.projectId?.trim() && !binding.legacyProjectId?.trim()) || !binding.seriesId?.trim() || !settings.series.some((series) => series.id === binding.seriesId)) {
       throw new TypeError("Story series bindings must use a repository identity and reference an existing series");
     }
   }
@@ -1572,7 +1572,7 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
         createdAt: now,
         updatedAt: now,
         sourceHash,
-        sourceSnapshot: context.reader.snapshot.remoteCommit,
+        sourceSnapshot: context.reader.snapshot.projectVersion,
       };
       const sourceSceneIds = new Set(source === "manuscript" ? evidence.flatMap((item) => item.sceneId ? [item.sceneId] : []) : [sourceSessionId!]);
       let staleCount = 0;
@@ -1697,12 +1697,12 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
     }),
     action("story.series.list", read, objectSchema, async (_input, context) => (await readSeriesSettings(context)).settings.series),
     action("story.series.get", read, fieldSchema(["id"], ["id"]), async (input, context) => (await readSeriesSettings(context)).settings.series.find((series) => series.id === input.id) ?? null),
-    action("story.series.create", propose, fieldSchema(["name", "bibleRepositoryId"], ["name", "bibleRepositoryId", "ownerId", "base_revision", "baseRevision", "operation_id", "operationId"]), async (input, context) => {
+    action("story.series.create", propose, fieldSchema(["name", "bibleProjectId"], ["name", "bibleProjectId", "ownerId", "base_revision", "baseRevision", "operation_id", "operationId"]), async (input, context) => {
       const { settings, revision } = await readSeriesSettings(context);
       assertSourceRevision(input, revision ?? "missing", "series settings revision");
       const name = stringValue(input.name, "name").trim();
-      const bibleRepositoryId = stringValue(input.bibleRepositoryId, "bibleRepositoryId").trim();
-      const created: SeriesRecord = { id: `series-${slugifyHint(name) || "series"}-${randomUUID().slice(0, 8)}`, name, ownerId: stringValue(input.ownerId ?? context.reader.snapshot.repository.ownerScope, "ownerId"), bibleRepositoryId, memberRepositoryIds: [], createdAt: new Date().toISOString() };
+      const bibleProjectId = stringValue(input.bibleProjectId, "bibleProjectId").trim();
+      const created: SeriesRecord = { id: `series-${slugifyHint(name) || "series"}-${randomUUID().slice(0, 8)}`, name, ownerId: stringValue(input.ownerId ?? context.projectId, "ownerId"), bibleProjectId, memberProjectIds: [], createdAt: new Date().toISOString() };
       settings.series.push(created);
       await proposeSeriesSettings(context, settings, revision, `Create Story series ${created.id}`, requestedOperationId(input));
       return created;
@@ -1717,10 +1717,10 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
       const next: SeriesRecord = {
         ...previous,
         name: patch.name !== undefined ? stringValue(patch.name, "name").trim() : previous.name,
-        bibleRepositoryId: patch.bibleRepositoryId !== undefined ? stringValue(patch.bibleRepositoryId, "bibleRepositoryId").trim() : previous.bibleRepositoryId,
-        memberRepositoryIds: Array.isArray(patch.memberRepositoryIds) ? [...new Set(patch.memberRepositoryIds.filter((id): id is string => typeof id === "string"))] : previous.memberRepositoryIds ?? [],
+        bibleProjectId: patch.bibleProjectId !== undefined ? stringValue(patch.bibleProjectId, "bibleProjectId").trim() : previous.bibleProjectId,
+        memberProjectIds: Array.isArray(patch.memberProjectIds) ? [...new Set(patch.memberProjectIds.filter((id): id is string => typeof id === "string"))] : previous.memberProjectIds ?? [],
       };
-      if (!next.name || !next.bibleRepositoryId) throw new TypeError("Series name and stable bibleRepositoryId are required");
+      if (!next.name || !next.bibleProjectId) throw new TypeError("Series name and stable bibleProjectId are required");
       settings.series[index] = next;
       await proposeSeriesSettings(context, settings, revision, `Update Story series ${next.id}`, requestedOperationId(input));
       return next;
@@ -1737,53 +1737,53 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
     }),
     action("story.series.binding.get", read, objectSchema, async (_input, context) => {
       const { settings } = await readSeriesSettings(context);
-      const repositoryId = context.reader.snapshot.repository.repositoryId;
-      const binding = settings.bindings.find((entry) => entry.repositoryId === repositoryId);
-      if (!binding) return { binding: null, series: null, requiresAuthorReview: settings.bindings.some((entry) => !entry.repositoryId), unresolvedLegacyBindings: settings.bindings.filter((entry) => !entry.repositoryId).map((entry) => ({ legacyProjectId: entry.projectId, seriesId: entry.seriesId })) };
+      const projectId = context.reader.snapshot.projectId;
+      const binding = settings.bindings.find((entry) => entry.projectId === projectId);
+      if (!binding) return { binding: null, series: null, requiresAuthorReview: settings.bindings.some((entry) => !entry.projectId), unresolvedLegacyBindings: settings.bindings.filter((entry) => !entry.projectId).map((entry) => ({ legacyProjectId: entry.projectId, seriesId: entry.seriesId })) };
       const series = settings.series.find((entry) => entry.id === binding.seriesId);
       if (!series) return { binding, series: null, requiresAuthorReview: true, error: "bound_series_missing" };
-      return { binding, bibleRepositoryId: series.bibleRepositoryId ?? null, series, requiresAuthorReview: !series.bibleRepositoryId, legacyBibleProjectId: series.bibleProjectId ?? null };
+      return { binding, bibleProjectId: series.bibleProjectId ?? null, series, requiresAuthorReview: !series.bibleProjectId, legacyBibleProjectId: series.legacyBibleProjectId ?? null };
     }),
     action("story.series.binding.update", propose, fieldSchema(["seriesId"], ["base_revision", "baseRevision", "operation_id", "operationId", "bibleRev", "coverLabel"]), async (input, context) => {
       const { settings, revision } = await readSeriesSettings(context);
       assertSourceRevision(input, revision ?? "missing", "series settings revision");
       const series = settings.series.find((entry) => entry.id === input.seriesId);
       if (!series) throw new TypeError("Series not found");
-      if (!series.bibleRepositoryId) throw Object.assign(new Error("The series Bible still uses a legacy project ID and requires author review before it can be linked."), { code: "author_review_required" });
-      const repositoryId = context.reader.snapshot.repository.repositoryId;
-      series.memberRepositoryIds = [...new Set([...(series.memberRepositoryIds ?? []), repositoryId])];
-      const binding: WorkSeriesBinding = { repositoryId, seriesId: series.id };
+      if (!series.bibleProjectId) throw Object.assign(new Error("The series Bible still uses a legacy project ID and requires author review before it can be linked."), { code: "author_review_required" });
+      const projectId = context.reader.snapshot.projectId;
+      series.memberProjectIds = [...new Set([...(series.memberProjectIds ?? []), projectId])];
+      const binding: WorkSeriesBinding = { projectId, seriesId: series.id };
       if (typeof input.bibleRev === "string" && input.bibleRev.trim()) binding.bibleRev = input.bibleRev.trim();
       if (typeof input.coverLabel === "string" && input.coverLabel.trim()) binding.coverLabel = input.coverLabel.trim();
-      const index = settings.bindings.findIndex((item) => item.repositoryId === repositoryId);
+      const index = settings.bindings.findIndex((item) => item.projectId === projectId);
       if (index < 0) settings.bindings.push(binding); else settings.bindings[index] = binding;
       await proposeSeriesSettings(context, settings, revision, `Bind work to Story series ${series.id}`, requestedOperationId(input));
-      return { binding, bibleRepositoryId: series.bibleRepositoryId };
+      return { binding, bibleProjectId: series.bibleProjectId };
     }),
     action("story.series.binding.delete", propose, fieldSchema([], ["base_revision", "baseRevision", "operation_id", "operationId"]), async (input, context) => {
       const { settings, revision } = await readSeriesSettings(context);
       assertSourceRevision(input, revision ?? "missing", "series settings revision");
-      const repositoryId = context.reader.snapshot.repository.repositoryId;
-      const prior = settings.bindings.find((item) => item.repositoryId === repositoryId);
+      const projectId = context.reader.snapshot.projectId;
+      const prior = settings.bindings.find((item) => item.projectId === projectId);
       if (!prior) throw new TypeError("Series binding not found");
-      settings.bindings = settings.bindings.filter((item) => item.repositoryId !== repositoryId);
+      settings.bindings = settings.bindings.filter((item) => item.projectId !== projectId);
       const series = settings.series.find((item) => item.id === prior.seriesId);
-      if (series?.memberRepositoryIds) series.memberRepositoryIds = series.memberRepositoryIds.filter((id) => id !== repositoryId);
+      if (series?.memberProjectIds) series.memberProjectIds = series.memberProjectIds.filter((id) => id !== projectId);
       await proposeSeriesSettings(context, settings, revision, "Remove Story series binding", requestedOperationId(input));
       return { removed: true };
     }),
     action("story.series.overlay", read, objectSchema, async (_input, context) => {
       const { settings } = await readSeriesSettings(context);
-      const repositoryId = context.reader.snapshot.repository.repositoryId;
-      const binding = settings.bindings.find((item) => item.repositoryId === repositoryId);
+      const projectId = context.reader.snapshot.projectId;
+      const binding = settings.bindings.find((item) => item.projectId === projectId);
       if (!binding) {
-        if (settings.bindings.some((item) => !item.repositoryId)) throw Object.assign(new Error("Legacy series bindings must be resolved by the author before the overlay can be read."), { code: "author_review_required" });
+        if (settings.bindings.some((item) => !item.projectId)) throw Object.assign(new Error("Legacy series bindings must be resolved by the author before the overlay can be read."), { code: "author_review_required" });
         return null;
       }
       const series = settings.series.find((item) => item.id === binding.seriesId);
       if (!series) return null;
-      if (!series.bibleRepositoryId) throw Object.assign(new Error("The series Bible repository ID is unresolved and requires author review."), { code: "author_review_required" });
-      const linked = await context.linkedReader(series.bibleRepositoryId);
+      if (!series.bibleProjectId) throw Object.assign(new Error("The series Bible repository ID is unresolved and requires author review."), { code: "author_review_required" });
+      const linked = await context.linkedReader(series.bibleProjectId);
       const work = await readStorySnapshot(context.reader);
       const bible = await readStorySnapshot(linked);
       const merged = mergeSeriesOverlay({ snapshot: context.reader.snapshot, workEntities: work.entities, workLinks: work.links, bibleEntities: bible.entities, bibleLinks: bible.links }).data;

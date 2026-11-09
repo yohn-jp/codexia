@@ -172,8 +172,8 @@ export function createSearchActions(moduleContext: ModuleContext, indexes: Snaps
       const content = `${JSON.stringify(next, null, 2)}\n`;
       const operation: ChangeOperation = {
         id: `search-${randomUUID()}`, generation: 0,
-        repository: context.reader.snapshot.repository,
-        baseRemoteCommit: context.reader.snapshot.remoteCommit,
+        projectId: context.reader.snapshot.projectId,
+        baseProjectVersion: context.reader.snapshot.projectVersion,
         effect: "settings",
         reads: [{ path: TERM_REGISTRY_PATH, revision }, { path: input.targetPath, revision: target.revision }],
         writes: [{ path: TERM_REGISTRY_PATH, revision, content }],
@@ -196,8 +196,8 @@ export function createSearchActions(moduleContext: ModuleContext, indexes: Snaps
       const content = `${JSON.stringify(next, null, 2)}\n`;
       const operation: ChangeOperation = {
         id: `search-${randomUUID()}`, generation: 0,
-        repository: context.reader.snapshot.repository,
-        baseRemoteCommit: context.reader.snapshot.remoteCommit,
+        projectId: context.reader.snapshot.projectId,
+        baseProjectVersion: context.reader.snapshot.projectVersion,
         effect: "settings", reads: [{ path: TERM_REGISTRY_PATH, revision }],
         writes: [{ path: TERM_REGISTRY_PATH, revision, content }],
         message: `Remove terminology entry: ${existing.canonical}`,

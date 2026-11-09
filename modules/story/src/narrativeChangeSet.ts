@@ -493,8 +493,8 @@ function makeOperation(context: ModuleActionContext, changeSetId: string, source
   return {
     id: operationId,
     generation: 0,
-    repository: context.reader.snapshot.repository,
-    baseRemoteCommit: context.reader.snapshot.remoteCommit,
+    projectId: context.reader.snapshot.projectId,
+    baseProjectVersion: context.reader.snapshot.projectVersion,
     effect,
     reads: [...reads].map(([path, revision]) => ({ path, revision })),
     ...(readScopes ? { readScopes } : {}),

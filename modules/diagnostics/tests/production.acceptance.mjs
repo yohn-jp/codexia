@@ -512,7 +512,7 @@ test("P06 public actions survive Core-approved publish, data-root deletion, and 
     store = new CoreStore({ dataDir: dataDirectory, allowLocalRemotes: true });
     project = await store.registerProject({ url: remote });
     const rebuiltReader = await pinnedRemoteReader(store, project.id);
-    assert.equal(rebuiltReader.snapshot.remoteCommit, publication.remoteCommit);
+    assert.equal(rebuiltReader.snapshot.projectVersion, publication.remoteCommit);
     const rebuiltStatuses = await store.listProposals(project.id);
     for (const proposal of proposals) {
       const rebuilt = rebuiltStatuses.find((status) => status.proposal.id === proposal.id);

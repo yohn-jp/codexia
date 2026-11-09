@@ -201,7 +201,7 @@ function StoryNavigator({ context }: { context: BrowserModuleContext }) {
     setTree(result.tree);
     setTreeRevision(result.revision);
   };
-  useEffect(() => { void refresh().catch(() => undefined); }, [context.snapshot.repository.repositoryId, context.snapshot.remoteCommit, context.snapshot.overlayCommit]);
+  useEffect(() => { void refresh().catch(() => undefined); }, [context.snapshot.projectId, context.snapshot.projectVersion]);
   const selectScene = async (id: string) => {
     setSceneId(id);
     try {
@@ -236,7 +236,7 @@ function StoryNavigator({ context }: { context: BrowserModuleContext }) {
     [orderedIds[index], orderedIds[nextIndex]] = [orderedIds[nextIndex]!, orderedIds[index]!];
     try {
       await invoke("story.entities.reorder", { type, parentId, orderedIds, base_revision: treeRevision, operation_id: operationId() });
-      setMessage(`Proposed ${type} order change. The outline updates after the proposal is accepted and checkpointed.`);
+      setMessage(`Proposed ${type} order change. The outline updates after the proposal is accepted and applied.`);
     } catch { /* The panel displays the machine error. */ }
   };
   return <section style={panelStyle} aria-label="Story navigator">
@@ -311,7 +311,7 @@ function StoryInspector({ context }: { context: BrowserModuleContext }) {
   useEffect(() => {
     void invoke<Entity[]>("story.entities.list", {}).then(setAvailableEntities).catch(() => setAvailableEntities([]));
     void invoke<SeriesOverlay | null>("story.series.overlay", {}).then(setSeriesOverlay).catch(() => setSeriesOverlay(null));
-  }, [context.snapshot.repository.repositoryId, context.snapshot.remoteCommit, context.snapshot.overlayCommit]);
+  }, [context.snapshot.projectId, context.snapshot.projectVersion]);
   const openEntity = async (entityId: string) => {
     const found = await invoke<Entity | null>("story.entities.get", { id: entityId.trim() });
     setEntity(found);
@@ -361,7 +361,7 @@ function StoryInspector({ context }: { context: BrowserModuleContext }) {
         operation_id: operationId(),
       });
       setEntity(updated);
-      setMessage(`Proposed update for ${entity.id}. Review it in pending changes before checkpointing.`);
+      setMessage(`Proposed update for ${entity.id}. Review it in pending changes before applying.`);
     } catch { /* The panel displays the machine error. */ }
   };
   const create = async (event: React.FormEvent) => {
@@ -387,7 +387,7 @@ function StoryInspector({ context }: { context: BrowserModuleContext }) {
       setId(created.id);
       setCreateName(""); setCreateId(""); setCreateTags(""); setCreateFields({});
       setCreateNotes({ lead: [], sections: [] }); setShowCreate(false);
-      setMessage(`Proposed ${created.type} ${created.id}. Review it in pending changes before checkpointing.`);
+      setMessage(`Proposed ${created.type} ${created.id}. Review it in pending changes before applying.`);
     } catch { /* The panel displays the machine error. */ }
   };
   const createFieldsForType = EDITABLE_FIELDS[createType] ?? [];
@@ -436,7 +436,7 @@ function StoryInspector({ context }: { context: BrowserModuleContext }) {
     <section aria-label="Read-only linked Bible overlay">
       <h3>Linked Bible reference (read-only)</h3>
       {seriesOverlay ? <>
-        <p style={mutedStyle}>Work snapshot {seriesOverlay.workSnapshot.repository.repositoryId}@{seriesOverlay.workSnapshot.remoteCommit}; Bible snapshot {seriesOverlay.bibleSnapshot.repository.repositoryId}@{seriesOverlay.bibleSnapshot.remoteCommit}.</p>
+        <p style={mutedStyle}>Work snapshot {seriesOverlay.workSnapshot.projectId}@{seriesOverlay.workSnapshot.projectVersion}; Bible snapshot {seriesOverlay.bibleSnapshot.projectId}@{seriesOverlay.bibleSnapshot.projectVersion}.</p>
         <label>Find a Bible entity <input type="search" value={bibleSearch} onChange={(event) => setBibleSearch(event.target.value)} placeholder="Name, alias, tag, or ID" /></label>
         <label>Bible entity type <select value={bibleTypeFilter} onChange={(event) => setBibleTypeFilter(event.target.value)}><option value="">All types</option>{bibleTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
         <label>Bible entity <select value={visibleBibleEntities.some((item) => item.id === selectedBibleEntityId) ? selectedBibleEntityId : ""} onChange={(event) => setSelectedBibleEntityId(event.target.value)}>
@@ -508,7 +508,7 @@ function ContinuityPanel({ context }: { context: BrowserModuleContext }) {
     void invoke<StoryMap>("story.map.query", {}).then(setMap).catch(() => setMap(null));
     void invoke<typeof graph>("story.graph.query", { types: ["character"] }).then(setGraph).catch(() => setGraph(null));
     setReaderModel(null);
-  }, [context.snapshot.repository.repositoryId, context.snapshot.remoteCommit, context.snapshot.overlayCommit]);
+  }, [context.snapshot.projectId, context.snapshot.projectVersion]);
   useEffect(() => {
     if (!showCooccurrence) { setCooccurrence(null); return; }
     let cancelled = false;
@@ -516,7 +516,7 @@ function ContinuityPanel({ context }: { context: BrowserModuleContext }) {
       if (!cancelled) setCooccurrence(data);
     }).catch(() => { if (!cancelled) setCooccurrence(null); });
     return () => { cancelled = true; };
-  }, [showCooccurrence, context.snapshot.repository.repositoryId, context.snapshot.remoteCommit, context.snapshot.overlayCommit]);
+  }, [showCooccurrence, context.snapshot.projectId, context.snapshot.projectVersion]);
   const openThread = async (threadId: string) => {
     setSelected(threadId);
     try { setLifecycle(await invoke("story.threads.lifecycle", { threadId })); } catch { setLifecycle(null); }
@@ -645,7 +645,7 @@ function WorldStatePanel({ context }: { context: BrowserModuleContext }) {
     setWorkbench(nextWorkbench);
     setEntities(nextEntities);
   };
-  useEffect(() => { void refresh().catch(() => undefined); }, [context.snapshot.repository.repositoryId, context.snapshot.remoteCommit, context.snapshot.overlayCommit]);
+  useEffect(() => { void refresh().catch(() => undefined); }, [context.snapshot.projectId, context.snapshot.projectVersion]);
   const act = async (action: "approve" | "reject", id: string) => {
     try {
       await invoke(`story.state-proposals.${action}`, { id, operation_id: operationId() });
@@ -708,7 +708,7 @@ function ZukanReviewPanel({ context }: { context: BrowserModuleContext }) {
     setPendingCount(result.pendingCount);
     setSuggestions(result.suggestions);
   };
-  useEffect(() => { submitted.current.clear(); void refresh().catch(() => undefined); }, [context.snapshot.repository.repositoryId, context.snapshot.remoteCommit, context.snapshot.overlayCommit]);
+  useEffect(() => { submitted.current.clear(); void refresh().catch(() => undefined); }, [context.snapshot.projectId, context.snapshot.projectVersion]);
   const decide = async (decision: "approve" | "reject", item: ZukanSuggestion) => {
     try {
       await invoke(`story.zukan-suggestions.${decision}`, {
@@ -717,7 +717,7 @@ function ZukanReviewPanel({ context }: { context: BrowserModuleContext }) {
         operation_id: operationId(),
       });
       submitted.current.add(item.id);
-      setMessage(`Proposed ${decision} for Zukan suggestion ${item.id}. Review the proposal before checkpointing.`);
+      setMessage(`Proposed ${decision} for Zukan suggestion ${item.id}. Review the proposal before applying.`);
     } catch { /* The panel displays the machine error. */ }
   };
   return <section style={panelStyle} aria-label="Zukan suggestion review">
@@ -728,7 +728,7 @@ function ZukanReviewPanel({ context }: { context: BrowserModuleContext }) {
       <strong>{item.entityName ?? item.entityId}</strong> · {item.kind ?? "note"} · {item.source} · {item.blockPath}
       <p>{item.proposedText}</p>
       {item.evidence.length > 0 && <details><summary>Evidence ({item.evidence.length})</summary><ul>{item.evidence.map((evidence, index) => <li key={`${evidence.sceneId ?? "quote"}-${index}`}>{evidence.sceneId ? `${evidence.sceneId}: ` : ""}{evidence.quote}</li>)}</ul></details>}
-      {submitted.current.has(item.id) && <p role="status">A review proposal is pending checkpoint; this suggestion remains pending in the selected snapshot.</p>}
+      {submitted.current.has(item.id) && <p role="status">A review proposal is pending apply; this suggestion remains pending in the selected snapshot.</p>}
       <div style={rowStyle}>
         <button type="button" style={buttonStyle} disabled={busy || !item.entityRevision || submitted.current.has(item.id)} onClick={() => void decide("approve", item)}>{submitted.current.has(item.id) ? "Approval proposal pending" : "Propose approval"}</button>
         <button type="button" style={buttonStyle} disabled={busy || submitted.current.has(item.id)} onClick={() => void decide("reject", item)}>{submitted.current.has(item.id) ? "Decision proposal pending" : "Propose rejection"}</button>
@@ -740,27 +740,27 @@ function ZukanReviewPanel({ context }: { context: BrowserModuleContext }) {
 
 function SeriesSettingsPanel({ context }: { context: BrowserModuleContext }) {
   const { invoke, busy, status, setMessage } = useAction(context);
-  const [series, setSeries] = useState<Array<{ id: string; name: string; bibleRepositoryId?: string; bibleProjectId?: string }>>([]);
-  const [repositories, setRepositories] = useState<Array<{ repository: { repositoryId: string; url: string; defaultBranch: string } }>>([]);
+  const [series, setSeries] = useState<Array<{ id: string; name: string; bibleProjectId?: string; legacyBibleProjectId?: string }>>([]);
+  const [repositories, setRepositories] = useState<Array<{ id: string; title: string }>>([]);
   const [name, setName] = useState("");
-  const [bibleRepositoryId, setBibleRepositoryId] = useState("");
+  const [bibleProjectId, setBibleRepositoryId] = useState("");
   const [selected, setSelected] = useState("");
   const [binding, setBinding] = useState<unknown>(null);
   const refresh = async () => {
     const [seriesRows, repoList, currentBinding] = await Promise.all([
       invoke<typeof series>("story.series.list", {}),
-      invoke<{ repositories: typeof repositories }>("core.repositories.list", {}),
+      invoke<{ projects: typeof repositories }>("core.projects.list", {}),
       invoke("story.series.binding.get", {}),
     ]);
     setSeries(seriesRows);
-    setRepositories(repoList.repositories);
+    setRepositories(repoList.projects);
     setBinding(currentBinding);
   };
-  useEffect(() => { void refresh().catch(() => undefined); }, [context.snapshot.repository.repositoryId, context.snapshot.remoteCommit, context.snapshot.overlayCommit]);
+  useEffect(() => { void refresh().catch(() => undefined); }, [context.snapshot.projectId, context.snapshot.projectVersion]);
   const create = async (event: React.FormEvent) => {
     event.preventDefault();
     try {
-      const created = await invoke<{ id: string }>("story.series.create", { name, bibleRepositoryId, operation_id: operationId() });
+      const created = await invoke<{ id: string }>("story.series.create", { name, bibleProjectId, operation_id: operationId() });
       setName(""); setSelected(created.id); await refresh();
       setMessage(`Proposed series ${created.id}.`);
     } catch { /* The panel displays the machine error. */ }
@@ -770,7 +770,7 @@ function SeriesSettingsPanel({ context }: { context: BrowserModuleContext }) {
     try {
       await invoke("story.series.binding.update", { seriesId: selected, operation_id: operationId() });
       await refresh();
-      setMessage("Proposed this repository’s series binding. The linked Bible remains read-only.");
+      setMessage("Proposed this project’s series binding. The linked Bible remains read-only.");
     } catch { /* The panel displays the machine error. */ }
   };
   const selectedSeries = useMemo(() => series.find((item) => item.id === selected), [series, selected]);
@@ -778,15 +778,15 @@ function SeriesSettingsPanel({ context }: { context: BrowserModuleContext }) {
     <h2>Series and Bible binding</h2>
     <form style={panelStyle} onSubmit={(event) => void create(event)}>
       <label>Series name <input value={name} onChange={(event) => setName(event.target.value)} /></label>
-      <label>Bible repository <select required value={bibleRepositoryId} onChange={(event) => setBibleRepositoryId(event.target.value)}>
-        <option value="">Choose a registered repository</option>{repositories.map(({ repository }) => <option key={repository.repositoryId} value={repository.repositoryId}>{repository.url} ({repository.defaultBranch})</option>)}
+      <label>Bible project <select required value={bibleProjectId} onChange={(event) => setBibleRepositoryId(event.target.value)}>
+        <option value="">Choose a project</option>{repositories.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
       </select></label>
-      <button style={buttonStyle} disabled={busy || !name.trim() || !bibleRepositoryId}>Propose series</button>
+      <button style={buttonStyle} disabled={busy || !name.trim() || !bibleProjectId}>Propose series</button>
     </form>
     <label>Series <select value={selected} onChange={(event) => setSelected(event.target.value)}>
       <option value="">Choose a series</option>{series.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
     </select></label>
-    {selectedSeries?.bibleRepositoryId ? <p style={mutedStyle}>Bible: {selectedSeries.bibleRepositoryId}</p> : selectedSeries?.bibleProjectId ? <p role="status">This series has a legacy project binding that needs author review.</p> : null}
+    {selectedSeries?.bibleProjectId ? <p style={mutedStyle}>Bible: {selectedSeries.bibleProjectId}</p> : selectedSeries?.legacyBibleProjectId ? <p role="status">This series has a legacy project binding that needs author review.</p> : null}
     <div style={rowStyle}>
       <button style={buttonStyle} disabled={busy || !selected} onClick={() => void bind()}>Propose work binding</button>
       <button style={buttonStyle} disabled={busy} onClick={() => void refresh().catch(() => undefined)}>Refresh series</button>

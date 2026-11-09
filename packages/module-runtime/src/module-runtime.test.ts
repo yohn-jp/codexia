@@ -6,8 +6,8 @@ import { createStoryActions } from "../../../modules/story/src/actions.js";
 import { ModuleRuntime, ModuleRuntimeError, resolveModulePlan, SharedCapabilityPool, type DomainJobProgressSink, type WorkerJobLifecycleSnapshot } from "./index.js";
 
 const snapshot: SnapshotId = {
-  repository: { provider: "github", repositoryId: "repo-1", defaultBranch: "main", ownerScope: "owner", url: "https://github.com/owner/repo" },
-  remoteCommit: "a".repeat(40),
+  projectId: "repo-1",
+  projectVersion: 11,
 };
 const schema: ValueSchema = { parse: (value) => value };
 const workerEntry = fileURLToPath(new URL("./fixtures/worker.mjs", import.meta.url));
@@ -51,8 +51,8 @@ function proposalOperation(): ChangeOperation {
   return {
     id: "operation-1",
     generation: 1,
-    repository: snapshot.repository,
-    baseRemoteCommit: snapshot.remoteCommit,
+    projectId: snapshot.projectId,
+    baseProjectVersion: snapshot.projectVersion,
     effect: "metadata",
     reads: [],
     writes: [{ path: "meta/scriptorium/modules/story/settings.yaml", revision: null, content: "setting: true\n" }],
@@ -926,7 +926,7 @@ test("disabling a module drains its real child process and leaves author data un
 
 test("module actions compose through namespaced host actions and owner-checked linked readers", async () => {
   const metadata = manifest("story");
-  const linkedSnapshot: SnapshotId = { ...snapshot, repository: { ...snapshot.repository, repositoryId: "repo-linked" } };
+  const linkedSnapshot: SnapshotId = { ...snapshot, projectId: "repo-linked" };
   const linkedReader = {
     snapshot: linkedSnapshot,
     async read() { return { content: "linked", revision: "linked-r1" }; },
@@ -1098,7 +1098,7 @@ test("HTTP contributions are hidden until activation and public reads cannot pro
     } }],
     async linkedReader() {
       linkedReaderCalls += 1;
-      return { ...readContext().reader, snapshot: { ...snapshot, repository: { ...snapshot.repository, repositoryId: "repo-linked" } } };
+      return { ...readContext().reader, snapshot: { ...snapshot, projectId: "repo-linked" } };
     },
     async propose(operations: ChangeOperation[]): Promise<ChangeProposal> {
       proposals += 1;

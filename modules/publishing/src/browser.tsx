@@ -439,7 +439,7 @@ function ShareLinksPanel({ context, tree }: { context: BrowserModuleContext; tre
       const data = await invoke(context, "publishing.shares.create", { kind, id: scopeId, label, expiresInHours: Number(hours) });
       const token = String(data.token);
       const url = window.location.origin + "/r/publishing/" +
-        encodeURIComponent(context.snapshot.repository.repositoryId) + "/" + encodeURIComponent(token);
+        encodeURIComponent(context.snapshot.projectId) + "/" + encodeURIComponent(token);
       setRevealed({ url, proposalId: String(data.proposalId) });
       setStatus(String(data.activation));
       setLabel("");
@@ -509,12 +509,12 @@ function SettingsView({ contributionId, context }: { contributionId: string; con
   </div>;
 }
 
-function ShareReaderView({ repositoryId, token }: { repositoryId: string; token: string }) {
+function ShareReaderView({ projectId, token }: { projectId: string; token: string }) {
   const [metadata, setMetadata] = useState<Record<string, unknown> | null>(null);
   const [scene, setScene] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const base = "/api/public/repos/" + encodeURIComponent(repositoryId) +
+  const base = "/api/public/projects/" + encodeURIComponent(projectId) +
     "/modules/publishing/share/" + encodeURIComponent(token);
   useEffect(() => {
     const robots = document.createElement("meta");
@@ -571,13 +571,13 @@ function MountView({ contributionId, context }: { contributionId: string; contex
   return <SettingsView contributionId={contributionId} context={context} />;
 }
 
-function publicRouteParts(request: Request): { repositoryId: string; token: string } | null {
+function publicRouteParts(request: Request): { projectId: string; token: string } | null {
   const segments = new URL(request.url).pathname.split("/").filter(Boolean);
   const routeIndex = segments.indexOf("r");
   if (routeIndex < 0 || segments[routeIndex + 1] !== "publishing" || !segments[routeIndex + 2] || !segments[routeIndex + 3]) return null;
   try {
     return {
-      repositoryId: decodeURIComponent(segments[routeIndex + 2]!),
+      projectId: decodeURIComponent(segments[routeIndex + 2]!),
       token: decodeURIComponent(segments[routeIndex + 3]!),
     };
   } catch { return null; }

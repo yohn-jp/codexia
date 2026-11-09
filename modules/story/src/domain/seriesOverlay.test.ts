@@ -4,14 +4,8 @@ import { mergeSeriesOverlay } from "./seriesOverlay.js";
 import type { StoryEntity } from "./types.js";
 
 const snapshot = {
-  repository: {
-    provider: "local" as const,
-    repositoryId: "repo-series",
-    defaultBranch: "main",
-    ownerScope: "owner-1",
-    url: "file:///repo-series",
-  },
-  remoteCommit: "e".repeat(40),
+  projectId: "repo-series",
+  projectVersion: 15,
 };
 
 function entity(id: string, name: string): StoryEntity {

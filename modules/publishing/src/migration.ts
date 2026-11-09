@@ -247,7 +247,7 @@ async function inspectRetainedGrants(context: MigrationContext): Promise<Migrati
       }));
       return result;
     }
-    const grant = safeRetainedGrant(parsed, context.repository.repositoryId);
+    const grant = safeRetainedGrant(parsed, context.projectId);
     if (!grant) {
       result.entries.push(reactivationEntry({
         source: LEGACY_GRANTS_PATH,

@@ -9,8 +9,8 @@ const workerServiceEntry = fileURLToPath(new URL("./fixtures/worker-service.mjs"
 const unreadyWorkerServiceEntry = fileURLToPath(new URL("./fixtures/worker-service-unready.mjs", import.meta.url));
 const missingNodeExecutable = fileURLToPath(new URL("./fixtures/node-executable-missing", import.meta.url));
 const snapshot: SnapshotId = {
-  repository: { provider: "github", repositoryId: "repo-1", defaultBranch: "main", ownerScope: "owner", url: "https://github.com/owner/repo" },
-  remoteCommit: "b".repeat(40),
+  projectId: "repo-1",
+  projectVersion: 12,
 };
 
 function request(task = "echo", input: unknown = { value: "hello" }, options: Partial<JobRequest> = {}): JobRequest {
@@ -423,7 +423,7 @@ test("spawn errors close one-shot and persistent worker records and release thei
 });
 
 test("a timed-out unready service keeps its process slot until its resistant child exits", async () => {
-  const supervisor = new WorkerSupervisor({ maxWorkerServices: 1, maxJobDurationMs: 100, cancellationGraceMs: 250 });
+  const supervisor = new WorkerSupervisor({ maxWorkerServices: 1, maxJobDurationMs: 1000, cancellationGraceMs: 250 });
   let pid: number | undefined;
   let startupFailure: Promise<unknown> | undefined;
   try {
@@ -432,7 +432,7 @@ test("a timed-out unready service keeps its process slot until its resistant chi
       (error: unknown) => error,
     );
     pid = await waitForPid(supervisor);
-    await new Promise((resolve) => setTimeout(resolve, 125));
+    await new Promise((resolve) => setTimeout(resolve, 1025));
     assert.doesNotThrow(() => process.kill(pid!, 0), "the startup timeout should still be draining the SIGTERM-resistant process");
 
     const replacement = await supervisor.createService("story", "0.1.0", workerServiceEntry).then(

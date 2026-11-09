@@ -6,8 +6,8 @@ import { SnapshotIndexCache } from "./index-cache.js";
 import { TERM_REGISTRY_PATH } from "./terminology.js";
 
 const snapshot: SnapshotId = {
-  repository: { provider: "local", repositoryId: "search-fixture", defaultBranch: "main", ownerScope: "owner", url: "local://search-fixture" },
-  remoteCommit: "a".repeat(40),
+  projectId: "search-fixture",
+  projectVersion: 11,
 };
 
 function revision(value: string): string {
