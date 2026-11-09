@@ -10,7 +10,7 @@ import YAML from "yaml";
 import { CoreStore } from "../../../packages/core/dist/index.js";
 import { ModuleRuntime } from "../../../packages/module-runtime/dist/index.js";
 import { createPostgresPersistence } from "../../../packages/persistence-postgres/dist/index.js";
-import { postgresFixture } from "../../test-support/postgres-fixture.mjs";
+import { postgresFixture } from "../../../tests/helpers/postgres-fixture.mjs";
 
 const nlpPackageUrl = new URL("../../nlp/package.json", import.meta.url);
 const diagnosticsPackageUrl = new URL("../package.json", import.meta.url);
