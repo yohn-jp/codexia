@@ -26,3 +26,43 @@ test("search and writing statistics share immutable Unicode-aware scene data",as
 test("reorder and recursive deletion mutate hierarchy while keeping revision history",async()=>{const p=await hierarchy();const second=await core.buildCreateHierarchyOperation(p.id,{kind:"scene",id:"s2",title:"Second",volumeId:"v1",chapterId:"c1",manuscriptBody:"Second"});await accept(p.id,second.operation);const reorder=await core.buildReorderHierarchyOperation(p.id,{kind:"scene",volumeId:"v1",chapterId:"c1",orderedIds:["s2","s1"]});await accept(p.id,reorder.operation);assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters[0]?.scenes.map(x=>x.id),["s2","s1"]);const docs=await persistence.read(r=>r.listDocuments(p.id));const scene=docs.find(d=>d.title==="Scene")!;const removal=await core.buildDeleteHierarchyOperation(p.id,{kind:"volume",id:"v1"});await accept(p.id,removal.operation);assert.equal((await core.tree(p.id)).volumes.length,0);assert.equal((await persistence.read(r=>r.getRevision(p.id,scene.id,scene.headRevisionId!)))?.markdown,"Text 😀\n");});
 test("manuscript history restores by appending an immutable revision",async()=>{const p=await hierarchy(),reader=await core.reader(p.id),path="manuscript/v1/c1/s1.md",old=await reader.read(path);const history=await core.listManuscriptSnapshots(p.id,"s1");await accept(p.id,operation(reader.snapshot,path,"New",old!.revision));const restore=await core.buildRestoreOperation(p.id,{sceneId:"s1",snapshotId:history.snapshots[0]!.id});await accept(p.id,restore.operation);assert.equal((await core.readScene(p.id,"s1")).text,"Text 😀\n");assert.equal((await core.listManuscriptSnapshots(p.id,"s1")).snapshots.length,3);});
 test("unsafe paths and unbound manuscript artifacts cannot bypass canonical documents",async()=>{const p=await project(),reader=await core.reader(p.id);await assert.rejects(reader.read("../secret"));await assert.rejects(accept(p.id,operation(reader.snapshot,"manuscript/unbound.md","illegal")),/canonical document/);assert.equal(await (await core.reader(p.id)).read("manuscript/unbound.md"),null);});
+test("independent approved proposals survive unrelated project changes",async()=>{const p=await project(),reader=await core.reader(p.id),a=operation(reader.snapshot,"bible/a.yaml","A"),b=operation(reader.snapshot,"bible/b.yaml","B");for(const op of [a,b]){const proposal:ChangeProposal={id:randomUUID(),snapshot:reader.snapshot,operations:[op],source:"author"};await core.propose(p.id,proposal);await core.approve(p.id,{proposalId:proposal.id,operationIds:[op.id],authorScope:"owner"});}await core.apply(p.id,a);await core.apply(p.id,b);assert.equal((await(await core.reader(p.id)).read("bible/b.yaml"))?.content,"B");});
+test("concurrent exact Core retries replay one durable approval receipt",async()=>{const p=await project(),reader=await core.reader(p.id),op=operation(reader.snapshot,"bible/a.yaml","A"),proposal:ChangeProposal={id:randomUUID(),snapshot:reader.snapshot,operations:[op],source:"author"};await core.propose(p.id,proposal);await core.approve(p.id,{proposalId:proposal.id,operationIds:[op.id],authorScope:"owner"});const receipts=await Promise.all([core.apply(p.id,op),core.apply(p.id,op)]);assert.deepEqual(receipts[0],receipts[1]);assert.equal((await core.observe(p.id)).snapshot.projectVersion,reader.snapshot.projectVersion+1);});
+test("scope membership changes reject the entire approved operation",async()=>{const {snapshotScopeRevision}=await import("@codexia/contracts");const p=await project(),reader=await core.reader(p.id),op=operation(reader.snapshot,"meta/result.yaml","computed");op.readScopes=[{prefix:"bible",revision:await snapshotScopeRevision(reader,"bible")}];const proposal:ChangeProposal={id:randomUUID(),snapshot:reader.snapshot,operations:[op],source:"author"};await core.propose(p.id,proposal);await core.approve(p.id,{proposalId:proposal.id,operationIds:[op.id],authorScope:"owner"});await accept(p.id,operation(reader.snapshot,"bible/new.yaml","new"));await assert.rejects(core.apply(p.id,op),/scope changed/);assert.equal(await(await core.reader(p.id)).read("meta/result.yaml"),null);});
+test("scope-bound evidence revisions are checked when proposing and applying", async () => {
+  const { snapshotScopeRevision } = await import("@codexia/contracts");
+  const projectRecord = await project();
+  const reader = await core.reader(projectRecord.id);
+  const evidencePath = "bible/source.yaml";
+  const operationRecord = operation(reader.snapshot, "meta/result.yaml", "computed");
+  operationRecord.readScopes = [{ prefix: "bible", revision: await snapshotScopeRevision(reader, "bible") }];
+  operationRecord.evidenceIds = ["source-evidence"];
+
+  const proposal: ChangeProposal = {
+    id: randomUUID(),
+    snapshot: reader.snapshot,
+    operations: [operationRecord],
+    source: "author",
+    evidence: [{
+      id: "source-evidence",
+      snapshot: reader.snapshot,
+      module: "story",
+      kind: "source_entity",
+      paths: [{ path: evidencePath, revision: "a".repeat(64) }],
+      details: {},
+    }],
+  };
+  await assert.rejects(core.propose(projectRecord.id, proposal), /evidence revision changed/);
+
+  proposal.evidence![0]!.paths[0]!.revision = null;
+  await core.propose(projectRecord.id, proposal);
+  await core.approve(projectRecord.id, {
+    proposalId: proposal.id,
+    operationIds: [operationRecord.id],
+    authorScope: "owner",
+  });
+  await accept(projectRecord.id, operation(reader.snapshot, evidencePath, "source"));
+
+  await assert.rejects(core.apply(projectRecord.id, operationRecord), /evidence revision changed/);
+  assert.equal(await (await core.reader(projectRecord.id)).read("meta/result.yaml"), null);
+});

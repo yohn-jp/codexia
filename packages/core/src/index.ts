@@ -154,6 +154,24 @@ function makeReader(manifest: Manifest): SnapshotReader {
   };
 }
 
+async function assertEvidenceRevisions(
+  reader: SnapshotReader,
+  proposal: ChangeProposal,
+  operation: ChangeOperation,
+): Promise<void> {
+  const evidenceById = new Map((proposal.evidence ?? []).map((item) => [item.id, item]));
+  for (const evidenceId of operation.evidenceIds ?? []) {
+    const evidence = evidenceById.get(evidenceId);
+    if (!evidence) fail(400, "invalid_proposal", "Operation references missing proposal evidence");
+    for (const path of evidence.paths) {
+      const currentRevision = (await reader.read(path.path))?.revision ?? null;
+      if (currentRevision !== path.revision) {
+        fail(409, "evidence_revision_conflict", `The evidence revision changed: ${path.path}`);
+      }
+    }
+  }
+}
+
 /** PostgreSQL is the sole durable manuscript, metadata and approved-operation authority. */
 export class CoreStore implements MutationCoordinator {
   readonly persistence: Persistence;
@@ -250,6 +268,8 @@ export class CoreStore implements MutationCoordinator {
     return this.persistence.transaction(async(tx)=>{
       const existing=await this.proposalStatus(tx,projectId,proposal.id); if(existing) { if(proposalDigest(existing.status.proposal)!==proposalDigest(proposal))fail(409,"proposal_identity_conflict","Proposal identity has a different payload");return existing.status.proposal; }
       await tx.assertProjectVersion(pid(projectId),proposal.snapshot.projectVersion);
+      const reader = makeReader(await this.currentManifest(tx, projectId));
+      for (const operation of proposal.operations) await assertEvidenceRevisions(reader, proposal, operation);
       const state:ProposalStatus={proposal:structuredClone(proposal),state:"proposed",approvedOperationIds:[],applications:[],appliedOperationIds:[],stale:false};
       await tx.saveModuleRecord({projectId:pid(projectId),moduleId:AUTHORITY,key:`proposal:${proposal.id}`,value:state as unknown as JsonObject,expectedVersion:null}); return structuredClone(proposal);
     });
@@ -302,14 +322,13 @@ export class CoreStore implements MutationCoordinator {
   async apply(projectId:string,operation:ChangeOperation):Promise<ApplyReceipt> {
     assertChangeOperation(operation);assertUserOperationPaths(operation);if(operation.projectId!==projectId)fail(409,"operation_scope_mismatch","Operation belongs to another project");
     return this.persistence.transaction(async(tx)=>{
+      await tx.assertProjectVersion(pid(projectId));
       const proposals=(await tx.listModuleRecords(pid(projectId),AUTHORITY)).filter((record)=>record.key.startsWith("proposal:"));
       const approved=proposals.find((record)=>{const state=record.value as unknown as ProposalStatus;return state.approvedOperationIds.includes(operation.id)&&state.proposal.operations.some((candidate)=>operationDigest(candidate)===operationDigest(operation));});
       if(!approved)fail(403,"operation_not_approved","The exact operation must be approved by an authenticated author");
       const state=approved.value as unknown as ProposalStatus;const replay=state.applications.find((receipt)=>receipt.operationId===operation.id&&receipt.generation===operation.generation);if(replay)return replay;
-      const currentProject=await tx.getProject(pid(projectId));if(!currentProject)fail(404,"project_not_found","Project not found");
-      const fence=state.applications.length?currentProject.version:operation.baseProjectVersion;
-      await tx.assertProjectVersion(pid(projectId),fence);
       const manifest=await this.currentManifest(tx,projectId),reader=makeReader(manifest);
+      await assertEvidenceRevisions(reader, state.proposal, operation);
       for(const read of [...operation.reads,...operation.writes])if((await reader.read(read.path))?.revision!==read.revision&& !((await reader.read(read.path))===null&&read.revision===null))fail(409,"revision_conflict",`The revision changed: ${read.path}`);
       for(const scope of operation.readScopes??[])if(await snapshotScopeRevision(reader,scope.prefix)!==scope.revision)fail(409,"scope_conflict",`The scope changed: ${scope.prefix}`);
       await this.applyWrites(tx,manifest,operation);
