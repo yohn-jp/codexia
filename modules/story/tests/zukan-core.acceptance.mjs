@@ -7,7 +7,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 import { ModuleRuntime } from "../../../packages/module-runtime/dist/index.js";
-import { postgresFixture } from "../../test-support/postgres-fixture.mjs";
+import { postgresFixture } from "../../../tests/helpers/postgres-fixture.mjs";
 
 const storyPackage = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 const manifest = storyPackage.codexiaModule;

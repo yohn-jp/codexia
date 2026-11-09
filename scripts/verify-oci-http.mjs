@@ -28,7 +28,7 @@ const ready = await get('/api/ready');
 const readyBody = await ready.json();
 assert.equal(readyBody.ok, true);
 assert.equal(readyBody.pendingRequests, 1, 'readiness reports the request currently being served');
-assert.equal(readyBody.pendingLocalCheckpoints, null);
+assert.equal(readyBody.persistenceReady, true);
 
 const health = await get('/api/health');
 assert.deepEqual(await health.json(), { status: 'ok' });

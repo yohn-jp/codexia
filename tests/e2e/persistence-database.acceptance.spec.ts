@@ -63,6 +63,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await editor.press("Control+A");
   await page.getByRole("button", { name: "選択範囲をText Anchorにする" }).click();
   await expect(page.locator(".pg-notice")).toContainText("Text Anchorを保存しました");
+  await page.getByRole("button", { name: "パネル：文書と保存状態", exact: true }).click();
   const evidence = page.locator(".pg-evidence-list");
   await expect(evidence).toContainText(firstDraft);
 

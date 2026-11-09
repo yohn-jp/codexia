@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
-import type { ChangeOperation, RepositoryIdentity } from "@codexia/contracts";
+import type { ChangeOperation } from "@codexia/contracts";
 import { MobileShell } from "../../../app/src/shells/mobile/MobileShell";
 import type { WorkspacePanel } from "../../../app/src/application/contracts";
-import { BrowserJournal, documentKey, journalEntryKey, repositoryKey, type JournalEntry } from "../../../app/src/storage/journal";
+import { BrowserJournal, documentKey, journalEntryKey, projectKey, type JournalEntry } from "../../../app/src/storage/journal";
 
 type GuardOutcome = boolean | "delayed";
 
@@ -29,14 +29,8 @@ declare global {
   }
 }
 
-const repository: RepositoryIdentity = {
-  provider: "github",
-  repositoryId: "mobile-transition-fixture",
-  ownerScope: "fixture-owner",
-  defaultBranch: "main",
-  url: "https://github.com/fixture-owner/mobile-transition-fixture",
-};
-const remoteCommit = "0123456789abcdef0123456789abcdef01234567";
+const projectId = "mobile-transition-fixture";
+const projectVersion = 1;
 const documentPath = "manuscript/vol-1/ch-1/scene-1.md";
 
 function makeEntry(generation: number): JournalEntry {
@@ -44,8 +38,8 @@ function makeEntry(generation: number): JournalEntry {
   const operation: ChangeOperation = {
     id: "mobile-transition-fixture-operation",
     generation,
-    repository,
-    baseRemoteCommit: remoteCommit,
+    projectId,
+    baseProjectVersion: projectVersion,
     effect: "manuscript",
     reads: [{ path: documentPath, revision: null }],
     writes: [{ path: documentPath, revision: null, content: text }],
@@ -54,13 +48,13 @@ function makeEntry(generation: number): JournalEntry {
   const entry: JournalEntry = {
     version: 1,
     key: "",
-    repositoryKey: repositoryKey(repository),
-    documentKey: documentKey(repository, documentPath),
+    projectKey: projectKey(projectId),
+    documentKey: documentKey(projectId, documentPath),
     authorScope: "fixture-author",
-    repository,
+    projectId,
     documentPath,
     sceneId: "scene-1",
-    snapshot: { repository, remoteCommit },
+    snapshot: { projectId, projectVersion },
     text,
     baseText: "Fixture base manuscript",
     operation,

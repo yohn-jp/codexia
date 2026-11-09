@@ -14,6 +14,7 @@ test("an unknown hosted grant requests refresh and retries the initial session c
     contentType: "application/json",
     body: JSON.stringify({ name: "codexia", version: "test", hosted: true, profile: "hosted" }),
   }));
+  await page.route("**/api/v1/persistence/status", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ available: true, provider: "postgres" }) }));
   await page.route("**/api/session", (route) => {
     sessionRequests += 1;
     if (!grantFresh) {
@@ -29,7 +30,7 @@ test("an unknown hosted grant requests refresh and retries the initial session c
       body: JSON.stringify({ authenticated: true, authorScope: "hosted:synthetic-author", permissions: ["read", "write"] }),
     });
   });
-  await page.route("**/api/v1/persistence/projects", (route) => route.fulfill({
+  await page.route("**/api/v1/persistence/projects*", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
     body: "[]",
@@ -78,6 +79,7 @@ test("concurrent tabs serialize a rotated hosted grant through the browser lock"
     contentType: "application/json",
     body: JSON.stringify({ name: "codexia", version: "test", hosted: true, profile: "hosted" }),
   }));
+  await context.route("**/api/v1/persistence/status", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ available: true, provider: "postgres" }) }));
   await context.route("**/api/session", async (route) => {
     totalSessionRequests += 1;
     if (grantFresh) {
@@ -96,7 +98,7 @@ test("concurrent tabs serialize a rotated hosted grant through the browser lock"
       body: JSON.stringify({ error: "Authentication required", code: "UNAUTHORIZED" }),
     });
   });
-  await context.route("**/api/v1/persistence/projects", (route) => route.fulfill({
+  await context.route("**/api/v1/persistence/projects*", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
     body: "[]",
@@ -143,7 +145,7 @@ test("an interrupted initial project bootstrap resumes after persisted pageshow"
     let started!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
     const pending = new Promise<void>((resolve) => { started = resolve; });
-    await resumed.route("**/api/v1/persistence/projects", async (route) => {
+    await resumed.route("**/api/v1/persistence/projects*", async (route) => {
       requests += 1;
       if (requests > 1) return route.continue();
       const response = await route.fetch();

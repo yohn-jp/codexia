@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { SnapshotReader } from "@codexia/contracts";
+import type { Persistence, PersistenceReader, Project, ProjectId } from "@codexia/persistence-contracts";
 import {
   metadataForRuntime,
-  normalizeRemoteRevision,
   parseQuiesceRequest,
   parseRuntimeAssignment,
   parseRuntimeControlCredential,
-  scanRemotePersistence,
+  observePostgresPersistence,
   sha256Digest,
 } from "./platform-runtime.js";
 
@@ -34,23 +33,32 @@ const ASSIGNMENT = {
   },
 } as const;
 
-function snapshotReader(files: Record<string, string>, remoteCommit = "c".repeat(40)): SnapshotReader {
-  const snapshot = {
-    repository: { provider: "github" as const, repositoryId: "42", defaultBranch: "main", ownerScope: "owner", url: ASSIGNMENT.repositoryLocator },
-    remoteCommit,
-  };
+function pgProject(id = "project-a", version = 7): Project {
   return {
-    snapshot,
-    async read(filePath, encoding = "utf8") {
-      const content = files[filePath];
-      return content === undefined ? null : {
-        content: encoding === "base64" ? Buffer.from(content, "utf8").toString("base64") : content,
-        revision: `sha256:${"d".repeat(64)}`,
-      };
+    id: id as ProjectId,
+    title: "Test project",
+    settings: {},
+    version,
+    createdAt: "2026-10-17T00:00:00.000Z",
+    updatedAt: "2026-10-17T00:00:00.000Z",
+  };
+}
+
+function testPersistence(options: {
+  project?: Project;
+  healthError?: Error;
+  withoutHealth?: boolean;
+  onRead?: () => void;
+} = {}): Persistence {
+  const reader = { async getProject() { return options.project; } } as unknown as PersistenceReader;
+  return {
+    async read(work) {
+      options.onRead?.();
+      return work(reader);
     },
-    async list(prefix) {
-      return Object.keys(files).filter((filePath) => filePath === prefix || filePath.startsWith(`${prefix}/`)).sort();
-    },
+    async transaction() { throw new Error("transactions are outside this observation test"); },
+    async close() {},
+    ...(options.withoutHealth ? {} : { async checkHealth() { if (options.healthError) throw options.healthError; } }),
   };
 }
 
@@ -114,83 +122,27 @@ describe("hosted runtime platform contract", () => {
     }), /binding mismatch/u);
   });
 
-  it("reports the exact remote metadata format pairs only after a complete scan", async () => {
-    const files = {
-      "meta/scriptorium/operations/v1/op-1.json": JSON.stringify({ version: 1, operation: { id: "op-1" } }),
-      "meta/scriptorium/publications/v1/batch-1.json": JSON.stringify({ version: 1, batchId: "batch-1" }),
-      "meta/scriptorium/proposals/v1/proposal-legacy.json": JSON.stringify({ version: 1, proposalId: "proposal-legacy" }),
-      "meta/scriptorium/proposals/v2/bindings/proposal-binding.json": JSON.stringify({ version: 2, proposalId: "proposal-binding" }),
-      "meta/scriptorium/proposals/v2/complete/proposal-complete.json": JSON.stringify({ version: 2, proposalId: "proposal-complete" }),
-    };
-    const commit = "c".repeat(40);
-    const observed = await scanRemotePersistence(snapshotReader(files), commit);
-    assert.equal(observed.state, "verified");
-    assert.equal(observed.observedRemoteCommit, commit);
-    assert.deepEqual(observed.formats, [
-      { formatId: "scriptorium.git-operations", version: 1 },
-      { formatId: "scriptorium.git-proposal-binding", version: 2 },
-      { formatId: "scriptorium.git-proposal-complete", version: 2 },
-      { formatId: "scriptorium.git-proposal-legacy", version: 1 },
-      { formatId: "scriptorium.git-publications", version: 1 },
-    ]);
-
-    const malformed = await scanRemotePersistence(snapshotReader({
-      ...files,
-      "meta/scriptorium/proposals/v2/other/proposal.json": "{}",
-    }), commit);
-    assert.equal(malformed.state, "unknown");
-    const wrongIdentity = await scanRemotePersistence(snapshotReader({
-      "meta/scriptorium/operations/v1/op-1.json": JSON.stringify({ version: 1, operation: { id: "different" } }),
-    }), commit);
-    assert.equal(wrongIdentity.state, "unknown");
-    assert.equal((await scanRemotePersistence(snapshotReader(files), "not-a-commit")).state, "unknown");
+  it("reports the exact PostgreSQL project version after a healthy durable read", async () => {
+    const persistence = testPersistence({ project: pgProject() });
+    assert.deepEqual(await observePostgresPersistence(persistence, "project-a"), { state: "verified", provider: "postgres", projectVersion: 7 });
   });
 
-  it("normalizes the empty Core remote sentinel and verifies a complete empty scan", async () => {
-    assert.equal(normalizeRemoteRevision(""), null);
-    assert.equal(normalizeRemoteRevision(null), null);
-    assert.equal(normalizeRemoteRevision("not-a-commit"), undefined);
-    assert.deepEqual(await scanRemotePersistence(snapshotReader({}, ""), null), {
-      state: "verified",
-      observedRemoteCommit: null,
-      formats: [],
-    });
+  it("never certifies a missing project, missing health check, or unavailable PostgreSQL as durable", async () => {
+    let reads = 0;
+    const missingProject = testPersistence({ onRead: () => { reads += 1; } });
+    const missingHealth = testPersistence({ project: pgProject(), withoutHealth: true, onRead: () => { reads += 1; } });
+    const unavailable = testPersistence({ project: pgProject(), healthError: new Error("offline"), onRead: () => { reads += 1; } });
+    for (const persistence of [missingProject, missingHealth, unavailable]) {
+      assert.deepEqual(await observePostgresPersistence(persistence, "project-a"), { state: "unknown", provider: "postgres", projectVersion: null });
+    }
+    assert.equal(reads, 1, "failed or unavailable health checks do not perform project reads");
   });
 
-  it("classifies supported module-owned formats and fails closed on unknown paths or versions", async () => {
-    const commit = "e".repeat(40);
-    const files = {
-      "meta/scriptorium/modules/assistant/model-settings.json": JSON.stringify({ defaultPresetId: "default", presets: [{ id: "default", model: "local" }] }),
-      "meta/scriptorium/modules/diagnostics/lint-rules.yaml": "rules: []\n",
-      "meta/scriptorium/modules/nlp/feature-settings.json": JSON.stringify({ externalEnabled: {} }),
-      "meta/scriptorium/modules/publishing/share-grants.jsonl": JSON.stringify({ version: 1, id: "grant-1" }),
-      "meta/scriptorium/modules/semantic/settings.json": JSON.stringify({ schemaVersion: 1, rerankerEnabled: false }),
-      "meta/scriptorium/modules/speaker/adopted-model.json": JSON.stringify({ version: 1, featureNames: ["x"], weights: [0], bias: 0, highProbabilityThreshold: 0.5, trainedAt: "2026-10-17T00:00:00.000Z" }),
-      "meta/scriptorium/modules/story/v1/series.json": JSON.stringify({ version: 1, series: [], bindings: [] }),
-      "meta/scriptorium/modules/story/legacy/files/meta/old.json": "opaque legacy bytes",
-    };
-    const observed = await scanRemotePersistence(snapshotReader(files), commit);
-    assert.equal(observed.state, "verified");
-    assert.equal(observed.observedRemoteCommit, commit);
-    assert.deepEqual(observed.formats.map(({ formatId, version }) => ({ formatId, version })), [
-      { formatId: "scriptorium.module-assistant.model-settings", version: 1 },
-      { formatId: "scriptorium.module-diagnostics.lint-rules", version: 1 },
-      { formatId: "scriptorium.module-nlp.feature-settings", version: 1 },
-      { formatId: "scriptorium.module-publishing.share-grants", version: 1 },
-      { formatId: "scriptorium.module-semantic.settings", version: 1 },
-      { formatId: "scriptorium.module-speaker.adopted-model", version: 1 },
-      { formatId: "scriptorium.module-story.legacy-files", version: 1 },
-      { formatId: "scriptorium.module-story.series", version: 1 },
-    ]);
-
-    assert.equal((await scanRemotePersistence(snapshotReader({
-      ...files,
-      "meta/scriptorium/modules/story/future-data.json": "{}",
-    }), commit)).state, "unknown");
-    assert.equal((await scanRemotePersistence(snapshotReader({
-      "meta/scriptorium/modules/story/v1/series.json": JSON.stringify({ version: 2, series: [], bindings: [] }),
-    }), commit)).state, "unknown");
-    assert.equal((await scanRemotePersistence(snapshotReader({ "meta/scriptorium/unclassified.json": "{}" }), commit)).state, "unknown");
+  it("fails closed when the database returns another project or invalid version", async () => {
+    for (const project of [pgProject("other-project"), pgProject("project-a", 0), pgProject("project-a", NaN)]) {
+      const persistence = testPersistence({ project });
+      assert.equal((await observePostgresPersistence(persistence, "project-a")).state, "unknown");
+    }
   });
 
   it("declares the actual hosted listener and quiesce shutdown action", () => {
