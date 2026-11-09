@@ -6,6 +6,7 @@ import {
   snapshotKey,
   type ChangeOperation,
   type ChangeProposal,
+  type ProposalEvidence,
   type SnapshotId,
 } from "@codexia/contracts";
 
@@ -128,6 +129,7 @@ export function assertPersistedProposal(value: unknown): asserts value is Change
     throw new Error("Invalid proposal evidence");
   }
   const evidenceIds = new Set<string>();
+  const evidenceById = new Map<string, ProposalEvidence>();
   for (const itemValue of evidence) {
     const item = asRecord(itemValue);
     if (!item || typeof item.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(item.id) || evidenceIds.has(item.id) ||
@@ -146,10 +148,19 @@ export function assertPersistedProposal(value: unknown): asserts value is Change
       assertProjectPath(file.path);
     }
     evidenceIds.add(item.id);
+    evidenceById.set(item.id, item as unknown as ProposalEvidence);
   }
   for (const candidate of proposal.operations) {
     const operation = candidate as ChangeOperation;
     if (operation.evidenceIds?.some((id) => !evidenceIds.has(id))) throw new Error("Missing proposal evidence reference");
+    for (const id of operation.evidenceIds ?? []) {
+      const item = evidenceById.get(id)!;
+      for (const path of item.paths) {
+        const boundByPath = [...operation.reads, ...operation.writes].some((read) => read.path === path.path && read.revision === path.revision);
+        const boundByScope = operation.readScopes?.some(({ prefix }) => path.path === prefix || path.path.startsWith(`${prefix}/`)) ?? false;
+        if (!boundByPath && !boundByScope) throw new Error("Proposal evidence must be bound by exact operation read preconditions");
+      }
+    }
   }
   if (Buffer.byteLength(JSON.stringify(normalizedProposal(proposal as unknown as ChangeProposal)), "utf8") > MAX_PROPOSAL_BYTES) {
     throw new Error("Persisted proposal exceeds its size limit");

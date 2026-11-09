@@ -656,12 +656,12 @@ class PostgresTransaction implements PersistenceTransaction {
     return {...mapProject(result.rows[0]), version: asNumber(result.rows[0].version) + 1};
   }
 
-  async assertProjectVersion(projectId: ProjectId, expectedVersion: number): Promise<void> {
+  async assertProjectVersion(projectId: ProjectId, expectedVersion?: number): Promise<void> {
     this.ensureWritable();
     const result = await this.query("SELECT version FROM project WHERE id = $1 FOR UPDATE", [projectId]);
     if (!result.rows[0]) throw notFound("project", projectId);
     const actual = asNumber(result.rows[0].version);
-    if (actual !== expectedVersion) throw conflict("project", projectId, expectedVersion, actual);
+    if (expectedVersion !== undefined && actual !== expectedVersion) throw conflict("project", projectId, expectedVersion, actual);
   }
 
   private async lockProject(projectId: ProjectId): Promise<void> {

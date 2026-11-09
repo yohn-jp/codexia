@@ -21,7 +21,7 @@ function goldenOperation(): ChangeOperation {
       revision: null,
       path: "manuscript/chapter.md",
     }],
-    reads: [{ revision: null, path: "manuscript/chapter.md" }],
+    reads: [{ revision: null, path: "manuscript/chapter.md" },{revision:null,path:"manuscript/source.md"}],
     readScopes: [{ revision: "b".repeat(64), prefix: "bible/characters" }],
     effect: "manuscript",
     baseProjectVersion: snapshot.projectVersion,
@@ -71,4 +71,15 @@ test("persisted proposal validation enforces record binding and safe content", (
   const reservedPath = goldenOperation();
   reservedPath.writes[0] = { ...reservedPath.writes[0]!, path: "meta/scriptorium/operations/v1/forged.json" };
   assert.throws(() => assertPersistedProposal({ ...proposal, operations: [reservedPath] }), /Core authority metadata/);
+});
+
+test("proposal evidence may be bound by a covering read scope", () => {
+  const proposal = goldenProposal();
+  proposal.operations[0]!.reads = [{ path: "manuscript/chapter.md", revision: null }];
+  proposal.operations[0]!.readScopes = [{ prefix: "manuscript", revision: "c".repeat(64) }];
+
+  assert.doesNotThrow(() => assertPersistedProposal(proposal));
+
+  proposal.operations[0]!.readScopes = [{ prefix: "bible", revision: "c".repeat(64) }];
+  assert.throws(() => assertPersistedProposal(proposal), /exact operation read preconditions/);
 });
