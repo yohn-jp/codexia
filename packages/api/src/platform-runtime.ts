@@ -64,11 +64,6 @@ export interface RuntimeControlCredential {
   jti: string;
 }
 
-export interface PersistenceFormat {
-  formatId: string;
-  version: number;
-}
-
 export interface PersistenceObservation {
   state: "verified" | "unknown";
   provider: "postgres";
@@ -287,8 +282,6 @@ export function metadataForRuntime(input: { producerRevision: string; port: numb
     shutdownTimeoutSeconds: input.shutdownTimeoutSeconds,
   };
 }
-
-
 /** Observe only durable PostgreSQL state; failure never falls back to workspace files. */
 export async function observePostgresPersistence(persistence: import("@codexia/persistence-contracts").Persistence, projectId: string): Promise<PersistenceObservation> {
   const unknown = { state: "unknown" as const, provider: "postgres" as const, projectVersion: null };
