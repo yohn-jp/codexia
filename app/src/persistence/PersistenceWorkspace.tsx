@@ -19,7 +19,7 @@ import { protectEditorTransition } from "./transition";
 import { ApiError } from "../api-error";
 import { DesktopShell } from "../shells/desktop/DesktopShell";
 import { MobileShell } from "../shells/mobile/MobileShell";
-import type { WorkspacePanel } from "../application/contracts";
+import type { WorkspacePanel, WorkspacePanelRequest } from "../application/contracts";
 import { applyThemeMode, loadThemeMode, persistThemeMode } from "../theme";
 import { ThemeControl } from "../components/ThemeControl";
 import { MobileReadingPager } from "../editor/MobileReadingPager";
@@ -56,6 +56,29 @@ interface PendingSave {
   generation: number;
   idempotencyKey: string;
   clientId: string;
+}
+
+type DesktopDurability = "draft" | "saving" | "uncertain" | "saved";
+
+function desktopDurabilityFor(active: ActiveDocument | null): DesktopDurability | undefined {
+  if (!active) return undefined;
+  if (active.remoteConflict || active.error || active.save === "failed" || active.recovery === "failed" || active.recovery === "other-tab") return "uncertain";
+  if (active.save === "saving") return "saving";
+  if (active.dirty) return "draft";
+  return active.save === "saved" && active.recovery === "stored" ? "saved" : "uncertain";
+}
+
+function desktopDurabilityDetail(active: ActiveDocument | null, status: DesktopDurability | undefined): string | undefined {
+  if (!active || !status) return undefined;
+  if (status === "draft") return active.recovery === "pending"
+    ? "新しい本文をIndexedDB回復Journalへ記録中です。PostgreSQLへは未保存です。"
+    : "下書きはIndexedDB回復Journalに保持されています。PostgreSQLへの保存は未完了です。";
+  if (status === "saving") return "本文はIndexedDB回復Journalに保持されています。PostgreSQLへの保存結果を確認中です。";
+  if (status === "saved") return "PostgreSQLへの保存を確認しました。";
+  if (active.remoteConflict) return "PostgreSQLに別のRevisionがあります。ブラウザーDraftを保持し、内容の比較が必要です。";
+  if (active.error) return active.error;
+  if (active.recovery === "pending") return "IndexedDB回復Journalへの記録が完了していません。本文を保持して再試行してください。";
+  return "PostgreSQL保存またはIndexedDB回復Journalの状態を再確認してください。";
 }
 
 const editorAdapter: EditorEvidenceAdapter = createPostgresEditorEvidenceAdapter();
@@ -120,8 +143,10 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const saveDocumentRef = useRef<() => Promise<void>>(async () => undefined);
   const scratchGuardRef = useRef<(() => Promise<void>) | null>(null);
   const editorRef = useRef<ManuscriptInputHandle>(null);
+  const transitionErrorRef = useRef("");
   const clientIdRef = useRef("");
   const openSequenceRef = useRef(0);
+  const panelRequestSequenceRef = useRef(0);
   const [resumeEpoch, setResumeEpoch] = useState(0);
   const [legacyImportBusy, setLegacyImportBusy] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -139,6 +164,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const [revisions, setRevisions] = useState<DocumentRevision[]>([]);
   const [showRevisions, setShowRevisions] = useState(false);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
+  const [requestedPanel, setRequestedPanel] = useState<WorkspacePanelRequest>();
 
   const resume = useRecentActivityResume({ binding: projectId ? { projectId, authorScope, projectScopeKey: projectId } : null, enabled: Boolean(projectId) });
   const project = projects.find((candidate) => candidate.id === projectId) ?? null;
@@ -560,6 +586,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
 
   const protectTransition = useCallback(async (): Promise<boolean> => {
     try {
+      transitionErrorRef.current = "";
       resume.flush();
       await scratchGuardRef.current?.();
       await protectEditorTransition(() => activeRef.current, () => {
@@ -569,7 +596,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       }, persistDraft);
       return true;
     } catch (error) {
-      setPageError(error instanceof Error ? error.message : "回復Journalを保存できませんでした。");
+      transitionErrorRef.current = error instanceof Error ? error.message : "回復Journalを保存できませんでした。";
+      setPageError(transitionErrorRef.current);
       return false;
     }
   }, [persistDraft, publishEditor, resume.flush]);
@@ -590,7 +618,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const beforeLegacyImport = useCallback(async (): Promise<void> => {
     legacyImportTargetRef.current = null;
     if (!journalRef.current) throw new Error(journalError || "回復Journalが利用できません。");
-    if (!await protectTransition()) throw new Error("現在の原稿を回復Journalへ保護できませんでした。");
+    if (!await protectTransition()) throw new Error(transitionErrorRef.current || "現在の原稿を回復Journalへ保護できませんでした。");
     const current = activeRef.current;
     if (!current || !projectId || current.document.projectId !== projectId) throw new Error("先に移行先のPostgreSQL文書を開いてください。");
     if (current.dirty || current.recovery !== "stored" || current.save !== "saved" || current.remoteConflict) {
@@ -748,6 +776,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       await refreshEvidence();
       setSelectedEvidenceId(created.anchor.id);
       setNotice(`Text Anchorを保存しました: ${created.quote}`);
+      setRequestedPanel({ id: "inspector", sequence: ++panelRequestSequenceRef.current });
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "Text Anchorを保存できませんでした。");
     }
@@ -955,7 +984,19 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   }, [navigateReference]);
   const switchPath = switchApplicationPath(window.location.href, mode === "desktop" ? "mobile" : "desktop");
 
-  const typographyStyle: CSSProperties = { fontSize: typography.fontSize, lineHeight: typography.lineHeight, letterSpacing: `${typography.letterSpacing}em`, maxWidth: typography.maxWidth, fontFamily: typography.fontFamily === "mincho" ? "serif" : "sans-serif" };
+  const editorFontFamily = typography.fontFamily === "mincho" ? "serif" : "sans-serif";
+  const typographyStyle = {
+    fontSize: typography.fontSize,
+    lineHeight: typography.lineHeight,
+    letterSpacing: `${typography.letterSpacing}em`,
+    maxWidth: typography.maxWidth,
+    fontFamily: editorFontFamily,
+    "--editor-font-size": `${typography.fontSize}px`,
+    "--editor-line-height": String(typography.lineHeight),
+    "--editor-letter-spacing": `${typography.letterSpacing}em`,
+    "--editor-font-family": editorFontFamily,
+    "--reader-max-width": `${typography.maxWidth}px`,
+  } as CSSProperties;
   const library = (<aside className="pg-library" aria-label="作品と文書">
         <section>
           <h2>作品</h2>
@@ -1168,16 +1209,19 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   });
   panels.push({ id: "review", title: "提案レビュー", render: () => <>{moduleError && <p role="alert">{moduleError}</p>}{journal && <ProposalReview projectId={projectId} authorScope={authorScope} journal={journal} proposals={proposals} onChange={() => { void refreshModules(); }} onStatus={(message) => setNotice(message)} />}</> }, ...modulePanels);
   const Shell = mode === "mobile" ? MobileShell : DesktopShell;
+  const currentDesktopDurability = desktopDurabilityFor(active);
   return <div className={`pg-workspace pg-shell pg-${mode}`}>
     <Shell mode={mode}
       header={<><h1>Database workspace</h1><ThemeControl mode={theme} error={themeError} onChange={(next) => { setTheme(next); applyThemeMode(next); try { persistThemeMode(next); setThemeError(""); } catch { setThemeError("外観設定をこのブラウザーへ保存できませんでした。"); } }} /><button type="button" onClick={() => void protectTransition().then((allowed) => { if (allowed) onSignOut(); })}>ログアウト</button></>}
       documentTitle={active?.document.title}
       documentContext={project?.title}
-      desktopDurability={active?.dirty ? "draft" : "saved"}
+      desktopDurability={currentDesktopDurability}
+      desktopDurabilityDetail={desktopDurabilityDetail(active, currentDesktopDurability)}
       library={library} editor={editor} tools={knowledge}
       status={<>{pageError && <p role="alert">{pageError}</p>}{loading && <p role="status">PostgreSQLの状態を読み込んでいます。</p>}</>}
       workspaceScope={`postgres:${authorScope}`}
       panels={panels}
+      requestedPanel={requestedPanel}
       beforeLayoutChange={protectTransition}
       onSwitchMode={async () => { if (!await protectTransition()) return false; window.location.assign(switchPath); return true; }}
     />
