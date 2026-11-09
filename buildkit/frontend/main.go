@@ -175,7 +175,8 @@ func build(ctx context.Context, gateway client.Client) (*client.Result, error) {
 	if _, err := rand.Read(smokeTokenBytes); err != nil {
 		return nil, fmt.Errorf("generate ephemeral startup smoke token: %w", err)
 	}
-	smoke := runtime.File(llb.Copy(*frontend, "/opt/codexia/scripts/hosted-smoke.mjs", "/usr/share/codexia/hosted-smoke.mjs", &llb.CopyInfo{CreateDestPath: true, ChownOpt: &owner})).
+	smoke := runtime.File(llb.Copy(*frontend, "/opt/codexia-smoke-postgres/root/", "/", &llb.CopyInfo{CopyDirContentsOnly: true})).
+		File(llb.Copy(*frontend, "/opt/codexia/scripts/hosted-smoke.mjs", "/usr/share/codexia/hosted-smoke.mjs", &llb.CopyInfo{CreateDestPath: true, ChownOpt: &owner})).
 		AddEnv("HOST", "127.0.0.1").
 		AddEnv("PORT", "34117").
 		AddEnv("CODEXIA_HOSTED_MODE", "0").

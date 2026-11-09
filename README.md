@@ -13,8 +13,11 @@ The [Codexia reboot RFC](docs/architecture/CODEXIA-REBOOT-RFC.md) contains broad
 Requires Node.js 24+, pnpm 12.10.1 and PostgreSQL.
 
 ```sh
+createdb codexia
 pnpm install --frozen-lockfile
 pnpm build
+export CODEXIA_DATABASE_URL='postgres://localhost/codexia'
+pnpm --filter @codexia/persistence-postgres migrate
 export CODEXIA_AUTH_TOKEN="$(openssl rand -hex 32)"
 export CODEXIA_DATABASE_URL='postgres://codexia:password@127.0.0.1:5432/codexia'
 pnpm --filter @codexia/persistence-postgres migrate
@@ -29,31 +32,17 @@ Writing, Research, and Review presets assemble independent Editor, Outline, Insp
 
 Search/Terminology is optional: it indexes snapshot revisions, using PostgreSQL project/document revisions, and supports lexical, exact, prefix, and scoped queries. The term dictionary is changed through reviewable proposals. Automatic term links are temporary editor/reading decorations and never insert links into Markdown; use Ctrl/Command-click or Ctrl/Command-Enter on an editor term to navigate. Ambiguous aliases remain plain text and can be inspected in the terminology panel. Search can explicitly request existing NLP or Semantic capabilities; ordinary search does not load models. Core-only builds retain authoring without this plugin.
 
-To build and run the full composition, use `CODEXIA_PROFILE=full pnpm build` and `CODEXIA_PROFILE=full pnpm start`. It includes Story, Diagnostics, NLP, Semantic, Speaker, Assistant, Publishing, MCP, and Search/Terminology. Module settings distinguish absent, disabled, enabled-idle, and active modules. Heavy engines run in supervised child processes. Assistant provider execution requires provider configuration and author consent; selecting no provider keeps local writing and review available.
+To build and run the Full composition, use `CODEXIA_PROFILE=full pnpm build` and `CODEXIA_PROFILE=full pnpm start`. It includes Story, Diagnostics, NLP, Semantic, Speaker, Assistant, Publishing, MCP, and Search/Terminology. Module settings distinguish absent, disabled, enabled-idle and active modules. Heavy engines run in supervised child processes. Assistant provider execution requires provider configuration and author consent; selecting no provider keeps local writing and review available.
 
 ## Hosted MCP access
 
-When the optional `mcp` module is included in a Praetorium Hosted composition,
-the stable application origin exposes `/mcp` (Streamable HTTP) and
-`/.well-known/oauth-protected-resource` (public OAuth resource discovery), also
-available at `/.well-known/oauth-protected-resource/mcp` for endpoint-path discovery.
-Configure a remote MCP client with `https://<stable-application-origin>/mcp`,
-not the physical Pod hostname or the Praetorium browser entry URL.
-The resource metadata points to Praetorium for GitHub-based OAuth login,
-explicit client consent, PKCE token exchange and refresh. Codexia validates
-the issued short-lived repository/instance/epoch-bound bearer grant and retains
-the existing proposal/author approval boundary.
+When the optional `mcp` module is included in a Praetorium Hosted composition, the stable application origin exposes `/mcp` (Streamable HTTP) and `/.well-known/oauth-protected-resource` (public OAuth resource discovery), also available at `/.well-known/oauth-protected-resource/mcp` for endpoint-path discovery. Configure a remote MCP client with `https://<stable-application-origin>/mcp`, not the physical Pod hostname or the Praetorium browser entry URL. The resource metadata points to Praetorium for user login, explicit client consent, PKCE token exchange and refresh. Codexia validates the issued short-lived repository/instance/epoch-bound bearer grant and retains the existing proposal/author approval boundary.
 
-A stopped Hosted instance is served by Praetorium's Instance Access fallback:
-the initial unauthenticated request receives OAuth discovery, while a valid
-bearer request can trigger the existing authorized Wake path and returns
-`503 Retry-After` until the same stable URL becomes ready. The caller must
-retry its request; no MCP request body is queued or replayed by the platform.
-This service consumes the reusable [Praetorium service MCP
-contract](https://github.com/yohn-jp/praetorium/blob/main/docs/architecture/SERVICE-MCP.md)
-rather than implementing an application-specific OAuth issuer.
+A stopped Hosted instance is served by Praetorium's Instance Access fallback: the initial unauthenticated request receives OAuth discovery, while a valid bearer request can trigger the existing authorized Wake path and returns `503 Retry-After` until the same stable URL becomes ready. The caller must retry its request; no MCP request body is queued or replayed by the platform. This service consumes the reusable [Praetorium service MCP contract](https://github.com/yohn-jp/praetorium/blob/main/docs/architecture/SERVICE-MCP.md) rather than implementing an application-specific OAuth issuer.
 
 ## Single OCI image
+
+The API requires a PostgreSQL database URL. The OCI verification script starts an isolated PostgreSQL sidecar automatically; standalone operators configure their own database and apply migrations before authoring.
 
 ```sh
 podman build --format oci --build-arg PROFILE=core -t codexia:local .

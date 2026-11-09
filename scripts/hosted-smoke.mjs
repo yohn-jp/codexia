@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -50,31 +50,40 @@ if (typeof token !== 'string' || !/^[a-f0-9]{64}$/u.test(token)) {
 }
 const dataDirectory = await mkdtemp(path.join(os.tmpdir(), 'codexia-runtime-smoke-'));
 const port = 34117;
-const child = spawn(process.execPath, ['/app/launch.mjs'], {
-  cwd: '/app',
-  stdio: ['ignore', 'pipe', 'pipe'],
-  env: {
-    ...process.env,
-    HOST: '127.0.0.1',
-    PORT: String(port),
-    CODEXIA_AUTH_TOKEN: token,
-    CODEXIA_HOSTED_MODE: '0',
-    CODEXIA_PROFILE: 'hosted',
-    CODEXIA_DATA_DIR: path.join(dataDirectory, 'data'),
-    CODEXIA_USAGE_DIR: path.join(dataDirectory, 'history'),
-    CODEXIA_MODULE_CACHE_DIR: path.join(dataDirectory, 'module-cache'),
-    CODEXIA_MODULE_PROFILE_PATH: '/app/generated/server.mjs',
-  },
-});
+const postgresBin = '/usr/lib/postgresql/17/bin';
+const databaseDirectory = path.join(dataDirectory, 'postgres');
+let databaseStarted = false;
+let child;
 let output = '';
-child.stdout.setEncoding('utf8').on('data', (chunk) => { output += chunk; });
-child.stderr.setEncoding('utf8').on('data', (chunk) => { output += chunk; });
 
 async function request(url, options) {
   return fetch(`http://127.0.0.1:${port}${url}`, { ...options, signal: AbortSignal.timeout(2_000) });
 }
 
 try {
+  execFileSync(path.join(postgresBin, 'initdb'), ['-D', databaseDirectory, '--no-locale', '--encoding=UTF8', '--auth=trust'], { stdio: 'pipe', timeout: 30_000 });
+  execFileSync(path.join(postgresBin, 'pg_ctl'), ['-D', databaseDirectory, '-l', path.join(dataDirectory, 'postgres.log'), '-w', '-t', '30', '-o', `-h 127.0.0.1 -k ${dataDirectory} -p 34118`, 'start'], { stdio: 'pipe', timeout: 35_000 });
+  databaseStarted = true;
+  child = spawn(process.execPath, ['/app/launch.mjs'], {
+    cwd: '/app',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      HOST: '127.0.0.1',
+      PORT: String(port),
+      CODEXIA_AUTH_TOKEN: token,
+      CODEXIA_DATABASE_URL: 'postgres://node@127.0.0.1:34118/postgres',
+      CODEXIA_DATABASE_MIGRATE_ON_START: '1',
+      CODEXIA_HOSTED_MODE: '0',
+      CODEXIA_PROFILE: 'hosted',
+      CODEXIA_DATA_DIR: path.join(dataDirectory, 'data'),
+      CODEXIA_USAGE_DIR: path.join(dataDirectory, 'history'),
+      CODEXIA_MODULE_CACHE_DIR: path.join(dataDirectory, 'module-cache'),
+      CODEXIA_MODULE_PROFILE_PATH: '/app/generated/server.mjs',
+    },
+  });
+  child.stdout.setEncoding('utf8').on('data', (chunk) => { output += chunk; });
+  child.stderr.setEncoding('utf8').on('data', (chunk) => { output += chunk; });
   let ready;
   for (let attempt = 0; attempt < 60; attempt += 1) {
     if (child.exitCode !== null) throw new Error(`Runtime exited before readiness: ${output}`);
@@ -145,8 +154,11 @@ try {
   }
   console.log(`Hosted runtime startup smoke passed (${expectedModules.length} modules, ${bundle.length} browser bytes)`);
 } finally {
-  child.kill('SIGTERM');
-  await Promise.race([new Promise((resolve) => child.once('exit', resolve)), delay(5_000)]);
-  if (child.exitCode === null) child.kill('SIGKILL');
+  if (child) {
+    if (child.exitCode === null) child.kill('SIGTERM');
+    await Promise.race([new Promise((resolve) => child.once('exit', resolve)), delay(5_000)]);
+    if (child.exitCode === null) child.kill('SIGKILL');
+  }
+  if (databaseStarted) execFileSync(path.join(postgresBin, 'pg_ctl'), ['-D', databaseDirectory, '-m', 'immediate', '-w', 'stop'], { stdio: 'pipe', timeout: 10_000 });
   await rm(dataDirectory, { recursive: true, force: true });
 }

@@ -1,30 +1,18 @@
 # OCI build and startup verification
 
-The root `Dockerfile` builds Core and Full profiles of one application container. Runtime packages include the compiled API and browser assets, Git and CA certificates. The image runs as UID 1000 and listens on port 3000. Core excludes optional analysis and model dependencies; Full includes its selected trusted module packages.
+The root `Dockerfile` builds Core and Full profiles of one application container. Runtime packages include the compiled API and browser assets, CA certificates and required runtime dependencies. The image runs as UID 1000 and listens on port 3000. Core excludes optional analysis and model dependencies; Full includes its selected trusted module packages.
 
-```sh
-podman build --format oci --build-arg PROFILE=core --tag codexia:local .
-export CODEXIA_AUTH_TOKEN="$(openssl rand -hex 32)"
-podman run --rm --publish 127.0.0.1:3000:3000 \
-  --env CODEXIA_AUTH_TOKEN --env CODEXIA_GITHUB_TOKEN \
-  --mount type=volume,src=scriptorium-data,dst=/data \
-  --mount type=volume,src=scriptorium-history,dst=/history \
-  codexia:local
-```
-
-Use `PROFILE=full` for the Full build. The existing volume names are retained for upgrades. Standalone startup requires an owner token; the GitHub token is optional for public reads and required for authorized private access or publication. Mount directories must be writable by UID 1000. `/data` holds project state; `/history` holds private usage/job history outside Git. Do not share one writable workspace between containers. Use a trusted HTTPS reverse proxy for access beyond localhost.
-
-Run the local acceptance probe for each profile:
+Every API startup requires PostgreSQL. The OCI verification script creates an isolated network and PostgreSQL sidecar, applies the checked migrations, starts the application against it, checks health/readiness, HTML and built assets, profile/module metadata, nonroot execution, writable scratch data and graceful shutdown, then removes both containers and the network.
 
 ```sh
 CODEXIA_PROFILE=core bash scripts/verify-oci.sh
 CODEXIA_PROFILE=full bash scripts/verify-oci.sh
 ```
 
-The probe builds the image, starts a temporary container, checks health/readiness, HTML and built assets, profile/module metadata, nonroot execution, writable data and graceful shutdown, then removes its container. It reports the image identity and startup resource observations. Those observations describe that execution; they are not universal performance budgets.
+For a manual run, provide `CODEXIA_DATABASE_URL` for a private PostgreSQL database and apply migrations before starting the image. Standalone mode also requires `CODEXIA_AUTH_TOKEN`. The runtime uses PostgreSQL for authoring state; `/data` holds derived module caches, while `/history` holds private usage/job history. Do not share one writable cache/history volume between containers. Use a trusted HTTPS reverse proxy beyond localhost.
 
-Podman is the default when available. Set `OCI_ENGINE`, `CODEXIA_OCI_IMAGE` and `CODEXIA_OCI_PORT` to override the engine, local image tag and host port; Docker remains a supported fallback for CI/other hosts. Provision a suitable engine trust policy through the host's normal administration; the verification procedure does not alter host trust configuration.
+Podman is the default when available. Set `OCI_ENGINE`, `CODEXIA_OCI_IMAGE` and `CODEXIA_OCI_PORT` to override the engine, local image tag and host port; Docker remains supported. Provision engine trust through the host's normal administration; the verification procedure does not alter host trust configuration.
 
 The production dependency audit rejects build/test tools in runtime closure. Core auditing additionally rejects optional NLP, model-provider, tokenizer, embedding, reranker and speaker dependencies in packages or compiled imports. The local `pnpm audit:core` command allows development tools installed for source work, so it does not substitute for the image's production audit.
 
-For hosted assignments and credential handling, use [Hosted deployment](../HOSTED-DEPLOYMENT.md). For publication, use [OCI releases](OCI-RELEASE.md).
+For hosted assignments and PostgreSQL configuration, use [Hosted deployment](../HOSTED-DEPLOYMENT.md). For immutable image publication, use [OCI releases](OCI-RELEASE.md).
