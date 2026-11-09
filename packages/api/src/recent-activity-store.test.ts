@@ -6,13 +6,7 @@ import { resolve } from "node:path";
 import { describe, it } from "node:test";
 import { importLegacyRecentActivity, RecentActivityStore, type RecentActivityItem } from "./recent-activity-store.js";
 
-const repository = {
-  provider: "github" as const,
-  repositoryId: "123",
-  defaultBranch: "main",
-  ownerScope: "owner-1",
-  url: "https://github.com/owner/work.git",
-};
+const repository = "project-one";
 
 function sourceItem(deviceType: "desktop" | "mobile", overrides: Partial<RecentActivityItem> = {}): RecentActivityItem {
   return {
@@ -43,7 +37,7 @@ describe("RecentActivityStore", () => {
     const restarted = new RecentActivityStore(usageDirectory);
     assert.equal((await restarted.list("owner", repository)).length, 2);
     assert.deepEqual(await restarted.list("another-owner", repository), []);
-    assert.deepEqual(await restarted.list("owner", { ...repository, repositoryId: "456" }), []);
+    assert.deepEqual(await restarted.list("owner", "project-two"), []);
     assert.equal((await lstat(resolve(usageDirectory, "recent-activity"))).mode & 0o777, 0o700);
     assert.equal((await lstat(resolve(usageDirectory, "recent-activity", "recent-activity-state.json"))).mode & 0o777, 0o600);
   });
@@ -65,7 +59,7 @@ describe("RecentActivityStore", () => {
     const mappings = {
       workspaceDataRoot,
       usageDirectory,
-      legacyRepositoryMappings: { "legacy-project": repository },
+      legacyProjectMappings: { "legacy-project": repository },
       legacyUserMappings: { "legacy-user": "owner" as const },
     };
 
@@ -100,7 +94,7 @@ describe("RecentActivityStore", () => {
     const mappings = {
       workspaceDataRoot,
       usageDirectory,
-      legacyRepositoryMappings: { project: repository },
+      legacyProjectMappings: { project: repository },
       legacyUserMappings: { user: "owner" as const },
     };
     const aliasBytes = Buffer.from(JSON.stringify({ byKey: { "user:project": [
@@ -148,7 +142,7 @@ describe("RecentActivityStore", () => {
     const report = await importLegacyRecentActivity({
       workspaceDataRoot,
       usageDirectory,
-      legacyRepositoryMappings: { project: repository },
+      legacyProjectMappings: { project: repository },
       legacyUserMappings: { user: "owner" },
     });
     assert.equal(report.adoptionBlocked, "invalid_record");
