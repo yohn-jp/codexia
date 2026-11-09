@@ -1,13 +1,22 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, request, test, type Page } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const rootPath = "/api/v1/persistence/projects";
+const appBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
+const appOrigin = new URL(appBaseURL).origin;
 interface Draft { key: string; projectId: string; documentId: string; authorScope: string; markdown: string; generation: number; baseRevisionId: string; baseMarkdown: string; version: number; updatedAt: number }
 interface Read { document: { id: string; title: string; headRevisionId: string }; revision: { id: string; markdown: string } }
 interface Fixture { projectId: string; one: Read; two: Read }
 const editor = (page: Page) => page.getByRole("textbox", { name: "原稿 Markdown" });
 const documentPath = (fixture: Fixture, documentId = fixture.one.document.id) => `${rootPath}/${fixture.projectId}/documents/${documentId}`;
+const mutationHeaders = (headers: Record<string, string> = {}): Record<string, string> => ({ Origin: appOrigin, ...headers });
+async function editorMarkdown(page: Page): Promise<string> {
+  return editor(page).evaluate((element) => Array.from(element.querySelectorAll(".cm-line"), (line) => line.textContent ?? "").join("\n").replace(/\n+$/u, ""));
+}
+async function expectEditor(page: Page, markdown: string): Promise<void> {
+  await expect.poll(() => editorMarkdown(page)).toBe(markdown.replace(/\n+$/u, ""));
+}
 
 async function signIn(page: Page, mode = "desktop"): Promise<void> {
   await page.goto(`/${mode}/`);
@@ -19,13 +28,13 @@ async function signIn(page: Page, mode = "desktop"): Promise<void> {
 }
 
 async function fixture(page: Page): Promise<Fixture> {
-  const login = await page.request.post("/api/login", { data: { token: authToken } });
+  const login = await page.request.post("/api/login", { headers: mutationHeaders(), data: { token: authToken } });
   expect(login.ok()).toBe(true);
-  const projectResponse = await page.request.post(rootPath, { data: { title: `Core acceptance ${randomUUID()}` } });
+  const projectResponse = await page.request.post(rootPath, { headers: mutationHeaders(), data: { title: `Core acceptance ${randomUUID()}` } });
   expect(projectResponse.status()).toBe(201);
   const { project } = await projectResponse.json() as { project: { id: string } };
   const createDocument = async (title: string, orderKey: string): Promise<Read> => {
-    const response = await page.request.post(`${rootPath}/${project.id}/documents`, { headers: { "Idempotency-Key": randomUUID() }, data: { title, kind: "scene", orderKey, markdown: `# ${title}\n\nInitial ${title} text.\n` } });
+    const response = await page.request.post(`${rootPath}/${project.id}/documents`, { headers: mutationHeaders({ "Idempotency-Key": randomUUID() }), data: { title, kind: "scene", orderKey, markdown: `# ${title}\n\nInitial ${title} text.\n` } });
     expect(response.status()).toBe(201);
     return response.json() as Promise<Read>;
   };
@@ -34,7 +43,7 @@ async function fixture(page: Page): Promise<Fixture> {
   await signIn(page);
   await page.getByLabel("開く作品").selectOption(project.id);
   await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
-  await expect(editor(page)).toHaveText(one.revision.markdown.trimEnd());
+  await expectEditor(page, one.revision.markdown);
   return { projectId: project.id, one, two };
 }
 
@@ -45,7 +54,7 @@ async function read(page: Page, f: Fixture, documentId = f.one.document.id): Pro
 }
 async function replace(page: Page, f: Fixture, markdown: string, base?: Read): Promise<Read> {
   const current = base ?? await read(page, f);
-  const response = await page.request.patch(documentPath(f), { headers: { "Idempotency-Key": randomUUID(), "X-Client-Id": "acceptance-external" }, data: { baseRevisionId: current.revision.id, changes: [{ fromUtf16: 0, toUtf16: current.revision.markdown.length, insert: markdown }], resultingSha256: createHash("sha256").update(markdown).digest("hex"), clientId: "acceptance-external" } });
+  const response = await page.request.patch(documentPath(f), { headers: mutationHeaders({ "Idempotency-Key": randomUUID(), "X-Client-Id": "acceptance-external" }), data: { baseRevisionId: current.revision.id, changes: [{ fromUtf16: 0, toUtf16: current.revision.markdown.length, insert: markdown }], resultingSha256: createHash("sha256").update(markdown).digest("hex"), clientId: "acceptance-external" } });
   expect(response.status()).toBe(200);
   return response.json() as Promise<Read>;
 }
@@ -127,12 +136,17 @@ test("same-origin stale tabs cannot replace an equal-generation journal draft", 
 
 test("IME composition blocks navigation while coalesced editor state stays current for print and history", async ({ page }) => {
   const f = await fixture(page);
-  await page.evaluate(() => { window.print = () => { document.documentElement.dataset.printedManuscript = document.querySelector(".print-manuscript")?.textContent ?? ""; }; });
+  await page.evaluate(() => {
+    window.print = () => {
+      const content = document.querySelector("#manuscript");
+      document.documentElement.dataset.printedManuscript = Array.from(content?.querySelectorAll(".cm-line") ?? [], (line) => line.textContent ?? "").join("\n").replace(/\n+$/u, "");
+    };
+  });
   const text = "Printed from the newest editor input."; await editor(page).fill(text);
   await editor(page).evaluate((element) => element.dispatchEvent(new CompositionEvent("compositionstart", { data: "にほんご", bubbles: true })));
   await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
   await expect(page.getByRole("heading", { name: "Scene One", exact: true })).toBeVisible();
-  await expect(page.getByRole("alert")).toContainText("日本語入力の変換が完了していません");
+  await expect(page.locator(".pg-editor-column").getByRole("alert").first()).toContainText("日本語入力の変換が完了していません");
   await editor(page).evaluate((element) => element.dispatchEvent(new CompositionEvent("compositionend", { data: "日本語", bubbles: true })));
   const composedText = `${text} 日本語入力`;
   await editor(page).fill(composedText);
@@ -146,7 +160,7 @@ test("exact revision acknowledgement removes its draft without reviving deleted 
   const f = await fixture(page); const text = "Acknowledged durable draft.";
   await editor(page).fill(text); await saved(page, f, text);
   await expect.poll(async () => (await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
-  await reopen(page, f); await expect(editor(page)).toHaveText(text);
+  await reopen(page, f); await expectEditor(page, text);
   expect((await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
 });
 
@@ -158,7 +172,7 @@ test("writing UI protects multiple document drafts separately from PostgreSQL re
     await editor(page).fill("Scene Two independent draft.");
     await expect.poll(async () => (await drafts(page)).some((d) => d.documentId === f.one.document.id && d.markdown === "Scene One protected draft.")).toBe(true);
     await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
-    await expect(editor(page)).toHaveText("Scene One protected draft.");
+    await expectEditor(page, "Scene One protected draft.");
   } finally { gate.release(); }
 });
 
@@ -169,7 +183,7 @@ test("new typing survives an older in-flight PostgreSQL save and exact acknowled
     await editor(page).fill("Newer generation while save is in flight.");
     await expect.poll(async () => (await drafts(page)).some((d) => d.markdown === "Newer generation while save is in flight.")).toBe(true);
     gate.release(); await saved(page, f, "Newer generation while save is in flight.");
-    await expect(editor(page)).toHaveText("Newer generation while save is in flight.");
+    await expectEditor(page, "Newer generation while save is in flight.");
   } finally { gate.release(); }
 });
 
@@ -180,7 +194,7 @@ test("new typing survives recovery against a newer PostgreSQL base revision", as
     await replace(page, f, "Competing PostgreSQL revision.");
     await editor(page).fill("Newest input before conflict arrives."); gate.release();
     await expect(page.getByRole("heading", { name: "Revision競合" })).toBeVisible();
-    await expect(editor(page)).toHaveText("Newest input before conflict arrives.");
+    await expectEditor(page, "Newest input before conflict arrives.");
     await page.getByRole("button", { name: "比較後、この回復Draftを最新版へ適用" }).click();
     await saved(page, f, "Newest input before conflict arrives.");
   } finally { gate.release(); }
@@ -199,20 +213,28 @@ test("one malformed legacy key does not hide later recoverable PostgreSQL drafts
     await editor(page).fill("Valid protected draft after malformed entry.");
     await expect.poll(async () => (await drafts(page)).some((d) => d.markdown === "Valid protected draft after malformed entry.")).toBe(true);
     await writeRecords(page, [{ key: "malformed-legacy-key", version: 0, markdown: "Untrusted legacy content" }]);
-    await reopen(page, f); await expect(editor(page)).toHaveText("Valid protected draft after malformed entry.");
+    await reopen(page, f); await expectEditor(page, "Valid protected draft after malformed entry.");
     expect((await drafts(page)).some((d) => d.key === "malformed-legacy-key")).toBe(true);
   } finally { gate.release(); }
 });
 
 async function submitProposal(page: Page, f: Fixture): Promise<{ id: string; operation: Record<string, unknown>; generated: string }> {
-  const observationResponse = await page.request.get(`/api/projects/${f.projectId}/observation`); expect(observationResponse.ok()).toBe(true);
-  const { snapshot } = await observationResponse.json() as { snapshot: { projectId: string; projectVersion: number } };
-  const current = await read(page, f); const generated = `${current.revision.markdown}\nMCP proposal requires explicit author approval.\n`;
+  const snapshotResponse = await page.request.get(`/api/projects/${f.projectId}/snapshot`); expect(snapshotResponse.ok()).toBe(true);
+  const { snapshot, files } = await snapshotResponse.json() as { snapshot: { projectId: string; projectVersion: number }; files: Array<{ path: string; revision: string; content: string }> };
   const path = `documents/${f.one.document.id}.md`;
-  const operation = { id: `mcp-op-${randomUUID()}`, generation: 1, projectId: f.projectId, baseProjectVersion: snapshot.projectVersion, effect: "manuscript", reads: [{ path, revision: current.revision.id }], writes: [{ path, revision: current.revision.id, content: generated }], message: "MCP acceptance proposal" };
+  const current = files.find((file) => file.path === path);
+  if (!current) throw new Error(`PostgreSQL snapshot omitted the document path ${path}`);
+  const generated = `${current.content}\nMCP proposal requires explicit author approval.\n`;
+  const operation = { id: `mcp-op-${randomUUID()}`, generation: 1, projectId: f.projectId, baseProjectVersion: snapshot.projectVersion, effect: "manuscript", reads: [{ path, revision: current.revision }], writes: [{ path, revision: current.revision, content: generated }], message: "MCP acceptance proposal" };
   const id = `mcp-${randomUUID()}`;
-  const response = await page.request.post(`/api/projects/${f.projectId}/proposals`, { headers: { Authorization: `Bearer ${authToken}` }, data: { id, snapshot, operations: [operation] } });
-  expect(response.status()).toBe(201); expect(await response.json()).toMatchObject({ id, source: "mcp" });
+  const external = await request.newContext({ baseURL: appBaseURL });
+  let responseBody: unknown;
+  let status: number;
+  try {
+    const response = await external.post(`/api/projects/${f.projectId}/proposals`, { headers: mutationHeaders({ Authorization: `Bearer ${authToken}` }), data: { id, snapshot, operations: [operation] } });
+    status = response.status(); responseBody = await response.json();
+  } finally { await external.dispose(); }
+  expect(status!, JSON.stringify(responseBody)).toBe(201); expect(responseBody).toMatchObject({ id, source: "mcp" });
   return { id, operation, generated };
 }
 
@@ -220,21 +242,25 @@ test("external MCP proposals require owner approval before PostgreSQL applicatio
   const f = await fixture(page); const proposal = await submitProposal(page, f);
   const before = await page.request.get(`/api/projects/${f.projectId}/proposals/${proposal.id}`);
   expect(await before.json()).toMatchObject({ state: "proposed", approvedOperationIds: [] });
-  const denied = await page.request.post(`/api/projects/${f.projectId}/apply`, { data: proposal.operation }); expect(denied.ok()).toBe(false);
+  const denied = await page.request.post(`/api/projects/${f.projectId}/apply`, { headers: mutationHeaders(), data: proposal.operation }); expect(denied.ok()).toBe(false);
   expect((await read(page, f)).revision.id).toBe(f.one.revision.id);
-  const approval = await page.request.post(`/api/projects/${f.projectId}/approvals`, { data: { proposalId: proposal.id, operationIds: [proposal.operation.id] } }); expect(approval.status()).toBe(204);
-  const applied = await page.request.post(`/api/projects/${f.projectId}/apply`, { data: proposal.operation }); expect(applied.status()).toBe(201);
+  const approval = await page.request.post(`/api/projects/${f.projectId}/approvals`, { headers: mutationHeaders(), data: { proposalId: proposal.id, operationIds: [proposal.operation.id] } }); expect(approval.status()).toBe(204);
+  const applied = await page.request.post(`/api/projects/${f.projectId}/apply`, { headers: mutationHeaders(), data: proposal.operation }); expect(applied.status()).toBe(201);
   expect((await read(page, f)).revision.markdown).toBe(proposal.generated);
-  await reopen(page, f); await expect(editor(page)).toHaveText(proposal.generated.trimEnd());
+  await reopen(page, f); await expectEditor(page, proposal.generated);
 });
 
 test("full MCP proposal payload and approval state survive Core process and cache loss", async ({ page }) => {
   const f = await fixture(page); const proposal = await submitProposal(page, f);
   const path = `/api/projects/${f.projectId}/proposals/${proposal.id}`;
-  const before = await (await page.request.get(path)).json(); await restart(page);
+  const approval = await page.request.post(`/api/projects/${f.projectId}/approvals`, { headers: mutationHeaders(), data: { proposalId: proposal.id, operationIds: [proposal.operation.id] } });
+  expect(approval.status()).toBe(204);
+  const before = await (await page.request.get(path)).json();
+  expect(before).toMatchObject({ state: "approved", approvedOperationIds: [proposal.operation.id] });
+  await restart(page); await signIn(page);
   const after = await page.request.get(path); expect(after.ok()).toBe(true); expect(await after.json()).toEqual(before);
   expect((await read(page, f)).revision.id).toBe(f.one.revision.id);
-  await reopen(page, f); await expect(editor(page)).toHaveText(f.one.revision.markdown.trimEnd());
+  await reopen(page, f); await expectEditor(page, f.one.revision.markdown);
 });
 
 test("a PostgreSQL update during author approval keeps the conflicting editor draft visible", async ({ page }) => {
@@ -242,9 +268,10 @@ test("a PostgreSQL update during author approval keeps the conflicting editor dr
   try {
     await editor(page).fill("Author input must survive rejected approval."); await gate.seen;
     await replace(page, f, "Another writer advanced the project.");
-    const approval = await page.request.post(`/api/projects/${f.projectId}/approvals`, { data: { proposalId: proposal.id, operationIds: [proposal.operation.id] } }); expect(approval.ok()).toBe(false);
+    const approval = await page.request.post(`/api/projects/${f.projectId}/approvals`, { headers: mutationHeaders(), data: { proposalId: proposal.id, operationIds: [proposal.operation.id] } }); expect(approval.status()).toBe(204);
+    const applied = await page.request.post(`/api/projects/${f.projectId}/apply`, { headers: mutationHeaders(), data: proposal.operation }); expect(applied.status()).toBe(409);
     gate.release(); await expect(page.getByRole("heading", { name: "Revision競合" })).toBeVisible();
-    await expect(editor(page)).toHaveText("Author input must survive rejected approval.");
+    await expectEditor(page, "Author input must survive rejected approval.");
     expect((await read(page, f)).revision.markdown).toBe("Another writer advanced the project.");
   } finally { gate.release(); }
 });
@@ -263,16 +290,16 @@ test("IndexedDB quota failures remain visible and block PostgreSQL writes", asyn
   await expect(page.getByRole("alert")).toContainText(/quota|容量|保存|database draft/i);
   await expect(page.getByRole("button", { name: /今すぐ保存|PostgreSQLへ再試行/ })).toBeDisabled();
   expect(remoteWrites).toBe(0); expect((await read(page, f)).revision.id).toBe(f.one.revision.id);
-  await expect(editor(page)).toHaveText("Unsaved text must remain visible after quota failure.");
+  await expectEditor(page, "Unsaved text must remain visible after quota failure.");
 });
 
 test("project reconstruction retains PostgreSQL revisions and removed Git lifecycle has no fallback", async ({ page }) => {
   const f = await fixture(page); const text = "Survives process reconstruction.";
   await editor(page).fill(text); await saved(page, f, text); const revision = (await read(page, f)).revision.id;
-  await restart(page); await reopen(page, f); await expect(editor(page)).toHaveText(text);
+  await restart(page); await signIn(page); await reopen(page, f); await expectEditor(page, text);
   expect((await read(page, f)).revision.id).toBe(revision);
   for (const suffix of ["publish", "reconcile", "checkpoints"]) {
-    const result = await page.request.post(`/api/projects/${f.projectId}/${suffix}`, { data: {} }); expect(result.ok()).toBe(false);
+    const result = await page.request.post(`/api/projects/${f.projectId}/${suffix}`, { headers: mutationHeaders(), data: {} }); expect(result.ok()).toBe(false);
   }
   await expect(page.getByRole("button", { name: "Save to GitHub" })).toHaveCount(0);
   await expect(page.getByLabel("GitHub リポジトリ URL")).toHaveCount(0);
@@ -293,7 +320,16 @@ test("unmounting a contribution aborts its in-flight action request", async ({ p
 });
 
 async function delayImages(page: Page): Promise<void> {
-  await page.addInitScript(() => { const original = FileReader.prototype.readAsDataURL; FileReader.prototype.readAsDataURL = function (this: FileReader, blob: Blob) { const reader = this; window.setTimeout(() => original.call(reader, blob), 700); }; });
+  await page.addInitScript(() => {
+    const original = FileReader.prototype.readAsDataURL;
+    const state = window as Window & { __scratchImageReadStarted?: boolean };
+    state.__scratchImageReadStarted = false;
+    FileReader.prototype.readAsDataURL = function (this: FileReader, blob: Blob) {
+      const reader = this;
+      state.__scratchImageReadStarted = true;
+      window.setTimeout(() => original.call(reader, blob), 700);
+    };
+  });
 }
 
 test("a pending scratch image read is flushed to its captured document before navigation", async ({ page }) => {
@@ -337,14 +373,60 @@ test("resuming an older scratch entry waits for its pending image read and keeps
   await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Latest scratch with attachment.") && r.text.includes("data:image/png;base64"))).toBe(true);
 });
 
-test("scratch text and image selection pause while recovery is being resumed", async ({ page }) => {
-  await delayImages(page); await fixture(page); await scratch(page);
-  await memo(page).fill("Protected scratch."); await editor(page).click();
-  await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Protected scratch."))).toBe(true);
+test("scratch text and image input survive while navigation waits for protection", async ({ page }) => {
+  await delayImages(page);
+  await page.addInitScript(() => {
+    type Gate = { armed: boolean; started: boolean; target?: IDBTransaction; release?: () => void };
+    type GateWindow = Window & { __scratchProtectionGate?: Gate };
+    (window as GateWindow).__scratchProtectionGate = { armed: false, started: false };
+    const descriptor = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, "oncomplete");
+    if (!descriptor?.get || !descriptor.set) throw new Error("IndexedDB completion hooks are unavailable.");
+    Object.defineProperty(IDBTransaction.prototype, "oncomplete", {
+      configurable: true,
+      enumerable: descriptor.enumerable,
+      get() { return descriptor.get!.call(this); },
+      set(handler: ((this: IDBTransaction, event: Event) => unknown) | null) {
+        if (!handler) { descriptor.set!.call(this, handler); return; }
+        const transaction = this;
+        descriptor.set!.call(this, function (this: IDBTransaction, event: Event) {
+          const gate = (window as GateWindow).__scratchProtectionGate;
+          if (gate && gate.target === transaction) {
+            gate.started = true;
+            gate.release = () => { gate.target = undefined; handler.call(transaction, event); };
+            return;
+          }
+          return handler.call(this, event);
+        });
+      },
+    });
+    const originalPut = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, value: unknown, key?: IDBValidKey): IDBRequest<IDBValidKey> {
+      const gate = (window as GateWindow).__scratchProtectionGate;
+      const text = value && typeof value === "object" && "text" in value && typeof value.text === "string" ? value.text : "";
+      if (this.name === "pgScratch" && gate?.armed && text.includes("Scratch write held during navigation.")) {
+        gate.armed = false;
+        gate.target = this.transaction;
+      }
+      return key === undefined ? originalPut.call(this, value) : originalPut.call(this, value, key);
+    };
+  });
+  await fixture(page); await scratch(page);
+  await memo(page).fill("Previously protected scratch."); await editor(page).click();
+  await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Previously protected scratch."))).toBe(true);
+  await page.evaluate(() => { (window as Window & { __scratchProtectionGate?: { armed: boolean } }).__scratchProtectionGate!.armed = true; });
+  await memo(page).fill("Scratch write held during navigation.");
+  await page.waitForFunction(() => (window as Window & { __scratchProtectionGate?: { started: boolean } }).__scratchProtectionGate?.started === true);
+
+  const sceneTwo = page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ });
+  await sceneTwo.click();
+  await expect(page.getByRole("heading", { name: "Scene One", exact: true })).toBeVisible();
+  await memo(page).fill("Latest scratch input during protection.");
   await image(page).setInputFiles(png);
-  const resume = page.locator(".scratch-panel").getByRole("button", { name: "続ける", exact: true }); await resume.click();
-  await expect(memo(page)).toBeDisabled(); await expect(image(page)).toBeDisabled();
-  await expect(memo(page)).toBeEnabled(); await expect(image(page)).toBeEnabled();
+  await page.waitForFunction(() => (window as Window & { __scratchImageReadStarted?: boolean }).__scratchImageReadStarted === true);
+  await page.evaluate(() => (window as Window & { __scratchProtectionGate?: { release?: () => void } }).__scratchProtectionGate!.release?.());
+  await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Latest scratch input during protection.") && r.text.includes("data:image/png;base64"))).toBe(true);
+  await sceneTwo.click();
+  await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
 });
 
 test("public publishing route mounts its source reader without an owner session", async ({ page }) => {
@@ -365,7 +447,7 @@ test("late document activation cannot replace explicit scene navigation", async 
     await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click(); await seen;
     await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
     await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible(); release();
-    await expect(editor(page)).toHaveText(f.two.revision.markdown.trimEnd());
+    await expectEditor(page, f.two.revision.markdown);
   } finally { release(); }
 });
 
@@ -374,7 +456,7 @@ test("Issue 42: an updated PostgreSQL revision cannot supersede explicit navigat
   try {
     await editor(page).fill("Pending Scene One draft before explicit navigation."); await gate.seen; await replace(page, f, "External PostgreSQL version.");
     await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
-    await expect(editor(page)).toHaveText(f.two.revision.markdown.trimEnd()); gate.release();
+    await expectEditor(page, f.two.revision.markdown); gate.release();
     await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
     await expect.poll(async () => (await drafts(page)).some((d) => d.documentId === f.one.document.id && d.markdown === "Pending Scene One draft before explicit navigation.")).toBe(true);
   } finally { gate.release(); }
@@ -385,7 +467,7 @@ test("Issue 42: an unchanged PostgreSQL observation leaves explicit scene select
   await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
   for (const name of ["online", "focus", "visibilitychange"]) await page.evaluate((event) => window.dispatchEvent(new Event(event)), name);
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
-  await expect(editor(page)).toHaveText(f.two.revision.markdown.trimEnd());
+  await expectEditor(page, f.two.revision.markdown);
   expect((await read(page, f)).revision.id).toBe(f.one.revision.id);
 });
 
@@ -397,5 +479,5 @@ test("Issue 42: failed PostgreSQL availability preserves the author session and 
   expect((await page.request.get("/api/session")).status()).toBe(200); expect(reauthCalls).toBe(0);
   unavailable = false; await page.getByRole("button", { name: "再試行" }).click();
   await page.getByLabel("開く作品").selectOption(f.projectId); await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
-  await expect(editor(page)).toHaveText(f.one.revision.markdown.trimEnd());
+  await expectEditor(page, f.one.revision.markdown);
 });
