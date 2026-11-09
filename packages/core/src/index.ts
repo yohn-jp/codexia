@@ -262,79 +262,316 @@ export class CoreStore implements MutationCoordinator {
   }
   async listProposals(projectId:string):Promise<ProposalStatus[]> { const observation=await this.observe(projectId); return this.persistence.read(async(reader)=>(await reader.listModuleRecords(pid(projectId),AUTHORITY)).filter((record)=>record.key.startsWith("proposal:")).map((record)=>({...record.value as unknown as ProposalStatus,stale:(record.value as unknown as ProposalStatus).proposal.snapshot.projectVersion!==observation.snapshot.projectVersion}))); }
   async getProposal(projectId:string,proposalId:string):Promise<ProposalStatus|null> { return this.persistence.read(async(reader)=>(await this.proposalStatus(reader,projectId,proposalId))?.status??null); }
-  async propose(projectId:string,proposal:ChangeProposal):Promise<ChangeProposal> {
-    try { assertPersistedProposal(proposal); } catch(error) { fail(400,"invalid_proposal",error instanceof Error?error.message:"Invalid proposal"); }
-    if(proposal.snapshot.projectId!==projectId)fail(409,"proposal_scope_mismatch","Proposal belongs to another project");
-    return this.persistence.transaction(async(tx)=>{
-      const existing=await this.proposalStatus(tx,projectId,proposal.id); if(existing) { if(proposalDigest(existing.status.proposal)!==proposalDigest(proposal))fail(409,"proposal_identity_conflict","Proposal identity has a different payload");return existing.status.proposal; }
-      await tx.assertProjectVersion(pid(projectId),proposal.snapshot.projectVersion);
-      const reader = makeReader(await this.currentManifest(tx, projectId));
-      for (const operation of proposal.operations) await assertEvidenceRevisions(reader, proposal, operation);
-      const state:ProposalStatus={proposal:structuredClone(proposal),state:"proposed",approvedOperationIds:[],applications:[],appliedOperationIds:[],stale:false};
-      await tx.saveModuleRecord({projectId:pid(projectId),moduleId:AUTHORITY,key:`proposal:${proposal.id}`,value:state as unknown as JsonObject,expectedVersion:null}); return structuredClone(proposal);
+  async propose(projectId: string, proposal: ChangeProposal): Promise<ChangeProposal> {
+    try {
+      assertPersistedProposal(proposal);
+    } catch (error) {
+      fail(400, "invalid_proposal", error instanceof Error ? error.message : "Invalid proposal");
+    }
+    if (proposal.snapshot.projectId !== projectId) {
+      fail(409, "proposal_scope_mismatch", "Proposal belongs to another project");
+    }
+
+    return this.persistence.transaction(async (transaction) => {
+      const existing = await this.proposalStatus(transaction, projectId, proposal.id);
+      if (existing) {
+        if (proposalDigest(existing.status.proposal) !== proposalDigest(proposal)) {
+          fail(409, "proposal_identity_conflict", "Proposal identity has a different payload");
+        }
+        return existing.status.proposal;
+      }
+
+      await transaction.assertProjectVersion(pid(projectId), proposal.snapshot.projectVersion);
+      const manifest = await this.currentManifest(transaction, projectId);
+      const reader = makeReader(manifest);
+      for (const operation of proposal.operations) {
+        await assertEvidenceRevisions(reader, proposal, operation);
+      }
+
+      const state: ProposalStatus = {
+        proposal: structuredClone(proposal),
+        state: "proposed",
+        approvedOperationIds: [],
+        applications: [],
+        appliedOperationIds: [],
+        stale: false,
+      };
+      await transaction.saveModuleRecord({
+        projectId: pid(projectId),
+        moduleId: AUTHORITY,
+        key: `proposal:${proposal.id}`,
+        value: state as unknown as JsonObject,
+        expectedVersion: null,
+      });
+      return structuredClone(proposal);
     });
   }
-  async approve(projectId:string,approval:Approval):Promise<void> {
-    if(!approval.authorScope?.trim()||!approval.operationIds.length||new Set(approval.operationIds).size!==approval.operationIds.length)fail(400,"invalid_approval","Author identity and unique operation identities are required");
-    await this.persistence.transaction(async(tx)=>{
-      const found=await this.proposalStatus(tx,projectId,approval.proposalId);if(!found)fail(404,"proposal_not_found","Proposal not found");const state=found.status;
-      for(const id of approval.operationIds)if(!state.proposal.operations.some((operation)=>operation.id===id))fail(400,"invalid_approval","Operation is outside this proposal");
-      state.approvedOperationIds=[...new Set([...state.approvedOperationIds,...approval.operationIds])];state.state=state.approvedOperationIds.length===state.proposal.operations.length?"approved":"partially_approved";
-      await tx.saveModuleRecord({projectId:pid(projectId),moduleId:AUTHORITY,key:`proposal:${approval.proposalId}`,value:{...state,approvedBy:approval.authorScope} as unknown as JsonObject,expectedVersion:found.recordVersion});
+
+  async approve(projectId: string, approval: Approval): Promise<void> {
+    const uniqueOperationIds = new Set(approval.operationIds);
+    if (!approval.authorScope?.trim() || !approval.operationIds.length || uniqueOperationIds.size !== approval.operationIds.length) {
+      fail(400, "invalid_approval", "Author identity and unique operation identities are required");
+    }
+
+    await this.persistence.transaction(async (transaction) => {
+      const found = await this.proposalStatus(transaction, projectId, approval.proposalId);
+      if (!found) fail(404, "proposal_not_found", "Proposal not found");
+
+      const state = found.status;
+      for (const operationId of approval.operationIds) {
+        if (!state.proposal.operations.some((operation) => operation.id === operationId)) {
+          fail(400, "invalid_approval", "Operation is outside this proposal");
+        }
+      }
+
+      state.approvedOperationIds = [...new Set([...state.approvedOperationIds, ...approval.operationIds])];
+      state.state = state.approvedOperationIds.length === state.proposal.operations.length
+        ? "approved"
+        : "partially_approved";
+      await transaction.saveModuleRecord({
+        projectId: pid(projectId),
+        moduleId: AUTHORITY,
+        key: `proposal:${approval.proposalId}`,
+        value: { ...state, approvedBy: approval.authorScope } as unknown as JsonObject,
+        expectedVersion: found.recordVersion,
+      });
     });
   }
-  private async applyWrites(tx:PersistenceTransaction,manifest:Manifest,operation:ChangeOperation):Promise<void> {
+
+  private async applyWrites(tx: PersistenceTransaction, manifest: Manifest, operation: ChangeOperation): Promise<void> {
     const projectId=pid(operation.projectId);
-    const metadataWrites=operation.writes.filter((write)=>/^plot\/volumes\/.+\.yaml$/.test(write.path));
+    const metadataWrites = operation.writes.filter((write) => /^plot\/volumes\/.+\.yaml$/.test(write.path));
     // Parents are inserted before children; removals are processed deepest first.
-    const ordered=[...metadataWrites.filter((w)=>w.content!==null).sort((a,b)=>a.path.split("/").length-b.path.split("/").length),...operation.writes.filter((w)=>!metadataWrites.includes(w)),...metadataWrites.filter((w)=>w.content===null).sort((a,b)=>b.path.split("/").length-a.path.split("/").length)];
-    const documents=[...manifest.documents];
-    const paths=new Map<string,string>();for(const [path,file]of Object.entries(manifest.files))if(file.documentId&&file.metadata)paths.set(path,file.documentId);
-    const manuscriptCreates=new Set<string>();
-    for(const write of ordered){
-      if(write.path==="meta/project.yaml"){
-        if(write.content===null)fail(422,"invalid_project_metadata","Project metadata cannot be deleted");const value=YAML.parse(write.content);if(!value||typeof value!=="object"||Array.isArray(value)||!isJsonValue(value))fail(422,"invalid_project_metadata","Project metadata must be an object");
-        const {title,...settings}=value;await tx.updateProject({projectId,expectedVersion:(await tx.getProject(projectId))!.version,title:typeof title==="string"?title:manifest.project.title,settings});continue;
+    const ordered = [
+      ...metadataWrites
+        .filter((write) => write.content !== null)
+        .sort((left, right) => left.path.split("/").length - right.path.split("/").length),
+      ...operation.writes.filter((write) => !metadataWrites.includes(write)),
+      ...metadataWrites
+        .filter((write) => write.content === null)
+        .sort((left, right) => right.path.split("/").length - left.path.split("/").length),
+    ];
+    const documents = [...manifest.documents];
+    const paths = new Map<string, string>();
+    for (const [path, file] of Object.entries(manifest.files)) {
+      if (file.documentId && file.metadata) paths.set(path, file.documentId);
+    }
+    const manuscriptCreates = new Set<string>();
+
+    for (const write of ordered) {
+      if (write.path === "meta/project.yaml") {
+        if (write.content === null) {
+          fail(422, "invalid_project_metadata", "Project metadata cannot be deleted");
+        }
+        const value = YAML.parse(write.content);
+        if (!value || typeof value !== "object" || Array.isArray(value) || !isJsonValue(value)) {
+          fail(422, "invalid_project_metadata", "Project metadata must be an object");
+        }
+        const { title, ...settings } = value;
+        await tx.updateProject({
+          projectId,
+          expectedVersion: (await tx.getProject(projectId))!.version,
+          title: typeof title === "string" ? title : manifest.project.title,
+          settings,
+        });
+        continue;
       }
-      if(metadataWrites.includes(write)){
-        const existingId=paths.get(write.path);const existing=existingId?documents.find((d)=>d.id===existingId):undefined;
-        if(write.content===null){if(existing)await tx.deleteDocument({projectId,documentId:existing.id,expectedVersion:existing.version});continue;}
-        const data=YAML.parse(write.content);if(!data||typeof data!=="object"||Array.isArray(data)||!isJsonValue(data))fail(422,"invalid_hierarchy_metadata","Hierarchy metadata must be an object");
-        const volume=/^plot\/volumes\/([^/]+)\/volume.yaml$/.exec(write.path),chapter=/^plot\/volumes\/([^/]+)\/chapters\/([^/]+)\/chapter.yaml$/.exec(write.path),scene=/^plot\/volumes\/([^/]+)\/chapters\/([^/]+)\/scenes\/([^/]+).yaml$/.exec(write.path);
-        if(!volume&&!chapter&&!scene)fail(422,"invalid_hierarchy_metadata","Unknown hierarchy metadata path");
-        const kind=volume?"volume":chapter?"chapter":"scene";const parentPath=chapter?`plot/volumes/${chapter[1]}/volume.yaml`:scene?`plot/volumes/${scene[1]}/chapters/${scene[2]}/chapter.yaml`:null;
-        const parentId=parentPath?paths.get(parentPath):null;if(parentPath&&!parentId)fail(422,"missing_hierarchy_parent","Hierarchy parent is missing");
-        const title=typeof data.title==="string"?data.title:typeof data.name==="string"?data.name:String(data.id??existing?.id??"");
-        const manuscriptPath=kind==="scene"?(typeof data.manuscript==="string"?data.manuscript:`manuscript/${scene![1]}/${scene![2]}/${scene![3]}.md`):undefined;if(manuscriptPath)safePath(manuscriptPath);
-        const id=existing?.id??stableId(operation.projectId,write.path);
-        let document:Document;
-        if(existing)document=await tx.updateDocument({projectId,documentId:id,parentId:parentId as DocumentId|null,title,orderKey:String(data.order??existing.orderKey),expectedVersion:existing.version});
-        else {const manuscript=manuscriptPath?operation.writes.find((w)=>w.path===manuscriptPath):undefined;document=(await tx.createDocument({projectId,documentId:id,parentId:parentId as DocumentId|null,kind,title,orderKey:String(data.order??"0"),markdown:manuscript?.content??"",authorId:"approved-author",idempotencyKey:`${operation.id}:${operation.generation}:${id}`})).document;if(manuscriptPath)manuscriptCreates.add(manuscriptPath);documents.push(document);}
-        paths.set(write.path,id);const mapping=await tx.getModuleRecord(projectId,PATHS,id);await tx.saveModuleRecord({projectId,moduleId:PATHS,key:id,value:{metadataPath:write.path,...(manuscriptPath?{manuscriptPath}:{}),metadata:data},expectedVersion:mapping?.version??null});continue;
+
+      if (metadataWrites.includes(write)) {
+        const existingId = paths.get(write.path);
+        const existing = existingId ? documents.find((document) => document.id === existingId) : undefined;
+        if (write.content === null) {
+          if (existing) {
+            await tx.deleteDocument({ projectId, documentId: existing.id, expectedVersion: existing.version });
+          }
+          continue;
+        }
+
+        const data = YAML.parse(write.content);
+        if (!data || typeof data !== "object" || Array.isArray(data) || !isJsonValue(data)) {
+          fail(422, "invalid_hierarchy_metadata", "Hierarchy metadata must be an object");
+        }
+        const volume = /^plot\/volumes\/([^/]+)\/volume.yaml$/.exec(write.path);
+        const chapter = /^plot\/volumes\/([^/]+)\/chapters\/([^/]+)\/chapter.yaml$/.exec(write.path);
+        const scene = /^plot\/volumes\/([^/]+)\/chapters\/([^/]+)\/scenes\/([^/]+).yaml$/.exec(write.path);
+        if (!volume && !chapter && !scene) {
+          fail(422, "invalid_hierarchy_metadata", "Unknown hierarchy metadata path");
+        }
+
+        const kind = volume ? "volume" : chapter ? "chapter" : "scene";
+        const parentPath = chapter
+          ? `plot/volumes/${chapter[1]}/volume.yaml`
+          : scene
+            ? `plot/volumes/${scene[1]}/chapters/${scene[2]}/chapter.yaml`
+            : null;
+        const parentId = parentPath ? paths.get(parentPath) : null;
+        if (parentPath && !parentId) fail(422, "missing_hierarchy_parent", "Hierarchy parent is missing");
+
+        const title = typeof data.title === "string"
+          ? data.title
+          : typeof data.name === "string"
+            ? data.name
+            : String(data.id ?? existing?.id ?? "");
+        const manuscriptPath = kind === "scene"
+          ? typeof data.manuscript === "string"
+            ? data.manuscript
+            : `manuscript/${scene![1]}/${scene![2]}/${scene![3]}.md`
+          : undefined;
+        if (manuscriptPath) safePath(manuscriptPath);
+
+        const id = existing?.id ?? stableId(operation.projectId, write.path);
+        let document: Document;
+        if (existing) {
+          document = await tx.updateDocument({
+            projectId,
+            documentId: id,
+            parentId: parentId as DocumentId | null,
+            title,
+            orderKey: String(data.order ?? existing.orderKey),
+            expectedVersion: existing.version,
+          });
+        } else {
+          const manuscript = manuscriptPath
+            ? operation.writes.find((candidate) => candidate.path === manuscriptPath)
+            : undefined;
+          document = (await tx.createDocument({
+            projectId,
+            documentId: id,
+            parentId: parentId as DocumentId | null,
+            kind,
+            title,
+            orderKey: String(data.order ?? "0"),
+            markdown: manuscript?.content ?? "",
+            authorId: "approved-author",
+            idempotencyKey: `${operation.id}:${operation.generation}:${id}`,
+          })).document;
+          if (manuscriptPath) manuscriptCreates.add(manuscriptPath);
+          documents.push(document);
+        }
+
+        paths.set(write.path, id);
+        const mapping = await tx.getModuleRecord(projectId, PATHS, id);
+        await tx.saveModuleRecord({
+          projectId,
+          moduleId: PATHS,
+          key: id,
+          value: { metadataPath: write.path, ...(manuscriptPath ? { manuscriptPath } : {}), metadata: data },
+          expectedVersion: mapping?.version ?? null,
+        });
+        continue;
       }
-      if(manuscriptCreates.has(write.path))continue;
-      const known=manifest.files[write.path];
-      if(known?.documentId&&!known.metadata){const document=await tx.getDocument(projectId,known.documentId as DocumentId);if(!document)continue;if(write.content===null){if(metadataWrites.some((candidate)=>candidate.content===null&&manifest.files[candidate.path]?.documentId===document.id))continue;fail(422,"invalid_document_delete","Delete a scene using its hierarchy metadata");}if(write.encoding==="base64")fail(422,"invalid_manuscript_encoding","Manuscripts must be UTF-8");const revision=await tx.getRevision(projectId,document.id,document.headRevisionId!);if(!revision)fail(409,"missing_revision","Document head is missing");await tx.saveDocument({projectId,documentId:document.id,baseRevisionId:revision.id,changes:[{fromUtf16:0,toUtf16:revision.markdown.length,insert:write.content}],resultingSha256:hash(write.content),authorId:"approved-author",clientId:"core",idempotencyKey:`${operation.id}:${operation.generation}:${write.path}`});continue;}
-      if(write.path.startsWith("manuscript/")||write.path.startsWith("documents/"))fail(422,"unbound_manuscript","Manuscript writes require a canonical document or hierarchy creation");
-      const record=await tx.getModuleRecord(projectId,ARTIFACTS,write.path);await tx.saveModuleRecord({projectId,moduleId:ARTIFACTS,key:write.path,value:write.content===null?{deleted:true}:{content:write.content,encoding:write.encoding??"utf8"},expectedVersion:record?.version??null});
+
+      if (manuscriptCreates.has(write.path)) continue;
+      const known = manifest.files[write.path];
+      if (known?.documentId && !known.metadata) {
+        const document = await tx.getDocument(projectId, known.documentId as DocumentId);
+        if (!document) continue;
+        if (write.content === null) {
+          const sceneIsBeingDeleted = metadataWrites.some((candidate) =>
+            candidate.content === null && manifest.files[candidate.path]?.documentId === document.id,
+          );
+          if (sceneIsBeingDeleted) continue;
+          fail(422, "invalid_document_delete", "Delete a scene using its hierarchy metadata");
+        }
+        if (write.encoding === "base64") {
+          fail(422, "invalid_manuscript_encoding", "Manuscripts must be UTF-8");
+        }
+
+        const revision = await tx.getRevision(projectId, document.id, document.headRevisionId!);
+        if (!revision) fail(409, "missing_revision", "Document head is missing");
+        await tx.saveDocument({
+          projectId,
+          documentId: document.id,
+          baseRevisionId: revision.id,
+          changes: [{ fromUtf16: 0, toUtf16: revision.markdown.length, insert: write.content }],
+          resultingSha256: hash(write.content),
+          authorId: "approved-author",
+          clientId: "core",
+          idempotencyKey: `${operation.id}:${operation.generation}:${write.path}`,
+        });
+        continue;
+      }
+
+      if (write.path.startsWith("manuscript/") || write.path.startsWith("documents/")) {
+        fail(422, "unbound_manuscript", "Manuscript writes require a canonical document or hierarchy creation");
+      }
+      const record = await tx.getModuleRecord(projectId, ARTIFACTS, write.path);
+      await tx.saveModuleRecord({
+        projectId,
+        moduleId: ARTIFACTS,
+        key: write.path,
+        value: write.content === null
+          ? { deleted: true }
+          : { content: write.content, encoding: write.encoding ?? "utf8" },
+        expectedVersion: record?.version ?? null,
+      });
     }
   }
-  async apply(projectId:string,operation:ChangeOperation):Promise<ApplyReceipt> {
-    assertChangeOperation(operation);assertUserOperationPaths(operation);if(operation.projectId!==projectId)fail(409,"operation_scope_mismatch","Operation belongs to another project");
-    return this.persistence.transaction(async(tx)=>{
-      await tx.assertProjectVersion(pid(projectId));
-      const proposals=(await tx.listModuleRecords(pid(projectId),AUTHORITY)).filter((record)=>record.key.startsWith("proposal:"));
-      const approved=proposals.find((record)=>{const state=record.value as unknown as ProposalStatus;return state.approvedOperationIds.includes(operation.id)&&state.proposal.operations.some((candidate)=>operationDigest(candidate)===operationDigest(operation));});
-      if(!approved)fail(403,"operation_not_approved","The exact operation must be approved by an authenticated author");
-      const state=approved.value as unknown as ProposalStatus;const replay=state.applications.find((receipt)=>receipt.operationId===operation.id&&receipt.generation===operation.generation);if(replay)return replay;
-      const manifest=await this.currentManifest(tx,projectId),reader=makeReader(manifest);
+  async apply(projectId: string, operation: ChangeOperation): Promise<ApplyReceipt> {
+    assertChangeOperation(operation);
+    assertUserOperationPaths(operation);
+    if (operation.projectId !== projectId) {
+      fail(409, "operation_scope_mismatch", "Operation belongs to another project");
+    }
+
+    return this.persistence.transaction(async (transaction) => {
+      // Serialize every project mutation before reading approval or precondition state.
+      await transaction.assertProjectVersion(pid(projectId));
+      const proposalRecords = (await transaction.listModuleRecords(pid(projectId), AUTHORITY))
+        .filter((record) => record.key.startsWith("proposal:"));
+      const approved = proposalRecords.find((record) => {
+        const status = record.value as unknown as ProposalStatus;
+        return status.approvedOperationIds.includes(operation.id) &&
+          status.proposal.operations.some((candidate) => operationDigest(candidate) === operationDigest(operation));
+      });
+      if (!approved) {
+        fail(403, "operation_not_approved", "The exact operation must be approved by an authenticated author");
+      }
+
+      const state = approved.value as unknown as ProposalStatus;
+      const replay = state.applications.find((receipt) =>
+        receipt.operationId === operation.id && receipt.generation === operation.generation,
+      );
+      if (replay) return replay;
+
+      const manifest = await this.currentManifest(transaction, projectId);
+      const reader = makeReader(manifest);
       await assertEvidenceRevisions(reader, state.proposal, operation);
-      for(const read of [...operation.reads,...operation.writes])if((await reader.read(read.path))?.revision!==read.revision&& !((await reader.read(read.path))===null&&read.revision===null))fail(409,"revision_conflict",`The revision changed: ${read.path}`);
-      for(const scope of operation.readScopes??[])if(await snapshotScopeRevision(reader,scope.prefix)!==scope.revision)fail(409,"scope_conflict",`The scope changed: ${scope.prefix}`);
-      await this.applyWrites(tx,manifest,operation);
-      const after=await this.currentManifest(tx,projectId);const receipt:ApplyReceipt={operationId:operation.id,generation:operation.generation,projectVersion:Math.max(after.project.version,manifest.project.version+1),revisions:operation.writes.map((write)=>({path:write.path,revision:after.files[write.path]?.revision??null}))};
-      state.applications.push(receipt);state.appliedOperationIds.push(operation.id);state.state=state.appliedOperationIds.length===state.proposal.operations.length?"applied":state.state;
-      await tx.saveModuleRecord({projectId:pid(projectId),moduleId:AUTHORITY,key:approved.key,value:state as unknown as JsonObject,expectedVersion:approved.version});return receipt;
+      for (const precondition of [...operation.reads, ...operation.writes]) {
+        const currentRevision = (await reader.read(precondition.path))?.revision ?? null;
+        if (currentRevision !== precondition.revision) {
+          fail(409, "revision_conflict", `The revision changed: ${precondition.path}`);
+        }
+      }
+      for (const scope of operation.readScopes ?? []) {
+        if (await snapshotScopeRevision(reader, scope.prefix) !== scope.revision) {
+          fail(409, "scope_conflict", `The scope changed: ${scope.prefix}`);
+        }
+      }
+
+      await this.applyWrites(transaction, manifest, operation);
+      const after = await this.currentManifest(transaction, projectId);
+      const receipt: ApplyReceipt = {
+        operationId: operation.id,
+        generation: operation.generation,
+        projectVersion: Math.max(after.project.version, manifest.project.version + 1),
+        revisions: operation.writes.map((write) => ({
+          path: write.path,
+          revision: after.files[write.path]?.revision ?? null,
+        })),
+      };
+
+      state.applications.push(receipt);
+      state.appliedOperationIds.push(operation.id);
+      if (state.appliedOperationIds.length === state.proposal.operations.length) state.state = "applied";
+      await transaction.saveModuleRecord({
+        projectId: pid(projectId),
+        moduleId: AUTHORITY,
+        key: approved.key,
+        value: state as unknown as JsonObject,
+        expectedVersion: approved.version,
+      });
+      return receipt;
     });
   }
   private async buildOperation(projectId:string,writes:FileChange[],effect:ChangeOperation["effect"],message:string,pinned?:SnapshotId):Promise<BuiltChangeOperation> {const reader=await this.reader(projectId,pinned);return {snapshot:reader.snapshot,operation:{id:randomUUID(),generation:0,projectId,baseProjectVersion:reader.snapshot.projectVersion,effect,reads:writes.map(({path,revision})=>({path,revision})),writes,message}};}
