@@ -6,18 +6,11 @@ import path from "node:path";
 import os from "node:os";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import type { ChangeOperation, RepositoryIdentity, SnapshotId, SnapshotReader } from "@codexia/contracts";
+import type { ChangeOperation, SnapshotId, SnapshotReader } from "@codexia/contracts";
 import { assertChangeOperation } from "@codexia/contracts";
 import { createLegacySourceReader, inspectLegacyProject, isSecretLegacyPath, proposeMigrationImport } from "./index.js";
 
-const repository: RepositoryIdentity = {
-  provider: "local",
-  repositoryId: "new-project",
-  defaultBranch: "main",
-  ownerScope: "migration-test",
-  url: "file:///migration-test/new-project",
-};
-const snapshot: SnapshotId = { repository, remoteCommit: "a".repeat(40) };
+const snapshot: SnapshotId = { projectId: "new-project", projectVersion: 1 };
 
 type TargetFiles = Map<string, { content: string; revision: string }>;
 
