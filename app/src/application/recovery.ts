@@ -1,6 +1,6 @@
 /**
  * Whether the editor text is represented by its current recoverable entry or,
- * when no entry exists, is still the clean text read from the repository.
+ * when no entry exists, is still the clean text read from PostgreSQL.
  */
 export function isTextRepresentedByRecoveryRecord(
   editorText: string,
@@ -21,40 +21,26 @@ export function isEditorTextSafeToFlush(
     (recoveryStatus === "pending" && editorText === cleanText);
 }
 
+/** Receipt matching is meaningful only within the caller's verified project and author scope. */
 export function isEntryAcknowledgedByReceipt(
-  entry: { publicationBatchId?: string; operation: { id: string; generation: number } },
-  receipt: {
-    batchId: string;
-    state: string;
-    acknowledged: readonly { operationId: string; generation: number }[];
-  },
+  entry: { operation: { id: string; generation: number } },
+  receipt: { operationId: string; generation: number },
 ): boolean {
-  return Boolean(entry.publicationBatchId && receipt.state === "confirmed" &&
-    receipt.batchId === entry.publicationBatchId && receipt.acknowledged.some((item) =>
-      item.operationId === entry.operation.id && item.generation === entry.operation.generation,
-    ));
+  return receipt.operationId === entry.operation.id && receipt.generation === entry.operation.generation;
 }
 
 export function isNonDraftEntryAcknowledgedByReceipt(
-  entry: { state: string; publicationBatchId?: string; operation: { id: string; generation: number } },
-  receipt: {
-    batchId: string;
-    state: string;
-    acknowledged: readonly { operationId: string; generation: number }[];
-  },
+  entry: { state: string; operation: { id: string; generation: number } },
+  receipt: { operationId: string; generation: number },
 ): boolean {
   return entry.state !== "draft" && isEntryAcknowledgedByReceipt(entry, receipt);
 }
 
-/** An unchanged in-memory operation can be dropped only after its exact generation was confirmed. */
+/** Only unchanged text with an exact PostgreSQL application receipt can leave memory. */
 export function isUnchangedEntryConfirmedByReceipt(
-  entry: { text: string; publicationBatchId?: string; operation: { id: string; generation: number } },
+  entry: { text: string; operation: { id: string; generation: number } },
   editorText: string,
-  receipts: readonly {
-    batchId: string;
-    state: string;
-    acknowledged: readonly { operationId: string; generation: number }[];
-  }[],
+  receipts: readonly { operationId: string; generation: number }[],
 ): boolean {
   return editorText === entry.text && receipts.some((receipt) => isEntryAcknowledgedByReceipt(entry, receipt));
 }
@@ -87,7 +73,7 @@ export function mergeLatestDraftEntry<T extends DraftEntryMergeCandidate>(entrie
 interface SceneEditorLoadIdentity {
   currentProjectId: string | undefined;
   requestedProjectId: string;
-  currentRepositoryMatches: boolean;
+  currentProjectMatches: boolean;
   currentAuthorScopeMatches: boolean;
   selectedSceneId: string;
   requestedSceneId: string;
@@ -96,7 +82,7 @@ interface SceneEditorLoadIdentity {
 
 /** Identifies a retained editor that still represents the requested scene and author context. */
 export function isSameSceneEditorLoad(input: SceneEditorLoadIdentity): boolean {
-  return input.currentProjectId === input.requestedProjectId && input.currentRepositoryMatches && input.currentAuthorScopeMatches &&
+  return input.currentProjectId === input.requestedProjectId && input.currentProjectMatches && input.currentAuthorScopeMatches &&
     input.requestedSceneId.length > 0 && input.selectedSceneId === input.requestedSceneId && input.editorSceneId === input.requestedSceneId;
 }
 

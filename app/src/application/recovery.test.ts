@@ -12,7 +12,7 @@ interface DraftEntry {
 function draftEntry(overrides: Omit<Partial<DraftEntry>, "operation"> & { operation?: Partial<DraftEntry["operation"]> } = {}): DraftEntry {
   const { operation, ...fields } = overrides;
   return {
-    documentKey: "repository/scene-1",
+    documentKey: "project/scene-1",
     authorScope: "author-1",
     state: "draft",
     ...fields,
@@ -27,31 +27,23 @@ test("text is recoverable only when the current record represents the editor", (
   assert.equal(isTextRepresentedByRecoveryRecord("new input", null, "clean"), false);
 });
 
-test("a locked pending editor may flush its canonical placeholder without replacing a checkpointed entry", () => {
-  assert.equal(isEditorTextSafeToFlush("canonical", "checkpointed draft", "canonical", "pending"), true);
-  assert.equal(isEditorTextSafeToFlush("new input", "checkpointed draft", "canonical", "pending"), false);
-  assert.equal(isEditorTextSafeToFlush("canonical", "checkpointed draft", "canonical", "ready"), false);
-  assert.equal(isEditorTextSafeToFlush("canonical", "checkpointed draft", "canonical", "unavailable"), false);
-  assert.equal(isEditorTextSafeToFlush("checkpointed draft", "checkpointed draft", "canonical", "pending"), true);
+test("a locked pending editor may flush its canonical placeholder without replacing an applied entry", () => {
+  assert.equal(isEditorTextSafeToFlush("canonical", "applied draft", "canonical", "pending"), true);
+  assert.equal(isEditorTextSafeToFlush("new input", "applied draft", "canonical", "pending"), false);
+  assert.equal(isEditorTextSafeToFlush("canonical", "applied draft", "canonical", "ready"), false);
+  assert.equal(isEditorTextSafeToFlush("canonical", "applied draft", "canonical", "unavailable"), false);
+  assert.equal(isEditorTextSafeToFlush("applied draft", "applied draft", "canonical", "pending"), true);
 });
 
-test("only an unchanged exact operation generation is cleared by a confirmed receipt", () => {
-  const entry = { text: "published text", publicationBatchId: "batch-1", operation: { id: "operation-1", generation: 4 } };
-  const confirmed = [{ batchId: "batch-1", state: "confirmed", acknowledged: [{ operationId: "operation-1", generation: 4 }] }];
-  assert.equal(isUnchangedEntryConfirmedByReceipt(entry, "published text", confirmed), true);
-  assert.equal(isUnchangedEntryConfirmedByReceipt(entry, "newer unjournaled text", confirmed), false);
-  assert.equal(isUnchangedEntryConfirmedByReceipt(entry, "published text", [
-    { batchId: "batch-1", state: "publication_unknown", acknowledged: [{ operationId: "operation-1", generation: 4 }] },
-  ]), false);
-  assert.equal(isUnchangedEntryConfirmedByReceipt(entry, "published text", [
-    { batchId: "batch-1", state: "confirmed", acknowledged: [{ operationId: "operation-1", generation: 5 }] },
-    { batchId: "batch-1", state: "confirmed", acknowledged: [{ operationId: "another-operation", generation: 4 }] },
-  ]), false);
-  assert.equal(isEntryAcknowledgedByReceipt(entry, {
-    batchId: "another-batch", state: "confirmed", acknowledged: [{ operationId: "operation-1", generation: 4 }],
-  }), false);
-  assert.equal(isNonDraftEntryAcknowledgedByReceipt({ ...entry, state: "publication_unknown" }, confirmed[0]!), true);
-  assert.equal(isNonDraftEntryAcknowledgedByReceipt({ ...entry, state: "draft" }, confirmed[0]!), false);
+test("only unchanged text with the exact applied operation generation is cleared", () => {
+  const entry = { text: "saved text", operation: { id: "operation-1", generation: 4 } };
+  const receipt = { operationId: "operation-1", generation: 4 };
+  assert.equal(isUnchangedEntryConfirmedByReceipt(entry, "saved text", [receipt]), true);
+  assert.equal(isUnchangedEntryConfirmedByReceipt(entry, "new text", [receipt]), false);
+  assert.equal(isUnchangedEntryConfirmedByReceipt(entry, "saved text", [{ ...receipt, generation: 5 }]), false);
+  assert.equal(isEntryAcknowledgedByReceipt(entry, { ...receipt, operationId: "other" }), false);
+  assert.equal(isNonDraftEntryAcknowledgedByReceipt({ ...entry, state: "applying" }, receipt), true);
+  assert.equal(isNonDraftEntryAcknowledgedByReceipt({ ...entry, state: "draft" }, receipt), false);
 });
 
 test("the editor is writable only after its selected scene recovery is ready", () => {
@@ -74,7 +66,7 @@ test("a recovered editor remains writable only for a background refresh of its c
   const sameScene = {
     currentProjectId: "project-1",
     requestedProjectId: "project-1",
-    currentRepositoryMatches: true,
+    currentProjectMatches: true,
     currentAuthorScopeMatches: true,
     selectedSceneId: "scene-1",
     requestedSceneId: "scene-1",
@@ -95,7 +87,7 @@ test("a recovered editor remains writable only for a background refresh of its c
 
   assert.equal(isSameSceneEditorLoad({ ...sameScene, requestedSceneId: "scene-2" }), false);
   assert.equal(isSameSceneEditorLoad({ ...sameScene, currentProjectId: "project-2" }), false);
-  assert.equal(isSameSceneEditorLoad({ ...sameScene, currentRepositoryMatches: false }), false);
+  assert.equal(isSameSceneEditorLoad({ ...sameScene, currentProjectMatches: false }), false);
   assert.equal(isSameSceneEditorLoad({ ...sameScene, currentAuthorScopeMatches: false }), false);
   assert.equal(isSameSceneEditorLoad({ ...sameScene, editorSceneId: undefined }), false);
   assert.equal(canRetainRecoveredEditorDuringSceneLoad({ ...sameScene, recoveryStatus: "pending" }), false);
@@ -117,7 +109,7 @@ test("a failed IndexedDB open is unavailable from project activation through sce
 
 test("a local draft merge replaces only older drafts for the same author and document", () => {
   const priorDraft = draftEntry();
-  const otherDocument = draftEntry({ documentKey: "repository/scene-2" });
+  const otherDocument = draftEntry({ documentKey: "project/scene-2" });
   const foreignAuthor = draftEntry({ authorScope: "author-2" });
   const protectedConflict = draftEntry({ state: "conflict", operation: { generation: 0 } });
   const savedDraft = draftEntry({ operation: { generation: 2 } });
