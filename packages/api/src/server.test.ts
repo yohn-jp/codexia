@@ -2355,11 +2355,11 @@ describe("Codexia HTTP boundary", () => {
     const snapshot = (await store.observe(project.id)).snapshot;
     const operation = (id: string, path: string, content: string): ChangeOperation => ({
       id, generation: 1, projectId: snapshot.projectId, baseProjectVersion: snapshot.projectVersion,
-      effect: "manuscript", reads: [{ path, revision: null }], writes: [{ path, revision: null, content }],
+      effect: "metadata", reads: [{ path, revision: null }], writes: [{ path, revision: null, content }],
       message: `Write ${path}`,
     });
-    const selected = operation("recovery_selected_op", "manuscript/recovery-selected.md", "Selected and published.\n");
-    const unselected = operation("recovery_unselected_op", "manuscript/recovery-unselected.md", "Still pending after recovery.\n");
+    const selected = operation("recovery_selected_op", "meta/recovery/selected.md", "Selected and published.\n");
+    const unselected = operation("recovery_unselected_op", "meta/recovery/unselected.md", "Still pending after recovery.\n");
     const proposal: ChangeProposal = {
       id: "recovery_mcp_batch",
       snapshot,
@@ -2378,7 +2378,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(initial.status, 201);
     assert.deepEqual(await initial.json(), proposal, "new bearer submissions are attributed to MCP regardless of request source");
 
-    const cookieOperation = operation("cookie_author_source_op", "manuscript/cookie-author.md", "Created by the owner session.\n");
+    const cookieOperation = operation("cookie_author_source_op", "meta/recovery/cookie-author.md", "Created by the owner session.\n");
     const cookieCreated = await fetch(`${apiServer.base}/api/projects/${project.id}/proposals`, {
       method: "POST", headers: ownerHeaders(),
       body: JSON.stringify({ id: "cookie_author_source", snapshot, operations: [cookieOperation], source: "mcp" }),
@@ -2391,11 +2391,11 @@ describe("Codexia HTTP boundary", () => {
       body: JSON.stringify({ proposalId: proposal.id, operationIds: [selected.id] }),
     });
     assert.equal(approval.status, 204);
-    const checkpoint = await fetch(`${apiServer.base}/api/projects/${project.id}/apply`, {
+    const applyResponse = await fetch(`${apiServer.base}/api/projects/${project.id}/apply`, {
       method: "POST", headers: ownerHeaders(), body: JSON.stringify(selected),
     });
-    assert.equal(checkpoint.status, 201);
-    const receipt = await checkpoint.json() as { projectVersion: number; operationId: string };
+    assert.equal(applyResponse.status, 201);
+    const receipt = await applyResponse.json() as { projectVersion: number; operationId: string };
     assert.equal(receipt.operationId, selected.id);
     assert.ok(receipt.projectVersion > snapshot.projectVersion);
     await apiServer.close();
@@ -2410,9 +2410,8 @@ describe("Codexia HTTP boundary", () => {
     const partialResponse = await fetch(statusPath, { headers: { Cookie: owner.cookie } });
     assert.equal(partialResponse.status, 200);
     const partial = await partialResponse.json() as ProposalStatus;
-    assert.equal(partial.payloadComplete, true);
     assert.equal(partial.proposal.source, "mcp");
-    assert.deepEqual(partial.operationIds, [selected.id, unselected.id]);
+    assert.deepEqual(partial.proposal.operations.map(({ id }) => id), [selected.id, unselected.id]);
     assert.deepEqual(partial.proposal, proposal, "PostgreSQL retains the complete private proposal and evidence");
     assert.deepEqual(partial.approvedOperationIds, [selected.id]);
     assert.deepEqual(partial.appliedOperationIds, [selected.id]);
@@ -2424,8 +2423,8 @@ describe("Codexia HTTP boundary", () => {
     assert.deepEqual(await retry.json(), proposal, "the owner retry restores the exact original MCP payload and source");
     const restoredResponse = await fetch(statusPath, { headers: { Cookie: owner.cookie } });
     const restored = await restoredResponse.json() as ProposalStatus;
-    assert.equal(restored.payloadComplete, true);
     assert.deepEqual(restored.proposal, proposal);
+    assert.deepEqual(restored.proposal.operations.map(({ id }) => id), [selected.id, unselected.id]);
     assert.deepEqual(restored.approvedOperationIds, [selected.id], "restoring payload must not approve the remaining operation");
     assert.deepEqual(restored.appliedOperationIds, [selected.id]);
 
@@ -2439,13 +2438,13 @@ describe("Codexia HTTP boundary", () => {
       method: "POST", headers: ownerHeaders(), body: JSON.stringify(changed),
     });
     assert.equal(changedRetry.status, 409);
-    assert.equal((await changedRetry.json() as { code: string }).code, "proposal_id_reused", "Core must keep enforcing the original full-payload digest");
+    assert.equal((await changedRetry.json() as { code: string }).code, "proposal_identity_conflict", "Core must keep enforcing the original full-payload digest");
 
-    const unapprovedCheckpoint = await fetch(`${apiServer.base}/api/projects/${recoveredProject.id}/apply`, {
+    const unapprovedApply = await fetch(`${apiServer.base}/api/projects/${recoveredProject.id}/apply`, {
       method: "POST", headers: ownerHeaders(), body: JSON.stringify(unselected),
     });
-    assert.equal(unapprovedCheckpoint.status, 403);
-    assert.equal((await unapprovedCheckpoint.json() as { code: string }).code, "author_approval_required");
+    assert.equal(unapprovedApply.status, 403);
+    assert.equal((await unapprovedApply.json() as { code: string }).code, "operation_not_approved");
 
     const currentSnapshot = (await store.observe(recoveredProject.id)).snapshot;
     const newCookieOperation = {
