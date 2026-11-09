@@ -9,7 +9,7 @@ import { test } from "node:test";
 import { CoreStore } from "../../../packages/core/dist/index.js";
 import { ModuleRuntime } from "../../../packages/module-runtime/dist/index.js";
 import { createPostgresPersistence } from "../../../packages/persistence-postgres/dist/index.js";
-import { postgresFixture } from "../../test-support/postgres-fixture.mjs";
+import { postgresFixture } from "../../../tests/helpers/postgres-fixture.mjs";
 
 const workFiles = {
   "meta/project.yaml": "title: Work Uma\nownerNote: preserve-project-metadata\n",

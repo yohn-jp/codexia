@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { postgresFixture } from "../../test-support/postgres-fixture.mjs";
+import { postgresFixture } from "../../../tests/helpers/postgres-fixture.mjs";
 
 import { ModuleRuntime } from "../../../packages/module-runtime/dist/index.js";
 
