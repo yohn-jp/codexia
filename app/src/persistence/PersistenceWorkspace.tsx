@@ -1,7 +1,24 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type CSSProperties } from "react";
+import type { BrowserEditorDocument, ModuleStatus, SnapshotId, UiContribution } from "@codexia/contracts";
+import { availableModulePanels } from "../application/AvailableModulePanels";
+import { workspaceContributions } from "../contributions/catalog";
+import { ProposalReview } from "../contributions/ProposalReview";
+import type { JournalProposal } from "../storage/journal";
 import type { Document as PersistenceDocument, DocumentId, DocumentRevision, EvidenceId, KnowledgeNode, KnowledgeNodeId, Project as PersistenceProject, RevisionId } from "@codexia/persistence-contracts";
 import { api } from "../api";
+import { readWorkspaceSelection, writeWorkspaceSelection } from "./selection";
+import { PersistenceScratch } from "./PersistenceScratch";
+import { protectEditorTransition } from "./transition";
 import { ApiError } from "../api-error";
+import { DesktopShell } from "../shells/desktop/DesktopShell";
+import { MobileShell } from "../shells/mobile/MobileShell";
+import type { WorkspacePanel } from "../application/contracts";
+import { applyThemeMode, loadThemeMode, persistThemeMode } from "../theme";
+import { ThemeControl } from "../components/ThemeControl";
+import { RubyText } from "../editor/ruby";
+import { MobileReadingPager } from "../editor/MobileReadingPager";
+import { WRITING_SYMBOLS } from "../editor/writingSymbols";
+import { loadTypographySettings, storeTypographySettings, TYPOGRAPHY_PRESETS, typographyPresetValues, type TypographyPresetId } from "../editor/typography";
 import { ManuscriptInput, type ManuscriptInputHandle } from "../editor/ManuscriptInput";
 import { initializeDocumentEvidence, type DocumentEvidenceState, type EditorEvidenceAdapter, type TextChange } from "../editor/evidence";
 import { BrowserJournal } from "../storage/journal";
@@ -41,9 +58,24 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
   authorScope: string;
   onSignOut: () => void;
 }) {
+  const selectionRef = useRef(readWorkspaceSelection(window.localStorage, authorScope));
+  const [reading, setReading] = useState(false);
+  const [readingDirection, setReadingDirection] = useState<"horizontal" | "vertical">("horizontal");
+  const [readingPage, setReadingPage] = useState(0);
+  const [typography, setTypography] = useState(loadTypographySettings);
+  const editorPositionRef = useRef<{ cursorSentenceIndex: number | null; scrollTop: number }>({ cursorSentenceIndex: null, scrollTop: 0 });
+  const [theme, setTheme] = useState(loadThemeMode);
+  const [themeError, setThemeError] = useState("");
   const [journal, setJournal] = useState<BrowserJournal | null>(null);
   const journalRef = useRef<BrowserJournal | null>(null);
   const [journalError, setJournalError] = useState("");
+  const [modules, setModules] = useState<ModuleStatus[]>([]);
+  const [contributions, setContributions] = useState<UiContribution[]>([]);
+  const moduleFilesRef = useRef<Array<{ path: string; revision: string | null }>>([]);
+  const moduleSequenceRef = useRef(0);
+  const [moduleSnapshot, setModuleSnapshot] = useState<SnapshotId | null>(null);
+  const [proposals, setProposals] = useState<JournalProposal[]>([]);
+  const [moduleError, setModuleError] = useState("");
   const [projects, setProjects] = useState<PersistenceProject[]>([]);
   const [projectId, setProjectId] = useState("");
   const [documents, setDocuments] = useState<PersistenceDocument[]>([]);
@@ -55,6 +87,7 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
   const pendingSaveRef = useRef(new Map<string, PendingSave>());
   const saveInFlightRef = useRef(false);
   const saveDocumentRef = useRef<() => Promise<void>>(async () => undefined);
+  const scratchGuardRef = useRef<(() => Promise<void>) | null>(null);
   const editorRef = useRef<ManuscriptInputHandle>(null);
   const clientIdRef = useRef("");
   const openSequenceRef = useRef(0);
@@ -62,6 +95,10 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
   const [pageError, setPageError] = useState("");
   const [notice, setNotice] = useState("");
   const [projectTitle, setProjectTitle] = useState("");
+  const [documentKind, setDocumentKind] = useState("scene");
+  const [renameTitle, setRenameTitle] = useState("");
+  const [orderRank, setOrderRank] = useState(0);
+  const [moveParent, setMoveParent] = useState("");
   const [documentTitle, setDocumentTitle] = useState("");
   const [newDocumentParent, setNewDocumentParent] = useState("");
   const [knowledgeName, setKnowledgeName] = useState("");
@@ -102,7 +139,7 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
     setLoading(true);
     void api.persistenceProjects(200, controller.signal).then((values) => {
       setProjects(values);
-      setProjectId((current) => current && values.some((value) => value.id === current) ? current : values[0]?.id ?? "");
+      setProjectId((current) => current && values.some((value) => value.id === current) ? current : values.find((value) => value.id === selectionRef.current?.projectId)?.id ?? values[0]?.id ?? "");
       setPageError("");
     }).catch((error: unknown) => {
       if (!controller.signal.aborted) setPageError(error instanceof Error ? error.message : "作品一覧を読み込めませんでした。");
@@ -131,7 +168,7 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
       setDocuments(documentResult.documents);
       setNodes(nodeResult.nodes);
       setDocumentId((current) => current && documentResult.documents.some((item) => item.id === current)
-        ? current : documentResult.documents[0]?.id ?? "");
+        ? current : documentResult.documents.find((item) => projectId === selectionRef.current?.projectId && item.id === selectionRef.current.documentId)?.id ?? documentResult.documents[0]?.id ?? "");
       setNodeId((current) => current && nodeResult.nodes.some((item) => item.id === current) ? current : "");
     }).catch((error: unknown) => {
       if (!controller.signal.aborted) setPageError(error instanceof Error ? error.message : "作品の内容を読み込めませんでした。");
@@ -140,6 +177,24 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
     });
     return () => controller.abort();
   }, [projectId, publishEditor]);
+
+  const refreshModules = useCallback(async () => {
+    const sequence = ++moduleSequenceRef.current;
+    if (!projectId) { setModuleSnapshot(null); setModules([]); setContributions([]); setProposals([]); return; }
+    try {
+      const [statuses, catalog, read, remote] = await Promise.all([api.modules(projectId), api.contributions(projectId), api.moduleSnapshot(projectId), api.proposalStatuses(projectId)]);
+      if (sequence !== moduleSequenceRef.current) return;
+      if (read.snapshot.projectId !== projectId) throw new Error("作品のRevisionが一致しません。");
+      const currentJournal = journalRef.current;
+      if (currentJournal) {
+        for (const status of remote.proposals) await currentJournal.putProposal(projectId, authorScope, status.proposal, status);
+        setProposals(await currentJournal.getProposals(projectId, authorScope));
+      }
+      moduleFilesRef.current = read.files;
+      setModules(statuses); setContributions(catalog); setModuleSnapshot(read.snapshot); setModuleError("");
+    } catch (error) { if (sequence !== moduleSequenceRef.current) return; setModuleError(error instanceof Error ? error.message : "モジュールを読み込めませんでした。"); }
+  }, [projectId, authorScope]);
+  useEffect(() => { void refreshModules(); }, [refreshModules, journal, active?.revision.id]);
 
   const openDocument = useCallback(async (nextDocumentId: string): Promise<void> => {
     const currentProject = projects.find((item) => item.id === projectId);
@@ -165,6 +220,8 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
       }, new AbortController().signal);
       const evidence = initializeDocumentEvidence(revision.markdown, revision.id, snapshot);
       if (openSequence !== openSequenceRef.current) return;
+      selectionRef.current = { projectId: currentProject.id, documentId: nextDocumentId };
+      writeWorkspaceSelection(window.localStorage, authorScope, selectionRef.current);
       const staleDraft = Boolean(draft && (draft.baseRevisionId !== revision.id || draft.baseMarkdown !== revision.markdown));
       const markdown = draft?.markdown ?? revision.markdown;
       const baseMarkdown = draft?.baseMarkdown ?? revision.markdown;
@@ -340,12 +397,13 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
   async function createProject(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const title = projectTitle.trim();
-    if (!title) return;
+    if (!title || !await protectTransition()) return;
     setLoading(true);
     setPageError("");
     try {
       const result = await api.createPersistenceProject({ title });
       setProjects((current) => [result.project, ...current]);
+      if (!await protectTransition()) return;
       setProjectId(result.project.id);
       setDocumentId("");
       setProjectTitle("");
@@ -360,19 +418,20 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
     event.preventDefault();
     if (!project) return;
     const title = documentTitle.trim();
-    if (!title) return;
+    if (!title || !await protectTransition()) return;
     setLoading(true);
     setPageError("");
     try {
       const result = await api.createPersistenceDocument(project.id, {
         parentId: (newDocumentParent || null) as DocumentId | null,
-        kind: "scene",
+        kind: documentKind,
         title,
         orderKey: String(documents.length).padStart(8, "0"),
         markdown: "",
         idempotencyKey: crypto.randomUUID(),
       });
       setDocuments((current) => [...current, result.document]);
+      if (!await protectTransition()) return;
       setDocumentId(result.document.id);
       setDocumentTitle("");
     } catch (error) {
@@ -382,20 +441,40 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
     }
   }
 
-  async function selectDocument(nextId: string): Promise<void> {
-    const current = activeRef.current;
-    if (current?.dirty) {
-      try {
-        const stored = await persistDraft(current);
-        if (!stored) throw new Error("別タブの新しい回復記録があるため、この文書は切り替えませんでした。");
-      } catch (error) {
-        setPageError(error instanceof Error ? error.message : "回復Journalを保存できませんでした。");
-        return;
-      }
+  async function protectTransition(): Promise<boolean> {
+    try {
+      await scratchGuardRef.current?.();
+      await protectEditorTransition(() => activeRef.current, () => {
+        const markdown = editorRef.current?.readForNavigation();
+        const current = activeRef.current;
+        if (current && markdown !== undefined && markdown !== current.markdown) publishEditor({ ...current, markdown, generation: current.generation + 1, dirty: markdown !== current.baseMarkdown, recovery: "pending" });
+      }, persistDraft);
+      return true;
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "回復Journalを保存できませんでした。");
+      return false;
     }
+  }
+
+  async function selectDocument(nextId: string): Promise<void> {
+    if (nextId === documentId || !await protectTransition()) return;
     openSequenceRef.current += 1;
     publishEditor(null);
     setDocumentId(nextId);
+  }
+
+  async function editStructure(update: { title?: string; parentId?: string | null; orderKey?: string }, remove = false): Promise<void> {
+    const current = activeRef.current;
+    if (!current || !await protectTransition()) return;
+    try {
+      if (remove) await api.deletePersistenceDocument(projectId, current.document.id, current.document.version);
+      else await api.updatePersistenceDocument(projectId, current.document.id, { ...update, expectedVersion: current.document.version });
+      const result = await api.persistenceDocuments(projectId);
+      setDocuments(result.documents);
+      if (remove) { openSequenceRef.current++; publishEditor(null); setDocumentId(result.documents[0]?.id ?? ""); }
+      else { const document = result.documents.find((item) => item.id === current.document.id); const latest = activeRef.current; if (document && latest?.document.id === current.document.id) publishEditor({ ...latest, document }); }
+      await refreshModules();
+    } catch (error) { setPageError(error instanceof Error ? error.message : "構成を更新できませんでした。"); }
   }
 
   async function refreshEvidence(value = activeRef.current): Promise<void> {
@@ -610,15 +689,7 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
   }, [publishEditor]);
 
   const selectProject = async (nextProjectId: string): Promise<void> => {
-    const current = activeRef.current;
-    if (current?.dirty) {
-      try {
-        if (!await persistDraft(current)) throw new Error("別タブの新しい回復記録があるため、作品を切り替えませんでした。");
-      } catch (error) {
-        setPageError(error instanceof Error ? error.message : "回復Journalへ保存できませんでした。");
-        return;
-      }
-    }
+    if (nextProjectId === projectId || !await protectTransition()) return;
     openSequenceRef.current += 1;
     publishEditor(null);
     setDocumentId("");
@@ -627,16 +698,8 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
 
   const switchPath = `/${mode === "desktop" ? "mobile" : "desktop"}`;
 
-  return <div className={`pg-workspace pg-${mode}`}>
-    <header className="pg-header">
-      <div><p className="eyebrow">Codexia · PostgreSQL</p><h1>Database workspace</h1></div>
-      <nav aria-label="Workspace controls">
-        <a href={switchPath}>{mode === "desktop" ? "Mobileへ" : "Desktopへ"}</a>
-        <button type="button" onClick={onSignOut}>ログアウト</button>
-      </nav>
-    </header>
-    <div className={`pg-layout ${active ? "has-document" : ""}`}>
-      <aside className="pg-library" aria-label="作品と文書">
+  const typographyStyle: CSSProperties = { fontSize: typography.fontSize, lineHeight: typography.lineHeight, letterSpacing: `${typography.letterSpacing}em`, maxWidth: typography.maxWidth, fontFamily: typography.fontFamily === "mincho" ? "serif" : "sans-serif" };
+  const library = (<aside className="pg-library" aria-label="作品と文書">
         <section>
           <h2>作品</h2>
           {projects.length > 0 && <label htmlFor="pg-project">開く作品</label>}
@@ -661,6 +724,7 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
           <form onSubmit={(event) => void createDocument(event)}>
             <label htmlFor="pg-document-title">文書を追加</label>
             <input id="pg-document-title" value={documentTitle} onChange={(event) => setDocumentTitle(event.target.value)} maxLength={256} required placeholder="章・シーン名" />
+            <label htmlFor="pg-document-kind">文書の種類</label><select id="pg-document-kind" value={documentKind} onChange={(event) => setDocumentKind(event.target.value)}><option value="volume">巻</option><option value="chapter">章</option><option value="scene">シーン</option><option value="note">ノート</option></select>
             <label htmlFor="pg-document-parent">追加先</label>
             <select id="pg-document-parent" value={newDocumentParent} onChange={(event) => setNewDocumentParent(event.target.value)}>
               <option value="">作品の直下</option>
@@ -668,10 +732,15 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
             </select>
             <button type="submit" disabled={loading || !documentTitle.trim()}>文書を作成</button>
           </form>
+          {active && <details><summary>選択文書の構成を変更</summary>
+            <form onSubmit={(event) => { event.preventDefault(); if (renameTitle.trim()) void editStructure({ title: renameTitle.trim() }); }}><label htmlFor="pg-rename">新しい文書名</label><input id="pg-rename" value={renameTitle} onChange={(event) => setRenameTitle(event.target.value)} required maxLength={256} /><button type="submit">文書名を変更</button></form>
+            <form onSubmit={(event) => { event.preventDefault(); void editStructure({ parentId: moveParent || null }); }}><label htmlFor="pg-move">移動先</label><select id="pg-move" value={moveParent} onChange={(event) => setMoveParent(event.target.value)}><option value="">作品の直下</option>{documents.filter((item) => item.id !== active.document.id).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select><button type="submit">文書を移動</button></form>
+            <form onSubmit={(event) => { event.preventDefault(); void editStructure({ orderKey: String(orderRank).padStart(8, "0") }); }}><label htmlFor="pg-order">並び順</label><input id="pg-order" type="number" min="0" max="99999999" value={orderRank} onChange={(event) => setOrderRank(Number(event.target.value))} /><button type="submit">並び順を変更</button></form>
+            <button type="button" onClick={() => { if (window.confirm(`「${active.document.title}」を削除しますか？保存済みRevisionは保持されます。`)) void editStructure({}, true); }}>文書を削除</button>
+          </details>}
         </section>}
-      </aside>
-
-      <main className="pg-editor-column" aria-label="PostgreSQL原稿編集">
+      </aside>);
+  const editor = (<main className="pg-editor-column" aria-label="PostgreSQL原稿編集">
         {pageError && <p className="pg-alert" role="alert">{pageError}</p>}
         {notice && <p className="pg-notice" role="status">{notice}</p>}
         {journalError && <p className="pg-alert" role="alert">{journalError}</p>}
@@ -690,13 +759,24 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
             <button type="button" onClick={() => void saveDocument()} disabled={!active.dirty || active.recovery !== "stored" || Boolean(active.remoteConflict) || active.save === "saving"}>
               {active.save === "failed" ? "PostgreSQLへ再試行" : "今すぐ保存"}
             </button>
+            <button type="button" onClick={() => { if (!editorRef.current) return; try { editorRef.current.readForNavigation(); window.print(); } catch (error) { setPageError(error instanceof Error ? error.message : "変換を確定してください。"); } }}>印刷</button>
             <button type="button" onClick={() => void loadRevisions()} disabled={active.dirty || Boolean(active.remoteConflict)}>Revision履歴</button>
             <button type="button" onClick={() => void createAnchor()} disabled={active.dirty || Boolean(active.remoteConflict) || active.save !== "saved"}>選択範囲をText Anchorにする</button>
           </div>
+          <div className="pg-editor-actions" aria-label="原稿の表示と書式">
+            <button type="button" aria-pressed={reading} onClick={() => void protectTransition().then((allowed) => { if (!allowed) return; setReading(!reading); if (reading) requestAnimationFrame(() => editorRef.current?.restorePosition(editorPositionRef.current)); })}>{reading ? "編集へ戻る" : "読む"}</button>
+            <label>組版<select aria-label="組版プリセット" defaultValue="" onChange={(event) => { const next = { ...typography, ...typographyPresetValues(event.target.value as TypographyPresetId) }; setTypography(next); storeTypographySettings(next); }}><option value="" disabled>表示設定</option>{Object.entries(TYPOGRAPHY_PRESETS).map(([id, preset]) => <option key={id} value={id}>{preset.label}</option>)}</select></label>
+            <label>文字サイズ<input aria-label="原稿の文字サイズ" type="number" min="14" max="24" value={typography.fontSize} onChange={(event) => { const next = { ...typography, fontSize: Math.max(14, Math.min(24, Number(event.target.value))) }; setTypography(next); storeTypographySettings(next); }} /></label>
+            {reading && <label>組方向<select aria-label="組方向" value={readingDirection} onChange={(event) => setReadingDirection(event.target.value as "horizontal" | "vertical")}><option value="horizontal">横書き</option><option value="vertical">縦書き</option></select></label>}
+            {!reading && WRITING_SYMBOLS.map((symbol) => <button key={symbol.id} type="button" aria-label={symbol.ariaLabel} onClick={() => editorRef.current?.insert(symbol.id)}>{symbol.label}</button>)}
+          </div>
+          <div hidden={reading}>
           <label id="pg-manuscript-label" htmlFor="manuscript">原稿 Markdown</label>
           <ManuscriptInput
             key={active.document.id}
             ref={editorRef}
+            style={typographyStyle}
+            onCursorPositionChange={(cursorSentenceIndex, scrollTop) => { editorPositionRef.current = { cursorSentenceIndex, scrollTop }; }}
             value={active.markdown}
             externalTextRevision={active.generation}
             readOnly={Boolean(journalError)}
@@ -712,8 +792,11 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
             labelledBy="pg-manuscript-label"
             placeholder="物語の続きを書く"
           />
+          </div>
+          {reading && <section aria-label="原稿の閲覧" className={`scene-reading scene-reading-${readingDirection}`} style={typographyStyle}><MobileReadingPager mode={readingDirection} pageIndex={readingPage} onPageIndexChange={setReadingPage}><RubyText text={active.markdown} /></MobileReadingPager></section>}
           <p className="pg-editor-hint">{active.markdown.length}字 · UTF-16差分をRevisionへ保存します。本文を送る前にIndexedDBの回復Journalへ記録します。</p>
 
+          {journal && <PersistenceScratch key={`${active.document.projectId}:${active.document.id}`} projectId={active.document.projectId} documentId={active.document.id} authorScope={authorScope} journal={journal} registerGuard={(guard) => { scratchGuardRef.current = guard; }} onSaved={async () => { const result = await api.persistenceDocuments(projectId); setDocuments(result.documents); setNotice("スクラッチを独立したノートとしてPostgreSQLへ保存しました。"); }} />}
           {active.remoteConflict && <section className="pg-conflict" aria-labelledby="pg-conflict-title">
             <h3 id="pg-conflict-title">Revision競合</h3>
             <p>ブラウザーDraftのbaseとPostgreSQLの最新版が違います。本文は上書きしていません。</p>
@@ -734,9 +817,8 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
             </article>)}
           </section>}
         </section>}
-      </main>
-
-      <aside className="pg-knowledge" aria-label="KnowledgeとEvidence">
+      </main>);
+  const knowledge = (<aside className="pg-knowledge" aria-label="KnowledgeとEvidence">
         <section>
           <h2>Knowledge</h2>
           <form onSubmit={(event) => void createKnowledge(event)}>
@@ -780,9 +862,37 @@ export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
             </li>)}
           </ul>}
         </section>
-      </aside>
-    </div>
-    {loading && <p className="pg-loading" role="status">PostgreSQLの状態を読み込んでいます。</p>}
+      </aside>);
+  const panels: WorkspacePanel[] = [
+    { id: "outline", title: "作品と構成", render: () => library },
+    { id: "editor", title: "原稿", render: () => editor },
+    { id: "inspector", title: "KnowledgeとEvidence", render: () => knowledge },
+  ];
+  const readCurrentEditor = (): BrowserEditorDocument | null => {
+    const current = activeRef.current;
+    if (!current || !moduleSnapshot || moduleSnapshot.projectId !== current.document.projectId) return null;
+    return { sceneId: current.document.id, documentPath: moduleFilesRef.current.find((file) => file.revision === current.revision.id)?.path ?? `documents/${current.document.id}.md`, documentRevision: current.revision.id,
+      sceneRevision: current.revision.id, text: current.markdown, snapshot: moduleSnapshot, baseSnapshot: moduleSnapshot, baseSceneRevision: current.revision.id };
+  };
+  const modulePanels = availableModulePanels({ items: workspaceContributions(contributions, modules), contributions, modules, projectId, authorScope,
+    snapshot: moduleSnapshot, journal, refresh: refreshModules, onProposalStored: () => { void refreshModules(); }, readCurrentEditor,
+    navigateDocument: async (path) => { const file = moduleFilesRef.current.find((item) => item.path === path); const target = documents.find((item) => file?.revision && item.headRevisionId === file.revision); if (!target) throw new Error("この作品の文書が見つかりません。"); await selectDocument(target.id); },
+  });
+  panels.push({ id: "review", title: "提案レビュー", render: () => <>{moduleError && <p role="alert">{moduleError}</p>}{journal && <ProposalReview projectId={projectId} authorScope={authorScope} journal={journal} proposals={proposals} onChange={() => { void refreshModules(); }} onStatus={(message) => setNotice(message)} />}</> }, ...modulePanels);
+  const Shell = mode === "mobile" ? MobileShell : DesktopShell;
+  return <div className={`pg-workspace pg-shell pg-${mode}`}>
+    <Shell mode={mode}
+      header={<><h1>Database workspace</h1><ThemeControl mode={theme} error={themeError} onChange={(next) => { setTheme(next); applyThemeMode(next); try { persistThemeMode(next); setThemeError(""); } catch { setThemeError("外観設定をこのブラウザーへ保存できませんでした。"); } }} /><button type="button" onClick={() => void protectTransition().then((allowed) => { if (allowed) onSignOut(); })}>ログアウト</button></>}
+      documentTitle={active?.document.title}
+      documentContext={project?.title}
+      desktopDurability={active?.dirty ? "draft" : "saved"}
+      library={library} editor={editor} tools={knowledge}
+      status={<>{pageError && <p role="alert">{pageError}</p>}{loading && <p role="status">PostgreSQLの状態を読み込んでいます。</p>}</>}
+      workspaceScope={`postgres:${authorScope}`}
+      panels={panels}
+      beforeLayoutChange={protectTransition}
+      onSwitchMode={async () => { if (!await protectTransition()) return false; window.location.assign(switchPath); return true; }}
+    />
   </div>;
 }
 

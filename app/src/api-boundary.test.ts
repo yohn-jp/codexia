@@ -21,30 +21,26 @@ test("audit browser API rejects a partial runtime-version DTO rather than config
   await assert.rejects(api.version(), invalid);
 });
 
-test("audit browser API validates checkpoint and publication receipts before recovery accepts them", async () => {
-  const operation: ChangeOperation = {
-    id: "op-1", generation: 0, effect: "manuscript", message: "save",
-    repository: { provider: "local", repositoryId: "1", ownerScope: "owner", defaultBranch: "main", url: "file:///fixture" },
-    baseRemoteCommit: "a".repeat(40), reads: [], writes: [{ path: "manuscript/a.md", revision: null, content: "text" }],
-  };
-  globalThis.fetch = async () => Response.json({ operationId: operation.id, generation: "0", localCommit: "b".repeat(40), remoteBase: operation.baseRemoteCommit, revisions: [] });
-  await assert.rejects(api.checkpoint("project-1", operation), invalid);
-  globalThis.fetch = async () => Response.json({ batchId: "b1", state: "confirmed", remoteCommit: "a".repeat(40), acknowledged: [{}] });
-  await assert.rejects(api.publish("project-1", "b1"), invalid);
-  globalThis.fetch = async () => Response.json({ batchId: "b1", state: "publication_unknown", remoteCommit: "", acknowledged: [] });
-  assert.equal((await api.publish("project-1", "b1")).state, "publication_unknown");
+test("audit browser API validates PostgreSQL apply receipts before recovery accepts them", async () => {
+  const operation: ChangeOperation = { id: "op-1", generation: 0, effect: "manuscript", message: "save", projectId: "project-1", baseProjectVersion: 1, reads: [], writes: [{ path: "documents/a.md", revision: null, content: "text" }] };
+  for (const receipt of [{ operationId: "op-1", generation: "0", projectVersion: 2, revisions: [] }, { operationId: "op-1", generation: 0, projectVersion: 0, revisions: [] }, { operationId: "op-1", generation: 0, localCommit: "b".repeat(40), revisions: [] }]) {
+    globalThis.fetch = async () => Response.json(receipt);
+    await assert.rejects(api.apply("project-1", operation), invalid);
+  }
+  globalThis.fetch = async () => Response.json({ operationId: "op-1", generation: 0, projectVersion: 2, revisions: [] });
+  assert.equal((await api.apply("project-1", operation)).projectVersion, 2);
 });
 
 test("audit browser API preserves service errors and permits 204 only for no-content endpoints", async () => {
   globalThis.fetch = async () => new Response("temporarily unavailable", { status: 503 });
   await assert.rejects(api.session(), (error: unknown) => error instanceof ApiError && error.status === 503);
   globalThis.fetch = async () => new Response(null, { status: 204 });
-  assert.equal(await api.detachProject("project-1"), undefined);
-  await assert.rejects(api.projects(), invalid);
+  assert.equal(await api.deletePersistenceDocument("project-1", "document-1", 1), undefined);
+  await assert.rejects(api.persistenceProjects(), invalid);
 });
 
 test("audit browser API rejects successful actions missing their required opaque payload", async () => {
-  const snapshot = { repository: { provider: "local", repositoryId: "fixture", ownerScope: "owner", defaultBranch: "main", url: "file:///fixture" }, remoteCommit: "a".repeat(40) };
+  const snapshot = { projectId: "project-1", projectVersion: 1 };
   globalThis.fetch = async () => Response.json({ ok: true, snapshot });
   await assert.rejects(api.action("project-1", "core.document.resolve", {}), invalid);
   globalThis.fetch = async () => Response.json({ ok: true, snapshot, data: null });

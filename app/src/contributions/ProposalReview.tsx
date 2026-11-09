@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ChangeOperation, ProposalStatus, RepositoryIdentity } from "@codexia/contracts";
+import type { ChangeOperation, ProposalStatus } from "@codexia/contracts";
 import { api } from "../api";
 import { BrowserJournal, proposalOperationEntry, stableJson, type JournalEntry, type JournalProposal } from "../storage/journal";
 
@@ -7,13 +7,12 @@ function operationKey(operation: ChangeOperation): string {
   return operation.id + "\u0000" + operation.generation;
 }
 
-function checkpointFor(status: ProposalStatus | undefined, operation: ChangeOperation) {
-  return status?.checkpoints.find((receipt) => receipt.operationId === operation.id && receipt.generation === operation.generation);
+function applicationFor(status: ProposalStatus | undefined, operation: ChangeOperation) {
+  return status?.applications.find((receipt) => receipt.operationId === operation.id && receipt.generation === operation.generation);
 }
 
 export function ProposalReview({
   projectId,
-  repository,
   authorScope,
   journal,
   proposals,
@@ -22,7 +21,6 @@ export function ProposalReview({
   onStatus,
 }: {
   projectId: string;
-  repository: RepositoryIdentity;
   authorScope: string;
   journal: BrowserJournal;
   proposals: JournalProposal[];
@@ -38,7 +36,7 @@ export function ProposalReview({
     setBusyId(record.proposal.id);
     setError("");
     try {
-      const pending = await journal.getRepository(repository, authorScope);
+      const pending = await journal.getProject(projectId, authorScope);
       let status = record.status;
       if (status?.payloadComplete === false) {
         const originalIds = status.operationIds ?? [];
@@ -54,29 +52,29 @@ export function ProposalReview({
         if (!latest || latest.payloadComplete === false || stableJson(latest.proposal) !== stableJson(record.proposal)) {
           throw new Error("元の提案を Core に復元できませんでした。提案はブラウザー回復記録に保持しています。");
         }
-        await journal.putProposal(repository, authorScope, record.proposal, latest);
+        await journal.putProposal(projectId, authorScope, record.proposal, latest);
         status = latest;
       }
-      const published = new Set(status?.publishedOperationIds ?? []);
+      const published = new Set(status?.appliedOperationIds ?? []);
       const alreadyApproved = new Set(status?.approvedOperationIds ?? []);
       const entries: JournalEntry[] = [];
       const needsApproval: string[] = [];
       for (const operation of record.proposal.operations) {
-        if (published.has(operation.id) || checkpointFor(status, operation)) continue;
+        if (published.has(operation.id) || applicationFor(status, operation)) continue;
         const current = pending.find((entry) => entry.operation.id === operation.id && entry.operation.generation === operation.generation);
-        const entry = current ?? proposalOperationEntry(repository, authorScope, record.proposal, operation);
-        // Persist the exact operation and author scope before either approval or checkpointing.
+        const entry = current ?? proposalOperationEntry(projectId, authorScope, record.proposal, operation);
+        // Persist the exact operation and author scope before either approval or applicationing.
         await journal.put(entry);
         const authorized = await journal.updateState({
           ...entry,
           proposalId: record.proposal.id,
           authorizedAt: entry.authorizedAt ?? Date.now(),
-        }, "checkpointing");
+        }, "applying");
         entries.push(authorized);
         if (!alreadyApproved.has(operation.id)) needsApproval.push(operation.id);
       }
       if (entries.length === 0) {
-        onStatus("この提案の操作はすでに Checkpoint 済みです。GitHub への公開待ちです。", "normal");
+        onStatus("この提案の操作はすでに PostgreSQL Revision 済みです。保存結果は確認済みです。", "normal");
         onChange();
         return;
       }
@@ -88,10 +86,10 @@ export function ProposalReview({
         });
       }
       for (const entry of entries) {
-        const receipt = await api.checkpoint(projectId, entry.operation);
-        await journal.updateState(entry, "checkpointed", receipt);
+        const receipt = await api.apply(projectId, entry.operation);
+        await journal.updateState(entry, "applied", receipt);
       }
-      onStatus("確認した操作をローカル Checkpoint に保存しました。GitHub への公開まで回復記録を保持します。", "success");
+      onStatus("確認した操作をPostgreSQL Revision に保存しました。保存結果を確認しました。", "success");
       onChange();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "提案を処理できませんでした。";
@@ -109,15 +107,15 @@ export function ProposalReview({
     setError("");
     try {
       const status = record.status;
-      if ((status?.approvedOperationIds.length ?? 0) > 0 || (status?.checkpoints.length ?? 0) > 0) {
-        throw new Error("承認済みまたは Checkpoint 済みの提案は一覧から隠せません。");
+      if ((status?.approvedOperationIds.length ?? 0) > 0 || (status?.applications.length ?? 0) > 0) {
+        throw new Error("承認済みまたは PostgreSQL Revision 済みの提案は一覧から隠せません。");
       }
-      const pending = await journal.getRepository(repository, authorScope);
+      const pending = await journal.getProject(projectId, authorScope);
       const authorized = record.proposal.operations.some((operation) => pending.some((entry) =>
         entry.operation.id === operation.id && entry.operation.generation === operation.generation && entry.state !== "draft",
       ));
       if (authorized) throw new Error("承認処理が始まった提案は一覧から隠せません。");
-      await journal.dismissProposal(repository, authorScope, record.proposal.id);
+      await journal.dismissProposal(projectId, authorScope, record.proposal.id);
       onStatus("提案をこのブラウザーの一覧から隠しました。Core 上の提案記録は保持しています。", "success");
       onChange();
     } catch (cause) {
@@ -131,14 +129,14 @@ export function ProposalReview({
   return (
     <section className="proposal-review" aria-labelledby="proposal-review-title">
       <h2 id="proposal-review-title">確認待ちの提案</h2>
-      <p>外部ツールやモジュールの操作内容と根拠を確認し、明示的に承認した操作だけ Checkpoint に保存できます。</p>
+      <p>外部ツールやモジュールの操作内容と根拠を確認し、明示的に承認した操作だけ PostgreSQL Revision に保存できます。</p>
       {error && <p className="status" data-kind="error" role="alert">{error}</p>}
       <ul className="proposal-list">
         {proposals.map((record) => {
           const status = record.status;
-          const published = new Set(status?.publishedOperationIds ?? []);
+          const published = new Set(status?.appliedOperationIds ?? []);
           const pendingOperations = record.proposal.operations.filter((operation) =>
-            !published.has(operation.id) && !checkpointFor(status, operation),
+            !published.has(operation.id) && !applicationFor(status, operation),
           );
           const originalIds = status?.operationIds ?? record.proposal.operations.map((operation) => operation.id);
           const fullOriginalAvailable = status?.payloadComplete !== false ||
@@ -154,7 +152,7 @@ export function ProposalReview({
                   <span>{new Date(record.createdAt).toLocaleString("ja-JP")}</span>
                 </header>
                 <p>提案 ID: <code>{record.proposal.id}</code> · 作者スコープ: <code>{record.authorScope ?? "未割り当て"}</code></p>
-                {status?.stale && <p className="status" data-kind="error" role="status">提案の基準リモートが現在の HEAD より古くなっています。Checkpoint 時に Core が競合を確認します。</p>}
+                {status?.stale && <p className="status" data-kind="error" role="status">提案の基準リモートが現在の HEAD より古くなっています。PostgreSQL Revision 時に Core が競合を確認します。</p>}
                 {unacceptedPayloadMissing
                   ? <p className="status" data-kind="error" role="alert">Core の Git 記録には承認済み操作だけがあり、未承認の元提案はこのブラウザーで見つかりません。未承認分を表示・承認できません。</p>
                   : status?.payloadComplete === false
@@ -162,13 +160,13 @@ export function ProposalReview({
                     : null}
                 {record.proposal.operations.map((operation) => {
                   const isPublished = published.has(operation.id);
-                  const receipt = checkpointFor(status, operation);
+                  const receipt = applicationFor(status, operation);
                   const isApproved = status?.approvedOperationIds.includes(operation.id) ?? false;
                   return (
                     <div className="proposal-operation" key={operationKey(operation)}>
                       <h3>{operation.message}</h3>
                       <p>{operation.effect} · operation <code>{operation.id}</code> · generation {operation.generation} · {operation.writes.length} 件のファイル変更</p>
-                      {isPublished ? <p>GitHub 保存済み</p> : receipt ? <p>ローカル Checkpoint 済み · {receipt.localCommit.slice(0, 12)}</p> : isApproved ? <p>作者承認済み · Checkpoint 待ち</p> : <p>承認待ち</p>}
+                      {isPublished ? <p>PostgreSQL 保存済み</p> : receipt ? <p>PostgreSQL Revision 済み · {receipt.projectVersion}</p> : isApproved ? <p>作者承認済み · PostgreSQL Revision 待ち</p> : <p>承認待ち</p>}
                       <ul>
                         {operation.writes.map((write) => (
                           <li key={write.path}>
@@ -190,9 +188,9 @@ export function ProposalReview({
                 ) : null}
                 <div className="proposal-actions">
                   <button type="button" onClick={() => void approve(record)} disabled={!canWrite || Boolean(busyId) || completed || unacceptedPayloadMissing}>
-                    {!canWrite ? "閲覧専用" : busyId === record.proposal.id ? "承認内容を保存中…" : unacceptedPayloadMissing ? "未承認分を回復できません" : completed ? "Checkpoint 完了" : needsApproval ? status?.payloadComplete === false ? "元の提案を照合して承認" : "承認して Checkpoint" : "承認済みを Checkpoint"}
+                    {!canWrite ? "閲覧専用" : busyId === record.proposal.id ? "承認内容を保存中…" : unacceptedPayloadMissing ? "未承認分を回復できません" : completed ? "PostgreSQL Revision 完了" : needsApproval ? status?.payloadComplete === false ? "元の提案を照合して承認" : "承認して PostgreSQL Revision" : "承認済みを PostgreSQL Revision"}
                   </button>
-                  <button type="button" className="quiet-button" onClick={() => void dismiss(record)} disabled={Boolean(busyId) || unacceptedPayloadMissing || (status?.approvedOperationIds.length ?? 0) > 0 || (status?.checkpoints.length ?? 0) > 0}>
+                  <button type="button" className="quiet-button" onClick={() => void dismiss(record)} disabled={Boolean(busyId) || unacceptedPayloadMissing || (status?.approvedOperationIds.length ?? 0) > 0 || (status?.applications.length ?? 0) > 0}>
                     この提案を隠す
                   </button>
                 </div>

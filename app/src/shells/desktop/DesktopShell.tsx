@@ -128,7 +128,7 @@ export function DesktopShell({
           {renderStatus ? renderStatus(switchError) : status}
         </div>
         <footer className="st-studio-footer">
-          <span><span className="st-studio-footer-dot" /> Git-backed workspace</span>
+          <span><span className="st-studio-footer-dot" /> PostgreSQL workspace</span>
           <span>Markdown · 日本語原稿 · Desktop</span>
         </footer>
       </div>

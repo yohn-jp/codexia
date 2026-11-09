@@ -5,16 +5,12 @@ import type {
   ActionResult,
   Approval,
   ChangeOperation,
+  ApplyReceipt,
   ChangeProposal,
-  CheckpointReceipt,
   ModuleStatus,
-  PublishReceipt,
   ProposalStatus,
   RecentActivityInput,
   RecentActivityResponse,
-  RemoteObservation,
-  RepositoryIdentity,
-  ReconcileResult,
   SnapshotId,
   UiContribution,
 } from "@codexia/contracts";
@@ -47,12 +43,6 @@ export class DocumentDepartureError extends DOMException {
   constructor() {
     super("The document is leaving.", "AbortError");
   }
-}
-
-export interface Project {
-  id: string;
-  url: string;
-  branch: string;
 }
 
 export type JobStatus = "queued" | "running" | "done" | "error";
@@ -99,11 +89,6 @@ export interface InboxItem {
 export interface InboxListResponse {
   items: InboxItem[];
   unreadCount: number;
-}
-
-export interface ProjectDetails {
-  project: Project;
-  observation: RemoteObservation;
 }
 
 export interface Tree {
@@ -188,56 +173,6 @@ export interface TreeRead {
 export interface SnapshotRead {
   snapshot: SnapshotId;
   files: FileDocument[];
-}
-
-export interface Commit {
-  hash: string;
-  date: string;
-  message: string;
-}
-
-export interface ManuscriptSnapshotMeta {
-  id: string;
-  sceneId: string;
-  manuscriptId: string;
-  createdAt: number;
-  charCount: number;
-  source: "git";
-  branch?: string;
-  label?: string;
-  trigger?: "manual" | "submit" | "idle";
-}
-
-export interface ManuscriptSnapshot {
-  id: string;
-  sceneId: string;
-  manuscriptId: string;
-  createdAt: number;
-  charCount: number;
-  source: "git";
-  branch?: string;
-  label?: string;
-  trigger?: "manual" | "submit" | "idle";
-  body: string;
-  document: FileDocument;
-}
-
-export interface ManuscriptSnapshotList {
-  snapshot: SnapshotId;
-  snapshots: ManuscriptSnapshotMeta[];
-}
-
-export interface ManuscriptSnapshotRead {
-  snapshot: SnapshotId;
-  manuscript: ManuscriptSnapshot;
-}
-
-export interface SyncStatus {
-  branch: string;
-  head: string;
-  ahead: number;
-  behind: number;
-  dirty: boolean;
 }
 
 export interface Session {
@@ -472,12 +407,6 @@ function persistencePath(projectId: string, suffix = ""): string {
   return suffix ? `${root}/${suffix}` : root;
 }
 
-function pinnedQuery(view: "remote" | "checkpoint", pinned?: SnapshotId): string {
-  const query = new URLSearchParams({ view });
-  if (pinned) query.set("snapshot", pinned.remoteCommit);
-  return `?${query.toString()}`;
-}
-
 /** The browser talks only to the public HTTP adapter and the shared contracts. */
 export const api = {
   version: async () => {
@@ -522,42 +451,6 @@ export const api = {
   markAllInboxRead: (signal?: AbortSignal) =>
     request(dto.marked, "/api/inbox/read-all", { method: "POST", ...(signal ? { signal } : {}) }),
   jobEventStream: (signal: AbortSignal) => requestEventStream("/api/jobs/events", signal),
-  projects: () => request(dto.projects, "/api/projects"),
-  projectDetails: (projectId: string) => request(dto.projectDetails, `/api/projects/${encodeURIComponent(projectId)}`),
-  registerProject: (url: string, branch?: string) => request(dto.project, "/api/projects", {
-    method: "POST",
-    body: JSON.stringify({ url, ...(branch ? { branch } : {}) }),
-  }),
-  reconstructProject: (projectId: string) => request(dto.projectEnvelope, `/api/projects/${encodeURIComponent(projectId)}`, {
-    method: "PUT",
-  }),
-  detachProject: (projectId: string) => request(dto.empty, `/api/projects/${encodeURIComponent(projectId)}`, {
-    method: "DELETE",
-  }),
-  tree: (projectId: string) => request(dto.tree, projectPath(projectId, "tree")),
-  readTree: (projectId: string, view: "remote" | "checkpoint" = "remote", pinned?: SnapshotId) =>
-    request(dto.treeRead, projectPath(projectId, `tree${pinnedQuery(view, pinned)}`)),
-  scene: (projectId: string, sceneId: string) => request(dto.scene, projectPath(projectId, `scenes/${encodeURIComponent(sceneId)}`)),
-  readScene: (projectId: string, sceneId: string, view: "remote" | "checkpoint" = "remote", pinned?: SnapshotId) =>
-    request(dto.sceneRead, projectPath(projectId, `scenes/${encodeURIComponent(sceneId)}${pinnedQuery(view, pinned)}`)),
-  readSceneViews: (projectId: string, sceneId: string, pinned: SnapshotId) =>
-    request(dto.sceneViews, projectPath(projectId,
-      `scenes/${encodeURIComponent(sceneId)}/views?snapshot=${encodeURIComponent(pinned.remoteCommit)}`)),
-  snapshot: (projectId: string, view: "remote" | "checkpoint" = "remote", pinned?: SnapshotId) =>
-    request(dto.snapshotRead, projectPath(projectId, `snapshot${pinnedQuery(view, pinned)}`)),
-  history: (projectId: string) => request(dto.history, projectPath(projectId, "history")),
-  manuscriptSnapshots: (projectId: string, manuscriptId: string, sceneId: string, pinned: SnapshotId) => {
-    const query = new URLSearchParams({ sceneId, view: "remote", snapshot: pinned.remoteCommit });
-    return request(dto.manuscriptList, projectPath(projectId,
-      `manuscripts/${encodeURIComponent(manuscriptId)}/snapshots?${query.toString()}`));
-  },
-  manuscriptSnapshot: (projectId: string, manuscriptId: string, snapshotId: string, pinned: SnapshotId) => {
-    const query = new URLSearchParams({ view: "remote", snapshot: pinned.remoteCommit });
-    return request(dto.manuscriptRead, projectPath(projectId,
-      `manuscripts/${encodeURIComponent(manuscriptId)}/snapshots/${encodeURIComponent(snapshotId)}?${query.toString()}`));
-  },
-  status: (projectId: string) => request(dto.sync, projectPath(projectId, "status")),
-  observation: (projectId: string) => request(dto.observation, projectPath(projectId, "observation")),
   recentActivity: (projectId: string, signal?: AbortSignal) =>
     request(dto.recentActivity, projectPath(projectId, "recent-activity"), { ...(signal ? { signal } : {}) }),
   putRecentActivity: (projectId: string, input: RecentActivityInput, options: { signal?: AbortSignal; keepalive?: boolean } = {}) =>
@@ -577,20 +470,10 @@ export const api = {
     body: JSON.stringify(approval),
     ...(signal ? { signal } : {}),
   }),
-  checkpoint: (projectId: string, operation: ChangeOperation, signal?: AbortSignal) => request(dto.checkpoint, projectPath(projectId, "checkpoints"), {
-    method: "POST",
-    body: JSON.stringify(operation),
-    ...(signal ? { signal } : {}),
+  apply: (projectId: string, operation: ChangeOperation, signal?: AbortSignal) => request(dto.apply, projectPath(projectId, "apply"), {
+    method: "POST", body: JSON.stringify(operation), ...(signal ? { signal } : {}),
   }),
-  reconcile: (projectId: string, signal?: AbortSignal) => request(dto.reconcile, projectPath(projectId, "reconcile"), {
-    ...(signal ? { signal } : {}),
-    method: "POST",
-    body: "{}",
-  }),
-  publish: (projectId: string, batchId: string) => request(dto.publish, projectPath(projectId, "publish"), {
-    method: "POST",
-    body: JSON.stringify({ batchId }),
-  }),
+  moduleSnapshot: (projectId: string) => request(dto.snapshotRead, projectPath(projectId, "snapshot")),
   modules: (projectId: string) => request(dto.modules, projectPath(projectId, "modules")),
   contributions: (projectId: string) => request(dto.contributions, projectPath(projectId, "contributions")),
   action: (projectId: string, actionId: string, input: unknown, signal?: AbortSignal, snapshot?: SnapshotId) => request(dto.action,
@@ -612,6 +495,8 @@ export const api = {
   },
   persistenceNodes: (projectId: string, limit = 200, signal?: AbortSignal) => request(dto.persistenceNodes,
     persistencePath(projectId, `nodes?${new URLSearchParams({ limit: String(limit) })}`), { ...(signal ? { signal } : {}) }),
+  updatePersistenceDocument: (projectId: string, documentId: string, command: { expectedVersion: number; title?: string; parentId?: string | null; orderKey?: string }) => request(dto.persistenceDocumentEnvelope, persistencePath(projectId, `documents/${encodeURIComponent(documentId)}/metadata`), { method: "PATCH", body: JSON.stringify(command) }),
+  deletePersistenceDocument: (projectId: string, documentId: string, expectedVersion: number) => request(dto.empty, persistencePath(projectId, `documents/${encodeURIComponent(documentId)}`), { method: "DELETE", body: JSON.stringify({ expectedVersion }) }),
   createPersistenceDocument: (
     projectId: string,
     command: Omit<CreateDocumentCommand, "projectId" | "authorId">,
@@ -717,4 +602,3 @@ export const api = {
     }),
 };
 
-export type { RepositoryIdentity };
