@@ -20,7 +20,7 @@ function describeFailure(reason: unknown): string {
 
 /** Workspace Studio: the approved desktop composition, retaining the real application controller. */
 export function DesktopShell({
-  header, desktopActions, documentTitle, documentContext, library, editor, tools, status, renderStatus,
+  header, desktopActions, desktopDurability, desktopDurabilityDetail, documentTitle, documentContext, library, editor, tools, status, renderStatus,
   onSwitchMode, workspaceScope, panels, beforeLayoutChange, requestedPanel,
 }: ApplicationShellProps) {
   const [switching, setSwitching] = useState(false);
@@ -88,6 +88,14 @@ export function DesktopShell({
             </div>
           </div>
           <div className="st-studio-masthead-actions">
+            {desktopDurability ? <span className={`st-studio-durability is-${desktopDurability}`}
+              aria-label="原稿のPostgreSQL保存状態" data-state={desktopDurability} title={desktopDurabilityDetail}>
+              {{
+                draft: "PostgreSQL未保存",
+                saving: "PostgreSQLへ保存中",
+                uncertain: "保存状態を要確認",
+                saved: "PostgreSQL保存済み",
+              }[desktopDurability]}</span> : null}
             {desktopActions}
             <div className="st-studio-header-slot">{header}</div>
           </div>

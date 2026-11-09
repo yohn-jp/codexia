@@ -360,8 +360,8 @@
 .mobile-shell .manuscript-column > label {font-size:10px;letter-spacing:.1em;color:var(--mobile-muted)}
 .mobile-shell .manuscript-input {border:0;background:transparent;border-radius:0}
 .mobile-shell .cm-editor {background:transparent;font-family:var(--editor-font-family,var(--manuscript-serif))}
-.mobile-shell .cm-scroller {font-family:var(--manuscript-serif);font-size:var(--editor-font-size,18px);line-height:2}
-.mobile-shell .cm-content {padding:16px 1px;min-height:36vh;line-height:2}
+.mobile-shell .cm-scroller {font-family:var(--editor-font-family,var(--manuscript-serif));font-size:var(--editor-font-size,18px);line-height:var(--editor-line-height,2);letter-spacing:var(--editor-letter-spacing,normal)}
+.mobile-shell .cm-content {padding:16px 1px;min-height:36vh;line-height:var(--editor-line-height,2)}
 .mobile-shell .preview-column {border:1px solid var(--mobile-line);background:var(--mobile-paper);border-radius:9px}
 .mobile-shell .reading-view {background:var(--mobile-paper);border:0;border-radius:7px}
 .mobile-shell .mobile-shell-footer {box-shadow:0 -4px 15px #1e3d240b;border-color:var(--mobile-line);background:var(--mobile-paper)}
@@ -535,4 +535,5 @@ ion-modal.mobile-shell-reference-modal {
   background:var(--mobile-sheet-stage);color:var(--mobile-sheet-ink);
 }
 .mobile-shell-reference-durability strong {font-size:13px;color:var(--mobile-sheet-accent)}
+.mobile-shell-reference-durability[data-state="uncertain"] strong {color:var(--error-text)}
 .mobile-shell-reference-durability span {font-size:12px;line-height:1.6}
