@@ -28,7 +28,7 @@ test("job IDs cannot be reused across PostgreSQL projects and results survive re
   const store = new JobHistoryStore(root);
   await store.beginDomainJob({ id: "job-one", type: "assistant", projectId: "project-one" });
   await assert.rejects(store.beginDomainJob({ id: "job-one", type: "assistant", projectId: "project-two" }), { code: "job_identity_conflict" });
-  await store.finishDomainJob("job-one", { ok: true, data: { answer: "retained" } });
+  await store.finishDomainJob("job-one", { ok: true, snapshot: { projectId: "project-one", projectVersion: 1 }, data: { answer: "retained" } });
   assert.deepEqual((await new JobHistoryStore(root).getJob("job-one"))?.result, { answer: "retained" });
   assert.equal((await new JobHistoryStore(root).listInbox()).items.length, 1);
 });
