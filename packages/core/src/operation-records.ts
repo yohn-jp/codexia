@@ -19,12 +19,7 @@ export function asRecord(value: unknown): Record<string, unknown> | null {
 
 export function isSnapshotId(value: unknown): value is SnapshotId {
   const snapshot = asRecord(value);
-  const repository = snapshot ? asRecord(snapshot.repository) : null;
-  return !!snapshot && !!repository &&
-    (repository.provider === "github" || repository.provider === "local") &&
-    [repository.repositoryId, repository.defaultBranch, repository.ownerScope, repository.url].every((item) => typeof item === "string" && item.length > 0) &&
-    typeof snapshot.remoteCommit === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64}|)$/.test(snapshot.remoteCommit) &&
-    (snapshot.overlayCommit === undefined || (typeof snapshot.overlayCommit === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(snapshot.overlayCommit)));
+  return !!snapshot && typeof snapshot.projectId === "string" && !!snapshot.projectId && Number.isSafeInteger(snapshot.projectVersion) && Number(snapshot.projectVersion) >= 0;
 }
 
 export function canonicalJson(value: unknown): string {
@@ -73,14 +68,8 @@ export function normalizedOperation(operation: ChangeOperation): ChangeOperation
   return {
     id: operation.id,
     generation: operation.generation,
-    repository: {
-      provider: operation.repository.provider,
-      repositoryId: operation.repository.repositoryId,
-      defaultBranch: operation.repository.defaultBranch,
-      ownerScope: operation.repository.ownerScope,
-      url: operation.repository.url,
-    },
-    baseRemoteCommit: operation.baseRemoteCommit,
+    projectId: operation.projectId,
+    baseProjectVersion: operation.baseProjectVersion,
     effect: operation.effect,
     reads: operation.reads.map(({ path, revision }) => ({ path, revision })),
     ...(operation.readScopes === undefined ? {} : {
@@ -127,9 +116,8 @@ export function assertPersistedProposal(value: unknown): asserts value is Change
     assertChangeOperation(candidate);
     assertUserOperationPaths(candidate);
     const operation = candidate as ChangeOperation;
-    if (operationIds.has(operation.id) || operation.baseRemoteCommit !== (proposal.snapshot as SnapshotId).remoteCommit ||
-        snapshotKey({ repository: operation.repository, remoteCommit: operation.baseRemoteCommit }) !==
-          snapshotKey({ repository: (proposal.snapshot as SnapshotId).repository, remoteCommit: (proposal.snapshot as SnapshotId).remoteCommit })) {
+    if (operationIds.has(operation.id) || operation.baseProjectVersion !== (proposal.snapshot as SnapshotId).projectVersion ||
+        operation.projectId !== (proposal.snapshot as SnapshotId).projectId) {
       throw new Error("Proposal operation binding mismatch");
     }
     operationIds.add(operation.id);
