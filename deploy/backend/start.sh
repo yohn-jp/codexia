@@ -21,12 +21,6 @@ if [ -n "${CODEXIA_AUTH_TOKEN_FILE:-}" ]; then
   unset CODEXIA_AUTH_TOKEN_FILE
 fi
 
-if [ -n "${CODEXIA_GITHUB_TOKEN_FILE:-}" ]; then
-  CODEXIA_GITHUB_TOKEN=$(read_secret_file "$CODEXIA_GITHUB_TOKEN_FILE")
-  export CODEXIA_GITHUB_TOKEN
-  unset CODEXIA_GITHUB_TOKEN_FILE
-fi
-
 if [ -n "${CODEXIA_DATABASE_PASSWORD_FILE:-}" ]; then
   database_password=$(read_secret_file "$CODEXIA_DATABASE_PASSWORD_FILE")
   database_user=${CODEXIA_DATABASE_USER:-codexia}

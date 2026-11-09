@@ -1,21 +1,10 @@
 import { createPublicKey, verify as verifySignature } from "node:crypto";
-import fs from "node:fs/promises";
 import { z } from "zod";
-import type {
-  GitCredentialProvider,
-  GitCredentialRequest,
-  HostedGitCredential,
-  PublicationAuthorizationRequest,
-} from "@codexia/core";
 
 const MAX_JWKS_BYTES = 16 * 1024;
-const MAX_BROKER_RESPONSE_BYTES = 8 * 1024;
-const MAX_GRANT_RESPONSE_BYTES = 16 * 1024;
 const JWKS_CACHE_TTL_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 5_000;
 const ACCESS_GRANT_LIFETIME_SECONDS = 300;
-const PUBLISH_RECEIPT_AUDIENCE = "praetorium-git-publisher";
-const RUNTIME_IDENTITY_JWKS_PATH = "/.well-known/runtime-identity-jwks.json";
 
 const HttpsUrlSchema = z.string().url().refine((value) => {
   const url = new URL(value);
@@ -56,62 +45,6 @@ const AccessGrantSchema = z.strictObject({
 }).refine((grant) => grant.exp > grant.iat && grant.exp - grant.iat <= ACCESS_GRANT_LIFETIME_SECONDS && grant.nbf <= grant.exp,
   "invalid access grant lifetime");
 
-const RuntimeIdentitySchema = z.strictObject({
-  contractVersion: z.literal("praetorium-runtime-identity/v1"),
-  iss: z.string().url().startsWith("https://"),
-  aud: z.literal("praetorium-git-broker"),
-  sub: z.string().min(1).max(128),
-  runtimeId: z.string().min(1).max(128),
-  instanceId: z.string().min(1).max(128),
-  repositoryId: z.number().int().positive().safe(),
-  installationId: z.number().int().positive().safe(),
-  runtimeEpoch: z.number().int().positive().safe(),
-  leaseId: z.string().min(1).max(128),
-  iat: z.number().int().nonnegative().safe(),
-  nbf: z.number().int().nonnegative().safe(),
-  exp: z.number().int().positive().safe(),
-  jti: z.string().min(1).max(128),
-}).refine((identity) => identity.sub === identity.runtimeId && identity.nbf === identity.iat &&
-  identity.exp > identity.iat && identity.exp - identity.iat <= ACCESS_GRANT_LIFETIME_SECONDS,
-"invalid runtime identity lifetime");
-
-const MutationReceiptSchema = z.strictObject({
-  contractVersion: z.literal("praetorium-mutation/v1"),
-  iss: z.string().url(),
-  sub: z.string().min(1).max(128),
-  aud: z.string().min(1).max(512),
-  repositoryId: z.number().int().positive().safe(),
-  instanceId: z.string().min(1).max(128),
-  runtimeEpoch: z.number().int().positive().safe(),
-  operationId: z.string().min(1).max(128),
-  payloadDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
-  action: z.literal("publish"),
-  authorizationRevision: z.number().int().nonnegative().safe(),
-  sessionRevision: z.number().int().nonnegative().safe(),
-  iat: z.number().int(),
-  nbf: z.number().int(),
-  exp: z.number().int(),
-  jti: z.string().min(1).max(128),
-}).refine((receipt) => receipt.exp > receipt.iat && receipt.exp - receipt.iat <= 60 && receipt.nbf <= receipt.exp,
-  "invalid mutation receipt lifetime");
-
-const MutationAuthorizationResponseSchema = z.strictObject({
-  contractVersion: z.literal("praetorium-mutation/v1"),
-  receipt: z.string().min(16).max(16_384),
-  operationId: z.string().min(1).max(128),
-  payloadDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
-  expiresAt: z.string().datetime(),
-});
-
-const GitCredentialSchema = z.strictObject({
-  username: z.literal("x-access-token"),
-  token: z.string().min(1).max(4_096).refine((value) => !/[\s\u0000-\u001f\u007f]/u.test(value)),
-  repositoryId: z.number().int().positive().safe(),
-  permission: z.enum(["read", "write"]),
-  runtimeEpoch: z.number().int().positive().safe(),
-  expiresAt: z.string().datetime(),
-});
-
 export interface HostedRuntimeAssignment {
   readonly contractVersion: "scriptorium-platform/v1";
   readonly instanceId: string;
@@ -145,10 +78,7 @@ export interface HostedPrincipal {
 
 export interface HostedAuthorizationPolicy {
   authenticate(token: string, requiredPermission?: z.infer<typeof PermissionSchema>): Promise<HostedPrincipal>;
-  authorizePublication(
-    token: string,
-    input: PublicationAuthorizationRequest,
-  ): Promise<{ readonly receipt: string; readonly operationId: string; readonly payloadDigest: string }>;
+
 }
 
 export class HostedAuthorizationError extends Error {
@@ -385,192 +315,5 @@ export function createHostedAuthorizationPolicy(options: {
     };
   }
 
-  return {
-    authenticate,
-    async authorizePublication(token, input) {
-      const principal = await authenticate(token, "write");
-      if (!input || !/^[A-Za-z0-9_-]{1,128}$/u.test(input.operationId) ||
-          !/^sha256:[a-f0-9]{64}$/u.test(input.payloadDigest)) {
-        throw new HostedAuthorizationError(400, "invalid_publication_authorization", "The publication authorization request is invalid");
-      }
-      let response: Response;
-      try {
-        response = await fetcher(`${assignment.grantPolicy.issuer}/api/repositories/${assignment.repositoryId}/mutation-authorizations`, {
-          method: "POST",
-          redirect: "error",
-          headers: {
-            Accept: "application/json",
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(input),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
-      } catch {
-        throw new HostedAuthorizationError(503, "publication_authorization_unavailable", "The publication authorization service is unavailable");
-      }
-      if (!response.ok) {
-        cancelResponse(response);
-        if (response.status === 401)
-          throw new HostedAuthorizationError(401, "access_grant_expired", "The hosted access grant is no longer valid");
-        if (response.status === 403)
-          throw new HostedAuthorizationError(403, "permission_denied", "The current user is not authorized to publish");
-        if (response.status === 400)
-          throw new HostedAuthorizationError(400, "invalid_publication_authorization", "The publication authorization request is invalid");
-        throw new HostedAuthorizationError(503, "publication_authorization_unavailable", "The publication authorization service is unavailable");
-      }
-      let body: unknown;
-      try { body = await readBoundedJson(response, MAX_GRANT_RESPONSE_BYTES); }
-      catch {
-        throw new HostedAuthorizationError(502, "publication_authorization_invalid", "The publication authorization response is invalid");
-      }
-      const issued = MutationAuthorizationResponseSchema.safeParse(body);
-      if (!issued.success || issued.data.operationId !== input.operationId || issued.data.payloadDigest !== input.payloadDigest) {
-        throw new HostedAuthorizationError(503, "publication_authorization_invalid", "The publication authorization response is invalid");
-      }
-      const receiptPayload = await verifyCompactJwt(
-        issued.data.receipt,
-        assignment.grantPolicy.jwksUrl,
-        assignment.grantPolicy.issuer,
-        PUBLISH_RECEIPT_AUDIENCE,
-        now(),
-        fetcher,
-      );
-      const receipt = MutationReceiptSchema.safeParse(receiptPayload);
-      if (!receipt.success || receipt.data.sub !== principal.userId ||
-          receipt.data.repositoryId !== assignment.repositoryId || receipt.data.instanceId !== assignment.instanceId ||
-          receipt.data.runtimeEpoch !== assignment.runtimeEpoch || receipt.data.operationId !== input.operationId ||
-          receipt.data.payloadDigest !== input.payloadDigest ||
-          Date.parse(issued.data.expiresAt) !== receipt.data.exp * 1000) {
-        throw new HostedAuthorizationError(503, "publication_authorization_invalid", "The publication authorization response is invalid");
-      }
-      if (receipt.data.authorizationRevision !== principal.authorizationRevision ||
-          receipt.data.sessionRevision !== principal.sessionRevision) {
-        throw new HostedAuthorizationError(401, "access_grant_stale", "A fresh hosted access grant is required");
-      }
-      return { receipt: issued.data.receipt, operationId: input.operationId, payloadDigest: input.payloadDigest };
-    },
-  };
-}
-
-function proofFromIdentity(token: string, claims: z.infer<typeof RuntimeIdentitySchema>): {
-  readonly serviceToken: string;
-  readonly runtimeId: string;
-  readonly instanceId: string;
-  readonly repositoryId: number;
-  readonly installationId: number;
-  readonly runtimeEpoch: number;
-  readonly leaseId: string;
-} {
-  return {
-    serviceToken: token,
-    runtimeId: claims.runtimeId,
-    instanceId: claims.instanceId,
-    repositoryId: claims.repositoryId,
-    installationId: claims.installationId,
-    runtimeEpoch: claims.runtimeEpoch,
-    leaseId: claims.leaseId,
-  };
-}
-
-/** Read the renewable runtime identity on every operation and request a one-repository GitHub token. */
-export function createHostedGitCredentialProvider(options: {
-  readonly assignment: HostedRuntimeAssignment;
-  readonly runtimeIdentityPath?: string;
-  readonly fetch?: typeof fetch;
-  readonly now?: () => number;
-}): GitCredentialProvider {
-  const assignment = validateAssignment(options.assignment);
-  const fetcher = options.fetch ?? fetch;
-  const now = options.now ?? Date.now;
-  const runtimeIdentityPath = options.runtimeIdentityPath ?? "/run/scriptorium/runtime-identity.jwt";
-
-  async function runtimeProof() {
-    let token: string;
-    try {
-      token = (await fs.readFile(runtimeIdentityPath, "utf8")).trim();
-    } catch {
-      throw new HostedAuthorizationError(503, "runtime_identity_unavailable", "The runtime identity is unavailable");
-    }
-    const identityJwksUrl = new URL(RUNTIME_IDENTITY_JWKS_PATH, assignment.controlServicePolicy.issuer).toString();
-    let payload: unknown;
-    try {
-      payload = await verifyCompactJwt(
-        token,
-        identityJwksUrl,
-        assignment.controlServicePolicy.issuer,
-        "praetorium-git-broker",
-        now(),
-        fetcher,
-      );
-    } catch (error) {
-      if (error instanceof HostedAuthorizationError && error.status === 401) {
-        throw new HostedAuthorizationError(503, "runtime_identity_invalid", "The runtime identity is invalid or expired");
-      }
-      throw error;
-    }
-    const parsed = RuntimeIdentitySchema.safeParse(payload);
-    if (!parsed.success || parsed.data.instanceId !== assignment.instanceId ||
-        parsed.data.repositoryId !== assignment.repositoryId || parsed.data.runtimeEpoch !== assignment.runtimeEpoch) {
-      throw new HostedAuthorizationError(503, "runtime_identity_binding_mismatch", "The runtime identity does not match this assignment");
-    }
-    return proofFromIdentity(token, parsed.data);
-  }
-
-  return {
-    async getCredential(request: GitCredentialRequest): Promise<HostedGitCredential> {
-      if (request.repositoryId !== assignment.repositoryId || request.instanceId !== assignment.instanceId ||
-          request.runtimeEpoch !== assignment.runtimeEpoch) {
-        throw new HostedAuthorizationError(403, "git_credential_binding_mismatch", "The Git credential request does not match this runtime");
-      }
-      if (request.operation === "publish" &&
-          (!/^[A-Za-z0-9_-]{1,128}$/u.test(request.operationId) ||
-            !/^sha256:[a-f0-9]{64}$/u.test(request.payloadDigest) ||
-            request.mutationReceipt.length < 16 || request.mutationReceipt.length > 16_384)) {
-        throw new HostedAuthorizationError(403, "git_credential_authorization_invalid", "The Git publication is not authorized");
-      }
-      const proof = await runtimeProof();
-      const body = request.operation === "fetch"
-        ? { operation: "fetch", proof }
-        : {
-            operation: "publish",
-            proof,
-            mutationReceipt: request.mutationReceipt,
-            operationId: request.operationId,
-            payloadDigest: request.payloadDigest,
-          };
-      let response: Response;
-      try {
-        response = await fetcher(assignment.credentialBrokerLocator, {
-          method: "POST",
-          redirect: "error",
-          headers: { Accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
-      } catch {
-        throw new HostedAuthorizationError(503, "git_credential_unavailable", "The Git credential service is unavailable");
-      }
-      if (!response.ok) {
-        cancelResponse(response);
-        if (response.status === 401 || response.status === 403)
-          throw new HostedAuthorizationError(403, "git_credential_denied", "The Git credential request was denied");
-        throw new HostedAuthorizationError(503, "git_credential_unavailable", "The Git credential service is unavailable");
-      }
-      let credentialValue: unknown;
-      try { credentialValue = await readBoundedJson(response, MAX_BROKER_RESPONSE_BYTES); }
-      catch {
-        throw new HostedAuthorizationError(502, "git_credential_invalid", "The Git credential response is invalid");
-      }
-      const parsed = GitCredentialSchema.safeParse(credentialValue);
-      const requiredPermission = request.operation === "fetch" ? "read" : "write";
-      const expiration = parsed.success ? Date.parse(parsed.data.expiresAt) : Number.NaN;
-      if (!parsed.success || parsed.data.repositoryId !== assignment.repositoryId ||
-          parsed.data.runtimeEpoch !== assignment.runtimeEpoch || parsed.data.permission !== requiredPermission ||
-          expiration <= now()) {
-        throw new HostedAuthorizationError(503, "git_credential_invalid", "The Git credential response is invalid");
-      }
-      return parsed.data;
-    },
-  };
+  return { authenticate };
 }
