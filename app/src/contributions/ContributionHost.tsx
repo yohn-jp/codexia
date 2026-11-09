@@ -128,10 +128,10 @@ export function MountedContribution({
           invoke: async (actionId, input) => {
             const result = await api.action(projectId, actionId, input, controller.signal, snapshot);
             if (controller.signal.aborted) throw new DOMException("Panel closed", "AbortError");
-            if (snapshotKey(result.snapshot) !== snapshotId) throw new Error("Action result belongs to a different repository snapshot.");
+            if (snapshotKey(result.snapshot) !== snapshotId) throw new Error("Action result belongs to a different project revision.");
             if (result.ok && result.proposals?.length) {
               if (!journal) throw new Error("Browser recovery storage is unavailable; the module proposal was not delivered to its panel.");
-              for (const proposal of result.proposals) await journal.putProposal(snapshot.repository, authorScope, proposal);
+              for (const proposal of result.proposals) await journal.putProposal(snapshot.projectId, authorScope, proposal);
               if (result.proposals.length > 0) onProposalStored();
             }
             return result;
@@ -150,14 +150,14 @@ export function MountedContribution({
               if (submissionMayHaveReachedCore) return;
               let removedAny = false;
               for (const [proposalId, ownership] of ownedProposals) {
-                removedAny = await proposalJournal.removeProposal(snapshot.repository, authorScope, proposalId, ownership) || removedAny;
+                removedAny = await proposalJournal.removeProposal(snapshot.projectId, authorScope, proposalId, ownership) || removedAny;
                 ownedProposals.delete(proposalId);
               }
               if (removedAny) onProposalStored();
             };
             const persistWhileActive = async (proposal: ChangeProposal) => {
               try {
-                const ownership = await proposalJournal.putProposal(snapshot.repository, authorScope, proposal);
+                const ownership = await proposalJournal.putProposal(snapshot.projectId, authorScope, proposal);
                 if (ownership) ownedProposals.set(proposal.id, ownership);
               } catch (cause) {
                 if (!isCancelled()) throw cause;
@@ -199,7 +199,7 @@ export function MountedContribution({
             await persistWhileActive(proposal);
             if (proposal.id !== submitted.id && ownedProposals.has(submitted.id)) {
               const ownership = ownedProposals.get(submitted.id)!;
-              await proposalJournal.removeProposal(snapshot.repository, authorScope, submitted.id, ownership);
+              await proposalJournal.removeProposal(snapshot.projectId, authorScope, submitted.id, ownership);
               ownedProposals.delete(submitted.id);
               if (isCancelled()) {
                 await removeCancelledProposals();
