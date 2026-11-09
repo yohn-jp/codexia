@@ -35,11 +35,16 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ld
 
 # PostgreSQL is copied only into a disposable startup-smoke overlay, never a runtime image.
 FROM ${POSTGRES_IMAGE} AS smoke-postgres
-RUN mkdir -p /opt/codexia-smoke-postgres/root \
- && cp --parents -a /usr/lib/postgresql/17 /usr/share/postgresql/17 /opt/codexia-smoke-postgres/root \
- && ldd /usr/lib/postgresql/17/bin/postgres /usr/lib/postgresql/17/bin/initdb /usr/lib/postgresql/17/bin/pg_ctl \
-    | awk '/=> \// { print $3 } /^[[:space:]]*\// { print $1 }' | sort -u \
-    | xargs -r cp --parents -L -t /opt/codexia-smoke-postgres/root
+RUN set -eu; \
+    mkdir -p /opt/codexia-smoke-postgres/root; \
+    cp --parents -a /usr/lib/postgresql/17 /usr/share/postgresql/17 /opt/codexia-smoke-postgres/root; \
+    ldd /usr/lib/postgresql/17/bin/postgres > /tmp/codexia-postgres-smoke-deps; \
+    ldd /usr/lib/postgresql/17/bin/initdb >> /tmp/codexia-postgres-smoke-deps; \
+    ldd /usr/lib/postgresql/17/bin/pg_ctl >> /tmp/codexia-postgres-smoke-deps; \
+    if grep -q 'not found' /tmp/codexia-postgres-smoke-deps; then echo 'A PostgreSQL smoke dependency is missing' >&2; exit 1; fi; \
+    awk '/=> \// { print $3 } /^[[:space:]]*\// { print $1 }' /tmp/codexia-postgres-smoke-deps | sort -u \
+      | xargs -r cp --parents -L -t /opt/codexia-smoke-postgres/root; \
+    rm /tmp/codexia-postgres-smoke-deps
 
 FROM source AS buildkit
 ARG SCRIPTORIUM_PRODUCER_REVISION
