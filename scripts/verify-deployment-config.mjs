@@ -68,9 +68,9 @@ assert.match(apiSource, /sameOrigin\(request, trustProxy\)/u);
 
 assert.match(apiQuadlet, /Image=ghcr\.io\/yohn-jp\/codexia-backend:sha-/u);
 assert.match(apiQuadlet, /CODEXIA_AUTH_TOKEN_FILE=\/run\/secrets\/codexia-auth-token/u);
-assert.match(apiQuadlet, /CODEXIA_GITHUB_TOKEN_FILE=\/run\/secrets\/codexia-github-token/u);
+assert.doesNotMatch(apiQuadlet, /GITHUB_TOKEN|github-token/u, "PostgreSQL authoring does not mount Git credentials");
 assert.match(apiQuadlet, /CODEXIA_DATABASE_PASSWORD_FILE=\/run\/secrets\/app-password/u);
-assert.match(apiQuadlet, /CODEXIA_REQUIRE_POSTGRES=1/u);
+assert.match(apiSource, /CODEXIA_DATABASE_URL is required for Codexia authoring/u, "PostgreSQL startup is always required");
 assert.match(apiQuadlet, /CODEXIA_DATABASE_MIGRATE_ON_START=1/u);
 assert.match(apiQuadlet, /Requires=codexia-db\.service/u);
 assert.match(apiQuadlet, /Network=codexia-data\.network/u);

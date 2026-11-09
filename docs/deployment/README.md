@@ -45,7 +45,7 @@ The Cloudflare Terraform example creates an Access application, remotely managed
 | `HOST=0.0.0.0` | Container | Listen on the private Podman network. |
 | `PORT=3000` | Container | API port consumed by Tunnel. |
 | `CODEXIA_PROFILE=core` | Release | Select the immutable server profile packaged into the image. |
-| `CODEXIA_DATA_DIR=/data` | VM operator | Persistent CoreStore repositories and local checkpoints. |
+| `CODEXIA_DATA_DIR=/data` | VM operator | Derived module caches; project authoring state lives in PostgreSQL. |
 | `CODEXIA_USAGE_DIR=/history` | VM operator | Persistent usage/job history. |
 | `CODEXIA_HOSTED_PROJECT_ID` | Hosted VM operator | Existing PostgreSQL project bound to the verified runtime assignment; required in hosted mode. |
 | `CODEXIA_DATABASE_MIGRATE_ON_START=1` | VM operator | Apply existing checksum-verified PostgreSQL schema migrations before accepting requests. |

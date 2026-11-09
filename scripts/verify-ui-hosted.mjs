@@ -65,6 +65,8 @@ function closeForSelection(requestedModules, manifests) {
 
 async function main() {
   const { packageDirectory, profile, requestedModules, port } = parseArgs(process.argv.slice(2));
+  const databaseUrl = process.env.CODEXIA_TEST_DATABASE_URL ?? process.env.CODEXIA_DATABASE_URL;
+  if (!databaseUrl) throw new Error('Set CODEXIA_TEST_DATABASE_URL to an isolated PostgreSQL database for hosted UI verification');
   const packageManifest = JSON.parse(await readFile(path.join(packageDirectory, 'generated/module-manifests.json'), 'utf8'));
   assert.equal(packageManifest.profile, 'hosted');
   assert.ok(Array.isArray(packageManifest.modules));
@@ -98,6 +100,8 @@ async function main() {
       HOST: '127.0.0.1',
       PORT: String(port),
       CODEXIA_AUTH_TOKEN: token,
+      CODEXIA_DATABASE_URL: databaseUrl,
+      CODEXIA_DATABASE_MIGRATE_ON_START: '1',
       CODEXIA_HOSTED_MODE: '0',
       CODEXIA_PROFILE: 'hosted',
       CODEXIA_DATA_DIR: path.join(dataDirectory, 'data'),
@@ -152,7 +156,7 @@ async function main() {
     const readyBody = await ready.json();
     assert.equal(readyBody.ok, true);
     assert.equal(readyBody.pendingRequests, 1, 'readiness reports the request currently being served');
-    assert.equal(readyBody.pendingLocalCheckpoints, null);
+    assert.equal(readyBody.persistenceReady, true);
 
     const health = await get('/api/health');
     assert.deepEqual(await health.json(), { status: 'ok' });

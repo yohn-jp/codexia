@@ -36,7 +36,7 @@ Browser acceptance covers editing, conflicts, recovery, shell switching, module 
 
 ## OCI and integration checks
 
-[OCI verification](OCI.md) checks packaging and startup. [Integration verification](INTEGRATION.md) describes MCP, import, actual model execution and GitHub/container recovery. Hosted producer checks run with:
+[OCI verification](OCI.md) checks packaging and startup. [Integration verification](INTEGRATION.md) describes MCP, import, actual model execution and PostgreSQL restore/container replacement. Hosted producer checks run with:
 
 ```sh
 pnpm verify:hosted

@@ -1,6 +1,6 @@
 # Core architecture
 
-This document defines the existing Git repository workspace: a TypeScript/Node application with a Git-backed canonical file store, a Fastify API and React browser shells. Core authoring works without optional modules or model credentials. The additive PostgreSQL Database workspace has a separate canonical record store and API; it reuses the CodeMirror authoring and evidence contracts without copying Git workspace data.
+Codexia is a TypeScript/Node application with a PostgreSQL-backed Core, a Fastify API and React browser shells. Core authoring works without optional modules or model credentials. PostgreSQL is the only durable authority for projects, documents, revisions, Knowledge, Evidence and approved changes. Runtime storage and browser recovery have separate roles.
 
 ## Ownership and dependency direction
 
@@ -9,61 +9,61 @@ Desktop / Mobile / HTTP / MCP
                 ↓
 Shared read, propose and approved mutation contracts
                 ↓
-Core project coordinator + immutable snapshot readers
+Core project coordinator + immutable PostgreSQL readers
                 ↓
-Git objects + canonical YAML/Markdown
+Persistence boundary
+                ↓
+PostgreSQL project records, documents, revisions and module data
 ```
 
 | Area | Owner |
 | --- | --- |
 | Revision, operation, snapshot and module contracts | `packages/contracts` |
-| Project registry, Git clones, canonical file reads and mutation | `packages/core` |
+| Database record/query/transaction contracts | `packages/persistence-contracts` |
+| PostgreSQL schema, queries and migrations | `packages/persistence-postgres` |
+| Project coordination, snapshots, proposals and application | `packages/core` |
 | Authentication, HTTP boundaries, static assets and host integration | `packages/api` |
 | Module resolution, activation and supervised workers | `packages/module-runtime` |
 | Legacy data import into reviewable operations | `packages/migration` |
 | Authoring, browser recovery and shell composition | `app` |
 | Domain analysis and optional features | `modules` |
 
-Core does not import optional module packages, model engines or provider SDKs. Modules use public contracts and host capabilities; they do not import Core implementation files or become independent Git writers.
+Core does not import optional module packages, model engines or provider SDKs. Modules use public contracts and host capabilities; they do not import Core implementation files or become independent database writers.
 
 ## Canonical state and snapshots
 
-Git-controlled YAML and Markdown are the durable work format. Approved module settings, dictionaries, corrections and other authoritative decisions use versioned work metadata, including the existing `meta/scriptorium/modules/<module-id>/` paths. Those persisted identifiers remain stable across the product rename. Unsupported data is preserved even when its module is disabled.
+PostgreSQL stores project identity and settings, hierarchy records, immutable Markdown revisions, knowledge nodes and relations, evidence anchors and history, module-owned records, and revision-bound proposals. The familiar authoring paths identify records exposed through Core; they are not repository files. Database queries and writes always carry a project ID.
 
-A `SnapshotId` binds repository, branch, commit and checkpoint overlay identity. Readers use pinned immutable objects rather than mutable checkout paths. Hierarchy caches, search indexes, graphs, downloaded weights and diagnostics are reconstructible derivatives keyed by their source revision and model or schema identity. A response assembled from mismatched snapshots is invalid.
+A `SnapshotId` binds a project ID to its project version. A document revision has its own canonical PostgreSQL UUID and immutable body. Project versions advance with successful authoring transactions; document revision IDs support history and restore. Hierarchy caches, search indexes, graphs, downloaded weights and diagnostics are reconstructible derivatives keyed by their source project/document revision and module or model identity.
 
-Separate the observed remote view, unpublished checkpoint overlay and browser draft base. Local operations can invalidate a view even if remote HEAD is unchanged. Cache invalidation must account for those revisions.
+Unsupported legacy metadata is preserved during explicit import. Runtime authoring does not clone a Git repository, inspect remote branches or fall back to local files when PostgreSQL is unavailable.
 
-## Mutation and publication
+## Mutation and revision safety
 
-All persistent work changes use the shared proposal, approval, checkpoint and publication boundary. Each operation carries stable identity, generation, declared read/write sets and revision preconditions. An authenticated author approves the operation; external tools cannot approve their own proposals.
+Persistent changes use the shared proposal, approval and apply boundary. Each operation carries a stable identity, declared read/write sets, project version and document revision preconditions. An authenticated author approves the operation; external tools cannot approve their own proposals.
 
-A project coordinator serializes mutations, Git index/ref changes and publication. Revision checks and compare-and-swap reject stale operations. Validation protects repository paths, symlinks and project boundaries. Readers remain pinned to immutable snapshots while writes are coordinated.
+Core validates the project scope, operation identity, expected project version, document revisions and document content before applying changes in a PostgreSQL transaction. Revision writes, hierarchy updates, knowledge/evidence mutations and associated module records commit together or roll back together. A stale project or document revision returns a conflict; Core does not silently merge prose or overwrite a newer revision.
 
-A checkpoint records approved changes as a local Git commit and retains the browser recovery entry. Explicit publication fetches and reconciles, performs an ordinary non-force push, then checks that the operation commit is reachable from the fetched remote branch. A later legitimate remote commit does not invalidate that reachability proof.
+Idempotency keys preserve operation identity across response loss. Replaying a completed operation returns its original outcome; reusing an identity for different data fails. Browser recovery retains pending operations until the server confirms their durable transition.
 
-Operation identities and receipts support bounded retry after a lost response or clone replacement. An ambiguous push remains `publication_unknown`; it is neither success nor authorization to duplicate the operation. Conflicting preconditions retain local work for author review. Do not silently merge prose, reset pending work or force-push.
+## Recovery and history
 
-## Remote observation and recovery
+Browser recovery is scoped to project, author and origin. Journal records retain operation identity, generation and revision bindings. Reconciliation must complete before an editor is represented as recovered and writable. Quota, storage and conflict failures preserve recoverable work and surface their state.
 
-Use the repository's actual default branch. A changed or deleted binding pauses unsafe mutations until an explicit safe rebind. Remote HEAD probing detects changes; fetching and reconciliation perform the validated integration. Unchanged remote and local revision identities avoid redundant work. Observation failure exposes unknown freshness while verified local data remains readable.
-
-The active author workspace observes the remote at project entry, foreground/reconnect and before mutation or publication, with a 15-second observation cadence while actively viewed. The interval is a change-detection schedule, not a freshness guarantee; a failed probe produces unknown freshness. Remote HEAD changes trigger a validated fetch/reconcile, while unchanged HEAD and local operation refs permit safe read reuse. Foreground typing and locally verified reads are not blocked by optional background work, but actions requiring remote freshness still enforce their preconditions.
-
-Browser recovery is scoped to repository, author and origin. Journal records retain operation identities, generations and checkpoint/publication receipts. Reconciliation must complete before an editor is represented as fully recovered and writable. Quota, storage and conflict failures preserve recoverable work and surface their state.
-
-GitHub supplies confirmed shared work history. The local clone and pending checkpoints require recovery until publication. Private host usage/job history lives under `CODEXIA_USAGE_DIR` independently of Git; replacing a deployment must retain it. Secrets come from host configuration or credential brokers and never enter Git, browser assets or images.
+PostgreSQL is the source for project history, immutable document revisions and restore. Private runtime usage and job history live under `CODEXIA_USAGE_DIR` independently from project data. Deployment replacement must preserve the database and the private `/history` volume. `/data` is reserved for derived runtime caches.
 
 ## Authentication and isolation
 
-Standalone mode has one trusted owner. Every authenticated session can access that owner's registered projects; this is not a multi-tenant ACL service. `CODEXIA_AUTH_TOKEN` authenticates the owner, and an optional server-side `CODEXIA_GITHUB_TOKEN` supplies repository access. Registry entries cannot select arbitrary filesystem roots.
+Standalone mode uses one trusted owner token. Every authenticated session can access all PostgreSQL projects served by that instance; this is not a multi-tenant ACL service. `CODEXIA_DATABASE_URL` and healthy PostgreSQL are required for startup and readiness.
 
-Hosted mode binds an assigned repository, runtime identity, instance and epoch. Browser/API grants, MCP bearer grants and runtime-control credentials have distinct validation boundaries. Hosted Git credentials are short-lived and repository-scoped; publication rechecks the author's write permission for the exact operation. See [Hosted deployment](../HOSTED-DEPLOYMENT.md).
+Hosted mode validates the mounted Praetorium assignment and signed access grant. Gateway grants bind user, repository, instance, runtime epoch, permissions and authorization/session revisions. `CODEXIA_HOSTED_PROJECT_ID` binds the runtime to one existing PostgreSQL project. Project lists, linked reads, actions, proposals, history and persistence routes enforce that assignment. Hosted project creation is forbidden.
+
+Runtime status and quiesce controls use a separate short-lived signed control credential. Status reports PostgreSQL provider, assigned project ID and project version. Database or project unavailability is reported as unknown durability and blocks a safe quiesce. Runtime draining preserves active job/history checks and does not approve pending changes.
 
 ## Runtime and packaging
 
-Core and Full are reproducible profiles of the root Dockerfile. Each deployment uses one application container. Core excludes optional packages, native model runtimes and weights from its production closure. Full includes trusted modules with lazy activation and supervised computation; module failure must not take basic writing offline.
+Core and Full are reproducible profiles of the root Dockerfile. Each deployment uses one application container connected to a private PostgreSQL service. Core excludes optional packages, native model runtimes and weights from its production closure. Full includes trusted modules with lazy activation and supervised computation; module failure must not take basic writing offline.
 
-Shutdown stops new mutations, drains bounded in-flight work and reports unresolved publication state. It does not automatically approve or publish pending changes. Health, readiness and host-control surfaces are owned by the API.
+Shutdown stops new mutations and drains bounded in-flight work. It preserves unresolved database and private job-history status for control-plane decisions. Health, readiness and host-control surfaces are owned by the API.
 
-See [modules](MODULES.md), [workspace composition](MODULAR-WORKSPACE.md), [source provenance](SOURCE-PROVENANCE.md) and [verification](../verification/README.md) for the corresponding contracts and checks.
+See [modules](MODULES.md), [workspace composition](MODULAR-WORKSPACE.md), [source provenance](SOURCE-PROVENANCE.md), [Hosted deployment](../HOSTED-DEPLOYMENT.md) and [verification](../verification/README.md) for the corresponding contracts and checks.
