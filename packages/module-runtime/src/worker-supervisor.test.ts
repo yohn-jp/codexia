@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { MAX_JOB_INPUT_BYTES, MAX_JOB_OUTPUT_BYTES, type JobRequest, type ModuleId, type SnapshotId } from "@codexia/contracts";
@@ -427,12 +430,28 @@ test("a timed-out unready service keeps its process slot until its resistant chi
   let pid: number | undefined;
   let startupFailure: Promise<unknown> | undefined;
   try {
+    const startedAt = Date.now();
     startupFailure = supervisor.createService("nlp", "0.1.0", unreadyWorkerServiceEntry).then(
       () => undefined,
       (error: unknown) => error,
     );
     pid = await waitForPid(supervisor);
-    await new Promise((resolve) => setTimeout(resolve, 1025));
+    const initialized = join(tmpdir(), `codexia-unready-worker-${pid}`);
+    const readinessDeadline = startedAt + 800;
+    let ready = false;
+    try {
+      while (Date.now() < readinessDeadline) {
+        try {
+          const marker = /^initialized:(\d+):(\d+)$/u.exec(await readFile(initialized, "utf8"));
+          if (Number(marker?.[1]) === pid && Number(marker?.[2]) >= startedAt) { ready = true; break; }
+        } catch { /* The worker may not have installed its SIGTERM handler yet. */ }
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      assert.ok(ready, "the child must report that its SIGTERM handler is installed before the startup timeout");
+    } finally {
+      await rm(initialized, { force: true });
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, 1025 - (Date.now() - startedAt))));
     assert.doesNotThrow(() => process.kill(pid!, 0), "the startup timeout should still be draining the SIGTERM-resistant process");
 
     const replacement = await supervisor.createService("story", "0.1.0", workerServiceEntry).then(
