@@ -47,6 +47,11 @@ import {
   type SaveKnowledgeRelationCommand,
   type SaveMentionLinkCommand,
   type TextChange,
+  type UpdateProjectCommand,
+  type UpdateDocumentCommand,
+  type DeleteDocumentCommand,
+  type ModuleRecord,
+  type SaveModuleRecordCommand,
 } from "@codexia/persistence-contracts";
 import { Pool, type PoolClient, type PoolConfig, type QueryResultRow } from "pg";
 
@@ -383,8 +388,11 @@ function operationWriteTarget(operation: ChangeSetOperation): ChangeSetWriteSetE
     case "document.create":
       if (!operation.command.documentId) throw validationError("ChangeSet document creates require a stable documentId");
       return { resource: "document", id: operation.command.documentId };
+    case "document.update":
+    case "document.delete":
     case "document.save":
     case "document.restore": return { resource: "document", id: operation.command.documentId };
+    case "module.record.save": return { resource: "module_record", id: JSON.stringify([operation.command.moduleId, operation.command.key]) };
     case "knowledge.node.save": return { resource: "knowledge_node", id: operation.command.id };
     case "knowledge.alias.save": return { resource: "knowledge_alias", id: operation.command.id };
     case "knowledge.relation.save": return { resource: "knowledge_relation", id: operation.command.id };
@@ -418,6 +426,7 @@ function validateChangeSetOperations(
 ): void {
   if (operations.length === 0) throw validationError("A ChangeSet must contain at least one operation");
   for (const operation of operations) {
+    if (operation.type === "module.record.save" && operation.command.moduleId.startsWith("core.")) throw validationError("Core record namespaces cannot be mutated by ChangeSets");
     if (operation.command.projectId !== projectId) throw validationError("All ChangeSet operations must use its project scope");
   }
   assertNonEmpty(provenance.source, "ChangeSet provenance source");
@@ -476,15 +485,15 @@ class PostgresTransaction implements PersistenceTransaction {
   }
 
   async getDocument(projectId: ProjectId, documentId: DocumentId): Promise<Document | undefined> {
-    const result = await this.query("SELECT * FROM document WHERE project_id = $1 AND id = $2", [projectId, documentId]);
+    const result = await this.query("SELECT * FROM document WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL", [projectId, documentId]);
     return result.rows[0] ? mapDocument(result.rows[0]) : undefined;
   }
 
   async listDocuments(projectId: ProjectId, parentId?: DocumentId | null, limit = 500): Promise<readonly Document[]> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Document page size must be between 1 and 1000");
     const result = parentId === undefined
-      ? await this.query("SELECT * FROM document WHERE project_id = $1 ORDER BY parent_id NULLS FIRST, order_key, id LIMIT $2", [projectId, limit])
-      : await this.query("SELECT * FROM document WHERE project_id = $1 AND parent_id IS NOT DISTINCT FROM $2 ORDER BY order_key, id LIMIT $3", [projectId, parentId, limit]);
+      ? await this.query("SELECT * FROM document WHERE project_id = $1 AND deleted_at IS NULL ORDER BY parent_id NULLS FIRST, order_key, id LIMIT $2", [projectId, limit])
+      : await this.query("SELECT * FROM document WHERE project_id = $1 AND deleted_at IS NULL AND parent_id IS NOT DISTINCT FROM $2 ORDER BY order_key, id LIMIT $3", [projectId, parentId, limit]);
     return result.rows.map(mapDocument);
   }
 
@@ -633,6 +642,99 @@ class PostgresTransaction implements PersistenceTransaction {
     return mapProject(result.rows[0]!);
   }
 
+  async updateProject(command: UpdateProjectCommand): Promise<Project> {
+    this.ensureWritable();
+    await this.lockProject(command.projectId);
+    if (command.title !== undefined) assertNonEmpty(command.title, "Project title");
+    const result = await this.query(
+      `UPDATE project SET title = COALESCE($3, title), settings = COALESCE($4::jsonb, settings),
+       updated_at = clock_timestamp() WHERE id = $1 AND version = $2 RETURNING *`,
+      [command.projectId, command.expectedVersion, command.title ?? null, command.settings === undefined ? null : toJson(command.settings)],
+    );
+    if (!result.rows[0]) throw conflict("project", command.projectId, command.expectedVersion, (await this.getProject(command.projectId))?.version ?? null);
+    this.markChanged(command.projectId);
+    return {...mapProject(result.rows[0]), version: asNumber(result.rows[0].version) + 1};
+  }
+
+  async assertProjectVersion(projectId: ProjectId, expectedVersion: number): Promise<void> {
+    this.ensureWritable();
+    const result = await this.query("SELECT version FROM project WHERE id = $1 FOR UPDATE", [projectId]);
+    if (!result.rows[0]) throw notFound("project", projectId);
+    const actual = asNumber(result.rows[0].version);
+    if (actual !== expectedVersion) throw conflict("project", projectId, expectedVersion, actual);
+  }
+
+  private async lockProject(projectId: ProjectId): Promise<void> {
+    const result = await this.query("SELECT id FROM project WHERE id = $1 FOR UPDATE", [projectId]);
+    if (!result.rows[0]) throw notFound("project", projectId);
+  }
+
+  async updateDocument(command: UpdateDocumentCommand): Promise<Document> {
+    this.ensureWritable();
+    await this.lockProject(command.projectId);
+    if (command.title !== undefined) assertNonEmpty(command.title, "Document title");
+    if (command.parentId !== undefined && command.parentId !== null) {
+      if (!(await this.getDocument(command.projectId, command.parentId))) throw notFound("parent document", command.parentId);
+      const cycle = await this.query(
+        `WITH RECURSIVE ancestors AS (
+           SELECT id, parent_id FROM document WHERE project_id = $1 AND id = $2
+           UNION SELECT d.id, d.parent_id FROM document d JOIN ancestors a ON d.id = a.parent_id WHERE d.project_id = $1
+         ) SELECT 1 FROM ancestors WHERE id = $3`, [command.projectId, command.parentId, command.documentId]);
+      if (cycle.rows.length) throw validationError("Document hierarchy cannot contain a cycle");
+    }
+    const result = await this.query(
+      `UPDATE document SET parent_id = CASE WHEN $4 THEN $5::uuid ELSE parent_id END,
+       title = COALESCE($6, title), order_key = COALESCE($7, order_key), version = version + 1,
+       updated_at = clock_timestamp() WHERE project_id = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING *`,
+      [command.projectId, command.documentId, command.expectedVersion, command.parentId !== undefined, command.parentId ?? null, command.title ?? null, command.orderKey ?? null]);
+    if (!result.rows[0]) throw conflict("document", command.documentId, command.expectedVersion, (await this.getDocument(command.projectId, command.documentId))?.version ?? null);
+    this.markChanged(command.projectId);
+    return mapDocument(result.rows[0]);
+  }
+
+  async deleteDocument(command: DeleteDocumentCommand): Promise<Document> {
+    this.ensureWritable();
+    await this.lockProject(command.projectId);
+    const children = await this.query("SELECT 1 FROM document WHERE project_id = $1 AND parent_id = $2 AND deleted_at IS NULL LIMIT 1", [command.projectId, command.documentId]);
+    if (children.rows.length) throw validationError("Delete child documents before their parent");
+    const result = await this.query(
+      `UPDATE document SET deleted_at = clock_timestamp(), version = version + 1, updated_at = clock_timestamp()
+       WHERE project_id = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING *`,
+      [command.projectId, command.documentId, command.expectedVersion]);
+    if (!result.rows[0]) throw conflict("document", command.documentId, command.expectedVersion, (await this.getDocument(command.projectId, command.documentId))?.version ?? null);
+    this.markChanged(command.projectId);
+    return mapDocument(result.rows[0]);
+  }
+
+  async getModuleRecord(projectId: ProjectId, moduleId: string, key: string): Promise<ModuleRecord | undefined> {
+    const result = await this.query("SELECT * FROM module_record WHERE project_id = $1 AND module_id = $2 AND key = $3", [projectId, moduleId, key]);
+    return result.rows[0] ? this.mapModuleRecord(result.rows[0]) : undefined;
+  }
+
+  async listModuleRecords(projectId: ProjectId, moduleId?: string): Promise<readonly ModuleRecord[]> {
+    const result = await this.query("SELECT * FROM module_record WHERE project_id = $1 AND ($2::text IS NULL OR module_id = $2) ORDER BY module_id, key", [projectId, moduleId ?? null]);
+    return result.rows.map((row) => this.mapModuleRecord(row));
+  }
+
+  private mapModuleRecord(row: DbRow): ModuleRecord {
+    return { projectId: asString(row.project_id) as ProjectId, moduleId: asString(row.module_id), key: asString(row.key), value: asJsonObject(row.value), version: asNumber(row.version), createdAt: asString(row.created_at), updatedAt: asString(row.updated_at) };
+  }
+
+  async saveModuleRecord(command: SaveModuleRecordCommand): Promise<ModuleRecord> {
+    this.ensureWritable();
+    await this.lockProject(command.projectId);
+    assertNonEmpty(command.moduleId, "Module id");
+    assertNonEmpty(command.key, "Module record key");
+    const result = command.expectedVersion === null
+      ? await this.query(`INSERT INTO module_record(project_id, module_id, key, value) VALUES ($1, $2, $3, $4::jsonb)
+          ON CONFLICT DO NOTHING RETURNING *`, [command.projectId, command.moduleId, command.key, toJson(command.value)])
+      : await this.query(`UPDATE module_record SET value = $4::jsonb, version = version + 1, updated_at = clock_timestamp()
+          WHERE project_id = $1 AND module_id = $2 AND key = $3 AND version = $5 RETURNING *`, [command.projectId, command.moduleId, command.key, toJson(command.value), command.expectedVersion]);
+    if (!result.rows[0]) throw conflict("module_record", JSON.stringify([command.moduleId, command.key]), command.expectedVersion, (await this.getModuleRecord(command.projectId, command.moduleId, command.key))?.version ?? null);
+    if (!command.moduleId.startsWith("core.authority.")) this.markChanged(command.projectId);
+    return this.mapModuleRecord(result.rows[0]);
+  }
+
   /** Serialize same-project retries before checking the durable idempotency receipt. */
   private async lockIdempotencyKey(projectId: ProjectId, key: IdempotencyKey): Promise<void> {
     await this.query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))", [JSON.stringify([projectId, key])]);
@@ -683,7 +785,7 @@ class PostgresTransaction implements PersistenceTransaction {
   ): Promise<Document> {
     const result = await this.query(
       `UPDATE document SET head_revision_id = $4, version = version + 1, updated_at = clock_timestamp()
-       WHERE project_id = $1 AND id = $2 AND head_revision_id IS NOT DISTINCT FROM $3
+       WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL AND head_revision_id IS NOT DISTINCT FROM $3
        RETURNING *`,
       [projectId, documentId, expectedHead, revisionId],
     );
@@ -723,6 +825,7 @@ class PostgresTransaction implements PersistenceTransaction {
 
   async createDocument(command: CreateDocumentCommand): Promise<DocumentWriteResult> {
     this.ensureWritable();
+    await this.lockProject(command.projectId);
     assertNonEmpty(command.idempotencyKey, "Idempotency key");
     assertNonEmpty(command.authorId, "Author id");
     assertNonEmpty(command.title, "Document title");
@@ -743,6 +846,7 @@ class PostgresTransaction implements PersistenceTransaction {
     if (replay) return replay;
     if (!(await this.getProject(command.projectId))) throw notFound("project", command.projectId);
 
+    await this.lockProject(command.projectId);
     const documentId = command.documentId ?? randomUUID() as DocumentId;
     const parentId = command.parentId ?? null;
     if (parentId && !(await this.getDocument(command.projectId, parentId))) throw notFound("parent document", parentId);
@@ -776,7 +880,7 @@ class PostgresTransaction implements PersistenceTransaction {
 
   private async lockedHead(projectId: ProjectId, documentId: DocumentId): Promise<Document> {
     const result = await this.query(
-      "SELECT * FROM document WHERE project_id = $1 AND id = $2 FOR UPDATE",
+      "SELECT * FROM document WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE",
       [projectId, documentId],
     );
     if (!result.rows[0]) throw notFound("document", documentId);
@@ -837,6 +941,7 @@ class PostgresTransaction implements PersistenceTransaction {
 
   async saveDocument(command: SaveDocumentCommand): Promise<DocumentWriteResult> {
     this.ensureWritable();
+    await this.lockProject(command.projectId);
     assertNonEmpty(command.idempotencyKey, "Idempotency key");
     assertNonEmpty(command.authorId, "Author id");
     assertNonEmpty(command.clientId, "Client id");
@@ -892,6 +997,7 @@ class PostgresTransaction implements PersistenceTransaction {
 
   async restoreDocumentRevision(command: RestoreDocumentRevisionCommand): Promise<DocumentWriteResult> {
     this.ensureWritable();
+    await this.lockProject(command.projectId);
     assertNonEmpty(command.idempotencyKey, "Idempotency key");
     assertNonEmpty(command.authorId, "Author id");
     const requestSha256 = digest({
@@ -945,6 +1051,7 @@ class PostgresTransaction implements PersistenceTransaction {
 
   async saveKnowledgeNode(command: SaveKnowledgeNodeCommand): Promise<KnowledgeNode> {
     this.ensureWritable();
+    await this.lockProject(command.projectId);
     assertNonEmpty(command.type, "Knowledge node type");
     assertNonEmpty(command.name, "Knowledge node name");
     if (command.expectedVersion === null) {
@@ -975,6 +1082,7 @@ class PostgresTransaction implements PersistenceTransaction {
 
   async saveKnowledgeAlias(command: SaveKnowledgeAliasCommand): Promise<KnowledgeAlias> {
     this.ensureWritable();
+    await this.lockProject(command.projectId);
     assertNonEmpty(command.surface, "Knowledge alias surface");
     assertNonEmpty(command.normalized, "Knowledge alias normalized value");
     if (!(await this.getKnowledgeNode(command.projectId, command.nodeId))) throw notFound("knowledge node", command.nodeId);
@@ -992,6 +1100,7 @@ class PostgresTransaction implements PersistenceTransaction {
 
   async saveKnowledgeRelation(command: SaveKnowledgeRelationCommand): Promise<KnowledgeRelation> {
     this.ensureWritable();
+    await this.lockProject(command.projectId);
     assertNonEmpty(command.type, "Knowledge relation type");
     if (!(await this.getKnowledgeNode(command.projectId, command.sourceId))) throw notFound("source knowledge node", command.sourceId);
     if (!(await this.getKnowledgeNode(command.projectId, command.targetId))) throw notFound("target knowledge node", command.targetId);
@@ -1021,6 +1130,7 @@ class PostgresTransaction implements PersistenceTransaction {
 
   async saveEvidenceAnchor(command: SaveEvidenceAnchorCommand): Promise<EvidenceAnchor> {
     this.ensureWritable();
+    await this.lockProject(command.projectId);
     assertHash(command.quoteSha256, "quoteSha256");
     if (!Number.isInteger(command.fromUtf16) || !Number.isInteger(command.toUtf16) || command.fromUtf16 >= command.toUtf16) {
       throw validationError("Evidence anchors require a non-empty UTF-16 range");
@@ -1070,6 +1180,7 @@ class PostgresTransaction implements PersistenceTransaction {
 
   async saveMentionLink(command: SaveMentionLinkCommand): Promise<MentionLink> {
     this.ensureWritable();
+    await this.lockProject(command.projectId);
     assertNonEmpty(command.source, "Mention source");
     assertConfidence(command.confidence);
     if (!(await this.getEvidenceAnchor(command.projectId, command.evidenceId))) throw notFound("evidence anchor", command.evidenceId);
@@ -1089,6 +1200,7 @@ class PostgresTransaction implements PersistenceTransaction {
 
   async saveAssertion(command: SaveAssertionCommand): Promise<Assertion> {
     this.ensureWritable();
+    await this.lockProject(command.projectId);
     assertNonEmpty(command.modality, "Assertion modality");
     assertNonEmpty(command.perspective, "Assertion perspective");
     assertConfidence(command.confidence);
@@ -1117,6 +1229,7 @@ class PostgresTransaction implements PersistenceTransaction {
 
   async linkAssertionEvidence(command: LinkAssertionEvidenceCommand): Promise<AssertionEvidence> {
     this.ensureWritable();
+    await this.lockProject(command.projectId);
     if (!(await this.getAssertion(command.projectId, command.assertionId))) throw notFound("assertion", command.assertionId);
     if (!(await this.getEvidenceAnchor(command.projectId, command.evidenceId))) throw notFound("evidence anchor", command.evidenceId);
     const result = await this.query(
@@ -1132,6 +1245,7 @@ class PostgresTransaction implements PersistenceTransaction {
 
   async createChangeSet(command: CreateChangeSetCommand): Promise<{ changeSet: ChangeSet; replayed: boolean }> {
     this.ensureWritable();
+    await this.lockProject(command.projectId);
     assertNonEmpty(command.authorId, "ChangeSet author id");
     assertNonEmpty(command.idempotencyKey, "ChangeSet idempotency key");
     validateChangeSetOperations(
@@ -1168,7 +1282,6 @@ class PostgresTransaction implements PersistenceTransaction {
         toJson(command.writeSet), toJson(command.provenance), command.idempotencyKey, requestSha256,
       ],
     );
-    this.markChanged(command.projectId);
     return { changeSet: mapChangeSet(result.rows[0]!), replayed: false };
   }
 
@@ -1180,6 +1293,7 @@ class PostgresTransaction implements PersistenceTransaction {
     actorId: string;
   }): Promise<ChangeSet> {
     this.ensureWritable();
+    await this.lockProject(command.projectId);
     assertNonEmpty(command.actorId, `${command.transition === "approve" ? "Approver" : "Rejector"} id`);
     const status = command.transition === "approve" ? "approved" : "rejected";
     const result = command.transition === "approve"
@@ -1206,7 +1320,6 @@ class PostgresTransaction implements PersistenceTransaction {
       }
       throw conflict("change_set", command.changeSetId, command.expectedVersion, current.version);
     }
-    this.markChanged(command.projectId);
     return mapChangeSet(result.rows[0]!);
   }
 
@@ -1242,6 +1355,9 @@ class PostgresTransaction implements PersistenceTransaction {
 
   private async applyOperation(operation: ChangeSetOperation): Promise<ChangeSetOperationResult> {
     switch (operation.type) {
+      case "document.update": return this.updateDocument(operation.command);
+      case "document.delete": return this.deleteDocument(operation.command);
+      case "module.record.save": return this.saveModuleRecord(operation.command);
       case "document.create": return this.createDocument(operation.command);
       case "document.save": return this.saveDocument(operation.command);
       case "document.restore": return this.restoreDocumentRevision(operation.command);
@@ -1266,11 +1382,19 @@ class PostgresTransaction implements PersistenceTransaction {
       switch (entry.resource) {
         case "document": {
           const result = await this.query(
-            "SELECT version, head_revision_id FROM document WHERE project_id = $1 AND id = $2 FOR UPDATE",
+            "SELECT version, head_revision_id FROM document WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE",
             [projectId, entry.id],
           );
           actualVersion = result.rows[0] ? asNumber(result.rows[0].version) : null;
           actualRevisionId = result.rows[0] ? asNullableString(result.rows[0].head_revision_id) : null;
+          break;
+        }
+        case "module_record": {
+          let identity: unknown;
+          try { identity = JSON.parse(entry.id); } catch { throw validationError("Invalid module record identity"); }
+          if (!Array.isArray(identity) || identity.length !== 2 || identity.some((part) => typeof part !== "string")) throw validationError("Invalid module record identity");
+          const result = await this.query("SELECT version FROM module_record WHERE project_id = $1 AND module_id = $2 AND key = $3 FOR UPDATE", [projectId, identity[0], identity[1]]);
+          actualVersion = result.rows[0] ? asNumber(result.rows[0].version) : null;
           break;
         }
         case "knowledge_node":
@@ -1338,6 +1462,7 @@ class PostgresTransaction implements PersistenceTransaction {
     expectedVersion: number;
   }): Promise<ChangeSetApplicationResult> {
     this.ensureWritable();
+    await this.lockProject(command.projectId);
     const selected = await this.query(
       "SELECT * FROM change_set WHERE project_id = $1 AND id = $2 FOR UPDATE",
       [command.projectId, command.changeSetId],

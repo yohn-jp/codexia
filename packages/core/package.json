@@ -26,9 +26,13 @@
   },
   "dependencies": {
     "yaml": "^2.8.1",
-    "@codexia/contracts": "workspace:*"
+    "@codexia/contracts": "workspace:*",
+    "@codexia/persistence-contracts": "workspace:*"
   },
   "files": [
     "dist"
-  ]
+  ],
+  "devDependencies": {
+    "@codexia/persistence-postgres": "workspace:*"
+  }
 }
