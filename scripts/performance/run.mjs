@@ -1,5 +1,5 @@
 import { spawn, execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { readFile, mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -20,7 +20,22 @@ export async function runWorker(script, args, output, timeoutMs, env = {}) {
     const descendants = [];
     const visit = pid => {
       let children = [];
-      try { children = readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean).map(Number); } catch {}
+      try { children = readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean).map(Number); }
+      catch (error) {
+        if (process.platform === 'linux' && error.code === 'ENOENT') {
+          // Some kernels omit CONFIG_CHECKPOINT_RESTORE's children file. The
+          // standard stat PPid remains available and also finds detached groups.
+          for (const candidate of readdirSync('/proc').filter((name) => /^\d+$/u.test(name))) {
+            try {
+              const stat = readFileSync(`/proc/${candidate}/stat`, 'utf8');
+              const fields = stat.slice(stat.lastIndexOf(') ') + 2).split(' ');
+              if (Number(fields[1]) === pid) children.push(Number(candidate));
+            } catch (cause) {
+              if (!['ENOENT', 'ESRCH', 'EACCES'].includes(cause.code)) throw cause;
+            }
+          }
+        }
+      }
       for (const id of children) { visit(id); descendants.push(id); }
     };
     visit(child.pid);
