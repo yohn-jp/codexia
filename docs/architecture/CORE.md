@@ -1,69 +1,40 @@
 # Core architecture
 
-This document defines the existing Git repository workspace: a TypeScript/Node application with a Git-backed canonical file store, a Fastify API and React browser shells. Core authoring works without optional modules or model credentials. The additive PostgreSQL Database workspace has a separate canonical record store and API; it reuses the CodeMirror authoring and evidence contracts without copying Git workspace data.
+PostgreSQL is the sole authority for projects, document hierarchy, Markdown bodies, immutable revisions, Knowledge, Evidence, Text Anchors and module-owned records. Core authoring works without optional modules or model credentials. A missing or unavailable database fails closed; no Git workspace or filesystem manuscript fallback is available.
 
 ## Ownership and dependency direction
 
-```text
-Desktop / Mobile / HTTP / MCP
-                ↓
-Shared read, propose and approved mutation contracts
-                ↓
-Core project coordinator + immutable snapshot readers
-                ↓
-Git objects + canonical YAML/Markdown
-```
+Desktop and Mobile shells use the authenticated API. API admission owns authentication, project authorization, origin checks, cancellation and lifecycle draining. Core coordinates module snapshots and approved mutations through Persistence; the PostgreSQL adapter owns transactions and record validation. Core never imports optional module implementations or model providers.
 
 | Area | Owner |
 | --- | --- |
-| Revision, operation, snapshot and module contracts | `packages/contracts` |
-| Project registry, Git clones, canonical file reads and mutation | `packages/core` |
-| Authentication, HTTP boundaries, static assets and host integration | `packages/api` |
-| Module resolution, activation and supervised workers | `packages/module-runtime` |
-| Legacy data import into reviewable operations | `packages/migration` |
-| Authoring, browser recovery and shell composition | `app` |
-| Domain analysis and optional features | `modules` |
-
-Core does not import optional module packages, model engines or provider SDKs. Modules use public contracts and host capabilities; they do not import Core implementation files or become independent Git writers.
+| Snapshot, operation and trusted module contracts | `packages/contracts` |
+| Canonical records, revision and ChangeSet interfaces | `packages/persistence-contracts` |
+| PostgreSQL transactions, schema and checked migrations | `packages/persistence-postgres` |
+| Project read models and module proposal coordination | `packages/core` |
+| Authentication, API admission and host integration | `packages/api` |
+| Lazy module activation and supervised workers | `packages/module-runtime` |
+| Read-only legacy inspection and import proposals | `packages/migration` |
+| Authoring, browser recovery and separate shells | `app` |
 
 ## Canonical state and snapshots
 
-Git-controlled YAML and Markdown are the durable work format. Approved module settings, dictionaries, corrections and other authoritative decisions use versioned work metadata, including the existing `meta/scriptorium/modules/<module-id>/` paths. Those persisted identifiers remain stable across the product rename. Unsupported data is preserved even when its module is disabled.
+Documents retain stable IDs, hierarchy, order and immutable body revisions. Metadata changes use version preconditions. Deletion preserves historical revisions and evidence rather than erasing author data. Knowledge and Evidence are project-scoped; Text Anchors bind UTF-16 ranges and quote hashes to exact document revisions. Saving a body maps unaffected anchors and marks overlapping or removed ranges for review.
 
-A `SnapshotId` binds repository, branch, commit and checkpoint overlay identity. Readers use pinned immutable objects rather than mutable checkout paths. Hierarchy caches, search indexes, graphs, downloaded weights and diagnostics are reconstructible derivatives keyed by their source revision and model or schema identity. A response assembled from mismatched snapshots is invalid.
+A module `SnapshotId` contains `projectId` and `projectVersion`. The Core materializes one consistent PostgreSQL read and retains pinned views for asynchronous work. Content mutations advance the project version atomically. Read models cannot combine content from different snapshots or substitute current content for an unavailable historical revision.
 
-Separate the observed remote view, unpublished checkpoint overlay and browser draft base. Local operations can invalidate a view even if remote HEAD is unchanged. Cache invalidation must account for those revisions.
+The module file-shaped reader is a projection over PostgreSQL records. Stable manuscript, hierarchy and `meta/scriptorium/modules/<module-id>/` paths are domain identifiers, not checkout locations. They preserve existing module formats and unknown data without introducing another authority. Search indexes, model artifacts and caches remain reconstructible derivatives keyed by source revision and model/schema identity.
 
-## Mutation and publication
+## Mutation and recovery
 
-All persistent work changes use the shared proposal, approval, checkpoint and publication boundary. Each operation carries stable identity, generation, declared read/write sets and revision preconditions. An authenticated author approves the operation; external tools cannot approve their own proposals.
+Document saves require the observed base revision, exact text changes, resulting hash and an idempotency key. A stale base conflicts without overwriting the author's draft. Revision restore creates a new immutable revision. Retry returns the original successful result rather than duplicating the write.
 
-A project coordinator serializes mutations, Git index/ref changes and publication. Revision checks and compare-and-swap reject stale operations. Validation protects repository paths, symlinks and project boundaries. Readers remain pinned to immutable snapshots while writes are coordinated.
+Modules and MCP receive read and proposal ports. Only the authenticated author boundary may approve. Approved operations declare their read/write sets and scope guards; PostgreSQL transactions recheck preconditions and apply writes atomically. Durable proposal state and application receipts survive process or local-state replacement. Cancellation or a lost response does not imply that an accepted write was rolled back.
 
-A checkpoint records approved changes as a local Git commit and retains the browser recovery entry. Explicit publication fetches and reconciles, performs an ordinary non-force push, then checks that the operation commit is reachable from the fetched remote branch. A later legitimate remote commit does not invalidate that reachability proof.
+Browser IndexedDB stores recoverable drafts and pending proposals separately from canonical records. Input and IME state remain immediately authoritative while editing. A save indicator requires the database result and the corresponding durable local journal transition. Conflicts, storage errors and uncertain responses preserve recovery data. Author/project scope and navigation generations fence late responses.
 
-Operation identities and receipts support bounded retry after a lost response or clone replacement. An ambiguous push remains `publication_unknown`; it is neither success nor authorization to duplicate the operation. Conflicting preconditions retain local work for author review. Do not silently merge prose, reset pending work or force-push.
+## Import, export and backup
 
-## Remote observation and recovery
+Legacy inspection reads explicitly selected source directories without modifying files, SQLite sidecars or Git metadata. Git source inspection is restricted to offline migration recovery; it never serves as application persistence, synchronization or runtime fallback. Import operations target a PostgreSQL project and require normal author approval. Secrets are excluded, unresolved records are reported, and source data remains intact.
 
-Use the repository's actual default branch. A changed or deleted binding pauses unsafe mutations until an explicit safe rebind. Remote HEAD probing detects changes; fetching and reconciliation perform the validated integration. Unchanged remote and local revision identities avoid redundant work. Observation failure exposes unknown freshness while verified local data remains readable.
-
-The active author workspace observes the remote at project entry, foreground/reconnect and before mutation or publication, with a 15-second observation cadence while actively viewed. The interval is a change-detection schedule, not a freshness guarantee; a failed probe produces unknown freshness. Remote HEAD changes trigger a validated fetch/reconcile, while unchanged HEAD and local operation refs permit safe read reuse. Foreground typing and locally verified reads are not blocked by optional background work, but actions requiring remote freshness still enforce their preconditions.
-
-Browser recovery is scoped to repository, author and origin. Journal records retain operation identities, generations and checkpoint/publication receipts. Reconciliation must complete before an editor is represented as fully recovered and writable. Quota, storage and conflict failures preserve recoverable work and surface their state.
-
-GitHub supplies confirmed shared work history. The local clone and pending checkpoints require recovery until publication. Private host usage/job history lives under `CODEXIA_USAGE_DIR` independently of Git; replacing a deployment must retain it. Secrets come from host configuration or credential brokers and never enter Git, browser assets or images.
-
-## Authentication and isolation
-
-Standalone mode has one trusted owner. Every authenticated session can access that owner's registered projects; this is not a multi-tenant ACL service. `CODEXIA_AUTH_TOKEN` authenticates the owner, and an optional server-side `CODEXIA_GITHUB_TOKEN` supplies repository access. Registry entries cannot select arbitrary filesystem roots.
-
-Hosted mode binds an assigned repository, runtime identity, instance and epoch. Browser/API grants, MCP bearer grants and runtime-control credentials have distinct validation boundaries. Hosted Git credentials are short-lived and repository-scoped; publication rechecks the author's write permission for the exact operation. See [Hosted deployment](../HOSTED-DEPLOYMENT.md).
-
-## Runtime and packaging
-
-Core and Full are reproducible profiles of the root Dockerfile. Each deployment uses one application container. Core excludes optional packages, native model runtimes and weights from its production closure. Full includes trusted modules with lazy activation and supervised computation; module failure must not take basic writing offline.
-
-Shutdown stops new mutations, drains bounded in-flight work and reports unresolved publication state. It does not automatically approve or publish pending changes. Health, readiness and host-control surfaces are owned by the API.
-
-See [modules](MODULES.md), [workspace composition](MODULAR-WORKSPACE.md), [source provenance](SOURCE-PROVENANCE.md) and [verification](../verification/README.md) for the corresponding contracts and checks.
+Publishing exports read pinned PostgreSQL projections. Operational recovery uses protected PostgreSQL backups plus private host-history backups; see [deployment](../deployment/README.md). Rehearse restoration into an isolated replacement database before changing service routing. Do not restore over the only copy or operate on production data during verification.

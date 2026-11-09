@@ -1,6 +1,6 @@
 # `@codexia/migration`
 
-This package inspects an explicitly selected legacy project and workspace data root, then returns a deterministic, reviewable `ChangeOperation[]`. Inspection does not write to the legacy project, Git history, SQLite databases, or target snapshot. The returned operations are proposals for the normal author review flow; they do not approve, checkpoint, or publish changes.
+This package inspects an explicitly selected legacy project and workspace data root, then returns a deterministic, reviewable `ChangeOperation[]`. Inspection does not write to the legacy project, Git history, SQLite databases, or target snapshot. The returned operations are proposals for the normal author review flow; they do not approve or apply changes.
 
 ## Public API
 
@@ -14,21 +14,21 @@ const inspection = await inspectLegacyProject({
   sourceRoot: "/data/legacy/project",
   workspaceDataRoot: "/data/legacy-workspace", // optional and explicit
   workspaceProjectId: "legacy-project-id",     // selects project-owned workspace records
-  legacyRepositoryMappings: {
-    "legacy-project-id": (await coordinator.observe("target-project")).snapshot.repository,
-  }, // only host-verified legacy ID -> repository mappings
+  legacyProjectMappings: {
+    "legacy-project-id": (await coordinator.observe("target-project")).snapshot.projectId,
+  }, // only host-verified legacy ID -> PostgreSQL project mappings
   target: await coordinator.reader("target-project"),
   enabledModules: ["story", "speaker", "nlp"], // omitted means all contract modules
 });
 
 // Display `entries`, `recovery`, and the proposed writes for author review.
 await proposeMigrationImport(coordinator, "target-project", inspection);
-// Approval, checkpoint and publication stay in the host's normal author flow.
+// Approval and database application stay in the host's normal author flow.
 ```
 
 `inspectLegacyProject` returns the base snapshot, categorized `entries`, guarded operations, provisional `recovery` records, and pending Git state. A target path that already contains different content is reported as a conflict rather than overwritten. Generic SQLite preservation keeps each database's recognized Story rows in a separate opaque snapshot; the Story migration producer owns ID reconciliation and semantic conversion.
 
-Modules can register domain-owned migration producers when composing the generic registry. The host resolves mappings from explicit legacy project URLs to already registered repository identities; import inspection never guesses a local project UUID or fetches a repository with credentials.
+Modules can register domain-owned migration producers when composing the generic registry. The host resolves mappings from explicit legacy project URLs to already registered PostgreSQL project IDs; import inspection never guesses a local project UUID or fetches a repository with credentials.
 
 ```ts
 import {
@@ -53,7 +53,7 @@ const inspection = await inspectLegacyProject({
 });
 ```
 
-The producer owns its source classification and must preserve stable IDs and unknown data. A disabled module's generic records are copied under `meta/scriptorium/modules/<module-id>/legacy/` with disposition `preserved-unreadable`; they are not imported to the module's canonical readable paths. The owning module migration consumes that namespace when enabled. The P12 integration check composes these producers with Core's normal author approval, checkpoint, and publication flow.
+The producer owns its source classification and must preserve stable IDs and unknown data. A disabled module's generic records are copied under `meta/scriptorium/modules/<module-id>/legacy/` with disposition `preserved-unreadable`; they are not imported to the module's canonical readable paths. The owning module migration consumes that namespace when enabled. The P12 integration check composes these producers with Core's normal author approval and database application flow.
 
 ## Generic source coverage
 
@@ -85,4 +85,4 @@ pnpm build
 node --test tests/integration/migration-acceptance.test.mjs
 ```
 
-The fixture includes both legacy SQLite stores/WAL files, authoritative and provisional module inputs, binary attachments, foreign grants, synthetic credentials, and a pending local Git commit. It verifies read-only source metadata/bytes, opaque preservation while modules are disabled, semantic module reactivation, private API-owned job-history restoration with explicit mappings, real Core author approval/checkpoint/push, complete Core data-directory removal, fresh remote clone recovery, and deterministic reinspection. No private manuscript or real credential is used.
+The fixture includes both legacy SQLite stores/WAL files, authoritative and provisional module inputs, binary attachments, foreign grants, synthetic credentials, and a pending local Git commit. It verifies read-only source metadata/bytes, opaque preservation while modules are disabled, semantic module reactivation, private API-owned job-history restoration with explicit mappings, real Core author approval/database application, complete Core data-directory removal, database connection replacement recovery, and deterministic reinspection. No private manuscript or real credential is used.

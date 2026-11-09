@@ -2,7 +2,7 @@
 
 ## 1. Product decision
 
-This contract describes the Git repository workspace. Its interface is assembled from movable, replaceable components. It ships usable workspace presets and allows users to construct and persist arbitrary layouts. Search, terminology linking, NLP, Semantic and other advanced features are optional modules on top of a small, usable Core. The separate PostgreSQL Database workspace is additive: PostgreSQL is authoritative for its own projects, documents, revisions, Knowledge and Evidence, and no data is copied between workspace modes.
+The interface is assembled from movable, replaceable components over PostgreSQL projects, documents, revisions, Knowledge and Evidence. Desktop and Mobile retain separate shells and share authoring and recovery. Search, terminology, NLP and Semantic remain optional modules on top of Core.
 
 The three product goals are:
 
@@ -30,42 +30,36 @@ Composition Host (existing ModuleRuntime + BrowserModule host)
         └─ Shared Core document-source capability
                   │
                   ▼
-Core: Local Git / Snapshot / Document Read / Change Coordinator
-                  │
-           Explicit Observe / Fetch / Publish
-                  ▼
-                GitHub
+Core: PostgreSQL Snapshot / Document Read / Approved Change Coordinator
+                  |
+             Persistence transactions
+                  |
+              PostgreSQL
 ```
 
-**Dependency direction:** Core never imports an optional module or its index; modules use Core-owned snapshot/document contracts. Workspace owns arrangement and panel lifetimes, not project mutation. Modules never become independent Git writers.
+**Dependency direction:** Core never imports an optional module or its index; modules use Core-owned snapshot/document contracts. Workspace owns arrangement and panel lifetimes, not project mutation. Modules never become independent manuscript writers.
 
 ## 3. Foreground vs background execution
 
 ### 3.1 Foreground contract
 
-The foreground consists of: user input, current scene (including the best recoverable draft), current navigation context, visible panel chrome and only the data required by the active action. Rendering the current document cannot require GitHub availability, a Semantic/NLP model, a complete search index, an invisible panel, or a successful optional module load.
+The foreground consists of: user input, current scene (including the best recoverable draft), current navigation context, visible panel chrome and only the data required by the active action. Rendering the current document cannot require optional external service availability, a Semantic/NLP model, a complete search index, an invisible panel, or a successful optional module load.
 
-A panel requesting data must bind to the project, repository identity, author scope (if authorized) and selected `SnapshotId`. A response for a superseded navigation generation or mismatched snapshot must never overwrite the current document.
+A panel requesting data must bind to the project identity, author scope (if authorized) and selected `SnapshotId`. A response for a superseded navigation generation or mismatched snapshot must never overwrite the current document.
 
 ### 3.2 Independent work
 
-Remote HEAD probing, fetching when changed, proposal-status refresh, optional module discovery, search indexing, terminology rebuild and non-visible panel activation are independently scheduled. When safe, parallelize unrelated tasks instead of serializing them behind initial navigation. Lazy-load browser entrypoints only when a registered and enabled contribution is actually needed; heavy analysis and models remain optional.
+Project revision observation, proposal-status refresh, optional module discovery, search indexing, terminology rebuild and non-visible panel activation are independently scheduled. When safe, parallelize unrelated tasks instead of serializing them behind initial navigation. Lazy-load browser entrypoints only when a registered and enabled contribution is actually needed; heavy analysis and models remain optional.
 
-**Correctness boundary:** Browser recovery of pending drafts/checkpoint receipts is not merely decorative auxiliary work. The current scene may be displayed promptly, but until its authoritative local recovery state has been reconciled, it must not be represented as a fully recovered, writable canonical editor. Journal recovery, conflict gates and generation checks take precedence over cosmetic immediacy. Failure preserves the recovery record and surfaces a truthful state; it must not silently discard or overwrite typing.
+**Correctness boundary:** Browser recovery of pending drafts/save receipts is not merely decorative auxiliary work. The current scene may be displayed promptly, but until its authoritative local recovery state has been reconciled, it must not be represented as a fully recovered, writable canonical editor. Journal recovery, conflict gates and generation checks take precedence over cosmetic immediacy. Failure preserves the recovery record and surfaces a truthful state; it must not silently discard or overwrite typing.
 
-### 3.3 Remote observation
+### 3.3 Revision observation
 
-A remote HEAD check is the cheap *change detector*, not a reason to re-fetch or re-index an unchanged commit. If repository identity/default branch and remote HEAD are unchanged **and** relevant local checkpoint/operation state is unchanged, avoid remote fetch, tree rebuilding and unnecessary reconciliation of that same revision.
-
-A changed HEAD is not automatically safe to apply: verify identity, fetch, preserve local work, reconcile and report conflicts through existing Core rules. Publish/checkpoint authorization and revision validation retain the freshness requirements defined by the existing durability contract. Observation failure reports unknown/stale freshness while already available local data remains readable.
-
-Do not use only the remote SHA as a universal invalidation key: checkpoint overlay, local operation revisions, author-scope draft generations and module-specific indexed document revisions can change without remote HEAD moving.
+Project version and document revision changes invalidate dependent read models. Unchanged observations do not require rebuilding the tree or analysis indexes. A changed revision must pass recovery and conflict guards before updating visible authoring state. Database failure exposes an unavailable state and preserves local drafts; it never selects another persistence backend.
 
 ### 3.4 Read model and cache
 
-Core owns a reconstructible read surface keyed by repository identity plus immutable remote/overlay revision. A bounded cache may hold hierarchy, scene/path lookup and immutable Git object metadata; current mutable draft state must be kept separate. Preserve symlink, path, revision and snapshot reachability validation at the trust boundary.
-
-Expose efficient **document enumeration, bulk reads and changed-path calculation** via the existing snapshot abstractions where needed. Avoid introducing a separate materialized database as the manuscript authority. An index is disposable and rebuildable; failures do not block Core writing.
+Core owns consistent snapshot readers keyed by PostgreSQL project identity and version. Derived indexes support enumeration, bulk reads and changed-path calculation using document/artifact revisions. Mutable drafts remain separate. Optional index failure cannot prevent Core writing.
 
 ## 4. Workspace composition
 
@@ -75,7 +69,7 @@ Expose efficient **document enumeration, bulk reads and changed-path calculation
 - **Panel instance:** A placement of a definition in a layout, with an instance ID and only permitted view-local settings. One definition may support more than one instance if the implementation declares that safe.
 - **Workspace layout:** A tree of split, stack/tab and leaf nodes with panel-instance references and sizes. The layout controller manages drag/drop, docking, resize, tabs, hide/show and focus.
 - **Preset:** A versioned initial layout plus a declared fallback for unavailable optional panels. Applying a preset creates an editable user layout.
-- **Workspace state:** User/device UI preference; never manuscript YAML/Markdown, repository commits or Git history by default.
+- **Workspace state:** User/device UI preference; never manuscript YAML/Markdown, database revisions by default.
 
 Core authoring panels (including Editor) remain available without modules. Optional modules may contribute full panels, editor adornments or contextual actions. These are distinct contribution kinds; do not force an inline text decoration into a dockable panel. One module may contribute several items, and multiple modules may contribute to one editor surface.
 
@@ -96,9 +90,9 @@ The layout schema must be validated before use, including depth, size, IDs, dupl
 
 ### 4.3 Persistence and synchronization
 
-Workspace layout is scoped to user/author identity and device class. It is not part of the Git canonical manuscript data and must not be written by repository sync. The host persists layouts in browser storage; layouts are not synchronized through work repositories.
+Workspace layout is scoped to user/author identity and device class. It is separate from canonical manuscript data. The host persists layouts in browser storage; layouts are not synchronized through work repositories.
 
-The layout stores declarative IDs/settings, never executable component source, secrets, arbitrary paths or full manuscript contents. Persist preferences independently from IndexedDB draft/checkpoint recovery, with different storage keys and failure handling.
+The layout stores declarative IDs/settings, never executable component source, secrets, arbitrary paths or full manuscript contents. Persist preferences independently from IndexedDB draft/save recovery, with different storage keys and failure handling.
 
 ## 5. Search and terminology as optional capabilities
 
@@ -113,15 +107,15 @@ Core snapshot search, indexed lexical search and Semantic search have distinct o
 
 ### 5.2 Index lifecycle
 
-An indexed revision is identified by repository/snapshot (including overlay) and the indexed document-set definition. Start from Core's canonical document list; apply deltas for changed paths when available. A remote HEAD change, local checkpoint, document creation/removal, terminology dictionary update or relevant module settings change invalidates only the affected index entries. An index ready for an older revision must not be projected as current.
+An indexed revision is identified by PostgreSQL project snapshot and the indexed document-set definition. Start from Core's canonical document list; apply deltas for changed paths when available. A project revision change, document save, document creation/removal, terminology dictionary update or relevant module settings change invalidates only the affected index entries. An index ready for an older revision must not be projected as current.
 
-Build/warm indexes after the foreground scene is ready, in bounded, cancellable work; visible searches may request priority. Plugin installation/enablement controls code loading and any background work. Disabled search leaves Core editor, navigation, history, checkpoint and publish operational.
+Build/warm indexes after the foreground scene is ready, in bounded, cancellable work; visible searches may request priority. Plugin installation/enablement controls code loading and any background work. Disabled search leaves Core editor, navigation, history, save and restore operational.
 
-Index bytes are derived data in bounded plugin-owned cache, not project Git, not the browser recovery journal and not authoritative data. Corruption is discarded and rebuilt without affecting the manuscript.
+Index bytes are derived data in bounded plugin-owned cache, not canonical project data, not the browser recovery journal and not authoritative data. Corruption is discarded and rebuilt without affecting the manuscript.
 
 ### 5.3 Automatic links
 
-Resolve known canonical terms and aliases against visible text, producing transient ranges of `(document revision, start, end, target term ID)`. Do **not** mutate Markdown source or Git commits to insert automatic links. Resolve collisions/overlaps deterministically and provide a way to dismiss or inspect an ambiguous match rather than guessing a target.
+Resolve known canonical terms and aliases against visible text, producing transient ranges of `(document revision, start, end, target term ID)`. Do **not** mutate Markdown source to insert automatic links. Resolve collisions/overlaps deterministically and provide a way to dismiss or inspect an ambiguous match rather than guessing a target.
 
 An editor decoration must not break caret position, IME composition, selection, ruby typography or input latency. Recompute on bounded visible ranges or idle tasks and invalidate on document revision changes. The link target is project-scoped and must be validated on navigation; missing targets degrade to plain text.
 
@@ -137,24 +131,24 @@ This contract covers trusted modules installed at build time. It does not grant 
 
 ## 7. State and failure invariants
 
-1. Repository Git remains the durable project authority; `Draft`, `Checkpoint` and confirmed `Saved to GitHub` never collapse into a single save state.
+1. PostgreSQL remains the durable project authority; local Draft, in-flight save and confirmed Revision remain distinct states.
 2. Current author edits and recovery state are never replaced by a stale asynchronous read, module result or layout switch.
 3. A module's failure cannot prevent minimal Core authoring or delete user work.
-4. Optional analysis never mutates manuscripts directly. Changes require Core proposal, authenticated approval and checkpoint.
+4. Optional analysis never mutates manuscripts directly. Changes require Core proposal, authenticated approval and PostgreSQL application.
 5. Snapshot-indexed output may be shown as current only for the exact bound revision; stale results are labeled or discarded.
-6. Module and panel identity, enabled profile, authorization and repository scopes are checked by the host before mounting/invocation.
-7. Layout changes and derived indexes are not persisted as manuscript commits.
-8. Unavailable remote service does not block reading locally verified objects; it does block actions whose existing contract requires fresh remote confirmation.
+6. Module and panel identity, enabled profile, authorization and project scopes are checked by the host before mounting/invocation.
+7. Layout changes and derived indexes are not persisted as manuscript revisions.
+8. Unavailable PostgreSQL preserves recoverable local drafts and blocks server saves; it never activates another manuscript store.
 
 ## 8. Explicit non-goals
 
-- Rewriting the Git storage or durability state machine.
+- Adding another manuscript authority or compatibility fallback.
 - Replacing existing NLP/Semantic modules or duplicating their indexes without a demonstrated gap.
-- Introducing an entire external plugin SDK, arbitrary third-party code sandbox, new database authority or module orchestration service.
+- Introducing an entire external plugin SDK, arbitrary third-party code sandbox, a second database authority or module orchestration service.
 - Coupling layout choices to repository data or requiring all optional modules for the Core profile.
 
 ## 9. Architectural decision summary
 
-**Decision:** Local Git Core with a minimal, responsive foreground read model; a host-owned composable Workspace with presets and complete customization; search/terminology and advanced intelligence as optional, capability-based modules.
+**Decision:** PostgreSQL Core with a minimal, responsive foreground read model; a host-owned composable Workspace with presets and complete customization; search/terminology and advanced intelligence as optional, capability-based modules.
 
-**Why:** One immutable document authority and one module runtime provide consistent revision identity, minimal startup dependency closure and freely assembled UX without duplicating Git I/O or forcing heavy features onto ordinary editing.
+**Why:** One immutable document authority and one module runtime provide consistent revision identity, minimal startup dependency closure and freely assembled UX without duplicating persistence ownership or forcing heavy features onto ordinary editing.
