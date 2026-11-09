@@ -143,6 +143,7 @@ function makeStore(onSaveScene: () => void = () => undefined): CoreStoreShape {
   return {
     listProjects: async () => [project],
     createProject: async ({ title }: { title: string }) => ({ id: "project-2", title, version: 1 }),
+    status: async () => ({ ...SNAPSHOT, state: "durable" as const }),
     observe: async () => ({ snapshot: SNAPSHOT, observedAt: "2026-10-17T00:00:00.000Z", state: "fresh" }),
     saveScene: async () => { onSaveScene(); throw Error("direct scene writes are forbidden"); },
   } as unknown as CoreStore;
@@ -2506,11 +2507,12 @@ describe("Codexia HTTP boundary", () => {
     for (const method of ["PUT", "PATCH", "DELETE"]) {
       for (const auth of routeAuthHeaders) {
         const response = await fetch(`${apiServer.base}/api/projects/project-1`, {
-          method, headers: { ...auth, "Content-Type": "application/json" },
+          method, headers: { ...auth, ...(method === "DELETE" ? {} : { "Content-Type": "application/json" }) },
           ...(method !== "DELETE" ? { body: JSON.stringify({ url: "https://github.com/other/repo.git", token: "must-not-echo", autoMerge: true }) } : {}),
         });
-        assert.equal(response.status, 404);
-        assert.equal((await response.text()).includes("must-not-echo"), false);
+        const responseText = await response.text();
+        assert.equal(response.status, 404, `${method} /api/projects/project-1 returned ${response.status}: ${responseText}`);
+        assert.equal(responseText.includes("must-not-echo"), false);
       }
     }
     const legacyRegistration = await fetch(`${apiServer.base}/api/projects`, {
@@ -2529,8 +2531,10 @@ describe("Codexia HTTP boundary", () => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-native-project-")); tempDirs.push(staticDir);
     const apiServer = await startCustomApi(store, staticDir, { persistence }); t.after(apiServer.close);
     const owner = await login(apiServer.base);
-    const headers = { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" };
-    const registration = await fetch(`${apiServer.base}/api/projects`, { method: "POST", headers, body: JSON.stringify({ title: "Native project" }) });
+    const headers = { Cookie: owner.cookie, Origin: apiServer.base };
+    const registration = await fetch(`${apiServer.base}/api/projects`, {
+      method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ title: "Native project" }),
+    });
     assert.equal(registration.status, 201);
     const project = await registration.json() as { id: string };
     const snapshot = (await store.observe(project.id)).snapshot;
@@ -2543,9 +2547,10 @@ describe("Codexia HTTP boundary", () => {
     const applied = await store.apply(project.id, operation);
     for (const [method, suffix] of [["PUT", ""], ["DELETE", ""], ["POST", "/sync"], ["POST", "/publish"]]) {
       const response = await fetch(`${apiServer.base}/api/projects/${project.id}${suffix}`, {
-        method, headers, ...(method !== "DELETE" ? { body: JSON.stringify({ url: "/tmp/forbidden.git" }) } : {}),
+        method, headers: { ...headers, ...(method === "DELETE" ? {} : { "Content-Type": "application/json" }) },
+        ...(method !== "DELETE" ? { body: JSON.stringify({ url: "/tmp/forbidden.git" }) } : {}),
       });
-      assert.equal(response.status, 404);
+      assert.equal(response.status, 404, `${method} /api/projects/${project.id}${suffix} returned ${response.status}: ${await response.clone().text()}`);
     }
     const reopened = new CoreStore({ persistence });
     assert.equal((await reopened.observe(project.id)).snapshot.projectVersion, applied.projectVersion);
@@ -2629,12 +2634,13 @@ describe("Codexia HTTP boundary", () => {
     const invoked = await fetch(`${apiServer.base}/api/projects/project-1/actions/publishing.read-core`, {
       method: "POST", headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify({ input: {} }),
     });
-    assert.equal((await invoked.json() as { ok: boolean; data: unknown }).ok, true);
+    const invokedBody = await invoked.json() as { ok: boolean; data: unknown };
+    assert.equal(invokedBody.ok, true, JSON.stringify(invokedBody));
 
     const ownerRoute = await fetch(`${apiServer.base}/api/projects/project-1/modules/publishing/share/secret`);
     assert.equal(ownerRoute.status, 401);
     const owner = await login(apiServer.base);
-    const publicResponse = await fetch(`${apiServer.base}/api/public/repos/123/modules/publishing/share/secret?lang=en`, {
+    const publicResponse = await fetch(`${apiServer.base}/api/public/projects/project-1/modules/publishing/share/secret?lang=en`, {
       headers: {
         Authorization: `Bearer ${ACCESS_TOKEN}`,
         Cookie: owner.cookie,
