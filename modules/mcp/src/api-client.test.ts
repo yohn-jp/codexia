@@ -1,33 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ChangeOperation, RemoteObservation, SnapshotId } from "@codexia/contracts";
+import type { ChangeOperation, ProjectObservation, SnapshotId } from "@codexia/contracts";
 import { ApiClient } from "./api-client.js";
 
 const snapshot: SnapshotId = {
-  repository: {
-    provider: "local",
-    repositoryId: "repo-one",
-    defaultBranch: "main",
-    ownerScope: "owner-one",
-    url: "file:///repo-one",
-  },
-  remoteCommit: "b".repeat(40),
+  projectId: "repo-one",
+  projectVersion: 12,
 };
 
 test("stdio API client uses bearer actions and host-sourced proposals only", async () => {
   const calls: Array<{ url: string; init: RequestInit }> = [];
-  const observation: RemoteObservation = {
+  const observation: ProjectObservation = {
     snapshot,
-    checkpointHead: "c".repeat(40),
     observedAt: "2026-10-17T00:00:00.000Z",
     state: "fresh",
-    pending: [],
   };
   const fetcher: typeof fetch = async (input, init = {}) => {
     const url = String(input);
     calls.push({ url, init });
     if (url.endsWith("/api/projects")) {
-      return Response.json([{ id: "project-one", url: "https://example.test/one", branch: "main" }]);
+      return Response.json([{ id: "project-one", title: "One" }]);
     }
     if (url.endsWith("/actions")) {
       return Response.json({ actions: [{ id: "core.status", module: "core", effect: "read" }] });
@@ -50,7 +42,7 @@ test("stdio API client uses bearer actions and host-sourced proposals only", asy
 
   assert.deepEqual(await client.listActions(), [{ id: "core.status", module: "core", effect: "read" }]);
   assert.deepEqual(await client.listProjects(), [
-    { id: "project-one", url: "https://example.test/one", branch: "main" },
+    { id: "project-one", title: "One" },
   ]);
   assert.deepEqual(await client.forProject("project-two").listActions(), [
     { id: "core.status", module: "core", effect: "read" },

@@ -20,14 +20,8 @@ import type { StoryEntity, StoryGraphInput } from "./types.js";
 import type { ThreadLifecycleSnapshot } from "./threadLifecycle.js";
 
 const snapshot = {
-  repository: {
-    provider: "local" as const,
-    repositoryId: "repo-world",
-    defaultBranch: "main",
-    ownerScope: "owner-1",
-    url: "file:///repo-world",
-  },
-  remoteCommit: "d".repeat(40),
+  projectId: "repo-world",
+  projectVersion: 14,
 };
 
 function entity(

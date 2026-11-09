@@ -268,8 +268,8 @@ function operation(context: ModuleActionContext, path: string, revision: string 
   return {
     id: `semantic-${randomUUID()}`,
     generation: 0,
-    repository: context.reader.snapshot.repository,
-    baseRemoteCommit: context.reader.snapshot.remoteCommit,
+    projectId: context.reader.snapshot.projectId,
+    baseProjectVersion: context.reader.snapshot.projectVersion,
     effect: "settings",
     reads: [{ path, revision }, ...additionalReads],
     writes: [{ path, revision, content }],

@@ -7,17 +7,17 @@ test("built-in module IDs remain a frozen canonical tuple", () => {
 });
 
 const operation: ChangeOperation = {
-  id: "op-1", generation: 2, repository: { provider: "github", repositoryId: "12", defaultBranch: "writing", ownerScope: "owner", url: "https://github.com/example/work" },
-  baseRemoteCommit: "a".repeat(40), effect: "manuscript", reads: [],
+  id: "op-1", generation: 2, projectId: "12",
+  baseProjectVersion: 11, effect: "manuscript", reads: [],
   writes: [{ path: "manuscripts/一.md", revision: null, content: "日本語" }], message: "Write scene",
 };
 test("recovery payload retains exact operation and snapshot identity", () => {
   const recovered = JSON.parse(JSON.stringify(operation));
   assert.doesNotThrow(() => assertChangeOperation(recovered));
   assert.deepEqual(recovered, operation);
-  const snapshot = { repository: operation.repository, remoteCommit: operation.baseRemoteCommit };
-  assert.notEqual(snapshotKey(snapshot), snapshotKey({ ...snapshot, overlayCommit: "b".repeat(40) }));
-  assert.notEqual(snapshotKey(snapshot), snapshotKey({ ...snapshot, repository: { ...snapshot.repository, ownerScope: "other" } }));
+  const snapshot = { projectId: operation.projectId, projectVersion: operation.baseProjectVersion };
+  assert.notEqual(snapshotKey(snapshot), snapshotKey({ ...snapshot, projectVersion: 12 }));
+  assert.notEqual(snapshotKey(snapshot), snapshotKey({ ...snapshot, projectId: "other" }));
 });
 test("untrusted recovery rejects traversal, duplicate writes and missing preconditions", () => {
   for (const path of ["../secret", "/absolute", "x/.GIT/config", "x\\y", "x//y"]) {
@@ -31,7 +31,7 @@ test("scope guards bind unseen insertions, deletions and file revisions independ
   const files = new Map([["bible/a.yaml", "a".repeat(64)], ["bible/b.yaml", "b".repeat(64)]]);
   let reverse = false;
   const reader: SnapshotReader = {
-    snapshot: { repository: operation.repository, remoteCommit: operation.baseRemoteCommit },
+    snapshot: { projectId: operation.projectId, projectVersion: operation.baseProjectVersion },
     async list() { const paths = [...files.keys()]; return reverse ? paths.reverse() : paths; },
     async read(path) { const revision = files.get(path); return revision ? { content: "", revision } : null; },
   };
@@ -53,7 +53,7 @@ test("scope guards bind unseen insertions, deletions and file revisions independ
 });
 
 test("document source keeps snapshot paths, uses revision metadata, and reports scoped deltas", async () => {
-  const snapshot = { repository: operation.repository, remoteCommit: operation.baseRemoteCommit };
+  const snapshot = { projectId: operation.projectId, projectVersion: operation.baseProjectVersion };
   const files = new Map([
     ["manuscript/scene.md", { content: "Scene text", revision: "a".repeat(64) }],
     ["manuscript/removed.md", { content: "Old text", revision: "b".repeat(64) }],
@@ -109,7 +109,7 @@ test("document source keeps snapshot paths, uses revision metadata, and reports 
 
 test("document source rejects unsafe and out-of-scope snapshot paths", async () => {
   const reader: SnapshotReader = {
-    snapshot: { repository: operation.repository, remoteCommit: operation.baseRemoteCommit },
+    snapshot: { projectId: operation.projectId, projectVersion: operation.baseProjectVersion },
     async list() { return ["manuscript/../secret.md"]; },
     async read() { return { content: "", revision: "a".repeat(64) }; },
   };

@@ -685,8 +685,8 @@ async function speakerOverrideAction(input: ReturnType<typeof parseOverrideInput
   const operation: ChangeOperation = {
     id: `speaker-${randomUUID()}`,
     generation: 0,
-    repository: context.reader.snapshot.repository,
-    baseRemoteCommit: context.reader.snapshot.remoteCommit,
+    projectId: context.reader.snapshot.projectId,
+    baseProjectVersion: context.reader.snapshot.projectVersion,
     effect: "metadata",
     reads,
     writes: [
@@ -789,8 +789,8 @@ async function speakerRetrainAction(input: ReturnType<typeof parseRetrainInput>,
     const operation: ChangeOperation = {
       id: `speaker-model-${randomUUID()}`,
       generation: 0,
-      repository: context.reader.snapshot.repository,
-      baseRemoteCommit: context.reader.snapshot.remoteCommit,
+      projectId: context.reader.snapshot.projectId,
+      baseProjectVersion: context.reader.snapshot.projectVersion,
       effect: "settings",
       reads: [{ path: ADOPTED_MODEL_PATH, revision: existing?.revision ?? null }],
       writes: [{ path: ADOPTED_MODEL_PATH, revision: existing?.revision ?? null, content }],

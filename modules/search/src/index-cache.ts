@@ -25,8 +25,7 @@ function checkAborted(signal: AbortSignal): void {
 }
 
 function repositoryKey(snapshot: SnapshotId): string {
-  const repository = snapshot.repository;
-  return JSON.stringify([repository.provider, repository.ownerScope, repository.repositoryId, repository.defaultBranch]);
+  return snapshot.projectId;
 }
 
 export function isSearchableDocumentPath(path: string): boolean {

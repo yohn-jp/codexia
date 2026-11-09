@@ -48,10 +48,8 @@ async function invokeWithSnapshot(context: BrowserModuleContext, id: string, inp
 function snapshotLabel(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const snapshot = value as Record<string, unknown>;
-  if (typeof snapshot.remoteCommit !== "string") return undefined;
-  const remote = snapshot.remoteCommit.slice(0, 12);
-  const overlay = typeof snapshot.overlayCommit === "string" ? `+${snapshot.overlayCommit.slice(0, 12)}` : "";
-  return `${remote}${overlay}`;
+  if (!Number.isSafeInteger(snapshot.projectVersion)) return undefined;
+  return `${snapshot.projectId}@${snapshot.projectVersion}`;
 }
 
 function searchPanel(root: HTMLElement, context: SearchBrowserContext, cleanup: Array<() => void>): void {

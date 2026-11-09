@@ -510,8 +510,8 @@ function sourceFormatterProposal(input: {
 
 function operation(context: ModuleActionContext, path: string, revision: string, content: string, operationId: string): ChangeOperation {
   return {
-    id: operationId, generation: 0, repository: context.reader.snapshot.repository,
-    baseRemoteCommit: context.reader.snapshot.remoteCommit, effect: "manuscript",
+    id: operationId, generation: 0, projectId: context.reader.snapshot.projectId,
+    baseProjectVersion: context.reader.snapshot.projectVersion, effect: "manuscript",
     reads: [{ path, revision }], writes: [{ path, revision, content }], message: "Apply reviewed manuscript lint fixes",
   };
 }

@@ -9,7 +9,6 @@ import type {
   ModuleActionContext,
   ModuleContext,
   ProposalStatus,
-  RepositoryIdentity,
   SnapshotId,
   SnapshotReader,
 } from "@codexia/contracts";
@@ -29,8 +28,8 @@ function revision(content: string): string {
 
 function yaml(value: unknown): string { return YAML.stringify(value); }
 
-function repository(repositoryId: string): RepositoryIdentity {
-  return { provider: "local", repositoryId, defaultBranch: "main", ownerScope: "owner:test", url: `file:///repositories/${repositoryId}` };
+function repository(projectId: string): string {
+  return projectId;
 }
 
 function fixtureFiles(extra: Record<string, string> = {}): Map<string, string> {
@@ -52,7 +51,7 @@ function fixtureFiles(extra: Record<string, string> = {}): Map<string, string> {
 }
 
 function makeReader(files: Map<string, string>, repositoryId = "repo-work"): SnapshotReader {
-  const snapshot: SnapshotId = { repository: repository(repositoryId), remoteCommit: "a".repeat(40) };
+  const snapshot: SnapshotId = { projectId: repository(repositoryId), projectVersion: 11 };
   return {
     snapshot,
     async read(path) {
@@ -74,7 +73,7 @@ function makeModuleContext(): ModuleContext {
 
 function makeActionContext(reader: SnapshotReader, options: {
   proposals?: Array<{ id: string; operations: ChangeOperation[] }>;
-  linkedReader?: (repositoryId: string) => Promise<SnapshotReader>;
+  linkedReader?: (projectId: string) => Promise<SnapshotReader>;
   projectId?: string;
 } = {}): ModuleActionContext {
   return {
@@ -83,7 +82,7 @@ function makeActionContext(reader: SnapshotReader, options: {
     async invoke() { return { ok: false, snapshot: reader.snapshot, error: { code: "missing_action", message: "not wired", retryable: false } }; },
     async listActions() { return []; },
     async linkedReader(repositoryId) {
-      if (!options.linkedReader) throw new Error(`Unexpected linked repository: ${repositoryId}`);
+      if (!options.linkedReader) throw new Error(`Unexpected linked projectId: ${repositoryId}`);
       return options.linkedReader(repositoryId);
     },
     signal: new AbortController().signal,
@@ -122,19 +121,19 @@ test("entity reads expose source revision and preserve nested notes and characte
 });
 
 test("snapshot materialization reads each pinned Story snapshot without proposing writes", async () => {
-  const counted = (files: Map<string, string>, repositoryId: string, remoteCommit: string) => {
-    const base = makeReader(files, repositoryId);
+  const counted = (files: Map<string, string>, projectId: string, projectVersion: number) => {
+    const base = makeReader(files, projectId);
     const counts = { reads: 0, lists: 0 };
     const reader: SnapshotReader = {
       ...base,
-      snapshot: { ...base.snapshot, remoteCommit },
+      snapshot: { ...base.snapshot, projectVersion },
       async read(path, encoding) { counts.reads += 1; return base.read(path, encoding); },
       async list(prefix) { counts.lists += 1; return base.list(prefix); },
     };
     return { reader, counts };
   };
   const firstFiles = fixtureFiles();
-  const first = counted(firstFiles, "repo-materialize", "a".repeat(40));
+  const first = counted(firstFiles, "repo-materialize", 11);
   const firstProposals: Array<{ id: string; operations: ChangeOperation[] }> = [];
   const firstContext = makeActionContext(first.reader, { proposals: firstProposals });
   const materialize = actionById("story.snapshot.materialize");
@@ -149,7 +148,7 @@ test("snapshot materialization reads each pinned Story snapshot without proposin
   const secondFiles = fixtureFiles({
     "bible/items/item-key.yaml": yaml({ id: "item-key", name: "Key", type: "item", related: ["loc-cafe"] }),
   });
-  const second = counted(secondFiles, "repo-materialize", "b".repeat(40));
+  const second = counted(secondFiles, "repo-materialize", 12);
   const secondProposals: Array<{ id: string; operations: ChangeOperation[] }> = [];
   const secondContext = makeActionContext(second.reader, { proposals: secondProposals });
   const secondResult = await invoke<{ entities: number; links: number }>("story.snapshot.materialize", {}, secondContext);
@@ -336,7 +335,7 @@ test("Zukan creation validates manuscript provenance and proposes a stable pendi
   assert.equal(suggestion.status, "pending", "creation only proposes a pending row and does not auto-approve it");
   assert.equal(suggestion.entityId, "char-uma");
   assert.equal(suggestion.entityName, "Uma");
-  assert.equal(suggestion.sourceSnapshot, "a".repeat(40));
+  assert.equal(suggestion.sourceSnapshot, 11);
   assert.match(String(suggestion.sourceHash), /^[a-f0-9]{64}$/u);
   assert.equal(suggestion.createdAt, suggestion.updatedAt);
 
@@ -398,14 +397,14 @@ test("Zukan retries across an unrelated snapshot return the stored status withou
     payloadComplete: true,
     state: "proposed",
     approvedOperationIds: [],
-    checkpoints: [],
-    publishedOperationIds: [],
+    applications: [],
+    appliedOperationIds: [],
     stale: true,
   };
 
   const advancedReader: SnapshotReader = {
     ...makeReader(files),
-    snapshot: { ...reader.snapshot, remoteCommit: "b".repeat(40) },
+    snapshot: { ...reader.snapshot, projectVersion: 12 },
   };
   const advancedProposals: ChangeProposal[] = [];
   const advancedContext = makeActionContext(advancedReader, { proposals: advancedProposals });
@@ -423,7 +422,7 @@ test("Zukan retries across an unrelated snapshot return the stored status withou
   assert.equal(retried.data.created, false);
   assert.equal(retried.data.replayed, true);
   assert.equal(retried.data.proposalStatus.proposal.id, proposal.id);
-  assert.equal(retried.data.proposalStatus.proposal.snapshot.remoteCommit, reader.snapshot.remoteCommit);
+  assert.equal(retried.data.proposalStatus.proposal.snapshot.projectVersion, reader.snapshot.projectVersion);
   assert.equal(retried.data.proposalStatus.stale, true);
   assert.equal(retried.proposals, undefined, "an old-snapshot proposal is read back without proposing it against the newer snapshot");
   assert.equal(advancedProposals.length, 0);
@@ -561,8 +560,8 @@ test("scene creation inserts by position in one proposal and includes every chan
 test("series bindings use stable repository identity and preserve unknown settings", async () => {
   const settings = {
     version: 1,
-    series: [{ id: "series-main", name: "Main", ownerId: "owner:test", bibleRepositoryId: "repo-bible", memberRepositoryIds: ["repo-work"], createdAt: "2026-01-01T00:00:00.000Z", futureSeriesField: "keep" }],
-    bindings: [{ repositoryId: "repo-work", seriesId: "series-main", futureBindingField: 12 }],
+    series: [{ id: "series-main", name: "Main", ownerId: "owner:test", bibleProjectId: "repo-bible", memberProjectIds: ["repo-work"], createdAt: "2026-01-01T00:00:00.000Z", futureSeriesField: "keep" }],
+    bindings: [{ projectId: "repo-work", seriesId: "series-main", futureBindingField: 12 }],
     futureRootField: { keep: true },
   };
   const reader = makeReader(fixtureFiles({ [SERIES_PATH]: JSON.stringify(settings) + "\n" }));
@@ -571,12 +570,12 @@ test("series bindings use stable repository identity and preserve unknown settin
   }), "repo-bible");
   const linkedIds: string[] = [];
   const context = makeActionContext(reader, { linkedReader: async (id) => { linkedIds.push(id); return linkedReader; } });
-  const binding = await invoke<{ bibleRepositoryId: string; requiresAuthorReview: boolean }>("story.series.binding.get", {}, context);
-  assert.equal(binding.data.bibleRepositoryId, "repo-bible");
+  const binding = await invoke<{ bibleProjectId: string; requiresAuthorReview: boolean }>("story.series.binding.get", {}, context);
+  assert.equal(binding.data.bibleProjectId, "repo-bible");
   assert.equal(binding.data.requiresAuthorReview, false);
   const overlay = await invoke<{ workSnapshot: SnapshotId; bibleSnapshot: SnapshotId; workEntities: Array<{ id: string; name: string }>; bibleEntities: Array<{ id: string; name: string; raw: Record<string, unknown> }> }>("story.series.overlay", {}, context);
-  assert.equal(overlay.data.workSnapshot.repository.repositoryId, "repo-work");
-  assert.equal(overlay.data.bibleSnapshot.repository.repositoryId, "repo-bible");
+  assert.equal(overlay.data.workSnapshot.projectId, "repo-work");
+  assert.equal(overlay.data.bibleSnapshot.projectId, "repo-bible");
   assert.equal(overlay.data.workEntities.find((entity) => entity.id === "char-uma")?.name, "Uma");
   assert.equal(overlay.data.bibleEntities.find((entity) => entity.id === "char-uma")?.name, "Bible Uma", "the browser can inspect the actual Bible record even when a work record has the same ID");
   assert.equal((overlay.data.bibleEntities.find((entity) => entity.id === "char-uma")?.raw.aliases as string[])[0], "Bible-U");
@@ -590,8 +589,8 @@ test("series bindings use stable repository identity and preserve unknown settin
   assert.deepEqual(written.futureRootField, { keep: true });
   assert.equal(written.series[0].futureSeriesField, "keep");
   assert.equal(written.bindings[0].futureBindingField, 12);
-  assert.equal(written.bindings[0].repositoryId, "repo-work");
-  assert.equal("projectId" in written.bindings[0], false);
+  assert.equal(written.bindings[0].projectId, "repo-work");
+  assert.equal("repositoryId" in written.bindings[0], false);
 });
 
 test("suggested tags do not allocate NLP at module load and report optional capability absence", async () => {

@@ -130,38 +130,15 @@ function parseIdInput(value: unknown, label = "sceneId"): RecordValue {
 }
 function parseSnapshotIdentity(value: unknown, label: string): SnapshotId {
   const snapshot = record(value, label);
-  const repository = record(snapshot.repository, `${label}.repository`);
-  if (repository.provider !== "github" && repository.provider !== "local") {
-    throw new TypeError(`${label}.repository.provider must be github or local`);
+  const projectId = parseString(snapshot.projectId, `${label}.projectId`, 512);
+  if (!Number.isSafeInteger(snapshot.projectVersion) || (snapshot.projectVersion as number) < 0) {
+    throw new TypeError(`${label}.projectVersion must be a non-negative safe integer`);
   }
-  const remoteCommit = snapshot.remoteCommit;
-  if (typeof remoteCommit !== "string" || remoteCommit.length > 64 ||
-      (remoteCommit !== "" && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(remoteCommit))) {
-    throw new TypeError(`${label}.remoteCommit must be empty or a full Git object ID`);
-  }
-  const repositoryIdentity: SnapshotId["repository"] = {
-    provider: repository.provider,
-    repositoryId: parseString(repository.repositoryId, `${label}.repository.repositoryId`, 512),
-    defaultBranch: parseString(repository.defaultBranch, `${label}.repository.defaultBranch`, 512),
-    ownerScope: parseString(repository.ownerScope, `${label}.repository.ownerScope`, 512),
-    url: parseString(repository.url, `${label}.repository.url`, 2_048),
-  };
-  let overlayCommit: string | undefined;
-  if (snapshot.overlayCommit !== undefined) {
-    if (typeof snapshot.overlayCommit !== "string" || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(snapshot.overlayCommit)) {
-      throw new TypeError(`${label}.overlayCommit must be a full Git object ID`);
-    }
-    overlayCommit = snapshot.overlayCommit;
-  }
-  return { repository: repositoryIdentity, remoteCommit, ...(overlayCommit ? { overlayCommit } : {}) };
+  return { projectId, projectVersion: snapshot.projectVersion as number };
 }
 
 function sameRemoteSnapshot(left: SnapshotId, right: SnapshotId): boolean {
-  return left.remoteCommit === right.remoteCommit
-    && left.repository.provider === right.repository.provider
-    && left.repository.ownerScope === right.repository.ownerScope
-    && left.repository.repositoryId === right.repository.repositoryId
-    && left.repository.defaultBranch === right.repository.defaultBranch;
+  return left.projectId === right.projectId && left.projectVersion === right.projectVersion;
 }
 
 function parseEditorDraft(value: unknown): BrowserEditorDocument {
@@ -614,7 +591,7 @@ async function generate(
     const aborted = abortSignal.aborted;
     const candidateCode = (callFailure as { code?: unknown } | undefined)?.code;
     const event: ModelUsageEvent = {
-      id: randomUUID(), repository: context.reader.snapshot.repository, feature: input.feature,
+      id: randomUUID(), projectId: context.reader.snapshot.projectId, feature: input.feature,
       provider: model.provider, model: model.model, startedAt: new Date(callStartedEpoch).toISOString(), completedAt,
       state: callFailure ? (aborted ? "aborted" : "failed") : "completed",
       cacheHit: false,
@@ -738,8 +715,8 @@ function makeOperation(
   for (const write of writes) assertProjectPath(write.path);
   const uniqueReads = new Map(reads.map((item) => [item.path, item]));
   return {
-    id: randomUUID(), generation: 0, repository: context.reader.snapshot.repository,
-    baseRemoteCommit: context.reader.snapshot.remoteCommit, effect,
+    id: randomUUID(), generation: 0, projectId: context.reader.snapshot.projectId,
+    baseProjectVersion: context.reader.snapshot.projectVersion, effect,
     reads: [...uniqueReads.values()].sort((a, b) => a.path.localeCompare(b.path)),
     writes, message,
   };
@@ -823,7 +800,7 @@ function decodeUsageCursor(value: unknown): number {
 
 function encodeUsageCursor(offset: number): string { return Buffer.from(JSON.stringify({ offset }), "utf8").toString("base64url"); }
 
-function legacyUsageRows(content: string, repository: ModelUsageEvent["repository"]): Array<ModelUsageEvent & RecordValue> {
+function legacyUsageRows(content: string, repository: ModelUsageEvent["projectId"]): Array<ModelUsageEvent & RecordValue> {
   const rows: Array<ModelUsageEvent & RecordValue> = [];
   for (const line of content.split(/\r?\n/)) {
     if (!line.trim()) continue;
@@ -836,7 +813,7 @@ function legacyUsageRows(content: string, repository: ModelUsageEvent["repositor
       const duration = typeof raw.durationMs === "number" && Number.isFinite(raw.durationMs) ? Math.max(0, raw.durationMs) : 0;
       const id = typeof raw.id === "string" ? raw.id : `legacy-${sha256(line)}`;
       rows.push({
-        id, repository, feature, provider: typeof raw.provider === "string" ? raw.provider : "legacy",
+        id, projectId: repository, feature, provider: typeof raw.provider === "string" ? raw.provider : "legacy",
         model, startedAt, completedAt: new Date(Date.parse(startedAt) + duration).toISOString(),
         state: raw.aborted === true ? "aborted" : "completed",
         ...(Number.isSafeInteger(raw.inputTokens) && (raw.inputTokens as number) >= 0 ? { inputTokens: raw.inputTokens as number } : {}),
@@ -854,7 +831,7 @@ function legacyUsageRows(content: string, repository: ModelUsageEvent["repositor
 }
 
 async function readUsageHistory(moduleContext: ModuleContext, context: ModuleActionContext, input: { month?: string; limit: number; cursor?: string }) {
-  const repository = context.reader.snapshot.repository;
+  const repository = context.reader.snapshot.projectId;
   const file = await context.reader.read(USAGE_PATH);
   const legacy = file ? legacyUsageRows(file.content, repository) : [];
   let hostEvents: Array<ModelUsageEvent & RecordValue> = [];
@@ -2334,7 +2311,7 @@ function parseModelUsageEvent(value: unknown): ModelUsageEvent {
   if (!(["completed", "aborted", "failed"] as unknown[]).includes(state)) throw new TypeError("Host model usage event has an invalid state");
   return {
     id: parseString(input.id, "event.id", 256),
-    repository: record(input.repository, "event.repository") as unknown as ModelUsageEvent["repository"],
+    projectId: parseString(input.projectId, "event.projectId", 512),
     feature: parseString(input.feature, "event.feature", 256),
     provider: parseString(input.provider, "event.provider", 128),
     model: parseString(input.model, "event.model", 512),

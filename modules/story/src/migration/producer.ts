@@ -7,7 +7,6 @@ import {
   type MigrationContribution,
   type MigrationProducer,
 } from "@codexia/migration";
-import type { RepositoryIdentity } from "@codexia/contracts";
 import { planStorySqliteWorkflow } from "./workflowRows.js";
 
 const STORY_SOURCE_ROOTS = [
@@ -54,14 +53,14 @@ function changeSetStableId(record: Record<string, unknown>): string | null {
 }
 
 type StoryMigrationContext = MigrationContext & {
-  legacyRepositoryMappings?: Readonly<Record<string, RepositoryIdentity>>;
+  legacyProjectMappings?: Readonly<Record<string, string>>;
 };
 
 function mappedRepositoryId(context: MigrationContext, legacyProjectId: unknown): string | undefined {
   if (typeof legacyProjectId !== "string") return undefined;
-  const mapping = (context as StoryMigrationContext).legacyRepositoryMappings?.[legacyProjectId];
-  return typeof mapping?.repositoryId === "string" && mapping.repositoryId.length > 0
-    ? mapping.repositoryId
+  const mapping = (context as StoryMigrationContext).legacyProjectMappings?.[legacyProjectId];
+  return typeof mapping === "string" && mapping.length > 0
+    ? mapping
     : undefined;
 }
 
@@ -76,7 +75,7 @@ function convertSeriesSettings(context: MigrationContext, text: string): { conte
     const result: Record<string, unknown> = { ...value };
     const bibleProjectId = value.bibleProjectId;
     const bibleRepositoryId = mappedRepositoryId(context, bibleProjectId);
-    if (bibleRepositoryId) result.bibleRepositoryId = bibleRepositoryId;
+    if (bibleRepositoryId) { result.legacyBibleProjectId = bibleProjectId; result.bibleProjectId = bibleRepositoryId; }
     else if (typeof bibleProjectId === "string" && !value.bibleRepositoryId) review.push(`series[${index}].bibleProjectId=${bibleProjectId}`);
     if (Array.isArray(value.memberProjectIds)) {
       const mapped = value.memberProjectIds.flatMap((projectId) => {
@@ -85,7 +84,8 @@ function convertSeriesSettings(context: MigrationContext, text: string): { conte
         if (typeof projectId === "string") review.push(`series[${index}].memberProjectIds=${projectId}`);
         return [];
       });
-      result.memberRepositoryIds = [...new Set([...(Array.isArray(value.memberRepositoryIds) ? value.memberRepositoryIds.filter((id): id is string => typeof id === "string") : []), ...mapped])];
+      result.legacyMemberProjectIds = value.memberProjectIds;
+      result.memberProjectIds = [...new Set([...(Array.isArray(value.memberRepositoryIds) ? value.memberRepositoryIds.filter((id): id is string => typeof id === "string") : []), ...mapped])];
     }
     if (review.some((item) => item.startsWith(`series[${index}]`))) result.requiresAuthorReview = true;
     return result;
@@ -94,7 +94,7 @@ function convertSeriesSettings(context: MigrationContext, text: string): { conte
     if (!isRecord(value)) { review.push(`bindings[${index}]`); return value; }
     const result: Record<string, unknown> = { ...value };
     const repositoryId = mappedRepositoryId(context, value.projectId);
-    if (repositoryId) result.repositoryId = repositoryId;
+    if (repositoryId) { result.legacyProjectId = value.projectId; result.projectId = repositoryId; }
     else if (typeof value.projectId === "string" && !value.repositoryId) {
       review.push(`bindings[${index}].projectId=${value.projectId}`);
       result.requiresAuthorReview = true;

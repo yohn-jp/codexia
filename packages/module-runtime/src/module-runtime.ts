@@ -33,7 +33,7 @@ export interface ActionHostContext {
   /** Core actions are explicitly supplied by the host and run against this same project and reader. */
   actions?: readonly { module: ModuleId | "core"; action: ModuleAction }[];
   /** Resolves only repositories registered to the same owner; runtime verifies the returned identity. */
-  linkedReader?(repositoryId: string): Promise<ModuleActionContext["reader"]>;
+  linkedReader?(projectId: string): Promise<ModuleActionContext["reader"]>;
   /** Authentication level of the current HTTP caller. Omission grants no owner access. */
   access?: "owner" | "public";
   /** Host-owned durable tracking around a declared module action. `execute` is safe to call once. */
@@ -728,16 +728,14 @@ export class ModuleRuntime {
         return result;
       },
       listActions: () => host.access === "public" ? Promise.resolve([]) : this.listActions(host),
-      linkedReader: async (repositoryId) => {
+      linkedReader: async (projectId) => {
         if (signal.aborted) throw new ModuleRuntimeError("action_cancelled", "Action was cancelled");
-        if (host.access === "public") throw new ModuleRuntimeError("public_access_restricted", "Public routes cannot read linked repositories");
-        if (!host.linkedReader) throw new ModuleRuntimeError("linked_repository_unavailable", "No linked repository reader is registered for this host");
-        const reader = await host.linkedReader(repositoryId);
-        const linked = reader?.snapshot?.repository;
-        const current = host.reader.snapshot.repository;
+        if (host.access === "public") throw new ModuleRuntimeError("public_access_restricted", "Public routes cannot read linked projects");
+        if (!host.linkedReader) throw new ModuleRuntimeError("linked_project_unavailable", "No linked project reader is registered for this host");
+        const reader = await host.linkedReader(projectId);
         if (!reader || typeof reader.read !== "function" || typeof reader.list !== "function" ||
-            !linked || linked.repositoryId !== repositoryId || linked.ownerScope !== current.ownerScope) {
-          throw new ModuleRuntimeError("linked_repository_unavailable", "Linked repository is unavailable for this owner");
+            reader.snapshot?.projectId !== projectId) {
+          throw new ModuleRuntimeError("linked_project_unavailable", "Linked project is unavailable for this owner");
         }
         if (signal.aborted) throw new ModuleRuntimeError("action_cancelled", "Action was cancelled");
         return reader;
@@ -967,9 +965,7 @@ export class ModuleRuntime {
   }
 
   private assertOperationSnapshot(operation: ChangeOperation, snapshot: SnapshotId): void {
-    if (!operation || operation.baseRemoteCommit !== snapshot.remoteCommit ||
-        operation.repository.provider !== snapshot.repository.provider || operation.repository.repositoryId !== snapshot.repository.repositoryId ||
-        operation.repository.ownerScope !== snapshot.repository.ownerScope || operation.repository.defaultBranch !== snapshot.repository.defaultBranch) {
+    if (!operation || operation.baseProjectVersion !== snapshot.projectVersion || operation.projectId !== snapshot.projectId) {
       throw new ModuleRuntimeError("action_snapshot_mismatch", "Proposed operation does not belong to the action snapshot");
     }
   }

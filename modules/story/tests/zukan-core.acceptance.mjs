@@ -143,7 +143,7 @@ test("Zukan suggestion creation runs through Story, Core review, checkpoint, pub
     assert.equal(materialized.ok, true, JSON.stringify(materialized.error));
     assert.deepEqual(materialized.data, { entities: entityList.data.length, links: 2 });
     assert.deepEqual(materialized.snapshot, entityList.snapshot, "the action reports counts from its pinned Core reader snapshot");
-    assert.equal(materialized.snapshot.remoteCommit, headBeforeReads);
+    assert.equal(materialized.snapshot.projectVersion, headBeforeReads);
     assert.equal(materialized.proposals, undefined, "materialization is a read action");
     const graph = await invoke(host, cookie, project.id, "story.graph.query", { types: ["character"] });
     assert.equal(graph.ok, true, JSON.stringify(graph.error));

@@ -23,8 +23,8 @@ import { buildSearchDocuments, combineHybridScores, searchSnapshotLexically } fr
 import { clusterSimilarTerms } from "./termClustering.js";
 
 const snapshot: SnapshotId = {
-  repository: { provider: "local", repositoryId: "semantic-production-fixture", defaultBranch: "main", ownerScope: "owner", url: "local://semantic-production-fixture" },
-  remoteCommit: "a".repeat(40),
+  projectId: "semantic-production-fixture",
+  projectVersion: 11,
 };
 
 test("source sentence rows preserve embeddable types, body/description/notes order, and trimmed indexes", () => {
@@ -303,7 +303,7 @@ test("default ModuleRuntime composes semantic status, real CPU rebuild/search/re
     const before = await runtime.invokeAction("semantic", "semantic.index.status", {}, initialHost);
     assert.equal(before.ok, true, `semantic.index.status failed: ${JSON.stringify(before.ok ? null : before.error)}`);
     const beforeData = before.data as { modelVersion: string; indexAvailable: boolean; modelLoaded: boolean };
-    assert.equal(before.snapshot.remoteCommit, snapshot.remoteCommit);
+    assert.equal(before.snapshot.projectVersion, snapshot.projectVersion);
     assert.equal(beforeData.modelVersion, EMBEDDING_MODEL_VERSION);
     assert.equal(beforeData.indexAvailable, false);
     assert.equal(beforeData.modelLoaded, false);
@@ -335,7 +335,7 @@ test("default ModuleRuntime composes semantic status, real CPU rebuild/search/re
     assert.ok(rerankedData.results.every((result) => Number.isFinite(result.scores.rerank)));
     assert.ok(rerankedData.results[0]!.scores.rerank! > rerankedData.results[1]!.scores.rerank!);
 
-    const nextSnapshot: SnapshotId = { ...snapshot, remoteCommit: "b".repeat(40) };
+    const nextSnapshot: SnapshotId = { ...snapshot, projectVersion: 12 };
     const nextFiles = new Map(initialFiles);
     nextFiles.set("plot/volumes/v/scenes/station.yaml", "id: sc-station\ntype: scene\nname: Updated Station\ndescription: 夜明けに駅から遠ざかり、白い切符を手放した。\n");
     const nextReader = makeSemanticReader(nextSnapshot, nextFiles);
@@ -356,7 +356,7 @@ test("default ModuleRuntime composes semantic status, real CPU rebuild/search/re
     assert.equal(newStation?.name, "Updated Station");
 
     const { createHash } = await import("node:crypto");
-    const repositoryKey = createHash("sha256").update(JSON.stringify([snapshot.repository.provider, snapshot.repository.ownerScope, snapshot.repository.repositoryId, snapshot.repository.defaultBranch])).digest("hex");
+    const repositoryKey = createHash("sha256").update(snapshot.projectId).digest("hex");
     const modelKey = createHash("sha256").update(`${EMBEDDING_MODEL_ID}@${EMBEDDING_MODEL_VERSION}`).digest("hex").slice(0, 24);
     await rm(path.join(cacheDirectory, "semantic", "semantic", "indexes", `${repositoryKey}-${modelKey}.json`));
     const missing = await runtime.invokeAction("semantic", "semantic.index.status", {}, initialHost);

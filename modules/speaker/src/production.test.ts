@@ -14,13 +14,7 @@ import { createModule as createNlpModule } from "@codexia/module-nlp";
 import { createModule as createDiagnosticsModule } from "@codexia/module-diagnostics";
 import { createModule as createSpeakerModule } from "./index.js";
 
-const repository = {
-  provider: "local" as const,
-  repositoryId: "p10-synthetic-speaker",
-  defaultBranch: "main",
-  ownerScope: "local-owner",
-  url: "file:///p10-synthetic-speaker",
-};
+const repository = "p10-synthetic-speaker";
 
 function fileRevision(content: string): string {
   return createHash("sha256").update(content).digest("hex");
@@ -28,7 +22,7 @@ function fileRevision(content: string): string {
 
 function snapshotFor(files: Map<string, { content: string; revision: string }>): SnapshotId {
   const tree = [...files].sort(([a], [b]) => a.localeCompare(b)).map(([filePath, file]) => [filePath, file.revision]);
-  return { repository, remoteCommit: createHash("sha256").update(JSON.stringify(tree)).digest("hex").slice(0, 40) };
+  return { projectId: repository, projectVersion: Number.parseInt(createHash("sha256").update(JSON.stringify(tree)).digest("hex").slice(0, 10), 16) };
 }
 
 function sceneText(): string { return "星野は灯りを見た。『俺が行く。』"; }
@@ -152,7 +146,7 @@ async function createRuntime(
   });
   const jobProgress = new Map<string, number[][]>();
   const host: Parameters<ModuleRuntime["invokeAction"]>[3] = {
-    projectId: repository.repositoryId,
+    projectId: repository,
     signal: new AbortController().signal,
     reader: {
       get snapshot() { return getSnapshot(); },
@@ -187,7 +181,7 @@ function applyReviewedProposal(
   assert.deepEqual(proposal.snapshot, getSnapshot(), "Core proposal must be bound to the pinned snapshot being reviewed");
   for (const operation of proposal.operations) {
     assertChangeOperation(operation);
-    assert.equal(operation.baseRemoteCommit, proposal.snapshot.remoteCommit);
+    assert.equal(operation.baseProjectVersion, proposal.snapshot.projectVersion);
     for (const read of operation.reads) assert.equal(files.get(read.path)?.revision ?? null, read.revision, `${read.path} read revision`);
     for (const write of operation.writes) {
       if (write.content === null) files.delete(write.path);

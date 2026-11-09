@@ -16,14 +16,8 @@ import {
 import { createAssistantActions } from "./actions.js";
 import { createModule } from "./index.js";
 
-const repository = {
-  provider: "local" as const,
-  repositoryId: "assistant-actions-test",
-  defaultBranch: "main",
-  ownerScope: "assistant-test-owner",
-  url: "file:///assistant-actions-test",
-};
-const snapshot: SnapshotId = { repository, remoteCommit: "c".repeat(40) };
+const repository = "assistant-actions-test";
+const snapshot: SnapshotId = { projectId: repository, projectVersion: 13 };
 const assistantSettingsPath = "meta/scriptorium/modules/assistant/model-settings.json";
 const usagePath = "meta/scriptorium/modules/assistant/usage.jsonl";
 const revision = "a".repeat(64);
@@ -208,7 +202,7 @@ test("speaker attribution uses the explicitly selected live editor text and pres
     "bible/characters/char-live/profile.yaml": "id: char-live\ntype: character\nname: Live speaker\nvoice:\n  tone: calm\n",
     [manuscriptPath]: "「保存済みの台詞。」と彼女が言った。",
   };
-  const editorSnapshot: SnapshotId = { repository, remoteCommit: "c".repeat(40), overlayCommit: "d".repeat(40) };
+  const editorSnapshot: SnapshotId = { projectId: repository, projectVersion: 13 };
   const editorDraft: BrowserEditorDocument = {
     sceneId: "sc-live", documentPath: manuscriptPath, documentRevision: "editor-document-rev-7",
     sceneRevision: "editor-scene-rev-11", text: "「編集中の新しい台詞。」と彼女が言った。",
@@ -219,8 +213,8 @@ test("speaker attribution uses the explicitly selected live editor text and pres
     const module = createAssistantActions(moduleContext(usageStore));
     const attribution = getAction(module, "assistant.speaker.attribute");
     const malformedDrafts: unknown[] = [
-      { ...editorDraft, snapshot: { repository: {}, remoteCommit: snapshot.remoteCommit } },
-      { ...editorDraft, snapshot: { ...editorSnapshot, overlayCommit: "not-a-git-object-id" } },
+      { ...editorDraft, snapshot: { projectId: {}, projectVersion: snapshot.projectVersion } },
+      { ...editorDraft, snapshot: { ...editorSnapshot, projectVersion: -1 } },
     ];
     for (const invalidDraft of malformedDrafts) {
       const invalidResult = await attribution.invoke({ sceneId: "sc-live", editorDraft: invalidDraft }, context({
@@ -234,7 +228,7 @@ test("speaker attribution uses the explicitly selected live editor text and pres
       sceneId: "sc-live",
       editorDraft: {
         ...editorDraft,
-        snapshot: { ...editorSnapshot, repository: { ...repository, repositoryId: "another-repository" } },
+        snapshot: { ...editorSnapshot, projectId: "another-repository" },
       },
     }, context({
       files,
@@ -327,7 +321,7 @@ test("continuation uses only a matching live editor draft after checking its rem
     "plot/volumes/vol-main/chapters/ch-selected/chapter.yaml": "id: ch-selected\ntype: chapter\nname: Selected continuation context\nvolume: vol-main\norder: 2\n",
     "plot/volumes/vol-main/chapters/ch-selected/chapter-summary.yaml": "scope: chapter\nid: ch-selected\nsummaryLines:\n  - 選択した章の承認済み要約。\n",
   };
-  const draftSnapshot: SnapshotId = { repository, remoteCommit: "c".repeat(40), overlayCommit: "e".repeat(40) };
+  const draftSnapshot: SnapshotId = { projectId: repository, projectVersion: 13 };
   const draftText = Array.from({ length: 13 }, (_, index) => `編集中${index + 1}。`).join("");
   const editorDraft: BrowserEditorDocument = {
     sceneId: "sc-live-cont", documentPath: manuscriptPath, documentRevision: "editor-document-rev-9",
@@ -1005,7 +999,7 @@ test("usage history combines preserved JSONL and host-owned events without rewri
   });
   const legacyContent = `${legacyLine}\n`;
   const hostEvent: ModelUsageEvent = {
-    id: "host-event-1", repository, feature: "scene-summary", provider: "openai-compatible", model: "Qwen3-local",
+    id: "host-event-1", projectId: repository, feature: "scene-summary", provider: "openai-compatible", model: "Qwen3-local",
     startedAt: "2026-10-02T12:00:00.000Z", completedAt: "2026-10-02T12:00:02.000Z", state: "completed",
     inputTokens: 50, outputTokens: 20, cacheHit: false, promptVersion: "scene-summary@2", durationMs: 1800, queueWaitMs: 200,
   };

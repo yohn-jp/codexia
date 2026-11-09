@@ -10,14 +10,8 @@ import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { closeMcpSessions, createMcpHttpContribution } from "./http.js";
 
 const snapshot: SnapshotId = {
-  repository: {
-    provider: "local",
-    repositoryId: "repo-one",
-    defaultBranch: "main",
-    ownerScope: "owner-one",
-    url: "file:///repo-one",
-  },
-  remoteCommit: "a".repeat(40),
+  projectId: "repo-one",
+  projectVersion: 11,
 };
 
 function actionContext(
@@ -86,8 +80,8 @@ function actionContext(
           operations: sourceOperationIds.map((id, index) => ({
             id,
             generation: 0,
-            repository: snapshot.repository,
-            baseRemoteCommit: snapshot.remoteCommit,
+            projectId: snapshot.projectId,
+            baseProjectVersion: snapshot.projectVersion,
             effect: "metadata",
             reads: [],
             writes: [{
@@ -112,7 +106,7 @@ function actionContext(
           proposal,
           state: "proposed",
           approvedOperationIds: [],
-          checkpoints: [],
+          applications: [],
           stale: false,
         };
         return {
@@ -161,16 +155,16 @@ function actionContext(
     async runJob() {
       throw new Error("MCP must not start a model job");
     },
-    setProposalReview(approvedOperationIds: string[], checkpoints: unknown[]) {
+    setProposalReview(approvedOperationIds: string[], applications: unknown[]) {
       if (!storedProposalStatus || typeof storedProposalStatus !== "object") throw new Error("No proposal is stored");
       storedProposalStatus = {
         ...(storedProposalStatus as Record<string, unknown>),
-        state: checkpoints.length ? "checkpointed" : approvedOperationIds.length ? "approved" : "proposed",
+        state: applications.length ? "applied" : approvedOperationIds.length ? "approved" : "proposed",
         approvedOperationIds,
-        checkpoints,
+        applications,
       };
     },
-    setProposalPayloadIncomplete(approvedOperationIds: string[], checkpoints: unknown[], publishedOperationIds: string[] = []) {
+    setProposalPayloadIncomplete(approvedOperationIds: string[], applications: unknown[], appliedOperationIds: string[] = []) {
       if (!storedProposalStatus || !storedProposal || typeof storedProposalStatus !== "object") throw new Error("No proposal is stored");
       storedProposal = {
         ...storedProposal,
@@ -184,12 +178,12 @@ function actionContext(
         originalDigest: "e".repeat(64),
         operationIds: sourceOperationIds,
         approvedOperationIds,
-        checkpoints,
-        publishedOperationIds,
-        state: checkpoints.length ? "partially_approved" : approvedOperationIds.length ? "approved" : "proposed",
+        applications,
+        appliedOperationIds,
+        state: applications.length ? "partially_approved" : approvedOperationIds.length ? "approved" : "proposed",
       };
     },
-  } satisfies ModuleActionContext & { setProposalReview(approvedOperationIds: string[], checkpoints: unknown[]): void; setProposalPayloadIncomplete(approvedOperationIds: string[], checkpoints: unknown[], publishedOperationIds?: string[]): void };
+  } satisfies ModuleActionContext & { setProposalReview(approvedOperationIds: string[], applications: unknown[]): void; setProposalPayloadIncomplete(approvedOperationIds: string[], applications: unknown[], appliedOperationIds?: string[]): void };
 }
 
 test("SDK Streamable HTTP transport lists and invokes tools through the host action context", async () => {
@@ -395,7 +389,7 @@ test("submit_change_set returns a source ChangeSetRecord with its source ID", as
     host.setProposalReview(["op-one"], [{
       operationId: "op-one",
       generation: 0,
-      localCommit: "d".repeat(40),
+      projectVersion: 4,
       remoteBase: "a".repeat(40),
       revisions: [{ path: "characters/char-one.yaml", revision: "b".repeat(64) }],
     }]);
@@ -416,7 +410,7 @@ test("submit_change_set returns a source ChangeSetRecord with its source ID", as
   }
 });
 
-test("ChangeSet readback preserves approved IDs while selected checkpoints are pending", async () => {
+test("ChangeSet readback preserves approved IDs while selected applications are pending", async () => {
   const calls: string[] = [];
   const host = actionContext(calls, [], undefined, ["op-one", "op-two"]);
   const contribution = createMcpHttpContribution(new Map());
@@ -461,7 +455,7 @@ test("ChangeSet readback preserves approved IDs while selected checkpoints are p
     host.setProposalReview(["op-one", "op-two"], [{
       operationId: "op-one",
       generation: 0,
-      localCommit: "d".repeat(40),
+      projectVersion: 4,
       remoteBase: "a".repeat(40),
       revisions: [{ path: "characters/char-one.yaml", revision: "b".repeat(64) }],
     }]);
@@ -477,7 +471,7 @@ test("ChangeSet readback preserves approved IDs while selected checkpoints are p
     host.setProposalReview(["op-one"], [{
       operationId: "op-one",
       generation: 0,
-      localCommit: "d".repeat(40),
+      projectVersion: 4,
       remoteBase: "a".repeat(40),
       revisions: [{ path: "characters/char-one.yaml", revision: "b".repeat(64) }],
     }]);
@@ -503,7 +497,7 @@ test("ChangeSet readback preserves approved IDs while selected checkpoints are p
     host.setProposalPayloadIncomplete(["op-one"], [{
       operationId: "op-one",
       generation: 0,
-      localCommit: "d".repeat(40),
+      projectVersion: 4,
       remoteBase: "a".repeat(40),
       revisions: [{ path: "characters/char-one.yaml", revision: "b".repeat(64) }],
     }], ["op-one"]);
@@ -523,8 +517,7 @@ test("ChangeSet readback preserves approved IDs while selected checkpoints are p
       originalDigest: "e".repeat(64),
       operationIds: ["op-one", "op-two"],
       approvedOperationIds: ["op-one"],
-      checkpointedOperationIds: ["op-one"],
-      publishedOperationIds: ["op-one"],
+      appliedOperationIds: ["op-one"],
       state: "partially_approved",
       recovery: "Restore the original browser/private proposal to recover its complete NarrativeChangeSet. This MCP result contains Core review status only.",
     });
@@ -540,8 +533,7 @@ test("ChangeSet readback preserves approved IDs while selected checkpoints are p
           originalDigest: "e".repeat(64),
           operationIds: ["op-one", "op-two"],
           approvedOperationIds: ["op-one"],
-          checkpointedOperationIds: ["op-one"],
-          publishedOperationIds: ["op-one"],
+          appliedOperationIds: ["op-one"],
           state: "partially_approved",
           recovery: "Restore the original browser/private proposal to recover its complete NarrativeChangeSet. This MCP result contains Core review status only.",
         },

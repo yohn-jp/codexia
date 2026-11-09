@@ -3,14 +3,8 @@ import test from "node:test";
 import type { MigrationContext } from "@codexia/migration";
 import { createAssistantMigrationProducer } from "./migration.js";
 
-const repository = {
-  provider: "local" as const,
-  repositoryId: "assistant-migration-test",
-  defaultBranch: "main",
-  ownerScope: "test-owner",
-  url: "file:///legacy/assistant",
-};
-const snapshot = { repository, remoteCommit: "b".repeat(40) };
+const repository = "assistant-migration-test";
+const snapshot = { projectId: repository, projectVersion: 12 };
 const settingsSourcePath = ".arcadia/llm-model-settings.json";
 const usageSourcePath = ".arcadia/llm-usage.jsonl";
 const settingsLegacyPath = "meta/scriptorium/modules/assistant/legacy/files/.arcadia/llm-model-settings.json";
@@ -50,7 +44,7 @@ function contextFor(input: {
       },
       async list(prefix) { return [...targets.keys()].filter((path) => path.startsWith(`${prefix}/`)).sort(); },
     },
-    repository,
+    projectId: repository,
     snapshot,
     enabledModules: new Set(input.enabled === false ? [] : ["assistant"]),
   };

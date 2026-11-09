@@ -14,7 +14,7 @@ function contextFor(input: {
   targetFiles?: string[];
   unreadableTargets?: string[];
   enabled?: boolean;
-  legacyRepositoryMappings?: Record<string, { provider: "github"; repositoryId: string; defaultBranch: string; ownerScope: string; url: string }>;
+  legacyProjectMappings?: Record<string, string>;
   sqliteProject?: Record<string, SqliteRow[]>;
   sqliteWorkspace?: Record<string, SqliteRow[]>;
 }): MigrationContext {
@@ -23,14 +23,8 @@ function contextFor(input: {
   );
   const targets = new Map(Object.entries(input.targets ?? {}).map(([path, content]) => [path, Buffer.from(content)]));
   const workspaceFiles = new Map(Object.entries(input.workspaceFiles ?? {}).map(([path, content]) => [path, Buffer.from(content)]));
-  const repository = {
-    provider: "local" as const,
-    repositoryId: "story-migration-test",
-    defaultBranch: "main",
-    ownerScope: "test-owner",
-    url: "file:///legacy/story",
-  };
-  const snapshot = { repository, remoteCommit: "b".repeat(40) };
+  const repository = "story-migration-test";
+  const snapshot = { projectId: repository, projectVersion: 12 };
   const sqliteProject = input.sqliteProject ?? {};
   const sqliteWorkspace = input.sqliteWorkspace ?? {};
   const sqliteTables = (tables: Record<string, SqliteRow[]>): SqliteTableInfo[] => Object.keys(tables).sort().map((name) => ({ name, sql: null, columns: [] }));
@@ -70,10 +64,10 @@ function contextFor(input: {
         return (input.targetFiles ?? []).filter((path) => path.startsWith(`${prefix}/`)).sort();
       },
     },
-    repository,
+    projectId: repository,
     snapshot,
     enabledModules: new Set(input.enabled === false ? [] : ["story"]),
-    ...(input.legacyRepositoryMappings ? { legacyRepositoryMappings: input.legacyRepositoryMappings } : {}),
+    ...(input.legacyProjectMappings ? { legacyProjectMappings: input.legacyProjectMappings } : {}),
   };
 }
 
@@ -411,9 +405,9 @@ test("maps legacy series project IDs to stable repository IDs and preserves sour
   });
   const result = await createStoryMigrationProducer().inspect(contextFor({
     workspaceFiles: { "app-state/series.json": source },
-    legacyRepositoryMappings: {
-      "old-bible": { provider: "github", repositoryId: "123", defaultBranch: "main", ownerScope: "owner", url: "https://github.com/o/bible" },
-      "old-work": { provider: "github", repositoryId: "456", defaultBranch: "main", ownerScope: "owner", url: "https://github.com/o/work" },
+    legacyProjectMappings: {
+      "old-bible": "123",
+      "old-work": "456",
     },
   }));
   const write = result.operations.flatMap((operation) => operation.writes).find((item) => item.path === "meta/scriptorium/modules/story/v1/series.json");
@@ -421,13 +415,13 @@ test("maps legacy series project IDs to stable repository IDs and preserves sour
   const settings = JSON.parse(write.content!) as Record<string, unknown>;
   assert.deepEqual(settings.futureTopLevel, ["keep"]);
   const series = (settings.series as Array<Record<string, unknown>>)[0]!;
-  assert.equal(series.bibleRepositoryId, "123");
-  assert.equal(series.bibleProjectId, "old-bible", "original source ID is retained for review/audit");
-  assert.deepEqual(series.memberRepositoryIds, ["456"]);
+  assert.equal(series.bibleProjectId, "123");
+  assert.equal(series.legacyBibleProjectId, "old-bible", "original source ID is retained for review/audit");
+  assert.deepEqual(series.memberProjectIds, ["456"]);
   assert.deepEqual(series.futureField, { keep: true });
   const binding = (settings.bindings as Array<Record<string, unknown>>)[0]!;
-  assert.equal(binding.repositoryId, "456");
-  assert.equal(binding.projectId, "old-work");
+  assert.equal(binding.projectId, "456");
+  assert.equal(binding.legacyProjectId, "old-work");
   assert.equal(binding.futureBinding, "keep");
   assert.equal(result.entries.find((entry) => entry.source === "app-state/series.json")?.category, "authoritative");
 });

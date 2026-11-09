@@ -13,14 +13,8 @@ import { buildLocationMap } from "./locationMap.js";
 import type { StoryEntity, StoryGraphInput } from "./types.js";
 
 const snapshot = {
-  repository: {
-    provider: "local" as const,
-    repositoryId: "repo-1",
-    defaultBranch: "main",
-    ownerScope: "owner-1",
-    url: "file:///repo-1",
-  },
-  remoteCommit: "a".repeat(40),
+  projectId: "repo-1",
+  projectVersion: 11,
 };
 
 function entity(

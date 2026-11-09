@@ -377,7 +377,7 @@ test("Story actions compose with Core over GitHub snapshots, approvals, recovery
     assert.equal(zukanRetry.data.created, false);
     assert.equal(zukanRetry.data.replayed, true);
     assert.equal(zukanRetry.data.proposalStatus.proposal.id, originalZukanProposal.id);
-    assert.equal(zukanRetry.data.proposalStatus.proposal.snapshot.remoteCommit, zukanCreated.proposals[0].snapshot.remoteCommit);
+    assert.equal(zukanRetry.data.proposalStatus.proposal.snapshot.projectVersion, zukanCreated.proposals[0].snapshot.projectVersion);
     assert.equal(zukanRetry.proposals, undefined, "the old proposal is read back and never rebased onto the newer snapshot");
     const changedZukanMeaning = await invoke(host, cookie, projectId, "story.zukan-suggestions.create", {
       ...zukanInput,
@@ -425,8 +425,8 @@ test("Story actions compose with Core over GitHub snapshots, approvals, recovery
 
     const overlayResult = await invoke(host, cookie, projectId, "story.series.overlay", {});
     assert.equal(overlayResult.ok, true, overlayResult.ok ? undefined : overlayResult.error.message);
-    assert.equal(overlayResult.data.workSnapshot.repository.repositoryId, workIdentity.repositoryId);
-    assert.equal(overlayResult.data.bibleSnapshot.repository.repositoryId, bibleIdentity.repositoryId);
+    assert.equal(overlayResult.data.workSnapshot.projectId, workIdentity.repositoryId);
+    assert.equal(overlayResult.data.bibleSnapshot.projectId, bibleIdentity.repositoryId);
     assert.equal(overlayResult.data.bibleSnapshot.remoteCommit, bibleHeadBefore);
     assert.equal(overlayResult.data.workEntities.find((entity) => entity.id === "char-uma")?.name, "Work Uma");
     assert.equal(overlayResult.data.bibleEntities.find((entity) => entity.id === "char-uma")?.name, "Bible Uma");
@@ -572,8 +572,8 @@ test("Story actions compose with Core over GitHub snapshots, approvals, recovery
     assert.ok(recoveredEntities.data.some((entity) => entity.id === "sc-p05-garden"), "a clean Core clone re-reads published Story entities from Git");
     const recoveredOverlay = await invoke(host, cookie, recoveredWork.id, "story.series.overlay", {});
     assert.equal(recoveredOverlay.ok, true, recoveredOverlay.ok ? undefined : recoveredOverlay.error.message);
-    assert.equal(recoveredOverlay.data.workSnapshot.repository.repositoryId, workIdentity.repositoryId);
-    assert.equal(recoveredOverlay.data.bibleSnapshot.repository.repositoryId, bibleIdentity.repositoryId);
+    assert.equal(recoveredOverlay.data.workSnapshot.projectId, workIdentity.repositoryId);
+    assert.equal(recoveredOverlay.data.bibleSnapshot.projectId, bibleIdentity.repositoryId);
     assert.equal(recoveredOverlay.data.workSnapshot.remoteCommit, await remoteHead(workUrl, workBranch, githubToken, askpass, workSeed));
     assert.equal(recoveredOverlay.data.bibleSnapshot.remoteCommit, bibleHeadBefore);
     assert.equal(recoveredOverlay.data.bibleEntities.find((entity) => entity.id === "char-uma")?.name, "Bible Uma");
