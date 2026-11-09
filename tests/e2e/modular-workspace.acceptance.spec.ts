@@ -312,14 +312,16 @@ async function signIn(page: Page, mode: "desktop" | "mobile"): Promise<void> {
 }
 
 async function createWorkspaceFixture(page: Page): Promise<WorkspaceFixture> {
+  const origin = new URL(page.url()).origin;
   const projectResponse = await page.request.post("/api/v1/persistence/projects", {
+    headers: { Origin: origin },
     data: { title: `Modular workspace ${randomUUID()}` },
   });
   expect(projectResponse.status()).toBe(201);
   const { project } = await projectResponse.json() as { project: { id: string; title: string } };
   const createDocument = async (input: { parentId?: string; kind: string; title: string; orderKey: string; markdown: string }) => {
     const response = await page.request.post(`/api/v1/persistence/projects/${project.id}/documents`, {
-      headers: { "Idempotency-Key": randomUUID() },
+      headers: { Origin: origin, "Idempotency-Key": randomUUID() },
       data: input,
     });
     expect(response.status(), `create ${input.title}`).toBe(201);
@@ -333,6 +335,7 @@ async function createWorkspaceFixture(page: Page): Promise<WorkspaceFixture> {
 }
 
 async function seedTermRegistry(page: Page, fixture: WorkspaceFixture): Promise<void> {
+  const origin = new URL(page.url()).origin;
   const projectPath = `/api/projects/${fixture.project.id}`;
   const snapshotResponse = await page.request.get(`${projectPath}/snapshot`);
   expect(snapshotResponse.ok()).toBe(true);
@@ -363,14 +366,16 @@ async function seedTermRegistry(page: Page, fixture: WorkspaceFixture): Promise<
   };
   const proposalId = `terms-proposal-${randomUUID()}`;
   const proposal = await page.request.post(`${projectPath}/proposals`, {
+    headers: { Origin: origin },
     data: { id: proposalId, snapshot: snapshotRead.snapshot, operations: [operation] },
   });
   expect(proposal.status()).toBe(201);
   const approval = await page.request.post(`${projectPath}/approvals`, {
+    headers: { Origin: origin },
     data: { proposalId, operationIds: [operation.id] },
   });
   expect(approval.status()).toBe(204);
-  const applied = await page.request.post(`${projectPath}/apply`, { data: operation });
+  const applied = await page.request.post(`${projectPath}/apply`, { headers: { Origin: origin }, data: operation });
   expect(applied.status()).toBe(201);
 }
 
