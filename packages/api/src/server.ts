@@ -2506,78 +2506,85 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     throw new Error("CODEXIA_HOSTED_MODE must be 1 or 0");
   }
   const hostedMode = hostedModeValue === "1";
-  if (hostedMode) {
-    if (readCodexiaEnvironment("AUTH_TOKEN") !== undefined || readCodexiaEnvironment("GITHUB_TOKEN") !== undefined) {
-      throw new Error("Static Codexia access and GitHub tokens are forbidden in hosted mode");
+  // Check the manuscript authority before initializing any workspace or listener.
+  const persistenceOptions = await postgresPersistenceOptions();
+  try {
+    if (hostedMode) {
+      if (readCodexiaEnvironment("AUTH_TOKEN") !== undefined || readCodexiaEnvironment("GITHUB_TOKEN") !== undefined) {
+        throw new Error("Static Codexia access and GitHub tokens are forbidden in hosted mode");
+      }
+      const assignment = await readRuntimeAssignment(readCodexiaEnvironment("RUNTIME_ASSIGNMENT_PATH") ?? HOSTED_ASSIGNMENT_PATH);
+      const profile = readCodexiaEnvironment("PROFILE") ?? process.env.CODEXIA_BUILD_PROFILE ?? "hosted";
+      if (profile !== "hosted") throw new Error("Hosted runtime requires the generated hosted profile");
+      const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory, assignment.enabledModuleIds);
+      const manifestIds = new Set<string>(runtimeOptions.manifests.map((manifest) => manifest.id));
+      if (assignment.enabledModuleIds.some((id) => !manifestIds.has(id))) {
+        throw new Error("Hosted assignment enables modules absent from the immutable composition");
+      }
+      const authorization = createHostedAuthorizationPolicy({ assignment });
+      const gitCredentialProvider = createHostedGitCredentialProvider({ assignment, runtimeIdentityPath: HOSTED_RUNTIME_IDENTITY_PATH });
+      const store = new CoreStore({
+        dataDir: dataDirectory,
+        hostedRepository: {
+          repositoryId: assignment.repositoryId,
+          repositoryLocator: assignment.repositoryLocator,
+          instanceId: assignment.instanceId,
+          runtimeEpoch: assignment.runtimeEpoch,
+        },
+        gitCredentialProvider,
+      });
+      let projects = await store.listProjects();
+      if (projects.length > 1) throw new Error("Hosted data directory contains multiple repository registrations");
+      let project = projects[0];
+      if (!project) {
+        project = await store.registerProject({ url: assignment.repositoryLocator });
+        projects = [project];
+      }
+      if (projects.length !== 1 || !project) throw new Error("Hosted repository registration is unavailable");
+      let identity;
+      try { identity = await store.registeredRepositoryIdentity(project.id); }
+      catch {
+        await store.observe(project.id);
+        identity = await store.registeredRepositoryIdentity(project.id);
+      }
+      if (identity.provider !== "github" || identity.repositoryId !== String(assignment.repositoryId)) {
+        throw new Error("Hosted Core repository identity does not match the signed assignment");
+      }
+      const producerRevision = readCodexiaEnvironment("PRODUCER_REVISION");
+      if (!producerRevision || !/^[a-f0-9]{40}$/u.test(producerRevision)) {
+        throw new Error("CODEXIA_PRODUCER_REVISION must be an immutable 40-character source revision");
+      }
+      return await startServer({
+        store,
+        ...persistenceOptions,
+        hosted: { assignment, projectId: project.id, authorization, producerRevision },
+        trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
+        runtimeOptions,
+        usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
+        profile,
+      });
     }
-    const assignment = await readRuntimeAssignment(readCodexiaEnvironment("RUNTIME_ASSIGNMENT_PATH") ?? HOSTED_ASSIGNMENT_PATH);
-    const profile = readCodexiaEnvironment("PROFILE") ?? process.env.CODEXIA_BUILD_PROFILE ?? "hosted";
-    if (profile !== "hosted") throw new Error("Hosted runtime requires the generated hosted profile");
-    const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory, assignment.enabledModuleIds);
-    const manifestIds = new Set<string>(runtimeOptions.manifests.map((manifest) => manifest.id));
-    if (assignment.enabledModuleIds.some((id) => !manifestIds.has(id))) {
-      throw new Error("Hosted assignment enables modules absent from the immutable composition");
-    }
-    const authorization = createHostedAuthorizationPolicy({ assignment });
-    const gitCredentialProvider = createHostedGitCredentialProvider({ assignment, runtimeIdentityPath: HOSTED_RUNTIME_IDENTITY_PATH });
+    const authToken = readCodexiaEnvironment("AUTH_TOKEN")?.trim();
+    if (!authToken || authToken.length < 32) throw new Error("CODEXIA_AUTH_TOKEN is required and must contain at least 32 characters");
+    const profile = readCodexiaEnvironment("PROFILE") ?? process.env.CODEXIA_BUILD_PROFILE ?? "core";
+    const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory);
     const store = new CoreStore({
       dataDir: dataDirectory,
-      hostedRepository: {
-        repositoryId: assignment.repositoryId,
-        repositoryLocator: assignment.repositoryLocator,
-        instanceId: assignment.instanceId,
-        runtimeEpoch: assignment.runtimeEpoch,
-      },
-      gitCredentialProvider,
+      ...(readCodexiaEnvironment("GITHUB_TOKEN") ? { githubToken: readCodexiaEnvironment("GITHUB_TOKEN") } : {}),
     });
-    let projects = await store.listProjects();
-    if (projects.length > 1) throw new Error("Hosted data directory contains multiple repository registrations");
-    let project = projects[0];
-    if (!project) {
-      project = await store.registerProject({ url: assignment.repositoryLocator });
-      projects = [project];
-    }
-    if (projects.length !== 1 || !project) throw new Error("Hosted repository registration is unavailable");
-    let identity;
-    try { identity = await store.registeredRepositoryIdentity(project.id); }
-    catch {
-      await store.observe(project.id);
-      identity = await store.registeredRepositoryIdentity(project.id);
-    }
-    if (identity.provider !== "github" || identity.repositoryId !== String(assignment.repositoryId)) {
-      throw new Error("Hosted Core repository identity does not match the signed assignment");
-    }
-    const producerRevision = readCodexiaEnvironment("PRODUCER_REVISION");
-    if (!producerRevision || !/^[a-f0-9]{40}$/u.test(producerRevision)) {
-      throw new Error("CODEXIA_PRODUCER_REVISION must be an immutable 40-character source revision");
-    }
-    return startServer({
+    return await startServer({
       store,
-      ...await postgresPersistenceOptions(),
-      hosted: { assignment, projectId: project.id, authorization, producerRevision },
+      ...persistenceOptions,
+      authToken,
       trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
       runtimeOptions,
       usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
       profile,
     });
+  } catch (error) {
+    await persistenceOptions.persistence?.close();
+    throw error;
   }
-  const authToken = readCodexiaEnvironment("AUTH_TOKEN")?.trim();
-  if (!authToken || authToken.length < 32) throw new Error("CODEXIA_AUTH_TOKEN is required and must contain at least 32 characters");
-  const profile = readCodexiaEnvironment("PROFILE") ?? process.env.CODEXIA_BUILD_PROFILE ?? "core";
-  const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory);
-  const store = new CoreStore({
-    dataDir: dataDirectory,
-    ...(readCodexiaEnvironment("GITHUB_TOKEN") ? { githubToken: readCodexiaEnvironment("GITHUB_TOKEN") } : {}),
-  });
-  return startServer({
-    store,
-    ...await postgresPersistenceOptions(),
-    authToken,
-    trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
-    runtimeOptions,
-    usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
-    profile,
-  });
 }
 
 async function postgresReady(persistence: Persistence | undefined): Promise<boolean> {
