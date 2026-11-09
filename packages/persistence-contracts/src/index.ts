@@ -35,6 +35,48 @@ export interface CreateProjectCommand {
   settings?: JsonObject;
 }
 
+export interface UpdateProjectCommand {
+  projectId: ProjectId;
+  expectedVersion: number;
+  title?: string;
+  settings?: JsonObject;
+}
+
+/** Metadata mutations preserve immutable body revisions. */
+export interface UpdateDocumentCommand {
+  projectId: ProjectId;
+  documentId: DocumentId;
+  expectedVersion: number;
+  parentId?: DocumentId | null;
+  title?: string;
+  orderKey?: string;
+}
+
+export interface DeleteDocumentCommand {
+  projectId: ProjectId;
+  documentId: DocumentId;
+  expectedVersion: number;
+}
+
+/** Durable module data; caches remain outside this authoritative record store. */
+export interface ModuleRecord {
+  projectId: ProjectId;
+  moduleId: string;
+  key: string;
+  value: JsonObject;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveModuleRecordCommand {
+  projectId: ProjectId;
+  moduleId: string;
+  key: string;
+  value: JsonObject;
+  expectedVersion: number | null;
+}
+
 export type DocumentKind = string;
 
 export interface Document {
@@ -303,6 +345,7 @@ export type ChangeSetStatus = "proposed" | "approved" | "applied" | "rejected";
 
 export type ChangeSetResource =
   | "document"
+  | "module_record"
   | "knowledge_node"
   | "knowledge_alias"
   | "knowledge_relation"
@@ -333,6 +376,9 @@ export interface ChangeSetProvenance {
 }
 
 export type ChangeSetOperation =
+  | { type: "document.update"; command: UpdateDocumentCommand }
+  | { type: "document.delete"; command: DeleteDocumentCommand }
+  | { type: "module.record.save"; command: SaveModuleRecordCommand }
   | { type: "document.create"; command: CreateDocumentCommand }
   | { type: "document.save"; command: SaveDocumentCommand }
   | { type: "document.restore"; command: RestoreDocumentRevisionCommand }
@@ -383,6 +429,8 @@ export interface ChangeSetResult {
 
 export type ChangeSetOperationResult =
   | DocumentWriteResult
+  | Document
+  | ModuleRecord
   | KnowledgeNode
   | KnowledgeAlias
   | KnowledgeRelation
@@ -398,6 +446,8 @@ export interface ChangeSetApplicationResult {
 }
 
 export interface PersistenceReader {
+  getModuleRecord(projectId: ProjectId, moduleId: string, key: string): Promise<ModuleRecord | undefined>;
+  listModuleRecords(projectId: ProjectId, moduleId?: string): Promise<readonly ModuleRecord[]>;
   getProject(projectId: ProjectId): Promise<Project | undefined>;
   listProjects(limit?: number): Promise<readonly Project[]>;
   getDocument(projectId: ProjectId, documentId: DocumentId): Promise<Document | undefined>;
@@ -420,6 +470,12 @@ export interface PersistenceReader {
 }
 
 export interface PersistenceTransaction extends PersistenceReader {
+  /** Lock and fence a project revision before applying a snapshot-bound mutation. */
+  assertProjectVersion(projectId: ProjectId, expectedVersion: number): Promise<void>;
+  updateProject(command: UpdateProjectCommand): Promise<Project>;
+  updateDocument(command: UpdateDocumentCommand): Promise<Document>;
+  deleteDocument(command: DeleteDocumentCommand): Promise<Document>;
+  saveModuleRecord(command: SaveModuleRecordCommand): Promise<ModuleRecord>;
   createProject(command: CreateProjectCommand): Promise<Project>;
   createDocument(command: CreateDocumentCommand): Promise<DocumentWriteResult>;
   saveDocument(command: SaveDocumentCommand): Promise<DocumentWriteResult>;
