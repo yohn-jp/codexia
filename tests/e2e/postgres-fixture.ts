@@ -5,7 +5,8 @@ export interface FixtureProject { id: string; title: string }
 export interface FixtureDocument { id: string; title: string; kind: string; headRevisionId: string | null }
 
 export async function ownerLogin(page: Page, path = "/desktop/"): Promise<void> {
-  await page.goto(path);
+  await page.goto(new URL(path, process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`).toString());
+  await expect(page.getByLabel("アクセス・トークン").or(page.getByRole("heading", { name: "Database workspace" }))).toBeVisible();
   if (await page.getByLabel("アクセス・トークン").isVisible()) {
     await page.getByLabel("アクセス・トークン").fill(authToken);
     await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
@@ -45,4 +46,34 @@ export async function fillDraft(page: Page, text: string): Promise<void> {
   await editor.fill(text);
   await expect(editor).toHaveText(text);
   await expect(page.getByText("IndexedDB回復Journalに保存済み", { exact: true })).toBeVisible();
+}
+
+export async function createWritingFixture(page: Page, mode: "desktop" | "mobile" = "desktop", title = "日本語の原稿"): Promise<{ project: FixtureProject; scene: FixtureDocument; second: FixtureDocument }> {
+  await ownerLogin(page, `/${mode}/`);
+  const headers = { Origin: new URL(page.url()).origin };
+  const createdProject = await page.request.post(new URL("/api/v1/persistence/projects", page.url()).toString(), { headers, data: { title: `Writing ${crypto.randomUUID()}` } });
+  expect(createdProject.status()).toBe(201);
+  const { project } = await createdProject.json() as { project: FixtureProject };
+  async function create(title: string, orderKey: string): Promise<FixtureDocument> {
+    const response = await page.request.post(new URL(`/api/v1/persistence/projects/${project.id}/documents`, page.url()).toString(), { headers: { ...headers, "Idempotency-Key": crypto.randomUUID() }, data: { kind: "scene", title, orderKey, markdown: "最初の本文。\n次の文章です。" } });
+    expect(response.status()).toBe(201);
+    return (await response.json() as { document: FixtureDocument }).document;
+  }
+  const scene = await create(title, "a");
+  const second = await create("次のシーン", "b");
+  await page.reload();
+  if (mode === "mobile") await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "作品", exact: true }).click();
+  await page.getByLabel("開く作品").selectOption(project.id);
+  await page.locator(".pg-document-list").getByRole("button", { name: new RegExp(title) }).click();
+  if (mode === "mobile") await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "書く", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "原稿 Markdown" })).toBeVisible();
+  return { project, scene, second };
+}
+
+export async function readPersistenceDrafts(page: Page): Promise<Array<{ key: string; projectId: string; documentId: string; markdown: string; generation: number }>> {
+  return page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => { const open = indexedDB.open("scriptorium-recovery"); open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error); });
+    try { return await new Promise((resolve, reject) => { const request = db.transaction("persistenceDrafts").objectStore("persistenceDrafts").getAll(); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
+    finally { db.close(); }
+  });
 }
