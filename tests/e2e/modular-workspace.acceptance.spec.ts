@@ -393,7 +393,7 @@ async function openFixtureScene(page: Page, mode: "desktop" | "mobile", sceneInd
   await page.locator(".pg-document-list").getByRole("button", { name: new RegExp(scene!.document.title) }).click();
   if (mode === "mobile") {
     await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "書く", exact: true }).click();
-    await page.getByRole("tablist", { name: "Workspace panels" }).getByRole("tab", { name: "Editor", exact: true }).click();
+    await page.getByRole("tablist", { name: "Workspace panels" }).getByRole("tab", { name: "原稿", exact: true }).click();
   }
   fixture.scene = scene!;
   await expect(page.getByRole("heading", { name: scene!.document.title, exact: true })).toBeVisible();
@@ -570,9 +570,9 @@ test("desktop workspace presets, arbitrary docking, panel visibility and layout 
   await expectDraft(page, fixture.scene.document.id, draft);
 
   await openPanelMenu(page);
-  await toolbar.getByRole("button", { name: "Hide Editor", exact: true }).click();
+  await toolbar.getByRole("button", { name: "Hide 原稿", exact: true }).click();
   await expect(workspace.locator('[data-workspace-panel="editor"]')).toHaveCount(0);
-  await toolbar.getByRole("button", { name: "Show Editor", exact: true }).click();
+  await toolbar.getByRole("button", { name: "Show 原稿", exact: true }).click();
   await expect(workspace.locator('[data-workspace-panel="editor"] .cm-content')).toHaveText(draft);
   const savedCustomLayout = await saveWorkspace(page);
   expect(savedCustomLayout.preset).toBe("custom");
@@ -614,7 +614,7 @@ test("mobile workspace tabs support keyboard navigation and preserve the editor 
   const fixture = await openFixtureScene(page, "mobile");
 
   const tabs = page.getByRole("tablist", { name: "Workspace panels" });
-  const editorTab = tabs.getByRole("tab", { name: "Editor", exact: true });
+  const editorTab = tabs.getByRole("tab", { name: "原稿", exact: true });
   await expect(tabs).toBeVisible();
   await expect(editorTab).toHaveAttribute("aria-selected", "true");
 
@@ -668,7 +668,7 @@ test("mobile route buttons restore their workspace panel without adding duplicat
   const historyLengthAtLibrary = await page.evaluate(() => history.length);
   expect(new URL(libraryUrl).searchParams.get("view")).toBe("library");
   const panelTabs = page.getByRole("tablist", { name: "Workspace panels" });
-  await panelTabs.getByRole("tab", { name: "Inspector", exact: true }).click();
+  await panelTabs.getByRole("tab", { name: "KnowledgeとEvidence", exact: true }).click();
   await expect(page.locator('[data-workspace-panel="inspector"]')).toBeVisible();
   await navigation.getByRole("button", { name: "作品", exact: true }).click();
   await expect(page.locator('[data-workspace-panel="outline"]')).toBeVisible();
@@ -927,7 +927,7 @@ test("desktop floating panels preserve drafts and saved layout geometry", async 
   await expectDraft(page, fixture.scene.document.id, draft);
 
   await workspace.locator('[data-workspace-panel="outline"]')
-    .getByRole("button", { name: "Float Outline" }).click();
+    .getByRole("button", { name: "Float 作品と構成" }).click();
   const floating = workspace.locator('[data-floating-panel="outline"]');
   await expect(floating).toBeVisible();
   await expect(manuscript).toHaveText(draft);
@@ -956,7 +956,7 @@ test("desktop floating panels preserve drafts and saved layout geometry", async 
   await page.locator('[data-floating-panel="outline"]')
     .getByRole("button", { name: "パネルをドックへ戻す" }).click();
   await expect(page.locator('[data-workspace-panel="outline"]')).toBeVisible();
-  await page.getByRole("tab", { name: "Editor", exact: true }).click();
+  await page.getByRole("tab", { name: "原稿", exact: true }).click();
   await expect(page.locator(".cm-content")).toHaveText(draft);
 });
 
@@ -967,7 +967,7 @@ test("a failed workspace record write preserves the previous dock and floating l
 
   const workspace = page.locator(".st-workspace");
   await workspace.locator('[data-workspace-panel="outline"]')
-    .getByRole("button", { name: "Float Outline" }).click();
+    .getByRole("button", { name: "Float 作品と構成" }).click();
   const floating = workspace.locator('[data-floating-panel="outline"]');
   await expect(floating).toBeVisible();
   await saveWorkspace(page);
