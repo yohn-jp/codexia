@@ -22,6 +22,7 @@ import { MobileShell } from "../shells/mobile/MobileShell";
 import type { WorkspacePanel, WorkspacePanelRequest } from "../application/contracts";
 import { applyThemeMode, loadThemeMode, persistThemeMode } from "../theme";
 import { ThemeControl } from "../components/ThemeControl";
+import { JobInbox } from "../components/JobInbox";
 import { MobileReadingPager } from "../editor/MobileReadingPager";
 import { TermAwareRubyText } from "../editor/TermAwareRubyText";
 import { WRITING_SYMBOLS } from "../editor/writingSymbols";
@@ -1212,7 +1213,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const currentDesktopDurability = desktopDurabilityFor(active);
   return <div className={`pg-workspace pg-shell pg-${mode}`}>
     <Shell mode={mode}
-      header={<><h1>Database workspace</h1><ThemeControl mode={theme} error={themeError} onChange={(next) => { setTheme(next); applyThemeMode(next); try { persistThemeMode(next); setThemeError(""); } catch { setThemeError("外観設定をこのブラウザーへ保存できませんでした。"); } }} /><button type="button" onClick={() => void protectTransition().then((allowed) => { if (allowed) onSignOut(); })}>ログアウト</button></>}
+      header={<><h1>Database workspace</h1><JobInbox /><ThemeControl mode={theme} error={themeError} onChange={(next) => { setTheme(next); applyThemeMode(next); try { persistThemeMode(next); setThemeError(""); } catch { setThemeError("外観設定をこのブラウザーへ保存できませんでした。"); } }} /><button type="button" onClick={() => void protectTransition().then((allowed) => { if (allowed) onSignOut(); })}>ログアウト</button></>}
       documentTitle={active?.document.title}
       documentContext={project?.title}
       desktopDurability={currentDesktopDurability}
