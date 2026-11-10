@@ -325,6 +325,9 @@ export class CoreStore implements MutationCoordinator {
       }
 
       state.approvedOperationIds = [...new Set([...state.approvedOperationIds, ...approval.operationIds])];
+      const approvers = { ...state.approvedByOperationId };
+      for (const id of approval.operationIds) approvers[id] ??= approval.authorScope;
+      state.approvedByOperationId = approvers;
       state.state = state.approvedOperationIds.length === state.proposal.operations.length
         ? "approved"
         : "partially_approved";
@@ -338,7 +341,7 @@ export class CoreStore implements MutationCoordinator {
     });
   }
 
-  private async applyWrites(tx: PersistenceTransaction, manifest: Manifest, operation: ChangeOperation): Promise<void> {
+  private async applyWrites(tx: PersistenceTransaction, manifest: Manifest, operation: ChangeOperation, authorId: string): Promise<void> {
     const projectId=pid(operation.projectId);
     const metadataWrites = operation.writes.filter((write) => /^plot\/volumes\/.+\.yaml$/.test(write.path));
     // Parents are inserted before children; removals are processed deepest first.
@@ -442,7 +445,7 @@ export class CoreStore implements MutationCoordinator {
             title,
             orderKey: String(data.order ?? "0"),
             markdown: manuscript?.content ?? "",
-            authorId: "approved-author",
+            authorId,
             idempotencyKey: `${operation.id}:${operation.generation}:${id}`,
           })).document;
           if (manuscriptPath) manuscriptCreates.add(manuscriptPath);
@@ -485,7 +488,7 @@ export class CoreStore implements MutationCoordinator {
           baseRevisionId: revision.id,
           changes: [{ fromUtf16: 0, toUtf16: revision.markdown.length, insert: write.content }],
           resultingSha256: hash(write.content),
-          authorId: "approved-author",
+          authorId,
           clientId: "core",
           idempotencyKey: `${operation.id}:${operation.generation}:${write.path}`,
         });
@@ -549,7 +552,10 @@ export class CoreStore implements MutationCoordinator {
         }
       }
 
-      await this.applyWrites(transaction, manifest, operation);
+      const authorId = state.approvedByOperationId?.[operation.id]
+        ?? (state as ProposalStatus & { approvedBy?: string }).approvedBy;
+      if (!authorId) fail(409, "approval_actor_missing", "Approved operation has no durable author identity");
+      await this.applyWrites(transaction, manifest, operation, authorId);
       const after = await this.currentManifest(transaction, projectId);
       const receipt: ApplyReceipt = {
         operationId: operation.id,
