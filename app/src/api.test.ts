@@ -211,3 +211,23 @@ test("module invocations bind the exact PostgreSQL project revision", async () =
     globalThis.fetch = originalFetch;
   }
 });
+
+test("document deletion accepts the canonical PostgreSQL response envelope", async () => {
+  const originalFetch = globalThis.fetch;
+  const document = {
+    id: "document-1", projectId: "project-1", parentId: null, kind: "scene",
+    title: "Deleted scene", orderKey: "0001", headRevisionId: "revision-1",
+    version: 2, createdAt: "2026-11-09T00:00:00Z", updatedAt: "2026-11-09T00:01:00Z",
+  };
+  globalThis.fetch = async (input, init) => {
+    assert.equal(String(input), "/api/v1/persistence/projects/project-1/documents/document-1");
+    assert.equal(init?.method, "DELETE");
+    assert.deepEqual(JSON.parse(String(init?.body)), { expectedVersion: 1 });
+    return Response.json({ document }, { status: 200 });
+  };
+  try {
+    assert.deepEqual(await api.deletePersistenceDocument("project-1", "document-1", 1), { document });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
