@@ -312,8 +312,14 @@ test("unmounting a contribution aborts its in-flight action request", async ({ p
   let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/api/projects/*/actions/publishing.project.tree", async (route) => { observed(route.request()); await gate; try { await route.abort(); } catch { /* already cancelled on unmount */ } });
   try {
-    const tab = page.getByRole("tab", { name: "EPUB 書き出し", exact: true });
-    await tab.click(); const request = await seen; const failed = page.waitForEvent("requestfailed", (candidate) => candidate === request);
+    // The PostgreSQL workspace mounts optional modules through its panel menu,
+    // not the retired Git workspace tab strip.
+    const menu = page.locator(".st-workspace-panel-menu");
+    await menu.locator("summary").click();
+    await menu.getByRole("button", { name: "Show EPUB 書き出し", exact: true }).click();
+    await expect(page.locator('[data-workspace-panel="module:publishing.export.epub"]')).toBeVisible();
+    const request = await seen;
+    const failed = page.waitForEvent("requestfailed", (candidate) => candidate === request);
     await page.getByRole("button", { name: "ログアウト" }).click();
     await expect(page.getByRole("heading", { name: "作品を開く" })).toBeVisible(); expect((await failed).failure()).not.toBeNull();
   } finally { release(); }
