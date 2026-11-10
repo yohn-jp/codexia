@@ -125,15 +125,19 @@ test("both production Shells preserve recoverable Japanese drafts and the Mobile
   }
 });
 
-test("profile-selected workspace panels match contribution kinds and mount one at a time in both Shells", async ({ page }) => {
+test("profile-selected workspace panels remain discoverable in the PostgreSQL workspace", async ({ page }) => {
   const { project } = await createWritingFixture(page);
   const response = await page.request.get(`/api/projects/${project.id}/contributions`); expect(response.ok()).toBe(true);
   const catalog = await response.json();
   const contributions = Array.isArray(catalog) ? catalog : catalog.contributions;
   expect(Array.isArray(contributions)).toBe(true);
-  await page.getByText("Panels", { exact: true }).click();
+  const menu = page.locator(".st-workspace-panel-menu");
+  await menu.locator("summary").click();
   for (const item of contributions.filter((item: { kind?: string; contexts?: string[] }) => (item.kind ?? "panel") === "panel" && (!item.contexts || item.contexts.includes("workspace")))) {
-    await expect(page.getByRole("checkbox", { name: item.title })).toBeVisible();
+    const row = menu.locator(".st-workspace-panel-menu-item").filter({
+      has: page.getByText(item.title, { exact: true }),
+    });
+    await expect(row.getByRole("button").first()).toBeVisible();
   }
   await expect(editor(page)).toBeVisible();
 });
