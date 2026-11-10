@@ -22,6 +22,7 @@ import { MobileShell } from "../shells/mobile/MobileShell";
 import type { WorkspacePanel, WorkspacePanelRequest } from "../application/contracts";
 import { applyThemeMode, loadThemeMode, persistThemeMode } from "../theme";
 import { ThemeControl } from "../components/ThemeControl";
+import { JobInbox } from "../components/JobInbox";
 import { MobileReadingPager } from "../editor/MobileReadingPager";
 import { TermAwareRubyText } from "../editor/TermAwareRubyText";
 import { WRITING_SYMBOLS } from "../editor/writingSymbols";
@@ -974,11 +975,19 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     return results.flatMap((result) => result.status === "fulfilled" && result.value.ok && snapshotKey(result.value.snapshot) === snapshotKey(moduleSnapshot) && Array.isArray((result.value.data as { spans?: unknown })?.spans) ? (result.value.data as { spans: EditorTermSpan[] }).spans : []);
   }, [moduleSnapshot, modules, contributions, projectId]);
   const navigateReference = useCallback(async (path: string): Promise<void> => {
-    const file = moduleFilesRef.current.find((item) => item.path === path);
-    const target = documents.find((item) => file?.revision && item.headRevisionId === file.revision);
+    // Snapshot file revisions are content hashes; PostgreSQL headRevisionId is a
+    // revision UUID. Never equate them when resolving a module's document link.
+    const canonicalPath = /^documents\/([^/]+)\.md$/u.exec(path);
+    let target = canonicalPath ? documents.find((item) => item.id === canonicalPath[1]) : undefined;
+    if (!target) {
+      const resolution = await api.action(projectId, "core.document.resolve", { path }, undefined, moduleSnapshot ?? undefined);
+      if (!resolution.ok) throw new Error(resolution.error.message);
+      const sceneId = (resolution.data as { sceneId?: unknown }).sceneId;
+      target = documents.find((item) => item.id === sceneId);
+    }
     if (!target) throw new Error("この作品の文書が見つかりません。");
     if (!await selectDocument(target.id)) throw new Error("回復JournalまたはIMEを確認できないため、参照先を開けませんでした。");
-  }, [documents, selectDocument]);
+  }, [documents, moduleSnapshot, projectId, selectDocument]);
   const handleTermNavigate = useCallback((path: string) => {
     void navigateReference(path).catch((error) => setPageError(error instanceof Error ? error.message : "参照を開けませんでした。"));
   }, [navigateReference]);
@@ -1212,7 +1221,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const currentDesktopDurability = desktopDurabilityFor(active);
   return <div className={`pg-workspace pg-shell pg-${mode}`}>
     <Shell mode={mode}
-      header={<><h1>Database workspace</h1><ThemeControl mode={theme} error={themeError} onChange={(next) => { setTheme(next); applyThemeMode(next); try { persistThemeMode(next); setThemeError(""); } catch { setThemeError("外観設定をこのブラウザーへ保存できませんでした。"); } }} /><button type="button" onClick={() => void protectTransition().then((allowed) => { if (allowed) onSignOut(); })}>ログアウト</button></>}
+      header={<><h1>Database workspace</h1><JobInbox /><ThemeControl mode={theme} error={themeError} onChange={(next) => { setTheme(next); applyThemeMode(next); try { persistThemeMode(next); setThemeError(""); } catch { setThemeError("外観設定をこのブラウザーへ保存できませんでした。"); } }} /><button type="button" onClick={() => void protectTransition().then((allowed) => { if (allowed) onSignOut(); })}>ログアウト</button></>}
       documentTitle={active?.document.title}
       documentContext={project?.title}
       desktopDurability={currentDesktopDurability}

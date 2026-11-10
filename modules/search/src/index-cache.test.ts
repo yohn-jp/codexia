@@ -58,6 +58,7 @@ function sourceFactory(counters: { enumerate: number; changes: number; readPaths
 test("index cache filters project data to canonical textual document roots", async () => {
   const first = snapshot("repo-a", 11, {
     "manuscript/v1/c1/s1.md": "Moonlit harbor",
+    "documents/pg-scene-1.md": "A submerged brass archive",
     "plot/v1/c1/s1.yaml": "name: harbor",
     "bible/places/harbor.yaml": "description: moonlit",
     "meta/scratch/notes.md": "local note",
@@ -71,11 +72,14 @@ test("index cache filters project data to canonical textual document roots", asy
   const cache = new SnapshotIndexCache(sourceFactory(counters));
   const indexed = await cache.get(reader(first), new AbortController().signal);
   assert.deepEqual([...indexed.documents.keys()].sort(), [
-    "bible/places/harbor.yaml", "manuscript/v1/c1/s1.md", "meta/scratch/notes.md", "plot/v1/c1/s1.yaml",
+    "bible/places/harbor.yaml", "documents/pg-scene-1.md", "manuscript/v1/c1/s1.md", "meta/scratch/notes.md", "plot/v1/c1/s1.yaml",
   ]);
   assert.equal(counters.readPaths.some((path) => path.startsWith("meta/scriptorium/")), false);
   assert.equal(counters.readPaths.some((path) => path.startsWith("attachments/")), false);
   assert.equal(isSearchableDocumentPath("meta/scriptorium/modules/search/terms.json"), false);
+  assert.equal(isSearchableDocumentPath("documents/pg-scene-1.md"), true);
+  assert.equal(isSearchableDocumentPath("documents/.hidden/secret.md"), false);
+  assert.equal(isSearchableDocumentPath("documents/pg-scene-1.png"), false);
 });
 
 test("unchanged snapshots reuse the index and changed revisions update and remove only their entries", async () => {
