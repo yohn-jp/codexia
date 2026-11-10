@@ -496,7 +496,7 @@ export const api = {
   persistenceNodes: (projectId: string, limit = 200, signal?: AbortSignal) => request(dto.persistenceNodes,
     persistencePath(projectId, `nodes?${new URLSearchParams({ limit: String(limit) })}`), { ...(signal ? { signal } : {}) }),
   updatePersistenceDocument: (projectId: string, documentId: string, command: { expectedVersion: number; title?: string; parentId?: string | null; orderKey?: string }) => request(dto.persistenceDocumentEnvelope, persistencePath(projectId, `documents/${encodeURIComponent(documentId)}/metadata`), { method: "PATCH", body: JSON.stringify(command) }),
-  deletePersistenceDocument: (projectId: string, documentId: string, expectedVersion: number) => request(dto.empty, persistencePath(projectId, `documents/${encodeURIComponent(documentId)}`), { method: "DELETE", body: JSON.stringify({ expectedVersion }) }),
+  deletePersistenceDocument: (projectId: string, documentId: string, expectedVersion: number) => request(dto.persistenceDocumentEnvelope, persistencePath(projectId, `documents/${encodeURIComponent(documentId)}`), { method: "DELETE", body: JSON.stringify({ expectedVersion }) }),
   createPersistenceDocument: (
     projectId: string,
     command: Omit<CreateDocumentCommand, "projectId" | "authorId">,
