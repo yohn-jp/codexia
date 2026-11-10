@@ -269,7 +269,7 @@ test('Cosign identity verification rejects versions affected by GHSA-fx35-mq7g-6
 });
 
 
-test('browser artifacts bind public modules to the launcher and exclude them from PostgreSQL shells', async () => {
+test('browser artifacts bind the selected module closure to every reachable UI entry', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'codexia-browser-closure-'));
   const source = '../modules/story/dist/browser.js';
   const manifests = new Map();
@@ -289,14 +289,16 @@ test('browser artifacts bind public modules to the launcher and exclude them fro
   }
   try {
     await emit('', true);
-    await emit('desktop', false);
-    await emit('mobile', false);
-    const records = await browserArtifactRecords(directory, ['story']);
-    assert.equal(records.files.length, 7);
     await emit('desktop', true);
-    await assert.rejects(browserArtifactRecords(directory, ['story']), /different browser module closure/);
-    await rm(path.join(directory, 'app/dist/desktop/assets/story-AbCd1234.js'));
+    await emit('mobile', true);
+    const records = await browserArtifactRecords(directory, ['story']);
+    assert.equal(records.files.length, 9);
     await emit('desktop', false);
+    await assert.rejects(browserArtifactRecords(directory, ['story']), /different browser module closure/);
+    await emit('desktop', true);
+    await emit('mobile', false);
+    await assert.rejects(browserArtifactRecords(directory, ['story']), /different browser module closure/);
+    await emit('mobile', true);
     const launcher = manifests.get('');
     launcher['index.html'].dynamicImports = [];
     await writeFile(path.join(directory, 'app/dist/.vite/manifest.json'), JSON.stringify(launcher));
