@@ -824,6 +824,12 @@ test("PostgreSQL API restart preserves canonical content and replays the exact b
   await expectDraft(page, fixture.scene.document.id, authorText);
   await saveStarted;
   await restartApi();
+  // Owner sessions are process-local and deliberately expire across API replacement.
+  // Reauthenticate before asserting canonical PostgreSQL data and journal replay.
+  const login = await page.request.post("/api/login", {
+    headers: { Origin: new URL(page.url()).origin }, data: { token: authToken },
+  });
+  expect(login.status()).toBe(200);
   releaseSave();
   await expect(page.getByText("PostgreSQL保存を確認できません", { exact: true })).toBeVisible();
   expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(INITIAL_SCENE_ONE);
@@ -933,9 +939,9 @@ test("desktop floating panels preserve drafts and saved layout geometry", async 
   await expect(manuscript).toHaveText(draft);
 
   const editorPanel = workspace.locator('[data-workspace-panel="editor"]');
-  await editorPanel.getByRole("button", { name: "Maximize Editor" }).click();
+  await editorPanel.getByRole("button", { name: "Maximize 原稿" }).click();
   await expect(editorPanel).toHaveClass(/is-maximized/);
-  await editorPanel.getByRole("button", { name: "Restore Editor" }).click();
+  await editorPanel.getByRole("button", { name: "Restore 原稿" }).click();
   await expect(editorPanel).not.toHaveClass(/is-maximized/);
 
   await workspaceToolbar(page).getByRole("button", { name: "Save layout", exact: true }).click();
