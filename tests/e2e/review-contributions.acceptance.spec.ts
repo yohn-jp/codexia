@@ -30,7 +30,7 @@ interface ProposalStatus {
 async function createReviewProject(page: Page): Promise<Project> {
   const origin = new URL(page.url()).origin;
   const title = `Review Contributions ${randomUUID()}`;
-  const projectResponse = await page.request.post(`${origin}/api/projects`, { data: { title } });
+  const projectResponse = await page.request.post(`${origin}/api/projects`, { headers: { Origin: origin }, data: { title } });
   expect(projectResponse.status(), await projectResponse.text()).toBe(201);
   const project = await projectResponse.json() as Project;
   const snapshotResponse = await page.request.get(`${origin}/api/projects/${encodeURIComponent(project.id)}/snapshot`);
@@ -108,15 +108,17 @@ async function createReviewProject(page: Page): Promise<Project> {
     message: "Seed Story and Speaker review data in PostgreSQL",
   };
   const proposalResponse = await page.request.post(`${origin}/api/projects/${encodeURIComponent(project.id)}/proposals`, {
+    headers: { Origin: origin },
     data: { id: randomUUID(), snapshot: current.snapshot, operations: [operation] },
   });
   expect(proposalResponse.status(), await proposalResponse.text()).toBe(201);
   const proposal = await proposalResponse.json() as { id: string };
   const approvalResponse = await page.request.post(`${origin}/api/projects/${encodeURIComponent(project.id)}/approvals`, {
+    headers: { Origin: origin },
     data: { proposalId: proposal.id, operationIds: [operation.id] },
   });
   expect(approvalResponse.status(), await approvalResponse.text()).toBe(204);
-  const applyResponse = await page.request.post(`${origin}/api/projects/${encodeURIComponent(project.id)}/apply`, { data: operation });
+  const applyResponse = await page.request.post(`${origin}/api/projects/${encodeURIComponent(project.id)}/apply`, { headers: { Origin: origin }, data: operation });
   expect(applyResponse.status(), await applyResponse.text()).toBe(201);
   const seededSnapshot = await page.request.get(`${origin}/api/projects/${encodeURIComponent(project.id)}/snapshot`);
   expect(seededSnapshot.ok(), await seededSnapshot.text()).toBe(true);
