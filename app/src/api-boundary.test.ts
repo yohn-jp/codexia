@@ -35,7 +35,10 @@ test("audit browser API preserves service errors and permits 204 only for no-con
   globalThis.fetch = async () => new Response("temporarily unavailable", { status: 503 });
   await assert.rejects(api.session(), (error: unknown) => error instanceof ApiError && error.status === 503);
   globalThis.fetch = async () => new Response(null, { status: 204 });
-  assert.equal(await api.deletePersistenceDocument("project-1", "document-1", 1), undefined);
+  assert.equal(await api.approve("project-1", {
+    proposalId: "proposal-1", operationIds: ["operation-1"], authorScope: "owner",
+  }), undefined);
+  await assert.rejects(api.deletePersistenceDocument("project-1", "document-1", 1), invalid);
   await assert.rejects(api.persistenceProjects(), invalid);
 });
 
