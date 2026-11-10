@@ -108,6 +108,8 @@ export interface ProposalStatus {
   operationIds?: string[];
   state: "proposed" | "partially_approved" | "approved" | "applied";
   approvedOperationIds: string[];
+  /** Durable author scope for each approved operation; retries cannot change the first approver. */
+  approvedByOperationId?: Record<string, string>;
   applications: ApplyReceipt[];
   /** Atomically applied in PostgreSQL. */
   appliedOperationIds: string[];
