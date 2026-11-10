@@ -143,3 +143,44 @@ test("scope-bound evidence revisions are checked when proposing and applying", a
   await assert.rejects(core.apply(projectRecord.id, operationRecord), /evidence revision changed/);
   assert.equal(await (await core.reader(projectRecord.id)).read("meta/result.yaml"), null);
 });
+
+test("partial approvals preserve each actor in immutable PostgreSQL revisions", async () => {
+  const p = await project();
+  for (const parent of [
+    { kind: "volume", id: "vol-actor", title: "Volume" },
+    { kind: "chapter", id: "chapter-actor", title: "Chapter", volumeId: "vol-actor" },
+  ] as const) {
+    const created = await core.buildCreateHierarchyOperation(p.id, parent);
+    await accept(p.id, created.operation, created.snapshot);
+  }
+  const one = await core.buildCreateHierarchyOperation(p.id, {
+    kind: "scene", id: "scene-alice", title: "Alice", volumeId: "vol-actor",
+    chapterId: "chapter-actor", manuscriptBody: "Alice's manuscript",
+  });
+  const two = await core.buildCreateHierarchyOperation(p.id, {
+    kind: "scene", id: "scene-bob", title: "Bob", volumeId: "vol-actor",
+    chapterId: "chapter-actor", manuscriptBody: "Bob's manuscript",
+  });
+  assert.deepEqual(one.snapshot, two.snapshot);
+  const proposal: ChangeProposal = {
+    id: randomUUID(), snapshot: one.snapshot, source: "author",
+    operations: [one.operation, two.operation],
+  };
+  await core.propose(p.id, proposal);
+  await core.approve(p.id, {
+    proposalId: proposal.id, operationIds: [one.operation.id], authorScope: "hosted:alice",
+  });
+  await core.approve(p.id, {
+    proposalId: proposal.id, operationIds: [two.operation.id], authorScope: "hosted:bob",
+  });
+  await core.apply(p.id, one.operation);
+  await core.apply(p.id, two.operation);
+  const documents = await persistence.read((reader) => reader.listDocuments(p.id));
+  for (const [title, expectedAuthor] of [["Alice", "hosted:alice"], ["Bob", "hosted:bob"]]) {
+    const document = documents.find((candidate) => candidate.title === title);
+    assert.ok(document?.headRevisionId);
+    const revision = await persistence.read((reader) =>
+      reader.getRevision(p.id, document.id, document.headRevisionId!));
+    assert.equal(revision?.authorId, expectedAuthor);
+  }
+});
