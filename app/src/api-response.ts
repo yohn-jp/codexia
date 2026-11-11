@@ -1,5 +1,5 @@
 import { assertChangeOperation, BUILTIN_MODULE_IDS, type ActionResult, type ChangeProposal, type ApplyReceipt, type ModuleStatus, type ProposalStatus, type RecentActivityResponse, type SnapshotId, type UiContribution } from "@codexia/contracts";
-import type { FileDocument, InboxItem, InboxListResponse, PersistenceAnchorView, PersistenceDocumentAnchors, PersistenceDocumentRead, PersistenceNodeRead, PersistenceStatus, PersistenceAssertionEvidenceRead, PersistenceAssertionRead, PublicJob, RuntimeVersion, Scene, SceneRead, Session, SnapshotRead, Tree, TreeRead } from "./api";
+import type { FileDocument, InboxItem, InboxListResponse, PersistenceAnchorView, PersistenceDocumentAnchors, PersistenceDocumentRead, PersistenceNodeRead, PersistenceStatus, PersistenceAssertionEvidenceRead, PersistenceAssertionRead, PublicJob, RuntimeVersion, Scene, SceneRead, Session, SnapshotRead, Tree, TreeRead, PortableWorkArchive, PortableWorkImportResult } from "./api";
 import { ApiError } from "./api-error";
 import type { Assertion, AssertionEvidence, Document as PersistenceDocument, DocumentRevision as PersistenceRevision, DocumentRevisionPage, DocumentWriteResult, EvidenceAnchor, KnowledgeAlias, KnowledgeNode, KnowledgeRelation, MentionLink, Project as PersistenceProject } from "@codexia/persistence-contracts";
 
@@ -68,6 +68,15 @@ export const responseContracts = {
   marked: (v: unknown): v is { marked: number } => record(v) && integer(v.marked),
   modules: array(moduleStatus), contributions: array(contribution),
   persistenceStatus: (v: unknown): v is PersistenceStatus => record(v) && bool(v.available) && (v.provider === null || v.provider === "postgres"),
+  portableWorkArchive: (v: unknown): v is PortableWorkArchive => record(v) && v.format === "codexia-work/v1" &&
+    record(v.project) && text(v.project.title) && jsonObject(v.project.settings) &&
+    Array.isArray(v.documents) && v.documents.every(d => record(d) && text(d.id) && text(d.title) && text(d.markdown)) &&
+    record(v.knowledge) && ["nodes", "aliases", "relations"].every(key => Array.isArray(v.knowledge[key])) &&
+    record(v.evidence) && ["anchors", "mentions", "assertions", "assertionEvidence"].every(key => Array.isArray(v.evidence[key])) &&
+    record(v.evidence.unresolved) && ["anchors", "mentions", "assertionEvidence"].every(key => Array.isArray(v.evidence.unresolved[key])) &&
+    Array.isArray(v.moduleRecords) && strings(v.omittedRecords),
+  portableWorkImport: (v: unknown): v is PortableWorkImportResult => record(v) && persistenceProject(v.project) &&
+    bool(v.replayed) && integer(v.unresolvedAnchors) && integer(v.omittedRecords),
   persistenceProjects: array(persistenceProject),
   persistenceProject: (v: unknown): v is { project: PersistenceProject } => record(v) && persistenceProject(v.project),
   persistenceDocuments: (v: unknown): v is { documents: PersistenceDocument[] } => record(v) && array(persistenceDocument)(v.documents),
