@@ -588,6 +588,10 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const protectTransition = useCallback(async (): Promise<boolean> => {
     try {
       transitionErrorRef.current = "";
+      // Capture the IME guard synchronously, before scratch/journal promises can
+      // settle after compositionend. A transition requested during composition
+      // must remain denied even if the browser finishes composing meanwhile.
+      editorRef.current?.readForNavigation();
       resume.flush();
       await scratchGuardRef.current?.();
       await protectEditorTransition(() => activeRef.current, () => {
