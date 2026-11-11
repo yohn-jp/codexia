@@ -99,6 +99,10 @@ export function MountedContribution({
   const elementRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
   const snapshotId = snapshotKey(snapshot);
+  // Callback identities change with workspace render state. Refresh their values
+  // without remounting a live module panel or discarding in-flight search results.
+  const hostCallbacksRef = useRef({ readCurrentEditor, navigateDocument, onProposalStored, refresh });
+  hostCallbacksRef.current = { readCurrentEditor, navigateDocument, onProposalStored, refresh };
 
   useEffect(() => {
     let cancelled = false;
@@ -120,10 +124,12 @@ export function MountedContribution({
           projectId,
           snapshot,
           signal: controller.signal,
-          readCurrentEditor,
+          readCurrentEditor: () => hostCallbacksRef.current.readCurrentEditor(),
           navigateDocument: navigateDocument ? async (path) => {
             if (controller.signal.aborted) throw new DOMException("Panel closed", "AbortError");
-            await navigateDocument(path);
+            const navigate = hostCallbacksRef.current.navigateDocument;
+            if (!navigate) throw new Error("Document navigation is unavailable.");
+            await navigate(path);
           } : undefined,
           invoke: async (actionId, input) => {
             const result = await api.action(projectId, actionId, input, controller.signal, snapshot);
@@ -132,7 +138,7 @@ export function MountedContribution({
             if (result.ok && result.proposals?.length) {
               if (!journal) throw new Error("Browser recovery storage is unavailable; the module proposal was not delivered to its panel.");
               for (const proposal of result.proposals) await journal.putProposal(snapshot.projectId, authorScope, proposal);
-              if (result.proposals.length > 0) onProposalStored();
+              if (result.proposals.length > 0) hostCallbacksRef.current.onProposalStored();
             }
             return result;
           },
@@ -153,7 +159,7 @@ export function MountedContribution({
                 removedAny = await proposalJournal.removeProposal(snapshot.projectId, authorScope, proposalId, ownership) || removedAny;
                 ownedProposals.delete(proposalId);
               }
-              if (removedAny) onProposalStored();
+              if (removedAny) hostCallbacksRef.current.onProposalStored();
             };
             const persistWhileActive = async (proposal: ChangeProposal) => {
               try {
@@ -176,7 +182,7 @@ export function MountedContribution({
               id: crypto.randomUUID(), snapshot, operations, source: "author", ...(evidence ? { evidence } : {}),
             };
             await persistWhileActive(submitted);
-            onProposalStored();
+            hostCallbacksRef.current.onProposalStored();
             if (isCancelled()) {
               await removeCancelledProposals();
               throw abortError();
@@ -206,10 +212,10 @@ export function MountedContribution({
                 throw abortError();
               }
             }
-            onProposalStored();
+            hostCallbacksRef.current.onProposalStored();
             return proposal;
           },
-          refresh,
+          refresh: () => hostCallbacksRef.current.refresh(),
         };
         const cleanup = await definition.mount(item.id, element, context);
         if (cancelled) {
@@ -227,7 +233,7 @@ export function MountedContribution({
       controller.abort();
       dispose?.();
     };
-  }, [authorScope, item.action, item.id, item.module, journal, navigateDocument, onProposalStored, projectId, readCurrentEditor, refresh, snapshot, snapshotId]);
+  }, [authorScope, item.action, item.id, item.module, journal, projectId, snapshotId]);
 
   return (
     <article className="contribution-card" aria-label={item.title}>
