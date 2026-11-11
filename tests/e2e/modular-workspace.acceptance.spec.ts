@@ -859,6 +859,10 @@ test("Core-only workspace keeps authoring available without search or terminolog
   await expect(workspaceToolbar(page).getByRole("button", { name: "Show 用語辞典", exact: true })).toHaveCount(0);
 
   const draft = "Core authoring works with optional search disabled.";
+  // Hold remote acknowledgement so this specifically checks IndexedDB recovery,
+  // not a draft already removed after a successful PostgreSQL save.
+  await page.route("**/api/v1/persistence/projects/*/documents/*", (route) =>
+    route.request().method() === "PATCH" ? route.abort("failed") : route.continue());
   await page.locator(".cm-content").fill(draft);
   await expectDraft(page, fixture.scene.document.id, draft);
 });
@@ -930,6 +934,10 @@ test("desktop floating panels preserve drafts and saved layout geometry", async 
   const workspace = page.locator(".st-workspace");
   const manuscript = workspace.locator('[data-workspace-panel="editor"] .cm-content');
   const draft = "Floating workspace retains the PostgreSQL manuscript.";
+  // Force the layout test to preserve an outstanding browser draft across reload
+  // instead of racing the normal 900ms PostgreSQL acknowledgement and cleanup.
+  await page.route("**/api/v1/persistence/projects/*/documents/*", (route) =>
+    route.request().method() === "PATCH" ? route.abort("failed") : route.continue());
   await manuscript.fill(draft);
   await expectDraft(page, fixture.scene.document.id, draft);
 
