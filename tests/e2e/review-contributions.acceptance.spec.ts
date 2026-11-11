@@ -166,10 +166,12 @@ test("full profile renders Story and Speaker review queues and turns both author
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   await signIn(page);
   const project = await createReviewProject(page);
-  await page.reload();
+  // Open the seeded project through its canonical route. A prior workspace
+  // selection can otherwise keep an older document active during async guards.
+  await page.goto(`/desktop/projects/${encodeURIComponent(project.id)}`);
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
-  await page.locator("#pg-project").selectOption(project.id);
-  await expect(page.getByRole("heading", { name: "Review Volume" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".pg-document-list")).toContainText("Review Volume", { timeout: 30_000 });
+  await expect(page.locator(".pg-document-list")).toContainText("Review Scene");
 
     const zukanListResponse = page.waitForResponse((response) => actionResponse(response, "story.zukan-suggestions.list"), { timeout: 60_000 });
     const zukanPanel = await openWorkspaceContributionPanel(page, "story.zukan-review", "Zukan suggestions");
