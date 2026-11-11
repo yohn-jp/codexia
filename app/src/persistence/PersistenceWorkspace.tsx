@@ -153,6 +153,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const [legacyImportBusy, setLegacyImportBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [workTransferBusy, setWorkTransferBusy] = useState(false);
+  const [workTransferStatus, setWorkTransferStatus] = useState("");
   const [pageError, setPageError] = useState("");
   const [notice, setNotice] = useState("");
   const [projectTitle, setProjectTitle] = useState("");
@@ -565,6 +566,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       return;
     }
     setWorkTransferBusy(true);
+    setWorkTransferStatus("");
     setPageError("");
     try {
       const archive = await api.exportWorkArchive(project.id);
@@ -580,7 +582,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       } finally {
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
-      setNotice("作品のJSONスナップショットを生成しました。過去のRevisionとブラウザーDraftは含まれません。" +
+      setWorkTransferStatus("作品のJSONスナップショットを生成しました。過去のRevisionとブラウザーDraftは含まれません。" +
         (archive.omittedRecords.length ? " セキュリティ保護のため除外された設定が " + archive.omittedRecords.length + " 件あります。" : "") +
         (archive.evidence.unresolved.anchors.length ? " 未解決の旧Evidenceが " + archive.evidence.unresolved.anchors.length + " 件含まれています。" : ""));
     } catch (error) {
@@ -599,6 +601,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       return;
     }
     setWorkTransferBusy(true);
+    setWorkTransferStatus("");
     setPageError("");
     try {
       const raw: unknown = JSON.parse(await file.text());
@@ -612,7 +615,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       updateRouteSelection(selectionRef.current, false);
       setDocumentId("");
       setProjectId(imported.project.id);
-      setNotice((imported.replayed ? "このJSONは既に取り込み済みです。" : "新しい作品としてJSONを取り込みました。") +
+      setWorkTransferStatus((imported.replayed ? "このJSONは既に取り込み済みです。" : "新しい作品としてJSONを取り込みました。") +
         (imported.unresolvedAnchors ? " 旧RevisionのEvidence " + imported.unresolvedAnchors + " 件は記録を保持し、現在の文書には自動リンクしていません。" : "") +
         (imported.omittedRecords ? " 元データで機密設定など " + imported.omittedRecords + " 件は除外済みです。" : ""));
     } catch (error) {
@@ -1107,6 +1110,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             <input id="pg-work-import" type="file" accept=".json,application/json" disabled={workTransferBusy || loading}
               onChange={(event) => void importPortableWork(event)} />
             {workTransferBusy && <p role="status">作品データを処理中です。</p>}
+            {workTransferStatus && <p role="status">{workTransferStatus}</p>}
           </details>
         </section>
         {project && <section>
