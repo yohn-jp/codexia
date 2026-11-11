@@ -7,7 +7,7 @@ import {
   keymap,
   placeholder as cmPlaceholder,
 } from "@codemirror/view";
-import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, type CSSProperties } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, type CSSProperties } from "react";
 import { bracketPairsExtension } from "./cm/bracketPairs";
 import { editorCompositionExtension, isViewComposing } from "./cm/compositionGuard";
 import { ellipsisNormalizeExtension } from "./cm/ellipsisNormalize";
@@ -166,7 +166,7 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
     },
   }), []);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     const parent = containerRef.current;
     if (!parent) return;
     const state = EditorState.create({
