@@ -39,8 +39,8 @@ Browser contributions use host-owned panels and permitted snapshot-scoped action
 
 Assistant SDKs and external transmission remain confined to the optional provider surface. Consent and host policy constrain transmission. Provider `none` keeps local editing, context preparation, MCP and review usable.
 
-## Legacy import
+## One-time source compatibility and normal work import
 
-`packages/migration` classifies legacy records as authoritative, provisional, secret, derived or relocated. Human corrections remain authoritative even if stored beside disposable vectors. Import produces a dry-run report and reviewable ChangeSet, preserves stable identities and formats, supports idempotent reruns, and leaves source files untouched.
+The ordinary end-user workflow is the PostgreSQL [portable work archive](../authoring-portable.md); old Git/Scriptorium data may be converted into that format as a one-time external operation. The existing read-only compatibility package `packages/migration` classifies legacy records as authoritative, provisional, secret, derived or relocated, but is not a required ongoing product import mode. Human corrections remain authoritative even if stored beside disposable vectors. Import produces a dry-run report and reviewable ChangeSet, preserves stable identities and formats, supports idempotent reruns, and leaves source files untouched.
 
 Pending local commits and provisional browser work must remain recoverable. Secrets and private source data do not become public fixtures. Validate imports through approval, PostgreSQL application, API state replacement and optional-module reactivation; generic file compatibility alone does not prove semantic preservation.
