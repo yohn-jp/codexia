@@ -247,8 +247,8 @@ test("full profile renders Story and Speaker review queues and turns both author
     expect(proposedFiles.has("meta/scriptorium/modules/speaker/corrections.jsonl")).toBe(false);
 
     await page.getByRole("tablist", { name: "Panel tabs" }).getByRole("tab", { name: "作品と構成", exact: true }).click();
-    await page.getByRole("navigation", { name: "作品構成" })
-      .getByRole("button", { name: "Review Chapter: Review Scene", exact: true }).click();
+    await page.locator(".pg-document-list")
+      .getByRole("button", { name: /Review Scene/u }).click();
     await expect(page.getByRole("heading", { name: "Review Scene" })).toBeVisible();
     await page.getByRole("button", { name: "モバイルUIへ" }).click();
     await expect(page).toHaveURL(new RegExp("/mobile/projects/" + encodeURIComponent(project.id) + "/scenes/scene-review"));
