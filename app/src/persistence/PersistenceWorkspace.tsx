@@ -573,7 +573,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       try {
         const link = document.createElement("a");
         link.href = url;
-        link.download = "codexia-" + (project.title.replace(/[^\\p{L}\\p{N}._-]+/gu, "-").slice(0, 64) || "work") + ".json";
+        link.download = "codexia-" + (project.title.replace(/[^\p{L}\p{N}._-]+/gu, "-").slice(0, 64) || "work") + ".json";
         document.body.appendChild(link);
         link.click();
         link.remove();
