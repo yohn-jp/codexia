@@ -400,8 +400,8 @@ async function openFixtureScene(page: Page, mode: "desktop" | "mobile", sceneInd
   await expect(page.getByLabel("開く作品")).toHaveValue(fixture.project.id);
   await expect(page.locator(".pg-editor-heading .eyebrow")).toHaveText(fixture.project.title);
   await expect.poll(async () => page.getByRole("textbox", { name: "原稿 Markdown" }).locator(".cm-line")
-    .evaluateAll((lines) => lines.map((line) => line.textContent ?? "").join("\\n").replace(/\\n+$/u, "")))
-    .toBe(scene!.revision.markdown.replace(/\\n+$/u, ""));
+    .evaluateAll((lines) => lines.map((line) => line.textContent ?? "").join("\n").replace(/\n+$/u, "")))
+    .toBe(scene!.revision.markdown.replace(/\n+$/u, ""));
   await expect(page.getByText("IndexedDB回復Journalに保存済み", { exact: true })).toBeVisible();
   return fixture;
 }
