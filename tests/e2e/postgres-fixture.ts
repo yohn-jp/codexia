@@ -61,19 +61,13 @@ export async function createWritingFixture(page: Page, mode: "desktop" | "mobile
   }
   const scene = await create(title, "a");
   const second = await create("次のシーン", "b");
-  await page.reload();
-  if (mode === "mobile") await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "作品", exact: true }).click();
-  await page.getByLabel("開く作品").selectOption(project.id);
-  const documentButton = page.locator(".pg-document-list").getByRole("button", { name: new RegExp(title) });
-  await expect(page.locator(".pg-document-list")).toContainText(title);
-  if (mode === "desktop" && !await documentButton.isVisible()) {
-    const outlineTab = page.getByRole("tablist", { name: "Panel tabs" }).getByRole("tab", { name: "作品と構成", exact: true });
-    if (await outlineTab.count()) await outlineTab.click();
-  }
-  await expect(documentButton).toBeVisible();
-  await documentButton.click();
-  if (mode === "mobile") await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "書く", exact: true }).click();
+  // Fixture setup must not race an unrelated prior project's guarded selector.
+  // Exercise the supported canonical deep link instead of mutating UI selection.
+  const writingRoute = `/${mode}/projects/${project.id}/scenes/${scene.id}${mode === "mobile" ? "?view=writing" : ""}`;
+  await page.goto(new URL(writingRoute, page.url()).toString());
+  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "原稿 Markdown" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
   return { project, scene, second };
 }
 
