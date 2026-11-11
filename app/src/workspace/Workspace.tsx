@@ -572,6 +572,17 @@ export function Workspace({ scope, mode, panels, beforeLayoutChange, requestedPa
   };
 
   const routeSelectionRef = useRef("");
+  const routeFocusPendingRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const key = `${scope}:${mode}:${selectedPanelId}`;
+    if (mode !== "mobile" || !selectedPanelId || mobilePanelId !== selectedPanelId ||
+        routeFocusPendingRef.current !== key || routeSelectionRef.current !== key) return;
+    const target = Array.from(workspaceRef.current?.querySelectorAll<HTMLElement>("[data-workspace-panel]") ?? [])
+      .find((element) => element.dataset.workspacePanel === selectedPanelId);
+    if (!target) return;
+    target.focus({ preventScroll: true });
+    routeFocusPendingRef.current = null;
+  }, [scope, mode, selectedPanelId, mobilePanelId, layout]);
   useEffect(() => {
     if (mode !== "mobile" || !selectedPanelId || !catalog.has(selectedPanelId)) return;
     if (changingRef.current) {
@@ -606,12 +617,10 @@ export function Workspace({ scope, mode, panels, beforeLayoutChange, requestedPa
           onRouteSelectionResult?.(currentRouteKey, false);
           return;
         }
+        // Wait for React to commit the selected panel before restoring focus.
+        // requestAnimationFrame can run against the previous route's DOM.
+        routeFocusPendingRef.current = selectionKey;
         setMobilePanelId(selectedPanelId);
-        window.requestAnimationFrame(() => {
-          const element = Array.from(workspaceRef.current?.querySelectorAll<HTMLElement>("[data-workspace-panel]") ?? [])
-            .find((candidate) => candidate.dataset.workspacePanel === selectedPanelId);
-          element?.focus();
-        });
         onRouteSelectionResult?.(currentRouteKey, true);
       });
   }, [mode, scope, selectedPanelId, visibleIds, catalog, changeLayout, changing, routeSelectionKey, routeSelectionRevision, isRouteSelectionCurrent, onRouteSelectionResult]);
