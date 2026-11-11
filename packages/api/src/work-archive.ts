@@ -106,10 +106,18 @@ function assertBounded(value: unknown): void {
 function sensitiveKey(key: string): boolean {
   return /(?:secret|password|credential|token|api[-_]?key|private[-_]?key|session|share[-_]?grants)/iu.test(key);
 }
-function excludedRecord(moduleId: string, key: string): boolean {
+function containsSensitiveObjectKeys(value: unknown, depth = 0): boolean {
+  if (depth > 32) return true;
+  if (Array.isArray(value)) return value.some((item) => containsSensitiveObjectKeys(item, depth + 1));
+  if (value !== null && typeof value === "object") {
+    return Object.entries(value).some(([key, item]) => sensitiveKey(key) || containsSensitiveObjectKeys(item, depth + 1));
+  }
+  return false;
+}
+function excludedRecord(moduleId: string, key: string, value: unknown): boolean {
   return moduleId.startsWith("core.authority.") ||
     moduleId === "core.portable.archive" ||
-    sensitiveKey(key) || sensitiveKey(moduleId);
+    sensitiveKey(key) || sensitiveKey(moduleId) || containsSensitiveObjectKeys(value);
 }
 function safeSettings(value: Record<string, unknown>, omitted: string[], prefix = "project.settings"): JsonObject {
   const result: Record<string, unknown> = {};
@@ -176,7 +184,7 @@ function validateGraph(archive: WorkArchive): void {
     }
   }
   for (const record of archive.moduleRecords) {
-    if (excludedRecord(record.moduleId, record.key)) {
+    if (excludedRecord(record.moduleId, record.key, record.value)) {
       fail(400, "INVALID_WORK_ARCHIVE", "Archive contains reserved or sensitive module records");
     }
   }
@@ -267,7 +275,7 @@ export async function exportWorkArchive(persistence: Persistence, projectId: Pro
         narrativeTime: item.narrativeTime, confidence: item.confidence, status: item.status }));
     const moduleRecords: WorkArchive["moduleRecords"] = [];
     for (const item of modules) {
-      if (excludedRecord(item.moduleId, item.key)) {
+      if (excludedRecord(item.moduleId, item.key, item.value)) {
         if (!(item.moduleId === "core.portable.archive")) omittedRecords.push(item.moduleId + ":" + item.key);
         continue;
       }
@@ -309,7 +317,7 @@ export async function importWorkArchive(persistence: Persistence, payload: unkno
   if (typeof authorId !== "string" || !authorId.trim()) fail(403, "AUTHOR_REQUIRED", "An authenticated author is required");
   const archive = parseWorkArchive(payload);
   const target = portableProjectId(archive);
-  return persistence.transaction(async (tx) => {
+  const result = await persistence.transaction(async (tx) => {
     const existing = await tx.getProject(target.id);
     if (existing) {
       const receipt = await tx.getModuleRecord(target.id, "core.portable.archive", "import-receipt");
@@ -390,4 +398,8 @@ export async function importWorkArchive(persistence: Persistence, payload: unkno
     return { project, replayed: false, unresolvedAnchors: archive.evidence.unresolved.anchors.length,
       omittedRecords: archive.omittedRecords.length };
   });
+  // PostgreSQL bumps the project version at COMMIT, after the transaction callback returns.
+  const committed = await persistence.read((reader) => reader.getProject(result.project.id));
+  if (!committed) fail(503, "WORK_IMPORT_INCOMPLETE", "Committed project could not be read back");
+  return { ...result, project: committed };
 }
