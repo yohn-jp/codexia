@@ -256,8 +256,11 @@ test("full profile renders Story and Speaker review queues and turns both author
     await page.locator(".pg-document-list")
       .getByRole("button", { name: /Review Scene/u }).click();
     await expect(page.getByRole("heading", { name: "Review Scene" })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp("/desktop/projects/" + encodeURIComponent(project.id) + "/scenes/[0-9a-f-]+"));
+    const selectedSceneId = new URL(page.url()).pathname.split("/scenes/")[1];
+    expect(selectedSceneId).toBeTruthy();
     await page.getByRole("button", { name: "モバイルUIへ" }).click();
-    await expect(page).toHaveURL(new RegExp("/mobile/projects/" + encodeURIComponent(project.id) + "/scenes/scene-review"));
+    await expect(page).toHaveURL(new RegExp("/mobile/projects/" + encodeURIComponent(project.id) + "/scenes/" + selectedSceneId));
     await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "道具", exact: true }).click();
     await expect(page.locator(".proposal-review").getByRole("heading", { name: "確認待ちの提案" })).toBeVisible();
     await page.reload();
@@ -276,7 +279,7 @@ test("full profile renders Story and Speaker review queues and turns both author
 
     await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "設定", exact: true }).click();
     await page.getByRole("button", { name: "Desktop版へ切り替え" }).click();
-    await expect(page).toHaveURL(new RegExp("/desktop/projects/" + encodeURIComponent(project.id) + "/scenes/scene-review"));
+    await expect(page).toHaveURL(new RegExp("/desktop/projects/" + encodeURIComponent(project.id) + "/scenes/" + selectedSceneId));
     await openWorkspaceReviewPanel(page);
     await expect(page.locator(".proposal-card").filter({ hasText: zukanProposalId! })).toContainText("PostgreSQL 保存済み");
     await expect(page.locator(".proposal-card").filter({ hasText: speakerProposalId! })).toContainText("承認待ち");
