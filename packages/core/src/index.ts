@@ -324,6 +324,10 @@ export class CoreStore implements MutationCoordinator {
         }
       }
 
+      // A repeated approval is an idempotent replay once every operation is applied.
+      // Never regress the durable terminal status back to approved.
+      if (state.state === "applied") return;
+
       state.approvedOperationIds = [...new Set([...state.approvedOperationIds, ...approval.operationIds])];
       const approvers = { ...state.approvedByOperationId };
       for (const id of approval.operationIds) approvers[id] ??= approval.authorScope;
