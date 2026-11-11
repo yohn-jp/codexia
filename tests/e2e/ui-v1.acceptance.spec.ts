@@ -55,8 +55,15 @@ test("legacy draft import can be canceled, reloads its source, and removes it on
 
 test("legacy draft import retains the confirmed PostgreSQL revision and creates a new generation", async ({ page }) => {
   const { project, scene } = await createWritingFixture(page); const text = "先に確定した本文。";
-  await editor(page).fill(text); await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
-  const before = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}`); const original = await before.json();
+  await editor(page).fill(text);
+  // "Saved" may still describe the previous revision until the async PATCH
+  // completes. Pin only a revision whose canonical PostgreSQL body is this text.
+  const url = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
+  await expect.poll(async () => {
+    const response = await page.request.get(url);
+    return response.ok() ? ((await response.json()) as { revision: { markdown: string } }).revision.markdown : "";
+  }).toBe(text);
+  const before = await page.request.get(url); const original = await before.json();
   await seedLegacy(page); await previewLegacy(page); await page.getByRole("button", { name: "この文書へ取り込む" }).click();
   await expect(editor(page)).toHaveText("旧記録の日本語原稿😀");
   await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
