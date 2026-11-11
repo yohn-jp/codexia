@@ -469,6 +469,12 @@ export function Workspace({ scope, mode, panels, beforeLayoutChange, requestedPa
       return;
     }
     if (mobilePanelId !== pending.panelId || !visibleIds.includes(pending.panelId)) return;
+    // Only focus after the destination panel is committed to the live DOM.
+    // A requestAnimationFrame issued before a route/scope transition can run
+    // before the panel mounts and silently lose keyboard focus.
+    const target = Array.from(workspaceRef.current?.querySelectorAll<HTMLElement>("[data-workspace-panel]") ?? [])
+      .find((element) => element.dataset.workspacePanel === pending.panelId);
+    target?.focus({ preventScroll: true });
     pendingPanelTransitionRef.current = null;
     setCommittingPanelRequest((sequence) => sequence === pending.sequence ? undefined : sequence);
     onPanelRequestResult?.(pending.sequence, true);
