@@ -306,7 +306,7 @@ function parseSceneId(value: string): string {
 function isPublicReaderPath(pathname: string): boolean {
   const parts = pathname.split("/");
   if (parts.length !== 5 || parts[0] !== "" || parts[1] !== "r" ||
-      !/^\d{1,32}$/u.test(parts[3] ?? "") || !/^[A-Za-z0-9._~-]{1,128}$/u.test(parts[4] ?? "")) return false;
+      !POSTGRES_REVISION_ID.test(parts[3] ?? "") || !/^[A-Za-z0-9._~-]{1,128}$/u.test(parts[4] ?? "")) return false;
   let moduleId: string;
   try { moduleId = decodeURIComponent(parts[2] ?? ""); }
   catch { return false; }
