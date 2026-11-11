@@ -39,6 +39,24 @@ import type {
   SaveMentionLinkCommand,
 } from "@codexia/persistence-contracts";
 
+/** Portable current-state work, separate from operational PostgreSQL backups. */
+export interface PortableWorkArchive {
+  format: "codexia-work/v1";
+  project: { title: string; settings: Record<string, unknown> };
+  documents: Array<{ id: string; title: string; markdown: string }>;
+  knowledge: { nodes: unknown[]; aliases: unknown[]; relations: unknown[] };
+  evidence: { anchors: unknown[]; mentions: unknown[]; assertions: unknown[]; assertionEvidence: unknown[];
+    unresolved: { anchors: unknown[]; mentions: unknown[]; assertionEvidence: unknown[] } };
+  moduleRecords: unknown[];
+  omittedRecords: string[];
+}
+export interface PortableWorkImportResult {
+  project: PersistenceProject;
+  replayed: boolean;
+  unresolvedAnchors: number;
+  omittedRecords: number;
+}
+
 export class DocumentDepartureError extends DOMException {
   constructor() {
     super("The document is leaving.", "AbortError");
@@ -481,6 +499,10 @@ export const api = {
     { method: "POST", body: JSON.stringify({ input, ...(snapshot ? { snapshot } : {}) }), ...(signal ? { signal } : {}) },
   ),
   persistenceStatus: (signal?: AbortSignal) => request(dto.persistenceStatus, "/api/v1/persistence/status", { ...(signal ? { signal } : {}) }),
+  exportWorkArchive: (projectId: string, signal?: AbortSignal) => request(dto.portableWorkArchive,
+    persistencePath(projectId, "archive"), { ...(signal ? { signal } : {}) }),
+  importWorkArchive: (archive: unknown, signal?: AbortSignal) => request(dto.portableWorkImport,
+    "/api/v1/persistence/import", { method: "POST", body: JSON.stringify(archive), ...(signal ? { signal } : {}) }),
   persistenceProjects: (limit = 100, signal?: AbortSignal) => request(dto.persistenceProjects,
     `/api/v1/persistence/projects?${new URLSearchParams({ limit: String(limit) })}`, { ...(signal ? { signal } : {}) }),
   createPersistenceProject: (command: CreateProjectCommand, signal?: AbortSignal) => request(dto.persistenceProject, "/api/v1/persistence/projects", {

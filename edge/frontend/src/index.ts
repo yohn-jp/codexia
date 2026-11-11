@@ -37,7 +37,7 @@ function desktopOrMobileEntry(pathname: string): string | undefined {
 function publicReaderPath(pathname: string): boolean {
   const parts = pathname.split("/");
   return parts.length === 5 && parts[0] === "" && parts[1] === "r" &&
-    PUBLIC_READER_MODULES.has(parts[2] ?? "") && /^\d{1,32}$/u.test(parts[3] ?? "") &&
+    PUBLIC_READER_MODULES.has(parts[2] ?? "") && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(parts[3] ?? "") &&
     /^[A-Za-z0-9._~-]{1,128}$/u.test(parts[4] ?? "");
 }
 

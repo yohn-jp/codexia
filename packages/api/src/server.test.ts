@@ -2909,3 +2909,55 @@ for (const status of [502, 503] as const) {
     });
   }
 }
+
+
+it("portable work API enforces authentication, author writes, origin, hosted assignment and replay", async (t) => {
+  const native = await nativeProject(t, "Portable HTTP");
+  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-archive-http-"));
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const apiServer = await startCustomApi(native.store, staticDir, { persistence: native.persistence });
+  t.after(apiServer.close);
+  const url = apiServer.base + "/api/v1/persistence/projects/" + native.project.id + "/archive";
+  assert.equal((await fetch(url)).status, 401);
+  const owner = await login(apiServer.base);
+  const exported = await fetch(url, { headers: { Cookie: owner.cookie } });
+  assert.equal(exported.status, 200);
+  const archive = await exported.json() as { format: string; documents: unknown[] };
+  assert.equal(archive.format, "codexia-work/v1");
+  assert.deepEqual(archive.documents, []);
+  const endpoint = apiServer.base + "/api/v1/persistence/import";
+  const requestBody = JSON.stringify(archive);
+  const bearer = await fetch(endpoint, { method: "POST", headers: {
+    Authorization: "Bearer " + ACCESS_TOKEN, "Content-Type": "application/json"
+  }, body: requestBody });
+  assert.equal(bearer.status, 403, "Bearer read access must not create works");
+  const forbiddenOrigin = await fetch(endpoint, { method: "POST", headers: {
+    Cookie: owner.cookie, Origin: "https://other.example", "Content-Type": "application/json"
+  }, body: requestBody });
+  assert.equal(forbiddenOrigin.status, 403, "Cookie writes require same origin");
+  const headers = { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" };
+  const importResponse = await fetch(endpoint, { method: "POST", headers, body: requestBody });
+  assert.equal(importResponse.status, 201);
+  const imported = await importResponse.json() as { project: { id: string }; replayed: boolean };
+  assert.equal(imported.replayed, false);
+  assert.notEqual(imported.project.id, native.project.id);
+  const repeated = await fetch(endpoint, { method: "POST", headers, body: requestBody });
+  assert.equal(repeated.status, 201);
+  const replay = await repeated.json() as { project: { id: string }; replayed: boolean };
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.project.id, imported.project.id);
+  const importedExport = await fetch(apiServer.base + "/api/v1/persistence/projects/" + imported.project.id + "/archive", { headers: { Cookie: owner.cookie } });
+  assert.equal(importedExport.status, 200);
+  assert.equal((await importedExport.json() as { project: { title: string } }).project.title, native.project.title);
+
+  const hosted = await startHostedApi(native.store, staticDir, hostedTestPolicy(), undefined, undefined, undefined, native.persistence, native.project.id);
+  t.after(hosted.close);
+  const hostedImport = await fetch(hosted.base + "/api/v1/persistence/import", { method: "POST", headers: {
+    Authorization: "Bearer write-grant", "Content-Type": "application/json"
+  }, body: requestBody });
+  assert.equal(hostedImport.status, 403);
+  const hostedOtherWork = await fetch(hosted.base + "/api/v1/persistence/projects/" + imported.project.id + "/archive", {
+    headers: { Authorization: "Bearer read-grant" }
+  });
+  assert.equal(hostedOtherWork.status, 404);
+});

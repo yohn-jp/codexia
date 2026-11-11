@@ -1,5 +1,5 @@
 import { assertChangeOperation, BUILTIN_MODULE_IDS, type ActionResult, type ChangeProposal, type ApplyReceipt, type ModuleStatus, type ProposalStatus, type RecentActivityResponse, type SnapshotId, type UiContribution } from "@codexia/contracts";
-import type { FileDocument, InboxItem, InboxListResponse, PersistenceAnchorView, PersistenceDocumentAnchors, PersistenceDocumentRead, PersistenceNodeRead, PersistenceStatus, PersistenceAssertionEvidenceRead, PersistenceAssertionRead, PublicJob, RuntimeVersion, Scene, SceneRead, Session, SnapshotRead, Tree, TreeRead } from "./api";
+import type { FileDocument, InboxItem, InboxListResponse, PersistenceAnchorView, PersistenceDocumentAnchors, PersistenceDocumentRead, PersistenceNodeRead, PersistenceStatus, PersistenceAssertionEvidenceRead, PersistenceAssertionRead, PublicJob, RuntimeVersion, Scene, SceneRead, Session, SnapshotRead, Tree, TreeRead, PortableWorkArchive, PortableWorkImportResult } from "./api";
 import { ApiError } from "./api-error";
 import type { Assertion, AssertionEvidence, Document as PersistenceDocument, DocumentRevision as PersistenceRevision, DocumentRevisionPage, DocumentWriteResult, EvidenceAnchor, KnowledgeAlias, KnowledgeNode, KnowledgeRelation, MentionLink, Project as PersistenceProject } from "@codexia/persistence-contracts";
 
@@ -11,6 +11,7 @@ const integer = (v: unknown): v is number => typeof v === "number" && Number.isS
 const nullableText = (v: unknown): v is string | null => v === null || text(v);
 const nullableInteger = (v: unknown): v is number | null => v === null || integer(v);
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every(text);
+const objectWithArrays = (v: unknown, keys: readonly string[]): boolean => record(v) && keys.every(key => Array.isArray(v[key]));
 const oneOf = (v: unknown, values: readonly string[]): boolean => text(v) && values.includes(v);
 const optional = <T>(v: unknown, guard: ResponseGuard<T>): v is T | undefined => v === undefined || guard(v);
 const array = <T>(guard: ResponseGuard<T>): ResponseGuard<T[]> => (v): v is T[] => Array.isArray(v) && v.every(guard);
@@ -68,6 +69,15 @@ export const responseContracts = {
   marked: (v: unknown): v is { marked: number } => record(v) && integer(v.marked),
   modules: array(moduleStatus), contributions: array(contribution),
   persistenceStatus: (v: unknown): v is PersistenceStatus => record(v) && bool(v.available) && (v.provider === null || v.provider === "postgres"),
+  portableWorkArchive: (v: unknown): v is PortableWorkArchive => record(v) && v.format === "codexia-work/v1" &&
+    record(v.project) && text(v.project.title) && jsonObject(v.project.settings) &&
+    Array.isArray(v.documents) && v.documents.every(d => record(d) && text(d.id) && text(d.title) && text(d.markdown)) &&
+    objectWithArrays(v.knowledge, ["nodes", "aliases", "relations"]) &&
+    record(v.evidence) && objectWithArrays(v.evidence, ["anchors", "mentions", "assertions", "assertionEvidence"]) &&
+    objectWithArrays(v.evidence.unresolved, ["anchors", "mentions", "assertionEvidence"]) &&
+    Array.isArray(v.moduleRecords) && strings(v.omittedRecords),
+  portableWorkImport: (v: unknown): v is PortableWorkImportResult => record(v) && persistenceProject(v.project) &&
+    bool(v.replayed) && integer(v.unresolvedAnchors) && integer(v.omittedRecords),
   persistenceProjects: array(persistenceProject),
   persistenceProject: (v: unknown): v is { project: PersistenceProject } => record(v) && persistenceProject(v.project),
   persistenceDocuments: (v: unknown): v is { documents: PersistenceDocument[] } => record(v) && array(persistenceDocument)(v.documents),

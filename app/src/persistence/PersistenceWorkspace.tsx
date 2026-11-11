@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
 import { snapshotKey } from "@codexia/contracts";
 import type { EditorTermSpan } from "../editor/terms";
@@ -152,6 +152,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const [resumeEpoch, setResumeEpoch] = useState(0);
   const [legacyImportBusy, setLegacyImportBusy] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [workTransferBusy, setWorkTransferBusy] = useState(false);
+  const [workTransferStatus, setWorkTransferStatus] = useState("");
   const [pageError, setPageError] = useState("");
   const [notice, setNotice] = useState("");
   const [projectTitle, setProjectTitle] = useState("");
@@ -553,6 +555,73 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       setPageError(error instanceof Error ? error.message : "作品を作成できませんでした。");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function exportCurrentWork(): Promise<void> {
+    if (!project || workTransferBusy) return;
+    const current = activeRef.current;
+    if (current?.document.projectId === project.id && (current.dirty || current.save === "saving" || current.remoteConflict)) {
+      setPageError("現在の原稿にPostgreSQL未保存の変更があります。保存または競合解決後にエクスポートしてください。");
+      return;
+    }
+    setWorkTransferBusy(true);
+    setWorkTransferStatus("");
+    setPageError("");
+    try {
+      const archive = await api.exportWorkArchive(project.id);
+      const blob = new Blob([JSON.stringify(archive) + "\n"], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      try {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "codexia-" + (project.title.replace(/[^\p{L}\p{N}._-]+/gu, "-").slice(0, 64) || "work") + ".json";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } finally {
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      setWorkTransferStatus("作品のJSONスナップショットを生成しました。過去のRevisionとブラウザーDraftは含まれません。" +
+        (archive.omittedRecords.length ? " セキュリティ保護のため除外された設定が " + archive.omittedRecords.length + " 件あります。" : "") +
+        (archive.evidence.unresolved.anchors.length ? " 未解決の旧Evidenceが " + archive.evidence.unresolved.anchors.length + " 件含まれています。" : ""));
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "作品をエクスポートできませんでした。");
+    } finally {
+      setWorkTransferBusy(false);
+    }
+  }
+
+  async function importPortableWork(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file || workTransferBusy || !await protectTransition()) return;
+    if (file.size > 12 * 1024 * 1024) {
+      setPageError("JSONファイルが12 MiBの受信上限を超えています。");
+      return;
+    }
+    setWorkTransferBusy(true);
+    setWorkTransferStatus("");
+    setPageError("");
+    try {
+      const raw: unknown = JSON.parse(await file.text());
+      const imported = await api.importWorkArchive(raw);
+      setProjects((current) => current.some((item) => item.id === imported.project.id)
+        ? current : [imported.project, ...current]);
+      openSequenceRef.current += 1;
+      publishEditor(null);
+      selectionRef.current = { projectId: imported.project.id, documentId: "" };
+      persistSelectionSafely(authorScope, selectionRef.current);
+      updateRouteSelection(selectionRef.current, false);
+      setDocumentId("");
+      setProjectId(imported.project.id);
+      setWorkTransferStatus((imported.replayed ? "このJSONは既に取り込み済みです。" : "新しい作品としてJSONを取り込みました。") +
+        (imported.unresolvedAnchors ? " 旧RevisionのEvidence " + imported.unresolvedAnchors + " 件は記録を保持し、現在の文書には自動リンクしていません。" : "") +
+        (imported.omittedRecords ? " 元データで機密設定など " + imported.omittedRecords + " 件は除外済みです。" : ""));
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "作品JSONを取り込めませんでした。");
+    } finally {
+      setWorkTransferBusy(false);
     }
   }
 
@@ -1031,6 +1100,18 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             <input id="pg-project-title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} maxLength={256} required placeholder="作品名" />
             <button type="submit" disabled={loading || !projectTitle.trim()}>作品を作成</button>
           </form>
+          <details>
+            <summary>作品のエクスポート・インポート</summary>
+            <p>Markdown本文・構成・Knowledge・Evidence・作者データを作品JSONで持ち出し、別の作品として取り込めます。PostgreSQLの全Revision履歴やブラウザーの下書きは含まれません。</p>
+            {project && <button type="button" disabled={workTransferBusy || loading} onClick={() => void exportCurrentWork()}>
+              選択中の作品をJSONでエクスポート
+            </button>}
+            <label htmlFor="pg-work-import">作品JSONをインポート（既存作品は上書きしません）</label>
+            <input id="pg-work-import" type="file" accept=".json,application/json" disabled={workTransferBusy || loading}
+              onChange={(event) => void importPortableWork(event)} />
+            {workTransferBusy && <p role="status">作品データを処理中です。</p>}
+            {workTransferStatus && <p role="status">{workTransferStatus}</p>}
+          </details>
         </section>
         {project && <section>
           <h2>文書</h2>

@@ -11,6 +11,7 @@ import {
   type ProjectId,
   type RevisionId,
 } from "@codexia/persistence-contracts";
+import { WorkArchiveError, exportWorkArchive, importWorkArchive } from "./work-archive.js";
 
 export interface PersistenceRouteInput {
   persistence?: Persistence;
@@ -87,6 +88,7 @@ function sha256(value: string): string {
 }
 
 function errorResponse(error: unknown): PersistenceRouteResponse {
+  if (error instanceof WorkArchiveError) return { status: error.status, body: { error: error.message, code: error.code } };
   if (error instanceof RouteFailure) return { status: error.status, body: { error: error.message, code: error.code } };
   if (error instanceof PersistenceError) {
     const status = error.code === "not_found" ? 404
@@ -149,6 +151,12 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
 
   const persistence = input.persistence;
   try {
+    if (url.pathname === "/api/v1/persistence/import") {
+      if (input.method !== "POST") return { status: 405, body: { error: "Method not allowed", code: "METHOD_NOT_ALLOWED" } };
+      if (input.assignedProjectId) failure(403, "ASSIGNED_PROJECT_ONLY", "Hosted runtimes cannot import new projects");
+      const authorId = await input.requireAuthor();
+      return { status: 201, body: await importWorkArchive(persistence, input.body, authorId) };
+    }
     if (url.pathname === "/api/v1/persistence/projects") {
       if (input.method === "GET") {
         const limit = requestLimit(url.searchParams.get("limit"), 100, 200);
@@ -181,6 +189,9 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
       return { status: 404, body: { error: "Project was not found", code: "PERSISTENCE_NOT_FOUND" } };
     }
     const suffix = projectPath[2] ?? "";
+    if (suffix === "archive" && input.method === "GET") {
+      return { status: 200, body: await exportWorkArchive(persistence, projectId) };
+    }
     if (!suffix) {
       if (input.method === "PATCH") {
         await input.requireAuthor();

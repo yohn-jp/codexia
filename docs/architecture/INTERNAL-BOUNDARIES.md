@@ -4,7 +4,7 @@
 
 ## 1. Authority and architectural decision
 
-This contract refines the internal implementation boundaries of [Core](CORE.md), [Full Migration](FULL-MIGRATION.md) and [Modular Workspace](MODULAR-WORKSPACE.md). It does not replace their canonical persistence, recovery, module, authorization or presentation contracts. The independently planned [Public Plugin Platform](PLUGIN-PLATFORM.md) is a separate architectural capability; an internal refactor does not confer untrusted-plugin isolation.
+This contract refines the internal implementation boundaries of [Core](CORE.md), [Codexia reboot](CODEXIA-REBOOT-RFC.md) and [Modular Workspace](MODULAR-WORKSPACE.md). It does not replace their canonical persistence, recovery, module, authorization or presentation contracts. The independently planned [Public Plugin Platform](PLUGIN-PLATFORM.md) is a separate architectural capability; an internal refactor does not confer untrusted-plugin isolation.
 
 **Decision:** retain one PostgreSQL manuscript authority, one browser recovery authority, one HTTP admission boundary and one shared authoring coordinator. Presentation and module algorithms consume these boundaries without owning competing writers.
 
