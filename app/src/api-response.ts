@@ -11,6 +11,7 @@ const integer = (v: unknown): v is number => typeof v === "number" && Number.isS
 const nullableText = (v: unknown): v is string | null => v === null || text(v);
 const nullableInteger = (v: unknown): v is number | null => v === null || integer(v);
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every(text);
+const objectWithArrays = (v: unknown, keys: readonly string[]): boolean => record(v) && keys.every(key => Array.isArray(v[key]));
 const oneOf = (v: unknown, values: readonly string[]): boolean => text(v) && values.includes(v);
 const optional = <T>(v: unknown, guard: ResponseGuard<T>): v is T | undefined => v === undefined || guard(v);
 const array = <T>(guard: ResponseGuard<T>): ResponseGuard<T[]> => (v): v is T[] => Array.isArray(v) && v.every(guard);
@@ -71,9 +72,9 @@ export const responseContracts = {
   portableWorkArchive: (v: unknown): v is PortableWorkArchive => record(v) && v.format === "codexia-work/v1" &&
     record(v.project) && text(v.project.title) && jsonObject(v.project.settings) &&
     Array.isArray(v.documents) && v.documents.every(d => record(d) && text(d.id) && text(d.title) && text(d.markdown)) &&
-    record(v.knowledge) && ["nodes", "aliases", "relations"].every(key => Array.isArray(v.knowledge[key])) &&
-    record(v.evidence) && ["anchors", "mentions", "assertions", "assertionEvidence"].every(key => Array.isArray(v.evidence[key])) &&
-    record(v.evidence.unresolved) && ["anchors", "mentions", "assertionEvidence"].every(key => Array.isArray(v.evidence.unresolved[key])) &&
+    objectWithArrays(v.knowledge, ["nodes", "aliases", "relations"]) &&
+    record(v.evidence) && objectWithArrays(v.evidence, ["anchors", "mentions", "assertions", "assertionEvidence"]) &&
+    objectWithArrays(v.evidence.unresolved, ["anchors", "mentions", "assertionEvidence"]) &&
     Array.isArray(v.moduleRecords) && strings(v.omittedRecords),
   portableWorkImport: (v: unknown): v is PortableWorkImportResult => record(v) && persistenceProject(v.project) &&
     bool(v.replayed) && integer(v.unresolvedAnchors) && integer(v.omittedRecords),
