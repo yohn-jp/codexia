@@ -4,8 +4,8 @@ import type { ChangeOperation, ChangeProposal, ModuleActionContext, ModuleContex
 import { createModule } from "./index.js";
 
 const snapshot: SnapshotId = {
-  repository: { provider: "local", repositoryId: "nlp-feature-consent", defaultBranch: "main", ownerScope: "local-owner", url: "file:///nlp-feature-consent" },
-  remoteCommit: "c".repeat(40),
+  projectId: "nlp-feature-consent",
+  projectVersion: 13,
 };
 
 test("source LLM reactions are external features with deny-by-default and explicit proposal consent", async () => {
@@ -25,7 +25,7 @@ test("source LLM reactions are external features with deny-by-default and explic
   let settingsContent = `${JSON.stringify({ externalEnabled: { "setting-qa": false } })}\n`;
   const reader = {
     get snapshot() { return selectedSnapshot; },
-    async read(path: string) { return path === "meta/scriptorium/modules/nlp/feature-settings.json" ? { content: settingsContent, revision: `revision-${selectedSnapshot.remoteCommit}` } : null; },
+    async read(path: string) { return path === "meta/scriptorium/modules/nlp/feature-settings.json" ? { content: settingsContent, revision: `revision-${selectedSnapshot.projectVersion}` } : null; },
     async list() { return []; },
   };
   const proposals: ChangeProposal[] = [];
@@ -81,7 +81,7 @@ test("source LLM reactions are external features with deny-by-default and explic
   }
 
   settingsContent = write?.content ?? settingsContent;
-  selectedSnapshot = { ...snapshot, remoteCommit: "d".repeat(40) };
+  selectedSnapshot = { ...snapshot, projectVersion: 14 };
   const afterApproval = await featuresAction.invoke(featuresAction.inputSchema.parse({}), context);
   assert.equal(afterApproval.ok, true);
   if (afterApproval.ok) {

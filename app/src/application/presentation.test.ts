@@ -40,33 +40,25 @@ test("status presentation hides an empty state and exposes current errors and re
   assert.match(visible, /aria-live="assertive"/u);
   assert.match(visible, /role="alert"/u);
   assert.match(visible, /回復記録 2 件/u);
-  assert.match(visible, /リモート確認状態: failed/u);
+  assert.match(visible, /データベース確認状態: failed/u);
 });
 
 test("library outline renders project, continuation, scene, and recovery controls from explicit props", () => {
   const markup = renderToStaticMarkup(createElement(LibraryOutline, {
-    hostedMode: false,
-    busy: "",
-    projects: [{ id: "project-1", url: "https://github.com/owner/work.git", branch: "main" }],
+    projects: [{ id: "project-1", title: "Novel", version: 1, settings: {}, createdAt: "2026-11-09", updatedAt: "2026-11-09" } as never],
     activeProjectId: "project-1",
-    projectManagement: null,
     tree,
     selectedSceneId: "scene-1",
     continueCandidates: [],
     deviceType: "desktop",
     continueError: "",
-    legacyDrafts: [],
-    legacySelectedSceneId: "",
     recoverableEntries: [],
-    onRegisterProject: () => undefined,
     onActivateProject: () => undefined,
     onContinue: () => undefined,
     onSelectScene: () => undefined,
-    onExportLegacyDrafts: () => undefined,
-    onMapLegacyDraft: () => undefined,
   }));
   assert.match(markup, /class="sidebar"/u);
-  assert.match(markup, /github\.com\/owner\/work/u);
+  assert.match(markup, /Novel/u);
   assert.match(markup, /aria-current="true"/u);
   assert.match(markup, /class="continue-panel"/u);
   assert.match(markup, /作品構成/u);

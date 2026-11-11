@@ -230,7 +230,7 @@ function changeSetRecordFromProposalStatus(value: unknown): Record<string, unkno
   if (proposal.id !== details.coreProposalId || details.coreProposalId !== coreProposalIdForChangeSet(details.sourceChangeSet.id)) {
     throw new ToolFailure("INVALID_RESPONSE", "Core proposal ID does not match its source ChangeSet identity");
   }
-  if (!Array.isArray(proposal.operations) || !Array.isArray(value.approvedOperationIds) || !Array.isArray(value.checkpoints)) {
+  if (!Array.isArray(proposal.operations) || !Array.isArray(value.approvedOperationIds) || !Array.isArray(value.applications)) {
     throw new ToolFailure("INVALID_RESPONSE", "Core proposal status is missing review details");
   }
 
@@ -263,8 +263,8 @@ function changeSetRecordFromProposalStatus(value: unknown): Record<string, unkno
     }
     approved.add(operationId);
   }
-  const checkpointed = new Map<string, JsonRecord>();
-  for (const receipt of value.checkpoints) {
+  const applied = new Map<string, JsonRecord>();
+  for (const receipt of value.applications) {
     if (!isRecord(receipt) || typeof receipt.operationId !== "string" || !sourceByCoreId.has(receipt.operationId) || !Array.isArray(receipt.revisions)) {
       throw new ToolFailure("INVALID_RESPONSE", "Core checkpoint receipt does not match the source operation map");
     }
@@ -275,7 +275,7 @@ function changeSetRecordFromProposalStatus(value: unknown): Record<string, unkno
     if (paths.some((path) => typeof path !== "string") || JSON.stringify(paths) !== JSON.stringify(expectedPaths)) {
       throw new ToolFailure("INVALID_RESPONSE", "Core checkpoint receipt does not cover the source operation writes");
     }
-    checkpointed.set(receipt.operationId, receipt);
+    applied.set(receipt.operationId, receipt);
     approved.add(receipt.operationId);
   }
 
@@ -285,7 +285,7 @@ function changeSetRecordFromProposalStatus(value: unknown): Record<string, unkno
   const approvedOperationIds = selectedSourceIds;
   let status = approvedOperationIds.length ? "approved" : "proposed";
   let result: Record<string, unknown> | undefined;
-  if (approvedOperationIds.length > 0 && approvedOperationIds.every((sourceId) => checkpointed.has(details.operationMap[sourceId]!))) {
+  if (approvedOperationIds.length > 0 && approvedOperationIds.every((sourceId) => applied.has(details.operationMap[sourceId]!))) {
     const appliedOperations = approvedOperationIds.map((sourceId) => {
       const sourceOperation = sourceOperations.find((item) => item.id === sourceId)!;
       const affectedEntities = details.affectedEntities[sourceId];
@@ -328,12 +328,9 @@ function unavailableChangeSetPayload(value: unknown, sourceChangeSetId?: string)
   const approvedOperationIds = Array.isArray(value.approvedOperationIds)
     ? value.approvedOperationIds.filter((id): id is string => typeof id === "string")
     : [];
-  const checkpointedOperationIds = Array.isArray(value.checkpoints)
-    ? value.checkpoints.flatMap((receipt) =>
+  const appliedOperationIds = Array.isArray(value.applications)
+    ? value.applications.flatMap((receipt) =>
         isRecord(receipt) && typeof receipt.operationId === "string" ? [receipt.operationId] : [])
-    : [];
-  const publishedOperationIds = Array.isArray(value.publishedOperationIds)
-    ? value.publishedOperationIds.filter((id): id is string => typeof id === "string")
     : [];
   return {
     coreProposalId: proposal.id,
@@ -342,8 +339,7 @@ function unavailableChangeSetPayload(value: unknown, sourceChangeSetId?: string)
     ...(typeof value.originalDigest === "string" ? { originalDigest: value.originalDigest } : {}),
     operationIds,
     approvedOperationIds,
-    checkpointedOperationIds,
-    publishedOperationIds,
+    appliedOperationIds,
     ...(typeof value.state === "string" ? { state: value.state } : {}),
     recovery: "Restore the original browser/private proposal to recover its complete NarrativeChangeSet. This MCP result contains Core review status only.",
   };
@@ -680,7 +676,7 @@ export function registerMcpTools(server: McpServer, baseClient: McpActionClient)
 
   server.tool(
     "get_status",
-    "Get current repository synchronization status",
+    "Get current project revision and status",
     { project_id: projectIdSchema },
     guarded(async ({ project_id }) =>
       invoke(scopedClient(baseClient, project_id), "core.status", {})),
@@ -688,7 +684,7 @@ export function registerMcpTools(server: McpServer, baseClient: McpActionClient)
 
   server.tool(
     "get_history",
-    "Get recent project repository history",
+    "Get recent project change history",
     { project_id: projectIdSchema },
     guarded(async ({ project_id }) =>
       invoke(scopedClient(baseClient, project_id), "core.history", {})),
@@ -696,7 +692,7 @@ export function registerMcpTools(server: McpServer, baseClient: McpActionClient)
 
   server.tool(
     "get_observation",
-    "Observe the project repository at its current remote snapshot",
+    "Observe the current PostgreSQL project revision",
     { project_id: projectIdSchema },
     guarded(async ({ project_id }) =>
       invoke(scopedClient(baseClient, project_id), "core.observation", {})),
@@ -749,7 +745,7 @@ export function registerMcpTools(server: McpServer, baseClient: McpActionClient)
 
   server.tool(
     "list_change_sets",
-    "List project proposals and their author review/checkpoint status",
+    "List project proposals and their author review/apply status",
     { project_id: projectIdSchema },
     guarded(async ({ project_id }) => {
       const result = await scopedClient(baseClient, project_id).invoke("core.proposals.list", {});
@@ -798,7 +794,7 @@ export function registerMcpTools(server: McpServer, baseClient: McpActionClient)
 
   server.tool(
     "get_change_set",
-    "Get one project proposal and its author review/checkpoint status",
+    "Get one project proposal and its author review/apply status",
     {
       project_id: projectIdSchema,
       change_set_id: z.string().min(1).max(256),

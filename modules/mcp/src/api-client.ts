@@ -3,7 +3,7 @@ import type {
   ActionResult,
   ChangeProposal,
   ProposalEvidence,
-  RemoteObservation,
+  ProjectObservation,
 } from "@codexia/contracts";
 
 export interface McpActionClient {
@@ -23,8 +23,7 @@ export interface McpActionClient {
 
 export interface ProjectInfo {
   id: string;
-  url: string;
-  branch: string;
+  title: string;
 }
 
 export interface ApiClientOptions {
@@ -144,8 +143,7 @@ export class ApiClient implements McpActionClient {
         (project) =>
           !isRecord(project) ||
           typeof project.id !== "string" ||
-          typeof project.url !== "string" ||
-          typeof project.branch !== "string",
+          typeof project.title !== "string",
       )
     ) {
       throw new McpApiError(502, "INVALID_RESPONSE", "Project list response is invalid");
@@ -179,7 +177,7 @@ export class ApiClient implements McpActionClient {
     proposalId?: string,
     signal?: AbortSignal,
   ): Promise<ChangeProposal> {
-    const observation = await this.request<RemoteObservation>("GET", "/observation", undefined, signal);
+    const observation = await this.request<ProjectObservation>("GET", "/observation", undefined, signal);
     return this.request<ChangeProposal>("POST", "/proposals", {
       ...(proposalId ? { id: proposalId } : {}),
       snapshot: observation.snapshot,

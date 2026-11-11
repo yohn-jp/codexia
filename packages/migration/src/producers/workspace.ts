@@ -91,7 +91,7 @@ async function inspectShareGrants(context: MigrationContext): Promise<MigrationC
     });
     return result;
   }
-  const selected = parsed.map((value) => safeShareGrant(value, context.workspaceProjectId!, context.repository.repositoryId));
+  const selected = parsed.map((value) => safeShareGrant(value, context.workspaceProjectId!, context.projectId));
   const invalid = parsed.filter((value) => isRecord(value) && value.projectId === context.workspaceProjectId).length - selected.filter(Boolean).length;
   if (invalid > 0) {
     result.entries.push({

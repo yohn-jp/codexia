@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
-import { App } from "./App";
-import { applyThemeMode, loadThemeMode } from "./theme";
+import { useState } from "react";
+import { PublicModuleView, publicModuleIdForPath } from "./contributions/PublicModuleView";
+import { applyThemeMode, loadThemeMode, persistThemeMode, type ThemeMode } from "./theme";
 import "../styles.css";
 
 const root = document.getElementById("root");
@@ -18,7 +19,19 @@ if (!isReader && (remembered === "desktop" || remembered === "mobile")) {
   search.delete("store");
   window.location.replace(`/${remembered}${search.size ? `?${search}` : ""}${window.location.hash}`);
 } else {
-  createRoot(root).render(isReader ? <App initialTheme={theme} /> : <InterfaceChoice />);
+  createRoot(root).render(isReader ? <PublicReader initialTheme={theme} /> : <InterfaceChoice />);
+}
+
+function PublicReader({ initialTheme }: { initialTheme: ThemeMode }) {
+  const [themeMode, setThemeMode] = useState(initialTheme);
+  const [themeError, setThemeError] = useState("");
+  const moduleId = publicModuleIdForPath(window.location.pathname);
+  if (!moduleId) return <main role="alert">公開読書ビューが見つかりません。</main>;
+  return <PublicModuleView moduleId={moduleId} themeMode={themeMode} themeError={themeError} onThemeChange={(next) => {
+    setThemeMode(next);
+    try { persistThemeMode(next); setThemeError(""); }
+    catch { setThemeError("外観設定を保存できませんでした。"); }
+  }} />;
 }
 
 function InterfaceChoice() {

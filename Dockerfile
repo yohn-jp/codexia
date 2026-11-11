@@ -2,6 +2,7 @@
 ARG NODE_IMAGE=docker.io/library/node:24-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5
 ARG GO_IMAGE=docker.io/library/golang:1.25.5-bookworm@sha256:d9132cce84391efab786495288756d60e1da215b1f94e87860aeefc3d4c45b6d
 ARG PNPM_VERSION=12.10.1
+ARG POSTGRES_IMAGE=docker.io/library/postgres:17-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
 ARG PROFILE=core
 
 FROM ${NODE_IMAGE} AS pnpm-base
@@ -32,6 +33,19 @@ COPY buildkit/frontend/go.mod buildkit/frontend/go.sum ./
 COPY buildkit/frontend/main.go ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags='-s -w' -o /codexia-buildkit-frontend .
 
+# PostgreSQL is copied only into a disposable startup-smoke overlay, never a runtime image.
+FROM ${POSTGRES_IMAGE} AS smoke-postgres
+RUN set -eu; \
+    mkdir -p /opt/codexia-smoke-postgres/root; \
+    cp --parents -a /usr/lib/postgresql/17 /usr/share/postgresql/17 /opt/codexia-smoke-postgres/root; \
+    ldd /usr/lib/postgresql/17/bin/postgres > /tmp/codexia-postgres-smoke-deps; \
+    ldd /usr/lib/postgresql/17/bin/initdb >> /tmp/codexia-postgres-smoke-deps; \
+    ldd /usr/lib/postgresql/17/bin/pg_ctl >> /tmp/codexia-postgres-smoke-deps; \
+    if grep -q 'not found' /tmp/codexia-postgres-smoke-deps; then echo 'A PostgreSQL smoke dependency is missing' >&2; exit 1; fi; \
+    awk '/=> \// { print $3 } /^[[:space:]]*\// { print $1 }' /tmp/codexia-postgres-smoke-deps | sort -u \
+      | xargs -r cp --parents -L -t /opt/codexia-smoke-postgres/root; \
+    rm /tmp/codexia-postgres-smoke-deps
+
 FROM source AS buildkit
 ARG SCRIPTORIUM_PRODUCER_REVISION
 ARG CODEXIA_PRODUCER_REVISION=${SCRIPTORIUM_PRODUCER_REVISION}
@@ -47,6 +61,7 @@ RUN pnpm build:workspace
 RUN node scripts/profile-package.mjs --modules-json '[]' --prebuilt --prime-deploy-cache --out /tmp/codexia-hosted-artifact/app \
  && rm -rf /tmp/codexia-hosted-artifact
 COPY --from=frontend-build /codexia-buildkit-frontend /usr/local/bin/codexia-buildkit-frontend
+COPY --from=smoke-postgres /opt/codexia-smoke-postgres /opt/codexia-smoke-postgres
 ENTRYPOINT ["/usr/local/bin/codexia-buildkit-frontend"]
 
 FROM ${NODE_IMAGE} AS runtime-base

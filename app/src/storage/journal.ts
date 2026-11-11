@@ -2,31 +2,29 @@ import {
   assertChangeOperation,
   type ChangeOperation,
   type ChangeProposal,
-  type CheckpointReceipt,
-  type PublishReceipt,
+  type ApplyReceipt,
   type ProposalStatus,
-  type RepositoryIdentity,
   type SnapshotId,
 } from "@codexia/contracts";
 
 const DATABASE_NAME = "scriptorium-recovery";
-const DATABASE_VERSION = 4;
-const ENTRY_STORE = "operations";
-const SCRATCH_STORE = "scratch";
-const PROPOSAL_STORE = "proposals";
-const RECEIPT_STORE = "publicationReceipts";
+const DATABASE_VERSION = 5;
+const ENTRY_STORE = "pgOperations";
+const SCRATCH_STORE = "pgScratch";
+const PROPOSAL_STORE = "pgProposals";
+const APPLICATION_STORE = "pgApplications";
 const PERSISTENCE_DRAFT_STORE = "persistenceDrafts";
 
-export type JournalState = "draft" | "checkpointing" | "checkpointed" | "publication_unknown" | "conflict";
+export type JournalState = "draft" | "applying" | "applied" | "conflict";
 
 export interface JournalEntry {
   version: 1;
   key: string;
-  repositoryKey: string;
+  projectKey: string;
   documentKey: string;
   /** null marks a legacy record whose author identity was never recorded. */
   authorScope: string | null;
-  repository: RepositoryIdentity;
+  projectId: string;
   documentPath: string;
   sceneId: string;
   snapshot: SnapshotId;
@@ -35,18 +33,17 @@ export interface JournalEntry {
   operation: ChangeOperation;
   proposalId?: string;
   state: JournalState;
-  checkpoint?: CheckpointReceipt;
-  publicationBatchId?: string;
+  application?: ApplyReceipt;
   authorizedAt?: number;
   updatedAt: number;
 }
 
 export interface JournalProposal {
   key: string;
-  repositoryKey: string;
+  projectKey: string;
   /** null marks a legacy proposal whose author identity was never recorded. */
   authorScope: string | null;
-  repository: RepositoryIdentity;
+  projectId: string;
   proposal: ChangeProposal;
   /** Latest Core review status for a remotely submitted proposal. */
   status?: ProposalStatus;
@@ -85,14 +82,6 @@ interface ScratchRecord {
   updatedAt: number;
 }
 
-interface PublicationReceiptRecord {
-  key: string;
-  repositoryKey: string;
-  authorScope: string;
-  receipt: PublishReceipt;
-  createdAt: number;
-}
-
 export class JournalError extends Error {
   constructor(message: string, cause?: unknown) {
     super(message, cause === undefined ? undefined : { cause });
@@ -100,25 +89,17 @@ export class JournalError extends Error {
   }
 }
 
-export function repositoryKey(repository: RepositoryIdentity): string {
-  return JSON.stringify([
-    repository.provider,
-    repository.ownerScope,
-    repository.repositoryId,
-    repository.defaultBranch,
-  ]);
+export function projectKey(projectId: string): string {
+  if (!projectId) throw new JournalError("The recovery record has no project identity.");
+  return JSON.stringify([projectId]);
 }
 
-export function documentKey(repository: RepositoryIdentity, path: string): string {
-  return JSON.stringify([repositoryKey(repository), path]);
+export function documentKey(projectId: string, path: string): string {
+  return JSON.stringify([projectKey(projectId), path]);
 }
 
 export function journalEntryKey(entry: Pick<JournalEntry, "documentKey" | "operation"> & { authorScope?: string | null }): string {
   return JSON.stringify([entry.documentKey, entry.authorScope ?? null, entry.operation.id, entry.operation.generation]);
-}
-
-export function publicationReceiptKey(repository: RepositoryIdentity, authorScope: string, batchId: string): string {
-  return JSON.stringify([repositoryKey(repository), authorScope, batchId]);
 }
 
 export function stableJson(value: unknown): string {
@@ -130,30 +111,53 @@ export function stableJson(value: unknown): string {
   return JSON.stringify(value) ?? "undefined";
 }
 
+export function assertApplicationReceipt(receipt: ApplyReceipt, operation: ChangeOperation): void {
+  const writes = new Set(operation.writes.map((write) => write.path));
+  if (receipt.operationId !== operation.id || receipt.generation !== operation.generation ||
+      !Number.isSafeInteger(receipt.projectVersion) || receipt.projectVersion <= operation.baseProjectVersion ||
+      !Array.isArray(receipt.revisions) || receipt.revisions.length !== writes.size ||
+      new Set(receipt.revisions.map((revision) => revision.path)).size !== writes.size ||
+      receipt.revisions.some((revision) => !writes.has(revision.path) ||
+        !(revision.revision === null || typeof revision.revision === "string" && revision.revision.length > 0))) {
+    throw new JournalError("The application receipt does not match the exact operation and write set.");
+  }
+}
+
+function assertJournalEntry(entry: JournalEntry): void {
+  assertChangeOperation(entry.operation);
+  if (!entry.authorScope || entry.projectKey !== projectKey(entry.projectId) ||
+      entry.snapshot.projectId !== entry.projectId || entry.operation.projectId !== entry.projectId ||
+      entry.snapshot.projectVersion !== entry.operation.baseProjectVersion ||
+      entry.documentKey !== documentKey(entry.projectId, entry.documentPath) ||
+      !entry.operation.writes.some((write) => write.path === entry.documentPath)) {
+    throw new JournalError("The recovery record does not match its project, author, snapshot, or document.");
+  }
+}
+
 export function proposalOperationEntry(
-  repository: RepositoryIdentity,
+  projectId: string,
   authorScope: string,
   proposal: ChangeProposal,
   operation: ChangeOperation,
   state: JournalState = "draft",
-  checkpoint?: CheckpointReceipt,
+  application?: ApplyReceipt,
 ): JournalEntry {
   if (!authorScope) throw new JournalError("The proposal has no author identity scope.");
   assertChangeOperation(operation);
-  const owner = repositoryKey(repository);
-  if (repositoryKey(proposal.snapshot.repository) !== owner || repositoryKey(operation.repository) !== owner ||
+  const owner = projectKey(projectId);
+  if (projectKey(proposal.snapshot.projectId) !== owner || projectKey(operation.projectId) !== owner || operation.baseProjectVersion !== proposal.snapshot.projectVersion ||
       !proposal.operations.some((candidate) => stableJson(candidate) === stableJson(operation))) {
-    throw new JournalError("The proposal operation does not match its repository or complete payload.");
+    throw new JournalError("The proposal operation does not match its projectId or complete payload.");
   }
   const documentPath = operation.writes[0]?.path;
   if (!documentPath) throw new JournalError("The proposal operation has no recoverable file path.");
   const entry: JournalEntry = {
     version: 1,
     key: "",
-    repositoryKey: owner,
-    documentKey: documentKey(repository, documentPath),
+    projectKey: owner,
+    documentKey: documentKey(projectId, documentPath),
     authorScope,
-    repository,
+    projectId,
     documentPath,
     sceneId: proposal.id,
     snapshot: proposal.snapshot,
@@ -162,9 +166,11 @@ export function proposalOperationEntry(
     operation,
     proposalId: proposal.id,
     state,
-    ...(checkpoint ? { checkpoint, authorizedAt: Date.now() } : {}),
+    ...(application ? { application, authorizedAt: Date.now() } : {}),
     updatedAt: Date.now(),
   };
+  assertJournalEntry(entry);
+  if (application) assertApplicationReceipt(application, operation);
   entry.key = journalEntryKey(entry);
   return entry;
 }
@@ -207,7 +213,7 @@ export class BrowserJournal {
         if (!database.objectStoreNames.contains(ENTRY_STORE)) {
           const entries = database.createObjectStore(ENTRY_STORE, { keyPath: "key" });
           entries.createIndex("documentKey", "documentKey", { unique: false });
-          entries.createIndex("repositoryKey", "repositoryKey", { unique: false });
+          entries.createIndex("projectKey", "projectKey", { unique: false });
           entries.createIndex("state", "state", { unique: false });
         }
         if (!database.objectStoreNames.contains(SCRATCH_STORE)) {
@@ -215,11 +221,10 @@ export class BrowserJournal {
         }
         if (!database.objectStoreNames.contains(PROPOSAL_STORE)) {
           const proposals = database.createObjectStore(PROPOSAL_STORE, { keyPath: "key" });
-          proposals.createIndex("repositoryKey", "repositoryKey", { unique: false });
+          proposals.createIndex("projectKey", "projectKey", { unique: false });
         }
-        if (!database.objectStoreNames.contains(RECEIPT_STORE)) {
-          const receipts = database.createObjectStore(RECEIPT_STORE, { keyPath: "key" });
-          receipts.createIndex("repositoryKey", "repositoryKey", { unique: false });
+        if (!database.objectStoreNames.contains(APPLICATION_STORE)) {
+          database.createObjectStore(APPLICATION_STORE, { keyPath: "key" });
         }
         if (!database.objectStoreNames.contains(PERSISTENCE_DRAFT_STORE)) {
           database.createObjectStore(PERSISTENCE_DRAFT_STORE, { keyPath: "key" });
@@ -266,7 +271,7 @@ export class BrowserJournal {
       const store = transaction.objectStore(PERSISTENCE_DRAFT_STORE);
       const existing = await requestValue(store.get(key)) as PersistenceDraftEntry | undefined;
       if (existing && existing.generation >= entry.generation) {
-        const sameGeneration = existing.generation === entry.generation && existing.baseRevisionId === entry.baseRevisionId && existing.markdown === entry.markdown;
+        const sameGeneration = existing.generation === entry.generation && existing.baseRevisionId === entry.baseRevisionId && existing.baseMarkdown === entry.baseMarkdown && existing.markdown === entry.markdown;
         await done;
         return sameGeneration;
       }
@@ -301,7 +306,7 @@ export class BrowserJournal {
   async put(entry: JournalEntry): Promise<void> {
     try {
       if (!entry.authorScope) throw new JournalError("The recovery record has no author identity scope.");
-      assertChangeOperation(entry.operation);
+      assertJournalEntry(entry);
       const transaction = this.database.transaction(ENTRY_STORE, "readwrite", { durability: "strict" });
       const done = transactionDone(transaction);
       const store = transaction.objectStore(ENTRY_STORE);
@@ -324,7 +329,7 @@ export class BrowserJournal {
     try {
       if (!entry.authorScope) throw new JournalError("The recovery record has no author identity scope.");
       if (entry.state !== "draft") throw new JournalError("Only an editable draft can replace the latest draft.");
-      assertChangeOperation(entry.operation);
+      assertJournalEntry(entry);
       const transaction = this.database.transaction(ENTRY_STORE, "readwrite", { durability: "strict" });
       const done = transactionDone(transaction);
       const store = transaction.objectStore(ENTRY_STORE);
@@ -361,8 +366,8 @@ export class BrowserJournal {
     }
   }
 
-  async getDocument(repository: RepositoryIdentity, path: string, authorScope: string): Promise<JournalEntry[]> {
-    const key = documentKey(repository, path);
+  async getDocument(projectId: string, path: string, authorScope: string): Promise<JournalEntry[]> {
+    const key = documentKey(projectId, path);
     try {
       const transaction = this.database.transaction(ENTRY_STORE, "readonly");
       const done = transactionDone(transaction);
@@ -376,15 +381,15 @@ export class BrowserJournal {
     }
   }
 
-  async getRepository(repository: RepositoryIdentity, authorScope: string): Promise<JournalEntry[]> {
-    const key = repositoryKey(repository);
+  async getProject(projectId: string, authorScope: string): Promise<JournalEntry[]> {
+    const key = projectKey(projectId);
     try {
       const transaction = this.database.transaction(ENTRY_STORE, "readonly");
       const done = transactionDone(transaction);
-      const records = await requestValue(transaction.objectStore(ENTRY_STORE).index("repositoryKey").getAll(key)) as JournalEntry[];
+      const records = await requestValue(transaction.objectStore(ENTRY_STORE).index("projectKey").getAll(key)) as JournalEntry[];
       await done;
       return records
-        .filter((entry) => entry.version === 1 && entry.repositoryKey === key && entry.authorScope === authorScope)
+        .filter((entry) => entry.version === 1 && entry.projectKey === key && entry.authorScope === authorScope)
         .sort((left, right) => left.updatedAt - right.updatedAt);
     } catch (error) {
       throw storageMessage(error, "recovery journal");
@@ -407,26 +412,26 @@ export class BrowserJournal {
 
   /** Return an ownership token only when this call inserted a new proposal record. */
   async putProposal(
-    repository: RepositoryIdentity,
+    projectId: string,
     authorScope: string,
     proposal: ChangeProposal,
     status?: ProposalStatus,
   ): Promise<JournalProposalOwnership | null> {
     if (!authorScope) throw new JournalError("The proposal has no author identity scope.");
     if (!proposal || !/^[A-Za-z0-9_-]{1,128}$/u.test(proposal.id) || !Array.isArray(proposal.operations) || !proposal.operations.length ||
-        !["author", "module", "mcp"].includes(proposal.source) || repositoryKey(proposal.snapshot.repository) !== repositoryKey(repository)) {
-      throw new JournalError("The proposal has an invalid identity or belongs to a different repository.");
+        !["author", "module", "mcp"].includes(proposal.source) || projectKey(proposal.snapshot.projectId) !== projectKey(projectId)) {
+      throw new JournalError("The proposal has an invalid identity or belongs to a different projectId.");
     }
     for (const operation of proposal.operations) {
       assertChangeOperation(operation);
-      if (repositoryKey(operation.repository) !== repositoryKey(repository) || operation.baseRemoteCommit !== proposal.snapshot.remoteCommit) {
-        throw new JournalError("The proposal contains an operation for a different repository snapshot.");
+      if (projectKey(operation.projectId) !== projectKey(projectId) || operation.baseProjectVersion !== proposal.snapshot.projectVersion) {
+        throw new JournalError("The proposal contains an operation for a different projectId snapshot.");
       }
     }
     if (status) {
       const statusProposal = status.proposal;
-      if (!statusProposal || statusProposal.id !== proposal.id || repositoryKey(statusProposal.snapshot.repository) !== repositoryKey(repository) ||
-          statusProposal.snapshot.remoteCommit !== proposal.snapshot.remoteCommit || statusProposal.source !== proposal.source ||
+      if (!statusProposal || statusProposal.id !== proposal.id || projectKey(statusProposal.snapshot.projectId) !== projectKey(projectId) ||
+          statusProposal.snapshot.projectVersion !== proposal.snapshot.projectVersion || statusProposal.source !== proposal.source ||
           !Array.isArray(statusProposal.operations) || !statusProposal.operations.length) {
         throw new JournalError("The review status does not match the journaled proposal identity.");
       }
@@ -438,20 +443,20 @@ export class BrowserJournal {
         }
         for (const operation of statusProposal.operations) {
           assertChangeOperation(operation);
-          if (repositoryKey(operation.repository) !== repositoryKey(repository) || operation.baseRemoteCommit !== proposal.snapshot.remoteCommit) {
-            throw new JournalError("The partial review status contains an operation for a different repository snapshot.");
+          if (projectKey(operation.projectId) !== projectKey(projectId) || operation.baseProjectVersion !== proposal.snapshot.projectVersion) {
+            throw new JournalError("The partial review status contains an operation for a different projectId snapshot.");
           }
         }
       } else if (stableJson(statusProposal) !== stableJson(proposal)) {
         throw new JournalError("The review status does not contain the complete journaled proposal.");
       }
     }
-    const owner = repositoryKey(repository);
+    const owner = projectKey(projectId);
     const record: JournalProposal = {
       key: JSON.stringify([owner, authorScope, proposal.id]),
-      repositoryKey: owner,
+      projectKey: owner,
       authorScope,
-      repository,
+      projectId,
       proposal,
       ownershipToken: crypto.randomUUID(),
       ...(status ? { status } : {}),
@@ -462,9 +467,14 @@ export class BrowserJournal {
       const done = transactionDone(transaction);
       const store = transaction.objectStore(PROPOSAL_STORE);
       const existing = await requestValue(store.get(record.key)) as JournalProposal | undefined;
-      if (existing && (existing.authorScope !== authorScope || existing.repositoryKey !== owner)) {
+      if (existing && (existing.authorScope !== authorScope || existing.projectKey !== owner)) {
         await done;
-        throw new JournalError("A proposal ID cannot be reused for a different author, repository, or payload.");
+        throw new JournalError("A proposal ID cannot be reused for a different author, projectId, or payload.");
+      }
+      if (existing && status?.payloadComplete === false && status.proposal.operations.some((operation) =>
+          !existing.proposal.operations.some((candidate) => candidate.id === operation.id && stableJson(candidate) === stableJson(operation)))) {
+        await done;
+        throw new JournalError("The partial status changed an immutable proposal operation payload.");
       }
       const existingWasPartial = existing?.status?.payloadComplete === false;
       const retryRestoredOriginal = Boolean(existing && existingWasPartial && status?.payloadComplete !== false &&
@@ -479,9 +489,9 @@ export class BrowserJournal {
       if (existing && stableJson(existing.proposal) !== stableJson(proposal) &&
           !(status?.payloadComplete === false || retryRestoredOriginal)) {
         await done;
-        throw new JournalError("A proposal ID cannot be reused for a different author, repository, or payload.");
+        throw new JournalError("A proposal ID cannot be reused for a different author, projectId, or payload.");
       }
-      // A partial Git recovery is only the accepted subset. Never let it replace a complete
+      // A partial server recovery is only the accepted subset. Never let it replace a complete
       // browser copy; retain that private payload while updating the server review status.
       const keepCompletePrivatePayload = Boolean(existing && status?.payloadComplete === false && !existingWasPartial);
       const effectiveProposal = keepCompletePrivatePayload
@@ -502,7 +512,7 @@ export class BrowserJournal {
           ...existing,
           proposal: effectiveProposal,
           ...(status ? { status } : {}),
-          ...(status && (status.approvedOperationIds.length > 0 || status.checkpoints.length > 0 || status.publishedOperationIds.length > 0)
+          ...(status && (status.approvedOperationIds.length > 0 || status.applications.length > 0 || status.appliedOperationIds.length > 0)
             ? { dismissedAt: undefined }
             : {}),
           createdAt: existing.createdAt,
@@ -518,27 +528,27 @@ export class BrowserJournal {
     }
   }
 
-  async getProposals(repository: RepositoryIdentity, authorScope: string): Promise<JournalProposal[]> {
-    const key = repositoryKey(repository);
+  async getProposals(projectId: string, authorScope: string): Promise<JournalProposal[]> {
+    const key = projectKey(projectId);
     try {
       const transaction = this.database.transaction(PROPOSAL_STORE, "readonly");
       const done = transactionDone(transaction);
-      const records = await requestValue(transaction.objectStore(PROPOSAL_STORE).index("repositoryKey").getAll(key)) as JournalProposal[];
+      const records = await requestValue(transaction.objectStore(PROPOSAL_STORE).index("projectKey").getAll(key)) as JournalProposal[];
       await done;
-      return records.filter((record) => record.repositoryKey === key && record.authorScope === authorScope && record.dismissedAt === undefined).sort((left, right) => left.createdAt - right.createdAt);
+      return records.filter((record) => record.projectKey === key && record.authorScope === authorScope && record.dismissedAt === undefined).sort((left, right) => left.createdAt - right.createdAt);
     } catch (error) {
       throw storageMessage(error, "module proposal");
     }
   }
 
-  async dismissProposal(repository: RepositoryIdentity, authorScope: string, proposalId: string): Promise<void> {
-    const key = JSON.stringify([repositoryKey(repository), authorScope, proposalId]);
+  async dismissProposal(projectId: string, authorScope: string, proposalId: string): Promise<void> {
+    const key = JSON.stringify([projectKey(projectId), authorScope, proposalId]);
     try {
       const transaction = this.database.transaction(PROPOSAL_STORE, "readwrite", { durability: "strict" });
       const done = transactionDone(transaction);
       const store = transaction.objectStore(PROPOSAL_STORE);
       const record = await requestValue(store.get(key)) as JournalProposal | undefined;
-      if (!record || record.authorScope !== authorScope || record.repositoryKey !== repositoryKey(repository)) {
+      if (!record || record.authorScope !== authorScope || record.projectKey !== projectKey(projectId)) {
         await done;
         throw new JournalError("The exact proposal is no longer in this author recovery journal.");
       }
@@ -566,7 +576,7 @@ export class BrowserJournal {
   }
 
   async removeProposal(
-    repository: RepositoryIdentity,
+    projectId: string,
     authorScope: string,
     proposalId: string,
     ownership?: JournalProposalOwnership,
@@ -574,11 +584,11 @@ export class BrowserJournal {
     try {
       const transaction = this.database.transaction(PROPOSAL_STORE, "readwrite", { durability: "strict" });
       const done = transactionDone(transaction);
-      const key = JSON.stringify([repositoryKey(repository), authorScope, proposalId]);
+      const key = JSON.stringify([projectKey(projectId), authorScope, proposalId]);
       const store = transaction.objectStore(PROPOSAL_STORE);
       if (ownership) {
         const existing = await requestValue(store.get(key)) as JournalProposal | undefined;
-        if (!existing || existing.repositoryKey !== repositoryKey(repository) || existing.authorScope !== authorScope ||
+        if (!existing || existing.projectKey !== projectKey(projectId) || existing.authorScope !== authorScope ||
             ownership.proposal.id !== proposalId || existing.ownershipToken !== ownership.token ||
             stableJson(existing.proposal) !== stableJson(ownership.proposal) || existing.status !== undefined ||
             existing.dismissedAt !== undefined) {
@@ -597,9 +607,11 @@ export class BrowserJournal {
   async updateState(
     entry: JournalEntry,
     state: JournalState,
-    receipt?: CheckpointReceipt,
+    receipt?: ApplyReceipt,
   ): Promise<JournalEntry> {
     if (!entry.authorScope) throw new JournalError("The recovery record has no author identity scope.");
+    assertJournalEntry(entry);
+    if (receipt) assertApplicationReceipt(receipt, entry.operation);
     const key = journalEntryKey(entry);
     try {
       const transaction = this.database.transaction(ENTRY_STORE, "readwrite", { durability: "strict" });
@@ -612,15 +624,14 @@ export class BrowserJournal {
         await done;
         throw new JournalError("The exact journal operation was not found; refusing a stale state update.");
       }
-      const rank: Record<JournalState, number> = { draft: 0, checkpointing: 1, checkpointed: 2, publication_unknown: 3, conflict: 4 };
+      const rank: Record<JournalState, number> = { draft: 0, applying: 1, applied: 2, conflict: 4 };
       const nextState = rank[state] >= rank[existing.state] ? state : existing.state;
       const updated: JournalEntry = {
         ...existing,
         ...(entry.proposalId ? { proposalId: entry.proposalId } : {}),
-        ...(entry.publicationBatchId ? { publicationBatchId: entry.publicationBatchId } : {}),
         ...(entry.authorizedAt ? { authorizedAt: entry.authorizedAt } : {}),
         state: nextState,
-        ...(receipt && nextState === "checkpointed" ? { checkpoint: receipt } : {}),
+        ...(receipt && nextState === "applied" ? { application: receipt } : {}),
         updatedAt: Date.now(),
       };
       store.put(updated);
@@ -644,72 +655,52 @@ export class BrowserJournal {
     }
   }
 
-  async acknowledge(repository: RepositoryIdentity, authorScope: string, receipt: PublishReceipt): Promise<number> {
-    if (receipt.state !== "confirmed") return 0;
-    const acknowledged = new Set(receipt.acknowledged.map((item) => `${item.operationId}\u0000${item.generation}`));
-    const owner = repositoryKey(repository);
+  /** Retain the exact durable receipt and retire only its scoped, authorized generation. */
+  async acknowledgeApplication(projectId: string, authorScope: string, receipt: ApplyReceipt): Promise<number> {
+    const owner = projectKey(projectId);
+    if (!authorScope) throw new JournalError("The application receipt has no author scope.");
     try {
-      const receiptRecord: PublicationReceiptRecord = {
-        key: publicationReceiptKey(repository, authorScope, receipt.batchId),
-        repositoryKey: owner,
-        authorScope,
-        receipt,
-        createdAt: Date.now(),
-      };
-      const receiptTransaction = this.database.transaction(RECEIPT_STORE, "readwrite", { durability: "strict" });
-      const receiptDone = transactionDone(receiptTransaction);
-      receiptTransaction.objectStore(RECEIPT_STORE).put(receiptRecord);
-      await receiptDone;
-      if (acknowledged.size === 0) return 0;
-
-      const transaction = this.database.transaction([ENTRY_STORE, PROPOSAL_STORE], "readwrite", { durability: "strict" });
+      const transaction = this.database.transaction([ENTRY_STORE, APPLICATION_STORE], "readwrite", { durability: "strict" });
       const done = transactionDone(transaction);
       const store = transaction.objectStore(ENTRY_STORE);
-      const proposals = transaction.objectStore(PROPOSAL_STORE);
-      const [entries, proposalRecords] = await Promise.all([
-        requestValue(store.getAll()) as Promise<JournalEntry[]>,
-        requestValue(proposals.getAll()) as Promise<JournalProposal[]>,
-      ]);
-      let removed = 0;
-      for (const entry of entries) {
-        const identity = `${entry.operation.id}\u0000${entry.operation.generation}`;
-        if (entry.repositoryKey === owner && entry.authorScope === authorScope && entry.publicationBatchId === receipt.batchId && acknowledged.has(identity) && entry.state !== "draft") {
-          store.delete(entry.key);
-          removed++;
-        }
-      }
-      for (const record of proposalRecords) {
-        const remotelyPublished = new Set(record.status?.publishedOperationIds ?? []);
-        if (record.repositoryKey === owner && record.authorScope === authorScope && record.proposal.operations.every((operation) =>
-          acknowledged.has(`${operation.id}\u0000${operation.generation}`) || remotelyPublished.has(operation.id))) {
-          proposals.delete(record.key);
-        }
+      const entries = await requestValue(store.index("projectKey").getAll(owner)) as JournalEntry[];
+      const matches = entries.filter((entry) => entry.projectId === projectId && entry.authorScope === authorScope &&
+        entry.operation.id === receipt.operationId && entry.operation.generation === receipt.generation &&
+        entry.state !== "draft" && entry.state !== "conflict");
+      for (const entry of matches) assertApplicationReceipt(receipt, entry.operation);
+      if (matches.length) {
+        transaction.objectStore(APPLICATION_STORE).put({
+          key: JSON.stringify([projectId, authorScope, receipt.operationId, receipt.generation]),
+          projectId, authorScope, receipt,
+        });
+        for (const entry of matches) store.delete(entry.key);
       }
       await done;
-      return removed;
+      return matches.length;
     } catch (error) {
-      throw storageMessage(error, "publication receipt");
+      if (error instanceof JournalError) throw error;
+      throw storageMessage(error, "application receipt");
     }
   }
 
-  async getPublicationReceipts(repository: RepositoryIdentity, authorScope: string): Promise<PublishReceipt[]> {
-    const owner = repositoryKey(repository);
+  async getApplicationReceipts(projectId: string, authorScope: string): Promise<ApplyReceipt[]> {
+    projectKey(projectId);
+    if (!authorScope) throw new JournalError("The application receipt has no author scope.");
     try {
-      const transaction = this.database.transaction(RECEIPT_STORE, "readonly");
+      const transaction = this.database.transaction(APPLICATION_STORE, "readonly");
       const done = transactionDone(transaction);
-      const records = await requestValue(transaction.objectStore(RECEIPT_STORE).index("repositoryKey").getAll(owner)) as PublicationReceiptRecord[];
+      const records = await requestValue(transaction.objectStore(APPLICATION_STORE).getAll()) as
+        { projectId: string; authorScope: string; receipt: ApplyReceipt }[];
       await done;
-      return records
-        .filter((record) => record.repositoryKey === owner && record.authorScope === authorScope)
-        .sort((left, right) => left.createdAt - right.createdAt)
+      return records.filter((record) => record.projectId === projectId && record.authorScope === authorScope)
         .map((record) => record.receipt);
     } catch (error) {
-      throw storageMessage(error, "publication receipt");
+      throw storageMessage(error, "application receipt");
     }
   }
 
-  async removeDrafts(repository: RepositoryIdentity, path: string, authorScope: string): Promise<number> {
-    const entries = await this.getDocument(repository, path, authorScope);
+  async removeDrafts(projectId: string, path: string, authorScope: string): Promise<number> {
+    const entries = await this.getDocument(projectId, path, authorScope);
     const drafts = entries.filter((entry) => entry.state === "draft");
     try {
       const transaction = this.database.transaction(ENTRY_STORE, "readwrite", { durability: "strict" });
@@ -723,8 +714,9 @@ export class BrowserJournal {
     }
   }
 
-  async getScratch(repository: RepositoryIdentity, path: string): Promise<string> {
-    const key = documentKey(repository, path);
+  async getScratch(projectId: string, path: string, authorScope: string): Promise<string> {
+    if (!authorScope) throw new JournalError("The scratch note has no author identity scope.");
+    const key = JSON.stringify([documentKey(projectId, path), authorScope]);
     try {
       const transaction = this.database.transaction(SCRATCH_STORE, "readonly");
       const done = transactionDone(transaction);
@@ -736,8 +728,9 @@ export class BrowserJournal {
     }
   }
 
-  async putScratch(repository: RepositoryIdentity, path: string, text: string): Promise<void> {
-    const record: ScratchRecord = { key: documentKey(repository, path), text, updatedAt: Date.now() };
+  async putScratch(projectId: string, path: string, text: string, authorScope: string): Promise<void> {
+    if (!authorScope) throw new JournalError("The scratch note has no author identity scope.");
+    const record: ScratchRecord = { key: JSON.stringify([documentKey(projectId, path), authorScope]), text, updatedAt: Date.now() };
     try {
       const transaction = this.database.transaction(SCRATCH_STORE, "readwrite", { durability: "strict" });
       const done = transactionDone(transaction);

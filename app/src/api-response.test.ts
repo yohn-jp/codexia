@@ -3,10 +3,7 @@ import { test } from "node:test";
 import { BUILTIN_MODULE_IDS } from "@codexia/contracts";
 import { responseContracts } from "./api-response.js";
 
-const snapshot = {
-  repository: { provider: "local", repositoryId: "repo", defaultBranch: "main", ownerScope: "owner", url: "file:///repo" },
-  remoteCommit: "a".repeat(40),
-};
+const snapshot = { projectId: "fixture", projectVersion: 1 };
 
 test("browser DTO guards accept exactly the canonical built-in module IDs", () => {
   for (const id of BUILTIN_MODULE_IDS) {

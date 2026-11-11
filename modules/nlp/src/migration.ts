@@ -53,10 +53,10 @@ export function createNlpMigrationProducer(): MigrationProducer {
           detail: "Restore preserved NLP author settings byte-for-byte after the module is enabled.",
         });
         contribution.operations.push({
-          id: stableMigrationId(`${context.repository.repositoryId}\0nlp-reactivation-v1\0${legacyPath}\0${legacy.content}`),
+          id: stableMigrationId(`${context.projectId}\0nlp-reactivation-v1\0${legacyPath}\0${legacy.content}`),
           generation: 0,
-          repository: context.repository,
-          baseRemoteCommit: context.snapshot.remoteCommit,
+          projectId: context.projectId,
+          baseProjectVersion: context.snapshot.projectVersion,
           effect: "migration",
           reads: [{ path: file.target, revision: null }],
           writes: [{ path: file.target, revision: null, content: legacy.content }],

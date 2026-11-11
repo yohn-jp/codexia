@@ -76,7 +76,7 @@ test("ordinary API requests stop at document departure while keepalive cursor wr
       if (String(input) === "/api/version") {
         return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
       }
-      if (String(input) === "/api/projects" && holdInitialProject) {
+      if (String(input) === "/api/v1/persistence/projects?limit=100" && holdInitialProject) {
         initialProjectStarted();
         return initialProjectResponse;
       }
@@ -95,20 +95,20 @@ test("ordinary API requests stop at document departure while keepalive cursor wr
       if (String(input) === "/_platform/refresh" && finalRetryMode !== "none") {
         return Response.json({ refreshed: true });
       }
-      if (String(input) === "/api/projects" && holdRefresh) {
+      if (String(input) === "/api/v1/persistence/projects?limit=100" && holdRefresh) {
         return Response.json({ error: "Authentication required", code: "UNAUTHORIZED" }, { status: 401 });
       }
-      if (String(input) === "/api/projects" && holdPendingRefresh && !pendingGrantFresh) {
+      if (String(input) === "/api/v1/persistence/projects?limit=100" && holdPendingRefresh && !pendingGrantFresh) {
         return Response.json({ error: "Authentication required", code: "UNAUTHORIZED" }, { status: 401 });
       }
-      if (String(input) === "/api/projects" && holdStaleRefresh) {
+      if (String(input) === "/api/v1/persistence/projects?limit=100" && holdStaleRefresh) {
         return Response.json({ error: "Authentication required", code: "UNAUTHORIZED" }, { status: 401 });
       }
-      if (String(input) === "/api/projects" && rejectHeldProjectFetch) {
+      if (String(input) === "/api/v1/persistence/projects?limit=100" && rejectHeldProjectFetch) {
         rejectedProjectFetchStarted();
         return rejectedProjectFetchResponse;
       }
-      if (String(input) === "/api/projects" && holdProjectBody) {
+      if (String(input) === "/api/v1/persistence/projects?limit=100" && holdProjectBody) {
         const response = Response.json([]);
         Object.defineProperty(response, "json", {
           value: () => {
@@ -132,10 +132,10 @@ test("ordinary API requests stop at document departure while keepalive cursor wr
         jobStreamFetchStarted();
         return rejectedJobStreamFetch;
       }
-      if (String(input) === "/api/projects" && failProjectFetchWhileActive) {
+      if (String(input) === "/api/v1/persistence/projects?limit=100" && failProjectFetchWhileActive) {
         throw new TypeError("The active network request failed.");
       }
-      if (String(input) === "/api/projects" && finalRetryMode !== "none") {
+      if (String(input) === "/api/v1/persistence/projects?limit=100" && finalRetryMode !== "none") {
         finalRetryAttempt += 1;
         const retryAttempt = finalRetryMode === "locks" ? 3 : 2;
         if (finalRetryAttempt === retryAttempt) {
@@ -147,7 +147,7 @@ test("ordinary API requests stop at document departure while keepalive cursor wr
       if (String(input).endsWith("/recent-activity")) {
         return Response.json({ items: [{ sceneId: "scene-1", sentenceOffset: null, deviceType: "mobile", updatedAt: "2026-01-01T00:00:00.000Z" }] });
       }
-      if (String(input) === "/api/projects") return Response.json([]);
+      if (String(input) === "/api/v1/persistence/projects?limit=100") return Response.json([]);
       throw new Error(`Unexpected request: ${String(input)}`);
     };
 
@@ -164,21 +164,21 @@ test("ordinary API requests stop at document departure while keepalive cursor wr
     dispatch("beforeunload", canceled);
     await afterMicrotasks();
     assert.equal(canceled.defaultPrevented, true);
-    assert.deepEqual(await api.projects(), []);
+    assert.deepEqual(await api.persistenceProjects(), []);
     assert.equal(requests.length, 1);
 
     await api.version();
     holdInitialProject = true;
-    const initialProjectRequest = api.projects();
+    const initialProjectRequest = api.persistenceProjects();
     await initialAdmission;
     dispatch("pageshow", new Event("pageshow"));
     releaseInitialProject(Response.json([]));
     assert.deepEqual(await initialProjectRequest, []);
-    assert.equal(requests.filter((request) => request.input === "/api/projects").length, 2);
+    assert.equal(requests.filter((request) => request.input === "/api/v1/persistence/projects?limit=100").length, 2);
     holdInitialProject = false;
 
     holdRefresh = true;
-    const refreshingRequest = api.projects();
+    const refreshingRequest = api.persistenceProjects();
     await refreshAdmission;
     listeners.set("beforeunload", (listeners.get("beforeunload") ?? []).filter((entry) => entry.capture));
     dispatch("beforeunload", new Event("beforeunload", { cancelable: true }));
@@ -186,25 +186,25 @@ test("ordinary API requests stop at document departure while keepalive cursor wr
     releaseRefresh(Response.json({ error: "Refresh grant expired", code: "UNAUTHORIZED" }, { status: 401 }));
     await assert.rejects(refreshingRequest, (error: unknown) => error instanceof DocumentDepartureError && error.name === "AbortError");
     assert.deepEqual(redirects, []);
-    assert.equal(requests.filter((request) => request.input === "/api/projects").length, 4);
+    assert.equal(requests.filter((request) => request.input === "/api/v1/persistence/projects?limit=100").length, 4);
 
-    await assert.rejects(api.projects(), (error: unknown) => error instanceof DocumentDepartureError && error.name === "AbortError");
-    assert.equal(requests.filter((request) => request.input === "/api/projects").length, 4);
+    await assert.rejects(api.persistenceProjects(), (error: unknown) => error instanceof DocumentDepartureError && error.name === "AbortError");
+    assert.equal(requests.filter((request) => request.input === "/api/v1/persistence/projects?limit=100").length, 4);
 
     holdRefresh = false;
     await api.putRecentActivity("project-1", { sceneId: "scene-1", sentenceOffset: null, deviceType: "mobile" }, { keepalive: true });
     assert.equal(requests.at(-1)?.keepalive, true);
 
     dispatch("pageshow", new Event("pageshow"));
-    assert.deepEqual(await api.projects(), []);
-    assert.equal(requests.filter((request) => request.input === "/api/projects").length, 5);
+    assert.deepEqual(await api.persistenceProjects(), []);
+    assert.equal(requests.filter((request) => request.input === "/api/v1/persistence/projects?limit=100").length, 5);
 
     dispatch("pagehide", new Event("pagehide"));
-    await assert.rejects(api.projects(), (error: unknown) => error instanceof DocumentDepartureError && error.name === "AbortError");
-    assert.equal(requests.filter((request) => request.input === "/api/projects").length, 5);
+    await assert.rejects(api.persistenceProjects(), (error: unknown) => error instanceof DocumentDepartureError && error.name === "AbortError");
+    assert.equal(requests.filter((request) => request.input === "/api/v1/persistence/projects?limit=100").length, 5);
     dispatch("pageshow", new Event("pageshow"));
-    assert.deepEqual(await api.projects(), []);
-    assert.equal(requests.filter((request) => request.input === "/api/projects").length, 6);
+    assert.deepEqual(await api.persistenceProjects(), []);
+    assert.equal(requests.filter((request) => request.input === "/api/v1/persistence/projects?limit=100").length, 6);
 
     holdRefresh = true;
     let lockQueued!: () => void;
@@ -221,23 +221,23 @@ test("ordinary API requests stop at document departure while keepalive cursor wr
       },
     };
     Object.defineProperty(globalThis, "navigator", { configurable: true, value: fakeNavigator });
-    const queuedRequest = api.projects();
+    const queuedRequest = api.persistenceProjects();
     await lockQueuedSignal;
     dispatch("pagehide", new Event("pagehide"));
     dispatch("pageshow", new Event("pageshow"));
     runQueuedLock();
     await assert.rejects(queuedRequest, (error: unknown) => error instanceof DocumentDepartureError && error.name === "AbortError");
-    assert.equal(requests.filter((request) => request.input === "/api/projects").length, 7);
+    assert.equal(requests.filter((request) => request.input === "/api/v1/persistence/projects?limit=100").length, 7);
 
     Object.defineProperty(globalThis, "navigator", { configurable: true, value: { locks: undefined } });
     holdRefresh = false;
     holdPendingRefresh = true;
     const refreshCountBeforeResume = requests.filter((request) => request.input === "/_platform/refresh").length;
-    const departingCaller = api.projects();
+    const departingCaller = api.persistenceProjects();
     await pendingRefreshAdmission;
     dispatch("pagehide", new Event("pagehide"));
     dispatch("pageshow", new Event("pageshow"));
-    const restoredCaller = api.projects();
+    const restoredCaller = api.persistenceProjects();
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(requests.filter((request) => request.input === "/_platform/refresh").length, refreshCountBeforeResume + 1);
     pendingGrantFresh = true;
@@ -248,12 +248,12 @@ test("ordinary API requests stop at document departure while keepalive cursor wr
     holdPendingRefresh = false;
 
     holdStaleRefresh = true;
-    const staleCaller = api.projects();
+    const staleCaller = api.persistenceProjects();
     await staleRefreshAdmission;
     dispatch("pagehide", new Event("pagehide"));
     dispatch("pageshow", new Event("pageshow"));
     const refreshCountBeforeShared401 = requests.filter((request) => request.input === "/_platform/refresh").length;
-    const restored401Callers = Promise.allSettled([api.projects(), api.projects()]);
+    const restored401Callers = Promise.allSettled([api.persistenceProjects(), api.persistenceProjects()]);
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(requests.filter((request) => request.input === "/_platform/refresh").length, refreshCountBeforeShared401);
     releaseStaleRefresh(Response.json({ error: "Refresh grant expired", code: "UNAUTHORIZED" }, { status: 401 }));
@@ -275,7 +275,7 @@ test("ordinary API requests stop at document departure while keepalive cursor wr
         value: { locks: mode === "locks" ? { request: (_name: string, callback: () => Promise<Response>) => callback() } : undefined },
       });
       const refreshCountBeforeRetry = requests.filter((request) => request.input === "/_platform/refresh").length;
-      const finalRetryCaller = api.projects();
+      const finalRetryCaller = api.persistenceProjects();
       await finalRetryAdmission;
       dispatch("pagehide", new Event("pagehide"));
       dispatch("pageshow", new Event("pageshow"));
@@ -287,7 +287,7 @@ test("ordinary API requests stop at document departure while keepalive cursor wr
     }
 
     rejectHeldProjectFetch = true;
-    const rejectedFetchRequest = api.projects();
+    const rejectedFetchRequest = api.persistenceProjects();
     await rejectedProjectFetchAdmission;
     dispatch("pagehide", new Event("pagehide"));
     dispatch("pageshow", new Event("pageshow"));
@@ -296,7 +296,7 @@ test("ordinary API requests stop at document departure while keepalive cursor wr
     rejectHeldProjectFetch = false;
 
     holdProjectBody = true;
-    const rejectedBodyRequest = api.projects();
+    const rejectedBodyRequest = api.persistenceProjects();
     await projectBodyAdmission;
     dispatch("pagehide", new Event("pagehide"));
     dispatch("pageshow", new Event("pageshow"));
@@ -305,7 +305,7 @@ test("ordinary API requests stop at document departure while keepalive cursor wr
     holdProjectBody = false;
 
     failProjectFetchWhileActive = true;
-    await assert.rejects(api.projects(), (error: unknown) => error instanceof TypeError && error.message === "The active network request failed.");
+    await assert.rejects(api.persistenceProjects(), (error: unknown) => error instanceof TypeError && error.message === "The active network request failed.");
     failProjectFetchWhileActive = false;
 
     holdLogoutBody = true;

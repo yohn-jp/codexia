@@ -8,8 +8,8 @@ import { createModule as createNlpModule } from "@codexia/module-nlp";
 import { createModule as createDiagnosticsModule } from "./index.js";
 
 const snapshot: SnapshotId = {
-  repository: { provider: "local", repositoryId: "p06-production", defaultBranch: "main", ownerScope: "local-owner", url: "file:///p06-production" },
-  remoteCommit: "c".repeat(40),
+  projectId: "p06-production",
+  projectVersion: 13,
 };
 
 function moduleContext(): ModuleContext {
@@ -202,7 +202,7 @@ test("corpus synonym suggestions acquire the optional snapshot-indexed provider 
         },
         async nearest(query: string, target: SnapshotId, options: { limit?: number; excludeSceneIds?: readonly string[] }, signal: AbortSignal) {
           assert.equal(signal.aborted, false);
-          assert.equal(target.remoteCommit, snapshot.remoteCommit);
+          assert.equal(target.projectVersion, snapshot.projectVersion);
           providerCalls.push({ kind: "nearest", values: [query, options] });
           return {
             snapshot: target, model: model.id, modelVersion: model.version, dimensions: model.dimensions,

@@ -7,7 +7,7 @@ const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
 const MAX_INDEX_BYTES = 32 * 1024 * 1024;
 const READ_BATCH = 48;
 const MAX_SOURCE_PATHS = 100_000;
-const DOCUMENT_ROOTS = ["manuscript", "plot", "bible", "meta/scratch"] as const;
+const DOCUMENT_ROOTS = ["documents", "manuscript", "plot", "bible", "meta/scratch"] as const;
 
 export interface IndexedSnapshot {
   key: string;
@@ -25,20 +25,20 @@ function checkAborted(signal: AbortSignal): void {
 }
 
 function repositoryKey(snapshot: SnapshotId): string {
-  const repository = snapshot.repository;
-  return JSON.stringify([repository.provider, repository.ownerScope, repository.repositoryId, repository.defaultBranch]);
+  return snapshot.projectId;
 }
 
 export function isSearchableDocumentPath(path: string): boolean {
   const lower = path.toLowerCase();
+  const inDocuments = lower.startsWith("documents/");
   const inManuscript = lower.startsWith("manuscript/");
   const inPlot = lower.startsWith("plot/");
   const inBible = lower.startsWith("bible/");
   const inScratch = lower.startsWith("meta/scratch/");
-  if (!inManuscript && !inPlot && !inBible && !inScratch) return false;
+  if (!inDocuments && !inManuscript && !inPlot && !inBible && !inScratch) return false;
   if (lower.split("/").some((part) => part.startsWith("."))) return false;
   const extension = lower.slice(lower.lastIndexOf(".") + 1);
-  if (inManuscript || inScratch) return ["md", "markdown", "txt"].includes(extension);
+  if (inDocuments || inManuscript || inScratch) return ["md", "markdown", "txt"].includes(extension);
   return ["md", "markdown", "txt", "yaml", "yml", "json"].includes(extension);
 }
 

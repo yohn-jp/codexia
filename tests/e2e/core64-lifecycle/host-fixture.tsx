@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { ChangeOperation, ChangeProposal, ModuleStatus, ProposalStatus, RepositoryIdentity, SnapshotId, UiContribution } from "@codexia/contracts";
+import type { ChangeOperation, ChangeProposal, ModuleStatus, ProposalStatus, SnapshotId, UiContribution } from "@codexia/contracts";
 import { ContributionHost } from "../../../app/src/contributions/ContributionHost";
-import { BrowserJournal, repositoryKey, type JournalProposalOwnership } from "../../../app/src/storage/journal";
+import { BrowserJournal, projectKey, type JournalProposalOwnership } from "../../../app/src/storage/journal";
 
 interface HostLifecycleMetrics {
   loaderCalls: number;
@@ -86,13 +86,7 @@ const harness: HostLifecycleHarness = {
 };
 window.__core64HostLifecycle = harness;
 
-const repository: RepositoryIdentity = {
-  provider: "github",
-  repositoryId: "core64-lifecycle-fixture",
-  defaultBranch: "main",
-  ownerScope: "fixture-owner",
-  url: "https://github.com/fixture/core64-lifecycle",
-};
+const projectId = "project-1";
 
 const contribution: UiContribution = {
   id: "publishing.lifecycle-fixture",
@@ -104,8 +98,8 @@ const contribution: UiContribution = {
 
 function snapshot(scene: number): SnapshotId {
   return {
-    repository,
-    remoteCommit: scene === 0 ? "a".repeat(40) : scene.toString(16).padStart(40, "0"),
+    projectId,
+    projectVersion: scene + 1,
   };
 }
 
@@ -113,10 +107,10 @@ function proposalOperation(currentSnapshot: SnapshotId): ChangeOperation {
   return {
     id: "late-contribution-operation",
     generation: 1,
-    repository,
-    baseRemoteCommit: currentSnapshot.remoteCommit,
+    projectId,
+    baseProjectVersion: currentSnapshot.projectVersion,
     effect: "metadata",
-    reads: [],
+    reads: [{ path: "meta/scriptorium/modules/publishing/lifecycle-late-callback.md", revision: null }],
     writes: [{
       path: "meta/scriptorium/modules/publishing/lifecycle-late-callback.md",
       revision: null,
@@ -137,11 +131,11 @@ let firstJournalWrite = true;
 
 async function syncJournalRecords(): Promise<void> {
   const records = (await browserJournal.getAllProposals())
-    .filter((record) => record.repositoryKey === repositoryKey(repository))
+    .filter((record) => record.projectKey === projectKey(projectId))
     .map((record) => ({ authorScope: record.authorScope ?? "", proposalId: record.proposal.id }));
   harness.metrics.journalRecords = records;
   const all = await browserJournal.getAllProposals();
-  const scoped = all.filter((record) => record.repositoryKey === repositoryKey(repository));
+  const scoped = all.filter((record) => record.projectKey === projectKey(projectId));
   harness.metrics.legacyProposalIds = scoped
     .filter((record) => record.ownershipToken === undefined)
     .map((record) => record.proposal.id);
@@ -155,7 +149,7 @@ async function syncJournalRecords(): Promise<void> {
 
 const journal = {
   async putProposal(
-    owner: RepositoryIdentity,
+    owner: string,
     authorScope: string,
     proposal: ChangeProposal,
   ): Promise<JournalProposalOwnership | null> {
@@ -177,7 +171,7 @@ const journal = {
     return ownership;
   },
   async removeProposal(
-    owner: RepositoryIdentity,
+    owner: string,
     authorScope: string,
     proposalId: string,
     ownership?: JournalProposalOwnership,
@@ -190,16 +184,16 @@ const journal = {
 };
 
 async function seedLegacyProposal(): Promise<void> {
-  const request = indexedDB.open("scriptorium-recovery", 4);
+  const request = indexedDB.open("scriptorium-recovery", 5);
   const database = await new Promise<IDBDatabase>((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
   try {
     await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction("proposals", "readwrite", { durability: "strict" });
-      const store = transaction.objectStore("proposals");
-      const key = JSON.stringify([repositoryKey(repository), "author-old", "preexisting-proposal-id"]);
+      const transaction = database.transaction("pgProposals", "readwrite", { durability: "strict" });
+      const store = transaction.objectStore("pgProposals");
+      const key = JSON.stringify([projectKey(projectId), "author-old", "preexisting-proposal-id"]);
       const read = store.get(key);
       read.onsuccess = () => {
         const legacyRecord = read.result as { ownershipToken?: string } | undefined;
@@ -227,26 +221,26 @@ async function reviewCurrentProposal(): Promise<void> {
     proposal: lastProposal,
     state: "proposed",
     approvedOperationIds: [],
-    checkpoints: [],
-    publishedOperationIds: [],
+    applications: [],
+    appliedOperationIds: [],
     stale: false,
   };
-  await browserJournal.putProposal(repository, "author-old", lastProposal, status);
+  await browserJournal.putProposal(projectId, "author-old", lastProposal, status);
   harness.metrics.reviewStatusProposalIds.push(lastProposal.id);
   await syncJournalRecords();
 }
 
 async function dismissCurrentProposal(): Promise<void> {
   if (!lastProposal) return;
-  await browserJournal.dismissProposal(repository, "author-old", lastProposal.id);
+  await browserJournal.dismissProposal(projectId, "author-old", lastProposal.id);
   harness.metrics.dismissedProposalIds.push(lastProposal.id);
   await syncJournalRecords();
 }
 
 async function replaceCurrentProposalVersion(): Promise<void> {
   if (!lastProposal) return;
-  await browserJournal.removeProposal(repository, "author-old", lastProposal.id);
-  const ownership = await browserJournal.putProposal(repository, "author-old", lastProposal);
+  await browserJournal.removeProposal(projectId, "author-old", lastProposal.id);
+  const ownership = await browserJournal.putProposal(projectId, "author-old", lastProposal);
   if (ownership) harness.metrics.proposalReinsertions += 1;
   await syncJournalRecords();
 }
@@ -306,7 +300,7 @@ async function startFixture(): Promise<void> {
       configurable: true,
       value: () => "preexisting-proposal-id",
     });
-    await browserJournal.putProposal(repository, "author-old", proposalFor("preexisting-proposal-id"));
+    await browserJournal.putProposal(projectId, "author-old", proposalFor("preexisting-proposal-id"));
     await seedLegacyProposal();
     await syncJournalRecords();
   }

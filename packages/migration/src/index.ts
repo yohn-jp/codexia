@@ -51,13 +51,13 @@ export async function inspectLegacyProject(options: InspectLegacyOptions): Promi
   const context: MigrationContext = {
     source,
     target,
-    repository: target.snapshot.repository,
+    projectId: target.snapshot.projectId,
     snapshot: target.snapshot,
     enabledModules: new Set(options.enabledModules ?? MODULE_IDS),
-    ...(options.legacyRepositoryMappings
+    ...(options.legacyProjectMappings
       ? {
-          legacyRepositoryMappings: Object.fromEntries(
-            Object.entries(options.legacyRepositoryMappings).map(([legacyId, repository]) => [legacyId, { ...repository }]),
+          legacyProjectMappings: Object.fromEntries(
+            Object.entries(options.legacyProjectMappings),
           ),
         }
       : {}),
@@ -126,7 +126,7 @@ export async function inspectLegacyProject(options: InspectLegacyOptions): Promi
 }
 
 /**
- * Submit the dry-run operations to Core as a proposal. Approval and checkpoint
+ * Submit the dry-run operations as a proposal. Approval and database application
  * remain separate authenticated author actions owned by MutationCoordinator.
  */
 export async function proposeMigrationImport(

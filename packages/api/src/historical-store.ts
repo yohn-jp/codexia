@@ -1,18 +1,17 @@
 import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { link, lstat, mkdir, open, readdir, unlink } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
-import type { ModelUsageEvent, ModelUsageStore, RepositoryIdentity } from "@codexia/contracts";
+import { join, resolve } from "node:path";
+import type { ModelUsageEvent, ModelUsageStore } from "@codexia/contracts";
 
 const DEFAULT_PAGE_SIZE = 100;
 const MAX_PAGE_SIZE = 1_000;
 const MAX_EVENT_BYTES = 8 * 1024;
 const MAX_TIMING_MS = 24 * 60 * 60 * 1_000;
 const EVENT_FIELDS = new Set([
-  "id", "repository", "feature", "provider", "model", "startedAt", "completedAt", "state",
+  "id", "projectId", "feature", "provider", "model", "startedAt", "completedAt", "state",
   "inputTokens", "outputTokens", "cost", "cacheHit", "promptVersion", "durationMs", "queueWaitMs", "errorCode",
 ]);
-const REPOSITORY_FIELDS = new Set(["provider", "repositoryId", "defaultBranch", "ownerScope", "url"]);
 
 export class HistoricalModelUsageError extends Error {
   constructor(readonly code: string, message: string) {
@@ -36,7 +35,7 @@ export class HistoricalModelUsageStore implements ModelUsageStore {
     const event = normalizeEvent(value);
     const root = this.directory;
     await ensureRoot(root);
-    const directory = join(root, repositoryKey(event.repository));
+    const directory = join(root, projectKey(event.projectId));
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await assertPrivateDirectory(directory);
     await syncDirectory(root);
@@ -73,15 +72,15 @@ export class HistoricalModelUsageStore implements ModelUsageStore {
     }
   }
 
-  async list(repository: RepositoryIdentity, query: { from?: string; to?: string; limit?: number; cursor?: string } = {}): Promise<{
+  async list(projectId: string, query: { from?: string; to?: string; limit?: number; cursor?: string } = {}): Promise<{
     events: ModelUsageEvent[];
     nextCursor?: string;
   }> {
-    const identity = normalizeRepository(repository);
+    const identity = normalizeProjectId(projectId);
     const page = normalizeQuery(query);
-    const key = repositoryKey(identity);
+    const key = projectKey(identity);
     if (page.cursor && page.cursor.partition !== key) {
-      throw new HistoricalModelUsageError("model_usage_cursor_invalid", "Model usage history cursor belongs to another repository");
+      throw new HistoricalModelUsageError("model_usage_cursor_invalid", "Model usage history cursor belongs to another project");
     }
     const directory = join(this.directory, key);
     try {
@@ -104,8 +103,8 @@ export class HistoricalModelUsageStore implements ModelUsageStore {
         throw new HistoricalModelUsageError("model_usage_history_corrupt", "Model usage history contains an unexpected filesystem entry");
       }
       const event = await readEvent(join(directory, entry.name));
-      if (repositoryKey(event.repository) !== key || `${hash(event.id)}.json` !== entry.name) {
-        throw new HistoricalModelUsageError("model_usage_history_corrupt", "A model usage history record does not match its repository or event identity");
+      if (projectKey(event.projectId) !== key || `${hash(event.id)}.json` !== entry.name) {
+        throw new HistoricalModelUsageError("model_usage_history_corrupt", "A model usage history record does not match its project or event identity");
       }
       if ((!page.from || event.startedAt >= page.from) && (!page.to || event.startedAt <= page.to)) events.push(event);
     }
@@ -134,7 +133,7 @@ export class HistoricalModelUsageStore implements ModelUsageStore {
 
 function normalizeEvent(value: unknown): ModelUsageEvent {
   if (!isRecord(value) || !hasOnlyKeys(value, EVENT_FIELDS)) invalidEvent();
-  const repository = normalizeRepository(value.repository);
+  const projectId = normalizeProjectId(value.projectId);
   const id = boundedText(value.id, 1, 128, /^[A-Za-z0-9._:-]+$/u, "event ID");
   const feature = boundedText(value.feature, 1, 128, /^[A-Za-z0-9._:-]+$/u, "feature");
   const provider = boundedText(value.provider, 1, 128, /^[A-Za-z0-9._:-]+$/u, "provider");
@@ -144,7 +143,7 @@ function normalizeEvent(value: unknown): ModelUsageEvent {
   if (completedAt < startedAt) invalidEvent("Model usage timestamps are out of order");
   if (value.state !== "completed" && value.state !== "aborted" && value.state !== "failed") invalidEvent();
   const event: ModelUsageEvent = {
-    id, repository, feature, provider, model, startedAt, completedAt, state: value.state,
+    id, projectId, feature, provider, model, startedAt, completedAt, state: value.state,
     ...(value.inputTokens === undefined ? {} : { inputTokens: boundedInteger(value.inputTokens, "inputTokens") }),
     ...(value.outputTokens === undefined ? {} : { outputTokens: boundedInteger(value.outputTokens, "outputTokens") }),
     ...(value.cost === undefined ? {} : { cost: boundedCost(value.cost) }),
@@ -158,31 +157,8 @@ function normalizeEvent(value: unknown): ModelUsageEvent {
   return event;
 }
 
-function normalizeRepository(value: unknown): RepositoryIdentity {
-  if (!isRecord(value) || !hasOnlyKeys(value, REPOSITORY_FIELDS)) {
-    throw new HistoricalModelUsageError("model_usage_event_invalid", "Model usage repository identity is invalid");
-  }
-  if (value.provider !== "github" && value.provider !== "local") {
-    throw new HistoricalModelUsageError("model_usage_event_invalid", "Model usage repository provider is invalid");
-  }
-  const repositoryId = boundedText(value.repositoryId, 1, 256, /^[A-Za-z0-9._:-]+$/u, "repository ID");
-  const defaultBranch = boundedText(value.defaultBranch, 1, 256, /^[^\x00-\x1f\x7f]+$/u, "default branch");
-  const ownerScope = boundedText(value.ownerScope, 1, 256, /^[^\x00-\x1f\x7f]+$/u, "owner scope");
-  const url = boundedText(value.url, 1, 2_048, /^[^\x00-\x1f\x7f]+$/u, "repository URL");
-  if (value.provider === "github") {
-    let parsed: URL;
-    try { parsed = new URL(url); } catch { throw new HistoricalModelUsageError("model_usage_event_invalid", "Model usage repository URL is invalid"); }
-    if (parsed.protocol !== "https:" || parsed.hostname !== "github.com" || parsed.username || parsed.password || parsed.search || parsed.hash) {
-      throw new HistoricalModelUsageError("model_usage_event_invalid", "Model usage GitHub URL is not a credential-free repository identity");
-    }
-  } else if (!isAbsolute(url)) {
-    let parsed: URL;
-    try { parsed = new URL(url); } catch { throw new HistoricalModelUsageError("model_usage_event_invalid", "Model usage local repository URL is invalid"); }
-    if (!["file:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
-      throw new HistoricalModelUsageError("model_usage_event_invalid", "Model usage local URL is not a credential-free repository identity");
-    }
-  }
-  return { provider: value.provider, repositoryId, defaultBranch, ownerScope, url };
+function normalizeProjectId(value: unknown): string {
+  return boundedText(value, 1, 256, /^[A-Za-z0-9._:-]+$/u, "project ID");
 }
 
 function normalizeQuery(query: unknown): { from?: string; to?: string; limit: number; cursor?: { partition: string; startedAt: string; id: string } } {
@@ -230,8 +206,8 @@ function encodeCursor(cursor: { partition: string; from: string | null; to: stri
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
 
-function repositoryKey(repository: RepositoryIdentity): string {
-  return hash(`${repository.provider}\0${repository.ownerScope}\0${repository.repositoryId}`);
+function projectKey(projectId: string): string {
+  return hash(`postgres-project\0${projectId}`);
 }
 
 function hash(value: string): string { return createHash("sha256").update(value, "utf8").digest("hex"); }

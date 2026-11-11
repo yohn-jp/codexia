@@ -122,9 +122,9 @@ function safePathPart(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function cacheFileFor(cacheDirectory: string, repository: SnapshotId["repository"]): string {
+function cacheFileFor(cacheDirectory: string, projectId: string): string {
   const modelPart = safePathPart(`${EMBEDDING_MODEL_ID}@${EMBEDDING_MODEL_VERSION}`).slice(0, 24);
-  const repositoryPart = safePathPart(JSON.stringify([repository.provider, repository.ownerScope, repository.repositoryId, repository.defaultBranch]));
+  const repositoryPart = safePathPart(projectId);
   return path.join(path.resolve(cacheDirectory), "semantic", "indexes", `${repositoryPart}-${modelPart}.json`);
 }
 
@@ -237,7 +237,7 @@ async function beginIndex(request: JobRequest, input: Record<string, unknown>): 
       typeof input.total !== "number" || !Number.isSafeInteger(input.total) || input.total < 0) {
     throw errorWithCode("invalid_semantic_index_request", "Index begin request is invalid");
   }
-  const cacheFile = cacheFileFor(input.cacheDirectory, request.snapshot.repository);
+  const cacheFile = cacheFileFor(input.cacheDirectory, request.snapshot.projectId);
   const store = await loadStore(cacheFile);
   const build: IndexBuild = {
     store,
@@ -354,7 +354,7 @@ async function nearest(request: JobRequest, input: Record<string, unknown>, sign
     throw errorWithCode("invalid_semantic_query", "Nearest search request is invalid");
   }
   if (!input.query.trim()) return { hits: [] };
-  const cacheFile = cacheFileFor(input.cacheDirectory, request.snapshot.repository);
+  const cacheFile = cacheFileFor(input.cacheDirectory, request.snapshot.projectId);
   const store = await loadStore(cacheFile);
   const membership = store.snapshots[input.key];
   if (!membership) throw errorWithCode("semantic_index_missing", "No semantic passage index exists for this snapshot; rebuild the index first");
@@ -390,7 +390,7 @@ async function contradictionPairs(request: JobRequest, input: Record<string, unk
       typeof input.minimum !== "number" || typeof input.maximum !== "number" || input.minimum > input.maximum) {
     throw errorWithCode("invalid_contradiction_pair_request", "Contradiction pair request is invalid");
   }
-  const store = await loadStore(cacheFileFor(input.cacheDirectory, request.snapshot.repository));
+  const store = await loadStore(cacheFileFor(input.cacheDirectory, request.snapshot.projectId));
   const membership = store.snapshots[input.key];
   if (!membership) throw errorWithCode("semantic_index_missing", "No semantic passage index exists for this snapshot");
   const memberByLocation = new Map(membership.passages.map((passage) => [stableKey(passage.entityId, passage.sentenceIndex), passage]));
@@ -487,7 +487,7 @@ async function rerank(query: string, texts: unknown, cacheDirectory: string, sig
 
 async function status(input: Record<string, unknown>, request: JobRequest): Promise<unknown> {
   if (typeof input.cacheDirectory !== "string") throw errorWithCode("invalid_semantic_status_request", "Status request has no cache directory");
-  const cacheFile = cacheFileFor(input.cacheDirectory, request.snapshot.repository);
+  const cacheFile = cacheFileFor(input.cacheDirectory, request.snapshot.projectId);
   const store = await loadStore(cacheFile);
   if (typeof input.key !== "string") throw errorWithCode("invalid_semantic_status_request", "Status request has no snapshot key");
   const key = input.key;

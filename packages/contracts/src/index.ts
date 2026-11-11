@@ -5,23 +5,16 @@ export const MAX_JOB_OUTPUT_BYTES = 8 * 1024 * 1024;
 export const MAX_PROPOSAL_EVIDENCE_BYTES = 1024 * 1024;
 export const BUILTIN_MODULE_IDS = Object.freeze(["story", "diagnostics", "nlp", "semantic", "speaker", "assistant", "publishing", "mcp", "search"] as const);
 export type ModuleId = (typeof BUILTIN_MODULE_IDS)[number];
-export interface RepositoryIdentity {
-  provider: "github" | "local";
-  repositoryId: string;
-  defaultBranch: string;
-  ownerScope: string;
-  url: string;
-}
+/** PostgreSQL project revision; never a Git object identity. */
 export interface SnapshotId {
-  repository: RepositoryIdentity;
-  remoteCommit: string;
-  overlayCommit?: string;
+  projectId: string;
+  projectVersion: number;
 }
 /** Optional host-owned historical records; never a project mutation or disposable model cache. */
 export const MODEL_USAGE_CAPABILITY = "host.model-usage";
 export interface ModelUsageEvent {
   id: string;
-  repository: RepositoryIdentity;
+  projectId: string;
   feature: string;
   provider: string;
   model: string;
@@ -39,7 +32,7 @@ export interface ModelUsageEvent {
 }
 export interface ModelUsageStore {
   append(event: ModelUsageEvent): Promise<void>;
-  list(repository: RepositoryIdentity, query?: { from?: string; to?: string; limit?: number; cursor?: string }): Promise<{
+  list(projectId: string, query?: { from?: string; to?: string; limit?: number; cursor?: string }): Promise<{
     events: ModelUsageEvent[];
     nextCursor?: string;
   }>;
@@ -53,8 +46,8 @@ export type EffectClass = "manuscript" | "structure" | "metadata" | "settings" |
 export interface ChangeOperation {
   id: string;
   generation: number;
-  repository: RepositoryIdentity;
-  baseRemoteCommit: string;
+  projectId: string;
+  baseProjectVersion: number;
   effect: EffectClass;
   reads: FileRevision[];
   readScopes?: ScopeRevision[];
@@ -62,25 +55,16 @@ export interface ChangeOperation {
   message: string;
   evidenceIds?: string[];
 }
-export interface CheckpointReceipt {
+export interface ApplyReceipt {
   operationId: string;
   generation: number;
-  localCommit: string;
-  remoteBase: string;
+  projectVersion: number;
   revisions: FileRevision[];
 }
-export interface PublishReceipt {
-  batchId: string;
-  state: "confirmed" | "publication_unknown" | "conflict";
-  remoteCommit: string;
-  acknowledged: CheckpointReceipt[];
-}
-export interface RemoteObservation {
+export interface ProjectObservation {
   snapshot: SnapshotId;
-  checkpointHead: string;
   observedAt: string;
   state: "fresh" | "failed" | "unknown";
-  pending: CheckpointReceipt[];
 }
 export interface SnapshotReader {
   snapshot: SnapshotId;
@@ -116,40 +100,32 @@ export interface ChangeProposal {
 /** Author review state. Unaccepted payload remains in private/browser recovery. */
 export interface ProposalStatus {
   proposal: ChangeProposal;
-  /** False when Git recovery contains only accepted operations, without provisional evidence. */
+  /** False when only accepted operations remain, without provisional evidence. */
   payloadComplete?: boolean;
   /** Digest binding of the original complete normalized proposal, including provisional data. */
   originalDigest?: string;
   /** Original proposal operation IDs in order, including privately retained operations. */
   operationIds?: string[];
-  state: "proposed" | "partially_approved" | "approved" | "checkpointed";
+  state: "proposed" | "partially_approved" | "approved" | "applied";
   approvedOperationIds: string[];
-  checkpoints: CheckpointReceipt[];
-  /** Confirmed in the currently observed canonical remote history. */
-  publishedOperationIds: string[];
+  /** Durable author scope for each approved operation; retries cannot change the first approver. */
+  approvedByOperationId?: Record<string, string>;
+  applications: ApplyReceipt[];
+  /** Atomically applied in PostgreSQL. */
+  appliedOperationIds: string[];
   stale: boolean;
 }
 export interface Approval { proposalId: string; operationIds: string[]; authorScope: string }
 /** Port shared by module and external callers: no author authority. */
 export interface ProposalCoordinator {
-  observe(projectId: string): Promise<RemoteObservation>;
-  reader(projectId: string, view?: "remote" | "checkpoint"): Promise<SnapshotReader>;
+  observe(projectId: string): Promise<ProjectObservation>;
+  reader(projectId: string, pinned?: SnapshotId): Promise<SnapshotReader>;
   propose(projectId: string, proposal: ChangeProposal): Promise<ChangeProposal>;
 }
-export interface ReconcileResult {
-  snapshot: SnapshotId;
-  operations: Array<{ operationId: string; state: "unchanged" | "replayed" | "conflict"; receipt?: CheckpointReceipt; paths: string[] }>;
-}
-/** Host-only port. Authenticated author adapters must never expose it to modules/MCP.
- * Proposal source is assigned by the authenticated transport, not accepted from request JSON. */
+/** Host-only port; modules and MCP never receive author approval authority. */
 export interface MutationCoordinator extends ProposalCoordinator {
-  observe(projectId: string): Promise<RemoteObservation>;
-  reader(projectId: string, view?: "remote" | "checkpoint"): Promise<SnapshotReader>;
-  propose(projectId: string, proposal: ChangeProposal): Promise<ChangeProposal>;
   approve(projectId: string, approval: Approval): Promise<void>;
-  checkpoint(projectId: string, operation: ChangeOperation): Promise<CheckpointReceipt>;
-  reconcile(projectId: string): Promise<ReconcileResult>;
-  publish(projectId: string, batchId: string): Promise<PublishReceipt>;
+  apply(projectId: string, operation: ChangeOperation): Promise<ApplyReceipt>;
 }
 export interface JobRequest<T = unknown> {
   id: string;
@@ -183,8 +159,8 @@ export interface ModuleActionContext {
   /** Same authenticated project/snapshot; never exposes author mutation ports. */
   invoke(actionId: string, input: unknown, signal?: AbortSignal): Promise<ActionResult>;
   listActions(): Promise<ActionDescriptor[]>;
-  /** Explicit read-only composition with another registered repository of this owner. */
-  linkedReader(repositoryId: string): Promise<SnapshotReader>;
+  /** Explicit read-only composition with another project of this owner. */
+  linkedReader(projectId: string): Promise<SnapshotReader>;
   signal: AbortSignal;
   /** Actual fractional progress of this host-tracked domain invocation. */
   reportProgress?(progress: number): Promise<void>;
@@ -370,8 +346,7 @@ export function createDocumentSource(reader: SnapshotReader): DocumentSource {
   };
 }
 export function snapshotKey(snapshot: SnapshotId): string {
-  return JSON.stringify([snapshot.repository.provider, snapshot.repository.ownerScope,
-    snapshot.repository.repositoryId, snapshot.repository.defaultBranch, snapshot.remoteCommit, snapshot.overlayCommit ?? null]);
+  return JSON.stringify([snapshot.projectId, snapshot.projectVersion]);
 }
 /** Content-neutral semantic read-set guard; callers choose the relevant project subtree. */
 export async function snapshotScopeRevision(reader: SnapshotReader, prefix: string): Promise<string> {
@@ -398,11 +373,9 @@ export function assertChangeOperation(value: unknown): asserts value is ChangeOp
   const v = value as ChangeOperation | null;
   if (!v || typeof v !== "object" || typeof v.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(v.id) ||
       !Number.isSafeInteger(v.generation) || v.generation < 0 || typeof v.message !== "string" ||
-      !v.message.trim() || v.message.length > 1024 || typeof v.baseRemoteCommit !== "string" ||
-      !/^(?:[a-f0-9]{40}|[a-f0-9]{64}|)$/.test(v.baseRemoteCommit) ||
+      !v.message.trim() || v.message.length > 1024 || !Number.isSafeInteger(v.baseProjectVersion) || v.baseProjectVersion < 0 ||
       !["manuscript", "structure", "metadata", "settings", "migration"].includes(v.effect) ||
-      !v.repository || !["github", "local"].includes(v.repository.provider) ||
-      [v.repository.repositoryId, v.repository.defaultBranch, v.repository.ownerScope, v.repository.url].some(x => typeof x !== "string" || !x) ||
+      typeof v.projectId !== "string" || !v.projectId || v.projectId.length > 512 ||
       !Array.isArray(v.reads) || !Array.isArray(v.writes) || v.reads.length > 512 || !v.writes.length || v.writes.length > 256) {
     throw new ContractError("Invalid change operation");
   }

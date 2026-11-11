@@ -1,19 +1,15 @@
 import { expect, test, type Page } from "@playwright/test";
-import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { randomUUID } from "node:crypto";
+import type { ProposalStatus } from "@codexia/contracts";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
-const branch = "main";
 const zukanPath = "meta/scriptorium/modules/story/zukan-suggestions.jsonl";
 const scenePath = "plot/volumes/vol-review/chapters/ch-review/scenes/scene-review.yaml";
+const manuscriptPath = "manuscript/vol-review/ch-review/scene-review.md";
 
 interface Project {
   id: string;
-  url: string;
-  branch: string;
+  title: string;
 }
 
 interface ProposalActionResult {
@@ -24,45 +20,16 @@ interface ProposalActionResult {
   error?: { code: string; message: string };
 }
 
-interface ProposalStatus {
-  proposal: { id: string; operations: Array<{ id: string; writes: Array<{ path: string; content: string | null }> }> };
-  state: string;
-  approvedOperationIds: string[];
-  checkpoints: unknown[];
-  publishedOperationIds: string[];
-}
-
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "Codexia Review Acceptance",
-      GIT_AUTHOR_EMAIL: "review-acceptance@example.invalid",
-      GIT_COMMITTER_NAME: "Codexia Review Acceptance",
-      GIT_COMMITTER_EMAIL: "review-acceptance@example.invalid",
-    },
-  }).trim();
-}
-
-async function writeFixture(seed: string, files: Record<string, string>): Promise<void> {
-  for (const [relativePath, content] of Object.entries(files)) {
-    const destination = join(seed, relativePath);
-    await mkdir(resolve(destination, ".."), { recursive: true });
-    await writeFile(destination, content, "utf8");
-  }
-}
-
-async function createReviewProject(): Promise<{ root: string; remote: string; remoteUrl: string; initialHead: string }> {
-  const root = await mkdtemp(join(tmpdir(), "codexia-review-contributions-"));
-  const remote = join(root, "review.git");
-  const seed = join(root, "seed");
-  await mkdir(seed, { recursive: true });
-  git(root, "init", "--bare", `--initial-branch=${branch}`, remote);
-  git(seed, "init", `--initial-branch=${branch}`);
-
+async function createReviewProject(page: Page): Promise<Project> {
+  const origin = new URL(page.url()).origin;
+  const title = `Review Contributions ${randomUUID()}`;
+  const projectResponse = await page.request.post(`${origin}/api/projects`, { headers: { Origin: origin }, data: { title } });
+  expect(projectResponse.status(), await projectResponse.text()).toBe(201);
+  const project = await projectResponse.json() as Project;
+  const snapshotResponse = await page.request.get(`${origin}/api/projects/${encodeURIComponent(project.id)}/snapshot`);
+  expect(snapshotResponse.ok(), await snapshotResponse.text()).toBe(true);
+  const current = await snapshotResponse.json() as { snapshot: { projectId: string; projectVersion: number } };
+  expect(current.snapshot.projectId).toBe(project.id);
   const suggestion = {
     id: "zukan-review-queue-item",
     entityId: "char-akari",
@@ -78,8 +45,7 @@ async function createReviewProject(): Promise<{ root: string; remote: string; re
     createdAt: "2026-10-17T00:00:00.000Z",
     updatedAt: "2026-10-17T00:00:00.000Z",
   };
-  await writeFixture(seed, {
-    "meta/project.yaml": "id: review-contributions\ntitle: Review Contributions\n",
+  const fixtureFiles = {
     "bible/characters/char-akari/profile.yaml": [
       "id: char-akari",
       "type: character",
@@ -104,9 +70,13 @@ async function createReviewProject(): Promise<{ root: string; remote: string; re
       "  firstPerson: [僕]",
       "",
     ].join("\n"),
-    "plot/volumes/vol-review/volume.yaml": "id: vol-review\ntype: volume\nname: Review Volume\norder: 1\n",
-    "plot/volumes/vol-review/chapters/ch-review/chapter.yaml": "id: ch-review\ntype: chapter\nname: Review Chapter\nvolume: vol-review\norder: 1\n",
-    [scenePath]: [
+    [manuscriptPath]: "# Review Scene\n\n『この古地図を探している。』\n",
+    [zukanPath]: `${JSON.stringify(suggestion)}\n`,
+  } satisfies Record<string, string>;
+  const writes = [
+    { path: "plot/volumes/vol-review/volume.yaml", revision: null, content: "id: vol-review\ntype: volume\nname: Review Volume\norder: 1\n" },
+    { path: "plot/volumes/vol-review/chapters/ch-review/chapter.yaml", revision: null, content: "id: ch-review\ntype: chapter\nname: Review Chapter\nvolume: vol-review\norder: 1\n" },
+    { path: scenePath, revision: null, content: [
       "id: scene-review",
       "type: scene",
       "name: Review Scene",
@@ -115,24 +85,49 @@ async function createReviewProject(): Promise<{ root: string; remote: string; re
       "order: 1",
       "appears: [char-akari, char-sumi]",
       "speakerCount: 2",
-      "manuscript: manuscript/vol-review/ch-review/scene-review.md",
+      `manuscript: ${manuscriptPath}`,
       "",
-    ].join("\n"),
-    "manuscript/vol-review/ch-review/scene-review.md": "# Review Scene\n\n『この古地図を探している。』\n",
-    [zukanPath]: `${JSON.stringify(suggestion)}\n`,
+    ].join("\n") },
+    ...Object.entries(fixtureFiles).map(([path, content]) => ({ path, revision: null, content })),
+  ];
+  const operation = {
+    id: randomUUID(),
+    generation: 0,
+    projectId: project.id,
+    baseProjectVersion: current.snapshot.projectVersion,
+    effect: "structure",
+    reads: writes.map(({ path, revision }) => ({ path, revision })),
+    writes,
+    message: "Seed Story and Speaker review data in PostgreSQL",
+  };
+  const proposalResponse = await page.request.post(`${origin}/api/projects/${encodeURIComponent(project.id)}/proposals`, {
+    headers: { Origin: origin },
+    data: { id: randomUUID(), snapshot: current.snapshot, operations: [operation] },
   });
-  git(seed, "add", "--all");
-  git(seed, "commit", "-m", "Seed pending Story and Speaker review contributions");
-  git(seed, "remote", "add", "origin", remote);
-  git(seed, "push", "origin", `HEAD:refs/heads/${branch}`);
-  return { root, remote, remoteUrl: remote, initialHead: git(remote, "rev-parse", `refs/heads/${branch}`) };
+  expect(proposalResponse.status(), await proposalResponse.text()).toBe(201);
+  const proposal = await proposalResponse.json() as { id: string };
+  const approvalResponse = await page.request.post(`${origin}/api/projects/${encodeURIComponent(project.id)}/approvals`, {
+    headers: { Origin: origin },
+    data: { proposalId: proposal.id, operationIds: [operation.id] },
+  });
+  expect(approvalResponse.status(), await approvalResponse.text()).toBe(204);
+  const applyResponse = await page.request.post(`${origin}/api/projects/${encodeURIComponent(project.id)}/apply`, { headers: { Origin: origin }, data: operation });
+  expect(applyResponse.status(), await applyResponse.text()).toBe(201);
+  const seededSnapshot = await page.request.get(`${origin}/api/projects/${encodeURIComponent(project.id)}/snapshot`);
+  expect(seededSnapshot.ok(), await seededSnapshot.text()).toBe(true);
+  const seeded = await seededSnapshot.json() as { files: Array<{ path: string; content: string }> };
+  const seededFiles = new Map(seeded.files.map((file) => [file.path, file.content]));
+  expect(seededFiles.get(zukanPath)).toContain("zukan-review-queue-item");
+  expect(seededFiles.get(scenePath)).toContain("char-akari");
+  expect(seededFiles.get(manuscriptPath)).toContain("この古地図を探している");
+  return project;
 }
 
 async function signIn(page: Page): Promise<void> {
   await page.goto("/desktop/");
-  await page.getByLabel("アクセストークン").fill(authToken);
-  await page.getByRole("button", { name: "ログイン" }).click();
-  await expect(page.getByRole("heading", { name: "作品を追加" })).toBeVisible();
+  await page.getByLabel("アクセス・トークン").fill(authToken);
+  await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
+  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
 }
 
 function actionResponse(response: { url(): string; request(): { method(): string } }, actionId: string): boolean {
@@ -152,7 +147,7 @@ async function openWorkspaceContributionPanel(page: Page, id: string, title: str
 async function openWorkspaceReviewPanel(page: Page): Promise<void> {
   const toolbar = page.getByRole("toolbar", { name: "Workspace layout controls" });
   await toolbar.getByRole("button", { name: "Review", exact: true }).click();
-  await page.getByRole("tablist", { name: "Panel tabs" }).getByRole("tab", { name: "Review", exact: true }).click();
+  await page.getByRole("tablist", { name: "Panel tabs" }).getByRole("tab", { name: "提案レビュー", exact: true }).click();
   await expect(page.locator('[data-workspace-panel="review"]')).toBeVisible();
 }
 
@@ -168,25 +163,15 @@ async function readProposalStatus(page: Page, projectId: string, proposalId: str
 test("full profile renders Story and Speaker review queues and turns both author decisions into unapproved Core proposals", async ({ page }) => {
   test.setTimeout(180_000);
   test.skip(process.env.CODEXIA_PROFILE !== "full", "Story and Speaker review contributions are selected by the full profile.");
-  test.skip(Boolean(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1" || process.env.CODEXIA_E2E_BASE_URL || process.env.CODEXIA_BASE_URL),
-    "This acceptance registers and writes only to an owned temporary local bare Git fixture.");
   expect(authToken.length).toBeGreaterThanOrEqual(32);
-  const fixture = await createReviewProject();
-  let projectId: string | null = null;
-  try {
-    await signIn(page);
-    await page.getByLabel("GitHub リポジトリ URL").fill(pathToFileURL(fixture.remote).href);
-    await page.getByRole("button", { name: "リポジトリを登録" }).click();
-    await expect(page.getByRole("heading", { name: "Review Volume" })).toBeVisible({ timeout: 30_000 });
-
-    const origin = new URL(page.url()).origin;
-    const projectsResponse = await page.request.get(`${origin}/api/projects`);
-    expect(projectsResponse.ok()).toBe(true);
-    const projects = await projectsResponse.json() as Project[];
-    const project = projects.find((item) => item.url === fixture.remote);
-    expect(project, "the app must register the owned local bare repository through its real API").toBeDefined();
-    if (!project) throw new Error("Registered review project was not found");
-    projectId = project.id;
+  await signIn(page);
+  const project = await createReviewProject(page);
+  // Open the seeded project through its canonical route. A prior workspace
+  // selection can otherwise keep an older document active during async guards.
+  await page.goto(`/desktop/projects/${encodeURIComponent(project.id)}`);
+  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
+  await expect(page.locator(".pg-document-list")).toContainText("Review Volume", { timeout: 30_000 });
+  await expect(page.locator(".pg-document-list")).toContainText("Review Scene");
 
     const zukanListResponse = page.waitForResponse((response) => actionResponse(response, "story.zukan-suggestions.list"), { timeout: 60_000 });
     const zukanPanel = await openWorkspaceContributionPanel(page, "story.zukan-review", "Zukan suggestions");
@@ -213,9 +198,13 @@ test("full profile renders Story and Speaker review queues and turns both author
     const zukanStatus = await readProposalStatus(page, project.id, zukanProposalId!);
     expect(zukanStatus.state).toBe("proposed");
     expect(zukanStatus.approvedOperationIds).toEqual([]);
-    expect(zukanStatus.checkpoints).toEqual([]);
+    expect(zukanStatus.applications).toEqual([]);
+    expect(zukanStatus.appliedOperationIds).toEqual([]);
     expect(zukanStatus.proposal.operations[0]?.writes.map((write) => write.path)).toContain(zukanPath);
-    await expect(zukanPanel.getByText("A review proposal is pending checkpoint; this suggestion remains pending in the selected snapshot.")).toBeVisible();
+    // A profile refresh may remount the module and clear its transient notice.
+    // The proposal must still leave the canonical suggestion pending until approval.
+    await expect(zukanPanel.getByText("1 pending suggestion(s)")).toBeVisible();
+    await expect(zukanPanel.getByText("Akari collects old maps.")).toBeVisible();
 
     const speakerQueueResponse = page.waitForResponse((response) => actionResponse(response, "speaker.review.queue"), { timeout: 120_000 });
     const speakerPanel = await openWorkspaceContributionPanel(page, "speaker.review", "話者確認キュー");
@@ -245,26 +234,35 @@ test("full profile renders Story and Speaker review queues and turns both author
     const speakerStatus = await readProposalStatus(page, project.id, speakerProposalId!);
     expect(speakerStatus.state).toBe("proposed");
     expect(speakerStatus.approvedOperationIds).toEqual([]);
-    expect(speakerStatus.checkpoints).toEqual([]);
+    expect(speakerStatus.applications).toEqual([]);
+    expect(speakerStatus.appliedOperationIds).toEqual([]);
     expect(speakerStatus.proposal.operations[0]?.writes.map((write) => write.path)).toEqual(expect.arrayContaining([
       scenePath,
       "meta/scriptorium/modules/speaker/corrections.jsonl",
     ]));
-    await expect(speakerPanel.getByText("確定案をレビューキューに作成しました。承認後に正本へ反映されます。")).toBeVisible();
+    // A module refresh can remount its transient status; the canonical speaker
+    // attribution must remain unresolved until the Core proposal is applied.
+    await expect(speakerPanel.getByRole("heading", { name: "未確定・低信頼の話者帰属" })).toBeVisible();
+    await expect(speakerPanel.getByText("『この古地図を探している。』")).toBeVisible();
 
-    expect(git(fixture.remote, "rev-parse", `refs/heads/${branch}`)).toBe(fixture.initialHead);
-    const remoteSuggestion = JSON.parse(git(fixture.remote, "show", `refs/heads/${branch}:${zukanPath}`)) as { status: string };
-    expect(remoteSuggestion.status).toBe("pending");
-    const remoteScene = git(fixture.remote, "show", `refs/heads/${branch}:${scenePath}`);
-    expect(remoteScene).not.toMatch(/^speakerOverrides:/mu);
-    expect(() => git(fixture.remote, "cat-file", "-e", `refs/heads/${branch}:meta/scriptorium/modules/speaker/corrections.jsonl`)).toThrow();
+    const origin = new URL(page.url()).origin;
+    const proposedSnapshotResponse = await page.request.get(`${origin}/api/projects/${encodeURIComponent(project.id)}/snapshot`);
+    expect(proposedSnapshotResponse.ok(), await proposedSnapshotResponse.text()).toBe(true);
+    const proposedSnapshot = await proposedSnapshotResponse.json() as { files: Array<{ path: string; content: string }> };
+    const proposedFiles = new Map(proposedSnapshot.files.map((file) => [file.path, file.content]));
+    expect(JSON.parse(proposedFiles.get(zukanPath)!.trim()).status).toBe("pending");
+    expect(proposedFiles.get(scenePath)).not.toMatch(/^speakerOverrides:/mu);
+    expect(proposedFiles.has("meta/scriptorium/modules/speaker/corrections.jsonl")).toBe(false);
 
-    await page.getByRole("tablist", { name: "Panel tabs" }).getByRole("tab", { name: "Outline", exact: true }).click();
-    await page.getByRole("navigation", { name: "作品構成" })
-      .getByRole("button", { name: "Review Chapter: Review Scene", exact: true }).click();
+    await page.getByRole("tablist", { name: "Panel tabs" }).getByRole("tab", { name: "作品と構成", exact: true }).click();
+    await page.locator(".pg-document-list")
+      .getByRole("button", { name: /Review Scene/u }).click();
     await expect(page.getByRole("heading", { name: "Review Scene" })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp("/desktop/projects/" + encodeURIComponent(project.id) + "/scenes/[0-9a-f-]+"));
+    const selectedSceneId = new URL(page.url()).pathname.split("/scenes/")[1];
+    expect(selectedSceneId).toBeTruthy();
     await page.getByRole("button", { name: "モバイルUIへ" }).click();
-    await expect(page).toHaveURL(new RegExp("/mobile/projects/" + encodeURIComponent(project.id) + "/scenes/scene-review"));
+    await expect(page).toHaveURL(new RegExp("/mobile/projects/" + encodeURIComponent(project.id) + "/scenes/" + selectedSceneId));
     await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "道具", exact: true }).click();
     await expect(page.locator(".proposal-review").getByRole("heading", { name: "確認待ちの提案" })).toBeVisible();
     await page.reload();
@@ -273,27 +271,25 @@ test("full profile renders Story and Speaker review queues and turns both author
     const mobileSpeakerCard = page.locator(".proposal-card").filter({ hasText: speakerProposalId! });
     await expect(mobileZukanCard).toContainText("承認待ち");
     await expect(mobileSpeakerCard).toContainText("承認待ち");
-    await mobileZukanCard.getByRole("button", { name: "承認して Checkpoint" }).click();
-    await expect(mobileZukanCard).toContainText("ローカル Checkpoint 済み");
+    await mobileZukanCard.getByRole("button", { name: "承認して PostgreSQL Revision" }).click();
+    await expect(mobileZukanCard).toContainText("PostgreSQL 保存済み");
     const mobileApprovedZukanStatus = await readProposalStatus(page, project.id, zukanProposalId!);
     const mobileZukanOperationIds = zukanProposalResult.proposals?.[0]?.operations.map((operation) => operation.id) ?? [];
     expect(mobileApprovedZukanStatus.approvedOperationIds).toEqual(mobileZukanOperationIds);
-    expect(mobileApprovedZukanStatus.checkpoints).toHaveLength(mobileZukanOperationIds.length);
+    expect(mobileApprovedZukanStatus.appliedOperationIds).toEqual(mobileZukanOperationIds);
+    expect(mobileApprovedZukanStatus.applications).toHaveLength(mobileZukanOperationIds.length);
 
     await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "設定", exact: true }).click();
     await page.getByRole("button", { name: "Desktop版へ切り替え" }).click();
-    await expect(page).toHaveURL(new RegExp("/desktop/projects/" + encodeURIComponent(project.id) + "/scenes/scene-review"));
+    await expect(page).toHaveURL(new RegExp("/desktop/projects/" + encodeURIComponent(project.id) + "/scenes/" + selectedSceneId));
     await openWorkspaceReviewPanel(page);
-    await expect(page.locator(".proposal-card").filter({ hasText: zukanProposalId! })).toContainText("ローカル Checkpoint 済み");
+    await expect(page.locator(".proposal-card").filter({ hasText: zukanProposalId! })).toContainText("PostgreSQL 保存済み");
     await expect(page.locator(".proposal-card").filter({ hasText: speakerProposalId! })).toContainText("承認待ち");
-    expect(git(fixture.remote, "rev-parse", `refs/heads/${branch}`)).toBe(fixture.initialHead);
-  } finally {
-    if (projectId) {
-      const origin = new URL(page.url()).origin;
-      await page.request.delete(`${origin}/api/projects/${encodeURIComponent(projectId)}`, {
-        headers: { Origin: origin },
-      }).catch(() => undefined);
-    }
-    await rm(fixture.root, { recursive: true, force: true });
-  }
+    const finalSnapshotResponse = await page.request.get(`${origin}/api/projects/${encodeURIComponent(project.id)}/snapshot`);
+    expect(finalSnapshotResponse.ok(), await finalSnapshotResponse.text()).toBe(true);
+    const finalSnapshot = await finalSnapshotResponse.json() as { files: Array<{ path: string; content: string }> };
+    const finalFiles = new Map(finalSnapshot.files.map((file) => [file.path, file.content]));
+    expect(JSON.parse(finalFiles.get(zukanPath)!.trim()).status).toBe("rejected");
+    expect(finalFiles.get(scenePath)).not.toMatch(/^speakerOverrides:/mu);
+    expect(finalFiles.has("meta/scriptorium/modules/speaker/corrections.jsonl")).toBe(false);
 });

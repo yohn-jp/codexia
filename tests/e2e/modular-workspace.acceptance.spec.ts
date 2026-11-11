@@ -1,12 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
-import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { authToken, ownerLogin } from "./postgres-fixture";
 
-const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
-const repositoryUrl = process.env.CODEXIA_E2E_MODULAR_REPOSITORY_URL ?? process.env.CODEXIA_E2E_REPOSITORY_URL ?? "";
 const profile = process.env.CODEXIA_PROFILE ?? "core";
+const INITIAL_SCENE_ONE = "# Scene One\n\nThe first line of the story.\nBeacon Quay appears in this scene.\n";
+const INITIAL_SCENE_TWO = "# Scene Two\n\nThe second line of the story.\nA submerged brass archive waits below Lantern Harbor.\n";
 
 async function startMobileTransitionFixture(): Promise<{ url: string; stop(): Promise<void> }> {
   const configuredPort = process.env.CODEXIA_MOBILE_TRANSITION_PORT;
@@ -269,11 +270,28 @@ test("mobile same-view panel requests cannot suppress a newer route and scope se
 });
 
 interface DraftRecord {
-  sceneId: string;
-  state: string;
-  text: string;
-  operationId: string;
+  key: string;
+  projectId: string;
+  documentId: string;
+  authorScope: string;
+  baseRevisionId: string;
+  baseMarkdown: string;
+  markdown: string;
   generation: number;
+  updatedAt: number;
+}
+
+interface WorkspaceDocument {
+  id: string;
+  title: string;
+  kind: string;
+  headRevisionId: string | null;
+}
+
+interface WorkspaceFixture {
+  project: { id: string; title: string };
+  scenes: Array<{ document: WorkspaceDocument; revision: { id: string; markdown: string } }>;
+  scene: { document: WorkspaceDocument; revision: { id: string; markdown: string } };
 }
 
 interface WorkspaceState {
@@ -289,119 +307,148 @@ interface WorkspaceSnapshotRecord {
   floating: Array<{ panelId: string; left: number; top: number; width: number; height: number }>;
 }
 
-function repositoryInputValue(value: string): string {
-  return value.startsWith("https://") || value.startsWith("file://") ? value : pathToFileURL(value).href;
-}
-
-function projectLabel(value: string): string {
-  try {
-    const url = new URL(value);
-    return `${url.hostname}${url.pathname.replace(/\.git$/u, "").replace(/\/$/u, "")}`;
-  } catch {
-    return value;
-  }
-}
-
 async function signIn(page: Page, mode: "desktop" | "mobile"): Promise<void> {
-  await page.goto(`/${mode}/`);
-  await page.getByLabel("アクセストークン").fill(authToken);
-  await page.getByRole("button", { name: "ログイン" }).click();
-  if (mode === "mobile") {
-    await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "作品", exact: true }).click();
-  }
-  await expect(page.getByRole("heading", { name: "作品を追加" })).toBeVisible();
+  await ownerLogin(page, `/${mode}/`);
 }
 
-async function openFixtureScene(page: Page, mode: "desktop" | "mobile", sceneId = "scene-1"): Promise<string> {
+async function createWorkspaceFixture(page: Page): Promise<WorkspaceFixture> {
+  const origin = new URL(page.url()).origin;
+  const projectResponse = await page.request.post("/api/v1/persistence/projects", {
+    headers: { Origin: origin },
+    data: { title: `Modular workspace ${randomUUID()}` },
+  });
+  expect(projectResponse.status()).toBe(201);
+  const { project } = await projectResponse.json() as { project: { id: string; title: string } };
+  const createDocument = async (input: { parentId?: string; kind: string; title: string; orderKey: string; markdown: string }) => {
+    const response = await page.request.post(`/api/v1/persistence/projects/${project.id}/documents`, {
+      headers: { Origin: origin, "Idempotency-Key": randomUUID() },
+      data: input,
+    });
+    expect(response.status(), `create ${input.title}`).toBe(201);
+    return response.json() as Promise<{ document: WorkspaceDocument; revision: { id: string; markdown: string } }>;
+  };
+  const volume = await createDocument({ kind: "volume", title: "Volume One", orderKey: "a", markdown: "" });
+  const chapter = await createDocument({ parentId: volume.document.id, kind: "chapter", title: "Chapter One", orderKey: "a", markdown: "" });
+  const one = await createDocument({ parentId: chapter.document.id, kind: "scene", title: "Scene One", orderKey: "a", markdown: INITIAL_SCENE_ONE });
+  const two = await createDocument({ parentId: chapter.document.id, kind: "scene", title: "Scene Two", orderKey: "b", markdown: INITIAL_SCENE_TWO });
+  return { project, scenes: [one, two], scene: one };
+}
+
+async function seedTermRegistry(page: Page, fixture: WorkspaceFixture): Promise<void> {
+  const origin = new URL(page.url()).origin;
+  const projectPath = `/api/projects/${fixture.project.id}`;
+  const snapshotResponse = await page.request.get(`${projectPath}/snapshot`);
+  expect(snapshotResponse.ok()).toBe(true);
+  const snapshotRead = await snapshotResponse.json() as {
+    snapshot: { projectId: string; projectVersion: number };
+    files: Array<{ path: string; revision: string; content: string }>;
+  };
+  const targetPath = `documents/${fixture.scenes[1]!.document.id}.md`;
+  expect(snapshotRead.files.some((file) => file.path === targetPath)).toBe(true);
+  const registryPath = "meta/scriptorium/modules/search/terms.json";
+  const existing = snapshotRead.files.find((file) => file.path === registryPath);
+  const terms = {
+    schemaVersion: 1,
+    terms: [
+      { id: `beacon-${randomUUID()}`, canonical: "Beacon Quay", aliases: ["The Quay"], targetPath },
+      { id: `lantern-${randomUUID()}`, canonical: "Lantern Harbor", aliases: ["Lantern Bay"], targetPath },
+    ],
+  };
+  const operation = {
+    id: `terms-${randomUUID()}`,
+    generation: 1,
+    projectId: fixture.project.id,
+    baseProjectVersion: snapshotRead.snapshot.projectVersion,
+    effect: "metadata",
+    reads: [{ path: registryPath, revision: existing?.revision ?? null }],
+    writes: [{ path: registryPath, revision: existing?.revision ?? null, content: JSON.stringify(terms) }],
+    message: "Acceptance terminology registry",
+  };
+  const proposalId = `terms-proposal-${randomUUID()}`;
+  const proposal = await page.request.post(`${projectPath}/proposals`, {
+    headers: { Origin: origin },
+    data: { id: proposalId, snapshot: snapshotRead.snapshot, operations: [operation] },
+  });
+  expect(proposal.status()).toBe(201);
+  const approval = await page.request.post(`${projectPath}/approvals`, {
+    headers: { Origin: origin },
+    data: { proposalId, operationIds: [operation.id] },
+  });
+  expect(approval.status()).toBe(204);
+  const applied = await page.request.post(`${projectPath}/apply`, { headers: { Origin: origin }, data: operation });
+  expect(applied.status()).toBe(201);
+}
+
+async function openFixtureScene(page: Page, mode: "desktop" | "mobile", sceneIndex = 0, seedTerms = false): Promise<WorkspaceFixture> {
+  const fixture = await createWorkspaceFixture(page);
+  if (seedTerms) await seedTermRegistry(page, fixture);
+  const scene = fixture.scenes[sceneIndex];
+  expect(scene).toBeTruthy();
+  // Select by canonical project/document IDs. Several fixtures use the same
+  // visible "Scene One" title; a stale prior project can otherwise satisfy
+  // the heading check before asynchronous guarded navigation commits.
+  const route = `/${mode}/projects/${fixture.project.id}/scenes/${scene!.document.id}${mode === "mobile" ? "?view=writing" : ""}`;
+  await page.goto(route);
+  await expect(page).toHaveURL(new RegExp(`/${mode}/projects/${fixture.project.id}/scenes/${scene!.document.id}`));
+  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   if (mode === "mobile") {
-    await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "作品", exact: true }).click();
+    await page.getByRole("tablist", { name: "Workspace panels" }).getByRole("tab", { name: "原稿", exact: true }).click();
   }
-
-  const existing = page.getByRole("button", { name: projectLabel(repositoryUrl), exact: true });
-  if (await existing.isVisible().catch(() => false)) {
-    await existing.click();
-  } else {
-    await page.getByLabel("GitHub リポジトリ URL").fill(repositoryInputValue(repositoryUrl));
-    await page.getByRole("button", { name: "リポジトリを登録" }).click();
-  }
-
-  await expect(page.getByRole("heading", { name: "Volume One" })).toBeVisible();
-  const sceneTitle = sceneId === "scene-1" ? "Chapter One: Scene One" : "Chapter One: Scene Two";
-  await page.getByRole("button", { name: sceneTitle, exact: true }).click();
-  if (mode === "mobile") {
-    await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "書く", exact: true }).click();
-    await page.getByRole("tablist", { name: "Workspace panels" }).getByRole("tab", { name: "Editor", exact: true }).click();
-  }
-  await expect(page.getByRole("heading", { name: sceneId === "scene-1" ? "Scene One" : "Scene Two" })).toBeVisible();
-  await expect(page.locator(".cm-content")).toBeVisible();
-  await expect(page.locator('[data-recovery-status="ready"]')).toBeVisible();
-
-  const response = await page.request.get(new URL("/api/projects", page.url()).toString());
-  expect(response.ok()).toBe(true);
-  const projects = await response.json() as Array<{ id: string; url: string }>;
-  const project = projects.find((item) => item.url === repositoryUrl || item.url === repositoryInputValue(repositoryUrl));
-  expect(project, "the synthetic Git repository should be registered in Core").toBeTruthy();
-  return project!.id;
+  fixture.scene = scene!;
+  await expect(page.getByRole("heading", { name: scene!.document.title, exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "原稿 Markdown" })).toBeVisible();
+  // Mobile mounts only the active panel; its project select is not present on
+  // the writing tab. Verify the displayed canonical project in both shells.
+  if (mode === "desktop") await expect(page.getByLabel("開く作品")).toHaveValue(fixture.project.id);
+  await expect(page.locator(".pg-editor-heading .eyebrow")).toHaveText(fixture.project.title);
+  await expect.poll(async () => page.getByRole("textbox", { name: "原稿 Markdown" }).locator(".cm-line")
+    .evaluateAll((lines) => lines.map((line) => line.textContent ?? "").join("\n").replace(/\n+$/u, "")))
+    .toBe(scene!.revision.markdown.replace(/\n+$/u, ""));
+  await expect(page.getByText("IndexedDB回復Journalに保存済み", { exact: true })).toBeVisible();
+  return fixture;
 }
 
 async function readJournal(page: Page): Promise<DraftRecord[]> {
   return page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("scriptorium-recovery", 4);
+      const request = indexedDB.open("scriptorium-recovery");
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
     try {
-      const transaction = database.transaction("operations", "readonly");
-      const records = await new Promise<Array<{ sceneId: string; state: string; text: string; operation: { id: string; generation: number } }>>((resolve, reject) => {
-        const request = transaction.objectStore("operations").getAll();
+      const transaction = database.transaction("persistenceDrafts", "readonly");
+      const records = await new Promise<DraftRecord[]>((resolve, reject) => {
+        const request = transaction.objectStore("persistenceDrafts").getAll();
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error ?? new Error("IndexedDB journal read failed"));
       });
-      return records.map(({ sceneId, state, text, operation }) => ({
-        sceneId,
-        state,
-        text,
-        operationId: operation.id,
-        generation: operation.generation,
-      }));
+      return records;
     } finally {
       database.close();
     }
   });
 }
 
-async function expectDraft(page: Page, sceneId: string, text: string): Promise<void> {
+async function expectDraft(page: Page, documentId: string, text: string): Promise<void> {
   await expect.poll(async () => (await readJournal(page)).some((entry) =>
-    entry.sceneId === sceneId && entry.state === "draft" && entry.text === text,
+    entry.documentId === documentId && entry.markdown === text,
   )).toBe(true);
 }
 
-async function readRemoteScene(page: Page, projectId: string, sceneId: string): Promise<string> {
-  const origin = new URL(page.url()).origin;
-  const projectPath = `/api/projects/${encodeURIComponent(projectId)}`;
-  const observationResponse = await page.request.get(new URL(`${projectPath}/observation`, origin).toString());
-  expect(observationResponse.ok()).toBe(true);
-  const observation = await observationResponse.json() as { snapshot?: { remoteCommit?: string } };
-  const remoteCommit = observation.snapshot?.remoteCommit;
-  expect(remoteCommit).toBeTruthy();
-  const sceneResponse = await page.request.get(new URL(
-    `${projectPath}/scenes/${encodeURIComponent(sceneId)}?view=remote&snapshot=${encodeURIComponent(remoteCommit!)}`,
-    origin,
-  ).toString());
-  expect(sceneResponse.ok()).toBe(true);
-  const sceneRead = await sceneResponse.json() as { document?: { content?: string } };
-  expect(typeof sceneRead.document?.content).toBe("string");
-  return sceneRead.document!.content!;
+async function readPersistedDocument(page: Page, projectId: string, documentId: string): Promise<{ id: string; markdown: string }> {
+  const response = await page.request.get(`/api/v1/persistence/projects/${projectId}/documents/${documentId}`);
+  expect(response.ok()).toBe(true);
+  const value = await response.json() as { revision?: { id: string; markdown: string } };
+  expect(value.revision?.markdown).toBeDefined();
+  return value.revision!;
 }
 
-async function resetLocalCore(): Promise<void> {
+async function restartApi(): Promise<void> {
   const e2ePort = Number.parseInt(process.env.CODEXIA_E2E_PORT ?? "4173", 10);
   const origin = `http://127.0.0.1:${e2ePort}`;
-  const reset = await fetch(`http://127.0.0.1:${e2ePort + 1}/__e2e/reset-core`, { method: "POST" });
-  expect(reset.status).toBe(204);
-  const health = await fetch(`${origin}/api/health`);
-  expect(health.ok).toBe(true);
+  const response = await fetch(`http://127.0.0.1:${e2ePort + 1}/__e2e/restart-api`, { method: "POST" });
+  expect(response.status).toBe(204);
+  expect((await fetch(`${origin}/api/health`)).ok).toBe(true);
 }
 
 function workspaceToolbar(page: Page) {
@@ -473,9 +520,8 @@ async function saveWorkspace(page: Page): Promise<WorkspaceState> {
 
 test("desktop workspace presets, arbitrary docking, panel visibility and layout persistence preserve drafts", async ({ page }) => {
   expect(authToken.length).toBeGreaterThanOrEqual(32);
-  expect(repositoryUrl).not.toBe("");
   await signIn(page, "desktop");
-  await openFixtureScene(page, "desktop");
+  const fixture = await openFixtureScene(page, "desktop");
 
   const workspace = page.locator(".st-workspace");
   const toolbar = workspaceToolbar(page);
@@ -527,12 +573,12 @@ test("desktop workspace presets, arbitrary docking, panel visibility and layout 
   await editor.pressSequentially(draftSuffix);
   const draft = draftPrefix + draftSuffix;
   await expect(editor).toHaveText(draft);
-  await expectDraft(page, "scene-1", draft);
+  await expectDraft(page, fixture.scene.document.id, draft);
 
   await openPanelMenu(page);
-  await toolbar.getByRole("button", { name: "Hide Editor", exact: true }).click();
+  await toolbar.getByRole("button", { name: "Hide 原稿", exact: true }).click();
   await expect(workspace.locator('[data-workspace-panel="editor"]')).toHaveCount(0);
-  await toolbar.getByRole("button", { name: "Show Editor", exact: true }).click();
+  await toolbar.getByRole("button", { name: "Show 原稿", exact: true }).click();
   await expect(workspace.locator('[data-workspace-panel="editor"] .cm-content')).toHaveText(draft);
   const savedCustomLayout = await saveWorkspace(page);
   expect(savedCustomLayout.preset).toBe("custom");
@@ -547,7 +593,6 @@ test("desktop workspace presets, arbitrary docking, panel visibility and layout 
 
 test("malformed workspace settings are retained until the owner explicitly saves a replacement", async ({ page }) => {
   expect(authToken.length).toBeGreaterThanOrEqual(32);
-  expect(repositoryUrl).not.toBe("");
   await signIn(page, "desktop");
   await openFixtureScene(page, "desktop");
   await saveWorkspace(page);
@@ -570,19 +615,18 @@ test("malformed workspace settings are retained until the owner explicitly saves
 
 test("mobile workspace tabs support keyboard navigation and preserve the editor draft", async ({ page }) => {
   expect(authToken.length).toBeGreaterThanOrEqual(32);
-  expect(repositoryUrl).not.toBe("");
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page, "mobile");
-  await openFixtureScene(page, "mobile");
+  const fixture = await openFixtureScene(page, "mobile");
 
   const tabs = page.getByRole("tablist", { name: "Workspace panels" });
-  const editorTab = tabs.getByRole("tab", { name: "Editor", exact: true });
+  const editorTab = tabs.getByRole("tab", { name: "原稿", exact: true });
   await expect(tabs).toBeVisible();
   await expect(editorTab).toHaveAttribute("aria-selected", "true");
 
   const draft = "Mobile panel keyboard navigation keeps this draft.";
   await page.locator('[data-workspace-panel="editor"] .cm-content').fill(draft);
-  await expectDraft(page, "scene-1", draft);
+  await expectDraft(page, fixture.scene.document.id, draft);
   await editorTab.focus();
   await editorTab.press("ArrowRight");
   await expect(editorTab).not.toHaveAttribute("aria-selected", "true");
@@ -607,7 +651,6 @@ test("mobile workspace tabs support keyboard navigation and preserve the editor 
 
 test("mobile route buttons restore their workspace panel without adding duplicate history entries", async ({ page }) => {
   expect(authToken.length).toBeGreaterThanOrEqual(32);
-  expect(repositoryUrl).not.toBe("");
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page, "mobile");
   await openFixtureScene(page, "mobile");
@@ -617,8 +660,8 @@ test("mobile route buttons restore their workspace panel without adding duplicat
   const historyLengthAtWriting = await page.evaluate(() => history.length);
   const writingUrl = page.url();
   expect(new URL(writingUrl).searchParams.get("view")).toBe("writing");
-  await editorPanel.getByRole("button", { name: "履歴", exact: true }).click();
-  await expect(page.locator('[data-workspace-panel="history"]')).toBeVisible();
+  await editorPanel.getByRole("button", { name: "Revision履歴", exact: true }).click();
+  await expect(editorPanel.getByRole("region", { name: "Revision履歴" })).toBeVisible();
   await expect(page).toHaveURL(writingUrl);
   await navigation.getByRole("button", { name: "書く", exact: true }).click();
   await expect(editorPanel).toBeVisible();
@@ -631,7 +674,7 @@ test("mobile route buttons restore their workspace panel without adding duplicat
   const historyLengthAtLibrary = await page.evaluate(() => history.length);
   expect(new URL(libraryUrl).searchParams.get("view")).toBe("library");
   const panelTabs = page.getByRole("tablist", { name: "Workspace panels" });
-  await panelTabs.getByRole("tab", { name: "Inspector", exact: true }).click();
+  await panelTabs.getByRole("tab", { name: "KnowledgeとEvidence", exact: true }).click();
   await expect(page.locator('[data-workspace-panel="inspector"]')).toBeVisible();
   await navigation.getByRole("button", { name: "作品", exact: true }).click();
   await expect(page.locator('[data-workspace-panel="outline"]')).toBeVisible();
@@ -639,15 +682,23 @@ test("mobile route buttons restore their workspace panel without adding duplicat
   expect(await page.evaluate(() => history.length)).toBe(historyLengthAtLibrary);
 });
 
-test("editor stays read-only until delayed browser recovery is reconciled", async ({ page }) => {
+test("editor remains unavailable until delayed browser recovery completes, then reapplies the exact draft", async ({ page }) => {
   expect(authToken.length).toBeGreaterThanOrEqual(32);
-  expect(repositoryUrl).not.toBe("");
   await signIn(page, "desktop");
-  await openFixtureScene(page, "desktop");
+  const fixture = await openFixtureScene(page, "desktop");
+  const documentUrl = `/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.document.id}`;
+  await page.route(`**${documentUrl}`, async (route) => {
+    if (route.request().method() === "PATCH") {
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Synthetic save interruption" }) });
+    } else {
+      await route.continue();
+    }
+  });
 
   const draft = "Recovered after delayed IndexedDB readiness.";
   await page.locator(".cm-content").fill(draft);
-  await expectDraft(page, "scene-1", draft);
+  await expectDraft(page, fixture.scene.document.id, draft);
+  await expect(page.getByText("PostgreSQL保存を確認できません", { exact: true })).toBeVisible();
 
   await page.addInitScript(() => {
     type RecoveryGate = { opened: boolean; release?: () => void };
@@ -682,14 +733,9 @@ test("editor stays read-only until delayed browser recovery is reconciled", asyn
   });
   await page.reload();
 
-  const editorReadiness = page.locator("[data-recovery-status]");
   await expect(page.locator(".st-workspace")).toBeVisible();
-  await expect(editorReadiness).toHaveAttribute("data-recovery-status", "pending");
-  await expect(editorReadiness).toHaveAttribute("data-editor-writable", "false");
-  const displayedScene = await page.locator(".cm-content").evaluate((editor) =>
-    Array.from(editor.querySelectorAll(".cm-line"), (line) => line.textContent ?? "").join("\n"),
-  );
-  expect(displayedScene).toBe("# Scene One\n\nThe first line of the story.\nBeacon Quay appears in this scene.\n");
+  await expect(page.locator(".pg-editor")).toHaveCount(0);
+  expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(INITIAL_SCENE_ONE);
   await expect.poll(() => page.evaluate(() => Boolean((window as Window & { __workspaceRecoveryGate?: { opened: boolean } }).__workspaceRecoveryGate?.opened))).toBe(true);
 
   await page.evaluate(() => {
@@ -697,48 +743,43 @@ test("editor stays read-only until delayed browser recovery is reconciled", asyn
     if (!gate?.release) throw new Error("IndexedDB readiness was not held.");
     gate.release();
   });
-  await expect(editorReadiness).toHaveAttribute("data-recovery-status", "ready");
-  await expect(editorReadiness).toHaveAttribute("data-editor-writable", "true");
   await expect(page.locator(".cm-content")).toHaveText(draft);
-  await expectDraft(page, "scene-1", draft);
+  await expectDraft(page, fixture.scene.document.id, draft);
+  await page.unroute(`**${documentUrl}`);
+  await page.getByRole("button", { name: /今すぐ保存|PostgreSQLへ再試行/u }).click();
+  await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+  expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(draft);
 });
 
-test("failed IndexedDB open before login keeps the scene readable and the existing recovery record intact", async ({ page }) => {
+test("failed IndexedDB open blocks editing and preserves the PostgreSQL manuscript and recovery record", async ({ page }) => {
   expect(authToken.length).toBeGreaterThanOrEqual(32);
-  expect(repositoryUrl).not.toBe("");
   await signIn(page, "desktop");
-  await openFixtureScene(page, "desktop");
+  const fixture = await openFixtureScene(page, "desktop");
 
   const draft = "Existing recovery record survives an unavailable browser journal.";
   await page.locator(".cm-content").fill(draft);
-  await expectDraft(page, "scene-1", draft);
+  await expectDraft(page, fixture.scene.document.id, draft);
   const beforeFailure = await readJournal(page);
-  expect(beforeFailure.some((entry) => entry.sceneId === "scene-1" && entry.state === "draft" && entry.text === draft)).toBe(true);
+  expect(beforeFailure.some((entry) => entry.documentId === fixture.scene.document.id && entry.markdown === draft)).toBe(true);
 
   await page.getByRole("button", { name: "ログアウト" }).click();
-  await expect(page.getByRole("heading", { name: "ログイン" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "作品を開く" })).toBeVisible();
   await page.addInitScript(() => {
     const nativeOpen = IDBFactory.prototype.open;
-    type RecoveryWindow = Window & { __readNativeRecoveryJournal?: () => Promise<Array<{ sceneId: string; state: string; text: string; operationId: string; generation: number }>> };
+    type RecoveryWindow = Window & { __readNativeRecoveryJournal?: () => Promise<DraftRecord[]> };
     (window as RecoveryWindow).__readNativeRecoveryJournal = async () => {
-      const request = Reflect.apply(nativeOpen, indexedDB, ["scriptorium-recovery", 4]) as IDBOpenDBRequest;
+      const request = Reflect.apply(nativeOpen, indexedDB, ["scriptorium-recovery"]) as IDBOpenDBRequest;
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error ?? new Error("Native IndexedDB journal open failed"));
       });
       try {
-        const records = await new Promise<Array<{ sceneId: string; state: string; text: string; operation: { id: string; generation: number } }>>((resolve, reject) => {
-          const read = database.transaction("operations", "readonly").objectStore("operations").getAll();
+        const records = await new Promise<DraftRecord[]>((resolve, reject) => {
+          const read = database.transaction("persistenceDrafts", "readonly").objectStore("persistenceDrafts").getAll();
           read.onsuccess = () => resolve(read.result);
           read.onerror = () => reject(read.error ?? new Error("Native IndexedDB journal read failed"));
         });
-        return records.map(({ sceneId, state, text, operation }) => ({
-          sceneId,
-          state,
-          text,
-          operationId: operation.id,
-          generation: operation.generation,
-        }));
+        return records;
       } finally {
         database.close();
       }
@@ -753,171 +794,70 @@ test("failed IndexedDB open before login keeps the scene readable and the existi
     });
   });
   await page.reload();
-  await expect(page.getByRole("heading", { name: "ログイン" })).toBeVisible();
-  await expect(page.locator('[role="alert"]').filter({ hasText: "Browser storage is unavailable" })).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "作品を開く" })).toBeVisible();
 
-  await page.getByLabel("アクセストークン").fill(authToken);
-  await page.getByRole("button", { name: "ログイン" }).click();
-  await expect(page.getByRole("heading", { name: "Volume One" })).toBeVisible();
-  await page.getByRole("button", { name: "Chapter One: Scene One", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Scene One" })).toBeVisible();
-  const readiness = page.locator('[data-recovery-status="unavailable"]');
-  await expect(readiness).toBeVisible();
-  await expect(readiness).toHaveAttribute("data-editor-writable", "false");
-  await expect(page.locator(".cm-content")).toBeVisible();
-  await expect(page.locator(".cm-content")).toHaveAttribute("contenteditable", "false");
-  await expect(page.getByRole("button", { name: "Checkpoint", exact: true })).toBeDisabled();
-  await expect(page.getByRole("region", { name: "保存と接続の状態" }).getByRole("alert")).toContainText("Browser storage is unavailable");
+  await page.getByLabel("アクセス・トークン").fill(authToken);
+  await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
+  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("Browser storage is unavailable");
+  await expect(page.locator(".pg-document-list")).toContainText("Scene One");
+  await expect(page.locator(".pg-editor")).toHaveCount(0);
+  expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(INITIAL_SCENE_ONE);
   const retained = await page.evaluate(() => (window as Window & {
-    __readNativeRecoveryJournal?: () => Promise<Array<{ sceneId: string; state: string; text: string; operationId: string; generation: number }>>;
+    __readNativeRecoveryJournal?: () => Promise<DraftRecord[]>;
   }).__readNativeRecoveryJournal?.());
   expect(retained).toEqual(beforeFailure);
 });
 
-test("Core loss replays an exact checkpointed author entry before enabling the recovered editor", async ({ page }) => {
-  test.skip(Boolean(process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY === "1" || process.env.CODEXIA_E2E_BASE_URL || process.env.CODEXIA_BASE_URL),
-    "This recovery acceptance resets only the disposable local Core data directory.");
+test("PostgreSQL API restart preserves canonical content and replays the exact browser draft", async ({ page }) => {
   expect(authToken.length).toBeGreaterThanOrEqual(32);
-  expect(repositoryUrl).not.toBe("");
-  const authorText = "Exact checkpointed author text survives Core loss.";
-  const canonicalRemote = "# Scene One\n\nThe first line of the story.\nBeacon Quay appears in this scene.\n";
-  let releaseCheckpoint!: () => void;
-  let signalCheckpoint!: () => void;
-  const checkpointGate = new Promise<void>((resolve) => { releaseCheckpoint = resolve; });
-  const checkpointStarted = new Promise<void>((resolve) => { signalCheckpoint = resolve; });
-  let releaseSceneRead!: () => void;
-  let signalSceneRead!: () => void;
-  const sceneReadGate = new Promise<void>((resolve) => { releaseSceneRead = resolve; });
-  const sceneReadStarted = new Promise<void>((resolve) => { signalSceneRead = resolve; });
-  let releaseReconcile!: () => void;
-  let signalReconcile!: () => void;
-  const reconcileGate = new Promise<void>((resolve) => { releaseReconcile = resolve; });
-  const reconcileStarted = new Promise<void>((resolve) => { signalReconcile = resolve; });
-  let capturedViews: {
-    remote: { document: { content: string } };
-    effective: { document: { content: string } };
-  } | undefined;
+  await signIn(page, "desktop");
+  const fixture = await openFixtureScene(page, "desktop");
+  const authorText = "Exact browser recovery draft survives an API restart.";
+  const documentUrl = `/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.document.id}`;
+  let releaseSave!: () => void;
+  let signalSave!: () => void;
+  const saveGate = new Promise<void>((resolve) => { releaseSave = resolve; });
+  const saveStarted = new Promise<void>((resolve) => { signalSave = resolve; });
+  await page.route(`**${documentUrl}`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.continue();
+    signalSave();
+    await saveGate;
+    await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Synthetic interrupted save" }) });
+  });
 
-  try {
-    await signIn(page, "desktop");
-    const projectId = await openFixtureScene(page, "desktop");
-    const editor = page.locator(".cm-content");
-    await editor.fill(authorText);
-    await expectDraft(page, "scene-1", authorText);
-    await page.getByRole("button", { name: "Checkpoint", exact: true }).click();
-    await expect(page.locator(".durability-message")).toContainText("ローカルチェックポイント");
-    await expect.poll(async () => (await readJournal(page)).some((entry) =>
-      entry.sceneId === "scene-1" && entry.state === "checkpointed" && entry.text === authorText,
-    )).toBe(true);
-    const originalEntry = (await readJournal(page)).find((entry) =>
-      entry.sceneId === "scene-1" && entry.state === "checkpointed" && entry.text === authorText,
-    );
-    expect(originalEntry).toBeTruthy();
+  await page.locator(".cm-content").fill(authorText);
+  await expectDraft(page, fixture.scene.document.id, authorText);
+  await saveStarted;
+  await restartApi();
+  // Owner sessions are process-local and deliberately expire across API replacement.
+  // Reauthenticate before asserting canonical PostgreSQL data and journal replay.
+  const login = await page.request.post("/api/login", {
+    headers: { Origin: new URL(page.url()).origin }, data: { token: authToken },
+  });
+  expect(login.status()).toBe(200);
+  releaseSave();
+  await expect(page.getByText("PostgreSQL保存を確認できません", { exact: true })).toBeVisible();
+  expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(INITIAL_SCENE_ONE);
 
-    await page.goto("about:blank");
-    await resetLocalCore();
-    await page.route((url) => url.pathname.endsWith("/checkpoints"), async (route) => {
-      if (route.request().method() === "POST") {
-        signalCheckpoint();
-        await checkpointGate;
-      }
-      await route.continue();
-    });
-    await page.route((url) => url.pathname.endsWith("/scenes/scene-1/views"), async (route) => {
-      const response = await route.fetch();
-      const body = await response.body();
-      capturedViews = JSON.parse(body.toString("utf8")) as typeof capturedViews;
-      signalSceneRead();
-      await sceneReadGate;
-      await route.fulfill({ response, body });
-    });
-    await page.route((url) => url.pathname.endsWith("/reconcile"), async (route) => {
-      if (route.request().method() === "POST") {
-        signalReconcile();
-        await reconcileGate;
-      }
-      await route.continue();
-    });
-
-    await signIn(page, "desktop");
-    await page.getByLabel("GitHub リポジトリ URL").fill(repositoryInputValue(repositoryUrl));
-    await page.getByRole("button", { name: "リポジトリを登録" }).click();
-    await expect(page.getByRole("heading", { name: "Volume One" })).toBeVisible();
-    await checkpointStarted;
-    await page.getByRole("button", { name: "Chapter One: Scene One", exact: true }).click();
-    await sceneReadStarted;
-    expect(capturedViews?.remote.document.content).toBe(canonicalRemote);
-    expect(capturedViews?.effective.document.content).toBe(canonicalRemote);
-
-    // Let Core replay the checkpoint while the pinned, pre-replay scene response stays held.
-    // This installs the canonical remote text beside the already checkpointed author entry.
-    releaseCheckpoint();
-    await expect.poll(async () => (await readJournal(page)).find((entry) => entry.operationId === originalEntry!.operationId)?.state)
-      .toBe("checkpointed");
-    await reconcileStarted;
-    releaseSceneRead();
-    await expect(page.getByRole("heading", { name: "Scene One" })).toBeVisible();
-
-    const readiness = page.locator("[data-recovery-status]");
-    await expect(readiness).toHaveAttribute("data-recovery-status", "pending");
-    await expect(readiness).toHaveAttribute("data-editor-writable", "false");
-    await expect(editor).toHaveAttribute("contenteditable", "false");
-    await expect(editor).toContainText("The first line of the story.");
-    await expect(editor).not.toContainText(authorText);
-    const duringReplay = (await readJournal(page)).find((entry) => entry.operationId === originalEntry!.operationId);
-    expect(duringReplay).toMatchObject({
-      sceneId: "scene-1",
-      state: "checkpointed",
-      text: authorText,
-      operationId: originalEntry!.operationId,
-      generation: originalEntry!.generation,
-    });
-
-    const reconcileResponse = page.waitForResponse((response) =>
-      response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/reconcile"),
-    );
-    releaseReconcile();
-    expect((await reconcileResponse).ok()).toBe(true);
-    await expect(readiness).toHaveAttribute("data-recovery-status", "ready");
-    await expect(readiness).toHaveAttribute("data-editor-writable", "true");
-    await expect(editor).toHaveText(authorText);
-    const recoveredEntry = (await readJournal(page)).find((entry) => entry.operationId === originalEntry!.operationId);
-    expect(recoveredEntry).toMatchObject({
-      sceneId: "scene-1",
-      state: "checkpointed",
-      text: authorText,
-      operationId: originalEntry!.operationId,
-      generation: originalEntry!.generation,
-    });
-
-    const recoveredProjectsResponse = await page.request.get(new URL("/api/projects", page.url()).toString());
-    expect(recoveredProjectsResponse.ok()).toBe(true);
-    const recoveredProjects = await recoveredProjectsResponse.json() as Array<{ id: string; url: string }>;
-    const recoveredProject = recoveredProjects.find((project) => project.url === repositoryUrl || project.url === repositoryInputValue(repositoryUrl));
-    expect(recoveredProject).toBeTruthy();
-    expect(await readRemoteScene(page, recoveredProject!.id, "scene-1")).toBe(canonicalRemote);
-    expect(recoveredProject!.id).not.toBe(projectId);
-  } finally {
-    releaseCheckpoint();
-    releaseSceneRead();
-    releaseReconcile();
-    if (process.env.CODEXIA_E2E_EXTERNAL_REPOSITORY !== "1" && !process.env.CODEXIA_E2E_BASE_URL && !process.env.CODEXIA_BASE_URL) {
-      await page.close().catch(() => undefined);
-      await resetLocalCore();
-    }
-  }
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
+  await expect(page.locator(".cm-content")).toHaveText(authorText);
+  await expectDraft(page, fixture.scene.document.id, authorText);
+  await page.unroute(`**${documentUrl}`);
+  await page.getByRole("button", { name: /今すぐ保存|PostgreSQLへ再試行/u }).click();
+  await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+  expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(authorText);
+  expect((await readJournal(page)).some((entry) => entry.documentId === fixture.scene.document.id)).toBe(false);
 });
 
 test("Core-only workspace keeps authoring available without search or terminology panels", async ({ page }) => {
   test.skip(profile !== "core", "Run this acceptance with CODEXIA_PROFILE=core.");
   expect(authToken.length).toBeGreaterThanOrEqual(32);
-  expect(repositoryUrl).not.toBe("");
-  const projectId = await (async () => {
-    await signIn(page, "desktop");
-    return openFixtureScene(page, "desktop");
-  })();
+  await signIn(page, "desktop");
+  const fixture = await openFixtureScene(page, "desktop");
 
-  const contributions = await page.request.get(new URL(`/api/projects/${encodeURIComponent(projectId)}/contributions`, page.url()).toString());
+  const contributions = await page.request.get(`/api/projects/${encodeURIComponent(fixture.project.id)}/contributions`);
   expect(contributions.ok()).toBe(true);
   const contributionIds = (await contributions.json() as Array<{ id: string }>).map((item) => item.id);
   expect(contributionIds.some((id) => id.startsWith("search."))).toBe(false);
@@ -925,31 +865,33 @@ test("Core-only workspace keeps authoring available without search or terminolog
   await expect(workspaceToolbar(page).getByRole("button", { name: "Show 用語辞典", exact: true })).toHaveCount(0);
 
   const draft = "Core authoring works with optional search disabled.";
+  // Hold remote acknowledgement so this specifically checks IndexedDB recovery,
+  // not a draft already removed after a successful PostgreSQL save.
+  await page.route("**/api/v1/persistence/projects/*/documents/*", (route) =>
+    route.request().method() === "PATCH" ? route.abort("failed") : route.continue());
   await page.locator(".cm-content").fill(draft);
-  await expectDraft(page, "scene-1", draft);
+  await expectDraft(page, fixture.scene.document.id, draft);
 });
 
 test("full profile exposes optional lexical search and terminology without changing manuscript source", async ({ page }) => {
   test.skip(profile !== "full", "Run this acceptance with CODEXIA_PROFILE=full.");
   expect(authToken.length).toBeGreaterThanOrEqual(32);
-  expect(repositoryUrl).not.toBe("");
-  const projectId = await (async () => {
-    await signIn(page, "desktop");
-    return openFixtureScene(page, "desktop");
-  })();
+  await signIn(page, "desktop");
+  const fixture = await openFixtureScene(page, "desktop", 0, true);
+  const projectId = fixture.project.id;
 
-  const contributionsResponse = await page.request.get(new URL(`/api/projects/${encodeURIComponent(projectId)}/contributions`, page.url()).toString());
+  const contributionsResponse = await page.request.get(`/api/projects/${encodeURIComponent(projectId)}/contributions`);
   expect(contributionsResponse.ok()).toBe(true);
   const contributions = await contributionsResponse.json() as Array<{ id: string; module: string }>;
   expect(contributions.some((item) => item.id === "search.panel" && item.module === "search")).toBe(true);
   expect(contributions.some((item) => item.id === "search.terms" && item.module === "search")).toBe(true);
 
-  const modulesResponse = await page.request.get(new URL(`/api/projects/${encodeURIComponent(projectId)}/modules`, page.url()).toString());
+  const modulesResponse = await page.request.get(`/api/projects/${encodeURIComponent(projectId)}/modules`);
   expect(modulesResponse.ok()).toBe(true);
   const modules = await modulesResponse.json() as Array<{ id: string; availability: string }>;
   expect(modules.find((module) => module.id === "search")?.availability).toMatch(/^(enabled-idle|active)$/u);
 
-  const sourceBefore = await readRemoteScene(page, projectId, "scene-1");
+  const sourceBefore = (await readPersistedDocument(page, projectId, fixture.scene.document.id)).markdown;
   expect(sourceBefore).toContain("Beacon Quay appears in this scene.");
   expect(sourceBefore).not.toMatch(/\[Beacon Quay\]\(/u);
 
@@ -963,7 +905,8 @@ test("full profile exposes optional lexical search and terminology without chang
   await query.fill("submerged brass archive");
   await query.press("Enter");
   await expect(searchPanel.getByRole("list")).toContainText("Scene Two");
-  await searchPanel.getByRole("button", { name: "この文書を開く: manuscript/vol-1/ch-1/scene-2.md", exact: true }).click();
+  const sceneTwoPath = `documents/${fixture.scenes[1]!.document.id}.md`;
+  await searchPanel.getByRole("button", { name: `この文書を開く: ${sceneTwoPath}`, exact: true }).click();
   await expect(page.getByRole("heading", { name: "Scene Two" })).toBeVisible();
 
   await openPanelMenu(page);
@@ -973,41 +916,48 @@ test("full profile exposes optional lexical search and terminology without chang
   await closePanelMenu(page);
   await expect(termsPanel).toContainText("Lantern Harbor");
   await expect(termsPanel).toContainText("Beacon Quay");
+  await termsPanel.getByRole("button", { name: "用語「Beacon Quay」の参照先を開く", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Scene Two" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Chapter One: Scene One", exact: true }).click();
+  await page.getByRole("tablist", { name: "Panel tabs" }).getByRole("tab", { name: "作品と構成", exact: true }).click();
+  await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/u }).click();
   await expect(page.getByRole("heading", { name: "Scene One" })).toBeVisible();
-  await page.getByRole("button", { name: "読書モード", exact: true }).click();
+  await page.getByRole("button", { name: "読む", exact: true }).click();
   const termLink = page.getByRole("button", { name: "Beacon Quay、用語を開く", exact: true });
   await expect(termLink).toBeVisible();
   await termLink.click();
   await expect(page.getByRole("heading", { name: "Scene Two" })).toBeVisible();
-  const sourceAfter = await readRemoteScene(page, projectId, "scene-1");
+  const sourceAfter = (await readPersistedDocument(page, projectId, fixture.scene.document.id)).markdown;
   expect(sourceAfter).toBe(sourceBefore);
 });
 
 
 test("desktop floating panels preserve drafts and saved layout geometry", async ({ page }) => {
   expect(authToken.length).toBeGreaterThanOrEqual(32);
-  expect(repositoryUrl).not.toBe("");
   await signIn(page, "desktop");
-  await openFixtureScene(page, "desktop");
+  const fixture = await openFixtureScene(page, "desktop");
 
   const workspace = page.locator(".st-workspace");
   const manuscript = workspace.locator('[data-workspace-panel="editor"] .cm-content');
-  const draft = "Floating workspace retains the manuscript without inventing Git publish.";
+  const draft = "Floating workspace retains the PostgreSQL manuscript.";
+  // Force the layout test to preserve an outstanding browser draft across reload
+  // instead of racing the normal 900ms PostgreSQL acknowledgement and cleanup.
+  await page.route("**/api/v1/persistence/projects/*/documents/*", (route) =>
+    route.request().method() === "PATCH" ? route.abort("failed") : route.continue());
   await manuscript.fill(draft);
-  await expectDraft(page, "scene-1", draft);
+  await expect(manuscript).toHaveText(draft);
+  await expectDraft(page, fixture.scene.document.id, draft);
 
   await workspace.locator('[data-workspace-panel="outline"]')
-    .getByRole("button", { name: "Float Outline" }).click();
+    .getByRole("button", { name: "Float 作品と構成" }).click();
   const floating = workspace.locator('[data-floating-panel="outline"]');
   await expect(floating).toBeVisible();
   await expect(manuscript).toHaveText(draft);
 
   const editorPanel = workspace.locator('[data-workspace-panel="editor"]');
-  await editorPanel.getByRole("button", { name: "Maximize Editor" }).click();
+  await editorPanel.getByRole("button", { name: "Maximize 原稿" }).click();
   await expect(editorPanel).toHaveClass(/is-maximized/);
-  await editorPanel.getByRole("button", { name: "Restore Editor" }).click();
+  await editorPanel.getByRole("button", { name: "Restore 原稿" }).click();
   await expect(editorPanel).not.toHaveClass(/is-maximized/);
 
   await workspaceToolbar(page).getByRole("button", { name: "Save layout", exact: true }).click();
@@ -1028,19 +978,18 @@ test("desktop floating panels preserve drafts and saved layout geometry", async 
   await page.locator('[data-floating-panel="outline"]')
     .getByRole("button", { name: "パネルをドックへ戻す" }).click();
   await expect(page.locator('[data-workspace-panel="outline"]')).toBeVisible();
-  await page.getByRole("tab", { name: "Editor", exact: true }).click();
+  await page.getByRole("tab", { name: "原稿", exact: true }).click();
   await expect(page.locator(".cm-content")).toHaveText(draft);
 });
 
 test("a failed workspace record write preserves the previous dock and floating layout on reload", async ({ page }) => {
   expect(authToken.length).toBeGreaterThanOrEqual(32);
-  expect(repositoryUrl).not.toBe("");
   await signIn(page, "desktop");
   await openFixtureScene(page, "desktop");
 
   const workspace = page.locator(".st-workspace");
   await workspace.locator('[data-workspace-panel="outline"]')
-    .getByRole("button", { name: "Float Outline" }).click();
+    .getByRole("button", { name: "Float 作品と構成" }).click();
   const floating = workspace.locator('[data-floating-panel="outline"]');
   await expect(floating).toBeVisible();
   await saveWorkspace(page);
@@ -1086,16 +1035,15 @@ test("a failed workspace record write preserves the previous dock and floating l
 
 test("mobile writing reference sheet keeps the editor mounted and preserves the real draft", async ({ page }) => {
   expect(authToken.length).toBeGreaterThanOrEqual(32);
-  expect(repositoryUrl).not.toBe("");
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page, "mobile");
-  await openFixtureScene(page, "mobile");
+  const fixture = await openFixtureScene(page, "mobile");
 
   const editor = page.locator('[data-workspace-panel="editor"] .cm-content');
   const manuscript = page.locator(".manuscript-input");
   const draft = "シートを開いても、この原稿と入力の文脈は残る。";
   await editor.fill(draft);
-  await expectDraft(page, "scene-1", draft);
+  await expectDraft(page, fixture.scene.document.id, draft);
   await manuscript.evaluate((node) => { node.setAttribute("data-stable-editor", "present"); });
   const currentUrl = page.url();
 
@@ -1103,7 +1051,7 @@ test("mobile writing reference sheet keeps the editor mounted and preserves the 
   const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
   await expect(sheet).toBeVisible();
   await expect(sheet.getByRole("tab", { name: "構成" })).toHaveAttribute("aria-selected", "true");
-  await expect(sheet.locator('[data-mobile-reference-panel="outline"] .scene-button').first()).toBeVisible();
+  await expect(sheet.locator('[data-mobile-reference-panel="outline"] .pg-document-list button').first()).toBeVisible();
   await expect(manuscript).toHaveAttribute("data-stable-editor", "present");
   await expect(editor).toHaveText(draft);
   await expect(page).toHaveURL(currentUrl);
@@ -1111,49 +1059,48 @@ test("mobile writing reference sheet keeps the editor mounted and preserves the 
   await sheet.getByRole("tab", { name: "構成" }).press("ArrowRight");
   await expect(sheet.getByRole("tab", { name: "保存状態" })).toHaveAttribute("aria-selected", "true");
   await expect(sheet.locator('[data-mobile-reference-panel="inspector"]')).toBeVisible();
-  await expect(sheet.getByRole("status", { name: "原稿の保存状態" })).toContainText("Draft");
+  await expect(sheet.getByRole("status", { name: "原稿のPostgreSQL保存状態" })).toContainText(/PostgreSQL未保存|PostgreSQLへ保存中|PostgreSQL保存済み|保存状態を要確認/u);
   await expect(manuscript).toHaveAttribute("data-stable-editor", "present");
   await sheet.getByRole("button", { name: "閉じる" }).click();
   await expect(sheet).not.toBeVisible();
   await expect(editor).toHaveText(draft);
   await expect(page).toHaveURL(currentUrl);
-  await expectDraft(page, "scene-1", draft);
+  await expectDraft(page, fixture.scene.document.id, draft);
 });
 
 test("mobile reference sheet scene selection uses the existing guarded navigation", async ({ page }) => {
   expect(authToken.length).toBeGreaterThanOrEqual(32);
-  expect(repositoryUrl).not.toBe("");
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page, "mobile");
-  await openFixtureScene(page, "mobile");
+  const fixture = await openFixtureScene(page, "mobile");
 
   const draft = "シーンを変更しても回復できる下書き。";
   await page.locator('[data-workspace-panel="editor"] .cm-content').fill(draft);
-  await expectDraft(page, "scene-1", draft);
+  await expectDraft(page, fixture.scene.document.id, draft);
 
   await page.getByRole("button", { name: "構成を参照" }).click();
   const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
   await expect(sheet).toBeVisible();
-  await sheet.getByRole("button", { name: "Chapter One: Scene Two", exact: true }).click();
+  await sheet.locator('[data-mobile-reference-panel="outline"] .pg-document-list')
+    .getByRole("button", { name: /Scene Two/u }).click();
 
   await expect(sheet).not.toBeVisible();
   await expect(page.getByRole("heading", { name: "Scene Two" })).toBeVisible();
   await expect(page.locator('[data-workspace-panel="editor"] .cm-content')).toBeVisible();
-  await expectDraft(page, "scene-1", draft);
+  await expectDraft(page, fixture.scene.document.id, draft);
 });
 
 
 test("mobile contextual reference refuses to cover a composing manuscript", async ({ page }) => {
   expect(authToken.length).toBeGreaterThanOrEqual(32);
-  expect(repositoryUrl).not.toBe("");
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page, "mobile");
-  await openFixtureScene(page, "mobile");
+  const fixture = await openFixtureScene(page, "mobile");
 
   const editor = page.locator('[data-workspace-panel="editor"] .cm-content');
   const draft = "変換中でも原稿を失わない";
   await editor.fill(draft);
-  await expectDraft(page, "scene-1", draft);
+  await expectDraft(page, fixture.scene.document.id, draft);
   await editor.evaluate((element) => element.dispatchEvent(
     new CompositionEvent("compositionstart", { data: "へんかん", bubbles: true }),
   ));
@@ -1164,7 +1111,7 @@ test("mobile contextual reference refuses to cover a composing manuscript", asyn
   await expect(page.locator(".mobile-shell-status").getByRole("alert").filter({ hasText: "下書きの回復状態" })).toBeVisible();
   await expect(page).toHaveURL(urlBefore);
   await expect(editor).toHaveText(draft);
-  await expectDraft(page, "scene-1", draft);
+  await expectDraft(page, fixture.scene.document.id, draft);
   await editor.evaluate((element) => element.dispatchEvent(
     new CompositionEvent("compositionend", { data: "変換", bubbles: true }),
   ));

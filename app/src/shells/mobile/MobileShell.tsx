@@ -103,7 +103,7 @@ function errorMessage(error: unknown): string {
  * Ionic page navigation for the shared application controller.
  * The mobile entry supplies the Ionic React Router context around the controller.
  */
-export function MobileShell({ header, documentTitle, documentContext, desktopDurability, library, editor, tools, status, renderStatus, onSwitchMode, workspaceScope, panels, beforeLayoutChange, requestedPanel }: ApplicationShellProps) {
+export function MobileShell({ header, documentTitle, documentContext, desktopDurability, desktopDurabilityDetail, library, editor, tools, status, renderStatus, onSwitchMode, workspaceScope, panels, beforeLayoutChange, requestedPanel }: ApplicationShellProps) {
   const location = useLocation();
   const navigateRoute = useNavigate();
   const activeView = readViewFromSearch(location.search);
@@ -481,7 +481,10 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
         </IonContent>
 
         <div className="mobile-shell-status" role="region" aria-label="保存と回復の状態">
-          {renderStatus ? renderStatus(switchError) : status}
+          {renderStatus ? renderStatus(switchError) : <>
+            {switchError && <p className="mobile-shell-switch-error" role="alert">{switchError}</p>}
+            {status}
+          </>}
         </div>
         <IonFooter className="mobile-shell-footer">
           {hasWritingContext ? (
@@ -567,19 +570,19 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
             aria-labelledby={referenceSheet ? "mobile-reference-tab-" + referenceSheet : undefined}
             data-mobile-reference-panel={referenceSheet ?? undefined}>
             {referenceSheet === "inspector" && desktopDurability ? (
-              <div className="mobile-shell-reference-durability" role="status" aria-label="原稿の保存状態">
+              <div className="mobile-shell-reference-durability" role="status" aria-label="原稿のPostgreSQL保存状態" data-state={desktopDurability}>
                 <strong>{{
-                  draft: "Draft", checkpointing: "Checkpoint確認中",
-                  checkpointed: "Checkpoint", publication_unknown: "Publish結果未確認",
-                  saved: "GitHub保存済み",
+                  draft: "PostgreSQL未保存",
+                  saving: "PostgreSQLへ保存中",
+                  uncertain: "保存状態を要確認",
+                  saved: "PostgreSQL保存済み",
                 }[desktopDurability]}</strong>
-                <span>{{
-                  draft: "ブラウザーの下書きです。GitHubへの保存はまだ確認されていません。",
-                  checkpointing: "ローカルCheckpointの結果を確認しています。",
-                  checkpointed: "ローカルCheckpointです。GitHubへの公開は完了していません。",
-                  publication_unknown: "GitHubへの保存結果は未確認です。原稿の回復記録を保持しています。",
-                  saved: "GitHubへの保存が確認されています。",
-                }[desktopDurability]}</span>
+                <span>{desktopDurabilityDetail ?? ({
+                  draft: "下書きはブラウザーに保持されています。PostgreSQLへの保存は未完了です。",
+                  saving: "PostgreSQLへの保存を確認しています。",
+                  uncertain: "PostgreSQLまたは回復Journalの状態を再確認してください。",
+                  saved: "PostgreSQLへの保存を確認しました。",
+                }[desktopDurability])}</span>
               </div>
             ) : null}
             {referencePanel?.render() ?? <p>この情報は現在利用できません。</p>}

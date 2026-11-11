@@ -8,14 +8,8 @@ import { getThreadStatus } from "./threadStatus.js";
 import type { StoryEntity, StoryGraphInput } from "./types.js";
 
 const snapshot = {
-  repository: {
-    provider: "local" as const,
-    repositoryId: "repo-threads",
-    defaultBranch: "main",
-    ownerScope: "owner-1",
-    url: "file:///repo-threads",
-  },
-  remoteCommit: "b".repeat(40),
+  projectId: "repo-threads",
+  projectVersion: 12,
 };
 
 function entity(

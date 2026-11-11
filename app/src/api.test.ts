@@ -16,7 +16,7 @@ test("concurrent expired Hosted requests share the rotating refresh exchange", a
       await new Promise<void>((resolve) => setImmediate(resolve));
       return Response.json({ refreshed: true });
     }
-    if (path === "/api/projects") {
+    if (path === "/api/v1/persistence/projects?limit=100") {
       projectRequests += 1;
       return projectRequests <= 2
         ? Response.json({ error: "expired", code: "UNAUTHORIZED" }, { status: 401 })
@@ -26,7 +26,7 @@ test("concurrent expired Hosted requests share the rotating refresh exchange", a
   };
   try {
     await api.version();
-    const results = await Promise.all([api.projects(), api.projects()]);
+    const results = await Promise.all([api.persistenceProjects(), api.persistenceProjects()]);
     assert.deepEqual(results, [[], []]);
     assert.equal(refreshRequests, 1);
     assert.equal(projectRequests, 4);
@@ -60,7 +60,7 @@ test("concurrent Hosted tabs serialize refresh-cookie rotation", async () => {
       grantFresh = true;
       return Response.json({ refreshed: true });
     }
-    if (path === "/api/projects") {
+    if (path === "/api/v1/persistence/projects?limit=100") {
       projectRequests += 1;
       return !grantFresh
         ? Response.json({ error: "expired", code: "UNAUTHORIZED" }, { status: 401 })
@@ -70,7 +70,7 @@ test("concurrent Hosted tabs serialize refresh-cookie rotation", async () => {
   };
   try {
     await api.version();
-    assert.deepEqual(await Promise.all([api.projects(), api.projects()]), [[], []]);
+    assert.deepEqual(await Promise.all([api.persistenceProjects(), api.persistenceProjects()]), [[], []]);
     assert.equal(refreshRequests, 1);
     assert.equal(projectRequests, 5);
   } finally {
@@ -92,7 +92,7 @@ test("Hosted dependency authorization failures do not trigger browser grant refr
   globalThis.fetch = async (input) => {
     const path = String(input);
     if (path === "/api/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
-    if (path === "/api/projects/project-1") {
+    if (path === "/api/v1/persistence/projects/project-1") {
       return Response.json({ error: "Remote repository authorization failed", code: "REMOTE_AUTHORIZATION_FAILED" }, { status: 401 });
     }
     if (path === "/_platform/refresh") {
@@ -103,7 +103,7 @@ test("Hosted dependency authorization failures do not trigger browser grant refr
   };
   try {
     await api.version();
-    await assert.rejects(api.projectDetails("project-1"), (error: unknown) =>
+    await assert.rejects(api.persistenceProject("project-1"), (error: unknown) =>
       error instanceof Error && error.message === "Remote repository authorization failed");
     assert.equal(refreshRequests, 0);
     assert.equal(redirectedToReauth, false);
@@ -125,13 +125,13 @@ test("transient Hosted refresh failures preserve their error without reauthentic
   globalThis.fetch = async (input) => {
     const path = String(input);
     if (path === "/api/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
-    if (path === "/api/projects") return Response.json({ error: "Authentication required", code: "UNAUTHORIZED" }, { status: 401 });
+    if (path === "/api/v1/persistence/projects?limit=100") return Response.json({ error: "Authentication required", code: "UNAUTHORIZED" }, { status: 401 });
     if (path === "/_platform/refresh") return Response.json({ error: "Gateway unavailable", code: "GATEWAY_UNAVAILABLE" }, { status: 503 });
     throw new Error(`Unexpected request: ${path}`);
   };
   try {
     await api.version();
-    await assert.rejects(api.projects(), (error: unknown) =>
+    await assert.rejects(api.persistenceProjects(), (error: unknown) =>
       error instanceof Error && "status" in error && error.status === 503 && error.message === "Gateway unavailable");
     assert.equal(redirectedToReauth, false);
   } finally {
@@ -150,11 +150,11 @@ test("Hosted mutation retries only after an explicit admission denial, never aft
   globalThis.fetch = async (input) => {
     const path = String(input);
     if (path === "/api/version") return Response.json({ name: "codexia", version: "0.1.0", hosted: true, profile: "hosted" });
-    if (path === "/api/projects") {
+    if (path === "/api/v1/persistence/projects") {
       registrationRequests += 1;
       return registrationRequests === 1
         ? Response.json({ error: "Authentication required", code: "UNAUTHORIZED" }, { status: 401 })
-        : Response.json({ id: "project-1", url: "https://github.com/owner/work", branch: "main" });
+        : Response.json({ project: { id: "project-1", title: "Novel", settings: {}, version: 1, createdAt: "2026-11-09", updatedAt: "2026-11-09" } });
     }
     if (path === "/_platform/refresh") {
       refreshRequests += 1;
@@ -164,8 +164,8 @@ test("Hosted mutation retries only after an explicit admission denial, never aft
   };
   try {
     await api.version();
-    assert.deepEqual(await api.registerProject("https://github.com/owner/work"), {
-      id: "project-1", url: "https://github.com/owner/work", branch: "main",
+    assert.deepEqual(await api.createPersistenceProject({ title: "Novel" }), {
+      project: { id: "project-1", title: "Novel", settings: {}, version: 1, createdAt: "2026-11-09", updatedAt: "2026-11-09" },
     });
     assert.equal(registrationRequests, 2);
     assert.equal(refreshRequests, 1);
@@ -191,39 +191,42 @@ test("Hosted mutation retries only after an explicit admission denial, never aft
   }
 });
 
-test("scene views use one pinned request for remote and checkpoint content", async () => {
+test("module snapshot reads one PostgreSQL project revision", async () => {
   const originalFetch = globalThis.fetch;
-  const sha = "a".repeat(40);
-  const snapshot: Parameters<typeof api.readSceneViews>[2] = { repository: { provider: "github", ownerScope: "owner", repositoryId: "1", defaultBranch: "main", url: "https://github.com/owner/work" }, remoteCommit: sha };
-  let requests = 0;
-  globalThis.fetch = async (input) => {
-    assert.equal(String(input), `/api/projects/project-1/scenes/scene-1/views?snapshot=${sha}`);
-    requests += 1;
-    const read = { snapshot, scene: { id: "scene-1", title: "One", text: "text", revision: "revision" }, document: { path: "a.md", content: "text", revision: null }, metadata: { path: "a.yaml", content: "id: scene-1", revision: null } };
-    return Response.json({ remote: read, effective: read });
-  };
-  try {
-    const views = await api.readSceneViews("project-1", "scene-1", snapshot);
-    assert.equal(views.remote.snapshot.remoteCommit, sha);
-    assert.equal(views.effective.snapshot.remoteCommit, sha);
-    assert.equal(requests, 1);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  const snapshot = { projectId: "project-1", projectVersion: 12 };
+  globalThis.fetch = async (input) => { assert.equal(String(input), "/api/projects/project-1/snapshot"); return Response.json({ snapshot, files: [] }); };
+  try { assert.deepEqual((await api.moduleSnapshot("project-1")).snapshot, snapshot); } finally { globalThis.fetch = originalFetch; }
 });
 
-test("module invocations bind the exact repository snapshot including the local checkpoint overlay", async () => {
+test("module invocations bind the exact PostgreSQL project revision", async () => {
   const originalFetch = globalThis.fetch;
-  const snapshot: NonNullable<Parameters<typeof api.action>[4]> = {
-    repository: { provider: "local", repositoryId: "1", ownerScope: "owner", defaultBranch: "main", url: "file:///fixture" },
-    remoteCommit: "a".repeat(40), overlayCommit: "b".repeat(40),
-  };
+  const snapshot = { projectId: "project-1", projectVersion: 12 };
   globalThis.fetch = async (_input, options) => {
     assert.deepEqual(JSON.parse(String(options?.body)), { input: { query: "term" }, snapshot });
     return Response.json({ ok: true, snapshot, data: [] });
   };
   try {
     assert.deepEqual((await api.action("project-1", "search.query", { query: "term" }, undefined, snapshot)).snapshot, snapshot);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("document deletion accepts the canonical PostgreSQL response envelope", async () => {
+  const originalFetch = globalThis.fetch;
+  const document = {
+    id: "document-1", projectId: "project-1", parentId: null, kind: "scene",
+    title: "Deleted scene", orderKey: "0001", headRevisionId: "revision-1",
+    version: 2, createdAt: "2026-11-09T00:00:00Z", updatedAt: "2026-11-09T00:01:00Z",
+  };
+  globalThis.fetch = async (input, init) => {
+    assert.equal(String(input), "/api/v1/persistence/projects/project-1/documents/document-1");
+    assert.equal(init?.method, "DELETE");
+    assert.deepEqual(JSON.parse(String(init?.body)), { expectedVersion: 1 });
+    return Response.json({ document }, { status: 200 });
+  };
+  try {
+    assert.deepEqual(await api.deletePersistenceDocument("project-1", "document-1", 1), { document });
   } finally {
     globalThis.fetch = originalFetch;
   }

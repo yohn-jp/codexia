@@ -22,6 +22,7 @@ import "./terminology.css";
 export interface ManuscriptInputHandle {
   focus(): void;
   flushComposition(): Promise<string>;
+  readForNavigation(): string;
   insert(symbol: WritingSymbolId): void;
   restorePosition(position: { cursorSentenceIndex: number | null; scrollTop: number }): void;
   getScrollTop(): number;
@@ -34,6 +35,7 @@ export interface ManuscriptInputProps {
   readOnly?: boolean;
   onChange: (value: string, changes: TextChange[]) => void;
   onSelectionLengthChange?: (length: number) => void;
+  onSelectionChange?: (selection: { from: number; to: number; text: string } | null) => void;
   onCursorPositionChange?: (cursorSentenceIndex: number | null, scrollTop: number) => void;
   placeholder?: string;
   labelledBy: string;
@@ -55,6 +57,7 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
   readOnly = false,
   onChange,
   onSelectionLengthChange,
+  onSelectionChange,
   onCursorPositionChange,
   placeholder,
   labelledBy,
@@ -85,8 +88,8 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
   evidenceRef.current = evidenceState;
   documentRevisionRef.current = documentRevision;
   evidenceCallbackRef.current = onEvidenceChange;
-  const latestRef = useRef({ onChange, onSelectionLengthChange, onCursorPositionChange });
-  latestRef.current = { onChange, onSelectionLengthChange, onCursorPositionChange };
+  const latestRef = useRef({ onChange, onSelectionLengthChange, onSelectionChange, onCursorPositionChange });
+  latestRef.current = { onChange, onSelectionLengthChange, onSelectionChange, onCursorPositionChange };
 
   function sentencePositionIndex(doc: EditorState["doc"], text?: string) {
     const cache = sentencePositionIndexRef.current ??= createUiSentencePositionIndexCache<EditorState["doc"]>();
@@ -105,6 +108,12 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
   useImperativeHandle(ref, () => ({
     focus() {
       viewRef.current?.focus();
+    },
+    readForNavigation() {
+      const view = viewRef.current;
+      if (!view) throw new Error("原稿エディタが初期化されていません。本文を保護するため、画面の切り替えを中止しました。");
+      if (isViewComposing(view)) throw new Error("日本語入力の変換が完了していません。変換を確定してから画面を切り替えてください。");
+      return view.state.doc.toString();
     },
     async flushComposition() {
       const view = viewRef.current;
@@ -200,6 +209,11 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
           if (update.docChanged || update.selectionSet) {
             const selection = update.state.selection.main;
             latestRef.current.onSelectionLengthChange?.(selection.empty ? 0 : Math.abs(selection.to - selection.from));
+            latestRef.current.onSelectionChange?.(selection.empty ? null : {
+              from: Math.min(selection.anchor, selection.head),
+              to: Math.max(selection.anchor, selection.head),
+              text: update.state.sliceDoc(Math.min(selection.anchor, selection.head), Math.max(selection.anchor, selection.head)),
+            });
             if (!externalSyncRef.current) {
               latestRef.current.onCursorPositionChange?.(
                 (changedDocumentIndex ?? sentencePositionIndex(update.state.doc)).indexAtOffset(selection.head),

@@ -35,7 +35,6 @@
 :is(.st-studio-shell, .mobile-shell) .durability-badge.is-current {
   margin: 0; padding: 0; border: 0; border-radius: 0; color: var(--accent-strong); background: transparent; font-size: 0.8rem;
 }
-:is(.st-studio-shell, .mobile-shell) .durability-badge[data-state="publication_unknown"] { color: var(--error-text); }
 .st-studio-shell .st-workspace .editor-columns:not(.has-preview) { grid-template-columns: minmax(0, 1fr); }
 :is(.st-studio-shell, .mobile-shell) .preview-column[hidden] { display: none; }
 .st-studio-shell .st-workspace .manuscript-column {

@@ -1,4 +1,3 @@
-import type { RemoteObservation } from "@codexia/contracts";
 
 export interface ApplicationStatusProps {
   status: { message: string; kind: "normal" | "error" | "success" };
@@ -6,7 +5,7 @@ export interface ApplicationStatusProps {
   globalError: string;
   journalOpenError: string;
   isolatedRecoveryCount: number;
-  remoteState: RemoteObservation["state"] | null;
+  remoteState: "fresh" | "failed" | "unknown" | null;
 }
 
 export function hasApplicationStatus({ status, globalError, journalOpenError, isolatedRecoveryCount, remoteState, interactionError = "" }: ApplicationStatusProps): boolean {
@@ -34,7 +33,7 @@ export function ApplicationStatus({
         {globalError && <p className="status" data-kind="error" role="alert">{globalError}</p>}
         {journalOpenError && <p className="status" data-kind="error" role="alert">{journalOpenError}</p>}
         {isolatedRecoveryCount > 0 && <p className="status" role="status">別の作者スコープまたは未割り当ての回復記録 {isolatedRecoveryCount} 件を保持しています。現在のセッションには復元しません。</p>}
-        {remoteState && remoteState !== "fresh" && <p className="status" data-kind="error" role="alert">リモート確認状態: {remoteState}。最後に確認できた原稿を表示しています。</p>}
+        {remoteState && remoteState !== "fresh" && <p className="status" data-kind="error" role="alert">データベース確認状態: {remoteState}。最後に確認できた原稿を表示しています。</p>}
       </div>
     </details>
   );

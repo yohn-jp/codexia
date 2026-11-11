@@ -35,10 +35,10 @@ export function createSemanticMigrationProducer(): MigrationProducer {
         detail: "Restore preserved semantic author dismissal decisions byte-for-byte after the module is enabled.",
       });
       contribution.operations.push({
-        id: stableMigrationId(`${context.repository.repositoryId}\0semantic-reactivation-v1\0${LEGACY_PATH}\0${legacy.content}`),
+        id: stableMigrationId(`${context.projectId}\0semantic-reactivation-v1\0${LEGACY_PATH}\0${legacy.content}`),
         generation: 0,
-        repository: context.repository,
-        baseRemoteCommit: context.snapshot.remoteCommit,
+        projectId: context.projectId,
+        baseProjectVersion: context.snapshot.projectVersion,
         effect: "migration",
         reads: [{ path: TARGET_PATH, revision: null }],
         writes: [{ path: TARGET_PATH, revision: null, content: legacy.content }],

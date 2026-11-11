@@ -214,11 +214,11 @@ test("authenticated inbox preserves owner job history and updates it from SSE", 
   });
 
   await page.goto("/desktop/");
-  await expect(page.getByLabel("アクセストークン")).toBeVisible();
+  await expect(page.getByLabel("アクセス・トークン")).toBeVisible();
   expect(apiRequestsBeforeLogin).toEqual([]);
-  await page.getByLabel("アクセストークン").fill(authToken);
-  await page.getByRole("button", { name: "ログイン" }).click();
-  await expect(page.getByRole("heading", { name: "作品を追加" })).toBeVisible();
+  await page.getByLabel("アクセス・トークン").fill(authToken);
+  await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
+  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
 
   const inboxButton = page.getByRole("button", { name: /受信箱/u });
   await expect(inboxButton).toContainText("2");

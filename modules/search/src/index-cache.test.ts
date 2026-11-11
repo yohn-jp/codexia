@@ -6,11 +6,11 @@ import { isSearchableDocumentPath, SnapshotIndexCache, type DocumentSourceFactor
 type StoredFile = { content: string; revision: string };
 type TestSnapshot = SnapshotId & { files: Map<string, StoredFile>; failChanges?: boolean; failRead?: boolean };
 
-function snapshot(repositoryId: string, remoteCommit: string, files: Record<string, string>, overlayCommit?: string): TestSnapshot {
+function snapshot(repositoryId: string, projectVersion: number, files: Record<string, string>, updatedVersion?: number): TestSnapshot {
   const id: SnapshotId = {
-    repository: { provider: "local", repositoryId, defaultBranch: "main", ownerScope: "owner", url: `local://${repositoryId}` },
-    remoteCommit,
-    ...(overlayCommit ? { overlayCommit } : {}),
+    projectId: repositoryId,
+    projectVersion,
+    ...(updatedVersion ? { projectVersion: updatedVersion } : {}),
   };
   return Object.assign(id, { files: new Map(Object.entries(files).map(([path, content]) => [path, { content, revision: contentRevision(content) }])) });
 }
@@ -56,8 +56,9 @@ function sourceFactory(counters: { enumerate: number; changes: number; readPaths
 }
 
 test("index cache filters project data to canonical textual document roots", async () => {
-  const first = snapshot("repo-a", "a".repeat(40), {
+  const first = snapshot("repo-a", 11, {
     "manuscript/v1/c1/s1.md": "Moonlit harbor",
+    "documents/pg-scene-1.md": "A submerged brass archive",
     "plot/v1/c1/s1.yaml": "name: harbor",
     "bible/places/harbor.yaml": "description: moonlit",
     "meta/scratch/notes.md": "local note",
@@ -71,19 +72,22 @@ test("index cache filters project data to canonical textual document roots", asy
   const cache = new SnapshotIndexCache(sourceFactory(counters));
   const indexed = await cache.get(reader(first), new AbortController().signal);
   assert.deepEqual([...indexed.documents.keys()].sort(), [
-    "bible/places/harbor.yaml", "manuscript/v1/c1/s1.md", "meta/scratch/notes.md", "plot/v1/c1/s1.yaml",
+    "bible/places/harbor.yaml", "documents/pg-scene-1.md", "manuscript/v1/c1/s1.md", "meta/scratch/notes.md", "plot/v1/c1/s1.yaml",
   ]);
   assert.equal(counters.readPaths.some((path) => path.startsWith("meta/scriptorium/")), false);
   assert.equal(counters.readPaths.some((path) => path.startsWith("attachments/")), false);
   assert.equal(isSearchableDocumentPath("meta/scriptorium/modules/search/terms.json"), false);
+  assert.equal(isSearchableDocumentPath("documents/pg-scene-1.md"), true);
+  assert.equal(isSearchableDocumentPath("documents/.hidden/secret.md"), false);
+  assert.equal(isSearchableDocumentPath("documents/pg-scene-1.png"), false);
 });
 
 test("unchanged snapshots reuse the index and changed revisions update and remove only their entries", async () => {
-  const first = snapshot("repo-a", "a".repeat(40), {
+  const first = snapshot("repo-a", 11, {
     "manuscript/v1/c1/s1.md": "old harbor",
     "manuscript/v1/c1/s2.md": "remove me",
   });
-  const second = snapshot("repo-a", "b".repeat(40), {
+  const second = snapshot("repo-a", 12, {
     "manuscript/v1/c1/s1.md": "new harbor",
     "manuscript/v1/c1/s3.md": "new scene",
   });
@@ -92,10 +96,10 @@ test("unchanged snapshots reuse the index and changed revisions update and remov
   const initial = await cache.get(reader(first), new AbortController().signal);
   const repeated = await cache.get(reader(first), new AbortController().signal);
   assert.equal(repeated, initial);
-  assert.equal(counters.enumerate, 4);
+  assert.equal(counters.enumerate, 5);
   assert.equal(counters.readPaths.length, 2);
   const updated = await cache.get(reader(second), new AbortController().signal);
-  assert.equal(counters.changes, 4);
+  assert.equal(counters.changes, 5);
   assert.deepEqual([...updated.documents.keys()].sort(), ["manuscript/v1/c1/s1.md", "manuscript/v1/c1/s3.md"]);
   assert.equal(updated.documents.get("manuscript/v1/c1/s1.md")?.content, "new harbor");
   assert.equal(updated.documents.has("manuscript/v1/c1/s2.md"), false);
@@ -103,9 +107,9 @@ test("unchanged snapshots reuse the index and changed revisions update and remov
 });
 
 test("overlay and repository identity isolate index cache entries", async () => {
-  const base = snapshot("repo-a", "a".repeat(40), { "manuscript/v1/c1/s1.md": "base" });
-  const overlay = snapshot("repo-a", "a".repeat(40), { "manuscript/v1/c1/s1.md": "checkpoint overlay" }, "b".repeat(40));
-  const other = snapshot("repo-b", "a".repeat(40), { "manuscript/v1/c1/s1.md": "other repository" });
+  const base = snapshot("repo-a", 11, { "manuscript/v1/c1/s1.md": "base" });
+  const overlay = snapshot("repo-a", 11, { "manuscript/v1/c1/s1.md": "checkpoint overlay" }, 12);
+  const other = snapshot("repo-b", 11, { "manuscript/v1/c1/s1.md": "other repository" });
   const counters = { enumerate: 0, changes: 0, readPaths: [] as string[] };
   const cache = new SnapshotIndexCache(sourceFactory(counters));
   const baseIndex = await cache.get(reader(base), new AbortController().signal);
@@ -115,24 +119,24 @@ test("overlay and repository identity isolate index cache entries", async () => 
   assert.notEqual(baseIndex, otherIndex);
   assert.equal(overlayIndex.documents.get("manuscript/v1/c1/s1.md")?.content, "checkpoint overlay");
   assert.equal(otherIndex.documents.get("manuscript/v1/c1/s1.md")?.content, "other repository");
-  assert.equal(counters.enumerate, 8);
-  assert.equal(counters.changes, 4);
+  assert.equal(counters.enumerate, 10);
+  assert.equal(counters.changes, 5);
 });
 
 test("failed refresh never projects an older index as the requested snapshot", async () => {
-  const first = snapshot("repo-a", "a".repeat(40), { "manuscript/v1/c1/s1.md": "old" });
-  const failed = snapshot("repo-a", "b".repeat(40), { "manuscript/v1/c1/s1.md": "new" });
+  const first = snapshot("repo-a", 11, { "manuscript/v1/c1/s1.md": "old" });
+  const failed = snapshot("repo-a", 12, { "manuscript/v1/c1/s1.md": "new" });
   failed.failChanges = true;
   const counters = { enumerate: 0, changes: 0, readPaths: [] as string[] };
   const cache = new SnapshotIndexCache(sourceFactory(counters));
   const initial = await cache.get(reader(first), new AbortController().signal);
   await assert.rejects(cache.get(reader(failed), new AbortController().signal), /change calculation failed/u);
   assert.equal((await cache.get(reader(first), new AbortController().signal)), initial);
-  assert.equal(initial.snapshot.remoteCommit, "a".repeat(40));
+  assert.equal(initial.snapshot.projectVersion, 11);
 });
 
 test("aborted indexing does not cache a partial snapshot", async () => {
-  const first = snapshot("repo-a", "a".repeat(40), { "manuscript/v1/c1/s1.md": "first" });
+  const first = snapshot("repo-a", 11, { "manuscript/v1/c1/s1.md": "first" });
   const controller = new AbortController();
   let abortOnce = true;
   const counters = { enumerate: 0, changes: 0, readPaths: [] as string[] };
@@ -148,11 +152,11 @@ test("aborted indexing does not cache a partial snapshot", async () => {
   await assert.rejects(cache.get(reader(first), controller.signal), (error: unknown) => (error as { name?: string }).name === "AbortError");
   const retried = await cache.get(reader(first), new AbortController().signal);
   assert.equal(retried.documents.size, 1);
-  assert.equal(counters.enumerate, 5);
+  assert.equal(counters.enumerate, 6);
 });
 
 test("disabled module disposal cannot let an unfinished read repopulate the cache", async () => {
-  const first = snapshot("repo-a", "a".repeat(40), { "manuscript/v1/c1/s1.md": "first" });
+  const first = snapshot("repo-a", 11, { "manuscript/v1/c1/s1.md": "first" });
   const counters = { enumerate: 0, changes: 0, readPaths: [] as string[] };
   let started!: () => void;
   let release!: () => void;
@@ -176,7 +180,7 @@ test("disabled module disposal cannot let an unfinished read repopulate the cach
 });
 
 test("source responses outside an explicitly requested root are rejected", async () => {
-  const first = snapshot("repo-a", "a".repeat(40), { "manuscript/v1/c1/s1.md": "text" });
+  const first = snapshot("repo-a", 11, { "manuscript/v1/c1/s1.md": "text" });
   const cache = new SnapshotIndexCache((rawReader) => {
     const source = sourceFactory({ enumerate: 0, changes: 0, readPaths: [] })(rawReader);
     return { ...source, async enumerate(prefix) {
@@ -188,7 +192,7 @@ test("source responses outside an explicitly requested root are rejected", async
 });
 
 test("a new request after cancellation starts fresh work instead of joining an aborted build", async () => {
-  const first = snapshot("repo-a", "a".repeat(40), { "manuscript/v1/c1/s1.md": "first" });
+  const first = snapshot("repo-a", 11, { "manuscript/v1/c1/s1.md": "first" });
   const controller = new AbortController();
   const counters = { enumerate: 0, changes: 0, readPaths: [] as string[] };
   let firstEnumeration = true;
@@ -218,7 +222,7 @@ test("a new request after cancellation starts fresh work instead of joining an a
 });
 
 test("cancelling one shared requester leaves another active request on the same snapshot intact", async () => {
-  const first = snapshot("repo-a", "a".repeat(40), { "manuscript/v1/c1/s1.md": "first" });
+  const first = snapshot("repo-a", 11, { "manuscript/v1/c1/s1.md": "first" });
   const cancelledController = new AbortController();
   const activeController = new AbortController();
   const counters = { enumerate: 0, changes: 0, readPaths: [] as string[] };
@@ -249,8 +253,8 @@ test("cancelling one shared requester leaves another active request on the same 
 });
 
 test("document sources must bind to the exact requested snapshot including checkpoint overlay", async () => {
-  const expected = snapshot("repo-a", "a".repeat(40), { "manuscript/v1/c1/s1.md": "expected" }, "b".repeat(40));
-  const wrong = snapshot("repo-a", "a".repeat(40), { "manuscript/v1/c1/s1.md": "wrong" });
+  const expected = snapshot("repo-a", 11, { "manuscript/v1/c1/s1.md": "expected" }, 12);
+  const wrong = snapshot("repo-a", 11, { "manuscript/v1/c1/s1.md": "wrong" });
   const cache = new SnapshotIndexCache((rawReader) => {
     const source = sourceFactory({ enumerate: 0, changes: 0, readPaths: [] })(rawReader);
     return { ...source, snapshot: wrong };

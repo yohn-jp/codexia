@@ -535,10 +535,10 @@ export async function runtimePackageRecords(deployedDirectory, serverIds) {
 }
 
 export async function browserArtifactRecords(deployedDirectory, browserIds) {
+  // Public readers and authenticated authoring shells load the same selected,
+  // capability-gated module browser closure. All three entries must be audited.
   const records = await Promise.all(['', 'desktop', 'mobile'].map((ui) =>
-    // PostgreSQL authoring shells do not mount Git module contributions.
-    // Public module readers remain reachable from the launcher entry.
-    browserUiArtifactRecords(path.join(deployedDirectory, 'app/dist', ui), ui ? [] : browserIds, ui)));
+    browserUiArtifactRecords(path.join(deployedDirectory, 'app/dist', ui), browserIds, ui)));
   return {
     files: records.flatMap(({ files }) => files).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
     entryFile: records[0].entryFile,
@@ -575,7 +575,9 @@ async function browserUiArtifactRecords(distDirectory, browserIds, ui) {
   const expectedDynamicSources = browserIds.map((id) => `../modules/${id}/dist/browser.js`).sort();
   const appManifest = JSON.parse(await readFile(path.join(root, 'app/package.json'), 'utf8'));
   const ionicPrefix = `../node_modules/.pnpm/@ionic+core@${appManifest.dependencies['@ionic/core']}/node_modules/@ionic/core/components/`;
-  const isIonicRuntime = (source) => ui === 'mobile' && source.startsWith(ionicPrefix) && /^p-[A-Za-z0-9_-]+\.js$/u.test(source.slice(ionicPrefix.length));
+  // MobileShell is a shared import of the PostgreSQL workspace; its Ionic
+  // runtime chunks may be emitted in either authoring entry.
+  const isIonicRuntime = (source) => source.startsWith(ionicPrefix) && /^p-[A-Za-z0-9_-]+\.js$/u.test(source.slice(ionicPrefix.length));
   const actualDynamicSources = [...new Set(applicationEntry.dynamicImports ?? [])].filter((source) => !isIonicRuntime(source)).sort();
   if (canonicalJson(actualDynamicSources) !== canonicalJson(expectedDynamicSources)) {
     throw new Error('Vite application entry imports a different browser module closure');
@@ -662,7 +664,8 @@ async function writeComposition(input, catalog, selection, runtimeDirectory, tru
   const browserBundleDigest = sha256(await readFile(browserEntryPath));
   const journalSource = await readFile(path.join(root, 'app/src/storage/journal.ts'), 'utf8');
   const indexedDbVersion = Number(journalSource.match(/const DATABASE_VERSION = ([1-9][0-9]*);/u)?.[1]);
-  if (indexedDbVersion !== 4) throw new Error('Browser recovery persistence version differs from the hosted compatibility declaration');
+  // PostgreSQL recovery journal v5 adds canonical operation and receipt stores.
+  if (indexedDbVersion !== 5) throw new Error('Browser recovery persistence version differs from the hosted compatibility declaration');
   const runtimeMetadata = {
     contractVersion: 'scriptorium-platform/v1',
     producerRevision: input.producerRevision,

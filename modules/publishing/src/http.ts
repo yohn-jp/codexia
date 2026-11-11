@@ -58,7 +58,6 @@ function safeTree(project: Awaited<ReturnType<typeof readPublishingProject>>, sc
 async function readPublicShare(request: Request, context: ModuleActionContext): Promise<Response> {
   // The host binds public contributions to a freshly fetched remote snapshot. Never
   // serve checkpoint-only proposals if a host accidentally supplies one here.
-  if (context.reader.snapshot.overlayCommit) return json({ error: "Remote publication snapshot required" }, 503);
   const parts = routeParts(request);
   if (!parts) return json(NOT_FOUND, 404);
   const { grants } = await readShareGrants(context.reader);
@@ -80,7 +79,7 @@ async function readPublicShare(request: Request, context: ModuleActionContext): 
     const scene = scopedScenes.find((item) => item.id === parts.sceneId);
     if (!scene) return json(NOT_FOUND, 404);
     return json({
-      snapshot: { repositoryId: context.reader.snapshot.repository.repositoryId, remoteCommit: context.reader.snapshot.remoteCommit },
+      snapshot: { projectId: context.reader.snapshot.projectId, projectVersion: context.reader.snapshot.projectVersion },
       id: scene.id,
       title: scene.title,
       body: scene.body,
@@ -88,7 +87,7 @@ async function readPublicShare(request: Request, context: ModuleActionContext): 
   }
 
   return json({
-    snapshot: { repositoryId: context.reader.snapshot.repository.repositoryId, remoteCommit: context.reader.snapshot.remoteCommit },
+    snapshot: { projectId: context.reader.snapshot.projectId, projectVersion: context.reader.snapshot.projectVersion },
     label: grant.label,
     scope,
     expiresAt: grant.expiresAt,

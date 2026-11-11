@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
-import { execFile as execFileCallback } from "node:child_process";
-import { createHash, generateKeyPairSync, sign as signJwt } from "node:crypto";
+import { createHash, generateKeyPairSync, randomUUID, sign as signJwt } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { cp, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, it } from "node:test";
-import { promisify } from "node:util";
-import { MODEL_USAGE_CAPABILITY, type ActionResult, type ChangeOperation, type ChangeProposal, type JobRequest, type ModelUsageEvent, type ModelUsageStore, type ModuleAction, type ModuleContext, type ModuleDefinition, type ModuleManifest, type ProposalStatus, type RepositoryIdentity, type SnapshotId, type ValueSchema } from "@codexia/contracts";
+import { MODEL_USAGE_CAPABILITY, type ActionResult, type ChangeOperation, type ChangeProposal, type JobRequest, type ModelUsageEvent, type ModelUsageStore, type ModuleAction, type ModuleContext, type ModuleDefinition, type ModuleManifest, type ProposalStatus, type SnapshotId, type ValueSchema } from "@codexia/contracts";
+import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
+import type { Persistence, PersistenceReader } from "@codexia/persistence-contracts";
 import { CoreStore, type CoreStore as CoreStoreShape } from "@codexia/core";
 import { ModuleRuntime, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleListener, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 import { createHostedAuthorizationPolicy } from "./hosted-policy.js";
@@ -20,11 +20,7 @@ import { createServer, importLegacyJobHistory, type ApiServerOptions, type Hoste
 import { RUNTIME_QUIESCE_PATH, RUNTIME_RESUME_PATH, RUNTIME_STATUS_PATH, sha256Digest, type RuntimeAssignment } from "./platform-runtime.js";
 
 const ACCESS_TOKEN = "test-access-token-which-is-longer-than-32-characters";
-const execFile = promisify(execFileCallback);
-const SNAPSHOT: SnapshotId = {
-  repository: { provider: "github", repositoryId: "123", defaultBranch: "main", ownerScope: "owner-1", url: "https://github.com/owner/work.git" },
-  remoteCommit: "a".repeat(40),
-};
+const SNAPSHOT: SnapshotId = { projectId: "project-1", projectVersion: 1 };
 const HOSTED_ASSIGNMENT: RuntimeAssignment = {
   contractVersion: "scriptorium-platform/v1",
   instanceId: "instance-1",
@@ -98,125 +94,116 @@ function realHostedGrantPolicy(): HostedAuthorizationPolicy {
   });
 }
 
+async function nativePersistence(t: { after(callback: () => Promise<void>): void }) {
+  const url = process.env.CODEXIA_TEST_DATABASE_URL;
+  if (!url) throw new Error("CODEXIA_TEST_DATABASE_URL must name a disposable PostgreSQL test database for native Core API recovery tests");
+  await migratePostgresDatabase(url);
+  const persistence = createPostgresPersistence(url);
+  t.after(() => persistence.close());
+  return persistence;
+}
+
+async function nativeProject(t: { after(callback: () => Promise<void>): void }, title: string) {
+  const persistence = await nativePersistence(t);
+  const store = new CoreStore({ persistence });
+  const project = await store.createProject({ title: `${title} ${randomUUID()}` });
+  return { persistence, store, project };
+}
+
+function instrumentPersistence(
+  persistence: Persistence,
+  hooks: { beforeProjectRead?: () => Promise<void>; onProjectRead?: () => void } = {},
+): Persistence {
+  return new Proxy(persistence, {
+    get(target, property, receiver) {
+      if (property === "read") {
+        return <T>(work: (reader: PersistenceReader) => Promise<T>): Promise<T> => target.read((reader) => work(new Proxy(reader, {
+          get(readerTarget, readerProperty, readerReceiver) {
+            if (readerProperty === "getProject") {
+              return async (...args: Parameters<PersistenceReader["getProject"]>) => {
+                await hooks.beforeProjectRead?.();
+                hooks.onProjectRead?.();
+                return readerTarget.getProject(...args);
+              };
+            }
+            const value = Reflect.get(readerTarget, readerProperty, readerReceiver);
+            return typeof value === "function" ? value.bind(readerTarget) : value;
+          },
+        })));
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+/** Admission-only fixture. Persistence integration cases below use a disposable PostgreSQL schema. */
 function makeStore(onSaveScene: () => void = () => undefined): CoreStoreShape {
-  const project = { id: "project-1", url: "https://github.com/owner/work.git", branch: "main" };
-  const scene = { id: "scene-1", title: "Opening", text: "canonical draft", revision: "revision-1" };
+  const project = { id: "project-1", title: "A Work", version: 1 };
   return {
     listProjects: async () => [project],
-    registerProject: async ({ url, branch }: { url: string; branch?: string }) => ({
-      id: "project-2",
-      url,
-      branch: branch ?? "main",
-    }),
-    tree: async () => ({
-      title: "A Work",
-      volumes: [{ id: "vol-1", title: "Volume 1", chapters: [{ id: "ch-1", title: "Chapter 1", scenes: [{ id: scene.id, title: scene.title }] }] }],
-    }),
-    readScene: async () => scene,
-    saveScene: async (_projectId: string, _sceneId: string, input: { text: string; revision: string }) => {
-      onSaveScene();
-      if (input.revision !== scene.revision) {
-        throw { status: 412, code: "STALE_REVISION", message: "Scene changed since it was read" };
-      }
-      return { ...scene, text: input.text, revision: "revision-2" };
-    },
-    localObservation: async () => ({ snapshot: SNAPSHOT, checkpointHead: SNAPSHOT.remoteCommit, observedAt: "1970-01-01T00:00:00.000Z", state: "unknown", pending: [] }),
-    history: async () => [{ hash: "abc12345", date: "2026-10-16T00:00:00.000Z", message: "write opening" }],
-    sync: async () => ({ branch: "main", head: "abc12345", ahead: 0, behind: 0, dirty: false }),
-    status: async () => ({ branch: "main", head: "abc12345", ahead: 1, behind: 0, dirty: true }),
+    createProject: async ({ title }: { title: string }) => ({ id: "project-2", title, version: 1 }),
+    status: async () => ({ ...SNAPSHOT, state: "durable" as const }),
+    observe: async () => ({ snapshot: SNAPSHOT, observedAt: "2026-10-17T00:00:00.000Z", state: "fresh" }),
+    saveScene: async () => { onSaveScene(); throw Error("direct scene writes are forbidden"); },
   } as unknown as CoreStore;
 }
 
-async function runGit(cwd: string, ...args: string[]): Promise<string> {
-  const { stdout } = await execFile("git", args, { cwd, maxBuffer: 4 * 1024 * 1024 });
-  return stdout.trim();
-}
-
-async function makeBareRemote(): Promise<{ root: string; remote: string }> {
-  const root = await mkdtemp(resolve(tmpdir(), "codexia-api-project-remote-"));
-  const remote = resolve(root, "remote.git");
-  const seed = resolve(root, "seed");
-  await mkdir(seed);
-  await runGit(root, "init", "--bare", "--initial-branch=main", remote);
-  await runGit(seed, "init", "--initial-branch=main");
-  await runGit(seed, "config", "user.name", "Codexia API Test");
-  await runGit(seed, "config", "user.email", "api-test@example.invalid");
-  await writeFile(resolve(seed, "README.md"), "Project workspace remains intact.\n", "utf8");
-  await runGit(seed, "add", ".");
-  await runGit(seed, "commit", "-m", "Initial project");
-  await runGit(seed, "remote", "add", "origin", remote);
-  await runGit(seed, "push", "-u", "origin", "main");
-  await runGit(root, "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/main");
-  return { root, remote };
+function admissionPersistence(store: CoreStore): ApiServerOptions["persistence"] {
+  return {
+    async checkHealth() {},
+    async read<T>(read: (reader: { getProject(id: string): Promise<unknown> }) => Promise<T>) {
+      return read({ async getProject(id) {
+        const project = (await store.listProjects()).find((item) => item.id === id);
+        return project ? { ...project, version: 1, settings: {}, createdAt: "2026-10-17T00:00:00.000Z", updatedAt: "2026-10-17T00:00:00.000Z" } : null;
+      } });
+    },
+  } as unknown as ApiServerOptions["persistence"];
 }
 
 function makeSnapshotStore() {
   const proposed: ChangeProposal[] = [];
   const approvals: Array<{ proposalId: string; operationIds: string[]; authorScope: string }> = [];
-  const pinnedReads: Array<string | undefined> = [];
-  const snapshotReads: Array<{ kind: "tree" | "scene" | "views"; view?: string; pinned?: string }> = [];
+  const pinnedReads: Array<number | undefined> = [];
+  const snapshotReads: Array<{ kind: "tree" | "scene" | "views"; pinned?: SnapshotId }> = [];
   const document = { path: "manuscript/ms-one/scene-one.md", content: "---\nid: scene-one\n---\n\nA harbor at night.\n", revision: "body-revision" };
+  const scene = (sceneId: string) => ({ scene: { id: sceneId, title: "Opening", text: "A harbor at night.", revision: "scene-revision" }, document,
+    metadata: { path: "plot/volumes/v1/chapters/c1/scenes/scene-one.yaml", content: "id: scene-one\n", revision: "metadata-revision" } });
   const store = Object.assign(makeStore(), {
-    async reader(_projectId: string, _view = "remote", pinned?: SnapshotId | string) {
-      pinnedReads.push(typeof pinned === "string" ? pinned : pinned?.remoteCommit);
-      const snapshot = typeof pinned === "object" ? pinned : { ...SNAPSHOT, ...(pinned ? { remoteCommit: pinned } : {}) };
-      return {
-        snapshot,
+    async reader(_projectId: string, pinned?: SnapshotId) {
+      pinnedReads.push(pinned?.projectVersion);
+      return { snapshot: pinned ?? SNAPSHOT,
         async read(path: string, encoding: "utf8" | "base64" = "utf8") {
           if (path !== document.path) return null;
           return { content: encoding === "base64" ? Buffer.from(document.content).toString("base64") : document.content, revision: document.revision };
-        },
-        async list(prefix: string) { return prefix === "manuscript/" ? [document.path] : []; },
-      };
+        }, async list(prefix: string) { return prefix === "manuscript/" ? [document.path] : []; } };
     },
-    async resolveDocumentScene(_projectId: string, path: string, pinned?: SnapshotId | string) {
-      return { snapshot: typeof pinned === "object" ? pinned : SNAPSHOT, sceneId: path === document.path ? "scene-one" : null };
+    async resolveDocumentScene(_projectId: string, path: string, pinned?: SnapshotId) {
+      return { snapshot: pinned ?? SNAPSHOT, sceneId: path === document.path ? "scene-one" : null };
     },
-    async observe() { return { snapshot: SNAPSHOT, checkpointHead: SNAPSHOT.remoteCommit, observedAt: "2026-10-17T00:00:00.000Z", state: "fresh" as const, pending: [] }; },
-    async localObservation() { return { snapshot: SNAPSHOT, checkpointHead: SNAPSHOT.remoteCommit, observedAt: "1970-01-01T00:00:00.000Z", state: "unknown" as const, pending: [] }; },
-    async readTreeSnapshot(_projectId: string, view?: "remote" | "checkpoint", pinned?: string) {
-      snapshotReads.push({ kind: "tree", view, pinned });
-      const snapshot = { ...SNAPSHOT, ...(pinned ? { remoteCommit: pinned } : {}) };
-      return { snapshot, tree: { title: "A Work", volumes: [] } };
+    async readTreeSnapshot(_projectId: string, pinned?: SnapshotId) {
+      snapshotReads.push({ kind: "tree", pinned }); return { snapshot: pinned ?? SNAPSHOT, tree: { title: "A Work", volumes: [] } };
     },
-    async readSceneSnapshot(_projectId: string, sceneId: string, view?: "remote" | "checkpoint", pinned?: string) {
-      snapshotReads.push({ kind: "scene", view, pinned });
-      return {
-        snapshot: { ...SNAPSHOT, ...(pinned ? { remoteCommit: pinned } : {}) },
-        scene: { id: sceneId, title: "Opening", text: "A harbor at night.", revision: "scene-revision" },
-        document,
-        metadata: { path: "plot/volumes/v1/chapters/c1/scenes/scene-one.yaml", content: "id: scene-one\n", revision: "metadata-revision" },
-      };
+    async readSceneSnapshot(_projectId: string, sceneId: string, pinned?: SnapshotId) {
+      snapshotReads.push({ kind: "scene", pinned }); return { snapshot: pinned ?? SNAPSHOT, ...scene(sceneId) };
     },
-    async readSceneViews(_projectId: string, sceneId: string, pinned: string) {
-      snapshotReads.push({ kind: "views", pinned });
-      const read = {
-        snapshot: { ...SNAPSHOT, remoteCommit: pinned },
-        scene: { id: sceneId, title: "Opening", text: "A harbor at night.", revision: "scene-revision" },
-        document,
-        metadata: { path: "plot/volumes/v1/chapters/c1/scenes/scene-one.yaml", content: "id: scene-one\n", revision: "metadata-revision" },
-      };
-      return { remote: read, effective: read };
+    async listManuscriptSnapshots(_projectId: string, manuscriptId: string, sceneId?: string, pinned?: SnapshotId) {
+      return { snapshot: pinned ?? SNAPSHOT, snapshots: [{ id: "11111111-1111-4111-8111-111111111111", manuscriptId, sceneId, createdAt: Date.now(), charCount: 18, source: "postgres" }] };
     },
-    async listManuscriptSnapshots(_projectId: string, manuscriptId: string, sceneId?: string, _view?: "remote" | "checkpoint", pinned?: string) {
-      return { snapshot: { ...SNAPSHOT, ...(pinned ? { remoteCommit: pinned } : {}) }, snapshots: [{ id: "b".repeat(40), manuscriptId, sceneId, message: "loom(scene): update", date: "2026-10-16T00:00:00.000Z" }] };
+    async readManuscriptSnapshot(_projectId: string, snapshotId: string, manuscriptId: string, _sceneId?: string, pinned?: SnapshotId) {
+      return { snapshot: pinned ?? SNAPSHOT, manuscriptSnapshot: { id: snapshotId, manuscriptId, body: "A harbor at night.", document } };
     },
-    async readManuscriptSnapshot(_projectId: string, manuscriptId: string, snapshotId: string, _view?: "remote" | "checkpoint", pinned?: string) {
-      return { snapshot: { ...SNAPSHOT, ...(pinned ? { remoteCommit: pinned } : {}) }, manuscript: { id: manuscriptId, snapshotId, body: "A harbor at night.", document } };
+    async searchSnapshot(_projectId: string, query: string, limit = 20, pinned?: SnapshotId) {
+      pinnedReads.push(pinned?.projectVersion);
+      return { snapshot: pinned ?? SNAPSHOT, results: [{ id: "scene-one", type: "scene", name: "Opening", snippet: "A harbor at night.", filePath: document.path, score: 1, field: "body", offset: 2, length: query.length }].slice(0, limit) };
     },
-    async searchSnapshot(_projectId: string, query: string, limit = 20, _view?: "remote" | "checkpoint", pinned?: string) {
-      pinnedReads.push(pinned);
-      return { snapshot: { ...SNAPSHOT, ...(pinned ? { remoteCommit: pinned } : {}) }, results: [{ id: "scene-one", type: "scene", name: "Opening", snippet: "A harbor at night.", filePath: document.path, score: 1, field: "body", offset: 2, length: query.length }].slice(0, limit) };
+    async writingStatsSnapshot(_projectId: string, pinned?: SnapshotId) {
+      pinnedReads.push(pinned?.projectVersion); return { snapshot: pinned ?? SNAPSHOT, stats: { totalCharCount: 20, totalPages400: 1, volumes: [], sceneById: {} } };
     },
-    async writingStatsSnapshot(_projectId: string, _view?: "remote" | "checkpoint", pinned?: string) {
-      pinnedReads.push(pinned);
-      return { snapshot: { ...SNAPSHOT, ...(pinned ? { remoteCommit: pinned } : {}) }, stats: { totalCharCount: 20, totalPages400: 1, volumes: [], sceneById: {} } };
-    },
-    async listProposals() { return []; },
-    async getProposal() { return null; },
+    async listProposals() { return []; }, async getProposal() { return null; },
     async propose(_projectId: string, proposal: ChangeProposal) { proposed.push(proposal); return proposal; },
     async approve(_projectId: string, approval: { proposalId: string; operationIds: string[]; authorScope: string }) { approvals.push(approval); },
-    async checkpoint(_projectId: string, operation: ChangeOperation) { return { operationId: operation.id, generation: operation.generation, localCommit: "c".repeat(40), remoteBase: SNAPSHOT.remoteCommit, revisions: operation.writes.map(({ path, revision }) => ({ path, revision })) }; },
+    async apply(_projectId: string, operation: ChangeOperation) { return { operationId: operation.id, generation: operation.generation, projectVersion: operation.baseProjectVersion + 1, revisions: operation.writes.map(({ path, revision }) => ({ path, revision })) }; },
   }) as unknown as CoreStore;
   return { store, proposed, approvals, pinnedReads, snapshotReads };
 }
@@ -257,7 +244,7 @@ function publishingRuntime(cacheDirectory: string, observed: PublishingObservati
         observed.publicActionIds = (await context.listActions()).map(({ id }) => id);
         try { await context.linkedReader("123"); }
         catch (error) { observed.linkedReaderError = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "unavailable"; }
-        return Response.json({ path: new URL(request.url).pathname, access: context.projectId, snapshot: context.reader.snapshot.remoteCommit }, {
+        return Response.json({ path: new URL(request.url).pathname, access: context.projectId, snapshot: context.reader.snapshot.projectVersion }, {
           headers: {
             "Cache-Control": "no-store",
             "Referrer-Policy": "no-referrer",
@@ -429,9 +416,9 @@ function sourceDomainJobRuntime(cacheDirectory: string): {
 async function startCustomApi(
   store: CoreStore,
   staticDir: string,
-  options: Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence"> = {},
+  options: Partial<Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence">> = {},
 ) {
-  const server = createServer({ store, authToken: ACCESS_TOKEN, staticDir, ...options });
+  const server = createServer({ store, authToken: ACCESS_TOKEN, staticDir, persistence: admissionPersistence(store), ...options });
   await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
   const address = server.address();
   assert.ok(address && typeof address !== "string");
@@ -462,9 +449,6 @@ function hostedTestPolicy(): HostedAuthorizationPolicy {
       if (!principal.permissions.includes(requiredPermission)) throw Object.assign(new Error("permission denied"), { status: 403 });
       return principal;
     },
-    async authorizePublication() {
-      throw Object.assign(new Error("publication is not part of this server-boundary test"), { status: 503 });
-    },
   };
 }
 
@@ -488,13 +472,15 @@ async function startHostedApi(
   controlFetch?: typeof fetch,
   runtime?: ModuleRuntime,
   usageDirectory?: string,
+  persistence: ApiServerOptions["persistence"] = admissionPersistence(store),
+  projectId = "project-1",
 ) {
   const server = createServer({
-    store, staticDir,
+    store, staticDir, persistence,
     trustProxy: true,
     ...(runtime ? { runtime } : {}),
     ...(usageDirectory ? { usageDirectory } : {}),
-    hosted: { assignment: HOSTED_ASSIGNMENT, projectId: "project-1", authorization, ...(controlFetch ? { controlFetch } : {}) },
+    hosted: { assignment: HOSTED_ASSIGNMENT, projectId, authorization, ...(controlFetch ? { controlFetch } : {}) },
   });
   await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
   const address = server.address();
@@ -554,9 +540,9 @@ async function startApi(staticDir: string, trustProxy = false) {
   return startCustomApi(makeStore(), staticDir, { trustProxy });
 }
 
-function usageEvent(repository: RepositoryIdentity, id: string, startedAt: string, options: Partial<ModelUsageEvent> = {}): ModelUsageEvent {
+function usageEvent(projectId: string, id: string, startedAt: string, options: Partial<ModelUsageEvent> = {}): ModelUsageEvent {
   return {
-    id, repository, feature: "assistant.story-draft", provider: "openai", model: "gpt-4o-mini",
+    id, projectId, feature: "assistant.story-draft", provider: "openai", model: "gpt-4o-mini",
     startedAt, completedAt: new Date(Date.parse(startedAt) + 1_000).toISOString(), state: "completed",
     inputTokens: 12, outputTokens: 8, cost: 0.00002, ...options,
   };
@@ -577,7 +563,7 @@ function modelUsageRuntimeOptions(cacheDirectory: string): Omit<ModuleRuntimeOpt
         const lease = await moduleContext.acquireCapability<ModelUsageStore>(MODEL_USAGE_CAPABILITY);
         try {
           if (input.event) await lease.value.append(input.event);
-          const history = await lease.value.list(context.reader.snapshot.repository, input.query);
+          const history = await lease.value.list(context.reader.snapshot.projectId, input.query);
           return { ok: true, snapshot: context.reader.snapshot, data: history };
         } catch (error) {
           const candidate = error as { code?: unknown; message?: unknown };
@@ -628,47 +614,41 @@ afterEach(async () => {
 });
 
 describe("Codexia HTTP boundary", () => {
-  it("binds hosted API access and signed lifecycle controls to one repository and runtime epoch", async (t) => {
+  it("binds hosted API access and signed lifecycle controls to one PostgreSQL project and runtime epoch", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-api-"));
     tempDirs.push(staticDir);
-    let pending: Awaited<ReturnType<CoreStore["observe"]>>["pending"] = [];
-    let pendingProposalCount = 0;
-    let localWorkspaceDirty = false;
-    let remoteObservationCalls = 0;
-    let latestObservation: Awaited<ReturnType<CoreStore["observe"]>> | undefined;
-    const fixture = makeSnapshotStore();
-    const store = Object.assign(fixture.store, {
-      async registeredRepositoryIdentity() { return SNAPSHOT.repository; },
-      async observe() {
-        remoteObservationCalls++;
-        latestObservation = {
-          snapshot: SNAPSHOT, checkpointHead: SNAPSHOT.remoteCommit,
-          observedAt: new Date().toISOString(), state: "fresh" as const, pending,
-        };
-        return latestObservation;
-      },
-      async listProposals() {
-        return Array.from({ length: pendingProposalCount }, () => ({ state: "pending" }) as unknown as ProposalStatus);
-      },
-      async localDurabilityCensus() {
-        assert.ok(latestObservation, "a signed status preflight seeded the bounded local census");
-        const observation = { ...latestObservation, pending };
-        const reader = await fixture.store.reader("project-1", "remote", observation.snapshot.remoteCommit || undefined);
-        return {
-          observation,
-          reader,
-          pendingCheckpoints: observation.pending,
-          pendingProposals: pendingProposalCount,
-          localWorkspaceDirty,
-        };
-      },
-    }) as CoreStore;
+    const native = await nativeProject(t, "Hosted API");
+    let projectReads = 0;
+    const persistence = instrumentPersistence(native.persistence, { onProjectRead: () => { projectReads++; } });
+    const projectSnapshot: SnapshotId = { projectId: native.project.id, projectVersion: native.project.version };
+    let delayNextProposal = false;
+    let announceProposalStarted!: () => void;
+    let releaseProposal!: () => void;
+    const proposalStarted = new Promise<void>((resolveStarted) => { announceProposalStarted = resolveStarted; });
+    const proposalGate = new Promise<void>((resolveGate) => { releaseProposal = resolveGate; });
+    const store = native.store;
+    const originalPropose = store.propose.bind(store);
+    store.propose = async (projectId, proposal) => {
+      if (delayNextProposal) {
+        delayNextProposal = false;
+        announceProposalStarted();
+        await proposalGate;
+      }
+      return originalPropose(projectId, proposal);
+    };
+    const operation: ChangeOperation = {
+      id: "hosted-api-proposal-op", generation: 0, projectId: native.project.id,
+      baseProjectVersion: native.project.version, effect: "metadata", reads: [],
+      writes: [{ path: "meta/hosted-api-test.md", revision: null, content: "A durable proposal.\n" }],
+      message: "Propose a bounded metadata update",
+    };
+    const proposalBody = JSON.stringify({ id: "hosted-api-proposal", snapshot: projectSnapshot, operations: [operation] });
     const controlFetch: typeof fetch = async (input) => {
       assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
       return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
     };
-    const apiServer = await startHostedApi(store, staticDir, hostedTestPolicy(), controlFetch);
-    t.after(apiServer.close);
+    const apiServer = await startHostedApi(store, staticDir, hostedTestPolicy(), controlFetch, undefined, undefined, persistence, native.project.id);
+    t.after(async () => { releaseProposal(); await apiServer.close(); });
 
     const noGrant = await fetch(`${apiServer.base}/api/projects`);
     assert.equal(noGrant.status, 401);
@@ -692,7 +672,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(mcpReader.status, 404, "a read grant must pass auth even if MCP was not packaged");
     const projects = await fetch(`${apiServer.base}/api/projects`, { headers: readerHeaders });
     assert.equal(projects.status, 200);
-    assert.deepEqual(await projects.json(), [{ id: "project-1", url: "https://github.com/owner/work.git", branch: "main" }]);
+    assert.deepEqual(await projects.json(), [native.project]);
     const otherRepository = await fetch(`${apiServer.base}/api/projects/another-project/tree`, { headers: readerHeaders });
     assert.equal(otherRepository.status, 404);
     const ambiguous = await fetch(`${apiServer.base}/api/projects`, {
@@ -700,12 +680,11 @@ describe("Codexia HTTP boundary", () => {
     });
     assert.equal(ambiguous.status, 400);
 
-    const readAction = await fetch(`${apiServer.base}/api/projects/project-1/actions/core.repositories.list`, {
+    const readAction = await fetch(`${apiServer.base}/api/projects/${native.project.id}/actions/core.status`, {
       method: "POST", headers: { ...readerHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ input: {} }),
     });
     assert.equal(readAction.status, 200, "read-only MCP grants may invoke POST actions whose declared effect is read");
-    const proposalBody = JSON.stringify({ snapshot: SNAPSHOT, operations: [{ id: "operation-1" }] });
-    const deniedProposal = await fetch(`${apiServer.base}/api/projects/project-1/proposals`, {
+    const deniedProposal = await fetch(`${apiServer.base}/api/projects/${native.project.id}/proposals`, {
       method: "POST", headers: { ...readerHeaders, "Content-Type": "application/json" }, body: proposalBody,
     });
     assert.equal(deniedProposal.status, 403);
@@ -727,16 +706,15 @@ describe("Codexia HTTP boundary", () => {
     const statusResponse = await fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, { headers: { Authorization: `Bearer ${statusToken}` } });
     assert.equal(statusResponse.status, 200);
     const status = await statusResponse.json() as {
-      instanceId: string; repositoryId: number; runtimeEpoch: number;
-      persistence: { state: string; observedRemoteCommit: string | null; remoteObservedAt?: string | null };
+      instanceId: string; projectId: string; runtimeEpoch: number;
+      persistence: { state: string; provider: string; projectVersion: number | null };
     };
-    assert.deepEqual([status.instanceId, status.repositoryId, status.runtimeEpoch], ["instance-1", 123, 3]);
+    assert.deepEqual([status.instanceId, status.projectId, status.runtimeEpoch], ["instance-1", native.project.id, 3]);
     assert.equal(status.persistence.state, "verified");
-    assert.equal(status.persistence.observedRemoteCommit, SNAPSHOT.remoteCommit);
-    assert.equal(status.persistence.remoteObservedAt, latestObservation?.observedAt,
-      "verified persistence is bound to Core's successful observation time, not the API scan time");
-    assert.ok(Number.isFinite(Date.parse(status.persistence.remoteObservedAt ?? "")));
-    const observationsAfterPreflight = remoteObservationCalls;
+    assert.equal(status.persistence.provider, "postgres");
+    assert.equal(status.persistence.projectVersion, native.project.version);
+    const readsBeforePreflight = projectReads;
+    assert.ok(readsBeforePreflight > 0, "hosted persistence status must read the assigned project through Persistence.read/getProject");
 
     const quiesceRequest = {
       operationId: "quiesce-safe",
@@ -752,12 +730,12 @@ describe("Codexia HTTP boundary", () => {
       method: "POST", headers: { Authorization: `Bearer ${quiesceToken}`, "Content-Type": "application/json" }, body: exactQuiesceBody,
     });
     assert.equal(quiesceResponse.status, 200);
-    const safeReceipt = await quiesceResponse.json() as { disposition: string; activeMutations: number; pendingCheckpoints: number };
+    const safeReceipt = await quiesceResponse.json() as { disposition: string; activeMutations: number; projectVersion: number | null };
     assert.equal(safeReceipt.disposition, "safe");
     assert.equal(safeReceipt.activeMutations, 0);
-    assert.equal(safeReceipt.pendingCheckpoints, 0);
-    assert.equal(remoteObservationCalls, observationsAfterPreflight, "quiesce must use the local census after closing admission");
-    const blockedByGate = await fetch(`${apiServer.base}/api/projects/project-1/proposals`, {
+    assert.equal(safeReceipt.projectVersion, native.project.version);
+    assert.ok(projectReads > readsBeforePreflight, "quiesce performs a fresh PostgreSQL census after closing admission");
+    const blockedByGate = await fetch(`${apiServer.base}/api/projects/${native.project.id}/proposals`, {
       method: "POST", headers: { Authorization: "Bearer write-grant", "Content-Type": "application/json" }, body: proposalBody,
     });
     assert.equal(blockedByGate.status, 503);
@@ -778,14 +756,16 @@ describe("Codexia HTTP boundary", () => {
       method: "POST", headers: { Authorization: `Bearer ${unrelatedResumeToken}`, "Content-Type": "application/json" }, body: unrelatedResumeBody,
     });
     assert.equal(unrelatedResume.status, 409);
-    const allowedProposal = await fetch(`${apiServer.base}/api/projects/project-1/proposals`, {
+    const allowedProposal = await fetch(`${apiServer.base}/api/projects/${native.project.id}/proposals`, {
       method: "POST", headers: { Authorization: "Bearer write-grant", "Content-Type": "application/json" }, body: proposalBody,
     });
     assert.equal(allowedProposal.status, 201);
 
-    pending = [{ operationId: "local-checkpoint", generation: 0, localCommit: "c".repeat(40), remoteBase: SNAPSHOT.remoteCommit, revisions: [] }];
-    pendingProposalCount = 1;
-    localWorkspaceDirty = true;
+    delayNextProposal = true;
+    const inFlightProposal = fetch(`${apiServer.base}/api/projects/${native.project.id}/proposals`, {
+      method: "POST", headers: { Authorization: "Bearer write-grant", "Content-Type": "application/json" }, body: proposalBody,
+    });
+    await proposalStarted;
     const blockedRequest = {
       ...quiesceRequest,
       operationId: "quiesce-blocked",
@@ -797,30 +777,27 @@ describe("Codexia HTTP boundary", () => {
       method: "POST", headers: { Authorization: `Bearer ${blockedToken}`, "Content-Type": "application/json" }, body: exactBlockedBody,
     });
     assert.equal(blockedResponse.status, 200);
-    const blockedReceipt = await blockedResponse.json() as { disposition: string; reasonCodes: string[] };
+    const blockedReceipt = await blockedResponse.json() as { disposition: string; activeMutations: number; reasonCodes: string[] };
     assert.equal(blockedReceipt.disposition, "blocked");
-    assert.ok(blockedReceipt.reasonCodes.includes("PENDING_CHECKPOINTS"));
-    assert.ok(blockedReceipt.reasonCodes.includes("PENDING_PROPOSALS"));
-    assert.ok(blockedReceipt.reasonCodes.includes("LOCAL_WORKSPACE_DIRTY"));
+    assert.equal(blockedReceipt.activeMutations, 1);
+    assert.ok(blockedReceipt.reasonCodes.includes("ACTIVE_MUTATIONS"));
     const blockedResumeToken = runtimeControlToken("resume", blockedRequest.operationId, sha256Digest(exactBlockedBody));
     const blockedResume = await fetch(`${apiServer.base}${RUNTIME_RESUME_PATH}`, {
       method: "POST", headers: { Authorization: `Bearer ${blockedResumeToken}`, "Content-Type": "application/json" }, body: exactBlockedBody,
     });
     assert.equal(blockedResume.status, 204, "resuming the exact blocked operation is an idempotent no-op");
-    const gateReleasedAfterBlock = await fetch(`${apiServer.base}/api/projects/project-1/proposals`, {
-      method: "POST", headers: { Authorization: "Bearer write-grant", "Content-Type": "application/json" }, body: proposalBody,
-    });
-    assert.equal(gateReleasedAfterBlock.status, 201);
+    releaseProposal();
+    assert.equal((await inFlightProposal).status, 201, "the active mutation may finish after quiesce reports blocked and reopens admission");
   });
 
   it("keeps a quiesce census unverified when a worker job starts and finishes during its local scan, then permits a stable retry", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-activity-race-"));
     tempDirs.push(staticDir);
-    const fixture = makeSnapshotStore();
+    const native = await nativeProject(t, "Hosted activity race");
     const runtime = new InterleavingLifecycleRuntime({ manifests: [], enabled: [], cacheDirectory: resolve(staticDir, "module-cache") });
-    let latestObservation: Awaited<ReturnType<CoreStore["observe"]>> | undefined;
-    let remoteObservationCalls = 0;
-    let interleaveNextCensus = true;
+    const projectSnapshot: SnapshotId = { projectId: native.project.id, projectVersion: native.project.version };
+    let projectReads = 0;
+    let interleaveNextProjectRead = false;
     const lifecycleCreatedAt = new Date().toISOString();
     let lifecycleUpdatedAt = lifecycleCreatedAt;
     let lifecycleStartedAt: string | null = null;
@@ -828,52 +805,38 @@ describe("Codexia HTTP boundary", () => {
       lifecycleUpdatedAt = new Date(Date.parse(lifecycleUpdatedAt) + 1).toISOString();
       if (state === "running") lifecycleStartedAt = lifecycleUpdatedAt;
       await runtime.emitLifecycle({
-        jobId: "job-interleaving", module: "story", task: "runtime-activity-interleaving", snapshot: SNAPSHOT,
+        jobId: "job-interleaving", module: "story", task: "runtime-activity-interleaving", snapshot: projectSnapshot,
         state, createdAt: lifecycleCreatedAt, updatedAt: lifecycleUpdatedAt,
         startedAt: lifecycleStartedAt,
         finishedAt: state === "succeeded" || state === "failed" || state === "cancelled" ? lifecycleUpdatedAt : null,
       });
     };
-    const store = Object.assign(fixture.store, {
-      async registeredRepositoryIdentity() { return SNAPSHOT.repository; },
-      async observe() {
-        remoteObservationCalls++;
-        latestObservation = {
-          snapshot: SNAPSHOT, checkpointHead: SNAPSHOT.remoteCommit,
-          observedAt: new Date().toISOString(), state: "fresh" as const, pending: [],
-        };
-        return latestObservation;
+    const persistence = instrumentPersistence(native.persistence, {
+      async beforeProjectRead() {
+        if (!interleaveNextProjectRead) return;
+        interleaveNextProjectRead = false;
+        await lifecycle("queued");
+        await lifecycle("running");
+        await lifecycle("succeeded");
       },
-      async listProposals() { return []; },
-      async localDurabilityCensus() {
-        assert.ok(latestObservation, "the signed preflight must seed the local census");
-        if (interleaveNextCensus) {
-          interleaveNextCensus = false;
-          await lifecycle("queued");
-          await lifecycle("running");
-          await lifecycle("succeeded");
-        }
-        const observation = latestObservation;
-        const reader = await fixture.store.reader("project-1", "remote", observation.snapshot.remoteCommit);
-        return {
-          observation, reader, pendingCheckpoints: observation.pending,
-          pendingProposals: 0, localWorkspaceDirty: false,
-        };
-      },
-    }) as CoreStore;
+      onProjectRead: () => { projectReads++; },
+    });
     const controlFetch: typeof fetch = async (input) => {
       assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
       return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
     };
-    const apiServer = await startHostedApi(store, staticDir, hostedTestPolicy(), controlFetch, runtime, resolve(staticDir, "usage"));
+    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, runtime, resolve(staticDir, "usage"), persistence, native.project.id);
     t.after(apiServer.close);
 
     const preflight = await fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, {
       headers: { Authorization: `Bearer ${runtimeControlToken("status", "race-preflight", sha256Digest(""))}` },
     });
     assert.equal(preflight.status, 200);
-    assert.equal((await preflight.json() as { persistence: { state: string } }).persistence.state, "verified");
-    const remoteCallsAfterPreflight = remoteObservationCalls;
+    const preflightStatus = await preflight.json() as { persistence: { state: string; projectVersion: number | null } };
+    assert.equal(preflightStatus.persistence.state, "verified");
+    assert.equal(preflightStatus.persistence.projectVersion, native.project.version);
+    const projectReadsAfterPreflight = projectReads;
+    assert.ok(projectReadsAfterPreflight > 0, "the signed preflight reads the assigned project from PostgreSQL");
 
     const request = {
       operationId: "quiesce-activity-race",
@@ -888,13 +851,14 @@ describe("Codexia HTTP boundary", () => {
       Authorization: `Bearer ${runtimeControlToken("quiesce", request.operationId, sha256Digest(body))}`,
       "Content-Type": "application/json",
     };
+    interleaveNextProjectRead = true;
     const first = await fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, { method: "POST", headers: quiesceHeaders, body });
     assert.equal(first.status, 200);
     const firstReceipt = await first.json() as { disposition: string; activeJobs: number; reasonCodes: string[] };
     assert.equal(firstReceipt.activeJobs, 0, "the worker has already finished by the time the census returns");
     assert.equal(firstReceipt.disposition, "unknown", "the monotonic activity version detects the completed job");
     assert.ok(firstReceipt.reasonCodes.includes("PERSISTENCE_UNVERIFIED"));
-    assert.equal(remoteObservationCalls, remoteCallsAfterPreflight, "the local census must not refetch after the gate closes");
+    assert.ok(projectReads > projectReadsAfterPreflight, "the closed-admission census re-reads its PostgreSQL project version");
 
     const stableStatus = await fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, {
       headers: { Authorization: `Bearer ${runtimeControlToken("status", "race-stable-status", sha256Digest(""))}` },
@@ -904,8 +868,9 @@ describe("Codexia HTTP boundary", () => {
 
     const retry = await fetch(`${apiServer.base}${RUNTIME_QUIESCE_PATH}`, { method: "POST", headers: quiesceHeaders, body });
     assert.equal(retry.status, 200);
-    assert.equal((await retry.json() as { disposition: string }).disposition, "safe");
-    assert.equal(remoteObservationCalls, remoteCallsAfterPreflight);
+    const retryReceipt = await retry.json() as { disposition: string; projectVersion: number | null };
+    assert.equal(retryReceipt.disposition, "safe");
+    assert.equal(retryReceipt.projectVersion, native.project.version);
 
     const resumed = await fetch(`${apiServer.base}${RUNTIME_RESUME_PATH}`, {
       method: "POST",
@@ -918,34 +883,23 @@ describe("Codexia HTTP boundary", () => {
   it("waits for accepted private job-history writes before certifying safe quiesce", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-history-quiesce-"));
     tempDirs.push(staticDir);
+    const native = await nativeProject(t, "Hosted history quiesce");
     const usageDirectory = resolve(staticDir, "usage");
     const migratedDirectory = resolve(staticDir, "migrated-usage");
-    const fixture = makeSnapshotStore();
     const runtime = new InterleavingLifecycleRuntime({ manifests: [], enabled: [], cacheDirectory: resolve(staticDir, "module-cache") });
-    const observation = {
-      snapshot: SNAPSHOT, checkpointHead: SNAPSHOT.remoteCommit,
-      observedAt: new Date().toISOString(), state: "fresh" as const, pending: [],
-    };
-    const store = Object.assign(fixture.store, {
-      async registeredRepositoryIdentity() { return SNAPSHOT.repository; },
-      async observe() { return observation; },
-      async localDurabilityCensus() {
-        const reader = await fixture.store.reader("project-1", "remote", observation.snapshot.remoteCommit);
-        return { observation, reader, pendingCheckpoints: [], pendingProposals: 0, localWorkspaceDirty: false };
-      },
-    }) as CoreStore;
+    const projectSnapshot: SnapshotId = { projectId: native.project.id, projectVersion: native.project.version };
     const controlFetch: typeof fetch = async (input) => {
       assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
       return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
     };
-    const apiServer = await startHostedApi(store, staticDir, hostedTestPolicy(), controlFetch, runtime, usageDirectory);
+    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, runtime, usageDirectory, native.persistence, native.project.id);
     t.after(apiServer.close);
 
     const createdAt = new Date().toISOString();
     const runningAt = new Date(Date.parse(createdAt) + 1).toISOString();
     const finishedAt = new Date(Date.parse(createdAt) + 2).toISOString();
     const lifecycle = (state: WorkerJobLifecycleSnapshot["state"], updatedAt: string, finishedAtValue: string | null = null): WorkerJobLifecycleSnapshot => ({
-      jobId: "job-history-quiesce-race", module: "story", task: "history-quiesce-race", snapshot: SNAPSHOT,
+      jobId: "job-history-quiesce-race", module: "story", task: "history-quiesce-race", snapshot: projectSnapshot,
       state, createdAt, updatedAt, startedAt: runningAt, finishedAt: finishedAtValue,
     });
     await runtime.emitLifecycle(lifecycle("running", runningAt));
@@ -1037,26 +991,14 @@ describe("Codexia HTTP boundary", () => {
     tempDirs.push(root);
     const staticDir = resolve(root, "static");
     await mkdir(staticDir);
+    const native = await nativeProject(t, "Hosted domain history failure");
     const usageDirectory = resolve(root, "usage");
-    const fixture = makeSnapshotStore();
     const domain = sourceDomainJobRuntime(resolve(root, "module-cache"));
-    const observation = {
-      snapshot: SNAPSHOT, checkpointHead: SNAPSHOT.remoteCommit,
-      observedAt: new Date().toISOString(), state: "fresh" as const, pending: [],
-    };
-    const store = Object.assign(fixture.store, {
-      async registeredRepositoryIdentity() { return SNAPSHOT.repository; },
-      async observe() { return observation; },
-      async localDurabilityCensus() {
-        const reader = await fixture.store.reader("project-1", "remote", observation.snapshot.remoteCommit);
-        return { observation, reader, pendingCheckpoints: [], pendingProposals: 0, localWorkspaceDirty: false };
-      },
-    }) as CoreStore;
     const controlFetch: typeof fetch = async (input) => {
       assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
       return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
     };
-    const apiServer = await startHostedApi(store, staticDir, hostedTestPolicy(), controlFetch, domain.runtime, usageDirectory);
+    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, domain.runtime, usageDirectory, native.persistence, native.project.id);
     t.after(async () => { domain.releaseAsync(); await apiServer.close(); });
     const prototype = JobHistoryStore.prototype as unknown as { persist: (state: unknown) => Promise<void> };
     const originalPersist = prototype.persist;
@@ -1070,7 +1012,7 @@ describe("Codexia HTTP boundary", () => {
       return originalPersist.call(this, state);
     };
     try {
-      const action = await fetch(`${apiServer.base}/api/projects/project-1/actions/speaker.evaluation.run`, {
+      const action = await fetch(`${apiServer.base}/api/projects/${native.project.id}/actions/speaker.evaluation.run`, {
         method: "POST",
         headers: { Authorization: "Bearer write-grant", "Content-Type": "application/json" },
         body: JSON.stringify({ input: {} }),
@@ -1107,32 +1049,20 @@ describe("Codexia HTTP boundary", () => {
   it("reports unknown when accepted private job history cannot drain before the quiesce deadline", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-history-deadline-"));
     tempDirs.push(staticDir);
+    const native = await nativeProject(t, "Hosted history deadline");
     const usageDirectory = resolve(staticDir, "usage");
-    const fixture = makeSnapshotStore();
     const runtime = new InterleavingLifecycleRuntime({ manifests: [], enabled: [], cacheDirectory: resolve(staticDir, "module-cache") });
-    const observation = {
-      snapshot: SNAPSHOT, checkpointHead: SNAPSHOT.remoteCommit,
-      observedAt: new Date().toISOString(), state: "fresh" as const, pending: [],
-    };
-    const store = Object.assign(fixture.store, {
-      async registeredRepositoryIdentity() { return SNAPSHOT.repository; },
-      async observe() { return observation; },
-      async localDurabilityCensus() {
-        const reader = await fixture.store.reader("project-1", "remote", observation.snapshot.remoteCommit);
-        return { observation, reader, pendingCheckpoints: [], pendingProposals: 0, localWorkspaceDirty: false };
-      },
-    }) as CoreStore;
     const controlFetch: typeof fetch = async (input) => {
       assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
       return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
     };
-    const apiServer = await startHostedApi(store, staticDir, hostedTestPolicy(), controlFetch, runtime, usageDirectory);
+    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, runtime, usageDirectory, native.persistence, native.project.id);
     t.after(apiServer.close);
     const createdAt = new Date().toISOString();
     const runningAt = new Date(Date.parse(createdAt) + 1).toISOString();
     const finishedAt = new Date(Date.parse(createdAt) + 2).toISOString();
     const lifecycle = (state: WorkerJobLifecycleSnapshot["state"], updatedAt: string, finishedAtValue: string | null = null): WorkerJobLifecycleSnapshot => ({
-      jobId: "job-history-deadline", module: "story", task: "history-deadline", snapshot: SNAPSHOT,
+      jobId: "job-history-deadline", module: "story", task: "history-deadline", snapshot: { projectId: native.project.id, projectVersion: native.project.version },
       state, createdAt, updatedAt, startedAt: runningAt, finishedAt: finishedAtValue,
     });
     await runtime.emitLifecycle(lifecycle("running", runningAt));
@@ -1197,60 +1127,29 @@ describe("Codexia HTTP boundary", () => {
     }
   });
 
-  it("safely quiesces an untouched empty remote using the lifecycle request property order", async (t) => {
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-empty-remote-"));
+  it("safely quiesces an untouched empty PostgreSQL project using the lifecycle request property order", async (t) => {
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-empty-project-"));
     tempDirs.push(staticDir);
-    const fixture = makeSnapshotStore();
-    const emptySnapshot: SnapshotId = { ...SNAPSHOT, remoteCommit: "" };
-    let remoteObservationCalls = 0;
-    let latestEmptyObservation: Awaited<ReturnType<CoreStore["observe"]>> | undefined;
-    const store = Object.assign(fixture.store, {
-      async observe() {
-        remoteObservationCalls++;
-        latestEmptyObservation = { snapshot: emptySnapshot, checkpointHead: "", observedAt: new Date().toISOString(), state: "fresh" as const, pending: [] };
-        return latestEmptyObservation;
-      },
-      async reader(_projectId: string, _view = "remote", pinned?: string) {
-        assert.equal(pinned, undefined, "the empty remote is represented by the unpinned reader");
-        return {
-          snapshot: emptySnapshot,
-          async read() { return null; },
-          async list(prefix: string) { assert.equal(prefix, "meta/scriptorium"); return []; },
-        };
-      },
-      async registeredRepositoryIdentity() { return SNAPSHOT.repository; },
-      async listProposals() { return []; },
-      async localDurabilityCensus() {
-        assert.ok(latestEmptyObservation, "the signed status preflight seeds an empty-remote observation");
-        return {
-          observation: latestEmptyObservation,
-          reader: {
-            snapshot: emptySnapshot,
-            async read() { return null; },
-            async list(prefix: string) { assert.equal(prefix, "meta/scriptorium"); return []; },
-          },
-          pendingCheckpoints: [], pendingProposals: 0, localWorkspaceDirty: false,
-        };
-      },
-    }) as CoreStore;
+    const native = await nativeProject(t, "Empty hosted project");
+    assert.deepEqual((await native.store.readTreeSnapshot(native.project.id)).tree.volumes, [], "the project has no manuscript hierarchy");
+    let projectReads = 0;
+    const persistence = instrumentPersistence(native.persistence, { onProjectRead: () => { projectReads++; } });
     const controlFetch: typeof fetch = async (input) => {
       assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
       return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
     };
-    const apiServer = await startHostedApi(store, staticDir, hostedTestPolicy(), controlFetch);
+    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, undefined, undefined, persistence, native.project.id);
     t.after(apiServer.close);
 
     const statusToken = runtimeControlToken("status", "empty-status", sha256Digest(""));
     const statusResponse = await fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, { headers: { Authorization: `Bearer ${statusToken}` } });
     assert.equal(statusResponse.status, 200);
-    const status = await statusResponse.json() as { lastConfirmedRemoteRevision: string | null; persistence: { state: string; observedRemoteCommit: string | null; remoteObservedAt: string | null; formats: unknown[] } };
-    assert.equal(status.lastConfirmedRemoteRevision, null);
+    const status = await statusResponse.json() as { projectId: string; persistence: { state: string; provider: string; projectVersion: number | null } };
+    assert.equal(status.projectId, native.project.id);
     assert.equal(status.persistence.state, "verified");
-    assert.equal(status.persistence.observedRemoteCommit, null);
-    assert.equal(status.persistence.remoteObservedAt, latestEmptyObservation?.observedAt,
-      "an empty remote retains the successful observation time from Core");
-    assert.ok(Number.isFinite(Date.parse(status.persistence.remoteObservedAt ?? "")));
-    const observationsAfterPreflight = remoteObservationCalls;
+    assert.equal(status.persistence.provider, "postgres");
+    assert.equal(status.persistence.projectVersion, native.project.version);
+    const projectReadsAfterPreflight = projectReads;
 
     // This matches Praetorium ControlHttpClient's insertion order exactly.
     const request = {
@@ -1267,8 +1166,10 @@ describe("Codexia HTTP boundary", () => {
       method: "POST", headers: { Authorization: `Bearer ${quiesceToken}`, "Content-Type": "application/json" }, body,
     });
     assert.equal(quiesced.status, 200);
-    assert.equal((await quiesced.json() as { disposition: string; lastConfirmedRemoteRevision: string | null }).disposition, "safe");
-    assert.equal(remoteObservationCalls, observationsAfterPreflight, "untouched empty remote quiesce must not perform a fresh remote observation");
+    const receipt = await quiesced.json() as { disposition: string; projectVersion: number | null };
+    assert.equal(receipt.disposition, "safe");
+    assert.equal(receipt.projectVersion, native.project.version);
+    assert.ok(projectReads > projectReadsAfterPreflight, "quiesce verifies the empty project's PostgreSQL version after closing admission");
 
     const resumeToken = runtimeControlToken("resume", request.operationId, sha256Digest(body));
     const resumed = await fetch(`${apiServer.base}${RUNTIME_RESUME_PATH}`, {
@@ -1331,15 +1232,17 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(!shell.headers.get("content-security-policy")?.includes("script-src 'unsafe-inline'"));
     const nextShell = await fetch(`${apiServer.base}/`);
     assert.notEqual(nextShell.headers.get("content-security-policy"), shell.headers.get("content-security-policy"));
-    const publicReader = await fetch(`${apiServer.base}/r/publishing/123/e2e-invalid-token`);
+    const publicProjectId = randomUUID();
+    const publicReader = await fetch(`${apiServer.base}/r/publishing/${publicProjectId}/e2e-invalid-token`);
     assert.equal(publicReader.status, 200, "a structurally valid public reader URL must load the SPA before token validation");
     assert.match(publicReader.headers.get("content-type") ?? "", /text\/html/u);
     assert.equal(publicReader.headers.get("referrer-policy"), "no-referrer");
     assert.equal(publicReader.headers.get("x-robots-tag"), "noindex, nofollow");
     assert.match(await publicReader.text(), /Codexia/u);
-    assert.equal((await fetch(`${apiServer.base}/r/unknown/123/e2e-invalid-token`)).status, 404);
+    assert.equal((await fetch(`${apiServer.base}/r/unknown/${publicProjectId}/e2e-invalid-token`)).status, 404);
     assert.equal((await fetch(`${apiServer.base}/r/publishing/not-numeric/e2e-invalid-token`)).status, 404);
-    assert.equal((await fetch(`${apiServer.base}/r/publishing/123/e2e-invalid-token/extra`)).status, 404);
+    assert.equal((await fetch(`${apiServer.base}/r/publishing/${publicProjectId}/e2e-invalid-token/extra`)).status, 404);
+    assert.equal((await fetch(`${apiServer.base}/r/publishing/123/e2e-invalid-token`)).status, 404);
     const owner = await login(apiServer.base);
     assert.equal((await fetch(`${apiServer.base}/api/no-such-route`, { headers: { Cookie: owner.cookie } })).status, 404,
       "the SPA fallback must not turn missing API routes into index.html");
@@ -1462,30 +1365,27 @@ describe("Codexia HTTP boundary", () => {
     const root = await mkdtemp(resolve(tmpdir(), "codexia-api-model-history-"));
     tempDirs.push(root);
     const usageDirectory = resolve(root, "host-history");
-    const coreDataDirectory = resolve(root, "core-data");
-    await mkdir(coreDataDirectory);
-    await writeFile(resolve(coreDataDirectory, "disposable-cache.json"), "temporary Core cache");
     const unusedDirectory = resolve(root, "unused-history");
-    assert.deepEqual(await new HistoricalModelUsageStore(unusedDirectory).list(SNAPSHOT.repository), { events: [] });
+    assert.deepEqual(await new HistoricalModelUsageStore(unusedDirectory).list(SNAPSHOT.projectId), { events: [] });
     await assert.rejects(lstat(unusedDirectory), (error: NodeJS.ErrnoException) => error.code === "ENOENT", "an empty history read must not create host storage");
     const store = new HistoricalModelUsageStore(usageDirectory);
-    const first = usageEvent(SNAPSHOT.repository, "usage-1", "2026-10-17T00:00:00.000Z", {
+    const first = usageEvent(SNAPSHOT.projectId, "usage-1", "2026-10-17T00:00:00.000Z", {
       cacheHit: true, promptVersion: "rewrite@1", durationMs: 217, queueWaitMs: 18,
     });
-    const second = usageEvent(SNAPSHOT.repository, "usage-2", "2026-10-17T00:00:02.000Z", { state: "aborted", errorCode: "request_cancelled" });
-    const third = usageEvent(SNAPSHOT.repository, "usage-3", "2026-10-17T00:00:04.000Z");
+    const second = usageEvent(SNAPSHOT.projectId, "usage-2", "2026-10-17T00:00:02.000Z", { state: "aborted", errorCode: "request_cancelled" });
+    const third = usageEvent(SNAPSHOT.projectId, "usage-3", "2026-10-17T00:00:04.000Z");
     await Promise.all([store.append(first), store.append(first), store.append(second), store.append(third)]);
 
-    const pageOne = await store.list(SNAPSHOT.repository, { limit: 2 });
+    const pageOne = await store.list(SNAPSHOT.projectId, { limit: 2 });
     assert.deepEqual(pageOne.events.map(({ id }) => id), [first.id, second.id]);
     assert.deepEqual(pageOne.events[0], first, "source cache and prompt/timing metadata survive append and list");
     assert.ok(pageOne.nextCursor);
-    const pageTwo = await store.list(SNAPSHOT.repository, { limit: 2, cursor: pageOne.nextCursor });
+    const pageTwo = await store.list(SNAPSHOT.projectId, { limit: 2, cursor: pageOne.nextCursor });
     assert.deepEqual(pageTwo.events.map(({ id }) => id), [third.id]);
     assert.equal(pageTwo.nextCursor, undefined);
-    const ranged = await store.list(SNAPSHOT.repository, { from: second.startedAt, to: third.startedAt, limit: 10 });
+    const ranged = await store.list(SNAPSHOT.projectId, { from: second.startedAt, to: third.startedAt, limit: 10 });
     assert.deepEqual(ranged.events.map(({ id }) => id), [second.id, third.id]);
-    await assert.rejects(store.list(SNAPSHOT.repository, { limit: 1_001 }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_query_invalid");
+    await assert.rejects(store.list(SNAPSHOT.projectId, { limit: 1_001 }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_query_invalid");
     await assert.rejects(store.append({ ...first, outputTokens: 9 }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_id_conflict");
     await assert.rejects(store.append({ ...first, cacheHit: false }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_id_conflict");
     for (const invalid of [
@@ -1506,15 +1406,13 @@ describe("Codexia HTTP boundary", () => {
       ...first, prompt: "private prompt", headers: { Authorization: "secret" }, key: "private key", body: "private body",
     } as ModelUsageEvent), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_invalid");
 
-    await rm(coreDataDirectory, { recursive: true, force: true });
-    await mkdir(coreDataDirectory);
     const reopened = new HistoricalModelUsageStore(usageDirectory);
-    assert.deepEqual((await reopened.list(SNAPSHOT.repository, { limit: 10 })).events, [first, second, third],
-      "source cache and prompt/timing metadata survive reopening the host-owned store after disposable Core data deletion");
+    assert.deepEqual((await reopened.list(SNAPSHOT.projectId, { limit: 10 })).events, [first, second, third],
+      "source cache and prompt/timing metadata survive reopening the host-owned store");
 
     const alias = resolve(root, "history-alias");
     await symlink(usageDirectory, alias, "dir");
-    await assert.rejects(new HistoricalModelUsageStore(alias).list(SNAPSHOT.repository), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_path_invalid");
+    await assert.rejects(new HistoricalModelUsageStore(alias).list(SNAPSHOT.projectId), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_path_invalid");
   });
 
   it("stores only bounded worker lifecycle metadata and durable completion inbox state", async () => {
@@ -1553,9 +1451,9 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(inbox.items.length, 1);
     assert.equal(inbox.unreadCount, 1);
     assert.equal(inbox.items[0]?.body, "The job failed (worker_failed).");
-    assert.equal(inbox.items[0]?.projectKey.includes(SNAPSHOT.repository.repositoryId), false);
+    assert.equal(inbox.items[0]?.projectKey.includes(SNAPSHOT.projectId), false);
     const stateText = await readFile(resolve(usageDirectory, "jobs", "jobs-state.json"), "utf8");
-    for (const secret of [SNAPSHOT.repository.url, SNAPSHOT.repository.ownerScope, ACCESS_TOKEN, "prompt-secret", "result-secret", "worker error text"]) {
+    for (const secret of ["private-project-title", "private-owner-scope", ACCESS_TOKEN, "prompt-secret", "result-secret", "worker error text"]) {
       assert.equal(stateText.includes(secret), false, `host history must not contain ${secret}`);
     }
     assert.equal(stateText.includes('"progress":null'), true);
@@ -1567,7 +1465,7 @@ describe("Codexia HTTP boundary", () => {
     assert.deepEqual(await reloaded.getJob("worker-job-1"), (await store.getJob("worker-job-1")));
     assert.equal(await reloaded.markAllInboxRead(), 1);
     assert.deepEqual(await new JobHistoryStore(usageDirectory).listInbox({ unreadOnly: true }), { items: [], unreadCount: 0 });
-    await assert.rejects(reloaded.record({ ...queued, snapshot: { ...SNAPSHOT, repository: { ...SNAPSHOT.repository, repositoryId: "999" } } }),
+    await assert.rejects(reloaded.record({ ...queued, snapshot: { ...SNAPSHOT, projectId: "another-project" } }),
       (error: unknown) => error instanceof JobHistoryError && error.code === "job_identity_conflict");
   });
 
@@ -1580,7 +1478,7 @@ describe("Codexia HTTP boundary", () => {
       ok: true, snapshot: SNAPSHOT,
       data: { report: { examples: 3, accuracy: 0.75 }, proposalId: "speaker-proposal-1" },
     };
-    const queued = await store.beginDomainJob({ id: "domain-job-success", type: "speaker-eval", repository: SNAPSHOT.repository });
+    const queued = await store.beginDomainJob({ id: "domain-job-success", type: "speaker-eval", projectId: SNAPSHOT.projectId });
     assert.equal(queued.status, "queued");
     assert.equal(queued.progress, 0);
     const running = await store.markDomainJobRunning("domain-job-success");
@@ -1603,7 +1501,7 @@ describe("Codexia HTTP boundary", () => {
       ok: false, snapshot: SNAPSHOT,
       error: { code: "aspect_scope_invalid", message: "The selected chapter has no scenes", retryable: false },
     };
-    await store.beginDomainJob({ id: "domain-job-error", type: "aspect-review", repository: SNAPSHOT.repository });
+    await store.beginDomainJob({ id: "domain-job-error", type: "aspect-review", projectId: SNAPSHOT.projectId });
     await store.markDomainJobRunning("domain-job-error");
     assert.equal((await store.finishDomainJob("domain-job-error", failed)).status, "error");
 
@@ -1620,7 +1518,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(failedJob?.error, failed.error.message);
     assert.equal(failedJob?.errorCode, failed.error.code);
     assert.equal(failedJob?.retryable, false);
-    await store.beginDomainJob({ id: "domain-job-interrupted", type: "speaker-retrain", repository: SNAPSHOT.repository });
+    await store.beginDomainJob({ id: "domain-job-interrupted", type: "speaker-retrain", projectId: SNAPSHOT.projectId });
     await store.markDomainJobRunning("domain-job-interrupted");
     await store.reportDomainJobProgress("domain-job-interrupted", 0.42);
     assert.equal((await reopened.listInbox()).unreadCount, 2);
@@ -1754,7 +1652,7 @@ describe("Codexia HTTP boundary", () => {
     assert.deepEqual((await reopenedHistory.getJob(directJobId))?.result, expectedData, "the exact action result remains owner-readable after host-history reopen");
     assert.deepEqual((await reopenedHistory.getJob(nestedJobId))?.result, expectedData, "nested MCP results remain owner-readable after host-history reopen");
     const inbox = await new JobHistoryStore(usageDirectory).listInbox();
-    assert.equal(inbox.items.length, 1, "unread completion inbox items coalesce by job type and repository");
+    assert.equal(inbox.items.length, 1, "unread completion inbox items coalesce by job type and PostgreSQL project");
     assert.equal(inbox.items[0]?.jobId, asyncJobId);
     const historyBytes = await readFile(resolve(usageDirectory, "jobs", "jobs-state.json"), "utf8");
     assert.equal(historyBytes.includes("must-not-be-captured"), false, "action input is not retained as job history");
@@ -1802,7 +1700,7 @@ describe("Codexia HTTP boundary", () => {
     const report = await importLegacyJobHistory({
       workspaceDataRoot,
       usageDirectory,
-      legacyRepositoryMappings: { "legacy-project-id": SNAPSHOT.repository },
+      legacyProjectMappings: { "legacy-project-id": SNAPSHOT.projectId },
       legacyUserMappings: { "legacy-owner-id": "owner" },
     });
     assert.equal(report.archived, true);
@@ -1818,7 +1716,7 @@ describe("Codexia HTTP boundary", () => {
     const retry = await importLegacyJobHistory({
       workspaceDataRoot,
       usageDirectory,
-      legacyRepositoryMappings: { "legacy-project-id": SNAPSHOT.repository },
+      legacyProjectMappings: { "legacy-project-id": SNAPSHOT.projectId },
       legacyUserMappings: { "legacy-owner-id": "owner" },
     });
     assert.equal(retry.sourceHash, report.sourceHash);
@@ -1855,7 +1753,7 @@ describe("Codexia HTTP boundary", () => {
       id: "mapped-inbox", kind: "job-complete", jobId: "mapped-job", jobType: "speaker-eval",
       title: "Mapped report", body: "Mapped inbox result body", status: "done", read: false,
       userId: "owner",
-      projectKey: createHash("sha256").update(`github\0${SNAPSHOT.repository.ownerScope}\0${SNAPSHOT.repository.repositoryId}`).digest("hex"),
+      projectKey: createHash("sha256").update(`postgres-project\0${SNAPSHOT.projectId}`).digest("hex"),
       createdAt: "2026-10-16T00:01:00.000Z",
     });
     assert.equal(JSON.stringify(inboxBody).includes("unmapped inbox body stays private"), false);
@@ -2003,26 +1901,26 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(job.error, "job_cancelled");
   });
 
-  it("wires model usage lazily into the host and retains it after Core data-root deletion and reconstruction", async (t) => {
-    const { root, remote } = await makeBareRemote();
+  it("wires model usage lazily into the host and retains it after Core reconstruction", async (t) => {
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-native-core-api-"));
+    const persistence = await nativePersistence(t);
     tempDirs.push(root);
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-model-history-app-"));
     tempDirs.push(staticDir);
-    const coreDataDirectory = resolve(root, "core-data");
     const usageDirectory = resolve(root, "history");
     const cacheDirectory = resolve(root, "module-cache");
-    let coreStore = new CoreStore({ dataDir: coreDataDirectory, allowLocalRemotes: true });
+    let coreStore = new CoreStore({ persistence });
     let apiServer: Awaited<ReturnType<typeof startCustomApi>> | undefined;
     t.after(async () => { if (apiServer) await apiServer.close(); });
     const openApi = (store: CoreStore) => startCustomApi(store, staticDir, {
-      usageDirectory,
+      usageDirectory, persistence,
       runtimeOptions: modelUsageRuntimeOptions(cacheDirectory),
     });
     apiServer = await openApi(coreStore);
     let owner = await login(apiServer.base);
     const ownerHeaders = () => ({ Cookie: owner.cookie, Origin: apiServer!.base, "Content-Type": "application/json" });
     const register = async () => {
-      const response = await fetch(`${apiServer!.base}/api/projects`, { method: "POST", headers: ownerHeaders(), body: JSON.stringify({ url: remote }) });
+      const response = await fetch(`${apiServer!.base}/api/projects`, { method: "POST", headers: ownerHeaders(), body: JSON.stringify({ title: "Native API test project" }) });
       assert.equal(response.status, 201);
       return response.json() as Promise<{ id: string }>;
     };
@@ -2034,7 +1932,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal((await fetch(`${apiServer.base}/api/health`)).status, 200);
     await assert.rejects(lstat(usageDirectory), (error: NodeJS.ErrnoException) => error.code === "ENOENT", "server startup must not touch unused usage history");
     const project = await register();
-    const identity = (await coreStore.observe(project.id)).snapshot.repository;
+    const identity = (await coreStore.observe(project.id)).snapshot.projectId;
     const event = usageEvent(identity, "host-usage-1", "2026-10-17T01:00:00.000Z", {
       cacheHit: true, promptVersion: "assistant-story-v2", durationMs: 1_842, queueWaitMs: 73,
     });
@@ -2052,22 +1950,18 @@ describe("Codexia HTTP boundary", () => {
 
     await apiServer.close();
     apiServer = undefined;
-    await rm(coreDataDirectory, { recursive: true, force: true });
-    await assert.rejects(lstat(coreDataDirectory), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
-    coreStore = new CoreStore({ dataDir: coreDataDirectory, allowLocalRemotes: true });
+    coreStore = new CoreStore({ persistence });
     apiServer = await openApi(coreStore);
     owner = await login(apiServer.base);
-    const reconstructed = await register();
-    const newIdentity = (await coreStore.observe(reconstructed.id)).snapshot.repository;
-    assert.equal(newIdentity.repositoryId, identity.repositoryId, "Core reconstructs stable repository identity independently of its ephemeral project ID");
-    assert.equal(newIdentity.ownerScope, identity.ownerScope);
+    const reconstructed = (await coreStore.listProjects()).find((item) => item.id === project.id)!;
+    const newIdentity = (await coreStore.observe(reconstructed.id)).snapshot.projectId;
+    assert.equal(newIdentity, identity, "reopening Core retains the native project identity");
     const restored = await invokeHistory(reconstructed.id, { query: { limit: 10 } });
     assert.equal(restored.status, 200);
     const restoredResult = await restored.json() as ActionResult<{ events: ModelUsageEvent[] }>;
     assert.equal(restoredResult.ok, true, JSON.stringify(restoredResult));
     if (!restoredResult.ok) return;
     assert.deepEqual(restoredResult.data.events, [event]);
-    assert.ok((await lstat(coreDataDirectory)).isDirectory(), "project registration recreates the disposable Core data root");
     assert.ok((await lstat(usageDirectory)).isDirectory(), "host history remains available in its separately configured directory");
   });
 
@@ -2102,7 +1996,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(loginResponse.status, 200);
     const projects = await fetch(`${apiServer.base}/api/projects`, { headers: { Cookie: cookie } });
     assert.deepEqual(await projects.json(), [
-      { id: "project-1", url: "https://github.com/owner/work.git", branch: "main" },
+      { id: "project-1", title: "A Work", version: 1 },
     ]);
 
     const mutation = await fetch(`${apiServer.base}/api/projects/project-1/scenes/scene-1`, {
@@ -2131,40 +2025,42 @@ describe("Codexia HTTP boundary", () => {
     assert.equal((await fetch(`${apiServer.base}/api/projects`, { headers: { Cookie: cookie } })).status, 401);
   });
 
-  it("keeps hosted repository service failures separate from an expired Browser Grant", async (t) => {
+  it("keeps PostgreSQL availability separate from an expired hosted Browser Grant", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-hosted-auth-boundary-"));
     tempDirs.push(staticDir);
-    let failRemoteObservation = true;
-    const store = Object.assign(makeStore(), {
-      async observe() {
-        if (failRemoteObservation) {
-          failRemoteObservation = false;
-          throw Object.assign(new Error("The repository credential service is unavailable"), {
-            status: 503,
-            code: "git_credential_unavailable",
-          });
+    const native = await nativeProject(t, "Hosted readiness");
+    let failHealthCheck = true;
+    const persistence = new Proxy(native.persistence, {
+      get(target, property, receiver) {
+        if (property === "checkHealth") {
+          return async () => {
+            if (failHealthCheck) {
+              failHealthCheck = false;
+              throw new Error("simulated PostgreSQL availability failure");
+            }
+            await target.checkHealth?.();
+          };
         }
-        return {
-          snapshot: SNAPSHOT,
-          checkpointHead: SNAPSHOT.remoteCommit,
-          observedAt: new Date().toISOString(),
-          state: "fresh",
-          pending: [],
-        };
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
       },
-    }) as CoreStore;
-    const apiServer = await startHostedApi(store, staticDir, realHostedGrantPolicy());
+    });
+    const controlFetch: typeof fetch = async (input) => {
+      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
+      return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
+    };
+    const apiServer = await startHostedApi(native.store, staticDir, realHostedGrantPolicy(), controlFetch, undefined, undefined, persistence, native.project.id);
     t.after(apiServer.close);
 
-    const validGrant = hostedGrantToken();
-    const observation = await fetch(`${apiServer.base}/api/projects/project-1/observation`, {
-      headers: { Authorization: `Bearer ${validGrant}` },
+    const status = await fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, {
+      headers: { Authorization: `Bearer ${runtimeControlToken("status", "postgres-unavailable", sha256Digest(""))}` },
     });
-    assert.equal(observation.status, 503);
-    assert.equal((await observation.json() as { code: string }).code, "git_credential_unavailable");
+    assert.equal(status.status, 200);
+    assert.equal((await status.json() as { persistence: { state: string } }).persistence.state, "unknown",
+      "a database health failure is reported as unavailable persistence, not as a rejected browser grant");
 
     const session = await fetch(`${apiServer.base}/api/session`, {
-      headers: { Authorization: `Bearer ${validGrant}` },
+      headers: { Authorization: `Bearer ${hostedGrantToken()}` },
     });
     assert.equal(session.status, 200);
     assert.deepEqual(await session.json(), {
@@ -2200,7 +2096,8 @@ describe("Codexia HTTP boundary", () => {
   });
 
   it("rejects short access tokens before opening a listener", () => {
-    assert.throws(() => createServer({ store: makeStore(), authToken: "too-short" }), /at least 32/u);
+    const store = makeStore();
+    assert.throws(() => createServer({ store, authToken: "too-short", persistence: admissionPersistence(store) }), /at least 32/u);
   });
 
   it("fails API readiness and persistence status while PostgreSQL is unavailable", async (t) => {
@@ -2258,35 +2155,31 @@ describe("Codexia HTTP boundary", () => {
     const auth = { Authorization: `Bearer ${ACCESS_TOKEN}` };
 
     const projects = await fetch(`${apiServer.base}/api/projects`, { headers: auth });
-    assert.deepEqual(await projects.json(), [{ id: "project-1", url: "https://github.com/owner/work.git", branch: "main" }]);
+    assert.deepEqual(await projects.json(), [{ id: "project-1", title: "A Work", version: 1 }]);
     const detail = await fetch(`${apiServer.base}/api/projects/project-1`, { headers: auth });
-    const detailBody = await detail.json() as { project: { id: string; url: string; branch: string }; observation: { snapshot: SnapshotId; state: string } };
+    const detailBody = await detail.json() as { project: { id: string; title: string; version: number }; observation: { snapshot: SnapshotId; state: string } };
     assert.equal(detail.status, 200);
-    assert.deepEqual(detailBody.project, { id: "project-1", url: "https://github.com/owner/work.git", branch: "main" });
-    assert.equal(detailBody.observation.snapshot.remoteCommit, SNAPSHOT.remoteCommit);
-    assert.equal(detailBody.observation.state, "unknown", "project opening uses local observation");
+    assert.deepEqual(detailBody.project, { id: "project-1", title: "A Work", version: 1 });
+    assert.equal(detailBody.observation.snapshot.projectVersion, SNAPSHOT.projectVersion);
+    assert.equal(detailBody.observation.state, "fresh", "project opening observes the assigned PostgreSQL project");
     const missingProject = await fetch(`${apiServer.base}/api/projects/missing`, { headers: auth });
     assert.equal(missingProject.status, 404);
     assert.equal((await missingProject.json() as { code: string }).code, "PROJECT_NOT_FOUND");
     assert.equal((await fetch(`${apiServer.base}/api/projects/project-1/manuscripts`, { headers: auth })).status, 404);
     const defaultTree = await fetch(`${apiServer.base}/api/projects/project-1/tree`, { headers: auth });
-    assert.equal((await defaultTree.json() as { snapshot: SnapshotId }).snapshot.remoteCommit, SNAPSHOT.remoteCommit);
-    assert.deepEqual(fixture.snapshotReads.at(-1), { kind: "tree", view: "remote", pinned: undefined });
+    assert.equal((await defaultTree.json() as { snapshot: SnapshotId }).snapshot.projectVersion, SNAPSHOT.projectVersion);
+    assert.deepEqual(fixture.snapshotReads.at(-1), { kind: "tree", pinned: undefined });
     const defaultScene = await fetch(`${apiServer.base}/api/projects/project-1/scenes/scene-one`, { headers: auth });
-    assert.equal((await defaultScene.json() as { snapshot: SnapshotId }).snapshot.remoteCommit, SNAPSHOT.remoteCommit);
-    assert.deepEqual(fixture.snapshotReads.at(-1), { kind: "scene", view: "remote", pinned: undefined });
-    const paired = await fetch(`${apiServer.base}/api/projects/project-1/scenes/scene-one/views?snapshot=${SNAPSHOT.remoteCommit}`, { headers: auth });
-    assert.equal(paired.status, 200);
-    const pairedBody = await paired.json() as { remote: { snapshot: SnapshotId }; effective: { snapshot: SnapshotId } };
-    assert.equal(pairedBody.remote.snapshot.remoteCommit, SNAPSHOT.remoteCommit);
-    assert.equal(pairedBody.effective.snapshot.remoteCommit, SNAPSHOT.remoteCommit);
-    assert.deepEqual(fixture.snapshotReads.at(-1), { kind: "views", pinned: SNAPSHOT.remoteCommit });
-    const missingPairPin = await fetch(`${apiServer.base}/api/projects/project-1/scenes/scene-one/views`, { headers: auth });
-    assert.equal(missingPairPin.status, 400);
-    const checkpointId = "c".repeat(40);
-    const checkpointTree = await fetch(`${apiServer.base}/api/projects/project-1/tree?view=checkpoint&snapshot=${checkpointId}`, { headers: auth });
-    assert.equal(checkpointTree.status, 200);
-    assert.deepEqual(fixture.snapshotReads.at(-1), { kind: "tree", view: "checkpoint", pinned: checkpointId });
+    assert.equal((await defaultScene.json() as { snapshot: SnapshotId }).snapshot.projectVersion, SNAPSHOT.projectVersion);
+    assert.deepEqual(fixture.snapshotReads.at(-1), { kind: "scene", pinned: undefined });
+    const pinnedTree = await fetch(`${apiServer.base}/api/projects/project-1/tree?projectVersion=${SNAPSHOT.projectVersion}`, { headers: auth });
+    assert.equal((await pinnedTree.json() as { snapshot: SnapshotId }).snapshot.projectVersion, SNAPSHOT.projectVersion);
+    assert.deepEqual(fixture.snapshotReads.at(-1), { kind: "tree", pinned: SNAPSHOT });
+    const legacyGitView = await fetch(`${apiServer.base}/api/projects/project-1/tree?view=checkpoint&snapshot=${"c".repeat(40)}`, { headers: auth });
+    assert.equal(legacyGitView.status, 400, "Git view and commit selectors are rejected instead of falling back to the current PostgreSQL snapshot");
+    assert.equal((await legacyGitView.json() as { code: string }).code, "INVALID_SNAPSHOT");
+    const retiredSceneViews = await fetch(`${apiServer.base}/api/projects/project-1/scenes/scene-one/views?projectVersion=1`, { headers: auth });
+    assert.equal(retiredSceneViews.status, 404, "the two-view Git reader route has been retired");
     assert.equal((await fetch(`${apiServer.base}/api/nlp/features`)).status, 401);
     const providerNone = await fetch(`${apiServer.base}/api/nlp/features`, { headers: auth });
     assert.equal((await providerNone.json() as { providerKind: string }).providerKind, "none");
@@ -2313,14 +2206,14 @@ describe("Codexia HTTP boundary", () => {
       ok: true, snapshot: SNAPSHOT,
       data: { query: "harbor", results: [{ id: "scene-one", type: "scene", name: "Opening", snippet: "A harbor at night.", filePath: "manuscript/ms-one/scene-one.md", score: 1, field: "body", offset: 2, length: 6 }] },
     });
-    assert.ok(fixture.pinnedReads.includes(SNAPSHOT.remoteCommit));
+    assert.ok(fixture.pinnedReads.includes(SNAPSHOT.projectVersion));
     const invalidAction = await fetch(`${apiServer.base}/api/projects/project-1/actions/core.search`, {
       method: "POST", headers: { ...auth, "Content-Type": "application/json" },
       body: JSON.stringify({ input: { query: "" } }),
     });
     assert.equal((await invalidAction.json() as { error: { code: string } }).error.code, "invalid_action_input");
 
-    const overlay = { ...SNAPSHOT, overlayCommit: "c".repeat(40) };
+    const overlay = SNAPSHOT;
     const resolveResponse = await fetch(`${apiServer.base}/api/projects/project-1/actions/core.document.resolve`, {
       method: "POST", headers: { ...auth, "Content-Type": "application/json" },
       body: JSON.stringify({ input: { path: "manuscript/ms-one/scene-one.md" }, snapshot: overlay }),
@@ -2331,20 +2224,23 @@ describe("Codexia HTTP boundary", () => {
     });
     assert.equal((await unsafeResolve.json() as { error: { code: string } }).error.code, "invalid_action_input");
     const invalidSnapshot = await fetch(`${apiServer.base}/api/projects/project-1/actions/core.document.resolve`, {
-      method: "POST", headers: { ...auth, "Content-Type": "application/json" }, body: JSON.stringify({ input: { path: "manuscript/x.md" }, snapshot: { remoteCommit: "invalid" } }),
+      method: "POST", headers: { ...auth, "Content-Type": "application/json" }, body: JSON.stringify({ input: { path: "manuscript/x.md" }, snapshot: { projectId: "project-1", projectVersion: "invalid" } }),
     });
     assert.equal(invalidSnapshot.status, 400);
-    const pinned = "b".repeat(40);
-    const snapshots = await fetch(`${apiServer.base}/api/projects/project-1/manuscripts/ms-one/snapshots?sceneId=scene-one&snapshot=${pinned}`, { headers: auth });
+    const pinned = SNAPSHOT.projectVersion;
+    const snapshots = await fetch(`${apiServer.base}/api/projects/project-1/manuscripts/ms-one/snapshots?sceneId=scene-one&projectVersion=${pinned}`, { headers: auth });
     const listed = await snapshots.json() as { snapshot: SnapshotId; snapshots: Array<{ id: string }> };
-    assert.equal(listed.snapshot.remoteCommit, pinned);
-    assert.equal(listed.snapshots[0]?.id, "b".repeat(40));
-    const historical = await fetch(`${apiServer.base}/api/projects/project-1/manuscripts/ms-one/snapshots/${"b".repeat(40)}?snapshot=${pinned}`, { headers: auth });
-    assert.equal((await historical.json() as { manuscript: { document: { path: string } } }).manuscript.document.path, "manuscript/ms-one/scene-one.md");
+    assert.equal(listed.snapshot.projectVersion, pinned);
+    assert.equal(listed.snapshots[0]?.id, "11111111-1111-4111-8111-111111111111");
+    const historical = await fetch(`${apiServer.base}/api/projects/project-1/manuscripts/ms-one/snapshots/11111111-1111-4111-8111-111111111111?projectVersion=${pinned}`, { headers: auth });
+    assert.equal(historical.status, 200);
+    assert.equal((await historical.json() as { manuscriptSnapshot: { document: { path: string } } }).manuscriptSnapshot.document.path, "manuscript/ms-one/scene-one.md");
+    const malformedRevision = await fetch(`${apiServer.base}/api/projects/project-1/manuscripts/ms-one/snapshots/not-a-revision?projectVersion=${pinned}`, { headers: auth });
+    assert.equal(malformedRevision.status, 400);
 
-    const stats = await fetch(`${apiServer.base}/api/projects/project-1/writing-stats?snapshot=${pinned}`, { headers: auth });
+    const stats = await fetch(`${apiServer.base}/api/projects/project-1/writing-stats?projectVersion=${pinned}`, { headers: auth });
     const statsBody = await stats.json() as { snapshot: SnapshotId; stats: { totalPages400: number } };
-    assert.equal(statsBody.snapshot.remoteCommit, pinned);
+    assert.equal(statsBody.snapshot.projectVersion, pinned);
     assert.equal(statsBody.stats.totalPages400, 1);
   });
 
@@ -2355,7 +2251,7 @@ describe("Codexia HTTP boundary", () => {
     const apiServer = await startCustomApi(fixture.store, staticDir);
     t.after(apiServer.close);
     const operation: ChangeOperation = {
-      id: "operation-1", generation: 0, repository: SNAPSHOT.repository, baseRemoteCommit: SNAPSHOT.remoteCommit,
+      id: "operation-1", generation: 0, projectId: SNAPSHOT.projectId, baseProjectVersion: SNAPSHOT.projectVersion,
       effect: "metadata", reads: [], writes: [], message: "propose a bounded metadata update",
     };
     const proposal = await fetch(`${apiServer.base}/api/projects/project-1/proposals`, {
@@ -2385,25 +2281,25 @@ describe("Codexia HTTP boundary", () => {
 
 
   it("keeps a strict Core proposal after an owner request is aborted following its durable write", async (t) => {
-    const { root, remote } = await makeBareRemote();
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-native-core-api-"));
+    const persistence = await nativePersistence(t);
     tempDirs.push(root);
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-aborted-proposal-"));
     tempDirs.push(staticDir);
-    const dataDir = resolve(root, "state");
-    const store = new CoreStore({ dataDir, allowLocalRemotes: true });
-    const apiServer = await startCustomApi(store, staticDir);
+    const store = new CoreStore({ persistence });
+    const apiServer = await startCustomApi(store, staticDir, { persistence });
     t.after(apiServer.close);
     const owner = await login(apiServer.base);
     const headers = { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" };
     const registration = await fetch(`${apiServer.base}/api/projects`, {
-      method: "POST", headers, body: JSON.stringify({ url: remote }),
+      method: "POST", headers, body: JSON.stringify({ title: "Native API test project" }),
     });
     assert.equal(registration.status, 201);
     const project = await registration.json() as { id: string };
     const snapshot = (await store.observe(project.id)).snapshot;
     const operation: ChangeOperation = {
-      id: "aborted_response_operation", generation: 1, repository: snapshot.repository,
-      baseRemoteCommit: snapshot.remoteCommit, effect: "metadata", reads: [],
+      id: "aborted_response_operation", generation: 1, projectId: snapshot.projectId,
+      baseProjectVersion: snapshot.projectVersion, effect: "metadata", reads: [],
       writes: [{ path: "meta/scriptorium/modules/publishing/aborted-response.md", revision: null, content: "Pending author decision.\n" }],
       message: "proposal retained across lost response",
     };
@@ -2436,38 +2332,37 @@ describe("Codexia HTTP boundary", () => {
 
     const recovered = await store.getProposal(project.id, proposal.id);
     assert.deepEqual(recovered?.proposal, proposal);
-    const localJournal = JSON.parse(await readFile(resolve(dataDir, "proposal-journal", `${project.id}.json`), "utf8")) as {
-      proposals: ChangeProposal[];
-    };
-    assert.deepEqual(localJournal.proposals, [proposal], "the server persists unaccepted proposals without HTTP acknowledgment");
+    const reopened = new CoreStore({ persistence });
+    assert.deepEqual((await reopened.getProposal(project.id, proposal.id))?.proposal, proposal,
+      "PostgreSQL retains an unacknowledged proposal across Core reconstruction");
   });
 
-  it("restores a partial MCP proposal through an exact owner retry after Core data loss", async (t) => {
-    const { root, remote } = await makeBareRemote();
+  it("retains a partially applied MCP proposal through exact owner retry after Core reconstruction", async (t) => {
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-native-core-api-"));
+    const persistence = await nativePersistence(t);
     tempDirs.push(root);
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-proposal-recovery-"));
     tempDirs.push(staticDir);
-    const dataDir = resolve(root, "state");
-    let store = new CoreStore({ dataDir, allowLocalRemotes: true });
+    let store = new CoreStore({ persistence });
     let apiServer: Awaited<ReturnType<typeof startCustomApi>> | undefined;
     t.after(async () => { if (apiServer) await apiServer.close(); });
 
-    apiServer = await startCustomApi(store, staticDir);
+    apiServer = await startCustomApi(store, staticDir, { persistence });
     let owner = await login(apiServer.base);
     const ownerHeaders = () => ({ Cookie: owner.cookie, Origin: apiServer!.base, "Content-Type": "application/json" });
     const registration = await fetch(`${apiServer.base}/api/projects`, {
-      method: "POST", headers: ownerHeaders(), body: JSON.stringify({ url: remote }),
+      method: "POST", headers: ownerHeaders(), body: JSON.stringify({ title: "Native API test project" }),
     });
     assert.equal(registration.status, 201);
-    const project = await registration.json() as { id: string; url: string; branch: string };
+    const project = await registration.json() as { id: string; title: string; version: number };
     const snapshot = (await store.observe(project.id)).snapshot;
     const operation = (id: string, path: string, content: string): ChangeOperation => ({
-      id, generation: 1, repository: snapshot.repository, baseRemoteCommit: snapshot.remoteCommit,
-      effect: "manuscript", reads: [{ path, revision: null }], writes: [{ path, revision: null, content }],
+      id, generation: 1, projectId: snapshot.projectId, baseProjectVersion: snapshot.projectVersion,
+      effect: "metadata", reads: [{ path, revision: null }], writes: [{ path, revision: null, content }],
       message: `Write ${path}`,
     });
-    const selected = operation("recovery_selected_op", "manuscript/recovery-selected.md", "Selected and published.\n");
-    const unselected = operation("recovery_unselected_op", "manuscript/recovery-unselected.md", "Still pending after recovery.\n");
+    const selected = operation("recovery_selected_op", "meta/recovery/selected.md", "Selected and published.\n");
+    const unselected = operation("recovery_unselected_op", "meta/recovery/unselected.md", "Still pending after recovery.\n");
     const proposal: ChangeProposal = {
       id: "recovery_mcp_batch",
       snapshot,
@@ -2486,7 +2381,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(initial.status, 201);
     assert.deepEqual(await initial.json(), proposal, "new bearer submissions are attributed to MCP regardless of request source");
 
-    const cookieOperation = operation("cookie_author_source_op", "manuscript/cookie-author.md", "Created by the owner session.\n");
+    const cookieOperation = operation("cookie_author_source_op", "meta/recovery/cookie-author.md", "Created by the owner session.\n");
     const cookieCreated = await fetch(`${apiServer.base}/api/projects/${project.id}/proposals`, {
       method: "POST", headers: ownerHeaders(),
       body: JSON.stringify({ id: "cookie_author_source", snapshot, operations: [cookieOperation], source: "mcp" }),
@@ -2499,39 +2394,30 @@ describe("Codexia HTTP boundary", () => {
       body: JSON.stringify({ proposalId: proposal.id, operationIds: [selected.id] }),
     });
     assert.equal(approval.status, 204);
-    const checkpoint = await fetch(`${apiServer.base}/api/projects/${project.id}/checkpoints`, {
+    const applyResponse = await fetch(`${apiServer.base}/api/projects/${project.id}/apply`, {
       method: "POST", headers: ownerHeaders(), body: JSON.stringify(selected),
     });
-    assert.equal(checkpoint.status, 201);
-    const publication = await fetch(`${apiServer.base}/api/projects/${project.id}/publish`, {
-      method: "POST", headers: ownerHeaders(), body: JSON.stringify({ batchId: "recovery_publish_batch" }),
-    });
-    assert.equal(publication.status, 200);
-    assert.equal((await publication.json() as { state: string }).state, "confirmed");
-
+    assert.equal(applyResponse.status, 201);
+    const receipt = await applyResponse.json() as { projectVersion: number; operationId: string };
+    assert.equal(receipt.operationId, selected.id);
+    assert.ok(receipt.projectVersion > snapshot.projectVersion);
     await apiServer.close();
     apiServer = undefined;
-    await rm(dataDir, { recursive: true, force: true });
-    store = new CoreStore({ dataDir, allowLocalRemotes: true });
-    apiServer = await startCustomApi(store, staticDir);
+    store = new CoreStore({ persistence });
+    apiServer = await startCustomApi(store, staticDir, { persistence });
     owner = await login(apiServer.base);
-    const recoveredRegistration = await fetch(`${apiServer.base}/api/projects`, {
-      method: "POST", headers: ownerHeaders(), body: JSON.stringify({ url: remote }),
-    });
-    assert.equal(recoveredRegistration.status, 201);
-    const recoveredProject = await recoveredRegistration.json() as { id: string };
-    assert.notEqual(recoveredProject.id, project.id, "the project cache is reconstructed from the remote after data-root deletion");
+    const recoveredProject = (await store.listProjects()).find((item) => item.id === project.id)!;
+    assert.equal(recoveredProject.id, project.id, "PostgreSQL project identity survives host replacement");
 
     const statusPath = `${apiServer.base}/api/projects/${recoveredProject.id}/proposals/${proposal.id}`;
     const partialResponse = await fetch(statusPath, { headers: { Cookie: owner.cookie } });
     assert.equal(partialResponse.status, 200);
     const partial = await partialResponse.json() as ProposalStatus;
-    assert.equal(partial.payloadComplete, false);
     assert.equal(partial.proposal.source, "mcp");
-    assert.deepEqual(partial.operationIds, [selected.id, unselected.id]);
-    assert.deepEqual(partial.proposal.operations.map(({ id }) => id), [selected.id]);
+    assert.deepEqual(partial.proposal.operations.map(({ id }) => id), [selected.id, unselected.id]);
+    assert.deepEqual(partial.proposal, proposal, "PostgreSQL retains the complete private proposal and evidence");
     assert.deepEqual(partial.approvedOperationIds, [selected.id]);
-    assert.deepEqual(partial.publishedOperationIds, [selected.id]);
+    assert.deepEqual(partial.appliedOperationIds, [selected.id]);
 
     const retry = await fetch(`${apiServer.base}/api/projects/${recoveredProject.id}/proposals`, {
       method: "POST", headers: ownerHeaders(), body: JSON.stringify(proposal),
@@ -2540,10 +2426,10 @@ describe("Codexia HTTP boundary", () => {
     assert.deepEqual(await retry.json(), proposal, "the owner retry restores the exact original MCP payload and source");
     const restoredResponse = await fetch(statusPath, { headers: { Cookie: owner.cookie } });
     const restored = await restoredResponse.json() as ProposalStatus;
-    assert.equal(restored.payloadComplete, true);
     assert.deepEqual(restored.proposal, proposal);
+    assert.deepEqual(restored.proposal.operations.map(({ id }) => id), [selected.id, unselected.id]);
     assert.deepEqual(restored.approvedOperationIds, [selected.id], "restoring payload must not approve the remaining operation");
-    assert.deepEqual(restored.publishedOperationIds, [selected.id]);
+    assert.deepEqual(restored.appliedOperationIds, [selected.id]);
 
     const changed = {
       ...proposal,
@@ -2555,19 +2441,19 @@ describe("Codexia HTTP boundary", () => {
       method: "POST", headers: ownerHeaders(), body: JSON.stringify(changed),
     });
     assert.equal(changedRetry.status, 409);
-    assert.equal((await changedRetry.json() as { code: string }).code, "proposal_id_reused", "Core must keep enforcing the original full-payload digest");
+    assert.equal((await changedRetry.json() as { code: string }).code, "proposal_identity_conflict", "Core must keep enforcing the original full-payload digest");
 
-    const unapprovedCheckpoint = await fetch(`${apiServer.base}/api/projects/${recoveredProject.id}/checkpoints`, {
+    const unapprovedApply = await fetch(`${apiServer.base}/api/projects/${recoveredProject.id}/apply`, {
       method: "POST", headers: ownerHeaders(), body: JSON.stringify(unselected),
     });
-    assert.equal(unapprovedCheckpoint.status, 403);
-    assert.equal((await unapprovedCheckpoint.json() as { code: string }).code, "author_approval_required");
+    assert.equal(unapprovedApply.status, 403);
+    assert.equal((await unapprovedApply.json() as { code: string }).code, "operation_not_approved");
 
     const currentSnapshot = (await store.observe(recoveredProject.id)).snapshot;
     const newCookieOperation = {
       ...cookieOperation,
-      repository: currentSnapshot.repository,
-      baseRemoteCommit: currentSnapshot.remoteCommit,
+      projectId: currentSnapshot.projectId,
+      baseProjectVersion: currentSnapshot.projectVersion,
     };
     const newCookieProposal = await fetch(`${apiServer.base}/api/projects/${recoveredProject.id}/proposals`, {
       method: "POST", headers: ownerHeaders(),
@@ -2577,194 +2463,103 @@ describe("Codexia HTTP boundary", () => {
     assert.equal((await newCookieProposal.json() as ChangeProposal).source, "author", "transport attribution still applies to new cookie proposals after recovery");
   });
 
-  it("streams owner-scoped events only for actual manual sync outcomes and closes streams on shutdown", async (t) => {
+  it("keeps owner event streams scoped, rejects retired synchronization, and closes streams on shutdown", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-project-events-"));
     tempDirs.push(staticDir);
-    let syncCount = 0;
-    let observationCount = 0;
-    const store = Object.assign(makeStore(), {
-      async observe() {
-        observationCount += 1;
-        return {
-          snapshot: { ...SNAPSHOT, remoteCommit: observationCount === 1 ? SNAPSHOT.remoteCommit : "b".repeat(40) },
-          checkpointHead: "c".repeat(40), observedAt: new Date().toISOString(), state: "fresh" as const, pending: [],
-        };
-      },
-      async sync() {
-        syncCount += 1;
-        if (syncCount === 2) throw { status: 409, code: "sync_conflict", message: "Remote synchronization failed" };
-        return { branch: "main", head: "b".repeat(40), ahead: 0, behind: 0, dirty: false };
-      },
-    }) as unknown as CoreStore;
+    let forbiddenCalls = 0;
+    const store = Object.assign(makeSnapshotStore().store, {
+      async sync() { forbiddenCalls++; throw Error("Git sync must never be reached"); },
+    });
     const apiServer = await startCustomApi(store, staticDir);
-    let closeCalled = false;
-    t.after(async () => { if (!closeCalled) await apiServer.close(); });
+    let closed = false;
+    t.after(async () => { if (!closed) await apiServer.close(); });
     const owner = await login(apiServer.base);
     const stream = await fetch(`${apiServer.base}/api/projects/events`, { headers: { Cookie: owner.cookie } });
     assert.equal(stream.status, 200);
     assert.match(stream.headers.get("content-type") ?? "", /text\/event-stream/u);
     assert.equal((await fetch(`${apiServer.base}/api/projects/events`)).status, 401);
-
-    const syncRequest = () => fetch(`${apiServer.base}/api/projects/project-1/sync`, {
-      method: "POST",
-      headers: { Cookie: owner.cookie, Origin: apiServer.base },
-    });
-    const completed = await syncRequest();
-    assert.equal(completed.status, 200);
-    const failed = await syncRequest();
-    assert.equal(failed.status, 409);
-
-    const streamReader = stream.body!.getReader();
-    const decoder = new TextDecoder();
-    let frames = "";
-    while (!frames.includes('"phase":"failed"')) {
-      const item = await streamReader.read();
-      if (item.done) break;
-      frames += decoder.decode(item.value, { stream: true });
+    for (const suffix of ["sync", "reconcile", "publish", "checkpoints"]) {
+      const response = await fetch(`${apiServer.base}/api/projects/project-1/${suffix}`, {
+        method: "POST", headers: { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" }, body: "{}",
+      });
+      assert.equal(response.status, 404, `${suffix} must not retain a Git fallback`);
     }
-    const parsed = [...frames.matchAll(/data: (\{[^\n]+\})\n\n/gu)].map((match) => JSON.parse(match[1]!) as {
-      id: string; type: string; projectId: string; reason: string; phase: string; status?: { head: string };
-      observation?: { snapshot: SnapshotId; pendingCount: number }; updated?: boolean; error?: { code: string };
-    });
-    assert.deepEqual(parsed.map(({ phase }) => phase), ["started", "completed", "started", "failed"]);
-    assert.ok(parsed.every((event) => event.type === "project-sync" && event.projectId === "project-1" && event.reason === "manual"));
-    assert.equal(parsed[0]?.id, parsed[1]?.id);
-    assert.equal(parsed[2]?.id, parsed[3]?.id);
-    assert.equal(parsed[1]?.status?.head, "b".repeat(40));
-    assert.equal(parsed[1]?.observation?.snapshot.remoteCommit, "b".repeat(40));
-    assert.equal(parsed[1]?.updated, true);
-    assert.deepEqual(parsed[3]?.error, { code: "sync_conflict", retryable: false });
+    assert.equal(forbiddenCalls, 0);
+    const reader = stream.body!.getReader();
     const shutdownAt = Date.now();
-    await apiServer.close();
-    closeCalled = true;
-    assert.equal((await streamReader.read()).done, true, "shutdown must close the live event stream");
-    assert.ok(Date.now() - shutdownAt < 5_000, "shutdown must not wait indefinitely for event-stream clients");
+    await apiServer.close(); closed = true;
+    assert.equal((await reader.read()).done, true, "shutdown closes the admitted event stream");
+    assert.ok(Date.now() - shutdownAt < 5_000, "shutdown closes owner streams without an indefinite wait");
   });
 
-  it("routes project reconstruction and detachment only through the guarded Core ports", async (t) => {
+
+  it("rejects repository reconstruction and detachment without calling retired Core ports", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-project-management-"));
     tempDirs.push(staticDir);
-    const project = { id: "project-1", url: "https://github.com/owner/work.git", branch: "main" };
-    const reconstructed: string[] = [];
-    const detached: string[] = [];
-    let refuseDetach = true;
-    const store = Object.assign(makeStore(), {
-      async reconstructProject(projectId: string) { reconstructed.push(projectId); return project; },
-      async detachProject(projectId: string) {
-        detached.push(projectId);
-        if (refuseDetach) throw { status: 409, code: "pending_checkpoints", message: "Pending local checkpoint operations block detach" };
-      },
-    }) as unknown as CoreStore;
-    const apiServer = await startCustomApi(store, staticDir);
-    t.after(apiServer.close);
+    let retiredCalls = 0;
+    const store = Object.assign(makeSnapshotStore().store, {
+      async reconstructProject() { retiredCalls++; }, async detachProject() { retiredCalls++; },
+    });
+    const apiServer = await startCustomApi(store, staticDir); t.after(apiServer.close);
     const owner = await login(apiServer.base);
-    const ownerJson = { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" };
-    const ownerMutation = { Cookie: owner.cookie, Origin: apiServer.base };
-
-    const bearerPut = await fetch(`${apiServer.base}/api/projects/project-1`, {
-      method: "PUT", headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify({}),
+    const routeAuthHeaders: Record<string, string>[] = [
+      { Authorization: `Bearer ${ACCESS_TOKEN}` },
+      { Cookie: owner.cookie, Origin: apiServer.base },
+    ];
+    for (const method of ["PUT", "PATCH", "DELETE"]) {
+      for (const auth of routeAuthHeaders) {
+        const response = await fetch(`${apiServer.base}/api/projects/project-1`, {
+          method, headers: { ...auth, ...(method === "DELETE" ? {} : { "Content-Type": "application/json" }) },
+          ...(method !== "DELETE" ? { body: JSON.stringify({ url: "https://github.com/other/repo.git", token: "must-not-echo", autoMerge: true }) } : {}),
+        });
+        const responseText = await response.text();
+        assert.equal(response.status, 404, `${method} /api/projects/project-1 returned ${response.status}: ${responseText}`);
+        assert.equal(responseText.includes("must-not-echo"), false);
+      }
+    }
+    const legacyRegistration = await fetch(`${apiServer.base}/api/projects`, {
+      method: "POST", headers: { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "https://github.com/other/repo.git", token: "must-not-echo" }),
     });
-    assert.equal(bearerPut.status, 403);
-    assert.deepEqual(reconstructed, []);
-
-    const otherUrl = await fetch(`${apiServer.base}/api/projects/project-1`, {
-      method: "PUT", headers: ownerJson, body: JSON.stringify({ repoUrl: "https://github.com/other/repo.git" }),
-    });
-    assert.equal(otherUrl.status, 409);
-    assert.equal((await otherUrl.json() as { code: string }).code, "REGISTER_REPOSITORY_FIRST");
-    assert.deepEqual(reconstructed, [], "mismatched remote URLs must not reach Core reconstruction");
-
-    const credentialInput = await fetch(`${apiServer.base}/api/projects/project-1`, {
-      method: "PUT", headers: ownerJson, body: JSON.stringify({ url: project.url, token: "must-not-echo" }),
-    });
-    const credentialError = await credentialInput.json() as { code: string; error: string };
-    assert.equal(credentialInput.status, 400);
-    assert.equal(credentialError.code, "REGISTER_REPOSITORY_FIRST");
-    assert.equal(credentialError.error.includes("must-not-echo"), false);
-    assert.deepEqual(reconstructed, []);
-
-    const reconstruction = await fetch(`${apiServer.base}/api/projects/project-1`, {
-      method: "PUT", headers: ownerJson, body: JSON.stringify({ url: project.url, branch: "main" }),
-    });
-    assert.equal(reconstruction.status, 200);
-    assert.deepEqual(await reconstruction.json(), { project });
-    assert.deepEqual(reconstructed, ["project-1"]);
-
-    const branchOverride = await fetch(`${apiServer.base}/api/projects/project-1`, {
-      method: "PUT", headers: ownerJson, body: JSON.stringify({ branch: "feature" }),
-    });
-    assert.equal(branchOverride.status, 409);
-    assert.equal((await branchOverride.json() as { code: string }).code, "DEFAULT_BRANCH_MISMATCH");
-
-    const patch = await fetch(`${apiServer.base}/api/projects/project-1`, {
-      method: "PATCH", headers: ownerJson, body: JSON.stringify({ autoMerge: true }),
-    });
-    assert.equal(patch.status, 410);
-    assert.equal((await patch.json() as { code: string }).code, "AUTO_MERGE_RETIRED");
-
-    const bearerDelete = await fetch(`${apiServer.base}/api/projects/project-1`, {
-      method: "DELETE", headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
-    });
-    assert.equal(bearerDelete.status, 403);
-    assert.deepEqual(detached, []);
-
-    const blockedDetach = await fetch(`${apiServer.base}/api/projects/project-1`, { method: "DELETE", headers: ownerMutation });
-    assert.equal(blockedDetach.status, 409);
-    assert.equal((await blockedDetach.json() as { code: string }).code, "pending_checkpoints");
-    refuseDetach = false;
-    const detach = await fetch(`${apiServer.base}/api/projects/project-1`, { method: "DELETE", headers: ownerMutation });
-    assert.equal(detach.status, 204);
-    assert.deepEqual(detached, ["project-1", "project-1"]);
+    assert.equal(legacyRegistration.status, 400);
+    assert.equal((await legacyRegistration.text()).includes("must-not-echo"), false);
+    assert.equal(retiredCalls, 0);
   });
 
-  it("keeps the real Core clone unchanged on URL mismatch and honors its detach guard", async (t) => {
-    const { root, remote } = await makeBareRemote();
-    tempDirs.push(root);
-    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-real-project-"));
-    tempDirs.push(staticDir);
-    const dataDir = resolve(root, "state");
-    const store = new CoreStore({ dataDir, allowLocalRemotes: true });
-    const apiServer = await startCustomApi(store, staticDir);
-    t.after(apiServer.close);
-    const owner = await login(apiServer.base);
-    const headers = { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" };
 
+  it("keeps native PostgreSQL revisions intact when retired Git management requests are attempted", async (t) => {
+    const persistence = await nativePersistence(t);
+    const store = new CoreStore({ persistence });
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-native-project-")); tempDirs.push(staticDir);
+    const apiServer = await startCustomApi(store, staticDir, { persistence }); t.after(apiServer.close);
+    const owner = await login(apiServer.base);
+    const headers = { Cookie: owner.cookie, Origin: apiServer.base };
     const registration = await fetch(`${apiServer.base}/api/projects`, {
-      method: "POST", headers, body: JSON.stringify({ url: remote }),
+      method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ title: "Native project" }),
     });
     assert.equal(registration.status, 201);
-    const project = await registration.json() as { id: string; url: string; branch: string };
-    assert.equal(project.branch, "main");
-    const workspace = resolve(dataDir, "projects", project.id);
-    const originalFile = await readFile(resolve(workspace, "README.md"), "utf8");
-
-    const mismatch = await fetch(`${apiServer.base}/api/projects/${project.id}`, {
-      method: "PUT", headers, body: JSON.stringify({ url: resolve(root, "other.git") }),
-    });
-    assert.equal(mismatch.status, 409);
-    assert.equal((await mismatch.json() as { code: string }).code, "REGISTER_REPOSITORY_FIRST");
-    assert.equal(await readFile(resolve(workspace, "README.md"), "utf8"), originalFile);
-    assert.deepEqual(await store.listProjects(), [project]);
-
-    const reconstructedResponse = await fetch(`${apiServer.base}/api/projects/${project.id}`, {
-      method: "PUT", headers, body: JSON.stringify({ repoUrl: project.url, branch: "main" }),
-    });
-    assert.equal(reconstructedResponse.status, 200);
-    assert.deepEqual(await reconstructedResponse.json(), { project });
-    assert.equal(await readFile(resolve(workspace, "README.md"), "utf8"), originalFile);
-
-    const untrackedPath = resolve(workspace, "api-test-untracked.md");
-    await writeFile(untrackedPath, "uncommitted local content\n", "utf8");
-    const blocked = await fetch(`${apiServer.base}/api/projects/${project.id}`, { method: "DELETE", headers: { Cookie: owner.cookie, Origin: apiServer.base } });
-    assert.equal(blocked.status, 409);
-    assert.equal((await blocked.json() as { code: string }).code, "working_tree_dirty");
-    assert.deepEqual(await store.listProjects(), [project]);
-    await rm(untrackedPath, { force: true });
-
-    const detached = await fetch(`${apiServer.base}/api/projects/${project.id}`, { method: "DELETE", headers: { Cookie: owner.cookie, Origin: apiServer.base } });
-    assert.equal(detached.status, 204);
-    assert.deepEqual(await store.listProjects(), []);
+    const project = await registration.json() as { id: string };
+    const snapshot = (await store.observe(project.id)).snapshot;
+    const operation: ChangeOperation = { id: "retained-native-file", generation: 1, projectId: project.id,
+      baseProjectVersion: snapshot.projectVersion, effect: "metadata", reads: [],
+      writes: [{ path: "meta/retained.md", revision: null, content: "Durable native content\n" }], message: "Native durability" };
+    const proposal = { id: "native-durability-proposal", snapshot, operations: [operation], source: "author" as const };
+    await store.propose(project.id, proposal);
+    await store.approve(project.id, { proposalId: proposal.id, operationIds: [operation.id], authorScope: "owner" });
+    const applied = await store.apply(project.id, operation);
+    for (const [method, suffix] of [["PUT", ""], ["DELETE", ""], ["POST", "/sync"], ["POST", "/publish"]]) {
+      const response = await fetch(`${apiServer.base}/api/projects/${project.id}${suffix}`, {
+        method, headers: { ...headers, ...(method === "DELETE" ? {} : { "Content-Type": "application/json" }) },
+        ...(method !== "DELETE" ? { body: JSON.stringify({ url: "/tmp/forbidden.git" }) } : {}),
+      });
+      assert.equal(response.status, 404, `${method} /api/projects/${project.id}${suffix} returned ${response.status}: ${await response.clone().text()}`);
+    }
+    const reopened = new CoreStore({ persistence });
+    assert.equal((await reopened.observe(project.id)).snapshot.projectVersion, applied.projectVersion);
+    assert.equal((await (await reopened.reader(project.id)).read("meta/retained.md"))?.content, "Durable native content\n");
+    assert.deepEqual(await reopened.apply(project.id, operation), applied, "retry retains operation identity and does not apply twice");
   });
+
 
   it("allows bearer compute under runtime effect limits and host-assigns MCP proposal source", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-effects-"));
@@ -2803,7 +2598,7 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(fixture.proposed.length, 0, "bearer HTTP compute must not reach the proposal coordinator");
 
     const operation: ChangeOperation = {
-      id: "mcp-cookie-operation", generation: 0, repository: SNAPSHOT.repository, baseRemoteCommit: SNAPSHOT.remoteCommit,
+      id: "mcp-cookie-operation", generation: 0, projectId: SNAPSHOT.projectId, baseProjectVersion: SNAPSHOT.projectVersion,
       effect: "metadata", reads: [], writes: [], message: "MCP contribution proposal",
     };
     const owner = await login(apiServer.base);
@@ -2841,12 +2636,13 @@ describe("Codexia HTTP boundary", () => {
     const invoked = await fetch(`${apiServer.base}/api/projects/project-1/actions/publishing.read-core`, {
       method: "POST", headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify({ input: {} }),
     });
-    assert.equal((await invoked.json() as { ok: boolean; data: unknown }).ok, true);
+    const invokedBody = await invoked.json() as { ok: boolean; data: unknown };
+    assert.equal(invokedBody.ok, true, JSON.stringify(invokedBody));
 
     const ownerRoute = await fetch(`${apiServer.base}/api/projects/project-1/modules/publishing/share/secret`);
     assert.equal(ownerRoute.status, 401);
     const owner = await login(apiServer.base);
-    const publicResponse = await fetch(`${apiServer.base}/api/public/repos/123/modules/publishing/share/secret?lang=en`, {
+    const publicResponse = await fetch(`${apiServer.base}/api/public/projects/project-1/modules/publishing/share/secret?lang=en`, {
       headers: {
         Authorization: `Bearer ${ACCESS_TOKEN}`,
         Cookie: owner.cookie,
@@ -2858,7 +2654,7 @@ describe("Codexia HTTP boundary", () => {
     const publicBody = await publicResponse.json() as { path: string; access: string; snapshot: string };
     assert.equal(publicBody.path, "/share/secret");
     assert.equal(publicBody.access, "project-1");
-    assert.equal(publicBody.snapshot, SNAPSHOT.remoteCommit);
+    assert.equal(publicBody.snapshot, SNAPSHOT.projectVersion);
     assert.deepEqual(observed.paths, ["/share/secret"]);
     assert.equal(publicResponse.headers.get("cache-control"), "no-store");
     assert.equal(publicResponse.headers.get("referrer-policy"), "no-referrer");
@@ -3011,30 +2807,23 @@ describe("Codexia HTTP boundary", () => {
     const usageDirectory = resolve(root, "host-history");
     await mkdir(staticDir);
     tempDirs.push(root);
-    const fixture = makeSnapshotStore();
+    const native = await nativeProject(t, "Recent activity primary project");
+    const secondProject = await native.store.createProject({ title: `Recent activity second project ${randomUUID()}` });
     let observeCalls = 0;
-    const identityLookups: string[] = [];
-    const apiStore = Object.assign(fixture.store, {
-      async registeredRepositoryIdentity(projectId: string) {
-        identityLookups.push(projectId);
-        if (projectId === "legacy-project") throw { status: 409, code: "repository_identity_unavailable", message: "Registered repository identity is unavailable" };
-        if (projectId === "unknown-project") throw { status: 404, code: "project_not_found", message: "Project not found" };
-        return SNAPSHOT.repository;
-      },
-      async observe() {
-        observeCalls += 1;
-        throw new Error("simulated unavailable remote observation");
-      },
-    });
-    let apiServer = await startCustomApi(apiStore, staticDir, { usageDirectory });
+    native.store.observe = async () => {
+      observeCalls += 1;
+      throw new Error("simulated unavailable project observation");
+    };
+    let apiServer = await startCustomApi(native.store, staticDir, { usageDirectory, persistence: native.persistence });
     t.after(() => apiServer.close().catch(() => undefined));
     let owner = await login(apiServer.base);
     const ownerJson = { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json" };
 
-    const empty = await fetch(`${apiServer.base}/api/projects/project-1/recent-activity`, { headers: { Cookie: owner.cookie } });
+    const empty = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, { headers: { Cookie: owner.cookie } });
     assert.deepEqual(await empty.json(), { items: [] });
-    assert.equal(observeCalls, 0, "cursor reads use the registered identity without triggering remote observation");
-    const desktopFirst = await fetch(`${apiServer.base}/api/projects/project-1/recent-activity`, {
+    assert.deepEqual(await (await fetch(`${apiServer.base}/api/projects/${secondProject.id}/recent-activity`, { headers: { Cookie: owner.cookie } })).json(), { items: [] });
+    assert.equal(observeCalls, 0, "project activity reads do not require a Core observation");
+    const desktopFirst = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
       method: "PUT", headers: ownerJson,
       body: JSON.stringify({ sceneId: "scene-one", sentenceOffset: 3, pageIndex: 7, deviceType: "desktop" }),
     });
@@ -3042,51 +2831,51 @@ describe("Codexia HTTP boundary", () => {
     const desktopFirstBody = await desktopFirst.json() as { items: Array<{ pageIndex: number | null; deviceType: string }> };
     assert.equal(desktopFirstBody.items[0]?.pageIndex, 7);
 
-    const desktopUpdate = await fetch(`${apiServer.base}/api/projects/project-1/recent-activity`, {
+    const desktopUpdate = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
       method: "PUT", headers: ownerJson,
       body: JSON.stringify({ sceneId: "scene-two", sentenceOffset: null, deviceType: "desktop" }),
     });
     const desktopUpdateBody = await desktopUpdate.json() as { items: Array<{ pageIndex: number | null; deviceType: string }> };
     assert.equal(desktopUpdateBody.items.find((item) => item.deviceType === "desktop")?.pageIndex, 7);
-    const mobileUpdate = await fetch(`${apiServer.base}/api/projects/project-1/recent-activity`, {
+    const mobileUpdate = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
       method: "PUT", headers: ownerJson,
       body: JSON.stringify({ sceneId: "scene-mobile", sentenceOffset: 1, pageIndex: null, deviceType: "mobile" }),
     });
     assert.equal((await mobileUpdate.json() as { items: unknown[] }).items.length, 2);
+    const secondProjectActivity = await fetch(`${apiServer.base}/api/projects/${secondProject.id}/recent-activity`, {
+      method: "PUT", headers: ownerJson,
+      body: JSON.stringify({ sceneId: "second-project-scene", sentenceOffset: 2, deviceType: "desktop" }),
+    });
+    assert.equal((await secondProjectActivity.json() as { items: unknown[] }).items.length, 1);
 
-    const bearerRead = await fetch(`${apiServer.base}/api/projects/project-1/recent-activity`, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
+    const bearerRead = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } });
     assert.equal(bearerRead.status, 403, "recent activity is owner-cookie state, not bearer project data");
-    const crossOriginWrite = await fetch(`${apiServer.base}/api/projects/project-1/recent-activity`, {
+    const crossOriginWrite = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
       method: "PUT", headers: { ...ownerJson, Origin: "https://foreign.example" },
       body: JSON.stringify({ sceneId: "foreign", sentenceOffset: 0, deviceType: "mobile" }),
     });
     assert.equal(crossOriginWrite.status, 403);
-    const malformed = await fetch(`${apiServer.base}/api/projects/project-1/recent-activity`, {
+    const malformed = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
       method: "PUT", headers: ownerJson,
       body: JSON.stringify({ sceneId: "scene-one", sentenceOffset: 0.5, deviceType: "desktop" }),
     });
     assert.equal(malformed.status, 400);
-    assert.equal(observeCalls, 0, "cursor writes do not depend on remote availability");
-    assert.deepEqual(identityLookups, ["project-1", "project-1", "project-1", "project-1", "project-1"]);
-    const legacyIdentity = await fetch(`${apiServer.base}/api/projects/legacy-project/recent-activity`, { headers: { Cookie: owner.cookie } });
-    assert.equal(legacyIdentity.status, 409);
-    assert.equal((await legacyIdentity.json() as { code: string }).code, "repository_identity_unavailable");
-    const unknownProject = await fetch(`${apiServer.base}/api/projects/unknown-project/recent-activity`, { headers: { Cookie: owner.cookie } });
-    assert.equal(unknownProject.status, 404);
-    assert.equal((await unknownProject.json() as { code: string }).code, "project_not_found");
-    assert.deepEqual(identityLookups.slice(-2), ["legacy-project", "unknown-project"]);
+    assert.equal(observeCalls, 0, "cursor writes do not depend on project observation availability");
 
     await apiServer.close();
-    apiServer = await startCustomApi(apiStore, staticDir, { usageDirectory });
+    apiServer = await startCustomApi(native.store, staticDir, { usageDirectory, persistence: native.persistence });
     owner = await login(apiServer.base);
     observeCalls = 0;
-    const afterRestart = await fetch(`${apiServer.base}/api/projects/project-1/recent-activity`, { headers: { Cookie: owner.cookie } });
+    const afterRestart = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, { headers: { Cookie: owner.cookie } });
     const restored = await afterRestart.json() as { items: Array<{ sceneId: string; pageIndex: number | null; deviceType: string }> };
     assert.equal(restored.items.length, 2);
     assert.equal(restored.items.find((item) => item.deviceType === "desktop")?.sceneId, "scene-two");
     assert.equal(restored.items.find((item) => item.deviceType === "desktop")?.pageIndex, 7);
     assert.equal(restored.items.find((item) => item.deviceType === "mobile")?.sceneId, "scene-mobile");
-    assert.equal(observeCalls, 0, "persisted cursors remain available while remote observation is unavailable after restart");
+    assert.equal(observeCalls, 0, "persisted cursors remain available while Core observation is unavailable after restart");
+    const secondAfterRestart = await fetch(`${apiServer.base}/api/projects/${secondProject.id}/recent-activity`, { headers: { Cookie: owner.cookie } });
+    const secondRestored = await secondAfterRestart.json() as { items: Array<{ sceneId: string }> };
+    assert.deepEqual(secondRestored.items.map((item) => item.sceneId), ["second-project-scene"], "recent activity stays scoped to its PostgreSQL project identity");
   });
 });
 

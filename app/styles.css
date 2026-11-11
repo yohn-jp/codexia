@@ -440,3 +440,15 @@ rt { color: var(--ruby-muted); font-size: 0.55em; }
   .pg-editor-actions { display: grid; grid-template-columns: 1fr 1fr; }
   .pg-editor-actions button:last-child { grid-column: 1 / -1; }
 }
+
+/* Shared shells retain their own viewport and panel scrolling. */
+.pg-shell { padding: 0; }
+.pg-shell .pg-editor-column { width: 100%; }
+.pg-shell .pg-library, .pg-shell .pg-knowledge { padding: 0.75rem; }
+.pg-shell .pg-editor { border: 0; border-radius: 0; }
+.pg-shell .pg-editor .cm-content {
+  font-family: var(--editor-font-family, var(--manuscript-serif));
+  font-size: var(--editor-font-size, 1.05rem);
+  line-height: var(--editor-line-height, 1.9);
+  letter-spacing: var(--editor-letter-spacing, normal);
+}
