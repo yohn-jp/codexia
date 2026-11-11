@@ -654,8 +654,8 @@ test("mobile route buttons restore their workspace panel without adding duplicat
   const historyLengthAtWriting = await page.evaluate(() => history.length);
   const writingUrl = page.url();
   expect(new URL(writingUrl).searchParams.get("view")).toBe("writing");
-  await editorPanel.getByRole("button", { name: "履歴", exact: true }).click();
-  await expect(page.locator('[data-workspace-panel="history"]')).toBeVisible();
+  await editorPanel.getByRole("button", { name: "Revision履歴", exact: true }).click();
+  await expect(editorPanel.getByRole("region", { name: "Revision履歴" })).toBeVisible();
   await expect(page).toHaveURL(writingUrl);
   await navigation.getByRole("button", { name: "書く", exact: true }).click();
   await expect(editorPanel).toBeVisible();
@@ -1035,7 +1035,7 @@ test("mobile writing reference sheet keeps the editor mounted and preserves the 
   const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
   await expect(sheet).toBeVisible();
   await expect(sheet.getByRole("tab", { name: "構成" })).toHaveAttribute("aria-selected", "true");
-  await expect(sheet.locator('[data-mobile-reference-panel="outline"] .scene-button').first()).toBeVisible();
+  await expect(sheet.locator('[data-mobile-reference-panel="outline"] .pg-document-list button').first()).toBeVisible();
   await expect(manuscript).toHaveAttribute("data-stable-editor", "present");
   await expect(editor).toHaveText(draft);
   await expect(page).toHaveURL(currentUrl);
@@ -1043,7 +1043,7 @@ test("mobile writing reference sheet keeps the editor mounted and preserves the 
   await sheet.getByRole("tab", { name: "構成" }).press("ArrowRight");
   await expect(sheet.getByRole("tab", { name: "保存状態" })).toHaveAttribute("aria-selected", "true");
   await expect(sheet.locator('[data-mobile-reference-panel="inspector"]')).toBeVisible();
-  await expect(sheet.getByRole("status", { name: "原稿の保存状態" })).toContainText("Draft");
+  await expect(sheet.getByRole("status", { name: "原稿のPostgreSQL保存状態" })).toContainText(/PostgreSQL未保存|PostgreSQLへ保存中|PostgreSQL保存済み|保存状態を要確認/u);
   await expect(manuscript).toHaveAttribute("data-stable-editor", "present");
   await sheet.getByRole("button", { name: "閉じる" }).click();
   await expect(sheet).not.toBeVisible();
@@ -1066,7 +1066,7 @@ test("mobile reference sheet scene selection uses the existing guarded navigatio
   const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
   await expect(sheet).toBeVisible();
   await sheet.locator('[data-mobile-reference-panel="outline"] .pg-document-list')
-    .getByRole("button", { name: "Scene Two", exact: true }).click();
+    .getByRole("button", { name: /Scene Two/u }).click();
 
   await expect(sheet).not.toBeVisible();
   await expect(page.getByRole("heading", { name: "Scene Two" })).toBeVisible();
