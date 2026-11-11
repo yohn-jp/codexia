@@ -168,6 +168,10 @@ test("writing UI protects multiple document drafts separately from PostgreSQL re
   const f = await fixture(page); const gate = await holdSaves(page, f);
   try {
     await editor(page).fill("Scene One protected draft.");
+    // Establish the exact durable recovery record and an in-flight, unacknowledged
+    // PostgreSQL save before switching documents.
+    await expect.poll(async () => (await drafts(page)).some((d) => d.documentId === f.one.document.id && d.markdown === "Scene One protected draft.")).toBe(true);
+    await gate.seen;
     await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
     await editor(page).fill("Scene Two independent draft.");
     await expect.poll(async () => (await drafts(page)).some((d) => d.documentId === f.one.document.id && d.markdown === "Scene One protected draft.")).toBe(true);
