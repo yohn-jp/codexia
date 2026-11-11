@@ -184,3 +184,19 @@ test("partial approvals preserve each actor in immutable PostgreSQL revisions", 
     assert.equal(revision?.authorId, expectedAuthor);
   }
 });
+
+
+test("re-approving an already applied proposal does not regress its durable status", async () => {
+  const p = await project();
+  const snapshot = (await core.reader(p.id)).snapshot;
+  const op = operation(snapshot, "bible/reapproval.yaml", "preserved");
+  const proposal: ChangeProposal = { id: randomUUID(), snapshot, operations: [op], source: "author" };
+  await core.propose(p.id, proposal);
+  await core.approve(p.id, { proposalId: proposal.id, operationIds: [op.id], authorScope: "owner" });
+  const receipt = await core.apply(p.id, op);
+  await core.approve(p.id, { proposalId: proposal.id, operationIds: [op.id], authorScope: "owner" });
+  const after = await core.getProposal(p.id, proposal.id);
+  assert.equal(after?.state, "applied");
+  assert.deepEqual(after?.applications, [receipt]);
+  assert.equal(after?.approvedByOperationId?.[op.id], "owner");
+});
