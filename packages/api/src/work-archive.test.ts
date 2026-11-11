@@ -36,6 +36,7 @@ test("a portable work round trip reconstitutes manuscript, hierarchy, knowledge,
     await tx.saveAssertion({ projectId, id: assertionId, proposition: { text: "東京は都市" }, modality: "stated", perspective: "narrator", narrativeTime: {}, confidence: 1, status: "confirmed", expectedVersion: null });
     await tx.linkAssertionEvidence({ projectId, assertionId, evidenceId, role: "supports" });
     await tx.saveModuleRecord({ projectId, moduleId: "story", key: "character-corrections", value: { editorNote: "保持" }, expectedVersion: null });
+    await tx.saveModuleRecord({ projectId, moduleId: "assistant", key: "settings", value: { provider: "local", credentials: { apiKey: "private-api-key" } }, expectedVersion: null });
     await tx.saveModuleRecord({ projectId, moduleId: "core.artifacts", key: "meta/scriptorium/modules/publishing/share-grants.jsonl", value: { content: "sensitive-grant" }, expectedVersion: null });
     await tx.saveModuleRecord({ projectId, moduleId: "core.authority.proposals", key: "proposal:private", value: { draft: "not portable" }, expectedVersion: null });
   });
@@ -48,9 +49,12 @@ test("a portable work round trip reconstitutes manuscript, hierarchy, knowledge,
   assert.ok(archive.omittedRecords.some((item) => item.includes("share-grants")));
   assert.equal(JSON.stringify(archive).includes("sensitive-grant"), false);
   assert.equal(JSON.stringify(archive).includes("not portable"), false);
+  assert.equal(JSON.stringify(archive).includes("private-api-key"), false);
+  assert.ok(archive.omittedRecords.some((item) => item.includes("assistant:settings")));
   const result = await importWorkArchive(persistence, archive, "owner");
   assert.equal(result.replayed, false);
   assert.notEqual(result.project.id, projectId);
+  assert.deepEqual(result.project, await persistence.read((reader) => reader.getProject(result.project.id)), "import response must expose the committed version");
   const repeat = await importWorkArchive(persistence, archive, "owner");
   assert.equal(repeat.replayed, true);
   assert.equal(repeat.project.id, result.project.id);
