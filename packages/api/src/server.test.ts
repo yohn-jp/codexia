@@ -1232,15 +1232,17 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(!shell.headers.get("content-security-policy")?.includes("script-src 'unsafe-inline'"));
     const nextShell = await fetch(`${apiServer.base}/`);
     assert.notEqual(nextShell.headers.get("content-security-policy"), shell.headers.get("content-security-policy"));
-    const publicReader = await fetch(`${apiServer.base}/r/publishing/123/e2e-invalid-token`);
+    const publicProjectId = randomUUID();
+    const publicReader = await fetch(`${apiServer.base}/r/publishing/${publicProjectId}/e2e-invalid-token`);
     assert.equal(publicReader.status, 200, "a structurally valid public reader URL must load the SPA before token validation");
     assert.match(publicReader.headers.get("content-type") ?? "", /text\/html/u);
     assert.equal(publicReader.headers.get("referrer-policy"), "no-referrer");
     assert.equal(publicReader.headers.get("x-robots-tag"), "noindex, nofollow");
     assert.match(await publicReader.text(), /Codexia/u);
-    assert.equal((await fetch(`${apiServer.base}/r/unknown/123/e2e-invalid-token`)).status, 404);
+    assert.equal((await fetch(`${apiServer.base}/r/unknown/${publicProjectId}/e2e-invalid-token`)).status, 404);
     assert.equal((await fetch(`${apiServer.base}/r/publishing/not-numeric/e2e-invalid-token`)).status, 404);
-    assert.equal((await fetch(`${apiServer.base}/r/publishing/123/e2e-invalid-token/extra`)).status, 404);
+    assert.equal((await fetch(`${apiServer.base}/r/publishing/${publicProjectId}/e2e-invalid-token/extra`)).status, 404);
+    assert.equal((await fetch(`${apiServer.base}/r/publishing/123/e2e-invalid-token`)).status, 404);
     const owner = await login(apiServer.base);
     assert.equal((await fetch(`${apiServer.base}/api/no-such-route`, { headers: { Cookie: owner.cookie } })).status, 404,
       "the SPA fallback must not turn missing API routes into index.html");
