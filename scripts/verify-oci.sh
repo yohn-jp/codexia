@@ -44,6 +44,8 @@ cleanup() {
   "$engine" network rm "$verification_network" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
+# Preserve the failing command location without logging secret-bearing arguments.
+trap 'status=$?; printf "OCI verification failed at line %s (exit %s)\\n" "$LINENO" "$status" >&2; "$engine" ps --all --filter "name=$database_container" --filter "name=$container" >&2 || true' ERR
 
 if [[ "${engine##*/}" == podman ]]; then
   "$engine" build --format oci --pull --build-arg "PROFILE=$profile" --tag "$image" .
