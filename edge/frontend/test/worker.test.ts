@@ -12,9 +12,13 @@ test("only known Codexia UI shells and supported assets are served", () => {
   assert.deepEqual(classify(request("/mobile/settings/")), {
     kind: "index", assetPath: "/mobile/index.html", reader: false,
   });
-  assert.deepEqual(classify(request("/r/story/123/reader")), {
+  assert.deepEqual(classify(request("/r/story/123e4567-e89b-12d3-a456-426614174000/reader")), {
     kind: "index", assetPath: "/index.html", reader: true,
   });
+  assert.deepEqual(classify(request("/r/publishing/123e4567-e89b-12d3-a456-426614174000/share_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")), {
+    kind: "index", assetPath: "/index.html", reader: true,
+  });
+  assert.deepEqual(classify(request("/r/story/123/reader")), { kind: "not-found" });
   assert.deepEqual(classify(request("/desktop/assets/main-a1b2c3d4.js")), { kind: "asset" });
   assert.deepEqual(classify(request("/assets/missing.js")), { kind: "asset" });
 });
