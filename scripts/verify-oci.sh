@@ -57,10 +57,12 @@ fi
   --env POSTGRES_USER=codexia --env POSTGRES_DB=codexia_verify --env "POSTGRES_PASSWORD=$database_password" \
   docker.io/library/postgres:17-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
 for attempt in $(seq 1 40); do
-  if "$engine" exec "$database_container" pg_isready -U codexia -d codexia_verify >/dev/null 2>&1; then break; fi
+  # Postgres initialization briefly starts a Unix-socket-only temporary server.
+  # Require TCP readiness so this probe cannot pass before the final server starts.
+  if "$engine" exec "$database_container" pg_isready -h 127.0.0.1 -U codexia -d codexia_verify >/dev/null 2>&1; then break; fi
   sleep 0.5
 done
-"$engine" exec "$database_container" pg_isready -U codexia -d codexia_verify >/dev/null
+"$engine" exec "$database_container" pg_isready -h 127.0.0.1 -U codexia -d codexia_verify >/dev/null
 "$engine" run --detach \
   --name "$container" \
   --network "$verification_network" \
