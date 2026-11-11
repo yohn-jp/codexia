@@ -538,6 +538,18 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows.map(mapKnowledgeNode);
   }
 
+  async listAllKnowledgeNodes(projectId: ProjectId, limit = 1000): Promise<readonly KnowledgeNode[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Archive knowledge page size must be between 1 and 1000");
+    const result = await this.query("SELECT * FROM knowledge_node WHERE project_id = $1 ORDER BY id LIMIT $2", [projectId, limit]);
+    return result.rows.map(mapKnowledgeNode);
+  }
+
+  async listAssertions(projectId: ProjectId, limit = 1000): Promise<readonly Assertion[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Archive assertion page size must be between 1 and 1000");
+    const result = await this.query("SELECT * FROM assertion WHERE project_id = $1 ORDER BY id LIMIT $2", [projectId, limit]);
+    return result.rows.map(mapAssertion);
+  }
+
   async listKnowledgeAliases(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<readonly KnowledgeAlias[]> {
     const result = await this.query(
       "SELECT * FROM knowledge_alias WHERE project_id = $1 AND node_id = $2 ORDER BY normalized, id",
