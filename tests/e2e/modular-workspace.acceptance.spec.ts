@@ -382,17 +382,16 @@ async function seedTermRegistry(page: Page, fixture: WorkspaceFixture): Promise<
 async function openFixtureScene(page: Page, mode: "desktop" | "mobile", sceneIndex = 0, seedTerms = false): Promise<WorkspaceFixture> {
   const fixture = await createWorkspaceFixture(page);
   if (seedTerms) await seedTermRegistry(page, fixture);
-  await page.reload();
-  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
-  if (mode === "mobile") {
-    await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "作品", exact: true }).click();
-  }
-  await page.getByLabel("開く作品").selectOption(fixture.project.id);
   const scene = fixture.scenes[sceneIndex];
   expect(scene).toBeTruthy();
-  await page.locator(".pg-document-list").getByRole("button", { name: new RegExp(scene!.document.title) }).click();
+  // Select by canonical project/document IDs. Several fixtures use the same
+  // visible "Scene One" title; a stale prior project can otherwise satisfy
+  // the heading check before asynchronous guarded navigation commits.
+  const route = `/${mode}/projects/${fixture.project.id}/scenes/${scene!.document.id}${mode === "mobile" ? "?view=writing" : ""}`;
+  await page.goto(route);
+  await expect(page).toHaveURL(new RegExp(`/${mode}/projects/${fixture.project.id}/scenes/${scene!.document.id}`));
+  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   if (mode === "mobile") {
-    await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "書く", exact: true }).click();
     await page.getByRole("tablist", { name: "Workspace panels" }).getByRole("tab", { name: "原稿", exact: true }).click();
   }
   fixture.scene = scene!;
