@@ -173,6 +173,9 @@ test("writing UI protects multiple document drafts separately from PostgreSQL re
     await expect.poll(async () => (await drafts(page)).some((d) => d.documentId === f.one.document.id && d.markdown === "Scene One protected draft.")).toBe(true);
     await gate.seen;
     await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+    // The guarded selection is asynchronous: do not type until Scene Two owns
+    // the mounted editor, otherwise the test edits Scene One again.
+    await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
     await editor(page).fill("Scene Two independent draft.");
     await expect.poll(async () => {
       const records = await drafts(page);
