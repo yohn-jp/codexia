@@ -987,6 +987,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     }
     if (!target) throw new Error("この作品の文書が見つかりません。");
     if (!await selectDocument(target.id)) throw new Error("回復JournalまたはIMEを確認できないため、参照先を開けませんでした。");
+    // Search and terminology may be shown in another workspace tab. Reveal the
+    // selected manuscript through the existing guarded panel request path.
+    setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
   }, [documents, moduleSnapshot, projectId, selectDocument]);
   const handleTermNavigate = useCallback((path: string) => {
     void navigateReference(path).catch((error) => setPageError(error instanceof Error ? error.message : "参照を開けませんでした。"));
