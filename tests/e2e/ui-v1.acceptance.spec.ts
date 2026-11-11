@@ -77,11 +77,13 @@ test("legacy draft import retains the confirmed PostgreSQL revision and creates 
 test("legacy draft import preserves input after its strict journal write fails", async ({ page }) => {
   await createWritingFixture(page); const original = await editor(page).innerText(); await seedLegacy(page); await previewLegacy(page); await denyWrites(page, true);
   await page.getByRole("button", { name: "この文書へ取り込む" }).click();
+  // Import is asynchronous. Keep the synthetic IndexedDB failure enabled until
+  // the application confirms the failed durable write; otherwise the pending
+  // write succeeds after denyWrites(false), silently removing the source.
+  await expect(page.locator("details.pg-legacy-import").getByRole("status"))
+    .toContainText("Browser storage is full");
   await expectMarkdown(page, original); expect(await sourceExists(page)).toBe(true);
   await denyWrites(page, false);
-  // A guarded failure can remount the target and invalidate the old preview.
-  // Re-read the retained source before explicitly retrying the import.
-  await previewLegacy(page);
   await page.getByRole("button", { name: "この文書へ取り込む" }).click();
   await expect(editor(page)).toHaveText("旧記録の日本語原稿😀");
 });
