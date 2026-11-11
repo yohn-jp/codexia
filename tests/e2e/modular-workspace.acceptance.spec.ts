@@ -909,7 +909,8 @@ test("full profile exposes optional lexical search and terminology without chang
   await termsPanel.getByRole("button", { name: "用語「Beacon Quay」の参照先を開く", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Scene Two" })).toBeVisible();
 
-  await page.locator(".pg-document-list").getByRole("button", { name: "Scene One", exact: true }).click();
+  await page.getByRole("tablist", { name: "Panel tabs" }).getByRole("tab", { name: "作品と構成", exact: true }).click();
+  await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/u }).click();
   await expect(page.getByRole("heading", { name: "Scene One" })).toBeVisible();
   await page.getByRole("button", { name: "読む", exact: true }).click();
   const termLink = page.getByRole("button", { name: "Beacon Quay、用語を開く", exact: true });
