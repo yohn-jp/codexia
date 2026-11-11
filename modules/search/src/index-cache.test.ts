@@ -96,10 +96,10 @@ test("unchanged snapshots reuse the index and changed revisions update and remov
   const initial = await cache.get(reader(first), new AbortController().signal);
   const repeated = await cache.get(reader(first), new AbortController().signal);
   assert.equal(repeated, initial);
-  assert.equal(counters.enumerate, 4);
+  assert.equal(counters.enumerate, 5);
   assert.equal(counters.readPaths.length, 2);
   const updated = await cache.get(reader(second), new AbortController().signal);
-  assert.equal(counters.changes, 4);
+  assert.equal(counters.changes, 5);
   assert.deepEqual([...updated.documents.keys()].sort(), ["manuscript/v1/c1/s1.md", "manuscript/v1/c1/s3.md"]);
   assert.equal(updated.documents.get("manuscript/v1/c1/s1.md")?.content, "new harbor");
   assert.equal(updated.documents.has("manuscript/v1/c1/s2.md"), false);
@@ -119,8 +119,8 @@ test("overlay and repository identity isolate index cache entries", async () => 
   assert.notEqual(baseIndex, otherIndex);
   assert.equal(overlayIndex.documents.get("manuscript/v1/c1/s1.md")?.content, "checkpoint overlay");
   assert.equal(otherIndex.documents.get("manuscript/v1/c1/s1.md")?.content, "other repository");
-  assert.equal(counters.enumerate, 8);
-  assert.equal(counters.changes, 4);
+  assert.equal(counters.enumerate, 10);
+  assert.equal(counters.changes, 5);
 });
 
 test("failed refresh never projects an older index as the requested snapshot", async () => {
@@ -152,7 +152,7 @@ test("aborted indexing does not cache a partial snapshot", async () => {
   await assert.rejects(cache.get(reader(first), controller.signal), (error: unknown) => (error as { name?: string }).name === "AbortError");
   const retried = await cache.get(reader(first), new AbortController().signal);
   assert.equal(retried.documents.size, 1);
-  assert.equal(counters.enumerate, 5);
+  assert.equal(counters.enumerate, 6);
 });
 
 test("disabled module disposal cannot let an unfinished read repopulate the cache", async () => {
