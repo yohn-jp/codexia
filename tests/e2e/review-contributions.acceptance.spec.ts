@@ -199,7 +199,10 @@ test("full profile renders Story and Speaker review queues and turns both author
     expect(zukanStatus.applications).toEqual([]);
     expect(zukanStatus.appliedOperationIds).toEqual([]);
     expect(zukanStatus.proposal.operations[0]?.writes.map((write) => write.path)).toContain(zukanPath);
-    await expect(zukanPanel.getByText("A review proposal is pending apply; this suggestion remains pending in the selected snapshot.")).toBeVisible();
+    // A profile refresh may remount the module and clear its transient notice.
+    // The proposal must still leave the canonical suggestion pending until approval.
+    await expect(zukanPanel.getByText("1 pending suggestion(s)")).toBeVisible();
+    await expect(zukanPanel.getByText("Akari collects old maps.")).toBeVisible();
 
     const speakerQueueResponse = page.waitForResponse((response) => actionResponse(response, "speaker.review.queue"), { timeout: 120_000 });
     const speakerPanel = await openWorkspaceContributionPanel(page, "speaker.review", "話者確認キュー");
