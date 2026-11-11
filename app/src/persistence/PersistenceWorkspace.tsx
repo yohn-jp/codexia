@@ -147,6 +147,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const transitionErrorRef = useRef("");
   const clientIdRef = useRef("");
   const openSequenceRef = useRef(0);
+  const selectionIntentRef = useRef(0);
   const panelRequestSequenceRef = useRef(0);
   const [resumeEpoch, setResumeEpoch] = useState(0);
   const [legacyImportBusy, setLegacyImportBusy] = useState(false);
@@ -608,8 +609,13 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   }, [persistDraft, publishEditor, resume.flush]);
 
   const selectDocument = useCallback(async (nextId: string): Promise<boolean> => {
-    if (nextId === documentId) return true;
+    // Navigation preflight is asynchronous. Only the latest requested selection
+    // may publish a document, even when an earlier request finishes later.
+    const intent = ++selectionIntentRef.current;
+    if (nextId === documentId && selectionRef.current?.documentId === nextId &&
+        activeRef.current?.document.id === nextId) return true;
     if (!await protectTransition()) return false;
+    if (intent !== selectionIntentRef.current) return false;
     openSequenceRef.current += 1;
     publishEditor(null);
     selectionRef.current = { projectId, documentId: nextId };
