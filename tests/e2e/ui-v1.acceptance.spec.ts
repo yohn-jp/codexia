@@ -10,7 +10,10 @@ async function seedLegacy(page: Page, text = "旧記録の日本語原稿😀") 
   await page.evaluate(({ key, text }) => localStorage.setItem(key, JSON.stringify({ version: 1, projectId: "legacy-project", sceneId: "legacy-scene", text, revision: "old-revision", savedAt: Date.now() })), { key: legacyKey, text });
 }
 async function previewLegacy(page: Page) {
-  await page.getByText("旧ブラウザーDraftの回復", { exact: true }).click();
+  const section = page.locator("details.pg-legacy-import");
+  if (!await section.evaluate((element) => (element as HTMLDetailsElement).open)) {
+    await section.locator("summary").click();
+  }
   await page.getByRole("button", { name: "旧Draftを確認", exact: true }).click();
   await page.getByRole("button", { name: "legacy-project / legacy-scene", exact: true }).click();
   await expect(page.getByRole("region", { name: "旧Draftのプレビュー" })).toBeVisible();
@@ -76,6 +79,9 @@ test("legacy draft import preserves input after its strict journal write fails",
   await page.getByRole("button", { name: "この文書へ取り込む" }).click();
   await expectMarkdown(page, original); expect(await sourceExists(page)).toBe(true);
   await denyWrites(page, false);
+  // A guarded failure can remount the target and invalidate the old preview.
+  // Re-read the retained source before explicitly retrying the import.
+  await previewLegacy(page);
   await page.getByRole("button", { name: "この文書へ取り込む" }).click();
   await expect(editor(page)).toHaveText("旧記録の日本語原稿😀");
 });
