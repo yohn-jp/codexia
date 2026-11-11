@@ -174,7 +174,11 @@ test("writing UI protects multiple document drafts separately from PostgreSQL re
     await gate.seen;
     await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
     await editor(page).fill("Scene Two independent draft.");
-    await expect.poll(async () => (await drafts(page)).some((d) => d.documentId === f.one.document.id && d.markdown === "Scene One protected draft.")).toBe(true);
+    await expect.poll(async () => {
+      const records = await drafts(page);
+      return records.find((entry) => entry.documentId === f.one.document.id)?.markdown
+        ?? `Missing Scene One draft (present: ${records.map((entry) => entry.documentId).join(", ")})`;
+    }).toBe("Scene One protected draft.");
     await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
     await expectEditor(page, "Scene One protected draft.");
   } finally { gate.release(); }
