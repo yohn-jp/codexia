@@ -203,7 +203,8 @@ test("full profile renders Story and Speaker review queues and turns both author
     const zukanStatus = await readProposalStatus(page, project.id, zukanProposalId!);
     expect(zukanStatus.state).toBe("proposed");
     expect(zukanStatus.approvedOperationIds).toEqual([]);
-    expect(zukanStatus.checkpoints).toEqual([]);
+    expect(zukanStatus.applications).toEqual([]);
+    expect(zukanStatus.appliedOperationIds).toEqual([]);
     expect(zukanStatus.proposal.operations[0]?.writes.map((write) => write.path)).toContain(zukanPath);
     await expect(zukanPanel.getByText("A review proposal is pending checkpoint; this suggestion remains pending in the selected snapshot.")).toBeVisible();
 
@@ -235,7 +236,8 @@ test("full profile renders Story and Speaker review queues and turns both author
     const speakerStatus = await readProposalStatus(page, project.id, speakerProposalId!);
     expect(speakerStatus.state).toBe("proposed");
     expect(speakerStatus.approvedOperationIds).toEqual([]);
-    expect(speakerStatus.checkpoints).toEqual([]);
+    expect(speakerStatus.applications).toEqual([]);
+    expect(speakerStatus.appliedOperationIds).toEqual([]);
     expect(speakerStatus.proposal.operations[0]?.writes.map((write) => write.path)).toEqual(expect.arrayContaining([
       scenePath,
       "meta/scriptorium/modules/speaker/corrections.jsonl",
@@ -265,18 +267,19 @@ test("full profile renders Story and Speaker review queues and turns both author
     const mobileSpeakerCard = page.locator(".proposal-card").filter({ hasText: speakerProposalId! });
     await expect(mobileZukanCard).toContainText("承認待ち");
     await expect(mobileSpeakerCard).toContainText("承認待ち");
-    await mobileZukanCard.getByRole("button", { name: "承認して Checkpoint" }).click();
-    await expect(mobileZukanCard).toContainText("ローカル Checkpoint 済み");
+    await mobileZukanCard.getByRole("button", { name: "承認して PostgreSQL Revision" }).click();
+    await expect(mobileZukanCard).toContainText("PostgreSQL 保存済み");
     const mobileApprovedZukanStatus = await readProposalStatus(page, project.id, zukanProposalId!);
     const mobileZukanOperationIds = zukanProposalResult.proposals?.[0]?.operations.map((operation) => operation.id) ?? [];
     expect(mobileApprovedZukanStatus.approvedOperationIds).toEqual(mobileZukanOperationIds);
-    expect(mobileApprovedZukanStatus.checkpoints).toHaveLength(mobileZukanOperationIds.length);
+    expect(mobileApprovedZukanStatus.appliedOperationIds).toEqual(mobileZukanOperationIds);
+    expect(mobileApprovedZukanStatus.applications).toHaveLength(mobileZukanOperationIds.length);
 
     await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "設定", exact: true }).click();
     await page.getByRole("button", { name: "Desktop版へ切り替え" }).click();
     await expect(page).toHaveURL(new RegExp("/desktop/projects/" + encodeURIComponent(project.id) + "/scenes/scene-review"));
     await openWorkspaceReviewPanel(page);
-    await expect(page.locator(".proposal-card").filter({ hasText: zukanProposalId! })).toContainText("ローカル Checkpoint 済み");
+    await expect(page.locator(".proposal-card").filter({ hasText: zukanProposalId! })).toContainText("PostgreSQL 保存済み");
     await expect(page.locator(".proposal-card").filter({ hasText: speakerProposalId! })).toContainText("承認待ち");
     const finalSnapshotResponse = await page.request.get(`${origin}/api/projects/${encodeURIComponent(project.id)}/snapshot`);
     expect(finalSnapshotResponse.ok(), await finalSnapshotResponse.text()).toBe(true);
