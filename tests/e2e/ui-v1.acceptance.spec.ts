@@ -120,20 +120,14 @@ test("recovery retry after pagehide retains its exact PostgreSQL draft", async (
 test("both production Shells preserve recoverable Japanese drafts and the Mobile writing and reading flow", async ({ page }) => {
   for (const mode of ["desktop", "mobile"] as const) {
     await page.setViewportSize({ width: mode === "mobile" ? 390 : 1280, height: 900 });
-    await createWritingFixture(page, mode);
+    const { project, scene } = await createWritingFixture(page, mode);
     const text = "東京《とうきょう》へ向かう。\n日本語😀の本文。";
     await editor(page).fill(text);
     await expectMarkdown(page, text);
     // "Saved" can reflect the previous revision. The reader must open only
     // after this exact manuscript is durable in PostgreSQL.
-    const currentProjectId = await page.getByLabel("開く作品").inputValue();
-    const documentResponse = await page.request.get(`/api/v1/persistence/projects/${currentProjectId}/documents`);
-    expect(documentResponse.ok()).toBe(true);
-    const currentDocuments = (await documentResponse.json() as { documents: Array<{ id: string; title: string }> }).documents;
-    const currentDocumentId = currentDocuments.find((document) => document.title === "日本語の原稿")?.id;
-    expect(currentDocumentId).toBeTruthy();
     await expect.poll(async () => {
-      const response = await page.request.get(`/api/v1/persistence/projects/${currentProjectId}/documents/${currentDocumentId}`);
+      const response = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}`);
       return response.ok() ? ((await response.json()) as { revision: { markdown: string } }).revision.markdown : "";
     }).toBe(text);
     await page.getByRole("button", { name: "読む", exact: true }).click();
