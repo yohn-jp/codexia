@@ -481,7 +481,10 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
         </IonContent>
 
         <div className="mobile-shell-status" role="region" aria-label="保存と回復の状態">
-          {renderStatus ? renderStatus(switchError) : status}
+          {renderStatus ? renderStatus(switchError) : <>
+            {switchError && <p className="mobile-shell-switch-error" role="alert">{switchError}</p>}
+            {status}
+          </>}
         </div>
         <IonFooter className="mobile-shell-footer">
           {hasWritingContext ? (
