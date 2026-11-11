@@ -238,7 +238,10 @@ test("full profile renders Story and Speaker review queues and turns both author
       scenePath,
       "meta/scriptorium/modules/speaker/corrections.jsonl",
     ]));
-    await expect(speakerPanel.getByText("確定案をレビューキューに作成しました。承認後に正本へ反映されます。")).toBeVisible();
+    // A module refresh can remount its transient status; the canonical speaker
+    // attribution must remain unresolved until the Core proposal is applied.
+    await expect(speakerPanel.getByRole("heading", { name: "未確定・低信頼の話者帰属" })).toBeVisible();
+    await expect(speakerPanel.getByText("『この古地図を探している。』")).toBeVisible();
 
     const origin = new URL(page.url()).origin;
     const proposedSnapshotResponse = await page.request.get(`${origin}/api/projects/${encodeURIComponent(project.id)}/snapshot`);
