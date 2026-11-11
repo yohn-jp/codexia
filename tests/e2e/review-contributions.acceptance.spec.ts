@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import type { ProposalStatus } from "@codexia/contracts";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const zukanPath = "meta/scriptorium/modules/story/zukan-suggestions.jsonl";
@@ -17,14 +18,6 @@ interface ProposalActionResult {
   data?: Record<string, unknown>;
   proposals?: Array<{ id: string; operations: Array<{ id: string; writes: Array<{ path: string; content: string | null }> }> }>;
   error?: { code: string; message: string };
-}
-
-interface ProposalStatus {
-  proposal: { id: string; operations: Array<{ id: string; writes: Array<{ path: string; content: string | null }> }> };
-  state: string;
-  approvedOperationIds: string[];
-  checkpoints: unknown[];
-  publishedOperationIds: string[];
 }
 
 async function createReviewProject(page: Page): Promise<Project> {
