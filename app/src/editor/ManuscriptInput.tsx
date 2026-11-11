@@ -7,7 +7,7 @@ import {
   keymap,
   placeholder as cmPlaceholder,
 } from "@codemirror/view";
-import { forwardRef, useEffect, useImperativeHandle, useRef, type CSSProperties } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, type CSSProperties } from "react";
 import { bracketPairsExtension } from "./cm/bracketPairs";
 import { editorCompositionExtension, isViewComposing } from "./cm/compositionGuard";
 import { ellipsisNormalizeExtension } from "./cm/ellipsisNormalize";
@@ -111,8 +111,9 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
     },
     readForNavigation() {
       const view = viewRef.current;
-      if (view && isViewComposing(view)) throw new Error("日本語入力の変換が完了していません。変換を確定してから画面を切り替えてください。");
-      return view?.state.doc.toString() ?? "";
+      if (!view) throw new Error("原稿エディタが初期化されていません。本文を保護するため、画面の切り替えを中止しました。");
+      if (isViewComposing(view)) throw new Error("日本語入力の変換が完了していません。変換を確定してから画面を切り替えてください。");
+      return view.state.doc.toString();
     },
     async flushComposition() {
       const view = viewRef.current;
@@ -165,7 +166,7 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
     },
   }), []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const parent = containerRef.current;
     if (!parent) return;
     const state = EditorState.create({
