@@ -456,6 +456,10 @@ export interface PersistenceReader {
   listRevisions(projectId: ProjectId, documentId: DocumentId, limit: number, before?: string): Promise<DocumentRevisionPage>;
   getKnowledgeNode(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<KnowledgeNode | undefined>;
   listKnowledgeNodes(projectId: ProjectId, limit?: number): Promise<readonly KnowledgeNode[]>;
+  /** Export-only complete canonical scope, including retired nodes. */
+  listAllKnowledgeNodes(projectId: ProjectId, limit?: number): Promise<readonly KnowledgeNode[]>;
+  /** Export-only project assertion inventory, including unlinked assertions. */
+  listAssertions(projectId: ProjectId, limit?: number): Promise<readonly Assertion[]>;
   listKnowledgeAliases(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<readonly KnowledgeAlias[]>;
   listKnowledgeRelations(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<readonly KnowledgeRelation[]>;
   getEvidenceAnchor(projectId: ProjectId, evidenceId: EvidenceId): Promise<EvidenceAnchor | undefined>;
