@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 import { createWritingFixture, ownerLogin, readPersistenceDrafts } from "./postgres-fixture";
 
 test.use({ hasTouch: true });
@@ -226,4 +227,36 @@ test("Full WebKit terminology stays safe across a held native Shell departure wi
   await expect(page).toHaveURL(/mobile/u);
   await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "書く", exact: true }).click();
   await expectMarkdown(page, text);
+});
+
+
+test("desktop author can download a portable work and import it without replacing the source", async ({ page }) => {
+  const { project, scene } = await createWritingFixture(page);
+  const transfer = page.locator("details").filter({ has: page.locator("summary", { hasText: "作品のエクスポート・インポート" }) });
+  await transfer.locator("summary").click();
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    transfer.getByRole("button", { name: "選択中の作品をJSONでエクスポート" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toMatch(/^codexia-.*\.json$/u);
+  const location = await download.path();
+  expect(location).toBeTruthy();
+  const json = await readFile(location!, "utf8");
+  const archive = JSON.parse(json) as { format: string; documents: Array<{ id: string; markdown: string }> };
+  expect(archive.format).toBe("codexia-work/v1");
+  expect(archive.documents.find((item) => item.id === scene.id)?.markdown).toContain("最初の本文。");
+
+  await transfer.locator('input[type="file"]').setInputFiles({
+    name: "portable-work.json", mimeType: "application/json", buffer: Buffer.from(json),
+  });
+  await expect(page.getByText("新しい作品としてJSONを取り込みました。", { exact: false })).toBeVisible();
+  const currentProject = await page.getByLabel("開く作品").inputValue();
+  expect(currentProject).not.toBe(project.id);
+  const imported = await page.request.get("/api/v1/persistence/projects/" + currentProject + "/documents");
+  expect(imported.ok()).toBe(true);
+  const body = await imported.json() as { documents: Array<{ id: string; title: string }> };
+  expect(body.documents.some((item) => item.id === scene.id)).toBe(true);
+  const original = await page.request.get("/api/v1/persistence/projects/" + project.id + "/documents/" + scene.id);
+  expect(original.ok()).toBe(true);
+  expect((await original.json() as { revision: { markdown: string } }).revision.markdown).toContain("最初の本文。");
 });
