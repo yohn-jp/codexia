@@ -41,8 +41,8 @@ async function fixture(page: Page): Promise<Fixture> {
   const one = await createDocument("Scene One", "a");
   const two = await createDocument("Scene Two", "b");
   await signIn(page);
-  await page.getByLabel("開く作品").selectOption(project.id);
-  await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
+  await page.goto(`/desktop/projects/${project.id}/scenes/${one.document.id}`);
+  await expect(page).toHaveURL(new RegExp(`/desktop/projects/${project.id}/scenes/${one.document.id}`));
   await expectEditor(page, one.revision.markdown);
   return { projectId: project.id, one, two };
 }
@@ -77,9 +77,8 @@ async function saved(page: Page, f: Fixture, text: string): Promise<void> {
   await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
 }
 async function reopen(page: Page, f: Fixture): Promise<void> {
-  await page.reload();
-  await page.getByLabel("開く作品").selectOption(f.projectId);
-  await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
+  await page.goto(`/desktop/projects/${f.projectId}/scenes/${f.one.document.id}`);
+  await expect(page).toHaveURL(new RegExp(`/desktop/projects/${f.projectId}/scenes/${f.one.document.id}`));
   await expect(editor(page)).toBeVisible();
 }
 async function restart(page: Page): Promise<void> {
