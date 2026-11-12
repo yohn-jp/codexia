@@ -11,7 +11,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type RecentActivityInput, type ProposalStatus, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ReorderHierarchyInput } from "@codexia/core";
 import type { Persistence } from "@codexia/persistence-contracts";
-import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
+import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema } from "@codexia/persistence-postgres";
 import { ModuleRuntime, type ActionHostContext, type DomainJobActionExecutor, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 import { HistoricalModelUsageStore } from "./historical-store.js";
 import { JobHistoryError, JobHistoryStore, type JobEvent } from "./job-history-store.js";
@@ -2277,6 +2277,8 @@ async function postgresPersistenceOptions(): Promise<Pick<ApiServerOptions, "per
     throw new Error("CODEXIA_DATABASE_MIGRATE_ON_START must be 1 or 0");
   }
   if (migrateOnStart === "1") await migratePostgresDatabase(connectionString);
+  // A healthy connection alone cannot prove that this image supports the deployed schema.
+  await verifyPostgresSchema(connectionString);
   const persistence = createPostgresPersistence(connectionString);
   try {
     await persistence.checkHealth();

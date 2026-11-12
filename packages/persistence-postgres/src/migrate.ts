@@ -1,8 +1,7 @@
-import { createHash } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Pool, type PoolConfig } from "pg";
+import { assertMigrationSet, readMigrationSet, type MigrationIdentity } from "./migration-set.js";
 
 const defaultMigrationDirectory = fileURLToPath(new URL("../migrations/", import.meta.url));
 
@@ -10,9 +9,7 @@ export async function runPostgresMigrations(
   pool: Pool,
   migrationDirectory = defaultMigrationDirectory,
 ): Promise<readonly string[]> {
-  const filenames = (await readdir(migrationDirectory))
-    .filter((filename) => /^\d+[-\w]*\.sql$/u.test(filename))
-    .sort();
+  const migrations = await readMigrationSet(migrationDirectory);
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -25,21 +22,16 @@ export async function runPostgresMigrations(
       )
     `);
 
-    const recorded = await client.query<{ version: string; checksum: string }>(
+    const recorded = await client.query<MigrationIdentity>(
       "SELECT version, checksum FROM codexia_schema_migrations",
     );
-    const applied = new Map(recorded.rows.map((row) => [row.version, row.checksum.trim()]));
+    const applied = new Set(recorded.rows.map((row) => row.version));
+    // A downgrade or edited migration must fail before applying any pending SQL.
+    assertMigrationSet(migrations.filter((migration) => applied.has(migration.version)), recorded.rows);
     const newlyApplied: string[] = [];
 
-    for (const filename of filenames) {
-      const sql = await readFile(path.join(migrationDirectory, filename), "utf8");
-      const checksum = createHash("sha256").update(sql, "utf8").digest("hex");
-      const existingChecksum = applied.get(filename);
-      if (existingChecksum !== undefined) {
-        if (existingChecksum !== checksum) throw new Error(`Applied migration ${filename} has changed`);
-        continue;
-      }
-
+    for (const { version: filename, sql, checksum } of migrations) {
+      if (applied.has(filename)) continue;
       await client.query(sql);
       await client.query(
         "INSERT INTO codexia_schema_migrations(version, checksum) VALUES ($1, $2)",
@@ -55,6 +47,18 @@ export async function runPostgresMigrations(
     throw error;
   } finally {
     client.release();
+  }
+}
+
+/** Verify the exact packaged migration ledger without creating or updating any database object. */
+export async function verifyPostgresSchema(config: PoolConfig | string): Promise<void> {
+  const expected = await readMigrationSet(defaultMigrationDirectory);
+  const pool = new Pool(typeof config === "string" ? { connectionString: config } : config);
+  try {
+    const recorded = await pool.query<MigrationIdentity>("SELECT version, checksum FROM codexia_schema_migrations");
+    assertMigrationSet(expected, recorded.rows);
+  } finally {
+    await pool.end();
   }
 }
 

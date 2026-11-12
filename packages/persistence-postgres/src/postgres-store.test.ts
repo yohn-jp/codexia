@@ -13,7 +13,7 @@ import {
   type RevisionId,
   type SaveDocumentCommand,
 } from "@codexia/persistence-contracts";
-import { createPostgresPersistence, migratePostgresDatabase } from "./index.js";
+import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema } from "./index.js";
 
 const connectionString = process.env.CODEXIA_TEST_DATABASE_URL;
 if (!connectionString) throw new Error("CODEXIA_TEST_DATABASE_URL is required for PostgreSQL integration tests");
@@ -69,6 +69,32 @@ before(async () => {
 after(async () => {
   await persistence.close();
   await directPool.end();
+});
+
+test("the exact migration ledger can be verified with read-only database transactions", async () => {
+  await verifyPostgresSchema({ connectionString, options: "-c default_transaction_read_only=on" });
+});
+
+test("read-only schema verification rejects missing, altered and newer migration ledgers", async (t) => {
+  // Use a disposable namespace rather than modifying the shared integration ledger.
+  const schema = `migration_gate_${randomUUID().replaceAll("-", "")}`;
+  const ledger = `"${schema}".codexia_schema_migrations`;
+  await directPool.query(`CREATE SCHEMA "${schema}"`);
+  t.after(async () => { await directPool.query(`DROP SCHEMA "${schema}" CASCADE`); });
+  const config = { connectionString, options: `-c search_path=${schema} -c default_transaction_read_only=on` };
+  await assert.rejects(verifyPostgresSchema(config), { code: "42P01" });
+  const absent = await directPool.query<{ relation: string | null }>("SELECT to_regclass($1)::text AS relation", [`${schema}.codexia_schema_migrations`]);
+  assert.equal(absent.rows[0]?.relation, null);
+
+  await directPool.query(`CREATE TABLE ${ledger} AS SELECT version, checksum FROM codexia_schema_migrations`);
+  await verifyPostgresSchema(config);
+  await directPool.query(`UPDATE ${ledger} SET checksum = repeat('0', 64)`);
+  await assert.rejects(verifyPostgresSchema(config), /has changed/);
+  await directPool.query(`TRUNCATE ${ledger}`);
+  await assert.rejects(verifyPostgresSchema(config), /Missing applied migration/);
+  await directPool.query(`INSERT INTO ${ledger} SELECT version, checksum FROM codexia_schema_migrations`);
+  await directPool.query(`INSERT INTO ${ledger} (version, checksum) VALUES ($1, $2)`, ["999999999-future.sql", "f".repeat(64)]);
+  await assert.rejects(verifyPostgresSchema(config), /Unexpected applied migration/);
 });
 
 test("migrations are repeatable and document revisions stay immutable", async () => {
