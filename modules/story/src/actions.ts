@@ -45,6 +45,7 @@ import {
 import { readStorySnapshot, type LoadedStorySnapshot } from "./snapshot.js";
 import { parseWorldTime, sceneContextPackage, temporalScene, type ContextScope } from "./domain/temporal.js";
 import type { SceneStateEvent } from "./domain/worldState.js";
+import { narrativeFindings, applyNarrativeDecisions, narrativeSourceFingerprint, type NarrativeDecision, type NarrativeDisposition, type NarrativeFinding } from "./domain/narrativeReview.js";
 import { appendProposedTextToNotes, collectNotesPlainTexts, normalizeNotes } from "./notes.js";
 import { buildNarrativeChangeProposal, identifyNarrativeChangeSet } from "./narrativeChangeSet.js";
 import {
@@ -61,6 +62,9 @@ const STORY_STATE_ROOT = "meta/scriptorium/modules/story";
 const SERIES_SETTINGS_PATH = `${STORY_STATE_ROOT}/v1/series.json`;
 const STATE_PROPOSALS_PATH = `${STORY_STATE_ROOT}/state-proposals.jsonl`;
 const ZUKAN_SUGGESTIONS_PATH = `${STORY_STATE_ROOT}/zukan-suggestions.jsonl`;
+const REVIEW_PATH = `${STORY_STATE_ROOT}/v1/narrative-review.json`;
+const SCENARIO_PATH = `${STORY_STATE_ROOT}/v1/scenarios.json`;
+
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 const ENTITY_TYPES = new Set<StoryEntityType>([
   "character", "location", "item", "faction", "event", "thread", "scene", "chapter",
@@ -969,6 +973,59 @@ async function withTokenizer<T>(capabilityContext: StoryCapabilityContext, conte
   finally { await lease.release(); }
 }
 
+function compareScenario(story: LoadedStorySnapshot, input: ObjectValue) {
+      const sceneId = stringValue(input.sceneId, "sceneId");
+      const scene = story.entities.get(sceneId);
+      if (scene?.type !== "scene") throw new TypeError("Scene not found");
+      if (!Array.isArray(input.alternatives) || input.alternatives.length !== 2) throw new TypeError("Provide exactly two alternatives");
+      const baseline = temporalScene(story, sceneId);
+      const alternatives = input.alternatives.map((alternative, index) => {
+        const raw = parseRecord(alternative, "alternative");
+        if (!Array.isArray(raw.events) || raw.events.length > 50) throw new TypeError("At most fifty hypothetical events per alternative");
+        const events = raw.events.map((event, eventIndex) => {
+          const candidate = createStateEvent({ event }, scene, "hypothetical").event;
+          validateEventReferences(candidate, story);
+          return { ...candidate, eventId: `hypothesis-${index}-${eventIndex}`, replacesEventId: undefined, source: "manual", status: "confirmed" } as unknown as SceneStateEvent;
+        });
+        return { label: stringValue(raw.label, "label"), hypothetical: true, projection: temporalScene(story, sceneId, events) };
+      });
+      return { baseline, alternatives, sourceFingerprint: narrativeSourceFingerprint(story), adoption: "author-approved-state-proposal-required" };
+
+}
+type SavedScenario = { id: string; label: string; sceneId: string; alternatives: unknown[]; sourceFingerprint: string; savedAt: string };
+async function readModuleRows<T>(context:ModuleActionContext,path:string):Promise<{rows:T[];revision:string|null}> {
+  const file=await readTextFile(context.reader,path);
+  const parsed=file.content.trim()?JSON.parse(file.content):[];
+  if(!Array.isArray(parsed))throw new TypeError("Invalid Story module records");
+  return {rows:parsed as T[],revision:file.revision};
+}
+async function writeModuleRows(context:ModuleActionContext,path:string,revision:string|null,rows:unknown[],message:string,operationId?:string,reads:FileRevision[]=[]){
+  const operation=buildOperation({reader:context.reader,reads:[{path,revision},...reads],writes:[{path,revision,content:stableJson(rows)}],message,effect:"metadata",operationId});
+  await context.propose([operation]);
+}
+async function reviewFindings(context:ModuleActionContext,story:LoadedStorySnapshot,sceneId?:string){
+  const findings=await narrativeFindings(story,sceneId);
+  // Diagnostics is optional; do not invent a result when it is unavailable.
+  const diagnostics=await context.invoke("diagnostics.checkConsistency",{}).catch(()=>null);
+  let diagnosticsAvailable=false;
+  if(diagnostics?.ok&&snapshotKey(diagnostics.snapshot)===snapshotKey(context.reader.snapshot)){
+    diagnosticsAvailable=true;
+    const data=diagnostics.data as {issues?:unknown[]};
+    for(const issue of Array.isArray(data.issues)?data.issues:[]){
+      if(!isRecord(issue)||typeof issue.message!=="string")continue;
+      const path=typeof issue.filePath==="string"?issue.filePath:typeof issue.path==="string"?issue.path:undefined;
+      const revision=path?story.revisions.get(path):undefined;
+      if(!path||!revision)continue;
+      const rule=typeof issue.code==="string"?issue.code:"CONSISTENCY";
+      const evidence=[{path,revision}];
+      const id=createHash("sha256").update(JSON.stringify(["diagnostics",rule,evidence,issue.message])).digest("hex");
+      findings.push({id,rule:"DIAGNOSTICS_"+rule,version:1,severity:issue.severity==="error"?"error":"warning",certainty:"candidate",targets:[],message:issue.message,evidence});
+    }
+  }
+  const {rows}=await readModuleRows<NarrativeDecision>(context,REVIEW_PATH);
+  return {findings:applyNarrativeDecisions(findings,rows),diagnosticsAvailable};
+}
+
 function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
   const read = "read" as const;
   const propose = "propose" as const;
@@ -1317,24 +1374,64 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
       const story = await readStorySnapshot(context.reader);
       return sceneContextPackage(story, stringValue(input.sceneId, "sceneId"), input.scope as ContextScope, input.characterId as string | undefined, input.budget === undefined ? 12000 : Number(input.budget));
     }),
-    action("story.scenario.compare", read, fieldSchema(["sceneId", "alternatives"], ["sceneId"]), async (input, context) => {
-      const story = await readStorySnapshot(context.reader);
-      const sceneId = stringValue(input.sceneId, "sceneId");
-      const scene = story.entities.get(sceneId);
-      if (scene?.type !== "scene") throw new TypeError("Scene not found");
-      if (!Array.isArray(input.alternatives) || input.alternatives.length !== 2) throw new TypeError("Provide exactly two alternatives");
-      const baseline = temporalScene(story, sceneId);
-      const alternatives = input.alternatives.map((alternative, index) => {
-        const raw = parseRecord(alternative, "alternative");
-        if (!Array.isArray(raw.events) || raw.events.length > 50) throw new TypeError("At most fifty hypothetical events per alternative");
-        const events = raw.events.map((event, eventIndex) => {
-          const candidate = createStateEvent({ event }, scene, "hypothetical").event;
-          validateEventReferences(candidate, story);
-          return { ...candidate, eventId: `hypothesis-${index}-${eventIndex}`, replacesEventId: undefined, source: "manual", status: "confirmed" } as unknown as SceneStateEvent;
-        });
-        return { label: stringValue(raw.label, "label"), hypothetical: true, projection: temporalScene(story, sceneId, events) };
-      });
-      return { baseline, alternatives, adoption: "author-approved-state-proposal-required" };
+    action("story.narrative.review", read, fieldSchema([], ["sceneId"]), async (input, context) => {
+      const story=await readStorySnapshot(context.reader,{includeManuscripts:true});
+      return reviewFindings(context,story,input.sceneId as string|undefined);
+    }),
+    action("story.narrative.disposition", propose, fieldSchema(["id","status","reason"],["id","status","reason","sceneId"]), async (input,context)=>{
+      const story=await readStorySnapshot(context.reader,{includeManuscripts:true});
+      const current=await reviewFindings(context,story,input.sceneId as string|undefined);
+      const item=current.findings.find(f=>f.id===input.id);
+      if(!item)throw Object.assign(new Error("Finding changed; refresh review"),{code:"stale_source"});
+      const status=stringValue(input.status,"status") as NarrativeDisposition;
+      if(!["confirmed","rejected","held","exception"].includes(status))throw new TypeError("Invalid review disposition");
+      const reason=stringValue(input.reason,"reason").trim();
+      if(!reason||reason.length>4000)throw new TypeError("Provide a scoped reason (maximum 4000 characters)");
+      const {rows,revision}=await readModuleRows<NarrativeDecision>(context,REVIEW_PATH);
+      const decision={id:item.id,status,reason,evidence:item.evidence};
+      await writeModuleRows(context,REVIEW_PATH,revision,[...rows.filter(row=>row.id!==item.id),decision],"Review narrative finding "+item.id,requestedOperationId(input),item.evidence);
+      return decision;
+    }),
+    action("story.scenario.compare", read, fieldSchema(["sceneId", "alternatives"], ["sceneId"]), async (input,context)=>compareScenario(await readStorySnapshot(context.reader,{includeManuscripts:true}),input)),
+    action("story.scenario.list",read,objectSchema,async(_input,context)=>{
+      const story=await readStorySnapshot(context.reader,{includeManuscripts:true});
+      const {rows}=await readModuleRows<SavedScenario>(context,SCENARIO_PATH);
+      const fingerprint=narrativeSourceFingerprint(story);
+      return rows.map(row=>({...row,stale:row.sourceFingerprint!==fingerprint}));
+    }),
+    action("story.scenario.save",propose,fieldSchema(["sceneId","alternatives","label","sourceFingerprint"],["sceneId","label","sourceFingerprint","id"]),async(input,context)=>{
+      const story=await readStorySnapshot(context.reader,{includeManuscripts:true});
+      const comparison=compareScenario(story,input);
+      if(input.sourceFingerprint!==comparison.sourceFingerprint)throw Object.assign(new Error("Story changed; compare alternatives again"),{code:"stale_source"});
+      const {rows,revision}=await readModuleRows<SavedScenario>(context,SCENARIO_PATH);
+      const id=typeof input.id==="string"?input.id:randomUUID();
+      if(!SAFE_ID.test(id))throw new TypeError("Invalid scenario id");
+      const label=stringValue(input.label,"label").trim();
+      if(!label||label.length>256)throw new TypeError("Invalid scenario label");
+      const saved:SavedScenario={id,label,sceneId:stringValue(input.sceneId,"sceneId"),alternatives:input.alternatives as unknown[],sourceFingerprint:comparison.sourceFingerprint,savedAt:new Date().toISOString()};
+      await writeModuleRows(context,SCENARIO_PATH,revision,[...rows.filter(row=>row.id!==id),saved],"Save hypothetical scenario "+label,requestedOperationId(input));
+      return saved;
+    }),
+    action("story.scenario.adopt",propose,fieldSchema(["id","alternativeIndex","sourceFingerprint"],["id","sourceFingerprint"]),async(input,context)=>{
+      const story=await readStorySnapshot(context.reader,{includeManuscripts:true});
+      const {rows,revision}=await readModuleRows<SavedScenario>(context,SCENARIO_PATH);
+      const saved=rows.find(row=>row.id===input.id);
+      if(!saved)throw new TypeError("Scenario not found");
+      const fingerprint=narrativeSourceFingerprint(story);
+      if(saved.sourceFingerprint!==fingerprint||input.sourceFingerprint!==fingerprint)throw Object.assign(new Error("Saved scenario is stale; compare and save again before adoption"),{code:"stale_source"});
+      const alternativeIndex=Number(input.alternativeIndex);
+      if(!Number.isInteger(alternativeIndex)||alternativeIndex<0||alternativeIndex>=saved.alternatives.length)throw new TypeError("Invalid alternative index");
+      compareScenario(story,{sceneId:saved.sceneId,alternatives:saved.alternatives});
+      const alternative=parseRecord(saved.alternatives[alternativeIndex],"alternative");
+      const scene=story.entities.get(saved.sceneId)!;
+      const manuscriptPath=typeof scene.raw.manuscript==="string"?scene.raw.manuscript:undefined;
+      const manuscript=manuscriptPath?[...story.entities.values()].find(entity=>entity.filePath===manuscriptPath)?.body??"":"";
+      const proposals=(alternative.events as unknown[]).map(event=>createStateEvent({event},scene,manuscriptTextHash(manuscript)));
+      for(const proposal of proposals)validateEventReferences(proposal.event,story);
+      const pending=await readStateProposals(context);
+      const operation=buildOperation({reader:context.reader,reads:[{path:SCENARIO_PATH,revision},{path:STATE_PROPOSALS_PATH,revision:pending.revision},{path:scene.filePath,revision:story.revisions.get(scene.filePath)??null},...(manuscriptPath?[{path:manuscriptPath,revision:story.revisions.get(manuscriptPath)??null}]:[])],writes:[{path:STATE_PROPOSALS_PATH,revision:pending.revision,content:stateProposalFile([...pending.rows,...proposals.map(proposal=>storedProposal(proposal))])}],message:"Submit scenario alternative as state proposals",effect:"metadata",operationId:requestedOperationId(input)});
+      await context.propose([operation]);
+      return {scenarioId:saved.id,alternativeIndex,proposals};
     }),
     action("story.world-state.at-scene", read, fieldSchema(["sceneId"], ["sceneId"]), async (input, context) => getWorldStateAtScene({ ...await readStorySnapshot(context.reader), sceneId: stringValue(input.sceneId, "sceneId") }).data),
     action("story.world-state.history", read, fieldSchema(["entityId"], ["entityId"]), async (input, context) => getEntityStateHistory({ ...await readStorySnapshot(context.reader), entityId: stringValue(input.entityId, "entityId") }).data),
