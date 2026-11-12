@@ -13,7 +13,7 @@ import {
   type RevisionId,
   type SaveDocumentCommand,
 } from "@codexia/persistence-contracts";
-import { createPostgresPersistence, migratePostgresDatabase } from "./index.js";
+import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema } from "./index.js";
 
 const connectionString = process.env.CODEXIA_TEST_DATABASE_URL;
 if (!connectionString) throw new Error("CODEXIA_TEST_DATABASE_URL is required for PostgreSQL integration tests");
