@@ -420,14 +420,15 @@ jobs:
           RUNNER_TEMP: ${{ runner.temp }}
           CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: node scripts/select-ci-plan.mjs
-      - uses: actions/download-artifact@v4
-        with:
-          artifact-ids: ${{ steps.select-plan.outputs.artifact-id }}
-          path: ${{ runner.temp }}/ci-plan
-          merge-multiple: true
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ github.run_id }}
+      - name: Download selected plan by exact artifact ID
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CODEXIA_CI_INVENTORY_PATH: ${{ steps.select-plan.outputs.inventory-path }}
+          CODEXIA_CI_ARTIFACT_IDS: ${{ steps.select-plan.outputs.artifact-id }}
+          CODEXIA_CI_ARTIFACT_DIR: ${{ runner.temp }}/ci-plan
+          CODEXIA_CI_ARTIFACT_KIND: plan
+        run: node scripts/download-ci-artifacts.mjs
       - name: Select latest exact-run execution evidence
         id: select-evidence
         env:
@@ -436,13 +437,15 @@ jobs:
           CODEXIA_CI_INVENTORY_PATH: ${{ steps.select-plan.outputs.inventory-path }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
         run: node scripts/select-ci-evidence.mjs
-      - uses: actions/download-artifact@v4
-        with:
-          artifact-ids: ${{ steps.select-evidence.outputs.artifact-ids }}
-          path: ${{ runner.temp }}/ci-evidence
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ github.run_id }}
+      - name: Download selected execution evidence by exact artifact ID
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CODEXIA_CI_INVENTORY_PATH: ${{ steps.select-plan.outputs.inventory-path }}
+          CODEXIA_CI_ARTIFACT_IDS: ${{ steps.select-evidence.outputs.artifact-ids }}
+          CODEXIA_CI_ARTIFACT_DIR: ${{ runner.temp }}/ci-evidence
+          CODEXIA_CI_ARTIFACT_KIND: evidence
+        run: node scripts/download-ci-artifacts.mjs
       - name: Certify every required exact-source matrix element
         env:
           GH_TOKEN: ${{ github.token }}
