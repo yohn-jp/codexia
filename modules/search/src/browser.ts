@@ -192,8 +192,23 @@ function termsPanel(root: HTMLElement, context: SearchBrowserContext, cleanup: A
           cleanup.push(() => open.removeEventListener("click", onOpen));
           item.append(open);
         }
-        if (typeof term.id === "string") {
-          const remove = button(`用語「${name}」の削除案を作成`);
+        if (typeof term.knowledgeId === "string") {
+          item.append(element("small","Knowledge正本からの投影 · 別名はKnowledge側で管理"));
+          if (Array.isArray(term.ambiguousAliases)&&term.ambiguousAliases.length) item.append(element("p","曖昧・スコープ付き別名: "+term.ambiguousAliases.join("、")));
+          const link=button(`Knowledge「${name}」の参照先を提案`);
+          const onLink=async()=>{
+            if(context.signal.aborted)return;
+            const target=targetPath.value.trim()||context.readCurrentEditor?.()?.documentPath||"";
+            if(!target){status.textContent="参照先パスを指定してください。";return;}
+            link.disabled=true;
+            try{await invoke(context,"search.terms.linkKnowledge",{knowledgeId:term.knowledgeId,targetPath:target});if(!context.signal.aborted)status.textContent="Knowledge参照先の変更案を作成しました。承認後に反映されます。";}
+            catch(error){if(!context.signal.aborted)status.textContent=error instanceof Error?error.message:String(error);}
+            finally{if(!context.signal.aborted)link.disabled=false;}
+          };
+          link.addEventListener("click",onLink);cleanup.push(()=>link.removeEventListener("click",onLink));item.append(link);
+        }
+        if (typeof term.id === "string" && (typeof term.knowledgeId !== "string" || path)) {
+          const remove = button(typeof term.knowledgeId==="string"?`Knowledge「${name}」の参照先解除案を作成`:`用語「${name}」の削除案を作成`);
           const onRemove = async () => {
             if (context.signal.aborted) return;
             remove.disabled = true;
