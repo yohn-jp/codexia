@@ -610,6 +610,13 @@ export const api = {
   persistenceNodeEvidence: (projectId: string, nodeId: string, limit = 200, signal?: AbortSignal) =>
     request(dto.persistenceNodeEvidence, persistencePath(projectId,
       `nodes/${encodeURIComponent(nodeId)}/evidence?${new URLSearchParams({ limit: String(limit) })}`), { ...(signal ? { signal } : {}) }),
+  createPersistenceAnchorAssertion: (projectId: string, documentId: string, evidenceId: string, command: {
+    id: string; nodeId: string; statement: string; modality: "fact" | "belief" | "disclosure" | "hypothesis";
+    perspective: string; revisionId: string; expectedAnchorVersion: number;
+  }, signal?: AbortSignal) =>
+    request(dto.persistenceAssertionEnvelope, persistencePath(projectId, `documents/${encodeURIComponent(documentId)}/anchors/${encodeURIComponent(evidenceId)}/assertions`), {
+      method: "POST", body: JSON.stringify(command), ...(signal ? { signal } : {}),
+    }),
   persistenceAssertion: (projectId: string, assertionId: string, signal?: AbortSignal) =>
     request(dto.persistenceAssertion, persistencePath(projectId, `assertions/${encodeURIComponent(assertionId)}`), { ...(signal ? { signal } : {}) }),
   savePersistenceAssertion: (projectId: string, assertionId: string, command: Omit<SaveAssertionCommand, "projectId" | "id">, signal?: AbortSignal) =>
