@@ -10,7 +10,7 @@ import { workspaceContributions } from "../contributions/catalog";
 import { ProposalReview } from "../contributions/ProposalReview";
 import type { JournalProposal } from "../storage/journal";
 import type { Document as PersistenceDocument, DocumentId, DocumentRevision, EvidenceId, KnowledgeNode, KnowledgeNodeId, Project as PersistenceProject, RevisionId } from "@codexia/persistence-contracts";
-import { api } from "../api";
+import { api, type PersistenceAnchorView } from "../api";
 import { readWorkspaceSelectionForLocation, workspaceSelectionPath, writeWorkspaceSelection } from "./selection";
 import { PersistenceLegacyDraftImport } from "./PersistenceLegacyDraftImport";
 import { parseApplicationLocation, switchApplicationPath } from "../application/navigation";
@@ -27,10 +27,15 @@ import { MobileReadingPager } from "../editor/MobileReadingPager";
 import { TermAwareRubyText } from "../editor/TermAwareRubyText";
 import { WRITING_SYMBOLS } from "../editor/writingSymbols";
 import { loadTypographySettings, storeTypographySettings, TYPOGRAPHY_PRESETS, typographyPresetValues, type TypographyPresetId } from "../editor/typography";
-import { ManuscriptInput, type ManuscriptInputHandle } from "../editor/ManuscriptInput";
+import { ManuscriptInput, type ManuscriptInputHandle, type EvidenceRangeRequest } from "../editor/ManuscriptInput";
 import { initializeDocumentEvidence, type DocumentEvidenceState, type EditorEvidenceAdapter, type TextChange } from "../editor/evidence";
 import { BrowserJournal } from "../storage/journal";
 import { createPostgresEditorEvidenceAdapter } from "../editor/postgresEvidenceAdapter";
+
+interface EvidenceJump extends EvidenceRangeRequest {
+  projectId: string;
+  documentId: string;
+}
 
 interface ActiveDocument {
   document: PersistenceDocument;
@@ -137,6 +142,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const [documentId, setDocumentId] = useState("");
   const [nodes, setNodes] = useState<KnowledgeNode[]>([]);
   const [nodeId, setNodeId] = useState("");
+  const [nodeEvidence, setNodeEvidence] = useState<{ projectId: string; nodeId: string; evidence: PersistenceAnchorView[] } | null>(null);
+  const [nodeEvidenceError, setNodeEvidenceError] = useState("");
+  const [evidenceJump, setEvidenceJump] = useState<EvidenceJump>();
   const [active, setActive] = useState<ActiveDocument | null>(null);
   const activeRef = useRef<ActiveDocument | null>(null);
   const pendingSaveRef = useRef(new Map<string, PendingSave>());
@@ -173,7 +181,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const resume = useRecentActivityResume({ binding: projectId ? { projectId, authorScope, projectScopeKey: projectId } : null, enabled: Boolean(projectId) });
   const project = projects.find((candidate) => candidate.id === projectId) ?? null;
   const selectedDocument = documents.find((candidate) => candidate.id === documentId) ?? null;
-  const selectedNode = nodes.find((candidate) => candidate.id === nodeId) ?? null;
+  const selectedNode = nodes.find((candidate) => candidate.id === nodeId && candidate.projectId === projectId) ?? null;
+  const selectedNodeEvidence = nodeEvidence?.projectId === projectId && nodeEvidence.nodeId === selectedNode?.id ? nodeEvidence.evidence : null;
 
   const publishEditor = useCallback((next: ActiveDocument | null) => {
     if (!next || (activeRef.current && activeRef.current.document.id !== next.document.id)) textSelectionRef.current = null;
@@ -265,6 +274,23 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     });
     return () => controller.abort();
   }, [projectId, publishEditor, resumeEpoch]);
+
+  useEffect(() => {
+    setNodeEvidence(null);
+    setNodeEvidenceError("");
+    if (!projectId || !selectedNode) return;
+    const selectedId = selectedNode.id;
+    const controller = new AbortController();
+    void api.persistenceNodeEvidence(projectId, selectedId, 500, controller.signal).then((result) => {
+      if (!controller.signal.aborted) setNodeEvidence({
+        projectId, nodeId: selectedId,
+        evidence: result.evidence.filter((item) => item.mentions.some(({ link }) => link.nodeId === selectedId && link.status !== "rejected")),
+      });
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) setNodeEvidenceError(error instanceof Error ? error.message : "根拠を読み込めませんでした。");
+    });
+    return () => controller.abort();
+  }, [projectId, selectedNode?.id, active?.revision.id, active?.evidenceLoadKey, resumeEpoch]);
 
   const refreshModules = useCallback(async () => {
     const sequence = ++moduleSequenceRef.current;
@@ -681,6 +707,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     // Navigation preflight is asynchronous. Only the latest requested selection
     // may publish a document, even when an earlier request finishes later.
     const intent = ++selectionIntentRef.current;
+    setEvidenceJump(undefined);
     if (nextId === documentId && selectionRef.current?.documentId === nextId &&
         activeRef.current?.document.id === nextId) return true;
     if (!await protectTransition()) return false;
@@ -1070,6 +1097,43 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     // selected manuscript through the existing guarded panel request path.
     setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
   }, [documents, moduleSnapshot, projectId, selectDocument]);
+  const handleEvidenceRangeResult = useCallback((request: EvidenceRangeRequest, revealed: boolean) => {
+    setEvidenceJump((current) => current === request ? undefined : current);
+    setNotice(revealed ? "現在のRevisionの根拠箇所を選択しました。" : "原稿またはRevisionが変わっているため、根拠の位置は再確認してください。");
+  }, []);
+
+  useEffect(() => {
+    if (!evidenceJump) return;
+    if (evidenceJump.projectId !== projectId || evidenceJump.documentId !== documentId) {
+      setEvidenceJump(undefined);
+      return;
+    }
+    if (active?.document.id !== evidenceJump.documentId) return;
+    if (active.revision.id !== evidenceJump.revisionId || active.dirty || active.remoteConflict || active.markdown !== active.revision.markdown) {
+      setEvidenceJump(undefined);
+      setNotice("原稿またはRevisionが変わっているため、根拠の位置は再確認してください。");
+    }
+  }, [evidenceJump, projectId, documentId, active]);
+
+  async function openNodeEvidence(item: PersistenceAnchorView): Promise<void> {
+    const { anchor, quote } = item;
+    if (!project || anchor.projectId !== project.id || !documents.some((document) => document.id === anchor.documentId)) {
+      setPageError("この作品の根拠文書が見つかりません。");
+      return;
+    }
+    // The same-document fast path of selectDocument does not perform a guard.
+    if (activeRef.current?.document.id === anchor.documentId && !await protectTransition()) return;
+    if (!await selectDocument(anchor.documentId)) return;
+    setReading(false);
+    setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
+    if (anchor.status !== "confirmed" || anchor.toUtf16 <= anchor.fromUtf16 || !quote) {
+      setNotice("現在位置が未確定の根拠です。本文の位置を再確認してください。");
+      return;
+    }
+    setEvidenceJump({ projectId: project.id, documentId: anchor.documentId, revisionId: anchor.revisionId,
+      from: anchor.fromUtf16, to: anchor.toUtf16, quote });
+  }
+
   const handleTermNavigate = useCallback((path: string) => {
     void navigateReference(path).catch((error) => setPageError(error instanceof Error ? error.message : "参照を開けませんでした。"));
   }, [navigateReference]);
@@ -1217,6 +1281,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             evidenceState={active.evidence}
             evidenceLoadKey={active.evidenceLoadKey}
             evidenceSourceText={active.revision.markdown}
+            evidenceRangeRequest={evidenceJump?.projectId === projectId && evidenceJump.documentId === active.document.id && evidenceJump.revisionId === active.revision.id && !active.dirty && !active.remoteConflict ? evidenceJump : undefined}
+            onEvidenceRangeResult={handleEvidenceRangeResult}
             onEvidenceChange={(evidence) => {
               const current = activeRef.current;
               if (current?.document.id === active.document.id) publishEditor({ ...current, evidence });
@@ -1275,6 +1341,27 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
               {node.status === "proposed" && <button type="button" onClick={() => void confirmKnowledge(node)}>内容を確認して確定</button>}
             </li>)}
           </ul>
+          {selectedNode && <section aria-label="Knowledgeの根拠">
+            <h3>{selectedNode.name}の根拠</h3>
+            {nodeEvidenceError && <p role="alert">{nodeEvidenceError}</p>}
+            {!nodeEvidenceError && selectedNodeEvidence === null && <p role="status">根拠を読み込んでいます。</p>}
+            {selectedNodeEvidence?.length === 0 && <p>このKnowledgeにリンクされた根拠はありません。</p>}
+            <ul className="pg-evidence-list">
+              {selectedNodeEvidence?.map((item) => {
+                const { anchor, quote } = item;
+                const link = item.mentions.find(({ link }) => link.nodeId === selectedNode.id)?.link;
+                const title = documents.find((document) => document.id === anchor.documentId)?.title;
+                const status = anchor.status === "confirmed" ? "確認済みの根拠" : anchor.status === "orphaned" ? "本文から削除" : anchor.status === "needs_review" ? "位置の再確認が必要" : "確認待ち";
+                return <li key={anchor.id}>
+                  <button type="button" disabled={!title} onClick={() => void openNodeEvidence(item)}>
+                    <span>{title ?? "文書不明"}</span>
+                    <q>{quote || "引用なし"}</q>
+                    <small>{link?.status === "confirmed" ? "確定リンク" : "候補リンク"} · {status}</small>
+                  </button>
+                </li>;
+              })}
+            </ul>
+          </section>}
         </section>
         <section>
           <h2>Text Anchor / Evidence</h2>
@@ -1285,7 +1372,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
               <button type="button" className={selectedEvidenceId === anchor.id ? "is-selected" : ""} onClick={() => setSelectedEvidenceId(anchor.id)}>
                 <q>{anchor.quote}</q><small>{anchor.status === "current" ? "現在のRevision" : anchor.status === "proposed" ? "確認待ち" : anchor.status === "needs_review" ? "再確認が必要" : anchor.status === "orphaned" ? "本文から削除" : "Revision不一致"}</small>
               </button>
-              {anchor.target && <p>確定先: {anchor.target.label}</p>}
+              {anchor.target && <p>確定先: {anchor.target.label} <button type="button" onClick={() => setNodeId(anchor.target!.id)}>Knowledgeの根拠を表示</button></p>}
               {anchor.candidates?.map((candidate) => <p key={candidate.id}>候補: {candidate.label}</p>)}
               {anchor.status === "current" && selectedNode && <div className="pg-link-actions">
                 <button type="button" onClick={() => void linkKnowledge(anchor.id, "proposed")}>候補としてリンク</button>
