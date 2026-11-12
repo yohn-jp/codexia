@@ -1408,7 +1408,7 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
       const sceneRaw = { ...scene.raw, state_events: [...rawEvents, event] };
       const operation = buildOperation({
         reader: context.reader,
-        reads: [{ path: scene.filePath, revision: sceneFile.revision }, { path: STATE_PROPOSALS_PATH, revision }],
+        reads: [{ path: scene.filePath, revision: sceneFile.revision }, { path: STATE_PROPOSALS_PATH, revision }, ...(manuscriptPath ? [{ path: manuscriptPath, revision: story.revisions.get(manuscriptPath) ?? null }] : [])],
         writes: [
           { path: scene.filePath, revision: sceneFile.revision, content: yamlContent(sceneRaw) },
           { path: STATE_PROPOSALS_PATH, revision, content: stateProposalFile(rows) },
