@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { assertProjectPath, snapshotKey, type ActionResult, type ChangeOperation, type ModuleAction, type ModuleActionContext, type ModuleContext, type ModuleDefinition, type ModuleManifest, type SnapshotReader, type ValueSchema } from "@codexia/contracts";
+import { nativeTerms, combineTerms, searchableTerms, KNOWLEDGE_PATH } from "./native-terms.js";
 import { SnapshotIndexCache } from "./index-cache.js";
 import { normalizeSearchText, searchDocuments, searchTerms, type SearchMode } from "./search-ranking.js";
 import { normalizeTerm, parseTermRegistry, resolveTermSpans, TERM_REGISTRY_PATH, type SearchTerm, type TermRegistry } from "./terminology.js";
@@ -124,7 +125,9 @@ export function createSearchActions(moduleContext: ModuleContext, indexes: Snaps
       try { registry = await registryFor(context.reader); }
       catch { warnings.push("term_registry_unavailable"); }
       const lexical = searchDocuments(index.documents.values(), input.query, input.mode, input.limit, input.scope, queryHints);
-      const termHits = searchTerms(registry.terms, index.revisions, input.query, input.mode, input.scope);
+      let termHits: ReturnType<typeof searchTerms> = [];
+      try { const native=await nativeTerms(context.reader,registry); termHits=searchTerms(searchableTerms(combineTerms(registry,native)),index.revisions,input.query,input.mode,input.scope); if(native.truncated)warnings.push("knowledge_inventory_truncated"); }
+      catch { warnings.push("knowledge_terminology_unavailable"); }
       let semanticResults: unknown[] = [];
       if (input.includeSemantic) {
         const result = await context.invoke("semantic.search", { query: input.query, mode: "scene", limit: input.limit }, context.signal);
@@ -143,8 +146,13 @@ export function createSearchActions(moduleContext: ModuleContext, indexes: Snaps
       try { registry = await registryFor(context.reader); }
       catch { registry = { schemaVersion: 1, terms: [] }; warning = "term_registry_unavailable"; }
       const paths = await indexes.documentPaths(context.reader, context.signal);
+      let terms: ReturnType<typeof combineTerms> = registry.terms;
+      let nativeAvailable=false;
+      try { const native=await nativeTerms(context.reader,registry); nativeAvailable=native.available; terms=combineTerms(registry,native); if(native.truncated)warning="knowledge_inventory_truncated"; }
+      catch { warning="knowledge_terminology_unavailable"; terms=registry.terms.map(term=>({...term,candidateOnly:true})); }
       return { ok: true, snapshot: context.reader.snapshot, data: {
-        terms: registry.terms.map((term) => ({ ...term, targetAvailable: paths.has(term.targetPath) })),
+        terms: terms.map((term) => ({ ...term, targetAvailable: !term.candidateOnly && paths.has(term.targetPath) })),
+        knowledgeAvailable: nativeAvailable,
         ...(warning ? { warning } : {}),
       } } as ActionResult;
     }),
@@ -155,7 +163,10 @@ export function createSearchActions(moduleContext: ModuleContext, indexes: Snaps
       try { registry = await registryFor(context.reader); }
       catch { registry = { schemaVersion: 1, terms: [] }; warning = "term_registry_unavailable"; }
       const paths = await indexes.documentPaths(context.reader, context.signal);
-      const resolved = resolveTermSpans(input.text, registry.terms, paths);
+      let terms: ReturnType<typeof combineTerms> = registry.terms;
+      try { const native=await nativeTerms(context.reader,registry); terms=combineTerms(registry,native); if(native.truncated)warning="knowledge_inventory_truncated"; }
+      catch { warning="knowledge_terminology_unavailable"; terms=registry.terms.map(term=>({...term,candidateOnly:true})); }
+      const resolved = resolveTermSpans(input.text, terms, paths);
       return { ok: true, snapshot: context.reader.snapshot, data: { ...resolved, ...(warning ? { warning } : {}) } } as ActionResult;
     }),
     action("search.terms.propose", "propose", parseTermProposal, async (raw, context) => {
@@ -163,12 +174,13 @@ export function createSearchActions(moduleContext: ModuleContext, indexes: Snaps
       const paths = await indexes.documentPaths(context.reader, context.signal);
       if (!paths.has(input.targetPath)) throw Object.assign(new Error("Term target is not an available document in this snapshot"), { code: "term_target_unavailable" });
       const { registry, revision } = await readRegistry(context.reader);
+      if(input.id?.startsWith("knowledge-"))throw new TypeError("Knowledge aliases are managed in the Knowledge inspector");
       const id = input.id ?? registry.terms.find((term) => normalizeTerm(term.canonical) === normalizeTerm(input.canonical))?.id ?? `term-${randomUUID()}`;
       const target = await context.reader.read(input.targetPath);
       if (!target) throw Object.assign(new Error("Term target is unavailable in this snapshot"), { code: "term_target_unavailable" });
       const nextTerm: SearchTerm = { id, canonical: input.canonical, aliases: input.aliases, targetPath: input.targetPath };
       const terms = [...registry.terms.filter((term) => term.id !== id), nextTerm].sort((left, right) => left.id.localeCompare(right.id));
-      const next = parseTermRegistry({ schemaVersion: 1, terms });
+      const next = parseTermRegistry({ ...registry, terms });
       const content = `${JSON.stringify(next, null, 2)}\n`;
       const operation: ChangeOperation = {
         id: `search-${randomUUID()}`, generation: 0,
@@ -187,12 +199,33 @@ export function createSearchActions(moduleContext: ModuleContext, indexes: Snaps
       registries.delete(snapshotKey(context.reader.snapshot));
       return { ok: true, snapshot: context.reader.snapshot, data: { term: nextTerm, proposal } } as ActionResult;
     }),
+    action("search.terms.linkKnowledge","propose",value=>{
+      const input=record(value,"Knowledge terminology reference");
+      if(typeof input.knowledgeId!=="string"||typeof input.targetPath!=="string")throw new TypeError("Knowledge ID and target path required");
+      assertProjectPath(input.targetPath);
+      return {knowledgeId:input.knowledgeId,targetPath:input.targetPath};
+    },async(raw,context)=>{
+      const input=raw as {knowledgeId:string;targetPath:string};
+      const {registry,revision}=await readRegistry(context.reader);
+      const native=await nativeTerms(context.reader,registry);
+      if(!native.available||native.truncated||!native.terms.some(term=>term.knowledgeId===input.knowledgeId))throw new TypeError("Confirmed Knowledge unavailable");
+      if(!(await indexes.documentPaths(context.reader,context.signal)).has(input.targetPath))throw new TypeError("Target document unavailable");
+      const target=await context.reader.read(input.targetPath);
+      if(!target)throw new TypeError("Target document unavailable");
+      const next=parseTermRegistry({...registry,knowledgeReferences:[...(registry.knowledgeReferences??[]).filter(ref=>ref.knowledgeId!==input.knowledgeId),input]});
+      const reads=[{path:TERM_REGISTRY_PATH,revision},{path:KNOWLEDGE_PATH,revision:native.revision},{path:input.targetPath,revision:target.revision}];
+      const operation:ChangeOperation={id:"search-"+randomUUID(),generation:0,projectId:context.reader.snapshot.projectId,baseProjectVersion:context.reader.snapshot.projectVersion,
+        effect:"settings",reads,writes:[{path:TERM_REGISTRY_PATH,revision,content:JSON.stringify(next,null,2)+"\n"}],message:"Link Knowledge terminology to document"};
+      const proposal=await context.propose([operation]);
+      return {ok:true,snapshot:context.reader.snapshot,data:{reference:input,proposal}} as ActionResult;
+    }),
     action("search.terms.remove", "propose", parseTermRemoval, async (raw, context) => {
       const input = raw as ReturnType<typeof parseTermRemoval>;
       const { registry, revision } = await readRegistry(context.reader);
       const existing = registry.terms.find((term) => term.id === input.id);
-      if (!existing) throw Object.assign(new Error("Search term was not found"), { code: "term_not_found" });
-      const next = parseTermRegistry({ schemaVersion: 1, terms: registry.terms.filter((term) => term.id !== input.id) });
+      const ref=registry.knowledgeReferences?.find(ref=>"knowledge-"+ref.knowledgeId===input.id);
+      if (!existing&&!ref) throw Object.assign(new Error("Search term was not found"), { code: "term_not_found" });
+      const next = parseTermRegistry({ ...registry, terms: registry.terms.filter((term) => term.id !== input.id),knowledgeReferences:(registry.knowledgeReferences??[]).filter(item=>item!==ref) });
       const content = `${JSON.stringify(next, null, 2)}\n`;
       const operation: ChangeOperation = {
         id: `search-${randomUUID()}`, generation: 0,
@@ -200,14 +233,14 @@ export function createSearchActions(moduleContext: ModuleContext, indexes: Snaps
         baseProjectVersion: context.reader.snapshot.projectVersion,
         effect: "settings", reads: [{ path: TERM_REGISTRY_PATH, revision }],
         writes: [{ path: TERM_REGISTRY_PATH, revision, content }],
-        message: `Remove terminology entry: ${existing.canonical}`,
+        message: `Remove terminology entry: ${(existing?.canonical??ref!.knowledgeId)}`,
       };
       const proposal = await context.propose([operation], [{
         id: randomUUID(), snapshot: context.reader.snapshot, module: "search", kind: "term_registry_remove",
-        paths: [{ path: TERM_REGISTRY_PATH, revision }], details: { termId: existing.id, canonical: existing.canonical },
+        paths: [{ path: TERM_REGISTRY_PATH, revision }], details: { termId: input.id, canonical: existing.canonical },
       }]);
       registries.delete(snapshotKey(context.reader.snapshot));
-      return { ok: true, snapshot: context.reader.snapshot, data: { removed: existing.id, proposal } } as ActionResult;
+      return { ok: true, snapshot: context.reader.snapshot, data: { removed: input.id, proposal } } as ActionResult;
     }),
   ];
 }
