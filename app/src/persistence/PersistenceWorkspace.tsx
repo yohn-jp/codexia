@@ -35,6 +35,7 @@ import { createPostgresEditorEvidenceAdapter } from "../editor/postgresEvidenceA
 interface EvidenceJump extends EvidenceRangeRequest {
   projectId: string;
   documentId: string;
+  positionConfirmed: boolean;
 }
 
 interface ActiveDocument {
@@ -1109,6 +1110,11 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       return;
     }
     if (active?.document.id !== evidenceJump.documentId) return;
+    if (!evidenceJump.positionConfirmed) {
+      setEvidenceJump(undefined);
+      setNotice("現在位置が未確定の根拠です。本文の位置を再確認してください。");
+      return;
+    }
     if (active.revision.id !== evidenceJump.revisionId || active.dirty || active.remoteConflict || active.markdown !== active.revision.markdown) {
       setEvidenceJump(undefined);
       setNotice("原稿またはRevisionが変わっているため、根拠の位置は再確認してください。");
@@ -1128,12 +1134,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     if (selectionRef.current?.projectId !== project.id || selectionRef.current.documentId !== anchor.documentId) return;
     setReading(false);
     setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
-    if (anchor.status !== "confirmed" || anchor.toUtf16 <= anchor.fromUtf16 || !quote) {
-      setNotice("現在位置が未確定の根拠です。本文の位置を再確認してください。");
-      return;
-    }
     setEvidenceJump({ projectId: project.id, documentId: anchor.documentId, revisionId: anchor.revisionId,
-      from: anchor.fromUtf16, to: anchor.toUtf16, quote });
+      from: anchor.fromUtf16, to: anchor.toUtf16, quote,
+      positionConfirmed: anchor.status === "confirmed" && anchor.toUtf16 > anchor.fromUtf16 && Boolean(quote) });
   }
 
   const handleTermNavigate = useCallback((path: string) => {
@@ -1283,7 +1286,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             evidenceState={active.evidence}
             evidenceLoadKey={active.evidenceLoadKey}
             evidenceSourceText={active.revision.markdown}
-            evidenceRangeRequest={evidenceJump?.projectId === projectId && evidenceJump.documentId === active.document.id && evidenceJump.revisionId === active.revision.id && !active.dirty && !active.remoteConflict ? evidenceJump : undefined}
+            evidenceRangeRequest={evidenceJump?.positionConfirmed && evidenceJump.projectId === projectId && evidenceJump.documentId === active.document.id && evidenceJump.revisionId === active.revision.id && !active.dirty && !active.remoteConflict ? evidenceJump : undefined}
             onEvidenceRangeResult={handleEvidenceRangeResult}
             onEvidenceChange={(evidence) => {
               const current = activeRef.current;
