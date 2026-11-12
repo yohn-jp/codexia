@@ -113,6 +113,7 @@ export class StandaloneController {
         assert.ok(!fenced.writers.some(writer=>writer.slot!==old.slot),'Candidate still owns writer');
         await this.uiEpoch(state.installed);
         if(!isOnlyWriter(fenced,old.slot,old.image)){
+          await this.host.pullAndVerify(state.installed);
           await this.host.prepare(old.slot,state.installed);
           await this.host.stopPreflight(old.slot);
           await this.host.startWriter(old.slot,state.installed);
@@ -144,7 +145,7 @@ export class StandaloneController {
       assertObservation(obs,state.journal);
       if(boot&&obs.writers.length===0){
         await this.host.route('blocked');
-        await this.uiEpoch(state.installed);
+        await this.host.pullAndVerify(state.installed);
         await this.host.prepare(active.slot,state.installed);
         await this.host.stopPreflight(active.slot);
         await this.host.startWriter(active.slot,state.installed);
