@@ -1123,7 +1123,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     }
     // The same-document fast path of selectDocument does not perform a guard.
     if (activeRef.current?.document.id === anchor.documentId && !await protectTransition()) return;
+    if (selectionRef.current?.projectId !== project.id) return;
     if (!await selectDocument(anchor.documentId)) return;
+    if (selectionRef.current?.projectId !== project.id || selectionRef.current.documentId !== anchor.documentId) return;
     setReading(false);
     setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
     if (anchor.status !== "confirmed" || anchor.toUtf16 <= anchor.fromUtf16 || !quote) {
@@ -1346,7 +1348,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             {nodeEvidenceError && <p role="alert">{nodeEvidenceError}</p>}
             {!nodeEvidenceError && selectedNodeEvidence === null && <p role="status">根拠を読み込んでいます。</p>}
             {selectedNodeEvidence?.length === 0 && <p>このKnowledgeにリンクされた根拠はありません。</p>}
-            <ul className="pg-evidence-list">
+            <ul className="pg-node-evidence-list">
               {selectedNodeEvidence?.map((item) => {
                 const { anchor, quote } = item;
                 const link = item.mentions.find(({ link }) => link.nodeId === selectedNode.id)?.link;
