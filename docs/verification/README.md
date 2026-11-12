@@ -16,7 +16,7 @@ pnpm audit:core
 
 The PostgreSQL persistence suite is part of `pnpm test` and requires a disposable PostgreSQL database in `CODEXIA_TEST_DATABASE_URL`. It runs the migrations and exercises persistence transactions; it does not clean the database after the run. For example, start a disposable local server, then run `CODEXIA_TEST_DATABASE_URL=postgres://codexia:codexia@127.0.0.1:55440/codexia_test pnpm test`. The verification workflow supplies its own PostgreSQL service.
 
-For an application database, apply the schema with `CODEXIA_DATABASE_URL='postgres://user:password@host:5432/database' pnpm --filter @codexia/persistence-postgres migrate`. Migration files are checksum-checked and applied transactionally.
+For an application database, apply the schema with `CODEXIA_DATABASE_URL='postgres://user:password@host:5432/database' pnpm --filter @codexia/persistence-postgres migrate`. Migration files are checksum-checked and applied transactionally. API startup verifies that the database migration ledger exactly matches the packaged migration files, even when startup migrations are disabled. Missing, changed or unexpected applied migrations prevent startup. With `CODEXIA_DATABASE_MIGRATE_ON_START=0` (or unset), this verification is read-only and does not initialize or migrate the database.
 
 ## Browser checks
 
