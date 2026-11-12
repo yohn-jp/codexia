@@ -1,0 +1,21 @@
+[Unit]
+Description=Codexia stable private API proxy
+After=network-online.target
+[Container]
+Image=ghcr.io/yohn-jp/codexia-backend@sha256:REPLACE_WITH_VERIFIED_DIGEST
+ContainerName=codexia-api-proxy
+Network=codexia.network
+Volume=/opt/codexia-updater/deploy/updater/proxy.mjs:/config/proxy.mjs:ro,Z
+Volume=%h/.local/state/codexia-updater:/config/state:ro,Z
+User=0
+Entrypoint=node
+Exec=/config/proxy.mjs
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=all
+Tmpfs=/tmp:rw,nosuid,nodev,noexec,size=16m
+[Service]
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=default.target
