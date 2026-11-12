@@ -1,4 +1,4 @@
-import { buildMentionDictionary, findMentions } from "./mentionIndex.js";
+import { buildMentionDictionary, findUnambiguousMentions } from "./mentionIndex.js";
 import {
   snapshotResult,
   type StoryEntity,
@@ -98,7 +98,7 @@ function extractReaderDisclosuresData(
   const events: ReaderKnowledgeEvent[] = [];
   for (const scene of [...scenes].sort((a, b) => a.order - b.order)) {
     if (scene.text) {
-      for (const entityId of findMentions(dictionary, scene.text)) {
+      for (const entityId of findUnambiguousMentions(dictionary, scene.text)) {
         if (disclosed.has(entityId)) continue;
         const entity = entityById.get(entityId);
         if (!entity) continue;
@@ -116,7 +116,7 @@ function extractReaderDisclosuresData(
     }
     for (const change of scene.stateChanges ?? []) {
       if (!change.trim()) continue;
-      for (const entityId of findMentions(dictionary, change)) {
+      for (const entityId of findUnambiguousMentions(dictionary, change)) {
         if (disclosed.has(entityId)) continue;
         disclosed.add(entityId);
         events.push({
