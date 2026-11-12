@@ -197,7 +197,7 @@ function diffReaderAndCharacterKnowledgeData(options: {
         characterId,
         entityId,
         characterKnewAtSceneId: knew.sceneId,
-        readerDisclosedAtSceneId: reader?.sceneId ?? null,
+        readerDisclosedAtSceneId: null,
       });
     }
   }
