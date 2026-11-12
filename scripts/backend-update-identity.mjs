@@ -12,11 +12,11 @@ export function validateBackendIdentity(identity) {
   if (!identity || typeof identity !== 'object' || Array.isArray(identity) ||
       Object.keys(identity).sort().join(',') !== keys.join(',') ||
       identity.format !== 'codexia-backend-identity/v1' ||
-      !/^\d+\.\d+\.\d+$/.test(identity.version) ||
-      !/^[0-9a-f]{40}$/.test(identity.sourceSha) ||
+      typeof identity.version !== 'string' || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(identity.version) ||
+      typeof identity.sourceSha !== 'string' || !/^[0-9a-f]{40}$/.test(identity.sourceSha) ||
       !['core', 'full'].includes(identity.profile) ||
       identity.platform !== 'linux/amd64' ||
-      !/^[0-9a-f]{64}$/.test(identity.migrationFingerprint) ||
+      typeof identity.migrationFingerprint !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(identity.migrationFingerprint) ||
       !Number.isSafeInteger(identity.apiEpoch) || identity.apiEpoch < 1 ||
       !Number.isSafeInteger(identity.persistenceFormat) || identity.persistenceFormat < 1) {
     throw new Error('Invalid backend update identity');
@@ -59,15 +59,15 @@ function main() {
       cwd: runtime, encoding: 'utf8',
     }).trim();
     writeFileSync(path.join(runtime, 'update-identity.json'), JSON.stringify(expectedIdentity(profile, sourceSha, fingerprint)) + '\n');
-  } else if (command === 'verify' && args.length === 6) {
-    const [embedded, api, platform, label, fingerprint, sourceSha] = args;
+  } else if (command === 'verify' && args.length === 7) {
+    const [embedded, api, platform, label, fingerprint, sourceSha, profile] = args;
     const identity = JSON.parse(embedded);
-    assertBackendIdentity(identity, expectedIdentity(identity.profile, sourceSha, fingerprint), {
+    assertBackendIdentity(identity, expectedIdentity(profile, sourceSha, fingerprint), {
       api: JSON.parse(api), platform, sourceSha: label, migrationFingerprint: fingerprint,
     });
     console.log('Backend update identity verified');
   } else {
-    throw new Error('Usage: backend-update-identity.mjs build <runtime> <profile> <sha> | verify <identity> <api> <platform> <label> <fingerprint> <sha>');
+    throw new Error('Usage: backend-update-identity.mjs build <runtime> <profile> <sha> | verify <identity> <api> <platform> <label> <fingerprint> <sha> <profile>');
   }
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
