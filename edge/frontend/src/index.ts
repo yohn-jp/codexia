@@ -4,6 +4,7 @@ export interface Env {
 
 export type Destination =
   | { kind: "index"; assetPath: string; reader: boolean }
+  | { kind: "identity" }
   | { kind: "asset" }
   | { kind: "not-found" };
 
@@ -50,6 +51,7 @@ export function classify(request: Request): Destination {
   }
 
   const pathname = url.pathname;
+  if (pathname === "/desktop/update-identity.json") return { kind: "identity" };
   if (pathname === "/" || pathname === "/index.html") {
     return { kind: "index", assetPath: "/index.html", reader: false };
   }
@@ -114,6 +116,13 @@ export async function dispatch(request: Request, env: Env): Promise<Response> {
   const destination = classify(request);
   if (destination.kind === "not-found") return notFound(request.method);
   if (destination.kind === "asset") return env.ASSETS.fetch(request);
+  if (destination.kind === "identity") {
+    const asset = await env.ASSETS.fetch(request);
+    if (!asset.ok) return notFound(request.method);
+    return new Response(request.method === "HEAD" ? null : await asset.text(), { status: 200, headers: {
+      "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+    } });
+  }
   return serveHtml(request, env, destination.assetPath, destination.reader);
 }
 
