@@ -43,6 +43,8 @@ import {
   type StoryEntityType,
 } from "./domain/index.js";
 import { readStorySnapshot, type LoadedStorySnapshot } from "./snapshot.js";
+import { parseWorldTime, sceneContextPackage, temporalScene, type ContextScope } from "./domain/temporal.js";
+import type { SceneStateEvent } from "./domain/worldState.js";
 import { appendProposedTextToNotes, collectNotesPlainTexts, normalizeNotes } from "./notes.js";
 import { buildNarrativeChangeProposal, identifyNarrativeChangeSet } from "./narrativeChangeSet.js";
 import {
@@ -536,10 +538,12 @@ function manuscriptTextHash(value: string): string {
 function createStateEvent(input: ObjectValue, scene: StoryEntity, manuscriptHash: string): StateProposal {
   const raw = parseRecord(input.event, "event");
   const kind = raw.kind;
-  if (!["location", "acquaintance", "ownership", "knowledge"].includes(String(kind))) throw new TypeError("event.kind is invalid");
+  if (!["location", "acquaintance", "ownership", "knowledge", "attribute"].includes(String(kind))) throw new TypeError("event.kind is invalid");
   const subject = stringValue(raw.subject, "event.subject");
   const object = raw.object === null ? null : stringValue(raw.object, "event.object");
   const payload = isRecord(raw.payload) ? raw.payload : {};
+  if (payload.layer !== undefined && !["objective", "character-belief", "reader-knowledge"].includes(String(payload.layer))) throw new TypeError("Invalid state layer");
+  if (kind === "attribute" && (typeof payload.predicate !== "string" || !["affiliation", "rank", "life"].includes(payload.predicate) || typeof payload.value !== "string" || !payload.value.trim() || object !== null)) throw new TypeError("Attribute events require a supported predicate, value and null object");
   const now = new Date().toISOString();
   const event = {
     sceneId: scene.id,
@@ -578,6 +582,8 @@ function validateEventReferences(event: Record<string, unknown>, story: LoadedSt
   if (event.kind === "location" && subject.type !== "character") throw new TypeError("Location state subject must be a character");
   if (event.kind === "location" && object?.type !== "location") throw new TypeError("Location state object must be a location");
   if (event.kind === "ownership" && subject.type !== "item") throw new TypeError("Ownership state subject must be an item");
+  if (event.kind === "attribute" && subject.type !== "character") throw new TypeError("Attribute state subject must be a character");
+  if (event.kind === "knowledge" && subject.type !== "character") throw new TypeError("Knowledge subject must be a character");
 }
 
 function canonical(value: unknown): unknown {
@@ -758,6 +764,7 @@ async function prepareEntityUpdate(
     patch.relations = relations;
     delete patch["links[+]"];
   }
+  if (entity.type === "scene" && Object.hasOwn(patch, "world_time")) parseWorldTime(patch.world_time);
   const next: ObjectValue = { ...entity.raw, ...patch, id: entity.id, type: entity.type };
   if ("name" in next) next.name = sanitizeScalar(next.name);
   if ("title" in next) next.title = sanitizeScalar(next.title);
@@ -1305,6 +1312,30 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
       const entries = buildSceneTimelineEntries({ snapshot: context.reader.snapshot, scenes: timelineInputs(story) }).data;
       return typeof input.sceneId === "string" ? entries.filter((entry) => entry.sceneId === input.sceneId) : entries;
     }),
+    action("story.world-state.temporal", read, fieldSchema(["sceneId"], ["sceneId"]), async (input, context) => temporalScene(await readStorySnapshot(context.reader), stringValue(input.sceneId, "sceneId"))),
+    action("story.context.package", read, fieldSchema(["sceneId", "scope"], ["sceneId", "scope", "characterId"]), async (input, context) => {
+      const story = await readStorySnapshot(context.reader);
+      return sceneContextPackage(story, stringValue(input.sceneId, "sceneId"), input.scope as ContextScope, input.characterId as string | undefined, input.budget === undefined ? 12000 : Number(input.budget));
+    }),
+    action("story.scenario.compare", read, fieldSchema(["sceneId", "alternatives"], ["sceneId"]), async (input, context) => {
+      const story = await readStorySnapshot(context.reader);
+      const sceneId = stringValue(input.sceneId, "sceneId");
+      const scene = story.entities.get(sceneId);
+      if (scene?.type !== "scene") throw new TypeError("Scene not found");
+      if (!Array.isArray(input.alternatives) || input.alternatives.length !== 2) throw new TypeError("Provide exactly two alternatives");
+      const baseline = temporalScene(story, sceneId);
+      const alternatives = input.alternatives.map((alternative, index) => {
+        const raw = parseRecord(alternative, "alternative");
+        if (!Array.isArray(raw.events) || raw.events.length > 50) throw new TypeError("At most fifty hypothetical events per alternative");
+        const events = raw.events.map((event, eventIndex) => {
+          const candidate = createStateEvent({ event }, scene, "hypothetical").event;
+          validateEventReferences(candidate, story);
+          return { ...candidate, eventId: `hypothesis-${index}-${eventIndex}`, replacesEventId: undefined, source: "manual", status: "confirmed" } as unknown as SceneStateEvent;
+        });
+        return { label: stringValue(raw.label, "label"), hypothetical: true, projection: temporalScene(story, sceneId, events) };
+      });
+      return { baseline, alternatives, adoption: "author-approved-state-proposal-required" };
+    }),
     action("story.world-state.at-scene", read, fieldSchema(["sceneId"], ["sceneId"]), async (input, context) => getWorldStateAtScene({ ...await readStorySnapshot(context.reader), sceneId: stringValue(input.sceneId, "sceneId") }).data),
     action("story.world-state.history", read, fieldSchema(["entityId"], ["entityId"]), async (input, context) => getEntityStateHistory({ ...await readStorySnapshot(context.reader), entityId: stringValue(input.entityId, "entityId") }).data),
     action("story.world-state.workbench", read, fieldSchema([], ["sceneId"]), async (input, context) => {
@@ -1364,6 +1395,10 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
       if (prior.conflictEventIds.length || prior.duplicateOfProposalId) throw new TypeError("State proposal has unresolved conflicts or duplicates");
       const scene = story.entities.get(String(prior.event.sceneId));
       if (scene?.type !== "scene") throw new TypeError("State proposal scene not found");
+      const manuscriptPath = typeof scene.raw.manuscript === "string" ? scene.raw.manuscript : undefined;
+      const manuscript = manuscriptPath ? [...story.entities.values()].find((entity) => entity.filePath === manuscriptPath)?.body ?? "" : "";
+      if (manuscriptTextHash(manuscript) !== prior.manuscriptHash) throw Object.assign(new Error("State proposal source manuscript changed; refresh before approval"), { code: "stale_source" });
+      validateEventReferences(prior.event, story);
       const event = { ...prior.event, source: "manual", status: "confirmed" };
       const rawEvents = Array.isArray(scene.raw.state_events) ? scene.raw.state_events : [];
       const updatedProposal = { ...prior, status: "approved", updatedAt: new Date().toISOString(), history: [...prior.history, { action: "approved", at: new Date().toISOString(), event }] };
