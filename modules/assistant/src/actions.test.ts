@@ -1032,3 +1032,26 @@ test("usage history combines preserved JSONL and host-owned events without rewri
   assert.equal((await actionContext.reader.read(usagePath))?.content, legacyContent);
   assert.equal(legacyContent.includes('"futureField":{"retained":true}'), true);
 });
+
+
+test("context preview delegates to the shared Story action without provider acquisition or proposals", async () => {
+  const input = { sceneId: "sc-a", scope: "reader", budget: 1000 };
+  const data = { sceneId: "sc-a", scope: "reader", parts: [], budget: 1000, used: 0, omitted: 0 };
+  let acquired = 0;
+  const action = getAction(createAssistantActions(moduleContext(undefined, () => { acquired++; })), "assistant.context.preview");
+  const result = await action.invoke(input, context({
+    onPropose() { assert.fail("preview must not propose changes"); },
+    async invoke(id, value) {
+      assert.equal(id, "story.context.package");
+      assert.deepEqual(value, input);
+      return { ok: true, snapshot, data };
+    },
+  }));
+  assert.equal(result.ok, true);
+  if (result.ok) assert.deepEqual(result.data, data);
+  assert.equal(acquired, 0);
+  const stale = await action.invoke(input, context({
+    async invoke() { return { ok: true, snapshot: { ...snapshot, projectVersion: snapshot.projectVersion + 1 }, data }; },
+  }));
+  assert.equal(stale.ok, false);
+});
