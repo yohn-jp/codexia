@@ -1,2 +1,2 @@
 export { createPostgresPersistence, PostgresPersistence } from "./postgres-store.js";
-export { migratePostgresDatabase, runPostgresMigrations, verifyPostgresSchema } from "./migrate.js";
+export { migratePostgresDatabase, packagedMigrationFingerprint, runPostgresMigrations, verifyPostgresSchema } from "./migrate.js";
