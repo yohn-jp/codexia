@@ -10,6 +10,7 @@ on:
       - modules/**
       - packages/contracts/**
       - deploy/cloudflare/ui-routes.json
+      - deploy/update-compatibility.json
       - scripts/build-frontend.mjs
       - scripts/profile-build.mjs
       - scripts/profile-package.mjs
@@ -27,6 +28,7 @@ on:
       - modules/**
       - packages/contracts/**
       - deploy/cloudflare/ui-routes.json
+      - deploy/update-compatibility.json
       - scripts/build-frontend.mjs
       - scripts/profile-build.mjs
       - scripts/profile-package.mjs
