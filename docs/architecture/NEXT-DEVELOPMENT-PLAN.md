@@ -1,9 +1,6 @@
-# Codexia 次期開発計画
+# Codexia 統合創作基盤・更新設計
 
-**版:** 1.0（レビュー用計画案）  
-**策定日:** 2026-11-12  
-**対象:** `yohn-jp/codexia`  
-**基準コミット:** [`464d2cb23a53535ae2bc48993e1e6374b1b1971b`](https://github.com/yohn-jp/codexia/commit/464d2cb23a53535ae2bc48993e1e6374b1b1971b)
+設計提案。既存の正本・承認・リリース契約を維持する。
 
 ## 1. 目的と完了条件
 
@@ -21,7 +18,7 @@ Codexiaを、原稿の執筆・作品世界の知識管理・物語の整合性�
 
 ### 2.1 確認済みの資産
 
-基準コミットの設計文書、パッケージ定義、主要エントリポイント、Story/Assistantのアクション実装を確認した。下表は存在を確認した契約・コードであり、機能全体のE2E合格や本番稼働を示すものではない。
+下表は設計上の依存先。対応する実装の受入は既存CIおよび実環境の検証によって判断する。
 
 | 領域 | 現行の資産 | 次期開発での扱い |
 |---|---|---|
@@ -56,34 +53,15 @@ Codexiaを、原稿の執筆・作品世界の知識管理・物語の整合性�
 6. 日本語IME、ルビ、縦書き閲覧、入力復旧、別シェル、可変レイアウトを維持する。新しいエディタや状態管理基盤への置換は行わない。
 7. DBスキーマ変更はメジャー更新でのみ行う。通常の自動更新では一切のDBマイグレーションを実行しない。次期機能に必要なスキーマ変更は計画的なメジャー境界へ集約し、不要な変更は避ける。
 
-## 4. 依存関係と開発系列
+## 4. 機能間の依存関係
 
-```text
-A0 現行機能・契約棚卸し ─┬─ A1 Knowledge / Evidence ─ A2 Temporal Story ─ A3 Narrative Intelligence
-                         │                                      └─────────┬──────────────┘
-                         │                                                A4 Context Engine ─ A5 Scenario Planning
-                         └─ O1 Release / Update Contract ─ O2 Blue/Green ─ O3 運用受入
-```
+Knowledge/Evidenceの統合契約を基礎として、Temporal Story、Narrative Intelligence、Context Engine、Scenario Planningを接続する。更新制御はリリース契約、Blue/Green切替、運用保全の順に依存する。共有API・永続契約・CI定義の整合を維持する。
 
-運用系列Oと創作系列Aは原則並行可能。共有API、永続契約、CI定義への変更は統合責任者が調整し、競合する作業を独立ブランチへ分割しない。各段階は「設計承認→最小実装→受入検証→統合」の順に進める。Phase番号は依存関係であって工数・納期を確約しない。
+## 5. 創作系列 — 設計仕様と受入条件
 
-| ID | 優先 | 成果 | 前提 |
-|---|---|---|---|
-| A0 | P0 | 実装・契約・ギャップ一覧、代表作品fixture、次期Issueの受入条件 | なし |
-| O1 | P0 | 不変digestのリリース契約、スキーマ互換ゲート、UI/API互換ポリシー | A0の配備調査 |
-| O2 | P0 | VM上の更新コントローラー、安定した切替経路 | O1 |
-| O3 | P0 | 障害注入・実環境受入、バックアップ・復旧手順 | O2 |
-| A1 | P1 | Knowledge/Evidenceを原稿と統合するContext Dockとレビュー | A0 |
-| A2 | P1 | 時系列・人物状態・認識の統一された参照 | A1 |
-| A3 | P1 | 伏線、開示、設定矛盾の根拠付きレビュー | A2 |
-| A4 | P2 | 既存Assistant/MCP共用のContext Package | A2、A3の参照契約 |
-| A5 | P3 | 仮説・分岐構想、採用時のみ正本へ反映 | A4 |
+### 棚卸し・統合契約
 
-## 5. 創作系列 — 各フェーズの仕様と受入条件
-
-### A0 — 棚卸し・統合契約
-
-**成果物:** 現行機能マトリクス（コード・API・UI・テストへのリンク）、ID/状態の対応表、スキーマ変更要否、統合fixture、実装Issue案。
+**統合契約:** コード・API・UI・テストの対応、ID/状態の対応、スキーマ互換性および統合fixtureを明確にする。
 
 - Core→Persistence、Story→SnapshotReader、Search→用語辞書、Assistant→Story/MCPの実際の実行経路を追跡する。KnowledgeとStoryの二重登録・未接続・型の変換損失を調査する。
 - 既存CI/実環境の結果を確認し、失敗を機能追加で覆い隠さない。実装の存在と動作済みを分ける。
@@ -91,7 +69,7 @@ A0 現行機能・契約棚卸し ─┬─ A1 Knowledge / Evidence ─ A2 Tempo
 
 **受入:** 各計画項目が既存機能の再利用・接続改善・新規実装・延期のどれかに分類され、担当コンポーネントと受入証拠が確定する。未確認の既存機能を「未実装」と決め付けない。
 
-### A1 — Knowledge / Evidence統合
+### Knowledge / Evidence統合
 
 **作者体験:** 本文選択または装飾クリックからContext Dockを開く。対象のKnowledge、関連人物・設定、確定根拠、候補、曖昧さを確認する。原稿を離れず新規設定・関連・言及を提案でき、承認後は設定から根拠箇所へ逆引きできる。既存Knowledge/Evidenceパネルを利用し、本文を閉じずに必要情報へ到達する。
 
@@ -104,7 +82,7 @@ A0 現行機能・契約棚卸し ─┬─ A1 Knowledge / Evidence ─ A2 Tempo
 - 日本語IME・ルビ・絵文字を含む実原稿で入力と選択が失われず、Desktop/Mobileで原稿↔Knowledgeの往復ができる。
 - Core-onlyでも手動Knowledge/Evidenceが利用でき、Optionalモジュールの停止によって確定データが失われない。
 
-### A2 — Temporal Story / 世界状態
+### Temporal Story / 世界状態
 
 **作者体験:** シーンを選択すると、世界内の時点、作品内の描写位置、人物の状態、直前からの変化とその根拠を確認できる。回想や時点不明の場面を無理に現在順へ並べず、年表と構成を独立して参照する。
 
@@ -116,7 +94,7 @@ A0 現行機能・契約棚卸し ─┬─ A1 Knowledge / Evidence ─ A2 Tempo
 - 過去の状態イベントを変更すると影響する後続の派生状態が更新またはstaleとなる。関連しない本文を再解析しない。
 - 同一時点の相反する確定状態は明示され、片方を無言で選択しない。
 
-### A3 — Narrative Intelligence / 伏線・認識・整合性
+### Narrative Intelligence / 伏線・認識・整合性
 
 **作者体験:** 章・シーン・人物ごとに、伏線の提示/進展/回収、人物の認識、読者への情報開示を確認できる。問題候補をクリックすると関連する原稿と設定へ移動する。意図的な矛盾や叙述トリックを作者が説明・除外できる。
 
@@ -129,7 +107,7 @@ A0 現行機能・契約棚卸し ─┬─ A1 Knowledge / Evidence ─ A2 Tempo
 - 原稿編集後に旧指摘を現行指摘として表示しない。作者が承認した例外をRevision変更時に必要に応じて再評価する。
 - 検査結果から原稿・設定へ移動し、ChangeSet経由で必要な修正のみ反映する。
 
-### A4 — Context Engine / AI・MCP統合
+### Context Engine / AI・MCP統合
 
 **作者体験:** 「このシーンの続きを考える」「この人物の発言を見直す」「読者視点で第3章を評価する」等に応じ、対象文脈を自動選定する。外部送信前には対象範囲・送信先・目的を確認できる。回答の根拠から原稿へ戻れる。
 
@@ -142,7 +120,7 @@ A0 現行機能・契約棚卸し ─┬─ A1 Knowledge / Evidence ─ A2 Tempo
 - AIは設定の確定や本文の書換えを直接行えない。作者承認とRevision検証を経て反映する。
 - 古い文脈・根拠を使った提案はstaleとして扱い、再取得を促す。出典が欠ける場合は推測と明示する。
 
-### A5 — Scenario Planning / 構想分岐（将来設計）
+### Scenario Planning / 構想分岐（将来設計）
 
 本編の正本を変更せず、複数の展開案・仮定・予定イベント・想定される世界状態を比較する。分岐はGitのブランチではなく、固定した本編Snapshotに対する仮説・変更候補の集合とする。まず設計と小さな実証を行い、既存ChangeSetとの意味・寿命・承認単位を整理する。長期保存が必要な構想はStoryの作者所有ModuleRecord等を評価する。完全な並行世界の版管理や自動マージは対象外。
 
@@ -150,7 +128,7 @@ A0 現行機能・契約棚卸し ─┬─ A1 Knowledge / Evidence ─ A2 Tempo
 
 ## 6. 運用系列 — 自動更新計画
 
-### O1 — リリース契約
+### リリース契約
 
 現行のSHA固定OCIイメージとexact-main CI certificationを維持する。ポーリング対象として、CI検証済みのアプリケーションリリースを指す配布メタデータを導入する。タグの辞書順や単なるコミットの新旧で自動更新先を判定しない。
 
@@ -160,7 +138,7 @@ A0 現行機能・契約棚卸し ─┬─ A1 Knowledge / Evidence ─ A2 Tempo
 
 **受入:** 未署名/未検証、古い版、誤profile、スキーマ差、UI非互換、digest不一致を拒否する。発行途中・GHCR障害では現行稼働を維持する。CIを迂回したリリースを自動適用しない。
 
-### O2 — Blue/Green更新コントローラー
+### Blue/Green更新コントローラー
 
 ```text
 Cloudflare Access
@@ -177,7 +155,7 @@ Cloudflare Access
 
 更新状態: idle → detected → verified → pulled → candidate-ready → draining → switched → observing → committed。失敗はrollback/blockedへ遷移する。状態とdigestを原子的に記録し、途中でVMが再起動した場合は実プロキシ・コンテナ・Writer状態を照合して復旧する。
 
-候補は独立したキャッシュ/一時領域で起動し、外部ルートから隔離する。候補でバックグラウンドジョブ・外部送信・正本変更・共有履歴への書込みを開始しない。実装方法はA0/O1で現行API lifecycleを追跡し決定する。旧APIと候補APIの同時Writerや共有 `/data` `/history` への無制御並行アクセスを禁止する。候補のReadinessはDB接続、スキーマ一致、契約、初期化完了を確認する。
+候補は独立したキャッシュ/一時領域で起動し、外部ルートから隔離する。候補でバックグラウンドジョブ・外部送信・正本変更・共有履歴への書込みを開始しない。実装方法は統合契約/リリース契約で現行API lifecycleを追跡し決定する。旧APIと候補APIの同時Writerや共有 `/data` `/history` への無制御並行アクセスを禁止する。候補のReadinessはDB接続、スキーマ一致、契約、初期化完了を確認する。
 
 切替時に旧APIの新規書込み・ジョブ開始を止め、進行中の保存と必要なジョブを既存drain境界で完了/安全に停止させる。排他が成立してから新APIをActiveへ昇格し、安定したプロキシの転送先を変更する。切替に伴う短い受付停止・再ログインを許容する初期版とし、無停止を保証しない。セッション継続を実現する場合は既存認証境界を拡張し、DBスキーマ変更が必要ならメジャー計画へ分離する。保存結果が不明な要求は既存冪等IDで照合する。SSE/長時間ジョブは接続切断と再接続を明示的に検証する。
 
@@ -190,7 +168,7 @@ Cloudflare Access
 - 不正な設定・DB不一致・health失敗・プロキシ切替失敗・切替後異常を注入し、fail-closedの動作を確認する。
 - DBスキーマを自動変更しないことをテストで証明する。Tunnel、Access、API認証、CSRF、公開ポート境界を維持する。
 
-### O3 — 運用受入・保全
+### 運用受入・保全
 
 更新の状態、現在/候補/直前バージョン、失敗理由、最終成功時刻、停止状態をホスト上のログ/CLIで観測できるようにする。初期版ではWeb管理画面を必須にしない。手動pause/resume、明示的なrollback、失敗版の再試行抑制を提供する。初期の自動更新有効化はoperatorの明示設定による。
 
@@ -202,28 +180,17 @@ Cloudflare Access
 
 - 既存 `scripts/ci-contract.mjs` の検証インベントリをauthorityとする。Core/Fullの型検査、unit、build、依存監査、ブラウザ、OCI、Hosted Native、certificationを省略しない。exact-head結果とmain-pushのリリースゲートを区別する。
 - 各機能の必須証拠は、純粋計算のunit、実PostgreSQLでのトランザクション・scope・Revision・障害検証、Desktop/Mobileの実操作、外部AIを使用しないfixture、必要な場合の実サービス検証で構成する。
-- パフォーマンスはA0の基準値と同じfixture・profile・環境で比較する。入力、場面切替、保存、参照、解析を分離し、解析をForegroundへ直列化しない。目標数値は基準計測後に設定する。
+- パフォーマンスは統合契約の基準値と同じfixture・profile・環境で比較する。入力、場面切替、保存、参照、解析を分離し、解析をForegroundへ直列化しない。目標数値は基準計測後に設定する。
 - スキーマ変更を発見した場合は変更の理由と互換性を記録する。通常更新へ紛れ込ませず、計画されたメジャーアップデートの運用手順・バックアップ・復旧試験を別途定める。
 - スコープ外: Git永続化/同期、WASMによる再設計、外部Plugin Marketplace、全作品横断の知識統合、汎用イベントバス、Kubernetes、完全オフライン同期、共同編集CRDT、無条件の自動原稿修正。外部Plugin設計は既存別計画に留める。
 
-## 8. 最初の実行単位
+## 8. 参照資料
 
-次の2本を独立して開始し、合流時に共有契約を一度だけ確定する。ブランチ名は実装開始時の候補であり、本計画の作成ではブランチ/Issue/PRを作成しない。
+設計上の参照先。
 
-| 作業単位 | ブランチ候補 | 成果物 |
-|---|---|---|
-| A0 | `plan/knowledge-story-integration` | 実装経路とID対応の棚卸し、代表fixture、A1〜A4のIssue候補、必要な設計文書更新案 |
-| O1 | `plan/deployment-lifecycle` | リリース互換契約、配備状態遷移、Blue/Greenの排他・履歴・切替設計、O2/O3のIssue候補 |
+- [Core](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/CORE.md) / [Internal boundaries](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/INTERNAL-BOUNDARIES.md) / [Reboot RFC](https://github.com/yohn-jp/codexia/blob/main/docs/architecture/CODEXIA-REBOOT-RFC.md)
+- [Persistence contracts](https://github.com/yohn-jp/codexia/blob/main/packages/persistence-contracts/src/index.ts) / [Core Knowledge](https://github.com/yohn-jp/codexia/blob/main/packages/core/src/knowledge/index.ts) / [Core Evidence](https://github.com/yohn-jp/codexia/blob/main/packages/core/src/evidence/index.ts)
+- [Story domain](https://github.com/yohn-jp/codexia/blob/main/modules/story/src/domain/index.ts) / [Story snapshot](https://github.com/yohn-jp/codexia/blob/main/modules/story/src/snapshot.ts) / [Story actions](https://github.com/yohn-jp/codexia/blob/main/modules/story/src/actions.ts) / [Assistant actions](https://github.com/yohn-jp/codexia/blob/main/modules/assistant/src/actions.ts)
+- [Deployment](https://github.com/yohn-jp/codexia/blob/main/docs/deployment/README.md) / [API Quadlet](https://github.com/yohn-jp/codexia/blob/main/deploy/quadlet/codexia-api.container) / [Portable works](https://github.com/yohn-jp/codexia/blob/main/docs/authoring-portable.md)
 
-A0の結果が確定した時点で、A1の最小垂直スライス（本文選択→Knowledge→根拠→作者承認→逆引き→原稿復帰）を開始する。O1の承認後にO2へ進む。Storyの既存年表・伏線・世界状態・読者モデル・Assistantの文脈処理を捨てて作り直すことは禁止する。
-
-## 9. 参照資料と未確認事項
-
-以下は基準コミットの参照先。
-
-- [Core](https://github.com/yohn-jp/codexia/blob/464d2cb23a53535ae2bc48993e1e6374b1b1971b/docs/architecture/CORE.md) / [Internal boundaries](https://github.com/yohn-jp/codexia/blob/464d2cb23a53535ae2bc48993e1e6374b1b1971b/docs/architecture/INTERNAL-BOUNDARIES.md) / [Reboot RFC](https://github.com/yohn-jp/codexia/blob/464d2cb23a53535ae2bc48993e1e6374b1b1971b/docs/architecture/CODEXIA-REBOOT-RFC.md)
-- [Persistence contracts](https://github.com/yohn-jp/codexia/blob/464d2cb23a53535ae2bc48993e1e6374b1b1971b/packages/persistence-contracts/src/index.ts) / [Core Knowledge](https://github.com/yohn-jp/codexia/blob/464d2cb23a53535ae2bc48993e1e6374b1b1971b/packages/core/src/knowledge/index.ts) / [Core Evidence](https://github.com/yohn-jp/codexia/blob/464d2cb23a53535ae2bc48993e1e6374b1b1971b/packages/core/src/evidence/index.ts)
-- [Story domain](https://github.com/yohn-jp/codexia/blob/464d2cb23a53535ae2bc48993e1e6374b1b1971b/modules/story/src/domain/index.ts) / [Story snapshot](https://github.com/yohn-jp/codexia/blob/464d2cb23a53535ae2bc48993e1e6374b1b1971b/modules/story/src/snapshot.ts) / [Story actions](https://github.com/yohn-jp/codexia/blob/464d2cb23a53535ae2bc48993e1e6374b1b1971b/modules/story/src/actions.ts) / [Assistant actions](https://github.com/yohn-jp/codexia/blob/464d2cb23a53535ae2bc48993e1e6374b1b1971b/modules/assistant/src/actions.ts)
-- [Deployment](https://github.com/yohn-jp/codexia/blob/464d2cb23a53535ae2bc48993e1e6374b1b1971b/docs/deployment/README.md) / [API Quadlet](https://github.com/yohn-jp/codexia/blob/464d2cb23a53535ae2bc48993e1e6374b1b1971b/deploy/quadlet/codexia-api.container) / [Portable works](https://github.com/yohn-jp/codexia/blob/464d2cb23a53535ae2bc48993e1e6374b1b1971b/docs/authoring-portable.md)
-
-未確認: 全経路のコード棚卸し、既存E2E実行結果、CI main-pushの認証、Cloudflare/VMの実稼働、更新コントローラーの実現方式と性能。これらはA0/O1/O3の検証対象である。本書は設計・開発計画であって実装完了・実機受入を宣言するものではない。5分間隔、監視時間、初期CLI、Standalone限定、短時間停止を許容する初期版は設計案として設定したもので、実機測定と設計承認を経て確定する。
+本書は設計提案であり、実装完了・実機受入を宣言しない。5分間隔、監視時間、初期CLI、Standalone限定、短時間停止を許容する設計は、実機測定と設計承認を経て確定する。
