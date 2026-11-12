@@ -566,19 +566,19 @@ function ContinuityPanel({ context }: { context: BrowserModuleContext }) {
       </div>
       {readerModel && <>
         <p>{readerModel.disclosures.length} reader disclosures · {readerModel.knowledgeGaps.length} knowledge gaps · {readerModel.forgetRisks.length} thread forget-risk checks</p>
-        <h4>What the reader has learned</h4>
+        <h4>Reader-visible mention candidates</h4>
         {readerModel.disclosures.length ? <ol>{readerModel.disclosures.map((item) => <li key={`${item.sceneId}-${item.entityId}`}>{entityName(item.entityId)} first appears in {sceneName(item.sceneId)} · “{item.evidence}”</li>)}</ol> : <p style={mutedStyle}>No registered entities are disclosed before the selected chapter ends.</p>}
-        <h4>Character and reader knowledge gaps</h4>
+        <h4>Possible character and reader knowledge gaps</h4>
         {readerModel.knowledgeGaps.length ? <ul>{readerModel.knowledgeGaps.map((gap, index) => <li key={`${gap.kind}-${gap.characterId}-${gap.entityId}-${index}`}>
           {gap.kind === "character_knows_reader_does_not"
             ? `${entityName(gap.characterId)} knows about ${entityName(gap.entityId)} in ${sceneName(gap.characterKnewAtSceneId)} before the reader sees it (${sceneName(gap.readerDisclosedAtSceneId)}).`
-            : `The reader has learned about ${entityName(gap.entityId)} in ${sceneName(gap.readerDisclosedAtSceneId)}, but ${entityName(gap.characterId)} has not.`}
+            : `${entityName(gap.entityId)} is mentioned in ${sceneName(gap.readerDisclosedAtSceneId)}; ${entityName(gap.characterId)} has no recorded knowledge.`}
         </li>)}</ul> : <p style={mutedStyle}>No knowledge gaps were detected.</p>}
         <h4>Thread forget risk</h4>
         {readerModel.forgetRisks.length ? <ul>{readerModel.forgetRisks.map((risk) => <li key={risk.threadId}>
           {entityName(risk.threadId)} · {Math.round(risk.forgetRisk * 100)}% · {risk.sceneDistance} scene(s) since planting · {risk.disclosureCountBetween} intervening disclosures
         </li>)}</ul> : <p style={mutedStyle}>No planted threads need a forget-risk check.</p>}
-        <p style={mutedStyle}>These checks use canonical scene summaries, appearances, and state events from this snapshot. The module’s first-read reaction remains a separate optional assistant flow.</p>
+        <p style={mutedStyle}>Mentions are candidates, not proof of knowledge. Missing knowledge records mean unknown, not ignorance. The module’s first-read reaction remains a separate optional assistant flow.</p>
       </>}
     </section>
     <h3>Character relationship graph</h3>
