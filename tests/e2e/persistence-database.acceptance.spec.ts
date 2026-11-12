@@ -84,7 +84,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await backlinks.getByRole("button", { name: /第一稿/u }).click();
   await expect(page.locator(".pg-notice")).toContainText("現在のRevisionの根拠箇所を選択しました");
   // CodeMirror represents line breaks as separate DOM nodes, not textContent.
-  const readEditor = () => editor.locator(".cm-line").allTextContents().then(lines => lines.join("\n"));
+  const readEditor = () => editor.locator(".cm-line").evaluateAll(lines => lines.map(line => { const copy = line.cloneNode(true) as Element; copy.querySelectorAll(".cm-placeholder").forEach(node => node.remove()); return copy.textContent ?? ""; }).join("\n"));
   await expect.poll(readEditor).toBe(firstDraft);
 
 
