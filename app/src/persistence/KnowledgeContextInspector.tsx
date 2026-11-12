@@ -3,9 +3,9 @@ import type { Assertion, KnowledgeAlias, KnowledgeAliasId, KnowledgeNode, Knowle
 import { api, type PersistenceAnchorView, type PersistenceNodeRead } from "../api";
 
 type Modality = "fact" | "belief" | "disclosure" | "hypothesis";
-export function KnowledgeContextInspector({node,nodes,documentId,revisionId,clean,selectedEvidenceId,onOpenEvidence}: {
+export function KnowledgeContextInspector({node,nodes,documentId,revisionId,clean,selectedEvidenceId,evidenceLoadKey,onOpenEvidence}: {
   node: KnowledgeNode; nodes: KnowledgeNode[]; documentId?: string; revisionId?: string; clean: boolean;
-  selectedEvidenceId: string; onOpenEvidence: (item: PersistenceAnchorView) => void;
+  selectedEvidenceId: string; evidenceLoadKey: number; onOpenEvidence: (item: PersistenceAnchorView) => void;
 }) {
   const projectId=node.projectId;
   const [detail,setDetail]=useState<PersistenceNodeRead|null>(null);
@@ -29,7 +29,7 @@ export function KnowledgeContextInspector({node,nodes,documentId,revisionId,clea
     ]).then(([data,evidence,doc])=>{if(!abort.signal.aborted){setDetail(data);setLinked(evidence.evidence);setAnchors(doc?.anchors??[]);}})
       .catch(e=>{if(!abort.signal.aborted)setError(e instanceof Error?e.message:"Knowledgeを取得できませんでした。");});
     return ()=>abort.abort();
-  },[projectId,node.id,node.version,documentId,revisionId,reload]);
+  },[projectId,node.id,node.version,documentId,revisionId,evidenceLoadKey,reload]);
   const mutate=async(action:()=>Promise<unknown>)=>{
     if(busy)return;setBusy(true);setError("");
     try{await action();setReload(n=>n+1)}catch(e){setError(e instanceof Error?e.message:"保存できませんでした。")}finally{setBusy(false)}
