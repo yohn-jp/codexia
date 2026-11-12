@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Pool, type PoolConfig } from "pg";
-import { assertMigrationSet, readMigrationSet, type MigrationIdentity } from "./migration-set.js";
+import { assertMigrationSet, migrationSetFingerprint, readMigrationSet, type MigrationIdentity } from "./migration-set.js";
 
 const defaultMigrationDirectory = fileURLToPath(new URL("../migrations/", import.meta.url));
 
@@ -50,13 +50,19 @@ export async function runPostgresMigrations(
   }
 }
 
+/** The packaged schema identity can be computed without connecting to PostgreSQL. */
+export async function packagedMigrationFingerprint(): Promise<string> {
+  return migrationSetFingerprint(await readMigrationSet(defaultMigrationDirectory));
+}
+
 /** Verify the exact packaged migration ledger without creating or updating any database object. */
-export async function verifyPostgresSchema(config: PoolConfig | string): Promise<void> {
+export async function verifyPostgresSchema(config: PoolConfig | string): Promise<string> {
   const expected = await readMigrationSet(defaultMigrationDirectory);
   const pool = new Pool(typeof config === "string" ? { connectionString: config } : config);
   try {
     const recorded = await pool.query<MigrationIdentity>("SELECT version, checksum FROM codexia_schema_migrations");
     assertMigrationSet(expected, recorded.rows);
+    return migrationSetFingerprint(expected);
   } finally {
     await pool.end();
   }
@@ -72,8 +78,20 @@ export async function migratePostgresDatabase(config: PoolConfig | string): Prom
 }
 
 async function runCli(): Promise<void> {
+  const args = process.argv.slice(2);
+  if (args.length === 1 && args[0] === "--fingerprint") {
+    console.log(await packagedMigrationFingerprint());
+    return;
+  }
+  if (args.length !== 0 && !(args.length === 1 && args[0] === "--verify-fingerprint")) {
+    throw new Error("Usage: migrate [--fingerprint | --verify-fingerprint]");
+  }
   const connectionString = process.env.CODEXIA_DATABASE_URL;
   if (!connectionString) throw new Error("CODEXIA_DATABASE_URL is required");
+  if (args[0] === "--verify-fingerprint") {
+    console.log(await verifyPostgresSchema(connectionString));
+    return;
+  }
   const applied = await migratePostgresDatabase(connectionString);
   console.log(applied.length === 0 ? "Database schema is current" : `Applied: ${applied.join(", ")}`);
 }
