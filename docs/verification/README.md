@@ -18,6 +18,16 @@ The PostgreSQL persistence suite is part of `pnpm test` and requires a disposabl
 
 For an application database, apply the schema with `CODEXIA_DATABASE_URL='postgres://user:password@host:5432/database' pnpm --filter @codexia/persistence-postgres migrate`. Migration files are checksum-checked and applied transactionally. API startup verifies that the database migration ledger exactly matches the packaged migration files, even when startup migrations are disabled. Missing, changed or unexpected applied migrations prevent startup. With `CODEXIA_DATABASE_MIGRATE_ON_START=0` (or unset), this verification is read-only and does not initialize or migrate the database.
 
+The packaged migration identity is the SHA-256 of the UTF-8 JSON array of `[filename, checksum]` pairs sorted by filename, prefixed by `sha256:`. Each checksum is computed from the same UTF-8 SQL input used by the migration runner. To obtain the identity without a database, or verify the identity against a real database without applying migrations:
+
+```sh
+pnpm --filter @codexia/persistence-postgres build
+node packages/persistence-postgres/dist/migrate.js --fingerprint
+CODEXIA_DATABASE_URL='<database-url>' node packages/persistence-postgres/dist/migrate.js --verify-fingerprint
+```
+
+The second command prints the fingerprint only when the applied ledger exactly matches the packaged migrations. A mismatch or unavailable database is a nonzero exit, not permission to migrate.
+
 ## Browser checks
 
 Install the configured browsers and run acceptance against each profile:

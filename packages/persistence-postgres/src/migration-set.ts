@@ -37,3 +37,18 @@ export function assertMigrationSet(expected: readonly MigrationIdentity[], appli
   }
   if (checksums.size !== 0) throw new Error(`Unexpected applied migration ${checksums.keys().next().value}`);
 }
+
+/** Stable release identity of the exact migration ledger, independent of row order. */
+export function migrationSetFingerprint(migrations: readonly MigrationIdentity[]): string {
+  if (migrations.length === 0) throw new Error("Empty migration set");
+  const identities = new Map<string, string>();
+  for (const { version, checksum } of migrations) {
+    if (!/^\d+[-\w]*\.sql$/u.test(version) || !/^[a-f0-9]{64}$/u.test(checksum)) {
+      throw new Error("Invalid migration identity");
+    }
+    if (identities.has(version)) throw new Error(`Duplicate migration identity ${version}`);
+    identities.set(version, checksum);
+  }
+  const pairs = [...identities.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
+  return `sha256:${createHash("sha256").update(JSON.stringify(pairs), "utf8").digest("hex")}`;
+}

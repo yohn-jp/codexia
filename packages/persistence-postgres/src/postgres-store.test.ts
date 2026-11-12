@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { after, before, test } from "node:test";
 import { Pool } from "pg";
 import {
@@ -13,7 +15,7 @@ import {
   type RevisionId,
   type SaveDocumentCommand,
 } from "@codexia/persistence-contracts";
-import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema } from "./index.js";
+import { createPostgresPersistence, migratePostgresDatabase, packagedMigrationFingerprint, verifyPostgresSchema } from "./index.js";
 
 const connectionString = process.env.CODEXIA_TEST_DATABASE_URL;
 if (!connectionString) throw new Error("CODEXIA_TEST_DATABASE_URL is required for PostgreSQL integration tests");
@@ -72,7 +74,22 @@ after(async () => {
 });
 
 test("the exact migration ledger can be verified with read-only database transactions", async () => {
-  await verifyPostgresSchema({ connectionString, options: "-c default_transaction_read_only=on" });
+  const expected = await packagedMigrationFingerprint();
+  assert.match(expected, /^sha256:[a-f0-9]{64}$/u);
+  assert.equal(await verifyPostgresSchema({ connectionString, options: "-c default_transaction_read_only=on" }), expected);
+});
+
+test("packaged and verified CLI fingerprints agree without applying migrations", async () => {
+  const cli = fileURLToPath(new URL("../dist/migrate.js", import.meta.url));
+  const expected = await packagedMigrationFingerprint();
+  const packaged = execFileSync(process.execPath, [cli, "--fingerprint"], {
+    encoding: "utf8", env: { ...process.env, CODEXIA_DATABASE_URL: "" },
+  });
+  assert.equal(packaged.trim(), expected);
+  const verified = execFileSync(process.execPath, [cli, "--verify-fingerprint"], {
+    encoding: "utf8", env: { ...process.env, CODEXIA_DATABASE_URL: connectionString, PGOPTIONS: "-c default_transaction_read_only=on" },
+  });
+  assert.equal(verified.trim(), expected);
 });
 
 test("read-only schema verification rejects missing, altered and newer migration ledgers", async (t) => {
