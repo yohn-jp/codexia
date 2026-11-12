@@ -77,6 +77,17 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await evidence.getByRole("button", { name: "Knowledgeリンクを確定" }).click();
   await expect(page.locator(".pg-notice")).toContainText("Knowledge参照を作者確認済みとして保存しました");
   await expect(evidence).toContainText("確定先: 青い塔");
+  const context = page.getByRole("region", { name: "Knowledge詳細" });
+  await context.getByLabel("別名候補").fill("塔");
+  await context.getByRole("button", { name: "別名候補を追加" }).click();
+  await expect(context).toContainText("塔 · proposed");
+  await context.getByRole("button", { name: "別名を確定" }).click();
+  await expect(context).toContainText("塔 · confirmed");
+  await context.getByLabel("命題", { exact: true }).fill("塔は青い。");
+  await context.getByRole("button", { name: "命題候補を保存" }).click();
+  await expect(context).toContainText("塔は青い。 · fact · author · proposed");
+  await context.getByRole("button", { name: "命題を確定" }).click();
+  await expect(context).toContainText("塔は青い。 · fact · author · confirmed");
   const backlinks = page.getByRole("region", { name: "Knowledgeの根拠" });
   await expect(backlinks).toContainText(documentTitle);
   await expect(backlinks).toContainText(firstDraft);
