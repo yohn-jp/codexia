@@ -398,6 +398,33 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
           });
           return { status: 200, body: result };
         }
+        if (anchorSuffix === "assertions" && input.method === "POST") {
+          await input.requireAuthor();
+          const body = bodyRecord(input.body);
+          const assertionId = requiredString(body.id, "id") as AssertionId;
+          const nodeId = requiredString(body.nodeId, "nodeId") as KnowledgeNodeId;
+          const statement = requiredString(body.statement, "statement", 4000);
+          const modality = allowedStatus(body.modality, ["fact", "belief", "disclosure", "hypothesis"] as const, "modality");
+          const perspective = requiredString(body.perspective, "perspective", 128);
+          const revisionId = requiredString(body.revisionId, "revisionId") as RevisionId;
+          const expectedAnchorVersion = integer(body.expectedAnchorVersion, "expectedAnchorVersion", 1);
+          const assertion = await persistence.transaction(async (transaction) => {
+            const anchor = await transaction.getEvidenceAnchor(projectId, evidenceId);
+            const document = await transaction.getDocument(projectId, documentId);
+            const node = await transaction.getKnowledgeNode(projectId, nodeId);
+            if (!anchor || anchor.documentId !== documentId || !document || !node || node.deletedAt || node.status === "retired") failure(404, "PERSISTENCE_NOT_FOUND", "Knowledge or Text Anchor was not found");
+            if (anchor.status !== "confirmed" || anchor.version !== expectedAnchorVersion || anchor.revisionId !== revisionId || document.headRevisionId !== revisionId || anchor.fromUtf16 >= anchor.toUtf16) {
+              failure(409, "ANCHOR_REQUIRES_AUTHOR_CONFIRMATION", "Use the current confirmed Text Anchor");
+            }
+            const created = await transaction.saveAssertion({
+              projectId, id: assertionId, proposition: { kind: "knowledge-statement/v1", nodeId, statement },
+              modality, perspective, narrativeTime: {}, confidence: null, status: "proposed", expectedVersion: null,
+            });
+            await transaction.linkAssertionEvidence({ projectId, assertionId, evidenceId, role: "supports" });
+            return created;
+          });
+          return { status: 201, body: { assertion } };
+        }
         if (anchorSuffix === "mentions" && input.method === "POST") {
           await input.requireAuthor();
           const body = bodyRecord(input.body);
