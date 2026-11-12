@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+# This wrapper holds the kernel lock across the Node process, including all child operations.
+# The rootless operator installs the repository under /opt/codexia-updater.
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/codexia-updater"
+umask 077
+mkdir -p "$state_dir"
+exec flock --exclusive --nonblock --no-fork "$state_dir/host.lock" node /opt/codexia-updater/deploy/updater/standalone-updater.mjs "$@"
