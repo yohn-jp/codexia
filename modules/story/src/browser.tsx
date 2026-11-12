@@ -631,6 +631,90 @@ function CharacterGraphOverlay({
   </div>;
 }
 
+type TemporalView = {
+  sceneId: string; narrativeOrder: number; worldTime: { earliest: number; latest: number } | null;
+  state: Array<{ subject: string; predicate: string; status: string; facts: Array<{ value: string | null; sceneId: string; evidence: { path: string; revision: string | null } }> }>;
+  beliefs: Array<{ subject: string; predicate: string; value: string | null }>;
+  disclosed: Array<{ subject: string; predicate: string; value: string | null }>;
+  unresolved: unknown[]; candidates: unknown[];
+};
+function TemporalScenePanel({ context, scenes, entities }: { context: BrowserModuleContext; scenes: Entity[]; entities: Entity[] }) {
+  const { invoke, busy, status, setMessage } = useAction(context);
+  const [sceneId, setSceneId] = useState("");
+  const [earliest, setEarliest] = useState("");
+  const [latest, setLatest] = useState("");
+  const [characterId, setCharacterId] = useState("");
+  const [predicate, setPredicate] = useState("rank");
+  const [valueA, setValueA] = useState("");
+  const [valueB, setValueB] = useState("");
+  const [projection, setProjection] = useState<TemporalView | null>(null);
+  const [comparison, setComparison] = useState<{ alternatives: Array<{ label: string; projection: TemporalView }> } | null>(null);
+  const [packageResult, setPackageResult] = useState<{ parts: unknown[]; omitted: number; budgetUnit: string } | null>(null);
+  const request = useRef(0);
+  useEffect(() => { request.current++; setProjection(null); setComparison(null); setPackageResult(null); }, [context.snapshot.projectId, context.snapshot.projectVersion]);
+  const name = (id: string | null) => id === null ? "none" : entities.find(item => item.id === id)?.name ?? id;
+  const clear = () => { request.current++; setProjection(null); setComparison(null); setPackageResult(null); };
+  const selectScene = (id: string) => {
+    clear(); setSceneId(id);
+    const time = scenes.find(scene => scene.id === id)?.raw.world_time as { earliest?: unknown; latest?: unknown } | undefined;
+    setEarliest(typeof time?.earliest === "number" ? String(time.earliest) : "");
+    setLatest(typeof time?.latest === "number" ? String(time.latest) : "");
+  };
+  const inspect = async () => {
+    const intent = ++request.current;
+    try { const result = await invoke<TemporalView>("story.world-state.temporal", { sceneId }); if (intent === request.current) setProjection(result); } catch {}
+  };
+  const proposeTime = async () => {
+    try {
+      const world_time = earliest === "" && latest === "" ? null : { earliest: Number(earliest), latest: Number(latest) };
+      if ((earliest === "") !== (latest === "")) throw new Error("Enter both bounds or leave both empty.");
+      await invoke("story.scene.metadata.update", { sceneId, patch: { world_time }, operation_id: operationId() });
+      clear(); setMessage("World time change proposed. Review before applying.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
+  };
+  const event = (value: string) => ({kind: "attribute", subject: characterId, object: null, payload: {predicate, value}});
+  const compare = async () => {
+    const intent = ++request.current;
+    try {
+      const result = await invoke<{ alternatives: Array<{label: string; projection: TemporalView}> }>("story.scenario.compare", {sceneId, alternatives: [{label: "A", events: [event(valueA)]}, {label: "B", events: [event(valueB)]}]});
+      if (intent === request.current) setComparison(result);
+    } catch {}
+  };
+  const adopt = async (value: string) => {
+    try { await invoke("story.state-proposals.create", {sceneId, event: event(value), operation_id: operationId()}); setMessage("Hypothesis submitted as a state proposal; canon has not changed."); } catch {}
+  };
+  const preview = async (scope: "author" | "character" | "reader") => {
+    const intent = ++request.current;
+    try { const result = await invoke<{parts: unknown[]; omitted: number; budgetUnit: string}>("story.context.package", {sceneId, scope, ...(scope === "character" ? {characterId} : {}), budget: 12000}); if (intent === request.current) setPackageResult(result); } catch {}
+  };
+  const cells = (data: TemporalView) => <ul>{data.state.map(cell => <li key={JSON.stringify([cell.subject, cell.predicate])}><strong>{name(cell.subject)} · {cell.predicate} · {cell.status}</strong>
+    {cell.facts.map((fact, index) => <div key={index}>{name(fact.value)} · {name(fact.sceneId)} <small>{fact.evidence.path} · {fact.evidence.revision ?? "unverified"}</small></div>)}
+  </li>)}</ul>;
+  return <section aria-label="Temporal scene state" style={panelStyle}>
+    <h3>World time and scene state</h3>
+    <label>Scene <select value={sceneId} onChange={e => selectScene(e.target.value)}><option value="">Choose a scene</option>{scenes.map(scene => <option key={scene.id} value={scene.id}>{String(scene.raw.title ?? scene.name ?? scene.id)}</option>)}</select></label>
+    <div style={rowStyle}><label>Earliest day <input type="number" step="1" value={earliest} onChange={e => setEarliest(e.target.value)}/></label><label>Latest day <input type="number" step="1" value={latest} onChange={e => setLatest(e.target.value)}/></label></div>
+    <p style={mutedStyle}>Use relative integer days; equal bounds mean an exact day. Empty means unknown. Narrative order is separate.</p>
+    <div style={rowStyle}><button type="button" disabled={!sceneId || busy} onClick={() => void proposeTime()}>Propose world time</button><button type="button" disabled={!sceneId || busy} onClick={() => void inspect()}>Inspect scene state</button></div>
+    {projection && projection.sceneId === sceneId && <section><p>Narrative position {projection.narrativeOrder} · {projection.worldTime ? `day ${projection.worldTime.earliest}–${projection.worldTime.latest}` : "world time unknown"}</p>{cells(projection)}
+      <p>{projection.unresolved.length} unresolved temporal events · {projection.candidates.length} unconfirmed candidates</p>
+      <h4>Character beliefs</h4><ul>{projection.beliefs.map((fact, i) => <li key={i}>{name(fact.subject)} · {fact.predicate} · {name(fact.value)}</li>)}</ul>
+      <h4>Reader disclosures</h4><ul>{projection.disclosed.map((fact, i) => <li key={i}>{name(fact.subject)} · {fact.predicate} · {name(fact.value)}</li>)}</ul>
+    </section>}
+    <h3>Hypothesis comparison</h3>
+    <label>Character <select value={characterId} onChange={e => {setCharacterId(e.target.value); setComparison(null); setPackageResult(null);}}><option value="">Choose character</option>{entities.filter(e => e.type === "character").map(e => <option key={e.id} value={e.id}>{e.name ?? e.id}</option>)}</select></label>
+    <label>State <select value={predicate} onChange={e => {setPredicate(e.target.value); setComparison(null);}}><option value="rank">Rank</option><option value="affiliation">Affiliation</option><option value="life">Life</option></select></label>
+    <label>Alternative A <input value={valueA} onChange={e => {setValueA(e.target.value); setComparison(null);}}/></label>
+    <label>Alternative B <input value={valueB} onChange={e => {setValueB(e.target.value); setComparison(null);}}/></label>
+    <button type="button" disabled={!sceneId || !characterId || !valueA.trim() || !valueB.trim() || busy} onClick={() => void compare()}>Compare hypotheses (read-only)</button>
+    {comparison && <section aria-label="Hypothesis comparison results">{comparison.alternatives.map((alternative, index) => <article key={alternative.label}><h4>Alternative {alternative.label} · hypothetical</h4>{cells(alternative.projection)}<button type="button" disabled={busy} onClick={() => void adopt(index === 0 ? valueA : valueB)}>Propose alternative {alternative.label}</button></article>)}</section>}
+    <h3>Local context preview</h3>
+    <div style={rowStyle}>{(["author","character","reader"] as const).map(scope => <button key={scope} type="button" disabled={busy || !sceneId || (scope === "character" && !characterId)} onClick={() => void preview(scope)}>{scope} context</button>)}</div>
+    {packageResult && <details open><summary>{packageResult.parts.length} parts · {packageResult.omitted} omitted · {packageResult.budgetUnit}</summary><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{JSON.stringify(packageResult.parts,null,2)}</pre></details>}
+    {status}
+  </section>;
+}
+
 function WorldStatePanel({ context }: { context: BrowserModuleContext }) {
   const { invoke, busy, status, setMessage } = useAction(context);
   const [workbench, setWorkbench] = useState<WorldStateWorkbench | null>(null);
@@ -671,7 +755,8 @@ function WorldStatePanel({ context }: { context: BrowserModuleContext }) {
     <h2>World state</h2>
     <button style={buttonStyle} disabled={busy} onClick={() => void refresh().catch(() => undefined)}>Refresh state</button>
     {workbench && <>
-      <p>{workbench.scenes.length} scenes · {workbench.events.length} confirmed events · {workbench.proposals.length} proposals</p>
+      <p>{workbench.scenes.length} scenes · {workbench.events.length} state events · {workbench.proposals.length} proposals</p>
+      <TemporalScenePanel key={context.snapshot.projectId} context={context} scenes={workbench.scenes} entities={entities} />
       <h3>Confirmed state changes</h3>
       {workbench.events.length ? <ul>{workbench.events.map((event, index) => <li key={`${event.sceneId}-${event.order}-${index}`}>
         {entityName(event.subject)} {event.kind}{event.object ? ` → ${entityName(event.object)}` : ""} · {entityName(event.sceneId)}
