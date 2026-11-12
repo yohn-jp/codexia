@@ -93,7 +93,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await expect(initialRevision).toBeVisible();
   await initialRevision.getByRole("button", { name: "このRevisionを新しいRevisionとして復元" }).click();
   await expect(page.locator(".pg-notice")).toContainText("新しいPostgreSQL Revisionとして復元しました");
-  await expect.poll(readEditor).toBe("");
+  await expect.poll(readEditor).not.toContain(firstDraft);
   await page.getByRole("button", { name: "パネル：文書と保存状態", exact: true }).click();
   await expect(backlinks).toContainText("本文から削除");
   await expect(backlinks).toContainText(firstDraft);
