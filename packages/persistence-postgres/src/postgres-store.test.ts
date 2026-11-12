@@ -71,6 +71,10 @@ after(async () => {
   await directPool.end();
 });
 
+test("the exact migration ledger can be verified with read-only database transactions", async () => {
+  await verifyPostgresSchema({ connectionString, options: "-c default_transaction_read_only=on" });
+});
+
 test("migrations are repeatable and document revisions stay immutable", async () => {
   const project = await persistence.transaction((transaction) => transaction.createProject({
     title: `migration-${randomUUID()}`,
