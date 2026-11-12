@@ -15,6 +15,7 @@ import type {
 import type { StoryVolumeTree } from "./domain/graph.js";
 
 import { createStoryActions } from "./actions.js";
+import { readStorySnapshot } from "./snapshot.js";
 
 interface ZukanSuggestion { id: string; entityRevision?: string }
 
@@ -118,6 +119,49 @@ test("entity reads expose source revision and preserve nested notes and characte
   assert.deepEqual(character.raw.voice, { cadence: "short" });
   assert.equal((await invoke<{ revision: string }>("story.entities.collection-revision", {}, context)).data.revision.length, 73);
   assert.equal((await invoke<{ revision: string } | null>("story.entities.get", { id: "char-uma" }, context)).data?.revision, character.revision);
+});
+
+test("native PostgreSQL manuscript projections are visible to scene context alongside legacy manuscripts", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const manuscriptPath = `documents/${id}.md`;
+  const markdown = "三日後、扉が開いた。😀\n";
+  const files = fixtureFiles({
+    [`plot/volumes/vol-main/chapters/ch-main-1/scenes/${id}.yaml`]: yaml({
+      id, title: "Native scene", order: "0003", manuscript: manuscriptPath,
+    }),
+    [manuscriptPath]: markdown,
+    "documents/not-a-document.md": "must not be included",
+    "documents/hidden.yaml": yaml({ id: "hidden", type: "character" }),
+  });
+  const reader = makeReader(files);
+  const context = makeActionContext(reader);
+  const result = await invoke<{
+    manuscript?: { id: string; filePath: string };
+    manuscriptBody?: string;
+    manuscriptPath: string | null;
+    manuscriptFileRevision: string | null;
+  }>("story.scene.context", { sceneId: id }, context);
+  assert.equal(result.data.manuscript?.id, `doc-ms-${id}`);
+  assert.equal(result.data.manuscript?.filePath, manuscriptPath);
+  assert.equal(result.data.manuscriptBody, markdown.trim());
+  assert.equal(result.data.manuscriptPath, manuscriptPath);
+  assert.equal(result.data.manuscriptFileRevision, revision(markdown));
+  assert.deepEqual(result.snapshot, reader.snapshot);
+
+  const legacy = await invoke<{ manuscript?: { id: string }; manuscriptBody?: string }>(
+    "story.scene.context", { sceneId: "sc-1" }, context,
+  );
+  assert.equal(legacy.data.manuscript?.id, "ms-vol-main-ch-main-1-sc-1");
+  assert.equal(legacy.data.manuscriptBody, "Uma enters the cafe.");
+
+  const full = await readStorySnapshot(reader);
+  assert.equal(full.files.get(manuscriptPath)?.content, markdown);
+  assert.equal(full.files.has("documents/not-a-document.md"), false);
+  assert.equal(full.files.has("documents/hidden.yaml"), false);
+  const metadataOnly = await readStorySnapshot(reader, { includeManuscripts: false });
+  assert.equal(metadataOnly.files.has(manuscriptPath), false);
+  assert.equal(metadataOnly.files.has("manuscript/vol-main/ch-main-1/sc-1.md"), false);
+  assert.equal(metadataOnly.entities.has(id), true);
 });
 
 test("snapshot materialization reads each pinned Story snapshot without proposing writes", async () => {
