@@ -59,7 +59,15 @@ export function temporalScene(story: LoadedStorySnapshot, sceneId: string, hypot
   const beliefs: TemporalFact[] = [];
   const disclosed: TemporalFact[] = [];
   const events = [...listRuleStateEvents(story).data, ...hypotheses];
-  const replacements = new Set(events.filter(validConfirmed).map(event => event.replacesEventId).filter((id): id is string => typeof id === "string"));
+  const replacements = new Set(events.filter(event => {
+    if (!validConfirmed(event)) return false;
+    const position = byScene.get(event.sceneId);
+    const eventScene = story.entities.get(event.sceneId);
+    if (!position || !eventScene) return false;
+    if (event.payload.layer === "reader-knowledge") return position.order <= info.order;
+    const time = parseWorldTime(eventScene.raw.world_time);
+    return event.sceneId === sceneId || (targetTime !== null && time !== null && time.latest < targetTime.earliest);
+  }).map(event => event.replacesEventId).filter((id): id is string => typeof id === "string"));
   for (const event of events) {
     const position = byScene.get(event.sceneId);
     if (!position || (event.eventId && replacements.has(event.eventId))) continue;
@@ -79,7 +87,8 @@ export function temporalScene(story: LoadedStorySnapshot, sceneId: string, hypot
       continue;
     }
     const isBelief = event.kind === "knowledge" || layer === "character-belief";
-    const before = event.sceneId === sceneId || (targetTime !== null && time !== null && time.latest < targetTime.earliest);
+    const sameExactDay = targetTime !== null && time !== null && targetTime.earliest === targetTime.latest && time.earliest === time.latest && time.latest === targetTime.latest;
+    const before = event.sceneId === sceneId || (targetTime !== null && time !== null && time.latest < targetTime.earliest) || (!isBelief && sameExactDay);
     if (!before) {
       if (targetTime === null || time === null || time.earliest <= targetTime.latest) unresolved.push(fact);
       continue;
@@ -102,17 +111,17 @@ export function temporalScene(story: LoadedStorySnapshot, sceneId: string, hypot
   for (const list of groups.values()) {
     // Partial-order maximal facts: overlapping intervals are not silently ordered.
     const maximal = list.filter(fact => !list.some(other => other !== fact &&
-      ((other.sceneId === sceneId && fact.sceneId !== sceneId) ||
+      ((other.sceneId === sceneId && fact.sceneId !== sceneId && fact.time === null) ||
        (fact.time !== null && other.time !== null && fact.time.latest < other.time.earliest))));
     const values = new Set(maximal.map(fact => fact.value));
     state.push({ subject: list[0]!.subject, predicate: list[0]!.predicate,
       status: values.size > 1 ? "conflict" : "confirmed", facts: maximal });
   }
   for (const fact of unresolved) {
-    if (!state.some(cell => cell.subject === fact.subject && cell.predicate === fact.predicate) &&
-        !beliefs.some(item => item.subject === fact.subject && item.predicate === fact.predicate)) {
-      state.push({subject: fact.subject, predicate: fact.predicate, status: "unknown", facts: []});
-    }
+    if (fact.predicate === "knowledge") continue;
+    const cell = state.find(item => item.subject === fact.subject && item.predicate === fact.predicate);
+    if (cell && cell.status !== "conflict") cell.status = "unknown";
+    else if (!cell) state.push({subject: fact.subject, predicate: fact.predicate, status: "unknown", facts: []});
   }
   return { sceneId, narrativeOrder: info.order, worldTime: targetTime, state, history: facts, beliefs, disclosed, unresolved, candidates,
     source: sceneSource(story, sceneId) };
