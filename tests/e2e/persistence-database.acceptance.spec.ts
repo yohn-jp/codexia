@@ -83,7 +83,9 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await expect(backlinks).toContainText("確定リンク · 確認済みの根拠");
   await backlinks.getByRole("button", { name: /第一稿/u }).click();
   await expect(page.locator(".pg-notice")).toContainText("現在のRevisionの根拠箇所を選択しました");
-  await expect(editor).toContainText(firstDraft);
+  // CodeMirror represents line breaks as separate DOM nodes, not textContent.
+  const readEditor = () => editor.locator(".cm-line").allTextContents().then(lines => lines.join("\n"));
+  await expect.poll(readEditor).toBe(firstDraft);
 
 
   await page.getByRole("button", { name: "Revision履歴" }).click();
@@ -91,13 +93,13 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await expect(initialRevision).toBeVisible();
   await initialRevision.getByRole("button", { name: "このRevisionを新しいRevisionとして復元" }).click();
   await expect(page.locator(".pg-notice")).toContainText("新しいPostgreSQL Revisionとして復元しました");
-  await expect(editor).not.toContainText(firstDraft);
+  await expect.poll(readEditor).toBe("");
   await page.getByRole("button", { name: "パネル：文書と保存状態", exact: true }).click();
   await expect(backlinks).toContainText("本文から削除");
   await expect(backlinks).toContainText(firstDraft);
   await backlinks.getByRole("button", { name: /第一稿/u }).click();
   await expect(page.locator(".pg-notice")).toContainText("現在位置が未確定の根拠です");
-  await expect(editor).not.toContainText(firstDraft);
+  await expect.poll(readEditor).toBe("");
 
 
   const otherPage = await page.context().newPage();
