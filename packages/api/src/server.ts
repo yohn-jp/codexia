@@ -2277,6 +2277,8 @@ async function postgresPersistenceOptions(): Promise<Pick<ApiServerOptions, "per
     throw new Error("CODEXIA_DATABASE_MIGRATE_ON_START must be 1 or 0");
   }
   if (migrateOnStart === "1") await migratePostgresDatabase(connectionString);
+  // A healthy connection alone cannot prove that this image supports the deployed schema.
+  await verifyPostgresSchema(connectionString);
   const persistence = createPostgresPersistence(connectionString);
   try {
     await persistence.checkHealth();
