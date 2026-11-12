@@ -13,6 +13,7 @@ function unavailable(response){if(!response.headersSent)response.writeHead(503,{
 /** Private Tunnel ingress only. Never accepts a destination from client input. */
 export function createStableProxy({routeFile,targets={blue:'http://codexia-slot-blue:3000',green:'http://codexia-slot-green:3000'}}){
   const server=http.createServer(async(req,res)=>{
+    if(!req.url?.startsWith('/')||req.url.startsWith('//'))return unavailable(res);
     let route;
     try{route=(await readFile(routeFile,'utf8')).trim();}catch{return unavailable(res);}
     if(!['blue','green'].includes(route))return unavailable(res);
