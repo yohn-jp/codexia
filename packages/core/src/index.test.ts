@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import YAML from "yaml";
 import { before, after, test } from "node:test";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import type { ChangeOperation, ChangeProposal, SnapshotId } from "@codexia/contracts";
@@ -14,6 +15,49 @@ async function hierarchy(){const p=await project();for(const input of [{kind:"vo
 function operation(snapshot:SnapshotId,path:string,content:string|null,revision:string|null=null):ChangeOperation{return {id:randomUUID(),generation:0,projectId:snapshot.projectId,baseProjectVersion:snapshot.projectVersion,effect:"metadata",reads:[{path,revision}],writes:[{path,revision,content}],message:"Write approved data"};}
 
 test("PostgreSQL is sole project authority, hierarchy creation preserves canonical scene bodies",async()=>{const p=await hierarchy();assert.equal((await core.listProjects()).some(x=>x.id===p.id),true);const tree=await core.tree(p.id);assert.equal(tree.volumes[0]?.chapters[0]?.scenes[0]?.id,"s1");assert.equal((await core.readScene(p.id,"s1")).text,"Text 😀\n");const docs=await persistence.read(r=>r.listDocuments(p.id));assert.equal(docs.length,3);assert.equal((await persistence.read(r=>r.getRevision(p.id,docs.find(d=>d.kind==="scene")!.id,docs.find(d=>d.kind==="scene")!.headRevisionId!)))?.markdown,"Text 😀\n");});
+test("native document snapshots expose authoritative chapter and scene parent identities", async () => {
+  const p = await project();
+  const create = (kind: string, parentId: import("@codexia/persistence-contracts").DocumentId | null, title: string) =>
+    persistence.transaction(tx => tx.createDocument({
+      projectId: p.id, kind, parentId, title, orderKey: "0001", markdown: "本文😀",
+      authorId: "owner", idempotencyKey: randomUUID(),
+    }));
+  const volume = (await create("volume", null, "Volume")).document;
+  const chapter = (await create("chapter", volume.id, "Chapter")).document;
+  const scene = (await create("scene", chapter.id, "Scene")).document;
+  const reader = await core.reader(p.id);
+  const chapterPath = `plot/volumes/${volume.id}/chapters/${chapter.id}/chapter.yaml`;
+  const scenePath = `plot/volumes/${volume.id}/chapters/${chapter.id}/scenes/${scene.id}.yaml`;
+  const chapterMeta = YAML.parse((await reader.read(chapterPath))!.content);
+  const sceneMeta = YAML.parse((await reader.read(scenePath))!.content);
+  assert.equal(chapterMeta.volume, volume.id);
+  assert.equal(sceneMeta.volume, volume.id);
+  assert.equal(sceneMeta.chapter, chapter.id);
+  assert.equal(sceneMeta.manuscript, `documents/${scene.id}.md`);
+  assert.equal((await reader.read(sceneMeta.manuscript))?.content, "本文😀");
+  assert.equal((await core.tree(p.id)).volumes[0]?.chapters[0]?.scenes[0]?.id, scene.id);
+});
+
+test("mapped hierarchy preserves logical IDs and ignores conflicting stored parent metadata", async () => {
+  const p = await hierarchy();
+  const first = await core.reader(p.id);
+  const path = "plot/volumes/v1/chapters/c1/scenes/s1.yaml";
+  const before = (await first.read(path))!;
+  const meta = YAML.parse(before.content);
+  assert.equal(meta.volume, "v1");
+  assert.equal(meta.chapter, "c1");
+  await accept(p.id, operation(first.snapshot, path,
+    YAML.stringify({ ...meta, volume: "unrelated", chapter: "unrelated" }), before.revision));
+  const next = await core.reader(p.id);
+  const actual = YAML.parse((await next.read(path))!.content);
+  assert.equal(actual.volume, "v1");
+  assert.equal(actual.chapter, "c1");
+  assert.equal(actual.id, "s1");
+  assert.equal(actual.manuscript, "manuscript/v1/c1/s1.md");
+  assert.equal(YAML.parse((await next.read("plot/volumes/v1/chapters/c1/chapter.yaml"))!.content).volume, "v1");
+  assert.equal(YAML.parse((await first.read(path))!.content).chapter, "c1");
+});
+
 test("immutable pinned readers survive edits and Core process replacement",async()=>{const p=await hierarchy(),reader=await core.reader(p.id);const path="manuscript/v1/c1/s1.md",original=await reader.read(path);await accept(p.id,operation(reader.snapshot,path,"Changed",original!.revision));assert.equal((await reader.read(path))?.content,"Text 😀\n");const restarted=new CoreStore({persistence});assert.equal((await (await restarted.reader(p.id,reader.snapshot)).read(path))?.content,"Text 😀\n");assert.equal((await core.readScene(p.id,"s1")).text,"Changed");});
 test("proposal approval binds exact payload and durable replay receipts",async()=>{const p=await project(),reader=await core.reader(p.id),op=operation(reader.snapshot,"bible/notes.yaml","name: A\n");await assert.rejects(core.apply(p.id,op),/approved/);const receipt=await accept(p.id,op);assert.deepEqual(await core.apply(p.id,op),receipt);await assert.rejects(core.apply(p.id,{...op,writes:[{...op.writes[0]!,content:"forged"}]}),/approved/);assert.equal((await new CoreStore({persistence}).listProposals(p.id))[0]?.state,"applied");});
 test("duplicate proposal identities reject changed envelopes",async()=>{const p=await project(),reader=await core.reader(p.id),op=operation(reader.snapshot,"bible/a.yaml","A");const proposal:ChangeProposal={id:randomUUID(),snapshot:reader.snapshot,operations:[op],source:"author"};await core.propose(p.id,proposal);assert.deepEqual(await core.propose(p.id,proposal),proposal);await assert.rejects(core.propose(p.id,{...proposal,source:"module"}),/different payload/);});
