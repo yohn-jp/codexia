@@ -8,7 +8,7 @@ import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
 
 const SLOT = /^(blue|green)$/u;
 const name = slot => {if(!SLOT.test(slot))throw Error('Invalid slot');return 'codexia-slot-'+slot;};
-const preflight = slot => 'codexia-preflight-'+name(slot).slice(-5).replace(/^-/,'');
+const preflight = slot => {name(slot);return 'codexia-preflight-'+slot;};
 const channelUrl='https://api.github.com/repos/yohn-jp/codexia/contents/stable-channel.json?ref=codexia-stable-channel';
 const fingerprintCode='import { packagedMigrationFingerprint } from "@codexia/api"; console.log(await packagedMigrationFingerprint());';
 const readyCode=`const health=await fetch("http://127.0.0.1:3000/health/ready",{signal:AbortSignal.timeout(5000)});if(!health.ok)process.exit(1);const version=await fetch("http://127.0.0.1:3000/api/version",{signal:AbortSignal.timeout(5000)});if(!version.ok)process.exit(1);console.log(JSON.stringify(await version.json()));`;
@@ -143,7 +143,9 @@ export class PodmanStandaloneHost{
   }
   async pullAndVerify(value){
     const release=validateUpdateRelease(value);
-    run('podman',['pull','--arch','amd64',release.image],{timeout:300000});
+    const local=spawnSync('podman',['image','exists',release.image],{timeout:15000,stdio:'ignore'});
+    if(local.status===1)run('podman',['pull','--arch','amd64',release.image],{timeout:300000});
+    else if(local.status!==0)throw Error('Local artifact availability unobservable');
     const image=JSON.parse(run('podman',['image','inspect',release.image]))[0];
     assert.ok(image.RepoDigests?.includes(release.image),'Pulled image digest mismatch');
     assert.equal(image.Os+'/'+image.Architecture,release.platform);
@@ -167,8 +169,8 @@ export class PodmanStandaloneHost{
     // Only the preflight password is available; the real writer credential and shared volumes are absent.
     const auth=randomBytes(32).toString('hex');
     run('podman',['run','--detach','--name',preflight(slot),'--network','codexia-data',
-      '--read-only','--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=64m','--tmpfs','/data:rw,nosuid,nodev,noexec,size=128m',
-      '--tmpfs','/history:rw,nosuid,nodev,noexec,size=64m','--cap-drop','all','--security-opt','no-new-privileges',
+      '--read-only','--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=64m','--tmpfs','/data:rw,nosuid,nodev,noexec,size=128m,mode=1777',
+      '--tmpfs','/history:rw,nosuid,nodev,noexec,size=64m,mode=1777','--cap-drop','all','--security-opt','no-new-privileges',
       '--secret','codexia-postgres-preflight-password,type=mount,target=/run/secrets/app-password',
       '--env','CODEXIA_AUTH_TOKEN','--env','CODEXIA_DATABASE_PASSWORD_FILE=/run/secrets/app-password',
       '--env','CODEXIA_DATABASE_USER=codexia_preflight','--env','CODEXIA_DATABASE_HOST=codexia-db',
