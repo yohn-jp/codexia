@@ -37,7 +37,7 @@ export function KnowledgeContextInspector({node,nodes,documentId,revisionId,clea
   const aliasSave=(alias:KnowledgeAlias,status:KnowledgeAlias["status"])=>mutate(()=>api.savePersistenceAlias(projectId,node.id,{id:alias.id,surface:alias.surface,normalized:alias.normalized,scope:alias.scope,status}));
   const relationSave=(relation:KnowledgeRelation,status:KnowledgeRelation["status"])=>mutate(()=>api.savePersistenceRelation(projectId,relation.sourceId,{id:relation.id,targetId:relation.targetId,type:relation.type,attributes:relation.attributes,validity:relation.validity,status,expectedVersion:relation.version}));
   const assertionSave=(assertion:Assertion,status:Assertion["status"])=>mutate(()=>api.savePersistenceAssertion(projectId,assertion.id,{proposition:assertion.proposition,modality:assertion.modality,perspective:assertion.perspective,narrativeTime:assertion.narrativeTime,confidence:assertion.confidence,status,expectedVersion:assertion.version}));
-  const current=anchors.find(item=>item.anchor.id===selectedEvidenceId&&item.anchor.revisionId===revisionId&&item.anchor.status==="confirmed");
+  const current=anchors.find(item=>item.anchor.id===selectedEvidenceId&&item.anchor.revisionId===revisionId&&item.anchor.status==="confirmed"&&item.mentions.some(({link})=>link.nodeId===node.id&&link.status!=="rejected"));
   const evidence=new Map<string,PersistenceAnchorView>();
   for(const item of [...linked,...anchors])evidence.set(item.anchor.id,item);
   const assertions=new Map<string,{assertion:Assertion;item:PersistenceAnchorView}>();
@@ -74,10 +74,10 @@ export function KnowledgeContextInspector({node,nodes,documentId,revisionId,clea
     <ul>{[...assertions.values()].map(({assertion,item})=><li key={assertion.id}>
       <p>{String(assertion.proposition.statement??"")} · {assertion.modality} · {assertion.perspective} · {assertion.status}</p>
       <button type="button" onClick={()=>onOpenEvidence(item)}>根拠を開く: {item.quote}</button>
-      {assertion.status==="proposed"&&<><button type="button" disabled={busy||!canEdit||item.anchor.status!=="confirmed"} onClick={()=>void assertionSave(assertion,"confirmed")}>命題を確定</button><button type="button" disabled={busy||!canEdit} onClick={()=>void assertionSave(assertion,"rejected")}>命題を却下</button></>}
+      {assertion.status==="proposed"&&<><button type="button" disabled={busy||!canEdit||node.status!=="confirmed"||item.anchor.status!=="confirmed"} onClick={()=>void assertionSave(assertion,"confirmed")}>命題を確定</button><button type="button" disabled={busy||!canEdit} onClick={()=>void assertionSave(assertion,"rejected")}>命題を却下</button></>}
       {assertion.status==="confirmed"&&<button type="button" disabled={busy||!canEdit} onClick={()=>void assertionSave(assertion,"retired")}>命題を退役</button>}
     </li>)}</ul>
-    <p>{current?"選択したText Anchorを根拠に命題を作成します。":"保存済みの確認済みText Anchorを選択してください。"}</p>
+    <p>{current?"選択したText Anchorを根拠に命題を作成します。":"このKnowledgeにリンクした保存済みの確認済みText Anchorを選択してください。"}</p>
     <form onSubmit={e=>{e.preventDefault();if(!current||!documentId||!revisionId||!clean||!statement.trim()||!perspective.trim())return;void mutate(async()=>{await api.createPersistenceAnchorAssertion(projectId,documentId,current.anchor.id,{id:crypto.randomUUID(),nodeId:node.id,statement:statement.trim(),modality,perspective:perspective.trim(),revisionId,expectedAnchorVersion:current.anchor.version});setStatement("")})}}>
       <label>命題<textarea value={statement} onChange={e=>setStatement(e.target.value)} maxLength={4000} required /></label>
       <label>種別<select value={modality} onChange={e=>setModality(e.target.value as Modality)}><option value="fact">世界の事実</option><option value="belief">人物の認識</option><option value="disclosure">読者への開示</option><option value="hypothesis">仮説</option></select></label>
