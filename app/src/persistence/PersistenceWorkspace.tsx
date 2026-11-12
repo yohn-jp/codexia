@@ -11,6 +11,7 @@ import { ProposalReview } from "../contributions/ProposalReview";
 import type { JournalProposal } from "../storage/journal";
 import type { Document as PersistenceDocument, DocumentId, DocumentRevision, EvidenceId, KnowledgeNode, KnowledgeNodeId, Project as PersistenceProject, RevisionId } from "@codexia/persistence-contracts";
 import { api, type PersistenceAnchorView } from "../api";
+import { KnowledgeContextInspector } from "./KnowledgeContextInspector";
 import { readWorkspaceSelectionForLocation, workspaceSelectionPath, writeWorkspaceSelection } from "./selection";
 import { PersistenceLegacyDraftImport } from "./PersistenceLegacyDraftImport";
 import { parseApplicationLocation, switchApplicationPath } from "../application/navigation";
@@ -1346,6 +1347,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
               {node.status === "proposed" && <button type="button" onClick={() => void confirmKnowledge(node)}>内容を確認して確定</button>}
             </li>)}
           </ul>
+          {selectedNode && <KnowledgeContextInspector key={selectedNode.id} node={selectedNode} nodes={nodes} documentId={active?.document.id} revisionId={active?.revision.id} clean={Boolean(active&&!active.dirty&&!active.remoteConflict&&active.save==="saved")} selectedEvidenceId={selectedEvidenceId??""} onOpenEvidence={(item)=>void openNodeEvidence(item)} />}
           {selectedNode && <section aria-label="Knowledgeの根拠">
             <h3>{selectedNode.name}の根拠</h3>
             {nodeEvidenceError && <p role="alert">{nodeEvidenceError}</p>}
