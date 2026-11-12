@@ -638,6 +638,44 @@ type TemporalView = {
   disclosed: Array<{ subject: string; predicate: string; value: string | null }>;
   unresolved: unknown[]; candidates: unknown[];
 };
+type NarrativeReviewView={findings:Array<{id:string;rule:string;severity:string;certainty:string;status:string;reason:string|null;sceneId?:string;message:string;evidence:Array<{path:string;revision:string|null}>}>;diagnosticsAvailable:boolean};
+function NarrativeReviewPanel({context,sceneId}:{context:BrowserModuleContext;sceneId:string}){
+  const {invoke,busy,status,setMessage}=useAction(context);
+  const [review,setReview]=useState<NarrativeReviewView|null>(null);
+  const [reasons,setReasons]=useState<Record<string,string>>({});
+  const request=useRef(0);
+  useEffect(()=>{request.current++;setReview(null);setReasons({});},[context.snapshot.projectId,context.snapshot.projectVersion,sceneId]);
+  const load=async()=>{const id=++request.current;try{const result=await invoke<NarrativeReviewView>("story.narrative.review",sceneId?{sceneId}:{});if(id===request.current)setReview(result);}catch{}};
+  const decide=async(id:string,decision:string)=>{try{await invoke("story.narrative.disposition",{id,status:decision,reason:reasons[id],...(sceneId?{sceneId}:{}),operation_id:operationId()});setMessage("Disposition proposed. Apply in proposal review.");}catch{}};
+  return <section aria-label="Narrative review" style={panelStyle}><h3>Narrative review</h3>
+    <button type="button" disabled={busy} onClick={()=>void load()}>Check narrative consistency</button>
+    {review&&<><p>{review.findings.length} findings · {review.diagnosticsAvailable?"Diagnostics integrated":"Optional Diagnostics unavailable"}</p>
+      {review.findings.map(finding=><article key={finding.id}><h4>{finding.rule} · {finding.severity} · {finding.certainty} · {finding.status}</h4>
+        <p>{finding.message}</p>{finding.reason&&<p>Previous disposition: {finding.reason}</p>}
+        <ul>{finding.evidence.map(source=><li key={source.path}><button type="button" disabled={!context.navigateDocument} onClick={()=>void context.navigateDocument?.(source.path)}>{source.path}</button><small>{source.revision??"missing"}</small></li>)}</ul>
+        <label>Disposition reason<textarea value={reasons[finding.id]??""} onChange={e=>setReasons(old=>({...old,[finding.id]:e.target.value}))}/></label>
+        <div style={rowStyle}>{["confirmed","rejected","held","exception"].map(decision=><button key={decision} type="button" disabled={busy||!reasons[finding.id]?.trim()} onClick={()=>void decide(finding.id,decision)}>{decision}</button>)}</div>
+      </article>)}</>}
+    {status}
+  </section>;
+}
+type SavedScenarioView={id:string;label:string;sceneId:string;alternatives:unknown[];sourceFingerprint:string;stale:boolean};
+function SavedScenariosPanel({context}:{context:BrowserModuleContext}){
+  const {invoke,busy,status,setMessage}=useAction(context);
+  const [rows,setRows]=useState<SavedScenarioView[]>([]);
+  const [selected,setSelected]=useState<SavedScenarioView|null>(null);
+  const [comparison,setComparison]=useState<{sourceFingerprint:string;alternatives:unknown[]}|null>(null);
+  useEffect(()=>{let active=true;setSelected(null);setComparison(null);void invoke<SavedScenarioView[]>("story.scenario.list",{}).then(rows=>{if(active)setRows(rows)}).catch(()=>undefined);return()=>{active=false}},[context.snapshot.projectId,context.snapshot.projectVersion]);
+  const compare=async(row:SavedScenarioView)=>{setSelected(row);setComparison(null);try{setComparison(await invoke("story.scenario.compare",{sceneId:row.sceneId,alternatives:row.alternatives}))}catch{}};
+  return <section aria-label="Saved scenarios" style={panelStyle}><h3>Saved hypotheses</h3>
+    {rows.map(row=><p key={row.id}><button type="button" disabled={busy} onClick={()=>void compare(row)}>{row.label} · {row.stale?"stale":"current"}</button></p>)}
+    {selected&&comparison&&<><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{JSON.stringify(comparison.alternatives,null,2)}</pre>
+      {selected.sourceFingerprint!==comparison.sourceFingerprint?<button type="button" disabled={busy} onClick={()=>void invoke("story.scenario.save",{...selected,sourceFingerprint:comparison.sourceFingerprint,operation_id:operationId()}).then(()=>setMessage("Refreshed comparison proposed; review before applying.")).catch(()=>undefined)}>Save refreshed comparison</button>:
+        [0,1].map(index=><button key={index} type="button" disabled={busy} onClick={()=>void invoke("story.scenario.adopt",{id:selected.id,alternativeIndex:index,sourceFingerprint:comparison.sourceFingerprint,operation_id:operationId()}).then(()=>setMessage("Adoption submitted as state proposals; canon unchanged.")).catch(()=>undefined)}>Propose alternative {index+1}</button>)}
+    </>}
+    {status}
+  </section>;
+}
 function TemporalScenePanel({ context, scenes, entities }: { context: BrowserModuleContext; scenes: Entity[]; entities: Entity[] }) {
   const { invoke, busy, status, setMessage } = useAction(context);
   const [sceneId, setSceneId] = useState("");
@@ -648,7 +686,8 @@ function TemporalScenePanel({ context, scenes, entities }: { context: BrowserMod
   const [valueA, setValueA] = useState("");
   const [valueB, setValueB] = useState("");
   const [projection, setProjection] = useState<TemporalView | null>(null);
-  const [comparison, setComparison] = useState<{ alternatives: Array<{ label: string; projection: TemporalView }> } | null>(null);
+  const [comparison, setComparison] = useState<{ sourceFingerprint:string; alternatives: Array<{ label: string; projection: TemporalView }> } | null>(null);
+  const [scenarioLabel,setScenarioLabel]=useState("");
   const [packageResult, setPackageResult] = useState<{ parts: unknown[]; omitted: number; budgetUnit: string } | null>(null);
   const request = useRef(0);
   useEffect(() => { request.current++; setProjection(null); setComparison(null); setPackageResult(null); }, [context.snapshot.projectId, context.snapshot.projectVersion]);
@@ -676,7 +715,7 @@ function TemporalScenePanel({ context, scenes, entities }: { context: BrowserMod
   const compare = async () => {
     const intent = ++request.current;
     try {
-      const result = await invoke<{ alternatives: Array<{label: string; projection: TemporalView}> }>("story.scenario.compare", {sceneId, alternatives: [{label: "A", events: [event(valueA)]}, {label: "B", events: [event(valueB)]}]});
+      const result = await invoke<{ sourceFingerprint:string; alternatives: Array<{label: string; projection: TemporalView}> }>("story.scenario.compare", {sceneId, alternatives: [{label: "A", events: [event(valueA)]}, {label: "B", events: [event(valueB)]}]});
       if (intent === request.current) setComparison(result);
     } catch {}
   };
@@ -708,6 +747,12 @@ function TemporalScenePanel({ context, scenes, entities }: { context: BrowserMod
     <label>Alternative B <input value={valueB} onChange={e => {setValueB(e.target.value); setComparison(null);}}/></label>
     <button type="button" disabled={!sceneId || !characterId || !valueA.trim() || !valueB.trim() || busy} onClick={() => void compare()}>Compare hypotheses (read-only)</button>
     {comparison && <section aria-label="Hypothesis comparison results">{comparison.alternatives.map((alternative, index) => <article key={alternative.label}><h4>Alternative {alternative.label} · hypothetical</h4>{cells(alternative.projection)}<button type="button" disabled={busy} onClick={() => void adopt(index === 0 ? valueA : valueB)}>Propose alternative {alternative.label}</button></article>)}</section>}
+    {comparison&&<form onSubmit={e=>{e.preventDefault();void invoke("story.scenario.save",{sceneId,label:scenarioLabel.trim(),sourceFingerprint:comparison.sourceFingerprint,alternatives:[{label:"A",events:[event(valueA)]},{label:"B",events:[event(valueB)]}],operation_id:operationId()}).then(()=>setMessage("Scenario save proposed; apply in proposal review.")).catch(()=>undefined)}}>
+      <label>Scenario name<input value={scenarioLabel} onChange={e=>setScenarioLabel(e.target.value)} required maxLength={256}/></label>
+      <button type="submit" disabled={busy||!scenarioLabel.trim()}>Save hypotheses for later</button>
+    </form>}
+    <SavedScenariosPanel context={context}/>
+    <NarrativeReviewPanel context={context} sceneId={sceneId}/>
     <h3>Local context preview</h3>
     <div style={rowStyle}>{(["author","character","reader"] as const).map(scope => <button key={scope} type="button" disabled={busy || !sceneId || (scope === "character" && !characterId)} onClick={() => void preview(scope)}>{scope} context</button>)}</div>
     {packageResult && <details open><summary>{packageResult.parts.length} parts · {packageResult.omitted} omitted · {packageResult.budgetUnit}</summary><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{JSON.stringify(packageResult.parts,null,2)}</pre></details>}
