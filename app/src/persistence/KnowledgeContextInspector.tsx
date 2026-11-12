@@ -3,9 +3,9 @@ import type { Assertion, KnowledgeAlias, KnowledgeAliasId, KnowledgeNode, Knowle
 import { api, type PersistenceAnchorView, type PersistenceNodeRead } from "../api";
 
 type Modality = "fact" | "belief" | "disclosure" | "hypothesis";
-export function KnowledgeContextInspector({node,nodes,documentId,revisionId,clean,selectedEvidenceId,evidenceLoadKey,onOpenEvidence}: {
+export function KnowledgeContextInspector({node,nodes,documentId,revisionId,clean,selectedEvidenceId,evidenceLoadKey,onOpenEvidence,onMerge,onNodeUpdate}: {
   node: KnowledgeNode; nodes: KnowledgeNode[]; documentId?: string; revisionId?: string; clean: boolean;
-  selectedEvidenceId: string; evidenceLoadKey: number; onOpenEvidence: (item: PersistenceAnchorView) => void;
+  selectedEvidenceId: string; evidenceLoadKey: number; onOpenEvidence: (item: PersistenceAnchorView) => void; onMerge:(target:KnowledgeNode,source:KnowledgeNode)=>void; onNodeUpdate:(node:KnowledgeNode)=>void;
 }) {
   const projectId=node.projectId;
   const [detail,setDetail]=useState<PersistenceNodeRead|null>(null);
@@ -14,6 +14,10 @@ export function KnowledgeContextInspector({node,nodes,documentId,revisionId,clea
   const [error,setError]=useState("");
   const [busy,setBusy]=useState(false);
   const [reload,setReload]=useState(0);
+  const [mergeTarget,setMergeTarget]=useState("");
+  const [mergePreview,setMergePreview]=useState<Awaited<ReturnType<typeof api.previewPersistenceMerge>>|null>(null);
+  const [mergeConfirm,setMergeConfirm]=useState(false);
+  const [storyEntityId,setStoryEntityId]=useState(String(node.attributes.storyEntityId??""));
   const [surface,setSurface]=useState("");
   const [target,setTarget]=useState("");
   const [relationType,setRelationType]=useState("");
@@ -50,6 +54,16 @@ export function KnowledgeContextInspector({node,nodes,documentId,revisionId,clea
     {error&&<p role="alert">{error}</p>}
     {!detail&&!error&&<p role="status">詳細を読み込んでいます。</p>}
     {detail&&<>
+      <h4>Storyとの明示的な関連付け</h4>
+      <label>Story entity ID<input value={storyEntityId} onChange={e=>setStoryEntityId(e.target.value)}/></label>
+      <button type="button" disabled={busy||!canEdit} onClick={()=>void mutate(async()=>{const result=await api.savePersistenceNode(projectId,node.id,{type:node.type,name:node.name,attributes:{...node.attributes,storyEntityId:storyEntityId.trim()||null},status:node.status,expectedVersion:node.version});onNodeUpdate(result.node)})}>関連付けを保存</button>
+      <h4>Knowledge統合</h4>
+      <label>統合先<select value={mergeTarget} onChange={e=>{setMergeTarget(e.target.value);setMergePreview(null);setMergeConfirm(false)}}><option value="">選択</option>{nodes.filter(n=>n.id!==node.id&&n.type===node.type&&n.status==="confirmed"&&!n.deletedAt).map(n=><option key={n.id} value={n.id}>{n.name} ({n.id})</option>)}</select></label>
+      <button type="button" disabled={busy||!canEdit||!mergeTarget} onClick={()=>void mutate(async()=>{setMergeConfirm(false);setMergePreview(await api.previewPersistenceMerge(projectId,node.id,mergeTarget))})}>統合内容を確認</button>
+      {mergePreview&&<div><p>{mergePreview.source.name} → {mergePreview.target.name}</p><p>別名 {mergePreview.sourceAliases.length}・関係 {mergePreview.sourceRelations.length}・根拠 {mergePreview.sourceMentions.length}・命題 {mergePreview.assertions.length}</p>
+      <ul>{mergePreview.conflicts.map(conflict=><li key={conflict}>{conflict}</li>)}</ul><details><summary>統合対象</summary><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{JSON.stringify(mergePreview,null,2)}</pre></details>
+      <label><input type="checkbox" checked={mergeConfirm} onChange={e=>setMergeConfirm(e.target.checked)}/>統合元を退役し、参照を統合先に移すことを確認しました。</label>
+      <button type="button" disabled={busy||!mergeConfirm||mergePreview.conflicts.length>0} onClick={()=>void mutate(async()=>{const result=await api.applyPersistenceMerge(projectId,node.id,mergeTarget,mergePreview.projectVersion,mergePreview.previewDigest);onMerge(result.target,result.source);setMergePreview(null)})}>作者承認で統合</button></div>}
       <h4>別名</h4>
       <ul>{detail.aliases.map(alias=><li key={alias.id}>{alias.surface} · {alias.status}
         {alias.status!=="confirmed"&&alias.status!=="retired"&&<button type="button" disabled={busy||!canEdit} onClick={()=>void aliasSave(alias,"confirmed")}>別名を確定</button>}
