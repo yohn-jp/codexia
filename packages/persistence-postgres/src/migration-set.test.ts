@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { assertMigrationSet, readMigrationSet } from "./migration-set.js";
+import { assertMigrationSet, migrationSetFingerprint, readMigrationSet } from "./migration-set.js";
 
 const first = { version: "0001-init.sql", checksum: "a".repeat(64) };
 const second = { version: "0002-next.sql", checksum: "b".repeat(64) };
@@ -30,4 +30,18 @@ test("packaged migration checksums match the migration runner's UTF-8 input", as
   assert.deepEqual(rows.map((row) => row.version), [first.version, second.version]);
   assert.equal(rows[0]?.sql, sql);
   assert.equal(rows[0]?.checksum, createHash("sha256").update(sql, "utf8").digest("hex"));
+});
+
+test("migration fingerprint is a stable ordered JSON identity", () => {
+  const canonical = JSON.stringify([[first.version, first.checksum], [second.version, second.checksum]]);
+  const fingerprint = `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
+  assert.equal(migrationSetFingerprint(expected), fingerprint);
+  assert.equal(migrationSetFingerprint([second, first]), fingerprint);
+  assert.notEqual(migrationSetFingerprint([first]), fingerprint);
+  assert.notEqual(migrationSetFingerprint([first, { ...second, version: "0003-next.sql" }]), fingerprint);
+  assert.notEqual(migrationSetFingerprint([first, { ...second, checksum: "c".repeat(64) }]), fingerprint);
+  assert.throws(() => migrationSetFingerprint([]), /Empty migration set/);
+  assert.throws(() => migrationSetFingerprint([first, first]), /Duplicate migration identity/);
+  assert.throws(() => migrationSetFingerprint([{ ...first, version: "../0001.sql" }]), /Invalid migration identity/);
+  assert.throws(() => migrationSetFingerprint([{ ...first, checksum: "a" }]), /Invalid migration identity/);
 });
