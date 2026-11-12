@@ -3,6 +3,8 @@ set -euo pipefail
 
 engine="${1:-docker}"
 image="${2:-codexia-backend-ci}"
+expected_source="${3:-$(git rev-parse HEAD)}"
+expected_profile="${4:-core}"
 container_name="codexia-backend-smoke-${RANDOM}-${RANDOM}"
 database_container="codexia-backend-smoke-db-${RANDOM}-${RANDOM}"
 verification_network="codexia-backend-smoke-net-${RANDOM}-${RANDOM}"
@@ -69,6 +71,13 @@ fi
 for endpoint in /health/startup /health/live /api/health /api/ready; do
   curl --fail --silent "http://127.0.0.1:$port$endpoint" >/dev/null
 done
+
+identity="$("$engine" exec "$container_name" cat /app/update-identity.json)"
+api_version="$(curl --fail --silent "http://127.0.0.1:$port/api/version")"
+platform="$("$engine" image inspect --format '{{.Os}}/{{.Architecture}}' "$image")"
+revision_label="$("$engine" image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")"
+fingerprint="$("$engine" exec "$container_name" node --input-type=module -e 'import { packagedMigrationFingerprint } from "@codexia/api"; console.log(await packagedMigrationFingerprint());')"
+node scripts/backend-update-identity.mjs verify "$identity" "$api_version" "$platform" "$revision_label" "$fingerprint" "$expected_source" "$expected_profile"
 
 session_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:$port/api/session")"
 root_response="$(curl --silent --write-out '\n%{http_code}' "http://127.0.0.1:$port/")"

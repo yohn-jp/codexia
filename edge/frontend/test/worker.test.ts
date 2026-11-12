@@ -70,3 +70,18 @@ test("missing asset requests stay 404 instead of returning the app shell", async
   assert.equal(response.status, 404);
   assert.equal(await response.text(), "missing");
 });
+
+
+test("compatibility identity uses exact static route and no-store", async () => {
+  const identity = {format:"codexia-frontend-identity/v1",version:"0.1.0",sourceSha:"a".repeat(40),profile:"core",apiEpoch:1};
+  assert.deepEqual(classify(request("/desktop/update-identity.json")), {kind:"identity"});
+  assert.deepEqual(classify(request("/desktop/update-identity.json", "POST")), {kind:"not-found"});
+  assert.deepEqual(classify(request("/desktop/update-identity.json/")), {kind:"not-found"});
+  const env: Env = {ASSETS:{fetch:async req=>{assert.equal(new URL(req.url).pathname,"/desktop/update-identity.json");return Response.json(identity);}}};
+  const result = await dispatch(request("/desktop/update-identity.json"),env);
+  assert.equal(result.headers.get("Cache-Control"),"no-store");
+  assert.deepEqual(await result.json(),identity);
+  const head=await dispatch(request("/desktop/update-identity.json","HEAD"),env);
+  assert.equal(await head.text(),"");
+  assert.equal((await dispatch(request("/desktop/update-identity.json"),{ASSETS:{fetch:async()=>new Response(null,{status:404})}})).status,404);
+});

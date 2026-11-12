@@ -190,14 +190,36 @@ export class CoreStore implements MutationCoordinator {
     };
     add("meta/project.yaml", YAML.stringify({title:project.title,...project.settings}));
     const byId = new Map(documents.map((document) => [document.id,document]));
+    const mappings = new Map(records.filter((record) => record.moduleId === PATHS).map((record) => [record.key, record.value]));
+    const metadataFor = (document: Document): JsonObject => {
+      const metadata = mappings.get(document.id)?.metadata;
+      return metadata && typeof metadata === "object" && !Array.isArray(metadata) ? { ...metadata } : {};
+    };
+    const projectedId = (document: Document): string => {
+      const id = metadataFor(document).id;
+      return typeof id === "string" ? id : document.id;
+    };
     for (const document of documents) {
-      const mapping = records.find((record) => record.moduleId === PATHS && record.key === document.id)?.value;
+      const mapping = mappings.get(document.id);
       const parent = document.parentId ? byId.get(document.parentId) : undefined;
       const grandparent = parent?.parentId ? byId.get(parent.parentId) : undefined;
       const metadataPath = typeof mapping?.metadataPath === "string" ? mapping.metadataPath : document.kind === "volume" ? `plot/volumes/${document.id}/volume.yaml` : document.kind === "chapter" ? `plot/volumes/${parent?.id ?? "root"}/chapters/${document.id}/chapter.yaml` : `plot/volumes/${grandparent?.id ?? "root"}/chapters/${parent?.id ?? "root"}/scenes/${document.id}.yaml`;
       const manuscriptPath = typeof mapping?.manuscriptPath === "string" ? mapping.manuscriptPath : `documents/${document.id}.md`;
-      const metadata = mapping?.metadata && typeof mapping.metadata === "object" && !Array.isArray(mapping.metadata) ? mapping.metadata : {};
-      add(metadataPath,YAML.stringify({...metadata,id:metadata.id ?? document.id,title:document.title,order:document.orderKey,...(document.kind === "scene" ? {manuscript:manuscriptPath}:{})}),"utf8",document.id,true);
+      const metadata = metadataFor(document);
+      // Hierarchy is owned by Document.parentId, not the optional module metadata.
+      // Keep mapped Story identities while deriving links from the same pinned DB read.
+      if (document.kind === "chapter" || document.kind === "scene") {
+        delete metadata.volume;
+        delete metadata.chapter;
+        if (document.kind === "chapter" && parent?.kind === "volume") {
+          metadata.volume = projectedId(parent);
+        }
+        if (document.kind === "scene" && parent?.kind === "chapter") {
+          metadata.chapter = projectedId(parent);
+          if (grandparent?.kind === "volume") metadata.volume = projectedId(grandparent);
+        }
+      }
+      add(metadataPath,YAML.stringify({...metadata,id:projectedId(document),title:document.title,order:document.orderKey,...(document.kind === "scene" ? {manuscript:manuscriptPath}:{})}),"utf8",document.id,true);
       if (document.headRevisionId) {
         const revision = await reader.getRevision(pid(projectId),document.id,document.headRevisionId);
         if (!revision) fail(409,"missing_revision","Document head revision is missing");
