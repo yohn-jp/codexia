@@ -153,6 +153,7 @@ export function createSearchActions(moduleContext: ModuleContext, indexes: Snaps
       return { ok: true, snapshot: context.reader.snapshot, data: {
         terms: terms.map((term) => ({ ...term, targetAvailable: !term.candidateOnly && paths.has(term.targetPath) })),
         knowledgeAvailable: nativeAvailable,
+        knowledgeReferences: registry.knowledgeReferences ?? [],
         ...(warning ? { warning } : {}),
       } } as ActionResult;
     }),
@@ -237,7 +238,7 @@ export function createSearchActions(moduleContext: ModuleContext, indexes: Snaps
       };
       const proposal = await context.propose([operation], [{
         id: randomUUID(), snapshot: context.reader.snapshot, module: "search", kind: "term_registry_remove",
-        paths: [{ path: TERM_REGISTRY_PATH, revision }], details: { termId: input.id, canonical: existing.canonical },
+        paths: [{ path: TERM_REGISTRY_PATH, revision }], details: { termId: input.id, canonical: existing?.canonical ?? ref!.knowledgeId },
       }]);
       registries.delete(snapshotKey(context.reader.snapshot));
       return { ok: true, snapshot: context.reader.snapshot, data: { removed: input.id, proposal } } as ActionResult;
