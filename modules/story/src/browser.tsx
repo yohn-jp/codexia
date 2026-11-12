@@ -676,6 +676,36 @@ function SavedScenariosPanel({context}:{context:BrowserModuleContext}){
     {status}
   </section>;
 }
+function SharedContextExecution({context,sceneId,characterId}:{context:BrowserModuleContext;sceneId:string;characterId:string}){
+  const {invoke,busy,status,setMessage}=useAction(context);
+  const [scope,setScope]=useState<"author"|"character"|"reader">("author");
+  const [purpose,setPurpose]=useState("setting-qa");
+  const [question,setQuestion]=useState("");
+  const [preview,setPreview]=useState<{system:string;prompt:string;provider:string;model:string;previewDigest:string;tokenCount:number;tokenExact:boolean}|null>(null);
+  const [answer,setAnswer]=useState<string|null>(null);
+  const [consent,setConsent]=useState(false);
+  const generation=useRef(0);
+  const clear=()=>{generation.current++;setPreview(null);setConsent(false);setAnswer(null);};
+  useEffect(clear,[context.snapshot.projectId,context.snapshot.projectVersion,sceneId,characterId,scope,purpose,question]);
+  const input=()=>({sceneId,scope,purpose,question,...(scope==="character"?{characterId}:{}),maxTokens:4096});
+  const inspect=async()=>{const id=++generation.current;setPreview(null);setConsent(false);setAnswer(null);try{
+    const result=await invoke<NonNullable<typeof preview>>("assistant.context.prompt.preview",input());if(id===generation.current)setPreview(result);
+  }catch{}};
+  const send=async()=>{if(!preview||!consent)return;const id=++generation.current;setConsent(false);try{
+    const result=await invoke<{text:string}>("assistant.context.generate",{...input(),previewDigest:preview.previewDigest,externalConsent:true});if(id===generation.current){setAnswer(result.text);setMessage("Generated suggestion; canonical work is unchanged.")}
+  }catch{}};
+  return <section aria-label="Shared context Assistant execution" style={panelStyle}><h3>Assistant context execution</h3>
+    <label>Scope <select value={scope} onChange={e=>setScope(e.target.value as typeof scope)}><option value="author">Author</option><option value="character">Character</option><option value="reader">Reader</option></select></label>
+    <label>Purpose <select value={purpose} onChange={e=>setPurpose(e.target.value)}><option value="setting-qa">Setting Q&amp;A</option><option value="continuation-options">Continuation</option><option value="first-read-reaction">Reader reaction</option></select></label>
+    <label>Question<textarea value={question} maxLength={4000} onChange={e=>setQuestion(e.target.value)}/></label>
+    <button type="button" disabled={busy||!sceneId||!question.trim()||(scope==="character"&&!characterId)} onClick={()=>void inspect()}>Preview exact request locally</button>
+    {preview&&<><p>Destination: {preview.provider} / {preview.model} · {preview.tokenCount} tokens ({preview.tokenExact?"exact":"estimated"})</p><details open><summary>Content to send externally</summary><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{preview.system+"\n"+preview.prompt}</pre></details>
+      <label><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/>I authorize sending this displayed content to the displayed model.</label><button type="button" disabled={busy||!consent} onClick={()=>void send()}>Send approved request</button></>}
+    {answer!==null&&<article><h4>Generated suggestion (not canon)</h4><p style={{whiteSpace:"pre-wrap"}}>{answer}</p></article>}
+    {status}
+  </section>;
+}
+
 function TemporalScenePanel({ context, scenes, entities }: { context: BrowserModuleContext; scenes: Entity[]; entities: Entity[] }) {
   const { invoke, busy, status, setMessage } = useAction(context);
   const [sceneId, setSceneId] = useState("");
@@ -755,6 +785,7 @@ function TemporalScenePanel({ context, scenes, entities }: { context: BrowserMod
     <NarrativeReviewPanel context={context} sceneId={sceneId}/>
     <h3>Local context preview</h3>
     <div style={rowStyle}>{(["author","character","reader"] as const).map(scope => <button key={scope} type="button" disabled={busy || !sceneId || (scope === "character" && !characterId)} onClick={() => void preview(scope)}>{scope} context</button>)}</div>
+    <SharedContextExecution context={context} sceneId={sceneId} characterId={characterId}/>
     {packageResult && <details open><summary>{packageResult.parts.length} parts · {packageResult.omitted} omitted · {packageResult.budgetUnit}</summary><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{JSON.stringify(packageResult.parts,null,2)}</pre></details>}
     {status}
   </section>;
