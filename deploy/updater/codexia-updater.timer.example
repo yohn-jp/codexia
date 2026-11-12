@@ -1,0 +1,8 @@
+[Unit]
+Description=Poll Codexia signed stable release channel
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=5min
+Unit=codexia-updater.service
+[Install]
+WantedBy=timers.target
