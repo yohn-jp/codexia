@@ -12,6 +12,7 @@ import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, snapshotKe
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ReorderHierarchyInput } from "@codexia/core";
 import type { Persistence } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema } from "@codexia/persistence-postgres";
+export { packagedMigrationFingerprint } from "@codexia/persistence-postgres";
 import { ModuleRuntime, type ActionHostContext, type DomainJobActionExecutor, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 import { HistoricalModelUsageStore } from "./historical-store.js";
 import { JobHistoryError, JobHistoryStore, type JobEvent } from "./job-history-store.js";
