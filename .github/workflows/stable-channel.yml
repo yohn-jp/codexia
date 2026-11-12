@@ -1,0 +1,46 @@
+name: Maintain Codexia stable channel
+on:
+  schedule:
+    - cron: '17 */4 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Stable channel operation
+        required: true
+        type: choice
+        options:
+          - refresh
+          - bootstrap
+          - withdraw
+      image:
+        description: Exact immutable backend digest image for withdrawal
+        required: false
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: codexia-stable-channel-writer
+  cancel-in-progress: false
+jobs:
+  maintain:
+    if: github.ref == 'refs/heads/main' && vars.CODEXIA_STABLE_CHANNEL_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: codexia-stable-channel
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.0'
+      - name: Maintain signed stable channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_CHANNEL_SIGNING_KEY: ${{ secrets.CODEXIA_CHANNEL_SIGNING_KEY }}
+          CODEXIA_CHANNEL_MODE: ${{ github.event_name == 'schedule' && 'refresh' || inputs.mode }}
+          CODEXIA_WITHDRAW_IMAGE: ${{ inputs.image }}
+        run: node scripts/publish-stable-channel.mjs
