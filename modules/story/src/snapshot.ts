@@ -131,11 +131,22 @@ function parseMarkdown(content: string): { raw: Record<string, unknown>; body: s
   return { raw, body: content.slice(bodyStart).trim() };
 }
 
+// Core projects native PostgreSQL documents at documents/<documentId>.md.
+const NATIVE_DOCUMENT_PATH = /^documents\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.md$/u;
+
+function manuscriptId(filePath: string): string | null {
+  const nativeId = NATIVE_DOCUMENT_PATH.exec(filePath)?.[1];
+  // Keep the legacy manuscript ID namespace unchanged and separate from native IDs.
+  if (nativeId) return `doc-ms-${nativeId}`;
+  if (!filePath.startsWith("manuscript/") || !filePath.endsWith(".md")) return null;
+  return filePath.replace(/^manuscript\//, "ms-").replace(/\//g, "-").replace(/\.md$/, "");
+}
+
 function parseStoryEntity(file: StoryFile): StoryEntity | null {
-  if (file.path.startsWith("manuscript/") && file.path.endsWith(".md")) {
+  const id = manuscriptId(file.path);
+  if (id !== null) {
     const parsed = parseMarkdown(file.content);
     if (!parsed) return null;
-    const id = file.path.replace(/^manuscript\//, "ms-").replace(/\//g, "-").replace(/\.md$/, "");
     return {
       id,
       type: "manuscript",
@@ -167,11 +178,11 @@ function parseStoryEntity(file: StoryFile): StoryEntity | null {
 }
 
 async function readFiles(reader: SnapshotReader, includeManuscripts: boolean): Promise<Map<string, StoryFile>> {
-  const prefixes = includeManuscripts ? ["bible", "plot", "meta", "manuscript"] : ["bible", "plot", "meta"];
+  const prefixes = includeManuscripts ? ["bible", "plot", "meta", "manuscript", "documents"] : ["bible", "plot", "meta"];
   const listed = await Promise.all(prefixes.map((prefix) => reader.list(prefix)));
   const paths = [...new Set(listed.flat().filter((filePath) =>
-    filePath.endsWith(".yaml") || filePath.endsWith(".yml") ||
-    (filePath.startsWith("manuscript/") && filePath.endsWith(".md"))))].sort();
+    (filePath.startsWith("documents/") ? NATIVE_DOCUMENT_PATH.test(filePath) :
+      filePath.endsWith(".yaml") || filePath.endsWith(".yml") || manuscriptId(filePath) !== null)))].sort();
   for (const filePath of paths) assertProjectPath(filePath);
 
   const files = new Map<string, StoryFile>();
