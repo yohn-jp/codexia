@@ -12,6 +12,8 @@ const config=JSON.parse(await readFile(configPath,'utf8'));
 assert.equal(config.format,'codexia-standalone-updater/v1');
 assert.ok(path.isAbsolute(config.stateFile)&&path.isAbsolute(config.publicKeyFile));
 assert.equal(path.dirname(config.routeFile),path.dirname(config.stateFile),'Route and state must share the protected host state directory');
+assert.equal(path.basename(config.routeFile),'route');
+assert.equal(path.dirname(config.stateFile),process.env.CODEXIA_UPDATER_LOCK_DIRECTORY,'Use the host-wide locked wrapper');
 const publicKey=await readFile(config.publicKeyFile,'utf8');
 const host=new PodmanStandaloneHost(config);
 const store={save:state=>atomicWrite(config.stateFile,JSON.stringify(state)+'\n')};
