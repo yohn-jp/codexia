@@ -398,6 +398,36 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
           });
           return { status: 200, body: result };
         }
+        if (anchorSuffix === "assertions" && input.method === "POST") {
+          await input.requireAuthor();
+          const body = bodyRecord(input.body);
+          const assertionId = requiredString(body.id, "id") as AssertionId;
+          const nodeId = requiredString(body.nodeId, "nodeId") as KnowledgeNodeId;
+          const statement = requiredString(body.statement, "statement", 4000);
+          const modality = allowedStatus(body.modality, ["fact", "belief", "disclosure", "hypothesis"] as const, "modality");
+          const perspective = requiredString(body.perspective, "perspective", 128);
+          const revisionId = requiredString(body.revisionId, "revisionId") as RevisionId;
+          const expectedAnchorVersion = integer(body.expectedAnchorVersion, "expectedAnchorVersion", 1);
+          const assertion = await persistence.transaction(async (transaction) => {
+            await transaction.assertProjectVersion(projectId);
+            const anchor = await transaction.getEvidenceAnchor(projectId, evidenceId);
+            const document = await transaction.getDocument(projectId, documentId);
+            const node = await transaction.getKnowledgeNode(projectId, nodeId);
+            if (!anchor || anchor.documentId !== documentId || !document || !node || node.deletedAt || node.status === "retired") failure(404, "PERSISTENCE_NOT_FOUND", "Knowledge or Text Anchor was not found");
+            if (anchor.status !== "confirmed" || anchor.version !== expectedAnchorVersion || anchor.revisionId !== revisionId || document.headRevisionId !== revisionId || anchor.fromUtf16 >= anchor.toUtf16) {
+              failure(409, "ANCHOR_REQUIRES_AUTHOR_CONFIRMATION", "Use the current confirmed Text Anchor");
+            }
+            const mentions = await transaction.listMentionLinks(projectId, evidenceId);
+            if (!mentions.some((link) => link.nodeId === nodeId && link.status !== "rejected")) failure(409, "KNOWLEDGE_LINK_REQUIRED", "Link the Text Anchor to this Knowledge node before proposing an assertion");
+            const created = await transaction.saveAssertion({
+              projectId, id: assertionId, proposition: { kind: "knowledge-statement/v1", nodeId, statement },
+              modality, perspective, narrativeTime: {}, confidence: null, status: "proposed", expectedVersion: null,
+            });
+            await transaction.linkAssertionEvidence({ projectId, assertionId, evidenceId, role: "supports" });
+            return created;
+          });
+          return { status: 201, body: { assertion } };
+        }
         if (anchorSuffix === "mentions" && input.method === "POST") {
           await input.requireAuthor();
           const body = bodyRecord(input.body);
@@ -493,7 +523,22 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
       if (!assertionSuffix && input.method === "PUT") {
         await input.requireAuthor();
         const body = bodyRecord(input.body);
-        const assertion = await persistence.transaction((transaction) => transaction.saveAssertion({
+        const assertion = await persistence.transaction(async (transaction) => {
+          await transaction.assertProjectVersion(projectId);
+          const existing = await transaction.getAssertion(projectId, assertionId);
+          if (existing?.proposition.kind === "knowledge-statement/v1" && body.status === "confirmed") {
+            const links = await transaction.listAssertionEvidence(projectId, assertionId);
+            let currentEvidence = false;
+            for (const link of links) {
+              const anchor = await transaction.getEvidenceAnchor(projectId, link.evidenceId);
+              const document = anchor && await transaction.getDocument(projectId, anchor.documentId);
+              if (anchor && document?.headRevisionId === anchor.revisionId && anchor.status === "confirmed" && anchor.fromUtf16 < anchor.toUtf16 && link.role === "supports") currentEvidence = true;
+            }
+            if (!currentEvidence) failure(409, "ANCHOR_REQUIRES_AUTHOR_CONFIRMATION", "Confirm a current supporting Text Anchor before confirming this assertion");
+            const node = typeof existing.proposition.nodeId === "string" && await transaction.getKnowledgeNode(projectId, existing.proposition.nodeId as KnowledgeNodeId);
+            if (!node || node.status !== "confirmed" || node.deletedAt) failure(409, "KNOWLEDGE_REQUIRES_AUTHOR_CONFIRMATION", "Confirm the Knowledge node before confirming this assertion");
+          }
+          return transaction.saveAssertion({
           projectId, id: assertionId,
           proposition: (isRecord(body.proposition) ? body.proposition : failure(400, "INVALID_BODY", "proposition must be an object")) as JsonObject,
           modality: requiredString(body.modality, "modality", 128),
@@ -502,7 +547,8 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
           confidence: body.confidence === null || body.confidence === undefined ? null : Number(body.confidence),
           status: allowedStatus(body.status, ["proposed", "confirmed", "rejected", "retired"] as const, "status"),
           expectedVersion: body.expectedVersion === null ? null : integer(body.expectedVersion, "expectedVersion", 1),
-        }));
+          });
+        });
         return { status: 200, body: { assertion } };
       }
       if (assertionSuffix === "evidence" && input.method === "GET") {

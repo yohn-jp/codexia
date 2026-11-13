@@ -77,13 +77,41 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await evidence.getByRole("button", { name: "Knowledgeリンクを確定" }).click();
   await expect(page.locator(".pg-notice")).toContainText("Knowledge参照を作者確認済みとして保存しました");
   await expect(evidence).toContainText("確定先: 青い塔");
+  const context = page.getByRole("region", { name: "Knowledge詳細" });
+  await context.getByLabel("別名候補").fill("塔");
+  await context.getByRole("button", { name: "別名候補を追加" }).click();
+  await expect(context).toContainText("塔 · proposed");
+  await context.getByRole("button", { name: "別名を確定" }).click();
+  await expect(context).toContainText("塔 · confirmed");
+  await context.getByLabel("命題", { exact: true }).fill("塔は青い。");
+  await context.getByRole("button", { name: "命題候補を保存" }).click();
+  await expect(context).toContainText("塔は青い。 · fact · author · proposed");
+  await context.getByRole("button", { name: "命題を確定" }).click();
+  await expect(context).toContainText("塔は青い。 · fact · author · confirmed");
+  const backlinks = page.getByRole("region", { name: "Knowledgeの根拠" });
+  await expect(backlinks).toContainText(documentTitle);
+  await expect(backlinks).toContainText(firstDraft);
+  await expect(backlinks).toContainText("確定リンク · 確認済みの根拠");
+  await backlinks.getByRole("button", { name: /第一稿/u }).click();
+  await expect(page.locator(".pg-notice")).toContainText("現在のRevisionの根拠箇所を選択しました");
+  // CodeMirror represents line breaks as separate DOM nodes, not textContent.
+  const readEditor = () => editor.locator(".cm-line").evaluateAll(lines => lines.map(line => { const copy = line.cloneNode(true) as Element; copy.querySelectorAll(".cm-placeholder").forEach(node => node.remove()); return copy.textContent ?? ""; }).join("\n"));
+  await expect.poll(readEditor).toBe(firstDraft);
+
 
   await page.getByRole("button", { name: "Revision履歴" }).click();
   const initialRevision = page.locator(".pg-revisions article").filter({ hasText: "（空の原稿）" });
   await expect(initialRevision).toBeVisible();
   await initialRevision.getByRole("button", { name: "このRevisionを新しいRevisionとして復元" }).click();
   await expect(page.locator(".pg-notice")).toContainText("新しいPostgreSQL Revisionとして復元しました");
-  await expect(editor).not.toContainText(firstDraft);
+  await expect.poll(readEditor).not.toContain(firstDraft);
+  await page.getByRole("button", { name: "パネル：文書と保存状態", exact: true }).click();
+  await expect(backlinks).toContainText("本文から削除");
+  await expect(backlinks).toContainText(firstDraft);
+  await backlinks.getByRole("button", { name: /第一稿/u }).click();
+  await expect(page.locator(".pg-notice")).toContainText("現在位置が未確定の根拠です");
+  await expect.poll(readEditor).toBe("");
+
 
   const otherPage = await page.context().newPage();
   otherPage.on("console", (message) => {

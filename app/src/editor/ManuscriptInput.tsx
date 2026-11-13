@@ -29,6 +29,13 @@ export interface ManuscriptInputHandle {
   getSelection(): { from: number; to: number; text: string } | null;
 }
 
+export interface EvidenceRangeRequest {
+  revisionId: string;
+  from: number;
+  to: number;
+  quote: string;
+}
+
 export interface ManuscriptInputProps {
   value: string;
   externalTextRevision: number;
@@ -48,6 +55,8 @@ export interface ManuscriptInputProps {
   evidenceLoadKey?: number;
   evidenceSourceText?: string;
   onEvidenceChange?: (state: DocumentEvidenceState) => void;
+  evidenceRangeRequest?: EvidenceRangeRequest;
+  onEvidenceRangeResult?: (request: EvidenceRangeRequest, revealed: boolean) => void;
 }
 
 /** CodeMirror adapter retaining IME-safe editing, source bracket/ellipsis rules and history keymaps. */
@@ -70,6 +79,8 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
   evidenceLoadKey = 0,
   evidenceSourceText = value,
   onEvidenceChange,
+  evidenceRangeRequest,
+  onEvidenceRangeResult,
 }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -268,6 +279,29 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
       annotations: [Transaction.addToHistory.of(false), externalDocumentSync.of(true)],
     });
   }, [externalTextRevision, value]);
+
+  useEffect(() => {
+    if (!evidenceRangeRequest || !onEvidenceRangeResult) return;
+    const request = evidenceRangeRequest;
+    const frame = requestAnimationFrame(() => {
+      const view = viewRef.current;
+      const valid = view && !isViewComposing(view) && request.revisionId === documentRevisionRef.current &&
+        view.state.doc.toString() === evidenceSourceText &&
+        Number.isSafeInteger(request.from) && Number.isSafeInteger(request.to) &&
+        request.from >= 0 && request.to > request.from && request.to <= view.state.doc.length &&
+        view.state.sliceDoc(request.from, request.to) === request.quote;
+      if (view && valid) {
+        view.dispatch({
+          selection: { anchor: request.from, head: request.to },
+          scrollIntoView: true,
+          annotations: Transaction.addToHistory.of(false),
+        });
+        view.focus();
+      }
+      onEvidenceRangeResult(request, Boolean(valid));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [evidenceRangeRequest, onEvidenceRangeResult, evidenceSourceText]);
 
   return <div ref={containerRef} className="manuscript-input" style={style} data-testid="manuscript-input" />;
 });
