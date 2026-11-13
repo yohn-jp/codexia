@@ -52,8 +52,12 @@ import {
   type DeleteDocumentCommand,
   type ModuleRecord,
   type SaveModuleRecordCommand,
+  type KnowledgeMergeChangeCommand,
+  type KnowledgeMergeResult,
+  type ProposeKnowledgeMergeCommand,
 } from "@codexia/persistence-contracts";
 import { Pool, type PoolClient, type PoolConfig, type QueryResultRow } from "pg";
+import { applyKnowledgeMerge, knowledgeMergeOperation, planKnowledgeMerge } from "./knowledge-merge.js";
 
 type DbRow = QueryResultRow;
 
@@ -383,34 +387,80 @@ function databaseError(error: unknown): unknown {
   return error;
 }
 
-function operationWriteTarget(operation: ChangeSetOperation): ChangeSetWriteSetEntry {
+function operationWriteTargets(operation: ChangeSetOperation): readonly ChangeSetWriteSetEntry[] {
   switch (operation.type) {
     case "document.create":
       if (!operation.command.documentId) throw validationError("ChangeSet document creates require a stable documentId");
-      return { resource: "document", id: operation.command.documentId };
+      return [{ resource: "document", id: operation.command.documentId }];
     case "document.update":
     case "document.delete":
     case "document.save":
-    case "document.restore": return { resource: "document", id: operation.command.documentId };
-    case "module.record.save": return { resource: "module_record", id: JSON.stringify([operation.command.moduleId, operation.command.key]) };
-    case "knowledge.node.save": return { resource: "knowledge_node", id: operation.command.id };
-    case "knowledge.alias.save": return { resource: "knowledge_alias", id: operation.command.id };
-    case "knowledge.relation.save": return { resource: "knowledge_relation", id: operation.command.id };
-    case "evidence.anchor.save": return { resource: "evidence_anchor", id: operation.command.id };
-    case "evidence.mention.save": return {
+    case "document.restore": return [{ resource: "document", id: operation.command.documentId }];
+    case "module.record.save": return [{ resource: "module_record", id: JSON.stringify([operation.command.moduleId, operation.command.key]) }];
+    case "knowledge.node.save": return [{ resource: "knowledge_node", id: operation.command.id }];
+    case "knowledge.alias.save": return [{ resource: "knowledge_alias", id: operation.command.id }];
+    case "knowledge.relation.save": return [{ resource: "knowledge_relation", id: operation.command.id }];
+    case "evidence.anchor.save": return [{ resource: "evidence_anchor", id: operation.command.id }];
+    case "evidence.mention.save": return [{
       resource: "mention_link",
       id: `${operation.command.evidenceId}:${operation.command.nodeId}`,
-    };
-    case "evidence.assertion.save": return { resource: "assertion", id: operation.command.id };
-    case "evidence.assertion.link": return {
+    }];
+    case "evidence.assertion.save": return [{ resource: "assertion", id: operation.command.id }];
+    case "evidence.assertion.link": return [{
       resource: "assertion_evidence",
       id: `${operation.command.assertionId}:${operation.command.evidenceId}`,
-    };
+    }];
+    case "knowledge.merge": return knowledgeMergeWriteSet(operation.command);
     default: {
       const exhaustive: never = operation;
       throw validationError(`Unsupported ChangeSet operation: ${String(exhaustive)}`);
     }
   }
+}
+
+function knowledgeMergeWriteSet(command: KnowledgeMergeChangeCommand): readonly ChangeSetWriteSetEntry[] {
+  const plan = command.plan as Record<string, unknown>;
+  const sourceAliases = Array.isArray(plan.sourceAliases) ? plan.sourceAliases as Array<{ id: string; status: string }> : [];
+  const sourceRelations = Array.isArray(plan.sourceRelations) ? plan.sourceRelations as Array<{ id: string; status: string }> : [];
+  const sourceMentions = Array.isArray(plan.sourceMentions) ? plan.sourceMentions as Array<{ evidenceId: string }> : [];
+  const targetMentions = Array.isArray(plan.targetMentions) ? plan.targetMentions as Array<{ evidenceId: string }> : [];
+  const assertions = Array.isArray(plan.assertions) ? plan.assertions as Array<{ id: string }> : [];
+  const targetAliasInfo = Array.isArray(plan.targetAliases) ? plan.targetAliases as Array<{ normalized: string; status: string }> : [];
+  const sourceName = (plan.source as { name?: unknown } | undefined)?.name;
+  const targetName = (plan.target as { name?: unknown } | undefined)?.name;
+  const generatedAlias = typeof sourceName === "string" && typeof targetName === "string" && sourceName !== targetName
+    && !targetAliasInfo.some(alias => alias.normalized === sourceName.normalize("NFKC").toLocaleLowerCase("ja"))
+    ? [{ resource: "knowledge_alias" as const, id: command.generatedAliasId }]
+    : [];
+  return [
+    { resource: "knowledge_node", id: command.sourceId },
+    { resource: "knowledge_node", id: command.targetId },
+    ...sourceAliases.filter(alias => alias.status !== "retired").map(alias => ({ resource: "knowledge_alias" as const, id: alias.id })),
+    ...generatedAlias,
+    ...sourceRelations.filter(relation => relation.status !== "retired" && relation.status !== "rejected").map(relation => ({ resource: "knowledge_relation" as const, id: relation.id })),
+    ...sourceMentions.filter(mention => !targetMentions.some(target => target.evidenceId === mention.evidenceId)).map(mention => ({ resource: "mention_link" as const, id: `${mention.evidenceId}:${command.targetId}` })),
+    ...assertions.map(assertion => ({ resource: "assertion" as const, id: assertion.id })),
+    { resource: "module_record", id: JSON.stringify(["core.knowledge-merge", command.auditId]) },
+  ];
+}
+
+type KnowledgeMergePlan = Awaited<ReturnType<typeof planKnowledgeMerge>>;
+
+function knowledgeMergeReadSet(plan: KnowledgeMergePlan, command: KnowledgeMergeChangeCommand): readonly ChangeSetReadSetEntry[] {
+  const entries: ChangeSetReadSetEntry[] = [
+    { resource: "knowledge_node", id: command.sourceId, expectedVersion: plan.source.version },
+    { resource: "knowledge_node", id: command.targetId, expectedVersion: plan.target.version },
+    ...plan.sourceAliases.map(alias => ({ resource: "knowledge_alias" as const, id: alias.id, expectedVersion: 1 })),
+    ...plan.targetAliases.map(alias => ({ resource: "knowledge_alias" as const, id: alias.id, expectedVersion: 1 })),
+    ...plan.sourceRelations.map(relation => ({ resource: "knowledge_relation" as const, id: relation.id, expectedVersion: relation.version })),
+    ...plan.targetRelations.map(relation => ({ resource: "knowledge_relation" as const, id: relation.id, expectedVersion: relation.version })),
+    ...plan.sourceMentions.map(link => ({ resource: "mention_link" as const, id: `${link.evidenceId}:${link.nodeId}`, expectedVersion: 1 })),
+    ...plan.targetMentions.map(link => ({ resource: "mention_link" as const, id: `${link.evidenceId}:${link.nodeId}`, expectedVersion: 1 })),
+    ...plan.assertions.map(assertion => ({ resource: "assertion" as const, id: assertion.id, expectedVersion: assertion.version })),
+    { resource: "knowledge_alias", id: command.generatedAliasId, expectedVersion: null },
+    { resource: "module_record", id: JSON.stringify(["core.knowledge-merge", command.auditId]), expectedVersion: null },
+  ];
+  return [...new Map(entries.map(entry => [`${entry.resource}:${entry.id}`, entry])).values()];
 }
 
 function changeSetResourceKey(resource: ChangeSetResource, id: string): string {
@@ -423,9 +473,11 @@ function validateChangeSetOperations(
   readSet: readonly ChangeSetReadSetEntry[],
   writeSet: readonly ChangeSetWriteSetEntry[],
   provenance: { source: string; actorId: string | null; details: JsonObject },
+  allowKnowledgeMerge = false,
 ): void {
   if (operations.length === 0) throw validationError("A ChangeSet must contain at least one operation");
   for (const operation of operations) {
+    if (operation.type === "knowledge.merge" && !allowKnowledgeMerge) throw validationError("Knowledge merge operations require the native merge proposal entrypoint");
     if (operation.type === "module.record.save" && operation.command.moduleId.startsWith("core.")) throw validationError("Core record namespaces cannot be mutated by ChangeSets");
     if (operation.command.projectId !== projectId) throw validationError("All ChangeSet operations must use its project scope");
   }
@@ -447,10 +499,18 @@ function validateChangeSetOperations(
   for (const entry of writeSet) assertNonEmpty(entry.id, "ChangeSet write-set id");
   const declaredWriteKeys = writeSet.map((entry) => changeSetResourceKey(entry.resource, entry.id));
   if (new Set(declaredWriteKeys).size !== declaredWriteKeys.length) throw validationError("ChangeSet write-set entries must be unique");
-  const operationWriteKeys = operations.map((operation) => {
-    const target = operationWriteTarget(operation);
-    return changeSetResourceKey(target.resource, target.id);
-  });
+  const merge = operations.find(operation => operation.type === "knowledge.merge");
+  if (merge) {
+    const command = merge.command;
+    if (operations.length !== 1 || provenance.source !== "native-knowledge-merge" || provenance.actorId !== command.actorId
+      || provenance.details.projectVersion !== command.projectVersion || provenance.details.sourceId !== command.sourceId
+      || provenance.details.targetId !== command.targetId || provenance.details.previewDigest !== command.previewDigest
+      || provenance.details.origin !== command.origin || command.projectId !== projectId || command.sourceId === command.targetId
+      || !Number.isSafeInteger(command.projectVersion) || command.projectVersion < 1 || !/^[0-9a-f]{64}$/u.test(command.previewDigest)) {
+      throw validationError("A Knowledge merge must be the only operation in a valid native merge ChangeSet");
+    }
+  }
+  const operationWriteKeys = operations.flatMap(operation => operationWriteTargets(operation)).map(target => changeSetResourceKey(target.resource, target.id));
   if (JSON.stringify([...new Set(operationWriteKeys)].sort()) !== JSON.stringify([...declaredWriteKeys].sort())) {
     throw validationError("ChangeSet writeSet must exactly describe the operations");
   }
@@ -1275,6 +1335,10 @@ class PostgresTransaction implements PersistenceTransaction {
   }
 
   async createChangeSet(command: CreateChangeSetCommand): Promise<{ changeSet: ChangeSet; replayed: boolean }> {
+    return this.createChangeSetInternal(command, false);
+  }
+
+  private async createChangeSetInternal(command: CreateChangeSetCommand, allowKnowledgeMerge: boolean): Promise<{ changeSet: ChangeSet; replayed: boolean }> {
     this.ensureWritable();
     await this.lockProject(command.projectId);
     assertNonEmpty(command.authorId, "ChangeSet author id");
@@ -1285,6 +1349,7 @@ class PostgresTransaction implements PersistenceTransaction {
       command.readSet,
       command.writeSet,
       command.provenance,
+      allowKnowledgeMerge,
     );
     const requestSha256 = digest({
       id: command.id ?? null,
@@ -1322,6 +1387,52 @@ class PostgresTransaction implements PersistenceTransaction {
       ],
     );
     return { changeSet: mapChangeSet(result.rows[0]!), replayed: false };
+  }
+
+  async proposeKnowledgeMerge(command: ProposeKnowledgeMergeCommand): Promise<{ changeSet: ChangeSet; replayed: boolean }> {
+    this.ensureWritable();
+    await this.lockProject(command.projectId);
+    assertNonEmpty(command.actorId, "Knowledge merge actor id");
+    assertNonEmpty(command.idempotencyKey, "Knowledge merge idempotency key");
+    if (!Number.isSafeInteger(command.projectVersion) || command.projectVersion < 1 || !/^[0-9a-f]{64}$/u.test(command.previewDigest) || command.sourceId === command.targetId) {
+      throw validationError("Knowledge merge proposal is malformed");
+    }
+    await this.lockIdempotencyKey(command.projectId, command.idempotencyKey);
+    const existing = await this.query("SELECT * FROM change_set WHERE project_id = $1 AND idempotency_key = $2", [command.projectId, command.idempotencyKey]);
+    if (existing.rows[0]) {
+      const stored = mapChangeSet(existing.rows[0]);
+      const details = stored.provenance.details;
+      const same = stored.authorId === command.actorId && stored.provenance.source === "native-knowledge-merge"
+        && stored.provenance.actorId === command.actorId && details.projectVersion === command.projectVersion
+        && details.sourceId === command.sourceId && details.targetId === command.targetId
+        && details.previewDigest === command.previewDigest && details.origin === command.origin;
+      if (!same) throw idempotencyConflict(command.idempotencyKey);
+      return { changeSet: stored, replayed: true };
+    }
+    await this.assertProjectVersion(command.projectId, command.projectVersion);
+    const plan = await planKnowledgeMerge(this, command.projectId, command.sourceId, command.targetId);
+    if (plan.projectVersion !== command.projectVersion || plan.previewDigest !== command.previewDigest || plan.conflicts.length > 0) {
+      throw new PersistenceError("conflict", "Knowledge merge preview is stale or has unresolved conflicts", { resource: "knowledge_merge", id: command.sourceId });
+    }
+    const operationCommand: KnowledgeMergeChangeCommand = {
+      projectId: command.projectId, sourceId: command.sourceId, targetId: command.targetId,
+      projectVersion: command.projectVersion, previewDigest: command.previewDigest, actorId: command.actorId,
+      origin: command.origin, auditId: randomUUID(), generatedAliasId: randomUUID() as KnowledgeMergeChangeCommand["generatedAliasId"],
+      plan: JSON.parse(JSON.stringify(plan)) as JsonObject,
+    };
+    const operation = knowledgeMergeOperation(operationCommand);
+    const writeSet = knowledgeMergeWriteSet(operationCommand);
+    const readSet = knowledgeMergeReadSet(plan, operationCommand);
+    await this.assertChangeSetReadSet(command.projectId, readSet);
+    const provenance = {
+      source: "native-knowledge-merge",
+      actorId: command.actorId,
+      details: { projectVersion: command.projectVersion, sourceId: command.sourceId, targetId: command.targetId, previewDigest: command.previewDigest, origin: command.origin },
+    };
+    return this.createChangeSetInternal({
+      projectId: command.projectId, authorId: command.actorId, idempotencyKey: command.idempotencyKey,
+      operations: [operation], readSet, writeSet, provenance,
+    }, true);
   }
 
   private async transitionChangeSet(command: {
@@ -1407,6 +1518,16 @@ class PostgresTransaction implements PersistenceTransaction {
       case "evidence.mention.save": return this.saveMentionLink(operation.command);
       case "evidence.assertion.save": return this.saveAssertion(operation.command);
       case "evidence.assertion.link": return this.linkAssertionEvidence(operation.command);
+      case "knowledge.merge": return applyKnowledgeMerge(
+        this,
+        operation.command.projectId,
+        operation.command.sourceId,
+        operation.command.targetId,
+        operation.command.projectVersion,
+        operation.command.previewDigest,
+        operation.command.actorId,
+        { auditId: operation.command.auditId, generatedAliasId: operation.command.generatedAliasId, plan: operation.command.plan },
+      );
       default: {
         const exhaustive: never = operation;
         throw validationError(`Unsupported ChangeSet operation: ${String(exhaustive)}`);
@@ -1467,8 +1588,7 @@ class PostgresTransaction implements PersistenceTransaction {
           break;
         default: throw validationError("Only native Knowledge and Evidence operations can be proposed");
       }
-      const target = operationWriteTarget(operation);
-      earlier.add(changeSetResourceKey(target.resource, target.id));
+      for (const target of operationWriteTargets(operation)) earlier.add(changeSetResourceKey(target.resource, target.id));
     }
     return [...resolved.values()];
   }
@@ -1597,6 +1717,11 @@ class PostgresTransaction implements PersistenceTransaction {
       if (typeof sourceVersion !== "number" || !Number.isInteger(sourceVersion)) throw validationError("Native ChangeSet is missing its project snapshot fence");
       await this.assertProjectVersion(command.projectId, sourceVersion);
     }
+    if (changeSet.provenance.source === "native-knowledge-merge") {
+      const sourceVersion = changeSet.provenance.details.projectVersion;
+      if (typeof sourceVersion !== "number" || !Number.isSafeInteger(sourceVersion)) throw validationError("Native merge ChangeSet is missing its project snapshot fence");
+      await this.assertProjectVersion(command.projectId, sourceVersion);
+    }
 
     validateChangeSetOperations(
       changeSet.projectId,
@@ -1604,6 +1729,7 @@ class PostgresTransaction implements PersistenceTransaction {
       changeSet.readSet,
       changeSet.writeSet,
       changeSet.provenance,
+      changeSet.operations.some(operation => operation.type === "knowledge.merge"),
     );
     await this.assertChangeSetReadSet(command.projectId, changeSet.readSet);
     const results: ChangeSetOperationResult[] = [];
