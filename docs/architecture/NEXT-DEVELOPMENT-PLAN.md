@@ -1,6 +1,6 @@
 # Codexia 統合創作基盤・更新設計
 
-設計提案。既存の正本・承認・リリース契約を維持する。
+統合設計。既存の正本・承認・リリース契約を維持する。AI統合の採用済み契約は [MCP-first creative architecture](MCP-FIRST.md) を正本とする。その他の未採用設計案と実装受入は区別する。
 
 ## 1. 目的と完了条件
 
@@ -28,7 +28,7 @@ Codexiaを、原稿の執筆・作品世界の知識管理・物語の整合性�
 | Story | `modules/story/src/domain` のグラフ、年表、世界状態、伏線、読者知識 | 既存計算を再利用。PostgreSQLのID・Revision・Evidenceへの接続を強化 |
 | Story UI/API | `story.timeline.query`、`story.world-state.at-scene`、`story.threads.lifecycle`、`story.reader-model.build`、既存Workbench | 新規の並行Storyシステムを作らない |
 | Search | `modules/search` の辞書・索引・自動リンク | Knowledgeと用語辞書の責務整理。重複索引を作らない |
-| Assistant | `assistant.qa`、`continuation`、`reader.reaction`、`stateEvents.draft` 等と文脈・出典・プレビューの実装 | 既存文脈取得の改善とMCPとの共用。新しいAI実行基盤を作らない |
+| Assistant | `assistant.qa`、`continuation`、`reader.reaction`、`stateEvents.draft` 等と文脈・出典・プレビューの実装 | 既存Provider実行を凍結。文脈取得と提案の共通部分のみ再利用し、外部AI/MCPを主経路にする |
 | UI | Desktop/Mobile、共有保存・復旧、可変パネル、Reading | 既存シェルを維持して創作ワークフローを完成させる |
 | 交換・復旧 | `codexia-work/v1`、PostgreSQLバックアップ | 作品交換と運用バックアップを区別し、未解決Evidenceを保持 |
 | 配備 | Workers静的UI、Tunnel、Rootless Podman、Quadlet、SHA固定GHCR発行 | 既存構成に更新制御を追加。Kubernetes等への移行は不要 |
@@ -109,14 +109,14 @@ Knowledge/Evidenceの統合契約を基礎として、Temporal Story、Narrative
 
 ### Context Engine / AI・MCP統合
 
-**作者体験:** 「このシーンの続きを考える」「この人物の発言を見直す」「読者視点で第3章を評価する」等に応じ、対象文脈を自動選定する。外部送信前には対象範囲・送信先・目的を確認できる。回答の根拠から原稿へ戻れる。
+**作者体験:** 「このシーンの続きを考える」「この人物の発言を見直す」「読者視点で第3章を評価する」等に応じ、外部AIがMCP経由で対象文脈を取得し、推論・生成をクライアント側で実施する。文脈の範囲と根拠を確認でき、提出された変更案から原稿へ戻れる。
 
-**実装:** 既存Assistantの文脈構築・出典・Prompt preview・provider・実行キューとMCPの既存Action境界を使用する。用途別に共通のContext Packageを生成できるよう、必要な共通部分だけを抽出する。入力は固定Snapshotと対象シーン・人物・用途・知識範囲・トークン予算。出力は原稿引用、Knowledge ID、確定/候補、世界状態、視点別認識、関連伏線、任意の文体サンプル、除外理由、出典Revisionを含む。固定予算で根拠・近接性・関連性を優先し、切り捨てた情報を明示する。既存検索を活用し、埋め込みやモデルをCoreの依存にしない。
+**実装:** 既存Storyの文脈構築、Knowledge投影、MCPのContext ManifestとAction境界、Assistantのローカル文脈構築・出典を再利用する。Provider・実行キュー・新規モデル呼出は拡張しない。用途別に共通のContext Packageを生成できるよう、必要な共通部分だけを抽出する。入力は固定Snapshotと対象シーン・人物・用途・知識範囲・トークン予算。出力は原稿引用、Knowledge ID、確定/候補、世界状態、視点別認識、関連伏線、任意の文体サンプル、除外理由、出典Revisionを含む。固定予算で根拠・近接性・関連性を優先し、切り捨てた情報を明示する。既存検索を活用し、埋め込みやモデルをCoreの依存にしない。
 
 **受入:**
-- 同じSnapshot・用途・制約で既存AssistantとMCPが同一の正本情報を参照する。
+- 同じSnapshot・用途・制約でWeb UIとMCPが同一の正本情報を参照する。Assistantなしでも主要操作が利用できる。
 - 読者視点では未開示の真相、人物視点では未取得の知識を既定で混入させない。作者向け全知モードとは明確に区別する。
-- 外部送信への同意がない場合、ローカルの文脈プレビューと対応するMCP権限範囲の読み取り以外は送信しない。
+- MCPは認証済みの作品権限と明示された視点・対象範囲内で文脈を返す。内部LLMの呼出はMCPの直接・間接経路を含め新規開発対象外とし、既存Providerの同意制御は維持する。
 - AIは設定の確定や本文の書換えを直接行えない。作者承認とRevision検証を経て反映する。
 - 古い文脈・根拠を使った提案はstaleとして扱い、再取得を促す。出典が欠ける場合は推測と明示する。
 
@@ -193,4 +193,4 @@ Cloudflare Access
 - [Story domain](https://github.com/yohn-jp/codexia/blob/main/modules/story/src/domain/index.ts) / [Story snapshot](https://github.com/yohn-jp/codexia/blob/main/modules/story/src/snapshot.ts) / [Story actions](https://github.com/yohn-jp/codexia/blob/main/modules/story/src/actions.ts) / [Assistant actions](https://github.com/yohn-jp/codexia/blob/main/modules/assistant/src/actions.ts)
 - [Deployment](https://github.com/yohn-jp/codexia/blob/main/docs/deployment/README.md) / [API Quadlet](https://github.com/yohn-jp/codexia/blob/main/deploy/quadlet/codexia-api.container) / [Portable works](https://github.com/yohn-jp/codexia/blob/main/docs/authoring-portable.md)
 
-本書は設計提案であり、実装完了・実機受入を宣言しない。5分間隔、監視時間、初期CLI、Standalone限定、短時間停止を許容する設計は、実機測定と設計承認を経て確定する。
+本書は設計契約と未採用の運用設計案を含み、実装完了・実機受入を宣言しない。5分間隔、監視時間、初期CLI、Standalone限定、短時間停止を許容する設計は、実機測定と設計承認を経て確定する。

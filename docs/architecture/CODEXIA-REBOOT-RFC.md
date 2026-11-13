@@ -237,7 +237,7 @@ BEGIN
 | `NLP` | 既存tokenizer/候補抽出 | **任意**：低負荷優先・明示起動。内包Lindera WASM依存は外部プラグインWASMとは別途評価 |
 | `Speaker` | 既存アルゴリズム・確認ログ | **移行**：訂正情報をDB正本、音声特徴・推論は派生 |
 | `Semantic` | Embedding/矛盾検出 | **後段移行**：sourceRevision付き。まず依存最小化 |
-| `Assistant` | 文脈構築、Provider、ChangeSet | **移行**：提出権限のみ。秘密・モデル呼出はAPI/Worker側 |
+| `Assistant` | 文脈構築、Provider、ChangeSet | **凍結**：既存Provider資産を保持し、新規内部LLM実行を拡張しない。文脈・提案は [MCP-first](MCP-FIRST.md) に従う |
 | `MCP` | 既存Tool名/Action境界 | **改修**：同一Domain APIに接続。外部から直接DB mutate禁止 |
 | `Publishing` | EPUB、縦書き、Plaintext | **移行**：DB→Markdown等のエクスポート経由で生成 |
 | `module-runtime` | 現行ランタイム | **部分維持**：依存解決、OFF/idle/active、Worker。Git Snapshot前提のhost context変更 |
@@ -314,7 +314,7 @@ codexia/
 ### Phase 5 — 安全なAI/MCP・公開/エクスポート
 
 - DB操作を対象とするChangeSet、提案者と承認者の境界、stale read/write preconditions、部分承認/却下/再提案を実装。
-- MCPは既存Action経由に統一。Speaker、Semantic、Assistant、Publishingは既存アルゴリズムを選別移植。
+- MCPは既存Action経由に統一。Speaker、Semantic、Publishingは既存アルゴリズムを選別移植。Assistantの内部LLM実行の新規拡張は [MCP-first](MCP-FIRST.md) により凍結。
 - EPUB、Markdown、JSONなどのエクスポートを旧形式との照合に使う。
 
 ### Phase 6 — Nous型のデプロイ・実機受入

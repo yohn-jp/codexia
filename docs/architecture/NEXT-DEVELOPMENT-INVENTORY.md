@@ -8,7 +8,7 @@
 | Knowledge | packages/core/src/knowledge/index.ts、packages/core/src/evidence、packages/api/src/persistence-routes.ts | 既存Inspector、命題、別名、関係、統合 | tests/e2e/persistence-database.acceptance.spec.ts、Core knowledge-evidence.test.ts |
 | Story | modules/story/src/snapshot.ts → domain/worldState.ts、timeline.ts、readerKnowledge.ts、threadLifecycle.ts | | modules/story/src/actions.test.ts、domainテスト |
 | Search | modules/search の既存Term Registryと辞書 | Knowledge AliasはPostgreSQL正本、同名一致は確定としない。Searchとの明示参照・一方向投影の接続は明示的な参照を必要とする | 既存Searchテスト、実UIで曖昧性を検証 |
-| Assistant/MCP | modules/assistant/src/actions.ts、既存Module Action registry | 共通Context、プレビュー、同意、既存provider queue | Assistantテスト、Story fixture、MCP権限・外部送信受入 |
+| Context/MCP | modules/story/src/actions.ts、modules/mcp/src/tools.ts、既存Module Action registry、Assistantのローカル文脈 | 共通Context、プレビュー、外部AIの提出、内部LLM実行の凍結（[MCP-first](MCP-FIRST.md)） | Story fixture、MCP権限・Provider非実行・Snapshot受入 |
 | Scenario | 既存Story ChangeSet / ModuleRecord | 比較、保存、stale再比較、採用提案 | 既存Storyテストと追加fixture、統合受入 |
 | Release | scripts/ci-contract.mjs、既存OCI/Worker CI | | exact-head/統合main CI、署名検証、DB fingerprint |
 | 更新 | deploy/quadlet、Tunnel、API lifecycle | | コントローラ単体、実Podman/VM、保存中切替 |

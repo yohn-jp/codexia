@@ -1,0 +1,8 @@
+[Unit]
+Description=Poll signed Codexia channel and perform exclusive update
+Requires=codexia-updater-boot.service
+After=codexia-updater-boot.service
+[Service]
+Type=oneshot
+ExecStart=/bin/sh /opt/codexia-updater/deploy/updater/codexia-updater tick %h/.config/codexia-updater/config.json
+TimeoutStartSec=1800
