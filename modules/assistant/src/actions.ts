@@ -2341,6 +2341,23 @@ export function createAssistantActions(moduleContext: ModuleContext): ModuleActi
       return { available: state.providerKind !== "none" && state.providerKind !== "invalid", providerKind: state.providerKind, configuredModel: state.envDefaultModel, ...(state.issue ? { issue: state.issue } : {}), locality: "optional-external" };
     }),
     action("assistant.queue.status", "read", parseEmpty, async () => modelQueue.status()),
+    action("assistant.context.preview", "read", (value) => {
+      const raw = record(value, "context preview");
+      const sceneId = parseString(raw.sceneId, "sceneId", 256);
+      const scope = raw.scope;
+      if (scope !== "author" && scope !== "character" && scope !== "reader") throw new TypeError("Invalid context scope");
+      const characterId = scope === "character" ? parseString(raw.characterId, "characterId", 256) : undefined;
+      const budget = raw.budget === undefined ? 12000 : raw.budget;
+      if (typeof budget !== "number" || !Number.isSafeInteger(budget) || budget < 128 || budget > 200000) throw new TypeError("Invalid context budget");
+      return { sceneId, scope, ...(characterId ? { characterId } : {}), budget };
+    }, async (input, context) => {
+      // The same Story action is available to MCP through the existing action registry.
+      // No model, provider, or external transfer participates in this preview.
+      const result = await context.invoke("story.context.package", input);
+      if (!result.ok) throw codeError(result.error.code, result.error.message);
+      if (snapshotKey(result.snapshot) !== snapshotKey(context.reader.snapshot)) throw codeError("stale_source", "Context snapshot changed");
+      return record(result.data, "story context package");
+    }),
     action("assistant.settings.read", "read", parseEmpty, async (_input, context) => {
       const { settings, revision } = await readAssistantSettings(context.reader);
       const modelByFeature = Object.fromEntries(ASSISTANT_FEATURE_IDS.map((feature) => {

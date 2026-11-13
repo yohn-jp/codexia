@@ -7,7 +7,7 @@ import {
 } from "./types.js";
 import type { SnapshotId } from "@codexia/contracts";
 
-export type SceneStateEventKind = "location" | "acquaintance" | "ownership" | "knowledge";
+export type SceneStateEventKind = "location" | "acquaintance" | "ownership" | "knowledge" | "attribute";
 export type SceneStateEventSource = "rule" | "llm-draft" | "manual";
 export type StateAssertionStatus = "proposed" | "confirmed" | "rejected" | "superseded";
 
@@ -157,7 +157,7 @@ function parseSceneEffects(raw: unknown): SceneEffect[] {
 }
 
 function isSceneStateEventKind(value: unknown): value is SceneStateEventKind {
-  return value === "location" || value === "ownership" || value === "acquaintance" || value === "knowledge";
+  return value === "location" || value === "ownership" || value === "acquaintance" || value === "knowledge" || value === "attribute";
 }
 
 function stateEventFromRaw(raw: unknown, sceneId: string, order: number, requireSceneId: boolean): SceneStateEvent | null {
@@ -165,20 +165,22 @@ function stateEventFromRaw(raw: unknown, sceneId: string, order: number, require
   const event = raw as Partial<SceneStateEvent>;
   if (!isSceneStateEventKind(event.kind) || typeof event.subject !== "string") return null;
   if (requireSceneId && typeof event.sceneId !== "string") return null;
+  if (event.sceneId !== undefined && event.sceneId !== sceneId) return null;
+  if (event.status !== undefined && !["proposed", "confirmed", "rejected", "superseded"].includes(event.status)) return null;
   return {
-    sceneId: typeof event.sceneId === "string" ? event.sceneId : sceneId,
-    order: typeof event.order === "number" ? event.order : order,
+    sceneId,
+    order,
     kind: event.kind,
     subject: event.subject,
     object: typeof event.object === "string" ? event.object : null,
     payload: event.payload && typeof event.payload === "object" ? (event.payload as Record<string, unknown>) : {},
-    source: "manual",
+    source: event.source === "llm-draft" ? "llm-draft" : "manual",
     eventId: event.eventId,
     propositionId: event.propositionId,
     evidence: event.evidence,
     confidence: event.confidence,
     createdAt: event.createdAt,
-    status: "confirmed",
+    status: event.status ?? "confirmed",
     replacesEventId: event.replacesEventId,
   };
 }
@@ -343,6 +345,7 @@ function applyEvent(
   acquaintances: Map<string, AcquaintanceState>,
 ): void {
   if (event.source === "llm-draft" || (event.status !== undefined && event.status !== "confirmed")) return;
+  if (event.payload.layer !== undefined && event.payload.layer !== "objective") return;
   switch (event.kind) {
     case "location":
       if (event.object) {
@@ -362,6 +365,7 @@ function applyEvent(
       }
       break;
     case "knowledge":
+    case "attribute":
       break;
   }
 }
