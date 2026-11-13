@@ -1,0 +1,14 @@
+{
+  "format": "codexia-standalone-updater/v1",
+  "enabled": false,
+  "stateFile": "/home/codexia/.local/state/codexia-updater/controller.json",
+  "routeFile": "/home/codexia/.local/state/codexia-updater/route",
+  "quadletDirectory": "/home/codexia/.config/containers/systemd",
+  "publicKeyFile": "/home/codexia/.config/codexia-updater/channel-public.pem",
+  "githubTokenFile": "/home/codexia/.config/codexia-updater/github-read-token",
+  "frontendIdentityUrl": "https://codexia.example.invalid/desktop/update-identity.json",
+  "accessClientIdFile": "/home/codexia/.config/codexia-updater/access-client-id",
+  "accessClientSecretFile": "/home/codexia/.config/codexia-updater/access-client-secret",
+  "observeMilliseconds": 300000,
+  "initialSlot": "blue"
+}
