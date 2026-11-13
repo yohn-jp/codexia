@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { z } from "zod";
 import type {
   ActorId, AssertionId, ChangeSet, ChangeSetApplicationResult, ChangeSetId, ChangeSetOperation,
   ChangeSetReadSetEntry, ChangeSetResource, ChangeSetWriteSetEntry, CreateChangeSetCommand,
@@ -160,23 +160,26 @@ export async function proposeNativeKnowledgeChange(input: ProposeNativeKnowledge
   if (!input.actorId.trim() || !input.idempotencyKey.trim() || input.idempotencyKey.length > 200 || !Number.isInteger(input.projectVersion) || input.projectVersion < 1 || !Array.isArray(input.operations) || input.operations.length < 1 || input.operations.length > 50 || Buffer.byteLength(JSON.stringify(input.operations), "utf8") > 256_000) {
     throw new NativeKnowledgeServiceError("invalid_input", "Native ChangeSet is empty or exceeds its bounded input limits");
   }
-  const operations = input.operations.map(operation => {
-    if (!operation || typeof operation !== "object" || !["knowledge.node.save", "knowledge.alias.save", "knowledge.relation.save", "evidence.anchor.save", "evidence.mention.save", "evidence.assertion.save", "evidence.assertion.link"].includes(operation.type)) throw new NativeKnowledgeServiceError("invalid_input", "Invalid native operation");
-    const fields: Record<string, readonly string[]> = {
-      "knowledge.node.save": ["projectId", "id", "type", "name", "attributes", "status", "expectedVersion"],
-      "knowledge.alias.save": ["projectId", "id", "nodeId", "surface", "normalized", "scope", "status"],
-      "knowledge.relation.save": ["projectId", "id", "sourceId", "targetId", "type", "attributes", "validity", "status", "expectedVersion"],
-      "evidence.anchor.save": ["projectId", "id", "documentId", "revisionId", "fromUtf16", "toUtf16", "quoteSha256", "status", "expectedVersion"],
-      "evidence.mention.save": ["projectId", "evidenceId", "nodeId", "status", "source", "confidence", "extractorVersion"],
-      "evidence.assertion.save": ["projectId", "id", "proposition", "modality", "perspective", "narrativeTime", "confidence", "status", "expectedVersion"],
-      "evidence.assertion.link": ["projectId", "assertionId", "evidenceId", "role"],
-    };
-    if (!operation.command || typeof operation.command !== "object" || Array.isArray(operation.command) || Object.keys(operation).some(key => key !== "type" && key !== "command") || Object.keys(operation.command).some(key => !fields[operation.type]!.includes(key))) {
-      throw new NativeKnowledgeServiceError("invalid_input", "Native operation contains malformed or unauthorized fields");
-    }
+  const id = z.string().uuid();
+  const nonempty = z.string().min(1).max(512).refine(value => value.trim().length > 0);
+  const object = z.record(z.unknown());
+  const version = z.number().int().positive().safe().nullable();
+  const confidence = z.number().min(0).max(1).nullable();
+  const scope = { projectId: id };
+  const schema = z.discriminatedUnion("type", [
+    z.object({ type: z.literal("knowledge.node.save"), command: z.object({ ...scope, id, type: nonempty, name: nonempty, attributes: object, status: z.enum(["proposed", "confirmed", "retired"]), expectedVersion: version }).strict() }).strict(),
+    z.object({ type: z.literal("knowledge.alias.save"), command: z.object({ ...scope, id, nodeId: id, surface: nonempty, normalized: nonempty, scope: nonempty.nullable(), status: z.enum(["proposed", "confirmed", "ambiguous", "retired"]) }).strict() }).strict(),
+    z.object({ type: z.literal("knowledge.relation.save"), command: z.object({ ...scope, id, sourceId: id, targetId: id, type: nonempty, attributes: object, validity: object, status: z.enum(["proposed", "confirmed", "rejected", "retired"]), expectedVersion: version }).strict() }).strict(),
+    z.object({ type: z.literal("evidence.anchor.save"), command: z.object({ ...scope, id, documentId: id, revisionId: id, fromUtf16: z.number().int().nonnegative().safe(), toUtf16: z.number().int().positive().safe(), quoteSha256: z.string().regex(/^[0-9a-f]{64}$/), status: z.enum(["proposed", "confirmed", "needs_review", "orphaned"]), expectedVersion: version }).strict() }).strict(),
+    z.object({ type: z.literal("evidence.mention.save"), command: z.object({ ...scope, evidenceId: id, nodeId: id, status: z.enum(["proposed", "confirmed", "ambiguous", "rejected"]), source: nonempty, confidence, extractorVersion: nonempty.nullable() }).strict() }).strict(),
+    z.object({ type: z.literal("evidence.assertion.save"), command: z.object({ ...scope, id, proposition: object, modality: nonempty, perspective: nonempty, narrativeTime: object, confidence, status: z.enum(["proposed", "confirmed", "rejected", "retired"]), expectedVersion: version }).strict() }).strict(),
+    z.object({ type: z.literal("evidence.assertion.link"), command: z.object({ ...scope, assertionId: id, evidenceId: id, role: z.enum(["supports", "contradicts", "quotes", "context"]) }).strict() }).strict(),
+  ]);
+  const parsed = z.array(schema).safeParse(input.operations);
+  if (!parsed.success) throw new NativeKnowledgeServiceError("invalid_input", "Native operation contains malformed or unauthorized fields");
+  const operations = parsed.data.map(operation => {
     if (operation.command.projectId !== input.projectId) throw new NativeKnowledgeServiceError("invalid_input", "Native operation project scope does not match the authorized project");
-    const command = { ...operation.command, projectId: input.projectId } as ChangeSetOperation["command"];
-    return { ...operation, command } as ChangeSetOperation;
+    return operation as unknown as ChangeSetOperation;
   });
   const writes: ChangeSetWriteSetEntry[] = [];
   const reads: ChangeSetReadSetEntry[] = [];
@@ -192,19 +195,7 @@ export async function proposeNativeKnowledgeChange(input: ProposeNativeKnowledge
     operations, readSet: reads, writeSet: writes,
     provenance: { source: "native-knowledge-service", actorId: input.actorId, details: { projectVersion: input.projectVersion } },
   };
-  return input.persistence.transaction(async transaction => {
-    await transaction.assertProjectVersion(input.projectId, input.projectVersion);
-    for (const operation of operations) {
-      if (operation.type === "evidence.anchor.save") {
-        const c = operation.command;
-        const revision = await transaction.getRevision(input.projectId, c.documentId, c.revisionId);
-        if (!revision || c.fromUtf16 < 0 || c.toUtf16 <= c.fromUtf16 || c.toUtf16 > revision.markdown.length) throw new NativeKnowledgeServiceError("invalid_input", "Evidence anchor must select a range in a project-owned source revision");
-        const quoteHash = createHash("sha256").update(revision.markdown.slice(c.fromUtf16, c.toUtf16), "utf8").digest("hex");
-        if (c.quoteSha256 !== quoteHash) throw new NativeKnowledgeServiceError("invalid_input", "Evidence anchor quote hash does not match its source range");
-      }
-    }
-    return transaction.createChangeSet(command);
-  });
+  return input.persistence.transaction(transaction => transaction.createChangeSet(command));
 }
 
 export async function getNativeChangeSet(persistence: Persistence, projectId: ProjectId, changeSetId: ChangeSetId): Promise<{ changeSet: ChangeSet; receipt: ChangeSetApplicationResult | undefined } | undefined> {

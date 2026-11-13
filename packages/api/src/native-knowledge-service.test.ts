@@ -34,6 +34,10 @@ test("native proposals stay noncanonical until approval, apply atomically, and r
   assert.equal(applied.changeSet.status, "applied");
   assert.equal((await persistence.read(reader => reader.getKnowledgeNode(p.id, operation.command.id)))?.name, "Luna");
   assert.equal((await applyNativeChangeSet(persistence, p.id, approved.id, approved.version)).replayed, true);
+  const replayAfterApply = await proposeNativeKnowledgeChange({ persistence, projectId: p.id, projectVersion: p.version, actorId: "reviewer", idempotencyKey: "native-create-1", operations: [operation] });
+  assert.equal(replayAfterApply.replayed, true);
+  assert.equal(replayAfterApply.changeSet.id, submitted.changeSet.id);
+  assert.equal(replayAfterApply.changeSet.status, "applied");
   const prior = persistence;
   await prior.close();
   persistence = createPostgresPersistence(connectionString);
@@ -61,7 +65,10 @@ test("native snapshot scope, rollback, rejection, and stale source fences fail c
   const current = await persistence.read(reader => reader.getProject(p.id));
   assert.ok(current);
   const badLink: ChangeSetOperation = { type: "evidence.mention.save", command: { projectId: p.id, evidenceId, nodeId: randomUUID() as KnowledgeNodeId, status: "proposed", source: "external", confidence: null, extractorVersion: null } };
-  const rollback = await proposeNativeKnowledgeChange({ persistence, projectId: p.id, projectVersion: current.version, actorId: "actor", idempotencyKey: "rollback", operations: [rollbackNode, badLink] });
+  await assert.rejects(proposeNativeKnowledgeChange({ persistence, projectId: p.id, projectVersion: current.version, actorId: "actor", idempotencyKey: "bad-link", operations: [rollbackNode, badLink] }));
+  const aliasCommand = { projectId: p.id, nodeId: rollbackNode.command.id, surface: "same", normalized: "same", scope: null, status: "confirmed" as const };
+  const aliases: ChangeSetOperation[] = [1, 2].map(() => ({ type: "knowledge.alias.save" as const, command: { ...aliasCommand, id: randomUUID() as import("@codexia/persistence-contracts").KnowledgeAliasId } }));
+  const rollback = await proposeNativeKnowledgeChange({ persistence, projectId: p.id, projectVersion: current.version, actorId: "actor", idempotencyKey: "rollback", operations: [rollbackNode, ...aliases] });
   const approved = await approveNativeChangeSet(persistence, p.id, rollback.changeSet.id, rollback.changeSet.version, "author");
   await assert.rejects(applyNativeChangeSet(persistence, p.id, approved.id, approved.version));
   assert.equal(await persistence.read(reader => reader.getKnowledgeNode(p.id, rollbackNode.command.id)), undefined);
@@ -73,6 +80,24 @@ test("native snapshot scope, rollback, rejection, and stale source fences fail c
   const staleApproved = await approveNativeChangeSet(persistence, p.id, stale.changeSet.id, stale.changeSet.version, "author");
   await assert.rejects(applyNativeChangeSet(persistence, p.id, staleApproved.id, staleApproved.version));
   assert.equal(await persistence.read(reader => reader.getKnowledgeNode(p.id, (stale.changeSet.operations[0] as NodeOperation).command.id)), undefined);
+});
+
+test("existing alias upserts capture presence and replay unchanged after application", async () => {
+  const p = await project("native-upsert");
+  const node = nodeOperation(p.id, "Alias node");
+  const aliasId = randomUUID() as import("@codexia/persistence-contracts").KnowledgeAliasId;
+  const alias: Extract<ChangeSetOperation, { type: "knowledge.alias.save" }> = { type: "knowledge.alias.save", command: { projectId: p.id, id: aliasId, nodeId: node.command.id, surface: "old", normalized: "old", scope: null, status: "proposed" } };
+  await persistence.transaction(async tx => { await tx.saveKnowledgeNode(node.command); await tx.saveKnowledgeAlias(alias.command); });
+  const current = await persistence.read(reader => reader.getProject(p.id));
+  assert.ok(current);
+  const operation: ChangeSetOperation = { ...alias, command: { ...alias.command, surface: "new", normalized: "new" } };
+  const request = { persistence, projectId: p.id, projectVersion: current.version, actorId: "actor", idempotencyKey: "update-alias", operations: [operation] };
+  const proposal = await proposeNativeKnowledgeChange(request);
+  assert.equal(proposal.changeSet.readSet.find(entry => entry.resource === "knowledge_alias")?.expectedVersion, 1);
+  const approved = await approveNativeChangeSet(persistence, p.id, proposal.changeSet.id, proposal.changeSet.version, "author");
+  await applyNativeChangeSet(persistence, p.id, approved.id, approved.version);
+  assert.equal((await persistence.read(reader => reader.listKnowledgeAliases(p.id, node.command.id)))[0]?.surface, "new");
+  assert.equal((await proposeNativeKnowledgeChange(request)).replayed, true);
 });
 
 test("authenticated persistence routes expose the native ChangeSet review lifecycle", async () => {

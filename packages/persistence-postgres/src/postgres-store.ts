@@ -1304,12 +1304,20 @@ class PostgresTransaction implements PersistenceTransaction {
       if (asString(existing.rows[0].request_sha256).trim() !== requestSha256) throw idempotencyConflict(command.idempotencyKey);
       return { changeSet: mapChangeSet(existing.rows[0]), replayed: true };
     }
+    let readSet = command.readSet;
+    if (command.provenance.source === "native-knowledge-service") {
+      const sourceVersion = command.provenance.details.projectVersion;
+      if (typeof sourceVersion !== "number" || !Number.isSafeInteger(sourceVersion)) throw validationError("Native ChangeSet is missing its project snapshot fence");
+      await this.assertProjectVersion(command.projectId, sourceVersion);
+      readSet = await this.prepareNativeChangeSetReadSet(command.projectId, command.operations, command.readSet);
+      await this.assertChangeSetReadSet(command.projectId, readSet);
+    }
     const id = command.id ?? randomUUID() as ChangeSetId;
     const result = await this.query(
       `INSERT INTO change_set(project_id, id, author_id, status, operations, read_set, write_set, provenance, idempotency_key, request_sha256)
        VALUES ($1, $2, $3, 'proposed', $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9) RETURNING *`,
       [
-        command.projectId, id, command.authorId, toJson(command.operations), toJson(command.readSet),
+        command.projectId, id, command.authorId, toJson(command.operations), toJson(readSet),
         toJson(command.writeSet), toJson(command.provenance), command.idempotencyKey, requestSha256,
       ],
     );
@@ -1406,8 +1414,66 @@ class PostgresTransaction implements PersistenceTransaction {
     }
   }
 
-  private async assertChangeSetReadSet(projectId: ProjectId, entries: readonly ChangeSetReadSetEntry[]): Promise<void> {
+  /** Resolve unversioned upsert preconditions and referenced identities once, under the project fence.
+   * Exact retries are checked by createChangeSet before this state-dependent work. */
+  private async prepareNativeChangeSetReadSet(projectId: ProjectId, operations: readonly ChangeSetOperation[], entries: readonly ChangeSetReadSetEntry[]): Promise<readonly ChangeSetReadSetEntry[]> {
+    const resolved = new Map<string, ChangeSetReadSetEntry>();
     for (const entry of entries) {
+      const unversioned = entry.resource === "knowledge_alias" || entry.resource === "mention_link" || entry.resource === "assertion_evidence";
+      const expectedVersion = unversioned ? (await this.currentChangeSetReadSetEntry(projectId, entry)).actualVersion : entry.expectedVersion;
+      resolved.set(changeSetResourceKey(entry.resource, entry.id), { ...entry, expectedVersion });
+    }
+    const earlier = new Set<string>();
+    const reference = async (resource: ChangeSetResource, id: string) => {
+      const key = changeSetResourceKey(resource, id);
+      if (earlier.has(key)) return;
+      const { actualVersion } = await this.currentChangeSetReadSetEntry(projectId, { resource, id, expectedVersion: null });
+      if (actualVersion === null) throw notFound(resource, id);
+      if (!resolved.has(key)) resolved.set(key, { resource, id, expectedVersion: actualVersion });
+    };
+    for (const operation of operations) {
+      switch (operation.type) {
+        case "knowledge.node.save":
+        case "evidence.assertion.save": break;
+        case "knowledge.alias.save":
+          await reference("knowledge_node", operation.command.nodeId);
+          break;
+        case "knowledge.relation.save":
+          await reference("knowledge_node", operation.command.sourceId);
+          await reference("knowledge_node", operation.command.targetId);
+          break;
+        case "evidence.anchor.save": {
+          const c = operation.command;
+          const document = await this.getDocument(projectId, c.documentId);
+          const revision = await this.getRevision(projectId, c.documentId, c.revisionId);
+          if (!document || !revision) throw notFound("evidence document revision", c.revisionId);
+          if (document.headRevisionId !== c.revisionId) throw conflict("document_revision", c.documentId, c.revisionId, document.headRevisionId);
+          if (c.fromUtf16 >= c.toUtf16) throw validationError("Evidence anchors require a non-empty UTF-16 range");
+          assertUtf16Boundary(revision.markdown, c.fromUtf16);
+          assertUtf16Boundary(revision.markdown, c.toUtf16);
+          if (bodyDigest(revision.markdown.slice(c.fromUtf16, c.toUtf16)) !== c.quoteSha256) throw validationError("Evidence quote hash does not match the referenced revision range");
+          const current = await this.getEvidenceAnchor(projectId, c.id);
+          if (current && current.documentId !== c.documentId) throw validationError("Evidence anchor document identity cannot change");
+          resolved.set(changeSetResourceKey("document", c.documentId), { resource: "document", id: c.documentId, expectedVersion: document.version, expectedRevisionId: c.revisionId });
+          break;
+        }
+        case "evidence.mention.save":
+          await reference("evidence_anchor", operation.command.evidenceId);
+          await reference("knowledge_node", operation.command.nodeId);
+          break;
+        case "evidence.assertion.link":
+          await reference("assertion", operation.command.assertionId);
+          await reference("evidence_anchor", operation.command.evidenceId);
+          break;
+        default: throw validationError("Only native Knowledge and Evidence operations can be proposed");
+      }
+      const target = operationWriteTarget(operation);
+      earlier.add(changeSetResourceKey(target.resource, target.id));
+    }
+    return [...resolved.values()];
+  }
+
+  private async currentChangeSetReadSetEntry(projectId: ProjectId, entry: ChangeSetReadSetEntry): Promise<{ actualVersion: number | null; actualRevisionId: string | null }> {
       let actualVersion: number | null;
       let actualRevisionId: string | null = null;
       switch (entry.resource) {
@@ -1478,6 +1544,12 @@ class PostgresTransaction implements PersistenceTransaction {
           throw validationError(`Unsupported ChangeSet read-set resource: ${String(exhaustive)}`);
         }
       }
+      return { actualVersion, actualRevisionId };
+  }
+
+  private async assertChangeSetReadSet(projectId: ProjectId, entries: readonly ChangeSetReadSetEntry[]): Promise<void> {
+    for (const entry of entries) {
+      const { actualVersion, actualRevisionId } = await this.currentChangeSetReadSetEntry(projectId, entry);
       if (actualVersion !== entry.expectedVersion) {
         throw conflict(entry.resource, entry.id, entry.expectedVersion, actualVersion);
       }
