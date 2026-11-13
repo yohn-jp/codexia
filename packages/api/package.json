@@ -4,14 +4,14 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
+    "./native-knowledge-merge-service": {
+      "types": "./dist/native-knowledge-merge-service.d.ts",
+      "import": "./dist/native-knowledge-merge-service.js"
+    },
     ".": "./dist/server.js",
     "./native-knowledge-service": {
       "types": "./dist/native-knowledge-service.d.ts",
       "import": "./dist/native-knowledge-service.js"
-    },
-    "./native-knowledge-merge-service": {
-      "types": "./dist/native-knowledge-merge-service.d.ts",
-      "import": "./dist/native-knowledge-merge-service.js"
     }
   },
   "scripts": {
