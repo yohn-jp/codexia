@@ -6,6 +6,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./knowledge-merge": {
+      "types": "./dist/knowledge-merge.d.ts",
+      "import": "./dist/knowledge-merge.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"

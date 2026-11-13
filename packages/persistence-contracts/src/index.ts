@@ -388,7 +388,39 @@ export type ChangeSetOperation =
   | { type: "evidence.anchor.save"; command: SaveEvidenceAnchorCommand }
   | { type: "evidence.mention.save"; command: SaveMentionLinkCommand }
   | { type: "evidence.assertion.save"; command: SaveAssertionCommand }
-  | { type: "evidence.assertion.link"; command: LinkAssertionEvidenceCommand };
+  | { type: "evidence.assertion.link"; command: LinkAssertionEvidenceCommand }
+  | { type: "knowledge.merge"; command: KnowledgeMergeChangeCommand };
+
+/** Server-derived immutable proposal payload for one atomic Knowledge merge. */
+export interface KnowledgeMergeChangeCommand {
+  projectId: ProjectId;
+  sourceId: KnowledgeNodeId;
+  targetId: KnowledgeNodeId;
+  projectVersion: number;
+  previewDigest: string;
+  actorId: ActorId;
+  origin: "author" | "external-agent";
+  auditId: string;
+  generatedAliasId: KnowledgeAliasId;
+  plan: JsonObject;
+}
+
+export interface ProposeKnowledgeMergeCommand {
+  projectId: ProjectId;
+  sourceId: KnowledgeNodeId;
+  targetId: KnowledgeNodeId;
+  projectVersion: number;
+  previewDigest: string;
+  actorId: ActorId;
+  origin: "author" | "external-agent";
+  idempotencyKey: IdempotencyKey;
+}
+
+export interface KnowledgeMergeResult {
+  target: KnowledgeNode;
+  source: KnowledgeNode;
+  auditId: string;
+}
 
 export interface ChangeSet {
   id: ChangeSetId;
@@ -437,7 +469,8 @@ export type ChangeSetOperationResult =
   | EvidenceAnchor
   | MentionLink
   | Assertion
-  | AssertionEvidence;
+  | AssertionEvidence
+  | KnowledgeMergeResult;
 
 export interface ChangeSetApplicationResult {
   changeSet: ChangeSet;
@@ -494,6 +527,8 @@ export interface PersistenceTransaction extends PersistenceReader {
   saveAssertion(command: SaveAssertionCommand): Promise<Assertion>;
   linkAssertionEvidence(command: LinkAssertionEvidenceCommand): Promise<AssertionEvidence>;
   createChangeSet(command: CreateChangeSetCommand): Promise<ChangeSetResult>;
+  /** Derive and persist one complete merge proposal under the project lock. */
+  proposeKnowledgeMerge(command: ProposeKnowledgeMergeCommand): Promise<ChangeSetResult>;
   approveChangeSet(command: {
     projectId: ProjectId;
     changeSetId: ChangeSetId;
