@@ -460,17 +460,19 @@ export interface PersistenceReader {
   listAllKnowledgeNodes(projectId: ProjectId, limit?: number): Promise<readonly KnowledgeNode[]>;
   /** Export-only project assertion inventory, including unlinked assertions. */
   listAssertions(projectId: ProjectId, limit?: number): Promise<readonly Assertion[]>;
-  listKnowledgeAliases(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<readonly KnowledgeAlias[]>;
-  listKnowledgeRelations(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<readonly KnowledgeRelation[]>;
+  listKnowledgeAliases(projectId: ProjectId, nodeId: KnowledgeNodeId, limit?: number): Promise<readonly KnowledgeAlias[]>;
+  listKnowledgeRelations(projectId: ProjectId, nodeId: KnowledgeNodeId, limit?: number): Promise<readonly KnowledgeRelation[]>;
   getEvidenceAnchor(projectId: ProjectId, evidenceId: EvidenceId): Promise<EvidenceAnchor | undefined>;
   listDocumentEvidence(projectId: ProjectId, documentId: DocumentId, revisionId?: RevisionId, limit?: number): Promise<readonly EvidenceAnchor[]>;
-  listEvidenceHistory(projectId: ProjectId, evidenceId: EvidenceId): Promise<readonly EvidenceAnchorHistory[]>;
-  listMentionLinks(projectId: ProjectId, evidenceId: EvidenceId): Promise<readonly MentionLink[]>;
+  listEvidenceHistory(projectId: ProjectId, evidenceId: EvidenceId, limit?: number): Promise<readonly EvidenceAnchorHistory[]>;
+  listMentionLinks(projectId: ProjectId, evidenceId: EvidenceId, limit?: number): Promise<readonly MentionLink[]>;
   listNodeMentions(projectId: ProjectId, nodeId: KnowledgeNodeId, limit?: number): Promise<readonly MentionLink[]>;
   getAssertion(projectId: ProjectId, assertionId: AssertionId): Promise<Assertion | undefined>;
-  listAssertionEvidence(projectId: ProjectId, assertionId: AssertionId): Promise<readonly AssertionEvidence[]>;
+  listAssertionEvidence(projectId: ProjectId, assertionId: AssertionId, limit?: number): Promise<readonly AssertionEvidence[]>;
   listEvidenceAssertions(projectId: ProjectId, evidenceId: EvidenceId, limit?: number): Promise<readonly AssertionEvidence[]>;
   getChangeSet(projectId: ProjectId, changeSetId: ChangeSetId): Promise<ChangeSet | undefined>;
+  listChangeSets(projectId: ProjectId, limit?: number): Promise<readonly ChangeSet[]>;
+  getChangeSetReceipt(projectId: ProjectId, changeSetId: ChangeSetId): Promise<ChangeSetApplicationResult | undefined>;
 }
 
 export interface PersistenceTransaction extends PersistenceReader {

@@ -4,7 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    ".": "./dist/server.js"
+    ".": "./dist/server.js",
+    "./native-knowledge-service": {
+      "types": "./dist/native-knowledge-service.d.ts",
+      "import": "./dist/native-knowledge-service.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
