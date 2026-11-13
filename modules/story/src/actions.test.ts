@@ -1068,12 +1068,84 @@ test("native Knowledge uses explicit ID, not matching names, and keeps unconfirm
   const context=makeActionContext(makeReader(files));
   const author=await invoke<{parts:Array<{kind:string;value:unknown}>}>("story.context.package",{sceneId:"sc-1",scope:"author",budget:200000},context);
   const knowledge=author.data.parts.filter(part=>part.kind==="native-knowledge");
-  assert.equal(knowledge.length,1);assert.match(JSON.stringify(knowledge),/"knowledgeId":"explicit"/);
-  assert.doesNotMatch(JSON.stringify(knowledge),/same-name|candidate|wrong-scene/);
+  assert.equal(knowledge.length,2);assert.match(JSON.stringify(knowledge),/"knowledgeId":"explicit"/);
+  assert.match(JSON.stringify(knowledge),/"knowledgeId":"candidate","name":"Uma","type":"character","status":"candidate"/);
+  assert.doesNotMatch(JSON.stringify(knowledge),/same-name|wrong-scene/);
   for(const scope of ["reader","character"]){
     const result=await invoke<{parts:Array<{kind:string}>}>("story.context.package",{sceneId:"sc-1",scope,characterId:"char-uma"},context);
     assert.equal(result.data.parts.some(part=>part.kind==="native-knowledge"),false);
   }
   const wrong=makeActionContext(makeReader(files,"another-project"));
   assert.equal((await actionById("story.knowledge.links").invoke({},wrong)).ok,false);
+});
+
+test("native Knowledge associates evidence through canonical document UUID mapping", async()=>{
+  const path="meta/scriptorium/knowledge-context/v1.json";
+  const files=fixtureFiles({[path]:JSON.stringify({version:1,projectId:"repo-work",documentMappings:[{documentId:"doc-uuid-1",storySceneId:"sc-1",mapping:"explicit"}],entries:[{
+    node:{id:"knowledge-1",name:"Cafe",type:"location",status:"confirmed",attributes:{}},aliases:[],relations:[],evidence:[{
+      current:false,stale:true,storySceneId:"sc-1",sourceDocumentId:"doc-uuid-1",sourceRevisionId:"revision-1",quote:null,mention:{status:"confirmed"},anchor:{id:"evidence-1",documentId:"doc-uuid-1",revisionId:"revision-1",fromUtf16:0,toUtf16:11,status:"confirmed",quoteSha256:"sha"},assertions:[]
+    }],evidenceLimitReached:false
+  }]})});
+  type ContextPart={kind:string;value:{evidence:Array<{storySceneId:string;sourceRevisionId:string;quote:string|null;status:string}>}};
+  const result=await invoke<{parts:ContextPart[]}>("story.context.package",{sceneId:"sc-1",scope:"author",budget:200000},makeActionContext(makeReader(files)));
+  const knowledge=result.data.parts.find(part=>part.kind==="native-knowledge")!;
+  assert.equal(knowledge.value.evidence[0]?.storySceneId,"sc-1");
+  assert.equal(knowledge.value.evidence[0]?.sourceRevisionId,"revision-1");
+  assert.equal(knowledge.value.evidence[0]?.quote,null,"quote is explicitly missing when the projection has no verified source quote");
+  assert.equal(knowledge.value.evidence[0]?.status,"stale");
+});
+
+test("legacy immutable Knowledge projections retain stale status and candidate evidence", async()=>{
+  const path="meta/scriptorium/knowledge-context/v1.json";
+  const files=fixtureFiles({[path]:JSON.stringify({version:1,projectId:"repo-work",entries:[{
+    node:{id:"legacy",name:"Legacy",type:"character",status:"confirmed",attributes:{storyEntityId:"char-uma"}},aliases:[],relations:[],
+    evidence:[
+      {current:false,anchor:{id:"old",documentId:"doc",revisionId:"old-revision",status:"confirmed"},mention:{status:"confirmed"},assertions:[]},
+      {current:true,anchor:{id:"candidate",documentId:"doc",revisionId:"new-revision",status:"proposed"},mention:{status:"proposed"},assertions:[]}
+    ],evidenceLimitReached:false
+  }]})});
+  const result=await invoke<{parts:Array<{kind:string;value:{evidence:Array<{status:string;quote:string|null}>}}>}>("story.context.package",{sceneId:"sc-1",scope:"author",budget:200000},makeActionContext(makeReader(files)));
+  const part=result.data.parts.find(part=>part.kind==="native-knowledge");
+  assert.deepEqual(part?.value.evidence.map(item=>[item.status,item.quote]),[["stale",null],["candidate",null]]);
+});
+
+test("restricted context does not expose omission details or unacquired facts", async()=>{
+  const path="meta/scriptorium/knowledge-context/v1.json";
+  const files=fixtureFiles({[path]:JSON.stringify({version:1,projectId:"repo-work",entries:[{
+    node:{id:"secret-node",name:"Secret Alias",type:"lore",status:"confirmed",attributes:{}},aliases:[],relations:[],evidence:[],evidenceLimitReached:false
+  }]})});
+  const result=await invoke("story.context.package",{sceneId:"sc-1",scope:"reader",budget:128},makeActionContext(makeReader(files)));
+  assert.doesNotMatch(JSON.stringify(result.data),/secret-node|Secret Alias/);
+});
+
+test("reader context includes explicitly disclosed Knowledge without its aliases or evidence", async()=>{
+  const path="meta/scriptorium/knowledge-context/v1.json";
+  const files=fixtureFiles({
+    "plot/volumes/vol-main/chapters/ch-main-1/scenes/sc-1.yaml":yaml({id:"sc-1",title:"Door",type:"scene",volume:"vol-main",chapter:"ch-main-1",order:1,appears:["char-uma"],state_events:[{sceneId:"sc-1",kind:"knowledge",subject:"char-uma",object:"native-id",payload:{layer:"reader-knowledge"},status:"confirmed"}],manuscript:"manuscript/vol-main/ch-main-1/sc-1.md"}),
+    [path]:JSON.stringify({version:1,projectId:"repo-work",entries:[{node:{id:"native-id",name:"Secret Name",type:"lore",status:"confirmed",attributes:{storyEntityId:"char-uma"}},aliases:[{surface:"Secret Alias",status:"confirmed"}],relations:[],evidence:[],evidenceLimitReached:false}]})
+  });
+  const result=await invoke("story.context.package",{sceneId:"sc-1",scope:"reader"},makeActionContext(makeReader(files)));
+  assert.match(JSON.stringify(result.data),/native-id/);
+  assert.doesNotMatch(JSON.stringify(result.data),/Secret Name|Secret Alias|"type":"lore"/);
+});
+
+test("author manuscript quotes truncate on Unicode boundaries within the UTF-8 byte budget", async()=>{
+  const files=fixtureFiles({"manuscript/vol-main/ch-main-1/sc-1.md":"😀漢字".repeat(500)});
+  const result=await invoke<{parts:Array<{kind:string;value:{text:string;truncated?:boolean}}>;used:number;budget:number;truncations:Array<{kind:string}>}>("story.context.package",{sceneId:"sc-1",scope:"author",budget:1024},makeActionContext(makeReader(files)));
+  const manuscript=result.data.parts.find(part=>part.kind==="manuscript");
+  assert.ok(manuscript,JSON.stringify(result.data));
+  assert.equal(manuscript.value.truncated,true);
+  assert.equal(Array.from(manuscript.value.text).join(""),manuscript.value.text);
+  assert.equal(result.data.used<=result.data.budget,true);
+  assert.deepEqual(result.data.truncations.map(item=>item.kind),["manuscript"]);
+});
+
+test("large manuscript truncation preserves structured world state under the same budget", async()=>{
+  const files=fixtureFiles({
+    "plot/volumes/vol-main/chapters/ch-main-1/scenes/sc-1.yaml":yaml({id:"sc-1",title:"Door",type:"scene",volume:"vol-main",chapter:"ch-main-1",order:1,world_time:{earliest:1,latest:1},state_events:[{sceneId:"sc-1",kind:"attribute",subject:"char-uma",object:null,payload:{predicate:"rank",value:"Captain"},status:"confirmed"}],manuscript:"manuscript/vol-main/ch-main-1/sc-1.md"}),
+    "manuscript/vol-main/ch-main-1/sc-1.md":"long manuscript ".repeat(1000)
+  });
+  const result=await invoke<{parts:Array<{kind:string;value:unknown}>;used:number;budget:number}>("story.context.package",{sceneId:"sc-1",scope:"author",budget:512},makeActionContext(makeReader(files)));
+  assert.equal(result.data.parts.some(part=>part.kind==="objective"&&JSON.stringify(part).includes("Captain")),true);
+  assert.equal(result.data.used<=result.data.budget,true);
 });

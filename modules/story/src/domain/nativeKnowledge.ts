@@ -13,7 +13,7 @@ function rows(value:unknown):Row[] {
 }
 export async function nativeKnowledge(reader:SnapshotReader,story:LoadedStorySnapshot,sceneId?:string) {
   const file=await reader.read(NATIVE_KNOWLEDGE_PATH);
-  if(!file) return {available:false,links:[],parts:[],truncated:false};
+  if(!file) return {available:false,links:[],parts:[],truncated:false,omissions:[]};
   const raw=row(JSON.parse(file.content));
   if(raw.version!==1 || raw.projectId!==reader.snapshot.projectId)throw new TypeError("Knowledge projection scope mismatch");
   const entries=rows(raw.entries);
@@ -22,6 +22,7 @@ export async function nativeKnowledge(reader:SnapshotReader,story:LoadedStorySna
   const scene=sceneId?story.entities.get(sceneId):undefined;
   if(sceneId&&scene?.type!=="scene")throw new TypeError("Scene not found");
   const related=new Set<string>(sceneId?[sceneId,...story.links.filter(link=>link.from===sceneId).map(link=>link.to)]:[]);
+  const documentMappings=rows(raw.documentMappings??[]);
   const links=entries.map(entry=>{
     const node=row(entry.node);
     const explicit=[...story.entities.values()].filter(entity=>entity.raw.knowledge_id===node.id);
@@ -31,17 +32,27 @@ export async function nativeKnowledge(reader:SnapshotReader,story:LoadedStorySna
     return {knowledgeId:node.id,name:node.name,status:node.status,storyEntityIds:matches,
       mapping:matches.length===1?"explicit":matches.length>1?"ambiguous":"unmapped"};
   });
-  const parts=confirmed.flatMap(entry=>{
+  const contextEntries=entries.filter(entry=>["confirmed","proposed"].includes(String(row(entry.node).status)));
+  const parts=contextEntries.flatMap(entry=>{
     const node=row(entry.node);
     const link=links.find(link=>link.knowledgeId===node.id)!;
-    const evidence=rows(entry.evidence).filter(item=>item.current===true&&row(item.mention).status==="confirmed"&&row(item.anchor).status==="confirmed");
-    const directEvidence=evidence.some(item=>row(item.anchor).documentId===sceneId);
+    const evidence=rows(entry.evidence).filter(item=>["confirmed","proposed","ambiguous"].includes(String(row(item.mention).status))&&["proposed","confirmed","needs_review","orphaned"].includes(String(row(item.anchor).status)));
+    const directEvidence=evidence.some(item=>item.storySceneId===sceneId&&documentMappings.some(mapping=>mapping.mapping==="explicit"&&mapping.storySceneId===sceneId&&mapping.documentId===item.sourceDocumentId));
     if(sceneId&&!directEvidence&&!(link.mapping==="explicit"&&link.storyEntityIds.some(id=>related.has(id))))return [];
-    return [{kind:"native-knowledge",value:{knowledgeId:node.id,name:node.name,type:node.type,mapping:link,
+    return [{kind:"native-knowledge",value:{knowledgeId:node.id,name:node.name,type:node.type,status:node.status==="confirmed"?"confirmed":"candidate",mapping:link,
       aliases:rows(entry.aliases).filter(alias=>alias.status==="confirmed"),
       relations:rows(entry.relations).filter(relation=>relation.status==="confirmed"&&confirmedIds.has(relation.sourceId)&&confirmedIds.has(relation.targetId)),
-      evidence:evidence.map(item=>({anchor:item.anchor,mention:item.mention,assertions:rows(item.assertions).filter(link=>row(link.assertion).status==="confirmed")})),
+      evidence:evidence.map(item=>({anchor:item.anchor,mention:item.mention,assertions:rows(item.assertions).filter(link=>row(link.assertion).status==="confirmed"),
+        storySceneId:item.storySceneId??null,sourceDocumentId:item.sourceDocumentId??row(item.anchor).documentId,
+        sourceRevisionId:item.sourceRevisionId??row(item.anchor).revisionId,quote:item.quoteAvailable===true&&typeof item.quote==="string"?item.quote:null,
+        status:item.stale===true||item.current===false||row(item.anchor).status==="orphaned"?"stale":item.current===true&&node.status==="confirmed"&&row(item.mention).status==="confirmed"&&row(item.anchor).status==="confirmed"?"confirmed":"candidate"})),
       evidenceLimitReached:entry.evidenceLimitReached===true,source:{path:NATIVE_KNOWLEDGE_PATH,revision:file.revision}}}];
   });
-  return {available:true,links,parts,truncated:raw.nodeLimitReached===true||entries.some(entry=>entry.evidenceLimitReached===true)};
+  const includedIds=new Set<string>(parts.map(part=>String((part.value as {knowledgeId:unknown}).knowledgeId)));
+  const omissions=entries.filter(entry=>{const id=row(entry.node).id;return typeof id==="string"&&includedIds.has(id);}).flatMap(entry=>{
+    const node=row(entry.node);
+    return rows(entry.evidence).filter(item=>item.quoteAvailable!==true&&["confirmed","proposed","ambiguous"].includes(String(row(item.mention).status)))
+      .map(item=>({knowledgeId:node.id,reason:item.quoteOmission==="projection-budget"?"source-quote-budget":"source-quote-unavailable"}));
+  });
+  return {available:true,links,parts,truncated:raw.nodeLimitReached===true||entries.some(entry=>entry.evidenceLimitReached===true),omissions};
 }
