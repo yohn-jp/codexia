@@ -225,9 +225,13 @@ export async function exportWorkArchive(persistence: Persistence, projectId: Pro
     const aliases = new Map<string, WorkArchive["knowledge"]["aliases"][number]>();
     const relations = new Map<string, WorkArchive["knowledge"]["relations"][number]>();
     for (const node of nodeRows) {
-      for (const { id, nodeId, surface, normalized, scope, status } of await reader.listKnowledgeAliases(projectId, node.id))
+      const aliasRows = await reader.listKnowledgeAliases(projectId, node.id, 1000);
+      checkSnapshotCount(aliasRows.length, 1000, "Aliases for knowledge node " + node.id);
+      for (const { id, nodeId, surface, normalized, scope, status } of aliasRows)
         aliases.set(id, { id, nodeId, surface, normalized, scope, status });
-      for (const { id, sourceId, targetId, type, attributes, validity, status } of await reader.listKnowledgeRelations(projectId, node.id))
+      const relationRows = await reader.listKnowledgeRelations(projectId, node.id, 1000);
+      checkSnapshotCount(relationRows.length, 1000, "Relations for knowledge node " + node.id);
+      for (const { id, sourceId, targetId, type, attributes, validity, status } of relationRows)
         relations.set(id, { id, sourceId, targetId, type, attributes, validity, status });
     }
 
@@ -257,12 +261,16 @@ export async function exportWorkArchive(persistence: Persistence, projectId: Pro
           entry.fromUtf16 < entry.toUtf16 && entry.toUtf16 <= canonical.markdown.length &&
           digest(canonical.markdown.slice(entry.fromUtf16, entry.toUtf16)) === entry.quoteSha256;
         if (current) archiveAnchors.push(entry); else unresolved.anchors.push(entry);
-        for (const item of await reader.listMentionLinks(projectId, anchor.id)) {
+        const mentionRows = await reader.listMentionLinks(projectId, anchor.id, 1000);
+        checkSnapshotCount(mentionRows.length, 1000, "Mentions for evidence " + anchor.id);
+        for (const item of mentionRows) {
           const link = { evidenceId: item.evidenceId, nodeId: item.nodeId, status: item.status,
             source: item.source, confidence: item.confidence, extractorVersion: item.extractorVersion };
           if (current) mentions.push(link); else unresolved.mentions.push(link);
         }
-        for (const item of await reader.listEvidenceAssertions(projectId, anchor.id, 200)) {
+        const assertionEvidenceRows = await reader.listEvidenceAssertions(projectId, anchor.id, 200);
+        checkSnapshotCount(assertionEvidenceRows.length, 200, "Assertion evidence for evidence " + anchor.id);
+        for (const item of assertionEvidenceRows) {
           const link = { assertionId: item.assertionId, evidenceId: item.evidenceId, role: item.role };
           if (current) assertionEvidence.push(link); else unresolved.assertionEvidence.push(link);
         }
