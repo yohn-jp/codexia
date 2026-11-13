@@ -32,6 +32,7 @@ import { ManuscriptInput, type ManuscriptInputHandle, type EvidenceRangeRequest 
 import { initializeDocumentEvidence, type DocumentEvidenceState, type EditorEvidenceAdapter, type TextChange } from "../editor/evidence";
 import { BrowserJournal } from "../storage/journal";
 import { createPostgresEditorEvidenceAdapter } from "../editor/postgresEvidenceAdapter";
+import { NativeChangeSetReview } from "./NativeChangeSetReview";
 
 interface EvidenceJump extends EvidenceRangeRequest {
   projectId: string;
@@ -140,6 +141,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const [moduleError, setModuleError] = useState("");
   const [projects, setProjects] = useState<PersistenceProject[]>([]);
   const [projectId, setProjectId] = useState("");
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
   const [documents, setDocuments] = useState<PersistenceDocument[]>([]);
   const [documentId, setDocumentId] = useState("");
   const [nodes, setNodes] = useState<KnowledgeNode[]>([]);
@@ -310,6 +313,17 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       setModules(statuses); setContributions(catalog); setModuleSnapshot(read.snapshot); setModuleError("");
     } catch (error) { if (sequence !== moduleSequenceRef.current) return; setModuleError(error instanceof Error ? error.message : "モジュールを読み込めませんでした。"); }
   }, [projectId, authorScope]);
+  const refreshAfterNativeApply = useCallback(() => {
+    const appliedProjectId = projectId;
+    void refreshModules();
+    void Promise.all([api.persistenceNodes(appliedProjectId, 500), api.persistenceProject(appliedProjectId)]).then(([nodeResult, projectResult]) => {
+      if (projectIdRef.current !== appliedProjectId) return;
+      setNodes(nodeResult.nodes);
+      setProjects((current) => current.map((item) => item.id === appliedProjectId ? projectResult.project : item));
+    }).catch((error: unknown) => {
+      if (projectIdRef.current === appliedProjectId) setNotice(error instanceof Error ? `適用後の作品状態を再読み込みできませんでした。${error.message}` : "適用後の作品状態を再読み込みできませんでした。");
+    });
+  }, [projectId, refreshModules]);
   useEffect(() => { void refreshModules(); }, [refreshModules, journal, active?.revision.id, resumeEpoch]);
 
   const openDocument = useCallback(async (nextDocumentId: string): Promise<void> => {
@@ -1404,7 +1418,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     snapshot: moduleSnapshot, journal, refresh: refreshModules, onProposalStored: () => { void refreshModules(); }, readCurrentEditor,
     navigateDocument: navigateReference,
   });
-  panels.push({ id: "review", title: "提案レビュー", render: () => <>{moduleError && <p role="alert">{moduleError}</p>}{journal && <ProposalReview projectId={projectId} authorScope={authorScope} journal={journal} proposals={proposals} onChange={() => { void refreshModules(); }} onStatus={(message) => setNotice(message)} />}</> }, ...modulePanels);
+  panels.push({ id: "review", title: "提案レビュー", render: () => <>{moduleError && <p role="alert">{moduleError}</p>}<NativeChangeSetReview key={projectId} projectId={projectId} onApplied={refreshAfterNativeApply} />{journal && <ProposalReview projectId={projectId} authorScope={authorScope} journal={journal} proposals={proposals} onChange={() => { void refreshModules(); }} onStatus={(message) => setNotice(message)} />}</> }, ...modulePanels);
   const Shell = mode === "mobile" ? MobileShell : DesktopShell;
   const currentDesktopDurability = desktopDurabilityFor(active);
   return <div className={`pg-workspace pg-shell pg-${mode}`}>

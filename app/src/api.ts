@@ -509,6 +509,16 @@ export const api = {
     method: "POST", body: JSON.stringify(command), ...(signal ? { signal } : {}),
   }),
   persistenceProject: (projectId: string, signal?: AbortSignal) => request(dto.persistenceProject, persistencePath(projectId), { ...(signal ? { signal } : {}) }),
+  nativeChangeSets: (projectId: string, limit = 50, signal?: AbortSignal) => request(dto.nativeChangeSets,
+    persistencePath(projectId, `changesets?${new URLSearchParams({ limit: String(limit) })}`), { ...(signal ? { signal } : {}) }),
+  nativeChangeSet: (projectId: string, changeSetId: string, signal?: AbortSignal) => request(dto.nativeChangeSet,
+    persistencePath(projectId, `changesets/${encodeURIComponent(changeSetId)}`), { ...(signal ? { signal } : {}) }),
+  approveNativeChangeSet: (projectId: string, changeSetId: string, expectedVersion: number, signal?: AbortSignal) => request(dto.nativeChangeSetEnvelope,
+    persistencePath(projectId, `changesets/${encodeURIComponent(changeSetId)}/approve`), { method: "POST", body: JSON.stringify({ expectedVersion }), ...(signal ? { signal } : {}) }),
+  rejectNativeChangeSet: (projectId: string, changeSetId: string, expectedVersion: number, signal?: AbortSignal) => request(dto.nativeChangeSetEnvelope,
+    persistencePath(projectId, `changesets/${encodeURIComponent(changeSetId)}/reject`), { method: "POST", body: JSON.stringify({ expectedVersion }), ...(signal ? { signal } : {}) }),
+  applyNativeChangeSet: (projectId: string, changeSetId: string, expectedVersion: number, signal?: AbortSignal) => request(dto.nativeChangeSetApplication,
+    persistencePath(projectId, `changesets/${encodeURIComponent(changeSetId)}/apply`), { method: "POST", body: JSON.stringify({ expectedVersion }), ...(signal ? { signal } : {}) }),
   persistenceDocuments: (projectId: string, parentId?: string | null, signal?: AbortSignal) => {
     const query = new URLSearchParams();
     if (parentId !== undefined) query.set("parentId", parentId ?? "root");
