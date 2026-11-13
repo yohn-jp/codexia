@@ -14,6 +14,7 @@ import type { Persistence } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema } from "@codexia/persistence-postgres";
 export { packagedMigrationFingerprint } from "@codexia/persistence-postgres";
 import { ModuleRuntime, type ActionHostContext, type DomainJobActionExecutor, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
+import { createNativeKnowledgeActions } from "./native-knowledge-actions.js";
 import { HistoricalModelUsageStore } from "./historical-store.js";
 import { JobHistoryError, JobHistoryStore, type JobEvent } from "./job-history-store.js";
 import { RecentActivityStore } from "./recent-activity-store.js";
@@ -710,7 +711,7 @@ export function createServer(options: ApiServerOptions): Server {
     if (!coreStore.writingStatsSnapshot) throw httpFailure(503, "WRITING_STATS_UNAVAILABLE", "Snapshot writing statistics are not available in this Core version");
     return coreStore.writingStatsSnapshot(projectId, selected.pinned);
   };
-  const buildCoreActions = (projectId: string): Array<{ module: "core"; action: ModuleAction }> => {
+  const buildCoreActions = (projectId: string, source: ChangeProposal["source"], actorId: string, authorizeProposal?: () => Promise<void>): Array<{ module: "core"; action: ModuleAction }> => {
     const jsonSchema: ValueSchema = {
       parse(value: unknown): unknown {
         let encoded: string;
@@ -929,6 +930,13 @@ export function createServer(options: ApiServerOptions): Server {
         return result.stats;
       }) },
       { module: "core", action: make("core.projects.list", emptyInput, async () => ({ projects: await listProjects() })) },
+      ...createNativeKnowledgeActions({
+        persistence: options.persistence!,
+        projectId: projectId as import("@codexia/persistence-contracts").ProjectId,
+        actorId: actorId as import("@codexia/persistence-contracts").ActorId,
+        origin: source === "mcp" ? "external-agent" : "author",
+        authorizeProposal: authorizeProposal ?? (async () => { throw httpFailure(403, "WRITE_PERMISSION_REQUIRED", "Current authenticated write permission is required to propose native changes"); }),
+      }).map(action => ({ module: "core" as const, action })),
     ];
   };
 
@@ -967,13 +975,17 @@ export function createServer(options: ApiServerOptions): Server {
     access: "owner" | "public" = "owner",
     onDomainJobStarted?: (jobId: string) => void,
     authorizeProposal?: () => Promise<void>,
+    actorId = "owner",
   ): ApiActionHost => {
     const host: ApiActionHost = {
       projectId,
       reader,
       signal,
       caller: access === "public" || source === "mcp" ? "external-agent" : "author",
-      actions: access === "public" ? [] : buildCoreActions(projectId),
+      actions: access === "public" ? [] : buildCoreActions(projectId, source, actorId, async () => {
+        if (authorizeProposal) { await authorizeProposal(); return; }
+        throw httpFailure(403, hosted ? "WRITE_PERMISSION_REQUIRED" : "AUTHOR_SESSION_REQUIRED", "Current authenticated write permission is required to propose native changes");
+      }),
       propose: async (operations: ChangeOperation[], evidence?: ProposalEvidence[], proposalId?: string, proposalSignal?: AbortSignal) => {
         if (access === "public") throw httpFailure(403, "PUBLIC_PROPOSAL_DENIED", "Public module requests cannot propose changes");
         if (hosted) {
@@ -1559,6 +1571,10 @@ export function createServer(options: ApiServerOptions): Server {
       if (!isCookie) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author browser session is required");
       return requireWritePermission();
     };
+    const authorizeActionProposal = async (): Promise<void> => {
+      if (hosted) { await requireWritePermission(); return; }
+      if (!isCookie && !isBearer) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author or bearer identity is required to propose changes");
+    };
     if (shuttingDown && routePath.startsWith("/api/") && !isRead) {
       fail(response, 503, "SHUTTING_DOWN", "The server is draining and is not accepting new mutations");
       return;
@@ -1896,7 +1912,7 @@ export function createServer(options: ApiServerOptions): Server {
           domainJobId = id;
           signal.removeEventListener("abort", abortBeforeAcceptance);
           resolveDomainJobStart(id);
-        }, async () => { await requireWritePermission(); });
+        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner");
         if (descriptor.module === "core") {
           const coreAction = host.actions?.find(({ action }) => action.id === descriptor.id)?.action;
           if (!coreAction) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
@@ -2000,7 +2016,7 @@ export function createServer(options: ApiServerOptions): Server {
         if (contribution.effect === "read" && method !== "GET" && method !== "HEAD") throw httpFailure(405, "MODULE_HTTP_METHOD_DENIED", "Read-only module routes must use GET or HEAD");
         const reader = await freshReader(projectId);
         let domainJobId: string | undefined;
-        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, async () => { await requireWritePermission(); });
+        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner");
         const webRequest = makeWebRequest(request, parsedBody, signal, moduleRoute[2] ?? "");
         const moduleResponse = await runtime.invokeHttp(moduleId, contribution.id, webRequest, host);
         if (domainJobId) response.setHeader("X-Codexia-Job-Id", domainJobId);
