@@ -380,11 +380,11 @@ rt { color: var(--ruby-muted); font-size: 0.55em; }
 .pg-library h2, .pg-knowledge h2, .pg-editor h2 { margin: 0 0 0.8rem; font-size: 1.05rem; }
 .pg-library form, .pg-knowledge form { display: grid; gap: 0.45rem; margin-top: 0.9rem; }
 .pg-library select, .pg-knowledge select { width: 100%; min-height: 2.65rem; padding: 0.4rem; border: 1px solid var(--input-border); border-radius: 0.35rem; color: var(--ink); background: var(--paper); }
-.pg-document-list, .pg-knowledge-list, .pg-evidence-list { display: grid; gap: 0.55rem; margin: 0.7rem 0; padding: 0; list-style: none; }
-.pg-document-list li, .pg-knowledge-list li, .pg-evidence-list li { min-width: 0; }
-.pg-document-list button, .pg-knowledge-list > li > button:first-child, .pg-evidence-list > li > button:first-child { width: 100%; display: grid; justify-items: start; gap: 0.2rem; text-align: left; color: var(--ink); background: var(--surface-subtle); border-color: var(--line); }
-.pg-document-list button.is-selected, .pg-knowledge-list button.is-selected, .pg-evidence-list button.is-selected { background: var(--surface-selected); border-color: var(--surface-selected-border); }
-.pg-document-list small, .pg-knowledge-list small, .pg-evidence-list small { color: var(--muted); }
+.pg-document-list, .pg-knowledge-list, :is(.pg-evidence-list, .pg-node-evidence-list) { display: grid; gap: 0.55rem; margin: 0.7rem 0; padding: 0; list-style: none; }
+.pg-document-list li, .pg-knowledge-list li, :is(.pg-evidence-list, .pg-node-evidence-list) li { min-width: 0; }
+.pg-document-list button, .pg-knowledge-list > li > button:first-child, :is(.pg-evidence-list, .pg-node-evidence-list) > li > button:first-child { width: 100%; display: grid; justify-items: start; gap: 0.2rem; text-align: left; color: var(--ink); background: var(--surface-subtle); border-color: var(--line); }
+.pg-document-list button.is-selected, .pg-knowledge-list button.is-selected, :is(.pg-evidence-list, .pg-node-evidence-list) button.is-selected { background: var(--surface-selected); border-color: var(--surface-selected-border); }
+.pg-document-list small, .pg-knowledge-list small, :is(.pg-evidence-list, .pg-node-evidence-list) small { color: var(--muted); }
 .pg-editor-column { display: grid; gap: 0.8rem; }
 .pg-editor { display: grid; gap: 0.8rem; }
 .pg-editor-heading { display: flex; justify-content: space-between; align-items: start; gap: 0.8rem; }
@@ -407,8 +407,8 @@ rt { color: var(--ruby-muted); font-size: 0.55em; }
 .pg-conflict button, .pg-revisions button { margin: 0 0.5rem 0.5rem 0; }
 .pg-revisions { margin-top: 0.8rem; }
 .pg-revisions article + article { border-top: 1px solid var(--line); }
-.pg-evidence-list q { white-space: pre-wrap; overflow-wrap: anywhere; }
-.pg-evidence-list p { margin: 0.35rem 0; }
+:is(.pg-evidence-list, .pg-node-evidence-list) q { white-space: pre-wrap; overflow-wrap: anywhere; }
+:is(.pg-evidence-list, .pg-node-evidence-list) p { margin: 0.35rem 0; }
 .pg-link-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.4rem; }
 .pg-link-actions button { min-height: 2.3rem; padding: 0.4rem 0.6rem; font-size: 0.82rem; }
 .pg-loading { position: fixed; inset: auto 1rem 1rem auto; z-index: 10; margin: 0; padding: 0.5rem 0.75rem; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); box-shadow: 0 0.2rem 0.9rem var(--focus-shadow); }
