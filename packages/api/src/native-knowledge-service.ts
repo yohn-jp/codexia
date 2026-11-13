@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import type {
   ActorId, AssertionId, ChangeSet, ChangeSetApplicationResult, ChangeSetId, ChangeSetOperation,
@@ -78,16 +79,10 @@ export function getNativeEvidenceAnchor(persistence: Persistence, projectId: Pro
     const [mentions, assertionLinks, history] = await Promise.all([
       reader.listMentionLinks(projectId, evidenceId, 500), reader.listEvidenceAssertions(projectId, evidenceId, 200), reader.listEvidenceHistory(projectId, evidenceId, historyLimit),
     ]);
-    let quote = "";
-    const quoteAt = async (revisionId: RevisionId, fromUtf16: number, toUtf16: number) => {
-      const revision = await reader.getRevision(projectId, anchor.documentId, revisionId);
-      return revision && fromUtf16 >= 0 && toUtf16 > fromUtf16 && toUtf16 <= revision.markdown.length ? revision.markdown.slice(fromUtf16, toUtf16) : "";
-    };
-    quote = await quoteAt(anchor.revisionId, anchor.fromUtf16, anchor.toUtf16);
-    if (!quote) for (const item of [...history].reverse()) { quote = await quoteAt(item.revisionId, item.fromUtf16, item.toUtf16); if (quote) break; }
+    const { quote, quoteSource } = await resolveNativeQuote(reader, projectId, anchor, history);
     const resolvedMentions = await Promise.all(mentions.map(async link => ({ link, node: await reader.getKnowledgeNode(projectId, link.nodeId) ?? null })));
     const resolvedAssertions = await Promise.all(assertionLinks.map(async link => ({ link, assertion: await reader.getAssertion(projectId, link.assertionId) ?? null })));
-    return { anchor, quote, mentions: resolvedMentions, assertions: resolvedAssertions, history };
+    return { anchor, quote, quoteSource, mentions: resolvedMentions, assertions: resolvedAssertions, history };
   });
 }
 
@@ -104,19 +99,32 @@ export function listNativeEvidenceForDocument(persistence: Persistence, projectI
   });
 }
 
+/** The compatibility quote may refer to a historical range. Always expose its exact immutable source, not the current anchor's range. */
+async function resolveNativeQuote(
+  reader: PersistenceReader, projectId: ProjectId,
+  anchor: import("@codexia/persistence-contracts").EvidenceAnchor,
+  history: readonly import("@codexia/persistence-contracts").EvidenceAnchorHistory[],
+) {
+  for (const [index, item] of [anchor, ...[...history].reverse()].entries()) {
+    if (item.fromUtf16 < 0 || item.toUtf16 <= item.fromUtf16) continue;
+    const revision = await reader.getRevision(projectId, anchor.documentId, item.revisionId);
+    if (!revision || item.toUtf16 > revision.markdown.length) continue;
+    const quote = revision.markdown.slice(item.fromUtf16, item.toUtf16);
+    const quoteSha256 = createHash("sha256").update(quote, "utf8").digest("hex");
+    if (index === 0 && quoteSha256 !== anchor.quoteSha256) continue;
+    return { quote, quoteSource: { revisionId: item.revisionId, fromUtf16: item.fromUtf16, toUtf16: item.toUtf16, quoteSha256, status: item.status, historical: index !== 0 } };
+  }
+  return { quote: "", quoteSource: null };
+}
+
 async function getNativeEvidenceAnchorFromReader(reader: PersistenceReader, projectId: ProjectId, evidenceId: EvidenceId) {
   const anchor = await reader.getEvidenceAnchor(projectId, evidenceId);
   if (!anchor) return undefined;
   const history = await reader.listEvidenceHistory(projectId, evidenceId, 500);
-  let quote = "";
-  for (const item of [anchor, ...[...history].reverse()]) {
-    if (item.toUtf16 <= item.fromUtf16) continue;
-    const revision = await reader.getRevision(projectId, anchor.documentId, item.revisionId);
-    if (revision && item.toUtf16 <= revision.markdown.length) { quote = revision.markdown.slice(item.fromUtf16, item.toUtf16); break; }
-  }
+  const { quote, quoteSource } = await resolveNativeQuote(reader, projectId, anchor, history);
   const links = await reader.listMentionLinks(projectId, evidenceId, 500);
   const assertions = await reader.listEvidenceAssertions(projectId, evidenceId, 200);
-  return { anchor, quote, mentions: await Promise.all(links.map(async link => ({ link, node: await reader.getKnowledgeNode(projectId, link.nodeId) ?? null }))), assertions: await Promise.all(assertions.map(async link => ({ link, assertion: await reader.getAssertion(projectId, link.assertionId) ?? null }))) };
+  return { anchor, quote, quoteSource, mentions: await Promise.all(links.map(async link => ({ link, node: await reader.getKnowledgeNode(projectId, link.nodeId) ?? null }))), assertions: await Promise.all(assertions.map(async link => ({ link, assertion: await reader.getAssertion(projectId, link.assertionId) ?? null }))) };
 }
 
 export function listNativeEvidenceForNode(persistence: Persistence, projectId: ProjectId, nodeId: KnowledgeNodeId, limit = 200, projectVersion?: number) {

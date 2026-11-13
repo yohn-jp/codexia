@@ -100,8 +100,10 @@ export function createNativeKnowledgeActions(host: NativeKnowledgeActionHost): M
           if (context.signal.aborted) throw Object.assign(new Error("Action was cancelled"), { code: "action_cancelled" });
           assertProjectScope(context, projectId);
           await host.authorizeProposal();
+          if (context.signal.aborted) throw Object.assign(new Error("Action was cancelled"), { code: "action_cancelled" });
           const value = raw as Record<string, unknown>;
           const selected = proposalVersion(value.projectVersion);
+          if (selected > context.reader.snapshot.projectVersion) throw new NativeKnowledgeServiceError("snapshot_unavailable", "Proposal source is newer than the selected Action reader");
           if (typeof value.idempotencyKey !== "string" || !Array.isArray(value.operations)) throw new NativeKnowledgeServiceError("invalid_input", "idempotencyKey and operations are required");
           const result = await proposeNativeKnowledgeChange({ persistence, projectId, actorId: host.actorId, projectVersion: selected, idempotencyKey: value.idempotencyKey, operations: value.operations as ChangeSetOperation[], origin: host.origin });
           if (context.signal.aborted) throw Object.assign(new Error("Action was cancelled"), { code: "action_cancelled" });
