@@ -550,18 +550,20 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows.map(mapAssertion);
   }
 
-  async listKnowledgeAliases(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<readonly KnowledgeAlias[]> {
+  async listKnowledgeAliases(projectId: ProjectId, nodeId: KnowledgeNodeId, limit = 500): Promise<readonly KnowledgeAlias[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Knowledge alias page size must be between 1 and 1000");
     const result = await this.query(
-      "SELECT * FROM knowledge_alias WHERE project_id = $1 AND node_id = $2 ORDER BY normalized, id",
-      [projectId, nodeId],
+      "SELECT * FROM knowledge_alias WHERE project_id = $1 AND node_id = $2 ORDER BY normalized, id LIMIT $3",
+      [projectId, nodeId, limit],
     );
     return result.rows.map(mapKnowledgeAlias);
   }
 
-  async listKnowledgeRelations(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<readonly KnowledgeRelation[]> {
+  async listKnowledgeRelations(projectId: ProjectId, nodeId: KnowledgeNodeId, limit = 500): Promise<readonly KnowledgeRelation[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Knowledge relation page size must be between 1 and 1000");
     const result = await this.query(
-      "SELECT * FROM knowledge_relation WHERE project_id = $1 AND (source_id = $2 OR target_id = $2) ORDER BY type, id",
-      [projectId, nodeId],
+      "SELECT * FROM knowledge_relation WHERE project_id = $1 AND (source_id = $2 OR target_id = $2) ORDER BY type, id LIMIT $3",
+      [projectId, nodeId, limit],
     );
     return result.rows.map(mapKnowledgeRelation);
   }
@@ -582,13 +584,14 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows.map(mapEvidenceAnchor);
   }
 
-  async listEvidenceHistory(projectId: ProjectId, evidenceId: EvidenceId): Promise<readonly EvidenceAnchorHistory[]> {
+  async listEvidenceHistory(projectId: ProjectId, evidenceId: EvidenceId, limit = 500): Promise<readonly EvidenceAnchorHistory[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Evidence history page size must be between 1 and 1000");
     const result = await this.query(
       `SELECT evidence_id, revision_id, from_utf16, to_utf16, status, recorded_at
-       FROM anchor_history WHERE project_id = $1 AND evidence_id = $2 ORDER BY version`,
-      [projectId, evidenceId],
+       FROM anchor_history WHERE project_id = $1 AND evidence_id = $2 ORDER BY version DESC LIMIT $3`,
+      [projectId, evidenceId, limit],
     );
-    return result.rows.map((row) => ({
+    return result.rows.reverse().map((row) => ({
       evidenceId: asString(row.evidence_id) as EvidenceId,
       revisionId: asString(row.revision_id) as RevisionId,
       fromUtf16: asNumber(row.from_utf16),
@@ -598,10 +601,11 @@ class PostgresTransaction implements PersistenceTransaction {
     }));
   }
 
-  async listMentionLinks(projectId: ProjectId, evidenceId: EvidenceId): Promise<readonly MentionLink[]> {
+  async listMentionLinks(projectId: ProjectId, evidenceId: EvidenceId, limit = 500): Promise<readonly MentionLink[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Evidence mention page size must be between 1 and 1000");
     const result = await this.query(
-      "SELECT * FROM mention_link WHERE project_id = $1 AND evidence_id = $2 ORDER BY node_id",
-      [projectId, evidenceId],
+      "SELECT * FROM mention_link WHERE project_id = $1 AND evidence_id = $2 ORDER BY node_id LIMIT $3",
+      [projectId, evidenceId, limit],
     );
     return result.rows.map(mapMentionLink);
   }
@@ -621,10 +625,11 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows[0] ? mapAssertion(result.rows[0]) : undefined;
   }
 
-  async listAssertionEvidence(projectId: ProjectId, assertionId: AssertionId): Promise<readonly AssertionEvidence[]> {
+  async listAssertionEvidence(projectId: ProjectId, assertionId: AssertionId, limit = 500): Promise<readonly AssertionEvidence[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Assertion evidence page size must be between 1 and 1000");
     const result = await this.query(
-      "SELECT * FROM assertion_evidence WHERE project_id = $1 AND assertion_id = $2 ORDER BY evidence_id",
-      [projectId, assertionId],
+      "SELECT * FROM assertion_evidence WHERE project_id = $1 AND assertion_id = $2 ORDER BY evidence_id LIMIT $3",
+      [projectId, assertionId, limit],
     );
     return result.rows.map(mapAssertionEvidence);
   }
@@ -641,6 +646,20 @@ class PostgresTransaction implements PersistenceTransaction {
   async getChangeSet(projectId: ProjectId, changeSetId: ChangeSetId): Promise<ChangeSet | undefined> {
     const result = await this.query("SELECT * FROM change_set WHERE project_id = $1 AND id = $2", [projectId, changeSetId]);
     return result.rows[0] ? mapChangeSet(result.rows[0]) : undefined;
+  }
+
+  async listChangeSets(projectId: ProjectId, limit = 50): Promise<readonly ChangeSet[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError("ChangeSet page size must be between 1 and 200");
+    const result = await this.query("SELECT * FROM change_set WHERE project_id = $1 ORDER BY created_at DESC, id LIMIT $2", [projectId, limit]);
+    return result.rows.map(mapChangeSet);
+  }
+
+  async getChangeSetReceipt(projectId: ProjectId, changeSetId: ChangeSetId): Promise<ChangeSetApplicationResult | undefined> {
+    const result = await this.query("SELECT status, application_result FROM change_set WHERE project_id = $1 AND id = $2", [projectId, changeSetId]);
+    const row = result.rows[0];
+    if (!row || row.status !== "applied") return undefined;
+    const stored = asJsonObject(row.application_result) as unknown as Omit<ChangeSetApplicationResult, "replayed">;
+    return { ...stored, replayed: false };
   }
 
   async createProject(command: CreateProjectCommand): Promise<Project> {
@@ -1499,6 +1518,12 @@ class PostgresTransaction implements PersistenceTransaction {
     }
     if (changeSet.version !== command.expectedVersion) {
       throw conflict("change_set", changeSet.id, command.expectedVersion, changeSet.version);
+    }
+
+    if (changeSet.provenance.source === "native-knowledge-service") {
+      const sourceVersion = changeSet.provenance.details.projectVersion;
+      if (typeof sourceVersion !== "number" || !Number.isInteger(sourceVersion)) throw validationError("Native ChangeSet is missing its project snapshot fence");
+      await this.assertProjectVersion(command.projectId, sourceVersion);
     }
 
     validateChangeSetOperations(

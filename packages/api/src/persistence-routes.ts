@@ -13,6 +13,12 @@ import {
 } from "@codexia/persistence-contracts";
 import { planKnowledgeMerge, applyKnowledgeMerge } from "./knowledge-merge.js";
 import { WorkArchiveError, exportWorkArchive, importWorkArchive } from "./work-archive.js";
+import {
+  NativeKnowledgeServiceError, applyNativeChangeSet, approveNativeChangeSet, getNativeChangeSet,
+  getNativeAssertion, getNativeKnowledgeNode, listNativeEvidenceForAssertion, listNativeEvidenceForDocument,
+  listNativeEvidenceForNode, listNativeKnowledgeNodes, listNativeChangeSets, proposeNativeKnowledgeChange,
+  readCurrentNativeKnowledge, readNativeKnowledge, rejectNativeChangeSet,
+} from "./native-knowledge-service.js";
 
 export interface PersistenceRouteInput {
   persistence?: Persistence;
@@ -90,6 +96,7 @@ function sha256(value: string): string {
 
 function errorResponse(error: unknown): PersistenceRouteResponse {
   if (error instanceof WorkArchiveError) return { status: error.status, body: { error: error.message, code: error.code } };
+  if (error instanceof NativeKnowledgeServiceError) return { status: error.code === "snapshot_unavailable" ? 409 : 400, body: { error: error.message, code: error.code.toUpperCase() } };
   if (error instanceof RouteFailure) return { status: error.status, body: { error: error.message, code: error.code } };
   if (error instanceof PersistenceError) {
     const status = error.code === "not_found" ? 404
@@ -102,31 +109,6 @@ function errorResponse(error: unknown): PersistenceRouteResponse {
     return { status, body: { error: error.message, code, ...(error.details ? { details: error.details } : {}) } };
   }
   throw error;
-}
-
-async function anchorView(reader: PersistenceReader, projectId: ProjectId, evidenceId: EvidenceId): Promise<unknown | undefined> {
-  const anchor = await reader.getEvidenceAnchor(projectId, evidenceId);
-  if (!anchor) return undefined;
-  const links = await reader.listMentionLinks(projectId, evidenceId);
-  const mentions = await Promise.all(links.map(async (link) => ({ link, node: await reader.getKnowledgeNode(projectId, link.nodeId) ?? null })));
-  const assertionLinks = await reader.listEvidenceAssertions(projectId, evidenceId);
-  const assertions = await Promise.all(assertionLinks.map(async (link) => ({ link, assertion: await reader.getAssertion(projectId, link.assertionId) ?? null })));
-  let quote = "";
-  if (anchor.toUtf16 > anchor.fromUtf16) {
-    const revision = await reader.getRevision(projectId, anchor.documentId, anchor.revisionId);
-    quote = revision?.markdown.slice(anchor.fromUtf16, anchor.toUtf16) ?? "";
-  } else {
-    const history = await reader.listEvidenceHistory(projectId, evidenceId);
-    for (const item of [...history].reverse()) {
-      if (item.toUtf16 <= item.fromUtf16) continue;
-      const revision = await reader.getRevision(projectId, anchor.documentId, item.revisionId);
-      if (revision) {
-        quote = revision.markdown.slice(item.fromUtf16, item.toUtf16);
-        break;
-      }
-    }
-  }
-  return { anchor, quote, mentions, assertions };
 }
 
 function allowedStatus<T extends string>(value: unknown, values: readonly T[], label: string): T {
@@ -189,7 +171,52 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
     if (input.assignedProjectId && projectId !== input.assignedProjectId) {
       return { status: 404, body: { error: "Project was not found", code: "PERSISTENCE_NOT_FOUND" } };
     }
+    const nativeRead = <T>(read: (reader: PersistenceReader) => Promise<T>) => {
+      const selected = url.searchParams.get("projectVersion");
+      if (selected === null) return readCurrentNativeKnowledge(persistence, projectId, read);
+      const version = Number(selected);
+      if (!Number.isInteger(version) || version < 1) failure(400, "INVALID_QUERY", "projectVersion must be a positive integer");
+      return readNativeKnowledge(persistence, projectId, version, read);
+    };
+    const selectedProjectVersion = (): number | undefined => {
+      const selected = url.searchParams.get("projectVersion");
+      if (selected === null) return undefined;
+      const version = Number(selected);
+      if (!Number.isInteger(version) || version < 1) failure(400, "INVALID_QUERY", "projectVersion must be a positive integer");
+      return version;
+    };
     const suffix = projectPath[2] ?? "";
+    const changeSetPath = suffix.match(/^changesets(?:\/([^/]+)(?:\/(approve|reject|apply))?)?$/u);
+    if (changeSetPath) {
+      const changeSetId = changeSetPath[1] ? decoded(changeSetPath[1], "ChangeSet id") as import("@codexia/persistence-contracts").ChangeSetId : undefined;
+      const action = changeSetPath[2];
+      if (!changeSetId && input.method === "GET") {
+        const limit = requestLimit(url.searchParams.get("limit"), 50, 200);
+        return { status: 200, body: { changeSets: await listNativeChangeSets(persistence, projectId, limit) } };
+      }
+      if (!changeSetId && input.method === "POST") {
+        const actorId = await input.requireAuthor();
+        const body = bodyRecord(input.body);
+        const operations = body.operations;
+        if (!Array.isArray(operations)) failure(400, "INVALID_BODY", "operations must be an array");
+        const result = await proposeNativeKnowledgeChange({ persistence, projectId, projectVersion: integer(body.projectVersion, "projectVersion", 1), actorId,
+          idempotencyKey: idempotencyKey(input.requestHeaders?.["idempotency-key"]), operations: operations as import("@codexia/persistence-contracts").ChangeSetOperation[] });
+        return { status: 201, body: result };
+      }
+      if (changeSetId && !action && input.method === "GET") {
+        const result = await getNativeChangeSet(persistence, projectId, changeSetId);
+        return result ? { status: 200, body: result } : { status: 404, body: { error: "ChangeSet was not found", code: "PERSISTENCE_NOT_FOUND" } };
+      }
+      if (changeSetId && action && input.method === "POST") {
+        const actorId = await input.requireAuthor();
+        const body = bodyRecord(input.body);
+        const expectedVersion = integer(body.expectedVersion, "expectedVersion", 1);
+        if (action === "approve") return { status: 200, body: { changeSet: await approveNativeChangeSet(persistence, projectId, changeSetId, expectedVersion, actorId) } };
+        if (action === "reject") return { status: 200, body: { changeSet: await rejectNativeChangeSet(persistence, projectId, changeSetId, expectedVersion, actorId) } };
+        return { status: 200, body: await applyNativeChangeSet(persistence, projectId, changeSetId, expectedVersion) };
+      }
+      return { status: 405, body: { error: "Method not allowed", code: "METHOD_NOT_ALLOWED" } };
+    }
     if (suffix === "archive" && input.method === "GET") {
       return { status: 200, body: await exportWorkArchive(persistence, projectId) };
     }
@@ -236,7 +263,7 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
 
     if (suffix === "nodes" && input.method === "GET") {
       const limit = requestLimit(url.searchParams.get("limit"), 100, 500);
-      const nodes = await persistence.read((reader) => reader.listKnowledgeNodes(projectId, limit));
+      const nodes = await listNativeKnowledgeNodes(persistence, projectId, limit, selectedProjectVersion());
       return { status: 200, body: { nodes } };
     }
 
@@ -265,7 +292,7 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
       }
       if (!documentSuffix && input.method === "GET") {
         const selectedRevisionId = url.searchParams.get("revision");
-        const value = await persistence.read(async (reader) => {
+        const value = await nativeRead(async (reader) => {
           const document = await reader.getDocument(projectId, documentId);
           if (!document) return undefined;
           const revisionId = selectedRevisionId ? decoded(selectedRevisionId, "Revision id") as RevisionId : document.headRevisionId;
@@ -333,18 +360,7 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
       if (documentSuffix === "anchors" && input.method === "GET") {
         const limit = requestLimit(url.searchParams.get("limit"), 200, 500);
         const revisionId = url.searchParams.get("revision");
-        const result = await persistence.read(async (reader) => {
-          const document = await reader.getDocument(projectId, documentId);
-          if (!document) return undefined;
-          const selectedRevision = revisionId ? decoded(revisionId, "Revision id") as RevisionId : document.headRevisionId;
-          if (!selectedRevision) return { revisionId: null, anchors: [] };
-          if (!(await reader.getRevision(projectId, documentId, selectedRevision))) return undefined;
-          const anchors = await reader.listDocumentEvidence(projectId, documentId, selectedRevision, limit);
-          return {
-            revisionId: selectedRevision,
-            anchors: await Promise.all(anchors.map((anchor) => anchorView(reader, projectId, anchor.id))),
-          };
-        });
+        const result = await listNativeEvidenceForDocument(persistence, projectId, documentId, revisionId ? decoded(revisionId, "Revision id") as RevisionId : undefined, limit, selectedProjectVersion());
         return result ? { status: 200, body: result } : { status: 404, body: { error: "Document revision was not found", code: "PERSISTENCE_NOT_FOUND" } };
       }
       if (documentSuffix === "anchors" && input.method === "POST") {
@@ -456,11 +472,7 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
       const nodeId = decoded(nodePath[1]!, "Knowledge node id") as KnowledgeNodeId;
       const nodeSuffix = nodePath[2] ?? "";
       if (!nodeSuffix && input.method === "GET") {
-        const value = await persistence.read(async (reader) => {
-          const node = await reader.getKnowledgeNode(projectId, nodeId);
-          if (!node) return undefined;
-          return { node, aliases: await reader.listKnowledgeAliases(projectId, nodeId), relations: await reader.listKnowledgeRelations(projectId, nodeId) };
-        });
+        const value = await getNativeKnowledgeNode(persistence, projectId, nodeId, selectedProjectVersion());
         return value ? { status: 200, body: value } : { status: 404, body: { error: "Knowledge node was not found", code: "PERSISTENCE_NOT_FOUND" } };
       }
       if (!nodeSuffix && input.method === "PUT") {
@@ -516,10 +528,7 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
       }
       if (nodeSuffix === "evidence" && input.method === "GET") {
         const limit = requestLimit(url.searchParams.get("limit"), 200, 500);
-        const evidence = await persistence.read(async (reader) => {
-          const mentions = await reader.listNodeMentions(projectId, nodeId, limit);
-          return Promise.all(mentions.map((mention) => anchorView(reader, projectId, mention.evidenceId)));
-        });
+        const evidence = await listNativeEvidenceForNode(persistence, projectId, nodeId, limit, selectedProjectVersion());
         return { status: 200, body: { evidence: evidence.filter((item) => item !== undefined) } };
       }
       return { status: 404, body: { error: "Persistence route not found", code: "NOT_FOUND" } };
@@ -530,10 +539,7 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
       const assertionId = decoded(assertionPath[1]!, "Assertion id") as AssertionId;
       const assertionSuffix = assertionPath[2] ?? "";
       if (!assertionSuffix && input.method === "GET") {
-        const value = await persistence.read(async (reader) => {
-          const assertion = await reader.getAssertion(projectId, assertionId);
-          return assertion ? { assertion, evidence: await reader.listAssertionEvidence(projectId, assertionId) } : undefined;
-        });
+        const value = await getNativeAssertion(persistence, projectId, assertionId, selectedProjectVersion());
         return value ? { status: 200, body: value } : { status: 404, body: { error: "Assertion was not found", code: "PERSISTENCE_NOT_FOUND" } };
       }
       if (!assertionSuffix && input.method === "PUT") {
@@ -568,10 +574,7 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
         return { status: 200, body: { assertion } };
       }
       if (assertionSuffix === "evidence" && input.method === "GET") {
-        const records = await persistence.read(async (reader) => {
-          const links = await reader.listAssertionEvidence(projectId, assertionId);
-          return Promise.all(links.map(async (link) => ({ link, evidence: await anchorView(reader, projectId, link.evidenceId) })));
-        });
+        const records = await listNativeEvidenceForAssertion(persistence, projectId, assertionId, selectedProjectVersion());
         return { status: 200, body: { evidence: records } };
       }
       if (assertionSuffix === "evidence" && input.method === "POST") {

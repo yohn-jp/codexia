@@ -52,6 +52,7 @@ test("persistence status reports database health and knowledge lists are bounded
     async checkHealth() { throw new Error("database unavailable"); },
     async read<T>(work: (reader: unknown) => Promise<T>) {
       return work({
+        async getProject(selectedProjectId: ProjectId) { assert.equal(selectedProjectId, projectId); return { id: projectId, version: 1 }; },
         async listKnowledgeNodes(selectedProjectId: ProjectId, limit: number) {
           assert.equal(selectedProjectId, projectId);
           requestedLimit = limit;
