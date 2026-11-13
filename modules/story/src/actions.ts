@@ -1378,8 +1378,9 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
     action("story.context.package", read, fieldSchema(["sceneId", "scope"], ["sceneId", "scope", "characterId"]), async (input, context) => {
       const story = await readStorySnapshot(context.reader);
       const sceneId=stringValue(input.sceneId,"sceneId");
-      const native=input.scope==="author"?await nativeKnowledge(context.reader,story,sceneId):null;
-      return {...sceneContextPackage(story,sceneId,input.scope as ContextScope,input.characterId as string|undefined,input.budget===undefined?12000:Number(input.budget),native?.parts??[]),...(native?{knowledgeAvailable:native.available,knowledgeTruncated:native.truncated}:{})};
+      const native=await nativeKnowledge(context.reader,story,sceneId);
+      const author=input.scope==="author";
+      return {...sceneContextPackage(story,sceneId,input.scope as ContextScope,input.characterId as string|undefined,input.budget===undefined?12000:Number(input.budget),native.parts,native.omissions),...(author?{knowledgeAvailable:native.available,knowledgeTruncated:native.truncated}:{})};
     }),
     action("story.narrative.review", read, fieldSchema([], ["sceneId"]), async (input, context) => {
       const story=await readStorySnapshot(context.reader,{includeManuscripts:true});

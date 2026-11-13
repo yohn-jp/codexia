@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import YAML from "yaml";
 import { before, after, test } from "node:test";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
@@ -59,6 +59,27 @@ test("mapped hierarchy preserves logical IDs and ignores conflicting stored pare
 });
 
 test("immutable pinned readers survive edits and Core process replacement",async()=>{const p=await hierarchy(),reader=await core.reader(p.id);const path="manuscript/v1/c1/s1.md",original=await reader.read(path);await accept(p.id,operation(reader.snapshot,path,"Changed",original!.revision));assert.equal((await reader.read(path))?.content,"Text 😀\n");const restarted=new CoreStore({persistence});assert.equal((await (await restarted.reader(p.id,reader.snapshot)).read(path))?.content,"Text 😀\n");assert.equal((await core.readScene(p.id,"s1")).text,"Changed");});
+test("pinned Knowledge projection retains original identity and anchored quote after Knowledge and body edits",async()=>{
+  const p=await hierarchy(),documents=await persistence.read(r=>r.listDocuments(p.id)),scene=documents.find(document=>document.kind==="scene")!,revision=scene.headRevisionId!;
+  const nodeId=randomUUID() as import("@codexia/persistence-contracts").KnowledgeNodeId,evidenceId=randomUUID() as import("@codexia/persistence-contracts").EvidenceId;
+  await persistence.transaction(async tx=>{
+    await tx.saveKnowledgeNode({projectId:p.id,id:nodeId,type:"lore",name:"Original clue",attributes:{},status:"confirmed",expectedVersion:null});
+    await tx.saveEvidenceAnchor({projectId:p.id,id:evidenceId,documentId:scene.id,revisionId:revision,fromUtf16:0,toUtf16:"Text 😀\n".length,quoteSha256:createHash("sha256").update("Text 😀\n").digest("hex"),status:"confirmed",expectedVersion:null});
+    await tx.saveMentionLink({projectId:p.id,evidenceId,nodeId,status:"confirmed",source:"author",confidence:1,extractorVersion:null});
+  });
+  const pinned=await core.reader(p.id),contextPath="meta/scriptorium/knowledge-context/v1.json",original=JSON.parse((await pinned.read(contextPath))!.content);
+  await persistence.transaction(tx=>tx.saveKnowledgeNode({projectId:p.id,id:nodeId,type:"lore",name:"Edited clue",attributes:{},status:"confirmed",expectedVersion:1}));
+  const knowledgeEdited=await core.reader(p.id),manuscriptPath="manuscript/v1/c1/s1.md",body=(await knowledgeEdited.read(manuscriptPath))!;
+  await accept(p.id,operation(knowledgeEdited.snapshot,manuscriptPath,"Edited manuscript",body.revision));
+  const current=JSON.parse((await (await core.reader(p.id)).read(contextPath))!.content),pinnedAgain=JSON.parse((await pinned.read(contextPath))!.content);
+  assert.equal(original.entries[0].node.name,"Original clue");
+  assert.equal(original.entries[0].evidence[0].quote,"Text 😀\n");
+  assert.equal(current.entries[0].node.name,"Edited clue");
+  assert.notEqual(current.entries[0].evidence[0].sourceRevisionId,revision);
+  assert.equal(current.entries[0].evidence[0].quote,"Edited manuscript","the current snapshot resolves only the new exact anchor quote");
+  assert.equal(current.entries[0].evidence[0].stale,false);
+  assert.deepEqual(pinnedAgain,original);
+});
 test("proposal approval binds exact payload and durable replay receipts",async()=>{const p=await project(),reader=await core.reader(p.id),op=operation(reader.snapshot,"bible/notes.yaml","name: A\n");await assert.rejects(core.apply(p.id,op),/approved/);const receipt=await accept(p.id,op);assert.deepEqual(await core.apply(p.id,op),receipt);await assert.rejects(core.apply(p.id,{...op,writes:[{...op.writes[0]!,content:"forged"}]}),/approved/);assert.equal((await new CoreStore({persistence}).listProposals(p.id))[0]?.state,"applied");});
 test("duplicate proposal identities reject changed envelopes",async()=>{const p=await project(),reader=await core.reader(p.id),op=operation(reader.snapshot,"bible/a.yaml","A");const proposal:ChangeProposal={id:randomUUID(),snapshot:reader.snapshot,operations:[op],source:"author"};await core.propose(p.id,proposal);assert.deepEqual(await core.propose(p.id,proposal),proposal);await assert.rejects(core.propose(p.id,{...proposal,source:"module"}),/different payload/);});
 test("proposal registration and approval preserve content project version",async()=>{const p=await project(),snapshot=(await core.observe(p.id)).snapshot,op=operation(snapshot,"bible/a.yaml","A"),proposal:ChangeProposal={id:randomUUID(),snapshot,operations:[op],source:"author"};await core.propose(p.id,proposal);await core.approve(p.id,{proposalId:proposal.id,operationIds:[op.id],authorScope:"owner"});assert.deepEqual((await core.observe(p.id)).snapshot,snapshot);await core.apply(p.id,op);assert.equal((await core.observe(p.id)).snapshot.projectVersion,snapshot.projectVersion+1);});

@@ -231,7 +231,8 @@ export class CoreStore implements MutationCoordinator {
       if (typeof record.value.content !== "string") fail(422,"invalid_artifact","Artifact body must be text");
       add(record.key,record.value.content,record.value.encoding === "base64" ? "base64":"utf8");
     }
-    add(KNOWLEDGE_CONTEXT_PATH, JSON.stringify(await projectKnowledgeContext(reader,pid(projectId),documents)));
+    const documentMappings = documents.filter(document => document.kind === "scene").map(document => ({documentId:document.id,storySceneId:projectedId(document)}));
+    add(KNOWLEDGE_CONTEXT_PATH, JSON.stringify(await projectKnowledgeContext(reader,pid(projectId),documents,documentMappings)));
     return {snapshot:{projectId,projectVersion:project.version},files,documents,project};
   }
   private async manifest(projectId: string, pinned?: SnapshotId): Promise<Manifest> {
