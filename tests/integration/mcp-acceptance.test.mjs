@@ -34,6 +34,11 @@ const SOURCE_TOOL_NAMES = [
   "check_style_deviations", "get_writing_context", "get_context_manifest", "lint_manuscript",
   "submit_change_set", "get_change_set", "list_change_sets",
 ];
+const NATIVE_TOOL_NAMES = [
+  "knowledge.nodes.list", "knowledge.node.get", "knowledge.aliases.list", "knowledge.relations.list",
+  "evidence.anchor.get", "evidence.document.list", "evidence.node.list", "evidence.assertion.get", "evidence.assertion.list",
+  "knowledge.propose", "changesets.list", "changeset.get", "knowledge.merge.preview", "knowledge.merge.propose",
+];
 const READY_MODULES = (process.env.CODEXIA_MCP_ACCEPTANCE_MODULES ?? "story,nlp,diagnostics,semantic,speaker,publishing,mcp")
   .split(",")
   .map((id) => id.trim())
@@ -344,6 +349,144 @@ async function closeMcpClient(connection, http = false) {
 function delay(milliseconds) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 }
+
+test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, review and receipt over both transports", {
+  skip: !(process.env.CODEXIA_TEST_DATABASE_URL ?? process.env.CODEXIA_DATABASE_URL),
+  timeout: 120_000,
+}, async (t) => {
+  const databaseUrl = process.env.CODEXIA_TEST_DATABASE_URL ?? process.env.CODEXIA_DATABASE_URL;
+  const rootDir = await mkdtemp(resolve(tmpdir(), "codexia-native-mcp-postgres-"));
+  const usageDirectory = resolve(rootDir, "host-history");
+  const previousProviderEnv = new Map(["ARCADIA_LLM_PROVIDER", "ARCADIA_LLM_MODEL", "ARCADIA_LLM_BASE_URL", "ARCADIA_LLM_API_KEY"].map(name => [name, process.env[name]]));
+  const providerProbe = await startProviderProbe();
+  process.env.ARCADIA_LLM_PROVIDER = "openai-compatible";
+  process.env.ARCADIA_LLM_MODEL = "native-mcp-admission-probe";
+  process.env.ARCADIA_LLM_BASE_URL = providerProbe.baseUrl;
+  process.env.ARCADIA_LLM_API_KEY = "integration-placeholder";
+  let host;
+  let stdio;
+  let http;
+  const persistence = createPostgresPersistence(databaseUrl);
+  t.after(async () => {
+    await closeMcpClient(http, true);
+    await closeMcpClient(stdio);
+    await host?.close().catch(() => undefined);
+    await persistence.close();
+    await providerProbe.close();
+    await rm(rootDir, { recursive: true, force: true });
+    for (const [name, value] of previousProviderEnv) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  host = await startAdmissionHost({ cacheDirectory: resolve(rootDir, "module-cache"), usageDirectory });
+  const cookie = await login(host);
+  const project = await ownerJson(host, cookie, "/api/v1/persistence/projects", {
+    method: "POST", status: 201, body: { title: `Native MCP ${randomUUID()}` },
+  });
+  const projectId = project.project.id;
+  const sourceId = randomUUID();
+  const targetId = randomUUID();
+  await persistence.transaction(async tx => {
+    await tx.saveKnowledgeNode({ projectId, id: sourceId, type: "person", name: "MCP source", attributes: { sourceFact: "kept" }, status: "confirmed", expectedVersion: null });
+    await tx.saveKnowledgeNode({ projectId, id: targetId, type: "person", name: "MCP target", attributes: { targetFact: "kept" }, status: "confirmed", expectedVersion: null });
+  });
+  const projectVersion = (await persistence.read(reader => reader.getProject(projectId))).version;
+  stdio = await startStdioClient(host, projectId);
+  http = await startHttpClient(host, projectId);
+
+  for (const [name, connection] of [["stdio", stdio], ["Streamable HTTP", http]]) {
+    const catalog = await connection.client.listTools();
+    const toolNames = catalog.tools.map(tool => tool.name);
+    for (const toolName of NATIVE_TOOL_NAMES) assert.ok(toolNames.includes(toolName), `${name} missing ${toolName}`);
+    assert.equal(toolNames.some(toolName => /approve|apply/u.test(toolName)), false, `${name} exposed author approval or apply`);
+    const nodes = success(await connection.client.callTool({ name: "knowledge.nodes.list", arguments: { project_version: projectVersion, limit: 20 } }), `${name} native nodes list`);
+    assert.equal(nodes.snapshot.projectVersion, projectVersion);
+    assert.deepEqual(new Set(nodes.data.map(node => node.id)), new Set([sourceId, targetId]));
+  }
+
+  const preview = success(await stdio.client.callTool({ name: "knowledge.merge.preview", arguments: { source_id: sourceId, target_id: targetId, project_version: projectVersion } }), "stdio native merge preview");
+  assert.equal(preview.snapshot.projectVersion, projectVersion);
+  assert.equal(preview.data.projectVersion, projectVersion);
+  assert.match(preview.data.previewDigest, /^[0-9a-f]{64}$/u);
+  const proposalArgs = { source_id: sourceId, target_id: targetId, project_version: projectVersion, preview_digest: preview.data.previewDigest, idempotency_key: "native-mcp-merge-once" };
+  const proposed = success(await stdio.client.callTool({ name: "knowledge.merge.propose", arguments: proposalArgs }), "stdio native merge proposal");
+  const changeSet = proposed.data.changeSet;
+  assert.equal(changeSet.status, "proposed");
+  assert.equal(changeSet.provenance.actorId, "owner");
+  assert.equal(changeSet.provenance.details.origin, "external-agent");
+  assert.equal(changeSet.operations[0].type, "knowledge.merge");
+  assert.equal((await persistence.read(reader => reader.getKnowledgeNode(projectId, sourceId))).status, "confirmed", "proposal must not mutate canonical Knowledge");
+
+  const replay = success(await http.client.callTool({ name: "knowledge.merge.propose", arguments: proposalArgs }), "HTTP idempotent merge replay");
+  assert.equal(replay.data.replayed, true);
+  assert.equal(replay.data.changeSet.id, changeSet.id);
+  const list = success(await http.client.callTool({ name: "changesets.list", arguments: { limit: 20 } }), "HTTP native ChangeSet list");
+  assert.ok(list.data.changeSets.some(item => item.id === changeSet.id));
+  const detail = success(await http.client.callTool({ name: "changeset.get", arguments: { change_set_id: changeSet.id } }), "HTTP native ChangeSet detail");
+  assert.equal(detail.data.changeSet.id, changeSet.id);
+
+  const forbiddenApproval = await apiRequest(host, `/api/v1/persistence/projects/${projectId}/changesets/${changeSet.id}/approve`, {
+    method: "POST", bearer: true, body: { expectedVersion: changeSet.version },
+  });
+  assert.equal(forbiddenApproval.status, 403, "external MCP bearer cannot approve a native ChangeSet");
+  const forbiddenApply = await apiRequest(host, `/api/v1/persistence/projects/${projectId}/changesets/${changeSet.id}/apply`, {
+    method: "POST", bearer: true, body: { expectedVersion: changeSet.version },
+  });
+  assert.equal(forbiddenApply.status, 403, "external MCP bearer cannot apply a native ChangeSet");
+
+  const approval = await fetch(`${host.base}/api/v1/persistence/projects/${projectId}/changesets/${changeSet.id}/approve`, {
+    method: "POST", headers: { Cookie: cookie, Origin: host.base, "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: changeSet.version }),
+  });
+  assert.equal(approval.status, 200, await approval.text());
+  const apply = await fetch(`${host.base}/api/v1/persistence/projects/${projectId}/changesets/${changeSet.id}/apply`, {
+    method: "POST", headers: { Cookie: cookie, Origin: host.base, "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: changeSet.version + 1 }),
+  });
+  const appliedBody = await apply.text();
+  assert.equal(apply.status, 200, appliedBody);
+  const applied = JSON.parse(appliedBody);
+  assert.equal(applied.changeSet.status, "applied");
+  assert.ok(applied.results[0].auditId);
+  const finalDetail = success(await http.client.callTool({ name: "changeset.get", arguments: { change_set_id: changeSet.id } }), "HTTP applied ChangeSet receipt");
+  assert.equal(finalDetail.data.receipt.changeSet.id, changeSet.id);
+  assert.equal((await persistence.read(reader => reader.getKnowledgeNode(projectId, sourceId))).status, "retired");
+  const target = await persistence.read(reader => reader.getKnowledgeNode(projectId, targetId));
+  assert.equal(target.attributes.sourceFact, "kept");
+  assert.equal(target.attributes.targetFact, "kept");
+
+  const ordinaryVersion = (await persistence.read(reader => reader.getProject(projectId))).version;
+  const proposedNodeId = randomUUID();
+  const ordinaryArgs = {
+    project_version: ordinaryVersion, idempotency_key: "native-mcp-node-once",
+    operations: [{ type: "knowledge.node.save", command: {
+      projectId, id: proposedNodeId, type: "person", name: "MCP proposed person", attributes: {}, status: "proposed", expectedVersion: null,
+    } }],
+  };
+  const ordinary = success(await stdio.client.callTool({ name: "knowledge.propose", arguments: ordinaryArgs }), "stdio ordinary native proposal");
+  assert.equal(ordinary.snapshot.projectVersion, ordinaryVersion);
+  assert.equal(ordinary.data.changeSet.provenance.details.projectVersion, ordinaryVersion);
+  assert.equal(ordinary.data.changeSet.operations[0].command.id, proposedNodeId);
+  assert.equal((await persistence.read(reader => reader.getKnowledgeNode(projectId, proposedNodeId))), undefined);
+  const ordinaryReplay = success(await http.client.callTool({ name: "knowledge.propose", arguments: ordinaryArgs }), "HTTP ordinary proposal replay");
+  assert.equal(ordinaryReplay.data.replayed, true);
+  assert.equal(ordinaryReplay.data.changeSet.id, ordinary.data.changeSet.id);
+
+  const anotherSource = randomUUID();
+  const anotherTarget = randomUUID();
+  await persistence.transaction(async tx => {
+    await tx.saveKnowledgeNode({ projectId, id: anotherSource, type: "person", name: "Stale source", attributes: {}, status: "confirmed", expectedVersion: null });
+    await tx.saveKnowledgeNode({ projectId, id: anotherTarget, type: "person", name: "Stale target", attributes: {}, status: "confirmed", expectedVersion: null });
+  });
+  const staleVersion = (await persistence.read(reader => reader.getProject(projectId))).version;
+  const stalePreview = success(await stdio.client.callTool({ name: "knowledge.merge.preview", arguments: { source_id: anotherSource, target_id: anotherTarget, project_version: staleVersion } }), "stdio stale merge preview");
+  await persistence.transaction(tx => tx.saveKnowledgeNode({ projectId, id: anotherTarget, type: "person", name: "Changed target", attributes: {}, status: "confirmed", expectedVersion: 1 }));
+  const staleProposal = await stdio.client.callTool({ name: "knowledge.merge.propose", arguments: {
+    source_id: anotherSource, target_id: anotherTarget, project_version: staleVersion, preview_digest: stalePreview.data.previewDigest, idempotency_key: "native-mcp-merge-stale",
+  } });
+  assert.equal(errorCode(staleProposal, "stale native merge proposal"), "conflict");
+  assert.equal(providerProbe.callCount(), 0, "native Knowledge Actions must not invoke a configured model provider");
+});
 
 async function waitUntil(predicate, timeoutMs, message) {
   const deadline = Date.now() + timeoutMs;

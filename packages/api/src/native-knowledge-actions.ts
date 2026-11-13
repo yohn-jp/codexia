@@ -6,6 +6,7 @@ import {
   listNativeEvidenceForNode, listNativeKnowledgeAliases, listNativeKnowledgeNodes,
   listNativeKnowledgeRelations, NativeKnowledgeServiceError, proposeNativeKnowledgeChange,
 } from "./native-knowledge-service.js";
+import { NativeKnowledgeMergeServiceError, previewNativeKnowledgeMerge, proposeNativeKnowledgeMerge } from "./native-knowledge-merge-service.js";
 
 export interface NativeKnowledgeActionHost {
   persistence: Persistence;
@@ -106,6 +107,34 @@ export function createNativeKnowledgeActions(host: NativeKnowledgeActionHost): M
           if (selected > context.reader.snapshot.projectVersion) throw new NativeKnowledgeServiceError("snapshot_unavailable", "Proposal source is newer than the selected Action reader");
           if (typeof value.idempotencyKey !== "string" || !Array.isArray(value.operations)) throw new NativeKnowledgeServiceError("invalid_input", "idempotencyKey and operations are required");
           const result = await proposeNativeKnowledgeChange({ persistence, projectId, actorId: host.actorId, projectVersion: selected, idempotencyKey: value.idempotencyKey, operations: value.operations as ChangeSetOperation[], origin: host.origin });
+          if (context.signal.aborted) throw Object.assign(new Error("Action was cancelled"), { code: "action_cancelled" });
+          return { ok: true, snapshot: context.reader.snapshot, data: result };
+        } catch (error) { return failure(context, error); }
+      },
+    },
+    read("core.knowledge.merge.preview", input(["sourceId", "targetId", "projectVersion"], ["sourceId", "targetId"]), async (v, c) =>
+      previewNativeKnowledgeMerge(persistence, projectId, id<KnowledgeNodeId>(v.sourceId, "sourceId"), id<KnowledgeNodeId>(v.targetId, "targetId"), version(v, c))),
+    {
+      id: "core.knowledge.merge.propose", effect: "propose",
+      inputSchema: input(["sourceId", "targetId", "projectVersion", "previewDigest", "idempotencyKey"], ["sourceId", "targetId", "projectVersion", "previewDigest", "idempotencyKey"]), outputSchema: output,
+      async invoke(raw, context) {
+        try {
+          if (context.signal.aborted) throw Object.assign(new Error("Action was cancelled"), { code: "action_cancelled" });
+          assertProjectScope(context, projectId);
+          await host.authorizeProposal();
+          if (context.signal.aborted) throw Object.assign(new Error("Action was cancelled"), { code: "action_cancelled" });
+          const value = raw as Record<string, unknown>;
+          const sourceId = id<KnowledgeNodeId>(value.sourceId, "sourceId");
+          const targetId = id<KnowledgeNodeId>(value.targetId, "targetId");
+          const selected = proposalVersion(value.projectVersion);
+          if (selected > context.reader.snapshot.projectVersion) throw new NativeKnowledgeServiceError("snapshot_unavailable", "Proposal source is newer than the selected Action reader");
+          if (typeof value.previewDigest !== "string" || !/^[0-9a-f]{64}$/u.test(value.previewDigest) || typeof value.idempotencyKey !== "string") {
+            throw new NativeKnowledgeMergeServiceError("invalid_input", "Native Knowledge merge proposal is malformed");
+          }
+          const result = await proposeNativeKnowledgeMerge({
+            persistence, projectId, sourceId, targetId, projectVersion: selected, previewDigest: value.previewDigest,
+            actorId: host.actorId, origin: host.origin, idempotencyKey: value.idempotencyKey,
+          });
           if (context.signal.aborted) throw Object.assign(new Error("Action was cancelled"), { code: "action_cancelled" });
           return { ok: true, snapshot: context.reader.snapshot, data: result };
         } catch (error) { return failure(context, error); }
