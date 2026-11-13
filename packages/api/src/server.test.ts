@@ -285,6 +285,11 @@ function actionBoundaryRuntime(cacheDirectory: string): ModuleRuntime {
         return Response.json({ source: proposal.source });
       },
     }, {
+      id: "native-propose", path: "native-propose", methods: ["POST"], access: "owner", effect: "propose",
+      async handle(request, context) {
+        return Response.json(await context.invoke("core.knowledge.propose", await request.json()));
+      },
+    }, {
       id: "compute", path: "compute", methods: ["POST"], access: "owner", effect: "compute",
       async handle(request, context) {
         const input = await request.json() as { operation?: ChangeOperation };
@@ -2201,6 +2206,11 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(actions.some((action) => action.id === "core.search"));
     assert.ok(actions.some((action) => action.id === "core.writing-stats"));
     assert.ok(actions.some((action) => action.id === "core.manuscript-snapshots"));
+    for (const id of [
+      "core.knowledge.nodes.list", "core.knowledge.node.get", "core.knowledge.aliases.list", "core.knowledge.relations.list",
+      "core.evidence.anchor.get", "core.evidence.document.list", "core.evidence.node.list", "core.evidence.assertion.get",
+      "core.evidence.assertion.list", "core.knowledge.propose", "core.changesets.list", "core.changeset.get",
+    ]) assert.ok(actions.some((action) => action.id === id && action.module === "core"), `${id} is registered by the host Core catalog`);
     assert.equal(actions.some((action) => action.module === "mcp"), false);
 
     const actionResponse = await fetch(`${apiServer.base}/api/projects/project-1/actions/core.search`, {
@@ -2212,6 +2222,15 @@ describe("Codexia HTTP boundary", () => {
       data: { query: "harbor", results: [{ id: "scene-one", type: "scene", name: "Opening", snippet: "A harbor at night.", filePath: "manuscript/ms-one/scene-one.md", score: 1, field: "body", offset: 2, length: 6 }] },
     });
     assert.ok(fixture.pinnedReads.includes(SNAPSHOT.projectVersion));
+    const mismatchedNativeRead = await fetch(`${apiServer.base}/api/projects/project-1/actions/core.knowledge.nodes.list`, {
+      method: "POST", headers: { ...auth, "Content-Type": "application/json" }, body: JSON.stringify({ input: { projectVersion: 2 } }),
+    });
+    assert.equal((await mismatchedNativeRead.json() as { error: { code: string } }).error.code, "snapshot_unavailable");
+    const forgedNativeActor = await fetch(`${apiServer.base}/api/projects/project-1/actions/core.knowledge.propose`, {
+      method: "POST", headers: { ...auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ input: { projectVersion: 1, idempotencyKey: "k", operations: [], actorId: "forged" } }),
+    });
+    assert.equal((await forgedNativeActor.json() as { error: { code: string } }).error.code, "invalid_action_input");
     const invalidAction = await fetch(`${apiServer.base}/api/projects/project-1/actions/core.search`, {
       method: "POST", headers: { ...auth, "Content-Type": "application/json" },
       body: JSON.stringify({ input: { query: "" } }),
@@ -2624,6 +2643,38 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(httpProposal.status, 200);
     assert.deepEqual(await httpProposal.json(), { source: "mcp" });
     assert.equal(fixture.proposed[1]?.source, "mcp");
+  });
+
+  it("denies hosted read grants native proposals through direct and nested MCP calls", async (t) => {
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-native-admission-"));
+    const cacheDir = await mkdtemp(resolve(tmpdir(), "codexia-api-native-admission-cache-"));
+    tempDirs.push(staticDir, cacheDir);
+    const fixture = makeSnapshotStore();
+    const apiServer = await startHostedApi(fixture.store, staticDir, hostedTestPolicy(), undefined, actionBoundaryRuntime(cacheDir));
+    t.after(apiServer.close);
+    const input = { projectVersion: 1, idempotencyKey: "native-denied", operations: [] };
+    const direct = await fetch(`${apiServer.base}/api/projects/project-1/actions/core.knowledge.propose`, {
+      method: "POST", headers: { Authorization: "Bearer read-grant", "Content-Type": "application/json" }, body: JSON.stringify({ input }),
+    });
+    assert.equal(direct.status, 403, "direct action admission requires a current Hosted write grant");
+
+    const nested = await fetch(`${apiServer.base}/api/projects/project-1/modules/mcp/native-propose`, {
+      method: "POST", headers: { Authorization: "Bearer read-grant", "Content-Type": "application/json" }, body: JSON.stringify(input),
+    });
+    assert.equal(nested.status, 200);
+    const nestedResult = await nested.json() as ActionResult;
+    assert.equal(nestedResult.ok, false);
+    if (!nestedResult.ok) assert.equal(nestedResult.error.code, "WRITE_PERMISSION_REQUIRED");
+
+    const cookieMcp = await rawHostedRequest(`${apiServer.base}/api/projects/project-1/modules/mcp/native-propose`, {
+      Host: "instance-1.instances.example", "X-Forwarded-Proto": "https", Origin: HOSTED_ASSIGNMENT.grantPolicy.audience,
+      Cookie: "__Host-praetorium_access=read-grant; __Host-praetorium_csrf=csrf-value", "X-CSRF-Token": "csrf-value", "Content-Type": "application/json",
+    }, JSON.stringify(input));
+    assert.equal(cookieMcp.status, 200);
+    const cookieResult = JSON.parse(cookieMcp.body) as ActionResult;
+    assert.equal(cookieResult.ok, false, "cookie-authenticated MCP still uses the host write authorization callback");
+    if (!cookieResult.ok) assert.equal(cookieResult.error.code, "WRITE_PERMISSION_REQUIRED");
+    assert.equal(fixture.proposed.length, 0, "native ChangeSet proposals never use the path-based proposal store");
   });
 
   it("passes public module requests through the registered relative route with a fresh remote reader", async (t) => {

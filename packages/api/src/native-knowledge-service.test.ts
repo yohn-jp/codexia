@@ -25,8 +25,9 @@ function nodeOperation(projectId: ProjectId, name: string, id = randomUUID() as 
 test("native proposals stay noncanonical until approval, apply atomically, and retain durable receipts", async () => {
   const p = await project("native-proposal");
   const operation = nodeOperation(p.id, "Luna");
-  const submitted = await proposeNativeKnowledgeChange({ persistence, projectId: p.id, projectVersion: p.version, actorId: "reviewer", idempotencyKey: "native-create-1", operations: [operation] });
-  const replay = await proposeNativeKnowledgeChange({ persistence, projectId: p.id, projectVersion: p.version, actorId: "reviewer", idempotencyKey: "native-create-1", operations: [operation] });
+  const submitted = await proposeNativeKnowledgeChange({ persistence, projectId: p.id, projectVersion: p.version, actorId: "reviewer", origin: "external-agent", idempotencyKey: "native-create-1", operations: [operation] });
+  assert.equal(submitted.changeSet.provenance.details.origin, "external-agent");
+  const replay = await proposeNativeKnowledgeChange({ persistence, projectId: p.id, projectVersion: p.version, actorId: "reviewer", origin: "external-agent", idempotencyKey: "native-create-1", operations: [operation] });
   assert.equal(replay.replayed, true);
   assert.equal(await persistence.read(reader => reader.getKnowledgeNode(p.id, operation.command.id)), undefined);
   const approved = await approveNativeChangeSet(persistence, p.id, submitted.changeSet.id, submitted.changeSet.version, "author");
@@ -34,7 +35,7 @@ test("native proposals stay noncanonical until approval, apply atomically, and r
   assert.equal(applied.changeSet.status, "applied");
   assert.equal((await persistence.read(reader => reader.getKnowledgeNode(p.id, operation.command.id)))?.name, "Luna");
   assert.equal((await applyNativeChangeSet(persistence, p.id, approved.id, approved.version)).replayed, true);
-  const replayAfterApply = await proposeNativeKnowledgeChange({ persistence, projectId: p.id, projectVersion: p.version, actorId: "reviewer", idempotencyKey: "native-create-1", operations: [operation] });
+  const replayAfterApply = await proposeNativeKnowledgeChange({ persistence, projectId: p.id, projectVersion: p.version, actorId: "reviewer", origin: "external-agent", idempotencyKey: "native-create-1", operations: [operation] });
   assert.equal(replayAfterApply.replayed, true);
   assert.equal(replayAfterApply.changeSet.id, submitted.changeSet.id);
   assert.equal(replayAfterApply.changeSet.status, "applied");

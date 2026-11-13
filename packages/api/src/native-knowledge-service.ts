@@ -16,6 +16,8 @@ export interface ProposeNativeKnowledgeChangeInput {
   projectVersion: number;
   /** Resolve this identity from the authenticated actor; never accept it from the operation body. */
   actorId: ActorId;
+  /** Host-derived provenance. Existing REST callers default to author. */
+  origin?: "author" | "external-agent";
   idempotencyKey: string;
   operations: readonly ChangeSetOperation[];
 }
@@ -193,7 +195,10 @@ export async function proposeNativeKnowledgeChange(input: ProposeNativeKnowledge
   const command: CreateChangeSetCommand = {
     projectId: input.projectId, authorId: input.actorId, idempotencyKey: input.idempotencyKey,
     operations, readSet: reads, writeSet: writes,
-    provenance: { source: "native-knowledge-service", actorId: input.actorId, details: { projectVersion: input.projectVersion } },
+    provenance: { source: "native-knowledge-service", actorId: input.actorId, details: {
+      projectVersion: input.projectVersion,
+      ...(input.origin === "external-agent" ? { origin: "external-agent" } : {}),
+    } },
   };
   return input.persistence.transaction(transaction => transaction.createChangeSet(command));
 }
