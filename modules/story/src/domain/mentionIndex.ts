@@ -25,3 +25,12 @@ export function findMentions(dictionary: MentionDictionary, text: string): strin
   }
   return [...found];
 }
+
+/** Ambiguous surface forms cannot identify one reader-visible entity. */
+export function findUnambiguousMentions(dictionary: MentionDictionary, text: string): string[] {
+  const found = new Set<string>();
+  for (const candidate of findMentionCandidates(dictionary, text)) {
+    if (candidate.nodeIds.length === 1) found.add(candidate.nodeIds[0]!);
+  }
+  return [...found];
+}
