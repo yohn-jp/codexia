@@ -11,10 +11,12 @@ export interface SearchTerm {
   targetPath: string;
 }
 
-export interface TermRegistry { schemaVersion: 1; terms: SearchTerm[] }
+export interface KnowledgeTermReference { knowledgeId: string; targetPath: string }
+export interface TermRegistry { schemaVersion: 1; terms: SearchTerm[]; knowledgeReferences?: KnowledgeTermReference[] }
+export interface ResolutionTerm extends SearchTerm { candidateOnly?: boolean; ambiguousAliases?: string[]; knowledgeId?: string }
 export interface TermSpan { start: number; end: number; termId: string; targetPath: string }
 export interface AmbiguousTermSpan { start: number; end: number; alias: string; termIds: string[] }
-export interface TermResolution { spans: TermSpan[]; ambiguities: AmbiguousTermSpan[] }
+export interface TermResolution { spans: TermSpan[]; ambiguities: AmbiguousTermSpan[]; candidates?: Array<{start:number;end:number;termId:string}> }
 
 export function normalizeTerm(value: string): string {
   return value.normalize("NFKC").toLowerCase();
@@ -44,10 +46,20 @@ export function parseTermRegistry(value: unknown): TermRegistry {
     return { id: raw.id, canonical, aliases, targetPath: raw.targetPath };
   });
   terms.sort((left, right) => left.id.localeCompare(right.id));
-  return { schemaVersion: 1, terms };
+  const references = value.knowledgeReferences ?? [];
+  if (!Array.isArray(references) || references.length > MAX_TERMS) throw new TypeError("Invalid Knowledge terminology references");
+  const referenced = new Set<string>();
+  const knowledgeReferences = references.map((raw): KnowledgeTermReference => {
+    if (!record(raw) || typeof raw.knowledgeId !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(raw.knowledgeId) ||
+        referenced.has(raw.knowledgeId) || typeof raw.targetPath !== "string" || Object.keys(raw).length !== 2) throw new TypeError("Invalid Knowledge terminology reference");
+    assertProjectPath(raw.targetPath);
+    referenced.add(raw.knowledgeId);
+    return {knowledgeId:raw.knowledgeId,targetPath:raw.targetPath};
+  }).sort((a,b)=>a.knowledgeId.localeCompare(b.knowledgeId));
+  return { schemaVersion: 1, terms, ...(knowledgeReferences.length ? {knowledgeReferences} : {}) };
 }
 
-interface AliasEntry { alias: string; normalized: string; term: SearchTerm }
+interface AliasEntry { alias: string; normalized: string; term: ResolutionTerm; ambiguous: boolean }
 interface NormalizedText { value: string; starts: number[]; ends: number[] }
 
 /** Keeps offsets in the original UTF-16 string while matching normalized graphemes. */
@@ -80,20 +92,21 @@ function hasWholeWordBoundary(text: string, start: number, end: number, alias: s
  * Resolves a bounded visible text slice. Shared aliases are returned for inspection and never
  * become links; overlapping unique aliases use longest match, then stable id ordering.
  */
-export function resolveTermSpans(text: string, terms: readonly SearchTerm[], validTargetPaths?: ReadonlySet<string>): TermResolution {
+export function resolveTermSpans(text: string, terms: readonly ResolutionTerm[], validTargetPaths?: ReadonlySet<string>): TermResolution {
   const normalizedText = normalizeWithOffsets(text);
   const aliases = new Map<string, AliasEntry[]>();
   for (const term of terms) {
-    if (validTargetPaths && !validTargetPaths.has(term.targetPath)) continue;
-    for (const alias of [term.canonical, ...term.aliases]) {
+    if (validTargetPaths && !validTargetPaths.has(term.targetPath) && !term.knowledgeId) continue;
+    const effective = term.knowledgeId && validTargetPaths && !validTargetPaths.has(term.targetPath) ? {...term,candidateOnly:true} : term;
+    for (const alias of [term.canonical, ...term.aliases, ...(term.ambiguousAliases ?? [])]) {
       const normalized = normalizeTerm(alias);
       if (!normalized) continue;
       const matches = aliases.get(normalized) ?? [];
-      if (!matches.some((entry) => entry.term.id === term.id)) matches.push({ alias, normalized, term });
+      if (!matches.some((entry) => entry.term.id === term.id)) matches.push({ alias, normalized, term:effective, ambiguous:term.ambiguousAliases?.some(value=>normalizeTerm(value)===normalized)??false });
       aliases.set(normalized, matches);
     }
   }
-  const candidates: Array<{ start: number; end: number; alias: string; terms: SearchTerm[] }> = [];
+  const candidates: Array<{ start: number; end: number; alias: string; terms: ResolutionTerm[]; ambiguous:boolean }> = [];
   for (const [normalized, entries] of aliases) {
     let at = normalizedText.value.indexOf(normalized);
     while (at !== -1) {
@@ -101,7 +114,7 @@ export function resolveTermSpans(text: string, terms: readonly SearchTerm[], val
       const start = normalizedText.starts[at];
       const end = normalizedText.ends[last - 1];
       if (start !== undefined && end !== undefined && hasWholeWordBoundary(normalizedText.value, at, last, normalized)) {
-        candidates.push({ start, end, alias: entries[0]!.alias, terms: entries.map(({ term }) => term) });
+        candidates.push({ start, end, alias: entries[0]!.alias, terms: entries.map(({ term }) => term), ambiguous:entries.some(entry=>entry.ambiguous) });
       }
       at = normalizedText.value.indexOf(normalized, at + Math.max(1, normalized.length));
     }
@@ -111,16 +124,18 @@ export function resolveTermSpans(text: string, terms: readonly SearchTerm[], val
     left.terms[0]!.id.localeCompare(right.terms[0]!.id));
   const spans: TermSpan[] = [];
   const ambiguities: AmbiguousTermSpan[] = [];
+  const unresolved: NonNullable<TermResolution["candidates"]> = [];
   const accepted: Array<{ start: number; end: number }> = [];
   for (const match of candidates) {
     if (accepted.some((item) => match.start < item.end && item.start < match.end)) continue;
     accepted.push({ start: match.start, end: match.end });
     const termIds = [...new Set(match.terms.map((term) => term.id))].sort();
-    if (termIds.length > 1) ambiguities.push({ start: match.start, end: match.end, alias: match.alias, termIds });
+    if (termIds.length > 1 || match.ambiguous) ambiguities.push({ start: match.start, end: match.end, alias: match.alias, termIds });
+    else if (match.terms[0]!.candidateOnly) unresolved.push({start:match.start,end:match.end,termId:termIds[0]!});
     else spans.push({ start: match.start, end: match.end, termId: termIds[0]!, targetPath: match.terms[0]!.targetPath });
   }
   spans.sort((left, right) => left.start - right.start || left.end - right.end);
   ambiguities.sort((left, right) => left.start - right.start || left.end - right.end);
-  return { spans, ambiguities };
+  return { spans, ambiguities, ...(unresolved.length ? {candidates:unresolved.sort((a,b)=>a.start-b.start||a.end-b.end)} : {}) };
 }
 

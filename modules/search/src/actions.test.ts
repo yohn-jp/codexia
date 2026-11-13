@@ -135,3 +135,42 @@ test("module disposal aborts and invalidates active index work", async () => {
   release();
   await assert.rejects(pending, (error: unknown) => (error as { code?: string }).code === "job_cancelled");
 });
+
+test("native Knowledge references store only identity and path, resolve aliases from pinned snapshot, and retain ambiguity",async()=>{
+  const a="11111111-1111-4111-8111-111111111111",b="22222222-2222-4222-8222-222222222222",retired="33333333-3333-4333-8333-333333333333";
+  const path="documents/scene.md",projection="meta/scriptorium/knowledge-context/v1.json";
+  const node=(id:string,name:string,status="confirmed",aliases:Array<{surface:string;status:string;scope:null|string}>=[])=>({node:{id,name,status,deletedAt:null},aliases:aliases.map(alias=>({...alias,nodeId:id}))});
+  const entries=[node(a,"青い塔","confirmed",[{surface:"塔",status:"confirmed",scope:null},{surface:"北塔",status:"ambiguous",scope:null},{surface:"司令塔",status:"confirmed",scope:"chapter"}]),node(b,"赤い塔","confirmed",[{surface:"塔",status:"confirmed",scope:null}]),node(retired,"退役","retired")];
+  const registry={schemaVersion:1,terms:[],knowledgeReferences:[{knowledgeId:a,targetPath:path}]};
+  const values={[path]:"青い塔", [TERM_REGISTRY_PATH]:JSON.stringify(registry),[projection]:JSON.stringify({version:1,projectId:snapshot.projectId,entries,nodeLimitReached:false})};
+  const actions=createSearchActions(moduleContext(async()=>{throw Error("unused")}),new SnapshotIndexCache());
+  let proposed:ChangeOperation[]=[];
+  const reader=makeReader(values);
+  const context=actionContext(reader,{async propose(operations){proposed=operations;return {id:"link",snapshot,operations,source:"module"}}});
+  const resolve=findAction(actions,"search.terms.resolve");
+  const out=await resolve.invoke(resolve.inputSchema.parse({text:"😀青い塔、塔、北塔、司令塔、赤い塔、退役"}),context);
+  assert.equal(out.ok,true);
+  if(out.ok){
+    const result=out.data as {spans:Array<{start:number;end:number;termId:string}>;ambiguities:Array<{alias:string;termIds:string[]}>;candidates:Array<{termId:string}>};
+    assert.deepEqual(result.spans.map(s=>s.termId),["knowledge-"+a]);
+    assert.equal(result.spans[0]!.start,2);
+    assert.equal(result.ambiguities.find(x=>x.alias==="塔")?.termIds.length,2);
+    assert.ok(result.ambiguities.some(x=>x.alias==="北塔"));
+    assert.ok(result.ambiguities.some(x=>x.alias==="司令塔"));
+    assert.deepEqual(result.candidates.map(x=>x.termId),["knowledge-"+b]);
+  }
+  const link=findAction(actions,"search.terms.linkKnowledge");
+  const linked=await link.invoke(link.inputSchema.parse({knowledgeId:b,targetPath:path}),context);
+  assert.equal(linked.ok,true);
+  const stored=JSON.parse(proposed[0]!.writes[0]!.content!);
+  assert.deepEqual(stored.knowledgeReferences,[{knowledgeId:a,targetPath:path},{knowledgeId:b,targetPath:path}]);
+  assert.doesNotMatch(JSON.stringify(stored),/青い塔|赤い塔|aliases/);
+  assert.ok(proposed[0]!.reads.some(read=>read.path===projection&&read.revision===revision(values[projection]!)));
+  assert.doesNotThrow(()=>assertChangeOperation(proposed[0]));
+  await assert.rejects(()=>link.invoke(link.inputSchema.parse({knowledgeId:retired,targetPath:path}),context),/Confirmed Knowledge unavailable/);
+  // New snapshot changes the authoritative aliases; the reference stays unchanged.
+  const changed=makeReader({...values,[projection]:JSON.stringify({version:1,projectId:snapshot.projectId,entries:[node(a,"新しい塔"),entries[1]],nodeLimitReached:false})});
+  const result=await resolve.invoke(resolve.inputSchema.parse({text:"青い塔、新しい塔"}),actionContext(changed));
+  assert.equal(result.ok,true);
+  if(result.ok)assert.equal((result.data as {spans:unknown[]}).spans.length,1);
+});
