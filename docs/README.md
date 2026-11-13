@@ -11,6 +11,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Shared internal ownership and maintainability | [Internal boundaries](architecture/INTERNAL-BOUNDARIES.md) |
 | Storage, snapshots, mutation and authentication | [Core architecture](architecture/CORE.md) |
 | Panels, foreground reads, search and terminology | [Modular workspace](architecture/MODULAR-WORKSPACE.md) |
+| External AI integration and internal LLM freeze | [MCP-first creative architecture](architecture/MCP-FIRST.md) |
 | Optional module ownership and lifecycle | [Modules](architecture/MODULES.md) |
 | Mobile interaction rules | [Mobile interactions](architecture/MOBILE-INTERACTION-UX.md) |
 | External plugin design requirements | [Plugin platform proposal](architecture/PLUGIN-PLATFORM.md) |
