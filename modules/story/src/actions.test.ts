@@ -1095,6 +1095,20 @@ test("native Knowledge associates evidence through canonical document UUID mappi
   assert.equal(knowledge.value.evidence[0]?.status,"stale");
 });
 
+test("legacy immutable Knowledge projections retain stale status and candidate evidence", async()=>{
+  const path="meta/scriptorium/knowledge-context/v1.json";
+  const files=fixtureFiles({[path]:JSON.stringify({version:1,projectId:"repo-work",entries:[{
+    node:{id:"legacy",name:"Legacy",type:"character",status:"confirmed",attributes:{storyEntityId:"char-uma"}},aliases:[],relations:[],
+    evidence:[
+      {current:false,anchor:{id:"old",documentId:"doc",revisionId:"old-revision",status:"confirmed"},mention:{status:"confirmed"},assertions:[]},
+      {current:true,anchor:{id:"candidate",documentId:"doc",revisionId:"new-revision",status:"proposed"},mention:{status:"proposed"},assertions:[]}
+    ],evidenceLimitReached:false
+  }]})});
+  const result=await invoke<{parts:Array<{kind:string;value:{evidence:Array<{status:string;quote:string|null}>}}>}>("story.context.package",{sceneId:"sc-1",scope:"author",budget:200000},makeActionContext(makeReader(files)));
+  const part=result.data.parts.find(part=>part.kind==="native-knowledge");
+  assert.deepEqual(part?.value.evidence.map(item=>[item.status,item.quote]),[["stale",null],["candidate",null]]);
+});
+
 test("restricted context does not expose omission details or unacquired facts", async()=>{
   const path="meta/scriptorium/knowledge-context/v1.json";
   const files=fixtureFiles({[path]:JSON.stringify({version:1,projectId:"repo-work",entries:[{
@@ -1112,7 +1126,7 @@ test("reader context includes explicitly disclosed Knowledge without its aliases
   });
   const result=await invoke("story.context.package",{sceneId:"sc-1",scope:"reader"},makeActionContext(makeReader(files)));
   assert.match(JSON.stringify(result.data),/native-id/);
-  assert.doesNotMatch(JSON.stringify(result.data),/Secret Name|Secret Alias/);
+  assert.doesNotMatch(JSON.stringify(result.data),/Secret Name|Secret Alias|"type":"lore"/);
 });
 
 test("author manuscript quotes truncate on Unicode boundaries within the UTF-8 byte budget", async()=>{

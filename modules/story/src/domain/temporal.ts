@@ -158,7 +158,7 @@ export function sceneContextPackage(story: LoadedStorySnapshot, sceneId: string,
     for (const part of nativeParts) {
       const value=part.value as {knowledgeId?:unknown;name?:unknown;type?:unknown;status?:unknown};
       if(typeof value?.knowledgeId==="string"&&value.status==="confirmed"&&acquiredIds.has(value.knowledgeId))
-        parts.push({kind:"acquired-knowledge",value:{knowledgeId:value.knowledgeId,type:value.type,acquiredAt:authorizedFacts.find(fact=>fact.value===value.knowledgeId)?.sceneId}});
+        parts.push({kind:"acquired-knowledge",value:{knowledgeId:value.knowledgeId,acquiredAt:authorizedFacts.find(fact=>fact.value===value.knowledgeId)?.sceneId}});
     }
   }
   const included: Array<{index:number;part:(typeof parts)[number]}> = [];

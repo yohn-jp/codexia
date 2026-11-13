@@ -7,9 +7,9 @@ import { projectKnowledgeContext } from "./knowledge-context.js";
 test("Knowledge projection binds evidence to Story identity and exact anchored revision", async () => {
   const documentId = "document-uuid" as Document["id"];
   const revisionId = "historical-revision" as RevisionId;
-  const markdown = "Opening 😀 evidence, then edited text";
-  const quote = "evidence";
-  const fromUtf16 = markdown.indexOf(quote);
+  let markdown = "Opening 😀 evidence, then edited text";
+  let quote = "evidence";
+  let fromUtf16 = markdown.indexOf(quote);
   let revisionReads=0;
   const reader = {
     async listKnowledgeNodes() { return ["knowledge-1","knowledge-2"].map(id=>({ id, projectId:"project-1", type:"lore", name:"The clue", attributes:{}, status:"confirmed" as const, version:1, deletedAt:null, createdAt:"", updatedAt:"" })); },
@@ -40,4 +40,12 @@ test("Knowledge projection binds evidence to Story identity and exact anchored r
   assert.equal(ambiguous.documentMappings.every(mapping => mapping.mapping === "ambiguous"), true);
   assert.equal((ambiguous.entries[0]!.evidence[0] as { storySceneId: string | null }).storySceneId, null);
   assert.equal(revisionReads,2,"each projection reads a source revision once even when references repeat");
+  quote = "漢".repeat(2000); markdown = quote; fromUtf16 = 0;
+  const oversized = await projectKnowledgeContext(reader, "project-1" as ProjectId, [
+    { id:documentId, projectId:"project-1" as ProjectId, kind:"scene", parentId:null, title:"Scene", orderKey:"1", headRevisionId:revisionId, version:2, createdAt:"", updatedAt:"" },
+  ], [{documentId,storySceneId:"scene-story-id"}]);
+  const oversizedEvidence = oversized.entries[0]!.evidence[0]!;
+  assert.equal(oversizedEvidence.quote,null);
+  assert.equal(oversizedEvidence.quoteAvailable,false);
+  assert.equal(oversizedEvidence.quoteOmission,"projection-budget");
 });
