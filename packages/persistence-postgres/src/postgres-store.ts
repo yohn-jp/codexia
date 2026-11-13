@@ -57,7 +57,7 @@ import {
   type ProposeKnowledgeMergeCommand,
 } from "@codexia/persistence-contracts";
 import { Pool, type PoolClient, type PoolConfig, type QueryResultRow } from "pg";
-import { applyKnowledgeMerge, knowledgeMergeOperation, planKnowledgeMerge } from "./knowledge-merge.js";
+import { applyKnowledgeMerge, knowledgeMergeOperation, planKnowledgeMerge, shouldGenerateSourceNameAlias } from "./knowledge-merge.js";
 
 type DbRow = QueryResultRow;
 
@@ -419,17 +419,10 @@ function operationWriteTargets(operation: ChangeSetOperation): readonly ChangeSe
 }
 
 function knowledgeMergeWriteSet(command: KnowledgeMergeChangeCommand): readonly ChangeSetWriteSetEntry[] {
-  const plan = command.plan as Record<string, unknown>;
-  const sourceAliases = Array.isArray(plan.sourceAliases) ? plan.sourceAliases as Array<{ id: string; status: string }> : [];
-  const sourceRelations = Array.isArray(plan.sourceRelations) ? plan.sourceRelations as Array<{ id: string; status: string }> : [];
-  const sourceMentions = Array.isArray(plan.sourceMentions) ? plan.sourceMentions as Array<{ evidenceId: string }> : [];
-  const targetMentions = Array.isArray(plan.targetMentions) ? plan.targetMentions as Array<{ evidenceId: string }> : [];
-  const assertions = Array.isArray(plan.assertions) ? plan.assertions as Array<{ id: string }> : [];
-  const targetAliasInfo = Array.isArray(plan.targetAliases) ? plan.targetAliases as Array<{ normalized: string; status: string }> : [];
-  const sourceName = (plan.source as { name?: unknown } | undefined)?.name;
-  const targetName = (plan.target as { name?: unknown } | undefined)?.name;
-  const generatedAlias = typeof sourceName === "string" && typeof targetName === "string" && sourceName !== targetName
-    && !targetAliasInfo.some(alias => alias.normalized === sourceName.normalize("NFKC").toLocaleLowerCase("ja"))
+  // The command plan is derived and persisted only by proposeKnowledgeMerge.
+  const plan = command.plan as unknown as KnowledgeMergePlan;
+  const { sourceAliases, sourceRelations, sourceMentions, targetMentions, assertions } = plan;
+  const generatedAlias = shouldGenerateSourceNameAlias(plan)
     ? [{ resource: "knowledge_alias" as const, id: command.generatedAliasId }]
     : [];
   return [

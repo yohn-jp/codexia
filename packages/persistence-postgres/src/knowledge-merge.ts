@@ -34,6 +34,11 @@ export async function planKnowledgeMerge(reader: PersistenceReader, projectId: P
   const allAssertions = await reader.listAssertions(projectId, MAX_ASSERTION_INVENTORY);
   const assertions = allAssertions.filter(assertion => containsId(assertion.proposition, sourceId) || containsId(assertion.narrativeTime, sourceId) || assertion.perspective === sourceId);
   const conflicts: string[] = [];
+  // The uniqueness constraint includes retired aliases and treats null/empty scope as the same key.
+  for (const alias of sourceAliases) if (alias.status !== "retired") {
+    const equivalent = targetAliases.find(other => other.normalized === alias.normalized && (other.scope ?? "") === (alias.scope ?? ""));
+    if (equivalent?.status === "retired") conflicts.push("Retired target alias requires author resolution: " + equivalent.id);
+  }
   if (source.deletedAt || target.deletedAt || source.status === "retired" || target.status !== "confirmed" || source.type !== target.type) conflicts.push("Source must be active and target must be confirmed with the same type");
   if (sourceAliases.length === MAX_ALIAS_INVENTORY || targetAliases.length === MAX_ALIAS_INVENTORY || sourceRelations.length === MAX_RELATION_INVENTORY || targetRelations.length === MAX_RELATION_INVENTORY || sourceMentions.length === MAX_MENTION_INVENTORY || targetMentions.length === MAX_MENTION_INVENTORY || allAssertions.length === MAX_ASSERTION_INVENTORY) conflicts.push("Inventory exceeds safe complete merge bound");
   for (const [key, value] of Object.entries(source.attributes)) if (key in target.attributes && JSON.stringify(target.attributes[key]) !== JSON.stringify(value)) conflicts.push("Conflicting attribute: " + key);
@@ -51,6 +56,14 @@ export async function planKnowledgeMerge(reader: PersistenceReader, projectId: P
   }
   const inventory = { projectVersion: project.version, source, target, sourceAliases, targetAliases, sourceRelations, targetRelations, sourceMentions, targetMentions, assertions };
   return { ...inventory, conflicts, previewDigest: createHash("sha256").update(JSON.stringify(inventory)).digest("hex") };
+}
+
+/** Identical plan decision for the declared write-set and canonical executor. */
+export function shouldGenerateSourceNameAlias(plan: Pick<Awaited<ReturnType<typeof planKnowledgeMerge>>, "source" | "target" | "sourceAliases" | "targetAliases">): boolean {
+  const normalized = plan.source.name.normalize("NFKC").toLocaleLowerCase("ja");
+  return plan.source.name !== plan.target.name
+    && !plan.targetAliases.some(alias => alias.normalized === normalized)
+    && !plan.sourceAliases.some(alias => alias.status !== "retired" && alias.normalized === normalized && (alias.scope ?? "") === "");
 }
 
 export async function applyKnowledgeMerge(
@@ -72,11 +85,11 @@ export async function applyKnowledgeMerge(
   const attributes = { ...source.attributes, ...target.attributes };
   const updated = await tx.saveKnowledgeNode({ projectId, id: targetId, type: target.type, name: target.name, attributes, status: "confirmed", expectedVersion: target.version });
   for (const alias of plan.sourceAliases) if (alias.status !== "retired") {
-    const equivalent = plan.targetAliases.find(other => other.normalized === alias.normalized && other.scope === alias.scope && other.status !== "retired");
+    const equivalent = plan.targetAliases.find(other => other.normalized === alias.normalized && (other.scope ?? "") === (alias.scope ?? "") && other.status !== "retired");
     if (equivalent) await tx.saveKnowledgeAlias({ ...alias, status: "retired" });
     else await tx.saveKnowledgeAlias({ ...alias, nodeId: targetId });
   }
-  if (source.name !== target.name && !plan.targetAliases.some(alias => alias.normalized === source.name.normalize("NFKC").toLocaleLowerCase("ja"))) {
+  if (shouldGenerateSourceNameAlias(plan)) {
     await tx.saveKnowledgeAlias({ projectId, id: stableIds?.generatedAliasId ?? randomUUID() as KnowledgeAliasId, nodeId: targetId, surface: source.name, normalized: source.name.normalize("NFKC").toLocaleLowerCase("ja"), scope: null, status: "proposed" });
   }
   for (const relation of plan.sourceRelations) if (relation.status !== "retired" && relation.status !== "rejected") {

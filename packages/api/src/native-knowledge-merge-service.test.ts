@@ -194,3 +194,34 @@ test("direct author merge continues to use the shared planner and executor", { s
   assert.equal(result.source.status, "retired");
   assert.equal((await persistence.read(reader => reader.listModuleRecords(project.id, "core.knowledge-merge"))).length, 1);
 });
+
+test("merge preview and write-set handle an already existing source-name alias and retired target collisions", { skip: !connectionString }, async t => {
+  await migratePostgresDatabase(connectionString!);
+  const persistence = createPostgresPersistence(connectionString!);
+  t.after(() => persistence.close());
+  const project = await persistence.transaction(tx => tx.createProject({ title: "merge-alias-" + randomUUID() }));
+  const sourceId = randomUUID() as KnowledgeNodeId;
+  const targetId = randomUUID() as KnowledgeNodeId;
+  const aliasId = randomUUID() as KnowledgeAliasId;
+  const retiredId = randomUUID() as KnowledgeAliasId;
+  await persistence.transaction(async tx => {
+    await tx.saveKnowledgeNode({ projectId: project.id, id: sourceId, type: "place", name: "Source", attributes: {}, status: "confirmed", expectedVersion: null });
+    await tx.saveKnowledgeNode({ projectId: project.id, id: targetId, type: "place", name: "Target", attributes: {}, status: "confirmed", expectedVersion: null });
+    await tx.saveKnowledgeAlias({ projectId: project.id, id: aliasId, nodeId: sourceId, surface: "Source", normalized: "source", scope: null, status: "confirmed" });
+    await tx.saveKnowledgeAlias({ projectId: project.id, id: retiredId, nodeId: targetId, surface: "Source", normalized: "source", scope: null, status: "retired" });
+  });
+  const v = (await persistence.read(reader => reader.getProject(project.id)))!.version;
+  const blocked = await previewNativeKnowledgeMerge(persistence, project.id, sourceId, targetId, v);
+  assert.ok(blocked.conflicts.some(c => c.includes(retiredId)));
+  await assert.rejects(proposeNativeKnowledgeMerge({ persistence, projectId: project.id, sourceId, targetId, projectVersion: v, previewDigest: blocked.previewDigest, actorId: "agent", origin: "external-agent", idempotencyKey: "blocked-alias" }));
+  await persistence.transaction(tx => tx.saveKnowledgeAlias({ projectId: project.id, id: retiredId, nodeId: targetId, surface: "Other", normalized: "other", scope: null, status: "retired" }));
+  const current = (await persistence.read(reader => reader.getProject(project.id)))!.version;
+  const preview = await previewNativeKnowledgeMerge(persistence, project.id, sourceId, targetId, current);
+  assert.deepEqual(preview.conflicts, []);
+  const proposal = await proposeNativeKnowledgeMerge({ persistence, projectId: project.id, sourceId, targetId, projectVersion: current, previewDigest: preview.previewDigest, actorId: "agent", origin: "external-agent", idempotencyKey: "existing-alias" });
+  assert.deepEqual(proposal.changeSet.writeSet.filter(entry => entry.resource === "knowledge_alias").map(entry => entry.id), [aliasId]);
+  const approved = await approveNativeChangeSet(persistence, project.id, proposal.changeSet.id, proposal.changeSet.version, "author");
+  await applyNativeChangeSet(persistence, project.id, approved.id, approved.version);
+  const aliases = await persistence.read(reader => reader.listKnowledgeAliases(project.id, targetId));
+  assert.deepEqual(aliases.filter(alias => alias.normalized === "source").map(alias => alias.id), [aliasId]);
+});
