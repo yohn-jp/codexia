@@ -1007,7 +1007,7 @@ test("temporal context respects explicit world days, competing facts, reader sco
   const proposals: Array<{ id: string; operations: ChangeOperation[] }> = [];
   const context = makeActionContext(reader, { proposals });
   type Projection = { worldTime: { earliest: number; latest: number } | null; narrativeOrder: number;
-    state: Array<{ subject: string; predicate: string; status: string; facts: Array<{ value: string; evidence: { path: string; revision: string } }> }>;
+    state: Array<{ subject: string; predicate: string; status: string; facts: Array<{ value: string; sceneId: string; evidence: { path: string; revision: string } }> }>;
     candidates: unknown[]; beliefs: unknown[]; disclosed: unknown[] };
   const flashback = await invoke<Projection>("story.world-state.temporal", { sceneId: "sc-2" }, context);
   assert.deepEqual(flashback.snapshot, reader.snapshot);
@@ -1043,6 +1043,11 @@ test("temporal context respects explicit world days, competing facts, reader sco
     { label: "Other", events: [] },
   ] }, context);
   assert.equal(invalidReplacement.ok, false, "replacement must identify a confirmed canonical event");
+  const unconfirmedReplacement = await actionById("story.scenario.compare").invoke({ sceneId: "sc-4", alternatives: [
+    { label: "Invalid", events: [{ kind: "attribute", subject: "char-uma", object: null, payload: { predicate: "rank", value: "Marshal" }, replacesEventId: "rank-draft" }] },
+    { label: "Other", events: [] },
+  ] }, context);
+  assert.equal(unconfirmedReplacement.ok, false, "replacement cannot target an unconfirmed canonical event");
   assert.equal(proposals.length, 0, "compare and invalid hypotheses do not write canonical state");
   const staleSave = await actionById("story.scenario.save").invoke({ sceneId: "sc-4", label: "Stale", alternatives: [
     { label: "A", events: [] }, { label: "B", events: [] },
@@ -1057,6 +1062,11 @@ test("temporal context respects explicit world days, competing facts, reader sco
     ], sourceFingerprint: scenario.data.sourceFingerprint,
   }, context);
   files.set("meta/scriptorium/modules/story/v1/scenarios.json", proposals.at(-1)!.operations[0]!.writes[0]!.content!);
+  const staleAdoption = await actionById("story.scenario.adopt").invoke({
+    id: saved.data.id, alternativeIndex: 0, sourceFingerprint: "stale-fingerprint",
+  }, context);
+  assert.equal(staleAdoption.ok, false);
+  if (!staleAdoption.ok) assert.equal(staleAdoption.error.code, "stale_source");
   const adopted = await invoke<{ proposals: Array<{ event: Record<string, unknown> }> }>("story.scenario.adopt", {
     id: saved.data.id, alternativeIndex: 0, sourceFingerprint: scenario.data.sourceFingerprint,
   }, context);
@@ -1066,6 +1076,20 @@ test("temporal context respects explicit world days, competing facts, reader sco
   const adoptedEvent = JSON.parse(adoptedRow.event_json) as Record<string, unknown>;
   assert.equal(adoptedEvent.replacesEventId, "rank-lieutenant");
   assert.equal(adoptedRow.status, "proposed");
+  files.set(STATE_PROPOSALS_PATH, proposals.at(-1)!.operations[0]!.writes.find(write => write.path === STATE_PROPOSALS_PATH)!.content!);
+  const approved = await invoke("story.state-proposals.approve", { id: adopted.data.proposals[0]!.id }, context);
+  const approvalOperation = proposals.at(-1)!.operations[0]!;
+  for (const write of approvalOperation.writes) files.set(write.path, write.content!);
+  const applied = await invoke<Projection>("story.world-state.temporal", { sceneId: "sc-4" }, context);
+  const semanticState = (projection: Projection) => projection.state.map(cell => ({
+    subject: cell.subject,
+    predicate: cell.predicate,
+    status: cell.status,
+    facts: cell.facts.map(fact => [fact.sceneId, fact.value]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+  })).sort((a, b) => `${a.subject}:${a.predicate}`.localeCompare(`${b.subject}:${b.predicate}`));
+  assert.ok(approved.ok);
+  assert.deepEqual(semanticState(applied.data), semanticState(scenario.data.alternatives[0]!.projection),
+    "author-approved adoption must produce the same semantic temporal state as its comparison hypothesis");
   assert.equal((await actionById("story.context.package").invoke({sceneId:"sc-2", scope:"character", characterId:"missing"}, context)).ok, false);
 });
 
