@@ -1,4 +1,4 @@
-import { buildMentionDictionary, findMentions } from "./mentionIndex.js";
+import { buildMentionDictionary, findUnambiguousMentions } from "./mentionIndex.js";
 import {
   snapshotResult,
   type StoryEntity,
@@ -98,7 +98,7 @@ function extractReaderDisclosuresData(
   const events: ReaderKnowledgeEvent[] = [];
   for (const scene of [...scenes].sort((a, b) => a.order - b.order)) {
     if (scene.text) {
-      for (const entityId of findMentions(dictionary, scene.text)) {
+      for (const entityId of findUnambiguousMentions(dictionary, scene.text)) {
         if (disclosed.has(entityId)) continue;
         const entity = entityById.get(entityId);
         if (!entity) continue;
@@ -116,7 +116,7 @@ function extractReaderDisclosuresData(
     }
     for (const change of scene.stateChanges ?? []) {
       if (!change.trim()) continue;
-      for (const entityId of findMentions(dictionary, change)) {
+      for (const entityId of findUnambiguousMentions(dictionary, change)) {
         if (disclosed.has(entityId)) continue;
         disclosed.add(entityId);
         events.push({
@@ -149,7 +149,7 @@ function diffReaderAndCharacterKnowledgeData(options: {
   scenes: readonly SceneTextForDisclosure[];
   upToOrder: number;
 }): KnowledgeGap[] {
-  const { entities, disclosures, knowledgeEvents, upToOrder } = options;
+  const { disclosures, knowledgeEvents, upToOrder } = options;
   const sorted = [...options.scenes]
     .sort((a, b) => a.order - b.order)
     .filter((scene) => scene.order <= upToOrder);
@@ -177,25 +177,18 @@ function diffReaderAndCharacterKnowledgeData(options: {
   }
 
   for (const event of knowledgeEvents) {
-    if (event.kind !== "knowledge" || event.order > upToOrder || !event.object) continue;
+    if (event.kind !== "knowledge" || event.order > upToOrder || !event.object || event.source !== "manual" || (event.status !== undefined && event.status !== "confirmed") || event.payload.layer === "reader-knowledge") continue;
     recordKnowledge(event.subject, event.object, event.sceneId, event.order);
   }
 
-  const dictionary = buildMentionDictionary(mentionableEntities(entities));
-  for (const scene of sorted) {
-    if (!scene.text || scene.characterIds.length === 0) continue;
-    const hitIds = findMentions(dictionary, scene.text);
-    for (const characterId of scene.characterIds) {
-      for (const entityId of hitIds) recordKnowledge(characterId, entityId, scene.sceneId, scene.order);
-    }
-  }
+  // A name in a scene is not evidence that any appearing character learned it.
 
   const gaps: KnowledgeGap[] = [];
   const seen = new Set<string>();
   for (const [characterId, byEntity] of characterKnowledge) {
     for (const [entityId, knew] of byEntity) {
       const reader = readerFirst.get(entityId);
-      if (reader && reader.order <= knew.order) continue;
+      if (reader) continue;
       const key = `c>${characterId}|${entityId}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -204,7 +197,7 @@ function diffReaderAndCharacterKnowledgeData(options: {
         characterId,
         entityId,
         characterKnewAtSceneId: knew.sceneId,
-        readerDisclosedAtSceneId: reader?.sceneId ?? null,
+        readerDisclosedAtSceneId: null,
       });
     }
   }

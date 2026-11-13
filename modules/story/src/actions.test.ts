@@ -980,3 +980,75 @@ test("NarrativeChangeSet preserves unrestricted source IDs and maps unsafe IDs t
   if (!changed.ok) assert.equal(changed.error.code, "change_set_identity_conflict");
   assert.equal(proposals.length, 1);
 });
+
+
+test("temporal context respects explicit world days, competing facts, reader scope and hypothetical isolation", async () => {
+  const scenePath = (id: string) => `plot/volumes/vol-main/chapters/ch-main-1/scenes/${id}.yaml`;
+  const scene = (id: string, order: number, day: number | null, events: unknown[]) => yaml({
+    id, type: "scene", chapter: "ch-main-1", volume: "vol-main", order,
+    ...(day === null ? {} : { world_time: { earliest: day, latest: day } }),
+    appears: ["char-uma"], state_events: events, manuscript: `manuscript/vol-main/ch-main-1/${id}.md`,
+  });
+  const fact = (sceneId: string, value: string, eventId: string, extra: Record<string, unknown> = {}) => ({
+    sceneId, order: 99, kind: "attribute", subject: "char-uma", object: null,
+    payload: { predicate: "rank", value }, eventId, status: "confirmed", ...extra,
+  });
+  const files = fixtureFiles({
+    [scenePath("sc-1")]: scene("sc-1", 1, 10, [fact("sc-1", "Captain", "rank-captain"),
+      { sceneId: "sc-1", kind: "knowledge", subject: "char-uma", object: "loc-cafe", payload: { layer: "reader-knowledge" }, status: "confirmed" }]),
+    [scenePath("sc-2")]: scene("sc-2", 2, 1, [fact("sc-2", "Recruit", "rank-recruit"),
+      fact("sc-2", "Secret", "rank-draft", { source: "llm-draft", status: "proposed" })]),
+    [scenePath("sc-3")]: scene("sc-3", 3, 10, [fact("sc-3", "Major", "rank-major")]),
+    [scenePath("sc-4")]: scene("sc-4", 4, null, []),
+    "manuscript/vol-main/ch-main-1/sc-2.md": "Uma reads an unrevealed secret.",
+    "manuscript/vol-main/ch-main-1/sc-3.md": "Uma later sees a secret.",
+  });
+  const reader = makeReader(files);
+  const proposals: Array<{ id: string; operations: ChangeOperation[] }> = [];
+  const context = makeActionContext(reader, { proposals });
+  type Projection = { worldTime: { earliest: number; latest: number } | null; narrativeOrder: number;
+    state: Array<{ subject: string; predicate: string; status: string; facts: Array<{ value: string; evidence: { path: string; revision: string } }> }>;
+    candidates: unknown[]; beliefs: unknown[]; disclosed: unknown[] };
+  const flashback = await invoke<Projection>("story.world-state.temporal", { sceneId: "sc-2" }, context);
+  assert.deepEqual(flashback.snapshot, reader.snapshot);
+  assert.equal(flashback.data.narrativeOrder, 2);
+  assert.deepEqual(flashback.data.worldTime, { earliest: 1, latest: 1 });
+  assert.equal(flashback.data.state.find(cell => cell.predicate === "rank")?.facts[0]?.value, "Recruit");
+  assert.equal(flashback.data.candidates.length > 0, true);
+  assert.equal(flashback.data.beliefs.length, 0);
+  assert.equal(flashback.data.disclosed.length, 1, "reader order differs from world time");
+  assert.equal(flashback.data.state[0]?.facts[0]?.evidence.revision, revision(files.get(scenePath("sc-2"))!));
+  const conflict = await invoke<Projection>("story.world-state.temporal", { sceneId: "sc-3" }, context);
+  assert.equal(conflict.data.state.find(cell => cell.predicate === "rank")?.status, "conflict");
+  const unknown = await invoke<Projection>("story.world-state.temporal", { sceneId: "sc-4" }, context);
+  assert.equal(unknown.data.worldTime, null);
+  assert.equal(unknown.data.state.find(cell => cell.predicate === "rank")?.status, "unknown");
+  const limited = await invoke<{ parts: unknown[] }>("story.context.package", { sceneId: "sc-2", scope: "character", characterId: "char-uma" }, context);
+  assert.deepEqual(limited.data.parts, []);
+  const readerContext = await invoke<{ parts: unknown[] }>("story.context.package", { sceneId: "sc-2", scope: "reader" }, context);
+  assert.equal(readerContext.data.parts.length, 1);
+  assert.doesNotMatch(JSON.stringify(readerContext.data), /Captain|Recruit|unrevealed secret/);
+  const scenario = await invoke<{ baseline: Projection; alternatives: Array<{ projection: Projection }> }>("story.scenario.compare", {
+    sceneId: "sc-4",
+    alternatives: ["General", "Civilian"].map(label => ({ label, events: [{ kind: "attribute", subject: "char-uma", object: null, payload: { predicate: "rank", value: label } }] })),
+  }, context);
+  assert.match(JSON.stringify(scenario.data.alternatives[0]), /General/);
+  assert.doesNotMatch(JSON.stringify(scenario.data.alternatives[0]), /Civilian/);
+  assert.match(JSON.stringify(scenario.data.alternatives[1]), /Civilian/);
+  assert.deepEqual(scenario.data.baseline, unknown.data);
+  assert.deepEqual((await invoke<Projection>("story.world-state.temporal", { sceneId: "sc-4" }, context)).data, unknown.data);
+  assert.equal(proposals.length, 0);
+  assert.equal((await actionById("story.context.package").invoke({sceneId:"sc-2", scope:"character", characterId:"missing"}, context)).ok, false);
+});
+
+test("world time metadata changes remain proposals and invalid ranges fail", async () => {
+  const reader = makeReader(fixtureFiles());
+  const proposals: Array<{ id: string; operations: ChangeOperation[] }> = [];
+  const context = makeActionContext(reader, { proposals });
+  const bad = await actionById("story.scene.metadata.update").invoke({ sceneId: "sc-1", patch: { world_time: { earliest: 3, latest: 1 } } }, context);
+  assert.equal(bad.ok, false);
+  assert.equal(proposals.length, 0);
+  await invoke("story.scene.metadata.update", { sceneId: "sc-1", patch: { world_time: { earliest: -3, latest: 0 } } }, context);
+  assert.equal(proposals.length, 1);
+  assert.equal((await invoke<{ worldTime: unknown }>("story.world-state.temporal", { sceneId: "sc-1" }, context)).data.worldTime, null);
+});

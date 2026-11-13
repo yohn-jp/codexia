@@ -90,6 +90,8 @@ jobs:
   publish:
     name: Publish immutable GHCR image
     needs: build-test
+    outputs:
+      certified-image: ${{ steps.push-image.outputs.image }}
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 70
@@ -122,12 +124,53 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish commit-addressed image
+        id: push-image
         env:
           IMAGE: ghcr.io/yohn-jp/codexia-backend
           SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           docker tag codexia-backend-ci "$IMAGE:sha-$SOURCE_SHA"
-          docker push "$IMAGE:sha-$SOURCE_SHA"
-          docker buildx imagetools inspect "$IMAGE:sha-$SOURCE_SHA"
+          tested_id="$(docker image inspect --format '{{.Id}}' codexia-backend-ci)"
+          docker push "$IMAGE:sha-$SOURCE_SHA" | tee "$RUNNER_TEMP/push.log"
+          digest="$(sed -nE 's/^.*digest: (sha256:[a-f0-9]{64}) size: [0-9]+.*$/\1/p' "$RUNNER_TEMP/push.log" | tail -1)"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          docker pull "$IMAGE@$digest"
+          test "$(docker image inspect --format '{{.Id}}' "$IMAGE@$digest")" = "$tested_id"
+          echo "image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
+          docker buildx imagetools inspect "$IMAGE@$digest"
           echo "Published $IMAGE:sha-$SOURCE_SHA from $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+  stable-channel:
+    name: Advertise certified stable backend
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CODEXIA_STABLE_CHANNEL_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: codexia-stable-channel
+    concurrency:
+      group: codexia-stable-channel-writer
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.0'
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Sign and atomically publish certified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_CHANNEL_SIGNING_KEY: ${{ secrets.CODEXIA_CHANNEL_SIGNING_KEY }}
+          CODEXIA_CHANNEL_MODE: publish
+          CODEXIA_CERTIFIED_IMAGE: ${{ needs.publish.outputs.certified-image }}
+        run: node scripts/publish-stable-channel.mjs
