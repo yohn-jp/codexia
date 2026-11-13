@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { KNOWLEDGE_CONTEXT_PATH, projectKnowledgeContext } from "./knowledge-context.js";
 import YAML from "yaml";
 import { assertChangeOperation, assertProjectPath, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type FileChange, type MutationCoordinator } from "@codexia/contracts";
 import { PersistenceError, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
@@ -230,6 +231,7 @@ export class CoreStore implements MutationCoordinator {
       if (typeof record.value.content !== "string") fail(422,"invalid_artifact","Artifact body must be text");
       add(record.key,record.value.content,record.value.encoding === "base64" ? "base64":"utf8");
     }
+    add(KNOWLEDGE_CONTEXT_PATH, JSON.stringify(await projectKnowledgeContext(reader,pid(projectId),documents)));
     return {snapshot:{projectId,projectVersion:project.version},files,documents,project};
   }
   private async manifest(projectId: string, pinned?: SnapshotId): Promise<Manifest> {

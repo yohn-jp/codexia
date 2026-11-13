@@ -1052,3 +1052,28 @@ test("world time metadata changes remain proposals and invalid ranges fail", asy
   assert.equal(proposals.length, 1);
   assert.equal((await invoke<{ worldTime: unknown }>("story.world-state.temporal", { sceneId: "sc-1" }, context)).data.worldTime, null);
 });
+
+test("native Knowledge uses explicit ID, not matching names, and keeps unconfirmed evidence out of scoped contexts", async()=>{
+  const path="meta/scriptorium/knowledge-context/v1.json";
+  const entry=(id:string,attributes:Record<string,unknown>,status="confirmed",evidence:unknown[]=[])=>
+    ({node:{id,name:"Uma",type:"character",status,attributes},aliases:[],relations:[],evidence,evidenceLimitReached:false});
+  const files=fixtureFiles({
+    "bible/characters/char-other/profile.yaml":yaml({id:"char-other",name:"Uma",type:"character"}),
+    [path]:JSON.stringify({version:1,projectId:"repo-work",entries:[
+      entry("explicit",{storyEntityId:"char-uma"}),entry("same-name",{}),
+      entry("candidate",{storyEntityId:"char-uma"},"proposed"),
+      entry("wrong-scene",{}, "confirmed",[{current:false,anchor:{documentId:"sc-1",status:"confirmed"},mention:{status:"confirmed"},assertions:[]}])
+    ]})
+  });
+  const context=makeActionContext(makeReader(files));
+  const author=await invoke<{parts:Array<{kind:string;value:unknown}>}>("story.context.package",{sceneId:"sc-1",scope:"author",budget:200000},context);
+  const knowledge=author.data.parts.filter(part=>part.kind==="native-knowledge");
+  assert.equal(knowledge.length,1);assert.match(JSON.stringify(knowledge),/"knowledgeId":"explicit"/);
+  assert.doesNotMatch(JSON.stringify(knowledge),/same-name|candidate|wrong-scene/);
+  for(const scope of ["reader","character"]){
+    const result=await invoke<{parts:Array<{kind:string}>}>("story.context.package",{sceneId:"sc-1",scope,characterId:"char-uma"},context);
+    assert.equal(result.data.parts.some(part=>part.kind==="native-knowledge"),false);
+  }
+  const wrong=makeActionContext(makeReader(files,"another-project"));
+  assert.equal((await actionById("story.knowledge.links").invoke({},wrong)).ok,false);
+});

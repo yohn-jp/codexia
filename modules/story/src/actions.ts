@@ -43,6 +43,7 @@ import {
   type StoryEntityType,
 } from "./domain/index.js";
 import { readStorySnapshot, type LoadedStorySnapshot } from "./snapshot.js";
+import { nativeKnowledge } from "./domain/nativeKnowledge.js";
 import { parseWorldTime, sceneContextPackage, temporalScene, type ContextScope } from "./domain/temporal.js";
 import type { SceneStateEvent } from "./domain/worldState.js";
 import { narrativeFindings, applyNarrativeDecisions, narrativeSourceFingerprint, type NarrativeDecision, type NarrativeDisposition, type NarrativeFinding } from "./domain/narrativeReview.js";
@@ -1370,9 +1371,15 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
       return typeof input.sceneId === "string" ? entries.filter((entry) => entry.sceneId === input.sceneId) : entries;
     }),
     action("story.world-state.temporal", read, fieldSchema(["sceneId"], ["sceneId"]), async (input, context) => temporalScene(await readStorySnapshot(context.reader), stringValue(input.sceneId, "sceneId"))),
+    action("story.knowledge.links",read,fieldSchema([],["sceneId"]),async(input,context)=>{
+      const story=await readStorySnapshot(context.reader,{includeManuscripts:false});
+      return nativeKnowledge(context.reader,story,input.sceneId as string|undefined);
+    }),
     action("story.context.package", read, fieldSchema(["sceneId", "scope"], ["sceneId", "scope", "characterId"]), async (input, context) => {
       const story = await readStorySnapshot(context.reader);
-      return sceneContextPackage(story, stringValue(input.sceneId, "sceneId"), input.scope as ContextScope, input.characterId as string | undefined, input.budget === undefined ? 12000 : Number(input.budget));
+      const sceneId=stringValue(input.sceneId,"sceneId");
+      const native=input.scope==="author"?await nativeKnowledge(context.reader,story,sceneId):null;
+      return {...sceneContextPackage(story,sceneId,input.scope as ContextScope,input.characterId as string|undefined,input.budget===undefined?12000:Number(input.budget),native?.parts??[]),...(native?{knowledgeAvailable:native.available,knowledgeTruncated:native.truncated}:{})};
     }),
     action("story.narrative.review", read, fieldSchema([], ["sceneId"]), async (input, context) => {
       const story=await readStorySnapshot(context.reader,{includeManuscripts:true});

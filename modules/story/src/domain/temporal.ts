@@ -128,7 +128,7 @@ export function temporalScene(story: LoadedStorySnapshot, sceneId: string, hypot
 }
 
 export type ContextScope = "author" | "character" | "reader";
-export function sceneContextPackage(story: LoadedStorySnapshot, sceneId: string, scope: ContextScope, characterId: string | undefined, budget: number) {
+export function sceneContextPackage(story: LoadedStorySnapshot, sceneId: string, scope: ContextScope, characterId: string | undefined, budget: number, nativeParts: Array<{kind:string;value:unknown}> = []) {
   if (!["author", "character", "reader"].includes(scope)) throw new TypeError("Invalid context scope");
   if (!Number.isSafeInteger(budget) || budget < 128 || budget > 200000) throw new TypeError("Invalid context budget");
   if (scope === "character" && (!characterId || story.entities.get(characterId)?.type !== "character")) throw new TypeError("Character scope requires a valid character");
@@ -139,13 +139,14 @@ export function sceneContextPackage(story: LoadedStorySnapshot, sceneId: string,
   if (scope === "author") {
     const manuscript = typeof scene.raw.manuscript === "string" ? story.files.get(scene.raw.manuscript) : undefined;
     if (manuscript) parts.push({ kind: "manuscript", value: { path: manuscript.path, revision: manuscript.revision, text: manuscript.content } });
+    parts.push(...nativeParts);
     for (const cell of temporal.state) parts.push({kind: "objective", value: cell});
     for (const fact of temporal.beliefs) parts.push({kind: "character-belief", value: fact});
     for (const fact of temporal.disclosed) parts.push({kind: "reader-disclosure", value: fact});
   } else {
     const facts = scope === "character" ? temporal.beliefs.filter(fact => fact.subject === characterId) : temporal.disclosed;
     for (const fact of facts) parts.push({kind: scope === "character" ? "character-belief" : "reader-disclosure",
-      value: {subject: fact.subject, predicate: fact.predicate, value: fact.value, sceneId: fact.sceneId, eventId: fact.eventId}});
+      value: {subject: fact.subject, predicate: fact.predicate, value: fact.value, sceneId: fact.sceneId, eventId: fact.eventId, evidence: fact.evidence}});
   }
   const included: typeof parts = [];
   let used = 0;

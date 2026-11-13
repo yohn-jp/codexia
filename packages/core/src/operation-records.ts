@@ -53,7 +53,7 @@ export function isJsonValue(value: unknown, active = new WeakSet<object>(), dept
 }
 
 export function assertUserOperationPaths(operation: ChangeOperation): void {
-  const reserved = ["meta/scriptorium/operations", "meta/scriptorium/publications", "meta/scriptorium/proposals"];
+  const reserved = ["meta/scriptorium/operations", "meta/scriptorium/publications", "meta/scriptorium/proposals", "meta/scriptorium/knowledge-context"];
   for (const write of operation.writes) {
     const filePath = write.path.toLowerCase();
     if (reserved.some((root) => filePath === root || filePath.startsWith(`${root}/`))) {

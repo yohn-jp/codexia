@@ -3,6 +3,7 @@
   "include": [
     "src/index.ts",
     "src/operation-records.ts",
+    "src/knowledge-context.ts",
     "src/knowledge/index.ts",
     "src/knowledge/**/*.ts",
     "src/evidence/index.ts",
