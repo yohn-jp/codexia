@@ -11,6 +11,7 @@ import {
   type ProjectId,
   type RevisionId,
 } from "@codexia/persistence-contracts";
+import { planKnowledgeMerge, applyKnowledgeMerge } from "./knowledge-merge.js";
 import { WorkArchiveError, exportWorkArchive, importWorkArchive } from "./work-archive.js";
 
 export interface PersistenceRouteInput {
@@ -472,6 +473,21 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
           expectedVersion: body.expectedVersion === null || body.expectedVersion === undefined ? null : integer(body.expectedVersion, "expectedVersion", 1),
         }));
         return { status: 200, body: { node } };
+      }
+      if (nodeSuffix === "merge-preview" && input.method === "POST") {
+        await input.requireAuthor();
+        const body=bodyRecord(input.body);
+        const targetId=requiredString(body.targetId,"targetId") as KnowledgeNodeId;
+        return {status:200,body:await persistence.read(reader=>planKnowledgeMerge(reader,projectId,nodeId,targetId))};
+      }
+      if (nodeSuffix === "merge" && input.method === "POST") {
+        const authorId=await input.requireAuthor();
+        const body=bodyRecord(input.body);
+        if(body.confirm!==true)failure(400,"AUTHOR_CONFIRMATION_REQUIRED","Confirm the displayed merge preview");
+        const targetId=requiredString(body.targetId,"targetId") as KnowledgeNodeId;
+        const projectVersion=integer(body.projectVersion,"projectVersion",0);
+        const previewDigest=requiredString(body.previewDigest,"previewDigest",64);
+        return {status:200,body:await persistence.transaction(tx=>applyKnowledgeMerge(tx,projectId,nodeId,targetId,projectVersion,previewDigest,authorId))};
       }
       if (nodeSuffix === "aliases" && input.method === "POST") {
         await input.requireAuthor();

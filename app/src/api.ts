@@ -599,6 +599,10 @@ export const api = {
     request(dto.persistenceNodeEnvelope, persistencePath(projectId, `nodes/${encodeURIComponent(nodeId)}`), {
       method: "PUT", body: JSON.stringify(command), ...(signal ? { signal } : {}),
     }),
+  previewPersistenceMerge: (projectId:string,nodeId:string,targetId:string) =>
+    request(dto.persistenceMergePreview,persistencePath(projectId,`nodes/${encodeURIComponent(nodeId)}/merge-preview`),{method:"POST",body:JSON.stringify({targetId})}),
+  applyPersistenceMerge: (projectId:string,nodeId:string,targetId:string,projectVersion:number,previewDigest:string) =>
+    request(dto.persistenceMergeResult,persistencePath(projectId,`nodes/${encodeURIComponent(nodeId)}/merge`),{method:"POST",body:JSON.stringify({targetId,projectVersion,previewDigest,confirm:true})}),
   savePersistenceAlias: (projectId: string, nodeId: string, command: Omit<SaveKnowledgeAliasCommand, "projectId" | "nodeId">, signal?: AbortSignal) =>
     request(dto.persistenceAliasEnvelope, persistencePath(projectId, `nodes/${encodeURIComponent(nodeId)}/aliases`), {
       method: "POST", body: JSON.stringify(command), ...(signal ? { signal } : {}),
