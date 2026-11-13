@@ -178,7 +178,7 @@ async function startHost({ dataDirectory, cacheDirectory, store: suppliedStore, 
   };
 }
 
-async function startAdmissionHost({ cacheDirectory, usageDirectory }) {
+async function startAdmissionHost({ cacheDirectory, usageDirectory, hosted }) {
   const databaseUrl = process.env.CODEXIA_TEST_DATABASE_URL ?? process.env.CODEXIA_DATABASE_URL;
   if (!databaseUrl) throw new Error("CODEXIA_TEST_DATABASE_URL must name a disposable PostgreSQL database for MCP admission acceptance");
   await migratePostgresDatabase(databaseUrl);
@@ -186,7 +186,8 @@ async function startAdmissionHost({ cacheDirectory, usageDirectory }) {
   const runtime = await runtimeOptions(cacheDirectory, usageDirectory);
   const store = new CoreStore({ persistence });
   const server = createServer({
-    store, persistence, authToken: ACCESS_TOKEN, staticDir: resolve(root, "app/dist"), runtime, usageDirectory,
+    store, persistence, ...(hosted ? { hosted, trustProxy: true } : { authToken: ACCESS_TOKEN }),
+    staticDir: resolve(root, "app/dist"), runtime, usageDirectory,
     profile: "mcp-admission-acceptance",
   });
   await new Promise((resolveListen, reject) => {
@@ -305,11 +306,11 @@ function errorCode(result, name) {
   return content.error.code;
 }
 
-async function startStdioClient(host, projectId) {
+async function startStdioClient(host, projectId, token = ACCESS_TOKEN) {
   const environment = {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     CODEXIA_API_URL: host.base,
-    CODEXIA_AUTH_TOKEN: ACCESS_TOKEN,
+    CODEXIA_AUTH_TOKEN: token,
     CODEXIA_PROJECT_ID: projectId,
   };
   const transport = new StdioClientTransport({
@@ -324,12 +325,12 @@ async function startStdioClient(host, projectId) {
   return { client, transport };
 }
 
-async function startHttpClient(host, projectId) {
+async function startHttpClient(host, projectId, token = ACCESS_TOKEN) {
   const path = `/api/projects/${encodeURIComponent(projectId)}/modules/mcp/streamable`;
   const transport = new StreamableHTTPClientTransport(new URL(path, host.base), {
     fetch: (input, init) => {
       const headers = new Headers(init?.headers);
-      headers.set("Authorization", `Bearer ${ACCESS_TOKEN}`);
+      headers.set("Authorization", `Bearer ${token}`);
       return fetch(input, { ...init, headers });
     },
     reconnectionOptions: { maxReconnectionDelay: 100, initialReconnectionDelay: 10, reconnectionDelayGrowFactor: 1, maxRetries: 0 },
@@ -405,6 +406,99 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
     assert.equal(nodes.snapshot.projectVersion, projectVersion);
     assert.deepEqual(new Set(nodes.data.map(node => node.id)), new Set([sourceId, targetId]));
   }
+
+  // Standalone owner credentials may select another owned project. Use the actual
+  // Hosted assignment boundary for cross-project and read-only grant checks.
+  const otherProject = await ownerJson(host, cookie, "/api/v1/persistence/projects", {
+    method: "POST", status: 201, body: { title: `Other native MCP ${randomUUID()}` },
+  });
+  const otherProjectId = otherProject.project.id;
+  const otherNodeId = randomUUID();
+  await persistence.transaction(tx => tx.saveKnowledgeNode({
+    projectId: otherProjectId, id: otherNodeId, type: "person", name: "Unassigned node",
+    attributes: {}, status: "confirmed", expectedVersion: null,
+  }));
+  const otherVersion = (await persistence.read(reader => reader.getProject(otherProjectId))).version;
+  const assignment = {
+    contractVersion: "scriptorium-platform/v1", instanceId: "native-mcp-acceptance", repositoryId: 123,
+    repositoryLocator: "https://github.com/owner/work", defaultBranchPolicy: "repository-default",
+    runtimeEpoch: 3, imageDigest: `sha256:${"a".repeat(64)}`,
+    compositionManifestDigest: `sha256:${"b".repeat(64)}`, enabledModuleIds: READY_MODULES,
+    credentialBrokerLocator: "https://praetorium.example/internal/github/credential",
+    controlServicePolicy: { issuer: "https://praetorium.example", jwksUrl: "https://praetorium.example/.well-known/control-jwks.json", audience: "praetorium-runtime-control" },
+    grantPolicy: { issuer: "https://praetorium.example", jwksUrl: "https://praetorium.example/.well-known/grant-jwks.json", audience: "https://native-mcp-acceptance.instances.example" },
+  };
+  const readToken = randomBytes(32).toString("base64url");
+  const writeToken = randomBytes(32).toString("base64url");
+  const hosted = await startAdmissionHost({
+    cacheDirectory: resolve(rootDir, "hosted-module-cache"), usageDirectory: resolve(rootDir, "hosted-history"),
+    hosted: { assignment, projectId, authorization: {
+      async authenticate(token, requiredPermission = "read") {
+        if (token !== readToken && token !== writeToken) throw Object.assign(new Error("grant invalid"), { status: 401 });
+        const permissions = token === writeToken ? ["read", "write"] : ["read"];
+        if (!permissions.includes(requiredPermission)) throw Object.assign(new Error("permission denied"), { status: 403 });
+        return { userId: token === writeToken ? "writer-1" : "reader-1", permissions,
+          repositoryId: assignment.repositoryId, instanceId: assignment.instanceId, runtimeEpoch: assignment.runtimeEpoch,
+          sessionRevision: 1, authorizationRevision: 1, expiresAt: Date.now() + 60_000 };
+      },
+    } },
+  });
+  t.after(() => hosted.close());
+  const rejectedNode = randomUUID();
+  const otherOperation = { type: "knowledge.node.save", command: {
+    projectId: otherProjectId, id: rejectedNode, type: "person", name: "Must not be written",
+    attributes: {}, status: "confirmed", expectedVersion: null,
+  } };
+  const rejected = async (connection, name, args, label) => {
+    const result = await connection.client.callTool({ name, arguments: args });
+    assert.equal(result.isError, true, `${label} unexpectedly succeeded: ${JSON.stringify(result.structuredContent ?? result.content)}`);
+    return result;
+  };
+  for (const [label, connect, isHttp] of [["stdio", startStdioClient, false], ["Streamable HTTP", startHttpClient, true]]) {
+    const writer = await connect(hosted, projectId, writeToken);
+    let reader;
+    try {
+      const validPreview = success(await writer.client.callTool({
+        name: "knowledge.merge.preview", arguments: { source_id: sourceId, target_id: targetId, project_version: projectVersion },
+      }), `${label} Hosted writer preview`);
+      assert.equal(validPreview.snapshot.projectId, projectId);
+      assert.equal(validPreview.snapshot.projectVersion, projectVersion);
+      for (const [tool, args] of [
+        ["knowledge.nodes.list", { project_id: otherProjectId, project_version: otherVersion }],
+        ["invoke_action", { project_id: otherProjectId, action_id: "core.knowledge.nodes.list", input: { projectVersion: otherVersion } }],
+        ["knowledge.propose", { project_id: otherProjectId, project_version: otherVersion, idempotency_key: "other-project", operations: [otherOperation] }],
+        ["invoke_action", { project_id: otherProjectId, action_id: "core.knowledge.propose", input: { projectVersion: otherVersion, idempotencyKey: "other-project-generic", operations: [otherOperation] } }],
+        ["knowledge.propose", { project_version: projectVersion, idempotency_key: "foreign-command", operations: [otherOperation] }],
+        ["invoke_action", { action_id: "core.knowledge.propose", input: { projectVersion, idempotencyKey: "foreign-command-generic", operations: [otherOperation] } }],
+        ["knowledge.nodes.list", { limit: 501 }],
+        ["invoke_action", { action_id: "core.knowledge.nodes.list", input: { limit: 501 } }],
+        ["knowledge.propose", { project_version: projectVersion, idempotency_key: "wrong-operation", operations: [{ type: "knowledge.merge", command: {} }] }],
+        ["invoke_action", { action_id: "core.knowledge.propose", input: { projectVersion, idempotencyKey: "wrong-operation-generic", operations: [{ type: "knowledge.merge", command: {} }] } }],
+      ]) await rejected(writer, tool, args, `${label} ${tool} boundary`);
+
+      reader = await connect(hosted, projectId, readToken);
+      const read = success(await reader.client.callTool({ name: "knowledge.nodes.list", arguments: { project_version: projectVersion } }), `${label} read-only grant`);
+      assert.equal(read.snapshot.projectId, projectId);
+      assert.deepEqual(new Set(read.data.map(node => node.id)), new Set([sourceId, targetId]));
+      const digest = validPreview.data.previewDigest;
+      await rejected(reader, "knowledge.merge.propose", {
+        source_id: sourceId, target_id: targetId, project_version: projectVersion, preview_digest: digest, idempotency_key: "read-only-merge",
+      }, `${label} read-only merge`);
+      await rejected(reader, "invoke_action", {
+        action_id: "core.knowledge.merge.propose", input: { sourceId, targetId, projectVersion, previewDigest: digest, idempotencyKey: "read-only-merge-generic" },
+      }, `${label} read-only generic merge`);
+    } finally {
+      await closeMcpClient(reader, isHttp);
+      await closeMcpClient(writer, isHttp);
+    }
+  }
+  for (const id of [projectId, otherProjectId]) {
+    assert.deepEqual(await persistence.read(reader => reader.listChangeSets(id, 100)), [], "denied native operations must not create ChangeSets");
+    assert.equal(await persistence.read(reader => reader.getKnowledgeNode(id, rejectedNode)), undefined);
+  }
+  assert.equal((await persistence.read(reader => reader.getKnowledgeNode(projectId, sourceId))).status, "confirmed");
+  assert.equal((await persistence.read(reader => reader.getProject(projectId))).version, projectVersion);
+  assert.equal((await persistence.read(reader => reader.getProject(otherProjectId))).version, otherVersion);
 
   const preview = success(await stdio.client.callTool({ name: "knowledge.merge.preview", arguments: { source_id: sourceId, target_id: targetId, project_version: projectVersion } }), "stdio native merge preview");
   assert.equal(preview.snapshot.projectVersion, projectVersion);
