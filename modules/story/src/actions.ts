@@ -986,7 +986,13 @@ function compareScenario(story: LoadedStorySnapshot, input: ObjectValue) {
         const events = raw.events.map((event, eventIndex) => {
           const candidate = createStateEvent({ event }, scene, "hypothetical").event;
           validateEventReferences(candidate, story);
-          return { ...candidate, eventId: `hypothesis-${index}-${eventIndex}`, replacesEventId: undefined, source: "manual", status: "confirmed" } as unknown as SceneStateEvent;
+          if (candidate.replacesEventId) {
+            const replaced = listRuleStateEvents(story).data.find(item => item.eventId === candidate.replacesEventId);
+            if (!replaced || replaced.source !== "manual" || (replaced.status !== undefined && replaced.status !== "confirmed")) {
+              throw new TypeError(`Replacement event not found or not confirmed: ${candidate.replacesEventId}`);
+            }
+          }
+          return { ...candidate, eventId: `hypothesis-${index}-${eventIndex}`, source: "manual", status: "confirmed" } as unknown as SceneStateEvent;
         });
         return { label: stringValue(raw.label, "label"), hypothetical: true, projection: temporalScene(story, sceneId, events) };
       });
