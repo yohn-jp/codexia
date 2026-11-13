@@ -1,22 +1,27 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { McpActionClient } from "../api-client.js";
-import { actionResult, errorResult, guarded, invoke, scopedClient, unavailableModuleAction } from "./shared.js";
+import { actionResult, byteLength, errorResult, guarded, invoke, scopedClient, unavailableModuleAction } from "./shared.js";
 
 const projectIdSchema = z.string().min(1).max(256).optional().describe("Registered project ID");
-const sceneIdSchema = z.string().min(1).max(256);
+const sceneIdSchema = z.string().min(1).max(256).refine(value => value.trim().length > 0);
 const fingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/u, "sourceFingerprint must be a SHA-256 hex digest");
 const eventSchema = z.object({
   kind: z.enum(["location", "acquaintance", "ownership", "knowledge", "attribute"]),
   subject: z.string().min(1).max(256),
   object: z.string().min(1).max(256).nullable(),
   payload: z.record(z.unknown()).optional(),
-}).passthrough();
+  eventId: sceneIdSchema.optional(),
+  propositionId: sceneIdSchema.optional(),
+  replacesEventId: sceneIdSchema.optional(),
+  evidence: z.array(z.record(z.unknown())).max(100).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+}).strict();
 const alternativeSchema = z.object({
   label: z.string().min(1).max(256),
   events: z.array(eventSchema).max(50),
 });
-const alternativesSchema = z.array(alternativeSchema).length(2);
+const alternativesSchema = z.array(alternativeSchema).length(2).refine(value => byteLength(value) <= 1_048_576, "Scenario input exceeds the 1 MiB MCP limit");
 
 /** Register bounded named adapters for the existing Story action catalog. */
 export function registerStoryTools(server: McpServer, baseClient: McpActionClient): void {
@@ -42,7 +47,7 @@ export function registerStoryTools(server: McpServer, baseClient: McpActionClien
     scene_id: sceneIdSchema.describe("Saved scene ID"),
     scope: z.enum(["author", "character", "reader"]),
     character_id: z.string().min(1).max(256).optional(),
-    budget: z.number().int().min(1).max(200_000).optional().describe("Context budget in source action units (default 12000)"),
+    budget: z.number().int().min(128).max(200_000).optional().describe("Context budget in UTF-8 bytes (default 12000)"),
   }, guarded(async ({ project_id, scene_id, scope, character_id, budget }) => {
     if (scope === "character" && !character_id) return errorResult("INVALID_INPUT", "character_id is required for character scope");
     if (scope !== "character" && character_id !== undefined) return errorResult("INVALID_INPUT", "character_id is only valid for character scope");

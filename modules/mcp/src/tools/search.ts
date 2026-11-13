@@ -12,7 +12,7 @@ export function registerSearchTools(server: McpServer, baseClient: McpActionClie
     "Search project content using ordinary lexical retrieval. Semantic enrichment is optional and disabled by default.",
     {
       project_id: projectIdSchema,
-      query: z.string().min(1).max(512).describe("Search query"),
+      query: z.string().min(1).max(512).refine(value => value.trim().length > 0).describe("Search query"),
       limit: z.number().int().min(1).max(100).optional().describe("Maximum result count (default 20)"),
       mode: z.enum(["fulltext", "exact", "prefix"]).optional().describe("Lexical matching mode"),
       scope: z.string().max(1024).optional().describe("Optional repository path scope"),

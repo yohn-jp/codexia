@@ -64,6 +64,8 @@ test("legacy search retains semantic action ID and Story Context preserves produ
     descriptor("story.context.package", "story", "read"),
   ], (id) => ({ ok: true, snapshot, data: id === "story.context.package" ? payload : { results: [] } }));
   await tools.get("search")!.handler({ query: "river", limit: 3 }, { signal: new AbortController().signal });
+  const contextSchema = z.object(tools.get("story.context.package")!.schema);
+  assert.equal(contextSchema.safeParse({ scene_id: "scene-1", scope: "reader", budget: 127 }).success, false);
   const context = await tools.get("story.context.package")!.handler({ scene_id: "scene-1", scope: "reader" }, { signal: new AbortController().signal });
   assert.equal(calls[0]!.id, "semantic.search");
   assert.deepEqual(calls[1], { id: "story.context.package", input: { sceneId: "scene-1", scope: "reader" } });
@@ -82,6 +84,8 @@ test("Scenario adapters map source fingerprints and keep saves and adoption as p
   ];
   const schema = z.object(tools.get("story.scenario.compare")!.schema);
   assert.equal(schema.safeParse({ scene_id: "scene-1", alternatives: [alternatives[0], alternatives[1], alternatives[0]] }).success, false);
+  assert.equal(schema.safeParse({ scene_id: "scene-1", alternatives: [{ label: "A", events: [{ kind: "location", subject: "char-1", object: "loc-1", confidence: "invalid" }] }, alternatives[1]] }).success, false);
+  assert.equal(schema.safeParse({ scene_id: "scene-1", alternatives: [{ label: "A", events: [{ kind: "location", subject: "char-1", object: "loc-1", payload: { text: "x".repeat(1_048_576) } }] }, alternatives[1]] }).success, false);
   const saveSchema = z.object(tools.get("story.scenario.save")!.schema);
   assert.equal(saveSchema.safeParse({ scene_id: "scene-1", label: "Fork", source_fingerprint: "stale", alternatives }).success, false);
   assert.equal(calls.length, 0, "invalid input schema must be rejected before the action handler runs");
