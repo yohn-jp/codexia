@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "projects": [
+    {
+      "id": "work-a",
+      "characters": [
+        {
+          "id": "c-a",
+          "name": "ユウ",
+          "aliases": [
+            "隊長"
+          ]
+        },
+        {
+          "id": "c-b",
+          "name": "ユウ",
+          "aliases": [
+            "隊長"
+          ]
+        }
+      ],
+      "scenes": [
+        {
+          "id": "arrival",
+          "order": 1,
+          "worldDay": 10,
+          "text": "ユウは隊長に敬礼した。🛰️"
+        },
+        {
+          "id": "flashback",
+          "order": 2,
+          "worldDay": 1,
+          "text": "入隊の日、彼はまだ何も知らなかった。"
+        },
+        {
+          "id": "battle",
+          "order": 3,
+          "worldDay": 7,
+          "text": "ユウは戦役で負傷した。"
+        },
+        {
+          "id": "promotion",
+          "order": 4,
+          "worldDay": 10,
+          "text": "昇進の報せが届いた。"
+        },
+        {
+          "id": "unknown",
+          "order": 5,
+          "worldDay": null,
+          "text": "いつか、鍵を手に入れた。"
+        }
+      ],
+      "facts": [
+        {
+          "subject": "c-a",
+          "predicate": "rank",
+          "value": "recruit",
+          "worldDay": 1
+        },
+        {
+          "subject": "c-a",
+          "predicate": "rank",
+          "value": "captain",
+          "worldDay": 10
+        }
+      ],
+      "beliefs": [
+        {
+          "character": "c-a",
+          "statement": "c-b is missing",
+          "truth": "mistaken"
+        }
+      ],
+      "disclosures": [
+        {
+          "scene": "promotion",
+          "statement": "c-a promoted"
+        }
+      ],
+      "lies": [
+        {
+          "scene": "arrival",
+          "speaker": "c-b",
+          "statement": "I was never there"
+        }
+      ],
+      "threads": [
+        {
+          "id": "key",
+          "planted": "unknown",
+          "payoff": null
+        }
+      ],
+      "edits": [
+        {
+          "document": "arrival",
+          "kind": "insert-before",
+          "text": "前置き。"
+        },
+        {
+          "document": "arrival",
+          "kind": "edit-inside"
+        },
+        {
+          "document": "arrival",
+          "kind": "delete-anchor"
+        }
+      ]
+    },
+    {
+      "id": "work-b",
+      "characters": [
+        {
+          "id": "c-a",
+          "name": "ユウ",
+          "aliases": [
+            "隊長"
+          ]
+        }
+      ]
+    }
+  ],
+  "expectations": [
+    "same-name and same-alias candidates remain ambiguous",
+    "project IDs isolate identical local entity IDs",
+    "flashback rank uses world day not narrative order",
+    "unverified day is unknown",
+    "belief and deliberate lie are not objective facts",
+    "reader excludes undisclosed truth",
+    "unresolved thread is review candidate",
+    "emoji selection is UTF-16; before edit tracks, inner edit requires review, deletion becomes orphaned",
+    "scenario alternatives do not mutate canonical state"
+  ]
+}

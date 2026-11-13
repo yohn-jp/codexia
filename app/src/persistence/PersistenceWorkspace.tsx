@@ -1347,7 +1347,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
               {node.status === "proposed" && <button type="button" onClick={() => void confirmKnowledge(node)}>内容を確認して確定</button>}
             </li>)}
           </ul>
-          {selectedNode && <KnowledgeContextInspector key={selectedNode.id} node={selectedNode} nodes={nodes} documentId={active?.document.id} revisionId={active?.revision.id} clean={Boolean(active&&!active.dirty&&!active.remoteConflict&&active.save==="saved")} selectedEvidenceId={selectedEvidenceId??""} evidenceLoadKey={active?.evidenceLoadKey??0} onOpenEvidence={(item)=>void openNodeEvidence(item)} />}
+          {selectedNode && <KnowledgeContextInspector key={selectedNode.id} node={selectedNode} nodes={nodes} documentId={active?.document.id} revisionId={active?.revision.id} clean={Boolean(active&&!active.dirty&&!active.remoteConflict&&active.save==="saved")} selectedEvidenceId={selectedEvidenceId??""} evidenceLoadKey={active?.evidenceLoadKey??0} onOpenEvidence={(item)=>void openNodeEvidence(item)} onNodeUpdate={(updated)=>setNodes(current=>current.map(item=>item.id===updated.id?updated:item))} onMerge={(target,source)=>{setNodes(current=>current.filter(item=>item.id!==source.id).map(item=>item.id===target.id?target:item));setNodeId(target.id);setNotice("Knowledgeを統合しました。")}} />}
           {selectedNode && <section aria-label="Knowledgeの根拠">
             <h3>{selectedNode.name}の根拠</h3>
             {nodeEvidenceError && <p role="alert">{nodeEvidenceError}</p>}

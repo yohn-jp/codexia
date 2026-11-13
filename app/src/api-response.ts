@@ -92,6 +92,8 @@ export const responseContracts = {
   persistenceAnchorCreated: (v: unknown): v is { anchor: EvidenceAnchor; quote: string; nodeId: string | null; authorId: string } => record(v) && persistenceEvidence(v.anchor) && text(v.quote) && nullableText(v.nodeId) && text(v.authorId),
   persistenceMention,
   persistenceNode: (v: unknown): v is PersistenceNodeRead => record(v) && persistenceKnowledgeNode(v.node) && array(persistenceKnowledgeAlias)(v.aliases) && array(persistenceKnowledgeRelation)(v.relations),
+  persistenceMergePreview: (v:unknown):v is {projectVersion:number;previewDigest:string;source:KnowledgeNode;target:KnowledgeNode;conflicts:string[];sourceAliases:KnowledgeAlias[];sourceRelations:KnowledgeRelation[];sourceMentions:MentionLink[];assertions:Assertion[]} => record(v)&&integer(v.projectVersion)&&text(v.previewDigest)&&persistenceKnowledgeNode(v.source)&&persistenceKnowledgeNode(v.target)&&strings(v.conflicts)&&array(persistenceKnowledgeAlias)(v.sourceAliases)&&array(persistenceKnowledgeRelation)(v.sourceRelations)&&array(persistenceMention)(v.sourceMentions)&&array(persistenceAssertion)(v.assertions),
+  persistenceMergeResult: (v:unknown):v is {source:KnowledgeNode;target:KnowledgeNode;auditId:string}=>record(v)&&persistenceKnowledgeNode(v.source)&&persistenceKnowledgeNode(v.target)&&text(v.auditId),
   persistenceNodeEnvelope: (v: unknown): v is { node: KnowledgeNode } => record(v) && persistenceKnowledgeNode(v.node),
   persistenceAliasEnvelope: (v: unknown): v is { alias: KnowledgeAlias } => record(v) && persistenceKnowledgeAlias(v.alias),
   persistenceRelationEnvelope: (v: unknown): v is { relation: KnowledgeRelation } => record(v) && persistenceKnowledgeRelation(v.relation),
