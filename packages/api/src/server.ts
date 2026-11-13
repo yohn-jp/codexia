@@ -2022,7 +2022,7 @@ export function createServer(options: ApiServerOptions): Server {
         sendJson(response, 200, await writingStatsSnapshot(projectId, selected)); return;
       }
       if (suffix === "scratch" && method === "POST") {
-        const author = hosted ? await requireWritePermission() : (await requireWritePermission(), undefined);
+        const author = await requireAuthorSession();
         await createScratch(projectId, await readJson(request, parsedBody), hosted ? `hosted:${author!.userId}` : "owner", response); return;
       }
       if (suffix === "review-queue" && method === "GET") {
@@ -2055,7 +2055,7 @@ export function createServer(options: ApiServerOptions): Server {
       const projectId = query.get("projectId");
       if (!projectId) throw httpFailure(400, "PROJECT_REQUIRED", "projectId is required");
       assertAssignedProject(projectId);
-      const author = hosted ? await requireWritePermission() : (await requireWritePermission(), undefined);
+      const author = await requireAuthorSession();
       await createScratch(projectId, await readJson(request, parsedBody), hosted ? `hosted:${author!.userId}` : "owner", response);
       return;
     }

@@ -2961,6 +2961,13 @@ it("Hosted Bearer write grants can propose but cannot perform author-only persis
   });
   assert.equal(bearerApply.status, 403);
   assert.equal((await bearerApply.json() as { code: string }).code, "AUTHOR_SESSION_REQUIRED");
+  for (const scratchPath of ["/api/projects/project-1/scratch", "/api/scratch?projectId=project-1"]) {
+    const denied = await fetch(`${apiServer.base}${scratchPath}`, {
+      method: "POST", headers: bearerHeaders, body: JSON.stringify({ text: "Bearer scratch" }),
+    });
+    assert.equal(denied.status, 403);
+    assert.equal((await denied.json() as { code: string }).code, "AUTHOR_SESSION_REQUIRED");
+  }
   assert.equal(fixture.approvals.length, 0);
   assert.equal(fixture.proposed.length, 1);
 
