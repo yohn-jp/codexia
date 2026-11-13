@@ -11,7 +11,7 @@ The module runtime composes trusted built-in packages around public Core contrac
 | Diagnostics | Snapshot-bound narrative diagnostics and reviewable findings |
 | Semantic | Embeddings, vector indexes, retrieval and reranking |
 | Speaker | Speaker attribution, correction and statistical training |
-| Assistant | Provider-backed context, prompt, streaming and proposal workflows |
+| Assistant | Frozen legacy provider-backed workflows; reusable local context and proposal helpers |
 | Publishing | Export, publication metadata and controlled reader sharing |
 | MCP | Stdio and Streamable HTTP tool adapters using shared actions |
 | Search | Lightweight lexical index, terminology registry and editor links |
@@ -37,7 +37,7 @@ Author corrections, settings, dictionaries, accepted small-model parameters and 
 
 Browser contributions use host-owned panels and permitted snapshot-scoped actions. Closing or switching a contribution aborts requests and disposes mounts. Route, UI and MCP availability derive from the same resolved capabilities; disabled features cannot retain hidden write endpoints.
 
-Assistant SDKs and external transmission remain confined to the optional provider surface. Consent and host policy constrain transmission. Provider `none` keeps local editing, context preparation, MCP and review usable.
+[MCP-first creative architecture](MCP-FIRST.md) governs AI integration. Existing Assistant SDKs and external transmission remain confined to the frozen optional provider surface; consent and host policy still constrain legacy execution. Do not extend provider execution. Shared context, editing, MCP and review must work without Assistant or a configured provider; the target MCP surface must not trigger internal generative inference.
 
 ## One-time source compatibility and normal work import
 

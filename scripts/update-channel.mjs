@@ -61,13 +61,24 @@ export function signUpdateChannel(value, privateKeyPem, now = Date.now()) {
   return { payload: payload.toString('base64'), signature: sign(null, payload, keyFor(privateKeyPem, true)).toString('base64') };
 }
 
-/** Verify exact bytes before JSON interpretation. Persist the returned checkpoint atomically before acting. */
-export function verifyUpdateChannel(envelope, publicKeyPem, previous = null, now = Date.now()) {
+function authenticatedPayload(envelope, publicKeyPem) {
   if (!exact(envelope, ['payload', 'signature'])) throw new Error('Invalid signed channel envelope');
   const bytes = decode(envelope.payload, MAX_BYTES);
   const signature = decode(envelope.signature, 64);
   if (signature.length !== 64 || !verify(null, bytes, keyFor(publicKeyPem, false), signature)) throw new Error('Invalid channel signature');
-  const payload = validatePayload(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)), now);
+  return { bytes, value: JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) };
+}
+
+/** Publisher-only: authenticate an expired predecessor without treating it as a deployable channel. */
+export function authenticateHistoricalChannel(envelope, publicKeyPem) {
+  const { value } = authenticatedPayload(envelope, publicKeyPem);
+  return validatePayload(value, timestamp(value.issuedAt));
+}
+
+/** Verify exact bytes before JSON interpretation. Persist the returned checkpoint atomically before acting. */
+export function verifyUpdateChannel(envelope, publicKeyPem, previous = null, now = Date.now()) {
+  const { bytes, value } = authenticatedPayload(envelope, publicKeyPem);
+  const payload = validatePayload(value, now);
   const checkpoint = Object.freeze({ sequence: payload.sequence, sha256: `sha256:${createHash('sha256').update(bytes).digest('hex')}` });
   if (previous !== null) {
     if (!exact(previous, ['sequence', 'sha256']) || !positive(previous.sequence) || typeof previous.sha256 !== 'string' || !SHA.test(previous.sha256)) throw new Error('Invalid stored channel checkpoint');
