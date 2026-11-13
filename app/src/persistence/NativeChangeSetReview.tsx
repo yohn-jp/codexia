@@ -20,6 +20,23 @@ function statusLabel(status: ChangeSet["status"]): string {
   return ({ proposed: "提案", approved: "承認済み・未適用", applied: "適用済み", rejected: "却下" })[status];
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergePlanName(plan: Record<string, unknown>, key: "source" | "target"): string {
+  const value = plan[key];
+  return isRecord(value) && typeof value.name === "string" ? value.name : "Knowledge node";
+}
+
+function mergePlanConflicts(plan: Record<string, unknown>): string[] {
+  return Array.isArray(plan.conflicts) ? plan.conflicts.filter((item): item is string => typeof item === "string") : [];
+}
+
+function mergeWriteCount(changeSet: ChangeSet, resource: ChangeSet["writeSet"][number]["resource"]): number {
+  return changeSet.writeSet.filter(entry => entry.resource === resource).length;
+}
+
 export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, onOpenSource }: {
   projectId: string;
   canWrite?: boolean;
@@ -204,7 +221,17 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, o
       <p>作成: <time dateTime={current.createdAt}>{current.createdAt}</time></p>
       <h3>操作内容（{current.operations.length}）</h3>
       {current.operations.map((operation, index) => <section className="proposal-operation" key={`${operation.type}:${index}`}>
-        <h4>{operation.type}</h4><pre>{JSON.stringify(operation.command, null, 2)}</pre>
+        <h4>{operation.type}</h4>
+        {operation.type === "knowledge.merge" ? <section aria-label="Knowledge merge proposal">
+          <p><strong>{mergePlanName(operation.command.plan, "source")}</strong> (<code>{operation.command.sourceId}</code>) → <strong>{mergePlanName(operation.command.plan, "target")}</strong> (<code>{operation.command.targetId}</code>)</p>
+          <p>Preview snapshot: <code>{operation.command.projectVersion}</code> · Digest: <code>{operation.command.previewDigest}</code></p>
+          <p>実際の書き込み対象: 別名 {mergeWriteCount(current, "knowledge_alias")} 件 · 関係 {mergeWriteCount(current, "knowledge_relation")} 件 · 根拠リンク {mergeWriteCount(current, "mention_link")} 件 · 命題 {mergeWriteCount(current, "assertion")} 件</p>
+          <p>Audit ID: <code>{operation.command.auditId}</code> · 生成別名 ID: <code>{operation.command.generatedAliasId}</code></p>
+          {mergePlanConflicts(operation.command.plan).length > 0
+            ? <div role="alert"><strong>競合</strong><ul>{mergePlanConflicts(operation.command.plan).map(conflict => <li key={conflict}>{conflict}</li>)}</ul></div>
+            : <p>Preview conflicts: なし</p>}
+          <details><summary>統合計画と対象リソースを確認</summary><pre>{JSON.stringify(operation.command.plan, null, 2)}</pre></details>
+        </section> : <pre>{JSON.stringify(operation.command, null, 2)}</pre>}
         {operation.type === "evidence.anchor.save" && <>
           <button type="button" disabled={busy || loading} onClick={() => void inspectSource(operation.command, `${current.id}:${index}`)}>引用元Revisionを確認</button>
           {sourceQuote?.key === `${current.id}:${index}` && <div><q>{sourceQuote.quote}</q><p>Revision: <code>{operation.command.revisionId}</code> · {operation.command.status}</p>{onOpenSource && <button type="button" onClick={() => void onOpenSource(operation.command, sourceQuote.quote).catch(error => setMessage(errorText(error)))}>原稿で確認</button>}</div>}

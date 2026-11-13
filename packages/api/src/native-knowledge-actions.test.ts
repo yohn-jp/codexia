@@ -18,7 +18,66 @@ test("native Knowledge catalog exposes the stable read and proposal action contr
     ["core.evidence.node.list", "read"], ["core.evidence.assertion.get", "read"],
     ["core.evidence.assertion.list", "read"], ["core.changesets.list", "read"],
     ["core.changeset.get", "read"], ["core.knowledge.propose", "propose"],
+    ["core.knowledge.merge.preview", "read"], ["core.knowledge.merge.propose", "propose"],
   ]);
+});
+
+test("merge Actions delegate preview and proposal through the selected native snapshot and host admission", async () => {
+  const sourceId = "22222222-2222-4222-8222-222222222222";
+  const targetId = "33333333-3333-4333-8333-333333333333";
+  const digest = "a".repeat(64);
+  let proposalInput: unknown;
+  let authorizations = 0;
+  const persistence = {
+    read: async (work: (reader: unknown) => Promise<unknown>) => work({
+      getProject: async () => ({ id: projectId, version: 4 }),
+      getKnowledgeNode: async (_project: string, id: string) => ({ id, type: "person", name: id, attributes: {}, status: "confirmed", deletedAt: null }),
+      listKnowledgeAliases: async () => [], listKnowledgeRelations: async () => [], listNodeMentions: async () => [], listAssertions: async () => [],
+    }),
+    transaction: async (work: (transaction: unknown) => Promise<unknown>) => work({
+      proposeKnowledgeMerge: async (value: unknown) => {
+        proposalInput = value;
+        return { changeSet: { id: "merge-change-set", projectId, status: "proposed" }, replayed: false };
+      },
+    }),
+  } as unknown as Persistence;
+  const actions = createNativeKnowledgeActions({ persistence, projectId, actorId, origin: "external-agent", authorizeProposal: async () => { authorizations++; } });
+  const previewAction = actions.find(action => action.id === "core.knowledge.merge.preview")!;
+  const proposalAction = actions.find(action => action.id === "core.knowledge.merge.propose")!;
+  const preview = await previewAction.invoke({ sourceId, targetId }, context) as ActionResult;
+  assert.equal(preview.ok, true);
+  assert.deepEqual((preview as { snapshot: SnapshotId }).snapshot, snapshot);
+  const submitted = await proposalAction.invoke({ sourceId, targetId, projectVersion: 4, previewDigest: digest, idempotencyKey: "merge-retry" }, context) as ActionResult;
+  assert.equal(submitted.ok, true);
+  assert.equal(authorizations, 1);
+  assert.equal((preview as { data: { previewDigest: string } }).data.previewDigest.length, 64);
+  assert.deepEqual(proposalInput, {
+    projectId, sourceId, targetId, projectVersion: 4, previewDigest: digest,
+    actorId, origin: "external-agent", idempotencyKey: "merge-retry",
+  });
+});
+
+test("merge proposal authorization denial and malformed digest fail before persistence", async () => {
+  let transactions = 0;
+  const action = createNativeKnowledgeActions({
+    persistence: { transaction: async () => { transactions++; throw new Error("must not transact"); } } as unknown as Persistence,
+    projectId, actorId, origin: "external-agent", authorizeProposal: async () => { throw Object.assign(new Error("write grant required"), { code: "WRITE_PERMISSION_REQUIRED" }); },
+  }).find(item => item.id === "core.knowledge.merge.propose")!;
+  const sourceId = "22222222-2222-4222-8222-222222222222";
+  const targetId = "33333333-3333-4333-8333-333333333333";
+  const denied = await action.invoke({ sourceId, targetId, projectVersion: 4, previewDigest: "a".repeat(64), idempotencyKey: "no-grant" }, context) as ActionResult;
+  assert.equal(denied.ok, false);
+  if (!denied.ok) assert.equal(denied.error.code, "WRITE_PERMISSION_REQUIRED");
+  assert.equal(transactions, 0);
+
+  const allowed = createNativeKnowledgeActions({
+    persistence: { transaction: async () => { transactions++; throw new Error("malformed digest must not transact"); } } as unknown as Persistence,
+    projectId, actorId, origin: "external-agent", authorizeProposal: async () => {},
+  }).find(item => item.id === "core.knowledge.merge.propose")!;
+  const invalid = await allowed.invoke({ sourceId, targetId, projectVersion: 4, previewDigest: "wrong", idempotencyKey: "bad-digest" }, context) as ActionResult;
+  assert.equal(invalid.ok, false);
+  if (!invalid.ok) assert.equal(invalid.error.code, "invalid_input");
+  assert.equal(transactions, 0);
 });
 
 test("proposal action binds host actor and project and rechecks host authorization", async () => {

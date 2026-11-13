@@ -23,7 +23,7 @@ test("browser DTO guards accept exactly the canonical built-in module IDs", () =
   }), false);
 });
 
-test("native ChangeSet guards accept only the seven integrated Knowledge and Evidence operations", () => {
+test("native ChangeSet guards accept the seven ordinary operations and the typed merge operation only", () => {
   const types = ["knowledge.node.save", "knowledge.alias.save", "knowledge.relation.save", "evidence.anchor.save", "evidence.mention.save", "evidence.assertion.save", "evidence.assertion.link"];
   const changeSet = {
     id: "change-1", projectId: "project-1", authorId: "actor-1", status: "proposed", version: 1,
@@ -40,6 +40,13 @@ test("native ChangeSet guards accept only the seven integrated Knowledge and Evi
   };
   assert.equal(responseContracts.nativeChangeSets({ changeSets: [changeSet] }), true);
   assert.equal(responseContracts.nativeChangeSet({ changeSet, receipt: undefined }), true);
-  assert.equal(responseContracts.nativeChangeSets({ changeSets: [{ ...changeSet, operations: [{ type: "knowledge.merge", command: {} }] }] }), false);
+  const merge = { type: "knowledge.merge", command: {
+    projectId: "project-1", sourceId: "source-1", targetId: "target-1", projectVersion: 4, previewDigest: "a".repeat(64),
+    actorId: "external-actor", origin: "external-agent", auditId: "audit-1", generatedAliasId: "alias-1",
+    plan: { source: { id: "source-1", name: "Source" }, target: { id: "target-1", name: "Target" }, sourceAliases: [], targetAliases: [], sourceRelations: [], targetRelations: [], sourceMentions: [], targetMentions: [], assertions: [], conflicts: [] },
+  } };
+  assert.equal(responseContracts.nativeChangeSets({ changeSets: [{ ...changeSet, operations: [merge] }] }), true);
+  assert.equal(responseContracts.nativeChangeSets({ changeSets: [{ ...changeSet, operations: [{ type: "knowledge.merge", command: { ...merge.command, previewDigest: "stale" } }] }] }), false);
+  assert.equal(responseContracts.nativeChangeSets({ changeSets: [{ ...changeSet, operations: [{ type: "knowledge.future", command: {} }] }] }), false);
   assert.equal(responseContracts.nativeChangeSets({ changeSets: [{ ...changeSet, readSet: [{ resource: "knowledge_node", id: "node-1", expectedVersion: "1" }] }] }), false);
 });

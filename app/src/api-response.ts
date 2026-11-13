@@ -35,7 +35,7 @@ const contribution: ResponseGuard<UiContribution> = (v): v is UiContribution => 
 const jsonValue = (v: unknown): boolean => v === null || text(v) || typeof v === "number" && Number.isFinite(v) || bool(v) || Array.isArray(v) && v.every(jsonValue) || record(v) && Object.values(v).every(jsonValue);
 const jsonObject = (v: unknown): v is Record<string, unknown> => record(v) && Object.values(v).every(jsonValue);
 const persistenceProject: ResponseGuard<PersistenceProject> = (v): v is PersistenceProject => record(v) && text(v.id) && text(v.title) && jsonObject(v.settings) && integer(v.version) && v.version > 0 && text(v.createdAt) && text(v.updatedAt);
-const nativeOperationTypes = ["knowledge.node.save", "knowledge.alias.save", "knowledge.relation.save", "evidence.anchor.save", "evidence.mention.save", "evidence.assertion.save", "evidence.assertion.link"] as const;
+const nativeOperationTypes = ["knowledge.node.save", "knowledge.alias.save", "knowledge.relation.save", "evidence.anchor.save", "evidence.mention.save", "evidence.assertion.save", "evidence.assertion.link", "knowledge.merge"] as const;
 const nullablePositiveVersion = (v: unknown): boolean => v === null || integer(v) && v > 0;
 const nativeOperation: ResponseGuard<ChangeSetOperation> = (v): v is ChangeSetOperation => {
   if (!record(v) || !oneOf(v.type, nativeOperationTypes) || !record(v.command)) return false;
@@ -48,6 +48,9 @@ const nativeOperation: ResponseGuard<ChangeSetOperation> = (v): v is ChangeSetOp
     case "evidence.mention.save": return [c.projectId, c.evidenceId, c.nodeId, c.source].every(text) && oneOf(c.status, ["proposed", "confirmed", "ambiguous", "rejected"]) && (c.confidence === null || typeof c.confidence === "number" && Number.isFinite(c.confidence) && c.confidence >= 0 && c.confidence <= 1) && nullableText(c.extractorVersion);
     case "evidence.assertion.save": return [c.projectId, c.id, c.modality, c.perspective].every(text) && jsonObject(c.proposition) && jsonObject(c.narrativeTime) && (c.confidence === null || typeof c.confidence === "number" && Number.isFinite(c.confidence) && c.confidence >= 0 && c.confidence <= 1) && oneOf(c.status, ["proposed", "confirmed", "rejected", "retired"]) && nullablePositiveVersion(c.expectedVersion);
     case "evidence.assertion.link": return [c.projectId, c.assertionId, c.evidenceId].every(text) && oneOf(c.role, ["supports", "contradicts", "quotes", "context"]);
+    case "knowledge.merge": return [c.projectId, c.sourceId, c.targetId, c.actorId, c.auditId, c.generatedAliasId].every(text)
+      && integer(c.projectVersion) && c.projectVersion > 0 && typeof c.previewDigest === "string" && /^[0-9a-f]{64}$/u.test(c.previewDigest)
+      && oneOf(c.origin, ["author", "external-agent"]) && jsonObject(c.plan);
     default: return false;
   }
 };

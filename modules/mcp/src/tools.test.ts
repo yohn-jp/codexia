@@ -96,3 +96,61 @@ test("Scenario adapters map source fingerprints and keep saves and adoption as p
     { id: "story.scenario.adopt", input: { id: "scenario-1", alternativeIndex: 1, sourceFingerprint: fingerprint } },
   ]);
 });
+
+test("native Knowledge and Evidence tools expose typed names and delegate exact camelCase Action inputs", async () => {
+  const ids = [
+    "core.knowledge.nodes.list", "core.knowledge.node.get", "core.knowledge.aliases.list", "core.knowledge.relations.list",
+    "core.evidence.anchor.get", "core.evidence.document.list", "core.evidence.node.list", "core.evidence.assertion.get", "core.evidence.assertion.list",
+    "core.knowledge.propose", "core.changesets.list", "core.changeset.get", "core.knowledge.merge.preview", "core.knowledge.merge.propose",
+  ];
+  const { tools, calls } = setup(ids.map(id => descriptor(id, "core", id.endsWith(".propose") ? "propose" : "read")), (id, input) => ({ ok: true, snapshot, data: { id, input } }));
+  const names = ids.map(id => id.replace(/^core\./u, ""));
+  for (const name of names) assert(tools.has(name), `missing MCP tool ${name}`);
+
+  await tools.get("knowledge.node.get")!.handler({ project_id: "project-one", node_id: "22222222-2222-4222-8222-222222222222", project_version: 7, related_limit: 12 }, { signal: new AbortController().signal });
+  await tools.get("evidence.document.list")!.handler({ document_id: "33333333-3333-4333-8333-333333333333", revision_id: "44444444-4444-4444-8444-444444444444", limit: 8 }, { signal: new AbortController().signal });
+  await tools.get("changeset.get")!.handler({ change_set_id: "55555555-5555-4555-8555-555555555555" }, { signal: new AbortController().signal });
+  assert.deepEqual(calls, [
+    { id: "core.knowledge.node.get", input: { nodeId: "22222222-2222-4222-8222-222222222222", projectVersion: 7, relatedLimit: 12 } },
+    { id: "core.evidence.document.list", input: { documentId: "33333333-3333-4333-8333-333333333333", revisionId: "44444444-4444-4444-8444-444444444444", limit: 8 } },
+    { id: "core.changeset.get", input: { changeSetId: "55555555-5555-4555-8555-555555555555" } },
+  ]);
+});
+
+test("native MCP schemas bound UUID reads and accept only the seven ordinary native ChangeSet operations", async () => {
+  const { tools, calls } = setup([descriptor("core.knowledge.propose", "core", "propose")], () => ({ ok: true, snapshot, data: {} }));
+  const node = "22222222-2222-4222-8222-222222222222";
+  const readSchema = z.object(tools.get("knowledge.node.get")!.schema);
+  assert.equal(readSchema.safeParse({ node_id: "not-a-uuid" }).success, false);
+  assert.equal(readSchema.safeParse({ node_id: node, related_limit: 1001 }).success, false);
+  const proposalSchema = z.object(tools.get("knowledge.propose")!.schema);
+  const ordinary = { type: "knowledge.node.save", command: { projectId: "66666666-6666-4666-8666-666666666666", id: node, type: "person", name: "Uma", attributes: {}, status: "proposed", expectedVersion: null } };
+  assert.equal(proposalSchema.safeParse({ project_version: 7, idempotency_key: "once", operations: [ordinary] }).success, true);
+  assert.equal(proposalSchema.safeParse({ project_version: 7, idempotency_key: "once", operations: [{ type: "knowledge.merge", command: {} }] }).success, false);
+  assert.equal(proposalSchema.safeParse({ project_version: 7, idempotency_key: "once", operations: [ordinary, { ...ordinary, type: "unknown" }] }).success, false);
+  assert.equal(proposalSchema.safeParse({ project_version: 7, idempotency_key: "once", operations: Array.from({ length: 51 }, () => ordinary) }).success, false);
+  const oversized = { ...ordinary, command: { ...ordinary.command, attributes: { note: "x".repeat(65_000) } } };
+  assert.equal(proposalSchema.safeParse({ project_version: 7, idempotency_key: "once", operations: [oversized] }).success, false);
+  const anchor = { type: "evidence.anchor.save", command: { projectId: "66666666-6666-4666-8666-666666666666", id: node, documentId: node, revisionId: node, fromUtf16: 8, toUtf16: 4, quoteSha256: "a".repeat(64), status: "proposed", expectedVersion: null } };
+  assert.equal(proposalSchema.safeParse({ project_version: 7, idempotency_key: "once", operations: [anchor] }).success, false);
+  const accepted = await tools.get("knowledge.propose")!.handler({ project_version: 7, idempotency_key: "once", operations: [ordinary] }, { signal: new AbortController().signal });
+  assert.deepEqual(calls, [{ id: "core.knowledge.propose", input: { projectVersion: 7, idempotencyKey: "once", operations: [ordinary] } }]);
+  assert.equal((accepted as { isError?: boolean }).isError, undefined);
+});
+
+test("native merge tools require an observed digest and delegate read and proposal Actions only", async () => {
+  const { tools, calls } = setup([
+    descriptor("core.knowledge.merge.preview", "core", "read"), descriptor("core.knowledge.merge.propose", "core", "propose"),
+  ], (id) => ({ ok: true, snapshot, data: { id } }));
+  const source = "22222222-2222-4222-8222-222222222222";
+  const target = "33333333-3333-4333-8333-333333333333";
+  await tools.get("knowledge.merge.preview")!.handler({ source_id: source, target_id: target, project_version: 7 }, { signal: new AbortController().signal });
+  const proposalSchema = z.object(tools.get("knowledge.merge.propose")!.schema);
+  assert.equal(proposalSchema.safeParse({ source_id: source, target_id: target, project_version: 7, idempotency_key: "merge", preview_digest: "bad" }).success, false);
+  const digest = "a".repeat(64);
+  await tools.get("knowledge.merge.propose")!.handler({ source_id: source, target_id: target, project_version: 7, idempotency_key: "merge", preview_digest: digest }, { signal: new AbortController().signal });
+  assert.deepEqual(calls, [
+    { id: "core.knowledge.merge.preview", input: { sourceId: source, targetId: target, projectVersion: 7 } },
+    { id: "core.knowledge.merge.propose", input: { sourceId: source, targetId: target, projectVersion: 7, idempotencyKey: "merge", previewDigest: digest } },
+  ]);
+});
