@@ -14,7 +14,11 @@ test("native Knowledge merge is one approved transaction with stable receipt and
   await migratePostgresDatabase(connectionString!);
   const persistence = createPostgresPersistence(connectionString!);
   const directPool = (persistence as unknown as { pool: { query: (text: string) => Promise<unknown> } }).pool;
-  t.after(() => persistence.close());
+  const cleanup: Array<() => Promise<unknown>> = [];
+  t.after(async () => {
+    try { for (const dispose of cleanup.reverse()) await dispose(); }
+    finally { await persistence.close(); }
+  });
   const project = await persistence.transaction(tx => tx.createProject({ title: `merge-${randomUUID()}` }));
   const sourceId = randomUUID() as KnowledgeNodeId;
   const targetId = randomUUID() as KnowledgeNodeId;
@@ -58,7 +62,7 @@ test("native Knowledge merge is one approved transaction with stable receipt and
   const suffix = randomUUID().replaceAll("-", "");
   const functionName = `reject_merge_alias_${suffix}`;
   const triggerName = `reject_merge_alias_${suffix}`;
-  t.after(async () => {
+  cleanup.push(async () => {
     await directPool.query(`DROP TRIGGER IF EXISTS ${triggerName} ON knowledge_alias`);
     await directPool.query(`DROP FUNCTION IF EXISTS ${functionName}()`);
   });
