@@ -61,14 +61,14 @@ export async function applyKnowledgeMerge(
   expectedProjectVersion: number,
   previewDigest: string,
   authorId: string,
-  stableIds?: { auditId: string; generatedAliasId: KnowledgeAliasId; plan?: JsonObject },
+  stableIds?: { auditId: string; generatedAliasId: KnowledgeAliasId; plan?: JsonObject; proposedBy?: string; origin?: "author" | "external-agent" },
 ): Promise<KnowledgeMergeResult> {
   await tx.assertProjectVersion(projectId, expectedProjectVersion);
   const plan = await planKnowledgeMerge(tx, projectId, sourceId, targetId);
   if (plan.previewDigest !== previewDigest || plan.conflicts.length || (stableIds?.plan && createHash("sha256").update(canonicalMergeJson(plan)).digest("hex") !== createHash("sha256").update(canonicalMergeJson(stableIds.plan)).digest("hex"))) throw new Error("Merge preview changed or has unresolved conflicts");
   const { source, target } = plan;
   const auditId = stableIds?.auditId ?? randomUUID();
-  await tx.saveModuleRecord({ projectId, moduleId: "core.knowledge-merge", key: auditId, value: JSON.parse(JSON.stringify({ authorId, sourceId, targetId, plan })) as JsonObject, expectedVersion: null });
+  await tx.saveModuleRecord({ projectId, moduleId: "core.knowledge-merge", key: auditId, value: JSON.parse(JSON.stringify({ authorId, sourceId, targetId, plan, ...(stableIds?.proposedBy ? { proposedBy: stableIds.proposedBy, origin: stableIds.origin } : {}) })) as JsonObject, expectedVersion: null });
   const attributes = { ...source.attributes, ...target.attributes };
   const updated = await tx.saveKnowledgeNode({ projectId, id: targetId, type: target.type, name: target.name, attributes, status: "confirmed", expectedVersion: target.version });
   for (const alias of plan.sourceAliases) if (alias.status !== "retired") {

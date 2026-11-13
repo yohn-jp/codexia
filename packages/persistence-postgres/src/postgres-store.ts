@@ -456,6 +456,7 @@ function knowledgeMergeReadSet(plan: KnowledgeMergePlan, command: KnowledgeMerge
     ...plan.targetRelations.map(relation => ({ resource: "knowledge_relation" as const, id: relation.id, expectedVersion: relation.version })),
     ...plan.sourceMentions.map(link => ({ resource: "mention_link" as const, id: `${link.evidenceId}:${link.nodeId}`, expectedVersion: 1 })),
     ...plan.targetMentions.map(link => ({ resource: "mention_link" as const, id: `${link.evidenceId}:${link.nodeId}`, expectedVersion: 1 })),
+    ...plan.sourceMentions.filter(link => !plan.targetMentions.some(target => target.evidenceId === link.evidenceId)).map(link => ({ resource: "mention_link" as const, id: `${link.evidenceId}:${command.targetId}`, expectedVersion: null })),
     ...plan.assertions.map(assertion => ({ resource: "assertion" as const, id: assertion.id, expectedVersion: assertion.version })),
     { resource: "knowledge_alias", id: command.generatedAliasId, expectedVersion: null },
     { resource: "module_record", id: JSON.stringify(["core.knowledge-merge", command.auditId]), expectedVersion: null },
@@ -1503,7 +1504,7 @@ class PostgresTransaction implements PersistenceTransaction {
     });
   }
 
-  private async applyOperation(operation: ChangeSetOperation): Promise<ChangeSetOperationResult> {
+  private async applyOperation(operation: ChangeSetOperation, approvedBy: string | null): Promise<ChangeSetOperationResult> {
     switch (operation.type) {
       case "document.update": return this.updateDocument(operation.command);
       case "document.delete": return this.deleteDocument(operation.command);
@@ -1518,16 +1519,19 @@ class PostgresTransaction implements PersistenceTransaction {
       case "evidence.mention.save": return this.saveMentionLink(operation.command);
       case "evidence.assertion.save": return this.saveAssertion(operation.command);
       case "evidence.assertion.link": return this.linkAssertionEvidence(operation.command);
-      case "knowledge.merge": return applyKnowledgeMerge(
+      case "knowledge.merge": {
+        if (!approvedBy) throw validationError("Approved merge lacks its author approval identity");
+        return applyKnowledgeMerge(
         this,
         operation.command.projectId,
         operation.command.sourceId,
         operation.command.targetId,
         operation.command.projectVersion,
         operation.command.previewDigest,
-        operation.command.actorId,
-        { auditId: operation.command.auditId, generatedAliasId: operation.command.generatedAliasId, plan: operation.command.plan },
+        approvedBy,
+        { auditId: operation.command.auditId, generatedAliasId: operation.command.generatedAliasId, plan: operation.command.plan, proposedBy: operation.command.actorId, origin: operation.command.origin },
       );
+      }
       default: {
         const exhaustive: never = operation;
         throw validationError(`Unsupported ChangeSet operation: ${String(exhaustive)}`);
@@ -1733,7 +1737,7 @@ class PostgresTransaction implements PersistenceTransaction {
     );
     await this.assertChangeSetReadSet(command.projectId, changeSet.readSet);
     const results: ChangeSetOperationResult[] = [];
-    for (const operation of changeSet.operations) results.push(await this.applyOperation(operation));
+    for (const operation of changeSet.operations) results.push(await this.applyOperation(operation, changeSet.approvedBy));
     const updated = await this.query(
       `UPDATE change_set SET status = 'applied', version = version + 1, applied_at = clock_timestamp(), application_result = '{}'::jsonb
        WHERE project_id = $1 AND id = $2 AND version = $3 AND status = 'approved' RETURNING *`,

@@ -39,7 +39,7 @@ test("native Knowledge merge is one approved transaction with stable receipt and
   });
   const projectVersion = (await persistence.read(reader => reader.getProject(project.id)))!.version;
   const preview = await previewNativeKnowledgeMerge(persistence, project.id, sourceId, targetId, projectVersion);
-  const proposed = await proposeNativeKnowledgeMerge({ persistence, projectId: project.id, sourceId, targetId, projectVersion, previewDigest: preview.previewDigest, actorId: "author", origin: "author", idempotencyKey: "native-merge-once" });
+  const proposed = await proposeNativeKnowledgeMerge({ persistence, projectId: project.id, sourceId, targetId, projectVersion, previewDigest: preview.previewDigest, actorId: "external-writer", origin: "external-agent", idempotencyKey: "native-merge-once" });
   assert.equal(proposed.changeSet.operations.length, 1);
   assert.equal(proposed.changeSet.operations[0]?.type, "knowledge.merge");
   const unchanged = await persistence.read(async reader => ({
@@ -55,7 +55,7 @@ test("native Knowledge merge is one approved transaction with stable receipt and
   assert.equal(unchanged.relation?.sourceId, sourceId);
   assert.equal(unchanged.mentionLinks.length, 1);
   assert.equal(unchanged.assertion?.proposition.nodeId, sourceId);
-  const replay = await proposeNativeKnowledgeMerge({ persistence, projectId: project.id, sourceId, targetId, projectVersion, previewDigest: preview.previewDigest, actorId: "author", origin: "author", idempotencyKey: "native-merge-once" });
+  const replay = await proposeNativeKnowledgeMerge({ persistence, projectId: project.id, sourceId, targetId, projectVersion, previewDigest: preview.previewDigest, actorId: "external-writer", origin: "external-agent", idempotencyKey: "native-merge-once" });
   assert.equal(replay.replayed, true);
   const approved = await approveNativeChangeSet(persistence, project.id, proposed.changeSet.id, proposed.changeSet.version, "author");
   const generatedAliasId = (proposed.changeSet.operations[0] as { command: { generatedAliasId: string } }).command.generatedAliasId;
@@ -109,6 +109,13 @@ test("native Knowledge merge is one approved transaction with stable receipt and
   assert.ok(after.aliases.some(alias => alias.surface === "S"));
   assert.equal(after.records.length, 1);
   assert.equal(after.records[0]?.key, mergeResult.auditId);
+  assert.equal(after.records[0]?.value.authorId, "author");
+  assert.equal(after.records[0]?.value.proposedBy, "external-writer");
+  assert.equal(after.records[0]?.value.origin, "external-agent");
+  const submissionReplay = await proposeNativeKnowledgeMerge({ persistence: restarted, projectId: project.id, sourceId, targetId, projectVersion, previewDigest: preview.previewDigest, actorId: "external-writer", origin: "external-agent", idempotencyKey: "native-merge-once" });
+  assert.equal(submissionReplay.replayed, true);
+  assert.equal(submissionReplay.changeSet.id, proposed.changeSet.id);
+  assert.equal(submissionReplay.changeSet.status, "applied");
   assert.equal(after.relation?.sourceId, targetId);
   assert.deepEqual(after.mentions.map(link => link.nodeId).sort(), [sourceId, targetId].sort());
   assert.equal(after.assertion?.proposition.nodeId, targetId);
