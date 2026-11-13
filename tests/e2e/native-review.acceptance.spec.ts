@@ -52,9 +52,12 @@ async function proposeMerge(page: Page, projectId: string) {
 async function openReview(page: Page, mode: "desktop" | "mobile") {
   if (mode === "desktop") {
     const menu = page.locator(".st-workspace-panel-menu > summary");
+    const panelMenu = page.locator(".st-workspace-panel-menu");
     const show = page.getByRole("button", { name: "Show 提案レビュー" });
     if (!await show.isVisible()) await menu.click();
     if (await show.count()) await show.click();
+    if (await panelMenu.evaluate((element: HTMLDetailsElement) => element.open)) await menu.click();
+    await expect(panelMenu).not.toHaveAttribute("open", "");
   } else {
     await page.getByRole("button", { name: /道具/u }).click();
   }
