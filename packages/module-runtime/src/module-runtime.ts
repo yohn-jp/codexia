@@ -36,6 +36,8 @@ export interface ActionHostContext {
   linkedReader?(projectId: string): Promise<ModuleActionContext["reader"]>;
   /** Authentication level of the current HTTP caller. Omission grants no owner access. */
   access?: "owner" | "public";
+  /** Host-derived principal class; MCP transport is external even when it carries an owner session. */
+  caller?: "author" | "external-agent";
   /** Host-owned durable tracking around a declared module action. `execute` is safe to call once. */
   trackDomainJob?(
     descriptor: ActionDescriptor & { job: NonNullable<ActionDescriptor["job"]> },
@@ -419,6 +421,7 @@ export class ModuleRuntime {
     this.assertOpen();
     const actions: ActionDescriptor[] = [];
     for (const id of this.plan.order) {
+      if (id === "assistant" && host?.caller === "external-agent") continue;
       try { await this.activate(id); } catch { continue; }
       const definition = this.sessions.get(id)?.definition;
       for (const action of definition?.actions ?? []) {
@@ -449,6 +452,9 @@ export class ModuleRuntime {
   }
 
   async invokeHttp(moduleId: string, contributionId: string, request: Request, host: ActionHostContext): Promise<Response> {
+    if (moduleId === "assistant" && host.caller === "external-agent") {
+      return httpFailure(403, "external_agent_assistant_denied", "External agents cannot invoke Assistant");
+    }
     let manifest: Readonly<ModuleManifest>;
     try {
       manifest = this.requireEnabled(moduleId);
@@ -559,6 +565,9 @@ export class ModuleRuntime {
     let session: ModuleSession | undefined;
     let callStarted = false;
     try {
+      if (id === "assistant" && host.caller === "external-agent") {
+        throw new ModuleRuntimeError("external_agent_assistant_denied", "External agents cannot invoke Assistant");
+      }
       if (depth > 16) throw new ModuleRuntimeError("action_recursion_limit", "Nested action limit exceeded");
       const manifest = this.requireEnabled(id);
       await this.activate(manifest.id);

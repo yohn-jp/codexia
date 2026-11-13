@@ -938,9 +938,9 @@ export function createServer(options: ApiServerOptions): Server {
       if (status.availability === "enabled-idle" || status.availability === "active") await runtime.activate(status.id);
     }
   };
-  const listActionDescriptors = async (projectId: string, signal: AbortSignal): Promise<ActionDescriptor[]> => {
+  const listActionDescriptors = async (projectId: string, signal: AbortSignal, source: ChangeProposal["source"] = "author"): Promise<ActionDescriptor[]> => {
     const reader = await freshReader(projectId);
-    return runtime.listActions(actionHost(projectId, reader, signal, "author"));
+    return runtime.listActions(actionHost(projectId, reader, signal, source));
   };
   const proposeAs = async (
     projectId: string,
@@ -972,6 +972,7 @@ export function createServer(options: ApiServerOptions): Server {
       projectId,
       reader,
       signal,
+      caller: access === "public" || source === "mcp" ? "external-agent" : "author",
       actions: access === "public" ? [] : buildCoreActions(projectId),
       propose: async (operations: ChangeOperation[], evidence?: ProposalEvidence[], proposalId?: string, proposalSignal?: AbortSignal) => {
         if (access === "public") throw httpFailure(403, "PUBLIC_PROPOSAL_DENIED", "Public module requests cannot propose changes");
@@ -1554,6 +1555,10 @@ export function createServer(options: ApiServerOptions): Server {
       if (!isCookie) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An owner session is required");
       return undefined;
     };
+    const requireAuthorSession = async (): Promise<HostedPrincipal | undefined> => {
+      if (!isCookie) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author browser session is required");
+      return requireWritePermission();
+    };
     if (shuttingDown && routePath.startsWith("/api/") && !isRead) {
       fail(response, 503, "SHUTTING_DOWN", "The server is draining and is not accepting new mutations");
       return;
@@ -1578,7 +1583,7 @@ export function createServer(options: ApiServerOptions): Server {
       body: parsedBody,
       requestHeaders: request.headers,
       requireAuthor: async () => {
-        const principal = await requireWritePermission();
+        const principal = await requireAuthorSession();
         return principal?.userId ?? "owner";
       },
     });
@@ -1831,26 +1836,29 @@ export function createServer(options: ApiServerOptions): Server {
         sendJson(response, 200, proposal); return;
       }
       if (suffix === "approvals" && method === "POST") {
-        const approver = await requireWritePermission();
+        const approver = await requireAuthorSession();
         const body = await readJson(request, parsedBody);
         if (!isRecord(body) || typeof body.proposalId !== "string" || !body.proposalId || !Array.isArray(body.operationIds) || !body.operationIds.every((id) => typeof id === "string")) throw httpFailure(400, "INVALID_APPROVAL", "Proposal and operation IDs are required");
         await options.store.approve(projectId, { proposalId: body.proposalId, operationIds: body.operationIds as string[], authorScope: hosted ? `hosted:${approver!.userId}` : "owner" });
         response.writeHead(204); response.end(); return;
       }
       if (suffix === "apply" && method === "POST") {
-        await requireWritePermission();
+        await requireAuthorSession();
         const body = await readJson(request, parsedBody);
         sendJson(response, 201, await options.store.apply(projectId, body as ChangeOperation)); return;
       }
       if (suffix === "actions" && method === "GET") {
-        sendJson(response, 200, { actions: await listActionDescriptors(projectId, signal) }); return;
+        sendJson(response, 200, { actions: await listActionDescriptors(projectId, signal, isBearer ? "mcp" : "author") }); return;
       }
       const actionMatch = suffix.match(/^actions\/([^/]+)$/u);
       if (actionMatch && method === "POST") {
         const body = await readJson(request, parsedBody);
         if (!isRecord(body) || !("input" in body)) throw httpFailure(400, "INVALID_ACTION", "Action input is required");
         const actionId = parseProjectId(actionMatch[1]!);
-        const descriptors = await listActionDescriptors(projectId, signal);
+        if (isBearer && actionId.startsWith("assistant.")) {
+          throw httpFailure(403, "external_agent_assistant_denied", "External agents cannot invoke Assistant");
+        }
+        const descriptors = await listActionDescriptors(projectId, signal, isBearer || actionMatch[1]!.startsWith("mcp.") ? "mcp" : "author");
         const descriptor = descriptors.find((item) => item.id === actionId);
         if (!descriptor) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
         if (isBearer && !["read", "compute", "propose"].includes(descriptor.effect)) throw httpFailure(403, "BEARER_EFFECT_DENIED", "Bearer credentials may only invoke read, compute, and propose actions");
@@ -1977,6 +1985,9 @@ export function createServer(options: ApiServerOptions): Server {
       const moduleRoute = suffix.match(/^modules\/([^/]+)(?:\/(.*))?$/u);
       if (moduleRoute) {
         const moduleId = parseProjectId(moduleRoute[1]!);
+        if (moduleId === "assistant" && isBearer) {
+          throw httpFailure(403, "external_agent_assistant_denied", "External agents cannot invoke Assistant");
+        }
         const contribution = await contributionFor(moduleId, moduleRoute[2] ?? "", method);
         if (!contribution || contribution.access !== "owner") throw httpFailure(404, "MODULE_ROUTE_UNAVAILABLE", "Module route is unavailable");
         if (isBearer && !["read", "compute", "propose"].includes(contribution.effect)) throw httpFailure(403, "BEARER_EFFECT_DENIED", "Bearer credentials may only use read, compute, and propose module routes");
@@ -2011,7 +2022,7 @@ export function createServer(options: ApiServerOptions): Server {
         sendJson(response, 200, await writingStatsSnapshot(projectId, selected)); return;
       }
       if (suffix === "scratch" && method === "POST") {
-        const author = hosted ? await requireWritePermission() : (await requireWritePermission(), undefined);
+        const author = await requireAuthorSession();
         await createScratch(projectId, await readJson(request, parsedBody), hosted ? `hosted:${author!.userId}` : "owner", response); return;
       }
       if (suffix === "review-queue" && method === "GET") {
@@ -2044,7 +2055,7 @@ export function createServer(options: ApiServerOptions): Server {
       const projectId = query.get("projectId");
       if (!projectId) throw httpFailure(400, "PROJECT_REQUIRED", "projectId is required");
       assertAssignedProject(projectId);
-      const author = hosted ? await requireWritePermission() : (await requireWritePermission(), undefined);
+      const author = await requireAuthorSession();
       await createScratch(projectId, await readJson(request, parsedBody), hosted ? `hosted:${author!.userId}` : "owner", response);
       return;
     }
