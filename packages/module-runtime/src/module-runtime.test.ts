@@ -101,6 +101,61 @@ test("disabled modules are not imported; enabling an absent module reports redep
   await runtime.shutdown();
 });
 
+test("external-agent admission excludes Assistant discovery and denies direct, future, and HTTP entrypoints before loading", async () => {
+  const metadata = manifest("assistant");
+  const storyMetadata = manifest("story");
+  const schema: ValueSchema = { parse: (value) => value };
+  let loaded = 0;
+  let executed = 0;
+  const runtime = new ModuleRuntime({
+    manifests: [metadata, storyMetadata], enabled: ["assistant", "story"], cacheDirectory: "/tmp/codexia-runtime-test",
+    loaders: { story: async () => definition(storyMetadata, {
+      id: "compose", effect: "compute", inputSchema: schema, outputSchema: schema,
+      async invoke(_input, context) {
+        const nested = await context.invoke("assistant.future-generation", {});
+        return { ok: true, snapshot: context.reader.snapshot, data: nested };
+      },
+    }), assistant: async () => {
+      loaded += 1;
+      return {
+        manifest: metadata,
+        actions: [{
+          id: "future-generation", effect: "compute", inputSchema: schema, outputSchema: schema,
+          async invoke(_input, context) { executed += 1; return { ok: true, snapshot: context.reader.snapshot, data: {} }; },
+        }],
+        ui: [],
+        http: [{ id: "generate", path: "generate", methods: ["POST"], access: "owner", effect: "compute", async handle() {
+          executed += 1;
+          return Response.json({ generated: true });
+        } }],
+        async dispose() {},
+      };
+    } },
+  });
+  const externalHost = { ...readContext(), access: "owner" as const, caller: "external-agent" as const };
+  try {
+    assert.deepEqual((await runtime.listActions(externalHost)).map(({ id }) => id), ["story.compose"]);
+    const direct = await runtime.invokeAction("assistant", "assistant.future-generation", {}, externalHost);
+    assert.equal(direct.ok, false);
+    if (!direct.ok) assert.equal(direct.error.code, "external_agent_assistant_denied");
+    const future = await runtime.invokeAction("assistant", "assistant.future-action", {}, externalHost);
+    assert.equal(future.ok, false);
+    if (!future.ok) assert.equal(future.error.code, "external_agent_assistant_denied");
+    const outer = await runtime.invokeAction("story", "story.compose", {}, externalHost);
+    assert.equal(outer.ok, true);
+    const nested = outer.ok ? outer.data as ActionResult : undefined;
+    assert.equal(nested?.ok, false, "nested Assistant invocation must retain the external-agent boundary");
+    if (nested && !nested.ok) assert.equal(nested.error.code, "external_agent_assistant_denied");
+    const http = await runtime.invokeHttp("assistant", "generate", new Request("http://localhost/generate", { method: "POST" }), externalHost);
+    assert.equal(http.status, 403);
+    assert.deepEqual(await http.json(), { error: { code: "external_agent_assistant_denied", message: "External agents cannot invoke Assistant", retryable: false } });
+    assert.equal(loaded, 0, "external discovery and dispatch must not load Assistant provider code");
+    assert.equal(executed, 0, "external dispatch must not enter an Assistant action or HTTP handler");
+  } finally {
+    await runtime.shutdown();
+  }
+});
+
 test("authenticated action catalogs expose only a cloned module domain job descriptor", async () => {
   const metadata = manifest("speaker");
   const declaration = { type: "speaker-eval", privateExtra: "must not escape" };

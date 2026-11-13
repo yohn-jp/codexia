@@ -7,10 +7,12 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
+import { createServer as createNodeServer } from "node:http";
 import test from "node:test";
 
 import { CoreStore } from "../../packages/core/dist/index.js";
 import { MODEL_USAGE_CAPABILITY } from "../../packages/contracts/dist/index.js";
+import { createPostgresPersistence, migratePostgresDatabase } from "../../packages/persistence-postgres/dist/index.js";
 import { ModuleRuntime } from "../../packages/module-runtime/dist/index.js";
 import { createServer } from "../../packages/api/dist/server.js";
 import { HistoricalModelUsageStore } from "../../packages/api/dist/historical-store.js";
@@ -171,6 +173,39 @@ async function startHost({ dataDirectory, cacheDirectory, store: suppliedStore, 
   };
 }
 
+async function startAdmissionHost({ cacheDirectory, usageDirectory }) {
+  const databaseUrl = process.env.CODEXIA_TEST_DATABASE_URL ?? process.env.CODEXIA_DATABASE_URL;
+  if (!databaseUrl) throw new Error("CODEXIA_TEST_DATABASE_URL must name a disposable PostgreSQL database for MCP admission acceptance");
+  await migratePostgresDatabase(databaseUrl);
+  const persistence = createPostgresPersistence(databaseUrl);
+  const runtime = await runtimeOptions(cacheDirectory, usageDirectory);
+  const store = new CoreStore({ persistence });
+  const server = createServer({
+    store, persistence, authToken: ACCESS_TOKEN, staticDir: resolve(root, "app/dist"), runtime, usageDirectory,
+    profile: "mcp-admission-acceptance",
+  });
+  await new Promise((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => { server.removeListener("error", reject); resolveListen(); });
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  let closePromise;
+  return {
+    base: `http://127.0.0.1:${address.port}`, runtime, store,
+    close() {
+      closePromise ??= new Promise((resolveClose, rejectClose) => {
+        server.close(async (error) => {
+          if (error) { rejectClose(error); return; }
+          try { await runtime.shutdown(); await persistence.close(); resolveClose(); }
+          catch (closeError) { rejectClose(closeError); }
+        });
+      });
+      return closePromise;
+    },
+  };
+}
+
 async function apiRequest(host, path, { method = "GET", body, cookie, bearer = false } = {}) {
   const headers = {};
   if (cookie) headers.Cookie = cookie;
@@ -319,6 +354,33 @@ async function waitUntil(predicate, timeoutMs, message) {
   assert.fail(message);
 }
 
+async function startProviderProbe() {
+  let calls = 0;
+  const server = createNodeServer((request, response) => {
+    calls += 1;
+    request.resume();
+    request.once("end", () => {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({
+        id: "provider-probe-response", object: "chat.completion", created: 0, model: "admission-probe",
+        choices: [{ index: 0, message: { role: "assistant", content: "{}" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }));
+    });
+  });
+  await new Promise((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => { server.removeListener("error", reject); resolveListen(); });
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    callCount: () => calls,
+    close: () => new Promise((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose())),
+  };
+}
+
 async function verifyCancellation(connection, host, projectId, label) {
   const controller = new AbortController();
   const inputText = "あ".repeat(300_000);
@@ -379,6 +441,88 @@ async function remoteContainsString(remote, value) {
   return (await git(root, "--git-dir", remote, "log", "--all", "--format=%H", "--fixed-strings", `-S${value}`)).length > 0;
 }
 
+test("stdio and Streamable HTTP enforce external Assistant admission with a configured provider", {
+  skip: !READY_MODULES.includes("assistant"),
+  timeout: 120_000,
+}, async (t) => {
+  const rootDir = await mkdtemp(resolve(tmpdir(), "codexia-mcp-first-admission-"));
+  const usageDirectory = resolve(rootDir, "host-history");
+  const providerEnvNames = ["ARCADIA_LLM_PROVIDER", "ARCADIA_LLM_MODEL", "ARCADIA_LLM_BASE_URL", "ARCADIA_LLM_API_KEY"];
+  const previousProviderEnv = new Map(providerEnvNames.map((name) => [name, process.env[name]]));
+  const providerProbe = await startProviderProbe();
+  process.env.ARCADIA_LLM_PROVIDER = "openai-compatible";
+  process.env.ARCADIA_LLM_MODEL = "admission-probe";
+  process.env.ARCADIA_LLM_BASE_URL = providerProbe.baseUrl;
+  process.env.ARCADIA_LLM_API_KEY = "integration-placeholder";
+  let host;
+  let stdio;
+  let http;
+  t.after(async () => {
+    await closeMcpClient(http, true);
+    await closeMcpClient(stdio);
+    await host?.close().catch(() => undefined);
+    await providerProbe.close();
+    await rm(rootDir, { recursive: true, force: true });
+    for (const [name, value] of previousProviderEnv) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  host = await startAdmissionHost({ cacheDirectory: resolve(rootDir, "module-cache"), usageDirectory });
+  const cookie = await login(host);
+  const project = await ownerJson(host, cookie, "/api/projects", {
+    method: "POST", status: 201, body: { title: "MCP admission acceptance" },
+  });
+  const projectId = project.id;
+  stdio = await startStdioClient(host, projectId);
+  http = await startHttpClient(host, projectId);
+
+  for (const [name, connection] of [["stdio", stdio], ["Streamable HTTP", http]]) {
+    const actions = success(await connection.client.callTool({
+      name: "discover_actions", arguments: { project_id: projectId },
+    }), `${name} action discovery`);
+    assert.ok(actions.data.actions.some((action) => action.id === "core.status"));
+    assert.equal(actions.data.actions.some((action) => action.id.startsWith("assistant.")), false,
+      `${name} action catalog exposed Assistant`);
+    const status = success(await connection.client.callTool({
+      name: "invoke_action", arguments: { project_id: projectId, action_id: "core.status", input: {} },
+    }), `${name} Core status`);
+    assert.ok(status.snapshot && status.data);
+
+    const unknownAssistant = await connection.client.callTool({
+      name: "invoke_action", arguments: { project_id: projectId, action_id: "assistant.future-generation", input: {} },
+    });
+    assert.equal(errorCode(unknownAssistant, `${name} unknown Assistant action`), "ACTION_UNAVAILABLE");
+    const namedAssistant = await connection.client.callTool({
+      name: "suggest_rewrite", arguments: { project_id: projectId, scene_id: "missing-scene", sentence_index: 0 },
+    });
+    assert.equal(errorCode(namedAssistant, `${name} Assistant named tool`), "MODULE_UNAVAILABLE");
+  }
+
+  const bearerAction = await apiRequest(host, `/api/projects/${encodeURIComponent(projectId)}/actions/assistant.future-generation`, {
+    method: "POST", bearer: true, body: { input: {} },
+  });
+  assert.equal(bearerAction.status, 403);
+  assert.equal((await responseJson(bearerAction, "direct bearer Assistant action")).code, "external_agent_assistant_denied");
+  const bearerHttp = await apiRequest(host, `/api/projects/${encodeURIComponent(projectId)}/modules/assistant/rewrite/stream`, {
+    method: "POST", bearer: true, body: { sceneId: "missing-scene", sentenceIndex: 0 },
+  });
+  assert.equal(bearerHttp.status, 403);
+  assert.equal((await responseJson(bearerHttp, "direct bearer Assistant HTTP route")).code, "external_agent_assistant_denied");
+
+  const proposal = success(await stdio.client.callTool({
+    name: "invoke_action",
+    arguments: { project_id: projectId, action_id: "core.hierarchy.create", input: {
+      kind: "volume", id: "mcp-proposed-volume", title: "Proposed volume", proposalId: "mcp-admission-proposal",
+    } },
+  }), "MCP Core proposal");
+  assert.equal(proposal.data.proposal.source, "mcp");
+  assert.equal(providerProbe.callCount(), 0, "MCP dispatch and direct bearer paths must not call the configured model provider");
+  const usage = await ownerAction(host, cookie, projectId, "assistant.usage.read", { limit: 200 });
+  assert.deepEqual(usage.data.events, [], "denied Assistant requests must not create provider usage records");
+});
+
 test("spawned stdio and production HTTP MCP preserve Core review boundaries through publish and restart", {
   timeout: 240_000,
 }, async (t) => {
@@ -388,6 +532,15 @@ test("spawned stdio and production HTTP MCP preserve Core review boundaries thro
   const staticDirectory = resolve(rootDir, "static");
   await mkdir(staticDirectory, { recursive: true });
   const fixture = await createSyntheticRemote(rootDir);
+  const providerEnvNames = ["ARCADIA_LLM_PROVIDER", "ARCADIA_LLM_MODEL", "ARCADIA_LLM_BASE_URL", "ARCADIA_LLM_API_KEY"];
+  const previousProviderEnv = new Map(providerEnvNames.map((name) => [name, process.env[name]]));
+  const providerProbe = READY_MODULES.includes("assistant") ? await startProviderProbe() : undefined;
+  if (providerProbe) {
+    process.env.ARCADIA_LLM_PROVIDER = "openai-compatible";
+    process.env.ARCADIA_LLM_MODEL = "admission-probe";
+    process.env.ARCADIA_LLM_BASE_URL = providerProbe.baseUrl;
+    process.env.ARCADIA_LLM_API_KEY = "integration-placeholder";
+  }
   let host;
   let stdio;
   let http;
@@ -396,6 +549,11 @@ test("spawned stdio and production HTTP MCP preserve Core review boundaries thro
     await closeMcpClient(stdio);
     await host?.close().catch(() => undefined);
     await rm(rootDir, { recursive: true, force: true });
+    await providerProbe?.close();
+    for (const [name, value] of previousProviderEnv) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   });
 
   host = await startHost({ dataDirectory, cacheDirectory: resolve(rootDir, "module-cache-first") });
@@ -433,7 +591,8 @@ test("spawned stdio and production HTTP MCP preserve Core review boundaries thro
     assert.ok(actionIds.has("speaker.dialogue.list"));
     assert.ok(actionIds.has("speaker.voice.check"));
   }
-  if (READY_MODULES.includes("assistant")) assert.ok(actionIds.has("assistant.rewrite"));
+  assert.equal([...actionIds].some((id) => id.startsWith("assistant.")), false,
+    "external MCP discovery must omit every Assistant action even when the module is enabled");
 
   const status = success(await http.client.callTool({
     name: "get_status", arguments: { project_id: projectId },
@@ -662,59 +821,35 @@ test("spawned stdio and production HTTP MCP preserve Core review boundaries thro
     }), "format_manuscript without diagnostics module"), "MODULE_UNAVAILABLE");
   }
 
-  const rewriteProvider = process.env.CODEXIA_MCP_ACCEPTANCE_REWRITE_PROVIDER;
-  if (rewriteProvider === "qwen-local") {
-    assert.ok(READY_MODULES.includes("assistant"), "Qwen rewrite acceptance requires the real Assistant module");
-    assert.equal(process.env.ARCADIA_LLM_PROVIDER, "openai-compatible");
-    assert.match(process.env.ARCADIA_LLM_BASE_URL ?? "", /^http:\/\/127\.0\.0\.1:\d+\/v1$/u,
-      "Qwen acceptance must use an OpenAI-compatible loopback endpoint");
-    assert.match(process.env.ARCADIA_LLM_MODEL ?? "", /Qwen3/u,
-      "Qwen acceptance must select the pinned local Qwen model");
-    const proposalsBeforeRewrite = await ownerJson(host, cookie,
-      `/api/projects/${encodeURIComponent(projectId)}/proposals`);
-    const manuscriptBeforeRewrite = await readRemoteFile(fixture.remote,
-      "manuscript/vol-main/ch-main-1/sc-1.md");
-    const rewrites = [];
-    for (const [name, connection] of [["stdio", stdio], ["HTTP", http]]) {
-      const result = success(await connection.client.callTool({
-        name: "suggest_rewrite",
-        arguments: { project_id: projectId, scene_id: "sc-1", sentence_index: 2 },
-      }), `${name} Qwen suggest_rewrite`);
-      assert.equal(result.data.sceneId, "sc-1");
-      assert.equal(result.data.sentenceIndex, 2);
-      assert.equal(result.data.originalSentence, "Uma enters the cafe at dusk.");
-      assert.equal(typeof result.data.prompt, "string");
-      assert.ok(result.data.prompt.length > 0);
-      assert.match(result.data.prompt, /0始まりの文番号 2/u,
-        "Rewrite prompt must preserve the selected zero-based source sentence index, including blank-line filtering");
-      assert.ok(result.data.context && typeof result.data.context === "object");
-      assert.equal(result.data.suggestions.length, 3, "Qwen must return the source-required three rewrite candidates");
-      assert.ok(result.data.suggestions.every((item) => typeof item.text === "string" && item.text.trim()));
-      assert.ok(result.data.suggestions.every((item) => ["concise", "contextual", "voice"].includes(item.strategy)),
-        "Rewrite candidates must preserve the pinned source strategy vocabulary");
-      assert.equal(result.data.model, process.env.ARCADIA_LLM_MODEL);
-      assert.equal(result.data.provider, "openai-compatible");
-      assert.equal(result.snapshot.remoteCommit, status.snapshot.remoteCommit,
-        `${name} rewrite must remain bound to the selected remote snapshot`);
-      assert.equal(result.proposals, undefined, "suggest_rewrite computes choices and must never propose or approve them");
-      rewrites.push(result.data);
-    }
-    assert.notDeepEqual(rewrites[0].suggestions, [], "The real Qwen provider returned no candidates");
-    const proposalsAfterRewrite = await ownerJson(host, cookie,
-      `/api/projects/${encodeURIComponent(projectId)}/proposals`);
-    assert.deepEqual(proposalsAfterRewrite.proposals.map((item) => item.proposal?.id).sort(),
-      proposalsBeforeRewrite.proposals.map((item) => item.proposal?.id).sort(),
-      "Rewrite computation created a persistent Core proposal");
-    assert.equal(await readRemoteFile(fixture.remote, "manuscript/vol-main/ch-main-1/sc-1.md"), manuscriptBeforeRewrite,
-      "Rewrite computation changed persistent manuscript data");
-  } else {
-    assert.ok(!process.env.ARCADIA_LLM_PROVIDER || process.env.ARCADIA_LLM_PROVIDER === "none",
-      "Set CODEXIA_MCP_ACCEPTANCE_REWRITE_PROVIDER=qwen-local to opt in to the local provider acceptance");
-    const rewrite = await stdio.client.callTool({
-      name: "suggest_rewrite", arguments: { project_id: projectId, scene_id: "sc-1", sentence_index: 2 },
+  for (const [name, connection] of [["stdio", stdio], ["Streamable HTTP", http]]) {
+    const futureAction = await connection.client.callTool({
+      name: "invoke_action",
+      arguments: { project_id: projectId, action_id: "assistant.future-generation", input: {} },
     });
-    assert.equal(errorCode(rewrite, "suggest_rewrite without a model provider"),
-      READY_MODULES.includes("assistant") ? "assistant_provider_unavailable" : "MODULE_UNAVAILABLE");
+    assert.equal(errorCode(futureAction, `${name} unknown future Assistant action`), "ACTION_UNAVAILABLE");
+    const namedTool = await connection.client.callTool({
+      name: "suggest_rewrite",
+      arguments: { project_id: projectId, scene_id: "sc-1", sentence_index: 2 },
+    });
+    assert.equal(errorCode(namedTool, `${name} Assistant named tool`), "MODULE_UNAVAILABLE");
+  }
+  const directBearerAction = await apiRequest(host,
+    `/api/projects/${encodeURIComponent(projectId)}/actions/assistant.future-generation`,
+    { method: "POST", bearer: true, body: { input: {} } });
+  assert.equal(directBearerAction.status, 403);
+  assert.equal((await responseJson(directBearerAction, "direct bearer Assistant action")).code,
+    "external_agent_assistant_denied");
+  const directBearerHttp = await apiRequest(host,
+    `/api/projects/${encodeURIComponent(projectId)}/modules/assistant/rewrite/stream`,
+    { method: "POST", bearer: true, body: { sceneId: "sc-1", sentenceIndex: 2 } });
+  assert.equal(directBearerHttp.status, 403);
+  assert.equal((await responseJson(directBearerHttp, "direct bearer Assistant HTTP route")).code,
+    "external_agent_assistant_denied");
+  assert.equal(providerProbe?.callCount() ?? 0, 0,
+    "stdio, Streamable HTTP, direct bearer action and HTTP admission must not issue an internal model request");
+  if (READY_MODULES.includes("assistant")) {
+    const usage = await ownerAction(host, cookie, projectId, "assistant.usage.read", { limit: 200 });
+    assert.deepEqual(usage.data.events, [], "denied external Assistant requests must not create model usage records");
   }
 
   await verifyCancellation(stdio, host, projectId, "spawned stdio");

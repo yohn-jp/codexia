@@ -492,9 +492,9 @@ async function startHostedApi(
   return { server, base, close };
 }
 
-function rawHostedRequestStatus(urlValue: string, headers: Record<string, string>): Promise<number> {
+function rawHostedRequest(urlValue: string, headers: Record<string, string>, body?: string): Promise<{ status: number; body: string }> {
   const url = new URL(urlValue);
-  return new Promise((resolveStatus, reject) => {
+  return new Promise((resolveResponse, reject) => {
     const request = httpRequest({
       hostname: "127.0.0.1",
       port: Number(url.port),
@@ -502,12 +502,17 @@ function rawHostedRequestStatus(urlValue: string, headers: Record<string, string
       method: "POST",
       headers,
     }, (response) => {
-      response.resume();
-      response.once("end", () => resolveStatus(response.statusCode ?? 0));
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.once("end", () => resolveResponse({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }));
     });
     request.once("error", reject);
-    request.end();
+    request.end(body);
   });
+}
+
+async function rawHostedRequestStatus(urlValue: string, headers: Record<string, string>, body?: string): Promise<number> {
+  return (await rawHostedRequest(urlValue, headers, body)).status;
 }
 
 function runtimeControlToken(action: "status" | "quiesce" | "resume", operationId: string, payloadDigest: string): string {
@@ -2910,6 +2915,71 @@ for (const status of [502, 503] as const) {
   }
 }
 
+
+it("Hosted Bearer write grants can propose but cannot perform author-only persistence, approval, or apply", async (t) => {
+  const fixture = makeSnapshotStore();
+  let documentWrites = 0;
+  const persistence = {
+    ...admissionPersistence(fixture.store),
+    async transaction<T>(work: (transaction: { createDocument(input: unknown): Promise<unknown> }) => Promise<T>): Promise<T> {
+      documentWrites += 1;
+      return work({ async createDocument(input) { return { id: "author-document", input }; } });
+    },
+  } as unknown as Persistence;
+  const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-author-session-"));
+  const apiServer = await startHostedApi(fixture.store, staticDir, hostedTestPolicy(), undefined, undefined, undefined, persistence);
+  t.after(async () => { await apiServer.close(); await rm(staticDir, { recursive: true, force: true }); });
+
+  const bearerHeaders = { Authorization: "Bearer write-grant", "Content-Type": "application/json" };
+  const documentPath = `${apiServer.base}/api/v1/persistence/projects/project-1/documents`;
+  const bearerDocument = await fetch(documentPath, {
+    method: "POST", headers: bearerHeaders,
+    body: JSON.stringify({ kind: "scene", title: "Bearer document", markdown: "Denied." }),
+  });
+  assert.equal(bearerDocument.status, 403);
+  assert.equal((await bearerDocument.json() as { code: string }).code, "AUTHOR_SESSION_REQUIRED");
+  assert.equal(documentWrites, 0, "a bearer grant must be rejected before native Persistence.transaction");
+
+  const operation: ChangeOperation = {
+    id: "hosted-review-operation", generation: 0, projectId: "project-1", baseProjectVersion: 1,
+    effect: "metadata", reads: [], writes: [], message: "Reviewable hosted proposal",
+  };
+  const proposalResponse = await fetch(`${apiServer.base}/api/projects/project-1/proposals`, {
+    method: "POST", headers: bearerHeaders,
+    body: JSON.stringify({ id: "hosted-review-proposal", snapshot: SNAPSHOT, operations: [operation] }),
+  });
+  assert.equal(proposalResponse.status, 201, "a Hosted write grant may submit an MCP proposal");
+
+  const bearerApproval = await fetch(`${apiServer.base}/api/projects/project-1/approvals`, {
+    method: "POST", headers: bearerHeaders,
+    body: JSON.stringify({ proposalId: "hosted-review-proposal", operationIds: [operation.id] }),
+  });
+  assert.equal(bearerApproval.status, 403);
+  assert.equal((await bearerApproval.json() as { code: string }).code, "AUTHOR_SESSION_REQUIRED");
+  const bearerApply = await fetch(`${apiServer.base}/api/projects/project-1/apply`, {
+    method: "POST", headers: bearerHeaders, body: JSON.stringify(operation),
+  });
+  assert.equal(bearerApply.status, 403);
+  assert.equal((await bearerApply.json() as { code: string }).code, "AUTHOR_SESSION_REQUIRED");
+  assert.equal(fixture.approvals.length, 0);
+  assert.equal(fixture.proposed.length, 1);
+
+  const cookieHeaders = {
+    Host: "instance-1.instances.example", "X-Forwarded-Proto": "https", Origin: HOSTED_ASSIGNMENT.grantPolicy.audience,
+    Cookie: "__Host-praetorium_access=write-grant; __Host-praetorium_csrf=csrf-value",
+    "X-CSRF-Token": "csrf-value", "Content-Type": "application/json", "Idempotency-Key": "hosted-author-document-1",
+  };
+  const authorDocument = await rawHostedRequest(documentPath, cookieHeaders,
+    JSON.stringify({ kind: "scene", title: "Author document", markdown: "Saved by author." }));
+  assert.equal(authorDocument.status, 201, authorDocument.body);
+  assert.equal(documentWrites, 1);
+  const authorApproval = await rawHostedRequestStatus(`${apiServer.base}/api/projects/project-1/approvals`, cookieHeaders,
+    JSON.stringify({ proposalId: "hosted-review-proposal", operationIds: [operation.id] }));
+  assert.equal(authorApproval, 204);
+  assert.equal(fixture.approvals[0]?.authorScope, "hosted:writer-1");
+  const authorApply = await rawHostedRequestStatus(`${apiServer.base}/api/projects/project-1/apply`, cookieHeaders, JSON.stringify(operation));
+  assert.equal(authorApply, 201);
+});
 
 it("portable work API enforces authentication, author writes, origin, hosted assignment and replay", async (t) => {
   const native = await nativeProject(t, "Portable HTTP");
