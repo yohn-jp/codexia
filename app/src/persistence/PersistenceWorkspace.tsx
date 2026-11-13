@@ -29,7 +29,7 @@ import { TermAwareRubyText } from "../editor/TermAwareRubyText";
 import { WRITING_SYMBOLS } from "../editor/writingSymbols";
 import { loadTypographySettings, storeTypographySettings, TYPOGRAPHY_PRESETS, typographyPresetValues, type TypographyPresetId } from "../editor/typography";
 import { ManuscriptInput, type ManuscriptInputHandle, type EvidenceRangeRequest } from "../editor/ManuscriptInput";
-import { initializeDocumentEvidence, type DocumentEvidenceState, type EditorEvidenceAdapter, type TextChange } from "../editor/evidence";
+import { initializeDocumentEvidence, markEvidenceNeedsReview, type DocumentEvidenceState, type EditorEvidenceAdapter, type TextChange } from "../editor/evidence";
 import { BrowserJournal } from "../storage/journal";
 import { createPostgresEditorEvidenceAdapter } from "../editor/postgresEvidenceAdapter";
 import { NativeChangeSetReview } from "./NativeChangeSetReview";
@@ -141,6 +141,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const [moduleError, setModuleError] = useState("");
   const [projects, setProjects] = useState<PersistenceProject[]>([]);
   const [projectId, setProjectId] = useState("");
+  const [nativeReviewEpoch, setNativeReviewEpoch] = useState(0);
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
   const [documents, setDocuments] = useState<PersistenceDocument[]>([]);
@@ -295,9 +296,10 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       if (!controller.signal.aborted) setNodeEvidenceError(error instanceof Error ? error.message : "根拠を読み込めませんでした。");
     });
     return () => controller.abort();
-  }, [projectId, selectedNode?.id, active?.revision.id, active?.evidenceLoadKey, resumeEpoch]);
+  }, [projectId, selectedNode?.id, active?.revision.id, active?.evidenceLoadKey, resumeEpoch, nativeReviewEpoch]);
 
   const refreshModules = useCallback(async () => {
+    if (projectIdRef.current !== projectId) return;
     const sequence = ++moduleSequenceRef.current;
     if (!projectId) { setModuleSnapshot(null); setModules([]); setContributions([]); setProposals([]); return; }
     try {
@@ -307,7 +309,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       const currentJournal = journalRef.current;
       if (currentJournal) {
         for (const status of remote.proposals) await currentJournal.putProposal(projectId, authorScope, status.proposal, status);
-        setProposals(await currentJournal.getProposals(projectId, authorScope));
+        const localProposals = await currentJournal.getProposals(projectId, authorScope);
+        if (sequence !== moduleSequenceRef.current || projectIdRef.current !== projectId) return;
+        setProposals(localProposals);
       }
       moduleFilesRef.current = read.files;
       setModules(statuses); setContributions(catalog); setModuleSnapshot(read.snapshot); setModuleError("");
@@ -315,7 +319,18 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   }, [projectId, authorScope]);
   const refreshAfterNativeApply = useCallback(() => {
     const appliedProjectId = projectId;
+    if (projectIdRef.current !== appliedProjectId) return;
+    setNativeReviewEpoch(current => current + 1);
     void refreshModules();
+    const captured = activeRef.current;
+    if (captured?.document.projectId === appliedProjectId) {
+      void editorAdapter.read({ projectId: appliedProjectId, documentId: captured.document.id, revisionId: captured.revision.id, markdown: captured.revision.markdown }, new AbortController().signal).then(snapshot => {
+        const latest = activeRef.current;
+        if (projectIdRef.current !== appliedProjectId || latest?.document.id !== captured.document.id || latest.revision.id !== captured.revision.id) return;
+        const evidence = initializeDocumentEvidence(captured.revision.markdown, captured.revision.id, snapshot);
+        publishEditor({ ...latest, evidence: latest.dirty || latest.remoteConflict ? markEvidenceNeedsReview(evidence) : evidence, evidenceLoadKey: latest.evidenceLoadKey + 1 });
+      }).catch((error: unknown) => { if (projectIdRef.current === appliedProjectId) setNotice(error instanceof Error ? `適用後の根拠を再読み込みできませんでした。${error.message}` : "適用後の根拠を再読み込みできませんでした。"); });
+    }
     void Promise.all([api.persistenceNodes(appliedProjectId, 500), api.persistenceProject(appliedProjectId)]).then(([nodeResult, projectResult]) => {
       if (projectIdRef.current !== appliedProjectId) return;
       setNodes(nodeResult.nodes);
@@ -323,7 +338,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     }).catch((error: unknown) => {
       if (projectIdRef.current === appliedProjectId) setNotice(error instanceof Error ? `適用後の作品状態を再読み込みできませんでした。${error.message}` : "適用後の作品状態を再読み込みできませんでした。");
     });
-  }, [projectId, refreshModules]);
+  }, [projectId, refreshModules, publishEditor]);
   useEffect(() => { void refreshModules(); }, [refreshModules, journal, active?.revision.id, resumeEpoch]);
 
   const openDocument = useCallback(async (nextDocumentId: string): Promise<void> => {
@@ -1136,7 +1151,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     }
   }, [evidenceJump, projectId, documentId, active]);
 
-  async function openNodeEvidence(item: PersistenceAnchorView): Promise<void> {
+  async function openNodeEvidence(item: { anchor: Pick<PersistenceAnchorView["anchor"], "projectId" | "documentId" | "revisionId" | "fromUtf16" | "toUtf16" | "status">; quote: string }): Promise<void> {
     const { anchor, quote } = item;
     if (!project || anchor.projectId !== project.id || !documents.some((document) => document.id === anchor.documentId)) {
       setPageError("この作品の根拠文書が見つかりません。");
@@ -1361,7 +1376,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
               {node.status === "proposed" && <button type="button" onClick={() => void confirmKnowledge(node)}>内容を確認して確定</button>}
             </li>)}
           </ul>
-          {selectedNode && <KnowledgeContextInspector key={selectedNode.id} node={selectedNode} nodes={nodes} documentId={active?.document.id} revisionId={active?.revision.id} clean={Boolean(active&&!active.dirty&&!active.remoteConflict&&active.save==="saved")} selectedEvidenceId={selectedEvidenceId??""} evidenceLoadKey={active?.evidenceLoadKey??0} onOpenEvidence={(item)=>void openNodeEvidence(item)} onNodeUpdate={(updated)=>setNodes(current=>current.map(item=>item.id===updated.id?updated:item))} onMerge={(target,source)=>{setNodes(current=>current.filter(item=>item.id!==source.id).map(item=>item.id===target.id?target:item));setNodeId(target.id);setNotice("Knowledgeを統合しました。")}} />}
+          {selectedNode && <KnowledgeContextInspector key={selectedNode.id} node={selectedNode} nodes={nodes} documentId={active?.document.id} revisionId={active?.revision.id} clean={Boolean(active&&!active.dirty&&!active.remoteConflict&&active.save==="saved")} selectedEvidenceId={selectedEvidenceId??""} evidenceLoadKey={(active?.evidenceLoadKey??0)+nativeReviewEpoch} onOpenEvidence={(item)=>void openNodeEvidence(item)} onNodeUpdate={(updated)=>setNodes(current=>current.map(item=>item.id===updated.id?updated:item))} onMerge={(target,source)=>{setNodes(current=>current.filter(item=>item.id!==source.id).map(item=>item.id===target.id?target:item));setNodeId(target.id);setNotice("Knowledgeを統合しました。")}} />}
           {selectedNode && <section aria-label="Knowledgeの根拠">
             <h3>{selectedNode.name}の根拠</h3>
             {nodeEvidenceError && <p role="alert">{nodeEvidenceError}</p>}
@@ -1418,7 +1433,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     snapshot: moduleSnapshot, journal, refresh: refreshModules, onProposalStored: () => { void refreshModules(); }, readCurrentEditor,
     navigateDocument: navigateReference,
   });
-  panels.push({ id: "review", title: "提案レビュー", render: () => <>{moduleError && <p role="alert">{moduleError}</p>}<NativeChangeSetReview key={projectId} projectId={projectId} onApplied={refreshAfterNativeApply} />{journal && <ProposalReview projectId={projectId} authorScope={authorScope} journal={journal} proposals={proposals} onChange={() => { void refreshModules(); }} onStatus={(message) => setNotice(message)} />}</> }, ...modulePanels);
+  panels.push({ id: "review", title: "提案レビュー", render: () => <>{moduleError && <p role="alert">{moduleError}</p>}<NativeChangeSetReview key={projectId} projectId={projectId} onApplied={refreshAfterNativeApply} onOpenSource={(anchor, quote) => openNodeEvidence({ anchor, quote })} />{journal && <ProposalReview projectId={projectId} authorScope={authorScope} journal={journal} proposals={proposals} onChange={() => { void refreshModules(); }} onStatus={(message) => setNotice(message)} />}</> }, ...modulePanels);
   const Shell = mode === "mobile" ? MobileShell : DesktopShell;
   const currentDesktopDurability = desktopDurabilityFor(active);
   return <div className={`pg-workspace pg-shell pg-${mode}`}>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChangeSet, ChangeSetApplicationResult } from "@codexia/persistence-contracts";
+import type { ChangeSet, ChangeSetApplicationResult, SaveEvidenceAnchorCommand } from "@codexia/persistence-contracts";
 import { ApiError } from "../api-error";
 import { api } from "../api";
 
@@ -20,10 +20,11 @@ function statusLabel(status: ChangeSet["status"]): string {
   return ({ proposed: "提案", approved: "承認済み・未適用", applied: "適用済み", rejected: "却下" })[status];
 }
 
-export function NativeChangeSetReview({ projectId, canWrite = true, onApplied }: {
+export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, onOpenSource }: {
   projectId: string;
   canWrite?: boolean;
   onApplied: () => void;
+  onOpenSource?: (anchor: SaveEvidenceAnchorCommand, quote: string) => Promise<void>;
 }) {
   const [changeSets, setChangeSets] = useState<ChangeSet[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -31,6 +32,9 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied }:
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [sourceQuote, setSourceQuote] = useState<{ key: string; quote: string } | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const sequence = useRef(0);
   const applyVersions = useRef(new Map<string, number>());
   const selectedIdRef = useRef(selectedId);
@@ -42,6 +46,8 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied }:
     const currentSequence = ++sequence.current;
     setLoading(true);
     setMessage("");
+    setDetail(null);
+    setSourceQuote(null);
     try {
       const result = await api.nativeChangeSets(projectId, 100, signal);
       if (signal?.aborted || sequence.current !== currentSequence) return;
@@ -85,6 +91,7 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied }:
     const currentSequence = ++sequence.current;
     setSelectedId(id);
     setDetail(null);
+    setSourceQuote(null);
     setLoading(true);
     setMessage("");
     try {
@@ -100,7 +107,7 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied }:
 
   const updateAfterAction = useCallback(async (id: string, action: "approve" | "reject" | "apply") => {
     const before = detail?.changeSet;
-    if (!before || before.id !== id || busy || !canWrite) return;
+    if (!before || before.id !== id || busy || loading || !canWrite || before.projectId !== projectId) return;
     if (action === "apply" && before.status !== "approved") return;
     setBusy(true);
     setMessage("");
@@ -118,12 +125,14 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied }:
       else if (action === "reject") await api.rejectNativeChangeSet(projectId, id, requestVersion);
       else {
         const applied = await api.applyNativeChangeSet(projectId, id, requestVersion);
-        if (projectIdRef.current !== projectId) return;
+        if (!mounted.current || projectIdRef.current !== projectId) return;
+        if (applied.changeSet.id !== id || applied.changeSet.projectId !== projectId) throw new Error("適用receiptの識別子が一致しません。");
         applyVersions.current.delete(id);
         setDetail({ changeSet: applied.changeSet, receipt: applied });
         refreshProjection();
       }
     } catch (error) {
+      if (!mounted.current || projectIdRef.current !== projectId) return;
       actionError = error;
       setMessage(`${errorText(error)} 結果をサーバーから照合しています。`);
       // A lost response may follow a committed action. Always re-read authoritative state and receipt.
@@ -133,13 +142,14 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied }:
         api.nativeChangeSets(projectId, 100),
         api.nativeChangeSet(projectId, id),
       ]);
-      if (projectIdRef.current !== projectId || projectId !== authoritative.changeSet.projectId) return;
+      if (!mounted.current || projectIdRef.current !== projectId) return;
+      if (projectId !== authoritative.changeSet.projectId || authoritative.changeSet.id !== id || list.changeSets.some(item => item.projectId !== projectId)) throw new Error("ChangeSetの作品または提案識別子が一致しません。");
       setChangeSets(list.changeSets);
       setDetail(authoritative);
       if (authoritative.receipt || authoritative.changeSet.status === "applied") {
         applyVersions.current.delete(id);
         refreshProjection();
-        setMessage("適用receiptを確認しました。正本の状態を再読み込みしました。");
+        setMessage(authoritative.receipt ? "適用receiptを確認しました。正本の状態を再読み込みしました。" : "適用済みの状態を確認しました。receiptは再確認してください。");
       } else if (authoritative.changeSet.status === "approved" && action === "apply") {
         applyVersions.current.set(id, requestVersion);
         setMessage(actionError instanceof ApiError
@@ -149,11 +159,27 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied }:
         setMessage(action === "approve" ? "承認を確認しました。適用は別の明示操作です。" : "却下を確認しました。正本への変更はありません。");
       }
     } catch (refreshError) {
-      setMessage(`${errorText(refreshError)} 最新状態の再確認を押してください。`);
+      if (mounted.current) setMessage(`${errorText(refreshError)} 最新状態の再確認を押してください。`);
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
-  }, [busy, canWrite, detail, onApplied, projectId]);
+  }, [busy, loading, canWrite, detail, onApplied, projectId]);
+
+  async function inspectSource(anchor: SaveEvidenceAnchorCommand, key: string) {
+    const sourceSequence = sequence.current;
+    setSourceQuote(null);
+    try {
+      const result = await api.persistenceDocument(projectId, anchor.documentId, undefined, anchor.revisionId);
+      if (!mounted.current || sequence.current !== sourceSequence) return;
+      const revision = result.revision;
+      if (!revision || revision.id !== anchor.revisionId || revision.projectId !== projectId || revision.documentId !== anchor.documentId || anchor.fromUtf16 < 0 || anchor.toUtf16 <= anchor.fromUtf16 || anchor.toUtf16 > revision.markdown.length) throw new Error("提案の引用元Revisionまたは範囲を確認できません。");
+      const quote = revision.markdown.slice(anchor.fromUtf16, anchor.toUtf16);
+      const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(quote)))].map(byte => byte.toString(16).padStart(2, "0")).join("");
+      if (!mounted.current || sequence.current !== sourceSequence) return;
+      if (digest !== anchor.quoteSha256) throw new Error("引用元のハッシュが提案と一致しません。");
+      setSourceQuote({ key, quote });
+    } catch (error) { if (mounted.current && sequence.current === sourceSequence) setMessage(errorText(error)); }
+  }
 
   const current = detail?.changeSet;
   return <section className="proposal-review native-changeset-review" aria-labelledby="native-review-title">
@@ -173,12 +199,16 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied }:
     </ul>}
     {current && <article className="proposal-card native-changeset-card">
       <header><strong>{statusLabel(current.status)}</strong><span>{current.provenance.source}</span></header>
-      <p>提案ID: <code>{current.id}</code> · actor: <code>{current.provenance.actorId ?? current.authorId}</code></p>
+      <p>提案ID: <code>{current.id}</code> · actor: <code>{current.provenance.actorId ?? current.authorId}</code> · origin: {current.provenance.details.origin === "external-agent" ? "external-agent" : "author"}</p>
       <p>提案時の作品version: <code>{sourceProjectVersion(current)}</code> · ChangeSet version: <code>{current.version}</code></p>
       <p>作成: <time dateTime={current.createdAt}>{current.createdAt}</time></p>
       <h3>操作内容（{current.operations.length}）</h3>
       {current.operations.map((operation, index) => <section className="proposal-operation" key={`${operation.type}:${index}`}>
         <h4>{operation.type}</h4><pre>{JSON.stringify(operation.command, null, 2)}</pre>
+        {operation.type === "evidence.anchor.save" && <>
+          <button type="button" disabled={busy || loading} onClick={() => void inspectSource(operation.command, `${current.id}:${index}`)}>引用元Revisionを確認</button>
+          {sourceQuote?.key === `${current.id}:${index}` && <div><q>{sourceQuote.quote}</q><p>Revision: <code>{operation.command.revisionId}</code> · {operation.command.status}</p>{onOpenSource && <button type="button" onClick={() => void onOpenSource(operation.command, sourceQuote.quote).catch(error => setMessage(errorText(error)))}>原稿で確認</button>}</div>}
+        </>}
       </section>)}
       <h3>読み取り前提</h3><pre>{JSON.stringify(current.readSet, null, 2)}</pre>
       <h3>書き込み対象</h3><pre>{JSON.stringify(current.writeSet, null, 2)}</pre>
@@ -188,12 +218,12 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied }:
       {current.status === "applied" && !detail?.receipt && <p role="status">適用済みです。receiptを取得できませんでした。最新状態を再確認してください。</p>}
       <div className="proposal-actions">
         {current.status === "proposed" && <>
-          <button type="button" disabled={!canWrite || busy} onClick={() => void updateAfterAction(current.id, "approve")}>{!canWrite ? "閲覧専用" : busy ? "処理中…" : "承認する"}</button>
-          <button type="button" className="quiet-button" disabled={!canWrite || busy} onClick={() => void updateAfterAction(current.id, "reject")}>却下する</button>
+          <button type="button" disabled={!canWrite || busy || loading} onClick={() => void updateAfterAction(current.id, "approve")}>{!canWrite ? "閲覧専用" : busy ? "処理中…" : "承認する"}</button>
+          <button type="button" className="quiet-button" disabled={!canWrite || busy || loading} onClick={() => void updateAfterAction(current.id, "reject")}>却下する</button>
         </>}
         {current.status === "approved" && <>
           <p>承認済みです。適用まではPostgreSQLの正本は変更されません。</p>
-          <button type="button" disabled={!canWrite || busy} onClick={() => void updateAfterAction(current.id, "apply")}>{!canWrite ? "閲覧専用" : busy ? "適用結果を照合中…" : "承認済み提案を適用"}</button>
+          <button type="button" disabled={!canWrite || busy || loading} onClick={() => void updateAfterAction(current.id, "apply")}>{!canWrite ? "閲覧専用" : busy ? "適用結果を照合中…" : "承認済み提案を適用"}</button>
         </>}
       </div>
     </article>}
