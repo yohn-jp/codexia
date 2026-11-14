@@ -60,5 +60,4 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
           RELEASE_KIND: ${{ steps.version.outputs.kind }}
           RELEASE_SOURCE: ${{ steps.version.outputs.source }}
-          AUTO_MERGE: ${{ vars.CODEXIA_AUTO_RELEASE_MERGE }}
         run: bash scripts/prepare-release-pr.sh

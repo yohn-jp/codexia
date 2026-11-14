@@ -47,7 +47,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: codexia-backend-${{ github.event.pull_request.number || github.ref }}
+  group: codexia-backend-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   release-plan:

@@ -132,6 +132,13 @@ function main() {
     console.log(decision.release ? 'Build certified release source' : 'Defer backend publication to version release PR');
     return;
   }
+  if (command === 'candidate') {
+    const base=checkedRef(process.argv[3]), head=checkedRef(process.argv[4]);
+    assert.equal(git(['merge-base',base,head]),base,'Release candidate is stale');
+    const result=validateTransition(snapshot(base),snapshot(head),changedFiles(base,head));
+    assert.ok(result.release,'Expected a version-only release candidate');
+    console.log(JSON.stringify(result)); return;
+  }
   if (command === 'prepare') {
     assert.equal(git(['status','--porcelain']), '', 'Release preparation requires a clean checkout');
     const source=checkedRef(git(['rev-parse','HEAD']));
@@ -143,6 +150,6 @@ function main() {
     output('version',plan.version); output('kind',plan.kind); output('source',source);
     console.log(JSON.stringify(plan)); return;
   }
-  throw new Error('Usage: release-version.mjs <check|backend|prepare>');
+  throw new Error('Usage: release-version.mjs <check|backend|candidate|prepare>');
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

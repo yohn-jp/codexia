@@ -69,15 +69,3 @@ if [[ -z "$number" ]]; then
 else
   gh api --method PATCH "repos/$GITHUB_REPOSITORY/pulls/$number" -f title="$title" -f body="$body" --silent
 fi
-if [[ "$RELEASE_KIND" != breaking && "$AUTO_MERGE" == true ]]; then
-  # Do not enable GitHub auto-merge unless main requires up-to-date certified
-  # PR checks. Missing privileges/protection fail closed, leaving the PR open.
-  protection="$(gh api "repos/$GITHUB_REPOSITORY/branches/main/protection/required_status_checks")"
-  jq -e '.strict == true and
-    (([.contexts[]?, .checks[]?.context] | unique) as $c |
-      ($c | index("certification")) != null and
-      ($c | index("Build and test backend OCI image (core)")) != null and
-      ($c | index("Build and test backend OCI image (full)")) != null)' <<< "$protection" >/dev/null
-  [[ "$(current_main)" == "$RELEASE_SOURCE" ]]
-  gh pr merge "$number" --repo "$GITHUB_REPOSITORY" --auto --merge --match-head-commit "$commit"
-fi
