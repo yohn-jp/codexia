@@ -460,7 +460,10 @@ test("late document activation cannot replace explicit scene navigation", async 
   await page.route(`**${documentPath(f)}`, async (route) => { if (route.request().method() !== "GET") return route.continue(); const response = await route.fetch(); observed(); await gate; await route.fulfill({ response }); });
   try {
     await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
-    await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click(); await seen;
+    await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
+    const sceneOne = page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ });
+    await sceneOne.click(); await seen;
+    await expect(sceneOne).toHaveAttribute("aria-current", "page");
     await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
     await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible(); release();
     await expectEditor(page, f.two.revision.markdown);
