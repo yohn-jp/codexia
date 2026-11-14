@@ -43,11 +43,30 @@ function unitStatus(slot){
   if(result.status!==0)throw Error('Systemd unit state unobservable');
   return result.stdout.trim();
 }
-function assertVersion(version,release){
+export function browserAuthEnvironment(config,frontendOrigin){
+  const auth=config.browserAuth;
+  assert.ok(auth&&typeof auth==='object'&&!Array.isArray(auth),'Explicit browserAuth configuration required');
+  if(auth.mode==='token'){
+    assert.deepEqual(Object.keys(auth),['mode'],'Unexpected token browserAuth fields');
+    return {CODEXIA_BROWSER_AUTH:'token'};
+  }
+  assert.equal(auth.mode,'cloudflare-access','Unsupported browser auth mode');
+  assert.deepEqual(Object.keys(auth).sort(),['audience','issuer','mode','origin','ownerEmail']);
+  assert.match(auth.issuer,/^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/u);
+  assert.match(auth.audience,/^[a-f0-9]{64}$/u);
+  assert.equal(new URL(auth.origin).origin,auth.origin);
+  assert.match(auth.origin,/^https:\/\/[a-z0-9.-]+(?::[0-9]+)?$/u);
+  assert.equal(auth.origin,frontendOrigin,'Access origin must match deployed UI');
+  // Restrict Quadlet values to literal safe characters, not directives or specifiers.
+  assert.match(auth.ownerEmail,/^[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+$/u);
+  return {CODEXIA_BROWSER_AUTH:auth.mode,CODEXIA_ACCESS_ISSUER:auth.issuer,CODEXIA_ACCESS_AUDIENCE:auth.audience,CODEXIA_ACCESS_ORIGIN:auth.origin,CODEXIA_ACCESS_OWNER_EMAIL:auth.ownerEmail};
+}
+export function assertVersion(version,release,browserAuth){
   assert.equal(version?.name,'codexia');assert.equal(version.version,release.version);
   assert.equal(version.profile,release.profile);assert.equal(version.hosted,false);
+  assert.equal(version.browserAuth??'token',browserAuth,'Candidate browser authentication mode mismatch');
 }
-function imageConfig(release){
+export function imageConfig(release,authEnvironment){
   return `[Unit]
 Description=Codexia exclusive writer
 Requires=codexia-db.service
@@ -68,6 +87,7 @@ Environment=CODEXIA_DATABASE_NAME=codexia
 Environment=CODEXIA_DATABASE_HOST=codexia-db
 Environment=CODEXIA_DATABASE_MIGRATE_ON_START=0
 Environment=CODEXIA_TRUST_PROXY=1
+${Object.entries(authEnvironment).map(([key,value])=>'Environment='+key+'='+value).join('\n')}
 Environment=CODEXIA_HOSTED_MODE=0
 Environment=CODEXIA_PROFILE=${release.profile}
 Environment=HOST=0.0.0.0
@@ -104,6 +124,7 @@ export class PodmanStandaloneHost{
     for(const key of ['routeFile','quadletDirectory','githubTokenFile'])assert.ok(path.isAbsolute(config[key]),key+' must be absolute');
     assert.ok(!config.accessClientIdFile===!config.accessClientSecretFile,'Access credentials must be paired');
     for(const key of ['accessClientIdFile','accessClientSecretFile'])if(config[key])assert.ok(path.isAbsolute(config[key]));
+    this.authEnvironment=browserAuthEnvironment(config,url.origin);
     this.config=config;this.url=url.href;
   }
   async fetchChannel(){
@@ -159,7 +180,7 @@ export class PodmanStandaloneHost{
   async waitReady(container,release){
     const deadline=Date.now()+90000;
     for(;;){
-      try{const version=JSON.parse(run('podman',['exec',container,'node','--input-type=module','-e',readyCode],{timeout:10000}));assertVersion(version,release);return;}catch(error){if(Date.now()>=deadline||!inspect(container)?.State.Running)throw Error('Candidate did not become ready: '+container);}
+      try{const version=JSON.parse(run('podman',['exec',container,'node','--input-type=module','-e',readyCode],{timeout:10000}));assertVersion(version,release,this.authEnvironment.CODEXIA_BROWSER_AUTH);return;}catch(error){if(Date.now()>=deadline||!inspect(container)?.State.Running)throw Error('Candidate did not become ready: '+container);}
       await delay(1000);
     }
   }
@@ -176,6 +197,8 @@ export class PodmanStandaloneHost{
       '--env','CODEXIA_DATABASE_USER=codexia_preflight','--env','CODEXIA_DATABASE_HOST=codexia-db',
       '--env','CODEXIA_DATABASE_NAME=codexia','--env','PGOPTIONS=-c default_transaction_read_only=on',
       '--env','CODEXIA_DATABASE_MIGRATE_ON_START=0','--env','CODEXIA_HOSTED_MODE=0','--env','CODEXIA_PROFILE='+release.profile,
+      '--env','CODEXIA_TRUST_PROXY=1',
+      ...Object.entries(this.authEnvironment).flatMap(([key,value])=>['--env',key+'='+value]),
       release.image],{env:{...process.env,CODEXIA_AUTH_TOKEN:auth}});
     await this.waitReady(preflight(slot),release);
     const observed=inspect(preflight(slot));
@@ -197,7 +220,7 @@ export class PodmanStandaloneHost{
     validateUpdateRelease(release);
     const obs=await this.observe();assert.equal(obs.writers.length,0,'Refusing second writer');
     await mkdir(this.config.quadletDirectory,{recursive:true,mode:0o700});
-    await atomicWrite(path.join(this.config.quadletDirectory,name(slot)+'.container'),imageConfig(release).replace('PLACEHOLDER',name(slot)));
+    await atomicWrite(path.join(this.config.quadletDirectory,name(slot)+'.container'),imageConfig(release,this.authEnvironment).replace('PLACEHOLDER',name(slot)));
     run('systemctl',['--user','daemon-reload']);
     run('systemctl',['--user','start',activeUnit(slot)],{timeout:120000});
     await this.waitReady(name(slot),release);
@@ -206,7 +229,7 @@ export class PodmanStandaloneHost{
   async probe(slot,release){
     await this.waitReady(name(slot),release);
     const routed=JSON.parse(run('podman',['exec','codexia-api-proxy','node','--input-type=module','-e',proxyProbeCode],{timeout:10000}));
-    assert.equal(routed.slot,slot);assertVersion(routed.version,release);
+    assert.equal(routed.slot,slot);assertVersion(routed.version,release,this.authEnvironment.CODEXIA_BROWSER_AUTH);
     run('podman',['exec',name(slot),'node','--input-type=module','-e',authProbeCode],{timeout:10000});
   }
 }
