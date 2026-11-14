@@ -20,7 +20,7 @@ const admission: Record<(typeof storageOutcomes)[number], Record<(typeof duringP
   quota: { unchanged: false, "new input": false },
 };
 
-test("navigation protection: complete bounded editor/storage event graph", async t => {
+test("navigation protection: complete bounded editor/storage event graph", {timeout:5000}, async t => {
   await t.test("composition rejects before storage access", async () => {
     let writes = 0;
     await assert.rejects(protectEditorTransition(() => ({generation:1}), () => { throw new Error("IME active"); },
@@ -47,7 +47,8 @@ test("navigation protection: complete bounded editor/storage event graph", async
           }, async entry => {
             writes.push({...entry}); started.resolve(); return storage.promise;
           }).then(() => ({allowed:true,error:""}), error => ({allowed:false,error:String(error)}));
-          await started.promise;
+          const began = await Promise.race([started.promise.then(() => true), completion.then(() => false)]);
+          assert.equal(began,true,"active editor must invoke storage");
           const captured = {...editor};
           if (event === "new input") editor = {generation:captured.generation+1,markdown:"latest"};
           if (outcome === "quota") storage.reject(new Error("quota"));
