@@ -109,9 +109,10 @@ RUN apt-get update \
  && chown node:node /data /history
 WORKDIR /app
 COPY --chown=node:node --from=build /runtime/ ./
+COPY --chown=node:node deploy/backend/start.sh /app/start.sh
 
 USER node
 VOLUME ["/data", "/history"]
 EXPOSE 3000
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "launch.mjs"]
+CMD ["/bin/sh", "/app/start.sh"]
