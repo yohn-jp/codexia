@@ -16,7 +16,7 @@ docker run --rm -d --name codexia-integration-postgres \
   -e POSTGRES_USER=codexia -e POSTGRES_PASSWORD=codexia \
   -e POSTGRES_DB=codexia_test -p 55440:5432 postgres:17-alpine
 export CODEXIA_TEST_DATABASE_URL='postgres://codexia:codexia@127.0.0.1:55440/codexia_test'
-docker exec codexia-integration-postgres pg_isready -U codexia -d codexia_test
+until docker exec codexia-integration-postgres pg_isready -q -U codexia -d codexia_test >/dev/null 2>&1; do sleep 1; done
 ```
 
 Stop the disposable database after verification with `docker stop codexia-integration-postgres`.
@@ -30,7 +30,10 @@ This runs production stdio and SDK Streamable HTTP transports against PostgreSQL
 
 ## Import and derived-state reconstruction
 
+The Diagnostics production acceptance needs `CODEXIA_TOKENIZER_MODELS_DIR` to point to an external tokenizer cache containing `Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer.json` and `tokenizer_config.json`. Set the variable before running the command below; without those pinned tokenizer artifacts, the required acceptance is unavailable and must not be reported as passed.
+
 ```sh
+export CODEXIA_TOKENIZER_MODELS_DIR=/path/to/tokenizer-cache
 node --test modules/diagnostics/tests/production.acceptance.mjs
 node --test tests/integration/migration-acceptance.test.mjs
 ```
