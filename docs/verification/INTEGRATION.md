@@ -30,7 +30,7 @@ This runs production stdio and SDK Streamable HTTP transports against PostgreSQL
 
 ## Import and derived-state reconstruction
 
-The Diagnostics production acceptance needs `CODEXIA_TOKENIZER_MODELS_DIR` to point to an external tokenizer cache containing `Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer.json` and `tokenizer_config.json`. Set the variable before running the command below; without those pinned tokenizer artifacts, the required acceptance is unavailable and must not be reported as passed.
+The Diagnostics production acceptance needs `CODEXIA_TOKENIZER_MODELS_DIR` to point to an external tokenizer cache containing the same pinned `tokenizer.json` and `tokenizer_config.json` at both `Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78/` and `Xenova/multilingual-e5-small/`. These tokenizer files are required; model weight files are not. Set the variable before running the command below; without the pinned tokenizer artifacts, the required acceptance is unavailable and must not be reported as passed.
 
 ```sh
 export CODEXIA_TOKENIZER_MODELS_DIR=/path/to/tokenizer-cache
