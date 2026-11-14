@@ -53,3 +53,46 @@ PostgreSQL、ID、read/write set、version、receipt等は技術詳細を必要�
 - Core/Full、Desktop/Mobileの既存対応機能を維持し、外部MCP・DB・保存・承認境界に変更を持ち込まない。
 
 詳細：[Desktop執筆](DESKTOP-AUTHORING.md)、[知識・レビュー](KNOWLEDGE-REVIEW.md)、[Mobile](MOBILE-AUTHORING.md)。
+
+## 画面カタログと状態の所有
+
+画面を増やす理由は対象や作者の仕事が変わるためであり、APIやmoduleの数に合わせて画面を作らない。以下のIDは論理的な画面識別子であって新規URL、API、DBテーブルを必須としない。
+
+| 画面ID | 開く対象・主な操作 | 主導線・戻り先 | 既存責務 |
+| --- | --- | --- | --- |
+| LIB-01 | 作品一覧、最近の作業、作品作成・取込 | 起動、作品名から開く。選択作品の構成へ | PersistenceWorkspace / persistenceProjects |
+| WRT-01 | 選択文書、構成、執筆・閲覧 | 作品選択、直接リンク、最近の作業。現在の原稿に留まる | outline / editor / coordinator |
+| WRT-02 | 原稿の履歴、確定Revision、比較・復元 | 原稿の操作メニュー。元の編集へ | persistenceRevisions / restoreRevision |
+| KNO-01 | 作品の知識一覧、絞込、候補登録 | 知識ナビゲーション。執筆に戻る | inspector / persistenceNodes |
+| KNO-02 | ノード詳細、関係、根拠、命題 | 一覧・原稿参照・関係から開く。元の一覧または原稿 | KnowledgeContextInspector / native reads |
+| KNO-03 | 選択ノードの局所関係 | 詳細の「関係」。一覧形式へ切替可能 | 既存node/relation projection |
+| REV-01 | 作者が確認する提案一覧 | レビュー、ジョブ／通知の対象リンク | review / NativeChangeSetReview / ProposalReview |
+| REV-02 | 選択提案の変更前後・根拠・承認・適用 | 一覧から。反映した原稿・知識へ | 各提案authority |
+| CFG-01 | 外観・組版・配置・module・接続・アカウント | 補助操作。元の作業へ | theme / typography / Workspace / module settings |
+| REC-01 | 保存と復旧の詳細・競合判断 | 状態表示またはエラーから。元の原稿へ | journal / save coordinator |
+| PUB-01 | 公開reader | 既存公開URLのみ。著者UIを前提にしない | PublicModuleView |
+
+作品未選択時はLIB-01、シーンが未作成なら作品の構成と新規作成を案内する。直接リンクがある場合はその対象の認可・取得・回復照合を優先する。最近の作業はauthor scope内の既存再開情報のみを表示する。存在しない作品、認可拒否、通信断を「空のライブラリ」に変換しない。
+
+### URLと作業文脈
+
+正規の文書ルートは既存の `/<shell>/projects/<projectId>/scenes/<documentId>`、作品ルートは `/<shell>/projects/<projectId>`。shellはdesktopまたはmobile。既存query/pathの読取互換とdeep linkを維持する。Mobileの `view=library|writing|inspection|tools|settings` は既存の導線として保持し、知識・レビューの新しい表示名や詳細表示を追加してもこれらのリンクを壊さない。新しい永続URL設計は本提案の必須条件ではない。
+
+作業文脈はauthor、project、document、revision、navigation generation、選択範囲・scroll、開いている参照対象に分ける。作品／文書の選択は既存selection storeとルート、本文と復旧はcoordinator／journal、パネル配置はWorkspace、参照対象と一覧条件は表示stateに属する。別のglobal storeに本文を複製しない。再読込で復元できる範囲と同じ画面の往復で保持する範囲を区別する。
+
+同一作品内の一覧・詳細・パネルの表示切替えは文書の選択を変えない。原稿へ戻る操作を、最後に見たKnowledgeの根拠へ移動する操作と混同しない。戻り先は直前の作業文脈に束縛し、対象の消失時には現在の構成へ戻して理由を示す。
+
+### グローバルナビゲーションと初期画面
+
+Desktopでは「執筆」「知識」「レビュー」を常設の第一階層とし、作品の切替・設定を分離する。執筆が初期の第一候補であり、保存済みのカスタム配置や正規リンクを上書きしない。作品一覧は現在の作品名から明示的に開く。任意moduleを上位ナビゲーションに自動で大量追加せず、関連する道具／パネル一覧へ分類する。
+
+Mobileの上位導線はMobile設計書に従う。同じ作業面を示すため、DesktopのタブとMobileのsheetが同じURLや同一のDOMを持つ必要はない。
+
+### 命令の分類と表示権限
+
+- 表示操作：一覧の絞込、構成の展開、プレビュー、レイアウト編集。正本への変更ではない。
+- 作者による明示変更：文書metadata、本文保存、知識候補登録・確定、関係編集、統合、履歴復元。既存author API、version、journalの境界を使う。
+- 外部／moduleによる提案：MCP・module actionsが提案として登録する。正本への直接書込みと区別する。
+- 提案の判断：承認、却下、適用は既存authorityで別操作。作者の許可がない時は該当操作を許可しない。UIで隠すだけでは認可にならない。
+
+状態・遷移の詳細は [操作と復旧](INTERACTION-CONTRACT.md)、視覚の基準は [Visual system](VISUAL-SYSTEM.md) に従う。
