@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { authenticateHistoricalChannel, signUpdateChannel } from './update-channel.mjs';
 import { validateUpdateRelease } from './update-release-policy.mjs';
+import { readComponentVersion } from './component-release-version.mjs';
 import { validateBackendIdentity, fingerprintProbe } from './backend-update-identity.mjs';
 
 const REPO = 'yohn-jp/codexia';
@@ -98,7 +99,7 @@ async function main() {
     const source=process.env.GITHUB_SHA;
     if(!source||execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim()!==source)throw new Error('Certified immutable main source required');
     const output=(args)=>execFileSync('docker',args,{encoding:'utf8',timeout:300000,maxBuffer:1024*1024}).trim();
-    const version=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')).version;
+    const version=readComponentVersion('backend');
     const compatibility=JSON.parse(readFileSync(new URL('../deploy/update-compatibility.json',import.meta.url),'utf8'));
     const releases=[];
     for(const [profile,image] of [['core',process.env.CODEXIA_CERTIFIED_IMAGE],['full',process.env.CODEXIA_CERTIFIED_FULL_IMAGE]]){
@@ -115,7 +116,7 @@ async function main() {
   } else if(mode==='withdraw') command={mode,image:process.env.CODEXIA_WITHDRAW_IMAGE};
   const now=Date.now();
   const next=nextChannel(previous,command,now);
-  if(next===null){console.log('Product version already advertised; a new SemVer is required for a new stable release.');return;}
+  if(next===null){console.log('Backend version already advertised; no change.');return;}
   const signed=signUpdateChannel(next,privatePem,now);
   const write=await request(token,resource,{method:'PUT',body:JSON.stringify({branch:REF,
     message:'publish signed Codexia stable channel sequence '+next.sequence,

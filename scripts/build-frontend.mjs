@@ -5,6 +5,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { readComponentVersion } from './component-release-version.mjs';
 import { createBuildCommands } from './profile-package.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -20,8 +21,8 @@ async function main() {
   const profile = JSON.parse(await readFile(path.join(root, 'profiles', `${profileName}.json`), 'utf8'));
   const sourceSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   if (!/^[a-f0-9]{40}$/u.test(sourceSha) || !['core', 'full'].includes(profileName)) throw new Error('Invalid standalone frontend identity');
-  const { version } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
-  const { apiEpoch } = JSON.parse(await readFile(path.join(root, 'deploy/update-compatibility.json'), 'utf8'));
+  const version = readComponentVersion('frontend');
+  const { apiEpoch } = JSON.parse(await readFile(path.join(root, 'deploy/frontend-compatibility.json'), 'utf8'));
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(version) || !Number.isSafeInteger(apiEpoch) || apiEpoch < 1) throw new Error('Invalid frontend compatibility version');
   for (const step of createBuildCommands(profileName, profile, { includeApi: false })) {
     run(step.command, step.args, step.env);

@@ -64,6 +64,7 @@ export function browserAuthEnvironment(config,frontendOrigin){
 export function assertVersion(version,release,browserAuth){
   assert.equal(version?.name,'codexia');assert.equal(version.version,release.version);
   assert.equal(version.profile,release.profile);assert.equal(version.hosted,false);
+  assert.equal(version.apiEpoch,release.apiEpoch,'Candidate API compatibility epoch mismatch');
   assert.equal(version.browserAuth??'token',browserAuth,'Candidate browser authentication mode mismatch');
 }
 export function imageConfig(release,authEnvironment){
