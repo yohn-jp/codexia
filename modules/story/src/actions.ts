@@ -980,19 +980,37 @@ function compareScenario(story: LoadedStorySnapshot, input: ObjectValue) {
       if (scene?.type !== "scene") throw new TypeError("Scene not found");
       if (!Array.isArray(input.alternatives) || input.alternatives.length !== 2) throw new TypeError("Provide exactly two alternatives");
       const baseline = temporalScene(story, sceneId);
+      const canonicalEvents = listRuleStateEvents(story).data;
+      const canonicalIds = new Set(canonicalEvents.map(event => event.eventId).filter((id): id is string => typeof id === "string"));
       const alternatives = input.alternatives.map((alternative, index) => {
         const raw = parseRecord(alternative, "alternative");
         if (!Array.isArray(raw.events) || raw.events.length > 50) throw new TypeError("At most fifty hypothetical events per alternative");
-        const events = raw.events.map((event, eventIndex) => {
+        // Explicit identities have the same meaning in comparison and adoption. Reserve
+        // them first so an implicit preview identity can never shadow a real event.
+        const usedIds = new Set(canonicalIds);
+        const parsed = raw.events.map(event => parseRecord(event, "event"));
+        for (const event of parsed) {
+          if (event.eventId === undefined) continue;
+          const id = stringValue(event.eventId, "event.eventId");
+          if (id === event.replacesEventId || usedIds.has(id)) throw new TypeError(`Conflicting Scenario event identity: ${id}`);
+          usedIds.add(id);
+        }
+        const events = parsed.map((event, eventIndex) => {
           const candidate = createStateEvent({ event }, scene, "hypothetical").event;
           validateEventReferences(candidate, story);
-          if (candidate.replacesEventId) {
-            const replaced = listRuleStateEvents(story).data.find(item => item.eventId === candidate.replacesEventId);
-            if (!replaced || replaced.source !== "manual" || (replaced.status !== undefined && replaced.status !== "confirmed")) {
-              throw new TypeError(`Replacement event not found or not confirmed: ${candidate.replacesEventId}`);
+          if (candidate.replacesEventId !== undefined) {
+            const replaced = canonicalEvents.filter(item => item.eventId === candidate.replacesEventId);
+            if (replaced.length !== 1 || replaced[0]!.source !== "manual" || (replaced[0]!.status !== undefined && replaced[0]!.status !== "confirmed")) {
+              throw new TypeError(`Replacement event not found, ambiguous or not confirmed: ${candidate.replacesEventId}`);
             }
           }
-          return { ...candidate, eventId: `hypothesis-${index}-${eventIndex}`, source: "manual", status: "confirmed" } as unknown as SceneStateEvent;
+          let eventId = event.eventId as string | undefined;
+          if (eventId === undefined) {
+            eventId = `hypothesis-${index}-${eventIndex}`;
+            while (usedIds.has(eventId)) eventId += "-next";
+            usedIds.add(eventId);
+          }
+          return { ...candidate, eventId, source: "manual", status: "confirmed" } as unknown as SceneStateEvent;
         });
         return { label: stringValue(raw.label, "label"), hypothetical: true, projection: temporalScene(story, sceneId, events) };
       });
@@ -1443,6 +1461,16 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
       const proposals=(alternative.events as unknown[]).map(event=>createStateEvent({event},scene,manuscriptTextHash(manuscript)));
       for(const proposal of proposals)validateEventReferences(proposal.event,story);
       const pending=await readStateProposals(context);
+      const occupied = new Set<unknown>(listRuleStateEvents(story).data.map(event => event.eventId));
+      for (const row of pending.rows) {
+        const prior = normalizeStoredProposal(row);
+        if (prior.status === "proposed" || prior.status === "stale") occupied.add(prior.event.eventId);
+      }
+      for (const proposal of proposals) {
+        const id = proposal.event.eventId;
+        if (occupied.has(id) || id === proposal.event.replacesEventId) throw new TypeError(`Conflicting Scenario event identity: ${id}`);
+        occupied.add(id);
+      }
       const operation=buildOperation({reader:context.reader,reads:[{path:SCENARIO_PATH,revision},{path:STATE_PROPOSALS_PATH,revision:pending.revision},{path:scene.filePath,revision:story.revisions.get(scene.filePath)??null},...(manuscriptPath?[{path:manuscriptPath,revision:story.revisions.get(manuscriptPath)??null}]:[])],writes:[{path:STATE_PROPOSALS_PATH,revision:pending.revision,content:stateProposalFile([...pending.rows,...proposals.map(proposal=>storedProposal(proposal))])}],message:"Submit scenario alternative as state proposals",effect:"metadata",operationId:requestedOperationId(input)});
       await context.propose([operation]);
       return {scenarioId:saved.id,alternativeIndex,proposals};
@@ -1510,6 +1538,10 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
       const manuscript = manuscriptPath ? [...story.entities.values()].find((entity) => entity.filePath === manuscriptPath)?.body ?? "" : "";
       if (manuscriptTextHash(manuscript) !== prior.manuscriptHash) throw Object.assign(new Error("State proposal source manuscript changed; refresh before approval"), { code: "stale_source" });
       validateEventReferences(prior.event, story);
+      const eventId = prior.event.eventId;
+      if (typeof eventId === "string" && (eventId === prior.event.replacesEventId || listRuleStateEvents(story).data.some(event => event.eventId === eventId))) {
+        throw new TypeError(`Conflicting state event identity: ${eventId}`);
+      }
       const event = { ...prior.event, source: "manual", status: "confirmed" };
       const rawEvents = Array.isArray(scene.raw.state_events) ? scene.raw.state_events : [];
       const updatedProposal = { ...prior, status: "approved", updatedAt: new Date().toISOString(), history: [...prior.history, { action: "approved", at: new Date().toISOString(), event }] };
@@ -1524,6 +1556,7 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
           { path: scene.filePath, revision: sceneFile.revision, content: yamlContent(sceneRaw) },
           { path: STATE_PROPOSALS_PATH, revision, content: stateProposalFile(rows) },
         ],
+        ...(typeof eventId === "string" ? { readScopes: [{ prefix: "plot", revision: await snapshotScopeRevision(context.reader, "plot") }] } : {}),
         message: `Confirm world-state event from proposal ${prior.id}`,
         effect: "metadata",
         operationId: requestedOperationId(input),
