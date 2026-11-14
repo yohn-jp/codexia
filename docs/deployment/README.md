@@ -20,9 +20,26 @@ Static response headers are defined in `edge/frontend/static/_headers`. Script e
 
 ## Authentication, API URL, and CORS
 
-Cloudflare Access applies an explicit identity allowlist to the application hostname. The Tunnel origin also requires the Access application audience. Access is the outer identity gate; the Codexia API keeps its own login and authorization boundary.
+Cloudflare Access applies an explicit identity allowlist to the application hostname. The Tunnel origin also requires the Access application audience. Access is the outer identity gate; the Codexia API keeps its authorization boundary. Dedicated deployments may opt into browser SSO without an additional token prompt.
 
-The current API accepts `CODEXIA_AUTH_TOKEN` at `POST /api/login`, then issues its Secure, HttpOnly session cookie and applies same-origin checks to cookie-authenticated writes. The access token must never be placed in a Worker variable, Vite build argument, browser bundle, or repository file.
+By default the standalone API accepts `CODEXIA_AUTH_TOKEN` at `POST /api/login`, issues an HttpOnly SameSite=Strict session cookie (Secure on HTTPS), and applies same-origin checks to browser writes. The token must never be placed in a Worker variable, Vite build argument, browser bundle, or repository file.
+
+### Dedicated browser SSO
+
+Set the following in the private VM Quadlet configuration; do not enable this mode on an isolated local or Hosted instance.
+
+| Environment | Value |
+| --- | --- |
+| `CODEXIA_BROWSER_AUTH` | `cloudflare-access` |
+| `CODEXIA_ACCESS_ISSUER` | `https://<team>.cloudflareaccess.com` |
+| `CODEXIA_ACCESS_AUDIENCE` | Access application's AUD tag |
+| `CODEXIA_ACCESS_ORIGIN` | Exact public HTTPS application origin |
+| `CODEXIA_ACCESS_OWNER_EMAIL` | The single approved author identity |
+| `CODEXIA_TRUST_PROXY` | `1`, only on the private Tunnel origin |
+
+Keep the auth-token Podman secret for external MCP bearer requests. The origin verifies the signed Access assertion for each browser API request using the team's HTTPS JWKS endpoint, checks issuer, audience, times, human identity, owner email and exact origin, and maintains the existing `owner` author scope. A missing or invalid assertion fails closed; the token login endpoint is retired in this mode. Explicit Authorization headers never acquire author authority from an Access assertion. Browser mutations retain exact same-origin checks. Browser logout navigates to Cloudflare's `/cdn-cgi/access/logout` (Access logout affects the user's other Access applications). An expired or revoked edge session requires top-level reauthentication; a signed JWT is not a separate long-lived Codexia session.
+
+Deploy the compatible static UI and immutable API image, then enable the VM settings and restart only the API. Test Access login without a token prompt, existing draft recovery, same-origin saves, cross-origin rejection, missing/invalid/wrong-owner assertions, bearer-only proposals and denied author mutations, logout, and reauthentication. Check the VM's outbound HTTPS access to the team's public signing-key endpoint. Do not weaken Access, introduce an API proxy, or publish the API port. To roll back, remove the SSO environment settings and restart using the retained previous image if necessary; the default token flow remains available and the author scope is unchanged.
 
 The UI uses relative `/api/...` URLs, so production has no `VITE_API_URL` or API-origin secret. UI and API share one origin and the API does not send `Access-Control-Allow-Origin`; browser CORS is intentionally disabled. External MCP/API clients must use their supported authorization flow and do not receive a CORS exception.
 

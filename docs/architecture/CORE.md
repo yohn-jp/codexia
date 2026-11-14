@@ -4,7 +4,7 @@ PostgreSQL is the sole authority for projects, document hierarchy, Markdown bodi
 
 ## Ownership and dependency direction
 
-Desktop and Mobile shells use the authenticated API. API admission owns authentication, project authorization, origin checks, cancellation and lifecycle draining. Core coordinates module snapshots and approved mutations through Persistence; the PostgreSQL adapter owns transactions and record validation. Core never imports optional module implementations or model providers.
+Desktop and Mobile shells use the authenticated API. API admission owns authentication, project authorization, origin checks, cancellation and lifecycle draining. Dedicated standalone deployments may verify Cloudflare Access browser identity directly; the configured single author retains the same owner scope. Explicit MCP bearer credentials retain their restricted authority and cannot acquire browser author privileges from an Access assertion. Local standalone token sessions and Hosted grants remain separate modes. Core coordinates module snapshots and approved mutations through Persistence; the PostgreSQL adapter owns transactions and record validation. Core never imports optional module implementations or model providers.
 
 | Area | Owner |
 | --- | --- |

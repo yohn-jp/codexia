@@ -204,6 +204,7 @@ export interface RuntimeVersion {
   version: string;
   hosted: boolean;
   profile: string;
+  browserAuth?: "cloudflare-access";
 }
 
 let hostedMode: boolean | undefined;
