@@ -55,7 +55,7 @@ const VIEWS: ReadonlyArray<{ id: MobileView; label: string; title: string; mark:
   { id: "library", label: "作品", title: "作品ライブラリ", mark: "▤" },
   { id: "writing", label: "書く", title: "執筆・読書", mark: "✎" },
   { id: "inspection", label: "知識", title: "知識と状態", mark: "⌕" },
-  { id: "tools", label: "レビュー", title: "レビューと道具", mark: "◇" },
+  { id: "tools", label: "道具", title: "レビューと道具", mark: "◇" },
   { id: "settings", label: "設定", title: "設定", mark: "⚙" },
 ];
 
