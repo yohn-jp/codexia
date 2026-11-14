@@ -21,12 +21,12 @@ test('twenty execution jobs retain all fifty-seven validation obligations exactl
   }
   assert.equal(workflow.jobs.browser.strategy.matrix.include, '${{ fromJSON(needs.plan.outputs.browser) }}');
 });
-test('selected groups depend only on planning and failed groups cannot cancel other evidence', () => {
+test('browser groups depend on profile producers; independent groups cannot cancel other evidence', () => {
   assert.equal(workflow.concurrency, undefined);
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.equal(workflow.jobs.plan.name, 'plan');
   for (const [id, job] of Object.entries(workflow.jobs).filter(([id]) => !['plan', 'certification'].includes(id))) {
-    assert.deepEqual(job.needs, ['plan'], id);
+    assert.deepEqual(job.needs, id === 'browser' ? ['plan', 'build'] : ['plan'], id);
     assert.match(job.if, /needs\.plan\.result == 'success'/);
     assert.equal(job['continue-on-error'], undefined, id);
     assert.equal(job.strategy['fail-fast'], false, id);
@@ -62,7 +62,7 @@ test('selected groups depend only on planning and failed groups cannot cancel ot
   assert.ok(gate.steps.indexOf(evidenceSelector) < gate.steps.indexOf(evidenceDownload));
   assert.doesNotMatch(evidenceDownload.run, /actions\/download-artifact/);
 });
-test('browser groups retain immutable runtime and build once before running selected shards', () => {
+test('browser groups retain immutable runtime and restore the exact producer before running selected shards', () => {
   const browser = workflow.jobs.browser;
   assert.match(browser.container.image, /^mcr\.microsoft\.com\/playwright@sha256:[a-f0-9]{64}$/);
   assert.equal(browser.container.options, '--ipc=host');
@@ -80,7 +80,18 @@ test('browser groups retain immutable runtime and build once before running sele
   assert.ok(runnerIndex < diagnosticsIndex && diagnosticsIndex < reportIndex);
   const runner = readFileSync(new URL('./ci-group.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(runner, /(?:apt(?:-get)?\s|playwright install|--with-deps)/);
-  assert.ok(runner.indexOf("node('scripts/verify-browser-runtime.mjs')") < runner.indexOf("run('pnpm', ['build']"));
+  assert.match(browser.if, /always\(\)/);
+  const restore = browser.steps.find(step => step.id === 'restore-profile');
+  assert.ok(restore);
+  assert.match(restore.run, /ci-profile-artifact\.mjs restore/);
+  assert.equal(browser.permissions['actions'], 'read');
+  assert.equal(browser.steps[runnerIndex].env.CODEXIA_CI_PROFILE_RESTORE, '${{ steps.restore-profile.outcome }}');
+  assert.ok(browser.steps.indexOf(restore) < runnerIndex);
+  const producer = workflow.jobs.build.steps.find(step => step.run?.includes('ci-profile-artifact.mjs pack'));
+  assert.ok(producer);
+  assert.ok(workflow.jobs.build.steps.some(step => step.uses === 'actions/upload-artifact@v4' && step.with.name === 'ci-profile-build-${{ matrix.profile }}'));
+  assert.match(runner, /assertBrowserReceipt/);
+  assert.doesNotMatch(runner, /run\('pnpm', \['build'\], \{ CODEXIA_PROFILE: group/);
   assert.match(runner, /run-browser-shard\.mjs.*--prebuilt/);
 });
 test('all source checkouts bind exact PR head/main source without persisted credentials', () => {

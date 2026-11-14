@@ -35,12 +35,12 @@ export function selectedArtifacts(inventory, ids, identity, kind) {
   });
 }
 
-export async function downloadArtifact(artifact, repository, token, request = fetch) {
+export async function downloadArtifact(artifact, repository, token, request = fetch, { maxArchive = MAX_ARCHIVE } = {}) {
   assert.match(repository, /^[\w.-]+\/[\w.-]+$/u);
   assert.ok(typeof token === 'string' && token.length > 0, 'Read token required');
   assert.ok(Number.isSafeInteger(artifact.id) && artifact.id > 0);
   assert.match(artifact.digest, /^sha256:[a-f0-9]{64}$/u);
-  assert.ok(Number.isSafeInteger(artifact.size_in_bytes) && artifact.size_in_bytes > 0 && artifact.size_in_bytes <= MAX_ARCHIVE);
+  assert.ok(Number.isSafeInteger(artifact.size_in_bytes) && artifact.size_in_bytes > 0 && artifact.size_in_bytes <= maxArchive);
   const response = await request(`https://api.github.com/repos/${repository}/actions/artifacts/${artifact.id}/zip`, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
     redirect: 'manual', signal: AbortSignal.timeout(15_000),
@@ -55,7 +55,7 @@ export async function downloadArtifact(artifact, repository, token, request = fe
   let size = 0;
   for await (const chunk of archive.body) {
     size += chunk.byteLength;
-    assert.ok(size <= artifact.size_in_bytes && size <= MAX_ARCHIVE, 'Artifact exceeds declared size');
+    assert.ok(size <= artifact.size_in_bytes && size <= maxArchive, 'Artifact exceeds declared size');
     chunks.push(chunk);
   }
   assert.equal(size, artifact.size_in_bytes, 'Artifact size mismatch');
@@ -65,7 +65,8 @@ export async function downloadArtifact(artifact, repository, token, request = fe
 }
 
 export async function extractJsonEntry(bytes, filename) {
-  assert.ok(filename === 'ci-plan.json' || filename === 'report.json', 'Invalid evidence filename');
+  assert.ok(['ci-plan.json', 'report.json', 'profile-build.json'].includes(filename), 'Invalid evidence filename');
+  const maxJson = filename === 'profile-build.json' ? 128 * 1024 * 1024 : MAX_JSON;
   const temporary = await mkdtemp(path.join(tmpdir(), 'codexia-ci-artifact-'));
   try {
     const zip = path.join(temporary, 'artifact.zip');
@@ -73,7 +74,7 @@ export async function extractJsonEntry(bytes, filename) {
     const entries = execFileSync('unzip', ['-Z1', zip], { encoding: 'utf8', maxBuffer: MAX_JSON, timeout: 10_000 }).split(/\r?\n/u);
     assert.equal(entries.filter(entry => entry === filename).length, 1, 'Missing or duplicate required JSON entry');
     // Do not extract arbitrary archive paths onto the runner filesystem.
-    const json = execFileSync('unzip', ['-p', zip, filename], { maxBuffer: MAX_JSON, timeout: 10_000 });
+    const json = execFileSync('unzip', ['-p', zip, filename], { maxBuffer: maxJson, timeout: 30_000 });
     JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(json));
     return json;
   } finally {

@@ -209,6 +209,16 @@ jobs:
           CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/build-${{ matrix.profile }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
         run: node scripts/ci-group.mjs "build-${{ matrix.profile }}"
+      - name: Pack immutable profile build
+        env:
+          CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
+        run: node scripts/ci-profile-artifact.mjs pack "${{ matrix.profile }}" "${{ runner.temp }}/profile-build/profile-build.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-profile-build-${{ matrix.profile }}
+          path: ${{ runner.temp }}/profile-build/profile-build.json
+          if-no-files-found: error
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -255,7 +265,11 @@ jobs:
     name: browser-${{ matrix.group }}
     needs:
       - plan
-    if: needs.plan.result == 'success' && needs.plan.outputs.browser != '[]'
+      - build
+    if: always() && !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.browser != '[]'
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     services:
@@ -304,10 +318,19 @@ jobs:
         with:
           name: ci-plan
           path: ${{ runner.temp }}/ci-plan
+      - name: Restore exact profile producer
+        id: restore-profile
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
+        run: node scripts/ci-profile-artifact.mjs restore "${{ matrix.profile }}" "${{ runner.temp }}/profile-receipt.json"
       - name: Run selected validations
+        if: always() && !cancelled()
         env:
           CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/browser-${{ matrix.group }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
+          CODEXIA_CI_PROFILE_RESTORE: ${{ steps.restore-profile.outcome }}
+          CODEXIA_CI_PROFILE_RECEIPT: ${{ runner.temp }}/profile-receipt.json
         run: node scripts/ci-group.mjs "browser-${{ matrix.group }}"
       - uses: actions/upload-artifact@v4
         if: always()

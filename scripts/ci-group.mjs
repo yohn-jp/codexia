@@ -4,6 +4,7 @@ import { readFileSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs'
 import path from 'node:path';
 import { VERIFICATION_GROUPS } from './ci-contract.mjs';
 import { planDigest, validateVerificationPlan } from './ci-impact.mjs';
+import { assertBrowserReceipt } from './ci-profile-artifact.mjs';
 
 const group = process.argv[2];
 const plan = validateVerificationPlan(JSON.parse(readFileSync(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json', 'utf8')));
@@ -23,11 +24,15 @@ const run = (command, args, extraEnv = {}) => {
 };
 const node = (...args) => run(process.execPath, args);
 let preparationError;
+let profileArtifact;
 try {
   if (group.startsWith('unit-')) node('scripts/ci-workspace.mjs', 'prepare', 'unit-group', tasks.map(task => task.slice(5)).join(','));
   if (group.startsWith('browser-')) {
+    // A failed producer or restore is a blocked validation, not a reason to rebuild.
+    if (process.env.CODEXIA_CI_PROFILE_RESTORE !== 'success') throw new Error('Same-profile build/restore prerequisite failed');
+    profileArtifact = JSON.parse(readFileSync(process.env.CODEXIA_CI_PROFILE_RECEIPT, 'utf8'));
+    assertBrowserReceipt(profileArtifact, plan, group.split('-')[1], process.env.GITHUB_RUN_ID);
     node('scripts/verify-browser-runtime.mjs');
-    run('pnpm', ['build'], { CODEXIA_PROFILE: group.split('-')[1] });
   }
 } catch (error) { preparationError = String(error); }
 
@@ -61,7 +66,7 @@ for (const task of tasks) {
           { CODEXIA_NATIVE_REPORT_PATH: path.join(reportDirectory, 'native-report.json') });
       } else if (task === 'coverage') {
         node('scripts/ci-workspace.mjs', 'coverage');
-        node('--test', 'scripts/ci-contract.test.mjs', 'scripts/ci-impact.test.mjs');
+        node('--test', 'scripts/ci-contract.test.mjs', 'scripts/ci-impact.test.mjs', 'scripts/ci-profile-artifact.test.mjs');
       } else throw new Error(`No runner for ${task}`);
     } catch (caught) { error = String(caught); }
   }
@@ -69,7 +74,7 @@ for (const task of tasks) {
   results.push(result);
   console.log(JSON.stringify(result));
 }
-const report = { group, sha, planDigest: planDigest(plan), results };
+const report = { group, sha, planDigest: planDigest(plan), ...(profileArtifact ? {profileArtifact} : {}), results };
 writeFileSync(path.join(reportDirectory, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
   `| Validation | Result | Seconds |\n| --- | --- | ---: |\n${results.map(item => `| ${item.task} | ${item.status} | ${item.seconds.toFixed(1)} |`).join('\n')}\n`);
