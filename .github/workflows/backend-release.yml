@@ -49,9 +49,13 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   build-test:
-    name: Build and test backend OCI image
+    name: Build and test backend OCI image (${{ matrix.profile }})
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [core, full]
     permissions:
       contents: read
     steps:
@@ -72,18 +76,21 @@ jobs:
       - name: Build API-only image
         env:
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PROFILE: ${{ matrix.profile }}
         run: |
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          docker buildx build --platform linux/amd64 --load --build-arg "CODEXIA_PRODUCER_REVISION=$SOURCE_SHA" --tag codexia-backend-ci --file Dockerfile.backend .
+          docker buildx build --platform linux/amd64 --load --build-arg "CODEXIA_PRODUCER_REVISION=$SOURCE_SHA" --build-arg "PROFILE=$PROFILE" --tag codexia-backend-ci --file Dockerfile.backend .
       - name: Verify API image before publication
-        run: bash scripts/verify-backend-image.sh docker codexia-backend-ci
+        env:
+          PROFILE: ${{ matrix.profile }}
+        run: bash scripts/verify-backend-image.sh docker codexia-backend-ci "$(git rev-parse HEAD)" "$PROFILE"
       - name: Save the exact tested image for publication
         if: github.event_name == 'push'
         run: docker save codexia-backend-ci | gzip > "$RUNNER_TEMP/codexia-backend-image.tar.gz"
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'push'
         with:
-          name: codexia-backend-image-${{ github.sha }}
+          name: codexia-backend-image-${{ github.sha }}-${{ matrix.profile }}
           path: ${{ runner.temp }}/codexia-backend-image.tar.gz
           if-no-files-found: error
           retention-days: 2
@@ -114,10 +121,8 @@ jobs:
         run: node scripts/verify-release-source.mjs
       - uses: actions/download-artifact@v4
         with:
-          name: codexia-backend-image-${{ github.sha }}
-          path: ${{ runner.temp }}
-      - name: Load the tested image
-        run: gzip -dc "$RUNNER_TEMP/codexia-backend-image.tar.gz" | docker load
+          pattern: codexia-backend-image-${{ github.sha }}-*
+          path: ${{ runner.temp }}/backend-images
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -130,16 +135,21 @@ jobs:
           SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          docker tag codexia-backend-ci "$IMAGE:sha-$SOURCE_SHA"
-          tested_id="$(docker image inspect --format '{{.Id}}' codexia-backend-ci)"
-          docker push "$IMAGE:sha-$SOURCE_SHA" | tee "$RUNNER_TEMP/push.log"
-          digest="$(sed -nE 's/^.*digest: (sha256:[a-f0-9]{64}) size: [0-9]+.*$/\1/p' "$RUNNER_TEMP/push.log" | tail -1)"
-          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
-          docker pull "$IMAGE@$digest"
-          test "$(docker image inspect --format '{{.Id}}' "$IMAGE@$digest")" = "$tested_id"
-          echo "image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
-          docker buildx imagetools inspect "$IMAGE@$digest"
-          echo "Published $IMAGE:sha-$SOURCE_SHA from $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          for profile in core full; do
+            gzip -dc "$RUNNER_TEMP/backend-images/codexia-backend-image-$SOURCE_SHA-$profile/codexia-backend-image.tar.gz" | docker load
+            tag="sha-$SOURCE_SHA"
+            if [[ "$profile" == full ]]; then tag="$tag-full"; fi
+            tested_id="$(docker image inspect --format '{{.Id}}' codexia-backend-ci)"
+            docker tag codexia-backend-ci "$IMAGE:$tag"
+            docker push "$IMAGE:$tag" | tee "$RUNNER_TEMP/push.log"
+            digest="$(sed -nE 's/^.*digest: (sha256:[a-f0-9]{64}) size: [0-9]+.*$/\1/p' "$RUNNER_TEMP/push.log" | tail -1)"
+            [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+            docker pull "$IMAGE@$digest"
+            test "$(docker image inspect --format '{{.Id}}' "$IMAGE@$digest")" = "$tested_id"
+            if [[ "$profile" == core ]]; then echo "image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"; fi
+            docker buildx imagetools inspect "$IMAGE@$digest"
+            echo "Published $IMAGE:$tag ($profile, $digest) from $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          done
 
   stable-channel:
     name: Advertise certified stable backend
