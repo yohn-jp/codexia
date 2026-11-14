@@ -36,8 +36,8 @@ export function nextChannel(previous, command, now) {
       const scoped = releases.filter(r=>r.platform===candidate.platform&&r.profile===candidate.profile);
       const sameVersion = scoped.find(r=>r.version===candidate.version);
       if (sameVersion) {
-        // Main commits do not implicitly replace existing product releases.
         if (sameVersion.state === 'withdrawn') throw new Error('Withdrawn version cannot be republished');
+        if (Object.keys(candidate).some(key=>candidate[key]!==sameVersion[key])) throw new Error('Existing backend version binds a different artifact');
         continue;
       }
       if (scoped.some(r=>cmp(candidate.version,r.version)<=0 || r.image===candidate.image || r.sourceSha===candidate.sourceSha)) throw new Error('Release version or artifact identity must advance');

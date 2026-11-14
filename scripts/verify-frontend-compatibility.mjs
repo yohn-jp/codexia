@@ -20,12 +20,14 @@ async function main() {
   assert.ok(id&&secret,'Cloudflare Access service credentials required');
   const frontend=JSON.parse(readFileSync(new URL('../app/dist/desktop/update-identity.json',import.meta.url),'utf8'));
   assert.equal(frontend.sourceSha,process.env.GITHUB_SHA,'Frontend artifact source mismatch');
-  const response=await fetch(new URL('/api/version',origin),{
+  const deployed=process.argv[2]==='deployed';
+  const response=await fetch(new URL(deployed?'/desktop/update-identity.json':'/api/version',origin),{
     headers:{'CF-Access-Client-Id':id,'CF-Access-Client-Secret':secret,Accept:'application/json','Cache-Control':'no-cache'},
     redirect:'error',signal:AbortSignal.timeout(15000),
   });
   if(!response.ok) throw Error('Live backend identity unavailable: HTTP '+response.status);
   const backend=await response.json();
+  if(deployed){assert.deepEqual(backend,frontend,'Deployed frontend identity does not match the tested artifact');console.log('Verified deployed frontend '+frontend.version);return;}
   assertFrontendCompatibility(frontend,backend);
   console.log('Frontend '+frontend.version+' is compatible with deployed backend '+backend.version+' (API epoch '+frontend.apiEpoch+')');
 }

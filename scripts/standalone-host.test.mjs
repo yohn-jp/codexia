@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {browserAuthEnvironment,imageConfig,assertVersion} from '../deploy/updater/standalone-host.mjs';
 const origin='https://codexia.example.invalid';
 const access={mode:'cloudflare-access',issuer:'https://example.cloudflareaccess.com',audience:'a'.repeat(64),origin,ownerEmail:'owner@example.invalid'};
-const release={image:'ghcr.io/yohn-jp/codexia-backend@sha256:'+'b'.repeat(64),version:'0.1.0',profile:'full'};
+const release={image:'ghcr.io/yohn-jp/codexia-backend@sha256:'+'b'.repeat(64),version:'0.1.0',profile:'full',apiEpoch:1};
 test('standalone writer and preflight use an explicit compatible browser auth mode',()=>{
   const env=browserAuthEnvironment({browserAuth:access},origin);
   assert.equal(env.CODEXIA_BROWSER_AUTH,'cloudflare-access');
@@ -13,10 +13,11 @@ test('standalone writer and preflight use an explicit compatible browser auth mo
   assert.ok(quadlet.includes('Environment=CODEXIA_PROFILE=full\n'));
   assert.ok(quadlet.includes('Environment=CODEXIA_DATABASE_MIGRATE_ON_START=0\n'));
   assert.ok(quadlet.includes('Secret=codexia-auth-token,'));
-  const version={name:'codexia',version:release.version,profile:'full',hosted:false};
+  const version={name:'codexia',version:release.version,profile:'full',hosted:false,apiEpoch:1};
   assertVersion({...version,browserAuth:'cloudflare-access'},release,'cloudflare-access');
   assert.throws(()=>assertVersion(version,release,'cloudflare-access'),/mode mismatch/);
   assertVersion(version,release,'token');
+  assert.throws(()=>assertVersion({...version,apiEpoch:2},release,'token'),/epoch mismatch/);
   assert.deepEqual(browserAuthEnvironment({browserAuth:{mode:'token'}},origin),{CODEXIA_BROWSER_AUTH:'token'});
 });
 test('standalone auth rejects implicit fallback, cross-origin configuration and Quadlet injection',()=>{

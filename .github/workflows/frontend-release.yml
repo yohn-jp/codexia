@@ -13,6 +13,7 @@ on:
       - deploy/cloudflare/ui-routes.json
       - deploy/frontend-compatibility.json
       - scripts/component-release-version*.mjs
+      - scripts/record-component-release.mjs
       - scripts/verify-frontend-compatibility*.mjs
       - scripts/build-frontend.mjs
       - scripts/profile-build.mjs
@@ -34,6 +35,7 @@ on:
       - deploy/cloudflare/ui-routes.json
       - deploy/frontend-compatibility.json
       - scripts/component-release-version*.mjs
+      - scripts/record-component-release.mjs
       - scripts/verify-frontend-compatibility*.mjs
       - scripts/build-frontend.mjs
       - scripts/profile-build.mjs
@@ -97,7 +99,7 @@ jobs:
     timeout-minutes: 15
     environment: codexia-production
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -123,7 +125,13 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: edge/frontend/node_modules/.bin/wrangler deploy --config edge/frontend/wrangler.jsonc
-      - name: Record asset release source
-        run: |
-          version="$(node scripts/component-release-version.mjs frontend)"
-          echo "Deployed frontend v$version from $GITHUB_SHA. Terraform Routes were not changed." >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify deployed frontend identity
+        env:
+          CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
+          CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
+          CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
+        run: node scripts/verify-frontend-compatibility.mjs deployed
+      - name: Record independent frontend release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/record-component-release.mjs frontend

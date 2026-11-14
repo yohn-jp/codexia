@@ -14,7 +14,8 @@ test('bootstrap, monotonic publish, refresh and withdrawal preserve immutable id
   assert.throws(()=>nextChannel(null,{mode:'publish',release:release('0.1.0','a')},now));
   const one=nextChannel(zero,{mode:'publish',release:release('0.1.0','a')},now);
   assert.equal(one.sequence,2);
-  assert.equal(nextChannel(one,{mode:'publish',release:release('0.1.0','b')},now),null);
+  assert.throws(()=>nextChannel(one,{mode:'publish',release:release('0.1.0','b')},now),/different artifact/);
+  assert.equal(nextChannel(one,{mode:'publish',release:release('0.1.0','a')},now),null);
   const two=nextChannel(one,{mode:'publish',release:release('0.1.1','b')},now);
   assert.throws(()=>nextChannel(two,{mode:'publish',release:release('0.0.1','c')},now));
   const withdrawn=nextChannel(two,{mode:'withdraw',image:image('b')},now);
