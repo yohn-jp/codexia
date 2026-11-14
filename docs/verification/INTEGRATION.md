@@ -9,13 +9,14 @@ CODEXIA_PROFILE=full pnpm build
 
 ## MCP and approved mutation
 
-These required checks need a disposable PostgreSQL database. The MCP and legacy-inspection tests fail clearly if `CODEXIA_TEST_DATABASE_URL` is absent; a database-dependent skip is not acceptance evidence. For a local run:
+These required checks need a disposable PostgreSQL database. The MCP and legacy-inspection tests fail clearly if database configuration is absent; use `CODEXIA_TEST_DATABASE_URL` for this disposable database. A database-dependent skip is not acceptance evidence. For a local run:
 
 ```sh
 docker run --rm -d --name codexia-integration-postgres \
   -e POSTGRES_USER=codexia -e POSTGRES_PASSWORD=codexia \
   -e POSTGRES_DB=codexia_test -p 55440:5432 postgres:17-alpine
 export CODEXIA_TEST_DATABASE_URL='postgres://codexia:codexia@127.0.0.1:55440/codexia_test'
+docker exec codexia-integration-postgres pg_isready -U codexia -d codexia_test
 ```
 
 Stop the disposable database after verification with `docker stop codexia-integration-postgres`.
