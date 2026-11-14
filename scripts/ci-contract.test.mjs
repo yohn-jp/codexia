@@ -26,7 +26,7 @@ test('browser groups depend on profile producers; independent groups cannot canc
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.equal(workflow.jobs.plan.name, 'plan');
   for (const [id, job] of Object.entries(workflow.jobs).filter(([id]) => !['plan', 'certification'].includes(id))) {
-    assert.deepEqual(job.needs, id === 'browser' ? ['plan', 'build'] : id === 'hosted' ? ['plan','hosted_catalog'] : ['plan'], id);
+    assert.deepEqual(job.needs, id === 'browser' ? ['plan', 'build'] : id === 'hosted' ? ['plan','build','hosted_catalog'] : ['plan'], id);
     assert.match(job.if, /needs\.plan\.result == 'success'/);
     assert.equal(job['continue-on-error'], undefined, id);
     if (id === 'hosted_catalog') assert.equal(job.name,'hosted-native-catalog');
@@ -93,7 +93,7 @@ test('browser groups retain immutable runtime and restore the exact producer bef
   const producer = workflow.jobs.build.steps.find(step => step.run?.includes('ci-profile-artifact.mjs pack'));
   assert.ok(producer);
   assert.ok(workflow.jobs.build.steps.some(step => step.uses === 'actions/upload-artifact@v4' && step.with.name === 'ci-profile-build-${{ matrix.profile }}'));
-  assert.match(runner, /assertBrowserReceipt/);
+  assert.match(runner, /assertProfileReceipt/);
   assert.doesNotMatch(runner, /run\('pnpm', \['build'\], \{ CODEXIA_PROFILE: group/);
   assert.match(runner, /run-browser-shard\.mjs.*--prebuilt/);
 });
@@ -135,7 +135,7 @@ test('Hosted Native keeps one verified producer and three independent compositio
   assert.match(producer.if,/hosted_catalog == 'true'/);
   assert.equal(producer.name,'hosted-native-catalog');
   assert.ok(producer.steps.some(step=>step.run?.includes('ci-native-producer.mjs seal')));
-  assert.deepEqual(consumers.needs,['plan','hosted_catalog']);
+  assert.deepEqual(consumers.needs,['plan','build','hosted_catalog']);
   assert.match(consumers.if,/always\(\)/);
   assert.equal(consumers.permissions.actions,'read');
   assert.ok(!consumers.steps.some(step=>step.uses==='docker/setup-buildx-action@v3'));
@@ -143,4 +143,18 @@ test('Hosted Native keeps one verified producer and three independent compositio
   assert.match(restore.run,/ci-native-producer\.mjs restore/);
   const execution=consumers.steps.find(step=>step.run?.includes('ci-group.mjs'));
   assert.equal(execution.env.CODEXIA_CI_NATIVE_RESTORE,'${{ steps.restore-native.outcome }}');
+  const profileRestore=consumers.steps.find(step=>step.id==='restore-profile');
+  assert.match(profileRestore.run,/ci-profile-artifact\.mjs restore full/);
+  assert.equal(execution.env.CODEXIA_CI_PROFILE_RESTORE,'${{ steps.restore-profile.outcome }}');
+  assert.ok(consumers.steps.indexOf(profileRestore)<consumers.steps.indexOf(execution));
+  const runner=readFileSync(new URL('./ci-group.mjs',import.meta.url),'utf8');
+  assert.doesNotMatch(runner,/build:workspace/);
+});
+
+test('balanced browser lanes retain all independent spec and browser combinations',()=>{
+  for(const profile of PROFILES){
+    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-writing'],['core','native-review','persistence-database'].map(id=>'browser-'+profile+'-'+id));
+    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-reference'],['modular-workspace','review-contributions','recent-activity','job-inbox'].map(id=>'browser-'+profile+'-'+id));
+    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-webkit'],['auth-recovery','ui-v1','webkit'].map(id=>'browser-'+profile+'-'+id));
+  }
 });

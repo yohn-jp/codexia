@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PROFILES, WORKSPACES } from './ci-contract.mjs';
+import { PROFILES, WORKSPACES, requiredBuildProfile } from './ci-contract.mjs';
 import { planDigest, validateVerificationPlan } from './ci-impact.mjs';
 import { selectLatestJobArtifact } from './ci-artifact-selection.mjs';
 import { extractJsonEntry } from './download-ci-artifacts.mjs';
@@ -113,27 +113,27 @@ export async function restoreProfile(root,bundle,expected) {
   }
 }
 
-export function assertBrowserReceipt(receipt,plan,profile,runId) {
+export function assertProfileReceipt(receipt,plan,profile,runId) {
   assert.equal(receipt?.profile,profileName(profile));
-  assert.equal(receipt.sourceSha,plan.sha,'Browser receipt source mismatch');
-  assert.equal(receipt.planDigest,planDigest(plan),'Browser receipt plan mismatch');
-  assert.equal(receipt.runId,String(runId),'Browser receipt run mismatch');
-  assert.ok(Number.isSafeInteger(receipt.artifactId)&&receipt.artifactId>0,'Invalid browser artifact ID');
+  assert.equal(receipt.sourceSha,plan.sha,'Profile receipt source mismatch');
+  assert.equal(receipt.planDigest,planDigest(plan),'Profile receipt plan mismatch');
+  assert.equal(receipt.runId,String(runId),'Profile receipt run mismatch');
+  assert.ok(Number.isSafeInteger(receipt.artifactId)&&receipt.artifactId>0,'Invalid profile artifact ID');
   assert.match(receipt.artifactDigest,/^sha256:[a-f0-9]{64}$/u);
   assert.ok(Number.isSafeInteger(receipt.producerAttempt)&&receipt.producerAttempt>0,'Invalid producer attempt');
   assert.equal(receipt.producerJob,'build-'+profile);
 }
 
-export function assertBrowserArtifactEvidence(plan,jobs,reports,artifacts,runId) {
-  for(const group of plan.groups.filter(name=>name.startsWith('browser-'))){
-    const profile=group.split('-')[1];
+export function assertProfileArtifactEvidence(plan,jobs,reports,artifacts,runId) {
+  for(const group of plan.groups.filter(name=>requiredBuildProfile(name))){
+    const profile=requiredBuildProfile(group);
     const receipt=reports.find(report=>report.group===group)?.profileArtifact;
-    assertBrowserReceipt(receipt,plan,profile,runId);
+    assertProfileReceipt(receipt,plan,profile,runId);
     const artifact=selectLatestJobArtifact('ci-profile-build-'+profile,'build-'+profile,artifacts,jobs,{runId,sourceSha:plan.sha});
     const job=jobs.find(job=>job.name==='build-'+profile);
-    assert.equal(receipt.artifactId,artifact.id,'Browser consumed a stale producer artifact');
-    assert.equal(receipt.artifactDigest,artifact.digest,'Browser artifact digest mismatch');
-    assert.equal(receipt.producerAttempt,job.run_attempt,'Browser producer attempt mismatch');
+    assert.equal(receipt.artifactId,artifact.id,'Consumer used a stale producer artifact');
+    assert.equal(receipt.artifactDigest,artifact.digest,'Profile artifact digest mismatch');
+    assert.equal(receipt.producerAttempt,job.run_attempt,'Profile producer attempt mismatch');
   }
 }
 
@@ -171,7 +171,7 @@ async function main(){
   await restoreProfile(root,bundle,identity);
   const receipt={profile,sourceSha:plan.sha,planDigest:identity.planDigest,runId:GITHUB_RUN_ID,producerJob:identity.producerJob,
     producerAttempt:identity.producerAttempt,artifactId:selected.id,artifactDigest:selected.digest};
-  assertBrowserReceipt(receipt,plan,profile,GITHUB_RUN_ID);
+  assertProfileReceipt(receipt,plan,profile,GITHUB_RUN_ID);
   await writeFile(filename,JSON.stringify(receipt),{flag:'wx',mode:0o600});
   console.log('Restored '+bundle.files.length+' files from exact artifact '+selected.id+' for '+profile);
 }

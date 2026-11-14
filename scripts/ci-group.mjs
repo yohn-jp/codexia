@@ -2,9 +2,9 @@
 import { spawnSync, execFileSync } from 'node:child_process';
 import { readFileSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
-import { VERIFICATION_GROUPS } from './ci-contract.mjs';
+import { VERIFICATION_GROUPS, requiredBuildProfile } from './ci-contract.mjs';
 import { planDigest, validateVerificationPlan } from './ci-impact.mjs';
-import { assertBrowserReceipt } from './ci-profile-artifact.mjs';
+import { assertProfileReceipt } from './ci-profile-artifact.mjs';
 import { assertNativeReceipt } from './ci-native-producer.mjs';
 
 const group = process.argv[2];
@@ -29,13 +29,14 @@ let profileArtifact;
 let nativeArtifact;
 try {
   if (group.startsWith('unit-')) node('scripts/ci-workspace.mjs', 'prepare', 'unit-group', tasks.map(task => task.slice(5)).join(','));
-  if (group.startsWith('browser-')) {
+  const requiredProfile = requiredBuildProfile(group);
+  if (requiredProfile) {
     // A failed producer or restore is a blocked validation, not a reason to rebuild.
-    if (process.env.CODEXIA_CI_PROFILE_RESTORE !== 'success') throw new Error('Same-profile build/restore prerequisite failed');
+    if (process.env.CODEXIA_CI_PROFILE_RESTORE !== 'success') throw new Error('Profile build/restore prerequisite failed');
     profileArtifact = JSON.parse(readFileSync(process.env.CODEXIA_CI_PROFILE_RECEIPT, 'utf8'));
-    assertBrowserReceipt(profileArtifact, plan, group.split('-')[1], process.env.GITHUB_RUN_ID);
-    node('scripts/verify-browser-runtime.mjs');
+    assertProfileReceipt(profileArtifact, plan, requiredProfile, process.env.GITHUB_RUN_ID);
   }
+  if (group.startsWith('browser-')) node('scripts/verify-browser-runtime.mjs');
   if (group.startsWith('hosted-native-') && group !== 'hosted-native-catalog') {
     if (process.env.CODEXIA_CI_NATIVE_RESTORE !== 'success') throw new Error('Hosted Native producer prerequisite failed');
     nativeArtifact = JSON.parse(readFileSync(process.env.CODEXIA_CI_NATIVE_RECEIPT,'utf8'));
@@ -68,7 +69,9 @@ for (const task of tasks) {
           { CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task) });
       } else if (task.startsWith('hosted-native-')) {
         const selection = task.slice(14);
-        run('pnpm', selection === 'catalog' ? ['--filter', '@codexia/module-*...', 'build'] : ['build:workspace']);
+        // Composition consumers have already restored every Full server/module build.
+        // profile-package still rebuilds the actual selected UI and verifies its deployed closure.
+        if (selection === 'catalog') run('pnpm', ['--filter', '@codexia/module-*...', 'build']);
         run(process.execPath, ['scripts/verify-hosted-native.mjs', '--selection', selection],
           { CODEXIA_NATIVE_REPORT_PATH: path.join(reportDirectory, 'native-report.json'),
             ...(nativeArtifact ? {CODEXIA_NATIVE_PRODUCER_REPORT:process.env.CODEXIA_CI_NATIVE_PRODUCER_REPORT} : {}) });

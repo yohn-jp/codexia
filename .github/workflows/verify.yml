@@ -416,6 +416,7 @@ jobs:
     name: hosted-native-${{ matrix.selection }}
     needs:
       - plan
+      - build
       - hosted_catalog
     if: always() && !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.hosted != '[]'
     permissions:
@@ -457,6 +458,13 @@ jobs:
         with:
           name: ci-plan
           path: ${{ runner.temp }}/ci-plan
+      - name: Restore exact profile producer
+        id: restore-profile
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
+          CODEXIA_CI_PROFILE_RECEIPT: ${{ runner.temp }}/profile-receipt.json
+        run: node scripts/ci-profile-artifact.mjs restore full "$CODEXIA_CI_PROFILE_RECEIPT"
       - name: Restore exact native producer
         id: restore-native
         env:
@@ -468,6 +476,8 @@ jobs:
         env:
           CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/hosted-native-${{ matrix.selection }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
+          CODEXIA_CI_PROFILE_RESTORE: ${{ steps.restore-profile.outcome }}
+          CODEXIA_CI_PROFILE_RECEIPT: ${{ runner.temp }}/profile-receipt.json
           CODEXIA_CI_NATIVE_RESTORE: ${{ steps.restore-native.outcome }}
           CODEXIA_CI_NATIVE_RECEIPT: ${{ runner.temp }}/native-producer/receipt.json
           CODEXIA_CI_NATIVE_PRODUCER_REPORT: ${{ runner.temp }}/native-producer/native-report.json

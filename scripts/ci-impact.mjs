@@ -48,6 +48,7 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
   // A selected browser suite always consumes the same-profile build result.
   for (const profile of PROFILES) if ([...selected].some(task => task.startsWith(`browser-${profile}-`))) add(`build-${profile}`);
   if ([...selected].some(task => task.startsWith('hosted-native-'))) add('hosted-native-catalog');
+  if ([...selected].some(task => task.startsWith('hosted-native-') && task !== 'hosted-native-catalog')) add('build-full');
   const tasks = VERIFICATION_TASKS.filter(task => full || selected.has(task));
   return {
     version: 1, sha, base, event, mode: full ? 'full' : 'affected', files: files ?? null,

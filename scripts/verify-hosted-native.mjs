@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Disposable native Producer contract check. Never pushes images or accesses production.
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -34,10 +34,16 @@ function readOciBlob(archive, digest) {
 async function buildImage(target) {
   const archive = path.join(output, `${target}.tar`);
   const metadata = path.join(output, `${target}.json`);
-  run('docker', ['buildx', 'build', '--platform', 'linux/amd64', '--target', target,
+  const started=Date.now();
+  await new Promise((resolve,reject)=>{
+    const child=spawn('docker', ['buildx', 'build', '--platform', 'linux/amd64', '--target', target,
     '--build-arg', `CODEXIA_PRODUCER_REVISION=${sha}`,
     '--build-arg', `CODEXIA_DOCKERFILE_SHA256=${dockerfileHash}`,
-    '--provenance=false', '--output', `type=oci,dest=${archive}`, '--metadata-file', metadata, '.']);
+      '--provenance=false', '--output', `type=oci,dest=${archive}`, '--metadata-file', metadata, '.'],
+      {cwd:root,stdio:'inherit',timeout:30*60_000});
+    child.once('error',reject);
+    child.once('close',(code,signal)=>code===0?resolve():reject(new Error(target+' OCI build failed: '+(signal??code))));
+  });
   const result = JSON.parse(await readFile(metadata, 'utf8'));
   const digest = result['containerimage.digest'];
   assert.match(digest, /^sha256:[a-f0-9]{64}$/u);
@@ -53,6 +59,7 @@ async function buildImage(target) {
   assert.equal(config.os, 'linux');
   assert.equal(config.architecture, 'amd64');
   assert.equal(config.config.Labels['org.opencontainers.image.revision'], sha);
+  console.log(JSON.stringify({phase:'native-oci-build',target,seconds:(Date.now()-started)/1000}));
   return digest;
 }
 
@@ -61,8 +68,17 @@ try {
   if (producerPath) assert.ok(['core','selected','full'].includes(selection),'Only composition consumers use a producer report');
   const producer = producerPath ? JSON.parse(await readFile(producerPath,'utf8')) : null;
   if (producer) assertNativeProducerReport(producer,sha,dockerfileHash);
-  const runtimeBaseDigest = producer ? producer.runtimeBaseDigest : await buildImage('runtime-base');
-  const buildKitDigest = producer ? producer.buildKitDigest : await buildImage('buildkit');
+  // Targets are independent; each exports to its own archive and metadata path.
+  // Settle both before cleanup, including when either fails.
+  let runtimeBaseDigest,buildKitDigest;
+  if (producer) {
+    ({runtimeBaseDigest,buildKitDigest}=producer);
+  } else {
+    const results=await Promise.allSettled([buildImage('runtime-base'),buildImage('buildkit')]);
+    const failures=results.filter(result=>result.status==='rejected');
+    if(failures.length) throw new AggregateError(failures.map(result=>result.reason),'Native OCI producer failed');
+    [runtimeBaseDigest,buildKitDigest]=results.map(result=>result.value);
+  }
   const catalogPath = path.join(output, 'catalog.json');
   run(process.execPath, ['scripts/hosted-build.mjs', 'catalog', '--producer-revision', sha,
     '--runtime-base-digest', runtimeBaseDigest, '--build-kit-digest', buildKitDigest, '--out', catalogPath]);

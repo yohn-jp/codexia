@@ -6,7 +6,7 @@ import path from 'node:path';
 import { collectGitHubPages } from './release-policy.mjs';
 import { validateVerificationPlan } from './ci-impact.mjs';
 import { assertPlanEvidence } from './ci-evidence.mjs';
-import { assertBrowserArtifactEvidence } from './ci-profile-artifact.mjs';
+import { assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
 import { assertNativeArtifactEvidence } from './ci-native-producer.mjs';
 
 const { GH_TOKEN, GITHUB_REPOSITORY, GITHUB_RUN_ID, CODEXIA_EXPECTED_SHA, CODEXIA_REQUIRED_RESULTS } = process.env;
@@ -43,7 +43,7 @@ for (const entry of await readdir(directory, { withFileTypes: true })) {
 }
 assertPlanEvidence(plan, jobs, reports);
 const artifacts = await collectGitHubPages(page => request(`actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100&page=${page}`), 'artifacts');
-assertBrowserArtifactEvidence(plan, jobs, reports, artifacts, GITHUB_RUN_ID);
+assertProfileArtifactEvidence(plan, jobs, reports, artifacts, GITHUB_RUN_ID);
 assertNativeArtifactEvidence(plan,jobs,reports,artifacts,GITHUB_RUN_ID);
 const message = `Verified ${plan.mode} plan: ${plan.tasks.length} validations at ${CODEXIA_EXPECTED_SHA}; run ${GITHUB_RUN_ID}. ${plan.excluded.length} explicitly NOT_SELECTED.\n`;
 console.log(message.trim());

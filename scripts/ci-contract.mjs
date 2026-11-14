@@ -30,6 +30,8 @@ export const VERIFICATION_TASKS = [
   'coverage',
 ];
 // Execution groups batch work without removing any validation obligation.
+// Browser lanes retain their stable job names; the WebKit lane also runs Chromium UI/auth specs.
+// Group measured longer specs across the three existing lanes, never share mutable fixtures.
 export const VERIFICATION_GROUPS = {
   'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'migration', 'core', 'api', 'root'].map(id => `unit-${id}`),
   'unit-modules': ['app', ...WORKSPACES.filter(item => item.path.startsWith('modules/')).map(item => item.id)].map(id => `unit-${id}`),
@@ -40,11 +42,17 @@ export const VERIFICATION_GROUPS = {
   'oci-core': ['oci-core'],
   'oci-full': ['oci-full'],
   ...Object.fromEntries(PROFILES.flatMap(profile => [
-    [`browser-${profile}-writing`, ['auth-recovery', 'core', 'job-inbox', 'native-review', 'persistence-database', 'recent-activity'].map(id => `browser-${profile}-${id}`)],
-    [`browser-${profile}-reference`, ['modular-workspace', 'review-contributions', 'ui-v1'].map(id => `browser-${profile}-${id}`)],
-    [`browser-${profile}-webkit`, [`browser-${profile}-webkit`]],
+    [`browser-${profile}-writing`, ['core', 'native-review', 'persistence-database'].map(id => `browser-${profile}-${id}`)],
+    [`browser-${profile}-reference`, ['modular-workspace', 'review-contributions', 'recent-activity', 'job-inbox'].map(id => `browser-${profile}-${id}`)],
+    [`browser-${profile}-webkit`, ['auth-recovery', 'ui-v1', 'webkit'].map(id => `browser-${profile}-${id}`)],
   ])),
   ...Object.fromEntries(NATIVE_SELECTIONS.map(id => [`hosted-native-${id}`, [`hosted-native-${id}`]])),
 };
+// A single dependency authority for profile artifact consumers and certification.
+export function requiredBuildProfile(group) {
+  if (group.startsWith('browser-')) return group.split('-')[1];
+  if (NATIVE_SELECTIONS.filter(id => id !== 'catalog').some(id => group === `hosted-native-${id}`)) return 'full';
+  return null;
+}
 export const VERIFICATION_LEAF_JOBS = ['plan', ...Object.keys(VERIFICATION_GROUPS)];
 export const REQUIRED_VERIFICATION_JOBS = [...VERIFICATION_LEAF_JOBS, 'certification'];
