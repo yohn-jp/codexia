@@ -49,6 +49,7 @@ export const VERIFICATION_GROUPS = {
   ...Object.fromEntries(NATIVE_SELECTIONS.map(id => [`hosted-native-${id}`, [`hosted-native-${id}`]])),
 };
 // A single dependency authority for profile artifact consumers and certification.
+/** @param {string} group */
 export function requiredBuildProfile(group) {
   if (group.startsWith('browser-')) return group.split('-')[1];
   if (NATIVE_SELECTIONS.filter(id => id !== 'catalog').some(id => group === `hosted-native-${id}`)) return 'full';
