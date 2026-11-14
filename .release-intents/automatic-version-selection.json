@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "summary": "Derive the backend API product version from its package manifest and automate compatible release selection."
+}

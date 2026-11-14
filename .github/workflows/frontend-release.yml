@@ -108,6 +108,11 @@ jobs:
         with:
           name: codexia-frontend-${{ github.sha }}
           path: app/dist
+      - name: Require operator-approved API compatibility epoch
+        env:
+          CODEXIA_ACTIVE_API_EPOCH: ${{ vars.CODEXIA_ACTIVE_API_EPOCH || '1' }}
+        run: |
+          node --input-type=module -e 'import assert from "node:assert/strict"; import { readFileSync } from "node:fs"; const active=process.env.CODEXIA_ACTIVE_API_EPOCH; assert.match(active,/^[1-9][0-9]*$/); const identity=JSON.parse(readFileSync("app/dist/desktop/update-identity.json","utf8")); assert.equal(String(identity.apiEpoch),active,"Coordinated API/UI rollout required");'
       - name: Deploy static assets only
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

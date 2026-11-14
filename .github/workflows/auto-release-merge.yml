@@ -1,0 +1,43 @@
+name: Merge certified Codexia version release
+on:
+  workflow_run:
+    workflows: [Verify Codexia, Codexia Backend Image, Codexia UI Static Assets, Verify Deployment Configuration]
+    types: [completed]
+    branches: [automation/semver-release]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: codexia-semver-merge
+  cancel-in-progress: false
+jobs:
+  merge:
+    if: >-
+      github.repository == 'yohn-jp/codexia' &&
+      vars.CODEXIA_AUTO_RELEASE_ENABLED == 'true' &&
+      vars.CODEXIA_AUTO_RELEASE_MERGE == 'true' &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+       (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.head_branch == 'automation/semver-release' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        github.event.workflow_run.conclusion == 'success'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: codexia-release-automation
+    steps:
+      # Never execute code or download artifacts from the triggering PR.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.0'
+      - name: Verify current release PR and merge only the certified head
+        env:
+          GH_TOKEN: ${{ secrets.CODEXIA_RELEASE_BOT_TOKEN }}
+          CHECKS_TOKEN: ${{ github.token }}
+        run: bash scripts/merge-release-pr.sh
