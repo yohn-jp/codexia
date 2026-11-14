@@ -4,6 +4,12 @@ export const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 export interface FixtureProject { id: string; title: string }
 export interface FixtureDocument { id: string; title: string; kind: string; headRevisionId: string | null }
 
+/** Shared manuscript operator; callers own the scenario and text assertions. */
+export const manuscriptEditor = (page: Page) => page.getByRole("textbox", { name: "原稿 Markdown" });
+export async function readManuscriptMarkdown(page: Page): Promise<string> {
+  return manuscriptEditor(page).evaluate(element => Array.from(element.querySelectorAll(".cm-line"), line => line.textContent ?? "").join("\n"));
+}
+
 export async function ownerLogin(page: Page, path = "/desktop/"): Promise<void> {
   await page.goto(new URL(path, process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`).toString());
   await expect(page.getByLabel("アクセス・トークン").or(page.getByRole("heading", { name: "Database workspace" }))).toBeVisible();
@@ -37,12 +43,12 @@ export async function openFixtureScene(page: Page, index = 0): Promise<{ project
     if (await library.count()) await library.first().click();
   }
   await page.locator(".pg-document-list").getByRole("button", { name: new RegExp(scene!.title) }).click();
-  await expect(page.getByRole("textbox", { name: "原稿 Markdown" })).toBeVisible();
+  await expect(manuscriptEditor(page)).toBeVisible();
   return { project, scene: scene! };
 }
 
 export async function fillDraft(page: Page, text: string): Promise<void> {
-  const editor = page.getByRole("textbox", { name: "原稿 Markdown" });
+  const editor = manuscriptEditor(page);
   await editor.fill(text);
   await expect(editor).toHaveText(text);
   await expect(page.getByText("IndexedDB回復Journalに保存済み", { exact: true })).toBeVisible();
@@ -66,7 +72,7 @@ export async function createWritingFixture(page: Page, mode: "desktop" | "mobile
   const writingRoute = `/${mode}/projects/${project.id}/scenes/${scene.id}${mode === "mobile" ? "?view=writing" : ""}`;
   await page.goto(new URL(writingRoute, page.url()).toString());
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "原稿 Markdown" })).toBeVisible();
+  await expect(manuscriptEditor(page)).toBeVisible();
   await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
   return { project, scene, second };
 }
