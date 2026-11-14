@@ -9,6 +9,7 @@ on:
       - profiles/**
       - modules/**
       - packages/contracts/**
+      - packages/persistence-contracts/**
       - deploy/cloudflare/ui-routes.json
       - deploy/update-compatibility.json
       - scripts/build-frontend.mjs
@@ -27,6 +28,7 @@ on:
       - profiles/**
       - modules/**
       - packages/contracts/**
+      - packages/persistence-contracts/**
       - deploy/cloudflare/ui-routes.json
       - deploy/update-compatibility.json
       - scripts/build-frontend.mjs
@@ -72,7 +74,9 @@ jobs:
         run: npm ci --prefix edge/frontend
       - name: Validate Wrangler assets-only bundle
         run: edge/frontend/node_modules/.bin/wrangler deploy --dry-run --config edge/frontend/wrangler.jsonc --outdir "$RUNNER_TEMP/codexia-frontend-worker"
-      - name: Exercise actual static asset server
+      - name: Install browser for static delivery verification
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Exercise actual static asset server and browser entrypoints
         run: node edge/frontend/test/static-smoke.mjs
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'push'

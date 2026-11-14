@@ -63,35 +63,14 @@ jobs:
           fi
           echo "name=ghcr.io/${GITHUB_REPOSITORY,,}/$PROFILE" >> "$GITHUB_OUTPUT"
           echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"
-      - name: Build the exact release image
+      - name: Build and verify the exact release image against PostgreSQL
         env:
-          PROFILE: ${{ matrix.profile }}
+          OCI_ENGINE: docker
+          CODEXIA_PROFILE: ${{ matrix.profile }}
+          CODEXIA_OCI_IMAGE: codexia-ci:${{ matrix.profile }}
         run: |
-          docker buildx build --platform linux/amd64 --load \
-            --build-arg "PROFILE=$PROFILE" --tag "codexia-ci:$PROFILE" .
-      - name: Verify image before publication
-        env:
-          PROFILE: ${{ matrix.profile }}
-        run: |
-          set -euo pipefail
-          token="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-          cid="$(docker run -d --publish 127.0.0.1::3000 --env "CODEXIA_AUTH_TOKEN=$token" --env CODEXIA_DATA_DIR=/data "codexia-ci:$PROFILE")"
-          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
-          port="$(docker port "$cid" 3000/tcp | sed -n 's/.*://p')"
-          test -n "$port"
-          ready=0
-          for attempt in $(seq 1 60); do
-            if curl --fail --silent "http://127.0.0.1:$port/api/health" >/dev/null; then ready=1; break; fi
-            if [[ "$(docker inspect -f '{{.State.Running}}' "$cid")" != true ]]; then break; fi
-            sleep 1
-          done
-          if [[ "$ready" != 1 ]]; then docker logs "$cid"; exit 1; fi
-          node scripts/verify-oci-http.mjs "http://127.0.0.1:$port" "$PROFILE"
-          test "$(docker exec "$cid" node -p 'process.getuid()')" = 1000
-          docker exec "$cid" node -e "require('node:fs').writeFileSync('/data/.ci-smoke', 'ok'); require('node:fs').unlinkSync('/data/.ci-smoke')"
-          docker kill --signal TERM "$cid" >/dev/null
-          test "$(docker wait "$cid")" = 0
-          docker logs "$cid" 2>&1 | grep -Fq 'Codexia shutdown complete'
+          bash scripts/verify-oci.sh
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$CODEXIA_OCI_IMAGE")" = linux/amd64
       - name: Recheck immutable tag before publication
         env:
           GH_TOKEN: ${{ github.token }}

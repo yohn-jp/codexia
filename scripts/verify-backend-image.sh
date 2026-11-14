@@ -11,21 +11,30 @@ verification_network="codexia-backend-smoke-net-${RANDOM}-${RANDOM}"
 token="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
 database_password="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(24).toString("hex"))')"
 database_image="docker.io/library/postgres:17-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994"
+secret_directory="$(mktemp -d "${TMPDIR:-/tmp}/codexia-backend-secrets.XXXXXX")"
+umask 077
 
 cleanup() {
   "$engine" rm --volumes --force "$container_name" "$database_container" >/dev/null 2>&1 || true
   "$engine" network rm "$verification_network" >/dev/null 2>&1 || true
+  rm -rf -- "$secret_directory"
 }
 trap cleanup EXIT INT TERM
 
+printf '%s' "$database_password" > "$secret_directory/postgres-password"
+printf '%s' "$token" > "$secret_directory/auth-token"
+printf '{"token":"%s"}' "$token" > "$secret_directory/login.json"
+chmod 0444 "$secret_directory/postgres-password" "$secret_directory/auth-token"
+
 "$engine" network create "$verification_network" >/dev/null
 "$engine" run --detach --name "$database_container" --network "$verification_network" \
-	--env POSTGRES_USER=codexia --env POSTGRES_DB=codexia_verify --env "POSTGRES_PASSWORD=$database_password" \
+	--env POSTGRES_USER=codexia --env POSTGRES_DB=codexia_verify --env POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password \
+	--volume "$secret_directory/postgres-password:/run/secrets/postgres-password:ro" \
 	"$database_image" >/dev/null
 
 database_ready=0
 for attempt in $(seq 1 60); do
-  if "$engine" exec "$database_container" pg_isready -U codexia -d codexia_verify >/dev/null 2>&1; then
+  if "$engine" exec "$database_container" pg_isready -h 127.0.0.1 -U codexia -d codexia_verify >/dev/null 2>&1; then
     database_ready=1
     break
   fi
@@ -40,10 +49,16 @@ fi
 
 "$engine" run --detach --name "$container_name" --network "$verification_network" \
   --publish 127.0.0.1::3000 \
-  --env "CODEXIA_AUTH_TOKEN=$token" \
+  --read-only --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --volume "$secret_directory/auth-token:/run/secrets/codexia-auth-token:ro" \
+  --volume "$secret_directory/postgres-password:/run/secrets/app-password:ro" \
+  --env CODEXIA_AUTH_TOKEN_FILE=/run/secrets/codexia-auth-token \
   --env CODEXIA_DATA_DIR=/data \
   --env CODEXIA_USAGE_DIR=/history \
-  --env "CODEXIA_DATABASE_URL=postgres://codexia:${database_password}@${database_container}:5432/codexia_verify" \
+  --env CODEXIA_DATABASE_PASSWORD_FILE=/run/secrets/app-password \
+  --env CODEXIA_DATABASE_USER=codexia --env CODEXIA_DATABASE_NAME=codexia_verify \
+  --env "CODEXIA_DATABASE_HOST=$database_container" \
   --env CODEXIA_DATABASE_MIGRATE_ON_START=1 \
   "$image" >/dev/null
 
@@ -85,6 +100,17 @@ desktop_response="$(curl --silent --write-out '\n%{http_code}' "http://127.0.0.1
 root_status="${root_response##*$'\n'}"
 desktop_status="${desktop_response##*$'\n'}"
 [[ "$session_status" == 401 ]] || { echo "Unauthenticated API session returned HTTP $session_status." >&2; exit 1; }
+origin="http://127.0.0.1:$port"
+curl --fail --silent --show-error --output /dev/null --cookie-jar "$secret_directory/cookies" \
+  --header "Origin: $origin" --header "Content-Type: application/json" \
+  --data-binary "@$secret_directory/login.json" "$origin/api/login"
+curl --fail --silent --show-error --cookie "$secret_directory/cookies" "$origin/api/session" | \
+  node -e 'const a=JSON.parse(require("node:fs").readFileSync(0,"utf8")); if(a.authenticated!==true||a.authorScope!=="owner")process.exit(1)'
+csrf_status="$(curl --silent --output /dev/null --write-out '%{http_code}' --cookie "$secret_directory/cookies" \
+  --header "Origin: https://foreign.invalid" --request POST "$origin/api/logout")"
+[[ "$csrf_status" == 403 ]] || { echo "Cross-origin logout returned HTTP $csrf_status." >&2; exit 1; }
+curl --fail --silent --show-error --cookie "$secret_directory/cookies" --header "Origin: $origin" \
+  --request POST "$origin/api/logout" >/dev/null
 [[ "$root_status" == 503 && "$root_response" == *'"code":"APP_NOT_BUILT"'* &&
    "$desktop_status" == 503 && "$desktop_response" == *'"code":"APP_NOT_BUILT"'* ]] || {
   echo "Backend image did not keep the UI outside its image (root=$root_status, desktop=$desktop_status)." >&2
