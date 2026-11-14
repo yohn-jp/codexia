@@ -2,11 +2,11 @@
 
 ## 1. この文書の位置付け
 
-本書はCodexiaが作者に保証する体験の正本であり、実装済み機能や本番受入の報告ではない。MUST／禁止は受入条件、SHOULDは例外理由と代替の証拠を要する設計原則とする。画像モックや外部製品の外観は仕様ではない。
+本書はCodexiaが作者に保証する体験の正本であり、実装済み機能や本番受入の報告ではない。MUST／禁止は受入条件、SHOULDは例外理由と代替の証拠を要する設計原則とする。画像モックや外部製品の外観は仕様ではない。具体的な再設計提案は [情報設計](INFORMATION-ARCHITECTURE.md)、[Desktop](DESKTOP-AUTHORING.md)、[Knowledge／Review](KNOWLEDGE-REVIEW.md)、[Mobile](MOBILE-AUTHORING.md) を参照する。本書の契約が優先される。
 
 最新の明示的なオーナー指示と受入済み製品契約を優先する。本書は情報設計・表示・操作の判断を固定し、[Core](../architecture/CORE.md)、[Internal boundaries](../architecture/INTERNAL-BOUNDARIES.md)、[Modular workspace](../architecture/MODULAR-WORKSPACE.md)、[Modules](../architecture/MODULES.md)の正本・保存・認可の意味を変更しない。[Authoring](../authoring.md)と[Mobile interactions](../architecture/MOBILE-INTERACTION-UX.md)も併読する。
 
-既存のReact、CodeMirror、Radix、Ionic React、可変パネル、Vite、Fastify、Gitの技術選択を維持する。Desktop／Mobileは別のpresentation、authoring coordinatorと保存・復旧は共通の責務とする。新しい状態管理基盤、別エディタ、別保存方式でUX問題を回避しない。
+既存のReact、CodeMirror、Radix、Ionic React、可変パネル、Vite、Fastify、PostgreSQLの技術選択を維持する。Desktop／Mobileは別のpresentation、authoring coordinatorと保存・復旧は共通の責務とする。新しい状態管理基盤、別エディタ、別保存方式でUX問題を回避しない。
 
 配色、余白、画面割り、ナビゲーション、パネルの初期配置は本書の範囲で改善できる。プリセットを固定モードへ縮退させたり、対応済みの執筆・閲覧機能を見た目のために削除してはならない。
 
