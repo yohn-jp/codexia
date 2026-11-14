@@ -42,3 +42,26 @@ test('release identity must match certified source and compatibility',()=>{
   assert.throws(()=>releaseFromIdentity(identity,artifact,'b'.repeat(40),r.version,compatibility,'core'));
   assert.throws(()=>releaseFromIdentity(identity,artifact,r.sourceSha,r.version,{...compatibility,apiEpoch:2},'core'));
 });
+
+
+test('certified Core and Full are advertised together without replacing an existing version',()=>{
+  const core=release('0.1.0','a');
+  const full={...core,profile:'full',image:image('b')};
+  const zero=nextChannel(null,{mode:'bootstrap'},now);
+  const both=nextChannel(zero,{mode:'publish',releases:[core,full]},now);
+  assert.equal(both.sequence,2);
+  assert.deepEqual(both.releases,[core,full]);
+  assert.equal(nextChannel(both,{mode:'publish',releases:[core,full]},now),null);
+  const old=nextChannel(zero,{mode:'publish',release:core},now);
+  const added=nextChannel(old,{mode:'publish',releases:[core,full]},now);
+  assert.deepEqual(added.releases,[core,full]);
+  assert.throws(()=>nextChannel(zero,{mode:'publish',releases:[core,{...full,sourceSha:'c'.repeat(40)}]},now),/share source/);
+  assert.throws(()=>nextChannel(zero,{mode:'publish',releases:[core,{...full,image:core.image}]},now),/distinct images/);
+  assert.throws(()=>nextChannel(zero,{mode:'publish',releases:[core,core]},now),/Duplicate candidate profile/);
+  const newer=release('0.1.1','c');
+  const newerFull={...newer,profile:'full',image:image('d')};
+  const next=nextChannel(both,{mode:'publish',releases:[newer,newerFull]},now);
+  assert.deepEqual(next.releases,[core,full,newer,newerFull]);
+  const withdrawn=nextChannel(next,{mode:'withdraw',image:newerFull.image},now);
+  assert.throws(()=>nextChannel(withdrawn,{mode:'publish',releases:[newer,newerFull]},now),/Withdrawn version/);
+});

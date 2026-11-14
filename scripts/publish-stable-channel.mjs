@@ -24,18 +24,26 @@ export function nextChannel(previous, command, now) {
   } else if (!previous) throw new Error('Channel must be explicitly bootstrapped');
   const releases = previous ? previous.releases.map(validateUpdateRelease) : [];
   if (command.mode === 'publish') {
-    const candidate = validateUpdateRelease(command.release);
-    if (candidate.state !== 'published') throw new Error('Only published releases may be added');
-    const scoped = releases.filter(r=>r.platform===candidate.platform&&r.profile===candidate.profile);
-    const sameVersion = scoped.find(r=>r.version===candidate.version);
-    if (sameVersion) {
-      // Main commits do not implicitly create new product releases.
-      if (sameVersion.state === 'withdrawn') throw new Error('Withdrawn version cannot be republished');
-      if (JSON.stringify(sameVersion) !== JSON.stringify(candidate)) return null;
-      return null;
+    const candidates = (command.releases ?? [command.release]).map(validateUpdateRelease);
+    if (candidates.length === 0) throw new Error('No certified releases supplied');
+    if (new Set(candidates.map(r=>r.platform+'/'+r.profile)).size !== candidates.length) throw new Error('Duplicate candidate profile');
+    if (candidates.length > 1 && candidates.some(r=>r.sourceSha!==candidates[0].sourceSha||r.version!==candidates[0].version||r.platform!==candidates[0].platform||r.migrationFingerprint!==candidates[0].migrationFingerprint||r.apiEpoch!==candidates[0].apiEpoch||r.persistenceFormat!==candidates[0].persistenceFormat)) throw new Error('Certified profiles must share source and compatibility');
+    if (new Set(candidates.map(r=>r.image)).size !== candidates.length) throw new Error('Profiles must bind distinct images');
+    let added = false;
+    for (const candidate of candidates) {
+      if (candidate.state !== 'published') throw new Error('Only published releases may be added');
+      const scoped = releases.filter(r=>r.platform===candidate.platform&&r.profile===candidate.profile);
+      const sameVersion = scoped.find(r=>r.version===candidate.version);
+      if (sameVersion) {
+        // Main commits do not implicitly replace existing product releases.
+        if (sameVersion.state === 'withdrawn') throw new Error('Withdrawn version cannot be republished');
+        continue;
+      }
+      if (scoped.some(r=>cmp(candidate.version,r.version)<=0 || r.image===candidate.image || r.sourceSha===candidate.sourceSha)) throw new Error('Release version or artifact identity must advance');
+      releases.push(candidate);
+      added = true;
     }
-    if (scoped.some(r=>cmp(candidate.version,r.version)<=0 || r.image===candidate.image || r.sourceSha===candidate.sourceSha)) throw new Error('Release version or artifact identity must advance');
-    releases.push(candidate);
+    if (!added) return null;
   } else if (command.mode === 'withdraw') {
     if (typeof command.image !== 'string') throw new Error('Withdrawal requires exact digest image');
     const matches = releases.filter(r=>r.image===command.image&&r.state==='published');
@@ -87,19 +95,23 @@ async function main() {
   } else if(mode!=='bootstrap') throw new Error('Stable channel file missing; refusing implicit reset');
   let command={mode};
   if(mode==='publish'){
-    const image=process.env.CODEXIA_CERTIFIED_IMAGE;
     const source=process.env.GITHUB_SHA;
-    if(!/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u.test(image??'')||!source||execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim()!==source)throw new Error('Certified immutable main image required');
-    const output=(args)=>execFileSync('docker',args,{encoding:'utf8',timeout:120000,maxBuffer:1024*1024}).trim();
-    output(['pull','--platform','linux/amd64',image]);
-    const identity=JSON.parse(output(['run','--rm','--network','none','--read-only','--entrypoint','cat',image,'/app/update-identity.json']));
-    const observedFingerprint=output(['run','--rm','--network','none','--read-only','--entrypoint','node',image,'--input-type=module','-e',fingerprintProbe]);
-    if(observedFingerprint!==identity.migrationFingerprint)throw new Error('Packaged migration fingerprint mismatch');
-    const observed=JSON.parse(output(['image','inspect',image]))[0];
-    if(observed.Os+'/'+observed.Architecture!==identity.platform||observed.Config.Labels?.['org.opencontainers.image.revision']!==source||!observed.RepoDigests?.includes(image))throw new Error('Published digest or OCI identity mismatch');
+    if(!source||execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim()!==source)throw new Error('Certified immutable main source required');
+    const output=(args)=>execFileSync('docker',args,{encoding:'utf8',timeout:300000,maxBuffer:1024*1024}).trim();
     const version=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')).version;
     const compatibility=JSON.parse(readFileSync(new URL('../deploy/update-compatibility.json',import.meta.url),'utf8'));
-    command={mode,release:releaseFromIdentity(identity,image,source,version,compatibility,'core')};
+    const releases=[];
+    for(const [profile,image] of [['core',process.env.CODEXIA_CERTIFIED_IMAGE],['full',process.env.CODEXIA_CERTIFIED_FULL_IMAGE]]){
+      if(!/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u.test(image??''))throw new Error('Certified immutable '+profile+' image required');
+      output(['pull','--platform','linux/amd64',image]);
+      const identity=JSON.parse(output(['run','--rm','--network','none','--read-only','--entrypoint','cat',image,'/app/update-identity.json']));
+      const observedFingerprint=output(['run','--rm','--network','none','--read-only','--entrypoint','node',image,'--input-type=module','-e',fingerprintProbe]);
+      if(observedFingerprint!==identity.migrationFingerprint)throw new Error('Packaged migration fingerprint mismatch');
+      const observed=JSON.parse(output(['image','inspect',image]))[0];
+      if(observed.Os+'/'+observed.Architecture!==identity.platform||observed.Config.Labels?.['org.opencontainers.image.revision']!==source||!observed.RepoDigests?.includes(image))throw new Error('Published digest or OCI identity mismatch');
+      releases.push(releaseFromIdentity(identity,image,source,version,compatibility,profile));
+    }
+    command={mode,releases};
   } else if(mode==='withdraw') command={mode,image:process.env.CODEXIA_WITHDRAW_IMAGE};
   const now=Date.now();
   const next=nextChannel(previous,command,now);
