@@ -54,8 +54,8 @@ const WORKSPACE_PANEL_FOR_VIEW: Readonly<Record<MobileView, string>> = {
 const VIEWS: ReadonlyArray<{ id: MobileView; label: string; title: string; mark: string }> = [
   { id: "library", label: "作品", title: "作品ライブラリ", mark: "▤" },
   { id: "writing", label: "書く", title: "執筆・読書", mark: "✎" },
-  { id: "inspection", label: "確認", title: "状態と回復", mark: "◎" },
-  { id: "tools", label: "道具", title: "ツールとレビュー", mark: "◇" },
+  { id: "inspection", label: "知識", title: "知識と状態", mark: "⌕" },
+  { id: "tools", label: "レビュー", title: "レビューと道具", mark: "◇" },
   { id: "settings", label: "設定", title: "設定", mark: "⚙" },
 ];
 
@@ -379,10 +379,15 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
     // Return to the invoking control, not to a contenteditable element:
     // restoring input focus would unexpectedly reopen the soft keyboard.
     const trigger = referenceTriggerRef.current;
-    if (trigger?.isConnected && routeIdentityRef.current === referenceOriginRef.current &&
-        readViewFromSearch(window.location.search) === "writing") {
-      trigger.focus({ preventScroll: true });
-    }
+    const origin = referenceOriginRef.current;
+    referenceTriggerRef.current = null;
+    referenceOriginRef.current = "";
+    window.requestAnimationFrame(() => {
+      if (trigger?.isConnected && routeIdentityRef.current === origin &&
+          readViewFromSearch(window.location.search) === "writing") {
+        trigger.focus({ preventScroll: true });
+      }
+    });
   }, []);
 
   const referencePanel = referenceSheet ? panels?.find((panel) => panel.id === referenceSheet) : undefined;
@@ -394,18 +399,23 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
   const mobileTitle = activeView === "writing" && documentTitle ? documentTitle : title;
   return (
     <IonApp className={"mobile-shell" + (writingKeyboardVisible ? " mobile-shell-keyboard-open" : "")}>
-      <IonPage className="mobile-shell-page">
+      <IonPage className="mobile-shell-page" data-mobile-view={activeView}>
         <IonHeader className="mobile-shell-ion-header">
           <div className="mobile-shell-identity-bar">
             <IonButton type="button" className="mobile-shell-back" fill="clear" aria-label="前の画面に戻る" onClick={goBack}>‹</IonButton>
             <div className="mobile-shell-identity-copy">
-              <span className="mobile-shell-wordmark">codexia<span>.</span></span>
               <strong className="mobile-shell-current-title">{mobileTitle}</strong>
               {documentContext && activeView === "writing" ? <small className="mobile-shell-context">{documentContext}</small> : null}
             </div>
-            <span className="mobile-shell-page-mark" aria-hidden="true">{VIEWS.find((view) => view.id === activeView)?.mark}</span>
+            <IonButton type="button" className="mobile-shell-settings-entry" fill="clear"
+              aria-label={activeView === "settings" ? "執筆画面へ戻る" : "設定を開く"}
+              aria-current={activeView === "settings" ? "page" : undefined}
+              onClick={() => { void navigate(activeView === "settings" ? "writing" : "settings"); }}>
+              <span aria-hidden="true">{activeView === "settings" ? "✎" : "⚙"}</span>
+              <span>{activeView === "settings" ? "執筆" : "設定"}</span>
+            </IonButton>
           </div>
-          <div className="mobile-shell-shared-header" aria-label="アカウントと画面設定">{header}</div>
+          <div className="mobile-shell-shared-header" data-active-view={activeView} aria-label="作業領域とアカウント設定">{header}</div>
         </IonHeader>
 
         <IonContent ref={contentRef} className="mobile-shell-content" fullscreen={false}>
