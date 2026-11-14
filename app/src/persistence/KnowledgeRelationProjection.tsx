@@ -32,6 +32,7 @@ export function KnowledgeRelationProjection({
   onStatusChange: (relation: KnowledgeRelation, status: KnowledgeRelation["status"]) => void;
 }) {
   const [showInactive, setShowInactive] = useState(false);
+  const [relationPage, setRelationPage] = useState(0);
   const [openNodeId, setOpenNodeId] = useState<KnowledgeNodeId | "">("");
   const [peek, setPeek] = useState<PersistenceNodeRead | null>(null);
   const [peekError, setPeekError] = useState("");
@@ -40,10 +41,11 @@ export function KnowledgeRelationProjection({
   const nodesById = useMemo(() => new Map(nodes.map((candidate) => [candidate.id, candidate])), [nodes]);
   const localRelations = relations.filter((relation) => relation.sourceId === node.id || relation.targetId === node.id);
   const inactiveRelations = localRelations.filter((relation) => relation.status === "retired" || relation.status === "rejected");
-  const visibleRelations = localRelations
-    .filter((relation) => showInactive || (relation.status !== "retired" && relation.status !== "rejected"))
-    .slice(0, MAX_VISIBLE_RELATIONS);
-  const remainingCount = Math.max(0, localRelations.filter((relation) => showInactive || (relation.status !== "retired" && relation.status !== "rejected")).length - visibleRelations.length);
+  const filteredRelations = localRelations.filter((relation) => showInactive || (relation.status !== "retired" && relation.status !== "rejected"));
+  const pageCount = Math.max(1, Math.ceil(filteredRelations.length / MAX_VISIBLE_RELATIONS));
+  const currentPage = Math.min(relationPage, pageCount - 1);
+  const firstIndex = currentPage * MAX_VISIBLE_RELATIONS;
+  const visibleRelations = filteredRelations.slice(firstIndex, firstIndex + MAX_VISIBLE_RELATIONS);
   const openNode = openNodeId ? nodesById.get(openNodeId) : undefined;
 
   useEffect(() => {
@@ -94,7 +96,7 @@ export function KnowledgeRelationProjection({
   return <>
     <div className="kci__graph-intro">
       <p>矢印は保存された関係の向きです。確定・候補は状態名と線の形でも区別します。</p>
-      {inactiveRelations.length > 0 && <button className="kci__quiet-action" type="button" aria-expanded={showInactive} onClick={() => setShowInactive((current) => !current)}>
+      {inactiveRelations.length > 0 && <button className="kci__quiet-action" type="button" aria-expanded={showInactive} onClick={() => { setShowInactive((current) => !current); setRelationPage(0); }}>
         {showInactive ? "退役・却下を隠す" : `退役・却下も表示 · ${inactiveRelations.length}件`}
       </button>}
     </div>
@@ -138,7 +140,11 @@ export function KnowledgeRelationProjection({
           </li>;
         })}
       </ul>}
-    {remainingCount > 0 && <p className="kci__graph-note">取得済みの直接関係 {remainingCount} 件を省略しています。全作品を追加取得していません。</p>}
+    {pageCount > 1 && <nav className="kci__actions" aria-label="取得済み関係のページ">
+      <button type="button" className="kci__quiet-action" disabled={currentPage === 0} onClick={() => setRelationPage(currentPage - 1)}>前の関係</button>
+      <span role="status">{firstIndex + 1}–{firstIndex + visibleRelations.length} / {filteredRelations.length}件（取得済み）</span>
+      <button type="button" className="kci__quiet-action" disabled={currentPage + 1 >= pageCount} onClick={() => setRelationPage(currentPage + 1)}>次の関係</button>
+    </nav>}
 
     {openNode && <section id="kci-neighbor-detail" className="kci__neighbor" aria-label={`${openNode.name}の読み取り専用詳細`} aria-live="polite">
       <header className="kci__neighbor-heading">
