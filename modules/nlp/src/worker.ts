@@ -65,6 +65,10 @@ async function loadCounter(input: TokenCounterWorkerInput): Promise<LoadedCounte
         // never sent to a remote endpoint.
         const transformers = await import("@huggingface/transformers");
         transformers.env.cacheDir = input.modelsDir;
+        // Transformers.js resolves local model IDs through localModelPath;
+        // cacheDir is only its file cache and does not point at mounted model
+        // artifacts. Keep lookup inside the configured, read-only model cache.
+        transformers.env.localModelPath = input.modelsDir;
         transformers.env.allowLocalModels = true;
         transformers.env.allowRemoteModels = false;
         const tokenizer = await transformers.AutoTokenizer.from_pretrained(modelId, { local_files_only: true });
