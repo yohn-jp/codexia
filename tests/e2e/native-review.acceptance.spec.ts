@@ -238,3 +238,26 @@ test("project switch fences a late native list response and read-only sessions e
   await expect(readOnlyPage.getByRole("heading", { name: "Database workspace" })).toHaveCount(0);
   await expect(readOnlyPage.getByRole("button", { name: "承認する" })).toHaveCount(0);
 });
+
+
+test("native assertion review exposes modality in the primary change fields", async ({ page }) => {
+  expect(databaseUrl).toBeTruthy();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { project } = await createWritingFixture(page);
+  const projectResponse = await page.request.get(`/api/v1/persistence/projects/${project.id}`);
+  expect(projectResponse.ok()).toBe(true);
+  const { project: current } = await projectResponse.json() as { project: { version: number } };
+  const response = await page.request.post(`/api/v1/persistence/projects/${project.id}/changesets`, {
+    headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": crypto.randomUUID() },
+    data: { projectVersion: current.version, operations: [{ type: "evidence.assertion.save", command: {
+      projectId: project.id, id: crypto.randomUUID(), proposition: { statement: "未確認の推測" },
+      modality: "hypothesis", perspective: "author", narrativeTime: {}, confidence: null, status: "proposed", expectedVersion: null,
+    } }] },
+  });
+  expect(response.status(), await response.text()).toBe(201);
+  await openReview(page, "desktop");
+  const fields = page.locator(".native-review-fields");
+  await expect(fields.getByText("種別", { exact: true })).toBeVisible();
+  await expect(fields.getByText("仮説", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "承認する" })).toBeVisible();
+});
