@@ -164,6 +164,7 @@ function operationFields(operation: ChangeSetOperation): ReviewField[] {
     case "evidence.assertion.save":
       return [
         { label: "命題", value: operation.command.proposition },
+        { label: "種別", value: ({ fact: "世界の事実", belief: "人物の認識", disclosure: "読者への開示", hypothesis: "仮説" } as Record<string, string>)[operation.command.modality] ?? operation.command.modality },
         { label: "確度", value: operation.command.confidence },
         { label: "視点", value: operation.command.perspective },
         { label: "物語上の時間", value: operation.command.narrativeTime },

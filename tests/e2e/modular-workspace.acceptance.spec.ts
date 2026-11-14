@@ -1042,6 +1042,9 @@ test("mobile writing reference sheet keeps the editor mounted and preserves the 
   const editor = page.locator('[data-workspace-panel="editor"] .cm-content');
   const manuscript = page.locator(".manuscript-input");
   const draft = "シートを開いても、この原稿と入力の文脈は残る。";
+  // Keep this draft in the browser journal; a successful PATCH clears its generation.
+  await page.route(`**/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.document.id}`, (route) =>
+    route.request().method() === "PATCH" ? route.abort("failed") : route.continue());
   await editor.fill(draft);
   await expectDraft(page, fixture.scene.document.id, draft);
   await manuscript.evaluate((node) => { node.setAttribute("data-stable-editor", "present"); });
