@@ -1,0 +1,64 @@
+name: Prepare Codexia version release
+on:
+  workflow_run:
+    workflows: [Verify Codexia]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: codexia-semver-release
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: >-
+      github.repository == 'yohn-jp/codexia' &&
+      vars.CODEXIA_AUTO_RELEASE_ENABLED == 'true' &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+       (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        github.event.workflow_run.conclusion == 'success'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: codexia-release-automation
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.0'
+      - name: Require exact current main verification
+        id: verified
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          source="$(git rev-parse HEAD)"
+          if [[ "$source" != "$TRIGGER_SHA" ]]; then
+            echo "A newer main revision exists; its own verification will prepare the release."
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          GITHUB_SHA="$source" GITHUB_REF=refs/heads/main GITHUB_REF_NAME=main CODEXIA_COMMIT_RELEASE=1 node scripts/verify-release-source.mjs
+          echo "current=true" >> "$GITHUB_OUTPUT"
+      - name: Derive version and consume pending release intents
+        id: version
+        if: steps.verified.outputs.current == 'true'
+        run: node scripts/release-version.mjs prepare
+      - name: Create or refresh the isolated release PR
+        if: steps.version.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.CODEXIA_RELEASE_BOT_TOKEN }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_KIND: ${{ steps.version.outputs.kind }}
+          RELEASE_SOURCE: ${{ steps.version.outputs.source }}
+          AUTO_MERGE: ${{ vars.CODEXIA_AUTO_RELEASE_MERGE }}
+        run: bash scripts/prepare-release-pr.sh
