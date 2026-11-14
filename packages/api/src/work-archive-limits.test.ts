@@ -53,6 +53,7 @@ function persistence(overrides: Record<string, unknown>): Persistence {
     listAllKnowledgeNodes: async () => [{ id: nodeId, type: "person", name: "A", attributes: {}, status: "confirmed" }],
     listKnowledgeAliases: async () => [],
     listKnowledgeRelations: async () => [],
+    listEvidenceDocumentIds: async () => [documentId],
     listDocumentEvidence: async () => [{ id: evidenceId, documentId, revisionId, fromUtf16: 0, toUtf16: 1, quoteSha256, status: "confirmed" }],
     listMentionLinks: async () => [],
     listEvidenceAssertions: async () => [],
@@ -87,4 +88,10 @@ test("archive export returns every row immediately below each bounded page limit
   for (const [name, store, countOf, expected] of cases) await t.test(name, async () => {
     assert.equal(countOf(await exportWorkArchive(store, projectId)), expected);
   });
+});
+
+test("archive export rejects an incomplete retained-evidence document inventory", async () => {
+  await assert.rejects(exportWorkArchive(persistence({
+    listEvidenceDocumentIds: async () => Array.from({ length: 1000 }, () => randomUUID()),
+  }), projectId), { code: "WORK_ARCHIVE_LIMIT" });
 });

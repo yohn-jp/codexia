@@ -119,19 +119,19 @@ function excludedRecord(moduleId: string, key: string, value: unknown): boolean 
     moduleId === "core.portable.archive" ||
     sensitiveKey(key) || sensitiveKey(moduleId) || containsSensitiveObjectKeys(value);
 }
-function safeSettings(value: Record<string, unknown>, omitted: string[], prefix = "project.settings"): JsonObject {
-  const result: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (sensitiveKey(key)) { omitted.push(prefix + "." + key); continue; }
-    if (item && typeof item === "object" && !Array.isArray(item)) {
-      result[key] = safeSettings(item as Record<string, unknown>, omitted, prefix + "." + key);
-    } else if (Array.isArray(item)) {
-      result[key] = item.map((entry, index) => entry && typeof entry === "object" && !Array.isArray(entry)
-        ? safeSettings(entry as Record<string, unknown>, omitted, prefix + "." + key + "[" + index + "]")
-        : entry);
-    } else result[key] = item;
+function safeSettingsValue(value: unknown, omitted: string[], path: string): unknown {
+  if (Array.isArray(value)) return value.map((item, index) => safeSettingsValue(item, omitted, path + "[" + index + "]"));
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).flatMap(([key, item]) => {
+      const childPath = path + "." + key;
+      if (sensitiveKey(key)) { omitted.push(childPath); return []; }
+      return [[key, safeSettingsValue(item, omitted, childPath)]];
+    }));
   }
-  return result as JsonObject;
+  return value;
+}
+function safeSettings(value: Record<string, unknown>, omitted: string[]): JsonObject {
+  return safeSettingsValue(value, omitted, "project.settings") as JsonObject;
 }
 function validateGraph(archive: WorkArchive): void {
   unique(archive.documents.map((item) => item.id), "document");
@@ -250,9 +250,11 @@ export async function exportWorkArchive(persistence: Persistence, projectId: Pro
       unresolved.assertionEvidence.push(...decoded.data.assertionEvidence);
     }
     const currentRevisions = new Map(documents.map((item) => [item.id, item]));
-    for (const document of documentRows) {
-      const anchors = await reader.listDocumentEvidence(projectId, document.id, undefined, 500);
-      checkSnapshotCount(anchors.length, 500, "Evidence for document " + document.id);
+    const evidenceDocumentIds = await reader.listEvidenceDocumentIds(projectId, 1000);
+    checkSnapshotCount(evidenceDocumentIds.length, 1000, "Documents with retained evidence");
+    for (const documentId of evidenceDocumentIds) {
+      const anchors = await reader.listDocumentEvidence(projectId, documentId, undefined, 500);
+      checkSnapshotCount(anchors.length, 500, "Evidence for document " + documentId);
       for (const anchor of anchors) {
         const entry = { id: anchor.id, documentId: anchor.documentId, revisionId: anchor.revisionId,
           fromUtf16: anchor.fromUtf16, toUtf16: anchor.toUtf16, quoteSha256: anchor.quoteSha256, status: anchor.status };

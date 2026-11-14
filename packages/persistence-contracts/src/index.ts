@@ -496,6 +496,8 @@ export interface PersistenceReader {
   listKnowledgeAliases(projectId: ProjectId, nodeId: KnowledgeNodeId, limit?: number): Promise<readonly KnowledgeAlias[]>;
   listKnowledgeRelations(projectId: ProjectId, nodeId: KnowledgeNodeId, limit?: number): Promise<readonly KnowledgeRelation[]>;
   getEvidenceAnchor(projectId: ProjectId, evidenceId: EvidenceId): Promise<EvidenceAnchor | undefined>;
+  /** All document identities with retained anchors, including logically deleted documents. */
+  listEvidenceDocumentIds(projectId: ProjectId, limit?: number): Promise<readonly DocumentId[]>;
   listDocumentEvidence(projectId: ProjectId, documentId: DocumentId, revisionId?: RevisionId, limit?: number): Promise<readonly EvidenceAnchor[]>;
   listEvidenceHistory(projectId: ProjectId, evidenceId: EvidenceId, limit?: number): Promise<readonly EvidenceAnchorHistory[]>;
   listMentionLinks(projectId: ProjectId, evidenceId: EvidenceId, limit?: number): Promise<readonly MentionLink[]>;
