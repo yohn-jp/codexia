@@ -323,7 +323,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
-        run: node scripts/ci-profile-artifact.mjs restore "${{ matrix.profile }}" "${{ runner.temp }}/profile-receipt.json"
+          CODEXIA_CI_PROFILE_RECEIPT: ${{ runner.temp }}/profile-receipt.json
+        run: node scripts/ci-profile-artifact.mjs restore "${{ matrix.profile }}" "$CODEXIA_CI_PROFILE_RECEIPT"
       - name: Run selected validations
         if: always() && !cancelled()
         env:
