@@ -3,6 +3,17 @@
   Referrer-Policy: same-origin
   X-Frame-Options: DENY
   Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+
+/index.html
+  Cache-Control: no-store
+
+/desktop/index.html
+  Cache-Control: no-store
+
+/mobile/index.html
+  Cache-Control: no-store
+
+/desktop/update-identity.json
   Cache-Control: no-store
 
 /assets/*
