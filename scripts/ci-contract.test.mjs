@@ -21,21 +21,22 @@ test('twenty execution jobs retain all fifty-seven validation obligations exactl
   }
   assert.equal(workflow.jobs.browser.strategy.matrix.include, '${{ fromJSON(needs.plan.outputs.browser) }}');
 });
-test('selected groups depend only on planning and failed groups cannot cancel other evidence', () => {
+test('browser groups depend on profile producers; independent groups cannot cancel other evidence', () => {
   assert.equal(workflow.concurrency, undefined);
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.equal(workflow.jobs.plan.name, 'plan');
   for (const [id, job] of Object.entries(workflow.jobs).filter(([id]) => !['plan', 'certification'].includes(id))) {
-    assert.deepEqual(job.needs, ['plan'], id);
+    assert.deepEqual(job.needs, id === 'browser' ? ['plan', 'build'] : id === 'hosted' ? ['plan','build','hosted_catalog'] : ['plan'], id);
     assert.match(job.if, /needs\.plan\.result == 'success'/);
     assert.equal(job['continue-on-error'], undefined, id);
-    assert.equal(job.strategy['fail-fast'], false, id);
+    if (id === 'hosted_catalog') assert.equal(job.name,'hosted-native-catalog');
+    else assert.equal(job.strategy['fail-fast'], false, id);
     assert.ok(job.steps.some(step => step.run?.includes('ci-group.mjs')));
     assert.ok(job.steps.some(step => step.uses === 'actions/upload-artifact@v4' && step.if === 'always()'));
   }
   const gate = workflow.jobs.certification;
   assert.equal(gate.if, 'always()');
-  assert.deepEqual(gate.needs.toSorted(), ['plan', 'unit', 'types', 'build', 'oci', 'browser', 'hosted'].toSorted());
+  assert.deepEqual(gate.needs.toSorted(), ['plan', 'unit', 'types', 'build', 'oci', 'browser', 'hosted_catalog', 'hosted'].toSorted());
   const planSelector = gate.steps.find(step => step.id === 'select-plan');
   const planDownload = gate.steps.find(step => step.run?.includes('node scripts/download-ci-artifacts.mjs') && step.env?.CODEXIA_CI_ARTIFACT_KIND === 'plan');
   const evidenceSelector = gate.steps.find(step => step.id === 'select-evidence');
@@ -62,7 +63,7 @@ test('selected groups depend only on planning and failed groups cannot cancel ot
   assert.ok(gate.steps.indexOf(evidenceSelector) < gate.steps.indexOf(evidenceDownload));
   assert.doesNotMatch(evidenceDownload.run, /actions\/download-artifact/);
 });
-test('browser groups retain immutable runtime and build once before running selected shards', () => {
+test('browser groups retain immutable runtime and restore the exact producer before running selected shards', () => {
   const browser = workflow.jobs.browser;
   assert.match(browser.container.image, /^mcr\.microsoft\.com\/playwright@sha256:[a-f0-9]{64}$/);
   assert.equal(browser.container.options, '--ipc=host');
@@ -80,7 +81,20 @@ test('browser groups retain immutable runtime and build once before running sele
   assert.ok(runnerIndex < diagnosticsIndex && diagnosticsIndex < reportIndex);
   const runner = readFileSync(new URL('./ci-group.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(runner, /(?:apt(?:-get)?\s|playwright install|--with-deps)/);
-  assert.ok(runner.indexOf("node('scripts/verify-browser-runtime.mjs')") < runner.indexOf("run('pnpm', ['build']"));
+  assert.match(browser.if, /always\(\)/);
+  const restore = browser.steps.find(step => step.id === 'restore-profile');
+  assert.ok(restore);
+  assert.match(restore.run, /ci-profile-artifact\.mjs restore/);
+  assert.equal(browser.permissions['actions'], 'read');
+  assert.match(restore.run,/\$CODEXIA_CI_PROFILE_RECEIPT/);
+  assert.equal(restore.env.CODEXIA_CI_PROFILE_RECEIPT, browser.steps[runnerIndex].env.CODEXIA_CI_PROFILE_RECEIPT);
+  assert.equal(browser.steps[runnerIndex].env.CODEXIA_CI_PROFILE_RESTORE, '${{ steps.restore-profile.outcome }}');
+  assert.ok(browser.steps.indexOf(restore) < runnerIndex);
+  const producer = workflow.jobs.build.steps.find(step => step.run?.includes('ci-profile-artifact.mjs pack'));
+  assert.ok(producer);
+  assert.ok(workflow.jobs.build.steps.some(step => step.uses === 'actions/upload-artifact@v4' && step.with.name === 'ci-profile-build-${{ matrix.profile }}'));
+  assert.match(runner, /assertProfileReceipt/);
+  assert.doesNotMatch(runner, /run\('pnpm', \['build'\], \{ CODEXIA_PROFILE: group/);
   assert.match(runner, /run-browser-shard\.mjs.*--prebuilt/);
 });
 test('all source checkouts bind exact PR head/main source without persisted credentials', () => {
@@ -113,4 +127,34 @@ test('every default browser spec is assigned a Chromium shard and WebKit UI is p
   assert.match(config, /testIgnore: "\*\*\/core64-lifecycle\.host\.acceptance\.spec\.ts"/);
   assert.match(config, /fullyParallel: false/);
   assert.match(config, /workers: 1/);
+});
+
+test('Hosted Native keeps one verified producer and three independent composition consumers',()=>{
+  const producer=workflow.jobs.hosted_catalog;
+  const consumers=workflow.jobs.hosted;
+  assert.match(producer.if,/hosted_catalog == 'true'/);
+  assert.equal(producer.name,'hosted-native-catalog');
+  assert.ok(producer.steps.some(step=>step.run?.includes('ci-native-producer.mjs seal')));
+  assert.deepEqual(consumers.needs,['plan','build','hosted_catalog']);
+  assert.match(consumers.if,/always\(\)/);
+  assert.equal(consumers.permissions.actions,'read');
+  assert.ok(!consumers.steps.some(step=>step.uses==='docker/setup-buildx-action@v3'));
+  const restore=consumers.steps.find(step=>step.id==='restore-native');
+  assert.match(restore.run,/ci-native-producer\.mjs restore/);
+  const execution=consumers.steps.find(step=>step.run?.includes('ci-group.mjs'));
+  assert.equal(execution.env.CODEXIA_CI_NATIVE_RESTORE,'${{ steps.restore-native.outcome }}');
+  const profileRestore=consumers.steps.find(step=>step.id==='restore-profile');
+  assert.match(profileRestore.run,/ci-profile-artifact\.mjs restore full/);
+  assert.equal(execution.env.CODEXIA_CI_PROFILE_RESTORE,'${{ steps.restore-profile.outcome }}');
+  assert.ok(consumers.steps.indexOf(profileRestore)<consumers.steps.indexOf(execution));
+  const runner=readFileSync(new URL('./ci-group.mjs',import.meta.url),'utf8');
+  assert.doesNotMatch(runner,/build:workspace/);
+});
+
+test('balanced browser lanes retain all independent spec and browser combinations',()=>{
+  for(const profile of PROFILES){
+    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-writing'],['core','native-review','persistence-database'].map(id=>'browser-'+profile+'-'+id));
+    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-reference'],['modular-workspace','review-contributions','recent-activity','job-inbox'].map(id=>'browser-'+profile+'-'+id));
+    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-webkit'],['auth-recovery','ui-v1','webkit'].map(id=>'browser-'+profile+'-'+id));
+  }
 });

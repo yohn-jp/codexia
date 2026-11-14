@@ -1,10 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import { createWritingFixture, ownerLogin, readPersistenceDrafts } from "./postgres-fixture";
+import { createWritingFixture, ownerLogin, readPersistenceDrafts, manuscriptEditor as editor, readManuscriptMarkdown as markdown } from "./postgres-fixture";
 
 test.use({ hasTouch: true });
-const editor = (page: Page) => page.getByRole("textbox", { name: "原稿 Markdown" });
-async function markdown(page: Page) { return editor(page).locator(".cm-line").evaluateAll((lines) => lines.map((line) => line.textContent ?? "").join("\n")); }
 async function expectMarkdown(page: Page, text: string) { await expect.poll(() => markdown(page)).toBe(text); }
 const legacyKey = "scriptorium:draft:legacy-project:legacy-scene";
 async function seedLegacy(page: Page, text = "旧記録の日本語原稿😀") {

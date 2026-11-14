@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { downloadArtifact, extractJsonEntry, selectedArtifacts } from './download-ci-artifacts.mjs';
+import { downloadArtifact, extractJsonEntry, extractProfileJson, selectedArtifacts } from './download-ci-artifacts.mjs';
 
 const identity = { runId: '123', sourceSha: 'a'.repeat(40) };
 const bytes = Buffer.from('archive');
@@ -56,4 +56,22 @@ test('extracts only one requested JSON entry and rejects missing or malformed JS
   await writeFile(path.join(dir, 'report.json'), 'not JSON');
   execFileSync('zip', ['-q', 'invalid.zip', 'report.json'], { cwd: dir });
   await assert.rejects(extractJsonEntry(await readFile(path.join(dir, 'invalid.zip')), 'report.json'), SyntaxError);
+});
+
+test('profile ZIP extracts with Node alone, rejects corruption and ignores untrusted paths', async t => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'codexia-profile-zip-'));
+  t.after(() => rm(dir, {recursive:true,force:true}));
+  const data = JSON.stringify({files:Array.from({length:100},(_,i)=>'profile output '+i)});
+  await writeFile(path.join(dir,'profile-build.json'),data);
+  await writeFile(path.join(dir,'extra.txt'),'not profile data');
+  for(const method of ['-0','-9']){
+    execFileSync('zip',['-q',method,'profile'+method+'.zip','profile-build.json','extra.txt'],{cwd:dir});
+    const bytes=await readFile(path.join(dir,'profile'+method+'.zip'));
+    assert.equal(extractProfileJson(bytes).toString(),data);
+    assert.equal((await extractJsonEntry(bytes,'profile-build.json')).toString(),data);
+    const broken=Buffer.from(bytes);
+    broken.writeUInt32LE(0xffffffff,broken.length-22+16);
+    assert.throws(()=>extractProfileJson(broken),/central directory/);
+    assert.throws(()=>extractProfileJson(bytes.subarray(0,bytes.length-8)));
+  }
 });

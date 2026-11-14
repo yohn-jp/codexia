@@ -31,7 +31,10 @@ const observations = jobs.map(job => {
     test: phase(/Test workspace|Test isolated|Typecheck|Verify native|Verify production OCI|Audit Core/),
     externalDownload: phase(/^(?:Initialize containers|Prepare exact|Install frozen|Restore content-addressed|Run actions\/setup-node)/),
     externalDownloadNote: 'Container pull and dependency retrieval are phase timings; download-only time is not exposed separately by Actions API.',
-    cache: phase(/Restore content-addressed/), cacheHit: job.steps.find(step => /^Dependency cache hit=/.test(step.name))?.name.split('=')[1] ?? 'NOT_CHECKED',
+    cache: phase(/Restore content-addressed/),
+    artifactPreparation: phase(/Pack immutable profile build|Seal verified native producer evidence/),
+    artifactRestore: phase(/Restore exact profile producer|Restore exact native producer/),
+    artifactTransfer: phase(/upload-artifact|download-artifact/), cacheHit: job.steps.find(step => /^Dependency cache hit=/.test(step.name))?.name.split('=')[1] ?? 'NOT_CHECKED',
   };
 });
 const completed = jobs.filter(job => job.completed_at).map(job => Date.parse(job.completed_at));
@@ -39,11 +42,16 @@ const leafJobs = jobs.filter(job => job.name !== 'certification' && job.complete
 const latestLeaf = leafJobs.sort((a, b) => Date.parse(b.completed_at) - Date.parse(a.completed_at))[0];
 // A rerun starts a new attempt; do not count the idle gap since the original run.
 const attemptStartedAt = run.run_attempt > 1 ? run.run_started_at : run.created_at;
+const completedDurations=observations.map(job=>job.durationSeconds).filter(value=>value!==null);
+const observedRunnerSeconds=completedDurations.reduce((sum,value)=>sum+value,0);
 const report = { runId, createdAt: run.created_at, attemptStartedAt, url: run.html_url, sha: run.head_sha, attempt: run.run_attempt, status: run.status, result: run.conclusion,
   wallClockSeconds: run.status === 'completed' && completed.length ? (Math.max(...completed) - Date.parse(attemptStartedAt)) / 1000 : null,
   observedElapsedSeconds: completed.length ? (Math.max(...completed) - Date.parse(attemptStartedAt)) / 1000 : null,
+  runnerSeconds: run.status === 'completed' && completedDurations.length === observations.length ? observedRunnerSeconds : null,
+  observedRunnerSeconds,
   criticalPath: latestLeaf ? `${latestLeaf.name}${jobs.some(job => job.name === 'certification') ? ' -> certification' : ''}` : null,
   warmColdClassification: 'Use per-job cache results; a rerun is not automatically warm.',
+  criticalPathNote: 'Last completed leaf, not a calculated dependency chain. Compare actual predecessor completion and queue intervals.',
   phaseMeasurementNote: 'Empty phase arrays mean not separately instrumented, not zero. Legacy source/browser steps combine phases; OCI combines image build and runtime checks; native verification includes Docker builds and compose. Download-related steps include other work and are not download-only stopwatch measurements.',
   jobs: observations };
 const output = option('--out');

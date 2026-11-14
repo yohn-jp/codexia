@@ -21,6 +21,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Edge UI, API service and operations | [Deployment](deployment/README.md) |
 | Hosted producer signing | [Producer attestation](hosted-producer-attestation.md) |
 | Development and verification commands | [Verification](verification/README.md) |
+| Test architecture and execution optimization | [Test Architecture Optimization](verification/TEST-ARCHITECTURE-OPTIMIZATION.md) — design proposal |
 | Recovery, MCP and model acceptance | [Integration verification](verification/INTEGRATION.md) |
 | Performance measurement | [Performance](performance/README.md) |
 | Release gates | [OCI releases](verification/OCI-RELEASE.md) |

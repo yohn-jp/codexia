@@ -45,6 +45,10 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
       full = true;
     }
   }
+  // A selected browser suite always consumes the same-profile build result.
+  for (const profile of PROFILES) if ([...selected].some(task => task.startsWith(`browser-${profile}-`))) add(`build-${profile}`);
+  if ([...selected].some(task => task.startsWith('hosted-native-'))) add('hosted-native-catalog');
+  if ([...selected].some(task => task.startsWith('hosted-native-') && task !== 'hosted-native-catalog')) add('build-full');
   const tasks = VERIFICATION_TASKS.filter(task => full || selected.has(task));
   return {
     version: 1, sha, base, event, mode: full ? 'full' : 'affected', files: files ?? null,
@@ -84,7 +88,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       build: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`build-${id}`))),
       oci: JSON.stringify(PROFILES.filter(id => plan.groups.includes(`oci-${id}`))),
       browser: JSON.stringify(PROFILES.flatMap(profile => ['writing', 'reference', 'webkit'].filter(id => plan.groups.includes(`browser-${profile}-${id}`)).map(id => ({ group: `${profile}-${id}`, profile })))),
-      hosted: JSON.stringify(['catalog', 'core', 'selected', 'full'].filter(id => plan.groups.includes(`hosted-native-${id}`))),
+      hosted_catalog: String(plan.groups.includes('hosted-native-catalog')),
+      hosted: JSON.stringify(['core', 'selected', 'full'].filter(id => plan.groups.includes(`hosted-native-${id}`))),
     };
     appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(outputs).map(([key, value]) => `${key}=${value}\n`).join(''));
   }

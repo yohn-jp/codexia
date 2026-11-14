@@ -1,30 +1,20 @@
 import { expect, request, test, type Page } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
+import { authToken, ownerLogin, manuscriptEditor as editor, readManuscriptMarkdown } from "./postgres-fixture";
 
-const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const rootPath = "/api/v1/persistence/projects";
 const appBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
 const appOrigin = new URL(appBaseURL).origin;
 interface Draft { key: string; projectId: string; documentId: string; authorScope: string; markdown: string; generation: number; baseRevisionId: string; baseMarkdown: string; version: number; updatedAt: number }
 interface Read { document: { id: string; title: string; headRevisionId: string }; revision: { id: string; markdown: string } }
 interface Fixture { projectId: string; one: Read; two: Read }
-const editor = (page: Page) => page.getByRole("textbox", { name: "原稿 Markdown" });
 const documentPath = (fixture: Fixture, documentId = fixture.one.document.id) => `${rootPath}/${fixture.projectId}/documents/${documentId}`;
 const mutationHeaders = (headers: Record<string, string> = {}): Record<string, string> => ({ Origin: appOrigin, ...headers });
 async function editorMarkdown(page: Page): Promise<string> {
-  return editor(page).evaluate((element) => Array.from(element.querySelectorAll(".cm-line"), (line) => line.textContent ?? "").join("\n").replace(/\n+$/u, ""));
+  return (await readManuscriptMarkdown(page)).replace(/\n+$/u, "");
 }
 async function expectEditor(page: Page, markdown: string): Promise<void> {
   await expect.poll(() => editorMarkdown(page)).toBe(markdown.replace(/\n+$/u, ""));
-}
-
-async function signIn(page: Page, mode = "desktop"): Promise<void> {
-  await page.goto(`/${mode}/`);
-  if (await page.getByLabel("アクセス・トークン").isVisible()) {
-    await page.getByLabel("アクセス・トークン").fill(authToken);
-    await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
-  }
-  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
 }
 
 async function fixture(page: Page): Promise<Fixture> {
@@ -40,7 +30,7 @@ async function fixture(page: Page): Promise<Fixture> {
   };
   const one = await createDocument("Scene One", "a");
   const two = await createDocument("Scene Two", "b");
-  await signIn(page);
+  await ownerLogin(page);
   await page.goto(`/desktop/projects/${project.id}/scenes/${one.document.id}`);
   await expect(page).toHaveURL(new RegExp(`/desktop/projects/${project.id}/scenes/${one.document.id}`));
   await expectEditor(page, one.revision.markdown);
@@ -101,7 +91,7 @@ async function scratchRecords(page: Page): Promise<Array<{ key: string; text: st
 // revision, browser recovery, or explicit removal boundary. No Git fixture is created.
 
 test("appearance modes follow system preference initially and persist explicit light, dark, and paper choices", async ({ page }) => {
-  await page.emulateMedia({ colorScheme: "light" }); await signIn(page);
+  await page.emulateMedia({ colorScheme: "light" }); await ownerLogin(page);
   await expect(page.locator("html")).toHaveAttribute("data-zp-theme", "light");
   for (const theme of ["dark", "paper", "light"]) {
     await page.getByLabel("外観").selectOption(theme);
@@ -267,7 +257,7 @@ test("full MCP proposal payload and approval state survive Core process and cach
   expect(approval.status()).toBe(204);
   const before = await (await page.request.get(path)).json();
   expect(before).toMatchObject({ state: "approved", approvedOperationIds: [proposal.operation.id] });
-  await restart(page); await signIn(page);
+  await restart(page); await ownerLogin(page);
   const after = await page.request.get(path); expect(after.ok()).toBe(true); expect(await after.json()).toEqual(before);
   expect((await read(page, f)).revision.id).toBe(f.one.revision.id);
   await reopen(page, f); await expectEditor(page, f.one.revision.markdown);
@@ -306,7 +296,7 @@ test("IndexedDB quota failures remain visible and block PostgreSQL writes", asyn
 test("project reconstruction retains PostgreSQL revisions and removed Git lifecycle has no fallback", async ({ page }) => {
   const f = await fixture(page); const text = "Survives process reconstruction.";
   await editor(page).fill(text); await saved(page, f, text); const revision = (await read(page, f)).revision.id;
-  await restart(page); await signIn(page); await reopen(page, f); await expectEditor(page, text);
+  await restart(page); await ownerLogin(page); await reopen(page, f); await expectEditor(page, text);
   expect((await read(page, f)).revision.id).toBe(revision);
   for (const suffix of ["publish", "reconcile", "checkpoints"]) {
     const result = await page.request.post(`/api/projects/${f.projectId}/${suffix}`, { headers: mutationHeaders(), data: {} }); expect(result.ok()).toBe(false);
