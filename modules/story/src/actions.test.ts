@@ -1030,7 +1030,7 @@ test("temporal context respects explicit world days, competing facts, reader sco
   assert.doesNotMatch(JSON.stringify(readerContext.data), /Captain|Recruit|unrevealed secret/);
   const scenario = await invoke<{ baseline: Projection; alternatives: Array<{ projection: Projection }>; sourceFingerprint: string }>("story.scenario.compare", {
     sceneId: "sc-4",
-    alternatives: ["General", "Civilian"].map(label => ({ label, events: [{ kind: "attribute", subject: "char-uma", object: null, payload: { predicate: "rank", value: label }, ...(label === "General" ? { replacesEventId: "rank-lieutenant" } : {}) }] })),
+    alternatives: ["General", "Civilian"].map(label => ({ label, events: [{ kind: "attribute", subject: "char-uma", object: null, payload: { predicate: "rank", value: label }, ...(label === "General" ? { eventId: "rank-general", replacesEventId: "rank-lieutenant" } : {}) }] })),
   }, context);
   assert.match(JSON.stringify(scenario.data.alternatives[0]), /General/);
   assert.deepEqual(scenario.data.alternatives[0]!.projection.state.find(cell => cell.predicate === "rank")?.facts.map(fact => fact.value), ["General"], "replacement hypothesis should remove the event it replaces");
@@ -1048,6 +1048,29 @@ test("temporal context respects explicit world days, competing facts, reader sco
     { label: "Other", events: [] },
   ] }, context);
   assert.equal(unconfirmedReplacement.ok, false, "replacement cannot target an unconfirmed canonical event");
+  const event = { kind: "attribute", subject: "char-uma", object: null, payload: { predicate: "rank", value: "Marshal" } };
+  for (const events of [
+    [{ ...event, eventId: "rank-lieutenant", replacesEventId: "rank-lieutenant" }],
+    [{ ...event, eventId: "rank-recruit" }],
+    [{ ...event, eventId: "new-event", replacesEventId: "new-event" }],
+    [{ ...event, eventId: "new-event" }, { ...event, eventId: "new-event" }],
+  ]) {
+    const alternatives = [{ label: "Invalid", events }, { label: "Other", events: [] }];
+    const comparison = await actionById("story.scenario.compare").invoke({ sceneId: "sc-4", alternatives }, context);
+    assert.equal(comparison.ok, false, "colliding event identities must be rejected during comparison");
+    const save = await actionById("story.scenario.save").invoke({ sceneId: "sc-4", alternatives, label: "Invalid", sourceFingerprint: scenario.data.sourceFingerprint }, context);
+    assert.equal(save.ok, false, "colliding event identities must be rejected during save");
+    files.set("meta/scriptorium/modules/story/v1/scenarios.json", JSON.stringify([{ id: "invalid-saved", label: "Invalid", sceneId: "sc-4", alternatives, sourceFingerprint: scenario.data.sourceFingerprint }]));
+    const adoption = await actionById("story.scenario.adopt").invoke({ id: "invalid-saved", alternativeIndex: 0, sourceFingerprint: scenario.data.sourceFingerprint }, context);
+    assert.equal(adoption.ok, false, "previously saved invalid identities must be rejected during adoption");
+    files.delete("meta/scriptorium/modules/story/v1/scenarios.json");
+  }
+  const syntheticCollision = await invoke("story.scenario.compare", { sceneId: "sc-4", alternatives: [
+    { label: "Two facts", events: [{ ...event }, { ...event, eventId: "hypothesis-0-0", payload: { predicate: "rank", value: "Colonel" } }] },
+    { label: "Other", events: [] },
+  ] }, context);
+  assert.match(JSON.stringify(syntheticCollision.data), /"eventId":"hypothesis-0-0-next"/);
+  assert.match(JSON.stringify(syntheticCollision.data), /"eventId":"hypothesis-0-0"/);
   assert.equal(proposals.length, 0, "compare and invalid hypotheses do not write canonical state");
   const staleSave = await actionById("story.scenario.save").invoke({ sceneId: "sc-4", label: "Stale", alternatives: [
     { label: "A", events: [] }, { label: "B", events: [] },
@@ -1057,7 +1080,7 @@ test("temporal context respects explicit world days, competing facts, reader sco
   assert.equal(proposals.length, 0, "stale scenarios do not create saved rows");
   const saved = await invoke<{ id: string }>("story.scenario.save", {
     id: "scenario-replacement", sceneId: "sc-4", label: "Replacement", alternatives: [
-      { label: "General", events: [{ kind: "attribute", subject: "char-uma", object: null, payload: { predicate: "rank", value: "General" }, replacesEventId: "rank-lieutenant" }] },
+      { label: "General", events: [{ kind: "attribute", subject: "char-uma", object: null, payload: { predicate: "rank", value: "General" }, eventId: "rank-general", replacesEventId: "rank-lieutenant" }] },
       { label: "Civilian", events: [{ kind: "attribute", subject: "char-uma", object: null, payload: { predicate: "rank", value: "Civilian" } }] },
     ], sourceFingerprint: scenario.data.sourceFingerprint,
   }, context);
@@ -1071,12 +1094,23 @@ test("temporal context respects explicit world days, competing facts, reader sco
     id: saved.data.id, alternativeIndex: 0, sourceFingerprint: scenario.data.sourceFingerprint,
   }, context);
   assert.equal(adopted.data.proposals[0]!.event.replacesEventId, "rank-lieutenant");
+  assert.equal(adopted.data.proposals[0]!.event.eventId, "rank-general");
+  assert.match(JSON.stringify(scenario.data.alternatives[0]), /"eventId":"rank-general"/);
   assert.equal(adopted.data.proposals[0]!.event.status, "proposed", "adoption submits an author review proposal without confirming canonical state");
   const adoptedRow = JSON.parse(proposals.at(-1)!.operations[0]!.writes.find(write => write.path === STATE_PROPOSALS_PATH)!.content!.trim().split("\n").at(-1)!) as { event_json: string; status: string };
   const adoptedEvent = JSON.parse(adoptedRow.event_json) as Record<string, unknown>;
   assert.equal(adoptedEvent.replacesEventId, "rank-lieutenant");
   assert.equal(adoptedRow.status, "proposed");
   files.set(STATE_PROPOSALS_PATH, proposals.at(-1)!.operations[0]!.writes.find(write => write.path === STATE_PROPOSALS_PATH)!.content!);
+  const duplicateAdoption = await actionById("story.scenario.adopt").invoke({
+    id: saved.data.id, alternativeIndex: 0, sourceFingerprint: scenario.data.sourceFingerprint,
+  }, context);
+  assert.equal(duplicateAdoption.ok, false, "pending identity must not be adopted twice");
+  const otherScene = files.get(scenePath("sc-2"))!;
+  files.set(scenePath("sc-2"), scene("sc-2", 2, 1, [fact("sc-2", "General", "rank-general")]));
+  const collidedApproval = await actionById("story.state-proposals.approve").invoke({ id: adopted.data.proposals[0]!.id }, context);
+  assert.equal(collidedApproval.ok, false, "a canonical event added after adoption must prevent duplicate approval");
+  files.set(scenePath("sc-2"), otherScene);
   const approved = await invoke("story.state-proposals.approve", { id: adopted.data.proposals[0]!.id }, context);
   const approvalOperation = proposals.at(-1)!.operations[0]!;
   for (const write of approvalOperation.writes) files.set(write.path, write.content!);

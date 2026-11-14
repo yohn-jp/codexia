@@ -34,7 +34,11 @@ export async function nativeTerms(reader:SnapshotReader, registry:TermRegistry) 
       ambiguousAliases:[...ambiguousAliases],targetPath:reference?.targetPath??"",candidateOnly:!reference||data.nodeLimitReached===true});
   }
   const nodeTruncated=data.nodeLimitReached===true;
-  const aliasTruncated=data.entries.some((raw:unknown)=>row(raw).aliasLimitReached===true);
+  // Legacy v1 snapshots predate the marker but used the same 500-row alias cap.
+  const aliasTruncated=data.entries.some((raw:unknown)=>{
+    const entry=row(raw);
+    return entry.aliasLimitReached===true || (entry.aliasLimitReached===undefined && Array.isArray(entry.aliases) && entry.aliases.length>=500);
+  });
   return {terms,revision:file.revision,available:true,nodeTruncated,aliasTruncated,truncated:nodeTruncated||aliasTruncated};
 }
 export function combineTerms(registry:TermRegistry,native:Awaited<ReturnType<typeof nativeTerms>>):ResolutionTerm[]{

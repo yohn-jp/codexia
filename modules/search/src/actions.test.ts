@@ -200,3 +200,28 @@ test("incomplete bounded alias inventory fails closed for automatic Knowledge li
   assert.equal(linked.ok,true,"explicit UUID linking remains available when only aliases are truncated");
   assert.equal(proposed.length,1);
 });
+
+test("legacy v1 Knowledge snapshots fail closed at the original alias cap", async () => {
+  const a="11111111-1111-4111-8111-111111111111",b="22222222-2222-4222-8222-222222222222";
+  const path="documents/scene.md",projection="meta/scriptorium/knowledge-context/v1.json";
+  const entry=(id:string,name:string,aliases:string[])=>({
+    node:{id,name,status:"confirmed",deletedAt:null},
+    aliases:aliases.map(surface=>({nodeId:id,surface,status:"confirmed",scope:null})),
+  });
+  const actions=createSearchActions(moduleContext(async()=>{throw Error("unused")}),new SnapshotIndexCache());
+  const resolve=findAction(actions,"search.terms.resolve");
+  for(const count of [499,500]){
+    const values={[path]:"塔",[TERM_REGISTRY_PATH]:JSON.stringify({schemaVersion:1,terms:[],knowledgeReferences:[{knowledgeId:a,targetPath:path}]}),
+      [projection]:JSON.stringify({version:1,projectId:snapshot.projectId,entries:[entry(a,"青い塔",["塔"]),entry(b,"赤い塔",Array.from({length:count},(_,i)=>"別名"+i))],nodeLimitReached:false})};
+    const out=await resolve.invoke(resolve.inputSchema.parse({text:"塔"}),actionContext(makeReader(values)));
+    assert.equal(out.ok,true);
+    if(out.ok){
+      const result=out.data as {spans:unknown[];candidates?:Array<{termId:string}>;warning?:string};
+      assert.equal(result.spans.length,count===499?1:0);
+      if(count===500){
+        assert.deepEqual(result.candidates?.map(term=>term.termId),["knowledge-"+a]);
+        assert.equal(result.warning,"knowledge_inventory_truncated");
+      }
+    }
+  }
+});
