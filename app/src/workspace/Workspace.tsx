@@ -72,6 +72,12 @@ function initialMobilePanel(layout: WorkspaceLayout): string {
   return visiblePanelIds(layout.root).includes("outline") ? "outline" : firstActivePanel(layout.root);
 }
 
+function desktopPanelAnchor(panelId: string): string | undefined {
+  if (panelId === "review") return "editor";
+  if (panelId.startsWith("module:")) return "inspector";
+  return undefined;
+}
+
 function domId(prefix: string, panelId: string): string {
   return `${prefix}-${Array.from(panelId).map((char) => /[A-Za-z0-9_-]/.test(char) ? char : `-${char.codePointAt(0)?.toString(16)}-`).join("")}`;
 }
@@ -368,6 +374,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   const [routeSelectionRevision, setRouteSelectionRevision] = useState(0);
   const changingRef = useRef(false);
   const workspaceRef = useRef<HTMLElement | null>(null);
+  const panelMenuRef = useRef<HTMLDetailsElement | null>(null);
   const handledRequestRef = useRef("");
   const routeSuppressedByPanelRequestRef = useRef("");
   const pendingRouteSelectionRef = useRef(false);
@@ -456,7 +463,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
       }
       const change = visibleIds.includes(panelId)
         ? (current: WorkspaceLayout) => activateWorkspacePanel(current, panelId)
-        : (current: WorkspaceLayout) => showWorkspacePanel(current, panelId);
+        : (current: WorkspaceLayout) => showWorkspacePanel(current, panelId, mode === "desktop" ? desktopPanelAnchor(panelId) : undefined);
       const allowed = await changeLayout(change, "Panel opened. Save layout to keep it.", true, isCurrent);
       if (!isCurrent()) {
         if (isRouteTransition) onPanelRequestResult?.(sequence, false);
@@ -539,7 +546,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   };
 
   const showPanel = (panelId: string): void => {
-    void changeLayout((current) => showWorkspacePanel(current, panelId))
+    void changeLayout((current) => showWorkspacePanel(current, panelId, mode === "desktop" ? desktopPanelAnchor(panelId) : undefined))
       .then((allowed) => { if (allowed) setFloating((current) => current.filter((item) => item.panelId !== panelId)); });
   };
   const floatPanel = (panelId: string): void => {
@@ -679,7 +686,13 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
         <button type="button" aria-pressed={layout.preset === "research"} onClick={() => changePreset("research")} disabled={changing}>Research</button>
         <button type="button" aria-pressed={layout.preset === "review"} onClick={() => changePreset("review")} disabled={changing}>Review</button>
       </div>
-      <details className="st-workspace-panel-menu">
+      <details
+        className="st-workspace-panel-menu"
+        ref={panelMenuRef}
+        onToggle={(event) => {
+          if (mode === "desktop" && event.currentTarget.open) setLayoutEditing(false);
+        }}
+      >
         <summary>Panels</summary>
         <div className="st-workspace-panel-menu-list">
           {panels.map((panel) => {
@@ -705,7 +718,11 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
     <details
       className="st-workspace-move-menu"
       open={mode === "desktop" ? layoutEditing : undefined}
-      onToggle={(event) => setLayoutEditing(mode === "desktop" && event.currentTarget.open)}
+      onToggle={(event) => {
+        const open = mode === "desktop" && event.currentTarget.open;
+        setLayoutEditing(open);
+        if (open && panelMenuRef.current?.open) panelMenuRef.current.open = false;
+      }}
     >
       <summary>配置を編集</summary>
       <div className="st-workspace-move-controls" aria-label="Move panel controls">
