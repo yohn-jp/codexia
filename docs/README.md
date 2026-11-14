@@ -9,6 +9,8 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Desktop writing | [Desktop authoring](design/DESKTOP-AUTHORING.md) — design proposal |
 | Knowledge and review | [Knowledge and review](design/KNOWLEDGE-REVIEW.md) — design proposal |
 | Mobile writing | [Mobile authoring](design/MOBILE-AUTHORING.md) — design proposal |
+| Visual system | [Visual system](design/VISUAL-SYSTEM.md) — design proposal |
+| Interaction and recovery states | [Interaction contract](design/INTERACTION-CONTRACT.md) — design proposal |
 | Installation and local startup | [Repository README](../README.md) |
 | Editing, recovery, history and layouts | [Authoring](authoring.md) |
 | Portable work JSON, new-project import and one-time source conversion | [Portable works](authoring-portable.md) |

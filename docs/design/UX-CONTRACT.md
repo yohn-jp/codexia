@@ -2,7 +2,7 @@
 
 ## 1. この文書の位置付け
 
-本書はCodexiaが作者に保証する体験の正本であり、実装済み機能や本番受入の報告ではない。MUST／禁止は受入条件、SHOULDは例外理由と代替の証拠を要する設計原則とする。画像モックや外部製品の外観は仕様ではない。具体的な再設計提案は [情報設計](INFORMATION-ARCHITECTURE.md)、[Desktop](DESKTOP-AUTHORING.md)、[Knowledge／Review](KNOWLEDGE-REVIEW.md)、[Mobile](MOBILE-AUTHORING.md) を参照する。本書の契約が優先される。
+本書はCodexiaが作者に保証する体験の正本であり、実装済み機能や本番受入の報告ではない。MUST／禁止は受入条件、SHOULDは例外理由と代替の証拠を要する設計原則とする。画像モックや外部製品の外観は仕様ではない。具体的な再設計提案は [情報設計](INFORMATION-ARCHITECTURE.md)、[Desktop](DESKTOP-AUTHORING.md)、[Knowledge／Review](KNOWLEDGE-REVIEW.md)、[Mobile](MOBILE-AUTHORING.md)、[視覚設計](VISUAL-SYSTEM.md)、[操作・状態・復旧](INTERACTION-CONTRACT.md) を参照する。本書の契約が優先される。
 
 最新の明示的なオーナー指示と受入済み製品契約を優先する。本書は情報設計・表示・操作の判断を固定し、[Core](../architecture/CORE.md)、[Internal boundaries](../architecture/INTERNAL-BOUNDARIES.md)、[Modular workspace](../architecture/MODULAR-WORKSPACE.md)、[Modules](../architecture/MODULES.md)の正本・保存・認可の意味を変更しない。[Authoring](../authoring.md)と[Mobile interactions](../architecture/MOBILE-INTERACTION-UX.md)も併読する。
 
@@ -96,9 +96,9 @@ receiptの記録や作者承認を表示速度のために省略しない。
 
 ### S-07 — 失敗しても文章と復旧判断を失わない
 
-通信断、journal不良、権限失効、競合、push結果不明を別々に扱う。結果不明は既存operation／receiptの照合で確認し、安易に新しい意味の操作として再実行しない。記録は正規の確定条件まで保持する。
+通信断、journal不良、権限失効、競合、DB保存結果不明を別々に扱う。結果不明は既存operation／receiptの照合で確認し、安易に新しい意味の操作として再実行しない。記録は正規の確定条件まで保持する。
 
-409／412などの競合は正規契約に従って表示し、自分の本文、比較対象、次に取れる行動を示す。原稿の自動競合merge、force-push、黙ったDraft破棄は行わない。外部サービスの障害中も読める検証済みlocal内容を残し、freshな認可を要する操作だけを正しく制限する。
+409／412などの競合は正規契約に従って表示し、自分の本文、比較対象、次に取れる行動を示す。原稿の自動競合merge、強制上書き、黙ったDraft破棄は行わない。外部サービスの障害中も読める検証済みlocal内容を残し、freshな認可を要する操作だけを正しく制限する。
 
 再ログインや別shellへの移行が必要な時は、何が同じbrowser／originに残るかを説明する。別端末・別originへの未公開Draft同期や完全offline編集を、存在しない保証として提供しない。
 
@@ -175,7 +175,7 @@ INP p75 200ms以下、CLS p75 0.1以下を外部の品質目安として参照�
 | S-A03 | 横書き／縦書き閲覧、ルビ、括弧、長文、表示切替え | 原稿・metadataを変更せず、読みと編集へ復帰できる | S-03 |
 | S-A04 | scene A→Bへ移動後にAの応答到着、別authorへ切替え | Bや別authorの本文・回復記録へ古い応答を適用しない | S-01,02,04 |
 | S-A05 | Draft書込み中／失敗、保存要求後に追加入力、DB確定 | 各revisionの保護範囲が正しい。新入力まで保存済みにならない | S-05,06 |
-| S-A06 | Checkpoint／pushの応答損失、二重操作、reload後に照合 | 同じoperation／receiptを照合、重複適用・記録の早期削除・偽successなし | S-06,07 |
+| S-A06 | DB保存／適用の応答損失、二重操作、reload後に照合 | 同じoperation／receiptを照合、重複適用・記録の早期削除・偽successなし | S-06,07 |
 | S-A07 | remote更新との競合、認可拒否、認証依存障害 | 原稿を保持し、競合／拒否／unknownを区別。forceや自動prose mergeなし | S-07,08 |
 | S-A08 | 履歴参照、古いmodule提案、適用前後の編集 | 閲覧は非変更、承認とrevision検査、変更範囲を理解して戻れる | S-08,10 |
 | S-A09 | preset適用、任意配置、keyboard移動、layout保存、壊れたlayout | 自由配置とfocus保持、原稿非変更、復旧可能fallback、draftは独立保持 | S-09 |

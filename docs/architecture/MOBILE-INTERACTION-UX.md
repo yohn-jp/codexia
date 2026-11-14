@@ -1,17 +1,17 @@
 # Mobile writing interactions — Codexia
 
-The Ionic React mobile shell is selected by the explicit `/mobile/` route. Desktop and mobile share Git, approval and recovery services.
+The Ionic React mobile shell is selected by the explicit `/mobile/` route. Desktop and mobile share PostgreSQL authoring, approval and recovery services.
 
 ## Intended moment
 
-A writer resumes a recoverable Japanese draft, checks which scene comes next, inspects publication state, then continues the same sentence. Supporting information should be available **without first leaving or unmounting the active manuscript**.
+A writer resumes a recoverable Japanese draft, checks which scene comes next, inspects durability state, then continues the same sentence. Supporting information should be available **without first leaving or unmounting the active manuscript**.
 
 | Stage | User action | Interaction and authoritative outcome |
 | --- | --- | --- |
 | Write | Type/convert/select Japanese text | CodeMirror keeps native IME, caret, selection, undo and scrolling. No custom swipe handlers are attached to manuscript content. |
 | Refer | Tap **構成を参照** or **保存状態を参照** above the Mobile bottom navigation | First run the existing `beforeLayoutChange` flush/recovery preflight. Only on success open an Ionic sheet, leaving `Workspace` and `SceneEditor` mounted. |
 | Expand | Swipe the Ionic sheet's handle | Native Ionic breakpoints are 0, 0.56, 0.88 and 1. A visible Close button and tab/keyboard navigation are equivalent access paths. |
-| Inspect | Show the Core-owned Outline or Inspector panel in the sheet | Only registered panels are rendered. Inspector also displays the controller's real Draft / Checkpoint / publication-unknown / GitHub-confirmed state. Nothing is auto-published. |
+| Inspect | Show the Core-owned Outline or Inspector panel in the sheet | Only registered panels are rendered. Inspector also displays the controller's real journal protection / pending DB write / uncertain result / confirmed PostgreSQL Revision. No false saved state is inferred. |
 | Continue | Close the sheet by button, backdrop, hardware back or dragging to 0 | No document route or editor mount changes. Focus returns to the invoking button if the same scene/view is still active; the editor caret remains with CodeMirror, and the keyboard is not reopened by surprise. |
 | Change scene | Tap a scene in the outline | Reuse existing guarded scene navigation; close the sheet after the actual document route changes. Do not claim success from the sheet animation. |
 | Blocked | Preflight detects incomplete composition or unprotected draft | Keep the sheet closed, preserve the text, show an actionable error on the writing screen, and allow an ordinary retry after the user resolves the condition. |
