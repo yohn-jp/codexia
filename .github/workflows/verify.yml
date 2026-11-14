@@ -30,6 +30,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.0
+      - name: Verify release intent and version transition
+        run: node scripts/release-version.mjs check
       - name: Select affected validations
         id: select
         env:

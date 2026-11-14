@@ -32,6 +32,10 @@ Changing a DB schema or persistent data format requires a planned manual upgrade
 
 The pure policy does not authenticate a publisher, query GHCR, verify registry freshness, track rollback history, activate a candidate or modify the database. Existing exact-main verification remains mandatory for publication. Do not treat success from this policy as deployment authorization.
 
+## Automatic product version selection
+
+See [automatic version releases](AUTO-RELEASE.md) for the release intent, release PR and operator activation contract. The compatibility admission policy above remains authoritative; automatic version selection never authorizes a schema migration or breaking host upgrade.
+
 ## Authenticated stable channel
 
 The stable channel envelope has exactly two fields: `payload` (canonical base64 of the signed UTF-8 JSON bytes) and `signature` (canonical base64 of the 64-byte Ed25519 signature). The signed payload contains `format: "codexia-update-channel/v1"`, a positive monotonic integer `sequence`, UTC ISO millisecond timestamps `issuedAt` and `expiresAt`, and the complete currently advertised `releases` array using the manifest above. Its validity window may not exceed 24 hours. The publisher retains withdrawal records and must never republish a withdrawn identity. Sequence increases on every changed payload, including a freshness renewal.
