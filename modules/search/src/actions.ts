@@ -209,7 +209,7 @@ export function createSearchActions(moduleContext: ModuleContext, indexes: Snaps
       const input=raw as {knowledgeId:string;targetPath:string};
       const {registry,revision}=await readRegistry(context.reader);
       const native=await nativeTerms(context.reader,registry);
-      if(!native.available||native.truncated||!native.terms.some(term=>term.knowledgeId===input.knowledgeId))throw new TypeError("Confirmed Knowledge unavailable");
+      if(!native.available||native.nodeTruncated||!native.terms.some(term=>term.knowledgeId===input.knowledgeId))throw new TypeError("Confirmed Knowledge unavailable");
       if(!(await indexes.documentPaths(context.reader,context.signal)).has(input.targetPath))throw new TypeError("Target document unavailable");
       const target=await context.reader.read(input.targetPath);
       if(!target)throw new TypeError("Target document unavailable");

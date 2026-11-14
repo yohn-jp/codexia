@@ -11,9 +11,10 @@ test("Knowledge projection binds evidence to Story identity and exact anchored r
   let quote = "evidence";
   let fromUtf16 = markdown.indexOf(quote);
   let revisionReads=0;
+  let aliasRows: Array<{id:string}> = [];
   const reader = {
     async listKnowledgeNodes() { return ["knowledge-1","knowledge-2"].map(id=>({ id, projectId:"project-1", type:"lore", name:"The clue", attributes:{}, status:"confirmed" as const, version:1, deletedAt:null, createdAt:"", updatedAt:"" })); },
-    async listKnowledgeAliases() { return []; },
+    async listKnowledgeAliases(_projectId: ProjectId, _nodeId: string, limit?: number) { assert.equal(limit,500); return aliasRows; },
     async listKnowledgeRelations() { return []; },
     async listNodeMentions() { return [{ evidenceId:"evidence-1", nodeId:"knowledge-1", status:"confirmed" }]; },
     async getEvidenceAnchor() { return { id:"evidence-1", projectId:"project-1", documentId, revisionId, fromUtf16, toUtf16:fromUtf16+quote.length,
@@ -48,4 +49,8 @@ test("Knowledge projection binds evidence to Story identity and exact anchored r
   assert.equal(oversizedEvidence.quote,null);
   assert.equal(oversizedEvidence.quoteAvailable,false);
   assert.equal(oversizedEvidence.quoteOmission,"projection-budget");
+  aliasRows=Array.from({length:500},(_,index)=>({id:`alias-${index}`}));
+  const boundedAliases=await projectKnowledgeContext(reader,"project-1" as ProjectId,[]);
+  assert.equal(boundedAliases.entries[0]!.aliases.length,500);
+  assert.equal(boundedAliases.entries[0]!.aliasLimitReached,true);
 });

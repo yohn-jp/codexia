@@ -33,7 +33,9 @@ export async function nativeTerms(reader:SnapshotReader, registry:TermRegistry) 
     terms.push({id:"knowledge-"+node.id,knowledgeId:node.id,canonical:node.name,aliases:[...aliases],
       ambiguousAliases:[...ambiguousAliases],targetPath:reference?.targetPath??"",candidateOnly:!reference||data.nodeLimitReached===true});
   }
-  return {terms,revision:file.revision,available:true,truncated:data.nodeLimitReached===true};
+  const nodeTruncated=data.nodeLimitReached===true;
+  const aliasTruncated=data.entries.some((raw:unknown)=>row(raw).aliasLimitReached===true);
+  return {terms,revision:file.revision,available:true,nodeTruncated,aliasTruncated,truncated:nodeTruncated||aliasTruncated};
 }
 export function combineTerms(registry:TermRegistry,native:Awaited<ReturnType<typeof nativeTerms>>):ResolutionTerm[]{
   // Distinct identities remain distinct even when their names are identical.
