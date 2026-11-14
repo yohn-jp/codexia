@@ -11,6 +11,18 @@ function rows(value:unknown):Row[] {
   if(!Array.isArray(value)) throw new TypeError("Invalid Knowledge projection collection");
   return value.map(row);
 }
+// Old immutable v1 projections used the same bounds before explicit markers.
+function reached(entry:Row, marker:string, collection:string, cap:number):boolean {
+  return entry[marker]===true || (entry[marker]===undefined && Array.isArray(entry[collection]) && entry[collection].length>=cap);
+}
+function entryLimits(entry:Row):string[] {
+  return [
+    ...(reached(entry,"aliasLimitReached","aliases",500)?["alias-inventory-limit"]:[]),
+    ...(reached(entry,"relationLimitReached","relations",500)?["relation-inventory-limit"]:[]),
+    ...(reached(entry,"evidenceLimitReached","evidence",100)?["mention-inventory-limit"]:[]),
+    ...(rows(entry.evidence).some(item=>reached(item,"assertionLimitReached","assertions",100))?["assertion-inventory-limit"]:[]),
+  ];
+}
 export async function nativeKnowledge(reader:SnapshotReader,story:LoadedStorySnapshot,sceneId?:string) {
   const file=await reader.read(NATIVE_KNOWLEDGE_PATH);
   if(!file) return {available:false,links:[],parts:[],truncated:false,omissions:[]};
@@ -46,7 +58,7 @@ export async function nativeKnowledge(reader:SnapshotReader,story:LoadedStorySna
         storySceneId:item.storySceneId??null,sourceDocumentId:item.sourceDocumentId??row(item.anchor).documentId,
         sourceRevisionId:item.sourceRevisionId??row(item.anchor).revisionId,quote:item.quoteAvailable===true&&typeof item.quote==="string"?item.quote:null,
         status:item.stale===true||item.current===false||row(item.anchor).status==="orphaned"?"stale":item.current===true&&node.status==="confirmed"&&row(item.mention).status==="confirmed"&&row(item.anchor).status==="confirmed"?"confirmed":"candidate"})),
-      evidenceLimitReached:entry.evidenceLimitReached===true,source:{path:NATIVE_KNOWLEDGE_PATH,revision:file.revision}}}];
+      evidenceLimitReached:reached(entry,"evidenceLimitReached","evidence",100),source:{path:NATIVE_KNOWLEDGE_PATH,revision:file.revision}}}];
   });
   const includedIds=new Set<string>(parts.map(part=>String((part.value as {knowledgeId:unknown}).knowledgeId)));
   const omissions=entries.filter(entry=>{const id=row(entry.node).id;return typeof id==="string"&&includedIds.has(id);}).flatMap(entry=>{
@@ -54,5 +66,7 @@ export async function nativeKnowledge(reader:SnapshotReader,story:LoadedStorySna
     return rows(entry.evidence).filter(item=>item.quoteAvailable!==true&&["confirmed","proposed","ambiguous"].includes(String(row(item.mention).status)))
       .map(item=>({knowledgeId:node.id,reason:item.quoteOmission==="projection-budget"?"source-quote-budget":"source-quote-unavailable"}));
   });
-  return {available:true,links,parts,truncated:raw.nodeLimitReached===true||entries.some(entry=>entry.evidenceLimitReached===true),omissions};
+  const limitReasons = new Set(entries.flatMap(entryLimits));
+  if(raw.nodeLimitReached===true || (raw.nodeLimitReached===undefined && entries.length>=1000)) limitReasons.add("node-inventory-limit");
+  return {available:true,links,parts,truncated:limitReasons.size>0,omissions:[...omissions,...[...limitReasons].sort().map(reason=>({knowledgeId:null,reason}))]};
 }

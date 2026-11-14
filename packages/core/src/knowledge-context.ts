@@ -6,6 +6,8 @@ export const KNOWLEDGE_CONTEXT_PATH = "meta/scriptorium/knowledge-context/v1.jso
 const MAX_PROJECTED_QUOTE_BYTES = 4096;
 const MAX_PROJECTED_QUOTES_TOTAL_BYTES = 256 * 1024;
 const MAX_PROJECTED_ALIASES_PER_NODE = 500;
+const MAX_PROJECTED_RELATIONS_PER_NODE = 500;
+const MAX_PROJECTED_ASSERTIONS_PER_ANCHOR = 100;
 export interface KnowledgeDocumentMapping { documentId: string; storySceneId: string }
 export async function projectKnowledgeContext(reader: PersistenceReader, projectId: ProjectId, documents: readonly Document[], documentMappings: readonly KnowledgeDocumentMapping[] = []) {
   const nodes = await reader.listKnowledgeNodes(projectId, 1000);
@@ -24,7 +26,7 @@ export async function projectKnowledgeContext(reader: PersistenceReader, project
   let remainingQuoteBytes = MAX_PROJECTED_QUOTES_TOTAL_BYTES;
   for (const node of ordered) {
     const aliases = [...await reader.listKnowledgeAliases(projectId,node.id,MAX_PROJECTED_ALIASES_PER_NODE)].sort((a,b)=>a.id.localeCompare(b.id));
-    const relations = [...await reader.listKnowledgeRelations(projectId,node.id)].sort((a,b)=>a.id.localeCompare(b.id));
+    const relations = [...await reader.listKnowledgeRelations(projectId,node.id,MAX_PROJECTED_RELATIONS_PER_NODE)].sort((a,b)=>a.id.localeCompare(b.id));
     const mentions = [...await reader.listNodeMentions(projectId,node.id,100)].sort((a,b)=>a.evidenceId.localeCompare(b.evidenceId));
     const evidence = [];
     for (const mention of mentions) {
@@ -45,16 +47,17 @@ export async function projectKnowledgeContext(reader: PersistenceReader, project
       const quoteAvailable = quoteVerified && quoteBytes <= MAX_PROJECTED_QUOTE_BYTES && quoteBytes <= remainingQuoteBytes;
       if (quoteAvailable) remainingQuoteBytes -= quoteBytes;
       const assertions = [];
-      for (const link of await reader.listEvidenceAssertions(projectId,anchor.id,100)) {
+      const assertionLinks = await reader.listEvidenceAssertions(projectId,anchor.id,MAX_PROJECTED_ASSERTIONS_PER_ANCHOR);
+      for (const link of assertionLinks) {
         const assertion = await reader.getAssertion(projectId,link.assertionId);
         if (assertion) assertions.push({ assertion, role:link.role });
       }
       assertions.sort((a,b)=>a.assertion.id.localeCompare(b.assertion.id)||a.role.localeCompare(b.role));
       evidence.push({ mention,anchor,current,stale:!current,sourceDocumentId:anchor.documentId,sourceRevisionId:anchor.revisionId,
         storySceneId:mapping && storyIds.get(mapping.storySceneId) === 1 && documentIds.get(mapping.documentId) === 1 ? mapping.storySceneId : null,
-        quote:quoteAvailable ? quote : null,quoteAvailable, ...(quoteVerified && !quoteAvailable ? {quoteOmission:"projection-budget" as const} : {}),assertions });
+        quote:quoteAvailable ? quote : null,quoteAvailable, ...(quoteVerified && !quoteAvailable ? {quoteOmission:"projection-budget" as const} : {}),assertions,assertionLimitReached:assertionLinks.length>=MAX_PROJECTED_ASSERTIONS_PER_ANCHOR });
     }
-    entries.push({node,aliases,relations,evidence,evidenceLimitReached:mentions.length===100,aliasLimitReached:aliases.length===MAX_PROJECTED_ALIASES_PER_NODE});
+    entries.push({node,aliases,relations,evidence,evidenceLimitReached:mentions.length===100,aliasLimitReached:aliases.length>=MAX_PROJECTED_ALIASES_PER_NODE,relationLimitReached:relations.length>=MAX_PROJECTED_RELATIONS_PER_NODE});
   }
   return {version:1,projectId,documentMappings:mappings,entries,nodeLimitReached:nodes.length===1000};
 }
