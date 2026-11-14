@@ -999,7 +999,7 @@ test("temporal context respects explicit world days, competing facts, reader sco
     [scenePath("sc-2")]: scene("sc-2", 2, 1, [fact("sc-2", "Recruit", "rank-recruit"),
       fact("sc-2", "Secret", "rank-draft", { source: "llm-draft", status: "proposed" })]),
     [scenePath("sc-3")]: scene("sc-3", 3, 10, [fact("sc-3", "Major", "rank-major")]),
-    [scenePath("sc-4")]: scene("sc-4", 4, null, []),
+    [scenePath("sc-4")]: scene("sc-4", 4, null, [fact("sc-4", "Lieutenant", "rank-lieutenant")]),
     "manuscript/vol-main/ch-main-1/sc-2.md": "Uma reads an unrevealed secret.",
     "manuscript/vol-main/ch-main-1/sc-3.md": "Uma later sees a secret.",
   });
@@ -1007,7 +1007,7 @@ test("temporal context respects explicit world days, competing facts, reader sco
   const proposals: Array<{ id: string; operations: ChangeOperation[] }> = [];
   const context = makeActionContext(reader, { proposals });
   type Projection = { worldTime: { earliest: number; latest: number } | null; narrativeOrder: number;
-    state: Array<{ subject: string; predicate: string; status: string; facts: Array<{ value: string; evidence: { path: string; revision: string } }> }>;
+    state: Array<{ subject: string; predicate: string; status: string; facts: Array<{ value: string; sceneId: string; evidence: { path: string; revision: string } }> }>;
     candidates: unknown[]; beliefs: unknown[]; disclosed: unknown[] };
   const flashback = await invoke<Projection>("story.world-state.temporal", { sceneId: "sc-2" }, context);
   assert.deepEqual(flashback.snapshot, reader.snapshot);
@@ -1028,16 +1028,68 @@ test("temporal context respects explicit world days, competing facts, reader sco
   const readerContext = await invoke<{ parts: unknown[] }>("story.context.package", { sceneId: "sc-2", scope: "reader" }, context);
   assert.equal(readerContext.data.parts.length, 1);
   assert.doesNotMatch(JSON.stringify(readerContext.data), /Captain|Recruit|unrevealed secret/);
-  const scenario = await invoke<{ baseline: Projection; alternatives: Array<{ projection: Projection }> }>("story.scenario.compare", {
+  const scenario = await invoke<{ baseline: Projection; alternatives: Array<{ projection: Projection }>; sourceFingerprint: string }>("story.scenario.compare", {
     sceneId: "sc-4",
-    alternatives: ["General", "Civilian"].map(label => ({ label, events: [{ kind: "attribute", subject: "char-uma", object: null, payload: { predicate: "rank", value: label } }] })),
+    alternatives: ["General", "Civilian"].map(label => ({ label, events: [{ kind: "attribute", subject: "char-uma", object: null, payload: { predicate: "rank", value: label }, ...(label === "General" ? { replacesEventId: "rank-lieutenant" } : {}) }] })),
   }, context);
   assert.match(JSON.stringify(scenario.data.alternatives[0]), /General/);
+  assert.deepEqual(scenario.data.alternatives[0]!.projection.state.find(cell => cell.predicate === "rank")?.facts.map(fact => fact.value), ["General"], "replacement hypothesis should remove the event it replaces");
   assert.doesNotMatch(JSON.stringify(scenario.data.alternatives[0]), /Civilian/);
   assert.match(JSON.stringify(scenario.data.alternatives[1]), /Civilian/);
   assert.deepEqual(scenario.data.baseline, unknown.data);
   assert.deepEqual((await invoke<Projection>("story.world-state.temporal", { sceneId: "sc-4" }, context)).data, unknown.data);
-  assert.equal(proposals.length, 0);
+  const invalidReplacement = await actionById("story.scenario.compare").invoke({ sceneId: "sc-4", alternatives: [
+    { label: "Invalid", events: [{ kind: "attribute", subject: "char-uma", object: null, payload: { predicate: "rank", value: "Marshal" }, replacesEventId: "missing-event" }] },
+    { label: "Other", events: [] },
+  ] }, context);
+  assert.equal(invalidReplacement.ok, false, "replacement must identify a confirmed canonical event");
+  const unconfirmedReplacement = await actionById("story.scenario.compare").invoke({ sceneId: "sc-4", alternatives: [
+    { label: "Invalid", events: [{ kind: "attribute", subject: "char-uma", object: null, payload: { predicate: "rank", value: "Marshal" }, replacesEventId: "rank-draft" }] },
+    { label: "Other", events: [] },
+  ] }, context);
+  assert.equal(unconfirmedReplacement.ok, false, "replacement cannot target an unconfirmed canonical event");
+  assert.equal(proposals.length, 0, "compare and invalid hypotheses do not write canonical state");
+  const staleSave = await actionById("story.scenario.save").invoke({ sceneId: "sc-4", label: "Stale", alternatives: [
+    { label: "A", events: [] }, { label: "B", events: [] },
+  ], sourceFingerprint: "stale-fingerprint" }, context);
+  assert.equal(staleSave.ok, false);
+  if (!staleSave.ok) assert.equal(staleSave.error.code, "stale_source");
+  assert.equal(proposals.length, 0, "stale scenarios do not create saved rows");
+  const saved = await invoke<{ id: string }>("story.scenario.save", {
+    id: "scenario-replacement", sceneId: "sc-4", label: "Replacement", alternatives: [
+      { label: "General", events: [{ kind: "attribute", subject: "char-uma", object: null, payload: { predicate: "rank", value: "General" }, replacesEventId: "rank-lieutenant" }] },
+      { label: "Civilian", events: [{ kind: "attribute", subject: "char-uma", object: null, payload: { predicate: "rank", value: "Civilian" } }] },
+    ], sourceFingerprint: scenario.data.sourceFingerprint,
+  }, context);
+  files.set("meta/scriptorium/modules/story/v1/scenarios.json", proposals.at(-1)!.operations[0]!.writes[0]!.content!);
+  const staleAdoption = await actionById("story.scenario.adopt").invoke({
+    id: saved.data.id, alternativeIndex: 0, sourceFingerprint: "stale-fingerprint",
+  }, context);
+  assert.equal(staleAdoption.ok, false);
+  if (!staleAdoption.ok) assert.equal(staleAdoption.error.code, "stale_source");
+  const adopted = await invoke<{ proposals: Array<{ id: string; event: Record<string, unknown> }> }>("story.scenario.adopt", {
+    id: saved.data.id, alternativeIndex: 0, sourceFingerprint: scenario.data.sourceFingerprint,
+  }, context);
+  assert.equal(adopted.data.proposals[0]!.event.replacesEventId, "rank-lieutenant");
+  assert.equal(adopted.data.proposals[0]!.event.status, "proposed", "adoption submits an author review proposal without confirming canonical state");
+  const adoptedRow = JSON.parse(proposals.at(-1)!.operations[0]!.writes.find(write => write.path === STATE_PROPOSALS_PATH)!.content!.trim().split("\n").at(-1)!) as { event_json: string; status: string };
+  const adoptedEvent = JSON.parse(adoptedRow.event_json) as Record<string, unknown>;
+  assert.equal(adoptedEvent.replacesEventId, "rank-lieutenant");
+  assert.equal(adoptedRow.status, "proposed");
+  files.set(STATE_PROPOSALS_PATH, proposals.at(-1)!.operations[0]!.writes.find(write => write.path === STATE_PROPOSALS_PATH)!.content!);
+  const approved = await invoke("story.state-proposals.approve", { id: adopted.data.proposals[0]!.id }, context);
+  const approvalOperation = proposals.at(-1)!.operations[0]!;
+  for (const write of approvalOperation.writes) files.set(write.path, write.content!);
+  const applied = await invoke<Projection>("story.world-state.temporal", { sceneId: "sc-4" }, context);
+  const semanticState = (projection: Projection) => projection.state.map(cell => ({
+    subject: cell.subject,
+    predicate: cell.predicate,
+    status: cell.status,
+    facts: cell.facts.map(fact => [fact.sceneId, fact.value]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+  })).sort((a, b) => `${a.subject}:${a.predicate}`.localeCompare(`${b.subject}:${b.predicate}`));
+  assert.ok(approved.ok);
+  assert.deepEqual(semanticState(applied.data), semanticState(scenario.data.alternatives[0]!.projection),
+    "author-approved adoption must produce the same semantic temporal state as its comparison hypothesis");
   assert.equal((await actionById("story.context.package").invoke({sceneId:"sc-2", scope:"character", characterId:"missing"}, context)).ok, false);
 });
 
