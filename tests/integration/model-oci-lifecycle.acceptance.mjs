@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomBytes, createHash } from "node:crypto";
+import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
@@ -8,7 +8,6 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
-import { CoreStore } from "../../packages/core/dist/index.js";
 
 const execFile = promisify(execFileCallback);
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -36,15 +35,8 @@ async function git(cwd, ...args) {
   return run("git", args, { cwd, timeout: 60_000 });
 }
 
-async function writeText(directory, relative, contents) {
-  const filename = join(directory, relative);
-  await mkdir(dirname(filename), { recursive: true });
-  await writeFile(filename, contents, "utf8");
-}
-
-async function writeYaml(directory, relative, value) {
-  await writeText(directory, relative, JSON.stringify(value) + "\n");
-}
+function writeText(files, path, content) { files[path] = content; }
+function writeYaml(files, path, value) { writeText(files, path, JSON.stringify(value) + "\n"); }
 
 async function choosePort() {
   const server = await import("node:net").then(({ createServer }) => createServer());
@@ -58,15 +50,8 @@ async function choosePort() {
   return address.port;
 }
 
-async function createFixture(directory, sceneCount = 240) {
-  const remote = join(directory, "remote.git");
-  const seed = join(directory, "seed");
-  await mkdir(seed, { recursive: true });
-  await git(directory, "init", "--bare", "--initial-branch=main", remote);
-  await git(seed, "init", "--initial-branch=main");
-  await git(seed, "config", "user.name", "P13 OCI Synthetic Author");
-  await git(seed, "config", "user.email", "p13-oci@example.test");
-
+async function createFixture(sceneCount = 240) {
+  const seed = {};
   await writeYaml(seed, "meta/project.yaml", { id: "p13-oci-synthetic", title: "Synthetic OCI model lifecycle work" });
   await writeYaml(seed, "plot/volumes/v1/volume.yaml", { id: "vol-one", type: "volume", name: "第一巻", order: 1 });
   await writeYaml(seed, "plot/volumes/v1/chapters/c1/chapter.yaml", { id: "ch-one", type: "chapter", title: "第一章", volume: "vol-one", order: 1 });
@@ -118,12 +103,7 @@ async function createFixture(directory, sceneCount = 240) {
   await writeText(seed, "meta/scriptorium/modules/semantic/settings.json", semanticSettings);
   await writeText(seed, "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl", dismissals);
 
-  await git(seed, "add", ".");
-  await git(seed, "commit", "-m", "Seed synthetic P13 OCI acceptance work");
-  await git(seed, "remote", "add", "origin", remote);
-  await git(seed, "push", "-u", "origin", "main");
-  await git(directory, "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/main");
-  return { remote, seed, nlpSettings, semanticSettings, dismissals };
+  return { files: seed, nlpSettings, semanticSettings, dismissals };
 }
 
 function safeBuildEnvironment() {
@@ -194,6 +174,12 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
   const customName = "codexia-p13-lifecycle-" + process.pid + "-" + randomBytes(4).toString("hex");
   const replacementName = "codexia-p13-replacement-" + process.pid + "-" + randomBytes(4).toString("hex");
   const token = randomBytes(32).toString("hex");
+  const projectId = randomUUID();
+  const network = customName + "-net";
+  const databaseName = customName + "-db";
+  const databasePassword = randomBytes(24).toString("hex");
+  let networkCreated = false;
+  let databaseStarted = false;
   let customStarted = false;
   let replacementStarted = false;
   let candidatePassed = false;
@@ -201,25 +187,37 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
   try {
     await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
     await mkdir(outputDirectory, { recursive: true, mode: 0o700 });
-    const fixture = await createFixture(temporaryRoot);
-    const store = new CoreStore({ dataDir: dataDirectory, allowLocalRemotes: true });
-    const project = await store.registerProject({ url: fixture.remote });
-    const observed = await store.observe(project.id);
-    assert.equal(observed.state, "fresh");
+    const fixture = await createFixture();
+    await writeFile(join(outputDirectory, "fixture.json"), JSON.stringify(fixture.files), {mode:0o600});
+    // Private disposable DB; neither inference container nor database has public network egress.
+    await run(podman, ["network", "create", "--internal", network]);
+    networkCreated = true;
+    await run(podman, ["run", "--detach", "--name", databaseName, "--network", network,
+      "--env", "POSTGRES_USER=codexia", "--env", "POSTGRES_DB=codexia_test",
+      "--env", "POSTGRES_PASSWORD=" + databasePassword,
+      "docker.io/library/postgres:17-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994"], {timeout:120_000});
+    databaseStarted = true;
+    let ready = false;
+    for (let attempt = 0; attempt < 60; attempt++) {
+      try { await run(podman, ["exec", databaseName, "pg_isready", "-h", "127.0.0.1", "-U", "codexia", "-d", "codexia_test"], {timeout:5000}); ready = true; break; }
+      catch { await delay(500); }
+    }
+    assert.ok(ready, "disposable PostgreSQL did not become ready");
     const modelLink = join(dataDirectory, "module-cache", "semantic", "semantic", "models");
     await mkdir(dirname(modelLink), { recursive: true });
     await symlink("/models", modelLink);
 
     await writeFile(envFilename, [
       "CODEXIA_AUTH_TOKEN=" + token,
-      "P13_PROJECT_ID=" + project.id,
+      "P13_PROJECT_ID=" + projectId,
+      "CODEXIA_DATABASE_URL=postgres://codexia:" + databasePassword + "@" + databaseName + ":5432/codexia_test",
+      "CODEXIA_DATABASE_MIGRATE_ON_START=1",
       "",
     ].join("\n"), { mode: 0o600 });
 
     const outputVolume = outputDirectory + ":/p13-output:rw";
     const commonMounts = [
       "--volume", dataDirectory + ":/data:rw",
-      "--volume", fixture.remote + ":" + fixture.remote + ":ro",
       "--volume", modelCache + ":/models:ro",
       "--volume", helperDirectory + ":/app/p13-harness:ro",
       "--volume", outputVolume,
@@ -237,7 +235,7 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
     ];
 
     await run(podman, [
-      "run", "--detach", "--name", customName, "--userns=keep-id", "--network=none",
+      "run", "--detach", "--name", customName, "--userns=keep-id", "--network", network,
       ...commonEnv, ...commonMounts, image,
       "node", "/app/p13-harness/model-oci-lifecycle.container.mjs", "lifecycle",
     ], { timeout: 30_000 });
@@ -253,7 +251,7 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
 
     const lifecycle = JSON.parse(await readFile(join(outputDirectory, "lifecycle.json"), "utf8"));
     assert.equal(lifecycle.profile, "full");
-    assert.deepEqual(lifecycle.installedModules, ["story", "nlp", "diagnostics", "semantic", "speaker", "assistant", "publishing", "mcp"]);
+    assert.deepEqual(lifecycle.installedModules, ["story", "nlp", "diagnostics", "semantic", "speaker", "assistant", "publishing", "mcp", "search"]);
     assert.equal(lifecycle.assertions.noWorkerAtEnabledIdle, true);
     assert.equal(lifecycle.assertions.disableOneConsumerPreservesOther, true);
     assert.equal(lifecycle.assertions.lastLeaseStopsWorker, true);
@@ -282,19 +280,16 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
     assert.ok(lifecyclePhases.get("replacement-e5-bge-search").peakSemantic.semanticWorkerCount > 0);
     assert.equal(lifecyclePhases.get("shared-diagnostics-semantic-real-inference").peakSemantic.semanticWorkerCount, 1);
 
-    const projectDirectory = join(dataDirectory, "projects", project.id);
     const preserved = {
       "meta/scriptorium/modules/nlp/feature-settings.json": fixture.nlpSettings,
       "meta/scriptorium/modules/semantic/settings.json": fixture.semanticSettings,
       "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl": fixture.dismissals,
     };
-    for (const [relative, expected] of Object.entries(preserved)) {
-      const actual = await readFile(join(projectDirectory, relative), "utf8");
-      assert.equal(actual, expected, "module lifecycle must preserve author settings and dismissals: " + relative);
-    }
+    const expectedHashes = Object.entries(preserved).map(([path, content]) => ({path, sha256:createHash("sha256").update(content).digest("hex")}));
+    assert.deepEqual(lifecycle.preservedFiles, expectedHashes, "model lifecycle must preserve canonical author records");
 
     await run(podman, [
-      "run", "--detach", "--name", replacementName, "--userns=keep-id", "--network=none",
+      "run", "--detach", "--name", replacementName, "--userns=keep-id", "--network", network,
       ...commonEnv, ...commonMounts, image,
     ], { timeout: 30_000 });
     replacementStarted = true;
@@ -305,9 +300,12 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
 
     const replacement = JSON.parse(await readFile(join(outputDirectory, "replacement.json"), "utf8"));
     assert.equal(replacement.mode, "production-launcher-replacement");
-    assert.equal(replacement.assertions.allEightModulesInstalledAndEnabled, true);
+    assert.equal(replacement.assertions.allInstalledModulesEnabled, true);
     assert.equal(replacement.assertions.noWorkerAtReplacementIdle, true);
     assert.equal(replacement.assertions.persistedDerivedIndex, true);
+    assert.deepEqual(replacement.preservedFiles, expectedHashes, "replacement must read the same canonical author records");
+    assert.equal(replacement.snapshot.projectId, projectId);
+    assert.deepEqual(replacement.snapshot, lifecycle.snapshot);
     assert.equal(replacement.assertions.realReplacementInference.reranker.revision, modelRefs.reranker.revision);
     assert.ok(replacement.resourceMeasurements.healthProbe.successfulRequests > 0);
     assert.equal(replacement.resourceMeasurements.healthProbe.failures, 0);
@@ -336,6 +334,9 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
   } finally {
     if (customStarted) await run(podman, ["rm", "--volumes", "--force", customName], { timeout: 30_000 }).catch(() => {});
     if (replacementStarted) await run(podman, ["rm", "--volumes", "--force", replacementName], { timeout: 30_000 }).catch(() => {});
+    if (databaseStarted) await run(podman, ["rm", "--volumes", "--force", databaseName], {timeout:30_000}).catch(() => {});
+    if (networkCreated) await run(podman, ["network", "rm", network], {timeout:30_000}).catch(() => {});
+    await rm(envFilename, {force:true});
     if (candidatePassed || process.env.CODEXIA_P13_KEEP_FAILED !== "1") {
       await rm(temporaryRoot, { recursive: true, force: true });
     } else {

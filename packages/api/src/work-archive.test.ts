@@ -101,3 +101,47 @@ test("superseded evidence remains in an explicit unresolved archive section", as
   const again = await exportWorkArchive(persistence, imported.project.id);
   assert.equal(again.evidence.unresolved.anchors[0]?.id, evidenceId);
 });
+test("nested settings arrays never expose sensitive keys in the exported archive", async () => {
+  const projectId = randomUUID() as import("@codexia/persistence-contracts").ProjectId;
+  await persistence.transaction(tx => tx.createProject({ id: projectId, title: "Nested settings", settings: {
+    connections: [[{ apiKey: "synthetic-secret", label: "keep" }], { nested: [[{ password: "synthetic-password", enabled: true }]] }],
+    theme: "night",
+  } }));
+  const archive = await exportWorkArchive(persistence, projectId);
+  assert.deepEqual(archive.project.settings, { connections: [[{ label: "keep" }], { nested: [[{ enabled: true }]] }], theme: "night" });
+  assert.deepEqual(archive.omittedRecords, ["project.settings.connections[0][0].apiKey", "project.settings.connections[1].nested[0][0].password"]);
+  assert.doesNotMatch(JSON.stringify(archive), /synthetic-secret|synthetic-password/);
+  const imported = await importWorkArchive(persistence, archive, "owner");
+  assert.deepEqual((await exportWorkArchive(persistence, imported.project.id)).project.settings, archive.project.settings);
+});
+
+test("evidence on a deleted document round trips as unresolved without restoring the document", async () => {
+  const projectId = randomUUID() as import("@codexia/persistence-contracts").ProjectId;
+  const documentId = randomUUID() as DocumentId;
+  const evidenceId = randomUUID() as EvidenceId;
+  const nodeId = randomUUID() as KnowledgeNodeId;
+  const assertionId = randomUUID() as import("@codexia/persistence-contracts").AssertionId;
+  await persistence.transaction(async tx => {
+    await tx.createProject({ id: projectId, title: "Deleted evidence source" });
+    const created = await tx.createDocument({ projectId, documentId, kind: "scene", title: "Deleted", orderKey: "0", markdown: "猫", authorId: "owner", idempotencyKey: "deleted-evidence-" + documentId });
+    await tx.saveKnowledgeNode({ projectId, id: nodeId, type: "animal", name: "猫", attributes: {}, status: "confirmed", expectedVersion: null });
+    await tx.saveEvidenceAnchor({ projectId, id: evidenceId, documentId, revisionId: created.revision.id, fromUtf16: 0, toUtf16: 1, quoteSha256: createHash("sha256").update("猫").digest("hex"), status: "confirmed", expectedVersion: null });
+    await tx.saveMentionLink({ projectId, evidenceId, nodeId, source: "author", confidence: null, extractorVersion: null, status: "confirmed" });
+    await tx.saveAssertion({ projectId, id: assertionId, proposition: { nodeId }, modality: "stated", perspective: "author", narrativeTime: {}, confidence: null, status: "confirmed", expectedVersion: null });
+    await tx.linkAssertionEvidence({ projectId, assertionId, evidenceId, role: "supports" });
+    const doc = await tx.getDocument(projectId, documentId);
+    assert.ok(doc);
+    await tx.deleteDocument({ projectId, documentId, expectedVersion: doc.version });
+  });
+  const archive = await exportWorkArchive(persistence, projectId);
+  assert.equal(archive.documents.length, 0);
+  assert.equal(archive.evidence.anchors.length, 0);
+  assert.deepEqual(archive.evidence.unresolved.anchors.map(a => [a.id, a.documentId]), [[evidenceId, documentId]]);
+  assert.deepEqual(archive.evidence.unresolved.mentions.map(m => [m.evidenceId, m.nodeId]), [[evidenceId, nodeId]]);
+  assert.deepEqual(archive.evidence.unresolved.assertionEvidence, [{ assertionId, evidenceId, role: "supports" }]);
+  const result = await importWorkArchive(persistence, archive, "owner");
+  const restored = await exportWorkArchive(persistence, result.project.id);
+  assert.equal(restored.documents.length, 0);
+  assert.deepEqual(restored.evidence.unresolved, archive.evidence.unresolved);
+  assert.deepEqual(restored.evidence.assertions, archive.evidence.assertions);
+});

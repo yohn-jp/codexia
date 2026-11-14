@@ -42,7 +42,7 @@ These checks exercise derived-state reconstruction and read-only legacy inspecti
 
 ## CPU model lifecycle
 
-Provide a model cache containing the artifacts required by the acceptance sources. The tests bind model repository/revision identities; arbitrary replacement weights do not satisfy those checks. Cache preparation may require downloading public models and tokenizer artifacts. Review their licenses and reserve appropriate disk and memory capacity.
+The host test also requires the disposable PostgreSQL database configured above via `CODEXIA_TEST_DATABASE_URL`. The OCI test starts its own pinned disposable PostgreSQL instance on an internal container network, with no published database port. Both seed synthetic manuscript and module records through approved Core operations. The host fixture scene count is bounded by the current Core snapshot limit (16–997 scenes). Provide a model cache containing the artifacts required by the acceptance sources. The tests bind model repository/revision identities; arbitrary replacement weights do not satisfy those checks. Cache preparation may require downloading public models and tokenizer artifacts. Review their licenses and reserve appropriate disk and memory capacity.
 
 ```sh
 CODEXIA_P13_MODEL_CACHE=/path/to/model-cache \
@@ -52,7 +52,7 @@ OCI_ENGINE=podman CODEXIA_P13_MODEL_CACHE=/path/to/model-cache \
   node --test tests/integration/model-oci-lifecycle.acceptance.mjs
 ```
 
-The OCI test builds the Full production image, mounts the model cache read-only and exercises inference without network access. It checks shared model leases, cancellation, disable/release, index rebuild, launcher replacement, health and preserved author state. Confirm actual worker/process release; dropping a JavaScript reference alone does not establish native memory release. Model absence or an unsupported host is an unavailable check, not successful inference.
+The OCI test builds the Full production image, mounts the model cache read-only and exercises inference without external network access; the private network is used only for PostgreSQL. The replacement launcher uses the same disposable database and compares canonical settings and snapshot identity. It checks shared model leases, cancellation, disable/release, index rebuild, launcher replacement, health and preserved author state. Confirm actual worker/process release; dropping a JavaScript reference alone does not establish native memory release. Model absence or an unsupported host is an unavailable check, not successful inference.
 
 ## Provider execution
 
@@ -61,5 +61,7 @@ MCP integration acceptance uses a synthetic provider probe only to verify that d
 ## PostgreSQL restore and container replacement
 
 Use an isolated PostgreSQL database with synthetic projects. Apply the checked migrations, create sample documents and revisions through the API, then dump and restore the database into a blank instance. Start a replacement API process against the restored database and verify project/document history, revision reads, authorization scope, `/health/ready`, and browser draft recovery on the same origin. Keep the PostgreSQL URL and restored data private. `OCI_ENGINE` selects the local engine and `CODEXIA_E2E_CHROMIUM` may select a system browser.
+
+The historical Git-publication and Git-container-recovery harnesses (`tests/integration/publishing-acceptance.test.mjs` and `tests/e2e/container-recovery.acceptance.mjs`) describe retired runtime behavior and are not current acceptance commands. Do not use them as evidence for PostgreSQL recovery; retain the closed historical migration evidence. Current publishing/browser and PostgreSQL restore contracts are verified separately.
 
 Only the exact tested source/artifact and executed assertions are certified. Keep private fixture URLs, tokens, manuscript content and raw recovery records out of public reports.

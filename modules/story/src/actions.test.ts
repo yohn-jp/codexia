@@ -1235,3 +1235,28 @@ test("large manuscript truncation preserves structured world state under the sam
   assert.equal(result.data.parts.some(part=>part.kind==="objective"&&JSON.stringify(part).includes("Captain")),true);
   assert.equal(result.data.used<=result.data.budget,true);
 });
+
+test("author context reports all native projection bounds without revealing them in restricted scopes", async()=>{
+  const path="meta/scriptorium/knowledge-context/v1.json";
+  for(const legacy of [false,true]){
+    const entry={
+      node:{id:"bounded-node",name:"Secret inventory",type:"character",status:"confirmed",attributes:{storyEntityId:"char-uma"}},
+      aliases:Array.from({length:500},(_,i)=>({surface:"a"+i,status:"confirmed"})),
+      relations:Array.from({length:500},(_,i)=>({id:"r"+i,status:"confirmed",sourceId:"bounded-node",targetId:"bounded-node"})),
+      evidence:[{current:true,anchor:{id:"anchor",status:"confirmed"},mention:{status:"confirmed"},
+        assertions:Array.from({length:100},(_,i)=>({assertion:{id:"fact"+i,status:"confirmed"},role:"supports"})),
+        ...(legacy?{}:{assertionLimitReached:true})}],
+      evidenceLimitReached:false,...(legacy?{}:{aliasLimitReached:true,relationLimitReached:true})
+    };
+    const files=fixtureFiles({[path]:JSON.stringify({version:1,projectId:"repo-work",entries:[entry],nodeLimitReached:false})});
+    const context=makeActionContext(makeReader(files));
+    const author=await invoke<{knowledgeTruncated:boolean;omissions:Array<{reason:string}>}>("story.context.package",{sceneId:"sc-1",scope:"author",budget:200000},context);
+    assert.equal(author.data.knowledgeTruncated,true);
+    for(const reason of ["alias-inventory-limit","relation-inventory-limit","assertion-inventory-limit"])
+      assert.ok(author.data.omissions.some(item=>item.reason===reason),reason);
+    for(const scope of ["reader","character"]){
+      const result=await invoke("story.context.package",{sceneId:"sc-1",scope,characterId:"char-uma"},context);
+      assert.doesNotMatch(JSON.stringify(result.data),/knowledgeTruncated|inventory-limit|Secret inventory|bounded-node/);
+    }
+  }
+});

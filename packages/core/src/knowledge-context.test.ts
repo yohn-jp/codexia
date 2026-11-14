@@ -12,14 +12,17 @@ test("Knowledge projection binds evidence to Story identity and exact anchored r
   let fromUtf16 = markdown.indexOf(quote);
   let revisionReads=0;
   let aliasRows: Array<{id:string}> = [];
+  let relationRows: Array<{id:string}> = [];
+  let assertionLinks: Array<{assertionId:string;role:string}> = [];
   const reader = {
     async listKnowledgeNodes() { return ["knowledge-1","knowledge-2"].map(id=>({ id, projectId:"project-1", type:"lore", name:"The clue", attributes:{}, status:"confirmed" as const, version:1, deletedAt:null, createdAt:"", updatedAt:"" })); },
     async listKnowledgeAliases(_projectId: ProjectId, _nodeId: string, limit?: number) { assert.equal(limit,500); return aliasRows; },
-    async listKnowledgeRelations() { return []; },
+    async listKnowledgeRelations(_projectId: ProjectId, _nodeId: string, limit?: number) { assert.equal(limit,500); return relationRows; },
     async listNodeMentions() { return [{ evidenceId:"evidence-1", nodeId:"knowledge-1", status:"confirmed" }]; },
     async getEvidenceAnchor() { return { id:"evidence-1", projectId:"project-1", documentId, revisionId, fromUtf16, toUtf16:fromUtf16+quote.length,
       quoteSha256:createHash("sha256").update(quote).digest("hex"), status:"confirmed", version:1, createdAt:"", updatedAt:"" }; },
-    async listEvidenceAssertions() { return []; },
+    async listEvidenceAssertions(_projectId: ProjectId, _anchorId: string, limit?: number) { assert.equal(limit,100); return assertionLinks; },
+    async getAssertion(_projectId: ProjectId, id: string) { return {id,status:"confirmed"}; },
     async getRevision(_projectId: ProjectId, _documentId: Document["id"], id: RevisionId) {
       revisionReads++;
       assert.equal(id, revisionId);
@@ -53,4 +56,9 @@ test("Knowledge projection binds evidence to Story identity and exact anchored r
   const boundedAliases=await projectKnowledgeContext(reader,"project-1" as ProjectId,[]);
   assert.equal(boundedAliases.entries[0]!.aliases.length,500);
   assert.equal(boundedAliases.entries[0]!.aliasLimitReached,true);
+  relationRows=Array.from({length:500},(_,index)=>({id:`relation-${index}`}));
+  assertionLinks=Array.from({length:100},(_,index)=>({assertionId:`assertion-${index}`,role:"supports"}));
+  const bounded=await projectKnowledgeContext(reader,"project-1" as ProjectId,[]);
+  assert.equal(bounded.entries[0]!.relationLimitReached,true);
+  assert.equal(bounded.entries[0]!.evidence[0]!.assertionLimitReached,true);
 });

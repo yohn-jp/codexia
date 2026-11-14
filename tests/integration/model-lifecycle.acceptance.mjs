@@ -1,19 +1,17 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { execFile as execFileCallback } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { promisify } from "node:util";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
 import { test } from "node:test";
 
-import { CoreStore } from "../../packages/core/dist/index.js";
+import { postgresFixture } from "../helpers/postgres-fixture.mjs";
+import { seedModelFixture } from "./model-postgres-fixture.mjs";
 import { ModuleRuntime } from "../../packages/module-runtime/dist/index.js";
 
-const execFile = promisify(execFileCallback);
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const defaultModelCache = "/tmp/codexia-model-runtime-edc033c/home/.arcadia/models";
 const modelCache = resolve(process.env.CODEXIA_P13_MODEL_CACHE ?? defaultModelCache);
@@ -30,37 +28,16 @@ const workerFiles = {
   semantic: join(root, "modules/semantic/dist/worker.js"),
 };
 
-async function git(cwd, ...args) {
-  const { stdout } = await execFile("git", args, { cwd, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
-  return stdout.trim();
-}
-
-async function writeText(directory, relativePath, content) {
-  const path = join(directory, relativePath);
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, content, "utf8");
-}
-
-async function writeYaml(directory, relativePath, value) {
-  // JSON is a valid YAML subset and avoids adding a root test dependency.
-  await writeText(directory, relativePath, `${JSON.stringify(value)}\n`);
-}
-
-async function createSyntheticRepository(directory) {
-  const remote = join(directory, "remote.git");
-  const seed = join(directory, "seed");
-  await mkdir(seed, { recursive: true });
-  await git(directory, "init", "--bare", "--initial-branch=main", remote);
-  await git(seed, "init", "--initial-branch=main");
-  await git(seed, "config", "user.name", "P13 Synthetic Author");
-  await git(seed, "config", "user.email", "p13-author@example.test");
-
+function writeText(files, path, content) { files[path] = content; }
+function writeYaml(files, path, value) { writeText(files, path, JSON.stringify(value) + "\n"); }
+async function createSyntheticFixture() {
+  const seed = {};
   await writeYaml(seed, "meta/project.yaml", { id: "p13-model-lifecycle", title: "Synthetic model lifecycle work" });
   await writeYaml(seed, "plot/volumes/v1/volume.yaml", { id: "vol-one", name: "第一巻", order: 1 });
   await writeYaml(seed, "plot/volumes/v1/chapters/c1/chapter.yaml", { id: "ch-one", title: "第一章", volume: "vol-one", order: 1 });
 
   const sceneCount = Number(process.env.CODEXIA_P13_SCENE_COUNT ?? 240);
-  assert.ok(Number.isSafeInteger(sceneCount) && sceneCount >= 16 && sceneCount <= 1200, "scene count must be between 16 and 1200");
+  assert.ok(Number.isSafeInteger(sceneCount) && sceneCount >= 16 && sceneCount <= 997, "scene count must be between 16 and 997 (Core snapshot document bound)");
   for (let index = 0; index < sceneCount; index += 1) {
     const suffix = String(index).padStart(4, "0");
     const sceneId = `sc-${suffix}`;
@@ -81,12 +58,7 @@ async function createSyntheticRepository(directory) {
   const dismissal = `${JSON.stringify({ candidateId: "author-dismissed-p13-fixture", timestamp: "2026-10-17T00:00:00.000Z" })}\n`;
   await writeText(seed, semanticDismissalsPath, dismissal);
 
-  await git(seed, "add", ".");
-  await git(seed, "commit", "-m", "Seed synthetic P13 model lifecycle work");
-  await git(seed, "remote", "add", "origin", remote);
-  await git(seed, "push", "-u", "origin", "main");
-  await git(directory, "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/main");
-  return remote;
+  return seed;
 }
 
 async function packageManifest(id) {
@@ -291,18 +263,20 @@ async function requireModelArtifacts() {
 test("P13 actual module consumers share and release pinned CPU model workers", { timeout: 15 * 60_000 }, async () => {
   await requireModelArtifacts();
   const rootDirectory = await mkdtemp(join(tmpdir(), "codexia-p13-lifecycle-"));
-  const remote = await createSyntheticRepository(rootDirectory);
-  const dataDirectory = join(rootDirectory, "core-data");
+  const files = await createSyntheticFixture();
   const runtimeCache = join(rootDirectory, "runtime-cache");
   const modelLink = join(runtimeCache, "semantic", "semantic", "models");
   await mkdir(dirname(modelLink), { recursive: true });
   await symlink(modelCache, modelLink, "dir");
 
-  const store = new CoreStore({ dataDir: dataDirectory, allowLocalRemotes: true });
-  const project = await store.registerProject({ url: remote });
+  const fixture = await postgresFixture({}, "Synthetic model lifecycle work");
+  const {store, project} = fixture;
+  let reader;
+  try { reader = await seedModelFixture(store, project.id, files); }
+  catch (error) { await fixture.close(); await rm(rootDirectory, {recursive:true,force:true}); throw error; }
   const observed = await store.observe(project.id);
   assert.equal(observed.state, "fresh");
-  const reader = await store.reader(project.id, "remote", observed.snapshot);
+  assert.deepEqual(reader.snapshot, observed.snapshot);
   const capabilityEvents = [];
   const diagnosticAcquireGate = createGate();
   const diagnosticRebuildAcquireGate = createGate();
@@ -396,12 +370,7 @@ test("P13 actual module consumers share and release pinned CPU model workers", {
 
     const semanticIndexStatus = actionData(await runtime.invokeAction("semantic", "semantic.index.status", {}, host()), "semantic.index.status");
     assert.equal(semanticIndexStatus.indexAvailable, true);
-    const repositoryKey = createHash("sha256").update(JSON.stringify([
-      reader.snapshot.repository.provider,
-      reader.snapshot.repository.ownerScope,
-      reader.snapshot.repository.repositoryId,
-      reader.snapshot.repository.defaultBranch,
-    ])).digest("hex");
+    const repositoryKey = createHash("sha256").update(reader.snapshot.projectId, "utf8").digest("hex");
     const modelKey = createHash("sha256").update("Xenova/multilingual-e5-small@761b726dd34fb83930e26aab4e9ac3899aa1fa78").digest("hex").slice(0, 24);
     const derivedIndex = join(runtimeCache, "semantic", "semantic", "indexes", `${repositoryKey}-${modelKey}.json`);
     assert.ok((await stat(derivedIndex)).isFile(), "actual semantic derived index must be present before deletion");
@@ -436,9 +405,10 @@ test("P13 actual module consumers share and release pinned CPU model workers", {
     assert.ok((await stat(derivedIndex)).isFile(), "the real index worker must recreate the deleted derived cache");
     metrics.push(await resources.mark());
 
-    const settingsAfter = await reader.read(semanticSettingsPath);
-    const dismissalsAfter = await reader.read(semanticDismissalsPath);
-    const consentAfter = await reader.read(nlpSettingsPath);
+    const currentReader = await store.reader(project.id);
+    const settingsAfter = await currentReader.read(semanticSettingsPath);
+    const dismissalsAfter = await currentReader.read(semanticDismissalsPath);
+    const consentAfter = await currentReader.read(nlpSettingsPath);
     assert.equal(settingsAfter?.content, savedSettings.content, "module enable/disable and cache rebuild must preserve author settings");
     assert.equal(dismissalsAfter?.content, savedDismissals.content, "module enable/disable and cache rebuild must preserve author dismissals");
     assert.equal(consentAfter?.content, savedConsent.content, "module enable/disable and cache rebuild must preserve external consent settings");
@@ -470,7 +440,7 @@ test("P13 actual module consumers share and release pinned CPU model workers", {
     storyStatus = runtime.status("story").availability;
     assert.equal(storyStatus, "enabled-idle");
     console.log("P13 model lifecycle observations:", JSON.stringify({
-      evidenceBase: "55cecfa5af73982d2b98009c125928f1ab3126c5",
+      snapshot: reader.snapshot,
       hostOnly: true,
       modelCache,
       modelRefs: {
@@ -486,6 +456,7 @@ test("P13 actual module consumers share and release pinned CPU model workers", {
     semanticAcquireGate.open();
     await resources.stop();
     await runtime.shutdown();
+    await fixture.close();
     await rm(rootDirectory, { recursive: true, force: true });
   }
 });

@@ -627,6 +627,15 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows[0] ? mapEvidenceAnchor(result.rows[0]) : undefined;
   }
 
+  async listEvidenceDocumentIds(projectId: ProjectId, limit = 1000): Promise<readonly DocumentId[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Evidence document page size must be between 1 and 1000");
+    const result = await this.query(
+      "SELECT DISTINCT document_id FROM text_anchor WHERE project_id = $1 ORDER BY document_id LIMIT $2",
+      [projectId, limit],
+    );
+    return result.rows.map(row => asString(row.document_id) as DocumentId);
+  }
+
   async listDocumentEvidence(projectId: ProjectId, documentId: DocumentId, revisionId?: RevisionId, limit = 200): Promise<readonly EvidenceAnchor[]> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw validationError("Evidence page size must be between 1 and 500");
     const result = await this.query(
