@@ -308,24 +308,9 @@ function addToFirstPanel(node: WorkspaceNode, panelId: string, root: WorkspaceNo
   return { ...node, children: [addToFirstPanel(node.children[0]!, panelId, root), ...node.children.slice(1)] };
 }
 
-function addToPanel(node: WorkspaceNode, targetPanelId: string, panelId: string, root: WorkspaceNode): WorkspaceNode {
-  if (node.type === "leaf") {
-    return node.panelId === targetPanelId ? stack(root, [node, leaf(panelId)], panelId) : node;
-  }
-  if (node.type === "stack") {
-    return node.children.some((child) => child.panelId === targetPanelId)
-      ? { ...node, children: [...node.children, leaf(panelId)], activePanelId: panelId }
-      : node;
-  }
-  const children = node.children.map((child) => addToPanel(child, targetPanelId, panelId, root));
-  return children.every((child, index) => child === node.children[index]) ? node : { ...node, children };
-}
-
-export function showWorkspacePanel(layout: WorkspaceLayout, panelId: string, targetPanelId?: string): WorkspaceLayout {
+export function showWorkspacePanel(layout: WorkspaceLayout, panelId: string): WorkspaceLayout {
   if (visiblePanelIds(layout.root).includes(panelId) || !validPanelId(panelId)) return layout;
-  const root = targetPanelId && visiblePanelIds(layout.root).includes(targetPanelId)
-    ? addToPanel(layout.root, targetPanelId, panelId, layout.root)
-    : addToFirstPanel(layout.root, panelId, layout.root);
+  const root = addToFirstPanel(layout.root, panelId, layout.root);
   const updated = {
     ...layout,
     preset: "custom" as const,

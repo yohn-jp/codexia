@@ -124,21 +124,6 @@ test("newly available panels can be added without replacing an unsaved layout", 
   assert.ok(visiblePanelIds(withTerms.root).includes("module:terms"));
 });
 
-test("restored Desktop panels can join the editor or reference stack", () => {
-  const initial = createWorkspacePreset("writing", panels);
-  const withReview = showWorkspacePanel(initial, "review", "editor");
-  assert.equal(validateWorkspaceLayout(withReview), true);
-  assert.deepEqual(visiblePanelIds(withReview.root), ["outline", "editor", "review", "inspector"]);
-  assert.equal(withReview.root.type === "split" && withReview.root.children[1]?.type === "stack"
-    ? withReview.root.children[1].activePanelId : undefined, "review");
-
-  const withModule = showWorkspacePanel(initial, "module:terms", "inspector");
-  assert.equal(validateWorkspaceLayout(withModule), true);
-  assert.deepEqual(visiblePanelIds(withModule.root), ["outline", "editor", "inspector", "module:terms"]);
-  assert.equal(withModule.root.type === "split" && withModule.root.children[2]?.type === "stack"
-    ? withModule.root.children[2].activePanelId : undefined, "module:terms");
-});
-
 test("selecting a leaf or the active stack tab does not turn a preset into a custom layout", () => {
   const review = createWorkspacePreset("review", panels);
   assert.equal(activateWorkspacePanel(review, "editor"), review);

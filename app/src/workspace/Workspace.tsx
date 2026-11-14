@@ -72,12 +72,6 @@ function initialMobilePanel(layout: WorkspaceLayout): string {
   return visiblePanelIds(layout.root).includes("outline") ? "outline" : firstActivePanel(layout.root);
 }
 
-function desktopPanelAnchor(panelId: string): string | undefined {
-  if (panelId === "review") return "editor";
-  if (panelId.startsWith("module:")) return "inspector";
-  return undefined;
-}
-
 function domId(prefix: string, panelId: string): string {
   return `${prefix}-${Array.from(panelId).map((char) => /[A-Za-z0-9_-]/.test(char) ? char : `-${char.codePointAt(0)?.toString(16)}-`).join("")}`;
 }
@@ -463,7 +457,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
       }
       const change = visibleIds.includes(panelId)
         ? (current: WorkspaceLayout) => activateWorkspacePanel(current, panelId)
-        : (current: WorkspaceLayout) => showWorkspacePanel(current, panelId, mode === "desktop" ? desktopPanelAnchor(panelId) : undefined);
+        : (current: WorkspaceLayout) => showWorkspacePanel(current, panelId);
       const allowed = await changeLayout(change, "Panel opened. Save layout to keep it.", true, isCurrent);
       if (!isCurrent()) {
         if (isRouteTransition) onPanelRequestResult?.(sequence, false);
@@ -546,7 +540,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   };
 
   const showPanel = (panelId: string): void => {
-    void changeLayout((current) => showWorkspacePanel(current, panelId, mode === "desktop" ? desktopPanelAnchor(panelId) : undefined))
+    void changeLayout((current) => showWorkspacePanel(current, panelId))
       .then((allowed) => { if (allowed) setFloating((current) => current.filter((item) => item.panelId !== panelId)); });
   };
   const floatPanel = (panelId: string): void => {
