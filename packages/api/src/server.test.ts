@@ -2105,8 +2105,9 @@ describe("Codexia HTTP boundary", () => {
       return unsigned + "." + signJwt("RSA-SHA256", Buffer.from(unsigned), key.privateKey).toString("base64url");
     };
     let jwksRequests = 0;
-    const apiServer = await startCustomApi(makeStore(), staticDir, {
-      trustProxy: true, usageDirectory: staticDir,
+    const persistence = await nativePersistence(t);
+    const apiServer = await startCustomApi(new CoreStore({ persistence }), staticDir, {
+      trustProxy: true, usageDirectory: staticDir, persistence,
       cloudflareAccess: { issuer, audience, origin, ownerEmail: email, fetch: async (input) => {
         assert.equal(String(input), issuer + "/cdn-cgi/access/certs");
         jwksRequests++;
@@ -2114,8 +2115,29 @@ describe("Codexia HTTP boundary", () => {
       } },
     });
     t.after(apiServer.close);
+    // Fetch normalizes Host to the loopback URL. Send the actual HTTP headers a
+    // TLS-terminating proxy would forward, while keeping the socket local.
     const send = (path: string, headers: Record<string, string> = {}, init: RequestInit = {}) =>
-      fetch(apiServer.base + path, { ...init, headers: { Host: "codexia.example", "X-Forwarded-Proto": "https", ...headers } });
+      new Promise<Response>((resolveResponse, reject) => {
+        const request = httpRequest(apiServer.base + path, {
+          method: init.method ?? "GET",
+          headers: { Host: "codexia.example", "X-Forwarded-Proto": "https", ...headers },
+        }, incoming => {
+          const chunks: Buffer[] = [];
+          incoming.on("data", chunk => chunks.push(Buffer.from(chunk)));
+          incoming.on("error", reject);
+          incoming.on("end", () => {
+            const responseHeaders = new Headers();
+            for (const [name, value] of Object.entries(incoming.headers)) {
+              if (typeof value === "string") responseHeaders.set(name, value);
+              else if (Array.isArray(value)) for (const item of value) responseHeaders.append(name, item);
+            }
+            resolveResponse(new Response(Buffer.concat(chunks), { status: incoming.statusCode!, headers: responseHeaders }));
+          });
+        });
+        request.on("error", reject);
+        request.end(typeof init.body === "string" ? init.body : undefined);
+      });
     const valid = token();
     const browser = { "Cf-Access-Jwt-Assertion": valid };
     assert.equal((await send("/api/version").then(r => r.json()) as { browserAuth: string }).browserAuth, "cloudflare-access");
@@ -2147,6 +2169,13 @@ describe("Codexia HTTP boundary", () => {
     const mutation = { method: "POST", body: JSON.stringify({ title: "must not be created" }) };
     assert.equal((await send("/api/v1/persistence/projects", { ...browser, Origin: "https://evil.example", "Content-Type": "application/json" }, mutation)).status, 403);
     assert.equal((await send("/api/v1/persistence/projects", { ...bearer, Origin: origin, "Content-Type": "application/json" }, mutation)).status, 403);
+    const created = await send("/api/v1/persistence/projects", { ...browser, Origin: origin, "Content-Type": "application/json" }, {
+      method: "POST", body: JSON.stringify({ title: "Access owner " + randomUUID() }),
+    });
+    assert.equal(created.status, 201);
+    const createdProject = await created.json() as { project: { id: string } };
+    assert.ok(await persistence.read(reader => reader.getProject(createdProject.project.id as import("@codexia/persistence-contracts").ProjectId)));
+
     assert.equal((await send("/api/login", { Origin: origin, "Content-Type": "application/json" }, { method: "POST", body: JSON.stringify({ token: ACCESS_TOKEN }) })).status, 410);
     assert.equal((await send("/api/logout", { ...browser, Origin: origin }, { method: "POST" })).status, 410);
   });
