@@ -99,6 +99,7 @@ jobs:
     needs: build-test
     outputs:
       certified-image: ${{ steps.push-image.outputs.image }}
+      certified-full-image: ${{ steps.push-image.outputs.full-image }}
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 70
@@ -146,7 +147,11 @@ jobs:
             [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
             docker pull "$IMAGE@$digest"
             test "$(docker image inspect --format '{{.Id}}' "$IMAGE@$digest")" = "$tested_id"
-            if [[ "$profile" == core ]]; then echo "image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"; fi
+            if [[ "$profile" == core ]]; then
+              echo "image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
+            else
+              echo "full-image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
+            fi
             docker buildx imagetools inspect "$IMAGE@$digest"
             echo "Published $IMAGE:$tag ($profile, $digest) from $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
           done
@@ -183,4 +188,5 @@ jobs:
           CODEXIA_CHANNEL_SIGNING_KEY: ${{ secrets.CODEXIA_CHANNEL_SIGNING_KEY }}
           CODEXIA_CHANNEL_MODE: publish
           CODEXIA_CERTIFIED_IMAGE: ${{ needs.publish.outputs.certified-image }}
+          CODEXIA_CERTIFIED_FULL_IMAGE: ${{ needs.publish.outputs.certified-full-image }}
         run: node scripts/publish-stable-channel.mjs
