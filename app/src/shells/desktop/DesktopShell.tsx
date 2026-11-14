@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as Separator from "@radix-ui/react-separator";
 import * as Tabs from "@radix-ui/react-tabs";
 import { Panel, PanelGroup, PanelResizeHandle, setNonce } from "react-resizable-panels";
@@ -18,6 +18,21 @@ function describeFailure(reason: unknown): string {
     : "下書きの保存状態を確認してから、もう一度お試しください。";
 }
 
+type DesktopActivity = "writing" | "knowledge" | "review";
+
+function activityForPanel(panelId: string): DesktopActivity | undefined {
+  if (panelId === "editor" || panelId === "outline" || panelId === "history") return "writing";
+  if (panelId === "inspector") return "knowledge";
+  if (panelId === "review") return "review";
+  return undefined;
+}
+
+const primaryActivities: ReadonlyArray<{ id: DesktopActivity; panelId: string; label: string }> = [
+  { id: "writing", panelId: "editor", label: "執筆" },
+  { id: "knowledge", panelId: "inspector", label: "知識" },
+  { id: "review", panelId: "review", label: "レビュー" },
+];
+
 /** Workspace Studio: the approved desktop composition, retaining the real application controller. */
 export function DesktopShell({
   header, desktopActions, desktopDurability, desktopDurabilityDetail, documentTitle, documentContext, library, editor, tools, status, renderStatus,
@@ -25,6 +40,7 @@ export function DesktopShell({
 }: ApplicationShellProps) {
   const [switching, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState("");
+  const [activeActivity, setActiveActivity] = useState<DesktopActivity>("writing");
   const switchInFlight = useRef(false);
   const requestSeq = useRef(0);
   const [effectiveRequest, setEffectiveRequest] = useState<WorkspacePanelRequest>();
@@ -32,12 +48,20 @@ export function DesktopShell({
   useEffect(() => {
     if (!requestedPanel?.id || !requestedPanel.sequence) return;
     setEffectiveRequest({ id: requestedPanel.id, sequence: ++requestSeq.current });
+    const activity = activityForPanel(requestedPanel.id);
+    if (activity) setActiveActivity(activity);
   }, [requestedPanel?.id, requestedPanel?.sequence]);
   function reveal(id: string) {
     if (!panels?.some((panel) => panel.id === id)) return;
+    const activity = activityForPanel(id);
+    if (activity) setActiveActivity(activity);
     const request = { id, sequence: ++requestSeq.current };
     setEffectiveRequest(request);
   }
+  const noteWorkspacePanel = useCallback((panelId: string): void => {
+    const activity = activityForPanel(panelId);
+    if (activity) setActiveActivity(activity);
+  }, []);
 
   async function switchToMobile(): Promise<void> {
     if (switchInFlight.current) return;
@@ -61,14 +85,13 @@ export function DesktopShell({
     { id: "history", mark: "◷", title: "履歴" },
     { id: "review", mark: "◇", title: "レビューとツール" },
   ];
-  const activeRequest = effectiveRequest;
   return (
     <div className="st-desktop-shell st-studio-shell">
       <aside className="st-studio-rail" aria-label="デスクトップ操作">
-        <a href="/" className="st-studio-monogram" aria-label="Codexia ホーム">S<span>.</span></a>
+        <a href="/" className="st-studio-monogram" aria-label="Codexia ホーム">C<span>.</span></a>
         <nav aria-label="パネルを開く" className="st-studio-rail-nav">
           {rail.map((item) => <button key={item.id} type="button"
-            className={"st-studio-rail-item" + (activeRequest?.id === item.id || (!activeRequest && item.id === "editor") ? " is-current" : "")}
+            className={"st-studio-rail-item" + (activityForPanel(item.id) === activeActivity ? " is-current" : "")}
             title={item.title} aria-label={"パネル：" + item.title} disabled={!panels?.some((panel) => panel.id === item.id)}
             onClick={() => reveal(item.id)}>{item.mark}</button>)}
         </nav>
@@ -87,6 +110,18 @@ export function DesktopShell({
               {documentTitle ? <><span aria-hidden="true">/</span><strong>{documentTitle}</strong></> : null}
             </div>
           </div>
+          {panels?.length ? <nav className="st-studio-primary-nav" aria-label="主な作業">
+            {primaryActivities.map((activity) => {
+              const available = panels.some((panel) => panel.id === activity.panelId);
+              return <button
+                type="button"
+                key={activity.id}
+                aria-pressed={activeActivity === activity.id}
+                disabled={!available}
+                onClick={() => reveal(activity.panelId)}
+              >{activity.label}</button>;
+            })}
+          </nav> : null}
           <div className="st-studio-masthead-actions">
             {desktopDurability ? <span className={`st-studio-durability is-${desktopDurability}`}
               aria-label="原稿のPostgreSQL保存状態" data-state={desktopDurability} title={desktopDurabilityDetail}>
@@ -103,7 +138,7 @@ export function DesktopShell({
 
         {workspaceScope && panels?.length ? (
           <Workspace scope={workspaceScope} mode="desktop" panels={panels}
-            beforeLayoutChange={beforeLayoutChange} requestedPanel={effectiveRequest} />
+            beforeLayoutChange={beforeLayoutChange} requestedPanel={effectiveRequest} onActivePanelChange={noteWorkspacePanel} />
         ) : <PanelGroup className="st-desktop-workbench" direction="horizontal" id="codexia-desktop-workbench">
           <Panel className="st-desktop-navigation-panel" defaultSize={28} minSize={18} maxSize={46}
             id="codexia-desktop-navigation" order={1}>
@@ -136,8 +171,8 @@ export function DesktopShell({
           {renderStatus ? renderStatus(switchError) : status}
         </div>
         <footer className="st-studio-footer">
-          <span><span className="st-studio-footer-dot" /> PostgreSQL workspace</span>
-          <span>Markdown · 日本語原稿 · Desktop</span>
+          <span><span className="st-studio-footer-dot" /> PostgreSQL正本 · Desktop</span>
+          <span>執筆 · 知識 · レビュー</span>
         </footer>
       </div>
     </div>

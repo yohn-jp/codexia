@@ -26,6 +26,7 @@ interface WorkspaceProps {
   scope: string;
   mode: UiMode;
   panels: readonly WorkspacePanel[];
+  onActivePanelChange?: (panelId: string) => void;
   beforeLayoutChange?: () => Promise<boolean>;
   requestedPanel?: WorkspacePanelRequest;
   selectedPanelId?: string;
@@ -84,6 +85,7 @@ interface PanelFrameProps {
   panelId: string;
   panel?: WorkspacePanel;
   mode: UiMode;
+  layoutEditing: boolean;
   canHide: boolean;
   onHide(panelId: string): void;
   onDrop(sourceId: string, targetId: string, placement: Placement): void;
@@ -92,7 +94,7 @@ interface PanelFrameProps {
   maximized: boolean;
 }
 
-function PanelFrame({ panelId, panel, mode, canHide, onHide, onDrop, onFloat, onMaximize, maximized }: PanelFrameProps): ReactNode {
+function PanelFrame({ panelId, panel, mode, layoutEditing, canHide, onHide, onDrop, onFloat, onMaximize, maximized }: PanelFrameProps): ReactNode {
   const title = panel?.title ?? panelId;
   const dragStart = (event: DragEvent<HTMLDivElement>): void => {
     event.dataTransfer.setData("text/plain", panelId);
@@ -124,7 +126,7 @@ function PanelFrame({ panelId, panel, mode, canHide, onHide, onDrop, onFloat, on
   return (
     <section className={"st-workspace-panel" + (maximized ? " is-maximized" : "")} tabIndex={-1} data-workspace-panel={panelId} aria-labelledby={domId("st-workspace-heading", panelId)}>
       <header className="st-workspace-panel-heading">
-        {mode === "desktop" ? (
+        {mode === "desktop" && layoutEditing ? (
           <div
             className="st-workspace-drag-grip"
             draggable
@@ -134,7 +136,7 @@ function PanelFrame({ panelId, panel, mode, canHide, onHide, onDrop, onFloat, on
           >⠿</div>
         ) : null}
         <h2 id={domId("st-workspace-heading", panelId)}>{title}</h2>
-        {mode === "desktop" ? (
+        {mode === "desktop" && layoutEditing ? (
           <div className="st-workspace-drop-zones" aria-hidden="true" onDragOver={acceptDrop} onDrop={dock}>
             {placementTitles.map(({ placement, mark }) => (
               <div
@@ -150,14 +152,14 @@ function PanelFrame({ panelId, panel, mode, canHide, onHide, onDrop, onFloat, on
             aria-label={`Float ${title}`} disabled={!canHide} onClick={() => onFloat(panelId)}>◱</button>
           <button type="button" className="st-workspace-maximize" title={maximized ? `Restore ${title}` : `Maximize ${title}`}
             aria-label={maximized ? `Restore ${title}` : `Maximize ${title}`} onClick={() => onMaximize(panelId)}>{maximized ? "↙" : "⛶"}</button>
-          <button
+          {layoutEditing ? <button
             className="st-workspace-hide"
             type="button"
             aria-label={`Hide ${title}`}
             title={`Hide ${title}`}
             disabled={!canHide}
             onClick={() => onHide(panelId)}
-          >×</button>
+          >×</button> : null}
         </div> : null}
       </header>
       <div className="st-workspace-panel-body"><PanelContent panel={panel} /></div>
@@ -168,6 +170,8 @@ function PanelFrame({ panelId, panel, mode, canHide, onHide, onDrop, onFloat, on
 interface TreeViewProps {
   node: WorkspaceNode;
   mode: UiMode;
+  layoutEditing: boolean;
+  depth: number;
   catalog: ReadonlyMap<string, WorkspacePanel>;
   visibleCount: number;
   onActivate(panelId: string): Promise<boolean>;
@@ -179,9 +183,14 @@ interface TreeViewProps {
   maximizedPanelId: string | null;
 }
 
-function WorkspaceTree({ node, mode, catalog, visibleCount, onActivate, onHide, onDrop, onResize, onFloat, onMaximize, maximizedPanelId }: TreeViewProps): ReactNode {
+function describeNode(node: WorkspaceNode, catalog: ReadonlyMap<string, WorkspacePanel>): string {
+  return visiblePanelIds(node).map((panelId) => catalog.get(panelId)?.title ?? panelId).join("、");
+}
+
+function WorkspaceTree({ node, mode, layoutEditing, depth, catalog, visibleCount, onActivate, onHide, onDrop, onResize, onFloat, onMaximize, maximizedPanelId }: TreeViewProps): ReactNode {
+  const resizeGestureRef = useRef(false);
   if (node.type === "leaf") {
-    return <PanelFrame panelId={node.panelId} panel={catalog.get(node.panelId)} mode={mode} canHide={visibleCount > 1} onHide={onHide} onDrop={onDrop} onFloat={onFloat} onMaximize={onMaximize} maximized={maximizedPanelId === node.panelId} />;
+    return <PanelFrame panelId={node.panelId} panel={catalog.get(node.panelId)} mode={mode} layoutEditing={layoutEditing} canHide={visibleCount > 1} onHide={onHide} onDrop={onDrop} onFloat={onFloat} onMaximize={onMaximize} maximized={maximizedPanelId === node.panelId} />;
   }
   if (node.type === "stack") {
     return (
@@ -235,6 +244,7 @@ function WorkspaceTree({ node, mode, catalog, visibleCount, onActivate, onHide, 
             panelId={node.activePanelId}
             panel={catalog.get(node.activePanelId)}
             mode={mode}
+            layoutEditing={layoutEditing}
             canHide={visibleCount > 1}
             onHide={onHide}
             onDrop={onDrop}
@@ -251,7 +261,7 @@ function WorkspaceTree({ node, mode, catalog, visibleCount, onActivate, onHide, 
       className={`st-workspace-split st-workspace-split-${node.direction}`}
       id={`st-workspace-${node.id}`}
       direction={node.direction}
-      onLayout={(sizes) => onResize(node.id, sizes)}
+      onLayout={(sizes) => { if (resizeGestureRef.current) onResize(node.id, sizes); }}
     >
       {node.children.flatMap((child, index) => [
           <Panel
@@ -265,6 +275,8 @@ function WorkspaceTree({ node, mode, catalog, visibleCount, onActivate, onHide, 
             <WorkspaceTree
               node={child}
               mode={mode}
+              layoutEditing={layoutEditing}
+              depth={depth + 1}
               catalog={catalog}
               visibleCount={visibleCount}
               onActivate={onActivate}
@@ -278,8 +290,19 @@ function WorkspaceTree({ node, mode, catalog, visibleCount, onActivate, onHide, 
             <PanelResizeHandle
               key={`resize-${node.id}-${index}`}
               className={`st-workspace-resize-handle st-workspace-resize-${node.direction}`}
-              aria-label={`Resize ${node.direction} workspace panels`}
+              aria-label={depth === 0 && index === 0
+                ? `Resize ${node.direction} workspace panels`
+                : `「${describeNode(node.children[index]!, catalog)}」と「${describeNode(node.children[index + 1]!, catalog)}」の間の幅を変更`}
               aria-orientation={node.direction === "horizontal" ? "vertical" : "horizontal"}
+              onPointerDownCapture={() => { resizeGestureRef.current = true; }}
+              onPointerUpCapture={() => { resizeGestureRef.current = false; }}
+              onPointerCancelCapture={() => { resizeGestureRef.current = false; }}
+              onKeyDownCapture={(event) => {
+                if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+                  resizeGestureRef.current = true;
+                }
+              }}
+              onKeyUpCapture={() => { resizeGestureRef.current = false; }}
             />,
           ] : []),
         ])}
@@ -326,7 +349,7 @@ function FloatingFrame({ record, panel, onMove, onDock, onMaximize, maximized }:
   </section>;
 }
 
-export function Workspace({ scope, mode, panels, beforeLayoutChange, requestedPanel, selectedPanelId, routeTransitionSequence, isPanelRequestCurrent, onPanelRequestResult, routeSelectionKey, isRouteSelectionCurrent, onRouteSelectionResult }: WorkspaceProps): ReactNode {
+export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayoutChange, requestedPanel, selectedPanelId, routeTransitionSequence, isPanelRequestCurrent, onPanelRequestResult, routeSelectionKey, isRouteSelectionCurrent, onRouteSelectionResult }: WorkspaceProps): ReactNode {
   const panelIds = useMemo(() => [...new Set(panels.map((panel) => panel.id))], [panels]);
   const catalog = useMemo(() => new Map(panels.map((panel) => [panel.id, panel])), [panels]);
   const [initial] = useState(() => loadFor(scope, mode, panelIds));
@@ -338,6 +361,7 @@ export function Workspace({ scope, mode, panels, beforeLayoutChange, requestedPa
   const [moveSource, setMoveSource] = useState<string>(() => firstActivePanel(initial.layout.root));
   const [moveTarget, setMoveTarget] = useState<string>(() => panelIds.find((id) => id !== "editor") ?? "");
   const [placement, setPlacement] = useState<Placement>("tab");
+  const [layoutEditing, setLayoutEditing] = useState(false);
   const [message, setMessage] = useState("");
   const [changing, setChanging] = useState(false);
   const [committingPanelRequest, setCommittingPanelRequest] = useState<number>();
@@ -365,8 +389,10 @@ export function Workspace({ scope, mode, panels, beforeLayoutChange, requestedPa
     setMobilePanelId(initialMobilePanel(loaded.layout));
     setMoveSource(firstActivePanel(loaded.layout.root));
     setMoveTarget(panelIds.find((id) => id !== "editor") ?? "");
+    setLayoutEditing(false);
     setMessage("");
-  }, [scope, mode]);
+    onActivePanelChange?.(firstActivePanel(loaded.layout.root));
+  }, [scope, mode, onActivePanelChange]);
 
   useEffect(() => {
     if (!visibleIds.includes(mobilePanelId)) setMobilePanelId(visibleIds[0] ?? "editor");
@@ -445,6 +471,7 @@ export function Workspace({ scope, mode, panels, beforeLayoutChange, requestedPa
       }
       setFloating((current) => isCurrent() ? current.filter((item) => item.panelId !== panelId) : current);
       if (mode === "mobile") setMobilePanelId((current) => isCurrent() ? panelId : current);
+      onActivePanelChange?.(panelId);
       window.requestAnimationFrame(() => {
         if (isPanelRequestCurrent && !isPanelRequestCurrent(sequence)) return;
         const element = Array.from(workspaceRef.current?.querySelectorAll<HTMLElement>("[data-workspace-panel]") ?? [])
@@ -457,7 +484,7 @@ export function Workspace({ scope, mode, panels, beforeLayoutChange, requestedPa
       }
     };
     void reveal();
-  }, [requestedPanel?.id, requestedPanel?.sequence, scope, mode, catalog, visibleIds, changeLayout, changing, routeTransitionSequence, isPanelRequestCurrent, onPanelRequestResult, selectedPanelId]);
+  }, [requestedPanel?.id, requestedPanel?.sequence, scope, mode, catalog, visibleIds, changeLayout, changing, routeTransitionSequence, isPanelRequestCurrent, onPanelRequestResult, onActivePanelChange, selectedPanelId]);
 
   useLayoutEffect(() => {
     const pending = pendingPanelTransitionRef.current;
@@ -482,7 +509,7 @@ export function Workspace({ scope, mode, panels, beforeLayoutChange, requestedPa
 
   const changePreset = (preset: Exclude<WorkspacePreset, "custom">): void => {
     void changeLayout(() => createWorkspacePreset(preset, panelIds), `${presetTitle(preset)} preset applied. Save layout to keep it.`)
-      .then((allowed) => { if (allowed) { setFloating([]); setMaximizedPanelId(null); } });
+      .then((allowed) => { if (allowed) { setFloating([]); setMaximizedPanelId(null); onActivePanelChange?.("editor"); } });
   };
 
   const save = (): void => {
@@ -543,7 +570,8 @@ export function Workspace({ scope, mode, panels, beforeLayoutChange, requestedPa
   };
 
   const activateTab = (panelId: string): Promise<boolean> => {
-    return changeLayout((current) => activateWorkspacePanel(current, panelId), "Panel selected. Save layout to keep it.");
+    return changeLayout((current) => activateWorkspacePanel(current, panelId), "Panel selected. Save layout to keep it.")
+      .then((allowed) => { if (allowed) onActivePanelChange?.(panelId); return allowed; });
   };
 
   const activateMobilePanel = (panelId: string): Promise<boolean> => {
@@ -643,40 +671,43 @@ export function Workspace({ scope, mode, panels, beforeLayoutChange, requestedPa
       : persistenceState === "unavailable"
         ? "Browser storage is unavailable."
         : "Layout changes are saved only when you choose Save layout.";
-
-  return (
-    <section ref={workspaceRef} className={`st-workspace st-workspace-${mode}`} data-maximized-panel={maximizedPanelId ?? undefined} aria-label="Composable workspace">
-      <details className="st-workspace-configuration" open={mode === "desktop" || undefined}>
-      <summary>ワークスペース配置</summary>
-      <div className="st-workspace-toolbar" role="toolbar" aria-label="Workspace layout controls">
-        <div className="st-workspace-presets" aria-label="Workspace presets">
-          <button type="button" aria-pressed={layout.preset === "writing"} onClick={() => changePreset("writing")} disabled={changing}>Writing</button>
-          <button type="button" aria-pressed={layout.preset === "research"} onClick={() => changePreset("research")} disabled={changing}>Research</button>
-          <button type="button" aria-pressed={layout.preset === "review"} onClick={() => changePreset("review")} disabled={changing}>Review</button>
-        </div>
-        <details className="st-workspace-panel-menu">
-          <summary>Panels</summary>
-          <div className="st-workspace-panel-menu-list">
-            {panels.map((panel) => {
-              const visible = visibleIds.includes(panel.id);
-              const isFloating = floating.some((item) => item.panelId === panel.id);
-              return (
-                <div className="st-workspace-panel-menu-item" key={panel.id}>
-                  <span>{panel.title}</span>
-                  <button type="button" disabled={changing || (visible && visibleIds.length <= 1)} onClick={() => visible ? hidePanel(panel.id) : showPanel(panel.id)}>
-                    {isFloating ? `Dock ${panel.title}` : visible ? `Hide ${panel.title}` : `Show ${panel.title}`}
-                  </button>
-                  {mode === "desktop" && visible && visibleIds.length > 1
-                    ? <button type="button" disabled={changing} onClick={() => floatPanel(panel.id)}>{`Float ${panel.title}`}</button> : null}
-                </div>
-              );
-            })}
-          </div>
-        </details>
-        <button className="st-workspace-save" type="button" onClick={save} disabled={changing}>Save layout</button>
+  const workspaceToolbar = (
+    <div className="st-workspace-toolbar" role="toolbar" aria-label="Workspace layout controls">
+      <div className="st-workspace-presets" aria-label="Workspace presets">
+        <span className="st-workspace-preset-label">配置プリセット</span>
+        <button type="button" aria-pressed={layout.preset === "writing"} onClick={() => changePreset("writing")} disabled={changing}>Writing</button>
+        <button type="button" aria-pressed={layout.preset === "research"} onClick={() => changePreset("research")} disabled={changing}>Research</button>
+        <button type="button" aria-pressed={layout.preset === "review"} onClick={() => changePreset("review")} disabled={changing}>Review</button>
       </div>
-
-      <details className="st-workspace-move-menu"><summary>配置変更</summary>
+      <details className="st-workspace-panel-menu">
+        <summary>Panels</summary>
+        <div className="st-workspace-panel-menu-list">
+          {panels.map((panel) => {
+            const visible = visibleIds.includes(panel.id);
+            const isFloating = floating.some((item) => item.panelId === panel.id);
+            return (
+              <div className="st-workspace-panel-menu-item" key={panel.id}>
+                <span>{panel.title}</span>
+                <button type="button" disabled={changing || (visible && visibleIds.length <= 1)} onClick={() => visible ? hidePanel(panel.id) : showPanel(panel.id)}>
+                  {isFloating ? `Dock ${panel.title}` : visible ? `Hide ${panel.title}` : `Show ${panel.title}`}
+                </button>
+                {mode === "desktop" && visible && visibleIds.length > 1
+                  ? <button type="button" disabled={changing} onClick={() => floatPanel(panel.id)}>{`Float ${panel.title}`}</button> : null}
+              </div>
+            );
+          })}
+        </div>
+      </details>
+      <button className="st-workspace-save" type="button" onClick={save} disabled={changing}>Save layout</button>
+    </div>
+  );
+  const layoutMoveMenu = (
+    <details
+      className="st-workspace-move-menu"
+      open={mode === "desktop" ? layoutEditing : undefined}
+      onToggle={(event) => setLayoutEditing(mode === "desktop" && event.currentTarget.open)}
+    >
+      <summary>配置を編集</summary>
       <div className="st-workspace-move-controls" aria-label="Move panel controls">
         <label>
           Panel to move
@@ -701,8 +732,38 @@ export function Workspace({ scope, mode, panels, beforeLayoutChange, requestedPa
           </select>
         </label>
         <button type="button" disabled={changing || !moveSource || !moveTarget} onClick={() => movePanel(moveSource, moveTarget, placement)}>Move panel</button>
-      </div></details>
-      </details>
+      </div>
+    </details>
+  );
+  const noteActivePanel = (target: EventTarget | null): void => {
+    if (!(target instanceof HTMLElement)) return;
+    const panelId = target.closest<HTMLElement>("[data-workspace-panel]")?.dataset.workspacePanel;
+    if (panelId) onActivePanelChange?.(panelId);
+  };
+
+  return (
+    <section
+      ref={workspaceRef}
+      className={`st-workspace st-workspace-${mode}`}
+      data-preset={layout.preset}
+      data-layout-editing={mode === "desktop" && layoutEditing ? "true" : "false"}
+      data-maximized-panel={maximizedPanelId ?? undefined}
+      aria-label="Composable workspace"
+      onFocusCapture={(event) => noteActivePanel(event.target)}
+      onPointerDownCapture={(event) => noteActivePanel(event.target)}
+    >
+      {mode === "desktop" ? (
+        <div className="st-workspace-desktop-controls">
+          {workspaceToolbar}
+          {layoutMoveMenu}
+        </div>
+      ) : (
+        <details className="st-workspace-configuration">
+          <summary>ワークスペース配置</summary>
+          {workspaceToolbar}
+          {layoutMoveMenu}
+        </details>
+      )}
 
       {persistenceState === "invalid" ? <p className="st-workspace-warning" role="alert">{storageLabel}</p> : null}
       {message ? <p className="st-workspace-message" tabIndex={0} role="status" aria-live="polite">{message}</p> : null}
@@ -749,7 +810,7 @@ export function Workspace({ scope, mode, panels, beforeLayoutChange, requestedPa
             aria-labelledby={domId("st-workspace-mobile-tab", mobilePanelId)}
             tabIndex={0}
           >
-            <PanelFrame panelId={mobilePanelId} panel={catalog.get(mobilePanelId)} mode="mobile" canHide={false} onHide={hidePanel} onDrop={handleDrop} onFloat={floatPanel} onMaximize={toggleMaximize} maximized={false} />
+            <PanelFrame panelId={mobilePanelId} panel={catalog.get(mobilePanelId)} mode="mobile" layoutEditing={false} canHide={false} onHide={hidePanel} onDrop={handleDrop} onFloat={floatPanel} onMaximize={toggleMaximize} maximized={false} />
           </div>
         </div>
       ) : (
@@ -757,6 +818,8 @@ export function Workspace({ scope, mode, panels, beforeLayoutChange, requestedPa
           <WorkspaceTree
             node={layout.root}
             mode={mode}
+            layoutEditing={mode === "desktop" && layoutEditing}
+            depth={0}
             catalog={catalog}
             visibleCount={visibleIds.length}
             onActivate={activateTab}
