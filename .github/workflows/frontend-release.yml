@@ -61,6 +61,8 @@ jobs:
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
       - name: Build UI without building the API
+        env:
+          CODEXIA_PROFILE: full
         run: pnpm run build:frontend
       - name: Check Worker types and request routing
         run: pnpm run typecheck:deployment && pnpm run test:deployment
@@ -68,8 +70,10 @@ jobs:
         run: pnpm run verify:deployment
       - name: Install pinned Wrangler
         run: npm ci --prefix edge/frontend
-      - name: Validate Wrangler Worker and Static Assets bundle
+      - name: Validate Wrangler assets-only bundle
         run: edge/frontend/node_modules/.bin/wrangler deploy --dry-run --config edge/frontend/wrangler.jsonc --outdir "$RUNNER_TEMP/codexia-frontend-worker"
+      - name: Exercise actual static asset server
+        run: node edge/frontend/test/static-smoke.mjs
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'push'
         with:

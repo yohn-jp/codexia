@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,9 +11,9 @@ const workerConfig = JSON.parse(await read('edge/frontend/wrangler.jsonc'));
 const edgePackage = JSON.parse(await read('edge/frontend/package.json'));
 const edgeLock = JSON.parse(await read('edge/frontend/package-lock.json'));
 const uiRoutes = JSON.parse(await read('deploy/cloudflare/ui-routes.json'));
-const publicFiles = await listFiles('app/public');
-const [workerSource, apiSource, apiClient, terraformMain, terraformVariables, apiQuadlet, databaseQuadlet, databaseNetwork, databaseVolume, tunnelQuadlet, backendDockerfile, deploymentDocs] = await Promise.all([
-  read('edge/frontend/src/index.ts'),
+const [staticHeaders, staticRedirects, apiSource, apiClient, terraformMain, terraformVariables, apiQuadlet, databaseQuadlet, databaseNetwork, databaseVolume, tunnelQuadlet, backendDockerfile, deploymentDocs] = await Promise.all([
+  read('edge/frontend/static/_headers'),
+  read('edge/frontend/static/_redirects'),
   read('packages/api/src/server.ts'),
   read('app/src/api.ts'),
   read('deploy/cloudflare/terraform/main.tf'),
@@ -34,33 +34,28 @@ assert.equal(workerConfig.$schema, './node_modules/wrangler/config-schema.json')
 assert.equal(workerConfig.workers_dev, false, 'workers.dev must stay disabled');
 assert.equal(workerConfig.preview_urls, false, 'Worker preview URLs must stay disabled');
 assert.equal(workerConfig.assets.directory, '../../app/dist');
-assert.equal(workerConfig.assets.binding, 'ASSETS');
+assert.equal(workerConfig.main, undefined, 'Static frontend must not execute Worker code');
+assert.equal(workerConfig.assets.binding, undefined);
+assert.equal(workerConfig.assets.run_worker_first, undefined);
+assert.equal(workerConfig.assets.html_handling, 'none');
 assert.equal(workerConfig.assets.not_found_handling, 'none');
-assert.deepEqual(uiRoutes.routes, ['/', '/index.html*', '/assets/*', '/desktop*', '/mobile*', '/r/*']);
+assert.deepEqual(uiRoutes.routes, ['/*']);
+assert.deepEqual(uiRoutes.originRoutes, ['/api*', '/health*', '/mcp*', '/.well-known/*']);
 assert.equal(uiRoutes.apiPrefix, '/api/');
-assert.ok(uiRoutes.routes.every((route) => route.startsWith('/')));
-assert.ok(uiRoutes.routes.every((route) => route !== '/*' && !route.includes(uiRoutes.apiPrefix)));
-for (const file of publicFiles.filter((item) => path.posix.basename(item) !== '_headers')) {
-  const assetPath = `/${file}`;
-  assert.ok(uiRoutes.routes.some((route) => route === assetPath || (route.endsWith('*') && assetPath.startsWith(route.slice(0, -1)))),
-    `Static public asset ${assetPath} needs an explicit Worker Route`);
-}
-assert.equal(workerConfig.assets.run_worker_first.includes('!/assets/*'), true);
-assert.equal(workerConfig.assets.run_worker_first.includes('!/desktop/assets/*'), true);
-assert.equal(workerConfig.assets.run_worker_first.includes('!/mobile/assets/*'), true);
-assert.ok(!workerConfig.assets.run_worker_first.some((route) => route.includes('/api')));
+assert.match(staticHeaders, /script-src 'self';/u);
+assert.match(staticHeaders, /style-src 'self' 'unsafe-inline';/u);
+assert.match(staticHeaders, /X-Frame-Options: DENY/u);
+assert.match(staticHeaders, /X-Robots-Tag: noindex, nofollow/u);
+assert.ok(staticRedirects.split('\n').includes('/ /index.html 200'));
+assert.ok(staticRedirects.split('\n').every(line => !['/api','/health','/mcp','/assets'].some(prefix => line.startsWith(prefix))));
 assert.match(terraformMain, /jsondecode\(file\("\$\{path\.module\}\/\.\.\/ui-routes\.json"\)\)\.routes/u);
 assert.match(terraformMain, /pattern\s+=\s+"\$\{var\.app_hostname\}\$\{each\.value\}"/u);
 assert.match(terraformMain, /service\s+=\s+var\.origin_service/u);
 assert.match(terraformMain, /required\s+=\s+true/u);
+assert.match(terraformMain, /originRoutes/u);
 assert.match(terraformVariables, /http:\/\/codexia-api:3000/u);
 
-assert.match(workerSource, /Content-Security-Policy/u);
-assert.match(workerSource, /__CODEXIA_STYLE_NONCE__/u);
-assert.match(workerSource, /style-src-attr 'unsafe-inline'/u);
 assert.match(apiSource, /style-src-attr 'unsafe-inline'/u);
-assert.match(workerSource, /env\.ASSETS\.fetch/u);
-assert.doesNotMatch(workerSource, /(?<!ASSETS\.)fetch\(request\)/u, 'the UI Worker must not proxy requests to the origin');
 assert.ok(apiClient.includes('"/api/login"'), 'the UI API client must keep using same-origin API paths');
 assert.doesNotMatch(apiClient, /VITE_API_URL/u, 'the frontend API origin is same-origin and must not be injected at build time');
 assert.doesNotMatch(apiSource, /Access-Control-Allow-Origin/u, 'the API must not grant cross-origin browser access');
@@ -105,12 +100,3 @@ assert.match(deploymentDocs, /127\.0\.0\.1:2000\/ready/u);
 
 console.info('Deployment configuration is consistent: UI/API routes, same-origin auth, Worker assets, GHCR Quadlet and secret mounts.');
 
-async function listFiles(directory, prefix = '') {
-  const files = [];
-  for (const entry of await readdir(path.join(root, directory, prefix), { withFileTypes: true })) {
-    const relative = path.posix.join(prefix, entry.name);
-    if (entry.isDirectory()) files.push(...await listFiles(directory, relative));
-    else files.push(relative);
-  }
-  return files;
-}

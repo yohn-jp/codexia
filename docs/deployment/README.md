@@ -7,28 +7,28 @@ This directory describes the deployable boundary in [CODEXIA-REBOOT-RFC.md](../a
 ```text
 Browser
   -> Cloudflare Access (one hostname and identity policy)
-  -> explicit UI routes -> codexia-frontend Worker -> Vite assets
-  -> all other routes -> Cloudflare Tunnel -> codexia-api container
+  -> assets-only catch-all -> codexia-frontend Static Assets -> Vite assets
+  -> scriptless API/health/MCP exclusions -> Cloudflare Tunnel -> codexia-api container
 
 API browser calls stay on the same hostname at /api/*.
 The Worker has no API route and no origin-proxy fallback.
 ```
 
-`deploy/cloudflare/ui-routes.json` is the route list shared by Terraform and the config verifier. It includes the root shell, hashed assets, Desktop/Mobile shells, and public reader shells. `/api/*`, health routes, and unknown paths do not match a Worker Route. A Worker script also rejects unknown paths if a catch-all Route is accidentally attached.
+The route contract in `deploy/cloudflare/ui-routes.json` assigns a catch-all to the assets-only Worker and more-specific scriptless exclusions to the Tunnel for API, health, MCP and OAuth metadata paths. This also covers query-string root requests. Unknown static paths and missing assets return 404. No Worker script, binding, or Worker-first route is deployed. Static 200 proxies in `edge/frontend/static/_redirects` serve the distinct Desktop/Mobile and reader shells without executing code at the edge.
 
-The Worker runs only for HTML shell requests, generates the per-response CodeMirror style nonce, and returns the existing CSP policy. Vite hashed assets bypass the Worker and use immutable cache headers. Missing assets return 404. The Worker never forwards a request to the VM.
+Static response headers are defined in `edge/frontend/static/_headers`. Script execution is restricted to same-origin external scripts; dynamic CodeMirror styles require inline styles in the static delivery CSP. The API-hosted UI retains per-response style nonces. The static frontend contains no secrets or origin-proxy code. Static asset requests do not incur Worker invocation charges.
 
 ## Authentication, API URL, and CORS
 
 Cloudflare Access applies an explicit identity allowlist to the application hostname. The Tunnel origin also requires the Access application audience. Access is the outer identity gate; the Codexia API keeps its own login and authorization boundary.
 
-The current API accepts `CODEXIA_AUTH_TOKEN` at `POST /api/login`, then issues its Secure, HttpOnly session cookie and applies same-origin checks to cookie-authenticated writes. The access token belongs in a Worker variable, Vite build argument, browser bundle, or repository file.
+The current API accepts `CODEXIA_AUTH_TOKEN` at `POST /api/login`, then issues its Secure, HttpOnly session cookie and applies same-origin checks to cookie-authenticated writes. The access token must never be placed in a Worker variable, Vite build argument, browser bundle, or repository file.
 
 The UI uses relative `/api/...` URLs, so production has no `VITE_API_URL` or API-origin secret. UI and API share one origin and the API does not send `Access-Control-Allow-Origin`; browser CORS is intentionally disabled. External MCP/API clients must use their supported authorization flow and do not receive a CORS exception.
 
 ## Build and release ownership
 
-- UI changes build `app/dist` with `pnpm run build:frontend`, check and test the static Worker, then upload only the `codexia-frontend` asset Worker. The release job runs only after a push to the configured base branch and uses the `codexia-production` GitHub Environment. Zone Routes remain Terraform-owned and are never changed by Wrangler.
+- UI changes build `app/dist` with `pnpm run build:frontend`, check and test the static Worker, then upload only the `codexia-frontend` asset Worker. The release job runs only after a push to the configured base branch and uses the `codexia-production` GitHub Environment. Production UI is built with the Full profile. Zone Routes are operated separately and are never changed by Wrangler.
 - Backend changes build `Dockerfile.backend`, test the resulting image, and publish `ghcr.io/yohn-jp/codexia-backend:sha-<40-character-commit>` only after a push to the configured base branch and successful complete main-push verification for that exact commit, including certification. The publication gate waits up to one hour and fails closed if verification is unavailable or unsuccessful. The image contains the API profile and runtime dependencies, not `app/dist`.
 - Changes shared by both build lanes may select both. PR jobs build and validate but do not publish or deploy.
 - The VM operator updates the Quadlet image to the exact published commit tag (or its recorded registry digest), reviews it, and performs the service restart. CI does not SSH to or deploy to the VM.
