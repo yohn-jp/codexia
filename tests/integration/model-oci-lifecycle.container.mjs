@@ -4,6 +4,7 @@ import { mkdir, readFile, readlink, symlink, writeFile } from "node:fs/promises"
 import { readFileSync } from "node:fs";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
+import { seedModelFixture } from "./model-postgres-fixture.mjs";
 
 const OUTPUT_DIRECTORY = "/p13-output";
 const API_ORIGIN = "http://127.0.0.1:3000";
@@ -13,7 +14,7 @@ const MODEL_IDS = {
   embedding: { id: "Xenova/multilingual-e5-small", revision: "761b726dd34fb83930e26aab4e9ac3899aa1fa78" },
   reranker: { id: "mogolloni/bge-reranker-v2-m3-onnx", revision: "e5023553f6c47f09057da7a19cdd79ef850a4985" },
 };
-const EXPECTED_MODULES = ["story", "nlp", "diagnostics", "semantic", "speaker", "assistant", "publishing", "mcp"];
+const EXPECTED_MODULES = ["story", "nlp", "diagnostics", "semantic", "speaker", "assistant", "publishing", "mcp", "search"];
 const SETTINGS_PATHS = [
   "meta/scriptorium/modules/nlp/feature-settings.json",
   "meta/scriptorium/modules/semantic/settings.json",
@@ -221,8 +222,17 @@ function createSampler(runtime, workerEntries) {
   };
 }
 
+let authorCookie;
 async function api(path, options = {}) {
-  const headers = { authorization: "Bearer " + AUTH_TOKEN };
+  if (!authorCookie) {
+    const login = await fetch(API_ORIGIN + "/api/login", {method:"POST",headers:{"content-type":"application/json",origin:API_ORIGIN},body:JSON.stringify({token:AUTH_TOKEN})});
+    assert.ok(login.ok, "author login failed");
+    const cookie = login.headers.get("set-cookie");
+    assert.ok(cookie, "author login did not establish session");
+    authorCookie = cookie.split(";",1)[0];
+    await login.arrayBuffer();
+  }
+  const headers = { cookie: authorCookie, origin: API_ORIGIN };
   const init = { method: options.method ?? "GET", headers };
   if (options.body !== undefined) {
     headers["content-type"] = "application/json";
@@ -415,8 +425,22 @@ async function runLifecycle() {
   const bgeModelDirectory = "/models/" + MODEL_IDS.reranker.id + "/" + MODEL_IDS.reranker.revision + "/onnx";
   assert.ok((await fs.readdir(e5ModelDirectory)).length > 0);
   assert.ok((await fs.readdir(bgeModelDirectory)).length > 0);
-  const store = new CoreStore({ dataDir: "/data", allowLocalRemotes: true });
-  const server = await start({ store, authToken: AUTH_TOKEN, runtime, profile: "full", usageDirectory: "/history", staticDir: "/app/app/dist" });
+  const {createPostgresPersistence, migratePostgresDatabase} = await import("/app/node_modules/.pnpm/node_modules/@codexia/persistence-postgres/dist/index.js");
+  const databaseUrl = process.env.CODEXIA_DATABASE_URL;
+  assert.ok(databaseUrl, "disposable PostgreSQL URL is required");
+  await migratePostgresDatabase(databaseUrl);
+  const persistence = createPostgresPersistence(databaseUrl);
+  const store = new CoreStore({ persistence });
+  let server;
+  try {
+    await persistence.transaction(tx=>tx.createProject({id:PROJECT_ID,title:"Synthetic OCI model lifecycle work"}));
+    await seedModelFixture(store,PROJECT_ID,JSON.parse(await readFile(OUTPUT_DIRECTORY+"/fixture.json","utf8")));
+    server = await start({ store, persistence, authToken: AUTH_TOKEN, runtime, profile: "full", usageDirectory: "/history", staticDir: "/app/app/dist" });
+  } catch (error) {
+    await runtime.shutdown();
+    await persistence.close();
+    throw error;
+  }
   const productionRuntime = server.codexia.runtime;
   assert.equal(productionRuntime, runtime);
 
@@ -440,6 +464,7 @@ async function runLifecycle() {
     assert.equal(statusFor(initialStatuses, "publishing").availability, "disabled");
     assert.equal(statusFor(initialStatuses, "mcp").availability, "disabled");
     assert.equal(statusFor(initialStatuses, "speaker").availability, "disabled");
+    assert.equal(statusFor(initialStatuses, "search").availability, "disabled");
 
     sampler.setPhase("full-installed-disabled-and-enabled-idle-baseline");
     const initialActions = (await api(projectPath + "/actions")).actions;
@@ -717,16 +742,13 @@ async function runLifecycle() {
     const firstStatus = actionData(firstStatusResult, "semantic.index.status");
     assert.equal(firstStatus.indexAvailable, true);
     assert.equal(firstStatus.modelVersion, MODEL_IDS.embedding.revision);
-    const repository = firstStatusResult.snapshot.repository;
-    const repositoryKey = createHash("sha256").update(JSON.stringify([
-      repository.provider, repository.ownerScope, repository.repositoryId, repository.defaultBranch,
-    ])).digest("hex");
+    const repositoryKey = createHash("sha256").update(firstStatusResult.snapshot.projectId, "utf8").digest("hex");
     const modelKey = createHash("sha256").update(MODEL_IDS.embedding.id + "@" + MODEL_IDS.embedding.revision).digest("hex").slice(0, 24);
     const candidateIndex = "/data/module-cache/semantic/semantic/indexes/" + repositoryKey + "-" + modelKey + ".json";
     const fs = await import("node:fs/promises");
     await fs.stat(candidateIndex);
 
-    sampler.setPhase("delete-derived-index-and-rebuild-from-synthetic-git");
+    sampler.setPhase("delete-derived-index-and-rebuild-from-postgres");
     await fs.unlink(candidateIndex);
     const missingStatus = actionData(await invoke("semantic.index.status", {}), "semantic.index.status");
     assert.equal(missingStatus.indexAvailable, false, "the worker must report a deleted derived cache as missing");
@@ -767,15 +789,10 @@ async function runLifecycle() {
     assert.deepEqual(runtime.workerSupervisor.activeWorkerPids, []);
     outcome.phases.push(await sampler.mark());
 
-    const projectResponse = await api(projectPath);
-    const projectRoot = projectResponse.project?.workspaceDirectory ?? "/data/projects/" + PROJECT_ID;
+    const currentReader = await store.reader(PROJECT_ID);
     outcome.projectId = PROJECT_ID;
-    outcome.snapshot = projectResponse.observation?.snapshot ?? null;
-    outcome.preservedFiles = [];
-    for (const relative of SETTINGS_PATHS) {
-      const file = await readFile(projectRoot + "/" + relative, "utf8");
-      outcome.preservedFiles.push({ path: relative, sha256: createHash("sha256").update(file).digest("hex") });
-    }
+    outcome.snapshot = currentReader.snapshot;
+    outcome.preservedFiles = await preservedFiles(currentReader);
     outcome.workerEntries = composition.moduleWorkerEntries;
     outcome.runtimeStatusesAtEnd = runtime.statuses();
     outcome.resourceMeasurements = await sampler.stop();
@@ -791,9 +808,17 @@ async function runLifecycle() {
     }
     const measurements = await sampler.stop();
     if (!outcome.resourceMeasurements) outcome.resourceMeasurements = measurements;
+    await persistence.close();
   }
 }
 
+async function preservedFiles(reader) {
+  return Promise.all(SETTINGS_PATHS.map(async path => {
+    const file = await reader.read(path);
+    assert.ok(file, "canonical settings record is missing: " + path);
+    return {path, sha256:createHash("sha256").update(file.content).digest("hex")};
+  }));
+}
 async function replacementProbe() {
   const composition = await import("/app/generated/server.mjs");
   assert.equal(composition.profile, "full");
@@ -821,7 +846,7 @@ async function replacementProbe() {
     const idle = await captureMetrics(undefined, composition.moduleWorkerEntries);
     assert.equal(idle.compiledWorkerCount, 0, "replacement launcher must remain model-worker-free before an action");
     outcome.phases.push(await probe.mark());
-    outcome.assertions.allEightModulesInstalledAndEnabled = true;
+    outcome.assertions.allInstalledModulesEnabled = true;
     outcome.assertions.noWorkerAtReplacementIdle = true;
 
     probe.setPhase("replacement-semantic-index-restored");
@@ -854,6 +879,14 @@ async function replacementProbe() {
     };
     await waitFor(async () => (await captureMetrics(undefined, composition.moduleWorkerEntries)).compiledWorkerCount === 0,
       "replacement semantic worker did not exit after its capability lease was released", 30_000);
+    const {CoreStore} = await import("/app/node_modules/.pnpm/node_modules/@codexia/core/dist/index.js");
+    const {createPostgresPersistence} = await import("/app/node_modules/.pnpm/node_modules/@codexia/persistence-postgres/dist/index.js");
+    const persistence = createPostgresPersistence(process.env.CODEXIA_DATABASE_URL);
+    try {
+      const reader = await new CoreStore({persistence}).reader(PROJECT_ID);
+      outcome.snapshot = reader.snapshot;
+      outcome.preservedFiles = await preservedFiles(reader);
+    } finally { await persistence.close(); }
   } finally {
     outcome.resourceMeasurements = await probe.stop();
   }

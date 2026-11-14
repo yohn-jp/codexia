@@ -54,7 +54,7 @@ pnpm verify:hosted
 
 That command verifies local producer/catalog/build composition contracts; it does not certify a deployed Hosted instance or publish a release. It requires a usable OCI engine and capacity for disposable local builds.
 
-`pnpm verify` runs frozen installation, production/test-source/safety type checks, tests, Core and Full builds, Core auditing, browser and OCI checks, MCP, Diagnostics persistence and legacy import acceptance. It requires the configured browsers, OCI engine and tokenizer artifacts. Separate real-provider, real-model and remote/container recovery checks require their own inputs and commands.
+`pnpm verify` runs frozen installation, production/test-source/safety type checks, tests, Core and Full builds, Core auditing, browser and OCI checks, MCP, Diagnostics persistence and legacy import acceptance. It requires the configured browsers, OCI engine and tokenizer artifacts. Separate CPU model lifecycle and PostgreSQL restore/container recovery checks require their own inputs and commands. Legacy Git publish and real-provider streaming acceptance is retired; it is not current verification evidence.
 
 ## Repository CI and release
 
