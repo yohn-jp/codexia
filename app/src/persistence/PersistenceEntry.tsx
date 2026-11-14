@@ -17,10 +17,15 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
   const inspect = useCallback(async () => {
     setBusy(true);
     setMessage("");
+    let versionChecked = false;
     try {
       const version = await api.version();
+      versionChecked = true;
       setAccessMode(version.browserAuth === "cloudflare-access");
       const session = await api.session();
+      if (version.browserAuth === "cloudflare-access" && session.authorScope !== "owner") {
+        throw new Error("Cloudflare Accessの作者認証を確認できませんでした。");
+      }
       const persistence: PersistenceStatus = await api.persistenceStatus();
       if (!persistence.available || persistence.provider !== "postgres") {
         throw new Error("PostgreSQL保存基盤が利用できません。Gitワークスペースへの切替は提供していません。");
@@ -31,7 +36,7 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
       setAuthorScope(session.authorScope || "owner");
       setState("database");
     } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
+      if (versionChecked && error instanceof ApiError && error.status === 401) {
         setState("signed-out");
       } else {
         setState("failed");
@@ -80,7 +85,8 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
       <p className="eyebrow">Codexia</p>
       <h1 id="pg-entry-title">PostgreSQLへ接続できません</h1>
       <p role="alert">{message}</p>
-      <button type="button" disabled={busy} onClick={() => accessMode ? window.location.reload() : void inspect()}>再試行</button>
+      <button type="button" disabled={busy} onClick={() => void inspect()}>再試行</button>
+      <button type="button" disabled={busy} onClick={() => window.location.reload()}>ページを再読み込み</button>
       <a href="/">画面選択へ戻る</a>
     </section>
   </main>;

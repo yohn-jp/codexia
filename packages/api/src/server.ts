@@ -1504,7 +1504,7 @@ export function createServer(options: ApiServerOptions): Server {
         name: "codexia", version: API_VERSION, contractVersion: CONTRACT_VERSION,
         hosted: Boolean(hosted),
         ...(cloudflareAccess ? { browserAuth: "cloudflare-access" } : {}),
-        profile, auth: ["cookie-owner", "bearer-read-compute-propose"], runtime: { name: "@codexia/module-runtime", contractVersion: CONTRACT_VERSION, ...(runtime.metadata ? { metadata: runtime.metadata() } : {}) },
+        profile, auth: [cloudflareAccess ? "access-owner" : "cookie-owner", "bearer-read-compute-propose"], runtime: { name: "@codexia/module-runtime", contractVersion: CONTRACT_VERSION, ...(runtime.metadata ? { metadata: runtime.metadata() } : {}) },
         modules: await enabledStatuses(),
       });
       return;
