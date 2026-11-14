@@ -58,6 +58,8 @@ That command verifies local producer/catalog/build composition contracts; it doe
 
 ## Repository CI and release
 
+[Test Architecture Optimization](TEST-ARCHITECTURE-OPTIMIZATION.md) defines the proposed test placement, shared build artifacts and dependency-aware execution architecture. The current supported commands and certification rules below remain authoritative until the corresponding implementation and contract changes are accepted.
+
 `.github/workflows/verify.yml` groups workspace unit tests, type checks, safety, builds, auditing, browser tests, OCI checks and Hosted Native composition into at most twenty jobs, including impact planning and the final gate. `scripts/ci-contract.mjs` defines both the execution groups and the complete validation inventory; coverage checks reject omitted workspaces and test sources.
 
 Pull requests select affected validations using `scripts/ci-impact.mjs`. Shared contracts, build inputs, unknown paths and unavailable diff history select full verification. Main pushes and manual runs always execute the full inventory. Plans record the base/head identities, changed paths, selected validations and explicit `NOT_SELECTED` reasons; exclusions are not passing test evidence. Each execution group records individual results and continues independent checks after a failure. The final gate requires every selected validation and its execution group to succeed at the exact source SHA. Release eligibility still requires complete successful main-push verification, including every execution group and certification.
