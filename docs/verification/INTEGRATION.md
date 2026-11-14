@@ -9,21 +9,36 @@ CODEXIA_PROFILE=full pnpm build
 
 ## MCP and approved mutation
 
+These required checks need a disposable PostgreSQL database. The MCP and legacy-inspection tests fail clearly if database configuration is absent; use `CODEXIA_TEST_DATABASE_URL` for this disposable database. A database-dependent skip is not acceptance evidence. For a local run:
+
+```sh
+docker run --rm -d --name codexia-integration-postgres \
+  -e POSTGRES_USER=codexia -e POSTGRES_PASSWORD=codexia \
+  -e POSTGRES_DB=codexia_test -p 55440:5432 postgres:17-alpine
+export CODEXIA_TEST_DATABASE_URL='postgres://codexia:codexia@127.0.0.1:55440/codexia_test'
+until docker exec codexia-integration-postgres pg_isready -q -U codexia -d codexia_test >/dev/null 2>&1; do sleep 1; done
+```
+
+Stop the disposable database after verification with `docker stop codexia-integration-postgres`.
+
 ```sh
 CODEXIA_MCP_ACCEPTANCE_MODULES=story,nlp,diagnostics,semantic,speaker,assistant,publishing,mcp \
   node --test tests/integration/mcp-acceptance.test.mjs
 ```
 
-This runs the production stdio and SDK Streamable HTTP transports with Core and optional modules. It checks project isolation, cancellation, proposal replay, partial approval, revision-bound PostgreSQL application and reconstruction. MCP may propose changes but cannot grant itself approval or author permission. Provider-free checks must remain usable without external transmission.
+This runs production stdio and SDK Streamable HTTP transports against PostgreSQL. It checks scoped native Knowledge access, project/version boundaries, proposal replay, stale-preview rejection, provider non-execution, MCP bearer denial of approval/application, and owner HTTP approval/application with a durable receipt. With the full module set shown here, a separate test also exercises cancellation through the real NLP worker on both transports; a restricted native MCP composition does not require NLP. Partial module proposal approval and retry after Core reconstruction remain covered by `packages/api/src/server.test.ts` and `modules/story/tests/production.acceptance.mjs`. MCP can propose native changes; it cannot grant itself author approval. The provider-admission probe confirms denied Assistant calls make no provider request or usage record.
 
 ## Import and derived-state reconstruction
 
+The Diagnostics production acceptance needs `CODEXIA_TOKENIZER_MODELS_DIR` to point to an external tokenizer cache containing the same pinned `tokenizer.json` and `tokenizer_config.json` at both `Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78/` and `Xenova/multilingual-e5-small/`. These tokenizer files are required; model weight files are not. Set the variable before running the command below; without the pinned tokenizer artifacts, the required acceptance is unavailable and must not be reported as passed.
+
 ```sh
+export CODEXIA_TOKENIZER_MODELS_DIR=/path/to/tokenizer-cache
 node --test modules/diagnostics/tests/production.acceptance.mjs
 node --test tests/integration/migration-acceptance.test.mjs
 ```
 
-These checks exercise derived-state reconstruction and legacy manuscript import into PostgreSQL through Core review. Verify idempotence, authoritative corrections/settings, retained provisional records, source immutability and recovery after replacing the API process. A local fixture round trip does not establish hosted lifecycle behavior.
+These checks exercise derived-state reconstruction and read-only legacy inspection through Core review against PostgreSQL. Migration acceptance repeats inspection and proposal submission, checks operation replay receipts after reconnecting to PostgreSQL, preserves an author-maintained Speaker correction and opaque records with both Story enabled and disabled, and compares the legacy Git/files/SQLite sources before and after review and application. The migration package tests also check deterministic operation identity and withholding conflicting producer writes. `packages/migration` is an operator-side conversion tool; the ordinary product import is the portable PostgreSQL work archive described in [Core architecture](../architecture/CORE.md). The integration acceptance does not exercise Git publish, remote commit reconstruction, or Git as runtime persistence. Diagnostics recovery after reopening PostgreSQL remains covered by its production acceptance test. A local fixture round trip does not establish hosted lifecycle behavior.
 
 ## CPU model lifecycle
 
@@ -39,31 +54,9 @@ OCI_ENGINE=podman CODEXIA_P13_MODEL_CACHE=/path/to/model-cache \
 
 The OCI test builds the Full production image, mounts the model cache read-only and exercises inference without network access. It checks shared model leases, cancellation, disable/release, index rebuild, launcher replacement, health and preserved author state. Confirm actual worker/process release; dropping a JavaScript reference alone does not establish native memory release. Model absence or an unsupported host is an unavailable check, not successful inference.
 
-## Local provider reference
+## Provider execution
 
-The provider reference accepts a loopback OpenAI-compatible endpoint serving `Qwen3-0.6B-Q4_K_M`. Prepare the model outside the repository and start a compatible `llama-server` with reasoning disabled:
-
-```sh
-llama-server --model /path/to/Qwen3-0.6B-Q4_K_M.gguf \
-  --host 127.0.0.1 --port 18088 --ctx-size 2048 --threads 4 \
-  --n-gpu-layers 0 --alias Qwen3-0.6B-Q4_K_M \
-  --reasoning off --reasoning-format none --reasoning-budget 0
-```
-
-Then run the production Assistant/MCP reference against synthetic inputs:
-
-```sh
-CODEXIA_MCP_ACCEPTANCE_MODULES=story,nlp,diagnostics,semantic,speaker,assistant,publishing,mcp \
-CODEXIA_MCP_ACCEPTANCE_REWRITE_PROVIDER=qwen-local \
-CODEXIA_ASSISTANT_REFERENCE_PROVIDER=qwen-local \
-ARCADIA_LLM_PROVIDER=openai-compatible \
-ARCADIA_LLM_BASE_URL=http://127.0.0.1:18088/v1 \
-ARCADIA_LLM_MODEL=Qwen3-0.6B-Q4_K_M \
-ARCADIA_LLM_API_KEY=local-only-placeholder \
-node --test tests/integration/mcp-acceptance.test.mjs
-```
-
-The placeholder is for the local fixture endpoint. The checks exercise streaming, cancellation, durable usage, context preview, author-selected proposals and PostgreSQL reconstruction. They do not certify model output quality. Stop the provider process after the run.
+MCP integration acceptance uses a synthetic provider probe only to verify that denied Assistant requests make no provider call or usage record. The previous local-provider reference that streamed model output and published approved rewrites is retired with the Git publish and `remoteCommit` verification contract. Optional CPU model execution is described above; it requires its own model cache and does not certify provider streaming or model output quality.
 
 ## PostgreSQL restore and container replacement
 
