@@ -12,12 +12,14 @@ export async function readManuscriptMarkdown(page: Page): Promise<string> {
 
 export async function ownerLogin(page: Page, path = "/desktop/"): Promise<void> {
   await page.goto(new URL(path, process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`).toString());
-  await expect(page.getByLabel("アクセス・トークン").or(page.getByRole("heading", { name: "Database workspace" }))).toBeVisible();
+  const signedInWorkspace = page.getByRole("heading", { name: "Database workspace" })
+    .or(page.locator(".mobile-shell-current-title"));
+  await expect(page.getByLabel("アクセス・トークン").or(signedInWorkspace)).toBeVisible();
   if (await page.getByLabel("アクセス・トークン").isVisible()) {
     await page.getByLabel("アクセス・トークン").fill(authToken);
     await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
   }
-  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
+  await expect(signedInWorkspace).toBeVisible();
 }
 
 export async function fixtureProject(request: APIRequestContext): Promise<{ project: FixtureProject; scenes: FixtureDocument[] }> {
@@ -71,7 +73,6 @@ export async function createWritingFixture(page: Page, mode: "desktop" | "mobile
   // Exercise the supported canonical deep link instead of mutating UI selection.
   const writingRoute = `/${mode}/projects/${project.id}/scenes/${scene.id}${mode === "mobile" ? "?view=writing" : ""}`;
   await page.goto(new URL(writingRoute, page.url()).toString());
-  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await expect(manuscriptEditor(page)).toBeVisible();
   await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
   return { project, scene, second };

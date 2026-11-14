@@ -415,7 +415,7 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
               <span>{activeView === "settings" ? "執筆" : "設定"}</span>
             </IonButton>
           </div>
-          <div className="mobile-shell-shared-header" data-active-view={activeView} aria-label="作業領域とアカウント設定">{header}</div>
+          <div className="mobile-shell-shared-header" data-active-view={activeView} hidden={activeView !== "settings"} aria-label="作業領域とアカウント設定">{header}</div>
         </IonHeader>
 
         <IonContent ref={contentRef} className="mobile-shell-content" fullscreen={false}>

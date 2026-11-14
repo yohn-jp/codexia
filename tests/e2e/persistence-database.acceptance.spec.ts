@@ -28,7 +28,7 @@ test("Hosted permission metadata does not force Git workspace fallback", async (
   await page.goto("/mobile/?store=git");
   await page.getByLabel("アクセス・トークン").fill(authToken);
   await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
-  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
+  await expect(page.locator(".mobile-shell-current-title")).toBeVisible();
   await expect(page.getByRole("link", { name: "Git作品を開く" })).toHaveCount(0);
 });
 

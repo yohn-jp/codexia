@@ -27,6 +27,7 @@ for (const shell of ["desktop", "mobile"] as const) {
     await expect(page.getByLabel("アクセス・トークン")).toHaveCount(0);
     signedIn = true;
     await page.getByRole("button", { name: "再認証" }).click();
+    if (shell === "mobile") await page.getByRole("button", { name: "設定を開く" }).click();
     await expect(page.getByRole("button", { name: "ログアウト", exact: true })).toBeVisible();
     await expect(page.getByLabel("アクセス・トークン")).toHaveCount(0);
     await page.getByRole("button", { name: "ログアウト", exact: true }).click();

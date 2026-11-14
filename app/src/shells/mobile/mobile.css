@@ -530,6 +530,24 @@
   scroll-padding-bottom:16px;
 }
 
+/* The writing route reserves its first screen for the scene and manuscript.
+   Account and theme actions remain grouped in the explicit Settings view. */
+.mobile-shell .mobile-shell-workspace-view:not([data-active-view="settings"]) .st-workspace-configuration { display:none!important; }
+.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-configuration { display:block; }
+.mobile-shell .mobile-shell-identity-bar {
+  padding-right:max(12px,env(safe-area-inset-right,0px));
+}
+.mobile-shell .mobile-shell-writing-accessories {
+  padding-right:max(12px,env(safe-area-inset-right,0px));
+  padding-left:max(12px,env(safe-area-inset-left,0px));
+}
+@media (max-width:360px) {
+  .mobile-shell .mobile-shell-identity-bar { gap:4px; }
+  .mobile-shell .mobile-shell-settings-entry::part(native) { gap:4px; padding-inline:5px; }
+  .mobile-shell .mobile-shell-accessory-button { padding-inline:6px; font-size:11px; }
+  .mobile-shell .mobile-shell-workspace-view .pg-editor-actions button { padding-inline:8px; }
+}
+
 /* IonModal may be attached outside IonApp: own theme variables must be complete. */
 ion-modal.mobile-shell-reference-modal {
   --height:100%;--width:min(100%,760px);

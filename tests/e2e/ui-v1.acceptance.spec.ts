@@ -128,7 +128,7 @@ test("both production Shells preserve recoverable Japanese drafts and the Mobile
   for (const mode of ["desktop", "mobile"] as const) {
     await page.setViewportSize({ width: mode === "mobile" ? 390 : 1280, height: 900 });
     const { project, scene } = await createWritingFixture(page, mode);
-    const text = "東京《とうきょう》へ向かう。\n日本語😀の本文。";
+    const text = "|東京《とうきょう》へ向かう。\n日本語😀の本文。";
     await editor(page).fill(text);
     await expectMarkdown(page, text);
     // "Saved" can reflect the previous revision. The reader must open only
@@ -139,6 +139,14 @@ test("both production Shells preserve recoverable Japanese drafts and the Mobile
     }).toBe(text);
     await page.getByRole("button", { name: "読む", exact: true }).click();
     await expect(page.getByRole("region", { name: "原稿の閲覧" })).toContainText("東京");
+    const reading = page.getByRole("region", { name: "原稿の閲覧" });
+    await expect(reading.locator("ruby rt")).toHaveText("とうきょう");
+    await page.getByLabel("組方向").selectOption("vertical");
+    await expect(reading).toHaveClass(/scene-reading-vertical/u);
+    await page.getByLabel("組方向").selectOption("horizontal");
+    await expect(reading).toHaveClass(/scene-reading-horizontal/u);
+    const unchanged = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}`);
+    expect((await unchanged.json() as { revision: { markdown: string } }).revision.markdown).toBe(text);
     await page.getByRole("button", { name: "編集へ戻る" }).click(); await expectMarkdown(page, text);
     await page.reload();
     if (mode === "mobile") await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "書く", exact: true }).click();
@@ -174,7 +182,7 @@ test("UX canon keeps the manuscript visible and stable through PostgreSQL save r
 });
 
 test("UX canon puts Japanese prose before optional chrome at every shell width", async ({ page }) => {
-  for (const width of [1440, 1024, 390]) {
+  for (const width of [1920, 1440, 1024, 430, 390, 375, 320]) {
     await page.setViewportSize({ width, height: 900 }); await createWritingFixture(page, width < 640 ? "mobile" : "desktop");
     await editor(page).fill("本文を中心に読める幅と余白を保つ。".repeat(20));
     const box = await editor(page).boundingBox(); expect(box).not.toBeNull(); expect(box!.width).toBeGreaterThan(200);
@@ -198,6 +206,28 @@ test("UX canon keeps explicit shells usable with long Japanese titles and enlarg
     await expect(editor(page)).toHaveCSS("font-size", "24px");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
     await expect(page.getByRole("button", { name: "今すぐ保存" })).toBeVisible();
+  }
+});
+
+test("mobile writing keeps account and layout controls one step away and reflows at 320px", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await createWritingFixture(page, "mobile", "灯台文庫の長い日本語シーン名");
+  const editorNode = editor(page);
+  await expect(editorNode).toBeVisible();
+  await expect(page.locator(".mobile-shell-shared-header")).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+
+  await page.getByRole("button", { name: "設定を開く" }).click();
+  await expect(page.locator(".mobile-shell-shared-header")).toBeVisible();
+  await expect(page.locator(".mobile-shell-workspace-view[data-active-view='settings'] .st-workspace-configuration")).toBeVisible();
+  await page.getByRole("button", { name: "執筆画面へ戻る" }).click();
+  await expect(page.locator(".mobile-shell-shared-header")).toBeHidden();
+  await expect(editorNode).toContainText("最初の本文。");
+
+  for (const width of [320, 375, 390, 430]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(editorNode).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   }
 });
 

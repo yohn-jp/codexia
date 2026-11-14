@@ -390,7 +390,9 @@ async function openFixtureScene(page: Page, mode: "desktop" | "mobile", sceneInd
   const route = `/${mode}/projects/${fixture.project.id}/scenes/${scene!.document.id}${mode === "mobile" ? "?view=writing" : ""}`;
   await page.goto(route);
   await expect(page).toHaveURL(new RegExp(`/${mode}/projects/${fixture.project.id}/scenes/${scene!.document.id}`));
-  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
+  await expect(mode === "mobile"
+    ? page.locator(".mobile-shell-current-title")
+    : page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   if (mode === "mobile") {
     await page.getByRole("tablist", { name: "Workspace panels" }).getByRole("tab", { name: "原稿", exact: true }).click();
   }
@@ -639,6 +641,7 @@ test("mobile workspace tabs support keyboard navigation and preserve the editor 
   await expect(editorTab).toHaveAttribute("aria-selected", "true");
   await expect(page.locator('[data-workspace-panel="editor"] .cm-content')).toHaveText(draft);
 
+  await page.getByRole("button", { name: "設定を開く" }).click();
   await page.locator(".st-workspace-configuration > summary").click();
   const mobileToolbar = workspaceToolbar(page);
   await mobileToolbar.getByRole("button", { name: "Save layout", exact: true }).click();

@@ -5,6 +5,10 @@
 }
 :is(.st-studio-shell, .mobile-shell) .scene-heading { min-width: 0; }
 :is(.st-studio-shell, .mobile-shell) .scene-heading :is(h1, .eyebrow) { overflow-wrap: anywhere; }
+:is(.st-studio-shell, .mobile-shell) .pg-editor-column {
+  min-width: 0;
+  container: codexia-editor / inline-size;
+}
 :is(.st-studio-shell, .mobile-shell) .editor-header { gap: 0.75rem; flex-wrap: wrap; }
 :is(.st-studio-shell, .mobile-shell) .writing-toolbar {
   display: flex; flex-wrap: wrap; gap: 0.35rem; margin-block: 0.35rem;
@@ -100,6 +104,16 @@
 .mobile-shell .mobile-shell-writing-accessories { gap: 0.35rem; padding: 0.25rem 0.5rem; }
 .mobile-shell .mobile-shell-accessory-button { min-height: 2.75rem; }
 :is(.st-studio-shell, .mobile-shell) :is(button, summary, select, a):focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+@container codexia-editor (max-width: 46rem) {
+  :is(.st-studio-shell, .mobile-shell) .pg-editor-heading { align-items: flex-start; flex-direction: column; }
+  :is(.st-studio-shell, .mobile-shell) .pg-save-state { justify-items: start; text-align: start; }
+}
+@supports not (container-type: inline-size) {
+  @media (max-width: 760px) {
+    :is(.st-studio-shell, .mobile-shell) .pg-editor-heading { align-items: flex-start; flex-direction: column; }
+    :is(.st-studio-shell, .mobile-shell) .pg-save-state { justify-items: start; text-align: start; }
+  }
+}
 @media (max-width: 850px) {
   .st-studio-topbar { flex: 0 0 auto; height: auto; min-height: 4.5rem; flex-wrap: wrap; padding-block: 0.5rem; }
   .st-studio-wordmark { font-size: 1.1rem; }
