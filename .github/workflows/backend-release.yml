@@ -13,6 +13,9 @@ on:
       - scripts/runtime-package-closure.mjs
       - scripts/verify-backend-image.sh
       - scripts/backend-update-identity*.mjs
+      - scripts/component-release-version*.mjs
+      - scripts/record-component-release.mjs
+      - scripts/backend-registry-tag.mjs
       - deploy/update-compatibility.json
       - scripts/verify-release-source.mjs
       - scripts/release-policy.mjs
@@ -34,6 +37,9 @@ on:
       - scripts/runtime-package-closure.mjs
       - scripts/verify-backend-image.sh
       - scripts/backend-update-identity*.mjs
+      - scripts/component-release-version*.mjs
+      - scripts/record-component-release.mjs
+      - scripts/backend-registry-tag.mjs
       - deploy/update-compatibility.json
       - scripts/verify-release-source.mjs
       - scripts/release-policy.mjs
@@ -45,7 +51,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: codexia-backend-${{ github.event.pull_request.number || github.ref }}
+  group: codexia-backend-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   build-test:
@@ -79,7 +85,9 @@ jobs:
           PROFILE: ${{ matrix.profile }}
         run: |
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          docker buildx build --platform linux/amd64 --load --build-arg "CODEXIA_PRODUCER_REVISION=$SOURCE_SHA" --build-arg "PROFILE=$PROFILE" --tag codexia-backend-ci --file Dockerfile.backend .
+          version="$(node scripts/component-release-version.mjs backend)"
+          echo "CODEXIA_RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          docker buildx build --platform linux/amd64 --load --build-arg "CODEXIA_RELEASE_VERSION=$version" --build-arg "CODEXIA_PRODUCER_REVISION=$SOURCE_SHA" --build-arg "PROFILE=$PROFILE" --tag codexia-backend-ci --file Dockerfile.backend .
       - name: Verify API image before publication
         env:
           PROFILE: ${{ matrix.profile }}
@@ -99,11 +107,12 @@ jobs:
     needs: build-test
     outputs:
       certified-image: ${{ steps.push-image.outputs.image }}
+      certified-full-image: ${{ steps.push-image.outputs.full-image }}
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 70
     permissions:
-      contents: read
+      contents: write
       packages: write
       actions: read
     steps:
@@ -133,23 +142,46 @@ jobs:
         env:
           IMAGE: ghcr.io/yohn-jp/codexia-backend
           SOURCE_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          export CODEXIA_RELEASE_VERSION="$(node scripts/component-release-version.mjs backend)"
           for profile in core full; do
             gzip -dc "$RUNNER_TEMP/backend-images/codexia-backend-image-$SOURCE_SHA-$profile/codexia-backend-image.tar.gz" | docker load
             tag="sha-$SOURCE_SHA"
             if [[ "$profile" == full ]]; then tag="$tag-full"; fi
             tested_id="$(docker image inspect --format '{{.Id}}' codexia-backend-ci)"
-            docker tag codexia-backend-ci "$IMAGE:$tag"
-            docker push "$IMAGE:$tag" | tee "$RUNNER_TEMP/push.log"
-            digest="$(sed -nE 's/^.*digest: (sha256:[a-f0-9]{64}) size: [0-9]+.*$/\1/p' "$RUNNER_TEMP/push.log" | tail -1)"
-            [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
-            docker pull "$IMAGE@$digest"
-            test "$(docker image inspect --format '{{.Id}}' "$IMAGE@$digest")" = "$tested_id"
-            if [[ "$profile" == core ]]; then echo "image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"; fi
+            digest="$(node scripts/backend-registry-tag.mjs "$tag")"
+            if [[ "$digest" == absent ]]; then
+              docker tag codexia-backend-ci "$IMAGE:$tag"
+              docker push "$IMAGE:$tag"
+              digest="$(node scripts/backend-registry-tag.mjs "$tag")"
+              [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+              docker pull "$IMAGE@$digest"
+              test "$(docker image inspect --format '{{.Id}}' "$IMAGE@$digest")" = "$tested_id"
+            else
+              # Retry or partial publication: never replace an existing SHA tag.
+              [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+              docker pull "$IMAGE@$digest"
+              if [[ "$(docker image inspect --format '{{.Id}}' "$IMAGE@$digest")" != "$tested_id" ]]; then
+                bash scripts/verify-backend-image.sh docker "$IMAGE@$digest" "$SOURCE_SHA" "$profile"
+              fi
+            fi
+            if [[ "$profile" == core ]]; then
+              echo "image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
+            else
+              echo "full-image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
+            fi
             docker buildx imagetools inspect "$IMAGE@$digest"
             echo "Published $IMAGE:$tag ($profile, $digest) from $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
           done
+
+      - name: Record independent backend release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_CERTIFIED_IMAGE: ${{ steps.push-image.outputs.image }}
+          CODEXIA_CERTIFIED_FULL_IMAGE: ${{ steps.push-image.outputs.full-image }}
+        run: node scripts/record-component-release.mjs backend
 
   stable-channel:
     name: Advertise certified stable backend
@@ -183,4 +215,5 @@ jobs:
           CODEXIA_CHANNEL_SIGNING_KEY: ${{ secrets.CODEXIA_CHANNEL_SIGNING_KEY }}
           CODEXIA_CHANNEL_MODE: publish
           CODEXIA_CERTIFIED_IMAGE: ${{ needs.publish.outputs.certified-image }}
+          CODEXIA_CERTIFIED_FULL_IMAGE: ${{ needs.publish.outputs.certified-full-image }}
         run: node scripts/publish-stable-channel.mjs

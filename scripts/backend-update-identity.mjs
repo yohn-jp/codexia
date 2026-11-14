@@ -3,6 +3,8 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { readComponentVersion } from './component-release-version.mjs';
+
 const root = fileURLToPath(new URL('../', import.meta.url));
 const readJson = filename => JSON.parse(readFileSync(filename, 'utf8'));
 const keys = ['apiEpoch', 'format', 'migrationFingerprint', 'persistenceFormat', 'platform', 'profile', 'sourceSha', 'version'];
@@ -33,13 +35,13 @@ export function assertBackendIdentity(identity, expected, observation) {
   if (observation.platform !== identity.platform || observation.sourceSha !== identity.sourceSha ||
       observation.migrationFingerprint !== identity.migrationFingerprint ||
       observation.api?.name !== 'codexia' || observation.api?.version !== identity.version ||
-      observation.api?.profile !== identity.profile || observation.api?.hosted !== false) {
+      observation.api?.apiEpoch !== identity.apiEpoch || observation.api?.profile !== identity.profile || observation.api?.hosted !== false) {
     throw new Error('Backend runtime does not match embedded identity');
   }
 }
 
 function expectedIdentity(profile, sourceSha, migrationFingerprint) {
-  const { version } = readJson(path.join(root, 'package.json'));
+  const version = process.env.CODEXIA_RELEASE_VERSION || readComponentVersion('backend', '');
   const compatibility = readJson(path.join(root, 'deploy/update-compatibility.json'));
   return validateBackendIdentity({ format: 'codexia-backend-identity/v1', version, sourceSha, profile,
     platform: 'linux/amd64', migrationFingerprint, ...compatibility });
@@ -51,7 +53,6 @@ function main() {
     const [runtime, profile, sourceSha] = args;
     const manifest = readJson(path.join(runtime, 'package.json'));
     if (manifest.name !== '@codexia/profile-' + profile ||
-        manifest.version !== readJson(path.join(root, 'package.json')).version ||
         process.platform !== 'linux' || process.arch !== 'x64') {
       throw new Error('Packaged profile, version or architecture mismatch');
     }

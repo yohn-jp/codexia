@@ -10,5 +10,8 @@
   "accessClientIdFile": "/home/codexia/.config/codexia-updater/access-client-id",
   "accessClientSecretFile": "/home/codexia/.config/codexia-updater/access-client-secret",
   "observeMilliseconds": 300000,
-  "initialSlot": "blue"
+  "initialSlot": "blue",
+  "browserAuth": {
+    "mode": "token"
+  }
 }

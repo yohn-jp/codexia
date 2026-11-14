@@ -14,7 +14,8 @@ test('bootstrap, monotonic publish, refresh and withdrawal preserve immutable id
   assert.throws(()=>nextChannel(null,{mode:'publish',release:release('0.1.0','a')},now));
   const one=nextChannel(zero,{mode:'publish',release:release('0.1.0','a')},now);
   assert.equal(one.sequence,2);
-  assert.equal(nextChannel(one,{mode:'publish',release:release('0.1.0','b')},now),null);
+  assert.throws(()=>nextChannel(one,{mode:'publish',release:release('0.1.0','b')},now),/different artifact/);
+  assert.equal(nextChannel(one,{mode:'publish',release:release('0.1.0','a')},now),null);
   const two=nextChannel(one,{mode:'publish',release:release('0.1.1','b')},now);
   assert.throws(()=>nextChannel(two,{mode:'publish',release:release('0.0.1','c')},now));
   const withdrawn=nextChannel(two,{mode:'withdraw',image:image('b')},now);
@@ -41,4 +42,27 @@ test('release identity must match certified source and compatibility',()=>{
   assert.deepEqual(releaseFromIdentity(identity,artifact,r.sourceSha,r.version,compatibility,'core'),r);
   assert.throws(()=>releaseFromIdentity(identity,artifact,'b'.repeat(40),r.version,compatibility,'core'));
   assert.throws(()=>releaseFromIdentity(identity,artifact,r.sourceSha,r.version,{...compatibility,apiEpoch:2},'core'));
+});
+
+
+test('certified Core and Full are advertised together without replacing an existing version',()=>{
+  const core=release('0.1.0','a');
+  const full={...core,profile:'full',image:image('b')};
+  const zero=nextChannel(null,{mode:'bootstrap'},now);
+  const both=nextChannel(zero,{mode:'publish',releases:[core,full]},now);
+  assert.equal(both.sequence,2);
+  assert.deepEqual(both.releases,[core,full]);
+  assert.equal(nextChannel(both,{mode:'publish',releases:[core,full]},now),null);
+  const old=nextChannel(zero,{mode:'publish',release:core},now);
+  const added=nextChannel(old,{mode:'publish',releases:[core,full]},now);
+  assert.deepEqual(added.releases,[core,full]);
+  assert.throws(()=>nextChannel(zero,{mode:'publish',releases:[core,{...full,sourceSha:'c'.repeat(40)}]},now),/share source/);
+  assert.throws(()=>nextChannel(zero,{mode:'publish',releases:[core,{...full,image:core.image}]},now),/distinct images/);
+  assert.throws(()=>nextChannel(zero,{mode:'publish',releases:[core,core]},now),/Duplicate candidate profile/);
+  const newer=release('0.1.1','c');
+  const newerFull={...newer,profile:'full',image:image('d')};
+  const next=nextChannel(both,{mode:'publish',releases:[newer,newerFull]},now);
+  assert.deepEqual(next.releases,[core,full,newer,newerFull]);
+  const withdrawn=nextChannel(next,{mode:'withdraw',image:newerFull.image},now);
+  assert.throws(()=>nextChannel(withdrawn,{mode:'publish',releases:[newer,newerFull]},now),/Withdrawn version/);
 });

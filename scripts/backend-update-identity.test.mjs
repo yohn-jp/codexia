@@ -5,7 +5,7 @@ import { validateBackendIdentity, assertBackendIdentity } from './backend-update
 const identity = {format:'codexia-backend-identity/v1', version:'0.1.0', sourceSha:'a'.repeat(40),
   profile:'core', platform:'linux/amd64', migrationFingerprint:'sha256:'+'b'.repeat(64), apiEpoch:1, persistenceFormat:1};
 const observation = {platform:identity.platform, sourceSha:identity.sourceSha,
-  migrationFingerprint:identity.migrationFingerprint, api:{name:'codexia', version:'0.1.0', profile:'core', hosted:false}};
+  migrationFingerprint:identity.migrationFingerprint, api:{name:'codexia', version:'0.1.0', profile:'core', hosted:false, apiEpoch:1}};
 test('exact identity and runtime observation pass', () => {
   assertBackendIdentity(identity, {...identity}, observation);
 });
@@ -23,7 +23,7 @@ test('every expected identity field is checked', () => {
 });
 test('runtime mismatches fail closed', () => {
   for (const patch of [{platform:'linux/arm64'},{sourceSha:'c'.repeat(40)},{migrationFingerprint:'sha256:'+'d'.repeat(64)},
-    {api:{...observation.api,profile:'full'}},{api:{...observation.api,version:'0.2.0'}},{api:{...observation.api,hosted:true}}]) {
+    {api:{...observation.api,profile:'full'}},{api:{...observation.api,version:'0.2.0'}},{api:{...observation.api,apiEpoch:2}},{api:{...observation.api,hosted:true}}]) {
     assert.throws(() => assertBackendIdentity(identity,identity,{...observation,...patch}));
   }
 });

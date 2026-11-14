@@ -5,6 +5,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { readFileSync } from "node:fs";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -59,7 +60,15 @@ const POSTGRES_REVISION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[
 const MAX_SCRATCH_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const API_DRAIN_TIMEOUT_MS = 5_000;
 const MAX_ACTIVE_DOMAIN_JOBS = 32;
-const API_VERSION = "0.1.0";
+const apiManifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+const standaloneIdentity = process.env.CODEXIA_STANDALONE_IDENTITY === "1"
+  ? JSON.parse(readFileSync("/app/update-identity.json", "utf8")) as { version: string; apiEpoch: number }
+  : undefined;
+const API_VERSION = standaloneIdentity?.version ?? apiManifest.version;
+if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(API_VERSION) ||
+    (standaloneIdentity && (!Number.isSafeInteger(standaloneIdentity.apiEpoch) || standaloneIdentity.apiEpoch < 1))) {
+  throw new Error("Invalid API release identity");
+}
 const STYLE_NONCES = new WeakMap<IncomingMessage, string>();
 
 function hasBase64AlphabetAndPadding(value: string): boolean {
@@ -1502,6 +1511,7 @@ export function createServer(options: ApiServerOptions): Server {
     if (routePath === "/api/version" && isRead) {
       sendJson(response, 200, {
         name: "codexia", version: API_VERSION, contractVersion: CONTRACT_VERSION,
+        ...(standaloneIdentity ? { apiEpoch: standaloneIdentity.apiEpoch } : {}),
         hosted: Boolean(hosted),
         ...(cloudflareAccess ? { browserAuth: "cloudflare-access" } : {}),
         profile, auth: [cloudflareAccess ? "access-owner" : "cookie-owner", "bearer-read-compute-propose"], runtime: { name: "@codexia/module-runtime", contractVersion: CONTRACT_VERSION, ...(runtime.metadata ? { metadata: runtime.metadata() } : {}) },

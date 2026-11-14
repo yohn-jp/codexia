@@ -21,6 +21,8 @@ RUN --mount=type=cache,id=codexia-pnpm-store,target=/pnpm/store,sharing=locked \
 FROM source AS build
 ARG PROFILE
 ARG CODEXIA_PRODUCER_REVISION
+ARG CODEXIA_RELEASE_VERSION
+ENV CODEXIA_RELEASE_VERSION=${CODEXIA_RELEASE_VERSION}
 ENV CODEXIA_PROFILE=${PROFILE}
 RUN node scripts/profile-package.mjs --profile "${PROFILE}" --server-only --out /runtime
 RUN node scripts/backend-update-identity.mjs build /runtime "${PROFILE}" "${CODEXIA_PRODUCER_REVISION}"
@@ -37,7 +39,8 @@ ENV NODE_ENV=production \
     CODEXIA_USAGE_DIR=/history \
     HOME=/data \
     TMPDIR=/tmp \
-    CODEXIA_PRODUCER_REVISION=${CODEXIA_PRODUCER_REVISION}
+    CODEXIA_PRODUCER_REVISION=${CODEXIA_PRODUCER_REVISION} \
+    CODEXIA_STANDALONE_IDENTITY=1
 LABEL org.opencontainers.image.revision=${CODEXIA_PRODUCER_REVISION}
 RUN test "${#CODEXIA_PRODUCER_REVISION}" -eq 40 \
  && printf '%s' "${CODEXIA_PRODUCER_REVISION}" | grep -Eq '^[a-f0-9]{40}$'
