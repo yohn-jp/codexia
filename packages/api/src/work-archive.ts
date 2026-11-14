@@ -258,7 +258,7 @@ export async function exportWorkArchive(persistence: Persistence, projectId: Pro
       for (const anchor of anchors) {
         const entry = { id: anchor.id, documentId: anchor.documentId, revisionId: anchor.revisionId,
           fromUtf16: anchor.fromUtf16, toUtf16: anchor.toUtf16, quoteSha256: anchor.quoteSha256, status: anchor.status };
-        const canonical = currentRevisions.get(document.id);
+        const canonical = currentRevisions.get(documentId);
         const current = !!canonical && entry.revisionId === canonical.revisionId &&
           entry.fromUtf16 < entry.toUtf16 && entry.toUtf16 <= canonical.markdown.length &&
           digest(canonical.markdown.slice(entry.fromUtf16, entry.toUtf16)) === entry.quoteSha256;
