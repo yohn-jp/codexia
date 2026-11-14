@@ -65,7 +65,7 @@ async function openReview(page: Page, mode: "desktop" | "mobile") {
 }
 
 async function returnToEditor(page: Page, mode: "desktop" | "mobile") {
-  if (mode === "desktop") await page.getByRole("tab", { name: "原稿" }).click();
+  if (mode === "desktop") await page.getByRole("navigation", { name: "主な作業" }).getByRole("button", { name: "執筆", exact: true }).click();
   else await page.getByRole("button", { name: /書く/u }).click();
 }
 

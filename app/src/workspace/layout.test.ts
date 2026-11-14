@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  activateWorkspacePanel,
   createWorkspacePreset,
   hideWorkspacePanel,
   moveWorkspacePanel,
@@ -24,11 +25,18 @@ test("presets are valid editable trees with the expected panel selections", () =
 
   assert.equal(validateWorkspaceLayout(writing), true);
   assert.equal(writing.root.type, "split");
-  assert.deepEqual(visiblePanelIds(writing.root), ["editor", "outline", "inspector"]);
+  assert.deepEqual(visiblePanelIds(writing.root), ["outline", "editor", "inspector"]);
+  assert.deepEqual(writing.root.type === "split" ? writing.root.sizes : [], [18, 60, 22]);
   assert.deepEqual(writing.hiddenPanelIds, ["history", "review", "module:terms"]);
-  assert.ok(visiblePanelIds(research.root).includes("module:terms"));
-  assert.ok(visiblePanelIds(review.root).includes("history"));
+  assert.equal(research.root.type, "split");
+  assert.deepEqual(visiblePanelIds(research.root), ["editor", "outline", "inspector", "module:terms"]);
+  assert.deepEqual(research.root.type === "split" ? research.root.sizes : [], [68, 32]);
+  assert.equal(research.root.type === "split" ? research.root.children[1]?.type : undefined, "stack");
+  assert.equal(research.root.type === "split" && research.root.children[1]?.type === "stack"
+    ? research.root.children[1].activePanelId : undefined, "inspector");
   assert.ok(visiblePanelIds(review.root).includes("review"));
+  assert.ok(!visiblePanelIds(review.root).includes("history"));
+  assert.ok(review.hiddenPanelIds.includes("history"));
 });
 
 test("validation rejects malformed, duplicate, oversized, deep, and executable-looking state", () => {
@@ -69,7 +77,11 @@ test("dock operations create tab stacks and horizontal or vertical splits", () =
   const initial = createWorkspacePreset("research", panels);
   const tabbed = moveWorkspacePanel(initial, "inspector", "outline", "tab");
   assert.equal(validateWorkspaceLayout(tabbed), true);
-  assert.deepEqual(visiblePanelIds(tabbed.root).slice(0, 3), ["editor", "outline", "inspector"]);
+  assert.deepEqual(visiblePanelIds(tabbed.root), ["editor", "outline", "inspector", "module:terms"]);
+  assert.equal(tabbed.root.type === "split" && tabbed.root.children[1]?.type === "stack"
+    ? tabbed.root.children[1].children.some((child) => child.panelId === "outline") &&
+      tabbed.root.children[1].children.some((child) => child.panelId === "inspector")
+    : false, true);
   assert.equal(tabbed.preset, "custom");
 
   const docked = moveWorkspacePanel(initial, "inspector", "editor", "bottom");
@@ -112,11 +124,21 @@ test("newly available panels can be added without replacing an unsaved layout", 
   assert.ok(visiblePanelIds(withTerms.root).includes("module:terms"));
 });
 
+test("selecting a leaf or the active stack tab does not turn a preset into a custom layout", () => {
+  const review = createWorkspacePreset("review", panels);
+  assert.equal(activateWorkspacePanel(review, "editor"), review);
+  assert.equal(activateWorkspacePanel(review, "review"), review);
+  assert.equal(activateWorkspacePanel(review, "inspector").preset, "custom");
+});
+
 test("resizing updates only the addressed split and keeps percentages normalized", () => {
   const initial = createWorkspacePreset("writing", panels);
   assert.equal(initial.root.type, "split");
   if (initial.root.type !== "split") return;
-  const resized = resizeWorkspaceSplit(initial, initial.root.id, [55, 45]);
-  assert.deepEqual(resized.root.type === "split" ? resized.root.sizes : [], [55, 45]);
+  assert.equal(resizeWorkspaceSplit(initial, initial.root.id, initial.root.sizes), initial);
+  assert.equal(resizeWorkspaceSplit(initial, "split-missing", [48, 32, 20]), initial);
+  const resized = resizeWorkspaceSplit(initial, initial.root.id, [48, 32, 20]);
+  assert.deepEqual(resized.root.type === "split" ? resized.root.sizes : [], [48, 32, 20]);
+  assert.equal(resized.preset, "custom");
   assert.equal(validateWorkspaceLayout(resized), true);
 });

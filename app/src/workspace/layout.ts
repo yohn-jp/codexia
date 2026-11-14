@@ -145,42 +145,70 @@ export function visiblePanelIds(node: WorkspaceNode): string[] {
 }
 
 function preferredPanels(preset: Exclude<WorkspacePreset, "custom">, ids: string[]): string[] {
-  const chosen = new Set<string>();
-  const add = (id: string): void => { if (ids.includes(id)) chosen.add(id); };
-  const primary = ids.includes("editor") ? "editor" : ids[0];
-  if (primary) chosen.add(primary);
+  const ordered = preset === "writing"
+    ? ["outline", "editor", "inspector"]
+    : preset === "research"
+      ? ["outline", "editor", "inspector", ...ids.filter((id) => id.startsWith("module:"))]
+      : ["editor", "review", "inspector"];
+  const selected = ordered.filter((id, index) => ids.includes(id) && ordered.indexOf(id) === index);
+  return selected.length ? selected : ids.slice(0, 1);
+}
 
-  if (preset === "writing") {
-    add("outline");
-    add("inspector");
-  } else if (preset === "research") {
-    add("outline");
-    add("inspector");
-    ids.filter((id) => id.startsWith("module:")).forEach(add);
-  } else {
-    add("review");
-    add("history");
-    add("inspector");
-  }
-  return [primary, ...[...chosen].filter((id) => id !== primary)].filter((id): id is string => Boolean(id));
+function presetPanelNode(panelIds: string[], activePanelId = panelIds[0]): WorkspaceNode | null {
+  if (panelIds.length === 0 || !activePanelId) return null;
+  if (panelIds.length === 1) return leaf(panelIds[0]!);
+  return {
+    type: "stack",
+    id: "stack-preset-secondary",
+    activePanelId,
+    children: panelIds.map(leaf),
+  };
+}
+
+function presetSplit(children: WorkspaceNode[], sizes: number[]): WorkspaceNode {
+  if (children.length === 1) return children[0]!;
+  return {
+    type: "split",
+    id: "split-preset-main",
+    direction: "horizontal",
+    children,
+    sizes: normalizeSizes(sizes),
+  };
 }
 
 export function createWorkspacePreset(preset: Exclude<WorkspacePreset, "custom">, panelIds: string[]): WorkspaceLayout {
   const ids = [...new Set(panelIds.filter(validPanelId))];
   const selected = preferredPanels(preset, ids);
-  const root: WorkspaceNode = selected.length === 0
-    ? leaf("editor")
-    : selected.length === 1
-      ? leaf(selected[0]!)
-      : {
-        type: "split",
-        id: "split-preset-main",
-        direction: "horizontal",
-        children: [leaf(selected[0]!), selected.length === 2
-          ? leaf(selected[1]!)
-          : { type: "stack", id: "stack-preset-secondary", activePanelId: selected[1]!, children: selected.slice(1).map(leaf) }],
-        sizes: [68, 32],
-      };
+  let root: WorkspaceNode;
+
+  if (selected.length === 0) {
+    root = leaf("editor");
+  } else if (preset === "writing") {
+    const regions = selected.map((id) => leaf(id));
+    const sizes = selected.length === 3
+      ? [18, 60, 22]
+      : selected.length === 2 && selected.includes("outline") && selected.includes("editor")
+        ? [24, 76]
+        : selected.length === 2 && selected.includes("editor") && selected.includes("inspector")
+          ? [78, 22]
+          : [50, 50];
+    root = presetSplit(regions, sizes);
+  } else if (preset === "research") {
+    const editor = selected.includes("editor") ? leaf("editor") : null;
+    const supportIds = selected.filter((id) => id !== "editor");
+    const support = presetPanelNode(
+      supportIds,
+      supportIds.includes("inspector") ? "inspector" : supportIds[0],
+    );
+    root = presetSplit([editor, support].filter((node): node is WorkspaceNode => node !== null), [68, 32]);
+  } else {
+    const editor = selected.includes("editor") ? leaf("editor") : null;
+    const supportIds = selected.filter((id) => id !== "editor");
+    const support = presetPanelNode(supportIds, supportIds.includes("review") ? "review" : supportIds[0]);
+    const regions = [editor, support].filter((node): node is WorkspaceNode => node !== null);
+    root = presetSplit(regions, [68, 32]);
+  }
+
   const layout: WorkspaceLayout = {
     version: 1,
     preset,
@@ -293,26 +321,34 @@ export function showWorkspacePanel(layout: WorkspaceLayout, panelId: string): Wo
 }
 
 export function resizeWorkspaceSplit(layout: WorkspaceLayout, splitId: string, sizes: number[]): WorkspaceLayout {
+  if (sizes.some((size) => !Number.isFinite(size) || size < 1 || size > 99)) return layout;
   const update = (node: WorkspaceNode): WorkspaceNode => {
     if (node.type !== "split") return node;
-    if (node.id === splitId && sizes.length === node.children.length &&
-        sizes.every((size) => Number.isFinite(size) && size >= 1 && size <= 99)) {
-      return { ...node, sizes: normalizeSizes(sizes) };
+    if (node.id === splitId && sizes.length === node.children.length) {
+      const normalized = normalizeSizes(sizes);
+      if (node.sizes.every((size, index) => Math.abs(size - normalized[index]!) < 0.01)) return node;
+      return { ...node, sizes: normalized };
     }
-    return { ...node, children: node.children.map(update) };
+    const children = node.children.map(update);
+    return children.every((child, index) => child === node.children[index]) ? node : { ...node, children };
   };
-  const updated = { ...layout, preset: "custom" as const, root: update(layout.root) };
+  const root = update(layout.root);
+  if (root === layout.root) return layout;
+  const updated = { ...layout, preset: "custom" as const, root };
   return validateWorkspaceLayout(updated) ? updated : layout;
 }
 
 export function activateWorkspacePanel(layout: WorkspaceLayout, panelId: string): WorkspaceLayout {
   const update = (node: WorkspaceNode): WorkspaceNode => {
     if (node.type === "leaf") return node;
-    if (node.type === "stack") return node.children.some((child) => child.panelId === panelId)
+    if (node.type === "stack") return node.activePanelId !== panelId && node.children.some((child) => child.panelId === panelId)
       ? { ...node, activePanelId: panelId }
       : node;
-    return { ...node, children: node.children.map(update) };
+    const children = node.children.map(update);
+    return children.every((child, index) => child === node.children[index]) ? node : { ...node, children };
   };
-  const updated = { ...layout, preset: "custom" as const, root: update(layout.root) };
+  const root = update(layout.root);
+  if (root === layout.root) return layout;
+  const updated = { ...layout, preset: "custom" as const, root };
   return validateWorkspaceLayout(updated) ? updated : layout;
 }
