@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { createWritingFixture } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
@@ -160,4 +161,44 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await expect(otherPage.getByText("PostgreSQLへ保存済み")).toBeVisible({ timeout: 15_000 });
   await otherPage.close();
   expect(contentSecurityPolicyViolations).toEqual([]);
+});
+
+
+test("Knowledge relation pagination keeps the forty-first fetched relation actionable", async ({ page }) => {
+  expect(databaseUrl).toBeTruthy();
+  const { project } = await createWritingFixture(page);
+  const path = `/api/v1/persistence/projects/${project.id}/nodes`;
+  const headers = { Origin: new URL(page.url()).origin };
+  const source = crypto.randomUUID(), target = crypto.randomUUID();
+  for (const [id, name] of [[source, "関係の中心"], [target, "関係先"]]) {
+    const response = await page.request.put(`${path}/${id}`, { headers, data: {
+      type: "person", name, attributes: {}, status: "confirmed", expectedVersion: null,
+    } });
+    expect(response.ok(), await response.text()).toBe(true);
+  }
+  for (let i = 0; i < 41; i++) {
+    const response = await page.request.post(`${path}/${source}/relations`, { headers, data: {
+      id: crypto.randomUUID(), targetId: target, type: `関係 ${String(i).padStart(2, "0")}`, attributes: {}, validity: {}, status: "proposed", expectedVersion: null,
+    } });
+    expect(response.status(), await response.text()).toBe(201);
+  }
+  const data = await page.request.get(`${path}/${source}`);
+  const { relations } = await data.json() as { relations: Array<{ id: string; type: string; status: string }> };
+  expect(relations).toHaveLength(41);
+  const last = relations[40]!;
+  await page.reload();
+  await page.getByRole("button", { name: "パネル：文書と保存状態", exact: true }).click();
+  await page.getByLabel("Text AnchorのKnowledge先").selectOption(source);
+  const context = page.getByRole("region", { name: "Knowledge詳細" });
+  await expect(context.locator(".kci__graph-row")).toHaveCount(40);
+  await context.getByRole("button", { name: "次の関係", exact: true }).click();
+  const row = context.locator(".kci__graph-row");
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText(last.type);
+  await row.getByRole("button", { name: "関係を確定" }).click();
+  await expect.poll(async () => {
+    const response = await page.request.get(`${path}/${source}`);
+    const result = await response.json() as { relations: Array<{ id: string; status: string }> };
+    return result.relations.find(relation => relation.id === last.id)?.status;
+  }).toBe("confirmed");
 });
