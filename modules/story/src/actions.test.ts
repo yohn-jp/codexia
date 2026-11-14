@@ -1028,7 +1028,7 @@ test("temporal context respects explicit world days, competing facts, reader sco
   const readerContext = await invoke<{ parts: unknown[] }>("story.context.package", { sceneId: "sc-2", scope: "reader" }, context);
   assert.equal(readerContext.data.parts.length, 1);
   assert.doesNotMatch(JSON.stringify(readerContext.data), /Captain|Recruit|unrevealed secret/);
-  const scenario = await invoke<{ baseline: Projection; alternatives: Array<{ projection: Projection }> }>("story.scenario.compare", {
+  const scenario = await invoke<{ baseline: Projection; alternatives: Array<{ projection: Projection }>; sourceFingerprint: string }>("story.scenario.compare", {
     sceneId: "sc-4",
     alternatives: ["General", "Civilian"].map(label => ({ label, events: [{ kind: "attribute", subject: "char-uma", object: null, payload: { predicate: "rank", value: label }, ...(label === "General" ? { replacesEventId: "rank-lieutenant" } : {}) }] })),
   }, context);
@@ -1067,7 +1067,7 @@ test("temporal context respects explicit world days, competing facts, reader sco
   }, context);
   assert.equal(staleAdoption.ok, false);
   if (!staleAdoption.ok) assert.equal(staleAdoption.error.code, "stale_source");
-  const adopted = await invoke<{ proposals: Array<{ event: Record<string, unknown> }> }>("story.scenario.adopt", {
+  const adopted = await invoke<{ proposals: Array<{ id: string; event: Record<string, unknown> }> }>("story.scenario.adopt", {
     id: saved.data.id, alternativeIndex: 0, sourceFingerprint: scenario.data.sourceFingerprint,
   }, context);
   assert.equal(adopted.data.proposals[0]!.event.replacesEventId, "rank-lieutenant");
