@@ -39,13 +39,24 @@ case "$profile" in
   *) echo "CODEXIA_PROFILE must be core or full." >&2; exit 2 ;;
 esac
 
+secret_directory=""
 cleanup() {
   "$engine" rm --volumes --force "$container" "$database_container" >/dev/null 2>&1 || true
   "$engine" network rm "$verification_network" >/dev/null 2>&1 || true
+  if [[ -n "$secret_directory" ]]; then rm -rf "$secret_directory"; fi
 }
 trap cleanup EXIT INT TERM
 # Preserve the failing command location without logging secret-bearing arguments.
 trap 'status=$?; printf "OCI verification failed at line %s (exit %s)\\n" "$LINENO" "$status" >&2; "$engine" ps --all --filter "name=$database_container" --filter "name=$container" >&2 || true' ERR
+
+secret_directory="$(mktemp -d "${TMPDIR:-/tmp}/codexia-oci-secrets.XXXXXX")"
+umask 077
+printf '%s' "$database_password" > "$secret_directory/postgres-password"
+printf '%s' "$database_password" > "$secret_directory/app-password"
+printf '%s' "$verification_token" > "$secret_directory/auth-token"
+# The directory remains private on the host; mounted files must be readable by
+# the non-root runtime UID inside the verification containers.
+chmod 0444 "$secret_directory/postgres-password" "$secret_directory/app-password" "$secret_directory/auth-token"
 
 if [[ "${engine##*/}" == podman ]]; then
   "$engine" build --format oci --pull --build-arg "PROFILE=$profile" --tag "$image" .
@@ -54,7 +65,8 @@ else
 fi
 "$engine" network create "$verification_network" >/dev/null
 "$engine" run --detach --name "$database_container" --network "$verification_network" \
-  --env POSTGRES_USER=codexia --env POSTGRES_DB=codexia_verify --env "POSTGRES_PASSWORD=$database_password" \
+  --env POSTGRES_USER=codexia --env POSTGRES_DB=codexia_verify --env POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password \
+  --volume "$secret_directory/postgres-password:/run/secrets/postgres-password:ro" \
   docker.io/library/postgres:17-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
 for attempt in $(seq 1 40); do
   # Postgres initialization briefly starts a Unix-socket-only temporary server.
@@ -68,9 +80,14 @@ done
   --network "$verification_network" \
   --stop-timeout 30 \
   --publish "127.0.0.1:${port}:3000" \
-  --env "CODEXIA_AUTH_TOKEN=$verification_token" \
+  --volume "$secret_directory/auth-token:/run/secrets/codexia-auth-token:ro" \
+  --volume "$secret_directory/app-password:/run/secrets/app-password:ro" \
+  --env CODEXIA_AUTH_TOKEN_FILE=/run/secrets/codexia-auth-token \
   --env CODEXIA_DATA_DIR=/data \
-  --env "CODEXIA_DATABASE_URL=postgres://codexia:${database_password}@${database_container}:5432/codexia_verify" \
+  --env CODEXIA_DATABASE_PASSWORD_FILE=/run/secrets/app-password \
+  --env CODEXIA_DATABASE_USER=codexia \
+  --env CODEXIA_DATABASE_NAME=codexia_verify \
+  --env "CODEXIA_DATABASE_HOST=$database_container" \
   --env CODEXIA_DATABASE_MIGRATE_ON_START=1 \
   "$image" >/dev/null
 
