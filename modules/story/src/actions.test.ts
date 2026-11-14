@@ -1065,6 +1065,12 @@ test("temporal context respects explicit world days, competing facts, reader sco
     assert.equal(adoption.ok, false, "previously saved invalid identities must be rejected during adoption");
     files.delete("meta/scriptorium/modules/story/v1/scenarios.json");
   }
+  const syntheticCollision = await invoke("story.scenario.compare", { sceneId: "sc-4", alternatives: [
+    { label: "Two facts", events: [{ ...event }, { ...event, eventId: "hypothesis-0-0", payload: { predicate: "rank", value: "Colonel" } }] },
+    { label: "Other", events: [] },
+  ] }, context);
+  assert.match(JSON.stringify(syntheticCollision.data), /"eventId":"hypothesis-0-0-next"/);
+  assert.match(JSON.stringify(syntheticCollision.data), /"eventId":"hypothesis-0-0"/);
   assert.equal(proposals.length, 0, "compare and invalid hypotheses do not write canonical state");
   const staleSave = await actionById("story.scenario.save").invoke({ sceneId: "sc-4", label: "Stale", alternatives: [
     { label: "A", events: [] }, { label: "B", events: [] },
@@ -1100,6 +1106,11 @@ test("temporal context respects explicit world days, competing facts, reader sco
     id: saved.data.id, alternativeIndex: 0, sourceFingerprint: scenario.data.sourceFingerprint,
   }, context);
   assert.equal(duplicateAdoption.ok, false, "pending identity must not be adopted twice");
+  const otherScene = files.get(scenePath("sc-2"))!;
+  files.set(scenePath("sc-2"), scene("sc-2", 2, 1, [fact("sc-2", "General", "rank-general")]));
+  const collidedApproval = await actionById("story.state-proposals.approve").invoke({ id: adopted.data.proposals[0]!.id }, context);
+  assert.equal(collidedApproval.ok, false, "a canonical event added after adoption must prevent duplicate approval");
+  files.set(scenePath("sc-2"), otherScene);
   const approved = await invoke("story.state-proposals.approve", { id: adopted.data.proposals[0]!.id }, context);
   const approvalOperation = proposals.at(-1)!.operations[0]!;
   for (const write of approvalOperation.writes) files.set(write.path, write.content!);
