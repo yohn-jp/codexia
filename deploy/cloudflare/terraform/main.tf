@@ -1,5 +1,6 @@
 locals {
-  ui_routes = jsondecode(file("${path.module}/../ui-routes.json")).routes
+  ui_routes     = jsondecode(file("${path.module}/../ui-routes.json")).routes
+  origin_routes = jsondecode(file("${path.module}/../ui-routes.json")).originRoutes
 }
 
 resource "cloudflare_zero_trust_access_policy" "codexia" {
@@ -64,10 +65,16 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "codexia" {
   }
 }
 
-# Zone Routes select only UI paths. /api/* and every other dynamic path reach the Tunnel directly.
+# Scriptless exclusions win over the static catch-all, including query-string URLs.
 resource "cloudflare_workers_route" "frontend" {
   for_each = var.frontend_route_enabled ? toset(local.ui_routes) : toset([])
   zone_id  = var.zone_id
   pattern  = "${var.app_hostname}${each.value}"
   script   = "codexia-frontend"
+}
+
+resource "cloudflare_workers_route" "origin" {
+  for_each = var.frontend_route_enabled ? toset(local.origin_routes) : toset([])
+  zone_id  = var.zone_id
+  pattern  = "${var.app_hostname}${each.value}"
 }
