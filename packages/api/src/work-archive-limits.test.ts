@@ -36,6 +36,15 @@ function mentionStore(count: number): Persistence {
   });
 }
 
+function assertionStore(count: number): Persistence {
+  const assertions = assertionRows(count);
+  return persistence({
+    listAssertions: async () => assertions,
+    listEvidenceAssertions: async (_project: unknown, _evidence: unknown, limit = 100) =>
+      records(count, (i) => ({ assertionId: assertions[i]!.id, evidenceId, role: "supports" })).slice(0, limit),
+  });
+}
+
 function persistence(overrides: Record<string, unknown>): Persistence {
   const reader = {
     getProject: async () => ({ id: projectId, title: "Fixture", settings: {}, version: 1, createdAt: "", updatedAt: "" }),
@@ -56,37 +65,24 @@ function persistence(overrides: Record<string, unknown>): Persistence {
 
 test("archive export rejects full alias, relation, mention, and assertion-evidence pages", async (t) => {
   const cases = [
-    ["aliases at 1000", persistence({ listKnowledgeAliases: async (_project: unknown, _node: unknown, limit = 500) => aliasRows(1000).slice(0, limit) })],
-    ["relations at 1000", persistence({ listKnowledgeRelations: async (_project: unknown, _node: unknown, limit = 500) => relationRows(1000).slice(0, limit) })],
-    ["mentions at 1000", mentionStore(1000)],
-    ["assertion evidence at 200", (() => {
-      const assertions = assertionRows(200);
-      return persistence({
-        listAssertions: async () => assertions,
-        listEvidenceAssertions: async (_project: unknown, _evidence: unknown, limit = 100) =>
-          records(200, (i) => ({ assertionId: assertions[i]!.id, evidenceId, role: "supports" })).slice(0, limit),
-      });
-    })()],
+    ["aliases", [1000, 1001], (count: number) => persistence({ listKnowledgeAliases: async (_project: unknown, _node: unknown, limit = 500) => aliasRows(count).slice(0, limit) })],
+    ["relations", [1000, 1001], (count: number) => persistence({ listKnowledgeRelations: async (_project: unknown, _node: unknown, limit = 500) => relationRows(count).slice(0, limit) })],
+    ["mentions", [1000, 1001], (count: number) => mentionStore(count)],
+    ["assertion evidence", [200, 201], (count: number) => assertionStore(count)],
   ] as const;
-  for (const [name, store] of cases) await t.test(name, async () => {
-    await assert.rejects(exportWorkArchive(store, projectId), { code: "WORK_ARCHIVE_LIMIT" });
-  });
+  for (const [name, counts, createStore] of cases) for (const count of counts) {
+    await t.test(`${name} at ${count}`, async () => {
+      await assert.rejects(exportWorkArchive(createStore(count), projectId), { code: "WORK_ARCHIVE_LIMIT" });
+    });
+  }
 });
 
 test("archive export returns every row immediately below each bounded page limit", async (t) => {
-  const assertionInventory = (count: number) => {
-    const assertions = assertionRows(count);
-    return persistence({
-      listAssertions: async () => assertions,
-      listEvidenceAssertions: async (_project: unknown, _evidence: unknown, limit = 100) =>
-        records(count, (i) => ({ assertionId: assertions[i]!.id, evidenceId, role: "supports" })).slice(0, limit),
-    });
-  };
   const cases: readonly [string, Persistence, (archive: Awaited<ReturnType<typeof exportWorkArchive>>) => number, number][] = [
     ["999 aliases", persistence({ listKnowledgeAliases: async (_project: unknown, _node: unknown, limit = 500) => aliasRows(999).slice(0, limit) }), (archive) => archive.knowledge.aliases.length, 999],
     ["999 relations", persistence({ listKnowledgeRelations: async (_project: unknown, _node: unknown, limit = 500) => relationRows(999).slice(0, limit) }), (archive) => archive.knowledge.relations.length, 999],
     ["999 mentions", mentionStore(999), (archive) => archive.evidence.mentions.length, 999],
-    ["199 assertion evidence links", assertionInventory(199), (archive) => archive.evidence.assertionEvidence.length, 199],
+    ["199 assertion evidence links", assertionStore(199), (archive) => archive.evidence.assertionEvidence.length, 199],
   ];
   for (const [name, store, countOf, expected] of cases) await t.test(name, async () => {
     assert.equal(countOf(await exportWorkArchive(store, projectId)), expected);
