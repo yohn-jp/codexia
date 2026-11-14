@@ -15,6 +15,7 @@ on:
       - scripts/backend-update-identity*.mjs
       - scripts/component-release-version*.mjs
       - scripts/record-component-release.mjs
+      - scripts/backend-registry-tag.mjs
       - deploy/update-compatibility.json
       - scripts/verify-release-source.mjs
       - scripts/release-policy.mjs
@@ -38,6 +39,7 @@ on:
       - scripts/backend-update-identity*.mjs
       - scripts/component-release-version*.mjs
       - scripts/record-component-release.mjs
+      - scripts/backend-registry-tag.mjs
       - deploy/update-compatibility.json
       - scripts/verify-release-source.mjs
       - scripts/release-policy.mjs
@@ -140,19 +142,31 @@ jobs:
         env:
           IMAGE: ghcr.io/yohn-jp/codexia-backend
           SOURCE_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          export CODEXIA_RELEASE_VERSION="$(node scripts/component-release-version.mjs backend)"
           for profile in core full; do
             gzip -dc "$RUNNER_TEMP/backend-images/codexia-backend-image-$SOURCE_SHA-$profile/codexia-backend-image.tar.gz" | docker load
             tag="sha-$SOURCE_SHA"
             if [[ "$profile" == full ]]; then tag="$tag-full"; fi
             tested_id="$(docker image inspect --format '{{.Id}}' codexia-backend-ci)"
-            docker tag codexia-backend-ci "$IMAGE:$tag"
-            docker push "$IMAGE:$tag" | tee "$RUNNER_TEMP/push.log"
-            digest="$(sed -nE 's/^.*digest: (sha256:[a-f0-9]{64}) size: [0-9]+.*$/\1/p' "$RUNNER_TEMP/push.log" | tail -1)"
-            [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
-            docker pull "$IMAGE@$digest"
-            test "$(docker image inspect --format '{{.Id}}' "$IMAGE@$digest")" = "$tested_id"
+            digest="$(node scripts/backend-registry-tag.mjs "$tag")"
+            if [[ "$digest" == absent ]]; then
+              docker tag codexia-backend-ci "$IMAGE:$tag"
+              docker push "$IMAGE:$tag"
+              digest="$(node scripts/backend-registry-tag.mjs "$tag")"
+              [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+              docker pull "$IMAGE@$digest"
+              test "$(docker image inspect --format '{{.Id}}' "$IMAGE@$digest")" = "$tested_id"
+            else
+              # Retry or partial publication: never replace an existing SHA tag.
+              [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+              docker pull "$IMAGE@$digest"
+              if [[ "$(docker image inspect --format '{{.Id}}' "$IMAGE@$digest")" != "$tested_id" ]]; then
+                bash scripts/verify-backend-image.sh docker "$IMAGE@$digest" "$SOURCE_SHA" "$profile"
+              fi
+            fi
             if [[ "$profile" == core ]]; then
               echo "image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
             else
