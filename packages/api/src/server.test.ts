@@ -421,7 +421,7 @@ function sourceDomainJobRuntime(cacheDirectory: string): {
 async function startCustomApi(
   store: CoreStore,
   staticDir: string,
-  options: Partial<Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence">> = {},
+  options: Partial<Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence" | "cloudflareAccess">> = {},
 ) {
   const server = createServer({ store, authToken: ACCESS_TOKEN, staticDir, persistence: admissionPersistence(store), ...options });
   await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
@@ -2084,6 +2084,100 @@ describe("Codexia HTTP boundary", () => {
     });
     assert.equal(expiredGrant.status, 401);
     assert.equal((await expiredGrant.json() as { code: string }).code, "UNAUTHORIZED");
+  });
+
+  it("admits only the verified Cloudflare browser owner, never upgrades a bearer and preserves same-origin writes", async (t) => {
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-access-"));
+    tempDirs.push(staticDir);
+    const issuer = "https://test.cloudflareaccess.com";
+    const audience = "a".repeat(64);
+    const origin = "https://codexia.example";
+    const email = "owner@example.com";
+    const key = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const jwk = { ...key.publicKey.export({ format: "jwk" }), kid: "access-key", alg: "RS256", use: "sig" };
+    const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+    const now = Math.floor(Date.now() / 1000);
+    const token = (overrides: Record<string, unknown> = {}, header: Record<string, unknown> = {}) => {
+      const unsigned = encode({ alg: "RS256", typ: "JWT", kid: jwk.kid, ...header }) + "." + encode({
+        iss: issuer, aud: [audience], type: "app", sub: "owner-id", email,
+        iat: now - 1, nbf: now - 1, exp: now + 300, ...overrides,
+      });
+      return unsigned + "." + signJwt("RSA-SHA256", Buffer.from(unsigned), key.privateKey).toString("base64url");
+    };
+    let jwksRequests = 0;
+    const persistence = await nativePersistence(t);
+    const apiServer = await startCustomApi(new CoreStore({ persistence }), staticDir, {
+      trustProxy: true, usageDirectory: staticDir, persistence,
+      cloudflareAccess: { issuer, audience, origin, ownerEmail: email, fetch: async (input) => {
+        assert.equal(String(input), issuer + "/cdn-cgi/access/certs");
+        jwksRequests++;
+        return Response.json({ keys: [jwk] });
+      } },
+    });
+    t.after(apiServer.close);
+    // Fetch normalizes Host to the loopback URL. Send the actual HTTP headers a
+    // TLS-terminating proxy would forward, while keeping the socket local.
+    const send = (path: string, headers: Record<string, string> = {}, init: RequestInit = {}) =>
+      new Promise<Response>((resolveResponse, reject) => {
+        const request = httpRequest(apiServer.base + path, {
+          method: init.method ?? "GET",
+          headers: { Host: "codexia.example", "X-Forwarded-Proto": "https", ...headers },
+        }, incoming => {
+          const chunks: Buffer[] = [];
+          incoming.on("data", chunk => chunks.push(Buffer.from(chunk)));
+          incoming.on("error", reject);
+          incoming.on("end", () => {
+            const responseHeaders = new Headers();
+            for (const [name, value] of Object.entries(incoming.headers)) {
+              if (typeof value === "string") responseHeaders.set(name, value);
+              else if (Array.isArray(value)) for (const item of value) responseHeaders.append(name, item);
+            }
+            resolveResponse(new Response(Buffer.concat(chunks), { status: incoming.statusCode!, headers: responseHeaders }));
+          });
+        });
+        request.on("error", reject);
+        request.end(typeof init.body === "string" ? init.body : undefined);
+      });
+    const valid = token();
+    const browser = { "Cf-Access-Jwt-Assertion": valid };
+    assert.equal((await send("/api/version").then(r => r.json()) as { browserAuth: string }).browserAuth, "cloudflare-access");
+    const session = await send("/api/session", browser);
+    assert.equal(session.status, 200);
+    assert.deepEqual(await session.json(), { authenticated: true, authorScope: "owner" });
+    assert.equal(session.headers.get("set-cookie"), null);
+    assert.equal((await send("/api/session", { "Cf-Access-Authenticated-User-Email": email })).status, 401);
+    assert.equal((await send("/api/session", { Cookie: "scriptorium_session=legacy" })).status, 401);
+    const signature = valid.split(".")[2]!;
+    const tampered = valid.slice(0, valid.lastIndexOf(".") + 1) + (signature[0] === "A" ? "B" : "A") + signature.slice(1);
+    for (const invalid of [
+      tampered, token({ iss: "https://other.cloudflareaccess.com" }), token({ aud: ["b".repeat(64)] }),
+      token({ email: "other@example.com" }), token({ exp: now - 1 }), token({ nbf: now + 100 }),
+      token({ sub: "", common_name: "service-token" }), token({ type: "org" }),
+      token({}, { alg: "none" }), token({}, { kid: "unknown" }),
+    ]) {
+      assert.equal((await send("/api/session", { "Cf-Access-Jwt-Assertion": invalid })).status, 401);
+    }
+    assert.equal(jwksRequests, 1, "cache and unknown-kid refresh throttling");
+    assert.equal((await send("/api/session", { ...browser, Host: "wrong.example" })).status, 401);
+    assert.equal((await send("/api/session", { ...browser, Authorization: "Bearer invalid" })).status, 401);
+    const bearer = { ...browser, Authorization: "Bearer " + ACCESS_TOKEN };
+    const bearerSession = await send("/api/session", bearer);
+    assert.equal(bearerSession.status, 200);
+    assert.deepEqual(await bearerSession.json(), { authenticated: true, authorScope: "" });
+    assert.equal((await send("/api/jobs", bearer)).status, 403);
+    assert.equal((await send("/api/jobs", browser)).status, 200);
+    const mutation = { method: "POST", body: JSON.stringify({ title: "must not be created" }) };
+    assert.equal((await send("/api/v1/persistence/projects", { ...browser, Origin: "https://evil.example", "Content-Type": "application/json" }, mutation)).status, 403);
+    assert.equal((await send("/api/v1/persistence/projects", { ...bearer, Origin: origin, "Content-Type": "application/json" }, mutation)).status, 403);
+    const created = await send("/api/v1/persistence/projects", { ...browser, Origin: origin, "Content-Type": "application/json" }, {
+      method: "POST", body: JSON.stringify({ title: "Access owner " + randomUUID() }),
+    });
+    assert.equal(created.status, 201);
+    const createdProject = await created.json() as { project: { id: string } };
+    assert.ok(await persistence.read(reader => reader.getProject(createdProject.project.id as import("@codexia/persistence-contracts").ProjectId)));
+
+    assert.equal((await send("/api/login", { Origin: origin, "Content-Type": "application/json" }, { method: "POST", body: JSON.stringify({ token: ACCESS_TOKEN }) })).status, 410);
+    assert.equal((await send("/api/logout", { ...browser, Origin: origin }, { method: "POST" })).status, 410);
   });
 
   it("marks a session cookie Secure when HTTPS is asserted by a trusted proxy", async (t) => {

@@ -1,5 +1,6 @@
 import { authorizationFailure } from "./authorization-error.js";
 import { readCodexiaEnvironment } from "./environment.js";
+import { createCloudflareAccessVerifier, type CloudflareAccessOptions } from "./cloudflare-access.js";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable } from "node:stream";
@@ -93,6 +94,8 @@ export interface ApiServerOptions {
   /** Set only by `start()` when it created the PostgreSQL pool itself. */
   closePersistenceOnShutdown?: boolean;
   authToken?: string;
+  /** Opt-in dedicated standalone owner SSO. Never used in hosted mode. */
+  cloudflareAccess?: CloudflareAccessOptions;
   /** Defaults to `<cwd>/app/dist`. */
   staticDir?: string;
   /** Trust X-Forwarded-Proto when TLS terminates at a reverse proxy. */
@@ -532,6 +535,10 @@ export function createServer(options: ApiServerOptions): Server {
   if (hosted && (options.authToken !== undefined || !hosted.projectId || hosted.authorization === undefined)) {
     throw new Error("Hosted runtime requires an assignment, assigned project, and grant policy without a standalone token");
   }
+  if (options.cloudflareAccess && (hosted || !options.trustProxy)) {
+    throw new Error("Cloudflare Access browser authentication requires standalone mode and the trusted HTTPS proxy");
+  }
+  const cloudflareAccess = options.cloudflareAccess ? createCloudflareAccessVerifier(options.cloudflareAccess) : undefined;
   const assignment = hosted?.assignment;
   if (assignment && parseRuntimeAssignment(assignment).instanceId !== assignment.instanceId) {
     throw new Error("Hosted runtime assignment is invalid");
@@ -1480,6 +1487,7 @@ export function createServer(options: ApiServerOptions): Server {
     }
 
     if (routePath === "/api/login" && method === "POST") {
+      if (cloudflareAccess) { fail(response, 410, "ACCESS_LOGIN_RETIRED", "Browser authentication is handled by Cloudflare Access"); return; }
       if (!sameOrigin(request, trustProxy)) { fail(response, 403, "CROSS_ORIGIN_REQUEST", "Request origin must match this application"); return; }
       const body = await readJson(request, parsedBody);
       const token = isRecord(body) && typeof body.token === "string" ? body.token : "";
@@ -1495,7 +1503,8 @@ export function createServer(options: ApiServerOptions): Server {
       sendJson(response, 200, {
         name: "codexia", version: API_VERSION, contractVersion: CONTRACT_VERSION,
         hosted: Boolean(hosted),
-        profile, auth: ["cookie-owner", "bearer-read-compute-propose"], runtime: { name: "@codexia/module-runtime", contractVersion: CONTRACT_VERSION, ...(runtime.metadata ? { metadata: runtime.metadata() } : {}) },
+        ...(cloudflareAccess ? { browserAuth: "cloudflare-access" } : {}),
+        profile, auth: [cloudflareAccess ? "access-owner" : "cookie-owner", "bearer-read-compute-propose"], runtime: { name: "@codexia/module-runtime", contractVersion: CONTRACT_VERSION, ...(runtime.metadata ? { metadata: runtime.metadata() } : {}) },
         modules: await enabledStatuses(),
       });
       return;
@@ -1522,7 +1531,20 @@ export function createServer(options: ApiServerOptions): Server {
         return;
       }
     }
-    const isCookie = hosted ? Boolean(accessToken && hostedPrincipal) : Boolean(session && session.expiresAt > Date.now());
+    let accessExpiresAt: number | undefined;
+    // Explicit Authorization always stays on the bearer path, even when Access
+    // attaches its own assertion to a programmatic request.
+    if (cloudflareAccess && authHeader === undefined && routePath.startsWith("/api/") && !publicRead) {
+      const assertion = request.headers["cf-access-jwt-assertion"];
+      const host = request.headers.host;
+      if (typeof assertion === "string" && typeof host === "string" &&
+          requestProtocol(request, trustProxy) + "//" + host === cloudflareAccess.origin) {
+        try { accessExpiresAt = await cloudflareAccess.authenticate(assertion); }
+        catch { /* Missing/invalid identity or unavailable keys fails closed. */ }
+      }
+    }
+    const isCookie = hosted ? Boolean(accessToken && hostedPrincipal) : cloudflareAccess
+      ? accessExpiresAt !== undefined : Boolean(session && session.expiresAt > Date.now());
     if (sessionId && !isCookie) sessions.delete(sessionId);
     const isBearer = hosted ? Boolean(bearer && hostedPrincipal) : !isCookie && bearer.length > 0 && constantTimeEqual(bearer, options.authToken!);
     const hasAuth = hosted ? Boolean(hostedPrincipal) : isCookie || isBearer;
@@ -1534,7 +1556,7 @@ export function createServer(options: ApiServerOptions): Server {
       fail(response, 401, "UNAUTHORIZED", "Authentication required");
       return;
     }
-    if (!hosted && isCookie) session!.expiresAt = Date.now() + SESSION_TTL_MS;
+    if (!hosted && !cloudflareAccess && isCookie) session!.expiresAt = Date.now() + SESSION_TTL_MS;
     if (hosted && accessToken && !isRead && routePath.startsWith("/api/")) {
       const csrfCookies = cookieValues(request, HOSTED_CSRF_COOKIE);
       const csrfHeader = request.headers["x-csrf-token"];
@@ -1547,7 +1569,8 @@ export function createServer(options: ApiServerOptions): Server {
         return;
       }
     }
-    if (!hosted && isCookie && !isRead && routePath.startsWith("/api/") && !sameOrigin(request, trustProxy)) {
+    if (!hosted && isCookie && !isRead && routePath.startsWith("/api/") &&
+        !(cloudflareAccess ? sameHostedOrigin(request, trustProxy, cloudflareAccess.origin) : sameOrigin(request, trustProxy))) {
       fail(response, 403, "CROSS_ORIGIN_REQUEST", "Request origin must match this application");
       return;
     }
@@ -1633,12 +1656,21 @@ export function createServer(options: ApiServerOptions): Server {
     }
     if (routePath === "/api/logout" && method === "POST") {
       if (!isCookie) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Only an owner session can log out"); return; }
+      if (cloudflareAccess) { fail(response, 410, "ACCESS_LOGOUT_REQUIRED", "Log out through Cloudflare Access"); return; }
       if (sessionId) sessions.delete(sessionId);
       response.setHeader("Set-Cookie", clearCookie(request, trustProxy));
       sendJson(response, 200, { authenticated: false });
       return;
     }
+    const boundAccessStream = (): void => {
+      if (accessExpiresAt === undefined) return;
+      const timer = setTimeout(() => response.end(), Math.max(0, Math.min(2_147_483_647, accessExpiresAt - Date.now())));
+      timer.unref();
+      response.once("close", () => clearTimeout(timer));
+      response.once("finish", () => clearTimeout(timer));
+    };
     if (routePath === "/api/projects/events" && method === "GET") {
+      boundAccessStream();
       response.statusCode = 200;
       response.setHeader("Content-Type", "text/event-stream; charset=utf-8");
       response.setHeader("Cache-Control", "no-store");
@@ -1660,6 +1692,7 @@ export function createServer(options: ApiServerOptions): Server {
       });
       response.write(": ok\n\n");
       jobEventStreams.add(response);
+      boundAccessStream();
       const cleanup = (): void => { jobEventStreams.delete(response); };
       response.once("close", cleanup);
       response.once("finish", cleanup);
@@ -2224,6 +2257,9 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     throw new Error("CODEXIA_HOSTED_MODE must be 1 or 0");
   }
   const hostedMode = hostedModeValue === "1";
+  const browserAuth = readCodexiaEnvironment("BROWSER_AUTH") ?? "token";
+  if (browserAuth !== "token" && browserAuth !== "cloudflare-access") throw new Error("Invalid CODEXIA_BROWSER_AUTH");
+  if (hostedMode && browserAuth !== "token") throw new Error("Cloudflare Access browser authentication is standalone only");
   if (hostedMode) {
     if (readCodexiaEnvironment("AUTH_TOKEN") !== undefined || readCodexiaEnvironment("GITHUB_TOKEN") !== undefined) {
       throw new Error("Static Codexia access and GitHub tokens are forbidden in hosted mode");
@@ -2273,6 +2309,12 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
       store,
       ...persistenceOptions,
       authToken,
+      ...(browserAuth === "cloudflare-access" ? { cloudflareAccess: {
+        issuer: readCodexiaEnvironment("ACCESS_ISSUER") ?? "",
+        audience: readCodexiaEnvironment("ACCESS_AUDIENCE") ?? "",
+        origin: readCodexiaEnvironment("ACCESS_ORIGIN") ?? "",
+        ownerEmail: readCodexiaEnvironment("ACCESS_OWNER_EMAIL") ?? "",
+      } } : {}),
       trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
       runtimeOptions,
       usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),

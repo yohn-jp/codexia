@@ -3,6 +3,49 @@ import { ownerLogin, fixtureProject } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 
+for (const shell of ["desktop", "mobile"] as const) {
+  test(`Access SSO enters the ${shell} shell, reauthenticates and logs out without a Codexia token`, async ({ page }) => {
+    let signedIn = false;
+    let tokenLogins = 0;
+    let tokenLogouts = 0;
+    await page.route("**/api/version", route => route.fulfill({
+      json: { name: "codexia", version: "test", hosted: false, profile: "full", browserAuth: "cloudflare-access" },
+    }));
+    await page.route("**/api/session", route => signedIn
+      ? route.fulfill({ json: { authenticated: true, authorScope: "owner" } })
+      : route.fulfill({ status: 401, json: { error: "Authentication required", code: "UNAUTHORIZED" } }));
+    await page.route("**/api/v1/persistence/status", route => route.fulfill({ json: { available: true, provider: "postgres" } }));
+    await page.route("**/api/v1/persistence/projects*", route => route.fulfill({ json: [] }));
+    await page.route("**/api/jobs", route => route.fulfill({ json: [] }));
+    await page.route("**/api/jobs/events", route => route.fulfill({ headers: { "content-type": "text/event-stream" }, body: "" }));
+    await page.route("**/api/inbox", route => route.fulfill({ json: { items: [], unreadCount: 0 } }));
+    await page.route("**/api/login", route => { tokenLogins++; return route.fulfill({ status: 410 }); });
+    await page.route("**/api/logout", route => { tokenLogouts++; return route.fulfill({ status: 410 }); });
+    await page.route("**/cdn-cgi/access/logout", route => route.fulfill({ contentType: "text/html", body: "Access logout fixture" }));
+    await page.goto(`/${shell}/`);
+    await expect(page.getByRole("heading", { name: "Cloudflare Accessで認証してください" })).toBeVisible();
+    await expect(page.getByLabel("アクセス・トークン")).toHaveCount(0);
+    signedIn = true;
+    await page.getByRole("button", { name: "再認証" }).click();
+    await expect(page.getByRole("button", { name: "ログアウト", exact: true })).toBeVisible();
+    await expect(page.getByLabel("アクセス・トークン")).toHaveCount(0);
+    await page.getByRole("button", { name: "ログアウト", exact: true }).click();
+    await expect(page).toHaveURL(/\/cdn-cgi\/access\/logout$/u);
+    expect(tokenLogins).toBe(0);
+    expect(tokenLogouts).toBe(0);
+  });
+}
+
+test("an unavailable initial version cannot incorrectly offer the standalone token form", async ({ page }) => {
+  await page.route("**/api/version", route => route.fulfill({
+    status: 401, json: { error: "Edge authentication required", code: "UNAUTHORIZED" },
+  }));
+  await page.goto("/desktop/");
+  await expect(page.getByRole("heading", { name: "PostgreSQLへ接続できません" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "ページを再読み込み" })).toBeVisible();
+  await expect(page.getByLabel("アクセス・トークン")).toHaveCount(0);
+});
+
 test("an unknown hosted grant requests refresh and retries the initial session check", async ({ page }) => {
   let sessionRequests = 0;
   let refreshRequests = 0;
