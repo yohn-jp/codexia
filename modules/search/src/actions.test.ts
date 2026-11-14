@@ -174,3 +174,29 @@ test("native Knowledge references store only identity and path, resolve aliases 
   assert.equal(result.ok,true);
   if(result.ok)assert.equal((result.data as {spans:unknown[]}).spans.length,1);
 });
+
+test("incomplete bounded alias inventory fails closed for automatic Knowledge links", async () => {
+  const a="11111111-1111-4111-8111-111111111111",b="22222222-2222-4222-8222-222222222222";
+  const path="documents/scene.md",projection="meta/scriptorium/knowledge-context/v1.json";
+  const entry=(id:string,name:string,aliases:Array<{surface:string;status:string;scope:null|string}>,aliasLimitReached=false)=>({
+    node:{id,name,status:"confirmed",deletedAt:null},aliases:aliases.map(alias=>({...alias,nodeId:id})),aliasLimitReached,
+  });
+  // The bounded read of B stopped at 500 aliases; its next alias is "塔", which collides with A.
+  const values={[path]:"塔",[TERM_REGISTRY_PATH]:JSON.stringify({schemaVersion:1,terms:[],knowledgeReferences:[{knowledgeId:a,targetPath:path}]}),
+    [projection]:JSON.stringify({version:1,projectId:snapshot.projectId,entries:[entry(a,"青い塔",[{surface:"塔",status:"confirmed",scope:null}]),entry(b,"赤い塔",[],true)],nodeLimitReached:false})};
+  const actions=createSearchActions(moduleContext(async()=>{throw Error("unused")}),new SnapshotIndexCache());
+  const resolve=findAction(actions,"search.terms.resolve");
+  let proposed:ChangeOperation[]=[];
+  const context=actionContext(makeReader(values),{async propose(operations){proposed=operations;return {id:"link",snapshot,operations,source:"module"};}});
+  const out=await resolve.invoke(resolve.inputSchema.parse({text:"塔"}),context);
+  assert.equal(out.ok,true);
+  if(out.ok){
+    const result=out.data as {spans:Array<unknown>;candidates:Array<{termId:string}>};
+    assert.deepEqual(result.spans,[]);
+    assert.deepEqual(result.candidates.map(term=>term.termId),["knowledge-"+a]);
+  }
+  const link=findAction(actions,"search.terms.linkKnowledge");
+  const linked=await link.invoke(link.inputSchema.parse({knowledgeId:b,targetPath:path}),context);
+  assert.equal(linked.ok,true,"explicit UUID linking remains available when only aliases are truncated");
+  assert.equal(proposed.length,1);
+});
