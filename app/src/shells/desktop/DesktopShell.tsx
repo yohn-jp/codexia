@@ -48,13 +48,9 @@ export function DesktopShell({
   useEffect(() => {
     if (!requestedPanel?.id || !requestedPanel.sequence) return;
     setEffectiveRequest({ id: requestedPanel.id, sequence: ++requestSeq.current });
-    const activity = activityForPanel(requestedPanel.id);
-    if (activity) setActiveActivity(activity);
   }, [requestedPanel?.id, requestedPanel?.sequence]);
   function reveal(id: string) {
     if (!panels?.some((panel) => panel.id === id)) return;
-    const activity = activityForPanel(id);
-    if (activity) setActiveActivity(activity);
     const request = { id, sequence: ++requestSeq.current };
     setEffectiveRequest(request);
   }

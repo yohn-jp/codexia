@@ -540,8 +540,9 @@
   .st-studio-topbar { min-height: 74px; height: auto; flex: 0 0 auto; flex-wrap: wrap; padding-block: 7px; }
   .st-studio-identity { flex: 0 0 auto; }
   .st-studio-primary-nav { order: 3; flex: 1 1 100%; justify-content: center; }
-  .st-studio-masthead-actions { margin-left: auto; }
-  .st-studio-header-slot .theme-control { display: none; }
+  .st-studio-masthead-actions { margin-left: auto; flex: 1 1 100%; flex-wrap: wrap; }
+  .st-studio-header-slot { flex-wrap: wrap; }
+  .st-studio-header-slot .theme-control { flex: 0 0 auto; }
   .st-studio-shell .st-workspace-desktop-controls { flex-wrap: wrap; }
   .st-studio-shell .st-workspace-move-menu { margin: 0 8px 6px auto; }
   .st-studio-shell .st-workspace-move-controls { width: calc(100vw - 64px); grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -78,7 +78,7 @@ for (const mode of ["desktop", "mobile"] as const) {
 
     // Keep the manuscript dirty and recoverable while the native review refreshes projections.
     await page.route(`**/api/v1/persistence/projects/${project.id}/documents/${scene.id}`, async (route) => {
-      if (route.request().method() === "PUT") await route.abort();
+      if (route.request().method() === "PATCH") await route.abort();
       else await route.continue();
     });
     const editor = page.getByRole("textbox", { name: "原稿 Markdown" });

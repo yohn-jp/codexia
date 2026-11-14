@@ -1042,6 +1042,9 @@ test("mobile writing reference sheet keeps the editor mounted and preserves the 
   const editor = page.locator('[data-workspace-panel="editor"] .cm-content');
   const manuscript = page.locator(".manuscript-input");
   const draft = "シートを開いても、この原稿と入力の文脈は残る。";
+  // Keep this draft in the browser journal; a successful PATCH clears its generation.
+  await page.route(`**/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.document.id}`, (route) =>
+    route.request().method() === "PATCH" ? route.abort("failed") : route.continue());
   await editor.fill(draft);
   await expectDraft(page, fixture.scene.document.id, draft);
   await manuscript.evaluate((node) => { node.setAttribute("data-stable-editor", "present"); });
@@ -1115,4 +1118,28 @@ test("mobile contextual reference refuses to cover a composing manuscript", asyn
   await editor.evaluate((element) => element.dispatchEvent(
     new CompositionEvent("compositionend", { data: "変換", bubbles: true }),
   ));
+});
+
+
+test("desktop activity stays selected on denied navigation and narrow appearance remains operable", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await signIn(page, "desktop");
+  await openFixtureScene(page, "desktop");
+  const editor = page.getByRole("textbox", { name: "原稿 Markdown" });
+  await editor.click();
+  const navigation = page.getByRole("navigation", { name: "主な作業" });
+  const writing = navigation.getByRole("button", { name: "執筆", exact: true });
+  const review = navigation.getByRole("button", { name: "レビュー", exact: true });
+  await expect(writing).toHaveAttribute("aria-pressed", "true");
+  await editor.evaluate(element => element.dispatchEvent(new CompositionEvent("compositionstart", { data: "にほんご", bubbles: true })));
+  await review.click();
+  await expect(page.locator(".st-workspace-message")).toContainText("current panel layout is unchanged");
+  await expect(writing).toHaveAttribute("aria-pressed", "true");
+  await expect(review).toHaveAttribute("aria-pressed", "false");
+  await editor.evaluate(element => element.dispatchEvent(new CompositionEvent("compositionend", { data: "日本語", bubbles: true })));
+  await page.setViewportSize({ width: 650, height: 900 });
+  const theme = page.getByLabel("外観");
+  await expect(theme).toBeVisible();
+  await theme.selectOption("paper");
+  await expect(page.locator("html")).toHaveAttribute("data-zp-theme", "paper");
 });

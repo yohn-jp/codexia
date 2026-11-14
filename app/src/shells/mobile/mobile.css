@@ -262,25 +262,31 @@
   background:var(--mobile-paper); color:var(--mobile-ink);
 }
 .mobile-shell-identity-bar {
-  display:flex; align-items:center; gap:11px; min-height:76px;
-  padding:7px max(16px,env(safe-area-inset-left,0px));
+  display:flex; align-items:center; gap:8px; min-height:56px;
+  padding:4px max(12px,env(safe-area-inset-left,0px));
 }
 .mobile-shell .mobile-shell-back {
-  flex:0 0 38px; width:38px;height:42px; min-height:42px;margin:0;
+  flex:0 0 44px; width:44px;height:44px; min-height:44px;margin:0;
   --padding-start:0;--padding-end:0;--color:var(--mobile-accent);
-  font-size:35px;line-height:1;
+  font-size:30px;line-height:1;
 }
 .mobile-shell-identity-copy {display:flex;flex:1;flex-direction:column;gap:1px;min-width:0;padding:1px 0}
-.mobile-shell-wordmark {font:700 17px Georgia,"Yu Mincho",serif;letter-spacing:-.6px; color:var(--mobile-ink)}
-.mobile-shell-wordmark span {color:var(--mobile-gold)}
-.mobile-shell-current-title {font:600 15px/1.55 var(--manuscript-serif);color:var(--mobile-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mobile-shell-context {font-size:10px;color:var(--mobile-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mobile-shell-page-mark {flex:0 0 auto;border-radius:50%;background:#e6ece1;color:#477259;display:grid;place-items:center;width:36px;height:36px;font-size:18px}
+.mobile-shell-current-title {font:600 15px/1.4 var(--manuscript-serif);color:var(--mobile-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mobile-shell-context {font-size:11px;line-height:1.35;color:var(--mobile-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mobile-shell .mobile-shell-settings-entry {
+  flex:0 0 auto;min-height:44px;margin:0;padding:0 9px;
+  --padding-start:0;--padding-end:0;--color:var(--mobile-accent);--border-radius:8px;
+}
+.mobile-shell .mobile-shell-settings-entry::part(native) {
+  min-height:44px;display:flex;gap:6px;padding-inline:8px;
+  font-size:12px;font-weight:600;white-space:nowrap;
+}
 .mobile-shell .mobile-shell-shared-header {
   display:flex;flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;
-  border-top:1px solid var(--mobile-line);padding:3px max(16px,env(safe-area-inset-left,0px));
-  scrollbar-width:none;background:var(--mobile-paper);min-height:39px;
+  border-top:1px solid var(--mobile-line);padding:2px max(8px,env(safe-area-inset-left,0px));
+  scrollbar-width:thin;background:var(--mobile-paper);min-height:46px;align-items:center;gap:5px;
 }
+.mobile-shell .mobile-shell-shared-header[hidden] {display:none!important}
 .mobile-shell .mobile-shell-shared-header::-webkit-scrollbar {display:none}
 .mobile-shell .mobile-shell-shared-header .topbar {
   flex:1 0 auto;display:flex;flex-wrap:nowrap;gap:6px;min-height:33px;
@@ -288,13 +294,52 @@
 }
 .mobile-shell .mobile-shell-shared-header .topbar .brand {display:none}
 .mobile-shell .mobile-shell-shared-header .theme-control {font-size:10px;margin:0;flex:0 0 auto}
-.mobile-shell .mobile-shell-shared-header .theme-control select {min-height:31px;padding:2px 6px;font-size:11px}
+.mobile-shell .mobile-shell-shared-header .theme-control select {width:76px;min-height:44px;padding:3px 6px;font-size:11px}
 .mobile-shell .mobile-shell-shared-header .topbar button {min-height:32px;padding:4px 8px;font-size:11px;border-radius:5px}
 .mobile-shell .mobile-shell-shared-header .topbar-status {order:unset;flex:0 1 25vw;font-size:10px}
+.mobile-shell .mobile-shell-shared-header:not([data-active-view="settings"]) {
+  min-height:46px;padding-top:2px;padding-bottom:2px;border-top:0;overflow-x:auto;align-items:center;
+}
+.mobile-shell .mobile-shell-shared-header:not([data-active-view="settings"]) > h1 {
+  flex:0 0 auto;margin:0;color:var(--mobile-muted);font:500 10px/1.2 var(--manuscript-sans);letter-spacing:.02em;white-space:nowrap;
+}
+.mobile-shell .mobile-shell-shared-header:not([data-active-view="settings"]) > button {
+  flex:0 0 auto;min-width:44px;min-height:44px;margin:0;padding:5px 8px;font-size:11px;white-space:nowrap;
+}
+.mobile-shell .mobile-shell-shared-header:not([data-active-view="settings"]) .theme-control {
+  flex:0 0 auto;gap:3px;font-size:9px;white-space:nowrap;
+}
 .mobile-shell .mobile-shell-content {--background:var(--mobile-stage);--padding-bottom:0}
 .mobile-shell-content::part(scroll) {scrollbar-gutter:auto}
 .mobile-shell .mobile-shell-workspace-view {height:100%;min-height:0;background:var(--mobile-stage)}
 .mobile-shell .st-workspace {height:100%;background:transparent}
+.mobile-shell .mobile-shell-workspace-view .pg-editor {
+  gap:7px;padding:8px 10px 12px;border:0;border-radius:0;background:transparent;box-shadow:none;
+}
+.mobile-shell .mobile-shell-workspace-view .pg-editor-heading {gap:4px}
+.mobile-shell .mobile-shell-workspace-view .pg-editor-heading > div:first-child > .eyebrow {display:none}
+.mobile-shell .mobile-shell-workspace-view .pg-editor-heading h2 {margin:0;font-size:17px;line-height:1.35}
+.mobile-shell .mobile-shell-workspace-view .pg-save-state {
+  display:flex;flex-wrap:wrap;justify-items:start;gap:2px 10px;text-align:left;font-size:10px;line-height:1.35;
+}
+.mobile-shell .mobile-shell-workspace-view .pg-editor-actions {
+  display:flex;flex-wrap:nowrap;gap:6px;margin:0;padding:0 1px 4px;overflow-x:auto;
+  overscroll-behavior-x:contain;scrollbar-width:thin;
+}
+.mobile-shell .mobile-shell-workspace-view .pg-editor-actions > * {flex:0 0 auto;white-space:nowrap}
+.mobile-shell .mobile-shell-workspace-view .pg-editor-actions button {
+  min-width:44px;min-height:44px;padding:7px 11px;font-size:12px;line-height:1.3;
+}
+.mobile-shell .mobile-shell-workspace-view .pg-editor-actions[aria-label="原稿の表示と書式"] > label {
+  display:flex;flex-direction:column;justify-content:center;gap:2px;font-size:10px;line-height:1.15;
+}
+.mobile-shell .mobile-shell-workspace-view .pg-editor-actions[aria-label="原稿の表示と書式"] select {
+  width:128px;min-height:44px;padding:5px 7px;font-size:12px;
+}
+.mobile-shell .mobile-shell-workspace-view .pg-editor-actions[aria-label="原稿の表示と書式"] input {
+  width:82px;min-height:44px;padding:5px 7px;font-size:14px;
+}
+.mobile-shell .mobile-shell-workspace-view .pg-editor-hint {margin:0;font-size:10px;line-height:1.45}
 .mobile-shell .st-workspace-toolbar {
   padding:5px 12px;background:var(--mobile-paper);
   border-bottom:1px solid var(--mobile-line);gap:7px;flex-wrap:nowrap;overflow:auto;
@@ -334,6 +379,10 @@
 .mobile-shell .st-workspace-panel-body :is(.sidebar,.writing-area) {padding:12px 16px 26px;border:0;background:transparent}
 .mobile-shell .st-workspace-panel-body .sidebar {background:var(--mobile-paper);border:1px solid var(--mobile-line);border-radius:12px}
 .mobile-shell .st-workspace-panel-body .editor {max-width:900px;margin:0 auto}
+.mobile-shell .mobile-shell-workspace-view .st-workspace-mobile-tabs {
+  display:flex;flex-wrap:nowrap;gap:5px;padding:5px 10px;overflow-x:auto;overscroll-behavior-x:contain;
+  scrollbar-width:thin;background:var(--mobile-stage);
+}
 .mobile-shell .editor-header {
   align-items:flex-start;gap:12px;flex-direction:column;
   padding:16px 5px 14px;border-bottom:1px solid var(--mobile-line);
@@ -379,6 +428,7 @@
 .mobile-shell .mobile-shell-nav-content {display:flex;flex-direction:column;align-items:center;gap:1px;font-size:10px;line-height:1.45}
 .mobile-shell .mobile-shell-nav-mark {font-size:20px;line-height:1.1}
 .mobile-shell .mobile-shell-status {bottom:calc(4rem + env(safe-area-inset-bottom,0px))}
+.mobile-shell .mobile-shell-status:empty {display:none!important}
 .mobile-shell .mobile-shell-view {padding:18px 16px 28px}
 .mobile-shell .mobile-shell-page-title {font:600 24px/1.5 var(--manuscript-serif);margin-bottom:16px}
 :root[data-zp-theme="dark"] .mobile-shell {
@@ -400,7 +450,6 @@
   .mobile-shell .mobile-shell-navigation {max-width:950px;margin:0 auto}
 }
 @media(max-width:390px){
-  .mobile-shell .mobile-shell-identity-bar {min-height:68px}
   .mobile-shell .st-workspace-mobile-tabs {padding:6px 9px}
   .mobile-shell .st-workspace-mobile-tabs button {padding:4px 7px;font-size:10px}
 }
@@ -408,8 +457,26 @@
   .mobile-shell *,.mobile-shell *::before,.mobile-shell *::after {transition-duration:.01ms!important;animation-duration:.01ms!important;scroll-behavior:auto!important}
 }
 
-/* Mobile never exposes the Desktop arrangement editor. The core layout retains its persistence. */
-.mobile-shell .st-workspace-move-menu {display:none}
+/* Keep the workspace disclosure compact; advanced arrangement controls live in Settings. */
+.mobile-shell .st-workspace-configuration > summary {
+  min-height:30px;padding:5px 10px;color:var(--mobile-muted);font-size:10px;line-height:1.3;
+}
+.mobile-shell .st-workspace-storage-state,.mobile-shell .st-workspace-message {
+  margin:0;padding:3px 10px;font-size:9px;line-height:1.35;
+}
+.mobile-shell .mobile-shell-workspace-view .st-workspace-configuration:not([open]) ~ .st-workspace-message,
+.mobile-shell .mobile-shell-workspace-view .st-workspace-configuration:not([open]) ~ .st-workspace-storage-state {
+  display:none!important;
+}
+.mobile-shell .mobile-shell-workspace-view:not([data-active-view="settings"]) .st-workspace-move-menu {
+  display:none;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-move-menu {
+  display:block;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-move-controls {
+  display:grid;grid-template-columns:minmax(0,1fr);gap:8px;padding:8px 12px;
+}
 
 
 /* Writing reference sheet: native Ionic drag/snapping, no gesture handling on manuscript text. */
@@ -439,13 +506,22 @@
   bottom:calc(7.5rem + env(safe-area-inset-bottom,0px));
 }
 .mobile-shell.mobile-shell-keyboard-open .mobile-shell-shared-header,
-.mobile-shell.mobile-shell-keyboard-open .mobile-shell-footer {display:none}
-.mobile-shell.mobile-shell-keyboard-open .mobile-shell-identity-bar {min-height:49px;padding-top:4px;padding-bottom:4px}
-.mobile-shell.mobile-shell-keyboard-open .mobile-shell-wordmark,
-.mobile-shell.mobile-shell-keyboard-open .mobile-shell-context,
-.mobile-shell.mobile-shell-keyboard-open .mobile-shell-page-mark {display:none}
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-settings-entry {display:none!important}
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-footer {display:block!important}
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-navigation {display:none!important}
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-configuration,
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-mobile-tabs,
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-message,
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-storage-state {
+  display:none!important;
+}
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-writing-accessories {
+  padding-top:4px;padding-bottom:4px;border-top:1px solid var(--mobile-line);border-bottom:0;
+}
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-identity-bar {min-height:50px;padding-top:3px;padding-bottom:3px}
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-context {display:none}
 .mobile-shell.mobile-shell-keyboard-open .mobile-shell-status {
-  bottom:max(10px,env(safe-area-inset-bottom,0px));max-height:21vh;
+  bottom:calc(4rem + env(safe-area-inset-bottom,0px));max-height:18vh;
 }
 .mobile-shell.mobile-shell-keyboard-open .mobile-shell-interaction-error {
   bottom:max(10px,env(safe-area-inset-bottom,0px));
