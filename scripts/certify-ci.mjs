@@ -7,6 +7,7 @@ import { collectGitHubPages } from './release-policy.mjs';
 import { validateVerificationPlan } from './ci-impact.mjs';
 import { assertPlanEvidence } from './ci-evidence.mjs';
 import { assertBrowserArtifactEvidence } from './ci-profile-artifact.mjs';
+import { assertNativeArtifactEvidence } from './ci-native-producer.mjs';
 
 const { GH_TOKEN, GITHUB_REPOSITORY, GITHUB_RUN_ID, CODEXIA_EXPECTED_SHA, CODEXIA_REQUIRED_RESULTS } = process.env;
 assert.match(GITHUB_REPOSITORY ?? '', /^[\w.-]+\/[\w.-]+$/);
@@ -15,7 +16,7 @@ assert.match(CODEXIA_EXPECTED_SHA ?? '', /^[a-f0-9]{40}$/);
 assert.ok(GH_TOKEN, 'Read token is required');
 assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), CODEXIA_EXPECTED_SHA);
 const outcomes = JSON.parse(CODEXIA_REQUIRED_RESULTS ?? 'null');
-assert.ok(outcomes && Object.keys(outcomes).length === 7, 'All required DAG groups must be present');
+assert.ok(outcomes && Object.keys(outcomes).length === 8, 'All required DAG groups must be present');
 assert.equal(outcomes.plan?.result, 'success', 'Impact planning did not succeed');
 assert.ok(Object.values(outcomes).every(value => ['success', 'skipped'].includes(value.result)), 'A required DAG group failed, was cancelled or unexecuted');
 const plan = validateVerificationPlan(JSON.parse(await readFile(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json', 'utf8')));
@@ -43,6 +44,7 @@ for (const entry of await readdir(directory, { withFileTypes: true })) {
 assertPlanEvidence(plan, jobs, reports);
 const artifacts = await collectGitHubPages(page => request(`actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100&page=${page}`), 'artifacts');
 assertBrowserArtifactEvidence(plan, jobs, reports, artifacts, GITHUB_RUN_ID);
+assertNativeArtifactEvidence(plan,jobs,reports,artifacts,GITHUB_RUN_ID);
 const message = `Verified ${plan.mode} plan: ${plan.tasks.length} validations at ${CODEXIA_EXPECTED_SHA}; run ${GITHUB_RUN_ID}. ${plan.excluded.length} explicitly NOT_SELECTED.\n`;
 console.log(message.trim());
 if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, message);

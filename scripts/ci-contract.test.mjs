@@ -26,16 +26,17 @@ test('browser groups depend on profile producers; independent groups cannot canc
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.equal(workflow.jobs.plan.name, 'plan');
   for (const [id, job] of Object.entries(workflow.jobs).filter(([id]) => !['plan', 'certification'].includes(id))) {
-    assert.deepEqual(job.needs, id === 'browser' ? ['plan', 'build'] : ['plan'], id);
+    assert.deepEqual(job.needs, id === 'browser' ? ['plan', 'build'] : id === 'hosted' ? ['plan','hosted_catalog'] : ['plan'], id);
     assert.match(job.if, /needs\.plan\.result == 'success'/);
     assert.equal(job['continue-on-error'], undefined, id);
-    assert.equal(job.strategy['fail-fast'], false, id);
+    if (id === 'hosted_catalog') assert.equal(job.name,'hosted-native-catalog');
+    else assert.equal(job.strategy['fail-fast'], false, id);
     assert.ok(job.steps.some(step => step.run?.includes('ci-group.mjs')));
     assert.ok(job.steps.some(step => step.uses === 'actions/upload-artifact@v4' && step.if === 'always()'));
   }
   const gate = workflow.jobs.certification;
   assert.equal(gate.if, 'always()');
-  assert.deepEqual(gate.needs.toSorted(), ['plan', 'unit', 'types', 'build', 'oci', 'browser', 'hosted'].toSorted());
+  assert.deepEqual(gate.needs.toSorted(), ['plan', 'unit', 'types', 'build', 'oci', 'browser', 'hosted_catalog', 'hosted'].toSorted());
   const planSelector = gate.steps.find(step => step.id === 'select-plan');
   const planDownload = gate.steps.find(step => step.run?.includes('node scripts/download-ci-artifacts.mjs') && step.env?.CODEXIA_CI_ARTIFACT_KIND === 'plan');
   const evidenceSelector = gate.steps.find(step => step.id === 'select-evidence');
@@ -124,4 +125,20 @@ test('every default browser spec is assigned a Chromium shard and WebKit UI is p
   assert.match(config, /testIgnore: "\*\*\/core64-lifecycle\.host\.acceptance\.spec\.ts"/);
   assert.match(config, /fullyParallel: false/);
   assert.match(config, /workers: 1/);
+});
+
+test('Hosted Native keeps one verified producer and three independent composition consumers',()=>{
+  const producer=workflow.jobs.hosted_catalog;
+  const consumers=workflow.jobs.hosted;
+  assert.match(producer.if,/hosted_catalog == 'true'/);
+  assert.equal(producer.name,'hosted-native-catalog');
+  assert.ok(producer.steps.some(step=>step.run?.includes('ci-native-producer.mjs seal')));
+  assert.deepEqual(consumers.needs,['plan','hosted_catalog']);
+  assert.match(consumers.if,/always\(\)/);
+  assert.equal(consumers.permissions.actions,'read');
+  assert.ok(!consumers.steps.some(step=>step.uses==='docker/setup-buildx-action@v3'));
+  const restore=consumers.steps.find(step=>step.id==='restore-native');
+  assert.match(restore.run,/ci-native-producer\.mjs restore/);
+  const execution=consumers.steps.find(step=>step.run?.includes('ci-group.mjs'));
+  assert.equal(execution.env.CODEXIA_CI_NATIVE_RESTORE,'${{ steps.restore-native.outcome }}');
 });

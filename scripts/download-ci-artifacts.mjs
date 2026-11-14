@@ -121,7 +121,7 @@ export function extractProfileJson(bytes, filename = 'profile-build.json') {
 }
 
 export async function extractJsonEntry(bytes, filename) {
-  assert.ok(['ci-plan.json', 'report.json', 'profile-build.json'].includes(filename), 'Invalid evidence filename');
+  assert.ok(['ci-plan.json', 'report.json', 'profile-build.json', 'native-report.json'].includes(filename), 'Invalid evidence filename');
   if (filename === 'profile-build.json') return extractProfileJson(bytes, filename);
   const temporary = await mkdtemp(path.join(tmpdir(), 'codexia-ci-artifact-'));
   try {

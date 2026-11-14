@@ -19,6 +19,7 @@ jobs:
       build: ${{ steps.select.outputs.build }}
       oci: ${{ steps.select.outputs.oci }}
       browser: ${{ steps.select.outputs.browser }}
+      hosted_catalog: ${{ steps.select.outputs.hosted_catalog }}
       hosted: ${{ steps.select.outputs.hosted }}
     steps:
       - uses: actions/checkout@v4
@@ -356,17 +357,13 @@ jobs:
       CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       CODEXIA_PLAYWRIGHT_IMAGE_DIGEST: sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8
       CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@postgres:5432/codexia_test
-  hosted:
-    name: hosted-native-${{ matrix.selection }}
+  hosted_catalog:
+    name: hosted-native-catalog
     needs:
       - plan
-    if: needs.plan.result == 'success' && needs.plan.outputs.hosted != '[]'
+    if: needs.plan.result == 'success' && needs.plan.outputs.hosted_catalog == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        selection: ${{ fromJSON(needs.plan.outputs.hosted) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -400,8 +397,79 @@ jobs:
           path: ${{ runner.temp }}/ci-plan
       - name: Run selected validations
         env:
+          CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/hosted-native-catalog
+          CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
+        run: node scripts/ci-group.mjs "hosted-native-catalog"
+      - name: Seal verified native producer evidence
+        env:
+          CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
+        run: node scripts/ci-native-producer.mjs seal "${{ runner.temp }}/ci-evidence/hosted-native-catalog"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-evidence-hosted-native-catalog
+          path: ${{ runner.temp }}/ci-evidence/hosted-native-catalog
+          if-no-files-found: error
+          retention-days: 7
+  hosted:
+    name: hosted-native-${{ matrix.selection }}
+    needs:
+      - plan
+      - hosted_catalog
+    if: always() && !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.hosted != '[]'
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        selection: ${{ fromJSON(needs.plan.outputs.hosted) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.0
+      - name: Prepare exact pnpm toolchain
+        id: pnpm
+        run: |
+          corepack enable
+          corepack pnpm@12.10.1 --version
+          echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Restore content-addressed dependency cache
+        id: dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-node24-pnpm12.10.1-${{ hashFiles('pnpm-lock.yaml') }}
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Dependency cache hit=${{ steps.dependencies.outputs.cache-hit || 'false' }}
+        env:
+          CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}
+        run: echo "Dependency cache hit=${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/download-artifact@v4
+        with:
+          name: ci-plan
+          path: ${{ runner.temp }}/ci-plan
+      - name: Restore exact native producer
+        id: restore-native
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
+        run: node scripts/ci-native-producer.mjs restore "${{ runner.temp }}/native-producer"
+      - name: Run selected validations
+        if: always() && !cancelled()
+        env:
           CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/hosted-native-${{ matrix.selection }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
+          CODEXIA_CI_NATIVE_RESTORE: ${{ steps.restore-native.outcome }}
+          CODEXIA_CI_NATIVE_RECEIPT: ${{ runner.temp }}/native-producer/receipt.json
+          CODEXIA_CI_NATIVE_PRODUCER_REPORT: ${{ runner.temp }}/native-producer/native-report.json
         run: node scripts/ci-group.mjs "hosted-native-${{ matrix.selection }}"
       - uses: actions/upload-artifact@v4
         if: always()
@@ -420,6 +488,7 @@ jobs:
       - build
       - oci
       - browser
+      - hosted_catalog
       - hosted
     runs-on: ubuntu-24.04
     timeout-minutes: 5

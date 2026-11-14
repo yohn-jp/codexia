@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { PROFILES, WORKSPACES } from './ci-contract.mjs';
 import { planDigest, validateVerificationPlan } from './ci-impact.mjs';
 import { selectLatestJobArtifact } from './ci-artifact-selection.mjs';
-import { collectGitHubPages } from './release-policy.mjs';
-import { downloadArtifact, extractJsonEntry } from './download-ci-artifacts.mjs';
+import { extractJsonEntry } from './download-ci-artifacts.mjs';
+import { fetchLatestProducerArtifact } from './ci-producer-artifact.mjs';
 
 const MAX_BYTES = 64 * 1024 * 1024;
 const MAX_FILES = 20_000;
@@ -163,24 +163,10 @@ async function main(){
     console.log('Packed '+bundle.files.length+' files for '+profile);
     return;
   }
-  assert.ok(GH_TOKEN,'Artifact read token required');
-  assert.match(GITHUB_REPOSITORY??'',/^[\w.-]+\/[\w.-]+$/u);
-  const request=async endpoint=>{
-    const response=await fetch('https://api.github.com/repos/'+GITHUB_REPOSITORY+'/'+endpoint,{
-      headers:{Authorization:'Bearer '+GH_TOKEN,Accept:'application/vnd.github+json'},redirect:'error',signal:AbortSignal.timeout(15_000)});
-    assert.ok(response.ok,'Artifact metadata unavailable: HTTP '+response.status);return response.json();
-  };
-  const run=await request('actions/runs/'+GITHUB_RUN_ID);
-  assert.equal(String(run.id),GITHUB_RUN_ID);
-  assert.equal(run.head_sha,plan.sha);
-  const [jobs,artifacts]=await Promise.all([
-    collectGitHubPages(page=>request('actions/runs/'+GITHUB_RUN_ID+'/jobs?filter=latest&per_page=100&page='+page),'jobs'),
-    collectGitHubPages(page=>request('actions/runs/'+GITHUB_RUN_ID+'/artifacts?per_page=100&page='+page),'artifacts')]);
-  const selected=selectLatestJobArtifact('ci-profile-build-'+profile,identity.producerJob,artifacts,jobs,{runId:GITHUB_RUN_ID,sourceSha:plan.sha});
-  const job=jobs.find(job=>job.name===identity.producerJob);
-  assert.ok(Number.isSafeInteger(job.run_attempt)&&job.run_attempt>0&&job.run_attempt<=Number(GITHUB_RUN_ATTEMPT),'Invalid producer attempt');
+  const {selected,job,bytes}=await fetchLatestProducerArtifact({plan,runId:GITHUB_RUN_ID,repository:GITHUB_REPOSITORY,
+    token:GH_TOKEN,producerJob:identity.producerJob,artifactName:'ci-profile-build-'+profile,maxArchive:MAX_BYTES});
+  assert.ok(job.run_attempt<=Number(GITHUB_RUN_ATTEMPT),'Invalid producer attempt');
   identity.producerAttempt=job.run_attempt;
-  const bytes=await downloadArtifact(selected,GITHUB_REPOSITORY,GH_TOKEN,fetch,{maxArchive:MAX_BYTES});
   const bundle=JSON.parse(await extractJsonEntry(bytes,'profile-build.json'));
   await restoreProfile(root,bundle,identity);
   const receipt={profile,sourceSha:plan.sha,planDigest:identity.planDigest,runId:GITHUB_RUN_ID,producerJob:identity.producerJob,

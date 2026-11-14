@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { trustedModuleData } from './hosted-build.mjs';
 import { resolveBuildCatalogSelection } from '../packages/module-runtime/dist/index.js';
 import { createHostedNativeReport, hostedNativeComposeCases, parseHostedNativeSelection } from './hosted-native-selection.mjs';
+import { assertNativeProducerReport } from './ci-native-producer.mjs';
 
 const selection = parseHostedNativeSelection(process.argv.slice(2));
 assert.equal(process.env.CI, 'true', 'This native contract check owns a disposable CI runner only');
@@ -56,8 +57,12 @@ async function buildImage(target) {
 }
 
 try {
-  const runtimeBaseDigest = await buildImage('runtime-base');
-  const buildKitDigest = await buildImage('buildkit');
+  const producerPath = process.env.CODEXIA_NATIVE_PRODUCER_REPORT;
+  if (producerPath) assert.ok(['core','selected','full'].includes(selection),'Only composition consumers use a producer report');
+  const producer = producerPath ? JSON.parse(await readFile(producerPath,'utf8')) : null;
+  if (producer) assertNativeProducerReport(producer,sha,dockerfileHash);
+  const runtimeBaseDigest = producer ? producer.runtimeBaseDigest : await buildImage('runtime-base');
+  const buildKitDigest = producer ? producer.buildKitDigest : await buildImage('buildkit');
   const catalogPath = path.join(output, 'catalog.json');
   run(process.execPath, ['scripts/hosted-build.mjs', 'catalog', '--producer-revision', sha,
     '--runtime-base-digest', runtimeBaseDigest, '--build-kit-digest', buildKitDigest, '--out', catalogPath]);
@@ -67,6 +72,10 @@ try {
   assert.equal(catalog.runtimeBaseDigest, runtimeBaseDigest);
   assert.equal(catalog.buildKitDigest, buildKitDigest);
   assert.equal(catalog.modules.length, trusted.length);
+  if (producer) {
+    for (const key of ['sourceDigest','recipeDigest','lockDigest']) assert.equal(catalog[key],producer.catalog[key], 'Recomputed catalog identity mismatch: '+key);
+    assert.equal(catalog.modules.length,producer.catalog.moduleCount);
+  }
 
   const compositionResults = [];
   const cases = hostedNativeComposeCases(selection);

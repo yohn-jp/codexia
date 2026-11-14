@@ -5,6 +5,7 @@ import path from 'node:path';
 import { VERIFICATION_GROUPS } from './ci-contract.mjs';
 import { planDigest, validateVerificationPlan } from './ci-impact.mjs';
 import { assertBrowserReceipt } from './ci-profile-artifact.mjs';
+import { assertNativeReceipt } from './ci-native-producer.mjs';
 
 const group = process.argv[2];
 const plan = validateVerificationPlan(JSON.parse(readFileSync(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json', 'utf8')));
@@ -25,6 +26,7 @@ const run = (command, args, extraEnv = {}) => {
 const node = (...args) => run(process.execPath, args);
 let preparationError;
 let profileArtifact;
+let nativeArtifact;
 try {
   if (group.startsWith('unit-')) node('scripts/ci-workspace.mjs', 'prepare', 'unit-group', tasks.map(task => task.slice(5)).join(','));
   if (group.startsWith('browser-')) {
@@ -33,6 +35,11 @@ try {
     profileArtifact = JSON.parse(readFileSync(process.env.CODEXIA_CI_PROFILE_RECEIPT, 'utf8'));
     assertBrowserReceipt(profileArtifact, plan, group.split('-')[1], process.env.GITHUB_RUN_ID);
     node('scripts/verify-browser-runtime.mjs');
+  }
+  if (group.startsWith('hosted-native-') && group !== 'hosted-native-catalog') {
+    if (process.env.CODEXIA_CI_NATIVE_RESTORE !== 'success') throw new Error('Hosted Native producer prerequisite failed');
+    nativeArtifact = JSON.parse(readFileSync(process.env.CODEXIA_CI_NATIVE_RECEIPT,'utf8'));
+    assertNativeReceipt(nativeArtifact,plan,process.env.GITHUB_RUN_ID);
   }
 } catch (error) { preparationError = String(error); }
 
@@ -63,10 +70,11 @@ for (const task of tasks) {
         const selection = task.slice(14);
         run('pnpm', selection === 'catalog' ? ['--filter', '@codexia/module-*...', 'build'] : ['build:workspace']);
         run(process.execPath, ['scripts/verify-hosted-native.mjs', '--selection', selection],
-          { CODEXIA_NATIVE_REPORT_PATH: path.join(reportDirectory, 'native-report.json') });
+          { CODEXIA_NATIVE_REPORT_PATH: path.join(reportDirectory, 'native-report.json'),
+            ...(nativeArtifact ? {CODEXIA_NATIVE_PRODUCER_REPORT:process.env.CODEXIA_CI_NATIVE_PRODUCER_REPORT} : {}) });
       } else if (task === 'coverage') {
         node('scripts/ci-workspace.mjs', 'coverage');
-        node('--test', 'scripts/ci-contract.test.mjs', 'scripts/ci-impact.test.mjs', 'scripts/ci-profile-artifact.test.mjs');
+        node('--test', 'scripts/ci-contract.test.mjs', 'scripts/ci-impact.test.mjs', 'scripts/ci-profile-artifact.test.mjs', 'scripts/ci-native-producer.test.mjs');
       } else throw new Error(`No runner for ${task}`);
     } catch (caught) { error = String(caught); }
   }
@@ -74,7 +82,7 @@ for (const task of tasks) {
   results.push(result);
   console.log(JSON.stringify(result));
 }
-const report = { group, sha, planDigest: planDigest(plan), ...(profileArtifact ? {profileArtifact} : {}), results };
+const report = { group, sha, planDigest: planDigest(plan), ...(profileArtifact ? {profileArtifact} : {}), ...(nativeArtifact ? {nativeArtifact} : {}), results };
 writeFileSync(path.join(reportDirectory, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
   `| Validation | Result | Seconds |\n| --- | --- | ---: |\n${results.map(item => `| ${item.task} | ${item.status} | ${item.seconds.toFixed(1)} |`).join('\n')}\n`);

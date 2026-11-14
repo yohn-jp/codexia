@@ -31,7 +31,10 @@ const observations = jobs.map(job => {
     test: phase(/Test workspace|Test isolated|Typecheck|Verify native|Verify production OCI|Audit Core/),
     externalDownload: phase(/^(?:Initialize containers|Prepare exact|Install frozen|Restore content-addressed|Run actions\/setup-node)/),
     externalDownloadNote: 'Container pull and dependency retrieval are phase timings; download-only time is not exposed separately by Actions API.',
-    cache: phase(/Restore content-addressed/), cacheHit: job.steps.find(step => /^Dependency cache hit=/.test(step.name))?.name.split('=')[1] ?? 'NOT_CHECKED',
+    cache: phase(/Restore content-addressed/),
+    artifactPreparation: phase(/Pack immutable profile build|Seal verified native producer evidence/),
+    artifactRestore: phase(/Restore exact profile producer|Restore exact native producer/),
+    artifactTransfer: phase(/upload-artifact|download-artifact/), cacheHit: job.steps.find(step => /^Dependency cache hit=/.test(step.name))?.name.split('=')[1] ?? 'NOT_CHECKED',
   };
 });
 const completed = jobs.filter(job => job.completed_at).map(job => Date.parse(job.completed_at));
