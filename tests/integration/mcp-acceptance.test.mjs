@@ -248,9 +248,6 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
   stdio = await startStdioClient(host, projectId);
   http = await startHttpClient(host, projectId);
 
-  await verifyCancellation(stdio, host, projectId, "stdio");
-  await verifyCancellation(http, host, projectId, "Streamable HTTP");
-
   for (const [name, connection] of [["stdio", stdio], ["Streamable HTTP", http]]) {
     const catalog = await connection.client.listTools();
     const toolNames = catalog.tools.map(tool => tool.name);
@@ -489,6 +486,35 @@ async function verifyCancellation(connection, host, projectId, label) {
   assert.ok("error" in completed || completed.result.isError === true, `${label} cancellation returned a successful result`);
   await waitUntil(() => host.runtime.status("nlp").activeJobs === 0, 15_000, `${label} cancellation did not stop the real worker job`);
 }
+
+test("MCP cancellation stops real NLP worker jobs through stdio and Streamable HTTP", {
+  skip: !READY_MODULES.includes("nlp"),
+  timeout: 120_000,
+}, async (t) => {
+  const rootDir = await mkdtemp(resolve(tmpdir(), "codexia-mcp-cancellation-"));
+  const usageDirectory = resolve(rootDir, "host-history");
+  let host;
+  let stdio;
+  let http;
+  t.after(async () => {
+    await closeMcpClient(http, true);
+    await closeMcpClient(stdio);
+    await host?.close().catch(() => undefined);
+    await rm(rootDir, { recursive: true, force: true });
+  });
+
+  host = await startAdmissionHost({ cacheDirectory: resolve(rootDir, "module-cache"), usageDirectory });
+  const cookie = await login(host);
+  const project = await ownerJson(host, cookie, "/api/projects", {
+    method: "POST", status: 201, body: { title: "MCP cancellation acceptance" },
+  });
+  const projectId = project.id;
+  stdio = await startStdioClient(host, projectId);
+  http = await startHttpClient(host, projectId);
+
+  await verifyCancellation(stdio, host, projectId, "stdio");
+  await verifyCancellation(http, host, projectId, "Streamable HTTP");
+});
 
 test("stdio and Streamable HTTP enforce external Assistant admission with a configured provider", {
   skip: !READY_MODULES.includes("assistant"),

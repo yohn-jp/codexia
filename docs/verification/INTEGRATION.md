@@ -26,7 +26,7 @@ CODEXIA_MCP_ACCEPTANCE_MODULES=story,nlp,diagnostics,semantic,speaker,assistant,
   node --test tests/integration/mcp-acceptance.test.mjs
 ```
 
-This runs production stdio and SDK Streamable HTTP transports against PostgreSQL. It checks scoped native Knowledge access, project/version boundaries, proposal replay, stale-preview rejection, provider non-execution, cancellation through the real NLP worker, MCP bearer denial of approval/application, and owner HTTP approval/application with a durable receipt. Partial module proposal approval and retry after Core reconstruction remain covered by `packages/api/src/server.test.ts` and `modules/story/tests/production.acceptance.mjs`. MCP can propose native changes; it cannot grant itself author approval. The provider-admission probe confirms denied Assistant calls make no provider request or usage record.
+This runs production stdio and SDK Streamable HTTP transports against PostgreSQL. It checks scoped native Knowledge access, project/version boundaries, proposal replay, stale-preview rejection, provider non-execution, MCP bearer denial of approval/application, and owner HTTP approval/application with a durable receipt. With the full module set shown here, a separate test also exercises cancellation through the real NLP worker on both transports; a restricted native MCP composition does not require NLP. Partial module proposal approval and retry after Core reconstruction remain covered by `packages/api/src/server.test.ts` and `modules/story/tests/production.acceptance.mjs`. MCP can propose native changes; it cannot grant itself author approval. The provider-admission probe confirms denied Assistant calls make no provider request or usage record.
 
 ## Import and derived-state reconstruction
 
