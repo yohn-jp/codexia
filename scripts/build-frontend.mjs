@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -25,6 +25,9 @@ async function main() {
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(version) || !Number.isSafeInteger(apiEpoch) || apiEpoch < 1) throw new Error('Invalid frontend compatibility version');
   for (const step of createBuildCommands(profileName, profile, { includeApi: false })) {
     run(step.command, step.args, step.env);
+  }
+  for (const name of ['_headers', '_redirects']) {
+    await copyFile(path.join(root, 'edge/frontend/static', name), path.join(root, 'app/dist', name));
   }
   await writeFile(path.join(root, 'app/dist/desktop/update-identity.json'), JSON.stringify({ format: 'codexia-frontend-identity/v1', version, sourceSha, profile: profileName, apiEpoch }) + '\n');
 }

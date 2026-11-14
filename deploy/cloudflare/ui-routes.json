@@ -1,11 +1,12 @@
 {
   "routes": [
-    "/",
-    "/index.html*",
-    "/assets/*",
-    "/desktop*",
-    "/mobile*",
-    "/r/*"
+    "/*"
+  ],
+  "originRoutes": [
+    "/api*",
+    "/health*",
+    "/mcp*",
+    "/.well-known/*"
   ],
   "apiPrefix": "/api/"
 }
