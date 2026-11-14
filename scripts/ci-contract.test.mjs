@@ -86,6 +86,8 @@ test('browser groups retain immutable runtime and restore the exact producer bef
   assert.ok(restore);
   assert.match(restore.run, /ci-profile-artifact\.mjs restore/);
   assert.equal(browser.permissions['actions'], 'read');
+  assert.match(restore.run,/\$CODEXIA_CI_PROFILE_RECEIPT/);
+  assert.equal(restore.env.CODEXIA_CI_PROFILE_RECEIPT, browser.steps[runnerIndex].env.CODEXIA_CI_PROFILE_RECEIPT);
   assert.equal(browser.steps[runnerIndex].env.CODEXIA_CI_PROFILE_RESTORE, '${{ steps.restore-profile.outcome }}');
   assert.ok(browser.steps.indexOf(restore) < runnerIndex);
   const producer = workflow.jobs.build.steps.find(step => step.run?.includes('ci-profile-artifact.mjs pack'));
