@@ -37,7 +37,7 @@
     "@codexia/module-runtime": "workspace:*",
     "@codexia/module-story": "workspace:*",
     "@codexia/module-nlp": "workspace:*",
-    "yaml": "^2.8.1",
+    "yaml": "^2.9.1",
     "@codexia/module-diagnostics": "workspace:*",
     "zod": "3.25.76",
     "@codexia/migration": "workspace:*"

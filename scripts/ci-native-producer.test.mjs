@@ -5,7 +5,7 @@ import {assertNativeArtifactEvidence,sealProducer,validateNativeProducer} from '
 const sha='a'.repeat(40),runId='123',jobName='hosted-native-catalog';
 const digest=n=>'sha256:'+String(n).repeat(64);
 const plan=createVerificationPlan({files:null,event:'push',sha});
-const identity={sourceSha:sha,sourceTree:'b'.repeat(40),planDigest:planDigest(plan),runId,producerJob:jobName,producerAttempt:1,dockerfileSha256:'c'.repeat(64),lockDigest:'d'.repeat(64),node:'v24.22.0',pnpm:'12.10.1',platform:'linux',arch:'x64'};
+const identity={sourceSha:sha,sourceTree:'b'.repeat(40),planDigest:planDigest(plan),runId,producerJob:jobName,producerAttempt:1,dockerfileSha256:'c'.repeat(64),lockDigest:'d'.repeat(64),node:'v24.22.3',pnpm:'12.21.0',platform:'linux',arch:'x64'};
 const native={schemaVersion:'codexia-hosted-native-verification/v1',acceptanceLevel:'DISPOSABLE_NATIVE_PRODUCER',selection:'catalog',sourceSha:sha,dockerfileSha256:identity.dockerfileSha256,runtimeBaseDigest:digest(1),buildKitDigest:digest(2),catalog:{result:'PASS',producerRevision:sha,sourceDigest:digest(3),recipeDigest:digest(4),lockDigest:digest(5),moduleCount:9},compositions:[],publication:false,hostedRuntimeAcceptance:'NOT_CHECKED'};
 const bytes=Buffer.from(JSON.stringify(native));
 const execution={group:jobName,sha,planDigest:planDigest(plan),results:[{task:jobName,status:'passed'}]};

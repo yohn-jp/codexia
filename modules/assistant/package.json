@@ -40,14 +40,14 @@
     "@codexia/module-diagnostics": "workspace:*",
     "@codexia/module-semantic": "workspace:*",
     "@codexia/module-speaker": "workspace:*",
-    "@ai-sdk/anthropic": "4.0.16",
-    "@ai-sdk/openai-compatible": "2.0.62",
-    "ai": "7.0.31",
+    "@ai-sdk/anthropic": "4.0.105",
+    "@ai-sdk/openai-compatible": "2.0.93",
+    "ai": "7.0.173",
     "jsonrepair": "3.15.0",
     "zod": "3.25.76",
-    "yaml": "^2.8.1",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "yaml": "^2.9.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   },
   "codexiaModule": {
     "id": "assistant",

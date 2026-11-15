@@ -30,7 +30,7 @@
     "@codexia/persistence-contracts": "workspace:*",
     "@codexia/persistence-postgres": "workspace:*",
     "@codexia/module-runtime": "workspace:*",
-    "fastify": "^5.3.2",
+    "fastify": "^5.12.8",
     "zod": "3.25.76"
   },
   "files": [

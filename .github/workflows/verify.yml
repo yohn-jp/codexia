@@ -22,21 +22,21 @@ jobs:
       hosted_catalog: ${{ steps.select.outputs.hosted_catalog }}
       hosted: ${{ steps.select.outputs.hosted }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 24.22.0
+          node-version: 24.22.3
       - name: Select affected validations
         id: select
         env:
           CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
         run: node scripts/ci-impact.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: ci-plan
           path: ${{ runner.temp }}/ci-plan/ci-plan.json
@@ -70,26 +70,26 @@ jobs:
       matrix:
         group: ${{ fromJSON(needs.plan.outputs.unit) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: ${{ matrix.group == 'core' && github.event_name == 'pull_request' && contains(fromJSON(needs.plan.outputs.plan).files, 'scripts/verify-mixed-version.mjs') && '0' || '1' }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 24.22.0
+          node-version: 24.22.3
       - name: Prepare exact pnpm toolchain
         id: pnpm
         run: |
           corepack enable
-          corepack pnpm@12.10.1 --version
+          corepack pnpm@12.21.0 --version
           echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Restore content-addressed dependency cache
         id: dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ steps.pnpm.outputs.store }}
-          key: pnpm-${{ runner.os }}-node24-pnpm12.10.1-${{ hashFiles('pnpm-lock.yaml') }}
+          key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
       - name: Dependency cache hit=${{ steps.dependencies.outputs.cache-hit || 'false' }}
@@ -108,7 +108,7 @@ jobs:
           docker exec "$POSTGRES_CONTAINER" createdb -U codexia codexia_e2e_compat_test
           pnpm exec playwright install --with-deps chromium
           node scripts/verify-mixed-version.mjs "$RUNNER_TEMP/prior-frontend" full
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: ci-plan
           path: ${{ runner.temp }}/ci-plan
@@ -117,7 +117,7 @@ jobs:
           CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/unit-${{ matrix.group }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
         run: node scripts/ci-group.mjs "unit-${{ matrix.group }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: ci-evidence-unit-${{ matrix.group }}
@@ -136,32 +136,32 @@ jobs:
       matrix:
         group: ${{ fromJSON(needs.plan.outputs.types) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 24.22.0
+          node-version: 24.22.3
       - name: Prepare exact pnpm toolchain
         id: pnpm
         run: |
           corepack enable
-          corepack pnpm@12.10.1 --version
+          corepack pnpm@12.21.0 --version
           echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Restore content-addressed dependency cache
         id: dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ steps.pnpm.outputs.store }}
-          key: pnpm-${{ runner.os }}-node24-pnpm12.10.1-${{ hashFiles('pnpm-lock.yaml') }}
+          key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
       - name: Dependency cache hit=${{ steps.dependencies.outputs.cache-hit || 'false' }}
         env:
           CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}
         run: echo "Dependency cache hit=${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: ci-plan
           path: ${{ runner.temp }}/ci-plan
@@ -170,7 +170,7 @@ jobs:
           CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/types-${{ matrix.group }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
         run: node scripts/ci-group.mjs "types-${{ matrix.group }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: ci-evidence-types-${{ matrix.group }}
@@ -189,32 +189,32 @@ jobs:
       matrix:
         profile: ${{ fromJSON(needs.plan.outputs.build) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 24.22.0
+          node-version: 24.22.3
       - name: Prepare exact pnpm toolchain
         id: pnpm
         run: |
           corepack enable
-          corepack pnpm@12.10.1 --version
+          corepack pnpm@12.21.0 --version
           echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Restore content-addressed dependency cache
         id: dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ steps.pnpm.outputs.store }}
-          key: pnpm-${{ runner.os }}-node24-pnpm12.10.1-${{ hashFiles('pnpm-lock.yaml') }}
+          key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
       - name: Dependency cache hit=${{ steps.dependencies.outputs.cache-hit || 'false' }}
         env:
           CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}
         run: echo "Dependency cache hit=${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: ci-plan
           path: ${{ runner.temp }}/ci-plan
@@ -227,13 +227,13 @@ jobs:
         env:
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
         run: node scripts/ci-profile-artifact.mjs pack "${{ matrix.profile }}" "${{ runner.temp }}/profile-build/profile-build.json"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: ci-profile-build-${{ matrix.profile }}
           path: ${{ runner.temp }}/profile-build/profile-build.json
           if-no-files-found: error
           retention-days: 7
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: ci-evidence-build-${{ matrix.profile }}
@@ -252,14 +252,14 @@ jobs:
       matrix:
         profile: ${{ fromJSON(needs.plan.outputs.oci) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 24.22.0
-      - uses: actions/download-artifact@v4
+          node-version: 24.22.3
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: ci-plan
           path: ${{ runner.temp }}/ci-plan
@@ -268,7 +268,7 @@ jobs:
           CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/oci-${{ matrix.profile }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
         run: node scripts/ci-group.mjs "oci-${{ matrix.profile }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: ci-evidence-oci-${{ matrix.profile }}
@@ -303,32 +303,32 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.browser) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 24.22.0
+          node-version: 24.22.3
       - name: Prepare exact pnpm toolchain
         id: pnpm
         run: |
           corepack enable
-          corepack pnpm@12.10.1 --version
+          corepack pnpm@12.21.0 --version
           echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Restore content-addressed dependency cache
         id: dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ steps.pnpm.outputs.store }}
-          key: pnpm-${{ runner.os }}-node24-pnpm12.10.1-${{ hashFiles('pnpm-lock.yaml') }}
+          key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
       - name: Dependency cache hit=${{ steps.dependencies.outputs.cache-hit || 'false' }}
         env:
           CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}
         run: echo "Dependency cache hit=${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: ci-plan
           path: ${{ runner.temp }}/ci-plan
@@ -347,7 +347,7 @@ jobs:
           CODEXIA_CI_PROFILE_RESTORE: ${{ steps.restore-profile.outcome }}
           CODEXIA_CI_PROFILE_RECEIPT: ${{ runner.temp }}/profile-receipt.json
         run: node scripts/ci-group.mjs "browser-${{ matrix.group }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: playwright-failure-${{ matrix.group }}-${{ github.event.pull_request.head.sha || github.sha }}
@@ -357,7 +357,7 @@ jobs:
             tests/e2e/test-results/**/journal-draft-*-diagnostic.json
           if-no-files-found: ignore
           retention-days: 7
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: ci-evidence-browser-${{ matrix.group }}
@@ -365,11 +365,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
     container:
-      image: mcr.microsoft.com/playwright@sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8
+      image: mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
       options: --ipc=host
     env:
       CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      CODEXIA_PLAYWRIGHT_IMAGE_DIGEST: sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8
+      CODEXIA_PLAYWRIGHT_IMAGE_DIGEST: sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
       CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@postgres:5432/codexia_test
   hosted_catalog:
     name: hosted-native-catalog
@@ -379,33 +379,33 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 24.22.0
-      - uses: docker/setup-buildx-action@v3
+          node-version: 24.22.3
+      - uses: docker/setup-buildx-action@v4.4.1
       - name: Prepare exact pnpm toolchain
         id: pnpm
         run: |
           corepack enable
-          corepack pnpm@12.10.1 --version
+          corepack pnpm@12.21.0 --version
           echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Restore content-addressed dependency cache
         id: dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ steps.pnpm.outputs.store }}
-          key: pnpm-${{ runner.os }}-node24-pnpm12.10.1-${{ hashFiles('pnpm-lock.yaml') }}
+          key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
       - name: Dependency cache hit=${{ steps.dependencies.outputs.cache-hit || 'false' }}
         env:
           CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}
         run: echo "Dependency cache hit=${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: ci-plan
           path: ${{ runner.temp }}/ci-plan
@@ -418,7 +418,7 @@ jobs:
         env:
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
         run: node scripts/ci-native-producer.mjs seal "${{ runner.temp }}/ci-evidence/hosted-native-catalog"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: ci-evidence-hosted-native-catalog
@@ -442,32 +442,32 @@ jobs:
       matrix:
         selection: ${{ fromJSON(needs.plan.outputs.hosted) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 24.22.0
+          node-version: 24.22.3
       - name: Prepare exact pnpm toolchain
         id: pnpm
         run: |
           corepack enable
-          corepack pnpm@12.10.1 --version
+          corepack pnpm@12.21.0 --version
           echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - name: Restore content-addressed dependency cache
         id: dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ steps.pnpm.outputs.store }}
-          key: pnpm-${{ runner.os }}-node24-pnpm12.10.1-${{ hashFiles('pnpm-lock.yaml') }}
+          key: pnpm-${{ runner.os }}-node24-pnpm12.21.0-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
       - name: Dependency cache hit=${{ steps.dependencies.outputs.cache-hit || 'false' }}
         env:
           CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}
         run: echo "Dependency cache hit=${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: ci-plan
           path: ${{ runner.temp }}/ci-plan
@@ -495,7 +495,7 @@ jobs:
           CODEXIA_CI_NATIVE_RECEIPT: ${{ runner.temp }}/native-producer/receipt.json
           CODEXIA_CI_NATIVE_PRODUCER_REPORT: ${{ runner.temp }}/native-producer/native-report.json
         run: node scripts/ci-group.mjs "hosted-native-${{ matrix.selection }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: ci-evidence-hosted-native-${{ matrix.selection }}
@@ -520,13 +520,13 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 24.22.0
+          node-version: 24.22.3
       - name: Select latest exact-run plan and job inventory
         id: select-plan
         env:
@@ -575,7 +575,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/measure-ci.mjs --out "${{ runner.temp }}/ci-metrics.json"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: ci-metrics

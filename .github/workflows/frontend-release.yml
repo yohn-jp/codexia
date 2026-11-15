@@ -77,8 +77,25 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   preflight:
+    name: Verify production Access and identity paths
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: ./.github/workflows/production-preflight.yml
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: codexia-production
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Probe production identity endpoints and Access boundary
+        env:
+          CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
+          CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
+          CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
+        run: node scripts/verify-frontend-compatibility.mjs preflight
   build:
     name: Build and verify UI assets
     runs-on: ubuntu-24.04
@@ -89,17 +106,17 @@ jobs:
       artifact-name: ${{ steps.producer.outputs.artifact-name }}
       producer-attempt: ${{ steps.producer.outputs.attempt }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '24.22.0'
+          node-version: '24.22.3'
       - name: Prepare locked pnpm toolchain
         run: |
           corepack enable
-          corepack pnpm@12.10.1 --version
+          corepack pnpm@12.21.0 --version
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
       - name: Build UI without building the API
@@ -124,7 +141,7 @@ jobs:
         run: |
           echo "attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
           echo "artifact-name=codexia-frontend-$GITHUB_SHA-attempt-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         id: upload
         if: github.event_name == 'push'
         with:
@@ -141,13 +158,13 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '24.22.0'
+          node-version: '24.22.3'
       - name: Require complete exact-source main verification
         env:
           GH_TOKEN: ${{ github.token }}
@@ -164,13 +181,13 @@ jobs:
       contents: write
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '24.22.0'
+          node-version: '24.22.3'
       - name: Install pinned Wrangler
         run: npm ci --prefix edge/frontend
       - name: Verify exact frontend artifact provenance

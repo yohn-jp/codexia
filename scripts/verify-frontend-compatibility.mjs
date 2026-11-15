@@ -149,6 +149,11 @@ function accessDenied(status) {
 /** @param {string} endpoint @param {URL} origin @param {{clientId:string,clientSecret:string}} credentials @param {typeof fetch} fetchImpl */
 async function readLiveJson(endpoint, origin, credentials, fetchImpl) {
   const response = await requestProbe(endpoint, origin, credentials, fetchImpl);
+  if (response.headers.get('cf-mitigated') === 'challenge') {
+    const evidence = statusEvidence(response);
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(`EDGE_CHALLENGE: ${endpoint} (${evidence}); exclude only the exact GET identity paths from interactive edge challenges, not Access authentication.`);
+  }
   if (!response.ok) {
     const evidence = statusEvidence(response);
     await response.body?.cancel().catch(() => undefined);
@@ -184,6 +189,12 @@ async function assertProbeDenied(endpoint, origin, credentials, fetchImpl) {
   const response = await requestProbe(endpoint, origin, credentials, fetchImpl);
   const evidence = statusEvidence(response);
   await response.body?.cancel().catch(() => undefined);
+  if (response.headers.get('cf-mitigated') === 'challenge') {
+    if (!credentials) throw new Error(`EDGE_CHALLENGE: anonymous identity request to ${endpoint} (${evidence}); cannot verify Access denial behind an interactive challenge.`);
+    // Author routes may be blocked by the geographic WAF before Access.
+    // This proves external denial, not the specific Access policy decision.
+    return;
+  }
   if (!accessBoundaryDenied(response, origin)) {
     throw new Error(`ACCESS_BOUNDARY: ${credentials ? 'CI token' : 'anonymous'} request to ${endpoint} was not denied (${evidence}). Check parent Access policy and route scope.`);
   }
@@ -241,7 +252,7 @@ async function main() {
     const { backend, deployed } = await probeLiveDeployment({ checkBoundary: true });
     const { apiEpoch } = JSON.parse(readFileSync(new URL('../deploy/frontend-compatibility.json', import.meta.url), 'utf8'));
     assertBackendCompatibility(backend, 'full', apiEpoch);
-    console.log(`Verified protected production identities: backend ${backend.version} (epoch ${backend.apiEpoch}), frontend ${deployed.version} (epoch ${deployed.apiEpoch}), candidate API epoch ${apiEpoch}; anonymous and out-of-scope CI access denied.`);
+    console.log(`Verified protected production identities: backend ${backend.version} (epoch ${backend.apiEpoch}), frontend ${deployed.version} (epoch ${deployed.apiEpoch}), candidate API epoch ${apiEpoch}; anonymous identity requests denied; out-of-scope CI requests blocked at Access or the edge.`);
     return;
   }
   const frontend = loadBuiltFrontend();

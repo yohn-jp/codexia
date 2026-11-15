@@ -72,7 +72,7 @@ async function bindCandidateRuntime(runtimeRoot, runtimeCommit) {
     buildCommand: 'pnpm --filter @codexia/api... build (contracts, module-runtime, core, api)',
     installCommand: 'pnpm install --offline --frozen-lockfile',
     node: process.version,
-    packageManager: 'pnpm@12.10.1',
+    packageManager: 'pnpm@12.21.0',
     artifactRoots: candidateArtifactRoots,
     artifactFiles: artifacts.length,
     artifactBytes: totalBytes,
