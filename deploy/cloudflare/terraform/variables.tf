@@ -27,12 +27,12 @@ variable "team_name" {
   description = "Cloudflare Access team prefix before .cloudflareaccess.com."
 }
 
-variable "allowed_emails" {
-  type        = set(string)
-  description = "Explicit Cloudflare Access identity allowlist."
+variable "access_policy_id" {
+  type        = string
+  description = "Existing account-owned reusable Access policy ID; its authorization rules are managed outside Codexia."
   validation {
-    condition     = length(var.allowed_emails) > 0 && alltrue([for email in var.allowed_emails : can(regex("^[^[:space:]@]+@[^[:space:]@]+[.][^[:space:]@]+$", email))])
-    error_message = "Set at least one valid Cloudflare Access email."
+    condition     = can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", var.access_policy_id))
+    error_message = "Set an existing reusable Access policy UUID."
   }
 }
 
