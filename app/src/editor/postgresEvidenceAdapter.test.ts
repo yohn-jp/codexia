@@ -45,6 +45,9 @@ test("PostgreSQL editor reads keep raw mentions, candidates, and confirmed Knowl
           { anchor: anchor("confirmed", 2, 4, "confirmed"), quote: "東京", mentions: [{
             link: { projectId, evidenceId: "confirmed", nodeId: confirmedNodeId, status: "confirmed", source: "author", confidence: 1, extractorVersion: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
             node: node(confirmedNodeId, "confirmed", "東京"),
+          }, {
+            link: { projectId, evidenceId: "confirmed", nodeId: proposedNodeId, status: "confirmed", source: "author", confidence: 1, extractorVersion: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+            node: node(proposedNodeId, "confirmed", "日本"),
           }], assertions: [] },
         ],
       });
@@ -64,7 +67,8 @@ test("PostgreSQL editor reads keep raw mentions, candidates, and confirmed Knowl
   assert.equal(snapshot.anchors.find((item) => item.id === "raw")?.candidates, undefined);
   assert.equal(snapshot.anchors.find((item) => item.id === "candidate")?.target, undefined);
   assert.deepEqual(snapshot.anchors.find((item) => item.id === "candidate")?.candidates, [{ id: proposedNodeId, label: "東京（候補）" }]);
-  assert.deepEqual(snapshot.anchors.find((item) => item.id === "confirmed")?.target, { id: confirmedNodeId, label: "東京" });
+  assert.equal(snapshot.anchors.find((item) => item.id === "confirmed")?.target, undefined);
+  assert.deepEqual(snapshot.anchors.find((item) => item.id === "confirmed")?.targets, [{ id: confirmedNodeId, label: "東京" }, { id: proposedNodeId, label: "日本" }]);
   assert.equal(snapshot.anchors.find((item) => item.id === "raw")?.assertions?.[0]?.status, "proposed");
   assert.match(snapshot.anchors.find((item) => item.id === "raw")?.assertions?.[0]?.label ?? "", /^fact:/u);
   assert.match(requests[0]!.url, new RegExp(`revision=${revisionId}`));

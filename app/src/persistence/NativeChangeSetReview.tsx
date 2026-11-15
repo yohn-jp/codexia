@@ -500,8 +500,8 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, o
           <ul className="proposal-list native-changeset-list">
             {changeSets.map((item) => {
               const operation = item.operations[0];
-              const headline = operation ? operationLabel(operation) : "内容を確認できません";
-              const target = operation ? operationTarget(operation) : "提案payloadを確認してください";
+              const headline = operation ? [...new Set(item.operations.map(operationLabel))].join(" / ") : "内容を確認できません";
+              const target = operation ? [...new Set(item.operations.map(operationTarget))].join(" / ") : "提案payloadを確認してください";
               return <li key={item.id}>
                 <button type="button" className="native-changeset-select" data-status={item.status} aria-pressed={selectedId === item.id} onClick={() => void inspect(item.id)} disabled={busy}>
                   <span className="native-review-row-meta"><span>保存済み提案</span><span className={"native-review-state is-" + item.status}>{statusLabel(item.status)}</span></span>
