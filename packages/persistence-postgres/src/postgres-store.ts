@@ -571,11 +571,17 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows.map(mapDocument);
   }
 
-  async getRevision(projectId: ProjectId, documentId: DocumentId, revisionId: RevisionId): Promise<DocumentRevision | undefined> {
-    const result = await this.query(
-      "SELECT * FROM document_revision WHERE project_id = $1 AND document_id = $2 AND id = $3",
-      [projectId, documentId, revisionId],
-    );
+  async getRevision(projectId: ProjectId, documentId: DocumentId, revisionId: RevisionId, throughHead?: RevisionId): Promise<DocumentRevision | undefined> {
+    const result = throughHead === undefined
+      ? await this.query("SELECT * FROM document_revision WHERE project_id = $1 AND document_id = $2 AND id = $3", [projectId, documentId, revisionId])
+      : await this.query(`WITH RECURSIVE ancestry(id,parent_revision_id) AS (
+          SELECT id,parent_revision_id FROM document_revision WHERE project_id=$1 AND document_id=$2 AND id=$4
+          UNION ALL
+          SELECT r.id,r.parent_revision_id FROM document_revision r JOIN ancestry a ON r.id=a.parent_revision_id
+          WHERE r.project_id=$1 AND r.document_id=$2
+        )
+        SELECT r.* FROM document_revision r JOIN ancestry a ON r.id=a.id
+        WHERE r.project_id=$1 AND r.document_id=$2 AND r.id=$3`, [projectId,documentId,revisionId,throughHead]);
     return result.rows[0] ? mapRevision(result.rows[0]) : undefined;
   }
 
@@ -599,17 +605,25 @@ class PostgresTransaction implements PersistenceTransaction {
     }));
   }
 
-  async listRevisions(projectId: ProjectId, documentId: DocumentId, limit: number, before?: string): Promise<DocumentRevisionPage> {
+  async listRevisions(projectId: ProjectId, documentId: DocumentId, limit: number, before?: string, throughHead?: RevisionId): Promise<DocumentRevisionPage> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError("Revision page size must be between 1 and 200");
+    const ancestry = throughHead === undefined ? "" : `WITH RECURSIVE ancestry(id,parent_revision_id) AS (
+      SELECT id,parent_revision_id FROM document_revision WHERE project_id=$1 AND document_id=$2 AND id=$5
+      UNION ALL
+      SELECT r.id,r.parent_revision_id FROM document_revision r JOIN ancestry a ON r.id=a.parent_revision_id
+      WHERE r.project_id=$1 AND r.document_id=$2
+    )`;
     const result = await this.query(
-      `SELECT revision.* FROM document_revision AS revision
+      `${ancestry} SELECT revision.* FROM document_revision AS revision
+       ${throughHead === undefined ? "" : "JOIN ancestry ON revision.id=ancestry.id"}
        WHERE revision.project_id = $1 AND revision.document_id = $2
          AND ($3::uuid IS NULL OR (revision.created_at, revision.id) < (
            SELECT cursor.created_at, cursor.id FROM document_revision AS cursor
            WHERE cursor.project_id = $1 AND cursor.document_id = $2 AND cursor.id = $3
+           ${throughHead === undefined ? "" : "AND cursor.id IN (SELECT id FROM ancestry)"}
          ))
        ORDER BY revision.created_at DESC, revision.id DESC LIMIT $4`,
-      [projectId, documentId, before ?? null, limit + 1],
+      [projectId, documentId, before ?? null, limit + 1, ...(throughHead === undefined ? [] : [throughHead])],
     );
     const hasMore = result.rows.length > limit;
     const rows = result.rows.slice(0, limit);
@@ -975,6 +989,12 @@ class PostgresTransaction implements PersistenceTransaction {
   async listModuleRecords(projectId: ProjectId, moduleId?: string): Promise<readonly ModuleRecord[]> {
     const result = await this.query("SELECT * FROM module_record WHERE project_id = $1 AND ($2::text IS NULL OR module_id = $2) ORDER BY module_id, key", [projectId, moduleId ?? null]);
     return result.rows.map((row) => this.mapModuleRecord(row));
+  }
+
+  async listPortableModuleRecords(projectId: ProjectId): Promise<{records: readonly ModuleRecord[]; omittedAuthorityModules: readonly string[]}> {
+    const records = await this.query("SELECT * FROM module_record WHERE project_id=$1 AND module_id NOT LIKE 'core.authority.%' ORDER BY module_id,key", [projectId]);
+    const omitted = await this.query("SELECT DISTINCT module_id FROM module_record WHERE project_id=$1 AND module_id LIKE 'core.authority.%' ORDER BY module_id", [projectId]);
+    return {records:records.rows.map(row=>this.mapModuleRecord(row)),omittedAuthorityModules:omitted.rows.map(row=>asString(row.module_id))};
   }
 
   private mapModuleRecord(row: DbRow): ModuleRecord {
@@ -1938,6 +1958,19 @@ export class PostgresPersistence implements Persistence {
 
   async checkHealth(): Promise<void> {
     await this.pool.query("SELECT 1");
+  }
+
+  /** Recognize the existing dedicated updater reader from the actual DB session, not a client flag. */
+  async snapshotStartupMode(): Promise<"transition" | "validate"> {
+    const result = await this.pool.query("SELECT current_user AS role_name, current_setting('default_transaction_read_only') AS read_only");
+    const row = result.rows[0];
+    if (!row) throw new Error("PostgreSQL startup identity is unavailable");
+    if (row.role_name === "codexia_preflight") {
+      if (row.read_only !== "on") throw new Error("Updater preflight must use read-only PostgreSQL transactions");
+      return "validate";
+    }
+    if (row.read_only !== "off") throw new Error("Writer startup requires writable PostgreSQL transactions");
+    return "transition";
   }
 
   async read<T>(work: (reader: PersistenceReader) => Promise<T>): Promise<T> {

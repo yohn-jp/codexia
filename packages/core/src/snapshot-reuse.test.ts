@@ -326,6 +326,18 @@ test("startup certifies equivalent legacy snapshots and transitions only incompa
   const compatible = await seedLegacy(true);
   const incompatible = await seedLegacy(false);
   const store = new CoreStore({persistence});
+  // Use real PostgreSQL reads with transactions forced read-only; no writer
+  // transaction may be attempted by the compatibility preflight.
+  const readOnly = createPostgresPersistence({connectionString, options:"-c default_transaction_read_only=on"});
+  try {
+    const preflight = new CoreStore({persistence:readOnly});
+    await preflight.prepareSnapshotReuse(compatible.project.id, "validate");
+    await preflight.prepareSnapshotReuse(incompatible.project.id, "validate");
+    for (const item of [compatible,incompatible]) {
+      assert.equal((await store.observe(item.project.id)).snapshot.projectVersion,item.project.version);
+      assert.equal(await persistence.read(reader=>reader.getModuleRecord(item.project.id as ProjectId,legacyModule,`proof:projection:1:snapshot:${item.project.version}`)),undefined);
+    }
+  } finally { await readOnly.close(); }
   await assert.rejects(store.reader(incompatible.project.id), {code:"snapshot_unavailable"});
   assert.equal((await store.observe(incompatible.project.id)).snapshot.projectVersion, incompatible.project.version);
   const exactFiles = async (reader: SnapshotReader) => Promise.all((await reader.list("")).map(async path => ({path, file:await reader.read(path,"base64")})));

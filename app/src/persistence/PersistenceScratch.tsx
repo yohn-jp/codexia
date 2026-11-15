@@ -6,8 +6,8 @@ interface Scratch { text: string; images: Array<{ name: string; data: string }>;
 const empty = (): Scratch => ({ text: "", images: [], generation: 0 });
 
 /** Private scratch remains outside the manuscript until explicitly saved as a note. */
-export function PersistenceScratch({ projectId, documentId, authorScope, journal, registerGuard, onSaved }: {
-  projectId: string; documentId: string; authorScope: string; journal: BrowserJournal;
+export function PersistenceScratch({ projectId, documentId, authorScope, journal, canCreateNote, registerGuard, onSaved }: {
+  projectId: string; documentId: string; authorScope: string; journal: BrowserJournal; canCreateNote: boolean;
   registerGuard(guard: (() => Promise<void>) | null): void; onSaved(): Promise<void>;
 }) {
   const [draft, setDraft] = useState<Scratch>(empty);
@@ -63,6 +63,7 @@ export function PersistenceScratch({ projectId, documentId, authorScope, journal
     try { await task; await protectRef.current(); } catch (cause) { setError(cause instanceof Error ? cause.message : "画像を保護できませんでした。"); }
   }
   async function saveNote() {
+    if (!canCreateNote) return;
     setSaving(true);
     try {
       await protect();
@@ -77,7 +78,7 @@ export function PersistenceScratch({ projectId, documentId, authorScope, journal
     <label>画像を添付<input aria-label="スクラッチ画像を添付" type="file" accept="image/*" multiple disabled={loading || saving} onChange={(event) => { void attach(Array.from(event.target.files ?? [])); event.target.value = ""; }} /></label>
     {draft.images.map((image, index) => <img key={index} src={image.data} alt={image.name} width="120" />)}
     <button type="button" disabled={loading || saving} onClick={() => void protect().catch(() => {})}>続ける</button>
-    <button type="button" disabled={loading || saving || (!draft.text && !draft.images.length)} onClick={() => void saveNote()}>ノートとしてPostgreSQLへ保存</button>
+    <button type="button" disabled={!canCreateNote || loading || saving || (!draft.text && !draft.images.length)} onClick={() => void saveNote()}>ノートとしてPostgreSQLへ保存</button>
     {error && <p role="alert">{error}</p>}
   </details>;
 }

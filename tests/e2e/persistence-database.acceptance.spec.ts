@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { createWritingFixture, openRevisionHistory } from "./postgres-fixture";
+import { createWritingFixture, openRevisionHistory, ownerLogin, manuscriptEditor } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
@@ -218,4 +218,36 @@ test("Knowledge relation pagination keeps the forty-first fetched relation actio
     const result = await response.json() as { relations: Array<{ id: string; status: string }> };
     return result.relations.find(relation => relation.id === last.id)?.status;
   }).toBe("confirmed");
+});
+
+test("a 501-document PostgreSQL work opens its final scene through the canonical deep link", async ({page}) => {
+  test.setTimeout(90000);
+  await ownerLogin(page);
+  const title = `Long outline ${crypto.randomUUID()}`;
+  const documents = Array.from({length:501},(_,i)=>({
+    id:crypto.randomUUID(), parentId:null, kind:"scene", title:`Large scene ${i+1}`,
+    orderKey:String(i).padStart(8,"0"), markdown:`本文 ${i+1}`, revisionId:crypto.randomUUID(),
+  }));
+  const response=await page.request.post(new URL("/api/v1/persistence/import",page.url()).toString(),{
+    headers:{Origin:new URL(page.url()).origin},
+    data:{format:"codexia-work/v1",project:{title,settings:{}},documents,
+      knowledge:{nodes:[],aliases:[],relations:[]},
+      evidence:{anchors:[],mentions:[],assertions:[],assertionEvidence:[],unresolved:{anchors:[],mentions:[],assertionEvidence:[]}},
+      moduleRecords:[],omittedRecords:[]},
+  });
+  expect(response.status()).toBe(201);
+  const {project}=await response.json() as {project:{id:string}};
+  const last=documents[500]!;
+  await page.goto(new URL(`/desktop/projects/${project.id}/scenes/${last.id}`,page.url()).toString());
+  await expect(manuscriptEditor(page)).toHaveText(last.markdown);
+  const outline=page.locator('[data-workspace-panel="outline"]');
+  await expect(outline.locator(".pg-outline-item")).toHaveCount(501);
+  await expect(outline.locator(`[data-document-id="${last.id}"] .pg-outline-document`)).toHaveAttribute("aria-current","page");
+  const create=outline.locator(".pg-library-create-document");
+  await create.locator("summary").click();
+  await create.getByLabel("文書名").fill("Large scene 502");
+  await create.getByLabel("種類").selectOption("scene");
+  await create.getByRole("button",{name:"作成",exact:true}).click();
+  await expect(outline.locator(".pg-outline-item")).toHaveCount(502);
+  await expect(page.getByRole("heading",{name:"Large scene 502",exact:true})).toBeVisible();
 });

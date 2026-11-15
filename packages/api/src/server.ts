@@ -891,9 +891,9 @@ export function createServer(options: ApiServerOptions): Server {
       { module: "core", action: makeProposal("core.hierarchy.reorder", hierarchyReorderInput, (context, input) =>
         options.store.buildReorderHierarchyOperation(projectId, input as ReorderHierarchyInput, context.reader.snapshot)) },
       { module: "core", action: makeProposal("core.operation.restore", restoreInput, (context, input) =>
-        options.store.buildRestoreOperation(projectId, input as { sceneId: string; snapshotId: string })) },
+        options.store.buildRestoreOperation(projectId, input as { sceneId: string; snapshotId: string }, undefined, context.reader.snapshot)) },
       { module: "core", action: make("core.status", emptyInput, async () => options.store.status(projectId)) },
-      { module: "core", action: make("core.history", emptyInput, async () => options.store.history(projectId)) },
+      { module: "core", action: make("core.history", emptyInput, async (context) => options.store.history(projectId, context.reader.snapshot)) },
       { module: "core", action: make("core.observation", emptyInput, async () => options.store.observe(projectId)) },
       { module: "core", action: make("core.tree", emptyInput, async (context) => options.store.readTreeSnapshot(projectId, context.reader.snapshot)) },
       { module: "core", action: make("core.scene.context", sceneInput, async (context, input) => options.store.readSceneSnapshot(projectId, (input as { sceneId: string }).sceneId, context.reader.snapshot)) },
@@ -1851,7 +1851,7 @@ export function createServer(options: ApiServerOptions): Server {
         sendJson(response, 200, { snapshot: reader.snapshot, files });
         return;
       }
-      if (suffix === "history" && method === "GET") { sendJson(response, 200, await options.store.history(projectId)); return; }
+      if (suffix === "history" && method === "GET") { sendJson(response, 200, await options.store.history(projectId, optionalSnapshot(query, projectId).pinned)); return; }
       if (suffix === "status" && method === "GET") { sendJson(response, 200, await options.store.status(projectId)); return; }
       if (suffix === "observation" && method === "GET") { sendJson(response, 200, await options.store.observe(projectId)); return; }
       if (suffix === "proposals" && method === "POST") {
@@ -2294,6 +2294,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
       const assignedProject = await persistenceOptions.persistence!.read((reader) => reader.getProject(projectId as import("@codexia/persistence-contracts").ProjectId));
       if (assignedProject?.id !== projectId) throw new Error("CODEXIA_HOSTED_PROJECT_ID must identify an existing PostgreSQL project");
       const store = new CoreStore({ persistence: persistenceOptions.persistence! });
+      if (await persistenceOptions.persistence.snapshotStartupMode() !== "transition") throw new Error("Hosted startup requires the PostgreSQL writer");
       await store.prepareSnapshotReuse(projectId);
       return await startServer({
         store,
@@ -2316,7 +2317,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   const persistenceOptions = await postgresPersistenceOptions();
   try {
     const store = new CoreStore({ persistence: persistenceOptions.persistence! });
-    await store.prepareSnapshotReuse();
+    await store.prepareSnapshotReuse(undefined, await persistenceOptions.persistence.snapshotStartupMode());
     return await startServer({
       store,
       ...persistenceOptions,
@@ -2348,7 +2349,7 @@ async function postgresReady(persistence: Persistence | undefined): Promise<bool
   }
 }
 
-async function postgresPersistenceOptions(): Promise<Pick<ApiServerOptions, "persistence" | "closePersistenceOnShutdown">> {
+async function postgresPersistenceOptions() {
   const connectionString = readCodexiaEnvironment("DATABASE_URL");
   // PostgreSQL is the only manuscript authority; startup never has a local or Git fallback.
   if (!connectionString) {

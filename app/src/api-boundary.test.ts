@@ -58,3 +58,18 @@ test("audit browser API rejects jobs missing their required opaque result", asyn
   globalThis.fetch = async () => Response.json([{ ...job, result: null }]);
   assert.equal((await api.jobs())[0]?.result, null);
 });
+
+test("complete workspace document reads cover 999 records and reject an ambiguous full page", async () => {
+  const documents = Array.from({length:1000},(_,index)=>({
+    id:`doc-${index}`,projectId:"project-1",parentId:null,kind:"scene",title:`Scene ${index}`,
+    orderKey:String(index),headRevisionId:null,version:1,createdAt:"",updatedAt:"",
+  }));
+  let count=999;
+  globalThis.fetch=async input=>{
+    assert.equal(String(input),"/api/v1/persistence/projects/project-1/documents?limit=1000");
+    return Response.json({documents:documents.slice(0,count)});
+  };
+  assert.equal((await api.persistenceDocuments("project-1")).documents.length,999);
+  count=1000;
+  await assert.rejects(api.persistenceDocuments("project-1"),(error:unknown)=>error instanceof ApiError&&error.code==="SNAPSHOT_TOO_LARGE");
+});

@@ -223,6 +223,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const [workTransferBusy, setWorkTransferBusy] = useState(false);
   const [workTransferStatus, setWorkTransferStatus] = useState("");
   const [pageError, setPageError] = useState("");
+  const [outlineError, setOutlineError] = useState("");
+  const [outlineReadyProject, setOutlineReadyProject] = useState("");
   const [notice, setNotice] = useState("");
   const [projectTitle, setProjectTitle] = useState("");
   const [documentKind, setDocumentKind] = useState("scene");
@@ -241,6 +243,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const resume = useRecentActivityResume({ binding: projectId ? { projectId, authorScope, projectScopeKey: projectId } : null, enabled: Boolean(projectId) });
   const project = projects.find((candidate) => candidate.id === projectId) ?? null;
   const selectedDocument = documents.find((candidate) => candidate.id === documentId) ?? null;
+  const canCreateDocument = outlineReadyProject === projectId && !!projectId && documents.length < 999;
   const documentOutline = useMemo(() => buildDocumentOutline(documents), [documents]);
   useEffect(() => {
     if (!documentId || !projectId) {
@@ -331,6 +334,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   }, [resumeEpoch]);
 
   useEffect(() => {
+    setOutlineReadyProject("");
+    setOutlineError("");
     if (!projectId) {
       setDocuments([]);
       setNodes([]);
@@ -343,19 +348,25 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     setPageError("");
     if (loadedDocumentsProjectRef.current !== projectId) {
       loadedDocumentsProjectRef.current = projectId;
+      setDocuments([]);
+      setNodes([]);
       publishEditor(null);
     }
     void Promise.all([
       api.persistenceDocuments(projectId, undefined, controller.signal),
       api.persistenceNodes(projectId, 500, controller.signal),
     ]).then(([documentResult, nodeResult]) => {
+      if (controller.signal.aborted || projectIdRef.current !== projectId) return;
       setDocuments(documentResult.documents);
+      setOutlineReadyProject(projectId);
       setNodes(nodeResult.nodes);
       setDocumentId((current) => current && documentResult.documents.some((item) => item.id === current)
         ? current : documentResult.documents.find((item) => projectId === selectionRef.current?.projectId && item.id === selectionRef.current.documentId)?.id ?? documentResult.documents[0]?.id ?? "");
       setNodeId((current) => current && nodeResult.nodes.some((item) => item.id === current) ? current : "");
     }).catch((error: unknown) => {
-      if (!controller.signal.aborted) setPageError(error instanceof Error ? error.message : "作品の内容を読み込めませんでした。");
+      if (!controller.signal.aborted && projectIdRef.current === projectId) {
+        setOutlineError(error instanceof Error ? error.message : "作品の内容を読み込めませんでした。");
+      }
     }).finally(() => {
       if (!controller.signal.aborted) setLoading(false);
     });
@@ -721,7 +732,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
       setWorkTransferStatus("作品のJSONスナップショットを生成しました。過去のRevisionとブラウザーDraftは含まれません。" +
-        (archive.omittedRecords.length ? " セキュリティ保護のため除外された設定が " + archive.omittedRecords.length + " 件あります。" : "") +
+        (archive.omittedRecords.length ? " セキュリティ保護のため除外された項目が " + archive.omittedRecords.length + " 項目あります。" : "") +
         (archive.evidence.unresolved.anchors.length ? " 未解決の旧Evidenceが " + archive.evidence.unresolved.anchors.length + " 件含まれています。" : ""));
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "作品をエクスポートできませんでした。");
@@ -755,7 +766,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       setProjectId(imported.project.id);
       setWorkTransferStatus((imported.replayed ? "このJSONは既に取り込み済みです。" : "新しい作品としてJSONを取り込みました。") +
         (imported.unresolvedAnchors ? " 旧RevisionのEvidence " + imported.unresolvedAnchors + " 件は記録を保持し、現在の文書には自動リンクしていません。" : "") +
-        (imported.omittedRecords ? " 元データで機密設定など " + imported.omittedRecords + " 件は除外済みです。" : ""));
+        (imported.omittedRecords ? " 元データで機密設定など " + imported.omittedRecords + " 項目は除外済みです。" : ""));
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "作品JSONを取り込めませんでした。");
     } finally {
@@ -768,6 +779,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     if (!project) return;
     const title = documentTitle.trim();
     if (!title || !await protectTransition()) return;
+    if (!canCreateDocument) { setPageError("完全な目次を取得できていないか、文書数が現在の作品構成上限に達しています。"); return; }
     setLoading(true);
     setPageError("");
     try {
@@ -786,12 +798,17 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       let documentResult: Awaited<ReturnType<typeof api.persistenceDocuments>>;
       try {
         documentResult = await api.persistenceDocuments(project.id);
-      } catch {
-        if (projectIdRef.current === project.id) setPageError("文書は作成済みですが、目次を再取得できませんでした。作品を開き直してください。");
+      } catch (error) {
+        if (projectIdRef.current === project.id) {
+          setOutlineReadyProject("");
+          setOutlineError("文書は作成済みですが、目次を再取得できませんでした。" + (error instanceof Error ? error.message : ""));
+        }
         return;
       }
       if (projectIdRef.current !== project.id || !await protectTransition() || projectIdRef.current !== project.id) return;
       setDocuments(documentResult.documents);
+      setOutlineReadyProject(project.id);
+      setOutlineError("");
       if (!documentResult.documents.some((item) => item.id === result.document.id)) {
         setPageError("文書は作成済みですが、現在の目次取得範囲に含まれていません。");
         return;
@@ -952,12 +969,18 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
 
   async function editStructure(update: { title?: string; parentId?: string | null; orderKey?: string }, remove = false): Promise<void> {
     const current = activeRef.current;
-    if (!current || !await protectTransition()) return;
+    if (!current || current.document.projectId !== projectId || !await protectTransition() || projectIdRef.current !== projectId) return;
+    let committed = false;
     try {
       if (remove) await api.deletePersistenceDocument(projectId, current.document.id, current.document.version);
       else await api.updatePersistenceDocument(projectId, current.document.id, { ...update, expectedVersion: current.document.version });
+      committed = true;
+      if (projectIdRef.current !== projectId) return;
       const result = await api.persistenceDocuments(projectId);
+      if (projectIdRef.current !== projectId) return;
       setDocuments(result.documents);
+      setOutlineReadyProject(projectId);
+      setOutlineError("");
       if (remove) {
         openSequenceRef.current++;
         publishEditor(null);
@@ -969,7 +992,22 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       }
       else { const document = result.documents.find((item) => item.id === current.document.id); const latest = activeRef.current; if (document && latest?.document.id === current.document.id) publishEditor({ ...latest, document }); }
       await refreshModules();
-    } catch (error) { setPageError(error instanceof Error ? error.message : "構成を更新できませんでした。"); }
+    } catch (error) {
+      if (projectIdRef.current !== projectId) return;
+      const message = error instanceof Error ? error.message : "構成を更新できませんでした。";
+      if (committed) {
+        setOutlineReadyProject("");
+        setOutlineError("構成は変更済みですが、目次を再取得できませんでした。" + message);
+        if (remove && activeRef.current?.document.id === current.document.id) {
+          openSequenceRef.current++;
+          publishEditor(null);
+          selectionRef.current = {projectId, documentId:""};
+          persistSelectionSafely(authorScope, selectionRef.current);
+          updateRouteSelection(selectionRef.current, true);
+          setDocumentId("");
+        }
+      } else setPageError(message);
+    }
   }
 
   async function refreshEvidence(value = activeRef.current): Promise<void> {
@@ -1357,6 +1395,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
               })}
             </section>
           </details>
+          {outlineError && <p className="pg-alert" role="alert">{outlineError}</p>}
+          {!outlineError && documents.length >= 999 && <p>現在の作品構成上限に達しています。文書を追加できません。</p>}
           <ul className="pg-document-list">{renderOutline(documentOutline)}</ul>
           {journal && active && <PersistenceLegacyDraftImport
             targetKey={JSON.stringify([authorScope, projectId, active.document.id, active.revision.id])}
@@ -1375,7 +1415,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
                 <option value="">作品の直下</option>
                 {documents.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
               </select>
-              <button type="submit" disabled={loading || !documentTitle.trim()}>作成</button>
+              <button type="submit" disabled={loading || !canCreateDocument || !documentTitle.trim()}>作成</button>
             </form>
           </details>
           {active && <details><summary>選択文書の構成を変更</summary>
@@ -1391,7 +1431,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         {notice && <p className="pg-notice" role="status">{notice}</p>}
         {journalError && <p className="pg-alert" role="alert">{journalError}</p>}
         {!project && <section className="pg-empty"><h2>最初の作品を作成してください</h2><p>作品、原稿Revision、Knowledge、EvidenceはPostgreSQLへ保存されます。</p></section>}
-        {project && !selectedDocument && <section className="pg-empty"><h2>{project.title}</h2><p>編集を始める文書を作成してください。</p></section>}
+        {project && !selectedDocument && !active && !outlineError && <section className="pg-empty"><h2>{project.title}</h2><p>編集を始める文書を作成してください。</p></section>}
         {active && <section className="pg-editor" aria-label={active.document.title}>
           <div className="pg-editor-heading">
             <div><p className="eyebrow">{project?.title}</p><h2>{active.document.title}</h2></div>
@@ -1461,7 +1501,21 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           {reading && <section aria-label="原稿の閲覧" className={`scene-reading scene-reading-${readingDirection}`} style={typographyStyle}><MobileReadingPager mode={readingDirection} pageIndex={readingPage} onPageIndexChange={(page) => { setReadingPage(page); resume.onReadingPage(active.document.id, page); }}><TermAwareRubyText text={active.markdown} resolveTerms={resolveTerms} onTermNavigate={handleTermNavigate} /></MobileReadingPager></section>}
           <p className="pg-editor-hint">{active.markdown.length}字 · UTF-16差分をRevisionへ保存します。本文を送る前にIndexedDBの回復Journalへ記録します。</p>
 
-          {journal && <PersistenceScratch key={`${active.document.projectId}:${active.document.id}`} projectId={active.document.projectId} documentId={active.document.id} authorScope={authorScope} journal={journal} registerGuard={(guard) => { scratchGuardRef.current = guard; }} onSaved={async () => { const result = await api.persistenceDocuments(projectId); setDocuments(result.documents); setNotice("スクラッチを独立したノートとしてPostgreSQLへ保存しました。"); }} />}
+          {journal && <PersistenceScratch key={`${active.document.projectId}:${active.document.id}`} projectId={active.document.projectId} documentId={active.document.id} authorScope={authorScope} journal={journal} canCreateNote={canCreateDocument} registerGuard={(guard) => { scratchGuardRef.current = guard; }} onSaved={async () => {
+            if (projectIdRef.current !== projectId) return;
+            setNotice("スクラッチを独立したノートとしてPostgreSQLへ保存しました。");
+            try {
+              const result = await api.persistenceDocuments(projectId);
+              if (projectIdRef.current !== projectId) return;
+              setDocuments(result.documents);
+              setOutlineReadyProject(projectId);
+              setOutlineError("");
+            } catch (error) {
+              if (projectIdRef.current !== projectId) return;
+              setOutlineReadyProject("");
+              setOutlineError("ノートは保存済みですが、目次を再取得できませんでした。" + (error instanceof Error ? error.message : ""));
+            }
+          }} />}
           {active.remoteConflict && <section className="pg-conflict" aria-labelledby="pg-conflict-title">
             <h3 id="pg-conflict-title">Revision競合</h3>
             <p>ブラウザーDraftのbaseとPostgreSQLの最新版が違います。本文は上書きしていません。</p>
@@ -1590,7 +1644,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       desktopDurability={currentDesktopDurability}
       desktopDurabilityDetail={desktopDurabilityDetail(active, currentDesktopDurability)}
       library={library} editor={editor} tools={knowledge}
-      status={<>{pageError && <p role="alert">{pageError}</p>}{loading && <p role="status">PostgreSQLの状態を読み込んでいます。</p>}</>}
+      status={<>{pageError && <p role="alert">{pageError}</p>}{outlineError && <p role="alert">{outlineError}</p>}{loading && <p role="status">PostgreSQLの状態を読み込んでいます。</p>}</>}
       workspaceScope={`postgres:${authorScope}`}
       panels={panels}
       requestedPanel={requestedPanel}

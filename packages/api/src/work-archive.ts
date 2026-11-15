@@ -239,7 +239,8 @@ export async function exportWorkArchive(persistence: Persistence, projectId: Pro
     const mentions: WorkArchive["evidence"]["mentions"] = [];
     const assertionEvidence: WorkArchive["evidence"]["assertionEvidence"] = [];
     const unresolved = emptyUnresolved();
-    const modules = await reader.listModuleRecords(projectId);
+    const {records:modules, omittedAuthorityModules} = await reader.listPortableModuleRecords(projectId);
+    omittedRecords.push(...omittedAuthorityModules.map(moduleId=>moduleId + ":*"));
     const previouslyUnresolved = modules.find((item) =>
       item.moduleId === "core.portable.archive" && item.key === "unresolved-evidence");
     if (previouslyUnresolved) {

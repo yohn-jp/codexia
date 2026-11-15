@@ -355,21 +355,21 @@ export class CoreStore implements MutationCoordinator {
    * their original pinned bytes and the project advances under its version fence.
    * Ordinary reads never perform this transition.
    */
-  async prepareSnapshotReuse(projectId?: string): Promise<void> {
+  async prepareSnapshotReuse(projectId?: string, mode: "transition" | "validate" = "transition"): Promise<void> {
     if (projectId !== undefined) {
-      await this.prepareProjectSnapshotReuse(pid(projectId));
+      await this.prepareProjectSnapshotReuse(pid(projectId), mode);
       return;
     }
     let after: ProjectId | undefined;
     for (;;) {
       const ids = await this.persistence.read(reader => reader.listProjectIds(100, after));
-      for (const id of ids) await this.prepareProjectSnapshotReuse(id);
+      for (const id of ids) await this.prepareProjectSnapshotReuse(id, mode);
       if (ids.length < 100) return;
       after = ids[ids.length - 1]!;
     }
   }
 
-  private async prepareProjectSnapshotReuse(projectId: ProjectId): Promise<void> {
+  private async prepareProjectSnapshotReuse(projectId: ProjectId, mode: "transition" | "validate"): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const legacy = await this.persistence.read(async reader => {
         const project = await reader.getProject(projectId);
@@ -383,7 +383,10 @@ export class CoreStore implements MutationCoordinator {
         return { version: project.version, recordVersion: record.version, fresh,
           equivalent: manifestFingerprint(saved) === manifestFingerprint(fresh) };
       });
-      if (!legacy) return;
+      // A candidate preflight is read-only. Successful materialization above
+      // proves the legacy projection can be inspected; only the exclusive
+      // writer may certify it or advance the project version.
+      if (!legacy || mode === "validate") return;
       if (legacy.equivalent) {
         await this.persistManifest(legacy.fresh);
         return;
@@ -815,14 +818,14 @@ export class CoreStore implements MutationCoordinator {
   }
   async buildRestoreOperation(projectId:string,input:{sceneId:string;snapshotId:string}|string,revisionId?:string,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
     const sceneId=typeof input==="string"?input:input.sceneId,sourceId=typeof input==="string"?revisionId:input.snapshotId;const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId,index);
-    const revision=await this.persistence.read((reader)=>reader.getRevision(pid(projectId),document.id,sourceId as RevisionId));if(!revision)fail(404,"revision_not_found","Revision not found");const path=index.pathsByDocumentId.get(document.id)?.bodyPath,file=path ? manifest.files[path] : undefined;if(!path||!file)fail(409,"snapshot_unavailable","Document body is missing from the project snapshot");return this.buildOperation(projectId,[{path,revision:file.revision,content:revision.markdown}],"manuscript","Restore manuscript revision",manifest.snapshot);
+    const revision=document.headRevisionId ? await this.persistence.read((reader)=>reader.getRevision(pid(projectId),document.id,sourceId as RevisionId,document.headRevisionId!)) : undefined;if(!revision)fail(404,"revision_not_found","Revision not found");const path=index.pathsByDocumentId.get(document.id)?.bodyPath,file=path ? manifest.files[path] : undefined;if(!path||!file)fail(409,"snapshot_unavailable","Document body is missing from the project snapshot");return this.buildOperation(projectId,[{path,revision:file.revision,content:revision.markdown}],"manuscript","Restore manuscript revision",manifest.snapshot);
   }
   async listManuscriptSnapshots(projectId:string,manuscriptId:string,sceneId?:string,pinned?:SnapshotId):Promise<{snapshot:SnapshotId;snapshots:ManuscriptSnapshotMeta[]}>{
-    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId??manuscriptId,index),page=await this.persistence.read((reader)=>reader.listRevisions(pid(projectId),document.id,100));return {snapshot:manifest.snapshot,snapshots:page.revisions.map((revision)=>({id:revision.id,sceneId:this.logicalId(index,document),manuscriptId,createdAt:Date.parse(revision.createdAt),charCount:Array.from(body(revision.markdown)).length,source:"postgres"}))};
+    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId??manuscriptId,index),page=document.headRevisionId ? await this.persistence.read((reader)=>reader.listRevisions(pid(projectId),document.id,100,undefined,document.headRevisionId!)) : {revisions:[]};return {snapshot:manifest.snapshot,snapshots:page.revisions.map((revision)=>({id:revision.id,sceneId:this.logicalId(index,document),manuscriptId,createdAt:Date.parse(revision.createdAt),charCount:Array.from(body(revision.markdown)).length,source:"postgres"}))};
   }
   async readManuscriptSnapshot(projectId:string,snapshotId:string,manuscriptId:string,sceneId?:string,pinned?:SnapshotId):Promise<{snapshot:SnapshotId;manuscriptSnapshot:ManuscriptSnapshot}>{
-    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId??manuscriptId,index);const revision=await this.persistence.read((reader)=>reader.getRevision(pid(projectId),document.id,snapshotId as RevisionId));if(!revision)fail(404,"revision_not_found","Revision not found");const path=index.pathsByDocumentId.get(document.id)?.bodyPath,file=path ? manifest.files[path] : undefined;if(!path||!file)fail(409,"snapshot_unavailable","Document body is missing from the project snapshot");return {snapshot:manifest.snapshot,manuscriptSnapshot:{id:revision.id,sceneId:this.logicalId(index,document),manuscriptId,createdAt:Date.parse(revision.createdAt),charCount:Array.from(body(revision.markdown)).length,source:"postgres",body:body(revision.markdown),document:{path,content:revision.markdown,revision:revision.sha256}}};
+    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId??manuscriptId,index);const revision=document.headRevisionId ? await this.persistence.read((reader)=>reader.getRevision(pid(projectId),document.id,snapshotId as RevisionId,document.headRevisionId!)) : undefined;if(!revision)fail(404,"revision_not_found","Revision not found");const path=index.pathsByDocumentId.get(document.id)?.bodyPath,file=path ? manifest.files[path] : undefined;if(!path||!file)fail(409,"snapshot_unavailable","Document body is missing from the project snapshot");return {snapshot:manifest.snapshot,manuscriptSnapshot:{id:revision.id,sceneId:this.logicalId(index,document),manuscriptId,createdAt:Date.parse(revision.createdAt),charCount:Array.from(body(revision.markdown)).length,source:"postgres",body:body(revision.markdown),document:{path,content:revision.markdown,revision:revision.sha256}}};
   }
   async status(projectId:string) { const observation=await this.observe(projectId);return {...observation.snapshot,state:"durable" as const}; }
-  async history(projectId:string):Promise<Commit[]> { const manifest=await this.manifest(projectId); const revisions=await this.persistence.read(async(reader)=>{const pages=await Promise.all(manifest.documents.map((document)=>reader.listRevisions(pid(projectId),document.id,100)));return pages.flatMap((page)=>page.revisions);});return revisions.sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,100).map((revision)=>({hash:revision.id,date:revision.createdAt,message:`Document revision ${revision.documentId}`})); }
+  async history(projectId:string,pinned?:SnapshotId):Promise<Commit[]> { const manifest=await this.manifest(projectId,pinned); const revisions=await this.persistence.read(async(reader)=>{const pages=await Promise.all(manifest.documents.flatMap((document)=>document.headRevisionId ? [reader.listRevisions(pid(projectId),document.id,100,undefined,document.headRevisionId)] : []));return pages.flatMap((page)=>page.revisions);});return revisions.sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,100).map((revision)=>({hash:revision.id,date:revision.createdAt,message:`Document revision ${revision.documentId}`})); }
 }
