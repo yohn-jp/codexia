@@ -900,6 +900,30 @@ test("full profile exposes optional lexical search and terminology without chang
   const modules = await modulesResponse.json() as Array<{ id: string; availability: string }>;
   expect(modules.find((module) => module.id === "search")?.availability).toMatch(/^(enabled-idle|active)$/u);
 
+  // Exercise the real Search action -> Runtime -> Core -> PostgreSQL proposal boundary.
+  const projectPath = `/api/projects/${encodeURIComponent(projectId)}`;
+  const origin = new URL(page.url()).origin;
+  const snapshotResponse = await page.request.get(`${projectPath}/snapshot`);
+  expect(snapshotResponse.ok()).toBe(true);
+  const snapshotRead = await snapshotResponse.json() as { files: Array<{ path: string; content: string }> };
+  const registry = snapshotRead.files.find(file => file.path === "meta/scriptorium/modules/search/terms.json");
+  expect(registry).toBeDefined();
+  const existing = (JSON.parse(registry!.content) as { terms: Array<{ id: string; canonical: string; aliases: string[]; targetPath: string }> }).terms[0]!;
+  const proposedInputs = [
+    { action: "search.terms.propose", input: { canonical: "New Harbor", aliases: [], targetPath: existing.targetPath }, kind: "term_registry_update" },
+    { action: "search.terms.propose", input: { ...existing, aliases: ["Updated alias"] }, kind: "term_registry_update" },
+    { action: "search.terms.remove", input: { id: existing.id }, kind: "term_registry_remove" },
+  ];
+  for (const { action, input, kind } of proposedInputs) {
+    const response = await page.request.post(`${projectPath}/actions/${action}`, { headers: { Origin: origin }, data: { input } });
+    expect(response.status()).toBe(200);
+    const result = await response.json() as { ok: boolean; data?: { proposal: { id: string } } };
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    const persisted = await page.request.get(`${projectPath}/proposals/${result.data!.proposal.id}`);
+    expect(persisted.status()).toBe(200);
+    expect(await persisted.json()).toMatchObject({ proposal: { id: result.data!.proposal.id, evidence: [{ module: "search", kind }] } });
+  }
+
   const sourceBefore = (await readPersistedDocument(page, projectId, fixture.scene.document.id)).markdown;
   expect(sourceBefore).toContain("Beacon Quay appears in this scene.");
   expect(sourceBefore).not.toMatch(/\[Beacon Quay\]\(/u);
