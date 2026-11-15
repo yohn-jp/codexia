@@ -59,9 +59,11 @@ export function textAnchorDecorationsExtension(
             : "再確認が必要";
         const attributes: Record<string, string> = {
           "data-anchor-id": anchor.id,
-          "data-block-id": anchor.blockId,
+          ...(anchor.blockId === null ? {} : { "data-block-id": anchor.blockId }),
           "data-anchor-status": anchor.status,
-          "aria-label": anchor.target
+          "aria-label": anchor.targets?.length
+            ? `${anchor.targets.map((target) => target.label).join("、")}への知識参照、${statusText}`
+            : anchor.target
             ? `${anchor.target.label}への知識参照、${statusText}`
             : `本文の根拠、${statusText}`,
         };
