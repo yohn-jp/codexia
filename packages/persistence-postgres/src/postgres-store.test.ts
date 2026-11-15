@@ -129,6 +129,35 @@ test("migrations are repeatable and document revisions stay immutable", async ()
   );
 });
 
+test("document head revisions are fetched as an ordered exact-key set within project scope", async () => {
+  const firstProject = await createProject(`head-batch-a-${randomUUID()}`);
+  const secondProject = await createProject(`head-batch-b-${randomUUID()}`);
+  const first = await createDocument(firstProject.id, "First head");
+  const second = await createDocument(firstProject.id, "Second head");
+
+  const lookups = await persistence.read((reader) => reader.getDocumentHeadRevisions(firstProject.id, [
+    { documentId: second.document.id, revisionId: second.revision.id },
+    { documentId: first.document.id, revisionId: second.revision.id },
+    { documentId: first.document.id, revisionId: first.revision.id },
+    { documentId: second.document.id, revisionId: second.revision.id },
+  ]));
+
+  assert.deepEqual(lookups.map(({ documentId, revisionId, revision }) => ({
+    documentId,
+    revisionId,
+    markdown: revision?.markdown ?? null,
+  })), [
+    { documentId: second.document.id, revisionId: second.revision.id, markdown: "Second head" },
+    { documentId: first.document.id, revisionId: second.revision.id, markdown: null },
+    { documentId: first.document.id, revisionId: first.revision.id, markdown: "First head" },
+    { documentId: second.document.id, revisionId: second.revision.id, markdown: "Second head" },
+  ]);
+  assert.deepEqual(await persistence.read((reader) => reader.getDocumentHeadRevisions(secondProject.id, [
+    { documentId: first.document.id, revisionId: first.revision.id },
+  ])), [{ documentId: first.document.id, revisionId: first.revision.id, revision: null }]);
+  assert.deepEqual(await persistence.read((reader) => reader.getDocumentHeadRevisions(firstProject.id, [])), []);
+});
+
 test("PostgreSQL health checks and Knowledge lists use the canonical project records", async () => {
   const project = await createProject(`knowledge-list-${randomUUID()}`);
   const nodeIds = [randomUUID() as KnowledgeNodeId, randomUUID() as KnowledgeNodeId];

@@ -4,6 +4,7 @@ import YAML from "yaml";
 import { assertChangeOperation, assertProjectPath, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type FileChange, type MutationCoordinator } from "@codexia/contracts";
 import { PersistenceError, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
+import { createSnapshotIndex, estimateSnapshotIndexBytes, type SnapshotIndex } from "./snapshot-index.js";
 export type { Project } from "@codexia/persistence-contracts";
 export type { ProposalStatus } from "@codexia/contracts";
 export interface TreeScene {
@@ -129,20 +130,38 @@ export class CoreError extends Error {
 export interface CoreStoreOptions { persistence: Persistence }
 type StoredFile = { content: string; encoding: "utf8" | "base64"; revision: string; documentId?: string; metadata?: boolean };
 type Manifest = { snapshot: SnapshotId; files: Record<string, StoredFile>; documents: Document[]; project: Project };
+type SnapshotIndexEntry = { index: SnapshotIndex; bytes: number };
 const AUTHORITY = "core.authority.proposals";
 const SNAPSHOTS = "core.authority.snapshots";
 const ARTIFACTS = "core.artifacts";
 const PATHS = "core.document-paths";
+const MAX_SNAPSHOT_INDEX_ENTRIES = 8;
+const MAX_SNAPSHOT_INDEX_BYTES = 4 * 1024 * 1024;
 const hash = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
 const pid = (value: string) => value as ProjectId;
 function fail(status: number, code: string, message: string): never { throw new CoreError(status, code, message); }
-function logicalId(document: Document, files: Record<string, StoredFile>): string {
-  const metadata = Object.entries(files).find(([, file]) => file.documentId === document.id && file.metadata);
-  if (metadata) { const data = YAML.parse(metadata[1].content); if (typeof data?.id === "string") return data.id; }
-  return document.id;
-}
 function safePath(value: string): void { assertProjectPath(value); }
 function body(content: string): string { return content.replace(/^---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n)?/, ""); }
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+function snapshotKey(projectId: string, projectVersion: number): string { return `${projectId}\0${projectVersion}`; }
+function storedManifest(value: unknown, projectId: string, projectVersion: number): Manifest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail(409, "snapshot_unavailable", "The stored immutable project snapshot is invalid");
+  const manifest = value as Manifest;
+  if (!manifest.snapshot || manifest.snapshot.projectId !== projectId || manifest.snapshot.projectVersion !== projectVersion ||
+      !manifest.project || manifest.project.id !== projectId || manifest.project.version !== projectVersion ||
+      !manifest.files || typeof manifest.files !== "object" || Array.isArray(manifest.files) || !Array.isArray(manifest.documents)) {
+    fail(409, "snapshot_unavailable", "The stored immutable project snapshot does not match its project version");
+  }
+  return manifest;
+}
+function manifestFingerprint(manifest: Manifest): string { return hash(canonicalJson(manifest)); }
 function stableId(projectId: string, key: string): DocumentId {
   const value = hash(`${projectId}\0${key}`); return `${value.slice(0,8)}-${value.slice(8,12)}-5${value.slice(13,16)}-a${value.slice(17,20)}-${value.slice(20,32)}` as DocumentId;
 }
@@ -176,13 +195,19 @@ async function assertEvidenceRevisions(
 /** PostgreSQL is the sole durable manuscript, metadata and approved-operation authority. */
 export class CoreStore implements MutationCoordinator {
   readonly persistence: Persistence;
+  private readonly snapshotIndexes = new Map<string, SnapshotIndexEntry>();
+  private snapshotIndexBytes = 0;
   constructor(options: CoreStoreOptions) { this.persistence = options.persistence; }
   async listProjects(): Promise<Project[]> { return [...await this.persistence.read((reader) => reader.listProjects(200))]; }
   async createProject(input: {title: string; settings?: JsonObject}): Promise<Project> { return this.persistence.transaction((tx) => tx.createProject(input)); }
-  private async currentManifest(reader: PersistenceReader, projectId: string): Promise<Manifest> {
-    const project = await reader.getProject(pid(projectId)); if (!project) fail(404,"project_not_found","Project not found");
+  private async currentManifest(reader: PersistenceReader, projectId: string, knownProject?: Project): Promise<Manifest> {
+    const project = knownProject ?? await reader.getProject(pid(projectId));
+    if (!project) fail(404,"project_not_found","Project not found");
     const documents = [...await reader.listDocuments(pid(projectId),undefined,1000)];
     if (documents.length === 1000) fail(413,"snapshot_too_large","Project snapshot exceeds the supported document bound");
+    const headKeys = documents.flatMap((document) => document.headRevisionId ? [{ documentId: document.id, revisionId: document.headRevisionId }] : []);
+    const headRevisions = await reader.getDocumentHeadRevisions(pid(projectId), headKeys);
+    const revisionsByHead = new Map(headRevisions.map((head) => [JSON.stringify([head.documentId, head.revisionId]), head.revision]));
     const records = (await Promise.all([reader.listModuleRecords(pid(projectId),PATHS),reader.listModuleRecords(pid(projectId),ARTIFACTS)])).flat(); const files: Record<string,StoredFile> = {};
     const add = (key: string, content: string, encoding: "utf8"|"base64" = "utf8", documentId?: string, metadata?: boolean) => {
       safePath(key); if (files[key]) fail(409,"duplicate_document_path","Project contains duplicate document paths");
@@ -221,7 +246,7 @@ export class CoreStore implements MutationCoordinator {
       }
       add(metadataPath,YAML.stringify({...metadata,id:projectedId(document),title:document.title,order:document.orderKey,...(document.kind === "scene" ? {manuscript:manuscriptPath}:{})}),"utf8",document.id,true);
       if (document.headRevisionId) {
-        const revision = await reader.getRevision(pid(projectId),document.id,document.headRevisionId);
+        const revision = revisionsByHead.get(JSON.stringify([document.id, document.headRevisionId]));
         if (!revision) fail(409,"missing_revision","Document head revision is missing");
         if (document.kind !== "volume" && document.kind !== "chapter") add(manuscriptPath,revision.markdown,"utf8",document.id);
       }
@@ -237,49 +262,111 @@ export class CoreStore implements MutationCoordinator {
   }
   private async manifest(projectId: string, pinned?: SnapshotId): Promise<Manifest> {
     if (pinned && pinned.projectId !== projectId) fail(409,"snapshot_scope_mismatch","Snapshot belongs to another project");
-    const result = await this.persistence.read(async (reader) => {
-      if (pinned) { const saved = await reader.getModuleRecord(pid(projectId),SNAPSHOTS,`snapshot:${pinned.projectVersion}`); if (saved) return saved.value as unknown as Manifest; }
-      const current = await this.currentManifest(reader,projectId);
-      if (pinned && current.snapshot.projectVersion !== pinned.projectVersion) fail(409,"snapshot_unavailable","The requested immutable project snapshot is unavailable");
-      return current;
+    const resolved = await this.persistence.read(async (reader) => {
+      if (pinned) {
+        const saved = await reader.getModuleRecord(pid(projectId),SNAPSHOTS,`snapshot:${pinned.projectVersion}`);
+        if (saved) return { manifest: storedManifest(saved.value, projectId, pinned.projectVersion), needsPersistence: false };
+      }
+      const project = await reader.getProject(pid(projectId));
+      if (!project) fail(404,"project_not_found","Project not found");
+      if (pinned && project.version !== pinned.projectVersion) fail(409,"snapshot_unavailable","The requested immutable project snapshot is unavailable");
+      if (!pinned) {
+        const saved = await reader.getModuleRecord(pid(projectId),SNAPSHOTS,`snapshot:${project.version}`);
+        if (saved) return { manifest: storedManifest(saved.value, projectId, project.version), needsPersistence: false };
+      }
+      return { manifest: await this.currentManifest(reader,projectId,project), needsPersistence: true };
     });
-    // Retain exact immutable bytes for pinned module jobs and historical readers across restart.
-    await this.persistence.transaction(async (tx) => { if (!(await tx.getModuleRecord(pid(projectId),SNAPSHOTS,`snapshot:${result.snapshot.projectVersion}`))) {
-      try { await tx.saveModuleRecord({projectId:pid(projectId),moduleId:SNAPSHOTS,key:`snapshot:${result.snapshot.projectVersion}`,value:result as unknown as JsonObject,expectedVersion:null}); }
-      catch (error) { if (!(error instanceof PersistenceError) || error.code !== "conflict") throw error; }
-    }});
-    return result;
+    const manifest = resolved.needsPersistence ? await this.persistManifest(resolved.manifest) : resolved.manifest;
+    this.snapshotIndex(manifest);
+    return manifest;
+  }
+
+  private snapshotIndex(manifest: Manifest): SnapshotIndex {
+    const key = snapshotKey(manifest.snapshot.projectId, manifest.snapshot.projectVersion);
+    const cached = this.snapshotIndexes.get(key);
+    if (cached) {
+      this.snapshotIndexes.delete(key);
+      this.snapshotIndexes.set(key, cached);
+      return cached.index;
+    }
+    const index = createSnapshotIndex(manifest.documents, manifest.files);
+    const bytes = estimateSnapshotIndexBytes(index);
+    if (bytes <= MAX_SNAPSHOT_INDEX_BYTES) {
+      this.snapshotIndexes.set(key, { index, bytes });
+      this.snapshotIndexBytes += bytes;
+      while (this.snapshotIndexes.size > MAX_SNAPSHOT_INDEX_ENTRIES || this.snapshotIndexBytes > MAX_SNAPSHOT_INDEX_BYTES) {
+        const oldest = this.snapshotIndexes.entries().next().value as [string, SnapshotIndexEntry] | undefined;
+        if (!oldest) break;
+        this.snapshotIndexes.delete(oldest[0]);
+        this.snapshotIndexBytes -= oldest[1].bytes;
+      }
+    }
+    return index;
+  }
+
+  private async persistManifest(manifest: Manifest): Promise<Manifest> {
+    const key = `snapshot:${manifest.snapshot.projectVersion}`;
+    return this.persistence.transaction(async (tx) => {
+      try {
+        await tx.saveModuleRecord({projectId:pid(manifest.snapshot.projectId),moduleId:SNAPSHOTS,key,value:manifest as unknown as JsonObject,expectedVersion:null});
+        return manifest;
+      } catch (error) {
+        if (!(error instanceof PersistenceError) || error.code !== "conflict") throw error;
+        const winner = await tx.getModuleRecord(pid(manifest.snapshot.projectId), SNAPSHOTS, key);
+        if (!winner) throw error;
+        const saved = storedManifest(winner.value, manifest.snapshot.projectId, manifest.snapshot.projectVersion);
+        if (manifestFingerprint(saved) !== manifestFingerprint(manifest)) {
+          fail(409, "snapshot_unavailable", "Concurrent snapshot builders produced different immutable project snapshots");
+        }
+        return saved;
+      }
+    });
   }
   async reader(projectId: string,pinned?: SnapshotId): Promise<SnapshotReader> { return makeReader(await this.manifest(projectId,pinned)); }
   async observe(projectId: string): Promise<ProjectObservation> { const project = await this.persistence.read((reader)=>reader.getProject(pid(projectId))); if (!project) fail(404,"project_not_found","Project not found"); return {snapshot:{projectId,projectVersion:project.version},observedAt:new Date().toISOString(),state:"fresh"}; }
-  private treeFor(manifest: Manifest): Tree {
-    const id = (document: Document) => logicalId(document,manifest.files);
-    return {title:manifest.project.title,volumes:manifest.documents.filter((d)=>d.kind === "volume").map((volume)=>({id:id(volume),title:volume.title,chapters:manifest.documents.filter((d)=>d.kind === "chapter" && d.parentId === volume.id).map((chapter)=>({id:id(chapter),title:chapter.title,scenes:manifest.documents.filter((d)=>d.kind === "scene" && d.parentId === chapter.id).map((scene)=>({id:id(scene),title:scene.title}))}))}))};
+  private logicalId(index: SnapshotIndex, document: Document): string { return index.logicalIdByDocumentId.get(document.id) ?? document.id; }
+  private treeFor(manifest: Manifest, index = this.snapshotIndex(manifest)): Tree {
+    return {
+      title: manifest.project.title,
+      volumes: index.volumes.map((volume) => ({
+        id: this.logicalId(index, volume),
+        title: volume.title,
+        chapters: (index.chaptersByVolumeId.get(volume.id) ?? []).map((chapter) => ({
+          id: this.logicalId(index, chapter),
+          title: chapter.title,
+          scenes: (index.scenesByChapterId.get(chapter.id) ?? []).map((scene) => ({
+            id: this.logicalId(index, scene),
+            title: scene.title,
+          })),
+        })),
+      })),
+    };
   }
   async readTreeSnapshot(projectId: string,pinned?: SnapshotId): Promise<{snapshot:SnapshotId;tree:Tree}> { const manifest=await this.manifest(projectId,pinned); return {snapshot:manifest.snapshot,tree:this.treeFor(manifest)}; }
   async tree(projectId:string): Promise<Tree> { return (await this.readTreeSnapshot(projectId)).tree; }
-  private findDocument(manifest:Manifest,id:string): Document { const found=manifest.documents.find((document)=>document.id===id || logicalId(document,manifest.files)===id); if (!found) fail(404,"scene_not_found","Document not found"); return found; }
+  private findDocument(manifest:Manifest,id:string,index=this.snapshotIndex(manifest)): Document { const found=index.firstDocumentByLookupId.get(id); if (!found) fail(404,"scene_not_found","Document not found"); return found; }
   async readSceneSnapshot(projectId:string,sceneId:string,pinned?:SnapshotId) {
-    const manifest=await this.manifest(projectId,pinned), document=this.findDocument(manifest,sceneId);
-    const manuscript=Object.entries(manifest.files).find(([,file])=>file.documentId===document.id && !file.metadata);
-    const metadata=Object.entries(manifest.files).find(([,file])=>file.documentId===document.id && file.metadata);
-    if (!manuscript || !metadata) fail(404,"scene_not_found","Scene body not found");
-    return {snapshot:manifest.snapshot,scene:{id:logicalId(document,manifest.files),title:document.title,text:body(manuscript[1].content),revision:hash(metadata[1].content+"\0"+manuscript[1].content)},document:{path:manuscript[0],content:manuscript[1].content,revision:manuscript[1].revision},metadata:{path:metadata[0],content:metadata[1].content,revision:metadata[1].revision}};
+    const manifest=await this.manifest(projectId,pinned), index=this.snapshotIndex(manifest), document=this.findDocument(manifest,sceneId,index);
+    const paths=index.pathsByDocumentId.get(document.id), manuscriptPath=paths?.bodyPath, metadataPath=paths?.metadataPath;
+    const manuscript=manuscriptPath ? manifest.files[manuscriptPath] : undefined, metadata=metadataPath ? manifest.files[metadataPath] : undefined;
+    if (!manuscriptPath || !metadataPath || !manuscript || !metadata) fail(404,"scene_not_found","Scene body not found");
+    return {snapshot:manifest.snapshot,scene:{id:this.logicalId(index,document),title:document.title,text:body(manuscript.content),revision:hash(metadata.content+"\0"+manuscript.content)},document:{path:manuscriptPath,content:manuscript.content,revision:manuscript.revision},metadata:{path:metadataPath,content:metadata.content,revision:metadata.revision}};
   }
   async readScene(projectId:string,sceneId:string):Promise<Scene> { return (await this.readSceneSnapshot(projectId,sceneId)).scene; }
-  async resolveDocumentScene(projectId:string,path:string,pinned?:SnapshotId) { safePath(path); const manifest=await this.manifest(projectId,pinned); const id=manifest.files[path]?.documentId; const document=id ? manifest.documents.find((d)=>d.id===id):undefined; return {snapshot:manifest.snapshot,sceneId:document ? logicalId(document,manifest.files):null}; }
+  async resolveDocumentScene(projectId:string,path:string,pinned?:SnapshotId) { safePath(path); const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest); const id=manifest.files[path]?.documentId; const document=id ? index.documentsById.get(id):undefined; return {snapshot:manifest.snapshot,sceneId:document ? this.logicalId(index,document):null}; }
   async searchSnapshot(projectId:string,query:string,limit=20,pinned?:SnapshotId):Promise<{snapshot:SnapshotId;results:LiteralSearchResult[]}> {
     if (typeof query!=="string" || query.length>512 || !Number.isInteger(limit) || limit<1) fail(400,"invalid_search_query","Invalid search query or limit");
-    const manifest=await this.manifest(projectId,pinned); const results:LiteralSearchResult[]=[];
-    if (query) for (const document of manifest.documents) { const entry=Object.entries(manifest.files).find(([,file])=>file.documentId===document.id && !file.metadata); for (const field of ["name","body"] as const) {
-      const text=field==="name" ? document.title:entry ? body(entry[1].content):""; const offset=text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase()); if(offset<0)continue;
-      results.push({id:logicalId(document,manifest.files),type:document.kind as LiteralSearchResult["type"],name:document.title,snippet:text.slice(Math.max(0,offset-48),offset+query.length+48),filePath:entry?.[0] ?? "",score:field==="name"?2:1,field,offset,length:query.length});
+    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest); const results:LiteralSearchResult[]=[];
+    const normalizedQuery=query.toLocaleLowerCase();
+    if (query) for (const document of manifest.documents) { const bodyPath=index.pathsByDocumentId.get(document.id)?.bodyPath,entry=bodyPath ? manifest.files[bodyPath] : undefined; for (const field of ["name","body"] as const) {
+      const text=field==="name" ? document.title:entry ? body(entry.content):""; const offset=text.toLocaleLowerCase().indexOf(normalizedQuery); if(offset<0)continue;
+      results.push({id:this.logicalId(index,document),type:document.kind as LiteralSearchResult["type"],name:document.title,snippet:text.slice(Math.max(0,offset-48),offset+query.length+48),filePath:bodyPath ?? "",score:field==="name"?2:1,field,offset,length:query.length});
     }}
     return {snapshot:manifest.snapshot,results:results.sort((a,b)=>b.score-a.score).slice(0,Math.min(limit,100))};
   }
   async writingStatsSnapshot(projectId:string,pinned?:SnapshotId):Promise<{snapshot:SnapshotId;stats:WritingStats}> {
-    const manifest=await this.manifest(projectId,pinned); const tree=this.treeFor(manifest), sceneById:Record<string,SceneWritingStats>={}; let totalCharCount=0;
-    const volumes=tree.volumes.map((volume)=>{const chapters=volume.chapters.map((chapter)=>{const scenes=chapter.scenes.map((scene)=>{const document=this.findDocument(manifest,scene.id); const file=Object.values(manifest.files).find((f)=>f.documentId===document.id&&!f.metadata); const charCount=Array.from(body(file?.content??"").replace(/\s/gu,"")).length; const stat={sceneId:scene.id,charCount,pages400:Math.ceil(charCount/400)}; sceneById[scene.id]=stat;return stat;});const charCount=scenes.reduce((sum,s)=>sum+s.charCount,0);return {chapterId:chapter.id,charCount,pages400:Math.ceil(charCount/400),scenes};});const charCount=chapters.reduce((sum,c)=>sum+c.charCount,0);totalCharCount+=charCount;return {volumeId:volume.id,charCount,pages400:Math.ceil(charCount/400),chapters};});
+    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),tree=this.treeFor(manifest,index),sceneById:Record<string,SceneWritingStats>={}; let totalCharCount=0;
+    const volumes=tree.volumes.map((volume)=>{const chapters=volume.chapters.map((chapter)=>{const scenes=chapter.scenes.map((scene)=>{const document=this.findDocument(manifest,scene.id,index); const charCount=index.sceneCharacterCountsByDocumentId.get(document.id) ?? 0; const stat={sceneId:scene.id,charCount,pages400:Math.ceil(charCount/400)}; sceneById[scene.id]=stat;return stat;});const charCount=scenes.reduce((sum,s)=>sum+s.charCount,0);return {chapterId:chapter.id,charCount,pages400:Math.ceil(charCount/400),scenes};});const charCount=chapters.reduce((sum,c)=>sum+c.charCount,0);totalCharCount+=charCount;return {volumeId:volume.id,charCount,pages400:Math.ceil(charCount/400),chapters};});
     return {snapshot:manifest.snapshot,stats:{totalCharCount,totalPages400:Math.ceil(totalCharCount/400),volumes,sceneById}};
   }
   private async proposalStatus(reader:PersistenceReader,projectId:string,proposalId:string):Promise<{recordVersion:number;status:ProposalStatus}|null> {
@@ -612,7 +699,7 @@ export class CoreStore implements MutationCoordinator {
   private async buildOperation(projectId:string,writes:FileChange[],effect:ChangeOperation["effect"],message:string,pinned?:SnapshotId):Promise<BuiltChangeOperation> {const reader=await this.reader(projectId,pinned);return {snapshot:reader.snapshot,operation:{id:randomUUID(),generation:0,projectId,baseProjectVersion:reader.snapshot.projectVersion,effect,reads:writes.map(({path,revision})=>({path,revision})),writes,message}};}
   async buildCreateHierarchyOperation(projectId:string,input:CreateHierarchyInput,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
     if(!input||!["volume","chapter","scene"].includes(input.kind)||typeof input.id!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(input.id)||!input.title?.trim())fail(400,"invalid_hierarchy_operation","A path-safe identity and title are required");
-    const manifest=await this.manifest(projectId,pinned);if(manifest.documents.some((document)=>logicalId(document,manifest.files)===input.id))fail(409,"hierarchy_id_exists","The hierarchy identity already exists");
+    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest);if(index.logicalDocumentIds.has(input.id))fail(409,"hierarchy_id_exists","The hierarchy identity already exists");
     const reader=makeReader(manifest),writes:FileChange[]=[];let path:string;
     if(input.kind==="volume")path=`plot/volumes/${input.id}/volume.yaml`;
     else {const volume=this.findDocument(manifest,input.volumeId);if(volume.kind!=="volume")fail(422,"invalid_hierarchy_parent","The parent must be a volume");path=`plot/volumes/${input.volumeId}/chapters/${input.id}/chapter.yaml`;
@@ -621,24 +708,24 @@ export class CoreStore implements MutationCoordinator {
     return this.buildOperation(projectId,writes,"structure",`Create ${input.kind} ${input.id}`,manifest.snapshot);
   }
   async buildDeleteHierarchyOperation(projectId:string,input:HierarchyTarget,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
-    const manifest=await this.manifest(projectId,pinned),target=this.findDocument(manifest,input.id);if(target.kind!==input.kind)fail(422,"invalid_hierarchy_target","Hierarchy kind mismatch");
-    const selected=new Set<string>([target.id]);let changed=true;while(changed){changed=false;for(const document of manifest.documents)if(document.parentId&&selected.has(document.parentId)&&!selected.has(document.id)){selected.add(document.id);changed=true;}}
+    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),target=this.findDocument(manifest,input.id,index);if(target.kind!==input.kind)fail(422,"invalid_hierarchy_target","Hierarchy kind mismatch");
+    const selected=new Set<string>([target.id]),pending=[target.id];for(let cursor=0;cursor<pending.length;cursor++)for(const document of index.documentsByParentId.get(pending[cursor]!)??[])if(!selected.has(document.id)){selected.add(document.id);pending.push(document.id);}
     const writes=Object.entries(manifest.files).filter(([,file])=>file.documentId&&selected.has(file.documentId)).map(([path,file])=>({path,revision:file.revision,content:null}));return this.buildOperation(projectId,writes,"structure",`Delete ${input.kind} ${input.id}`,manifest.snapshot);
   }
   async buildReorderHierarchyOperation(projectId:string,input:ReorderHierarchyInput,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
-    const manifest=await this.manifest(projectId,pinned);let parent:Document|undefined;if(input.kind==="chapter")parent=this.findDocument(manifest,input.volumeId);if(input.kind==="scene")parent=this.findDocument(manifest,input.chapterId);
-    const siblings=manifest.documents.filter((document)=>document.kind===input.kind&&document.parentId===(parent?.id??null));const expected=siblings.map((document)=>logicalId(document,manifest.files)).sort();if(JSON.stringify([...input.orderedIds].sort())!==JSON.stringify(expected))fail(422,"invalid_hierarchy_order","Reorder must include every sibling exactly once");
-    const writes=input.orderedIds.map((id,index)=>{const document=this.findDocument(manifest,id),entry=Object.entries(manifest.files).find(([,file])=>file.documentId===document.id&&file.metadata)!;return {path:entry[0],revision:entry[1].revision,content:YAML.stringify({...YAML.parse(entry[1].content),order:String(index).padStart(10,"0")})};});return this.buildOperation(projectId,writes,"structure","Reorder hierarchy",manifest.snapshot);
+    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest);let parent:Document|undefined;if(input.kind==="chapter")parent=this.findDocument(manifest,input.volumeId,index);if(input.kind==="scene")parent=this.findDocument(manifest,input.chapterId,index);
+    const siblings=(index.documentsByParentId.get(parent?.id??null)??[]).filter((document)=>document.kind===input.kind);const expected=siblings.map((document)=>this.logicalId(index,document)).sort();if(JSON.stringify([...input.orderedIds].sort())!==JSON.stringify(expected))fail(422,"invalid_hierarchy_order","Reorder must include every sibling exactly once");
+    const writes=input.orderedIds.map((id,order)=>{const document=this.findDocument(manifest,id,index),path=index.pathsByDocumentId.get(document.id)?.metadataPath,entry=path ? manifest.files[path] : undefined;if(!path||!entry)fail(409,"snapshot_unavailable","Document metadata is missing from the project snapshot");return {path,revision:entry.revision,content:YAML.stringify({...YAML.parse(entry.content),order:String(order).padStart(10,"0")})};});return this.buildOperation(projectId,writes,"structure","Reorder hierarchy",manifest.snapshot);
   }
   async buildRestoreOperation(projectId:string,input:{sceneId:string;snapshotId:string}|string,revisionId?:string,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
-    const sceneId=typeof input==="string"?input:input.sceneId,sourceId=typeof input==="string"?revisionId:input.snapshotId;const manifest=await this.manifest(projectId,pinned),document=this.findDocument(manifest,sceneId);
-    const revision=await this.persistence.read((reader)=>reader.getRevision(pid(projectId),document.id,sourceId as RevisionId));if(!revision)fail(404,"revision_not_found","Revision not found");const file=Object.entries(manifest.files).find(([,value])=>value.documentId===document.id&&!value.metadata)!;return this.buildOperation(projectId,[{path:file[0],revision:file[1].revision,content:revision.markdown}],"manuscript","Restore manuscript revision",manifest.snapshot);
+    const sceneId=typeof input==="string"?input:input.sceneId,sourceId=typeof input==="string"?revisionId:input.snapshotId;const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId,index);
+    const revision=await this.persistence.read((reader)=>reader.getRevision(pid(projectId),document.id,sourceId as RevisionId));if(!revision)fail(404,"revision_not_found","Revision not found");const path=index.pathsByDocumentId.get(document.id)?.bodyPath,file=path ? manifest.files[path] : undefined;if(!path||!file)fail(409,"snapshot_unavailable","Document body is missing from the project snapshot");return this.buildOperation(projectId,[{path,revision:file.revision,content:revision.markdown}],"manuscript","Restore manuscript revision",manifest.snapshot);
   }
   async listManuscriptSnapshots(projectId:string,manuscriptId:string,sceneId?:string,pinned?:SnapshotId):Promise<{snapshot:SnapshotId;snapshots:ManuscriptSnapshotMeta[]}>{
-    const manifest=await this.manifest(projectId,pinned),document=this.findDocument(manifest,sceneId??manuscriptId),page=await this.persistence.read((reader)=>reader.listRevisions(pid(projectId),document.id,100));return {snapshot:manifest.snapshot,snapshots:page.revisions.map((revision)=>({id:revision.id,sceneId:logicalId(document,manifest.files),manuscriptId,createdAt:Date.parse(revision.createdAt),charCount:Array.from(body(revision.markdown)).length,source:"postgres"}))};
+    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId??manuscriptId,index),page=await this.persistence.read((reader)=>reader.listRevisions(pid(projectId),document.id,100));return {snapshot:manifest.snapshot,snapshots:page.revisions.map((revision)=>({id:revision.id,sceneId:this.logicalId(index,document),manuscriptId,createdAt:Date.parse(revision.createdAt),charCount:Array.from(body(revision.markdown)).length,source:"postgres"}))};
   }
   async readManuscriptSnapshot(projectId:string,snapshotId:string,manuscriptId:string,sceneId?:string,pinned?:SnapshotId):Promise<{snapshot:SnapshotId;manuscriptSnapshot:ManuscriptSnapshot}>{
-    const manifest=await this.manifest(projectId,pinned),document=this.findDocument(manifest,sceneId??manuscriptId);const revision=await this.persistence.read((reader)=>reader.getRevision(pid(projectId),document.id,snapshotId as RevisionId));if(!revision)fail(404,"revision_not_found","Revision not found");const file=Object.entries(manifest.files).find(([,value])=>value.documentId===document.id&&!value.metadata)!;return {snapshot:manifest.snapshot,manuscriptSnapshot:{id:revision.id,sceneId:logicalId(document,manifest.files),manuscriptId,createdAt:Date.parse(revision.createdAt),charCount:Array.from(body(revision.markdown)).length,source:"postgres",body:body(revision.markdown),document:{path:file[0],content:revision.markdown,revision:revision.sha256}}};
+    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId??manuscriptId,index);const revision=await this.persistence.read((reader)=>reader.getRevision(pid(projectId),document.id,snapshotId as RevisionId));if(!revision)fail(404,"revision_not_found","Revision not found");const path=index.pathsByDocumentId.get(document.id)?.bodyPath,file=path ? manifest.files[path] : undefined;if(!path||!file)fail(409,"snapshot_unavailable","Document body is missing from the project snapshot");return {snapshot:manifest.snapshot,manuscriptSnapshot:{id:revision.id,sceneId:this.logicalId(index,document),manuscriptId,createdAt:Date.parse(revision.createdAt),charCount:Array.from(body(revision.markdown)).length,source:"postgres",body:body(revision.markdown),document:{path,content:revision.markdown,revision:revision.sha256}}};
   }
   async status(projectId:string) { const observation=await this.observe(projectId);return {...observation.snapshot,state:"durable" as const}; }
   async history(projectId:string):Promise<Commit[]> { const manifest=await this.manifest(projectId); const revisions=await this.persistence.read(async(reader)=>{const pages=await Promise.all(manifest.documents.map((document)=>reader.listRevisions(pid(projectId),document.id,100)));return pages.flatMap((page)=>page.revisions);});return revisions.sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,100).map((revision)=>({hash:revision.id,date:revision.createdAt,message:`Document revision ${revision.documentId}`})); }
