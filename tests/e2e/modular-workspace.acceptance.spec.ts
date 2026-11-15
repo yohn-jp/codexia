@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
-import { authToken, ownerLogin } from "./postgres-fixture";
+import { authToken, ownerLogin, openRevisionHistory } from "./postgres-fixture";
 
 const profile = process.env.CODEXIA_PROFILE ?? "core";
 const INITIAL_SCENE_ONE = "# Scene One\n\nThe first line of the story.\nBeacon Quay appears in this scene.\n";
@@ -157,14 +157,18 @@ test("mobile denials retain the current route and panel, and app back is guarded
     expect(await page.evaluate(() => history.length)).toBe(historyLength);
     expect(await mobileTransitionMetrics(page)).toEqual({ guardCalls: 1, journalCalls: 1, journalWrites: 1, unusedOutcomes: 0 });
 
-    await page.getByRole("tablist", { name: "Workspace panels" }).getByRole("tab", { name: "Outline", exact: true }).click();
+    await armMobileTransitionFixture(page, [true]);
+    await page.getByRole("button", { name: "設定を開く" }).click();
+    await expect(page.getByTestId("fixture-route")).toHaveText("settings");
+    const panelTabs = page.getByRole("tablist", { name: "パネル" });
+    await panelTabs.getByRole("tab", { name: "Outline", exact: true }).click();
     await expect(outlinePanel).toBeVisible();
     const sameViewHistoryLength = await page.evaluate(() => history.length);
     await armMobileTransitionFixture(page, [true]);
     await navigation.getByRole("button", { name: "書く", exact: true }).click();
     await expect(editorPanel).toBeVisible();
     await expect(page.getByTestId("fixture-route")).toHaveText("writing");
-    expect(await page.evaluate(() => history.length)).toBe(sameViewHistoryLength);
+    expect(await page.evaluate(() => history.length)).toBe(sameViewHistoryLength + 1);
     expect(await mobileTransitionMetrics(page)).toEqual({ guardCalls: 1, journalCalls: 1, journalWrites: 1, unusedOutcomes: 0 });
   } finally {
     await fixture.server.stop();
@@ -243,7 +247,9 @@ test("mobile same-view panel requests cannot suppress a newer route and scope se
   try {
     const { navigation } = fixture;
     const editorPanel = page.locator('[data-workspace-panel="editor"]');
-    await page.getByRole("tablist", { name: "Workspace panels" }).getByRole("tab", { name: "Outline", exact: true }).click();
+    await page.getByRole("button", { name: "設定を開く" }).click();
+    await expect(page.getByTestId("fixture-route")).toHaveText("settings");
+    await page.getByRole("tablist", { name: "パネル" }).getByRole("tab", { name: "Outline", exact: true }).click();
     await expect(page.locator('[data-workspace-panel="outline"]')).toBeVisible();
 
     await armMobileTransitionFixture(page, ["delayed"]);
@@ -391,17 +397,14 @@ async function openFixtureScene(page: Page, mode: "desktop" | "mobile", sceneInd
   await page.goto(route);
   await expect(page).toHaveURL(new RegExp(`/${mode}/projects/${fixture.project.id}/scenes/${scene!.document.id}`));
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
-  if (mode === "mobile") {
-    await page.getByRole("tablist", { name: "Workspace panels" }).getByRole("tab", { name: "原稿", exact: true }).click();
-  }
   fixture.scene = scene!;
   await expect(page.getByRole("heading", { name: scene!.document.title, exact: true })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "原稿 Markdown" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "本文", exact: true })).toBeVisible();
   // Mobile mounts only the active panel; its project select is not present on
   // the writing tab. Verify the displayed canonical project in both shells.
-  if (mode === "desktop") await expect(page.getByLabel("開く作品")).toHaveValue(fixture.project.id);
+  if (mode === "desktop") await expect(page.getByLabel("作品", { exact: true })).toHaveValue(fixture.project.id);
   await expect(page.locator(".pg-editor-heading .eyebrow")).toHaveText(fixture.project.title);
-  await expect.poll(async () => page.getByRole("textbox", { name: "原稿 Markdown" }).locator(".cm-line")
+  await expect.poll(async () => page.getByRole("textbox", { name: "本文", exact: true }).locator(".cm-line")
     .evaluateAll((lines) => lines.map((line) => line.textContent ?? "").join("\n").replace(/\n+$/u, "")))
     .toBe(scene!.revision.markdown.replace(/\n+$/u, ""));
   await expect(page.getByText("IndexedDB回復Journalに保存済み", { exact: true })).toBeVisible();
@@ -452,7 +455,7 @@ async function restartApi(): Promise<void> {
 }
 
 function workspaceToolbar(page: Page) {
-  return page.getByRole("toolbar", { name: "Workspace layout controls" });
+  return page.getByRole("toolbar", { name: "ワークスペース配置" });
 }
 
 async function openPanelMenu(page: Page): Promise<void> {
@@ -511,7 +514,7 @@ function firstSplitSizes(root: unknown): number[] | null {
 }
 
 async function saveWorkspace(page: Page): Promise<WorkspaceState> {
-  await workspaceToolbar(page).getByRole("button", { name: "Save layout", exact: true }).click();
+  await workspaceToolbar(page).getByRole("button", { name: "配置を保存", exact: true }).click();
   const storage = await workspaceStorage(page, "desktop");
   expect(storage.key).not.toBe("");
   expect(storage.raw).not.toBeNull();
@@ -528,26 +531,30 @@ test("desktop workspace presets, arbitrary docking, panel visibility and layout 
   await expect(workspace).toBeVisible();
   await expect(workspace.locator('[data-workspace-panel="editor"]')).toBeVisible();
 
-  for (const preset of ["Writing", "Research", "Review"] as const) {
-    await toolbar.getByRole("button", { name: preset, exact: true }).click();
+  for (const { label, preset } of [
+    { label: "執筆", preset: "writing" },
+    { label: "調査", preset: "research" },
+    { label: "レビュー", preset: "review" },
+  ] as const) {
+    await toolbar.getByRole("button", { name: label, exact: true }).click();
     const saved = await saveWorkspace(page);
     expect(saved.version).toBe(1);
-    expect(saved.preset).toBe(preset.toLowerCase());
+    expect(saved.preset).toBe(preset);
     await expect(workspace.locator('[data-workspace-panel="editor"]')).toBeVisible();
   }
 
-  await toolbar.getByRole("button", { name: "Writing", exact: true }).click();
+  await toolbar.getByRole("button", { name: "執筆", exact: true }).click();
   await saveWorkspace(page);
 
   await workspace.locator(".st-workspace-move-menu summary").click();
   const moveControls = workspace.locator(".st-workspace-move-controls");
-  const movePanel = moveControls.getByLabel("Panel to move");
-  const moveNextTo = moveControls.getByLabel("Move next to");
-  const placement = moveControls.getByLabel("Placement");
+  const movePanel = moveControls.getByLabel("移動するパネル");
+  const moveNextTo = moveControls.getByLabel("移動先のパネル");
+  const placement = moveControls.getByLabel("配置");
   await movePanel.selectOption("editor");
   await moveNextTo.selectOption("outline");
   await placement.selectOption("right");
-  await moveControls.getByRole("button", { name: "Move panel", exact: true }).click();
+  await moveControls.getByRole("button", { name: "パネルを移動", exact: true }).click();
   const splitLayout = await saveWorkspace(page);
   expect(containsLayoutNode(splitLayout.root, "split", ["editor", "outline"])).toBe(true);
   const beforeResize = firstSplitSizes(splitLayout.root);
@@ -562,7 +569,7 @@ test("desktop workspace presets, arbitrary docking, panel visibility and layout 
   await movePanel.selectOption("editor");
   await moveNextTo.selectOption("outline");
   await placement.selectOption("tab");
-  await moveControls.getByRole("button", { name: "Move panel", exact: true }).click();
+  await moveControls.getByRole("button", { name: "パネルを移動", exact: true }).click();
   const tabLayout = await saveWorkspace(page);
   expect(containsLayoutNode(tabLayout.root, "stack", ["editor", "outline"])).toBe(true);
 
@@ -576,9 +583,9 @@ test("desktop workspace presets, arbitrary docking, panel visibility and layout 
   await expectDraft(page, fixture.scene.document.id, draft);
 
   await openPanelMenu(page);
-  await toolbar.getByRole("button", { name: "Hide 原稿", exact: true }).click();
+  await toolbar.getByRole("button", { name: "原稿を隠す", exact: true }).click();
   await expect(workspace.locator('[data-workspace-panel="editor"]')).toHaveCount(0);
-  await toolbar.getByRole("button", { name: "Show 原稿", exact: true }).click();
+  await toolbar.getByRole("button", { name: "原稿を表示", exact: true }).click();
   await expect(workspace.locator('[data-workspace-panel="editor"] .cm-content')).toHaveText(draft);
   const savedCustomLayout = await saveWorkspace(page);
   expect(savedCustomLayout.preset).toBe("custom");
@@ -619,14 +626,15 @@ test("mobile workspace tabs support keyboard navigation and preserve the editor 
   await signIn(page, "mobile");
   const fixture = await openFixtureScene(page, "mobile");
 
-  const tabs = page.getByRole("tablist", { name: "Workspace panels" });
+  const tabs = page.getByRole("tablist", { name: "パネル" });
   const editorTab = tabs.getByRole("tab", { name: "原稿", exact: true });
-  await expect(tabs).toBeVisible();
-  await expect(editorTab).toHaveAttribute("aria-selected", "true");
 
   const draft = "Mobile panel keyboard navigation keeps this draft.";
   await page.locator('[data-workspace-panel="editor"] .cm-content').fill(draft);
   await expectDraft(page, fixture.scene.document.id, draft);
+  await page.getByRole("button", { name: "設定を開く" }).click();
+  await expect(tabs).toBeVisible();
+  await expect(editorTab).toBeVisible();
   await editorTab.focus();
   await editorTab.press("ArrowRight");
   await expect(editorTab).not.toHaveAttribute("aria-selected", "true");
@@ -641,7 +649,7 @@ test("mobile workspace tabs support keyboard navigation and preserve the editor 
 
   await page.locator(".st-workspace-configuration > summary").click();
   const mobileToolbar = workspaceToolbar(page);
-  await mobileToolbar.getByRole("button", { name: "Save layout", exact: true }).click();
+  await mobileToolbar.getByRole("button", { name: "配置を保存", exact: true }).click();
   const mobileStorage = await workspaceStorage(page, "mobile");
   const desktopStorage = await workspaceStorage(page, "desktop");
   expect(mobileStorage.key).not.toBe("");
@@ -660,7 +668,7 @@ test("mobile route buttons restore their workspace panel without adding duplicat
   const historyLengthAtWriting = await page.evaluate(() => history.length);
   const writingUrl = page.url();
   expect(new URL(writingUrl).searchParams.get("view")).toBe("writing");
-  await editorPanel.getByRole("button", { name: "Revision履歴", exact: true }).click();
+  await openRevisionHistory(editorPanel);
   await expect(editorPanel.getByRole("region", { name: "Revision履歴" })).toBeVisible();
   await expect(page).toHaveURL(writingUrl);
   await navigation.getByRole("button", { name: "書く", exact: true }).click();
@@ -673,13 +681,14 @@ test("mobile route buttons restore their workspace panel without adding duplicat
   const libraryUrl = page.url();
   const historyLengthAtLibrary = await page.evaluate(() => history.length);
   expect(new URL(libraryUrl).searchParams.get("view")).toBe("library");
-  const panelTabs = page.getByRole("tablist", { name: "Workspace panels" });
-  await panelTabs.getByRole("tab", { name: "KnowledgeとEvidence", exact: true }).click();
+  await navigation.getByRole("button", { name: "知識", exact: true }).click();
   await expect(page.locator('[data-workspace-panel="inspector"]')).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("view")).toBe("inspection");
+  expect(await page.evaluate(() => history.length)).toBe(historyLengthAtLibrary + 1);
   await navigation.getByRole("button", { name: "作品", exact: true }).click();
   await expect(page.locator('[data-workspace-panel="outline"]')).toBeVisible();
   await expect(page).toHaveURL(libraryUrl);
-  expect(await page.evaluate(() => history.length)).toBe(historyLengthAtLibrary);
+  expect(await page.evaluate(() => history.length)).toBe(historyLengthAtLibrary + 2);
 });
 
 test("editor remains unavailable until delayed browser recovery completes, then reapplies the exact draft", async ({ page }) => {
@@ -861,8 +870,8 @@ test("Core-only workspace keeps authoring available without search or terminolog
   expect(contributions.ok()).toBe(true);
   const contributionIds = (await contributions.json() as Array<{ id: string }>).map((item) => item.id);
   expect(contributionIds.some((id) => id.startsWith("search."))).toBe(false);
-  await expect(workspaceToolbar(page).getByRole("button", { name: "Show 全文検索", exact: true })).toHaveCount(0);
-  await expect(workspaceToolbar(page).getByRole("button", { name: "Show 用語辞典", exact: true })).toHaveCount(0);
+  await expect(workspaceToolbar(page).getByRole("button", { name: "全文検索を表示", exact: true })).toHaveCount(0);
+  await expect(workspaceToolbar(page).getByRole("button", { name: "用語辞典を表示", exact: true })).toHaveCount(0);
 
   const draft = "Core authoring works with optional search disabled.";
   // Hold remote acknowledgement so this specifically checks IndexedDB recovery,
@@ -897,7 +906,7 @@ test("full profile exposes optional lexical search and terminology without chang
 
   const toolbar = workspaceToolbar(page);
   await openPanelMenu(page);
-  await toolbar.getByRole("button", { name: "Show 全文検索", exact: true }).click();
+  await toolbar.getByRole("button", { name: "全文検索を表示", exact: true }).click();
   const searchPanel = page.locator('[data-workspace-panel="module:search.panel"]');
   await expect(searchPanel).toBeVisible();
   await closePanelMenu(page);
@@ -910,7 +919,7 @@ test("full profile exposes optional lexical search and terminology without chang
   await expect(page.getByRole("heading", { name: "Scene Two" })).toBeVisible();
 
   await openPanelMenu(page);
-  await toolbar.getByRole("button", { name: "Show 用語辞典", exact: true }).click();
+  await toolbar.getByRole("button", { name: "用語辞典を表示", exact: true }).click();
   const termsPanel = page.locator('[data-workspace-panel="module:search.terms"]');
   await expect(termsPanel).toBeVisible();
   await closePanelMenu(page);
@@ -919,7 +928,7 @@ test("full profile exposes optional lexical search and terminology without chang
   await termsPanel.getByRole("button", { name: "用語「Beacon Quay」の参照先を開く", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Scene Two" })).toBeVisible();
 
-  await page.getByRole("tablist", { name: "Panel tabs" }).getByRole("tab", { name: "作品と構成", exact: true }).click();
+  await page.getByRole("tablist", { name: "パネル" }).getByRole("tab", { name: "作品と構成", exact: true }).click();
   await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/u }).click();
   await expect(page.getByRole("heading", { name: "Scene One" })).toBeVisible();
   await page.getByRole("button", { name: "読む", exact: true }).click();
@@ -938,6 +947,9 @@ test("desktop floating panels preserve drafts and saved layout geometry", async 
   const fixture = await openFixtureScene(page, "desktop");
 
   const workspace = page.locator(".st-workspace");
+  await openPanelMenu(page);
+  await workspaceToolbar(page).getByRole("button", { name: "知識と根拠を表示", exact: true }).click();
+  await closePanelMenu(page);
   const manuscript = workspace.locator('[data-workspace-panel="editor"] .cm-content');
   const draft = "Floating workspace retains the PostgreSQL manuscript.";
   // Force the layout test to preserve an outstanding browser draft across reload
@@ -948,19 +960,23 @@ test("desktop floating panels preserve drafts and saved layout geometry", async 
   await expect(manuscript).toHaveText(draft);
   await expectDraft(page, fixture.scene.document.id, draft);
 
+  await workspace.getByRole("tab", { name: "作品と構成", exact: true }).click();
+  await workspace.locator(".st-workspace-move-menu > summary").click();
   await workspace.locator('[data-workspace-panel="outline"]')
-    .getByRole("button", { name: "Float 作品と構成" }).click();
+    .getByRole("button", { name: "作品と構成を別ウィンドウにする" }).click();
   const floating = workspace.locator('[data-floating-panel="outline"]');
   await expect(floating).toBeVisible();
   await expect(manuscript).toHaveText(draft);
 
+  const moveMenu = workspace.locator(".st-workspace-move-menu");
+  if (!await moveMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await moveMenu.locator("summary").click();
   const editorPanel = workspace.locator('[data-workspace-panel="editor"]');
-  await editorPanel.getByRole("button", { name: "Maximize 原稿" }).click();
+  await editorPanel.getByRole("button", { name: "原稿を最大化" }).click();
   await expect(editorPanel).toHaveClass(/is-maximized/);
-  await editorPanel.getByRole("button", { name: "Restore 原稿" }).click();
+  await editorPanel.getByRole("button", { name: "原稿を元に戻す" }).click();
   await expect(editorPanel).not.toHaveClass(/is-maximized/);
 
-  await workspaceToolbar(page).getByRole("button", { name: "Save layout", exact: true }).click();
+  await workspaceToolbar(page).getByRole("button", { name: "配置を保存", exact: true }).click();
   const stored = await workspaceStorage(page, "desktop");
   expect(stored.raw).not.toBeNull();
   const savedRecord = JSON.parse(stored.raw!) as WorkspaceSnapshotRecord;
@@ -978,8 +994,7 @@ test("desktop floating panels preserve drafts and saved layout geometry", async 
   await page.locator('[data-floating-panel="outline"]')
     .getByRole("button", { name: "パネルをドックへ戻す" }).click();
   await expect(page.locator('[data-workspace-panel="outline"]')).toBeVisible();
-  await page.getByRole("tab", { name: "原稿", exact: true }).click();
-  await expect(page.locator(".cm-content")).toHaveText(draft);
+  await expect(workspace.locator('[data-workspace-panel="editor"] .cm-content')).toHaveText(draft);
 });
 
 test("a failed workspace record write preserves the previous dock and floating layout on reload", async ({ page }) => {
@@ -988,8 +1003,13 @@ test("a failed workspace record write preserves the previous dock and floating l
   await openFixtureScene(page, "desktop");
 
   const workspace = page.locator(".st-workspace");
+  await openPanelMenu(page);
+  await workspaceToolbar(page).getByRole("button", { name: "知識と根拠を表示", exact: true }).click();
+  await closePanelMenu(page);
+  await workspace.getByRole("tab", { name: "作品と構成", exact: true }).click();
+  await workspace.locator(".st-workspace-move-menu > summary").click();
   await workspace.locator('[data-workspace-panel="outline"]')
-    .getByRole("button", { name: "Float 作品と構成" }).click();
+    .getByRole("button", { name: "作品と構成を別ウィンドウにする" }).click();
   const floating = workspace.locator('[data-floating-panel="outline"]');
   await expect(floating).toBeVisible();
   await saveWorkspace(page);
@@ -1014,8 +1034,8 @@ test("a failed workspace record write preserves the previous dock and floating l
       prototype.__workspaceOriginalSetItem!.call(this, key, value);
     };
   }, oldSnapshot.key);
-  await workspaceToolbar(page).getByRole("button", { name: "Save layout", exact: true }).click();
-  await expect(page.locator(".st-workspace-message")).toContainText("could not be saved");
+  await workspaceToolbar(page).getByRole("button", { name: "配置を保存", exact: true }).click();
+  await expect(page.locator(".st-workspace-message")).toContainText("保存できませんでした");
   await page.evaluate(() => {
     const prototype = Storage.prototype as Storage & { __workspaceOriginalSetItem?: typeof Storage.prototype.setItem };
     if (prototype.__workspaceOriginalSetItem) prototype.setItem = prototype.__workspaceOriginalSetItem;
@@ -1050,7 +1070,7 @@ test("mobile writing reference sheet keeps the editor mounted and preserves the 
   await manuscript.evaluate((node) => { node.setAttribute("data-stable-editor", "present"); });
   const currentUrl = page.url();
 
-  await page.getByRole("button", { name: "構成を参照" }).click();
+  await page.getByRole("button", { name: "構成", exact: true }).click();
   const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
   await expect(sheet).toBeVisible();
   await expect(sheet.getByRole("tab", { name: "構成" })).toHaveAttribute("aria-selected", "true");
@@ -1081,7 +1101,7 @@ test("mobile reference sheet scene selection uses the existing guarded navigatio
   await page.locator('[data-workspace-panel="editor"] .cm-content').fill(draft);
   await expectDraft(page, fixture.scene.document.id, draft);
 
-  await page.getByRole("button", { name: "構成を参照" }).click();
+  await page.getByRole("button", { name: "構成", exact: true }).click();
   const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
   await expect(sheet).toBeVisible();
   await sheet.locator('[data-mobile-reference-panel="outline"] .pg-document-list')
@@ -1109,7 +1129,7 @@ test("mobile contextual reference refuses to cover a composing manuscript", asyn
   ));
 
   const urlBefore = page.url();
-  await page.getByRole("button", { name: "構成を参照" }).click();
+  await page.getByRole("button", { name: "構成", exact: true }).click();
   await expect(page.locator("ion-modal.mobile-shell-reference-modal")).not.toBeVisible();
   await expect(page.locator(".mobile-shell-status").getByRole("alert").filter({ hasText: "下書きの回復状態" })).toBeVisible();
   await expect(page).toHaveURL(urlBefore);
@@ -1125,15 +1145,15 @@ test("desktop activity stays selected on denied navigation and narrow appearance
   await page.setViewportSize({ width: 1440, height: 900 });
   await signIn(page, "desktop");
   await openFixtureScene(page, "desktop");
-  const editor = page.getByRole("textbox", { name: "原稿 Markdown" });
+  const editor = page.getByRole("textbox", { name: "本文", exact: true });
   await editor.click();
-  const navigation = page.getByRole("navigation", { name: "主な作業" });
+  const navigation = page.getByRole("toolbar", { name: "ワークスペース配置" });
   const writing = navigation.getByRole("button", { name: "執筆", exact: true });
   const review = navigation.getByRole("button", { name: "レビュー", exact: true });
   await expect(writing).toHaveAttribute("aria-pressed", "true");
   await editor.evaluate(element => element.dispatchEvent(new CompositionEvent("compositionstart", { data: "にほんご", bubbles: true })));
   await review.click();
-  await expect(page.locator(".st-workspace-message")).toContainText("current panel layout is unchanged");
+  await expect(page.locator(".st-workspace-message")).toContainText("パネル配置は変更していません");
   await expect(writing).toHaveAttribute("aria-pressed", "true");
   await expect(review).toHaveAttribute("aria-pressed", "false");
   await editor.evaluate(element => element.dispatchEvent(new CompositionEvent("compositionend", { data: "日本語", bubbles: true })));

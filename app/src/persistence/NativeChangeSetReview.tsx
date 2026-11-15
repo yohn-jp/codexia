@@ -38,6 +38,14 @@ function mergeWriteCount(changeSet: ChangeSet, resource: ChangeSet["writeSet"][n
   return changeSet.writeSet.filter(entry => entry.resource === resource).length;
 }
 
+function sourceLabel(source: string): string {
+  if (source === "native-knowledge-service") return "知識機能";
+  if (source.startsWith("story.")) return "物語支援";
+  if (source.startsWith("speaker.")) return "話者支援";
+  if (source.startsWith("search.")) return "検索支援";
+  return "作品内の提案";
+}
+
 type ReviewField = { label: string; value: unknown };
 
 function operationLabel(operation: ChangeSetOperation): string {
@@ -469,19 +477,19 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, o
   return <section className="proposal-review native-changeset-review" aria-labelledby="native-review-title">
     <header className="native-review-masthead">
       <div>
-        <p className="native-review-kicker">CHANGE REVIEW / POSTGRESQL</p>
-        <h2 id="native-review-title">PostgreSQL ChangeSet</h2>
+        <p className="native-review-kicker">提案を確認</p>
+        <h2 id="native-review-title">変更提案</h2>
         <p className="native-review-intro">提案内容と対象を確認します。承認しても正本には反映されず、適用は別の操作です。</p>
       </div>
       <div className="native-review-total" aria-label={"この作品の取得済み提案 " + changeSets.length + " 件"}>
         <strong>{changeSets.length.toString().padStart(2, "0")}</strong>
-        <span>取得済み提案</span>
+          <span>件の提案</span>
       </div>
     </header>
     <div className="native-review-toolbar">
       <span>この作品の変更記録</span>
       <button type="button" className="native-review-refresh" disabled={loading || busy} onClick={() => void load(undefined, selectedId)}>最新状態を再確認</button>
-      {loading && <span role="status">ChangeSetを読み込んでいます。</span>}
+      {loading && <span role="status">提案を読み込んでいます。</span>}
     </div>
     {message && <p className="native-review-message" role="alert">{message}</p>}
     {changeSets.length === 0 && !loading
@@ -496,10 +504,10 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, o
               const target = operation ? operationTarget(operation) : "提案payloadを確認してください";
               return <li key={item.id}>
                 <button type="button" className="native-changeset-select" data-status={item.status} aria-pressed={selectedId === item.id} onClick={() => void inspect(item.id)} disabled={busy}>
-                  <span className="native-review-row-meta"><span>POSTGRESQL</span><span className={"native-review-state is-" + item.status}>{statusLabel(item.status)}</span></span>
+                  <span className="native-review-row-meta"><span>保存済み提案</span><span className={"native-review-state is-" + item.status}>{statusLabel(item.status)}</span></span>
                   <strong>{headline}</strong>
                   <span className="native-review-row-target">{target}</span>
-                  <small>{item.provenance.source} · {item.operations.length}件の操作 · version {item.version}</small>
+                  <small>{sourceLabel(item.provenance.source)} · {item.operations.length}件の変更</small>
                   <span className="native-review-id-token" aria-hidden="true">{item.id}</span>
                 </button>
               </li>;
@@ -514,7 +522,7 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, o
                 <div>
                   <div className="native-review-detail-meta">
                     <span className={"native-review-state is-" + current.status}>{statusLabel(current.status)}</span>
-                    <span>POSTGRESQL CHANGESET</span>
+                    <span>提案の詳細</span>
                   </div>
                   <h3>{firstOperation ? operationLabel(firstOperation) : "提案内容を確認できません"}</h3>
                   {firstOperation && <p className="native-review-target">{operationTarget(firstOperation)}</p>}
@@ -522,12 +530,12 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, o
                 <div className="native-review-created"><span>作成</span><time dateTime={current.createdAt}>{dateLabel(current.createdAt)}</time></div>
               </header>
               <div className="native-review-facts">
-                <p><span>提案元</span><strong>{current.provenance.source}</strong></p>
+                <p><span>提案元</span><strong>{sourceLabel(current.provenance.source)}</strong></p>
                 <p><span>適用先</span><strong>この作品のPostgreSQL正本</strong></p>
                 <p><span>変更件数</span><strong>{current.operations.length}件</strong></p>
               </div>
               <section className="native-review-changes" aria-labelledby="native-review-changes-title">
-                <div className="native-review-section-heading"><h4 id="native-review-changes-title">変更内容</h4><span>{current.operations.length.toString().padStart(2, "0")} OPERATIONS</span></div>
+                <div className="native-review-section-heading"><h4 id="native-review-changes-title">変更内容</h4><span>{current.operations.length}件の変更</span></div>
                 {current.operations.length === 0 && <p className="native-review-unknown">提案に操作が含まれていないため、変更内容を確認できません。</p>}
                 {current.operations.map((operation, index) => <section className="proposal-operation native-review-operation" key={operation.type + ":" + index}>
                   <div className="native-review-operation-heading">

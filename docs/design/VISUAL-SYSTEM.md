@@ -4,9 +4,13 @@
 
 [UX contract](UX-CONTRACT.md) を具体化する視覚設計提案。原稿の内容、構成と関連知識が製品の個性を生む。写真、装飾的なグラデーション、ダッシュボード風の均等なカードによる演出を基準にしない。既存テーマと日本語組版を維持する。
 
-二つの配置案を比較する。第一案「編集机」は、原稿を独立した大きなfolioとして置き、細い構成・参照面で囲む。執筆・参照の往復を視線の移動で解決できるが、狭幅では補助面を閉じる設計が必要。第二案「資料室」は、作品単位のカード／知識探索を入口とし、原稿は選択後に全画面で開く。作品選択や整理には有効だが、日常の継続執筆に画面遷移が増える。**第一案を標準Writingの方向として採用する。** 第二案の一覧・詳細の利点はLIB-01とKNO-01/02に取り入れる。
+この再設計では二つの大きく異なる実画面案を比較した。[Folio Atlas](../../evidence/ui-redesign-v2/direction-folio.png) は左に章の索引、中央にfolio、右に引用とKnowledgeを並べ、文脈の見比べを優先する。[Quiet Page](../../evidence/ui-redesign-v2/direction-focus.png) は本文を一続きの面として広く取り、章の索引だけを細く添え、参照は明示操作で呼び出す。構成と引用の同時比較にはFolio Atlasが向く。継続執筆の視覚的な重心、日本語の行長、モバイルへの連続した展開ではQuiet Pageが優れたため、**Quiet Pageを標準Writingとして採用する。**
 
-編集机の表現は、本文に紙面らしい余白と文字のリズムを持たせ、周辺chromeを一段静かにすることで成立する。影や紙の質感の模倣ではなく、実際の文字と引用が大きな視覚面を占めることを重視する。可変Workspaceを維持し、固定ページや固定カラムの形に本文を閉じ込めない。
+Quiet Pageでは、DesktopのWriting初期配置を構成20%・原稿80%とし、Knowledge／Evidenceのinspectorは隠してWorkspaceから呼び出す。Researchは原稿と補助panelのsplit、Reviewは原稿と提案レビューを並べる。Mobileは別のIonic画面とし、文書名・簡潔な保存表示・原稿・参照dock・4項目のbottom navigationで構成する。settingsへはtitle barから進む。ユーザーが保存したWorkspace配置は自動的に置換しない。
+
+選択の基準は色の好みではない。縮小表示で本文が第一に見えるか、日本語の長文を実際に読めるか、構成・Knowledge・差分へ戻れるか、DesktopとMobileがそれぞれの操作方法に合うかで比較する。紙の質感や大きなロゴ、装飾的な影を主役にせず、原稿そのものと静かな見出し階層を視覚面にする。
+
+実装した全画面、Before / after、操作・accessibility・persistence・performanceの別評価は[視覚受入記録](../../evidence/ui-redesign-v2/acceptance.md)にまとめた。以前の画面は[Desktop](../../evidence/ui-redesign-v2/before-desktop.png)と[Mobile](../../evidence/ui-redesign-v2/before-mobile.png)、採用後は[Writing](../../evidence/ui-redesign-v2/after-desktop-writing.png)、[Research](../../evidence/ui-redesign-v2/after-desktop-research.png)、[Review](../../evidence/ui-redesign-v2/after-desktop-review.png)、[Mobile Writing](../../evidence/ui-redesign-v2/after-mobile-writing.png)を参照する。MobileのBeforeは同じorigin/mainから390×844 CSS pxで撮影した。
 
 ## 基礎トークンの責務
 
@@ -38,7 +42,7 @@ Light／Dark／Paper（既存 `ThemeMode`）を維持し、既存保存keyを変
 | Mobile主要操作 | 44×44以上の目標 |
 | 角丸 | 小部品4–6、メニュー／sheetは8–12程度。原稿面は抑制 |
 
-本文の既存default 16px、行間1.8、最大幅960pxと、文庫風560px／Web小説風720px／原稿用紙風480pxの各プリセットを保持する。ユーザー設定（fontSize 14–24、lineHeight 1.4–2.4等）は既存 `typography.ts` の範囲を使う。UIのfont-sizeやletter-spacingを原稿設定へ流用しない。UI書体は既存システム和文sans、本文は明朝／ゴシックの選択。フォント配布・取得を新たな必須条件にしない。日本語見出し、和欧混植、ルビ、禁則、長いタイトルに対応し、過度なletter-spacingや大文字化を用いない。
+本文の既存default 16px、行間1.8、最大幅960pxと、文庫風560px／Web小説風720px／原稿用紙風480pxの各プリセットを保持する。ユーザー設定（fontSize 14–24、lineHeight 1.4–2.4等）は既存 `typography.ts` の範囲を使う。Desktopの原稿は現在のWorkspace幅の中で組版幅を保ち、Mobileは幅とsafe areaに合わせて余白を縮める。UIのfont-sizeやletter-spacingを原稿設定へ流用しない。UI書体は既存システム和文sans、本文は明朝／ゴシックの選択。フォント配布・取得を新たな必須条件にしない。日本語見出し、和欧混植、ルビ、禁則、長いタイトルに対応し、過度なletter-spacingや大文字化を用いない。
 
 ## 部品の優先順位と挙動
 

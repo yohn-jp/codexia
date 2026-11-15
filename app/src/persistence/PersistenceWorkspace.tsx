@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type CSSProperties, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { snapshotKey } from "@codexia/contracts";
 import type { EditorTermSpan } from "../editor/terms";
@@ -54,6 +54,58 @@ interface ActiveDocument {
   remoteConflict: DocumentRevision | null;
   evidence: DocumentEvidenceState;
   evidenceLoadKey: number;
+}
+
+interface OutlineDocument extends PersistenceDocument {
+  children: OutlineDocument[];
+  misplaced?: boolean;
+}
+
+function documentKindLabel(kind: string): string {
+  switch (kind) {
+    case "volume": return "巻";
+    case "chapter": return "章";
+    case "scene": return "シーン";
+    case "note": return "ノート";
+    default: return "文書";
+  }
+}
+
+function knowledgeTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    person: "人物", character: "人物", place: "場所", event: "出来事",
+    setting: "設定", term: "用語", object: "物・道具",
+  };
+  return labels[type] ?? "知識";
+}
+
+function buildDocumentOutline(documents: readonly PersistenceDocument[]): OutlineDocument[] {
+  const nodes: OutlineDocument[] = documents.map((document) => ({ ...document, children: [] }));
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const roots: OutlineDocument[] = [];
+  for (const node of nodes) {
+    const parent = node.parentId ? byId.get(node.parentId) : undefined;
+    if (!parent || parent.id === node.id) {
+      if (node.parentId) node.misplaced = true;
+      roots.push(node);
+      continue;
+    }
+    let cursor: OutlineDocument | undefined = parent;
+    let cycle = false;
+    const visited = new Set<string>([node.id]);
+    while (cursor) {
+      if (visited.has(cursor.id)) { cycle = true; break; }
+      visited.add(cursor.id);
+      cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined;
+    }
+    if (cycle) {
+      node.misplaced = true;
+      roots.push(node);
+    } else parent.children.push(node);
+  }
+  // The document list already comes from PostgreSQL in order_key, id order.
+  // Grouping preserves that sibling order, including ties and non-ASCII keys.
+  return roots;
 }
 
 interface PendingSave {
@@ -145,7 +197,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
   const [documents, setDocuments] = useState<PersistenceDocument[]>([]);
+  const [collapsedDocumentIds, setCollapsedDocumentIds] = useState<Set<string>>(() => new Set());
   const [documentId, setDocumentId] = useState("");
+  const lastOutlineSelectionRef = useRef("");
   const [nodes, setNodes] = useState<KnowledgeNode[]>([]);
   const [nodeId, setNodeId] = useState("");
   const [nodeEvidence, setNodeEvidence] = useState<{ projectId: string; nodeId: string; evidence: PersistenceAnchorView[] } | null>(null);
@@ -187,6 +241,33 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const resume = useRecentActivityResume({ binding: projectId ? { projectId, authorScope, projectScopeKey: projectId } : null, enabled: Boolean(projectId) });
   const project = projects.find((candidate) => candidate.id === projectId) ?? null;
   const selectedDocument = documents.find((candidate) => candidate.id === documentId) ?? null;
+  const documentOutline = useMemo(() => buildDocumentOutline(documents), [documents]);
+  useEffect(() => {
+    if (!documentId || !projectId) {
+      lastOutlineSelectionRef.current = "";
+      return;
+    }
+    const byId = new Map<string, PersistenceDocument>(documents.filter((document) => document.projectId === projectId).map((document) => [document.id, document]));
+    const selected = byId.get(documentId);
+    if (!selected) return; // A route can select a document before the list arrives.
+    const ancestors: string[] = [];
+    const visited = new Set<string>([documentId]);
+    let parent = selected.parentId ? byId.get(selected.parentId) : undefined;
+    while (parent && !visited.has(parent.id)) {
+      ancestors.push(parent.id);
+      visited.add(parent.id);
+      parent = parent.parentId ? byId.get(parent.parentId) : undefined;
+    }
+    const selection = JSON.stringify([projectId, documentId, ancestors]);
+    if (lastOutlineSelectionRef.current === selection) return;
+    lastOutlineSelectionRef.current = selection;
+    setCollapsedDocumentIds((current) => {
+      if (!ancestors.some((id) => current.has(id))) return current;
+      const next = new Set(current);
+      for (const id of ancestors) next.delete(id);
+      return next;
+    });
+  }, [documents, documentId, projectId]);
   const selectedNode = nodes.find((candidate) => candidate.id === nodeId && candidate.projectId === projectId) ?? null;
   const selectedNodeEvidence = nodeEvidence?.projectId === projectId && nodeEvidence.nodeId === selectedNode?.id ? nodeEvidence.evidence : null;
 
@@ -698,13 +779,27 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         markdown: "",
         idempotencyKey: crypto.randomUUID(),
       });
-      if (!await protectTransition()) return;
-      setDocuments((current) => [...current, result.document]);
+      // Re-read the canonical order after creation; an appended document can
+      // share an orderKey with an existing sibling or sort before it.
+      if (projectIdRef.current !== project.id) return;
+      setDocumentTitle("");
+      let documentResult: Awaited<ReturnType<typeof api.persistenceDocuments>>;
+      try {
+        documentResult = await api.persistenceDocuments(project.id);
+      } catch {
+        if (projectIdRef.current === project.id) setPageError("文書は作成済みですが、目次を再取得できませんでした。作品を開き直してください。");
+        return;
+      }
+      if (projectIdRef.current !== project.id || !await protectTransition() || projectIdRef.current !== project.id) return;
+      setDocuments(documentResult.documents);
+      if (!documentResult.documents.some((item) => item.id === result.document.id)) {
+        setPageError("文書は作成済みですが、現在の目次取得範囲に含まれていません。");
+        return;
+      }
       selectionRef.current = { projectId: project.id, documentId: result.document.id };
       persistSelectionSafely(authorScope, selectionRef.current);
       updateRouteSelection(selectionRef.current, false);
       setDocumentId(result.document.id);
-      setDocumentTitle("");
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "文書を作成できませんでした。");
     } finally {
@@ -1187,18 +1282,43 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     "--editor-font-family": editorFontFamily,
     "--reader-max-width": `${typography.maxWidth}px`,
   } as CSSProperties;
+  const renderOutline = (items: OutlineDocument[]): ReactNode => items.map((item) => {
+    const hasChildren = item.children.length > 0;
+    const collapsed = collapsedDocumentIds.has(item.id);
+    return <li key={item.id} className="pg-outline-item" data-kind={item.kind} data-document-id={item.id}>
+      <div className="pg-outline-row">
+        {hasChildren ? <button type="button" className="pg-outline-toggle"
+          aria-label={collapsed ? `${item.title}を展開` : `${item.title}を折りたたむ`}
+          aria-expanded={!collapsed}
+          onClick={() => setCollapsedDocumentIds((current) => {
+            const next = new Set(current);
+            if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+            return next;
+          })}>{collapsed ? "›" : "⌄"}</button> : <span className="pg-outline-spacer" aria-hidden="true" />}
+        <button type="button" className={`pg-outline-document${item.id === documentId ? " is-selected" : ""}`}
+          aria-current={item.id === documentId ? "page" : undefined}
+          onClick={() => void selectDocument(item.id)}>
+          <span>{item.title}</span>
+          <small>{item.misplaced ? `未配置 · ${documentKindLabel(item.kind)}` : documentKindLabel(item.kind)}</small>
+        </button>
+      </div>
+      {hasChildren && !collapsed ? <ul className="pg-document-children">{renderOutline(item.children)}</ul> : null}
+    </li>;
+  });
   const library = (<aside className="pg-library" aria-label="作品と文書">
         <section>
-          <h2>作品</h2>
-          {projects.length > 0 && <label htmlFor="pg-project">開く作品</label>}
+          {projects.length > 0 && <label htmlFor="pg-project">作品</label>}
           {projects.length > 0 && <select id="pg-project" value={projectId} onChange={(event) => void selectProject(event.target.value)}>
             {projects.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
           </select>}
-          <form onSubmit={(event) => void createProject(event)}>
-            <label htmlFor="pg-project-title">新しい作品</label>
-            <input id="pg-project-title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} maxLength={256} required placeholder="作品名" />
-            <button type="submit" disabled={loading || !projectTitle.trim()}>作品を作成</button>
-          </form>
+          <details className="pg-library-create">
+            <summary>作品を作成</summary>
+            <form onSubmit={(event) => void createProject(event)}>
+              <label htmlFor="pg-project-title">作品名</label>
+              <input id="pg-project-title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} maxLength={256} required placeholder="作品名" />
+              <button type="submit" disabled={loading || !projectTitle.trim()}>作成</button>
+            </form>
+          </details>
           <details>
             <summary>作品のエクスポート・インポート</summary>
             <p>Markdown本文・構成・Knowledge・Evidence・作者データを作品JSONで持ち出し、別の作品として取り込めます。PostgreSQLの全Revision履歴やブラウザーの下書きは含まれません。</p>
@@ -1213,52 +1333,51 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           </details>
         </section>
         {project && <section>
-          <h2>文書</h2>
-          <section className="continue-panel" aria-label="続きから">
-            <h3>続きから</h3>
-            {resume.error && <p role="status">再開位置を同期できません: {resume.error}</p>}
-            {mergeContinueCandidates(resume.localWriting, resume.items, { documents }).map((candidate) => {
-              const title = documents.find((item) => item.id === candidate.sceneId)?.title ?? candidate.sceneId;
-              const handoff = formatHandoffHint(candidate.deviceType, candidate.updatedAt, Date.now(), resume.deviceType);
-              return <p key={candidate.sceneId}>
-                <span>{title}</span>{handoff && <small>{handoff}</small>}
-                <button type="button" onClick={() => { void selectDocument(candidate.sceneId).then((opened) => {
-                  if (!opened) return;
-                  setReading(false);
-                  requestAnimationFrame(() => editorRef.current?.restorePosition({ cursorSentenceIndex: candidate.sentenceOffset, scrollTop: candidate.scrollTop ?? 0 }));
-                }); }}>続きを書く</button>
-                {candidate.pageIndex !== null && <button type="button" onClick={() => { void selectDocument(candidate.sceneId).then((opened) => {
-                  if (!opened) return;
-                  setReading(true);
-                  setReadingPage(candidate.pageIndex ?? 0);
-                }); }}>読書位置を開く</button>}
-              </p>;
-            })}
-          </section>
-          <ul className="pg-document-list">
-            {documents.map((item) => <li key={item.id}>
-              <button type="button" className={item.id === documentId ? "is-selected" : ""} aria-current={item.id === documentId ? "page" : undefined} onClick={() => void selectDocument(item.id)}>
-                <span>{item.title}</span><small>{item.parentId ? `${documents.find((parent) => parent.id === item.parentId)?.title ?? "親文書"} · ` : ""}{item.kind}</small>
-              </button>
-            </li>)}
-          </ul>
+          <h2>目次</h2>
+          <details className="pg-library-continue">
+            <summary>続きを開く</summary>
+            <section className="continue-panel" aria-label="続きから">
+              {resume.error && <p role="status">再開位置を同期できません: {resume.error}</p>}
+              {mergeContinueCandidates(resume.localWriting, resume.items, { documents }).map((candidate) => {
+                const title = documents.find((item) => item.id === candidate.sceneId)?.title ?? candidate.sceneId;
+                const handoff = formatHandoffHint(candidate.deviceType, candidate.updatedAt, Date.now(), resume.deviceType);
+                return <p key={candidate.sceneId}>
+                  <span>{title}</span>{handoff && <small>{handoff}</small>}
+                  <button type="button" onClick={() => { void selectDocument(candidate.sceneId).then((opened) => {
+                    if (!opened) return;
+                    setReading(false);
+                    requestAnimationFrame(() => editorRef.current?.restorePosition({ cursorSentenceIndex: candidate.sentenceOffset, scrollTop: candidate.scrollTop ?? 0 }));
+                  }); }}>続きを書く</button>
+                  {candidate.pageIndex !== null && <button type="button" onClick={() => { void selectDocument(candidate.sceneId).then((opened) => {
+                    if (!opened) return;
+                    setReading(true);
+                    setReadingPage(candidate.pageIndex ?? 0);
+                  }); }}>読書位置を開く</button>}
+                </p>;
+              })}
+            </section>
+          </details>
+          <ul className="pg-document-list">{renderOutline(documentOutline)}</ul>
           {journal && active && <PersistenceLegacyDraftImport
             targetKey={JSON.stringify([authorScope, projectId, active.document.id, active.revision.id])}
             targetLabel={`${project.title} / ${active.document.title}`}
             beforeImport={beforeLegacyImport}
             onImport={importLegacyDraft}
           />}
-          <form onSubmit={(event) => void createDocument(event)}>
-            <label htmlFor="pg-document-title">文書を追加</label>
-            <input id="pg-document-title" value={documentTitle} onChange={(event) => setDocumentTitle(event.target.value)} maxLength={256} required placeholder="章・シーン名" />
-            <label htmlFor="pg-document-kind">文書の種類</label><select id="pg-document-kind" value={documentKind} onChange={(event) => setDocumentKind(event.target.value)}><option value="volume">巻</option><option value="chapter">章</option><option value="scene">シーン</option><option value="note">ノート</option></select>
-            <label htmlFor="pg-document-parent">追加先</label>
-            <select id="pg-document-parent" value={newDocumentParent} onChange={(event) => setNewDocumentParent(event.target.value)}>
-              <option value="">作品の直下</option>
-              {documents.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
-            </select>
-            <button type="submit" disabled={loading || !documentTitle.trim()}>文書を作成</button>
-          </form>
+          <details className="pg-library-create-document">
+            <summary>巻・章・シーンを追加</summary>
+            <form onSubmit={(event) => void createDocument(event)}>
+              <label htmlFor="pg-document-title">文書名</label>
+              <input id="pg-document-title" value={documentTitle} onChange={(event) => setDocumentTitle(event.target.value)} maxLength={256} required placeholder="章・シーン名" />
+              <label htmlFor="pg-document-kind">種類</label><select id="pg-document-kind" value={documentKind} onChange={(event) => setDocumentKind(event.target.value)}><option value="volume">巻</option><option value="chapter">章</option><option value="scene">シーン</option><option value="note">ノート</option></select>
+              <label htmlFor="pg-document-parent">追加先</label>
+              <select id="pg-document-parent" value={newDocumentParent} onChange={(event) => setNewDocumentParent(event.target.value)}>
+                <option value="">作品の直下</option>
+                {documents.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+              </select>
+              <button type="submit" disabled={loading || !documentTitle.trim()}>作成</button>
+            </form>
+          </details>
           {active && <details><summary>選択文書の構成を変更</summary>
             <form onSubmit={(event) => { event.preventDefault(); if (renameTitle.trim()) void editStructure({ title: renameTitle.trim() }); }}><label htmlFor="pg-rename">新しい文書名</label><input id="pg-rename" value={renameTitle} onChange={(event) => setRenameTitle(event.target.value)} required maxLength={256} /><button type="submit">文書名を変更</button></form>
             <form onSubmit={(event) => { event.preventDefault(); void editStructure({ parentId: moveParent || null }); }}><label htmlFor="pg-move">移動先</label><select id="pg-move" value={moveParent} onChange={(event) => setMoveParent(event.target.value)}><option value="">作品の直下</option>{documents.filter((item) => item.id !== active.document.id).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select><button type="submit">文書を移動</button></form>
@@ -1282,23 +1401,36 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             </div>
           </div>
           {active.error && <p className="pg-alert" role="alert">{active.error}</p>}
-          <div className="pg-editor-actions">
+          <div className="pg-editor-actions" aria-label="主な原稿操作">
             <button type="button" onClick={() => void saveDocument()} disabled={!active.dirty || active.recovery !== "stored" || Boolean(active.remoteConflict) || active.save === "saving"}>
               {active.save === "failed" ? "PostgreSQLへ再試行" : "今すぐ保存"}
             </button>
-            <button type="button" onClick={() => { if (!editorRef.current) return; try { editorRef.current.readForNavigation(); window.print(); } catch (error) { setPageError(error instanceof Error ? error.message : "変換を確定してください。"); } }}>印刷</button>
-            <button type="button" onClick={() => void loadRevisions()} disabled={active.dirty || Boolean(active.remoteConflict)}>Revision履歴</button>
-            <button type="button" onClick={() => void createAnchor()} disabled={active.dirty || Boolean(active.remoteConflict) || active.save !== "saved"}>選択範囲をText Anchorにする</button>
+            <button type="button" aria-pressed={reading} onClick={() => void protectTransition().then((allowed) => { if (!allowed) return; setReading(!reading); if (reading) requestAnimationFrame(() => editorRef.current?.restorePosition(editorPositionRef.current)); })}>{reading ? "編集へ戻る" : "読む"}</button>
+            <details className="pg-editor-command-menu">
+              <summary>その他</summary>
+              <div>
+                <button type="button" onClick={() => { if (!editorRef.current) return; try { editorRef.current.readForNavigation(); window.print(); } catch (error) { setPageError(error instanceof Error ? error.message : "変換を確定してください。"); } }}>印刷</button>
+                <button type="button" onClick={() => void loadRevisions()} disabled={active.dirty || Boolean(active.remoteConflict)}>Revision履歴</button>
+                <button type="button" onClick={() => void createAnchor()} disabled={active.dirty || Boolean(active.remoteConflict) || active.save !== "saved"}>選択範囲をText Anchorにする</button>
+              </div>
+            </details>
           </div>
           <div className="pg-editor-actions" aria-label="原稿の表示と書式">
-            <button type="button" aria-pressed={reading} onClick={() => void protectTransition().then((allowed) => { if (!allowed) return; setReading(!reading); if (reading) requestAnimationFrame(() => editorRef.current?.restorePosition(editorPositionRef.current)); })}>{reading ? "編集へ戻る" : "読む"}</button>
-            <label>組版<select aria-label="組版プリセット" defaultValue="" onChange={(event) => { const next = { ...typography, ...typographyPresetValues(event.target.value as TypographyPresetId) }; setTypography(next); storeTypographySettings(next); }}><option value="" disabled>表示設定</option>{Object.entries(TYPOGRAPHY_PRESETS).map(([id, preset]) => <option key={id} value={id}>{preset.label}</option>)}</select></label>
-            <label>文字サイズ<input aria-label="原稿の文字サイズ" type="number" min="14" max="24" value={typography.fontSize} onChange={(event) => { const next = { ...typography, fontSize: Math.max(14, Math.min(24, Number(event.target.value))) }; setTypography(next); storeTypographySettings(next); }} /></label>
-            {reading && <label>組方向<select aria-label="組方向" value={readingDirection} onChange={(event) => setReadingDirection(event.target.value as "horizontal" | "vertical")}><option value="horizontal">横書き</option><option value="vertical">縦書き</option></select></label>}
-            {!reading && WRITING_SYMBOLS.map((symbol) => <button key={symbol.id} type="button" aria-label={symbol.ariaLabel} onClick={() => editorRef.current?.insert(symbol.id)}>{symbol.label}</button>)}
+            <details className="pg-editor-display-menu">
+              <summary>表示と組版</summary>
+              <div>
+                <label>組版<select aria-label="組版プリセット" defaultValue="" onChange={(event) => { const next = { ...typography, ...typographyPresetValues(event.target.value as TypographyPresetId) }; setTypography(next); storeTypographySettings(next); }}><option value="" disabled>表示設定</option>{Object.entries(TYPOGRAPHY_PRESETS).map(([id, preset]) => <option key={id} value={id}>{preset.label}</option>)}</select></label>
+                <label>文字サイズ<input aria-label="原稿の文字サイズ" type="number" min="14" max="24" value={typography.fontSize} onChange={(event) => { const next = { ...typography, fontSize: Math.max(14, Math.min(24, Number(event.target.value))) }; setTypography(next); storeTypographySettings(next); }} /></label>
+                {reading && <label>組方向<select aria-label="組方向" value={readingDirection} onChange={(event) => setReadingDirection(event.target.value as "horizontal" | "vertical")}><option value="horizontal">横書き</option><option value="vertical">縦書き</option></select></label>}
+              </div>
+            </details>
+            {!reading && <details className="pg-editor-symbol-menu">
+              <summary>書式記号</summary>
+              <div>{WRITING_SYMBOLS.map((symbol) => <button key={symbol.id} type="button" aria-label={symbol.ariaLabel} onClick={() => editorRef.current?.insert(symbol.id)}>{symbol.label}</button>)}</div>
+            </details>}
           </div>
           <div hidden={reading}>
-          <label id="pg-manuscript-label" htmlFor="manuscript">原稿 Markdown</label>
+          <label id="pg-manuscript-label" htmlFor="manuscript">本文</label>
           <ManuscriptInput
             key={active.document.id}
             ref={editorRef}
@@ -1343,17 +1475,30 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
 
           {showRevisions && <section className="pg-revisions" aria-label="Revision履歴">
             <h3>Revision履歴</h3>
-            {revisions.map((revision) => <article key={revision.id}>
+            {revisions.map((revision) => {
+              const difference = revision.id === active.revision.id ? null : revisionDifferencePreview(revision.markdown, active.revision.markdown);
+              return <article key={revision.id}>
               <p>{new Date(revision.createdAt).toLocaleString()} · {revision.id === active.revision.id ? "現在" : "保存済み"}</p>
               <pre>{revision.markdown.slice(0, 700) || "（空の原稿）"}</pre>
+              {difference && <details className="pg-revision-difference">
+                <summary>最新版との違い</summary>
+                <section className="pg-revision-diff-preview" aria-label="原稿Revisionの比較">
+                  <div><h4>以前の本文</h4><pre>{difference.before}</pre></div>
+                  <span aria-hidden="true">→</span>
+                  <div><h4>最新版</h4><pre>{difference.after}</pre></div>
+                </section>
+              </details>}
               {revision.id !== active.revision.id && <button type="button" disabled={loading || active.dirty} onClick={() => void restoreRevision(revision)}>このRevisionを新しいRevisionとして復元</button>}
-            </article>)}
+            </article>;
+            })}
           </section>}
         </section>}
       </main>);
-  const knowledge = (<aside className="pg-knowledge" aria-label="KnowledgeとEvidence">
+  const knowledge = (<aside className="pg-knowledge" aria-label="知識と根拠">
         <section>
-          <h2>Knowledge</h2>
+          <h2>作品内の知識</h2>
+        <details className="pg-knowledge-tools">
+          <summary>知識候補を追加・根拠に指定</summary>
           <form onSubmit={(event) => void createKnowledge(event)}>
             <label htmlFor="pg-knowledge-name">Knowledge候補を追加</label>
             <input id="pg-knowledge-name" value={knowledgeName} onChange={(event) => setKnowledgeName(event.target.value)} maxLength={512} required placeholder="人物・場所・用語" />
@@ -1368,10 +1513,11 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             <option value="">Knowledgeを選択</option>
             {nodes.map((node) => <option key={node.id} value={node.id}>{node.name} · {node.status === "confirmed" ? "確定" : node.status === "proposed" ? "候補" : "退役"}</option>)}
           </select>
+        </details>
           <ul className="pg-knowledge-list">
             {nodes.map((node) => <li key={node.id}>
               <button type="button" className={node.id === nodeId ? "is-selected" : ""} onClick={() => setNodeId(node.id)}>
-                <span>{node.name}</span><small>{node.type} · {node.status === "confirmed" ? "作者確定" : node.status === "proposed" ? "未確認候補" : "退役"}</small>
+                <span>{node.name}</span><small>{knowledgeTypeLabel(node.type)} · {node.status === "confirmed" ? "作者確定" : node.status === "proposed" ? "未確認候補" : "退役"}</small>
               </button>
               {node.status === "proposed" && <button type="button" onClick={() => void confirmKnowledge(node)}>内容を確認して確定</button>}
             </li>)}
@@ -1400,8 +1546,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           </section>}
         </section>
         <section>
-          <h2>Text Anchor / Evidence</h2>
-          {!active && <p>文書を開くと、この作品のKnowledgeとEvidenceを利用できます。</p>}
+          <h2>本文の根拠</h2>
+          {!active && <p>文書を開くと、この作品の知識と根拠を利用できます。</p>}
           {active && active.evidence.anchors.length === 0 && <p>このRevisionにText Anchorはありません。本文で範囲を選び、作成してください。</p>}
           {active && <ul className="pg-evidence-list">
             {active.evidence.anchors.map((anchor) => <li key={anchor.id}>
@@ -1421,7 +1567,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const panels: WorkspacePanel[] = [
     { id: "outline", title: "作品と構成", render: () => library },
     { id: "editor", title: "原稿", render: () => editor },
-    { id: "inspector", title: "KnowledgeとEvidence", render: () => knowledge },
+    { id: "inspector", title: "知識と根拠", render: () => knowledge },
   ];
   const readCurrentEditor = (): BrowserEditorDocument | null => {
     const current = activeRef.current;
@@ -1467,4 +1613,16 @@ function minimalTextChanges(source: string, target: string): TextChange[] {
   const to = sourcePoints.slice(0, sourcePoints.length - suffix).join("").length;
   const insert = targetPoints.slice(prefix, targetPoints.length - suffix).join("");
   return [{ from, to, insert }];
+}
+
+function revisionDifferencePreview(previous: string, latest: string): { before: string; after: string } | null {
+  const change = minimalTextChanges(previous, latest)[0];
+  if (!change) return null;
+  const contextStart = Math.max(0, change.from - 48);
+  const contextBefore = previous.slice(contextStart, change.from);
+  const contextAfter = previous.slice(change.to, change.to + 48);
+  return {
+    before: `${contextBefore}${previous.slice(change.from, change.to) || "（追加前）"}${contextAfter}`,
+    after: `${contextBefore}${change.insert || "（削除）"}${contextAfter}`,
+  };
 }

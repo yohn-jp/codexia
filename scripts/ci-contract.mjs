@@ -16,7 +16,7 @@ export const TEST_TYPECHECK_SCOPES = ['app-e2e', 'packages', 'modules'];
 export const PROFILES = ['core', 'full'];
 export const BROWSER_SHARDS = [
   { id: 'auth-recovery', project: 'chromium', file: 'auth-recovery.acceptance.spec.ts' },
-  ...['core', 'job-inbox', 'modular-workspace', 'native-review', 'persistence-database', 'recent-activity', 'review-contributions', 'ui-v1'].map(id => ({ id, project: 'chromium', file: `${id}.acceptance.spec.ts` })),
+  ...['core', 'job-inbox', 'modular-workspace', 'native-review', 'persistence-database', 'recent-activity', 'redesign-visual', 'review-contributions', 'ui-v1'].map(id => ({ id, project: 'chromium', file: `${id}.acceptance.spec.ts` })),
   { id: 'webkit', project: 'webkit', file: 'ui-v1.acceptance.spec.ts' },
 ];
 export const NATIVE_SELECTIONS = ['catalog', 'core', 'selected', 'full'];
@@ -42,7 +42,7 @@ export const VERIFICATION_GROUPS = {
   'oci-core': ['oci-core'],
   'oci-full': ['oci-full'],
   ...Object.fromEntries(PROFILES.flatMap(profile => [
-    [`browser-${profile}-writing`, ['core', 'native-review', 'persistence-database'].map(id => `browser-${profile}-${id}`)],
+    [`browser-${profile}-writing`, ['core', 'native-review', 'persistence-database', 'redesign-visual'].map(id => `browser-${profile}-${id}`)],
     [`browser-${profile}-reference`, ['modular-workspace', 'review-contributions', 'recent-activity', 'job-inbox'].map(id => `browser-${profile}-${id}`)],
     [`browser-${profile}-webkit`, ['auth-recovery', 'ui-v1', 'webkit'].map(id => `browser-${profile}-${id}`)],
   ])),

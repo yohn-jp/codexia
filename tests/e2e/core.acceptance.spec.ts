@@ -1,6 +1,6 @@
 import { expect, request, test, type Page } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
-import { authToken, ownerLogin, manuscriptEditor as editor, readManuscriptMarkdown } from "./postgres-fixture";
+import { authToken, ownerLogin, manuscriptEditor as editor, readManuscriptMarkdown, openRevisionHistory } from "./postgres-fixture";
 
 const rootPath = "/api/v1/persistence/projects";
 const appBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
@@ -103,7 +103,7 @@ test("appearance modes follow system preference initially and persist explicit l
 test("revision history keeps immutable content through a foreground refresh", async ({ page }) => {
   const f = await fixture(page); const text = "Saved immutable version.";
   await editor(page).fill(text); await saved(page, f, text);
-  await page.getByRole("button", { name: "Revision履歴", exact: true }).click();
+  await openRevisionHistory(page);
   await expect(page.getByRole("region", { name: "Revision履歴" })).toContainText(f.one.revision.markdown.trim());
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect(page.getByRole("region", { name: "Revision履歴" })).toContainText(text);
@@ -113,7 +113,7 @@ test("revision history keeps immutable content through a foreground refresh", as
 test("same-origin stale tabs cannot replace an equal-generation journal draft", async ({ page, context }) => {
   const f = await fixture(page); const gate = await holdSaves(page, f);
   const second = await context.newPage(); await second.goto(page.url());
-  await second.getByLabel("開く作品").selectOption(f.projectId); await second.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
+  await second.getByLabel("作品", { exact: true }).selectOption(f.projectId); await second.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
   try {
     await editor(page).fill("First tab protected draft.");
     await expect.poll(async () => (await drafts(page)).some((d) => d.markdown === "First tab protected draft.")).toBe(true);
@@ -139,9 +139,10 @@ test("IME composition blocks navigation while coalesced editor state stays curre
   await editor(page).evaluate((element) => element.dispatchEvent(new CompositionEvent("compositionend", { data: "日本語", bubbles: true })));
   const composedText = `${text} 日本語入力`;
   await editor(page).fill(composedText);
+  await page.locator(".pg-editor-command-menu > summary").click();
   await page.getByRole("button", { name: "印刷", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-printed-manuscript", composedText);
-  await saved(page, f, composedText); await page.getByRole("button", { name: "Revision履歴", exact: true }).click();
+  await saved(page, f, composedText); await openRevisionHistory(page);
   await expect(page.getByRole("region", { name: "Revision履歴" })).toContainText(composedText);
 });
 
@@ -316,7 +317,7 @@ test("unmounting a contribution aborts its in-flight action request", async ({ p
     // not the retired Git workspace tab strip.
     const menu = page.locator(".st-workspace-panel-menu");
     await menu.locator("summary").click();
-    await menu.getByRole("button", { name: "Show EPUB 書き出し", exact: true }).click();
+    await menu.getByRole("button", { name: "EPUB 書き出しを表示", exact: true }).click();
     await expect(page.locator('[data-workspace-panel="module:publishing.export.epub"]')).toBeVisible();
     const request = await seen;
     const failed = page.waitForEvent("requestfailed", (candidate) => candidate === request);
@@ -487,6 +488,6 @@ test("Issue 42: failed PostgreSQL availability preserves the author session and 
   await page.reload(); await expect(page.getByRole("heading", { name: "PostgreSQLへ接続できません" })).toBeVisible();
   expect((await page.request.get("/api/session")).status()).toBe(200); expect(reauthCalls).toBe(0);
   unavailable = false; await page.getByRole("button", { name: "再試行" }).click();
-  await page.getByLabel("開く作品").selectOption(f.projectId); await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
+  await page.getByLabel("作品", { exact: true }).selectOption(f.projectId); await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
   await expectEditor(page, f.one.revision.markdown);
 });
