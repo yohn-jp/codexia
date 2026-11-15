@@ -74,6 +74,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: ${{ matrix.group == 'core' && github.event_name == 'pull_request' && contains(fromJSON(needs.plan.outputs.plan).files, 'scripts/verify-mixed-version.mjs') && '0' || '1' }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.0
@@ -95,6 +96,18 @@ jobs:
         env:
           CACHE_HIT: ${{ steps.dependencies.outputs.cache-hit }}
         run: echo "Dependency cache hit=${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+      - name: Exercise mixed-version runner against prior PR base
+        if: matrix.group == 'core' && github.event_name == 'pull_request' && contains(fromJSON(needs.plan.outputs.plan).files, 'scripts/verify-mixed-version.mjs')
+        env:
+          PRIOR_SOURCE_SHA: ${{ github.event.pull_request.base.sha }}
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+          CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@127.0.0.1:5432/codexia_e2e_compat_test
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/prior-frontend" "$PRIOR_SOURCE_SHA"
+          docker exec "$POSTGRES_CONTAINER" createdb -U codexia codexia_e2e_compat_test
+          pnpm exec playwright install --with-deps chromium
+          node scripts/verify-mixed-version.mjs "$RUNNER_TEMP/prior-frontend" full
       - uses: actions/download-artifact@v4
         with:
           name: ci-plan

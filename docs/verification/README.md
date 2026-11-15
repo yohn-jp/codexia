@@ -44,6 +44,22 @@ On a supported host, `CODEXIA_E2E_CHROMIUM` selects a system Chromium executable
 
 Browser acceptance covers editing, conflicts, recovery, shell switching, module contributions, workspace layouts, terminology and job review. Tests use generated repositories and isolated browser state. Do not point fixture-driven tests at author work.
 
+## Mixed-version frontend/backend acceptance
+
+A matching API epoch and profile permit independent component replacement; they do not alone prove wire behavior. Before accepting a compatibility-sensitive change without an epoch bump, exercise a previously served frontend source against the candidate API using an isolated PostgreSQL database and existing authoring browser scenarios. Select the prior source from the frontend release identity, not a guessed tag or the candidate's freshly built UI.
+
+From the clean candidate checkout, after installing Chromium on the verification host:
+
+```sh
+git worktree add --detach /tmp/codexia-prior-ui "$PRIOR_SOURCE_SHA"
+export CODEXIA_E2E_DATABASE_URL='postgres://user:password@127.0.0.1:5432/codexia_e2e_compat_test'
+node scripts/verify-mixed-version.mjs /tmp/codexia-prior-ui full
+```
+
+Set `PRIOR_SOURCE_SHA` and replace the database credentials with the actual prior release source and a fresh disposable database. Use the deployed profile (Core or Full). The runner verifies distinct clean ancestor/candidate sources and the unchanged epoch, builds the prior frontend separately, validates its generated identity, builds the candidate, and uses only the prior frontend assets in the current E2E server. The browser exercises actual API and PostgreSQL login, editing, save/receipt, immutable revision reads and conflict recovery. Record the source pair, profile, epoch, test results and limitations. A failure caused by a historical UI locator change requires investigation, not weakening the assertions.
+
+This opt-in source-build acceptance is not a replay of the byte-identical deployed release artifact, does not exercise Cloudflare Access or live VM cutover, and does not replace exact-source CI, live release admission or manual epoch/schema transition acceptance. Do not target production. The ordinary CI browser lanes retain their same-source artifact contract; their success is not mixed-version evidence.
+
 ## OCI and integration checks
 
 [OCI verification](OCI.md) checks packaging and startup. [Integration verification](INTEGRATION.md) describes MCP, import, actual model execution and PostgreSQL restore/container replacement. Hosted producer checks run with:

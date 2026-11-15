@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer as createControlServer, type Server } from "node:http";
 import { rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { DocumentId } from "@codexia/persistence-contracts";
 import type { ModuleId, ModuleManifest } from "@codexia/contracts";
@@ -20,6 +20,8 @@ const stateDir = requiredSetting("CODEXIA_E2E_STATE_DIR");
 const port = Number.parseInt(process.env.CODEXIA_E2E_PORT ?? "4173", 10);
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = requiredSetting("CODEXIA_E2E_DATABASE_URL");
+const staticDirectory = process.env.CODEXIA_E2E_COMPAT_FRONTEND_DIR;
+if (staticDirectory !== undefined && !isAbsolute(staticDirectory)) throw new Error("Compatibility frontend directory must be absolute");
 
 if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("CODEXIA_E2E_PORT must be a valid TCP port");
 if (authToken.length < 32) throw new Error("CODEXIA_E2E_AUTH_TOKEN must contain at least 32 characters");
@@ -89,7 +91,7 @@ async function startTestServer(): Promise<void> {
     const server = createServer({
       store,
       authToken,
-      staticDir: resolve("app/dist"),
+      staticDir: staticDirectory ?? resolve("app/dist"),
       usageDirectory: join(stateDir, "host-history"),
       profile,
       persistence, closePersistenceOnShutdown: true,
