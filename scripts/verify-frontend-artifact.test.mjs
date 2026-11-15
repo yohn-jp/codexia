@@ -44,3 +44,11 @@ test('frontend artifact provenance rejects wrong SHA, event, run, ID, digest, ex
   ];
   for(const check of rejected) assert.throws(check);
 });
+
+ test('GitHub partial rerun aliases the reused successful job to the current attempt',()=>{
+  const {run,artifact,jobs,expected}=evidence({currentAttempt:2,producerAttempt:1});
+  const latest=[{...jobs[0],run_attempt:2}];
+  assert.doesNotThrow(()=>assertFrontendArtifactEvidence(run,artifact,latest,expected,jobs));
+  assert.throws(()=>assertFrontendArtifactEvidence(run,artifact,latest,expected,latest));
+  assert.throws(()=>assertFrontendArtifactEvidence(run,artifact,[{...latest[0],started_at:'2026-11-15T01:00:00Z',completed_at:'2026-11-15T01:05:00Z'}],expected,jobs));
+});
