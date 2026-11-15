@@ -396,3 +396,21 @@ test("public actions read namespaced dictionaries/settings and lint changes rema
     await runtime.shutdown();
   }
 });
+
+test("configured global line-spacing rules fix every line flagged by diagnostics", async () => {
+  const files = new Map(initialFiles);
+  files.set("meta/scriptorium/modules/diagnostics/lint-rules.yaml", {
+    content: "rules:\n  - id: x\n    kind: line_spacing\n    startPattern: '^X'\n    flags: g\n",
+    revision: "lint-r1",
+  });
+  const { runtime, host } = await createRuntime(files, []);
+  try {
+    const result = await runtime.invokeAction("diagnostics", "diagnostics.lint", { text: "X one\nX two\nbody" }, host);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+    const data = result.data as { warnings: unknown[]; body: string; fixed: boolean };
+    assert.ok(data.warnings.length > 0);
+    assert.equal(data.fixed, true);
+    assert.equal(data.body, "X one\n\nX two\n\nbody");
+  } finally { await runtime.shutdown(); }
+});

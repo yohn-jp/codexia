@@ -63,6 +63,17 @@ function snippet(content: string, normalizedContent: string, query: string, toke
     }
   }
   if (offset < 0) return content.slice(0, 180).trim();
+  // NFKC and lowercase may expand or contract the source. Keep the index
+  // and ranking in normalized coordinates, but locate the original snippet.
+  if (offset > content.length || normalizeSearchText(content.slice(0, offset)) !== normalizedContent.slice(0, offset)) {
+    let low = 0, high = content.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (normalizeSearchText(content.slice(0, middle + 1)).length > offset) high = middle;
+      else low = middle + 1;
+    }
+    offset = low;
+  }
   const start = Math.max(0, offset - 70);
   const end = Math.min(content.length, offset + 180);
   return `${start ? "…" : ""}${content.slice(start, end).trim()}${end < content.length ? "…" : ""}`;

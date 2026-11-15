@@ -189,28 +189,17 @@ export function manuscriptBodyToXhtml(body: string): string {
     .join("\n");
 }
 
-/**
- * ルビ・傍点以外の生テキストをエスケープしつつ記法を HTML 化する。
- * 記法区間をプレースホルダにしてから全体 escape → 記法を HTML 化。
- */
+/** Escape literal text and render markup ranges without reserving any manuscript characters. */
 function escapeXmlKeepMarkup(line: string): string {
-  const tokens: string[] = [];
-  const protectedLine = line
-    .replace(RUBY_RE, (m) => {
-      const i = tokens.length;
-      tokens.push(m);
-      return `@@ARCADIA_MARKUP_${i}@@`;
-    })
-    .replace(BOUTEN_RE, (m) => {
-      const i = tokens.length;
-      tokens.push(m);
-      return `@@ARCADIA_MARKUP_${i}@@`;
-    });
-  const escaped = escapeXml(protectedLine);
-  return escaped.replace(/@@ARCADIA_MARKUP_(\d+)@@/g, (_m, idx) => {
-    const original = tokens[Number(idx)] ?? "";
-    return manuscriptMarkupToHtml(original);
-  });
+  const markup = new RegExp(`${RUBY_RE.source}|${BOUTEN_RE.source}`, "g");
+  let cursor = 0;
+  let output = "";
+  for (const match of line.matchAll(markup)) {
+    const start = match.index!;
+    output += escapeXml(line.slice(cursor, start)) + manuscriptMarkupToHtml(match[0]);
+    cursor = start + match[0].length;
+  }
+  return output + escapeXml(line.slice(cursor));
 }
 
 function xhtmlDocument(title: string, bodyInner: string, cssHref = "styles.css"): string {

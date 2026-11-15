@@ -7,7 +7,7 @@ import type { ChangeOperation, ChangeProposal, ModuleActionContext, ModuleContex
 import { createWorkspaceProducer, proposeMigrationImport, type LegacySourceReader, type MigrationContext, type MigrationInspection } from "@codexia/migration";
 import { createModule } from "./index.js";
 import { readEpubBibleEntries } from "./bible.js";
-import { buildEpubExport } from "./epub.js";
+import { buildEpubExport, manuscriptBodyToXhtml } from "./epub.js";
 import { buildPlaintextExport, stripManuscriptMarkup, toNarouDialect } from "./plaintext.js";
 import { composeVerticalPrintText } from "./verticalPrint.js";
 import { createPublishingMigrationProducer } from "./migration.js";
@@ -487,4 +487,10 @@ test("publishing reactivation defers to live stores and does nothing while disab
   });
   assert.deepEqual(disabled.operations, [], "retained values stay unreadable until Publishing is enabled");
   assert.deepEqual(disabled.entries, []);
+});
+
+test("EPUB preserves literal placeholder-shaped manuscript text alongside ruby and emphasis", () => {
+  assert.equal(manuscriptBodyToXhtml("前@@ARCADIA_MARKUP_0@@後"), "<p>前@@ARCADIA_MARKUP_0@@後</p>");
+  assert.equal(manuscriptBodyToXhtml("@@ARCADIA_MARKUP_0@@ |星《ほし》 《《彼女》》 & <"),
+    '<p>@@ARCADIA_MARKUP_0@@ <ruby>星<rt>ほし</rt></ruby> <span class="bouten">彼女</span> &amp; &lt;</p>');
 });
