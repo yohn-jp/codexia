@@ -127,6 +127,28 @@ test('PostgreSQL author pipeline records receipts without manuscript Git process
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test('Knowledge-dense PostgreSQL fixture persists exact Knowledge and Evidence counts and a readable projection', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'wave0-knowledge-fixture-'));
+  try {
+    const datasetPath = join(root, 'fixture'), output = join(root, 'result.json');
+    await generate(datasetPath, 'knowledge-dense');
+    const result = await runWorker(new URL('./core.mjs', import.meta.url).pathname,
+      [datasetPath, output, '1', 'projection'], output, 120000);
+    assert.equal(result.status, 'complete', JSON.stringify(result.error));
+    assert.deepEqual(result.fixture.knowledgeSeed, { nodes: 100, aliases: 200, anchors: 400, assertions: 100 });
+    assert.deepEqual({ nodes: result.fixture.persisted.knowledge.nodes, aliases: result.fixture.persisted.knowledge.aliases,
+      relations: result.fixture.persisted.knowledge.relations }, { nodes: 100, aliases: 200, relations: 0 });
+    assert.ok(result.fixture.persisted.knowledge.tupleBytes > 0);
+    assert.equal(result.fixture.persisted.evidence.anchors, 400);
+    assert.equal(result.fixture.persisted.evidence.mentions, 400);
+    assert.equal(result.fixture.persisted.evidence.assertions, 100);
+    assert.equal(result.fixture.persisted.evidence.assertionLinks, 100);
+    assert.ok(result.projection.bytes > 0);
+    const projection = result.samples.find(row => row.name === 'knowledge.evidence.projection');
+    assert.ok(projection?.status === 'complete' && projection.counters.gitProcesses === 0);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('browser probes retain strict IDB semantics and count document index reads', { skip: !process.env.CODEXIA_E2E_CHROMIUM }, async () => {
   const { chromium } = await import('@playwright/test');
   const { installBrowserProbes } = await import('./browser-probes.mjs');

@@ -128,8 +128,8 @@ async function seedKnowledgeEvidence(persistence, projectId, scenes, profile) {
       for (let item = 0; item < knowledge.evidencePerNode; item++) {
         const id = randomUUID();
         const fromUtf16 = 20 + item * 8;
-        const toUtf16 = Math.min(scene.markdown.length, fromUtf16 + 32);
-        const quote = scene.markdown.slice(fromUtf16, toUtf16);
+        const toUtf16 = Math.min(scene.revision.markdown.length, fromUtf16 + 32);
+        const quote = scene.revision.markdown.slice(fromUtf16, toUtf16);
         if (!quote.length) throw new Error('Synthetic evidence quote must not be empty');
         operations.push({ type: 'evidence.anchor.save', command: { projectId, id, documentId: scene.document.id,
           revisionId: scene.revision.id, fromUtf16, toUtf16, quoteSha256: sha256(quote), status: 'confirmed', expectedVersion: null } });
