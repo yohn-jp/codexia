@@ -520,10 +520,10 @@ async function rawHostedRequestStatus(urlValue: string, headers: Record<string, 
   return (await rawHostedRequest(urlValue, headers, body)).status;
 }
 
-function runtimeControlToken(action: "status" | "quiesce" | "resume", operationId: string, payloadDigest: string): string {
+function runtimeControlToken(action: "status" | "quiesce" | "resume", operationId: string, payloadDigest: string, signingKey = RUNTIME_CONTROL_KEY.privateKey, kid = "runtime-control-test-key"): string {
   const now = Math.floor(Date.now() / 1000);
   const encode = (value: unknown): string => Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
-  const unsigned = `${encode({ alg: "ES256", kid: "runtime-control-test-key", typ: "JWT" })}.${encode({
+  const unsigned = `${encode({ alg: "ES256", kid, typ: "JWT" })}.${encode({
     contractVersion: "praetorium-runtime-control/v1",
     iss: HOSTED_ASSIGNMENT.controlServicePolicy.issuer,
     sub: "test-control-plane",
@@ -540,7 +540,7 @@ function runtimeControlToken(action: "status" | "quiesce" | "resume", operationI
     jti: `${action}-${operationId}`,
   })}`;
   const signature = signJwt("sha256", Buffer.from(unsigned, "ascii"), {
-    key: RUNTIME_CONTROL_KEY.privateKey,
+    key: signingKey,
     dsaEncoding: "ieee-p1363",
   });
   return `${unsigned}.${signature.toString("base64url")}`;
@@ -630,11 +630,15 @@ describe("Codexia HTTP boundary", () => {
     const native = await nativeProject(t, "Hosted control JWKS");
     let unavailable = true;
     let requests = 0;
+    const rotated = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    const rotatedKid = "runtime-control-rotated-key";
+    const rotatedJwk = { ...RUNTIME_CONTROL_PUBLIC_JWK, ...rotated.publicKey.export({ format: "jwk" }), kid: rotatedKid };
+    let keys = [RUNTIME_CONTROL_PUBLIC_JWK];
     const controlFetch: typeof fetch = async (input) => {
       assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
       requests++;
       if (unavailable) throw new Error("private upstream failure");
-      return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
+      return Response.json({ keys });
     };
     const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, undefined, undefined, native.persistence, native.project.id);
     t.after(apiServer.close);
@@ -662,6 +666,16 @@ describe("Codexia HTTP boundary", () => {
     const tampered = statusToken.slice(0, statusToken.lastIndexOf(".") + 1) + (signature[0] === "A" ? "B" : "A") + signature.slice(1);
     assert.equal((await status(tampered)).status, 401);
     assert.equal(requests, afterFetch, "verified JWKS is reused without relaxing credential validation");
+
+    unavailable = false;
+    keys = [rotatedJwk];
+    const rotatedToken = runtimeControlToken("status", operationId, sha256Digest(""), rotated.privateKey, rotatedKid);
+    assert.equal((await status(rotatedToken)).status, 200, "a previously unknown signing key triggers JWKS refresh");
+    assert.equal(requests, afterFetch + 1);
+    unavailable = true;
+    assert.equal((await status(rotatedToken)).status, 200, "the refreshed key is cached");
+    assert.equal(requests, afterFetch + 1);
+    assert.equal((await status(statusToken)).status, 401, "the replaced key is not accepted after refresh");
   });
 
   it("binds hosted API access and signed lifecycle controls to one PostgreSQL project and runtime epoch", async (t) => {
