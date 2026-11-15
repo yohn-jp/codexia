@@ -38,7 +38,7 @@ export function selectedArtifacts(inventory, ids, identity, kind) {
   });
 }
 
-export async function downloadArtifact(artifact, repository, token, request = fetch, { maxArchive = MAX_ARCHIVE } = {}) {
+export async function downloadArtifact(artifact, repository, token, request = fetch, { maxArchive = MAX_ARCHIVE, downloadTimeoutMs = 30_000 } = {}) {
   assert.match(repository, /^[\w.-]+\/[\w.-]+$/u);
   assert.ok(typeof token === 'string' && token.length > 0, 'Read token required');
   assert.ok(Number.isSafeInteger(artifact.id) && artifact.id > 0);
@@ -52,7 +52,8 @@ export async function downloadArtifact(artifact, repository, token, request = fe
   const location = new URL(response.headers.get('location') ?? '');
   assert.ok(location.protocol === 'https:' && !location.username && !location.password, 'Invalid artifact download redirect');
   // The GitHub token belongs only at api.github.com, never the signed storage URL.
-  const archive = await request(location.href, { redirect: 'error', signal: AbortSignal.timeout(30_000) });
+  assert.ok(Number.isSafeInteger(downloadTimeoutMs) && downloadTimeoutMs > 0 && downloadTimeoutMs <= 300_000, 'Invalid artifact download timeout');
+  const archive = await request(location.href, { redirect: 'error', signal: AbortSignal.timeout(downloadTimeoutMs) });
   assert.ok(archive.ok && archive.body, `Artifact ${artifact.id} download failed`);
   const chunks = [];
   let size = 0;
