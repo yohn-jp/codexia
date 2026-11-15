@@ -301,6 +301,7 @@
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions > details[open] {
   flex: 1 0 100%;
   max-width: 100%;
+  white-space: normal;
 }
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions button {
   min-width: 44px;

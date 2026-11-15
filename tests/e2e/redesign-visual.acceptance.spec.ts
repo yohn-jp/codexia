@@ -375,7 +375,7 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
 });
 
 test("mobile manuscript disclosures remain operable at 320 and 390 CSS pixels", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 1440, height: 900 });
   const { project, firstScene } = await buildManuscript(page, "desktop");
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
@@ -389,6 +389,7 @@ test("mobile manuscript disclosures remain operable at 320 and 390 CSS pixels", 
     await command.getByRole("button", { name: "Revision履歴", exact: true }).click();
     await expect(page.getByRole("region", { name: "Revision履歴" })).toBeVisible();
     await command.getByRole("button", { name: "Revision履歴", exact: true }).click();
+    await expect(page.getByRole("region", { name: "Revision履歴" })).toHaveCount(0);
     await command.locator("summary").click();
     const display = page.locator(".pg-editor-display-menu");
     await display.locator("summary").click();
@@ -399,12 +400,17 @@ test("mobile manuscript disclosures remain operable at 320 and 390 CSS pixels", 
     await display.locator("summary").click();
     const symbols = page.locator(".pg-editor-symbol-menu");
     await symbols.locator("summary").click();
-    await symbols.getByRole("button", { name: "三点リーダーを挿入" }).click();
-    await expect(manuscriptEditor(page)).toContainText("……");
+    const symbol = width === 390 ? { label: "三点リーダーを挿入", text: "……" } : { label: "ダッシュを挿入", text: "――" };
+    await symbols.getByRole("button", { name: symbol.label }).click();
+    await expect(manuscriptEditor(page)).toContainText(symbol.text);
     await symbols.locator("summary").click();
-    // Keep the next viewport independent of the edit; use the normal save path.
-    await expect(page.getByRole("button", { name: "今すぐ保存" })).toBeEnabled();
-    await page.getByRole("button", { name: "今すぐ保存" }).click();
+    // The normal autosave may finish before a manual save can be clicked.
+    await expect.poll(async () => {
+      const response = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${firstScene.id}`);
+      if (!response.ok()) return "";
+      const { revision } = await response.json() as { revision: { markdown: string } };
+      return revision.markdown;
+    }, { timeout: 15_000 }).toContain(symbol.text);
     await expect(page.locator(".pg-save-state")).toContainText("PostgreSQLへ保存済み");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
   }

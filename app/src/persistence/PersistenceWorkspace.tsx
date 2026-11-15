@@ -800,7 +800,6 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       persistSelectionSafely(authorScope, selectionRef.current);
       updateRouteSelection(selectionRef.current, false);
       setDocumentId(result.document.id);
-      setDocumentTitle("");
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "文書を作成できませんでした。");
     } finally {
