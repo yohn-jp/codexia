@@ -104,9 +104,7 @@ assert.deepEqual(Object.keys(identityProbes), ['backend', 'frontend']);
 assert.equal(identityProbes.backend.path, '/api/version');
 assert.equal(identityProbes.frontend.path, '/desktop/update-identity.json');
 for (const probe of Object.values(identityProbes)) {
-  assert.equal(probe.tunnelPath, '^' + probe.path.replaceAll('.', '\\.') + ' is consistent: UI/API routes, same-origin auth, Worker assets, GHCR Quadlet and secret mounts.');
-
-);
+  assert.equal(probe.tunnelPath, '^' + probe.path.replaceAll('.', '\\.') + '$');
   const matcher = new RegExp(probe.tunnelPath, 'u');
   assert.ok(matcher.test(probe.path));
   assert.ok(!matcher.test(probe.path + '/other'));
