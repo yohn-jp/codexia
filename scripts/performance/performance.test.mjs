@@ -13,32 +13,63 @@ test('nearest-rank quantiles retain missing observations and sample count', () =
   const result = distribution(Array.from({ length: 100 }, (_, i) => 100 - i));
   assert.deepEqual(result, { n: 100, p50: 50, p95: 95, p99: 99, max: 100 });
 });
+test('summaries exclude failed and timed-out workload latency while preserving completed observations and rejections', async () => {
+  const { summarizeCore } = await import('./summarize.mjs');
+  const result = summarizeCore({ status: 'NOT_CHECKED', workerStatus: 'failed', samples: [
+    { name: 'read', status: 'complete', appWallMs: 12, counters: { pgQueries: 3 } },
+    { name: 'read', status: 'failed', appWallMs: 900, counters: { pgQueries: 50 } },
+  ], rejections: [{ name: 'snapshot.materialize.boundary', status: 'rejected', rejectionWallMs: 44 }],
+  failures: [{ name: 'read', status: 'failed' }, { name: 'write', status: 'failed' }] });
+  assert.equal(result.operations.read.status, 'partial');
+  assert.equal(result.operations.read.appWallMs.n, 1);
+  assert.equal(result.operations.read.appWallMs.p50, 12);
+  assert.equal(result.operations.read.sqlQueries.p50, 3);
+  assert.equal(result.rejections[0].rejectionWallMs, 44);
+});
 test('synthetic fixture has exact tracked count, document sizes and reproducible Git identity', async () => {
   const root = await mkdtemp(join(tmpdir(), 'wave0-test-'));
   try {
     const a = await generate(join(root, 'a'), 'small'), b = await generate(join(root, 'b'), 'small');
-    assert.equal(a.files, 10); assert.equal(a.commit, b.commit);
-    const short = await generate(join(root, 'short'), 'small', 'short');
-    assert.equal(short.datasetId, 'small-short');
-    assert.equal(short.files, 10); assert.deepEqual(short.documentBytes, [1024, 1024, 1024]);
-    for (let i = 1; i <= 3; i++) assert.equal(Buffer.byteLength(await readFile(join(root, 'a/seed/manuscript/vol-1/ch-1', `scene-${i}.md`))), a.documentBytes[i - 1]);
-    assert.equal(git(join(root, 'a/seed'), 'ls-files').split('\n').length, 10);
+    assert.equal(a.documentCount, 8); assert.equal(a.transport.commit, b.transport.commit);
+    assert.equal(a.fixtureId, b.fixtureId); assert.equal(a.fixtureSha256, b.fixtureSha256);
+    assert.equal(a.sceneCount, 6); assert.deepEqual(a.scenes.slice(0, 3).map(scene => scene.bodyBytes), [1024, 102400, 1048576]);
+    for (const scene of a.scenes) assert.equal(Buffer.byteLength(await readFile(join(root, 'a/seed', scene.name))), scene.bodyBytes);
+    assert.equal(git(join(root, 'a/seed'), 'ls-files').split('\n').length, 7);
     await assert.rejects(generate(join(root, 'a'), 'small'), { code: 'EEXIST' });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
-test('node interception preserves promisified execFile result and failed process errors', async () => {
+
+test('performance database safety accepts disposable loopback targets and rejects remote or unrelated databases', async () => {
+  const { databaseTarget } = await import('./postgres-fixture.mjs');
+  assert.equal(databaseTarget('postgres://codexia:synthetic@127.0.0.1:55440/codexia_perf_baseline').database, 'codexia_perf_baseline');
+  assert.deepEqual(databaseTarget('postgres://codexia:synthetic@127.0.0.1/codexia_perf_baseline?host=localhost&port=55440&user=codexia_perf_user'),
+    { host: 'localhost', hostaddr: null, port: 55440, database: 'codexia_perf_baseline', user: 'codexia_perf_user', sslMode: 'default' });
+  assert.throws(() => databaseTarget('postgres://codexia:synthetic@db.example.test/codexia_perf_baseline'), /loopback/u);
+  assert.throws(() => databaseTarget('postgres://codexia:synthetic@localhost/codexia_perf_baseline?hostaddr=8.8.8.8'), /loopback/u);
+  assert.throws(() => databaseTarget('postgres://codexia:synthetic@localhost/codexia_perf_baseline?host=db.example.test'), /loopback/u);
+  assert.throws(() => databaseTarget('postgres://codexia:synthetic@localhost/codexia_perf_baseline?service=remote'), /loopback/u);
+  assert.throws(() => databaseTarget('postgres://codexia:synthetic@localhost/codexia_perf_baseline?dbname=codexia'), /override/u);
+  assert.throws(() => databaseTarget('postgres://codexia:synthetic@localhost/codexia_perf_baseline?port=70000'), /valid PostgreSQL port/u);
+  assert.throws(() => databaseTarget('postgres://codexia:synthetic@127.0.0.1/codexia'), /Disposable performance database/u);
+});
+test('node interception counts Git through sync and async process APIs while preserving promisified execFile errors', async () => {
   const { counts } = await import('./instrument-node.mjs');
   const cp = await import('node:child_process');
   const run = promisify(cp.execFile), before = counts.gitProcesses;
   assert.match((await run('git', ['--version'])).stdout, /^git version/);
   assert.equal(counts.gitProcesses, before + 1);
+  assert.match(cp.execFileSync('git', ['--version'], { encoding: 'utf8' }), /^git version/);
+  assert.match(cp.spawnSync('git', ['--version'], { encoding: 'utf8' }).stdout, /^git version/);
+  assert.match(cp.execSync('git --version', { encoding: 'utf8' }), /^git version/);
+  assert.equal(counts.gitProcesses, before + 4);
   await assert.rejects(run('git', ['--invalid-benchmark-argument']), error => error.code !== 0 && typeof error.stderr === 'string');
+  assert.equal(counts.gitProcesses, before + 5);
 });
 test('worker timeout retains completed evidence without claiming completion', async () => {
   const root = await mkdtemp(join(tmpdir(), 'wave0-worker-'));
   try {
     const worker = join(root, 'hang.mjs'), output = join(root, 'result.json');
-    await writeFile(worker, `import { writeFileSync } from 'node:fs'; writeFileSync(process.argv[2], JSON.stringify({status:'running',samples:[{name:'completed',ms:12}]})); setInterval(()=>{},1000);`);
+    await writeFile(worker, `import { writeFileSync } from 'node:fs'; writeFileSync(process.argv[2], JSON.stringify({status:'running',samples:[{name:'completed',status:'complete',ms:12,appWallMs:12}]})); setInterval(()=>{},1000);`);
     const result = await runWorker(worker, [output], output, 500);
     assert.equal(result.status, 'NOT_CHECKED'); assert.equal(result.execution.timeout, true);
     assert.equal(result.samples[0].ms, 12);
@@ -53,7 +84,7 @@ test('browser summaries distinguish completed strict writes from pending or abor
       { start: 2, mode: 'readwrite', durability: 'strict', status: 'pending' },
       { start: 2, mode: 'readwrite', durability: 'strict', status: 'aborted', ms: 8 },
     ] };
-  const result = summarizeBrowser({ status: 'NOT_CHECKED', phases: [{ name: 'input.1024', start: 1, end: 3, browser }], samples: [], requests: [] });
+  const result = summarizeBrowser({ status: 'NOT_CHECKED', phases: [{ name: 'browser.authoring.1024', start: 1, end: 3, browser }], samples: [], requests: [] });
   assert.equal(result.status, 'NOT_CHECKED');
   assert.equal(result.inputs[0].strictWriteMs.n, 1);
   assert.equal(result.inputs[0].strictWriteMs.p95, 5);
@@ -88,11 +119,11 @@ test('PostgreSQL author pipeline records receipts without manuscript Git process
       [datasetPath, output, '1', 'mutation'], output, 30000);
     assert.equal(result.status, 'complete', JSON.stringify(result.error));
     assert.equal(result.execution.code, 0);
-    for (const name of ['proposal', 'approval', 'apply']) {
+    for (const name of ['document.save', 'proposal.create', 'proposal.approval', 'operation.apply.receipt', 'application.receipt.replay']) {
       const sample = result.samples.find(row => row.name === name);
-      assert.ok(sample && sample.ms > 0 && sample.counters.gitProcesses === 0, name);
+      assert.ok(sample && sample.status === 'complete' && sample.ms > 0 && sample.counters.gitProcesses === 0, name);
     }
-    assert.equal(git(root, '--git-dir', fixture.remote, 'rev-parse', 'main'), fixture.commit);
+    assert.equal(git(join(datasetPath, 'seed'), 'rev-parse', 'HEAD'), fixture.transport.commit);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

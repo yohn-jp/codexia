@@ -1,42 +1,95 @@
 import { createHash } from 'node:crypto';
-import { git } from './dataset.mjs';
 import { fork } from 'node:child_process';
 import { once } from 'node:events';
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { chromium, expect as playwrightExpect } from '@playwright/test';
-import { distribution, save } from './common.mjs';
+import { buildIdentity, distribution, save, sourceIdentity } from './common.mjs';
 import { installBrowserProbes } from './browser-probes.mjs';
+
 const expect = playwrightExpect.configure({ timeout: 60000 });
-const [datasetPath, output, repeatsArg = '20', idleArg = '35000'] = process.argv.slice(2);
-const repeats = Number(repeatsArg), idleMs = Number(idleArg);
+const [datasetPathArg, output, repeatsArg = '20'] = process.argv.slice(2);
+const datasetPath = resolve(datasetPathArg);
+const repeats = Number(repeatsArg);
+const saveRepeats = Number(process.env.BENCH_BROWSER_SAVE_REPEATS ?? 3);
+if (!Number.isInteger(repeats) || repeats < 1 || !Number.isInteger(saveRepeats) || saveRepeats < 1) {
+  throw new Error('Navigation and save repeat counts must be positive integers');
+}
 const dataset = JSON.parse(await readFile(join(datasetPath, 'dataset.json'), 'utf8'));
-let page;
-const harness = { source: git(process.cwd(), 'rev-parse', 'HEAD'), scriptSha256: createHash('sha256').update(await readFile(new URL(import.meta.url))).digest('hex') };
-const report = { harness, profile: 'core', dataset, node: process.version, samples: [], phases: [], requests: [], status: 'running', notChecked: [] };
-const server = fork(new URL('./server.mjs', import.meta.url), [resolve(datasetPath)], { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] });
-let browser, cdp, browserCDP;
+const token = 'synthetic-benchmark-local-token-000000';
+const report = { schemaVersion: 2, harness: { source: sourceIdentity(), build: await buildIdentity(),
+    scriptSha256: createHash('sha256').update(await readFile(new URL(import.meta.url))).digest('hex') },
+  profile: 'core', dataset, node: process.version, repeats, saveRepeats, runtimeAuthority: 'PostgreSQL-backed Core/API',
+  gitRole: 'synthetic-fixture-transport-only', samples: [], phases: [], requests: [], status: 'running',
+  failures: [], notMeasured: ['Native OS IME and physical-device input', 'Input-to-pixel latency beyond the recorded animation-frame opportunity',
+    'React production render durations', 'Offline recovery, process crash, and long-idle acceptance'] };
+const server = fork(new URL('./server.mjs', import.meta.url), [datasetPath], { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] });
+let page, browser, cdp, browserCDP, lastServerSnapshot;
+
+function numericDelta(after, before) {
+  return Object.fromEntries(Object.keys(after ?? {}).filter(key => typeof after[key] === 'number')
+    .map(key => [key, after[key] - (before?.[key] ?? 0)]));
+}
+async function stats() {
+  const next = once(server, 'message'); server.send('stats');
+  return (await next)[0];
+}
 async function browserRuntime() {
   const { processInfo } = await browserCDP.send('SystemInfo.getProcessInfo');
   return Promise.all(processInfo.map(async info => {
     let rssBytes = null;
-    try { rssBytes = Number((await readFile(`/proc/${info.id}/status`, 'utf8')).match(/^VmRSS:\s+(\d+)/m)?.[1]) * 1024; } catch {}
+    try { rssBytes = Number((await readFile(`/proc/${info.id}/status`, 'utf8')).match(/^VmRSS:\s+(\d+)/m)?.[1]) * 1024; } catch { /* browser process may exit between CDP and procfs reads */ }
     return { ...info, rssBytes };
   }));
 }
-async function stats() { const next = once(server, 'message'); server.send('stats'); return (await next)[0]; }
-async function phase(name, action) {
-  const start = performance.now();
-  const value = await action();
-  report.samples.push({ name, ms: performance.now() - start });
-  await save(output, report); return value;
+async function phase(name, action, details = {}) {
+  const before = await stats();
+  const browserBefore = browserCDP ? await browserRuntime() : [];
+  const cpuBefore = process.cpuUsage(), start = performance.now();
+  try {
+    const value = await action();
+    const ms = performance.now() - start;
+    const after = await stats();
+    if (after.counts.gitProcesses - before.counts.gitProcesses > 0) {
+      throw new Error('PostgreSQL browser workload invoked Git at runtime');
+    }
+    const browserAfter = browserCDP ? await browserRuntime() : [];
+    const cpuUs = process.cpuUsage(cpuBefore);
+    const browserCpuMs = browserAfter.reduce((total, row) => total + Math.max(0,
+      row.cpuTime - (browserBefore.find(previous => previous.id === row.id)?.cpuTime ?? row.cpuTime)) * 1000, 0);
+    const sample = { name, status: 'complete', ms, appWallMs: ms, cpuUs, rssBytes: process.memoryUsage().rss,
+      maxRssKiB: process.resourceUsage().maxRSS, server: { queryMetrics: numericDelta(after.counts, before.counts),
+        cpuUs: { user: after.cpu.user - before.cpu.user, system: after.cpu.system - before.cpu.system },
+        rssBytes: after.memory.rss, io: after.io && before.io ? numericDelta(after.io, before.io) : null },
+      browserCpuMs, browserRssSumBytes: browserAfter.reduce((total, row) => total + (row.rssBytes ?? 0), 0), ...details };
+    report.samples.push(sample);
+    await save(output, report);
+    lastServerSnapshot = after;
+    return value;
+  } catch (error) {
+    report.failures.push({ name, status: 'failed', code: error.code, message: error.message });
+    await save(output, report);
+    throw error;
+  }
 }
+
+async function waitForServer() {
+  return new Promise((resolveReady, reject) => {
+    server.once('message', message => message.ready ? resolveReady(message) : reject(new Error(message.error ?? 'PostgreSQL API server failed')));
+    server.once('error', reject);
+    server.once('exit', (code, signal) => reject(new Error(`PostgreSQL API server exited before ready (${code ?? signal})`)));
+  });
+}
+
 try {
-  const [ready] = await once(server, 'message');
+  const ready = await waitForServer();
   report.serverStartupMs = ready.startupMs;
-  browser = await chromium.launch({ headless: true, ...(process.env.CODEXIA_E2E_CHROMIUM ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM } : {}) });
+  report.fixtureSetupMs = ready.fixtureSetupMs;
+  report.fixture = ready.fixture;
+  report.browser = undefined;
+  browser = await chromium.launch({ headless: true,
+    ...(process.env.CODEXIA_E2E_CHROMIUM ? { executablePath: process.env.CODEXIA_E2E_CHROMIUM } : {}) });
   report.browser = browser.version();
   browserCDP = await browser.newBrowserCDPSession();
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
@@ -60,113 +113,108 @@ try {
       if (!finiteRequests.size && performance.now() - lastFiniteEvent >= 500) return;
       await page.waitForTimeout(100);
     }
-    throw new Error('Finite HTTP requests did not settle before the idle observation');
+    throw new Error('Finite PostgreSQL API requests did not settle');
   }
   const base = `http://127.0.0.1:${ready.port}`;
   cdp = await context.newCDPSession(page);
   await cdp.send('Network.enable');
   report.network = { encodedTransferBytes: 0, completed: 0, failed: 0 };
-  cdp.on('Network.loadingFinished', e => { report.network.encodedTransferBytes += e.encodedDataLength; report.network.completed++; });
+  cdp.on('Network.loadingFinished', event => { report.network.encodedTransferBytes += event.encodedDataLength; report.network.completed++; });
   cdp.on('Network.loadingFailed', () => report.network.failed++);
   await cdp.send('Performance.enable');
   await cdp.send('Profiler.enable');
   await cdp.send('Profiler.start');
-  await phase('startup.loginReady', async () => { await page.goto(base + '/desktop/'); await page.getByLabel('アクセストークン').waitFor(); });
-  await page.getByLabel('アクセストークン').fill('synthetic-benchmark-local-token-000000');
-  await page.getByRole('button', { name: 'ログイン', exact: true }).click();
-  await page.getByLabel('GitHub リポジトリ URL').fill(pathToFileURL(ready.remote).href);
-  const sceneButton = id => page.locator('button.scene-button').filter({ hasText: new RegExp(`^Chapter One: Scene ${id}$`) });
-  await phase('startup.registerToOutline', async () => { await page.getByRole('button', { name: 'リポジトリを登録' }).click(); await sceneButton(1).waitFor(); });
-  const editor = page.locator('.cm-content');
-  async function openScene(id) {
-    await sceneButton(id).click();
-    await expect(page.locator('.scene-heading h1')).toHaveText(`Scene ${id}`);
-    await expect(editor).toHaveAttribute('contenteditable', 'true');
-    await editor.press('Control+Home');
-    // Heading can precede the paired snapshot read: verify expected manuscript too.
-    await expect(editor).toContainText(`Synthetic scene ${id}`);
-  }
-  await phase('startup.firstEditor', () => openScene(1));
-  report.phases.push({ name: 'startup', server: await stats(), browser: await page.evaluate(() => structuredClone(window.__wave0)), cdp: await cdp.send('Performance.getMetrics'), runtime: await browserRuntime(), storageEstimate: await page.evaluate(() => navigator.storage.estimate()) });
-  for (let id = 1; id <= 3; id++) {
-    await openScene(id);
-    await editor.focus();
-    await editor.press('Control+End');
-    const start = await page.evaluate(() => performance.now());
-    for (let i = 0; i < repeats; i++) {
-      await editor.press('a');
-      await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await phase('browser.startup.login-ready', async () => {
+    await page.goto(`${base}/desktop/`);
+    await page.getByLabel('アクセス・トークン').waitFor();
+  });
+  await phase('browser.author.login', async () => {
+    await page.getByLabel('アクセス・トークン').fill(token);
+    await page.getByRole('button', { name: 'PostgreSQL作品を開く', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Database workspace' })).toBeVisible();
+  });
+  const project = ready.fixture.project;
+  const scenes = ready.fixture.scenes;
+  const editor = page.getByRole('textbox', { name: '原稿 Markdown' });
+  const sceneButton = scene => page.locator('.pg-document-list').getByRole('button', { name: new RegExp(scene.title.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')) });
+  async function openScene(scene) {
+    const button = sceneButton(scene);
+    if (!await button.isVisible()) {
+      const library = page.getByRole('button', { name: /ライブラリ/u });
+      if (await library.count()) await library.first().click();
     }
-    for (let i = 0; i < repeats; i++) await editor.press('ArrowLeft');
-    await editor.press('Control+z'); await editor.press('Control+Shift+z');
-    await cdp.send('Input.imeSetComposition', { text: 'にほんご', selectionStart: 4, selectionEnd: 4 });
-    await cdp.send('Input.insertText', { text: '日本語' });
-    await cdp.send('Input.insertText', { text: '\nSynthetic paste. '.repeat(64) });
-    // Wait for the actual strict IDB transaction, then debounce and queued work to settle.
-    await page.waitForFunction(at => window.__wave0.transactions.some(tx => tx.start > at && tx.mode === 'readwrite' && tx.status === 'complete'), start);
-    await page.waitForTimeout(1000);
-    const end = await page.evaluate(() => performance.now());
-    report.phases.push({ name: `input.${dataset.documentBytes[id - 1]}`, sceneId: `scene-${id}`, start, end, server: await stats(),
-      browser: await page.evaluate(() => structuredClone(window.__wave0)), cdp: await cdp.send('Performance.getMetrics'), runtime: await browserRuntime(), storageEstimate: await page.evaluate(() => navigator.storage.estimate()) });
-    await save(output, report);
+    await button.click();
+    await expect(editor).toBeVisible();
+    await expect(page.getByRole('heading', { name: scene.title, exact: true })).toBeVisible();
   }
-  for (let i = 0; i < repeats; i++) await phase('file.switch', () => openScene(i % 3 + 1));
-  // Use the UI's existing Checkpoint and Publish contracts on a local synthetic remote only.
-  await editor.press('Control+End'); await editor.press('b');
-  await page.waitForTimeout(600);
-  await phase('ui.checkpoint', async () => {
-    const checkpoint = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/checkpoints'));
-    await page.locator('.editor-actions').getByRole('button', { name: 'Checkpoint', exact: true }).click();
-    const receipt = await checkpoint;
-    if (!receipt.ok() || !(await receipt.json()).operationId) throw new Error('Checkpoint did not return a receipt');
-    await expect(page.locator('.durability-message')).toContainText('ローカルチェックポイント');
+  await phase('browser.navigation.project-and-first-scene', async () => {
+    await page.getByLabel('開く作品').selectOption(project.id);
+    await openScene(scenes[0]);
   });
-  await phase('ui.publish', async () => {
-    const publication = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/publish'));
-    await page.locator('.editor-actions').getByRole('button', { name: 'Save to GitHub', exact: true }).click();
-    const receipt = await publication;
-    if (!receipt.ok() || (await receipt.json()).state !== 'confirmed') throw new Error('Publication was not confirmed');
-    await expect(page.locator('.durability-row').getByText('Saved to GitHub', { exact: true })).toBeVisible();
-  });
-  async function idle(name) {
-    const before = await stats(), requestsBefore = report.requests.length;
-    const runtimeBefore = await browserRuntime();
-    const metricsBefore = await cdp.send('Performance.getMetrics'), start = performance.now();
-    await page.waitForTimeout(idleMs);
-    report.phases.push({ name, elapsedMs: performance.now() - start, requests: report.requests.slice(requestsBefore),
-      before, after: await stats(), runtimeBefore, runtimeAfter: await browserRuntime(), metricsBefore, metricsAfter: await cdp.send('Performance.getMetrics'),
-      visibility: await page.evaluate(() => document.visibilityState) });
+  report.phases.push({ name: 'browser.startup', server: await stats(),
+    browser: await page.evaluate(() => structuredClone(window.__wave0)),
+    cdp: await cdp.send('Performance.getMetrics'), runtime: await browserRuntime(),
+    storageEstimate: await page.evaluate(() => navigator.storage.estimate()) });
+
+  for (let index = 0; index < Math.min(3, scenes.length); index++) {
+    const scene = scenes[index];
+    if (index > 0) await phase('browser.navigation.scene', () => openScene(scene), { sceneId: scene.id, documentBytes: scene.bytes });
+    const revisionPath = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
+    for (let saveIndex = 0; saveIndex < saveRepeats; saveIndex++) {
+      const transactionIndex = await page.evaluate(() => window.__wave0.transactions.length);
+      const inputStart = await page.evaluate(() => performance.now());
+      const saveResponse = page.waitForResponse(response => response.request().method() === 'PATCH' &&
+        new URL(response.url()).pathname === revisionPath);
+      await phase('browser.authoring.save-and-receipt', async () => {
+        await editor.focus();
+        await editor.press('Control+End');
+        await page.keyboard.type(` Browser performance edit ${index + 1}.${saveIndex + 1}.`);
+        await page.waitForFunction(startIndex => window.__wave0.transactions.slice(startIndex)
+          .some(transaction => transaction.mode === 'readwrite' && transaction.durability === 'strict' && transaction.status === 'complete'), transactionIndex);
+        const response = await saveResponse;
+        if (!response.ok()) throw new Error(`PostgreSQL document save failed: HTTP ${response.status()}`);
+        const receipt = await response.json();
+        if (!receipt.revision?.id || !receipt.document?.headRevisionId) throw new Error('Document save response did not include its revision receipt');
+        await expect(page.getByText('PostgreSQLへ保存済み', { exact: true })).toBeVisible();
+        return receipt;
+      }, { sceneId: scene.id, documentBytes: scene.bytes, saveIndex: saveIndex + 1 });
+      const end = await page.evaluate(() => performance.now());
+      const snapshot = await stats();
+      report.phases.push({ name: `browser.authoring.${scene.bytes}`, sceneId: scene.id, saveIndex: saveIndex + 1,
+        documentBytes: scene.bytes, start: inputStart, end, server: snapshot,
+        browser: await page.evaluate(() => structuredClone(window.__wave0)),
+        cdp: await cdp.send('Performance.getMetrics'), runtime: await browserRuntime(),
+        storageEstimate: await page.evaluate(() => navigator.storage.estimate()) });
+    }
   }
-  // The status text can become visible before publication refresh requests finish.
-  // Exclude that foreground tail before counting background requests.
+  for (let index = 0; index < repeats; index++) {
+    await phase('browser.navigation.repeat', () => openScene(scenes[index % Math.min(3, scenes.length)]),
+      { sceneId: scenes[index % Math.min(3, scenes.length)].id, documentBytes: scenes[index % Math.min(3, scenes.length)].bytes });
+  }
   await settleFiniteRequests();
-  await page.waitForTimeout(2500); // allow the cursor/activity debounce tail to complete
-  await settleFiniteRequests();
-  await idle('idle.visible');
-  const foreground = await context.newPage(); await foreground.bringToFront();
-  if (await page.evaluate(() => document.hidden)) await idle('idle.hidden');
-  else report.notChecked.push('Hidden idle: headless Chromium did not hide the original page when another tab was foregrounded. No synthetic visibility override.');
-  await foreground.close();
   report.storageEstimate = await page.evaluate(() => navigator.storage.estimate());
   report.browserMetrics = await page.evaluate(() => structuredClone(window.__wave0));
   report.server = await stats();
+  if (report.server.counts.gitProcesses > 0) throw new Error('PostgreSQL browser workload invoked Git at runtime');
   report.browserRuntime = await browserRuntime();
   report.cdpMetrics = await cdp.send('Performance.getMetrics');
-  report.summaries = Object.fromEntries([...new Set(report.samples.map(s => s.name))].map(name => [name, distribution(report.samples.filter(s => s.name === name).map(s => s.ms))]));
-  const profile = await cdp.send('Profiler.stop');
-  await writeFile(output + '.cpuprofile', JSON.stringify(profile.profile));
-  report.notChecked.push('Native OS English/Japanese IME and physical devices; CDP composition is synthetic.', 'React component render durations: production build has commit counts only.', '24-hour idle and network outage/crash load scenarios.');
+  const cpu = await cdp.send('Profiler.stop');
+  await writeFile(`${output}.cpuprofile`, JSON.stringify(cpu.profile));
+  report.summaries = Object.fromEntries([...new Set(report.samples.map(sample => sample.name))].map(name =>
+    [name, distribution(report.samples.filter(sample => sample.name === name && sample.status === 'complete').map(sample => sample.appWallMs))]));
   report.status = 'complete';
-} catch (error) { report.status = 'failed'; report.error = error.stack;
+} catch (error) {
+  report.status = 'failed';
+  report.error = { message: error.message, stack: error.stack };
   if (page && !page.isClosed()) {
     report.browserMetrics = await page.evaluate(() => structuredClone(window.__wave0)).catch(() => null);
     report.server = await stats().catch(() => null);
     if (cdp) {
-      try { const { profile } = await cdp.send('Profiler.stop'); await writeFile(output + '.cpuprofile', JSON.stringify(profile)); report.partialCpuProfile = true; } catch {}
+      try { const { profile } = await cdp.send('Profiler.stop'); await writeFile(`${output}.cpuprofile`, JSON.stringify(profile)); } catch { /* browser may already be closed */ }
     }
   }
-  process.exitCode = 1; }
-finally {
+  process.exitCode = 1;
+} finally {
   if (browser) await browser.close();
   if (server.connected) { const exited = once(server, 'exit'); server.send('stop'); await exited; }
   await save(output, report);
