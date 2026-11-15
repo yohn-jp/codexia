@@ -1,6 +1,11 @@
 name: Production Access Preflight
 on:
   workflow_call:
+    secrets:
+      CODEXIA_ACCESS_CLIENT_ID:
+        required: false
+      CODEXIA_ACCESS_CLIENT_SECRET:
+        required: false
   workflow_dispatch:
   schedule:
     - cron: '17 0 * * *'

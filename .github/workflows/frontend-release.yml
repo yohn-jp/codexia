@@ -79,6 +79,9 @@ jobs:
   preflight:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/production-preflight.yml
+    secrets:
+      CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
+      CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
   build:
     name: Build and verify UI assets
     runs-on: ubuntu-24.04

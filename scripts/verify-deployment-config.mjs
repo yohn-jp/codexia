@@ -126,7 +126,13 @@ assert.match(terraformVariables, /variable "access_ci_policy_id"/u);
 const release = await read('.github/workflows/frontend-release.yml');
 const preflight = await read('.github/workflows/production-preflight.yml');
 assert.match(release, /needs: \[preflight, build, certify\]/u);
-assert.match(release, /uses: \.\/\.github\/workflows\/production-preflight\.yml/u);
+const preflightCaller = release.split('  preflight:\n')[1].split('  build:\n')[0];
+assert.match(preflightCaller, /uses: \.\/\.github\/workflows\/production-preflight\.yml/u);
+for (const key of ['CODEXIA_ACCESS_CLIENT_ID', 'CODEXIA_ACCESS_CLIENT_SECRET']) {
+  assert.ok(preflightCaller.includes(key + ': ${{ secrets.' + key + ' }}'), 'Preflight caller must forward ' + key);
+  assert.ok(preflight.includes(key + ':\n        required: false'), 'Reusable preflight must declare ' + key);
+}
+assert.doesNotMatch(preflightCaller, /secrets:\s*inherit/u, 'Forward only the two Access credentials');
 assert.match(preflight, /verify-frontend-compatibility\.mjs preflight/u);
 assert.doesNotMatch(preflight, /CLOUDFLARE_API_TOKEN|wrangler deploy|terraform apply/u);
 
