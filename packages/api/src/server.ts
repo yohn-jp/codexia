@@ -24,6 +24,7 @@ import { RecentActivityStore } from "./recent-activity-store.js";
 import { handlePersistenceRoute } from "./persistence-routes.js";
 import {
   createHostedAuthorizationPolicy,
+  HostedAuthorizationError,
   verifyCompactJwt,
 } from "./hosted-policy.js";
 import {
@@ -1262,6 +1263,14 @@ export function createServer(options: ApiServerOptions): Server {
     finally { if (timer) clearTimeout(timer); }
   };
 
+  // Keep one fetcher identity per server so the verifier's bounded JWKS cache
+  // is shared across requests without sharing trust across server instances.
+  const runtimeControlFetcher: typeof fetch = (input, init) => {
+    const boundedSignal = AbortSignal.timeout(RUNTIME_CONTROL_JWKS_TIMEOUT_MS);
+    const signal = init?.signal ? AbortSignal.any([init.signal, boundedSignal]) : boundedSignal;
+    return (hosted?.controlFetch ?? fetch)(input, { ...init, signal });
+  };
+
   const authorizeRuntimeControl = async (
     request: IncomingMessage,
     action: "status" | "quiesce" | "resume",
@@ -1275,18 +1284,13 @@ export function createServer(options: ApiServerOptions): Server {
     const token = typeof header === "string" && /^Bearer [A-Za-z0-9_.-]+$/u.test(header) ? header.slice(7) : "";
     if (!token) throw httpFailure(401, "RUNTIME_CONTROL_UNAUTHORIZED", "A signed runtime-control credential is required");
     try {
-      const fetcher: typeof fetch = (input, init) => {
-        const boundedSignal = AbortSignal.timeout(RUNTIME_CONTROL_JWKS_TIMEOUT_MS);
-        const signal = init?.signal ? AbortSignal.any([init.signal, boundedSignal]) : boundedSignal;
-        return (hosted.controlFetch ?? fetch)(input, { ...init, signal });
-      };
       const verified = await verifyCompactJwt(
         token,
         assignment.controlServicePolicy.jwksUrl,
         assignment.controlServicePolicy.issuer,
         assignment.controlServicePolicy.audience,
         Date.now(),
-        fetcher,
+        runtimeControlFetcher,
       );
       const claims = isRecord(verified) ? verified : null;
       const boundOperationId = action === "status" ? claims?.operationId : operationId;
@@ -1302,7 +1306,11 @@ export function createServer(options: ApiServerOptions): Server {
         payloadDigest,
         nowSeconds: Math.floor(Date.now() / 1000),
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof HostedAuthorizationError && (error.status === 502 || error.status === 503)) {
+        const failure = authorizationFailure(error, "read");
+        throw httpFailure(failure.status, failure.code, failure.message);
+      }
       throw httpFailure(401, "RUNTIME_CONTROL_UNAUTHORIZED", "Runtime-control credential binding is invalid or expired");
     }
   };
