@@ -60,8 +60,10 @@ rootless systemctl --user daemon-reload
 if ! rootless systemctl --user start codexia-fixture-network.service; then
   echo 'Quadlet network unit was not loaded; checking the source and generator output.' >&2
   rootless stat -c '%n %U:%G %a' "$home/.config/containers/systemd/codexia-fixture.network"
-  manager_pid=$(rootless pgrep -xo systemd)
-  rootless sh -c 'tr "\\0" "\\n" < "/proc/$1/environ" | grep -E "^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)="' _ "$manager_pid"
+  manager_pid=$(rootless pgrep -u "$uid" -xo systemd || true)
+  if [[ -n "$manager_pid" ]]; then
+    rootless sh -c 'tr "\\0" "\\n" < "/proc/$1/environ" | grep -E "^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)="' _ "$manager_pid" || true
+  fi
   rootless systemctl --user show-environment | awk -F= '$1 ~ /^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)$/ {print}'
   rootless systemd-analyze --user unit-paths
   rootless find "/run/user/$uid/systemd/generator" -maxdepth 1 -type f -name '*codexia-fixture*' -printf '%f\\n'
