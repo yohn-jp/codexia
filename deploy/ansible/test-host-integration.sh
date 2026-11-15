@@ -57,6 +57,8 @@ rootless systemctl --user daemon-reload
 if ! rootless systemctl --user start codexia-fixture-network.service; then
   echo 'Quadlet network unit was not loaded; checking the source and generator output.' >&2
   rootless stat -c '%n %U:%G %a' "$home/.config/containers/systemd/codexia-fixture.network"
+  rootless systemctl --user show-environment | awk -F= '$1 ~ /^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)$/ {print}'
+  rootless systemd-analyze --user unit-paths
   rootless /usr/lib/systemd/user-generators/podman-user-generator -dryrun -v
   rootless systemctl --user list-unit-files --no-legend
   exit 1
