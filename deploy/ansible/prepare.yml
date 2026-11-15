@@ -125,6 +125,7 @@
 - name: Reject reuse of the existing writer credential
   ansible.builtin.command:
     argv: [podman, exec, -i, codexia-db, sh, -ec, 'IFS= read -r candidate; test "$candidate" != "$(cat /run/secrets/app-password)"']
+    expand_argument_vars: false
     stdin: "{{ codexia_preflight_password }}"
   changed_when: false
   no_log: true
@@ -132,6 +133,7 @@
 - name: Converge dedicated database role (never rotate it)
   ansible.builtin.command:
     argv: [podman, exec, -i, codexia-db, sh, -ec, 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia']
+    expand_argument_vars: false
     stdin: "{{ '\\set preflight_password ' ~ codexia_preflight_password ~ '\n' ~ lookup('ansible.builtin.file', repo_root + '/deploy/updater/provision-preflight-role.sql') }}"
   register: db_role
   changed_when: "'changed' in db_role.stdout_lines"
@@ -140,6 +142,7 @@
 - name: Prove the actual TCP login is read-only
   ansible.builtin.command:
     argv: [podman, exec, -i, codexia-db, sh, -ec, 'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -qAt -h 127.0.0.1 -U codexia_preflight -d codexia -c "SELECT current_user || chr(58) || current_setting(''transaction_read_only'')"']
+    expand_argument_vars: false
     stdin: "{{ codexia_preflight_password }}"
   register: login
   changed_when: false
@@ -149,6 +152,7 @@
 - name: Create preflight Podman secret only when absent
   ansible.builtin.command:
     argv: [podman, secret, create, codexia-postgres-preflight-password, '-']
+    expand_argument_vars: false
     stdin: "{{ codexia_preflight_password }}"
     stdin_add_newline: false
   no_log: true

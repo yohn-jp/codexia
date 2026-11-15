@@ -5,7 +5,7 @@ password=$(printf '%064d' 1)
 trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
 docker run -d --name "$name" -e POSTGRES_PASSWORD=test -e POSTGRES_DB=codexia docker.io/library/postgres:17-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994 >/dev/null
 for i in $(seq 1 60); do
-  if docker exec "$name" pg_isready -U postgres -d codexia >/dev/null 2>&1; then break; fi
+  if docker exec "$name" pg_isready -h 127.0.0.1 -U postgres -d codexia >/dev/null 2>&1; then break; fi
   sleep 1
 done
 sql() { docker exec -i "$name" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d codexia "$@"; }

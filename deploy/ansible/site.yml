@@ -68,6 +68,9 @@
     - name: Verify initialized controller
       ansible.builtin.include_tasks: verify.yml
       when: journal.stat.exists and codexia_stage in ['prepare', 'initialize', 'verify', 'enable']
+    - name: Ensure boot and poll units after initialization (also repairs interrupted unit installation)
+      ansible.builtin.include_tasks: install-units.yml
+      when: codexia_stage == 'initialize' and not ansible_check_mode
     - name: Enable automatic updates only after live acceptance
       ansible.builtin.include_tasks: enable.yml
       when: codexia_stage == 'enable' and not ansible_check_mode
