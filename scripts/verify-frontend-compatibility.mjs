@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 const shaPattern = /^[a-f0-9]{40}$/u;
+const probes = JSON.parse(readFileSync(new URL('../deploy/cloudflare/identity-probes.json', import.meta.url), 'utf8'));
 
 function record(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -58,13 +59,21 @@ export function assertFrontendReleaseAdmission(deployed, candidate) {
   return true;
 }
 
-/** @param {unknown} frontend @param {unknown} backend */
-export function assertFrontendCompatibility(frontend, backend) {
-  assertFrontendIdentity(frontend);
+/** @param {unknown} backend */
+export function assertBackendIdentity(backend) {
   assert.ok(record(backend), 'Live backend identity is invalid');
   assert.equal(backend.name, 'codexia');
   assert.equal(backend.hosted, false);
   assert.ok(typeof backend.version === 'string' && semver.test(backend.version), 'Live backend version is invalid');
+  assert.ok(['core', 'full'].includes(backend.profile), 'Live backend profile is invalid');
+  assert.ok(Number.isSafeInteger(backend.apiEpoch) && backend.apiEpoch > 0, 'Live backend API epoch is missing or invalid');
+  return backend;
+}
+
+/** @param {unknown} frontend @param {unknown} backend */
+export function assertFrontendCompatibility(frontend, backend) {
+  assertFrontendIdentity(frontend);
+  assertBackendIdentity(backend);
   assert.equal(backend.profile, frontend.profile, 'Backend profile mismatch');
   assert.equal(backend.apiEpoch, frontend.apiEpoch, 'Frontend and backend API epochs are incompatible');
 }
@@ -95,32 +104,100 @@ export function readFrontendReleaseConfiguration(env) {
   return { origin, clientId, clientSecret };
 }
 
-/** @param {string} endpoint @param {URL} origin @param {{clientId:string,clientSecret:string}} credentials @param {typeof fetch} fetchImpl */
-async function readLiveJson(endpoint, origin, credentials, fetchImpl) {
-  let response;
+/** @param {string} endpoint @param {URL} origin @param {{clientId:string,clientSecret:string}|null} credentials @param {typeof fetch} fetchImpl */
+async function requestProbe(endpoint, origin, credentials, fetchImpl) {
   try {
-    response = await fetchImpl(new URL(endpoint, origin), {
+    return await fetchImpl(new URL(endpoint, origin), {
       headers: {
-        'CF-Access-Client-Id': credentials.clientId,
-        'CF-Access-Client-Secret': credentials.clientSecret,
+        ...(credentials ? {
+          'CF-Access-Client-Id': credentials.clientId,
+          'CF-Access-Client-Secret': credentials.clientSecret,
+        } : {}),
         Accept: 'application/json',
         'Cache-Control': 'no-cache',
       },
-      redirect: 'error',
+      redirect: 'manual',
+      cache: 'no-store',
       signal: AbortSignal.timeout(15_000),
     });
   } catch {
-    throw new Error(`Could not reach protected live identity endpoint ${endpoint}; verify CODEXIA_PUBLIC_ORIGIN and the Cloudflare Access service credentials and policy.`);
+    throw new Error(`NETWORK: ${endpoint} unreachable; check origin, DNS, Tunnel and TLS.`);
   }
-  if (response.status === 401 || response.status === 403) {
-    throw new Error(`Cloudflare Access denied live identity endpoint ${endpoint} (HTTP ${response.status}); verify CODEXIA_ACCESS_CLIENT_ID, CODEXIA_ACCESS_CLIENT_SECRET, and the service-token policy.`);
+}
+
+/** @param {Response} response */
+function statusEvidence(response) {
+  const ray = response.headers.get('cf-ray');
+  return `HTTP ${response.status}${ray && /^[0-9a-f]+-[A-Z0-9]+$/u.test(ray) ? `, CF-Ray ${ray}` : ''}`;
+}
+
+/** @param {number} status */
+function accessDenied(status) {
+  return [301, 302, 303, 307, 308, 401, 403].includes(status);
+}
+
+/** @param {string} endpoint @param {URL} origin @param {{clientId:string,clientSecret:string}} credentials @param {typeof fetch} fetchImpl */
+async function readLiveJson(endpoint, origin, credentials, fetchImpl) {
+  const response = await requestProbe(endpoint, origin, credentials, fetchImpl);
+  if (!response.ok) {
+    const evidence = statusEvidence(response);
+    await response.body?.cancel().catch(() => undefined);
+    if (accessDenied(response.status)) {
+      throw new Error(`ACCESS_DENIED: ${endpoint} (${evidence}); check CI token pair, exact-path Service Auth policy and Tunnel AUD for this endpoint.`);
+    }
+    throw new Error(`IDENTITY_UNAVAILABLE: ${endpoint} (${evidence}); check origin route and deployed identity artifact.`);
   }
-  if (!response.ok) throw new Error(`Live identity endpoint ${endpoint} is unavailable (HTTP ${response.status}).`);
   try {
     return await response.json();
   } catch {
-    throw new Error(`Live identity endpoint ${endpoint} returned invalid JSON.`);
+    throw new Error(`IDENTITY_INVALID_JSON: ${endpoint} (${statusEvidence(response)}).`);
   }
+}
+
+/** @param {Response} response @param {URL} origin */
+function accessBoundaryDenied(response, origin) {
+  if (response.status === 401 || response.status === 403) return true;
+  if (!accessDenied(response.status)) return false;
+  // A navigation redirect is not proof of authorization denial.
+  const location = response.headers.get('location');
+  if (!location) return false;
+  try {
+    const target = new URL(location, origin);
+    return target.protocol === 'https:' &&
+      (target.origin === origin.origin || target.hostname.endsWith('.cloudflareaccess.com')) &&
+      /^\/cdn-cgi\/access\/login(?:\/|$)/u.test(target.pathname);
+  } catch { return false; }
+}
+
+/** @param {string} endpoint @param {URL} origin @param {{clientId:string,clientSecret:string}|null} credentials @param {typeof fetch} fetchImpl */
+async function assertProbeDenied(endpoint, origin, credentials, fetchImpl) {
+  const response = await requestProbe(endpoint, origin, credentials, fetchImpl);
+  const evidence = statusEvidence(response);
+  await response.body?.cancel().catch(() => undefined);
+  if (!accessBoundaryDenied(response, origin)) {
+    throw new Error(`ACCESS_BOUNDARY: ${credentials ? 'CI token' : 'anonymous'} request to ${endpoint} was not denied (${evidence}). Check parent Access policy and route scope.`);
+  }
+}
+
+/** @param {{env?:NodeJS.ProcessEnv | Record<string,string|undefined>, fetchImpl?:typeof fetch, checkBoundary?:boolean}} options */
+export async function probeLiveDeployment({ env = process.env, fetchImpl = fetch, checkBoundary = false } = {}) {
+  const { origin, clientId, clientSecret } = readFrontendReleaseConfiguration(env);
+  const credentials = { clientId, clientSecret };
+  const backend = readLiveJson(probes.backend.path, origin, credentials, fetchImpl).then(assertBackendIdentity);
+  const deployed = readLiveJson(probes.frontend.path, origin, credentials, fetchImpl).then(assertFrontendIdentity);
+  const checks = [
+    backend, deployed,
+    ...(checkBoundary ? [
+      assertProbeDenied(probes.backend.path, origin, null, fetchImpl),
+      assertProbeDenied(probes.frontend.path, origin, null, fetchImpl),
+      assertProbeDenied('/', origin, credentials, fetchImpl),
+      assertProbeDenied('/api/ready', origin, credentials, fetchImpl),
+    ] : []),
+  ];
+  const results = await Promise.allSettled(checks);
+  const errors = results.filter(result => result.status === 'rejected').map(result => result.reason instanceof Error ? result.reason.message : 'Probe failed');
+  if (errors.length) throw new Error(`Production deployment preflight failed:\n- ${errors.join('\n- ')}`);
+  return { backend: await backend, deployed: await deployed };
 }
 
 /**
@@ -131,19 +208,14 @@ export async function verifyFrontendCompatibility({ frontend, env = process.env,
   assertFrontendIdentity(frontend);
   assert.equal(frontend.sourceSha, env.GITHUB_SHA, 'Frontend artifact source mismatch');
   assert.equal(frontend.profile, 'full', 'Production frontend artifact must use the Full profile');
-  const { origin, clientId, clientSecret } = readFrontendReleaseConfiguration(env);
-  const credentials = { clientId, clientSecret };
-
   if (mode === 'deployed') {
-    const deployed = await readLiveJson('/desktop/update-identity.json', origin, credentials, fetchImpl);
+    const { origin, clientId, clientSecret } = readFrontendReleaseConfiguration(env);
+    const deployed = await readLiveJson(probes.frontend.path, origin, { clientId, clientSecret }, fetchImpl);
     assert.deepEqual(deployed, frontend, 'Deployed frontend identity does not match the tested artifact');
     return { deploy: false, backend: undefined };
   }
 
-  const [backend, deployed] = await Promise.all([
-    readLiveJson('/api/version', origin, credentials, fetchImpl),
-    readLiveJson('/desktop/update-identity.json', origin, credentials, fetchImpl),
-  ]);
+  const { backend, deployed } = await probeLiveDeployment({ env, fetchImpl });
   assertFrontendCompatibility(frontend, backend);
   const deploy = assertFrontendReleaseAdmission(deployed, frontend);
   return { deploy, backend };
@@ -154,6 +226,11 @@ function loadBuiltFrontend() {
 }
 
 async function main() {
+  if (process.argv[2] === 'preflight') {
+    const { backend, deployed } = await probeLiveDeployment({ checkBoundary: true });
+    console.log(`Verified protected production identities: backend ${backend.version} (epoch ${backend.apiEpoch}), frontend ${deployed.version} (epoch ${deployed.apiEpoch}); anonymous and out-of-scope CI access denied.`);
+    return;
+  }
   const frontend = loadBuiltFrontend();
   const mode = process.argv[2] === 'deployed' ? 'deployed' : 'predeploy';
   const result = await verifyFrontendCompatibility({ frontend, mode });

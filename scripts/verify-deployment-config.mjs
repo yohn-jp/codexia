@@ -98,5 +98,38 @@ assert.match(deploymentDocs, /CORS/u);
 assert.match(deploymentDocs, /restore/u);
 assert.match(deploymentDocs, /127\.0\.0\.1:2000\/ready/u);
 
+
+const identityProbes = JSON.parse(await read('deploy/cloudflare/identity-probes.json'));
+assert.deepEqual(Object.keys(identityProbes), ['backend', 'frontend']);
+assert.equal(identityProbes.backend.path, '/api/version');
+assert.equal(identityProbes.frontend.path, '/desktop/update-identity.json');
+for (const probe of Object.values(identityProbes)) {
+  assert.equal(probe.tunnelPath, '^' + probe.path.replaceAll('.', '\\.') + ' is consistent: UI/API routes, same-origin auth, Worker assets, GHCR Quadlet and secret mounts.');
+
+);
+  const matcher = new RegExp(probe.tunnelPath, 'u');
+  assert.ok(matcher.test(probe.path));
+  assert.ok(!matcher.test(probe.path + '/other'));
+}
+assert.ok(uiRoutes.originRoutes.includes('/api*'));
+assert.ok(!uiRoutes.originRoutes.some(pattern => identityProbes.frontend.path.startsWith(pattern.replace(/\*$/u, ''))));
+assert.match(terraformMain, /identity-probes\.json/u);
+assert.match(terraformMain, /domain\s+=\s+"\$\{var\.app_hostname\}\$\{each\.value\.path\}"/u);
+const parentAccess = terraformMain.split('resource "cloudflare_zero_trust_access_application" "codexia"')[1].split('resource "cloudflare_zero_trust_access_application" "identity_probe"')[0];
+assert.doesNotMatch(parentAccess, /access_ci_policy_id/u, 'CI Service Auth must never be attached to the author app');
+const probeAccess = terraformMain.split('resource "cloudflare_zero_trust_access_application" "identity_probe"')[1].split('resource "cloudflare_zero_trust_tunnel_cloudflared"')[0];
+assert.match(probeAccess, /id\s+=\s+var\.access_ci_policy_id\s+precedence\s+=\s+1/u);
+assert.match(probeAccess, /id\s+=\s+var\.access_policy_id\s+precedence\s+=\s+2/u);
+assert.match(terraformMain, /path\s+=\s+probe\.tunnelPath/u);
+const ingress = terraformMain.split('ingress = concat(')[1].split('# Scriptless exclusions')[0];
+assert.match(ingress, /for key, probe in local\.identity_probes[\s\S]*?aud_tag = \[\s*cloudflare_zero_trust_access_application\.identity_probe\[key\]\.aud,\s*cloudflare_zero_trust_access_application\.codexia\.aud\s*\][\s\S]*?aud_tag\s+=\s+\[cloudflare_zero_trust_access_application\.codexia\.aud\][\s\S]*?http_status:404/u);
+assert.match(terraformVariables, /variable "access_ci_policy_id"/u);
+const release = await read('.github/workflows/frontend-release.yml');
+const preflight = await read('.github/workflows/production-preflight.yml');
+assert.match(release, /needs: \[preflight, build, certify\]/u);
+assert.match(release, /uses: \.\/\.github\/workflows\/production-preflight\.yml/u);
+assert.match(preflight, /verify-frontend-compatibility\.mjs preflight/u);
+assert.doesNotMatch(preflight, /CLOUDFLARE_API_TOKEN|wrangler deploy|terraform apply/u);
+
 console.info('Deployment configuration is consistent: UI/API routes, same-origin auth, Worker assets, GHCR Quadlet and secret mounts.');
 

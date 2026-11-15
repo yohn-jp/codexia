@@ -14,7 +14,7 @@ on:
       - packages/module-runtime/**
       - packages/persistence-contracts/**
       - packages/persistence-postgres/**
-      - deploy/cloudflare/ui-routes.json
+      - deploy/cloudflare/**
       - deploy/frontend-compatibility.json
       - scripts/ci-contract.mjs
       - scripts/ci-artifact-selection.mjs
@@ -34,6 +34,7 @@ on:
       - pnpm-workspace.yaml
       - .github/workflows/verify.yml
       - .github/workflows/frontend-release.yml
+      - .github/workflows/production-preflight.yml
   push:
     branches: [main]
     paths:
@@ -48,7 +49,7 @@ on:
       - packages/module-runtime/**
       - packages/persistence-contracts/**
       - packages/persistence-postgres/**
-      - deploy/cloudflare/ui-routes.json
+      - deploy/cloudflare/**
       - deploy/frontend-compatibility.json
       - scripts/ci-contract.mjs
       - scripts/ci-artifact-selection.mjs
@@ -68,12 +69,16 @@ on:
       - pnpm-workspace.yaml
       - .github/workflows/verify.yml
       - .github/workflows/frontend-release.yml
+      - .github/workflows/production-preflight.yml
 permissions:
   contents: read
 concurrency:
   group: codexia-frontend-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  preflight:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/production-preflight.yml
   build:
     name: Build and verify UI assets
     runs-on: ubuntu-24.04
@@ -150,7 +155,7 @@ jobs:
         run: node scripts/verify-release-source.mjs
   deploy:
     name: Deploy UI Static Assets
-    needs: [build, certify]
+    needs: [preflight, build, certify]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15

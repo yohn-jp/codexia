@@ -36,6 +36,15 @@ variable "access_policy_id" {
   }
 }
 
+variable "access_ci_policy_id" {
+  type        = string
+  description = "Existing account-owned reusable Service Auth policy UUID, restricted to the Codexia CI token and attached only to identity probes."
+  validation {
+    condition     = can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", var.access_ci_policy_id))
+    error_message = "Set an existing reusable Service Auth policy UUID."
+  }
+}
+
 variable "allowed_idps" {
   type        = set(string)
   description = "Existing Cloudflare Access IdP IDs."
