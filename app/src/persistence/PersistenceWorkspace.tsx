@@ -699,7 +699,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         try {
           const currentRead = await api.persistenceDocument(pending.projectId, pending.documentId, controller.signal);
           const latest = activeRef.current;
-          if (inScope(latest)) {
+          if (latest && inScope(latest)) {
             publishEditor({ ...latest, remoteConflict: currentRead.revision ?? null, save: "failed", error: currentRead.revision ? "PostgreSQL上のRevisionが先に更新されました。下書きはIndexedDBに残しています。" : "競合した最新Revisionを確認できません。下書きは保持しています。" });
           }
         } catch (readError) {
@@ -708,7 +708,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         }
       } else {
         const latest = activeRef.current;
-        if (inScope(latest)) {
+        if (latest && inScope(latest)) {
           publishEditor({ ...latest, save: "failed", error: error instanceof Error ? error.message : "PostgreSQLへ保存できませんでした。回復下書きは保持しています。" });
         }
       }
