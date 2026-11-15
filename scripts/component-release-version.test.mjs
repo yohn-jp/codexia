@@ -76,14 +76,16 @@ test('frontend live gate rejects wrong source, incompatible profile or epoch, an
     jsonResponse(String(url).endsWith('/api/version')?{...liveBackend,apiEpoch:2}:liveFrontend)}),/API epochs are incompatible/);
   await assert.rejects(verifyFrontendCompatibility({frontend:candidate,env:releaseEnv,fetchImpl:async url=>
     jsonResponse(String(url).endsWith('/api/version')?{...liveBackend,profile:'core'}:liveFrontend)}),/Backend profile mismatch/);
-  await assert.rejects(verifyFrontendCompatibility({frontend:candidate,env:releaseEnv,fetchImpl:async()=>new Response('unavailable',{status:503})}),/Live identity endpoint .* is unavailable \(HTTP 503\)/);
+  await assert.rejects(verifyFrontendCompatibility({frontend:candidate,env:releaseEnv,fetchImpl:async()=>new Response('unavailable',{status:503})}),/IDENTITY_UNAVAILABLE: \/api\/version \(HTTP 503\)[\s\S]*IDENTITY_UNAVAILABLE: \/desktop\/update-identity\.json \(HTTP 503\)/);
 });
 
 test('frontend live gate diagnoses Access rejection without exposing service credentials',async()=>{
   const secret='do-not-print-this-access-secret';
   await assert.rejects(verifyFrontendCompatibility({frontend:candidate,env:{...releaseEnv,CODEXIA_ACCESS_CLIENT_SECRET:secret},fetchImpl:async()=>new Response('',{status:403})}),error=>{
-    assert.match(error.message,/Cloudflare Access denied/);
-    assert.match(error.message,/CODEXIA_ACCESS_CLIENT_ID, CODEXIA_ACCESS_CLIENT_SECRET/);
+    assert.match(error.message,/ACCESS_DENIED: \/api\/version \(HTTP 403\)/);
+    assert.match(error.message,/ACCESS_DENIED: \/desktop\/update-identity\.json \(HTTP 403\)/);
+    assert.match(error.message,/CI token pair, exact-path Service Auth policy and Tunnel AUD/);
+    assert.equal(error.message.includes(releaseEnv.CODEXIA_ACCESS_CLIENT_ID),false);
     assert.equal(error.message.includes(secret),false);
     return true;
   });

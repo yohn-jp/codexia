@@ -10,6 +10,7 @@ on:
       - scripts/build-frontend.mjs
       - scripts/verify-deployment-config.mjs
       - scripts/verify-frontend-compatibility*.mjs
+      - scripts/component-release-version*.mjs
       - scripts/profile-package.mjs
       - scripts/profile-package.test.mjs
       - package.json
@@ -27,6 +28,7 @@ on:
       - scripts/build-frontend.mjs
       - scripts/verify-deployment-config.mjs
       - scripts/verify-frontend-compatibility*.mjs
+      - scripts/component-release-version*.mjs
       - scripts/profile-package.mjs
       - scripts/profile-package.test.mjs
       - package.json
@@ -57,7 +59,7 @@ jobs:
       - name: Check deployment configuration consistency
         run: pnpm run verify:deployment
       - name: Test release identity probes and Access failure diagnostics
-        run: node --test scripts/verify-frontend-compatibility.test.mjs
+        run: node --test scripts/verify-frontend-compatibility.test.mjs scripts/component-release-version.test.mjs
       - name: Typecheck and test the Static Assets Worker
         run: pnpm run typecheck:deployment && pnpm run test:deployment
       - name: Check standalone Ansible configuration
