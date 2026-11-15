@@ -26,12 +26,14 @@ export interface AssertionReference {
 
 export interface TextAnchor {
   id: string;
-  blockId: string;
+  blockId: string | null;
   from: number;
   to: number;
   quote: string;
   /** Author-confirmed Knowledge target. A body mention may have no target. */
   target?: KnowledgeReference;
+  /** All author-confirmed targets when an anchor links multiple nodes. */
+  targets?: KnowledgeReference[];
   /** Unconfirmed link candidates; these are never treated as canon references. */
   candidates?: KnowledgeReference[];
   assertions?: AssertionReference[];
@@ -198,13 +200,14 @@ export function assertEditorEvidenceSnapshot(value: unknown, documentLength: num
   const statuses = new Set(["proposed", "current", "needs_review", "orphaned", "revision_conflict"]);
   const anchors = value.anchors.map((item) => {
     if (!record(item) || typeof item.id !== "string" || item.id.length === 0
-      || typeof item.blockId !== "string" || item.blockId.length === 0
+      || (item.blockId !== null && (typeof item.blockId !== "string" || item.blockId.length === 0))
       || !Number.isInteger(item.from) || !Number.isInteger(item.to)
       || (item.from as number) < 0 || (item.to as number) < (item.from as number)
       || typeof item.quote !== "string" || item.quote.length === 0
       || typeof item.revisionId !== "string" || item.revisionId.length === 0 || typeof item.status !== "string" || !statuses.has(item.status)
       || ((item.to as number) === (item.from as number) && item.status !== "orphaned")
       || (item.target !== undefined && !validKnowledgeReference(item.target))
+       || (item.targets !== undefined && (!Array.isArray(item.targets) || !item.targets.every(validKnowledgeReference)))
       || (item.candidates !== undefined && (!Array.isArray(item.candidates) || !item.candidates.every(validKnowledgeReference)))
       || (item.assertions !== undefined && (!Array.isArray(item.assertions) || !item.assertions.every(validAssertionReference)))) {
       throw new TypeError("Text Anchor adapter returned an invalid anchor.");
@@ -433,10 +436,8 @@ function changeInsertedStart(change: TextChange, changes: readonly TextChange[])
   return change.from + delta;
 }
 
-function blockAt(blocks: readonly MarkdownBlockIdentity[], offset: number): MarkdownBlockIdentity | undefined {
-  return blocks.find((block) => offset >= block.from && offset <= block.to)
-    ?? blocks.reduce<MarkdownBlockIdentity | undefined>((nearest, block) =>
-      !nearest || Math.abs(block.from - offset) < Math.abs(nearest.from - offset) ? block : nearest, undefined);
+function blockAt(blocks: readonly MarkdownBlockIdentity[], from: number, to: number): MarkdownBlockIdentity | undefined {
+  return blocks.find((block) => from >= block.from && from < block.to && to <= block.to);
 }
 
 export function initializeDocumentEvidence(
@@ -456,11 +457,11 @@ export function initializeDocumentEvidence(
     const quoteMatches = inRange && text.slice(anchor.from, anchor.to) === anchor.quote;
     const revisionMatches = anchor.revisionId === revisionId && snapshot?.revisionId === revisionId;
     const persistedBlock = blocks.find((block) => block.id === anchor.blockId);
-    const actualBlock = inRange ? blockAt(blocks, anchor.from) : undefined;
+    const actualBlock = inRange ? blockAt(blocks, anchor.from, anchor.to) : undefined;
     return [{
       ...anchor,
-      blockId: persistedBlock && inRange && anchor.from >= persistedBlock.from && anchor.from <= persistedBlock.to
-        ? persistedBlock.id : actualBlock?.id ?? anchor.blockId,
+      blockId: persistedBlock && inRange && anchor.from >= persistedBlock.from && anchor.from < persistedBlock.to && anchor.to <= persistedBlock.to
+        ? persistedBlock.id : actualBlock?.id ?? null,
       status: sourceMatches && revisionMatches && quoteMatches ? anchor.status
         : anchor.status === "orphaned" ? "orphaned" as const : "revision_conflict" as const,
     }];
@@ -524,7 +525,7 @@ export function trackTextChanges(
     }
     const quoteMatches = nextText.slice(from, to) === anchor.quote;
     const status = overlapping || !quoteMatches ? "needs_review" as const : anchor.status;
-    return { ...anchor, from, to, blockId: blockAt(blocks, from)?.id ?? anchor.blockId, status };
+    return { ...anchor, from, to, blockId: blockAt(blocks, from, to)?.id ?? null, status };
   });
   return { ...state, blocks, anchors };
 }
