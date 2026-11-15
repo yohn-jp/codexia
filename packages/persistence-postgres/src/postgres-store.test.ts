@@ -130,6 +130,35 @@ test("migrations are repeatable and document revisions stay immutable", async ()
   );
 });
 
+test("document head revisions are fetched as an ordered exact-key set within project scope", async () => {
+  const firstProject = await createProject(`head-batch-a-${randomUUID()}`);
+  const secondProject = await createProject(`head-batch-b-${randomUUID()}`);
+  const first = await createDocument(firstProject.id, "First head");
+  const second = await createDocument(firstProject.id, "Second head");
+
+  const lookups = await persistence.read((reader) => reader.getDocumentHeadRevisions(firstProject.id, [
+    { documentId: second.document.id, revisionId: second.revision.id },
+    { documentId: first.document.id, revisionId: second.revision.id },
+    { documentId: first.document.id, revisionId: first.revision.id },
+    { documentId: second.document.id, revisionId: second.revision.id },
+  ]));
+
+  assert.deepEqual(lookups.map(({ documentId, revisionId, revision }) => ({
+    documentId,
+    revisionId,
+    markdown: revision?.markdown ?? null,
+  })), [
+    { documentId: second.document.id, revisionId: second.revision.id, markdown: "Second head" },
+    { documentId: first.document.id, revisionId: second.revision.id, markdown: null },
+    { documentId: first.document.id, revisionId: first.revision.id, markdown: "First head" },
+    { documentId: second.document.id, revisionId: second.revision.id, markdown: "Second head" },
+  ]);
+  assert.deepEqual(await persistence.read((reader) => reader.getDocumentHeadRevisions(secondProject.id, [
+    { documentId: first.document.id, revisionId: first.revision.id },
+  ])), [{ documentId: first.document.id, revisionId: first.revision.id, revision: null }]);
+  assert.deepEqual(await persistence.read((reader) => reader.getDocumentHeadRevisions(firstProject.id, [])), []);
+});
+
 test("PostgreSQL health checks and Knowledge lists use the canonical project records", async () => {
   const project = await createProject(`knowledge-list-${randomUUID()}`);
   const nodeIds = [randomUUID() as KnowledgeNodeId, randomUUID() as KnowledgeNodeId];
@@ -926,4 +955,22 @@ test("ChangeSet application is atomic, versioned and idempotent", async () => {
   assert.ok(rejectedUpdate && rejectedUpdate.status === "rejected");
   assert.ok(rejectedUpdate.reason instanceof PersistenceError);
   assert.equal(rejectedUpdate.reason.code, "conflict");
+});
+
+test("startup project inventory uses bounded stable keyset pages", async () => {
+  const first = await createProject(`project-page-a-${randomUUID()}`);
+  const second = await createProject(`project-page-b-${randomUUID()}`);
+  await persistence.read(async reader => {
+    const ids = [];
+    let after: typeof first.id | undefined;
+    for (;;) {
+      const page = await reader.listProjectIds(2,after);
+      assert.ok(page.length <= 2);
+      ids.push(...page);
+      if (page.length < 2) break;
+      after = page[page.length-1]!;
+    }
+    assert.ok(ids.includes(first.id) && ids.includes(second.id));
+    assert.deepEqual(ids,[...new Set(ids)].sort());
+  });
 });

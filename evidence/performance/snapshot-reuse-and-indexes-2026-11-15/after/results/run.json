@@ -1,0 +1,18 @@
+{
+  "source": {
+    "commit": "a7ebe0337e803bf70a142eaabf09b5a3c529106c",
+    "clean": false,
+    "status": "M  packages/core/src/index.ts\nA  packages/core/src/snapshot-index.test.ts\nA  packages/core/src/snapshot-index.ts\nA  packages/core/src/snapshot-reuse.test.ts\nM  packages/core/tsconfig.build.json\nM  packages/persistence-contracts/src/index.ts\nM  packages/persistence-postgres/src/postgres-store.test.ts\nM  packages/persistence-postgres/src/postgres-store.ts",
+    "statusSha256": "6a8a6b9797160fc0d5487805e1e5cedfd58b131ce555b81ae1a3486e14f69889",
+    "worktreeDiffSha256": "63f62f15943063e5e2d72e774224acd246fcb5c05bf764a932e1ca9493396de3"
+  },
+  "root": "/home/sophia/src/codexia-perf-snapshot-reuse-and-indexes",
+  "outputRoot": "/home/sophia/src/codexia-perf-snapshot-reuse-and-indexes/evidence/performance/snapshot-reuse-and-indexes-2026-11-15/after",
+  "databaseName": "codexia_perf_candidate2",
+  "selectedDatasets": [
+    "long-form"
+  ],
+  "repeats": 20,
+  "timeoutMs": 600000,
+  "browserSizes": []
+}

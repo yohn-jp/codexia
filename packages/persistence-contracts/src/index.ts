@@ -157,6 +157,15 @@ export interface DocumentRevisionPage {
   nextBefore: string | null;
 }
 
+export interface DocumentRevisionKey {
+  documentId: DocumentId;
+  revisionId: RevisionId;
+}
+
+export interface DocumentHeadRevisionLookup extends DocumentRevisionKey {
+  revision: DocumentRevision | null;
+}
+
 export type KnowledgeNodeStatus = "proposed" | "confirmed" | "retired";
 export type KnowledgeAliasStatus = "proposed" | "confirmed" | "ambiguous" | "retired";
 export type KnowledgeRelationStatus = "proposed" | "confirmed" | "rejected" | "retired";
@@ -500,9 +509,13 @@ export interface PersistenceReader {
   listModuleRecords(projectId: ProjectId, moduleId?: string): Promise<readonly ModuleRecord[]>;
   getProject(projectId: ProjectId): Promise<Project | undefined>;
   listProjects(limit?: number): Promise<readonly Project[]>;
+  /** Bounded, stable project-ID inventory for explicit startup compatibility checks. */
+  listProjectIds(limit: number, after?: ProjectId): Promise<readonly ProjectId[]>;
   getDocument(projectId: ProjectId, documentId: DocumentId): Promise<Document | undefined>;
   listDocuments(projectId: ProjectId, parentId?: DocumentId | null, limit?: number): Promise<readonly Document[]>;
   getRevision(projectId: ProjectId, documentId: DocumentId, revisionId: RevisionId): Promise<DocumentRevision | undefined>;
+  /** Resolve exact document/revision pairs in input order within the project scope. */
+  getDocumentHeadRevisions(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionLookup[]>;
   listRevisions(projectId: ProjectId, documentId: DocumentId, limit: number, before?: string): Promise<DocumentRevisionPage>;
   getKnowledgeNode(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<KnowledgeNode | undefined>;
   listKnowledgeNodes(projectId: ProjectId, limit?: number): Promise<readonly KnowledgeNode[]>;

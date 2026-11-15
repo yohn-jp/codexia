@@ -16,8 +16,10 @@ import {
   type CreateDocumentCommand,
   type CreateProjectCommand,
   type Document,
+  type DocumentHeadRevisionLookup,
   type DocumentId,
   type DocumentRevision,
+  type DocumentRevisionKey,
   type DocumentRevisionPage,
   type DocumentWriteResult,
   type EvidenceAnchor,
@@ -550,6 +552,12 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows.map(mapProject);
   }
 
+  async listProjectIds(limit: number, after?: ProjectId): Promise<readonly ProjectId[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError("Project page size must be between 1 and 200");
+    const result = await this.query("SELECT id FROM project WHERE ($2::uuid IS NULL OR id > $2::uuid) ORDER BY id LIMIT $1", [limit, after ?? null]);
+    return result.rows.map(row => asString(row.id) as ProjectId);
+  }
+
   async getDocument(projectId: ProjectId, documentId: DocumentId): Promise<Document | undefined> {
     const result = await this.query("SELECT * FROM document WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL", [projectId, documentId]);
     return result.rows[0] ? mapDocument(result.rows[0]) : undefined;
@@ -569,6 +577,26 @@ class PostgresTransaction implements PersistenceTransaction {
       [projectId, documentId, revisionId],
     );
     return result.rows[0] ? mapRevision(result.rows[0]) : undefined;
+  }
+
+  async getDocumentHeadRevisions(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionLookup[]> {
+    if (heads.length === 0) return [];
+    const result = await this.query(
+      `SELECT requested.document_id AS requested_document_id, requested.revision_id AS requested_revision_id,
+         revision.project_id, revision.document_id, revision.id, revision.parent_revision_id,
+         revision.markdown, revision.sha256, revision.author_id, revision.created_at
+       FROM unnest($2::uuid[], $3::uuid[]) WITH ORDINALITY
+         AS requested(document_id, revision_id, request_order)
+       LEFT JOIN document_revision AS revision
+         ON revision.project_id = $1 AND revision.document_id = requested.document_id AND revision.id = requested.revision_id
+       ORDER BY requested.request_order`,
+      [projectId, heads.map((head) => head.documentId), heads.map((head) => head.revisionId)],
+    );
+    return result.rows.map((row) => ({
+      documentId: asString(row.requested_document_id) as DocumentId,
+      revisionId: asString(row.requested_revision_id) as RevisionId,
+      revision: row.id === null ? null : mapRevision(row),
+    }));
   }
 
   async listRevisions(projectId: ProjectId, documentId: DocumentId, limit: number, before?: string): Promise<DocumentRevisionPage> {
