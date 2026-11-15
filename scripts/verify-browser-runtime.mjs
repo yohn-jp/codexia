@@ -11,14 +11,14 @@ const execFileAsync = promisify(execFile);
 const root = fileURLToPath(new URL("../", import.meta.url));
 process.chdir(root);
 
-const expectedImageDigest = "sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8";
+const expectedImageDigest = "sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579";
 assert.equal(process.platform, "linux", "Browser verification requires the Linux Noble container");
 assert.equal(process.arch, "x64", "The pinned Playwright image digest is the Linux amd64 image");
 assert.equal(process.versions.node.split(".")[0], "24", "The browser runner must use Node 24");
 assert.equal(
   process.env.CODEXIA_PLAYWRIGHT_IMAGE_DIGEST,
   expectedImageDigest,
-  "The browser job must declare the pinned Playwright 1.64.1 Noble image digest",
+  "The browser job must declare the pinned Playwright 1.65.1 Noble image digest",
 );
 
 const operatingSystem = await readFile("/etc/os-release", "utf8");
@@ -26,10 +26,10 @@ assert.match(operatingSystem, /^VERSION_CODENAME="?noble"?$/mu, "The browser run
 
 const { stdout: pnpmVersionOutput } = await execFileAsync("pnpm", ["--version"], { encoding: "utf8" });
 const pnpmVersion = pnpmVersionOutput.trim();
-assert.equal(pnpmVersion, "12.10.1", "The browser runner must use pnpm 12.10.1");
+assert.equal(pnpmVersion, "12.21.0", "The browser runner must use pnpm 12.21.0");
 
 const playwrightPackage = JSON.parse(await readFile(resolve(root, "node_modules/@playwright/test/package.json"), "utf8"));
-assert.equal(playwrightPackage.version, "1.64.1", "The installed Playwright package must match the pinned browser image");
+assert.equal(playwrightPackage.version, "1.65.1", "The installed Playwright package must match the pinned browser image");
 
 async function verifyBrowser(name, browserType) {
   const browser = await browserType.launch({ headless: true });

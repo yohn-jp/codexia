@@ -58,8 +58,8 @@ Read `containerimage.digest` from each metadata file and use those `sha256:` val
 RUNTIME_BASE_DIGEST='<sha256:64-lowercase-hex>'
 BUILD_KIT_DIGEST='<sha256:64-lowercase-hex>'
 
-corepack pnpm@12.10.1 install --frozen-lockfile
-corepack pnpm@12.10.1 build
+corepack pnpm@12.21.0 install --frozen-lockfile
+corepack pnpm@12.21.0 build
 node scripts/hosted-build.mjs catalog \
   --producer-revision "$REVISION" \
   --runtime-base-digest "$RUNTIME_BASE_DIGEST" \

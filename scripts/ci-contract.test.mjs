@@ -32,7 +32,7 @@ test('browser groups depend on profile producers; independent groups cannot canc
     if (id === 'hosted_catalog') assert.equal(job.name,'hosted-native-catalog');
     else assert.equal(job.strategy['fail-fast'], false, id);
     assert.ok(job.steps.some(step => step.run?.includes('ci-group.mjs')));
-    assert.ok(job.steps.some(step => step.uses === 'actions/upload-artifact@v4' && step.if === 'always()'));
+    assert.ok(job.steps.some(step => step.uses === 'actions/upload-artifact@v7.0.2' && step.if === 'always()'));
   }
   const gate = workflow.jobs.certification;
   assert.equal(gate.if, 'always()');
@@ -67,7 +67,7 @@ test('browser groups retain immutable runtime and restore the exact producer bef
   const browser = workflow.jobs.browser;
   assert.match(browser.container.image, /^mcr\.microsoft\.com\/playwright@sha256:[a-f0-9]{64}$/);
   assert.equal(browser.container.options, '--ipc=host');
-  const diagnostics = browser.steps.find(step => step.uses === 'actions/upload-artifact@v4' && step.with.name.startsWith('playwright-failure-'));
+  const diagnostics = browser.steps.find(step => step.uses === 'actions/upload-artifact@v7.0.2' && step.with.name.startsWith('playwright-failure-'));
   assert.ok(diagnostics);
   assert.equal(diagnostics.if, 'always()');
   assert.match(diagnostics.with.name, /playwright-failure-\$\{\{ matrix\.group \}\}-\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
@@ -77,7 +77,7 @@ test('browser groups retain immutable runtime and restore the exact producer bef
   assert.equal(diagnostics.with['if-no-files-found'], 'ignore');
   const runnerIndex = browser.steps.findIndex(step => step.run?.includes('ci-group.mjs'));
   const diagnosticsIndex = browser.steps.indexOf(diagnostics);
-  const reportIndex = browser.steps.findIndex(step => step.uses === 'actions/upload-artifact@v4' && step.with.name.startsWith('ci-evidence-browser-'));
+  const reportIndex = browser.steps.findIndex(step => step.uses === 'actions/upload-artifact@v7.0.2' && step.with.name.startsWith('ci-evidence-browser-'));
   assert.ok(runnerIndex < diagnosticsIndex && diagnosticsIndex < reportIndex);
   const runner = readFileSync(new URL('./ci-group.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(runner, /(?:apt(?:-get)?\s|playwright install|--with-deps)/);
@@ -92,19 +92,19 @@ test('browser groups retain immutable runtime and restore the exact producer bef
   assert.ok(browser.steps.indexOf(restore) < runnerIndex);
   const producer = workflow.jobs.build.steps.find(step => step.run?.includes('ci-profile-artifact.mjs pack'));
   assert.ok(producer);
-  assert.ok(workflow.jobs.build.steps.some(step => step.uses === 'actions/upload-artifact@v4' && step.with.name === 'ci-profile-build-${{ matrix.profile }}'));
+  assert.ok(workflow.jobs.build.steps.some(step => step.uses === 'actions/upload-artifact@v7.0.2' && step.with.name === 'ci-profile-build-${{ matrix.profile }}'));
   assert.match(runner, /assertProfileReceipt/);
   assert.doesNotMatch(runner, /run\('pnpm', \['build'\], \{ CODEXIA_PROFILE: group/);
   assert.match(runner, /run-browser-shard\.mjs.*--prebuilt/);
 });
 test('all source checkouts bind exact PR head/main source without persisted credentials', () => {
   for (const job of Object.values(workflow.jobs)) {
-    const checkout = job.steps.find(step => step.uses === 'actions/checkout@v4');
+    const checkout = job.steps.find(step => step.uses === 'actions/checkout@v7.0.1');
     assert.equal(checkout.with.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
     assert.equal(checkout.with['persist-credentials'], false);
     const execution = job.steps.find(step => /node scripts\/(?:ci-impact|ci-group|certify-ci)\.mjs/.test(step.run ?? ''));
     assert.equal(execution.env.CODEXIA_CI_PLAN_PATH, '${{ runner.temp }}/ci-plan/ci-plan.json');
-    for (const step of job.steps.filter(step => step.uses === 'actions/download-artifact@v4' && step.with.name === 'ci-plan')) {
+    for (const step of job.steps.filter(step => step.uses === 'actions/download-artifact@v8.0.2' && step.with.name === 'ci-plan')) {
       assert.equal(step.with.path, '${{ runner.temp }}/ci-plan');
     }
   }

@@ -34,8 +34,8 @@
   "dependencies": {
     "@codexia/contracts": "workspace:*",
     "@codexia/migration": "workspace:*",
-    "yaml": "^2.8.1",
-    "jszip": "^3.10.1"
+    "yaml": "^2.9.1",
+    "jszip": "^3.10.2"
   },
   "codexiaModule": {
     "id": "publishing",

@@ -28,14 +28,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || 'main' }}
           persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 24.22.0
+          node-version: 24.22.3
       - name: Install the isolated audit tool
         run: |
           npm install --prefix "$RUNNER_TEMP/audit-tool" --ignore-scripts --no-audit --no-fund repomix@1.19.0 playwright-core@1.64.1
@@ -45,7 +45,7 @@ jobs:
         run: node --test scripts/audit/export.test.mjs
       - name: Restore previous verified HEAD exports
         if: github.event_name != 'pull_request'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ runner.temp }}/audit-cache
           key: audit-pages-v1-${{ hashFiles('scripts/audit/export.mjs', 'scripts/audit/repomix.config.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -59,18 +59,18 @@ jobs:
         run: node -e 'const m=require(process.argv[1]); const main=m.branches.find(x=>x.branch==="main"); if(!main || m.snapshots[main.sha].status==="blocked") throw new Error("Main audit snapshot is unavailable");' "$RUNNER_TEMP/audit-site/manifest.json"
       - name: Save verified HEAD exports
         if: github.event_name != 'pull_request'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6.1.0
         with:
           path: ${{ runner.temp }}/audit-cache
           key: audit-pages-v1-${{ hashFiles('scripts/audit/export.mjs', 'scripts/audit/repomix.config.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload Pages site
         if: github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v5.0.0
         with:
           path: ${{ runner.temp }}/audit-site
       - name: Upload non-publishing PR preview
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: repository-audit-preview
           path: ${{ runner.temp }}/audit-site
@@ -90,7 +90,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6.0.0
       - name: Deploy audit portal
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5.0.1

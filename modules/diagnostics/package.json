@@ -36,9 +36,9 @@
     "@codexia/contracts": "workspace:*",
     "@codexia/migration": "workspace:*",
     "@codexia/module-nlp": "workspace:*",
-    "yaml": "^2.8.1",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
+    "yaml": "^2.9.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "@codexia/module-runtime": "workspace:*"
   },
   "codexiaModule": {

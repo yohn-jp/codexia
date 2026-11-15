@@ -44,16 +44,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '24.22.0'
+          node-version: '24.22.3'
       - name: Prepare locked pnpm toolchain
         run: |
           corepack enable
-          corepack pnpm@12.10.1 --version
+          corepack pnpm@12.21.0 --version
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
       - name: Check deployment configuration consistency
@@ -65,13 +65,13 @@ jobs:
       - name: Check standalone Ansible configuration
         run: |
           python3 -m venv "$RUNNER_TEMP/codexia-ansible"
-          "$RUNNER_TEMP/codexia-ansible/bin/pip" install ansible-core==2.19.4
+          "$RUNNER_TEMP/codexia-ansible/bin/pip" install ansible-core==2.19.15
           "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i deploy/ansible/inventory.example.yml deploy/ansible/site.yml --syntax-check
           ANSIBLE_PLAYBOOK="$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" bash deploy/ansible/test-preflight.sh
       - name: Check all Terraform files
-        uses: hashicorp/setup-terraform@v4
+        uses: hashicorp/setup-terraform@v4.0.1
         with:
-          terraform_version: 1.17.1
+          terraform_version: 1.17.2
       - name: Validate Cloudflare Terraform
         working-directory: deploy/cloudflare/terraform
         env:

@@ -11,7 +11,7 @@ preflight_container="codexia-backend-smoke-preflight-${RANDOM}-${RANDOM}"
 verification_network="codexia-backend-smoke-net-${RANDOM}-${RANDOM}"
 token="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
 database_password="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(24).toString("hex"))')"
-database_image="docker.io/library/postgres:17-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994"
+database_image="docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536"
 secret_directory="$(mktemp -d "${TMPDIR:-/tmp}/codexia-backend-secrets.XXXXXX")"
 umask 077
 
