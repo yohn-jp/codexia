@@ -34,11 +34,10 @@ export function createPostgresEditorEvidenceAdapter(
       })());
       const anchors = evidence.anchors.flatMap(({ anchor, quote, mentions, assertions }) => {
         if (!quote) return [];
-        const block = blocks.find((item) => anchor.fromUtf16 >= item.from && anchor.fromUtf16 <= item.to)
-          ?? blocks[0];
-        if (!block) return [];
-        const confirmed = mentions.find((item) => item.link.status === "confirmed" && item.node?.status === "confirmed");
-        const target = confirmed?.node ? { id: confirmed.node.id, label: confirmed.node.name } : undefined;
+        const block = blocks.find((item) => anchor.fromUtf16 >= item.from && anchor.fromUtf16 < item.to && anchor.toUtf16 <= item.to);
+        const targets = mentions.flatMap(({ link, node }) => link.status === "confirmed" && node?.status === "confirmed"
+          ? [{ id: node.id, label: node.name }] : []);
+        const target = targets.length === 1 ? targets[0] : undefined;
         const candidates = mentions.flatMap(({ link, node }) =>
           link.status === "rejected" || !node || (link.status === "confirmed" && node.status === "confirmed")
             ? [] : [{ id: node.id, label: node.name }]);
@@ -50,11 +49,12 @@ export function createPostgresEditorEvidenceAdapter(
         }] : []);
         return [{
           id: anchor.id,
-          blockId: block.id,
+          blockId: block?.id ?? null,
           from: anchor.fromUtf16,
           to: anchor.toUtf16,
           quote,
           ...(target ? { target } : {}),
+          ...(targets.length ? { targets } : {}),
           ...(candidates.length ? { candidates } : {}),
           ...(assertionReferences.length ? { assertions: assertionReferences } : {}),
           revisionId: anchor.revisionId,
