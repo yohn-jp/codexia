@@ -4,9 +4,13 @@ on:
     paths:
       - 'scripts/audit/**'
       - '.github/workflows/repository-audit.yml'
+      - '.github/workflows/repository-audit-signal.yml'
   push:
     branches: [main]
   delete:
+  workflow_run:
+    workflows: ['Repository Audit Refresh Signal']
+    types: [completed]
   schedule:
     - cron: '7,22,37,52 * * * *'
   workflow_dispatch:
@@ -20,7 +24,7 @@ concurrency:
 
 jobs:
   pack:
-    if: github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name != 'delete' || github.event.ref_type == 'branch'))
+    if: github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name != 'delete' || github.event.ref_type == 'branch') && (github.event_name != 'workflow_run' || (github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.conclusion == 'success')))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
