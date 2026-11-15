@@ -95,7 +95,7 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
   }
 
   if (state === "database") return <>
-    <div inert={sessionBlocked} hidden={sessionBlocked}>
+    <div inert={sessionBlocked} hidden={sessionBlocked} style={{ display: sessionBlocked ? "none" : "contents" }}>
       <PersistenceWorkspace mode={mode} authorScope={authorScope} sessionBlocked={sessionBlocked} registerProtection={registerProtection} onSignOut={() => {
         if (accessMode) { window.location.assign("/cdn-cgi/access/logout"); return; }
         void api.logout().finally(() => { workspaceScopeRef.current = null; setState("signed-out"); });
