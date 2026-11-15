@@ -3,15 +3,12 @@ locals {
   origin_routes = jsondecode(file("${path.module}/../ui-routes.json")).originRoutes
 }
 
-resource "cloudflare_zero_trust_access_policy" "codexia" {
-  account_id = var.account_id
-  name       = "Allow selected Codexia identities"
-  decision   = "allow"
-  include = [
-    for email in sort(tolist(var.allowed_emails)) : {
-      email = { email = email }
-    }
-  ]
+# The account administrator owns the shared reusable policy.
+removed {
+  from = cloudflare_zero_trust_access_policy.codexia
+  lifecycle {
+    destroy = false
+  }
 }
 
 resource "cloudflare_zero_trust_access_application" "codexia" {
@@ -23,7 +20,7 @@ resource "cloudflare_zero_trust_access_application" "codexia" {
   auto_redirect_to_identity = length(var.allowed_idps) == 1
   session_duration          = "8h"
   policies = [{
-    id         = cloudflare_zero_trust_access_policy.codexia.id
+    id         = var.access_policy_id
     precedence = 1
   }]
 }
