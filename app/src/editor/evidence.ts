@@ -203,7 +203,7 @@ export function assertEditorEvidenceSnapshot(value: unknown, documentLength: num
       || (item.blockId !== null && (typeof item.blockId !== "string" || item.blockId.length === 0))
       || !Number.isInteger(item.from) || !Number.isInteger(item.to)
       || (item.from as number) < 0 || (item.to as number) < (item.from as number)
-      || typeof item.quote !== "string" || item.quote.length === 0
+      || typeof item.quote !== "string" || (item.quote.length === 0 && item.status !== "orphaned" && item.status !== "revision_conflict")
       || typeof item.revisionId !== "string" || item.revisionId.length === 0 || typeof item.status !== "string" || !statuses.has(item.status)
       || ((item.to as number) === (item.from as number) && item.status !== "orphaned")
       || (item.target !== undefined && !validKnowledgeReference(item.target))
@@ -452,15 +452,15 @@ export function initializeDocumentEvidence(
     : parseMarkdownBlocks(text, makeId);
   const anchors = (snapshot?.anchors ?? []).flatMap((anchor) => {
     if (!Number.isInteger(anchor.from) || !Number.isInteger(anchor.to) || anchor.from < 0 || anchor.to < anchor.from
-      || (anchor.to === anchor.from && anchor.status !== "orphaned")) return [];
+      || (anchor.to === anchor.from && anchor.status !== "orphaned" && anchor.status !== "revision_conflict")) return [];
     const inRange = anchor.to <= text.length;
     const quoteMatches = inRange && text.slice(anchor.from, anchor.to) === anchor.quote;
     const revisionMatches = anchor.revisionId === revisionId && snapshot?.revisionId === revisionId;
     const persistedBlock = blocks.find((block) => block.id === anchor.blockId);
-    const actualBlock = inRange ? blockAt(blocks, anchor.from, anchor.to) : undefined;
+    const actualBlock = inRange && anchor.status !== "orphaned" && anchor.status !== "revision_conflict" ? blockAt(blocks, anchor.from, anchor.to) : undefined;
     return [{
       ...anchor,
-      blockId: persistedBlock && inRange && anchor.from >= persistedBlock.from && anchor.from < persistedBlock.to && anchor.to <= persistedBlock.to
+      blockId: persistedBlock && actualBlock && inRange && anchor.from >= persistedBlock.from && anchor.from < persistedBlock.to && anchor.to <= persistedBlock.to
         ? persistedBlock.id : actualBlock?.id ?? null,
       status: sourceMatches && revisionMatches && quoteMatches ? anchor.status
         : anchor.status === "orphaned" ? "orphaned" as const : "revision_conflict" as const,
@@ -521,7 +521,7 @@ export function trackTextChanges(
     const from = mapTextOffset(anchor.from, changes, overlapping ? -1 : 1);
     const to = mapTextOffset(anchor.to, changes, overlapping ? 1 : -1);
     if (deleted || to <= from) {
-      return { ...anchor, from, to: from, status: "orphaned" as const };
+      return { ...anchor, from, to: from, blockId: null, status: "orphaned" as const };
     }
     const quoteMatches = nextText.slice(from, to) === anchor.quote;
     const status = overlapping || !quoteMatches ? "needs_review" as const : anchor.status;
