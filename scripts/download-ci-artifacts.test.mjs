@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { downloadArtifact, extractJsonEntry, extractProfileJson, selectedArtifacts } from './download-ci-artifacts.mjs';
+import { downloadArtifact, extractArtifactFiles, extractJsonEntry, extractProfileJson, selectedArtifacts, validateZipEntryPath } from './download-ci-artifacts.mjs';
 
 const identity = { runId: '123', sourceSha: 'a'.repeat(40) };
 const bytes = Buffer.from('archive');
@@ -74,4 +74,32 @@ test('profile ZIP extracts with Node alone, rejects corruption and ignores untru
     assert.throws(()=>extractProfileJson(broken),/central directory/);
     assert.throws(()=>extractProfileJson(bytes.subarray(0,bytes.length-8)));
   }
+});
+
+test('verified frontend ZIP extraction writes only safe regular files into an empty destination',async t=>{
+  const dir=await mkdtemp(path.join(tmpdir(),'codexia-frontend-zip-'));
+  t.after(()=>rm(dir,{recursive:true,force:true}));
+  await mkdir(path.join(dir,'desktop','assets'),{recursive:true});
+  await writeFile(path.join(dir,'desktop','update-identity.json'),'{}');
+  await writeFile(path.join(dir,'desktop','assets','app.js'),'export {};');
+  execFileSync('zip',['-q','-r','frontend.zip','desktop'],{cwd:dir});
+  const archive=await readFile(path.join(dir,'frontend.zip'));
+  const destination=path.join(dir,'out');
+  const written=await extractArtifactFiles(archive,destination);
+  assert.deepEqual(written.sort(),['desktop/assets/app.js','desktop/update-identity.json']);
+  assert.equal(await readFile(path.join(destination,'desktop','assets','app.js'),'utf8'),'export {};');
+  await assert.rejects(extractArtifactFiles(archive,destination),/must be empty/);
+  for(const name of ['../outside.txt','/etc/passwd','C:/outside.txt','desktop\\..\\outside.txt','desktop//empty.txt']){
+    assert.throws(()=>validateZipEntryPath(name),/Unsafe ZIP entry path/);
+  }
+});
+
+test('frontend ZIP extraction rejects symbolic links',async t=>{
+  const dir=await mkdtemp(path.join(tmpdir(),'codexia-frontend-link-'));
+  t.after(()=>rm(dir,{recursive:true,force:true}));
+  await writeFile(path.join(dir,'target.js'),'export {};');
+  await symlink('target.js',path.join(dir,'linked.js'));
+  execFileSync('zip',['-q','-y','frontend.zip','linked.js'],{cwd:dir});
+  const archive=await readFile(path.join(dir,'frontend.zip'));
+  await assert.rejects(extractArtifactFiles(archive,path.join(dir,'out')),/symlinks and special files/);
 });
