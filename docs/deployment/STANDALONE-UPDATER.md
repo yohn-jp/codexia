@@ -4,7 +4,7 @@ The rootless host controller is opt-in. It is not a database migration tool and 
  
 ## Topology and bootstrap
 
-For declarative adoption of an existing VM, use [Infrastructure as code](IAC.md). The manual procedure below remains the operational contract and recovery reference.
+[Infrastructure as code](IAC.md) owns the VM desired-state and lifecycle contract. The updater remains the exclusive writer/route/journal authority; Ansible must invoke its locked operations. The manual procedure below is the transitional operational contract and emergency recovery reference until the corresponding Ansible stages are implemented and accepted.
  
 - Install the verified source tree under /opt/codexia-updater, owned by the deployment operator, with Node.js 22+, Podman/Quadlet, systemd user services, and flock.
 - Retain the existing codexia-db service, codexia and codexia-data networks, and codexia-data/history volumes. Provision codexia_preflight using deploy/updater/provision-preflight-role.sql as a dedicated non-owner reader. Set its password via a protected psql variable, and create the Podman secret codexia-postgres-preflight-password. Never reuse the application writer password or expose the preflight role externally. Verify read-only privileges and that it cannot write persistent canon tables.
