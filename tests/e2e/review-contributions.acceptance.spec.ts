@@ -136,18 +136,18 @@ function actionResponse(response: { url(): string; request(): { method(): string
 }
 
 async function openWorkspaceContributionPanel(page: Page, id: string, title: string): Promise<ReturnType<Page["locator"]>> {
-  const toolbar = page.getByRole("toolbar", { name: "Workspace layout controls" });
-  await toolbar.getByRole("button", { name: "Research", exact: true }).click();
-  await page.getByRole("tablist", { name: "Panel tabs" }).getByRole("tab", { name: title, exact: true }).click();
+  const toolbar = page.getByRole("toolbar", { name: "ワークスペース配置" });
+  await toolbar.getByRole("button", { name: "調査", exact: true }).click();
+  await page.getByRole("tablist", { name: "パネル" }).getByRole("tab", { name: title, exact: true }).click();
   const panel = page.locator('[data-workspace-panel="module:' + id + '"]');
   await expect(panel).toBeVisible();
   return panel;
 }
 
 async function openWorkspaceReviewPanel(page: Page): Promise<void> {
-  const toolbar = page.getByRole("toolbar", { name: "Workspace layout controls" });
-  await toolbar.getByRole("button", { name: "Review", exact: true }).click();
-  await page.getByRole("tablist", { name: "Panel tabs" }).getByRole("tab", { name: "提案レビュー", exact: true }).click();
+  const toolbar = page.getByRole("toolbar", { name: "ワークスペース配置" });
+  await toolbar.getByRole("button", { name: "レビュー", exact: true }).click();
+  await page.getByRole("tablist", { name: "パネル" }).getByRole("tab", { name: "提案レビュー", exact: true }).click();
   await expect(page.locator('[data-workspace-panel="review"]')).toBeVisible();
 }
 
@@ -254,7 +254,7 @@ test("full profile renders Story and Speaker review queues and turns both author
     expect(proposedFiles.get(scenePath)).not.toMatch(/^speakerOverrides:/mu);
     expect(proposedFiles.has("meta/scriptorium/modules/speaker/corrections.jsonl")).toBe(false);
 
-    await page.getByRole("tablist", { name: "Panel tabs" }).getByRole("tab", { name: "作品と構成", exact: true }).click();
+    await page.getByRole("tablist", { name: "パネル" }).getByRole("tab", { name: "作品と構成", exact: true }).click();
     await page.locator(".pg-document-list")
       .getByRole("button", { name: /Review Scene/u }).click();
     await expect(page.getByRole("heading", { name: "Review Scene" })).toBeVisible();

@@ -21,6 +21,7 @@ import "@ionic/react/css/typography.css";
 import "./mobile.css";
 import "../editorial.css";
 import "../authoring.css";
+import "./mobile-authoring.css";
 
 export type MobileView = "library" | "writing" | "inspection" | "tools" | "settings";
 type ReferenceSheet = "outline" | "inspector";
@@ -55,8 +56,7 @@ const VIEWS: ReadonlyArray<{ id: MobileView; label: string; title: string; mark:
   { id: "library", label: "作品", title: "作品ライブラリ", mark: "▤" },
   { id: "writing", label: "書く", title: "執筆・読書", mark: "✎" },
   { id: "inspection", label: "知識", title: "知識と状態", mark: "⌕" },
-  { id: "tools", label: "道具", title: "レビューと道具", mark: "◇" },
-  { id: "settings", label: "設定", title: "設定", mark: "⚙" },
+  { id: "tools", label: "レビュー", title: "レビューと道具", mark: "◇" },
 ];
 
 const MOBILE_VIEW_PARAM = "view";
@@ -398,7 +398,7 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
   const title = VIEWS.find((view) => view.id === activeView)?.title ?? "Codexia";
   const mobileTitle = activeView === "writing" && documentTitle ? documentTitle : title;
   return (
-    <IonApp className={"mobile-shell" + (writingKeyboardVisible ? " mobile-shell-keyboard-open" : "")}>
+    <IonApp className={`mobile-shell mobile-shell-view-${activeView}${writingKeyboardVisible ? " mobile-shell-keyboard-open" : ""}`}>
       <IonPage className="mobile-shell-page" data-mobile-view={activeView}>
         <IonHeader className="mobile-shell-ion-header">
           <div className="mobile-shell-identity-bar">
@@ -411,9 +411,24 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
               aria-label={activeView === "settings" ? "執筆画面へ戻る" : "設定を開く"}
               aria-current={activeView === "settings" ? "page" : undefined}
               onClick={() => { void navigate(activeView === "settings" ? "writing" : "settings"); }}>
-              <span aria-hidden="true">{activeView === "settings" ? "✎" : "⚙"}</span>
-              <span>{activeView === "settings" ? "執筆" : "設定"}</span>
+              <span className="mobile-shell-settings-symbol" aria-hidden="true">
+                {activeView === "settings" ? (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m15.8 5.2 3 3M4 20l4.3-1 9.2-9.2a2.1 2.1 0 0 0-3-3L5.3 16 4 20Z" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 8.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2Z" />
+                    <path d="M19.2 13.2v-2.4l-2-.4a5.4 5.4 0 0 0-.7-1.6l1.1-1.7-1.7-1.7-1.7 1.1a5.4 5.4 0 0 0-1.6-.7l-.4-2h-2.4l-.4 2a5.4 5.4 0 0 0-1.6.7L6.1 5.4 4.4 7.1l1.1 1.7a5.4 5.4 0 0 0-.7 1.6l-2 .4v2.4l2 .4a5.4 5.4 0 0 0 .7 1.6l-1.1 1.7 1.7 1.7 1.7-1.1a5.4 5.4 0 0 0 1.6.7l.4 2h2.4l.4-2a5.4 5.4 0 0 0 1.6-.7l1.7 1.1 1.7-1.7-1.1-1.7a5.4 5.4 0 0 0 .7-1.6l2-.4Z" />
+                  </svg>
+                )}
+              </span>
+              <span className="mobile-shell-settings-label">{activeView === "settings" ? "執筆" : "設定"}</span>
             </IonButton>
+            {activeView === "writing" && desktopDurability ? <span className="mobile-shell-protection" data-state={desktopDurability} aria-label="原稿のPostgreSQL保存状態">
+              <span aria-hidden="true" />
+              {{ draft: "未保存", saving: "保存中", uncertain: "要確認", saved: "保存済" }[desktopDurability]}
+            </span> : null}
           </div>
           <div className="mobile-shell-shared-header" data-active-view={activeView} aria-label="作業領域とアカウント設定">{header}</div>
         </IonHeader>
@@ -490,23 +505,25 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
           </div>}
         </IonContent>
 
-        <div className="mobile-shell-status" role="region" aria-label="保存と回復の状態">
-          {renderStatus ? renderStatus(switchError) : <>
-            {switchError && <p className="mobile-shell-switch-error" role="alert">{switchError}</p>}
-            {status}
-          </>}
-        </div>
         <IonFooter className="mobile-shell-footer">
-          {hasWritingContext ? (
+          <div className="mobile-shell-status" role="region" aria-label="保存と回復の状態">
+            {renderStatus ? renderStatus(switchError) : <>
+              {switchError && <p className="mobile-shell-switch-error" role="alert">{switchError}</p>}
+              {status}
+            </>}
+          </div>
+          {activeView === "writing" ? (
             <div className="mobile-shell-writing-accessories" aria-label="執筆中の参照">
-              <span className="mobile-shell-accessories-label" aria-hidden="true">REFERENCES</span>
-              <button type="button" className="mobile-shell-accessory-button" disabled={openingReference}
+              <span className="mobile-shell-accessories-label" aria-hidden="true">参照</span>
+              <button type="button" className="mobile-shell-accessory-button" disabled={openingReference || !hasWritingContext}
+                title={!hasWritingContext ? "作品を開くと利用できます" : undefined}
                 onClick={(event) => { void openReferenceSheet("outline", event.currentTarget); }}>
-                <span aria-hidden="true">☷</span> 構成を参照
+                <span aria-hidden="true">☷</span> 構成
               </button>
-              <button type="button" className="mobile-shell-accessory-button" disabled={openingReference}
+              <button type="button" className="mobile-shell-accessory-button" disabled={openingReference || !hasWritingContext}
+                title={!hasWritingContext ? "作品を開くと利用できます" : undefined}
                 onClick={(event) => { void openReferenceSheet("inspector", event.currentTarget); }}>
-                <span aria-hidden="true">◎</span> 保存状態を参照
+                <span aria-hidden="true">◎</span> 知識・保存
               </button>
             </div>
           ) : null}

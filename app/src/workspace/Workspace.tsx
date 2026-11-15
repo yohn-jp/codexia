@@ -132,7 +132,7 @@ function PanelFrame({ panelId, panel, mode, layoutEditing, canHide, onHide, onDr
             draggable
             aria-hidden="true"
             onDragStart={dragStart}
-            title={`Drag ${title} to move`}
+            title={`${title}をドラッグして移動`}
           >⠿</div>
         ) : null}
         <h2 id={domId("st-workspace-heading", panelId)}>{title}</h2>
@@ -148,15 +148,15 @@ function PanelFrame({ panelId, panel, mode, layoutEditing, canHide, onHide, onDr
           </div>
         ) : null}
         {mode === "desktop" ? <div className="st-workspace-frame-actions">
-          <button type="button" className="st-workspace-float-button" title={`Float ${title}`}
-            aria-label={`Float ${title}`} disabled={!canHide} onClick={() => onFloat(panelId)}>◱</button>
-          <button type="button" className="st-workspace-maximize" title={maximized ? `Restore ${title}` : `Maximize ${title}`}
-            aria-label={maximized ? `Restore ${title}` : `Maximize ${title}`} onClick={() => onMaximize(panelId)}>{maximized ? "↙" : "⛶"}</button>
+          <button type="button" className="st-workspace-float-button" title={`${title}を別ウィンドウにする`}
+            aria-label={`${title}を別ウィンドウにする`} disabled={!canHide} onClick={() => onFloat(panelId)}>◱</button>
+          <button type="button" className="st-workspace-maximize" title={maximized ? `${title}を元に戻す` : `${title}を最大化`}
+            aria-label={maximized ? `${title}を元に戻す` : `${title}を最大化`} onClick={() => onMaximize(panelId)}>{maximized ? "↙" : "⛶"}</button>
           {layoutEditing ? <button
             className="st-workspace-hide"
             type="button"
-            aria-label={`Hide ${title}`}
-            title={`Hide ${title}`}
+            aria-label={`${title}を隠す`}
+            title={`${title}を隠す`}
             disabled={!canHide}
             onClick={() => onHide(panelId)}
           >×</button> : null}
@@ -195,7 +195,7 @@ function WorkspaceTree({ node, mode, layoutEditing, depth, catalog, visibleCount
   if (node.type === "stack") {
     return (
       <div className="st-workspace-stack">
-        <div className="st-workspace-tabs" role="tablist" aria-label="Panel tabs">
+        <div className="st-workspace-tabs" role="tablist" aria-label="パネル">
           {node.children.map((child) => {
             const panel = catalog.get(child.panelId);
             const title = panel?.title ?? child.panelId;
@@ -323,7 +323,7 @@ function FloatingFrame({ record, panel, onMove, onDock, onMaximize, maximized }:
   return <section className={"st-workspace-float" + (maximized ? " is-maximized" : "")}
     data-floating-panel={record.panelId} aria-label={panel?.title ?? record.panelId}
     style={{left:record.left,top:record.top,width:record.width,height:record.height}}>
-    <div className="st-workspace-float-handle" role="toolbar" aria-label="Floating panel controls" tabIndex={0}
+    <div className="st-workspace-float-handle" role="toolbar" aria-label="フローティングパネル操作" tabIndex={0}
       onPointerDown={(event) => {
         if (event.target !== event.currentTarget || event.button !== 0) return;
         dragging.current={x:event.clientX,y:event.clientY,left:record.left,top:record.top};
@@ -403,7 +403,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
     }
   }, [visibleIds, mobilePanelId, moveSource, moveTarget]);
 
-  const changeLayout = useCallback(async (change: (current: WorkspaceLayout) => WorkspaceLayout, success = "Layout updated. Save layout to keep it.", runPreflight = true, isCurrent: () => boolean = () => true): Promise<boolean> => {
+  const changeLayout = useCallback(async (change: (current: WorkspaceLayout) => WorkspaceLayout, success = "配置を変更しました。次回も使うには配置を保存してください。", runPreflight = true, isCurrent: () => boolean = () => true): Promise<boolean> => {
     if (changingRef.current) return false;
     changingRef.current = true;
     setChanging(true);
@@ -412,14 +412,14 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
       const allowed = runPreflight && beforeLayoutChange ? await beforeLayoutChange() : true;
       if (!isCurrent()) return false;
       if (!allowed) {
-        setMessage("The editor could not confirm its recovery state. The current panel layout is unchanged.");
+        setMessage("回復Journalの状態を確認できないため、パネル配置は変更していません。");
         return false;
       }
       setLayout((current) => isCurrent() ? change(current) : current);
       setMessage(success);
       return true;
     } catch (error) {
-      setMessage(error instanceof Error && error.message ? error.message : "The editor could not be prepared for a panel change.");
+      setMessage(error instanceof Error && error.message ? error.message : "入力状態を保護できず、パネル配置を変更できませんでした。");
       return false;
     } finally {
       changingRef.current = false;
@@ -439,7 +439,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
     const isRouteTransition = routeTransitionSequence === sequence;
     const isCurrent = () => isPanelRequestCurrent ? isPanelRequestCurrent(sequence) : true;
     if (!catalog.has(panelId)) {
-      setMessage(`The ${panelId} panel is not available.`);
+      setMessage(`${panelId}パネルを利用できません。`);
       if (isRouteTransition) onPanelRequestResult?.(sequence, false);
       return;
     }
@@ -458,7 +458,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
       const change = visibleIds.includes(panelId)
         ? (current: WorkspaceLayout) => activateWorkspacePanel(current, panelId)
         : (current: WorkspaceLayout) => showWorkspacePanel(current, panelId);
-      const allowed = await changeLayout(change, "Panel opened. Save layout to keep it.", true, isCurrent);
+      const allowed = await changeLayout(change, "パネルを開きました。次回も使うには配置を保存してください。", true, isCurrent);
       if (!isCurrent()) {
         if (isRouteTransition) onPanelRequestResult?.(sequence, false);
         return;
@@ -509,7 +509,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   }, [committingPanelRequest, scope, mode, mobilePanelId, visibleIds, onPanelRequestResult]);
 
   const changePreset = (preset: Exclude<WorkspacePreset, "custom">): void => {
-    void changeLayout(() => createWorkspacePreset(preset, panelIds), `${presetTitle(preset)} preset applied. Save layout to keep it.`)
+    void changeLayout(() => createWorkspacePreset(preset, panelIds), `${presetTitle(preset)}の作業面を開きました。次回も使うには配置を保存してください。`)
       .then((allowed) => { if (allowed) { setFloating([]); setMaximizedPanelId(null); onActivePanelChange?.("editor"); } });
   };
 
@@ -526,9 +526,9 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
     }) : false;
     if (saved) {
       setPersistenceState("valid");
-      setMessage("Layout saved on this device.");
+      setMessage("この端末に配置を保存しました。");
     } else {
-      setMessage("Layout could not be saved in this browser.");
+      setMessage("このブラウザーに配置を保存できませんでした。");
     }
   };
 
@@ -545,7 +545,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   };
   const floatPanel = (panelId: string): void => {
     if (mode !== "desktop" || !visibleIds.includes(panelId) || visibleIds.length < 2) return;
-    void changeLayout((current) => hideWorkspacePanel(current, panelId), "Panel floated. Save layout to keep it.")
+    void changeLayout((current) => hideWorkspacePanel(current, panelId), "パネルを別ウィンドウにしました。次回も使うには配置を保存してください。")
       .then((allowed) => {
         if (!allowed) return;
         setFloating((current) => current.concat({
@@ -555,7 +555,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
       });
   };
   const dockFloatingPanel = (panelId: string): void => {
-    void changeLayout((current) => showWorkspacePanel(current, panelId), "Panel docked. Save layout to keep it.")
+    void changeLayout((current) => showWorkspacePanel(current, panelId), "パネルを配置に戻しました。次回も使うには配置を保存してください。")
       .then((allowed) => { if (allowed) setFloating((current) => current.filter((item) => item.panelId !== panelId)); });
   };
   const moveFloatingPanel = (panelId: string, left: number, top: number): void => {
@@ -571,7 +571,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   };
 
   const activateTab = (panelId: string): Promise<boolean> => {
-    return changeLayout((current) => activateWorkspacePanel(current, panelId), "Panel selected. Save layout to keep it.")
+    return changeLayout((current) => activateWorkspacePanel(current, panelId), "パネルを選びました。次回も使うには配置を保存してください。")
       .then((allowed) => { if (allowed) onActivePanelChange?.(panelId); return allowed; });
   };
 
@@ -584,13 +584,13 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
       try {
         const allowed = beforeLayoutChange ? await beforeLayoutChange() : true;
         if (!allowed) {
-          setMessage("The editor could not confirm its recovery state. The current panel is unchanged.");
+          setMessage("回復Journalの状態を確認できないため、パネルは変更していません。");
           return false;
         }
         setMobilePanelId(panelId);
         return true;
       } catch (error) {
-        setMessage(error instanceof Error && error.message ? error.message : "The editor could not be prepared for a panel change.");
+        setMessage(error instanceof Error && error.message ? error.message : "入力状態を保護できず、パネルを変更できませんでした。");
         return false;
       } finally {
         changingRef.current = false;
@@ -636,7 +636,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
       : (current: WorkspaceLayout) => showWorkspacePanel(current, selectedPanelId);
     const currentRouteKey = routeSelectionKey ?? selectionKey;
     const isCurrent = () => isRouteSelectionCurrent ? isRouteSelectionCurrent(currentRouteKey) : routeSelectionRef.current === selectionKey;
-    void changeLayout(change, "Panel opened for this view. Save layout to keep it.", true, isCurrent)
+    void changeLayout(change, "この画面のパネルを開きました。次回も使うには配置を保存してください。", true, isCurrent)
       .then((allowed) => {
         if (!isCurrent()) {
           onRouteSelectionResult?.(currentRouteKey, false);
@@ -666,19 +666,19 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
 
   const titleOf = (panelId: string): string => catalog.get(panelId)?.title ?? panelId;
   const storageLabel = persistenceState === "valid"
-    ? "Saved layout loaded."
+    ? "保存済みの配置を読み込みました。"
     : persistenceState === "invalid"
-      ? "A saved layout is invalid. The Writing preset is open; saving will replace it."
+      ? "保存済みの配置を読み取れません。執筆の初期配置を表示中です。配置を保存すると置き換わります。"
       : persistenceState === "unavailable"
-        ? "Browser storage is unavailable."
-        : "Layout changes are saved only when you choose Save layout.";
+        ? "ブラウザーの保存領域を利用できません。"
+        : "配置の変更は「配置を保存」を選ぶまで記録されません。";
   const workspaceToolbar = (
-    <div className="st-workspace-toolbar" role="toolbar" aria-label="Workspace layout controls">
-      <div className="st-workspace-presets" aria-label="Workspace presets">
-        <span className="st-workspace-preset-label">配置プリセット</span>
-        <button type="button" aria-pressed={layout.preset === "writing"} onClick={() => changePreset("writing")} disabled={changing}>Writing</button>
-        <button type="button" aria-pressed={layout.preset === "research"} onClick={() => changePreset("research")} disabled={changing}>Research</button>
-        <button type="button" aria-pressed={layout.preset === "review"} onClick={() => changePreset("review")} disabled={changing}>Review</button>
+    <div className="st-workspace-toolbar" role="toolbar" aria-label="ワークスペース配置">
+      <div className="st-workspace-presets" aria-label="作業面">
+        <span className="st-workspace-preset-label">作業面</span>
+        <button type="button" aria-label="執筆" aria-pressed={layout.preset === "writing"} onClick={() => changePreset("writing")} disabled={changing}>執筆</button>
+        <button type="button" aria-label="調査" aria-pressed={layout.preset === "research"} onClick={() => changePreset("research")} disabled={changing}>調査</button>
+        <button type="button" aria-label="レビュー" aria-pressed={layout.preset === "review"} onClick={() => changePreset("review")} disabled={changing}>レビュー</button>
       </div>
       <details
         className="st-workspace-panel-menu"
@@ -687,7 +687,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
           if (mode === "desktop" && event.currentTarget.open) setLayoutEditing(false);
         }}
       >
-        <summary>Panels</summary>
+        <summary aria-label="パネル">パネル</summary>
         <div className="st-workspace-panel-menu-list">
           {panels.map((panel) => {
             const visible = visibleIds.includes(panel.id);
@@ -696,16 +696,16 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
               <div className="st-workspace-panel-menu-item" key={panel.id}>
                 <span>{panel.title}</span>
                 <button type="button" disabled={changing || (visible && visibleIds.length <= 1)} onClick={() => visible ? hidePanel(panel.id) : showPanel(panel.id)}>
-                  {isFloating ? `Dock ${panel.title}` : visible ? `Hide ${panel.title}` : `Show ${panel.title}`}
+                  {isFloating ? `${panel.title}を配置に戻す` : visible ? `${panel.title}を隠す` : `${panel.title}を表示`}
                 </button>
                 {mode === "desktop" && visible && visibleIds.length > 1
-                  ? <button type="button" disabled={changing} onClick={() => floatPanel(panel.id)}>{`Float ${panel.title}`}</button> : null}
+                  ? <button type="button" disabled={changing} onClick={() => floatPanel(panel.id)}>{`${panel.title}を別ウィンドウにする`}</button> : null}
               </div>
             );
           })}
         </div>
       </details>
-      <button className="st-workspace-save" type="button" onClick={save} disabled={changing}>Save layout</button>
+      <button className="st-workspace-save" type="button" aria-label="配置を保存" onClick={save} disabled={changing}>配置を保存</button>
     </div>
   );
   const layoutMoveMenu = (
@@ -718,31 +718,31 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
         if (open && panelMenuRef.current?.open) panelMenuRef.current.open = false;
       }}
     >
-      <summary>配置を編集</summary>
-      <div className="st-workspace-move-controls" aria-label="Move panel controls">
+      <summary>レイアウト</summary>
+      <div className="st-workspace-move-controls" aria-label="パネルを移動">
         <label>
-          Panel to move
+          <span>移動するパネル</span>
           <select value={moveSource} onChange={(event) => setMoveSource(event.target.value)} disabled={changing || visibleIds.length < 2}>
             {visibleIds.map((id) => <option value={id} key={id}>{titleOf(id)}</option>)}
           </select>
         </label>
         <label>
-          Move next to
+          <span>移動先のパネル</span>
           <select value={moveTarget} onChange={(event) => setMoveTarget(event.target.value)} disabled={changing || visibleIds.length < 2}>
             {visibleIds.filter((id) => id !== moveSource).map((id) => <option value={id} key={id}>{titleOf(id)}</option>)}
           </select>
         </label>
         <label>
-          Placement
+          <span>配置</span>
           <select value={placement} onChange={(event) => setPlacement(event.target.value as Placement)} disabled={changing}>
-            <option value="tab">Tab</option>
-            <option value="left">Left</option>
-            <option value="right">Right</option>
-            <option value="top">Top</option>
-            <option value="bottom">Bottom</option>
+            <option value="tab">同じタブ</option>
+            <option value="left">左</option>
+            <option value="right">右</option>
+            <option value="top">上</option>
+            <option value="bottom">下</option>
           </select>
         </label>
-        <button type="button" disabled={changing || !moveSource || !moveTarget} onClick={() => movePanel(moveSource, moveTarget, placement)}>Move panel</button>
+        <button type="button" aria-label="パネルを移動" disabled={changing || !moveSource || !moveTarget} onClick={() => movePanel(moveSource, moveTarget, placement)}>移動</button>
       </div>
     </details>
   );
@@ -759,7 +759,7 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
       data-preset={layout.preset}
       data-layout-editing={mode === "desktop" && layoutEditing ? "true" : "false"}
       data-maximized-panel={maximizedPanelId ?? undefined}
-      aria-label="Composable workspace"
+      aria-label="可変ワークスペース"
       onFocusCapture={(event) => noteActivePanel(event.target)}
       onPointerDownCapture={(event) => noteActivePanel(event.target)}
     >
@@ -778,11 +778,11 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
 
       {persistenceState === "invalid" ? <p className="st-workspace-warning" role="alert">{storageLabel}</p> : null}
       {message ? <p className="st-workspace-message" tabIndex={0} role="status" aria-live="polite">{message}</p> : null}
-      {!message && persistenceState !== "invalid" ? <p className="st-workspace-storage-state">{storageLabel}</p> : null}
+      {!message && persistenceState === "unavailable" ? <p className="st-workspace-storage-state" role="status">{storageLabel}</p> : null}
 
       {mode === "mobile" ? (
         <div className="st-workspace-mobile-layout">
-          <nav className="st-workspace-mobile-tabs" role="tablist" aria-label="Workspace panels">
+          <nav className="st-workspace-mobile-tabs" role="tablist" aria-label="パネル">
             {visibleIds.map((panelId) => {
               const selected = panelId === mobilePanelId;
               const tabId = domId("st-workspace-mobile-tab", panelId);

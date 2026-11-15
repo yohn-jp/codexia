@@ -25,9 +25,9 @@ test("presets are valid editable trees with the expected panel selections", () =
 
   assert.equal(validateWorkspaceLayout(writing), true);
   assert.equal(writing.root.type, "split");
-  assert.deepEqual(visiblePanelIds(writing.root), ["outline", "editor", "inspector"]);
-  assert.deepEqual(writing.root.type === "split" ? writing.root.sizes : [], [18, 60, 22]);
-  assert.deepEqual(writing.hiddenPanelIds, ["history", "review", "module:terms"]);
+  assert.deepEqual(visiblePanelIds(writing.root), ["outline", "editor"]);
+  assert.deepEqual(writing.root.type === "split" ? writing.root.sizes : [], [20, 80]);
+  assert.deepEqual(writing.hiddenPanelIds, ["inspector", "history", "review", "module:terms"]);
   assert.equal(research.root.type, "split");
   assert.deepEqual(visiblePanelIds(research.root), ["editor", "outline", "inspector", "module:terms"]);
   assert.deepEqual(research.root.type === "split" ? research.root.sizes : [], [68, 32]);
@@ -136,9 +136,9 @@ test("resizing updates only the addressed split and keeps percentages normalized
   assert.equal(initial.root.type, "split");
   if (initial.root.type !== "split") return;
   assert.equal(resizeWorkspaceSplit(initial, initial.root.id, initial.root.sizes), initial);
-  assert.equal(resizeWorkspaceSplit(initial, "split-missing", [48, 32, 20]), initial);
-  const resized = resizeWorkspaceSplit(initial, initial.root.id, [48, 32, 20]);
-  assert.deepEqual(resized.root.type === "split" ? resized.root.sizes : [], [48, 32, 20]);
+  assert.equal(resizeWorkspaceSplit(initial, "split-missing", [60, 40]), initial);
+  const resized = resizeWorkspaceSplit(initial, initial.root.id, [60, 40]);
+  assert.deepEqual(resized.root.type === "split" ? resized.root.sizes : [], [60, 40]);
   assert.equal(resized.preset, "custom");
   assert.equal(validateWorkspaceLayout(resized), true);
 });

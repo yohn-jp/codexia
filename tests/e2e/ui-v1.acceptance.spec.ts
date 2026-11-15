@@ -169,6 +169,7 @@ test("UX canon keeps the manuscript visible and stable through PostgreSQL save r
   await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
   await expect(editor(page)).toHaveAttribute("data-original-editor", "retained");
   await editor(page).press("Control+A");
+  await page.locator(".pg-editor-command-menu > summary").click();
   await page.getByRole("button", { name: "選択範囲をText Anchorにする" }).click();
   await expect(page.locator(".pg-notice")).toContainText("Text Anchorを保存しました");
 });
@@ -248,7 +249,7 @@ test("desktop author can download a portable work and import it without replacin
     name: "portable-work.json", mimeType: "application/json", buffer: Buffer.from(json),
   });
   await expect(page.getByText("新しい作品としてJSONを取り込みました。", { exact: false })).toBeVisible();
-  const currentProject = await page.getByLabel("開く作品").inputValue();
+  const currentProject = await page.getByLabel("作品", { exact: true }).inputValue();
   expect(currentProject).not.toBe(project.id);
   const imported = await page.request.get("/api/v1/persistence/projects/" + currentProject + "/documents");
   expect(imported.ok()).toBe(true);

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { createWritingFixture } from "./postgres-fixture";
+import { createWritingFixture, openRevisionHistory } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
@@ -55,13 +55,14 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await page.getByLabel("文書を追加").fill(documentTitle);
   await page.getByRole("button", { name: "文書を作成" }).click();
 
-  const editor = page.getByRole("textbox", { name: "原稿 Markdown" });
+  const editor = page.getByRole("textbox", { name: "本文", exact: true });
   await expect(editor).toBeVisible();
   await editor.fill(firstDraft);
   await expect(page.getByText("PostgreSQLへ保存済み")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("IndexedDB回復Journalに保存済み")).toBeVisible();
 
   await editor.press("Control+A");
+  await page.locator(".pg-editor-command-menu > summary").click();
   await page.getByRole("button", { name: "選択範囲をText Anchorにする" }).click();
   await expect(page.locator(".pg-notice")).toContainText("Text Anchorを保存しました");
   await page.getByRole("button", { name: "パネル：文書と保存状態", exact: true }).click();
@@ -100,7 +101,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await expect.poll(readEditor).toBe(firstDraft);
 
 
-  await page.getByRole("button", { name: "Revision履歴" }).click();
+  await openRevisionHistory(page);
   const initialRevision = page.locator(".pg-revisions article").filter({ hasText: "（空の原稿）" });
   await expect(initialRevision).toBeVisible();
   await initialRevision.getByRole("button", { name: "このRevisionを新しいRevisionとして復元" }).click();
@@ -122,11 +123,11 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   });
   await otherPage.goto("/desktop/?store=postgres");
   await expect(otherPage.getByRole("heading", { name: "Database workspace" })).toBeVisible();
-  await otherPage.getByLabel("開く作品").selectOption({ label: projectTitle });
+  await otherPage.getByLabel("作品", { exact: true }).selectOption({ label: projectTitle });
   const otherDocument = otherPage.locator(".pg-document-list").getByRole("button", { name: new RegExp(documentTitle, "u") });
   await expect(otherDocument).toBeVisible();
   await otherDocument.click();
-  const otherEditor = otherPage.getByRole("textbox", { name: "原稿 Markdown" });
+  const otherEditor = otherPage.getByRole("textbox", { name: "本文", exact: true });
   await expect(otherEditor).toBeVisible();
   await expect(otherEditor).not.toContainText(firstDraft);
 
@@ -153,10 +154,10 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await otherPage.unroute("**/api/v1/persistence/projects/*/documents/*");
   await otherPage.reload();
   await expect(otherPage.getByRole("heading", { name: "Database workspace" })).toBeVisible();
-  await otherPage.getByLabel("開く作品").selectOption({ label: projectTitle });
+  await otherPage.getByLabel("作品", { exact: true }).selectOption({ label: projectTitle });
   await expect(otherPage.locator(".pg-document-list").getByRole("button", { name: new RegExp(documentTitle, "u") })).toBeVisible();
   await otherPage.locator(".pg-document-list").getByRole("button", { name: new RegExp(documentTitle, "u") }).click();
-  const recoveredEditor = otherPage.getByRole("textbox", { name: "原稿 Markdown" });
+  const recoveredEditor = otherPage.getByRole("textbox", { name: "本文", exact: true });
   await expect(recoveredEditor).toContainText(interruptedDraft);
   await expect(otherPage.getByText("PostgreSQLへ保存済み")).toBeVisible({ timeout: 15_000 });
   await otherPage.close();

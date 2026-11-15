@@ -146,7 +146,7 @@ export function visiblePanelIds(node: WorkspaceNode): string[] {
 
 function preferredPanels(preset: Exclude<WorkspacePreset, "custom">, ids: string[]): string[] {
   const ordered = preset === "writing"
-    ? ["outline", "editor", "inspector"]
+    ? ["outline", "editor"]
     : preset === "research"
       ? ["outline", "editor", "inspector", ...ids.filter((id) => id.startsWith("module:"))]
       : ["editor", "review", "inspector"];
@@ -188,7 +188,7 @@ export function createWorkspacePreset(preset: Exclude<WorkspacePreset, "custom">
     const sizes = selected.length === 3
       ? [18, 60, 22]
       : selected.length === 2 && selected.includes("outline") && selected.includes("editor")
-        ? [24, 76]
+        ? [20, 80]
         : selected.length === 2 && selected.includes("editor") && selected.includes("inspector")
           ? [78, 22]
           : [50, 50];

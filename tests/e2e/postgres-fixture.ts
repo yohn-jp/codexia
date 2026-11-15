@@ -1,11 +1,16 @@
-import { expect, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 
 export const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 export interface FixtureProject { id: string; title: string }
 export interface FixtureDocument { id: string; title: string; kind: string; headRevisionId: string | null }
 
 /** Shared manuscript operator; callers own the scenario and text assertions. */
-export const manuscriptEditor = (page: Page) => page.getByRole("textbox", { name: "原稿 Markdown" });
+export const manuscriptEditor = (page: Page) => page.getByRole("textbox", { name: "本文", exact: true });
+export async function openRevisionHistory(scope: Page | Locator): Promise<void> {
+  const menu = scope.locator(".pg-editor-command-menu");
+  if (!await menu.evaluate((element) => (element as HTMLDetailsElement).open)) await menu.locator("summary").click();
+  await scope.getByRole("button", { name: "Revision履歴", exact: true }).click();
+}
 export async function readManuscriptMarkdown(page: Page): Promise<string> {
   return manuscriptEditor(page).evaluate(element => Array.from(element.querySelectorAll(".cm-line"), line => line.textContent ?? "").join("\n"));
 }
@@ -37,7 +42,7 @@ export async function openFixtureScene(page: Page, index = 0): Promise<{ project
   const { project, scenes } = await fixtureProject(page.request);
   const scene = scenes[index];
   expect(scene).toBeTruthy();
-  await page.getByLabel("開く作品").selectOption(project.id);
+  await page.getByLabel("作品", { exact: true }).selectOption(project.id);
   if (!await page.locator(".pg-document-list").getByRole("button", { name: new RegExp(scene!.title) }).isVisible()) {
     const library = page.getByRole("button", { name: /ライブラリ/u });
     if (await library.count()) await library.first().click();

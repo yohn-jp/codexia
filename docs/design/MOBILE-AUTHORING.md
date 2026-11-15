@@ -8,7 +8,7 @@
 
 通常の画面は現在のシーンと原稿がほぼ全域を占める。上部に作品／シーンの現在位置、読み書き切替と簡潔な保存状態を配置する。キーボードが開いている間は書くために必要な操作を優先し、頻度の低い画面切替や管理操作を押し込まない。
 
-主要な移動先は「作品」「執筆」「知識」「レビュー」。設定、詳細な保存・回復情報、処理状況は文脈に沿ったメニューから開く。既存の設定・ツール・状態確認・パネル配置の機能を削除するという意味ではなく、第一の操作面と補助操作を分ける。CoreとFullの提供機能の違いを明示する。
+主要な移動先は「作品」「書く」「知識」「レビュー」の4つ。設定はtitle barのgearから開く。PostgreSQLの保護状態はtitle barに短く示し、Journal・Revision・receiptの詳細は参照sheetで確認する。対処が必要な状態はbottom navigationの位置を動かさずdockの上へ重ねて知らせる。構成・Knowledge・Evidenceは参照sheetから開く。既存の設定・ツール・状態確認・パネル配置の機能を削除するという意味ではなく、第一の操作面と補助操作を分ける。CoreとFullの提供機能の違いを明示する。
 
 ## 参照と復帰
 
@@ -29,6 +29,12 @@ CodeMirror/browserが本文操作とIME、Ionicがsheetのgestureとfocusを担�
 
 通常の通知は位置を変えず、入力中にfocusを奪わない。sheetを閉じた際は適切なinvokerへfocusを返し、keyboardを勝手に開かない。主なタッチ操作は44×44 CSS pxを目標とし、戻る・閉じる・実行・確認がラベルから分かる。詳細な設定や配置編集は意図的に開く。
 
+## 実装した画面と検証
+
+初期WritingはCodeMirrorと日本語原稿を中心にし、構成・知識／保存の参照dockと4項目のbottom navigationから移動する。通常の参照はIonic sheetで開き、CodeMirrorのnodeを維持したまま閉じられる。320pxで横方向にoverflowしないこと、390×844pxでsheetが表示完了した後の構成／知識内容、Light／Darkの実レンダリングは[視覚受入記録](../../evidence/ui-redesign-v2/acceptance.md)に記録した。
+
+![Mobile Writing](../../evidence/ui-redesign-v2/after-mobile-writing.png)
+
 ## 受入
 
 - 320 CSS px相当の幅、390×844 CSS px、横向き、文字拡大、長い日本語タイトルで主要操作と原稿が利用可能。横方向のはみ出しやkeyboardによるcaretの隠れを確認する。
@@ -39,26 +45,26 @@ CodeMirror/browserが本文操作とIME、Ionicがsheetのgestureとfocusを担�
 
 ## 画面構成と導線
 
-基準画面は390×844 CSS px。通常執筆時の上部約48〜56pxに戻る、作品／シーン名、保存状態、操作メニューをまとめる。下部は44px以上の主要ナビゲーションとsafe area。残りのviewportを本文と既存の読み書き操作に割り当てる。入力欄を縦に並べたDesktopの管理画面を採用しない。
+基準画面は390×844 CSS px。通常執筆時の上部約56pxに戻る、作品／シーン名、保存状態、設定をまとめる。保存状態は本文を押し下げず、詳細は参照sheetに置く。下部は44px以上の主要ナビゲーションとsafe area。残りのviewportを本文と既存の読み書き操作に割り当てる。入力欄を縦に並べたDesktopの管理画面を採用しない。
 
 ```text
 ┌────────────────────────┐
-│ ‹ 第一章 / 序章   保存済 │
-│                 読む ⋯ │
+│ ‹ 薄明の羅針盤 保存済   ⚙ │
 ├────────────────────────┤
-│ 序章                   │
+│ 第一巻　潮が満ちる       │
+│ 一　薄明の羅針盤         │
+│ 保存済       読む  その他 │
 │                        │
-│ 本文                    │
-│ 日本語の原稿            │
-│                        │
+│ 日本語の本文が視界の大半 │
+│ を占め、組版の設定を保つ │
 │                        │
 ├────────────────────────┤
-│ 構成を参照    知識を参照 │
-│ 作品  執筆  知識 レビュー│
+│ [構成]      [知識・保存] │
+│ 作品   書く   知識   レビュー│
 └────────────────────────┘
 ```
 
-この配置は標準Writingの提案。任意のモバイルpanel配置・選択や既存URLを破壊しない。従来の `view=library` を作品、`view=writing` を執筆、`view=inspection` を確認／知識、`view=tools` をレビュー／道具、`view=settings` を設定として解決できるよう維持する。表示名と内部分類を変える場合、保存状態確認と設定へ一操作で到達可能な導線を失わない。設定は上部メニューから開ける。現在のモバイルroute transition、history state、generation fenceを維持する。
+この配置は標準Writingの画面案。任意のモバイルpanel配置・選択や既存URLを破壊しない。従来の `view=library` を作品、`view=writing` を執筆、`view=inspection` を知識、`view=tools` をレビュー／道具、`view=settings` を設定として解決できるよう維持する。settingsはbottom navigationからtitle barのgearへ移るが、設定routeと設定内容は保つ。保存詳細とsettingsへは通常の執筆中も一操作で到達できる。現在のモバイルroute transition、history state、generation fenceを維持する。
 
 ### 作品から執筆へ
 

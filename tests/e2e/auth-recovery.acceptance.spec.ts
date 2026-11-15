@@ -27,6 +27,7 @@ for (const shell of ["desktop", "mobile"] as const) {
     await expect(page.getByLabel("アクセス・トークン")).toHaveCount(0);
     signedIn = true;
     await page.getByRole("button", { name: "再認証" }).click();
+    if (shell === "mobile") await page.getByRole("button", { name: "設定を開く" }).click();
     await expect(page.getByRole("button", { name: "ログアウト", exact: true })).toBeVisible();
     await expect(page.getByLabel("アクセス・トークン")).toHaveCount(0);
     await page.getByRole("button", { name: "ログアウト", exact: true }).click();
@@ -203,7 +204,7 @@ test("an interrupted initial project bootstrap resumes after persisted pageshow"
     await resumed.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
     await resumed.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
     release();
-    await expect(resumed.getByLabel("開く作品")).toBeVisible({ timeout: 15_000 });
+    await expect(resumed.getByLabel("作品", { exact: true })).toBeVisible({ timeout: 15_000 });
     expect(requests).toBeGreaterThanOrEqual(2);
     await expect(resumed.getByRole("alert")).toHaveCount(0);
     await resumed.close();
@@ -233,11 +234,11 @@ test("direct-link, active scene, and project activation resume after persisted p
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
   release();
-  await expect(page.getByRole("textbox", { name: "原稿 Markdown" })).toContainText("The first line of the story.");
+  await expect(page.getByRole("textbox", { name: "本文", exact: true })).toContainText("The first line of the story.");
   expect(reads).toBeGreaterThanOrEqual(2);
   await page.locator(".pg-document-list").getByRole("button", { name: new RegExp(scenes[1]!.title) }).click();
-  await expect(page.getByRole("textbox", { name: "原稿 Markdown" })).toContainText("The second line of the story.");
+  await expect(page.getByRole("textbox", { name: "本文", exact: true })).toContainText("The second line of the story.");
   await page.goBack();
-  await expect(page.getByRole("textbox", { name: "原稿 Markdown" })).toContainText("The first line of the story.");
+  await expect(page.getByRole("textbox", { name: "本文", exact: true })).toContainText("The first line of the story.");
   await expect(page.getByRole("alert")).toHaveCount(0);
 });

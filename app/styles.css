@@ -130,6 +130,9 @@
 
 * { box-sizing: border-box; }
 html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
+/* Keep the startup placeholder's margin inside the React root so it cannot
+   push the full-screen authoring shell down before the app mounts. */
+#root { display: flow-root; }
 body { min-height: 100vh; color: var(--ink); background: var(--page-bg); }
 button, input, textarea { font: inherit; }
 button { min-height: 2.75rem; padding: 0.55rem 0.9rem; border: 1px solid var(--accent-strong); border-radius: 0.4rem; color: var(--button-foreground); background: var(--accent); cursor: pointer; }

@@ -8,10 +8,10 @@ import { REQUIRED_VERIFICATION_JOBS, VERIFICATION_LEAF_JOBS, UNIT_TARGETS, TYPEC
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8'));
-test('twenty execution jobs retain all fifty-seven validation obligations exactly once', () => {
+test('twenty execution jobs retain all fifty-nine validation obligations exactly once', () => {
   assert.equal(REQUIRED_VERIFICATION_JOBS.length, 20);
   assert.equal(VERIFICATION_LEAF_JOBS.length, 19);
-  assert.equal(VERIFICATION_TASKS.length, 57);
+  assert.equal(VERIFICATION_TASKS.length, 59);
   const tasks = Object.values(VERIFICATION_GROUPS).flat();
   assert.equal(new Set(tasks).size, tasks.length);
   assert.deepEqual(tasks.toSorted(), VERIFICATION_TASKS.toSorted());
@@ -153,7 +153,7 @@ test('Hosted Native keeps one verified producer and three independent compositio
 
 test('balanced browser lanes retain all independent spec and browser combinations',()=>{
   for(const profile of PROFILES){
-    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-writing'],['core','native-review','persistence-database'].map(id=>'browser-'+profile+'-'+id));
+    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-writing'],['core','native-review','persistence-database','redesign-visual'].map(id=>'browser-'+profile+'-'+id));
     assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-reference'],['modular-workspace','review-contributions','recent-activity','job-inbox'].map(id=>'browser-'+profile+'-'+id));
     assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-webkit'],['auth-recovery','ui-v1','webkit'].map(id=>'browser-'+profile+'-'+id));
   }

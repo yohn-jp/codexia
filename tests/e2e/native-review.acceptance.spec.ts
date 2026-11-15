@@ -53,7 +53,7 @@ async function openReview(page: Page, mode: "desktop" | "mobile") {
   if (mode === "desktop") {
     const menu = page.locator(".st-workspace-panel-menu > summary");
     const panelMenu = page.locator(".st-workspace-panel-menu");
-    const show = page.getByRole("button", { name: "Show 提案レビュー" });
+    const show = page.getByRole("button", { name: "提案レビューを表示" });
     if (!await show.isVisible()) await menu.click();
     if (await show.count()) await show.click();
     if (await panelMenu.evaluate((element: HTMLDetailsElement) => element.open)) await menu.click();
@@ -61,7 +61,7 @@ async function openReview(page: Page, mode: "desktop" | "mobile") {
   } else {
     await page.getByRole("button", { name: /道具/u }).click();
   }
-  await expect(page.getByRole("heading", { name: "PostgreSQL ChangeSet" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "変更提案" })).toBeVisible();
 }
 
 async function returnToEditor(page: Page, mode: "desktop" | "mobile") {
@@ -81,7 +81,7 @@ for (const mode of ["desktop", "mobile"] as const) {
       if (route.request().method() === "PATCH") await route.abort();
       else await route.continue();
     });
-    const editor = page.getByRole("textbox", { name: "原稿 Markdown" });
+    const editor = page.getByRole("textbox", { name: "本文", exact: true });
     const draft = "提案レビュー中も保持する未保存の原稿😀";
     await editor.fill(draft);
     await expect(page.getByText("IndexedDB回復Journalに保存済み")).toBeVisible();
@@ -220,7 +220,7 @@ test("project switch fences a late native list response and read-only sessions e
   release();
   const reviewTab = page.getByRole("tab", { name: "提案レビュー" });
   if (await reviewTab.isVisible()) await reviewTab.click();
-  await expect(page.getByRole("heading", { name: "PostgreSQL ChangeSet" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "変更提案" })).toBeVisible();
   await expect(page.getByText("この作品にネイティブ提案はありません。", { exact: true })).toBeVisible();
   await expect(page.locator(".native-changeset-card")).toHaveCount(0);
 
