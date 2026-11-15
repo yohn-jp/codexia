@@ -136,18 +136,18 @@ function actionResponse(response: { url(): string; request(): { method(): string
 }
 
 async function openWorkspaceContributionPanel(page: Page, id: string, title: string): Promise<ReturnType<Page["locator"]>> {
-  const toolbar = page.getByRole("toolbar", { name: "Workspace layout controls" });
-  await toolbar.getByRole("button", { name: "Research", exact: true }).click();
-  await page.getByRole("tablist", { name: "Panel tabs" }).getByRole("tab", { name: title, exact: true }).click();
+  const toolbar = page.getByRole("toolbar", { name: "ワークスペース配置" });
+  await toolbar.getByRole("button", { name: "調査", exact: true }).click();
+  await page.getByRole("tablist", { name: "パネル" }).getByRole("tab", { name: title, exact: true }).click();
   const panel = page.locator('[data-workspace-panel="module:' + id + '"]');
   await expect(panel).toBeVisible();
   return panel;
 }
 
 async function openWorkspaceReviewPanel(page: Page): Promise<void> {
-  const toolbar = page.getByRole("toolbar", { name: "Workspace layout controls" });
-  await toolbar.getByRole("button", { name: "Review", exact: true }).click();
-  await page.getByRole("tablist", { name: "Panel tabs" }).getByRole("tab", { name: "提案レビュー", exact: true }).click();
+  const toolbar = page.getByRole("toolbar", { name: "ワークスペース配置" });
+  await toolbar.getByRole("button", { name: "レビュー", exact: true }).click();
+  await page.getByRole("tablist", { name: "パネル" }).getByRole("tab", { name: "提案レビュー", exact: true }).click();
   await expect(page.locator('[data-workspace-panel="review"]')).toBeVisible();
 }
 
@@ -254,19 +254,19 @@ test("full profile renders Story and Speaker review queues and turns both author
     expect(proposedFiles.get(scenePath)).not.toMatch(/^speakerOverrides:/mu);
     expect(proposedFiles.has("meta/scriptorium/modules/speaker/corrections.jsonl")).toBe(false);
 
-    await page.getByRole("tablist", { name: "Panel tabs" }).getByRole("tab", { name: "作品と構成", exact: true }).click();
+    await page.getByRole("tablist", { name: "パネル" }).getByRole("tab", { name: "作品と構成", exact: true }).click();
     await page.locator(".pg-document-list")
       .getByRole("button", { name: /Review Scene/u }).click();
     await expect(page.getByRole("heading", { name: "Review Scene" })).toBeVisible();
     await expect(page).toHaveURL(new RegExp("/desktop/projects/" + encodeURIComponent(project.id) + "/scenes/[0-9a-f-]+"));
     const selectedSceneId = new URL(page.url()).pathname.split("/scenes/")[1];
     expect(selectedSceneId).toBeTruthy();
-    await page.getByRole("button", { name: "モバイルUIへ" }).click();
+    await page.getByRole("button", { name: "モバイル ↗" }).click();
     await expect(page).toHaveURL(new RegExp("/mobile/projects/" + encodeURIComponent(project.id) + "/scenes/" + selectedSceneId));
-    await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "道具", exact: true }).click();
+    await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "レビュー", exact: true }).click();
     await expect(page.locator(".proposal-review").getByRole("heading", { name: "確認待ちの提案" })).toBeVisible();
     await page.reload();
-    await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "道具", exact: true }).click();
+    await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "レビュー", exact: true }).click();
     const mobileZukanCard = page.locator(".proposal-card").filter({ hasText: zukanProposalId! });
     const mobileSpeakerCard = page.locator(".proposal-card").filter({ hasText: speakerProposalId! });
     await expect(mobileZukanCard).toContainText("承認待ち");
@@ -279,7 +279,7 @@ test("full profile renders Story and Speaker review queues and turns both author
     expect(mobileApprovedZukanStatus.appliedOperationIds).toEqual(mobileZukanOperationIds);
     expect(mobileApprovedZukanStatus.applications).toHaveLength(mobileZukanOperationIds.length);
 
-    await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "設定", exact: true }).click();
+    await page.getByRole("button", { name: "設定を開く" }).click();
     await page.getByRole("button", { name: "Desktop版へ切り替え" }).click();
     await expect(page).toHaveURL(new RegExp("/desktop/projects/" + encodeURIComponent(project.id) + "/scenes/" + selectedSceneId));
     await openWorkspaceReviewPanel(page);

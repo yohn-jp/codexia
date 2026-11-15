@@ -374,6 +374,18 @@
   font-size: 12px;
   font-weight: 650;
 }
+.st-studio-shell .st-workspace[data-layout-editing="true"] > .st-workspace-desktop-controls { align-items: stretch; flex-wrap: wrap; }
+.st-studio-shell .st-workspace[data-layout-editing="true"] .st-workspace-move-menu {
+  position: static;
+  flex: 1 0 100%;
+  align-self: stretch;
+  margin: 0 14px 8px;
+}
+.st-studio-shell .st-workspace[data-layout-editing="true"] .st-workspace-move-controls {
+  position: static;
+  width: 100%;
+  box-shadow: none;
+}
 
 .st-studio-shell .st-workspace-layout {
   padding: 12px;

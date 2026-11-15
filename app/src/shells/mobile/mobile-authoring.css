@@ -1,0 +1,669 @@
+/* Mobile writing is a focused page with reference and navigation docks.
+   The shared workspace remains mounted; only its presentation changes by route. */
+.mobile-shell {
+  --mobile-ink: #30352f;
+  --mobile-muted: #72766d;
+  --mobile-paper: #fbfaf6;
+  --mobile-stage: #f1f0e9;
+  --mobile-line: #deded4;
+  --mobile-accent: #5b6f56;
+  --page-bg: var(--mobile-stage);
+  --paper: var(--mobile-paper);
+  --ink: var(--mobile-ink);
+  --muted: var(--mobile-muted);
+  --line: var(--mobile-line);
+  --accent: var(--mobile-accent);
+  --accent-strong: var(--mobile-accent);
+  --surface-hover: #eceee6;
+  --surface-selected: #e5e9de;
+  --surface-selected-border: #a7b39e;
+  --ion-background-color: var(--mobile-stage);
+  --ion-text-color: var(--mobile-ink);
+  --ion-border-color: var(--mobile-line);
+  --ion-font-family: var(--manuscript-sans);
+  --ion-toolbar-background: var(--mobile-paper);
+  --ion-tab-bar-background: var(--mobile-paper);
+  --ion-tab-bar-color: var(--mobile-muted);
+  --ion-tab-bar-color-selected: var(--mobile-accent);
+  color-scheme: light;
+  background: var(--mobile-stage);
+}
+:root[data-zp-theme="dark"] .mobile-shell {
+  --mobile-ink: #e4e7df;
+  --mobile-muted: #a8afa4;
+  --mobile-paper: #1a201d;
+  --mobile-stage: #121714;
+  --mobile-line: #343b35;
+  --mobile-accent: #a8c39e;
+  --surface-hover: #262e28;
+  --surface-selected: #29362b;
+  --surface-selected-border: #647d63;
+  --ion-color-primary-rgb: 168, 195, 158;
+  --ion-color-primary-contrast-rgb: 18, 23, 20;
+  color-scheme: dark;
+}
+:root[data-zp-theme="paper"] .mobile-shell {
+  --mobile-ink: #38352e;
+  --mobile-muted: #726958;
+  --mobile-paper: #f8f3e8;
+  --mobile-stage: #ebe4d6;
+  --mobile-line: #d8cfbf;
+  --mobile-accent: #695d46;
+  --surface-hover: #eee6d7;
+  --surface-selected: #e8ddca;
+  --surface-selected-border: #b6a589;
+  color-scheme: light;
+}
+
+.mobile-shell .mobile-shell-page {
+  min-width: 320px;
+  background: var(--mobile-stage);
+}
+.mobile-shell .mobile-shell-ion-header {
+  padding-top: env(safe-area-inset-top, 0px);
+  border-bottom: 1px solid var(--mobile-line);
+  background: var(--mobile-paper);
+  box-shadow: none;
+}
+.mobile-shell-identity-bar {
+  min-height: 56px;
+  gap: 8px;
+  padding: 3px max(12px, env(safe-area-inset-left, 0px)) 3px max(12px, env(safe-area-inset-right, 0px));
+  border: 0;
+  background: var(--mobile-paper);
+}
+.mobile-shell .mobile-shell-back {
+  min-width: 40px;
+  width: 40px;
+  min-height: 44px;
+  flex-basis: 40px;
+  color: var(--mobile-muted);
+  font-size: 27px;
+}
+.mobile-shell-current-title {
+  color: var(--mobile-ink);
+  font: 550 15px/1.35 var(--manuscript-serif);
+}
+.mobile-shell-context {
+  color: var(--mobile-muted);
+  font-size: 10px;
+  line-height: 1.3;
+}
+.mobile-shell .mobile-shell-settings-entry {
+  min-width: 44px;
+  width: 44px;
+  min-height: 44px;
+  justify-content: center;
+  padding: 0;
+  color: var(--mobile-muted);
+  --background: transparent;
+  --background-hover: transparent;
+  --background-activated: transparent;
+  --background-focused: transparent;
+  --padding-start: 0;
+  --padding-end: 0;
+}
+.mobile-shell .mobile-shell-settings-entry::part(native) {
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
+  padding: 0;
+  font-size: 19px;
+  background: transparent;
+}
+.mobile-shell-settings-symbol svg { display: block; width: 19px; height: 19px; }
+.mobile-shell-settings-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.mobile-shell-protection {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  color: var(--mobile-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.mobile-shell-protection > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.mobile-shell-protection[data-state="saved"] { color: var(--success); }
+.mobile-shell-protection[data-state="uncertain"] { color: var(--error-text); }
+.mobile-shell-protection[data-state="saving"] { color: var(--accent-strong); }
+.mobile-shell .mobile-shell-shared-header:not([data-active-view="settings"]) {
+  position: absolute;
+  z-index: -1;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.mobile-shell .mobile-shell-shared-header:not([data-active-view="settings"]) > :not(h1) { display: none; }
+.mobile-shell .mobile-shell-shared-header:not([data-active-view="settings"]) > h1 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.mobile-shell .mobile-shell-shared-header[data-active-view="settings"] {
+  display: flex;
+  min-height: 48px;
+  padding: 2px max(12px, env(safe-area-inset-right, 0px)) 2px max(12px, env(safe-area-inset-left, 0px));
+  border-top: 1px solid var(--mobile-line);
+  background: var(--mobile-paper);
+}
+.mobile-shell .mobile-shell-shared-header[data-active-view="settings"] .topbar {
+  min-height: 44px;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+.mobile-shell .mobile-shell-shared-header[data-active-view="settings"] .topbar .brand { display: none; }
+.mobile-shell .mobile-shell-shared-header[data-active-view="settings"] .topbar-status { display: none; }
+.mobile-shell .mobile-shell-shared-header[data-active-view="settings"] .theme-control { margin: 0; font-size: 11px; }
+.mobile-shell .mobile-shell-shared-header[data-active-view="settings"] .theme-control select { min-height: 44px; }
+.mobile-shell .mobile-shell-shared-header[data-active-view="settings"] .topbar button { min-height: 44px; }
+
+.mobile-shell-content {
+  --background: var(--mobile-stage);
+  --padding-bottom: 0;
+  background: var(--mobile-stage);
+  overscroll-behavior-y: contain;
+}
+.mobile-shell-content::part(scroll) { scrollbar-gutter: auto; }
+.mobile-shell .mobile-shell-workspace-view {
+  width: 100%;
+  max-width: none;
+  min-height: 100%;
+  margin: 0;
+  background: var(--mobile-stage);
+}
+.mobile-shell .mobile-shell-workspace-view .st-workspace {
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+  background: transparent;
+}
+.mobile-shell .mobile-shell-workspace-view:not([data-active-view="settings"]) .st-workspace-configuration,
+.mobile-shell .mobile-shell-workspace-view:not([data-active-view="settings"]) .st-workspace-mobile-tabs,
+.mobile-shell .mobile-shell-workspace-view:not([data-active-view="settings"]) .st-workspace-message,
+.mobile-shell .mobile-shell-workspace-view:not([data-active-view="settings"]) .st-workspace-storage-state {
+  display: none !important;
+}
+.mobile-shell .mobile-shell-workspace-view .st-workspace-mobile-layout,
+.mobile-shell .mobile-shell-workspace-view .st-workspace-mobile-pane {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+}
+.mobile-shell .mobile-shell-workspace-view .st-workspace-mobile-pane > .st-workspace-panel {
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+  background: transparent;
+}
+.mobile-shell .mobile-shell-workspace-view .st-workspace-panel-heading { display: none; }
+.mobile-shell .mobile-shell-workspace-view .st-workspace-panel-body {
+  min-height: 0;
+  overflow: visible;
+  background: transparent;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-column {
+  display: block;
+  min-height: 100%;
+  padding: 14px clamp(14px, 4.2vw, 22px) 24px;
+  background: var(--mobile-paper);
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor {
+  container: manuscript / inline-size;
+  display: grid;
+  width: 100%;
+  max-width: 48rem;
+  gap: 10px;
+  margin-inline: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-heading > div:first-child {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-heading > div:first-child > .eyebrow {
+  display: block;
+  margin: 0 0 2px;
+  color: var(--mobile-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-heading h2 {
+  margin: 0;
+  color: var(--mobile-ink);
+  font: 500 clamp(20px, 5vw, 25px)/1.4 var(--manuscript-serif);
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-save-state {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 2px 10px;
+  color: var(--mobile-muted);
+  font-size: 9px;
+  line-height: 1.35;
+  text-align: start;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0 0 2px;
+  min-width: 0;
+  overflow: visible;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions > * { flex: 0 1 auto; min-width: 0; }
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions > details[open] {
+  flex: 1 0 100%;
+  max-width: 100%;
+  white-space: normal;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 7px 10px;
+  border-color: transparent;
+  border-radius: 7px;
+  color: var(--mobile-muted);
+  background: transparent;
+  font-size: 12px;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions[aria-label="主な原稿操作"] > button:first-child {
+  border-color: var(--mobile-accent);
+  color: var(--mobile-paper);
+  background: var(--mobile-accent);
+  font-weight: 650;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions summary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0 8px;
+  color: var(--mobile-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions summary::after {
+  content: "⌄";
+  margin-inline-start: 0.45rem;
+  color: var(--mobile-muted);
+  transition: transform 140ms ease;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions details[open] > summary::after {
+  transform: rotate(180deg);
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-command-menu,
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-display-menu,
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-symbol-menu { position: relative; }
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions details[open] > div {
+  /* Keep disclosed controls in normal flow so no scrollport clips them. */
+  position: static;
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--mobile-line);
+  border-radius: 9px;
+  background: var(--mobile-paper);
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-symbol-menu[open] > div {
+  flex-flow: row wrap;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-display-menu[open] > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-display-menu label {
+  display: grid;
+  gap: 4px;
+  color: var(--mobile-muted);
+  font-size: 11px;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-display-menu select,
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-display-menu input {
+  min-height: 44px;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--mobile-line);
+  border-radius: 6px;
+  color: var(--mobile-ink);
+  background: var(--mobile-paper);
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-display-menu label:first-child { grid-column: 1 / -1; }
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .manuscript-column {
+  min-height: max(54vh, 26rem);
+  padding: 8px 0 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .manuscript-column > label,
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-hint { display: none; }
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .manuscript-input,
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .cm-editor,
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .cm-scroller,
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .cm-content {
+  min-height: max(54vh, 26rem);
+  border: 0;
+  background: transparent;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .cm-editor {
+  font-family: var(--editor-font-family, var(--manuscript-serif));
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .cm-scroller {
+  font-family: var(--editor-font-family, var(--manuscript-serif));
+  font-size: var(--editor-font-size, 18px);
+  line-height: var(--editor-line-height, 1.9);
+  letter-spacing: var(--editor-letter-spacing, normal);
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .cm-content {
+  max-width: min(100%, var(--reader-max-width, 960px));
+  margin-inline: auto;
+  padding: 12px 2px 8rem;
+  line-height: var(--editor-line-height, 1.9);
+  text-wrap: pretty;
+}
+
+/* Persistent save state stays in the title bar. Actionable messages float
+   above the dock so loading and error text cannot resize the manuscript. */
+.mobile-shell .mobile-shell-footer {
+  position: relative;
+  padding: 0 0 env(safe-area-inset-bottom, 0px);
+  border-top: 1px solid var(--mobile-line);
+  background: var(--mobile-paper);
+  box-shadow: 0 -5px 20px rgb(26 31 25 / 5%);
+}
+.mobile-shell .mobile-shell-status {
+  position: absolute;
+  z-index: 20;
+  inset-inline: 8px;
+  bottom: calc(100% + 6px);
+  width: auto;
+  height: auto;
+  max-block-size: min(30dvh, 10rem);
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid var(--mobile-line);
+  border-radius: 9px;
+  background: var(--mobile-paper);
+  box-shadow: 0 5px 18px rgb(0 0 0 / 12%);
+}
+.mobile-shell .mobile-shell-status:empty {
+  display: none !important;
+}
+.mobile-shell .mobile-shell-status > p {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.mobile-shell .mobile-shell-status .application-status > summary {
+  min-height: 28px;
+  height: 28px;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 2px;
+  color: var(--mobile-muted);
+  font-size: 10px;
+}
+.mobile-shell .mobile-shell-status .application-status[data-attention] > summary {
+  color: var(--error-text);
+  background: transparent;
+}
+.mobile-shell .mobile-shell-status .application-status-content {
+  position: absolute;
+  z-index: 40;
+  right: 8px;
+  bottom: calc(100% + 4px);
+  left: 8px;
+  max-height: min(38dvh, 18rem);
+  padding: 12px;
+  border: 1px solid var(--mobile-line);
+  border-radius: 10px;
+  background: var(--mobile-paper);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 17%);
+}
+.mobile-shell .mobile-shell-writing-accessories {
+  gap: 7px;
+  padding: 6px max(12px, env(safe-area-inset-right, 0px)) 7px max(12px, env(safe-area-inset-left, 0px));
+  border-top: 1px solid var(--mobile-line);
+  border-bottom: 1px solid var(--mobile-line);
+  background: var(--mobile-paper);
+}
+.mobile-shell .mobile-shell-accessory-button {
+  min-height: 44px;
+  border: 1px solid var(--mobile-line);
+  border-radius: 7px;
+  color: var(--mobile-ink);
+  background: var(--mobile-stage);
+  font-size: 12px;
+  font-weight: 600;
+}
+.mobile-shell .mobile-shell-accessory-button > span { font-size: 16px; }
+.mobile-shell .mobile-shell-navigation {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-height: 54px;
+  max-width: none;
+  gap: 2px;
+  padding: 2px max(10px, env(safe-area-inset-right, 0px)) 2px max(10px, env(safe-area-inset-left, 0px));
+}
+.mobile-shell .mobile-shell-navigation ion-button {
+  min-height: 48px;
+  --color: var(--mobile-muted);
+  --background: transparent;
+  --border-radius: 8px;
+}
+.mobile-shell .mobile-shell-navigation ion-button[aria-current="page"] {
+  --color: var(--mobile-accent);
+  --background: var(--surface-selected);
+}
+.mobile-shell .mobile-shell-nav-content { gap: 0; font-size: 10px; font-weight: 550; }
+.mobile-shell .mobile-shell-nav-mark { font-size: 17px; }
+.mobile-shell .mobile-shell-view-settings .mobile-shell-workspace-view { max-width: 48rem; margin-inline: auto; }
+.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-configuration {
+  display: block;
+  margin: 12px;
+  border: 1px solid var(--mobile-line);
+  border-radius: 9px;
+  background: var(--mobile-paper);
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-configuration > summary {
+  min-height: 44px;
+  padding: 11px 14px;
+  color: var(--mobile-ink);
+  font-size: 13px;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-toolbar {
+  display: grid;
+  padding: 10px 12px;
+  border-top: 1px solid var(--mobile-line);
+  background: transparent;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-presets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-presets button,
+.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-panel-menu summary,
+.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-save {
+  min-height: 44px;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-mobile-tabs {
+  display: flex;
+  overflow-x: auto;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="settings"] .st-workspace-mobile-tabs button {
+  min-height: 44px;
+}
+.mobile-shell .mobile-shell-keyboard-open .mobile-shell-shared-header,
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-shared-header,
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-settings-entry,
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-protection,
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-navigation,
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-status { display: none !important; }
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-identity-bar { min-height: 48px; }
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-writing-accessories {
+  padding-top: 3px;
+  padding-bottom: 3px;
+  border-top: 1px solid var(--mobile-line);
+}
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-configuration,
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-mobile-tabs,
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-message,
+.mobile-shell.mobile-shell-keyboard-open .mobile-shell-workspace-view .st-workspace-storage-state { display: none !important; }
+.mobile-shell .mobile-shell-reference-modal {
+  --height: 100%;
+  --border-radius: 18px 18px 0 0;
+  --background: var(--mobile-paper);
+}
+.mobile-shell .mobile-shell-reference-content { --background: var(--mobile-paper); }
+.mobile-shell .mobile-shell-reference-top { padding: max(12px, env(safe-area-inset-top, 0px)) 16px 8px; }
+.mobile-shell .mobile-shell-reference-switch button { min-height: 44px; }
+.mobile-shell .mobile-shell-reference-pane { padding: 12px 16px max(24px, env(safe-area-inset-bottom, 0px)); }
+.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-document-list,
+.mobile-shell .mobile-shell-reference-pane .pg-document-list {
+  display: grid;
+  gap: 4px;
+  margin: 12px 0 20px;
+  padding: 0;
+  list-style: none;
+}
+.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-row,
+.mobile-shell .mobile-shell-reference-pane .pg-outline-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: stretch;
+  gap: 2px;
+}
+.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-toggle,
+.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-spacer,
+.mobile-shell .mobile-shell-reference-pane .pg-outline-toggle,
+.mobile-shell .mobile-shell-reference-pane .pg-outline-spacer {
+  display: grid;
+  min-width: 44px;
+  min-height: 44px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  color: var(--mobile-muted);
+  background: transparent;
+  font-size: 18px;
+}
+.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-document,
+.mobile-shell .mobile-shell-reference-pane .pg-outline-document {
+  min-width: 0;
+  min-height: 44px;
+  gap: 0;
+  padding: 6px 10px;
+  border: 0;
+  border-inline-start: 2px solid transparent;
+  border-radius: 4px;
+  color: var(--mobile-ink);
+  background: transparent;
+  text-align: start;
+  font-size: 13px;
+}
+.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-document.is-selected,
+.mobile-shell .mobile-shell-reference-pane .pg-outline-document.is-selected {
+  border-inline-start-color: var(--mobile-accent);
+  background: var(--surface-selected);
+  font-weight: 650;
+}
+.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-document small,
+.mobile-shell .mobile-shell-reference-pane .pg-outline-document small {
+  margin: 2px 0 0;
+  color: var(--mobile-muted);
+  font-size: 10px;
+}
+.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-document-children,
+.mobile-shell .mobile-shell-reference-pane .pg-document-children {
+  display: grid;
+  gap: 3px;
+  margin: 2px 0 2px 20px;
+  padding: 0 0 0 8px;
+  border-inline-start: 1px solid var(--mobile-line);
+  list-style: none;
+}
+.mobile-shell .mobile-shell-reference-durability {
+  border-color: var(--mobile-line);
+  border-radius: 8px;
+  background: var(--mobile-stage);
+}
+.mobile-shell .mobile-shell-reference-durability strong { color: var(--mobile-accent); }
+.mobile-shell .mobile-shell-view { padding: 14px 14px 28px; }
+.mobile-shell .mobile-shell-page-title { font: 500 23px/1.45 var(--manuscript-serif); }
+.mobile-shell .mobile-shell-settings-card {
+  margin: 12px;
+  padding: 16px;
+  border: 1px solid var(--mobile-line);
+  border-radius: 9px;
+  background: var(--mobile-paper);
+}
+.mobile-shell .mobile-shell-settings-card h2 { font: 500 18px/1.4 var(--manuscript-serif); }
+.mobile-shell .mobile-shell-settings-card p { color: var(--mobile-muted); line-height: 1.65; }
+.mobile-shell :is(button, ion-button, a, [role="tab"], select, input, summary):focus-visible,
+.mobile-shell ion-button::part(native):focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+
+@media (min-width: 640px) {
+  .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-column { padding-inline: clamp(24px, 7vw, 64px); }
+  .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor { max-width: 44rem; }
+  .mobile-shell .mobile-shell-writing-accessories { max-width: 54rem; margin-inline: auto; }
+  .mobile-shell .mobile-shell-navigation { max-width: 54rem; margin-inline: auto; }
+}
+@media (max-width: 360px) {
+  .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-heading { grid-template-columns: minmax(0, 1fr); }
+  .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-save-state { grid-template-columns: repeat(2, max-content); justify-items: start; text-align: start; }
+  .mobile-shell-protection { font-size: 9px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mobile-shell *, .mobile-shell *::before, .mobile-shell *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

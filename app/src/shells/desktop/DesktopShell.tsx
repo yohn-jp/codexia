@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as Separator from "@radix-ui/react-separator";
 import * as Tabs from "@radix-ui/react-tabs";
 import { Panel, PanelGroup, PanelResizeHandle, setNonce } from "react-resizable-panels";
@@ -18,29 +18,13 @@ function describeFailure(reason: unknown): string {
     : "下書きの保存状態を確認してから、もう一度お試しください。";
 }
 
-type DesktopActivity = "writing" | "knowledge" | "review";
-
-function activityForPanel(panelId: string): DesktopActivity | undefined {
-  if (panelId === "editor" || panelId === "outline" || panelId === "history") return "writing";
-  if (panelId === "inspector") return "knowledge";
-  if (panelId === "review") return "review";
-  return undefined;
-}
-
-const primaryActivities: ReadonlyArray<{ id: DesktopActivity; panelId: string; label: string }> = [
-  { id: "writing", panelId: "editor", label: "執筆" },
-  { id: "knowledge", panelId: "inspector", label: "知識" },
-  { id: "review", panelId: "review", label: "レビュー" },
-];
-
-/** Workspace Studio: the approved desktop composition, retaining the real application controller. */
+/** Desktop manuscript surface; panels and commands remain owned by the shared workspace. */
 export function DesktopShell({
   header, desktopActions, desktopDurability, desktopDurabilityDetail, documentTitle, documentContext, library, editor, tools, status, renderStatus,
   onSwitchMode, workspaceScope, panels, beforeLayoutChange, requestedPanel,
 }: ApplicationShellProps) {
   const [switching, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState("");
-  const [activeActivity, setActiveActivity] = useState<DesktopActivity>("writing");
   const switchInFlight = useRef(false);
   const requestSeq = useRef(0);
   const [effectiveRequest, setEffectiveRequest] = useState<WorkspacePanelRequest>();
@@ -49,15 +33,6 @@ export function DesktopShell({
     if (!requestedPanel?.id || !requestedPanel.sequence) return;
     setEffectiveRequest({ id: requestedPanel.id, sequence: ++requestSeq.current });
   }, [requestedPanel?.id, requestedPanel?.sequence]);
-  function reveal(id: string) {
-    if (!panels?.some((panel) => panel.id === id)) return;
-    const request = { id, sequence: ++requestSeq.current };
-    setEffectiveRequest(request);
-  }
-  const noteWorkspacePanel = useCallback((panelId: string): void => {
-    const activity = activityForPanel(panelId);
-    if (activity) setActiveActivity(activity);
-  }, []);
 
   async function switchToMobile(): Promise<void> {
     if (switchInFlight.current) return;
@@ -74,29 +49,8 @@ export function DesktopShell({
       setSwitching(false);
     }
   }
-  const rail: ReadonlyArray<{ id: string; mark: string; title: string }> = [
-    { id: "editor", mark: "▦", title: "ワークスペース" },
-    { id: "outline", mark: "☷", title: "作品と構成" },
-    { id: "inspector", mark: "⌕", title: "文書と保存状態" },
-    { id: "history", mark: "◷", title: "履歴" },
-    { id: "review", mark: "◇", title: "レビューとツール" },
-  ];
   return (
     <div className="st-desktop-shell st-studio-shell">
-      <aside className="st-studio-rail" aria-label="デスクトップ操作">
-        <a href="/" className="st-studio-monogram" aria-label="Codexia ホーム">C<span>.</span></a>
-        <nav aria-label="パネルを開く" className="st-studio-rail-nav">
-          {rail.map((item) => <button key={item.id} type="button"
-            className={"st-studio-rail-item" + (activityForPanel(item.id) === activeActivity ? " is-current" : "")}
-            title={item.title} aria-label={"パネル：" + item.title} disabled={!panels?.some((panel) => panel.id === item.id)}
-            onClick={() => reveal(item.id)}>{item.mark}</button>)}
-        </nav>
-        <div className="st-studio-rail-bottom">
-          <button type="button" className="st-studio-rail-item" title="モバイルUIへ" aria-label="モバイルUIへ"
-            onClick={() => void switchToMobile()} disabled={switching}>↗</button>
-          <span className="st-studio-avatar" aria-hidden="true">S</span>
-        </div>
-      </aside>
       <div className="st-studio-main">
         <div className="st-studio-topbar">
           <div className="st-studio-identity">
@@ -106,18 +60,6 @@ export function DesktopShell({
               {documentTitle ? <><span aria-hidden="true">/</span><strong>{documentTitle}</strong></> : null}
             </div>
           </div>
-          {panels?.length ? <nav className="st-studio-primary-nav" aria-label="主な作業">
-            {primaryActivities.map((activity) => {
-              const available = panels.some((panel) => panel.id === activity.panelId);
-              return <button
-                type="button"
-                key={activity.id}
-                aria-pressed={activeActivity === activity.id}
-                disabled={!available}
-                onClick={() => reveal(activity.panelId)}
-              >{activity.label}</button>;
-            })}
-          </nav> : null}
           <div className="st-studio-masthead-actions">
             {desktopDurability ? <span className={`st-studio-durability is-${desktopDurability}`}
               aria-label="原稿のPostgreSQL保存状態" data-state={desktopDurability} title={desktopDurabilityDetail}>
@@ -129,12 +71,15 @@ export function DesktopShell({
               }[desktopDurability]}</span> : null}
             {desktopActions}
             <div className="st-studio-header-slot">{header}</div>
+            <button type="button" className="st-studio-mobile-link" onClick={() => void switchToMobile()} disabled={switching}>
+              {switching ? "切替中" : "モバイル ↗"}
+            </button>
           </div>
         </div>
 
         {workspaceScope && panels?.length ? (
           <Workspace scope={workspaceScope} mode="desktop" panels={panels}
-            beforeLayoutChange={beforeLayoutChange} requestedPanel={effectiveRequest} onActivePanelChange={noteWorkspacePanel} />
+            beforeLayoutChange={beforeLayoutChange} requestedPanel={effectiveRequest} />
         ) : <PanelGroup className="st-desktop-workbench" direction="horizontal" id="codexia-desktop-workbench">
           <Panel className="st-desktop-navigation-panel" defaultSize={28} minSize={18} maxSize={46}
             id="codexia-desktop-navigation" order={1}>
@@ -166,10 +111,6 @@ export function DesktopShell({
         <div className="st-desktop-status" role="region" aria-label="保存と接続の状態">
           {renderStatus ? renderStatus(switchError) : status}
         </div>
-        <footer className="st-studio-footer">
-          <span><span className="st-studio-footer-dot" /> PostgreSQL正本 · Desktop</span>
-          <span>執筆 · 知識 · レビュー</span>
-        </footer>
       </div>
     </div>
   );

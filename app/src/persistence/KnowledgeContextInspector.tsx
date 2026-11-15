@@ -252,7 +252,7 @@ export function KnowledgeContextInspector({
                 </details>
               </li>)}
             </ul>}
-          <form className="kci__form" onSubmit={(event) => {
+          <details className="kci__edit-disclosure"><summary>別名を追加</summary><form className="kci__form" onSubmit={(event) => {
             event.preventDefault();
             void mutate(async () => {
               const value = surface.trim();
@@ -270,7 +270,7 @@ export function KnowledgeContextInspector({
               <input value={surface} onChange={(event) => setSurface(event.target.value)} maxLength={512} required />
             </label>
             <button type="submit" disabled={busy || !canEdit || !surface.trim()}>別名候補を追加</button>
-          </form>
+          </form></details>
         </section>
 
         <section className="kci__section" aria-labelledby="kci-relation-heading">
@@ -284,7 +284,7 @@ export function KnowledgeContextInspector({
             actionsDisabled={busy || !canEdit}
             onStatusChange={(relation, status) => void relationSave(relation, status)}
           />
-          <form className="kci__form kci__form--relation" onSubmit={(event) => {
+          <details className="kci__edit-disclosure"><summary>関係を追加</summary><form className="kci__form kci__form--relation" onSubmit={(event) => {
             event.preventDefault();
             const other = nodes.find((candidate) => candidate.id === target && candidate.projectId === projectId && candidate.status !== "retired");
             if (!other) return;
@@ -313,7 +313,7 @@ export function KnowledgeContextInspector({
               </select>
             </label>
             <button type="submit" disabled={busy || !canEdit || !target || !relationType.trim()}>関係候補を追加</button>
-          </form>
+          </form></details>
         </section>
 
         <KnowledgeEvidenceList
@@ -368,7 +368,7 @@ export function KnowledgeContextInspector({
           <p className="kci__guidance">{current
             ? "選択中の保存済みText Anchorを根拠に命題候補を作成します。"
             : "現在の保存済みRevisionで、このKnowledgeへのリンクが確定したText Anchorを選択してください。"}</p>
-          <form className="kci__form" onSubmit={(event) => {
+          <details className="kci__edit-disclosure"><summary>命題候補を作成</summary><form className="kci__form" onSubmit={(event) => {
             event.preventDefault();
             if (!current || !documentId || !revisionId || !clean || !statement.trim() || !perspective.trim()) return;
             void mutate(async () => {
@@ -401,10 +401,11 @@ export function KnowledgeContextInspector({
               </label>
             </div>
             <button type="submit" disabled={busy || !canEdit || !clean || !current || !statement.trim() || !perspective.trim()}>命題候補を保存</button>
-          </form>
+          </form></details>
         </section>
 
-        <section className="kci__section" aria-labelledby="kci-merge-heading">
+        <details className="kci__section kci__edit-disclosure" aria-labelledby="kci-merge-heading">
+          <summary>Knowledgeを統合</summary>
           <div className="kci__section-heading">
             <div><p className="kci__section-kicker">正本の統合</p><h4 id="kci-merge-heading">Knowledge統合</h4></div>
           </div>
@@ -443,7 +444,7 @@ export function KnowledgeContextInspector({
               setMergePreview(null);
             })}>作者承認で統合</button>
           </div>}
-        </section>
+        </details>
 
         <details className="kci__section kci__technical-association">
           <summary>Storyとの明示的な関連付け（詳細）</summary>

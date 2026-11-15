@@ -1,8 +1,18 @@
 import { expect, test } from "@playwright/test";
-import { createWritingFixture } from "./postgres-fixture";
+import { createWritingFixture, openRevisionHistory } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
+
+async function openResearchInspector(page: import("@playwright/test").Page) {
+  const toolbar = page.getByRole("toolbar", { name: "ワークスペース配置" });
+  await toolbar.getByRole("button", { name: "調査", exact: true }).click();
+  await expect(page.locator('[data-workspace-panel="inspector"]')).toBeVisible();
+  const knowledgeTools = page.locator(".pg-knowledge-tools");
+  if (await knowledgeTools.count() && !await knowledgeTools.evaluate((element) => (element as HTMLDetailsElement).open)) {
+    await knowledgeTools.locator("summary").click();
+  }
+}
 
 
 test("Git store selector cannot bypass PostgreSQL-only authoring", async ({ page }) => {
@@ -49,22 +59,27 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
 
-  await page.getByLabel("新しい作品").fill(projectTitle);
-  await page.getByRole("button", { name: "作品を作成" }).click();
+  const outline = page.locator('[data-workspace-panel="outline"]');
+  await outline.locator(".pg-library-create > summary").click();
+  await outline.getByLabel("作品名").fill(projectTitle);
+  await outline.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
   await expect(page.getByRole("heading", { name: projectTitle })).toBeVisible();
-  await page.getByLabel("文書を追加").fill(documentTitle);
-  await page.getByRole("button", { name: "文書を作成" }).click();
+  const createDocument = outline.locator(".pg-library-create-document");
+  await createDocument.locator("summary").click();
+  await createDocument.getByLabel("文書名").fill(documentTitle);
+  await createDocument.getByRole("button", { name: "作成", exact: true }).click();
 
-  const editor = page.getByRole("textbox", { name: "原稿 Markdown" });
+  const editor = page.getByRole("textbox", { name: "本文", exact: true });
   await expect(editor).toBeVisible();
   await editor.fill(firstDraft);
   await expect(page.getByText("PostgreSQLへ保存済み")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("IndexedDB回復Journalに保存済み")).toBeVisible();
 
   await editor.press("Control+A");
+  await page.locator(".pg-editor-command-menu > summary").click();
   await page.getByRole("button", { name: "選択範囲をText Anchorにする" }).click();
   await expect(page.locator(".pg-notice")).toContainText("Text Anchorを保存しました");
-  await page.getByRole("button", { name: "パネル：文書と保存状態", exact: true }).click();
+  await openResearchInspector(page);
   const evidence = page.locator(".pg-evidence-list");
   await expect(evidence).toContainText(firstDraft);
 
@@ -79,11 +94,13 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await expect(page.locator(".pg-notice")).toContainText("Knowledge参照を作者確認済みとして保存しました");
   await expect(evidence).toContainText("確定先: 青い塔");
   const context = page.getByRole("region", { name: "Knowledge詳細" });
+  await context.locator(".kci__edit-disclosure").filter({ hasText: "別名を追加" }).locator("summary").click();
   await context.getByLabel("別名候補").fill("塔");
   await context.getByRole("button", { name: "別名候補を追加" }).click();
   await expect(context).toContainText("塔 · proposed");
   await context.getByRole("button", { name: "別名を確定" }).click();
   await expect(context).toContainText("塔 · confirmed");
+  await context.locator(".kci__edit-disclosure").filter({ hasText: "命題候補を作成" }).locator("summary").click();
   await context.getByLabel("命題", { exact: true }).fill("塔は青い。");
   await context.getByRole("button", { name: "命題候補を保存" }).click();
   await expect(context).toContainText("塔は青い。 · fact · author · proposed");
@@ -100,13 +117,13 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await expect.poll(readEditor).toBe(firstDraft);
 
 
-  await page.getByRole("button", { name: "Revision履歴" }).click();
+  await openRevisionHistory(page);
   const initialRevision = page.locator(".pg-revisions article").filter({ hasText: "（空の原稿）" });
   await expect(initialRevision).toBeVisible();
   await initialRevision.getByRole("button", { name: "このRevisionを新しいRevisionとして復元" }).click();
   await expect(page.locator(".pg-notice")).toContainText("新しいPostgreSQL Revisionとして復元しました");
   await expect.poll(readEditor).not.toContain(firstDraft);
-  await page.getByRole("button", { name: "パネル：文書と保存状態", exact: true }).click();
+  await openResearchInspector(page);
   await expect(backlinks).toContainText("本文から削除");
   await expect(backlinks).toContainText(firstDraft);
   await backlinks.getByRole("button", { name: /第一稿/u }).click();
@@ -122,11 +139,11 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   });
   await otherPage.goto("/desktop/?store=postgres");
   await expect(otherPage.getByRole("heading", { name: "Database workspace" })).toBeVisible();
-  await otherPage.getByLabel("開く作品").selectOption({ label: projectTitle });
+  await otherPage.getByLabel("作品", { exact: true }).selectOption({ label: projectTitle });
   const otherDocument = otherPage.locator(".pg-document-list").getByRole("button", { name: new RegExp(documentTitle, "u") });
   await expect(otherDocument).toBeVisible();
   await otherDocument.click();
-  const otherEditor = otherPage.getByRole("textbox", { name: "原稿 Markdown" });
+  const otherEditor = otherPage.getByRole("textbox", { name: "本文", exact: true });
   await expect(otherEditor).toBeVisible();
   await expect(otherEditor).not.toContainText(firstDraft);
 
@@ -153,10 +170,10 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await otherPage.unroute("**/api/v1/persistence/projects/*/documents/*");
   await otherPage.reload();
   await expect(otherPage.getByRole("heading", { name: "Database workspace" })).toBeVisible();
-  await otherPage.getByLabel("開く作品").selectOption({ label: projectTitle });
+  await otherPage.getByLabel("作品", { exact: true }).selectOption({ label: projectTitle });
   await expect(otherPage.locator(".pg-document-list").getByRole("button", { name: new RegExp(documentTitle, "u") })).toBeVisible();
   await otherPage.locator(".pg-document-list").getByRole("button", { name: new RegExp(documentTitle, "u") }).click();
-  const recoveredEditor = otherPage.getByRole("textbox", { name: "原稿 Markdown" });
+  const recoveredEditor = otherPage.getByRole("textbox", { name: "本文", exact: true });
   await expect(recoveredEditor).toContainText(interruptedDraft);
   await expect(otherPage.getByText("PostgreSQLへ保存済み")).toBeVisible({ timeout: 15_000 });
   await otherPage.close();
@@ -187,7 +204,7 @@ test("Knowledge relation pagination keeps the forty-first fetched relation actio
   expect(relations).toHaveLength(41);
   const last = relations[40]!;
   await page.reload();
-  await page.getByRole("button", { name: "パネル：文書と保存状態", exact: true }).click();
+  await openResearchInspector(page);
   await page.getByLabel("Text AnchorのKnowledge先").selectOption(source);
   const context = page.getByRole("region", { name: "Knowledge詳細" });
   await expect(context.locator(".kci__graph-row")).toHaveCount(40);
