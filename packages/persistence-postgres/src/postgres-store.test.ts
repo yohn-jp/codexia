@@ -11,6 +11,7 @@ import {
   type DocumentId,
   type EvidenceId,
   type KnowledgeNodeId,
+  type KnowledgeProjectionBatch,
   type ProjectId,
   type RevisionId,
   type SaveDocumentCommand,
@@ -699,6 +700,105 @@ test("ChangeSet application is atomic, versioned and idempotent", async () => {
   assert.equal(readBack.appliedChangeSet?.provenance.source, "author");
   assert.equal(readBack.appliedChangeSet?.readSet[0]?.expectedRevisionId, document.revision.id);
   assert.equal(readBack.appliedChangeSet?.writeSet.length, operations.length);
+
+  await persistence.transaction(async (transaction) => {
+    await transaction.saveKnowledgeAlias({
+      projectId: project.id, id: randomUUID() as import("@codexia/persistence-contracts").KnowledgeAliasId,
+      nodeId, surface: "Aoi", normalized: "aoi", scope: null, status: "confirmed",
+    });
+    await transaction.saveKnowledgeAlias({
+      projectId: project.id, id: randomUUID() as import("@codexia/persistence-contracts").KnowledgeAliasId,
+      nodeId: secondNodeId, surface: "Station", normalized: "station", scope: null, status: "confirmed",
+    });
+    await transaction.saveMentionLink({
+      projectId: project.id, evidenceId, nodeId: secondNodeId, status: "confirmed",
+      source: "author", confidence: 1, extractorVersion: null,
+    });
+  });
+  const historicalDocument = await createDocument(project.id, "Historical source quote");
+  const latestHistoricalBody = "A later revision has different text";
+  const historicalEvidenceId = randomUUID() as EvidenceId;
+  await persistence.transaction(async (transaction) => {
+    await transaction.saveEvidenceAnchor({
+      projectId: project.id, id: historicalEvidenceId, documentId: historicalDocument.document.id,
+      revisionId: historicalDocument.revision.id, fromUtf16: 0, toUtf16: historicalDocument.revision.markdown.length,
+      quoteSha256: sha256(historicalDocument.revision.markdown), status: "confirmed", expectedVersion: null,
+    });
+    await transaction.saveMentionLink({
+      projectId: project.id, evidenceId: historicalEvidenceId, nodeId, status: "confirmed",
+      source: "author", confidence: 1, extractorVersion: null,
+    });
+  });
+  const latestHistoricalRevision = await persistence.transaction((transaction) => transaction.saveDocument(saveCommand(
+    project.id, historicalDocument.document.id, historicalDocument.revision.id, latestHistoricalBody,
+    [{ fromUtf16: 0, toUtf16: historicalDocument.revision.markdown.length, insert: latestHistoricalBody }],
+  )));
+
+  const batchComparison = await persistence.read(async (reader) => {
+    assert.ok(reader.readKnowledgeProjectionBatch);
+    const nodeIds = [nodeId, secondNodeId];
+    const limits = { aliasesPerNode: 1, relationsPerNode: 1, mentionsPerNode: 2, assertionsPerAnchor: 1 };
+    const batch = await reader.readKnowledgeProjectionBatch(project.id, nodeIds, limits);
+    const singles = {
+      aliases: [] as KnowledgeProjectionBatch["aliases"][number][],
+      relations: [] as KnowledgeProjectionBatch["relations"][number][],
+      mentions: [] as KnowledgeProjectionBatch["mentions"][number][],
+      anchors: [] as KnowledgeProjectionBatch["anchors"][number][],
+      revisions: [] as KnowledgeProjectionBatch["revisions"][number][],
+      assertionEvidence: [] as KnowledgeProjectionBatch["assertionEvidence"][number][],
+      assertions: [] as KnowledgeProjectionBatch["assertions"][number][],
+    };
+    for (const selectedNodeId of nodeIds) {
+      for (const alias of await reader.listKnowledgeAliases(project.id, selectedNodeId, limits.aliasesPerNode)) {
+        singles.aliases.push({ nodeId: selectedNodeId, alias });
+      }
+      for (const relation of await reader.listKnowledgeRelations(project.id, selectedNodeId, limits.relationsPerNode)) {
+        singles.relations.push({ nodeId: selectedNodeId, relation });
+      }
+      singles.mentions.push(...await reader.listNodeMentions(project.id, selectedNodeId, limits.mentionsPerNode));
+    }
+    const revisions = new Set<string>();
+    const assertions = new Set<string>();
+    for (const evidenceId of [...new Set(singles.mentions.map(mention => mention.evidenceId))].sort()) {
+      const anchor = await reader.getEvidenceAnchor(project.id, evidenceId);
+      if (!anchor) continue;
+      singles.anchors.push(anchor);
+      const revisionKey = JSON.stringify([anchor.documentId, anchor.revisionId]);
+      if (!revisions.has(revisionKey)) {
+        revisions.add(revisionKey);
+        const revision = await reader.getRevision(project.id, anchor.documentId, anchor.revisionId);
+        if (revision) singles.revisions.push(revision);
+      }
+      for (const link of await reader.listEvidenceAssertions(project.id, evidenceId, limits.assertionsPerAnchor)) {
+        singles.assertionEvidence.push({ evidenceId, link });
+        if (!assertions.has(link.assertionId)) {
+          assertions.add(link.assertionId);
+          const assertion = await reader.getAssertion(project.id, link.assertionId);
+          if (assertion) singles.assertions.push(assertion);
+        }
+      }
+    }
+    const sorted = (value: KnowledgeProjectionBatch): KnowledgeProjectionBatch => {
+      const byJson = <T>(rows: readonly T[]): T[] => [...rows].sort((left, right) =>
+        (JSON.stringify(left) ?? "").localeCompare(JSON.stringify(right) ?? ""));
+      return {
+        aliases: byJson(value.aliases), relations: byJson(value.relations), mentions: byJson(value.mentions),
+        anchors: byJson(value.anchors), revisions: byJson(value.revisions),
+        assertionEvidence: byJson(value.assertionEvidence), assertions: byJson(value.assertions),
+      };
+    };
+    return { batch: sorted(batch), singles: sorted(singles) };
+  });
+  assert.deepEqual(batchComparison.batch, batchComparison.singles,
+    "bounded set reads enforce each parent limit and retain exact source revision mapping");
+  assert.equal(batchComparison.batch.aliases.length, 2,
+    "a limit of one applies to both parents instead of truncating the whole batch");
+  assert.equal(batchComparison.batch.relations.length, 2,
+    "a relation joining two selected nodes is mapped once to each parent");
+  assert.equal(batchComparison.batch.anchors.find(anchor => anchor.id === historicalEvidenceId)?.revisionId,
+    latestHistoricalRevision.revision.id, "the batch keeps the anchor's exact source revision");
+  assert.equal(batchComparison.batch.revisions.find(revision => revision.documentId === historicalDocument.document.id)?.markdown,
+    latestHistoricalBody, "the batch maps its source revision for the correct document");
 
   const reviewedAnchor = await persistence.transaction((transaction) => transaction.saveEvidenceAnchor({
     projectId: project.id,
