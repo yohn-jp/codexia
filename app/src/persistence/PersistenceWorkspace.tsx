@@ -130,15 +130,15 @@ function desktopDurabilityFor(active: ActiveDocument | null): DesktopDurability 
 }
 
 function desktopDurabilityLabel(active: ActiveDocument | null, pending: PendingSave | undefined, loading: boolean): string | undefined {
-  if (!active) return loading ? "原稿を確認中" : undefined;
-  if (active.remoteConflict) return "競合・比較が必要";
-  if (active.recovery === "failed") return "下書き保護に失敗";
-  if (active.recovery === "other-tab") return "別タブの下書きを確認";
-  if (active.save === "failed" || active.error) return "保存結果を要確認";
-  if (active.save === "saving") return pending && (pending.generation !== active.generation || pending.markdown !== active.markdown) ? "保存中・新しい入力あり" : "保存中";
-  if (active.dirty && active.recovery === "pending") return "入力を保護中";
-  if (active.dirty) return "下書き";
-  return active.save === "saved" && active.recovery === "stored" ? "保存済み" : "原稿を確認中";
+  if (!active) return loading ? "保存状態を要確認・原稿を確認中" : undefined;
+  if (active.remoteConflict) return "保存状態を要確認・競合";
+  if (active.recovery === "failed") return "保存状態を要確認・下書き保護失敗";
+  if (active.recovery === "other-tab") return "保存状態を要確認・別タブの下書き";
+  if (active.save === "failed" || active.error) return "保存状態を要確認";
+  if (active.save === "saving") return pending && (pending.generation !== active.generation || pending.markdown !== active.markdown) ? "PostgreSQLへ保存中・新しい入力あり" : "PostgreSQLへ保存中";
+  if (active.dirty && active.recovery === "pending") return "PostgreSQL未保存・入力を保護中";
+  if (active.dirty) return "PostgreSQL未保存";
+  return active.save === "saved" && active.recovery === "stored" ? "PostgreSQL保存済み" : "保存状態を要確認";
 }
 
 function desktopDurabilityDetail(active: ActiveDocument | null, status: DesktopDurability | undefined): string | undefined {
