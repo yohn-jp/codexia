@@ -38,10 +38,12 @@ grep -q 'changed=0' "$tmp/second.log"
 test "$(id -u "$user")" = "$uid"
 test "$(id -g "$user")" = "$uid"
 test "$(loginctl show-user "$user" --property=Linger --value)" = yes
-rootless() {
+rootless() (
+  # The runner checkout is intentionally inaccessible to the fixture account.
+  cd /
   sudo -H -u "$user" env HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_DATA_HOME="$home/.local/share" XDG_STATE_HOME="$home/.local/state" XDG_RUNTIME_DIR="/run/user/$uid" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"
-}
+)
 test "$(rootless /usr/bin/podman info --format '{{.Host.Security.Rootless}} {{.Host.CgroupVersion}}')" = 'true v2'
 rootless mkdir -p "$home/.config/containers/systemd"
 cat <<'QUADLET' | rootless tee "$home/.config/containers/systemd/codexia-fixture.network" >/dev/null
