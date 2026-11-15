@@ -1,0 +1,151 @@
+---
+- name: Validate host stage before privileged work
+  ansible.builtin.include_tasks: host-validate.yml
+- name: Converge only the declared host baseline
+  become: true
+  become_user: root
+  block:
+    - name: Observe user and group identity before any mutation
+      ansible.builtin.command:
+        argv: [getent, "{{ item.database }}", "{{ item.key }}"]
+      loop:
+        - {database: passwd, key: "{{ codexia_service_user }}"}
+        - {database: passwd, key: "{{ codexia_service_uid | string }}"}
+        - {database: group, key: "{{ codexia_service_group }}"}
+        - {database: group, key: "{{ codexia_service_gid | string }}"}
+      register: host_identity
+      changed_when: false
+      failed_when: host_identity.rc not in [0, 2]
+    - name: Reject identity collisions or mismatched existing identity
+      ansible.builtin.assert:
+        that:
+          - (u.rc == 0 and un.rc == 0 and u.stdout == un.stdout) or (u.rc == 2 and un.rc == 2 and (codexia_create_service_account | default(false) | bool))
+          - (g.rc == 0 and gn.rc == 0 and g.stdout == gn.stdout) or (g.rc == 2 and gn.rc == 2 and u.rc == 2)
+          - u.rc != 0 or (u.stdout.split(':') | length == 7 and u.stdout.split(':')[0] == codexia_service_user and u.stdout.split(':')[2] | int == codexia_service_uid and u.stdout.split(':')[3] | int == codexia_service_gid and u.stdout.split(':')[5] == codexia_service_home)
+          - g.rc != 0 or (g.stdout.split(':') | length == 4 and g.stdout.split(':')[0] == codexia_service_group and g.stdout.split(':')[2] | int == codexia_service_gid)
+        fail_msg: Existing identity differs, ID is already occupied, or new account creation was not authorized.
+      vars:
+        u: "{{ host_identity.results[0] }}"
+        un: "{{ host_identity.results[1] }}"
+        g: "{{ host_identity.results[2] }}"
+        gn: "{{ host_identity.results[3] }}"
+    - name: Observe the service home without following symlinks
+      ansible.builtin.stat:
+        path: "{{ codexia_service_home }}"
+        follow: false
+        get_checksum: false
+        get_mime: false
+        get_attributes: false
+      register: host_home
+    - name: Reject unexpected or unowned home rather than adopting it implicitly
+      ansible.builtin.assert:
+        that:
+          - (host_identity.results[0].rc == 2 and not host_home.stat.exists) or (host_identity.results[0].rc == 0 and (host_home.stat.isdir | default(false)) and host_home.stat.uid == codexia_service_uid and host_home.stat.gid == codexia_service_gid)
+    - name: Validate existing rootless subordinate mappings before package changes
+      ansible.builtin.command:
+        argv: [python3, -c, "{{ lookup('ansible.builtin.file', playbook_dir + '/host-contract.py') }}", "{{ codexia_service_user }}", "{{ codexia_service_uid | string }}", "{{ codexia_service_gid | string }}"]
+      changed_when: false
+      when: host_identity.results[0].rc == 0
+    - name: Observe installed package inventory
+      ansible.builtin.package_facts:
+        manager: apt
+    - name: Require compatible installed Podman or Node before mutation
+      ansible.builtin.command:
+        argv: [dpkg, --compare-versions, "{{ ansible_facts.packages[item.name][0].version }}", ge, "{{ item.minimum }}"]
+      loop:
+        - {name: podman, minimum: '5.7'}
+        - {name: nodejs, minimum: '22'}
+      when: item.name in ansible_facts.packages
+      changed_when: false
+    - name: Install missing distribution packages without upgrading installed packages
+      ansible.builtin.apt:
+        name: "{{ host_packages | difference(ansible_facts.packages.keys() | list) }}"
+        state: present
+        install_recommends: false
+        update_cache: true
+        cache_valid_time: 3600
+      vars:
+        host_packages: [podman, nodejs, uidmap, slirp4netns, fuse-overlayfs, dbus-user-session, age, util-linux, ca-certificates, acl]
+      when: host_packages | difference(ansible_facts.packages.keys() | list) | length > 0
+    - name: Verify actual Podman and Node runtime versions
+      ansible.builtin.command:
+        argv: ["{{ item.binary }}", --version]
+      loop:
+        - {binary: /usr/bin/podman}
+        - {binary: /usr/bin/node}
+      register: host_versions
+      changed_when: false
+    - name: Require supported runtime versions
+      ansible.builtin.assert:
+        that:
+          - host_versions.results[0].stdout is match('^podman version [0-9]+\.[0-9]+\.[0-9]+')
+          - host_versions.results[0].stdout.split(' ')[-1] is version('5.7.0', '>=')
+          - host_versions.results[1].stdout is match('^v[0-9]+\.[0-9]+\.[0-9]+')
+          - host_versions.results[1].stdout[1:] is version('22.0.0', '>=')
+    - name: Observe installed Quadlet user generator
+      ansible.builtin.stat:
+        path: /usr/lib/systemd/user-generators/podman-user-generator
+        follow: true
+        get_checksum: false
+        get_mime: false
+        get_attributes: false
+      register: host_quadlet
+    - name: Require the rootless Quadlet generator
+      ansible.builtin.assert:
+        that: host_quadlet.stat.executable | default(false)
+    - name: Create explicitly authorized service primary group when absent
+      ansible.builtin.group:
+        name: "{{ codexia_service_group }}"
+        gid: "{{ codexia_service_gid }}"
+        state: present
+      when: host_identity.results[2].rc == 2
+    - name: Create explicitly authorized service account when absent
+      ansible.builtin.user:
+        name: "{{ codexia_service_user }}"
+        uid: "{{ codexia_service_uid }}"
+        group: "{{ codexia_service_group }}"
+        home: "{{ codexia_service_home }}"
+        create_home: true
+        shell: /bin/bash
+        password_lock: true
+        state: present
+      when: host_identity.results[0].rc == 2
+    - name: Verify system-allocated subordinate ID mappings
+      ansible.builtin.command:
+        argv: [python3, -c, "{{ lookup('ansible.builtin.file', playbook_dir + '/host-contract.py') }}", "{{ codexia_service_user }}", "{{ codexia_service_uid | string }}", "{{ codexia_service_gid | string }}"]
+      changed_when: false
+    - name: Observe lingering configuration
+      ansible.builtin.stat:
+        path: "/var/lib/systemd/linger/{{ codexia_service_user }}"
+        get_checksum: false
+        get_mime: false
+        get_attributes: false
+      register: host_linger
+    - name: Enable lingering only when missing
+      ansible.builtin.command:
+        argv: [loginctl, enable-linger, "{{ codexia_service_user }}"]
+      when: not host_linger.stat.exists
+    - name: Verify the runtime user manager is active
+      ansible.builtin.command:
+        argv: [systemctl, is-active, "user@{{ codexia_service_uid }}.service"]
+      register: host_manager
+      until: host_manager.rc == 0 and host_manager.stdout == 'active'
+      retries: 10
+      delay: 2
+      changed_when: false
+    - name: Verify lingering is enabled
+      ansible.builtin.command:
+        argv: [loginctl, show-user, "{{ codexia_service_user }}", --property=Linger, --value]
+      register: host_linger_status
+      changed_when: false
+      failed_when: host_linger_status.rc != 0 or host_linger_status.stdout != 'yes'
+- name: Verify the rootless user manager without starting Podman or application units
+  become: true
+  become_user: "{{ codexia_service_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ codexia_service_uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ codexia_service_uid }}/bus"
+    XDG_STATE_HOME: "{{ codexia_service_home }}/.local/state"
+  ansible.builtin.command:
+    argv: [systemctl, --user, show, --property=Version]
+  changed_when: false

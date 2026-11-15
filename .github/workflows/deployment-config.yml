@@ -69,6 +69,8 @@ jobs:
           "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i deploy/ansible/inventory.example.yml deploy/ansible/site.yml --syntax-check
           ANSIBLE_PLAYBOOK="$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" bash deploy/ansible/test-preflight.sh
           ANSIBLE_PLAYBOOK="$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" bash deploy/ansible/test-inspect.sh
+          python3 -m unittest discover -s deploy/ansible -p 'test_host_contract.py'
+          ANSIBLE_PLAYBOOK="$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" bash deploy/ansible/test-host-validation.sh
       - name: Check all Terraform files
         uses: hashicorp/setup-terraform@v4.0.1
         with:

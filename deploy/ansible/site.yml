@@ -39,6 +39,12 @@
     - name: End read-only inspection before any convergence task
       ansible.builtin.meta: end_host
       when: codexia_stage == 'inspect'
+    - name: Converge the supported host baseline without touching application services
+      ansible.builtin.include_tasks: host.yml
+      when: codexia_stage == 'host'
+    - name: End host convergence before any application task
+      ansible.builtin.meta: end_host
+      when: codexia_stage == 'host'
     - name: Require explicit standalone deployment inputs
       ansible.builtin.assert:
         that:
