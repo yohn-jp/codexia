@@ -31,7 +31,7 @@
     "@codexia/persistence-postgres": "workspace:*",
     "@codexia/module-runtime": "workspace:*",
     "fastify": "^5.12.8",
-    "zod": "3.25.76"
+    "zod": "4.6.6"
   },
   "files": [
     "dist"
