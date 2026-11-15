@@ -33,6 +33,12 @@
       browserAuth: "{{ codexia_browser_auth }}"
   environment: "{{ updater_env }}"
   tasks:
+    - name: Inspect host and existing runtime without converging application state
+      ansible.builtin.include_tasks: inspect.yml
+      when: codexia_stage == 'inspect'
+    - name: End read-only inspection before any convergence task
+      ansible.builtin.meta: end_host
+      when: codexia_stage == 'inspect'
     - name: Require explicit standalone deployment inputs
       ansible.builtin.assert:
         that:

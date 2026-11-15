@@ -7,6 +7,8 @@ all:
           ansible_user: codexia
       vars:
         codexia_stage: prepare
+        # Runtime account for read-only inspection; use the actual adopted identity.
+        codexia_service_user: codexia
         codexia_frontend_origin: https://codexia.example.invalid
         codexia_browser_auth:
           mode: token

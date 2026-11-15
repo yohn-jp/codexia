@@ -1,0 +1,175 @@
+---
+# This stage never reads credential values, changes units or starts services.
+- name: Validate the supported host and explicit runtime identity
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.distribution == 'Ubuntu'
+      - ansible_facts.distribution_version == '26.04'
+      - ansible_facts.architecture == 'x86_64'
+      - ansible_facts.service_mgr == 'systemd'
+      - codexia_service_user is defined
+      - codexia_service_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+      - codexia_service_user != 'root'
+    fail_msg: Unsupported standalone host or missing explicit runtime account.
+- name: Observe cgroup v2 availability
+  ansible.builtin.stat:
+    path: /sys/fs/cgroup/cgroup.controllers
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  register: inspect_cgroup
+- name: Observe tool paths without installing packages
+  ansible.builtin.command:
+    argv: [sh, -c, 'command -v "$1"', sh, "{{ item }}"]
+  loop: [podman, node, flock, age, findmnt, loginctl, systemctl]
+  register: inspect_tools
+  changed_when: false
+  failed_when: inspect_tools.rc not in [0, 1]
+  check_mode: false
+- name: Resolve existing service account
+  ansible.builtin.command:
+    argv: [getent, passwd, "{{ codexia_service_user }}"]
+  register: inspect_account
+  changed_when: false
+  failed_when: inspect_account.rc not in [0, 2]
+  check_mode: false
+- name: Validate an existing account before using its home
+  ansible.builtin.assert:
+    that:
+      - (inspect_account.stdout.split(':') | length) == 7
+      - inspect_account.stdout.split(':')[0] == codexia_service_user
+      - inspect_account.stdout.split(':')[2] | int > 0
+      - inspect_account.stdout.split(':')[5] is match('^/')
+  when: inspect_account.rc == 0
+- name: Report host baseline without assuming a missing runtime is healthy
+  ansible.builtin.debug:
+    msg:
+      platform: "{{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }} {{ ansible_facts.architecture }}"
+      cgroup_v2: "{{ inspect_cgroup.stat.exists }}"
+      service_account_present: "{{ inspect_account.rc == 0 }}"
+      tools: "{{ dict(inspect_tools.results | map(attribute='item') | zip(inspect_tools.results | map(attribute='rc'))) }}"
+      tool_status_codes: "0=present, 1=absent"
+- name: Require cgroup v2 on the supported baseline
+  ansible.builtin.assert:
+    that: inspect_cgroup.stat.exists
+- name: Inspect the existing rootless account only under its own SSH identity
+  when: inspect_account.rc == 0
+  block:
+    - name: Require the runtime SSH identity for account-scoped inspection
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.user_id == codexia_service_user
+          - ansible_facts.user_uid | int == inspect_account.stdout.split(':')[2] | int
+          - ansible_facts.user_dir == inspect_account.stdout.split(':')[5]
+        fail_msg: Run existing-account inspection using the declared runtime SSH identity.
+    - name: Observe rootless host file metadata without reading content
+      ansible.builtin.stat:
+        path: "{{ ansible_facts.user_dir }}/{{ item }}"
+        get_checksum: false
+        get_mime: false
+        get_attributes: false
+        follow: false
+      loop:
+        - .local/share/containers/storage
+        - .config/containers/systemd/codexia-db.container
+        - .config/containers/systemd/codexia-api.container
+        - .config/containers/systemd/codexia-api-proxy.container
+        - .config/containers/systemd/codexia-tunnel.container
+        - .config/containers/systemd/codexia.network
+        - .config/containers/systemd/codexia-data.network
+        - .config/containers/systemd/codexia-postgres.volume
+        - .config/containers/systemd/codexia-data.volume
+        - .config/containers/systemd/codexia-history.volume
+        - .config/systemd/user/codexia-updater-boot.service
+        - .config/systemd/user/codexia-updater.service
+        - .config/systemd/user/codexia-updater.timer
+        - .config/codexia-updater/config.json
+        - .local/state/codexia-updater/controller.json
+        - .local/state/codexia-updater/route
+      register: inspect_files
+    - name: Observe user lingering
+      ansible.builtin.command:
+        argv: [loginctl, show-user, "{{ codexia_service_user }}", --property=Linger, --value]
+      register: inspect_linger
+      changed_when: false
+      failed_when: false
+      check_mode: false
+    - name: Report local file presence and lingering
+      ansible.builtin.debug:
+        msg:
+          files: "{{ dict(inspect_files.results | map(attribute='item') | zip(inspect_files.results | map(attribute='stat.exists'))) }}"
+          linger: "{{ inspect_linger.stdout if inspect_linger.rc == 0 else 'unobservable' }}"
+    - name: Avoid initializing Podman storage during inspection of an empty account
+      ansible.builtin.set_fact:
+        inspect_podman_available: "{{ (inspect_files.results[0].stat.isdir | default(false)) and (inspect_tools.results[0].rc == 0) }}"
+    - name: Observe existing rootless Podman runtime
+      when: inspect_podman_available | bool
+      block:
+        - name: Query the rootless Podman security and cgroup mode
+          ansible.builtin.command:
+            argv: [podman, info, --format, "{% raw %}{{.Host.Security.Rootless}} {{.Host.CgroupVersion}}{% endraw %}"]
+          register: inspect_podman_mode
+          changed_when: false
+          check_mode: false
+        - name: Reject an unexpected Podman security boundary
+          ansible.builtin.assert:
+            that: inspect_podman_mode.stdout == 'true v2'
+        - name: Observe network identities
+          ansible.builtin.command:
+            argv: [podman, network, exists, "{{ item }}"]
+          loop: [codexia, codexia-data]
+          register: inspect_networks
+          changed_when: false
+          failed_when: inspect_networks.rc not in [0, 1]
+          check_mode: false
+        - name: Observe persistent volume identities
+          ansible.builtin.command:
+            argv: [podman, volume, exists, "{{ item }}"]
+          loop: [codexia-postgres, codexia-data, codexia-history]
+          register: inspect_volumes
+          changed_when: false
+          failed_when: inspect_volumes.rc not in [0, 1]
+          check_mode: false
+        - name: Observe secret names only
+          ansible.builtin.command:
+            argv: [podman, secret, exists, "{{ item }}"]
+          loop:
+            - codexia-auth-token
+            - codexia-tunnel-token
+            - codexia-postgres-admin-password
+            - codexia-postgres-app-password
+            - codexia-postgres-preflight-password
+          register: inspect_secrets
+          changed_when: false
+          failed_when: inspect_secrets.rc not in [0, 1]
+          check_mode: false
+        - name: Observe container identities
+          ansible.builtin.command:
+            argv: [podman, container, exists, "{{ item }}"]
+          loop: [codexia-db, codexia-api, codexia-api-proxy, codexia-tunnel, codexia-slot-blue, codexia-slot-green, codexia-preflight-blue, codexia-preflight-green]
+          register: inspect_containers
+          changed_when: false
+          failed_when: inspect_containers.rc not in [0, 1]
+          check_mode: false
+        - name: Observe running state and image identity without inspecting environment or mounts
+          ansible.builtin.command:
+            argv: [podman, inspect, --type, container, --format, "{% raw %}{{.State.Running}} {{.Image}} {{.ImageName}}{% endraw %}", "{{ item.item }}"]
+          loop: "{{ inspect_containers.results | selectattr('rc', 'equalto', 0) | list }}"
+          loop_control:
+            label: "{{ item.item }}"
+          register: inspect_images
+          changed_when: false
+          check_mode: false
+        - name: Report observed local topology without credential material
+          ansible.builtin.debug:
+            msg:
+              networks: "{{ dict(inspect_networks.results | map(attribute='item') | zip(inspect_networks.results | map(attribute='rc'))) }}"
+              volumes: "{{ dict(inspect_volumes.results | map(attribute='item') | zip(inspect_volumes.results | map(attribute='rc'))) }}"
+              secrets: "{{ dict(inspect_secrets.results | map(attribute='item') | zip(inspect_secrets.results | map(attribute='rc'))) }}"
+              containers: "{{ dict(inspect_containers.results | map(attribute='item') | zip(inspect_containers.results | map(attribute='rc'))) }}"
+              existing_images: "{{ dict(inspect_images.results | map(attribute='item.item') | zip(inspect_images.results | map(attribute='stdout'))) }}"
+              status_codes: "0=present, 1=absent; image fields=running, image ID, configured image"
+    - name: Report an unobserved Podman store rather than initializing it
+      ansible.builtin.debug:
+        msg: "Runtime storage absent or noncanonical, or Podman unavailable; container topology is NOT_CHECKED."
+      when: not (inspect_podman_available | bool)
