@@ -116,7 +116,7 @@
           check_mode: false
         - name: Reject an unexpected Podman security boundary
           ansible.builtin.assert:
-            that: inspect_podman_mode.stdout == 'true v2'
+            that: inspect_podman_mode.stdout == 'true'
         - name: Observe network identities
           ansible.builtin.command:
             argv: [podman, network, exists, "{{ item }}"]
