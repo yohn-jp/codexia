@@ -87,3 +87,20 @@ test('post-deploy identity mismatch does not disclose untrusted additional respo
     return true;
   });
 });
+
+test('interactive edge challenges on identity paths are distinct from Access denial', async () => {
+  const challenged = () => new Response('private-body', { status: 403, headers: { 'cf-mitigated': 'challenge', 'cf-ray': 'abcdef-NRT' } });
+  await assert.rejects(probeLiveDeployment({ env, fetchImpl: async (url, options) =>
+    url.pathname === '/api/version' ? challenged() : normal(url, options)
+  }), error => {
+    assert.match(error.message, /EDGE_CHALLENGE: \/api\/version/);
+    assert.doesNotMatch(error.message, /ACCESS_DENIED|private-body/);
+    return true;
+  });
+  await assert.rejects(probeLiveDeployment({ env, checkBoundary: true, fetchImpl: async (url, options) =>
+    url.pathname === '/api/version' && !options.headers['CF-Access-Client-Id'] ? challenged() : normal(url, options)
+  }), /EDGE_CHALLENGE: anonymous identity request to \/api\/version/);
+  await probeLiveDeployment({ env, checkBoundary: true, fetchImpl: async (url, options) =>
+    !allowedPaths.includes(url.pathname) ? challenged() : normal(url, options)
+  });
+});

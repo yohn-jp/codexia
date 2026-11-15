@@ -1,6 +1,5 @@
 name: Production Access Preflight
 on:
-  workflow_call:
   workflow_dispatch:
   schedule:
     - cron: '17 0 * * *'
