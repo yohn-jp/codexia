@@ -1,0 +1,26 @@
+{
+  "source": {
+    "commit": "9e02d34f8dd4a00f321f1f43df9c63f6d09b4c05",
+    "clean": true,
+    "status": "",
+    "statusSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "worktreeDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "root": "<REPO_ROOT>",
+  "outputRoot": "<OUTPUT_DIR>",
+  "databaseName": "codexia_perf_run_luna3",
+  "selectedDatasets": [
+    "small",
+    "long-form",
+    "knowledge-dense",
+    "limit-999",
+    "limit-1000",
+    "limit-1001"
+  ],
+  "repeats": 20,
+  "timeoutMs": 600000,
+  "browserSizes": [
+    "small",
+    "long-form"
+  ]
+}

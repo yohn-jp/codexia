@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 2,
+  "timestamp": "2026-11-15T04:08:09.822Z",
+  "command": [
+    "node",
+    "scripts/performance/run.mjs",
+    "<OUTPUT_DIR>"
+  ],
+  "source": {
+    "commit": "9e02d34f8dd4a00f321f1f43df9c63f6d09b4c05",
+    "clean": true,
+    "status": "",
+    "statusSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "worktreeDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "build": {
+    "app/dist": {
+      "root": "app/dist",
+      "files": 27,
+      "sha256": "97aa72377d2f7cd9495ce3f9493b7f65eaa4addd85db89113cfddfa97b7c5953"
+    },
+    "packages/core/dist": {
+      "root": "packages/core/dist",
+      "files": 45,
+      "sha256": "2829988958fbfedac6ea77b1f0a6199c56766ece8a04cd4b0c1de9a4b6a5007f"
+    },
+    "packages/api/dist": {
+      "root": "packages/api/dist",
+      "files": 87,
+      "sha256": "dd1c4fe62e86fe87bd4a46f87db0ce2a894171dd0eaa1393fb54b883b7ef4438"
+    },
+    "packages/persistence-postgres/dist": {
+      "root": "packages/persistence-postgres/dist",
+      "files": 15,
+      "sha256": "911097628cc2fb6331532fc773d0bffdc43e8d2f1522364b855278342733ef60"
+    }
+  },
+  "node": "v24.21.0",
+  "pnpm": "12.10.1",
+  "git": "git version 2.54.0",
+  "os": {
+    "platform": "linux",
+    "release": "6.18.52",
+    "arch": "x64",
+    "distribution": {
+      "ANSI_COLOR": "0;38;2;126;186;228",
+      "BUG_REPORT_URL": "https://github.com/NixOS/nixpkgs/issues",
+      "BUILD_ID": "26.05.10304.6d663c0533ff",
+      "CPE_NAME": "cpe:/o:nixos:nixos:26.05",
+      "DEFAULT_HOSTNAME": "nixos",
+      "DOCUMENTATION_URL": "https://nixos.org/learn.html",
+      "HOME_URL": "https://nixos.org/",
+      "ID": "nixos",
+      "ID_LIKE": "",
+      "IMAGE_ID": "",
+      "IMAGE_VERSION": "",
+      "LOGO": "nix-snowflake",
+      "NAME": "NixOS",
+      "PRETTY_NAME": "NixOS 26.05 (Yarara)",
+      "SUPPORT_END": "2026-12-31",
+      "SUPPORT_URL": "https://nixos.org/community.html",
+      "VARIANT": "",
+      "VARIANT_ID": "",
+      "VENDOR_NAME": "NixOS",
+      "VENDOR_URL": "https://nixos.org/",
+      "VERSION": "26.05 (Yarara)",
+      "VERSION_CODENAME": "yarara",
+      "VERSION_ID": "26.05"
+    }
+  },
+  "cpuModels": [
+    "Intel(R) Core(TM) i5-14600KF"
+  ],
+  "logicalCpus": 16,
+  "totalMemoryBytes": 50994458624,
+  "freeMemoryBytes": 47923408896,
+  "loadAverage": [
+    0.42,
+    0.53,
+    0.6
+  ],
+  "profile": "core",
+  "repeats": 20,
+  "browserSaveRepeats": 3,
+  "timeoutMs": 600000,
+  "poolMax": 10,
+  "lockPollMs": 25,
+  "browserExecutable": "/nix/store/r0f9i35n3r7rng8162xih4c1dag0s1vw-chromium-156.0.8078.47/bin/chromium",
+  "browserSizes": [
+    "small",
+    "long-form"
+  ],
+  "selectedDatasets": [
+    "small",
+    "long-form",
+    "knowledge-dense",
+    "limit-999",
+    "limit-1000",
+    "limit-1001"
+  ],
+  "instrumentation": {
+    "version": 2,
+    "processWrappers": [
+      "pg Client.query",
+      "pg Pool.connect",
+      "readFile",
+      "Git process"
+    ],
+    "pgLockWait": "pg_stat_activity wait_event_type polling on a separate observer connection",
+    "sqlRowsBytes": "PostgreSQL returned rows, driver rowCount and serialized returned-row bytes",
+    "setupExcluded": [
+      "migration",
+      "fixture generation",
+      "PostgreSQL seeding",
+      "browser/API startup"
+    ]
+  }
+}

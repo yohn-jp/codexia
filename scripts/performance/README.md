@@ -12,7 +12,8 @@ CODEXIA_PROFILE=core pnpm build
 podman run --detach --rm --name codexia-perf-baseline-20261115 \
   --publish 127.0.0.1:55440:5432 \
   --env POSTGRES_USER=codexia --env POSTGRES_PASSWORD=codexia \
-  --env POSTGRES_DB=codexia_perf_baseline postgres:16-alpine
+  --env POSTGRES_DB=codexia_perf_baseline \
+  docker.io/library/postgres@sha256:f4b419e350fd98d4a8429603295208976dea4c8fb8326d818d346d3e29f1db6f
 export CODEXIA_TEST_DATABASE_URL='postgres://codexia:codexia@127.0.0.1:55440/codexia_perf_baseline'
 export BENCH_REPEATS=20
 export BENCH_BROWSER_SAVE_REPEATS=3
