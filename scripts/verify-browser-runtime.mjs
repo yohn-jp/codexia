@@ -18,7 +18,7 @@ assert.equal(process.versions.node.split(".")[0], "24", "The browser runner must
 assert.equal(
   process.env.CODEXIA_PLAYWRIGHT_IMAGE_DIGEST,
   expectedImageDigest,
-  "The browser job must declare the pinned Playwright 1.64.1 Noble image digest",
+  "The browser job must declare the pinned Playwright 1.65.1 Noble image digest",
 );
 
 const operatingSystem = await readFile("/etc/os-release", "utf8");
@@ -29,7 +29,7 @@ const pnpmVersion = pnpmVersionOutput.trim();
 assert.equal(pnpmVersion, "12.21.0", "The browser runner must use pnpm 12.21.0");
 
 const playwrightPackage = JSON.parse(await readFile(resolve(root, "node_modules/@playwright/test/package.json"), "utf8"));
-assert.equal(playwrightPackage.version, "1.64.1", "The installed Playwright package must match the pinned browser image");
+assert.equal(playwrightPackage.version, "1.65.1", "The installed Playwright package must match the pinned browser image");
 
 async function verifyBrowser(name, browserType) {
   const browser = await browserType.launch({ headless: true });
