@@ -798,7 +798,15 @@ export class CoreStore implements MutationCoordinator {
   async buildDeleteHierarchyOperation(projectId:string,input:HierarchyTarget,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
     const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),target=this.findDocument(manifest,input.id,index);if(target.kind!==input.kind)fail(422,"invalid_hierarchy_target","Hierarchy kind mismatch");
     const selected=new Set<string>([target.id]),pending=[target.id];for(let cursor=0;cursor<pending.length;cursor++)for(const document of index.documentsByParentId.get(pending[cursor]!)??[])if(!selected.has(document.id)){selected.add(document.id);pending.push(document.id);}
-    const writes=Object.entries(manifest.files).filter(([,file])=>file.documentId&&selected.has(file.documentId)).map(([path,file])=>({path,revision:file.revision,content:null}));return this.buildOperation(projectId,writes,"structure",`Delete ${input.kind} ${input.id}`,manifest.snapshot);
+    const entries=Object.entries(manifest.files).filter(([,file])=>file.documentId&&selected.has(file.documentId));
+    if (!pinned) {
+      // JSONB object key order differs from the original current projection.
+      // Retain its document order and metadata-before-body write ordering.
+      const order = new Map(manifest.documents.map((document, position) => [document.id, position]));
+      entries.sort(([,left],[,right]) => order.get(left.documentId as DocumentId)! - order.get(right.documentId as DocumentId)! ||
+        Number(Boolean(right.metadata)) - Number(Boolean(left.metadata)));
+    }
+    const writes=entries.map(([path,file])=>({path,revision:file.revision,content:null}));return this.buildOperation(projectId,writes,"structure",`Delete ${input.kind} ${input.id}`,manifest.snapshot);
   }
   async buildReorderHierarchyOperation(projectId:string,input:ReorderHierarchyInput,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
     const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest);let parent:Document|undefined;if(input.kind==="chapter")parent=this.findDocument(manifest,input.volumeId,index);if(input.kind==="scene")parent=this.findDocument(manifest,input.chapterId,index);

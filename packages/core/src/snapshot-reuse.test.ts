@@ -377,3 +377,26 @@ test("writing statistics preserve a non-scene first-match logical identity colli
   assert.equal(stats.sceneById["shared-logical"]?.charCount,3);
   assert.equal(stats.totalCharCount,3);
 });
+
+test("durable current reuse preserves hierarchy deletion write order", async () => {
+  const project = await createProject();
+  const {volume,chapter,scene} = await persistence.transaction(async tx => {
+    const create = (kind: string,parentId: DocumentId | null) => tx.createDocument({
+      projectId:project.id,kind,parentId,title:kind,markdown:"本文",orderKey:"01",
+      authorId:"synthetic-author",idempotencyKey:randomUUID(),
+    });
+    const volume = await create("volume",null);
+    const chapter = await create("chapter",volume.document.id);
+    const scene = await create("scene",chapter.document.id);
+    return {volume,chapter,scene};
+  });
+  const target = {kind:"scene" as const,id:scene.document.id,volumeId:volume.document.id,chapterId:chapter.document.id};
+  const first = await core.buildDeleteHierarchyOperation(project.id,target);
+  const current = await core.readSceneSnapshot(project.id,scene.document.id);
+  const expected = [current.metadata.path,current.document.path];
+  assert.deepEqual(first.operation.writes.map(write=>write.path),expected);
+  const warm = await core.buildDeleteHierarchyOperation(project.id,target);
+  assert.deepEqual(warm.operation.writes,first.operation.writes);
+  const restarted = new CoreStore({persistence});
+  assert.deepEqual((await restarted.buildDeleteHierarchyOperation(project.id,target)).operation.writes,first.operation.writes);
+});
