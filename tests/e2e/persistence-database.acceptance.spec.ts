@@ -243,4 +243,11 @@ test("a 501-document PostgreSQL work opens its final scene through the canonical
   const outline=page.locator('[data-workspace-panel="outline"]');
   await expect(outline.locator(".pg-outline-item")).toHaveCount(501);
   await expect(outline.locator(`[data-document-id="${last.id}"] .pg-outline-document`)).toHaveAttribute("aria-current","page");
+  const create=outline.locator(".pg-library-create-document");
+  await create.locator("summary").click();
+  await create.getByLabel("文書名").fill("Large scene 502");
+  await create.getByLabel("種類").selectOption("scene");
+  await create.getByRole("button",{name:"作成",exact:true}).click();
+  await expect(outline.locator(".pg-outline-item")).toHaveCount(502);
+  await expect(page.getByRole("heading",{name:"Large scene 502",exact:true})).toBeVisible();
 });

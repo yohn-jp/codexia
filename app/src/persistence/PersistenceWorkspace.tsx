@@ -969,12 +969,18 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
 
   async function editStructure(update: { title?: string; parentId?: string | null; orderKey?: string }, remove = false): Promise<void> {
     const current = activeRef.current;
-    if (!current || !await protectTransition()) return;
+    if (!current || current.document.projectId !== projectId || !await protectTransition() || projectIdRef.current !== projectId) return;
+    let committed = false;
     try {
       if (remove) await api.deletePersistenceDocument(projectId, current.document.id, current.document.version);
       else await api.updatePersistenceDocument(projectId, current.document.id, { ...update, expectedVersion: current.document.version });
+      committed = true;
+      if (projectIdRef.current !== projectId) return;
       const result = await api.persistenceDocuments(projectId);
+      if (projectIdRef.current !== projectId) return;
       setDocuments(result.documents);
+      setOutlineReadyProject(projectId);
+      setOutlineError("");
       if (remove) {
         openSequenceRef.current++;
         publishEditor(null);
@@ -986,7 +992,22 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       }
       else { const document = result.documents.find((item) => item.id === current.document.id); const latest = activeRef.current; if (document && latest?.document.id === current.document.id) publishEditor({ ...latest, document }); }
       await refreshModules();
-    } catch (error) { setPageError(error instanceof Error ? error.message : "構成を更新できませんでした。"); }
+    } catch (error) {
+      if (projectIdRef.current !== projectId) return;
+      const message = error instanceof Error ? error.message : "構成を更新できませんでした。";
+      if (committed) {
+        setOutlineReadyProject("");
+        setOutlineError("構成は変更済みですが、目次を再取得できませんでした。" + message);
+        if (remove && activeRef.current?.document.id === current.document.id) {
+          openSequenceRef.current++;
+          publishEditor(null);
+          selectionRef.current = {projectId, documentId:""};
+          persistSelectionSafely(authorScope, selectionRef.current);
+          updateRouteSelection(selectionRef.current, true);
+          setDocumentId("");
+        }
+      } else setPageError(message);
+    }
   }
 
   async function refreshEvidence(value = activeRef.current): Promise<void> {
