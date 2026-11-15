@@ -148,27 +148,33 @@ function persistSelectionSafely(authorScope: string, selection: { projectId: str
   try { writeWorkspaceSelection(window.localStorage, authorScope, selection); } catch { /* Route and journal state do not depend on preferences. */ }
 }
 
-export function PersistenceWorkspace({ mode, authorScope, onSignOut }: {
+export function PersistenceWorkspace({ mode, authorScope, onSignOut, registerProtection, sessionBlocked = false }: {
   mode: "desktop" | "mobile";
   authorScope: string;
   onSignOut: () => void;
+  registerProtection?: (guard: (() => Promise<boolean>) | null) => void;
+  sessionBlocked?: boolean;
 }) {
-  if (mode === "mobile") return <MobilePersistenceWorkspace authorScope={authorScope} onSignOut={onSignOut} />;
-  return <PersistenceWorkspaceController mode="desktop" authorScope={authorScope} onSignOut={onSignOut} />;
+  if (mode === "mobile") return <MobilePersistenceWorkspace authorScope={authorScope} onSignOut={onSignOut} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
+  return <PersistenceWorkspaceController mode="desktop" authorScope={authorScope} onSignOut={onSignOut} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
 }
 
-function MobilePersistenceWorkspace({ authorScope, onSignOut }: { authorScope: string; onSignOut: () => void }) {
+function MobilePersistenceWorkspace({ authorScope, onSignOut, registerProtection, sessionBlocked }: { authorScope: string; onSignOut: () => void; registerProtection?: (guard: (() => Promise<boolean>) | null) => void; sessionBlocked: boolean }) {
   const navigate = useNavigate();
   const navigateUrl = useCallback((url: string, replace: boolean) => { navigate(url, { replace }); }, [navigate]);
-  return <PersistenceWorkspaceController mode="mobile" authorScope={authorScope} onSignOut={onSignOut} navigateUrl={navigateUrl} />;
+  return <PersistenceWorkspaceController mode="mobile" authorScope={authorScope} onSignOut={onSignOut} navigateUrl={navigateUrl} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
 }
 
-function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigateUrl }: {
+function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigateUrl, registerProtection, sessionBlocked = false }: {
   mode: "desktop" | "mobile";
   authorScope: string;
   onSignOut: () => void;
   navigateUrl?: (url: string, replace: boolean) => void;
+  registerProtection?: (guard: (() => Promise<boolean>) | null) => void;
+  sessionBlocked?: boolean;
 }) {
+  const sessionBlockedRef = useRef(sessionBlocked);
+  sessionBlockedRef.current = sessionBlocked;
   const selectionRef = useRef((() => { try { return readWorkspaceSelectionForLocation(window.localStorage, authorScope, mode, window.location.href); } catch { return null; } })());
   const textSelectionRef = useRef<{ from: number; to: number; text: string } | null>(null);
   const legacyImportTargetRef = useRef<{ authorScope: string; projectId: string; documentId: string; revisionId: string; generation: number; markdown: string } | null>(null);
@@ -186,7 +192,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const [journalError, setJournalError] = useState("");
   const [modules, setModules] = useState<ModuleStatus[]>([]);
   const [contributions, setContributions] = useState<UiContribution[]>([]);
-  const moduleFilesRef = useRef<Array<{ path: string; revision: string | null }>>([]);
+  const moduleReadRef = useRef<{ snapshot: SnapshotId; files: Array<{ path: string; revision: string | null }> } | null>(null);
   const moduleSequenceRef = useRef(0);
   const [moduleSnapshot, setModuleSnapshot] = useState<SnapshotId | null>(null);
   const [proposals, setProposals] = useState<JournalProposal[]>([]);
@@ -209,6 +215,10 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const activeRef = useRef<ActiveDocument | null>(null);
   const pendingSaveRef = useRef(new Map<string, PendingSave>());
   const saveInFlightRef = useRef(false);
+  const restoreInFlightRef = useRef(false);
+  const [restoring, setRestoring] = useState(false);
+  const saveControllerRef = useRef<AbortController | null>(null);
+  useEffect(() => () => { saveControllerRef.current?.abort(); }, []);
   const saveDocumentRef = useRef<() => Promise<void>>(async () => undefined);
   const scratchGuardRef = useRef<(() => Promise<void>) | null>(null);
   const editorRef = useRef<ManuscriptInputHandle>(null);
@@ -393,7 +403,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const refreshModules = useCallback(async () => {
     if (projectIdRef.current !== projectId) return;
     const sequence = ++moduleSequenceRef.current;
-    if (!projectId) { setModuleSnapshot(null); setModules([]); setContributions([]); setProposals([]); return; }
+    if (!projectId) { moduleReadRef.current = null; setModuleSnapshot(null); setModules([]); setContributions([]); setProposals([]); return; }
     try {
       const [statuses, catalog, read, remote] = await Promise.all([api.modules(projectId), api.contributions(projectId), api.moduleSnapshot(projectId), api.proposalStatuses(projectId)]);
       if (sequence !== moduleSequenceRef.current) return;
@@ -405,7 +415,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         if (sequence !== moduleSequenceRef.current || projectIdRef.current !== projectId) return;
         setProposals(localProposals);
       }
-      moduleFilesRef.current = read.files;
+      if (sequence !== moduleSequenceRef.current || projectIdRef.current !== projectId) return;
+      moduleReadRef.current = { snapshot: read.snapshot, files: read.files };
       setModules(statuses); setContributions(catalog); setModuleSnapshot(read.snapshot); setModuleError("");
     } catch (error) { if (sequence !== moduleSequenceRef.current) return; setModuleError(error instanceof Error ? error.message : "モジュールを読み込めませんでした。"); }
   }, [projectId, authorScope]);
@@ -562,7 +573,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   }, [documentId, journal, openDocument, projectId, revalidateActiveDocument, resumeEpoch]);
 
   useEffect(() => {
-    if (!journal || !active?.dirty || active.generation < 1) return;
+    if (!journal || !active?.dirty || active.generation < 1 || active.recovery === "other-tab") return;
     let cancelled = false;
     let timer: number | undefined;
     const current = active;
@@ -576,7 +587,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         return;
       }
       publishEditor({ ...latest, recovery: "stored", error: "" });
-      if (!latest.remoteConflict) timer = window.setTimeout(() => { void saveDocumentRef.current(); }, 900);
+      if (!latest.remoteConflict && !sessionBlockedRef.current) timer = window.setTimeout(() => { void saveDocumentRef.current(); }, 900);
     }).catch((error: unknown) => {
       if (cancelled) return;
       const latest = activeRef.current;
@@ -589,11 +600,11 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       if (timer !== undefined) window.clearTimeout(timer);
     };
     // Save only after this exact editor generation has been written to IndexedDB.
-  }, [active?.document.id, active?.generation, active?.baseRevisionId, active?.markdown, journal, persistDraft, publishEditor]);
+  }, [active?.document.id, active?.generation, active?.baseRevisionId, active?.markdown, journal, persistDraft, publishEditor, sessionBlocked]);
 
   const saveDocument = useCallback(async (): Promise<void> => {
     const currentJournal = journalRef.current;
-    if (!currentJournal || saveInFlightRef.current) return;
+    if (!currentJournal || saveInFlightRef.current || restoreInFlightRef.current || sessionBlockedRef.current) return;
     const current = activeRef.current;
     if (!current) return;
     const pendingKey = JSON.stringify([current.document.projectId, current.document.id]);
@@ -613,8 +624,11 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       pendingSaveRef.current.set(pendingKey, pending);
     }
     saveInFlightRef.current = true;
-    const inScope = activeRef.current?.document.id === pending.documentId;
-    if (inScope) publishEditor({ ...activeRef.current!, save: "saving", error: "" });
+    const controller = new AbortController();
+    saveControllerRef.current = controller;
+    const navigation = openSequenceRef.current;
+    const inScope = (value: ActiveDocument | null): value is ActiveDocument => Boolean(value && value.document.projectId === pending.projectId && value.document.id === pending.documentId && navigation === openSequenceRef.current && !controller.signal.aborted);
+    if (inScope(activeRef.current)) publishEditor({ ...activeRef.current!, save: "saving", error: "" });
     try {
       const result = await editorAdapter.save?.({
         projectId: pending.projectId,
@@ -627,15 +641,23 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         changes: minimalTextChanges(pending.baseMarkdown, pending.markdown),
         idempotencyKey: pending.idempotencyKey,
         clientId: pending.clientId,
-      }, new AbortController().signal);
-      if (!result || result.markdown !== pending.markdown || !result.document || !result.revision) {
+      }, controller.signal);
+      if (!result || result.markdown !== pending.markdown || !result.document || !result.revision || result.document.projectId !== pending.projectId || result.document.id !== pending.documentId || result.revision.projectId !== pending.projectId || result.revision.documentId !== pending.documentId || result.document.headRevisionId !== result.revision.id) {
         throw new Error("PostgreSQLの保存結果を確認できませんでした。");
       }
+      if (controller.signal.aborted) return;
       const removed = await currentJournal.removePersistenceDraft(pending.projectId, pending.documentId, authorScope, pending.generation);
+      const remaining = removed ? undefined : await currentJournal.getPersistenceDraft(pending.projectId, pending.documentId, authorScope);
       pendingSaveRef.current.delete(pendingKey);
       const latest = activeRef.current;
-      if (latest?.document.id === pending.documentId) {
+      if (inScope(latest)) {
         const hasNewerText = latest.generation > pending.generation || latest.markdown !== pending.markdown;
+        const ownNewerDraft = hasNewerText && remaining?.generation === latest.generation && remaining.markdown === latest.markdown && remaining.baseRevisionId === latest.baseRevisionId && remaining.baseMarkdown === latest.baseMarkdown;
+        const otherTab = Boolean(remaining && !ownNewerDraft);
+        if (otherTab) {
+          publishEditor({ ...latest, document: result.document, revision: result.revision, baseRevisionId: result.revision.id, baseMarkdown: pending.markdown, dirty: hasNewerText, recovery: "other-tab", save: "failed", error: "この文書のより新しい回復記録が別タブに残っています。自動保存を停止しました。", remoteConflict: null });
+          return;
+        }
         publishEditor({
           ...latest,
           document: result.document,
@@ -648,35 +670,39 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           generation: hasNewerText ? latest.generation + 1 : latest.generation,
           recovery: hasNewerText ? "pending" : "stored",
           save: hasNewerText ? "idle" : "saved",
-          error: !removed && !hasNewerText ? "この文書のより新しい回復記録が別タブに残っています。" : "",
+          error: "",
           remoteConflict: null,
         });
+      } else if (latest?.document.id === pending.documentId && latest.document.projectId === pending.projectId) {
+        setResumeEpoch((value) => value + 1);
       } else if (latest?.dirty) {
         window.setTimeout(() => { void saveDocumentRef.current(); }, 0);
       }
     } catch (error) {
+      if (controller.signal.aborted) return;
       if (error instanceof ApiError && error.status === 409) {
         pendingSaveRef.current.delete(pendingKey);
         try {
-          const currentRead = await api.persistenceDocument(pending.projectId, pending.documentId);
+          const currentRead = await api.persistenceDocument(pending.projectId, pending.documentId, controller.signal);
           const latest = activeRef.current;
-          if (latest?.document.id === pending.documentId && currentRead.revision) {
-            publishEditor({ ...latest, remoteConflict: currentRead.revision, save: "failed", error: "PostgreSQL上のRevisionが先に更新されました。下書きはIndexedDBに残しています。" });
+          if (inScope(latest)) {
+            publishEditor({ ...latest, remoteConflict: currentRead.revision ?? null, save: "failed", error: currentRead.revision ? "PostgreSQL上のRevisionが先に更新されました。下書きはIndexedDBに残しています。" : "競合した最新Revisionを確認できません。下書きは保持しています。" });
           }
         } catch (readError) {
           const latest = activeRef.current;
-          if (latest?.document.id === pending.documentId) publishEditor({ ...latest, save: "failed", error: readError instanceof Error ? readError.message : "競合した最新Revisionを読み込めませんでした。" });
+          if (inScope(latest)) publishEditor({ ...latest, save: "failed", error: readError instanceof Error ? readError.message : "競合した最新Revisionを読み込めませんでした。" });
         }
       } else {
         const latest = activeRef.current;
-        if (latest?.document.id === pending.documentId) {
+        if (inScope(latest)) {
           publishEditor({ ...latest, save: "failed", error: error instanceof Error ? error.message : "PostgreSQLへ保存できませんでした。回復下書きは保持しています。" });
         }
       }
     } finally {
       saveInFlightRef.current = false;
+      if (saveControllerRef.current === controller) saveControllerRef.current = null;
       const latest = activeRef.current;
-      if (latest?.dirty && latest.recovery === "stored" && !latest.remoteConflict && latest.document.id !== pending.documentId) {
+      if (latest?.dirty && latest.recovery === "stored" && !latest.remoteConflict && (latest.document.id !== pending.documentId || latest.document.projectId !== pending.projectId) && !controller.signal.aborted) {
         window.setTimeout(() => { void saveDocumentRef.current(); }, 0);
       }
     }
@@ -845,6 +871,11 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       return false;
     }
   }, [persistDraft, publishEditor, resume.flush]);
+
+  useEffect(() => {
+    registerProtection?.(protectTransition);
+    return () => registerProtection?.(null);
+  }, [registerProtection, protectTransition]);
 
   const selectDocument = useCallback(async (nextId: string): Promise<boolean> => {
     // Navigation preflight is asynchronous. Only the latest requested selection
@@ -1117,47 +1148,68 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   }
 
   async function restoreRevision(source: DocumentRevision): Promise<void> {
-    if (!project || !active || active.dirty || active.remoteConflict) return;
-    setLoading(true);
+    const captured = activeRef.current;
+    if (!project || !captured || captured.dirty || captured.remoteConflict || saveInFlightRef.current || restoreInFlightRef.current || sessionBlockedRef.current) return;
+    if (source.projectId !== captured.document.projectId || source.documentId !== captured.document.id) return;
+    if (!await protectTransition()) return;
+    const current = activeRef.current;
+    if (!current || current !== captured || current.dirty || restoreInFlightRef.current || saveInFlightRef.current) return;
+    const navigation = openSequenceRef.current;
+    const projectId = captured.document.projectId;
+    const documentId = captured.document.id;
+    const stillSelected = () => openSequenceRef.current === navigation && activeRef.current?.document.projectId === projectId && activeRef.current?.document.id === documentId;
+    const unchanged = () => stillSelected() && activeRef.current?.generation === captured.generation && activeRef.current?.revision.id === captured.revision.id && activeRef.current?.markdown === captured.markdown;
+    restoreInFlightRef.current = true;
+    setRestoring(true);
     setPageError("");
     try {
-      const restored = await api.restorePersistenceDocument(project.id, active.document.id, {
-        baseRevisionId: active.revision.id as RevisionId,
+      const restored = await api.restorePersistenceDocument(projectId, documentId, {
+        baseRevisionId: captured.revision.id as RevisionId,
         sourceRevisionId: source.id as RevisionId,
         idempotencyKey: crypto.randomUUID(),
       });
-      const snapshot = await editorAdapter.read({
-        projectId: project.id,
-        documentId: active.document.id,
-        revisionId: restored.revision.id,
-        markdown: restored.revision.markdown,
-      }, new AbortController().signal);
-      const evidence = initializeDocumentEvidence(restored.revision.markdown, restored.revision.id, snapshot);
+      if (restored.document.projectId !== projectId || restored.document.id !== documentId || restored.revision.projectId !== projectId || restored.revision.documentId !== documentId || restored.document.headRevisionId !== restored.revision.id) throw new Error("復元結果の識別子が一致しません。");
+      if (!unchanged()) {
+        if (stillSelected() && activeRef.current) publishEditor({ ...activeRef.current, remoteConflict: restored.revision, save: "failed", error: "復元中に原稿が変わりました。現在の入力を保持しています。" });
+        else setResumeEpoch((value) => value + 1);
+        return;
+      }
+      const snapshot = await editorAdapter.read({ projectId, documentId, revisionId: restored.revision.id, markdown: restored.revision.markdown }, new AbortController().signal);
+      if (!unchanged()) {
+        if (stillSelected() && activeRef.current) publishEditor({ ...activeRef.current, remoteConflict: restored.revision, save: "failed", error: "復元中に原稿が変わりました。現在の入力を保持しています。" });
+        else setResumeEpoch((value) => value + 1);
+        return;
+      }
+      const latest = activeRef.current!;
       publishEditor({
-        ...active,
-        document: restored.document,
-        revision: restored.revision,
-        baseRevisionId: restored.revision.id,
-        baseMarkdown: restored.revision.markdown,
-        markdown: restored.revision.markdown,
-        generation: active.generation + 1,
-        dirty: false,
-        recovery: "stored",
-        save: "saved",
-        error: "",
-        remoteConflict: null,
-        evidence,
-        evidenceLoadKey: active.evidenceLoadKey + 1,
+        ...latest, document: restored.document, revision: restored.revision,
+        baseRevisionId: restored.revision.id, baseMarkdown: restored.revision.markdown, markdown: restored.revision.markdown,
+        generation: latest.generation + 1, dirty: false, recovery: "stored", save: "saved", error: "", remoteConflict: null,
+        evidence: initializeDocumentEvidence(restored.revision.markdown, restored.revision.id, snapshot), evidenceLoadKey: latest.evidenceLoadKey + 1,
       });
       setNotice("選んだRevisionを新しいPostgreSQL Revisionとして復元しました。");
       setShowRevisions(false);
     } catch (error) {
+      if (!stillSelected()) { setResumeEpoch((value) => value + 1); return; }
       if (error instanceof ApiError && error.status === 409) {
-        const latest = await api.persistenceDocument(project.id, active.document.id);
-        if (latest.revision) publishEditor({ ...active, remoteConflict: latest.revision, save: "failed", error: "復元前にRevisionが更新されました。最新Revisionを確認してください。" });
-      } else setPageError(error instanceof Error ? error.message : "Revisionを復元できませんでした。");
+        try {
+          const latest = await api.persistenceDocument(projectId, documentId);
+          if (!stillSelected()) return;
+          if (!latest.revision) throw new Error("競合した最新Revisionを確認できませんでした。");
+          const current = activeRef.current!;
+          publishEditor({ ...current, remoteConflict: latest.revision, save: "failed", error: "復元前にRevisionが更新されました。最新Revisionを確認してください。" });
+        } catch (cause) {
+          if (stillSelected()) setPageError(cause instanceof Error ? cause.message : "競合した最新Revisionを確認できませんでした。");
+        }
+      } else {
+        setPageError(error instanceof Error ? error.message : "Revisionを復元できませんでした。");
+        setResumeEpoch((value) => value + 1);
+      }
     } finally {
-      setLoading(false);
+      restoreInFlightRef.current = false;
+      setRestoring(false);
+      const latest = activeRef.current;
+      if (latest?.dirty && latest.recovery === "stored" && !latest.remoteConflict) void saveDocumentRef.current();
     }
   }
 
@@ -1482,7 +1534,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             onSelectionChange={(selection) => { textSelectionRef.current = selection; }}
             value={active.markdown}
             externalTextRevision={active.generation}
-            readOnly={Boolean(journalError) || legacyImportBusy}
+            readOnly={Boolean(journalError) || legacyImportBusy || restoring || sessionBlocked}
             onChange={onEditorChange}
             documentRevision={active.revision.id}
             evidenceState={active.evidence}
@@ -1542,7 +1594,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
                   <div><h4>最新版</h4><pre>{difference.after}</pre></div>
                 </section>
               </details>}
-              {revision.id !== active.revision.id && <button type="button" disabled={loading || active.dirty} onClick={() => void restoreRevision(revision)}>このRevisionを新しいRevisionとして復元</button>}
+              {revision.id !== active.revision.id && <button type="button" disabled={loading || restoring || active.dirty} onClick={() => void restoreRevision(revision)}>このRevisionを新しいRevisionとして復元</button>}
             </article>;
             })}
           </section>}
@@ -1608,7 +1660,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
               <button type="button" className={selectedEvidenceId === anchor.id ? "is-selected" : ""} onClick={() => setSelectedEvidenceId(anchor.id)}>
                 <q>{anchor.quote}</q><small>{anchor.status === "current" ? "現在のRevision" : anchor.status === "proposed" ? "確認待ち" : anchor.status === "needs_review" ? "再確認が必要" : anchor.status === "orphaned" ? "本文から削除" : "Revision不一致"}</small>
               </button>
-              {anchor.target && <p>確定先: {anchor.target.label} <button type="button" onClick={() => setNodeId(anchor.target!.id)}>Knowledgeの根拠を表示</button></p>}
+              {(anchor.targets ?? (anchor.target ? [anchor.target] : [])).map((target) => <p key={target.id}>確定先: {target.label} <button type="button" onClick={() => setNodeId(target.id)}>Knowledgeの根拠を表示</button></p>)}
               {anchor.candidates?.map((candidate) => <p key={candidate.id}>候補: {candidate.label}</p>)}
               {anchor.status === "current" && selectedNode && <div className="pg-link-actions">
                 <button type="button" onClick={() => void linkKnowledge(anchor.id, "proposed")}>候補としてリンク</button>
@@ -1625,9 +1677,12 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   ];
   const readCurrentEditor = (): BrowserEditorDocument | null => {
     const current = activeRef.current;
-    if (!current || !moduleSnapshot || moduleSnapshot.projectId !== current.document.projectId) return null;
-    return { sceneId: current.document.id, documentPath: moduleFilesRef.current.find((file) => file.revision === current.revision.id)?.path ?? `documents/${current.document.id}.md`, documentRevision: current.revision.id,
-      sceneRevision: current.revision.id, text: current.markdown, snapshot: moduleSnapshot, baseSnapshot: moduleSnapshot, baseSceneRevision: current.revision.id };
+    const read = moduleReadRef.current;
+    if (!current || !read || !moduleSnapshot || snapshotKey(read.snapshot) !== snapshotKey(moduleSnapshot) || read.snapshot.projectId !== current.document.projectId || projectIdRef.current !== current.document.projectId || sessionBlockedRef.current) return null;
+    const documentPath = `documents/${current.document.id}.md`;
+    if (!read.files.some((file) => file.path === documentPath)) return null;
+    return { sceneId: current.document.id, documentPath, documentRevision: current.revision.id,
+      sceneRevision: current.revision.id, text: current.markdown, snapshot: read.snapshot, baseSnapshot: read.snapshot, baseSceneRevision: current.revision.id };
   };
   const modulePanels = availableModulePanels({ items: workspaceContributions(contributions, modules), contributions, modules, projectId, authorScope,
     snapshot: moduleSnapshot, journal, refresh: refreshModules, onProposalStored: () => { void refreshModules(); }, readCurrentEditor,
