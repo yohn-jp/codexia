@@ -75,9 +75,7 @@ export function ProposalReview({
       const pending = await journal.getProject(projectId, authorScope);
       let status = record.status;
       if (status?.payloadComplete === false) {
-        const originalIds = status.operationIds ?? [];
-        const localIds = record.proposal.operations.map((operation) => operation.id);
-        if (JSON.stringify(localIds) !== JSON.stringify(originalIds)) {
+        if (!hasCompleteOriginal(record.proposal.operations.map((operation) => operation.id), status.operationIds)) {
           throw new Error("PostgreSQLの提案記録には承認済み操作だけがあり、未承認の元提案はこのブラウザー回復記録にありません。未承認分を復元できません。");
         }
         const restored = await api.propose(projectId, record.proposal);
@@ -183,9 +181,8 @@ export function ProposalReview({
           const pendingOperations = record.proposal.operations.filter((operation) =>
             !published.has(operation.id) && !applicationFor(status, operation),
           );
-          const originalIds = status?.operationIds ?? record.proposal.operations.map((operation) => operation.id);
           const fullOriginalAvailable = status?.payloadComplete !== false ||
-            JSON.stringify(record.proposal.operations.map((operation) => operation.id)) === JSON.stringify(originalIds);
+            hasCompleteOriginal(record.proposal.operations.map((operation) => operation.id), status.operationIds);
           const unacceptedPayloadMissing = status?.payloadComplete === false && !fullOriginalAvailable;
           const needsApproval = pendingOperations.some((operation) => !status?.approvedOperationIds.includes(operation.id));
           const approvedPendingCount = pendingOperations.filter((operation) => status?.approvedOperationIds.includes(operation.id)).length;
@@ -318,4 +315,9 @@ export function ProposalReview({
       </ul>
     </section>
   );
+}
+
+/** A partial receipt must explicitly identify every original operation. */
+function hasCompleteOriginal(localIds: readonly string[], originalIds: readonly string[] | undefined): boolean {
+  return Boolean(originalIds && originalIds.length === localIds.length && new Set(originalIds).size === originalIds.length && new Set(localIds).size === localIds.length && localIds.every((id) => originalIds.includes(id)));
 }
