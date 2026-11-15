@@ -44,7 +44,7 @@
     "@ai-sdk/openai-compatible": "2.0.93",
     "ai": "7.0.173",
     "jsonrepair": "3.15.0",
-    "zod": "3.25.76",
+    "zod": "4.6.6",
     "yaml": "^2.9.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
