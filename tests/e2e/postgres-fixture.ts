@@ -37,18 +37,28 @@ export async function fixtureProject(request: APIRequestContext): Promise<{ proj
   return { project: project!, scenes: documents.filter((item) => item.kind === "scene") };
 }
 
+/** Shared canonical UI operators for acceptance and performance probes. */
+export async function selectManuscriptProject(page: Page, projectId: string): Promise<void> {
+  await page.getByLabel("作品", { exact: true }).selectOption(projectId);
+}
+export async function openManuscriptScene(page: Page, scene: Pick<FixtureDocument, "id" | "title">): Promise<void> {
+  const button = page.locator(`.pg-document-list .pg-outline-item[data-document-id="${scene.id}"] > .pg-outline-row > .pg-outline-document`);
+  if (!await button.isVisible()) {
+    const library = page.getByRole("button", { name: /ライブラリ/u });
+    if (await library.count()) await library.first().click();
+  }
+  await button.click();
+  await expect(button).toHaveAttribute("aria-current", "page");
+  await expect(manuscriptEditor(page)).toBeVisible();
+  await expect(page.getByRole("heading", { name: scene.title, exact: true })).toBeVisible();
+}
 export async function openFixtureScene(page: Page, index = 0): Promise<{ project: FixtureProject; scene: FixtureDocument }> {
   await ownerLogin(page);
   const { project, scenes } = await fixtureProject(page.request);
   const scene = scenes[index];
   expect(scene).toBeTruthy();
-  await page.getByLabel("作品", { exact: true }).selectOption(project.id);
-  if (!await page.locator(".pg-document-list").getByRole("button", { name: new RegExp(scene!.title) }).isVisible()) {
-    const library = page.getByRole("button", { name: /ライブラリ/u });
-    if (await library.count()) await library.first().click();
-  }
-  await page.locator(".pg-document-list").getByRole("button", { name: new RegExp(scene!.title) }).click();
-  await expect(manuscriptEditor(page)).toBeVisible();
+  await selectManuscriptProject(page, project.id);
+  await openManuscriptScene(page, scene!);
   return { project, scene: scene! };
 }
 

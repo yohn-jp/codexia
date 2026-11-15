@@ -69,7 +69,7 @@ async function main() {
   const root = resolve(process.argv[2] ?? '/tmp/codexia-postgresql-baseline');
   const repeats = Number(process.env.BENCH_REPEATS ?? 20);
   const browserSaveRepeats = Number(process.env.BENCH_BROWSER_SAVE_REPEATS ?? 3);
-  const timeoutMs = Number(process.env.BENCH_TIMEOUT_MS ?? 180000);
+  const timeoutMs = Number(process.env.BENCH_TIMEOUT_MS ?? 600000);
   if (!Number.isInteger(repeats) || repeats < 1 || !Number.isInteger(browserSaveRepeats) || browserSaveRepeats < 1 ||
       !Number.isFinite(timeoutMs) || timeoutMs < 1000) throw new Error('Invalid repeat count or timeout');
   if (!process.env.CODEXIA_TEST_DATABASE_URL) throw new Error('CODEXIA_TEST_DATABASE_URL must point to a disposable loopback codexia_perf_* database');

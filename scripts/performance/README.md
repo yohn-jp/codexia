@@ -17,7 +17,7 @@ podman run --detach --rm --name codexia-perf-baseline-20261115 \
 export CODEXIA_TEST_DATABASE_URL='postgres://codexia:codexia@127.0.0.1:55440/codexia_perf_baseline'
 export BENCH_REPEATS=20
 export BENCH_BROWSER_SAVE_REPEATS=3
-export BENCH_TIMEOUT_MS=180000
+export BENCH_TIMEOUT_MS=600000
 export CODEXIA_PERF_POOL_MAX=10
 export CODEXIA_PERF_LOCK_POLL_MS=25
 node scripts/performance/run.mjs /tmp/codexia-postgresql-baseline-20261115
@@ -26,7 +26,7 @@ node scripts/performance/summarize.mjs /tmp/codexia-postgresql-baseline-20261115
 
 The output path must be new. The runner records the exact source and dirty state, built output hashes, toolchain, OS/CPU, PostgreSQL version and `pg_settings` snapshot/hash, fixture hashes, sample counts and cold/warm conditions. Raw JSON, the machine summary, Markdown tables and Chromium CPU profiles remain under the output directory. Keep raw evidence outside product documentation.
 
-`BENCH_SIZES` selects a comma-separated subset of `small,long-form,knowledge-dense,limit-999,limit-1000,limit-1001`. `BENCH_BROWSER_SIZES` selects browser runs and defaults to `small,long-form`. `BENCH_REPEATS` controls Core and browser navigation repeats; `BENCH_BROWSER_SAVE_REPEATS` controls editor save/receipt repeats per document size and defaults to 3. Set these variables before the command to narrow a run. `CODEXIA_E2E_CHROMIUM` selects a system Chromium; otherwise Playwright's installed Chromium is used. Browser probes use `/desktop/`, the authenticated Persistence API, real PostgreSQL revisions, isolated browser storage and the current IndexedDB journal/save protocol.
+`BENCH_SIZES` selects a comma-separated subset of `small,long-form,knowledge-dense,limit-999,limit-1000,limit-1001`. `BENCH_BROWSER_SIZES` selects browser runs and defaults to `small,long-form`. `BENCH_TIMEOUT_MS` defaults to 600000 (10 minutes) per worker; the earlier 180-second budget is insufficient for the measured long-form fixture. `BENCH_REPEATS` controls Core and browser navigation repeats; `BENCH_BROWSER_SAVE_REPEATS` controls editor save/receipt repeats per document size and defaults to 3. Set these variables before the command to narrow a run. `CODEXIA_E2E_CHROMIUM` selects a system Chromium; otherwise Playwright's installed Chromium is used. Browser probes use `/desktop/`, the authenticated Persistence API, real PostgreSQL revisions, isolated browser storage and the current IndexedDB journal/save protocol.
 
 ## PostgreSQL fixture dimensions
 
@@ -39,7 +39,7 @@ The output path must be new. The runner records the exact source and dirty state
 | `limit-1000` | 1,000 | 1 volume, 1 chapter, 998 scenes; first 3 bodies are 1 KiB, 100 KiB and 1 MiB, remaining bodies 1 KiB; 1 extra revision | rejected with `snapshot_too_large` |
 | `limit-1001` | 1,001 | 1 volume, 1 chapter, 999 scenes; first 3 bodies are 1 KiB, 100 KiB and 1 MiB, remaining bodies 1 KiB; 1 extra revision | rejected with `snapshot_too_large` |
 
-Dataset identity is derived from the fixed plan and content hashes, independent of the temporary output path or generated PostgreSQL IDs. Persisted document and revision counts, logical Markdown bytes, PostgreSQL tuple bytes, Knowledge/Evidence row counts and bytes, and measured projection bytes are recorded from the database or actual Core projection. Fixture setup time is recorded separately and is never included in workload latency.
+Dataset identity is derived from the fixed plan and content hashes, independent of the temporary output path or generated PostgreSQL IDs. Before migration or seeding, the importer verifies the manifest, transport plan and exact scene bytes against that identity. Persisted document and revision counts, logical Markdown bytes, PostgreSQL tuple bytes, Knowledge/Evidence row counts and bytes, and measured projection bytes are recorded from the database or actual Core projection. Fixture setup time is recorded separately and is never included in workload latency.
 
 ## Workloads and interpretation
 
@@ -58,6 +58,6 @@ CODEXIA_TEST_DATABASE_URL='postgres://codexia:codexia@127.0.0.1:55440/codexia_pe
   pnpm exec node --test scripts/performance/*.test.mjs
 ```
 
-The focused test database must also be disposable; the persistence pipeline test adds records and does not clean them up. Full verification uses the separate `codexia_test` database described by the verification guide.
+Set `CODEXIA_E2E_CHROMIUM` after a Core build to additionally execute the browser benchmark smoke and IndexedDB probes. The smoke is not a full matched performance campaign. The focused test database must also be disposable; the persistence pipeline test adds records and does not clean them up. Full verification uses the separate `codexia_test` database described by the verification guide.
 
 Historical Core64, Git/OCI and release probes are specific to their recorded source/artifact identities. They are not measurements of current PostgreSQL authoring. The historical artifact packer/verifier continues to serve the immutable [wave0 evidence](../../docs/performance/README.md).

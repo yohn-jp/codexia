@@ -1,6 +1,6 @@
 # PostgreSQL native performance baseline
 
-This is a reproducible measurement baseline for future backend work. It makes no performance improvement claim. Raw worker reports, deterministic fixture manifests, the complete machine summary, generated metric tables and Chromium CPU profiles are in [`raw/`](raw/).
+This is a reproducible measurement baseline for future backend work. It makes no performance improvement claim. The browser figures below describe the pre-#129 UI at the measured source; they must not be used as the post-redesign browser baseline. The current harness follows the shared browser acceptance operators for the redesigned UI. For a matched candidate comparison, rerun the baseline and candidate under the same harness, source/build and fixture conditions. Raw worker reports, deterministic fixture manifests, the complete machine summary, generated metric tables and Chromium CPU profiles are in [`raw/`](raw/).
 
 ## Measured source and environment
 

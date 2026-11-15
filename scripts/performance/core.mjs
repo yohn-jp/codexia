@@ -140,7 +140,7 @@ async function boundaryWorkload(store, project, manifest) {
 }
 
 try {
-  const fixture = await postgresFixture(datasetPath);
+  fixture = await postgresFixture(datasetPath);
   report.fixture = { projectId: fixture.project.id, projectVersion: fixture.project.version,
     setupMs: fixture.setupMs, persisted: fixture.inventory, database: fixture.database,
     knowledgeSeed: fixture.knowledgeSeed ?? null, sceneCount: fixture.sceneRecords.length,
@@ -176,8 +176,16 @@ try {
   report.status = 'failed'; report.error = { message: error.message, code: error.code, stack: error.stack };
   process.exitCode = 1;
 } finally {
-  await lockSampler?.stop().catch(error => { report.cleanupError = error.message; });
-  if (fixture?.persistence) await fixture.persistence.close().catch(error => { report.cleanupError = error.message; });
+  const cleanup = async (action) => {
+    try { await action(); }
+    catch (error) {
+      (report.cleanupErrors ??= []).push(error.message);
+      report.status = 'failed';
+      process.exitCode = 1;
+    }
+  };
+  if (lockSampler) await cleanup(() => lockSampler.stop());
+  if (fixture?.persistence) await cleanup(() => fixture.persistence.close());
   if (lockSampler) report.conditions.lockWaitSamplingIntervalMs = lockSampler.intervalMs;
   await persist();
 }

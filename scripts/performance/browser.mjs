@@ -7,6 +7,7 @@ import { performance } from 'node:perf_hooks';
 import { chromium, expect as playwrightExpect } from '@playwright/test';
 import { buildIdentity, distribution, save, sourceIdentity } from './common.mjs';
 import { installBrowserProbes } from './browser-probes.mjs';
+import { manuscriptEditor, selectManuscriptProject, openManuscriptScene } from '../../tests/e2e/postgres-fixture.ts';
 
 const expect = playwrightExpect.configure({ timeout: 60000 });
 const [datasetPathArg, output, repeatsArg = '20'] = process.argv.slice(2);
@@ -135,20 +136,10 @@ try {
   });
   const project = ready.fixture.project;
   const scenes = ready.fixture.scenes;
-  const editor = page.getByRole('textbox', { name: '原稿 Markdown' });
-  const sceneButton = scene => page.locator('.pg-document-list').getByRole('button', { name: new RegExp(scene.title.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')) });
-  async function openScene(scene) {
-    const button = sceneButton(scene);
-    if (!await button.isVisible()) {
-      const library = page.getByRole('button', { name: /ライブラリ/u });
-      if (await library.count()) await library.first().click();
-    }
-    await button.click();
-    await expect(editor).toBeVisible();
-    await expect(page.getByRole('heading', { name: scene.title, exact: true })).toBeVisible();
-  }
+  const editor = manuscriptEditor(page);
+  const openScene = scene => openManuscriptScene(page, scene);
   await phase('browser.navigation.project-and-first-scene', async () => {
-    await page.getByLabel('開く作品').selectOption(project.id);
+    await selectManuscriptProject(page, project.id);
     await openScene(scenes[0]);
   });
   report.phases.push({ name: 'browser.startup', server: await stats(),

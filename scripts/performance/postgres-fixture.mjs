@@ -1,10 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { createPostgresPersistence, migratePostgresDatabase } from '../../packages/persistence-postgres/dist/index.js';
 import { CoreStore } from '../../packages/core/dist/index.js';
+import { verifyFixture } from './dataset.mjs';
 
 const requirePersistence = createRequire(new URL('../../packages/persistence-postgres/package.json', import.meta.url));
 const { Client } = requirePersistence('pg');
@@ -174,13 +173,10 @@ export async function postgresFixture(datasetPath) {
   const target = databaseTarget(url);
   const poolMax = Number(process.env.CODEXIA_PERF_POOL_MAX ?? 10);
   if (!Number.isInteger(poolMax) || poolMax < 1 || poolMax > 100) throw new Error('CODEXIA_PERF_POOL_MAX must be an integer from 1 to 100');
+  const { manifest: profile, bodies } = await verifyFixture(datasetPath);
   await migratePostgresDatabase(url);
   const persistence = createPostgresPersistence({ connectionString: url, max: poolMax });
   try {
-    const profile = JSON.parse(await readFile(join(datasetPath, 'dataset.json'), 'utf8'));
-    if (profile.schemaVersion !== 2 || !/^[a-f0-9]{64}$/u.test(profile.fixtureId)) throw new Error('Invalid deterministic fixture manifest');
-    const plan = JSON.parse(await readFile(join(datasetPath, 'seed', 'fixture-plan.json'), 'utf8'));
-    if (plan.fixtureId !== undefined) throw new Error('Fixture transport plan cannot contain runtime state');
     const store = new CoreStore({ persistence });
     const project = await store.createProject({ title: `Synthetic benchmark ${profile.datasetId}` });
     const volumes = [], chapters = [], sceneRecords = [];
@@ -206,8 +202,7 @@ export async function postgresFixture(datasetPath) {
       for (let index = 0; index < profile.scenes.length; index++) {
         const scene = profile.scenes[index];
         const chapter = chapters[index % chapters.length];
-        const markdown = await readFile(join(datasetPath, 'seed', scene.name), 'utf8');
-        if (Buffer.byteLength(markdown) !== scene.bodyBytes) throw new Error(`Fixture body byte mismatch: ${scene.name}`);
+        const markdown = bodies.get(scene.name).toString('utf8');
         const created = await transaction.createDocument({ projectId: project.id, parentId: chapter.document.id,
           kind: 'scene', title: scene.title, orderKey: String(index + 1).padStart(6, '0'), markdown, authorId,
           idempotencyKey: `${profile.fixtureId}:scene:${index + 1}` });

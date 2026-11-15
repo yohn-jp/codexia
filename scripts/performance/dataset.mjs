@@ -33,6 +33,40 @@ function sceneBody(index, bytes) {
 
 function sha256(value) { return createHash('sha256').update(value).digest('hex'); }
 
+function fixtureIdentity(plan, bodies, seedFiles) {
+  return sha256(JSON.stringify({ plan, sceneHashes: plan.scenes.map(scene =>
+    [scene.name, sha256(bodies.get(scene.name))]), seedFiles }));
+}
+
+/** Bind the actual input bytes and plan to the manifest before any database mutation. */
+export async function verifyFixture(root) {
+  const manifest = JSON.parse(await readFile(join(root, 'dataset.json'), 'utf8'));
+  const plan = JSON.parse(await readFile(join(root, 'seed', 'fixture-plan.json'), 'utf8'));
+  const { fixtureId, fixtureSha256, transport, documentBodyBytes, generatedBy, ...manifestPlan } = manifest;
+  if (plan.schemaVersion !== 2 || !Array.isArray(plan.scenes) ||
+      JSON.stringify(plan) !== JSON.stringify(manifestPlan) ||
+      !/^[a-f0-9]{64}$/u.test(fixtureId) || fixtureId !== fixtureSha256) {
+    throw new Error('Fixture manifest and transport plan mismatch');
+  }
+  const bodies = new Map();
+  for (const [offset, scene] of plan.scenes.entries()) {
+    if (scene.index !== offset + 1 || scene.name !== `scene-${String(offset + 1).padStart(4, '0')}.md`) {
+      throw new Error('Invalid fixture scene path or order');
+    }
+    const bytes = await readFile(join(root, 'seed', scene.name));
+    if (bytes.byteLength !== scene.bodyBytes || !Buffer.from(bytes.toString('utf8')).equals(bytes)) {
+      throw new Error(`Fixture body byte mismatch: ${scene.name}`);
+    }
+    bodies.set(scene.name, bytes);
+  }
+  const seedFiles = [...bodies.keys(), 'fixture-plan.json'].sort();
+  if (fixtureIdentity(plan, bodies, seedFiles) !== fixtureId ||
+      [...bodies.values()].reduce((sum, body) => sum + body.byteLength, 0) !== documentBodyBytes) {
+    throw new Error('Fixture content identity mismatch');
+  }
+  return { manifest, bodies };
+}
+
 export async function generate(root, scenario) {
   const spec = scenarios[scenario];
   if (!spec) throw new Error(`Unknown dataset: ${scenario}`);
@@ -66,9 +100,9 @@ export async function generate(root, scenario) {
   if (JSON.stringify(actualFiles) !== JSON.stringify(seedFiles)) throw new Error('Synthetic fixture transport inventory changed');
   const transportBytes = (await Promise.all(actualFiles.map(file => stat(join(seed, file))))).reduce((sum, row) => sum + row.size, 0);
   const commit = git(seed, 'rev-parse', 'HEAD');
-  const identityInput = JSON.stringify({ plan, sceneHashes: await Promise.all(scenes.map(async scene =>
-    [scene.name, sha256(await readFile(join(seed, scene.name)))])), seedFiles });
-  const manifest = { ...plan, fixtureId: sha256(identityInput), fixtureSha256: sha256(identityInput),
+  const bodies = new Map(await Promise.all(scenes.map(async scene => [scene.name, await readFile(join(seed, scene.name))])));
+  const fixtureId = fixtureIdentity(plan, bodies, seedFiles);
+  const manifest = { ...plan, fixtureId, fixtureSha256: fixtureId,
     transport: { kind: 'synthetic-git', commit, trackedFiles: actualFiles.length, bytes: transportBytes },
     documentBodyBytes: documentBytes, generatedBy: 'scripts/performance/dataset.mjs' };
   await writeFile(join(root, 'dataset.json'), `${JSON.stringify(manifest, null, 2)}\n`);

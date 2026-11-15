@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { distribution } from './common.mjs';
-import { generate, git } from './dataset.mjs';
+import { generate, git, verifyFixture } from './dataset.mjs';
 import { runWorker } from './run.mjs';
 
 test('nearest-rank quantiles retain missing observations and sample count', () => {
@@ -36,6 +36,24 @@ test('synthetic fixture has exact tracked count, document sizes and reproducible
     for (const scene of a.scenes) assert.equal(Buffer.byteLength(await readFile(join(root, 'a/seed', scene.name))), scene.bodyBytes);
     assert.equal(git(join(root, 'a/seed'), 'ls-files').split('\n').length, 7);
     await assert.rejects(generate(join(root, 'a'), 'small'), { code: 'EEXIST' });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('fixture import rejects same-size content changes and manifest plan drift', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'postgres-fixture-identity-'));
+  try {
+    const path = join(root, 'fixture');
+    const manifest = await generate(path, 'small');
+    assert.equal((await verifyFixture(path)).manifest.fixtureId, manifest.fixtureId);
+    const scenePath = join(path, 'seed', manifest.scenes[0].name);
+    const body = await readFile(scenePath);
+    const changed = Buffer.from(body); changed[0] = changed[0] === 65 ? 66 : 65;
+    await writeFile(scenePath, changed);
+    await assert.rejects(verifyFixture(path), /Fixture content identity mismatch/u);
+    await writeFile(scenePath, body);
+    const manifestPath = join(path, 'dataset.json');
+    await writeFile(manifestPath, JSON.stringify({ ...manifest, chapterCount: manifest.chapterCount + 1 }));
+    await assert.rejects(verifyFixture(path), /Fixture manifest and transport plan mismatch/u);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -146,6 +164,21 @@ test('Knowledge-dense PostgreSQL fixture persists exact Knowledge and Evidence c
     assert.ok(result.projection.bytes > 0);
     const projection = result.samples.find(row => row.name === 'knowledge.evidence.projection');
     assert.ok(projection?.status === 'complete' && projection.counters.gitProcesses === 0);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('PostgreSQL browser benchmark exercises the current UI and save/receipt path', { skip: !process.env.CODEXIA_E2E_CHROMIUM }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'postgres-browser-benchmark-'));
+  try {
+    const datasetPath = join(root, 'fixture'), output = join(root, 'browser.json');
+    await generate(datasetPath, 'small');
+    const result = await runWorker(new URL('./browser.mjs', import.meta.url).pathname,
+      [datasetPath, output, '1'], output, 180000, { CODEXIA_PROFILE: 'core', BENCH_BROWSER_SAVE_REPEATS: '1' });
+    assert.equal(result.status, 'complete', JSON.stringify(result.error));
+    assert.equal(result.samples.filter(row => row.name === 'browser.navigation.repeat').length, 1);
+    assert.equal(result.samples.filter(row => row.name === 'browser.authoring.save-and-receipt').length, 3);
+    assert.equal(result.server.counts.gitProcesses, 0);
+    assert.equal(result.network.failed, 0);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
