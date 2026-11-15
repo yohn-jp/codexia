@@ -22,6 +22,7 @@ export interface ApplicationShellProps {
   desktopActions?: ReactNode;
   desktopDurability?: "draft" | "saving" | "uncertain" | "saved";
   desktopDurabilityDetail?: string;
+  desktopDurabilityLabel?: string;
   documentTitle?: string;
   documentContext?: string;
   library: ReactNode;
