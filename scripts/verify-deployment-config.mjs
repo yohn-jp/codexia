@@ -126,7 +126,16 @@ assert.match(terraformVariables, /variable "access_ci_policy_id"/u);
 const release = await read('.github/workflows/frontend-release.yml');
 const preflight = await read('.github/workflows/production-preflight.yml');
 assert.match(release, /needs: \[preflight, build, certify\]/u);
-assert.match(release, /uses: \.\/\.github\/workflows\/production-preflight\.yml/u);
+const preflightJob = release.split('  preflight:\n')[1].split('  build:\n')[0];
+const deployJob = release.split('  deploy:\n')[1];
+assert.match(preflightJob, /environment: codexia-production/u);
+assert.match(preflightJob, /verify-frontend-compatibility\.mjs preflight/u);
+assert.doesNotMatch(preflightJob, /uses: \.\/\.github\/workflows\//u, 'Production preflight must obtain secrets directly from the production environment');
+for (const key of ['CODEXIA_ACCESS_CLIENT_ID', 'CODEXIA_ACCESS_CLIENT_SECRET']) {
+  const binding = key + ': ${{ secrets.' + key + ' }}';
+  assert.ok(preflightJob.includes(binding) && deployJob.includes(binding) && preflight.includes(binding), 'All production probes must use the same credential binding: ' + key);
+}
+assert.doesNotMatch(preflightJob, /CLOUDFLARE_API_TOKEN|wrangler deploy|terraform apply/u);
 assert.match(preflight, /verify-frontend-compatibility\.mjs preflight/u);
 assert.doesNotMatch(preflight, /CLOUDFLARE_API_TOKEN|wrangler deploy|terraform apply/u);
 
