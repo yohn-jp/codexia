@@ -113,14 +113,23 @@ test("the launcher remembers an explicit choice while direct Shell links keep th
 });
 
 test("recovery retry after pagehide retains its exact PostgreSQL draft", async ({ page }) => {
-  const { scene } = await createWritingFixture(page);
+  const { project, scene } = await createWritingFixture(page);
+  const text = "頁を隠しても残る日本語のDraft。";
+  await expectMarkdown(page, "最初の本文。\n次の文章です。");
   await page.route("**/api/v1/persistence/projects/*/documents/*", (route) => route.request().method() === "PATCH" ? route.abort("failed") : route.continue());
-  await editor(page).fill("頁を隠しても残る日本語のDraft。");
-  await expect.poll(async () => (await readPersistenceDrafts(page)).some((draft) => draft.documentId === scene.id)).toBe(true);
+  await editor(page).click();
+  await editor(page).press("ControlOrMeta+a");
+  await page.keyboard.insertText(text);
+  await expectMarkdown(page, text);
+  await expect.poll(async () => (await readPersistenceDrafts(page)).some((draft) => draft.documentId === scene.id && draft.markdown === text)).toBe(true);
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
   await page.unroute("**/api/v1/persistence/projects/*/documents/*");
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
-  await expect(editor(page)).toHaveText("頁を隠しても残る日本語のDraft。");
+  await expectMarkdown(page, text);
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}`);
+    return response.ok() ? ((await response.json()) as { revision: { markdown: string } }).revision.markdown : "";
+  }).toBe(text);
   await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
 });
 
