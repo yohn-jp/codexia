@@ -117,6 +117,9 @@ test('worker timeout also terminates a detached descendant', { skip: process.pla
     await writeFile(worker, `import { spawn } from 'node:child_process'; import { writeFileSync } from 'node:fs'; const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'}); writeFileSync(process.argv[2],JSON.stringify({status:'running',samples:[],descendantPid:child.pid})); setInterval(()=>{},1000);`);
     const result = await runWorker(worker, [output], output, 500);
     assert.equal(result.status, 'NOT_CHECKED');
+    assert.equal(result.execution.timeout, true);
+    assert.equal(result.execution.cleanupError, undefined, 'cleanup must be confirmed before returning');
+    assert.ok(Number.isInteger(result.descendantPid) && result.descendantPid > 0, 'fixture must record a real detached child');
     // An exited descendant can remain a zombie briefly until the host reaps it.
     let state = 'missing';
     try { state = (await readFile(`/proc/${result.descendantPid}/stat`, 'utf8')).split(') ')[1].split(' ')[0]; }
