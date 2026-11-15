@@ -520,6 +520,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     const currentJournal = journalRef.current;
     if (!currentJournal) throw new Error(journalError || "IndexedDB回復Journalを利用できません。");
     if (!value.dirty || value.generation < 1) return true;
+    if (value.recovery === "other-tab") return false;
     return currentJournal.putPersistenceDraft({
       projectId: value.document.projectId,
       documentId: value.document.id,
@@ -534,11 +535,11 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const revalidateActiveDocument = useCallback(async (signal: AbortSignal): Promise<void> => {
     const captured = activeRef.current;
     const currentProject = projects.find((item) => item.id === projectId);
-    if (!captured || !currentProject || captured.document.id !== documentId || captured.document.projectId !== projectId) return;
+    if (sessionBlockedRef.current || !captured || !currentProject || captured.document.id !== documentId || captured.document.projectId !== projectId) return;
     const sequence = ++openSequenceRef.current;
     try {
       const read = await api.persistenceDocument(projectId, captured.document.id, signal);
-      if (signal.aborted || sequence !== openSequenceRef.current || !read.revision) return;
+      if (sessionBlockedRef.current || signal.aborted || sequence !== openSequenceRef.current || !read.revision) return;
       const latest = activeRef.current;
       if (!latest || latest.document.id !== captured.document.id) return;
       if (latest.revision.id === read.revision.id) {
@@ -573,7 +574,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   }, [documentId, openDocument, persistDraft, projectId, projects, publishEditor]);
 
   useEffect(() => {
-    if (!journal || !projectId || !documentId) return;
+    if (sessionBlocked || !journal || !projectId || !documentId) return;
     const controller = new AbortController();
     const current = activeRef.current;
     if (current?.document.id === documentId && current.document.projectId === projectId) {
@@ -582,7 +583,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       void openDocument(documentId);
     }
     return () => controller.abort();
-  }, [documentId, journal, openDocument, projectId, revalidateActiveDocument, resumeEpoch]);
+  }, [documentId, journal, openDocument, projectId, revalidateActiveDocument, resumeEpoch, sessionBlocked]);
 
   useEffect(() => {
     if (!journal || !active?.dirty || active.generation < 1 || active.recovery === "other-tab") return;
@@ -1166,7 +1167,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     if (source.projectId !== captured.document.projectId || source.documentId !== captured.document.id) return;
     if (!await protectTransition()) return;
     const current = activeRef.current;
-    if (!current || current !== captured || current.dirty || restoreInFlightRef.current || saveInFlightRef.current) return;
+    if (!current || current !== captured || current.dirty || restoreInFlightRef.current || saveInFlightRef.current || sessionBlockedRef.current) return;
     const navigation = openSequenceRef.current;
     const projectId = captured.document.projectId;
     const documentId = captured.document.id;
@@ -1230,12 +1231,18 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     const current = activeRef.current;
     const remote = current?.remoteConflict;
     const currentJournal = journalRef.current;
-    if (!project || !current || !remote || !currentJournal) return;
+    if (!project || !current || !remote || !currentJournal || sessionBlockedRef.current) return;
+    const navigation = openSequenceRef.current;
+    const stillCurrent = () => navigation === openSequenceRef.current && activeRef.current?.document.id === current.document.id && activeRef.current.document.projectId === current.document.projectId && activeRef.current.generation === current.generation && activeRef.current.markdown === current.markdown;
     try {
       const read = await api.persistenceDocument(project.id, current.document.id);
       if (!read.revision) throw new Error("最新Revisionを読み込めませんでした。");
       const snapshot = await editorAdapter.read({ projectId: project.id, documentId: current.document.id, revisionId: read.revision.id, markdown: read.revision.markdown }, new AbortController().signal);
-      const removed = await currentJournal.removePersistenceDraft(project.id, current.document.id, authorScope, current.generation);
+      if (!stillCurrent()) return;
+      const existing = await currentJournal.getPersistenceDraft(project.id, current.document.id, authorScope);
+      if (!stillCurrent()) return;
+      const removed = existing ? existing.generation === current.generation && existing.markdown === current.markdown && existing.baseRevisionId === current.baseRevisionId && await currentJournal.removePersistenceDraft(project.id, current.document.id, authorScope, current.generation) : !current.dirty;
+      if (!stillCurrent()) return;
       if (!removed) {
         setPageError("別タブに新しい回復記録があるため、破棄しませんでした。まずそのタブの保存状態を確認してください。");
         return;
