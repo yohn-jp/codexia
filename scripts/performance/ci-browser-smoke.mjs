@@ -44,7 +44,7 @@ try {
   target.port = String(proxy.address().port);
   target.pathname = '/' + database;
   const { stdout } = await promisify(execFile)(process.execPath, [
-    '--test', '--test-name-pattern=PostgreSQL browser benchmark exercises the current UI and save/receipt path',
+    '--test', '--test-reporter=tap', '--test-name-pattern=PostgreSQL browser benchmark exercises the current UI and save/receipt path',
     'scripts/performance/performance.test.mjs',
   ], { env: { ...process.env, CODEXIA_TEST_DATABASE_URL: target.toString(), CODEXIA_PERF_BROWSER_SMOKE: '1' },
     timeout: 200_000, maxBuffer: 4 * 1024 * 1024 });
