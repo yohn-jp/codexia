@@ -14,7 +14,7 @@ const shaPattern = /^[a-f0-9]{40}$/u;
 const maxBlob = 8 * 1024 * 1024;
 const maxInput = 64 * 1024 * 1024;
 const maxSite = 900 * 1024 * 1024;
-export const PART_LIMIT = 270_000;
+export const PART_COUNT = 4;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const json = data => JSON.stringify(data, null, 2) + '\n';
 const git = (root, args, options = {}) => execFileSync('git', args, { cwd: root, maxBuffer: maxInput + 4 * 1024 * 1024, ...options });
@@ -78,59 +78,20 @@ function inventory(root, sha, stage) {
   return { included, excluded };
 }
 
-/** Repomix JSON is the source for both full and split exports. No code is removed. */
-export function splitFiles(files, sha, limit = PART_LIMIT) {
-  const parts = [];
-  let entries = [];
-  const encode = rows => json({ schemaVersion: 1, sourceSha: sha, entries: rows });
-  function add(entry) {
-    if (entries.length && Buffer.byteLength(encode([...entries, entry])) > limit) {
-      parts.push(encode(entries));
-      entries = [];
-    }
-    assert.ok(Buffer.byteLength(encode([entry])) <= limit, 'One split entry exceeds limit');
-    entries.push(entry);
+/** Balance whole files by serialized UTF-8 size, deterministically. */
+export function splitFiles(files, sha) {
+  const entries = Object.keys(files).map(path => {
+    assert.equal(typeof files[path], 'string');
+    const entry = { path, offset: 0, content: files[path] };
+    return { entry, bytes: Buffer.byteLength(JSON.stringify(entry, null, 2)) };
+  }).sort((a,b) => b.bytes - a.bytes || order(a.entry.path,b.entry.path));
+  const bins = Array.from({ length: Math.min(PART_COUNT, entries.length) }, () => ({ bytes: 0, entries: [] }));
+  for (const item of entries) {
+    const bin = bins.reduce((a,b) => a.bytes <= b.bytes ? a : b);
+    bin.entries.push(item.entry);
+    bin.bytes += item.bytes;
   }
-  for (const path of Object.keys(files).sort(order)) {
-    const content = files[path];
-    assert.equal(typeof content, 'string');
-    const whole = { path, offset: 0, content };
-    if (Buffer.byteLength(encode([whole])) <= limit) { add(whole); continue; }
-    // Split only a file that cannot fit intact. Offsets are UTF-16 positions.
-    for (let offset = 0; offset < content.length;) {
-      let end = Math.min(content.length, offset + Math.floor(limit / 12));
-      if (end < content.length && /[\uD800-\uDBFF]/u.test(content[end - 1])) end--;
-      assert.ok(end > offset, 'Split budget too small');
-      add({ path, offset, content: content.slice(offset, end) });
-      offset = end;
-    }
-  }
-  if (entries.length) parts.push(encode(entries));
-  return parts;
-}
-
-/** Keep each review slice within a single ownership boundary, while the full
- * Repomix export remains the authoritative complete selected-source view. */
-export function reviewScope(path) {
-  const [root, child] = path.split('/');
-  if (root === 'app') return 'frontend';
-  if ((root === 'packages' || root === 'modules') && /^[a-z0-9-]+$/u.test(child ?? '')) return root + '/' + child;
-  if (root === 'docs') return 'architecture-and-docs';
-  if (root === 'tests') return 'acceptance-tests';
-  if (root === 'scripts') return 'tooling';
-  if (['.github', 'deploy', 'edge', 'buildkit', 'profiles'].includes(root)) return 'deployment-and-ci';
-  return 'repository-config';
-}
-
-export function scopedParts(files, sha) {
-  const scopes = new Map();
-  for (const path of Object.keys(files).sort(order)) {
-    const scope = reviewScope(path);
-    if (!scopes.has(scope)) scopes.set(scope, Object.create(null));
-    scopes.get(scope)[path] = files[path];
-  }
-  return [...scopes].sort(([a],[b]) => order(a,b)).flatMap(([scope, entries]) =>
-    splitFiles(entries, sha).map(content => ({ scope, content })));
+  return bins.map(bin => json({ schemaVersion: 1, sourceSha: sha, entries: bin.entries.sort((a,b) => order(a.path,b.path)) }));
 }
 
 export function validatePack(pack, inventory) {
@@ -167,14 +128,14 @@ function snapshot(root, sha, dest, executable, policyHash) {
     const full = json({ ...pack, audit: { sourceSha: sha, policySha256: policyHash, repomixVersion: REPOMIX_VERSION, status: selection.partial ? 'partial' : 'ready' } });
     mkdirSync(dest, { recursive: true });
     const outputs = [];
-    function emit(name, text, scope) {
+    function emit(name, text) {
       const bytes = Buffer.from(text);
       writeFileSync(join(dest, name), bytes, { flag: 'wx' });
-      outputs.push({ name, bytes: bytes.length, sha256: hash(bytes), ...(scope ? { scope } : {}) });
+      outputs.push({ name, bytes: bytes.length, sha256: hash(bytes) });
     }
     emit('repomix.json', full);
-    const parts = scopedParts(pack.files, sha);
-    parts.forEach((part, index) => emit('part-' + String(index + 1).padStart(4, '0') + '.json', part.content, part.scope));
+    const parts = splitFiles(pack.files, sha);
+    parts.forEach((part, index) => emit('part-' + String(index + 1).padStart(4, '0') + '.json', part));
     const manifest = { schemaVersion: 1, sourceSha: sha, policySha256: policyHash, repomixVersion: REPOMIX_VERSION,
       status: selection.partial ? 'partial' : 'ready', files: selection.included, excluded: selection.excluded, outputs };
     writeFileSync(join(dest, 'manifest.json'), json(manifest), { flag: 'wx' });
@@ -195,7 +156,6 @@ function cachedSnapshot(dir, sha, policyHash) {
     for (const item of manifest.outputs) {
       assert.match(item.name, /^(?:repomix\.json|part-\d{4,}\.json)$/u);
       assert.ok(!names.has(item.name));
-      if (item.name.startsWith('part-')) assert.equal(typeof item.scope, 'string');
       names.add(item.name);
       const bytes = readFileSync(join(dir, item.name));
       assert.equal(bytes.length, item.bytes);
@@ -227,23 +187,18 @@ export function renderIndex(manifest) {
     if (snap.status !== 'blocked') {
       const full = snap.outputs.find(x => x.name === 'repomix.json');
       assert.ok(full, 'Missing full export');
-      const parts = new Map();
-      for (const item of snap.outputs.filter(x => x.name.startsWith('part-'))) {
-        if (!parts.has(item.scope)) parts.set(item.scope, []);
-        parts.get(item.scope).push(item);
-      }
+      const parts = snap.outputs.filter(x => x.name.startsWith('part-'));
       links = '<div class="actions">' +
         downloadLink(base, full.name, prefix + full.name, 'Download full JSON · ' + sizeLabel(full.bytes), 'primary') +
         downloadLink(base, 'manifest.json', prefix + 'manifest.json', 'Download manifest') +
         '<a href="' + base + 'repomix.json">View JSON</a></div>' +
-        '<details><summary>Review by scope · ' + parts.size + ' groups</summary>' +
-        [...parts].map(([scope, files]) => '<div class="scope"><strong>' + escapeHtml(scope) + '</strong><div class="actions">' +
-          files.map((item, i) => downloadLink(base, item.name, prefix + item.name, 'Download ' + (i + 1) + '/' + files.length + ' · ' + sizeLabel(item.bytes))).join('') +
-          '</div></div>').join('') + '</details>';
+        '<div class="actions review-parts">' +
+        parts.map((item, i) => downloadLink(base, item.name, prefix + item.name, 'Part ' + (i + 1) + '/' + parts.length + ' · ' + sizeLabel(item.bytes))).join('') +
+        '</div>';
     }
     return '<tr><th scope="row">' + escapeHtml(branch.branch) + '</th><td><code>' + escapeHtml(branch.sha) + '</code></td><td>' + escapeHtml(snap.status) + '</td><td>' + (snap.fileCount ?? '—') + '</td><td>' + links + '</td></tr>';
   }).join('\n');
-  return '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia source audit</title><style>body{font:16px system-ui,sans-serif;max-width:1200px;margin:40px auto;padding:0 20px;color:#24292f}table{border-collapse:collapse;width:100%}th,td{padding:12px;text-align:left;vertical-align:top;border-bottom:1px solid #d0d7de;overflow-wrap:anywhere}code{font-size:12px}a{color:#0969da}.scroll{overflow:auto}.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.actions a{display:inline-block;padding:6px 10px;border:1px solid #d0d7de;border-radius:6px;text-decoration:none}.actions .primary{background:#0969da;color:white;border-color:#0969da}details{margin-top:12px}summary{cursor:pointer;color:#0969da}.scope{margin-top:12px}.scope strong{display:block;margin-bottom:4px;font-size:13px}</style><h1>Codexia source audit</h1><p>Observed remote HEADs: ' + escapeHtml(manifest.observedAt) + '. Repomix ' + REPOMIX_VERSION + '. This is source review material, not release certification. Historical evidence is excluded; see each manifest for all excluded files. Partial exports omit additional files. A blocked snapshot has no downloadable source. Branches may advance between refreshes.</p><p>' + downloadLink('', 'manifest.json', 'codexia-branches.json', 'Download branch index') + ' · <a href="https://github.com/yohn-jp/codexia">Repository</a></p><div class="scroll"><table><thead><tr><th>Branch</th><th>Commit</th><th>Status</th><th>Files</th><th>Downloads</th></tr></thead><tbody>' + rows + '</tbody></table></div></html>';
+  return '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia source audit</title><style>body{font:16px system-ui,sans-serif;max-width:1200px;margin:40px auto;padding:0 20px;color:#24292f}table{border-collapse:collapse;width:100%}th,td{padding:12px;text-align:left;vertical-align:top;border-bottom:1px solid #d0d7de;overflow-wrap:anywhere}code{font-size:12px}a{color:#0969da}.scroll{overflow:auto}.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.actions a{display:inline-block;padding:6px 10px;border:1px solid #d0d7de;border-radius:6px;text-decoration:none}.actions .primary{background:#0969da;color:white;border-color:#0969da}.review-parts{margin-top:8px}td:nth-child(3),td:nth-child(4){white-space:nowrap}</style><h1>Codexia source audit</h1><p>Observed remote HEADs: ' + escapeHtml(manifest.observedAt) + '. Repomix ' + REPOMIX_VERSION + '. This is source review material, not release certification. Historical evidence is excluded; see each manifest for all excluded files. Partial exports omit additional files. A blocked snapshot has no downloadable source. Branches may advance between refreshes.</p><p>' + downloadLink('', 'manifest.json', 'codexia-branches.json', 'Download branch index') + ' · <a href="https://github.com/yohn-jp/codexia">Repository</a></p><div class="scroll"><table><thead><tr><th>Branch</th><th>Commit</th><th>Status</th><th>Files</th><th>Downloads</th></tr></thead><tbody>' + rows + '</tbody></table></div></html>';
 }
 
 export function buildPortal({ root, site, cache, executable, heads, observedAt = new Date().toISOString() }) {
