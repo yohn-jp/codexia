@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, rm, mkdir } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm, mkdir, symlink } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pack, verify } from './artifacts.mjs';
+import { createInventory, pack, verify } from './artifacts.mjs';
 
 const hash = data => createHash('sha256').update(data).digest('hex');
 test('artifact round trip reproduces archives and rejects corrupt archive, gzip and raw evidence', async () => {
@@ -35,5 +35,31 @@ test('artifact round trip reproduces archives and rejects corrupt archive, gzip 
     await assert.rejects(pack(index, source, join(root, 'changed'), url), /mismatch: result.json/);
     manifest.artifacts[0].sourceFile = '../outside'; await writeFile(index, JSON.stringify(manifest));
     await assert.rejects(pack(index, source, join(root, 'unsafe'), url), /Unsafe source/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('new archive inventory is explicit, deterministic and rejects unsafe or changed inputs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'performance-inventory-'));
+  try {
+    const source = join(root, 'source'); await mkdir(source);
+    await writeFile(join(source, 'result.json'), '{"synthetic":true}\n');
+    await writeFile(join(source, 'dataset.json'), '{"fixtureId":"synthetic"}\n');
+    await writeFile(join(source, 'unselected.txt'), 'not evidence');
+    await symlink(join(source, 'result.json'), join(source, 'link.json'));
+    const index = join(root, 'recipe.json');
+    const a = await createInventory(source, ['result.json', 'dataset.json'], index);
+    const b = await createInventory(source, ['dataset.json', 'result.json'], join(root, 'other.json'));
+    assert.deepEqual(a, b);
+    assert.deepEqual(a.artifacts.map(row => row.sourceFile), ['dataset.json', 'result.json']);
+    await assert.rejects(createInventory(source, ['result.json'], index), { code: 'EEXIST' });
+    for (const files of [[], ['result.json', 'result.json'], ['../outside'], ['link.json']]) {
+      await assert.rejects(createInventory(source, files, join(root, 'invalid.json')));
+    }
+    const url = 'https://github.com/yohn-jp/codexia/releases/download/test/evidence.tar';
+    const output = join(root, 'archive');
+    await pack(index, source, output, url);
+    assert.equal(await verify(join(output, 'INDEX.json'), output), 2);
+    await writeFile(join(source, 'result.json'), 'changed');
+    await assert.rejects(pack(index, source, join(root, 'changed'), url), /mismatch: result.json/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
