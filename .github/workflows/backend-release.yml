@@ -20,6 +20,9 @@ on:
       - scripts/verify-release-source.mjs
       - scripts/release-policy.mjs
       - scripts/ci-contract.mjs
+      - scripts/ci-artifact-selection.mjs
+      - scripts/download-ci-artifacts*.mjs
+      - scripts/verify-backend-artifacts*.mjs
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
@@ -44,6 +47,9 @@ on:
       - scripts/verify-release-source.mjs
       - scripts/release-policy.mjs
       - scripts/ci-contract.mjs
+      - scripts/ci-artifact-selection.mjs
+      - scripts/download-ci-artifacts*.mjs
+      - scripts/verify-backend-artifacts*.mjs
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
@@ -98,7 +104,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'push'
         with:
-          name: codexia-backend-image-${{ github.sha }}-${{ matrix.profile }}
+          name: codexia-backend-image-${{ github.sha }}-${{ matrix.profile }}-attempt-${{ github.run_attempt }}
+          compression-level: 0
           path: ${{ runner.temp }}/codexia-backend-image.tar.gz
           if-no-files-found: error
           retention-days: 2
@@ -128,10 +135,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_COMMIT_RELEASE: '1'
         run: node scripts/verify-release-source.mjs
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: codexia-backend-image-${{ github.sha }}-*
-          path: ${{ runner.temp }}/backend-images
+      - name: Verify exact tested Core and Full image artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_BACKEND_ARTIFACT_DIR: ${{ runner.temp }}/backend-images
+        run: node scripts/verify-backend-artifacts.mjs
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -147,7 +155,7 @@ jobs:
           set -euo pipefail
           export CODEXIA_RELEASE_VERSION="$(node scripts/component-release-version.mjs backend)"
           for profile in core full; do
-            gzip -dc "$RUNNER_TEMP/backend-images/codexia-backend-image-$SOURCE_SHA-$profile/codexia-backend-image.tar.gz" | docker load
+            gzip -dc "$RUNNER_TEMP/backend-images/$profile/codexia-backend-image.tar.gz" | docker load
             tag="sha-$SOURCE_SHA"
             if [[ "$profile" == full ]]; then tag="$tag-full"; fi
             tested_id="$(docker image inspect --format '{{.Id}}' codexia-backend-ci)"
