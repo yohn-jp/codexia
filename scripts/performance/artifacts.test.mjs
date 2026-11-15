@@ -61,5 +61,9 @@ test('new archive inventory is explicit, deterministic and rejects unsafe or cha
     assert.equal(await verify(join(output, 'INDEX.json'), output), 2);
     await writeFile(join(source, 'result.json'), 'changed');
     await assert.rejects(pack(index, source, join(root, 'changed'), url), /mismatch: result.json/);
+    await rm(join(source, 'result.json'));
+    await writeFile(join(root, 'replacement.json'), '{"synthetic":true}\n');
+    await symlink(join(root, 'replacement.json'), join(source, 'result.json'));
+    await assert.rejects(pack(index, source, join(root, 'linked'), url), { code: 'ELOOP' });
   } finally { await rm(root, { recursive: true, force: true }); }
 });

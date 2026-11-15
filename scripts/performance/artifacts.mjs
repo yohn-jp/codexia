@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync, gunzipSync } from 'node:zlib';
@@ -29,6 +30,16 @@ function compress(source) {
   return compressed;
 }
 
+// Use one regular-file descriptor for validation and reading; a swapped leaf
+// symlink must not bypass the inventory or the later pack operation.
+async function readEvidenceSource(directory, name) {
+  const handle = await open(join(directory, name), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    check((await handle.stat()).isFile(), 'Evidence source must be a regular file: ' + name);
+    return await handle.readFile();
+  } finally { await handle.close(); }
+}
+
 // Explicit allowlist: callers review/redact synthetic evidence before packaging.
 // Never recursively collect a workspace, credentials, model caches or author data.
 export async function createInventory(sourceDirectory, sourceFiles, indexPath) {
@@ -38,9 +49,7 @@ export async function createInventory(sourceDirectory, sourceFiles, indexPath) {
   const artifacts = [];
   for (const sourceFile of files) {
     check(typeof sourceFile === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(sourceFile), 'Unsafe source filename');
-    const sourcePath = join(sourceDirectory, sourceFile);
-    check((await lstat(sourcePath)).isFile(), 'Evidence source must be a regular file: ' + sourceFile);
-    const source = await readFile(sourcePath);
+    const source = await readEvidenceSource(sourceDirectory, sourceFile);
     const compressed = compress(source);
     artifacts.push({ file: `raw/${sourceFile}.gz`, sourceFile,
       sourceBytes: source.length, gzipBytes: compressed.length,
@@ -61,7 +70,7 @@ export async function pack(indexPath, sourceDirectory, outputDirectory, assetUrl
   check(/^[A-Za-z0-9][A-Za-z0-9._-]*\.tar$/.test(archiveFile), 'Asset must have a .tar filename');
   await mkdir(outputDirectory); await mkdir(join(outputDirectory, 'raw'));
   for (const row of input.artifacts) {
-    const source = await readFile(join(sourceDirectory, row.sourceFile));
+    const source = await readEvidenceSource(sourceDirectory, row.sourceFile);
     equalBytes(source, row.sourceBytes, row.sha256, row.sourceFile);
     const compressed = compress(source);
     equalBytes(compressed, row.gzipBytes, row.gzipSha256, row.file);
