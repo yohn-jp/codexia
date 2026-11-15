@@ -205,7 +205,7 @@ export function assertEditorEvidenceSnapshot(value: unknown, documentLength: num
       || (item.from as number) < 0 || (item.to as number) < (item.from as number)
       || typeof item.quote !== "string" || (item.quote.length === 0 && item.status !== "orphaned" && item.status !== "revision_conflict")
       || typeof item.revisionId !== "string" || item.revisionId.length === 0 || typeof item.status !== "string" || !statuses.has(item.status)
-      || ((item.to as number) === (item.from as number) && item.status !== "orphaned")
+      || ((item.to as number) === (item.from as number) && item.status !== "orphaned" && item.status !== "revision_conflict")
       || (item.target !== undefined && !validKnowledgeReference(item.target))
        || (item.targets !== undefined && (!Array.isArray(item.targets) || !item.targets.every(validKnowledgeReference)))
       || (item.candidates !== undefined && (!Array.isArray(item.candidates) || !item.candidates.every(validKnowledgeReference)))

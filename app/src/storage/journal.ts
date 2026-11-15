@@ -284,14 +284,14 @@ export class BrowserJournal {
     }
   }
 
-  async removePersistenceDraft(projectId: string, documentId: string, authorScope: string, expectedGeneration?: number): Promise<boolean> {
+  async removePersistenceDraft(projectId: string, documentId: string, authorScope: string, expectedGeneration?: number, expectedContent?: Pick<PersistenceDraftEntry, "baseRevisionId" | "baseMarkdown" | "markdown">): Promise<boolean> {
     const key = persistenceDraftKey(projectId, documentId, authorScope);
     try {
       const transaction = this.database.transaction(PERSISTENCE_DRAFT_STORE, "readwrite", { durability: "strict" });
       const done = transactionDone(transaction);
       const store = transaction.objectStore(PERSISTENCE_DRAFT_STORE);
       const existing = await requestValue(store.get(key)) as PersistenceDraftEntry | undefined;
-      if (!existing || (expectedGeneration !== undefined && existing.generation !== expectedGeneration)) {
+      if (!existing || (expectedGeneration !== undefined && existing.generation !== expectedGeneration) || (expectedContent && (existing.baseRevisionId !== expectedContent.baseRevisionId || existing.baseMarkdown !== expectedContent.baseMarkdown || existing.markdown !== expectedContent.markdown))) {
         await done;
         return false;
       }

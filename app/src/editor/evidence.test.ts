@@ -254,4 +254,6 @@ test("unplaced and cross-block anchors never acquire a fabricated block identity
   const recovered = initializeDocumentEvidence("", "revision-1", validated, ids);
   assert.equal(recovered.anchors[0]!.blockId, null);
   assert.equal(recovered.anchors[0]!.status, "orphaned");
+  const conflicted = assertEditorEvidenceSnapshot({ revisionId: "revision-1", blocks: [], anchors: [{ ...orphan, status: "revision_conflict" }] }, 0);
+  assert.equal(initializeDocumentEvidence("", "revision-1", conflicted, ids).anchors[0]!.status, "revision_conflict");
 });

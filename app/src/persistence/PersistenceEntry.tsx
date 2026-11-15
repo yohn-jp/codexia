@@ -21,6 +21,7 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
 
   const inspect = useCallback(async () => {
     const sequence = ++inspectSequenceRef.current;
+    if (workspaceScopeRef.current !== null) setSessionBlocked(true);
     setBusy(true);
     setMessage("");
     let versionChecked = false;

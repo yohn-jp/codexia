@@ -319,5 +319,5 @@ export function ProposalReview({
 
 /** A partial receipt must explicitly identify every original operation. */
 function hasCompleteOriginal(localIds: readonly string[], originalIds: readonly string[] | undefined): boolean {
-  return Boolean(originalIds && originalIds.length === localIds.length && new Set(originalIds).size === originalIds.length && new Set(localIds).size === localIds.length && localIds.every((id) => originalIds.includes(id)));
+  return Boolean(originalIds && originalIds.length === localIds.length && new Set(originalIds).size === originalIds.length && new Set(localIds).size === localIds.length && localIds.every((id, index) => originalIds[index] === id));
 }
