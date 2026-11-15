@@ -53,7 +53,7 @@ assert.match(terraformMain, /pattern\s+=\s+"\$\{var\.app_hostname\}\$\{each\.val
 assert.match(terraformMain, /service\s+=\s+var\.origin_service/u);
 assert.match(terraformMain, /required\s+=\s+true/u);
 assert.match(terraformMain, /originRoutes/u);
-assert.match(terraformVariables, /http:\/\/codexia-api:3000/u);
+assert.match(terraformVariables, /condition\s*=\s*contains\(\["http:\/\/codexia-api:3000", "http:\/\/codexia-api-proxy:3000"\], var\.origin_service\)/u);
 
 assert.match(apiSource, /style-src-attr 'unsafe-inline'/u);
 assert.ok(apiClient.includes('"/api/login"'), 'the UI API client must keep using same-origin API paths');
