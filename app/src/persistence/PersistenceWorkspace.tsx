@@ -247,7 +247,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       lastOutlineSelectionRef.current = "";
       return;
     }
-    const byId = new Map(documents.filter((document) => document.projectId === projectId).map((document) => [document.id, document]));
+    const byId = new Map<string, PersistenceDocument>(documents.filter((document) => document.projectId === projectId).map((document) => [document.id, document]));
     const selected = byId.get(documentId);
     if (!selected) return; // A route can select a document before the list arrives.
     const ancestors: string[] = [];
