@@ -20,7 +20,7 @@
   register: inspect_cgroup
 - name: Observe tool paths without installing packages
   ansible.builtin.command:
-    argv: [sh, -c, 'command -v "$1"', sh, "{{ item }}"]
+    argv: [sh, -c, 'if command -v "$1"; then exit 0; else exit 1; fi', sh, "{{ item }}"]
   loop: [podman, node, flock, age, findmnt, loginctl, systemctl]
   register: inspect_tools
   changed_when: false
