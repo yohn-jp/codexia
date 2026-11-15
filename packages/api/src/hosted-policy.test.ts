@@ -207,3 +207,21 @@ test("expired and tampered hosted access grants fail closed", async () => {
       (error: unknown) => error instanceof HostedAuthorizationError && error.status === 401);
   }
 });
+
+test("early JWKS rejection cancels the unread upstream body and retains service failure", async () => {
+  for (const init of [
+    { status: 502, headers: { "Content-Type": "application/json" } },
+    { status: 200, headers: { "Content-Type": "text/html" } },
+    { status: 200, headers: { "Content-Type": "application/json", "Content-Length": "invalid" } },
+    { status: 200, headers: { "Content-Type": "application/json", "Content-Length": "16385" } },
+  ]) {
+    let cancelled = 0;
+    const fetcher = async () => new Response(new ReadableStream({
+      cancel() { cancelled++; },
+    }), init);
+    const policy = createHostedAuthorizationPolicy({ assignment: assignment(), now: () => NOW, fetch: fetcher });
+    await assert.rejects(policy.authenticate(accessGrant(), "read"),
+      (error: unknown) => error instanceof HostedAuthorizationError && error.status === 503);
+    assert.equal(cancelled, 1);
+  }
+});
