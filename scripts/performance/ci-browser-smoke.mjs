@@ -7,9 +7,26 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { once } from 'node:events';
+import { realpath } from 'node:fs/promises';
 
 if (process.env.CI !== 'true' || !process.env.CODEXIA_CI_REPORT_DIR || process.env.CODEXIA_PROFILE !== 'core') {
   throw new Error('Benchmark CI smoke requires the isolated Core browser lane');
+}
+// The container runs under a different UID than actions/checkout. Trust only
+// the exact CI workspace and verify its HEAD before starting the benchmark.
+const workspace = await realpath(process.cwd());
+if (!process.env.GITHUB_WORKSPACE || workspace !== await realpath(process.env.GITHUB_WORKSPACE)) {
+  throw new Error('Benchmark smoke must run from the checked-out GitHub workspace');
+}
+const configCount = Number(process.env.GIT_CONFIG_COUNT ?? 0);
+if (!Number.isSafeInteger(configCount) || configCount < 0) throw new Error('Invalid inherited Git config count');
+const gitEnv = { ...process.env, GIT_CONFIG_COUNT: String(configCount + 1),
+  [`GIT_CONFIG_KEY_${configCount}`]: 'safe.directory',
+  [`GIT_CONFIG_VALUE_${configCount}`]: workspace };
+const { stdout: checkedHead } = await promisify(execFile)('git', ['rev-parse', 'HEAD'], { env: gitEnv });
+if (!/^[a-f0-9]{40}$/u.test(process.env.CODEXIA_EXPECTED_SHA ?? '') ||
+    checkedHead.trim() !== process.env.CODEXIA_EXPECTED_SHA) {
+  throw new Error('Benchmark smoke source SHA differs from the selected CI source');
 }
 const service = new URL(process.env.CODEXIA_E2E_DATABASE_URL ?? '');
 if (!['postgres:', 'postgresql:'].includes(service.protocol) || service.hostname !== 'postgres' ||
@@ -46,7 +63,7 @@ try {
   const { stdout } = await promisify(execFile)(process.execPath, [
     '--test', '--test-reporter=tap', '--test-name-pattern=PostgreSQL browser benchmark exercises the current UI and save/receipt path',
     'scripts/performance/performance.test.mjs',
-  ], { env: { ...process.env, CODEXIA_TEST_DATABASE_URL: target.toString(), CODEXIA_PERF_BROWSER_SMOKE: '1' },
+  ], { env: { ...gitEnv, CODEXIA_TEST_DATABASE_URL: target.toString(), CODEXIA_PERF_BROWSER_SMOKE: '1' },
     timeout: 200_000, maxBuffer: 4 * 1024 * 1024 });
   if (!stdout.includes('# pass 1') || !stdout.includes('# skipped 0')) {
     throw new Error('Benchmark smoke did not execute exactly one passing test');
