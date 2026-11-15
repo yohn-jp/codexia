@@ -1,0 +1,30 @@
+name: Audit dependency lock resolution (temporary)
+on:
+  push:
+    branches: [fix/audit-security-dependency-resolution]
+permissions:
+  contents: read
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Resolve real lockfile without lifecycle scripts
+        run: |
+          corepack enable
+          corepack pnpm@12.21.0 --version
+          pnpm install --lockfile-only --ignore-scripts
+          echo 'CODEXIA_LOCK_PATCH_BEGIN'
+          git diff --no-color -- pnpm-lock.yaml
+          echo 'CODEXIA_LOCK_PATCH_END'
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: resolved-lock
+          path: pnpm-lock.yaml
+          if-no-files-found: error
