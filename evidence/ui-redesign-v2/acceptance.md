@@ -35,7 +35,7 @@
 | 操作・入力 | PASS（Chromium自動ブラウザー範囲） | Core suite 82 passed／6 skipped／0 failed、Full suite 85 passed／3 skipped／0 failed。`redesign-visual.acceptance.spec.ts`、modular workspace、native review、UI-v1、Story／Speaker reviewを含む。Mobile reference sheet中のEditor node同一性、composition中遷移拒否、route/history/focus、preset、float／dock／resize、提案承認と適用を確認。 |
 | Accessibility | PARTIAL | role/name、keyboardでのtab・panel操作、sheetの表示・閉鎖とfocus／IMEガードをブラウザーで確認。手動screen-reader評価と物理iOS／Android日本語IME・native keyboardは未確認。 |
 | Persistence integrity | PASS（合成PostgreSQL） | PostgreSQLのrevision・Knowledge／Text Anchor・提案・receipt、IndexedDB回復Journal、draftのreload、保存競合、応答不明の再照合と配置storageを実操作で確認。実ユーザー原稿へはアクセスしていない。 |
-| Performance | PASS（ローカルlab計測） | 下記`performance.json`。入力反応ではなくNavigation／preset／sheetの単発ラボ値。Field INP／CLS達成の主張には使わない。 |
+| Performance | PARTIAL（変更後のローカルlab計測） | 下記`performance.json`。同条件の変更前Navigation／interaction計測がないため改善幅は未証明。bundleサイズのみ比較。Field INP／CLS達成の主張には使わない。 |
 
 Coreの全Chromium browser suiteはcommit `ae9154b`で実行し、82 passed／6 skipped／0 failed。Fullも同じsourceで85 passed／3 skipped／0 failed。profileを指定した4ケースと環境依存の2件（native headful visibility）が各profileでskipされた。Playwright WebKitはこの実行環境に`libgtk-4.so.1`／Grapheneがなく起動不能。`playwright install-deps`は権限のない`su`で失敗し、Docker browser imageは容量不足で取得できなかったためBLOCKEDとした。物理端末IMEもNOT_CHECKED。
 
@@ -43,7 +43,7 @@ Coreの全Chromium browser suiteはcommit `ae9154b`で実行し、82 passed／6 
 
 ## Performance evidence
 
-計測JSONは[`performance.json`](performance.json)。ローカルheadless Chromium、cache無効、CPU／network throttleなし。ローカル試行でありフィールドRUMではない。
+計測JSONは[`performance.json`](performance.json)。変更前の同一fixture・profile・cache条件の実行時間は採取していない。以下は初回実装時点の現状値であり、性能改善や回帰なしの証拠ではない。ローカルheadless Chromium、cache無効、CPU／network throttleなし。ローカル試行でありフィールドRUMではない。
 
 | Viewport | Same-origin transfer | Main JS | DCL | LCP | CLS |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -52,3 +52,7 @@ Coreの全Chromium browser suiteはcommit `ae9154b`で実行し、82 passed／6 
 
 現在の`performance.json`はFull profileの試行。Core buildのmain JSはDesktop 1,752.34 kB／gzip 460.25 kB、Mobile 1,814.80 kB／gzip 477.01 kB。Full buildはDesktop 1,753.97 kB／gzip 460.59 kB、Mobile 1,816.43 kB／gzip 477.33 kB。origin/main Core build比で約3.86 kB raw、gzip約1 kBの増分。既存の500 kB chunk警告は継続している。interaction試行値（Research 150 ms、Review 232 ms、Mobile reference sheet 748 ms）は初回sheet表示を含むラボ観測で、ユーザー母集団の応答時間ではない。
 
+
+## Review follow-up
+
+Mobileの原稿操作disclosureを通常フローに置き、操作列でのクリッピングを除去した。目次はPostgreSQLの正規取得順序を保持し、選択対象または祖先経路が変わった場合だけ祖先を展開する。明示的な折り畳みは維持する。追加のブラウザー受入テストは320/390幅の原稿操作、同一orderKeyの文書と名称変更、履歴ナビゲーションからの選択表示を対象とする。上記スクリーンショット・性能値は初回実装の記録であり、レビュー修正後の再測定値ではない。

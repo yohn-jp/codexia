@@ -373,3 +373,80 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
     interactions: interactionMeasurementsMs,
   }, null, 2) + "\n");
 });
+
+test("mobile manuscript disclosures remain operable at 320 and 390 CSS pixels", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const { project, firstScene } = await buildManuscript(page, "desktop");
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto(new URL(`/mobile/projects/${project.id}/scenes/${firstScene.id}?view=writing`, page.url()).toString());
+    await expect(manuscriptEditor(page)).toBeVisible();
+    await expect(page.locator(".pg-save-state")).toContainText("PostgreSQLへ保存済み");
+    const command = page.locator(".pg-editor-command-menu");
+    await command.locator("summary").click();
+    // A visible DOM node is not necessarily hit-testable when clipped.
+    // Use actual clicks (no force, no programmatic scrolling inside the toolbar).
+    await command.getByRole("button", { name: "Revision履歴", exact: true }).click();
+    await expect(page.getByRole("region", { name: "Revision履歴" })).toBeVisible();
+    await command.getByRole("button", { name: "Revision履歴", exact: true }).click();
+    await command.locator("summary").click();
+    const display = page.locator(".pg-editor-display-menu");
+    await display.locator("summary").click();
+    const fontSize = display.getByRole("spinbutton", { name: "原稿の文字サイズ" });
+    await fontSize.click();
+    await fontSize.fill("18");
+    await expect(fontSize).toHaveValue("18");
+    await display.locator("summary").click();
+    const symbols = page.locator(".pg-editor-symbol-menu");
+    await symbols.locator("summary").click();
+    await symbols.getByRole("button", { name: "三点リーダーを挿入" }).click();
+    await expect(manuscriptEditor(page)).toContainText("……");
+    await symbols.locator("summary").click();
+    // Keep the next viewport independent of the edit; use the normal save path.
+    await expect(page.getByRole("button", { name: "今すぐ保存" })).toBeEnabled();
+    await page.getByRole("button", { name: "今すぐ保存" }).click();
+    await expect(page.locator(".pg-save-state")).toContainText("PostgreSQLへ保存済み");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  }
+});
+
+test("outline preserves database sibling order and reveals a navigated document", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { project, firstScene } = await buildManuscript(page, "desktop");
+  const url = `/api/v1/persistence/projects/${project.id}/documents`;
+  const list = async () => {
+    const response = await page.request.get(url);
+    expect(response.ok()).toBe(true);
+    return (await response.json() as { documents: Array<CreatedDocument & { title: string; parentId: string | null; orderKey: string }> }).documents;
+  };
+  const parentId = (await list()).find(document => document.id === firstScene.id)!.parentId!;
+  const a = await createDocument(page, project.id, { kind: "scene", parentId, title: "同順A", orderKey: "04", markdown: "同順の原稿A" });
+  const b = await createDocument(page, project.id, { kind: "scene", parentId, title: "同順B", orderKey: "04", markdown: "同順の原稿B" });
+  const ties = (await list()).filter(document => document.id === a.id || document.id === b.id);
+  expect(ties).toHaveLength(2);
+  for (const [index, document] of ties.entries()) {
+    const response = await page.request.patch(`${url}/${document.id}/metadata`, {
+      headers: { Origin: new URL(page.url()).origin },
+      data: { expectedVersion: document.version, title: index === 0 ? "ZZZ同順" : "AAA同順" },
+    });
+    expect(response.ok(), await response.text()).toBe(true);
+  }
+  const expected = (await list()).filter(document => document.parentId === parentId).map(document => document.title);
+  await page.reload();
+  await expect(manuscriptEditor(page)).toBeVisible();
+  const chapter = page.locator('.pg-outline-item[data-kind="chapter"]').filter({ has: page.getByRole("button", { name: /第一章　灯台守の娘を折りたたむ/ }) });
+  await expect(chapter.locator(":scope > ul > li > .pg-outline-row > .pg-outline-document > span")).toHaveText(expected);
+  await page.getByRole("button", { name: /一　青い目録/ }).click();
+  await expect(manuscriptEditor(page)).toBeVisible();
+  await expect(page.getByRole("button", { name: /一　青い目録/ })).toHaveAttribute("aria-current", "page");
+  await page.getByRole("button", { name: "第一章　灯台守の娘を折りたたむ" }).click();
+  await expect(page.getByRole("button", { name: /一　薄明の羅針盤/ })).toHaveCount(0);
+  await page.goBack();
+  await expect(page.getByRole("button", { name: /一　薄明の羅針盤/ })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("button", { name: "第一章　灯台守の娘を折りたたむ" })).toHaveAttribute("aria-expanded", "true");
+  await expect(manuscriptEditor(page)).toContainText("誰かが選ばなかった未来");
+  // Explicit collapse of the current branch does not change the selected manuscript.
+  await page.getByRole("button", { name: "第一章　灯台守の娘を折りたたむ" }).click();
+  await expect(page.getByRole("button", { name: "第一章　灯台守の娘を展開" })).toHaveAttribute("aria-expanded", "false");
+  await expect(manuscriptEditor(page)).toContainText("誰かが選ばなかった未来");
+});

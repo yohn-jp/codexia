@@ -290,16 +290,18 @@
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions {
   display: flex;
   align-items: center;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 4px;
   margin: 0;
   padding: 0 0 2px;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scrollbar-width: none;
+  min-width: 0;
+  overflow: visible;
 }
-.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions::-webkit-scrollbar { display: none; }
-.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions > * { flex: 0 0 auto; white-space: nowrap; }
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions > * { flex: 0 1 auto; min-width: 0; }
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions > details[open] {
+  flex: 1 0 100%;
+  max-width: 100%;
+}
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions button {
   min-width: 44px;
   min-height: 44px;
@@ -338,12 +340,11 @@
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-display-menu,
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-symbol-menu { position: relative; }
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions details[open] > div {
-  position: absolute;
-  z-index: 12;
-  top: calc(100% + 4px);
-  inset-inline-start: 0;
+  /* Keep disclosed controls in normal flow so no scrollport clips them. */
+  position: static;
   display: flex;
-  min-width: min(18rem, calc(100vw - 32px));
+  min-width: 0;
+  max-width: 100%;
   flex-direction: column;
   align-items: stretch;
   gap: 4px;
@@ -351,12 +352,14 @@
   border: 1px solid var(--mobile-line);
   border-radius: 9px;
   background: var(--mobile-paper);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 14%);
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-symbol-menu[open] > div {
+  flex-flow: row wrap;
 }
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-display-menu[open] > div {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  min-width: min(21rem, calc(100vw - 32px));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
 }
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-display-menu label {
   display: grid;

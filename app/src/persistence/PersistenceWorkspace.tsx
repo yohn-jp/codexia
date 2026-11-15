@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type CSSProperties, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { snapshotKey } from "@codexia/contracts";
 import type { EditorTermSpan } from "../editor/terms";
@@ -103,11 +103,8 @@ function buildDocumentOutline(documents: readonly PersistenceDocument[]): Outlin
       roots.push(node);
     } else parent.children.push(node);
   }
-  const sort = (items: OutlineDocument[]): void => {
-    items.sort((left, right) => left.orderKey.localeCompare(right.orderKey) || left.title.localeCompare(right.title));
-    for (const node of items) sort(node.children);
-  };
-  sort(roots);
+  // The document list already comes from PostgreSQL in order_key, id order.
+  // Grouping preserves that sibling order, including ties and non-ASCII keys.
   return roots;
 }
 
@@ -202,6 +199,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const [documents, setDocuments] = useState<PersistenceDocument[]>([]);
   const [collapsedDocumentIds, setCollapsedDocumentIds] = useState<Set<string>>(() => new Set());
   const [documentId, setDocumentId] = useState("");
+  const lastOutlineSelectionRef = useRef("");
   const [nodes, setNodes] = useState<KnowledgeNode[]>([]);
   const [nodeId, setNodeId] = useState("");
   const [nodeEvidence, setNodeEvidence] = useState<{ projectId: string; nodeId: string; evidence: PersistenceAnchorView[] } | null>(null);
@@ -243,6 +241,33 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const resume = useRecentActivityResume({ binding: projectId ? { projectId, authorScope, projectScopeKey: projectId } : null, enabled: Boolean(projectId) });
   const project = projects.find((candidate) => candidate.id === projectId) ?? null;
   const selectedDocument = documents.find((candidate) => candidate.id === documentId) ?? null;
+  const documentOutline = useMemo(() => buildDocumentOutline(documents), [documents]);
+  useEffect(() => {
+    if (!documentId || !projectId) {
+      lastOutlineSelectionRef.current = "";
+      return;
+    }
+    const byId = new Map(documents.filter((document) => document.projectId === projectId).map((document) => [document.id, document]));
+    const selected = byId.get(documentId);
+    if (!selected) return; // A route can select a document before the list arrives.
+    const ancestors: string[] = [];
+    const visited = new Set<string>([documentId]);
+    let parent = selected.parentId ? byId.get(selected.parentId) : undefined;
+    while (parent && !visited.has(parent.id)) {
+      ancestors.push(parent.id);
+      visited.add(parent.id);
+      parent = parent.parentId ? byId.get(parent.parentId) : undefined;
+    }
+    const selection = JSON.stringify([projectId, documentId, ancestors]);
+    if (lastOutlineSelectionRef.current === selection) return;
+    lastOutlineSelectionRef.current = selection;
+    setCollapsedDocumentIds((current) => {
+      if (!ancestors.some((id) => current.has(id))) return current;
+      const next = new Set(current);
+      for (const id of ancestors) next.delete(id);
+      return next;
+    });
+  }, [documents, documentId, projectId]);
   const selectedNode = nodes.find((candidate) => candidate.id === nodeId && candidate.projectId === projectId) ?? null;
   const selectedNodeEvidence = nodeEvidence?.projectId === projectId && nodeEvidence.nodeId === selectedNode?.id ? nodeEvidence.evidence : null;
 
@@ -754,8 +779,23 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         markdown: "",
         idempotencyKey: crypto.randomUUID(),
       });
-      if (!await protectTransition()) return;
-      setDocuments((current) => [...current, result.document]);
+      // Re-read the canonical order after creation; an appended document can
+      // share an orderKey with an existing sibling or sort before it.
+      if (projectIdRef.current !== project.id) return;
+      setDocumentTitle("");
+      let documentResult: Awaited<ReturnType<typeof api.persistenceDocuments>>;
+      try {
+        documentResult = await api.persistenceDocuments(project.id);
+      } catch {
+        if (projectIdRef.current === project.id) setPageError("文書は作成済みですが、目次を再取得できませんでした。作品を開き直してください。");
+        return;
+      }
+      if (projectIdRef.current !== project.id || !await protectTransition() || projectIdRef.current !== project.id) return;
+      setDocuments(documentResult.documents);
+      if (!documentResult.documents.some((item) => item.id === result.document.id)) {
+        setPageError("文書は作成済みですが、現在の目次取得範囲に含まれていません。");
+        return;
+      }
       selectionRef.current = { projectId: project.id, documentId: result.document.id };
       persistSelectionSafely(authorScope, selectionRef.current);
       updateRouteSelection(selectionRef.current, false);
@@ -1243,7 +1283,6 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     "--editor-font-family": editorFontFamily,
     "--reader-max-width": `${typography.maxWidth}px`,
   } as CSSProperties;
-  const documentOutline = buildDocumentOutline(documents);
   const renderOutline = (items: OutlineDocument[]): ReactNode => items.map((item) => {
     const hasChildren = item.children.length > 0;
     const collapsed = collapsedDocumentIds.has(item.id);
