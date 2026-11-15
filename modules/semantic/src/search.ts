@@ -215,7 +215,21 @@ function bm25Scores(documents: readonly SearchDocument[], groups: readonly strin
 }
 
 function makeSnippet(content: string, offset: number, length: number): string {
-  return content.slice(Math.max(0, offset - 40), Math.min(content.length, offset + length + 80)).replace(/\s+/g, " ");
+  let end = offset + length;
+  // Default Unicode lowercasing can expand a character (e.g. U+0130).
+  // Convert the selected folded range back to original UTF-16 coordinates.
+  if (content.toLowerCase().length !== content.length) {
+    const foldedStart = offset, foldedEnd = end;
+    let original = 0, folded = 0;
+    for (const character of content) {
+      const next = folded + character.toLowerCase().length;
+      if (folded <= foldedStart && foldedStart < next) offset = original;
+      if (folded < foldedEnd && foldedEnd <= next) { end = original + character.length; break; }
+      original += character.length;
+      folded = next;
+    }
+  }
+  return content.slice(Math.max(0, offset - 40), Math.min(content.length, end + 80)).replace(/\s+/g, " ");
 }
 
 /** Source `searchEntities` field weighting and RRF rank input over a pinned snapshot. */
@@ -262,7 +276,7 @@ export function searchSnapshotLexically(entities: readonly CanonicalSnapshotEnti
       id: document.id,
       type: document.type,
       ...(document.name ? { name: document.name } : {}),
-      ...(offset >= 0 ? { snippet: makeSnippet(document.content, offset, matchedTerm.length) } : { snippet: document.content.slice(0, 120).replace(/\s+/g, " ") }),
+      ...(offset >= 0 ? { snippet: makeSnippet(document.content, offset, matchedTerm.toLowerCase().length) } : { snippet: document.content.slice(0, 120).replace(/\s+/g, " ") }),
       filePath: document.filePath,
       score,
       field: document.field,

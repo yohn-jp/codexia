@@ -21,7 +21,11 @@ function applyRegexSequenceRules(text: string, rules: RegexSequenceRule[]): stri
 /** 複数のline_spacingルールを、いずれか1つでもマッチすれば「ブロック開始行」とみなす判定関数にまとめる。 */
 function buildBlockStartMatcher(rules: LineSpacingRule[]): (line: string) => boolean {
   const regexes = rules.map((rule) => new RegExp(rule.startPattern, rule.flags ?? ""));
-  return (line: string) => regexes.some((regex) => regex.test(line.trim()));
+  return (line: string) => regexes.some((regex) => {
+    // Match each line independently, just like the warning evaluator.
+    regex.lastIndex = 0;
+    return regex.test(line.trim());
+  });
 }
 
 /** ブロック開始行（会話文など）の前後に空行を1行だけ確保する。 */

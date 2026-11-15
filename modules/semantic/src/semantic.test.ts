@@ -394,3 +394,12 @@ function semanticActionHost(reader: ReturnType<typeof makeSemanticReader>) {
     async propose() { throw new Error("unexpected proposal"); },
   };
 }
+
+test("semantic lexical snippets map lowercase expansion to original text", () => {
+  const body = "İ".repeat(100) + "検索対象";
+  const hits = searchSnapshotLexically([
+    { id: "sc-unicode", type: "scene", filePath: "plot/scene.yaml", raw: {}, body },
+  ], "検索対象", 10);
+  assert.equal(hits[0]?.id, "sc-unicode");
+  assert.match(hits[0]?.snippet ?? "", /検索対象/u);
+});

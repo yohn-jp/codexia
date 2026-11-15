@@ -35,3 +35,15 @@ test("exact and prefix terminology lookups return only available scoped targets"
   assert.deepEqual(searchTerms(terms, revisions, "blue", "prefix").map(({ title }) => title), ["Blue Lantern"]);
 });
 
+test("lexical snippets retain original text after Unicode normalization", () => {
+  for (const body of [
+    "㍿".repeat(100) + "検索対象",
+    "㍿".repeat(100) + "検索対象" + "e\u0301".repeat(300),
+    "e\u0301".repeat(100) + "検索対象",
+  ]) {
+    const document = createSearchDocument("manuscript/scene.md", "a", body);
+    const hit = searchDocuments([document], "検索対象", "fulltext", 1)[0];
+    assert.ok(hit);
+    assert.match(hit.snippet, /検索対象/u);
+  }
+});
