@@ -301,3 +301,25 @@ test("review queue preserves proposal ordering, scope and stale semantics", asyn
   assert.ok(page.items.filter(item=>item.projectId===second.id).every(item=>item.proposal.stale));
   assert.ok(page.items.filter(item=>item.projectId===first.id).every(item=>!item.proposal.stale));
 });
+
+test("literal search maps lowercase expansions to original UTF-16 ranges", async () => {
+  const p=await hierarchy(), reader=await core.reader(p.id), path="manuscript/v1/c1/s1.md";
+  await accept(p.id,operation(reader.snapshot,path,"İX 😀",(await reader.read(path))!.revision));
+  for(const [query,offset,length] of [["x",1,1],["i",0,1],["İX",0,2],["😀",3,2]] as const) {
+    const result=(await core.searchSnapshot(p.id,query)).results.find(item=>item.field==="body");
+    assert.ok(result);
+    assert.equal(result.offset,offset);
+    assert.equal(result.length,length);
+  }
+});
+test("proposal detail, list and review queue agree after a content revision", async () => {
+  const p=await project(), snapshot=(await core.observe(p.id)).snapshot;
+  const proposal:ChangeProposal={id:randomUUID(),snapshot,source:"author",operations:[operation(snapshot,"bible/a.yaml","A")]};
+  await core.propose(p.id,proposal);
+  assert.equal((await core.getProposal(p.id,proposal.id))?.stale,false);
+  await accept(p.id,operation(snapshot,"bible/b.yaml","B"));
+  const detail=await core.getProposal(p.id,proposal.id);
+  assert.equal(detail?.stale,true);
+  assert.deepEqual((await core.listProposals(p.id)).find(item=>item.proposal.id===proposal.id),detail);
+  assert.deepEqual((await core.reviewQueue([p.id])).items.find(item=>item.proposal.proposal.id===proposal.id)?.proposal,detail);
+});
