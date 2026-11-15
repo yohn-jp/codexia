@@ -1743,7 +1743,7 @@ export function createServer(options: ApiServerOptions): Server {
     }
     if (routePath === "/api/review-queue" && method === "GET") {
       if (!coreStore.reviewQueue) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
-      const projectIds = hosted ? [hosted.projectId] : null;
+      const projectIds = hosted ? (await listProjects()).map(project => project.id) : null;
       sendJson(response, 200, await coreStore.reviewQueue(projectIds));
       return;
     }
