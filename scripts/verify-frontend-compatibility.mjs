@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { appendFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 const shaPattern = /^[a-f0-9]{40}$/u;
@@ -15,7 +16,9 @@ function record(value) {
 /** @param {unknown} identity */
 export function assertFrontendIdentity(identity) {
   assert.ok(record(identity), 'Frontend identity is invalid');
-  assert.equal(identity.format, 'codexia-frontend-identity/v1', 'Frontend identity format is invalid');
+  // Node's strict equality assertion includes raw values in its error diff,
+  // even with a custom message. Do not disclose untrusted live response fields.
+  if (identity.format !== 'codexia-frontend-identity/v1') throw new Error('Frontend identity format is invalid');
   assert.ok(typeof identity.version === 'string' && semver.test(identity.version), 'Frontend version is invalid');
   assert.ok(typeof identity.sourceSha === 'string' && shaPattern.test(identity.sourceSha), 'Frontend source SHA is invalid');
   assert.ok(['core', 'full'].includes(identity.profile), 'Frontend profile is invalid');
@@ -62,8 +65,8 @@ export function assertFrontendReleaseAdmission(deployed, candidate) {
 /** @param {unknown} backend */
 export function assertBackendIdentity(backend) {
   assert.ok(record(backend), 'Live backend identity is invalid');
-  assert.equal(backend.name, 'codexia', 'Live backend identity name is invalid');
-  assert.equal(backend.hosted, false, 'Live backend must be standalone');
+  if (backend.name !== 'codexia') throw new Error('Live backend identity name is invalid');
+  if (backend.hosted !== false) throw new Error('Live backend must be standalone');
   assert.ok(typeof backend.version === 'string' && semver.test(backend.version), 'Live backend version is invalid');
   assert.ok(['core', 'full'].includes(backend.profile), 'Live backend profile is invalid');
   assert.ok(Number.isSafeInteger(backend.apiEpoch) && backend.apiEpoch > 0, 'Live backend API epoch is missing or invalid');
@@ -218,7 +221,8 @@ export async function verifyFrontendCompatibility({ frontend, env = process.env,
   if (mode === 'deployed') {
     const { origin, clientId, clientSecret } = readFrontendReleaseConfiguration(env);
     const deployed = await readLiveJson(probes.frontend.path, origin, { clientId, clientSecret }, fetchImpl);
-    assert.deepEqual(deployed, frontend, 'Deployed frontend identity does not match the tested artifact');
+    assertFrontendIdentity(deployed);
+    if (!isDeepStrictEqual(deployed, frontend)) throw new Error('Deployed frontend identity does not match the tested artifact');
     return { deploy: false, backend: undefined };
   }
 

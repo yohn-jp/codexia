@@ -76,3 +76,14 @@ test('invalid live identity fields never disclose their values in preflight diag
     return true;
   });
 });
+
+test('post-deploy identity mismatch does not disclose untrusted additional response fields', async () => {
+  await assert.rejects(verifyFrontendCompatibility({
+    frontend, env, mode: 'deployed',
+    fetchImpl: async () => response({ ...frontend, unexpected: 'private-value' }),
+  }), error => {
+    assert.match(error.message, /Deployed frontend identity does not match/);
+    assert.doesNotMatch(error.message, /private-value/);
+    return true;
+  });
+});
