@@ -55,6 +55,22 @@ podman run --rm -p 127.0.0.1:3000:3000 \
 
 Use `PROFILE=full` with the same Dockerfile for the full composition. The existing volume names are retained for upgrades. Keep `/data` and `/history` persistent: `/history` holds private usage and job history separately from PostgreSQL manuscript records. Use HTTPS through a trusted reverse proxy when accessing the instance beyond localhost. Do not run multiple containers against one workspace volume. This is a single-owner application.
 
+## Repository source audit
+
+[Source audit portal](https://yohn-jp.github.io/codexia/) · [Branch manifest](https://yohn-jp.github.io/codexia/manifest.json)
+
+The repository audit workflow exports each observed remote branch HEAD with the same main-branch Repomix policy, independent of product releases. Select a branch, download its full JSON for Gemini or another reviewer, or use the numbered JSON parts (at most 270,000 UTF-8 bytes each). Each part identifies the source SHA and original file path; a file that exceeds the part budget is split into UTF-16 offsets. Read the snapshot manifest for original blob hashes, output checksums and excluded paths. The portal does not contain uncommitted changes or claim full coverage of excluded files.
+
+Public Pages deployment requires **Settings → Pages → Build and deployment → Source: GitHub Actions**. Only default-branch publisher runs deploy. Main pushes, branch deletions, manual runs and unprivileged refresh signals from other branch pushes or creations discover all remote HEADs; the scheduled reconciliation (every 15 minutes, subject to Actions scheduling) covers older branches without the signal workflow and missed events. The signal is a wake-up only: no branch artifacts or branch code enter the publisher. The index records the actual observation time. PRs produce a non-publishing preview artifact. Identical HEADs share a snapshot and unchanged, checksum-verified exports may be reused. The site publishes only the current observed branch inventory, not historical snapshots.
+
+For local generation from the repository root, use a separate installation of Repomix 1.19.0 and absolute output paths outside the checkout:
+
+```sh
+node scripts/audit/export.mjs /tmp/codexia-audit-site /tmp/codexia-audit-cache /absolute/path/to/repomix
+```
+
+The exporter reads Git blobs, never executes branch code or uses branch-specific packer configuration, excludes binary/non-UTF-8 content, private-data paths, credential filenames and non-Markdown historical evidence, and enables Repomix secret scanning. Filtered or blocked snapshots are explicitly marked. This is review material, not release verification or a substitute for a security review; do not commit private material even to an audit-target branch.
+
 ## Development and verification
 
 ```sh

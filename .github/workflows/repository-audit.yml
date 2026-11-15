@@ -1,0 +1,95 @@
+name: Repository Audit Pages
+on:
+  pull_request:
+    paths:
+      - 'scripts/audit/**'
+      - '.github/workflows/repository-audit.yml'
+      - '.github/workflows/repository-audit-signal.yml'
+  push:
+    branches: [main]
+  delete:
+  workflow_run:
+    workflows: ['Repository Audit Refresh Signal']
+    types: [completed]
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repository-audit-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'pages' }}
+  cancel-in-progress: false
+
+jobs:
+  pack:
+    if: github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name != 'delete' || github.event.ref_type == 'branch') && (github.event_name != 'workflow_run' || (github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.conclusion == 'success')))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || 'main' }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.0
+      - name: Install the isolated audit tool
+        run: |
+          npm install --prefix "$RUNNER_TEMP/audit-tool" --ignore-scripts --no-audit --no-fund repomix@1.19.0
+          echo "CODEXIA_AUDIT_REPOMIX_BIN=$RUNNER_TEMP/audit-tool/node_modules/.bin/repomix" >> "$GITHUB_ENV"
+      - name: Test audit exporter (including real Repomix)
+        run: node --test scripts/audit/export.test.mjs
+      - name: Restore previous verified HEAD exports
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/audit-cache
+          key: audit-pages-v1-${{ hashFiles('scripts/audit/export.mjs', 'scripts/audit/repomix.config.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            audit-pages-v1-${{ hashFiles('scripts/audit/export.mjs', 'scripts/audit/repomix.config.json') }}-
+      - name: Pack every remote branch HEAD with the same policy
+        run: |
+          node scripts/audit/export.mjs "$RUNNER_TEMP/audit-site" "$RUNNER_TEMP/audit-cache" "$CODEXIA_AUDIT_REPOMIX_BIN"
+      - name: Require usable main snapshot in PR preview
+        if: github.event_name == 'pull_request'
+        run: node -e 'const m=require(process.argv[1]); const main=m.branches.find(x=>x.branch==="main"); if(!main || m.snapshots[main.sha].status==="blocked") throw new Error("Main audit snapshot is unavailable");' "$RUNNER_TEMP/audit-site/manifest.json"
+      - name: Save verified HEAD exports
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/audit-cache
+          key: audit-pages-v1-${{ hashFiles('scripts/audit/export.mjs', 'scripts/audit/repomix.config.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Upload Pages site
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ${{ runner.temp }}/audit-site
+      - name: Upload non-publishing PR preview
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: repository-audit-preview
+          path: ${{ runner.temp }}/audit-site
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: pack
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - name: Deploy audit portal
+        id: deployment
+        uses: actions/deploy-pages@v4
