@@ -129,12 +129,24 @@ function desktopDurabilityFor(active: ActiveDocument | null): DesktopDurability 
   return active.save === "saved" && active.recovery === "stored" ? "saved" : "uncertain";
 }
 
+function desktopDurabilityLabel(active: ActiveDocument | null, pending: PendingSave | undefined, loading: boolean): string | undefined {
+  if (!active) return loading ? "原稿を確認中" : undefined;
+  if (active.remoteConflict) return "競合・比較が必要";
+  if (active.recovery === "failed") return "下書き保護に失敗";
+  if (active.recovery === "other-tab") return "別タブの下書きを確認";
+  if (active.save === "failed" || active.error) return "保存結果を要確認";
+  if (active.save === "saving") return pending && (pending.generation !== active.generation || pending.markdown !== active.markdown) ? "保存中・新しい入力あり" : "保存中";
+  if (active.dirty && active.recovery === "pending") return "入力を保護中";
+  if (active.dirty) return "下書き";
+  return active.save === "saved" && active.recovery === "stored" ? "保存済み" : "原稿を確認中";
+}
+
 function desktopDurabilityDetail(active: ActiveDocument | null, status: DesktopDurability | undefined): string | undefined {
   if (!active || !status) return undefined;
   if (status === "draft") return active.recovery === "pending"
     ? "新しい本文をIndexedDB回復Journalへ記録中です。PostgreSQLへは未保存です。"
     : "下書きはIndexedDB回復Journalに保持されています。PostgreSQLへの保存は未完了です。";
-  if (status === "saving") return "本文はIndexedDB回復Journalに保持されています。PostgreSQLへの保存結果を確認中です。";
+  if (status === "saving") return active.recovery === "pending" ? "送信した本文の保存結果を確認中です。後続入力はブラウザーへ記録中です。" : "本文はIndexedDB回復Journalに保持されています。PostgreSQLへの保存結果を確認中です。";
   if (status === "saved") return "PostgreSQLへの保存を確認しました。";
   if (active.remoteConflict) return "PostgreSQLに別のRevisionがあります。ブラウザーDraftを保持し、内容の比較が必要です。";
   if (active.error) return active.error;
@@ -606,10 +618,11 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     const currentJournal = journalRef.current;
     if (!currentJournal || saveInFlightRef.current || restoreInFlightRef.current || sessionBlockedRef.current) return;
     const current = activeRef.current;
-    if (!current) return;
+    if (!current || current.recovery === "other-tab" || current.remoteConflict) return;
     const pendingKey = JSON.stringify([current.document.projectId, current.document.id]);
-    let pending = pendingSaveRef.current.get(pendingKey);
-    if (!pending) {
+    const existingPending = pendingSaveRef.current.get(pendingKey);
+    let pending: PendingSave;
+    if (!existingPending) {
       if (!current?.dirty || current.remoteConflict || current.recovery !== "stored") return;
       pending = {
         projectId: current.document.projectId,
@@ -622,7 +635,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         clientId: clientIdRef.current ||= crypto.randomUUID(),
       };
       pendingSaveRef.current.set(pendingKey, pending);
-    }
+    } else pending = existingPending;
     saveInFlightRef.current = true;
     const controller = new AbortController();
     saveControllerRef.current = controller;
@@ -652,7 +665,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       const latest = activeRef.current;
       if (inScope(latest)) {
         const hasNewerText = latest.generation > pending.generation || latest.markdown !== pending.markdown;
-        const ownNewerDraft = hasNewerText && remaining?.generation === latest.generation && remaining.markdown === latest.markdown && remaining.baseRevisionId === latest.baseRevisionId && remaining.baseMarkdown === latest.baseMarkdown;
+        const ownNewerDraft = hasNewerText && remaining !== undefined && remaining.generation === latest.generation && remaining.markdown === latest.markdown && remaining.baseRevisionId === latest.baseRevisionId && remaining.baseMarkdown === latest.baseMarkdown;
         const otherTab = Boolean(remaining && !ownNewerDraft);
         if (otherTab) {
           publishEditor({ ...latest, document: result.document, revision: result.revision, baseRevisionId: result.revision.id, baseMarkdown: pending.markdown, dirty: hasNewerText, recovery: "other-tab", save: "failed", error: "この文書のより新しい回復記録が別タブに残っています。自動保存を停止しました。", remoteConflict: null });
@@ -1273,7 +1286,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const onEditorChange = useCallback((markdown: string, _changes: TextChange[]) => {
     const current = activeRef.current;
     if (!current || markdown === current.markdown) return;
-    publishEditor({ ...current, markdown, generation: current.generation + 1, dirty: markdown !== current.baseMarkdown, recovery: "pending", save: "idle", error: "" });
+    publishEditor({ ...current, markdown, generation: current.generation + 1, dirty: markdown !== current.baseMarkdown, recovery: current.recovery === "other-tab" ? "other-tab" : "pending", save: current.save === "saving" ? "saving" : current.recovery === "other-tab" ? "failed" : "idle", error: current.recovery === "other-tab" ? current.error : "" });
   }, [publishEditor]);
 
   const selectProject = async (nextProjectId: string): Promise<void> => {
@@ -1534,7 +1547,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             onSelectionChange={(selection) => { textSelectionRef.current = selection; }}
             value={active.markdown}
             externalTextRevision={active.generation}
-            readOnly={Boolean(journalError) || legacyImportBusy || restoring || sessionBlocked}
+            readOnly={Boolean(journalError) || legacyImportBusy || restoring || sessionBlocked || active.recovery === "other-tab"}
             onChange={onEditorChange}
             documentRevision={active.revision.id}
             evidenceState={active.evidence}
@@ -1658,7 +1671,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           {active && <ul className="pg-evidence-list">
             {active.evidence.anchors.map((anchor) => <li key={anchor.id}>
               <button type="button" className={selectedEvidenceId === anchor.id ? "is-selected" : ""} onClick={() => setSelectedEvidenceId(anchor.id)}>
-                <q>{anchor.quote}</q><small>{anchor.status === "current" ? "現在のRevision" : anchor.status === "proposed" ? "確認待ち" : anchor.status === "needs_review" ? "再確認が必要" : anchor.status === "orphaned" ? "本文から削除" : "Revision不一致"}</small>
+                <q>{anchor.quote || "引用位置を確認できません"}</q><small>{anchor.status === "current" ? "現在のRevision" : anchor.status === "proposed" ? "確認待ち" : anchor.status === "needs_review" ? "再確認が必要" : anchor.status === "orphaned" ? "本文から削除" : "Revision不一致"}</small>
               </button>
               {(anchor.targets ?? (anchor.target ? [anchor.target] : [])).map((target) => <p key={target.id}>確定先: {target.label} <button type="button" onClick={() => setNodeId(target.id)}>Knowledgeの根拠を表示</button></p>)}
               {anchor.candidates?.map((candidate) => <p key={candidate.id}>候補: {candidate.label}</p>)}
@@ -1680,7 +1693,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     const read = moduleReadRef.current;
     if (!current || !read || !moduleSnapshot || snapshotKey(read.snapshot) !== snapshotKey(moduleSnapshot) || read.snapshot.projectId !== current.document.projectId || projectIdRef.current !== current.document.projectId || sessionBlockedRef.current) return null;
     const documentPath = `documents/${current.document.id}.md`;
-    if (!read.files.some((file) => file.path === documentPath)) return null;
+    if (!read.files.some((file) => file.path === documentPath && file.revision === current.revision.sha256)) return null;
     return { sceneId: current.document.id, documentPath, documentRevision: current.revision.id,
       sceneRevision: current.revision.id, text: current.markdown, snapshot: read.snapshot, baseSnapshot: read.snapshot, baseSceneRevision: current.revision.id };
   };
@@ -1690,13 +1703,15 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   });
   panels.push({ id: "review", title: "提案レビュー", render: () => <>{moduleError && <p role="alert">{moduleError}</p>}<NativeChangeSetReview key={projectId} projectId={projectId} onApplied={refreshAfterNativeApply} onOpenSource={(anchor, quote) => openNodeEvidence({ anchor, quote })} />{journal && <ProposalReview projectId={projectId} authorScope={authorScope} journal={journal} proposals={proposals} onChange={() => { void refreshModules(); }} onStatus={(message) => setNotice(message)} />}</> }, ...modulePanels);
   const Shell = mode === "mobile" ? MobileShell : DesktopShell;
-  const currentDesktopDurability = desktopDurabilityFor(active);
+  const currentDesktopDurability = desktopDurabilityFor(active) ?? (loading ? "uncertain" : undefined);
+  const currentPending = active ? pendingSaveRef.current.get(JSON.stringify([active.document.projectId, active.document.id])) : undefined;
   return <div className={`pg-workspace pg-shell pg-${mode}`}>
     <Shell mode={mode}
       header={<><h1>Database workspace</h1><JobInbox /><ThemeControl mode={theme} error={themeError} onChange={(next) => { setTheme(next); applyThemeMode(next); try { persistThemeMode(next); setThemeError(""); } catch { setThemeError("外観設定をこのブラウザーへ保存できませんでした。"); } }} /><button type="button" onClick={() => void protectTransition().then((allowed) => { if (allowed) onSignOut(); })}>ログアウト</button></>}
       documentTitle={active?.document.title}
       documentContext={project?.title}
       desktopDurability={currentDesktopDurability}
+      desktopDurabilityLabel={desktopDurabilityLabel(active, currentPending, loading)}
       desktopDurabilityDetail={desktopDurabilityDetail(active, currentDesktopDurability)}
       library={library} editor={editor} tools={knowledge}
       status={<>{pageError && <p role="alert">{pageError}</p>}{outlineError && <p role="alert">{outlineError}</p>}{loading && <p role="status">PostgreSQLの状態を読み込んでいます。</p>}</>}
