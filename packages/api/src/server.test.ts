@@ -624,6 +624,46 @@ afterEach(async () => {
 });
 
 describe("Codexia HTTP boundary", () => {
+  it("distinguishes runtime-control key outages from invalid credentials and reuses verified JWKS", async (t) => {
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-control-jwks-"));
+    tempDirs.push(staticDir);
+    const native = await nativeProject(t, "Hosted control JWKS");
+    let unavailable = true;
+    let requests = 0;
+    const controlFetch: typeof fetch = async (input) => {
+      assert.equal(String(input), HOSTED_ASSIGNMENT.controlServicePolicy.jwksUrl);
+      requests++;
+      if (unavailable) throw new Error("private upstream failure");
+      return Response.json({ keys: [RUNTIME_CONTROL_PUBLIC_JWK] });
+    };
+    const apiServer = await startHostedApi(native.store, staticDir, hostedTestPolicy(), controlFetch, undefined, undefined, native.persistence, native.project.id);
+    t.after(apiServer.close);
+    const operationId = "control-key-outage";
+    const body = JSON.stringify({ operationId, instanceId: HOSTED_ASSIGNMENT.instanceId, runtimeEpoch: HOSTED_ASSIGNMENT.runtimeEpoch,
+      reason: "redeploy", contractVersion: "scriptorium-platform/v1", deadline: new Date(Date.now() + 60_000).toISOString() });
+    const statusToken = runtimeControlToken("status", operationId, sha256Digest(""));
+    const status = (token = statusToken) => fetch(`${apiServer.base}${RUNTIME_STATUS_PATH}`, { headers: { Authorization: `Bearer ${token}` } });
+    for (const action of ["status", "quiesce", "resume"] as const) {
+      const response = action === "status" ? await status() : await fetch(`${apiServer.base}${action === "quiesce" ? RUNTIME_QUIESCE_PATH : RUNTIME_RESUME_PATH}`, {
+        method: "POST", headers: { Authorization: `Bearer ${runtimeControlToken(action, operationId, sha256Digest(body))}`, "Content-Type": "application/json" }, body,
+      });
+      assert.equal(response.status, 503, action);
+      const failure = await response.json() as { code: string; message: string };
+      assert.equal(failure.code, "AUTHORIZATION_UNAVAILABLE");
+      assert.doesNotMatch(JSON.stringify(failure), /private upstream failure/u);
+    }
+    assert.equal((await status("invalid.token.value")).status, 401);
+    unavailable = false;
+    assert.equal((await status()).status, 200);
+    const afterFetch = requests;
+    unavailable = true;
+    assert.equal((await status()).status, 200, "a valid cached key survives a temporary upstream outage");
+    const signature = statusToken.split(".")[2]!;
+    const tampered = statusToken.slice(0, statusToken.lastIndexOf(".") + 1) + (signature[0] === "A" ? "B" : "A") + signature.slice(1);
+    assert.equal((await status(tampered)).status, 401);
+    assert.equal(requests, afterFetch, "verified JWKS is reused without relaxing credential validation");
+  });
+
   it("binds hosted API access and signed lifecycle controls to one PostgreSQL project and runtime epoch", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-hosted-api-"));
     tempDirs.push(staticDir);
