@@ -110,7 +110,7 @@
       block:
         - name: Query the rootless Podman security boundary
           ansible.builtin.command:
-            argv: [podman, info, --format, "{% raw %}{{.Host.Security.Rootless}} {{.Host.CgroupVersion}}{% endraw %}"]
+            argv: [podman, info, --format, "{% raw %}{{.Host.Security.Rootless}}{% endraw %}"]
           register: inspect_podman_mode
           changed_when: false
           check_mode: false
