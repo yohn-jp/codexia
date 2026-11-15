@@ -167,7 +167,7 @@ test('Knowledge-dense PostgreSQL fixture persists exact Knowledge and Evidence c
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('PostgreSQL browser benchmark exercises the current UI and save/receipt path', { skip: !process.env.CODEXIA_E2E_CHROMIUM }, async () => {
+test('PostgreSQL browser benchmark exercises the current UI and save/receipt path', { skip: !process.env.CODEXIA_E2E_CHROMIUM && process.env.CODEXIA_PERF_BROWSER_SMOKE !== '1' }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'postgres-browser-benchmark-'));
   try {
     const datasetPath = join(root, 'fixture'), output = join(root, 'browser.json');

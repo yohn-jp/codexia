@@ -58,6 +58,6 @@ CODEXIA_TEST_DATABASE_URL='postgres://codexia:codexia@127.0.0.1:55440/codexia_pe
   pnpm exec node --test scripts/performance/*.test.mjs
 ```
 
-Set `CODEXIA_E2E_CHROMIUM` after a Core build to additionally execute the browser benchmark smoke and IndexedDB probes. The smoke is not a full matched performance campaign. The focused test database must also be disposable; the persistence pipeline test adds records and does not clean them up. Full verification uses the separate `codexia_test` database described by the verification guide.
+Set `CODEXIA_E2E_CHROMIUM` after a Core build to additionally execute the browser benchmark smoke and IndexedDB probes. The Core CI writing browser lane also executes the same smoke against a fresh disposable database on its private PostgreSQL service, through a loopback-only forwarding adapter. The smoke is not a full matched performance campaign. The focused test database must also be disposable; the persistence pipeline test adds records and does not clean them up. Full verification uses the separate `codexia_test` database described by the verification guide.
 
 Historical Core64, Git/OCI and release probes are specific to their recorded source/artifact identities. They are not measurements of current PostgreSQL authoring. The historical artifact packer/verifier continues to serve the immutable [wave0 evidence](../../docs/performance/README.md).
