@@ -19,7 +19,7 @@ cat > "$tmp/bin/podman" <<'SH'
 #!/bin/sh
 printf '%s\n' "$*" >> "$INSPECT_TEST_LOG"
 case "$1 $2" in
-  'info --format') printf 'true v2\n';;
+  'info --format') printf 'true\n';;
   'network exists'|'volume exists'|'secret exists') exit 0;;
   'container exists') test "$3" = codexia-api;;
   'inspect --type') printf 'true sha256:fixture example.invalid/backend@sha256:fixture\n';;
