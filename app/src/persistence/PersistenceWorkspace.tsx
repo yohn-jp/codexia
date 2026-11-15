@@ -641,7 +641,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     const controller = new AbortController();
     saveControllerRef.current = controller;
     const navigation = openSequenceRef.current;
-    const inScope = (value: ActiveDocument | null): value is ActiveDocument => Boolean(value && value.document.projectId === pending.projectId && value.document.id === pending.documentId && navigation === openSequenceRef.current && !controller.signal.aborted);
+    const inScope = (value: ActiveDocument | null): boolean => Boolean(value && value.document.projectId === pending.projectId && value.document.id === pending.documentId && navigation === openSequenceRef.current && !controller.signal.aborted);
     if (inScope(activeRef.current)) publishEditor({ ...activeRef.current!, save: "saving", error: "" });
     try {
       const result = await editorAdapter.save?.({
@@ -664,7 +664,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       const remaining = removed ? undefined : await currentJournal.getPersistenceDraft(pending.projectId, pending.documentId, authorScope);
       pendingSaveRef.current.delete(pendingKey);
       const latest = activeRef.current;
-      if (inScope(latest)) {
+      if (latest && inScope(latest)) {
         const hasNewerText = latest.generation > pending.generation || latest.markdown !== pending.markdown;
         const ownNewerDraft = hasNewerText && remaining !== undefined && remaining.generation === latest.generation && remaining.markdown === latest.markdown && remaining.baseRevisionId === latest.baseRevisionId && remaining.baseMarkdown === latest.baseMarkdown;
         const otherTab = Boolean(remaining && !ownNewerDraft);
@@ -704,7 +704,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           }
         } catch (readError) {
           const latest = activeRef.current;
-          if (inScope(latest)) publishEditor({ ...latest, save: "failed", error: readError instanceof Error ? readError.message : "競合した最新Revisionを読み込めませんでした。" });
+          if (latest && inScope(latest)) publishEditor({ ...latest, save: "failed", error: readError instanceof Error ? readError.message : "競合した最新Revisionを読み込めませんでした。" });
         }
       } else {
         const latest = activeRef.current;
