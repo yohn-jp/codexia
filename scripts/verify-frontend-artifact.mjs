@@ -26,9 +26,10 @@ function positiveInteger(value, label) {
  * @param {unknown} run
  * @param {unknown} artifact
  * @param {unknown[]} jobs
+ * @param {unknown[]} producerAttemptJobs
  * @param {{runId:string|number,currentAttempt:string|number,producerAttempt:string|number,sourceSha:string,artifactId:string|number,artifactName:string,artifactDigest:string}} expected
  */
-export function assertFrontendArtifactEvidence(run, artifact, jobs, expected) {
+export function assertFrontendArtifactEvidence(run, artifact, jobs, expected, producerAttemptJobs = jobs) {
   assert.ok(run && typeof run === 'object' && !Array.isArray(run), 'Frontend producer workflow run metadata is invalid');
   assert.ok(artifact && typeof artifact === 'object' && !Array.isArray(artifact), 'Frontend artifact metadata is invalid');
   assert.match(expected.sourceSha, shaPattern, 'Frontend source SHA is invalid');
@@ -39,6 +40,7 @@ export function assertFrontendArtifactEvidence(run, artifact, jobs, expected) {
   const artifactId = positiveInteger(expected.artifactId, 'Frontend artifact ID');
 
   assert.equal(String(run.id), runId, 'Frontend producer run ID mismatch');
+  assert.ok(producerAttempt <= currentAttempt, 'Frontend producer attempt is newer than the workflow attempt');
   assert.equal(run.run_attempt, currentAttempt, 'Frontend workflow run attempt mismatch');
   assert.equal(run.event, 'push', 'Frontend producer event must be a main push');
   assert.equal(run.head_branch, 'main', 'Frontend producer branch must be main');
@@ -50,9 +52,10 @@ export function assertFrontendArtifactEvidence(run, artifact, jobs, expected) {
     sourceSha: expected.sourceSha,
   });
   assert.equal(selected.id, artifactId, 'Frontend artifact ID does not match the build job output');
-  const producerJobs = jobs.filter(job => job && typeof job === 'object' && job.name === 'Build and verify UI assets');
+  const producerJobs = producerAttemptJobs.filter(job => job && typeof job === 'object' && job.name === 'Build and verify UI assets');
   assert.equal(producerJobs.length, 1, 'Expected exactly one latest frontend artifact producer job');
   assert.equal(producerJobs[0].run_attempt, producerAttempt, 'Frontend artifact producer attempt mismatch');
+  assert.equal(selectLatestJobArtifact(expected.artifactName, 'Build and verify UI assets', [artifact], producerAttemptJobs, {runId, sourceSha: expected.sourceSha}).id, artifactId, 'Frontend artifact does not belong to the declared producer attempt');
   assert.equal(artifact.digest, `sha256:${expected.artifactDigest}`, 'Frontend artifact digest mismatch');
 }
 
@@ -99,12 +102,13 @@ export async function verifyFrontendArtifact({ env = process.env, fetchImpl = fe
   assert.match(expected.artifactDigest ?? '', digestPattern, 'Frontend artifact digest is invalid');
 
   const apiBase = `https://api.github.com/repos/${repository}/actions`;
-  const [run, artifact, jobs] = await Promise.all([
+  const [run, artifact, jobs, producerAttemptJobs] = await Promise.all([
     githubJson(`${apiBase}/runs/${expected.runId}`, token, fetchImpl),
     githubJson(`${apiBase}/artifacts/${expected.artifactId}`, token, fetchImpl),
     collectGitHubPages((page, perPage) => githubJson(`${apiBase}/runs/${expected.runId}/jobs?filter=latest&per_page=${perPage}&page=${page}`, token, fetchImpl), 'jobs'),
+    collectGitHubPages((page, perPage) => githubJson(`${apiBase}/runs/${expected.runId}/attempts/${expected.producerAttempt}/jobs?per_page=${perPage}&page=${page}`, token, fetchImpl), 'jobs'),
   ]);
-  assertFrontendArtifactEvidence(run, artifact, jobs, expected);
+  assertFrontendArtifactEvidence(run, artifact, jobs, expected, producerAttemptJobs);
 
   const artifactBytes = await downloadArtifact(artifact, repository, token, fetchImpl, {maxArchive:MAX_ASSET_ARCHIVE});
   await extractArtifactFiles(artifactBytes, fileURLToPath(new URL('../app/dist/', import.meta.url)), {
