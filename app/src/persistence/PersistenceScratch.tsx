@@ -36,7 +36,7 @@ export function PersistenceScratch({ projectId, documentId, authorScope, journal
       if (cancelled) return;
       if (raw) {
         const parsed: unknown = JSON.parse(raw);
-        if (!parsed || typeof parsed !== "object" || typeof (parsed as Scratch).text !== "string" || !Array.isArray((parsed as Scratch).images) || !Number.isSafeInteger((parsed as Scratch).generation)) throw new Error("スクラッチの回復記録を確認できませんでした。元の記録は保持しています。");
+        if (!parsed || typeof parsed !== "object" || typeof (parsed as Scratch).text !== "string" || !Array.isArray((parsed as Scratch).images) || !(parsed as Scratch).images.every((image) => image && typeof image.name === "string" && typeof image.data === "string" && image.data.startsWith("data:image/")) || !Number.isSafeInteger((parsed as Scratch).generation) || (parsed as Scratch).generation < 0) throw new Error("スクラッチの回復記録を確認できませんでした。元の記録は保持しています。");
         publish(parsed as Scratch); setProtectedGeneration((parsed as Scratch).generation);
       }
       setLoading(false);
