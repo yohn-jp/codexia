@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { mkdir, writeFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
 import { manuscriptEditor, ownerLogin, openRevisionHistory } from "./postgres-fixture";
@@ -463,4 +465,14 @@ test("outline preserves database sibling order and reveals a navigated document"
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await expect(manuscriptEditor(page)).toContainText("誰かが選ばなかった未来");
+});
+
+test("Core benchmark browser worker measures the redesigned manuscript and persisted receipts", async () => {
+  test.skip(process.env.CODEXIA_PROFILE !== "core" || !process.env.CODEXIA_CI_REPORT_DIR,
+    "The Core CI browser lane owns the disposable benchmark smoke database.");
+  test.setTimeout(240_000);
+  const { stdout } = await promisify(execFile)(process.execPath, ["scripts/performance/ci-browser-smoke.mjs"], {
+    timeout: 220_000, maxBuffer: 4 * 1024 * 1024,
+  });
+  expect(stdout).toContain("PostgreSQL browser benchmark smoke passed");
 });
