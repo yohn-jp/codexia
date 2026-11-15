@@ -7,6 +7,7 @@ export INSPECT_TEST_HOME="$tmp/home" INSPECT_TEST_LOG="$tmp/commands"
 cat > "$tmp/bin/getent" <<'SH'
 #!/bin/sh
 test "$1" = passwd && test "$2" = codexia-inspect || exit 99
+if [ "${INSPECT_TEST_ACCOUNT_ABSENT:-0}" = 1 ]; then exit 2; fi
 printf 'codexia-inspect:x:1001:1001::%s:/bin/sh\n' "$INSPECT_TEST_HOME"
 SH
 cat > "$tmp/bin/loginctl" <<'SH'
@@ -54,7 +55,21 @@ YAML
 "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$tmp/inspect.yml" > "$tmp/inspect.log" || { cat "$tmp/inspect.log"; exit 1; }
 grep -q 'changed=0' "$tmp/inspect.log"
 grep -q 'secret exists codexia-tunnel-token' "$INSPECT_TEST_LOG"
-! grep -Eq '(^| )(create|start|stop|rm|--showsecret)( |$)' "$INSPECT_TEST_LOG"
+if grep -Eq '(^| )(create|start|stop|rm|--showsecret)( |$)' "$INSPECT_TEST_LOG"; then
+  echo 'Inspection issued a mutating or secret-disclosing command' >&2; exit 1
+fi
+# A fresh account must not be created and Podman must not be contacted.
+: > "$INSPECT_TEST_LOG"
+sed '/    - ansible.builtin.assert:/,$d' "$tmp/inspect.yml" > "$tmp/absent.yml"
+cat >> "$tmp/absent.yml" <<'YAML'
+    - ansible.builtin.assert:
+        that:
+          - inspect_account.rc == 2
+          - inspect_podman_available is not defined
+YAML
+INSPECT_TEST_ACCOUNT_ABSENT=1 "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$tmp/absent.yml" > "$tmp/absent.log" || { cat "$tmp/absent.log"; exit 1; }
+grep -q 'changed=0' "$tmp/absent.log"
+test ! -s "$INSPECT_TEST_LOG"
 # Unsupported input must fail before any Podman operation.
 : > "$INSPECT_TEST_LOG"
 sed "s/distribution_version: '26.04'/distribution_version: '24.04'/" "$tmp/inspect.yml" > "$tmp/unsupported.yml"
