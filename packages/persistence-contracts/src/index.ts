@@ -507,6 +507,11 @@ export interface KnowledgeProjectionBatch {
 export interface PersistenceReader {
   getModuleRecord(projectId: ProjectId, moduleId: string, key: string): Promise<ModuleRecord | undefined>;
   listModuleRecords(projectId: ProjectId, moduleId?: string): Promise<readonly ModuleRecord[]>;
+  /** Count all unresolved proposal records in the supplied project order; return only the bounded prefix. */
+  listProposalReviewQueue(projectIds: readonly ProjectId[], moduleId: string, limit: number): Promise<{
+    unresolvedCount: number;
+    records: readonly { record: ModuleRecord; projectVersion: number }[];
+  }>;
   /** Portable exchange excludes internal authority payloads at the SQL boundary. */
   listPortableModuleRecords(projectId: ProjectId): Promise<{ records: readonly ModuleRecord[]; omittedAuthorityModules: readonly string[] }>;
   getProject(projectId: ProjectId): Promise<Project | undefined>;

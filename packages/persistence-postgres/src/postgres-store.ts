@@ -991,6 +991,26 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows.map((row) => this.mapModuleRecord(row));
   }
 
+  async listProposalReviewQueue(projectIds: readonly ProjectId[], moduleId: string, limit: number): Promise<{
+    unresolvedCount: number; records: readonly { record: ModuleRecord; projectVersion: number }[];
+  }> {
+    if (projectIds.length > 200 || new Set(projectIds).size !== projectIds.length ||
+        !Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Invalid proposal review scope or page size");
+    if (!projectIds.length) return { unresolvedCount: 0, records: [] };
+    const scope = `FROM unnest($1::uuid[]) WITH ORDINALITY AS scope(project_id, position)
+      JOIN project p ON p.id = scope.project_id
+      JOIN module_record m ON m.project_id = p.id AND m.module_id = $2
+      WHERE m.key LIKE 'proposal:%' AND (m.value->>'state') IS DISTINCT FROM 'applied'`;
+    const args = [projectIds, moduleId];
+    const count = await this.query(`SELECT count(*) AS count ${scope}`, args);
+    const unresolvedCount = asNumber(count.rows[0]?.count);
+    const page = await this.query(`SELECT m.*, p.version AS project_version ${scope}
+      ORDER BY scope.position, m.key LIMIT $3`, [...args, limit]);
+    return { unresolvedCount, records: page.rows.map(row => ({
+      record: this.mapModuleRecord(row), projectVersion: asNumber(row.project_version),
+    })) };
+  }
+
   async listPortableModuleRecords(projectId: ProjectId): Promise<{records: readonly ModuleRecord[]; omittedAuthorityModules: readonly string[]}> {
     const records = await this.query("SELECT * FROM module_record WHERE project_id=$1 AND module_id NOT LIKE 'core.authority.%' ORDER BY module_id,key", [projectId]);
     const omitted = await this.query("SELECT DISTINCT module_id FROM module_record WHERE project_id=$1 AND module_id LIKE 'core.authority.%' ORDER BY module_id", [projectId]);

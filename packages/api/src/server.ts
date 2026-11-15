@@ -1,3 +1,4 @@
+import { EventStreams } from "./event-streams.js";
 import { authorizationFailure } from "./authorization-error.js";
 import { readCodexiaEnvironment } from "./environment.js";
 import { createCloudflareAccessVerifier, type CloudflareAccessOptions } from "./cloudflare-access.js";
@@ -10,7 +11,7 @@ import { lstat, readFile, realpath } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
-import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type RecentActivityInput, type ProposalStatus, type SnapshotId, type ValueSchema } from "@codexia/contracts";
+import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ReorderHierarchyInput } from "@codexia/core";
 import type { Persistence } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema } from "@codexia/persistence-postgres";
@@ -508,7 +509,6 @@ function boundedInt(value: string | null, fallback: number, min: number, max: nu
   return parsed;
 }
 
-type ProjectSyncEvent = { id: string; type: "project-changed"; projectId: string; at: string };
 type CoreStoreApi = CoreStore;
 
 type RuntimeHttpHost = ModuleRuntime & {
@@ -568,8 +568,8 @@ export function createServer(options: ApiServerOptions): Server {
   const activeWorkerJobIds = new Set<string>();
   const privateHistoryUncertaintyIds = new Set<string>();
   const workerJobLifecycleStates = new Map<string, WorkerJobLifecycleSnapshot["state"]>();
-  const projectEventStreams = new Set<ServerResponse>();
-  const jobEventStreams = new Set<ServerResponse>();
+  const projectEventStreams = new EventStreams();
+  const jobEventStreams = new EventStreams();
   const coreStore = options.store as CoreStoreApi;
   let quiesceGate = false;
   let quiesceOperationId: string | undefined;
@@ -625,13 +625,7 @@ export function createServer(options: ApiServerOptions): Server {
   let closed = false;
   let runtimeShutdownPromise: Promise<void> | undefined;
   const publishJobEvent = (event: JobEvent): void => {
-    const frame = `data: ${JSON.stringify(event)}\n\n`;
-    for (const response of jobEventStreams) {
-      if (!response.destroyed && !response.writableEnded) {
-        try { response.write(frame); }
-        catch { jobEventStreams.delete(response); response.destroy(); }
-      }
-    }
+    jobEventStreams.publish(`data: ${JSON.stringify(event)}\n\n`);
   };
   const shutdownRuntime = (): Promise<void> => {
     runtimeShutdownPromise ??= Promise.resolve().then(() => {
@@ -668,12 +662,7 @@ export function createServer(options: ApiServerOptions): Server {
     }
   });
 
-  const emitProjectEvent = (event: ProjectSyncEvent): void => {
-    const frame = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
-    for (const response of projectEventStreams) {
-      if (!response.destroyed && !response.writableEnded) response.write(frame);
-    }
-  };
+
 
   app.addContentTypeParser("application/json", { parseAs: "string", bodyLimit: MAX_JSON_BYTES }, (_request, body, done) => {
     try { done(null, JSON.parse(body as string) as unknown); }
@@ -1672,46 +1661,15 @@ export function createServer(options: ApiServerOptions): Server {
       sendJson(response, 200, { authenticated: false });
       return;
     }
-    const boundAccessStream = (): void => {
-      if (accessExpiresAt === undefined) return;
-      const timer = setTimeout(() => response.end(), Math.max(0, Math.min(2_147_483_647, accessExpiresAt - Date.now())));
-      timer.unref();
-      response.once("close", () => clearTimeout(timer));
-      response.once("finish", () => clearTimeout(timer));
-    };
     if (routePath === "/api/projects/events" && method === "GET") {
-      boundAccessStream();
-      response.statusCode = 200;
-      response.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-      response.setHeader("Cache-Control", "no-store");
-      response.setHeader("Connection", "keep-alive");
-      response.setHeader("X-Accel-Buffering", "no");
-      response.flushHeaders();
-      projectEventStreams.add(response);
-      response.once("close", () => projectEventStreams.delete(response));
+      if (projectEventStreams.full) throw httpFailure(503, "PROJECT_EVENT_STREAM_LIMIT", "Too many project event streams are open");
+      projectEventStreams.open(response, "no-store", undefined, accessExpiresAt);
       return;
     }
     if (routePath === "/api/jobs/events" && method === "GET") {
       if (!isCookie) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job events require an owner session"); return; }
-      if (jobEventStreams.size >= 100) throw httpFailure(503, "JOB_EVENT_STREAM_LIMIT", "Too many job event streams are open");
-      response.writeHead(200, {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
-      });
-      response.write(": ok\n\n");
-      jobEventStreams.add(response);
-      boundAccessStream();
-      const cleanup = (): void => { jobEventStreams.delete(response); };
-      response.once("close", cleanup);
-      response.once("finish", cleanup);
-      const heartbeat = setInterval(() => {
-        if (!response.destroyed && !response.writableEnded) response.write(": heartbeat\n\n");
-      }, 30_000);
-      heartbeat.unref();
-      response.once("close", () => clearInterval(heartbeat));
-      response.once("finish", () => clearInterval(heartbeat));
+      if (jobEventStreams.full) throw httpFailure(503, "JOB_EVENT_STREAM_LIMIT", "Too many job event streams are open");
+      jobEventStreams.open(response, "no-cache", ": ok\n\n", accessExpiresAt);
       return;
     }
     if (routePath === "/api/jobs" && method === "GET") {
@@ -1770,14 +1728,9 @@ export function createServer(options: ApiServerOptions): Server {
       sendJson(response, 201, project); return;
     }
     if (routePath === "/api/review-queue" && method === "GET") {
-      if (!coreStore.listProposals) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
-      const items: Array<{ projectId: string; proposal: ProposalStatus }> = [];
-      for (const project of await listProjects()) {
-        for (const proposal of await coreStore.listProposals(project.id)) {
-          if (proposal.state !== "applied") items.push({ projectId: project.id, proposal });
-        }
-      }
-      sendJson(response, 200, { unresolvedCount: items.length, items: items.slice(0, 1000) });
+      if (!coreStore.reviewQueue) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
+      const projectIds = (await listProjects()).map(project => project.id);
+      sendJson(response, 200, await coreStore.reviewQueue(projectIds));
       return;
     }
 
@@ -2201,10 +2154,8 @@ export function createServer(options: ApiServerOptions): Server {
         resolveDeadline();
       };
       for (const controller of requestControllers) controller.abort(new Error("The API server is shutting down"));
-      for (const stream of projectEventStreams) stream.end();
-      projectEventStreams.clear();
-      for (const stream of jobEventStreams) stream.end();
-      jobEventStreams.clear();
+      projectEventStreams.close();
+      jobEventStreams.close();
       const nodeDrain = new Promise<Error | undefined>((resolveNode) => nodeClose((error?: Error) => resolveNode(error)));
       const runtimeDrain = shutdownRuntime().then(
         () => undefined,

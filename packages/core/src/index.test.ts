@@ -281,3 +281,23 @@ test("pinned manuscript history never includes or restores a future revision", a
   await assert.rejects(core.buildRestoreOperation(p.id, {sceneId:"s1",snapshotId:future.id}, undefined, old.snapshot), {code:"revision_not_found"});
   assert.ok(!(await core.history(p.id, old.snapshot)).some(item => item.hash === future.id));
 });
+
+test("review queue preserves proposal ordering, scope and stale semantics", async () => {
+  const first=await project(), second=await project(), outside=await project();
+  for (const p of [first,second,outside]) {
+    const snapshot=(await core.observe(p.id)).snapshot;
+    for(const id of ["z-review","a-review"]){
+      await core.propose(p.id,{id,snapshot,source:"author",operations:[operation(snapshot,`bible/${id}.yaml`,"A")]});
+    }
+  }
+  const secondSnapshot=(await core.observe(second.id)).snapshot;
+  await accept(second.id,operation(secondSnapshot,"bible/other.yaml","B"));
+  const expected=[];
+  for(const p of [second,first]) for(const proposal of await core.listProposals(p.id))
+    if(proposal.state!=="applied")expected.push({projectId:p.id,proposal});
+  const page=await core.reviewQueue([second.id,first.id]);
+  assert.deepEqual(page,{unresolvedCount:expected.length,items:expected});
+  assert.equal(page.unresolvedCount,4);
+  assert.ok(page.items.filter(item=>item.projectId===second.id).every(item=>item.proposal.stale));
+  assert.ok(page.items.filter(item=>item.projectId===first.id).every(item=>!item.proposal.stale));
+});

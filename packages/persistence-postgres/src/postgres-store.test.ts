@@ -988,3 +988,30 @@ test("portable module inventory omits arbitrarily many retained authority record
   assert.deepEqual(result.omittedAuthorityModules,["core.authority.snapshots"]);
   assert.deepEqual(result.records.map(item=>[item.moduleId,item.key,item.value]),[["story","author-note",{text:"keep"}]]);
 });
+
+test("proposal review queue counts unresolved records without returning the unbounded tail", async () => {
+  const first = await createProject("Review first");
+  const second = await createProject("Review second");
+  const outside = await createProject("Review outside");
+  const moduleId = "core.authority.proposals";
+  try {
+    await directPool.query(`INSERT INTO module_record(project_id,module_id,key,value)
+      SELECT $1,$2,'proposal:' || lpad(n::text,4,'0'), jsonb_build_object('state','proposed')
+      FROM generate_series(1,1002) AS n`, [first.id,moduleId]);
+    await directPool.query(`INSERT INTO module_record(project_id,module_id,key,value) VALUES
+      ($1,$4,'proposal:0000','{"state":"applied"}'),
+      ($2,$4,'proposal:0001','{"state":"approved"}'),
+      ($3,$4,'proposal:0001','{"state":"proposed"}'),
+      ($1,$4,'receipt:0000','{}'),
+      ($1,'story','proposal:0000','{"state":"proposed"}')`, [first.id,second.id,outside.id,moduleId]);
+    const page = await persistence.read(reader=>reader.listProposalReviewQueue([second.id,first.id],moduleId,1000));
+    assert.equal(page.unresolvedCount,1003);
+    assert.equal(page.records.length,1000);
+    assert.deepEqual(page.records.slice(0,2).map(({record})=>[record.projectId,record.key]),[[second.id,"proposal:0001"],[first.id,"proposal:0001"]]);
+    assert.equal(page.records.at(-1)?.record.key,"proposal:0999");
+    assert.ok(page.records.every(({record,projectVersion})=>record.projectId!==outside.id && projectVersion===1));
+    assert.deepEqual(await persistence.read(reader=>reader.listProposalReviewQueue([],moduleId,1000)),{unresolvedCount:0,records:[]});
+  } finally {
+    await directPool.query("DELETE FROM module_record WHERE project_id = ANY($1::uuid[])", [[first.id,second.id,outside.id]]);
+  }
+});

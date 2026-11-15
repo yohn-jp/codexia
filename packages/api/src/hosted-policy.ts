@@ -117,12 +117,14 @@ function cancelResponse(response: Response): void {
 }
 
 async function readBoundedJson(response: Response, maximumBytes: number): Promise<unknown> {
-  if (!response.ok) throw new Error("upstream request failed");
+  if (!response.ok) { cancelResponse(response); throw new Error("upstream request failed"); }
   const contentType = response.headers.get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase();
-  if (contentType !== "application/json") throw new Error("upstream response was not JSON");
+  if (contentType !== "application/json") { cancelResponse(response); throw new Error("upstream response was not JSON"); }
   const contentLength = response.headers.get("Content-Length");
-  if (contentLength !== null && (!/^(0|[1-9][0-9]*)$/u.test(contentLength) || Number(contentLength) > maximumBytes))
+  if (contentLength !== null && (!/^(0|[1-9][0-9]*)$/u.test(contentLength) || Number(contentLength) > maximumBytes)) {
+    cancelResponse(response);
     throw new Error("upstream response exceeded its limit");
+  }
   const reader = response.body?.getReader();
   if (!reader) throw new Error("upstream response body was missing");
   const chunks: Uint8Array[] = [];
