@@ -734,60 +734,138 @@ test("ChangeSet application is atomic, versioned and idempotent", async () => {
     [{ fromUtf16: 0, toUtf16: historicalDocument.revision.markdown.length, insert: latestHistoricalBody }],
   )));
 
+  // Both anchors have two assertion links, including a shared assertion.
+  // A global LIMIT 1 would lose one parent; deduplication must not lose links.
+  const additionalAssertionId = randomUUID() as import("@codexia/persistence-contracts").AssertionId;
+  await persistence.transaction(async (transaction) => {
+    await transaction.saveAssertion({
+      projectId: project.id, id: additionalAssertionId,
+      proposition: { subject: nodeId, predicate: "recalls", object: secondNodeId },
+      modality: "certain", perspective: "author", narrativeTime: {},
+      confidence: null, status: "confirmed", expectedVersion: null,
+    });
+    await transaction.linkAssertionEvidence({ projectId: project.id, assertionId, evidenceId: historicalEvidenceId, role: "supports" });
+    for (const selectedEvidenceId of [evidenceId, historicalEvidenceId]) {
+      await transaction.linkAssertionEvidence({
+        projectId: project.id, assertionId: additionalAssertionId, evidenceId: selectedEvidenceId, role: "supports",
+      });
+    }
+  });
+  // UUIDs are project-scoped, not globally unique. Seed colliding identities
+  // and a foreign-only node with real dependent records in another project.
+  const foreignProject = await createProject("Foreign batch projection");
+  const foreignDocument = await createDocument(foreignProject.id, "Foreign evidence must not enter the selected project");
+  const foreignOnlyNodeId = randomUUID() as KnowledgeNodeId;
+  await persistence.transaction(async (transaction) => {
+    for (const id of [nodeId, foreignOnlyNodeId]) {
+      await transaction.saveKnowledgeNode({
+        projectId: foreignProject.id, id, type: "character", name: "Foreign node",
+        attributes: {}, status: "confirmed", expectedVersion: null,
+      });
+      await transaction.saveKnowledgeAlias({
+        projectId: foreignProject.id, id: randomUUID() as import("@codexia/persistence-contracts").KnowledgeAliasId,
+        nodeId: id, surface: "Foreign", normalized: "foreign", scope: null, status: "confirmed",
+      });
+    }
+    await transaction.saveKnowledgeRelation({
+      projectId: foreignProject.id, id: relationId, sourceId: nodeId, targetId: foreignOnlyNodeId,
+      type: "visits", attributes: {}, validity: {}, status: "confirmed", expectedVersion: null,
+    });
+    await transaction.saveEvidenceAnchor({
+      projectId: foreignProject.id, id: evidenceId, documentId: foreignDocument.document.id,
+      revisionId: foreignDocument.revision.id, fromUtf16: 0, toUtf16: foreignDocument.revision.markdown.length,
+      quoteSha256: sha256(foreignDocument.revision.markdown), status: "confirmed", expectedVersion: null,
+    });
+    for (const id of [nodeId, foreignOnlyNodeId]) {
+      await transaction.saveMentionLink({
+        projectId: foreignProject.id, evidenceId, nodeId: id, status: "confirmed",
+        source: "author", confidence: 1, extractorVersion: null,
+      });
+    }
+    await transaction.saveAssertion({
+      projectId: foreignProject.id, id: assertionId,
+      proposition: { subject: "foreign" }, modality: "certain", perspective: "author",
+      narrativeTime: {}, confidence: null, status: "confirmed", expectedVersion: null,
+    });
+    await transaction.linkAssertionEvidence({ projectId: foreignProject.id, assertionId, evidenceId, role: "supports" });
+  });
+
   const batchComparison = await persistence.read(async (reader) => {
     assert.ok(reader.readKnowledgeProjectionBatch);
-    const nodeIds = [nodeId, secondNodeId];
+    const readBatch = reader.readKnowledgeProjectionBatch.bind(reader);
     const limits = { aliasesPerNode: 1, relationsPerNode: 1, mentionsPerNode: 2, assertionsPerAnchor: 1 };
-    const batch = await reader.readKnowledgeProjectionBatch(project.id, nodeIds, limits);
-    const singles = {
-      aliases: [] as KnowledgeProjectionBatch["aliases"][number][],
-      relations: [] as KnowledgeProjectionBatch["relations"][number][],
-      mentions: [] as KnowledgeProjectionBatch["mentions"][number][],
-      anchors: [] as KnowledgeProjectionBatch["anchors"][number][],
-      revisions: [] as KnowledgeProjectionBatch["revisions"][number][],
-      assertionEvidence: [] as KnowledgeProjectionBatch["assertionEvidence"][number][],
-      assertions: [] as KnowledgeProjectionBatch["assertions"][number][],
-    };
-    for (const selectedNodeId of nodeIds) {
-      for (const alias of await reader.listKnowledgeAliases(project.id, selectedNodeId, limits.aliasesPerNode)) {
-        singles.aliases.push({ nodeId: selectedNodeId, alias });
+    const nodeIds = [nodeId, secondNodeId];
+    const compare = async (selectedNodeIds: readonly KnowledgeNodeId[]) => {
+      const batch = await readBatch(project.id, selectedNodeIds, limits);
+      const singles = {
+        aliases: [] as KnowledgeProjectionBatch["aliases"][number][],
+        relations: [] as KnowledgeProjectionBatch["relations"][number][],
+        mentions: [] as KnowledgeProjectionBatch["mentions"][number][],
+        anchors: [] as KnowledgeProjectionBatch["anchors"][number][],
+        revisions: [] as KnowledgeProjectionBatch["revisions"][number][],
+        assertionEvidence: [] as KnowledgeProjectionBatch["assertionEvidence"][number][],
+        assertions: [] as KnowledgeProjectionBatch["assertions"][number][],
+      };
+      for (const selectedNodeId of new Set(selectedNodeIds)) {
+        for (const alias of await reader.listKnowledgeAliases(project.id, selectedNodeId, limits.aliasesPerNode)) {
+          singles.aliases.push({ nodeId: selectedNodeId, alias });
+        }
+        for (const relation of await reader.listKnowledgeRelations(project.id, selectedNodeId, limits.relationsPerNode)) {
+          singles.relations.push({ nodeId: selectedNodeId, relation });
+        }
+        singles.mentions.push(...await reader.listNodeMentions(project.id, selectedNodeId, limits.mentionsPerNode));
       }
-      for (const relation of await reader.listKnowledgeRelations(project.id, selectedNodeId, limits.relationsPerNode)) {
-        singles.relations.push({ nodeId: selectedNodeId, relation });
-      }
-      singles.mentions.push(...await reader.listNodeMentions(project.id, selectedNodeId, limits.mentionsPerNode));
-    }
-    const revisions = new Set<string>();
-    const assertions = new Set<string>();
-    for (const evidenceId of [...new Set(singles.mentions.map(mention => mention.evidenceId))].sort()) {
-      const anchor = await reader.getEvidenceAnchor(project.id, evidenceId);
-      if (!anchor) continue;
-      singles.anchors.push(anchor);
-      const revisionKey = JSON.stringify([anchor.documentId, anchor.revisionId]);
-      if (!revisions.has(revisionKey)) {
-        revisions.add(revisionKey);
-        const revision = await reader.getRevision(project.id, anchor.documentId, anchor.revisionId);
-        if (revision) singles.revisions.push(revision);
-      }
-      for (const link of await reader.listEvidenceAssertions(project.id, evidenceId, limits.assertionsPerAnchor)) {
-        singles.assertionEvidence.push({ evidenceId, link });
-        if (!assertions.has(link.assertionId)) {
-          assertions.add(link.assertionId);
-          const assertion = await reader.getAssertion(project.id, link.assertionId);
-          if (assertion) singles.assertions.push(assertion);
+      const revisions = new Set<string>();
+      const assertions = new Set<string>();
+      for (const evidenceId of [...new Set(singles.mentions.map(mention => mention.evidenceId))].sort()) {
+        const anchor = await reader.getEvidenceAnchor(project.id, evidenceId);
+        if (!anchor) continue;
+        singles.anchors.push(anchor);
+        const revisionKey = JSON.stringify([anchor.documentId, anchor.revisionId]);
+        if (!revisions.has(revisionKey)) {
+          revisions.add(revisionKey);
+          const revision = await reader.getRevision(project.id, anchor.documentId, anchor.revisionId);
+          if (revision) singles.revisions.push(revision);
+        }
+        for (const link of await reader.listEvidenceAssertions(project.id, evidenceId, limits.assertionsPerAnchor)) {
+          singles.assertionEvidence.push({ evidenceId, link });
+          if (!assertions.has(link.assertionId)) {
+            assertions.add(link.assertionId);
+            const assertion = await reader.getAssertion(project.id, link.assertionId);
+            if (assertion) singles.assertions.push(assertion);
+          }
         }
       }
-    }
-    const sorted = (value: KnowledgeProjectionBatch): KnowledgeProjectionBatch => {
-      const byJson = <T>(rows: readonly T[]): T[] => [...rows].sort((left, right) =>
-        (JSON.stringify(left) ?? "").localeCompare(JSON.stringify(right) ?? ""));
-      return {
-        aliases: byJson(value.aliases), relations: byJson(value.relations), mentions: byJson(value.mentions),
-        anchors: byJson(value.anchors), revisions: byJson(value.revisions),
-        assertionEvidence: byJson(value.assertionEvidence), assertions: byJson(value.assertions),
+      const sorted = (value: KnowledgeProjectionBatch): KnowledgeProjectionBatch => {
+        const byJson = <T>(rows: readonly T[]): T[] => [...rows].sort((left, right) =>
+          (JSON.stringify(left) ?? "").localeCompare(JSON.stringify(right) ?? ""));
+        return {
+          aliases: byJson(value.aliases), relations: byJson(value.relations), mentions: byJson(value.mentions),
+          anchors: byJson(value.anchors), revisions: byJson(value.revisions),
+          assertionEvidence: byJson(value.assertionEvidence), assertions: byJson(value.assertions),
+        };
       };
+      return { batch: sorted(batch), singles: sorted(singles) };
     };
-    return { batch: sorted(batch), singles: sorted(singles) };
+    const ordinary = await compare(nodeIds);
+    assert.deepEqual(ordinary.batch, ordinary.singles);
+    for (const selectedNodeIds of [
+      [],
+      [randomUUID() as KnowledgeNodeId],
+      [foreignOnlyNodeId],
+      [secondNodeId, nodeId, nodeId, secondNodeId, foreignOnlyNodeId, randomUUID() as KnowledgeNodeId],
+    ]) {
+      const comparison = await compare(selectedNodeIds);
+      assert.deepEqual(comparison.batch, comparison.singles, "batch agrees with scoped, deduplicated single reads");
+      const hasLocalNodes = selectedNodeIds.includes(nodeId) || selectedNodeIds.includes(secondNodeId);
+      if (hasLocalNodes) assert.deepEqual(comparison.batch, ordinary.batch, "duplicate and foreign keys do not change the local result");
+      else for (const rows of Object.values(comparison.batch)) assert.equal(rows.length, 0, "empty, missing or foreign-only keys return no rows");
+    }
+    for (const selectedEvidenceId of [evidenceId, historicalEvidenceId]) {
+      assert.equal((await reader.listEvidenceAssertions(project.id, selectedEvidenceId, 2)).length, 2,
+        "both anchors actually contain more assertion links than the per-anchor limit");
+    }
+    return ordinary;
   });
   assert.deepEqual(batchComparison.batch, batchComparison.singles,
     "bounded set reads enforce each parent limit and retain exact source revision mapping");
@@ -795,6 +873,10 @@ test("ChangeSet application is atomic, versioned and idempotent", async () => {
     "a limit of one applies to both parents instead of truncating the whole batch");
   assert.equal(batchComparison.batch.relations.length, 2,
     "a relation joining two selected nodes is mapped once to each parent");
+  assert.deepEqual(batchComparison.batch.assertionEvidence.map(item => item.evidenceId).sort(),
+    [evidenceId, historicalEvidenceId].sort(), "a limit of one returns one link for each anchor");
+  assert.equal(batchComparison.batch.assertions.length, 1,
+    "the same selected assertion is fetched once while its two evidence links remain distinct");
   assert.equal(batchComparison.batch.anchors.find(anchor => anchor.id === historicalEvidenceId)?.revisionId,
     latestHistoricalRevision.revision.id, "the batch keeps the anchor's exact source revision");
   assert.equal(batchComparison.batch.revisions.find(revision => revision.documentId === historicalDocument.document.id)?.markdown,
