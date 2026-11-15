@@ -317,7 +317,7 @@ test("unmounting a contribution aborts its in-flight action request", async ({ p
     // not the retired Git workspace tab strip.
     const menu = page.locator(".st-workspace-panel-menu");
     await menu.locator("summary").click();
-    await menu.getByRole("button", { name: "Show EPUB 書き出し", exact: true }).click();
+    await menu.getByRole("button", { name: "EPUB 書き出しを表示", exact: true }).click();
     await expect(page.locator('[data-workspace-panel="module:publishing.export.epub"]')).toBeVisible();
     const request = await seen;
     const failed = page.waitForEvent("requestfailed", (candidate) => candidate === request);
