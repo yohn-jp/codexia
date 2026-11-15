@@ -229,20 +229,7 @@ function normalizePath(value) {
 }
 
 function testFilePattern(pattern, relativePath) {
-  let expression = '^';
-  for (let index = 0; index < pattern.length; index += 1) {
-    const character = pattern[index];
-    if (character === '*' && pattern[index + 1] === '*') {
-      index += 1;
-      if (pattern[index + 1] === '/') {
-        index += 1;
-        expression += '(?:.*/)?';
-      } else expression += '.*';
-    } else if (character === '*') expression += '[^/]*';
-    else if (character === '?') expression += '[^/]';
-    else expression += character.replace(/[|\\{}()[\]^$+?.]/gu, '\\$&');
-  }
-  return new RegExp(`${expression}$`, 'u').test(relativePath);
+  return path.posix.matchesGlob(relativePath, pattern);
 }
 
 function sourcePatternFromRunnerPattern(pattern) {
