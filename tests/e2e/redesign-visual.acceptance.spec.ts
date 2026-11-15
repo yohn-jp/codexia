@@ -437,22 +437,30 @@ test("outline preserves database sibling order and reveals a navigated document"
     });
     expect(response.ok(), await response.text()).toBe(true);
   }
-  const expected = (await list()).filter(document => document.parentId === parentId).map(document => document.title);
+  const persisted = await list();
+  const expected = persisted.filter(document => document.parentId === parentId).map(document => document.title);
+  const other = persisted.find(document => document.title === "一　青い目録")!;
   await page.reload();
   await expect(manuscriptEditor(page)).toBeVisible();
-  const chapter = page.locator('.pg-outline-item[data-kind="chapter"]').filter({ has: page.getByRole("button", { name: /第一章　灯台守の娘を折りたたむ/ }) });
-  await expect(chapter.locator(":scope > ul > li > .pg-outline-row > .pg-outline-document > span")).toHaveText(expected);
-  await page.getByRole("button", { name: /一　青い目録/ }).click();
+  // Bind UI rows to the actual persisted IDs, not whitespace-normalized names.
+  const outline = page.locator('[data-workspace-panel="outline"]');
+  const rowSelector = (id: string) => `.pg-outline-item[data-document-id="${id}"]`;
+  const row = (id: string) => outline.locator(rowSelector(id));
+  const select = (id: string) => outline.locator(`${rowSelector(id)} > .pg-outline-row > .pg-outline-document`);
+  const toggle = outline.locator(`${rowSelector(parentId)} > .pg-outline-row > .pg-outline-toggle`);
+  await expect(row(parentId)).toBeVisible();
+  await expect(outline.locator(`${rowSelector(parentId)} > .pg-document-children > li > .pg-outline-row > .pg-outline-document > span`)).toHaveText(expected);
+  await select(other.id).click();
   await expect(manuscriptEditor(page)).toBeVisible();
-  await expect(page.getByRole("button", { name: /一　青い目録/ })).toHaveAttribute("aria-current", "page");
-  await page.getByRole("button", { name: "第一章　灯台守の娘を折りたたむ" }).click();
-  await expect(page.getByRole("button", { name: /一　薄明の羅針盤/ })).toHaveCount(0);
+  await expect(select(other.id)).toHaveAttribute("aria-current", "page");
+  await toggle.click();
+  await expect(select(firstScene.id)).toHaveCount(0);
   await page.goBack();
-  await expect(page.getByRole("button", { name: /一　薄明の羅針盤/ })).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("button", { name: "第一章　灯台守の娘を折りたたむ" })).toHaveAttribute("aria-expanded", "true");
+  await expect(select(firstScene.id)).toHaveAttribute("aria-current", "page");
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await expect(manuscriptEditor(page)).toContainText("誰かが選ばなかった未来");
   // Explicit collapse of the current branch does not change the selected manuscript.
-  await page.getByRole("button", { name: "第一章　灯台守の娘を折りたたむ" }).click();
-  await expect(page.getByRole("button", { name: "第一章　灯台守の娘を展開" })).toHaveAttribute("aria-expanded", "false");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await expect(manuscriptEditor(page)).toContainText("誰かが選ばなかった未来");
 });

@@ -1285,7 +1285,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const renderOutline = (items: OutlineDocument[]): ReactNode => items.map((item) => {
     const hasChildren = item.children.length > 0;
     const collapsed = collapsedDocumentIds.has(item.id);
-    return <li key={item.id} className="pg-outline-item" data-kind={item.kind}>
+    return <li key={item.id} className="pg-outline-item" data-kind={item.kind} data-document-id={item.id}>
       <div className="pg-outline-row">
         {hasChildren ? <button type="button" className="pg-outline-toggle"
           aria-label={collapsed ? `${item.title}を展開` : `${item.title}を折りたたむ`}
