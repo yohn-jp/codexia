@@ -103,7 +103,7 @@ function errorMessage(error: unknown): string {
  * Ionic page navigation for the shared application controller.
  * The mobile entry supplies the Ionic React Router context around the controller.
  */
-export function MobileShell({ header, documentTitle, documentContext, desktopDurability, desktopDurabilityDetail, library, editor, tools, status, renderStatus, onSwitchMode, workspaceScope, panels, beforeLayoutChange, requestedPanel }: ApplicationShellProps) {
+export function MobileShell({ header, documentTitle, documentContext, desktopDurability, desktopDurabilityDetail, desktopDurabilityLabel, library, editor, tools, status, renderStatus, onSwitchMode, workspaceScope, panels, beforeLayoutChange, requestedPanel }: ApplicationShellProps) {
   const location = useLocation();
   const navigateRoute = useNavigate();
   const activeView = readViewFromSearch(location.search);
@@ -427,7 +427,7 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
             </IonButton>
             {activeView === "writing" && desktopDurability ? <span className="mobile-shell-protection" data-state={desktopDurability} aria-label="原稿のPostgreSQL保存状態">
               <span aria-hidden="true" />
-              {{ draft: "未保存", saving: "保存中", uncertain: "要確認", saved: "保存済" }[desktopDurability]}
+              {desktopDurabilityLabel ?? ({ draft: "未保存", saving: "保存中", uncertain: "要確認", saved: "保存済" }[desktopDurability])}
             </span> : null}
           </div>
           <div className="mobile-shell-shared-header" data-active-view={activeView} aria-label="作業領域とアカウント設定">{header}</div>
@@ -598,12 +598,12 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
             data-mobile-reference-panel={referenceSheet ?? undefined}>
             {referenceSheet === "inspector" && desktopDurability ? (
               <div className="mobile-shell-reference-durability" role="status" aria-label="原稿のPostgreSQL保存状態" data-state={desktopDurability}>
-                <strong>{{
+                <strong>{desktopDurabilityLabel ?? ({
                   draft: "PostgreSQL未保存",
                   saving: "PostgreSQLへ保存中",
                   uncertain: "保存状態を要確認",
                   saved: "PostgreSQL保存済み",
-                }[desktopDurability]}</strong>
+                }[desktopDurability])}</strong>
                 <span>{desktopDurabilityDetail ?? ({
                   draft: "下書きはブラウザーに保持されています。PostgreSQLへの保存は未完了です。",
                   saving: "PostgreSQLへの保存を確認しています。",
