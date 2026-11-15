@@ -450,8 +450,18 @@ export class CoreStore implements MutationCoordinator {
     const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest); const results:LiteralSearchResult[]=[];
     const normalizedQuery=query.toLocaleLowerCase();
     if (query) for (const document of manifest.documents) { const bodyPath=index.pathsByDocumentId.get(document.id)?.bodyPath,entry=bodyPath ? manifest.files[bodyPath] : undefined; for (const field of ["name","body"] as const) {
-      const text=field==="name" ? document.title:entry ? body(entry.content):""; const offset=text.toLocaleLowerCase().indexOf(normalizedQuery); if(offset<0)continue;
-      results.push({id:this.logicalId(index,document),type:document.kind as LiteralSearchResult["type"],name:document.title,snippet:text.slice(Math.max(0,offset-48),offset+query.length+48),filePath:bodyPath ?? "",score:field==="name"?2:1,field,offset,length:query.length});
+      const text=field==="name" ? document.title:entry ? body(entry.content):""; const folded=text.toLocaleLowerCase(), match=folded.indexOf(normalizedQuery); if(match<0)continue;
+      let offset=match, end=match+normalizedQuery.length;
+      if(folded.length!==text.length) {
+        let original=0, normalized=0;
+        for(const character of text) {
+          const next=normalized+character.toLocaleLowerCase().length;
+          if(normalized<=match && match<next) offset=original;
+          if(normalized<match+normalizedQuery.length && match+normalizedQuery.length<=next) { end=original+character.length; break; }
+          original+=character.length; normalized=next;
+        }
+      }
+      results.push({id:this.logicalId(index,document),type:document.kind as LiteralSearchResult["type"],name:document.title,snippet:text.slice(Math.max(0,offset-48),end+48),filePath:bodyPath ?? "",score:field==="name"?2:1,field,offset,length:end-offset});
     }}
     return {snapshot:manifest.snapshot,results:results.sort((a,b)=>b.score-a.score).slice(0,Math.min(limit,100))};
   }
@@ -463,7 +473,14 @@ export class CoreStore implements MutationCoordinator {
   private async proposalStatus(reader:PersistenceReader,projectId:string,proposalId:string):Promise<{recordVersion:number;status:ProposalStatus}|null> {
     const record=await reader.getModuleRecord(pid(projectId),AUTHORITY,`proposal:${proposalId}`); return record ? {recordVersion:record.version,status:record.value as unknown as ProposalStatus}:null;
   }
-  async listProposals(projectId:string):Promise<ProposalStatus[]> { const observation=await this.observe(projectId); return this.persistence.read(async(reader)=>(await reader.listModuleRecords(pid(projectId),AUTHORITY)).filter((record)=>record.key.startsWith("proposal:")).map((record)=>({...record.value as unknown as ProposalStatus,stale:(record.value as unknown as ProposalStatus).proposal.snapshot.projectVersion!==observation.snapshot.projectVersion}))); }
+  async listProposals(projectId:string):Promise<ProposalStatus[]> { return this.persistence.read(async reader => {
+      const project=await reader.getProject(pid(projectId));
+      if(!project) fail(404,"project_not_found","Project not found");
+      return (await reader.listModuleRecords(pid(projectId),AUTHORITY)).filter(record=>record.key.startsWith("proposal:")).map(record=>{
+        const status=record.value as unknown as ProposalStatus;
+        return {...status,stale:status.proposal.snapshot.projectVersion!==project.version};
+      });
+    }); }
   async reviewQueue(projectIds: readonly string[]): Promise<{ unresolvedCount: number; items: Array<{ projectId: string; proposal: ProposalStatus }> }> {
     return this.persistence.read(async reader => {
       const { unresolvedCount, records } = await reader.listProposalReviewQueue(projectIds.map(pid), AUTHORITY, 1000);
@@ -473,7 +490,13 @@ export class CoreStore implements MutationCoordinator {
       }) };
     });
   }
-  async getProposal(projectId:string,proposalId:string):Promise<ProposalStatus|null> { return this.persistence.read(async(reader)=>(await this.proposalStatus(reader,projectId,proposalId))?.status??null); }
+  async getProposal(projectId:string,proposalId:string):Promise<ProposalStatus|null> { return this.persistence.read(async reader => {
+      const found=await this.proposalStatus(reader,projectId,proposalId);
+      if(!found) return null;
+      const project=await reader.getProject(pid(projectId));
+      if(!project) return null;
+      return {...found.status,stale:found.status.proposal.snapshot.projectVersion!==project.version};
+    }); }
   async propose(projectId: string, proposal: ChangeProposal): Promise<ChangeProposal> {
     try {
       assertPersistedProposal(proposal);
