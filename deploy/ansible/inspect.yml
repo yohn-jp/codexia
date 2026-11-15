@@ -108,7 +108,7 @@
     - name: Observe existing rootless Podman runtime
       when: inspect_podman_available | bool
       block:
-        - name: Query the rootless Podman security and cgroup mode
+        - name: Query the rootless Podman security boundary
           ansible.builtin.command:
             argv: [podman, info, --format, "{% raw %}{{.Host.Security.Rootless}} {{.Host.CgroupVersion}}{% endraw %}"]
           register: inspect_podman_mode
