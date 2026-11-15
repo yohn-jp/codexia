@@ -7,50 +7,104 @@ import os from 'node:os';
 import { generate, sizes } from './dataset.mjs';
 import { buildIdentity, save, sourceIdentity } from './common.mjs';
 
+// A Linux process identity includes its start time; PID reuse must never make
+// the cleanup wait on, or signal, an unrelated process.
+function procIdentity(pid) {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(') ') + 2).split(' ');
+    return { pid, state: fields[0], parent: Number(fields[1]), startTime: fields[19] };
+  } catch (error) {
+    if (['ENOENT', 'ESRCH'].includes(error.code)) return null;
+    throw error;
+  }
+}
+
+function descendantsOf(root) {
+  if (process.platform !== 'linux') return [];
+  // /proc/<pid>/task/<pid>/children is not a reliable inventory while
+  // processes are exiting and only covers the specified thread.
+  const byParent = new Map();
+  for (const name of readdirSync('/proc').filter(name => /^\d+$/u.test(name))) {
+    let entry;
+    try { entry = procIdentity(Number(name)); }
+    catch (error) { if (error.code === 'EACCES') continue; throw error; }
+    if (!entry) continue;
+    const siblings = byParent.get(entry.parent) ?? [];
+    siblings.push(entry);
+    byParent.set(entry.parent, siblings);
+  }
+  const found = [], visited = new Set([root]);
+  const visit = pid => {
+    for (const entry of byParent.get(pid) ?? []) {
+      if (visited.has(entry.pid)) continue;
+      visited.add(entry.pid);
+      visit(entry.pid);
+      found.push(entry);
+    }
+  };
+  visit(root);
+  return found;
+}
+
+function sameLiveProcess(entry) {
+  const current = procIdentity(entry.pid);
+  return current && current.startTime === entry.startTime && !['Z', 'X'].includes(current.state);
+}
+
+async function confirmDescendantExit(descendants) {
+  const deadline = performance.now() + 5000;
+  for (;;) {
+    const remaining = descendants.filter(sameLiveProcess);
+    if (!remaining.length) return;
+    if (performance.now() >= deadline) throw Error(`Worker descendant termination unconfirmed: ${remaining.map(entry => entry.pid).join(', ')}`);
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+}
+
 // A live child handle is authoritative. Timeouts terminate local worker process groups;
 // completed samples remain individually marked complete, while the worker stays NOT_CHECKED.
 export async function runWorker(script, args, output, timeoutMs, env = {}) {
   const child = spawn(process.execPath, [script, ...args], { detached: true,
     env: { ...process.env, ...env }, stdio: ['ignore', 'ignore', 'inherit'] });
-  let timeout = false;
+  let timeout = false, descendants = [], cleanupError;
   const timer = setTimeout(() => {
     timeout = true;
-    const descendants = [];
-    const visit = pid => {
-      let children = [];
-      try { children = readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean).map(Number); }
-      catch (error) {
-        if (process.platform === 'linux' && error.code === 'ENOENT') {
-          for (const candidate of readdirSync('/proc').filter(name => /^\d+$/u.test(name))) {
-            try {
-              const stat = readFileSync(`/proc/${candidate}/stat`, 'utf8');
-              const fields = stat.slice(stat.lastIndexOf(') ') + 2).split(' ');
-              if (Number(fields[1]) === pid) children.push(Number(candidate));
-            } catch (cause) { if (!['ENOENT', 'ESRCH', 'EACCES'].includes(cause.code)) throw cause; }
-          }
-        }
+    try {
+      descendants = descendantsOf(child.pid);
+      for (const entry of descendants) {
+        if (!sameLiveProcess(entry)) continue;
+        try { process.kill(entry.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
       }
-      for (const id of children) { visit(id); descendants.push(id); }
-    };
-    visit(child.pid);
-    for (const id of descendants) { try { process.kill(id, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; } }
-    try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+    } catch (error) { cleanupError = String(error); }
+    // Always terminate the worker group even when descendant enumeration fails.
+    try { process.kill(-child.pid, 'SIGKILL'); }
+    catch (error) { if (error.code !== 'ESRCH') cleanupError = String(error); }
   }, timeoutMs);
-  const terminal = await new Promise((resolveExit, reject) => {
-    child.once('error', reject);
-    child.once('exit', (code, signal) => resolveExit({ code, signal }));
-  });
-  clearTimeout(timer);
+  let terminal;
+  try {
+    terminal = await new Promise((resolveExit, reject) => {
+      child.once('error', reject);
+      child.once('exit', (code, signal) => resolveExit({ code, signal }));
+    });
+  } finally { clearTimeout(timer); }
+  // SIGKILL delivery and the parent's exit do not prove a detached child
+  // has stopped. Verify known descendants before returning the report.
+  if (timeout) {
+    try { await confirmDescendantExit(descendants); }
+    catch (error) { cleanupError = String(error); }
+  }
   let report;
   try { report = JSON.parse(await readFile(output, 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') throw error; report = { samples: [] }; }
   report.workerStatus = report.status;
-  report.execution = { ...terminal, timeout, timeoutMs };
-  if (timeout || terminal.code !== 0 || report.status !== 'complete') {
+  report.execution = { ...terminal, timeout, timeoutMs, ...(cleanupError ? { cleanupError } : {}) };
+  if (timeout || terminal.code !== 0 || report.status !== 'complete' || cleanupError) {
     report.status = 'NOT_CHECKED';
-    report.reason = timeout ? 'Worker budget exhausted; only completed operations remain in samples.'
-      : terminal.code !== 0 ? 'Worker failed; inspect failures/error and exit status.'
-        : 'Worker did not reach its complete state.';
+    report.reason = cleanupError ? 'Worker cleanup failed; remaining process termination is unconfirmed.'
+      : timeout ? 'Worker budget exhausted; only completed operations remain in samples.'
+        : terminal.code !== 0 ? 'Worker failed; inspect failures/error and exit status.'
+          : 'Worker did not reach its complete state.';
   }
   await save(output, report);
   return report;
