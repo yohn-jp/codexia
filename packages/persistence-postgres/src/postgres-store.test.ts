@@ -977,6 +977,9 @@ test("startup project inventory uses bounded stable keyset pages", async () => {
 
 test("portable module inventory omits arbitrarily many retained authority records without reading their bodies", async () => {
   const project = await createProject("Portable authority inventory");
+  // Keep synthetic retained records strictly below the current project version.
+  // Subsequent integration suites must never treat them as a current snapshot.
+  await directPool.query("UPDATE project SET version=10002 WHERE id=$1",[project.id]);
   await directPool.query(`INSERT INTO module_record(project_id,module_id,key,value)
     SELECT $1,'core.authority.snapshots','snapshot:' || n, '{"private":"internal"}'::jsonb
     FROM generate_series(1,10001) AS n`, [project.id]);
