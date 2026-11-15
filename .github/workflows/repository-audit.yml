@@ -49,7 +49,9 @@ jobs:
       - name: Pack every remote branch HEAD with the same policy
         run: |
           node scripts/audit/export.mjs "$RUNNER_TEMP/audit-site" "$RUNNER_TEMP/audit-cache" "$CODEXIA_AUDIT_REPOMIX_BIN"
-          node -e 'const m=require(process.argv[1]); const main=m.branches.find(x=>x.branch==="main"); if(!main || m.snapshots[main.sha].status==="blocked") throw new Error("Main audit snapshot is unavailable");' "$RUNNER_TEMP/audit-site/manifest.json"
+      - name: Require usable main snapshot in PR preview
+        if: github.event_name == 'pull_request'
+        run: node -e 'const m=require(process.argv[1]); const main=m.branches.find(x=>x.branch==="main"); if(!main || m.snapshots[main.sha].status==="blocked") throw new Error("Main audit snapshot is unavailable");' "$RUNNER_TEMP/audit-site/manifest.json"
       - name: Save verified HEAD exports
         if: github.event_name != 'pull_request'
         uses: actions/cache/save@v4
