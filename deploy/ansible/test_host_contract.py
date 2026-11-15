@@ -14,6 +14,11 @@ class HostContractTest(unittest.TestCase):
     def test_numeric_owner(self):
         contract.validate_ranges("1001:100000:65536\n", "codexia", 1001)
 
+    def test_subgid_numeric_owner_is_uid_not_gid(self):
+        contract.validate_ranges("1001:100000:65536", "codexia", 1001, 1002)
+        with self.assertRaises(ValueError):
+            contract.validate_ranges("1002:100000:65536", "codexia", 1001, 1002)
+
     def test_reject_missing_short_or_unsafe_ranges(self):
         for text in ("alice:100000:65536", "codexia:100000:65535",
                      "codexia:0:65536", "codexia:100000:65536\nalice:165535:65536",

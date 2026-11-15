@@ -1,6 +1,6 @@
 # Standalone Ansible entrypoint
 
-The target desired-state contract is [IAC](../../docs/deployment/IAC.md) (design PR #177). The current implementation is incremental; an inspect result is not proof of convergence.
+The target desired-state contract is [IAC](../../docs/deployment/IAC.md). The current implementation is incremental; an inspect result is not proof of convergence.
 
 ## Read-only host inspection
 
@@ -22,4 +22,4 @@ Use the private bootstrap SSH identity with sudo and explicitly set the existing
 ansible-playbook -i /private/codexia-inventory.yml deploy/ansible/site.yml -e codexia_stage=host -e codexia_host_approved=true
 ```
 
-The host stage installs only missing distribution packages (Podman, Node.js and rootless/backup dependencies; no system upgrade), verifies Podman >=5.7 and Node >=22, adopts matching existing identity or creates the explicitly authorized new account, verifies system-allocated subordinate ID ranges, enables lingering and verifies the user manager. It does not start/restart any Codexia unit, touch volumes or initialize Podman storage. Existing account identity or subordinate-ID drift fails closed. Existing manually installed incompatible toolchains require a separately reviewed maintenance plan. Account creation does not provision SSH keys: SSH trust remains external. The host stage is not a dry-run; use inspect for observation. A real Ubuntu 26.04 fresh/repeat test is still required.
+The host stage installs only missing distribution packages (Podman, Node.js and rootless/backup dependencies; no broad system upgrade or package removal), verifies Podman >=5.7 and Node >=22, adopts matching existing identity or creates the explicitly authorized new account, verifies system-allocated subordinate ID ranges, enables lingering and verifies the user manager. It does not start/restart any Codexia unit, touch volumes or initialize Podman storage. Existing account identity or subordinate-ID drift fails closed. Existing manually installed incompatible toolchains require a separately reviewed maintenance plan. Account creation does not provision SSH keys: SSH trust remains external. The host stage is not a dry-run; use inspect for observation. A real Ubuntu 26.04 fresh/repeat test is still required.

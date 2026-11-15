@@ -62,10 +62,11 @@
         name: "{{ host_packages | difference(ansible_facts.packages.keys() | list) }}"
         state: present
         install_recommends: false
+        fail_on_autoremove: true
         update_cache: true
         cache_valid_time: 3600
       vars:
-        host_packages: [podman, nodejs, uidmap, slirp4netns, fuse-overlayfs, dbus-user-session, age, util-linux, ca-certificates, acl]
+        host_packages: [podman, nodejs, uidmap, netavark, aardvark-dns, slirp4netns, fuse-overlayfs, dbus-user-session, age, util-linux, ca-certificates, acl]
       when: host_packages | difference(ansible_facts.packages.keys() | list) | length > 0
     - name: Verify actual Podman and Node runtime versions
       ansible.builtin.command:

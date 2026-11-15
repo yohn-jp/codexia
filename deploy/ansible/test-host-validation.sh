@@ -21,6 +21,13 @@ cat > "$tmp/test.yml" <<YAML
   tasks:
     - ansible.builtin.include_tasks: "$(pwd)/deploy/ansible/host-validate.yml"
 YAML
+cat > "$tmp/syntax.yml" <<YAML
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - ansible.builtin.import_tasks: "$(pwd)/deploy/ansible/host.yml"
+YAML
+"${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$tmp/syntax.yml" --syntax-check
 run() { "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$tmp/test.yml" "$@"; }
 run > "$tmp/valid.log" || { cat "$tmp/valid.log"; exit 1; }
 grep -q 'changed=0' "$tmp/valid.log"
