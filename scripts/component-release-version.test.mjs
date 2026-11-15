@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {componentVersion} from './component-release-version.mjs';
-import {assertFrontendCompatibility} from './verify-frontend-compatibility.mjs';
+import {
+  assertFrontendCompatibility,
+  assertFrontendReleaseAdmission,
+  compareFrontendVersions,
+  readFrontendReleaseConfiguration,
+  verifyFrontendCompatibility,
+} from './verify-frontend-compatibility.mjs';
 test('independent stable release lines use monotonically increasing workflow patches',()=>{
   assert.equal(componentVersion('0.1.0','42'),'0.1.42');
   assert.equal(componentVersion('0.2.0','43'),'0.2.43');
@@ -17,4 +23,68 @@ test('frontend and backend releases are independent, but profile and API epoch m
   for(const changed of [{apiEpoch:2},{apiEpoch:undefined},{profile:'core'},{hosted:true},{version:'latest'}]){
     assert.throws(()=>assertFrontendCompatibility(ui,{...api,...changed}));
   }
+});
+
+test('frontend release order rejects stale versions and preserves same-version immutability',()=>{
+  const current={format:'codexia-frontend-identity/v1',version:'0.4.9',sourceSha:'a'.repeat(40),profile:'full',apiEpoch:1};
+  const newer={...current,version:'0.4.10',sourceSha:'b'.repeat(40)};
+  assert.equal(compareFrontendVersions('0.4.10','0.4.9'),1);
+  assert.equal(compareFrontendVersions('0.4.9','0.4.10'),-1);
+  assert.equal(compareFrontendVersions('0.4.9','0.4.9'),0);
+  assert.equal(assertFrontendReleaseAdmission(current,newer),true);
+  assert.throws(()=>assertFrontendReleaseAdmission(current,{...current,version:'0.4.8'}),/older than deployed frontend/);
+  assert.equal(assertFrontendReleaseAdmission(current,{...current}),false);
+  assert.throws(()=>assertFrontendReleaseAdmission(current,{...current,sourceSha:'c'.repeat(40)}),/immutable and belongs to a different source/);
+  assert.throws(()=>assertFrontendReleaseAdmission(current,{...current,apiEpoch:2}),/immutable and has a different API epoch/);
+});
+
+const candidate={format:'codexia-frontend-identity/v1',version:'0.4.10',sourceSha:'b'.repeat(40),profile:'full',apiEpoch:1};
+const liveBackend={name:'codexia',version:'0.8.2',hosted:false,profile:'full',apiEpoch:1};
+const liveFrontend={format:'codexia-frontend-identity/v1',version:'0.4.9',sourceSha:'a'.repeat(40),profile:'full',apiEpoch:1};
+const releaseEnv={GITHUB_SHA:candidate.sourceSha,CODEXIA_PUBLIC_ORIGIN:'https://codexia.example.com',CODEXIA_ACCESS_CLIENT_ID:'client-id',CODEXIA_ACCESS_CLIENT_SECRET:'client-secret'};
+const jsonResponse=value=>new Response(JSON.stringify(value),{status:200,headers:{'content-type':'application/json'}});
+
+test('frontend live gate admits a newer artifact only after protected API compatibility succeeds',async()=>{
+  const calls=[];
+  const result=await verifyFrontendCompatibility({frontend:candidate,env:releaseEnv,fetchImpl:async(url,options)=>{
+    calls.push([String(url),options.headers]);
+    return jsonResponse(String(url).endsWith('/api/version')?liveBackend:liveFrontend);
+  }});
+  assert.equal(result.deploy,true);
+  assert.deepEqual(result.backend,liveBackend);
+  assert.deepEqual(calls.map(([url])=>new URL(url).pathname).sort(),['/api/version','/desktop/update-identity.json']);
+  assert.ok(calls.every(([,headers])=>headers['CF-Access-Client-Id']==='client-id'&&headers['CF-Access-Client-Secret']==='client-secret'));
+});
+
+test('same-version frontend retry observes the deployed identity without allowing replacement',async()=>{
+  const retry={...candidate};
+  const result=await verifyFrontendCompatibility({frontend:retry,env:releaseEnv,fetchImpl:async url=>
+    jsonResponse(String(url).endsWith('/api/version')?liveBackend:retry)});
+  assert.equal(result.deploy,false);
+});
+
+test('frontend live gate reports missing origin and Access credentials without guessing values',()=>{
+  assert.throws(()=>readFrontendReleaseConfiguration({...releaseEnv,CODEXIA_PUBLIC_ORIGIN:''}),/CODEXIA_PUBLIC_ORIGIN must be configured/);
+  assert.throws(()=>readFrontendReleaseConfiguration({...releaseEnv,CODEXIA_PUBLIC_ORIGIN:'https://codexia.example.com/app'}),/without a path/);
+  assert.throws(()=>readFrontendReleaseConfiguration({...releaseEnv,CODEXIA_ACCESS_CLIENT_ID:''}),/CODEXIA_ACCESS_CLIENT_ID and CODEXIA_ACCESS_CLIENT_SECRET/);
+  assert.throws(()=>readFrontendReleaseConfiguration({...releaseEnv,CODEXIA_ACCESS_CLIENT_SECRET:undefined}),/CODEXIA_ACCESS_CLIENT_ID and CODEXIA_ACCESS_CLIENT_SECRET/);
+});
+
+test('frontend live gate rejects wrong source, incompatible profile or epoch, and unavailable identity',async()=>{
+  await assert.rejects(verifyFrontendCompatibility({frontend:candidate,env:{...releaseEnv,GITHUB_SHA:'c'.repeat(40)},fetchImpl:async()=>jsonResponse(liveBackend)}),/artifact source mismatch/);
+  await assert.rejects(verifyFrontendCompatibility({frontend:candidate,env:releaseEnv,fetchImpl:async url=>
+    jsonResponse(String(url).endsWith('/api/version')?{...liveBackend,apiEpoch:2}:liveFrontend)}),/API epochs are incompatible/);
+  await assert.rejects(verifyFrontendCompatibility({frontend:candidate,env:releaseEnv,fetchImpl:async url=>
+    jsonResponse(String(url).endsWith('/api/version')?{...liveBackend,profile:'core'}:liveFrontend)}),/Backend profile mismatch/);
+  await assert.rejects(verifyFrontendCompatibility({frontend:candidate,env:releaseEnv,fetchImpl:async()=>new Response('unavailable',{status:503})}),/Live identity endpoint .* is unavailable \(HTTP 503\)/);
+});
+
+test('frontend live gate diagnoses Access rejection without exposing service credentials',async()=>{
+  const secret='do-not-print-this-access-secret';
+  await assert.rejects(verifyFrontendCompatibility({frontend:candidate,env:{...releaseEnv,CODEXIA_ACCESS_CLIENT_SECRET:secret},fetchImpl:async()=>new Response('',{status:403})}),error=>{
+    assert.match(error.message,/Cloudflare Access denied/);
+    assert.match(error.message,/CODEXIA_ACCESS_CLIENT_ID, CODEXIA_ACCESS_CLIENT_SECRET/);
+    assert.equal(error.message.includes(secret),false);
+    return true;
+  });
 });
