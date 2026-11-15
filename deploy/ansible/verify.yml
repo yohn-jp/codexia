@@ -1,7 +1,7 @@
 ---
-- name: Read controller and observed topology under the canonical lock
+- name: Verify live serving topology and persistence through the canonical locked controller
   ansible.builtin.command:
-    argv: [sh, "{{ updater }}", status, "{{ config_path }}"]
+    argv: [sh, "{{ updater }}", verify, "{{ config_path }}"]
   register: controller_status
   changed_when: false
   check_mode: false

@@ -158,9 +158,10 @@ export class StandaloneController {
       return this.save({...state,paused:true,lastError:'Topology reconciliation blocked: '+safeError(error)});
     }
   }
-  async tick(state,{manualRollback=false}={}){
+  async tick(state,{manualRollback=false,manualAcceptance=false}={}){
+    if(manualAcceptance)assert.equal(state.paused,true,'Manual acceptance requires paused state');
     state=await this.reconcile(state);
-    if(!stable(state.journal)||state.paused&&!manualRollback)return state;
+    if(!stable(state.journal)||state.paused&&!manualRollback&&!manualAcceptance)return state;
     if(state.lastError?.startsWith('Topology reconciliation blocked:'))return state;
     let candidate;
     const old=state.journal.active;
