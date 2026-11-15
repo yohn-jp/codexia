@@ -175,3 +175,35 @@
   ansible.builtin.command:
     argv: [systemctl, --user, show, --property=Version]
   changed_when: false
+- name: Observe the rootless manager environment without logging its contents
+  become: true
+  become_user: "{{ codexia_service_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ codexia_service_uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ codexia_service_uid }}/bus"
+  ansible.builtin.command:
+    argv: [systemctl, --user, show-environment]
+  register: host_manager_environment
+  changed_when: false
+  no_log: true
+- name: Converge the rootless manager Quadlet configuration directory
+  become: true
+  become_user: "{{ codexia_service_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ codexia_service_uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ codexia_service_uid }}/bus"
+  ansible.builtin.command:
+    argv: [systemctl, --user, set-environment, "XDG_CONFIG_HOME={{ codexia_service_home }}/.config"]
+  when: "('XDG_CONFIG_HOME=' ~ codexia_service_home ~ '/.config') not in host_manager_environment.stdout_lines"
+- name: Verify the rootless manager Quadlet configuration directory
+  become: true
+  become_user: "{{ codexia_service_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ codexia_service_uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ codexia_service_uid }}/bus"
+  ansible.builtin.command:
+    argv: [systemctl, --user, show-environment]
+  register: host_manager_environment_verified
+  changed_when: false
+  failed_when: "('XDG_CONFIG_HOME=' ~ codexia_service_home ~ '/.config') not in host_manager_environment_verified.stdout_lines"
+  no_log: true
