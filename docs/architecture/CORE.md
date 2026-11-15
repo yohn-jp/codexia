@@ -23,6 +23,8 @@ Documents retain stable IDs, hierarchy, order and immutable body revisions. Meta
 
 A module `SnapshotId` contains `projectId` and `projectVersion`. The Core materializes one consistent PostgreSQL read and retains pinned views for asynchronous work. Content mutations advance the project version atomically. Read models cannot combine content from different snapshots or substitute current content for an unavailable historical revision.
 
+[Backend read model](BACKEND-READ-MODEL.md) specifies snapshot reuse, bounded set-oriented persistence reads, internal indexes, resource envelopes and performance acceptance without changing this authority.
+
 The module file-shaped reader is a projection over PostgreSQL records. Stable manuscript, hierarchy and `meta/scriptorium/modules/<module-id>/` paths are domain identifiers, not checkout locations. They preserve existing module formats and unknown data without introducing another authority. Search indexes, model artifacts and caches remain reconstructible derivatives keyed by source revision and model/schema identity.
 
 ## Mutation and recovery

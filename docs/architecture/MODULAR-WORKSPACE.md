@@ -59,6 +59,8 @@ Project version and document revision changes invalidate dependent read models. 
 
 ### 3.4 Read model and cache
 
+Read implementation and scaling invariants are defined in [Backend read model](BACKEND-READ-MODEL.md); this section defines workspace consumption and scheduling.
+
 Core owns consistent snapshot readers keyed by PostgreSQL project identity and version. Derived indexes support enumeration, bulk reads and changed-path calculation using document/artifact revisions. Mutable drafts remain separate. Optional index failure cannot prevent Core writing.
 
 ## 4. Workspace composition

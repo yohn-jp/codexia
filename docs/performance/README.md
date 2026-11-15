@@ -1,28 +1,16 @@
 # Performance measurement
 
-Use synthetic workloads and matched baseline/candidate inputs. Measure input and navigation latency, immutable Git reads, mutation, search/statistics, journal persistence, network activity, builds and startup separately. Improvements must retain revision validation, authentication, project isolation, strict browser recovery and the Core-only dependency boundary.
+The [backend read model](../architecture/BACKEND-READ-MODEL.md) and [optimization decisions](../architecture/decisions/OPTIMIZATION-BOUNDARIES.md) define correctness constraints. This document owns how to measure improvements, not a second architecture or benchmark campaign status.
 
-Run the [benchmark harness](../../scripts/performance/README.md) from the repository root:
+Use matched synthetic PostgreSQL workloads, disposable databases and exact baseline/candidate source and build identities. Measure current and pinned reads, cold construction and warm reuse, Knowledge/Evidence projection, tree/scene, search/statistics, history, mutations/receipts, and end-to-end navigation separately. Compare the same project hierarchy, body bytes, revision history, evidence density, concurrency, database settings, toolchain, instrumentation and cache conditions. Record counts of actual persisted records, not Git fixture file totals.
 
-```sh
-pnpm install --frozen-lockfile
-CODEXIA_PROFILE=core pnpm build
-node --test scripts/performance/*.test.mjs
-node scripts/performance/run.mjs /tmp/codexia-benchmark
-node scripts/performance/summarize.mjs /tmp/codexia-benchmark/results
-```
+For backend work capture SQL query counts, rows and bytes, database and application wall time, transaction/lock duration, CPU, RSS, pool contention, projection bytes and growth. Capture cold and warm distributions with sample counts and raw measurements, and distinguish one-time seeding from operations. Include near-limit and rejected cases; timeouts and errors are not successful latency observations. Do not combine separate experiments into an aggregate speedup. Do not use real author data or change authentication, durability, scope or revision checks to improve a metric.
 
-The output root must be new. Workers use generated fixtures, fresh processes and local synthetic bare remotes. Publish workloads write only to those remotes. Retain raw results outside the checkout or under ignored `artifacts/`; product documentation must not accumulate benchmark snapshots, execution logs or candidate progress tables.
+The [benchmark harness](../../scripts/performance/README.md) documents runnable entrypoints and limitations. Its synthetic Git seed generator is only fixture transport; PostgreSQL is the runtime authority. Historical Git-era measurements and browser probes that still instantiate the retired Core API are not valid current PostgreSQL baselines. Repair or replace only the affected measurement adapters before relying on them. Actual browser/IME acceptance remains separate from performance probes and synthetic events.
 
-Compare identical fixture contents, runtime profiles, browser flags, repetition counts, instrumentation and host constraints. Distinguish cold from warm reads, cache state and evolving mutation history. Keep sample counts with quantiles; a single observation is not a tail-latency estimate. Report resource and network observations separately from wall time.
+## Immutable historical evidence
 
-A timeout or unavailable model/display leaves affected cases unmeasured. A synthetic composition event does not establish native OS IME performance, and a browser frame opportunity is not input-to-pixel latency. Do not add improvements from unrelated experiments into one aggregate percentage.
-
-Specialized probes under `scripts/performance/` bind their runtime and artifact identities explicitly. Their immutable comparison inputs are in `evidence/performance/`; generated output is not a production input.
-
-## Immutable baseline evidence
-
-The retained `evidence/performance/wave0/INDEX.json` is the exact manifest for the published raw measurement archive. Check the archive before extraction and validate each compressed and raw member using the existing artifact verifier:
+The retained `evidence/performance/wave0/INDEX.json` is the exact manifest for the historical raw measurement archive. Check the archive before extraction and validate each compressed and raw member using the existing artifact verifier:
 
 ```sh
 index=evidence/performance/wave0/INDEX.json
@@ -34,4 +22,4 @@ tar -xf "$evidence/codexia-wave0-2026-10-20.tar" -C "$evidence"
 node scripts/performance/artifacts.mjs verify "$index" "$evidence"
 ```
 
-The manifest's digest is the immutable source of artifact identity; summary tables do not replace the raw archive. See [architectural optimization decisions](../architecture/decisions/OPTIMIZATION-BOUNDARIES.md) for the safety constraints that survive any individual measurement.
+Retain immutable comparison inputs and raw evidence outside product documentation. A historical archive is not a current performance claim; specialized probes must bind their own runtime and artifact identities.
