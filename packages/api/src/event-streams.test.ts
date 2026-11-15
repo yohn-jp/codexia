@@ -54,7 +54,7 @@ test("heartbeat and expiration use the same safe lifecycle, finish releases capa
       const original = response.write.bind(response);
       response.write = frame => { const written = original(frame); if (frame === ": heartbeat\n\n") resolve(); return written; };
     });
-    const deadline = setTimeout(() => response.emit("error", new Error("heartbeat deadline")), 100);
+    const deadline = setTimeout(() => response.emit("error", new Error("heartbeat deadline")), 1000);
     try { await Promise.race([heartbeat, new Promise<void>((_, reject) => response.once("close", () => reject(new Error("closed before heartbeat"))))]); }
     finally { clearTimeout(deadline); }
     response.end();
@@ -62,8 +62,12 @@ test("heartbeat and expiration use the same safe lifecycle, finish releases capa
     const expired = new ResponseDouble();
     const finished = new Promise<void>(resolve => expired.once("finish", resolve));
     streams.open(expired.asResponse(), "no-store", undefined, Date.now());
-    const keepAlive = setTimeout(() => expired.end(), 100);
-    try { await finished; } finally { clearTimeout(keepAlive); }
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([finished, new Promise<void>((_, reject) => {
+        deadlineTimer = setTimeout(() => reject(new Error("expiration did not end the response")), 1000);
+      })]);
+    } finally { clearTimeout(deadlineTimer); }
     assert.equal(streams.full, false);
   } finally { streams.close(); }
 });

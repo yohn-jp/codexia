@@ -2581,6 +2581,27 @@ describe("Codexia HTTP boundary", () => {
     assert.equal((await newCookieProposal.json() as ChangeProposal).source, "author", "transport attribution still applies to new cookie proposals after recovery");
   });
 
+  it("review queue delegates once with the admitted project inventory and preserves the exact count", async (t) => {
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-review-queue-"));
+    tempDirs.push(staticDir);
+    const calls: string[][] = [];
+    const store = Object.assign(makeStore(), {
+      async reviewQueue(projectIds: readonly string[]) {
+        calls.push([...projectIds]);
+        return { unresolvedCount: 1234, items: [] };
+      },
+      async listProposals() { throw Error("global queue must not expand per-project proposals"); },
+    });
+    const apiServer = await startCustomApi(store, staticDir);
+    t.after(() => apiServer.close());
+    assert.equal((await fetch(`${apiServer.base}/api/review-queue`)).status, 401);
+    const owner = await login(apiServer.base);
+    const response = await fetch(`${apiServer.base}/api/review-queue`, { headers: { Cookie: owner.cookie } });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { unresolvedCount: 1234, items: [] });
+    assert.deepEqual(calls, [["project-1"]]);
+  });
+
   it("keeps owner event streams scoped, rejects retired synchronization, and closes streams on shutdown", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-project-events-"));
     tempDirs.push(staticDir);
