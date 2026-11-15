@@ -55,9 +55,48 @@ test("legacy draft import can be canceled, reloads its source, and removes it on
   expect(await sourceExists(page)).toBe(false);
 });
 
-test("legacy draft import retains the confirmed PostgreSQL revision and creates a new generation", async ({ page }) => {
+// Keep the original fill-based acceptance intact while comparing it with a
+// user-facing selection + typing path. This isolates the automation boundary
+// without weakening the canonical persisted-body assertion.
+test("keyboard select-all replacement saves exactly the intended manuscript", async ({ page }) => {
+  const { project, scene } = await createWritingFixture(page);
+  const text = "先に確定した本文。";
+  await expectMarkdown(page, "最初の本文。\n次の文章です。");
+  await editor(page).click();
+  await editor(page).press("ControlOrMeta+a");
+  await page.keyboard.insertText(text);
+  await expectMarkdown(page, text);
+  const url = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
+  await expect.poll(async () => {
+    const response = await page.request.get(url);
+    return response.ok() ? ((await response.json()) as { revision: { markdown: string } }).revision.markdown : "";
+  }).toBe(text);
+});
+
+test("legacy draft import retains the confirmed PostgreSQL revision and creates a new generation", async ({ page }, testInfo) => {
   const { project, scene } = await createWritingFixture(page); const text = "先に確定した本文。";
-  await editor(page).fill(text);
+  const beforeFill = await markdown(page);
+  await editor(page).evaluate(element => {
+    const probe = window as Window & { __codexiaFillProbe?: Array<{ type: string; inputType: string | null; selection: string; text: string }> };
+    const events: NonNullable<typeof probe.__codexiaFillProbe> = [];
+    probe.__codexiaFillProbe = events;
+    const record = (event: Event) => {
+      const selection = window.getSelection();
+      events.push({ type: event.type, inputType: event instanceof InputEvent ? event.inputType : null,
+        selection: selection?.toString() ?? "", text: element.textContent ?? "" });
+    };
+    for (const type of ["beforeinput", "input", "keydown", "keyup", "compositionstart", "compositionend"]) {
+      element.addEventListener(type, record, { capture: true });
+    }
+    document.addEventListener("selectionchange", record);
+  });
+  try {
+    await editor(page).fill(text);
+  } finally {
+    const afterFill = await markdown(page);
+    const events = await page.evaluate(() => (window as Window & { __codexiaFillProbe?: unknown }).__codexiaFillProbe ?? []);
+    await testInfo.attach("manuscript-fill-probe", { body: JSON.stringify({ beforeFill, afterFill, events }, null, 2), contentType: "application/json" });
+  }
   // "Saved" may still describe the previous revision until the async PATCH
   // completes. Pin only a revision whose canonical PostgreSQL body is this text.
   const url = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
