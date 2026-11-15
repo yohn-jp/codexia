@@ -1,0 +1,12 @@
+{
+  "backend": {
+    "name": "Codexia CI backend identity",
+    "path": "/api/version",
+    "tunnelPath": "^/api/version$"
+  },
+  "frontend": {
+    "name": "Codexia CI frontend identity",
+    "path": "/desktop/update-identity.json",
+    "tunnelPath": "^/desktop/update-identity\\.json$"
+  }
+}
