@@ -13,13 +13,20 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const pageWasHiddenRef = useRef(false);
+  const workspaceScopeRef = useRef<string | null>(null);
+  const inspectSequenceRef = useRef(0);
+  const protectionRef = useRef<(() => Promise<boolean>) | null>(null);
+  const registerProtection = useCallback((guard: (() => Promise<boolean>) | null) => { protectionRef.current = guard; }, []);
+  const [sessionBlocked, setSessionBlocked] = useState(false);
 
   const inspect = useCallback(async () => {
+    const sequence = ++inspectSequenceRef.current;
     setBusy(true);
     setMessage("");
     let versionChecked = false;
     try {
       const version = await api.version();
+      if (sequence !== inspectSequenceRef.current) return;
       versionChecked = true;
       setAccessMode(version.browserAuth === "cloudflare-access");
       const session = await api.session();
@@ -33,9 +40,21 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
       if (session.permissions && !session.permissions.some((permission) => permission === "write" || permission === "maintain" || permission === "admin")) {
         throw new Error("このアカウントには原稿編集権限がありません。");
       }
-      setAuthorScope(session.authorScope || "owner");
+      if (sequence !== inspectSequenceRef.current) return;
+      const scope = session.authorScope || "owner";
+      if (workspaceScopeRef.current !== null && workspaceScopeRef.current !== scope) throw new Error("認証された作者が変わりました。現在の下書きを保護してから再読み込みしてください。");
+      workspaceScopeRef.current = scope;
+      setAuthorScope(scope);
+      setSessionBlocked(false);
       setState("database");
     } catch (error) {
+      if (sequence !== inspectSequenceRef.current) return;
+      if (workspaceScopeRef.current !== null) {
+        // Do not destroy the current editor or expose it to a different author.
+        setSessionBlocked(true);
+        setMessage(error instanceof Error ? error.message : "認証またはPostgreSQL接続を確認できませんでした。");
+        return;
+      }
       if (versionChecked && error instanceof ApiError && error.status === 401) {
         setState("signed-out");
       } else {
@@ -43,7 +62,7 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
         setMessage(error instanceof Error ? error.message : "Codexia APIに接続できませんでした。");
       }
     } finally {
-      setBusy(false);
+      if (sequence === inspectSequenceRef.current) setBusy(false);
     }
   }, []);
 
@@ -57,7 +76,7 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
     };
     window.addEventListener("pagehide", hide);
     window.addEventListener("pageshow", resume);
-    return () => { window.removeEventListener("pagehide", hide); window.removeEventListener("pageshow", resume); };
+    return () => { inspectSequenceRef.current += 1; window.removeEventListener("pagehide", hide); window.removeEventListener("pageshow", resume); };
   }, [inspect]);
 
   async function signIn(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -75,10 +94,24 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
     }
   }
 
-  if (state === "database") return <PersistenceWorkspace mode={mode} authorScope={authorScope} onSignOut={() => {
-    if (accessMode) { window.location.assign("/cdn-cgi/access/logout"); return; }
-    void api.logout().finally(() => setState("signed-out"));
-  }} />;
+  if (state === "database") return <>
+    <div inert={sessionBlocked} hidden={sessionBlocked}>
+      <PersistenceWorkspace mode={mode} authorScope={authorScope} sessionBlocked={sessionBlocked} registerProtection={registerProtection} onSignOut={() => {
+        if (accessMode) { window.location.assign("/cdn-cgi/access/logout"); return; }
+        void api.logout().finally(() => { workspaceScopeRef.current = null; setState("signed-out"); });
+      }} />
+    </div>
+    {sessionBlocked && <main className={`pg-entry pg-${mode}`}><section className="pg-login" aria-labelledby="pg-recheck-title">
+      <h1 id="pg-recheck-title">認証・接続を再確認してください</h1>
+      <p role="alert">{message}</p>
+      <p>編集中の原稿は現在の画面に保持しています。認証と接続を確認するまで編集を停止します。</p>
+      <button type="button" disabled={busy} onClick={() => void inspect()}>再試行</button>
+      <button type="button" disabled={busy} onClick={() => void (async () => {
+        if (!protectionRef.current || !await protectionRef.current()) { setMessage("入力を保護できないため再読み込みを停止しました。接続を再確認してください。"); return; }
+        window.location.reload();
+      })()}>下書きを保護して再読み込み</button>
+    </section></main>}
+  </>;
   if (state === "checking") return <main className={`pg-entry pg-${mode}`}><p role="status">PostgreSQL保存基盤を確認しています。</p></main>;
   if (state === "failed") return <main className={`pg-entry pg-${mode}`}>
     <section className="pg-login" aria-labelledby="pg-entry-title">
