@@ -321,11 +321,11 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
     const previous = historyState(location.state)[MOBILE_PREVIOUS_VIEW_STATE];
     if (isMobileView(previous)) {
       if (workspaceScope && panels?.length) {
-        queueWorkspacePanel(WORKSPACE_PANEL_FOR_VIEW[previous], () => navigateRoute(-1), withViewInCurrentUrl(previous));
+        queueWorkspacePanel(WORKSPACE_PANEL_FOR_VIEW[previous], () => navigateRoute(withViewInCurrentUrl(previous), { replace: true }), withViewInCurrentUrl(previous));
         return;
       }
       if (!(await preparePanelChange())) return;
-      navigateRoute(-1);
+      navigateRoute(withViewInCurrentUrl(previous), { replace: true });
       return;
     }
     await navigate(activeView === "writing" ? "library" : "writing");
