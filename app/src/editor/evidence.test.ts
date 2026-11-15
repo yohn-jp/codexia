@@ -239,3 +239,19 @@ test("Markdown source remains byte-for-byte text and offsets use UTF-16 around s
   assert.equal(next.anchors[0]!.from, 3);
   assert.equal(next.anchors[0]!.status, "current");
 });
+
+
+test("unplaced and cross-block anchors never acquire a fabricated block identity", () => {
+  const text = "前。\n\n後。";
+  const ids = makeIds();
+  const base = emptyDocumentEvidence(text, "revision-1", ids);
+  const anchor = anchorFor(text, "前。\n\n後。", base.blocks[0]!.id);
+  const cross = initializeDocumentEvidence(text, "revision-1", { revisionId: "revision-1", blocks: base.blocks, anchors: [anchor] }, ids);
+  assert.equal(cross.anchors[0]!.blockId, null);
+  assert.equal(cross.anchors[0]!.status, "current");
+  const orphan = { ...anchor, from: 0, to: 0, quote: "", status: "orphaned" as const, blockId: null };
+  const validated = assertEditorEvidenceSnapshot({ revisionId: "revision-1", blocks: [], anchors: [orphan] }, 0);
+  const recovered = initializeDocumentEvidence("", "revision-1", validated, ids);
+  assert.equal(recovered.anchors[0]!.blockId, null);
+  assert.equal(recovered.anchors[0]!.status, "orphaned");
+});
