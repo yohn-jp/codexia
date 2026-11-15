@@ -28,7 +28,7 @@ const [staticHeaders, staticRedirects, apiSource, apiClient, terraformMain, terr
 ]);
 
 assert.equal(workerConfig.name, 'codexia-frontend');
-assert.equal(edgePackage.devDependencies.wrangler, '4.158.0');
+assert.equal(edgePackage.devDependencies.wrangler, '4.162.0');
 assert.equal(edgeLock.packages['node_modules/wrangler'].version, edgePackage.devDependencies.wrangler);
 assert.equal(workerConfig.$schema, './node_modules/wrangler/config-schema.json');
 assert.equal(workerConfig.workers_dev, false, 'workers.dev must stay disabled');
