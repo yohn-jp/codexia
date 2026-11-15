@@ -44,7 +44,8 @@ rootless() (
   sudo -H -u "$user" env HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_DATA_HOME="$home/.local/share" XDG_STATE_HOME="$home/.local/state" XDG_RUNTIME_DIR="/run/user/$uid" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"
 )
-test "$(rootless /usr/bin/podman info --format '{{.Host.Security.Rootless}} {{.Host.CgroupVersion}}')" = 'true v2'
+test -f /sys/fs/cgroup/cgroup.controllers
+test "$(rootless /usr/bin/podman info --format '{{.Host.Security.Rootless}}')" = true
 rootless mkdir -p "$home/.config/containers/systemd"
 cat <<'QUADLET' | rootless tee "$home/.config/containers/systemd/codexia-fixture.network" >/dev/null
 [Network]
