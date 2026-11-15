@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  BUILTIN_MODULE_IDS,
   MAX_PROPOSAL_EVIDENCE_BYTES,
   assertChangeOperation,
   assertProjectPath,
@@ -134,7 +135,7 @@ export function assertPersistedProposal(value: unknown): asserts value is Change
     const item = asRecord(itemValue);
     if (!item || typeof item.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(item.id) || evidenceIds.has(item.id) ||
         !isSnapshotId(item.snapshot) || snapshotKey(item.snapshot) !== snapshotKey(proposal.snapshot as SnapshotId) ||
-        !["story", "diagnostics", "nlp", "semantic", "speaker", "assistant", "publishing", "mcp"].includes(item.module as string) ||
+        !BUILTIN_MODULE_IDS.some((module) => module === item.module) ||
         typeof item.kind !== "string" || !item.kind.trim() || item.kind.length > 128 || !Array.isArray(item.paths) || item.paths.length > 512 ||
         !Object.prototype.hasOwnProperty.call(item, "details")) {
       throw new Error("Invalid proposal evidence record");
