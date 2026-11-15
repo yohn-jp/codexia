@@ -12,6 +12,12 @@ all:
           mode: token
         # Pin a certified backend digest for the private proxy.
         codexia_proxy_image: ghcr.io/yohn-jp/codexia-backend@sha256:REPLACE_WITH_VERIFIED_DIGEST
+        # Base secrets: exact protected file content; do not commit these inputs.
+        codexia_secrets_approved: false
+        codexia_auth_token_file: /private/api-auth-token
+        codexia_tunnel_token_file: /private/tunnel-token
+        codexia_postgres_admin_password_file: /private/postgres-admin-password
+        codexia_postgres_app_password_file: /private/postgres-app-password
         # Private control-node files; use Ansible Vault for the secret variable.
         codexia_public_key_file: /private/channel-public.pem
         codexia_github_token_file: /private/github-read-token
