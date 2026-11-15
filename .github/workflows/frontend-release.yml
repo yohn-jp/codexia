@@ -74,6 +74,28 @@ concurrency:
   group: codexia-frontend-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  live-preflight:
+    name: Verify live release prerequisites
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: codexia-production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.0'
+      - name: Probe protected backend and frontend identities
+        env:
+          CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
+          CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
+          CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
+        run: node scripts/verify-frontend-compatibility.mjs probe
   build:
     name: Build and verify UI assets
     runs-on: ubuntu-24.04
@@ -150,7 +172,7 @@ jobs:
         run: node scripts/verify-release-source.mjs
   deploy:
     name: Deploy UI Static Assets
-    needs: [build, certify]
+    needs: [live-preflight, build, certify]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15

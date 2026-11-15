@@ -36,6 +36,15 @@ variable "access_policy_id" {
   }
 }
 
+variable "ci_access_policy_id" {
+  type        = string
+  description = "Existing account-owned reusable Service Auth policy restricted to the CI identity service token."
+  validation {
+    condition     = can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", var.ci_access_policy_id)) && var.ci_access_policy_id != var.access_policy_id
+    error_message = "Set an existing reusable Service Auth policy UUID distinct from the author policy."
+  }
+}
+
 variable "allowed_idps" {
   type        = set(string)
   description = "Existing Cloudflare Access IdP IDs."

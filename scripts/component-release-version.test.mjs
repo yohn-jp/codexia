@@ -7,6 +7,7 @@ import {
   compareFrontendVersions,
   readFrontendReleaseConfiguration,
   verifyFrontendCompatibility,
+  probeLiveReleaseIdentities,
 } from './verify-frontend-compatibility.mjs';
 test('independent stable release lines use monotonically increasing workflow patches',()=>{
   assert.equal(componentVersion('0.1.0','42'),'0.1.42');
@@ -87,4 +88,29 @@ test('frontend live gate diagnoses Access rejection without exposing service cre
     assert.equal(error.message.includes(secret),false);
     return true;
   });
+});
+
+test('early live probe checks both endpoints and reports both failures without following redirects',async()=>{
+  const seen=[];
+  await assert.rejects(probeLiveReleaseIdentities({env:releaseEnv,fetchImpl:async(url,options)=>{
+    seen.push(new URL(url).pathname);
+    assert.equal(options.redirect,'manual');
+    return String(url).endsWith('/api/version')
+      ? new Response('',{status:403,headers:{'cf-ray':'1234-NRT'}})
+      : new Response('',{status:302,headers:{location:'https://example.invalid/secret', 'cf-ray':'5678-NRT'}});
+  }}),error=>{
+    assert.match(error.message,/api\/version.*403.*1234-NRT/);
+    assert.match(error.message,/update-identity\.json.*302.*5678-NRT/);
+    assert.doesNotMatch(error.message,/example\.invalid|client-secret/);
+    return true;
+  });
+  assert.equal(seen.length,2);
+});
+
+test('early live probe validates backend and frontend independently without an artifact',async()=>{
+  const result=await probeLiveReleaseIdentities({env:releaseEnv,fetchImpl:async url=>
+    jsonResponse(String(url).endsWith('/api/version')?liveBackend:liveFrontend)});
+  assert.deepEqual(result,{backend:liveBackend,deployed:liveFrontend});
+  await assert.rejects(probeLiveReleaseIdentities({env:releaseEnv,fetchImpl:async url=>
+    jsonResponse(String(url).endsWith('/api/version')?{...liveBackend,apiEpoch:undefined}:liveFrontend)}),/Live backend identity is invalid/);
 });

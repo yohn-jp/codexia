@@ -106,21 +106,51 @@ async function readLiveJson(endpoint, origin, credentials, fetchImpl) {
         Accept: 'application/json',
         'Cache-Control': 'no-cache',
       },
-      redirect: 'error',
+      redirect: 'manual',
       signal: AbortSignal.timeout(15_000),
     });
   } catch {
     throw new Error(`Could not reach protected live identity endpoint ${endpoint}; verify CODEXIA_PUBLIC_ORIGIN and the Cloudflare Access service credentials and policy.`);
   }
+  // A Ray ID permits correlation with Access/Tunnel logs without exposing
+  // credentials, response bodies or redirect locations.
+  const ray = response.headers.get('cf-ray');
+  const correlation = ray && /^[a-zA-Z0-9-]{1,64}$/u.test(ray) ? ` [CF-Ray ${ray}]` : '';
   if (response.status === 401 || response.status === 403) {
-    throw new Error(`Cloudflare Access denied live identity endpoint ${endpoint} (HTTP ${response.status}); verify CODEXIA_ACCESS_CLIENT_ID, CODEXIA_ACCESS_CLIENT_SECRET, and the service-token policy.`);
+    throw new Error(`Cloudflare Access denied live identity endpoint ${endpoint} (HTTP ${response.status}); verify CODEXIA_ACCESS_CLIENT_ID, CODEXIA_ACCESS_CLIENT_SECRET, and the service-token policy; if Access allowed the request, verify Tunnel ingress audience.${correlation}`);
   }
-  if (!response.ok) throw new Error(`Live identity endpoint ${endpoint} is unavailable (HTTP ${response.status}).`);
+  if (response.status >= 300 && response.status < 400) {
+    throw new Error(`Live identity endpoint ${endpoint} redirected (HTTP ${response.status}); service authentication must return JSON directly.${correlation}`);
+  }
+  if (!response.ok) throw new Error(`Live identity endpoint ${endpoint} is unavailable (HTTP ${response.status}).${correlation}`);
   try {
     return await response.json();
   } catch {
     throw new Error(`Live identity endpoint ${endpoint} returned invalid JSON.`);
   }
+}
+
+/**
+ * Inspect both endpoints independently. One denial must not hide the other
+ * endpoint's result. The same probe is used early and immediately before deploy.
+ * @param {{env?:NodeJS.ProcessEnv | Record<string,string|undefined>, fetchImpl?:typeof fetch}} options
+ */
+export async function probeLiveReleaseIdentities({ env = process.env, fetchImpl = fetch } = {}) {
+  const { origin, clientId, clientSecret } = readFrontendReleaseConfiguration(env);
+  const credentials = { clientId, clientSecret };
+  const results = await Promise.allSettled([
+    readLiveJson('/api/version', origin, credentials, fetchImpl),
+    readLiveJson('/desktop/update-identity.json', origin, credentials, fetchImpl),
+  ]);
+  const failures = results.filter(result => result.status === 'rejected');
+  if (failures.length) throw new Error(failures.map(result => result.reason.message).join('\n'));
+  const [backend, deployed] = results.map(result => result.value);
+  assertFrontendIdentity(deployed);
+  assert.ok(record(backend) && backend.name === 'codexia' && backend.hosted === false &&
+    typeof backend.version === 'string' && semver.test(backend.version) &&
+    ['core', 'full'].includes(backend.profile) && Number.isSafeInteger(backend.apiEpoch) && backend.apiEpoch > 0,
+    'Live backend identity is invalid');
+  return { backend, deployed };
 }
 
 /**
@@ -140,10 +170,7 @@ export async function verifyFrontendCompatibility({ frontend, env = process.env,
     return { deploy: false, backend: undefined };
   }
 
-  const [backend, deployed] = await Promise.all([
-    readLiveJson('/api/version', origin, credentials, fetchImpl),
-    readLiveJson('/desktop/update-identity.json', origin, credentials, fetchImpl),
-  ]);
+  const { backend, deployed } = await probeLiveReleaseIdentities({ env, fetchImpl });
   assertFrontendCompatibility(frontend, backend);
   const deploy = assertFrontendReleaseAdmission(deployed, frontend);
   return { deploy, backend };
@@ -154,6 +181,13 @@ function loadBuiltFrontend() {
 }
 
 async function main() {
+  if (process.argv[2] === 'probe') {
+    const { backend, deployed } = await probeLiveReleaseIdentities();
+    const { apiEpoch } = JSON.parse(readFileSync(new URL('../deploy/frontend-compatibility.json', import.meta.url), 'utf8'));
+    assertFrontendCompatibility({ ...deployed, profile: 'full', apiEpoch }, backend);
+    console.log(`Live release preflight succeeded: backend ${backend.version}, frontend ${deployed.version}, required API epoch ${apiEpoch}.`);
+    return;
+  }
   const frontend = loadBuiltFrontend();
   const mode = process.argv[2] === 'deployed' ? 'deployed' : 'predeploy';
   const result = await verifyFrontendCompatibility({ frontend, mode });

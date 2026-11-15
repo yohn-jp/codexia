@@ -53,6 +53,21 @@ assert.match(terraformMain, /pattern\s+=\s+"\$\{var\.app_hostname\}\$\{each\.val
 assert.match(terraformMain, /service\s+=\s+var\.origin_service/u);
 assert.match(terraformMain, /required\s+=\s+true/u);
 assert.match(terraformMain, /originRoutes/u);
+assert.match(terraformMain, /backend\s*=\s*\{ path = "\/api\/version", ingress_path = "\^\/api\/version\$" \}/u);
+assert.match(terraformMain, /frontend\s*=\s*\{ path = "\/desktop\/update-identity\.json", ingress_path = "\^\/desktop\/update-identity\\\\\.json\$" \}/u);
+const authorApp = terraformMain.split('resource "cloudflare_zero_trust_access_application" "codexia" {')[1].split('resource "cloudflare_zero_trust_access_application" "ci_identity" {')[0];
+assert.doesNotMatch(authorApp, /var\.ci_access_policy_id/u, 'CI service auth must not apply to author application');
+const ciApp = terraformMain.split('resource "cloudflare_zero_trust_access_application" "ci_identity" {')[1].split('resource "cloudflare_zero_trust_tunnel_cloudflared"')[0];
+assert.match(ciApp, /id\s*=\s*var\.ci_access_policy_id\s+precedence\s*=\s*1/u);
+assert.match(ciApp, /id\s*=\s*var\.access_policy_id\s+precedence\s*=\s*2/u);
+assert.match(terraformMain, /ingress\s*=\s*concat\(\[\s*for key in sort\(keys\(local\.ci_identity_routes\)\)/u);
+assert.match(terraformMain, /path\s*=\s*local\.ci_identity_routes\[key\]\.ingress_path/u);
+assert.match(terraformMain, /aud_tag\s*=\s*\[\s*cloudflare_zero_trust_access_application\.ci_identity\[key\]\.aud,\s*cloudflare_zero_trust_access_application\.codexia\.aud\s*\]/u);
+assert.match(terraformMain, /aud_tag\s*=\s*\[cloudflare_zero_trust_access_application\.codexia\.aud\]/u);
+assert.match(terraformVariables, /var\.ci_access_policy_id != var\.access_policy_id/u);
+const frontendWorkflow = await read('.github/workflows/frontend-release.yml');
+assert.match(frontendWorkflow, /live-preflight:[\s\S]*?run: node scripts\/verify-frontend-compatibility\.mjs probe/u);
+assert.match(frontendWorkflow, /needs: \[live-preflight, build, certify\]/u);
 assert.match(terraformVariables, /condition\s*=\s*contains\(\["http:\/\/codexia-api:3000", "http:\/\/codexia-api-proxy:3000"\], var\.origin_service\)/u);
 
 assert.match(apiSource, /style-src-attr 'unsafe-inline'/u);
