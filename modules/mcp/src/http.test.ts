@@ -202,14 +202,15 @@ test("SDK Streamable HTTP transport lists and invokes tools through the host act
     const { tools } = await client.listTools();
     const names = new Set(tools.map((tool) => tool.name));
     const sourceTools = [
-      "get_entity", "get_scene_context", "suggest_rewrite", "list_entities", "search", "get_volume_tree",
+      "get_entity", "get_scene_context", "list_entities", "search", "get_volume_tree",
       "reload", "analyze_manuscript", "check_stylometric_deviations", "check_plot_semantics", "get_diagnostics",
       "get_thread_status", "get_dialogue", "format_manuscript", "create_scene", "update_entity",
       "check_consistency", "check_continuity", "compute_cooccurrence", "check_voice_consistency",
       "check_style_deviations", "get_writing_context", "get_context_manifest", "lint_manuscript",
       "submit_change_set", "get_change_set", "list_change_sets",
     ];
-    assert.equal(sourceTools.length, 27);
+    assert.equal(sourceTools.length, 26);
+    assert.equal(names.has("suggest_rewrite"), false);
     assert.ok(sourceTools.every((name) => names.has(name)));
     assert.ok(names.has("discover_actions"));
     assert.ok(names.has("get_status"));

@@ -35,6 +35,6 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Performance measurement | [Performance](performance/README.md) |
 | Release gates | [OCI releases](verification/OCI-RELEASE.md) |
 
-For architecture proposals and historical migration context, see [Reboot RFC](architecture/CODEXIA-REBOOT-RFC.md) and [Integrated creative design](architecture/NEXT-DEVELOPMENT-PLAN.md). They do not override accepted contracts. The topic owners above are the canonical references; update the owning document rather than adding a competing specification.
+For architecture proposals, see [Integrated creative design](architecture/NEXT-DEVELOPMENT-PLAN.md). The [historical reboot rationale](architecture/CODEXIA-REBOOT-RFC.md) points to the archived source evidence. Neither overrides accepted contracts. The topic owners above are the canonical references; update the owning document rather than adding a competing specification.
 
 Documentation describes supported behavior, contracts, procedures and explicitly identified design proposals. Execution results belong to test reports and build artifacts; contribution rules are in [CONTRIBUTING.md](../CONTRIBUTING.md).

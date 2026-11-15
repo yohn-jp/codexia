@@ -32,7 +32,7 @@ export interface WorkerSupervisorOptions {
   maxConcurrentJobs?: number;
   /** Maximum one-shot requests waiting for a process slot; defaults to 8 (64 MiB at the input bound). */
   maxQueuedJobs?: number;
-  /** Maximum live persistent worker processes; defaults to the eight installed module IDs. */
+  /** Maximum live persistent worker processes; defaults to 8 independently of the number of installed module IDs. */
   maxWorkerServices?: number;
   /** Maximum jobs dispatched to one persistent service; defaults to 1 to serialize model access. */
   maxConcurrentServiceJobs?: number;
