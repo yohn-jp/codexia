@@ -1,0 +1,16 @@
+name: Repository Audit Refresh Signal
+on:
+  push:
+    branches-ignore: [main]
+  create:
+
+permissions: {}
+
+jobs:
+  signal:
+    if: github.event_name == 'push' || (github.event.ref_type == 'branch' && github.event.ref != 'main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Signal the default-branch audit publisher
+        run: echo 'Remote branch inventory may have changed.'
