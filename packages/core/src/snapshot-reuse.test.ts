@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { SnapshotReader } from "@codexia/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import type {
@@ -327,7 +328,9 @@ test("startup certifies equivalent legacy snapshots and transitions only incompa
   const store = new CoreStore({persistence});
   await assert.rejects(store.reader(incompatible.project.id), {code:"snapshot_unavailable"});
   assert.equal((await store.observe(incompatible.project.id)).snapshot.projectVersion, incompatible.project.version);
+  const exactFiles = async (reader: SnapshotReader) => Promise.all((await reader.list("")).map(async path => ({path, file:await reader.read(path,"base64")})));
   const oldPinned = await store.reader(incompatible.project.id,incompatible.snapshot);
+  const oldFiles = await exactFiles(oldPinned);
   assert.equal(await oldPinned.read(incompatible.knowledgePath), null);
   await store.prepareSnapshotReuse(compatible.project.id);
   assert.deepEqual((await store.reader(compatible.project.id)).snapshot, compatible.snapshot);
@@ -346,12 +349,12 @@ test("startup certifies equivalent legacy snapshots and transitions only incompa
   assert.equal(current.snapshot.projectVersion,incompatible.project.version+1);
   assert.ok(await current.read(incompatible.knowledgePath));
   assert.equal(await (await store.reader(incompatible.project.id,incompatible.snapshot)).read(incompatible.knowledgePath),null);
-  assert.deepEqual(await (await store.reader(incompatible.project.id,incompatible.snapshot)).listRevisions(),await oldPinned.listRevisions());
+  assert.deepEqual(await exactFiles(await store.reader(incompatible.project.id,incompatible.snapshot)),oldFiles);
   await store.prepareSnapshotReuse(incompatible.project.id);
   assert.equal((await store.observe(incompatible.project.id)).snapshot.projectVersion,incompatible.project.version+1);
   const restarted = new CoreStore({persistence});
   assert.deepEqual((await restarted.reader(incompatible.project.id)).snapshot,current.snapshot);
-  assert.deepEqual(await (await restarted.reader(incompatible.project.id,incompatible.snapshot)).listRevisions(),await oldPinned.listRevisions());
+  assert.deepEqual(await exactFiles(await restarted.reader(incompatible.project.id,incompatible.snapshot)),oldFiles);
   const lazyCompatible = await seedLegacy(true);
   assert.deepEqual((await restarted.reader(lazyCompatible.project.id)).snapshot,lazyCompatible.snapshot);
   assert.equal((await restarted.observe(lazyCompatible.project.id)).snapshot.projectVersion,lazyCompatible.project.version);
