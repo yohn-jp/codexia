@@ -56,6 +56,12 @@ jobs:
         run: pnpm run verify:deployment
       - name: Typecheck and test the Static Assets Worker
         run: pnpm run typecheck:deployment && pnpm run test:deployment
+      - name: Check standalone Ansible configuration
+        run: |
+          python3 -m venv "$RUNNER_TEMP/codexia-ansible"
+          "$RUNNER_TEMP/codexia-ansible/bin/pip" install ansible-core==2.19.4
+          "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i deploy/ansible/inventory.example.yml deploy/ansible/site.yml --syntax-check
+          ANSIBLE_PLAYBOOK="$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" bash deploy/ansible/test-preflight.sh
       - name: Check all Terraform files
         uses: hashicorp/setup-terraform@v4
         with:

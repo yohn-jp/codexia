@@ -178,6 +178,26 @@ export class PodmanStandaloneHost{
     for(const field of ['version','sourceSha','platform','profile','migrationFingerprint','persistenceFormat','apiEpoch'])assert.equal(identity[field],release[field],'Artifact '+field+' mismatch');
     assert.equal(run('podman',[...isolated,'node',release.image,'--input-type=module','-e',fingerprintCode]),release.migrationFingerprint);
   }
+  async assertLegacyRelease(value){
+    const release=validateUpdateRelease(value);
+    const legacy=inspect('codexia-api');
+    assert.ok(legacy?.State.Running,'Legacy writer must be running the selected release');
+    for(const slot of ['blue','green'])assert.ok(!inspect(name(slot))?.State.Running,'Unexpected running slot writer');
+    const image=JSON.parse(run('podman',['image','inspect',release.image]))[0];
+    const imageId=id=>typeof id==='string'?id.replace(/^sha256:/u,''):'';
+    const actual=imageId(legacy.Image);
+    assert.match(actual,/^[a-f0-9]{64}$/u,'Legacy image ID is unobservable');
+    assert.equal(actual,imageId(image.Id),'Legacy writer image differs from selected immutable release');
+    assert.ok(image.RepoDigests?.includes(release.image),'Selected release digest is unobservable');
+    const version=JSON.parse(run('podman',['exec','codexia-api','node','--input-type=module','-e',readyCode],{timeout:10000}));
+    assertVersion(version,release,this.authEnvironment.CODEXIA_BROWSER_AUTH);
+    const env=legacy.Config?.Env;
+    assert.ok(Array.isArray(env),'Legacy browser auth settings are unobservable');
+    for(const [key,value] of Object.entries(this.authEnvironment)){
+      const actual=env.find(entry=>entry.startsWith(key+'='))?.slice(key.length+1);
+      assert.equal(actual??(key==='CODEXIA_BROWSER_AUTH'?'token':undefined),value,'Legacy browser authentication configuration mismatch: '+key);
+    }
+  }
   async waitReady(container,release){
     const deadline=Date.now()+90000;
     for(;;){

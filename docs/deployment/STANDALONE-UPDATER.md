@@ -3,6 +3,8 @@
 The rootless host controller is opt-in. It is not a database migration tool and is not used for Hosted. It requires the signed stable channel, embedded backend identity, migration fingerprint, and deployed frontend identity contracts. Do not activate before those dependencies have converged and the target VM acceptance has passed.
  
 ## Topology and bootstrap
+
+For declarative adoption of an existing VM, use [Infrastructure as code](IAC.md). The manual procedure below remains the operational contract and recovery reference.
  
 - Install the verified source tree under /opt/codexia-updater, owned by the deployment operator, with Node.js 22+, Podman/Quadlet, systemd user services, and flock.
 - Retain the existing codexia-db service, codexia and codexia-data networks, and codexia-data/history volumes. Provision codexia_preflight using deploy/updater/provision-preflight-role.sql as a dedicated non-owner reader. Set its password via a protected psql variable, and create the Podman secret codexia-postgres-preflight-password. Never reuse the application writer password or expose the preflight role externally. Verify read-only privileges and that it cannot write persistent canon tables.
@@ -15,7 +17,7 @@ The rootless host controller is opt-in. It is not a database migration tool and 
  
 Every poll validates freshness and signature, persists the checkpoint, selects a compatible immutable release, verifies the pulled artifact and packaged schema, and runs isolated preflight with no shared writable volumes or writer credential. The actual frontend identity and signed channel are rechecked before stopping the old writer. Admission is blocked before old-writer shutdown; no new writer starts until the old writer is stopped and absence of writers is observed. The proxy is switched only after the new writer is ready. Health, routed version and authenticated persistence probes run during observation. An unhealthy candidate is fenced before restoration. An unexpected topology blocks traffic and pauses rather than guessing. A successful boot can use a locally cached verified installed artifact.
  
-Commands: status, pause, resume, tick, boot, rollback. Explicit rollback requires an authenticated, still-published compatible previous release. The same exclusive cutover is used; failed digests are suppressed. Failed or interrupted transitions reconcile to the prior recorded writer, or stay blocked if exclusive ownership cannot be established. A major/schema-changing upgrade remains an operator-controlled maintenance procedure.
+Commands: status, verify (read-only serving probes), pause, resume, tick, boot, rollback. Before initial cutover use verify-legacy with the installed-release record to validate the running legacy writer. For explicit maintenance acceptance only, acceptance-update and acceptance-rollback require a disabled, paused controller and retain pause; keep the polling timer inactive. Explicit rollback requires an authenticated, still-published compatible previous release. The same exclusive cutover is used; failed digests are suppressed. Failed or interrupted transitions reconcile to the prior recorded writer, or stay blocked if exclusive ownership cannot be established. A major/schema-changing upgrade remains an operator-controlled maintenance procedure.
  
 ## Acceptance (target VM required)
  

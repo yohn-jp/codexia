@@ -64,3 +64,15 @@ test('durable state round trips with its authenticated checkpoint',async()=>{
  const {controller,state}=fixture();const result=await controller.tick(state);const dir=await mkdtemp(path.join(tmpdir(),'codexia-updater-'));
  try{const file=path.join(dir,'controller.json');await atomicWrite(file,JSON.stringify(result));assert.deepEqual(await loadControllerState(file),result)}finally{await rm(dir,{recursive:true,force:true})}
 });
+
+test('manual acceptance updates and rolls back without enabling normal polling',async()=>{
+ const {h,controller,state,persisted}=fixture();
+ let result=await controller.tick({...state,paused:true},{manualAcceptance:true});
+ assert.equal(result.installed.image,next.image);assert.equal(result.paused,true);assert.equal(persisted().paused,true);
+ result=await controller.tick(result);
+ assert.equal(result.installed.image,next.image);assert.equal(result.paused,true);
+ result=await controller.tick(result,{manualRollback:true,manualAcceptance:true});
+ assert.equal(result.installed.image,old.image);assert.equal(result.paused,true);assert.equal(persisted().paused,true);
+ assert.deepEqual(h.writers,[{slot:'blue',image:old.image}]);
+ await assert.rejects(controller.tick(state,{manualAcceptance:true}),/requires paused state/);
+});

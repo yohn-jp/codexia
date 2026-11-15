@@ -1,0 +1,69 @@
+---
+- name: Require a maintenance window and verified backup/runtime review
+  ansible.builtin.assert:
+    that:
+      - codexia_maintenance_approved | default(false) | bool
+      - codexia_installed_release_file is defined
+    fail_msg: Verify the offline backup and legacy runtime settings before approving maintenance.
+- name: Install the selected signed-channel release record
+  ansible.builtin.copy:
+    src: "{{ codexia_installed_release_file }}"
+    dest: "{{ config_dir }}/installed-release.json"
+    mode: '0600'
+- name: Verify signed release, image, deployed frontend and running legacy API before stopping it
+  ansible.builtin.command:
+    argv: [sh, "{{ updater }}", verify-legacy, "{{ config_path }}", "{{ config_dir }}/installed-release.json"]
+  changed_when: false
+- name: Inspect legacy Quadlet
+  ansible.builtin.stat:
+    path: "{{ quadlet_dir }}/codexia-api.container"
+  register: legacy
+- name: Require the running legacy writer's Quadlet
+  ansible.builtin.assert:
+    that: legacy.stat.exists
+- name: Save legacy Quadlet outside the generator directory
+  ansible.builtin.copy:
+    src: "{{ quadlet_dir }}/codexia-api.container"
+    dest: "{{ config_dir }}/legacy-api.container"
+    remote_src: true
+    mode: '0600'
+    force: false
+  when: legacy.stat.exists
+- name: Verify saved legacy Quadlet matches the current source before removing it
+  ansible.builtin.command:
+    argv: [cmp, -s, "{{ quadlet_dir }}/codexia-api.container", "{{ config_dir }}/legacy-api.container"]
+  changed_when: false
+- name: Stop legacy writer
+  ansible.builtin.systemd_service:
+    name: codexia-api.service
+    scope: user
+    state: stopped
+  when: legacy.stat.exists
+- name: Remove legacy Quadlet after stopping it
+  ansible.builtin.file:
+    path: "{{ quadlet_dir }}/codexia-api.container"
+    state: absent
+- name: Remove only legacy dependency from existing Tunnel Quadlet
+  ansible.builtin.replace:
+    path: "{{ quadlet_dir }}/codexia-tunnel.container"
+    regexp: '^(Requires|After)=codexia-api\.service$'
+    replace: '\1=codexia-api-proxy.service'
+    backup: true
+- name: Reload rootless systemd
+  ansible.builtin.systemd_service:
+    scope: user
+    daemon_reload: true
+- name: Start the private proxy
+  ansible.builtin.systemd_service:
+    name: codexia-api-proxy.service
+    scope: user
+    state: started
+- name: Initialize via canonical locked controller (fences writers and validates preflight)
+  ansible.builtin.command:
+    argv: [sh, "{{ updater }}", init, "{{ config_path }}", "{{ config_dir }}/installed-release.json"]
+  changed_when: true
+- name: Start the existing Tunnel after removing its legacy writer dependency
+  ansible.builtin.systemd_service:
+    name: codexia-tunnel.service
+    scope: user
+    state: started
