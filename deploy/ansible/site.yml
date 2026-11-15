@@ -1,0 +1,73 @@
+---
+- name: Converge the standalone Codexia updater on an existing rootless VM
+  hosts: codexia
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    repo_root: "{{ playbook_dir }}/../.."
+    home: "{{ ansible_facts.user_dir }}"
+    config_dir: "{{ home }}/.config/codexia-updater"
+    state_dir: "{{ home }}/.local/state/codexia-updater"
+    quadlet_dir: "{{ home }}/.config/containers/systemd"
+    unit_dir: "{{ home }}/.config/systemd/user"
+    source_dir: /opt/codexia-updater
+    config_path: "{{ config_dir }}/config.json"
+    updater: "{{ source_dir }}/deploy/updater/codexia-updater"
+    updater_env:
+      XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.user_uid }}"
+      XDG_STATE_HOME: "{{ home }}/.local/state"
+    desired_config:
+      format: codexia-standalone-updater/v1
+      enabled: false
+      stateFile: "{{ state_dir }}/controller.json"
+      routeFile: "{{ state_dir }}/route"
+      quadletDirectory: "{{ quadlet_dir }}"
+      publicKeyFile: "{{ config_dir }}/channel-public.pem"
+      githubTokenFile: "{{ config_dir }}/github-read-token"
+      frontendIdentityUrl: "{{ codexia_frontend_origin }}/desktop/update-identity.json"
+      accessClientIdFile: "{{ config_dir }}/access-client-id"
+      accessClientSecretFile: "{{ config_dir }}/access-client-secret"
+      observeMilliseconds: 300000
+      initialSlot: blue
+      browserAuth: "{{ codexia_browser_auth }}"
+  environment: "{{ updater_env }}"
+  tasks:
+    - name: Require explicit standalone deployment inputs
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.user_uid | int != 0
+          - codexia_stage in ['prepare', 'initialize', 'enable', 'verify']
+          - codexia_frontend_origin is match('^https://[a-z0-9.-]+(:[0-9]+)?$')
+          - codexia_proxy_image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+          - codexia_browser_auth.mode in ['token', 'cloudflare-access']
+    - name: Check rootless prerequisites (do not replace the existing host installation)
+      ansible.builtin.command:
+        argv: [sh, -ec, 'command -v podman; command -v flock; node -e "if (parseInt(process.versions.node,10) < 22) process.exit(1)"']
+      changed_when: false
+      check_mode: false
+    - name: Check rootless systemd
+      ansible.builtin.command:
+        argv: [systemctl, --user, show, --property=Version]
+      changed_when: false
+      check_mode: false
+    - name: Check for durable controller state
+      ansible.builtin.stat:
+        path: "{{ state_dir }}/controller.json"
+      register: journal
+    - name: Prepare an uninitialized host
+      ansible.builtin.include_tasks: prepare.yml
+      when: codexia_stage in ['prepare', 'initialize'] and not journal.stat.exists
+    - name: Initialize the exclusive writer
+      ansible.builtin.include_tasks: initialize.yml
+      when: codexia_stage == 'initialize' and not journal.stat.exists and not ansible_check_mode
+    - name: Require an existing controller for verify and enable
+      ansible.builtin.assert:
+        that: journal.stat.exists
+      when: codexia_stage in ['verify', 'enable']
+    - name: Verify initialized controller
+      ansible.builtin.include_tasks: verify.yml
+      when: journal.stat.exists and codexia_stage in ['prepare', 'initialize', 'verify', 'enable']
+    - name: Enable automatic updates only after live acceptance
+      ansible.builtin.include_tasks: enable.yml
+      when: codexia_stage == 'enable' and not ansible_check_mode

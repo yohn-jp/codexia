@@ -1,0 +1,101 @@
+---
+- name: Require a maintenance window and verified backup/runtime review
+  ansible.builtin.assert:
+    that:
+      - codexia_maintenance_approved | default(false) | bool
+      - codexia_installed_release_file is defined
+    fail_msg: Verify the offline backup and legacy runtime settings before approving maintenance.
+- name: Install the selected signed-channel release record
+  ansible.builtin.copy:
+    src: "{{ codexia_installed_release_file }}"
+    dest: "{{ config_dir }}/installed-release.json"
+    mode: '0600'
+- name: Verify signed release, image and deployed frontend before stopping legacy writer
+  ansible.builtin.command:
+    argv:
+      - node
+      - --input-type=module
+      - -e
+      - |
+        import assert from 'node:assert/strict';
+        import {readFile} from 'node:fs/promises';
+        import {PodmanStandaloneHost} from './deploy/updater/standalone-host.mjs';
+        import {verifyUpdateChannel} from './scripts/update-channel.mjs';
+        import {validateUpdateRelease} from './scripts/update-release-policy.mjs';
+        const config=JSON.parse(await readFile(process.argv[1],'utf8'));
+        const release=validateUpdateRelease(JSON.parse(await readFile(process.argv[2],'utf8')));
+        const host=new PodmanStandaloneHost(config);
+        const channel=verifyUpdateChannel(await host.fetchChannel(),await readFile(config.publicKeyFile,'utf8'),null);
+        assert.ok(channel.payload.releases.some(r=>r.state==='published'&&JSON.stringify(r)===JSON.stringify(release)));
+        await host.pullAndVerify(release);
+        const ui=await host.frontendIdentity();
+        assert.equal(ui.apiEpoch,release.apiEpoch);
+        assert.equal(ui.profile,release.profile);
+      - "{{ config_path }}"
+      - "{{ config_dir }}/installed-release.json"
+    chdir: "{{ source_dir }}"
+  changed_when: false
+- name: Inspect legacy Quadlet
+  ansible.builtin.stat:
+    path: "{{ quadlet_dir }}/codexia-api.container"
+  register: legacy
+- name: Inspect saved legacy Quadlet
+  ansible.builtin.stat:
+    path: "{{ config_dir }}/legacy-api.container"
+  register: legacy_backup
+- name: Require known legacy configuration or its saved copy
+  ansible.builtin.assert:
+    that: legacy.stat.exists or legacy_backup.stat.exists
+- name: Save legacy Quadlet outside the generator directory
+  ansible.builtin.copy:
+    src: "{{ quadlet_dir }}/codexia-api.container"
+    dest: "{{ config_dir }}/legacy-api.container"
+    remote_src: true
+    mode: '0600'
+    force: false
+  when: legacy.stat.exists
+- name: Stop legacy writer
+  ansible.builtin.systemd_service:
+    name: codexia-api.service
+    scope: user
+    state: stopped
+  when: legacy.stat.exists
+- name: Remove legacy Quadlet after stopping it
+  ansible.builtin.file:
+    path: "{{ quadlet_dir }}/codexia-api.container"
+    state: absent
+- name: Remove only legacy dependency from existing Tunnel Quadlet
+  ansible.builtin.replace:
+    path: "{{ quadlet_dir }}/codexia-tunnel.container"
+    regexp: '^(Requires|After)=codexia-api\.service$'
+    replace: '\1=codexia-api-proxy.service'
+    backup: true
+- name: Reload rootless systemd
+  ansible.builtin.systemd_service:
+    scope: user
+    daemon_reload: true
+- name: Start the private proxy
+  ansible.builtin.systemd_service:
+    name: codexia-api-proxy.service
+    scope: user
+    state: started
+- name: Initialize via canonical locked controller (fences writers and validates preflight)
+  ansible.builtin.command:
+    argv: [sh, "{{ updater }}", init, "{{ config_path }}", "{{ config_dir }}/installed-release.json"]
+  changed_when: true
+- name: Install boot and poll units after successful initialization
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/updater/{{ item }}.example"
+    dest: "{{ unit_dir }}/{{ item }}"
+    mode: '0600'
+  loop:
+    - codexia-updater-boot.service
+    - codexia-updater.service
+    - codexia-updater.timer
+- name: Enable recovery on reboot but leave polling disabled
+  ansible.builtin.systemd_service:
+    name: codexia-updater-boot.service
+    scope: user
+    daemon_reload: true
+    enabled: true
+    state: started

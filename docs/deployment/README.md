@@ -59,6 +59,8 @@ The Cloudflare Terraform example creates an Access application, remotely managed
 
 ## VM environment and Secrets
 
+For declarative standalone updater adoption, see [Infrastructure as code](IAC.md).
+
 `deploy/quadlet/codexia-api.container` defines these runtime values:
 
 | Variable | Owner | Purpose |

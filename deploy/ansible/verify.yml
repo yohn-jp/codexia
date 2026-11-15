@@ -1,0 +1,25 @@
+---
+- name: Read controller and observed topology under the canonical lock
+  ansible.builtin.command:
+    argv: [sh, "{{ updater }}", status, "{{ config_path }}"]
+  register: controller_status
+  changed_when: false
+  check_mode: false
+- name: Validate the serving topology and journal
+  ansible.builtin.assert:
+    that:
+      - status.state.journal.phase in ['idle', 'committed']
+      - status.state.lastError is none
+      - status.observed.writers | length == 1
+      - status.observed.route == status.state.journal.active.slot
+      - status.observed.writers[0].slot == status.state.journal.active.slot
+      - status.observed.writers[0].image == status.state.installed.image
+  vars:
+    status: "{{ controller_status.stdout | from_json }}"
+- name: Verify the saved configuration has not drifted
+  ansible.builtin.slurp:
+    src: "{{ config_path }}"
+  register: saved_config
+- name: Refuse changes to an initialized controller outside maintenance
+  ansible.builtin.assert:
+    that: (saved_config.content | b64decode | from_json | combine({'enabled': false})) == desired_config
