@@ -5,6 +5,9 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readComponentVersion } from './component-release-version.mjs';
+import { selectLatestJobArtifact } from './ci-artifact-selection.mjs';
+import { downloadArtifact, extractArtifactFiles, MAX_ASSET_ARCHIVE, MAX_ASSET_BYTES } from './download-ci-artifacts.mjs';
+import { collectGitHubPages } from './release-policy.mjs';
 import { assertFrontendIdentity } from './verify-frontend-compatibility.mjs';
 
 const repository = 'yohn-jp/codexia';
@@ -19,35 +22,38 @@ function positiveInteger(value, label) {
 
 /**
  * Confirms the current workflow run and uploaded artifact are the exact producer
- * selected by the build job output.
+ * selected by the build job output, including partial and full reruns.
  * @param {unknown} run
  * @param {unknown} artifact
- * @param {{runId:string|number,runAttempt:string|number,sourceSha:string,artifactId:string|number,artifactName:string,artifactDigest:string}} expected
+ * @param {unknown[]} jobs
+ * @param {{runId:string|number,currentAttempt:string|number,producerAttempt:string|number,sourceSha:string,artifactId:string|number,artifactName:string,artifactDigest:string}} expected
  */
-export function assertFrontendArtifactEvidence(run, artifact, expected) {
+export function assertFrontendArtifactEvidence(run, artifact, jobs, expected) {
   assert.ok(run && typeof run === 'object' && !Array.isArray(run), 'Frontend producer workflow run metadata is invalid');
   assert.ok(artifact && typeof artifact === 'object' && !Array.isArray(artifact), 'Frontend artifact metadata is invalid');
   assert.match(expected.sourceSha, shaPattern, 'Frontend source SHA is invalid');
   assert.match(expected.artifactDigest, digestPattern, 'Frontend artifact digest is invalid');
   const runId = String(positiveInteger(expected.runId, 'Frontend producer run ID'));
-  const runAttempt = positiveInteger(expected.runAttempt, 'Frontend producer run attempt');
+  const currentAttempt = positiveInteger(expected.currentAttempt, 'Frontend workflow run attempt');
+  const producerAttempt = positiveInteger(expected.producerAttempt, 'Frontend producer job attempt');
   const artifactId = positiveInteger(expected.artifactId, 'Frontend artifact ID');
 
   assert.equal(String(run.id), runId, 'Frontend producer run ID mismatch');
-  assert.equal(run.run_attempt, runAttempt, 'Frontend producer run attempt mismatch');
+  assert.equal(run.run_attempt, currentAttempt, 'Frontend workflow run attempt mismatch');
   assert.equal(run.event, 'push', 'Frontend producer event must be a main push');
   assert.equal(run.head_branch, 'main', 'Frontend producer branch must be main');
   assert.equal(run.head_sha, expected.sourceSha, 'Frontend producer source SHA mismatch');
 
-  assert.equal(artifact.id, artifactId, 'Frontend artifact ID mismatch');
-  assert.equal(artifact.name, expected.artifactName, 'Frontend artifact name mismatch');
-  assert.equal(artifact.expired, false, 'Frontend artifact is expired');
-  assert.ok(Number.isSafeInteger(artifact.size_in_bytes) && artifact.size_in_bytes > 0, 'Frontend artifact is empty or has invalid size');
+  assert.equal(expected.artifactName, `codexia-frontend-${expected.sourceSha}-attempt-${producerAttempt}`, 'Frontend artifact name does not bind the producer attempt');
+  const selected = selectLatestJobArtifact(expected.artifactName, 'Build and verify UI assets', [artifact], jobs, {
+    runId,
+    sourceSha: expected.sourceSha,
+  });
+  assert.equal(selected.id, artifactId, 'Frontend artifact ID does not match the build job output');
+  const producerJobs = jobs.filter(job => job && typeof job === 'object' && job.name === 'Build and verify UI assets');
+  assert.equal(producerJobs.length, 1, 'Expected exactly one latest frontend artifact producer job');
+  assert.equal(producerJobs[0].run_attempt, producerAttempt, 'Frontend artifact producer attempt mismatch');
   assert.equal(artifact.digest, `sha256:${expected.artifactDigest}`, 'Frontend artifact digest mismatch');
-  assert.ok(artifact.workflow_run && typeof artifact.workflow_run === 'object' && !Array.isArray(artifact.workflow_run), 'Frontend artifact producer binding is missing');
-  assert.equal(String(artifact.workflow_run.id), runId, 'Frontend artifact belongs to a different producer run');
-  assert.equal(artifact.workflow_run.head_branch, 'main', 'Frontend artifact producer branch mismatch');
-  assert.equal(artifact.workflow_run.head_sha, expected.sourceSha, 'Frontend artifact source SHA mismatch');
 }
 
 /** @param {string} url @param {string} token @param {typeof fetch} fetchImpl */
@@ -82,21 +88,29 @@ export async function verifyFrontendArtifact({ env = process.env, fetchImpl = fe
 
   const expected = {
     runId: positiveInteger(env.GITHUB_RUN_ID, 'Frontend producer run ID'),
-    runAttempt: positiveInteger(env.GITHUB_RUN_ATTEMPT, 'Frontend producer run attempt'),
+    currentAttempt: positiveInteger(env.GITHUB_RUN_ATTEMPT, 'Frontend workflow run attempt'),
+    producerAttempt: positiveInteger(env.CODEXIA_FRONTEND_PRODUCER_ATTEMPT, 'Frontend producer job attempt'),
     sourceSha: env.GITHUB_SHA,
     artifactId: positiveInteger(env.CODEXIA_FRONTEND_ARTIFACT_ID, 'Frontend artifact ID'),
     artifactName: env.CODEXIA_FRONTEND_ARTIFACT_NAME,
     artifactDigest: env.CODEXIA_FRONTEND_ARTIFACT_DIGEST,
   };
-  assert.equal(expected.artifactName, `codexia-frontend-${expected.sourceSha}`, 'Frontend artifact name is not source-addressed');
+  assert.equal(expected.artifactName, `codexia-frontend-${expected.sourceSha}-attempt-${expected.producerAttempt}`, 'Frontend artifact name does not bind its source and producer attempt');
   assert.match(expected.artifactDigest ?? '', digestPattern, 'Frontend artifact digest is invalid');
 
   const apiBase = `https://api.github.com/repos/${repository}/actions`;
-  const [run, artifact] = await Promise.all([
+  const [run, artifact, jobs] = await Promise.all([
     githubJson(`${apiBase}/runs/${expected.runId}`, token, fetchImpl),
     githubJson(`${apiBase}/artifacts/${expected.artifactId}`, token, fetchImpl),
+    collectGitHubPages((page, perPage) => githubJson(`${apiBase}/runs/${expected.runId}/jobs?filter=latest&per_page=${perPage}&page=${page}`, token, fetchImpl), 'jobs'),
   ]);
-  assertFrontendArtifactEvidence(run, artifact, expected);
+  assertFrontendArtifactEvidence(run, artifact, jobs, expected);
+
+  const artifactBytes = await downloadArtifact(artifact, repository, token, fetchImpl, {maxArchive:MAX_ASSET_ARCHIVE});
+  await extractArtifactFiles(artifactBytes, fileURLToPath(new URL('../app/dist/', import.meta.url)), {
+    maxArchive:MAX_ASSET_ARCHIVE,
+    maxUncompressed:MAX_ASSET_BYTES,
+  });
 
   const identity = assertFrontendIdentity(JSON.parse(readFileSync(new URL('../app/dist/desktop/update-identity.json', import.meta.url), 'utf8')));
   const apiEpoch = JSON.parse(readFileSync(new URL('../deploy/frontend-compatibility.json', import.meta.url), 'utf8')).apiEpoch;
@@ -109,7 +123,7 @@ export async function verifyFrontendArtifact({ env = process.env, fetchImpl = fe
 
 async function main() {
   const artifact = await verifyFrontendArtifact();
-  console.log(`Verified frontend artifact ${artifact.artifactId} from producer run ${process.env.GITHUB_RUN_ID}, source ${artifact.sourceSha}, version ${artifact.version}.`);
+  console.log(`Verified frontend artifact ${artifact.artifactId} from producer run ${process.env.GITHUB_RUN_ID} attempt ${process.env.CODEXIA_FRONTEND_PRODUCER_ATTEMPT}, source ${artifact.sourceSha}, version ${artifact.version}.`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

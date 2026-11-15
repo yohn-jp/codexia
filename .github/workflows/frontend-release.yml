@@ -17,6 +17,8 @@ on:
       - deploy/cloudflare/ui-routes.json
       - deploy/frontend-compatibility.json
       - scripts/ci-contract.mjs
+      - scripts/ci-artifact-selection.mjs
+      - scripts/download-ci-artifacts*.mjs
       - scripts/release-policy.mjs
       - scripts/component-release-version*.mjs
       - scripts/record-component-release.mjs
@@ -49,6 +51,8 @@ on:
       - deploy/cloudflare/ui-routes.json
       - deploy/frontend-compatibility.json
       - scripts/ci-contract.mjs
+      - scripts/ci-artifact-selection.mjs
+      - scripts/download-ci-artifacts*.mjs
       - scripts/release-policy.mjs
       - scripts/component-release-version*.mjs
       - scripts/record-component-release.mjs
@@ -77,6 +81,8 @@ jobs:
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
       artifact-digest: ${{ steps.upload.outputs.artifact-digest }}
+      artifact-name: ${{ steps.producer.outputs.artifact-name }}
+      producer-attempt: ${{ steps.producer.outputs.attempt }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -107,11 +113,17 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
       - name: Exercise actual static asset server and browser entrypoints
         run: node edge/frontend/test/static-smoke.mjs
+      - name: Identify immutable frontend artifact for this producer attempt
+        id: producer
+        if: github.event_name == 'push'
+        run: |
+          echo "attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          echo "artifact-name=codexia-frontend-$GITHUB_SHA-attempt-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         id: upload
         if: github.event_name == 'push'
         with:
-          name: codexia-frontend-${{ github.sha }}
+          name: ${{ steps.producer.outputs.artifact-name }}
           path: app/dist
           if-no-files-found: error
           retention-days: 2
@@ -156,16 +168,13 @@ jobs:
           node-version: '24.22.0'
       - name: Install pinned Wrangler
         run: npm ci --prefix edge/frontend
-      - uses: actions/download-artifact@v4
-        with:
-          artifact-ids: ${{ needs.build.outputs.artifact-id }}
-          path: app/dist
       - name: Verify exact frontend artifact provenance
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_FRONTEND_ARTIFACT_ID: ${{ needs.build.outputs.artifact-id }}
           CODEXIA_FRONTEND_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact-digest }}
-          CODEXIA_FRONTEND_ARTIFACT_NAME: codexia-frontend-${{ github.sha }}
+          CODEXIA_FRONTEND_ARTIFACT_NAME: ${{ needs.build.outputs.artifact-name }}
+          CODEXIA_FRONTEND_PRODUCER_ATTEMPT: ${{ needs.build.outputs.producer-attempt }}
         run: node scripts/verify-frontend-artifact.mjs
       - name: Verify live backend API compatibility before switching UI
         id: compatibility

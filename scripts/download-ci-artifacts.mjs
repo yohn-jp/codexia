@@ -3,13 +3,15 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { inflateRawSync } from 'node:zlib';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const MAX_ARCHIVE = 16 * 1024 * 1024;
 const MAX_JSON = 4 * 1024 * 1024;
+export const MAX_ASSET_ARCHIVE = 128 * 1024 * 1024;
+export const MAX_ASSET_BYTES = 256 * 1024 * 1024;
 
 export function selectedArtifacts(inventory, ids, identity, kind) {
   assert.ok(kind === 'plan' || kind === 'evidence', 'Invalid artifact kind');
@@ -63,6 +65,144 @@ export async function downloadArtifact(artifact, repository, token, request = fe
   const bytes = Buffer.concat(chunks);
   assert.equal(`sha256:${createHash('sha256').update(bytes).digest('hex')}`, artifact.digest, 'Artifact digest mismatch');
   return bytes;
+}
+
+export function validateZipEntryPath(name) {
+  assert.ok(typeof name === 'string' && name.length > 0, 'Empty ZIP entry path');
+  assert.ok(!name.includes('\\') && !name.includes('\0') && !name.startsWith('/') && !/^[a-z]:/iu.test(name), 'Unsafe ZIP entry path');
+  const isDirectory = name.endsWith('/');
+  const normalized = isDirectory ? name.slice(0, -1) : name;
+  const parts = normalized.split('/');
+  assert.ok(parts.length > 0 && parts.every(part => part.length > 0 && part !== '.' && part !== '..'), 'Unsafe ZIP entry path');
+  return {path: parts.join('/'), isDirectory};
+}
+
+/**
+ * Extracts a verified asset archive without trusting archive paths or link metadata.
+ * The caller must verify the complete archive digest before calling this function.
+ * @param {Buffer} bytes
+ * @param {string} destination
+ * @param {{maxArchive?:number,maxUncompressed?:number}} limits
+ */
+export async function extractArtifactFiles(bytes, destination, {maxArchive = MAX_ASSET_ARCHIVE, maxUncompressed = MAX_ASSET_BYTES} = {}) {
+  assert.ok(Buffer.isBuffer(bytes) && bytes.length >= 22 && bytes.length <= maxArchive, 'Invalid or oversized ZIP archive');
+  assert.ok(Number.isSafeInteger(maxUncompressed) && maxUncompressed > 0, 'Invalid ZIP extraction limit');
+
+  let end = -1;
+  for (let at = bytes.length - 22; at >= Math.max(0, bytes.length - 22 - 0xffff); at--) {
+    if (bytes.readUInt32LE(at) === 0x06054b50 && at + 22 + bytes.readUInt16LE(at + 20) === bytes.length) { end = at; break; }
+  }
+  assert.ok(end >= 0, 'ZIP end record missing');
+  assert.equal(bytes.readUInt16LE(end + 4), 0, 'Multi-disk ZIP not supported');
+  assert.equal(bytes.readUInt16LE(end + 6), 0, 'Multi-disk ZIP not supported');
+  const count = bytes.readUInt16LE(end + 10);
+  assert.equal(bytes.readUInt16LE(end + 8), count, 'ZIP entry count mismatch');
+  assert.ok(count > 0 && count < 10_000, 'Invalid ZIP entry count');
+  const centralSize = bytes.readUInt32LE(end + 12);
+  const centralOffset = bytes.readUInt32LE(end + 16);
+  assert.ok(centralOffset + centralSize === end, 'Invalid ZIP central directory bounds');
+
+  /** @type {{path:string,isDirectory:boolean,flags:number,method:number,compressed:number,uncompressed:number,localOffset:number,name:string}[]} */
+  const entries = [];
+  const paths = new Set();
+  const localOffsets = new Set();
+  let totalUncompressed = 0;
+  let cursor = centralOffset;
+  const decoder = new TextDecoder('utf-8', {fatal:true});
+  for (let index = 0; index < count; index++) {
+    assert.ok(cursor + 46 <= end && bytes.readUInt32LE(cursor) === 0x02014b50, 'Invalid ZIP central entry');
+    const creator = bytes.readUInt16LE(cursor + 4) >>> 8;
+    const flags = bytes.readUInt16LE(cursor + 8);
+    const method = bytes.readUInt16LE(cursor + 10);
+    const compressed = bytes.readUInt32LE(cursor + 20);
+    const uncompressed = bytes.readUInt32LE(cursor + 24);
+    const nameLength = bytes.readUInt16LE(cursor + 28);
+    const extraLength = bytes.readUInt16LE(cursor + 30);
+    const commentLength = bytes.readUInt16LE(cursor + 32);
+    const diskStart = bytes.readUInt16LE(cursor + 34);
+    const externalAttributes = bytes.readUInt32LE(cursor + 38);
+    const localOffset = bytes.readUInt32LE(cursor + 42);
+    const next = cursor + 46 + nameLength + extraLength + commentLength;
+    assert.ok(next <= end, 'ZIP entry exceeds central directory');
+    assert.equal(diskStart, 0, 'Multi-disk ZIP not supported');
+    assert.ok(compressed !== 0xffffffff && uncompressed !== 0xffffffff && localOffset !== 0xffffffff, 'ZIP64 archives are not supported');
+    assert.ok((flags & 1) === 0 && [0, 8].includes(method), 'Unsupported ZIP entry encoding');
+    const name = decoder.decode(bytes.subarray(cursor + 46, cursor + 46 + nameLength));
+    const entryPath = validateZipEntryPath(name);
+    const mode = externalAttributes >>> 16;
+    const fileType = creator === 3 ? mode & 0o170000 : 0;
+    assert.ok(fileType === 0 || fileType === 0o100000 || fileType === 0o040000, 'ZIP symlinks and special files are not allowed');
+    if (fileType === 0o040000) assert.equal(entryPath.isDirectory, true, 'ZIP directory metadata mismatch');
+    if (fileType === 0o100000) assert.equal(entryPath.isDirectory, false, 'ZIP file metadata mismatch');
+    assert.ok(!paths.has(entryPath.path), 'Duplicate ZIP entry path');
+    assert.ok(!localOffsets.has(localOffset), 'Duplicate ZIP local entry offset');
+    paths.add(entryPath.path);
+    localOffsets.add(localOffset);
+    totalUncompressed += uncompressed;
+    assert.ok(totalUncompressed <= maxUncompressed, 'ZIP expands beyond configured limit');
+    if (entryPath.isDirectory) {
+      assert.equal(uncompressed, 0, 'ZIP directory entry contains data');
+      assert.equal(compressed, 0, 'ZIP directory entry contains compressed data');
+    }
+    entries.push({...entryPath,flags,method,compressed,uncompressed,localOffset,name});
+    cursor = next;
+  }
+  assert.equal(cursor, centralOffset + centralSize, 'ZIP central directory size mismatch');
+
+  const files = new Set(entries.filter(entry => !entry.isDirectory).map(entry => entry.path));
+  for (const entry of entries) {
+    const parts = entry.path.split('/');
+    for (let length = 1; length < parts.length; length++) {
+      assert.ok(!files.has(parts.slice(0, length).join('/')), 'ZIP file path is a parent of another entry');
+    }
+  }
+
+  /** @type {{start:number,end:number}[]} */
+  const ranges = [];
+  for (const entry of entries) {
+    const offset = entry.localOffset;
+    assert.ok(offset + 30 <= centralOffset && bytes.readUInt32LE(offset) === 0x04034b50, 'Invalid ZIP local entry');
+    assert.equal(bytes.readUInt16LE(offset + 6), entry.flags, 'ZIP flags mismatch');
+    assert.equal(bytes.readUInt16LE(offset + 8), entry.method, 'ZIP method mismatch');
+    const localNameLength = bytes.readUInt16LE(offset + 26);
+    const localExtraLength = bytes.readUInt16LE(offset + 28);
+    const dataStart = offset + 30 + localNameLength + localExtraLength;
+    const dataEnd = dataStart + entry.compressed;
+    assert.ok(dataEnd <= centralOffset, 'ZIP data exceeds central directory');
+    assert.equal(decoder.decode(bytes.subarray(offset + 30, offset + 30 + localNameLength)), entry.name, 'ZIP local entry name mismatch');
+    if ((entry.flags & 8) === 0) {
+      assert.equal(bytes.readUInt32LE(offset + 18), entry.compressed, 'ZIP compressed size mismatch');
+      assert.equal(bytes.readUInt32LE(offset + 22), entry.uncompressed, 'ZIP uncompressed size mismatch');
+    }
+    entry.dataStart = dataStart;
+    ranges.push({start:offset,end:dataEnd});
+  }
+  ranges.sort((left, right) => left.start - right.start);
+  for (let index = 1; index < ranges.length; index++) assert.ok(ranges[index - 1].end <= ranges[index].start, 'Overlapping ZIP entries');
+
+  const target = path.resolve(destination);
+  await mkdir(target, {recursive:true});
+  const targetInfo = await lstat(target);
+  assert.ok(targetInfo.isDirectory() && !targetInfo.isSymbolicLink(), 'ZIP extraction destination must be a real directory');
+  assert.equal((await readdir(target)).length, 0, 'ZIP extraction destination must be empty');
+  for (const entry of entries.filter(value => value.isDirectory).sort((a, b) => a.path.length - b.path.length)) {
+    await mkdir(path.join(target, ...entry.path.split('/')), {recursive:true});
+  }
+  const written = [];
+  let extractedTotal = 0;
+  for (const entry of entries.filter(value => !value.isDirectory)) {
+    const compressed = bytes.subarray(entry.dataStart, entry.dataStart + entry.compressed);
+    const remaining = maxUncompressed - extractedTotal;
+    const content = entry.method === 0 ? Buffer.from(compressed) : inflateRawSync(compressed, {maxOutputLength:Math.max(1, remaining)});
+    assert.equal(content.length, entry.uncompressed, 'ZIP uncompressed size mismatch');
+    extractedTotal += content.length;
+    const filename = path.join(target, ...entry.path.split('/'));
+    await mkdir(path.dirname(filename), {recursive:true});
+    await writeFile(filename, content, {flag:'wx',mode:0o644});
+    written.push(entry.path);
+  }
+  assert.ok(written.length > 0, 'ZIP archive contains no files');
+  return written;
 }
 
 // Profile artifacts run inside the immutable Playwright image, which has no unzip.
