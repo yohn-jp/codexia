@@ -949,8 +949,8 @@ const zukanSchema = z.object({
 });
 const stateEventSchema = z.object({ events: z.array(z.object({
   kind: z.enum(["location", "acquaintance", "ownership", "knowledge"]),
-  target: z.string().min(1), operation: z.string().min(1), before: z.record(z.unknown()).nullable(),
-  after: z.record(z.unknown()).nullable(), object: z.string().nullable(), payload: z.record(z.unknown()).default({}), evidenceQuote: z.string().min(1),
+  target: z.string().min(1), operation: z.string().min(1), before: z.record(z.string(), z.unknown()).nullable(),
+  after: z.record(z.string(), z.unknown()).nullable(), object: z.string().nullable(), payload: z.record(z.string(), z.unknown()).default({}), evidenceQuote: z.string().min(1),
 })).max(20) });
 const speakerSchema = z.object({ attributions: z.array(z.object({ sentenceIndex: z.number().int().positive(), speakerEntityId: z.string().nullable(), rationale: z.string().optional() })).max(500) });
 const reactionSchema = z.object({ questions: z.array(z.string()), expectations: z.array(z.string()), confusions: z.array(z.string()) });
