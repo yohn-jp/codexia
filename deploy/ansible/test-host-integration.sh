@@ -54,7 +54,13 @@ Driver=bridge
 Internal=true
 QUADLET
 rootless systemctl --user daemon-reload
-rootless systemctl --user start codexia-fixture-network.service
+if ! rootless systemctl --user start codexia-fixture-network.service; then
+  echo 'Quadlet network unit was not loaded; checking the source and generator output.' >&2
+  rootless stat -c '%n %U:%G %a' "$home/.config/containers/systemd/codexia-fixture.network"
+  rootless /usr/lib/systemd/user-generators/podman-user-generator -dryrun -v
+  rootless systemctl --user list-unit-files --no-legend
+  exit 1
+fi
 rootless /usr/bin/podman network exists codexia-fixture
 test "$(rootless /usr/bin/podman network inspect --format '{{.Internal}}' codexia-fixture)" = true
 rootless systemctl --user stop codexia-fixture-network.service
