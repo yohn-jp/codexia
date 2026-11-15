@@ -330,6 +330,7 @@
   background: color-mix(in srgb, var(--st-canvas) 94%, var(--paper));
 }
 .st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .st-workspace-panel-heading { display: none; }
+.st-studio-shell .st-workspace[data-layout-editing="true"] .st-workspace-panel[data-workspace-panel="editor"] .st-workspace-panel-heading { display: flex; }
 .st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .st-workspace-panel-body {
   background: var(--st-folio);
 }
