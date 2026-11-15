@@ -209,12 +209,13 @@ test("expired and tampered hosted access grants fail closed", async () => {
 });
 
 test("early JWKS rejection cancels the unread upstream body and retains service failure", async () => {
-  for (const init of [
+  const rejectedResponses: ResponseInit[] = [
     { status: 502, headers: { "Content-Type": "application/json" } },
     { status: 200, headers: { "Content-Type": "text/html" } },
     { status: 200, headers: { "Content-Type": "application/json", "Content-Length": "invalid" } },
     { status: 200, headers: { "Content-Type": "application/json", "Content-Length": "16385" } },
-  ]) {
+  ];
+  for (const init of rejectedResponses) {
     let cancelled = 0;
     const fetcher = async () => new Response(new ReadableStream({
       cancel() { cancelled++; },
