@@ -159,6 +159,27 @@ test("document head revisions are fetched as an ordered exact-key set within pro
   assert.deepEqual(await persistence.read((reader) => reader.getDocumentHeadRevisions(firstProject.id, [])), []);
 });
 
+test("project revision history is globally bounded, metadata only and pinned to exact heads", async () => {
+  const project = await createProject("Bounded revision history");
+  const foreign = await createProject("Foreign history");
+  const first = await createDocument(project.id, "first");
+  const second = await createDocument(project.id, "second");
+  const other = await createDocument(foreign.id, "foreign");
+  const next = await persistence.transaction(tx => tx.saveDocument(saveCommand(project.id, first.document.id, first.revision.id, "first!", [{fromUtf16:5,toUtf16:5,insert:"!"}])));
+  const heads = [
+    {documentId:first.document.id,revisionId:first.revision.id},
+    {documentId:second.document.id,revisionId:second.revision.id},
+    {documentId:other.document.id,revisionId:other.revision.id},
+  ];
+  const rows = await persistence.read(reader => reader.listProjectRevisionHistory(project.id, heads, 2));
+  assert.equal(rows.length, 2);
+  assert.deepEqual(new Set(rows.map(row => row.id)), new Set([first.revision.id,second.revision.id]));
+  assert.ok(rows.every(row => !("markdown" in row)));
+  assert.ok(!rows.some(row => row.id === next.revision.id));
+  const bounded = await persistence.read(reader => reader.listProjectRevisionHistory(project.id, heads, 1));
+  assert.deepEqual(bounded, rows.slice(0,1));
+});
+
 test("PostgreSQL health checks and Knowledge lists use the canonical project records", async () => {
   const project = await createProject(`knowledge-list-${randomUUID()}`);
   const nodeIds = [randomUUID() as KnowledgeNodeId, randomUUID() as KnowledgeNodeId];

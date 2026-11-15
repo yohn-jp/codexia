@@ -542,6 +542,7 @@ class PostgresTransaction implements PersistenceTransaction {
   }
 
   async getProject(projectId: ProjectId): Promise<Project | undefined> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(projectId)) return undefined;
     const result = await this.query("SELECT * FROM project WHERE id = $1", [projectId]);
     return result.rows[0] ? mapProject(result.rows[0]) : undefined;
   }
@@ -631,6 +632,31 @@ class PostgresTransaction implements PersistenceTransaction {
       revisions: rows.map(mapRevision),
       nextBefore: hasMore && rows.length > 0 ? encodeCursor(rows[rows.length - 1]?.id) : null,
     };
+  }
+
+  async listProjectRevisionHistory(projectId: ProjectId, heads: readonly DocumentRevisionKey[], limit: number): Promise<readonly Pick<DocumentRevision, "id" | "documentId" | "createdAt">[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200 || heads.length > 1000 ||
+        new Set(heads.map(head => head.documentId)).size !== heads.length) throw validationError("Invalid project revision history bounds");
+    if (!heads.length) return [];
+    const result = await this.query(
+      `WITH RECURSIVE ancestry(id, document_id, parent_revision_id, created_at, position) AS (
+         SELECT r.id, r.document_id, r.parent_revision_id, r.created_at, h.position
+         FROM unnest($2::uuid[], $3::uuid[]) WITH ORDINALITY AS h(document_id, revision_id, position)
+         JOIN document_revision r ON r.project_id = $1 AND r.document_id = h.document_id AND r.id = h.revision_id
+         UNION ALL
+         SELECT r.id, r.document_id, r.parent_revision_id, r.created_at, a.position
+         FROM ancestry a JOIN document_revision r
+           ON r.project_id = $1 AND r.document_id = a.document_id AND r.id = a.parent_revision_id
+       )
+       SELECT id, document_id, created_at FROM ancestry
+       ORDER BY date_trunc('milliseconds', created_at) DESC, position, created_at DESC, id DESC LIMIT $4`,
+      [projectId, heads.map(head => head.documentId), heads.map(head => head.revisionId), limit],
+    );
+    return result.rows.map(row => ({
+      id: asString(row.id) as RevisionId,
+      documentId: asString(row.document_id) as DocumentId,
+      createdAt: asString(row.created_at),
+    }));
   }
 
   async getKnowledgeNode(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<KnowledgeNode | undefined> {
@@ -991,21 +1017,22 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows.map((row) => this.mapModuleRecord(row));
   }
 
-  async listProposalReviewQueue(projectIds: readonly ProjectId[], moduleId: string, limit: number): Promise<{
+  async listProposalReviewQueue(projectIds: readonly ProjectId[] | null, moduleId: string, limit: number): Promise<{
     unresolvedCount: number; records: readonly { record: ModuleRecord; projectVersion: number }[];
   }> {
-    if (projectIds.length > 200 || new Set(projectIds).size !== projectIds.length ||
+    if ((projectIds !== null && (projectIds.length > 200 || new Set(projectIds).size !== projectIds.length)) ||
         !Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Invalid proposal review scope or page size");
-    if (!projectIds.length) return { unresolvedCount: 0, records: [] };
-    const scope = `FROM unnest($1::uuid[]) WITH ORDINALITY AS scope(project_id, position)
-      JOIN project p ON p.id = scope.project_id
+    if (projectIds?.length === 0) return { unresolvedCount: 0, records: [] };
+    const scope = `FROM project p
       JOIN module_record m ON m.project_id = p.id AND m.module_id = $2
-      WHERE m.key LIKE 'proposal:%' AND (m.value->>'state') IS DISTINCT FROM 'applied'`;
+      LEFT JOIN unnest($1::uuid[]) WITH ORDINALITY AS scope(project_id, position) ON p.id = scope.project_id
+      WHERE ($1::uuid[] IS NULL OR scope.project_id IS NOT NULL)
+        AND m.key LIKE 'proposal:%' AND (m.value->>'state') IS DISTINCT FROM 'applied'`;
     const args = [projectIds, moduleId];
     const count = await this.query(`SELECT count(*) AS count ${scope}`, args);
     const unresolvedCount = asNumber(count.rows[0]?.count);
     const page = await this.query(`SELECT m.*, p.version AS project_version ${scope}
-      ORDER BY scope.position, m.key LIMIT $3`, [...args, limit]);
+      ORDER BY scope.position, p.updated_at DESC, p.id, m.key LIMIT $3`, [...args, limit]);
     return { unresolvedCount, records: page.rows.map(row => ({
       record: this.mapModuleRecord(row), projectVersion: asNumber(row.project_version),
     })) };

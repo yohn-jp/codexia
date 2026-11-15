@@ -597,6 +597,12 @@ export function createServer(options: ApiServerOptions): Server {
       throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
     }
   };
+  const findAuthorizedProject = async (projectId: string): Promise<Project | undefined> => {
+    assertAssignedProject(projectId);
+    if (hosted) return (await listProjects())[0];
+    const project = await options.persistence.read(reader => reader.getProject(projectId as import("@codexia/persistence-contracts").ProjectId));
+    return project?.id === projectId ? project : undefined;
+  };
   const capabilityProviders = {
     ...(options.runtimeOptions?.capabilityProviders ?? {}),
     [MODEL_USAGE_CAPABILITY]: { create: (): ModelUsageStore => new HistoricalModelUsageStore(usageDirectory) },
@@ -1080,7 +1086,7 @@ export function createServer(options: ApiServerOptions): Server {
       };
       host.linkedReader = async (linkedProjectId: string) => {
         assertAssignedProject(linkedProjectId);
-        if (!(await listProjects()).some((project) => project.id === linkedProjectId)) throw httpFailure(404, "PROJECT_NOT_FOUND", "Linked project was not found");
+        if (!(await findAuthorizedProject(linkedProjectId))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Linked project was not found");
         return freshReader(linkedProjectId);
       };
     }
@@ -1737,7 +1743,7 @@ export function createServer(options: ApiServerOptions): Server {
     }
     if (routePath === "/api/review-queue" && method === "GET") {
       if (!coreStore.reviewQueue) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
-      const projectIds = (await listProjects()).map(project => project.id);
+      const projectIds = hosted ? [hosted.projectId] : null;
       sendJson(response, 200, await coreStore.reviewQueue(projectIds));
       return;
     }
@@ -1766,7 +1772,7 @@ export function createServer(options: ApiServerOptions): Server {
         }
       }
       if (suffix === "" && method === "GET") {
-        const project = (await listProjects()).find((candidate) => candidate.id === projectId);
+        const project = await findAuthorizedProject(projectId);
         if (!project) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project not found");
         const observation = await options.store.observe(projectId);
         sendJson(response, 200, { project, observation });
@@ -2085,7 +2091,7 @@ export function createServer(options: ApiServerOptions): Server {
       const projectId = parseProjectId(publicMatch[1]!);
       assertAssignedProject(projectId);
       const moduleId = parseProjectId(publicMatch[2]!);
-      if (!(await listProjects()).some((project) => project.id === projectId)) throw httpFailure(404, "PROJECT_NOT_FOUND", "Public project was not found");
+      if (!(await findAuthorizedProject(projectId))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Public project was not found");
       const contribution = await contributionFor(moduleId, publicMatch[3] ?? "", method);
       if (!contribution || contribution.access !== "public" || contribution.effect !== "read") throw httpFailure(404, "MODULE_ROUTE_UNAVAILABLE", "Public module route is unavailable");
       if (!isRead) throw httpFailure(405, "PUBLIC_MODULE_READ_ONLY", "Public module routes are read-only");

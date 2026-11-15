@@ -2317,7 +2317,7 @@ describe("Codexia HTTP boundary", () => {
     const detail = await fetch(`${apiServer.base}/api/projects/project-1`, { headers: auth });
     const detailBody = await detail.json() as { project: { id: string; title: string; version: number }; observation: { snapshot: SnapshotId; state: string } };
     assert.equal(detail.status, 200);
-    assert.deepEqual(detailBody.project, { id: "project-1", title: "A Work", version: 1 });
+    assert.deepEqual(detailBody.project, { id: "project-1", title: "A Work", version: 1, settings: {}, createdAt: "2026-10-17T00:00:00.000Z", updatedAt: "2026-10-17T00:00:00.000Z" });
     assert.equal(detailBody.observation.snapshot.projectVersion, SNAPSHOT.projectVersion);
     assert.equal(detailBody.observation.state, "fresh", "project opening observes the assigned PostgreSQL project");
     const missingProject = await fetch(`${apiServer.base}/api/projects/missing`, { headers: auth });
@@ -2635,13 +2635,28 @@ describe("Codexia HTTP boundary", () => {
     assert.equal((await newCookieProposal.json() as ChangeProposal).source, "author", "transport attribution still applies to new cookie proposals after recovery");
   });
 
+  it("opens an existing PostgreSQL project outside the bounded project listing", async (t) => {
+    const native = await nativeProject(t, "Outside project page");
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-project-page-"));
+    tempDirs.push(staticDir);
+    native.store.listProjects = async () => [];
+    const apiServer = await startCustomApi(native.store, staticDir, { persistence: native.persistence });
+    t.after(apiServer.close);
+    const auth = { Authorization: `Bearer ${ACCESS_TOKEN}` };
+    assert.deepEqual(await (await fetch(`${apiServer.base}/api/projects`, { headers: auth })).json(), []);
+    const detail = await fetch(`${apiServer.base}/api/projects/${native.project.id}`, { headers: auth });
+    assert.equal(detail.status, 200);
+    assert.equal((await detail.json() as { project: { id: string } }).project.id, native.project.id);
+    assert.equal((await fetch(`${apiServer.base}/api/projects/missing`, { headers: auth })).status, 404);
+  });
+
   it("review queue delegates once with the admitted project inventory and preserves the exact count", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-review-queue-"));
     tempDirs.push(staticDir);
-    const calls: string[][] = [];
+    const calls: Array<readonly string[] | null> = [];
     const store = Object.assign(makeStore(), {
-      async reviewQueue(projectIds: readonly string[]) {
-        calls.push([...projectIds]);
+      async reviewQueue(projectIds: readonly string[] | null) {
+        calls.push(projectIds);
         return { unresolvedCount: 1234, items: [] };
       },
       async listProposals() { throw Error("global queue must not expand per-project proposals"); },
@@ -2653,7 +2668,7 @@ describe("Codexia HTTP boundary", () => {
     const response = await fetch(`${apiServer.base}/api/review-queue`, { headers: { Cookie: owner.cookie } });
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { unresolvedCount: 1234, items: [] });
-    assert.deepEqual(calls, [["project-1"]]);
+    assert.deepEqual(calls, [null]);
   });
 
   it("keeps owner event streams scoped, rejects retired synchronization, and closes streams on shutdown", async (t) => {
