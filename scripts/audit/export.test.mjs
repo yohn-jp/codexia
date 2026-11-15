@@ -1,10 +1,12 @@
 import { test } from 'node:test';
+import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, symlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseHeads, exclusion, splitFiles, validatePack, renderIndex, buildPortal, PART_LIMIT } from './export.mjs';
+import { parseHeads, exclusion, splitFiles, validatePack, renderIndex, buildPortal, scopedParts, reviewScope, PART_LIMIT } from './export.mjs';
 
 const sha = 'a'.repeat(40);
 test('all branch refs, including slash and HTML characters, are data only', () => {
@@ -18,10 +20,10 @@ test('all branch refs, including slash and HTML characters, are data only', () =
   assert.ok(!html.includes('snapshots/' + sha));
 });
 test('only regular source blobs, not credentials, data or branch-controlled packer configuration', () => {
-  for (const path of ['.env.production', 'nested/.npmrc', 'secret.pem', 'data/work.md', 'evidence/run/output.json', '.repomixignore', 'repomix.config.ts', '../escape', '.git/config']) assert.ok(exclusion(path, '100644', 1), path);
+  for (const path of ['.env.production', 'nested/.npmrc', 'secret.pem', 'data/work.md', 'evidence/run/output.json', 'evidence/README.md', 'evidence/performance/run/seed/scene.md', '.repomixignore', 'repomix.config.ts', '../escape', '.git/config']) assert.ok(exclusion(path, '100644', 1), path);
   assert.ok(exclusion('link', '120000', 10));
   assert.ok(exclusion('submodule', '160000', 0));
-  for (const path of ['.env.example', 'app/src/index.ts', '.github/workflows/verify.yml', 'evidence/README.md', 'pnpm-lock.yaml']) assert.equal(exclusion(path, '100644', 1), null, path);
+  for (const path of ['.env.example', 'app/src/index.ts', '.github/workflows/verify.yml', 'docs/architecture/CORE.md', 'packages/core/src/merge.test.ts', 'packages/persistence-postgres/migrations/0001.sql', 'pnpm-lock.yaml']) assert.equal(exclusion(path, '100644', 1), null, path);
 });
 test('split parts are bounded and reassemble every UTF-16 code unit of the packed input', () => {
   const files = { 'a.ts': 'small\n', 'b.ts': '😀\n"\\'.repeat(100_000), 'c.ts': '' };
@@ -53,6 +55,10 @@ test('real Repomix packs immutable Git blobs, skips unsafe input, reuses only ve
     const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
     git('init', '-q'); git('config', 'user.name', 'Audit test'); git('config', 'user.email', 'audit@example.invalid');
     writeFileSync(join(repo, 'source.ts'), 'export const value = 1;\n');
+    mkdirSync(join(repo, 'evidence', 'run'), { recursive: true });
+    writeFileSync(join(repo, 'evidence', 'run', 'scene.md'), 'historical fixture');
+    mkdirSync(join(repo, 'app', 'src'), { recursive: true });
+    writeFileSync(join(repo, 'app', 'src', 'view.ts'), 'export const view = true;\n');
     writeFileSync(join(repo, '.env'), 'PRIVATE_TEST_VALUE=must-not-be-packed\n');
     writeFileSync(join(repo, '.repomixignore'), 'source.ts\n');
     writeFileSync(join(repo, 'repomix.config.ts'), 'throw new Error("branch config executed");\n');
@@ -75,6 +81,11 @@ test('real Repomix packs immutable Git blobs, skips unsafe input, reuses only ve
     assert.equal(Object.hasOwn(files, '.env'), false);
     assert.equal(Object.hasOwn(files, 'link'), false);
     assert.equal(Object.hasOwn(files, 'repomix.config.ts'), false);
+    assert.equal(Object.hasOwn(files, 'evidence/run/scene.md'), false);
+    const manifest = read('site1', second, 'manifest.json');
+    assert.ok(manifest.excluded.some(x => x.path === 'evidence/run/scene.md' && x.reason === 'historical-evidence'));
+    assert.ok(manifest.outputs.some(x => x.scope === 'frontend'));
+    assert.ok(manifest.outputs.some(x => x.scope === 'repository-config'));
     const c = run('site2', [{branch:'main',sha:second}], '/does-not-exist');
     assert.equal(c.snapshots[second].status, 'ready');
     assert.equal(existsSync(join(root, 'site2', 'snapshots', first)), false);
@@ -84,4 +95,60 @@ test('real Repomix packs immutable Git blobs, skips unsafe input, reuses only ve
     assert.equal(d.snapshots[second].status, 'blocked');
     assert.equal(existsSync(join(root, 'site3', 'snapshots', second)), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('review parts cover every selected file exactly and never mix ownership scopes', () => {
+  const files = { 'app/src/a.ts': 'a', 'packages/core/src/a.ts': 'b', 'modules/story/src/a.ts': 'c', 'docs/architecture/CORE.md': 'd', '.github/workflows/verify.yml': 'e', 'tests/e2e/a.spec.ts': 'f', 'scripts/audit/export.mjs': 'g', 'pnpm-lock.yaml': 'h' };
+  const restored = {};
+  for (const part of scopedParts(files, sha)) {
+    assert.ok(Buffer.byteLength(part.content) <= PART_LIMIT);
+    for (const entry of JSON.parse(part.content).entries) {
+      assert.equal(reviewScope(entry.path), part.scope);
+      assert.equal(entry.offset, (restored[entry.path] ?? '').length);
+      restored[entry.path] = (restored[entry.path] ?? '') + entry.content;
+    }
+  }
+  assert.deepEqual(restored, files);
+});
+
+test('browser downloads full, manifest and scoped part bytes without navigating away', { skip: !process.env.CODEXIA_AUDIT_TOOL_DIR }, async () => {
+  const require = createRequire(join(process.env.CODEXIA_AUDIT_TOOL_DIR, 'package.json'));
+  const { chromium } = require('playwright-core');
+  const full = '{"files":{"app/src/a.ts":"source"}}';
+  const part = '{"entries":[{"path":"app/src/a.ts","offset":0,"content":"source"}]}';
+  const snapshotManifest = '{"files":[{"path":"app/src/a.ts"}]}';
+  const html = renderIndex({ observedAt: 'now', branches: [{ branch: 'main', sha }], snapshots: {
+    [sha]: { status: 'ready', fileCount: 1, outputs: [{ name: 'repomix.json', bytes: Buffer.byteLength(full) }, { name: 'part-0001.json', bytes: Buffer.byteLength(part), scope: 'frontend' }] },
+  } });
+  const base = '/snapshots/' + sha + '/';
+  const files = new Map([[base + 'repomix.json', full], [base + 'part-0001.json', part], [base + 'manifest.json', snapshotManifest], ['/manifest.json', '{"branches":[]}']]);
+  const server = createServer((req, res) => {
+    if (req.url === '/') { res.setHeader('Content-Type', 'text/html'); res.end(html); return; }
+    if (!files.has(req.url)) { res.statusCode = 404; res.end(); return; }
+    res.setHeader('Content-Type', 'application/json'); res.end(files.get(req.url));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  let browser;
+  try {
+    browser = await chromium.launch({ channel: 'chrome', headless: true });
+    const page = await browser.newPage({ acceptDownloads: true });
+    const url = 'http://127.0.0.1:' + server.address().port + '/';
+    await page.goto(url);
+    const verify = async (name, filename, content) => {
+      const pending = page.waitForEvent('download');
+      await page.getByRole('link', { name, exact: false }).click();
+      const download = await pending;
+      assert.equal(download.suggestedFilename(), filename);
+      assert.equal(readFileSync(await download.path(), 'utf8'), content);
+      assert.equal(page.url(), url);
+    };
+    await verify('Download full JSON', 'codexia-' + sha + '-repomix.json', full);
+    await verify('Download manifest', 'codexia-' + sha + '-manifest.json', snapshotManifest);
+    await page.getByText('Review by scope', { exact: false }).click();
+    await verify('Download 1/1', 'codexia-' + sha + '-part-0001.json', part);
+    await verify('Download branch index', 'codexia-branches.json', '{"branches":[]}');
+  } finally {
+    await browser?.close();
+    await new Promise(resolve => server.close(resolve));
+  }
 });

@@ -38,9 +38,10 @@ jobs:
           node-version: 24.22.0
       - name: Install the isolated audit tool
         run: |
-          npm install --prefix "$RUNNER_TEMP/audit-tool" --ignore-scripts --no-audit --no-fund repomix@1.19.0
+          npm install --prefix "$RUNNER_TEMP/audit-tool" --ignore-scripts --no-audit --no-fund repomix@1.19.0 playwright-core@1.64.1
           echo "CODEXIA_AUDIT_REPOMIX_BIN=$RUNNER_TEMP/audit-tool/node_modules/.bin/repomix" >> "$GITHUB_ENV"
-      - name: Test audit exporter (including real Repomix)
+          echo "CODEXIA_AUDIT_TOOL_DIR=$RUNNER_TEMP/audit-tool" >> "$GITHUB_ENV"
+      - name: Test audit exporter and browser downloads
         run: node --test scripts/audit/export.test.mjs
       - name: Restore previous verified HEAD exports
         if: github.event_name != 'pull_request'
