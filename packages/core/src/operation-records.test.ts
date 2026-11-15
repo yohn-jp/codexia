@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ChangeOperation, ChangeProposal, SnapshotId } from "@codexia/contracts";
+import { BUILTIN_MODULE_IDS, type ChangeOperation, type ChangeProposal, type SnapshotId } from "@codexia/contracts";
 import {
   assertPersistedProposal,
   normalizedOperation,
@@ -82,4 +82,15 @@ test("proposal evidence may be bound by a covering read scope", () => {
 
   proposal.operations[0]!.readScopes = [{ prefix: "bible", revision: "c".repeat(64) }];
   assert.throws(() => assertPersistedProposal(proposal), /exact operation read preconditions/);
+});
+
+
+test("persisted proposal evidence accepts exactly the canonical built-in module identities", () => {
+  for (const module of BUILTIN_MODULE_IDS) {
+    const proposal = goldenProposal();
+    proposal.evidence![0]!.module = module;
+    assert.doesNotThrow(() => assertPersistedProposal(proposal), module);
+  }
+  const proposal = goldenProposal();
+  assert.throws(() => assertPersistedProposal({ ...proposal, evidence: [{ ...proposal.evidence![0], module: "unknown-module" }] }), /Invalid proposal evidence record/);
 });
