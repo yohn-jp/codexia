@@ -1032,6 +1032,11 @@ test("proposal review queue counts unresolved records without returning the unbo
     assert.equal(page.records.at(-1)?.record.key,"proposal:0999");
     assert.ok(page.records.every(({record,projectVersion})=>record.projectId!==outside.id && projectVersion===1));
     assert.deepEqual(await persistence.read(reader=>reader.listProposalReviewQueue([],moduleId,1000)),{unresolvedCount:0,records:[]});
+    const standalone = await persistence.read(reader=>reader.listProposalReviewQueue(null,moduleId,1000));
+    assert.ok(standalone.unresolvedCount >= 1004);
+    assert.equal(standalone.records.length,1000);
+    assert.ok(standalone.records.some(({record})=>record.projectId===outside.id));
+
   } finally {
     await directPool.query("DELETE FROM module_record WHERE project_id = ANY($1::uuid[])", [[first.id,second.id,outside.id]]);
   }
