@@ -1,0 +1,15 @@
+{
+  "comparison": "baseline projection output bytes vs candidate direct projection of same persisted PostgreSQL project snapshot",
+  "sourceCommit": "a7ebe0337e803bf70a142eaabf09b5a3c529106c",
+  "candidateCommit": "852e52c0316663142d1356ba83cdd848be8244e1",
+  "fixtureId": "knowledge-dense",
+  "fixtureProfileHash": "736a9df8d85b6765e9477ad4afd192479c314b9d3197cdbd609f73e0503c2546",
+  "projectId": "91345991-78e0-4dbf-82b4-baa75bd5147e",
+  "projectVersion": 57,
+  "baselineBytes": 626287,
+  "candidateBytes": 626287,
+  "baselineSha256": "c5dfd175602e2ef2ea0fb764fcf0cda28c5f0e151697653aa58a2fbf04028c4a",
+  "candidateSha256": "c5dfd175602e2ef2ea0fb764fcf0cda28c5f0e151697653aa58a2fbf04028c4a",
+  "exactByteMatch": true,
+  "baselineDirectProjectionMatchedStoredSnapshot": true
+}
