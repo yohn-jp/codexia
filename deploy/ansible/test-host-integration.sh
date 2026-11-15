@@ -31,7 +31,7 @@ all:
         codexia_service_gid: $uid
         codexia_service_home: $home
 YAML
-apply() { "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i "$tmp/inventory.yml" deploy/ansible/site.yml; }
+apply() { env -u XDG_CONFIG_HOME "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i "$tmp/inventory.yml" deploy/ansible/site.yml; }
 apply | tee "$tmp/first.log"
 grep -Eq 'changed=[1-9][0-9]*' "$tmp/first.log"
 apply | tee "$tmp/second.log"
