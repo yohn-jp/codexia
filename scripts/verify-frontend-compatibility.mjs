@@ -15,7 +15,7 @@ function record(value) {
 /** @param {unknown} identity */
 export function assertFrontendIdentity(identity) {
   assert.ok(record(identity), 'Frontend identity is invalid');
-  assert.equal(identity.format, 'codexia-frontend-identity/v1');
+  assert.equal(identity.format, 'codexia-frontend-identity/v1', 'Frontend identity format is invalid');
   assert.ok(typeof identity.version === 'string' && semver.test(identity.version), 'Frontend version is invalid');
   assert.ok(typeof identity.sourceSha === 'string' && shaPattern.test(identity.sourceSha), 'Frontend source SHA is invalid');
   assert.ok(['core', 'full'].includes(identity.profile), 'Frontend profile is invalid');
@@ -62,8 +62,8 @@ export function assertFrontendReleaseAdmission(deployed, candidate) {
 /** @param {unknown} backend */
 export function assertBackendIdentity(backend) {
   assert.ok(record(backend), 'Live backend identity is invalid');
-  assert.equal(backend.name, 'codexia');
-  assert.equal(backend.hosted, false);
+  assert.equal(backend.name, 'codexia', 'Live backend identity name is invalid');
+  assert.equal(backend.hosted, false, 'Live backend must be standalone');
   assert.ok(typeof backend.version === 'string' && semver.test(backend.version), 'Live backend version is invalid');
   assert.ok(['core', 'full'].includes(backend.profile), 'Live backend profile is invalid');
   assert.ok(Number.isSafeInteger(backend.apiEpoch) && backend.apiEpoch > 0, 'Live backend API epoch is missing or invalid');
@@ -73,9 +73,16 @@ export function assertBackendIdentity(backend) {
 /** @param {unknown} frontend @param {unknown} backend */
 export function assertFrontendCompatibility(frontend, backend) {
   assertFrontendIdentity(frontend);
+  assertBackendCompatibility(backend, frontend.profile, frontend.apiEpoch);
+}
+
+/** The early release gate uses the same profile/epoch checks as artifact admission. */
+export function assertBackendCompatibility(backend, profile, apiEpoch) {
   assertBackendIdentity(backend);
-  assert.equal(backend.profile, frontend.profile, 'Backend profile mismatch');
-  assert.equal(backend.apiEpoch, frontend.apiEpoch, 'Frontend and backend API epochs are incompatible');
+  assert.ok(['core', 'full'].includes(profile), 'Required frontend profile is invalid');
+  assert.ok(Number.isSafeInteger(apiEpoch) && apiEpoch > 0, 'Required frontend API epoch is invalid');
+  assert.equal(backend.profile, profile, 'Backend profile mismatch');
+  assert.equal(backend.apiEpoch, apiEpoch, 'Frontend and backend API epochs are incompatible');
 }
 
 /** @param {NodeJS.ProcessEnv | Record<string, string | undefined>} env */
@@ -228,7 +235,9 @@ function loadBuiltFrontend() {
 async function main() {
   if (process.argv[2] === 'preflight') {
     const { backend, deployed } = await probeLiveDeployment({ checkBoundary: true });
-    console.log(`Verified protected production identities: backend ${backend.version} (epoch ${backend.apiEpoch}), frontend ${deployed.version} (epoch ${deployed.apiEpoch}); anonymous and out-of-scope CI access denied.`);
+    const { apiEpoch } = JSON.parse(readFileSync(new URL('../deploy/frontend-compatibility.json', import.meta.url), 'utf8'));
+    assertBackendCompatibility(backend, 'full', apiEpoch);
+    console.log(`Verified protected production identities: backend ${backend.version} (epoch ${backend.apiEpoch}), frontend ${deployed.version} (epoch ${deployed.apiEpoch}), candidate API epoch ${apiEpoch}; anonymous and out-of-scope CI access denied.`);
     return;
   }
   const frontend = loadBuiltFrontend();

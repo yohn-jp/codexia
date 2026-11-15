@@ -35,6 +35,7 @@ resource "cloudflare_zero_trust_access_application" "identity_probe" {
   type                      = "self_hosted"
   allowed_idps              = sort(tolist(var.allowed_idps))
   auto_redirect_to_identity = length(var.allowed_idps) == 1
+  app_launcher_visible      = false
   session_duration          = "8h"
   policies = [
     {

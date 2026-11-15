@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { probeLiveDeployment, verifyFrontendCompatibility } from './verify-frontend-compatibility.mjs';
+import { assertBackendCompatibility, probeLiveDeployment, verifyFrontendCompatibility } from './verify-frontend-compatibility.mjs';
 
 const frontend = { format: 'codexia-frontend-identity/v1', version: '0.1.2', sourceSha: 'a'.repeat(40), profile: 'full', apiEpoch: 1 };
 const backend = { name: 'codexia', hosted: false, version: '0.1.3', profile: 'full', apiEpoch: 1 };
@@ -57,4 +57,22 @@ test('ordinary navigation redirects cannot prove a denied Access boundary', asyn
   await assert.rejects(probeLiveDeployment({ env, checkBoundary: true, fetchImpl }), /ACCESS_BOUNDARY: CI token request to \//);
   const accessRedirect = async (url, options) => url.pathname === '/' ? new Response('', { status: 302, headers: { location: 'https://team.cloudflareaccess.com/cdn-cgi/access/login/example.invalid' } }) : normal(url, options);
   await probeLiveDeployment({ env, checkBoundary: true, fetchImpl: accessRedirect });
+});
+
+test('early preflight can reject the required Full profile and API epoch before an artifact is built', () => {
+  assert.doesNotThrow(() => assertBackendCompatibility(backend, 'full', 1));
+  assert.throws(() => assertBackendCompatibility(backend, 'core', 1), /Backend profile mismatch/);
+  assert.throws(() => assertBackendCompatibility(backend, 'full', 2), /API epochs are incompatible/);
+  assert.throws(() => assertBackendCompatibility(backend, 'full', undefined), /Required frontend API epoch is invalid/);
+});
+
+test('invalid live identity fields never disclose their values in preflight diagnostics', async () => {
+  await assert.rejects(probeLiveDeployment({ env, fetchImpl: async url =>
+    response(url.pathname === '/api/version' ? { ...backend, name: 'unexpected-private-value' } : { ...frontend, format: 'another-private-value' })
+  }), error => {
+    assert.match(error.message, /Live backend identity name is invalid/);
+    assert.match(error.message, /Frontend identity format is invalid/);
+    assert.doesNotMatch(error.message, /private-value/);
+    return true;
+  });
 });

@@ -116,6 +116,7 @@ assert.match(terraformMain, /domain\s+=\s+"\$\{var\.app_hostname\}\$\{each\.valu
 const parentAccess = terraformMain.split('resource "cloudflare_zero_trust_access_application" "codexia"')[1].split('resource "cloudflare_zero_trust_access_application" "identity_probe"')[0];
 assert.doesNotMatch(parentAccess, /access_ci_policy_id/u, 'CI Service Auth must never be attached to the author app');
 const probeAccess = terraformMain.split('resource "cloudflare_zero_trust_access_application" "identity_probe"')[1].split('resource "cloudflare_zero_trust_tunnel_cloudflared"')[0];
+assert.match(probeAccess, /app_launcher_visible\s*=\s*false/u);
 assert.match(probeAccess, /id\s+=\s+var\.access_ci_policy_id\s+precedence\s+=\s+1/u);
 assert.match(probeAccess, /id\s+=\s+var\.access_policy_id\s+precedence\s+=\s+2/u);
 assert.match(terraformMain, /path\s+=\s+probe\.tunnelPath/u);
