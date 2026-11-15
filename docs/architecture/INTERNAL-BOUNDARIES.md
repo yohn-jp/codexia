@@ -63,7 +63,7 @@ Define a single `BUILTIN_MODULE_IDS` readonly tuple in `@codexia/contracts` and 
 
 ## 6. Core computation and persistence effects
 
-Core owns consistent module snapshots, domain projections, approved proposal coordination and receipt lookup through the existing Persistence boundary. PostgreSQL transactions own canonical writes. Keep normalization, digest and read-set validation deterministic; do not duplicate authorities or replace durable records with process-local state.
+Core owns consistent module snapshots, domain projections, approved proposal coordination and receipt lookup through the existing Persistence boundary. [Backend read model](BACKEND-READ-MODEL.md) owns the detailed read and scalability contract. PostgreSQL transactions own canonical writes. Keep normalization, digest and read-set validation deterministic; do not duplicate authorities or replace durable records with process-local state.
 
 Document and module revisions, project version fences, scope membership guards and approval identity must be checked in the same transaction as application. A pinned historical reader must not silently read current records. Module paths are validated domain identifiers over database records, never filesystem paths for manuscript storage.
 
@@ -73,13 +73,9 @@ Fastify's shared request handler remains the admission boundary for authenticati
 
 Hosted authorization dependency outages must remain distinguishable from authentication failures (502/503 versus 401/403), and previously successful JSON responses must continue to be validated at the browser boundary. Neither concern warrants weakening authorization or duplicating validators.
 
-## 8. Verification graph is declarative, not inferred from prose
+## 8. Verification authority
 
-`scripts/ci-contract.mjs` retains authority for the validation inventory, bounded execution groups, browser/profile coverage and exact-source certification. `scripts/ci-impact.mjs` selects affected PR validations; unknown changes or missing diff inputs select the complete inventory. Main pushes and manual verification always select the complete inventory. Grouped execution preserves individual validation results, and certification checks their source and plan identities as well as successful execution. Each package's own `package.json` defines its test command and necessary self-build; workspace dependency manifests determine dependency preparation.
-
-`scripts/ci-workspace.mjs` must **not** infer per-workspace unit-build requirements by splitting and regex-matching the root `package.json` `test` command. A formatting change to root orchestration must not change per-workspace test prerequisites. Prefer existing package scripts and the declared workspace dependency graph over additional parallel registries or custom task runners.
-
-Preserve mandatory coverage detection, frozen installs, production and test-source typing, scoped safety checks, unit tests, Core/Full build and dependency audit, browser matrices, OCI startup, native Hosted composition and the exact-main-SHA fail-closed certification. Maintain release immutability and explicit `NOT_CHECKED` reporting for unavailable external prerequisites. Do not trade away any accepted gate to make the workflow look simpler.
+[CI/CD architecture](../verification/CI-CD.md) owns execution, evidence and release gates; [Test architecture](../verification/TEST-ARCHITECTURE-OPTIMIZATION.md) owns proof placement. The executable inventory remains in `scripts/ci-contract.mjs`. Keep workspace prerequisites declared in package scripts and dependencies; no duplicate task authority.
 
 ## 9. Structural acceptance contract
 

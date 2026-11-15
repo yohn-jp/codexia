@@ -11,9 +11,7 @@ This workflow is intentionally local to Codexia and does not use organization sh
 
 ## Exact-source verification and immutable publication
 
-`scripts/ci-contract.mjs` defines the canonical verification inventory, including workspace tests, production and test-source type checks, safety, builds, Core audit, OCI, browser, Hosted Native and coverage checks, plus the `certification` gate. Matrix entries have individual job names, and matrix fail-fast is disabled so one failure does not stop unrelated checks.
-
-Before either OCI profile can be published, `scripts/verify-release-source.mjs` requires a completed successful **main push** verification for the exact tagged commit SHA. It checks the exact names from the canonical contract and requires each exactly once with `completed` / `success` status, including the certification gate. Missing, duplicate, unexpected, failed, cancelled, skipped, queued, or in-progress jobs block release. It excludes PR runs, other SHAs, and other events. The GitHub Actions API run listing and job listing are read through every page using `total_count`; malformed, incomplete, inconsistent, or failed page requests stop the gate. A tag or a successful PR check alone is insufficient. Publication rechecks the tag-to-commit binding immediately before pushing.
+The shared exact-main verification and release authority is [CI/CD architecture](CI-CD.md). The tag-triggered publisher additionally verifies the tag-to-commit binding immediately before pushing. A tag or PR check alone is insufficient.
 
 `verify-unpublished-image.mjs` checks GHCR immediately before each image push. An existing version tag is refused; only a registry 404 with `MANIFEST_UNKNOWN` or `NAME_UNKNOWN` confirms absence. Authorization, service, malformed-response and network failures stop publication. The workflow serializes events for the same Git ref. A partial publication must use a new version; rerunning it must not replace the profile already published.
 

@@ -1,5 +1,7 @@
 # Codexia — アーキテクチャ・実装移行 RFC
 
+> Historical migration design proposal. The following records the original reboot rationale and pre-migration observations, not current runtime behavior, open tasks or governing instructions. Current authority is the [documentation index](../README.md), in particular [Core](CORE.md), [Backend read model](BACKEND-READ-MODEL.md), [MCP-first](MCP-FIRST.md), [Deployment](../deployment/README.md) and [CI/CD architecture](../verification/CI-CD.md). Do not reopen the closed migration ledger or restore Git runtime behavior.
+
 - **状態**: 設計RFC（移行処理は未実装）。新リポジトリ `yohn-jp/codexia` は Scriptorium の main を複製済み。設計の文書化と製品名変更は行うが、DB移行・VM/Cloudflare配備は別工程。
 - **作成日**: 2026-11-08
 - **コード調査基準**:

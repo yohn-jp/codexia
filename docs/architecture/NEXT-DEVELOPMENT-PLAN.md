@@ -1,6 +1,6 @@
 # Codexia 統合創作基盤・更新設計
 
-統合設計。既存の正本・承認・リリース契約を維持する。AI統合の採用済み契約は [MCP-first creative architecture](MCP-FIRST.md) を正本とする。その他の未採用設計案と実装受入は区別する。
+創作機能の統合設計提案。既存の正本・承認・リリース契約を維持する。バックエンドの読み取り・規模対応は [Backend read model](BACKEND-READ-MODEL.md)、CI/CDは [CI/CD architecture](../verification/CI-CD.md) を正本とする。AI統合の採用済み契約は [MCP-first creative architecture](MCP-FIRST.md) を正本とする。その他の未採用設計案と実装受入は区別する。
 
 ## 1. 目的と完了条件
 
@@ -38,8 +38,7 @@ Codexiaを、原稿の執筆・作品世界の知識管理・物語の整合性�
 - Storyの `readStorySnapshot` は、Coreの固定Snapshotから `bible/`・`plot/`・`manuscript/` 等のファイル形状を読み、独自Story Entityを組み立てる。これはGitへの復帰を意味しないが、KnowledgeのUUIDとStoryのID、文書の正規ID、Evidenceの関係を統一的に扱えるかを確認する必要がある。単にパスを全置換するのではなく、既存の投影・互換契約と実利用を追跡する。
 - CoreのKnowledge型とPersistence型には状態名・表現の相違がある。変換境界、損失の有無、正本の優先を確認し、必要な場合だけ修正する。
 - RFCの軽量Lexical Linkerと、現行のOptional Search/Terminologyの責務を整合させる。本計画ではCoreが手動のKnowledge/Evidenceと確認済み参照を提供し、継続的な自動抽出・検索は既存Optional機能の明示的な有効化に従う。Core-onlyでモデルや索引を必須化しない。
-- 現行Quadletは `CODEXIA_DATABASE_MIGRATE_ON_START=1`、単一API、共用 `/data` `/history`、TunnelからAPIへの直接接続を採用している。並行起動・更新用の排他と切替境界は追加設計が必要。
-- WorkerとAPIは独立リリースされる。自動更新に際し、ブラウザ・新旧UI/API間の互換性を明示的に保証する必要がある。
+- 配備・更新の正本は [Deployment](../deployment/README.md)、[Standalone updater](../deployment/STANDALONE-UPDATER.md)、[Update release](../deployment/UPDATE-RELEASE.md)。本書はこれらの実装・運用受入の進捗を定義しない。
 
 本計画は `CORE.md`、`INTERNAL-BOUNDARIES.md`、`MODULES.md`、`MODULAR-WORKSPACE.md`、`UX-CONTRACT.md` の既存契約を維持する。矛盾するRFC記述を採用する場合は、実装前に正本の文書を明示的に改訂する。設計案を暗黙に受入条件へ昇格させない。
 
@@ -126,59 +125,13 @@ Knowledge/Evidenceの統合契約を基礎として、Temporal Story、Narrative
 
 **受入:** 同一の本編から2つの仮説を比較しても確定状態・検索結果・読者知識は汚染されない。採用時のみ作者承認で必要な変更を適用し、元のSnapshotが古ければ差分を再確認する。不採用案は本編に影響せず再利用できる。
 
-## 6. 運用系列 — 自動更新計画
+## 6. 運用系列
 
-### リリース契約
-
-現行のSHA固定OCIイメージとexact-main CI certificationを維持する。ポーリング対象として、CI検証済みのアプリケーションリリースを指す配布メタデータを導入する。タグの辞書順や単なるコミットの新旧で自動更新先を判定しない。
-
-リリース情報には製品SemVer、ソースSHA、OCI digest、対象arch/profile、DB migration setのfingerprint、UI/API互換範囲、必要な設定・データ形式互換性、リリース状態を含める。信頼できる発行者の署名または既存attestationの拡張でメタデータとdigestを束縛する。既存の `0.x` バージョン期間はメジャー互換の扱いを別途明文化し、安全性をSemVer慣習に委ねない。安定チャネルへ発行されたもののみを対象とし、PRビルド・未認証・取り消されたリリースは候補にしない。
-
-**通常更新の条件:** バージョンが前進し、同一メジャー・同一DB migration set・同一の必要な永続形式互換性・選択profile・UI/API互換範囲を満たす。実DBの適用済みmigration checksumを確認し、候補側の期待値と異なれば拒否。通常起動はマイグレーション無効、必要ならDB権限でもDDLを防止する。メジャー更新やDB変更は明示的な運用手順でのみ実施する。
-
-**受入:** 未署名/未検証、古い版、誤profile、スキーマ差、UI非互換、digest不一致を拒否する。発行途中・GHCR障害では現行稼働を維持する。CIを迂回したリリースを自動適用しない。
-
-### Blue/Green更新コントローラー
-
-```text
-Cloudflare Access
-  ├─ UI routes → Workers Static Assets
-  └─ API / other routes → Cloudflare Tunnel
-                           → stable private proxy
-                                ├─ Blue API (active)
-                                └─ Green API (candidate)
-                                      ↓
-                             PostgreSQL (unchanged)
-```
-
-単一VMのRootless Podman + Quadletを維持し、固定の内部プロキシ、2スロット、ホスト上の更新制御を追加する。Tunnelの宛先は固定し、Cloudflare API操作を更新ごとに要求しない。APIやWorkerへPodmanソケット、GHCR書き込み権限、ホスト管理権限を与えない。systemd timerの既定ポーリング間隔は5分（設定変更可能）とし、永続状態と排他ロックで多重更新を防ぐ。
-
-更新状態: idle → detected → verified → pulled → candidate-ready → draining → switched → observing → committed。失敗はrollback/blockedへ遷移する。状態とdigestを原子的に記録し、途中でVMが再起動した場合は実プロキシ・コンテナ・Writer状態を照合して復旧する。
-
-候補は独立したキャッシュ/一時領域で起動し、外部ルートから隔離する。候補でバックグラウンドジョブ・外部送信・正本変更・共有履歴への書込みを開始しない。実装方法は統合契約/リリース契約で現行API lifecycleを追跡し決定する。旧APIと候補APIの同時Writerや共有 `/data` `/history` への無制御並行アクセスを禁止する。候補のReadinessはDB接続、スキーマ一致、契約、初期化完了を確認する。
-
-切替時に旧APIの新規書込み・ジョブ開始を止め、進行中の保存と必要なジョブを既存drain境界で完了/安全に停止させる。排他が成立してから新APIをActiveへ昇格し、安定したプロキシの転送先を変更する。切替に伴う短い受付停止・再ログインを許容する初期版とし、無停止を保証しない。セッション継続を実現する場合は既存認証境界を拡張し、DBスキーマ変更が必要ならメジャー計画へ分離する。保存結果が不明な要求は既存冪等IDで照合する。SSE/長時間ジョブは接続切断と再接続を明示的に検証する。
-
-切替後は実API応答、認証済み読み取り、DB readiness等を一定期間（初期案5分）監視する。失敗時は新APIをdrain/fenceしてから旧APIへ戻す。旧版が新しい永続形式・UIと互換であることが確認できない場合は自動rollbackを行わず更新を停止する。成功後に旧APIを停止するが直前のdigestは保持する。UI/API混在と古いブラウザbundleを含む互換期間を設け、互換性のないUIはAPIと別々に公開しない。
-
-**受入:**
-- 更新候補検出から切替まで手動操作不要。旧API稼働中の候補検証に失敗しても旧APIは継続。
-- 同じリリースの再検出、重複ポーリング、プロセス停止、VM再起動で二重Writerや状態不整合が発生しない。
-- 保存中・応答損失・切替中・旧版への復帰でも、正本Revisionと冪等receipt、IndexedDB Draftを失わない。
-- 不正な設定・DB不一致・health失敗・プロキシ切替失敗・切替後異常を注入し、fail-closedの動作を確認する。
-- DBスキーマを自動変更しないことをテストで証明する。Tunnel、Access、API認証、CSRF、公開ポート境界を維持する。
-
-### 運用受入・保全
-
-更新の状態、現在/候補/直前バージョン、失敗理由、最終成功時刻、停止状態をホスト上のログ/CLIで観測できるようにする。初期版ではWeb管理画面を必須にしない。手動pause/resume、明示的なrollback、失敗版の再試行抑制を提供する。初期の自動更新有効化はoperatorの明示設定による。
-
-実環境でWorker Routes、Tunnel、Access、API、PostgreSQL、保存/再読込、更新と復旧を確認する。DBの暗号化オフVMバックアップと孤立環境への復元演習、`/history`の保全を行う。作品JSONは履歴を含まない交換形式であり、DBバックアップに代替しない。
-
-**受入:** 実機で正常更新・失敗更新・復帰、VM再起動、バックアップ復元に成功し、原稿ハッシュ・Revision/関連知識・承認状態が維持される。実機にアクセスできない場合は未検証として残す。Praetorium Hostedの制御契約は変更せず、初期自動更新はStandalone VM専用とする。
+独立したコンポーネント配布、互換性、署名チャネル、単一Writer切替、バックアップ・復元は [Deployment](../deployment/README.md)、[Update release](../deployment/UPDATE-RELEASE.md)、[Standalone updater](../deployment/STANDALONE-UPDATER.md)、[Standalone backup](../deployment/STANDALONE-BACKUP.md) を正本とする。CIの実行と認証は [CI/CD architecture](../verification/CI-CD.md) に従う。実VMの受入は運用手順で証明し、設計提案を本番稼働の証拠としない。
 
 ## 7. 共通検証・リリースガバナンス
 
-- 既存 `scripts/ci-contract.mjs` の検証インベントリをauthorityとする。Core/Fullの型検査、unit、build、依存監査、ブラウザ、OCI、Hosted Native、certificationを省略しない。exact-head結果とmain-pushのリリースゲートを区別する。
+- 検証義務の配置は [Test architecture](../verification/TEST-ARCHITECTURE-OPTIMIZATION.md)、実行・認証は [CI/CD architecture](../verification/CI-CD.md) に従う。
 - 各機能の必須証拠は、純粋計算のunit、実PostgreSQLでのトランザクション・scope・Revision・障害検証、Desktop/Mobileの実操作、外部AIを使用しないfixture、必要な場合の実サービス検証で構成する。
 - パフォーマンスは統合契約の基準値と同じfixture・profile・環境で比較する。入力、場面切替、保存、参照、解析を分離し、解析をForegroundへ直列化しない。目標数値は基準計測後に設定する。
 - スキーマ変更を発見した場合は変更の理由と互換性を記録する。通常更新へ紛れ込ませず、計画されたメジャーアップデートの運用手順・バックアップ・復旧試験を別途定める。

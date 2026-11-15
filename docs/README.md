@@ -16,6 +16,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Portable work JSON, new-project import and one-time source conversion | [Portable works](authoring-portable.md) |
 | Shared internal ownership and maintainability | [Internal boundaries](architecture/INTERNAL-BOUNDARIES.md) |
 | Storage, snapshots, mutation and authentication | [Core architecture](architecture/CORE.md) |
+| Backend read models, snapshot reuse and scalability | [Backend read model](architecture/BACKEND-READ-MODEL.md) — normative target |
 | Panels, foreground reads, search and terminology | [Modular workspace](architecture/MODULAR-WORKSPACE.md) |
 | External AI integration and internal LLM freeze | [MCP-first creative architecture](architecture/MCP-FIRST.md) |
 | Optional module ownership and lifecycle | [Modules](architecture/MODULES.md) |
@@ -27,9 +28,12 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Edge UI, API service and operations | [Deployment](deployment/README.md) |
 | Hosted producer signing | [Producer attestation](hosted-producer-attestation.md) |
 | Development and verification commands | [Verification](verification/README.md) |
-| Test architecture and execution optimization | [Test Architecture Optimization](verification/TEST-ARCHITECTURE-OPTIMIZATION.md) — design proposal |
+| Test design and proof placement | [Test architecture](verification/TEST-ARCHITECTURE-OPTIMIZATION.md) — normative target |
+| CI graph, artifact trust, certification and delivery gates | [CI/CD architecture](verification/CI-CD.md) — normative target |
 | Recovery, MCP and model acceptance | [Integration verification](verification/INTEGRATION.md) |
 | Performance measurement | [Performance](performance/README.md) |
 | Release gates | [OCI releases](verification/OCI-RELEASE.md) |
+
+For architecture proposals and historical migration context, see [Reboot RFC](architecture/CODEXIA-REBOOT-RFC.md) and [Integrated creative design](architecture/NEXT-DEVELOPMENT-PLAN.md). They do not override accepted contracts. The topic owners above are the canonical references; update the owning document rather than adding a competing specification.
 
 Documentation describes supported behavior, contracts, procedures and explicitly identified design proposals. Execution results belong to test reports and build artifacts; contribution rules are in [CONTRIBUTING.md](../CONTRIBUTING.md).
