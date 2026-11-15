@@ -12,15 +12,27 @@ Treat cold as first Core materialization in a fresh worker for a new project ver
 
 ## Immutable historical evidence
 
-The retained `evidence/performance/wave0/INDEX.json` is the exact manifest for the historical raw measurement archive. Check the archive before extraction and validate each compressed and raw member using the existing artifact verifier:
+Select the immutable archive manifest from the [evidence index](../../evidence/README.md). Its storage record is authoritative for the release repository, tag, asset name, length and SHA-256; do not derive these from the current product name. Check the archive before extraction and validate each compressed and raw member using the existing artifact verifier. Run the following in Bash with GitHub CLI authentication for the repository named in the manifest:
 
 ```sh
-index=evidence/performance/wave0/INDEX.json
+set -e
+index=/path/to/INDEX.json
 evidence=$(mktemp -d)
-gh release download perf-wave0-2026-10-20 --repo yohn-jp/codexia \
-  --pattern codexia-wave0-2026-10-20.tar --dir "$evidence"
+asset=$(node --input-type=module -e '
+  import { readFileSync } from "node:fs";
+  const { storage } = JSON.parse(readFileSync(process.argv[1], "utf8"));
+  const url = new URL(storage.url);
+  const match = /^\/([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)\/releases\/download\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+\.tar)$/.exec(url.pathname);
+  if (storage.type !== "github-release-asset" || url.origin !== "https://github.com" ||
+      url.username || url.password || url.search || url.hash || !match || match[3] !== storage.file) {
+    throw new Error("Invalid archive storage locator");
+  }
+  console.log(match.slice(1).join(" "));
+' "$index")
+read -r repo tag archive <<< "$asset"
+gh release download "$tag" --repo "$repo" --pattern "$archive" --dir "$evidence"
 node scripts/performance/artifacts.mjs verify-archive "$index" "$evidence"
-tar -xf "$evidence/codexia-wave0-2026-10-20.tar" -C "$evidence"
+tar -xf "$evidence/$archive" -C "$evidence"
 node scripts/performance/artifacts.mjs verify "$index" "$evidence"
 ```
 

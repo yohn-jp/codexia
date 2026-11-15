@@ -569,10 +569,9 @@ test("stdio and Streamable HTTP enforce external Assistant admission with a conf
       name: "invoke_action", arguments: { project_id: projectId, action_id: "assistant.future-generation", input: {} },
     });
     assert.equal(errorCode(unknownAssistant, `${name} unknown Assistant action`), "ACTION_UNAVAILABLE");
-    const namedAssistant = await connection.client.callTool({
-      name: "suggest_rewrite", arguments: { project_id: projectId, scene_id: "missing-scene", sentence_index: 0 },
-    });
-    assert.equal(errorCode(namedAssistant, `${name} Assistant named tool`), "MODULE_UNAVAILABLE");
+    const catalog = await connection.client.listTools();
+    assert.equal(catalog.tools.some(tool => tool.name === "suggest_rewrite"), false,
+      `${name} exposed the retired Assistant rewrite tool`);
   }
 
   const bearerAction = await apiRequest(host, `/api/projects/${encodeURIComponent(projectId)}/actions/assistant.future-generation`, {

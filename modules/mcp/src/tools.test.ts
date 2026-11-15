@@ -31,6 +31,13 @@ function setup(actions: ActionDescriptor[], respond: (id: string, input: unknown
 
 const descriptor = (id: string, module: ActionDescriptor["module"], effect: ActionDescriptor["effect"] = "compute"): ActionDescriptor => ({ id, module, effect });
 
+test("external MCP never registers the frozen Assistant rewrite tool", () => {
+  const { tools, calls } = setup([descriptor("assistant.rewrite", "assistant"), descriptor("nlp.analyze", "nlp")],
+    () => { throw new Error("Assistant must not be invoked"); });
+  assert.equal(tools.has("suggest_rewrite"), false);
+  assert.deepEqual(calls, []);
+});
+
 test("search_lexical works without Semantic and delegates bounded non-semantic search", async () => {
   const { tools, calls } = setup([descriptor("search.query", "search")], () => ({
     ok: true, snapshot, data: { results: [], semanticResults: [], warnings: [] },
