@@ -492,6 +492,8 @@ export interface PersistenceReader {
   listModuleRecords(projectId: ProjectId, moduleId?: string): Promise<readonly ModuleRecord[]>;
   getProject(projectId: ProjectId): Promise<Project | undefined>;
   listProjects(limit?: number): Promise<readonly Project[]>;
+  /** Bounded, stable project-ID inventory for explicit startup compatibility checks. */
+  listProjectIds(limit: number, after?: ProjectId): Promise<readonly ProjectId[]>;
   getDocument(projectId: ProjectId, documentId: DocumentId): Promise<Document | undefined>;
   listDocuments(projectId: ProjectId, parentId?: DocumentId | null, limit?: number): Promise<readonly Document[]>;
   getRevision(projectId: ProjectId, documentId: DocumentId, revisionId: RevisionId): Promise<DocumentRevision | undefined>;

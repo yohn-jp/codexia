@@ -2294,6 +2294,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
       const assignedProject = await persistenceOptions.persistence!.read((reader) => reader.getProject(projectId as import("@codexia/persistence-contracts").ProjectId));
       if (assignedProject?.id !== projectId) throw new Error("CODEXIA_HOSTED_PROJECT_ID must identify an existing PostgreSQL project");
       const store = new CoreStore({ persistence: persistenceOptions.persistence! });
+      await store.prepareSnapshotReuse(projectId);
       return await startServer({
         store,
         ...persistenceOptions,
@@ -2315,6 +2316,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   const persistenceOptions = await postgresPersistenceOptions();
   try {
     const store = new CoreStore({ persistence: persistenceOptions.persistence! });
+    await store.prepareSnapshotReuse();
     return await startServer({
       store,
       ...persistenceOptions,

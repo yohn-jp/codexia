@@ -15,6 +15,7 @@ import type {
 } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import { CoreStore } from "./index.js";
+import YAML from "yaml";
 
 const connectionString = process.env.CODEXIA_TEST_DATABASE_URL;
 if (!connectionString) throw new Error("CODEXIA_TEST_DATABASE_URL is required for Core PostgreSQL snapshot reuse tests");
@@ -304,4 +305,38 @@ test("every persisted snapshot dependency advances the project version, while au
     expectedVersion: null,
   }));
   assert.equal((await persistence.read((reader) => reader.getProject(project.id as ProjectId)))?.version, beforeAuthority);
+});
+
+test("startup certifies equivalent legacy snapshots and transitions only incompatible current projections", async () => {
+  const legacyModule = "core.authority.snapshots";
+  async function seedLegacy(compatible: boolean) {
+    const project = await createProject();
+    const snapshot = {projectId:project.id, projectVersion:project.version};
+    const file = (content: string) => ({content,encoding:"utf8",revision:createHash("sha256").update(content).digest("hex")});
+    const files: Record<string, ReturnType<typeof file>> = {
+      "meta/project.yaml": file(YAML.stringify({title:project.title,...project.settings})),
+    };
+    const knowledgePath = "meta/scriptorium/knowledge-context/v1.json";
+    if (compatible) files[knowledgePath] = file(JSON.stringify({version:1,projectId:project.id,documentMappings:[],entries:[],nodeLimitReached:false}));
+    await persistence.transaction(tx => tx.saveModuleRecord({projectId:project.id,moduleId:legacyModule,key:`snapshot:${project.version}`,value:{snapshot,project,documents:[],files},expectedVersion:null}));
+    return {project,snapshot,knowledgePath};
+  }
+  const compatible = await seedLegacy(true);
+  const incompatible = await seedLegacy(false);
+  const store = new CoreStore({persistence});
+  await assert.rejects(store.reader(incompatible.project.id), {code:"snapshot_unavailable"});
+  assert.equal((await store.observe(incompatible.project.id)).snapshot.projectVersion, incompatible.project.version);
+  const oldPinned = await store.reader(incompatible.project.id,incompatible.snapshot);
+  assert.equal(await oldPinned.read(incompatible.knowledgePath), null);
+  await store.prepareSnapshotReuse(compatible.project.id);
+  assert.deepEqual((await store.reader(compatible.project.id)).snapshot, compatible.snapshot);
+  assert.equal((await store.observe(incompatible.project.id)).snapshot.projectVersion, incompatible.project.version);
+  await Promise.all([store.prepareSnapshotReuse(incompatible.project.id),store.prepareSnapshotReuse(incompatible.project.id)]);
+  const current = await store.reader(incompatible.project.id);
+  assert.equal(current.snapshot.projectVersion,incompatible.project.version+1);
+  assert.ok(await current.read(incompatible.knowledgePath));
+  assert.equal(await (await store.reader(incompatible.project.id,incompatible.snapshot)).read(incompatible.knowledgePath),null);
+  assert.deepEqual(await (await store.reader(incompatible.project.id,incompatible.snapshot)).listRevisions(),await oldPinned.listRevisions());
+  await store.prepareSnapshotReuse(incompatible.project.id);
+  assert.equal((await store.observe(incompatible.project.id)).snapshot.projectVersion,incompatible.project.version+1);
 });

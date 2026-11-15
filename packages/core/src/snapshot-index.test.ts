@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Document, DocumentId, ProjectId } from "@codexia/persistence-contracts";
-import { createSnapshotIndex, type SnapshotIndexFile } from "./snapshot-index.js";
+import { createSnapshotIndex, estimateSnapshotIndexBytes, type SnapshotIndexFile } from "./snapshot-index.js";
 
 const projectId = "project-index" as ProjectId;
 
@@ -73,4 +73,22 @@ test("snapshot indexes preserve actual ID lookup precedence when logical IDs col
   assert.equal(index.firstDocumentByLookupId.get("shared-id"), first);
   assert.equal(index.logicalDocumentIds.has("shared-id"), true);
   assert.equal(index.logicalDocumentIds.has("second-logical"), true);
+});
+
+test("index counts a non-scene first match and accounts for retained variable-length document data", () => {
+  const note = document("note-db", "note", "補足", null, "01");
+  const scene = document("scene-db", "scene", "Scene", null, "02");
+  const files = {
+    "metadata/note.yaml": file("id: shared-logical\n", note.id, true),
+    "body/note.md": file("補足 😀", note.id),
+    "metadata/scene.yaml": file("id: shared-logical\n", scene.id, true),
+    "body/scene.md": file("different", scene.id),
+  };
+  const index = createSnapshotIndex([note, scene], files);
+  assert.equal(index.firstDocumentByLookupId.get("shared-logical"), note);
+  assert.equal(index.sceneCharacterCountsByDocumentId.get(note.id), 3);
+  const oversizedTitle = "界".repeat(3 * 1024 * 1024);
+  const oversized = createSnapshotIndex([{...note, title: oversizedTitle}, scene], files);
+  assert.ok(estimateSnapshotIndexBytes(oversized) > 4 * 1024 * 1024);
+  assert.ok(estimateSnapshotIndexBytes(oversized) - estimateSnapshotIndexBytes(index) >= 2 * (oversizedTitle.length - note.title.length));
 });

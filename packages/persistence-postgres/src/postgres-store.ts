@@ -540,6 +540,12 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows.map(mapProject);
   }
 
+  async listProjectIds(limit: number, after?: ProjectId): Promise<readonly ProjectId[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError("Project page size must be between 1 and 200");
+    const result = await this.query("SELECT id FROM project WHERE ($2::uuid IS NULL OR id > $2::uuid) ORDER BY id LIMIT $1", [limit, after ?? null]);
+    return result.rows.map(row => asString(row.id) as ProjectId);
+  }
+
   async getDocument(projectId: ProjectId, documentId: DocumentId): Promise<Document | undefined> {
     const result = await this.query("SELECT * FROM document WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL", [projectId, documentId]);
     return result.rows[0] ? mapDocument(result.rows[0]) : undefined;

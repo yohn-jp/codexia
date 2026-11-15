@@ -133,6 +133,12 @@ type Manifest = { snapshot: SnapshotId; files: Record<string, StoredFile>; docum
 type SnapshotIndexEntry = { index: SnapshotIndex; bytes: number };
 const AUTHORITY = "core.authority.proposals";
 const SNAPSHOTS = "core.authority.snapshots";
+// Increment this proof epoch when the canonical projected bytes change. Older
+// pinned snapshots retain their original key and are never rewritten.
+const SNAPSHOT_PROJECTION_EPOCH = 1;
+function projectionProofKey(version: number): string {
+  return `proof:projection:${SNAPSHOT_PROJECTION_EPOCH}:snapshot:${version}`;
+}
 const ARTIFACTS = "core.artifacts";
 const PATHS = "core.document-paths";
 const MAX_SNAPSHOT_INDEX_ENTRIES = 8;
@@ -272,7 +278,16 @@ export class CoreStore implements MutationCoordinator {
       if (pinned && project.version !== pinned.projectVersion) fail(409,"snapshot_unavailable","The requested immutable project snapshot is unavailable");
       if (!pinned) {
         const saved = await reader.getModuleRecord(pid(projectId),SNAPSHOTS,`snapshot:${project.version}`);
-        if (saved) return { manifest: storedManifest(saved.value, projectId, project.version), needsPersistence: false };
+        if (saved) {
+          const manifest = storedManifest(saved.value, projectId, project.version);
+          const proof = await reader.getModuleRecord(pid(projectId), SNAPSHOTS, projectionProofKey(project.version));
+          if (proof?.value.snapshotRecordVersion === saved.version) return { manifest, needsPersistence: false };
+          const fresh = await this.currentManifest(reader, projectId, project);
+          if (manifestFingerprint(manifest) !== manifestFingerprint(fresh)) {
+            fail(409, "snapshot_unavailable", "Current snapshot requires the projection compatibility transition before reuse");
+          }
+          return { manifest: fresh, needsPersistence: true };
+        }
       }
       return { manifest: await this.currentManifest(reader,projectId,project), needsPersistence: true };
     });
@@ -305,22 +320,96 @@ export class CoreStore implements MutationCoordinator {
   }
 
   private async persistManifest(manifest: Manifest): Promise<Manifest> {
-    const key = `snapshot:${manifest.snapshot.projectVersion}`;
+    const projectId = pid(manifest.snapshot.projectId);
+    const version = manifest.snapshot.projectVersion;
+    const key = `snapshot:${version}`;
     return this.persistence.transaction(async (tx) => {
+      let record;
       try {
-        await tx.saveModuleRecord({projectId:pid(manifest.snapshot.projectId),moduleId:SNAPSHOTS,key,value:manifest as unknown as JsonObject,expectedVersion:null});
-        return manifest;
+        record = await tx.saveModuleRecord({projectId,moduleId:SNAPSHOTS,key,value:manifest as unknown as JsonObject,expectedVersion:null});
       } catch (error) {
         if (!(error instanceof PersistenceError) || error.code !== "conflict") throw error;
-        const winner = await tx.getModuleRecord(pid(manifest.snapshot.projectId), SNAPSHOTS, key);
-        if (!winner) throw error;
-        const saved = storedManifest(winner.value, manifest.snapshot.projectId, manifest.snapshot.projectVersion);
-        if (manifestFingerprint(saved) !== manifestFingerprint(manifest)) {
-          fail(409, "snapshot_unavailable", "Concurrent snapshot builders produced different immutable project snapshots");
-        }
-        return saved;
+        record = await tx.getModuleRecord(projectId, SNAPSHOTS, key);
+        if (!record) throw error;
       }
+      const saved = storedManifest(record.value, projectId, version);
+      if (manifestFingerprint(saved) !== manifestFingerprint(manifest)) {
+        fail(409, "snapshot_unavailable", "Concurrent snapshot builders produced different immutable project snapshots");
+      }
+      // The immutable record and its proof are committed together, under the
+      // existing project lock. Proofs are scoped to the exact record version.
+      const proofKey = projectionProofKey(version);
+      const proof = await tx.getModuleRecord(projectId, SNAPSHOTS, proofKey);
+      if (!proof) {
+        await tx.saveModuleRecord({projectId,moduleId:SNAPSHOTS,key:proofKey,value:{snapshotRecordVersion:record.version},expectedVersion:null});
+      } else if (proof.value.snapshotRecordVersion !== record.version) {
+        fail(409, "snapshot_unavailable", "Stored snapshot compatibility proof does not match its immutable record");
+      }
+      return saved;
     });
+  }
+
+  /**
+   * Explicit startup compatibility transition, before accepting requests.
+   * A projection change is a new semantic snapshot version, not a content edit.
+   * Equivalent legacy snapshots acquire a proof; incompatible snapshots retain
+   * their original pinned bytes and the project advances under its version fence.
+   * Ordinary reads never perform this transition.
+   */
+  async prepareSnapshotReuse(projectId?: string): Promise<void> {
+    if (projectId !== undefined) {
+      await this.prepareProjectSnapshotReuse(pid(projectId));
+      return;
+    }
+    let after: ProjectId | undefined;
+    for (;;) {
+      const ids = await this.persistence.read(reader => reader.listProjectIds(100, after));
+      for (const id of ids) await this.prepareProjectSnapshotReuse(id);
+      if (ids.length < 100) return;
+      after = ids[ids.length - 1]!;
+    }
+  }
+
+  private async prepareProjectSnapshotReuse(projectId: ProjectId): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const legacy = await this.persistence.read(async reader => {
+        const project = await reader.getProject(projectId);
+        if (!project) fail(404, "project_not_found", "Project not found");
+        const record = await reader.getModuleRecord(projectId, SNAPSHOTS, `snapshot:${project.version}`);
+        if (!record) return null;
+        const proof = await reader.getModuleRecord(projectId, SNAPSHOTS, projectionProofKey(project.version));
+        if (proof?.value.snapshotRecordVersion === record.version) return null;
+        const saved = storedManifest(record.value, projectId, project.version);
+        const fresh = await this.currentManifest(reader, projectId, project);
+        return { version: project.version, recordVersion: record.version, fresh,
+          equivalent: manifestFingerprint(saved) === manifestFingerprint(fresh) };
+      });
+      if (!legacy) return;
+      if (legacy.equivalent) {
+        await this.persistManifest(legacy.fresh);
+        return;
+      }
+      try {
+        await this.persistence.transaction(async tx => {
+          await tx.assertProjectVersion(projectId, legacy.version);
+          const record = await tx.getModuleRecord(projectId, SNAPSHOTS, `snapshot:${legacy.version}`);
+          if (!record || record.version !== legacy.recordVersion) {
+            fail(409, "snapshot_unavailable", "Legacy snapshot changed during the compatibility transition");
+          }
+          const proof = await tx.getModuleRecord(projectId, SNAPSHOTS, projectionProofKey(legacy.version));
+          if (proof) fail(409, "snapshot_unavailable", "Incompatible snapshot has an unexpected compatibility proof");
+          // The projected bytes changed: allocate a new SnapshotId while
+          // preserving manuscript, metadata, and every old pinned record.
+          await tx.updateProject({projectId, expectedVersion:legacy.version});
+        });
+        return;
+      } catch (error) {
+        if (!(error instanceof PersistenceError) || error.code !== "conflict") throw error;
+        // A concurrent content mutation or startup transition advanced the
+        // version. Re-read the current project instead of bumping it again.
+      }
+    }
+    fail(409, "snapshot_unavailable", "Project changed repeatedly during the projection compatibility transition");
   }
   async reader(projectId: string,pinned?: SnapshotId): Promise<SnapshotReader> { return makeReader(await this.manifest(projectId,pinned)); }
   async observe(projectId: string): Promise<ProjectObservation> { const project = await this.persistence.read((reader)=>reader.getProject(pid(projectId))); if (!project) fail(404,"project_not_found","Project not found"); return {snapshot:{projectId,projectVersion:project.version},observedAt:new Date().toISOString(),state:"fresh"}; }

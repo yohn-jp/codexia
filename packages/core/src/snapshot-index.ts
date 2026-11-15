@@ -93,10 +93,12 @@ export function createSnapshotIndex(
         scenes.push(document);
         scenesByChapterId.set(document.parentId, scenes);
       }
-      const bodyPath = pathsByDocumentId.get(document.id)?.bodyPath;
-      const bodyContent = bodyPath ? files[bodyPath]!.content : "";
-      sceneCharacterCountsByDocumentId.set(document.id, countNonWhitespaceCodePoints(manuscriptBody(bodyContent)));
     }
+    // A scene's logical ID may resolve to an earlier non-scene document.
+    // Preserve the original first-match statistic for every document kind.
+    const bodyPath = pathsByDocumentId.get(document.id)?.bodyPath;
+    const bodyContent = bodyPath ? files[bodyPath]!.content : "";
+    sceneCharacterCountsByDocumentId.set(document.id, countNonWhitespaceCodePoints(manuscriptBody(bodyContent)));
   }
 
   return {
@@ -115,14 +117,23 @@ export function createSnapshotIndex(
 
 /** Approximate retained index payload; the LRU never retains manuscript or artifact bodies. */
 export function estimateSnapshotIndexBytes(index: SnapshotIndex): number {
-  let bytes = index.documentsById.size * 256;
+  // Account for retained Document strings as well as lookup keys. Use a
+  // conservative UTF-16 payload estimate and fixed map/object overhead.
+  const stringBytes = (value: string): number => value.length * 2;
+  let bytes = 1024;
+  for (const document of index.documentsById.values()) {
+    bytes += 512;
+    for (const value of Object.values(document)) {
+      if (typeof value === "string") bytes += stringBytes(value);
+    }
+  }
   for (const [documentId, logicalId] of index.logicalIdByDocumentId) {
-    bytes += 48 + Buffer.byteLength(documentId) + Buffer.byteLength(logicalId);
+    bytes += 96 + stringBytes(documentId) + stringBytes(logicalId);
   }
   for (const [documentId, paths] of index.pathsByDocumentId) {
-    bytes += 48 + Buffer.byteLength(documentId);
-    if (paths.bodyPath) bytes += Buffer.byteLength(paths.bodyPath);
-    if (paths.metadataPath) bytes += Buffer.byteLength(paths.metadataPath);
+    bytes += 96 + stringBytes(documentId);
+    if (paths.bodyPath) bytes += stringBytes(paths.bodyPath);
+    if (paths.metadataPath) bytes += stringBytes(paths.metadataPath);
   }
   return bytes;
 }
