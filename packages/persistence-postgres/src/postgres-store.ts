@@ -30,6 +30,8 @@ import {
   type KnowledgeAlias,
   type KnowledgeNode,
   type KnowledgeNodeId,
+  type KnowledgeProjectionBatch,
+  type KnowledgeProjectionBatchLimits,
   type KnowledgeRelation,
   type KnowledgeRelationId,
   type LinkAssertionEvidenceCommand,
@@ -62,6 +64,16 @@ import { Pool, type PoolClient, type PoolConfig, type QueryResultRow } from "pg"
 import { applyKnowledgeMerge, knowledgeMergeOperation, planKnowledgeMerge, shouldGenerateSourceNameAlias } from "./knowledge-merge.js";
 
 type DbRow = QueryResultRow;
+
+const KNOWLEDGE_PROJECTION_NODE_BATCH_SIZE = 32;
+const KNOWLEDGE_PROJECTION_EVIDENCE_BATCH_SIZE = 128;
+const KNOWLEDGE_PROJECTION_REVISION_BATCH_SIZE = 32;
+
+function chunks<T>(values: readonly T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let offset = 0; offset < values.length; offset += size) result.push(values.slice(offset, offset + size));
+  return result;
+}
 
 function asString(value: unknown): string {
   if (typeof value === "string") return value;
@@ -648,6 +660,133 @@ class PostgresTransaction implements PersistenceTransaction {
       [projectId, nodeId, limit],
     );
     return result.rows.map(mapKnowledgeRelation);
+  }
+
+  async readKnowledgeProjectionBatch(
+    projectId: ProjectId,
+    nodeIds: readonly KnowledgeNodeId[],
+    limits: KnowledgeProjectionBatchLimits,
+  ): Promise<KnowledgeProjectionBatch> {
+    if (nodeIds.length > 1000) throw validationError("Knowledge projection node batch cannot exceed 1000 nodes");
+    const validLimits: readonly [number, number, string][] = [
+      [limits.aliasesPerNode, 1000, "Knowledge alias"],
+      [limits.relationsPerNode, 1000, "Knowledge relation"],
+      [limits.mentionsPerNode, 500, "Knowledge mention"],
+      [limits.assertionsPerAnchor, 200, "Evidence assertion"],
+    ];
+    for (const [limit, maximum, label] of validLimits) {
+      if (!Number.isInteger(limit) || limit < 1 || limit > maximum) {
+        throw validationError(`${label} page size must be between 1 and ${maximum}`);
+      }
+    }
+
+    const aliases: { nodeId: KnowledgeNodeId; alias: KnowledgeAlias }[] = [];
+    const relations: { nodeId: KnowledgeNodeId; relation: KnowledgeRelation }[] = [];
+    const mentions: MentionLink[] = [];
+    const uniqueNodeIds = [...new Set(nodeIds)];
+    for (const nodeChunk of chunks(uniqueNodeIds, KNOWLEDGE_PROJECTION_NODE_BATCH_SIZE)) {
+      const aliasRows = await this.query(
+        `SELECT selected.node_id AS parent_node_id, alias.*
+         FROM unnest($2::uuid[]) AS selected(node_id)
+         CROSS JOIN LATERAL (
+           SELECT item.* FROM knowledge_alias AS item
+           WHERE item.project_id = $1 AND item.node_id = selected.node_id
+           ORDER BY item.normalized, item.id LIMIT $3
+         ) AS alias
+         ORDER BY selected.node_id, alias.normalized, alias.id`,
+        [projectId, nodeChunk, limits.aliasesPerNode],
+      );
+      for (const row of aliasRows.rows) {
+        aliases.push({ nodeId: asString(row.parent_node_id) as KnowledgeNodeId, alias: mapKnowledgeAlias(row) });
+      }
+
+      const relationRows = await this.query(
+        `SELECT selected.node_id AS parent_node_id, relation.*
+         FROM unnest($2::uuid[]) AS selected(node_id)
+         CROSS JOIN LATERAL (
+           SELECT item.* FROM knowledge_relation AS item
+           WHERE item.project_id = $1 AND (item.source_id = selected.node_id OR item.target_id = selected.node_id)
+           ORDER BY item.type, item.id LIMIT $3
+         ) AS relation
+         ORDER BY selected.node_id, relation.type, relation.id`,
+        [projectId, nodeChunk, limits.relationsPerNode],
+      );
+      for (const row of relationRows.rows) {
+        relations.push({ nodeId: asString(row.parent_node_id) as KnowledgeNodeId, relation: mapKnowledgeRelation(row) });
+      }
+
+      const mentionRows = await this.query(
+        `SELECT mention.*
+         FROM unnest($2::uuid[]) AS selected(node_id)
+         CROSS JOIN LATERAL (
+           SELECT item.* FROM mention_link AS item
+           WHERE item.project_id = $1 AND item.node_id = selected.node_id
+           ORDER BY item.updated_at DESC, item.evidence_id LIMIT $3
+         ) AS mention
+         ORDER BY mention.node_id, mention.updated_at DESC, mention.evidence_id`,
+        [projectId, nodeChunk, limits.mentionsPerNode],
+      );
+      mentions.push(...mentionRows.rows.map(mapMentionLink));
+    }
+
+    const evidenceIds = [...new Set(mentions.map(mention => mention.evidenceId))];
+    const anchors: EvidenceAnchor[] = [];
+    for (const evidenceChunk of chunks(evidenceIds, KNOWLEDGE_PROJECTION_EVIDENCE_BATCH_SIZE)) {
+      const anchorRows = await this.query(
+        "SELECT * FROM text_anchor WHERE project_id = $1 AND id = ANY($2::uuid[]) ORDER BY id",
+        [projectId, evidenceChunk],
+      );
+      anchors.push(...anchorRows.rows.map(mapEvidenceAnchor));
+    }
+
+    const revisionByKey = new Map<string, { documentId: DocumentId; revisionId: RevisionId }>();
+    for (const anchor of anchors) {
+      const key = JSON.stringify([anchor.documentId, anchor.revisionId]);
+      if (!revisionByKey.has(key)) revisionByKey.set(key, { documentId: anchor.documentId, revisionId: anchor.revisionId });
+    }
+    const revisionPairs = [...revisionByKey.values()].sort((left, right) =>
+      left.documentId.localeCompare(right.documentId) || left.revisionId.localeCompare(right.revisionId));
+    const revisions: DocumentRevision[] = [];
+    for (const revisionChunk of chunks(revisionPairs, KNOWLEDGE_PROJECTION_REVISION_BATCH_SIZE)) {
+      const revisionRows = await this.query(
+        `SELECT revision.* FROM unnest($2::uuid[], $3::uuid[]) AS requested(document_id, revision_id)
+         JOIN document_revision AS revision
+           ON revision.project_id = $1 AND revision.document_id = requested.document_id AND revision.id = requested.revision_id
+         ORDER BY requested.document_id, requested.revision_id`,
+        [projectId, revisionChunk.map(pair => pair.documentId), revisionChunk.map(pair => pair.revisionId)],
+      );
+      revisions.push(...revisionRows.rows.map(mapRevision));
+    }
+
+    const assertionEvidence: { evidenceId: EvidenceId; link: AssertionEvidence }[] = [];
+    for (const evidenceChunk of chunks(evidenceIds, KNOWLEDGE_PROJECTION_EVIDENCE_BATCH_SIZE)) {
+      const linkRows = await this.query(
+        `SELECT selected.evidence_id AS parent_evidence_id, link.*
+         FROM unnest($2::uuid[]) AS selected(evidence_id)
+         CROSS JOIN LATERAL (
+           SELECT item.* FROM assertion_evidence AS item
+           WHERE item.project_id = $1 AND item.evidence_id = selected.evidence_id
+           ORDER BY item.assertion_id, item.evidence_role LIMIT $3
+         ) AS link
+         ORDER BY selected.evidence_id, link.assertion_id, link.evidence_role`,
+        [projectId, evidenceChunk, limits.assertionsPerAnchor],
+      );
+      for (const row of linkRows.rows) {
+        assertionEvidence.push({ evidenceId: asString(row.parent_evidence_id) as EvidenceId, link: mapAssertionEvidence(row) });
+      }
+    }
+
+    const assertionIds = [...new Set(assertionEvidence.map(item => item.link.assertionId))].sort();
+    const assertions: Assertion[] = [];
+    for (const assertionChunk of chunks(assertionIds, KNOWLEDGE_PROJECTION_EVIDENCE_BATCH_SIZE)) {
+      const assertionRows = await this.query(
+        "SELECT * FROM assertion WHERE project_id = $1 AND id = ANY($2::uuid[]) ORDER BY id",
+        [projectId, assertionChunk],
+      );
+      assertions.push(...assertionRows.rows.map(mapAssertion));
+    }
+
+    return { aliases, relations, mentions, anchors, revisions, assertionEvidence, assertions };
   }
 
   async getEvidenceAnchor(projectId: ProjectId, evidenceId: EvidenceId): Promise<EvidenceAnchor | undefined> {

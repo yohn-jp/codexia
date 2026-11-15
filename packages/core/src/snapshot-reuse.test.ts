@@ -5,6 +5,7 @@ import type {
   AssertionId,
   DocumentId,
   EvidenceId,
+  JsonObject,
   KnowledgeAliasId,
   KnowledgeNodeId,
   KnowledgeRelationId,
@@ -318,7 +319,7 @@ test("startup certifies equivalent legacy snapshots and transitions only incompa
     };
     const knowledgePath = "meta/scriptorium/knowledge-context/v1.json";
     if (compatible) files[knowledgePath] = file(JSON.stringify({version:1,projectId:project.id,documentMappings:[],entries:[],nodeLimitReached:false}));
-    await persistence.transaction(tx => tx.saveModuleRecord({projectId:project.id,moduleId:legacyModule,key:`snapshot:${project.version}`,value:{snapshot,project,documents:[],files},expectedVersion:null}));
+    await persistence.transaction(tx => tx.saveModuleRecord({projectId:project.id,moduleId:legacyModule,key:`snapshot:${project.version}`,value:{snapshot,project,documents:[],files} as unknown as JsonObject,expectedVersion:null}));
     return {project,snapshot,knowledgePath};
   }
   const compatible = await seedLegacy(true);
@@ -331,7 +332,16 @@ test("startup certifies equivalent legacy snapshots and transitions only incompa
   await store.prepareSnapshotReuse(compatible.project.id);
   assert.deepEqual((await store.reader(compatible.project.id)).snapshot, compatible.snapshot);
   assert.equal((await store.observe(incompatible.project.id)).snapshot.projectVersion, incompatible.project.version);
-  await Promise.all([store.prepareSnapshotReuse(incompatible.project.id),store.prepareSnapshotReuse(incompatible.project.id)]);
+  let release!: () => void;
+  const both = new Promise<void>(resolve => { release = resolve; });
+  let misses = 0;
+  const instrumented = countSnapshotReads(persistence, async () => {
+    if (++misses === 2) release();
+    await both;
+  });
+  const competing = new CoreStore({persistence:instrumented.persistence});
+  await Promise.all([competing.prepareSnapshotReuse(incompatible.project.id),competing.prepareSnapshotReuse(incompatible.project.id)]);
+  assert.ok(misses >= 2);
   const current = await store.reader(incompatible.project.id);
   assert.equal(current.snapshot.projectVersion,incompatible.project.version+1);
   assert.ok(await current.read(incompatible.knowledgePath));
@@ -339,4 +349,31 @@ test("startup certifies equivalent legacy snapshots and transitions only incompa
   assert.deepEqual(await (await store.reader(incompatible.project.id,incompatible.snapshot)).listRevisions(),await oldPinned.listRevisions());
   await store.prepareSnapshotReuse(incompatible.project.id);
   assert.equal((await store.observe(incompatible.project.id)).snapshot.projectVersion,incompatible.project.version+1);
+  const restarted = new CoreStore({persistence});
+  assert.deepEqual((await restarted.reader(incompatible.project.id)).snapshot,current.snapshot);
+  assert.deepEqual(await (await restarted.reader(incompatible.project.id,incompatible.snapshot)).listRevisions(),await oldPinned.listRevisions());
+  const lazyCompatible = await seedLegacy(true);
+  assert.deepEqual((await restarted.reader(lazyCompatible.project.id)).snapshot,lazyCompatible.snapshot);
+  assert.equal((await restarted.observe(lazyCompatible.project.id)).snapshot.projectVersion,lazyCompatible.project.version);
+});
+
+test("writing statistics preserve a non-scene first-match logical identity collision", async () => {
+  const project = await createProject();
+  await persistence.transaction(async tx => {
+    const create = (kind: string,parentId: DocumentId | null,title: string,markdown: string) => tx.createDocument({
+      projectId:project.id,kind,parentId,title,markdown,orderKey:"01",
+      authorId:"synthetic-author",idempotencyKey:randomUUID(),
+    });
+    const note = await create("note",null,"Note","補足 😀");
+    const volume = await create("volume",null,"Volume","");
+    const chapter = await create("chapter",volume.document.id,"Chapter","");
+    const scene = await create("scene",chapter.document.id,"Scene","not the first match");
+    for (const [document,kind] of [[note.document,"note"],[scene.document,"scene"]] as const) {
+      await tx.saveModuleRecord({projectId:project.id,moduleId:"core.document-paths",key:document.id,
+        value:{metadataPath:`metadata/${kind}.yaml`,manuscriptPath:`manuscript/${kind}.md`,metadata:{id:"shared-logical"}},expectedVersion:null});
+    }
+  });
+  const {stats} = await core.writingStatsSnapshot(project.id);
+  assert.equal(stats.sceneById["shared-logical"]?.charCount,3);
+  assert.equal(stats.totalCharCount,3);
 });

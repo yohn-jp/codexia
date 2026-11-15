@@ -292,7 +292,6 @@ export class CoreStore implements MutationCoordinator {
       return { manifest: await this.currentManifest(reader,projectId,project), needsPersistence: true };
     });
     const manifest = resolved.needsPersistence ? await this.persistManifest(resolved.manifest) : resolved.manifest;
-    this.snapshotIndex(manifest);
     return manifest;
   }
 

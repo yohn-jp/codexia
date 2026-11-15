@@ -487,6 +487,23 @@ export interface ChangeSetApplicationResult {
   replayed: boolean;
 }
 
+export interface KnowledgeProjectionBatchLimits {
+  aliasesPerNode: number;
+  relationsPerNode: number;
+  mentionsPerNode: number;
+  assertionsPerAnchor: number;
+}
+
+export interface KnowledgeProjectionBatch {
+  aliases: readonly { nodeId: KnowledgeNodeId; alias: KnowledgeAlias }[];
+  relations: readonly { nodeId: KnowledgeNodeId; relation: KnowledgeRelation }[];
+  mentions: readonly MentionLink[];
+  anchors: readonly EvidenceAnchor[];
+  revisions: readonly DocumentRevision[];
+  assertionEvidence: readonly { evidenceId: EvidenceId; link: AssertionEvidence }[];
+  assertions: readonly Assertion[];
+}
+
 export interface PersistenceReader {
   getModuleRecord(projectId: ProjectId, moduleId: string, key: string): Promise<ModuleRecord | undefined>;
   listModuleRecords(projectId: ProjectId, moduleId?: string): Promise<readonly ModuleRecord[]>;
@@ -508,6 +525,12 @@ export interface PersistenceReader {
   listAssertions(projectId: ProjectId, limit?: number): Promise<readonly Assertion[]>;
   listKnowledgeAliases(projectId: ProjectId, nodeId: KnowledgeNodeId, limit?: number): Promise<readonly KnowledgeAlias[]>;
   listKnowledgeRelations(projectId: ProjectId, nodeId: KnowledgeNodeId, limit?: number): Promise<readonly KnowledgeRelation[]>;
+  /** Optional bounded set read for the immutable Knowledge/Evidence snapshot projection. */
+  readKnowledgeProjectionBatch?(
+    projectId: ProjectId,
+    nodeIds: readonly KnowledgeNodeId[],
+    limits: KnowledgeProjectionBatchLimits,
+  ): Promise<KnowledgeProjectionBatch>;
   getEvidenceAnchor(projectId: ProjectId, evidenceId: EvidenceId): Promise<EvidenceAnchor | undefined>;
   /** All document identities with retained anchors, including logically deleted documents. */
   listEvidenceDocumentIds(projectId: ProjectId, limit?: number): Promise<readonly DocumentId[]>;

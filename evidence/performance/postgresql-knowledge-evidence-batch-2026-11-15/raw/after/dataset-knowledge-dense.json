@@ -1,0 +1,689 @@
+{
+  "schemaVersion": 2,
+  "datasetId": "knowledge-dense",
+  "documentCount": 100,
+  "volumeCount": 1,
+  "chapterCount": 5,
+  "sceneCount": 94,
+  "defaultBodyBytes": 2048,
+  "historyTarget": {
+    "sceneIndex": 1,
+    "additionalRevisions": 5
+  },
+  "knowledge": {
+    "nodes": 100,
+    "aliasesPerNode": 2,
+    "evidencePerNode": 4,
+    "assertionsPerNode": 1
+  },
+  "scenes": [
+    {
+      "index": 1,
+      "name": "scene-0001.md",
+      "title": "Scene 0001",
+      "bodyBytes": 1024,
+      "historyRevisions": 5
+    },
+    {
+      "index": 2,
+      "name": "scene-0002.md",
+      "title": "Scene 0002",
+      "bodyBytes": 102400,
+      "historyRevisions": 0
+    },
+    {
+      "index": 3,
+      "name": "scene-0003.md",
+      "title": "Scene 0003",
+      "bodyBytes": 1048576,
+      "historyRevisions": 0
+    },
+    {
+      "index": 4,
+      "name": "scene-0004.md",
+      "title": "Scene 0004",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 5,
+      "name": "scene-0005.md",
+      "title": "Scene 0005",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 6,
+      "name": "scene-0006.md",
+      "title": "Scene 0006",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 7,
+      "name": "scene-0007.md",
+      "title": "Scene 0007",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 8,
+      "name": "scene-0008.md",
+      "title": "Scene 0008",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 9,
+      "name": "scene-0009.md",
+      "title": "Scene 0009",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 10,
+      "name": "scene-0010.md",
+      "title": "Scene 0010",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 11,
+      "name": "scene-0011.md",
+      "title": "Scene 0011",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 12,
+      "name": "scene-0012.md",
+      "title": "Scene 0012",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 13,
+      "name": "scene-0013.md",
+      "title": "Scene 0013",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 14,
+      "name": "scene-0014.md",
+      "title": "Scene 0014",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 15,
+      "name": "scene-0015.md",
+      "title": "Scene 0015",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 16,
+      "name": "scene-0016.md",
+      "title": "Scene 0016",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 17,
+      "name": "scene-0017.md",
+      "title": "Scene 0017",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 18,
+      "name": "scene-0018.md",
+      "title": "Scene 0018",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 19,
+      "name": "scene-0019.md",
+      "title": "Scene 0019",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 20,
+      "name": "scene-0020.md",
+      "title": "Scene 0020",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 21,
+      "name": "scene-0021.md",
+      "title": "Scene 0021",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 22,
+      "name": "scene-0022.md",
+      "title": "Scene 0022",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 23,
+      "name": "scene-0023.md",
+      "title": "Scene 0023",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 24,
+      "name": "scene-0024.md",
+      "title": "Scene 0024",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 25,
+      "name": "scene-0025.md",
+      "title": "Scene 0025",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 26,
+      "name": "scene-0026.md",
+      "title": "Scene 0026",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 27,
+      "name": "scene-0027.md",
+      "title": "Scene 0027",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 28,
+      "name": "scene-0028.md",
+      "title": "Scene 0028",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 29,
+      "name": "scene-0029.md",
+      "title": "Scene 0029",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 30,
+      "name": "scene-0030.md",
+      "title": "Scene 0030",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 31,
+      "name": "scene-0031.md",
+      "title": "Scene 0031",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 32,
+      "name": "scene-0032.md",
+      "title": "Scene 0032",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 33,
+      "name": "scene-0033.md",
+      "title": "Scene 0033",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 34,
+      "name": "scene-0034.md",
+      "title": "Scene 0034",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 35,
+      "name": "scene-0035.md",
+      "title": "Scene 0035",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 36,
+      "name": "scene-0036.md",
+      "title": "Scene 0036",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 37,
+      "name": "scene-0037.md",
+      "title": "Scene 0037",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 38,
+      "name": "scene-0038.md",
+      "title": "Scene 0038",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 39,
+      "name": "scene-0039.md",
+      "title": "Scene 0039",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 40,
+      "name": "scene-0040.md",
+      "title": "Scene 0040",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 41,
+      "name": "scene-0041.md",
+      "title": "Scene 0041",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 42,
+      "name": "scene-0042.md",
+      "title": "Scene 0042",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 43,
+      "name": "scene-0043.md",
+      "title": "Scene 0043",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 44,
+      "name": "scene-0044.md",
+      "title": "Scene 0044",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 45,
+      "name": "scene-0045.md",
+      "title": "Scene 0045",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 46,
+      "name": "scene-0046.md",
+      "title": "Scene 0046",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 47,
+      "name": "scene-0047.md",
+      "title": "Scene 0047",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 48,
+      "name": "scene-0048.md",
+      "title": "Scene 0048",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 49,
+      "name": "scene-0049.md",
+      "title": "Scene 0049",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 50,
+      "name": "scene-0050.md",
+      "title": "Scene 0050",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 51,
+      "name": "scene-0051.md",
+      "title": "Scene 0051",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 52,
+      "name": "scene-0052.md",
+      "title": "Scene 0052",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 53,
+      "name": "scene-0053.md",
+      "title": "Scene 0053",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 54,
+      "name": "scene-0054.md",
+      "title": "Scene 0054",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 55,
+      "name": "scene-0055.md",
+      "title": "Scene 0055",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 56,
+      "name": "scene-0056.md",
+      "title": "Scene 0056",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 57,
+      "name": "scene-0057.md",
+      "title": "Scene 0057",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 58,
+      "name": "scene-0058.md",
+      "title": "Scene 0058",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 59,
+      "name": "scene-0059.md",
+      "title": "Scene 0059",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 60,
+      "name": "scene-0060.md",
+      "title": "Scene 0060",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 61,
+      "name": "scene-0061.md",
+      "title": "Scene 0061",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 62,
+      "name": "scene-0062.md",
+      "title": "Scene 0062",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 63,
+      "name": "scene-0063.md",
+      "title": "Scene 0063",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 64,
+      "name": "scene-0064.md",
+      "title": "Scene 0064",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 65,
+      "name": "scene-0065.md",
+      "title": "Scene 0065",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 66,
+      "name": "scene-0066.md",
+      "title": "Scene 0066",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 67,
+      "name": "scene-0067.md",
+      "title": "Scene 0067",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 68,
+      "name": "scene-0068.md",
+      "title": "Scene 0068",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 69,
+      "name": "scene-0069.md",
+      "title": "Scene 0069",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 70,
+      "name": "scene-0070.md",
+      "title": "Scene 0070",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 71,
+      "name": "scene-0071.md",
+      "title": "Scene 0071",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 72,
+      "name": "scene-0072.md",
+      "title": "Scene 0072",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 73,
+      "name": "scene-0073.md",
+      "title": "Scene 0073",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 74,
+      "name": "scene-0074.md",
+      "title": "Scene 0074",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 75,
+      "name": "scene-0075.md",
+      "title": "Scene 0075",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 76,
+      "name": "scene-0076.md",
+      "title": "Scene 0076",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 77,
+      "name": "scene-0077.md",
+      "title": "Scene 0077",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 78,
+      "name": "scene-0078.md",
+      "title": "Scene 0078",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 79,
+      "name": "scene-0079.md",
+      "title": "Scene 0079",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 80,
+      "name": "scene-0080.md",
+      "title": "Scene 0080",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 81,
+      "name": "scene-0081.md",
+      "title": "Scene 0081",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 82,
+      "name": "scene-0082.md",
+      "title": "Scene 0082",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 83,
+      "name": "scene-0083.md",
+      "title": "Scene 0083",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 84,
+      "name": "scene-0084.md",
+      "title": "Scene 0084",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 85,
+      "name": "scene-0085.md",
+      "title": "Scene 0085",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 86,
+      "name": "scene-0086.md",
+      "title": "Scene 0086",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 87,
+      "name": "scene-0087.md",
+      "title": "Scene 0087",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 88,
+      "name": "scene-0088.md",
+      "title": "Scene 0088",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 89,
+      "name": "scene-0089.md",
+      "title": "Scene 0089",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 90,
+      "name": "scene-0090.md",
+      "title": "Scene 0090",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 91,
+      "name": "scene-0091.md",
+      "title": "Scene 0091",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 92,
+      "name": "scene-0092.md",
+      "title": "Scene 0092",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 93,
+      "name": "scene-0093.md",
+      "title": "Scene 0093",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    },
+    {
+      "index": 94,
+      "name": "scene-0094.md",
+      "title": "Scene 0094",
+      "bodyBytes": 2048,
+      "historyRevisions": 0
+    }
+  ],
+  "fixtureId": "736a9df8d85b6765e9477ad4afd192479c314b9d3197cdbd609f73e0503c2546",
+  "fixtureSha256": "736a9df8d85b6765e9477ad4afd192479c314b9d3197cdbd609f73e0503c2546",
+  "transport": {
+    "kind": "synthetic-git",
+    "commit": "fdca1beb7797ba55b97246b4ae3857f62dbf5276",
+    "trackedFiles": 95,
+    "bytes": 1352378
+  },
+  "documentBodyBytes": 1338368,
+  "generatedBy": "scripts/performance/dataset.mjs"
+}
