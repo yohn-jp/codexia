@@ -204,6 +204,10 @@ test("Knowledge relation pagination keeps the forty-first fetched relation actio
   expect(relations).toHaveLength(41);
   const last = relations[40]!;
   await page.reload();
+  // Wait for the persisted document and recovery journal to finish activation
+  // before requesting a guarded workspace layout transition.
+  await expect(manuscriptEditor(page)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "日本語の原稿", exact: true })).toBeVisible();
   await openResearchInspector(page);
   await page.getByLabel("Text AnchorのKnowledge先").selectOption(source);
   const context = page.getByRole("region", { name: "Knowledge詳細" });
