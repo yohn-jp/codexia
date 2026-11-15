@@ -14,7 +14,7 @@ export const WORK_ARCHIVE_FORMAT = "codexia-work/v1" as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const id = z.string().regex(UUID);
 const nonEmpty = z.string().min(1).max(512);
-const jsonObject = z.record(z.unknown());
+const jsonObject = z.record(z.string(), z.unknown());
 const bounded = <T extends z.ZodTypeAny>(schema: T, limit: number) => z.array(schema).max(limit);
 const documentSchema = z.object({
   id, parentId: id.nullable(), kind: nonEmpty, title: nonEmpty, orderKey: z.string().max(512),
