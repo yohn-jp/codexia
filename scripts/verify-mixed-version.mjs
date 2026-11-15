@@ -24,9 +24,19 @@ export function assertDisposableDatabase(value) {
   assert.ok(value, 'Set CODEXIA_E2E_DATABASE_URL to a disposable loopback database');
   const url = new URL(value);
   assert.ok(['postgres:', 'postgresql:'].includes(url.protocol) &&
-    ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) &&
+    ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) && !url.search && !url.hash &&
     /^\/codexia_e2e_compat_[a-z0-9_]+$/u.test(url.pathname),
   'Use a disposable loopback codexia_e2e_compat_* database');
+}
+
+export function assertIsolatedEnvironment(env) {
+  for (const name of ['CODEXIA_E2E_BASE_URL', 'CODEXIA_BASE_URL', 'CODEXIA_E2E_EXTERNAL_DATABASE',
+    'CODEXIA_E2E_TEST_FILE', 'CODEXIA_E2E_STATE_DIR', 'CODEXIA_E2E_COVERAGE_FILE',
+    'CODEXIA_E2E_COMPAT_FRONTEND_DIR', 'CODEXIA_E2E_PROJECT_TITLE',
+    'CODEXIA_BROWSER_MODULE_PROFILE_PATH', 'SCRIPTORIUM_BROWSER_MODULE_PROFILE_PATH',
+    'CODEXIA_STANDALONE_IDENTITY']) {
+    assert.ok(!env[name], 'Unset ' + name + ' for isolated mixed-version verification');
+  }
 }
 
 function git(cwd, ...args) {
@@ -52,11 +62,7 @@ function main() {
   assert.notEqual(previous, realpathSync(root), 'Use a separate prior source worktree');
   assert.equal(realpathSync(git(previous, 'rev-parse', '--show-toplevel')), previous, 'Use the prior repository root');
   assertDisposableDatabase(process.env.CODEXIA_E2E_DATABASE_URL);
-  for (const name of ['CODEXIA_E2E_BASE_URL', 'CODEXIA_BASE_URL', 'CODEXIA_E2E_EXTERNAL_DATABASE',
-    'CODEXIA_E2E_TEST_FILE', 'CODEXIA_E2E_STATE_DIR', 'CODEXIA_E2E_COVERAGE_FILE',
-    'CODEXIA_E2E_COMPAT_FRONTEND_DIR', 'CODEXIA_E2E_PROJECT_TITLE']) {
-    assert.ok(!process.env[name], 'Unset ' + name + ' for isolated mixed-version verification');
-  }
+  assertIsolatedEnvironment(process.env);
   const currentSha = cleanSource(root), priorSha = cleanSource(previous);
   assert.notEqual(currentSha, priorSha, 'Use distinct prior and candidate sources');
   git(root, 'merge-base', '--is-ancestor', priorSha, currentSha);
