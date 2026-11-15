@@ -59,14 +59,21 @@ async function openReview(page: Page, mode: "desktop" | "mobile") {
     if (await panelMenu.evaluate((element: HTMLDetailsElement) => element.open)) await menu.click();
     await expect(panelMenu).not.toHaveAttribute("open", "");
   } else {
-    await page.getByRole("button", { name: /道具/u }).click();
+    await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "レビュー", exact: true }).click();
   }
   await expect(page.getByRole("heading", { name: "変更提案" })).toBeVisible();
 }
 
 async function returnToEditor(page: Page, mode: "desktop" | "mobile") {
-  if (mode === "desktop") await page.getByRole("navigation", { name: "主な作業" }).getByRole("button", { name: "執筆", exact: true }).click();
+  if (mode === "desktop") await page.getByRole("toolbar", { name: "ワークスペース配置" }).getByRole("button", { name: "執筆", exact: true }).click();
   else await page.getByRole("button", { name: /書く/u }).click();
+}
+
+async function openProjectCreator(page: Page) {
+  const outline = page.locator('[data-workspace-panel="outline"]');
+  const disclosure = outline.locator(".pg-library-create");
+  if (!await disclosure.evaluate((element) => (element as HTMLDetailsElement).open)) await disclosure.locator("summary").click();
+  return outline.getByLabel("作品名");
 }
 
 for (const mode of ["desktop", "mobile"] as const) {
@@ -106,7 +113,7 @@ for (const mode of ["desktop", "mobile"] as const) {
       else await route.continue();
     });
     await page.getByRole("button", { name: "承認済み提案を適用" }).click();
-    await expect(page.getByRole("alert")).toContainText("同じChangeSet version");
+    await expect(page.locator(".native-review-message")).toContainText("適用receiptはまだ確認できません。再試行は同じChangeSet versionで行います。");
     await page.getByRole("button", { name: "承認済み提案を適用" }).click();
     await expect(page.getByRole("region", { name: "適用receipt" })).toBeVisible();
     expect(applyVersions).toEqual([2, 2]);
@@ -214,8 +221,8 @@ test("project switch fences a late native list response and read-only sessions e
   await expect.poll(() => held).toBe(true);
   await page.getByRole("tab", { name: "作品と構成" }).click();
   const targetTitle = `切替先 ${crypto.randomUUID()}`;
-  await page.getByLabel("新しい作品").fill(targetTitle);
-  await page.getByRole("button", { name: "作品を作成" }).click();
+  await (await openProjectCreator(page)).fill(targetTitle);
+  await page.locator('[data-workspace-panel="outline"]').locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
   await expect(page.locator("body")).toContainText(targetTitle);
   release();
   const reviewTab = page.getByRole("tab", { name: "提案レビュー" });

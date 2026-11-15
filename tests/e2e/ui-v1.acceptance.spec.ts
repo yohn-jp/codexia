@@ -195,6 +195,8 @@ test("UX canon preserves focus and recovery when journal storage fails and retur
 test("UX canon keeps explicit shells usable with long Japanese titles and enlarged text", async ({ page }) => {
   for (const mode of ["desktop", "mobile"] as const) {
     await page.setViewportSize({ width: mode === "mobile" ? 390 : 1280, height: 900 }); await createWritingFixture(page, mode, "長い日本語の章題".repeat(8));
+    const displayMenu = page.locator(".pg-editor-display-menu");
+    if (!await displayMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await displayMenu.locator("summary").click();
     await page.getByLabel("原稿の文字サイズ").fill("24"); await editor(page).fill("大きな文字でも読み書きできる。".repeat(10));
     await expect(editor(page)).toHaveCSS("font-size", "24px");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
@@ -219,10 +221,10 @@ test("Full WebKit terminology stays safe across a held native Shell departure wi
   await createWritingFixture(page); const text = "東京《とうきょう》の用語と変換を保持する。";
   await editor(page).fill(text); await expect(page.getByText("IndexedDB回復Journalに保存済み", { exact: true })).toBeVisible();
   await editor(page).dispatchEvent("compositionstart", { data: "とうきょう" });
-  await page.getByRole("button", { name: "モバイルUIへ" }).click();
+  await page.getByRole("button", { name: "モバイル ↗" }).click();
   await expect(page).toHaveURL(/desktop/u); await expectMarkdown(page, text);
   await editor(page).dispatchEvent("compositionend", { data: "東京" });
-  await page.getByRole("button", { name: "モバイルUIへ" }).click();
+  await page.getByRole("button", { name: "モバイル ↗" }).click();
   await expect(page).toHaveURL(/mobile/u);
   await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "書く", exact: true }).click();
   await expectMarkdown(page, text);

@@ -1147,13 +1147,13 @@ test("desktop activity stays selected on denied navigation and narrow appearance
   await openFixtureScene(page, "desktop");
   const editor = page.getByRole("textbox", { name: "本文", exact: true });
   await editor.click();
-  const navigation = page.getByRole("navigation", { name: "主な作業" });
+  const navigation = page.getByRole("toolbar", { name: "ワークスペース配置" });
   const writing = navigation.getByRole("button", { name: "執筆", exact: true });
   const review = navigation.getByRole("button", { name: "レビュー", exact: true });
   await expect(writing).toHaveAttribute("aria-pressed", "true");
   await editor.evaluate(element => element.dispatchEvent(new CompositionEvent("compositionstart", { data: "にほんご", bubbles: true })));
   await review.click();
-  await expect(page.locator(".st-workspace-message")).toContainText("current panel layout is unchanged");
+  await expect(page.locator(".st-workspace-message")).toContainText("パネル配置は変更していません");
   await expect(writing).toHaveAttribute("aria-pressed", "true");
   await expect(review).toHaveAttribute("aria-pressed", "false");
   await editor.evaluate(element => element.dispatchEvent(new CompositionEvent("compositionend", { data: "日本語", bubbles: true })));
