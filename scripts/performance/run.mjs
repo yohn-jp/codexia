@@ -105,7 +105,7 @@ async function main() {
     browserExecutable, browserSizes, selectedDatasets: selected,
     instrumentation: { version: 2, processWrappers: ['pg Client.query', 'pg Pool.connect', 'readFile', 'Git process'],
       pgLockWait: 'pg_stat_activity wait_event_type polling on a separate observer connection',
-      sqlRowsBytes: 'PostgreSQL returned rows, affected-row counts and serialized returned-row bytes',
+      sqlRowsBytes: 'PostgreSQL returned rows, driver rowCount and serialized returned-row bytes',
       setupExcluded: ['migration', 'fixture generation', 'PostgreSQL seeding', 'browser/API startup'] } };
   await save(join(results, 'environment.json'), environment);
   let incomplete = false;

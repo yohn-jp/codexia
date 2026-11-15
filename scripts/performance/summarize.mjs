@@ -19,7 +19,7 @@ export function summarizeCore(report) {
       poolAcquireMs: sampleDistribution(rows, row => row.poolAcquireMs),
       sqlQueries: sampleDistribution(rows, row => row.counters?.pgQueries),
       sqlRows: sampleDistribution(rows, row => row.counters?.pgRows),
-      sqlRowsAffected: sampleDistribution(rows, row => row.counters?.pgRowsAffected),
+      sqlRowCount: sampleDistribution(rows, row => row.counters?.pgRowCount),
       sqlResultBytes: sampleDistribution(rows, row => row.counters?.pgResultBytes),
       transactionWallMs: sampleDistribution(rows, row => row.transactionWallMs),
       lockBearingStatementWallMs: sampleDistribution(rows, row => row.lockBearingStatementWallMs),
@@ -70,7 +70,7 @@ export function summarizeBrowser(report) {
       appWallMs: sampleDistribution(rows, row => row.appWallMs ?? row.ms),
       sqlQueries: sampleDistribution(rows, row => row.server?.queryMetrics?.pgQueries),
       sqlRows: sampleDistribution(rows, row => row.server?.queryMetrics?.pgRows),
-      sqlRowsAffected: sampleDistribution(rows, row => row.server?.queryMetrics?.pgRowsAffected),
+      sqlRowCount: sampleDistribution(rows, row => row.server?.queryMetrics?.pgRowCount),
       poolAcquireMs: sampleDistribution(rows, row => row.server?.queryMetrics?.pgPoolAcquireMs),
       sqlResultBytes: sampleDistribution(rows, row => row.server?.queryMetrics?.pgResultBytes),
       transactionWallMs: sampleDistribution(rows, row => row.server?.queryMetrics?.pgTransactionWallMs),
@@ -116,15 +116,15 @@ export async function summarize(directory) {
   }
   await save(join(directory, 'summary.json'), result);
   const fmt = value => value == null ? 'NOT_CHECKED' : Number(value).toFixed(2);
-  const lines = ['| Dataset / operation | Worker status | n | App p50 ms | App p95 ms | SQL queries p50 | SQL rows returned p50 | SQL rows affected p50 | SQL round trip p50 ms | SQL result bytes p50 | Transaction p95 ms | Lock-bearing tx p95 ms | Lock wait observed p95 ms | CPU p50 ms | RSS max MiB |',
+  const lines = ['| Dataset / operation | Worker status | n | App p50 ms | App p95 ms | SQL queries p50 | SQL rows returned p50 | SQL driver rowCount p50 | SQL round trip p50 ms | SQL result bytes p50 | Transaction p95 ms | Lock-bearing tx p95 ms | Lock wait observed p95 ms | CPU p50 ms | RSS max MiB |',
     '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'];
   for (const [file, report] of Object.entries(result.core)) for (const [operation, data] of Object.entries(report.operations)) {
-    lines.push(`| ${file.replace('.json', '')} / ${operation} | ${report.status} | ${data.appWallMs.n} | ${fmt(data.appWallMs.p50)} | ${fmt(data.appWallMs.p95)} | ${fmt(data.sqlQueries.p50)} | ${fmt(data.sqlRows.p50)} | ${fmt(data.sqlRowsAffected.p50)} | ${fmt(data.sqlRoundTripMs.p50)} | ${fmt(data.sqlResultBytes.p50)} | ${fmt(data.transactionWallMs.p95)} | ${fmt(data.lockBearingTransactionWallMs.p95)} | ${fmt(data.lockWaitObservedMs.p95)} | ${fmt(data.nodeCpuMs.p50)} | ${fmt(data.rssMaxBytes / 1048576)} |`);
+    lines.push(`| ${file.replace('.json', '')} / ${operation} | ${report.status} | ${data.appWallMs.n} | ${fmt(data.appWallMs.p50)} | ${fmt(data.appWallMs.p95)} | ${fmt(data.sqlQueries.p50)} | ${fmt(data.sqlRows.p50)} | ${fmt(data.sqlRowCount.p50)} | ${fmt(data.sqlRoundTripMs.p50)} | ${fmt(data.sqlResultBytes.p50)} | ${fmt(data.transactionWallMs.p95)} | ${fmt(data.lockBearingTransactionWallMs.p95)} | ${fmt(data.lockWaitObservedMs.p95)} | ${fmt(data.nodeCpuMs.p50)} | ${fmt(data.rssMaxBytes / 1048576)} |`);
   }
-  lines.push('', '| Browser dataset / operation | Worker status | n | App p50 / p95 ms | SQL queries p50 | SQL rows returned p50 | SQL rows affected p50 | SQL result bytes p50 | Transaction p95 ms | Lock-bearing tx p95 ms | Lock wait observed p95 ms | API CPU p50 ms | API RSS max MiB | Browser CPU p50 ms | Browser RSS max MiB |',
+  lines.push('', '| Browser dataset / operation | Worker status | n | App p50 / p95 ms | SQL queries p50 | SQL rows returned p50 | SQL driver rowCount p50 | SQL result bytes p50 | Transaction p95 ms | Lock-bearing tx p95 ms | Lock wait observed p95 ms | API CPU p50 ms | API RSS max MiB | Browser CPU p50 ms | Browser RSS max MiB |',
     '| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |');
   for (const [file, report] of Object.entries(result.browser)) for (const [operation, data] of Object.entries(report.operations)) {
-    lines.push(`| ${file.replace('.json', '')} / ${operation} | ${report.status} | ${data.appWallMs.n} | ${fmt(data.appWallMs.p50)} / ${fmt(data.appWallMs.p95)} | ${fmt(data.sqlQueries.p50)} | ${fmt(data.sqlRows.p50)} | ${fmt(data.sqlRowsAffected.p50)} | ${fmt(data.sqlResultBytes.p50)} | ${fmt(data.transactionWallMs.p95)} | ${fmt(data.lockBearingTransactionWallMs.p95)} | ${fmt(data.lockWaitObservedMs.p95)} | ${fmt(data.serverCpuMs.p50)} | ${fmt(data.serverRssBytes / 1048576)} | ${fmt(data.browserCpuMs.p50)} | ${fmt(data.browserRssBytes / 1048576)} |`);
+    lines.push(`| ${file.replace('.json', '')} / ${operation} | ${report.status} | ${data.appWallMs.n} | ${fmt(data.appWallMs.p50)} / ${fmt(data.appWallMs.p95)} | ${fmt(data.sqlQueries.p50)} | ${fmt(data.sqlRows.p50)} | ${fmt(data.sqlRowCount.p50)} | ${fmt(data.sqlResultBytes.p50)} | ${fmt(data.transactionWallMs.p95)} | ${fmt(data.lockBearingTransactionWallMs.p95)} | ${fmt(data.lockWaitObservedMs.p95)} | ${fmt(data.serverCpuMs.p50)} | ${fmt(data.serverRssBytes / 1048576)} | ${fmt(data.browserCpuMs.p50)} | ${fmt(data.browserRssBytes / 1048576)} |`);
   }
   lines.push('', '| Browser dataset / document bytes | typing frame n | p50 / p95 / p99 ms | strict IDB writes n / p95 ms | React commits | Long Tasks n / p95 ms |',
     '| --- | ---: | --- | --- | ---: | --- |');

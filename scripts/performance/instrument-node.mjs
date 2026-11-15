@@ -6,7 +6,7 @@ import { performance } from 'node:perf_hooks';
 
 export const counts = {
   gitProcesses: 0, gitCommandLogDropped: 0, readFileCalls: 0, readFileBytes: 0,
-  pgQueries: 0, pgQueryErrors: 0, pgQueryRoundTripMs: 0, pgRows: 0, pgRowsAffected: 0, pgResultBytes: 0,
+  pgQueries: 0, pgQueryErrors: 0, pgQueryRoundTripMs: 0, pgRows: 0, pgRowCount: 0, pgResultBytes: 0,
   pgPoolAcquireMs: 0, pgTransactions: 0, pgTransactionWallMs: 0,
   pgLockStatements: 0, pgLockStatementRoundTripMs: 0, pgLockBearingTransactions: 0,
   pgLockBearingTransactionWallMs: 0, pgLockWaitObservedMs: 0, pgLockWaitObservations: 0,
@@ -104,7 +104,7 @@ function recordQuery(client, text, startedAt, error, result) {
   if (result) {
     const rows = Array.isArray(result.rows) ? result.rows : [];
     counts.pgRows += rows.length;
-    counts.pgRowsAffected += Number.isFinite(result.rowCount) ? result.rowCount : rows.length;
+    counts.pgRowCount += Number.isFinite(result.rowCount) ? result.rowCount : rows.length;
     try { counts.pgResultBytes += Buffer.byteLength(JSON.stringify(rows)); } catch { /* unsupported row values are not byte-counted */ }
   }
   const state = transactionState.get(client);
