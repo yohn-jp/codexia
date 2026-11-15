@@ -507,16 +507,18 @@ export interface KnowledgeProjectionBatch {
 export interface PersistenceReader {
   getModuleRecord(projectId: ProjectId, moduleId: string, key: string): Promise<ModuleRecord | undefined>;
   listModuleRecords(projectId: ProjectId, moduleId?: string): Promise<readonly ModuleRecord[]>;
+  /** Portable exchange excludes internal authority payloads at the SQL boundary. */
+  listPortableModuleRecords(projectId: ProjectId): Promise<{ records: readonly ModuleRecord[]; omittedAuthorityModules: readonly string[] }>;
   getProject(projectId: ProjectId): Promise<Project | undefined>;
   listProjects(limit?: number): Promise<readonly Project[]>;
   /** Bounded, stable project-ID inventory for explicit startup compatibility checks. */
   listProjectIds(limit: number, after?: ProjectId): Promise<readonly ProjectId[]>;
   getDocument(projectId: ProjectId, documentId: DocumentId): Promise<Document | undefined>;
   listDocuments(projectId: ProjectId, parentId?: DocumentId | null, limit?: number): Promise<readonly Document[]>;
-  getRevision(projectId: ProjectId, documentId: DocumentId, revisionId: RevisionId): Promise<DocumentRevision | undefined>;
+  getRevision(projectId: ProjectId, documentId: DocumentId, revisionId: RevisionId, throughHead?: RevisionId): Promise<DocumentRevision | undefined>;
   /** Resolve exact document/revision pairs in input order within the project scope. */
   getDocumentHeadRevisions(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionLookup[]>;
-  listRevisions(projectId: ProjectId, documentId: DocumentId, limit: number, before?: string): Promise<DocumentRevisionPage>;
+  listRevisions(projectId: ProjectId, documentId: DocumentId, limit: number, before?: string, throughHead?: RevisionId): Promise<DocumentRevisionPage>;
   getKnowledgeNode(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<KnowledgeNode | undefined>;
   listKnowledgeNodes(projectId: ProjectId, limit?: number): Promise<readonly KnowledgeNode[]>;
   /** Export-only complete canonical scope, including retired nodes. */

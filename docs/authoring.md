@@ -13,7 +13,7 @@ plot/volumes/<volume>/chapters/<chapter>/scenes/<scene>.yaml
 manuscript/<volume>/<chapter>/<scene>.md
 ```
 
-Scene metadata names its Markdown document with `manuscript: manuscript/.../scene.md`. The UI creates and reorders hierarchy entries through reviewed Core operations. Editing a manuscript preserves frontmatter, unsupported metadata and unrelated records.
+Scene metadata names its Markdown document with `manuscript: manuscript/.../scene.md`. The authenticated author UI creates and reorders hierarchy entries through version-checked Persistence API operations; external-agent and module hierarchy changes use reviewed Core operations. Editing a manuscript preserves frontmatter, unsupported metadata and unrelated records.
 
 ## Draft and Saved
 

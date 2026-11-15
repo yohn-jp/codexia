@@ -343,12 +343,15 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     setPageError("");
     if (loadedDocumentsProjectRef.current !== projectId) {
       loadedDocumentsProjectRef.current = projectId;
+      setDocuments([]);
+      setNodes([]);
       publishEditor(null);
     }
     void Promise.all([
       api.persistenceDocuments(projectId, undefined, controller.signal),
       api.persistenceNodes(projectId, 500, controller.signal),
     ]).then(([documentResult, nodeResult]) => {
+      if (controller.signal.aborted || projectIdRef.current !== projectId) return;
       setDocuments(documentResult.documents);
       setNodes(nodeResult.nodes);
       setDocumentId((current) => current && documentResult.documents.some((item) => item.id === current)
@@ -768,6 +771,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     if (!project) return;
     const title = documentTitle.trim();
     if (!title || !await protectTransition()) return;
+    if (documents.length >= 999) { setPageError("文書数が現在の作品構成上限に達しています。"); return; }
     setLoading(true);
     setPageError("");
     try {

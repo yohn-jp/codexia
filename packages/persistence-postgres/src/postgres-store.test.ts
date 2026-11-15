@@ -974,3 +974,14 @@ test("startup project inventory uses bounded stable keyset pages", async () => {
     assert.deepEqual(ids,[...new Set(ids)].sort());
   });
 });
+
+test("portable module inventory omits arbitrarily many retained authority records without reading their bodies", async () => {
+  const project = await createProject("Portable authority inventory");
+  await directPool.query(`INSERT INTO module_record(project_id,module_id,key,value)
+    SELECT $1,'core.authority.snapshots','snapshot:' || n, '{"private":"internal"}'::jsonb
+    FROM generate_series(1,10001) AS n`, [project.id]);
+  await persistence.transaction(tx=>tx.saveModuleRecord({projectId:project.id,moduleId:"story",key:"author-note",value:{text:"keep"},expectedVersion:null}));
+  const result = await persistence.read(reader=>reader.listPortableModuleRecords(project.id));
+  assert.deepEqual(result.omittedAuthorityModules,["core.authority.snapshots"]);
+  assert.deepEqual(result.records.map(item=>[item.moduleId,item.key,item.value]),[["story","author-note",{text:"keep"}]]);
+});

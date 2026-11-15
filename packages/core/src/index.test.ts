@@ -265,3 +265,19 @@ test("re-approving an already applied proposal does not regress its durable stat
   assert.deepEqual(after?.applications, [receipt]);
   assert.equal(after?.approvedByOperationId?.[op.id], "owner");
 });
+
+test("pinned manuscript history never includes or restores a future revision", async () => {
+  const p = await hierarchy();
+  const old = await core.reader(p.id);
+  const path = "manuscript/v1/c1/s1.md";
+  const initial = (await core.listManuscriptSnapshots(p.id, "s1", undefined, old.snapshot)).snapshots;
+  await accept(p.id, operation(old.snapshot, path, "Future revision", (await old.read(path))!.revision));
+  const current = await core.listManuscriptSnapshots(p.id, "s1");
+  const future = current.snapshots.find(item => !initial.some(previous => previous.id === item.id))!;
+  assert.ok(future);
+  assert.deepEqual((await core.listManuscriptSnapshots(p.id, "s1", undefined, old.snapshot)).snapshots, initial);
+  assert.equal((await core.readManuscriptSnapshot(p.id, initial[0]!.id, "s1", undefined, old.snapshot)).manuscriptSnapshot.body, "Text 😀\n");
+  await assert.rejects(core.readManuscriptSnapshot(p.id, future.id, "s1", undefined, old.snapshot), {code:"revision_not_found"});
+  await assert.rejects(core.buildRestoreOperation(p.id, {sceneId:"s1",snapshotId:future.id}, undefined, old.snapshot), {code:"revision_not_found"});
+  assert.ok(!(await core.history(p.id, old.snapshot)).some(item => item.hash === future.id));
+});

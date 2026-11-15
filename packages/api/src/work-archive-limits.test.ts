@@ -59,6 +59,7 @@ function persistence(overrides: Record<string, unknown>): Persistence {
     listEvidenceAssertions: async () => [],
     listAssertions: async () => [],
     listModuleRecords: async () => [],
+    listPortableModuleRecords: async () => ({records:[],omittedAuthorityModules:[]}),
     ...overrides,
   };
   return { read: (work) => work(reader as never), transaction: async () => { throw new Error("unused"); }, close: async () => {} } as Persistence;
@@ -94,4 +95,12 @@ test("archive export rejects an incomplete retained-evidence document inventory"
   await assert.rejects(exportWorkArchive(persistence({
     listEvidenceDocumentIds: async () => Array.from({ length: 1000 }, () => randomUUID()),
   }), projectId), { code: "WORK_ARCHIVE_LIMIT" });
+});
+
+test("portable archive reports internal authority namespaces without one omission per snapshot", async () => {
+  const archive = await exportWorkArchive(persistence({
+    listPortableModuleRecords: async () => ({records:[],omittedAuthorityModules:["core.authority.snapshots"]}),
+    listModuleRecords: async () => { assert.fail("export must not load historical authority bodies"); },
+  }), projectId);
+  assert.deepEqual(archive.omittedRecords, ["core.authority.snapshots:*"]);
 });

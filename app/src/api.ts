@@ -520,11 +520,12 @@ export const api = {
     persistencePath(projectId, `changesets/${encodeURIComponent(changeSetId)}/reject`), { method: "POST", body: JSON.stringify({ expectedVersion }), ...(signal ? { signal } : {}) }),
   applyNativeChangeSet: (projectId: string, changeSetId: string, expectedVersion: number, signal?: AbortSignal) => request(dto.nativeChangeSetApplication,
     persistencePath(projectId, `changesets/${encodeURIComponent(changeSetId)}/apply`), { method: "POST", body: JSON.stringify({ expectedVersion }), ...(signal ? { signal } : {}) }),
-  persistenceDocuments: (projectId: string, parentId?: string | null, signal?: AbortSignal) => {
-    const query = new URLSearchParams();
+  persistenceDocuments: async (projectId: string, parentId?: string | null, signal?: AbortSignal) => {
+    const query = new URLSearchParams({limit:"1000"});
     if (parentId !== undefined) query.set("parentId", parentId ?? "root");
-    const suffix = query.size ? `?${query}` : "";
-    return request(dto.persistenceDocuments, persistencePath(projectId, `documents${suffix}`), { ...(signal ? { signal } : {}) });
+    const result = await request(dto.persistenceDocuments, persistencePath(projectId, `documents?${query}`), { ...(signal ? { signal } : {}) });
+    if (result.documents.length >= 1000) throw new ApiError("作品の構成が取得上限に達しています。完全な目次を表示できません。",413,"SNAPSHOT_TOO_LARGE");
+    return result;
   },
   persistenceNodes: (projectId: string, limit = 200, signal?: AbortSignal) => request(dto.persistenceNodes,
     persistencePath(projectId, `nodes?${new URLSearchParams({ limit: String(limit) })}`), { ...(signal ? { signal } : {}) }),
