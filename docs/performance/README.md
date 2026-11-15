@@ -8,7 +8,25 @@ For backend work capture SQL query counts, rows and bytes, database and applicat
 
 The [benchmark harness](../../scripts/performance/README.md) documents runnable entrypoints and limitations. Its deterministic Git fixture is transport only; both Core and browser workloads run against the current PostgreSQL-backed product. The browser probe uses the authenticated Persistence API, current editor, IndexedDB recovery journal and PostgreSQL revision receipt. Historical Git-era measurements do not describe current PostgreSQL behavior. Actual browser/IME acceptance remains separate from performance probes and synthetic events.
 
-Treat cold as first Core materialization in a fresh worker for a new project version. Database and host caches are not flushed. Compare exact source/build, fixture, database configuration, browser, sample counts and cold/warm conditions. Fixture setup, failed operations and timeouts are not successful workload latency. Store baseline manifests and raw machine evidence under `evidence/performance/`, outside this product documentation; do not turn a measurement baseline into a performance improvement claim.
+Treat cold as first Core materialization in a fresh worker for a new project version. Database and host caches are not flushed. Compare exact source/build, fixture, database configuration, browser, sample counts and cold/warm conditions. Fixture setup, failed operations and timeouts are not successful workload latency. Store baseline manifests and summary results under `evidence/performance/`, outside this product documentation. Keep large raw machine evidence in immutable release assets; do not turn a measurement baseline into a performance improvement claim.
+
+## Retaining new measurement evidence
+
+Keep generated scene bodies, CPU profiles and bulky raw results out of new Git evidence commits. Retain the exact source/build identities, fixture plan and dataset manifest, per-file hashes, environment, summary and sample counts. The deterministic fixture generator at the recorded source must reproduce the recorded fixture identity and scene hashes; if it cannot, preserve the actual input bytes in the archive as well. Never remove or rewrite existing immutable evidence to apply this policy retroactively.
+
+Use the existing archive packer with an explicit list of reviewed synthetic result files. Stage selected files under unique, flat basenames outside the checkout (prefix before/after filenames for matched runs), preserving the mapping to their original paths in the summary. Do not collect an entire workspace, Git directory, database dump, author data, credentials or model caches. Inspect and redact machine-local sensitive information before computing checksums; record redactions without altering measurements.
+
+Example, with a new output directory and an immutable release asset URL:
+
+```sh
+node scripts/performance/artifacts.mjs inventory /tmp/evidence-recipe.json /tmp/reviewed-results \
+  before-core.json after-core.json before-dataset.json after-dataset.json
+node scripts/performance/artifacts.mjs pack /tmp/evidence-recipe.json /tmp/reviewed-results \
+  /tmp/evidence-archive 'https://github.com/yohn-jp/codexia/releases/download/<evidence-tag>/evidence.tar'
+node scripts/performance/artifacts.mjs verify /tmp/evidence-archive/INDEX.json /tmp/evidence-archive
+```
+
+Replace the example filenames and URL with the actual reviewed inputs and planned release tag (quote the URL in a shell). An authorized publisher uploads the archive without replacing an existing asset. Download it again and verify its archive and member hashes using the procedure below before committing the final INDEX.json and summary. A planned URL or locally generated manifest alone does not establish retention. If publication or verification fails, retain the local evidence and do not claim it is archived.
 
 ## Immutable historical evidence
 
