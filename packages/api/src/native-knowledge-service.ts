@@ -170,9 +170,10 @@ export async function proposeNativeKnowledgeChange(input: ProposeNativeKnowledge
   if (!input.actorId.trim() || !input.idempotencyKey.trim() || input.idempotencyKey.length > 200 || !Number.isInteger(input.projectVersion) || input.projectVersion < 1 || !Array.isArray(input.operations) || input.operations.length < 1 || input.operations.length > 50 || Buffer.byteLength(JSON.stringify(input.operations), "utf8") > 256_000) {
     throw new NativeKnowledgeServiceError("invalid_input", "Native ChangeSet is empty or exceeds its bounded input limits");
   }
-  const id = z.string().uuid();
+  // Preserve the previous UUID-shaped PostgreSQL identifier contract.
+  const id = z.guid();
   const nonempty = z.string().min(1).max(512).refine(value => value.trim().length > 0);
-  const object = z.record(z.unknown());
+  const object = z.record(z.string(), z.unknown());
   const version = z.number().int().positive().safe().nullable();
   const confidence = z.number().min(0).max(1).nullable();
   const scope = { projectId: id };
