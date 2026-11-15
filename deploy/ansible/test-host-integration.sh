@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run only on a disposable Ubuntu 26.04 systemd VM (never production).
 set -euo pipefail
+umask 077
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 test "$(lsb_release -rs)" = 26.04
@@ -44,6 +45,7 @@ rootless() (
   sudo -H -u "$user" env HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_DATA_HOME="$home/.local/share" XDG_STATE_HOME="$home/.local/state" XDG_RUNTIME_DIR="/run/user/$uid" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"
 )
+rootless systemctl --user show-environment | grep -Fqx "XDG_CONFIG_HOME=$home/.config"
 test -f /sys/fs/cgroup/cgroup.controllers
 test "$(rootless /usr/bin/podman info --format '{{.Host.Security.Rootless}}')" = true
 rootless mkdir -p "$home/.config/containers/systemd"
