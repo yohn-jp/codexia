@@ -31,7 +31,9 @@
       observeMilliseconds: 300000
       initialSlot: blue
       browserAuth: "{{ codexia_browser_auth }}"
-  environment: "{{ updater_env }}"
+  # Fact gathering runs before user_uid/user_dir exist. Privileged host setup must
+  # not inherit the bootstrap SSH account's rootless runtime paths.
+  environment: "{{ updater_env if codexia_stage != 'host' and ansible_facts.user_uid is defined and ansible_facts.user_dir is defined else {} }}"
   tasks:
     - name: Require explicit standalone deployment inputs
       ansible.builtin.assert:
