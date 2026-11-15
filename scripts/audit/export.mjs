@@ -1,0 +1,250 @@
+#!/usr/bin/env node
+import assert from 'node:assert/strict';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve, basename } from 'node:path';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+
+export const REPOMIX_VERSION = '1.19.0';
+const config = fileURLToPath(new URL('./repomix.config.json', import.meta.url));
+const self = fileURLToPath(import.meta.url);
+const shaPattern = /^[a-f0-9]{40}$/u;
+const maxBlob = 8 * 1024 * 1024;
+const maxInput = 64 * 1024 * 1024;
+const maxSite = 900 * 1024 * 1024;
+export const PART_LIMIT = 270_000;
+const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+const json = data => JSON.stringify(data, null, 2) + '\n';
+const git = (root, args, options = {}) => execFileSync('git', args, { cwd: root, maxBuffer: maxInput + 4 * 1024 * 1024, ...options });
+const decode = bytes => new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+const order = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+const policy = () => hash(Buffer.concat([Buffer.from(REPOMIX_VERSION), readFileSync(self), readFileSync(config)]));
+
+export function parseHeads(value) {
+  const seen = new Set();
+  const heads = value.trimEnd().split('\n').filter(Boolean).map(line => {
+    const match = /^([a-f0-9]{40})\trefs\/heads\/(.+)$/u.exec(line);
+    assert.ok(match && !/[\x00-\x1f\x7f]/u.test(match[2]), 'Invalid remote branch inventory');
+    assert.ok(!seen.has(match[2]), 'Duplicate branch');
+    seen.add(match[2]);
+    return { branch: match[2], sha: match[1] };
+  });
+  assert.ok(heads.length, 'No remote branches found');
+  return heads.sort((a, b) => order(a.branch, b.branch));
+}
+
+export function exclusion(path, mode, size) {
+  const parts = path.split('/');
+  if (parts.some(p => !p || p === '.' || p === '..' || p.toLowerCase() === '.git') || /[\x00-\x1f\x7f\\]/u.test(path)) return 'unsafe-path';
+  if (!['100644', '100755'].includes(mode)) return 'non-regular-git-object';
+  if (parts.some(p => ['node_modules', 'dist', 'build', 'coverage', '.turbo', '.pnpm-store', 'test-results', 'playwright-report', 'artifacts', 'results', 'data', 'host-history', '.arcadia'].includes(p))) return 'generated-or-private-data';
+  if (/^evidence\//u.test(path) && !/\.md$/iu.test(path)) return 'historical-machine-evidence';
+  const name = basename(path);
+  if (/^(?:\.env(?:\..*)?|\.npmrc|\.netrc|\.pypirc|id_rsa|id_ed25519|credentials(?:\..*)?|secrets?(?:\..*)?)$/iu.test(name) && name !== '.env.example') return 'sensitive-filename';
+  if (/\.(?:pem|key|p12|pfx|sqlite(?:-wal|-shm)?|db|log|tsbuildinfo)$/iu.test(name)) return 'sensitive-or-generated-file';
+  if (/^(?:\.repomixignore|\.repopackignore)$/iu.test(name) || (parts.length === 1 && /^(?:repomix|repopack)\.config(?:\..*)?$/iu.test(name))) return 'branch-controlled-packer-config';
+  if (size > maxBlob) return 'oversized-blob';
+  return null;
+}
+
+function inventory(root, sha, stage) {
+  assert.match(sha, shaPattern);
+  const records = decode(git(root, ['ls-tree', '-r', '-l', '-z', '--full-tree', sha])).split('\0').filter(Boolean);
+  const included = [], excluded = [];
+  let total = 0;
+  for (const row of records) {
+    const match = /^(\d{6}) (blob|commit) ([a-f0-9]{40}) +(\d+|-)\t([\s\S]+)$/u.exec(row);
+    assert.ok(match, 'Invalid Git tree entry');
+    const [, mode, , oid, rawSize, path] = match;
+    const size = rawSize === '-' ? 0 : Number(rawSize);
+    const reason = exclusion(path, mode, size);
+    if (reason) { excluded.push({ path, reason }); continue; }
+    assert.ok(Number.isSafeInteger(size) && size >= 0, 'Invalid blob size');
+    const bytes = git(root, ['cat-file', 'blob', oid], { maxBuffer: maxBlob + 1024 });
+    assert.equal(bytes.length, size);
+    let content;
+    try { content = decode(bytes); } catch { excluded.push({ path, reason: 'non-utf8' }); continue; }
+    if (content.includes('\0')) { excluded.push({ path, reason: 'binary' }); continue; }
+    total += size;
+    assert.ok(total <= maxInput, 'Snapshot exceeds input budget');
+    const target = join(stage, path);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, bytes, { flag: 'wx' });
+    included.push({ path, bytes: size, sha256: hash(bytes) });
+  }
+  assert.ok(included.length, 'No source files selected');
+  return { included, excluded };
+}
+
+/** Repomix JSON is the source for both full and split exports. No code is removed. */
+export function splitFiles(files, sha, limit = PART_LIMIT) {
+  const parts = [];
+  let entries = [];
+  const encode = rows => json({ schemaVersion: 1, sourceSha: sha, entries: rows });
+  function add(entry) {
+    if (entries.length && Buffer.byteLength(encode([...entries, entry])) > limit) {
+      parts.push(encode(entries));
+      entries = [];
+    }
+    assert.ok(Buffer.byteLength(encode([entry])) <= limit, 'One split entry exceeds limit');
+    entries.push(entry);
+  }
+  for (const path of Object.keys(files).sort(order)) {
+    const content = files[path];
+    assert.equal(typeof content, 'string');
+    const whole = { path, offset: 0, content };
+    if (Buffer.byteLength(encode([whole])) <= limit) { add(whole); continue; }
+    // Split only a file that cannot fit intact. Offsets are UTF-16 positions.
+    for (let offset = 0; offset < content.length;) {
+      let end = Math.min(content.length, offset + Math.floor(limit / 12));
+      if (end < content.length && /[\uD800-\uDBFF]/u.test(content[end - 1])) end--;
+      assert.ok(end > offset, 'Split budget too small');
+      add({ path, offset, content: content.slice(offset, end) });
+      offset = end;
+    }
+  }
+  if (entries.length) parts.push(encode(entries));
+  return parts;
+}
+
+export function validatePack(pack, inventory) {
+  assert.ok(pack && typeof pack.files === 'object' && pack.files && !Array.isArray(pack.files), 'Unexpected Repomix JSON format');
+  const expected = new Map(inventory.included.map(file => [file.path, file]));
+  const included = [];
+  for (const path of Object.keys(pack.files).sort(order)) {
+    const file = expected.get(path);
+    assert.ok(file && typeof pack.files[path] === 'string', 'Unexpected packed path');
+    included.push(file);
+    expected.delete(path);
+  }
+  // Repomix may exclude a secret or another unsupported file. Never reconstruct
+  // omitted content from Git or silently describe the export as complete.
+  const excluded = [...inventory.excluded, ...[...expected.keys()].map(path => ({ path, reason: 'repomix-omitted (security or packer filtering)' }))].sort((a,b) => order(a.path,b.path));
+  assert.ok(included.length, 'Repomix returned no source files');
+  return { included, excluded, partial: expected.size > 0 };
+}
+
+function snapshot(root, sha, dest, executable, policyHash) {
+  const temp = mkdtempSync(join(tmpdir(), 'codexia-audit-'));
+  try {
+    const stage = join(temp, 'source');
+    mkdirSync(stage);
+    const selected = inventory(root, sha, stage);
+    const output = join(temp, 'packed.json');
+    const result = spawnSync(executable, [stage, '--config', config, '--style', 'json', '--output', output, '--no-gitignore', '--no-dot-ignore', '--no-default-patterns', '--quiet'], {
+      cwd: temp, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024, timeout: 5 * 60_000,
+      // Do not print packer diagnostics: they could contain source/secret values.
+    });
+    if (result.error || result.status !== 0 || !existsSync(output)) throw new Error('Repomix failed');
+    const pack = JSON.parse(readFileSync(output, 'utf8'));
+    const selection = validatePack(pack, selected);
+    const full = json({ ...pack, audit: { sourceSha: sha, policySha256: policyHash, repomixVersion: REPOMIX_VERSION, status: selection.partial ? 'partial' : 'ready' } });
+    mkdirSync(dest, { recursive: true });
+    const outputs = [];
+    function emit(name, text) {
+      const bytes = Buffer.from(text);
+      writeFileSync(join(dest, name), bytes, { flag: 'wx' });
+      outputs.push({ name, bytes: bytes.length, sha256: hash(bytes) });
+    }
+    emit('repomix.json', full);
+    const parts = splitFiles(pack.files, sha);
+    parts.forEach((part, index) => emit('part-' + String(index + 1).padStart(4, '0') + '.json', part));
+    const manifest = { schemaVersion: 1, sourceSha: sha, policySha256: policyHash, repomixVersion: REPOMIX_VERSION,
+      status: selection.partial ? 'partial' : 'ready', files: selection.included, excluded: selection.excluded, outputs };
+    writeFileSync(join(dest, 'manifest.json'), json(manifest), { flag: 'wx' });
+    return manifest;
+  } finally { rmSync(temp, { recursive: true, force: true }); }
+}
+
+function cachedSnapshot(dir, sha, policyHash) {
+  if (!existsSync(dir)) return null;
+  try {
+    const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+    assert.equal(manifest.sourceSha, sha);
+    assert.equal(manifest.policySha256, policyHash);
+    assert.equal(manifest.repomixVersion, REPOMIX_VERSION);
+    assert.ok(['ready', 'partial'].includes(manifest.status));
+    assert.ok(Array.isArray(manifest.files) && manifest.files.length && Array.isArray(manifest.excluded) && Array.isArray(manifest.outputs));
+    const names = new Set(['manifest.json']);
+    for (const item of manifest.outputs) {
+      assert.match(item.name, /^(?:repomix\.json|part-\d{4,}\.json)$/u);
+      assert.ok(!names.has(item.name));
+      names.add(item.name);
+      const bytes = readFileSync(join(dir, item.name));
+      assert.equal(bytes.length, item.bytes);
+      assert.equal(hash(bytes), item.sha256);
+    }
+    assert.ok(names.has('repomix.json') && names.size >= 3);
+    assert.deepEqual(readdirSync(dir).sort(order), [...names].sort(order));
+    const full = JSON.parse(readFileSync(join(dir, 'repomix.json'), 'utf8'));
+    assert.equal(full.audit.sourceSha, sha);
+    assert.equal(full.audit.policySha256, policyHash);
+    assert.deepEqual(Object.keys(full.files).sort(order), manifest.files.map(file => file.path).sort(order));
+    return manifest;
+  } catch { return null; }
+}
+
+const escapeHtml = value => String(value).replace(/[&<>"']/gu, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+export function renderIndex(manifest) {
+  const rows = manifest.branches.map(branch => {
+    const snap = manifest.snapshots[branch.sha];
+    const base = 'snapshots/' + branch.sha + '/';
+    const links = snap.status === 'blocked' ? 'Not published' : '<a href="' + base + 'repomix.json">Full JSON</a> · <a href="' + base + 'manifest.json">Manifest</a> · ' + snap.outputs.filter(x => x.name.startsWith('part-')).map(x => '<a href="' + base + x.name + '">' + x.name.slice(0,-5) + '</a>').join(' ');
+    return '<tr><th scope="row">' + escapeHtml(branch.branch) + '</th><td><code>' + escapeHtml(branch.sha) + '</code></td><td>' + escapeHtml(snap.status) + '</td><td>' + (snap.fileCount ?? '—') + '</td><td>' + links + '</td></tr>';
+  }).join('\n');
+  return '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia source audit</title><style>body{font:16px system-ui,sans-serif;max-width:1200px;margin:40px auto;padding:0 20px;color:#24292f}table{border-collapse:collapse;width:100%}th,td{padding:12px;text-align:left;border-bottom:1px solid #d0d7de;overflow-wrap:anywhere}code{font-size:12px}a{color:#0969da}.scroll{overflow:auto}</style><h1>Codexia source audit</h1><p>Observed remote HEADs: ' + escapeHtml(manifest.observedAt) + '. Repomix ' + REPOMIX_VERSION + '. This is source review material, not release certification. Partial exports omit files; see each manifest. A blocked snapshot has no downloadable source. Branches may advance between refreshes.</p><p><a href="manifest.json">Machine-readable branch index</a> · <a href="https://github.com/yohn-jp/codexia">Repository</a></p><div class="scroll"><table><thead><tr><th>Branch</th><th>Commit</th><th>Status</th><th>Files</th><th>Downloads</th></tr></thead><tbody>' + rows + '</tbody></table></div></html>';
+}
+
+export function buildPortal({ root, site, cache, executable, heads, observedAt = new Date().toISOString() }) {
+  assert.ok(!existsSync(site), 'Site output must not exist');
+  const policyHash = policy();
+  const manifest = { schemaVersion: 1, observedAt, repomixVersion: REPOMIX_VERSION, policySha256: policyHash, branches: heads, snapshots: {} };
+  mkdirSync(site, { recursive: true });
+  mkdirSync(cache, { recursive: true });
+  let bytes = 0;
+  for (const sha of [...new Set(heads.map(head => head.sha))].sort(order)) {
+    assert.match(sha, shaPattern);
+    const cached = join(cache, sha);
+    const dest = join(site, 'snapshots', sha);
+    let result = cachedSnapshot(cached, sha, policyHash);
+    try {
+      if (!result) {
+        rmSync(cached, { recursive: true, force: true });
+        result = snapshot(root, sha, cached, executable, policyHash);
+      }
+      bytes += result.outputs.reduce((total, item) => total + item.bytes, 0) + statSync(join(cached, 'manifest.json')).size;
+      assert.ok(bytes <= maxSite, 'Pages size budget exceeded');
+      mkdirSync(dirname(dest), { recursive: true });
+      cpSync(cached, dest, { recursive: true, errorOnExist: true, force: false });
+      manifest.snapshots[sha] = { status: result.status, fileCount: result.files.length, excludedCount: result.excluded.length, outputs: result.outputs };
+    } catch (error) {
+      rmSync(dest, { recursive: true, force: true });
+      rmSync(cached, { recursive: true, force: true });
+      if (error.message === 'Pages size budget exceeded') throw error;
+      manifest.snapshots[sha] = { status: 'blocked', reason: 'snapshot export or security verification failed' };
+    }
+  }
+  // Cache is an optimization only; deleted HEADs are never copied into the site.
+  for (const name of readdirSync(cache)) if (shaPattern.test(name) && !manifest.snapshots[name]) rmSync(join(cache, name), { recursive: true, force: true });
+  writeFileSync(join(site, 'manifest.json'), json(manifest));
+  writeFileSync(join(site, 'index.html'), renderIndex(manifest));
+  writeFileSync(join(site, '.nojekyll'), '');
+  return manifest;
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === self) {
+  const [site, cache, executable] = process.argv.slice(2);
+  assert.ok(site && cache && executable && process.argv.length === 5, 'Usage: node scripts/audit/export.mjs SITE CACHE REPOMIX_BIN');
+  assert.equal(execFileSync(executable, ['--version'], { encoding: 'utf8' }).trim(), REPOMIX_VERSION);
+  const root = resolve('.');
+  const heads = parseHeads(decode(git(root, ['ls-remote', '--heads', 'origin'])));
+  const observedAt = new Date().toISOString();
+  for (const sha of new Set(heads.map(head => head.sha))) {
+    try { git(root, ['cat-file', '-e', sha + '^{commit}']); }
+    catch { git(root, ['fetch', '--no-tags', 'origin', sha], { stdio: 'ignore' }); }
+  }
+  const result = buildPortal({ root, site: resolve(site), cache: resolve(cache), executable: resolve(executable), heads, observedAt });
+  console.log('Audited ' + heads.length + ' branches; ' + Object.keys(result.snapshots).length + ' distinct HEADs; ' + Object.values(result.snapshots).filter(x => x.status === 'blocked').length + ' blocked.');
+}
