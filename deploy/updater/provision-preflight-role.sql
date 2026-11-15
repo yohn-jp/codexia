@@ -40,7 +40,7 @@ FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
 WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','f')
   AND NOT has_table_privilege('codexia_preflight',c.oid,'SELECT') \gexec
 \endif
-DO $
+DO $$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='codexia_preflight' AND 'default_transaction_read_only=on'=ANY(rolconfig))
     OR NOT has_database_privilege('codexia_preflight','codexia','CONNECT')
@@ -49,5 +49,5 @@ BEGIN
       WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','f')
       AND NOT has_table_privilege('codexia_preflight',c.oid,'SELECT'))
   THEN RAISE EXCEPTION 'Preflight role configuration or required SELECT privileges drifted'; END IF;
-END $;
+END $$;
 COMMIT;
