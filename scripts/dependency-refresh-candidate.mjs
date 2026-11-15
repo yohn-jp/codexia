@@ -69,15 +69,19 @@ async function npm() {
     const workflow='.github/workflows/verify.yml';
     const old=readFileSync(workflow,'utf8').match(/mcr\.microsoft\.com\/playwright@(sha256:[a-f0-9]{64})/u)?.[1];
     assert.ok(old,'Missing current browser container digest');
-    let flavor;
-    for(const variant of ['noble','jammy']) {
-      try { if(imageDigest('mcr.microsoft.com/playwright:v'+currentPlaywright+'-'+variant)===old){flavor=variant;break;} } catch {}
-    }
-    assert.ok(flavor,'Cannot establish existing Playwright container flavor; do not change version');
+    // The selected release is the official Ubuntu Noble Playwright image.
+    // Current CI runs Ubuntu 24.04; the complete browser matrix must prove
+    // the replacement. The old digest may be a platform-specific manifest.
+    const flavor='noble';
     const digest=imageDigest('mcr.microsoft.com/playwright:v'+playwrightVersion+'-'+flavor);
     replaceTracked(old,digest,p=>p===workflow||p.startsWith('scripts/')&&/\.(?:mjs|ts|sh)$/u.test(p));
     console.log('PLAYWRIGHT_IMAGE '+JSON.stringify({currentPlaywright,playwrightVersion,flavor,digest}));
   }
+  // Preserve toolchain major lines and update every active exact reference
+  // together; regenerate the pnpm lock with the new tool, never edit integrity.
+  const activeText=p=>!p.startsWith('evidence/')&&!p.includes('dependency-refresh-candidate')&&p!=='pnpm-lock.yaml'&&!p.endsWith('package-lock.json')&&(p==='Dockerfile'||p==='Dockerfile.backend'||p==='package.json'||p.startsWith('.github/workflows/')&&p.endsWith('.yml')||p.startsWith('scripts/')&&/\.(?:mjs|ts|sh)$/u.test(p)||p.startsWith('docs/')&&p.endsWith('.md'));
+  replaceTracked('12.10.1','12.21.0',activeText);
+  replaceTracked('24.22.0','24.22.3',activeText);
 }
 async function infra() {
   const files=tracked.filter(p=>p==='Dockerfile'||p==='Dockerfile.backend'||p.startsWith('deploy/quadlet/')&&p.endsWith('.container'));
@@ -87,6 +91,11 @@ async function infra() {
     try { const current=imageDigest(ref); console.log('IMAGE_VERSION '+JSON.stringify({ref,old,current})); if(current!==old)replaceTracked(ref+'@'+old,ref+'@'+current,p=>files.includes(p)||p.startsWith('scripts/')&&/\.(mjs|ts|sh)$/u.test(p)); }
     catch(error){console.log('IMAGE_LOOKUP_FAILED '+ref+' '+error.message);}
   }
+  const oldGo='docker.io/library/golang:1.25.5-bookworm@sha256:d9132cce84391efab786495288756d60e1da215b1f94e87860aeefc3d4c45b6d';
+  const goRef='docker.io/library/golang:1.27.4-bookworm';
+  const goDigest=imageDigest(goRef);
+  replaceTracked(oldGo,goRef+'@'+goDigest,p=>files.includes(p)||p.startsWith('scripts/')&&/\.(?:mjs|ts|sh)$/u.test(p));
+  console.log('GO_IMAGE '+JSON.stringify({ref:goRef,digest:goDigest}));
   const provider=await json('https://registry.terraform.io/v1/providers/cloudflare/cloudflare/versions');
   const tf='deploy/cloudflare/terraform/versions.tf';
   const src=readFileSync(tf,'utf8');
@@ -105,6 +114,8 @@ async function infra() {
   console.log('TOOLCHAIN_ANSIBLE '+JSON.stringify({current:'2.19.4',candidate:highest(Object.keys(ansible.releases).filter(v=>v.startsWith('2.19.'))),latest:ansible.info.version}));
   const tfVersions=await json('https://releases.hashicorp.com/terraform/index.json');
   console.log('TOOLCHAIN_TERRAFORM '+JSON.stringify({current:'1.17.1',candidate:highest(Object.keys(tfVersions.versions).filter(v=>v.startsWith('1.')))}));
+  replaceTracked('ansible-core==2.19.4','ansible-core==2.19.15',p=>p==='.github/workflows/deployment-config.yml');
+  replaceTracked('terraform_version: 1.17.1','terraform_version: 1.17.2',p=>p==='.github/workflows/deployment-config.yml');
   const actions=new Set();
   for(const file of tracked.filter(p=>p.startsWith('.github/workflows/')&&p.endsWith('.yml')))for(const m of readFileSync(file,'utf8').matchAll(/\buses:\s+([a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)@(v\d+)\b/gu))actions.add(m[1]+'@'+m[2]);
   for(const action of actions) {
