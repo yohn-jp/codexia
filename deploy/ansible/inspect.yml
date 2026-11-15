@@ -47,6 +47,9 @@
       platform: "{{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }} {{ ansible_facts.architecture }}"
       cgroup_v2: "{{ inspect_cgroup.stat.exists }}"
       service_account_present: "{{ inspect_account.rc == 0 }}"
+      service_uid: "{{ inspect_account.stdout.split(':')[2] if inspect_account.rc == 0 else 'absent' }}"
+      service_gid: "{{ inspect_account.stdout.split(':')[3] if inspect_account.rc == 0 else 'absent' }}"
+      service_home: "{{ inspect_account.stdout.split(':')[5] if inspect_account.rc == 0 else 'absent' }}"
       tools: "{{ dict(inspect_tools.results | map(attribute='item') | zip(inspect_tools.results | map(attribute='rc'))) }}"
       tool_status_codes: "0=present, 1=absent"
 - name: Require cgroup v2 on the supported baseline

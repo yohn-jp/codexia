@@ -41,6 +41,28 @@
       ansible.builtin.assert:
         that:
           - (host_identity.results[0].rc == 2 and not host_home.stat.exists) or (host_identity.results[0].rc == 0 and (host_home.stat.isdir | default(false)) and host_home.stat.uid == codexia_service_uid and host_home.stat.gid == codexia_service_gid)
+    - name: Inspect existing user manager before enabling lingering
+      ansible.builtin.command:
+        argv: [systemctl, is-active, "user@{{ codexia_service_uid }}.service"]
+      register: host_existing_manager
+      changed_when: false
+      failed_when: host_existing_manager.rc not in [0, 3, 4]
+      when: host_identity.results[0].rc == 0
+    - name: Inspect existing user unit directories before any activation
+      ansible.builtin.stat:
+        path: "{{ codexia_service_home }}/{{ item }}"
+        get_checksum: false
+        get_mime: false
+        get_attributes: false
+      loop: [.config/containers/systemd, .config/systemd/user]
+      register: host_existing_units
+      when: host_identity.results[0].rc == 0 and host_existing_manager.rc != 0
+    - name: Refuse implicit activation of existing units through lingering
+      ansible.builtin.assert:
+        that:
+          - host_existing_units.results | selectattr('stat.exists', 'equalto', true) | list | length == 0
+        fail_msg: Existing user units with an inactive user manager require explicit maintenance; host convergence will not activate them.
+      when: host_identity.results[0].rc == 0 and host_existing_manager.rc != 0
     - name: Validate existing rootless subordinate mappings before package changes
       ansible.builtin.command:
         argv: [python3, -c, "{{ lookup('ansible.builtin.file', playbook_dir + '/host-contract.py') }}", "{{ codexia_service_user }}", "{{ codexia_service_uid | string }}", "{{ codexia_service_gid | string }}"]
@@ -63,10 +85,13 @@
         state: present
         install_recommends: false
         fail_on_autoremove: true
+        policy_rc_d: 101
         update_cache: true
         cache_valid_time: 3600
+      environment:
+        NEEDRESTART_MODE: l
       vars:
-        host_packages: [podman, nodejs, uidmap, netavark, aardvark-dns, slirp4netns, fuse-overlayfs, dbus-user-session, age, util-linux, ca-certificates, acl]
+        host_packages: [podman, nodejs, uidmap, netavark, aardvark-dns, passt, slirp4netns, fuse-overlayfs, dbus-user-session, age, util-linux, ca-certificates, acl]
       when: host_packages | difference(ansible_facts.packages.keys() | list) | length > 0
     - name: Verify actual Podman and Node runtime versions
       ansible.builtin.command:
