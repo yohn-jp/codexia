@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync, gunzipSync } from 'node:zlib';
@@ -22,6 +22,36 @@ function equalBytes(data, bytes, hash, name) {
   check(data.length === bytes && sha256(data) === hash, `Size/SHA-256 mismatch: ${name}`);
 }
 
+function compress(source) {
+  const compressed = gzipSync(source, { level: 6, mtime: 0 });
+  // RFC 1952 OS=unknown: independent of the host OS, matching the original evidence.
+  compressed[9] = 255;
+  return compressed;
+}
+
+// Explicit allowlist: callers review/redact synthetic evidence before packaging.
+// Never recursively collect a workspace, credentials, model caches or author data.
+export async function createInventory(sourceDirectory, sourceFiles, indexPath) {
+  check(Array.isArray(sourceFiles) && sourceFiles.length > 0, 'Empty artifact inventory');
+  const files = [...sourceFiles].sort();
+  check(new Set(files).size === files.length, 'Duplicate source filename');
+  const artifacts = [];
+  for (const sourceFile of files) {
+    check(typeof sourceFile === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(sourceFile), 'Unsafe source filename');
+    const sourcePath = join(sourceDirectory, sourceFile);
+    check((await lstat(sourcePath)).isFile(), 'Evidence source must be a regular file: ' + sourceFile);
+    const source = await readFile(sourcePath);
+    const compressed = compress(source);
+    artifacts.push({ file: `raw/${sourceFile}.gz`, sourceFile,
+      sourceBytes: source.length, gzipBytes: compressed.length,
+      sha256: sha256(source), gzipSha256: sha256(compressed), diagnostic: false });
+  }
+  const manifest = { schemaVersion: 1, artifacts };
+  inventory(manifest);
+  await writeFile(indexPath, JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
+  return manifest;
+}
+
 // OUTPUT must be new. INDEX is also the inventory/recipe, including diagnostics.
 export async function pack(indexPath, sourceDirectory, outputDirectory, assetUrl) {
   const input = JSON.parse(await readFile(indexPath, 'utf8')); inventory(input);
@@ -33,9 +63,7 @@ export async function pack(indexPath, sourceDirectory, outputDirectory, assetUrl
   for (const row of input.artifacts) {
     const source = await readFile(join(sourceDirectory, row.sourceFile));
     equalBytes(source, row.sourceBytes, row.sha256, row.sourceFile);
-    const compressed = gzipSync(source, { level: 6, mtime: 0 });
-    // RFC 1952 OS=unknown: independent of the host OS, matching the original evidence.
-    compressed[9] = 255;
+    const compressed = compress(source);
     equalBytes(compressed, row.gzipBytes, row.gzipSha256, row.file);
     await writeFile(join(outputDirectory, row.file), compressed);
   }
@@ -79,7 +107,11 @@ export async function verify(indexPath, root) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [command, index, ...args] = process.argv.slice(2);
-  if (command === 'pack' && args.length === 3) {
+  if (command === 'inventory' && args.length >= 2) {
+    const [source, ...files] = args;
+    const manifest = await createInventory(source, files, index);
+    console.log(`Inventoried ${manifest.artifacts.length} artifacts`);
+  } else if (command === 'pack' && args.length === 3) {
     const manifest = await pack(index, ...args);
     console.log(`Packaged ${manifest.artifacts.length} artifacts; archive SHA-256 ${manifest.storage.sha256}`);
   } else if (command === 'verify-archive' && args.length === 1) {
@@ -88,6 +120,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   } else if (command === 'verify' && args.length === 1) {
     console.log(`Verified ${await verify(index, args[0])} artifacts and archive`);
   } else {
-    throw new Error('Usage: artifacts.mjs pack INDEX SOURCE NEW_OUTPUT HTTPS_ASSET_URL | (verify-archive | verify) INDEX DOWNLOADED_AND_EXTRACTED_ROOT');
+    throw new Error('Usage: artifacts.mjs inventory NEW_INDEX SOURCE FILE... | pack INDEX SOURCE NEW_OUTPUT HTTPS_ASSET_URL | (verify-archive | verify) INDEX DOWNLOADED_AND_EXTRACTED_ROOT');
   }
 }
