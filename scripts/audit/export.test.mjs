@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, symlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseHeads, exclusion, splitFiles, validatePack, renderIndex, buildPortal, PART_COUNT } from './export.mjs';
+import { parseHeads, exclusion, splitFiles, validatePack, renderIndex, buildPortal, reviewScope, PART_COUNT } from './export.mjs';
 
 const sha = 'a'.repeat(40);
 test('all branch refs, including slash and HTML characters, are data only', () => {
@@ -28,10 +28,10 @@ test('only regular source blobs, not credentials, data or branch-controlled pack
 test('split parts preserve whole files and reconstruct packed input', () => {
   const files = { 'a.ts': 'small\n', 'b.ts': '😀\n"\\'.repeat(100_000), 'c.ts': '' };
   const output = splitFiles(files, sha);
-  assert.equal(output.length, 3);
+  assert.equal(output.length, 1);
   const restored = Object.create(null);
   for (const part of output) {
-    const parsed = JSON.parse(part);
+    const parsed = JSON.parse(part.content);
     assert.equal(parsed.sourceSha, sha);
     for (const entry of parsed.entries) {
       assert.equal(entry.offset, 0);
@@ -85,7 +85,7 @@ test('real Repomix packs immutable Git blobs, skips unsafe input, reuses only ve
     assert.equal(Object.hasOwn(files, 'evidence/run/scene.md'), false);
     const manifest = read('site1', second, 'manifest.json');
     assert.ok(manifest.excluded.some(x => x.path === 'evidence/run/scene.md' && x.reason === 'historical-evidence'));
-    assert.equal(manifest.outputs.filter(x => x.name.startsWith('part-')).length, Math.min(PART_COUNT, manifest.files.length));
+    assert.equal(manifest.outputs.filter(x => x.name.startsWith('part-')).length, 2);
     const c = run('site2', [{branch:'main',sha:second}], '/does-not-exist');
     assert.equal(c.snapshots[second].status, 'ready');
     assert.equal(existsSync(join(root, 'site2', 'snapshots', first)), false);
@@ -97,20 +97,20 @@ test('real Repomix packs immutable Git blobs, skips unsafe input, reuses only ve
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('four balanced parts are deterministic and preserve every whole file', () => {
-  const files = Object.fromEntries(Array.from({length: 40}, (_,i) => ['file-' + i, 'x'.repeat(1000 + i * 100)]));
+test('nine responsibility groups preserve every whole file deterministically', () => {
+  const paths = ['docs/CORE.md','app/src/a.ts','packages/core/a.ts','packages/api/a.ts','packages/persistence-postgres/a.ts','modules/story/a.ts','modules/mcp/a.ts','deploy/a.yml','scripts/a.mjs','tests/a.ts','pnpm-lock.yaml'];
+  const files = Object.fromEntries(paths.map((p,i)=>[p,'x'.repeat(1000+i)]));
   const parts = splitFiles(files, sha);
   assert.equal(parts.length, PART_COUNT);
   assert.deepEqual(parts, splitFiles(Object.fromEntries(Object.entries(files).reverse()), sha));
   const restored = Object.create(null);
-  for (const part of parts) for (const entry of JSON.parse(part).entries) {
+  for (const part of parts) for (const entry of JSON.parse(part.content).entries) {
+    assert.equal(reviewScope(entry.path), part.scope);
     assert.equal(entry.offset, 0);
     assert.equal(Object.hasOwn(restored, entry.path), false);
     restored[entry.path] = entry.content;
   }
   assert.deepEqual({...restored}, files);
-  const sizes = parts.map(p => Buffer.byteLength(p));
-  assert.ok(Math.max(...sizes) - Math.min(...sizes) < 6000);
 });
 
 test('browser downloads full, manifest and scoped part bytes without navigating away', { skip: !process.env.CODEXIA_AUDIT_TOOL_DIR }, async () => {
@@ -120,7 +120,7 @@ test('browser downloads full, manifest and scoped part bytes without navigating 
   const part = '{"entries":[{"path":"app/src/a.ts","offset":0,"content":"source"}]}';
   const snapshotManifest = '{"files":[{"path":"app/src/a.ts"}]}';
   const html = renderIndex({ observedAt: 'now', branches: [{ branch: 'main', sha }], snapshots: {
-    [sha]: { status: 'ready', fileCount: 1, outputs: [{ name: 'repomix.json', bytes: Buffer.byteLength(full) }, { name: 'part-0001.json', bytes: Buffer.byteLength(part), scope: 'frontend' }] },
+    [sha]: { status: 'ready', fileCount: 1, outputs: [{ name: 'repomix.json', bytes: Buffer.byteLength(full) }, { name: 'part-0001.json', bytes: Buffer.byteLength(part), scope: '02-frontend' }] },
   } });
   const base = '/snapshots/' + sha + '/';
   const files = new Map([[base + 'repomix.json', full], [base + 'part-0001.json', part], [base + 'manifest.json', snapshotManifest], ['/manifest.json', '{"branches":[]}']]);
@@ -146,7 +146,7 @@ test('browser downloads full, manifest and scoped part bytes without navigating 
     };
     await verify('Download full JSON', 'codexia-' + sha + '-repomix.json', full);
     await verify('Download manifest', 'codexia-' + sha + '-manifest.json', snapshotManifest);
-    await verify('Part 1/1', 'codexia-' + sha + '-part-0001.json', part);
+    await verify('frontend ·', 'codexia-' + sha + '-part-0001.json', part);
     await verify('Download branch index', 'codexia-branches.json', '{"branches":[]}');
   } finally {
     await browser?.close();

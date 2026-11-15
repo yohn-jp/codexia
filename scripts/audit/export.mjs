@@ -14,7 +14,7 @@ const shaPattern = /^[a-f0-9]{40}$/u;
 const maxBlob = 8 * 1024 * 1024;
 const maxInput = 64 * 1024 * 1024;
 const maxSite = 900 * 1024 * 1024;
-export const PART_COUNT = 4;
+export const PART_COUNT = 9;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const json = data => JSON.stringify(data, null, 2) + '\n';
 const git = (root, args, options = {}) => execFileSync('git', args, { cwd: root, maxBuffer: maxInput + 4 * 1024 * 1024, ...options });
@@ -78,20 +78,30 @@ function inventory(root, sha, stage) {
   return { included, excluded };
 }
 
-/** Balance whole files by serialized UTF-8 size, deterministically. */
-export function splitFiles(files, sha) {
-  const entries = Object.keys(files).map(path => {
-    assert.equal(typeof files[path], 'string');
-    const entry = { path, offset: 0, content: files[path] };
-    return { entry, bytes: Buffer.byteLength(JSON.stringify(entry, null, 2)) };
-  }).sort((a,b) => b.bytes - a.bytes || order(a.entry.path,b.entry.path));
-  const bins = Array.from({ length: Math.min(PART_COUNT, entries.length) }, () => ({ bytes: 0, entries: [] }));
-  for (const item of entries) {
-    const bin = bins.reduce((a,b) => a.bytes <= b.bytes ? a : b);
-    bin.entries.push(item.entry);
-    bin.bytes += item.bytes;
+export function reviewScope(path) {
+  const [root, child] = path.split('/');
+  if (root === 'docs' || ['AGENTS.md','README.md','CONTRIBUTING.md','SECURITY.md','LICENSE'].includes(root)) return '01-architecture';
+  if (root === 'app') return '02-frontend';
+  if (root === 'packages') {
+    if (child === 'api') return '04-api';
+    if (['persistence-postgres','persistence-contracts','migration'].includes(child)) return '05-persistence';
+    return '03-core-contracts';
   }
-  return bins.map(bin => json({ schemaVersion: 1, sourceSha: sha, entries: bin.entries.sort((a,b) => order(a.path,b.path)) }));
+  if (root === 'modules') return ['story','assistant','speaker'].includes(child) ? '06-authoring-modules' : '07-platform-modules';
+  if (['buildkit','deploy','edge','profiles','.github','Dockerfile','Dockerfile.backend'].includes(root)) return '08-infrastructure-ci';
+  return '09-verification-tooling';
+}
+
+/** Each responsibility group is one complete, independently readable JSON file. */
+export function splitFiles(files, sha) {
+  const groups = new Map();
+  for (const path of Object.keys(files).sort(order)) {
+    assert.equal(typeof files[path], 'string');
+    const scope = reviewScope(path);
+    if (!groups.has(scope)) groups.set(scope, []);
+    groups.get(scope).push({ path, offset: 0, content: files[path] });
+  }
+  return [...groups].sort(([a],[b]) => order(a,b)).map(([scope, entries]) => ({scope, content: json({schemaVersion: 1, sourceSha: sha, scope, entries})}));
 }
 
 export function validatePack(pack, inventory) {
@@ -128,14 +138,14 @@ function snapshot(root, sha, dest, executable, policyHash) {
     const full = json({ ...pack, audit: { sourceSha: sha, policySha256: policyHash, repomixVersion: REPOMIX_VERSION, status: selection.partial ? 'partial' : 'ready' } });
     mkdirSync(dest, { recursive: true });
     const outputs = [];
-    function emit(name, text) {
+    function emit(name, text, scope) {
       const bytes = Buffer.from(text);
       writeFileSync(join(dest, name), bytes, { flag: 'wx' });
-      outputs.push({ name, bytes: bytes.length, sha256: hash(bytes) });
+      outputs.push({ name, bytes: bytes.length, sha256: hash(bytes), ...(scope ? { scope } : {}) });
     }
     emit('repomix.json', full);
     const parts = splitFiles(pack.files, sha);
-    parts.forEach((part, index) => emit('part-' + String(index + 1).padStart(4, '0') + '.json', part));
+    parts.forEach((part, index) => emit('part-' + String(index + 1).padStart(4, '0') + '.json', part.content, part.scope));
     const manifest = { schemaVersion: 1, sourceSha: sha, policySha256: policyHash, repomixVersion: REPOMIX_VERSION,
       status: selection.partial ? 'partial' : 'ready', files: selection.included, excluded: selection.excluded, outputs };
     writeFileSync(join(dest, 'manifest.json'), json(manifest), { flag: 'wx' });
@@ -193,7 +203,7 @@ export function renderIndex(manifest) {
         downloadLink(base, 'manifest.json', prefix + 'manifest.json', 'Download manifest') +
         '<a href="' + base + 'repomix.json">View JSON</a></div>' +
         '<div class="actions review-parts">' +
-        parts.map((item, i) => downloadLink(base, item.name, prefix + item.name, 'Part ' + (i + 1) + '/' + parts.length + ' · ' + sizeLabel(item.bytes))).join('') +
+        parts.map((item, i) => downloadLink(base, item.name, prefix + item.name, item.scope.slice(3).replaceAll('-', ' ') + ' · ' + sizeLabel(item.bytes))).join('') +
         '</div>';
     }
     return '<tr><th scope="row">' + escapeHtml(branch.branch) + '</th><td><code>' + escapeHtml(branch.sha) + '</code></td><td>' + escapeHtml(snap.status) + '</td><td>' + (snap.fileCount ?? '—') + '</td><td>' + links + '</td></tr>';
