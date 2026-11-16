@@ -19,6 +19,26 @@ test('affected PR and complete main plans both require exact execution evidence'
     assert.doesNotThrow(() => assertPlanEvidence(plan, jobs, reports));
   }
 });
+test('supplemental Full-model OCI results stay outside authenticated artifact certification', () => {
+  const plan = createVerificationPlan({ files: ['profiles/full/profile.json'], event: 'pull_request', sha });
+  const jobs = ['plan', ...plan.groups].map(name => ({ name, head_sha: sha, status: 'completed', conclusion: 'success' }));
+  const reports = plan.groups.map(group => ({ group, sha, planDigest: planDigest(plan), results: VERIFICATION_GROUPS[group].filter(task => plan.tasks.includes(task)).map(task => ({ task, status: 'passed' })) }));
+  assert.equal(plan.full_model_oci, true);
+  for (const result of [
+    { status: 'completed', conclusion: 'success' },
+    { status: 'completed', conclusion: 'failure' },
+    { status: 'in_progress', conclusion: null },
+  ]) {
+    assert.doesNotThrow(() => assertPlanEvidence(plan, [...jobs,
+      { name: 'full-model-oci', head_sha: sha, ...result },
+      { name: 'full-model-oci / Run pinned Full model lifecycle on rootless Podman', head_sha: sha, ...result },
+    ], reports));
+  }
+  assert.throws(() => assertPlanEvidence(plan, [...jobs,
+    { name: 'full-model-oci', head_sha: sha, status: 'completed', conclusion: 'success' },
+    { name: 'full-model-oci', head_sha: sha, status: 'completed', conclusion: 'success' },
+  ], reports), /Duplicate supplemental Full-model OCI job/);
+});
 test('missing, stale, failed, skipped and duplicate evidence cannot certify selected work', () => {
   for (const mutate of [
     data => data.jobs.pop(),

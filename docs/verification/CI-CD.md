@@ -19,7 +19,7 @@ Do not maintain a parallel hand-written inventory. Update the declarative contra
 
 PRs verify the exact source selected by the workflow, using the affected-task plan. Documentation-only PRs retain coverage checks; shared foundation/unknown paths or missing diff history select the full inventory. Browser and Hosted consumers pull in their prerequisites. Main pushes and manual verification always select every obligation. A manual or PR success is not a main-push release certification.
 
-The verification graph groups tasks into at most twenty jobs including plan and certification. The cap is on execution jobs, not test coverage. Keep independent work parallel and fail-fast disabled for independent groups. Within a group retain individual results even after a sibling failure. Prefer reuse of one certified producer over repeated builds. Do not add a second workflow or runner inventory just to bypass the bound.
+The certified verification graph groups tasks into at most twenty jobs including plan and certification. The cap is on execution jobs, not test coverage. Keep independent work parallel and fail-fast disabled for independent groups. Within a group retain individual results even after a sibling failure. Prefer reuse of one certified producer over repeated builds. Do not add a second workflow or runner inventory just to bypass the bound. The Full-model OCI workload is a supplemental high-cost reusable job: Verify calls it only for its exact pull-request input paths, while the standalone workflow runs it for matching main pushes or manual dispatch. It stays outside the artifact-evidence certification and release job inventory; a selected failure still fails the overall Verify workflow.
 
 ```mermaid
 flowchart TD

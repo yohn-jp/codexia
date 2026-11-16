@@ -1,26 +1,6 @@
 name: Full model OCI lifecycle acceptance
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - .dockerignore
-      - .github/workflows/full-model-oci-acceptance.yml
-      - Dockerfile
-      - Dockerfile.backend
-      - app/**
-      - modules/**
-      - package.json
-      - packages/**
-      - profiles/**
-      - pnpm-lock.yaml
-      - pnpm-workspace.yaml
-      - scripts/profile-build.mjs
-      - scripts/profile-package.mjs
-      - scripts/verify-oci.sh
-      - scripts/verify-oci-http.mjs
-      - tests/integration/model-oci-lifecycle.acceptance.mjs
-      - tests/integration/model-oci-lifecycle.container.mjs
-      - tests/integration/model-postgres-fixture.mjs
+  workflow_call:
   push:
     branches: [main]
     paths:

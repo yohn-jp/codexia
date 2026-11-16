@@ -6,10 +6,39 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BROWSER_SHARDS, PROFILES, TYPECHECK_TARGETS, VERIFICATION_GROUPS, VERIFICATION_TASKS, WORKSPACES } from './ci-contract.mjs';
 
+export const FULL_MODEL_OCI_PATHS = Object.freeze([
+  '.dockerignore',
+  '.github/workflows/full-model-oci-acceptance.yml',
+  'Dockerfile',
+  'Dockerfile.backend',
+  'app/**',
+  'modules/**',
+  'package.json',
+  'packages/**',
+  'profiles/**',
+  'pnpm-lock.yaml',
+  'pnpm-workspace.yaml',
+  'scripts/profile-build.mjs',
+  'scripts/profile-package.mjs',
+  'scripts/verify-oci.sh',
+  'scripts/verify-oci-http.mjs',
+  'tests/integration/model-oci-lifecycle.acceptance.mjs',
+  'tests/integration/model-oci-lifecycle.container.mjs',
+  'tests/integration/model-postgres-fixture.mjs',
+  '.github/workflows/verify.yml',
+]);
+
+/** @param {string} file */
+export function matchesFullModelOciPath(file) {
+  return typeof file === 'string' && FULL_MODEL_OCI_PATHS.some(pattern =>
+    pattern.endsWith('/**') ? file.startsWith(pattern.slice(0, -2)) : file === pattern);
+}
+
 export function createVerificationPlan({ files, event, sha, base = null }) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? '') || (base !== null && !/^[a-f0-9]{40}$/.test(base))) throw new Error('Invalid verification source identity');
   const selected = new Set(['coverage']);
   let full = event !== 'pull_request' || !Array.isArray(files);
+  const fullModelOci = event === 'pull_request' && Array.isArray(files) && files.some(matchesFullModelOciPath);
   const add = (...tasks) => tasks.forEach(task => selected.add(task));
   const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
   for (const file of files ?? []) {
@@ -51,7 +80,8 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
   if ([...selected].some(task => task.startsWith('hosted-native-') && task !== 'hosted-native-catalog')) add('build-full');
   const tasks = VERIFICATION_TASKS.filter(task => full || selected.has(task));
   return {
-    version: 1, sha, base, event, mode: full ? 'full' : 'affected', files: files ?? null,
+    version: 2, sha, base, event, mode: full ? 'full' : 'affected', files: files ?? null,
+    full_model_oci: fullModelOci,
     tasks,
     groups: Object.keys(VERIFICATION_GROUPS).filter(group => VERIFICATION_GROUPS[group].some(task => tasks.includes(task))),
     excluded: VERIFICATION_TASKS.filter(task => !tasks.includes(task)).map(task => ({ task, reason: 'Outside the affected source/profile boundaries of this PR' })),
@@ -90,11 +120,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       browser: JSON.stringify(PROFILES.flatMap(profile => ['writing', 'reference', 'webkit'].filter(id => plan.groups.includes(`browser-${profile}-${id}`)).map(id => ({ group: `${profile}-${id}`, profile })))),
       hosted_catalog: String(plan.groups.includes('hosted-native-catalog')),
       hosted: JSON.stringify(['core', 'selected', 'full'].filter(id => plan.groups.includes(`hosted-native-${id}`))),
+      full_model_oci: String(plan.full_model_oci),
     };
     appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(outputs).map(([key, value]) => `${key}=${value}\n`).join(''));
   }
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
     `Verification plan: **${plan.mode}**, ${plan.tasks.length}/${VERIFICATION_TASKS.length} validations in ${plan.groups.length} execution groups at ${sha}.\n\n` +
+    `Full model OCI acceptance: **${plan.full_model_oci ? 'SELECTED' : 'NOT_SELECTED'}**.\n\n` +
     plan.excluded.map(item => `- NOT_SELECTED: ${item.task}: ${item.reason}\n`).join(''));
   console.log(JSON.stringify(plan));
 }

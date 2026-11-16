@@ -5,9 +5,16 @@ import { planDigest, validateVerificationPlan } from './ci-impact.mjs';
 export function assertPlanEvidence(plan, jobs, reports) {
   validateVerificationPlan(plan);
   const names = new Set();
+  const supplementalFullModelNames = new Set();
   for (const job of jobs) {
     assert.equal(job.head_sha, plan.sha, 'Job source SHA mismatch');
     if (job.name === 'certification') continue;
+    if (job.name === 'full-model-oci' || job.name.startsWith('full-model-oci / ')) {
+      // The path-scoped reusable lifecycle run is a workflow-level gate, not artifact-report evidence.
+      assert.equal(supplementalFullModelNames.has(job.name), false, 'Duplicate supplemental Full-model OCI job');
+      supplementalFullModelNames.add(job.name);
+      continue;
+    }
     assert.ok(!names.has(job.name), `Duplicate verification job: ${job.name}`);
     names.add(job.name);
     if (job.name === 'plan' || plan.groups.includes(job.name)) {
