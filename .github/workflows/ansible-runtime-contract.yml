@@ -10,6 +10,7 @@ on:
       - deploy/updater/codexia-updater-*.example
       - deploy/updater/codexia-api-proxy.container.example
       - deploy/updater/test-runtime-contract-integration.sh
+      - deploy/updater/test-standalone-maintenance-integration.mjs
       - deploy/ansible/prepare.yml
       - deploy/ansible/maintenance.yml
       - deploy/ansible/verify.yml
@@ -32,6 +33,7 @@ on:
       - deploy/updater/codexia-updater-*.example
       - deploy/updater/codexia-api-proxy.container.example
       - deploy/updater/test-runtime-contract-integration.sh
+      - deploy/updater/test-standalone-maintenance-integration.mjs
       - deploy/ansible/prepare.yml
       - deploy/ansible/maintenance.yml
       - deploy/ansible/verify.yml
@@ -73,6 +75,13 @@ jobs:
           sudo usermod --groups '' "$fixture_user"
           fixture_uid=$(id -u "$fixture_user")
           fixture_home=$(getent passwd "$fixture_user" | cut -d: -f6)
+          test -d /opt && test ! -L /opt
+          test ! -e /opt/codexia-updater && test ! -L /opt/codexia-updater
+          touch "$RUNNER_TEMP/codexia-runtime-contract.source-tree-created"
+          sudo mkdir -m 0700 -- /opt/codexia-updater
+          sudo chown "$fixture_user:$fixture_user" /opt/codexia-updater
+          printf '%s\n' 'codexia-runtime-contract-source/v1' | sudo -u "$fixture_user" tee /opt/codexia-updater/.codexia-runtime-contract-source >/dev/null
+          sudo -u "$fixture_user" chmod 0600 /opt/codexia-updater/.codexia-runtime-contract-source
           test ! -e /var/cache/codexia && test ! -L /var/cache/codexia
           test ! -e /var/cache/codexia/models && test ! -L /var/cache/codexia/models
           touch "$RUNNER_TEMP/codexia-runtime-contract.model-cache-created"
@@ -114,9 +123,11 @@ jobs:
           ANSIBLE_PLAYBOOK=/opt/codexia-ansible/bin/ansible-playbook bash deploy/ansible/test-runtime-contract.sh
           ANSIBLE_PLAYBOOK=/opt/codexia-ansible/bin/ansible-playbook bash deploy/ansible/test-verify-timer.sh
           bash -n deploy/updater/test-runtime-contract-integration.sh
+          node --check deploy/updater/test-standalone-maintenance-integration.mjs
       - name: Exercise generated Core and Full Quadlets on disposable rootless Podman
         env:
           CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE: 'yes'
+          ANSIBLE_PLAYBOOK: /opt/codexia-ansible/bin/ansible-playbook
         run: |
           fixture_user=codexia-runtime-contract-test
           fixture_uid=$(id -u "$fixture_user")
@@ -137,6 +148,23 @@ jobs:
           if test -f "$RUNNER_TEMP/codexia-runtime-contract.marker-created"; then
             sudo rm -f /etc/codexia-iac-disposable-vm || cleanup_failed=1
             rm -f "$RUNNER_TEMP/codexia-runtime-contract.marker-created" || cleanup_failed=1
+          fi
+          if test -f "$RUNNER_TEMP/codexia-runtime-contract.source-tree-created"; then
+            fixture_uid=$(id -u "$fixture_user" 2>/dev/null || true)
+            if test -n "$fixture_uid" \
+              && test -d /opt/codexia-updater && test ! -L /opt/codexia-updater \
+              && test "$(realpath -- /opt/codexia-updater)" = /opt/codexia-updater \
+              && test "$(stat -c '%u' /opt/codexia-updater)" = "$fixture_uid" \
+              && test -f /opt/codexia-updater/.codexia-runtime-contract-source \
+              && test ! -L /opt/codexia-updater/.codexia-runtime-contract-source \
+              && test "$(cat -- /opt/codexia-updater/.codexia-runtime-contract-source)" = codexia-runtime-contract-source/v1 \
+              && test "$(stat -c '%u' /opt/codexia-updater/.codexia-runtime-contract-source)" = "$fixture_uid"; then
+              sudo rm -rf --one-file-system /opt/codexia-updater || cleanup_failed=1
+              rm -f "$RUNNER_TEMP/codexia-runtime-contract.source-tree-created" || cleanup_failed=1
+            else
+              echo 'Refusing to remove an unexpected or replaced updater source fixture' >&2
+              cleanup_failed=1
+            fi
           fi
           if test -f "$RUNNER_TEMP/codexia-runtime-contract.model-cache-created"; then
             fixture_uid=$(id -u codexia-runtime-contract-test 2>/dev/null || true)

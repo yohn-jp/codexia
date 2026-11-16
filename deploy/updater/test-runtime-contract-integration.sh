@@ -39,10 +39,12 @@ cleanup() {
   trap - EXIT INT TERM
   set +e
   if (( CLEANUP_ARMED )); then
+    systemctl --user disable --now codexia-updater.timer >/dev/null 2>&1 || true
+    systemctl --user reset-failed codexia-updater.service >/dev/null 2>&1 || true
     systemctl --user revert --runtime codexia-slot-blue.service codexia-slot-green.service >/dev/null 2>&1 || true
     systemctl --user daemon-reload >/dev/null 2>&1 || true
     for unit in "${OWNED_UNITS[@]}"; do systemctl --user stop "$unit" >/dev/null 2>&1 || true; done
-    for container in codexia-slot-blue codexia-slot-green "$PROXY_FIXTURE_CONTAINER"; do
+    for container in codexia-slot-blue codexia-slot-green codexia-api-proxy "$PROXY_FIXTURE_CONTAINER"; do
       if podman container exists "$container" >/dev/null 2>&1; then
         actual="$(podman inspect --type container --format '{{.Image}}' "$container" 2>/dev/null || true)"
         [[ -n "$IMAGE_ID" && "$actual" == "$IMAGE_ID" ]] && podman rm --force "$container" >/dev/null 2>&1 || true
@@ -70,6 +72,16 @@ cleanup() {
         codexia.network|codexia-data.network|codexia-data.volume|codexia-history.volume) grep -Fq "Label=codexia-runtime-contract-test=$NONCE" "$file" && rm -f -- "$file" || true ;;
         codexia-db.service) grep -Fq "Description=Codexia runtime acceptance dependency $NONCE" "$file" && rm -f -- "$file" || true ;;
         codexia-runtime-contract-proxy-fixture.container) grep -Fq "ContainerName=$PROXY_FIXTURE_CONTAINER" "$file" && grep -Fq "Label=codexia-runtime-contract-test=$NONCE" "$file" && rm -f -- "$file" || true ;;
+        codexia-api-proxy.container) grep -Fq 'ContainerName=codexia-api-proxy' "$file" && grep -Eq '^Image=ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$' "$file" && grep -Fq "Label=codexia-runtime-contract-test=$NONCE" "$file" && rm -f -- "$file" || true ;;
+      esac
+    done
+    for unit in codexia-updater-boot.service codexia-updater.service codexia-updater.timer; do
+      file="$USER_UNIT_DIR/$unit"
+      [[ -f "$file" && ! -L "$file" && "$(stat -c '%u' "$file" 2>/dev/null)" == "$UID_VALUE" ]] || continue
+      case "$unit" in
+        codexia-updater-boot.service) grep -Fq 'ExecStart=/bin/sh /opt/codexia-updater/deploy/updater/codexia-updater boot ' "$file" && rm -f -- "$file" || true ;;
+        codexia-updater.service) grep -Fq 'ExecStart=/bin/sh /opt/codexia-updater/deploy/updater/codexia-updater tick ' "$file" && rm -f -- "$file" || true ;;
+        codexia-updater.timer) grep -Fq 'Unit=codexia-updater.service' "$file" && grep -Eq '^OnBootSec=(5min|24h)$' "$file" && rm -f -- "$file" || true ;;
       esac
     done
     if (( MODEL_ALIAS_CREATED )) && [[ "$MODEL_ALIAS" == "$MODEL_CACHE_ROOT/.runtime-contract-test.$UID_VALUE.$NONCE.alias" && -L "$MODEL_ALIAS" && "$(readlink -- "$MODEL_ALIAS")" == "$MODEL_DIR" ]]; then rm -f -- "$MODEL_ALIAS"; fi
@@ -139,7 +151,7 @@ for identity in codexia-api codexia-db codexia-api-proxy codexia-slot-blue codex
 for identity in codexia codexia-data; do must_not_exist network "$identity"; done
 for identity in codexia-data codexia-history codexia-postgres; do must_not_exist volume "$identity"; done
 for identity in codexia-postgres-app-password codexia-auth-token codexia-postgres-preflight-password; do must_not_exist secret "$identity"; done
-quadlet_names=(codexia-slot-blue.container codexia-slot-green.container codexia-runtime-contract-proxy-fixture.container codexia.network codexia-data.network codexia-data.volume codexia-history.volume codexia-db.container)
+quadlet_names=(codexia-slot-blue.container codexia-slot-green.container codexia-runtime-contract-proxy-fixture.container codexia-api-proxy.container codexia.network codexia-data.network codexia-data.volume codexia-history.volume codexia-db.container)
 quadlet_roots=("$QUADLET_DIR" "$RUNTIME_DIR/containers/systemd" "/etc/containers/systemd/users/$UID_VALUE" /etc/containers/systemd/users)
 for root in "${quadlet_roots[@]}"; do
   for filename in "${quadlet_names[@]}"; do
@@ -147,12 +159,12 @@ for root in "${quadlet_roots[@]}"; do
   done
 done
 for root in "$USER_UNIT_DIR" /etc/systemd/user /usr/lib/systemd/user "$RUNTIME_DIR/systemd/user" "$RUNTIME_DIR/systemd/generator"; do
-  for unit in codexia-db.service codexia-slot-blue.service codexia-slot-green.service "$PROXY_FIXTURE_UNIT"; do
+  for unit in codexia-db.service codexia-slot-blue.service codexia-slot-green.service codexia-api-proxy.service "$PROXY_FIXTURE_UNIT" codexia-updater-boot.service codexia-updater.service codexia-updater.timer; do
     [[ ! -e "$root/$unit" && ! -L "$root/$unit" ]] || die "refusing existing systemd unit identity: $root/$unit"
     [[ ! -e "$root/$unit.d" && ! -L "$root/$unit.d" ]] || die "refusing existing systemd override identity: $root/$unit.d"
   done
 done
-for unit in codexia-slot-blue.service codexia-slot-green.service codexia-db.service "$PROXY_FIXTURE_UNIT"; do
+for unit in codexia-slot-blue.service codexia-slot-green.service codexia-db.service codexia-api-proxy.service "$PROXY_FIXTURE_UNIT" codexia-updater-boot.service codexia-updater.service codexia-updater.timer; do
   load_state="$(systemctl --user show --property=LoadState --value "$unit" 2>/dev/null || true)"
   [[ -z "$load_state" || "$load_state" == not-found ]] || die "refusing loaded unit identity: $unit"
 done
@@ -231,16 +243,28 @@ ExecStop=/usr/bin/true
 EOF
 OWNED_UNITS=(
   codexia-slot-blue.service codexia-slot-green.service codexia-db.service
+  codexia-api-proxy.service codexia-updater-boot.service codexia-updater.service codexia-updater.timer
   "$PROXY_FIXTURE_UNIT"
   codexia-network.service codexia-data-network.service
   codexia-data-volume.service codexia-history-volume.service
 )
 
+cat > "$WORK_DIR/image/health.mjs" <<'EOF'
+import http from 'node:http';
+const version={name:'codexia',version:'0.1.0',profile:process.env.CODEXIA_PROFILE,hosted:false,apiEpoch:1,browserAuth:'token'};
+http.createServer((request,response)=>{
+  const route=new URL(request.url,'http://localhost').pathname;
+  if(route==='/health/ready'){response.writeHead(200,{'Content-Type':'text/plain'});response.end('ready');return;}
+  if(route==='/api/version'){response.writeHead(200,{'Content-Type':'application/json'});response.end(JSON.stringify(version));return;}
+  response.writeHead(404);response.end();
+}).listen(Number(process.env.PORT||3000),process.env.HOST||'0.0.0.0');
+EOF
 cat > "$WORK_DIR/image/Containerfile" <<'EOF'
 FROM docker.io/library/node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54
 ARG CODEXIA_RUNTIME_TEST_NONCE
 LABEL codexia.runtime-contract-test=${CODEXIA_RUNTIME_TEST_NONCE}
-CMD ["node", "-e", "setInterval(() => {}, 1000)"]
+COPY health.mjs /opt/codexia-runtime-contract-health.mjs
+CMD ["node", "/opt/codexia-runtime-contract-health.mjs"]
 EOF
 IMAGE_TAG="localhost/codexia-runtime-contract-test:$NONCE"
 podman build --pull=always --build-arg "CODEXIA_RUNTIME_TEST_NONCE=$NONCE" --tag "$IMAGE_TAG" "$WORK_DIR/image"
@@ -621,4 +645,10 @@ assert_exclusive_writer blue
 run_node_check blue "$IMAGE_ID"
 write_and_check_markers codexia-slot-blue verify
 
-printf 'PASS: pinned synthetic Core/Full Quadlets, rootless Podman/systemd, effective resource limits, read-only models, blue/green persistence and service restart\n'
+OWNED_FILES+=("$QUADLET_DIR/codexia-api-proxy.container")
+CODEXIA_RUNTIME_MAINTENANCE_REPO_ROOT="$REPO_ROOT" \
+CODEXIA_RUNTIME_MAINTENANCE_IMAGE="$IMAGE_ID" \
+CODEXIA_RUNTIME_MAINTENANCE_NONCE="$NONCE" \
+  node "$SCRIPT_DIR/test-standalone-maintenance-integration.mjs" --run "$REPO_ROOT" "$QUADLET_DIR" "$USER_UNIT_DIR" "$WORK_DIR"
+
+printf 'PASS: pinned synthetic Core/Full Quadlets, rootless Podman/systemd, effective resource limits, read-only models, blue/green persistence, locked maintenance rollback/recovery, real timer verification and post-update restart\n'
