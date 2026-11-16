@@ -23,7 +23,7 @@ Use a single validated inventory schema with separate nonsecret configuration an
 
 - service user, UID/GID policy, home, rootless subordinate ID allocation/validation, package/toolchain versions or supported version constraints, lingering, directory ownership and required host capabilities;
 - the existing network/volume identities and security constraints, database and cloudflared immutable image digests, selected Core/Full profile, signed backend release reference, immutable proxy image and selected browser-auth configuration;
-- explicit permitted runtime options needed by the profile (model/cache paths and read-only artifact mounts where configured, resource limits/tmpfs, storage and ownership). No arbitrary shell, environment passthrough or unrestricted host paths. Authoring storage stays separate from derived caches;
+- explicit permitted runtime options needed by the profile (resource limits/tmpfs and the read-only model cache). `modelCachePath` is limited to `/var/cache/codexia/models` and its descendants; this dedicated artifact tree stays outside authoring storage, and source paths cannot traverse symlinks. No arbitrary shell, environment passthrough or unrestricted host paths;
 - protected input references for auth token, Tunnel token, independent PostgreSQL admin/app/preflight passwords, GitHub read/registry access where required, scoped Access probe credentials, pinned Ed25519 public key, backup recipient and destination. The signing private key stays in the protected publisher; the recovery private key stays on the isolated recovery host;
 - backup/restore policy, retention responsibility, maintenance approval, and desired polling state. Approval flags authorize operations, not proof of execution.
 

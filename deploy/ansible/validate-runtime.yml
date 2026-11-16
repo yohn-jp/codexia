@@ -21,7 +21,7 @@
         and runtime.get('format') == 'codexia-runtime/v1'
         and runtime.get('profile') in ['core', 'full']
         and (runtime.get('profile') != 'full' or runtime.get('modelCachePath') is string)
-        and (runtime.get('modelCachePath') is none or (runtime.get('modelCachePath') is string and runtime.get('modelCachePath') is match('^/[A-Za-z0-9._/-]+$') and '//' not in runtime.get('modelCachePath') and runtime.get('modelCachePath') != '/' and runtime.get('modelCachePath') == (runtime.get('modelCachePath') | regex_replace('/+$', '')) and (runtime.get('modelCachePath') | regex_search('(^|/)\\.\\.?(/|$)')) is none))
+        and (runtime.get('modelCachePath') is none or (runtime.get('modelCachePath') is string and runtime.get('modelCachePath') is match('^/var/cache/codexia/models(/|$)') and runtime.get('modelCachePath') is match('^/[A-Za-z0-9._/-]+$') and '//' not in runtime.get('modelCachePath') and runtime.get('modelCachePath') != '/' and runtime.get('modelCachePath') == (runtime.get('modelCachePath') | regex_replace('/+$', '')) and (runtime.get('modelCachePath') | regex_search('(^|/)\\.\\.?(/|$)')) is none))
         and runtime.get('tmpfs') is mapping
         and runtime.get('tmpfs').keys() | list | sort == ['moduleCacheSize', 'tempSize']
         and runtime.get('tmpfs').get('tempSize') in ['16m', '32m', '64m', '128m', '256m', '512m', '1g']

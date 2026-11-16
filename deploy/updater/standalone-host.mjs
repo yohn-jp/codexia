@@ -11,6 +11,7 @@ const SLOT = /^(blue|green)$/u;
 const name = slot => {if(!SLOT.test(slot))throw Error('Invalid slot');return 'codexia-slot-'+slot;};
 const preflight = slot => {name(slot);return 'codexia-preflight-'+slot;};
 const channelUrl='https://api.github.com/repos/yohn-jp/codexia/contents/stable-channel.json?ref=codexia-stable-channel';
+const modelCacheRoot='/var/cache/codexia/models';
 const fingerprintCode='import { packagedMigrationFingerprint } from "@codexia/api"; console.log(await packagedMigrationFingerprint());';
 const readyCode=`const health=await fetch("http://127.0.0.1:3000/health/ready",{signal:AbortSignal.timeout(5000)});if(!health.ok)process.exit(1);const version=await fetch("http://127.0.0.1:3000/api/version",{signal:AbortSignal.timeout(5000)});if(!version.ok)process.exit(1);console.log(JSON.stringify(await version.json()));`;
 const proxyProbeCode=`const r=await fetch("http://127.0.0.1:3000/api/version",{signal:AbortSignal.timeout(5000)});if(!r.ok)process.exit(1);console.log(JSON.stringify({slot:r.headers.get("x-codexia-upstream-slot"),version:await r.json()}));`;
@@ -30,6 +31,7 @@ export function validateRuntimeContract(value){
     assert.equal(typeof value.modelCachePath,'string','Model cache path must be a string or null');
     assert.ok(path.isAbsolute(value.modelCachePath)&&path.resolve(value.modelCachePath)===value.modelCachePath&&value.modelCachePath!=='/','Model cache path must be a normalized non-root absolute path');
     assert.match(value.modelCachePath,/^[A-Za-z0-9._/-]+$/u,'Model cache path contains a Quadlet delimiter or unsafe character');
+    assert.ok(value.modelCachePath===modelCacheRoot||value.modelCachePath.startsWith(modelCacheRoot+path.sep),'Model cache path must remain inside the dedicated /var/cache/codexia/models artifact tree');
   }
   assert.ok(value.tmpfs&&typeof value.tmpfs==='object'&&!Array.isArray(value.tmpfs));
   assert.deepEqual(Object.keys(value.tmpfs).sort(),['moduleCacheSize','tempSize'],'Unexpected runtime tmpfs fields');
@@ -45,6 +47,7 @@ export function validateRuntimeContract(value){
 }
 
 export function assertModelCacheOutsideVolumes(modelCachePath,volumeMountpoints){
+  assert.ok(typeof modelCachePath==='string'&&(modelCachePath===modelCacheRoot||modelCachePath.startsWith(modelCacheRoot+path.sep)),'Model cache path must remain inside the dedicated /var/cache/codexia/models artifact tree');
   assert.ok(path.isAbsolute(modelCachePath)&&path.resolve(modelCachePath)===modelCachePath,'Model cache path must be normalized and absolute');
   for(const mountpoint of volumeMountpoints){
     assert.ok(path.isAbsolute(mountpoint)&&path.resolve(mountpoint)===mountpoint,'Persistent volume mountpoint is unobservable');
@@ -139,6 +142,18 @@ export function assertRuntimeObservation(container,value,imageEnvironment,unitTe
   assert.deepEqual(Object.keys(tmpfs).sort(),['/cache','/tmp'],'Legacy tmpfs mount set drift');
   assert.equal(tmpfs['/tmp'],`rw,nosuid,nodev,noexec,size=${runtime.tmpfs.tempSize}`,'Legacy temporary filesystem drift');
   assert.equal(tmpfs['/cache'],`rw,nosuid,nodev,noexec,size=${runtime.tmpfs.moduleCacheSize}`,'Legacy module-cache filesystem drift');
+  const portBindings=container.HostConfig?.PortBindings;
+  assert.ok(portBindings===null||portBindings&&typeof portBindings==='object'&&!Array.isArray(portBindings),'Legacy host port bindings are unobservable');
+  assert.equal(Object.keys(portBindings??{}).length,0,'Legacy writer exposes a host port');
+  const networks=container.NetworkSettings?.Networks;
+  assert.ok(networks&&typeof networks==='object'&&!Array.isArray(networks),'Legacy writer networks are unobservable');
+  assert.deepEqual(Object.keys(networks).sort(),['codexia','codexia-data'],'Legacy writer network drift');
+  assert.equal(container.HostConfig?.ReadonlyRootfs,true,'Legacy writer root filesystem is not read-only');
+  assert.deepEqual((container.HostConfig?.CapDrop??[]).map(value=>String(value).toLowerCase()).sort(),['all'],'Legacy writer capability drop contract drift');
+  const securityOptions=container.HostConfig?.SecurityOpt;
+  assert.ok(Array.isArray(securityOptions),'Legacy writer security options are unobservable');
+  assert.equal(securityOptions.length,1,'Legacy writer security options drift');
+  assert.match(securityOptions[0],/^no-new-privileges(?::true)?$/iu,'Legacy writer no-new-privileges setting is missing or has an unexpected override');
 }
 
 export function assertProxyRuntimeObservation(quadletText,container,activeState,imageInfo,{home=process.env.HOME}={}){

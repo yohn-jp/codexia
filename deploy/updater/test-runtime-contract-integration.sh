@@ -13,6 +13,7 @@ readonly QUADLET_DIR="$CONFIG_HOME/containers/systemd"
 readonly USER_UNIT_DIR="$CONFIG_HOME/systemd/user"
 readonly MARKER=/etc/codexia-iac-disposable-vm
 readonly LOCK="$RUNTIME_DIR/codexia-runtime-contract-acceptance.lock"
+readonly MODEL_CACHE_ROOT=/var/cache/codexia/models
 readonly PROXY_FIXTURE_CONTAINER=codexia-runtime-contract-proxy-fixture
 readonly PROXY_FIXTURE_UNIT=codexia-runtime-contract-proxy-fixture.service
 WORK_DIR=
@@ -20,6 +21,9 @@ NONCE=
 IMAGE_TAG=
 IMAGE_ID=
 MODEL_DIR=
+MODEL_ALIAS=
+MODEL_DIR_CREATED=0
+MODEL_ALIAS_CREATED=0
 CLEANUP_ARMED=0
 LOCK_ACQUIRED=0
 CREATED_QUADLET_DIR=0
@@ -68,6 +72,11 @@ cleanup() {
         codexia-runtime-contract-proxy-fixture.container) grep -Fq "ContainerName=$PROXY_FIXTURE_CONTAINER" "$file" && grep -Fq "Label=codexia-runtime-contract-test=$NONCE" "$file" && rm -f -- "$file" || true ;;
       esac
     done
+    if (( MODEL_ALIAS_CREATED )) && [[ "$MODEL_ALIAS" == "$MODEL_CACHE_ROOT/.runtime-contract-test.$UID_VALUE.$NONCE.alias" && -L "$MODEL_ALIAS" && "$(readlink -- "$MODEL_ALIAS")" == "$MODEL_DIR" ]]; then rm -f -- "$MODEL_ALIAS"; fi
+    if (( MODEL_DIR_CREATED )) && [[ "$MODEL_DIR" == "$MODEL_CACHE_ROOT/.runtime-contract-test.$UID_VALUE.$NONCE" && -d "$MODEL_DIR" && ! -L "$MODEL_DIR" && "$(stat -c '%u' "$MODEL_DIR" 2>/dev/null)" == "$UID_VALUE" ]]; then
+      if [[ -f "$MODEL_DIR/model.txt" && ! -L "$MODEL_DIR/model.txt" && "$(stat -c '%u' "$MODEL_DIR/model.txt" 2>/dev/null)" == "$UID_VALUE" ]]; then rm -f -- "$MODEL_DIR/model.txt"; fi
+      rmdir -- "$MODEL_DIR" >/dev/null 2>&1 || true
+    fi
     systemctl --user daemon-reload >/dev/null 2>&1 || true
     (( CREATED_USER_UNIT_DIR == 0 )) || rmdir -- "$USER_UNIT_DIR" 2>/dev/null || true
     (( CREATED_QUADLET_DIR == 0 )) || rmdir -- "$QUADLET_DIR" 2>/dev/null || true
@@ -101,6 +110,7 @@ for command in buildah flock node od podman sha256sum systemctl systemd-detect-v
 [[ ! -L "$CONFIG_HOME/containers" && ! -L "$CONFIG_HOME/systemd" ]] || die 'unit directory parents must not be symlinks'
 [[ -d "$RUNTIME_DIR" && "$(stat -c '%u' "$RUNTIME_DIR")" == "$UID_VALUE" ]] || die 'rootless XDG_RUNTIME_DIR is unavailable'
 [[ -f /sys/fs/cgroup/cgroup.controllers ]] || die 'requires cgroup v2'
+[[ -d "$MODEL_CACHE_ROOT" && ! -L "$MODEL_CACHE_ROOT" && "$(realpath -- "$MODEL_CACHE_ROOT")" == "$MODEL_CACHE_ROOT" && -w "$MODEL_CACHE_ROOT" && -x "$MODEL_CACHE_ROOT" ]] || die 'requires a writable real /var/cache/codexia/models artifact directory for the synthetic Full fixture'
 systemctl --user is-active --quiet default.target || die 'requires an active systemd user manager'
 systemctl --user show-environment >/dev/null || die 'systemd user manager is unreachable'
 manager_config_home="$(systemctl --user show-environment | sed -n 's/^XDG_CONFIG_HOME=//p')"
@@ -157,13 +167,20 @@ LOCK_ACQUIRED=1
 NONCE="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
 WORK_DIR="$(mktemp -d "/var/tmp/codexia-runtime-contract-acceptance.$UID_VALUE.XXXXXX")"
 readonly WORK_DIR
-MODEL_DIR="$WORK_DIR/models"
+MODEL_DIR="$MODEL_CACHE_ROOT/.runtime-contract-test.$UID_VALUE.$NONCE"
 readonly MODEL_DIR
-mkdir -m 0777 -- "$MODEL_DIR" "$WORK_DIR/image"
-chmod 0777 "$MODEL_DIR"
+[[ ! -e "$MODEL_DIR" && ! -L "$MODEL_DIR" ]] || die 'refusing an existing synthetic model artifact identity'
+MODEL_ALIAS="$MODEL_CACHE_ROOT/.runtime-contract-test.$UID_VALUE.$NONCE.alias"
+readonly MODEL_ALIAS
+[[ ! -e "$MODEL_ALIAS" && ! -L "$MODEL_ALIAS" ]] || die 'refusing an existing synthetic model alias identity'
+CLEANUP_ARMED=1
+mkdir -m 0700 -- "$MODEL_DIR"
+MODEL_DIR_CREATED=1
+ln -s -- "$MODEL_DIR" "$MODEL_ALIAS"
+MODEL_ALIAS_CREATED=1
+mkdir -m 0700 -- "$WORK_DIR/image"
 printf 'synthetic model artifact\n' > "$MODEL_DIR/model.txt"
 chmod 0644 "$MODEL_DIR/model.txt"
-CLEANUP_ARMED=1
 if [[ ! -d "$CONFIG_HOME/containers" ]]; then mkdir -m 0700 -- "$CONFIG_HOME/containers"; CREATED_CONTAINERS_DIR=1; fi
 if [[ ! -d "$QUADLET_DIR" ]]; then mkdir -m 0700 -- "$QUADLET_DIR"; CREATED_QUADLET_DIR=1; fi
 if [[ ! -d "$CONFIG_HOME/systemd" ]]; then mkdir -m 0700 -- "$CONFIG_HOME/systemd"; CREATED_SYSTEMD_CONFIG_DIR=1; fi
@@ -365,14 +382,14 @@ exercise_proxy_fixture_revision revision-2
 
 run_node_check() {
   local slot="$1" image="$2"
-  node --input-type=module - "$slot" "$image" "$REPO_ROOT" "$QUADLET_DIR" "$WORK_DIR" <<'NODE'
+  node --input-type=module - "$slot" "$image" "$REPO_ROOT" "$QUADLET_DIR" "$WORK_DIR" "$MODEL_ALIAS" <<'NODE'
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const [slot, image, repoRoot, quadletDir, workDir] = process.argv.slice(2);
+const [slot, image, repoRoot, quadletDir, workDir, modelAlias] = process.argv.slice(2);
 const name = `codexia-slot-${slot}`;
 const service = `${name}.service`;
 const host = await import(pathToFileURL(path.join(repoRoot, 'deploy/updater/standalone-host.mjs')).href);
@@ -380,6 +397,19 @@ const runtime = JSON.parse(await readFile(path.join(workDir, `codexia-runtime-${
 const inspect = JSON.parse(execFileSync('podman', ['inspect', '--type', 'container', name], { encoding: 'utf8' }))[0];
 const imageInfo = JSON.parse(execFileSync('podman', ['image', 'inspect', image], { encoding: 'utf8' }))[0];
 const quadletText = await readFile(path.join(quadletDir, `${name}.container`), 'utf8');
+const sourceHost = new host.PodmanStandaloneHost({
+  browserAuth: { mode: 'token' }, frontendIdentityUrl: 'https://codexia.invalid/desktop/update-identity.json',
+  routeFile: path.join(workDir, 'route'), quadletDirectory: quadletDir, githubTokenFile: path.join(workDir, 'token'), runtime,
+});
+await sourceHost.assertRuntimeSources();
+if (runtime.modelCachePath) {
+  const aliasHost = new host.PodmanStandaloneHost({
+    browserAuth: { mode: 'token' }, frontendIdentityUrl: 'https://codexia.invalid/desktop/update-identity.json',
+    routeFile: path.join(workDir, 'route'), quadletDirectory: quadletDir, githubTokenFile: path.join(workDir, 'token'),
+    runtime: { ...runtime, modelCachePath: modelAlias },
+  });
+  await assert.rejects(aliasHost.assertRuntimeSources(), /real directory/u);
+}
 assert.equal(inspect.State?.Running, true, `${name} is not running`);
 const observedImage = typeof inspect.Image === 'string' && inspect.Image.startsWith('sha256:') ? inspect.Image : `sha256:${inspect.Image}`;
 assert.equal(observedImage, image, `${name} image identity is not pinned to the local fixture digest`);

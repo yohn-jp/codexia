@@ -15,12 +15,14 @@ YAML
 
 core='{"format":"codexia-runtime/v1","profile":"core","modelCachePath":null,"tmpfs":{"tempSize":"64m","moduleCacheSize":"1g"},"resources":{"memoryMaxBytes":null,"cpuQuotaPercent":null}}'
 full='{"format":"codexia-runtime/v1","profile":"full","modelCachePath":"/var/cache/codexia/models","tmpfs":{"tempSize":"64m","moduleCacheSize":"512m"},"resources":{"memoryMaxBytes":8589934592,"cpuQuotaPercent":250}}'
+full_nested='{"format":"codexia-runtime/v1","profile":"full","modelCachePath":"/var/cache/codexia/models/semantic","tmpfs":{"tempSize":"64m","moduleCacheSize":"512m"},"resources":{"memoryMaxBytes":8589934592,"cpuQuotaPercent":250}}'
 run_runtime() {
   node -e 'process.stdout.write(JSON.stringify({codexia_runtime:JSON.parse(process.argv[1])}))' "$1" > "$tmp/vars.json"
   "$ansible" -i localhost, "$tmp/runtime.yml" -e "@$tmp/vars.json"
 }
 run_runtime "$core" > "$tmp/core.log"
 run_runtime "$full" > "$tmp/full.log"
+run_runtime "$full_nested" > "$tmp/full-nested.log"
 
 reject_runtime() {
   local runtime_json=$1
@@ -33,6 +35,9 @@ reject_runtime() {
 reject_runtime '{"format":"codexia-runtime/v1","profile":"full","modelCachePath":null,"tmpfs":{"tempSize":"64m","moduleCacheSize":"512m"},"resources":{"memoryMaxBytes":8589934592,"cpuQuotaPercent":250}}'
 reject_runtime '{"format":"codexia-runtime/v1","profile":"full","modelCachePath":"/var/cache/codexia/models","extraEnvironment":{},"tmpfs":{"tempSize":"64m","moduleCacheSize":"512m"},"resources":{"memoryMaxBytes":8589934592,"cpuQuotaPercent":250}}'
 reject_runtime '{"format":"codexia-runtime/v1","profile":"full","modelCachePath":"/var/cache/../etc","tmpfs":{"tempSize":"64m","moduleCacheSize":"512m"},"resources":{"memoryMaxBytes":8589934592,"cpuQuotaPercent":250}}'
+reject_runtime '{"format":"codexia-runtime/v1","profile":"full","modelCachePath":"/etc","tmpfs":{"tempSize":"64m","moduleCacheSize":"512m"},"resources":{"memoryMaxBytes":8589934592,"cpuQuotaPercent":250}}'
+reject_runtime '{"format":"codexia-runtime/v1","profile":"full","modelCachePath":"/home/codexia/.ssh","tmpfs":{"tempSize":"64m","moduleCacheSize":"512m"},"resources":{"memoryMaxBytes":8589934592,"cpuQuotaPercent":250}}'
+reject_runtime '{"format":"codexia-runtime/v1","profile":"full","modelCachePath":"/var/cache/codexia/models-evil","tmpfs":{"tempSize":"64m","moduleCacheSize":"512m"},"resources":{"memoryMaxBytes":8589934592,"cpuQuotaPercent":250}}'
 reject_runtime '{"format":"codexia-runtime/v1","profile":"full","modelCachePath":"/var//cache/models","tmpfs":{"tempSize":"64m","moduleCacheSize":"512m"},"resources":{"memoryMaxBytes":8589934592,"cpuQuotaPercent":250}}'
 reject_runtime '{"format":"codexia-runtime/v1","profile":"full","modelCachePath":"/var/cache/codexia/models","tmpfs":{"tempSize":"64m","moduleCacheSize":"8g"},"resources":{"memoryMaxBytes":8589934592,"cpuQuotaPercent":250}}'
 reject_runtime '{"format":"codexia-runtime/v1","profile":"full","modelCachePath":"/var/cache/codexia/models","tmpfs":{"tempSize":"64m","moduleCacheSize":"512m"},"resources":{"memoryMaxBytes":268435456,"cpuQuotaPercent":250}}'
