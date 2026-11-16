@@ -129,11 +129,17 @@ apply_base() {
 as_service mkdir -p "$quadlet_dir"
 cat deploy/quadlet/codexia-data.network | as_service tee "$quadlet_dir/codexia-data.network" >/dev/null
 as_service sh -c 'printf "# fixture drift\\n" >> "$1"' _ "$quadlet_dir/codexia-data.network"
-if apply_base > "$tmp/quadlet-drift.log" 2>&1; then
+quadlet_drift_status=0
+apply_base > "$tmp/quadlet-drift.log" 2>&1 || quadlet_drift_status=$?
+if (( quadlet_drift_status == 0 )); then
   echo 'Base convergence accepted an existing noncanonical Quadlet' >&2
   exit 1
 fi
-grep -q 'Existing Codexia Quadlet differs from the reviewed source' "$tmp/quadlet-drift.log"
+if ! grep -Fq 'Existing Codexia Quadlet differs from the reviewed source' "$tmp/quadlet-drift.log"; then
+  printf 'Quadlet drift was rejected with unexpected output (Ansible status %s); captured output follows:\n' "$quadlet_drift_status" >&2
+  cat "$tmp/quadlet-drift.log" >&2
+  exit 1
+fi
 test "$(as_service find "$quadlet_dir" -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 1
 test ! -e /etc/codexia
 for network in codexia codexia-data; do
