@@ -11,19 +11,23 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const channelUrl = 'https://api.github.com/repos/yohn-jp/codexia/contents/stable-channel.json?ref=codexia-stable-channel';
 const frontendUrl = 'https://codexia-phase-f.fixture.invalid/desktop/update-identity.json';
 
-test('Phase F workflow reuses the Full-model proof and limits the runtime job to disposable read-only inputs', async () => {
-  const workflow = await readFile(path.join(root, '.github/workflows/phase-f-disposable.yml'), 'utf8');
+test('Standalone updater acceptance runs only on demand, without duplicating Full-model OCI', async () => {
+  const workflow = await readFile(path.join(root, '.github/workflows/standalone-updater-acceptance.yml'), 'utf8');
   const evidenceDoc = await readFile(path.join(root, 'docs/deployment/PHASE-F-DISPOSABLE-CI.md'), 'utf8');
   const runtimeJob = workflow.split('  rootless-updater-lifecycle:', 2)[1];
   assert.match(workflow, /runs-on: ubuntu-26\.04/u);
-  assert.match(workflow, /uses: \.\/\.github\/workflows\/full-model-oci-acceptance\.yml/u);
+  assert.match(workflow, /\n  workflow_dispatch:/u);
+  assert.doesNotMatch(workflow, /\n  (?:pull_request|push|schedule|workflow_run):/u);
+  assert.doesNotMatch(workflow, /full-model-oci-acceptance\.yml/u);
+  assert.match(workflow, /cancel-in-progress: true/u);
   assert.match(workflow, /test-phase-f-disposable\.sh/u);
   assert.match(workflow, /contents: read/u);
   assert.match(workflow, /actions: read/u);
   assert.match(workflow, /packages: read/u);
   assert.match(workflow, /\$\{\{ runner\.temp \}\}\/codexia-phase-f-evidence\//u);
   assert.match(workflow, /if-no-files-found: error/u);
-  assert.ok(workflow.match(/deploy\/update-compatibility\.json/gu)?.length >= 2, 'Compatibility changes must trigger both PR and main runs');
+  const obsoleteWorkflow = await readFile(path.join(root, '.github/workflows/phase-f-disposable.yml'), 'utf8').catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+  assert.equal(obsoleteWorkflow, null, 'The redundant automatic workflow must be removed');
   assert.match(runtimeJob, /permissions:\s*\n\s+contents: read\s*\n\s+actions: read\s*\n\s+packages: read/u);
   assert.doesNotMatch(runtimeJob, /(?:contents|actions|packages):\s*write/u);
   assert.doesNotMatch(workflow, /environment:\s*codexia-production|CODEXIA_CHANNEL_SIGNING_KEY|CODEXIA_PRODUCTION_SSH|terraform apply|ansible_host:/u);
@@ -83,10 +87,10 @@ test('Phase F integration helper is valid shell and exercises the existing locke
   const productionInitFile = baseRuntime.match(/- name: Install the canonical app-role initializer only when absent([\s\S]*?)(?=\n- name:)/u)?.[1];
   assert.ok(productionInitDirectory && productionInitFile, 'Missing canonical PostgreSQL initializer policy');
   assert.match(productionInitDirectory, /path: \/etc\/codexia\/postgres[\s\S]*?owner: "\{\{ codexia_service_user \}\}"[\s\S]*?group: root[\s\S]*?mode: '0750'/u);
-  assert.match(productionInitFile, /dest: \/etc\/codexia\/postgres\/010-create-app-role\.sh[\s\S]*?owner: "\{\{ codexia_service_user \}\}"[\s\S]*?group: root[\s\S]*?mode: '0550'/u);
+  assert.match(productionInitFile, /dest: \/etc\/codexia\/postgres\/010-create-app-role\.sh[\s\S]*?owner: "\{\{ codexia_service_user \}\}"[\s\S]*?group: root[\s\S]*?mode: '0555'/u);
   assert.match(helper, /postgres_init_script=\$postgres_init_dir\/010-create-app-role\.sh/u);
   assert.match(helper, /sudo install -d -o "\$service_user" -g root -m 0750 "\$postgres_init_dir"/u);
-  assert.match(helper, /sudo install -o "\$service_user" -g root -m 0550 "\$source_dir\/deploy\/postgres\/010-create-app-role\.sh" "\$postgres_init_script"/u);
+  assert.match(helper, /sudo install -o "\$service_user" -g root -m 0555 "\$source_dir\/deploy\/postgres\/010-create-app-role\.sh" "\$postgres_init_script"/u);
   assert.match(helper, /sudo stat --printf='host-file=%n mode=%a uid=%u gid=%g owner=%U group=%G\\n' "\$postgres_init_script"/u);
   assert.match(helper, /rootless run --rm --user postgres --entrypoint \/bin\/sh[\s\S]*?--volume "\$postgres_init_script:\/docker-entrypoint-initdb\.d\/010-create-app-role\.sh:ro,Z"[\s\S]*?test -r \/docker-entrypoint-initdb\.d\/010-create-app-role\.sh[\s\S]*?user_systemctl start codexia-db\.service/u);
   assert.match(helper, /postgres_image=\$\(sed -n 's\/\^Image=\/\/p' "\$source_dir\/deploy\/quadlet\/codexia-db\.container"\)/u);
