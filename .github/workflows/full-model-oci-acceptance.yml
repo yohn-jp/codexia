@@ -52,7 +52,7 @@ jobs:
   full-model-oci:
     name: Run pinned Full model lifecycle on rootless Podman
     runs-on: ubuntu-26.04
-    timeout-minutes: 120
+    timeout-minutes: 150
     env:
       CODEXIA_P13_MODEL_CACHE: ${{ runner.temp }}/codexia-p13-model-cache
       HF_HOME: ${{ runner.temp }}/huggingface-home
