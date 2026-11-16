@@ -7,6 +7,7 @@ all:
           ansible_user: codexia
       vars:
         codexia_stage: prepare
+        codexia_observe_milliseconds: 300000
         # Runtime account for read-only inspection; use the actual adopted identity.
         codexia_service_user: codexia
         # Required for the explicit host stage; match existing identity on adoption.

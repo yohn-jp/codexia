@@ -1,4 +1,74 @@
 ---
+- name: Inspect the complete installed updater source dependency closure
+  ansible.builtin.stat:
+    path: "{{ source_dir }}/{{ item }}"
+    checksum_algorithm: sha256
+  loop:
+    - deploy/updater/codexia-updater
+    - deploy/updater/standalone-updater.mjs
+    - deploy/updater/standalone-host.mjs
+    - deploy/updater/standalone-maintenance.mjs
+    - deploy/updater/proxy.mjs
+    - deploy/updater/standalone-backup.sh
+    - scripts/standalone-update-controller.mjs
+    - scripts/update-host-state.mjs
+    - scripts/update-channel.mjs
+    - scripts/update-release-policy.mjs
+  register: installed_updater_sources
+- name: Refuse to execute updater code when its reviewed source closure has drifted
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+      - not item.stat.islnk
+      - item.stat.mode == '0600'
+      - item.stat.checksum == (lookup('ansible.builtin.file', repo_root + '/' + item.item, rstrip=false) | hash('sha256'))
+    fail_msg: Installed updater source differs from the reviewed repository; use the approved maintain stage.
+  loop: "{{ installed_updater_sources.results }}"
+- name: Inspect the updater systemd unit source closure
+  ansible.builtin.stat:
+    path: "{{ unit_dir }}/{{ item }}"
+    checksum_algorithm: sha256
+  loop:
+    - codexia-updater-boot.service
+    - codexia-updater.service
+    - codexia-updater.timer
+  register: installed_updater_units
+- name: Refuse to reload an unreviewed updater unit
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+      - not item.stat.islnk
+      - item.stat.mode == '0600'
+      - item.stat.checksum == (lookup('ansible.builtin.file', repo_root + '/deploy/updater/' + item.item + '.example', rstrip=false) | hash('sha256'))
+    fail_msg: Installed updater units differ from the reviewed repository; use the approved maintain stage.
+  loop: "{{ installed_updater_units.results }}"
+- name: Inspect effective updater unit drop-ins
+  ansible.builtin.command:
+    argv: [systemctl, --user, show, --property=DropInPaths, --value, "{{ item }}"]
+  loop:
+    - codexia-updater-boot.service
+    - codexia-updater.service
+    - codexia-updater.timer
+  register: updater_unit_dropins
+  changed_when: false
+  failed_when: updater_unit_dropins.rc != 0
+- name: Refuse unreviewed updater unit overrides
+  ansible.builtin.assert:
+    that:
+      - item.stdout | trim == ''
+    fail_msg: Updater systemd unit has an unreviewed drop-in; single-writer and polling behavior are not verified.
+  loop: "{{ updater_unit_dropins.results }}"
+- name: Verify the installed proxy Quadlet source without restarting the live proxy
+  ansible.builtin.slurp:
+    src: "{{ quadlet_dir }}/codexia-api-proxy.container"
+  register: installed_proxy_quadlet
+- name: Refuse an unreviewed proxy Quadlet
+  ansible.builtin.assert:
+    that:
+      - (installed_proxy_quadlet.content | b64decode) == desired_proxy_quadlet
+    fail_msg: Installed proxy Quadlet differs from the reviewed pin; a separate proxy transition is required.
 - name: Verify live serving topology and persistence through the canonical locked controller
   ansible.builtin.command:
     argv: [sh, "{{ updater }}", verify, "{{ config_path }}"]
@@ -22,4 +92,5 @@
   register: saved_config
 - name: Refuse changes to an initialized controller outside maintenance
   ansible.builtin.assert:
-    that: (saved_config.content | b64decode | from_json | combine({'enabled': false})) == desired_config
+    that:
+      - "(saved_config.content | b64decode | from_json | combine({'enabled': false})) == desired_config"

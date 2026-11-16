@@ -48,6 +48,7 @@
     - deploy/updater/codexia-updater
     - deploy/updater/standalone-updater.mjs
     - deploy/updater/standalone-host.mjs
+    - deploy/updater/standalone-maintenance.mjs
     - deploy/updater/proxy.mjs
     - deploy/updater/standalone-backup.sh
     - scripts/standalone-update-controller.mjs
@@ -104,6 +105,6 @@
     preflight_verify_only: false
 - name: Install the private proxy Quadlet without starting it
   ansible.builtin.copy:
-    content: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/updater/codexia-api-proxy.container.example') | replace('ghcr.io/yohn-jp/codexia-backend@sha256:REPLACE_WITH_VERIFIED_DIGEST', codexia_proxy_image) }}\n"
+    content: "{{ desired_proxy_quadlet }}"
     dest: "{{ quadlet_dir }}/codexia-api-proxy.container"
     mode: '0600'

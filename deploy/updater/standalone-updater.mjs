@@ -5,9 +5,10 @@ import { atomicWrite, initialControllerState, loadControllerState, StandaloneCon
 import { PodmanStandaloneHost } from './standalone-host.mjs';
 import { verifyUpdateChannel } from '../../scripts/update-channel.mjs';
 import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
+import { maintainStandaloneUpdater } from './standalone-maintenance.mjs';
 
 const [command,configPath,argument]=process.argv.slice(2);
-if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|init|boot|tick|status|verify|pause|resume|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [installed-release.json]');
+if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|init|boot|tick|status|verify|pause|resume|maintain|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [argument]');
 const config=JSON.parse(await readFile(configPath,'utf8'));
 assert.equal(config.format,'codexia-standalone-updater/v1');
 assert.ok(path.isAbsolute(config.stateFile)&&path.isAbsolute(config.publicKeyFile));
@@ -50,6 +51,12 @@ if(command==='init'||command==='verify-legacy'){
     await host.verifyWriterUnits(state);
     await controller.assertServing(state,state.journal.active.slot,state.installed);
     console.log(JSON.stringify({state,observed:await host.observe()},null,2));
+    process.exit(0);
+  }
+  else if(command==='maintain'){
+    assert.ok(argument&&path.isAbsolute(argument),'An absolute staged maintenance manifest is required');
+    const result=await maintainStandaloneUpdater({config,manifestPath:argument,publicKey,state,store});
+    console.log(JSON.stringify(result));
     process.exit(0);
   }
   else if(command==='pause')state=await controller.save({...state,paused:true});

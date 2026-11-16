@@ -107,6 +107,19 @@ export function assertRuntimeObservation(container,value){
   assert.equal(tmpfs['/cache'],`rw,nosuid,nodev,noexec,size=${runtime.tmpfs.moduleCacheSize}`,'Legacy module-cache filesystem drift');
 }
 
+export function assertProxyRuntimeObservation(quadletText,container,activeState,imageInfo){
+  const images=[...quadletText.matchAll(/^Image=(\S+)$/gmu)].map(match=>match[1]);
+  assert.equal(images.length,1,'Proxy Quadlet image identity is unobservable');
+  assert.match(images[0],/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u,'Proxy Quadlet image is not digest pinned');
+  assert.equal(activeState,'active','Private proxy systemd unit is not active');
+  assert.equal(container?.State?.Running,true,'Private proxy container is not running');
+  const observed=container.ImageName??container.Config?.Image;
+  assert.equal(observed,images[0],'Running private proxy image differs from its pinned Quadlet');
+  assert.ok(imageInfo&&typeof imageInfo.Id==='string'&&imageInfo.Id.startsWith('sha256:'),'Pinned proxy image content identity is unobservable');
+  assert.ok(Array.isArray(imageInfo.RepoDigests)&&imageInfo.RepoDigests.includes(images[0]),'Pinned proxy digest is not present in the local image');
+  assert.equal(container.Image,imageInfo.Id,'Running private proxy container uses different image content');
+}
+
 export function assertRuntimeUnit(unitText,value){
   const runtime=validateRuntimeContract(value);
   const quotas=[...unitText.matchAll(/^CPUQuota=(.+)$/gmu)].map(match=>match[1]);
@@ -434,6 +447,13 @@ export class PodmanStandaloneHost{
     const after=await this.observe();assert.deepEqual(after.writers,[{slot,image:release.image}]);
   }
   async probe(slot,release){
+    const proxyQuadlet=await readFile(path.join(this.config.quadletDirectory,'codexia-api-proxy.container'),'utf8');
+    const proxyContainer=inspect('codexia-api-proxy');
+    const proxyUnitState=run('systemctl',['--user','show','--property=ActiveState','--value','codexia-api-proxy.service']);
+    const proxyImage=proxyQuadlet.match(/^Image=(\S+)$/mu)?.[1];
+    assert.ok(proxyImage,'Private proxy image is unobservable');
+    const proxyImageInfo=JSON.parse(run('podman',['image','inspect',proxyImage]))[0];
+    assertProxyRuntimeObservation(proxyQuadlet,proxyContainer,proxyUnitState,proxyImageInfo);
     await this.waitReady(name(slot),release);
     const routed=JSON.parse(run('podman',['exec','codexia-api-proxy','node','--input-type=module','-e',proxyProbeCode],{timeout:10000}));
     assert.equal(routed.slot,slot);assertVersion(routed.version,release,this.authEnvironment.CODEXIA_BROWSER_AUTH);

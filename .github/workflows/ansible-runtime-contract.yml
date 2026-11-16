@@ -1,0 +1,132 @@
+name: Verify Ansible Runtime Contract
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - deploy/updater/standalone-host.mjs
+      - deploy/updater/standalone-updater.mjs
+      - deploy/updater/standalone-maintenance.mjs
+      - deploy/updater/codexia-updater
+      - deploy/updater/codexia-updater-*.example
+      - deploy/updater/codexia-api-proxy.container.example
+      - deploy/updater/test-runtime-contract-integration.sh
+      - deploy/ansible/prepare.yml
+      - deploy/ansible/maintenance.yml
+      - deploy/ansible/verify.yml
+      - deploy/ansible/site.yml
+      - deploy/ansible/validate-runtime.yml
+      - scripts/standalone-host.test.mjs
+      - scripts/standalone-maintenance.test.mjs
+      - scripts/standalone-update-controller.mjs
+      - .github/workflows/ansible-runtime-contract.yml
+  push:
+    branches: [main]
+    paths:
+      - deploy/updater/standalone-host.mjs
+      - deploy/updater/standalone-updater.mjs
+      - deploy/updater/standalone-maintenance.mjs
+      - deploy/updater/codexia-updater
+      - deploy/updater/codexia-updater-*.example
+      - deploy/updater/codexia-api-proxy.container.example
+      - deploy/updater/test-runtime-contract-integration.sh
+      - deploy/ansible/prepare.yml
+      - deploy/ansible/maintenance.yml
+      - deploy/ansible/verify.yml
+      - deploy/ansible/site.yml
+      - deploy/ansible/validate-runtime.yml
+      - scripts/standalone-host.test.mjs
+      - scripts/standalone-maintenance.test.mjs
+      - scripts/standalone-update-controller.mjs
+      - .github/workflows/ansible-runtime-contract.yml
+permissions:
+  contents: read
+jobs:
+  runtime-contract:
+    name: Verify real rootless runtime contract on Ubuntu VM
+    runs-on: ubuntu-26.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+      - name: Install isolated host test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends podman buildah uidmap netavark aardvark-dns passt slirp4netns fuse-overlayfs dbus-user-session
+          sudo python3 -m venv /opt/codexia-ansible
+          sudo /opt/codexia-ansible/bin/pip install ansible-core==2.21.6
+      - name: Prepare an isolated rootless systemd identity
+        run: |
+          fixture_user=codexia-runtime-contract-test
+          test -z "$(id -u "$fixture_user" 2>/dev/null || true)"
+          sudo useradd --create-home --shell /bin/bash "$fixture_user"
+          touch "$RUNNER_TEMP/codexia-runtime-contract.user-created"
+          sudo usermod --groups '' "$fixture_user"
+          fixture_uid=$(id -u "$fixture_user")
+          fixture_home=$(getent passwd "$fixture_user" | cut -d: -f6)
+          sudo -u "$fixture_user" install -d -m 0700 "$fixture_home/.config"
+          subuid_max=$(awk -F: 'BEGIN { max = 100000 } { end = $2 + $3; if (end > max) max = end } END { print max }' /etc/subuid)
+          subgid_max=$(awk -F: 'BEGIN { max = 100000 } { end = $2 + $3; if (end > max) max = end } END { print max }' /etc/subgid)
+          subuid_start=$(( (subuid_max + 65535) / 65536 * 65536 ))
+          subgid_start=$(( (subgid_max + 65535) / 65536 * 65536 ))
+          sudo usermod --add-subuids "$subuid_start-$((subuid_start + 65535))" --add-subgids "$subgid_start-$((subgid_start + 65535))" "$fixture_user"
+          sudo loginctl enable-linger "$fixture_user"
+          sudo install -d -m 0755 "/run/systemd/system/user@${fixture_uid}.service.d"
+          cat <<EOF | sudo tee "/run/systemd/system/user@${fixture_uid}.service.d/10-codexia-runtime-ci.conf" >/dev/null
+          [Service]
+          Environment=HOME=$fixture_home
+          Environment=XDG_CONFIG_HOME=$fixture_home/.config
+          Environment=XDG_RUNTIME_DIR=/run/user/$fixture_uid
+          EOF
+          sudo systemctl daemon-reload
+          sudo systemctl start "user@${fixture_uid}.service"
+          for attempt in $(seq 1 20); do
+            if sudo -u "$fixture_user" env HOME="$fixture_home" XDG_RUNTIME_DIR="/run/user/$fixture_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" systemctl --user show --property=Version >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          sudo -u "$fixture_user" env HOME="$fixture_home" XDG_CONFIG_HOME="$fixture_home/.config" XDG_RUNTIME_DIR="/run/user/$fixture_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" systemctl --user show --property=Version
+          test ! -e /etc/codexia-iac-disposable-vm && test ! -L /etc/codexia-iac-disposable-vm
+          printf '%s\n' 'codexia-iac-disposable-vm/v1' | sudo tee /etc/codexia-iac-disposable-vm >/dev/null
+          touch "$RUNNER_TEMP/codexia-runtime-contract.marker-created"
+          sudo chown root:root /etc/codexia-iac-disposable-vm
+          sudo chmod 0444 /etc/codexia-iac-disposable-vm
+      - name: Check runtime schema, maintenance guards and Ansible validation
+        run: |
+          node --test scripts/standalone-host.test.mjs scripts/standalone-maintenance.test.mjs
+          /opt/codexia-ansible/bin/ansible-playbook -i deploy/ansible/inventory.example.yml deploy/ansible/site.yml --syntax-check
+          ANSIBLE_PLAYBOOK=/opt/codexia-ansible/bin/ansible-playbook bash deploy/ansible/test-runtime-contract.sh
+          bash -n deploy/updater/test-runtime-contract-integration.sh
+      - name: Exercise generated Core and Full Quadlets on disposable rootless Podman
+        env:
+          CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE: 'yes'
+        run: |
+          fixture_user=codexia-runtime-contract-test
+          fixture_uid=$(id -u "$fixture_user")
+          fixture_home=$(getent passwd "$fixture_user" | cut -d: -f6)
+          sudo -u "$fixture_user" env \
+            HOME="$fixture_home" XDG_CONFIG_HOME="$fixture_home/.config" \
+            XDG_RUNTIME_DIR="/run/user/$fixture_uid" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" \
+            CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE=yes \
+            PATH="$PATH" \
+            bash deploy/updater/test-runtime-contract-integration.sh
+      - name: Remove the disposable VM marker and user manager
+        if: always()
+        run: |
+          fixture_user=codexia-runtime-contract-test
+          if test -f "$RUNNER_TEMP/codexia-runtime-contract.marker-created"; then
+            sudo rm -f /etc/codexia-iac-disposable-vm
+            rm -f "$RUNNER_TEMP/codexia-runtime-contract.marker-created"
+          fi
+          if test -f "$RUNNER_TEMP/codexia-runtime-contract.user-created" && id "$fixture_user" >/dev/null 2>&1; then
+            fixture_uid=$(id -u "$fixture_user")
+            sudo loginctl disable-linger "$fixture_user" || true
+            sudo systemctl stop "user@${fixture_uid}.service" || true
+            sudo rm -f "/run/systemd/system/user@${fixture_uid}.service.d/10-codexia-runtime-ci.conf"
+            sudo rmdir "/run/systemd/system/user@${fixture_uid}.service.d" 2>/dev/null || true
+            sudo userdel --remove "$fixture_user" || true
+            rm -f "$RUNNER_TEMP/codexia-runtime-contract.user-created"
+          fi
