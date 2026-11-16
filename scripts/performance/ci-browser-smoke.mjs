@@ -28,7 +28,7 @@ if (!/^[a-f0-9]{40}$/u.test(process.env.CODEXIA_EXPECTED_SHA ?? '') ||
     checkedHead.trim() !== process.env.CODEXIA_EXPECTED_SHA) {
   throw new Error('Benchmark smoke source SHA differs from the selected CI source');
 }
-const service = new URL(process.env.CODEXIA_E2E_DATABASE_URL ?? '');
+const service = new URL(process.env.CODEXIA_E2E_ADMIN_DATABASE_URL ?? process.env.CODEXIA_E2E_DATABASE_URL ?? '');
 if (!['postgres:', 'postgresql:'].includes(service.protocol) || service.hostname !== 'postgres' ||
     service.pathname !== '/codexia_test' || service.search || service.hash ||
     (service.port && service.port !== '5432')) {
