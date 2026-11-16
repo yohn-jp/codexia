@@ -23,7 +23,7 @@ esac
 SH
 chmod 700 "$tmp/bin/podman"
 export PATH="$tmp/bin:$PATH"
-printf 'fixture-auth-token' > "$tmp/auth"
+printf 'fixture-auth-token-0123456789abcdef\n' > "$tmp/auth"
 printf 'fixture-tunnel-token\n' > "$tmp/tunnel"
 printf '%064d' 1 > "$tmp/admin"
 printf '%064d\n' 2 > "$tmp/app"
@@ -53,6 +53,10 @@ expect_fail() {
   fi
 }
 # Invalid input or reused DB password must fail before any creation.
+printf 'fixture-auth-token\n' > "$tmp/auth"
+expect_fail
+test -z "$(ls -A "$tmp/store")"
+printf 'fixture-auth-token-0123456789abcdef\n' > "$tmp/auth"
 chmod 0644 "$tmp/auth"
 expect_fail
 test -z "$(ls -A "$tmp/store")"
@@ -85,10 +89,10 @@ apply > "$tmp/second.log" || { cat "$tmp/second.log"; exit 1; }
 grep -q 'changed=0' "$tmp/second.log"
 # Mismatch of one existing secret must not create another missing secret.
 mv "$tmp/store/codexia-tunnel-token" "$tmp/missing"
-printf 'different-token' > "$tmp/auth"
+printf 'fixture-auth-token-different-0123456789\n' > "$tmp/auth"
 expect_fail
 test ! -e "$tmp/store/codexia-tunnel-token"
-printf 'fixture-auth-token' > "$tmp/auth"
+printf 'fixture-auth-token-0123456789abcdef\n' > "$tmp/auth"
 touch "$BASE_SECRET_EXISTING"
 expect_fail
 test ! -e "$tmp/store/codexia-tunnel-token"
