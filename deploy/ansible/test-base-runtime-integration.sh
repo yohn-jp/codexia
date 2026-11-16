@@ -24,6 +24,7 @@ export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 systemctl --user show --property=Version >/dev/null
 
 quadlet_dir="$service_home/.config/containers/systemd"
+as_service test ! -e "$service_home/unexpected-tunnel-mount"
 for container in codexia-db codexia-tunnel codexia-api codexia-api-proxy; do
   rc=0; podman container exists "$container" || rc=$?
   test "$rc" = 1
@@ -66,9 +67,11 @@ cleanup() {
   podman secret rm \
     codexia-auth-token \
     codexia-tunnel-token \
+    codexia-tunnel-token-wrong \
     codexia-postgres-admin-password \
     codexia-postgres-app-password \
     codexia-postgres-preflight-password >/dev/null 2>&1 || true
+  as_service rm -rf "$service_home/unexpected-tunnel-mount" >/dev/null 2>&1 || true
   sudo rm -f /etc/codexia/postgres/010-create-app-role.sh
   sudo rmdir /etc/codexia/postgres /etc/codexia 2>/dev/null || true
   rm -rf "$tmp"
@@ -180,7 +183,10 @@ expect_tunnel_drift_rejection() {
   grep -q 'Existing Tunnel image, private network, loopback-only port' "$tmp/tunnel-runtime-drift.log"
 }
 create_tunnel_fixture() {
-  podman create --name codexia-tunnel "$@" --secret codexia-tunnel-token,type=mount,target=/run/secrets/token --read-only --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m "$tunnel_image" tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token-file /run/secrets/token >/dev/null
+  podman create --name codexia-tunnel "$@" --secret "${tunnel_fixture_secret:-codexia-tunnel-token}",type=mount,target=/run/secrets/token --read-only --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m "$tunnel_image" tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token-file /run/secrets/token >/dev/null
+}
+create_bind_tunnel_fixture() {
+  podman create --name codexia-tunnel "$@" --read-only --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m "$tunnel_image" tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token-file /run/secrets/token >/dev/null
 }
 create_tunnel_fixture --network codexia-data --publish 127.0.0.1:2000:2000/tcp
 expect_tunnel_drift_rejection
@@ -188,7 +194,17 @@ podman rm codexia-tunnel >/dev/null
 create_tunnel_fixture --network codexia --publish 0.0.0.0:2000:2000/tcp
 expect_tunnel_drift_rejection
 podman rm codexia-tunnel >/dev/null
+printf 'wrong-tunnel-token' | podman secret create codexia-tunnel-token-wrong - >/dev/null
+tunnel_fixture_secret=codexia-tunnel-token-wrong
+create_tunnel_fixture --network codexia --publish 127.0.0.1:2000:2000/tcp
+expect_tunnel_drift_rejection
+podman rm codexia-tunnel >/dev/null
+podman secret rm codexia-tunnel-token-wrong >/dev/null
+tunnel_fixture_secret=codexia-tunnel-token
 as_service mkdir -p "$service_home/unexpected-tunnel-mount"
+create_bind_tunnel_fixture --network codexia --publish 127.0.0.1:2000:2000/tcp --volume "$service_home/unexpected-tunnel-mount:/run/secrets/token:ro"
+expect_tunnel_drift_rejection
+podman rm codexia-tunnel >/dev/null
 create_tunnel_fixture --network codexia --publish 127.0.0.1:2000:2000/tcp --volume "$service_home/unexpected-tunnel-mount:/unexpected:ro"
 expect_tunnel_drift_rejection
 podman rm codexia-tunnel >/dev/null

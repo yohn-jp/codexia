@@ -19,6 +19,16 @@
     argv: [podman, inspect, --format, "{% raw %}{{json .Mounts}}{% endraw %}", codexia-tunnel]
   register: base_runtime_tunnel_mounts
   changed_when: false
+- name: Inspect the Tunnel's declared Podman secret identity without reading its value
+  ansible.builtin.command:
+    argv: [podman, inspect, --format, "{% raw %}{{json .Config.Secrets}}{% endraw %}", codexia-tunnel]
+  register: base_runtime_tunnel_secrets
+  changed_when: false
+- name: Inspect the current canonical Tunnel secret identity
+  ansible.builtin.command:
+    argv: [podman, secret, inspect, --format, "{% raw %}{{.ID}}{% endraw %}", codexia-tunnel-token]
+  register: base_runtime_tunnel_secret_id
+  changed_when: false
 - name: Inspect the existing Tunnel root filesystem setting
   ansible.builtin.command:
     argv: [podman, inspect, --format, "{% raw %}{{.HostConfig.ReadonlyRootfs}}{% endraw %}", codexia-tunnel]
@@ -32,6 +42,9 @@
       - >-
         (base_runtime_tunnel_ports.stdout | from_json) ==
         {'2000/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '2000'}]}
+      - (base_runtime_tunnel_secrets.stdout | from_json | length) == 1
+      - (base_runtime_tunnel_secrets.stdout | from_json | first).Name == 'codexia-tunnel-token'
+      - (base_runtime_tunnel_secrets.stdout | from_json | first).ID == base_runtime_tunnel_secret_id.stdout
       - (base_runtime_tunnel_mounts.stdout | from_json | selectattr('Destination', 'equalto', '/run/secrets/token') | list | length) == 1
       - (base_runtime_tunnel_mounts.stdout | from_json | selectattr('Destination', 'equalto', '/run/secrets/token') | map(attribute='RW') | first) == false
       - (base_runtime_tunnel_mounts.stdout | from_json | selectattr('Type', 'equalto', 'volume') | list | length) == 0
