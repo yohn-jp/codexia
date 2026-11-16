@@ -97,7 +97,7 @@ all:
         codexia_service_home: "$service_home"
 YAML
 apply_base() {
-  "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i "$tmp/base-inventory.yml" deploy/ansible/site.yml "$@"
+  ANSIBLE_LOCAL_TEMP="$tmp/ansible-local" "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i "$tmp/base-inventory.yml" deploy/ansible/site.yml "$@"
 }
 # Existing Quadlet drift must be detected before other files, directories, or runtime resources are created.
 as_service mkdir -p "$quadlet_dir"

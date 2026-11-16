@@ -57,7 +57,7 @@ all:
         codexia_postgres_admin_password_file: "$tmp/admin"
         codexia_postgres_app_password_file: "$tmp/app"
 YAML
-apply() { "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i "$tmp/inventory.yml" deploy/ansible/site.yml; }
+apply() { ANSIBLE_LOCAL_TEMP="$tmp/ansible-local" "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i "$tmp/inventory.yml" deploy/ansible/site.yml; }
 apply > "$tmp/first.log" || { cat "$tmp/first.log"; exit 1; }
 for pair in 'auth codexia-auth-token' 'tunnel codexia-tunnel-token' 'admin codexia-postgres-admin-password' 'app codexia-postgres-app-password'; do
   read -r file name <<< "$pair"
