@@ -5,7 +5,10 @@ test "${GITHUB_ACTIONS:-}" = true
 test "$(lsb_release -rs)" = 26.04
 tmp=$(mktemp -d /tmp/codexia-base-secrets.XXXXXX)
 cleanup() {
-  if [[ "$tmp" == /tmp/codexia-base-secrets.* && -d "$tmp" && ! -L "$tmp" ]]; then sudo rm -rf -- "$tmp"; fi
+  local status=$?
+  trap - EXIT
+  if [[ "$tmp" == /tmp/codexia-base-secrets.* && -d "$tmp" && ! -L "$tmp" ]]; then sudo rm -rf -- "$tmp" || true; fi
+  exit "$status"
 }
 trap cleanup EXIT
 umask 077
