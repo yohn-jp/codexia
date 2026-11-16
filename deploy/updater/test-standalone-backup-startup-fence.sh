@@ -158,6 +158,10 @@ done
 test -L "$XDG_RUNTIME_DIR/systemd/generator/default.target.wants/codexia-api.service"
 test -L "$XDG_RUNTIME_DIR/systemd/generator/default.target.wants/codexia-tunnel.service"
 systemctl --user start codexia-api.service codexia-tunnel.service
+for unit in codexia-api.service codexia-tunnel.service; do
+  systemctl --user show --property=ActiveState --property=SubState --property=Result --property=ConditionResult --property=Conditions "$unit" >&2
+  journalctl --user --unit="$unit" --no-pager --lines=12 >&2 || true
+done
 for container in codexia-api codexia-tunnel; do
   test "$(systemctl --user is-active "$container.service" || true)" = inactive
   status=0
