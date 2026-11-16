@@ -15,6 +15,7 @@ on:
       - deploy/ansible/verify.yml
       - deploy/ansible/site.yml
       - deploy/ansible/validate-runtime.yml
+      - deploy/ansible/test-runtime-contract.sh
       - scripts/standalone-host.test.mjs
       - scripts/standalone-maintenance.test.mjs
       - scripts/standalone-update-controller.mjs
@@ -34,6 +35,7 @@ on:
       - deploy/ansible/verify.yml
       - deploy/ansible/site.yml
       - deploy/ansible/validate-runtime.yml
+      - deploy/ansible/test-runtime-contract.sh
       - scripts/standalone-host.test.mjs
       - scripts/standalone-maintenance.test.mjs
       - scripts/standalone-update-controller.mjs
@@ -67,6 +69,14 @@ jobs:
           sudo usermod --groups '' "$fixture_user"
           fixture_uid=$(id -u "$fixture_user")
           fixture_home=$(getent passwd "$fixture_user" | cut -d: -f6)
+          test ! -e /var/cache/codexia && test ! -L /var/cache/codexia
+          test ! -e /var/cache/codexia/models && test ! -L /var/cache/codexia/models
+          touch "$RUNNER_TEMP/codexia-runtime-contract.model-cache-created"
+          sudo mkdir -m 0755 -- /var/cache/codexia
+          touch "$RUNNER_TEMP/codexia-runtime-contract.model-cache-parent-created"
+          sudo mkdir -m 0700 -- /var/cache/codexia/models
+          touch "$RUNNER_TEMP/codexia-runtime-contract.model-cache-dir-created"
+          sudo chown "$fixture_user:$fixture_user" /var/cache/codexia/models
           sudo -u "$fixture_user" install -d -m 0700 "$fixture_home/.config"
           subuid_max=$(awk -F: 'BEGIN { max = 100000 } { end = $2 + $3; if (end > max) max = end } END { print max }' /etc/subuid)
           subgid_max=$(awk -F: 'BEGIN { max = 100000 } { end = $2 + $3; if (end > max) max = end } END { print max }' /etc/subgid)
@@ -116,10 +126,38 @@ jobs:
       - name: Remove the disposable VM marker and user manager
         if: always()
         run: |
+          set +e
+          cleanup_failed=0
           fixture_user=codexia-runtime-contract-test
           if test -f "$RUNNER_TEMP/codexia-runtime-contract.marker-created"; then
-            sudo rm -f /etc/codexia-iac-disposable-vm
-            rm -f "$RUNNER_TEMP/codexia-runtime-contract.marker-created"
+            sudo rm -f /etc/codexia-iac-disposable-vm || cleanup_failed=1
+            rm -f "$RUNNER_TEMP/codexia-runtime-contract.marker-created" || cleanup_failed=1
+          fi
+          if test -f "$RUNNER_TEMP/codexia-runtime-contract.model-cache-created"; then
+            fixture_uid=$(id -u codexia-runtime-contract-test 2>/dev/null || true)
+            if test ! -e /var/cache/codexia && test ! -L /var/cache/codexia; then
+              rm -f "$RUNNER_TEMP/codexia-runtime-contract.model-cache-created" "$RUNNER_TEMP/codexia-runtime-contract.model-cache-parent-created" "$RUNNER_TEMP/codexia-runtime-contract.model-cache-dir-created" || cleanup_failed=1
+            elif test -f "$RUNNER_TEMP/codexia-runtime-contract.model-cache-parent-created" \
+              && test -d /var/cache/codexia && test ! -L /var/cache/codexia \
+              && test "$(realpath -- /var/cache/codexia)" = /var/cache/codexia \
+              && test "$(stat -c '%u' /var/cache/codexia)" = 0; then
+              children=$(sudo find /var/cache/codexia -mindepth 1 -maxdepth 1 -printf '%f')
+              if test -z "$children"; then
+                if sudo rmdir -- /var/cache/codexia; then rm -f "$RUNNER_TEMP/codexia-runtime-contract.model-cache-created" "$RUNNER_TEMP/codexia-runtime-contract.model-cache-parent-created" "$RUNNER_TEMP/codexia-runtime-contract.model-cache-dir-created" || cleanup_failed=1; else cleanup_failed=1; fi
+              elif test -f "$RUNNER_TEMP/codexia-runtime-contract.model-cache-dir-created" \
+                && test "$children" = models && test -n "$fixture_uid" \
+                && test -d /var/cache/codexia/models && test ! -L /var/cache/codexia/models \
+                && test "$(realpath -- /var/cache/codexia/models)" = /var/cache/codexia/models \
+                && { test "$(stat -c '%u' /var/cache/codexia/models)" = "$fixture_uid" || test "$(stat -c '%u' /var/cache/codexia/models)" = 0; }; then
+                if sudo rm -rf -- /var/cache/codexia; then rm -f "$RUNNER_TEMP/codexia-runtime-contract.model-cache-created" "$RUNNER_TEMP/codexia-runtime-contract.model-cache-parent-created" "$RUNNER_TEMP/codexia-runtime-contract.model-cache-dir-created" || cleanup_failed=1; else cleanup_failed=1; fi
+              else
+                echo 'Refusing to remove an unexpected or replaced runtime model-cache tree' >&2
+                cleanup_failed=1
+              fi
+            else
+              echo 'Refusing to remove an unexpected or replaced runtime model-cache tree' >&2
+              cleanup_failed=1
+            fi
           fi
           if test -f "$RUNNER_TEMP/codexia-runtime-contract.user-created" && id "$fixture_user" >/dev/null 2>&1; then
             fixture_uid=$(id -u "$fixture_user")
@@ -130,3 +168,4 @@ jobs:
             sudo userdel --remove "$fixture_user" || true
             rm -f "$RUNNER_TEMP/codexia-runtime-contract.user-created"
           fi
+          exit "$cleanup_failed"
