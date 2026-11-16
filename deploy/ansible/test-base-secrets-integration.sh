@@ -3,8 +3,11 @@
 set -euo pipefail
 test "${GITHUB_ACTIONS:-}" = true
 test "$(lsb_release -rs)" = 26.04
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+tmp=$(mktemp -d /tmp/codexia-base-secrets.XXXXXX)
+cleanup() {
+  if [[ "$tmp" == /tmp/codexia-base-secrets.* && -d "$tmp" && ! -L "$tmp" ]]; then sudo rm -rf -- "$tmp"; fi
+}
+trap cleanup EXIT
 umask 077
 service_user=${CODEXIA_SERVICE_USER:?missing rootless fixture identity}
 service_uid=$(id -u "$service_user")

@@ -49,7 +49,7 @@ for file in codexia.network codexia-data.network codexia-postgres.volume codexia
   as_service test ! -e "$quadlet_dir/$file"
 done
 
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/codexia-base-runtime.XXXXXX")
+tmp=$(mktemp -d /tmp/codexia-base-runtime.XXXXXX)
 cleanup() {
   systemctl --user stop codexia-tunnel.service codexia-db.service >/dev/null 2>&1 || true
   podman rm -f codexia-tunnel codexia-db >/dev/null 2>&1 || true
@@ -75,7 +75,7 @@ cleanup() {
   as_service rm -rf "$service_home/unexpected-tunnel-mount" >/dev/null 2>&1 || true
   sudo rm -f /etc/codexia/postgres/010-create-app-role.sh
   sudo rmdir /etc/codexia/postgres /etc/codexia 2>/dev/null || true
-  rm -rf "$tmp"
+  if [[ "$tmp" == /tmp/codexia-base-runtime.* && -d "$tmp" && ! -L "$tmp" ]]; then sudo rm -rf -- "$tmp"; fi
 }
 trap cleanup EXIT
 umask 077
