@@ -100,6 +100,16 @@ function assertContainerEnvironment(container,imageEnvironment,unitText,label){
   }
 }
 
+function assertTmpfsOptions(observed,expected,label){
+  assert.equal(typeof observed,'string',label+' is unobservable');
+  const actualOptions=observed.split(',');
+  const expectedOptions=expected.split(',');
+  assert.equal(new Set(actualOptions).size,actualOptions.length,label+' contains duplicate options');
+  assert.ok(expectedOptions.every(option=>actualOptions.includes(option)),label+' drift');
+  const podmanOptions=new Set(['rprivate','tmpcopyup']);
+  assert.ok(actualOptions.every(option=>expectedOptions.includes(option)||podmanOptions.has(option)),label+' drift');
+}
+
 export function assertRuntimeObservation(container,value,imageEnvironment,unitText){
   const runtime=validateRuntimeContract(value);
   const environment=container?.Config?.Env;
@@ -144,8 +154,8 @@ export function assertRuntimeObservation(container,value,imageEnvironment,unitTe
   const tmpfs=container.HostConfig?.Tmpfs;
   assert.ok(tmpfs&&typeof tmpfs==='object','Legacy tmpfs settings are unobservable');
   assert.deepEqual(Object.keys(tmpfs).sort(),['/cache','/tmp'],'Legacy tmpfs mount set drift');
-  assert.equal(tmpfs['/tmp'],`rw,nosuid,nodev,noexec,size=${runtime.tmpfs.tempSize}`,'Legacy temporary filesystem drift');
-  assert.equal(tmpfs['/cache'],`rw,nosuid,nodev,noexec,size=${runtime.tmpfs.moduleCacheSize}`,'Legacy module-cache filesystem drift');
+  assertTmpfsOptions(tmpfs['/tmp'],`rw,nosuid,nodev,noexec,size=${runtime.tmpfs.tempSize}`,'Legacy temporary filesystem');
+  assertTmpfsOptions(tmpfs['/cache'],`rw,nosuid,nodev,noexec,size=${runtime.tmpfs.moduleCacheSize}`,'Legacy module-cache filesystem');
   const portBindings=container.HostConfig?.PortBindings;
   assert.ok(portBindings===null||portBindings&&typeof portBindings==='object'&&!Array.isArray(portBindings),'Legacy host port bindings are unobservable');
   assert.equal(Object.keys(portBindings??{}).length,0,'Legacy writer exposes a host port');

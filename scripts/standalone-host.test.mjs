@@ -104,6 +104,8 @@ test('legacy runtime verification rejects undeclared environment, mounts and sys
  assert.doesNotThrow(()=>assertRuntimeObservation(observed,runtime,imageEnvironment,unit));
  assert.doesNotThrow(()=>assertRuntimeObservation({...observed,Mounts:observed.Mounts.filter(mount=>mount.Type!=='tmpfs')},runtime,imageEnvironment,unit));
  assert.doesNotThrow(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,CpuQuota:0,CpuPeriod:0}},runtime,imageEnvironment,unit));
+ assert.doesNotThrow(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,Tmpfs:{'/tmp':`${observed.HostConfig.Tmpfs['/tmp']},rprivate,tmpcopyup`,'/cache':`${observed.HostConfig.Tmpfs['/cache']},tmpcopyup,rprivate`}}},runtime,imageEnvironment,unit));
+ assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,Tmpfs:{...observed.HostConfig.Tmpfs,'/tmp':`${observed.HostConfig.Tmpfs['/tmp']},exec`}}},runtime,imageEnvironment,unit),/Legacy temporary filesystem drift/);
  assert.doesNotThrow(()=>assertRuntimeUnit('[Service]\nCPUQuota=250%\n',runtime));
  assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Hostname:'codexia-slot-blue'}},runtime,imageEnvironment,unit),/Podman-generated hostname drift/);
  assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:observed.Config.Env.map(entry=>entry==='HOSTNAME='+containerId.slice(0,12)?'HOSTNAME=injected-host':entry)}},runtime,imageEnvironment,unit),/unexpected runtime environment/);
