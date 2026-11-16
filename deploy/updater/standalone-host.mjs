@@ -293,6 +293,32 @@ export async function assertRuntimeSystemdCpuQuota(unitName,value){
   assertRuntimeCpuMax(await readFile(observedPath,'utf8'),value);
 }
 
+export function assertRuntimeProcessCgroup(processCgroupText,controlGroup,label='Runtime'){
+  assert.ok(typeof controlGroup==='string'&&controlGroup.startsWith('/')&&controlGroup!=='/'&&path.posix.normalize(controlGroup)===controlGroup,'Systemd control group path is invalid');
+  assert.ok(typeof processCgroupText==='string',label+' unified cgroup membership is unobservable');
+  const unified=processCgroupText.split(/\r?\n/u).filter(line=>line.startsWith('0::'));
+  assert.equal(unified.length,1,label+' unified cgroup membership is unobservable');
+  const observed=unified[0].slice(3);
+  assert.ok(observed.startsWith('/')&&observed!=='/'&&path.posix.normalize(observed)===observed,label+' process cgroup path is invalid');
+  assert.ok(observed===controlGroup||observed.startsWith(controlGroup+'/'),label+' process escaped its systemd service cgroup');
+  return observed;
+}
+
+export async function assertRuntimeProcessInSystemdUnit(unitName,container,label='Runtime'){
+  const pid=container?.State?.Pid;
+  assert.ok(Number.isSafeInteger(pid)&&pid>1,label+' PID must be numeric and positive');
+  const controlGroup=run('systemctl',['--user','show','--property=ControlGroup','--value',unitName]).trim();
+  const processCgroup=assertRuntimeProcessCgroup(await readFile(`/proc/${pid}/cgroup`,'utf8'),controlGroup,label);
+  const cgroupRoot=await realpath('/sys/fs/cgroup');
+  const cgroupPrefix=cgroupRoot+path.sep;
+  const unitPath=await realpath(path.join(cgroupRoot,controlGroup.slice(1)));
+  const processPath=await realpath(path.join(cgroupRoot,processCgroup.slice(1)));
+  assert.ok(unitPath.startsWith(cgroupPrefix),label+' systemd service cgroup escapes the cgroup root');
+  assert.ok(processPath.startsWith(cgroupPrefix),label+' process cgroup escapes the cgroup root');
+  assert.ok(processPath===unitPath||processPath.startsWith(unitPath+path.sep),label+' process escaped its systemd service cgroup');
+  return processPath;
+}
+
 async function boundedJson(url,headers,max=2*1024*1024){
   const response=await fetch(url,{headers,redirect:'error',cache:'no-store',signal:AbortSignal.timeout(15000)});
   if(!response.ok||!response.body)throw Error('Read-only update metadata request failed: HTTP '+response.status);
@@ -521,6 +547,7 @@ export class PodmanStandaloneHost{
           assertRuntimeObservation(observed,this.runtime,image.Config?.Env,expectedUnit,capabilityStatus);
           assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value',activeUnit(slot)]));
           assertRuntimeUnit(run('systemctl',['--user','cat',activeUnit(slot)]),this.runtime);
+          await assertRuntimeProcessInSystemdUnit(activeUnit(slot),observed,'Legacy writer');
           await assertRuntimeSystemdCpuQuota(activeUnit(slot),this.runtime);
         }
         writers.push({slot,image:configured});
@@ -566,6 +593,7 @@ export class PodmanStandaloneHost{
       assertRuntimeObservation(legacy,this.runtime,image.Config?.Env,expectedUnit,capabilityStatus);
       assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value','codexia-api.service']));
       assertRuntimeUnit(run('systemctl',['--user','cat','codexia-api.service']),this.runtime);
+      await assertRuntimeProcessInSystemdUnit('codexia-api.service',legacy,'Legacy writer');
       await assertRuntimeSystemdCpuQuota('codexia-api.service',this.runtime);
     }
     const env=legacy.Config?.Env;

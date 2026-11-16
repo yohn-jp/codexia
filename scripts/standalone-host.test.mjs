@@ -102,6 +102,18 @@ test('failed writer unit is reset only after its exact Podman container is absen
  }finally{process.env.PATH=previousPath;await rm(dir,{recursive:true,force:true});}
 });
 
+test('effective writer cgroup must remain beneath its exact systemd unit',async()=>{
+ const {assertRuntimeProcessCgroup}=await import('../deploy/updater/standalone-host.mjs');
+ const unit='/user.slice/user-1001.slice/user@1001.service/app.slice/codexia-slot-blue.service';
+ assert.equal(assertRuntimeProcessCgroup(`0::${unit}\n`,unit),unit);
+ const child=unit+'/libpod-abcdef.scope';
+ assert.equal(assertRuntimeProcessCgroup(`0::${child}\n`,unit),child);
+ assert.throws(()=>assertRuntimeProcessCgroup('0::/user.slice/user-1001.slice/user@1001.service/app.slice/other.service\n',unit),/escaped its systemd service cgroup/);
+ assert.throws(()=>assertRuntimeProcessCgroup('1:name=systemd:/user.slice/codexia-slot-blue.service\n',unit),/unified cgroup membership is unobservable/);
+ assert.throws(()=>assertRuntimeProcessCgroup(`0::${unit}/../other.service\n`,unit),/process cgroup path is invalid/);
+ assert.throws(()=>assertRuntimeProcessCgroup(`0::${unit}\n`,unit.replace('/user@1001.service/','/../')),/control group path is invalid/);
+});
+
 test('effective cgroup CPU quota must match the typed runtime contract',async()=>{
  const {assertRuntimeCpuMax}=await import('../deploy/updater/standalone-host.mjs');
  assert.equal(typeof assertRuntimeCpuMax,'function');
