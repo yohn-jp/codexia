@@ -2161,6 +2161,7 @@ describe("Codexia HTTP boundary", () => {
       ? { Authorization: `Bearer ${token}` }
       : { Cookie: `__Host-praetorium_access=${token}` };
     const token = hostedGrantToken(false, 4);
+    const expiresAt = (JSON.parse(Buffer.from(token.split(".")[1]!, "base64url").toString("utf8")) as { exp: number }).exp * 1000;
     const deadline = setTimeout(() => abort.abort(), 10000);
     try {
       const responses = await Promise.all(endpoints.map(path => fetch(api.base + path, {
@@ -2170,7 +2171,13 @@ describe("Codexia HTTP boundary", () => {
         assert.equal(response.status, 200);
         assert.match(response.headers.get("content-type") ?? "", /text\/event-stream/u);
       }
-      const results = await Promise.allSettled(responses.map(response => response.text()));
+      const closedAt: number[] = [];
+      const results = await Promise.allSettled(responses.map(async (response, index) => {
+        try { return await response.text(); }
+        finally { closedAt[index] = Date.now(); }
+      }));
+      assert.ok(closedAt.every(at => at >= expiresAt), "streams must not close before the admitting grant deadline");
+      assert.equal(closedAt.length, endpoints.length);
       assert.equal(abort.signal.aborted, false, "the server must close the streams, not the test timeout");
       assert.equal(results[0]?.status, "fulfilled");
       assert.deepEqual(results[1], { status: "fulfilled", value: ": ok\n\n" });

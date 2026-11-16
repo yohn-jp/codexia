@@ -4,7 +4,7 @@ import { readCodexiaEnvironment } from "./environment.js";
 import { createCloudflareAccessVerifier, type CloudflareAccessOptions } from "./cloudflare-access.js";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { readFileSync } from "node:fs";
 import { lstat, readFile, realpath } from "node:fs/promises";
@@ -1119,10 +1119,23 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
     const expiry = new AbortController();
-    const timer = setTimeout(() => expiry.abort(), Math.max(0, expiresAt - Date.now()));
+    const grantDeadline = expiresAt;
+    const timer = setTimeout(() => expiry.abort(), Math.max(0, grantDeadline - Date.now()));
     timer.unref();
+    // A busy event loop can deliver a ready chunk before the expiry timer runs.
+    // Check the absolute deadline before forwarding each chunk as well.
+    const fence = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        if (Date.now() >= grantDeadline) {
+          expiry.abort();
+          callback(new Error("Authentication expired"));
+          return;
+        }
+        callback(null, chunk);
+      },
+    });
     try {
-      await pipeline(Readable.fromWeb(response.body as never), raw, { signal: AbortSignal.any([signal, expiry.signal]) });
+      await pipeline(Readable.fromWeb(response.body as never), fence, raw, { signal: AbortSignal.any([signal, expiry.signal]) });
     } catch (error) {
       if (!expiry.signal.aborted) throw error;
     } finally { clearTimeout(timer); }
