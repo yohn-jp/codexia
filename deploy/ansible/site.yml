@@ -31,8 +31,22 @@
       observeMilliseconds: 300000
       initialSlot: blue
       browserAuth: "{{ codexia_browser_auth }}"
-  environment: "{{ updater_env }}"
+  # Fact gathering runs before user_uid/user_dir exist. Privileged host setup must
+  # not inherit the bootstrap SSH account's rootless runtime paths.
+  environment: "{{ updater_env if codexia_stage != 'host' and ansible_facts.user_uid is defined and ansible_facts.user_dir is defined else {} }}"
   tasks:
+    - name: Inspect host and existing runtime without converging application state
+      ansible.builtin.include_tasks: inspect.yml
+      when: codexia_stage == 'inspect'
+    - name: End read-only inspection before any convergence task
+      ansible.builtin.meta: end_host
+      when: codexia_stage == 'inspect'
+    - name: Converge the supported host baseline without touching application services
+      ansible.builtin.include_tasks: host.yml
+      when: codexia_stage == 'host'
+    - name: End host convergence before any application task
+      ansible.builtin.meta: end_host
+      when: codexia_stage == 'host'
     - name: Require explicit standalone deployment inputs
       ansible.builtin.assert:
         that:
