@@ -97,6 +97,112 @@ export class StandaloneController {
     assert.equal(obs.route,slot,'Proxy route mismatch');
     await this.host.probe(slot,release);
   }
+  async backup(state,{destination,recipient}={}){
+    assert.ok(stable(state.journal),'Backup requires a stable controller journal');
+    assert.equal(state.lastError,null,'Controller error requires operator repair before backup');
+    assert.ok(typeof destination==='string'&&path.isAbsolute(destination),'Backup destination must be an absolute external path');
+    assert.ok(typeof recipient==='string'&&/^age1[0-9a-z]+$/u.test(recipient),'Provide an age public recipient');
+    const original=state;
+    const active=state.journal.active;
+    const timerWasActive=await this.host.pollingTimerActive();
+    const before=await this.host.observe();
+    assert.ok(Array.isArray(before.writers)&&before.writers.length===1,'Backup requires exactly one active writer');
+    assertObservation(before,state.journal);
+    assert.ok(isOnlyWriter(before,active.slot,state.installed.image),'Backup requires exactly one active writer');
+    assert.equal(before.route,active.slot,'Backup requires the route to target the active writer');
+    await this.host.assertNoPreflight();
+    await this.assertServing(state,active.slot,state.installed);
+
+    let maintenanceState=state;
+    let output;
+    let operationError;
+    try{
+      if(timerWasActive)await this.host.stopPollingTimer();
+      if(!maintenanceState.paused)maintenanceState=await this.save({...maintenanceState,paused:true});
+      await this.host.route('blocked');
+      await this.host.stopWriter(active.slot);
+      const fenced=await this.host.observe();
+      assertObservation(fenced,maintenanceState.journal);
+      assert.equal(fenced.route,'blocked','Proxy admission was not blocked');
+      assert.equal(fenced.writers.length,0,'Writer fencing was not confirmed');
+      output=await this.host.backup(destination,recipient);
+    }catch(error){operationError=error;}
+
+    let restored;
+    try{
+      const observed=await this.host.observe();
+      assertObservation(observed,maintenanceState.journal);
+      if(observed.writers.length===0){
+        await this.host.startWriter(active.slot,maintenanceState.installed);
+      }else{
+        assert.ok(isOnlyWriter(observed,active.slot,maintenanceState.installed.image),'Unexpected writer prevents safe backup recovery');
+      }
+      await this.host.route(active.slot);
+      await this.assertServing(maintenanceState,active.slot,maintenanceState.installed);
+      restored=await this.save({...maintenanceState,paused:original.paused,lastError:original.lastError});
+    }catch(error){
+      await this.host.route('blocked').catch(()=>undefined);
+      const reason='Backup recovery blocked: '+safeError(error);
+      await this.save({...maintenanceState,paused:true,lastError:reason});
+      throw new Error(operationError?safeError(operationError)+'; '+reason:reason);
+    }
+
+    if(timerWasActive){
+      try{await this.host.startPollingTimer();}
+      catch(error){
+        const reason='Backup completed and writer restored, but updater timer restoration failed: '+safeError(error);
+        await this.save({...restored,paused:true,lastError:reason});
+        throw new Error(reason);
+      }
+    }
+    if(operationError)throw operationError;
+    return {state:restored,output};
+  }
+  async backupLegacy(release,{destination,recipient}={}){
+    release=validateUpdateRelease(release);
+    assert.ok(typeof destination==='string'&&path.isAbsolute(destination),'Backup destination must be an absolute external path');
+    assert.ok(typeof recipient==='string'&&/^age1[0-9a-z]+$/u.test(recipient),'Provide an age public recipient');
+    const channel=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,null,this.now());
+    assert.ok(channel.payload.releases.some(item=>item.state==='published'&&JSON.stringify(item)===JSON.stringify(release)),'Legacy backup release must be published in the signed channel');
+    assert.equal(await this.host.routeState(),'blocked','Legacy backup requires the controller-owned route marker to be blocked');
+    assert.equal(await this.host.legacyServiceActive(),true,'Legacy backup requires the legacy API service to be active');
+    const tunnelWasActive=await this.host.tunnelServiceActive();
+    const timerWasActive=await this.host.pollingTimerActive();
+    await this.host.assertNoPreflight();
+    await this.uiEpoch(release);
+    await this.host.assertLegacyRelease(release);
+
+    let output;
+    let operationError;
+    try{
+      if(timerWasActive)await this.host.stopPollingTimer();
+      await this.host.route('blocked');
+      if(tunnelWasActive)await this.host.stopTunnel();
+      await this.host.stopLegacyWriter();
+      assert.equal(await this.host.legacyServiceActive(),false,'Legacy API writer fencing was not confirmed');
+      assert.equal(await this.host.tunnelServiceActive(),false,'Tunnel admission fencing was not confirmed');
+      output=await this.host.backup(destination,recipient);
+    }catch(error){operationError=error;}
+
+    try{
+      await this.host.route('blocked');
+      if(!(await this.host.legacyServiceActive()))await this.host.startLegacyWriter();
+      await this.host.assertLegacyRelease(release);
+      const tunnelIsActive=await this.host.tunnelServiceActive();
+      if(tunnelWasActive&&!tunnelIsActive)await this.host.startTunnel();
+      else if(!tunnelWasActive&&tunnelIsActive)await this.host.stopTunnel();
+      await this.host.assertLegacyRelease(release);
+      if(timerWasActive)await this.host.startPollingTimer();
+    }catch(error){
+      await this.host.route('blocked').catch(()=>undefined);
+      await this.host.stopTunnel().catch(()=>undefined);
+      await this.host.stopLegacyWriter().catch(()=>undefined);
+      const reason='Legacy backup recovery blocked: '+safeError(error);
+      throw new Error(operationError?safeError(operationError)+'; '+reason:reason);
+    }
+    if(operationError)throw operationError;
+    return {output};
+  }
   async restoreOld(state,reason){
     const old=state.journal.active;
     const candidate=state.journal.candidate;

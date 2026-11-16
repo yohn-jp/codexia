@@ -6,8 +6,8 @@ import { PodmanStandaloneHost } from './standalone-host.mjs';
 import { verifyUpdateChannel } from '../../scripts/update-channel.mjs';
 import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
 
-const [command,configPath,argument]=process.argv.slice(2);
-if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|init|boot|tick|status|verify|pause|resume|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [installed-release.json]');
+const [command,configPath,...arguments_]=process.argv.slice(2);
+if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|init|boot|tick|status|verify|pause|resume|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
 const config=JSON.parse(await readFile(configPath,'utf8'));
 assert.equal(config.format,'codexia-standalone-updater/v1');
 assert.ok(path.isAbsolute(config.stateFile)&&path.isAbsolute(config.publicKeyFile));
@@ -18,7 +18,25 @@ const publicKey=await readFile(config.publicKeyFile,'utf8');
 const host=new PodmanStandaloneHost(config);
 const store={save:state=>atomicWrite(config.stateFile,JSON.stringify(state)+'\n')};
 const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
-if(command==='init'||command==='verify-legacy'){
+if(command==='backup'){
+  assert.equal(arguments_.at(-1),'--approved','Backup requires the explicit --approved maintenance attestation');
+  const backupArguments=arguments_.slice(0,-1);
+  let state;
+  try{state=await loadControllerState(config.stateFile);}catch(error){if(error.code!=='ENOENT')throw error;}
+  let result;
+  if(state){
+    assert.equal(backupArguments.length,2,'Initialized backup usage: backup /absolute/config.json /absolute/remote/destination age1-recipient --approved');
+    result=await controller.backup(state,{destination:backupArguments[0],recipient:backupArguments[1]});
+  }else{
+    assert.equal(backupArguments.length,3,'Legacy backup usage: backup /absolute/config.json /absolute/signed-release.json /absolute/remote/destination age1-recipient --approved');
+    assert.ok(path.isAbsolute(backupArguments[0]),'Explicit signed legacy release JSON is required before controller initialization');
+    result=await controller.backupLegacy(JSON.parse(await readFile(backupArguments[0],'utf8')),{destination:backupArguments[1],recipient:backupArguments[2]});
+  }
+  console.log(result.output);
+  process.exit(0);
+}else if(command==='init'||command==='verify-legacy'){
+  const [argument]=arguments_;
+  assert.equal(arguments_.length,1,'Provide exactly one signed installed release JSON');
   assert.ok(argument&&path.isAbsolute(argument),'Explicit trusted installed release JSON is required');
   try{await loadControllerState(config.stateFile);throw Error('Existing state cannot be initialized again');}catch(error){if(error.code!=='ENOENT')throw error;}
   const release=validateUpdateRelease(JSON.parse(await readFile(argument,'utf8')));
@@ -40,6 +58,7 @@ if(command==='init'||command==='verify-legacy'){
   console.log(JSON.stringify(state,null,2));
   if(state.lastError)process.exitCode=1;
 }else{
+  assert.equal(arguments_.length,0,'This controller command does not accept positional arguments');
   let state=await loadControllerState(config.stateFile);
   if(command==='boot')state=await controller.reconcile(state,{boot:true});
   else if(command==='status'){console.log(JSON.stringify({state,observed:await host.observe()},null,2));process.exit(0);}

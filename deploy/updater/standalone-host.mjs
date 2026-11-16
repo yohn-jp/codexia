@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { readFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { atomicWrite } from '../../scripts/standalone-update-controller.mjs';
 import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
 
@@ -158,6 +159,85 @@ export class PodmanStandaloneHost{
       }
     }
     return {route,writers};
+  }
+  async assertNoPreflight(){
+    for(const slot of ['blue','green'])assert.ok(!exists(preflight(slot)),'Unexpected preflight container prevents backup');
+  }
+  async routeState(){
+    const route=(await readFile(this.config.routeFile,'utf8')).trim();
+    assert.ok(['blue','green','blocked'].includes(route),'Invalid proxy route');
+    return route;
+  }
+  async unitActive(unit){
+    const loaded=spawnSync('systemctl',['--user','show','--property=LoadState','--value',unit],{encoding:'utf8',timeout:15000});
+    if(loaded.status===0&&loaded.stdout.trim()==='not-found')return false;
+    if(loaded.status!==0){
+      const missing=spawnSync('systemctl',['--user','is-active',unit],{encoding:'utf8',timeout:15000});
+      if(missing.status===4&&['unknown','inactive'].includes(missing.stdout.trim()))return false;
+      throw Error('Systemd service state is unobservable: '+unit);
+    }
+    const result=spawnSync('systemctl',['--user','is-active',unit],{encoding:'utf8',timeout:15000});
+    if(result.status===0&&result.stdout.trim()==='active')return true;
+    if(result.status===3&&result.stdout.trim()==='inactive')return false;
+    if(result.status===4&&['unknown','inactive'].includes(result.stdout.trim()))return false;
+    throw Error('Systemd service state is unobservable or failed: '+unit);
+  }
+  async legacyServiceActive(){
+    const active=await this.unitActive('codexia-api.service');
+    const running=Boolean(inspect('codexia-api')?.State.Running);
+    assert.equal(active,running,'Legacy API service and container state disagree');
+    return active;
+  }
+  async tunnelServiceActive(){
+    const active=await this.unitActive('codexia-tunnel.service');
+    const running=Boolean(inspect('codexia-tunnel')?.State.Running);
+    assert.equal(active,running,'Tunnel service and container state disagree');
+    return active;
+  }
+  async stopLegacyWriter(){
+    run('systemctl',['--user','stop','codexia-api.service'],{timeout:120000});
+    assert.equal(await this.legacyServiceActive(),false,'Legacy API writer did not stop');
+  }
+  async startLegacyWriter(){
+    run('systemctl',['--user','start','codexia-api.service'],{timeout:120000});
+    assert.equal(await this.legacyServiceActive(),true,'Legacy API writer did not resume');
+  }
+  async stopTunnel(){
+    run('systemctl',['--user','stop','codexia-tunnel.service'],{timeout:120000});
+    assert.equal(await this.tunnelServiceActive(),false,'Tunnel did not stop');
+  }
+  async startTunnel(){
+    run('systemctl',['--user','start','codexia-tunnel.service'],{timeout:120000});
+    assert.equal(await this.tunnelServiceActive(),true,'Tunnel did not resume');
+  }
+  async pollingTimerActive(){
+    const loadState=run('systemctl',['--user','show','--property=LoadState','--value','codexia-updater.timer']);
+    if(loadState==='not-found')return false;
+    const result=spawnSync('systemctl',['--user','is-active','codexia-updater.timer'],{encoding:'utf8',timeout:15000});
+    if(result.status===0&&result.stdout.trim()==='active')return true;
+    if(result.status===3&&result.stdout.trim()==='inactive')return false;
+    throw Error('Updater timer state is unobservable or failed');
+  }
+  async stopPollingTimer(){
+    run('systemctl',['--user','stop','codexia-updater.timer']);
+    assert.equal(await this.pollingTimerActive(),false,'Updater timer did not stop');
+  }
+  async startPollingTimer(){
+    run('systemctl',['--user','start','codexia-updater.timer']);
+    assert.equal(await this.pollingTimerActive(),true,'Updater timer did not resume');
+  }
+  async backup(destination,recipient){
+    const script=fileURLToPath(new URL('./standalone-backup.sh',import.meta.url));
+    const result=spawnSync('bash',[script,'backup-locked',destination,recipient],{
+      encoding:'utf8',timeout:6*60*60*1000,maxBuffer:1024*1024,
+      env:{...process.env,CODEXIA_UPDATER_LOCK_HELD:'1'},
+    });
+    if(result.error||result.status!==0){
+      const status=result.status??'unknown';
+      const message=(result.stderr??'').trim().slice(0,500);
+      throw Error('Encrypted backup command failed (status '+status+')'+(message?': '+message:''));
+    }
+    return (result.stdout??'').trim();
   }
   async route(slot){
     assert.ok(['blue','green','blocked'].includes(slot));

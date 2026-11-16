@@ -2,13 +2,26 @@
 # Offline encrypted backup and isolated restore verification. Never restores live data.
 set -euo pipefail
 umask 077
-readonly PG_IMAGE='docker.io/library/postgres:17-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994'
+readonly PG_IMAGE='docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536'
 readonly STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/codexia-updater"
 die(){ printf '%s\n' "$*" >&2; exit 1; }
-for cmd in podman age sha256sum flock findmnt sync; do command -v "$cmd" >/dev/null || die "Missing dependency: $cmd"; done
+for cmd in podman age sha256sum flock findmnt sync stat; do command -v "$cmd" >/dev/null || die "Missing dependency: $cmd"; done
 mkdir -p "$STATE_DIR"
-exec 9>"$STATE_DIR/host.lock"
-flock --exclusive --nonblock 9 || die 'Updater or backup already running'
+lock_file="$STATE_DIR/host.lock"
+operation="${1:-}"
+case "$operation" in
+  backup-locked)
+    [[ "${CODEXIA_UPDATER_LOCK_HELD:-}" == 1 && "${CODEXIA_UPDATER_LOCK_DIRECTORY:-}" == "$STATE_DIR" ]] || die 'Internal backup requires the canonical controller lock'
+    lock_status=0
+    flock --exclusive --nonblock --conflict-exit-code 75 "$lock_file" true || lock_status=$?
+    [[ "$lock_status" == 75 ]] || die 'Controller lock ownership could not be verified'
+    ;;
+  drill)
+    exec 9>"$lock_file"
+    flock --exclusive --nonblock 9 || die 'Updater or backup already running'
+    ;;
+  *) die 'Use the controller backup command or the explicitly approved drill';;
+esac
 
 # Hash complete canonical public-table contents, including the migration ledger,
 # revision history, Knowledge, Evidence and approval state. Explicit table/row
@@ -45,42 +58,57 @@ require_quiesced(){
   done
 }
 remote_directory(){
-  [[ "$1" == /* && -d "$1" ]] || die 'Use an existing absolute off-VM mount directory'
+  [[ "$1" == /* && -d "$1" && ! -L "$1" ]] || die 'Use an existing absolute off-VM mount directory'
   local fstype
   fstype="$(findmnt -T "$1" -n -o FSTYPE)"
   case "$fstype" in nfs|nfs4|cifs|fuse.sshfs|sshfs) ;; *) die 'Destination is not an approved remote filesystem';; esac
 }
+backup_artifact(){
+  local destination="$1" recipient="$2"
+  require_quiesced
+  podman volume exists codexia-history || die 'History volume absent'
+  local stamp staging final db_hash history_hash
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)-$(cat /proc/sys/kernel/random/uuid)"
+  staging="$destination/.codexia-$stamp.partial"; final="$destination/codexia-$stamp"
+  mkdir "$staging"
+  trap 'rm -rf -- "$staging"' EXIT
+  db_hash="$(db_fingerprint codexia-db codexia_admin)"
+  history_hash="$(history_fingerprint codexia-history)"
+  podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec pg_dump -U codexia_admin -d codexia -Fc' |
+    age -r "$recipient" -o "$staging/database.dump.age"
+  podman volume export codexia-history | age -r "$recipient" -o "$staging/history.tar.age"
+  # Recheck the stopped state and both logical fingerprints before publication.
+  require_quiesced
+  [[ "$(db_fingerprint codexia-db codexia_admin)" == "$db_hash" ]] || die 'Database changed during backup'
+  [[ "$(history_fingerprint codexia-history)" == "$history_hash" ]] || die 'History changed during backup'
+  printf 'codexia-backup/v1\n%s\n%s\n' "$db_hash" "$history_hash" | age -r "$recipient" -o "$staging/manifest.age"
+  (cd "$staging"; sha256sum database.dump.age history.tar.age manifest.age > SHA256SUMS)
+  sync -f "$staging"
+  [[ ! -e "$final" ]] || die 'Backup already exists'
+  mv -T -- "$staging" "$final"
+  sync -f "$destination"
+  trap - EXIT
+  printf 'Encrypted backup committed: %s\n' "$final"
+}
+assert_restore_resource_absent(){
+  local kind="$1" resource="$2" status=0
+  podman "$kind" exists "$resource" || status=$?
+  [[ "$status" == 1 ]] || die 'Isolated restore resource name is already in use or cannot be inspected'
+}
 case "${1:-}" in
-  backup)
-    [[ $# == 3 ]] || die 'Usage: backup /remote/mount age1-recipient'
+  backup-locked)
+    [[ $# == 3 ]] || die 'Usage: backup-locked /remote/mount age1-recipient'
     remote_directory "$2"
     [[ "$3" =~ ^age1[0-9a-z]+$ ]] || die 'Provide an age public recipient, not a private key'
-    require_quiesced
-    podman volume exists codexia-history || die 'History volume absent'
-    stamp="$(date -u +%Y%m%dT%H%M%SZ)-$(cat /proc/sys/kernel/random/uuid)"
-    staging="$2/.codexia-$stamp.partial"; final="$2/codexia-$stamp"
-    mkdir "$staging"
-    trap 'rm -rf -- "$staging"' EXIT
-    db_hash="$(db_fingerprint codexia-db codexia_admin)"
-    history_hash="$(history_fingerprint codexia-history)"
-    podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec pg_dump -U codexia_admin -d codexia -Fc' |
-      age -r "$3" -o "$staging/database.dump.age"
-    podman volume export codexia-history | age -r "$3" -o "$staging/history.tar.age"
-    # Recheck the stopped state and both logical fingerprints before publication.
-    require_quiesced
-    [[ "$(db_fingerprint codexia-db codexia_admin)" == "$db_hash" ]] || die 'Database changed during backup'
-    [[ "$(history_fingerprint codexia-history)" == "$history_hash" ]] || die 'History changed during backup'
-    printf 'codexia-backup/v1\n%s\n%s\n' "$db_hash" "$history_hash" | age -r "$3" -o "$staging/manifest.age"
-    (cd "$staging"; sha256sum database.dump.age history.tar.age manifest.age > SHA256SUMS)
-    sync -f "$staging"
-    [[ ! -e "$final" ]] || die 'Backup already exists'
-    mv -T -- "$staging" "$final"
-    sync -f "$2"
-    trap - EXIT
-    printf 'Encrypted backup committed: %s\n' "$final"
+    backup_artifact "$2" "$3"
     ;;
   drill)
-    [[ $# == 3 && -d "$2" && -r "$3" ]] || die 'Usage: drill /backup/directory /private/age-identity'
+    [[ $# == 4 && "$4" == --approved && "$2" == /* && -d "$2" && ! -L "$2" && "$3" == /* && -f "$3" && ! -L "$3" && -r "$3" ]] || die 'Usage: drill /absolute/remote/backup/directory /absolute/private/age-identity --approved'
+    remote_directory "$2"
+    identity_mode="$(stat -Lc '%a' -- "$3")"
+    identity_owner="$(stat -Lc '%u' -- "$3")"
+    [[ "$identity_mode" == 400 || "$identity_mode" == 600 ]] || die 'Recovery identity must be mode 0400 or 0600'
+    [[ "$identity_owner" == "$(id -u)" ]] || die 'Recovery identity must be owned by the current recovery user'
     dir="$(realpath -- "$2")"
     # Validate fixed ciphertext names, never execute filenames from the checksum file.
     (cd "$dir"; sha256sum database.dump.age history.tar.age manifest.age | cmp - SHA256SUMS)
@@ -89,11 +117,27 @@ case "${1:-}" in
     [[ "${#fields[@]}" == 3 && "${fields[0]}" == codexia-backup/v1 && "${fields[1]}" =~ ^[0-9a-f]{64}$ && "${fields[2]}" =~ ^[0-9a-f]{64}$ ]] || die 'Invalid decrypted backup manifest'
     suffix="$(cat /proc/sys/kernel/random/uuid)"
     db="codexia-restore-drill-$suffix"; data="$db-data"; history="$db-history"
-    cleanup(){ podman rm -f "$db" >/dev/null 2>&1 || true; podman volume rm "$data" "$history" >/dev/null 2>&1 || true; }
+    label="io.codexia.restore-drill"
+    db_created=false; data_created=false; history_created=false
+    cleanup(){
+      if [[ "$db_created" == true ]] && [[ "$(podman inspect --format "{{index .Config.Labels \"$label\"}}" "$db" 2>/dev/null || true)" == "$suffix" ]]; then podman rm -f "$db" >/dev/null 2>&1 || true; fi
+      if [[ "$data_created" == true ]] && [[ "$(podman volume inspect --format "{{index .Labels \"$label\"}}" "$data" 2>/dev/null || true)" == "$suffix" ]]; then podman volume rm "$data" >/dev/null 2>&1 || true; fi
+      if [[ "$history_created" == true ]] && [[ "$(podman volume inspect --format "{{index .Labels \"$label\"}}" "$history" 2>/dev/null || true)" == "$suffix" ]]; then podman volume rm "$history" >/dev/null 2>&1 || true; fi
+    }
     trap cleanup EXIT
-    podman volume create "$data" >/dev/null
-    podman volume create "$history" >/dev/null
-    podman run -d --name "$db" --network none --security-opt no-new-privileges       -e POSTGRES_DB=codexia -e POSTGRES_HOST_AUTH_METHOD=trust -v "$data:/var/lib/postgresql/data" "$PG_IMAGE" >/dev/null
+    assert_restore_resource_absent container "$db"
+    assert_restore_resource_absent volume "$data"
+    assert_restore_resource_absent volume "$history"
+    data_created=true
+    podman volume create --label "$label=$suffix" "$data" >/dev/null
+    [[ "$(podman volume inspect --format "{{index .Labels \"$label\"}}" "$data")" == "$suffix" ]] || die 'Could not verify isolated restore data volume'
+    history_created=true
+    podman volume create --label "$label=$suffix" "$history" >/dev/null
+    [[ "$(podman volume inspect --format "{{index .Labels \"$label\"}}" "$history")" == "$suffix" ]] || die 'Could not verify isolated restore history volume'
+    db_created=true
+    podman run -d --name "$db" --label "$label=$suffix" --network none --security-opt no-new-privileges \
+      -e POSTGRES_DB=codexia -e POSTGRES_HOST_AUTH_METHOD=trust -v "$data:/var/lib/postgresql/data" "$PG_IMAGE" >/dev/null
+    [[ "$(podman inspect --format "{{index .Config.Labels \"$label\"}}" "$db")" == "$suffix" ]] || die 'Could not verify isolated restore container'
     for attempt in $(seq 1 60); do
       if podman exec "$db" pg_isready -U postgres -d codexia >/dev/null 2>&1; then break; fi
       sleep 1
@@ -107,5 +151,5 @@ case "${1:-}" in
     [[ "$(history_fingerprint "$history")" == "${fields[2]}" ]] || die 'Restored history fingerprint mismatch'
     printf 'Isolated restore verified: database and history fingerprints match\n'
     ;;
-  *) die 'Use backup or drill';;
+  *) die 'Use backup-locked or the explicitly approved drill';;
 esac
