@@ -189,7 +189,7 @@
   when: base_runtime_containers.results[item.result_index].rc == 0
 - name: Read all existing base Quadlets before creating any host files or resources
   ansible.builtin.slurp:
-    path: "{{ item.item }}"
+    path: "{{ item.stat.path }}"
   loop: "{{ base_runtime_existing_quadlets.results | selectattr('stat.exists', 'equalto', true) | list }}"
   register: base_runtime_existing_quadlet_contents
 - name: Reject any existing base Quadlet drift before mutation
