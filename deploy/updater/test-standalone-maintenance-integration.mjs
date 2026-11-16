@@ -215,7 +215,7 @@ async function runLiveAnsibleTimerCheck({ repoRoot, workDir, enabled, shouldPass
   if (!shouldPass && result.status === 0) throw new Error(`Live Ansible timer check accepted mismatched enabled=${enabled}`);
 }
 
-async function runInterruptedBootRecovery({ workDir, stateDir, configPath, candidate, environment, expectedState, expectedRuntime, interruption }) {
+async function runInterruptedBootRecovery({ repoRoot, workDir, stateDir, configPath, candidate, environment, expectedState, expectedRuntime, interruption }) {
   assert.ok(['after-write', 'after-writer-drain'].includes(interruption));
   const faultBin = path.join(workDir, `fault-bin-${interruption}`);
   await mkdir(faultBin, { mode: 0o700 });
@@ -240,7 +240,7 @@ async function runInterruptedBootRecovery({ workDir, stateDir, configPath, candi
   await writeFile(systemctlPath, shim, { mode: 0o700, flag: 'wx' });
 
   const wrapper = path.join(SOURCE_ROOT, 'deploy/updater/codexia-updater');
-  const candidateEntry = path.join(candidate.root, 'deploy/updater/standalone-updater.mjs');
+  const testEntry = path.resolve(repoRoot, 'deploy/updater/test-standalone-maintenance-integration.mjs');
   const killEnv = {
     ...environment,
     PATH: faultBin + path.delimiter + environment.PATH,
@@ -248,7 +248,7 @@ async function runInterruptedBootRecovery({ workDir, stateDir, configPath, candi
     CODEXIA_RUNTIME_MAINTENANCE_MARKER: markerPath,
     CODEXIA_RUNTIME_MAINTENANCE_KILL_MARKER: observedPath,
   };
-  const interrupted = spawnSync('sh', [wrapper, 'maintain-candidate', candidateEntry, configPath, candidate.manifestPath], {
+  const interrupted = spawnSync('flock', ['--exclusive', '--nonblock', '--no-fork', path.join(stateDir, 'host.lock'), process.execPath, testEntry, '--maintain', candidate.manifestPath, 'expect-interruption'], {
     encoding: 'utf8', timeout: 240000, maxBuffer: 4 * 1024 * 1024, env: killEnv,
   });
   if (interrupted.error) throw interrupted.error;
@@ -281,8 +281,13 @@ async function runInterruptedBootRecovery({ workDir, stateDir, configPath, candi
     assert.equal(systemdState(SERVICE), 'inactive', 'Writer-drain interruption did not stop the active writer');
   }
 
+  const preload = path.join(repoRoot, 'deploy/updater/test-standalone-maintenance-preload.mjs');
+  const bootEnvironment = {
+    ...environment,
+    NODE_OPTIONS: [environment.NODE_OPTIONS, `--import=${preload}`].filter(Boolean).join(' '),
+  };
   const boot = spawnSync('sh', [wrapper, 'boot', configPath], {
-    encoding: 'utf8', timeout: 240000, maxBuffer: 4 * 1024 * 1024, env: environment,
+    encoding: 'utf8', timeout: 240000, maxBuffer: 4 * 1024 * 1024, env: bootEnvironment,
   });
   if (boot.error) throw boot.error;
   if (boot.status !== 0) throw new Error(`Canonical boot recovery failed after ${interruption} (${boot.status}):\n${boot.stdout}\n${boot.stderr}`);
@@ -298,17 +303,18 @@ async function runInterruptedBootRecovery({ workDir, stateDir, configPath, candi
     'import {readFileSync} from "node:fs";const nl=String.fromCharCode(10);for(const [p,v] of [["/data/runtime-contract-marker","data-marker-v1"+nl],["/history/runtime-contract-marker","history-marker-v1"+nl]])if(readFileSync(p,"utf8")!==v)throw new Error(p)']);
 }
 
-function installTestAdapters() {
+export function installTestAdapters(hostClass = PodmanStandaloneHost) {
   const expectedImage = process.env.CODEXIA_RUNTIME_MAINTENANCE_IMAGE;
-  const stopWriterWithRuntimeProof = PodmanStandaloneHost.prototype.stopWriter;
+  const stopWriterWithRuntimeProof = hostClass.prototype.stopWriter;
+  const verifyWriterUnitsWithPinnedIdentity = hostClass.prototype.verifyWriterUnits;
   assert.match(expectedImage ?? '', /^sha256:[a-f0-9]{64}$/u, 'Synthetic local image identity is missing');
 
-  PodmanStandaloneHost.prototype.assertRuntimeSources = async function assertSyntheticRuntimeSources() {
+  hostClass.prototype.assertRuntimeSources = async function assertSyntheticRuntimeSources() {
     validateRuntimeContract(this.runtime);
     assert.equal(this.runtime.modelCachePath, null, 'Locked maintenance fixture must not mount host model data');
   };
 
-  PodmanStandaloneHost.prototype.observe = async function observeSyntheticHost() {
+  hostClass.prototype.observe = async function observeSyntheticHost() {
     const state = await loadControllerState(this.config.stateFile);
     const route = (await readFile(this.config.routeFile, 'utf8')).trim();
     const writers = [];
@@ -325,13 +331,32 @@ function installTestAdapters() {
     return { route, writers };
   };
 
-  PodmanStandaloneHost.prototype.verifyWriterUnits = async function verifySyntheticWriterUnits(state) {
+  hostClass.prototype.verifyWriterUnits = async function verifySyntheticWriterUnits(state) {
+    assert.match(state?.installed?.image ?? '', /^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u, 'Synthetic controller release identity is not digest pinned');
+    const restoredUnits = [];
+    try {
+      for (const slot of ['blue', 'green']) {
+        const filename = path.join(this.config.quadletDirectory, `codexia-slot-${slot}.container`);
+        let content;
+        try { content = await readFile(filename, 'utf8'); }
+        catch (error) { if (error.code === 'ENOENT' && slot !== state.journal.active.slot) continue; throw error; }
+        const image = content.match(/^Image=(\S+)$/mu)?.[1];
+        assert.ok(image === expectedImage || image === state.installed.image, `${filename} has an unexpected fixture image identity`);
+        if (image === expectedImage) {
+          restoredUnits.push({ filename, content });
+          await atomicWrite(filename, content.replace(/^Image=\S+$/mu, `Image=${state.installed.image}`));
+        }
+      }
+      await verifyWriterUnitsWithPinnedIdentity.call(this, state);
+    } finally {
+      for (const { filename, content } of restoredUnits.reverse()) await atomicWrite(filename, content);
+    }
     await validateSlot(this.config, this.runtime, state, expectedImage);
     const observed = await this.observe();
     assert.deepEqual(observed.writers, [{ slot: state.journal.active.slot, image: state.installed.image }], 'Synthetic maintenance must retain exactly one active writer');
   };
 
-  PodmanStandaloneHost.prototype.convergeWriterUnits = async function convergeSyntheticWriterUnits(state) {
+  hostClass.prototype.convergeWriterUnits = async function convergeSyntheticWriterUnits(state) {
     assert.equal(state.journal.active.slot, 'blue');
     for (const slot of ['blue', 'green']) {
       const name = `codexia-slot-${slot}`;
@@ -351,12 +376,12 @@ function installTestAdapters() {
     }
   };
 
-  PodmanStandaloneHost.prototype.stopWriter = async function stopSyntheticWriter(slot) {
+  hostClass.prototype.stopWriter = async function stopSyntheticWriter(slot) {
     assert.equal(slot, 'blue');
     await stopWriterWithRuntimeProof.call(this, slot);
   };
 
-  PodmanStandaloneHost.prototype.startWriter = async function startSyntheticWriter(slot, release) {
+  hostClass.prototype.startWriter = async function startSyntheticWriter(slot, release) {
     assert.equal(slot, 'blue');
     assert.equal(release.profile, this.runtime.profile);
     const observed = await this.observe();
@@ -366,7 +391,7 @@ function installTestAdapters() {
     await validateSlot(this.config, this.runtime, await loadControllerState(this.config.stateFile), expectedImage);
   };
 
-  PodmanStandaloneHost.prototype.probe = async function probeSyntheticWriter(slot, release) {
+  hostClass.prototype.probe = async function probeSyntheticWriter(slot, release) {
     assert.equal(slot, 'blue');
     assert.equal(release.profile, this.runtime.profile);
     const result = JSON.parse(run('podman', ['exec', CONTAINER, 'node', '--input-type=module', '-e',
@@ -382,19 +407,20 @@ function installTestAdapters() {
   };
 }
 
-async function performMaintenance(manifestPath, expectFailure) {
+async function performMaintenance(manifestPath, outcome) {
   installTestAdapters();
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   const config = JSON.parse(await readFile(manifest.configPath, 'utf8'));
   const state = await loadControllerState(config.stateFile);
   const publicKey = await readFile(config.publicKeyFile, 'utf8');
   const store = { save: value => atomicWrite(config.stateFile, JSON.stringify(value) + '\n') };
-  if (expectFailure) {
+  if (outcome === 'expect-failure') {
     await assert.rejects(maintainStandaloneUpdater({ config, manifestPath, publicKey, state, store }), /Updater maintenance failed; previous source\/config\/units were restored/u);
-  } else {
+  } else if (outcome === 'expect-success') {
     const result = await maintainStandaloneUpdater({ config, manifestPath, publicKey, state, store });
     assert.equal(result.format, 'codexia-updater-maintenance/v1');
-  }
+  } else if (outcome === 'expect-interruption') await maintainStandaloneUpdater({ config, manifestPath, publicKey, state, store });
+  else throw new Error('Unknown synthetic maintenance test outcome');
 }
 
 async function assertTimerState(active, enabled) {
@@ -595,11 +621,11 @@ async function main() {
     quadletDir, candidateConfig: { ...appliedConfig, runtime: interruptedRuntime }, nonce: nonce + '-boot-recovery',
   });
   await runInterruptedBootRecovery({
-    workDir, stateDir, configPath, candidate: interruptedCandidate, environment,
+    repoRoot, workDir, stateDir, configPath, candidate: interruptedCandidate, environment,
     expectedState: appliedState, expectedRuntime: appliedConfig.runtime, interruption: 'after-write',
   });
   await runInterruptedBootRecovery({
-    workDir, stateDir, configPath, candidate: interruptedCandidate, environment,
+    repoRoot, workDir, stateDir, configPath, candidate: interruptedCandidate, environment,
     expectedState: appliedState, expectedRuntime: appliedConfig.runtime, interruption: 'after-writer-drain',
   });
 
@@ -641,19 +667,7 @@ if (process.argv[2] === '--verify-old') {
 } else if (process.argv[2] === '--maintain') {
   const [manifestPath, outcome] = process.argv.slice(3);
   assert.ok(path.isAbsolute(manifestPath));
-  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-  const config = JSON.parse(await readFile(manifest.configPath, 'utf8'));
-  const state = await loadControllerState(config.stateFile);
-  const publicKey = await readFile(config.publicKeyFile, 'utf8');
-  const store = { save: value => atomicWrite(config.stateFile, JSON.stringify(value) + '\n') };
-  installTestAdapters();
-  if (outcome === 'expect-failure') {
-    await assert.rejects(maintainStandaloneUpdater({ config, manifestPath, publicKey, state, store }), /Updater maintenance failed; previous source\/config\/units were restored/u);
-  } else {
-    assert.equal(outcome, 'expect-success');
-    const result = await maintainStandaloneUpdater({ config, manifestPath, publicKey, state, store });
-    assert.equal(result.format, 'codexia-updater-maintenance/v1');
-  }
+  await performMaintenance(manifestPath, outcome);
 } else if (process.argv[2] === '--run') {
   await main();
 }

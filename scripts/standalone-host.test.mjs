@@ -228,6 +228,12 @@ test('post-initialization verifies slot unit source and retained runtime setting
   await writeFile(blue,imageConfig(release,env,runtime).replace('PLACEHOLDER','codexia-slot-blue'),{mode:0o600});
   await writeFile(green,imageConfig(prior,env,runtime).replace('PLACEHOLDER','codexia-slot-green'),{mode:0o600});
   await host.verifyWriterUnits(state);
+  const validBlue=await readFile(blue,'utf8');
+  await writeFile(blue,validBlue.replace(/^Image=\S+$/mu,'Image=localhost/codexia-backend:latest'),{mode:0o600});
+  await assert.rejects(host.verifyWriterUnits(state),/Writer Quadlet image is not digest pinned/);
+  await writeFile(blue,validBlue.replace(release.image,'ghcr.io/yohn-jp/codexia-backend@sha256:'+'e'.repeat(64)),{mode:0o600});
+  await assert.rejects(host.verifyWriterUnits(state),/Writer Quadlet image is absent from controller history/);
+  await writeFile(blue,validBlue,{mode:0o600});
   const valid=await readFile(green,'utf8');
   await writeFile(green,valid.replace('size=512m','size=1g'),{mode:0o600});
   await assert.rejects(host.verifyWriterUnits(state),/runtime drift/);
