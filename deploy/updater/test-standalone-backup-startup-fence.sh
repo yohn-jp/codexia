@@ -299,10 +299,10 @@ node --input-type=module -e '
   });
   if(changedEnvironmentKeys.length)console.error("Tunnel runtime environment key drift: "+changedEnvironmentKeys.join(", "));
   assert.equal(containerRuntimeFingerprint(actual,expected.tunnelSecretIdentities),expected.tunnelRuntime);
-  assert.equal(await host.legacyServiceActive(),false,'Tunnel permit started the API writer');
+  assert.equal(await host.legacyServiceActive(),false,"Tunnel permit started the API writer");
   await assert.rejects(lstat(host.backupStartupFencePaths().tunnel.permit),{code:"ENOENT"});
   await host.startLegacyWriter();
-  assert.equal(await host.tunnelServiceActive(),true,'API permit changed Tunnel activity');
+  assert.equal(await host.tunnelServiceActive(),true,"API permit changed Tunnel activity");
   const api=JSON.parse(execFileSync("podman",["inspect","codexia-api"],{encoding:"utf8"}))[0];
   assert.equal(containerRuntimeFingerprint(api,expected.apiSecretIdentities),expected.apiRuntime);
   await assert.rejects(lstat(host.backupStartupFencePaths().api.permit),{code:"ENOENT"});
