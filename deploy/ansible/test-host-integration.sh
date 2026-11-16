@@ -49,6 +49,8 @@ rootless() (
 # Override only this disposable user@ service so the generator inherits its own identity paths.
 manager_dropin_dir="/run/systemd/system/user@$uid.service.d"
 sudo install -d -m 0755 "$manager_dropin_dir"
+manager_dropin="$manager_dropin_dir/10-codexia-ci-xdg.conf"
+test ! -e "$manager_dropin"
 cat <<EOF | sudo tee "$manager_dropin_dir/10-codexia-ci-xdg.conf" >/dev/null
 [Service]
 Environment=HOME=$home
@@ -68,8 +70,11 @@ if ! printf '%s\n' "$manager_environment" | grep -Fqx "XDG_CONFIG_HOME=$home/.co
   printf '%s\n' "$manager_environment" | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)=' >&2 || true
   echo 'The fixture user manager did not start with its XDG config home.' >&2; exit 1
 fi
-rootless systemctl --user show-environment | grep -Fqx "XDG_RUNTIME_DIR=/run/user/$uid"
-rootless systemctl --user show-environment | grep -Fqx "XDG_CONFIG_HOME=$home/.config"
+manager_session_environment=$(rootless systemctl --user show-environment | awk -F= '$1 ~ /^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)$/ {print}')
+if ! printf '%s\n' "$manager_session_environment" | grep -Fqx "HOME=$home" || ! printf '%s\n' "$manager_session_environment" | grep -Fqx "XDG_RUNTIME_DIR=/run/user/$uid" || ! printf '%s\n' "$manager_session_environment" | grep -Fqx "XDG_CONFIG_HOME=$home/.config"; then
+  printf '%s\n' "$manager_session_environment" >&2
+  echo 'The fixture manager environment does not match the service identity.' >&2; exit 1
+fi
 test -f /sys/fs/cgroup/cgroup.controllers
 test "$(rootless /usr/bin/podman info --format '{{.Host.Security.Rootless}}')" = true
 rootless mkdir -p "$home/.config/containers/systemd"
@@ -84,11 +89,11 @@ rootless systemctl --user daemon-reload
 if ! rootless systemctl --user start codexia-fixture-network.service; then
   echo 'Quadlet network unit was not loaded; checking the source and generator output.' >&2
   rootless stat -c '%n %U:%G %a' "$home/.config/containers/systemd/codexia-fixture.network"
-  manager_pid=$(rootless pgrep -u "$uid" -xo systemd || true)
+  manager_pid=$(sudo systemctl show --property=MainPID --value "user@$uid.service")
   if [[ -n "$manager_pid" ]]; then
-    rootless sh -c 'tr "\0" "\n" < "/proc/$1/environ" | grep -E "^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)="' _ "$manager_pid" || true
+    sudo sh -c 'tr "\0" "\n" < "/proc/$1/environ" | grep -E "^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)="' _ "$manager_pid" || true
   fi
-  rootless systemctl --user show-environment | awk -F= '$1 ~ /^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)$/ {print}'
+  printf '%s\n' "$manager_session_environment" >&2
   rootless systemd-analyze --user unit-paths
   rootless find "/run/user/$uid/systemd/generator" -maxdepth 1 -type f -name '*codexia-fixture*' -printf '%f\n' || true
   rootless journalctl --user --boot --grep='quadlet|generator' --no-pager || true
