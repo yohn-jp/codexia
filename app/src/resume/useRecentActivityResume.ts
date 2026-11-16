@@ -71,6 +71,7 @@ export function useRecentActivityResume({
   const serverTimerRef = useRef<number | null>(null);
   const lastWritingRef = useRef<{ bindingKey: string; position: WritingResumePosition } | null>(null);
   const latestWriteVersionRef = useRef(0);
+  const serverWritesRef = useRef(new Map<string, Promise<void>>());
   const refreshSequenceRef = useRef(0);
   const localFlushRef = useRef<() => void>(() => undefined);
   const serverFlushRef = useRef<(keepalive?: boolean) => void>(() => undefined);
@@ -98,20 +99,31 @@ export function useRecentActivityResume({
     if (!pending) return;
     if (bindingRef.current?.authorScope !== pending.binding.authorScope) return;
     const version = ++latestWriteVersionRef.current;
-    void api.putRecentActivity(pending.binding.projectId, pending.input, { keepalive }).then((response) => {
-      const active = bindingRef.current;
-      if (version === latestWriteVersionRef.current && active?.identityKey === pending.binding.identityKey &&
-          active.authorScope === pending.binding.authorScope) {
-        setItems(response.items);
-        setProjectKey(active.identityKey);
-        setError("");
+    // A response fence alone cannot order the server's durable writes.
+    // Serialize dispatch for the same author/project/device, including lifecycle flushes.
+    const key = JSON.stringify([pending.binding.identityKey, pending.input.deviceType]);
+    const writes = serverWritesRef.current;
+    const send = async () => {
+      if (bindingRef.current?.authorScope !== pending.binding.authorScope) return;
+      try {
+        const response = await api.putRecentActivity(pending.binding.projectId, pending.input, { keepalive });
+        const active = bindingRef.current;
+        if (version === latestWriteVersionRef.current && active?.identityKey === pending.binding.identityKey) {
+          setItems(response.items);
+          setProjectKey(active.identityKey);
+          setError("");
+        }
+      } catch (caught: unknown) {
+        const active = bindingRef.current;
+        if (version === latestWriteVersionRef.current && active?.identityKey === pending.binding.identityKey) {
+          setError(caught instanceof Error ? caught.message : "再開位置を同期できませんでした。");
+        }
       }
-    }).catch((caught: unknown) => {
-      const active = bindingRef.current;
-      if (active?.identityKey === pending.binding.identityKey) {
-        setError(caught instanceof Error ? caught.message : "再開位置を同期できませんでした。");
-      }
-    });
+    };
+    const previous = writes.get(key);
+    const write = previous ? previous.then(send) : send();
+    writes.set(key, write);
+    void write.then(() => { if (writes.get(key) === write) writes.delete(key); });
   };
 
   const flush = useCallback((keepalive = false) => {

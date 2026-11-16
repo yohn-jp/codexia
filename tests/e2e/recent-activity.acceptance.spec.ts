@@ -235,3 +235,43 @@ test("recent activity coalesces repeated positions and records 50 input reports"
   await expect.poll(() => writes.length, { timeout: 6_000 }).toBe(inputCount + 1);
   expect((await activity(page, f.project.id)).items.some((item) => item.sceneId === f.scene.id)).toBe(true);
 });
+
+test("recent activity does not send a newer cursor ahead of a delayed older PUT", async ({ browser, page }) => {
+  const f = await longFixture(page);
+  const editor = page.getByRole("textbox", { name: "本文", exact: true });
+  await editor.press("Control+End");
+  await expect.poll(async () => (await activity(page, f.project.id)).items.some((item) => item.sceneId === f.scene.id && item.deviceType === "desktop" && (item.sentenceOffset ?? 0) > 1)).toBe(true);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const sent: Array<{ sceneId: string; sentenceOffset: number | null; deviceType: string }> = [];
+  const url = `**/api/projects/${f.project.id}/recent-activity`;
+  await page.route(url, async (route) => {
+    if (route.request().method() !== "PUT") return route.continue();
+    sent.push(route.request().postDataJSON());
+    if (sent.length === 1) await held;
+    await route.continue();
+  });
+  try {
+    await editor.press("Control+Home");
+    await expect.poll(() => sent.length, { timeout: 6_000 }).toBe(1);
+    expect(sent[0]?.sentenceOffset).toBe(1);
+    await editor.press("Control+End");
+    // Let the newer report's debounce expire while the first PUT cannot reach the API.
+    await page.waitForTimeout(2_500);
+    expect(sent).toHaveLength(1);
+    release();
+    await expect.poll(() => sent.length, { timeout: 6_000 }).toBeGreaterThanOrEqual(2);
+    const latest = sent.at(-1)!;
+    expect(latest.sentenceOffset ?? 0).toBeGreaterThan(1);
+    await expect.poll(async () => (await activity(page, f.project.id)).items.find((item) => item.deviceType === "desktop")?.sentenceOffset).toBe(latest.sentenceOffset);
+    const mobile = await browser.newContext({ viewport: { width: 390, height: 900 }, isMobile: true, hasTouch: true });
+    try {
+      const other = await mobile.newPage();
+      await ownerLogin(other, `/mobile/projects/${f.project.id}/scenes/${f.scene.id}?view=writing`);
+      expect((await activity(other, f.project.id)).items.find((item) => item.deviceType === "desktop")?.sentenceOffset).toBe(latest.sentenceOffset);
+    } finally { await mobile.close(); }
+  } finally {
+    release();
+    await page.unroute(url);
+  }
+});
