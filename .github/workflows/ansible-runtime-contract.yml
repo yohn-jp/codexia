@@ -68,6 +68,7 @@ jobs:
           sudo /opt/codexia-ansible/bin/pip install ansible-core==2.21.6
       - name: Prepare an isolated rootless systemd identity
         run: |
+          set -euo pipefail
           fixture_user=codexia-runtime-contract-test
           test -z "$(id -u "$fixture_user" 2>/dev/null || true)"
           sudo useradd --create-home --shell /bin/bash "$fixture_user"
@@ -75,13 +76,24 @@ jobs:
           sudo usermod --groups '' "$fixture_user"
           fixture_uid=$(id -u "$fixture_user")
           fixture_home=$(getent passwd "$fixture_user" | cut -d: -f6)
+          fixture_repo="$fixture_home/codexia-runtime-contract-repo"
+          test ! -e "$fixture_repo" && test ! -L "$fixture_repo"
+          touch "$RUNNER_TEMP/codexia-runtime-contract.repo-copy-created"
+          sudo -u "$fixture_user" install -d -m 0700 "$fixture_repo"
+          git -C "$GITHUB_WORKSPACE" archive HEAD | sudo -u "$fixture_user" tar -xf - -C "$fixture_repo"
+          printf '%s\n' 'codexia-runtime-contract-repo/v1' | sudo -u "$fixture_user" tee "$fixture_repo/.codexia-runtime-contract-fixture" >/dev/null
+          test "$(sudo stat -c '%u' "$fixture_repo")" = "$fixture_uid"
+          test "$(sudo stat -c '%u' "$fixture_repo/.codexia-runtime-contract-fixture")" = "$fixture_uid"
           test -d /opt && test ! -L /opt
           test ! -e /opt/codexia-updater && test ! -L /opt/codexia-updater
           touch "$RUNNER_TEMP/codexia-runtime-contract.source-tree-created"
           sudo mkdir -m 0700 -- /opt/codexia-updater
           sudo chown "$fixture_user:$fixture_user" /opt/codexia-updater
+          test "$(sudo stat -c '%u' /opt/codexia-updater)" = "$fixture_uid"
           printf '%s\n' 'codexia-runtime-contract-source/v1' | sudo -u "$fixture_user" tee /opt/codexia-updater/.codexia-runtime-contract-source >/dev/null
           sudo -u "$fixture_user" chmod 0600 /opt/codexia-updater/.codexia-runtime-contract-source
+          test "$(sudo stat -c '%u' /opt/codexia-updater/.codexia-runtime-contract-source)" = "$fixture_uid"
+          test "$(sudo cat -- /opt/codexia-updater/.codexia-runtime-contract-source)" = codexia-runtime-contract-source/v1
           test ! -e /var/cache/codexia && test ! -L /var/cache/codexia
           test ! -e /var/cache/codexia/models && test ! -L /var/cache/codexia/models
           touch "$RUNNER_TEMP/codexia-runtime-contract.model-cache-created"
@@ -111,6 +123,11 @@ jobs:
             sleep 1
           done
           sudo -u "$fixture_user" env HOME="$fixture_home" XDG_CONFIG_HOME="$fixture_home/.config" XDG_RUNTIME_DIR="/run/user/$fixture_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" systemctl --user show --property=Version
+          sudo -u "$fixture_user" env HOME="$fixture_home" XDG_CONFIG_HOME="$fixture_home/.config" XDG_RUNTIME_DIR="/run/user/$fixture_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" systemctl --user import-environment HOME XDG_CONFIG_HOME XDG_RUNTIME_DIR
+          manager_env=$(sudo -u "$fixture_user" env HOME="$fixture_home" XDG_CONFIG_HOME="$fixture_home/.config" XDG_RUNTIME_DIR="/run/user/$fixture_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" systemctl --user show-environment)
+          for expected in "HOME=$fixture_home" "XDG_CONFIG_HOME=$fixture_home/.config" "XDG_RUNTIME_DIR=/run/user/$fixture_uid"; do
+            grep -Fxq "$expected" <<<"$manager_env"
+          done
           test ! -e /etc/codexia-iac-disposable-vm && test ! -L /etc/codexia-iac-disposable-vm
           printf '%s\n' 'codexia-iac-disposable-vm/v1' | sudo tee /etc/codexia-iac-disposable-vm >/dev/null
           touch "$RUNNER_TEMP/codexia-runtime-contract.marker-created"
@@ -132,13 +149,14 @@ jobs:
           fixture_user=codexia-runtime-contract-test
           fixture_uid=$(id -u "$fixture_user")
           fixture_home=$(getent passwd "$fixture_user" | cut -d: -f6)
+          fixture_repo="$fixture_home/codexia-runtime-contract-repo"
           sudo -u "$fixture_user" env \
             HOME="$fixture_home" XDG_CONFIG_HOME="$fixture_home/.config" \
             XDG_RUNTIME_DIR="/run/user/$fixture_uid" \
             DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" \
             CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE=yes \
             PATH="$PATH" \
-            bash deploy/updater/test-runtime-contract-integration.sh
+            bash "$fixture_repo/deploy/updater/test-runtime-contract-integration.sh"
       - name: Remove the disposable VM marker and user manager
         if: always()
         run: |
@@ -149,16 +167,35 @@ jobs:
             sudo rm -f /etc/codexia-iac-disposable-vm || cleanup_failed=1
             rm -f "$RUNNER_TEMP/codexia-runtime-contract.marker-created" || cleanup_failed=1
           fi
+          if test -f "$RUNNER_TEMP/codexia-runtime-contract.repo-copy-created"; then
+            fixture_uid=$(id -u "$fixture_user" 2>/dev/null || true)
+            fixture_home=$(getent passwd "$fixture_user" 2>/dev/null | cut -d: -f6)
+            fixture_repo="$fixture_home/codexia-runtime-contract-repo"
+            if test -n "$fixture_uid" \
+              && sudo test -d "$fixture_repo" && sudo test ! -L "$fixture_repo" \
+              && test "$(sudo realpath -- "$fixture_repo")" = "$fixture_repo" \
+              && test "$(sudo stat -c '%u' "$fixture_repo")" = "$fixture_uid" \
+              && sudo test -f "$fixture_repo/.codexia-runtime-contract-fixture" \
+              && sudo test ! -L "$fixture_repo/.codexia-runtime-contract-fixture" \
+              && test "$(sudo cat -- "$fixture_repo/.codexia-runtime-contract-fixture")" = codexia-runtime-contract-repo/v1 \
+              && test "$(sudo stat -c '%u' "$fixture_repo/.codexia-runtime-contract-fixture")" = "$fixture_uid"; then
+              sudo rm -rf --one-file-system -- "$fixture_repo" || cleanup_failed=1
+              rm -f "$RUNNER_TEMP/codexia-runtime-contract.repo-copy-created" || cleanup_failed=1
+            else
+              echo 'Refusing to remove an unexpected or replaced runtime-contract checkout copy' >&2
+              cleanup_failed=1
+            fi
+          fi
           if test -f "$RUNNER_TEMP/codexia-runtime-contract.source-tree-created"; then
             fixture_uid=$(id -u "$fixture_user" 2>/dev/null || true)
             if test -n "$fixture_uid" \
-              && test -d /opt/codexia-updater && test ! -L /opt/codexia-updater \
-              && test "$(realpath -- /opt/codexia-updater)" = /opt/codexia-updater \
-              && test "$(stat -c '%u' /opt/codexia-updater)" = "$fixture_uid" \
-              && test -f /opt/codexia-updater/.codexia-runtime-contract-source \
-              && test ! -L /opt/codexia-updater/.codexia-runtime-contract-source \
-              && test "$(cat -- /opt/codexia-updater/.codexia-runtime-contract-source)" = codexia-runtime-contract-source/v1 \
-              && test "$(stat -c '%u' /opt/codexia-updater/.codexia-runtime-contract-source)" = "$fixture_uid"; then
+              && sudo test -d /opt/codexia-updater && sudo test ! -L /opt/codexia-updater \
+              && test "$(sudo realpath -- /opt/codexia-updater)" = /opt/codexia-updater \
+              && test "$(sudo stat -c '%u' /opt/codexia-updater)" = "$fixture_uid" \
+              && sudo test -f /opt/codexia-updater/.codexia-runtime-contract-source \
+              && sudo test ! -L /opt/codexia-updater/.codexia-runtime-contract-source \
+              && test "$(sudo cat -- /opt/codexia-updater/.codexia-runtime-contract-source)" = codexia-runtime-contract-source/v1 \
+              && test "$(sudo stat -c '%u' /opt/codexia-updater/.codexia-runtime-contract-source)" = "$fixture_uid"; then
               sudo rm -rf --one-file-system /opt/codexia-updater || cleanup_failed=1
               rm -f "$RUNNER_TEMP/codexia-runtime-contract.source-tree-created" || cleanup_failed=1
             else
