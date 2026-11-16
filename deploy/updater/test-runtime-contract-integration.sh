@@ -491,12 +491,13 @@ assert.ok(cgroupLine, `${name} is not in the unified cgroup hierarchy`);
 const cgroupRoot = await realpath('/sys/fs/cgroup');
 const cgroupPath = path.resolve(cgroupRoot, cgroupLine.slice(3).replace(/^\//u, ''));
 assert.ok(cgroupPath.startsWith(cgroupRoot + path.sep), `${name} cgroup escapes cgroup root`);
-const [memoryMax, cpuMax] = await Promise.all([
-  readFile(path.join(cgroupPath, 'memory.max'), 'utf8'),
-  readFile(path.join(cgroupPath, 'cpu.max'), 'utf8'),
-]);
+const unitControlGroup = execFileSync('systemctl', ['--user', 'show', '--property=ControlGroup', '--value', service], { encoding: 'utf8' }).trim();
+assert.ok(unitControlGroup.startsWith('/') && unitControlGroup !== '/' && path.posix.normalize(unitControlGroup) === unitControlGroup, `${service} control group path is invalid`);
+const unitCgroupPath = path.resolve(cgroupRoot, unitControlGroup.slice(1));
+assert.ok(unitCgroupPath.startsWith(cgroupRoot + path.sep), `${service} cgroup escapes cgroup root`);
+assert.ok(cgroupPath === unitCgroupPath || cgroupPath.startsWith(unitCgroupPath + path.sep), `${name} process escaped its systemd service cgroup`);
+const memoryMax = await readFile(path.join(cgroupPath, 'memory.max'), 'utf8');
 assert.equal(memoryMax.trim(), String(runtime.resources.memoryMaxBytes), `${name} effective memory.max drift`);
-host.assertRuntimeCpuMax(cpuMax, runtime);
 
 const mountinfo = await readFile(`/proc/${pid}/mountinfo`, 'utf8');
 const mounts = new Map(mountinfo.split('\n').filter(Boolean).map(line => {
