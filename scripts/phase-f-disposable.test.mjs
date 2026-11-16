@@ -60,6 +60,10 @@ test('Phase F integration helper is valid shell and exercises the existing locke
   assert.ok(repoRoot >= 0 && accessibleCwd > repoRoot && privilegeProbe > accessibleCwd && provenanceCommand > accessibleCwd,
     'Resolve all repository paths before moving to an accessible cwd for fixture-user sudo');
   assert.doesNotMatch(helper, /sudo [^\n]*-D "\$service_home"/u);
+  assert.doesNotMatch(helper, /as_service install -m [^\n]*"\$(?:repo_root|test_root)\//u,
+    'Fixture-user install must not read the private checkout or root-only temp directory');
+  assert.match(helper, /sudo install -o "\$service_user" -g "\$service_group" -m 0600 "\$source_dir\/deploy\/quadlet\/\$file"/u);
+  assert.match(helper, /sudo install -o "\$service_user" -g "\$service_group" -m 0600 "\$test_root\/updater-config\.json"/u);
   assert.match(helper, /codexia-updater(?:\.sh)?/u);
 });
 

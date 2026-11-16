@@ -25,6 +25,7 @@ cd /tmp
 service_user=codexia-phase-f-ci
 service_uid=''
 service_home=''
+service_group=''
 node_bin=$(command -v node)
 node_path=$(dirname "$node_bin")
 fixture_created=false
@@ -133,7 +134,9 @@ sudo useradd --create-home --shell /bin/bash "$service_user"
 fixture_created=true
 service_uid=$(id -u "$service_user")
 service_home=$(getent passwd "$service_user" | cut -d: -f6)
+service_group=$(id -gn "$service_user")
 [[ "$service_uid" -gt 0 && "$service_home" == "/home/$service_user" ]]
+[[ -n "$service_group" ]]
 if sudo -H -u "$service_user" sudo -n true 2>/dev/null; then
   echo 'The fixture service account unexpectedly has sudo privileges.' >&2
   exit 1
@@ -210,14 +213,14 @@ sudo --preserve-env=GH_TOKEN,GITHUB_SHA -H -u "$service_user" env \
   "$node_bin" "$source_dir/scripts/phase-f-test-channel.mjs" --out "$evidence_dir"
 
 for file in codexia.network codexia-data.network codexia-data.volume codexia-history.volume codexia-postgres.volume; do
-  as_service install -m 0600 "$repo_root/deploy/quadlet/$file" "$quadlet_dir/$file"
+  sudo install -o "$service_user" -g "$service_group" -m 0600 "$source_dir/deploy/quadlet/$file" "$quadlet_dir/$file"
 done
-as_service install -m 0600 "$repo_root/deploy/postgres/010-create-app-role.sh" "$fixture_data/010-create-app-role.sh"
+sudo install -o "$service_user" -g "$service_group" -m 0600 "$source_dir/deploy/postgres/010-create-app-role.sh" "$fixture_data/010-create-app-role.sh"
 sed \
   -e "s|/etc/codexia/postgres/010-create-app-role.sh|$fixture_data/010-create-app-role.sh|g" \
   -e '/Secret=codexia-postgres-app-password/a Secret=codexia-postgres-preflight-password,type=mount,target=/run/secrets/preflight-password' \
   "$repo_root/deploy/quadlet/codexia-db.container" > "$test_root/codexia-db.container"
-as_service install -m 0600 "$test_root/codexia-db.container" "$quadlet_dir/codexia-db.container"
+sudo install -o "$service_user" -g "$service_group" -m 0600 "$test_root/codexia-db.container" "$quadlet_dir/codexia-db.container"
 
 # All values are generated inside the fixture account and remain in Podman secrets.
 as_service "$node_bin" --input-type=module - "$secret_dir" <<'NODE'
@@ -285,7 +288,7 @@ SQL
 proxy_image=$base_image
 sed "s|ghcr.io/yohn-jp/codexia-backend@sha256:REPLACE_WITH_VERIFIED_DIGEST|$proxy_image|g" \
   "$repo_root/deploy/updater/codexia-api-proxy.container.example" > "$test_root/codexia-api-proxy.container"
-as_service install -m 0600 "$test_root/codexia-api-proxy.container" "$quadlet_dir/codexia-api-proxy.container"
+sudo install -o "$service_user" -g "$service_group" -m 0600 "$test_root/codexia-api-proxy.container" "$quadlet_dir/codexia-api-proxy.container"
 as_service install -d -m 0700 "$state_dir"
 as_service sh -c 'printf "blocked\\n" > "$1/route"' sh "$state_dir"
 
@@ -311,7 +314,7 @@ cat > "$test_root/updater-config.json" <<EOF
   "browserAuth": { "mode": "token" }
 }
 EOF
-as_service install -m 0600 "$test_root/updater-config.json" "$config_dir/config.json"
+sudo install -o "$service_user" -g "$service_group" -m 0600 "$test_root/updater-config.json" "$config_dir/config.json"
 
 user_systemctl daemon-reload
 user_systemctl start codexia-db.service codexia-api-proxy.service
@@ -419,7 +422,7 @@ if [ "\$1" = "--user" ] && [ "\$2" = "stop" ] && [ "\$3" = "codexia-slot-blue.se
 fi
 exec /usr/bin/systemctl "\$@"
 EOF
-as_service install -m 0700 "$test_root/systemctl-crash" "$crash_bin/systemctl"
+sudo install -o "$service_user" -g "$service_group" -m 0700 "$test_root/systemctl-crash" "$crash_bin/systemctl"
 set +e
 as_service env \
   PATH="$crash_bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
