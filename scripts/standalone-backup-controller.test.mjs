@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { generateKeyPairSync } from 'node:crypto';
-import { chmod, mkdtemp, rm, symlink } from 'node:fs/promises';
+import { chmod, lstat, mkdtemp, open, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { atomicWrite, loadBackupIntent, StandaloneController, initialControllerState, validateBackupIntent } from './standalone-update-controller.mjs';
-import { assertLegacyBackupIdentity, assertLegacyBackupUnitIdentity, assertVersion } from '../deploy/updater/standalone-host.mjs';
+import { PodmanStandaloneHost, assertLegacyBackupIdentity, assertLegacyBackupUnitIdentity, assertLegacyBackupTunnelUnitIdentity, containerRuntimeFingerprint, assertVersion } from '../deploy/updater/standalone-host.mjs';
 import { signUpdateChannel } from './update-channel.mjs';
 
 const release = {
@@ -24,13 +24,38 @@ function controllerBackupIntent(overrides = {}) {
 }
 
 function legacyBackupIntent(overrides = {}) {
+  const apiWasEnabled = overrides.apiWasEnabled ?? true;
+  const tunnelWasEnabled = overrides.tunnelWasEnabled ?? true;
   return {
-    format: 'codexia-backup-intent/v1', kind: 'legacy', release,
-    legacyUnitFingerprint: 'f'.repeat(64),
+    format: 'codexia-backup-intent/v3', kind: 'legacy', release,
+    identity: {
+      api: { unitFingerprint: 'f'.repeat(64), runtimeFingerprint: 'a'.repeat(64) },
+      tunnel: { unitFingerprint: 'e'.repeat(64), runtimeFingerprint: 'b'.repeat(64) },
+    },
+    apiWasEnabled, tunnelWasEnabled,
+    autostartLinks: overrides.autostartLinks ?? {
+      api: { generatorTarget: apiWasEnabled ? '../codexia-api.service' : null, defaultTargetWants: apiWasEnabled },
+      tunnel: { generatorTarget: tunnelWasEnabled ? '../codexia-tunnel.service' : null, defaultTargetWants: tunnelWasEnabled },
+    },
     tunnelWasActive: true, timerWasActive: true,
     createdAt: '2026-11-12T12:00:00.000Z', ...overrides,
   };
 }
+
+function setFixtureAutostart(host,intent){
+  host.apiWasEnabled=intent.apiWasEnabled;
+  host.tunnelWasEnabled=intent.tunnelWasEnabled;
+  host.autostartLinks=structuredClone(intent.autostartLinks);
+}
+
+test('legacy backup intent requires complete API and Tunnel identities and startup state', () => {
+  const intent = legacyBackupIntent();
+  assert.deepEqual(validateBackupIntent(intent), intent);
+  assert.throws(() => validateBackupIntent({ ...intent, identity: { ...intent.identity, tunnel: { ...intent.identity.tunnel, unitFingerprint: undefined } } }));
+  assert.throws(() => validateBackupIntent({ ...intent, tunnelWasActive: true,
+    identity: { ...intent.identity, tunnel: { ...intent.identity.tunnel, runtimeFingerprint: null } } }));
+  assert.throws(() => validateBackupIntent({ ...intent, apiWasEnabled: undefined }));
+});
 
 test('backup intent is durable, owner-private, and rejects symlinks or undeclared fields', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'codexia-backup-intent-'));
@@ -235,7 +260,7 @@ test('stable backup rejects an invalid destination before pausing or fencing the
   assert.ok(!host.trace.includes('stop:blue'));
 });
 
-function legacyFixture({ tunnelActive = true, timerActive = true, backupFailure = false, restoreFailure = false, destinationFailure = false } = {}) {
+function legacyFixture({ tunnelActive = true, timerActive = true, backupFailure = false, restoreFailure = false, tunnelStartFailure = false, apiPermitFailure = false, apiPermitCleanupFailure = false, destinationFailure = false } = {}) {
   const key = generateKeyPairSync('ed25519');
   const publicKey = key.publicKey.export({ type: 'spki', format: 'pem' });
   const privateKey = key.privateKey.export({ type: 'pkcs8', format: 'pem' });
@@ -245,6 +270,15 @@ function legacyFixture({ tunnelActive = true, timerActive = true, backupFailure 
     legacyActive: true,
     legacyContainerPresent: true,
     legacyUnitFingerprint: 'f'.repeat(64),
+    legacyRuntimeFingerprint: 'a'.repeat(64),
+    tunnelUnitFingerprint: 'e'.repeat(64),
+    tunnelRuntimeFingerprint: 'b'.repeat(64),
+    apiWasEnabled: true,
+    tunnelWasEnabled: true,
+    autostartLinks: {
+      api: { generatorTarget: '../codexia-api.service', defaultTargetWants: true },
+      tunnel: { generatorTarget: '../codexia-tunnel.service', defaultTargetWants: true },
+    },
     startupFence: false,
     apiStartupFence: false,
     tunnelStartupFence: false,
@@ -254,6 +288,9 @@ function legacyFixture({ tunnelActive = true, timerActive = true, backupFailure 
     preflight: false,
     failBackup: backupFailure,
     failRestore: restoreFailure,
+    failTunnelStart: tunnelStartFailure,
+    failApiPermit: apiPermitFailure,
+    failApiPermitCleanup: apiPermitCleanupFailure,
     failDestination: destinationFailure,
     trace: [],
     async fetchChannel() {
@@ -276,22 +313,40 @@ function legacyFixture({ tunnelActive = true, timerActive = true, backupFailure 
       this.trace.push('fence-install');
       this.startupFence = true; this.apiStartupFence = true; this.tunnelStartupFence = true;
     },
+    async captureBackupAutostart() {
+      this.trace.push('autostart-capture');
+      return { apiWasEnabled: this.apiWasEnabled, tunnelWasEnabled: this.tunnelWasEnabled, autostartLinks: structuredClone(this.autostartLinks) };
+    },
+    async assertBackupAutostartGated(intent) {
+      this.trace.push('autostart-gated');
+      assert.equal(this.startupFence, true);
+      assert.deepEqual(this.autostartLinks, intent.autostartLinks);
+      assert.equal(this.apiWasEnabled, intent.apiWasEnabled);
+      assert.equal(this.tunnelWasEnabled, intent.tunnelWasEnabled);
+    },
+    async restoreBackupAutostart(intent) {
+      this.trace.push('autostart-restore');
+      assert.deepEqual(this.autostartLinks, intent.autostartLinks);
+      assert.equal(this.apiWasEnabled, intent.apiWasEnabled); this.tunnelWasEnabled = intent.tunnelWasEnabled;
+    },
     async assertBackupStartupFence() { assert.equal(this.startupFence, true); },
-    async removeLegacyBackupStartupFence() { this.trace.push('api-fence-remove'); this.apiStartupFence = false; this.startupFence = this.tunnelStartupFence; },
-    async removeTunnelBackupStartupFence() { this.trace.push('tunnel-fence-remove'); this.tunnelStartupFence = false; this.startupFence = this.apiStartupFence; },
+    async removeBackupStartupPermits() { this.trace.push('permits-clear'); },
     async removeBackupStartupFence() { this.trace.push('fence-remove'); this.startupFence = false; this.apiStartupFence = false; this.tunnelStartupFence = false; },
     async validateBackupDestination(destination) {
       this.trace.push('validate-destination');
       assert.equal(destination, '/mnt/backup');
       if (this.failDestination) throw new Error('destination is not an approved remote filesystem');
     },
-    async assertLegacyBackupRelease(candidate, { allowStopped = false, expectedUnitFingerprint } = {}) {
+    async assertLegacyBackupRelease(candidate, { allowStopped = false, expectedIdentity } = {}) {
       this.trace.push('verify-api');
-      if (expectedUnitFingerprint) assert.equal(this.legacyUnitFingerprint, expectedUnitFingerprint, 'Legacy Quadlet/systemd source drifted');
+      if (expectedIdentity) {
+        assert.equal(this.legacyUnitFingerprint, expectedIdentity.unitFingerprint, 'Legacy API Quadlet/systemd source drifted');
+        if (this.legacyContainerPresent) assert.equal(this.legacyRuntimeFingerprint, expectedIdentity.runtimeFingerprint, 'Legacy API runtime drifted');
+      }
       if (!this.legacyContainerPresent) {
         assert.ok(allowStopped, 'Legacy writer container is missing');
-        assert.ok(expectedUnitFingerprint, 'Stopped legacy writer requires its captured Quadlet/systemd fingerprint');
-        return this.legacyUnitFingerprint;
+        assert.ok(expectedIdentity, 'Stopped legacy writer requires its captured Quadlet/systemd identity');
+        return { unitFingerprint: this.legacyUnitFingerprint, runtimeFingerprint: null };
       }
       const imageId = 'c'.repeat(64);
       assertLegacyBackupIdentity({
@@ -299,12 +354,21 @@ function legacyFixture({ tunnelActive = true, timerActive = true, backupFailure 
         image: { Id: 'sha256:' + imageId, RepoDigests: [release.image], Os: 'linux', Architecture: 'amd64', Labels: { 'org.opencontainers.image.revision': release.sourceSha } },
         version: this.legacyActive ? { name: 'codexia', version: candidate.version, profile: candidate.profile, hosted: false, browserAuth: 'token' } : null,
       }, candidate, { CODEXIA_BROWSER_AUTH: 'token' }, { requireRunning: !allowStopped });
-      return this.legacyUnitFingerprint;
+      return { unitFingerprint: this.legacyUnitFingerprint, runtimeFingerprint: this.legacyRuntimeFingerprint };
+    },
+    async assertLegacyBackupTunnel({ allowStopped = false, expectedIdentity } = {}) {
+      this.trace.push('verify-tunnel');
+      if (expectedIdentity) {
+        assert.equal(this.tunnelUnitFingerprint, expectedIdentity.unitFingerprint, 'Legacy Tunnel Quadlet/systemd source drifted');
+        if (this.tunnelActive) assert.equal(this.tunnelRuntimeFingerprint, expectedIdentity.runtimeFingerprint, 'Legacy Tunnel runtime drifted');
+      }
+      if (!this.tunnelActive) assert.ok(allowStopped || expectedIdentity?.runtimeFingerprint === null, 'Legacy Tunnel is unexpectedly stopped');
+      return { unitFingerprint: this.tunnelUnitFingerprint, runtimeFingerprint: this.tunnelActive ? this.tunnelRuntimeFingerprint : null };
     },
     async stopTunnel() { this.trace.push('tunnel-stop'); this.tunnelActive = false; },
-    async startTunnel() { this.trace.push('tunnel-start'); this.tunnelActive = true; },
+    async startTunnel() { this.trace.push('tunnel-permit'); this.trace.push('tunnel-start'); if (this.failTunnelStart) throw new Error('legacy Tunnel restore failed'); this.tunnelActive = true; },
     async stopLegacyWriter() { this.trace.push('api-stop'); this.legacyActive = false; this.legacyContainerPresent = false; },
-    async startLegacyWriter() { this.trace.push('api-start'); if (this.failRestore) throw new Error('legacy API restore failed'); this.legacyActive = true; this.legacyContainerPresent = true; },
+    async startLegacyWriter() { this.trace.push('api-permit'); if (this.failApiPermit) throw new Error('API recovery startup permit creation failed'); this.trace.push('api-start'); if (this.failRestore) throw new Error('legacy API restore failed'); this.legacyActive = true; this.legacyContainerPresent = true; if (this.failApiPermitCleanup) throw new Error('API recovery startup permit removal failed'); },
     async backup(destination, recipient) {
       this.trace.push('backup');
       assert.equal(destination, '/mnt/backup');
@@ -337,15 +401,23 @@ test('pre-journal backup verifies the signed legacy identity and restores API, T
   assert.equal(host.timerActive, true);
   assert.equal(host.backupIntent, null);
   assert.equal(host.startupFence, false);
+  assert.equal(host.apiWasEnabled, true);
+  assert.equal(host.tunnelWasEnabled, true);
   assert.ok(host.trace.indexOf('fence-install') < host.trace.indexOf('intent-save'));
+  assert.ok(host.trace.indexOf('intent-save') < host.trace.indexOf('autostart-gated'));
   assert.ok(host.trace.indexOf('route:blocked') < host.trace.indexOf('tunnel-stop'));
   assert.ok(host.trace.indexOf('tunnel-stop') < host.trace.indexOf('api-stop'));
   assert.ok(host.trace.indexOf('api-stop') < host.trace.indexOf('backup'));
   assert.ok(host.trace.indexOf('backup') < host.trace.indexOf('api-start'));
-  assert.ok(host.trace.indexOf('api-fence-remove') < host.trace.indexOf('api-start'));
+  assert.ok(host.trace.indexOf('api-permit') < host.trace.indexOf('api-start'));
   assert.ok(host.trace.indexOf('api-start') < host.trace.indexOf('tunnel-start'));
-  assert.ok(host.trace.indexOf('tunnel-fence-remove') < host.trace.indexOf('tunnel-start'));
+  assert.ok(host.trace.indexOf('tunnel-permit') < host.trace.indexOf('tunnel-start'));
   assert.ok(host.trace.indexOf('tunnel-start') < host.trace.indexOf('timer-start'));
+  assert.ok(host.trace.indexOf('autostart-restore') < host.trace.indexOf('intent-clear'));
+  const finalFenceInstall = host.trace.lastIndexOf('fence-install');
+  assert.ok(finalFenceInstall > host.trace.indexOf('tunnel-start'));
+  assert.ok(finalFenceInstall < host.trace.indexOf('autostart-restore'));
+  assert.ok(host.trace.indexOf('intent-clear') < host.trace.lastIndexOf('fence-remove'));
 });
 
 test('boot recovery resumes an interrupted legacy backup only after revalidating its signed container', async () => {
@@ -381,15 +453,134 @@ test('interrupted pre-journal backup refuses to restart when the captured Quadle
   host.legacyUnitFingerprint = 'd'.repeat(64);
   host.backupIntent = legacyBackupIntent();
 
-  await assert.rejects(controller.recoverBackupIntent(null), /Legacy Quadlet\/systemd source drifted/);
+  await assert.rejects(controller.recoverBackupIntent(null), /Legacy API Quadlet\/systemd source drifted/);
 
   assert.equal(host.legacyActive, false);
   assert.equal(host.tunnelActive, false);
   assert.equal(host.timerActive, false);
   assert.equal(host.routeValue, 'blocked');
-  assert.equal(host.backupIntent.legacyUnitFingerprint, 'f'.repeat(64));
+  assert.equal(host.backupIntent.identity.api.unitFingerprint, 'f'.repeat(64));
   assert.equal(host.startupFence, true);
   assert.ok(!host.trace.includes('api-start'));
+});
+
+test('interrupted legacy recovery refuses Tunnel source drift before either writer or ingress starts', async () => {
+  const { host, controller } = legacyFixture();
+  host.legacyActive = false;
+  host.legacyContainerPresent = false;
+  host.tunnelActive = false;
+  host.timerActive = false;
+  host.tunnelUnitFingerprint = 'd'.repeat(64);
+  host.backupIntent = legacyBackupIntent();
+
+  await assert.rejects(controller.recoverBackupIntent(null), /Legacy Tunnel Quadlet\/systemd source drifted/);
+
+  assert.equal(host.legacyActive, false);
+  assert.equal(host.tunnelActive, false);
+  assert.equal(host.routeValue, 'blocked');
+  assert.equal(host.backupIntent.identity.tunnel.unitFingerprint, 'e'.repeat(64));
+  assert.equal(host.apiWasEnabled, true);
+  assert.equal(host.tunnelWasEnabled, true);
+  assert.ok(!host.trace.includes('api-start'));
+  assert.ok(!host.trace.includes('tunnel-start'));
+});
+
+test('legacy API runtime drift after Quadlet recreates its container blocks Tunnel and retains intent', async () => {
+  const { host, controller } = legacyFixture();
+  host.legacyActive = false;
+  host.legacyContainerPresent = false;
+  host.tunnelActive = false;
+  host.timerActive = false;
+  host.legacyRuntimeFingerprint = 'd'.repeat(64);
+  host.backupIntent = legacyBackupIntent();
+
+  await assert.rejects(controller.recoverBackupIntent(null), /Legacy API runtime drifted/);
+
+  assert.equal(host.routeValue, 'blocked');
+  assert.equal(host.legacyActive, false);
+  assert.equal(host.tunnelActive, false);
+  assert.equal(host.backupIntent.identity.api.runtimeFingerprint, 'a'.repeat(64));
+  assert.equal(host.startupFence, true);
+  assert.ok(!host.trace.includes('tunnel-start'));
+});
+
+test('legacy Tunnel runtime drift after Quadlet recreates its container blocks ingress and retains intent', async () => {
+  const { host, controller } = legacyFixture();
+  host.legacyActive = false;
+  host.legacyContainerPresent = false;
+  host.tunnelActive = false;
+  host.timerActive = false;
+  host.tunnelRuntimeFingerprint = 'd'.repeat(64);
+  host.backupIntent = legacyBackupIntent();
+
+  await assert.rejects(controller.recoverBackupIntent(null), /Legacy Tunnel runtime drifted/);
+
+  assert.equal(host.routeValue, 'blocked');
+  assert.equal(host.legacyActive, true);
+  assert.equal(host.tunnelActive, false);
+  assert.equal(host.backupIntent.identity.tunnel.runtimeFingerprint, 'b'.repeat(64));
+  assert.equal(host.startupFence, true);
+  assert.equal(host.apiWasEnabled, true);
+  assert.equal(host.tunnelWasEnabled, true);
+  assert.ok(!host.trace.includes('timer-start'));
+});
+
+test('failed Tunnel restart keeps generated wants unchanged behind the durable startup fence', async () => {
+  const { host, controller } = legacyFixture({ tunnelStartFailure: true });
+  host.legacyActive = false;
+  host.legacyContainerPresent = false;
+  host.tunnelActive = false;
+  host.timerActive = false;
+  host.backupIntent = legacyBackupIntent({ apiWasEnabled: false, tunnelWasEnabled: false });
+  setFixtureAutostart(host,host.backupIntent);
+
+  await assert.rejects(controller.recoverBackupIntent(null), /legacy Tunnel restore failed/);
+
+  assert.equal(host.backupIntent.kind, 'legacy');
+  assert.equal(host.startupFence, true);
+  assert.equal(host.apiWasEnabled, false);
+  assert.equal(host.tunnelWasEnabled, false);
+  assert.equal(host.legacyActive, true);
+  assert.equal(host.tunnelActive, false);
+  assert.equal(host.routeValue, 'blocked');
+});
+
+test('failed one-use API startup permit preserves the real backup intent and durable fence', async () => {
+  const { host, controller } = legacyFixture({ apiPermitFailure: true });
+  host.legacyActive = false;
+  host.legacyContainerPresent = false;
+  host.tunnelActive = false;
+  host.timerActive = false;
+  host.backupIntent = legacyBackupIntent();
+
+  await assert.rejects(controller.recoverBackupIntent(null), /API recovery startup permit creation failed/);
+
+  assert.equal(host.backupIntent.kind, 'legacy');
+  assert.deepEqual(host.backupIntent.identity, legacyBackupIntent().identity);
+  assert.equal(host.startupFence, true);
+  assert.equal(host.apiWasEnabled, true);
+  assert.equal(host.tunnelWasEnabled, true);
+  assert.equal(host.legacyActive, false);
+  assert.equal(host.routeValue, 'blocked');
+  assert.ok(!host.trace.includes('api-start'));
+});
+
+test('failed one-use API startup permit removal preserves the real backup intent and durable fence', async () => {
+  const { host, controller } = legacyFixture({ apiPermitCleanupFailure: true });
+  host.legacyActive = false;
+  host.legacyContainerPresent = false;
+  host.tunnelActive = false;
+  host.timerActive = false;
+  host.backupIntent = legacyBackupIntent();
+
+  await assert.rejects(controller.recoverBackupIntent(null), /API recovery startup permit removal failed/);
+
+  assert.equal(host.backupIntent.kind, 'legacy');
+  assert.deepEqual(host.backupIntent.identity, legacyBackupIntent().identity);
+  assert.equal(host.startupFence, true);
+  assert.equal(host.legacyActive, false);
+  assert.equal(host.routeValue, 'blocked');
+  assert.ok(host.trace.includes('api-start'));
 });
 
 test('legacy backup identity accepts a missing API epoch only after immutable image and runtime checks', () => {
@@ -437,6 +628,187 @@ test('legacy backup fingerprints only the loaded Quadlet/systemd unit tied to th
   assert.throws(() => assertLegacyBackupUnitIdentity({ ...identity, source: source.replace('ContainerName=codexia-api', 'ContainerName=other-api') }, release), /Expected values to be strictly equal/);
   assert.throws(() => assertLegacyBackupUnitIdentity({ ...identity, fragment: fragment.replace(/sha-[a-f0-9]{40}/u, 'different-image') }, release), /does not start the image/);
   assert.throws(() => assertLegacyBackupUnitIdentity({ ...identity, quadletImage: { ...image, Id: 'sha256:' + 'd'.repeat(64) } }, release), /does not resolve/);
+});
+
+test('Tunnel Quadlet identity includes its pinned image and secret identities', () => {
+  const imageId = 'c'.repeat(64);
+  const image = {
+    Id: 'sha256:' + imageId,
+    RepoDigests: ['docker.io/cloudflare/cloudflared@sha256:' + 'd'.repeat(64)],
+    Os: 'linux', Architecture: 'amd64',
+  };
+  const imageReference = 'docker.io/cloudflare/cloudflared:2026.11.0@sha256:' + 'd'.repeat(64);
+  const identity = {
+    sourcePath: '/home/codexia/.config/containers/systemd/codexia-tunnel.container',
+    fragmentPath: '/run/user/1002/systemd/generator/codexia-tunnel.service',
+    source: `[Container]\nImage=${imageReference}\nContainerName=codexia-tunnel\nSecret=codexia-tunnel-token,type=mount,target=/run/secrets/token\n`,
+    fragment: `[Service]\nExecStart=/usr/bin/podman run --name=codexia-tunnel ${imageReference}\n`,
+    image,
+    secretIdentities: [{ name: 'codexia-tunnel-token', id: 'secret-id-1' }],
+  };
+  const fingerprint = assertLegacyBackupTunnelUnitIdentity(identity);
+  assert.match(fingerprint, /^[a-f0-9]{64}$/u);
+  assert.ok(!fingerprint.includes('fixture-secret-value'));
+  assert.notEqual(assertLegacyBackupTunnelUnitIdentity({ ...identity, secretIdentities: [{ name: 'codexia-tunnel-token', id: 'secret-id-2' }] }), fingerprint);
+  assert.throws(() => assertLegacyBackupTunnelUnitIdentity({ ...identity, secretIdentities: [{ name: 'codexia-tunnel-token', id: 'secret-id-1', value: 'fixture-secret-value' }] }), /unsupported fields/);
+  assert.throws(() => assertLegacyBackupTunnelUnitIdentity({ ...identity, source: identity.source.replace(imageReference, 'unPinnedImage') }), /digest/);
+});
+
+test('container runtime fingerprint covers data mounts, network, ports, environment, and ignores volatile state', () => {
+  const runtime = {
+    Id: 'container-1', Created: '2026-11-12T12:00:00Z', State: { Running: true, Pid: 123 },
+    Image: 'sha256:' + 'a'.repeat(64), ImageName: release.image,
+    Config: {
+      Env: ['PORT=3000', 'CODEXIA_PROFILE=core'], Entrypoint: ['node'], Cmd: ['server.js'],
+      Labels: { service: 'codexia-api' }, ExposedPorts: { '3000/tcp': {} }, User: '10001', WorkingDir: '/app',
+      CreateCommand: ['podman', 'run', '--secret', 'codexia-app-password,type=mount,target=/run/secrets/app-password'],
+      Secrets: [{ Name: 'codexia-app-password', ID: 'secret-id-1', UID: 0, GID: 0, Mode: 292 }],
+    },
+    HostConfig: {
+      NetworkMode: 'codexia.network', PortBindings: {}, ReadonlyRootfs: true, Tmpfs: { '/tmp': 'rw,nosuid' },
+      Binds: [], RestartPolicy: { Name: 'on-failure', MaximumRetryCount: 0 }, CapDrop: ['ALL'], SecurityOpt: [],
+    },
+    Mounts: [{ Type: 'volume', Name: 'codexia-data', Source: '/var/lib/volumes/codexia-data', Destination: '/data', Driver: 'local', Mode: 'rw', RW: true, Propagation: 'rprivate', Options: [] }],
+    NetworkSettings: { Networks: { 'codexia.network': { NetworkID: 'network-id-1', Aliases: ['codexia-api'], IPAddress: '10.0.0.2', Gateway: '10.0.0.1' } } },
+  };
+  const secretIdentities = [{ name: 'codexia-app-password', id: 'secret-id-1' }];
+  const fingerprint = containerRuntimeFingerprint(runtime, secretIdentities);
+  assert.equal(containerRuntimeFingerprint({ ...runtime, Id: 'container-2', Created: '2026-11-13T12:00:00Z', State: { Running: false, Pid: 0 }, NetworkSettings: { Networks: { 'codexia.network': { NetworkID: 'network-id-1', Aliases: ['codexia-api'], IPAddress: '10.0.0.8', Gateway: '10.0.0.1' } } } }, secretIdentities), fingerprint);
+  assert.notEqual(containerRuntimeFingerprint({ ...runtime, NetworkSettings: { Networks: { 'codexia.network': { ...runtime.NetworkSettings.Networks['codexia.network'], NetworkID: 'network-id-2' } } } }, secretIdentities), fingerprint);
+  assert.notEqual(containerRuntimeFingerprint({ ...runtime, Config: { ...runtime.Config, CreateCommand: ['podman', 'run', '--secret', 'codexia-app-password,type=mount,target=/run/secrets/other'] } }, secretIdentities), fingerprint);
+  assert.notEqual(containerRuntimeFingerprint({ ...runtime, HostConfig: { ...runtime.HostConfig, PortBindings: { '3000/tcp': [{ HostIp: '0.0.0.0', HostPort: '3000' }] } } }, secretIdentities), fingerprint);
+  assert.notEqual(containerRuntimeFingerprint({ ...runtime, HostConfig: { ...runtime.HostConfig, CpuQuota: 50000 } }, secretIdentities), fingerprint);
+  assert.notEqual(containerRuntimeFingerprint({ ...runtime, Mounts: [{ ...runtime.Mounts[0], Name: 'codexia-data-drift' }] }, secretIdentities), fingerprint);
+  assert.notEqual(containerRuntimeFingerprint({ ...runtime, NetworkSettings: { Networks: { 'public.network': { NetworkID: 'network-id-public', Aliases: ['codexia-api'] } } } }, secretIdentities), fingerprint);
+  assert.notEqual(containerRuntimeFingerprint({ ...runtime, Config: { ...runtime.Config, Env: ['PORT=4000'] } }, secretIdentities), fingerprint);
+  assert.throws(() => containerRuntimeFingerprint({ ...runtime, Config: { ...runtime.Config, Env: ['CODEXIA_AUTH_TOKEN=fixture-secret-value'] } }, secretIdentities), /Plaintext secret environment/);
+  assert.throws(() => containerRuntimeFingerprint({ ...runtime, Config: { ...runtime.Config, Secrets: [{ Name: 'codexia-app-password', ID: 'stale-secret-id' }] } }, secretIdentities), /Podman runtime secret IDs differ/);
+  assert.throws(() => containerRuntimeFingerprint(runtime, [{ name: 'codexia-app-password', id: 'secret-id-1', value: 'fixture-secret-value' }]), /unsupported fields/);
+  assert.ok(!fingerprint.includes('fixture-secret-value'));
+  assert.ok(!fingerprint.includes('/run/secrets/app-password'));
+});
+
+test('container runtime fingerprint binds sanitized secret targets without retaining raw command values', () => {
+  const secrets = [{ name: 'codexia-app-password', id: 'secret-id-1' }];
+  const container = {
+    Image: 'sha256:' + 'a'.repeat(64),
+    Config: {
+      Env: ['CODEXIA_DATABASE_PASSWORD_FILE=/run/secrets/app-password'],
+      CreateCommand: ['podman', 'run', '--label', 'review.marker=fixture-secret-value', '--secret', 'codexia-app-password,type=mount,target=/run/secrets/app-password'],
+      Secrets: [{ Name: 'codexia-app-password', ID: 'secret-id-1', UID: 0, GID: 0, Mode: 292 }],
+    },
+    HostConfig: {},
+    NetworkSettings: { Networks: {} },
+    Mounts: [],
+  };
+  const fingerprint = containerRuntimeFingerprint(container, secrets);
+  const reordered = containerRuntimeFingerprint({
+    ...container,
+    Config: { ...container.Config, CreateCommand: ['podman', 'create', '--label', 'review.marker=fixture-secret-value', '--secret', 'codexia-app-password,target=/run/secrets/app-password,type=mount'] },
+  }, secrets);
+  const drifted = containerRuntimeFingerprint({
+    ...container,
+    Config: { ...container.Config, CreateCommand: ['podman', 'run', '--label', 'review.marker=fixture-secret-value', '--secret', 'codexia-app-password,type=mount,target=/run/secrets/other'] },
+  }, secrets);
+
+  assert.equal(reordered, fingerprint, 'Equivalent secret options must fingerprint stably');
+  assert.notEqual(drifted, fingerprint, 'A changed secret mount target must change runtime identity');
+  assert.match(fingerprint, /^[a-f0-9]{64}$/u);
+  assert.ok(!fingerprint.includes('fixture-secret-value'));
+  assert.ok(!fingerprint.includes('--secret'));
+});
+
+test('container runtime fingerprint preserves ordered entrypoint and command arguments', () => {
+  const container = {
+    Image: 'sha256:' + 'a'.repeat(64),
+    Config: { Env: [], Entrypoint: ['/usr/bin/node'], Cmd: ['server.js', '--read-only'], CreateCommand: ['podman', 'run'] },
+    HostConfig: {},
+    NetworkSettings: { Networks: {} },
+    Mounts: [],
+  };
+  const fingerprint = containerRuntimeFingerprint(container);
+  const reordered = containerRuntimeFingerprint({ ...container, Config: { ...container.Config, Cmd: ['--read-only', 'server.js'] } });
+
+  assert.notEqual(reordered, fingerprint, 'Argument order changes the process that the container runs');
+});
+
+test('container runtime fingerprint excludes only Podman-generated hostname and preserves explicit environment order', () => {
+  const base = {
+    Image: 'sha256:' + 'a'.repeat(64),
+    Config: { Env: ['PORT=3000', 'PORT=4000'], Entrypoint: ['/usr/bin/node'], Cmd: ['server.js'], CreateCommand: ['podman', 'run'] },
+    HostConfig: {},
+    NetworkSettings: { Networks: {} },
+    Mounts: [],
+  };
+  const before = containerRuntimeFingerprint({ ...base, Config: { ...base.Config, Hostname: 'container-1' } });
+  const after = containerRuntimeFingerprint({ ...base, Config: { ...base.Config, Hostname: 'container-2' } });
+  assert.equal(before, after, 'Podman derives the default hostname from the recreated container ID');
+
+  const firstEnvironmentOrder = containerRuntimeFingerprint(base);
+  const secondEnvironmentOrder = containerRuntimeFingerprint({ ...base, Config: { ...base.Config, Env: ['PORT=4000', 'PORT=3000'] } });
+  assert.notEqual(firstEnvironmentOrder, secondEnvironmentOrder, 'Duplicate environment variables are order-sensitive');
+
+  const explicit = { ...base, Config: { ...base.Config, Hostname: 'codexia-api', CreateCommand: ['podman', 'run', '--hostname', 'codexia-api'] } };
+  const explicitDrift = { ...explicit, Config: { ...explicit.Config, Hostname: 'changed-host', CreateCommand: ['podman', 'run', '--hostname', 'changed-host'] } };
+  assert.notEqual(containerRuntimeFingerprint(explicit), containerRuntimeFingerprint(explicitDrift));
+});
+
+test('legacy startup fence allows only intent-free starts or a unit-specific recovery permit', () => {
+  const originalRuntime = process.env.XDG_RUNTIME_DIR;
+  process.env.XDG_RUNTIME_DIR = '/run/user/1000';
+  try {
+    const host = new PodmanStandaloneHost({
+      routeFile: '/home/codexia/.config/codexia/route',
+      quadletDirectory: '/home/codexia/.config/containers/systemd',
+      githubTokenFile: '/home/codexia/.config/codexia/github-token',
+      stateFile: '/home/codexia/.local/state/codexia/controller.json',
+      frontendIdentityUrl: 'https://example.test/desktop/update-identity.json',
+      browserAuth: { mode: 'token' },
+    });
+    const paths = host.backupStartupFencePaths();
+
+    assert.match(paths.api.content, /^\[Unit\]\nConditionPathExists=\|!/u);
+    assert.match(paths.api.content, /\nConditionPathExists=\|\/run\/user\/1000\//u);
+    assert.notEqual(paths.api.permit, paths.tunnel.permit);
+    assert.ok(paths.api.content.includes(paths.api.permit));
+    assert.ok(paths.tunnel.content.includes(paths.tunnel.permit));
+  } finally {
+    if (originalRuntime === undefined) delete process.env.XDG_RUNTIME_DIR;
+    else process.env.XDG_RUNTIME_DIR = originalRuntime;
+  }
+});
+
+test('production host exposes an assertion for the loaded durable startup fence', () => {
+  assert.equal(typeof PodmanStandaloneHost.prototype.assertBackupStartupFence, 'function');
+});
+
+test('stale process-bound recovery permits are removable but live permits fail closed', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-start-permit-'));
+  const originalRuntime = process.env.XDG_RUNTIME_DIR;
+  process.env.XDG_RUNTIME_DIR = directory;
+  const host = new PodmanStandaloneHost({
+    routeFile: '/home/codexia/.config/codexia/route',
+    quadletDirectory: '/home/codexia/.config/containers/systemd',
+    githubTokenFile: '/home/codexia/.config/codexia/github-token',
+    stateFile: '/home/codexia/.local/state/codexia/controller.json',
+    frontendIdentityUrl: 'https://example.test/desktop/update-identity.json',
+    browserAuth: { mode: 'token' },
+  });
+  const entry = host.backupStartupFencePaths().api;
+  const descriptor = await open('/dev/null', 'r');
+  try {
+    await symlink('/proc/2147483647/fd/9', entry.permit);
+    await host.removeBackupStartupPermits();
+    await assert.rejects(lstat(entry.permit), { code: 'ENOENT' });
+
+    await symlink(`/proc/${process.pid}/fd/${descriptor.fd}`, entry.permit);
+    await assert.rejects(host.removeBackupStartupPermits(), /still held by a live process/);
+  } finally {
+    await descriptor.close();
+    if (originalRuntime === undefined) delete process.env.XDG_RUNTIME_DIR;
+    else process.env.XDG_RUNTIME_DIR = originalRuntime;
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('pre-journal backup failure restores prior services and timer before returning failure', async () => {

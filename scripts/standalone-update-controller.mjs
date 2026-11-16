@@ -45,10 +45,11 @@ export async function loadControllerState(filename) {
 }
 
 export function validateBackupIntent(value) {
-  assert.equal(value?.format, 'codexia-backup-intent/v1');
+  assert.ok(['codexia-backup-intent/v1','codexia-backup-intent/v3'].includes(value?.format));
   assert.ok(Number.isFinite(Date.parse(value.createdAt)), 'Backup intent timestamp is invalid');
   assert.equal(typeof value.timerWasActive, 'boolean');
   if (value.kind === 'controller') {
+    assert.equal(value.format,'codexia-backup-intent/v1');
     assert.deepEqual(Object.keys(value).sort(), ['createdAt','format','image','journalGeneration','kind','priorLastError','priorPaused','slot','timerWasActive'].sort());
     assert.ok(['blue','green'].includes(value.slot));
     assert.match(value.image, imagePattern);
@@ -60,10 +61,30 @@ export function validateBackupIntent(value) {
       priorLastError:value.priorLastError, timerWasActive:value.timerWasActive, createdAt:value.createdAt };
   }
   assert.equal(value.kind, 'legacy');
-  assert.deepEqual(Object.keys(value).sort(), ['createdAt','format','kind','legacyUnitFingerprint','release','timerWasActive','tunnelWasActive'].sort());
+  assert.equal(value.format,'codexia-backup-intent/v3','Legacy backup recovery intent is missing captured runtime and startup identity');
+  assert.deepEqual(Object.keys(value).sort(), ['apiWasEnabled','autostartLinks','createdAt','format','identity','kind','release','timerWasActive','tunnelWasActive','tunnelWasEnabled'].sort());
   assert.equal(typeof value.tunnelWasActive, 'boolean');
-  assert.match(value.legacyUnitFingerprint, /^[a-f0-9]{64}$/u);
-  return { format:value.format, kind:value.kind, release:validateUpdateRelease(value.release), legacyUnitFingerprint:value.legacyUnitFingerprint,
+  assert.equal(typeof value.apiWasEnabled, 'boolean');
+  assert.equal(typeof value.tunnelWasEnabled, 'boolean');
+  assert.deepEqual(Object.keys(value.autostartLinks??{}).sort(),['api','tunnel']);
+  for(const [service,enabled] of [['api',value.apiWasEnabled],['tunnel',value.tunnelWasEnabled]]){
+    const links=value.autostartLinks[service];
+    assert.deepEqual(Object.keys(links??{}).sort(),['defaultTargetWants','generatorTarget']);
+    assert.equal(typeof links.defaultTargetWants,'boolean');
+    assert.equal(links.defaultTargetWants,enabled,'Captured default.target dependency state disagrees');
+    assert.ok(links.generatorTarget===null||(typeof links.generatorTarget==='string'&&links.generatorTarget.length>0&&!/[\r\n\0]/u.test(links.generatorTarget)));
+  }
+  assert.deepEqual(Object.keys(value.identity??{}).sort(),['api','tunnel']);
+  for(const service of ['api','tunnel']){
+    assert.deepEqual(Object.keys(value.identity[service]??{}).sort(),['runtimeFingerprint','unitFingerprint']);
+    assert.match(value.identity[service].unitFingerprint,/^[a-f0-9]{64}$/u);
+    if(value.identity[service].runtimeFingerprint!==null)assert.match(value.identity[service].runtimeFingerprint,/^[a-f0-9]{64}$/u);
+  }
+  assert.match(value.identity.api.runtimeFingerprint,/^[a-f0-9]{64}$/u);
+  if(value.tunnelWasActive)assert.match(value.identity.tunnel.runtimeFingerprint,/^[a-f0-9]{64}$/u);
+  return { format:value.format, kind:value.kind, release:validateUpdateRelease(value.release), identity:value.identity,
+    autostartLinks:value.autostartLinks,
+    apiWasEnabled:value.apiWasEnabled,tunnelWasEnabled:value.tunnelWasEnabled,
     tunnelWasActive:value.tunnelWasActive, timerWasActive:value.timerWasActive, createdAt:value.createdAt };
 }
 
@@ -156,9 +177,10 @@ export class StandaloneController {
   }
   async recoverBackupIntent(state=null){
     const intent=await this.loadBackupIntent();
-    if(!intent){await this.host.removeBackupStartupFence?.();return state;}
+    if(!intent){await this.host.removeBackupStartupPermits?.();await this.host.removeBackupStartupFence?.();return state;}
     let legacyApiStartedByRecovery=false;
     let legacyApiIdentityVerified=false;
+    let legacyIntentCleared=false;
     try{
       if(intent.kind==='controller'){
         assert.ok(state,'Controller backup intent has no durable controller state');
@@ -195,42 +217,63 @@ export class StandaloneController {
       assert.ok(channel.payload.releases.some(item=>item.state==='published'&&JSON.stringify(item)===JSON.stringify(release)),
         'Legacy backup release is no longer present in the signed channel');
       await this.uiEpoch(release);
+      await this.host.removeBackupStartupPermits();
       await this.host.installBackupStartupFence();
+      await this.host.assertBackupAutostartGated(intent);
       await this.host.route('blocked');
       if(await this.host.pollingTimerActive())await this.host.stopPollingTimer();
-      if(await this.host.tunnelServiceActive())await this.host.stopTunnel();
       await this.host.assertNoPreflight();
       const apiActive=await this.host.legacyServiceActive();
-      await this.host.assertLegacyBackupRelease(release,{allowStopped:!apiActive,expectedUnitFingerprint:intent.legacyUnitFingerprint});
+      const tunnelActive=await this.host.tunnelServiceActive();
+      if(!intent.tunnelWasActive)assert.equal(tunnelActive,false,'Legacy Tunnel became active during a backup that recorded it inactive');
+      await this.host.assertLegacyBackupRelease(release,{allowStopped:!apiActive,expectedIdentity:intent.identity.api});
+      const tunnelIdentity=await this.host.assertLegacyBackupTunnel({allowStopped:!tunnelActive,expectedIdentity:intent.identity.tunnel});
+      if(!intent.tunnelWasActive)assert.equal(tunnelIdentity.runtimeFingerprint,intent.identity.tunnel.runtimeFingerprint,'Inactive legacy Tunnel runtime identity changed during backup recovery');
       legacyApiIdentityVerified=apiActive;
+      if(tunnelActive)await this.host.stopTunnel();
       if(!apiActive){
-        await this.host.removeLegacyBackupStartupFence();
         legacyApiStartedByRecovery=true;
         await this.host.startLegacyWriter();
       }
-      await this.host.assertLegacyBackupRelease(release);
+      await this.host.assertLegacyBackupRelease(release,{expectedIdentity:intent.identity.api});
       legacyApiIdentityVerified=true;
-      await this.host.removeLegacyBackupStartupFence();
-      const tunnelActive=await this.host.tunnelServiceActive();
       if(intent.tunnelWasActive){
-        await this.host.removeTunnelBackupStartupFence();
-        if(!tunnelActive)await this.host.startTunnel();
-      }else if(tunnelActive)await this.host.stopTunnel();
-      await this.host.assertLegacyBackupRelease(release);
+        await this.host.startTunnel();
+        await this.host.assertLegacyBackupTunnel({expectedIdentity:intent.identity.tunnel});
+      }
+      // Keep the generated Wants links unchanged. The durable intent condition
+      // blocks boot starts; a per-service volatile permit authorizes only the
+      // already-verified recovery start while this controller holds its lock.
+      await this.host.installBackupStartupFence();
+      await this.host.assertBackupAutostartGated(intent);
+      await this.host.assertLegacyBackupRelease(release,{expectedIdentity:intent.identity.api});
       assert.equal(await this.host.routeState(),'blocked','Legacy backup recovery changed the controller-owned route');
       const timerActive=await this.host.pollingTimerActive();
       if(intent.timerWasActive&&!timerActive)await this.host.startPollingTimer();
       else if(!intent.timerWasActive&&timerActive)await this.host.stopPollingTimer();
-      await this.host.removeBackupStartupFence();
+      await this.host.restoreBackupAutostart(intent);
       await this.clearBackupIntent();
+      legacyIntentCleared=true;
+      // With the intent durably gone, the gate condition is now satisfied even
+      // if a crash happens before these otherwise harmless drop-ins are removed.
+      await this.host.removeBackupStartupFence();
       return null;
     }catch(error){
       const prefix=intent.kind==='legacy'?'Legacy backup recovery blocked: ':'Backup recovery blocked: ';
       const reason=prefix+safeError(error);
+      if(intent.kind==='legacy'&&!legacyIntentCleared){
+        try{legacyIntentCleared=(await this.loadBackupIntent())===null;}catch{}
+      }
+      if(intent.kind==='legacy'&&legacyIntentCleared){
+        await this.host.removeBackupStartupFence().catch(()=>undefined);
+        throw new Error('Legacy backup recovery committed but startup-fence cleanup failed: '+safeError(error));
+      }
       await this.host.route('blocked').catch(()=>undefined);
       await this.host.stopPollingTimer().catch(()=>undefined);
       if(intent.kind==='legacy'){
+        await this.host.removeBackupStartupPermits().catch(()=>undefined);
         await this.host.installBackupStartupFence().catch(()=>undefined);
+        await this.host.assertBackupAutostartGated(intent).catch(()=>undefined);
         await this.host.stopTunnel().catch(()=>undefined);
         if(legacyApiStartedByRecovery&&!legacyApiIdentityVerified)await this.host.stopLegacyWriter().catch(()=>undefined);
       }
@@ -298,16 +341,22 @@ export class StandaloneController {
     const timerWasActive=await this.host.pollingTimerActive();
     await this.host.assertNoPreflight();
     await this.uiEpoch(release);
-    const legacyUnitFingerprint=await this.host.assertLegacyBackupRelease(release);
-    assert.match(legacyUnitFingerprint,/^[a-f0-9]{64}$/u,'Legacy systemd/Quadlet identity is not fingerprinted');
+    const autostart=await this.host.captureBackupAutostart();
+    const apiIdentity=await this.host.assertLegacyBackupRelease(release);
+    const tunnelIdentity=await this.host.assertLegacyBackupTunnel({allowStopped:!tunnelWasActive});
+    for(const [name,identity] of [['API',apiIdentity],['Tunnel',tunnelIdentity]]){
+      assert.match(identity.unitFingerprint,/^[a-f0-9]{64}$/u,name+' systemd/Quadlet identity is not fingerprinted');
+      if(name==='API'||tunnelWasActive)assert.match(identity.runtimeFingerprint,/^[a-f0-9]{64}$/u,name+' runtime identity is not fingerprinted');
+    }
     await this.host.installBackupStartupFence();
 
-    const intent={format:'codexia-backup-intent/v1',kind:'legacy',release,legacyUnitFingerprint,tunnelWasActive,timerWasActive,
+    const intent={format:'codexia-backup-intent/v3',kind:'legacy',release,identity:{api:apiIdentity,tunnel:tunnelIdentity},...autostart,tunnelWasActive,timerWasActive,
       createdAt:new Date(this.now()).toISOString()};
     await this.saveBackupIntent(intent);
     let output;
     let operationError;
     try{
+      await this.host.assertBackupAutostartGated(intent);
       if(timerWasActive)await this.host.stopPollingTimer();
       await this.host.route('blocked');
       if(tunnelWasActive)await this.host.stopTunnel();

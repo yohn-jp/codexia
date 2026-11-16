@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { lstat, mkdir, open, readFile, rmdir, unlink } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, readlink, rmdir, stat, symlink, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWrite } from '../../scripts/standalone-update-controller.mjs';
@@ -94,11 +94,36 @@ export function assertLegacyBackupIdentity({legacy,image,version},release,authEn
 }
 function sha256(value){return createHash('sha256').update(value).digest('hex');}
 function imageId(value){return typeof value==='string'?value.replace(/^sha256:/u,''):'';}
+function imageRepository(reference){const name=reference.split('@',1)[0];const slash=name.lastIndexOf('/');return name.slice(0,slash+1)+name.slice(slash+1).split(':',1)[0];}
+function imageHasDigest(image,reference){
+  const digest=reference.match(/@sha256:([a-f0-9]{64})$/u)?.[1];
+  return Boolean(digest&&image?.RepoDigests?.some(actual=>actual.endsWith('@sha256:'+digest)&&imageRepository(actual)===imageRepository(reference)));
+}
 function systemdProperties(text){
   return Object.fromEntries(text.split(/\r?\n/u).filter(Boolean).map(line=>{
     const split=line.indexOf('=');assert.ok(split>0,'Systemd unit property output is malformed');
     return [line.slice(0,split),line.slice(split+1)];
   }));
+}
+async function syncDirectory(directory){const handle=await open(directory,'r');try{await handle.sync();}finally{await handle.close();}}
+async function ensureDirectoryTreeDurable(directory){
+  const absolute=path.resolve(directory),root=path.parse(absolute).root;
+  let current=root;
+  for(const part of absolute.slice(root.length).split(path.sep).filter(Boolean)){
+    const next=path.join(current,part);
+    let created=false;
+    try{await lstat(next);}catch(error){
+      if(error.code!=='ENOENT')throw error;
+      await mkdir(next,{mode:0o700});created=true;
+    }
+    const metadata=await lstat(next);
+    assert.ok(metadata.isDirectory()&&!metadata.isSymbolicLink(),'Backup recovery fence path must contain only real directories');
+    if(created){await syncDirectory(current);await syncDirectory(next);}
+    current=next;
+  }
+  const metadata=await lstat(absolute);
+  if(typeof process.getuid==='function')assert.equal(metadata.uid,process.getuid(),'Backup recovery fence directory owner differs from service user');
+  assert.equal(metadata.mode&0o022,0,'Backup recovery fence directory is group/world writable');
 }
 async function regularPrivateText(filename,{privateOnly=false}={}){
   const metadata=await lstat(filename);
@@ -114,7 +139,7 @@ function quadletField(text,name){
   assert.ok(values[0]&&!/[\r\n\s]/u.test(values[0]),'Legacy Quadlet '+name+' is malformed');
   return values[0];
 }
-export function assertLegacyBackupUnitIdentity({source,fragment,sourcePath,fragmentPath,quadletImage,selectedImage},release){
+export function assertLegacyBackupUnitIdentity({source,fragment,sourcePath,fragmentPath,quadletImage,selectedImage,secretIdentities=[]},release){
   release=validateUpdateRelease(release);
   assert.equal(quadletField(source,'ContainerName'),'codexia-api');
   const sourceImage=quadletField(source,'Image');
@@ -123,7 +148,171 @@ export function assertLegacyBackupUnitIdentity({source,fragment,sourcePath,fragm
   assert.ok(selectedImage?.RepoDigests?.includes(release.image),'Signed legacy release digest is unavailable locally');
   assert.equal(selectedImage.Os+'/'+selectedImage.Architecture,release.platform,'Signed legacy release platform differs from its image');
   assert.equal(selectedImage.Labels?.['org.opencontainers.image.revision']??selectedImage.Config?.Labels?.['org.opencontainers.image.revision'],release.sourceSha,'Signed legacy release source differs from its image');
-  return sha256(JSON.stringify({sourcePath,source,fragmentPath,fragment,sourceImage}));
+  return sha256(JSON.stringify(canonical({sourcePath,source,fragmentPath,fragment,sourceImage,secretIdentities:safeSecretIdentities(secretIdentities)})));
+}
+function canonical(value){
+  if(Array.isArray(value))return value.map(canonical);
+  if(value&&typeof value==='object')return Object.fromEntries(Object.keys(value).sort().filter(key=>value[key]!==undefined).map(key=>[key,canonical(value[key])]));
+  return value;
+}
+function safeEnvironment(values){
+  assert.ok(Array.isArray(values),'Container environment is unobservable');
+  return values.map(entry=>{
+    assert.equal(typeof entry,'string','Container environment entry is malformed');
+    const split=entry.indexOf('=');assert.ok(split>0,'Container environment entry is malformed');
+    const key=entry.slice(0,split);
+    if(/(?:TOKEN|PASSWORD|PASSWD|SECRET|CREDENTIAL|PRIVATE.?KEY|API.?KEY)/iu.test(key)&&!/_FILE$/iu.test(key)){
+      throw Error('Plaintext secret environment prevents safe backup identity capture: '+key);
+    }
+    return entry;
+  });
+}
+function assertNoSecretNamedFields(value,location='runtime'){
+  if(Array.isArray(value)){for(const entry of value)assertNoSecretNamedFields(entry,location);return;}
+  if(!value||typeof value!=='object')return;
+  for(const [key,entry] of Object.entries(value)){
+    assert.ok(!/(?:TOKEN|PASSWORD|PASSWD|SECRET|CREDENTIAL|PRIVATE.?KEY|API.?KEY)/iu.test(key)||/_FILE$/iu.test(key),
+      'Potential plaintext secret in '+location+' property: '+key);
+    assertNoSecretNamedFields(entry,location+'.'+key);
+  }
+}
+function safeSecretIdentities(secretIdentities){
+  assert.ok(Array.isArray(secretIdentities),'Podman secret identities are unobservable');
+  return secretIdentities.map(secret=>{
+    assert.deepEqual(Object.keys(secret??{}).sort(),['id','name'],'Podman secret identity contains unsupported fields');
+    assert.ok(typeof secret.name==='string'&&secret.name,'Podman secret name is unobservable');
+    assert.ok(typeof secret.id==='string'&&secret.id,'Podman secret ID is unobservable');
+    return {name:secret.name,id:secret.id};
+  }).sort((left,right)=>left.name.localeCompare(right.name));
+}
+function runtimeSecretIdentities(container,secretIdentities){
+  const configured=container.Config?.Secrets??[];
+  assert.ok(Array.isArray(configured),'Podman container secret identities are unobservable');
+  const observed=safeSecretIdentities(configured.map(secret=>({name:secret?.Name??secret?.name,id:secret?.ID??secret?.Id??secret?.id})));
+  const expected=safeSecretIdentities(secretIdentities);
+  assert.deepEqual(observed,expected,'Podman runtime secret IDs differ from the current named secret objects');
+  assert.equal(new Set(observed.map(secret=>secret.name)).size,observed.length,'Podman runtime contains a duplicate secret name');
+  return observed;
+}
+function configuredRuntimeHostname(container){
+  const command=container.Config?.CreateCommand;
+  assert.ok(Array.isArray(command)&&command.every(argument=>typeof argument==='string'),'Podman container create arguments are unobservable');
+  const values=[];
+  for(let index=0;index<command.length;index++){
+    const argument=command[index];
+    if(argument==='--')break;
+    if(argument==='--hostname'||argument==='-h'){
+      const value=command[++index];
+      assert.ok(typeof value==='string'&&value,'Podman hostname create argument is malformed');
+      values.push(value);
+    }else if(argument.startsWith('--hostname=')){
+      const value=argument.slice('--hostname='.length);
+      assert.ok(value,'Podman hostname create argument is malformed');
+      values.push(value);
+    }else if(argument.startsWith('-h=')){
+      const value=argument.slice(3);
+      assert.ok(value,'Podman hostname create argument is malformed');
+      values.push(value);
+    }
+  }
+  assert.ok(values.length<=1,'Podman hostname create argument is duplicated');
+  if(values.length===0)return null;
+  const hostname=values[0];
+  assert.ok(hostname.length<=253&&/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/u.test(hostname),'Podman hostname create argument is malformed');
+  assert.equal(container.Config.Hostname,hostname,'Podman explicit hostname differs from its inspected value');
+  return hostname;
+}
+function runtimeSecretMounts(container,secretIdentities){
+  const command=container.Config?.CreateCommand;
+  assert.ok(Array.isArray(command)&&command.every(argument=>typeof argument==='string'),'Podman container create arguments are unobservable');
+  const identities=safeSecretIdentities(secretIdentities);
+  const byName=new Map(identities.map(identity=>[identity.name,identity]));
+  const byId=new Map(identities.map(identity=>[identity.id,identity]));
+  const mounts=[];
+  for(let index=0;index<command.length;index++){
+    const argument=command[index];
+    if(argument==='--')break;
+    let declaration;
+    if(argument==='--secret'){
+      declaration=command[++index];
+      assert.ok(typeof declaration==='string'&&declaration.length>0,'Podman secret create argument is malformed');
+    }else if(argument.startsWith('--secret=')){
+      declaration=argument.slice('--secret='.length);
+      assert.ok(declaration.length>0,'Podman secret create argument is malformed');
+    }else continue;
+    const [reference,...pairs]=declaration.split(',');
+    assert.ok(reference&&!/[\r\n\0]/u.test(reference),'Podman secret reference is malformed');
+    const identity=byName.get(reference)??byId.get(reference);
+    assert.ok(identity,'Podman create arguments reference an unobserved secret');
+    const options={};
+    for(const pair of pairs){
+      const separator=pair.indexOf('=');
+      assert.ok(separator>0&&separator<pair.length-1,'Podman secret mount option is malformed');
+      const key=pair.slice(0,separator),value=pair.slice(separator+1);
+      assert.ok(['type','target','uid','gid','mode'].includes(key),'Podman secret mount option is unsupported');
+      assert.ok(!Object.hasOwn(options,key),'Podman secret mount option is duplicated');
+      assert.ok(!/[\r\n\0]/u.test(value),'Podman secret mount option is malformed');
+      options[key]=value;
+    }
+    const type=options.type??'mount';
+    assert.ok(type==='mount'||type==='env','Podman secret exposure type is unsupported');
+    const target=options.target??identity.name;
+    const normalizedTarget=type==='mount'
+      ? path.posix.normalize(target.startsWith('/')?target:path.posix.join('/run/secrets',target))
+      : target;
+    const mount={name:identity.name,id:identity.id,type,target:normalizedTarget};
+    if(type==='mount'){
+      const uid=options.uid??'0',gid=options.gid??'0',mode=options.mode??'0444';
+      assert.match(uid,/^\d+$/u,'Podman secret UID is malformed');
+      assert.match(gid,/^\d+$/u,'Podman secret GID is malformed');
+      assert.match(mode,/^(?:0?[0-7]{3,4}|\d+)$/u,'Podman secret mode is malformed');
+      Object.assign(mount,{uid,gid,mode});
+    }else{
+      assert.ok(options.uid===undefined&&options.gid===undefined&&options.mode===undefined,'Podman env secret has mount-only options');
+    }
+    mounts.push(mount);
+  }
+  const expected=identities.map(identity=>identity.name).sort();
+  const observed=mounts.map(mount=>mount.name).sort();
+  assert.deepEqual(observed,expected,'Podman secret create arguments differ from the captured secret identities');
+  assert.equal(new Set(observed).size,observed.length,'Podman create arguments declare a secret more than once');
+  return mounts.sort((left,right)=>left.name.localeCompare(right.name));
+}
+export function containerRuntimeFingerprint(container,secretIdentities=[]){
+  assert.ok(container?.Config&&container?.HostConfig&&container?.NetworkSettings,'Container runtime configuration is unobservable');
+  assert.ok(Array.isArray(container.Mounts),'Container mounts are unobservable');
+  const config=container.Config,host=container.HostConfig;
+  const mounts=container.Mounts.map(mount=>({
+    Type:mount.Type,Name:mount.Name,Driver:mount.Driver,Destination:mount.Destination,Mode:mount.Mode,
+    RW:mount.RW,Propagation:mount.Propagation,Options:mount.Options,
+    ...(mount.Type==='bind'?{Source:mount.Source}:{}),
+  })).sort((left,right)=>String(left.Destination).localeCompare(String(right.Destination)));
+  const networks=Object.entries(container.NetworkSettings.Networks??{}).map(([name,network])=>{
+    const id=network.NetworkID??network.NetworkId;
+    assert.ok(typeof id==='string'&&id,'Attached Podman network identity is unobservable');
+    return {name,NetworkID:id,Aliases:[...(network.Aliases??[])].sort(),Links:[...(network.Links??[])].sort(),DriverOpts:network.DriverOpts??{}};
+  }).sort((left,right)=>left.name.localeCompare(right.name));
+  const currentSecretIdentities=runtimeSecretIdentities(container,secretIdentities);
+  const secretMounts=runtimeSecretMounts(container,currentSecretIdentities);
+  const {CreateCommand:_createCommand,Secrets:_secrets,Env,Hostname:_hostname,...configSettings}=config;
+  const sanitizedConfig={...configSettings,Env:safeEnvironment(Env??[]),Hostname:configuredRuntimeHostname(container)};
+  assertNoSecretNamedFields(sanitizedConfig,'Config');
+  assertNoSecretNamedFields(host,'HostConfig');
+  return sha256(JSON.stringify(canonical({
+    Image:imageId(container.Image),ImageName:container.ImageName??config.Image,
+    Config:sanitizedConfig,
+    HostConfig:host,
+    Mounts:mounts,Networks:networks,SecretMounts:secretMounts,
+  })));
+}
+export function assertLegacyBackupTunnelUnitIdentity({source,fragment,sourcePath,fragmentPath,image,secretIdentities=[]}){
+  assert.equal(quadletField(source,'ContainerName'),'codexia-tunnel');
+  const sourceImage=quadletField(source,'Image');
+  assert.match(sourceImage,/^.+@sha256:[a-f0-9]{64}$/u,'Legacy Tunnel image must be digest pinned');
+  assert.ok(fragment.split(/\r?\n/u).some(line=>line.startsWith('ExecStart=')&&line.includes(sourceImage)),'Generated Tunnel unit does not start its declared image');
+  assert.match(imageId(image?.Id),/^[a-f0-9]{64}$/u,'Pinned Tunnel image ID is unobservable');
+  assert.ok(imageHasDigest(image,sourceImage),'Pinned Tunnel image digest is unavailable locally');
+  return sha256(JSON.stringify(canonical({sourcePath,source,fragmentPath,fragment,sourceImage,imageId:imageId(image.Id),secretIdentities:safeSecretIdentities(secretIdentities)})));
 }
 export function imageConfig(release,authEnvironment){
   return `[Unit]
@@ -251,6 +440,45 @@ export class PodmanStandaloneHost{
     assert.equal(active,running,'Tunnel service and container state disagree');
     return active;
   }
+  async generatedWantTarget(entry){
+    const runtime=process.env.XDG_RUNTIME_DIR??'';
+    assert.ok(path.isAbsolute(runtime),'Rootless systemd runtime directory is unavailable');
+    const generator=path.resolve(runtime,'systemd','generator');
+    const link=path.join(generator,'default.target.wants',entry.unit);
+    let metadata;
+    try{metadata=await lstat(link);}catch(error){if(error.code==='ENOENT')return null;throw error;}
+    assert.ok(metadata.isSymbolicLink(),'Quadlet default.target dependency is not a generated symlink: '+entry.unit);
+    const target=await readlink(link);
+    assert.equal(path.resolve(path.dirname(link),target),path.join(generator,entry.unit),'Quadlet default.target dependency points at an unexpected unit: '+entry.unit);
+    return target;
+  }
+  async defaultTargetWants(entry){
+    const properties=systemdProperties(run('systemctl',['--user','show','--property=Wants','default.target']));
+    return new Set((properties.Wants??'').trim().split(/\s+/u).filter(Boolean)).has(entry.unit);
+  }
+  async captureBackupAutostart(){
+    const entries=this.backupStartupFencePaths();
+    const [apiGenerator,tunnelGenerator,apiWanted,tunnelWanted]=await Promise.all([
+      this.generatedWantTarget(entries.api),this.generatedWantTarget(entries.tunnel),this.defaultTargetWants(entries.api),this.defaultTargetWants(entries.tunnel),
+    ]);
+    return {
+      apiWasEnabled:apiWanted,tunnelWasEnabled:tunnelWanted,
+      autostartLinks:{
+        api:{generatorTarget:apiGenerator,defaultTargetWants:apiWanted},
+        tunnel:{generatorTarget:tunnelGenerator,defaultTargetWants:tunnelWanted},
+      },
+    };
+  }
+  async assertBackupAutostartGated(intent){
+    await this.assertBackupStartupFence();
+    const current=await this.captureBackupAutostart();
+    assert.deepEqual(current.autostartLinks,intent.autostartLinks,'Quadlet default.target autostart links drifted during backup recovery');
+    assert.equal(current.apiWasEnabled,intent.apiWasEnabled,'API default.target autostart state changed during backup recovery');
+    assert.equal(current.tunnelWasEnabled,intent.tunnelWasEnabled,'Tunnel default.target autostart state changed during backup recovery');
+  }
+  async restoreBackupAutostart(intent){
+    await this.assertBackupAutostartGated(intent);
+  }
   async stopLegacyWriter(){
     run('systemctl',['--user','stop','codexia-api.service'],{timeout:120000});
     assert.equal(await this.legacyServiceActive(),false,'Legacy API writer did not stop');
@@ -261,14 +489,16 @@ export class PodmanStandaloneHost{
     assert.equal(quadletDirectory,path.join(serviceHome,'.config','containers','systemd'),'Legacy Quadlet directory is outside the service home');
     const directory=path.join(serviceHome,'.config','systemd','user');
     const intent=path.join(path.dirname(this.config.stateFile),'backup-intent.json');
-    const condition=`[Unit]\nConditionPathExists=!${intent}\n`;
+    const runtime=process.env.XDG_RUNTIME_DIR??'';
+    assert.ok(path.isAbsolute(runtime),'Rootless systemd runtime directory is unavailable');
+    const condition=(permit)=>`[Unit]\nConditionPathExists=|!${intent}\nConditionPathExists=|${permit}\n`;
     return {
-      api:{unit:'codexia-api.service',directory:path.join(directory,'codexia-api.service.d'),file:path.join(directory,'codexia-api.service.d','90-codexia-backup-recovery.conf'),content:condition},
-      tunnel:{unit:'codexia-tunnel.service',directory:path.join(directory,'codexia-tunnel.service.d'),file:path.join(directory,'codexia-tunnel.service.d','90-codexia-backup-recovery.conf'),content:condition},
+      api:{unit:'codexia-api.service',permit:path.join(runtime,'codexia-backup-recovery-api.permit'),directory:path.join(directory,'codexia-api.service.d'),file:path.join(directory,'codexia-api.service.d','90-codexia-backup-recovery.conf'),content:condition(path.join(runtime,'codexia-backup-recovery-api.permit'))},
+      tunnel:{unit:'codexia-tunnel.service',permit:path.join(runtime,'codexia-backup-recovery-tunnel.permit'),directory:path.join(directory,'codexia-tunnel.service.d'),file:path.join(directory,'codexia-tunnel.service.d','90-codexia-backup-recovery.conf'),content:condition(path.join(runtime,'codexia-backup-recovery-tunnel.permit'))},
     };
   }
   async ensureBackupStartupFenceFile(entry){
-    await mkdir(entry.directory,{recursive:true,mode:0o700});
+    await ensureDirectoryTreeDurable(entry.directory);
     const directoryMetadata=await lstat(entry.directory);
     assert.ok(directoryMetadata.isDirectory()&&!directoryMetadata.isSymbolicLink(),'Backup recovery fence directory must be a real directory');
     if(typeof process.getuid==='function')assert.equal(directoryMetadata.uid,process.getuid(),'Backup recovery fence directory owner differs from service user');
@@ -276,7 +506,7 @@ export class PodmanStandaloneHost{
     try{
       const handle=await open(entry.file,'wx',0o600);
       try{await handle.writeFile(entry.content,'utf8');await handle.sync();}finally{await handle.close();}
-      const parent=await open(entry.directory,'r');try{await parent.sync();}finally{await parent.close();}
+      await syncDirectory(entry.directory);
     }catch(error){
       if(error.code!=='EEXIST')throw error;
       assert.equal(await regularPrivateText(entry.file,{privateOnly:true}),entry.content,'Backup recovery fence differs from the expected unit condition');
@@ -288,28 +518,26 @@ export class PodmanStandaloneHost{
     catch(error){if(error.code==='ENOENT')return false;throw error;}
     assert.equal(content,entry.content,'Refusing to remove an unrecognized systemd drop-in');
     await unlink(entry.file);
-    const parent=await open(entry.directory,'r');try{await parent.sync();}finally{await parent.close();}
-    try{await rmdir(entry.directory);}catch(error){if(!['ENOTEMPTY','EEXIST'].includes(error.code))throw error;}
+    await syncDirectory(entry.directory);
+    try{await rmdir(entry.directory);await syncDirectory(path.dirname(entry.directory));}catch(error){if(!['ENOTEMPTY','EEXIST'].includes(error.code))throw error;}
     return true;
+  }
+  async assertBackupStartupFence(){
+    const entries=this.backupStartupFencePaths();
+    for(const entry of Object.values(entries)){
+      assert.equal(await regularPrivateText(entry.file,{privateOnly:true}),entry.content,'Legacy service startup fence differs from the reviewed condition: '+entry.unit);
+      const properties=systemdProperties(run('systemctl',['--user','show','--property=LoadState,DropInPaths',entry.unit]));
+      assert.equal(properties.LoadState,'loaded','Legacy service unit is not loaded with its startup fence: '+entry.unit);
+      const paths=(properties.DropInPaths??'').trim().split(/\s+/u).filter(Boolean);
+      assert.deepEqual(paths,[entry.file],'Legacy service startup fence is overridden by an unreviewed drop-in or was not loaded: '+entry.unit);
+    }
   }
   async installBackupStartupFence(){
     const entries=this.backupStartupFencePaths();
     await this.ensureBackupStartupFenceFile(entries.api);
     await this.ensureBackupStartupFenceFile(entries.tunnel);
     run('systemctl',['--user','daemon-reload']);
-    for(const entry of Object.values(entries)){
-      const properties=systemdProperties(run('systemctl',['--user','show','--property=DropInPaths',entry.unit]));
-      const paths=(properties.DropInPaths??'').trim().split(/\s+/u).filter(Boolean);
-      assert.ok(paths.includes(entry.file),'Legacy service startup fence was not loaded by systemd');
-    }
-  }
-  async removeLegacyBackupStartupFence(){
-    const changed=await this.removeBackupStartupFenceFile(this.backupStartupFencePaths().api);
-    if(changed)run('systemctl',['--user','daemon-reload']);
-  }
-  async removeTunnelBackupStartupFence(){
-    const changed=await this.removeBackupStartupFenceFile(this.backupStartupFencePaths().tunnel);
-    if(changed)run('systemctl',['--user','daemon-reload']);
+    await this.assertBackupStartupFence();
   }
   async removeBackupStartupFence(){
     const entries=this.backupStartupFencePaths();
@@ -317,40 +545,123 @@ export class PodmanStandaloneHost{
     const tunnel=await this.removeBackupStartupFenceFile(entries.tunnel);
     if(api||tunnel)run('systemctl',['--user','daemon-reload']);
   }
-  async legacyBackupUnitFingerprint(release){
-    const paths=this.backupStartupFencePaths();
-    const sourcePath=path.join(this.config.quadletDirectory,'codexia-api.container');
-    const properties=systemdProperties(run('systemctl',['--user','show','--property=LoadState,FragmentPath,SourcePath,DropInPaths','codexia-api.service']));
-    assert.equal(properties.LoadState,'loaded','Legacy API systemd unit is not loaded');
-    assert.equal(path.resolve(properties.SourcePath??''),sourcePath,'Legacy API unit does not reference the expected Quadlet source');
+  async removeBackupStartupPermits(){
+    for(const entry of Object.values(this.backupStartupFencePaths())){
+      let metadata;
+      try{metadata=await lstat(entry.permit);}
+      catch(error){if(error.code==='ENOENT')continue;throw error;}
+      assert.ok(metadata.isSymbolicLink(),'Legacy recovery permit is not a process-bound descriptor link');
+      const target=await readlink(entry.permit);
+      assert.match(target,/^\/proc\/\d+\/fd\/\d+$/u,'Legacy recovery permit target is malformed');
+      try{
+        await stat(target);
+        throw Error('Legacy recovery permit is still held by a live process');
+      }catch(error){if(error.code!=='ENOENT')throw error;}
+      await unlink(entry.permit);
+      await syncDirectory(path.dirname(entry.permit));
+    }
+  }
+  async withBackupStartupPermit(key,operation){
+    const entry=this.backupStartupFencePaths()[key];
+    assert.ok(entry,'Unsupported legacy recovery permit');
+    await this.assertBackupStartupFence();
+    await ensureDirectoryTreeDurable(path.dirname(entry.permit));
+    const temporary=path.join(path.dirname(entry.permit),'.'+path.basename(entry.permit)+'.'+process.pid+'.'+randomBytes(8).toString('hex')+'.tmp');
+    const handle=await open(temporary,'wx',0o600);
+    const target=`/proc/${process.pid}/fd/${handle.fd}`;
+    let installed=false;
+    try{
+      await handle.writeFile('codexia-backup-recovery-permit/v1\n','utf8');
+      await handle.sync();
+      await unlink(temporary);
+      await symlink(target,entry.permit);
+      installed=true;
+      await syncDirectory(path.dirname(entry.permit));
+      return await operation();
+    }finally{
+      if(installed){
+        try{
+          assert.equal(await readlink(entry.permit),target,'Legacy recovery permit changed while a service was starting');
+          await unlink(entry.permit);
+          await syncDirectory(path.dirname(entry.permit));
+        }finally{await handle.close();}
+      }else{
+        await unlink(temporary).catch(()=>undefined);
+        await handle.close();
+      }
+    }
+  }
+  async readBackupQuadletUnit(unit,sourceName){
+    const entries=this.backupStartupFencePaths();
+    const entry=Object.values(entries).find(candidate=>candidate.unit===unit);
+    assert.ok(entry,'Unsupported legacy backup unit');
+    const sourcePath=path.join(this.config.quadletDirectory,sourceName);
+    const properties=systemdProperties(run('systemctl',['--user','show','--property=LoadState,FragmentPath,SourcePath,DropInPaths',unit]));
+    assert.equal(properties.LoadState,'loaded','Legacy systemd unit is not loaded: '+unit);
+    assert.equal(path.resolve(properties.SourcePath??''),sourcePath,'Legacy systemd unit does not reference the expected Quadlet source: '+unit);
     const dropIns=(properties.DropInPaths??'').trim().split(/\s+/u).filter(Boolean);
     for(const dropIn of dropIns){
-      const entry=Object.values(paths).find(candidate=>candidate.file===dropIn);
-      assert.ok(entry,'Legacy API unit has an unreviewed systemd drop-in');
-      assert.equal(await regularPrivateText(dropIn,{privateOnly:true}),entry.content,'Legacy API backup fence differs from the reviewed condition');
+      assert.equal(dropIn,entry.file,'Legacy service has an unreviewed systemd drop-in: '+unit);
+      assert.equal(await regularPrivateText(dropIn,{privateOnly:true}),entry.content,'Legacy service backup fence differs from the reviewed condition: '+unit);
     }
     assert.ok(path.isAbsolute(process.env.XDG_RUNTIME_DIR??''),'Rootless systemd runtime directory is unavailable');
     const fragmentRoot=path.resolve(process.env.XDG_RUNTIME_DIR,'systemd','generator');
     const fragmentPath=path.resolve(properties.FragmentPath??'');
-    assert.equal(path.dirname(fragmentPath),fragmentRoot,'Legacy API unit is not the generated Quadlet service');
-    assert.equal(path.basename(fragmentPath),'codexia-api.service');
+    assert.equal(path.dirname(fragmentPath),fragmentRoot,'Legacy service is not a generated Quadlet unit: '+unit);
+    assert.equal(path.basename(fragmentPath),unit);
     const [source,fragment]=await Promise.all([regularPrivateText(sourcePath),regularPrivateText(fragmentPath)]);
+    return {source,fragment,sourcePath,fragmentPath};
+  }
+  async quadletSecretIdentities(source){
+    const names=source.split(/\r?\n/u).filter(line=>line.startsWith('Secret=')).map(line=>line.slice('Secret='.length).split(',',1)[0]);
+    assert.equal(new Set(names).size,names.length,'Quadlet declares a duplicate Podman secret');
+    return Promise.all(names.sort().map(async name=>{
+      assert.match(name,/^[A-Za-z0-9_.-]+$/u,'Quadlet secret name is malformed');
+      const secret=JSON.parse(run('podman',['secret','inspect',name]))[0];
+      const id=secret?.ID??secret?.Id;
+      assert.ok(typeof id==='string'&&id,'Podman secret identity is unobservable: '+name);
+      return {name,id};
+    }));
+  }
+  async legacyBackupUnitSnapshot(release){
+    const {source,fragment,sourcePath,fragmentPath}=await this.readBackupQuadletUnit('codexia-api.service','codexia-api.container');
     const sourceImage=quadletField(source,'Image');
     const selectedImage=JSON.parse(run('podman',['image','inspect',release.image]))[0];
     const quadletImage=JSON.parse(run('podman',['image','inspect',sourceImage]))[0];
-    return assertLegacyBackupUnitIdentity({source,fragment,sourcePath,fragmentPath,quadletImage,selectedImage},release);
+    const secretIdentities=await this.quadletSecretIdentities(source);
+    const unitFingerprint=assertLegacyBackupUnitIdentity({source,fragment,sourcePath,fragmentPath,quadletImage,selectedImage,secretIdentities},release);
+    return {unitFingerprint,source,secretIdentities};
+  }
+  async legacyBackupTunnelSnapshot(){
+    const {source,fragment,sourcePath,fragmentPath}=await this.readBackupQuadletUnit('codexia-tunnel.service','codexia-tunnel.container');
+    const sourceImage=quadletField(source,'Image');
+    const image=JSON.parse(run('podman',['image','inspect',sourceImage]))[0];
+    const secretIdentities=await this.quadletSecretIdentities(source);
+    const unitFingerprint=assertLegacyBackupTunnelUnitIdentity({source,fragment,sourcePath,fragmentPath,image,secretIdentities});
+    return {unitFingerprint,source,secretIdentities,imageId:imageId(image.Id)};
+  }
+  async legacyBackupUnitFingerprint(release){return (await this.legacyBackupUnitSnapshot(release)).unitFingerprint;}
+  async legacyBackupTunnelUnitFingerprint(){return (await this.legacyBackupTunnelSnapshot()).unitFingerprint;}
+  async legacyRuntimeFingerprint(containerName,source,secretIdentities){
+    const container=inspect(containerName);
+    if(!container)return null;
+    return containerRuntimeFingerprint(container,secretIdentities??await this.quadletSecretIdentities(source));
   }
   async startLegacyWriter(){
-    run('systemctl',['--user','start','codexia-api.service'],{timeout:120000});
-    assert.equal(await this.legacyServiceActive(),true,'Legacy API writer did not resume');
+    await this.withBackupStartupPermit('api',async()=>{
+      run('systemctl',['--user','start','codexia-api.service'],{timeout:120000});
+      assert.equal(await this.legacyServiceActive(),true,'Legacy API writer did not resume');
+    });
   }
   async stopTunnel(){
     run('systemctl',['--user','stop','codexia-tunnel.service'],{timeout:120000});
     assert.equal(await this.tunnelServiceActive(),false,'Tunnel did not stop');
   }
   async startTunnel(){
-    run('systemctl',['--user','start','codexia-tunnel.service'],{timeout:120000});
-    assert.equal(await this.tunnelServiceActive(),true,'Tunnel did not resume');
+    await this.withBackupStartupPermit('tunnel',async()=>{
+      run('systemctl',['--user','start','codexia-tunnel.service'],{timeout:120000});
+      assert.equal(await this.tunnelServiceActive(),true,'Tunnel did not resume');
+    });
   }
   async pollingTimerActive(){
     const loadState=run('systemctl',['--user','show','--property=LoadState','--value','codexia-updater.timer']);
@@ -438,22 +749,39 @@ export class PodmanStandaloneHost{
       assert.equal(actual??(key==='CODEXIA_BROWSER_AUTH'?'token':undefined),value,'Legacy browser authentication configuration mismatch: '+key);
     }
   }
-  async assertLegacyBackupRelease(value,{allowStopped=false,expectedUnitFingerprint}={}){
+  async assertLegacyBackupRelease(value,{allowStopped=false,expectedIdentity}={}){
     const release=validateUpdateRelease(value);
-    const unitFingerprint=await this.legacyBackupUnitFingerprint(release);
-    if(expectedUnitFingerprint!==undefined)assert.equal(unitFingerprint,expectedUnitFingerprint,'Legacy Quadlet/systemd source drifted during backup recovery');
+    const snapshot=await this.legacyBackupUnitSnapshot(release);
+    if(expectedIdentity!==undefined)assert.equal(snapshot.unitFingerprint,expectedIdentity.unitFingerprint,'Legacy API Quadlet/systemd source drifted during backup recovery');
     const legacy=inspect('codexia-api');
     for(const slot of ['blue','green'])assert.ok(!inspect(name(slot))?.State.Running,'Unexpected running slot writer');
     const image=JSON.parse(run('podman',['image','inspect',release.image]))[0];
     if(!legacy){
       assert.ok(allowStopped,'Legacy writer container is missing');
-      return unitFingerprint;
+      return {unitFingerprint:snapshot.unitFingerprint,runtimeFingerprint:null};
     }
+    const runtimeFingerprint=containerRuntimeFingerprint(legacy,snapshot.secretIdentities);
+    if(expectedIdentity?.runtimeFingerprint)assert.equal(runtimeFingerprint,expectedIdentity.runtimeFingerprint,'Legacy API runtime drifted during backup recovery');
     const version=legacy.State.Running
       ? JSON.parse(run('podman',['exec','codexia-api','node','--input-type=module','-e',readyCode],{timeout:10000}))
       : null;
     assertLegacyBackupIdentity({legacy,image,version},release,this.authEnvironment,{requireRunning:!allowStopped});
-    return unitFingerprint;
+    return {unitFingerprint:snapshot.unitFingerprint,runtimeFingerprint};
+  }
+  async assertLegacyBackupTunnel({allowStopped=false,expectedIdentity}={}){
+    const snapshot=await this.legacyBackupTunnelSnapshot();
+    if(expectedIdentity!==undefined)assert.equal(snapshot.unitFingerprint,expectedIdentity.unitFingerprint,'Legacy Tunnel Quadlet/systemd source drifted during backup recovery');
+    const tunnel=inspect('codexia-tunnel');
+    if(!tunnel){
+      assert.ok(allowStopped,'Legacy Tunnel container is missing');
+      return {unitFingerprint:snapshot.unitFingerprint,runtimeFingerprint:null};
+    }
+    assert.equal(imageId(tunnel.Image),snapshot.imageId,'Legacy Tunnel runtime image differs from its pinned Quadlet image');
+    const runtimeFingerprint=containerRuntimeFingerprint(tunnel,snapshot.secretIdentities);
+    if(expectedIdentity?.runtimeFingerprint)assert.equal(runtimeFingerprint,expectedIdentity.runtimeFingerprint,'Legacy Tunnel runtime drifted during backup recovery');
+    if(allowStopped)assert.equal(tunnel.State.Running,false,'Legacy Tunnel unexpectedly resumed during backup recovery');
+    else assert.equal(tunnel.State.Running,true,'Legacy Tunnel is not running during backup identity capture');
+    return {unitFingerprint:snapshot.unitFingerprint,runtimeFingerprint};
   }
   async waitReady(container,release){
     const deadline=Date.now()+90000;
