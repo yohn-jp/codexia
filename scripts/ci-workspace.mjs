@@ -213,6 +213,10 @@ function buildWorkspace() {
 
 function prerequisiteIds(task) {
   if (task === 'coverage') return [];
+  if (task.startsWith('unit-')) {
+    const id = getUnitTarget(task.slice(5)).id;
+    return id === 'root' ? [...buildDependencies(['api']), 'api'] : buildDependencies([id]);
+  }
   if (task === 'safety' || task === 'test-types-app-e2e') {
     if (rootManifest.devDependencies?.['@codexia/api'] !== 'workspace:*') fail('API workspace dependency is required');
     return [...buildDependencies(['api']), 'api'];
@@ -222,9 +226,9 @@ function prerequisiteIds(task) {
   fail('Unknown type task ' + task);
 }
 
-async function prepareTypeGroup(filename) {
-  const tasks = JSON.parse(process.env.CODEXIA_CI_TYPE_TASKS ?? 'null');
-  if (!Array.isArray(tasks) || !tasks.length || new Set(tasks).size !== tasks.length) fail('Invalid type task selection');
+async function prepareSelectedGroup(filename) {
+  const tasks = JSON.parse(process.env.CODEXIA_CI_GROUP_TASKS ?? 'null');
+  if (!Array.isArray(tasks) || !tasks.length || new Set(tasks).size !== tasks.length) fail('Invalid group task selection');
   const requirements = new Map(tasks.map(task => [task, prerequisiteIds(task)]));
   const targets = [...new Set([...requirements.values()].flat())];
   const build = async id => {
@@ -237,7 +241,8 @@ async function prepareTypeGroup(filename) {
       child.once('close', (code, signal) => code === 0 && !signal ? resolve() : reject(new Error('Build failed: ' + id + ' (' + (signal ?? code) + ')')));
     });
   };
-  const builds = await runDependencyBuilds(targets, dependenciesOf, build);
+  const limit = Number(process.env.CODEXIA_CI_CONCURRENCY ?? '2');
+  const builds = await runDependencyBuilds(targets, dependenciesOf, build, limit);
   const report = tasks.map(task => {
     const missing = requirements.get(task).filter(id => builds.get(id)?.status !== 'passed');
     const exclusive = task.startsWith('typecheck-') && typecheckWorkspaceIds(task.slice(10)).some(id => !packageManifests.get(id).scripts?.typecheck);
@@ -374,7 +379,7 @@ if (extra.length || !command) {
   fail('Usage: node scripts/ci-workspace.mjs <prepare|unit|typecheck|test-types|coverage> [kind] [target]');
 }
 if (command === 'build-workspace' && !targetId) buildWorkspace();
-else if (command === 'prepare' && targetId === 'type-group' && scopeOrTarget) await prepareTypeGroup(scopeOrTarget);
+else if (command === 'prepare' && targetId === 'selected-group' && scopeOrTarget) await prepareSelectedGroup(scopeOrTarget);
 else if (command === 'prepare' && targetId === 'unit' && scopeOrTarget) await prepareUnit(scopeOrTarget);
 else if (command === 'prepare' && targetId === 'unit-group' && scopeOrTarget) await prepareUnitGroup(scopeOrTarget);
 else if (command === 'prepare' && targetId === 'typecheck' && scopeOrTarget) await prepareTypecheck(scopeOrTarget);
