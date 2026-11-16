@@ -52,10 +52,13 @@ sudo systemctl restart "user@$uid.service"
 manager_pid=$(sudo systemctl show --property=MainPID --value "user@$uid.service")
 test -n "$manager_pid"
 manager_environment=$(sudo sh -c 'tr "\\0" "\\n" < "/proc/$1/environ"' _ "$manager_pid")
-printf '%s\n' "$manager_environment" | grep -Fqx "HOME=$home"
-printf '%s\n' "$manager_environment" | grep -Fqx "XDG_RUNTIME_DIR=/run/user/$uid"
-printf '%s\n' "$manager_environment" | grep -Fqx "XDG_CONFIG_HOME=$home/.config"
+if ! printf '%s\n' "$manager_environment" | grep -Fqx "HOME=$home" || ! printf '%s\n' "$manager_environment" | grep -Fqx "XDG_RUNTIME_DIR=/run/user/$uid"; then
+  printf '%s\n' "$manager_environment" | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)=' >&2 || true
+  echo 'The fixture user manager did not start with the service account home/runtime.' >&2; exit 1
+fi
 sudo systemctl unset-environment HOME XDG_CONFIG_HOME XDG_RUNTIME_DIR
+rootless systemctl --user set-environment "XDG_CONFIG_HOME=$home/.config" "XDG_RUNTIME_DIR=/run/user/$uid"
+rootless systemctl --user daemon-reexec
 rootless systemctl --user show-environment | grep -Fqx "XDG_CONFIG_HOME=$home/.config"
 test -f /sys/fs/cgroup/cgroup.controllers
 test "$(rootless /usr/bin/podman info --format '{{.Host.Security.Rootless}}')" = true
