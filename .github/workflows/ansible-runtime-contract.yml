@@ -48,6 +48,9 @@ on:
       - .github/workflows/ansible-runtime-contract.yml
 permissions:
   contents: read
+concurrency:
+  group: ansible-runtime-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   runtime-contract:
     name: Verify real rootless runtime contract on Ubuntu VM
