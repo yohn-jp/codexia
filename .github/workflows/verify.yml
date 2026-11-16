@@ -21,6 +21,7 @@ jobs:
       browser: ${{ steps.select.outputs.browser }}
       hosted_catalog: ${{ steps.select.outputs.hosted_catalog }}
       hosted: ${{ steps.select.outputs.hosted }}
+      full_model_oci: ${{ steps.select.outputs.full_model_oci }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -42,6 +43,12 @@ jobs:
           path: ${{ runner.temp }}/ci-plan/ci-plan.json
           if-no-files-found: error
           retention-days: 7
+  full_model_oci:
+    name: full-model-oci
+    needs:
+      - plan
+    if: needs.plan.result == 'success' && needs.plan.outputs.full_model_oci == 'true'
+    uses: ./.github/workflows/full-model-oci-acceptance.yml
   unit:
     name: unit-${{ matrix.group }}
     needs:

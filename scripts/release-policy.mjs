@@ -18,11 +18,15 @@ export function verifiedSourceRun(runs, sha) {
   }
   throw new Error('Release source has no successful main verification');
 }
-/** @param {unknown} jobs @param {readonly string[]} expectedNames */
-function assertNamedJobs(jobs, expectedNames) {
+/** @param {unknown} jobs @param {readonly string[]} expectedNames @param {readonly string[]} optionalSkippedNames */
+function assertNamedJobs(jobs, expectedNames, optionalSkippedNames = []) {
   if (!Array.isArray(jobs)) throw new Error('Invalid release verification jobs response');
   const required = new Set(expectedNames);
   if (required.size !== expectedNames.length) throw new Error('Canonical release verification job set contains duplicates');
+  const optionalSkipped = new Set(optionalSkippedNames);
+  if (optionalSkipped.size !== optionalSkippedNames.length || [...optionalSkipped].some(name => required.has(name))) {
+    throw new Error('Canonical optional release verification job set is invalid');
+  }
   const seen = new Set();
   for (const job of jobs) {
     if (!record(job) || typeof job.name !== 'string' || job.name.length === 0) {
@@ -30,12 +34,18 @@ function assertNamedJobs(jobs, expectedNames) {
     }
     if (seen.has(job.name)) throw new Error(`Duplicate release verification job: ${job.name}`);
     seen.add(job.name);
+    if (optionalSkipped.has(job.name)) {
+      if (job.status !== 'completed' || job.conclusion !== 'skipped') {
+        throw new Error(`Optional release verification job must be skipped: ${job.name}`);
+      }
+      continue;
+    }
     if (!required.has(job.name)) throw new Error(`Unexpected release verification job: ${job.name}`);
     if (job.status !== 'completed' || job.conclusion !== 'success') {
       throw new Error(`Release verification job did not succeed: ${job.name}`);
     }
   }
-  if (seen.size !== required.size || [...required].some(name => !seen.has(name))) {
+  if ([...required].some(name => !seen.has(name))) {
     throw new Error('Release verification does not contain the exact required job set');
   }
 }
@@ -47,7 +57,8 @@ export function assertVerificationLeafJobs(jobs) {
 
 /** @param {unknown} jobs */
 export function assertVerificationJobs(jobs) {
-  assertNamedJobs(jobs, REQUIRED_VERIFICATION_JOBS);
+  // Main Verify skips the PR-only call; the standalone workflow owns matching main pushes.
+  assertNamedJobs(jobs, REQUIRED_VERIFICATION_JOBS, ['full-model-oci']);
 }
 
 /**
