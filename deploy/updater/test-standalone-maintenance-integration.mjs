@@ -254,6 +254,7 @@ async function runInterruptedBootRecovery({ workDir, stateDir, configPath, candi
   assert.equal((await readFile(observedPath, 'utf8')).trim(), interruption, `Fault injection did not reach ${interruption}`);
   const markerInfo = await lstat(markerPath);
   assert.ok(markerInfo.isFile() && !markerInfo.isSymbolicLink(), 'Interrupted maintenance marker was not retained');
+  assert.equal(JSON.parse(await readFile(markerPath, 'utf8')).runtimeChanged, true, 'Fault-injected transaction did not exercise typed runtime recovery');
   const interruptedState = await loadControllerState(path.join(stateDir, 'controller.json'));
   assert.equal(interruptedState.paused, true, 'Interrupted maintenance did not keep the controller paused');
   await assertTimerState('inactive', 'enabled');
