@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run only after test-base-secrets-integration.sh on a disposable Ubuntu runner.
-set -Eeuo pipefail
+set -euo pipefail
 runtime_test_error() {
   local status=$?
   printf 'Phase B runtime integration failed at line %s (status %s): %s\n' "${BASH_LINENO[0]:-$LINENO}" "$status" "$BASH_COMMAND" >&2
