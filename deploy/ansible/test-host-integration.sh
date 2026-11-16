@@ -80,6 +80,9 @@ test ! -e "$generator_wrapper"
 rootless test ! -e "$generator_log"
 cat > "$tmp/podman-user-generator" <<EOF
 #!/bin/sh
+# Actions exports runner-specific XDG paths into lingering managers. Normalize
+# only this disposable fixture generator before executing the real Podman code.
+export HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_RUNTIME_DIR="/run/user/$uid"
 printf 'uid=%s\\n' "\$(id -u)" >> "$generator_log"
 env | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)=' >> "$generator_log" || true
 exec /usr/lib/systemd/user-generators/podman-user-generator "\$@"
