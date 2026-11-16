@@ -114,6 +114,17 @@ test('effective writer cgroup must remain beneath its exact systemd unit',async(
  assert.throws(()=>assertRuntimeProcessCgroup(`0::${unit}\n`,unit.replace('/user@1001.service/','/../')),/control group path is invalid/);
 });
 
+test('effective writer memory.max must match the runtime limit including unlimited mode',async()=>{
+ const {assertRuntimeMemoryMax}=await import('../deploy/updater/standalone-host.mjs');
+ assert.doesNotThrow(()=>assertRuntimeMemoryMax(String(runtime.resources.memoryMaxBytes),runtime));
+ assert.throws(()=>assertRuntimeMemoryMax(String(runtime.resources.memoryMaxBytes-1),runtime),/effective memory.max drift/);
+ assert.throws(()=>assertRuntimeMemoryMax('max',runtime),/effective memory.max drift/);
+ const unlimited={...runtime,resources:{...runtime.resources,memoryMaxBytes:null}};
+ assert.doesNotThrow(()=>assertRuntimeMemoryMax('max',unlimited));
+ assert.throws(()=>assertRuntimeMemoryMax(String(runtime.resources.memoryMaxBytes),unlimited),/effective memory.max drift/);
+ assert.throws(()=>assertRuntimeMemoryMax('unlimited',unlimited),/effective memory.max drift/);
+});
+
 test('effective cgroup CPU quota must match the typed runtime contract',async()=>{
  const {assertRuntimeCpuMax}=await import('../deploy/updater/standalone-host.mjs');
  assert.equal(typeof assertRuntimeCpuMax,'function');

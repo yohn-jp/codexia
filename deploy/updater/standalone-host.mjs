@@ -304,6 +304,17 @@ export function assertRuntimeProcessCgroup(processCgroupText,controlGroup,label=
   return observed;
 }
 
+export function assertRuntimeMemoryMax(memoryMax,value,label='Runtime'){
+  const runtime=validateRuntimeContract(value);
+  assert.ok(typeof memoryMax==='string',label+' effective memory.max is unobservable');
+  const observed=memoryMax.trim();
+  if(runtime.resources.memoryMaxBytes===null){
+    assert.equal(observed,'max',label+' effective memory.max drift');
+    return;
+  }
+  assert.equal(observed,String(runtime.resources.memoryMaxBytes),label+' effective memory.max drift');
+}
+
 export async function assertRuntimeProcessInSystemdUnit(unitName,container,label='Runtime'){
   const pid=container?.State?.Pid;
   assert.ok(Number.isSafeInteger(pid)&&pid>1,label+' PID must be numeric and positive');
@@ -317,6 +328,15 @@ export async function assertRuntimeProcessInSystemdUnit(unitName,container,label
   assert.ok(processPath.startsWith(cgroupPrefix),label+' process cgroup escapes the cgroup root');
   assert.ok(processPath===unitPath||processPath.startsWith(unitPath+path.sep),label+' process escaped its systemd service cgroup');
   return processPath;
+}
+
+export async function assertRuntimeProcessMemoryMax(processCgroupPath,value,label='Runtime'){
+  const cgroupRoot=await realpath('/sys/fs/cgroup');
+  const cgroupPrefix=cgroupRoot+path.sep;
+  assert.ok(typeof processCgroupPath==='string'&&path.isAbsolute(processCgroupPath)&&path.resolve(processCgroupPath)===processCgroupPath&&processCgroupPath.startsWith(cgroupPrefix),label+' process cgroup path is invalid');
+  const memoryPath=await realpath(path.join(processCgroupPath,'memory.max'));
+  assert.ok(memoryPath.startsWith(cgroupPrefix),label+' memory limit path escapes the cgroup root');
+  assertRuntimeMemoryMax(await readFile(memoryPath,'utf8'),value,label);
 }
 
 async function boundedJson(url,headers,max=2*1024*1024){
@@ -547,7 +567,8 @@ export class PodmanStandaloneHost{
           assertRuntimeObservation(observed,this.runtime,image.Config?.Env,expectedUnit,capabilityStatus);
           assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value',activeUnit(slot)]));
           assertRuntimeUnit(run('systemctl',['--user','cat',activeUnit(slot)]),this.runtime);
-          await assertRuntimeProcessInSystemdUnit(activeUnit(slot),observed,'Legacy writer');
+          const processCgroupPath=await assertRuntimeProcessInSystemdUnit(activeUnit(slot),observed,'Legacy writer');
+          await assertRuntimeProcessMemoryMax(processCgroupPath,this.runtime,'Legacy writer');
           await assertRuntimeSystemdCpuQuota(activeUnit(slot),this.runtime);
         }
         writers.push({slot,image:configured});
@@ -593,7 +614,8 @@ export class PodmanStandaloneHost{
       assertRuntimeObservation(legacy,this.runtime,image.Config?.Env,expectedUnit,capabilityStatus);
       assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value','codexia-api.service']));
       assertRuntimeUnit(run('systemctl',['--user','cat','codexia-api.service']),this.runtime);
-      await assertRuntimeProcessInSystemdUnit('codexia-api.service',legacy,'Legacy writer');
+      const processCgroupPath=await assertRuntimeProcessInSystemdUnit('codexia-api.service',legacy,'Legacy writer');
+      await assertRuntimeProcessMemoryMax(processCgroupPath,this.runtime,'Legacy writer');
       await assertRuntimeSystemdCpuQuota('codexia-api.service',this.runtime);
     }
     const env=legacy.Config?.Env;

@@ -502,8 +502,7 @@ host.assertRuntimeUnit(execFileSync('systemctl', ['--user', 'cat', service], { e
 await host.assertRuntimeSystemdCpuQuota(service, runtime);
 const cgroupPath = await host.assertRuntimeProcessInSystemdUnit(service, inspect, name);
 const pid = inspect.State.Pid;
-const memoryMax = await readFile(path.join(cgroupPath, 'memory.max'), 'utf8');
-assert.equal(memoryMax.trim(), String(runtime.resources.memoryMaxBytes), `${name} effective memory.max drift`);
+await host.assertRuntimeProcessMemoryMax(cgroupPath, runtime, name);
 
 const mountinfo = await readFile(`/proc/${pid}/mountinfo`, 'utf8');
 const mounts = new Map(mountinfo.split('\n').filter(Boolean).map(line => {
