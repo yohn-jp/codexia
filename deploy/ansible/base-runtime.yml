@@ -431,6 +431,10 @@
           UNION ALL
           SELECT p.oid FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname !~ '^pg_toast'
+          UNION ALL
+          SELECT t.oid FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+          WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+            AND n.nspname !~ '^pg_toast' AND t.typelem = 0
         ) AS application_objects
   register: base_runtime_application_object_count
   changed_when: false
@@ -556,6 +560,10 @@
           UNION ALL
           SELECT p.oid FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname !~ '^pg_toast'
+          UNION ALL
+          SELECT t.oid FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+          WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+            AND n.nspname !~ '^pg_toast' AND t.typelem = 0
         ) AS untracked
   register: base_runtime_untracked_schema_objects
   changed_when: false
@@ -605,6 +613,12 @@
     dest: "{{ quadlet_dir }}/codexia-tunnel.container"
     mode: '0600'
     force: false
+  register: base_runtime_tunnel_quadlet
+- name: Load the generated Tunnel unit after installing its Quadlet without starting it
+  ansible.builtin.command:
+    argv: [systemctl, --user, daemon-reload]
+  changed_when: false
+  when: base_runtime_tunnel_quadlet.changed
 - name: Read the installed Tunnel Quadlet without reloading or starting the Tunnel
   ansible.builtin.slurp:
     path: "{{ quadlet_dir }}/codexia-tunnel.container"

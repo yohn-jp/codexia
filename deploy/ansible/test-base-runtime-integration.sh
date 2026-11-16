@@ -73,6 +73,10 @@ generator_probe_path="$generator_probe_dir/podman-user-generator"
 generator_probe_log="/run/codexia-phase-b-generator-environment-$service_uid-$$.log"
 generator_probe_installed=false
 generator_probe_dir_created=false
+user_environment_generator_dir=/run/systemd/user-environment-generators
+user_environment_generator_path="$user_environment_generator_dir/99-codexia-phase-b-xdg-$service_uid-$$"
+user_environment_generator_installed=false
+user_environment_generator_dir_created=false
 cleanup() {
   local status=$?
   local cleanup_status=0
@@ -92,10 +96,18 @@ cleanup() {
     sudo rm -f -- "$generator_probe_path" || cleanup_status=1
     generator_probe_installed=false
   fi
+  if [[ "$user_environment_generator_installed" == true ]]; then
+    sudo rm -f -- "$user_environment_generator_path" || cleanup_status=1
+    user_environment_generator_installed=false
+  fi
   sudo rm -f -- "$generator_probe_log" || true
   if [[ "$generator_probe_dir_created" == true ]]; then
     sudo rmdir -- "$generator_probe_dir" 2>/dev/null || cleanup_status=1
     generator_probe_dir_created=false
+  fi
+  if [[ "$user_environment_generator_dir_created" == true ]]; then
+    sudo rmdir -- "$user_environment_generator_dir" 2>/dev/null || cleanup_status=1
+    user_environment_generator_dir_created=false
   fi
   systemctl --user daemon-reload >/dev/null 2>&1 || true
   systemctl --user reset-failed codexia-tunnel.service codexia-db.service >/dev/null 2>&1 || true
@@ -118,6 +130,31 @@ cleanup() {
 }
 trap cleanup EXIT
 umask 077
+
+# systemd reruns user environment generators during daemon-reload. Scope this
+# late-running fixture override to the disposable service UID so the real
+# packaged Quadlet generator receives that user's XDG paths even when the CI
+# runner's environment has been imported into another user manager.
+if [[ ! -d "$user_environment_generator_dir" ]]; then
+  sudo install -d -m 0755 "$user_environment_generator_dir"
+  user_environment_generator_dir_created=true
+fi
+if [[ -e "$user_environment_generator_path" || -L "$user_environment_generator_path" ]]; then
+  printf 'Refusing to replace an existing user environment generator: %s\n' "$user_environment_generator_path" >&2
+  exit 1
+fi
+sudo install -m 0755 /dev/null "$user_environment_generator_path"
+user_environment_generator_installed=true
+sudo tee "$user_environment_generator_path" >/dev/null <<EOF
+#!/bin/sh
+if [ "\$(id -u)" = "$service_uid" ]; then
+  printf '%s\\n' 'XDG_CONFIG_HOME=$service_home/.config' 'XDG_RUNTIME_DIR=/run/user/$service_uid'
+fi
+EOF
+as_service systemctl --user daemon-reload
+systemctl --user show-environment | grep -Fxq "XDG_CONFIG_HOME=$service_home/.config"
+systemctl --user show-environment | grep -Fxq "XDG_RUNTIME_DIR=/run/user/$service_uid"
+printf '%s\n' 'Phase B fixture manager XDG environment verified after systemd environment generation.'
 
 repo_root=$(pwd)
 cat > "$tmp/base-inventory.yml" <<YAML
@@ -340,6 +377,60 @@ grep -Eq 'changed=[1-9]' "$tmp/first.log"
 apply_base > "$tmp/second.log" || { cat "$tmp/second.log"; exit 1; }
 grep -q 'changed=0' "$tmp/second.log"
 
+# The base stage must load the newly installed Tunnel unit itself while
+# leaving both the Tunnel container and service stopped.
+test "$(systemctl --user show --property=LoadState --value codexia-tunnel.service)" = loaded
+rc=0; systemctl --user is-active codexia-tunnel.service >/dev/null 2>&1 || rc=$?
+test "$rc" != 0
+rc=0; podman container exists codexia-tunnel || rc=$?
+test "$rc" = 1
+
+# Exercise the database verifier's stale-secret rejection with a mock Podman
+# inspection. The real canonical container has already passed this verifier
+# during both base convergences above.
+mock_bin="$tmp/db-verifier-mock-bin"
+mkdir -m 0700 "$mock_bin"
+cat > "$mock_bin/podman" <<'MOCK_PODMAN'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == inspect && "${2:-}" == --format && "${4:-}" == codexia-db ]]; then
+  case "$3" in
+    '{{.Config.Image}}') printf '%s\n' 'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536' ;;
+    '{{json .Mounts}}') printf '%s\n' '[{"Type":"volume","Name":"codexia-postgres","Destination":"/var/lib/postgresql/data","RW":true},{"Type":"bind","Name":"","Source":"/etc/codexia/postgres/010-create-app-role.sh","Destination":"/docker-entrypoint-initdb.d/010-create-app-role.sh","RW":false}]' ;;
+    '{{json .NetworkSettings.Networks}}') printf '%s\n' '{"codexia-data":{}}' ;;
+    '{{json .HostConfig.PortBindings}}') printf '%s\n' 'null' ;;
+    '{{json .Config.Env}}') printf '%s\n' '["PGDATA=/var/lib/postgresql/data/pgdata","POSTGRES_DB=codexia","POSTGRES_USER=codexia_admin","POSTGRES_PASSWORD_FILE=/run/secrets/admin-password"]' ;;
+    '{{json .Config.Secrets}}') printf '%s\n' '[{"Name":"codexia-postgres-admin-password","ID":"stale-admin-secret-id"},{"Name":"codexia-postgres-app-password","ID":"stale-app-secret-id"}]' ;;
+    *) exit 2 ;;
+  esac
+elif [[ "${1:-}" == secret && "${2:-}" == inspect && "${3:-}" == --format ]]; then
+  case "${5:-}" in
+    codexia-postgres-admin-password) printf '%s\n' current-admin-secret-id ;;
+    codexia-postgres-app-password) printf '%s\n' current-app-secret-id ;;
+    *) exit 2 ;;
+  esac
+else
+  exit 2
+fi
+MOCK_PODMAN
+chmod 0700 "$mock_bin/podman"
+cat > "$tmp/verify-db-stale-secrets.yml" <<YAML
+---
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  environment:
+    PATH: "$mock_bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  tasks:
+    - ansible.builtin.include_tasks: "$repo_root/deploy/ansible/verify-base-db-container.yml"
+YAML
+if "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$tmp/verify-db-stale-secrets.yml" > "$tmp/db-stale-secrets.log" 2>&1; then
+  echo 'Database container verification accepted stale administrator or application secret IDs' >&2
+  exit 1
+fi
+grep -q 'Database container has unexpected PGDATA, storage, network, port, or current secret identity configuration' "$tmp/db-stale-secrets.log"
+rm -rf -- "$mock_bin"
+
 test "$(podman network inspect --format '{{.Name}}|{{.Driver}}|{{.Internal}}' codexia-data)" = 'codexia-data|bridge|true'
 test "$(podman network inspect --format '{{.Name}}|{{.Driver}}|{{.Internal}}' codexia)" = 'codexia|bridge|false'
 for volume in codexia-postgres codexia-data codexia-history; do
@@ -412,8 +503,8 @@ verify_tunnel > "$tmp/tunnel-runtime-canonical.log" || { cat "$tmp/tunnel-runtim
 podman rm codexia-tunnel >/dev/null
 as_service rmdir "$service_home/unexpected-tunnel-mount"
 
-# Loading the generated Tunnel unit must not start the Tunnel during base convergence.
-systemctl --user daemon-reload
+# Rechecking the loaded unit after the adoption fixtures must not start it.
+test "$(systemctl --user show --property=LoadState --value codexia-tunnel.service)" = loaded
 rc=0; systemctl --user is-active codexia-tunnel.service >/dev/null 2>&1 || rc=$?
 test "$rc" != 0
 rc=0; podman container exists codexia-tunnel || rc=$?
@@ -426,11 +517,23 @@ case " $legacy_requires " in *' codexia-api.service '*) ;; *) echo 'Tunnel did n
 case " $legacy_after " in *' codexia-api.service '*) ;; *) echo 'Tunnel was not ordered after the legacy API unit' >&2; exit 1;; esac
 case " $legacy_after " in *' network-online.target '*) ;; *) echo 'Tunnel lost network-online ordering' >&2; exit 1;; esac
 
-# Simulate initdb interruption after the role transaction rolled back: the
-# empty database remains, the role is absent, and a repeat base apply repairs it
-# from the same protected secret without replacing the volume.
-podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c 'ALTER SCHEMA public OWNER TO codexia_admin' >/dev/null
+# A database containing only a user-defined type and no migration ledger is
+# not pristine. Role recovery must reject it and preserve the type and volume.
+podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c \
+  'ALTER SCHEMA public OWNER TO codexia_admin; CREATE TYPE public.phase_b_enum_probe AS ENUM ('"'"'kept'"'"');' >/dev/null
 podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d postgres -c 'ALTER DATABASE codexia OWNER TO codexia_admin; DROP ROLE codexia' >/dev/null
+if apply_base > "$tmp/type-only-no-ledger.log" 2>&1; then
+  echo 'Base convergence treated a user-defined type without a migration ledger as pristine' >&2
+  exit 1
+fi
+grep -q 'Missing application role is recoverable only for an explicitly approved empty PostgreSQL database' "$tmp/type-only-no-ledger.log"
+test "$(podman exec codexia-db psql -X -qAt -U codexia_admin -d postgres -c "SELECT count(*) FROM pg_roles WHERE rolname='codexia'")" = 0
+test "$(podman exec codexia-db psql -X -qAt -U codexia_admin -d codexia -c "SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='public' AND t.typname='phase_b_enum_probe'")" = 1
+podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c 'DROP TYPE public.phase_b_enum_probe' >/dev/null
+
+# Simulate initdb interruption after the role transaction rolled back: after
+# removing the test object, the truly empty database is recoverable without
+# replacing its volume or rotating either protected secret.
 apply_base > "$tmp/init-recovery.log" || { cat "$tmp/init-recovery.log"; exit 1; }
 test "$(podman exec codexia-db psql -X -qAt -U codexia_admin -d postgres -c "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname='codexia'")" = codexia
 

@@ -34,6 +34,21 @@
     argv: [podman, inspect, --format, "{% raw %}{{json .Config.Env}}{% endraw %}", codexia-db]
   register: base_runtime_db_environment
   changed_when: false
+- name: Inspect the database container's declared secret identities without reading values
+  ansible.builtin.command:
+    argv: [podman, inspect, --format, "{% raw %}{{json .Config.Secrets}}{% endraw %}", codexia-db]
+  register: base_runtime_db_secrets
+  changed_when: false
+- name: Inspect the current administrator secret identity
+  ansible.builtin.command:
+    argv: [podman, secret, inspect, --format, "{% raw %}{{.ID}}{% endraw %}", codexia-postgres-admin-password]
+  register: base_runtime_db_admin_secret_id
+  changed_when: false
+- name: Inspect the current application secret identity
+  ansible.builtin.command:
+    argv: [podman, secret, inspect, --format, "{% raw %}{{.ID}}{% endraw %}", codexia-postgres-app-password]
+  register: base_runtime_db_app_secret_id
+  changed_when: false
 - name: Reject database container storage, network, or port drift
   ansible.builtin.assert:
     that:
@@ -68,4 +83,15 @@
         (base_runtime_db_environment.stdout | from_json | select('equalto', 'POSTGRES_USER=codexia_admin') | list | length) == 1
       - >-
         (base_runtime_db_environment.stdout | from_json | select('equalto', 'POSTGRES_PASSWORD_FILE=/run/secrets/admin-password') | list | length) == 1
-    fail_msg: Database container has unexpected PGDATA, storage, init-script, network, credential-source, or published-port configuration.
+      - (base_runtime_db_secrets.stdout | from_json | length) == 2
+      - >-
+        (base_runtime_db_secrets.stdout | from_json
+        | selectattr('Name', 'equalto', 'codexia-postgres-admin-password')
+        | selectattr('ID', 'equalto', base_runtime_db_admin_secret_id.stdout)
+        | list | length) == 1
+      - >-
+        (base_runtime_db_secrets.stdout | from_json
+        | selectattr('Name', 'equalto', 'codexia-postgres-app-password')
+        | selectattr('ID', 'equalto', base_runtime_db_app_secret_id.stdout)
+        | list | length) == 1
+    fail_msg: Database container has unexpected PGDATA, storage, network, port, or current secret identity configuration.

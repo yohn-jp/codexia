@@ -267,7 +267,10 @@ test("optional terminology cancels work at pagehide and resumes at pageshow", as
 
 test("Full WebKit terminology stays safe across a held native Shell departure window", async ({ page }) => {
   await createWritingFixture(page); const text = "東京《とうきょう》の用語と変換を保持する。";
-  await editor(page).fill(text); await expect(page.getByText("IndexedDB回復Journalに保存済み", { exact: true })).toBeVisible();
+  await expectMarkdown(page, "最初の本文。\n次の文章です。");
+  await editor(page).click(); await editor(page).press("ControlOrMeta+a"); await page.keyboard.insertText(text);
+  await expectMarkdown(page, text);
+  await expect(page.getByText("IndexedDB回復Journalに保存済み", { exact: true })).toBeVisible();
   await editor(page).dispatchEvent("compositionstart", { data: "とうきょう" });
   await page.getByRole("button", { name: "モバイル ↗" }).click();
   await expect(page).toHaveURL(/desktop/u); await expectMarkdown(page, text);
