@@ -567,11 +567,11 @@
         ) AS untracked
   register: base_runtime_untracked_schema_objects
   changed_when: false
-  when: base_runtime_schema_present.stdout == 'false'
+  when: base_runtime_schema_present.stdout == 'f'
 - name: Reject untracked application schema without a migration ledger
   ansible.builtin.assert:
     that:
-      - base_runtime_schema_present.stdout == 'true' or base_runtime_untracked_schema_objects.stdout | int == 0
+      - base_runtime_schema_present.stdout == 't' or base_runtime_untracked_schema_objects.stdout | int == 0
     fail_msg: Existing PostgreSQL application objects have no migration ledger and cannot be adopted safely.
 - name: Read the existing migration ledger without changing the database
   ansible.builtin.command:
@@ -595,7 +595,7 @@
         FROM public.codexia_schema_migrations
   register: base_runtime_schema_ledger_rows
   changed_when: false
-  when: base_runtime_schema_present.stdout == 'true'
+  when: base_runtime_schema_present.stdout == 't'
 - name: Reject missing, changed, or newer PostgreSQL migrations without repair
   ansible.builtin.assert:
     that:
@@ -603,7 +603,7 @@
         (base_runtime_schema_ledger_rows.stdout | from_json
         | items2dict(key_name='version', value_name='checksum')) == base_runtime_expected_migration_ledger
     fail_msg: PostgreSQL schema migration ledger differs from the packaged release; no schema changes were made.
-  when: base_runtime_schema_present.stdout == 'true'
+  when: base_runtime_schema_present.stdout == 't'
 - name: Report safe base runtime adoption without mutating database schema
   ansible.builtin.debug:
     msg: Verified canonical rootless networks, exact persistent volume names, pinned PostgreSQL 17, exact schema migration identity when present, and separate database roles. Existing database data and credentials were preserved.
