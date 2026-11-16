@@ -1,0 +1,45 @@
+name: Verify Ansible Host
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - deploy/ansible/site.yml
+      - deploy/ansible/host.yml
+      - deploy/ansible/host-validate.yml
+      - deploy/ansible/host-contract.py
+      - deploy/ansible/test-host-integration.sh
+      - deploy/ansible/requirements.txt
+      - .github/workflows/ansible-host.yml
+  push:
+    branches: [main]
+    paths:
+      - deploy/ansible/site.yml
+      - deploy/ansible/host.yml
+      - deploy/ansible/host-validate.yml
+      - deploy/ansible/host-contract.py
+      - deploy/ansible/test-host-integration.sh
+      - deploy/ansible/requirements.txt
+      - .github/workflows/ansible-host.yml
+permissions:
+  contents: read
+concurrency:
+  group: ansible-host-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  standalone-host:
+    name: Verify real Ubuntu rootless host convergence
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install supported Ansible control environment
+        run: |
+          python3 -m venv "$RUNNER_TEMP/codexia-ansible"
+          "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
+      - name: Exercise host stage twice and run Quadlet with Actions-only environment isolation
+        env:
+          CODEXIA_HOST_PROOF_MODE: actions-fixture
+          ANSIBLE_PLAYBOOK: ${{ runner.temp }}/codexia-ansible/bin/ansible-playbook
+        run: bash deploy/ansible/test-host-integration.sh
