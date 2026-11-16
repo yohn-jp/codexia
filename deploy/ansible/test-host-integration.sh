@@ -77,6 +77,19 @@ if ! printf '%s\n' "$manager_session_environment" | grep -Fqx "HOME=$home" || ! 
   printf '%s\n' "$manager_session_environment" >&2
   echo 'The fixture manager environment does not match the service identity.' >&2; exit 1
 fi
+generator_dir=/run/systemd/user-generators
+generator_wrapper="$generator_dir/podman-user-generator"
+generator_log="/run/user/$uid/codexia-podman-user-generator.log"
+test ! -e "$generator_wrapper"
+rootless test ! -e "$generator_log"
+cat > "$tmp/podman-user-generator" <<EOF
+#!/bin/sh
+printf 'uid=%s\\n' "\$(id -u)" >> "$generator_log"
+env | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)=' >> "$generator_log" || true
+exec /usr/lib/systemd/user-generators/podman-user-generator "\$@"
+EOF
+sudo install -d -m 0755 "$generator_dir"
+sudo install -m 0755 "$tmp/podman-user-generator" "$generator_wrapper"
 test -f /sys/fs/cgroup/cgroup.controllers
 test "$(rootless /usr/bin/podman info --format '{{.Host.Security.Rootless}}')" = true
 rootless mkdir -p "$home/.config/containers/systemd"
@@ -88,6 +101,15 @@ Internal=true
 QUADLET
 rootless chmod 0600 "$home/.config/containers/systemd/codexia-fixture.network"
 rootless systemctl --user daemon-reload
+if ! sudo test -s "$generator_log"; then
+  echo 'The Podman generator wrapper did not run; inspect the user generator path.' >&2
+  exit 1
+fi
+generator_environment=$(sudo cat "$generator_log")
+if ! printf '%s\n' "$generator_environment" | grep -Fqx "HOME=$home" || ! printf '%s\n' "$generator_environment" | grep -Fqx "XDG_RUNTIME_DIR=/run/user/$uid" || ! printf '%s\n' "$generator_environment" | grep -Fqx "XDG_CONFIG_HOME=$home/.config"; then
+  printf '%s\n' "$generator_environment" >&2
+  echo 'The user manager passed an unexpected environment to the Podman generator.' >&2; exit 1
+fi
 if ! rootless systemctl --user start codexia-fixture-network.service; then
   echo 'Quadlet network unit was not loaded; checking the source and generator output.' >&2
   rootless stat -c '%n %U:%G %a' "$home/.config/containers/systemd/codexia-fixture.network"
