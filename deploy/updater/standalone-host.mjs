@@ -280,7 +280,7 @@ function runtimeSecretMounts(container,secretIdentities){
   assert.equal(new Set(observed).size,observed.length,'Podman create arguments declare a secret more than once');
   return mounts.sort((left,right)=>left.name.localeCompare(right.name));
 }
-export function containerRuntimeFingerprint(container,secretIdentities=[]){
+export function containerRuntimeFingerprintProjection(container,secretIdentities=[]){
   assert.ok(container?.Config&&container?.HostConfig&&container?.NetworkSettings,'Container runtime configuration is unobservable');
   assert.ok(Array.isArray(container.Mounts),'Container mounts are unobservable');
   const config=container.Config,host=container.HostConfig;
@@ -300,12 +300,15 @@ export function containerRuntimeFingerprint(container,secretIdentities=[]){
   const sanitizedConfig={...configSettings,Env:safeEnvironment(Env??[]),Hostname:configuredRuntimeHostname(container)};
   assertNoSecretNamedFields(sanitizedConfig,'Config');
   assertNoSecretNamedFields(host,'HostConfig');
-  return sha256(JSON.stringify(canonical({
+  return canonical({
     Image:imageId(container.Image),ImageName:container.ImageName??config.Image,
     Config:sanitizedConfig,
     HostConfig:host,
     Mounts:mounts,Networks:networks,SecretMounts:secretMounts,
-  })));
+  });
+}
+export function containerRuntimeFingerprint(container,secretIdentities=[]){
+  return sha256(JSON.stringify(containerRuntimeFingerprintProjection(container,secretIdentities)));
 }
 export function assertLegacyBackupTunnelUnitIdentity({source,fragment,sourcePath,fragmentPath,image,secretIdentities=[]}){
   assert.equal(quadletField(source,'ContainerName'),'codexia-tunnel');

@@ -99,18 +99,21 @@ node --input-type=module -e '
   import path from "node:path";
   import {pathToFileURL} from "node:url";
   const root=process.argv[1],quadlet=process.argv[2],state=process.argv[3],output=process.argv[4];
-  const {PodmanStandaloneHost,containerRuntimeFingerprint}=await import(pathToFileURL(path.join(root,"deploy/updater/standalone-host.mjs")));
+  const {PodmanStandaloneHost,containerRuntimeFingerprint,containerRuntimeFingerprintProjection}=await import(pathToFileURL(path.join(root,"deploy/updater/standalone-host.mjs")));
   const host=new PodmanStandaloneHost({routeFile:path.join(state,"route"),quadletDirectory:quadlet,githubTokenFile:path.join(state,"token"),
     stateFile:path.join(state,"controller.json"),frontendIdentityUrl:"https://backup-test.invalid/desktop/update-identity.json",browserAuth:{mode:"token"}});
   const api=await host.readBackupQuadletUnit("codexia-api.service","codexia-api.container");
   const apiSecretIdentities=await host.quadletSecretIdentities(api.source);
   const tunnel=await host.legacyBackupTunnelSnapshot();
   const inspect=name=>JSON.parse(execFileSync("podman",["inspect",name],{encoding:"utf8"}))[0];
+  const apiInspect=inspect("codexia-api"),tunnelInspect=inspect("codexia-tunnel");
   const identity={apiSource:api.source,apiFragment:api.fragment,apiSecretIdentities,
-    apiRuntime:containerRuntimeFingerprint(inspect("codexia-api"),apiSecretIdentities),
+    apiRuntime:containerRuntimeFingerprint(apiInspect,apiSecretIdentities),
+    apiRuntimeProjection:containerRuntimeFingerprintProjection(apiInspect,apiSecretIdentities),
     tunnelSource:tunnel.source,tunnelSecretIdentities:tunnel.secretIdentities,
     tunnelUnitFingerprint:tunnel.unitFingerprint,
-    tunnelRuntime:containerRuntimeFingerprint(inspect("codexia-tunnel"),tunnel.secretIdentities),
+    tunnelRuntime:containerRuntimeFingerprint(tunnelInspect,tunnel.secretIdentities),
+    tunnelRuntimeProjection:containerRuntimeFingerprintProjection(tunnelInspect,tunnel.secretIdentities),
     autostart:await host.captureBackupAutostart()};
   assert.equal(identity.autostart.apiWasEnabled,true);
   assert.equal(identity.autostart.tunnelWasEnabled,true);
@@ -186,12 +189,28 @@ node --input-type=module -e '
   import {readFile} from "node:fs/promises";
   import {pathToFileURL} from "node:url";
   const root=process.argv[1],quadlet=process.argv[2],state=process.argv[3],snapshotFile=process.argv[4];
-  const {PodmanStandaloneHost,containerRuntimeFingerprint}=await import(pathToFileURL(path.join(root,"deploy/updater/standalone-host.mjs")));
+  const {PodmanStandaloneHost,containerRuntimeFingerprint,containerRuntimeFingerprintProjection}=await import(pathToFileURL(path.join(root,"deploy/updater/standalone-host.mjs")));
   const expected=JSON.parse(await readFile(snapshotFile,"utf8"));
   const host=new PodmanStandaloneHost({routeFile:path.join(state,"route"),quadletDirectory:quadlet,githubTokenFile:path.join(state,"token"),
     stateFile:path.join(state,"controller.json"),frontendIdentityUrl:"https://backup-test.invalid/desktop/update-identity.json",browserAuth:{mode:"token"}});
   await host.startLegacyWriter();
   const api=JSON.parse(execFileSync("podman",["inspect","codexia-api"],{encoding:"utf8"}))[0];
+  const actualProjection=containerRuntimeFingerprintProjection(api,expected.apiSecretIdentities);
+  const differencePaths=(left,right,prefix="")=>{
+    if(Array.isArray(left)&&Array.isArray(right)){
+      if(left.length!==right.length)return [prefix+"[length]"];
+      return left.flatMap((value,index)=>differencePaths(value,right[index],prefix+"["+index+"]"));
+    }
+    if(left&&right&&typeof left==="object"&&typeof right==="object"&&!Array.isArray(left)&&!Array.isArray(right)){
+      const keys=new Set([...Object.keys(left),...Object.keys(right)]);
+      return [...keys].flatMap(key=>Object.hasOwn(left,key)&&Object.hasOwn(right,key)
+        ?differencePaths(left[key],right[key],prefix?prefix+"."+key:key)
+        :[prefix?prefix+"."+key:key]);
+    }
+    return Object.is(left,right)?[]:[prefix||"<root>"];
+  };
+  const changedFields=differencePaths(expected.apiRuntimeProjection,actualProjection);
+  if(changedFields.length)console.error("API runtime identity changed at fields: "+changedFields.join(", "));
   assert.equal(containerRuntimeFingerprint(api,expected.apiSecretIdentities),expected.apiRuntime);
   await host.assertBackupAutostartGated({...expected.autostart,timerWasActive:false,tunnelWasActive:true});
 ' "$repo_root" "$quadlet_dir" "$state_dir" "$snapshot"
@@ -237,7 +256,7 @@ node --input-type=module -e '
   import path from "node:path";
   import {pathToFileURL} from "node:url";
   const root=process.argv[1],quadlet=process.argv[2],state=process.argv[3],snapshotFile=process.argv[4];
-  const {PodmanStandaloneHost,containerRuntimeFingerprint}=await import(pathToFileURL(path.join(root,"deploy/updater/standalone-host.mjs")));
+  const {PodmanStandaloneHost,containerRuntimeFingerprint,containerRuntimeFingerprintProjection}=await import(pathToFileURL(path.join(root,"deploy/updater/standalone-host.mjs")));
   const expected=JSON.parse(await readFile(snapshotFile,"utf8"));
   const host=new PodmanStandaloneHost({routeFile:path.join(state,"route"),quadletDirectory:quadlet,githubTokenFile:path.join(state,"token"),
     stateFile:path.join(state,"controller.json"),frontendIdentityUrl:"https://backup-test.invalid/desktop/update-identity.json",browserAuth:{mode:"token"}});
@@ -247,6 +266,22 @@ node --input-type=module -e '
   await host.stopLegacyWriter();
   await host.startTunnel();
   const actual=JSON.parse(execFileSync("podman",["inspect","codexia-tunnel"],{encoding:"utf8"}))[0];
+  const actualProjection=containerRuntimeFingerprintProjection(actual,expected.tunnelSecretIdentities);
+  const differencePaths=(left,right,prefix="")=>{
+    if(Array.isArray(left)&&Array.isArray(right)){
+      if(left.length!==right.length)return [prefix+"[length]"];
+      return left.flatMap((value,index)=>differencePaths(value,right[index],prefix+"["+index+"]"));
+    }
+    if(left&&right&&typeof left==="object"&&typeof right==="object"&&!Array.isArray(left)&&!Array.isArray(right)){
+      const keys=new Set([...Object.keys(left),...Object.keys(right)]);
+      return [...keys].flatMap(key=>Object.hasOwn(left,key)&&Object.hasOwn(right,key)
+        ?differencePaths(left[key],right[key],prefix?prefix+"."+key:key)
+        :[prefix?prefix+"."+key:key]);
+    }
+    return Object.is(left,right)?[]:[prefix||"<root>"];
+  };
+  const changedFields=differencePaths(expected.tunnelRuntimeProjection,actualProjection);
+  if(changedFields.length)console.error("Tunnel runtime identity changed at fields: "+changedFields.join(", "));
   assert.equal(containerRuntimeFingerprint(actual,expected.tunnelSecretIdentities),expected.tunnelRuntime);
   assert.equal(await host.legacyServiceActive(),false,'Tunnel permit started the API writer');
   await assert.rejects(lstat(host.backupStartupFencePaths().tunnel.permit),{code:"ENOENT"});
