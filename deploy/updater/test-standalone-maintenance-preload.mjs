@@ -1,0 +1,52 @@
+import assert from 'node:assert/strict';
+import { lstat, readFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const fixtureSourceRoot = '/opt/codexia-updater';
+const updaterEntry = path.join(fixtureSourceRoot, 'deploy/updater/standalone-updater.mjs');
+const bootRecoveryEnabled = process.env.CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY === 'yes';
+
+function isInside(parent, candidate) {
+  const relative = path.relative(parent, candidate);
+  return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+export function oldSourceVerifierEntry(argv, env) {
+  if (argv[2] !== 'verify' || !path.isAbsolute(argv[1] ?? '') || !path.isAbsolute(env.XDG_STATE_HOME ?? '')) return null;
+  const stateHome = path.resolve(env.XDG_STATE_HOME);
+  const entry = path.resolve(argv[1]);
+  if (stateHome !== env.XDG_STATE_HOME || entry !== argv[1]) return null;
+
+  const snapshotsRoot = path.join(stateHome, 'codexia-updater', 'maintenance', 'snapshots');
+  if (!isInside(snapshotsRoot, entry)) return null;
+  const relative = path.relative(snapshotsRoot, entry).split(path.sep);
+  if (relative.length !== 5 ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(relative[0]) ||
+      relative[1] !== 'old-source' || relative[2] !== 'deploy' || relative[3] !== 'updater' || relative[4] !== 'standalone-updater.mjs') return null;
+  return entry;
+}
+
+let adapterEntry = null;
+if (bootRecoveryEnabled && path.resolve(process.argv[1] ?? '') === updaterEntry && process.argv[2] === 'boot') {
+  adapterEntry = updaterEntry;
+} else if (bootRecoveryEnabled) {
+  adapterEntry = oldSourceVerifierEntry(process.argv, process.env);
+}
+
+if (adapterEntry) {
+  assert.equal(process.env.CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE, 'yes', 'Disposable runtime acceptance guard is absent');
+  assert.notEqual(process.getuid?.(), 0, 'Refusing the root identity for runtime maintenance adapters');
+  assert.notEqual(os.userInfo().username, 'codexia', 'Refusing the production Codexia service identity');
+  const markerPath = '/etc/codexia-iac-disposable-vm';
+  const markerInfo = await lstat(markerPath);
+  assert.ok(markerInfo.isFile() && !markerInfo.isSymbolicLink(), 'Disposable VM marker is not a regular file');
+  assert.equal(markerInfo.uid, 0, 'Disposable VM marker is not root-owned');
+  assert.equal((await readFile(markerPath, 'utf8')).trim(), 'codexia-iac-disposable-vm/v1', 'Disposable VM marker is invalid');
+
+  const hostModule = await import(pathToFileURL(path.join(path.dirname(adapterEntry), 'standalone-host.mjs')).href);
+  const testModule = await import(new URL('./test-standalone-maintenance-integration.mjs', import.meta.url));
+  assert.equal(typeof testModule.installTestAdapters, 'function', 'Disposable runtime adapter is unavailable');
+  testModule.installTestAdapters(hostModule.PodmanStandaloneHost);
+}

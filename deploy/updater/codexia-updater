@@ -9,4 +9,19 @@ exec 9>"$state_dir/host.lock"
 flock --exclusive --nonblock 9 || exit 75
 export CODEXIA_UPDATER_LOCK_DIRECTORY="$state_dir"
 export CODEXIA_UPDATER_LOCK_FD=9
+if [ "$#" -gt 0 ] && [ "$1" = maintain-candidate ]; then
+  if [ "$#" -lt 4 ]; then
+    echo "Usage: codexia-updater maintain-candidate /state/maintenance/candidates/<id>/deploy/updater/standalone-updater.mjs /absolute/config.json /absolute/manifest.json" >&2
+    exit 2
+  fi
+  shift
+  candidate_entry=$1
+  shift
+  case "$candidate_entry" in
+    "$state_dir"/maintenance/candidates/*/deploy/updater/standalone-updater.mjs) ;;
+    *) echo "Maintenance entrypoint must stay within the private candidate directory" >&2; exit 2 ;;
+  esac
+  test -f "$candidate_entry" && test ! -L "$candidate_entry"
+  exec node "$candidate_entry" maintain "$@"
+fi
 exec node /opt/codexia-updater/deploy/updater/standalone-updater.mjs "$@"

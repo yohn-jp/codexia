@@ -5,17 +5,17 @@ import { atomicWrite, clearBackupIntent, initialControllerState, loadBackupInten
 import { PodmanStandaloneHost } from './standalone-host.mjs';
 import { verifyUpdateChannel } from '../../scripts/update-channel.mjs';
 import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
+import { maintainStandaloneUpdater, recoverInterruptedMaintenance } from './standalone-maintenance.mjs';
 
 const [command,configPath,...arguments_]=process.argv.slice(2);
-if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|init|boot|tick|status|verify|pause|resume|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
-const config=JSON.parse(await readFile(configPath,'utf8'));
+if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|init|boot|tick|status|verify|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
+let config=JSON.parse(await readFile(configPath,'utf8'));
 assert.equal(config.format,'codexia-standalone-updater/v1');
 assert.ok(path.isAbsolute(config.stateFile)&&path.isAbsolute(config.publicKeyFile));
 assert.equal(path.dirname(config.routeFile),path.dirname(config.stateFile),'Route and state must share the protected host state directory');
 assert.equal(path.basename(config.routeFile),'route');
 assert.equal(path.dirname(config.stateFile),process.env.CODEXIA_UPDATER_LOCK_DIRECTORY,'Use the host-wide locked wrapper');
 const publicKey=await readFile(config.publicKeyFile,'utf8');
-const host=new PodmanStandaloneHost(config);
 const backupIntentFile=path.join(path.dirname(config.stateFile),'backup-intent.json');
 const store={
   save:state=>atomicWrite(config.stateFile,JSON.stringify(state)+'\n'),
@@ -23,6 +23,18 @@ const store={
   loadBackupIntent:()=>loadBackupIntent(backupIntentFile),
   clearBackupIntent:()=>clearBackupIntent(backupIntentFile),
 };
+const maintenanceMarker=path.join(path.dirname(config.stateFile),'maintenance','in-progress.json');
+const pendingMaintenance=await readFile(maintenanceMarker,'utf8').then(()=>true,error=>{if(error.code==='ENOENT')return false;throw error;});
+if(pendingMaintenance){
+  assert.equal(await store.loadBackupIntent(),null,'Simultaneous backup and maintenance intents require operator repair');
+  assert.ok(command==='boot'||command==='maintain','Pending runtime maintenance requires recovery before other operations');
+}
+if(command==='boot'){
+  const recovered=await recoverInterruptedMaintenance({config,store,publicKey});
+  if(recovered)config=JSON.parse(await readFile(configPath,'utf8'));
+}
+const host=new PodmanStandaloneHost(config);
+if(command!=='maintain')await host.assertRuntimeSources();
 const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
 if(command==='backup'){
   if(arguments_.at(-1)!=='--approved')throw new Error('Backup requires the explicit --approved maintenance attestation');
@@ -66,6 +78,15 @@ if(command==='backup'){
   state=await controller.reconcile(state,{boot:true});
   console.log(JSON.stringify(state,null,2));
   if(state.lastError)process.exitCode=1;
+}else if(command==='maintain'){
+  assert.equal(arguments_.length,1,'Provide exactly one staged maintenance manifest');
+  const [argument]=arguments_;
+  assert.ok(path.isAbsolute(argument),'An absolute staged maintenance manifest is required');
+  assert.equal(await controller.loadBackupIntent(),null,'Pending backup recovery prevents runtime maintenance');
+  const state=await loadControllerState(config.stateFile);
+  const result=await maintainStandaloneUpdater({config,manifestPath:argument,publicKey,state,store});
+  console.log(JSON.stringify(result));
+  process.exit(0);
 }else{
   assert.equal(arguments_.length,0,'This controller command does not accept positional arguments');
   let state;
@@ -80,6 +101,7 @@ if(command==='backup'){
     assert.equal(await controller.loadBackupIntent(),null,'Pending backup recovery prevents service verification');
     assert.ok(['idle','committed'].includes(state.journal.phase),'Unreconciled journal requires operator repair');
     assert.equal(state.lastError,null,'Controller has a recorded error');
+    await host.verifyWriterUnits(state);
     await controller.assertServing(state,state.journal.active.slot,state.installed);
     console.log(JSON.stringify({state,observed:await host.observe()},null,2));
     process.exit(0);

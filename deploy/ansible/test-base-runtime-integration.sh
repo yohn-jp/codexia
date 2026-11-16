@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # Run only after test-base-secrets-integration.sh on a disposable Ubuntu runner.
-set -euo pipefail
+set -Eeuo pipefail
+runtime_test_error() {
+  local status=$?
+  printf 'Phase B runtime integration failed at line %s (status %s): %s\n' "${BASH_LINENO[0]:-$LINENO}" "$status" "$BASH_COMMAND" >&2
+  return 0
+}
+trap runtime_test_error ERR
+printf '%s\n' 'Starting Phase B runtime integration test.'
 test "${GITHUB_ACTIONS:-}" = true
 test "${CODEXIA_DISPOSABLE_HOST:-}" = phase-b-integration
 test "$(lsb_release -rs)" = 26.04
@@ -9,6 +16,7 @@ service_uid=$(id -u "$service_user")
 service_home=$(getent passwd "$service_user" | cut -d: -f6)
 test "$(id -un)" != "$service_user"
 sudo -n true
+printf '%s\n' 'Phase B runtime preflight checks passed.'
 as_service() {
   sudo -u "$service_user" env HOME="$service_home" XDG_CONFIG_HOME="$service_home/.config" XDG_DATA_HOME="$service_home/.local/share" XDG_STATE_HOME="$service_home/.local/state" XDG_RUNTIME_DIR="/run/user/$service_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$service_uid/bus" bash -c 'cd "$HOME" && exec "$@"' bash "$@"
 }
@@ -16,12 +24,22 @@ podman() { as_service /usr/bin/podman "$@"; }
 systemctl() {
   if [[ "${1:-}" == --user ]]; then as_service /usr/bin/systemctl "$@"; else command systemctl "$@"; fi
 }
-test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
+rootless_info=''
+if rootless_info=$(podman info --format '{{.Host.Security.Rootless}}' 2>&1); then
+  :
+else
+  status=$?
+  printf 'Rootless Podman info failed with status %s: %s\n' "$status" "$rootless_info" >&2
+  exit "$status"
+fi
+test "$rootless_info" = true
+printf '%s\n' 'Phase B rootless Podman info verified.'
 test "$(id -u)" != 0
 
 export XDG_RUNTIME_DIR="/run/user/$service_uid"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 systemctl --user show --property=Version >/dev/null
+printf '%s\n' 'Phase B rootless systemd manager verified.'
 
 quadlet_dir="$service_home/.config/containers/systemd"
 as_service test ! -e "$service_home/unexpected-tunnel-mount"
@@ -47,11 +65,29 @@ test ! -e /etc/codexia
 for file in codexia.network codexia-data.network codexia-postgres.volume codexia-data.volume codexia-history.volume codexia-db.container codexia-tunnel.container; do
   as_service test ! -e "$quadlet_dir/$file"
 done
+printf '%s\n' 'Phase B initial runtime resource checks passed.'
 
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/codexia-base-runtime.XXXXXX")
+tmp=$(mktemp -d /tmp/codexia-base-runtime.XXXXXX)
+tunnel_quadlet_saved="$service_home/.codexia-tunnel.container.saved-$service_uid-$$"
+generator_probe_dir=/run/systemd/user-generators
+generator_probe_path="$generator_probe_dir/podman-user-generator"
+generator_probe_log="/run/codexia-phase-b-generator-environment-$service_uid-$$.log"
+generator_probe_installed=false
+generator_probe_dir_created=false
+user_environment_generator_dir=/run/systemd/user-environment-generators
+user_environment_generator_path="$user_environment_generator_dir/99-codexia-phase-b-xdg-$service_uid-$$"
+user_environment_generator_installed=false
+user_environment_generator_dir_created=false
 cleanup() {
+  local status=$?
+  local cleanup_status=0
+  trap - EXIT
+  set +e
   systemctl --user stop codexia-tunnel.service codexia-db.service >/dev/null 2>&1 || true
   podman rm -f codexia-tunnel codexia-db >/dev/null 2>&1 || true
+  if [[ -e "$tunnel_quadlet_saved" || -L "$tunnel_quadlet_saved" ]]; then
+    as_service mv -- "$tunnel_quadlet_saved" "$quadlet_dir/codexia-tunnel.container" || cleanup_status=1
+  fi
   as_service rm -f \
     "$quadlet_dir/codexia.network" \
     "$quadlet_dir/codexia-data.network" \
@@ -59,7 +95,24 @@ cleanup() {
     "$quadlet_dir/codexia-data.volume" \
     "$quadlet_dir/codexia-history.volume" \
     "$quadlet_dir/codexia-db.container" \
-    "$quadlet_dir/codexia-tunnel.container"
+    "$quadlet_dir/codexia-tunnel.container" || cleanup_status=1
+  if [[ "$generator_probe_installed" == true ]]; then
+    sudo rm -f -- "$generator_probe_path" || cleanup_status=1
+    generator_probe_installed=false
+  fi
+  if [[ "$user_environment_generator_installed" == true ]]; then
+    sudo rm -f -- "$user_environment_generator_path" || cleanup_status=1
+    user_environment_generator_installed=false
+  fi
+  sudo rm -f -- "$generator_probe_log" || true
+  if [[ "$generator_probe_dir_created" == true ]]; then
+    sudo rmdir -- "$generator_probe_dir" 2>/dev/null || cleanup_status=1
+    generator_probe_dir_created=false
+  fi
+  if [[ "$user_environment_generator_dir_created" == true ]]; then
+    sudo rmdir -- "$user_environment_generator_dir" 2>/dev/null || cleanup_status=1
+    user_environment_generator_dir_created=false
+  fi
   systemctl --user daemon-reload >/dev/null 2>&1 || true
   systemctl --user reset-failed codexia-tunnel.service codexia-db.service >/dev/null 2>&1 || true
   podman network rm codexia-data codexia >/dev/null 2>&1 || true
@@ -72,12 +125,40 @@ cleanup() {
     codexia-postgres-app-password \
     codexia-postgres-preflight-password >/dev/null 2>&1 || true
   as_service rm -rf "$service_home/unexpected-tunnel-mount" >/dev/null 2>&1 || true
-  sudo rm -f /etc/codexia/postgres/010-create-app-role.sh
+  sudo rm -f /etc/codexia/postgres/010-create-app-role.sh || cleanup_status=1
   sudo rmdir /etc/codexia/postgres /etc/codexia 2>/dev/null || true
-  rm -rf "$tmp"
+  if [[ "$tmp" == /tmp/codexia-base-runtime.* && -d "$tmp" && ! -L "$tmp" ]]; then sudo rm -rf -- "$tmp" || cleanup_status=1; fi
+  if (( status == 0 && cleanup_status != 0 )); then status=$cleanup_status; fi
+  printf 'Phase B runtime integration cleanup finished with test status %s and cleanup status %s.\n' "$status" "$cleanup_status" >&2
+  exit "$status"
 }
 trap cleanup EXIT
 umask 077
+
+# systemd reruns user environment generators during daemon-reload. Scope this
+# late-running fixture override to the disposable service UID so the real
+# packaged Quadlet generator receives that user's XDG paths even when the CI
+# runner's environment has been imported into another user manager.
+if [[ ! -d "$user_environment_generator_dir" ]]; then
+  sudo install -d -m 0755 "$user_environment_generator_dir"
+  user_environment_generator_dir_created=true
+fi
+if [[ -e "$user_environment_generator_path" || -L "$user_environment_generator_path" ]]; then
+  printf 'Refusing to replace an existing user environment generator: %s\n' "$user_environment_generator_path" >&2
+  exit 1
+fi
+sudo install -m 0755 /dev/null "$user_environment_generator_path"
+user_environment_generator_installed=true
+sudo tee "$user_environment_generator_path" >/dev/null <<EOF
+#!/bin/sh
+if [ "\$(id -u)" = "$service_uid" ]; then
+  printf '%s\\n' 'XDG_CONFIG_HOME=$service_home/.config' 'XDG_RUNTIME_DIR=/run/user/$service_uid'
+fi
+EOF
+as_service systemctl --user daemon-reload
+systemctl --user show-environment | grep -Fxq "XDG_CONFIG_HOME=$service_home/.config"
+systemctl --user show-environment | grep -Fxq "XDG_RUNTIME_DIR=/run/user/$service_uid"
+printf '%s\n' 'Phase B fixture manager XDG environment verified after systemd environment generation.'
 
 repo_root=$(pwd)
 cat > "$tmp/base-inventory.yml" <<YAML
@@ -97,17 +178,172 @@ all:
         codexia_service_home: "$service_home"
 YAML
 apply_base() {
-  "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i "$tmp/base-inventory.yml" deploy/ansible/site.yml "$@"
+  ANSIBLE_LOCAL_TEMP="$tmp/ansible-local" "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i "$tmp/base-inventory.yml" deploy/ansible/site.yml "$@"
+}
+diagnose_missing_database_unit() {
+  local generator=/usr/lib/systemd/user-generators/podman-user-generator
+  local generator_output="$service_home/.local/state/codexia-phase-b-generator-diagnostic-$$"
+  local reload_started reload_status
+  printf '%s\n' 'Database unit generation diagnostics:' >&2
+  printf '%s\n' '--- systemd user manager environment ---' >&2
+  systemctl --user show-environment | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_DATA_HOME|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS)=' >&2 || true
+  local manager_pid
+  manager_pid=$(sudo systemctl show --property=MainPID --value "user@${service_uid}.service" 2>/dev/null || true)
+  if [[ "$manager_pid" =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s\n' "--- systemd user manager process environment (PID $manager_pid) ---" >&2
+    sudo cat "/proc/$manager_pid/environ" | tr '\0' '\n' | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_DATA_HOME|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS)=' >&2 || true
+  else
+    printf 'Could not read the user manager MainPID (value: %s)\n' "$manager_pid" >&2
+  fi
+  printf '%s\n' '--- systemd user manager paths and database unit ---' >&2
+  systemctl --user show --property=UnitPath >&2 || true
+  systemctl --user show --property=LoadState --property=FragmentPath --property=SourcePath codexia-db.service >&2 || true
+  systemctl --user list-unit-files --no-pager >&2 || true
+  systemctl --user cat codexia-db.service >&2 || true
+  printf '%s\n' '--- installed Quadlet sources and generated unit directories ---' >&2
+  for path in \
+    "$quadlet_dir" \
+    "$service_home/.config/systemd/user" \
+    "/run/user/$service_uid/systemd/generator.early" \
+    "/run/user/$service_uid/systemd/generator" \
+    "/run/user/$service_uid/systemd/generator.late"; do
+    if [[ -e "$path" ]]; then
+      as_service find "$path" -maxdepth 3 -printf '%M %u:%g %p\n' >&2 || true
+    else
+      printf 'Missing path: %s\n' "$path" >&2
+    fi
+  done
+  printf '%s\n' '--- user journal for Quadlet generation ---' >&2
+  as_service journalctl --user -b -n 100 --no-pager -o short-iso --grep='(?i)(podman|quadlet|codexia|generator|failed|error|warn)' >&2 || true
+  printf '%s\n' '--- system journal for the disposable user manager ---' >&2
+  sudo journalctl -b -n 100 --no-pager -o short-iso --grep='(?i)(podman|quadlet|codexia|generator|failed|error|warn)' "_UID=$service_uid" >&2 || true
+  printf '%s\n' '--- install a temporary highest-priority user-generator environment probe ---' >&2
+  if [[ -e "$generator_probe_path" || -L "$generator_probe_path" ]]; then
+    printf 'Refusing to replace an existing generator override: %s\n' "$generator_probe_path" >&2
+  else
+    if [[ ! -d "$generator_probe_dir" ]]; then
+      sudo install -d -m 0755 "$generator_probe_dir" || true
+      generator_probe_dir_created=true
+    fi
+    if sudo install -m 0666 /dev/null "$generator_probe_log"; then
+      generator_probe_installed=true
+      sudo tee "$generator_probe_path" >/dev/null <<EOF
+#!/bin/sh
+{
+  printf 'EFFECTIVE_UID=%s\n' "\$(id -u)"
+  printf 'PPID=%s\n' "\$PPID"
+  printf 'GENERATOR_CGROUP='; cat /proc/self/cgroup 2>/dev/null | tr '\n' ';'; printf '\n'
+  if [ -r "/proc/\$PPID/status" ]; then
+    printf 'PARENT_STATUS='; grep -E '^(Name|Pid|PPid|Uid|Gid):' "/proc/\$PPID/status" | tr '\n' ';'; printf '\n'
+    printf 'PARENT_CGROUP='; cat "/proc/\$PPID/cgroup" 2>/dev/null | tr '\n' ';'; printf '\n'
+    printf 'PARENT_CMDLINE='; tr '\0' ' ' <"/proc/\$PPID/cmdline" 2>/dev/null; printf '\n'
+    printf 'PARENT_ENV='; tr '\0' '\n' <"/proc/\$PPID/environ" 2>/dev/null | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_DATA_HOME|XDG_STATE_HOME|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS)=' | tr '\n' ';'; printf '\n'
+  else
+    printf 'PARENT_PROC_UNAVAILABLE=1\n'
+  fi
+  printf 'HOME=%s\n' "\${HOME-<unset>}"
+  printf 'XDG_CONFIG_HOME=%s\n' "\${XDG_CONFIG_HOME-<unset>}"
+  printf 'XDG_DATA_HOME=%s\n' "\${XDG_DATA_HOME-<unset>}"
+  printf 'XDG_STATE_HOME=%s\n' "\${XDG_STATE_HOME-<unset>}"
+  printf 'XDG_RUNTIME_DIR=%s\n' "\${XDG_RUNTIME_DIR-<unset>}"
+  case "\${DBUS_SESSION_BUS_ADDRESS-}" in
+    unix:path=/run/user/[0-9]*/bus) printf 'DBUS_SESSION_BUS_ADDRESS=%s\n' "\${DBUS_SESSION_BUS_ADDRESS}" ;;
+    *) printf 'DBUS_SESSION_BUS_ADDRESS=<unset-or-nonstandard>\n' ;;
+  esac
+} >> "$generator_probe_log"
+exec "$generator" "\$@"
+EOF
+      sudo chmod 0755 "$generator_probe_path"
+      printf 'Installed disposable probe at %s; cleanup trap will remove it.\n' "$generator_probe_path" >&2
+    else
+      printf 'Could not create generator probe log: %s\n' "$generator_probe_log" >&2
+    fi
+  fi
+  reload_started=$(date --iso-8601=seconds)
+  printf '%s\n' "--- explicit user-manager daemon-reload at $reload_started ---" >&2
+  if as_service systemctl --user daemon-reload >"$tmp/diagnostic-daemon-reload.log" 2>&1; then
+    cat "$tmp/diagnostic-daemon-reload.log" >&2
+  else
+    reload_status=$?
+    printf 'Explicit user-manager daemon-reload exited with status %s\n' "$reload_status" >&2
+    cat "$tmp/diagnostic-daemon-reload.log" >&2
+  fi
+  printf '%s\n' '--- database unit and generated directories after explicit reload ---' >&2
+  systemctl --user show --property=LoadState --property=FragmentPath --property=SourcePath codexia-db.service >&2 || true
+  for path in \
+    "/run/user/$service_uid/systemd/generator.early" \
+    "/run/user/$service_uid/systemd/generator" \
+    "/run/user/$service_uid/systemd/generator.late"; do
+    if [[ -e "$path" ]]; then
+      as_service find "$path" -maxdepth 3 -printf '%M %u:%g %p\n' >&2 || true
+    else
+      printf 'Missing path after reload: %s\n' "$path" >&2
+    fi
+  done
+  printf '%s\n' '--- timestamped journal entries after explicit reload ---' >&2
+  as_service journalctl --user -b --since="$reload_started" --no-pager -o short-iso --grep='(?i)(podman|quadlet|codexia|generator|failed|error|warn)' >&2 || true
+  if [[ "$generator_probe_installed" == true ]]; then
+    printf '%s\n' '--- environment observed by the systemd-launched packaged-generator wrapper ---' >&2
+    if [[ -s "$generator_probe_log" ]]; then
+      cat "$generator_probe_log" >&2
+      local runner_uid probe_manager_uid manager_pid wrapper_ppid
+      runner_uid=$(id -u)
+      printf '%s\n' '--- runner and fixture user-manager process correlation ---' >&2
+      for probe_manager_uid in "$runner_uid" "$service_uid"; do
+        printf '%s\n' "user@${probe_manager_uid}.service:" >&2
+        sudo systemctl show --property=Id --property=MainPID --property=ControlGroup "user@${probe_manager_uid}.service" >&2 || true
+        manager_pid=$(sudo systemctl show --property=MainPID --value "user@${probe_manager_uid}.service" 2>/dev/null || true)
+        if [[ "$manager_pid" =~ ^[1-9][0-9]*$ ]]; then
+          printf '%s\n' "manager process environment (PID $manager_pid):" >&2
+          sudo cat "/proc/$manager_pid/environ" | tr '\0' '\n' | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_DATA_HOME|XDG_STATE_HOME|XDG_RUNTIME_DIR)=' >&2 || true
+          printf '%s\n' "manager process cgroup (PID $manager_pid):" >&2
+          sudo cat "/proc/$manager_pid/cgroup" >&2 || true
+        fi
+      done
+      while IFS= read -r wrapper_ppid; do
+        if [[ "$wrapper_ppid" =~ ^[1-9][0-9]*$ ]]; then
+          printf '%s\n' "generator parent process (PID $wrapper_ppid):" >&2
+          sudo ps -o pid=,ppid=,euid=,comm= -p "$wrapper_ppid" >&2 || true
+          sudo cat "/proc/$wrapper_ppid/cgroup" >&2 || true
+        fi
+      done < <(awk -F= '$1 == "PPID" { print $2 }' "$generator_probe_log" | sort -u)
+    else
+      printf 'The systemd reload did not execute the override at %s.\n' "$generator_probe_path" >&2
+    fi
+  fi
+  if [[ -x "$generator" ]]; then
+    as_service mkdir -p "$generator_output/early" "$generator_output/normal" "$generator_output/late"
+    printf '%s\n' '--- isolated debug invocation of podman-user-generator ---' >&2
+    if as_service env SYSTEMD_LOG_LEVEL=debug "$generator" \
+      "$generator_output/early" "$generator_output/normal" "$generator_output/late" \
+      >"$tmp/quadlet-generator.log" 2>&1; then
+      cat "$tmp/quadlet-generator.log" >&2
+    else
+      local generator_status=$?
+      printf 'podman-user-generator exited with status %s\n' "$generator_status" >&2
+      cat "$tmp/quadlet-generator.log" >&2
+    fi
+    as_service find "$generator_output" -maxdepth 3 -printf '%M %u:%g %p\n' >&2 || true
+    as_service rm -rf -- "$generator_output" || true
+  else
+    printf 'User generator is absent or not executable: %s\n' "$generator" >&2
+  fi
 }
 # Existing Quadlet drift must be detected before other files, directories, or runtime resources are created.
 as_service mkdir -p "$quadlet_dir"
 cat deploy/quadlet/codexia-data.network | as_service tee "$quadlet_dir/codexia-data.network" >/dev/null
 as_service sh -c 'printf "# fixture drift\\n" >> "$1"' _ "$quadlet_dir/codexia-data.network"
-if apply_base > "$tmp/quadlet-drift.log" 2>&1; then
+quadlet_drift_status=0
+apply_base > "$tmp/quadlet-drift.log" 2>&1 || quadlet_drift_status=$?
+if (( quadlet_drift_status == 0 )); then
   echo 'Base convergence accepted an existing noncanonical Quadlet' >&2
   exit 1
 fi
-grep -q 'Existing Codexia Quadlet differs from the reviewed source' "$tmp/quadlet-drift.log"
+if ! grep -Fq 'Existing Codexia Quadlet differs from the reviewed source' "$tmp/quadlet-drift.log"; then
+  printf 'Quadlet drift was rejected with unexpected output (Ansible status %s); captured output follows:\n' "$quadlet_drift_status" >&2
+  cat "$tmp/quadlet-drift.log" >&2
+  exit 1
+fi
 test "$(as_service find "$quadlet_dir" -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 1
 test ! -e /etc/codexia
 for network in codexia codexia-data; do
@@ -136,17 +372,107 @@ for network in codexia codexia-data; do
 done
 sed -i 's/codexia_database_initialization_approved: false/codexia_database_initialization_approved: true/' "$tmp/base-inventory.yml"
 
-apply_base > "$tmp/first.log" || { cat "$tmp/first.log"; exit 1; }
+if ! apply_base > "$tmp/first.log" 2>&1; then
+  cat "$tmp/first.log" >&2
+  diagnose_missing_database_unit
+  exit 1
+fi
 grep -Eq 'changed=[1-9]' "$tmp/first.log"
 apply_base > "$tmp/second.log" || { cat "$tmp/second.log"; exit 1; }
 grep -q 'changed=0' "$tmp/second.log"
+
+# The base stage must load the newly installed Tunnel unit itself while
+# leaving both the Tunnel container and service stopped.
+test "$(systemctl --user show --property=LoadState --value codexia-tunnel.service)" = loaded
+test "$(systemctl --user show --property=ActiveState --value codexia-tunnel.service)" = inactive
+rc=0; podman container exists codexia-tunnel || rc=$?
+test "$rc" = 1
+
+# Recover a generated-unit cache miss while the canonical Quadlet file is
+# already unchanged: the base stage must reload because the unit is not found.
+if [[ -e "$tunnel_quadlet_saved" || -L "$tunnel_quadlet_saved" ]]; then
+  echo "Refusing to replace an existing Tunnel Quadlet recovery file: $tunnel_quadlet_saved" >&2
+  exit 1
+fi
+as_service mv "$quadlet_dir/codexia-tunnel.container" "$tunnel_quadlet_saved"
+as_service systemctl --user daemon-reload
+rc=0; systemctl --user is-active codexia-tunnel.service >/dev/null 2>&1 || rc=$?
+test "$rc" = 4
+as_service mv "$tunnel_quadlet_saved" "$quadlet_dir/codexia-tunnel.container"
+apply_base > "$tmp/tunnel-unit-recovery.log" || { cat "$tmp/tunnel-unit-recovery.log"; exit 1; }
+grep -q 'changed=0' "$tmp/tunnel-unit-recovery.log"
+test "$(systemctl --user show --property=LoadState --value codexia-tunnel.service)" = loaded
+test "$(systemctl --user show --property=ActiveState --value codexia-tunnel.service)" = inactive
+
+# Exercise the database verifier's stale-secret rejection with a mock Podman
+# inspection. The real canonical container has already passed this verifier
+# during both base convergences above.
+mock_bin="$tmp/db-verifier-mock-bin"
+mkdir -m 0700 "$mock_bin"
+cat > "$mock_bin/podman" <<'MOCK_PODMAN'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == inspect && "${2:-}" == --format && "${4:-}" == codexia-db ]]; then
+  case "$3" in
+    '{{.Config.Image}}') printf '%s\n' 'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536' ;;
+    '{{json .Mounts}}') printf '%s\n' '[{"Type":"volume","Name":"codexia-postgres","Destination":"/var/lib/postgresql/data","RW":true},{"Type":"bind","Name":"","Source":"/etc/codexia/postgres/010-create-app-role.sh","Destination":"/docker-entrypoint-initdb.d/010-create-app-role.sh","RW":false}]' ;;
+    '{{json .NetworkSettings.Networks}}') printf '%s\n' '{"codexia-data":{}}' ;;
+    '{{json .HostConfig.PortBindings}}') printf '%s\n' 'null' ;;
+    '{{json .Config.Env}}') printf '%s\n' '["PGDATA=/var/lib/postgresql/data/pgdata","POSTGRES_DB=codexia","POSTGRES_USER=codexia_admin","POSTGRES_PASSWORD_FILE=/run/secrets/admin-password"]' ;;
+    '{{json .Config.Secrets}}')
+      admin_id=current-admin-secret-id
+      app_id=current-app-secret-id
+      case "${CODEXIA_TEST_STALE_DB_SECRET:-}" in
+        admin) admin_id=stale-admin-secret-id ;;
+        app) app_id=stale-app-secret-id ;;
+        *) exit 2 ;;
+      esac
+      printf '[{"Name":"codexia-postgres-admin-password","ID":"%s"},{"Name":"codexia-postgres-app-password","ID":"%s"}]\n' "$admin_id" "$app_id"
+      ;;
+    *) exit 2 ;;
+  esac
+elif [[ "${1:-}" == secret && "${2:-}" == inspect && "${3:-}" == --format ]]; then
+  case "${5:-}" in
+    codexia-postgres-admin-password) printf '%s\n' current-admin-secret-id ;;
+    codexia-postgres-app-password) printf '%s\n' current-app-secret-id ;;
+    *) exit 2 ;;
+  esac
+else
+  exit 2
+fi
+MOCK_PODMAN
+chmod 0700 "$mock_bin/podman"
+for stale_secret in admin app; do
+cat > "$tmp/verify-db-stale-secrets.yml" <<YAML
+---
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  environment:
+    PATH: "$mock_bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    CODEXIA_TEST_STALE_DB_SECRET: "$stale_secret"
+  tasks:
+    - ansible.builtin.include_tasks: "$repo_root/deploy/ansible/verify-base-db-container.yml"
+YAML
+if "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$tmp/verify-db-stale-secrets.yml" > "$tmp/db-stale-secrets.log" 2>&1; then
+  echo "Database container verification accepted a stale $stale_secret secret ID" >&2
+  exit 1
+fi
+grep -q 'Database container has unexpected PGDATA, storage, network, port, or current secret identity configuration' "$tmp/db-stale-secrets.log"
+done
+rm -rf -- "$mock_bin"
 
 test "$(podman network inspect --format '{{.Name}}|{{.Driver}}|{{.Internal}}' codexia-data)" = 'codexia-data|bridge|true'
 test "$(podman network inspect --format '{{.Name}}|{{.Driver}}|{{.Internal}}' codexia)" = 'codexia|bridge|false'
 for volume in codexia-postgres codexia-data codexia-history; do
   test "$(podman volume inspect --format '{{.Name}}' "$volume")" = "$volume"
 done
-test "$(podman inspect --format '{{.Config.Image}}' codexia-db)" = 'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536'
+actual_db_image=$(podman inspect --format '{{.Config.Image}}' codexia-db)
+case "$actual_db_image" in
+  'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536'|\
+  'docker.io/library/postgres@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536') ;;
+  *) printf 'Unexpected PostgreSQL image reference: %s\n' "$actual_db_image" >&2; exit 1 ;;
+esac
 test "$(podman inspect --format '{{json .NetworkSettings.Networks}}' codexia-db | jq -r 'keys | join(",")')" = codexia-data
 test "$(podman inspect --format '{{json .HostConfig.PortBindings}}' codexia-db | jq -c 'if . == null then {} else . end')" = '{}'
 test "$(podman inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}|{{.Destination}}{{"\n"}}{{end}}{{end}}' codexia-db)" = 'codexia-postgres|/var/lib/postgresql/data'
@@ -180,10 +506,20 @@ expect_tunnel_drift_rejection() {
     echo 'Tunnel adoption accepted noncanonical runtime state' >&2
     exit 1
   fi
-  grep -q 'Existing Tunnel image, private network, loopback-only port' "$tmp/tunnel-runtime-drift.log"
+  if ! grep -q 'Existing Tunnel image, private network, loopback-only port' "$tmp/tunnel-runtime-drift.log"; then
+    echo 'Tunnel runtime drift failed for an unexpected reason; captured Ansible output follows:' >&2
+    cat "$tmp/tunnel-runtime-drift.log" >&2
+    exit 1
+  fi
 }
 create_tunnel_fixture() {
   podman create --name codexia-tunnel "$@" --secret "${tunnel_fixture_secret:-codexia-tunnel-token}",type=mount,target=/run/secrets/token --read-only --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m "$tunnel_image" tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token-file /run/secrets/token >/dev/null
+  printf 'Tunnel fixture secret identities: '
+  podman inspect --format '{{json .Config.Secrets}}' codexia-tunnel | jq -c 'if type == "array" then map({Name}) else . end'
+  printf 'Tunnel fixture secret mount arguments: '
+  podman inspect --format '{{json .Config.CreateCommand}}' codexia-tunnel | jq -c 'if type == "array" then [range(0; length) as $i | select(.[ $i ] == "--secret" or (.[ $i ] | startswith("--secret="))) | .[$i], .[$i + 1]] else . end'
+  printf 'Tunnel fixture secret mount metadata: '
+  podman inspect --format '{{json .Mounts}}' codexia-tunnel | jq -c 'if type == "array" then map({Type,Name,Destination,RW}) else . end'
 }
 create_bind_tunnel_fixture() {
   podman create --name codexia-tunnel "$@" --read-only --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m "$tunnel_image" tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token-file /run/secrets/token >/dev/null
@@ -213,10 +549,9 @@ verify_tunnel > "$tmp/tunnel-runtime-canonical.log" || { cat "$tmp/tunnel-runtim
 podman rm codexia-tunnel >/dev/null
 as_service rmdir "$service_home/unexpected-tunnel-mount"
 
-# Loading the generated Tunnel unit must not start the Tunnel during base convergence.
-systemctl --user daemon-reload
-rc=0; systemctl --user is-active codexia-tunnel.service >/dev/null 2>&1 || rc=$?
-test "$rc" != 0
+# Rechecking the loaded unit after the adoption fixtures must not start it.
+test "$(systemctl --user show --property=LoadState --value codexia-tunnel.service)" = loaded
+test "$(systemctl --user show --property=ActiveState --value codexia-tunnel.service)" = inactive
 rc=0; podman container exists codexia-tunnel || rc=$?
 test "$rc" = 1
 test "$(podman inspect --format '{{json .HostConfig.PortBindings}}' codexia-db | jq -c 'if . == null then {} else . end')" = '{}'
@@ -227,13 +562,30 @@ case " $legacy_requires " in *' codexia-api.service '*) ;; *) echo 'Tunnel did n
 case " $legacy_after " in *' codexia-api.service '*) ;; *) echo 'Tunnel was not ordered after the legacy API unit' >&2; exit 1;; esac
 case " $legacy_after " in *' network-online.target '*) ;; *) echo 'Tunnel lost network-online ordering' >&2; exit 1;; esac
 
-# Simulate initdb interruption after the role transaction rolled back: the
-# empty database remains, the role is absent, and a repeat base apply repairs it
-# from the same protected secret without replacing the volume.
-podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c 'ALTER SCHEMA public OWNER TO codexia_admin' >/dev/null
+# A database containing only a user-defined type and no migration ledger is
+# not pristine. Role recovery must reject it and preserve the type and volume.
+podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c \
+  'ALTER SCHEMA public OWNER TO codexia_admin; CREATE TYPE public.phase_b_enum_probe AS ENUM ('"'"'kept'"'"');' >/dev/null
 podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d postgres -c 'ALTER DATABASE codexia OWNER TO codexia_admin; DROP ROLE codexia' >/dev/null
+if apply_base > "$tmp/type-only-no-ledger.log" 2>&1; then
+  echo 'Base convergence treated a user-defined type without a migration ledger as pristine' >&2
+  exit 1
+fi
+grep -q 'Missing application role is recoverable only for an explicitly approved empty PostgreSQL database' "$tmp/type-only-no-ledger.log"
+test "$(podman exec codexia-db psql -X -qAt -U codexia_admin -d postgres -c "SELECT count(*) FROM pg_roles WHERE rolname='codexia'")" = 0
+test "$(podman exec codexia-db psql -X -qAt -U codexia_admin -d codexia -c "SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='public' AND t.typname='phase_b_enum_probe'")" = 1
+podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c 'DROP TYPE public.phase_b_enum_probe' >/dev/null
+
+# Simulate initdb interruption after the role transaction rolled back: after
+# removing the test object, the truly empty database is recoverable without
+# replacing its volume or rotating either protected secret.
 apply_base > "$tmp/init-recovery.log" || { cat "$tmp/init-recovery.log"; exit 1; }
 test "$(podman exec codexia-db psql -X -qAt -U codexia_admin -d postgres -c "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname='codexia'")" = codexia
+
+# The interrupted-role fixture temporarily transfers public-schema ownership
+# to the administrator so the application role can be dropped. Restore the
+# normal application-owned schema before exercising the real app migrations.
+podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c 'ALTER SCHEMA public OWNER TO codexia' >/dev/null
 
 # Apply the repository's exact migration set so later convergence proves a
 # real schema adoption instead of accepting an untracked application database.
@@ -257,7 +609,7 @@ SQL
   done < <(find "$repo_root/packages/persistence-postgres/migrations" -maxdepth 1 -type f -name '*.sql' | sort)
   printf '\nCOMMIT;\n'
 } > "$migration_sql"
-podman exec -i codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia < "$migration_sql" >/dev/null
+podman exec -i codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/app-password)"; exec psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia -d codexia' < "$migration_sql" >/dev/null
 apply_base > "$tmp/schema-adoption.log" || { cat "$tmp/schema-adoption.log"; exit 1; }
 grep -q 'changed=0' "$tmp/schema-adoption.log"
 
@@ -369,6 +721,15 @@ cat > "$switch_playbook" <<YAML
 - hosts: localhost
   connection: local
   gather_facts: false
+  become: true
+  become_user: $service_user
+  environment:
+    HOME: "$service_home"
+    XDG_CONFIG_HOME: "$service_home/.config"
+    XDG_DATA_HOME: "$service_home/.local/share"
+    XDG_STATE_HOME: "$service_home/.local/state"
+    XDG_RUNTIME_DIR: "/run/user/$service_uid"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/$service_uid/bus"
   vars:
     ansible_python_interpreter: /usr/bin/python3
     quadlet_dir: "$quadlet_dir"

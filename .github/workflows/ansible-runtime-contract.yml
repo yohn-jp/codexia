@@ -1,0 +1,303 @@
+name: Verify Ansible Runtime Contract
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - deploy/updater/standalone-host.mjs
+      - deploy/updater/standalone-updater.mjs
+      - deploy/updater/standalone-maintenance.mjs
+      - deploy/updater/codexia-updater
+      - deploy/updater/codexia-updater-*.example
+      - deploy/updater/codexia-api-proxy.container.example
+      - deploy/updater/test-runtime-contract-integration.sh
+      - deploy/updater/test-standalone-maintenance-integration.mjs
+      - deploy/ansible/prepare.yml
+      - deploy/ansible/maintenance.yml
+      - deploy/ansible/verify.yml
+      - deploy/ansible/verify-timer.yml
+      - deploy/ansible/test-verify-timer.sh
+      - deploy/ansible/site.yml
+      - deploy/ansible/validate-runtime.yml
+      - deploy/ansible/test-runtime-contract.sh
+      - scripts/standalone-host.test.mjs
+      - scripts/standalone-maintenance.test.mjs
+      - scripts/standalone-update-controller.mjs
+      - .github/workflows/ansible-runtime-contract.yml
+  push:
+    branches: [main]
+    paths:
+      - deploy/updater/standalone-host.mjs
+      - deploy/updater/standalone-updater.mjs
+      - deploy/updater/standalone-maintenance.mjs
+      - deploy/updater/codexia-updater
+      - deploy/updater/codexia-updater-*.example
+      - deploy/updater/codexia-api-proxy.container.example
+      - deploy/updater/test-runtime-contract-integration.sh
+      - deploy/updater/test-standalone-maintenance-integration.mjs
+      - deploy/ansible/prepare.yml
+      - deploy/ansible/maintenance.yml
+      - deploy/ansible/verify.yml
+      - deploy/ansible/verify-timer.yml
+      - deploy/ansible/test-verify-timer.sh
+      - deploy/ansible/site.yml
+      - deploy/ansible/validate-runtime.yml
+      - deploy/ansible/test-runtime-contract.sh
+      - scripts/standalone-host.test.mjs
+      - scripts/standalone-maintenance.test.mjs
+      - scripts/standalone-update-controller.mjs
+      - .github/workflows/ansible-runtime-contract.yml
+permissions:
+  contents: read
+jobs:
+  runtime-contract:
+    name: Verify real rootless runtime contract on Ubuntu VM
+    runs-on: ubuntu-26.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+      - name: Install isolated host test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends podman buildah uidmap netavark aardvark-dns passt slirp4netns fuse-overlayfs dbus-user-session
+          sudo python3 -m venv /opt/codexia-ansible
+          sudo /opt/codexia-ansible/bin/pip install ansible-core==2.21.6
+      - name: Prepare an isolated rootless systemd identity
+        run: |
+          set -euo pipefail
+          fixture_user=codexia-runtime-contract-test
+          test -z "$(id -u "$fixture_user" 2>/dev/null || true)"
+          sudo useradd --create-home --shell /bin/bash "$fixture_user"
+          touch "$RUNNER_TEMP/codexia-runtime-contract.user-created"
+          sudo usermod --groups '' "$fixture_user"
+          fixture_uid=$(id -u "$fixture_user")
+          fixture_home=$(getent passwd "$fixture_user" | cut -d: -f6)
+          fixture_repo="$fixture_home/codexia-runtime-contract-repo"
+          test ! -e "$fixture_repo" && test ! -L "$fixture_repo"
+          touch "$RUNNER_TEMP/codexia-runtime-contract.repo-copy-created"
+          sudo -u "$fixture_user" install -d -m 0700 "$fixture_repo"
+          git -C "$GITHUB_WORKSPACE" archive HEAD | sudo -u "$fixture_user" tar -xf - -C "$fixture_repo"
+          printf '%s\n' 'codexia-runtime-contract-repo/v1' | sudo -u "$fixture_user" tee "$fixture_repo/.codexia-runtime-contract-fixture" >/dev/null
+          test "$(sudo stat -c '%u' "$fixture_repo")" = "$fixture_uid"
+          test "$(sudo stat -c '%u' "$fixture_repo/.codexia-runtime-contract-fixture")" = "$fixture_uid"
+          test -d /opt && test ! -L /opt
+          test ! -e /opt/codexia-updater && test ! -L /opt/codexia-updater
+          touch "$RUNNER_TEMP/codexia-runtime-contract.source-tree-created"
+          sudo mkdir -m 0700 -- /opt/codexia-updater
+          sudo chown "$fixture_user:$fixture_user" /opt/codexia-updater
+          test "$(sudo stat -c '%u' /opt/codexia-updater)" = "$fixture_uid"
+          printf '%s\n' 'codexia-runtime-contract-source/v1' | sudo -u "$fixture_user" tee /opt/codexia-updater/.codexia-runtime-contract-source >/dev/null
+          sudo -u "$fixture_user" chmod 0600 /opt/codexia-updater/.codexia-runtime-contract-source
+          test "$(sudo stat -c '%u' /opt/codexia-updater/.codexia-runtime-contract-source)" = "$fixture_uid"
+          test "$(sudo cat -- /opt/codexia-updater/.codexia-runtime-contract-source)" = codexia-runtime-contract-source/v1
+          test ! -e /var/cache/codexia && test ! -L /var/cache/codexia
+          test ! -e /var/cache/codexia/models && test ! -L /var/cache/codexia/models
+          touch "$RUNNER_TEMP/codexia-runtime-contract.model-cache-created"
+          sudo mkdir -m 0755 -- /var/cache/codexia
+          touch "$RUNNER_TEMP/codexia-runtime-contract.model-cache-parent-created"
+          sudo mkdir -m 0700 -- /var/cache/codexia/models
+          touch "$RUNNER_TEMP/codexia-runtime-contract.model-cache-dir-created"
+          sudo chown "$fixture_user:$fixture_user" /var/cache/codexia/models
+          sudo -u "$fixture_user" install -d -m 0700 "$fixture_home/.config"
+          subuid_max=$(awk -F: 'BEGIN { max = 100000 } { end = $2 + $3; if (end > max) max = end } END { print max }' /etc/subuid)
+          subgid_max=$(awk -F: 'BEGIN { max = 100000 } { end = $2 + $3; if (end > max) max = end } END { print max }' /etc/subgid)
+          subuid_start=$(( (subuid_max + 65535) / 65536 * 65536 ))
+          subgid_start=$(( (subgid_max + 65535) / 65536 * 65536 ))
+          sudo usermod --add-subuids "$subuid_start-$((subuid_start + 65535))" --add-subgids "$subgid_start-$((subgid_start + 65535))" "$fixture_user"
+          sudo loginctl enable-linger "$fixture_user"
+          sudo install -d -m 0755 "/run/systemd/system/user@${fixture_uid}.service.d"
+          cat <<EOF | sudo tee "/run/systemd/system/user@${fixture_uid}.service.d/10-codexia-runtime-ci.conf" >/dev/null
+          [Service]
+          Environment=HOME=$fixture_home
+          Environment=XDG_CONFIG_HOME=$fixture_home/.config
+          Environment=XDG_RUNTIME_DIR=/run/user/$fixture_uid
+          EOF
+          sudo systemctl daemon-reload
+          sudo systemctl restart "user@${fixture_uid}.service"
+          for attempt in $(seq 1 20); do
+            if sudo -u "$fixture_user" env HOME="$fixture_home" XDG_RUNTIME_DIR="/run/user/$fixture_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" systemctl --user show --property=Version >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          sudo -u "$fixture_user" env HOME="$fixture_home" XDG_CONFIG_HOME="$fixture_home/.config" XDG_RUNTIME_DIR="/run/user/$fixture_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" systemctl --user show --property=Version
+          manager_pid=$(sudo systemctl show --property=MainPID --value "user@${fixture_uid}.service")
+          test "$manager_pid" -gt 1
+          manager_process_env=$(sudo cat "/proc/$manager_pid/environ" | tr '\0' '\n')
+          printf '%s\n' 'Fixture user-manager process environment:'
+          printf '%s\n' "$manager_process_env" | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)='
+          for expected in "HOME=$fixture_home" "XDG_CONFIG_HOME=$fixture_home/.config" "XDG_RUNTIME_DIR=/run/user/$fixture_uid"; do
+            grep -Fxq "$expected" <<<"$manager_process_env"
+          done
+          sudo -u "$fixture_user" env HOME="$fixture_home" XDG_CONFIG_HOME="$fixture_home/.config" XDG_RUNTIME_DIR="/run/user/$fixture_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" systemctl --user import-environment HOME XDG_CONFIG_HOME XDG_RUNTIME_DIR
+          manager_env=$(sudo -u "$fixture_user" env HOME="$fixture_home" XDG_CONFIG_HOME="$fixture_home/.config" XDG_RUNTIME_DIR="/run/user/$fixture_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" systemctl --user show-environment)
+          for expected in "HOME=$fixture_home" "XDG_CONFIG_HOME=$fixture_home/.config" "XDG_RUNTIME_DIR=/run/user/$fixture_uid"; do
+            grep -Fxq "$expected" <<<"$manager_env"
+          done
+          user_environment_generator_dir=/run/systemd/user-environment-generators
+          user_environment_generator_path="$user_environment_generator_dir/90-codexia-runtime-contract-$fixture_uid"
+          if sudo test -d "$user_environment_generator_dir"; then
+            sudo test ! -L "$user_environment_generator_dir"
+            sudo test "$(sudo realpath -- "$user_environment_generator_dir")" = "$user_environment_generator_dir"
+          else
+            sudo install -d -m 0755 "$user_environment_generator_dir"
+            touch "$RUNNER_TEMP/codexia-runtime-contract.user-env-generator-dir-created"
+          fi
+          sudo test ! -e "$user_environment_generator_path" && sudo test ! -L "$user_environment_generator_path"
+          cat > "$RUNNER_TEMP/codexia-runtime-contract.user-env-generator.expected" <<EOF
+          #!/bin/sh
+          if [ "\$(id -u)" = "$fixture_uid" ]; then
+            printf '%s\\n' 'XDG_CONFIG_HOME=$fixture_home/.config' 'XDG_RUNTIME_DIR=/run/user/$fixture_uid'
+          fi
+          EOF
+          touch "$RUNNER_TEMP/codexia-runtime-contract.user-env-generator-created"
+          sudo install -m 0755 "$RUNNER_TEMP/codexia-runtime-contract.user-env-generator.expected" "$user_environment_generator_path"
+          test ! -e /etc/codexia-iac-disposable-vm && test ! -L /etc/codexia-iac-disposable-vm
+          printf '%s\n' 'codexia-iac-disposable-vm/v1' | sudo tee /etc/codexia-iac-disposable-vm >/dev/null
+          touch "$RUNNER_TEMP/codexia-runtime-contract.marker-created"
+          sudo chown root:root /etc/codexia-iac-disposable-vm
+          sudo chmod 0444 /etc/codexia-iac-disposable-vm
+      - name: Check runtime schema, maintenance guards and Ansible validation
+        run: |
+          node --test scripts/standalone-host.test.mjs scripts/standalone-maintenance.test.mjs
+          /opt/codexia-ansible/bin/ansible-playbook -i deploy/ansible/inventory.example.yml deploy/ansible/site.yml --syntax-check
+          ANSIBLE_PLAYBOOK=/opt/codexia-ansible/bin/ansible-playbook bash deploy/ansible/test-runtime-contract.sh
+          ANSIBLE_PLAYBOOK=/opt/codexia-ansible/bin/ansible-playbook bash deploy/ansible/test-verify-timer.sh
+          bash -n deploy/updater/test-runtime-contract-integration.sh
+          node --check deploy/updater/test-standalone-maintenance-integration.mjs
+      - name: Exercise generated Core and Full Quadlets on disposable rootless Podman
+        env:
+          CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE: 'yes'
+          ANSIBLE_PLAYBOOK: /opt/codexia-ansible/bin/ansible-playbook
+        run: |
+          fixture_user=codexia-runtime-contract-test
+          fixture_uid=$(id -u "$fixture_user")
+          fixture_home=$(getent passwd "$fixture_user" | cut -d: -f6)
+          fixture_repo="$fixture_home/codexia-runtime-contract-repo"
+          cd /tmp
+          sudo -u "$fixture_user" env \
+            HOME="$fixture_home" XDG_CONFIG_HOME="$fixture_home/.config" \
+            XDG_RUNTIME_DIR="/run/user/$fixture_uid" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" \
+            CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE=yes \
+            PATH="$PATH" \
+            bash "$fixture_repo/deploy/updater/test-runtime-contract-integration.sh"
+      - name: Remove the disposable VM marker and user manager
+        if: always()
+        run: |
+          set +e
+          cleanup_failed=0
+          fixture_user=codexia-runtime-contract-test
+          if test -f "$RUNNER_TEMP/codexia-runtime-contract.marker-created"; then
+            sudo rm -f /etc/codexia-iac-disposable-vm || cleanup_failed=1
+            rm -f "$RUNNER_TEMP/codexia-runtime-contract.marker-created" || cleanup_failed=1
+          fi
+          if test -f "$RUNNER_TEMP/codexia-runtime-contract.repo-copy-created"; then
+            fixture_uid=$(id -u "$fixture_user" 2>/dev/null || true)
+            fixture_home=$(getent passwd "$fixture_user" 2>/dev/null | cut -d: -f6)
+            fixture_repo="$fixture_home/codexia-runtime-contract-repo"
+            if test -n "$fixture_uid" \
+              && sudo test -d "$fixture_repo" && sudo test ! -L "$fixture_repo" \
+              && test "$(sudo realpath -- "$fixture_repo")" = "$fixture_repo" \
+              && test "$(sudo stat -c '%u' "$fixture_repo")" = "$fixture_uid" \
+              && sudo test -f "$fixture_repo/.codexia-runtime-contract-fixture" \
+              && sudo test ! -L "$fixture_repo/.codexia-runtime-contract-fixture" \
+              && test "$(sudo cat -- "$fixture_repo/.codexia-runtime-contract-fixture")" = codexia-runtime-contract-repo/v1 \
+              && test "$(sudo stat -c '%u' "$fixture_repo/.codexia-runtime-contract-fixture")" = "$fixture_uid"; then
+              sudo rm -rf --one-file-system -- "$fixture_repo" || cleanup_failed=1
+              rm -f "$RUNNER_TEMP/codexia-runtime-contract.repo-copy-created" || cleanup_failed=1
+            else
+              echo 'Refusing to remove an unexpected or replaced runtime-contract checkout copy' >&2
+              sudo stat -c 'checkout fixture: %n owner=%u mode=%a type=%F' "$fixture_repo" "$fixture_repo/.codexia-runtime-contract-fixture" >&2 || true
+              sudo cat -- "$fixture_repo/.codexia-runtime-contract-fixture" >&2 || true
+              cleanup_failed=1
+            fi
+          fi
+          if test -f "$RUNNER_TEMP/codexia-runtime-contract.source-tree-created"; then
+            fixture_uid=$(id -u "$fixture_user" 2>/dev/null || true)
+            if test -n "$fixture_uid" \
+              && sudo test -d /opt/codexia-updater && sudo test ! -L /opt/codexia-updater \
+              && test "$(sudo realpath -- /opt/codexia-updater)" = /opt/codexia-updater \
+              && test "$(sudo stat -c '%u' /opt/codexia-updater)" = "$fixture_uid" \
+              && sudo test -f /opt/codexia-updater/.codexia-runtime-contract-source \
+              && sudo test ! -L /opt/codexia-updater/.codexia-runtime-contract-source \
+              && test "$(sudo cat -- /opt/codexia-updater/.codexia-runtime-contract-source)" = codexia-runtime-contract-source/v1 \
+              && test "$(sudo stat -c '%u' /opt/codexia-updater/.codexia-runtime-contract-source)" = "$fixture_uid"; then
+              sudo rm -rf --one-file-system /opt/codexia-updater || cleanup_failed=1
+              rm -f "$RUNNER_TEMP/codexia-runtime-contract.source-tree-created" || cleanup_failed=1
+            else
+              echo 'Refusing to remove an unexpected or replaced updater source fixture' >&2
+              sudo stat -c 'source fixture: %n owner=%u mode=%a type=%F' /opt/codexia-updater /opt/codexia-updater/.codexia-runtime-contract-source >&2 || true
+              sudo cat -- /opt/codexia-updater/.codexia-runtime-contract-source >&2 || true
+              cleanup_failed=1
+            fi
+          fi
+          if test -f "$RUNNER_TEMP/codexia-runtime-contract.model-cache-created"; then
+            fixture_uid=$(id -u codexia-runtime-contract-test 2>/dev/null || true)
+            if test ! -e /var/cache/codexia && test ! -L /var/cache/codexia; then
+              rm -f "$RUNNER_TEMP/codexia-runtime-contract.model-cache-created" "$RUNNER_TEMP/codexia-runtime-contract.model-cache-parent-created" "$RUNNER_TEMP/codexia-runtime-contract.model-cache-dir-created" || cleanup_failed=1
+            elif test -f "$RUNNER_TEMP/codexia-runtime-contract.model-cache-parent-created" \
+              && test -d /var/cache/codexia && test ! -L /var/cache/codexia \
+              && test "$(realpath -- /var/cache/codexia)" = /var/cache/codexia \
+              && test "$(stat -c '%u' /var/cache/codexia)" = 0; then
+              children=$(sudo find /var/cache/codexia -mindepth 1 -maxdepth 1 -printf '%f')
+              if test -z "$children"; then
+                if sudo rmdir -- /var/cache/codexia; then rm -f "$RUNNER_TEMP/codexia-runtime-contract.model-cache-created" "$RUNNER_TEMP/codexia-runtime-contract.model-cache-parent-created" "$RUNNER_TEMP/codexia-runtime-contract.model-cache-dir-created" || cleanup_failed=1; else cleanup_failed=1; fi
+              elif test -f "$RUNNER_TEMP/codexia-runtime-contract.model-cache-dir-created" \
+                && test "$children" = models && test -n "$fixture_uid" \
+                && test -d /var/cache/codexia/models && test ! -L /var/cache/codexia/models \
+                && test "$(realpath -- /var/cache/codexia/models)" = /var/cache/codexia/models \
+                && { test "$(stat -c '%u' /var/cache/codexia/models)" = "$fixture_uid" || test "$(stat -c '%u' /var/cache/codexia/models)" = 0; }; then
+                if sudo rm -rf -- /var/cache/codexia; then rm -f "$RUNNER_TEMP/codexia-runtime-contract.model-cache-created" "$RUNNER_TEMP/codexia-runtime-contract.model-cache-parent-created" "$RUNNER_TEMP/codexia-runtime-contract.model-cache-dir-created" || cleanup_failed=1; else cleanup_failed=1; fi
+              else
+                echo 'Refusing to remove an unexpected or replaced runtime model-cache tree' >&2
+                cleanup_failed=1
+              fi
+            else
+              echo 'Refusing to remove an unexpected or replaced runtime model-cache tree' >&2
+              cleanup_failed=1
+            fi
+          fi
+          if test -f "$RUNNER_TEMP/codexia-runtime-contract.user-env-generator-created"; then
+            fixture_uid=$(id -u "$fixture_user" 2>/dev/null || true)
+            user_environment_generator_path="/run/systemd/user-environment-generators/90-codexia-runtime-contract-$fixture_uid"
+            if test -n "$fixture_uid" \
+              && sudo test -f "$user_environment_generator_path" \
+              && sudo test ! -L "$user_environment_generator_path" \
+              && test "$(sudo stat -c '%u' "$user_environment_generator_path")" = 0 \
+              && test "$(sudo stat -c '%a' "$user_environment_generator_path")" = 755 \
+              && sudo cmp -s "$RUNNER_TEMP/codexia-runtime-contract.user-env-generator.expected" "$user_environment_generator_path"; then
+              sudo rm -- "$user_environment_generator_path" || cleanup_failed=1
+              rm -f "$RUNNER_TEMP/codexia-runtime-contract.user-env-generator-created" "$RUNNER_TEMP/codexia-runtime-contract.user-env-generator.expected" || cleanup_failed=1
+            elif test -n "$fixture_uid" && sudo test ! -e "$user_environment_generator_path" && sudo test ! -L "$user_environment_generator_path"; then
+              rm -f "$RUNNER_TEMP/codexia-runtime-contract.user-env-generator-created" "$RUNNER_TEMP/codexia-runtime-contract.user-env-generator.expected" || cleanup_failed=1
+            else
+              echo 'Refusing to remove an unexpected runtime-contract user environment generator' >&2
+              sudo stat -c 'user environment generator: %n owner=%u mode=%a type=%F' "$user_environment_generator_path" >&2 || true
+              cleanup_failed=1
+            fi
+          fi
+          if test -f "$RUNNER_TEMP/codexia-runtime-contract.user-env-generator-dir-created"; then
+            if sudo test -d /run/systemd/user-environment-generators \
+              && sudo test ! -L /run/systemd/user-environment-generators \
+              && test "$(sudo realpath -- /run/systemd/user-environment-generators)" = /run/systemd/user-environment-generators \
+              && test -z "$(sudo find /run/systemd/user-environment-generators -mindepth 1 -maxdepth 1 -print -quit)"; then
+              sudo rmdir -- /run/systemd/user-environment-generators || cleanup_failed=1
+              rm -f "$RUNNER_TEMP/codexia-runtime-contract.user-env-generator-dir-created" || cleanup_failed=1
+            else
+              echo 'Refusing to remove a nonempty or replaced user environment generator directory' >&2
+              cleanup_failed=1
+            fi
+          fi
+          if test -f "$RUNNER_TEMP/codexia-runtime-contract.user-created" && id "$fixture_user" >/dev/null 2>&1; then
+            fixture_uid=$(id -u "$fixture_user")
+            sudo loginctl disable-linger "$fixture_user" || true
+            sudo systemctl stop "user@${fixture_uid}.service" || true
+            sudo rm -f "/run/systemd/system/user@${fixture_uid}.service.d/10-codexia-runtime-ci.conf"
+            sudo rmdir "/run/systemd/system/user@${fixture_uid}.service.d" 2>/dev/null || true
+            sudo userdel --remove "$fixture_user" || true
+            rm -f "$RUNNER_TEMP/codexia-runtime-contract.user-created"
+          fi
+          exit "$cleanup_failed"

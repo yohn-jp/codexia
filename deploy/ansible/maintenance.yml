@@ -1,0 +1,96 @@
+---
+- name: Require explicit maintenance approval for updater source/config/unit changes
+  ansible.builtin.assert:
+    that:
+      - codexia_maintenance_approved | default(false) | bool
+      - journal.stat.exists
+    fail_msg: Maintenance requires an initialized, reviewed controller and explicit approval.
+- name: Create the private maintenance staging area
+  ansible.builtin.file:
+    path: "{{ maintenance_dir }}/candidates"
+    state: directory
+    mode: '0700'
+- name: Allocate an isolated maintenance candidate
+  ansible.builtin.tempfile:
+    path: "{{ maintenance_dir }}/candidates"
+    state: directory
+    prefix: candidate-
+  register: maintenance_candidate
+- name: Create candidate source, unit and Quadlet directories
+  ansible.builtin.file:
+    path: "{{ maintenance_candidate.path }}/{{ item }}"
+    state: directory
+    mode: '0700'
+  loop:
+    - deploy/updater
+    - scripts
+    - units
+    - quadlet
+- name: Stage the complete updater source dependency closure
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/{{ item }}"
+    dest: "{{ maintenance_candidate.path }}/{{ item }}"
+    mode: '0600'
+  loop:
+    - deploy/updater/codexia-updater
+    - deploy/updater/standalone-updater.mjs
+    - deploy/updater/standalone-host.mjs
+    - deploy/updater/standalone-maintenance.mjs
+    - deploy/updater/proxy.mjs
+    - deploy/updater/standalone-backup.sh
+    - scripts/standalone-update-controller.mjs
+    - scripts/update-host-state.mjs
+    - scripts/update-channel.mjs
+    - scripts/update-release-policy.mjs
+- name: Stage the reviewed updater systemd units
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/updater/{{ item }}.example"
+    dest: "{{ maintenance_candidate.path }}/units/{{ item }}"
+    mode: '0600'
+  loop:
+    - codexia-updater-boot.service
+    - codexia-updater.service
+    - codexia-updater.timer
+- name: Stage the desired updater configuration without changing its enabled state
+  ansible.builtin.copy:
+    content: "{{ desired_config | to_nice_json }}\n"
+    dest: "{{ maintenance_candidate.path }}/config.json"
+    mode: '0600'
+- name: Stage the desired private proxy Quadlet without starting or replacing the running proxy
+  ansible.builtin.copy:
+    content: "{{ desired_proxy_quadlet }}"
+    dest: "{{ maintenance_candidate.path }}/quadlet/codexia-api-proxy.container"
+    mode: '0600'
+- name: Describe the reviewed candidate and its only permitted host destinations
+  ansible.builtin.copy:
+    content: >-
+      {{
+        {
+          'format': 'codexia-updater-maintenance/v1',
+          'candidateRoot': maintenance_candidate.path,
+          'sourceDir': source_dir,
+          'unitDir': unit_dir,
+          'configPath': config_path
+        } | to_nice_json
+      }}
+      {{ '\n' }}
+    dest: "{{ maintenance_candidate.path }}/manifest.json"
+    mode: '0600'
+- name: Apply and verify the candidate under the existing updater host lock
+  ansible.builtin.command:
+    argv:
+      - sh
+      - "{{ maintenance_candidate.path }}/deploy/updater/codexia-updater"
+      - maintain-candidate
+      - "{{ maintenance_candidate.path }}/deploy/updater/standalone-updater.mjs"
+      - "{{ config_path }}"
+      - "{{ maintenance_candidate.path }}/manifest.json"
+  environment:
+    CODEXIA_UPDATER_LOCK_DIRECTORY: "{{ state_dir }}"
+  register: maintenance_result
+  changed_when: true
+- name: Remove the completed temporary source candidate
+  ansible.builtin.file:
+    path: "{{ maintenance_candidate.path }}"
+    state: absent
+  when: maintenance_result is succeeded

@@ -3,8 +3,17 @@
 set -euo pipefail
 test "${GITHUB_ACTIONS:-}" = true
 test "$(lsb_release -rs)" = 26.04
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+tmp=$(mktemp -d /tmp/codexia-base-secrets.XXXXXX)
+cleanup() {
+  local status=$?
+  trap - EXIT
+  if [[ "$tmp" == /tmp/codexia-base-secrets.* && -d "$tmp" && ! -L "$tmp" ]]; then
+    sudo rm -rf -- "$tmp" || printf 'Phase B secrets fixture cleanup could not remove its temporary directory.\n' >&2
+  fi
+  printf 'Phase B secrets fixture cleanup preserved script status %s.\n' "$status" >&2
+  exit "$status"
+}
+trap cleanup EXIT
 umask 077
 service_user=${CODEXIA_SERVICE_USER:?missing rootless fixture identity}
 service_uid=$(id -u "$service_user")
@@ -57,7 +66,7 @@ all:
         codexia_postgres_admin_password_file: "$tmp/admin"
         codexia_postgres_app_password_file: "$tmp/app"
 YAML
-apply() { "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i "$tmp/inventory.yml" deploy/ansible/site.yml; }
+apply() { ANSIBLE_LOCAL_TEMP="$tmp/ansible-local" "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i "$tmp/inventory.yml" deploy/ansible/site.yml; }
 apply > "$tmp/first.log" || { cat "$tmp/first.log"; exit 1; }
 for pair in 'auth codexia-auth-token' 'tunnel codexia-tunnel-token' 'admin codexia-postgres-admin-password' 'app codexia-postgres-app-password'; do
   read -r file name <<< "$pair"
@@ -73,6 +82,10 @@ podman secret rm codexia-tunnel-token >/dev/null
 if apply > "$tmp/fail.log"; then echo 'Existing volume with missing secret accepted' >&2; exit 1; fi
 rc=0; podman secret exists codexia-tunnel-token || rc=$?
 test "$rc" = 1
+# Restore the exact synthetic baseline for the following runtime integration
+# test; this is fixture cleanup, not Ansible-managed secret rotation.
+cat "$tmp/tunnel" | podman secret create codexia-tunnel-token - >/dev/null
+podman secret inspect --showsecret codexia-tunnel-token | jq -j '.[0].SecretData' | cmp - "$tmp/tunnel"
 if grep -Eq 'fixture-auth-token|fixture-tunnel-token|0{63}[12]' "$tmp/"*.log; then
   echo 'Credential appeared in Ansible output' >&2; exit 1
 fi

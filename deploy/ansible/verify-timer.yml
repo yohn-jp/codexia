@@ -1,0 +1,23 @@
+---
+- name: Observe the active polling timer state
+  ansible.builtin.command:
+    argv: [systemctl, --user, is-active, codexia-updater.timer]
+  register: updater_timer_active
+  changed_when: false
+  failed_when: updater_timer_active.rc not in [0, 3]
+  check_mode: false
+- name: Observe the enabled polling timer state
+  ansible.builtin.command:
+    argv: [systemctl, --user, is-enabled, codexia-updater.timer]
+  register: updater_timer_enabled
+  changed_when: false
+  failed_when: updater_timer_enabled.rc not in [0, 1]
+  check_mode: false
+- name: Verify polling timer activation matches the controller configuration
+  ansible.builtin.assert:
+    that:
+      - updater_timer_active.stdout | trim in ['active', 'inactive']
+      - updater_timer_enabled.stdout | trim in ['enabled', 'disabled']
+      - "(updater_timer_active.stdout | trim == 'active') == ((saved_config.content | b64decode | from_json).enabled | bool)"
+      - "(updater_timer_enabled.stdout | trim == 'enabled') == ((saved_config.content | b64decode | from_json).enabled | bool)"
+    fail_msg: Polling timer activation differs from the initialized controller configuration.
