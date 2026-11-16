@@ -28,9 +28,9 @@
     that: (existing_secret.stdout | from_json | first).SecretData == codexia_preflight_password
   no_log: true
   when: secret_exists.rc == 0
-- name: Reject reuse of the existing writer credential
+- name: Reject reuse of the existing writer or administrator credential
   ansible.builtin.command:
-    argv: [podman, exec, -i, codexia-db, sh, -ec, 'IFS= read -r candidate; test "$candidate" != "$(cat /run/secrets/app-password)"']
+    argv: [podman, exec, -i, codexia-db, sh, -ec, 'IFS= read -r candidate; test "$candidate" != "$(cat /run/secrets/app-password)"; test "$candidate" != "$(cat /run/secrets/admin-password)"']
     expand_argument_vars: false
     stdin: "{{ codexia_preflight_password }}"
   changed_when: false
