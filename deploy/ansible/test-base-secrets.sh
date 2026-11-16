@@ -51,6 +51,16 @@ expect_fail() {
   fi
 }
 # Invalid input or reused DB password must fail before any creation.
+chmod 0644 "$tmp/auth"
+expect_fail
+test -z "$(ls -A "$tmp/store")"
+chmod 0600 "$tmp/auth"
+ln -s "$tmp/auth" "$tmp/auth-link"
+sed "s#$tmp/auth#$tmp/auth-link#" "$tmp/test.yml" > "$tmp/link.yml"
+if "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$tmp/link.yml" > "$tmp/link.log"; then
+  echo 'Symlink secret input accepted' >&2; exit 1
+fi
+test -z "$(ls -A "$tmp/store")"
 cp "$tmp/app" "$tmp/app.original"
 printf 'invalid' > "$tmp/app"
 expect_fail
