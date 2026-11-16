@@ -140,9 +140,7 @@ export function assertRuntimeObservation(container,value,imageEnvironment,unitTe
   // Podman may omit tmpfs pseudo-mounts from Mounts; HostConfig.Tmpfs is checked below.
   assert.equal(actual.length,persistent.length+tmpfsMounts.length,'Legacy runtime contains an unsupported mount type');
   assert.equal(container.HostConfig?.Memory??0,runtime.resources.memoryMaxBytes??0,'Legacy memory limit drift');
-  const expectedCpuQuota=runtime.resources.cpuQuotaPercent===null?0:runtime.resources.cpuQuotaPercent*1000;
-  assert.equal(container.HostConfig?.CpuQuota??0,expectedCpuQuota,'Legacy CPU limit drift');
-  if(expectedCpuQuota!==0)assert.equal(container.HostConfig?.CpuPeriod??0,100000,'Legacy CPU period drift');
+  assert.equal(container.HostConfig?.CpuQuota??0,0,'Legacy writer has an unexpected container CPU quota');
   const tmpfs=container.HostConfig?.Tmpfs;
   assert.ok(tmpfs&&typeof tmpfs==='object','Legacy tmpfs settings are unobservable');
   assert.deepEqual(Object.keys(tmpfs).sort(),['/cache','/tmp'],'Legacy tmpfs mount set drift');

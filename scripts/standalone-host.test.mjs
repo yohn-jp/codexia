@@ -97,12 +97,13 @@ test('legacy runtime verification rejects undeclared environment, mounts and sys
    {Destination:'/models',Type:'bind',Source:runtime.modelCachePath,RW:false},
    {Destination:'/tmp',Type:'tmpfs',RW:true},
   ],
-  HostConfig:{PortBindings:{},ReadonlyRootfs:true,CapDrop:['ALL'],SecurityOpt:['no-new-privileges:true'],Memory:runtime.resources.memoryMaxBytes,CpuQuota:250000,CpuPeriod:100000,Tmpfs:{
+  HostConfig:{PortBindings:{},ReadonlyRootfs:true,CapDrop:['ALL'],SecurityOpt:['no-new-privileges:true'],Memory:runtime.resources.memoryMaxBytes,CpuQuota:0,CpuPeriod:0,Tmpfs:{
    '/tmp':'rw,nosuid,nodev,noexec,size=64m','/cache':'rw,nosuid,nodev,noexec,size=512m',
   }},
  };
  assert.doesNotThrow(()=>assertRuntimeObservation(observed,runtime,imageEnvironment,unit));
  assert.doesNotThrow(()=>assertRuntimeObservation({...observed,Mounts:observed.Mounts.filter(mount=>mount.Type!=='tmpfs')},runtime,imageEnvironment,unit));
+ assert.doesNotThrow(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,CpuQuota:0,CpuPeriod:0}},runtime,imageEnvironment,unit));
  assert.doesNotThrow(()=>assertRuntimeUnit('[Service]\nCPUQuota=250%\n',runtime));
  assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Hostname:'codexia-slot-blue'}},runtime,imageEnvironment,unit),/Podman-generated hostname drift/);
  assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:observed.Config.Env.map(entry=>entry==='HOSTNAME='+containerId.slice(0,12)?'HOSTNAME=injected-host':entry)}},runtime,imageEnvironment,unit),/unexpected runtime environment/);
@@ -115,7 +116,7 @@ test('legacy runtime verification rejects undeclared environment, mounts and sys
  assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:observed.Config.Env.map(entry=>entry==='CODEXIA_ACCESS_AUDIENCE='+access.audience?'CODEXIA_ACCESS_AUDIENCE='+'b'.repeat(64):entry)}},runtime,imageEnvironment,unit),/CODEXIA_ACCESS_AUDIENCE environment drift/);
  assert.throws(()=>assertRuntimeObservation({...observed,Mounts:[...observed.Mounts,{Destination:'/etc',Type:'bind',Source:'/etc',RW:false}]},runtime,imageEnvironment,unit),/persistent and host mounts/);
  assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,Memory:0}},runtime,imageEnvironment,unit),/memory limit drift/);
- assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,CpuQuota:200000}},runtime,imageEnvironment,unit),/CPU limit drift/);
+ assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,CpuQuota:200000}},runtime,imageEnvironment,unit),/unexpected container CPU quota/);
  assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,PortBindings:{'3000/tcp':[{HostPort:'3000'}]}}},runtime,imageEnvironment,unit),/host port/u);
  assert.throws(()=>assertRuntimeObservation({...observed,NetworkSettings:{Networks:{codexia:{}}}},runtime,imageEnvironment,unit),/network drift/u);
  assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,ReadonlyRootfs:false}},runtime,imageEnvironment,unit),/root filesystem is not read-only/u);
