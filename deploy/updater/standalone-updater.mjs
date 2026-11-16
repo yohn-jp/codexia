@@ -25,7 +25,7 @@ const store={
 };
 const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
 if(command==='backup'){
-  assert.equal(arguments_.at(-1),'--approved','Backup requires the explicit --approved maintenance attestation');
+  if(arguments_.at(-1)!=='--approved')throw new Error('Backup requires the explicit --approved maintenance attestation');
   const backupArguments=arguments_.slice(0,-1);
   let state;
   try{state=await loadControllerState(config.stateFile);}catch(error){if(error.code!=='ENOENT')throw error;}
