@@ -70,11 +70,9 @@ if ! printf '%s\n' "$manager_environment" | grep -Fqx "XDG_CONFIG_HOME=$home/.co
   printf '%s\n' "$manager_environment" | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)=' >&2 || true
   echo 'The fixture user manager did not start with its XDG config home.' >&2; exit 1
 fi
+# systemctl --user show-environment reports imported client variables. The
+# generator wrapper below checks the environment actually passed by systemd.
 manager_session_environment=$(rootless systemctl --user show-environment | awk -F= '$1 ~ /^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)$/ {print}')
-if ! printf '%s\n' "$manager_session_environment" | grep -Fqx "HOME=$home" || ! printf '%s\n' "$manager_session_environment" | grep -Fqx "XDG_RUNTIME_DIR=/run/user/$uid" || ! printf '%s\n' "$manager_session_environment" | grep -Fqx "XDG_CONFIG_HOME=$home/.config"; then
-  printf '%s\n' "$manager_session_environment" >&2
-  echo 'The fixture manager environment does not match the service identity.' >&2; exit 1
-fi
 generator_dir=/run/systemd/user-generators
 generator_wrapper="$generator_dir/podman-user-generator"
 generator_log="/run/user/$uid/codexia-podman-user-generator.log"
