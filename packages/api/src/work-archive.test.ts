@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
-import type { DocumentId, EvidenceId, KnowledgeNodeId } from "@codexia/persistence-contracts";
+import type { DocumentId, EvidenceId, KnowledgeNodeId, Persistence, PersistenceTransaction, ProjectId } from "@codexia/persistence-contracts";
+import { handlePersistenceRoute } from "./persistence-routes.js";
 import { exportWorkArchive, importWorkArchive } from "./work-archive.js";
 
 const connectionString = process.env.CODEXIA_TEST_DATABASE_URL;
@@ -144,4 +145,63 @@ test("evidence on a deleted document round trips as unresolved without restoring
   assert.equal(restored.documents.length, 0);
   assert.deepEqual(restored.evidence.unresolved, archive.evidence.unresolved);
   assert.deepEqual(restored.evidence.assertions, archive.evidence.assertions);
+});
+
+test("overlapping identical portable import requests replay the committed project", { timeout: 15000 }, async () => {
+  const sourceId = randomUUID() as ProjectId;
+  await persistence.transaction(tx => tx.createProject({ id: sourceId, title: "Concurrent " + sourceId }));
+  const archive = await exportWorkArchive(persistence, sourceId);
+  let arrivals = 0;
+  let release!: () => void;
+  const bothRead = new Promise<void>(resolve => { release = resolve; });
+  // Each request obtains an independent real PostgreSQL transaction. Force both
+  // initial reads to observe absence before either can attempt the INSERT.
+  const overlapping: Persistence = {
+    read: work => persistence.read(work),
+    transaction: <T>(work: (tx: PersistenceTransaction) => Promise<T>) =>
+      persistence.transaction(tx => work(new Proxy(tx, {
+        get(target, key, receiver) {
+          if (key === "getProject") return async (id: ProjectId) => {
+            const project = await target.getProject(id);
+            arrivals++;
+            if (arrivals === 2) release();
+            await bothRead;
+            assert.equal(project, undefined);
+            return project;
+          };
+          const value = Reflect.get(target, key, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }))),
+    close: async () => {},
+  };
+  const request = () => handlePersistenceRoute({
+    persistence: overlapping, method: "POST", url: "/api/v1/persistence/import",
+    body: archive, requestHeaders: {}, requireAuthor: async () => "owner",
+  });
+  const timer = setTimeout(release, 5000);
+  try {
+    const responses = await Promise.all([request(), request()]);
+    assert.equal(arrivals, 2);
+    for (const response of responses) assert.equal(response?.status, 201);
+    const results = responses.map(response => response!.body as Awaited<ReturnType<typeof importWorkArchive>>);
+    assert.equal(results[0]!.project.id, results[1]!.project.id);
+    assert.deepEqual(results.map(result => result.replayed).sort(), [false, true]);
+    assert.deepEqual(results[0]!.project, await persistence.read(reader => reader.getProject(results[0]!.project.id)));
+    assert.deepEqual(results[1]!.project, results[0]!.project);
+  } finally { clearTimeout(timer); release(); }
+});
+
+test("a conflicting portable import receipt does not authorize replay or overwrite", async () => {
+  const sourceId = randomUUID() as ProjectId;
+  await persistence.transaction(tx => tx.createProject({ id: sourceId, title: "Receipt " + sourceId }));
+  const archive = await exportWorkArchive(persistence, sourceId);
+  const imported = await importWorkArchive(persistence, archive, "owner");
+  await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: imported.project.id, moduleId: "core.portable.archive", key: "import-receipt",
+    value: { payloadSha256: "different", archiveFormat: archive.format }, expectedVersion: 1,
+  }));
+  const before = await persistence.read(reader => reader.getProject(imported.project.id));
+  await assert.rejects(importWorkArchive(persistence, archive, "owner"), /conflicts with this import identity/u);
+  assert.deepEqual(await persistence.read(reader => reader.getProject(imported.project.id)), before);
 });

@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import type {
-  AssertionId, DocumentId, EvidenceId, JsonObject, KnowledgeAliasId, KnowledgeNodeId,
-  KnowledgeRelationId, Persistence, Project, ProjectId, RevisionId,
+import {
+  PersistenceError,
+  type AssertionId, type DocumentId, type EvidenceId, type JsonObject, type KnowledgeAliasId, type KnowledgeNodeId,
+  type KnowledgeRelationId, type Persistence, type PersistenceReader, type Project, type ProjectId, type RevisionId,
 } from "@codexia/persistence-contracts";
 
 /**
@@ -328,17 +329,23 @@ export async function importWorkArchive(persistence: Persistence, payload: unkno
   if (typeof authorId !== "string" || !authorId.trim()) fail(403, "AUTHOR_REQUIRED", "An authenticated author is required");
   const archive = parseWorkArchive(payload);
   const target = portableProjectId(archive);
-  const result = await persistence.transaction(async (tx) => {
-    const existing = await tx.getProject(target.id);
-    if (existing) {
-      const receipt = await tx.getModuleRecord(target.id, "core.portable.archive", "import-receipt");
-      if (receipt?.value.payloadSha256 !== target.hash) {
-        fail(409, "WORK_IMPORT_CONFLICT", "An existing project conflicts with this import identity");
-      }
-      return { project: existing, replayed: true, unresolvedAnchors: archive.evidence.unresolved.anchors.length,
-        omittedRecords: archive.omittedRecords.length };
+  const readReplay = async (reader: PersistenceReader): Promise<WorkImportResult | undefined> => {
+    const existing = await reader.getProject(target.id);
+    if (!existing) return undefined;
+    const receipt = await reader.getModuleRecord(target.id, "core.portable.archive", "import-receipt");
+    if (receipt?.value.payloadSha256 !== target.hash) {
+      fail(409, "WORK_IMPORT_CONFLICT", "An existing project conflicts with this import identity");
     }
+    return { project: existing, replayed: true, unresolvedAnchors: archive.evidence.unresolved.anchors.length,
+      omittedRecords: archive.omittedRecords.length };
+  };
+  let creatingProject = false;
+  const result = await persistence.transaction(async (tx) => {
+    const replay = await readReplay(tx);
+    if (replay) return replay;
+    creatingProject = true;
     const project = await tx.createProject({ id: target.id, title: archive.project.title, settings: archive.project.settings as JsonObject });
+    creatingProject = false;
     const pending = new Map(archive.documents.map((document) => [document.id, document]));
     const newRevisionByDocument = new Map<string, RevisionId>();
     while (pending.size > 0) {
@@ -408,6 +415,13 @@ export async function importWorkArchive(persistence: Persistence, payload: unkno
     });
     return { project, replayed: false, unresolvedAnchors: archive.evidence.unresolved.anchors.length,
       omittedRecords: archive.omittedRecords.length };
+  }).catch(async (error: unknown): Promise<WorkImportResult> => {
+    if (!creatingProject || !(error instanceof PersistenceError) || error.code !== "conflict") throw error;
+    // A competing INSERT can only win by committing before PostgreSQL rejects ours.
+    // The failed transaction has rolled back; validate its durable receipt on a fresh snapshot.
+    const replay = await persistence.read(readReplay);
+    if (!replay) throw error;
+    return replay;
   });
   // PostgreSQL bumps the project version at COMMIT, after the transaction callback returns.
   const committed = await persistence.read((reader) => reader.getProject(result.project.id));
