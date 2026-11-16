@@ -33,6 +33,7 @@ test('Phase F workflow reuses the Full-model proof and limits the runtime job to
 
 test('Phase F integration helper is valid shell and exercises the existing locked updater paths', async () => {
   const helper = await readFile(path.join(root, 'deploy/ansible/test-phase-f-disposable.sh'), 'utf8');
+  const baseRuntime = await readFile(path.join(root, 'deploy/ansible/base-runtime.yml'), 'utf8');
   const syntax = spawnSync('bash', ['-n', path.join(root, 'deploy/ansible/test-phase-f-disposable.sh')], { encoding: 'utf8' });
   assert.equal(syntax.status, 0, syntax.stderr);
   for (const marker of [
@@ -66,6 +67,14 @@ test('Phase F integration helper is valid shell and exercises the existing locke
     'Fixture-user install must not read the private checkout or root-only temp directory');
   assert.match(helper, /sudo install -o "\$service_user" -g "\$service_group" -m 0600 "\$source_dir\/deploy\/quadlet\/\$file"/u);
   assert.match(helper, /sudo install -o "\$service_user" -g "\$service_group" -m 0600 "\$test_root\/updater-config\.json"/u);
+  const productionInitDirectory = baseRuntime.match(/- name: Create the protected PostgreSQL init-script directory([\s\S]*?)(?=\n- name:)/u)?.[1];
+  const productionInitFile = baseRuntime.match(/- name: Install the canonical app-role initializer only when absent([\s\S]*?)(?=\n- name:)/u)?.[1];
+  assert.ok(productionInitDirectory && productionInitFile, 'Missing canonical PostgreSQL initializer policy');
+  assert.match(productionInitDirectory, /path: \/etc\/codexia\/postgres[\s\S]*?owner: "\{\{ codexia_service_user \}\}"[\s\S]*?group: root[\s\S]*?mode: '0750'/u);
+  assert.match(productionInitFile, /dest: \/etc\/codexia\/postgres\/010-create-app-role\.sh[\s\S]*?owner: "\{\{ codexia_service_user \}\}"[\s\S]*?group: root[\s\S]*?mode: '0550'/u);
+  assert.match(helper, /postgres_init_script=\$postgres_init_dir\/010-create-app-role\.sh/u);
+  assert.match(helper, /sudo install -d -o "\$service_user" -g root -m 0750 "\$postgres_init_dir"/u);
+  assert.match(helper, /sudo install -o "\$service_user" -g root -m 0550 "\$source_dir\/deploy\/postgres\/010-create-app-role\.sh" "\$postgres_init_script"/u);
   assert.match(helper, /codexia-updater(?:\.sh)?/u);
 });
 

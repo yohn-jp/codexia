@@ -33,8 +33,14 @@ manager_dropin_installed=false
 environment_generator_installed=false
 environment_generator_dir_created=false
 source_installed=false
+postgres_config_dir_created=false
+postgres_init_dir_created=false
+postgres_init_script_installed=false
 test_root=$(mktemp -d /tmp/codexia-phase-f.XXXXXX)
 source_dir=/opt/codexia-updater
+postgres_config_dir=/etc/codexia
+postgres_init_dir=$postgres_config_dir/postgres
+postgres_init_script=$postgres_init_dir/010-create-app-role.sh
 manager_dropin=''
 environment_generator=''
 evidence_dir=''
@@ -112,6 +118,9 @@ cleanup() {
     if [[ "$manager_dropin_installed" == true ]]; then sudo rm -f -- "$manager_dropin" || cleanup_status=1; fi
     sudo rmdir "/run/systemd/system/user@${service_uid}.service.d" 2>/dev/null || true
     sudo systemctl daemon-reload >/dev/null 2>&1 || cleanup_status=1
+    if [[ "$postgres_init_script_installed" == true ]]; then sudo rm -f -- "$postgres_init_script" || cleanup_status=1; fi
+    if [[ "$postgres_init_dir_created" == true ]]; then sudo rmdir -- "$postgres_init_dir" 2>/dev/null || cleanup_status=1; fi
+    if [[ "$postgres_config_dir_created" == true ]]; then sudo rmdir -- "$postgres_config_dir" 2>/dev/null || cleanup_status=1; fi
     sudo userdel --remove "$service_user" >/dev/null 2>&1 || cleanup_status=1
   fi
   if [[ "$source_installed" == true ]]; then sudo rm -rf -- "$source_dir" || cleanup_status=1; fi
@@ -124,6 +133,10 @@ trap cleanup EXIT
 
 if getent passwd "$service_user" >/dev/null || sudo test -e "$source_dir"; then
   echo 'Disposable service identity or updater source path already exists; refusing to adopt it.' >&2
+  exit 1
+fi
+if sudo test -e "$postgres_config_dir" || sudo test -L "$postgres_config_dir"; then
+  echo 'Disposable PostgreSQL fixture path already exists; refusing to adopt it.' >&2
   exit 1
 fi
 sudo -n apt-get update -qq
@@ -215,11 +228,15 @@ sudo --preserve-env=GH_TOKEN,GITHUB_SHA -H -u "$service_user" env \
 for file in codexia.network codexia-data.network codexia-data.volume codexia-history.volume codexia-postgres.volume; do
   sudo install -o "$service_user" -g "$service_group" -m 0600 "$source_dir/deploy/quadlet/$file" "$quadlet_dir/$file"
 done
-sudo install -o "$service_user" -g "$service_group" -m 0600 "$source_dir/deploy/postgres/010-create-app-role.sh" "$fixture_data/010-create-app-role.sh"
+sudo install -d -o root -g root -m 0755 "$postgres_config_dir"
+postgres_config_dir_created=true
+sudo install -d -o "$service_user" -g root -m 0750 "$postgres_init_dir"
+postgres_init_dir_created=true
+sudo install -o "$service_user" -g root -m 0550 "$source_dir/deploy/postgres/010-create-app-role.sh" "$postgres_init_script"
+postgres_init_script_installed=true
 sed \
-  -e "s|/etc/codexia/postgres/010-create-app-role.sh|$fixture_data/010-create-app-role.sh|g" \
   -e '/Secret=codexia-postgres-app-password/a Secret=codexia-postgres-preflight-password,type=mount,target=/run/secrets/preflight-password' \
-  "$repo_root/deploy/quadlet/codexia-db.container" > "$test_root/codexia-db.container"
+  "$source_dir/deploy/quadlet/codexia-db.container" > "$test_root/codexia-db.container"
 sudo install -o "$service_user" -g "$service_group" -m 0600 "$test_root/codexia-db.container" "$quadlet_dir/codexia-db.container"
 
 # All values are generated inside the fixture account and remain in Podman secrets.
