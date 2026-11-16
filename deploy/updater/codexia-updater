@@ -5,5 +5,8 @@ set -eu
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/codexia-updater"
 umask 077
 mkdir -p "$state_dir"
+exec 9>"$state_dir/host.lock"
+flock --exclusive --nonblock 9 || exit 75
 export CODEXIA_UPDATER_LOCK_DIRECTORY="$state_dir"
-exec flock --exclusive --nonblock --no-fork "$state_dir/host.lock" node /opt/codexia-updater/deploy/updater/standalone-updater.mjs "$@"
+export CODEXIA_UPDATER_LOCK_FD=9
+exec node /opt/codexia-updater/deploy/updater/standalone-updater.mjs "$@"

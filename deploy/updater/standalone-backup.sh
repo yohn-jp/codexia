@@ -6,19 +6,35 @@ readonly PG_IMAGE='docker.io/library/postgres:17-bookworm@sha256:40865bc877a289d
 readonly STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/codexia-updater"
 die(){ printf '%s\n' "$*" >&2; exit 1; }
 for cmd in podman age sha256sum flock findmnt sync stat; do command -v "$cmd" >/dev/null || die "Missing dependency: $cmd"; done
-mkdir -p "$STATE_DIR"
 lock_file="$STATE_DIR/host.lock"
 operation="${1:-}"
+remote_directory(){
+  [[ "$1" == /* && -d "$1" && ! -L "$1" ]] || die 'Use an existing absolute off-VM mount directory'
+  local fstype
+  fstype="$(findmnt -T "$1" -n -o FSTYPE)"
+  case "$fstype" in nfs|nfs4|cifs|fuse.sshfs|sshfs) ;; *) die 'Destination is not an approved remote filesystem';; esac
+}
 case "$operation" in
   backup-locked)
+    mkdir -p "$STATE_DIR"
     [[ "${CODEXIA_UPDATER_LOCK_HELD:-}" == 1 && "${CODEXIA_UPDATER_LOCK_DIRECTORY:-}" == "$STATE_DIR" ]] || die 'Internal backup requires the canonical controller lock'
-    lock_status=0
-    flock --exclusive --nonblock --conflict-exit-code 75 "$lock_file" true || lock_status=$?
-    [[ "$lock_status" == 75 ]] || die 'Controller lock ownership could not be verified'
+    lock_fd="${CODEXIA_UPDATER_LOCK_FD:-}"
+    [[ "$lock_fd" =~ ^[0-9]+$ && -e "/proc/self/fd/$lock_fd" ]] || die 'Controller lock descriptor was not inherited from the updater'
+    fd_identity="$(stat -Lc '%d:%i' -- "/proc/self/fd/$lock_fd" 2>/dev/null || true)"
+    lock_identity="$(stat -Lc '%d:%i' -- "$lock_file" 2>/dev/null || true)"
+    [[ -n "$fd_identity" && "$fd_identity" == "$lock_identity" ]] || die 'Inherited descriptor does not identify the canonical controller lock'
+    flock --exclusive --nonblock "$lock_fd" || die 'Inherited descriptor does not hold the updater lock'
     ;;
   drill)
+    mkdir -p "$STATE_DIR"
     exec 9>"$lock_file"
     flock --exclusive --nonblock 9 || die 'Updater or backup already running'
+    ;;
+  validate-destination)
+    [[ $# == 2 ]] || die 'Usage: validate-destination /absolute/remote/mount'
+    remote_directory "$2"
+    printf '%s\n' 'Backup destination preflight passed'
+    exit 0
     ;;
   *) die 'Use the controller backup command or the explicitly approved drill';;
 esac
@@ -56,12 +72,6 @@ require_quiesced(){
       *) die "Cannot inspect $container";;
     esac
   done
-}
-remote_directory(){
-  [[ "$1" == /* && -d "$1" && ! -L "$1" ]] || die 'Use an existing absolute off-VM mount directory'
-  local fstype
-  fstype="$(findmnt -T "$1" -n -o FSTYPE)"
-  case "$fstype" in nfs|nfs4|cifs|fuse.sshfs|sshfs) ;; *) die 'Destination is not an approved remote filesystem';; esac
 }
 backup_artifact(){
   local destination="$1" recipient="$2"

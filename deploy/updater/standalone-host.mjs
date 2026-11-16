@@ -68,6 +68,26 @@ export function assertVersion(version,release,browserAuth){
   assert.equal(version.apiEpoch,release.apiEpoch,'Candidate API compatibility epoch mismatch');
   assert.equal(version.browserAuth??'token',browserAuth,'Candidate browser authentication mode mismatch');
 }
+export function assertLegacyBackupIdentity({legacy,image,version},release,authEnvironment){
+  assert.ok(legacy?.State?.Running,'Legacy writer must be running the selected release');
+  const imageId=id=>typeof id==='string'?id.replace(/^sha256:/u,''):'';
+  const actual=imageId(legacy.Image);
+  assert.match(actual,/^[a-f0-9]{64}$/u,'Legacy image ID is unobservable');
+  assert.equal(actual,imageId(image?.Id),'Legacy writer image differs from selected immutable release');
+  assert.ok(image?.RepoDigests?.includes(release.image),'Selected release digest is unobservable');
+  assert.equal(image.Os+'/'+image.Architecture,release.platform,'Legacy image platform differs from selected release');
+  assert.equal(image.Labels?.['org.opencontainers.image.revision']??image.Config?.Labels?.['org.opencontainers.image.revision'],release.sourceSha,'Legacy image source differs from selected release');
+  // Only the absent epoch is tolerated for an old legacy runtime. If it advertises
+  // an epoch, all ordinary version/profile/auth checks remain exact.
+  const observedVersion=version?.apiEpoch===undefined?{...version,apiEpoch:release.apiEpoch}:version;
+  assertVersion(observedVersion,release,authEnvironment.CODEXIA_BROWSER_AUTH);
+  const env=legacy.Config?.Env;
+  assert.ok(Array.isArray(env),'Legacy browser auth settings are unobservable');
+  for(const [key,value] of Object.entries(authEnvironment)){
+    const actual=env.find(entry=>entry.startsWith(key+'='))?.slice(key.length+1);
+    assert.equal(actual??(key==='CODEXIA_BROWSER_AUTH'?'token':undefined),value,'Legacy browser authentication configuration mismatch: '+key);
+  }
+}
 export function imageConfig(release,authEnvironment){
   return `[Unit]
 Description=Codexia exclusive writer
@@ -228,14 +248,32 @@ export class PodmanStandaloneHost{
   }
   async backup(destination,recipient){
     const script=fileURLToPath(new URL('./standalone-backup.sh',import.meta.url));
+    const lockFd=Number(process.env.CODEXIA_UPDATER_LOCK_FD);
+    assert.ok(Number.isSafeInteger(lockFd)&&lockFd>=3,'Updater lock descriptor is unavailable to the controller');
+    const stdio=['ignore','pipe','pipe'];
+    while(stdio.length<lockFd)stdio.push('ignore');
+    stdio[lockFd]=lockFd;
     const result=spawnSync('bash',[script,'backup-locked',destination,recipient],{
       encoding:'utf8',timeout:6*60*60*1000,maxBuffer:1024*1024,
-      env:{...process.env,CODEXIA_UPDATER_LOCK_HELD:'1'},
+      env:{...process.env,CODEXIA_UPDATER_LOCK_HELD:'1',CODEXIA_UPDATER_LOCK_FD:String(lockFd)},
+      stdio,
     });
     if(result.error||result.status!==0){
       const status=result.status??'unknown';
       const message=(result.stderr??'').trim().slice(0,500);
       throw Error('Encrypted backup command failed (status '+status+')'+(message?': '+message:''));
+    }
+    return (result.stdout??'').trim();
+  }
+  async validateBackupDestination(destination){
+    const script=fileURLToPath(new URL('./standalone-backup.sh',import.meta.url));
+    const result=spawnSync('bash',[script,'validate-destination',destination],{
+      encoding:'utf8',timeout:15000,maxBuffer:65536,env:process.env,
+    });
+    if(result.error||result.status!==0){
+      const status=result.status??'unknown';
+      const message=(result.stderr??'').trim().slice(0,500);
+      throw Error('Backup destination preflight failed (status '+status+')'+(message?': '+message:''));
     }
     return (result.stdout??'').trim();
   }
@@ -277,6 +315,14 @@ export class PodmanStandaloneHost{
       const actual=env.find(entry=>entry.startsWith(key+'='))?.slice(key.length+1);
       assert.equal(actual??(key==='CODEXIA_BROWSER_AUTH'?'token':undefined),value,'Legacy browser authentication configuration mismatch: '+key);
     }
+  }
+  async assertLegacyBackupRelease(value){
+    const release=validateUpdateRelease(value);
+    const legacy=inspect('codexia-api');
+    for(const slot of ['blue','green'])assert.ok(!inspect(name(slot))?.State.Running,'Unexpected running slot writer');
+    const image=JSON.parse(run('podman',['image','inspect',release.image]))[0];
+    const version=JSON.parse(run('podman',['exec','codexia-api','node','--input-type=module','-e',readyCode],{timeout:10000}));
+    assertLegacyBackupIdentity({legacy,image,version},release,this.authEnvironment);
   }
   async waitReady(container,release){
     const deadline=Date.now()+90000;

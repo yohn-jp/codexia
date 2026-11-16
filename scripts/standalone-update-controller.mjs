@@ -102,6 +102,7 @@ export class StandaloneController {
     assert.equal(state.lastError,null,'Controller error requires operator repair before backup');
     assert.ok(typeof destination==='string'&&path.isAbsolute(destination),'Backup destination must be an absolute external path');
     assert.ok(typeof recipient==='string'&&/^age1[0-9a-z]+$/u.test(recipient),'Provide an age public recipient');
+    await this.host.validateBackupDestination(destination);
     const original=state;
     const active=state.journal.active;
     const timerWasActive=await this.host.pollingTimerActive();
@@ -164,13 +165,14 @@ export class StandaloneController {
     assert.ok(typeof recipient==='string'&&/^age1[0-9a-z]+$/u.test(recipient),'Provide an age public recipient');
     const channel=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,null,this.now());
     assert.ok(channel.payload.releases.some(item=>item.state==='published'&&JSON.stringify(item)===JSON.stringify(release)),'Legacy backup release must be published in the signed channel');
+    await this.host.validateBackupDestination(destination);
     assert.equal(await this.host.routeState(),'blocked','Legacy backup requires the controller-owned route marker to be blocked');
     assert.equal(await this.host.legacyServiceActive(),true,'Legacy backup requires the legacy API service to be active');
     const tunnelWasActive=await this.host.tunnelServiceActive();
     const timerWasActive=await this.host.pollingTimerActive();
     await this.host.assertNoPreflight();
     await this.uiEpoch(release);
-    await this.host.assertLegacyRelease(release);
+    await this.host.assertLegacyBackupRelease(release);
 
     let output;
     let operationError;
@@ -187,11 +189,11 @@ export class StandaloneController {
     try{
       await this.host.route('blocked');
       if(!(await this.host.legacyServiceActive()))await this.host.startLegacyWriter();
-      await this.host.assertLegacyRelease(release);
+      await this.host.assertLegacyBackupRelease(release);
       const tunnelIsActive=await this.host.tunnelServiceActive();
       if(tunnelWasActive&&!tunnelIsActive)await this.host.startTunnel();
       else if(!tunnelWasActive&&tunnelIsActive)await this.host.stopTunnel();
-      await this.host.assertLegacyRelease(release);
+      await this.host.assertLegacyBackupRelease(release);
       if(timerWasActive)await this.host.startPollingTimer();
     }catch(error){
       await this.host.route('blocked').catch(()=>undefined);

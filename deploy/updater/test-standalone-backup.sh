@@ -75,7 +75,7 @@ run_locked_backup() {
   (
     exec 9> "$state_dir/host.lock"
     flock --exclusive --nonblock 9
-    CODEXIA_UPDATER_LOCK_HELD=1 CODEXIA_UPDATER_LOCK_DIRECTORY="$state_dir" \
+    CODEXIA_UPDATER_LOCK_HELD=1 CODEXIA_UPDATER_LOCK_DIRECTORY="$state_dir" CODEXIA_UPDATER_LOCK_FD=9 \
       bash "$backup_script" backup-locked "$1" "$2"
   )
 }
@@ -154,7 +154,7 @@ if CODEXIA_UPDATER_LOCK_HELD=1 CODEXIA_UPDATER_LOCK_DIRECTORY="$state_dir" \
   echo 'Internal backup mode accepted an absent controller lock' >&2
   exit 1
 fi
-grep -q 'Controller lock ownership could not be verified' "$tmp/unlocked-internal.log"
+grep -q 'Controller lock descriptor was not inherited from the updater' "$tmp/unlocked-internal.log"
 
 run_locked_backup "$remote" "$recipient" > "$tmp/backup.log"
 artifact=$(sed -n 's/^Encrypted backup committed: //p' "$tmp/backup.log")
@@ -191,7 +191,7 @@ chmod 0600 "$tmp/age-identity"
 (
   exec 9> "$state_dir/host.lock"
   flock --exclusive --nonblock 9
-  CODEXIA_UPDATER_LOCK_HELD=1 CODEXIA_UPDATER_LOCK_DIRECTORY="$state_dir" \
+  CODEXIA_UPDATER_LOCK_HELD=1 CODEXIA_UPDATER_LOCK_DIRECTORY="$state_dir" CODEXIA_UPDATER_LOCK_FD=9 \
     bash "$backup_script" backup-locked "$remote" "$recipient" > "$tmp/backup-locked.log"
 )
 grep -q '^Encrypted backup committed:' "$tmp/backup-locked.log"

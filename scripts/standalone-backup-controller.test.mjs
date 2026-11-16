@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { generateKeyPairSync } from 'node:crypto';
 import { StandaloneController, initialControllerState } from './standalone-update-controller.mjs';
+import { assertLegacyBackupIdentity, assertVersion } from '../deploy/updater/standalone-host.mjs';
 import { signUpdateChannel } from './update-channel.mjs';
 
 const release = {
@@ -11,7 +12,7 @@ const release = {
   persistenceFormat: 1, apiEpoch: 1,
 };
 
-function fixture({ paused = false, timerActive = true, backupFailure = false, restoreFailure = false } = {}) {
+function fixture({ paused = false, timerActive = true, backupFailure = false, restoreFailure = false, destinationFailure = false } = {}) {
   const host = {
     routeValue: 'blue',
     writers: [{ slot: 'blue', image: release.image }],
@@ -19,9 +20,15 @@ function fixture({ paused = false, timerActive = true, backupFailure = false, re
     preflight: false,
     failBackup: backupFailure,
     failRestore: restoreFailure,
+    failDestination: destinationFailure,
     trace: [],
     async observe() { return { route: this.routeValue, writers: structuredClone(this.writers) }; },
     async assertNoPreflight() { assert.equal(this.preflight, false, 'unexpected preflight container'); },
+    async validateBackupDestination(destination) {
+      this.trace.push('validate-destination');
+      assert.equal(destination, '/mnt/backup');
+      if (this.failDestination) throw new Error('destination is not an approved remote filesystem');
+    },
     async pollingTimerActive() { this.trace.push('timer-state'); return this.timerActive; },
     async stopPollingTimer() { this.trace.push('timer-stop'); this.timerActive = false; },
     async startPollingTimer() { this.trace.push('timer-start'); this.timerActive = true; },
@@ -125,7 +132,18 @@ test('preflight drift is rejected before pausing or blocking the service', async
   assert.ok(!host.trace.includes('route:blocked'));
 });
 
-function legacyFixture({ tunnelActive = true, timerActive = true, backupFailure = false, restoreFailure = false } = {}) {
+test('stable backup rejects an invalid destination before pausing or fencing the writer', async () => {
+  const { host, controller, state } = fixture({ destinationFailure: true });
+  await assert.rejects(controller.backup(state, { destination: '/mnt/backup', recipient: 'age1recipient' }), /not an approved remote filesystem/);
+  assert.deepEqual(host.writers, [{ slot: 'blue', image: release.image }]);
+  assert.equal(host.routeValue, 'blue');
+  assert.equal(host.timerActive, true);
+  assert.ok(!host.trace.includes('timer-stop'));
+  assert.ok(!host.trace.includes('route:blocked'));
+  assert.ok(!host.trace.includes('stop:blue'));
+});
+
+function legacyFixture({ tunnelActive = true, timerActive = true, backupFailure = false, restoreFailure = false, destinationFailure = false } = {}) {
   const key = generateKeyPairSync('ed25519');
   const publicKey = key.publicKey.export({ type: 'spki', format: 'pem' });
   const privateKey = key.privateKey.export({ type: 'pkcs8', format: 'pem' });
@@ -138,6 +156,7 @@ function legacyFixture({ tunnelActive = true, timerActive = true, backupFailure 
     preflight: false,
     failBackup: backupFailure,
     failRestore: restoreFailure,
+    failDestination: destinationFailure,
     trace: [],
     async fetchChannel() {
       return signUpdateChannel({
@@ -155,7 +174,20 @@ function legacyFixture({ tunnelActive = true, timerActive = true, backupFailure 
     async stopPollingTimer() { this.trace.push('timer-stop'); this.timerActive = false; },
     async startPollingTimer() { this.trace.push('timer-start'); this.timerActive = true; },
     async assertNoPreflight() { assert.equal(this.preflight, false); },
-    async assertLegacyRelease(candidate) { this.trace.push('verify-api'); assert.equal(this.legacyActive, true); assert.equal(candidate.image, release.image); },
+    async validateBackupDestination(destination) {
+      this.trace.push('validate-destination');
+      assert.equal(destination, '/mnt/backup');
+      if (this.failDestination) throw new Error('destination is not an approved remote filesystem');
+    },
+    async assertLegacyBackupRelease(candidate) {
+      this.trace.push('verify-api');
+      const imageId = 'c'.repeat(64);
+      assertLegacyBackupIdentity({
+        legacy: { State: { Running: this.legacyActive }, Image: 'sha256:' + imageId, Config: { Env: ['CODEXIA_BROWSER_AUTH=token'] } },
+        image: { Id: 'sha256:' + imageId, RepoDigests: [release.image], Os: 'linux', Architecture: 'amd64', Labels: { 'org.opencontainers.image.revision': release.sourceSha } },
+        version: { name: 'codexia', version: candidate.version, profile: candidate.profile, hosted: false, browserAuth: 'token' },
+      }, candidate, { CODEXIA_BROWSER_AUTH: 'token' });
+    },
     async stopTunnel() { this.trace.push('tunnel-stop'); this.tunnelActive = false; },
     async startTunnel() { this.trace.push('tunnel-start'); this.tunnelActive = true; },
     async stopLegacyWriter() { this.trace.push('api-stop'); this.legacyActive = false; },
@@ -192,6 +224,36 @@ test('pre-journal backup verifies the signed legacy identity and restores API, T
   assert.ok(host.trace.indexOf('tunnel-start') < host.trace.indexOf('timer-start'));
 });
 
+test('legacy backup identity accepts a missing API epoch only after immutable image and runtime checks', () => {
+  const imageId = 'c'.repeat(64);
+  const legacy = {
+    State: { Running: true },
+    Image: 'sha256:' + imageId,
+    Config: { Env: ['CODEXIA_BROWSER_AUTH=token'] },
+  };
+  const image = { Id: 'sha256:' + imageId, RepoDigests: [release.image], Os: 'linux', Architecture: 'amd64', Labels: { 'org.opencontainers.image.revision': release.sourceSha } };
+  const version = { name: 'codexia', version: release.version, profile: release.profile, hosted: false, browserAuth: 'token' };
+
+  assert.doesNotThrow(() => assertLegacyBackupIdentity({ legacy, image, version }, release, { CODEXIA_BROWSER_AUTH: 'token' }));
+  assert.throws(() => assertVersion(version, release, 'token'), /epoch mismatch/);
+});
+
+test('legacy backup identity rejects an unexpected image, profile, or advertised API epoch', () => {
+  const imageId = 'c'.repeat(64);
+  const legacy = {
+    State: { Running: true },
+    Image: 'sha256:' + imageId,
+    Config: { Env: ['CODEXIA_BROWSER_AUTH=token'] },
+  };
+  const image = { Id: 'sha256:' + imageId, RepoDigests: [release.image], Os: 'linux', Architecture: 'amd64', Labels: { 'org.opencontainers.image.revision': release.sourceSha } };
+  const version = { name: 'codexia', version: release.version, profile: release.profile, hosted: false, browserAuth: 'token' };
+  const auth = { CODEXIA_BROWSER_AUTH: 'token' };
+
+  assert.throws(() => assertLegacyBackupIdentity({ legacy: { ...legacy, Image: 'sha256:' + 'd'.repeat(64) }, image, version }, release, auth), /image differs/);
+  assert.throws(() => assertLegacyBackupIdentity({ legacy, image, version: { ...version, profile: 'full' } }, release, auth), /'full' !== 'core'/);
+  assert.throws(() => assertLegacyBackupIdentity({ legacy, image, version: { ...version, apiEpoch: release.apiEpoch + 1 } }, release, auth), /epoch mismatch/);
+});
+
 test('pre-journal backup failure restores prior services and timer before returning failure', async () => {
   const { host, controller } = legacyFixture({ backupFailure: true });
   await assert.rejects(controller.backupLegacy(release, { destination: '/mnt/backup', recipient: 'age1recipient' }), /synthetic backup failure/);
@@ -199,6 +261,18 @@ test('pre-journal backup failure restores prior services and timer before return
   assert.equal(host.legacyActive, true);
   assert.equal(host.tunnelActive, true);
   assert.equal(host.timerActive, true);
+});
+
+test('pre-journal backup rejects an invalid destination before stopping the legacy services', async () => {
+  const { host, controller } = legacyFixture({ destinationFailure: true });
+  await assert.rejects(controller.backupLegacy(release, { destination: '/mnt/backup', recipient: 'age1recipient' }), /not an approved remote filesystem/);
+  assert.equal(host.routeValue, 'blocked');
+  assert.equal(host.legacyActive, true);
+  assert.equal(host.tunnelActive, true);
+  assert.equal(host.timerActive, true);
+  assert.ok(!host.trace.includes('timer-stop'));
+  assert.ok(!host.trace.includes('tunnel-stop'));
+  assert.ok(!host.trace.includes('api-stop'));
 });
 
 test('pre-journal recovery failure leaves the route blocked and does not restart ingress', async () => {

@@ -4,6 +4,8 @@ on:
     branches: [main]
     paths:
       - deploy/updater/standalone-backup.sh
+      - deploy/updater/codexia-updater
+      - deploy/updater/test-standalone-backup-lock.sh
       - deploy/updater/test-standalone-backup.sh
       - deploy/updater/standalone-host.mjs
       - deploy/updater/standalone-updater.mjs
@@ -18,6 +20,8 @@ on:
     branches: [main]
     paths:
       - deploy/updater/standalone-backup.sh
+      - deploy/updater/codexia-updater
+      - deploy/updater/test-standalone-backup-lock.sh
       - deploy/updater/test-standalone-backup.sh
       - deploy/updater/standalone-host.mjs
       - deploy/updater/standalone-updater.mjs
@@ -66,6 +70,7 @@ jobs:
           fixture_uid=$(id -u "$fixture_user")
           fixture_home=$(getent passwd "$fixture_user" | cut -d: -f6)
           sudo -u "$fixture_user" env HOME="$fixture_home" USER="$fixture_user" LOGNAME="$fixture_user" PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$fixture_uid" TMPDIR=/tmp CODEXIA_DISPOSABLE_BACKUP_TEST=true bash deploy/updater/test-standalone-backup.sh
+          sudo -u "$fixture_user" env HOME="$fixture_home" USER="$fixture_user" LOGNAME="$fixture_user" PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$fixture_uid" TMPDIR=/tmp CODEXIA_DISPOSABLE_BACKUP_TEST=true bash deploy/updater/test-standalone-backup-lock.sh
           node --test scripts/standalone-backup-controller.test.mjs
       - name: Remove the disposable backup test user
         if: always()
