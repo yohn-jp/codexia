@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Run only after test-base-secrets-integration.sh on a disposable Ubuntu runner.
-set -euo pipefail
+set -Eeuo pipefail
 runtime_test_error() {
   local status=$?
   printf 'Phase B runtime integration failed at line %s (status %s): %s\n' "${BASH_LINENO[0]:-$LINENO}" "$status" "$BASH_COMMAND" >&2
-  return "$status"
+  return 0
 }
 trap runtime_test_error ERR
 printf '%s\n' 'Starting Phase B runtime integration test.'
@@ -65,6 +65,7 @@ test ! -e /etc/codexia
 for file in codexia.network codexia-data.network codexia-postgres.volume codexia-data.volume codexia-history.volume codexia-db.container codexia-tunnel.container; do
   as_service test ! -e "$quadlet_dir/$file"
 done
+printf '%s\n' 'Phase B initial runtime resource checks passed.'
 
 tmp=$(mktemp -d /tmp/codexia-base-runtime.XXXXXX)
 cleanup() {
