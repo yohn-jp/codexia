@@ -58,6 +58,23 @@ interface StoredState {
   legacySources: string[];
 }
 
+// Keep admission metadata separate from the legacy v1 cursor file so that
+// older backends can still read the history during independent replacement.
+interface WriterOrder {
+  sequence: number;
+  pageSequence: number;
+}
+interface DeviceOrder {
+  lastWriter: string | null;
+  itemHash: string | null;
+  writers: Record<string, WriterOrder>;
+}
+type OrderState = Record<string, DeviceOrder>;
+interface RecentActivityOrder {
+  writer: string;
+  sequence: number;
+}
+
 interface LegacyCandidate {
   ownerScope: string;
   projectId: string;
@@ -78,6 +95,7 @@ export class RecentActivityStore {
   private readonly root: string;
   private readonly directory: string;
   private readonly filePath: string;
+  private readonly orderPath: string;
 
   constructor(usageDirectory: string) {
     if (typeof usageDirectory !== "string" || !usageDirectory.trim()) {
@@ -86,6 +104,7 @@ export class RecentActivityStore {
     this.root = resolve(usageDirectory);
     this.directory = join(this.root, "recent-activity");
     this.filePath = join(this.directory, "recent-activity-state.json");
+    this.orderPath = join(this.directory, "recent-activity-order.json");
   }
 
   async list(ownerScope: string, projectId: string): Promise<RecentActivityItem[]> {
@@ -99,11 +118,13 @@ export class RecentActivityStore {
     return entry.items.map((item) => ({ ...item })).sort(newestFirst);
   }
 
-  async upsert(ownerScope: string, projectId: string, input: RecentActivityInput): Promise<RecentActivityItem[]> {
+  async upsert(ownerScope: string, projectId: string, input: RecentActivityInput, order?: RecentActivityOrder): Promise<RecentActivityItem[]> {
     const owner = validateOwnerScope(ownerScope);
     const ownerKey = hash(owner);
     const identity = normalizeProjectId(projectId);
     const normalizedInput = normalizeInput(input);
+    if (order && (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u.test(order.writer) ||
+        !Number.isSafeInteger(order.sequence) || order.sequence < 1)) invalidRecord("Recent activity order is invalid");
     return exclusive(this.filePath, async () => {
       const state = await this.readState();
       const key = partitionKey(ownerKey, identity);
@@ -116,6 +137,28 @@ export class RecentActivityStore {
         state.entries.push(entry);
       }
       const existing = entry.items.find((item) => item.deviceType === normalizedInput.deviceType);
+      const ordering = await this.readOrderState();
+      const deviceKey = hash(`${key}\\0${normalizedInput.deviceType}`);
+      const writerKey = order ? hash(order.writer) : undefined;
+      const deviceOrder = ordering[deviceKey];
+      const previous = writerKey ? deviceOrder?.writers[writerKey] : undefined;
+      const result = () => entry.items.map((candidate) => ({ ...candidate })).sort(newestFirst);
+      if (order && writerKey && previous && order.sequence <= previous.sequence) {
+        // An older reading report can still supply the page omitted by a
+        // newer writing report. Never change the newer cursor or timestamp,
+        // and never apply the old page over another writer's current record.
+        if (order.sequence < previous.sequence && order.sequence > previous.pageSequence &&
+            normalizedInput.pageIndex !== undefined && existing &&
+            deviceOrder?.lastWriter === writerKey && deviceOrder.itemHash === hash(JSON.stringify(existing))) {
+          existing.pageIndex = normalizedInput.pageIndex;
+          previous.pageSequence = order.sequence;
+          deviceOrder.itemHash = hash(JSON.stringify(existing));
+          const orderBytes = this.serialize(ordering);
+          await this.persist(state);
+          await this.persistBytes(this.orderPath, orderBytes);
+        }
+        return result();
+      }
       const item: RecentActivityItem = {
         sceneId: normalizedInput.sceneId,
         sentenceOffset: normalizedInput.sentenceOffset,
@@ -125,8 +168,29 @@ export class RecentActivityStore {
       };
       entry.items = entry.items.filter((candidate) => candidate.deviceType !== item.deviceType);
       entry.items.push(item);
+      let orderBytes: string | undefined;
+      if (order && writerKey) {
+        const device = deviceOrder ?? { lastWriter: null, itemHash: null, writers: {} };
+        device.writers[writerKey] = {
+          sequence: order.sequence,
+          pageSequence: normalizedInput.pageIndex === undefined ? previous?.pageSequence ?? 0 : order.sequence,
+        };
+        device.lastWriter = writerKey;
+        device.itemHash = hash(JSON.stringify(item));
+        ordering[deviceKey] = device;
+        orderBytes = this.serialize(ordering);
+      } else if (deviceOrder?.lastWriter) {
+        // Legacy clients remain accepted; their writes invalidate stale-page
+        // merging from a prior ordered writer, but not its sequence fence.
+        deviceOrder.lastWriter = null;
+        deviceOrder.itemHash = null;
+        orderBytes = this.serialize(ordering);
+      }
       await this.persist(state);
-      return entry.items.map((candidate) => ({ ...candidate })).sort(newestFirst);
+      // A successful response certifies both the cursor and its admission
+      // fence. The same exclusive lock spans both atomic file replacements.
+      if (orderBytes !== undefined) await this.persistBytes(this.orderPath, orderBytes);
+      return result();
     });
   }
 
@@ -274,14 +338,48 @@ export class RecentActivityStore {
     return normalizeState(decoded);
   }
 
-  private async persist(state: StoredState): Promise<void> {
-    await ensurePrivateDirectory(this.root);
-    await ensurePrivateDirectory(this.directory);
-    await syncDirectory(this.root);
-    const serialized = `${JSON.stringify(state)}\n`;
+  private async readOrderState(): Promise<OrderState> {
+    const bytes = await readPrivateFile(this.orderPath, MAX_STATE_BYTES, "recent_activity_state_corrupt", true);
+    if (!bytes) return {};
+    let value: unknown;
+    try { value = JSON.parse(bytes.toString("utf8")) as unknown; }
+    catch { corruptState(); }
+    if (!isRecord(value)) corruptState();
+    const state: OrderState = {};
+    const digest = (key: unknown): key is string => typeof key === "string" && /^[a-f0-9]{64}$/u.test(key);
+    const sequence = (number: unknown): number is number => typeof number === "number" && Number.isSafeInteger(number) && number >= 0;
+    for (const [key, raw] of Object.entries(value)) {
+      if (!digest(key) || !isRecord(raw) || !hasOnlyKeys(raw, new Set(["lastWriter", "itemHash", "writers"])) ||
+          !isRecord(raw.writers) || (raw.lastWriter !== null && !digest(raw.lastWriter)) ||
+          (raw.itemHash !== null && !digest(raw.itemHash))) corruptState();
+      const writers: Record<string, WriterOrder> = {};
+      for (const [writer, entry] of Object.entries(raw.writers)) {
+        if (!digest(writer) || !isRecord(entry) || !hasOnlyKeys(entry, new Set(["sequence", "pageSequence"])) ||
+            !sequence(entry.sequence) || entry.sequence < 1 || !sequence(entry.pageSequence) || entry.pageSequence > entry.sequence) corruptState();
+        writers[writer] = { sequence: entry.sequence, pageSequence: entry.pageSequence };
+      }
+      if ((raw.lastWriter === null) !== (raw.itemHash === null) || (raw.lastWriter !== null && !writers[raw.lastWriter])) corruptState();
+      state[key] = { lastWriter: raw.lastWriter, itemHash: raw.itemHash, writers };
+    }
+    return state;
+  }
+
+  private serialize(value: unknown): string {
+    const serialized = `${JSON.stringify(value)}\n`;
     if (Buffer.byteLength(serialized, "utf8") > MAX_STATE_BYTES) {
       throw new RecentActivityStoreError("recent_activity_history_full", "Recent activity history exceeds its storage limit");
     }
+    return serialized;
+  }
+
+  private async persist(state: StoredState): Promise<void> {
+    await this.persistBytes(this.filePath, this.serialize(state));
+  }
+
+  private async persistBytes(path: string, serialized: string): Promise<void> {
+    await ensurePrivateDirectory(this.root);
+    await ensurePrivateDirectory(this.directory);
+    await syncDirectory(this.root);
     const temporary = join(this.directory, `.tmp-${randomBytes(16).toString("hex")}`);
     let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {
@@ -290,7 +388,7 @@ export class RecentActivityStore {
       await handle.sync();
       await handle.close();
       handle = undefined;
-      await rename(temporary, this.filePath);
+      await rename(temporary, path);
       await syncDirectory(this.directory);
     } finally {
       await handle?.close().catch(() => undefined);

@@ -3077,6 +3077,17 @@ describe("Codexia HTTP boundary", () => {
     });
     const desktopUpdateBody = await desktopUpdate.json() as { items: Array<{ pageIndex: number | null; deviceType: string }> };
     assert.equal(desktopUpdateBody.items.find((item) => item.deviceType === "desktop")?.pageIndex, 7);
+    const writer = randomUUID();
+    const ordered = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
+      method: "PUT", headers: { ...ownerJson, "X-Codexia-Recent-Activity-Order": `${writer}:2` },
+      body: JSON.stringify({ sceneId: "scene-two", sentenceOffset: null, deviceType: "desktop" }),
+    });
+    assert.equal(ordered.status, 200);
+    const invalidOrder = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
+      method: "PUT", headers: { ...ownerJson, "X-Codexia-Recent-Activity-Order": "invalid" },
+      body: JSON.stringify({ sceneId: "wrong", sentenceOffset: 1, deviceType: "desktop" }),
+    });
+    assert.equal(invalidOrder.status, 400);
     const mobileUpdate = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
       method: "PUT", headers: ownerJson,
       body: JSON.stringify({ sceneId: "scene-mobile", sentenceOffset: 1, pageIndex: null, deviceType: "mobile" }),
@@ -3112,6 +3123,14 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(restored.items.find((item) => item.deviceType === "desktop")?.sceneId, "scene-two");
     assert.equal(restored.items.find((item) => item.deviceType === "desktop")?.pageIndex, 7);
     assert.equal(restored.items.find((item) => item.deviceType === "mobile")?.sceneId, "scene-mobile");
+    const stale = await fetch(`${apiServer.base}/api/projects/${native.project.id}/recent-activity`, {
+      method: "PUT", headers: { Cookie: owner.cookie, Origin: apiServer.base, "Content-Type": "application/json",
+        "X-Codexia-Recent-Activity-Order": `${writer}:1` },
+      body: JSON.stringify({ sceneId: "older", sentenceOffset: 1, deviceType: "desktop" }),
+    });
+    assert.equal(stale.status, 200);
+    const staleItems = await stale.json() as typeof restored;
+    assert.deepEqual(staleItems, restored, "a delayed request after restart cannot rewind the accepted cursor");
     assert.equal(observeCalls, 0, "persisted cursors remain available while Core observation is unavailable after restart");
     const secondAfterRestart = await fetch(`${apiServer.base}/api/projects/${secondProject.id}/recent-activity`, { headers: { Cookie: owner.cookie } });
     const secondRestored = await secondAfterRestart.json() as { items: Array<{ sceneId: string }> };

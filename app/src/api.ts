@@ -472,12 +472,15 @@ export const api = {
   jobEventStream: (signal: AbortSignal) => requestEventStream("/api/jobs/events", signal),
   recentActivity: (projectId: string, signal?: AbortSignal) =>
     request(dto.recentActivity, projectPath(projectId, "recent-activity"), { ...(signal ? { signal } : {}) }),
-  putRecentActivity: (projectId: string, input: RecentActivityInput, options: { signal?: AbortSignal; keepalive?: boolean } = {}) =>
-    request(dto.recentActivity, projectPath(projectId, "recent-activity"), {
+  putRecentActivity: (projectId: string, input: RecentActivityInput, options: { signal?: AbortSignal; keepalive?: boolean; order?: string } = {}) => {
+    const { order, ...init } = options;
+    return request(dto.recentActivity, projectPath(projectId, "recent-activity"), {
       method: "PUT",
       body: JSON.stringify(input),
-      ...options,
-    }),
+      ...(order ? { headers: { "X-Codexia-Recent-Activity-Order": order } } : {}),
+      ...init,
+    });
+  },
   proposalStatuses: (projectId: string) => request(dto.proposals, projectPath(projectId, "proposals")),
   propose: (projectId: string, proposal: ChangeProposal, signal?: AbortSignal) => request(dto.proposal, projectPath(projectId, "proposals"), {
     method: "POST",
