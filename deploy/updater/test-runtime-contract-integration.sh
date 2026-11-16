@@ -618,7 +618,7 @@ NODE
 }
 
 remove_effective_override_text() {
-  local unit="$1" expected_quota="$2" before_dropins="$3" dropins file was_new in_unit_dir file_state owner quota_lines
+  local unit="$1" expected_quota="$2" before_dropins="$3" dropins file was_new in_unit_dir file_state owner quota_count quota_directives
   local -a candidates=()
   dropins="$(systemctl --user show --property=DropInPaths --value "$unit")"
   printf 'Runtime override diagnostic for %s: baseline DropInPaths=%s\n' "$unit" "${before_dropins:-<empty>}" >&2
@@ -629,20 +629,21 @@ remove_effective_override_text() {
     case " $before_dropins " in *" $file "*) was_new=no ;; esac
     in_unit_dir=no
     [[ "$file" == *"/$unit.d/"* ]] && in_unit_dir=yes
-    file_state=missing owner=unknown quota_lines=0
+    file_state=missing owner=unknown quota_count=0 quota_directives='<none>'
     if [[ -f "$file" && ! -L "$file" ]]; then
       file_state=regular
       owner="$(stat -c '%u' "$file" 2>/dev/null || printf unknown)"
-      quota_lines="$(grep -Fxc "CPUQuota=$expected_quota" "$file" || true)"
+      quota_count="$(grep -Ec '^(CPUQuota|CPUQuotaPerSecUSec)=' "$file" || true)"
+      quota_directives="$(grep -E '^(CPUQuota|CPUQuotaPerSecUSec)=' "$file" | tr '\n' ';' || true)"
     elif [[ -L "$file" ]]; then file_state=symlink
     elif [[ -e "$file" ]]; then file_state=non-regular
     fi
-    printf 'Runtime override diagnostic for %s: path=%s new=%s unit-drop-in=%s type=%s owner=%s expected-quota-line-count=%s\n' \
-      "$unit" "$file" "$was_new" "$in_unit_dir" "$file_state" "$owner" "$quota_lines" >&2
-    [[ "$was_new" == yes && "$in_unit_dir" == yes && "$file_state" == regular && "$owner" == "$UID_VALUE" && "$quota_lines" == 1 ]] && candidates+=("$file")
+    printf 'Runtime override diagnostic for %s: path=%s new=%s unit-drop-in=%s type=%s owner=%s expected-percent=%s quota-directive-count=%s quota-directives=%s\n' \
+      "$unit" "$file" "$was_new" "$in_unit_dir" "$file_state" "$owner" "$expected_quota" "$quota_count" "$quota_directives" >&2
+    [[ "$was_new" == yes && "$in_unit_dir" == yes && "$file_state" == regular && "$owner" == "$UID_VALUE" && "$quota_count" == 1 ]] && candidates+=("$file")
   done < <(tr ' ' '\n' <<< "$dropins")
   (( ${#candidates[@]} == 1 )) || die 'could not identify the unique newly created systemd CPUQuota override file'
-  rm -- "${candidates[0]}"
+  sed -i -E '/^(CPUQuota|CPUQuotaPerSecUSec)=/d' -- "${candidates[0]}"
 }
 
 systemctl --user start codexia-slot-blue.service
@@ -675,6 +676,15 @@ FULL_SOURCE_FILE="$QUADLET_DIR/codexia-slot-green.container"
 FULL_SOURCE_SHA="$(sha256sum "$FULL_SOURCE_FILE" | awk '{print $1}')"
 FULL_DROPINS_BEFORE="$(systemctl --user show --property=DropInPaths --value codexia-slot-green.service)"
 systemctl --user set-property --runtime codexia-slot-green.service CPUQuota=100%
+node --input-type=module - "$REPO_ROOT" codexia-slot-green.service "$FULL_RUNTIME_FILE" <<'NODE'
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const [repoRoot, unit, runtimeFile] = process.argv.slice(2);
+const host = await import(pathToFileURL(path.join(repoRoot, 'deploy/updater/standalone-host.mjs')).href);
+const runtime = JSON.parse(await readFile(runtimeFile, 'utf8'));
+await host.assertRuntimeSystemdCpuQuota(unit, { ...runtime, resources: { ...runtime.resources, cpuQuotaPercent: 100 } });
+NODE
 remove_effective_override_text codexia-slot-green.service 100% "$FULL_DROPINS_BEFORE"
 systemd_override_rejected codexia-slot-green.service "$FULL_RUNTIME_FILE" "$FULL_SOURCE_FILE" "$FULL_SOURCE_SHA"
 systemctl --user set-property --runtime codexia-slot-green.service CPUQuota=200%
