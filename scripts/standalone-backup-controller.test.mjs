@@ -267,7 +267,7 @@ test('stable backup rejects an invalid destination before pausing or fencing the
   assert.ok(!host.trace.includes('stop:blue'));
 });
 
-function legacyFixture({ tunnelActive = true, timerActive = true, backupFailure = false, restoreFailure = false, tunnelStartFailure = false, apiPermitFailure = false, apiPermitCleanupFailure = false, destinationFailure = false } = {}) {
+function legacyFixture({ tunnelActive = true, timerActive = true, backupFailure = false, restoreFailure = false, tunnelStartFailure = false, apiPermitFailure = false, apiPermitCleanupFailure = false, destinationFailure = false, clearIntentFailureAfterUnlink = false, clearRecoveryIntentFailureBeforeUnlink = false, clearRecoveryIntentFailureAfterUnlink = false, startupFenceRemovalFailure = false, primaryIntentResaveFailure = false, recoveryIntentSaveFailure = false } = {}) {
   const key = generateKeyPairSync('ed25519');
   const publicKey = key.publicKey.export({ type: 'spki', format: 'pem' });
   const privateKey = key.privateKey.export({ type: 'pkcs8', format: 'pem' });
@@ -290,6 +290,13 @@ function legacyFixture({ tunnelActive = true, timerActive = true, backupFailure 
     apiStartupFence: false,
     tunnelStartupFence: false,
     backupIntent: null,
+    recoveryIntent: null,
+    failClearIntentAfterUnlink: clearIntentFailureAfterUnlink,
+    failClearRecoveryIntentBeforeUnlink: clearRecoveryIntentFailureBeforeUnlink,
+    failClearRecoveryIntentAfterUnlink: clearRecoveryIntentFailureAfterUnlink,
+    failPrimaryIntentResave: primaryIntentResaveFailure,
+    failRecoveryIntentSave: recoveryIntentSaveFailure,
+    failStartupFenceRemoval: startupFenceRemovalFailure,
     tunnelActive,
     timerActive,
     preflight: false,
@@ -338,7 +345,7 @@ function legacyFixture({ tunnelActive = true, timerActive = true, backupFailure 
     },
     async assertBackupStartupFence() { assert.equal(this.startupFence, true); },
     async removeBackupStartupPermits() { this.trace.push('permits-clear'); },
-    async removeBackupStartupFence() { this.trace.push('fence-remove'); this.startupFence = false; this.apiStartupFence = false; this.tunnelStartupFence = false; },
+    async removeBackupStartupFence() { this.trace.push('fence-remove'); if (this.failStartupFenceRemoval) { this.failStartupFenceRemoval = false; throw new Error('synthetic startup-fence cleanup failure'); } this.startupFence = false; this.apiStartupFence = false; this.tunnelStartupFence = false; },
     async validateBackupDestination(destination) {
       this.trace.push('validate-destination');
       assert.equal(destination, '/mnt/backup');
@@ -388,9 +395,31 @@ function legacyFixture({ tunnelActive = true, timerActive = true, backupFailure 
   const controller = new StandaloneController({
     host, store: {
       async save() { throw new Error('legacy backup must not create a journal'); },
-      async saveBackupIntent(value) { host.backupIntent = structuredClone(value); host.trace.push('intent-save'); },
+      async saveBackupIntent(value) {
+        host.trace.push('intent-save');
+        if (host.failPrimaryIntentResave) throw new Error('synthetic primary intent re-save failure');
+        host.backupIntent = structuredClone(value);
+      },
       async loadBackupIntent() { return host.backupIntent && structuredClone(host.backupIntent); },
-      async clearBackupIntent() { host.backupIntent = null; host.trace.push('intent-clear'); },
+      async clearBackupIntent() {
+        host.backupIntent = null; host.trace.push('intent-clear');
+        if (host.failClearIntentAfterUnlink) {
+          host.failClearIntentAfterUnlink = false;
+          throw new Error('synthetic parent directory fsync failure after unlink');
+        }
+      },
+      async saveBackupRecoveryIntent(value) {
+        host.trace.push('recovery-intent-save');
+        if (host.failRecoveryIntentSave) throw new Error('synthetic recovery marker fsync failure');
+        host.recoveryIntent = structuredClone(value);
+      },
+      async loadBackupRecoveryIntent() { return host.recoveryIntent && structuredClone(host.recoveryIntent); },
+      async clearBackupRecoveryIntent() {
+        host.trace.push('recovery-intent-clear');
+        if (host.failClearRecoveryIntentBeforeUnlink) { host.failClearRecoveryIntentBeforeUnlink = false; throw new Error('synthetic recovery marker unlink failure before clear'); }
+        host.recoveryIntent = null;
+        if (host.failClearRecoveryIntentAfterUnlink) { host.failClearRecoveryIntentAfterUnlink = false; throw new Error('synthetic recovery marker directory fsync failure after unlink'); }
+      },
     },
     publicKey, now: () => now,
   });
@@ -407,9 +436,11 @@ test('pre-journal backup verifies the signed legacy identity and restores API, T
   assert.equal(host.tunnelActive, true);
   assert.equal(host.timerActive, true);
   assert.equal(host.backupIntent, null);
+  assert.equal(host.recoveryIntent, null);
   assert.equal(host.startupFence, false);
   assert.equal(host.apiWasEnabled, true);
   assert.equal(host.tunnelWasEnabled, true);
+  assert.ok(host.trace.indexOf('recovery-intent-save') < host.trace.indexOf('fence-install'));
   assert.ok(host.trace.indexOf('fence-install') < host.trace.indexOf('intent-save'));
   assert.ok(host.trace.indexOf('intent-save') < host.trace.indexOf('autostart-gated'));
   assert.ok(host.trace.indexOf('route:blocked') < host.trace.indexOf('tunnel-stop'));
@@ -424,7 +455,25 @@ test('pre-journal backup verifies the signed legacy identity and restores API, T
   const finalFenceInstall = host.trace.lastIndexOf('fence-install');
   assert.ok(finalFenceInstall > host.trace.indexOf('tunnel-start'));
   assert.ok(finalFenceInstall < host.trace.indexOf('autostart-restore'));
-  assert.ok(host.trace.indexOf('intent-clear') < host.trace.lastIndexOf('fence-remove'));
+  assert.ok(host.trace.indexOf('intent-clear') < host.trace.indexOf('recovery-intent-clear'));
+  assert.ok(host.trace.indexOf('recovery-intent-clear') < host.trace.lastIndexOf('fence-remove'));
+});
+
+test('legacy backup fails before installing a startup fence if its durable recovery marker cannot be saved', async () => {
+  const { host, controller } = legacyFixture({ recoveryIntentSaveFailure: true });
+
+  await assert.rejects(controller.backupLegacy(release, { destination: '/mnt/backup', recipient: 'age1recipient' }), /recovery marker fsync failure/);
+
+  assert.equal(host.startupFence, false);
+  assert.equal(host.legacyActive, true);
+  assert.equal(host.legacyContainerPresent, true);
+  assert.equal(host.tunnelActive, true);
+  assert.equal(host.timerActive, true);
+  assert.ok(!host.trace.includes('fence-install'));
+  assert.ok(!host.trace.includes('api-stop'));
+  assert.ok(!host.trace.includes('tunnel-stop'));
+  assert.ok(!host.trace.includes('timer-stop'));
+  assert.ok(!host.trace.includes('backup'));
 });
 
 test('boot recovery resumes an interrupted legacy backup only after revalidating its signed container', async () => {
@@ -445,7 +494,136 @@ test('boot recovery resumes an interrupted legacy backup only after revalidating
     assert.equal(host.timerActive, true, boundary.name);
     assert.equal(host.routeValue, 'blocked', boundary.name);
     assert.equal(host.backupIntent, null, boundary.name);
+    assert.equal(host.recoveryIntent, null, boundary.name);
   }
+});
+
+test('recovery resumes from the independent marker when the primary intent is missing', async () => {
+  const { host, controller } = legacyFixture();
+  host.legacyActive = false;
+  host.legacyContainerPresent = false;
+  host.tunnelActive = false;
+  host.timerActive = false;
+  host.recoveryIntent = legacyBackupIntent();
+
+  await controller.recoverBackupIntent(null);
+
+  assert.equal(host.legacyActive, true);
+  assert.equal(host.tunnelActive, true);
+  assert.equal(host.timerActive, true);
+  assert.equal(host.backupIntent, null);
+  assert.equal(host.recoveryIntent, null);
+});
+
+test('mismatched primary and independent recovery intents fail closed', async () => {
+  const { host, controller } = legacyFixture();
+  host.backupIntent = legacyBackupIntent();
+  host.recoveryIntent = legacyBackupIntent({ apiWasEnabled: false, tunnelWasEnabled: false });
+
+  await assert.rejects(controller.loadBackupIntent(), /Primary and independent backup recovery intents disagree/);
+  assert.equal(host.startupFence, false);
+  assert.ok(!host.trace.includes('fence-remove'));
+  assert.ok(!host.trace.includes('api-start'));
+});
+
+test('legacy intent unlink followed by parent fsync failure restores intent and keeps the startup fence', async () => {
+  const { host, controller } = legacyFixture({ clearIntentFailureAfterUnlink: true });
+  const intent = legacyBackupIntent();
+  host.backupIntent = structuredClone(intent);
+
+  await assert.rejects(controller.recoverBackupIntent(null), /parent directory fsync failure after unlink/);
+
+  assert.deepEqual(host.backupIntent, intent, 'The failed clear must durably restore the primary intent');
+  assert.deepEqual(host.recoveryIntent, intent, 'The independent recovery marker must remain durable');
+  assert.equal(host.startupFence, true);
+  assert.equal(host.routeValue, 'blocked');
+  assert.equal(host.timerActive, false);
+  assert.equal(host.tunnelActive, false);
+  assert.ok(!host.trace.includes('fence-remove'));
+  assert.ok(host.trace.lastIndexOf('recovery-intent-save') < host.trace.length);
+});
+
+test('independent recovery marker keeps the startup fence when primary intent re-save fails', async () => {
+  const { host, controller } = legacyFixture({ clearIntentFailureAfterUnlink: true, primaryIntentResaveFailure: true, tunnelActive: false });
+  const intent = legacyBackupIntent({
+    tunnelWasActive: false,
+    identity: { ...legacyBackupIntent().identity, tunnel: { ...legacyBackupIntent().identity.tunnel, runtimeFingerprint: null } },
+  });
+  host.backupIntent = structuredClone(intent);
+
+  await assert.rejects(controller.recoverBackupIntent(null), /parent directory fsync failure after unlink/);
+
+  assert.equal(host.backupIntent, null);
+  assert.deepEqual(host.recoveryIntent, intent);
+  assert.equal(host.startupFence, true);
+  assert.equal(host.routeValue, 'blocked');
+  assert.equal(host.timerActive, false);
+  assert.equal(host.tunnelActive, false);
+  assert.ok(!host.trace.includes('fence-remove'));
+  assert.ok(!host.trace.includes('api-start'));
+  assert.ok(!host.trace.includes('tunnel-start'));
+  assert.ok(host.trace.lastIndexOf('timer-stop') > host.trace.lastIndexOf('timer-start'), 'The failed clear must leave polling stopped after any pre-clear restoration');
+});
+
+test('recovery marker fsync failure restores the marker and retains the startup fence', async () => {
+  const { host, controller } = legacyFixture({ clearRecoveryIntentFailureAfterUnlink: true, tunnelActive: false });
+  const intent = legacyBackupIntent({
+    tunnelWasActive: false,
+    identity: { ...legacyBackupIntent().identity, tunnel: { ...legacyBackupIntent().identity.tunnel, runtimeFingerprint: null } },
+  });
+  host.backupIntent = structuredClone(intent);
+
+  await assert.rejects(controller.recoverBackupIntent(null), /recovery marker directory fsync failure after unlink/);
+
+  assert.equal(host.backupIntent, null, 'The primary intent clear was already durable');
+  assert.deepEqual(host.recoveryIntent, intent, 'The independent marker must be restored after its ambiguous unlink');
+  assert.equal(host.startupFence, true);
+  assert.equal(host.routeValue, 'blocked');
+  assert.equal(host.timerActive, false);
+  assert.equal(host.tunnelActive, false);
+  assert.ok(!host.trace.includes('fence-remove'));
+  assert.ok(host.trace.lastIndexOf('recovery-intent-save') > host.trace.lastIndexOf('recovery-intent-clear'));
+});
+
+test('recovery marker unlink failure retains the marker, blocks routing, and keeps the startup fence', async () => {
+  const { host, controller } = legacyFixture({ clearRecoveryIntentFailureBeforeUnlink: true, tunnelActive: false });
+  const intent = legacyBackupIntent({
+    tunnelWasActive: false,
+    identity: { ...legacyBackupIntent().identity, tunnel: { ...legacyBackupIntent().identity.tunnel, runtimeFingerprint: null } },
+  });
+  host.backupIntent = structuredClone(intent);
+
+  await assert.rejects(controller.recoverBackupIntent(null), /recovery marker unlink failure before clear/);
+
+  assert.equal(host.backupIntent, null, 'The primary intent clear was already durable');
+  assert.deepEqual(host.recoveryIntent, intent, 'The recovery marker remains available for the next recovery attempt');
+  assert.equal(host.startupFence, true);
+  assert.equal(host.routeValue, 'blocked');
+  assert.equal(host.timerActive, false);
+  assert.equal(host.tunnelActive, false);
+  assert.ok(!host.trace.includes('fence-remove'));
+});
+
+test('durably committed recovery leaves a failed fence cleanup for the next no-intent pass', async () => {
+  const { host, controller } = legacyFixture({ startupFenceRemovalFailure: true });
+  host.backupIntent = legacyBackupIntent();
+
+  await assert.rejects(controller.recoverBackupIntent(null), /startup-fence cleanup failed/);
+
+  assert.equal(host.backupIntent, null);
+  assert.equal(host.recoveryIntent, null);
+  assert.equal(host.startupFence, true, 'A failed fence cleanup must leave the reviewed fence in place');
+  assert.equal(host.legacyActive, true);
+  assert.equal(host.tunnelActive, true);
+  assert.equal(host.timerActive, true);
+  assert.equal(host.routeValue, 'blocked');
+  assert.equal(host.trace.filter(event => event === 'fence-remove').length, 1, 'The controller must not retry fence removal in the committed error branch');
+
+  await controller.recoverBackupIntent(null);
+
+  assert.equal(host.startupFence, false, 'A later no-intent pass may remove the completed recovery fence');
+  assert.equal(host.legacyActive, true);
+  assert.equal(host.tunnelActive, true);
 });
 
 test('interrupted pre-journal backup refuses to restart when the captured Quadlet or systemd unit drifted', async () => {
@@ -823,7 +1001,7 @@ test('container runtime fingerprint validates and retains Podman Config.Passwd b
   assert.throws(() => containerRuntimeFingerprint({ ...container, HostConfig: { Passwd: false } }), /Potential plaintext secret in HostConfig property: Passwd/);
 });
 
-test('legacy startup fence allows only intent-free starts or a unit-specific recovery permit', () => {
+test('legacy startup fence allows only marker-free starts or a unit-specific recovery permit', () => {
   const originalRuntime = process.env.XDG_RUNTIME_DIR;
   process.env.XDG_RUNTIME_DIR = '/run/user/1000';
   try {
@@ -838,6 +1016,7 @@ test('legacy startup fence allows only intent-free starts or a unit-specific rec
     const paths = host.backupStartupFencePaths();
 
     assert.match(paths.api.content, /^\[Unit\]\nConditionPathExists=\|!/u);
+    assert.match(paths.api.content, /backup-recovery\.json/u);
     assert.match(paths.api.content, /\nConditionPathExists=\|\/run\/user\/1000\//u);
     assert.notEqual(paths.api.permit, paths.tunnel.permit);
     assert.ok(paths.api.content.includes(paths.api.permit));

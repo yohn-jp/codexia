@@ -18,6 +18,18 @@ The existing `prepare`, `initialize`, `verify`, `enable` and acceptance stages r
 
 The explicit `secrets` stage converges protected Podman credentials without rotation. After it succeeds, the `base` stage converges fixed networks, volumes, PostgreSQL and the legacy Tunnel unit without replacing existing data or starting the Tunnel. Run these two stages through a separate bootstrap SSH account with Ansible privilege escalation; Ansible executes rootless Podman/systemd work as `codexia_service_user`, which does not receive sudo. Follow [Base secret convergence](BASE-SECRETS.md) and [Base runtime convergence](BASE-RUNTIME.md) for required approvals, adoption rules and recovery behavior. These stages do not complete signed release admission, writer cutover or target-host acceptance.
 
+## Locked updater lifecycle
+
+The `pause`, `resume` and `rollback` stages require `codexia_maintenance_approved=true` and use the existing updater wrapper and host lock. Pause/resume preserve the configured enabled state and timer state. Rollback requires an explicitly paused, healthy controller and a previous digest that the updater still verifies as signed, published and compatible. If automatic updates are enabled in the saved configuration, Ansible invokes the ordinary locked `rollback` operation. If they are disabled, it invokes the existing locked `acceptance-rollback` operation, which preserves the disabled and paused state while recording the rolled-back image in `failedImages`. Both paths require the real signed rollback transition to complete; there is no implicit credential rotation or live database restore. Schema/epoch maintenance remains the separate signed bootstrap transition defined by the canonical IAC plan.
+
+Examples:
+
+```sh
+ansible-playbook -i /private/codexia-inventory.yml deploy/ansible/site.yml -e codexia_stage=pause -e codexia_maintenance_approved=true
+ansible-playbook -i /private/codexia-inventory.yml deploy/ansible/site.yml -e codexia_stage=resume -e codexia_maintenance_approved=true
+ansible-playbook -i /private/codexia-inventory.yml deploy/ansible/site.yml -e codexia_stage=rollback -e codexia_maintenance_approved=true
+```
+
 ## Host baseline convergence
 
 Use the private bootstrap SSH identity with sudo and explicitly set the existing service account's name, primary group, UID, GID and home in inventory. For a new VM explicitly authorize account creation. Then run:

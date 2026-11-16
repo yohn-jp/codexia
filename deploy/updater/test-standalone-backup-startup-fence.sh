@@ -12,6 +12,7 @@ quadlet_dir="$HOME/.config/containers/systemd"
 unit_dir="$HOME/.config/systemd/user"
 state_dir=$(mktemp -d /tmp/codexia-backup-startup-fence.XXXXXX)
 intent="$state_dir/backup-intent.json"
+recovery_intent="$state_dir/backup-recovery.json"
 snapshot="$state_dir/runtime-identity.json"
 api_source="$quadlet_dir/codexia-api.container"
 tunnel_source="$quadlet_dir/codexia-tunnel.container"
@@ -94,12 +95,13 @@ podman inspect codexia-tunnel >/dev/null
 # Capture live settings and generated Quadlet units before their stop hooks remove containers.
 node --input-type=module -e '
   import assert from "node:assert/strict";
-  import {execFileSync,spawnSync} from "node:child_process";
-  import {writeFile} from "node:fs/promises";
+  import {execFileSync} from "node:child_process";
+  import {open,writeFile} from "node:fs/promises";
   import path from "node:path";
   import {pathToFileURL} from "node:url";
   const root=process.argv[1],quadlet=process.argv[2],state=process.argv[3],output=process.argv[4];
   const {PodmanStandaloneHost,containerRuntimeFingerprint,containerRuntimeFingerprintProjection}=await import(pathToFileURL(path.join(root,"deploy/updater/standalone-host.mjs")));
+  const {validateBackupIntent}=await import(pathToFileURL(path.join(root,"scripts/standalone-update-controller.mjs")));
   const host=new PodmanStandaloneHost({routeFile:path.join(state,"route"),quadletDirectory:quadlet,githubTokenFile:path.join(state,"token"),
     stateFile:path.join(state,"controller.json"),frontendIdentityUrl:"https://backup-test.invalid/desktop/update-identity.json",browserAuth:{mode:"token"}});
   const api=await host.readBackupQuadletUnit("codexia-api.service","codexia-api.container");
@@ -120,15 +122,21 @@ node --input-type=module -e '
   assert.ok(identity.autostart.autostartLinks.api.generatorTarget);
   assert.ok(identity.autostart.autostartLinks.tunnel.generatorTarget);
   await writeFile(output,JSON.stringify(identity)+"\n",{mode:0o600,flag:"wx"});
+  const marker=await open(path.join(state,"backup-recovery.json"),"wx",0o600);
+  const fakeDigest=char=>char.repeat(64);
+  const markerIntent={format:"codexia-backup-intent/v3",kind:"legacy",release:{format:"codexia-update-release/v1",channel:"stable",state:"published",version:"1.2.3",sourceSha:"a".repeat(40),image:"ghcr.io/yohn-jp/codexia-backend@sha256:"+fakeDigest("a"),platform:"linux/amd64",profile:"core",migrationFingerprint:"sha256:"+fakeDigest("b"),persistenceFormat:1,apiEpoch:1},identity:{api:{unitFingerprint:fakeDigest("c"),runtimeFingerprint:identity.apiRuntime},tunnel:{unitFingerprint:identity.tunnelUnitFingerprint,runtimeFingerprint:identity.tunnelRuntime}},...identity.autostart,tunnelWasActive:true,timerWasActive:false,createdAt:new Date().toISOString()};
+  assert.deepEqual(validateBackupIntent(markerIntent),markerIntent);
+  try{await marker.writeFile(JSON.stringify(markerIntent)+"\n");await marker.sync();}finally{await marker.close();}
+  const stateDirectory=await open(state,"r");try{await stateDirectory.sync();}finally{await stateDirectory.close();}
   await host.installBackupStartupFence();
 ' "$repo_root" "$quadlet_dir" "$state_dir" "$snapshot"
 
 # A real generated Quadlet stop removes each Podman container. The generated
-# default.target links stay in place; the durable intent condition gates starts.
+# default.target links stay in place; the durable recovery marker condition gates starts.
 printf '%s\n' '{"format":"codexia-backup-intent/v3","kind":"legacy"}' > "$intent"
 node --input-type=module -e '
   import assert from "node:assert/strict";
-  import {execFileSync} from "node:child_process";
+  import {execFileSync,spawnSync} from "node:child_process";
   import path from "node:path";
   import {pathToFileURL} from "node:url";
   const root=process.argv[1],quadlet=process.argv[2],state=process.argv[3];
@@ -158,7 +166,7 @@ done
 systemctl --user reset-failed codexia-api.service codexia-tunnel.service
 
 # Without a recovery permit, systemd must skip both default.target-linked services while
-# the durable intent exists. A permitted API restart simulates the recovery crash boundary.
+# the recovery marker exists, even after the primary intent is removed. A permitted API restart simulates the recovery crash boundary.
 test -L "$XDG_RUNTIME_DIR/systemd/generator/default.target.wants/codexia-api.service"
 test -L "$XDG_RUNTIME_DIR/systemd/generator/default.target.wants/codexia-tunnel.service"
 systemctl --user start codexia-api.service codexia-tunnel.service
@@ -264,7 +272,7 @@ node --input-type=module -e '
 systemctl --user daemon-reload
 node --input-type=module -e '
   import assert from "node:assert/strict";
-  import {execFileSync} from "node:child_process";
+  import {execFileSync,spawnSync} from "node:child_process";
   import {lstat,readFile} from "node:fs/promises";
   import path from "node:path";
   import {pathToFileURL} from "node:url";
@@ -321,10 +329,55 @@ node --input-type=module -e '
 ' "$repo_root" "$quadlet_dir" "$state_dir" "$snapshot"
 test ! -e "$XDG_RUNTIME_DIR/codexia-backup-recovery-api.permit"
 test ! -e "$XDG_RUNTIME_DIR/codexia-backup-recovery-tunnel.permit"
-test ! -L "$XDG_RUNTIME_DIR/codexia-backup-recovery-api.permit"
-test ! -L "$XDG_RUNTIME_DIR/codexia-backup-recovery-tunnel.permit"
-test "$(systemctl --user is-active codexia-api.service || true)" = active
 rm -f -- "$intent"
+systemctl --user stop codexia-api.service codexia-tunnel.service
+for container in codexia-api codexia-tunnel; do
+  status=0
+  podman container exists "$container" || status=$?
+  test "$status" = 1
+done
+systemctl --user reset-failed codexia-api.service codexia-tunnel.service
+systemctl --user start codexia-api.service codexia-tunnel.service
+for unit in codexia-api.service codexia-tunnel.service; do
+  test "$(systemctl --user show --property=ActiveState --value "$unit")" = inactive
+  test "$(systemctl --user show --property=ConditionResult --value "$unit")" = no
+done
+for container in codexia-api codexia-tunnel; do
+  status=0
+  podman container exists "$container" || status=$?
+  test "$status" = 1
+done
+# The verified recovery marker is now durably cleared while both reviewed
+# fences remain loaded. A normal systemd start must pass its condition and
+# recreate the stopped Quadlet containers, even if fence cleanup is interrupted.
+node --input-type=module -e '
+  import {open,unlink} from "node:fs/promises";
+  const marker=process.argv[1],state=process.argv[2];
+  await unlink(marker);
+  const dir=await open(state,"r");try{await dir.sync();}finally{await dir.close();}
+' "$recovery_intent" "$state_dir"
+systemctl --user start codexia-api.service codexia-tunnel.service
+for unit in codexia-api.service codexia-tunnel.service; do
+  active_state=$(systemctl --user show --property=ActiveState --value "$unit")
+  condition_result=$(systemctl --user show --property=ConditionResult --value "$unit")
+  if test "$active_state" != active || test "$condition_result" != yes; then
+    echo "$unit did not start normally after durable recovery-marker removal" >&2
+    systemctl --user show --property=ActiveState --property=SubState --property=ConditionResult --property=Conditions "$unit" >&2
+    journalctl --user --unit="$unit" --no-pager --lines=12 >&2 || true
+    exit 1
+  fi
+done
+for container in codexia-api codexia-tunnel; do
+  status=0
+  podman container exists "$container" || status=$?
+  if test "$status" != 0; then echo "$container did not restart after durable recovery-marker removal" >&2; exit 1; fi
+done
+systemctl --user stop codexia-api.service codexia-tunnel.service
+for container in codexia-api codexia-tunnel; do
+  status=0
+  podman container exists "$container" || status=$?
+  test "$status" = 1
+done
 node --input-type=module -e '
   import path from "node:path";
   import {pathToFileURL} from "node:url";

@@ -155,12 +155,60 @@ case "${1:-}" in
     db="codexia-restore-drill-$suffix"; data="$db-data"; history="$db-history"
     label="io.codexia.restore-drill"
     db_created=false; data_created=false; history_created=false
-    cleanup(){
-      if [[ "$db_created" == true ]] && [[ "$(podman inspect --format "{{index .Config.Labels \"$label\"}}" "$db" 2>/dev/null || true)" == "$suffix" ]]; then podman rm -f "$db" >/dev/null 2>&1 || true; fi
-      if [[ "$data_created" == true ]] && [[ "$(podman volume inspect --format "{{index .Labels \"$label\"}}" "$data" 2>/dev/null || true)" == "$suffix" ]]; then podman volume rm "$data" >/dev/null 2>&1 || true; fi
-      if [[ "$history_created" == true ]] && [[ "$(podman volume inspect --format "{{index .Labels \"$label\"}}" "$history" 2>/dev/null || true)" == "$suffix" ]]; then podman volume rm "$history" >/dev/null 2>&1 || true; fi
+    cleanup_restore_resources(){
+      local failed=0 status actual_label resource created
+      if [[ "$db_created" == true ]]; then
+        status=0; podman container exists "$db" >/dev/null 2>&1 || status=$?
+        if [[ "$status" == 0 ]]; then
+          if ! actual_label="$(podman inspect --format "{{index .Config.Labels \"$label\"}}" "$db" 2>/dev/null)"; then
+            printf '%s\n' 'Restore drill cleanup failed: could not inspect isolated database container ownership' >&2; failed=1
+          elif [[ "$actual_label" != "$suffix" ]]; then
+            printf '%s\n' 'Restore drill cleanup failed: isolated database container ownership changed' >&2; failed=1
+          elif ! podman rm -f "$db" >/dev/null 2>&1; then
+            printf '%s\n' 'Restore drill cleanup failed: isolated database container removal failed' >&2; failed=1
+          fi
+        elif [[ "$status" != 1 ]]; then
+          printf '%s\n' 'Restore drill cleanup failed: isolated database container state is unobservable' >&2; failed=1
+        fi
+        status=0; podman container exists "$db" >/dev/null 2>&1 || status=$?
+        if [[ "$status" == 0 ]]; then
+          printf '%s\n' 'Restore drill cleanup failed: isolated database container remains' >&2; failed=1
+        elif [[ "$status" != 1 ]]; then
+          printf '%s\n' 'Restore drill cleanup failed: isolated database container absence is unobservable' >&2; failed=1
+        fi
+      fi
+      for resource in "$data" "$history"; do
+        case "$resource" in "$data") created="$data_created";; "$history") created="$history_created";; esac
+        [[ "$created" == true ]] || continue
+        status=0; podman volume exists "$resource" >/dev/null 2>&1 || status=$?
+        if [[ "$status" == 0 ]]; then
+          if ! actual_label="$(podman volume inspect --format "{{index .Labels \"$label\"}}" "$resource" 2>/dev/null)"; then
+            printf '%s\n' 'Restore drill cleanup failed: could not inspect isolated volume ownership' >&2; failed=1
+          elif [[ "$actual_label" != "$suffix" ]]; then
+            printf '%s\n' 'Restore drill cleanup failed: isolated volume ownership changed' >&2; failed=1
+          elif ! podman volume rm "$resource" >/dev/null 2>&1; then
+            printf '%s\n' 'Restore drill cleanup failed: isolated volume removal failed' >&2; failed=1
+          fi
+        elif [[ "$status" != 1 ]]; then
+          printf '%s\n' 'Restore drill cleanup failed: isolated volume state is unobservable' >&2; failed=1
+        fi
+        status=0; podman volume exists "$resource" >/dev/null 2>&1 || status=$?
+        if [[ "$status" == 0 ]]; then
+          printf '%s\n' 'Restore drill cleanup failed: isolated volume remains' >&2; failed=1
+        elif [[ "$status" != 1 ]]; then
+          printf '%s\n' 'Restore drill cleanup failed: isolated volume absence is unobservable' >&2; failed=1
+        fi
+      done
+      return "$failed"
     }
-    trap cleanup EXIT
+    finish_restore_drill(){
+      local status=$?
+      trap - EXIT
+      set +e
+      cleanup_restore_resources || status=1
+      exit "$status"
+    }
+    trap finish_restore_drill EXIT
     assert_restore_resource_absent container "$db"
     assert_restore_resource_absent volume "$data"
     assert_restore_resource_absent volume "$history"
@@ -185,6 +233,8 @@ case "${1:-}" in
     age -d -i "$3" "$dir/history.tar.age" | podman volume import "$history" -
     [[ "$(db_fingerprint "$db" postgres)" == "${fields[1]}" ]] || die 'Restored database logical fingerprint mismatch'
     [[ "$(history_fingerprint "$history")" == "${fields[2]}" ]] || die 'Restored history fingerprint mismatch'
+    cleanup_restore_resources
+    trap - EXIT
     printf 'Isolated restore verified: database and history fingerprints match\n'
     ;;
   *) die 'Use backup-locked or the explicitly approved drill';;

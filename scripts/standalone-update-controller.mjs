@@ -160,9 +160,12 @@ export class StandaloneController {
     await this.host.probe(slot,release);
   }
   async loadBackupIntent(){
-    if(!this.store.loadBackupIntent)return null;
-    const value=await this.store.loadBackupIntent();
-    return value===null||value===undefined?null:validateBackupIntent(value);
+    const primary=this.store.loadBackupIntent?await this.store.loadBackupIntent():null;
+    const recovery=this.store.loadBackupRecoveryIntent?await this.store.loadBackupRecoveryIntent():null;
+    const validatedPrimary=primary===null||primary===undefined?null:validateBackupIntent(primary);
+    const validatedRecovery=recovery===null||recovery===undefined?null:validateBackupIntent(recovery);
+    if(validatedPrimary&&validatedRecovery)assert.deepEqual(validatedPrimary,validatedRecovery,'Primary and independent backup recovery intents disagree');
+    return validatedPrimary??validatedRecovery;
   }
   async saveBackupIntent(value){
     assert.ok(this.store.saveBackupIntent,'Durable backup intent storage is required');
@@ -171,6 +174,14 @@ export class StandaloneController {
   async clearBackupIntent(){
     assert.ok(this.store.clearBackupIntent,'Durable backup intent removal is required');
     await this.store.clearBackupIntent();
+  }
+  async saveBackupRecoveryIntent(value){
+    assert.ok(this.store.saveBackupRecoveryIntent,'Independent durable backup recovery intent storage is required');
+    await this.store.saveBackupRecoveryIntent(validateBackupIntent(value));
+  }
+  async clearBackupRecoveryIntent(){
+    assert.ok(this.store.clearBackupRecoveryIntent,'Independent durable backup recovery intent removal is required');
+    await this.store.clearBackupRecoveryIntent();
   }
   async assertNoBackupIntent(){
     assert.equal(await this.loadBackupIntent(),null,'Interrupted backup recovery is required before maintenance');
@@ -181,6 +192,10 @@ export class StandaloneController {
     let legacyApiStartedByRecovery=false;
     let legacyApiIdentityVerified=false;
     let legacyIntentCleared=false;
+    let legacyIntentClearAttempted=false;
+    let legacyRecoveryIntentCleared=false;
+    let legacyRecoveryIntentClearAttempted=false;
+    let legacyRecoveryIntentSaved=false;
     try{
       if(intent.kind==='controller'){
         assert.ok(state,'Controller backup intent has no durable controller state');
@@ -217,6 +232,8 @@ export class StandaloneController {
       assert.ok(channel.payload.releases.some(item=>item.state==='published'&&JSON.stringify(item)===JSON.stringify(release)),
         'Legacy backup release is no longer present in the signed channel');
       await this.uiEpoch(release);
+      await this.saveBackupRecoveryIntent(intent);
+      legacyRecoveryIntentSaved=true;
       await this.host.removeBackupStartupPermits();
       await this.host.installBackupStartupFence();
       await this.host.assertBackupAutostartGated(intent);
@@ -241,9 +258,9 @@ export class StandaloneController {
         await this.host.startTunnel();
         await this.host.assertLegacyBackupTunnel({expectedIdentity:intent.identity.tunnel});
       }
-      // Keep the generated Wants links unchanged. The durable intent condition
-      // blocks boot starts; a per-service volatile permit authorizes only the
-      // already-verified recovery start while this controller holds its lock.
+      // Keep the generated Wants links unchanged. The independent durable
+      // recovery marker blocks boot starts; a per-service volatile permit
+      // authorizes only this verified start while the controller holds its lock.
       await this.host.installBackupStartupFence();
       await this.host.assertBackupAutostartGated(intent);
       await this.host.assertLegacyBackupRelease(release,{expectedIdentity:intent.identity.api});
@@ -252,30 +269,44 @@ export class StandaloneController {
       if(intent.timerWasActive&&!timerActive)await this.host.startPollingTimer();
       else if(!intent.timerWasActive&&timerActive)await this.host.stopPollingTimer();
       await this.host.restoreBackupAutostart(intent);
+      legacyIntentClearAttempted=true;
       await this.clearBackupIntent();
       legacyIntentCleared=true;
-      // With the intent durably gone, the gate condition is now satisfied even
-      // if a crash happens before these otherwise harmless drop-ins are removed.
+      // Keep both reviewed startup fences loaded until both durable recovery
+      // records have been cleared. A crash before marker deletion remains
+      // recoverable; after marker deletion, service identities and timer state
+      // have already been verified, so ordinary autostart is safe even if a
+      // later fence cleanup is interrupted.
+      legacyRecoveryIntentClearAttempted=true;
+      await this.clearBackupRecoveryIntent();
+      legacyRecoveryIntentCleared=true;
       await this.host.removeBackupStartupFence();
       return null;
     }catch(error){
       const prefix=intent.kind==='legacy'?'Legacy backup recovery blocked: ':'Backup recovery blocked: ';
       const reason=prefix+safeError(error);
-      if(intent.kind==='legacy'&&!legacyIntentCleared){
-        try{legacyIntentCleared=(await this.loadBackupIntent())===null;}catch{}
-      }
-      if(intent.kind==='legacy'&&legacyIntentCleared){
-        await this.host.removeBackupStartupFence().catch(()=>undefined);
+      if(intent.kind==='legacy'&&legacyIntentCleared&&legacyRecoveryIntentCleared){
         throw new Error('Legacy backup recovery committed but startup-fence cleanup failed: '+safeError(error));
       }
-      await this.host.route('blocked').catch(()=>undefined);
-      await this.host.stopPollingTimer().catch(()=>undefined);
       if(intent.kind==='legacy'){
+        await this.host.route('blocked').catch(()=>undefined);
+        await this.host.stopPollingTimer().catch(()=>undefined);
+        if(legacyIntentClearAttempted&&!legacyIntentCleared){
+          try{await this.saveBackupIntent(intent);}catch{}
+        }
+        if((legacyRecoveryIntentClearAttempted&&!legacyRecoveryIntentCleared)||!legacyRecoveryIntentSaved){
+          try{await this.saveBackupRecoveryIntent(intent);legacyRecoveryIntentSaved=true;}catch{}
+        }
         await this.host.removeBackupStartupPermits().catch(()=>undefined);
-        await this.host.installBackupStartupFence().catch(()=>undefined);
-        await this.host.assertBackupAutostartGated(intent).catch(()=>undefined);
+        if(legacyRecoveryIntentSaved){
+          await this.host.installBackupStartupFence().catch(()=>undefined);
+          await this.host.assertBackupAutostartGated(intent).catch(()=>undefined);
+        }
         await this.host.stopTunnel().catch(()=>undefined);
         if(legacyApiStartedByRecovery&&!legacyApiIdentityVerified)await this.host.stopLegacyWriter().catch(()=>undefined);
+      }else{
+        await this.host.route('blocked').catch(()=>undefined);
+        await this.host.stopPollingTimer().catch(()=>undefined);
       }
       if(intent.kind==='controller'&&state){
         await this.save({...state,paused:true,lastError:reason}).catch(()=>undefined);
@@ -348,10 +379,10 @@ export class StandaloneController {
       assert.match(identity.unitFingerprint,/^[a-f0-9]{64}$/u,name+' systemd/Quadlet identity is not fingerprinted');
       if(name==='API'||tunnelWasActive)assert.match(identity.runtimeFingerprint,/^[a-f0-9]{64}$/u,name+' runtime identity is not fingerprinted');
     }
-    await this.host.installBackupStartupFence();
-
     const intent={format:'codexia-backup-intent/v3',kind:'legacy',release,identity:{api:apiIdentity,tunnel:tunnelIdentity},...autostart,tunnelWasActive,timerWasActive,
       createdAt:new Date(this.now()).toISOString()};
+    await this.saveBackupRecoveryIntent(intent);
+    await this.host.installBackupStartupFence();
     await this.saveBackupIntent(intent);
     let output;
     let operationError;

@@ -238,6 +238,31 @@ bash "$backup_script" drill "$artifact" "$tmp/age-identity" --approved > "$tmp/d
 grep -q 'Isolated restore verified: database and history fingerprints match' "$tmp/drill.log"
 assert_no_drill_resources
 
+# A scratch-container removal failure must fail the drill and withhold success;
+# the EXIT cleanup gets a second chance and must remove the uniquely owned object.
+real_podman=$(command -v podman)
+cat > "$shim/podman" <<'SH'
+#!/usr/bin/env bash
+if [[ "${CODEXIA_FAIL_DRILL_REMOVE:-}" == true && "${1:-}" == rm && "${2:-}" == -f && "${3:-}" == codexia-restore-drill-* && ! -e "${CODEXIA_FAIL_DRILL_REMOVE_MARKER:?}" ]]; then
+  : > "$CODEXIA_FAIL_DRILL_REMOVE_MARKER"
+  exit 1
+fi
+exec "${CODEXIA_REAL_PODMAN:?}" "$@"
+SH
+chmod 0700 "$shim/podman"
+if CODEXIA_REAL_PODMAN="$real_podman" CODEXIA_FAIL_DRILL_REMOVE=true CODEXIA_FAIL_DRILL_REMOVE_MARKER="$tmp/fail-drill-remove-once" \
+  bash "$backup_script" drill "$artifact" "$tmp/age-identity" --approved > "$tmp/cleanup-failure.log" 2>&1; then
+  echo 'Restore drill reported success after scratch cleanup failed' >&2
+  exit 1
+fi
+test -f "$tmp/fail-drill-remove-once"
+grep -q 'Restore drill cleanup failed: isolated database container removal failed' "$tmp/cleanup-failure.log"
+if grep -q 'Isolated restore verified:' "$tmp/cleanup-failure.log"; then
+  echo 'Restore drill printed success before cleanup completed' >&2
+  exit 1
+fi
+assert_no_drill_resources
+
 assert_logs_do_not_contain(){
   local needle="$1" marker="$2" logfile
   for logfile in "$tmp"/*.log; do

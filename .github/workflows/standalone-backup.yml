@@ -13,9 +13,14 @@ on:
       - scripts/standalone-update-controller.mjs
       - scripts/standalone-backup-controller.test.mjs
       - deploy/ansible/backup.yml
+      - deploy/ansible/lifecycle.yml
       - deploy/ansible/restore-drill.yml
+      - deploy/ansible/test-lifecycle-contract.sh
+      - deploy/ansible/test-lifecycle-contract.yml
       - deploy/quadlet/codexia-db.container
+      - docs/deployment/IAC.md
       - docs/deployment/STANDALONE-BACKUP.md
+      - deploy/ansible/README.md
       - .github/workflows/standalone-backup.yml
   push:
     branches: [main]
@@ -30,9 +35,14 @@ on:
       - scripts/standalone-update-controller.mjs
       - scripts/standalone-backup-controller.test.mjs
       - deploy/ansible/backup.yml
+      - deploy/ansible/lifecycle.yml
       - deploy/ansible/restore-drill.yml
+      - deploy/ansible/test-lifecycle-contract.sh
+      - deploy/ansible/test-lifecycle-contract.yml
       - deploy/quadlet/codexia-db.container
+      - docs/deployment/IAC.md
       - docs/deployment/STANDALONE-BACKUP.md
+      - deploy/ansible/README.md
       - .github/workflows/standalone-backup.yml
 permissions:
   contents: read
@@ -48,6 +58,13 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 22
+      - name: Install the pinned Ansible runner
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/codexia-ansible"
+          "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
+      - name: Verify pause, resume and rollback Ansible contracts
+        run: PATH="$RUNNER_TEMP/codexia-ansible/bin:$PATH" bash deploy/ansible/test-lifecycle-contract.sh
       - name: Prepare a fresh rootless Podman fixture account
         run: |
           set -euo pipefail
