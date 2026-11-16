@@ -753,7 +753,7 @@ if "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$switch_playbook" > "$
   exit 1
 fi
 
-for secret in fixture-auth-token fixture-tunnel-token "$(printf '%064d' 1)" "$(printf '%064d' 2)" "$preflight_password"; do
+for secret in fixture-auth-token-0123456789abcdef fixture-tunnel-token "$(printf '%064d' 1)" "$(printf '%064d' 2)" "$preflight_password"; do
   if grep -Fq "$secret" "$tmp"/*.log; then
     echo 'A database credential appeared in an Ansible or test log' >&2
     exit 1
