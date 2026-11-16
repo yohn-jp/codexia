@@ -160,10 +160,16 @@ test -L "$XDG_RUNTIME_DIR/systemd/generator/default.target.wants/codexia-api.ser
 test -L "$XDG_RUNTIME_DIR/systemd/generator/default.target.wants/codexia-tunnel.service"
 systemctl --user start codexia-api.service codexia-tunnel.service
 for unit in codexia-api.service codexia-tunnel.service; do
-  result=$(systemctl --user show --property=Result --value "$unit")
+  active_state=$(systemctl --user show --property=ActiveState --value "$unit")
+  sub_state=$(systemctl --user show --property=SubState --value "$unit")
   condition_result=$(systemctl --user show --property=ConditionResult --value "$unit")
-  if test "$result" != condition || test "$condition_result" != no; then
+  if test "$active_state" != inactive || test "$sub_state" != dead || test "$condition_result" != no; then
     systemctl --user show --property=ActiveState --property=SubState --property=Result --property=ConditionResult --property=Conditions "$unit" >&2
+    journalctl --user --unit="$unit" --no-pager --lines=12 >&2 || true
+    exit 1
+  fi
+  if ! journalctl --user --unit="$unit" --no-pager --output=cat --lines=12 | grep -Fq 'skipped, no trigger condition checks were met'; then
+    echo "$unit did not record a systemd condition skip" >&2
     journalctl --user --unit="$unit" --no-pager --lines=12 >&2 || true
     exit 1
   fi
