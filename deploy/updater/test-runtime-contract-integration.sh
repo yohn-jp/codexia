@@ -619,16 +619,30 @@ NODE
 }
 
 remove_effective_override_text() {
-  local unit="$1" expected_quota="$2" dropins runtime_root file
+  local unit="$1" expected_quota="$2" before_dropins="$3" dropins file was_new in_unit_dir file_state owner quota_lines
   local -a candidates=()
-  runtime_root="$(realpath -- "$RUNTIME_DIR")"
   dropins="$(systemctl --user show --property=DropInPaths --value "$unit")"
+  printf 'Runtime override diagnostic for %s: baseline DropInPaths=%s\n' "$unit" "${before_dropins:-<empty>}" >&2
+  printf 'Runtime override diagnostic for %s: current DropInPaths=%s\n' "$unit" "${dropins:-<empty>}" >&2
   while IFS= read -r file; do
-    [[ -n "$file" && "$file" == "$runtime_root/"* && "$file" == *"/$unit.d/"* ]] || continue
-    [[ -f "$file" && ! -L "$file" && "$(stat -c '%u' "$file")" == "$UID_VALUE" ]] || continue
-    grep -Fxq "CPUQuota=$expected_quota" "$file" && candidates+=("$file")
+    [[ -n "$file" ]] || continue
+    was_new=yes
+    case " $before_dropins " in *" $file "*) was_new=no ;; esac
+    in_unit_dir=no
+    [[ "$file" == *"/$unit.d/"* ]] && in_unit_dir=yes
+    file_state=missing owner=unknown quota_lines=0
+    if [[ -f "$file" && ! -L "$file" ]]; then
+      file_state=regular
+      owner="$(stat -c '%u' "$file" 2>/dev/null || printf unknown)"
+      quota_lines="$(grep -Fxc "CPUQuota=$expected_quota" "$file" || true)"
+    elif [[ -L "$file" ]]; then file_state=symlink
+    elif [[ -e "$file" ]]; then file_state=non-regular
+    fi
+    printf 'Runtime override diagnostic for %s: path=%s new=%s unit-drop-in=%s type=%s owner=%s expected-quota-line-count=%s\n' \
+      "$unit" "$file" "$was_new" "$in_unit_dir" "$file_state" "$owner" "$quota_lines" >&2
+    [[ "$was_new" == yes && "$in_unit_dir" == yes && "$file_state" == regular && "$owner" == "$UID_VALUE" && "$quota_lines" == 1 ]] && candidates+=("$file")
   done < <(tr ' ' '\n' <<< "$dropins")
-  (( ${#candidates[@]} == 1 )) || die 'could not identify the unique runtime CPUQuota override file'
+  (( ${#candidates[@]} == 1 )) || die 'could not identify the unique newly created systemd CPUQuota override file'
   rm -- "${candidates[0]}"
 }
 
@@ -660,8 +674,9 @@ NODE
 FULL_RUNTIME_FILE="$WORK_DIR/codexia-runtime-green.json"
 FULL_SOURCE_FILE="$QUADLET_DIR/codexia-slot-green.container"
 FULL_SOURCE_SHA="$(sha256sum "$FULL_SOURCE_FILE" | awk '{print $1}')"
+FULL_DROPINS_BEFORE="$(systemctl --user show --property=DropInPaths --value codexia-slot-green.service)"
 systemctl --user set-property --runtime codexia-slot-green.service CPUQuota=100%
-remove_effective_override_text codexia-slot-green.service 100%
+remove_effective_override_text codexia-slot-green.service 100% "$FULL_DROPINS_BEFORE"
 systemd_override_rejected codexia-slot-green.service "$FULL_RUNTIME_FILE" "$FULL_SOURCE_FILE" "$FULL_SOURCE_SHA"
 systemctl --user set-property --runtime codexia-slot-green.service CPUQuota=200%
 node --input-type=module - "$REPO_ROOT" codexia-slot-green.service "$FULL_RUNTIME_FILE" <<'NODE'
