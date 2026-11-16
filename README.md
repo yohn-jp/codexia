@@ -10,23 +10,23 @@ The [Codexia reboot RFC](docs/architecture/CODEXIA-REBOOT-RFC.md) contains broad
 
 ## Run locally
 
-Requires Node.js 24+, pnpm 12.10.1 and PostgreSQL.
+Requires Node.js 24+, the pnpm version pinned in [`package.json`](package.json), and PostgreSQL. The following local-development example assumes PostgreSQL is running on localhost and your local database role can create and access a database. Configure its authentication first if required.
 
 ```sh
 createdb codexia
 pnpm install --frozen-lockfile
 pnpm build
-export CODEXIA_DATABASE_URL='postgres://localhost/codexia'
+export CODEXIA_DATABASE_URL='postgres://localhost/codexia' # replace with your actual connection URL if needed
 pnpm --filter @codexia/persistence-postgres migrate
 export CODEXIA_AUTH_TOKEN="$(openssl rand -hex 32)"
-export CODEXIA_DATABASE_URL='postgres://codexia:password@127.0.0.1:5432/codexia'
-pnpm --filter @codexia/persistence-postgres migrate
 pnpm start
 ```
 
 Open `http://127.0.0.1:3000` and sign in with `CODEXIA_AUTH_TOKEN`. Configuration names are in [.env.example](.env.example); environment files are not automatically loaded. Startup requires a reachable PostgreSQL database. Apply checked migrations explicitly, or set `CODEXIA_DATABASE_MIGRATE_ON_START=1` only when the API role is intended to apply migrations. No Git fallback exists.
 
-Use the work panel to export a portable `codexia-work/v1` JSON snapshot or import one as a new project. This preserves current manuscripts, hierarchy, Knowledge and supported Evidence without turning legacy source conversion into an application feature. Historical revisions and browser drafts are not part of the JSON; see [portable works](docs/authoring-portable.md).\n\nCreate projects and documents in the workspace. Local drafts live in IndexedDB until the server confirms a database revision. Stale saves preserve the draft and expose conflict recovery. Browser recovery belongs to the same browser/origin; clearing its storage removes that recovery copy. Back up PostgreSQL and private host history separately, following [deployment](docs/deployment/README.md).
+Use the work panel to export a portable `codexia-work/v1` JSON snapshot or import one as a new project. This preserves current manuscripts, hierarchy, Knowledge and supported Evidence without turning legacy source conversion into an application feature. Historical revisions and browser drafts are not part of the JSON; see [portable works](docs/authoring-portable.md).
+
+Create projects and documents in the workspace. Local drafts live in IndexedDB until the server confirms a database revision. Stale saves preserve the draft and expose conflict recovery. Browser recovery belongs to the same browser/origin; clearing its storage removes that recovery copy. Back up PostgreSQL and private host history separately, following [deployment](docs/deployment/README.md).
 
 Writing, Research, and Review presets assemble independent Editor, Outline, Inspector, History, and Review panels. Use panel grips and dock targets on desktop, or the keyboard-accessible move controls, to split, tab, reorder, resize, show, and hide panels. **Save layout** stores the arrangement for the current author and desktop/mobile device class in this browser, separately from draft recovery and PostgreSQL. Invalid saved layouts fall back without erasing the prior setting until an explicit save.
 
