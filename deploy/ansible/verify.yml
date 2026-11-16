@@ -94,3 +94,5 @@
   ansible.builtin.assert:
     that:
       - "(saved_config.content | b64decode | from_json | combine({'enabled': false})) == desired_config"
+- name: Verify polling timer health
+  ansible.builtin.include_tasks: verify-timer.yml
