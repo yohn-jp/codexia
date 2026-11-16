@@ -11,6 +11,19 @@
   "accessClientSecretFile": "/home/codexia/.config/codexia-updater/access-client-secret",
   "observeMilliseconds": 300000,
   "initialSlot": "blue",
+  "runtime": {
+    "format": "codexia-runtime/v1",
+    "profile": "core",
+    "modelCachePath": null,
+    "tmpfs": {
+      "tempSize": "64m",
+      "moduleCacheSize": "1g"
+    },
+    "resources": {
+      "memoryMaxBytes": null,
+      "cpuQuotaPercent": null
+    }
+  },
   "browserAuth": {
     "mode": "token"
   }

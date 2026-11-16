@@ -31,6 +31,11 @@ test("model selection follows explicit model, tokenizer environment, then LLM en
   assert.equal(isSafeHuggingFaceModelId("https://example.test/model"), false);
 });
 
+test("standalone runtime can select a mounted read-only tokenizer cache", () => {
+  assert.equal(resolveTokenCountConfiguration({ CODEXIA_TOKENIZER_MODELS_DIR: "/models" }).modelsDir, "/models");
+  assert.equal(resolveTokenCountConfiguration({ CODEXIA_TOKENIZER_MODELS_DIR: "/models", ARCADIA_TOKENIZER_MODEL: "env/tokenizer" }).modelId, "env/tokenizer");
+});
+
 test("token count batches enforce per-text, aggregate byte, and item bounds", () => {
   assert.deepEqual(validateTokenCountTexts(["駅abc", "abcdef"]), ["駅abc", "abcdef"]);
   assert.throws(() => validateTokenCountTexts([]), /between 1 and/);

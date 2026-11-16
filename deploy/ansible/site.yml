@@ -14,6 +14,9 @@
     source_dir: /opt/codexia-updater
     config_path: "{{ config_dir }}/config.json"
     updater: "{{ source_dir }}/deploy/updater/codexia-updater"
+    maintenance_dir: "{{ state_dir }}/maintenance"
+    desired_proxy_quadlet: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/updater/codexia-api-proxy.container.example') | replace('ghcr.io/yohn-jp/codexia-backend@sha256:REPLACE_WITH_VERIFIED_DIGEST', codexia_proxy_image) + '\n' }}"
+    runtime: "{{ codexia_runtime | default({}) }}"
     updater_env:
       XDG_RUNTIME_DIR: "/run/user/{{ codexia_service_uid | default(ansible_facts.user_uid) }}"
       XDG_STATE_HOME: "{{ home }}/.local/state"
@@ -35,9 +38,10 @@
       frontendIdentityUrl: "{{ codexia_frontend_origin }}/desktop/update-identity.json"
       accessClientIdFile: "{{ config_dir }}/access-client-id"
       accessClientSecretFile: "{{ config_dir }}/access-client-secret"
-      observeMilliseconds: 300000
+      observeMilliseconds: "{{ codexia_observe_milliseconds | default(300000) }}"
       initialSlot: blue
       browserAuth: "{{ codexia_browser_auth }}"
+      runtime: "{{ runtime }}"
   # Fact gathering runs before user_uid/user_dir exist. Privileged host setup must
   # not inherit the bootstrap SSH account's rootless runtime paths.
   environment: "{{ updater_env if codexia_stage != 'host' and ansible_facts.user_uid is defined and ansible_facts.user_dir is defined else {} }}"
@@ -58,10 +62,16 @@
       ansible.builtin.assert:
         that:
           - ansible_facts.user_uid | int != 0
-          - codexia_stage in ['secrets', 'base', 'prepare', 'initialize', 'enable', 'verify', 'acceptance-update', 'acceptance-rollback']
+          - codexia_stage in ['secrets', 'base', 'prepare', 'initialize', 'enable', 'verify', 'maintain', 'acceptance-update', 'acceptance-rollback']
           - codexia_stage in ['secrets', 'base'] or codexia_frontend_origin is match('^https://[a-z0-9.-]+(:[0-9]+)?$')
           - codexia_stage in ['secrets', 'base'] or codexia_proxy_image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
           - codexia_stage in ['secrets', 'base'] or codexia_browser_auth.mode in ['token', 'cloudflare-access']
+          - (codexia_observe_milliseconds | default(300000)) is integer
+          - (codexia_observe_milliseconds | default(300000)) >= 60000
+          - (codexia_observe_milliseconds | default(300000)) <= 3600000
+    - name: Validate the shared runtime contract before application convergence
+      ansible.builtin.include_tasks: validate-runtime.yml
+      when: codexia_stage not in ['secrets', 'base']
     - name: Check rootless prerequisites (do not replace the existing host installation)
       ansible.builtin.command:
         argv: [sh, -ec, 'command -v podman; command -v flock; node -e "if (parseInt(process.versions.node,10) < 22) process.exit(1)"']
@@ -111,15 +121,18 @@
     - name: Initialize the exclusive writer
       ansible.builtin.include_tasks: initialize.yml
       when: codexia_stage == 'initialize' and not journal.stat.exists and not ansible_check_mode
-    - name: Require an existing controller for verify and enable
+    - name: Require an existing controller for verify, maintain and enable
       ansible.builtin.assert:
         that: journal.stat.exists
-      when: codexia_stage in ['verify', 'enable', 'acceptance-update', 'acceptance-rollback']
+      when: codexia_stage in ['verify', 'maintain', 'enable', 'acceptance-update', 'acceptance-rollback']
     - name: Verify preflight role and secret after initialization without changing them
       ansible.builtin.include_tasks: preflight.yml
       vars:
         preflight_verify_only: true
       when: journal.stat.exists
+    - name: Maintain updater source, configuration and systemd units through the locked controller
+      ansible.builtin.include_tasks: maintenance.yml
+      when: codexia_stage == 'maintain' and journal.stat.exists and not ansible_check_mode
     - name: Verify initialized controller
       ansible.builtin.include_tasks: verify.yml
       when: journal.stat.exists
