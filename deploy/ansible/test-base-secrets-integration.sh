@@ -84,7 +84,7 @@ rc=0; podman secret exists codexia-tunnel-token || rc=$?
 test "$rc" = 1
 # Restore the exact synthetic baseline for the following runtime integration
 # test; this is fixture cleanup, not Ansible-managed secret rotation.
-podman secret create codexia-tunnel-token "$tmp/tunnel" >/dev/null
+cat "$tmp/tunnel" | podman secret create codexia-tunnel-token - >/dev/null
 podman secret inspect --showsecret codexia-tunnel-token | jq -j '.[0].SecretData' | cmp - "$tmp/tunnel"
 if grep -Eq 'fixture-auth-token|fixture-tunnel-token|0{63}[12]' "$tmp/"*.log; then
   echo 'Credential appeared in Ansible output' >&2; exit 1
