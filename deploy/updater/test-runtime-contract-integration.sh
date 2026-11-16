@@ -344,8 +344,44 @@ WantedBy=default.target
 EOF
 
 systemctl --user daemon-reload
+diagnose_missing_generated_unit() {
+  local unit="$1" path generator log
+  printf 'Quadlet generation diagnostics for %s:\n' "$unit" >&2
+  printf '%s\n' '--- systemd user manager environment and unit search paths ---' >&2
+  systemctl --user show-environment | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)=' >&2 || true
+  systemctl --user show --property=UnitPath >&2 || true
+  systemd-analyze --user unit-paths >&2 || true
+  systemctl --user show --property=LoadState --property=FragmentPath --property=SourcePath "$unit" >&2 || true
+  systemctl --user list-unit-files --no-pager >&2 || true
+  printf '%s\n' '--- Quadlet source and generated directories ---' >&2
+  for path in \
+    "$QUADLET_DIR" \
+    "$USER_UNIT_DIR" \
+    "$RUNTIME_DIR/systemd/generator.early" \
+    "$RUNTIME_DIR/systemd/generator" \
+    "$RUNTIME_DIR/systemd/generator.late"; do
+    if [[ -d "$path" ]]; then find "$path" -maxdepth 4 -printf '%M %u:%g %p\n' >&2 || true
+    else printf 'Missing path: %s\n' "$path" >&2; fi
+  done
+  printf '%s\n' '--- user journal for Podman/Quadlet generation ---' >&2
+  journalctl --user -b -n 100 --no-pager -o short-iso --grep='(?i)(podman|quadlet|codexia|generator|failed|error|warn)' >&2 || true
+  printf '%s\n' '--- system journal for the fixture UID ---' >&2
+  journalctl -b -n 100 --no-pager -o short-iso --grep='(?i)(podman|quadlet|codexia|generator|failed|error|warn)' "_UID=$UID_VALUE" >&2 || true
+  printf '%s\n' '--- installed generators ---' >&2
+  for generator in /usr/lib/systemd/user-generators/podman-user-generator /usr/lib/systemd/system-generators/podman-system-generator; do
+    if [[ -x "$generator" ]]; then
+      printf 'Selected candidate: %s -> %s\n' "$generator" "$(realpath -- "$generator")" >&2
+      log="$WORK_DIR/$(basename -- "$generator").diagnostic.log"
+      if SYSTEMD_LOG_LEVEL=debug "$generator" -dryrun -v >"$log" 2>&1; then cat -- "$log" >&2
+      else printf 'Generator returned %s; output follows:\n' "$?" >&2; cat -- "$log" >&2; fi
+    else printf 'Unavailable generator: %s\n' "$generator" >&2; fi
+  done
+}
 for unit in codexia-slot-blue.service codexia-slot-green.service "$PROXY_FIXTURE_UNIT" codexia-network.service codexia-data-network.service codexia-data-volume.service codexia-history-volume.service; do
-  systemctl --user cat "$unit" >/dev/null || die "Quadlet did not generate $unit"
+  if ! systemctl --user cat "$unit" >/dev/null; then
+    diagnose_missing_generated_unit "$unit"
+    die "Quadlet did not generate $unit"
+  fi
 done
 
 wait_for_unit() {
