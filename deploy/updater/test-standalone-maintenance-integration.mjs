@@ -300,6 +300,7 @@ async function runInterruptedBootRecovery({ workDir, stateDir, configPath, candi
 
 function installTestAdapters() {
   const expectedImage = process.env.CODEXIA_RUNTIME_MAINTENANCE_IMAGE;
+  const stopWriterWithRuntimeProof = PodmanStandaloneHost.prototype.stopWriter;
   assert.match(expectedImage ?? '', /^sha256:[a-f0-9]{64}$/u, 'Synthetic local image identity is missing');
 
   PodmanStandaloneHost.prototype.assertRuntimeSources = async function assertSyntheticRuntimeSources() {
@@ -352,13 +353,7 @@ function installTestAdapters() {
 
   PodmanStandaloneHost.prototype.stopWriter = async function stopSyntheticWriter(slot) {
     assert.equal(slot, 'blue');
-    if (systemdState(SERVICE) !== 'inactive') run('systemctl', ['--user', 'stop', SERVICE], { timeout: 120000 });
-    await waitForUnit(SERVICE, 'inactive');
-    const result = spawnSync('podman', ['container', 'exists', CONTAINER], { timeout: 15000, stdio: 'ignore' });
-    if (result.status === 0) {
-      const observed = JSON.parse(run('podman', ['inspect', '--type', 'container', CONTAINER]))[0];
-      assert.notEqual(observed.State?.Running, true, 'Runtime maintenance did not fence the previous writer');
-    } else assert.equal(result.status, 1, 'Stopped writer state is unobservable');
+    await stopWriterWithRuntimeProof.call(this, slot);
   };
 
   PodmanStandaloneHost.prototype.startWriter = async function startSyntheticWriter(slot, release) {
