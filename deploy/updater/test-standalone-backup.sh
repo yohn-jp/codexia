@@ -238,10 +238,16 @@ bash "$backup_script" drill "$artifact" "$tmp/age-identity" --approved > "$tmp/d
 grep -q 'Isolated restore verified: database and history fingerprints match' "$tmp/drill.log"
 assert_no_drill_resources
 
-for secret in "$recipient" 'encrypted-fixture-row' 'encrypted fixture history'; do
-  if grep -Fq "$secret" "$tmp"/*.log; then
-    echo 'Backup credential or fixture data appeared in tool output' >&2
-    exit 1
-  fi
-done
+assert_logs_do_not_contain(){
+  local needle="$1" marker="$2" logfile
+  for logfile in "$tmp"/*.log; do
+    if grep -Fq -- "$needle" "$logfile"; then
+      printf 'Backup tool log %s contains a %s marker\n' "${logfile##*/}" "$marker" >&2
+      exit 1
+    fi
+  done
+}
+assert_logs_do_not_contain "$recipient" 'age recipient'
+assert_logs_do_not_contain 'encrypted-fixture-row' 'database fixture row'
+assert_logs_do_not_contain 'encrypted fixture history' 'history fixture content'
 printf '%s\n' 'Verified encrypted PostgreSQL/history backup, artifact integrity, lock and writer checks, isolated restore, and scratch cleanup.'
