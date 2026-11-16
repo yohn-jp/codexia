@@ -618,7 +618,7 @@
   ansible.builtin.command:
     argv: [systemctl, --user, daemon-reload]
   changed_when: false
-  when: base_runtime_tunnel_quadlet.changed
+  when: base_runtime_tunnel_quadlet.changed or base_runtime_services.results[1].rc == 4
 - name: Read the installed Tunnel Quadlet without reloading or starting the Tunnel
   ansible.builtin.slurp:
     path: "{{ quadlet_dir }}/codexia-tunnel.container"

@@ -68,6 +68,7 @@ done
 printf '%s\n' 'Phase B initial runtime resource checks passed.'
 
 tmp=$(mktemp -d /tmp/codexia-base-runtime.XXXXXX)
+tunnel_quadlet_saved="$service_home/.codexia-tunnel.container.saved-$service_uid-$$"
 generator_probe_dir=/run/systemd/user-generators
 generator_probe_path="$generator_probe_dir/podman-user-generator"
 generator_probe_log="/run/codexia-phase-b-generator-environment-$service_uid-$$.log"
@@ -84,6 +85,9 @@ cleanup() {
   set +e
   systemctl --user stop codexia-tunnel.service codexia-db.service >/dev/null 2>&1 || true
   podman rm -f codexia-tunnel codexia-db >/dev/null 2>&1 || true
+  if [[ -e "$tunnel_quadlet_saved" || -L "$tunnel_quadlet_saved" ]]; then
+    as_service mv -- "$tunnel_quadlet_saved" "$quadlet_dir/codexia-tunnel.container" || cleanup_status=1
+  fi
   as_service rm -f \
     "$quadlet_dir/codexia.network" \
     "$quadlet_dir/codexia-data.network" \
@@ -380,10 +384,25 @@ grep -q 'changed=0' "$tmp/second.log"
 # The base stage must load the newly installed Tunnel unit itself while
 # leaving both the Tunnel container and service stopped.
 test "$(systemctl --user show --property=LoadState --value codexia-tunnel.service)" = loaded
-rc=0; systemctl --user is-active codexia-tunnel.service >/dev/null 2>&1 || rc=$?
-test "$rc" != 0
+test "$(systemctl --user show --property=ActiveState --value codexia-tunnel.service)" = inactive
 rc=0; podman container exists codexia-tunnel || rc=$?
 test "$rc" = 1
+
+# Recover a generated-unit cache miss while the canonical Quadlet file is
+# already unchanged: the base stage must reload because the unit is not found.
+if [[ -e "$tunnel_quadlet_saved" || -L "$tunnel_quadlet_saved" ]]; then
+  echo "Refusing to replace an existing Tunnel Quadlet recovery file: $tunnel_quadlet_saved" >&2
+  exit 1
+fi
+as_service mv "$quadlet_dir/codexia-tunnel.container" "$tunnel_quadlet_saved"
+as_service systemctl --user daemon-reload
+rc=0; systemctl --user is-active codexia-tunnel.service >/dev/null 2>&1 || rc=$?
+test "$rc" = 4
+as_service mv "$tunnel_quadlet_saved" "$quadlet_dir/codexia-tunnel.container"
+apply_base > "$tmp/tunnel-unit-recovery.log" || { cat "$tmp/tunnel-unit-recovery.log"; exit 1; }
+grep -q 'changed=0' "$tmp/tunnel-unit-recovery.log"
+test "$(systemctl --user show --property=LoadState --value codexia-tunnel.service)" = loaded
+test "$(systemctl --user show --property=ActiveState --value codexia-tunnel.service)" = inactive
 
 # Exercise the database verifier's stale-secret rejection with a mock Podman
 # inspection. The real canonical container has already passed this verifier
@@ -400,7 +419,16 @@ if [[ "${1:-}" == inspect && "${2:-}" == --format && "${4:-}" == codexia-db ]]; 
     '{{json .NetworkSettings.Networks}}') printf '%s\n' '{"codexia-data":{}}' ;;
     '{{json .HostConfig.PortBindings}}') printf '%s\n' 'null' ;;
     '{{json .Config.Env}}') printf '%s\n' '["PGDATA=/var/lib/postgresql/data/pgdata","POSTGRES_DB=codexia","POSTGRES_USER=codexia_admin","POSTGRES_PASSWORD_FILE=/run/secrets/admin-password"]' ;;
-    '{{json .Config.Secrets}}') printf '%s\n' '[{"Name":"codexia-postgres-admin-password","ID":"stale-admin-secret-id"},{"Name":"codexia-postgres-app-password","ID":"stale-app-secret-id"}]' ;;
+    '{{json .Config.Secrets}}')
+      admin_id=current-admin-secret-id
+      app_id=current-app-secret-id
+      case "${CODEXIA_TEST_STALE_DB_SECRET:-}" in
+        admin) admin_id=stale-admin-secret-id ;;
+        app) app_id=stale-app-secret-id ;;
+        *) exit 2 ;;
+      esac
+      printf '[{"Name":"codexia-postgres-admin-password","ID":"%s"},{"Name":"codexia-postgres-app-password","ID":"%s"}]\n' "$admin_id" "$app_id"
+      ;;
     *) exit 2 ;;
   esac
 elif [[ "${1:-}" == secret && "${2:-}" == inspect && "${3:-}" == --format ]]; then
@@ -414,6 +442,7 @@ else
 fi
 MOCK_PODMAN
 chmod 0700 "$mock_bin/podman"
+for stale_secret in admin app; do
 cat > "$tmp/verify-db-stale-secrets.yml" <<YAML
 ---
 - hosts: localhost
@@ -421,14 +450,16 @@ cat > "$tmp/verify-db-stale-secrets.yml" <<YAML
   gather_facts: false
   environment:
     PATH: "$mock_bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    CODEXIA_TEST_STALE_DB_SECRET: "$stale_secret"
   tasks:
     - ansible.builtin.include_tasks: "$repo_root/deploy/ansible/verify-base-db-container.yml"
 YAML
 if "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$tmp/verify-db-stale-secrets.yml" > "$tmp/db-stale-secrets.log" 2>&1; then
-  echo 'Database container verification accepted stale administrator or application secret IDs' >&2
+  echo "Database container verification accepted a stale $stale_secret secret ID" >&2
   exit 1
 fi
 grep -q 'Database container has unexpected PGDATA, storage, network, port, or current secret identity configuration' "$tmp/db-stale-secrets.log"
+done
 rm -rf -- "$mock_bin"
 
 test "$(podman network inspect --format '{{.Name}}|{{.Driver}}|{{.Internal}}' codexia-data)" = 'codexia-data|bridge|true'
@@ -505,8 +536,7 @@ as_service rmdir "$service_home/unexpected-tunnel-mount"
 
 # Rechecking the loaded unit after the adoption fixtures must not start it.
 test "$(systemctl --user show --property=LoadState --value codexia-tunnel.service)" = loaded
-rc=0; systemctl --user is-active codexia-tunnel.service >/dev/null 2>&1 || rc=$?
-test "$rc" != 0
+test "$(systemctl --user show --property=ActiveState --value codexia-tunnel.service)" = inactive
 rc=0; podman container exists codexia-tunnel || rc=$?
 test "$rc" = 1
 test "$(podman inspect --format '{{json .HostConfig.PortBindings}}' codexia-db | jq -c 'if . == null then {} else . end')" = '{}'
