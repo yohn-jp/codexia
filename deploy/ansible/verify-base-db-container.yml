@@ -12,7 +12,12 @@
 - name: Reject any implicit PostgreSQL image change
   ansible.builtin.assert:
     that:
-      - base_runtime_db_image.stdout == 'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536'
+      # Podman 5.7 reports a digest-only reference in Config.Image for some
+      # rootless containers. Both accepted forms pin the same manifest digest.
+      - base_runtime_db_image.stdout in [
+          'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536',
+          'docker.io/library/postgres@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536'
+        ]
     fail_msg: The existing database container does not use the repository's verified PostgreSQL image pin.
 - name: Verify the database container has only the canonical storage volume
   ansible.builtin.command:

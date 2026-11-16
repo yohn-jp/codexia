@@ -467,7 +467,12 @@ test "$(podman network inspect --format '{{.Name}}|{{.Driver}}|{{.Internal}}' co
 for volume in codexia-postgres codexia-data codexia-history; do
   test "$(podman volume inspect --format '{{.Name}}' "$volume")" = "$volume"
 done
-test "$(podman inspect --format '{{.Config.Image}}' codexia-db)" = 'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536'
+actual_db_image=$(podman inspect --format '{{.Config.Image}}' codexia-db)
+case "$actual_db_image" in
+  'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536'|\
+  'docker.io/library/postgres@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536') ;;
+  *) printf 'Unexpected PostgreSQL image reference: %s\n' "$actual_db_image" >&2; exit 1 ;;
+esac
 test "$(podman inspect --format '{{json .NetworkSettings.Networks}}' codexia-db | jq -r 'keys | join(",")')" = codexia-data
 test "$(podman inspect --format '{{json .HostConfig.PortBindings}}' codexia-db | jq -c 'if . == null then {} else . end')" = '{}'
 test "$(podman inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}|{{.Destination}}{{"\n"}}{{end}}{{end}}' codexia-db)" = 'codexia-postgres|/var/lib/postgresql/data'
