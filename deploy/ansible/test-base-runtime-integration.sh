@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run only after test-base-secrets-integration.sh on a disposable Ubuntu runner.
 set -euo pipefail
+trap 'rc=$?; printf "Phase B runtime integration failed at line %s (status %s).\\n" "$LINENO" "$rc" >&2' ERR
 test "${GITHUB_ACTIONS:-}" = true
 test "${CODEXIA_DISPOSABLE_HOST:-}" = phase-b-integration
 test "$(lsb_release -rs)" = 26.04
