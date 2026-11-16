@@ -245,9 +245,14 @@ async function verifyOldCode(marker){
   });
 }
 async function recoverInterrupted(config,store,markerPath,publicKey){
-  let markerInfo;
-  try{markerInfo=await lstat(markerPath);}catch(error){if(error.code==='ENOENT')return false;throw error;}
   const blockRoute=()=>atomicWrite(config.routeFile,'blocked\n');
+  let markerInfo;
+  try{markerInfo=await lstat(markerPath);}catch(error){
+    if(error.code==='ENOENT')return false;
+    await blockRoute().catch(()=>undefined);
+    await keepTimerStopped().catch(()=>undefined);
+    throw error;
+  }
   try{await blockRoute();}
   catch(error){await keepTimerStopped().catch(()=>undefined);throw error;}
   try{
