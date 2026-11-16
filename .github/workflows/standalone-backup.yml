@@ -18,9 +18,9 @@ on:
       - deploy/ansible/test-lifecycle-contract.sh
       - deploy/ansible/test-lifecycle-contract.yml
       - deploy/quadlet/codexia-db.container
-      - docs/deployment/IAC.md
-      - docs/deployment/STANDALONE-BACKUP.md
-      - deploy/ansible/README.md
+      - deploy/ansible/site.yml
+      - deploy/ansible/validate-runtime.yml
+      - deploy/ansible/requirements.txt
       - .github/workflows/standalone-backup.yml
   push:
     branches: [main]
@@ -40,12 +40,15 @@ on:
       - deploy/ansible/test-lifecycle-contract.sh
       - deploy/ansible/test-lifecycle-contract.yml
       - deploy/quadlet/codexia-db.container
-      - docs/deployment/IAC.md
-      - docs/deployment/STANDALONE-BACKUP.md
-      - deploy/ansible/README.md
+      - deploy/ansible/site.yml
+      - deploy/ansible/validate-runtime.yml
+      - deploy/ansible/requirements.txt
       - .github/workflows/standalone-backup.yml
 permissions:
   contents: read
+concurrency:
+  group: standalone-backup-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   backup-drill:
     name: Verify encrypted backup and isolated PostgreSQL restore
