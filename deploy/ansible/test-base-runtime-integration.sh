@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # Run only after test-base-secrets-integration.sh on a disposable Ubuntu runner.
-set -euo pipefail
-trap 'rc=$?; printf "Phase B runtime integration failed at line %s (status %s).\\n" "$LINENO" "$rc" >&2' ERR
+set -Eeuo pipefail
+runtime_test_error() {
+  local status=$?
+  printf 'Phase B runtime integration failed at line %s (status %s): %s\n' "${BASH_LINENO[0]:-$LINENO}" "$status" "$BASH_COMMAND" >&2
+  return "$status"
+}
+trap runtime_test_error ERR
+printf '%s\n' 'Starting Phase B runtime integration test.'
 test "${GITHUB_ACTIONS:-}" = true
 test "${CODEXIA_DISPOSABLE_HOST:-}" = phase-b-integration
 test "$(lsb_release -rs)" = 26.04
@@ -51,6 +57,10 @@ done
 
 tmp=$(mktemp -d /tmp/codexia-base-runtime.XXXXXX)
 cleanup() {
+  local status=$?
+  local cleanup_status=0
+  trap - EXIT
+  set +e
   systemctl --user stop codexia-tunnel.service codexia-db.service >/dev/null 2>&1 || true
   podman rm -f codexia-tunnel codexia-db >/dev/null 2>&1 || true
   as_service rm -f \
@@ -60,7 +70,7 @@ cleanup() {
     "$quadlet_dir/codexia-data.volume" \
     "$quadlet_dir/codexia-history.volume" \
     "$quadlet_dir/codexia-db.container" \
-    "$quadlet_dir/codexia-tunnel.container"
+    "$quadlet_dir/codexia-tunnel.container" || cleanup_status=1
   systemctl --user daemon-reload >/dev/null 2>&1 || true
   systemctl --user reset-failed codexia-tunnel.service codexia-db.service >/dev/null 2>&1 || true
   podman network rm codexia-data codexia >/dev/null 2>&1 || true
@@ -73,9 +83,12 @@ cleanup() {
     codexia-postgres-app-password \
     codexia-postgres-preflight-password >/dev/null 2>&1 || true
   as_service rm -rf "$service_home/unexpected-tunnel-mount" >/dev/null 2>&1 || true
-  sudo rm -f /etc/codexia/postgres/010-create-app-role.sh
+  sudo rm -f /etc/codexia/postgres/010-create-app-role.sh || cleanup_status=1
   sudo rmdir /etc/codexia/postgres /etc/codexia 2>/dev/null || true
-  if [[ "$tmp" == /tmp/codexia-base-runtime.* && -d "$tmp" && ! -L "$tmp" ]]; then sudo rm -rf -- "$tmp"; fi
+  if [[ "$tmp" == /tmp/codexia-base-runtime.* && -d "$tmp" && ! -L "$tmp" ]]; then sudo rm -rf -- "$tmp" || cleanup_status=1; fi
+  if (( status == 0 && cleanup_status != 0 )); then status=$cleanup_status; fi
+  printf 'Phase B runtime integration cleanup finished with test status %s and cleanup status %s.\n' "$status" "$cleanup_status" >&2
+  exit "$status"
 }
 trap cleanup EXIT
 umask 077
