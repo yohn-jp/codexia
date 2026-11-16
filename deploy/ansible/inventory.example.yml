@@ -7,6 +7,8 @@ all:
           ansible_user: codexia
       vars:
         codexia_stage: prepare
+        # Base runtime convergence is a separate pre-initialization stage.
+        codexia_base_approved: false
         codexia_frontend_origin: https://codexia.example.invalid
         codexia_browser_auth:
           mode: token
