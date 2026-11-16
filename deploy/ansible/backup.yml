@@ -24,7 +24,7 @@
   no_log: true
 - name: Recover any interrupted backup under the updater lock before preflight
   ansible.builtin.command:
-    argv: ["{{ updater }}", boot, "{{ config_path }}"]
+    argv: [sh, "{{ updater }}", boot, "{{ config_path }}"]
   changed_when: false
   no_log: true
 - name: Install the existing boot recovery unit before the maintenance window
@@ -52,7 +52,7 @@
   no_log: true
 - name: Observe controller state before taking the backup window
   ansible.builtin.command:
-    argv: ["{{ updater }}", status, "{{ config_path }}"]
+    argv: [sh, "{{ updater }}", status, "{{ config_path }}"]
   register: codexia_backup_before
   changed_when: false
   no_log: true
@@ -115,6 +115,7 @@
 - name: Run the controller-locked backup window
   ansible.builtin.command:
     argv:
+      - sh
       - "{{ updater }}"
       - backup
       - "{{ config_path }}"
@@ -122,13 +123,14 @@
       - "{{ codexia_backup_destination }}"
       - "{{ codexia_backup_recipient }}"
       - --approved
-  register: codexia_backup_result
+  register: codexia_legacy_backup_result
   changed_when: true
   no_log: true
   when: not codexia_backup_journal.stat.exists
 - name: Run the controller-locked backup window for an initialized service
   ansible.builtin.command:
     argv:
+      - sh
       - "{{ updater }}"
       - backup
       - "{{ config_path }}"
@@ -141,7 +143,7 @@
   when: codexia_backup_journal.stat.exists
 - name: Verify the prior controller journal, pause state, route and writer were restored
   ansible.builtin.command:
-    argv: ["{{ updater }}", status, "{{ config_path }}"]
+    argv: [sh, "{{ updater }}", status, "{{ config_path }}"]
   register: codexia_backup_after
   changed_when: false
   no_log: true
@@ -156,15 +158,11 @@
     fail_msg: Backup completed without restoring the exact prior controller state and single-writer topology.
   no_log: true
   when: codexia_backup_journal.stat.exists
-- name: Verify the signed legacy release is serving again after a pre-journal backup
-  ansible.builtin.command:
-    argv:
-      - "{{ updater }}"
-      - verify-legacy
-      - "{{ config_path }}"
-      - "{{ config_dir }}/backup-installed-release.json"
-  register: codexia_backup_legacy_after
-  changed_when: false
+- name: Require the legacy backup command to confirm artifact publication after locked recovery
+  ansible.builtin.assert:
+    that:
+      - codexia_legacy_backup_result.stdout is match('^Encrypted backup committed: ')
+    fail_msg: Legacy backup did not confirm encrypted artifact publication and identity-preserving recovery.
   no_log: true
   when: not codexia_backup_journal.stat.exists
 - name: Report encrypted backup completion without exposing destination inputs

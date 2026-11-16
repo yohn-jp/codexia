@@ -53,6 +53,7 @@ chmod 0700 "$tmp/bin/codexia-lifecycle-updater"
 cat > "$tmp/bin/systemctl" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "$*" == '--user show --property=Version' ]]; then echo 'Version=259'; exit 0; fi
 [[ "$*" == '--user is-active codexia-updater.timer' ]] || exit 8
 state="${CODEXIA_LIFECYCLE_TIMER_STATE:-inactive}"
 if [[ -e "${CODEXIA_LIFECYCLE_OPERATION_FILE:?}" && -f "$CODEXIA_LIFECYCLE_OPERATION_FILE.timer-after" ]]; then
@@ -106,4 +107,34 @@ run_case rollback-requires-failed-image-suppression rollback true true active fa
 run_case rollback-verification-preserves-failed-image rollback true true active fail-after-rollback '' false '' true
 run_case lifecycle-preserves-timer rollback true true active fail-after-rollback '' false inactive
 
+## Run the real site dispatcher with only the host-specific verification tasks stubbed.
+mkdir -p "$tmp/site" "$tmp/site-state"
+cp "$root/deploy/ansible/"{site,lifecycle,validate-runtime}.yml "$tmp/site/"
+: > "$tmp/site-state/controller.json"
+printf '%s\n' '---' '[]' > "$tmp/site/preflight.yml"
+# Reuse the synthetic observed controller state from the task-level contract.
+sed -n '/    - name: Provide a synthetic initialized controller/,/    - name: Exercise the production lifecycle tasks/{ /    - name: Exercise the production lifecycle tasks/d; s/^    //; p; }' "$playbook" > "$tmp/site/verify.yml"
+cat > "$tmp/bin/podman" <<'SH'
+#!/bin/sh
+exit 0
+SH
+chmod 0700 "$tmp/bin/podman"
+for stage in pause resume rollback; do
+  operation_file="$tmp/site-$stage.operation"
+  paused=true; [[ "$stage" != pause ]] || paused=false
+  CODEXIA_LIFECYCLE_STAGE="$stage" CODEXIA_LIFECYCLE_CONFIG_ENABLED=false CODEXIA_LIFECYCLE_PAUSED="$paused" \
+    CODEXIA_LIFECYCLE_TIMER_STATE=inactive CODEXIA_LIFECYCLE_FAKE_UPDATER="$tmp/bin/codexia-lifecycle-updater" \
+    CODEXIA_LIFECYCLE_OPERATION_FILE="$operation_file" PATH="$tmp/bin:$PATH" \
+    ansible-playbook -i 'codexia,' -c local "$tmp/site/site.yml" \
+      -e "codexia_stage=$stage" -e "state_dir=$tmp/site-state" \
+      -e 'codexia_frontend_origin=https://fixture.invalid' -e "codexia_proxy_image=ghcr.io/yohn-jp/codexia-backend@sha256:$(printf '%064d' 0)" \
+      -e '{"codexia_browser_auth":{"mode":"token"},"codexia_runtime":{"format":"codexia-runtime/v1","profile":"core","modelCachePath":null,"tmpfs":{"tempSize":"64m","moduleCacheSize":"1g"},"resources":{"memoryMaxBytes":null,"cpuQuotaPercent":null}}}' \
+      -e "test_stage=$stage" -e "{\"test_paused\":$paused,\"test_config_enabled\":false}" \
+      -e "test_active_image=ghcr.io/yohn-jp/codexia-backend@sha256:$(printf 'a%.0s' {1..64})" \
+      -e "test_previous=ghcr.io/yohn-jp/codexia-backend@sha256:$(printf 'b%.0s' {1..64})" \
+      -e "updater=$tmp/bin/codexia-lifecycle-updater" -e 'config_path=/tmp/codexia-lifecycle-test-config.json' \
+      > "$tmp/site-$stage.log" 2>&1 || { cat "$tmp/site-$stage.log" >&2; exit 1; }
+  expected="$stage"; [[ "$stage" != rollback ]] || expected=acceptance-rollback
+  [[ "$(cat "$operation_file")" == "$expected" ]]
+done
 echo 'Ansible lifecycle stage contract checks passed'

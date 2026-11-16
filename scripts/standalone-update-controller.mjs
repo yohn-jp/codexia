@@ -240,7 +240,7 @@ export class StandaloneController {
       await this.host.route('blocked');
       if(await this.host.pollingTimerActive())await this.host.stopPollingTimer();
       await this.host.assertNoPreflight();
-      const apiActive=await this.host.legacyServiceActive();
+      const apiActive=await this.host.legacyServiceActive({recoverStopped:true});
       const tunnelActive=await this.host.tunnelServiceActive();
       if(!intent.tunnelWasActive)assert.equal(tunnelActive,false,'Legacy Tunnel became active during a backup that recorded it inactive');
       await this.host.assertLegacyBackupRelease(release,{allowStopped:!apiActive,expectedIdentity:intent.identity.api});

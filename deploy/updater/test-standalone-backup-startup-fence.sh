@@ -288,7 +288,8 @@ node --input-type=module -e '
   const stopped=spawnSync("systemctl",["--user","is-active","codexia-api.service"],{encoding:"utf8"});
   assert.equal(stopped.stdout.trim(),"failed","Disposable Quadlet stop must exercise the post-SIGKILL failed-unit recovery path");
   assert.notEqual(stopped.status,0,"Failed unit state must have a nonzero systemctl result");
-  await host.stopLegacyWriter();
+  await assert.rejects(host.legacyServiceActive(),/unobservable or failed/);
+  assert.equal(await host.legacyServiceActive({recoverStopped:true}),false,"Interrupted API stop must be recoverable without repeating the stop command");
   await host.startTunnel();
   const actual=JSON.parse(execFileSync("podman",["inspect","codexia-tunnel"],{encoding:"utf8"}))[0];
   const actualProjection=containerRuntimeFingerprintProjection(actual,expected.tunnelSecretIdentities);

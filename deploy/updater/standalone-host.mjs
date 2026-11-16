@@ -902,7 +902,14 @@ export class PodmanStandaloneHost{
     if(result.status===4&&['unknown','inactive'].includes(result.stdout.trim()))return false;
     throw Error('Systemd service state is unobservable or failed: '+unit);
   }
-  async legacyServiceActive(){
+  async resetAbsentFailedLegacyApi(){
+    const status=spawnSync('systemctl',['--user','is-active','codexia-api.service'],{encoding:'utf8',timeout:15000});
+    if(assertLegacyApiStoppedState(status,inspect('codexia-api'))){
+      run('systemctl',['--user','reset-failed','codexia-api.service']);
+    }
+  }
+  async legacyServiceActive({recoverStopped=false}={}){
+    if(recoverStopped)await this.resetAbsentFailedLegacyApi();
     const active=await this.unitActive('codexia-api.service');
     const running=Boolean(inspect('codexia-api')?.State.Running);
     assert.equal(active,running,'Legacy API service and container state disagree');
@@ -955,11 +962,7 @@ export class PodmanStandaloneHost{
   }
   async stopLegacyWriter(){
     run('systemctl',['--user','stop','codexia-api.service'],{timeout:120000});
-    const status=spawnSync('systemctl',['--user','is-active','codexia-api.service'],{encoding:'utf8',timeout:15000});
-    if(assertLegacyApiStoppedState(status,inspect('codexia-api'))){
-      run('systemctl',['--user','reset-failed','codexia-api.service']);
-    }
-    assert.equal(await this.legacyServiceActive(),false,'Legacy API writer did not stop');
+    assert.equal(await this.legacyServiceActive({recoverStopped:true}),false,'Legacy API writer did not stop');
   }
   backupStartupFencePaths(){
     const quadletDirectory=path.resolve(this.config.quadletDirectory);
