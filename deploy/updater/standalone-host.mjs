@@ -610,10 +610,20 @@ export class PodmanStandaloneHost{
     if(exists(container))throw Error('Preflight still exists');
   }
   async stopWriter(slot){
-    const container=name(slot);
-    if(unitStatus(slot)!=='inactive')run('systemctl',['--user','stop',activeUnit(slot)],{timeout:120000});
+    const container=name(slot),unit=activeUnit(slot);
+    let state=unitStatus(slot);
+    if(!['inactive','failed'].includes(state)){
+      run('systemctl',['--user','stop',unit],{timeout:120000});
+      state=unitStatus(slot);
+    }
     const observed=inspect(container);
-    if(observed?.State.Running||!['inactive','failed'].includes(unitStatus(slot)))throw Error('Writer fencing not confirmed');
+    if(observed?.State.Running)throw Error('Writer fencing not confirmed');
+    if(state==='failed'){
+      if(observed!==null)throw Error('Failed writer unit still has its Podman container');
+      run('systemctl',['--user','reset-failed',unit]);
+      state=unitStatus(slot);
+    }
+    if(state!=='inactive')throw Error('Writer fencing not confirmed');
   }
   async startWriter(slot,release){
     validateUpdateRelease(release);

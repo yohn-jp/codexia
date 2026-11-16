@@ -393,6 +393,24 @@ wait_for_unit() {
   die "systemd unit $unit did not reach $expected"
 }
 
+stop_slot_writer() {
+  local slot="$1"
+  node --input-type=module - "$REPO_ROOT" "$WORK_DIR" "$slot" <<'NODE'
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const [repoRoot, workDir, slot] = process.argv.slice(2);
+const { PodmanStandaloneHost } = await import(pathToFileURL(path.join(repoRoot, 'deploy/updater/standalone-host.mjs')).href);
+const host = new PodmanStandaloneHost({
+  browserAuth: { mode: 'token' },
+  frontendIdentityUrl: 'https://codexia.example.invalid/desktop/update-identity.json',
+  routeFile: path.join(workDir, 'route'),
+  quadletDirectory: path.join(workDir, 'quadlets'),
+  githubTokenFile: path.join(workDir, 'github-token'),
+});
+await host.stopWriter(slot);
+NODE
+}
+
 write_proxy_fixture_revision() {
   local revision="$1"
   cat > "$WORK_DIR/proxy-fixture.mjs" <<EOF
@@ -632,7 +650,7 @@ assert_exclusive_writer blue
 run_node_check blue "$IMAGE_ID"
 write_and_check_markers codexia-slot-blue write
 
-systemctl --user stop codexia-slot-blue.service
+stop_slot_writer blue
 wait_for_unit codexia-slot-blue.service inactive
 assert_exclusive_writer none
 systemctl --user start codexia-slot-green.service
@@ -674,7 +692,7 @@ assert_exclusive_writer green
 run_node_check green "$IMAGE_ID"
 write_and_check_markers codexia-slot-green verify
 
-systemctl --user stop codexia-slot-green.service
+stop_slot_writer green
 wait_for_unit codexia-slot-green.service inactive
 assert_exclusive_writer none
 systemctl --user start codexia-slot-blue.service

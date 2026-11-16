@@ -65,6 +65,43 @@ test('model cache cannot resolve inside an existing authoring or history volume'
  assert.throws(()=>assertModelCacheOutsideVolumes('/var/cache/codexia/models',['/var/cache/codexia/models/persistent']),/must be outside persistent Codexia volumes/);
 });
 
+test('failed writer unit is reset only after its exact Podman container is absent',async()=>{
+ const dir=await mkdtemp(path.join(tmpdir(),'codexia-writer-stop-'));
+ const previousPath=process.env.PATH;
+ const stateFile=path.join(dir,'unit-state');
+ const callsFile=path.join(dir,'calls');
+ const containerMarker=path.join(dir,'container-present');
+ const config={browserAuth:{mode:'token'},frontendIdentityUrl:origin+'/desktop/update-identity.json',routeFile:path.join(dir,'route'),quadletDirectory:dir,githubTokenFile:path.join(dir,'token')};
+ const host=new PodmanStandaloneHost(config);
+ try{
+  await writeFile(stateFile,'active\n');
+  await writeFile(path.join(dir,'systemctl'),'#!/usr/bin/env node\n'+
+   'const fs=require("node:fs");const a=process.argv.slice(2);const state='+JSON.stringify(stateFile)+';const calls='+JSON.stringify(callsFile)+';'+
+   'fs.appendFileSync(calls,a.join(" ")+"\\n");const command=a[1];'+
+   'if(command==="show"){process.stdout.write(fs.readFileSync(state,"utf8"));process.exit(0)}'+
+   'if(command==="stop"){fs.writeFileSync(state,"failed\\n");process.exit(0)}'+
+   'if(command==="reset-failed"){fs.writeFileSync(state,"inactive\\n");process.exit(0)}'+
+   'process.exit(97);\n',{mode:0o700});
+  await writeFile(path.join(dir,'podman'),'#!/usr/bin/env node\n'+
+   'const fs=require("node:fs");const a=process.argv.slice(2);const marker='+JSON.stringify(containerMarker)+';const calls='+JSON.stringify(callsFile)+';fs.appendFileSync(calls,"podman "+a.join(" ")+"\\n");'+
+   'if(a[0]==="container"&&a[1]==="exists"){process.exit(fs.existsSync(marker)?0:1)}'+
+   'if(a[0]==="inspect"){process.stdout.write(JSON.stringify([{State:{Running:false}}]));process.exit(0)}'+
+   'process.exit(97);\n',{mode:0o700});
+  process.env.PATH=dir+path.delimiter+previousPath;
+  await host.stopWriter('blue');
+  assert.equal((await readFile(stateFile,'utf8')).trim(),'inactive');
+  let calls=(await readFile(callsFile,'utf8')).trim().split('\n');
+  assert.ok(calls.indexOf('podman container exists codexia-slot-blue')<calls.indexOf('--user reset-failed codexia-slot-blue.service'),'reset-failed ran before proving exact container absence');
+
+  await writeFile(stateFile,'failed\n');
+  await writeFile(containerMarker,'present');
+  await assert.rejects(host.stopWriter('blue'),/Failed writer unit still has its Podman container/);
+  assert.equal((await readFile(stateFile,'utf8')).trim(),'failed');
+  calls=(await readFile(callsFile,'utf8')).trim().split('\n');
+  assert.equal(calls.filter(call=>call==='--user reset-failed codexia-slot-blue.service').length,1,'reset-failed ran while the exact Podman container still existed');
+ }finally{process.env.PATH=previousPath;await rm(dir,{recursive:true,force:true});}
+});
+
 test('effective cgroup CPU quota must match the typed runtime contract',async()=>{
  const {assertRuntimeCpuMax}=await import('../deploy/updater/standalone-host.mjs');
  assert.equal(typeof assertRuntimeCpuMax,'function');
