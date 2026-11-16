@@ -582,6 +582,11 @@ podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c
 apply_base > "$tmp/init-recovery.log" || { cat "$tmp/init-recovery.log"; exit 1; }
 test "$(podman exec codexia-db psql -X -qAt -U codexia_admin -d postgres -c "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname='codexia'")" = codexia
 
+# The interrupted-role fixture temporarily transfers public-schema ownership
+# to the administrator so the application role can be dropped. Restore the
+# normal application-owned schema before exercising the real app migrations.
+podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c 'ALTER SCHEMA public OWNER TO codexia' >/dev/null
+
 # Apply the repository's exact migration set so later convergence proves a
 # real schema adoption instead of accepting an untracked application database.
 migration_sql="$tmp/migrations.sql"
@@ -604,7 +609,7 @@ SQL
   done < <(find "$repo_root/packages/persistence-postgres/migrations" -maxdepth 1 -type f -name '*.sql' | sort)
   printf '\nCOMMIT;\n'
 } > "$migration_sql"
-podman exec -i codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia < "$migration_sql" >/dev/null
+podman exec -i codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/app-password)"; exec psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia -d codexia' < "$migration_sql" >/dev/null
 apply_base > "$tmp/schema-adoption.log" || { cat "$tmp/schema-adoption.log"; exit 1; }
 grep -q 'changed=0' "$tmp/schema-adoption.log"
 
