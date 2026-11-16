@@ -210,12 +210,6 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
     const modelLink = join(dataDirectory, "module-cache", "semantic", "semantic", "models");
     await mkdir(dirname(modelLink), { recursive: true });
     await symlink("/models", modelLink);
-    // The NLP token counter resolves its local cache from $HOME/.arcadia/models
-    // (the backend image sets HOME=/data). Point that canonical path at the same
-    // read-only pinned artifacts used by Semantic and the replacement probe.
-    const tokenizerModelLink = join(dataDirectory, ".arcadia", "models");
-    await mkdir(dirname(tokenizerModelLink), { recursive: true });
-    await symlink("/models", tokenizerModelLink);
 
     await writeFile(envFilename, [
       "CODEXIA_AUTH_TOKEN=" + token,

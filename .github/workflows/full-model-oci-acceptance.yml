@@ -104,6 +104,19 @@ jobs:
                 sentencepiece.bpe.model onnx/model.onnx onnx/model.onnx_data \
               --max-workers 4
           done < <(cut -f1,2 "$RUNNER_TEMP/p13-model-files.tsv" | sort -u)
+      - name: Expose the pinned tokenizer at the configured local model path
+        env:
+          CODEXIA_P13_MODEL_CACHE: ${{ runner.temp }}/codexia-p13-model-cache
+        run: |
+          set -euo pipefail
+          model='Xenova/multilingual-e5-small'
+          revision='761b726dd34fb83930e26aab4e9ac3899aa1fa78'
+          model_root="$CODEXIA_P13_MODEL_CACHE/$model"
+          pinned_root="$model_root/$revision"
+          for file in config.json tokenizer.json tokenizer_config.json special_tokens_map.json sentencepiece.bpe.model; do
+            test -s "$pinned_root/$file"
+            ln -sfn "$revision/$file" "$model_root/$file"
+          done
       - name: Fail on missing or altered model cache files
         env:
           CODEXIA_P13_MODEL_CACHE: ${{ runner.temp }}/codexia-p13-model-cache
