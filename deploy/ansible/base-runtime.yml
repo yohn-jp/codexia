@@ -571,8 +571,9 @@
 - name: Reject untracked application schema without a migration ledger
   ansible.builtin.assert:
     that:
-      - base_runtime_schema_present.stdout == 't' or base_runtime_untracked_schema_objects.stdout | int == 0
+      - base_runtime_untracked_schema_objects.stdout | int == 0
     fail_msg: Existing PostgreSQL application objects have no migration ledger and cannot be adopted safely.
+  when: base_runtime_schema_present.stdout == 'f'
 - name: Read the existing migration ledger without changing the database
   ansible.builtin.command:
     argv:
