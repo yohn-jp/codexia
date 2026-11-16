@@ -506,7 +506,11 @@ expect_tunnel_drift_rejection() {
     echo 'Tunnel adoption accepted noncanonical runtime state' >&2
     exit 1
   fi
-  grep -q 'Existing Tunnel image, private network, loopback-only port' "$tmp/tunnel-runtime-drift.log"
+  if ! grep -q 'Existing Tunnel image, private network, loopback-only port' "$tmp/tunnel-runtime-drift.log"; then
+    echo 'Tunnel runtime drift failed for an unexpected reason; captured Ansible output follows:' >&2
+    cat "$tmp/tunnel-runtime-drift.log" >&2
+    exit 1
+  fi
 }
 create_tunnel_fixture() {
   podman create --name codexia-tunnel "$@" --secret "${tunnel_fixture_secret:-codexia-tunnel-token}",type=mount,target=/run/secrets/token --read-only --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m "$tunnel_image" tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token-file /run/secrets/token >/dev/null
