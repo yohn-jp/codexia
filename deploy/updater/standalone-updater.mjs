@@ -5,20 +5,24 @@ import { atomicWrite, initialControllerState, loadControllerState, StandaloneCon
 import { PodmanStandaloneHost } from './standalone-host.mjs';
 import { verifyUpdateChannel } from '../../scripts/update-channel.mjs';
 import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
-import { maintainStandaloneUpdater } from './standalone-maintenance.mjs';
+import { maintainStandaloneUpdater, recoverInterruptedMaintenance } from './standalone-maintenance.mjs';
 
 const [command,configPath,argument]=process.argv.slice(2);
 if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|init|boot|tick|status|verify|pause|resume|maintain|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [argument]');
-const config=JSON.parse(await readFile(configPath,'utf8'));
+let config=JSON.parse(await readFile(configPath,'utf8'));
 assert.equal(config.format,'codexia-standalone-updater/v1');
 assert.ok(path.isAbsolute(config.stateFile)&&path.isAbsolute(config.publicKeyFile));
 assert.equal(path.dirname(config.routeFile),path.dirname(config.stateFile),'Route and state must share the protected host state directory');
 assert.equal(path.basename(config.routeFile),'route');
 assert.equal(path.dirname(config.stateFile),process.env.CODEXIA_UPDATER_LOCK_DIRECTORY,'Use the host-wide locked wrapper');
 const publicKey=await readFile(config.publicKeyFile,'utf8');
-const host=new PodmanStandaloneHost(config);
-await host.assertRuntimeSources();
 const store={save:state=>atomicWrite(config.stateFile,JSON.stringify(state)+'\n')};
+if(command==='boot'){
+  const recovered=await recoverInterruptedMaintenance({config,store,publicKey});
+  if(recovered)config=JSON.parse(await readFile(configPath,'utf8'));
+}
+const host=new PodmanStandaloneHost(config);
+if(command!=='maintain')await host.assertRuntimeSources();
 const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
 if(command==='init'||command==='verify-legacy'){
   assert.ok(argument&&path.isAbsolute(argument),'Explicit trusted installed release JSON is required');

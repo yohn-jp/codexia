@@ -51,7 +51,7 @@ export function assertModelCacheOutsideVolumes(modelCachePath,volumeMountpoints)
   assert.ok(path.isAbsolute(modelCachePath)&&path.resolve(modelCachePath)===modelCachePath,'Model cache path must be normalized and absolute');
   for(const mountpoint of volumeMountpoints){
     assert.ok(path.isAbsolute(mountpoint)&&path.resolve(mountpoint)===mountpoint,'Persistent volume mountpoint is unobservable');
-    assert.ok(modelCachePath!==mountpoint&&!modelCachePath.startsWith(mountpoint+path.sep),'Model cache must be outside persistent Codexia volumes');
+    assert.ok(modelCachePath!==mountpoint&&!modelCachePath.startsWith(mountpoint+path.sep)&&!mountpoint.startsWith(modelCachePath+path.sep),'Model cache must be outside persistent Codexia volumes');
   }
 }
 
@@ -84,11 +84,17 @@ function assertContainerEnvironment(container,imageEnvironment,unitText,label){
   for(const [key,value] of environmentMap(declared,label+' Quadlet'))expected.set(key,value);
   const actual=environmentMap(container?.Config?.Env,label+' runtime');
   for(const [key,value] of expected)assert.equal(actual.get(key),value,label+' '+key+' environment drift');
+  const declaredName=unitText.match(/^ContainerName=(\S+)$/mu)?.[1];
+  assert.ok(declaredName,label+' Quadlet container name is unobservable');
   const containerName=typeof container?.Name==='string'?container.Name.replace(/^\//u,''):'';
+  assert.equal(containerName,declaredName,label+' Podman container name drift');
+  assert.match(container?.Id??'',/^[a-f0-9]{64}$/u,label+' Podman container ID is unobservable');
+  const generatedHostname=container.Id.slice(0,12);
+  assert.equal(container.Config?.Hostname,generatedHostname,label+' Podman-generated hostname drift');
   for(const [key,value] of actual){
     if(expected.has(key))continue;
     if(key==='container'&&value==='podman')continue;
-    if(key==='HOSTNAME'&&containerName&&value===containerName)continue;
+    if(key==='HOSTNAME'&&value===generatedHostname)continue;
     if(key==='HOME'&&value==='/root'&&['','0','root'].includes(container.Config?.User??''))continue;
     assert.fail(label+' contains an unexpected runtime environment setting: '+key);
   }

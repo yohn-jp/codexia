@@ -692,4 +692,4 @@ CODEXIA_RUNTIME_MAINTENANCE_IMAGE="$IMAGE_ID" \
 CODEXIA_RUNTIME_MAINTENANCE_NONCE="$NONCE" \
   node "$SCRIPT_DIR/test-standalone-maintenance-integration.mjs" --run "$REPO_ROOT" "$QUADLET_DIR" "$USER_UNIT_DIR" "$WORK_DIR"
 
-printf 'PASS: pinned synthetic Core/Full Quadlets, rootless Podman/systemd, effective resource limits, read-only models, blue/green persistence, locked maintenance rollback/recovery, real timer verification and post-update restart\n'
+printf 'PASS: pinned synthetic Core/Full Quadlets, rootless Podman/systemd, effective resource limits, read-only models, blue/green persistence, fail-closed locked boot recovery after process kill, real timer verification and post-update restart\n'

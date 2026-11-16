@@ -244,42 +244,60 @@ async function verifyOldCode(marker){
     stdio:['ignore','pipe','pipe'],
   });
 }
-async function recoverInterrupted(config,store,markerPath){
-  const marker=await readTransaction(markerPath);
-  if(!marker)return false;
-  assert.equal(marker.stateFile,config.stateFile,'Interrupted maintenance belongs to a different controller');
-  assert.equal(marker.routeFile,config.routeFile,'Interrupted maintenance belongs to a different route');
-  const stateBefore=await loadControllerState(marker.stateFile);
-  assertStateExceptPause(JSON.parse(await readFile(path.join(marker.snapshotRoot,'controller.json'),'utf8')),stateBefore);
-  await stopTimerPolling();
-  const recoveryHost=new PodmanStandaloneHost(config);
-  if(marker.proxyRestartRequired||marker.runtimeChanged)await recoveryHost.route('blocked');
-  await restoreFiles(marker.files);
-  run('systemctl',['--user','daemon-reload']);
-  const interruptedRoute=await readFile(marker.routeFile,'utf8');
-  assert.ok(interruptedRoute===marker.routeContent||(marker.proxyRestartRequired||marker.runtimeChanged)&&interruptedRoute==='blocked\n','Maintenance route changed during interrupted recovery');
-  const oldConfig=JSON.parse(await readFile(marker.configPath,'utf8'));
-  const oldHost=new PodmanStandaloneHost(oldConfig);
-  if(marker.proxyRestartRequired){
-    await oldHost.route('blocked');
-    await activateProxyRevision({changed:true,restart:restartProxyService,verify:async()=>{}});
+async function recoverInterrupted(config,store,markerPath,publicKey){
+  let markerInfo;
+  try{markerInfo=await lstat(markerPath);}catch(error){if(error.code==='ENOENT')return false;throw error;}
+  const blockRoute=()=>atomicWrite(config.routeFile,'blocked\n');
+  try{await blockRoute();}
+  catch(error){await keepTimerStopped().catch(()=>undefined);throw error;}
+  try{
+    await stopTimerPolling();
+    assert.ok(markerInfo.isFile()&&!markerInfo.isSymbolicLink(),'Interrupted maintenance marker must be a regular non-symlink file');
+    assert.equal(markerInfo.mode&0o777,0o600,'Interrupted maintenance marker permissions drift');
+    if(typeof process.getuid==='function')assert.equal(markerInfo.uid,process.getuid(),'Interrupted maintenance marker owner drift');
+    const marker=await readTransaction(markerPath);
+    assert.ok(marker,'Interrupted maintenance marker disappeared during recovery');
+    assert.equal(marker.stateFile,config.stateFile,'Interrupted maintenance belongs to a different controller');
+    assert.equal(marker.routeFile,config.routeFile,'Interrupted maintenance belongs to a different route');
+    const stateBefore=await loadControllerState(marker.stateFile);
+    assertStateExceptPause(JSON.parse(await readFile(path.join(marker.snapshotRoot,'controller.json'),'utf8')),stateBefore);
+    await restoreFiles(marker.files);
+    run('systemctl',['--user','daemon-reload']);
+    const interruptedRoute=await readFile(marker.routeFile,'utf8');
+    assert.ok(interruptedRoute===marker.routeContent||interruptedRoute==='blocked\n','Maintenance route changed during interrupted recovery');
+    const oldConfig=JSON.parse(await readFile(marker.configPath,'utf8'));
+    const oldHost=new PodmanStandaloneHost(oldConfig);
+    if(marker.proxyRestartRequired){
+      await oldHost.route('blocked');
+      await activateProxyRevision({changed:true,restart:restartProxyService,verify:async()=>{}});
+    }
+    if(marker.runtimeChanged){
+      const oldController=new StandaloneController({host:oldHost,store,publicKey,observeMilliseconds:oldConfig.observeMilliseconds??300000});
+      await transitionRuntimeWriter({
+        currentHost:oldHost,targetHost:oldHost,slot:stateBefore.journal.active.slot,release:stateBefore.installed,state:stateBefore,
+        verify:async()=>{await oldHost.verifyWriterUnits(stateBefore);await oldController.assertServing(stateBefore,stateBefore.journal.active.slot,stateBefore.installed);},
+      });
+    }else if(marker.proxyRestartRequired)await oldHost.route(marker.routeContent.trim());
+    else await oldHost.route(marker.routeContent.trim());
+    await verifyOldCode(marker);
+    const after=await loadControllerState(marker.stateFile);
+    assertStateExceptPause(JSON.parse(await readFile(path.join(marker.snapshotRoot,'controller.json'),'utf8')),after);
+    if(after.paused!==marker.originalPaused)await store.save(withPause(after,marker.originalPaused));
+    await restoreTimerPolling(marker.timerState);
+    await rm(markerPath,{force:true});
+    await rm(marker.snapshotRoot,{recursive:true,force:true}).catch(()=>{});
+    return true;
+  }catch(error){
+    await blockRoute().catch(()=>undefined);
+    await keepTimerStopped().catch(()=>undefined);
+    throw error;
   }
-  if(marker.runtimeChanged){
-    const oldController=new StandaloneController({host:oldHost,store,publicKey,observeMilliseconds:oldConfig.observeMilliseconds??300000});
-    await transitionRuntimeWriter({
-      currentHost:oldHost,targetHost:oldHost,slot:stateBefore.journal.active.slot,release:stateBefore.installed,state:stateBefore,
-      verify:async()=>{await oldHost.verifyWriterUnits(stateBefore);await oldController.assertServing(stateBefore,stateBefore.journal.active.slot,stateBefore.installed);},
-    });
-  }else if(marker.proxyRestartRequired)await oldHost.route(marker.routeContent.trim());
-  else await oldHost.route(marker.routeContent.trim());
-  try{await verifyOldCode(marker);}catch(error){await oldHost.route('blocked').catch(()=>undefined);throw error;}
-  const after=await loadControllerState(marker.stateFile);
-  assertStateExceptPause(JSON.parse(await readFile(path.join(marker.snapshotRoot,'controller.json'),'utf8')),after);
-  if(after.paused!==marker.originalPaused)await store.save(withPause(after,marker.originalPaused));
-  await restoreTimerPolling(marker.timerState);
-  await rm(markerPath,{force:true});
-  await rm(marker.snapshotRoot,{recursive:true,force:true});
-  return true;
+}
+
+export async function recoverInterruptedMaintenance({config,store,publicKey}){
+  assert.equal(path.dirname(config.stateFile),process.env.CODEXIA_UPDATER_LOCK_DIRECTORY,'Boot recovery must use the canonical host lock');
+  const markerPath=path.join(path.dirname(config.stateFile),'maintenance','in-progress.json');
+  return recoverInterrupted(config,store,markerPath,publicKey);
 }
 
 function filesFor(manifest,config,candidateConfig){
@@ -319,7 +337,7 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
   const maintenanceDir=path.join(stateDir,'maintenance');
   const markerPath=path.join(maintenanceDir,'in-progress.json');
   await mkdir(maintenanceDir,{recursive:true,mode:0o700});
-  const recovered=await recoverInterrupted(config,store,markerPath);
+  const recovered=await recoverInterrupted(config,store,markerPath,publicKey);
   if(recovered){
     state=await loadControllerState(config.stateFile);
     config=JSON.parse(await readFile(path.join(path.dirname(config.publicKeyFile),'config.json'),'utf8'));

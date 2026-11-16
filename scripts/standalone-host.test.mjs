@@ -62,6 +62,7 @@ test('model cache cannot resolve inside an existing authoring or history volume'
  const history='/home/codexia/.local/share/containers/storage/volumes/codexia-history/_data';
  assert.doesNotThrow(()=>assertModelCacheOutsideVolumes('/var/cache/codexia/models',[data,history]));
  assert.throws(()=>assertModelCacheOutsideVolumes('/var/cache/codexia/models/data',['/var/cache/codexia/models']),/must be outside persistent Codexia volumes/);
+ assert.throws(()=>assertModelCacheOutsideVolumes('/var/cache/codexia/models',['/var/cache/codexia/models/persistent']),/must be outside persistent Codexia volumes/);
 });
 
 test('effective cgroup CPU quota must match the typed runtime contract',async()=>{
@@ -83,9 +84,11 @@ test('runtime verification rejects unreviewed writer and proxy systemd drop-ins'
 test('legacy runtime verification rejects undeclared environment, mounts and systemd resource drift',()=>{
  const imageEnvironment=['PATH=/usr/bin','NODE_ENV=production','CODEXIA_PROFILE=full','CODEXIA_MODULE_PROFILE_PATH=/app/generated/server.mjs','CODEXIA_STANDALONE_IDENTITY=1'];
  const authEnvironment=browserAuthEnvironment({browserAuth:access},origin);
- const unit=imageConfig(release,authEnvironment,runtime);
+ const unit=imageConfig(release,authEnvironment,runtime).replace('PLACEHOLDER','codexia-slot-blue');
+ const containerId='d'.repeat(64);
  const observed={
-  Config:{Env:imageEnvironmentFromUnit(imageEnvironment,unit)},
+  Id:containerId,Name:'/codexia-slot-blue',
+  Config:{Hostname:containerId.slice(0,12),Env:[...imageEnvironmentFromUnit(imageEnvironment,unit),'HOSTNAME='+containerId.slice(0,12)]},
   NetworkSettings:{Networks:{codexia:{},'codexia-data':{}}},
   Mounts:[
    {Destination:'/cache',Type:'tmpfs',RW:true},
@@ -100,12 +103,15 @@ test('legacy runtime verification rejects undeclared environment, mounts and sys
  };
  assert.doesNotThrow(()=>assertRuntimeObservation(observed,runtime,imageEnvironment,unit));
  assert.doesNotThrow(()=>assertRuntimeUnit('[Service]\nCPUQuota=250%\n',runtime));
- assert.throws(()=>assertRuntimeObservation({...observed,Config:{Env:[...observed.Config.Env,'CODEXIA_UNREVIEWED=1']}},runtime,imageEnvironment,unit),/Unknown Codexia runtime/);
- assert.throws(()=>assertRuntimeObservation({...observed,Config:{Env:[...observed.Config.Env,'CODEXIA_PROFILE=core']}},runtime,imageEnvironment,unit),/duplicate environment/);
- assert.throws(()=>assertRuntimeObservation({...observed,Config:{Env:observed.Config.Env.map(entry=>entry==='CODEXIA_DATA_DIR=/data'?'CODEXIA_DATA_DIR=/tmp/data':entry)}},runtime,imageEnvironment,unit),/CODEXIA_DATA_DIR environment drift/);
- assert.throws(()=>assertRuntimeObservation({...observed,Config:{Env:[...observed.Config.Env,'NODE_OPTIONS=--require=/tmp/inject.js']}},runtime,imageEnvironment,unit),/unexpected runtime environment/);
- assert.throws(()=>assertRuntimeObservation({...observed,Config:{Env:observed.Config.Env.map(entry=>entry==='CODEXIA_DATABASE_USER=codexia'?'CODEXIA_DATABASE_USER=other':entry)}},runtime,imageEnvironment,unit),/CODEXIA_DATABASE_USER environment drift/);
- assert.throws(()=>assertRuntimeObservation({...observed,Config:{Env:observed.Config.Env.map(entry=>entry==='CODEXIA_ACCESS_AUDIENCE='+access.audience?'CODEXIA_ACCESS_AUDIENCE='+'b'.repeat(64):entry)}},runtime,imageEnvironment,unit),/CODEXIA_ACCESS_AUDIENCE environment drift/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Hostname:'codexia-slot-blue'}},runtime,imageEnvironment,unit),/Podman-generated hostname drift/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:observed.Config.Env.map(entry=>entry==='HOSTNAME='+containerId.slice(0,12)?'HOSTNAME=injected-host':entry)}},runtime,imageEnvironment,unit),/unexpected runtime environment/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Name:'/codexia-slot-green'},runtime,imageEnvironment,unit),/Podman container name drift/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:[...observed.Config.Env,'CODEXIA_UNREVIEWED=1']}},runtime,imageEnvironment,unit),/Unknown Codexia runtime/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:[...observed.Config.Env,'CODEXIA_PROFILE=core']}},runtime,imageEnvironment,unit),/duplicate environment/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:observed.Config.Env.map(entry=>entry==='CODEXIA_DATA_DIR=/data'?'CODEXIA_DATA_DIR=/tmp/data':entry)}},runtime,imageEnvironment,unit),/CODEXIA_DATA_DIR environment drift/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:[...observed.Config.Env,'NODE_OPTIONS=--require=/tmp/inject.js']}},runtime,imageEnvironment,unit),/unexpected runtime environment/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:observed.Config.Env.map(entry=>entry==='CODEXIA_DATABASE_USER=codexia'?'CODEXIA_DATABASE_USER=other':entry)}},runtime,imageEnvironment,unit),/CODEXIA_DATABASE_USER environment drift/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:observed.Config.Env.map(entry=>entry==='CODEXIA_ACCESS_AUDIENCE='+access.audience?'CODEXIA_ACCESS_AUDIENCE='+'b'.repeat(64):entry)}},runtime,imageEnvironment,unit),/CODEXIA_ACCESS_AUDIENCE environment drift/);
  assert.throws(()=>assertRuntimeObservation({...observed,Mounts:[...observed.Mounts,{Destination:'/etc',Type:'bind',Source:'/etc',RW:false}]},runtime,imageEnvironment,unit),/persistent and host mounts/);
  assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,Memory:0}},runtime,imageEnvironment,unit),/memory limit drift/);
  assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,CpuQuota:200000}},runtime,imageEnvironment,unit),/CPU limit drift/);

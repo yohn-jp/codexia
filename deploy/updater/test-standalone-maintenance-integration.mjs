@@ -213,6 +213,88 @@ async function runLiveAnsibleTimerCheck({ repoRoot, workDir, enabled, shouldPass
   if (!shouldPass && result.status === 0) throw new Error(`Live Ansible timer check accepted mismatched enabled=${enabled}`);
 }
 
+async function runInterruptedBootRecovery({ workDir, stateDir, configPath, candidate, environment, expectedState, expectedRuntime, interruption }) {
+  assert.ok(['after-write', 'after-writer-drain'].includes(interruption));
+  const faultBin = path.join(workDir, `fault-bin-${interruption}`);
+  await mkdir(faultBin, { mode: 0o700 });
+  const markerPath = path.join(stateDir, 'maintenance', 'in-progress.json');
+  const observedPath = path.join(workDir, `fault-observed-${interruption}`);
+  const systemctlPath = path.join(faultBin, 'systemctl');
+  const shim = [
+    '#!/bin/sh',
+    '/usr/bin/systemctl "$@"',
+    'status=$?',
+    'if [ "$status" -ne 0 ]; then exit "$status"; fi',
+    'if [ "${CODEXIA_RUNTIME_MAINTENANCE_KILL_AT-}" = "after-write" ] && [ "$1" = "--user" ] && [ "$2" = "daemon-reload" ] && [ -f "${CODEXIA_RUNTIME_MAINTENANCE_MARKER-}" ]; then',
+    '  printf "%s\\n" after-write > "${CODEXIA_RUNTIME_MAINTENANCE_KILL_MARKER}"',
+    '  kill -KILL "$PPID"',
+    'fi',
+    'if [ "${CODEXIA_RUNTIME_MAINTENANCE_KILL_AT-}" = "after-writer-drain" ] && [ "$1" = "--user" ] && [ "$2" = "stop" ] && [ "$3" = "codexia-slot-blue.service" ] && [ -f "${CODEXIA_RUNTIME_MAINTENANCE_MARKER-}" ]; then',
+    '  printf "%s\\n" after-writer-drain > "${CODEXIA_RUNTIME_MAINTENANCE_KILL_MARKER}"',
+    '  kill -KILL "$PPID"',
+    'fi',
+    'exit "$status"',
+  ].join('\n') + '\n';
+  await writeFile(systemctlPath, shim, { mode: 0o700, flag: 'wx' });
+
+  const wrapper = path.join(SOURCE_ROOT, 'deploy/updater/codexia-updater');
+  const candidateEntry = path.join(candidate.root, 'deploy/updater/standalone-updater.mjs');
+  const killEnv = {
+    ...environment,
+    PATH: faultBin + path.delimiter + environment.PATH,
+    CODEXIA_RUNTIME_MAINTENANCE_KILL_AT: interruption,
+    CODEXIA_RUNTIME_MAINTENANCE_MARKER: markerPath,
+    CODEXIA_RUNTIME_MAINTENANCE_KILL_MARKER: observedPath,
+  };
+  const interrupted = spawnSync('sh', [wrapper, 'maintain-candidate', candidateEntry, configPath, candidate.manifestPath], {
+    encoding: 'utf8', timeout: 240000, maxBuffer: 4 * 1024 * 1024, env: killEnv,
+  });
+  if (interrupted.error) throw interrupted.error;
+  assert.equal(interrupted.signal, 'SIGKILL', `Maintenance did not terminate at ${interruption}: ${interrupted.stdout}\n${interrupted.stderr}`);
+  assert.equal((await readFile(observedPath, 'utf8')).trim(), interruption, `Fault injection did not reach ${interruption}`);
+  const markerInfo = await lstat(markerPath);
+  assert.ok(markerInfo.isFile() && !markerInfo.isSymbolicLink(), 'Interrupted maintenance marker was not retained');
+  const interruptedState = await loadControllerState(path.join(stateDir, 'controller.json'));
+  assert.equal(interruptedState.paused, true, 'Interrupted maintenance did not keep the controller paused');
+  await assertTimerState('inactive', 'enabled');
+  if (interruption === 'after-write') {
+    assert.equal((await readFile(path.join(stateDir, 'route'), 'utf8')), 'blue\n', 'Pre-drain interruption unexpectedly changed the route');
+    assert.equal(systemdState(SERVICE), 'active', 'Pre-drain interruption unexpectedly stopped the writer');
+    const originalMarker = await readFile(markerPath, 'utf8');
+    const ambiguousMarker = JSON.parse(originalMarker);
+    ambiguousMarker.routeFile = path.join(stateDir, 'unexpected-route');
+    await atomicWrite(markerPath, JSON.stringify(ambiguousMarker) + '\n');
+    const refused = spawnSync('sh', [wrapper, 'boot', configPath], {
+      encoding: 'utf8', timeout: 240000, maxBuffer: 4 * 1024 * 1024, env: environment,
+    });
+    if (refused.error) throw refused.error;
+    assert.notEqual(refused.status, 0, 'Boot accepted a maintenance marker for a different route');
+    assert.equal((await readFile(path.join(stateDir, 'route'), 'utf8')), 'blocked\n', 'Ambiguous recovery did not keep ingress blocked');
+    await assertTimerState('inactive', 'enabled');
+    await lstat(markerPath);
+    await atomicWrite(markerPath, originalMarker);
+  } else {
+    assert.equal((await readFile(path.join(stateDir, 'route'), 'utf8')), 'blocked\n', 'Writer-drain interruption did not fence ingress');
+    assert.equal(systemdState(SERVICE), 'inactive', 'Writer-drain interruption did not stop the active writer');
+  }
+
+  const boot = spawnSync('sh', [wrapper, 'boot', configPath], {
+    encoding: 'utf8', timeout: 240000, maxBuffer: 4 * 1024 * 1024, env: environment,
+  });
+  if (boot.error) throw boot.error;
+  if (boot.status !== 0) throw new Error(`Canonical boot recovery failed after ${interruption} (${boot.status}):\n${boot.stdout}\n${boot.stderr}`);
+  await assert.rejects(lstat(markerPath), { code: 'ENOENT' }, 'Successful boot recovery retained the transaction marker');
+  const recoveredConfig = JSON.parse(await readFile(configPath, 'utf8'));
+  assert.deepEqual(recoveredConfig.runtime, expectedRuntime, 'Boot recovery did not restore the previous runtime configuration');
+  const recoveredState = await loadControllerState(path.join(stateDir, 'controller.json'));
+  assert.deepEqual(recoveredState, expectedState, 'Boot recovery changed the controller journal/checkpoint or pause state');
+  assert.equal((await readFile(path.join(stateDir, 'route'), 'utf8')), 'blue\n', 'Boot recovery did not restore the committed route');
+  await assertTimerState('active', 'enabled');
+  await verifyFixture(configPath);
+  run('podman', ['exec', CONTAINER, 'node', '--input-type=module', '-e',
+    'import {readFileSync} from "node:fs";const nl=String.fromCharCode(10);for(const [p,v] of [["/data/runtime-contract-marker","data-marker-v1"+nl],["/history/runtime-contract-marker","history-marker-v1"+nl]])if(readFileSync(p,"utf8")!==v)throw new Error(p)']);
+}
+
 function installTestAdapters() {
   const expectedImage = process.env.CODEXIA_RUNTIME_MAINTENANCE_IMAGE;
   assert.match(expectedImage ?? '', /^sha256:[a-f0-9]{64}$/u, 'Synthetic local image identity is missing');
@@ -500,6 +582,23 @@ async function main() {
   run('podman', ['exec', CONTAINER, 'node', '--input-type=module', '-e',
     'import {readFileSync} from "node:fs";const nl=String.fromCharCode(10);for(const [p,v] of [["/data/runtime-contract-marker","data-marker-v1"+nl],["/history/runtime-contract-marker","history-marker-v1"+nl]])if(readFileSync(p,"utf8")!==v)throw new Error(p)']);
 
+  const interruptedRuntime = validateRuntimeContract({
+    ...appliedConfig.runtime,
+    resources: { ...appliedConfig.runtime.resources, cpuQuotaPercent: FAILURE_CPU + 25 },
+  });
+  const interruptedCandidate = await createCandidate({
+    repoRoot, stateDir, configPath, sourceDir: SOURCE_ROOT, unitDir: userUnitDir,
+    quadletDir, candidateConfig: { ...appliedConfig, runtime: interruptedRuntime }, nonce: nonce + '-boot-recovery',
+  });
+  await runInterruptedBootRecovery({
+    workDir, stateDir, configPath, candidate: interruptedCandidate, environment,
+    expectedState: appliedState, expectedRuntime: appliedConfig.runtime, interruption: 'after-write',
+  });
+  await runInterruptedBootRecovery({
+    workDir, stateDir, configPath, candidate: interruptedCandidate, environment,
+    expectedState: appliedState, expectedRuntime: appliedConfig.runtime, interruption: 'after-writer-drain',
+  });
+
   run('systemctl', ['--user', 'disable', '--now', 'codexia-updater.timer']);
   await assertTimerState('inactive', 'disabled');
   await runLiveAnsibleTimerCheck({ repoRoot, workDir, enabled: false, shouldPass: true });
@@ -530,7 +629,7 @@ async function main() {
   for (const file of [routeFile, path.join(stateDir, 'controller.json'), path.join(stateDir, 'host.lock')]) await rm(file, { force: true });
   await rm(stateBase, { recursive: true, force: true });
   run('systemctl', ['--user', 'daemon-reload']);
-  process.stdout.write('PASS: locked maintenance applies a runtime/source/unit candidate, rolls back a failed live writer restart, preserves the journal/route/data, restores the real systemd timer, and survives a post-update systemd service restart\n');
+  process.stdout.write('PASS: locked maintenance applies a runtime/source/unit candidate, rolls back a failed writer restart, recovers killed transactions through canonical boot before and after writer drain, fails closed on ambiguous markers, preserves journal/route/data, restores the real timer, and survives a service restart\n');
 }
 
 if (process.argv[2] === '--verify-old') {

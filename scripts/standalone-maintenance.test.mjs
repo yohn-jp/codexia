@@ -127,12 +127,13 @@ test('maintenance activates changed proxy source and verifies the replacement be
 test('maintenance requires the running proxy to match its private digest-pinned runtime contract',()=>{
   const digest='a'.repeat(64);
   const home='/home/codexia';
-  const quadlet='[Container]\nImage=ghcr.io/yohn-jp/codexia-backend@sha256:'+digest+'\nNetwork=codexia.network\nVolume=/opt/codexia-updater/deploy/updater/proxy.mjs:/config/proxy.mjs:ro,Z\nVolume=%h/.local/state/codexia-updater:/config/state:ro,Z\nUser=0\nEntrypoint=node\nExec=/config/proxy.mjs\nReadOnly=true\nNoNewPrivileges=true\nDropCapability=all\nTmpfs=/tmp:rw,nosuid,nodev,noexec,size=16m\n';
+  const quadlet='[Container]\nImage=ghcr.io/yohn-jp/codexia-backend@sha256:'+digest+'\nContainerName=codexia-api-proxy\nNetwork=codexia.network\nVolume=/opt/codexia-updater/deploy/updater/proxy.mjs:/config/proxy.mjs:ro,Z\nVolume=%h/.local/state/codexia-updater:/config/state:ro,Z\nUser=0\nEntrypoint=node\nExec=/config/proxy.mjs\nReadOnly=true\nNoNewPrivileges=true\nDropCapability=all\nTmpfs=/tmp:rw,nosuid,nodev,noexec,size=16m\n';
   const proxyImageEnvironment=['PATH=/usr/bin','NODE_ENV=production'];
   const imageInfo={Id:'sha256:'+'c'.repeat(64),RepoDigests:['ghcr.io/yohn-jp/codexia-backend@sha256:'+digest],Config:{Env:proxyImageEnvironment}};
+  const containerId='e'.repeat(64);
   const container={
-    State:{Running:true},Image:'sha256:'+'c'.repeat(64),ImageName:'ghcr.io/yohn-jp/codexia-backend@sha256:'+digest,
-    Config:{User:'0',Env:proxyImageEnvironment,Entrypoint:['node'],Cmd:['/config/proxy.mjs']},
+    Id:containerId,Name:'/codexia-api-proxy',State:{Running:true},Image:'sha256:'+'c'.repeat(64),ImageName:'ghcr.io/yohn-jp/codexia-backend@sha256:'+digest,
+    Config:{Hostname:containerId.slice(0,12),User:'0',Env:[...proxyImageEnvironment,'HOSTNAME='+containerId.slice(0,12)],Entrypoint:['node'],Cmd:['/config/proxy.mjs']},
     HostConfig:{PortBindings:{},ReadonlyRootfs:true,CapDrop:['ALL'],SecurityOpt:['no-new-privileges:true'],Tmpfs:{'/tmp':'rw,nosuid,nodev,noexec,size=16m'}},
     NetworkSettings:{Networks:{codexia:{}}},
     Mounts:[
