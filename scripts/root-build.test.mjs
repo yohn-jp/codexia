@@ -49,9 +49,7 @@ test('default and explicit Core root builds select the existing selective profil
 
 test('Full root builds keep the existing workspace graph', () => {
   assert.equal(packageManifest.scripts.build, 'node scripts/root-build.mjs');
-  assert.match(packageManifest.scripts['build:workspace'], /@codexia\/migration build/);
-  assert.match(packageManifest.scripts['build:workspace'], /@codexia\/persistence-postgres build/);
-  assert.match(packageManifest.scripts['build:workspace'], /@codexia\/module-assistant build/);
+  assert.match(packageManifest.scripts['build:workspace'], /^node scripts\/ci-workspace\.mjs build-workspace && node scripts\/profile-build\.mjs .* && pnpm --filter @codexia\/app build && pnpm --filter @codexia\/api build$/u);
   assert.deepEqual(createRootBuildCommands('full'), [{
     command: 'pnpm',
     args: ['run', 'build:workspace'],

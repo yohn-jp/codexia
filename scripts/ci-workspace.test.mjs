@@ -27,6 +27,7 @@ async function makeWorkspaceFixture(rootTestScript) {
   await mkdir(path.join(projectRoot, 'scripts'), { recursive: true });
   await copyFile(runner, path.join(projectRoot, 'scripts/ci-workspace.mjs'));
   await copyFile(path.join(root, 'scripts/ci-contract.mjs'), path.join(projectRoot, 'scripts/ci-contract.mjs'));
+  await copyFile(path.join(root, 'scripts/ci-parallel.mjs'), path.join(projectRoot, 'scripts/ci-parallel.mjs'));
 
   const rootManifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
   rootManifest.scripts.test = rootTestScript;
@@ -242,4 +243,21 @@ test('real workspace preparation overlaps independent builds and blocks dependen
   } finally {
     await rm(fixture.projectRoot, { recursive: true, force: true });
   }
+});
+
+test('pre-profile workspace build preserves the complete 15-package build graph', async () => {
+  const fixture = await makeWorkspaceFixture('pnpm run test:scripts');
+  try {
+    const result = runProject(fixture.projectRoot, ['build-workspace'], fixture.env);
+    assert.equal(result.status, 0, result.stderr);
+    const commands = (await readFile(fixture.record, 'utf8')).trim().split('\n').map(JSON.parse);
+    assert.equal(commands.length, 1);
+    const filters = commands[0].flatMap((arg, index) => arg === '--filter' ? [commands[0][index + 1]] : []);
+    const expected = await Promise.all(WORKSPACES.filter(({id}) => id !== 'app' && id !== 'api').map(async ({path: workspacePath}) =>
+      JSON.parse(await readFile(path.join(root, workspacePath, 'package.json'), 'utf8')).name));
+    assert.equal(filters.length, 15);
+    assert.deepEqual(filters.sort(), expected.sort());
+    assert.deepEqual(commands[0].slice(0, 3), ['--recursive', '--sort', '--workspace-concurrency=2']);
+    assert.deepEqual(commands[0].slice(-2), ['run', 'build']);
+  } finally { await rm(fixture.projectRoot, { recursive: true, force: true }); }
 });
