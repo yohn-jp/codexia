@@ -1,0 +1,13 @@
+---
+- name: Read the existing Tunnel Quadlet before writer cutover
+  ansible.builtin.slurp:
+    path: "{{ quadlet_dir }}/codexia-tunnel.container"
+  register: tunnel_legacy_quadlet
+- name: Require the canonical legacy dependency pair before cutover
+  ansible.builtin.assert:
+    that:
+      - "'Requires=codexia-api.service' in (tunnel_legacy_quadlet.content | b64decode | split('\n'))"
+      - "'After=network-online.target codexia-api.service' in (tunnel_legacy_quadlet.content | b64decode | split('\n'))"
+      - "'Requires=codexia-api-proxy.service' not in (tunnel_legacy_quadlet.content | b64decode | split('\n'))"
+      - "'After=network-online.target codexia-api-proxy.service' not in (tunnel_legacy_quadlet.content | b64decode | split('\n'))"
+    fail_msg: Tunnel Quadlet is not in the canonical legacy state; restore it through the documented maintenance procedure.

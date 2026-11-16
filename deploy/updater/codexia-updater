@@ -6,4 +6,19 @@ state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/codexia-updater"
 umask 077
 mkdir -p "$state_dir"
 export CODEXIA_UPDATER_LOCK_DIRECTORY="$state_dir"
+if [ "$#" -gt 0 ] && [ "$1" = maintain-candidate ]; then
+  if [ "$#" -lt 4 ]; then
+    echo "Usage: codexia-updater maintain-candidate /state/maintenance/candidates/<id>/deploy/updater/standalone-updater.mjs /absolute/config.json /absolute/manifest.json" >&2
+    exit 2
+  fi
+  shift
+  candidate_entry=$1
+  shift
+  case "$candidate_entry" in
+    "$state_dir"/maintenance/candidates/*/deploy/updater/standalone-updater.mjs) ;;
+    *) echo "Maintenance entrypoint must stay within the private candidate directory" >&2; exit 2 ;;
+  esac
+  test -f "$candidate_entry" && test ! -L "$candidate_entry"
+  exec flock --exclusive --nonblock --no-fork "$state_dir/host.lock" node "$candidate_entry" maintain "$@"
+fi
 exec flock --exclusive --nonblock --no-fork "$state_dir/host.lock" node /opt/codexia-updater/deploy/updater/standalone-updater.mjs "$@"

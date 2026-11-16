@@ -37,6 +37,22 @@ test('release gate requires the exact successful job set including every matrix 
   assert.throws(() => assertVerificationJobs([...jobs, { name: 'unexpected', status: 'completed', conclusion: 'cancelled' }]), /Unexpected release verification job/);
 });
 
+test('main release verification permits only a skipped supplemental Full-model OCI caller job', () => {
+  const jobs = REQUIRED_VERIFICATION_JOBS.map(name => ({ name, status: 'completed', conclusion: 'success' }));
+  assert.doesNotThrow(() => assertVerificationJobs([...jobs, { name: 'full-model-oci', status: 'completed', conclusion: 'skipped' }]));
+  for (const supplemental of [
+    { name: 'full-model-oci', status: 'completed', conclusion: 'success' },
+    { name: 'full-model-oci', status: 'completed', conclusion: 'failure' },
+    { name: 'full-model-oci', status: 'in_progress', conclusion: null },
+    { name: 'full-model-oci', status: 'completed', conclusion: 'cancelled' },
+  ]) assert.throws(() => assertVerificationJobs([...jobs, supplemental]), /must be skipped/);
+  assert.throws(() => assertVerificationJobs([...jobs,
+    { name: 'full-model-oci', status: 'completed', conclusion: 'skipped' },
+    { name: 'full-model-oci', status: 'completed', conclusion: 'skipped' },
+  ]), /Duplicate release verification job/);
+  assert.throws(() => assertVerificationLeafJobs([...jobs.filter(job => job.name !== 'certification'), { name: 'full-model-oci', status: 'completed', conclusion: 'skipped' }]), /Unexpected release verification job/);
+});
+
 test('GitHub Actions pagination retrieves all pages and rejects incomplete responses', async () => {
   const expected = Array.from({ length: 205 }, (_, id) => ({ id }));
   const calls = [];

@@ -1,6 +1,6 @@
 # Standalone backup and isolated restore drill
  
-This is an operator-invoked O3 maintenance tool, distinct from portable work JSON. Run as the rootless Podman deployment user with the same updater state directory. Requires Podman, age, flock, GNU coreutils, findmnt, the existing pinned PostgreSQL 17 image, and a remote mounted NFS/CIFS/SSHFS destination. Provision the age recipient and recovery identity independently; never store the private key on the source VM or alongside the backup. The destination must be independently protected against deletion and have a retention policy.
+This is an operator-invoked O3 maintenance tool, distinct from portable work JSON. [Infrastructure as code](IAC.md) requires its integration into the Ansible lifecycle through the canonical controller's locked maintenance operations. The steps below are the existing transitional runbook, not a completed automated backup workflow. Run as the rootless Podman deployment user with the same updater state directory. Requires Podman, age, flock, GNU coreutils, findmnt, the existing pinned PostgreSQL 17 image, and a remote mounted NFS/CIFS/SSHFS destination. Provision the age recipient and recovery identity independently; never store the private key on the source VM or alongside the backup. The destination must be independently protected against deletion and have a retention policy.
  
 ## Backup
  

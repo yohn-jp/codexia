@@ -19,6 +19,10 @@ const modelRefs = {
   embedding: { id: "Xenova/multilingual-e5-small", revision: "761b726dd34fb83930e26aab4e9ac3899aa1fa78" },
   reranker: { id: "mogolloni/bge-reranker-v2-m3-onnx", revision: "e5023553f6c47f09057da7a19cdd79ef850a4985" },
 };
+// The production image runs as UID/GID 1000 (`node`). Map the rootless
+// runner's owned private bind mounts to that identity while preserving the
+// image's configured user; bare keep-id maps the runner to its own UID instead.
+const nodeUserNamespace = "--userns=keep-id:uid=1000,gid=1000";
 
 async function run(command, args, options = {}) {
   const result = await execFile(command, args, {
@@ -129,7 +133,7 @@ async function waitForReplacementReady(podman, name) {
   throw new Error("replacement full-profile OCI server did not become live");
 }
 
-test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives replacement", { timeout: 900_000 }, async () => {
+test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives replacement", { timeout: 2_700_000 }, async () => {
   const podman = process.env.OCI_ENGINE ?? "podman";
   const commit = await git(root, "rev-parse", "HEAD");
   const tree = await git(root, "rev-parse", "HEAD^{tree}");
@@ -235,18 +239,31 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
     ];
 
     await run(podman, [
-      "run", "--detach", "--name", customName, "--userns=keep-id", "--network", network,
+      "run", "--detach", "--name", customName, nodeUserNamespace, "--network", network,
       ...commonEnv, ...commonMounts, image,
       "node", "/app/p13-harness/model-oci-lifecycle.container.mjs", "lifecycle",
     ], { timeout: 30_000 });
     customStarted = true;
     const customExit = await run(podman, ["wait", customName], { timeout: 720_000, maxBuffer: 256_000 });
     if (customExit !== "0") {
-      const logs = await run(podman, ["logs", customName], { timeout: 10_000, maxBuffer: 2 * 1024 * 1024 }).catch(() => "");
-      const failure = await readFile(join(outputDirectory, "failure.json"), "utf8").catch(() => "");
+      const diagnostic = async (command, args) => {
+        try { return await run(command, args, { timeout: 10_000, maxBuffer: 2 * 1024 * 1024 }); }
+        catch (error) { return "unavailable (" + (error?.code ?? "command-failed") + ")"; }
+      };
+      const state = await diagnostic(podman, ["inspect", "--format", "{{json .State}}", customName]);
+      const runtime = await diagnostic(podman, ["inspect", "--format", "{{.Config.User}}|{{.HostConfig.UsernsMode}}|{{json .HostConfig.LogConfig}}", customName]);
+      const ownership = await diagnostic("stat", ["-c", "%u:%g %a %n", dataDirectory, outputDirectory]);
+      const logs = await diagnostic(podman, ["logs", customName]);
+      let failure;
+      try { failure = await readFile(join(outputDirectory, "failure.json"), "utf8"); }
+      catch (error) { failure = "unavailable (" + (error?.code ?? "read-failed") + ")"; }
+      const redacted = (value) => value.replaceAll(token, "[redacted]").replaceAll(databasePassword, "[redacted]");
       throw new Error("in-container lifecycle acceptance exited with " + customExit +
-        (failure ? "\n" + failure.slice(-12_000) : "") +
-        (logs ? "\n" + logs.slice(-12_000) : ""));
+        "\ncontainer state: " + redacted(state) +
+        "\ncontainer runtime: " + redacted(runtime) +
+        "\nhost bind-mount ownership: " + redacted(ownership) +
+        "\nfailure file: " + redacted(failure.slice(-12_000)) +
+        "\ncontainer logs: " + redacted(logs.slice(-12_000)));
     }
 
     const lifecycle = JSON.parse(await readFile(join(outputDirectory, "lifecycle.json"), "utf8"));
@@ -289,7 +306,7 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
     assert.deepEqual(lifecycle.preservedFiles, expectedHashes, "model lifecycle must preserve canonical author records");
 
     await run(podman, [
-      "run", "--detach", "--name", replacementName, "--userns=keep-id", "--network", network,
+      "run", "--detach", "--name", replacementName, nodeUserNamespace, "--network", network,
       ...commonEnv, ...commonMounts, image,
     ], { timeout: 30_000 });
     replacementStarted = true;

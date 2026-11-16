@@ -1,0 +1,159 @@
+name: Full model OCI lifecycle acceptance
+on:
+  workflow_call:
+  push:
+    branches: [main]
+    paths:
+      - .dockerignore
+      - .github/workflows/full-model-oci-acceptance.yml
+      - Dockerfile
+      - Dockerfile.backend
+      - app/**
+      - modules/**
+      - package.json
+      - packages/**
+      - profiles/**
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - scripts/profile-build.mjs
+      - scripts/profile-package.mjs
+      - scripts/verify-oci.sh
+      - scripts/verify-oci-http.mjs
+      - tests/integration/model-oci-lifecycle.acceptance.mjs
+      - tests/integration/model-oci-lifecycle.container.mjs
+      - tests/integration/model-postgres-fixture.mjs
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: full-model-oci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+jobs:
+  full-model-oci:
+    name: Run pinned Full model lifecycle on rootless Podman
+    runs-on: ubuntu-26.04
+    timeout-minutes: 150
+    env:
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      HF_HUB_ETAG_TIMEOUT: '60'
+      HF_HUB_DOWNLOAD_TIMEOUT: '120'
+    steps:
+      - name: Check out the exact source without persistent credentials
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Install a disposable rootless OCI runtime
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            podman uidmap netavark aardvark-dns passt slirp4netns fuse-overlayfs dbus-user-session jq
+          test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
+          podman version
+          free -h
+          df -h "$RUNNER_TEMP"
+      - name: Write the pinned real model file manifest
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/p13-model-files.tsv" <<'MODEL_FILES'
+          Xenova/multilingual-e5-small	761b726dd34fb83930e26aab4e9ac3899aa1fa78	config.json	658	cb99455288675345e1a4f411438d5d0adbba5fbd3a67ea4fb03c015433b996c1
+          Xenova/multilingual-e5-small	761b726dd34fb83930e26aab4e9ac3899aa1fa78	tokenizer.json	17082730	0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39
+          Xenova/multilingual-e5-small	761b726dd34fb83930e26aab4e9ac3899aa1fa78	tokenizer_config.json	443	a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b
+          Xenova/multilingual-e5-small	761b726dd34fb83930e26aab4e9ac3899aa1fa78	special_tokens_map.json	167	d05497f1da52c5e09554c0cd874037a083e1dc1b9cfd48034d1c717f1afc07a7
+          Xenova/multilingual-e5-small	761b726dd34fb83930e26aab4e9ac3899aa1fa78	sentencepiece.bpe.model	5069051	cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865
+          Xenova/multilingual-e5-small	761b726dd34fb83930e26aab4e9ac3899aa1fa78	onnx/model.onnx	470268533	4aa845c27760e06e9a686b9d8b5d440eae4b6612cd09e5b522b716d3941f77ff
+          mogolloni/bge-reranker-v2-m3-onnx	e5023553f6c47f09057da7a19cdd79ef850a4985	config.json	756	acdbf9ee9fe3710ee1c275e674c6bf4367e73a50711c02e3edba038047ccd526
+          mogolloni/bge-reranker-v2-m3-onnx	e5023553f6c47f09057da7a19cdd79ef850a4985	tokenizer.json	17082900	8bf8afbfd11306bd872018c53bfdf2e160a56f8edbcf49933324404791c148d3
+          mogolloni/bge-reranker-v2-m3-onnx	e5023553f6c47f09057da7a19cdd79ef850a4985	tokenizer_config.json	1203	b87c8703482b0300d3da30e201519aa641f6a450f5eb5bf1e624afbf70c74d80
+          mogolloni/bge-reranker-v2-m3-onnx	e5023553f6c47f09057da7a19cdd79ef850a4985	special_tokens_map.json	964	8c785abebea9ae3257b61681b4e6fd8365ceafde980c21970d001e834cf10835
+          mogolloni/bge-reranker-v2-m3-onnx	e5023553f6c47f09057da7a19cdd79ef850a4985	sentencepiece.bpe.model	5069051	cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865
+          mogolloni/bge-reranker-v2-m3-onnx	e5023553f6c47f09057da7a19cdd79ef850a4985	onnx/model.onnx	489245	ed283424d9a40dbd6fe2f3081386848a88cc8057b7ab43e02d84077d6b69ba42
+          mogolloni/bge-reranker-v2-m3-onnx	e5023553f6c47f09057da7a19cdd79ef850a4985	onnx/model.onnx_data	2271088656	9a748c82efb2079d24650c489e053dbb3c71d8acbbcf04d7b2340db66f2748f7
+          MODEL_FILES
+      - name: Restore the exact pinned model artifacts
+        id: model-cache
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ runner.temp }}/codexia-p13-model-cache
+          key: p13-full-models-ubuntu-26.04-${{ hashFiles('.github/workflows/full-model-oci-acceptance.yml', 'tests/integration/model-oci-lifecycle.acceptance.mjs', 'tests/integration/model-oci-lifecycle.container.mjs') }}
+      - name: Download the real model files from their pinned revisions
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 45
+        env:
+          CODEXIA_P13_MODEL_CACHE: ${{ runner.temp }}/codexia-p13-model-cache
+          HF_HOME: ${{ runner.temp }}/huggingface-home
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/huggingface-cli"
+          "$RUNNER_TEMP/huggingface-cli/bin/pip" install --disable-pip-version-check --no-input 'huggingface_hub==0.36.0'
+          mkdir -p "$CODEXIA_P13_MODEL_CACHE" "$HF_HOME"
+
+          while IFS=$'\t' read -r model revision _; do
+            destination="$CODEXIA_P13_MODEL_CACHE/$model/$revision"
+            "$RUNNER_TEMP/huggingface-cli/bin/hf" download "$model" \
+              --revision "$revision" \
+              --local-dir "$destination" \
+              --include \
+                config.json tokenizer.json tokenizer_config.json special_tokens_map.json \
+                sentencepiece.bpe.model onnx/model.onnx onnx/model.onnx_data \
+              --max-workers 4
+          done < <(cut -f1,2 "$RUNNER_TEMP/p13-model-files.tsv" | sort -u)
+      - name: Expose the pinned tokenizer at the configured local model path
+        env:
+          CODEXIA_P13_MODEL_CACHE: ${{ runner.temp }}/codexia-p13-model-cache
+        run: |
+          set -euo pipefail
+          model='Xenova/multilingual-e5-small'
+          revision='761b726dd34fb83930e26aab4e9ac3899aa1fa78'
+          model_root="$CODEXIA_P13_MODEL_CACHE/$model"
+          pinned_root="$model_root/$revision"
+          for file in config.json tokenizer.json tokenizer_config.json special_tokens_map.json sentencepiece.bpe.model; do
+            test -s "$pinned_root/$file"
+            ln -sfn "$revision/$file" "$model_root/$file"
+          done
+      - name: Fail on missing or altered model cache files
+        env:
+          CODEXIA_P13_MODEL_CACHE: ${{ runner.temp }}/codexia-p13-model-cache
+        run: |
+          set -euo pipefail
+          manifest="$RUNNER_TEMP/p13-model-files.tsv"
+          test -d "$CODEXIA_P13_MODEL_CACHE"
+          while IFS=$'\t' read -r model revision file expected_size expected_sha; do
+            artifact="$CODEXIA_P13_MODEL_CACHE/$model/$revision/$file"
+            test -s "$artifact" || { echo "Missing pinned model file: $model@$revision/$file" >&2; exit 1; }
+            actual_size=$(stat -c '%s' "$artifact")
+            test "$actual_size" = "$expected_size" || { echo "Pinned model size mismatch: $model@$revision/$file" >&2; exit 1; }
+            printf '%s  %s\n' "$expected_sha" "$artifact"
+          done < "$manifest" > "$RUNNER_TEMP/p13-model-checksums.txt"
+          sha256sum --check --strict "$RUNNER_TEMP/p13-model-checksums.txt"
+          for identity in \
+            'Xenova/multilingual-e5-small 761b726dd34fb83930e26aab4e9ac3899aa1fa78' \
+            'mogolloni/bge-reranker-v2-m3-onnx e5023553f6c47f09057da7a19cdd79ef850a4985'; do
+            read -r model revision <<< "$identity"
+            for source in tests/integration/model-oci-lifecycle.acceptance.mjs tests/integration/model-oci-lifecycle.container.mjs; do
+              grep -Fq "id: \"$model\", revision: \"$revision\"" "$source" || {
+                echo "Pinned model identity differs from $source: $model@$revision" >&2
+                exit 1
+              }
+            done
+          done
+          printf 'Verified %s pinned real model files outside the checkout.\n' "$(wc -l < "$RUNNER_TEMP/p13-model-files.tsv")"
+      - name: Save only the checksum-verified pinned model cache
+        if: success() && steps.model-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ runner.temp }}/codexia-p13-model-cache
+          key: p13-full-models-ubuntu-26.04-${{ hashFiles('.github/workflows/full-model-oci-acceptance.yml', 'tests/integration/model-oci-lifecycle.acceptance.mjs', 'tests/integration/model-oci-lifecycle.container.mjs') }}
+      - name: Run the real Full model OCI lifecycle acceptance
+        timeout-minutes: 60
+        env:
+          CODEXIA_P13_MODEL_CACHE: ${{ runner.temp }}/codexia-p13-model-cache
+          OCI_ENGINE: podman
+          HF_HUB_OFFLINE: '1'
+        run: node --test tests/integration/model-oci-lifecycle.acceptance.mjs

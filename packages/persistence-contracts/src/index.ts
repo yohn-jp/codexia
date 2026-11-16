@@ -507,8 +507,8 @@ export interface KnowledgeProjectionBatch {
 export interface PersistenceReader {
   getModuleRecord(projectId: ProjectId, moduleId: string, key: string): Promise<ModuleRecord | undefined>;
   listModuleRecords(projectId: ProjectId, moduleId?: string): Promise<readonly ModuleRecord[]>;
-  /** Count all unresolved proposal records in the supplied project order; return only the bounded prefix. */
-  listProposalReviewQueue(projectIds: readonly ProjectId[], moduleId: string, limit: number): Promise<{
+  /** Count unresolved proposals in explicit project order, or all standalone projects in recent-project order when null; return only the bounded prefix. */
+  listProposalReviewQueue(projectIds: readonly ProjectId[] | null, moduleId: string, limit: number): Promise<{
     unresolvedCount: number;
     records: readonly { record: ModuleRecord; projectVersion: number }[];
   }>;
@@ -524,6 +524,8 @@ export interface PersistenceReader {
   /** Resolve exact document/revision pairs in input order within the project scope. */
   getDocumentHeadRevisions(projectId: ProjectId, heads: readonly DocumentRevisionKey[]): Promise<readonly DocumentHeadRevisionLookup[]>;
   listRevisions(projectId: ProjectId, documentId: DocumentId, limit: number, before?: string, throughHead?: RevisionId): Promise<DocumentRevisionPage>;
+  /** Globally bounded metadata from the ancestry of the supplied immutable heads, in input-document order for timestamp ties. */
+  listProjectRevisionHistory(projectId: ProjectId, heads: readonly DocumentRevisionKey[], limit: number): Promise<readonly Pick<DocumentRevision, "id" | "documentId" | "createdAt">[]>;
   getKnowledgeNode(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<KnowledgeNode | undefined>;
   listKnowledgeNodes(projectId: ProjectId, limit?: number): Promise<readonly KnowledgeNode[]>;
   /** Export-only complete canonical scope, including retired nodes. */

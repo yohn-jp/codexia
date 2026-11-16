@@ -1,0 +1,27 @@
+---
+- name: Recheck the canonical legacy dependency before changing its upstream
+  ansible.builtin.include_tasks: verify-tunnel-legacy.yml
+- name: Change only the Tunnel Requires dependency to the private proxy
+  ansible.builtin.replace:
+    path: "{{ quadlet_dir }}/codexia-tunnel.container"
+    regexp: '^Requires=codexia-api\.service$'
+    replace: 'Requires=codexia-api-proxy.service'
+    backup: true
+- name: Change only the Tunnel After dependency while preserving network ordering
+  ansible.builtin.replace:
+    path: "{{ quadlet_dir }}/codexia-tunnel.container"
+    regexp: '^(After=.*\s)codexia-api\.service$'
+    replace: '\1codexia-api-proxy.service'
+    backup: true
+- name: Read the Tunnel Quadlet after dependency change
+  ansible.builtin.slurp:
+    path: "{{ quadlet_dir }}/codexia-tunnel.container"
+  register: tunnel_after_switch
+- name: Verify the Tunnel now depends only on the private proxy
+  ansible.builtin.assert:
+    that:
+      - "'Requires=codexia-api-proxy.service' in (tunnel_after_switch.content | b64decode | split('\n'))"
+      - "'After=network-online.target codexia-api-proxy.service' in (tunnel_after_switch.content | b64decode | split('\n'))"
+      - "'Requires=codexia-api.service' not in (tunnel_after_switch.content | b64decode | split('\n'))"
+      - "'After=network-online.target codexia-api.service' not in (tunnel_after_switch.content | b64decode | split('\n'))"
+    fail_msg: Tunnel dependency switch did not produce the exact private proxy dependency.

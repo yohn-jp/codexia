@@ -68,3 +68,9 @@ if apply true > "$tmp/drift.log"; then echo 'Missing secret accepted' >&2; exit 
 test ! -e "$CODEXIA_TEST_SECRET"
 mv "$tmp/saved-secret" "$CODEXIA_TEST_SECRET"
 apply true > "$tmp/verify.log" || { cat "$tmp/verify.log"; exit 1; }
+# Reject reuse of the existing administrator password before SQL connection.
+docker exec -i "$name" sh -ec 'cat > /run/secrets/admin-password' <<< "$password"
+if apply true > "$tmp/admin-reuse.log"; then echo 'Admin password reuse accepted' >&2; exit 1; fi
+grep -q 'Reject reuse of the existing writer or administrator credential' "$tmp/admin-reuse.log"
+docker exec "$name" sh -ec 'printf test > /run/secrets/admin-password'
+apply true > "$tmp/verify.log" || { cat "$tmp/verify.log"; exit 1; }

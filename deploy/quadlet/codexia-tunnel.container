@@ -1,10 +1,11 @@
 [Unit]
 Description=Cloudflare Tunnel to the Codexia API
 Requires=codexia-api.service
-After=codexia-api.service
+After=network-online.target codexia-api.service
 
 [Container]
-Image=docker.io/cloudflare/cloudflared:REPLACE_WITH_VERIFIED_VERSION
+# cloudflared 2026.11.0, pinned to Cloudflare's published multi-architecture manifest digest.
+Image=docker.io/cloudflare/cloudflared@sha256:b94b96edf2c9c4360f8879c8580cfaa99077f19c849ec595ca2f711b27d4f344
 ContainerName=codexia-tunnel
 Network=codexia.network
 Secret=codexia-tunnel-token,type=mount,target=/run/secrets/token

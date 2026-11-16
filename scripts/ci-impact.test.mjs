@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import { REQUIRED_VERIFICATION_JOBS } from './ci-contract.mjs';
+const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
+const { parse } = require('yaml');
 
 test('full verification uses twenty jobs including planning and certification', () => {
   assert.equal(REQUIRED_VERIFICATION_JOBS.length, 20);
@@ -10,6 +14,38 @@ const plan = async (files, event = 'pull_request') => {
   const { createVerificationPlan } = await import('./ci-impact.mjs');
   return createVerificationPlan({ files, event, sha: 'a'.repeat(40), base: 'b'.repeat(40) });
 };
+
+test('Full-model OCI impact matches the standalone push paths and the Verify caller', async () => {
+  const { FULL_MODEL_OCI_PATHS, matchesFullModelOciPath } = await import('./ci-impact.mjs');
+  const standalone = parse(readFileSync(new URL('../.github/workflows/full-model-oci-acceptance.yml', import.meta.url), 'utf8'));
+  const pushPaths = standalone.on.push.paths;
+  assert.equal(Object.hasOwn(standalone.on, 'workflow_call'), true);
+  assert.equal(standalone.on.workflow_dispatch, null);
+  assert.deepEqual(standalone.on.push.branches, ['main']);
+  assert.equal(Object.hasOwn(standalone.on, 'pull_request'), false);
+  assert.deepEqual(pushPaths, FULL_MODEL_OCI_PATHS.filter(file => file !== '.github/workflows/verify.yml'));
+
+  for (const pattern of FULL_MODEL_OCI_PATHS) {
+    const changedPath = pattern.endsWith('/**') ? `${pattern.slice(0, -3)}/ci-impact-sentinel.mjs` : pattern;
+    assert.equal(matchesFullModelOciPath(changedPath), true, `Expected impact for ${changedPath}`);
+    assert.equal((await plan([changedPath])).full_model_oci, true, `Expected plan impact for ${changedPath}`);
+  }
+  for (const changedPath of [
+    '.github/workflows/other.yml',
+    'profiles-old/full/config.json',
+    'tests/integration/unrelated.acceptance.mjs',
+    'docs/deployment/IAC.md',
+  ]) {
+    assert.equal(matchesFullModelOciPath(changedPath), false, `Unexpected impact for ${changedPath}`);
+    assert.equal((await plan([changedPath])).full_model_oci, false, `Unexpected plan impact for ${changedPath}`);
+  }
+  assert.equal((await plan(null)).full_model_oci, false);
+  assert.equal((await plan(['profiles/full/config.json'], 'push')).full_model_oci, false);
+
+  const verify = parse(readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8'));
+  assert.equal(verify.jobs.full_model_oci.uses, './.github/workflows/full-model-oci-acceptance.yml');
+  assert.equal(verify.jobs.full_model_oci.if, "needs.plan.result == 'success' && needs.plan.outputs.full_model_oci == 'true'");
+});
 
 test('Search browser changes do not run unrelated units or native image builds', async () => {
   const selected = await plan(['modules/search/src/browser.ts', 'modules/search/src/browser.test.ts']);

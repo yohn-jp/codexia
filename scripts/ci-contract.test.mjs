@@ -8,10 +8,12 @@ import { REQUIRED_VERIFICATION_JOBS, VERIFICATION_LEAF_JOBS, UNIT_TARGETS, TYPEC
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8'));
-test('twenty execution jobs retain all fifty-nine validation obligations exactly once', () => {
+const fullModelWorkflow = parse(readFileSync(new URL('../.github/workflows/full-model-oci-acceptance.yml', import.meta.url), 'utf8'));
+test('the certified twenty-job inventory retains all fifty-nine obligations beside one supplemental model call', () => {
   assert.equal(REQUIRED_VERIFICATION_JOBS.length, 20);
   assert.equal(VERIFICATION_LEAF_JOBS.length, 19);
   assert.equal(VERIFICATION_TASKS.length, 59);
+  assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'unit', 'types', 'build', 'oci', 'browser', 'hosted_catalog', 'hosted', 'certification']);
   const tasks = Object.values(VERIFICATION_GROUPS).flat();
   assert.equal(new Set(tasks).size, tasks.length);
   assert.deepEqual(tasks.toSorted(), VERIFICATION_TASKS.toSorted());
@@ -20,12 +22,34 @@ test('twenty execution jobs retain all fifty-nine validation obligations exactly
     assert.equal(workflow.jobs[family].strategy.matrix[axis], '${{ fromJSON(needs.plan.outputs.' + family + ') }}');
   }
   assert.equal(workflow.jobs.browser.strategy.matrix.include, '${{ fromJSON(needs.plan.outputs.browser) }}');
+  const modelJob = workflow.jobs.full_model_oci;
+  assert.equal(modelJob.name, 'full-model-oci');
+  assert.equal(modelJob.uses, './.github/workflows/full-model-oci-acceptance.yml');
+  assert.deepEqual(modelJob.needs, ['plan']);
+  assert.equal(modelJob.if, "needs.plan.result == 'success' && needs.plan.outputs.full_model_oci == 'true'");
+  assert.equal(modelJob['continue-on-error'], undefined);
+  assert.equal(REQUIRED_VERIFICATION_JOBS.includes(modelJob.name), false);
+  assert.equal(workflow.jobs.certification.needs.includes('full_model_oci'), false);
+  assert.equal(Object.hasOwn(fullModelWorkflow.on, 'workflow_call'), true);
+  assert.equal(Object.hasOwn(fullModelWorkflow.on, 'pull_request'), false);
+  const modelJobConfig = fullModelWorkflow.jobs['full-model-oci'];
+  assert.ok(!Object.values(modelJobConfig.env).some(value => String(value).includes('${{ runner.')));
+  for (const stepName of [
+    'Download the real model files from their pinned revisions',
+    'Fail on missing or altered model cache files',
+    'Run the real Full model OCI lifecycle acceptance',
+  ]) {
+    const step = modelJobConfig.steps.find(item => item.name === stepName);
+    assert.equal(step.env.CODEXIA_P13_MODEL_CACHE, '${{ runner.temp }}/codexia-p13-model-cache', stepName);
+  }
+  assert.equal(modelJobConfig.steps.find(item => item.name === 'Download the real model files from their pinned revisions').env.HF_HOME,
+    '${{ runner.temp }}/huggingface-home');
 });
 test('browser groups depend on profile producers; independent groups cannot cancel other evidence', () => {
   assert.equal(workflow.concurrency, undefined);
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.equal(workflow.jobs.plan.name, 'plan');
-  for (const [id, job] of Object.entries(workflow.jobs).filter(([id]) => !['plan', 'certification'].includes(id))) {
+  for (const [id, job] of Object.entries(workflow.jobs).filter(([id]) => !['plan', 'certification', 'full_model_oci'].includes(id))) {
     assert.deepEqual(job.needs, id === 'browser' ? ['plan', 'build'] : id === 'hosted' ? ['plan','build','hosted_catalog'] : ['plan'], id);
     assert.match(job.if, /needs\.plan\.result == 'success'/);
     assert.equal(job['continue-on-error'], undefined, id);
@@ -98,7 +122,7 @@ test('browser groups retain immutable runtime and restore the exact producer bef
   assert.match(runner, /run-browser-shard\.mjs.*--prebuilt/);
 });
 test('all source checkouts bind exact PR head/main source without persisted credentials', () => {
-  for (const job of Object.values(workflow.jobs)) {
+  for (const job of Object.values(workflow.jobs).filter(job => job.uses !== './.github/workflows/full-model-oci-acceptance.yml')) {
     const checkout = job.steps.find(step => step.uses === 'actions/checkout@v7.0.1');
     assert.equal(checkout.with.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
     assert.equal(checkout.with['persist-credentials'], false);

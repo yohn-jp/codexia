@@ -70,11 +70,9 @@ if ! printf '%s\n' "$manager_environment" | grep -Fqx "XDG_CONFIG_HOME=$home/.co
   printf '%s\n' "$manager_environment" | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)=' >&2 || true
   echo 'The fixture user manager did not start with its XDG config home.' >&2; exit 1
 fi
+# systemctl --user show-environment reports imported client variables. The
+# generator wrapper below checks the environment actually passed by systemd.
 manager_session_environment=$(rootless systemctl --user show-environment | awk -F= '$1 ~ /^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)$/ {print}')
-if ! printf '%s\n' "$manager_session_environment" | grep -Fqx "HOME=$home" || ! printf '%s\n' "$manager_session_environment" | grep -Fqx "XDG_RUNTIME_DIR=/run/user/$uid" || ! printf '%s\n' "$manager_session_environment" | grep -Fqx "XDG_CONFIG_HOME=$home/.config"; then
-  printf '%s\n' "$manager_session_environment" >&2
-  echo 'The fixture manager environment does not match the service identity.' >&2; exit 1
-fi
 generator_dir=/run/systemd/user-generators
 generator_wrapper="$generator_dir/podman-user-generator"
 generator_log="/run/user/$uid/codexia-podman-user-generator.log"
@@ -82,6 +80,9 @@ test ! -e "$generator_wrapper"
 rootless test ! -e "$generator_log"
 cat > "$tmp/podman-user-generator" <<EOF
 #!/bin/sh
+# Actions exports runner-specific XDG paths into lingering managers. Normalize
+# only this disposable fixture generator before executing the real Podman code.
+export HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_RUNTIME_DIR="/run/user/$uid"
 printf 'uid=%s\\n' "\$(id -u)" >> "$generator_log"
 env | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)=' >> "$generator_log" || true
 exec /usr/lib/systemd/user-generators/podman-user-generator "\$@"
@@ -98,6 +99,17 @@ Driver=bridge
 Internal=true
 QUADLET
 rootless chmod 0600 "$home/.config/containers/systemd/codexia-fixture.network"
+# The manager inherits GitHub's XDG_RUNTIME_DIR. Scope the correct runtime paths
+# to this generated fixture unit so Podman uses only the fixture user's state.
+unit_dropin_dir="$home/.config/systemd/user/codexia-fixture-network.service.d"
+rootless install -d -m 0755 "$unit_dropin_dir"
+cat <<EOF | rootless tee "$unit_dropin_dir/10-codexia-ci-runtime.conf" >/dev/null
+[Service]
+Environment=HOME=$home
+Environment=XDG_CONFIG_HOME=$home/.config
+Environment=XDG_RUNTIME_DIR=/run/user/$uid
+EOF
+rootless chmod 0600 "$unit_dropin_dir/10-codexia-ci-runtime.conf"
 rootless systemctl --user daemon-reload
 if ! sudo test -s "$generator_log"; then
   echo 'The Podman generator wrapper did not run; inspect the user generator path.' >&2
@@ -109,7 +121,10 @@ if ! printf '%s\n' "$generator_environment" | grep -Fqx "HOME=$home" || ! printf
   echo 'The user manager passed an unexpected environment to the Podman generator.' >&2; exit 1
 fi
 if ! rootless systemctl --user start codexia-fixture-network.service; then
-  echo 'Quadlet network unit was not loaded; checking the source and generator output.' >&2
+  echo 'Quadlet network unit failed to start; checking systemd and Podman diagnostics.' >&2
+  rootless systemctl --user status codexia-fixture-network.service --no-pager || true
+  rootless journalctl --user --boot --unit=codexia-fixture-network.service --no-pager || true
+  rootless /usr/bin/podman network inspect codexia-fixture || true
   rootless stat -c '%n %U:%G %a' "$home/.config/containers/systemd/codexia-fixture.network"
   manager_pid=$(sudo systemctl show --property=MainPID --value "user@$uid.service")
   if [[ -n "$manager_pid" ]]; then

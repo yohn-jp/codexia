@@ -1,18 +1,18 @@
 # Plugin platform proposal
 
-This proposal specifies external plugin protocols, packaging and enforced isolation. It does not describe the trusted built-in module runtime or promise those isolation guarantees for its packages. See [Modules](MODULES.md) for the supported runtime contract.
+This proposal specifies external plugin protocols, packaging and enforced isolation. PostgreSQL is the sole canonical manuscript authority under [Core](CORE.md); Git is relevant only to plugin source distribution, not project persistence. Generic binary/asset persistence and public plugin execution remain future design work, not current product capabilities. It does not describe the trusted built-in module runtime or promise those isolation guarantees for its packages. See [Modules](MODULES.md) for the supported runtime contract.
 
 ## 1. 製品の定義と品質目標
 
-**Codexiaは、プラグインによって自由に構成できる、Gitネイティブなライティングアプリケーション基盤である。**
+**Codexiaは、プラグインによって自由に構成できる、PostgreSQLを正本とするライティングアプリケーション基盤である。**
 
-執筆を第一用途とするが、Coreの保存モデルを小説の「巻・章・シーン」に固定しない。Markdown、図面、参考資料、独自形式は、最終的には同じGit-backed Workspaceに置くファイルとして扱う。文章の意味づけ・編集体験はCoreが提供する既定UIまたは拡張に委ねる。
+執筆を第一用途とするが、Coreの保存モデルを小説の「巻・章・シーン」に固定しない。Markdown、図面、参考資料、独自形式は、最終的には同じプロジェクトの認可済み文書・将来の型付きAssetとして扱う。文章の意味づけ・編集体験はCoreが提供する既定UIまたは拡張に委ねる。
 
 **固定する品質条件:**
 
-1. **Always usable:** 全Pluginが存在しない／停止していても、Coreの起動、既定Markdownの閲覧・編集、回復記録の確認、認可済みGit保存・同期は成立する。
+1. **Always usable:** 全Pluginが存在しない／停止していても、Coreの起動、既定Markdownの閲覧・編集、回復記録の確認、認可済みPostgreSQL保存・Revision履歴は成立する。
 2. **Fault containment:** Pluginのtrap、例外、無限ループ、メモリ超過、クラッシュ、壊れたRPC、ハング、任意の停止操作が**Codexia Coreと他の無関係なPluginの稼働に波及しない**。これを満たさない実行モードは隔離保証を掲げない。
-3. **No authority transfer:** PluginはGitの正本、認可、単一Writer、Recovery Journal、Checkpoints、Publishを所有しない。Pluginが起こせる永続変更は原則「検証付き提案」までである。
+3. **No authority transfer:** PluginはPostgreSQLの正本、認可、単一Writer、Recovery Journal、承認・適用・Receiptを所有しない。Pluginが起こせる永続変更は原則「検証付き提案」までである。
 4. **Pay only when used:** 未インストール・無効・有効だが非アクティブという各状態を区別し、無使用の機能がCPU、実行プロセス、索引更新、ブラウザJS、定期通信を消費しない。
 5. **Public, language-neutral contract:** Rust/WASM、TypeScript、別言語でPluginを書けるように、境界はシリアライズ可能なVersioned Protocolで固定する。CoreをRustへ全面移植することは前提にしない。
 6. **Independent delivery:** Pluginは独立したGitリポジトリから開発・ビルドでき、ホストの承認済みバージョンとDigestを参照して組み込める。外部コードが作業リポジトリから勝手にインストール・実行されない。
@@ -23,7 +23,7 @@ This proposal specifies external plugin protocols, packaging and enforced isolat
 
 Built-in modules are trusted application code. Public contracts, lifecycle supervision and lazy browser imports constrain supported integration, but do not isolate arbitrary JavaScript from the host process, DOM or credentials.
 
-External plugins require versioned namespaced identities, metadata-only registration, capability grants, immutable distribution, OS-enforced server isolation and a separate browser origin. Snapshot identity, operation approval, Git authority and browser recovery remain host-owned.
+External plugins require versioned namespaced identities, metadata-only registration, capability grants, immutable distribution, OS-enforced server isolation and a separate browser origin. Snapshot identity, operation approval, PostgreSQL authority and browser recovery remain host-owned.
 
 ## 3. 最小の信頼境界と全体構成
 
@@ -33,13 +33,13 @@ flowchart TB
     Shell["Workspace Shell + Core Editor fallback"]
     Broker["Plugin Host: Registry / Capability Broker / Supervisor"]
     Core["Core: File / Snapshot / Journal / Mutation / Authorization"]
-    Git[("Git objects + confirmed GitHub history")]
+    DB[("PostgreSQL canonical records + immutable revisions")]
 
     User --> Shell
     Shell --> Broker
     Shell --> Core
     Broker -->|"Validated, scoped requests only"| Core
-    Core --> Git
+    Core --> DB
 
     subgraph PUI["Untrusted Browser Domain"]
         Frame["Sandboxed iframe: Plugin UI JS"]
@@ -54,7 +54,7 @@ flowchart TB
     Meta --> Frame
 ~~~
 
-**Trusted Computing Base (TCB):** CoreStore/Git・Browser Journal・作者の認証UI・プラットフォーム認証・Plugin Registry・RPC Validation/Broker・Supervisor・配布Artifact検証。Pluginの任意コードはTCBの外に置く。
+**Trusted Computing Base (TCB):** CoreStore/PostgreSQL・Browser Journal・作者の認証UI・プラットフォーム認証・Plugin Registry・RPC Validation/Broker・Supervisor・配布Artifact検証。Pluginの任意コードはTCBの外に置く。
 
 **Two execution domains:**
 
@@ -108,16 +108,16 @@ WASM Component Model/WITは異言語間IFとして第一候補、RustはPlugin�
 
 | Versioned capability family | 最小操作 | 権限・実装境界 |
 | --- | --- | --- |
-| `workspace.snapshot.read` | `list(prefix,cursor,limit)`,`stat(path)`,`read(path,revision,range)` | 認可済みRepository+Snapshotに固定、Path/Symlink検証、Bytes/Files上限。Private Git Credentialは渡さない |
-| `workspace.change.propose` | `propose(changeSet,readSet,revision,operationId)` | **提案まで**。Authorの明示的な受入・Browser Journal・Checkpoint/PublishはHost-owned。別Plugin権限では代行不可 |
+| `workspace.snapshot.read` | `list(prefix,cursor,limit)`,`stat(path)`,`read(path,revision,range)` | 認可済みProject+Snapshotに固定、論理PathとRevision検証、Bytes/Records上限。DB資格情報は渡さない |
+| `workspace.change.propose` | `propose(changeSet,readSet,revision,operationId)` | **提案まで**。Authorの明示的な受入・Browser Journal・トランザクション適用・ReceiptはHost-owned。別Plugin権限では代行不可 |
 | `workspace.events.subscribe` | `subscribe(types,scope)`,`unsubscribe` | advisoryな更新通知。Snapshot/version付き。欠落後は`snapshot.diff`等で照合できる |
 | `workspace.navigation` | `open(path,revision)`,`reveal(panelId)` | 対象Projectの認可・Safe Path、Editor Recovery GateとNavigation GenerationをHostが確認 |
 | `workspace.ui.contribute` | Editor/Viewer、Panel、Command、Toolbar、Context Menuの**宣言的登録** | 登録先と表示順・可否はShellが管理。Pluginは任意Host DOMやGlobal CSSを編集できない |
 | `workspace.compute` | `invoke(actionId,input,deadline)`,`cancel(jobId)` | Actionの副作用クラス・同時実行・CPU/Memory/Time/Output quotaをHostが検証 |
-| `plugin.state` | `readSettings`,`proposeSettingsChange`,`cacheRead/Write` | Git保存するSettingsは承認経路。実行キャッシュはPlugin毎quota・破棄可能・正本ではない |
+| `plugin.state` | `readSettings`,`proposeSettingsChange`,`cacheRead/Write` | 正本に保存するSettingsは承認経路。実行キャッシュはPlugin毎quota・破棄可能・正本ではない |
 | `network.egress` | Default **DENY**。許可する場合は明示許可Originと用途別Proxy | Browser direct fetch/Native networkは不可。GitHub/AIトークンはPluginに渡さずProxy側でScope/Consent/Limitを適用 |
 
-**非公開・非委譲:** raw`fs`/Git exec、`MutationCoordinator.approve/checkpoint/publish`、GitHub App鍵、host credential、Kubernetes/Podman/host daemon socket、`/data`/Browser IndexedDBの直接アクセス、任意Server routes、他Repositoryへの無制限Reader、任意Pluginのkill/enable、Host CSP/認証処理。
+**非公開・非委譲:** raw`fs`/Git exec、`MutationCoordinator.approve/apply`、GitHub App鍵、host credential、Kubernetes/Podman/host daemon socket、`/data`/Browser IndexedDBの直接アクセス、任意Server routes、他Projectへの無制限Reader、任意Pluginのkill/enable、Host CSP/認証処理。
 
 v1必須集合は`snapshot.read`、`change.propose`、`ui.contribute`、`navigation`、Lifecycleとする。Events/Computeは任意Capabilityとし、対応範囲をManifestで宣言する。
 
@@ -125,7 +125,7 @@ v1必須集合は`snapshot.read`、`change.propose`、`ui.contribute`、`navigat
 
 ~~~text
 request  = {protocolVersion, requestId, pluginId, packageDigest, instanceId,
-            projectId, repositoryIdentity, authorScope, snapshotId,
+            projectId, authorScope, snapshotId,
             activationEpoch, capability, method, payload, deadline}
 response = {protocolVersion, requestId, activationEpoch, snapshotId,
             ok, data | machineError}
@@ -140,18 +140,18 @@ event    = {protocolVersion, eventId, projectId, snapshotId,
 - Backpressure: 1 PluginのQueue、RPC同時実行、Bytes in flight、Event buffer、UI message率を上限付きにする。上限超過は`plugin_overloaded`で**そのPluginだけ**失敗させる。
 - Machine Errorは`code`、`message`、`retryable`、`requestId`の必要最小限。例: `plugin_crashed`、`plugin_timeout`、`plugin_oom`、`plugin_protocol_invalid`、`capability_denied`、`plugin_unavailable`、`snapshot_changed`。Host内部例外/Secretは露出しない。
 
-## 5. Git-backed File / Document拡張
+## 5. PostgreSQL-backed Document / Asset拡張
 
 File APIを**Markdown以外にも使える原始能力**にする。ただし既存作品の`plot/volumes`、`manuscript/*.md`、YAML Hierarchy、既定執筆UXの互換性は保持し、機械的に廃止しない。
 
 ### 5.1 分離すべき抽象
 
 ~~~text
-Core immutable repository snapshot
-  ├─ File object: path, objectId/contentDigest, MIME hint, size, revision
+Core immutable project snapshot
+  ├─ Document / proposed asset: stable ID, logical path, contentDigest, MIME hint, size, revision
   ├─ Document read: UTF-8 / bounded binary stream or blob reference
   ├─ File-scoped read-set and write-intent with CAS
-  └─ Git checkpoint / reconcile / publish + recovery receipt
+  └─ Author approval / transactional application + recovery receipt
 
 Host writing experience
   ├─ Default Markdown Editor / YAML-to-Scene domain adapter
@@ -164,11 +164,11 @@ Optional Plugin UI / Compute
 `SnapshotReader.read`のBase64読取りと`FileChange`のBase64書込みは、汎用ファイルの境界に用いる。`DocumentSource`のUTF-8契約、`ChangeOperation.effect`の効果分類、Browser Draftの保存形式を、各Editor bindingが明示的に満たす必要がある。Base64対応だけを根拠に任意形式のUI保存を保証しない。
 
 - Pluginは`*.excalidraw`などの**形式ハンドラ**（Editor/Viewer）を宣言する。HostはExtension・MIME・ユーザー選択・Capability Permissionでルーティングし、衝突はHost/ユーザーが決める。
-- Plugin UIからの編集途中はHostが**回復可能なDraft**として受け取る。Plugin自身のLocalStorageだけに唯一の原稿を置かない。大きな画像/Assetはサイズ限定ストリーム・Content Addressing・Commitとの原子的参照関係を設計する。
-- Pluginからの提案は`FileChange`系のCAS/Read-set・Operation IDへ正規化し、Editor UIの承認前Journal/Checkpoint/Publishの境界を保つ。承認が必要な効果の分類は明示的に定義。`EffectClass`を理由なく`migration`で使い回さない。
-- エディタの一時Draft・ローカルCheckpoint・リモートGitHub confirmedは異なる状態のまま。図面プラグインでも`publication_unknown`を成功表示しない。
+- Plugin UIからの編集途中はHostが**回復可能なDraft**として受け取る。Plugin自身のLocalStorageだけに唯一の原稿を置かない。大きな画像/Assetはサイズ限定ストリーム・Content Addressing・Revisionとの原子的参照関係を設計する。
+- Pluginからの提案は`FileChange`系のCAS/Read-set・Operation IDへ正規化し、Editor UIの承認前Journal/トランザクション適用/Receiptの境界を保つ。承認が必要な効果の分類は明示的に定義。`EffectClass`を理由なく`migration`で使い回さない。
+- エディタの一時Draft・Journal確定・PostgreSQL適用・Receipt照合は異なる状態のまま。応答喪失や未確認適用を成功表示しない。
 - HostのOperation・Scratch限界値を超える巨大画像については、パイプラインを回避するのではなく**サイズ・Asset分割・Chunking方式を別契約として設計**する。上限を超える操作は明示的に拒否する。
-- `Git object`/Snapshot IndexはCoreが所有し、Plugin索引は派生・Quota付き・いつでも破棄可能。Pluginが独自の正本DBを作らない。
+- Canonical Revision/Snapshot IndexはCoreが所有し、Plugin索引は派生・Quota付き・いつでも破棄可能。Pluginが独自の正本DBを作らない。
 
 ## 6. Plugin Sandbox：故障と権限を本当に隔離する
 
@@ -254,21 +254,21 @@ MiB、ms、同時起動数の上限は対象Hostの実測と故障注入で検�
 | Load失敗/Trap/Process crash | 対象Plugin `failed`、実行Handle破棄、PanelはError Boundaryへ | Core Editor・他Panel継続 |
 | 無限ループ/Timeout | Deadline経過で独立Worker/Frameをterminate、必要ならQuarantine | Draft保存済み/未保存状態はHostが保持 |
 | OOM/IO過負荷 | OS予算で当該Sandbox終了、BudgetViolation記録 | Host cgroupが道連れにならないことを受入試験で検証 |
-| 非準拠RPC/権限外操作 | Fail closed、Audit、依存程度でQuarantine | Git/権限変更なし |
-| Host再起動/Delivery喪失 | Pluginの実行履歴は再構築、未確認Proposal/Operationを正本と照合 | Journal・Receipt保持。未知Publishは`publication_unknown` |
+| 非準拠RPC/権限外操作 | Fail closed、Audit、依存程度でQuarantine | 正本/権限変更なし |
+| Host再起動/Delivery喪失 | Pluginの実行履歴は再構築、未確認Proposal/Operationを正本と照合 | Journal・Receipt保持。未確認適用は同一Operation IDで照合 |
 | Pluginの要求したChangeの競合 | Coreが`snapshot_changed`やConflictを返し再提案を要求 | 原稿は自動上書きしない |
 
-**自動再試行の対象は冪等なRead/Computeに限定**。提案済みMutationは同一Operation IDとDigestで照合し、Checkpoint/PublishをPluginが自律的に繰り返さない。
+**自動再試行の対象は冪等なRead/Computeに限定**。提案済みMutationは同一Operation IDとDigestで照合し、承認・適用をPluginが自律的に繰り返さない。
 
 ### 7.4 Praetorium Runtime / Quiesceとの連動
 
 Pluginが止まることと、**Codexia Writerを安全に停止できることは別**。Hosted Runtimeの`/api/platform/v1/status`、`quiesce`、`resume`契約（[platform-runtime](../../packages/api/src/platform-runtime.ts)）に従い、Plugin Hostも活動・保存状態に参加する。
 
 - **Activity/Status:** Plugin Workerの実行中Job、未DrainのRPC、Plugin UIからHostへ受領した未保存Draft、未確定Proposal/Operationを、Host側の観測に反映する。失敗や接続断は`unknown`として扱い、単に「Pluginプロセスがない = safe」と判定しない。
-- **Quiesce:** Hostは新規Plugin編集/書込提案を停止し、進行中UI変更を確定済みBrowser Journalへflushする。Browserが不在でFlushを確認できない場合や、Pluginがクラッシュ中の場合は、元のCodexia/Writer不在証明・Checkpoint契約に沿って停止可否を決める。
-- **Shutdown:** Deadline以内に停止しないPluginは当該Sandboxだけterminateする。ただし未保存編集の消失、未確定Publish、旧Writerが生存していないかを別条件として確認し、単なるProcess killで`quiesced`を確定しない。
-- **Resume/Replacement:** PluginのActivation EpochとRuntime Epochを更新し、旧Sandboxから遅延到着したResponse/Event/Proposalを無効化する。新Runtime/新Pluginが旧Writerと同時に同じRepositoryへ書き込まない。
-- **プラットフォームの正本:** [Praetorium](https://github.com/yohn-jp/praetorium)のD1・Operation FenceとGitHub履歴をPlugin独自のローカル状態で置き換えない。Pod Ready/Worker停止をGitHubへの出版成功証明として扱わない。
+- **Quiesce:** Hostは新規Plugin編集/書込提案を停止し、進行中UI変更を確定済みBrowser Journalへflushする。Browserが不在でFlushを確認できない場合や、Pluginがクラッシュ中の場合は、元のCodexia/Writer不在証明・PostgreSQL耐久性契約に沿って停止可否を決める。
+- **Shutdown:** Deadline以内に停止しないPluginは当該Sandboxだけterminateする。ただし未保存編集の消失、未確認適用、旧Writerが生存していないかを別条件として確認し、単なるProcess killで`quiesced`を確定しない。
+- **Resume/Replacement:** PluginのActivation EpochとRuntime Epochを更新し、旧Sandboxから遅延到着したResponse/Event/Proposalを無効化する。新Runtime/新Pluginが旧Writerと同時に同じPostgreSQL正本へ書き込まない。
+- **プラットフォームの正本:** [Praetorium](https://github.com/yohn-jp/praetorium)のD1・Operation FenceとCodexiaのPostgreSQL revision/receiptをPlugin独自のローカル状態で置き換えない。Pod Ready/Worker停止をPostgreSQL適用成功証明として扱わない。
 
 ## 8. 外部リポジトリ、配布、Praetorium連携
 
@@ -288,7 +288,7 @@ independent Git repository
 - Core/SDK/Plugin Hostは`yohn-jp/codexia`に置く。Pluginは独立リポジトリから開発でき、機能内の任意依存関係はCore本体へ展開しない。
 - 配布形式の第一候補は**OCI Artifact**（Digest pinning、Producer/Registryと再利用しやすい）。npm配布やWIT SDK bindingも選択できるが、Registry名でなく**承認された内容Digest**を最終識別子とする。
 - Plugin Artifactの`manifest`、WASM、Browser UI、Resourceアセット、API SchemaはBuild時に同一Digestへ束縛。Manifest内容とEntry Pathは署名済みBundle内だけ参照する。
-- **インストール/許可はHost管理**。Git作業リポジトリのYAMLやMarkdownから任意のPlugin URL/Packageを実行することはない。Work repositoryは「承認済みPlugin IDと設定」だけ指定できる。
+- **インストール/許可はHost管理**。プロジェクト内のYAMLやMarkdownから任意のPlugin URL/Packageを実行することはない。Projectは「承認済みPlugin IDと設定」だけ指定できる。
 - Hosted Compositionは既存のPraetoriumによるCatalog、Immutable Digest、Admissionと接続する。新たな認可DBや第二のPlugin Marketplace Authorityを設けない。Private/Internal Pluginも同じVersion/Digest/Scope契約を使う。
 - Runtimeの`npm install`や任意コードダウンロード、`latest`タグ追従は禁止。アップグレードはHost Policyで承認したImage/Compositionの再配布とModule Recovery検証を必要とする。
 - SDKテストハーネスは外部リポジトリ単独で実行可能。**Coreのprivate importsを使うPluginはSDK準拠と認めない。**
@@ -305,10 +305,10 @@ Pluginが依存してよいのは、Versioned Manifest Schema、生成されたS
 
 1. 外部リポジトリの`example.diagram`を承認済みDigestでBuild Compositionへ登録。Manifestのみ読み込み、Core起動とMarkdown編集の初期コストは変化しない。
 2. ユーザーが`docs/map.excalidraw`を開く。HostがPath/Revisionと選択されたSnapshotを確認し、対応Editorをオンデマンドのisolated Frameとして表示。
-3. Pluginは`workspace.snapshot.read`でJSONを受け取り編集。Canvas表示をServerへ強制しない。Raw Git Credential/Host DOMは受け取らない。
+3. Pluginは`workspace.snapshot.read`でJSONを受け取り編集。Canvas表示をServerへ強制しない。DB credential/Host DOMは受け取らない。
 4. ユーザーが保存操作を行う。Host UIはまず回復可能な差分/完全DraftをJournalに確定し、その後`workspace.change.propose`で適切なOperationを発行。PluginにAuthor Approval権限を渡さない。
-5. 既存のChange Approval→Checkpoint→Publish→GitHub confirmedが成功すればGitに`.excalidraw`ファイルとして存在。競合や`publication_unknown`の時はHostが状態を明示し、原稿と図面を保持。
-6. PluginのFrame/Workerを強制終了しても別のMarkdown Editor、未公開Draft、Core API、他Pluginは継続。Frameを再起動すればHost Journalから確実なDraftを復元。
+5. 将来の型付きAsset永続化契約に従い、Author Approval→トランザクション適用→Receipt照合が成功すれば正本に図面Revisionが存在する。競合や応答喪失時はHostが状態を明示し、原稿と図面Draftを保持。
+6. PluginのFrame/Workerを強制終了しても別のMarkdown Editor、未保存Draft、Core API、他Pluginは継続。Frameを再起動すればHost Journalから確実なDraftを復元。
 
 **このユースケースを満たせなければ**、公開APIが実際のファイル編集に不足している。具体的な差分を公開Protocolへ追加し、Plugin専用のCore回避APIを作らない。
 
@@ -316,14 +316,14 @@ Pluginが依存してよいのは、Versioned Manifest Schema、生成されたS
 
 ### 10.1 契約の試験（必須Acceptance）
 
-- **Core-only**: Pluginが0件/100件インストールされていても、disabled/no-plugin時のProcess=0・Browser Plugin Runtimeロード=0。Core Editor/Recovery/Publishへの既定経路は存在。性能差は測定して予算内。
+- **Core-only**: Pluginが0件/100件インストールされていても、disabled/no-plugin時のProcess=0・Browser Plugin Runtimeロード=0。Core Editor/Recovery/Saveへの既定経路は存在。性能差は測定して予算内。
 - **Manifest**: 不正ID、パストラバーサル、署名不一致、未知の必須Capability、依存Cycle、Duplicate Provider、ABI不一致、悪意のあるAsset URL、過大入力をfail closed。
 - **Isolation**: WASM trap/無限loop/メモリ膨張、OS子プロセスOOM、stdout/stderr洪水、孤児プロセス、IPC洪水、Network/FS脱出要求でCore/他Pluginが落ちない。必要なOS sandboxがなければPlugin起動を拒否する。
 - **Browser**: 親DOM/Cookie/IndexedDBへのアクセス、Same-origin Host fetch、Cross-frame spoofing、Popup/Navigation、Promise Hang、Frame crash、Script大負荷を対象。Host Markdown編集とDraftは継続。
-- **Persistence**: Pluginの提案→Author Approval→Journal→Checkpoint→Publish、ネット断・Response loss・再起動・同時編集・CAS conflictで旧Writer/古いSnapshotは上書き不可、Digest/Operation IDで再照合。
+- **Persistence**: Pluginの提案→Author Approval→Journal→トランザクション適用→Receipt、ネット断・Response loss・再起動・同時編集・CAS conflictで旧Writer/古いSnapshotは上書き不可、Digest/Operation IDで再照合。
 - **Lifecycle**: Disable/Unload/Upgradeと途中のin-flight RPC、古いActivation Epochの結果がHostへ再適用されない。Capability Leaseは解除され、Resource Usageは起動前まで戻る。
 - **Distribution**: 外部Repository Artifactが公開SDKだけでBuild/Verifyでき、Producerへ指定Digestで取り込まれ、Core-only Imageに依存追加しない。改竄Packageは実行前に拒否。
-- **Authorization**: Repository/Author scope、Operation、承認状態をHostが毎回照合。Plugin IDの自己申告だけでwrite/linkedReader/networkを得ない。
+- **Authorization**: Project/Author scope、Operation、承認状態をHostが毎回照合。Plugin IDの自己申告だけでwrite/linkedReader/networkを得ない。
 
 ### 10.2 測定項目と合格の論理
 
@@ -344,7 +344,7 @@ The following order is architectural dependency, not a dated implementation camp
 | Protocol and identity | Freeze the namespaced plugin ID, versioned public manifest, capability/permission/error schemas and internal built-in adapter. Reject unknown ABI and missing capabilities before executing guest code. |
 | Server isolation | Prove a minimal WASI action in a separately resource-limited OS process; enforce filesystem/network denial and crash, OOM, infinite-loop and timeout containment. Fail closed if host quotas cannot be enforced. |
 | Browser isolation | Prove a cross-origin sandboxed iframe, validated MessageChannel and host-owned editor/panel fallback; guest code cannot read host DOM, cookies, IndexedDB or authenticated API. |
-| Generic Git editing | Prove snapshot-scoped file reads and scoped proposed edits through host Journal, approval, CAS, checkpoint and confirmed publication for non-Markdown files, including restart and conflicts. |
+| Generic document/asset editing | Prove snapshot-scoped file reads and scoped proposed edits through host Journal, approval, CAS, transactional application and durable receipt for non-Markdown files, including restart and conflicts. |
 | Immutable distribution | Compose approved external-repository artifacts by verified manifest/digest; disabled plugins do not expand Core's dependency closure. |
 | Legacy compatibility | Migrate selected trusted modules through an adapter only when equivalent behavior, data durability and lifecycle are demonstrated; unmigrated built-ins remain trusted, not reclassified as sandboxed. |
 
@@ -357,4 +357,4 @@ Decisions that require evidence before selecting a concrete implementation: whet
 - [Wasmtime Security](https://docs.wasmtime.dev/security.html)、[Wasmtime Introduction](https://docs.wasmtime.dev/introduction.html)、[WIT Component Model](https://github.com/WebAssembly/component-model/blob/main/design/mvp/WIT.md)
 - [MDN iframe Sandbox](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/iframe)、[MDN CSP sandbox](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/sandbox)
 
-**設計の到達点:** CodexiaのCoreは小さく、Gitと回復を堅牢に保ち、Pluginは公開された能力を通して自由にアプリケーションを構成できる。ただし自由な拡張は、HostのAuthor認可、データ正本、OS/Browserの隔離境界を超えない。
+**設計の到達点:** CodexiaのCoreは小さく、PostgreSQL正本と回復を堅牢に保ち、Pluginは公開された能力を通して自由にアプリケーションを構成できる。ただし自由な拡張は、HostのAuthor認可、データ正本、OS/Browserの隔離境界を超えない。

@@ -21,6 +21,8 @@
 - name: Require the running legacy writer's Quadlet
   ansible.builtin.assert:
     that: legacy.stat.exists
+- name: Verify the Tunnel is still attached to the legacy writer before stopping it
+  ansible.builtin.include_tasks: verify-tunnel-legacy.yml
 - name: Save legacy Quadlet outside the generator directory
   ansible.builtin.copy:
     src: "{{ quadlet_dir }}/codexia-api.container"
@@ -43,12 +45,8 @@
   ansible.builtin.file:
     path: "{{ quadlet_dir }}/codexia-api.container"
     state: absent
-- name: Remove only legacy dependency from existing Tunnel Quadlet
-  ansible.builtin.replace:
-    path: "{{ quadlet_dir }}/codexia-tunnel.container"
-    regexp: '^(Requires|After)=codexia-api\.service$'
-    replace: '\1=codexia-api-proxy.service'
-    backup: true
+- name: Switch the Tunnel dependency to the private proxy while preserving network ordering
+  ansible.builtin.include_tasks: switch-tunnel-to-proxy.yml
 - name: Reload rootless systemd
   ansible.builtin.systemd_service:
     scope: user
