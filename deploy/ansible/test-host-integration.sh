@@ -39,23 +39,24 @@ grep -q 'changed=0' "$tmp/second.log"
 test "$(id -u "$user")" = "$uid"
 test "$(id -g "$user")" = "$uid"
 test "$(loginctl show-user "$user" --property=Linger --value)" = yes
-# The hosted runner starts the newly lingered manager with runner-only XDG variables.
-# Reset this disposable fixture manager so the subsequent generator check uses the service account's login environment.
-sudo systemctl restart "user@$uid.service"
-manager_pid=$(sudo systemctl show --property=MainPID --value "user@$uid.service")
-test -n "$manager_pid"
-manager_environment=$(sudo sh -c 'tr "\\0" "\\n" < "/proc/$1/environ"' _ "$manager_pid")
-printf '%s\n' "$manager_environment" | grep -Fqx "HOME=$home"
-printf '%s\n' "$manager_environment" | grep -Fqx "XDG_RUNTIME_DIR=/run/user/$uid"
-if printf '%s\n' "$manager_environment" | grep -Fqx 'XDG_CONFIG_HOME=/home/runner/.config'; then
-  echo 'Service user manager retained the hosted runner XDG configuration path' >&2; exit 1
-fi
 rootless() (
   # The runner checkout is intentionally inaccessible to the fixture account.
   cd /
   sudo -H -u "$user" env HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_DATA_HOME="$home/.local/share" XDG_STATE_HOME="$home/.local/state" XDG_RUNTIME_DIR="/run/user/$uid" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"
 )
+# The hosted runner starts the newly lingered manager with runner-only XDG variables.
+# Reset this disposable fixture manager, then reexec it with the service account's XDG paths.
+sudo systemctl restart "user@$uid.service"
+manager_pid=$(sudo systemctl show --property=MainPID --value "user@$uid.service")
+test -n "$manager_pid"
+manager_environment=$(sudo sh -c 'tr "\\0" "\\n" < "/proc/$1/environ"' _ "$manager_pid")
+printf '%s\n' "$manager_environment" | grep -Fqx "HOME=$home"
+printf '%s\n' "$manager_environment" | grep -Fqx "XDG_RUNTIME_DIR=/run/user/$uid"
+rootless systemctl --user set-environment "XDG_CONFIG_HOME=$home/.config" "XDG_RUNTIME_DIR=/run/user/$uid"
+rootless systemctl --user daemon-reexec
+rootless systemctl --user show-environment | grep -Fqx "XDG_CONFIG_HOME=$home/.config"
+rootless systemctl --user show-environment | grep -Fqx "XDG_RUNTIME_DIR=/run/user/$uid"
 test -f /sys/fs/cgroup/cgroup.controllers
 test "$(rootless /usr/bin/podman info --format '{{.Host.Security.Rootless}}')" = true
 rootless mkdir -p "$home/.config/containers/systemd"
