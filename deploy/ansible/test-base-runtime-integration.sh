@@ -23,7 +23,15 @@ podman() { as_service /usr/bin/podman "$@"; }
 systemctl() {
   if [[ "${1:-}" == --user ]]; then as_service /usr/bin/systemctl "$@"; else command systemctl "$@"; fi
 }
-test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
+rootless_info=''
+if rootless_info=$(podman info --format '{{.Host.Security.Rootless}}' 2>&1); then
+  :
+else
+  status=$?
+  printf 'Rootless Podman info failed with status %s: %s\n' "$status" "$rootless_info" >&2
+  exit "$status"
+fi
+test "$rootless_info" = true
 test "$(id -u)" != 0
 
 export XDG_RUNTIME_DIR="/run/user/$service_uid"
