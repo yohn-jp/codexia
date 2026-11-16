@@ -12,7 +12,7 @@ service_home=$(getent passwd "$service_user" | cut -d: -f6)
 test "$(id -un)" != "$service_user"
 sudo -n true
 as_service() {
-  sudo -u "$service_user" env HOME="$service_home" XDG_CONFIG_HOME="$service_home/.config" XDG_DATA_HOME="$service_home/.local/share" XDG_STATE_HOME="$service_home/.local/state" XDG_RUNTIME_DIR="/run/user/$service_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$service_uid/bus" "$@"
+  sudo -u "$service_user" --chdir "$service_home" env HOME="$service_home" XDG_CONFIG_HOME="$service_home/.config" XDG_DATA_HOME="$service_home/.local/share" XDG_STATE_HOME="$service_home/.local/state" XDG_RUNTIME_DIR="/run/user/$service_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$service_uid/bus" "$@"
 }
 podman() { as_service /usr/bin/podman "$@"; }
 systemctl() {
