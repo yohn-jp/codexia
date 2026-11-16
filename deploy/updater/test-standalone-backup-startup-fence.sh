@@ -159,11 +159,15 @@ test -L "$XDG_RUNTIME_DIR/systemd/generator/default.target.wants/codexia-api.ser
 test -L "$XDG_RUNTIME_DIR/systemd/generator/default.target.wants/codexia-tunnel.service"
 systemctl --user start codexia-api.service codexia-tunnel.service
 for unit in codexia-api.service codexia-tunnel.service; do
-  systemctl --user show --property=ActiveState --property=SubState --property=Result --property=ConditionResult --property=Conditions "$unit" >&2
-  journalctl --user --unit="$unit" --no-pager --lines=12 >&2 || true
+  result=$(systemctl --user show --property=Result --value "$unit")
+  condition_result=$(systemctl --user show --property=ConditionResult --value "$unit")
+  if test "$result" != condition || test "$condition_result" != no; then
+    systemctl --user show --property=ActiveState --property=SubState --property=Result --property=ConditionResult --property=Conditions "$unit" >&2
+    journalctl --user --unit="$unit" --no-pager --lines=12 >&2 || true
+    exit 1
+  fi
 done
 for container in codexia-api codexia-tunnel; do
-  test "$(systemctl --user is-active "$container.service" || true)" = inactive
   status=0
   podman container exists "$container" || status=$?
   test "$status" = 1

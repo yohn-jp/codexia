@@ -121,7 +121,7 @@ jobs:
             cd "$1"
             bash deploy/updater/test-standalone-backup.sh
             bash deploy/updater/test-standalone-backup-lock.sh
-            bash -x deploy/updater/test-standalone-backup-startup-fence.sh
+            bash deploy/updater/test-standalone-backup-startup-fence.sh
           ' bash "$fixture_repo"
           node --test scripts/standalone-backup-controller.test.mjs
       - name: Remove the disposable backup test user
