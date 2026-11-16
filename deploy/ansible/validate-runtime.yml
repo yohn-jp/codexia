@@ -1,0 +1,34 @@
+---
+- name: Validate the shared runtime contract before host inspection or mutation
+  vars:
+    runtime: "{{ codexia_runtime | default({}) }}"
+    runtime_size_bytes:
+      '16m': 16777216
+      '32m': 33554432
+      '64m': 67108864
+      '128m': 134217728
+      '256m': 268435456
+      '512m': 536870912
+      '1g': 1073741824
+      '2g': 2147483648
+      '4g': 4294967296
+      '8g': 8589934592
+  ansible.builtin.assert:
+    that:
+      - >-
+        runtime is mapping
+        and runtime.keys() | list | sort == ['format', 'modelCachePath', 'profile', 'resources', 'tmpfs']
+        and runtime.get('format') == 'codexia-runtime/v1'
+        and runtime.get('profile') in ['core', 'full']
+        and (runtime.get('profile') != 'full' or runtime.get('modelCachePath') is string)
+        and (runtime.get('modelCachePath') is none or (runtime.get('modelCachePath') is string and runtime.get('modelCachePath') is match('^/[A-Za-z0-9._/-]+$') and '//' not in runtime.get('modelCachePath') and runtime.get('modelCachePath') != '/' and runtime.get('modelCachePath') == (runtime.get('modelCachePath') | regex_replace('/+$', '')) and (runtime.get('modelCachePath') | regex_search('(^|/)\\.\\.?(/|$)')) is none))
+        and runtime.get('tmpfs') is mapping
+        and runtime.get('tmpfs').keys() | list | sort == ['moduleCacheSize', 'tempSize']
+        and runtime.get('tmpfs').get('tempSize') in ['16m', '32m', '64m', '128m', '256m', '512m', '1g']
+        and runtime.get('tmpfs').get('moduleCacheSize') in ['128m', '256m', '512m', '1g', '2g', '4g', '8g']
+        and runtime.get('resources') is mapping
+        and runtime.get('resources').keys() | list | sort == ['cpuQuotaPercent', 'memoryMaxBytes']
+        and (runtime.get('resources').get('memoryMaxBytes') is none or (runtime.get('resources').get('memoryMaxBytes') is integer and runtime.get('resources').get('memoryMaxBytes') >= 268435456 and runtime.get('resources').get('memoryMaxBytes') <= 68719476736))
+        and (runtime.get('resources').get('cpuQuotaPercent') is none or (runtime.get('resources').get('cpuQuotaPercent') is integer and runtime.get('resources').get('cpuQuotaPercent') >= 10 and runtime.get('resources').get('cpuQuotaPercent') <= 800))
+        and (runtime.get('resources').get('memoryMaxBytes') is none or runtime.get('resources').get('memoryMaxBytes') >= runtime_size_bytes.get(runtime.get('tmpfs').get('tempSize')) + runtime_size_bytes.get(runtime.get('tmpfs').get('moduleCacheSize')))
+    fail_msg: The declared Codexia runtime is invalid or outside the supported bounded profile.

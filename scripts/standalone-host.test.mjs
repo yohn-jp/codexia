@@ -1,12 +1,151 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,writeFile,readFile,rm,mkdir,symlink} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {browserAuthEnvironment,imageConfig,assertVersion,PodmanStandaloneHost} from '../deploy/updater/standalone-host.mjs';
+import {browserAuthEnvironment,imageConfig,assertVersion,PodmanStandaloneHost,validateRuntimeContract,runtimeContainerArgs,assertRuntimeObservation,assertRuntimeUnit,assertModelCacheOutsideVolumes} from '../deploy/updater/standalone-host.mjs';
 const origin='https://codexia.example.invalid';
 const access={mode:'cloudflare-access',issuer:'https://example.cloudflareaccess.com',audience:'a'.repeat(64),origin,ownerEmail:'owner@example.invalid'};
 const release={image:'ghcr.io/yohn-jp/codexia-backend@sha256:'+'b'.repeat(64),version:'0.1.0',profile:'full',apiEpoch:1};
+const runtime={
+ format:'codexia-runtime/v1',profile:'full',modelCachePath:'/var/lib/codexia/models',
+ tmpfs:{tempSize:'64m',moduleCacheSize:'512m'},
+ resources:{memoryMaxBytes:8*1024**3,cpuQuotaPercent:250},
+};
+
+test('typed runtime contract produces the same bounded model, cache and resource settings for a release',()=>{
+ assert.deepEqual(validateRuntimeContract(runtime),runtime);
+ const quadlet=imageConfig(release,{},runtime);
+ assert.ok(quadlet.includes('Volume=/var/lib/codexia/models:/models:ro\n'));
+ assert.ok(quadlet.includes('Environment=CODEXIA_TOKENIZER_MODELS_DIR=/models\n'));
+ assert.ok(quadlet.includes('Environment=CODEXIA_MODULE_CACHE_DIR=/cache/modules\n'));
+ assert.ok(quadlet.includes('Tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m\n'));
+ assert.ok(quadlet.includes('Tmpfs=/cache:rw,nosuid,nodev,noexec,size=512m\n'));
+ assert.ok(quadlet.includes('Memory=8589934592\n'));
+ assert.ok(quadlet.includes('CPUQuota=250%\n'));
+ assert.deepEqual(runtimeContainerArgs(runtime),[
+  '--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=64m','--tmpfs','/cache:rw,nosuid,nodev,noexec,size=512m',
+  '--env','CODEXIA_MODULE_CACHE_DIR=/cache/modules','--volume','/var/lib/codexia/models:/models:ro',
+  '--env','CODEXIA_TOKENIZER_MODELS_DIR=/models','--memory',String(8*1024**3),'--cpu-period','100000','--cpu-quota','250000',
+ ]);
+ assert.throws(()=>imageConfig(release,{}, {...runtime,profile:'core'}),/release profile/);
+});
+
+test('typed runtime contract rejects unsafe paths, unknown settings and impossible bounds',()=>{
+ for(const patch of [
+  {extraEnvironment:{CODEXIA_HOSTED_MODE:'1'}},
+  {modelCachePath:'/var/lib/codexia/models:rw'},
+  {modelCachePath:'/var/../etc'},
+  {modelCachePath:'/'},
+  {tmpfs:{...runtime.tmpfs,tempSize:'8g'}},
+  {resources:{...runtime.resources,cpuQuotaPercent:0}},
+  {resources:{...runtime.resources,memoryMaxBytes:512*1024**2}},
+ ]) assert.throws(()=>validateRuntimeContract({...runtime,...patch}));
+});
+
+test('Full profile requires an explicit model cache outside persistent authoring storage',()=>{
+ assert.throws(()=>validateRuntimeContract({...runtime,modelCachePath:null}),/Full profile requires an explicit model cache path/);
+});
+
+test('model cache cannot resolve inside an existing authoring or history volume',()=>{
+ const data='/home/codexia/.local/share/containers/storage/volumes/codexia-data/_data';
+ const history='/home/codexia/.local/share/containers/storage/volumes/codexia-history/_data';
+ assert.doesNotThrow(()=>assertModelCacheOutsideVolumes('/var/cache/codexia/models',[data,history]));
+ assert.throws(()=>assertModelCacheOutsideVolumes(data+'/models',[data,history]),/must be outside persistent Codexia volumes/);
+ assert.throws(()=>assertModelCacheOutsideVolumes(history,[data,history]),/must be outside persistent Codexia volumes/);
+});
+
+test('effective cgroup CPU quota must match the typed runtime contract',async()=>{
+ const {assertRuntimeCpuMax}=await import('../deploy/updater/standalone-host.mjs');
+ assert.equal(typeof assertRuntimeCpuMax,'function');
+ assert.doesNotThrow(()=>assertRuntimeCpuMax('250000 100000',runtime));
+ assert.throws(()=>assertRuntimeCpuMax('200000 100000',runtime),/Effective CPU quota drift/);
+ assert.doesNotThrow(()=>assertRuntimeCpuMax('max 100000',{...runtime,resources:{...runtime.resources,cpuQuotaPercent:null}}));
+ assert.throws(()=>assertRuntimeCpuMax('250000 100000',{...runtime,resources:{...runtime.resources,cpuQuotaPercent:null}}),/Effective CPU quota drift/);
+});
+
+test('legacy runtime verification rejects undeclared environment, mounts and systemd resource drift',()=>{
+ const observed={
+  Config:{Env:['CODEXIA_PROFILE=full','CODEXIA_MODULE_CACHE_DIR=/cache/modules','CODEXIA_TOKENIZER_MODELS_DIR=/models','CODEXIA_MODULE_PROFILE_PATH=/app/generated/server.mjs','CODEXIA_STANDALONE_IDENTITY=1']},
+  Mounts:[
+   {Destination:'/cache',Type:'tmpfs',RW:true},
+   {Destination:'/data',Type:'volume',Name:'codexia-data',RW:true},
+   {Destination:'/history',Type:'volume',Name:'codexia-history',RW:true},
+   {Destination:'/models',Type:'bind',Source:runtime.modelCachePath,RW:false},
+   {Destination:'/tmp',Type:'tmpfs',RW:true},
+  ],
+  HostConfig:{Memory:runtime.resources.memoryMaxBytes,CpuQuota:250000,CpuPeriod:100000,Tmpfs:{
+   '/tmp':'rw,nosuid,nodev,noexec,size=64m','/cache':'rw,nosuid,nodev,noexec,size=512m',
+  }},
+ };
+ assert.doesNotThrow(()=>assertRuntimeObservation(observed,runtime));
+ assert.doesNotThrow(()=>assertRuntimeUnit('[Service]\nCPUQuota=250%\n',runtime));
+ assert.throws(()=>assertRuntimeObservation({...observed,Config:{Env:[...observed.Config.Env,'CODEXIA_UNREVIEWED=1']}},runtime),/Unknown Codexia runtime/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Config:{Env:[...observed.Config.Env,'CODEXIA_PROFILE=core']}},runtime),/duplicate environment/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Mounts:[...observed.Mounts,{Destination:'/etc',Type:'bind',Source:'/etc',RW:false}]},runtime),/persistent and host mounts/);
+ assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,Memory:0}},runtime),/memory limit drift/);
+ assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,CpuQuota:200000}},runtime),/CPU limit drift/);
+ assert.throws(()=>assertRuntimeUnit('[Service]\nCPUQuota=200%\n',runtime),/CPU quota drift/);
+});
+
+test('model cache source must be an existing readable directory without symlink traversal',async()=>{
+ const dir=await mkdtemp(path.join(tmpdir(),'codexia-model-cache-'));
+ const modelCachePath=path.join(dir,'models');
+ const alias=path.join(dir,'models-alias');
+ const dataVolume=path.join(dir,'codexia-data-volume');
+ const historyVolume=path.join(dir,'codexia-history-volume');
+ const fakePodman=path.join(dir,'podman');
+ const previousPath=process.env.PATH;
+ const previousData=process.env.CODEXIA_TEST_DATA_MOUNT;
+ const previousHistory=process.env.CODEXIA_TEST_HISTORY_MOUNT;
+ await mkdir(modelCachePath,{mode:0o700});
+ await mkdir(dataVolume,{mode:0o700});
+ await mkdir(historyVolume,{mode:0o700});
+ await symlink(modelCachePath,alias);
+ await writeFile(fakePodman,'#!/bin/sh\nif [ "$1" = volume ] && [ "$2" = inspect ] && [ "$3" = --format ]; then case "$5" in codexia-data) printf "%s\\n" "$CODEXIA_TEST_DATA_MOUNT";; codexia-history) printf "%s\\n" "$CODEXIA_TEST_HISTORY_MOUNT";; *) exit 1;; esac; else exit 1; fi\n',{mode:0o700});
+ process.env.PATH=dir+path.delimiter+previousPath;
+ process.env.CODEXIA_TEST_DATA_MOUNT=dataVolume;
+ process.env.CODEXIA_TEST_HISTORY_MOUNT=historyVolume;
+ const config={browserAuth:access,frontendIdentityUrl:origin+'/desktop/update-identity.json',routeFile:'/tmp/route',quadletDirectory:'/tmp',githubTokenFile:'/tmp/token'};
+ try{
+  const host=new PodmanStandaloneHost({...config,runtime:{...runtime,modelCachePath}});
+  await host.assertRuntimeSources();
+  const aliasHost=new PodmanStandaloneHost({...config,runtime:{...runtime,modelCachePath:alias}});
+  await assert.rejects(aliasHost.assertRuntimeSources(),/real directory/);
+  const modelInData=new PodmanStandaloneHost({...config,runtime:{...runtime,modelCachePath:path.join(dataVolume,'models')}});
+  await mkdir(path.join(dataVolume,'models'),{mode:0o700});
+  await assert.rejects(modelInData.assertRuntimeSources(),/must be outside persistent Codexia volumes/);
+ }finally{
+  process.env.PATH=previousPath;
+  if(previousData===undefined)delete process.env.CODEXIA_TEST_DATA_MOUNT;else process.env.CODEXIA_TEST_DATA_MOUNT=previousData;
+  if(previousHistory===undefined)delete process.env.CODEXIA_TEST_HISTORY_MOUNT;else process.env.CODEXIA_TEST_HISTORY_MOUNT=previousHistory;
+  await rm(dir,{recursive:true,force:true});
+ }
+});
+
+test('post-initialization verifies slot unit source and retained runtime settings',async()=>{
+ const dir=await mkdtemp(path.join(tmpdir(),'codexia-runtime-units-'));
+ const config={browserAuth:{mode:'token'},frontendIdentityUrl:origin+'/desktop/update-identity.json',routeFile:path.join(dir,'route'),quadletDirectory:dir,githubTokenFile:path.join(dir,'token'),runtime};
+ const host=new PodmanStandaloneHost(config);
+ const prior={...release,image:'ghcr.io/yohn-jp/codexia-backend@sha256:'+'c'.repeat(64)};
+ const blue=path.join(dir,'codexia-slot-blue.container');
+ const green=path.join(dir,'codexia-slot-green.container');
+ const env=browserAuthEnvironment({browserAuth:{mode:'token'}},origin);
+ const state={installed:release,previous:prior,failedImages:[],journal:{active:{slot:'blue'}}};
+ try{
+  await writeFile(blue,imageConfig(release,env,runtime).replace('PLACEHOLDER','codexia-slot-blue'),{mode:0o600});
+  await writeFile(green,imageConfig(prior,env,runtime).replace('PLACEHOLDER','codexia-slot-green'),{mode:0o600});
+  await host.verifyWriterUnits(state);
+  const valid=await readFile(green,'utf8');
+  await writeFile(green,valid.replace('size=512m','size=1g'),{mode:0o600});
+  await assert.rejects(host.verifyWriterUnits(state),/runtime drift/);
+  await writeFile(green,valid,{mode:0o600});
+  await rm(green);
+  await symlink(blue,green);
+  await assert.rejects(host.verifyWriterUnits(state),/symlink/);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
 test('standalone writer and preflight use an explicit compatible browser auth mode',()=>{
   const env=browserAuthEnvironment({browserAuth:access},origin);
   assert.equal(env.CODEXIA_BROWSER_AUTH,'cloudflare-access');

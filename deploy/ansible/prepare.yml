@@ -62,7 +62,8 @@
       - -e
       - |
         import { PodmanStandaloneHost } from './deploy/updater/standalone-host.mjs';
-        new PodmanStandaloneHost(JSON.parse(process.argv[1]));
+        const host = new PodmanStandaloneHost(JSON.parse(process.argv[1]));
+        await host.assertRuntimeSources();
       - "{{ desired_config | to_json }}"
     chdir: "{{ source_dir }}"
   changed_when: false

@@ -23,6 +23,16 @@ all:
         codexia_frontend_origin: https://codexia.example.invalid
         codexia_browser_auth:
           mode: token
+        codexia_runtime:
+          format: codexia-runtime/v1
+          profile: core
+          modelCachePath: null
+          tmpfs:
+            tempSize: 64m
+            moduleCacheSize: 1g
+          resources:
+            memoryMaxBytes: null
+            cpuQuotaPercent: null
         # Pin a certified backend digest for the private proxy.
         codexia_proxy_image: ghcr.io/yohn-jp/codexia-backend@sha256:REPLACE_WITH_VERIFIED_DIGEST
         # Base secrets: exact protected file content; do not commit these inputs.

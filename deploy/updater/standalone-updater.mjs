@@ -16,6 +16,7 @@ assert.equal(path.basename(config.routeFile),'route');
 assert.equal(path.dirname(config.stateFile),process.env.CODEXIA_UPDATER_LOCK_DIRECTORY,'Use the host-wide locked wrapper');
 const publicKey=await readFile(config.publicKeyFile,'utf8');
 const host=new PodmanStandaloneHost(config);
+await host.assertRuntimeSources();
 const store={save:state=>atomicWrite(config.stateFile,JSON.stringify(state)+'\n')};
 const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
 if(command==='init'||command==='verify-legacy'){
@@ -46,6 +47,7 @@ if(command==='init'||command==='verify-legacy'){
   else if(command==='verify'){
     assert.ok(['idle','committed'].includes(state.journal.phase),'Unreconciled journal requires operator repair');
     assert.equal(state.lastError,null,'Controller has a recorded error');
+    await host.verifyWriterUnits(state);
     await controller.assertServing(state,state.journal.active.slot,state.installed);
     console.log(JSON.stringify({state,observed:await host.observe()},null,2));
     process.exit(0);

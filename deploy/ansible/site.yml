@@ -14,6 +14,7 @@
     source_dir: /opt/codexia-updater
     config_path: "{{ config_dir }}/config.json"
     updater: "{{ source_dir }}/deploy/updater/codexia-updater"
+    runtime: "{{ codexia_runtime | default({}) }}"
     updater_env:
       XDG_RUNTIME_DIR: "/run/user/{{ codexia_service_uid | default(ansible_facts.user_uid) }}"
       XDG_STATE_HOME: "{{ home }}/.local/state"
@@ -38,6 +39,7 @@
       observeMilliseconds: 300000
       initialSlot: blue
       browserAuth: "{{ codexia_browser_auth }}"
+      runtime: "{{ runtime }}"
   # Fact gathering runs before user_uid/user_dir exist. Privileged host setup must
   # not inherit the bootstrap SSH account's rootless runtime paths.
   environment: "{{ updater_env if codexia_stage != 'host' and ansible_facts.user_uid is defined and ansible_facts.user_dir is defined else {} }}"
@@ -62,6 +64,9 @@
           - codexia_stage in ['secrets', 'base'] or codexia_frontend_origin is match('^https://[a-z0-9.-]+(:[0-9]+)?$')
           - codexia_stage in ['secrets', 'base'] or codexia_proxy_image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
           - codexia_stage in ['secrets', 'base'] or codexia_browser_auth.mode in ['token', 'cloudflare-access']
+    - name: Validate the shared runtime contract before application convergence
+      ansible.builtin.include_tasks: validate-runtime.yml
+      when: codexia_stage not in ['secrets', 'base']
     - name: Check rootless prerequisites (do not replace the existing host installation)
       ansible.builtin.command:
         argv: [sh, -ec, 'command -v podman; command -v flock; node -e "if (parseInt(process.versions.node,10) < 22) process.exit(1)"']
