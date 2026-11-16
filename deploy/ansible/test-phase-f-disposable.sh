@@ -250,7 +250,7 @@ sudo install -d -o root -g root -m 0755 "$postgres_config_dir"
 postgres_config_dir_created=true
 sudo install -d -o "$service_user" -g root -m 0750 "$postgres_init_dir"
 postgres_init_dir_created=true
-sudo install -o "$service_user" -g root -m 0550 "$source_dir/deploy/postgres/010-create-app-role.sh" "$postgres_init_script"
+sudo install -o "$service_user" -g root -m 0555 "$source_dir/deploy/postgres/010-create-app-role.sh" "$postgres_init_script"
 postgres_init_script_installed=true
 sed \
   -e '/Secret=codexia-postgres-app-password/a Secret=codexia-postgres-preflight-password,type=mount,target=/run/secrets/preflight-password' \
@@ -292,6 +292,7 @@ postgres_image=$(sed -n 's/^Image=//p' "$source_dir/deploy/quadlet/codexia-db.co
       cat /proc/self/gid_map
       stat --printf="container-file=%n mode=%a uid=%u gid=%g owner=%U group=%G\\n" /docker-entrypoint-initdb.d/010-create-app-role.sh
       test -r /docker-entrypoint-initdb.d/010-create-app-role.sh
+      test -x /docker-entrypoint-initdb.d/010-create-app-role.sh
       cat /docker-entrypoint-initdb.d/010-create-app-role.sh >/dev/null
       echo "postgres-user can read the exact init bind"
     '
