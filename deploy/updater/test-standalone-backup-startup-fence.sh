@@ -152,6 +152,7 @@ for container in codexia-api codexia-tunnel; do
   podman container exists "$container" || status=$?
   test "$status" = 1
 done
+systemctl --user reset-failed codexia-api.service codexia-tunnel.service
 
 # Without a recovery permit, systemd must skip both default.target-linked services while
 # the durable intent exists. A permitted API restart simulates the recovery crash boundary.
