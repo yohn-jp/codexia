@@ -38,7 +38,7 @@ environment_generator=''
 evidence_dir=''
 
 as_service() {
-  sudo -H -u "$service_user" env \
+  sudo -H -u "$service_user" -D "$service_home" env \
     HOME="$service_home" \
     XDG_CONFIG_HOME="$service_home/.config" \
     XDG_DATA_HOME="$service_home/.local/share" \
@@ -133,7 +133,7 @@ fixture_created=true
 service_uid=$(id -u "$service_user")
 service_home=$(getent passwd "$service_user" | cut -d: -f6)
 [[ "$service_uid" -gt 0 && "$service_home" == "/home/$service_user" ]]
-if sudo -u "$service_user" sudo -n true 2>/dev/null; then
+if sudo -H -u "$service_user" -D "$service_home" sudo -n true 2>/dev/null; then
   echo 'The fixture service account unexpectedly has sudo privileges.' >&2
   exit 1
 fi
@@ -202,7 +202,7 @@ evidence_dir="$fixture_data/evidence"
 as_service install -d -m 0700 "$fixture_data" "$quadlet_dir" "$state_dir" "$config_dir" "$secret_dir" "$evidence_dir"
 
 # Pull and validate only the three exact published image digests in the channel fixture.
-sudo --preserve-env=GH_TOKEN,GITHUB_SHA -H -u "$service_user" env \
+sudo --preserve-env=GH_TOKEN,GITHUB_SHA -H -u "$service_user" -D "$service_home" env \
   HOME="$service_home" XDG_CONFIG_HOME="$service_home/.config" XDG_DATA_HOME="$service_home/.local/share" \
   XDG_STATE_HOME="$service_home/.local/state" XDG_RUNTIME_DIR="/run/user/$service_uid" \
   DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$service_uid/bus" \

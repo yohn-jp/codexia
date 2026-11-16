@@ -53,6 +53,9 @@ test('Phase F integration helper is valid shell and exercises the existing locke
   assert.doesNotMatch(evidenceAllowlist, /private|secret|token|github-read/i);
   assert.match(helper, /Successful Phase F run is missing uploaded evidence/u);
   assert.doesNotMatch(helper, /sudo cp -a "\$evidence_dir/u);
+  assert.match(helper, /sudo -H -u "\$service_user" -D "\$service_home" env/u);
+  assert.match(helper, /sudo --preserve-env=GH_TOKEN,GITHUB_SHA -H -u "\$service_user" -D "\$service_home" env/u);
+  assert.match(helper, /sudo -H -u "\$service_user" -D "\$service_home" sudo -n true/u);
   assert.match(helper, /codexia-updater(?:\.sh)?/u);
 });
 
