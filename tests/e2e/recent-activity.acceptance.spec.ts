@@ -256,6 +256,8 @@ for (const departure of [false, true]) {
       await editor.press("Control+Home");
       await expect.poll(() => sent.length, { timeout: 6_000 }).toBe(1);
       expect(sent[0]?.sentenceOffset).toBe(1);
+      const newerResponse = page.waitForResponse((response) => response.url().endsWith("/recent-activity") &&
+        response.request().method() === "PUT" && (response.request().postDataJSON().sentenceOffset ?? 0) > 1);
       await editor.press("Control+End");
       if (departure) {
         // Observe the real fetch option and trigger the existing lifecycle
@@ -276,6 +278,9 @@ for (const departure of [false, true]) {
       await expect.poll(() => sent.length, { timeout: 6_000 }).toBeGreaterThanOrEqual(2);
       const latest = sent.at(-1)!;
       expect(latest.sentenceOffset ?? 0).toBeGreaterThan(1);
+      // The initial cursor may equal the newer report. Its GET alone cannot
+      // establish reversed delivery; require the newer PUT's own completion.
+      expect((await newerResponse).ok()).toBe(true);
       await expect.poll(async () => (await activity(page, f.project.id)).items.find((item) => item.deviceType === "desktop")?.sentenceOffset).toBe(latest.sentenceOffset);
       const newer = (await activity(page, f.project.id)).items.find((item) => item.deviceType === "desktop");
       const olderResponse = page.waitForResponse((response) => response.url().endsWith("/recent-activity") &&
