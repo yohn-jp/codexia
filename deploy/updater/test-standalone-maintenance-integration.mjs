@@ -521,7 +521,7 @@ async function main() {
   };
   const lockFile = path.join(stateDir, 'host.lock');
   const holderMarker = path.join(workDir, 'host-lock-held');
-  const holderChild = spawn('flock', ['--exclusive', '--nonblock', '--no-fork', lockFile, 'sh', '-c', 'touch -- "$1"; exec sleep 10', 'codexia-lock-holder', holderMarker], { env: environment, stdio: 'ignore' });
+  const holderChild = spawn('flock', ['--exclusive', '--nonblock', '--no-fork', lockFile, 'sh', '-c', 'touch -- "$1"; exec sleep 60', 'codexia-lock-holder', holderMarker], { env: environment, stdio: 'ignore' });
   const waitForFile = async filename => {
     const deadline = Date.now() + 5000;
     while (Date.now() < deadline) {
@@ -531,12 +531,18 @@ async function main() {
     throw new Error('Competing updater lock holder did not start');
   };
   await waitForFile(holderMarker);
+  assert.equal(holderChild.exitCode, null, 'Host lock holder exited before the competing command');
+  const contentionProbe = spawnSync('flock', ['--exclusive', '--nonblock', lockFile, process.execPath, '-e', 'process.exit(0)'], {
+    encoding: 'utf8', timeout: 15000, env: environment,
+  });
+  assert.equal(contentionProbe.error, undefined, 'Kernel lock contention probe did not complete');
+  assert.notEqual(contentionProbe.status, 0, 'A second updater acquired the already-held host lock');
   const wrapperResult = spawnSync('sh', [path.join(SOURCE_ROOT, 'deploy/updater/codexia-updater'), 'maintain-candidate', path.join(candidate.root, 'deploy/updater/standalone-updater.mjs'), configPath, path.join(candidate.root, 'manifest.json')], {
     encoding: 'utf8', timeout: 15000, env: environment,
   });
   assert.equal(wrapperResult.error, undefined, 'Contended wrapper check did not complete');
   assert.notEqual(wrapperResult.status, 0, 'Canonical updater wrapper bypassed an already-held host lock');
-  assert.match(`${wrapperResult.stdout}${wrapperResult.stderr}`, /Resource temporarily unavailable|cannot lock/iu, 'Canonical wrapper failure did not report host-lock contention');
+  assert.equal(holderChild.exitCode, null, 'Host lock holder exited before the canonical wrapper finished');
   holderChild.kill('SIGTERM');
   await new Promise(resolve => holderChild.once('exit', resolve));
   await rm(holderMarker, { force: true });
