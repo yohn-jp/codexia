@@ -24,6 +24,11 @@
     argv: [podman, inspect, --format, "{% raw %}{{json .Config.Secrets}}{% endraw %}", codexia-tunnel]
   register: base_runtime_tunnel_secrets
   changed_when: false
+- name: Inspect the Tunnel's recorded secret mount arguments without reading values
+  ansible.builtin.command:
+    argv: [podman, inspect, --format, "{% raw %}{{json .Config.CreateCommand}}{% endraw %}", codexia-tunnel]
+  register: base_runtime_tunnel_create_command
+  changed_when: false
 - name: Inspect the current canonical Tunnel secret identity
   ansible.builtin.command:
     argv: [podman, secret, inspect, --format, "{% raw %}{{.ID}}{% endraw %}", codexia-tunnel-token]
@@ -45,8 +50,13 @@
       - (base_runtime_tunnel_secrets.stdout | from_json | default([], true) | length) == 1
       - (base_runtime_tunnel_secrets.stdout | from_json | default([], true) | first).Name == 'codexia-tunnel-token'
       - (base_runtime_tunnel_secrets.stdout | from_json | default([], true) | first).ID == base_runtime_tunnel_secret_id.stdout
-      - (base_runtime_tunnel_mounts.stdout | from_json | selectattr('Destination', 'equalto', '/run/secrets/token') | list | length) == 1
-      - (base_runtime_tunnel_mounts.stdout | from_json | selectattr('Destination', 'equalto', '/run/secrets/token') | map(attribute='RW') | first) == false
+      - >-
+        (base_runtime_tunnel_create_command.stdout | from_json | default([], true)
+        | select('equalto', 'codexia-tunnel-token,type=mount,target=/run/secrets/token')
+        | list | length) == 1 or
+        (base_runtime_tunnel_create_command.stdout | from_json | default([], true)
+        | select('equalto', '--secret=codexia-tunnel-token,type=mount,target=/run/secrets/token')
+        | list | length) == 1
       - (base_runtime_tunnel_mounts.stdout | from_json | selectattr('Type', 'equalto', 'volume') | list | length) == 0
       - (base_runtime_tunnel_mounts.stdout | from_json | selectattr('Type', 'equalto', 'bind') | rejectattr('Destination', 'equalto', '/run/secrets/token') | list | length) == 0
       - base_runtime_tunnel_readonly.stdout == 'true'
