@@ -245,7 +245,16 @@ for attempt in $(seq 1 90); do
   if [[ "$(rootless inspect --format '{{.State.Running}}' codexia-db 2>/dev/null || true)" != true ]]; then break; fi
   sleep 1
 done
-[[ "$db_ready" == true ]] || { rootless logs codexia-db >&2 || true; echo 'Fixture PostgreSQL did not become ready.' >&2; exit 1; }
+[[ "$db_ready" == true ]] || {
+  user_systemctl status codexia-db.service --no-pager >&2 || true
+  user_systemctl show codexia-db.service \
+    --property=LoadState,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus --no-pager >&2 || true
+  as_service /usr/bin/journalctl --user --unit=codexia-db.service --no-pager -n 80 >&2 || true
+  rootless ps --all --no-trunc >&2 || true
+  rootless logs codexia-db >&2 || true
+  echo 'Fixture PostgreSQL did not become ready.' >&2
+  exit 1
+}
 
 base_image=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).image)' "$evidence_dir/release-0.1.236.json")
 database_id_before=$(rootless inspect --format '{{.Id}}' codexia-db)

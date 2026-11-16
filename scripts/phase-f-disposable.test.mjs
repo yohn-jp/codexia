@@ -46,6 +46,8 @@ test('Phase F integration helper is valid shell and exercises the existing locke
     'NOT_CHECKED',
     'lifecycle-results.json',
     'test-channel-public.pem',
+    'journalctl --user --unit=codexia-db.service',
+    'status codexia-db.service --no-pager',
   ]) assert.ok(helper.includes(marker), 'Missing integration proof: ' + marker);
   const evidenceAllowlist = helper.match(/evidence_files=\(\s*([\s\S]*?)\s*\)/u)?.[1];
   assert.ok(evidenceAllowlist, 'Missing explicit artifact evidence allowlist');
