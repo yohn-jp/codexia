@@ -16,6 +16,7 @@ service_uid=$(id -u "$service_user")
 service_home=$(getent passwd "$service_user" | cut -d: -f6)
 test "$(id -un)" != "$service_user"
 sudo -n true
+printf '%s\n' 'Phase B runtime preflight checks passed.'
 as_service() {
   sudo -u "$service_user" env HOME="$service_home" XDG_CONFIG_HOME="$service_home/.config" XDG_DATA_HOME="$service_home/.local/share" XDG_STATE_HOME="$service_home/.local/state" XDG_RUNTIME_DIR="/run/user/$service_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$service_uid/bus" bash -c 'cd "$HOME" && exec "$@"' bash "$@"
 }
@@ -32,11 +33,13 @@ else
   exit "$status"
 fi
 test "$rootless_info" = true
+printf '%s\n' 'Phase B rootless Podman info verified.'
 test "$(id -u)" != 0
 
 export XDG_RUNTIME_DIR="/run/user/$service_uid"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 systemctl --user show --property=Version >/dev/null
+printf '%s\n' 'Phase B rootless systemd manager verified.'
 
 quadlet_dir="$service_home/.config/containers/systemd"
 as_service test ! -e "$service_home/unexpected-tunnel-mount"
