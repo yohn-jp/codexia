@@ -19,8 +19,8 @@ const tasks = VERIFICATION_GROUPS[group].filter(task => plan.tasks.includes(task
 const completed = new Map();
 const limit = Number(process.env.CODEXIA_CI_CONCURRENCY ?? '2');
 if (![1, 2].includes(limit)) throw new Error('CI concurrency must be 1 or 2');
-const typePreparation = new Map();
-let typePreparationError;
+const groupPreparation = new Map();
+let groupPreparationError;
 const reportDirectory = process.env.CODEXIA_CI_REPORT_DIR ?? path.resolve('ci-results', group);
 mkdirSync(reportDirectory, { recursive: true });
 const run = (command, args, extraEnv = {}) => new Promise((resolve, reject) => {
@@ -37,7 +37,6 @@ let preparationError;
 let profileArtifact;
 let nativeArtifact;
 try {
-  if (group.startsWith('unit-')) await node('scripts/ci-workspace.mjs', 'prepare', 'unit-group', tasks.map(task => task.slice(5)).join(','));
   const requiredProfile = requiredBuildProfile(group);
   if (requiredProfile) {
     // A failed producer or restore is a blocked validation, not a reason to rebuild.
@@ -52,19 +51,23 @@ try {
     assertNativeReceipt(nativeArtifact,plan,process.env.GITHUB_RUN_ID);
   }
 } catch (error) { preparationError = String(error); }
-if (group.startsWith('types-') && !preparationError) {
+const preparationStarted = Date.now();
+if ((group.startsWith('types-') || group.startsWith('unit-')) && !preparationError) {
   try {
-    const filename = path.resolve(reportDirectory, 'type-preparation.json');
-    await run(process.execPath, ['scripts/ci-workspace.mjs', 'prepare', 'type-group', filename], { CODEXIA_CI_TYPE_TASKS: JSON.stringify(tasks) });
+    const filename = path.resolve(reportDirectory, 'workspace-preparation.json');
+    await run(process.execPath, ['scripts/ci-workspace.mjs', 'prepare', 'selected-group', filename], { CODEXIA_CI_GROUP_TASKS: JSON.stringify(tasks) });
     const report = JSON.parse(readFileSync(filename, 'utf8'));
-    if (report.length !== tasks.length || report.some((entry, i) => entry.task !== tasks[i])) throw new Error('Invalid type preparation report');
-    for (const entry of report) typePreparation.set(entry.task, entry);
-  } catch (error) { typePreparationError = String(error); }
+    if (report.length !== tasks.length || report.some((entry, i) => entry.task !== tasks[i])) throw new Error('Invalid workspace preparation report');
+    for (const entry of report) groupPreparation.set(entry.task, entry);
+  } catch (error) { groupPreparationError = String(error); }
 }
+
+const preparationSeconds = (Date.now() - preparationStarted) / 1000;
+console.log(JSON.stringify({ phase: 'shared-workspace-preparation', group, seconds: preparationSeconds, concurrency: limit }));
 
 async function executeTask(task, index) {
   const started = Date.now();
-  let error = preparationError || (task !== 'coverage' && (typePreparationError || typePreparation.get(task)?.error)) || undefined;
+  let error = preparationError || (task !== 'coverage' && (groupPreparationError || groupPreparation.get(task)?.error)) || undefined;
   let blocked = Boolean(error || (task === 'audit-core' && completed.get('build-core')?.status !== 'passed' && tasks.includes('build-core')));
   if (blocked && !error) error = 'Core build prerequisite failed';
   if (!blocked) {
@@ -112,13 +115,15 @@ async function executeTask(task, index) {
 const independentUnits = new Set(['unit-contracts', 'unit-persistence-contracts', 'unit-app', 'unit-story', 'unit-nlp', 'unit-publishing', 'unit-mcp', 'unit-search']);
 const exclusive = task => {
   if (group.startsWith('browser-')) return task.endsWith('-redesign-visual'); // performance measurements must not contend with siblings
-  if (group.startsWith('types-')) return typePreparation.get(task)?.exclusive ?? false;
+  if (group.startsWith('types-')) return groupPreparation.get(task)?.exclusive ?? false;
   if (group.startsWith('unit-')) return !independentUnits.has(task);
   return true;
 };
+const executionStarted = Date.now();
 const settled = await runBounded(tasks, executeTask, { limit, exclusive });
+const executionSeconds = (Date.now() - executionStarted) / 1000;
 const results = settled.map((entry, index) => entry.status === 'fulfilled' ? entry.value : { task: tasks[index], status: 'failed', seconds: 0, error: String(entry.reason) });
-const report = { group, sha, planDigest: planDigest(plan), ...(profileArtifact ? {profileArtifact} : {}), ...(nativeArtifact ? {nativeArtifact} : {}), results };
+const report = { group, sha, planDigest: planDigest(plan), timing: { concurrency: limit, preparationSeconds, executionSeconds }, ...(profileArtifact ? {profileArtifact} : {}), ...(nativeArtifact ? {nativeArtifact} : {}), results };
 writeFileSync(path.join(reportDirectory, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
   `| Validation | Result | Seconds |\n| --- | --- | ---: |\n${results.map(item => `| ${item.task} | ${item.status} | ${item.seconds.toFixed(1)} |`).join('\n')}\n`);
