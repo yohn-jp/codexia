@@ -32,6 +32,19 @@ all:
         codexia_service_home: $home
 YAML
 apply() { env -u XDG_CONFIG_HOME "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i "$tmp/inventory.yml" deploy/ansible/site.yml; }
+# Set only the not-yet-created fixture account's manager environment before
+# Ansible enables lingering and starts its first user manager.
+manager_dropin_dir="/run/systemd/system/user@$uid.service.d"
+sudo install -d -m 0755 "$manager_dropin_dir"
+manager_dropin="$manager_dropin_dir/10-codexia-ci-xdg.conf"
+test ! -e "$manager_dropin"
+cat <<EOF | sudo tee "$manager_dropin" >/dev/null
+[Service]
+Environment=HOME=$home
+Environment=XDG_CONFIG_HOME=$home/.config
+Environment=XDG_RUNTIME_DIR=/run/user/$uid
+EOF
+sudo systemctl daemon-reload
 apply | tee "$tmp/first.log"
 grep -Eq 'changed=[1-9][0-9]*' "$tmp/first.log"
 apply | tee "$tmp/second.log"
@@ -45,20 +58,7 @@ rootless() (
   sudo -H -u "$user" env HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_DATA_HOME="$home/.local/share" XDG_STATE_HOME="$home/.local/state" XDG_RUNTIME_DIR="/run/user/$uid" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"
 )
-# The hosted runner may inject XDG values through PAM when the fixture manager starts.
-# Override only this disposable user@ service so the generator inherits its own identity paths.
-manager_dropin_dir="/run/systemd/system/user@$uid.service.d"
-sudo install -d -m 0755 "$manager_dropin_dir"
-manager_dropin="$manager_dropin_dir/10-codexia-ci-xdg.conf"
-test ! -e "$manager_dropin"
-cat <<EOF | sudo tee "$manager_dropin_dir/10-codexia-ci-xdg.conf" >/dev/null
-[Service]
-Environment=HOME=$home
-Environment=XDG_CONFIG_HOME=$home/.config
-Environment=XDG_RUNTIME_DIR=/run/user/$uid
-EOF
-sudo systemctl daemon-reload
-sudo systemctl restart "user@$uid.service"
+# Verify the user manager retained the service account paths from its first start.
 manager_pid=$(sudo systemctl show --property=MainPID --value "user@$uid.service")
 test -n "$manager_pid"
 manager_environment=$(sudo sh -c 'tr "\\0" "\\n" < "/proc/$1/environ"' _ "$manager_pid")
@@ -70,8 +70,6 @@ if ! printf '%s\n' "$manager_environment" | grep -Fqx "XDG_CONFIG_HOME=$home/.co
   printf '%s\n' "$manager_environment" | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)=' >&2 || true
   echo 'The fixture user manager did not start with its XDG config home.' >&2; exit 1
 fi
-rootless systemctl --user set-environment "HOME=$home" "XDG_CONFIG_HOME=$home/.config" "XDG_RUNTIME_DIR=/run/user/$uid"
-rootless systemctl --user daemon-reexec
 manager_session_environment=$(rootless systemctl --user show-environment | awk -F= '$1 ~ /^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)$/ {print}')
 if ! printf '%s\n' "$manager_session_environment" | grep -Fqx "HOME=$home" || ! printf '%s\n' "$manager_session_environment" | grep -Fqx "XDG_RUNTIME_DIR=/run/user/$uid" || ! printf '%s\n' "$manager_session_environment" | grep -Fqx "XDG_CONFIG_HOME=$home/.config"; then
   printf '%s\n' "$manager_session_environment" >&2
