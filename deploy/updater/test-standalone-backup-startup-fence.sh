@@ -253,9 +253,14 @@ if podman container exists codexia-tunnel; then
   exit 1
 fi
 
-# After removing the test-only drift, start Tunnel with its own volatile permit and compare
+# Restore the exact captured Quadlet bytes after the deliberate drift check, then start Tunnel
+# with its own volatile permit and compare
 # its normalized Podman runtime config with the captured pre-stop config.
-sed -i '/Deliberate recovery drift/d' "$tunnel_source"
+node --input-type=module -e '
+  import {readFile,writeFile} from "node:fs/promises";
+  const expected=JSON.parse(await readFile(process.argv[1],"utf8"));
+  await writeFile(process.argv[2],expected.tunnelSource,{mode:0o600});
+' "$snapshot" "$tunnel_source"
 systemctl --user daemon-reload
 node --input-type=module -e '
   import assert from "node:assert/strict";
