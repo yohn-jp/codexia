@@ -125,6 +125,60 @@ YAML
 apply_base() {
   ANSIBLE_LOCAL_TEMP="$tmp/ansible-local" "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i "$tmp/base-inventory.yml" deploy/ansible/site.yml "$@"
 }
+diagnose_missing_database_unit() {
+  local generator=/usr/lib/systemd/user-generators/podman-user-generator
+  local generator_output="$service_home/.local/state/codexia-phase-b-generator-diagnostic-$$"
+  printf '%s\n' 'Database unit generation diagnostics:' >&2
+  printf '%s\n' '--- systemd user manager environment ---' >&2
+  systemctl --user show-environment | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_DATA_HOME|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS)=' >&2 || true
+  local manager_pid
+  manager_pid=$(sudo systemctl show --property=MainPID --value "user@${service_uid}.service" 2>/dev/null || true)
+  if [[ "$manager_pid" =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s\n' "--- systemd user manager process environment (PID $manager_pid) ---" >&2
+    sudo cat "/proc/$manager_pid/environ" | tr '\0' '\n' | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_DATA_HOME|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS)=' >&2 || true
+  else
+    printf 'Could not read the user manager MainPID (value: %s)\n' "$manager_pid" >&2
+  fi
+  printf '%s\n' '--- systemd user manager paths and database unit ---' >&2
+  systemctl --user show --property=UnitPath >&2 || true
+  systemctl --user show --property=LoadState --property=FragmentPath --property=SourcePath codexia-db.service >&2 || true
+  systemctl --user list-unit-files --no-pager >&2 || true
+  systemctl --user cat codexia-db.service >&2 || true
+  printf '%s\n' '--- installed Quadlet sources and generated unit directories ---' >&2
+  for path in \
+    "$quadlet_dir" \
+    "$service_home/.config/systemd/user" \
+    "/run/user/$service_uid/systemd/generator.early" \
+    "/run/user/$service_uid/systemd/generator" \
+    "/run/user/$service_uid/systemd/generator.late"; do
+    if [[ -e "$path" ]]; then
+      as_service find "$path" -maxdepth 3 -printf '%M %u:%g %p\n' >&2 || true
+    else
+      printf 'Missing path: %s\n' "$path" >&2
+    fi
+  done
+  printf '%s\n' '--- user journal for Quadlet generation ---' >&2
+  as_service journalctl --user -b -n 100 --no-pager -o cat --grep='(?i)(podman|quadlet|codexia|generator|failed|error|warn)' >&2 || true
+  printf '%s\n' '--- system journal for the disposable user manager ---' >&2
+  sudo journalctl -b -n 100 --no-pager -o cat --grep='(?i)(podman|quadlet|codexia|generator|failed|error|warn)' "_UID=$service_uid" >&2 || true
+  if [[ -x "$generator" ]]; then
+    as_service mkdir -p "$generator_output/early" "$generator_output/normal" "$generator_output/late"
+    printf '%s\n' '--- isolated debug invocation of podman-user-generator ---' >&2
+    if as_service env SYSTEMD_LOG_LEVEL=debug "$generator" \
+      "$generator_output/early" "$generator_output/normal" "$generator_output/late" \
+      >"$tmp/quadlet-generator.log" 2>&1; then
+      cat "$tmp/quadlet-generator.log" >&2
+    else
+      local generator_status=$?
+      printf 'podman-user-generator exited with status %s\n' "$generator_status" >&2
+      cat "$tmp/quadlet-generator.log" >&2
+    fi
+    as_service find "$generator_output" -maxdepth 3 -printf '%M %u:%g %p\n' >&2 || true
+    as_service rm -rf -- "$generator_output" || true
+  else
+    printf 'User generator is absent or not executable: %s\n' "$generator" >&2
+  fi
+}
 # Existing Quadlet drift must be detected before other files, directories, or runtime resources are created.
 as_service mkdir -p "$quadlet_dir"
 cat deploy/quadlet/codexia-data.network | as_service tee "$quadlet_dir/codexia-data.network" >/dev/null
@@ -168,7 +222,11 @@ for network in codexia codexia-data; do
 done
 sed -i 's/codexia_database_initialization_approved: false/codexia_database_initialization_approved: true/' "$tmp/base-inventory.yml"
 
-apply_base > "$tmp/first.log" || { cat "$tmp/first.log"; exit 1; }
+if ! apply_base > "$tmp/first.log" 2>&1; then
+  cat "$tmp/first.log" >&2
+  diagnose_missing_database_unit
+  exit 1
+fi
 grep -Eq 'changed=[1-9]' "$tmp/first.log"
 apply_base > "$tmp/second.log" || { cat "$tmp/second.log"; exit 1; }
 grep -q 'changed=0' "$tmp/second.log"
