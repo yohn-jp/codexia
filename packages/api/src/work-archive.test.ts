@@ -197,6 +197,8 @@ test("a conflicting portable import receipt does not authorize replay or overwri
   await persistence.transaction(tx => tx.createProject({ id: sourceId, title: "Receipt " + sourceId }));
   const archive = await exportWorkArchive(persistence, sourceId);
   const imported = await importWorkArchive(persistence, archive, "owner");
+  const original = await persistence.read(reader => reader.getModuleRecord(imported.project.id, "core.portable.archive", "import-receipt"));
+  assert.ok(original);
   await persistence.transaction(tx => tx.saveModuleRecord({
     projectId: imported.project.id, moduleId: "core.portable.archive", key: "import-receipt",
     value: { payloadSha256: "different", archiveFormat: archive.format }, expectedVersion: 1,
@@ -204,4 +206,12 @@ test("a conflicting portable import receipt does not authorize replay or overwri
   const before = await persistence.read(reader => reader.getProject(imported.project.id));
   await assert.rejects(importWorkArchive(persistence, archive, "owner"), /conflicts with this import identity/u);
   assert.deepEqual(await persistence.read(reader => reader.getProject(imported.project.id)), before);
+  const corrupted = await persistence.read(reader => reader.getModuleRecord(imported.project.id, "core.portable.archive", "import-receipt"));
+  assert.ok(corrupted);
+  await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: imported.project.id, moduleId: "core.portable.archive", key: "import-receipt",
+    value: { ...original.value, archiveFormat: "wrong-format" }, expectedVersion: corrupted.version,
+  }));
+  await assert.rejects(importWorkArchive(persistence, archive, "owner"), /conflicts with this import identity/u);
+
 });

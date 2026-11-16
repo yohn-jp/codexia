@@ -333,7 +333,7 @@ export async function importWorkArchive(persistence: Persistence, payload: unkno
     const existing = await reader.getProject(target.id);
     if (!existing) return undefined;
     const receipt = await reader.getModuleRecord(target.id, "core.portable.archive", "import-receipt");
-    if (receipt?.value.payloadSha256 !== target.hash) {
+    if (receipt?.value.payloadSha256 !== target.hash || receipt.value.archiveFormat !== WORK_ARCHIVE_FORMAT) {
       fail(409, "WORK_IMPORT_CONFLICT", "An existing project conflicts with this import identity");
     }
     return { project: existing, replayed: true, unresolvedAnchors: archive.evidence.unresolved.anchors.length,
