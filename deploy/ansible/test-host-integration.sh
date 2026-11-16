@@ -99,6 +99,17 @@ Driver=bridge
 Internal=true
 QUADLET
 rootless chmod 0600 "$home/.config/containers/systemd/codexia-fixture.network"
+# The manager inherits GitHub's XDG_RUNTIME_DIR. Scope the correct runtime paths
+# to this generated fixture unit so Podman uses only the fixture user's state.
+unit_dropin_dir="$home/.config/systemd/user/codexia-fixture-network.service.d"
+rootless install -d -m 0755 "$unit_dropin_dir"
+cat <<EOF | rootless tee "$unit_dropin_dir/10-codexia-ci-runtime.conf" >/dev/null
+[Service]
+Environment=HOME=$home
+Environment=XDG_CONFIG_HOME=$home/.config
+Environment=XDG_RUNTIME_DIR=/run/user/$uid
+EOF
+rootless chmod 0600 "$unit_dropin_dir/10-codexia-ci-runtime.conf"
 rootless systemctl --user daemon-reload
 if ! sudo test -s "$generator_log"; then
   echo 'The Podman generator wrapper did not run; inspect the user generator path.' >&2
