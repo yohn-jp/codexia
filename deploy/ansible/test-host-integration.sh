@@ -45,18 +45,18 @@ rootless() (
   sudo -H -u "$user" env HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_DATA_HOME="$home/.local/share" XDG_STATE_HOME="$home/.local/state" XDG_RUNTIME_DIR="/run/user/$uid" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"
 )
-# The hosted runner starts the newly lingered manager with runner-only XDG variables.
-# Reset this disposable fixture manager, then reexec it with the service account's XDG paths.
+# The hosted runner may have XDG values in PID 1's environment; seed this isolated
+# fixture manager with the service identity before its generator is exercised.
+sudo systemctl set-environment "HOME=$home" "XDG_CONFIG_HOME=$home/.config" "XDG_RUNTIME_DIR=/run/user/$uid"
 sudo systemctl restart "user@$uid.service"
 manager_pid=$(sudo systemctl show --property=MainPID --value "user@$uid.service")
 test -n "$manager_pid"
 manager_environment=$(sudo sh -c 'tr "\\0" "\\n" < "/proc/$1/environ"' _ "$manager_pid")
 printf '%s\n' "$manager_environment" | grep -Fqx "HOME=$home"
 printf '%s\n' "$manager_environment" | grep -Fqx "XDG_RUNTIME_DIR=/run/user/$uid"
-rootless systemctl --user set-environment "XDG_CONFIG_HOME=$home/.config" "XDG_RUNTIME_DIR=/run/user/$uid"
-rootless systemctl --user daemon-reexec
+printf '%s\n' "$manager_environment" | grep -Fqx "XDG_CONFIG_HOME=$home/.config"
+sudo systemctl unset-environment HOME XDG_CONFIG_HOME XDG_RUNTIME_DIR
 rootless systemctl --user show-environment | grep -Fqx "XDG_CONFIG_HOME=$home/.config"
-rootless systemctl --user show-environment | grep -Fqx "XDG_RUNTIME_DIR=/run/user/$uid"
 test -f /sys/fs/cgroup/cgroup.controllers
 test "$(rootless /usr/bin/podman info --format '{{.Host.Security.Rootless}}')" = true
 rootless mkdir -p "$home/.config/containers/systemd"
