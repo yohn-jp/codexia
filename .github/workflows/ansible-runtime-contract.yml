@@ -150,7 +150,7 @@ jobs:
           fixture_uid=$(id -u "$fixture_user")
           fixture_home=$(getent passwd "$fixture_user" | cut -d: -f6)
           fixture_repo="$fixture_home/codexia-runtime-contract-repo"
-          sudo -u "$fixture_user" env \
+          sudo --chdir="$fixture_repo" -u "$fixture_user" env \
             HOME="$fixture_home" XDG_CONFIG_HOME="$fixture_home/.config" \
             XDG_RUNTIME_DIR="/run/user/$fixture_uid" \
             DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" \
@@ -183,6 +183,8 @@ jobs:
               rm -f "$RUNNER_TEMP/codexia-runtime-contract.repo-copy-created" || cleanup_failed=1
             else
               echo 'Refusing to remove an unexpected or replaced runtime-contract checkout copy' >&2
+              sudo stat -c 'checkout fixture: %n owner=%u mode=%a type=%F' "$fixture_repo" "$fixture_repo/.codexia-runtime-contract-fixture" >&2 || true
+              sudo cat -- "$fixture_repo/.codexia-runtime-contract-fixture" >&2 || true
               cleanup_failed=1
             fi
           fi
@@ -200,6 +202,8 @@ jobs:
               rm -f "$RUNNER_TEMP/codexia-runtime-contract.source-tree-created" || cleanup_failed=1
             else
               echo 'Refusing to remove an unexpected or replaced updater source fixture' >&2
+              sudo stat -c 'source fixture: %n owner=%u mode=%a type=%F' /opt/codexia-updater /opt/codexia-updater/.codexia-runtime-contract-source >&2 || true
+              sudo cat -- /opt/codexia-updater/.codexia-runtime-contract-source >&2 || true
               cleanup_failed=1
             fi
           fi
