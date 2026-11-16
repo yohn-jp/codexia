@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { chmod, lstat, mkdir, readFile, readdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, readdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   PodmanStandaloneHost,
+  assertRuntimeProcessInSystemdUnit,
+  assertRuntimeProcessMemoryMax,
   assertRuntimeObservation,
   assertRuntimeSystemdCpuQuota,
   assertRuntimeUnit,
@@ -98,10 +100,8 @@ async function validateSlot(config, runtime, state, expectedImage) {
       assertRuntimeObservation(observed, runtime, JSON.parse(run('podman', ['image', 'inspect', expectedImage]))[0].Config?.Env, expected, capabilityStatus);
       assertRuntimeUnit(run('systemctl', ['--user', 'cat', unit]), runtime);
       await assertRuntimeSystemdCpuQuota(unit, runtime);
-      const controlGroup = run('systemctl', ['--user', 'show', '--property=ControlGroup', '--value', unit]);
-      const cgroupRoot = await realpath('/sys/fs/cgroup');
-      const memoryMax = await readFile(path.join(cgroupRoot, controlGroup.slice(1), 'memory.max'), 'utf8');
-      assert.equal(memoryMax.trim(), String(runtime.resources.memoryMaxBytes), `${unit} effective memory limit drift`);
+      const processCgroupPath = await assertRuntimeProcessInSystemdUnit(unit, observed, `${slotName} writer`);
+      await assertRuntimeProcessMemoryMax(processCgroupPath, runtime, `${slotName} writer`);
     }
   }
   const inactive = activeSlot === 'blue' ? 'green' : 'blue';
