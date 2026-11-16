@@ -110,7 +110,10 @@ if ! printf '%s\n' "$generator_environment" | grep -Fqx "HOME=$home" || ! printf
   echo 'The user manager passed an unexpected environment to the Podman generator.' >&2; exit 1
 fi
 if ! rootless systemctl --user start codexia-fixture-network.service; then
-  echo 'Quadlet network unit was not loaded; checking the source and generator output.' >&2
+  echo 'Quadlet network unit failed to start; checking systemd and Podman diagnostics.' >&2
+  rootless systemctl --user status codexia-fixture-network.service --no-pager || true
+  rootless journalctl --user --boot --unit=codexia-fixture-network.service --no-pager || true
+  rootless /usr/bin/podman network inspect codexia-fixture || true
   rootless stat -c '%n %U:%G %a' "$home/.config/containers/systemd/codexia-fixture.network"
   manager_pid=$(sudo systemctl show --property=MainPID --value "user@$uid.service")
   if [[ -n "$manager_pid" ]]; then
