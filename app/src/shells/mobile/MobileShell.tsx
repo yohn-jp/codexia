@@ -101,7 +101,7 @@ function errorMessage(error: unknown): string {
 
 /**
  * Ionic page navigation for the shared application controller.
- * The mobile entry supplies the Ionic React Router context around the controller.
+ * The mobile entry supplies the React Router browser context around the controller.
  */
 export function MobileShell({ header, documentTitle, documentContext, desktopDurability, desktopDurabilityDetail, desktopDurabilityLabel, library, editor, tools, status, renderStatus, onSwitchMode, workspaceScope, panels, beforeLayoutChange, requestedPanel }: ApplicationShellProps) {
   const location = useLocation();

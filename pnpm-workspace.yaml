@@ -8,3 +8,6 @@ allowBuilds:
   onnxruntime-node: false
   protobufjs: false
   sharp: false
+# Transformers uses sharp transitively; keep the native dependency on a patched release.
+overrides:
+  "@huggingface/transformers>sharp": 0.35.5
