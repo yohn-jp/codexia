@@ -481,9 +481,9 @@ export class CoreStore implements MutationCoordinator {
         return {...status,stale:status.proposal.snapshot.projectVersion!==project.version};
       });
     }); }
-  async reviewQueue(projectIds: readonly string[]): Promise<{ unresolvedCount: number; items: Array<{ projectId: string; proposal: ProposalStatus }> }> {
+  async reviewQueue(projectIds: readonly string[] | null): Promise<{ unresolvedCount: number; items: Array<{ projectId: string; proposal: ProposalStatus }> }> {
     return this.persistence.read(async reader => {
-      const { unresolvedCount, records } = await reader.listProposalReviewQueue(projectIds.map(pid), AUTHORITY, 1000);
+      const { unresolvedCount, records } = await reader.listProposalReviewQueue(projectIds === null ? null : projectIds.map(pid), AUTHORITY, 1000);
       return { unresolvedCount, items: records.map(({ record, projectVersion }) => {
         const status = record.value as unknown as ProposalStatus;
         return { projectId: record.projectId, proposal: { ...status, stale: status.proposal.snapshot.projectVersion !== projectVersion } };
@@ -859,5 +859,10 @@ export class CoreStore implements MutationCoordinator {
     const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId??manuscriptId,index);const revision=document.headRevisionId ? await this.persistence.read((reader)=>reader.getRevision(pid(projectId),document.id,snapshotId as RevisionId,document.headRevisionId!)) : undefined;if(!revision)fail(404,"revision_not_found","Revision not found");const path=index.pathsByDocumentId.get(document.id)?.bodyPath,file=path ? manifest.files[path] : undefined;if(!path||!file)fail(409,"snapshot_unavailable","Document body is missing from the project snapshot");return {snapshot:manifest.snapshot,manuscriptSnapshot:{id:revision.id,sceneId:this.logicalId(index,document),manuscriptId,createdAt:Date.parse(revision.createdAt),charCount:Array.from(body(revision.markdown)).length,source:"postgres",body:body(revision.markdown),document:{path,content:revision.markdown,revision:revision.sha256}}};
   }
   async status(projectId:string) { const observation=await this.observe(projectId);return {...observation.snapshot,state:"durable" as const}; }
-  async history(projectId:string,pinned?:SnapshotId):Promise<Commit[]> { const manifest=await this.manifest(projectId,pinned); const revisions=await this.persistence.read(async(reader)=>{const pages=await Promise.all(manifest.documents.flatMap((document)=>document.headRevisionId ? [reader.listRevisions(pid(projectId),document.id,100,undefined,document.headRevisionId)] : []));return pages.flatMap((page)=>page.revisions);});return revisions.sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,100).map((revision)=>({hash:revision.id,date:revision.createdAt,message:`Document revision ${revision.documentId}`})); }
+  async history(projectId:string,pinned?:SnapshotId):Promise<Commit[]> {
+    const manifest = await this.manifest(projectId,pinned);
+    const heads = manifest.documents.flatMap(document => document.headRevisionId ? [{documentId:document.id,revisionId:document.headRevisionId}] : []);
+    const revisions = await this.persistence.read(reader => reader.listProjectRevisionHistory(pid(projectId), heads, 100));
+    return revisions.map(revision => ({hash:revision.id,date:revision.createdAt,message:`Document revision ${revision.documentId}`}));
+  }
 }
