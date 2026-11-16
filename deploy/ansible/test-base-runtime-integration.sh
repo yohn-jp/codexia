@@ -189,9 +189,17 @@ diagnose_missing_database_unit() {
       sudo tee "$generator_probe_path" >/dev/null <<EOF
 #!/bin/sh
 {
-  printf 'HOME=%s\n' "\${HOME-}"
-  printf 'XDG_CONFIG_HOME=%s\n' "\${XDG_CONFIG_HOME-}"
-  printf 'XDG_RUNTIME_DIR=%s\n' "\${XDG_RUNTIME_DIR-}"
+  printf 'EFFECTIVE_UID=%s\n' "\$(id -u)"
+  printf 'PPID=%s\n' "\$PPID"
+  printf 'HOME=%s\n' "\${HOME-<unset>}"
+  printf 'XDG_CONFIG_HOME=%s\n' "\${XDG_CONFIG_HOME-<unset>}"
+  printf 'XDG_DATA_HOME=%s\n' "\${XDG_DATA_HOME-<unset>}"
+  printf 'XDG_STATE_HOME=%s\n' "\${XDG_STATE_HOME-<unset>}"
+  printf 'XDG_RUNTIME_DIR=%s\n' "\${XDG_RUNTIME_DIR-<unset>}"
+  case "\${DBUS_SESSION_BUS_ADDRESS-}" in
+    unix:path=/run/user/[0-9]*/bus) printf 'DBUS_SESSION_BUS_ADDRESS=%s\n' "\${DBUS_SESSION_BUS_ADDRESS}" ;;
+    *) printf 'DBUS_SESSION_BUS_ADDRESS=<unset-or-nonstandard>\n' ;;
+  esac
 } >> "$generator_probe_log"
 exec "$generator" "\$@"
 EOF
@@ -228,6 +236,27 @@ EOF
     printf '%s\n' '--- environment observed by the systemd-launched packaged-generator wrapper ---' >&2
     if [[ -s "$generator_probe_log" ]]; then
       cat "$generator_probe_log" >&2
+      local runner_uid probe_manager_uid manager_pid wrapper_ppid
+      runner_uid=$(id -u)
+      printf '%s\n' '--- runner and fixture user-manager process correlation ---' >&2
+      for probe_manager_uid in "$runner_uid" "$service_uid"; do
+        printf '%s\n' "user@${probe_manager_uid}.service:" >&2
+        sudo systemctl show --property=Id --property=MainPID --property=ControlGroup "user@${probe_manager_uid}.service" >&2 || true
+        manager_pid=$(sudo systemctl show --property=MainPID --value "user@${probe_manager_uid}.service" 2>/dev/null || true)
+        if [[ "$manager_pid" =~ ^[1-9][0-9]*$ ]]; then
+          printf '%s\n' "manager process environment (PID $manager_pid):" >&2
+          sudo cat "/proc/$manager_pid/environ" | tr '\0' '\n' | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_DATA_HOME|XDG_STATE_HOME|XDG_RUNTIME_DIR)=' >&2 || true
+          printf '%s\n' "manager process cgroup (PID $manager_pid):" >&2
+          sudo cat "/proc/$manager_pid/cgroup" >&2 || true
+        fi
+      done
+      while IFS= read -r wrapper_ppid; do
+        if [[ "$wrapper_ppid" =~ ^[1-9][0-9]*$ ]]; then
+          printf '%s\n' "generator parent process (PID $wrapper_ppid):" >&2
+          sudo ps -o pid=,ppid=,euid=,comm= -p "$wrapper_ppid" >&2 || true
+          sudo cat "/proc/$wrapper_ppid/cgroup" >&2 || true
+        fi
+      done < <(awk -F= '$1 == "PPID" { print $2 }' "$generator_probe_log" | sort -u)
     else
       printf 'The systemd reload did not execute the override at %s.\n' "$generator_probe_path" >&2
     fi
