@@ -514,6 +514,10 @@ expect_tunnel_drift_rejection() {
 }
 create_tunnel_fixture() {
   podman create --name codexia-tunnel "$@" --secret "${tunnel_fixture_secret:-codexia-tunnel-token}",type=mount,target=/run/secrets/token --read-only --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m "$tunnel_image" tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token-file /run/secrets/token >/dev/null
+  printf 'Tunnel fixture secret identities: '
+  podman inspect --format '{{json .Config.Secrets}}' codexia-tunnel | jq -c 'if type == "array" then map({Name}) else . end'
+  printf 'Tunnel fixture secret mount metadata: '
+  podman inspect --format '{{json .Mounts}}' codexia-tunnel | jq -c 'if type == "array" then map({Type,Name,Destination,RW}) else . end'
 }
 create_bind_tunnel_fixture() {
   podman create --name codexia-tunnel "$@" --read-only --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m "$tunnel_image" tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token-file /run/secrets/token >/dev/null
