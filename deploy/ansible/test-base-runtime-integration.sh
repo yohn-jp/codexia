@@ -191,6 +191,15 @@ diagnose_missing_database_unit() {
 {
   printf 'EFFECTIVE_UID=%s\n' "\$(id -u)"
   printf 'PPID=%s\n' "\$PPID"
+  printf 'GENERATOR_CGROUP='; cat /proc/self/cgroup 2>/dev/null | tr '\n' ';'; printf '\n'
+  if [ -r "/proc/\$PPID/status" ]; then
+    printf 'PARENT_STATUS='; grep -E '^(Name|Pid|PPid|Uid|Gid):' "/proc/\$PPID/status" | tr '\n' ';'; printf '\n'
+    printf 'PARENT_CGROUP='; cat "/proc/\$PPID/cgroup" 2>/dev/null | tr '\n' ';'; printf '\n'
+    printf 'PARENT_CMDLINE='; tr '\0' ' ' <"/proc/\$PPID/cmdline" 2>/dev/null; printf '\n'
+    printf 'PARENT_ENV='; tr '\0' '\n' <"/proc/\$PPID/environ" 2>/dev/null | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_DATA_HOME|XDG_STATE_HOME|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS)=' | tr '\n' ';'; printf '\n'
+  else
+    printf 'PARENT_PROC_UNAVAILABLE=1\n'
+  fi
   printf 'HOME=%s\n' "\${HOME-<unset>}"
   printf 'XDG_CONFIG_HOME=%s\n' "\${XDG_CONFIG_HOME-<unset>}"
   printf 'XDG_DATA_HOME=%s\n' "\${XDG_DATA_HOME-<unset>}"
