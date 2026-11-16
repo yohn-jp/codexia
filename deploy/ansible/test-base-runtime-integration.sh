@@ -721,6 +721,15 @@ cat > "$switch_playbook" <<YAML
 - hosts: localhost
   connection: local
   gather_facts: false
+  become: true
+  become_user: $service_user
+  environment:
+    HOME: "$service_home"
+    XDG_CONFIG_HOME: "$service_home/.config"
+    XDG_DATA_HOME: "$service_home/.local/share"
+    XDG_STATE_HOME: "$service_home/.local/state"
+    XDG_RUNTIME_DIR: "/run/user/$service_uid"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/$service_uid/bus"
   vars:
     ansible_python_interpreter: /usr/bin/python3
     quadlet_dir: "$quadlet_dir"
