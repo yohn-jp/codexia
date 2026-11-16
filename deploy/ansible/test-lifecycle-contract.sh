@@ -137,4 +137,35 @@ for stage in pause resume rollback; do
   expected="$stage"; [[ "$stage" != rollback ]] || expected=acceptance-rollback
   [[ "$(cat "$operation_file")" == "$expected" ]]
 done
+# The same source/configuration guard used before verify and backup must
+# reject drift before invoking an installed updater, even before a journal exists.
+guard="$tmp/guard"
+mkdir -p "$guard/source/deploy/updater" "$guard/source/scripts" "$guard/quadlet"
+for file in deploy/updater/{codexia-updater,standalone-updater.mjs,standalone-host.mjs,standalone-maintenance.mjs,proxy.mjs,standalone-backup.sh} scripts/{standalone-update-controller.mjs,update-host-state.mjs,update-channel.mjs,update-release-policy.mjs}; do
+  install -m 0600 "$root/$file" "$guard/source/$file"
+done
+printf 'fixture proxy\n' > "$guard/quadlet/codexia-api-proxy.container"
+printf '{"enabled":false}\n' > "$guard/config.json"
+cat > "$guard/guard.yml" <<YAML
+---
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    repo_root: "$root"
+    source_dir: "$guard/source"
+    quadlet_dir: "$guard/quadlet"
+    config_path: "$guard/config.json"
+    desired_proxy_quadlet: "fixture proxy\\n"
+    desired_config: {enabled: false}
+  tasks:
+    - ansible.builtin.include_tasks: "$root/deploy/ansible/verify-updater-inputs.yml"
+YAML
+ansible-playbook -i localhost, "$guard/guard.yml" > "$guard/valid.log" || { cat "$guard/valid.log"; exit 1; }
+printf '# drift\n' >> "$guard/source/deploy/updater/codexia-updater"
+if ansible-playbook -i localhost, "$guard/guard.yml" > "$guard/drift.log" 2>&1; then
+  echo 'Drifted updater source was accepted' >&2
+  exit 1
+fi
+grep -q 'Installed updater source differs from the reviewed repository' "$guard/drift.log"
 echo 'Ansible lifecycle stage contract checks passed'

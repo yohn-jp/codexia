@@ -13,6 +13,8 @@ on:
       - scripts/standalone-update-controller.mjs
       - scripts/standalone-backup-controller.test.mjs
       - deploy/ansible/backup.yml
+      - deploy/ansible/verify-updater-inputs.yml
+      - deploy/ansible/verify-updater-units.yml
       - deploy/ansible/lifecycle.yml
       - deploy/ansible/restore-drill.yml
       - deploy/ansible/test-lifecycle-contract.sh
@@ -35,6 +37,8 @@ on:
       - scripts/standalone-update-controller.mjs
       - scripts/standalone-backup-controller.test.mjs
       - deploy/ansible/backup.yml
+      - deploy/ansible/verify-updater-inputs.yml
+      - deploy/ansible/verify-updater-units.yml
       - deploy/ansible/lifecycle.yml
       - deploy/ansible/restore-drill.yml
       - deploy/ansible/test-lifecycle-contract.sh
