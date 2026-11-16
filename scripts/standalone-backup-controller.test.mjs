@@ -753,6 +753,21 @@ test('container runtime fingerprint excludes only Podman-generated hostname and 
   assert.notEqual(containerRuntimeFingerprint(explicit), containerRuntimeFingerprint(explicitDrift));
 });
 
+test('container runtime fingerprint validates and retains Podman Config.Passwd boolean', () => {
+  const container = {
+    Image: 'sha256:' + 'a'.repeat(64),
+    Config: { Env: [], CreateCommand: ['podman', 'run'], Passwd: false },
+    HostConfig: {},
+    NetworkSettings: { Networks: {} },
+    Mounts: [],
+  };
+  const fingerprint = containerRuntimeFingerprint(container);
+
+  assert.notEqual(containerRuntimeFingerprint({ ...container, Config: { ...container.Config, Passwd: true } }), fingerprint);
+  assert.throws(() => containerRuntimeFingerprint({ ...container, Config: { ...container.Config, Passwd: 'fixture-value' } }), /Config.Passwd must be a boolean/);
+  assert.throws(() => containerRuntimeFingerprint({ ...container, HostConfig: { Passwd: false } }), /Potential plaintext secret in HostConfig property: Passwd/);
+});
+
 test('legacy startup fence allows only intent-free starts or a unit-specific recovery permit', () => {
   const originalRuntime = process.env.XDG_RUNTIME_DIR;
   process.env.XDG_RUNTIME_DIR = '/run/user/1000';

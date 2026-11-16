@@ -171,7 +171,9 @@ function assertNoSecretNamedFields(value,location='runtime'){
   if(Array.isArray(value)){for(const entry of value)assertNoSecretNamedFields(entry,location);return;}
   if(!value||typeof value!=='object')return;
   for(const [key,entry] of Object.entries(value)){
-    assert.ok(!/(?:TOKEN|PASSWORD|PASSWD|SECRET|CREDENTIAL|PRIVATE.?KEY|API.?KEY)/iu.test(key)||/_FILE$/iu.test(key),
+    const podmanPasswdFlag=location==='Config'&&key==='Passwd';
+    if(podmanPasswdFlag)assert.equal(typeof entry,'boolean','Podman Config.Passwd must be a boolean');
+    assert.ok(podmanPasswdFlag||!/(?:TOKEN|PASSWORD|PASSWD|SECRET|CREDENTIAL|PRIVATE.?KEY|API.?KEY)/iu.test(key)||/_FILE$/iu.test(key),
       'Potential plaintext secret in '+location+' property: '+key);
     assertNoSecretNamedFields(entry,location+'.'+key);
   }
