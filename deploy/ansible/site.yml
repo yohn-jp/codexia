@@ -6,7 +6,7 @@
   any_errors_fatal: true
   vars:
     repo_root: "{{ playbook_dir }}/../.."
-    home: "{{ ansible_facts.user_dir }}"
+    home: "{{ codexia_service_home | default(ansible_facts.user_dir) }}"
     config_dir: "{{ home }}/.config/codexia-updater"
     state_dir: "{{ home }}/.local/state/codexia-updater"
     quadlet_dir: "{{ home }}/.config/containers/systemd"
@@ -15,8 +15,15 @@
     config_path: "{{ config_dir }}/config.json"
     updater: "{{ source_dir }}/deploy/updater/codexia-updater"
     updater_env:
-      XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.user_uid }}"
+      XDG_RUNTIME_DIR: "/run/user/{{ codexia_service_uid | default(ansible_facts.user_uid) }}"
       XDG_STATE_HOME: "{{ home }}/.local/state"
+    service_runtime_env:
+      HOME: "{{ home }}"
+      XDG_CONFIG_HOME: "{{ home }}/.config"
+      XDG_DATA_HOME: "{{ home }}/.local/share"
+      XDG_STATE_HOME: "{{ home }}/.local/state"
+      XDG_RUNTIME_DIR: "/run/user/{{ codexia_service_uid | default(ansible_facts.user_uid) }}"
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ codexia_service_uid | default(ansible_facts.user_uid) }}/bus"
     desired_config:
       format: codexia-standalone-updater/v1
       enabled: false
@@ -51,26 +58,49 @@
       ansible.builtin.assert:
         that:
           - ansible_facts.user_uid | int != 0
-          - codexia_stage in ['secrets', 'prepare', 'initialize', 'enable', 'verify', 'acceptance-update', 'acceptance-rollback']
-          - codexia_stage == 'secrets' or codexia_frontend_origin is match('^https://[a-z0-9.-]+(:[0-9]+)?$')
-          - codexia_stage == 'secrets' or codexia_proxy_image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
-          - codexia_stage == 'secrets' or codexia_browser_auth.mode in ['token', 'cloudflare-access']
+          - codexia_stage in ['secrets', 'base', 'prepare', 'initialize', 'enable', 'verify', 'acceptance-update', 'acceptance-rollback']
+          - codexia_stage in ['secrets', 'base'] or codexia_frontend_origin is match('^https://[a-z0-9.-]+(:[0-9]+)?$')
+          - codexia_stage in ['secrets', 'base'] or codexia_proxy_image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+          - codexia_stage in ['secrets', 'base'] or codexia_browser_auth.mode in ['token', 'cloudflare-access']
     - name: Check rootless prerequisites (do not replace the existing host installation)
       ansible.builtin.command:
         argv: [sh, -ec, 'command -v podman; command -v flock; node -e "if (parseInt(process.versions.node,10) < 22) process.exit(1)"']
       changed_when: false
       check_mode: false
+      become: "{{ codexia_stage in ['secrets', 'base'] }}"
+      become_user: "{{ codexia_service_user if codexia_stage in ['secrets', 'base'] else omit }}"
+      environment: "{{ service_runtime_env if codexia_stage in ['secrets', 'base'] else updater_env }}"
+      when: codexia_stage != 'base'
     - name: Check rootless systemd
       ansible.builtin.command:
         argv: [systemctl, --user, show, --property=Version]
       changed_when: false
       check_mode: false
+      become: "{{ codexia_stage in ['secrets', 'base'] }}"
+      become_user: "{{ codexia_service_user if codexia_stage in ['secrets', 'base'] else omit }}"
+      environment: "{{ service_runtime_env if codexia_stage in ['secrets', 'base'] else updater_env }}"
     - name: Converge base Podman secrets before application initialization
-      ansible.builtin.include_tasks: base-secrets.yml
+      ansible.builtin.include_tasks:
+        file: base-secrets.yml
+        apply:
+          become: true
+          become_user: "{{ codexia_service_user }}"
+          environment: "{{ service_runtime_env }}"
       when: codexia_stage == 'secrets'
     - name: End secret convergence before application or updater operations
       ansible.builtin.meta: end_host
       when: codexia_stage == 'secrets'
+    - name: Converge canonical rootless networks, volumes, PostgreSQL, and Tunnel Quadlets
+      ansible.builtin.include_tasks:
+        file: base-runtime.yml
+        apply:
+          become: true
+          become_user: "{{ codexia_service_user }}"
+          environment: "{{ service_runtime_env }}"
+      when: codexia_stage == 'base'
+    - name: End base convergence before application or updater operations
+      ansible.builtin.meta: end_host
+      when: codexia_stage == 'base'
     - name: Check for durable controller state
       ansible.builtin.stat:
         path: "{{ state_dir }}/controller.json"

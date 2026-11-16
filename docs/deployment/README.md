@@ -59,7 +59,7 @@ The Cloudflare Terraform example manages the author Access application, two exac
 
 ## VM environment and Secrets
 
-[Infrastructure as code](IAC.md) is the normative VM desired-state authority. The current manual host setup and updater-only Ansible adoption described below are transitional until its convergence and acceptance phases are implemented; they do not establish complete Ansible coverage.
+[Infrastructure as code](IAC.md) is the normative VM desired-state authority. Rootless host inspection and the protected secret, storage, network, PostgreSQL and Tunnel stages are implemented; the manual procedures and updater lifecycle below remain transitional until runtime convergence, cutover, maintenance and target-host acceptance are verified.
 
 `deploy/quadlet/codexia-api.container` defines these runtime values:
 

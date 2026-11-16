@@ -8,8 +8,10 @@ case "$PG_APP_PASSWORD" in *[!A-Fa-f0-9]*|'') echo "PostgreSQL application passw
 psql --set=ON_ERROR_STOP=1 \
   --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'SQL'
 \getenv app_password PG_APP_PASSWORD
+BEGIN;
 SELECT format('CREATE ROLE codexia LOGIN PASSWORD %L', :'app_password') \gexec
 ALTER DATABASE codexia OWNER TO codexia;
+COMMIT;
 SQL
 
 unset PG_APP_PASSWORD

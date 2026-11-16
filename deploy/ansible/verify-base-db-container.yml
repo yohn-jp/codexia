@@ -1,0 +1,102 @@
+---
+- name: Verify the database container uses the existing reviewed image pin
+  ansible.builtin.command:
+    argv:
+      - podman
+      - inspect
+      - --format
+      - "{% raw %}{{.Config.Image}}{% endraw %}"
+      - codexia-db
+  register: base_runtime_db_image
+  changed_when: false
+- name: Reject any implicit PostgreSQL image change
+  ansible.builtin.assert:
+    that:
+      # Podman 5.7 reports a digest-only reference in Config.Image for some
+      # rootless containers. Both accepted forms pin the same manifest digest.
+      - base_runtime_db_image.stdout in [
+          'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536',
+          'docker.io/library/postgres@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536'
+        ]
+    fail_msg: The existing database container does not use the repository's verified PostgreSQL image pin.
+- name: Verify the database container has only the canonical storage volume
+  ansible.builtin.command:
+    argv: [podman, inspect, --format, "{% raw %}{{json .Mounts}}{% endraw %}", codexia-db]
+  register: base_runtime_db_mounts
+  changed_when: false
+- name: Verify the database container is attached only to its private internal network
+  ansible.builtin.command:
+    argv: [podman, inspect, --format, "{% raw %}{{json .NetworkSettings.Networks}}{% endraw %}", codexia-db]
+  register: base_runtime_db_networks
+  changed_when: false
+- name: Verify the database container publishes no host ports
+  ansible.builtin.command:
+    argv: [podman, inspect, --format, "{% raw %}{{json .HostConfig.PortBindings}}{% endraw %}", codexia-db]
+  register: base_runtime_db_ports
+  changed_when: false
+- name: Verify the database container's PGDATA and bootstrap credential source
+  ansible.builtin.command:
+    argv: [podman, inspect, --format, "{% raw %}{{json .Config.Env}}{% endraw %}", codexia-db]
+  register: base_runtime_db_environment
+  changed_when: false
+- name: Inspect the database container's declared secret identities without reading values
+  ansible.builtin.command:
+    argv: [podman, inspect, --format, "{% raw %}{{json .Config.Secrets}}{% endraw %}", codexia-db]
+  register: base_runtime_db_secrets
+  changed_when: false
+- name: Inspect the current administrator secret identity
+  ansible.builtin.command:
+    argv: [podman, secret, inspect, --format, "{% raw %}{{.ID}}{% endraw %}", codexia-postgres-admin-password]
+  register: base_runtime_db_admin_secret_id
+  changed_when: false
+- name: Inspect the current application secret identity
+  ansible.builtin.command:
+    argv: [podman, secret, inspect, --format, "{% raw %}{{.ID}}{% endraw %}", codexia-postgres-app-password]
+  register: base_runtime_db_app_secret_id
+  changed_when: false
+- name: Reject database container storage, network, or port drift
+  ansible.builtin.assert:
+    that:
+      - >-
+        (base_runtime_db_mounts.stdout | from_json
+        | selectattr('Type', 'equalto', 'volume')
+        | selectattr('Name', 'equalto', 'codexia-postgres')
+        | selectattr('Destination', 'equalto', '/var/lib/postgresql/data')
+        | list | length) == 1
+      - >-
+        (base_runtime_db_mounts.stdout | from_json
+        | selectattr('Type', 'equalto', 'volume')
+        | list | length) == 1
+      - >-
+        (base_runtime_db_mounts.stdout | from_json
+        | selectattr('Destination', 'match', '^/var/lib/postgresql(/|$)')
+        | list | length) == 1
+      - >-
+        (base_runtime_db_mounts.stdout | from_json
+        | selectattr('Destination', 'equalto', '/docker-entrypoint-initdb.d/010-create-app-role.sh')
+        | selectattr('Type', 'equalto', 'bind')
+        | selectattr('Source', 'equalto', '/etc/codexia/postgres/010-create-app-role.sh')
+        | selectattr('RW', 'equalto', false)
+        | list | length) == 1
+      - (base_runtime_db_networks.stdout | from_json).keys() | list == ['codexia-data']
+      - (base_runtime_db_ports.stdout | from_json) is none or (base_runtime_db_ports.stdout | from_json) == {}
+      - >-
+        (base_runtime_db_environment.stdout | from_json | select('equalto', 'PGDATA=/var/lib/postgresql/data/pgdata') | list | length) == 1
+      - >-
+        (base_runtime_db_environment.stdout | from_json | select('equalto', 'POSTGRES_DB=codexia') | list | length) == 1
+      - >-
+        (base_runtime_db_environment.stdout | from_json | select('equalto', 'POSTGRES_USER=codexia_admin') | list | length) == 1
+      - >-
+        (base_runtime_db_environment.stdout | from_json | select('equalto', 'POSTGRES_PASSWORD_FILE=/run/secrets/admin-password') | list | length) == 1
+      - (base_runtime_db_secrets.stdout | from_json | length) == 2
+      - >-
+        (base_runtime_db_secrets.stdout | from_json
+        | selectattr('Name', 'equalto', 'codexia-postgres-admin-password')
+        | selectattr('ID', 'equalto', base_runtime_db_admin_secret_id.stdout)
+        | list | length) == 1
+      - >-
+        (base_runtime_db_secrets.stdout | from_json
+        | selectattr('Name', 'equalto', 'codexia-postgres-app-password')
+        | selectattr('ID', 'equalto', base_runtime_db_app_secret_id.stdout)
+        | list | length) == 1
+    fail_msg: Database container has unexpected PGDATA, storage, network, port, or current secret identity configuration.
