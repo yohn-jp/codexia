@@ -756,6 +756,51 @@ test('container runtime fingerprint excludes only Podman-generated hostname and 
   assert.notEqual(containerRuntimeFingerprint(explicit), containerRuntimeFingerprint(explicitDrift));
 });
 
+test('container runtime fingerprint canonicalizes unique environment order but preserves duplicates', () => {
+  const base = {
+    Image: 'sha256:' + 'a'.repeat(64),
+    Config: { Env: ['ZED=last', 'ALPHA=first'], Entrypoint: ['/bin/sh'], Cmd: ['sleep', '300'], CreateCommand: ['podman', 'run'] },
+    HostConfig: {},
+    NetworkSettings: { Networks: {} },
+    Mounts: [],
+  };
+  const reordered = { ...base, Config: { ...base.Config, Env: ['ALPHA=first', 'ZED=last'] } };
+
+  assert.equal(containerRuntimeFingerprint(reordered), containerRuntimeFingerprint(base), 'Unique environment keys have no order-dependent lookup semantics');
+
+  const duplicates = { ...base, Config: { ...base.Config, Env: ['PORT=3000', 'PORT=4000'] } };
+  const duplicatesReordered = { ...duplicates, Config: { ...duplicates.Config, Env: ['PORT=4000', 'PORT=3000'] } };
+  assert.notEqual(containerRuntimeFingerprint(duplicatesReordered), containerRuntimeFingerprint(duplicates), 'Duplicate environment key order can change the effective value');
+});
+
+test('container runtime fingerprint normalizes only Podman-generated HOSTNAME and rejects unrelated drift', () => {
+  const makeContainer = (id, hostname, createCommand = ['podman', 'run'], envHostname = hostname) => ({
+    Id: id.repeat(64),
+    Image: 'sha256:' + 'a'.repeat(64),
+    Config: { Env: ['PATH=/usr/bin', 'HOSTNAME=' + envHostname], Hostname: hostname, CreateCommand: createCommand },
+    HostConfig: {},
+    NetworkSettings: { Networks: {} },
+    Mounts: [],
+  });
+  const first = makeContainer('a', 'aaaaaaaaaaaa');
+  const recreated = makeContainer('b', 'bbbbbbbbbbbb');
+  assert.equal(containerRuntimeFingerprint(first), containerRuntimeFingerprint(recreated), 'Generated hostname follows the recreated container identity');
+
+  const idHostname = makeContainer('e', '', ['podman', 'run'], 'e'.repeat(12));
+  assert.equal(containerRuntimeFingerprint(idHostname), containerRuntimeFingerprint(makeContainer('f', '', ['podman', 'run'], 'f'.repeat(12))), 'Generated hostname may also be the inspected container ID prefix');
+
+  const mismatchedGeneratedValue = makeContainer('c', 'cccccccccccc', ['podman', 'run'], 'unrelated-hostname');
+  assert.throws(() => containerRuntimeFingerprint(mismatchedGeneratedValue), /Podman-generated HOSTNAME does not match the inspected hostname or container ID/);
+
+  const explicitBefore = makeContainer('d', 'default-hostname', ['podman', 'run', '--env', 'HOSTNAME=service-a'], 'service-a');
+  const explicitAfter = makeContainer('d', 'default-hostname', ['podman', 'run', '--env', 'HOSTNAME=service-b'], 'service-b');
+  assert.notEqual(containerRuntimeFingerprint(explicitBefore), containerRuntimeFingerprint(explicitAfter), 'Explicit HOSTNAME remains part of runtime identity');
+
+  const explicitHostnameBefore = makeContainer('g', 'service-host', ['podman', 'run', '--hostname', 'service-host'], 'service-host');
+  const explicitHostnameAfter = makeContainer('g', 'service-host', ['podman', 'run', '--hostname', 'service-host'], 'changed-host');
+  assert.notEqual(containerRuntimeFingerprint(explicitHostnameBefore), containerRuntimeFingerprint(explicitHostnameAfter), 'An explicit hostname keeps its runtime HOSTNAME tied to the observed configuration');
+});
+
 test('container runtime fingerprint validates and retains Podman Config.Passwd boolean', () => {
   const container = {
     Image: 'sha256:' + 'a'.repeat(64),

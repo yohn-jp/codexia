@@ -224,6 +224,52 @@ function configuredRuntimeHostname(container){
   assert.equal(container.Config.Hostname,hostname,'Podman explicit hostname differs from its inspected value');
   return hostname;
 }
+function configuredRuntimeEnvironment(container){
+  const command=container.Config?.CreateCommand;
+  assert.ok(Array.isArray(command)&&command.every(argument=>typeof argument==='string'),'Podman container create arguments are unobservable');
+  const names=new Set();
+  for(let index=0;index<command.length;index++){
+    const argument=command[index];
+    if(argument==='--')break;
+    let declaration;
+    if(argument==='--env'||argument==='-e'){
+      declaration=command[++index];
+      assert.ok(typeof declaration==='string'&&declaration.length>0,'Podman environment create argument is malformed');
+    }else if(argument.startsWith('--env='))declaration=argument.slice('--env='.length);
+    else if(argument.startsWith('-e='))declaration=argument.slice(3);
+    else if(argument.startsWith('-e')&&argument.length>2)declaration=argument.slice(2);
+    else continue;
+    const name=declaration.split('=',1)[0];
+    assert.match(name,/^[A-Za-z_][A-Za-z0-9_]*$/u,'Podman environment create argument is malformed');
+    names.add(name);
+  }
+  return names;
+}
+function fingerprintEnvironment(container){
+  const values=safeEnvironment(container.Config.Env??[]);
+  const configuredHostname=configuredRuntimeHostname(container);
+  const configuredEnvironment=configuredRuntimeEnvironment(container);
+  if(configuredHostname===null&&!configuredEnvironment.has('HOSTNAME')){
+    const hostnameEntries=values.map((entry,index)=>({entry,index})).filter(({entry})=>entry.startsWith('HOSTNAME='));
+    assert.ok(hostnameEntries.length<=1,'Podman-generated HOSTNAME is ambiguous');
+    if(hostnameEntries.length===1){
+      const {entry,index}=hostnameEntries[0];
+      const observed=entry.slice('HOSTNAME='.length);
+      const inspected=container.Config.Hostname;
+      const id=String(container.Id??container.ID??'').replace(/^sha256:/u,'');
+      const matchesInspectedHostname=typeof inspected==='string'&&observed===inspected;
+      const matchesContainerId=/^[a-f0-9]{12,64}$/u.test(id)&&observed.length>=12&&id.startsWith(observed);
+      assert.ok(matchesInspectedHostname||matchesContainerId,'Podman-generated HOSTNAME does not match the inspected hostname or container ID');
+      values[index]='HOSTNAME=<podman-generated>';
+    }
+  }
+  const names=values.map(entry=>entry.slice(0,entry.indexOf('=')));
+  if(new Set(names).size===names.length)values.sort((left,right)=>{
+    const leftName=left.slice(0,left.indexOf('=')),rightName=right.slice(0,right.indexOf('='));
+    return leftName<rightName?-1:leftName>rightName?1:0;
+  });
+  return values;
+}
 function runtimeSecretMounts(container,secretIdentities){
   const command=container.Config?.CreateCommand;
   assert.ok(Array.isArray(command)&&command.every(argument=>typeof argument==='string'),'Podman container create arguments are unobservable');
@@ -296,8 +342,8 @@ export function containerRuntimeFingerprintProjection(container,secretIdentities
   }).sort((left,right)=>left.name.localeCompare(right.name));
   const currentSecretIdentities=runtimeSecretIdentities(container,secretIdentities);
   const secretMounts=runtimeSecretMounts(container,currentSecretIdentities);
-  const {CreateCommand:_createCommand,Secrets:_secrets,Env,Hostname:_hostname,...configSettings}=config;
-  const sanitizedConfig={...configSettings,Env:safeEnvironment(Env??[]),Hostname:configuredRuntimeHostname(container)};
+  const {CreateCommand:_createCommand,Secrets:_secrets,Env:_environment,Hostname:_hostname,...configSettings}=config;
+  const sanitizedConfig={...configSettings,Env:fingerprintEnvironment(container),Hostname:configuredRuntimeHostname(container)};
   assertNoSecretNamedFields(sanitizedConfig,'Config');
   assertNoSecretNamedFields(host,'HostConfig');
   return canonical({
