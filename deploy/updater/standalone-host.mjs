@@ -137,7 +137,7 @@ export function assertRuntimeObservation(container,value,imageEnvironment,unitTe
   const tmpfsMounts=actual.filter(mount=>mount.type==='tmpfs');
   const allowedTmpfs=new Set(['/cache','/tmp','/dev','/dev/shm','/run','/var/tmp']);
   assert.ok(tmpfsMounts.every(mount=>allowedTmpfs.has(mount.destination)&&mount.rw),'Legacy runtime has an undeclared tmpfs mount');
-  assert.ok(tmpfsMounts.some(mount=>mount.destination==='/cache')&&tmpfsMounts.some(mount=>mount.destination==='/tmp'),'Declared runtime tmpfs mounts are missing');
+  // Podman may omit tmpfs pseudo-mounts from Mounts; HostConfig.Tmpfs is checked below.
   assert.equal(actual.length,persistent.length+tmpfsMounts.length,'Legacy runtime contains an unsupported mount type');
   assert.equal(container.HostConfig?.Memory??0,runtime.resources.memoryMaxBytes??0,'Legacy memory limit drift');
   const expectedCpuQuota=runtime.resources.cpuQuotaPercent===null?0:runtime.resources.cpuQuotaPercent*1000;

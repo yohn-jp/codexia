@@ -102,6 +102,7 @@ test('legacy runtime verification rejects undeclared environment, mounts and sys
   }},
  };
  assert.doesNotThrow(()=>assertRuntimeObservation(observed,runtime,imageEnvironment,unit));
+ assert.doesNotThrow(()=>assertRuntimeObservation({...observed,Mounts:observed.Mounts.filter(mount=>mount.Type!=='tmpfs')},runtime,imageEnvironment,unit));
  assert.doesNotThrow(()=>assertRuntimeUnit('[Service]\nCPUQuota=250%\n',runtime));
  assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Hostname:'codexia-slot-blue'}},runtime,imageEnvironment,unit),/Podman-generated hostname drift/);
  assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:observed.Config.Env.map(entry=>entry==='HOSTNAME='+containerId.slice(0,12)?'HOSTNAME=injected-host':entry)}},runtime,imageEnvironment,unit),/unexpected runtime environment/);
