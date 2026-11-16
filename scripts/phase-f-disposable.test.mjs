@@ -22,6 +22,7 @@ test('Phase F workflow reuses the Full-model proof and limits the runtime job to
   assert.match(workflow, /actions: read/u);
   assert.match(workflow, /packages: read/u);
   assert.match(workflow, /\$\{\{ runner\.temp \}\}\/codexia-phase-f-evidence\//u);
+  assert.match(workflow, /if-no-files-found: error/u);
   assert.ok(workflow.match(/deploy\/update-compatibility\.json/gu)?.length >= 2, 'Compatibility changes must trigger both PR and main runs');
   assert.match(runtimeJob, /permissions:\s*\n\s+contents: read\s*\n\s+actions: read\s*\n\s+packages: read/u);
   assert.doesNotMatch(runtimeJob, /(?:contents|actions|packages):\s*write/u);
@@ -49,12 +50,23 @@ test('Phase F integration helper is valid shell and exercises the existing locke
     'test-channel-public.pem',
     'journalctl --user --unit=codexia-db.service',
     'status codexia-db.service --no-pager',
+    'postgres-init-access.txt',
+    'rootless unshare sh -c',
+    'uid_map',
+    'gid_map',
+    '--user postgres',
+    'test -r /docker-entrypoint-initdb.d/010-create-app-role.sh',
+    'as_service tee "$evidence_dir/postgres-init-access.txt"',
   ]) assert.ok(helper.includes(marker), 'Missing integration proof: ' + marker);
   const evidenceAllowlist = helper.match(/evidence_files=\(\s*([\s\S]*?)\s*\)/u)?.[1];
   assert.ok(evidenceAllowlist, 'Missing explicit artifact evidence allowlist');
   assert.match(evidenceAllowlist, /release-identities\.json lifecycle-results\.json/u);
+  assert.match(evidenceAllowlist, /postgres-init-access\.txt/u);
   assert.doesNotMatch(evidenceAllowlist, /private|secret|token|github-read/i);
   assert.match(helper, /Successful Phase F run is missing uploaded evidence/u);
+  assert.match(helper, /sudo test -d "\$evidence_dir"[\s\S]*?sudo test -f "\$evidence_source"[\s\S]*?sudo install -m 0644 -- "\$evidence_source" "\$evidence_copy\/\$evidence_file"[\s\S]*?sudo chown "\$\(id -u\):\$\(id -g\)"/u);
+  assert.match(helper, /sudo test -L "\$evidence_source"/u);
+  assert.match(helper, /Successful Phase F run is missing source evidence/u);
   assert.doesNotMatch(helper, /sudo cp -a "\$evidence_dir/u);
   const repoRoot = helper.indexOf('repo_root=$(cd');
   const accessibleCwd = helper.indexOf('\ncd /tmp\n');
@@ -75,6 +87,9 @@ test('Phase F integration helper is valid shell and exercises the existing locke
   assert.match(helper, /postgres_init_script=\$postgres_init_dir\/010-create-app-role\.sh/u);
   assert.match(helper, /sudo install -d -o "\$service_user" -g root -m 0750 "\$postgres_init_dir"/u);
   assert.match(helper, /sudo install -o "\$service_user" -g root -m 0550 "\$source_dir\/deploy\/postgres\/010-create-app-role\.sh" "\$postgres_init_script"/u);
+  assert.match(helper, /sudo stat --printf='host-file=%n mode=%a uid=%u gid=%g owner=%U group=%G\\n' "\$postgres_init_script"/u);
+  assert.match(helper, /rootless run --rm --user postgres --entrypoint \/bin\/sh[\s\S]*?--volume "\$postgres_init_script:\/docker-entrypoint-initdb\.d\/010-create-app-role\.sh:ro,Z"[\s\S]*?test -r \/docker-entrypoint-initdb\.d\/010-create-app-role\.sh[\s\S]*?user_systemctl start codexia-db\.service/u);
+  assert.match(helper, /postgres_image=\$\(sed -n 's\/\^Image=\/\/p' "\$source_dir\/deploy\/quadlet\/codexia-db\.container"\)/u);
   assert.match(helper, /codexia-updater(?:\.sh)?/u);
 });
 

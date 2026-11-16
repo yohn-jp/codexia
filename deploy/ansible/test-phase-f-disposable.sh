@@ -64,26 +64,41 @@ cleanup() {
   local cleanup_status=0
   trap - EXIT ERR
   set +e
-  if [[ -n "$evidence_dir" && -d "$evidence_dir" && -n "${RUNNER_TEMP:-}" ]]; then
+  evidence_files=(
+    release-0.1.236.json release-0.1.245.json release-0.1.254.json
+    channel-sequence-1.json channel-sequence-2.json test-channel-public.pem
+    simulated-frontend-identity.json release-identities.json lifecycle-results.json
+    postgres-init-access.txt
+  )
+  if [[ -n "${RUNNER_TEMP:-}" ]]; then
     evidence_copy="$RUNNER_TEMP/codexia-phase-f-evidence"
-    mkdir -p "$evidence_copy"
-    evidence_files=(
-      release-0.1.236.json release-0.1.245.json release-0.1.254.json
-      channel-sequence-1.json channel-sequence-2.json test-channel-public.pem
-      simulated-frontend-identity.json release-identities.json lifecycle-results.json
-    )
-    for evidence_file in "${evidence_files[@]}"; do
-      evidence_source="$evidence_dir/$evidence_file"
-      if [[ -e "$evidence_source" || -L "$evidence_source" ]]; then
-        if [[ ! -f "$evidence_source" || -L "$evidence_source" ]]; then
-          printf 'Refusing non-regular Phase F evidence file: %s\n' "$evidence_file" >&2
+    if ! mkdir -p "$evidence_copy"; then
+      printf 'Cannot create Phase F evidence artifact directory: %s\n' "$evidence_copy" >&2
+      cleanup_status=1
+    fi
+    if [[ -n "$evidence_dir" ]] && sudo test -d "$evidence_dir" && ! sudo test -L "$evidence_dir"; then
+      for evidence_file in "${evidence_files[@]}"; do
+        evidence_source="$evidence_dir/$evidence_file"
+        if sudo test -e "$evidence_source" || sudo test -L "$evidence_source"; then
+          if ! sudo test -f "$evidence_source" || sudo test -L "$evidence_source"; then
+            printf 'Refusing non-regular Phase F evidence file: %s\n' "$evidence_file" >&2
+            cleanup_status=1
+            continue
+          fi
+          if ! sudo install -m 0644 -- "$evidence_source" "$evidence_copy/$evidence_file"; then
+            cleanup_status=1
+            continue
+          fi
+          sudo chown "$(id -u):$(id -g)" "$evidence_copy/$evidence_file" || cleanup_status=1
+        elif (( status == 0 )); then
+          printf 'Successful Phase F run is missing source evidence: %s\n' "$evidence_file" >&2
           cleanup_status=1
-          continue
         fi
-        sudo install -m 0644 -- "$evidence_source" "$evidence_copy/$evidence_file" || cleanup_status=1
-        sudo chown "$(id -u):$(id -g)" "$evidence_copy/$evidence_file" || cleanup_status=1
-      fi
-    done
+      done
+    elif (( status == 0 )); then
+      printf 'Successful Phase F run is missing its real, non-symlink evidence directory: %s\n' "${evidence_dir:-unset}" >&2
+      cleanup_status=1
+    fi
     if (( status == 0 )); then
       for evidence_file in "${evidence_files[@]}"; do
         if [[ ! -s "$evidence_copy/$evidence_file" ]]; then
@@ -92,6 +107,9 @@ cleanup() {
         fi
       done
     fi
+  elif (( status == 0 )); then
+    printf '%s\n' 'Successful Phase F run has no RUNNER_TEMP for its evidence artifacts.' >&2
+    cleanup_status=1
   fi
   if [[ "$fixture_created" == true ]] && id "$service_user" >/dev/null 2>&1; then
     user_systemctl stop codexia-slot-blue.service codexia-slot-green.service codexia-api-proxy.service codexia-db.service >/dev/null 2>&1 || true
@@ -253,6 +271,31 @@ rootless secret create codexia-auth-token "$secret_dir/auth-token" >/dev/null
 rootless secret create codexia-postgres-admin-password "$secret_dir/admin-password" >/dev/null
 rootless secret create codexia-postgres-app-password "$secret_dir/app-password" >/dev/null
 rootless secret create codexia-postgres-preflight-password "$secret_dir/preflight-password" >/dev/null
+
+postgres_image=$(sed -n 's/^Image=//p' "$source_dir/deploy/quadlet/codexia-db.container")
+[[ "$postgres_image" =~ ^docker\.io/library/postgres:17-bookworm@sha256:[a-f0-9]{64}$ ]]
+{
+  printf '%s\n' '=== Host rootless account and PostgreSQL init bind source ==='
+  id "$service_user"
+  sudo stat --printf='host-file=%n mode=%a uid=%u gid=%g owner=%U group=%G\n' "$postgres_init_script"
+  sudo stat --printf='host-parent=%n mode=%a uid=%u gid=%g owner=%U group=%G\n' "$postgres_init_dir"
+  printf '%s\n' '=== Podman rootless user namespace maps ==='
+  rootless unshare sh -c 'printf "uid_map:\n"; cat /proc/self/uid_map; printf "gid_map:\n"; cat /proc/self/gid_map'
+  printf '%s\n' '=== Exact pinned PostgreSQL image bind read as the postgres user ==='
+  rootless run --rm --user postgres --entrypoint /bin/sh \
+    --volume "$postgres_init_script:/docker-entrypoint-initdb.d/010-create-app-role.sh:ro,Z" \
+    "$postgres_image" -ec '
+      id
+      printf "container uid_map:\n"
+      cat /proc/self/uid_map
+      printf "container gid_map:\n"
+      cat /proc/self/gid_map
+      stat --printf="container-file=%n mode=%a uid=%u gid=%g owner=%U group=%G\\n" /docker-entrypoint-initdb.d/010-create-app-role.sh
+      test -r /docker-entrypoint-initdb.d/010-create-app-role.sh
+      cat /docker-entrypoint-initdb.d/010-create-app-role.sh >/dev/null
+      echo "postgres-user can read the exact init bind"
+    '
+} 2>&1 | as_service tee "$evidence_dir/postgres-init-access.txt"
 
 as_service /usr/bin/systemctl --user daemon-reload
 user_systemctl start codexia-db.service

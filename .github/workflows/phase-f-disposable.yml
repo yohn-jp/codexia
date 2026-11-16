@@ -94,5 +94,5 @@ jobs:
         with:
           name: phase-f-disposable-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/codexia-phase-f-evidence/
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 7
