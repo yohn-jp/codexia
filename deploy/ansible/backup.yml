@@ -22,6 +22,22 @@
       - not (codexia_backup_destination_stat.stat.islnk | default(false))
     fail_msg: Backup destination must be an existing directory on an approved off-VM filesystem.
   no_log: true
+- name: Recover any interrupted backup under the updater lock before preflight
+  ansible.builtin.command:
+    argv: ["{{ updater }}", boot, "{{ config_path }}"]
+  changed_when: false
+  no_log: true
+- name: Install the existing boot recovery unit before the maintenance window
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/updater/codexia-updater-boot.service.example"
+    dest: "{{ unit_dir }}/codexia-updater-boot.service"
+    mode: '0600'
+- name: Enable backup intent recovery at the next boot without starting services now
+  ansible.builtin.systemd_service:
+    name: codexia-updater-boot.service
+    scope: user
+    daemon_reload: true
+    enabled: true
 - name: Observe whether a controller journal already exists
   ansible.builtin.stat:
     path: "{{ state_dir }}/controller.json"

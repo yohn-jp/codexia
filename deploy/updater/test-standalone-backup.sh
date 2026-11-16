@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Real disposable Podman/PostgreSQL/age exercise. The findmnt shim only models an
-# approved remote mount; this test is not off-VM backup or recovery evidence.
+# Real disposable Podman/PostgreSQL/age exercise. The mount/network shims only
+# model an approved remote mount; this test is not off-VM backup evidence.
 set -euo pipefail
 test "${CODEXIA_DISPOSABLE_BACKUP_TEST:-}" = true
 test "$(id -un)" = codexia-phase-e-test
 test "$(id -u)" != 0
 test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
 
-for command in podman age age-keygen flock findmnt sha256sum sync stat; do
+for command in podman age age-keygen flock findmnt sha256sum sync stat getent ip; do
   command -v "$command" >/dev/null
 done
 
@@ -60,13 +60,31 @@ JSON
 real_findmnt=$(command -v findmnt)
 cat > "$shim/findmnt" <<'SH'
 #!/usr/bin/env bash
-if [[ "${1:-}" == -T && "${2:-}" == "${CODEXIA_TEST_REMOTE:-}"* && "${3:-}" == -n && "${4:-}" == -o && "${5:-}" == FSTYPE ]]; then
-  printf '%s\n' nfs4
+if [[ "${1:-}" == -T && "${2:-}" == "${CODEXIA_TEST_REMOTE:-}"* && "${3:-}" == -n && "${4:-}" == -o ]]; then
+  case "${5:-}" in
+    FSTYPE) printf '%s\n' nfs4 ;;
+    SOURCE) printf '%s\n' "${CODEXIA_TEST_REMOTE_SOURCE:-backup.example.invalid:/export}" ;;
+    *) exit 2 ;;
+  esac
 else
   exec "${CODEXIA_REAL_FINDMNT:?}" "$@"
 fi
 SH
-chmod 0700 "$shim/findmnt"
+cat > "$shim/getent" <<'SH'
+#!/usr/bin/env bash
+[[ "${1:-}" == ahosts ]] || exit 2
+case "${2:-}" in
+  localhost) printf '%s\n' '127.0.0.1 STREAM localhost' ;;
+  backup.example.invalid) printf '%s\n' "${CODEXIA_TEST_REMOTE_ADDRESS:-192.0.2.10} STREAM backup.example.invalid" ;;
+  *) exit 2 ;;
+esac
+SH
+cat > "$shim/ip" <<'SH'
+#!/usr/bin/env bash
+[[ "${1:-}" == -o && "${2:-}" == address && "${3:-}" == show ]] || exit 2
+printf '%s\n' '1: lo inet 127.0.0.1/8 scope host lo' '1: lo inet6 ::1/128 scope host lo'
+SH
+chmod 0700 "$shim/findmnt" "$shim/getent" "$shim/ip"
 export PATH="$shim:$PATH"
 export XDG_STATE_HOME="$state_home"
 export CODEXIA_TEST_REMOTE="$remote"

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFile, mkdir } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, rmdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWrite } from '../../scripts/standalone-update-controller.mjs';
@@ -68,8 +68,9 @@ export function assertVersion(version,release,browserAuth){
   assert.equal(version.apiEpoch,release.apiEpoch,'Candidate API compatibility epoch mismatch');
   assert.equal(version.browserAuth??'token',browserAuth,'Candidate browser authentication mode mismatch');
 }
-export function assertLegacyBackupIdentity({legacy,image,version},release,authEnvironment){
-  assert.ok(legacy?.State?.Running,'Legacy writer must be running the selected release');
+export function assertLegacyBackupIdentity({legacy,image,version},release,authEnvironment,{requireRunning=true}={}){
+  assert.ok(legacy?.State&&typeof legacy.State.Running==='boolean','Legacy writer state is unobservable');
+  if(requireRunning)assert.ok(legacy.State.Running,'Legacy writer must be running the selected release');
   const imageId=id=>typeof id==='string'?id.replace(/^sha256:/u,''):'';
   const actual=imageId(legacy.Image);
   assert.match(actual,/^[a-f0-9]{64}$/u,'Legacy image ID is unobservable');
@@ -77,16 +78,52 @@ export function assertLegacyBackupIdentity({legacy,image,version},release,authEn
   assert.ok(image?.RepoDigests?.includes(release.image),'Selected release digest is unobservable');
   assert.equal(image.Os+'/'+image.Architecture,release.platform,'Legacy image platform differs from selected release');
   assert.equal(image.Labels?.['org.opencontainers.image.revision']??image.Config?.Labels?.['org.opencontainers.image.revision'],release.sourceSha,'Legacy image source differs from selected release');
-  // Only the absent epoch is tolerated for an old legacy runtime. If it advertises
-  // an epoch, all ordinary version/profile/auth checks remain exact.
-  const observedVersion=version?.apiEpoch===undefined?{...version,apiEpoch:release.apiEpoch}:version;
-  assertVersion(observedVersion,release,authEnvironment.CODEXIA_BROWSER_AUTH);
+  if(legacy.State.Running){
+    assert.ok(version&&typeof version==='object','Running legacy API identity is unobservable');
+    // Only the absent epoch is tolerated for an old legacy runtime. If it advertises
+    // an epoch, all ordinary version/profile/auth checks remain exact.
+    const observedVersion=version.apiEpoch===undefined?{...version,apiEpoch:release.apiEpoch}:version;
+    assertVersion(observedVersion,release,authEnvironment.CODEXIA_BROWSER_AUTH);
+  }else assert.ok(!requireRunning,'Stopped legacy writer cannot prove its running API identity');
   const env=legacy.Config?.Env;
   assert.ok(Array.isArray(env),'Legacy browser auth settings are unobservable');
   for(const [key,value] of Object.entries(authEnvironment)){
     const actual=env.find(entry=>entry.startsWith(key+'='))?.slice(key.length+1);
     assert.equal(actual??(key==='CODEXIA_BROWSER_AUTH'?'token':undefined),value,'Legacy browser authentication configuration mismatch: '+key);
   }
+}
+function sha256(value){return createHash('sha256').update(value).digest('hex');}
+function imageId(value){return typeof value==='string'?value.replace(/^sha256:/u,''):'';}
+function systemdProperties(text){
+  return Object.fromEntries(text.split(/\r?\n/u).filter(Boolean).map(line=>{
+    const split=line.indexOf('=');assert.ok(split>0,'Systemd unit property output is malformed');
+    return [line.slice(0,split),line.slice(split+1)];
+  }));
+}
+async function regularPrivateText(filename,{privateOnly=false}={}){
+  const metadata=await lstat(filename);
+  assert.ok(metadata.isFile()&&!metadata.isSymbolicLink(),'Legacy systemd/Quadlet source must be a regular file');
+  if(typeof process.getuid==='function')assert.equal(metadata.uid,process.getuid(),'Legacy systemd/Quadlet source owner differs from service user');
+  if(privateOnly)assert.equal(metadata.mode&0o077,0,'Backup recovery fence permissions must be private');
+  else assert.equal(metadata.mode&0o022,0,'Legacy systemd/Quadlet source must not be group/world writable');
+  return readFile(filename,'utf8');
+}
+function quadletField(text,name){
+  const values=text.split(/\r?\n/u).filter(line=>line.startsWith(name+'=')).map(line=>line.slice(name.length+1));
+  assert.equal(values.length,1,'Legacy Quadlet must declare exactly one '+name);
+  assert.ok(values[0]&&!/[\r\n\s]/u.test(values[0]),'Legacy Quadlet '+name+' is malformed');
+  return values[0];
+}
+export function assertLegacyBackupUnitIdentity({source,fragment,sourcePath,fragmentPath,quadletImage,selectedImage},release){
+  release=validateUpdateRelease(release);
+  assert.equal(quadletField(source,'ContainerName'),'codexia-api');
+  const sourceImage=quadletField(source,'Image');
+  assert.ok(fragment.split(/\r?\n/u).some(line=>line.startsWith('ExecStart=')&&line.includes(sourceImage)),'Generated API unit does not start the image declared by its Quadlet');
+  assert.equal(imageId(quadletImage?.Id),imageId(selectedImage?.Id),'Legacy Quadlet image does not resolve to the signed release image');
+  assert.ok(selectedImage?.RepoDigests?.includes(release.image),'Signed legacy release digest is unavailable locally');
+  assert.equal(selectedImage.Os+'/'+selectedImage.Architecture,release.platform,'Signed legacy release platform differs from its image');
+  assert.equal(selectedImage.Labels?.['org.opencontainers.image.revision']??selectedImage.Config?.Labels?.['org.opencontainers.image.revision'],release.sourceSha,'Signed legacy release source differs from its image');
+  return sha256(JSON.stringify({sourcePath,source,fragmentPath,fragment,sourceImage}));
 }
 export function imageConfig(release,authEnvironment){
   return `[Unit]
@@ -218,6 +255,91 @@ export class PodmanStandaloneHost{
     run('systemctl',['--user','stop','codexia-api.service'],{timeout:120000});
     assert.equal(await this.legacyServiceActive(),false,'Legacy API writer did not stop');
   }
+  backupStartupFencePaths(){
+    const quadletDirectory=path.resolve(this.config.quadletDirectory);
+    const serviceHome=path.resolve(quadletDirectory,'../../..');
+    assert.equal(quadletDirectory,path.join(serviceHome,'.config','containers','systemd'),'Legacy Quadlet directory is outside the service home');
+    const directory=path.join(serviceHome,'.config','systemd','user');
+    const intent=path.join(path.dirname(this.config.stateFile),'backup-intent.json');
+    const condition=`[Unit]\nConditionPathExists=!${intent}\n`;
+    return {
+      api:{unit:'codexia-api.service',directory:path.join(directory,'codexia-api.service.d'),file:path.join(directory,'codexia-api.service.d','90-codexia-backup-recovery.conf'),content:condition},
+      tunnel:{unit:'codexia-tunnel.service',directory:path.join(directory,'codexia-tunnel.service.d'),file:path.join(directory,'codexia-tunnel.service.d','90-codexia-backup-recovery.conf'),content:condition},
+    };
+  }
+  async ensureBackupStartupFenceFile(entry){
+    await mkdir(entry.directory,{recursive:true,mode:0o700});
+    const directoryMetadata=await lstat(entry.directory);
+    assert.ok(directoryMetadata.isDirectory()&&!directoryMetadata.isSymbolicLink(),'Backup recovery fence directory must be a real directory');
+    if(typeof process.getuid==='function')assert.equal(directoryMetadata.uid,process.getuid(),'Backup recovery fence directory owner differs from service user');
+    assert.equal(directoryMetadata.mode&0o022,0,'Backup recovery fence directory is group/world writable');
+    try{
+      const handle=await open(entry.file,'wx',0o600);
+      try{await handle.writeFile(entry.content,'utf8');await handle.sync();}finally{await handle.close();}
+      const parent=await open(entry.directory,'r');try{await parent.sync();}finally{await parent.close();}
+    }catch(error){
+      if(error.code!=='EEXIST')throw error;
+      assert.equal(await regularPrivateText(entry.file,{privateOnly:true}),entry.content,'Backup recovery fence differs from the expected unit condition');
+    }
+  }
+  async removeBackupStartupFenceFile(entry){
+    let content;
+    try{content=await regularPrivateText(entry.file,{privateOnly:true});}
+    catch(error){if(error.code==='ENOENT')return false;throw error;}
+    assert.equal(content,entry.content,'Refusing to remove an unrecognized systemd drop-in');
+    await unlink(entry.file);
+    const parent=await open(entry.directory,'r');try{await parent.sync();}finally{await parent.close();}
+    try{await rmdir(entry.directory);}catch(error){if(!['ENOTEMPTY','EEXIST'].includes(error.code))throw error;}
+    return true;
+  }
+  async installBackupStartupFence(){
+    const entries=this.backupStartupFencePaths();
+    await this.ensureBackupStartupFenceFile(entries.api);
+    await this.ensureBackupStartupFenceFile(entries.tunnel);
+    run('systemctl',['--user','daemon-reload']);
+    for(const entry of Object.values(entries)){
+      const properties=systemdProperties(run('systemctl',['--user','show','--property=DropInPaths',entry.unit]));
+      const paths=(properties.DropInPaths??'').trim().split(/\s+/u).filter(Boolean);
+      assert.ok(paths.includes(entry.file),'Legacy service startup fence was not loaded by systemd');
+    }
+  }
+  async removeLegacyBackupStartupFence(){
+    const changed=await this.removeBackupStartupFenceFile(this.backupStartupFencePaths().api);
+    if(changed)run('systemctl',['--user','daemon-reload']);
+  }
+  async removeTunnelBackupStartupFence(){
+    const changed=await this.removeBackupStartupFenceFile(this.backupStartupFencePaths().tunnel);
+    if(changed)run('systemctl',['--user','daemon-reload']);
+  }
+  async removeBackupStartupFence(){
+    const entries=this.backupStartupFencePaths();
+    const api=await this.removeBackupStartupFenceFile(entries.api);
+    const tunnel=await this.removeBackupStartupFenceFile(entries.tunnel);
+    if(api||tunnel)run('systemctl',['--user','daemon-reload']);
+  }
+  async legacyBackupUnitFingerprint(release){
+    const paths=this.backupStartupFencePaths();
+    const sourcePath=path.join(this.config.quadletDirectory,'codexia-api.container');
+    const properties=systemdProperties(run('systemctl',['--user','show','--property=LoadState,FragmentPath,SourcePath,DropInPaths','codexia-api.service']));
+    assert.equal(properties.LoadState,'loaded','Legacy API systemd unit is not loaded');
+    assert.equal(path.resolve(properties.SourcePath??''),sourcePath,'Legacy API unit does not reference the expected Quadlet source');
+    const dropIns=(properties.DropInPaths??'').trim().split(/\s+/u).filter(Boolean);
+    for(const dropIn of dropIns){
+      const entry=Object.values(paths).find(candidate=>candidate.file===dropIn);
+      assert.ok(entry,'Legacy API unit has an unreviewed systemd drop-in');
+      assert.equal(await regularPrivateText(dropIn,{privateOnly:true}),entry.content,'Legacy API backup fence differs from the reviewed condition');
+    }
+    assert.ok(path.isAbsolute(process.env.XDG_RUNTIME_DIR??''),'Rootless systemd runtime directory is unavailable');
+    const fragmentRoot=path.resolve(process.env.XDG_RUNTIME_DIR,'systemd','generator');
+    const fragmentPath=path.resolve(properties.FragmentPath??'');
+    assert.equal(path.dirname(fragmentPath),fragmentRoot,'Legacy API unit is not the generated Quadlet service');
+    assert.equal(path.basename(fragmentPath),'codexia-api.service');
+    const [source,fragment]=await Promise.all([regularPrivateText(sourcePath),regularPrivateText(fragmentPath)]);
+    const sourceImage=quadletField(source,'Image');
+    const selectedImage=JSON.parse(run('podman',['image','inspect',release.image]))[0];
+    const quadletImage=JSON.parse(run('podman',['image','inspect',sourceImage]))[0];
+    return assertLegacyBackupUnitIdentity({source,fragment,sourcePath,fragmentPath,quadletImage,selectedImage},release);
+  }
   async startLegacyWriter(){
     run('systemctl',['--user','start','codexia-api.service'],{timeout:120000});
     assert.equal(await this.legacyServiceActive(),true,'Legacy API writer did not resume');
@@ -316,13 +438,22 @@ export class PodmanStandaloneHost{
       assert.equal(actual??(key==='CODEXIA_BROWSER_AUTH'?'token':undefined),value,'Legacy browser authentication configuration mismatch: '+key);
     }
   }
-  async assertLegacyBackupRelease(value){
+  async assertLegacyBackupRelease(value,{allowStopped=false,expectedUnitFingerprint}={}){
     const release=validateUpdateRelease(value);
+    const unitFingerprint=await this.legacyBackupUnitFingerprint(release);
+    if(expectedUnitFingerprint!==undefined)assert.equal(unitFingerprint,expectedUnitFingerprint,'Legacy Quadlet/systemd source drifted during backup recovery');
     const legacy=inspect('codexia-api');
     for(const slot of ['blue','green'])assert.ok(!inspect(name(slot))?.State.Running,'Unexpected running slot writer');
     const image=JSON.parse(run('podman',['image','inspect',release.image]))[0];
-    const version=JSON.parse(run('podman',['exec','codexia-api','node','--input-type=module','-e',readyCode],{timeout:10000}));
-    assertLegacyBackupIdentity({legacy,image,version},release,this.authEnvironment);
+    if(!legacy){
+      assert.ok(allowStopped,'Legacy writer container is missing');
+      return unitFingerprint;
+    }
+    const version=legacy.State.Running
+      ? JSON.parse(run('podman',['exec','codexia-api','node','--input-type=module','-e',readyCode],{timeout:10000}))
+      : null;
+    assertLegacyBackupIdentity({legacy,image,version},release,this.authEnvironment,{requireRunning:!allowStopped});
+    return unitFingerprint;
   }
   async waitReady(container,release){
     const deadline=Date.now()+90000;

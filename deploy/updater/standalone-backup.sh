@@ -5,14 +5,40 @@ umask 077
 readonly PG_IMAGE='docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536'
 readonly STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/codexia-updater"
 die(){ printf '%s\n' "$*" >&2; exit 1; }
-for cmd in podman age sha256sum flock findmnt sync stat; do command -v "$cmd" >/dev/null || die "Missing dependency: $cmd"; done
+for cmd in podman age sha256sum flock findmnt sync stat getent ip; do command -v "$cmd" >/dev/null || die "Missing dependency: $cmd"; done
 lock_file="$STATE_DIR/host.lock"
 operation="${1:-}"
 remote_directory(){
   [[ "$1" == /* && -d "$1" && ! -L "$1" ]] || die 'Use an existing absolute off-VM mount directory'
-  local fstype
+  local fstype mount_source remote_host local_addresses remote_addresses address
   fstype="$(findmnt -T "$1" -n -o FSTYPE)"
   case "$fstype" in nfs|nfs4|cifs|fuse.sshfs|sshfs) ;; *) die 'Destination is not an approved remote filesystem';; esac
+  mount_source="$(findmnt -T "$1" -n -o SOURCE)"
+  case "$fstype" in
+    nfs|nfs4)
+      if [[ "$mount_source" == \[*\]:* ]]; then remote_host="${mount_source#\[}"; remote_host="${remote_host%%]*}";
+      else remote_host="${mount_source%%:*}"; fi
+      ;;
+    cifs)
+      remote_host="${mount_source#//}"
+      if [[ "$remote_host" == \[*\]* ]]; then remote_host="${remote_host#\[}"; remote_host="${remote_host%%]*}";
+      else remote_host="${remote_host%%/*}"; fi
+      ;;
+    fuse.sshfs|sshfs)
+      remote_host="${mount_source%%:*}"
+      remote_host="${remote_host##*@}"
+      if [[ "$remote_host" == \[*\] ]]; then remote_host="${remote_host#\[}"; remote_host="${remote_host%\]}"; fi
+      ;;
+  esac
+  [[ -n "$remote_host" ]] || die 'Cannot verify that the backup destination is off-VM'
+  case "${remote_host,,}" in localhost|localhost.*|127.*|::1|0.0.0.0) die 'Backup destination is mounted from this VM';; esac
+  local_addresses="$(ip -o address show | awk '{sub(/\/.*/, "", $4); print $4}' | sort -u)"
+  remote_addresses="$(getent ahosts "$remote_host" | awk '{print $1}' | sort -u || true)"
+  [[ -n "$remote_addresses" ]] || die 'Cannot verify the backup destination host address'
+  while IFS= read -r address; do
+    [[ -n "$address" ]] || continue
+    if grep -Fxq "$address" <<< "$local_addresses"; then die 'Backup destination resolves to this VM'; fi
+  done <<< "$remote_addresses"
 }
 case "$operation" in
   backup-locked)

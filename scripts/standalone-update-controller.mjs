@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, rename, rm, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { advanceJournal, validateJournal } from './update-host-state.mjs';
 import { verifyUpdateChannel, selectUpdateCandidate } from './update-channel.mjs';
@@ -42,6 +42,47 @@ export async function loadControllerState(filename) {
   const content=await readFile(filename,'utf8');
   if(Buffer.byteLength(content)>1024*1024)throw new Error('Controller state exceeds limit');
   return validateControllerState(JSON.parse(content));
+}
+
+export function validateBackupIntent(value) {
+  assert.equal(value?.format, 'codexia-backup-intent/v1');
+  assert.ok(Number.isFinite(Date.parse(value.createdAt)), 'Backup intent timestamp is invalid');
+  assert.equal(typeof value.timerWasActive, 'boolean');
+  if (value.kind === 'controller') {
+    assert.deepEqual(Object.keys(value).sort(), ['createdAt','format','image','journalGeneration','kind','priorLastError','priorPaused','slot','timerWasActive'].sort());
+    assert.ok(['blue','green'].includes(value.slot));
+    assert.match(value.image, imagePattern);
+    assert.ok(Number.isSafeInteger(value.journalGeneration) && value.journalGeneration >= 0);
+    assert.equal(typeof value.priorPaused, 'boolean');
+    assert.ok(value.priorLastError === null || (typeof value.priorLastError === 'string' && value.priorLastError.length <= 1000));
+    return { format:value.format, kind:value.kind, slot:value.slot, image:value.image,
+      journalGeneration:value.journalGeneration, priorPaused:value.priorPaused,
+      priorLastError:value.priorLastError, timerWasActive:value.timerWasActive, createdAt:value.createdAt };
+  }
+  assert.equal(value.kind, 'legacy');
+  assert.deepEqual(Object.keys(value).sort(), ['createdAt','format','kind','legacyUnitFingerprint','release','timerWasActive','tunnelWasActive'].sort());
+  assert.equal(typeof value.tunnelWasActive, 'boolean');
+  assert.match(value.legacyUnitFingerprint, /^[a-f0-9]{64}$/u);
+  return { format:value.format, kind:value.kind, release:validateUpdateRelease(value.release), legacyUnitFingerprint:value.legacyUnitFingerprint,
+    tunnelWasActive:value.tunnelWasActive, timerWasActive:value.timerWasActive, createdAt:value.createdAt };
+}
+
+export async function loadBackupIntent(filename) {
+  let metadata;
+  try { metadata = await lstat(filename); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  assert.ok(metadata.isFile() && !metadata.isSymbolicLink(), 'Backup intent must be a regular file');
+  assert.equal(metadata.mode & 0o077, 0, 'Backup intent permissions must be private');
+  if (typeof process.getuid === 'function') assert.equal(metadata.uid, process.getuid(), 'Backup intent owner differs from the service user');
+  assert.ok(metadata.size <= 65536, 'Backup intent exceeds the size limit');
+  return validateBackupIntent(JSON.parse(await readFile(filename, 'utf8')));
+}
+
+export async function clearBackupIntent(filename) {
+  try { await unlink(filename); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const parent = await open(path.dirname(filename), 'r');
+  try { await parent.sync(); } finally { await parent.close(); }
 }
 
 export function initialControllerState(installed,slot,checkpoint) {
@@ -97,11 +138,114 @@ export class StandaloneController {
     assert.equal(obs.route,slot,'Proxy route mismatch');
     await this.host.probe(slot,release);
   }
+  async loadBackupIntent(){
+    if(!this.store.loadBackupIntent)return null;
+    const value=await this.store.loadBackupIntent();
+    return value===null||value===undefined?null:validateBackupIntent(value);
+  }
+  async saveBackupIntent(value){
+    assert.ok(this.store.saveBackupIntent,'Durable backup intent storage is required');
+    await this.store.saveBackupIntent(validateBackupIntent(value));
+  }
+  async clearBackupIntent(){
+    assert.ok(this.store.clearBackupIntent,'Durable backup intent removal is required');
+    await this.store.clearBackupIntent();
+  }
+  async assertNoBackupIntent(){
+    assert.equal(await this.loadBackupIntent(),null,'Interrupted backup recovery is required before maintenance');
+  }
+  async recoverBackupIntent(state=null){
+    const intent=await this.loadBackupIntent();
+    if(!intent){await this.host.removeBackupStartupFence?.();return state;}
+    let legacyApiStartedByRecovery=false;
+    let legacyApiIdentityVerified=false;
+    try{
+      if(intent.kind==='controller'){
+        assert.ok(state,'Controller backup intent has no durable controller state');
+        assert.equal(state.journal.generation,intent.journalGeneration,'Controller journal changed during backup recovery');
+        assert.equal(state.journal.active.slot,intent.slot,'Controller active slot changed during backup recovery');
+        assert.equal(state.installed.image,intent.image,'Controller release changed during backup recovery');
+        await this.host.route('blocked');
+        if(await this.host.pollingTimerActive())await this.host.stopPollingTimer();
+        await this.host.assertNoPreflight();
+        let observed=await this.host.observe();
+        assertObservation(observed,state.journal);
+        if(observed.writers.length===0){
+          await this.host.pullAndVerify(state.installed);
+          await this.host.prepare(intent.slot,state.installed);
+          await this.host.stopPreflight(intent.slot);
+          observed=await this.host.observe();
+          assertObservation(observed,state.journal);
+          assert.equal(observed.writers.length,0,'Unexpected writer appeared during backup recovery');
+          await this.host.startWriter(intent.slot,state.installed);
+        }else assert.ok(isOnlyWriter(observed,intent.slot,intent.image),'Unexpected writer prevents backup recovery');
+        await this.host.route(intent.slot);
+        await this.assertServing(state,intent.slot,state.installed);
+        const timerActive=await this.host.pollingTimerActive();
+        if(intent.timerWasActive&&!timerActive)await this.host.startPollingTimer();
+        else if(!intent.timerWasActive&&timerActive)await this.host.stopPollingTimer();
+        state=await this.save({...state,paused:intent.priorPaused,lastError:intent.priorLastError});
+        await this.clearBackupIntent();
+        return state;
+      }
+
+      assert.equal(state,null,'Legacy backup intent unexpectedly has a controller journal');
+      const release=intent.release;
+      const channel=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,null,this.now());
+      assert.ok(channel.payload.releases.some(item=>item.state==='published'&&JSON.stringify(item)===JSON.stringify(release)),
+        'Legacy backup release is no longer present in the signed channel');
+      await this.uiEpoch(release);
+      await this.host.installBackupStartupFence();
+      await this.host.route('blocked');
+      if(await this.host.pollingTimerActive())await this.host.stopPollingTimer();
+      if(await this.host.tunnelServiceActive())await this.host.stopTunnel();
+      await this.host.assertNoPreflight();
+      const apiActive=await this.host.legacyServiceActive();
+      await this.host.assertLegacyBackupRelease(release,{allowStopped:!apiActive,expectedUnitFingerprint:intent.legacyUnitFingerprint});
+      legacyApiIdentityVerified=apiActive;
+      if(!apiActive){
+        await this.host.removeLegacyBackupStartupFence();
+        legacyApiStartedByRecovery=true;
+        await this.host.startLegacyWriter();
+      }
+      await this.host.assertLegacyBackupRelease(release);
+      legacyApiIdentityVerified=true;
+      await this.host.removeLegacyBackupStartupFence();
+      const tunnelActive=await this.host.tunnelServiceActive();
+      if(intent.tunnelWasActive){
+        await this.host.removeTunnelBackupStartupFence();
+        if(!tunnelActive)await this.host.startTunnel();
+      }else if(tunnelActive)await this.host.stopTunnel();
+      await this.host.assertLegacyBackupRelease(release);
+      assert.equal(await this.host.routeState(),'blocked','Legacy backup recovery changed the controller-owned route');
+      const timerActive=await this.host.pollingTimerActive();
+      if(intent.timerWasActive&&!timerActive)await this.host.startPollingTimer();
+      else if(!intent.timerWasActive&&timerActive)await this.host.stopPollingTimer();
+      await this.host.removeBackupStartupFence();
+      await this.clearBackupIntent();
+      return null;
+    }catch(error){
+      const prefix=intent.kind==='legacy'?'Legacy backup recovery blocked: ':'Backup recovery blocked: ';
+      const reason=prefix+safeError(error);
+      await this.host.route('blocked').catch(()=>undefined);
+      await this.host.stopPollingTimer().catch(()=>undefined);
+      if(intent.kind==='legacy'){
+        await this.host.installBackupStartupFence().catch(()=>undefined);
+        await this.host.stopTunnel().catch(()=>undefined);
+        if(legacyApiStartedByRecovery&&!legacyApiIdentityVerified)await this.host.stopLegacyWriter().catch(()=>undefined);
+      }
+      if(intent.kind==='controller'&&state){
+        await this.save({...state,paused:true,lastError:reason}).catch(()=>undefined);
+      }
+      throw new Error(reason);
+    }
+  }
   async backup(state,{destination,recipient}={}){
     assert.ok(stable(state.journal),'Backup requires a stable controller journal');
     assert.equal(state.lastError,null,'Controller error requires operator repair before backup');
     assert.ok(typeof destination==='string'&&path.isAbsolute(destination),'Backup destination must be an absolute external path');
     assert.ok(typeof recipient==='string'&&/^age1[0-9a-z]+$/u.test(recipient),'Provide an age public recipient');
+    await this.assertNoBackupIntent();
     await this.host.validateBackupDestination(destination);
     const original=state;
     const active=state.journal.active;
@@ -114,12 +258,16 @@ export class StandaloneController {
     await this.host.assertNoPreflight();
     await this.assertServing(state,active.slot,state.installed);
 
+    const intent={format:'codexia-backup-intent/v1',kind:'controller',slot:active.slot,image:state.installed.image,
+      journalGeneration:state.journal.generation,priorPaused:state.paused,priorLastError:state.lastError,
+      timerWasActive,createdAt:new Date(this.now()).toISOString()};
+    await this.saveBackupIntent(intent);
     let maintenanceState=state;
     let output;
     let operationError;
     try{
-      if(timerWasActive)await this.host.stopPollingTimer();
       if(!maintenanceState.paused)maintenanceState=await this.save({...maintenanceState,paused:true});
+      if(timerWasActive)await this.host.stopPollingTimer();
       await this.host.route('blocked');
       await this.host.stopWriter(active.slot);
       const fenced=await this.host.observe();
@@ -130,32 +278,8 @@ export class StandaloneController {
     }catch(error){operationError=error;}
 
     let restored;
-    try{
-      const observed=await this.host.observe();
-      assertObservation(observed,maintenanceState.journal);
-      if(observed.writers.length===0){
-        await this.host.startWriter(active.slot,maintenanceState.installed);
-      }else{
-        assert.ok(isOnlyWriter(observed,active.slot,maintenanceState.installed.image),'Unexpected writer prevents safe backup recovery');
-      }
-      await this.host.route(active.slot);
-      await this.assertServing(maintenanceState,active.slot,maintenanceState.installed);
-      restored=await this.save({...maintenanceState,paused:original.paused,lastError:original.lastError});
-    }catch(error){
-      await this.host.route('blocked').catch(()=>undefined);
-      const reason='Backup recovery blocked: '+safeError(error);
-      await this.save({...maintenanceState,paused:true,lastError:reason});
-      throw new Error(operationError?safeError(operationError)+'; '+reason:reason);
-    }
-
-    if(timerWasActive){
-      try{await this.host.startPollingTimer();}
-      catch(error){
-        const reason='Backup completed and writer restored, but updater timer restoration failed: '+safeError(error);
-        await this.save({...restored,paused:true,lastError:reason});
-        throw new Error(reason);
-      }
-    }
+    try{restored=await this.recoverBackupIntent(maintenanceState);}
+    catch(error){throw new Error(operationError?safeError(operationError)+'; '+safeError(error):safeError(error));}
     if(operationError)throw operationError;
     return {state:restored,output};
   }
@@ -163,6 +287,8 @@ export class StandaloneController {
     release=validateUpdateRelease(release);
     assert.ok(typeof destination==='string'&&path.isAbsolute(destination),'Backup destination must be an absolute external path');
     assert.ok(typeof recipient==='string'&&/^age1[0-9a-z]+$/u.test(recipient),'Provide an age public recipient');
+    await this.assertNoBackupIntent();
+    await this.host.removeBackupStartupFence?.();
     const channel=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,null,this.now());
     assert.ok(channel.payload.releases.some(item=>item.state==='published'&&JSON.stringify(item)===JSON.stringify(release)),'Legacy backup release must be published in the signed channel');
     await this.host.validateBackupDestination(destination);
@@ -172,8 +298,13 @@ export class StandaloneController {
     const timerWasActive=await this.host.pollingTimerActive();
     await this.host.assertNoPreflight();
     await this.uiEpoch(release);
-    await this.host.assertLegacyBackupRelease(release);
+    const legacyUnitFingerprint=await this.host.assertLegacyBackupRelease(release);
+    assert.match(legacyUnitFingerprint,/^[a-f0-9]{64}$/u,'Legacy systemd/Quadlet identity is not fingerprinted');
+    await this.host.installBackupStartupFence();
 
+    const intent={format:'codexia-backup-intent/v1',kind:'legacy',release,legacyUnitFingerprint,tunnelWasActive,timerWasActive,
+      createdAt:new Date(this.now()).toISOString()};
+    await this.saveBackupIntent(intent);
     let output;
     let operationError;
     try{
@@ -186,22 +317,8 @@ export class StandaloneController {
       output=await this.host.backup(destination,recipient);
     }catch(error){operationError=error;}
 
-    try{
-      await this.host.route('blocked');
-      if(!(await this.host.legacyServiceActive()))await this.host.startLegacyWriter();
-      await this.host.assertLegacyBackupRelease(release);
-      const tunnelIsActive=await this.host.tunnelServiceActive();
-      if(tunnelWasActive&&!tunnelIsActive)await this.host.startTunnel();
-      else if(!tunnelWasActive&&tunnelIsActive)await this.host.stopTunnel();
-      await this.host.assertLegacyBackupRelease(release);
-      if(timerWasActive)await this.host.startPollingTimer();
-    }catch(error){
-      await this.host.route('blocked').catch(()=>undefined);
-      await this.host.stopTunnel().catch(()=>undefined);
-      await this.host.stopLegacyWriter().catch(()=>undefined);
-      const reason='Legacy backup recovery blocked: '+safeError(error);
-      throw new Error(operationError?safeError(operationError)+'; '+reason:reason);
-    }
+    try{await this.recoverBackupIntent(null);}
+    catch(error){throw new Error(operationError?safeError(operationError)+'; '+safeError(error):safeError(error));}
     if(operationError)throw operationError;
     return {output};
   }

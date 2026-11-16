@@ -25,13 +25,31 @@ printf '#!/bin/sh\nexit 1\n' > "$shim/podman"
 printf '#!/bin/sh\nexit 1\n' > "$shim/age"
 cat > "$shim/findmnt" <<'SH'
 #!/bin/sh
-if [ "${1:-}" = -T ] && [ "${2:-}" = "${CODEXIA_TEST_REMOTE:-}" ] && [ "${3:-}" = -n ] && [ "${4:-}" = -o ] && [ "${5:-}" = FSTYPE ]; then
-  printf '%s\n' nfs4
+if [ "${1:-}" = -T ] && [ "${2:-}" = "${CODEXIA_TEST_REMOTE:-}" ] && [ "${3:-}" = -n ] && [ "${4:-}" = -o ]; then
+  case "${5:-}" in
+    FSTYPE) printf '%s\n' nfs4 ;;
+    SOURCE) printf '%s\n' "${CODEXIA_TEST_REMOTE_SOURCE:-backup.example.invalid:/export}" ;;
+    *) exit 2 ;;
+  esac
 else
   printf '%s\n' ext4
 fi
 SH
-chmod 0700 "$shim/podman" "$shim/age" "$shim/findmnt"
+cat > "$shim/getent" <<'SH'
+#!/bin/sh
+[ "${1:-}" = ahosts ] || exit 2
+case "${2:-}" in
+  localhost) printf '%s\n' '127.0.0.1 STREAM localhost' ;;
+  backup.example.invalid) printf '%s\n' "${CODEXIA_TEST_REMOTE_ADDRESS:-192.0.2.10} STREAM backup.example.invalid" ;;
+  *) exit 2 ;;
+esac
+SH
+cat > "$shim/ip" <<'SH'
+#!/bin/sh
+[ "${1:-}" = -o ] && [ "${2:-}" = address ] && [ "${3:-}" = show ] || exit 2
+printf '%s\n' '1: lo inet 127.0.0.1/8 scope host lo' '1: lo inet6 ::1/128 scope host lo'
+SH
+chmod 0700 "$shim/podman" "$shim/age" "$shim/findmnt" "$shim/getent" "$shim/ip"
 export PATH="$shim:$PATH"
 export XDG_STATE_HOME="$state_home"
 export CODEXIA_TEST_REMOTE="$remote"
@@ -45,6 +63,16 @@ fi
 grep -q 'Destination is not an approved remote filesystem' "$tmp/local-destination.log"
 bash "$backup_script" validate-destination "$remote" > "$tmp/remote-destination.log"
 grep -q 'Backup destination preflight passed' "$tmp/remote-destination.log"
+if CODEXIA_TEST_REMOTE_SOURCE='localhost:/export' bash "$backup_script" validate-destination "$remote" > "$tmp/loopback-destination.log" 2>&1; then
+  echo 'Destination preflight accepted an NFS export from the same VM' >&2
+  exit 1
+fi
+grep -q 'Backup destination is mounted from this VM' "$tmp/loopback-destination.log"
+if CODEXIA_TEST_REMOTE_ADDRESS=127.0.0.1 bash "$backup_script" validate-destination "$remote" > "$tmp/local-address-destination.log" 2>&1; then
+  echo 'Destination preflight accepted a remote name resolving to this VM' >&2
+  exit 1
+fi
+grep -q 'Backup destination resolves to this VM' "$tmp/local-address-destination.log"
 
 # Hold the canonical lock in a sibling process. A caller with only the legacy
 # boolean marker must not treat that unrelated lock holder as its capability.

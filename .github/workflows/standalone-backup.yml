@@ -6,6 +6,7 @@ on:
       - deploy/updater/standalone-backup.sh
       - deploy/updater/codexia-updater
       - deploy/updater/test-standalone-backup-lock.sh
+      - deploy/updater/test-standalone-backup-startup-fence.sh
       - deploy/updater/test-standalone-backup.sh
       - deploy/updater/standalone-host.mjs
       - deploy/updater/standalone-updater.mjs
@@ -22,6 +23,7 @@ on:
       - deploy/updater/standalone-backup.sh
       - deploy/updater/codexia-updater
       - deploy/updater/test-standalone-backup-lock.sh
+      - deploy/updater/test-standalone-backup-startup-fence.sh
       - deploy/updater/test-standalone-backup.sh
       - deploy/updater/standalone-host.mjs
       - deploy/updater/standalone-updater.mjs
@@ -49,7 +51,7 @@ jobs:
       - name: Prepare a fresh rootless Podman fixture account
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends podman uidmap netavark aardvark-dns slirp4netns fuse-overlayfs age
+          sudo apt-get install -y --no-install-recommends podman uidmap netavark aardvark-dns slirp4netns fuse-overlayfs age dbus-user-session
           fixture_user=codexia-phase-e-test
           test -z "$(id -u "$fixture_user" 2>/dev/null || true)"
           sudo useradd --create-home --shell /bin/bash "$fixture_user"
@@ -62,15 +64,31 @@ jobs:
           sudo usermod --add-subuids "$subuid_start-$((subuid_start + 65535))" --add-subgids "$subgid_start-$((subgid_start + 65535))" "$fixture_user"
           fixture_uid=$(id -u "$fixture_user")
           fixture_home=$(getent passwd "$fixture_user" | cut -d: -f6)
+          sudo loginctl enable-linger "$fixture_user"
+          sudo install -d -m 0755 "/run/systemd/system/user@${fixture_uid}.service.d"
+          cat <<EOF | sudo tee "/run/systemd/system/user@${fixture_uid}.service.d/10-codexia-backup-ci.conf" >/dev/null
+          [Service]
+          Environment=HOME=$fixture_home
+          Environment=XDG_CONFIG_HOME=$fixture_home/.config
+          Environment=XDG_RUNTIME_DIR=/run/user/$fixture_uid
+          EOF
+          sudo systemctl daemon-reload
+          sudo systemctl start "user@${fixture_uid}.service"
           sudo install -d -m 0700 -o "$fixture_user" -g "$fixture_user" "/run/user/$fixture_uid"
+          for attempt in $(seq 1 20); do
+            if sudo -u "$fixture_user" env HOME="$fixture_home" XDG_CONFIG_HOME="$fixture_home/.config" XDG_RUNTIME_DIR="/run/user/$fixture_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" systemctl --user show --property=Version >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          sudo -u "$fixture_user" env HOME="$fixture_home" XDG_CONFIG_HOME="$fixture_home/.config" XDG_RUNTIME_DIR="/run/user/$fixture_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" systemctl --user show --property=Version >/dev/null
           sudo -u "$fixture_user" env HOME="$fixture_home" XDG_RUNTIME_DIR="/run/user/$fixture_uid" podman info --format '{{.Host.Security.Rootless}}'
       - name: Verify controller fence, encrypted artifact integrity and isolated restore
         run: |
           fixture_user=codexia-phase-e-test
           fixture_uid=$(id -u "$fixture_user")
           fixture_home=$(getent passwd "$fixture_user" | cut -d: -f6)
-          sudo -u "$fixture_user" env HOME="$fixture_home" USER="$fixture_user" LOGNAME="$fixture_user" PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$fixture_uid" TMPDIR=/tmp CODEXIA_DISPOSABLE_BACKUP_TEST=true bash deploy/updater/test-standalone-backup.sh
-          sudo -u "$fixture_user" env HOME="$fixture_home" USER="$fixture_user" LOGNAME="$fixture_user" PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$fixture_uid" TMPDIR=/tmp CODEXIA_DISPOSABLE_BACKUP_TEST=true bash deploy/updater/test-standalone-backup-lock.sh
+          sudo -u "$fixture_user" env HOME="$fixture_home" USER="$fixture_user" LOGNAME="$fixture_user" PATH="$PATH" XDG_CONFIG_HOME="$fixture_home/.config" XDG_RUNTIME_DIR="/run/user/$fixture_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" TMPDIR=/tmp CODEXIA_DISPOSABLE_BACKUP_TEST=true bash deploy/updater/test-standalone-backup.sh
+          sudo -u "$fixture_user" env HOME="$fixture_home" USER="$fixture_user" LOGNAME="$fixture_user" PATH="$PATH" XDG_CONFIG_HOME="$fixture_home/.config" XDG_RUNTIME_DIR="/run/user/$fixture_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" TMPDIR=/tmp CODEXIA_DISPOSABLE_BACKUP_TEST=true bash deploy/updater/test-standalone-backup-lock.sh
+          sudo -u "$fixture_user" env HOME="$fixture_home" USER="$fixture_user" LOGNAME="$fixture_user" PATH="$PATH" XDG_CONFIG_HOME="$fixture_home/.config" XDG_RUNTIME_DIR="/run/user/$fixture_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" TMPDIR=/tmp CODEXIA_DISPOSABLE_BACKUP_TEST=true bash deploy/updater/test-standalone-backup-startup-fence.sh
           node --test scripts/standalone-backup-controller.test.mjs
       - name: Remove the disposable backup test user
         if: always()
@@ -80,6 +98,10 @@ jobs:
           if test -f "$fixture_marker"; then
             if id "$fixture_user" >/dev/null 2>&1; then
               fixture_uid=$(id -u "$fixture_user")
+              sudo loginctl disable-linger "$fixture_user" || true
+              sudo systemctl stop "user@${fixture_uid}.service" || true
+              sudo rm -f "/run/systemd/system/user@${fixture_uid}.service.d/10-codexia-backup-ci.conf"
+              sudo rmdir "/run/systemd/system/user@${fixture_uid}.service.d" 2>/dev/null || true
               sudo userdel --remove "$fixture_user" || true
               sudo rmdir "/run/user/$fixture_uid" 2>/dev/null || true
             fi

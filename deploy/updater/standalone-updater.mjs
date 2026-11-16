@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { atomicWrite, initialControllerState, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
+import { atomicWrite, clearBackupIntent, initialControllerState, loadBackupIntent, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
 import { PodmanStandaloneHost } from './standalone-host.mjs';
 import { verifyUpdateChannel } from '../../scripts/update-channel.mjs';
 import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
@@ -16,13 +16,20 @@ assert.equal(path.basename(config.routeFile),'route');
 assert.equal(path.dirname(config.stateFile),process.env.CODEXIA_UPDATER_LOCK_DIRECTORY,'Use the host-wide locked wrapper');
 const publicKey=await readFile(config.publicKeyFile,'utf8');
 const host=new PodmanStandaloneHost(config);
-const store={save:state=>atomicWrite(config.stateFile,JSON.stringify(state)+'\n')};
+const backupIntentFile=path.join(path.dirname(config.stateFile),'backup-intent.json');
+const store={
+  save:state=>atomicWrite(config.stateFile,JSON.stringify(state)+'\n'),
+  saveBackupIntent:intent=>atomicWrite(backupIntentFile,JSON.stringify(intent)+'\n'),
+  loadBackupIntent:()=>loadBackupIntent(backupIntentFile),
+  clearBackupIntent:()=>clearBackupIntent(backupIntentFile),
+};
 const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
 if(command==='backup'){
   assert.equal(arguments_.at(-1),'--approved','Backup requires the explicit --approved maintenance attestation');
   const backupArguments=arguments_.slice(0,-1);
   let state;
   try{state=await loadControllerState(config.stateFile);}catch(error){if(error.code!=='ENOENT')throw error;}
+  state=await controller.recoverBackupIntent(state??null);
   let result;
   if(state){
     assert.equal(backupArguments.length,2,'Initialized backup usage: backup /absolute/config.json /absolute/remote/destination age1-recipient --approved');
@@ -39,6 +46,8 @@ if(command==='backup'){
   assert.equal(arguments_.length,1,'Provide exactly one signed installed release JSON');
   assert.ok(argument&&path.isAbsolute(argument),'Explicit trusted installed release JSON is required');
   try{await loadControllerState(config.stateFile);throw Error('Existing state cannot be initialized again');}catch(error){if(error.code!=='ENOENT')throw error;}
+  if(command==='init')await controller.recoverBackupIntent(null);
+  else assert.equal(await controller.loadBackupIntent(),null,'Pending backup recovery prevents legacy verification');
   const release=validateUpdateRelease(JSON.parse(await readFile(argument,'utf8')));
   const channel=verifyUpdateChannel(await host.fetchChannel(),publicKey,null);
   assert.ok(channel.payload.releases.some(r=>r.state==='published'&&JSON.stringify(r)===JSON.stringify(release)),'Installed release must be in trusted signed channel');
@@ -59,26 +68,38 @@ if(command==='backup'){
   if(state.lastError)process.exitCode=1;
 }else{
   assert.equal(arguments_.length,0,'This controller command does not accept positional arguments');
-  let state=await loadControllerState(config.stateFile);
-  if(command==='boot')state=await controller.reconcile(state,{boot:true});
-  else if(command==='status'){console.log(JSON.stringify({state,observed:await host.observe()},null,2));process.exit(0);}
+  let state;
+  try{state=await loadControllerState(config.stateFile);}catch(error){if(command!=='boot'||error.code!=='ENOENT')throw error;}
+  if(command==='boot'){
+    state=await controller.recoverBackupIntent(state??null);
+    if(!state){console.log('No controller state or interrupted backup recovery intent; legacy runtime unchanged');process.exit(0);}
+    state=await controller.reconcile(state,{boot:true});
+  }
+  else if(command==='status'){console.log(JSON.stringify({state,backupIntent:await controller.loadBackupIntent(),observed:await host.observe()},null,2));process.exit(0);}
   else if(command==='verify'){
+    assert.equal(await controller.loadBackupIntent(),null,'Pending backup recovery prevents service verification');
     assert.ok(['idle','committed'].includes(state.journal.phase),'Unreconciled journal requires operator repair');
     assert.equal(state.lastError,null,'Controller has a recorded error');
     await controller.assertServing(state,state.journal.active.slot,state.installed);
     console.log(JSON.stringify({state,observed:await host.observe()},null,2));
     process.exit(0);
   }
-  else if(command==='pause')state=await controller.save({...state,paused:true});
+  else if(command==='pause'){
+    state=await controller.recoverBackupIntent(state);
+    state=await controller.save({...state,paused:true});
+  }
   else if(command==='resume'){
+    state=await controller.recoverBackupIntent(state);
     state=await controller.reconcile(state);
     await controller.assertServing(state,state.journal.active.slot,state.installed);
     assert.ok(['idle','committed'].includes(state.journal.phase),'Unreconciled journal requires operator repair');
     state=await controller.save({...state,paused:false,lastError:null});
   }else if(command==='tick'){
     if(config.enabled!==true)process.exit(0);
+    state=await controller.recoverBackupIntent(state);
     state=await controller.tick(state);
   }else if(command==='acceptance-update'||command==='acceptance-rollback'){
+    state=await controller.recoverBackupIntent(state);
     assert.equal(config.enabled,false,'Acceptance exercises require automatic updates disabled');
     assert.equal(state.paused,true,'Acceptance exercises require a paused controller');
     assert.ok(['idle','committed'].includes(state.journal.phase),'Unreconciled journal requires operator repair');
@@ -94,6 +115,7 @@ if(command==='backup'){
     if(rollback)assert.equal(state.installed.image,previous,'Previous release was not restored');
   }else if(command==='rollback'){
     assert.equal(config.enabled,true,'Operator must enable update controller');
+    state=await controller.recoverBackupIntent(state);
     state=await controller.tick(state,{manualRollback:true});
   }else throw Error('Unknown controller command');
   console.log(JSON.stringify(state,null,2));
