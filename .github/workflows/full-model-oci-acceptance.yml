@@ -34,8 +34,6 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 150
     env:
-      CODEXIA_P13_MODEL_CACHE: ${{ runner.temp }}/codexia-p13-model-cache
-      HF_HOME: ${{ runner.temp }}/huggingface-home
       HF_HUB_DISABLE_TELEMETRY: '1'
       HF_HUB_ETAG_TIMEOUT: '60'
       HF_HUB_DOWNLOAD_TIMEOUT: '120'
@@ -87,6 +85,9 @@ jobs:
       - name: Download the real model files from their pinned revisions
         if: steps.model-cache.outputs.cache-hit != 'true'
         timeout-minutes: 45
+        env:
+          CODEXIA_P13_MODEL_CACHE: ${{ runner.temp }}/codexia-p13-model-cache
+          HF_HOME: ${{ runner.temp }}/huggingface-home
         run: |
           set -euo pipefail
           python3 -m venv "$RUNNER_TEMP/huggingface-cli"
@@ -104,6 +105,8 @@ jobs:
               --max-workers 4
           done < <(cut -f1,2 "$RUNNER_TEMP/p13-model-files.tsv" | sort -u)
       - name: Fail on missing or altered model cache files
+        env:
+          CODEXIA_P13_MODEL_CACHE: ${{ runner.temp }}/codexia-p13-model-cache
         run: |
           set -euo pipefail
           manifest="$RUNNER_TEMP/p13-model-files.tsv"
@@ -137,6 +140,7 @@ jobs:
       - name: Run the real Full model OCI lifecycle acceptance
         timeout-minutes: 60
         env:
+          CODEXIA_P13_MODEL_CACHE: ${{ runner.temp }}/codexia-p13-model-cache
           OCI_ENGINE: podman
           HF_HUB_OFFLINE: '1'
         run: node --test tests/integration/model-oci-lifecycle.acceptance.mjs

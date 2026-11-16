@@ -32,6 +32,18 @@ test('the certified twenty-job inventory retains all fifty-nine obligations besi
   assert.equal(workflow.jobs.certification.needs.includes('full_model_oci'), false);
   assert.equal(Object.hasOwn(fullModelWorkflow.on, 'workflow_call'), true);
   assert.equal(Object.hasOwn(fullModelWorkflow.on, 'pull_request'), false);
+  const modelJobConfig = fullModelWorkflow.jobs['full-model-oci'];
+  assert.ok(!Object.values(modelJobConfig.env).some(value => String(value).includes('${{ runner.')));
+  for (const stepName of [
+    'Download the real model files from their pinned revisions',
+    'Fail on missing or altered model cache files',
+    'Run the real Full model OCI lifecycle acceptance',
+  ]) {
+    const step = modelJobConfig.steps.find(item => item.name === stepName);
+    assert.equal(step.env.CODEXIA_P13_MODEL_CACHE, '${{ runner.temp }}/codexia-p13-model-cache', stepName);
+  }
+  assert.equal(modelJobConfig.steps.find(item => item.name === 'Download the real model files from their pinned revisions').env.HF_HOME,
+    '${{ runner.temp }}/huggingface-home');
 });
 test('browser groups depend on profile producers; independent groups cannot cancel other evidence', () => {
   assert.equal(workflow.concurrency, undefined);
