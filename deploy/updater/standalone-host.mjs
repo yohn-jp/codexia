@@ -966,7 +966,7 @@ export class PodmanStandaloneHost{
     const serviceHome=path.resolve(quadletDirectory,'../../..');
     assert.equal(quadletDirectory,path.join(serviceHome,'.config','containers','systemd'),'Legacy Quadlet directory is outside the service home');
     const directory=path.join(serviceHome,'.config','systemd','user');
-    const intent=path.join(path.dirname(this.config.stateFile),'backup-intent.json');
+    const intent=path.join(path.dirname(this.config.stateFile),'backup-recovery.json');
     const runtime=process.env.XDG_RUNTIME_DIR??'';
     assert.ok(path.isAbsolute(runtime),'Rootless systemd runtime directory is unavailable');
     const condition=(permit)=>`[Unit]\nConditionPathExists=|!${intent}\nConditionPathExists=|${permit}\n`;

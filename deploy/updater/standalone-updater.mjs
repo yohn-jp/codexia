@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { atomicWrite, clearBackupIntent, initialControllerState, loadBackupIntent, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
@@ -17,16 +17,21 @@ assert.equal(path.basename(config.routeFile),'route');
 assert.equal(path.dirname(config.stateFile),process.env.CODEXIA_UPDATER_LOCK_DIRECTORY,'Use the host-wide locked wrapper');
 const publicKey=await readFile(config.publicKeyFile,'utf8');
 const backupIntentFile=path.join(path.dirname(config.stateFile),'backup-intent.json');
+const backupRecoveryFile=path.join(path.dirname(config.stateFile),'backup-recovery.json');
 const store={
   save:state=>atomicWrite(config.stateFile,JSON.stringify(state)+'\n'),
   saveBackupIntent:intent=>atomicWrite(backupIntentFile,JSON.stringify(intent)+'\n'),
   loadBackupIntent:()=>loadBackupIntent(backupIntentFile),
   clearBackupIntent:()=>clearBackupIntent(backupIntentFile),
+  saveBackupRecoveryIntent:intent=>atomicWrite(backupRecoveryFile,JSON.stringify(intent)+'\n'),
+  loadBackupRecoveryIntent:()=>loadBackupIntent(backupRecoveryFile),
+  clearBackupRecoveryIntent:()=>clearBackupIntent(backupRecoveryFile),
 };
 const maintenanceMarker=path.join(path.dirname(config.stateFile),'maintenance','in-progress.json');
-const pendingMaintenance=await readFile(maintenanceMarker,'utf8').then(()=>true,error=>{if(error.code==='ENOENT')return false;throw error;});
+const pendingMaintenance=await lstat(maintenanceMarker).then(()=>true,error=>{if(error.code==='ENOENT')return false;if(command==='boot'||command==='maintain')return true;throw error;});
 if(pendingMaintenance){
   assert.equal(await store.loadBackupIntent(),null,'Simultaneous backup and maintenance intents require operator repair');
+  assert.equal(await store.loadBackupRecoveryIntent(),null,'Simultaneous backup recovery and maintenance intents require operator repair');
   assert.ok(command==='boot'||command==='maintain','Pending runtime maintenance requires recovery before other operations');
 }
 if(command==='boot'){

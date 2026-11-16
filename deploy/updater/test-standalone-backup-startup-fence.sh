@@ -323,7 +323,7 @@ node --input-type=module -e '
   const api=JSON.parse(execFileSync("podman",["inspect","codexia-api"],{encoding:"utf8"}))[0];
   assert.equal(containerRuntimeFingerprint(api,expected.apiSecretIdentities),expected.apiRuntime);
   await assert.rejects(lstat(host.backupStartupFencePaths().api.permit),{code:"ENOENT"});
-  await host.assertLegacyBackupTunnel({allowStopped:true,expectedIdentity:{unitFingerprint:expected.tunnelUnitFingerprint,runtimeFingerprint:expected.tunnelRuntime}});
+  await host.assertLegacyBackupTunnel({expectedIdentity:{unitFingerprint:expected.tunnelUnitFingerprint,runtimeFingerprint:expected.tunnelRuntime}});
   await host.removeBackupStartupPermits();
   await host.assertBackupAutostartGated({...expected.autostart,timerWasActive:false,tunnelWasActive:true});
 ' "$repo_root" "$quadlet_dir" "$state_dir" "$snapshot"
