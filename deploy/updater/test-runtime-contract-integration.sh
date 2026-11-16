@@ -4,6 +4,11 @@ umask 077
 
 die() { printf 'runtime-contract integration: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "missing prerequisite: $1"; }
+normalize_image_id() {
+  local value="${1:-}"
+  if [[ "$value" =~ ^[a-f0-9]{64}$ ]]; then value="sha256:$value"; fi
+  printf '%s' "$value"
+}
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 readonly UID_VALUE="$(id -u)"
@@ -46,7 +51,7 @@ cleanup() {
     for unit in "${OWNED_UNITS[@]}"; do systemctl --user stop "$unit" >/dev/null 2>&1 || true; done
     for container in codexia-slot-blue codexia-slot-green codexia-api-proxy "$PROXY_FIXTURE_CONTAINER"; do
       if podman container exists "$container" >/dev/null 2>&1; then
-        actual="$(podman inspect --type container --format '{{.Image}}' "$container" 2>/dev/null || true)"
+        actual="$(normalize_image_id "$(podman inspect --type container --format '{{.Image}}' "$container" 2>/dev/null || true)")"
         [[ -n "$IMAGE_ID" && "$actual" == "$IMAGE_ID" ]] && podman rm --force "$container" >/dev/null 2>&1 || true
       fi
     done
@@ -268,9 +273,9 @@ CMD ["node", "/opt/codexia-runtime-contract-health.mjs"]
 EOF
 IMAGE_TAG="localhost/codexia-runtime-contract-test:$NONCE"
 podman build --pull=always --build-arg "CODEXIA_RUNTIME_TEST_NONCE=$NONCE" --tag "$IMAGE_TAG" "$WORK_DIR/image"
-IMAGE_ID="$(podman image inspect --format '{{.Id}}' "$IMAGE_TAG")"
+IMAGE_ID="$(normalize_image_id "$(podman image inspect --format '{{.Id}}' "$IMAGE_TAG")")"
 [[ "$IMAGE_ID" =~ ^sha256:[a-f0-9]{64}$ ]] || die 'synthetic fixture image is not content-addressed'
-image_label="$(podman image inspect --format '{{ index .Labels "codexia.runtime-contract-test" }}' "$IMAGE_ID")"
+image_label="$(podman image inspect --format '{{ index .Labels "codexia.runtime-contract-test" }}' "$IMAGE_TAG")"
 [[ "$image_label" == "$NONCE" ]] || die 'synthetic fixture image ownership label mismatch'
 
 printf '%s\n' 'synthetic secret fixture' > "$WORK_DIR/secret"
