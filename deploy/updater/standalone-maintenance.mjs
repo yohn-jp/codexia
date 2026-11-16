@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { isDeepStrictEqual } from 'node:util';
 import { chmod, lstat, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { atomicWrite, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
-import { PodmanStandaloneHost } from './standalone-host.mjs';
+import { PodmanStandaloneHost, validateRuntimeContract } from './standalone-host.mjs';
 
 export const MAINTENANCE_SOURCE_FILES = Object.freeze([
   'deploy/updater/codexia-updater',
@@ -32,9 +33,14 @@ export function validateMaintenanceConfig(current,candidate){
   assert.equal(typeof candidate.enabled,'boolean','Candidate update enabled state is invalid');
   assert.ok(Number.isSafeInteger(current.observeMilliseconds),'Current updater observation interval is invalid');
   assert.ok(Number.isSafeInteger(candidate.observeMilliseconds)&&candidate.observeMilliseconds>=60000&&candidate.observeMilliseconds<=3600000,'Candidate observation interval must be 60 seconds–60 minutes');
+  if(current.runtime!==undefined)assert.ok(candidate.runtime!==undefined,'Maintenance cannot remove the typed runtime contract');
+  if(candidate.runtime!==undefined){
+    validateRuntimeContract(candidate.runtime);
+    if(current.runtime!==undefined)assert.equal(candidate.runtime.profile,current.runtime.profile,'Runtime profile changes require a compatible signed release transition');
+  }
   // A first Phase C maintenance run may adopt the typed contract only after
   // the running writer has been observed against it below.
-  const normalizedCurrent={...current,observeMilliseconds:candidate.observeMilliseconds,runtime:current.runtime??candidate.runtime};
+  const normalizedCurrent={...current,observeMilliseconds:candidate.observeMilliseconds,runtime:candidate.runtime??current.runtime};
   const normalizedCandidate={...candidate,enabled:current.enabled};
   assert.deepEqual(normalizedCandidate,normalizedCurrent,'Maintenance cannot change release trust, browser authentication, runtime, host paths, or other controller identity');
   return normalizedCandidate;
@@ -51,6 +57,43 @@ export function assertProxyImageStable(currentText,candidateText){
 export function assertNoDropInPaths(value){
   assert.equal(typeof value,'string','Systemd unit override paths are unobservable');
   assert.equal(value.trim(),'','Systemd unit drop-ins are not part of the reviewed updater contract');
+}
+
+export async function activateProxyRevision({changed,restart,verify}){
+  assert.equal(typeof changed,'boolean','Proxy revision change state is unobservable');
+  assert.equal(typeof restart,'function','Proxy restart operation is unavailable');
+  assert.equal(typeof verify,'function','Proxy verification operation is unavailable');
+  if(!changed)return false;
+  await restart();
+  await verify();
+  return true;
+}
+
+export async function transitionRuntimeWriter({currentHost,targetHost,slot,release,state,verify}){
+  assert.ok(['blue','green'].includes(slot),'Runtime maintenance writer slot is invalid');
+  assert.equal(state?.journal?.active?.slot,slot,'Runtime maintenance must preserve the committed writer slot');
+  assert.equal(typeof verify,'function','Runtime maintenance verification is unavailable');
+  await targetHost.route('blocked');
+  await currentHost.stopWriter(slot);
+  await targetHost.convergeWriterUnits(state);
+  await targetHost.startWriter(slot,release);
+  await targetHost.route(slot);
+  try{await verify();}catch(error){await targetHost.route('blocked').catch(()=>undefined);throw error;}
+}
+
+export async function preflightMaintenanceRuntime({currentConfig,nextConfig,currentHost,candidateHost,currentController,candidateController,state,activeSlot}){
+  const adoptingRuntime=currentConfig.runtime===undefined&&nextConfig.runtime!==undefined;
+  const observedHost=adoptingRuntime?candidateHost:currentHost;
+  const observedController=adoptingRuntime?candidateController:currentController;
+  await observedHost.verifyWriterUnits(state);
+  await observedController.assertServing(state,activeSlot,state.installed);
+  return adoptingRuntime;
+}
+
+async function restartProxyService(){
+  assertNoDropInPaths(run('systemctl',['--user','show','--property=DropInPaths','--value','codexia-api-proxy.service']));
+  run('systemctl',['--user','restart','codexia-api-proxy.service'],{timeout:120000});
+  assert.equal(run('systemctl',['--user','show','--property=ActiveState','--value','codexia-api-proxy.service']),'active','Private proxy did not become active after maintenance restart');
 }
 
 export function timerActivationCommand(expected){
@@ -176,6 +219,10 @@ async function readTransaction(markerPath){
   assert.equal(typeof marker.routeContent,'string');
   assert.equal(typeof marker.quadletDir,'string');
   assert.equal(marker.updaterServiceState,'inactive');
+  if(marker.proxyRestartRequired===undefined)marker.proxyRestartRequired=false;
+  assert.equal(typeof marker.proxyRestartRequired,'boolean');
+  if(marker.runtimeChanged===undefined)marker.runtimeChanged=false;
+  assert.equal(typeof marker.runtimeChanged,'boolean');
   assert.ok(marker.timerState&&['active','inactive'].includes(marker.timerState.active)&&['enabled','disabled'].includes(marker.timerState.enabled));
   const allowedTargets=new Set([
     ...MAINTENANCE_SOURCE_FILES.map(relative=>path.join(marker.sourceDir,relative)),
@@ -205,10 +252,27 @@ async function recoverInterrupted(config,store,markerPath){
   const stateBefore=await loadControllerState(marker.stateFile);
   assertStateExceptPause(JSON.parse(await readFile(path.join(marker.snapshotRoot,'controller.json'),'utf8')),stateBefore);
   await stopTimerPolling();
+  const recoveryHost=new PodmanStandaloneHost(config);
+  if(marker.proxyRestartRequired||marker.runtimeChanged)await recoveryHost.route('blocked');
   await restoreFiles(marker.files);
   run('systemctl',['--user','daemon-reload']);
-  assert.equal((await readFile(marker.routeFile,'utf8')),marker.routeContent,'Maintenance route changed during interrupted recovery');
-  await verifyOldCode(marker);
+  const interruptedRoute=await readFile(marker.routeFile,'utf8');
+  assert.ok(interruptedRoute===marker.routeContent||(marker.proxyRestartRequired||marker.runtimeChanged)&&interruptedRoute==='blocked\n','Maintenance route changed during interrupted recovery');
+  const oldConfig=JSON.parse(await readFile(marker.configPath,'utf8'));
+  const oldHost=new PodmanStandaloneHost(oldConfig);
+  if(marker.proxyRestartRequired){
+    await oldHost.route('blocked');
+    await activateProxyRevision({changed:true,restart:restartProxyService,verify:async()=>{}});
+  }
+  if(marker.runtimeChanged){
+    const oldController=new StandaloneController({host:oldHost,store,publicKey,observeMilliseconds:oldConfig.observeMilliseconds??300000});
+    await transitionRuntimeWriter({
+      currentHost:oldHost,targetHost:oldHost,slot:stateBefore.journal.active.slot,release:stateBefore.installed,state:stateBefore,
+      verify:async()=>{await oldHost.verifyWriterUnits(stateBefore);await oldController.assertServing(stateBefore,stateBefore.journal.active.slot,stateBefore.installed);},
+    });
+  }else if(marker.proxyRestartRequired)await oldHost.route(marker.routeContent.trim());
+  else await oldHost.route(marker.routeContent.trim());
+  try{await verifyOldCode(marker);}catch(error){await oldHost.route('blocked').catch(()=>undefined);throw error;}
   const after=await loadControllerState(marker.stateFile);
   assertStateExceptPause(JSON.parse(await readFile(path.join(marker.snapshotRoot,'controller.json'),'utf8')),after);
   if(after.paused!==marker.originalPaused)await store.save(withPause(after,marker.originalPaused));
@@ -279,16 +343,25 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
   const candidateConfig=JSON.parse(await readCandidate(candidateRoot,'config.json'));
   const nextConfig=validateMaintenanceConfig(config,candidateConfig);
   const candidateHost=new PodmanStandaloneHost(nextConfig);
+  const currentHost=new PodmanStandaloneHost(config);
+  const runtimeChanged=!isDeepStrictEqual(config.runtime,nextConfig.runtime);
+  if(runtimeChanged)assert.equal(nextConfig.runtime?.profile,state.installed.profile,'Runtime profile changes require a compatible signed release transition');
   await candidateHost.assertRuntimeSources();
   const controller=new StandaloneController({host:candidateHost,store,publicKey,observeMilliseconds:nextConfig.observeMilliseconds??300000});
   const activeSlot=state.journal.active.slot;
-  await candidateHost.verifyWriterUnits(state);
-  await controller.assertServing(state,activeSlot,state.installed);
+  const currentController=new StandaloneController({host:currentHost,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
+  await preflightMaintenanceRuntime({currentConfig:config,nextConfig,currentHost,candidateHost,currentController,candidateController:controller,state,activeSlot});
 
   const entries=filesFor(manifest,{...config,...nextConfig},candidateConfig);
   const files=await candidateFiles(entries,candidateRoot);
   const proxyIndex=files.findIndex(entry=>entry.candidate==='quadlet/codexia-api-proxy.container');
   assertProxyImageStable(await readRegularFile(files[proxyIndex].target),files[proxyIndex].content);
+  let proxyRestartRequired=false;
+  for(const entry of files){
+    if(entry.candidate!=='deploy/updater/proxy.mjs'&&entry.candidate!=='quadlet/codexia-api-proxy.container')continue;
+    const previous=await readRegularFile(entry.target);
+    if(previous!==entry.content)proxyRestartRequired=true;
+  }
 
   const routeContent=await readFile(config.routeFile,'utf8');
   const initialTimer=timerState();
@@ -310,7 +383,7 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
     format:'codexia-maintenance-transaction/v1',snapshotRoot,files:records,
     configPath:manifest.configPath,sourceDir:manifest.sourceDir,unitDir:manifest.unitDir,
     stateFile:config.stateFile,routeFile:config.routeFile,routeContent,quadletDir:config.quadletDirectory,
-    originalPaused:state.paused,timerState:initialTimer,updaterServiceState:'inactive',
+    originalPaused:state.paused,timerState:initialTimer,updaterServiceState:'inactive',proxyRestartRequired,runtimeChanged,
   };
   await atomicWrite(markerPath,JSON.stringify(marker)+'\n');
   try{
@@ -324,6 +397,15 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
       const target=path.join(manifest.unitDir,filename);
       await assertUnitLoaded(unitName,target);
     }
+    if(runtimeChanged){
+      await transitionRuntimeWriter({
+        currentHost,targetHost:candidateHost,slot:activeSlot,release:state.installed,state,
+        verify:async()=>{await candidateHost.verifyWriterUnits(state);await controller.assertServing(state,activeSlot,state.installed);},
+      });
+    }
+    if(proxyRestartRequired)await candidateHost.route('blocked');
+    await activateProxyRevision({changed:proxyRestartRequired,restart:restartProxyService,verify:async()=>{}});
+    if(proxyRestartRequired)await candidateHost.route(activeSlot);
     await candidateHost.assertRuntimeSources();
     await candidateHost.verifyWriterUnits(state);
     await controller.assertServing(state,activeSlot,state.installed);
@@ -339,6 +421,18 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
     try{
       await restoreFiles(records);
       run('systemctl',['--user','daemon-reload']);
+      const oldHost=new PodmanStandaloneHost(config);
+      if(proxyRestartRequired){
+        await oldHost.route('blocked');
+        await activateProxyRevision({changed:true,restart:restartProxyService,verify:async()=>{}});
+      }
+      if(runtimeChanged){
+        const oldController=new StandaloneController({host:oldHost,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
+        await transitionRuntimeWriter({
+          currentHost:candidateHost,targetHost:oldHost,slot:activeSlot,release:state.installed,state,
+          verify:async()=>{await oldHost.verifyWriterUnits(state);await oldController.assertServing(state,activeSlot,state.installed);},
+        });
+      }else if(proxyRestartRequired)await oldHost.route(activeSlot);
       assert.equal(await readFile(config.routeFile,'utf8'),routeContent,'Maintenance changed the active proxy route');
       const currentState=await loadControllerState(config.stateFile);
       assertStateExceptPause(state,currentState);
@@ -350,6 +444,7 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
     }catch(rollbackError){
       const currentState=await loadControllerState(config.stateFile);
       if(currentState.paused!==true)await store.save(withPause(currentState,true));
+      await new PodmanStandaloneHost(config).route('blocked').catch(()=>undefined);
       await keepTimerStopped().catch(()=>undefined);
       throw new Error('Updater maintenance failed and rollback remains blocked for recovery: '+String(rollbackError.message??rollbackError));
     }

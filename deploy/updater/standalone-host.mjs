@@ -63,7 +63,35 @@ export function runtimeContainerArgs(value){
   return args;
 }
 
-export function assertRuntimeObservation(container,value){
+function environmentMap(entries,label){
+  assert.ok(Array.isArray(entries),label+' environment is unobservable');
+  const values=entries.map(value=>{
+    const split=value.indexOf('=');
+    return split<0?['',value]:[value.slice(0,split),value.slice(split+1)];
+  });
+  assert.ok(values.every(([key])=>key.length>0),label+' environment contains an invalid setting');
+  assert.equal(new Set(values.map(([key])=>key)).size,values.length,label+' environment contains duplicate settings');
+  return new Map(values);
+}
+
+function assertContainerEnvironment(container,imageEnvironment,unitText,label){
+  assert.equal(typeof unitText,'string',label+' Quadlet environment is unobservable');
+  const expected=environmentMap(imageEnvironment,'Pinned image');
+  const declared=[...unitText.matchAll(/^Environment=(.*)$/gmu)].map(match=>match[1]);
+  for(const [key,value] of environmentMap(declared,label+' Quadlet'))expected.set(key,value);
+  const actual=environmentMap(container?.Config?.Env,label+' runtime');
+  for(const [key,value] of expected)assert.equal(actual.get(key),value,label+' '+key+' environment drift');
+  const containerName=typeof container?.Name==='string'?container.Name.replace(/^\//u,''):'';
+  for(const [key,value] of actual){
+    if(expected.has(key))continue;
+    if(key==='container'&&value==='podman')continue;
+    if(key==='HOSTNAME'&&containerName&&value===containerName)continue;
+    if(key==='HOME'&&value==='/root'&&['','0','root'].includes(container.Config?.User??''))continue;
+    assert.fail(label+' contains an unexpected runtime environment setting: '+key);
+  }
+}
+
+export function assertRuntimeObservation(container,value,imageEnvironment,unitText){
   const runtime=validateRuntimeContract(value);
   const environment=container?.Config?.Env;
   assert.ok(Array.isArray(environment),'Legacy runtime environment is unobservable');
@@ -71,11 +99,17 @@ export function assertRuntimeObservation(container,value){
     const split=value.indexOf('=');
     return split<0?['',value]:[value.slice(0,split),value.slice(split+1)];
   });
+  assert.ok(entries.every(([key])=>key.length>0),'Legacy runtime contains an invalid environment setting');
   assert.equal(new Set(entries.map(([key])=>key)).size,entries.length,'Legacy runtime contains duplicate environment settings');
   const env=new Map(entries);
   const allowed=new Set(['CODEXIA_AUTH_TOKEN_FILE','CODEXIA_DATABASE_PASSWORD_FILE','CODEXIA_DATABASE_USER','CODEXIA_DATABASE_NAME','CODEXIA_DATABASE_HOST','CODEXIA_DATABASE_MIGRATE_ON_START','CODEXIA_TRUST_PROXY','CODEXIA_BROWSER_AUTH','CODEXIA_ACCESS_ISSUER','CODEXIA_ACCESS_AUDIENCE','CODEXIA_ACCESS_ORIGIN','CODEXIA_ACCESS_OWNER_EMAIL','CODEXIA_HOSTED_MODE','CODEXIA_PROFILE','CODEXIA_DATA_DIR','CODEXIA_USAGE_DIR','CODEXIA_MODULE_PROFILE_PATH','CODEXIA_MODULE_CACHE_DIR','CODEXIA_TOKENIZER_MODELS_DIR','CODEXIA_STANDALONE_IDENTITY','CODEXIA_PRODUCER_REVISION','CODEXIA_BUILD_PROFILE','CODEXIA_BUILD_MODULE_PROFILE_PATH','CODEXIA_BUILD_DATA_DIR','CODEXIA_BUILD_USAGE_DIR']);
   for(const [key] of entries)if(key.startsWith('CODEXIA_'))assert.ok(allowed.has(key),'Unknown Codexia runtime environment setting: '+key);
+  assertContainerEnvironment(container,imageEnvironment,unitText,'Legacy runtime');
   assert.equal(env.get('CODEXIA_PROFILE'),runtime.profile,'Legacy runtime profile drift');
+  assert.equal(env.get('CODEXIA_DATA_DIR'),'/data','Legacy data directory drift');
+  assert.equal(env.get('CODEXIA_USAGE_DIR'),'/history','Legacy usage directory drift');
+  assert.equal(env.get('HOST'),'0.0.0.0','Legacy application bind address drift');
+  assert.equal(env.get('PORT'),'3000','Legacy application port drift');
   assert.equal(env.get('CODEXIA_MODULE_CACHE_DIR'),'/cache/modules','Legacy module-cache path drift');
   assert.equal(env.get('CODEXIA_TOKENIZER_MODELS_DIR'),runtime.modelCachePath?'/models':undefined,'Legacy model-cache path drift');
 
@@ -107,7 +141,7 @@ export function assertRuntimeObservation(container,value){
   assert.equal(tmpfs['/cache'],`rw,nosuid,nodev,noexec,size=${runtime.tmpfs.moduleCacheSize}`,'Legacy module-cache filesystem drift');
 }
 
-export function assertProxyRuntimeObservation(quadletText,container,activeState,imageInfo){
+export function assertProxyRuntimeObservation(quadletText,container,activeState,imageInfo,{home=process.env.HOME}={}){
   const images=[...quadletText.matchAll(/^Image=(\S+)$/gmu)].map(match=>match[1]);
   assert.equal(images.length,1,'Proxy Quadlet image identity is unobservable');
   assert.match(images[0],/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u,'Proxy Quadlet image is not digest pinned');
@@ -118,12 +152,69 @@ export function assertProxyRuntimeObservation(quadletText,container,activeState,
   assert.ok(imageInfo&&typeof imageInfo.Id==='string'&&imageInfo.Id.startsWith('sha256:'),'Pinned proxy image content identity is unobservable');
   assert.ok(Array.isArray(imageInfo.RepoDigests)&&imageInfo.RepoDigests.includes(images[0]),'Pinned proxy digest is not present in the local image');
   assert.equal(container.Image,imageInfo.Id,'Running private proxy container uses different image content');
+  assertContainerEnvironment(container,imageInfo.Config?.Env,quadletText,'Private proxy');
+
+  for(const [directive,expected] of [
+    ['User','0'],['Entrypoint','node'],['Exec','/config/proxy.mjs'],['ReadOnly','true'],
+    ['NoNewPrivileges','true'],['DropCapability','all'],['Tmpfs','/tmp:rw,nosuid,nodev,noexec,size=16m'],
+  ]){
+    const observed=[...quadletText.matchAll(new RegExp('^'+directive+'=(.*)$','gmu'))].map(match=>match[1]);
+    assert.deepEqual(observed,[expected],'Private proxy Quadlet '+directive+' contract drift');
+  }
+  assert.deepEqual([...quadletText.matchAll(/^PublishPort=(.*)$/gmu)].map(match=>match[1]),[],'Private proxy Quadlet declares a host port');
+
+  const networks=[...quadletText.matchAll(/^Network=(\S+)$/gmu)].map(match=>match[1]);
+  assert.deepEqual(networks,['codexia.network'],'Private proxy Quadlet network contract drift');
+  const observedNetworks=container.NetworkSettings?.Networks;
+  assert.ok(observedNetworks&&typeof observedNetworks==='object'&&!Array.isArray(observedNetworks),'Private proxy networks are unobservable');
+  assert.deepEqual(Object.keys(observedNetworks).sort(),['codexia'],'Private proxy network drift');
+
+  const portBindings=container.HostConfig?.PortBindings;
+  assert.ok(portBindings===null||portBindings&&typeof portBindings==='object'&&!Array.isArray(portBindings),'Private proxy host port bindings are unobservable');
+  assert.equal(Object.keys(portBindings??{}).length,0,'Private proxy exposes a host port');
+
+  assert.ok(path.isAbsolute(home),'Private proxy service home is unobservable');
+  const declaredVolumes=[...quadletText.matchAll(/^Volume=(\S+)$/gmu)].map(match=>match[1]);
+  const expectedMounts=declaredVolumes.map(value=>{
+    const [source,destination,...optionParts]=value.split(':');
+    assert.ok(source&&destination&&optionParts.length>0,'Private proxy volume declaration is invalid');
+    const options=optionParts.join(':').split(',');
+    assert.ok(options.includes('ro')&&!options.includes('rw'),'Private proxy host mount must be read-only');
+    const resolvedSource=source.replace(/^%h(?=\/|$)/u,home);
+    assert.ok(path.isAbsolute(resolvedSource),'Private proxy host mount source is not absolute');
+    return {source:path.resolve(resolvedSource),destination,readOnly:true};
+  }).sort((left,right)=>left.destination.localeCompare(right.destination));
+  assert.deepEqual(expectedMounts.map(mount=>mount.destination).sort(),['/config/proxy.mjs','/config/state'],'Private proxy mount contract drift');
+  const mounts=container.Mounts;
+  assert.ok(Array.isArray(mounts),'Private proxy mounts are unobservable');
+  const actualBinds=mounts.filter(mount=>mount.Type==='bind'||mount.Type==='volume').map(mount=>({
+    source:path.resolve(mount.Source??''),destination:mount.Destination,readOnly:mount.RW===false,
+  })).sort((left,right)=>left.destination.localeCompare(right.destination));
+  assert.deepEqual(actualBinds,expectedMounts,'Private proxy mounts differ from the reviewed read-only host mounts');
+  const allowedTmpfs=new Set(['/dev','/dev/shm','/run','/tmp','/var/tmp']);
+  assert.ok(mounts.every(mount=>mount.Type==='bind'||mount.Type==='volume'||mount.Type==='tmpfs'&&allowedTmpfs.has(mount.Destination)),'Private proxy has an unsupported mount type');
+
+  const hostConfig=container.HostConfig;
+  assert.equal(hostConfig?.ReadonlyRootfs,true,'Private proxy root filesystem is not read-only');
+  assert.deepEqual((hostConfig?.CapDrop??[]).map(value=>String(value).toLowerCase()).sort(),['all'],'Private proxy capability drop contract drift');
+  assert.ok(Array.isArray(hostConfig?.SecurityOpt),'Private proxy security options are unobservable');
+  assert.equal(hostConfig.SecurityOpt.length,1,'Private proxy security options drift');
+  assert.match(hostConfig.SecurityOpt[0],/^no-new-privileges(?::true)?$/iu,'Private proxy no-new-privileges setting is missing or has an unexpected override');
+  assert.deepEqual(hostConfig?.Tmpfs,{'/tmp':'rw,nosuid,nodev,noexec,size=16m'},'Private proxy temporary filesystem drift');
+  assert.equal(container.Config?.User,'0','Private proxy container user drift');
+  assert.deepEqual(container.Config?.Entrypoint,['node'],'Private proxy entrypoint drift');
+  assert.deepEqual(container.Config?.Cmd,['/config/proxy.mjs'],'Private proxy command drift');
 }
 
 export function assertRuntimeUnit(unitText,value){
   const runtime=validateRuntimeContract(value);
   const quotas=[...unitText.matchAll(/^CPUQuota=(.+)$/gmu)].map(match=>match[1]);
   assert.deepEqual(quotas,runtime.resources.cpuQuotaPercent===null?[]:[`${runtime.resources.cpuQuotaPercent}%`],'Legacy CPU quota drift');
+}
+
+export function assertRuntimeUnitDropIns(value){
+  assert.equal(typeof value,'string','Runtime systemd unit overrides are unobservable');
+  assert.equal(value.trim(),'','Runtime systemd unit has an unreviewed drop-in');
 }
 
 export function assertRuntimeCpuMax(cpuMax,value){
@@ -313,6 +404,37 @@ export class PodmanStandaloneHost{
       if(slot===activeSlot)assert.equal(image,state.installed.image,'Committed writer Quadlet image drift');
       const expected=imageConfig({image,profile:this.runtime.profile},this.authEnvironment,this.runtime).replace('PLACEHOLDER',name(slot));
       assert.equal(content,expected,'Writer Quadlet runtime drift');
+      assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value',activeUnit(slot)]));
+    }
+  }
+  async convergeWriterUnits(state){
+    if(!this.runtime)return;
+    const activeSlot=state?.journal?.active?.slot;
+    assert.ok(['blue','green'].includes(activeSlot),'Committed writer slot is unobservable');
+    assert.equal(state.installed?.profile,this.runtime.profile,'Installed release profile differs from runtime contract');
+    const acceptedImages=new Set([state.installed.image,state.previous?.image,...(state.failedImages??[])].filter(Boolean));
+    for(const slot of ['blue','green']){
+      const filename=path.join(this.config.quadletDirectory,name(slot)+'.container');
+      let observed;
+      try{observed=await lstat(filename);}catch(error){
+        if(error.code==='ENOENT'&&slot!==activeSlot)continue;
+        throw error.code==='ENOENT'?new Error('Committed writer Quadlet is missing'):error;
+      }
+      assert.ok(observed.isFile()&&!observed.isSymbolicLink(),'Writer Quadlet must be a regular non-symlink file');
+      assert.equal(observed.mode&0o777,0o600,'Writer Quadlet permissions drift');
+      if(typeof process.getuid==='function')assert.equal(observed.uid,process.getuid(),'Writer Quadlet owner drift');
+      const content=await readFile(filename,'utf8');
+      const image=content.match(/^Image=(\S+)$/mu)?.[1];
+      assert.ok(image&&/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u.test(image),'Writer Quadlet image is not digest pinned');
+      assert.ok(acceptedImages.has(image),'Writer Quadlet image is absent from controller history');
+      if(slot===activeSlot)assert.equal(image,state.installed.image,'Committed writer Quadlet image drift');
+      await atomicWrite(filename,imageConfig({image,profile:this.runtime.profile},this.authEnvironment,this.runtime).replace('PLACEHOLDER',name(slot)));
+    }
+    run('systemctl',['--user','daemon-reload']);
+    for(const slot of ['blue','green']){
+      const filename=path.join(this.config.quadletDirectory,name(slot)+'.container');
+      try{await lstat(filename);}catch(error){if(error.code==='ENOENT'&&slot!==activeSlot)continue;throw error;}
+      assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value',activeUnit(slot)]));
     }
   }
   async fetchChannel(){
@@ -342,7 +464,10 @@ export class PodmanStandaloneHost{
         const configured=observed.ImageName??observed.Config?.Image;
         if(typeof configured!=='string')throw Error('Running writer image unobservable');
         if(this.runtime){
-          assertRuntimeObservation(observed,this.runtime);
+          const image=JSON.parse(run('podman',['image','inspect',configured]))[0];
+          const expectedUnit=imageConfig({image:configured,profile:this.runtime.profile},this.authEnvironment,this.runtime).replace('PLACEHOLDER',name(slot));
+          assertRuntimeObservation(observed,this.runtime,image.Config?.Env,expectedUnit);
+          assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value',activeUnit(slot)]));
           assertRuntimeUnit(run('systemctl',['--user','cat',activeUnit(slot)]),this.runtime);
           await assertRuntimeSystemdCpuQuota(activeUnit(slot),this.runtime);
         }
@@ -384,7 +509,9 @@ export class PodmanStandaloneHost{
     const version=JSON.parse(run('podman',['exec','codexia-api','node','--input-type=module','-e',readyCode],{timeout:10000}));
     assertVersion(version,release,this.authEnvironment.CODEXIA_BROWSER_AUTH);
     if(this.runtime){
-      assertRuntimeObservation(legacy,this.runtime);
+      const expectedUnit=imageConfig(release,this.authEnvironment,this.runtime).replace('PLACEHOLDER','codexia-api');
+      assertRuntimeObservation(legacy,this.runtime,image.Config?.Env,expectedUnit);
+      assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value','codexia-api.service']));
       assertRuntimeUnit(run('systemctl',['--user','cat','codexia-api.service']),this.runtime);
       await assertRuntimeSystemdCpuQuota('codexia-api.service',this.runtime);
     }
@@ -442,6 +569,7 @@ export class PodmanStandaloneHost{
     if(this.runtime)assert.equal(this.runtime.profile,release.profile,'Runtime contract release profile mismatch');
     await atomicWrite(path.join(this.config.quadletDirectory,name(slot)+'.container'),imageConfig(release,this.authEnvironment,this.runtime??undefined).replace('PLACEHOLDER',name(slot)));
     run('systemctl',['--user','daemon-reload']);
+    assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value',activeUnit(slot)]));
     run('systemctl',['--user','start',activeUnit(slot)],{timeout:120000});
     await this.waitReady(name(slot),release);
     const after=await this.observe();assert.deepEqual(after.writers,[{slot,image:release.image}]);
@@ -449,11 +577,12 @@ export class PodmanStandaloneHost{
   async probe(slot,release){
     const proxyQuadlet=await readFile(path.join(this.config.quadletDirectory,'codexia-api-proxy.container'),'utf8');
     const proxyContainer=inspect('codexia-api-proxy');
+    assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value','codexia-api-proxy.service']));
     const proxyUnitState=run('systemctl',['--user','show','--property=ActiveState','--value','codexia-api-proxy.service']);
     const proxyImage=proxyQuadlet.match(/^Image=(\S+)$/mu)?.[1];
     assert.ok(proxyImage,'Private proxy image is unobservable');
     const proxyImageInfo=JSON.parse(run('podman',['image','inspect',proxyImage]))[0];
-    assertProxyRuntimeObservation(proxyQuadlet,proxyContainer,proxyUnitState,proxyImageInfo);
+    assertProxyRuntimeObservation(proxyQuadlet,proxyContainer,proxyUnitState,proxyImageInfo,{home:path.resolve(path.dirname(this.config.stateFile),'../../..')});
     await this.waitReady(name(slot),release);
     const routed=JSON.parse(run('podman',['exec','codexia-api-proxy','node','--input-type=module','-e',proxyProbeCode],{timeout:10000}));
     assert.equal(routed.slot,slot);assertVersion(routed.version,release,this.authEnvironment.CODEXIA_BROWSER_AUTH);

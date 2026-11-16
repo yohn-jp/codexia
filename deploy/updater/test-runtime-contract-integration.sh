@@ -13,6 +13,8 @@ readonly QUADLET_DIR="$CONFIG_HOME/containers/systemd"
 readonly USER_UNIT_DIR="$CONFIG_HOME/systemd/user"
 readonly MARKER=/etc/codexia-iac-disposable-vm
 readonly LOCK="$RUNTIME_DIR/codexia-runtime-contract-acceptance.lock"
+readonly PROXY_FIXTURE_CONTAINER=codexia-runtime-contract-proxy-fixture
+readonly PROXY_FIXTURE_UNIT=codexia-runtime-contract-proxy-fixture.service
 WORK_DIR=
 NONCE=
 IMAGE_TAG=
@@ -36,7 +38,7 @@ cleanup() {
     systemctl --user revert --runtime codexia-slot-blue.service codexia-slot-green.service >/dev/null 2>&1 || true
     systemctl --user daemon-reload >/dev/null 2>&1 || true
     for unit in "${OWNED_UNITS[@]}"; do systemctl --user stop "$unit" >/dev/null 2>&1 || true; done
-    for container in codexia-slot-blue codexia-slot-green; do
+    for container in codexia-slot-blue codexia-slot-green "$PROXY_FIXTURE_CONTAINER"; do
       if podman container exists "$container" >/dev/null 2>&1; then
         actual="$(podman inspect --type container --format '{{.Image}}' "$container" 2>/dev/null || true)"
         [[ -n "$IMAGE_ID" && "$actual" == "$IMAGE_ID" ]] && podman rm --force "$container" >/dev/null 2>&1 || true
@@ -63,6 +65,7 @@ cleanup() {
         codexia-slot-green.container) grep -Fq "Image=$IMAGE_ID" "$file" && grep -Fq 'ContainerName=codexia-slot-green' "$file" && rm -f -- "$file" || true ;;
         codexia.network|codexia-data.network|codexia-data.volume|codexia-history.volume) grep -Fq "Label=codexia-runtime-contract-test=$NONCE" "$file" && rm -f -- "$file" || true ;;
         codexia-db.service) grep -Fq "Description=Codexia runtime acceptance dependency $NONCE" "$file" && rm -f -- "$file" || true ;;
+        codexia-runtime-contract-proxy-fixture.container) grep -Fq "ContainerName=$PROXY_FIXTURE_CONTAINER" "$file" && grep -Fq "Label=codexia-runtime-contract-test=$NONCE" "$file" && rm -f -- "$file" || true ;;
       esac
     done
     systemctl --user daemon-reload >/dev/null 2>&1 || true
@@ -122,11 +125,11 @@ must_not_exist() {
   set +e; podman "$kind" exists "$identity" >/dev/null 2>&1; result=$?; set -e
   (( result == 1 )) || die "refusing or unable to verify existing Codexia $kind identity: $identity"
 }
-for identity in codexia-api codexia-db codexia-api-proxy codexia-slot-blue codexia-slot-green; do must_not_exist container "$identity"; done
+for identity in codexia-api codexia-db codexia-api-proxy codexia-slot-blue codexia-slot-green "$PROXY_FIXTURE_CONTAINER"; do must_not_exist container "$identity"; done
 for identity in codexia codexia-data; do must_not_exist network "$identity"; done
 for identity in codexia-data codexia-history codexia-postgres; do must_not_exist volume "$identity"; done
 for identity in codexia-postgres-app-password codexia-auth-token codexia-postgres-preflight-password; do must_not_exist secret "$identity"; done
-quadlet_names=(codexia-slot-blue.container codexia-slot-green.container codexia.network codexia-data.network codexia-data.volume codexia-history.volume codexia-db.container)
+quadlet_names=(codexia-slot-blue.container codexia-slot-green.container codexia-runtime-contract-proxy-fixture.container codexia.network codexia-data.network codexia-data.volume codexia-history.volume codexia-db.container)
 quadlet_roots=("$QUADLET_DIR" "$RUNTIME_DIR/containers/systemd" "/etc/containers/systemd/users/$UID_VALUE" /etc/containers/systemd/users)
 for root in "${quadlet_roots[@]}"; do
   for filename in "${quadlet_names[@]}"; do
@@ -134,12 +137,12 @@ for root in "${quadlet_roots[@]}"; do
   done
 done
 for root in "$USER_UNIT_DIR" /etc/systemd/user /usr/lib/systemd/user "$RUNTIME_DIR/systemd/user" "$RUNTIME_DIR/systemd/generator"; do
-  for unit in codexia-db.service codexia-slot-blue.service codexia-slot-green.service; do
+  for unit in codexia-db.service codexia-slot-blue.service codexia-slot-green.service "$PROXY_FIXTURE_UNIT"; do
     [[ ! -e "$root/$unit" && ! -L "$root/$unit" ]] || die "refusing existing systemd unit identity: $root/$unit"
     [[ ! -e "$root/$unit.d" && ! -L "$root/$unit.d" ]] || die "refusing existing systemd override identity: $root/$unit.d"
   done
 done
-for unit in codexia-slot-blue.service codexia-slot-green.service codexia-db.service; do
+for unit in codexia-slot-blue.service codexia-slot-green.service codexia-db.service "$PROXY_FIXTURE_UNIT"; do
   load_state="$(systemctl --user show --property=LoadState --value "$unit" 2>/dev/null || true)"
   [[ -z "$load_state" || "$load_state" == not-found ]] || die "refusing loaded unit identity: $unit"
 done
@@ -211,6 +214,7 @@ ExecStop=/usr/bin/true
 EOF
 OWNED_UNITS=(
   codexia-slot-blue.service codexia-slot-green.service codexia-db.service
+  "$PROXY_FIXTURE_UNIT"
   codexia-network.service codexia-data-network.service
   codexia-data-volume.service codexia-history-volume.service
 )
@@ -264,8 +268,37 @@ for (const slot of ['blue', 'green']) {
 }
 NODE
 
+cat > "$WORK_DIR/proxy-fixture.mjs" <<'EOF'
+import http from 'node:http';
+const revision='revision-1';
+http.createServer((_request,response)=>{response.writeHead(200,{'Content-Type':'text/plain'});response.end(revision);}).listen(3000,'0.0.0.0');
+EOF
+chmod 0600 "$WORK_DIR/proxy-fixture.mjs"
+write_owned_file "$QUADLET_DIR/codexia-runtime-contract-proxy-fixture.container" 0600 <<EOF
+[Unit]
+Description=Codexia runtime contract proxy reload fixture $NONCE
+[Container]
+Image=$IMAGE_ID
+ContainerName=$PROXY_FIXTURE_CONTAINER
+Network=codexia.network
+Volume=$WORK_DIR/proxy-fixture.mjs:/config/proxy.mjs:ro,Z
+User=0
+Entrypoint=node
+Exec=/config/proxy.mjs
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=all
+Tmpfs=/tmp:rw,nosuid,nodev,noexec,size=16m
+Label=codexia-runtime-contract-test=$NONCE
+[Service]
+Restart=on-failure
+RestartSec=1
+[Install]
+WantedBy=default.target
+EOF
+
 systemctl --user daemon-reload
-for unit in codexia-slot-blue.service codexia-slot-green.service codexia-network.service codexia-data-network.service codexia-data-volume.service codexia-history-volume.service; do
+for unit in codexia-slot-blue.service codexia-slot-green.service "$PROXY_FIXTURE_UNIT" codexia-network.service codexia-data-network.service codexia-data-volume.service codexia-history-volume.service; do
   systemctl --user cat "$unit" >/dev/null || die "Quadlet did not generate $unit"
 done
 
@@ -277,6 +310,58 @@ wait_for_unit() {
   done
   die "systemd unit $unit did not reach $expected"
 }
+
+write_proxy_fixture_revision() {
+  local revision="$1"
+  cat > "$WORK_DIR/proxy-fixture.mjs" <<EOF
+import http from 'node:http';
+const revision='$revision';
+http.createServer((_request,response)=>{response.writeHead(200,{'Content-Type':'text/plain'});response.end(revision);}).listen(3000,'0.0.0.0');
+EOF
+  chmod 0600 "$WORK_DIR/proxy-fixture.mjs"
+}
+
+exercise_proxy_fixture_revision() {
+  local expected="$1" expect_failure="${2:-no}"
+  node --input-type=module - "$REPO_ROOT" "$PROXY_FIXTURE_UNIT" "$PROXY_FIXTURE_CONTAINER" "$expected" "$expect_failure" <<'NODE'
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const [repoRoot,unit,container,expected,expectFailure]=process.argv.slice(2);
+const {activateProxyRevision}=await import(pathToFileURL(path.join(repoRoot,'deploy/updater/standalone-maintenance.mjs')).href);
+const restart=()=>execFileSync('systemctl',['--user','restart',unit],{stdio:'ignore'});
+const verify=async()=>{
+  const deadline=Date.now()+15000;
+  for(;;){
+    let actual=null;
+    try{actual=execFileSync('podman',['exec',container,'node','--input-type=module','-e','const response=await fetch("http://127.0.0.1:3000/revision");process.stdout.write(await response.text())'],{encoding:'utf8',timeout:3000}).trim();}catch{}
+    if(actual!==null){assert.equal(actual,expected,'Proxy source revision did not become active');return;}
+    if(Date.now()>=deadline)throw new Error('Proxy fixture did not become ready after restart');
+    await delay(100);
+  }
+};
+if(expectFailure==='yes')await assert.rejects(activateProxyRevision({changed:true,restart,verify}),/Proxy source revision did not become active/u);
+else assert.equal(await activateProxyRevision({changed:true,restart,verify}),true);
+NODE
+}
+
+systemctl --user start "$PROXY_FIXTURE_UNIT"
+wait_for_unit "$PROXY_FIXTURE_UNIT" active
+exercise_proxy_fixture_revision revision-1
+write_proxy_fixture_revision revision-2
+exercise_proxy_fixture_revision revision-2
+cp -- "$WORK_DIR/proxy-fixture.mjs" "$WORK_DIR/proxy-fixture.rollback.mjs"
+write_proxy_fixture_revision revision-3
+exercise_proxy_fixture_revision revision-2 yes
+cp -- "$WORK_DIR/proxy-fixture.rollback.mjs" "$WORK_DIR/proxy-fixture.mjs"
+exercise_proxy_fixture_revision revision-2
+write_proxy_fixture_revision revision-4
+systemctl --user restart "$PROXY_FIXTURE_UNIT"
+wait_for_unit "$PROXY_FIXTURE_UNIT" active
+cp -- "$WORK_DIR/proxy-fixture.rollback.mjs" "$WORK_DIR/proxy-fixture.mjs"
+exercise_proxy_fixture_revision revision-2
 
 run_node_check() {
   local slot="$1" image="$2"
@@ -293,10 +378,12 @@ const service = `${name}.service`;
 const host = await import(pathToFileURL(path.join(repoRoot, 'deploy/updater/standalone-host.mjs')).href);
 const runtime = JSON.parse(await readFile(path.join(workDir, `codexia-runtime-${slot}.json`), 'utf8'));
 const inspect = JSON.parse(execFileSync('podman', ['inspect', '--type', 'container', name], { encoding: 'utf8' }))[0];
+const imageInfo = JSON.parse(execFileSync('podman', ['image', 'inspect', image], { encoding: 'utf8' }))[0];
+const quadletText = await readFile(path.join(quadletDir, `${name}.container`), 'utf8');
 assert.equal(inspect.State?.Running, true, `${name} is not running`);
 const observedImage = typeof inspect.Image === 'string' && inspect.Image.startsWith('sha256:') ? inspect.Image : `sha256:${inspect.Image}`;
 assert.equal(observedImage, image, `${name} image identity is not pinned to the local fixture digest`);
-host.assertRuntimeObservation(inspect, runtime);
+host.assertRuntimeObservation(inspect, runtime, imageInfo.Config?.Env, quadletText);
 host.assertRuntimeUnit(execFileSync('systemctl', ['--user', 'cat', service], { encoding: 'utf8' }), runtime);
 await host.assertRuntimeSystemdCpuQuota(service, runtime);
 

@@ -12,6 +12,11 @@ const runtime={
  tmpfs:{tempSize:'64m',moduleCacheSize:'512m'},
  resources:{memoryMaxBytes:8*1024**3,cpuQuotaPercent:250},
 };
+const imageEnvironmentFromUnit=(imageEnvironment,unit)=>{
+ const env=new Map(imageEnvironment.map(entry=>[entry.slice(0,entry.indexOf('=')),entry.slice(entry.indexOf('=')+1)]));
+ for(const [,entry] of unit.matchAll(/^Environment=(.*)$/gmu))env.set(entry.slice(0,entry.indexOf('=')),entry.slice(entry.indexOf('=')+1));
+ return [...env].map(([key,value])=>key+'='+value);
+};
 
 test('typed runtime contract produces the same bounded model, cache and resource settings for a release',()=>{
  assert.deepEqual(validateRuntimeContract(runtime),runtime);
@@ -64,9 +69,19 @@ test('effective cgroup CPU quota must match the typed runtime contract',async()=
  assert.throws(()=>assertRuntimeCpuMax('250000 100000',{...runtime,resources:{...runtime.resources,cpuQuotaPercent:null}}),/Effective CPU quota drift/);
 });
 
+test('runtime verification rejects unreviewed writer and proxy systemd drop-ins',async()=>{
+ const {assertRuntimeUnitDropIns}=await import('../deploy/updater/standalone-host.mjs');
+ assert.equal(typeof assertRuntimeUnitDropIns,'function');
+ assert.doesNotThrow(()=>assertRuntimeUnitDropIns(''));
+ assert.throws(()=>assertRuntimeUnitDropIns('/home/codexia/.config/systemd/user/codexia-slot-blue.service.d/override.conf'),/unreviewed drop-in/);
+});
+
 test('legacy runtime verification rejects undeclared environment, mounts and systemd resource drift',()=>{
+ const imageEnvironment=['PATH=/usr/bin','NODE_ENV=production','CODEXIA_PROFILE=full','CODEXIA_MODULE_PROFILE_PATH=/app/generated/server.mjs','CODEXIA_STANDALONE_IDENTITY=1'];
+ const authEnvironment=browserAuthEnvironment({browserAuth:access},origin);
+ const unit=imageConfig(release,authEnvironment,runtime);
  const observed={
-  Config:{Env:['CODEXIA_PROFILE=full','CODEXIA_MODULE_CACHE_DIR=/cache/modules','CODEXIA_TOKENIZER_MODELS_DIR=/models','CODEXIA_MODULE_PROFILE_PATH=/app/generated/server.mjs','CODEXIA_STANDALONE_IDENTITY=1']},
+  Config:{Env:imageEnvironmentFromUnit(imageEnvironment,unit)},
   Mounts:[
    {Destination:'/cache',Type:'tmpfs',RW:true},
    {Destination:'/data',Type:'volume',Name:'codexia-data',RW:true},
@@ -78,13 +93,17 @@ test('legacy runtime verification rejects undeclared environment, mounts and sys
    '/tmp':'rw,nosuid,nodev,noexec,size=64m','/cache':'rw,nosuid,nodev,noexec,size=512m',
   }},
  };
- assert.doesNotThrow(()=>assertRuntimeObservation(observed,runtime));
+ assert.doesNotThrow(()=>assertRuntimeObservation(observed,runtime,imageEnvironment,unit));
  assert.doesNotThrow(()=>assertRuntimeUnit('[Service]\nCPUQuota=250%\n',runtime));
- assert.throws(()=>assertRuntimeObservation({...observed,Config:{Env:[...observed.Config.Env,'CODEXIA_UNREVIEWED=1']}},runtime),/Unknown Codexia runtime/);
- assert.throws(()=>assertRuntimeObservation({...observed,Config:{Env:[...observed.Config.Env,'CODEXIA_PROFILE=core']}},runtime),/duplicate environment/);
- assert.throws(()=>assertRuntimeObservation({...observed,Mounts:[...observed.Mounts,{Destination:'/etc',Type:'bind',Source:'/etc',RW:false}]},runtime),/persistent and host mounts/);
- assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,Memory:0}},runtime),/memory limit drift/);
- assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,CpuQuota:200000}},runtime),/CPU limit drift/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Config:{Env:[...observed.Config.Env,'CODEXIA_UNREVIEWED=1']}},runtime,imageEnvironment,unit),/Unknown Codexia runtime/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Config:{Env:[...observed.Config.Env,'CODEXIA_PROFILE=core']}},runtime,imageEnvironment,unit),/duplicate environment/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Config:{Env:observed.Config.Env.map(entry=>entry==='CODEXIA_DATA_DIR=/data'?'CODEXIA_DATA_DIR=/tmp/data':entry)}},runtime,imageEnvironment,unit),/CODEXIA_DATA_DIR environment drift/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Config:{Env:[...observed.Config.Env,'NODE_OPTIONS=--require=/tmp/inject.js']}},runtime,imageEnvironment,unit),/unexpected runtime environment/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Config:{Env:observed.Config.Env.map(entry=>entry==='CODEXIA_DATABASE_USER=codexia'?'CODEXIA_DATABASE_USER=other':entry)}},runtime,imageEnvironment,unit),/CODEXIA_DATABASE_USER environment drift/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Config:{Env:observed.Config.Env.map(entry=>entry==='CODEXIA_ACCESS_AUDIENCE='+access.audience?'CODEXIA_ACCESS_AUDIENCE='+'b'.repeat(64):entry)}},runtime,imageEnvironment,unit),/CODEXIA_ACCESS_AUDIENCE environment drift/);
+ assert.throws(()=>assertRuntimeObservation({...observed,Mounts:[...observed.Mounts,{Destination:'/etc',Type:'bind',Source:'/etc',RW:false}]},runtime,imageEnvironment,unit),/persistent and host mounts/);
+ assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,Memory:0}},runtime,imageEnvironment,unit),/memory limit drift/);
+ assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,CpuQuota:200000}},runtime,imageEnvironment,unit),/CPU limit drift/);
  assert.throws(()=>assertRuntimeUnit('[Service]\nCPUQuota=200%\n',runtime),/CPU quota drift/);
 });
 
@@ -125,6 +144,7 @@ test('model cache source must be an existing readable directory without symlink 
 
 test('post-initialization verifies slot unit source and retained runtime settings',async()=>{
  const dir=await mkdtemp(path.join(tmpdir(),'codexia-runtime-units-'));
+ const previousPath=process.env.PATH;
  const config={browserAuth:{mode:'token'},frontendIdentityUrl:origin+'/desktop/update-identity.json',routeFile:path.join(dir,'route'),quadletDirectory:dir,githubTokenFile:path.join(dir,'token'),runtime};
  const host=new PodmanStandaloneHost(config);
  const prior={...release,image:'ghcr.io/yohn-jp/codexia-backend@sha256:'+'c'.repeat(64)};
@@ -133,6 +153,8 @@ test('post-initialization verifies slot unit source and retained runtime setting
  const env=browserAuthEnvironment({browserAuth:{mode:'token'}},origin);
  const state={installed:release,previous:prior,failedImages:[],journal:{active:{slot:'blue'}}};
  try{
+  await writeFile(path.join(dir,'systemctl'),'#!/bin/sh\nprintf "%s" "${CODEXIA_TEST_DROPINS:-}"\n',{mode:0o700});
+  process.env.PATH=dir+path.delimiter+previousPath;
   await writeFile(blue,imageConfig(release,env,runtime).replace('PLACEHOLDER','codexia-slot-blue'),{mode:0o600});
   await writeFile(green,imageConfig(prior,env,runtime).replace('PLACEHOLDER','codexia-slot-green'),{mode:0o600});
   await host.verifyWriterUnits(state);
@@ -140,10 +162,21 @@ test('post-initialization verifies slot unit source and retained runtime setting
   await writeFile(green,valid.replace('size=512m','size=1g'),{mode:0o600});
   await assert.rejects(host.verifyWriterUnits(state),/runtime drift/);
   await writeFile(green,valid,{mode:0o600});
+  process.env.CODEXIA_TEST_DROPINS='/home/codexia/.config/systemd/user/codexia-slot-green.service.d/override.conf';
+  await assert.rejects(host.verifyWriterUnits(state),/unreviewed drop-in/);
+  delete process.env.CODEXIA_TEST_DROPINS;
   await rm(green);
   await symlink(blue,green);
   await assert.rejects(host.verifyWriterUnits(state),/symlink/);
- }finally{await rm(dir,{recursive:true,force:true});}
+  await rm(green);
+  await writeFile(green,valid,{mode:0o600});
+  const nextRuntime={...runtime,resources:{...runtime.resources,cpuQuotaPercent:300}};
+  const nextHost=new PodmanStandaloneHost({...config,runtime:nextRuntime});
+  await nextHost.convergeWriterUnits(state);
+  assert.match(await readFile(blue,'utf8'),/CPUQuota=300%/);
+  assert.match(await readFile(green,'utf8'),/CPUQuota=300%/);
+  await nextHost.verifyWriterUnits(state);
+ }finally{process.env.PATH=previousPath;delete process.env.CODEXIA_TEST_DROPINS;await rm(dir,{recursive:true,force:true});}
 });
 
 test('standalone writer and preflight use an explicit compatible browser auth mode',()=>{
