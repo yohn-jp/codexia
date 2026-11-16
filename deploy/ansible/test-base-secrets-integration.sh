@@ -7,7 +7,10 @@ tmp=$(mktemp -d /tmp/codexia-base-secrets.XXXXXX)
 cleanup() {
   local status=$?
   trap - EXIT
-  if [[ "$tmp" == /tmp/codexia-base-secrets.* && -d "$tmp" && ! -L "$tmp" ]]; then sudo rm -rf -- "$tmp" || true; fi
+  if [[ "$tmp" == /tmp/codexia-base-secrets.* && -d "$tmp" && ! -L "$tmp" ]]; then
+    sudo rm -rf -- "$tmp" || printf 'Phase B secrets fixture cleanup could not remove its temporary directory.\n' >&2
+  fi
+  printf 'Phase B secrets fixture cleanup preserved script status %s.\n' "$status" >&2
   exit "$status"
 }
 trap cleanup EXIT
