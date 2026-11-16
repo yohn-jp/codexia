@@ -44,6 +44,12 @@ function unitStatus(slot){
   if(result.status!==0)throw Error('Systemd unit state unobservable');
   return result.stdout.trim();
 }
+export function assertLegacyApiStoppedState(result,container){
+  if(result?.stdout?.trim()!=='failed')return false;
+  assert.notEqual(result.status,0,'Failed legacy API unit unexpectedly reported success');
+  assert.equal(container,null,'Failed legacy API unit still has a Podman container');
+  return true;
+}
 export function browserAuthEnvironment(config,frontendOrigin){
   const auth=config.browserAuth;
   assert.ok(auth&&typeof auth==='object'&&!Array.isArray(auth),'Explicit browserAuth configuration required');
@@ -532,6 +538,10 @@ export class PodmanStandaloneHost{
   }
   async stopLegacyWriter(){
     run('systemctl',['--user','stop','codexia-api.service'],{timeout:120000});
+    const status=spawnSync('systemctl',['--user','is-active','codexia-api.service'],{encoding:'utf8',timeout:15000});
+    if(assertLegacyApiStoppedState(status,inspect('codexia-api'))){
+      run('systemctl',['--user','reset-failed','codexia-api.service']);
+    }
     assert.equal(await this.legacyServiceActive(),false,'Legacy API writer did not stop');
   }
   backupStartupFencePaths(){

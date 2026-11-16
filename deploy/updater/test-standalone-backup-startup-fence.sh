@@ -94,7 +94,7 @@ podman inspect codexia-tunnel >/dev/null
 # Capture live settings and generated Quadlet units before their stop hooks remove containers.
 node --input-type=module -e '
   import assert from "node:assert/strict";
-  import {execFileSync} from "node:child_process";
+  import {execFileSync,spawnSync} from "node:child_process";
   import {writeFile} from "node:fs/promises";
   import path from "node:path";
   import {pathToFileURL} from "node:url";
@@ -276,6 +276,10 @@ node --input-type=module -e '
   const tunnel=await host.readBackupQuadletUnit("codexia-tunnel.service","codexia-tunnel.container");
   assert.equal(tunnel.source,expected.tunnelSource);
   assert.equal((await host.legacyBackupTunnelSnapshot()).unitFingerprint,expected.tunnelUnitFingerprint);
+  execFileSync("systemctl",["--user","stop","codexia-api.service"],{encoding:"utf8"});
+  const stopped=spawnSync("systemctl",["--user","is-active","codexia-api.service"],{encoding:"utf8"});
+  assert.equal(stopped.stdout.trim(),"failed","Disposable Quadlet stop must exercise the post-SIGKILL failed-unit recovery path");
+  assert.notEqual(stopped.status,0,"Failed unit state must have a nonzero systemctl result");
   await host.stopLegacyWriter();
   await host.startTunnel();
   const actual=JSON.parse(execFileSync("podman",["inspect","codexia-tunnel"],{encoding:"utf8"}))[0];

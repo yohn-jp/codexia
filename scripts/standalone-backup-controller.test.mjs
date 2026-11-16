@@ -5,7 +5,7 @@ import { chmod, lstat, mkdtemp, open, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { atomicWrite, loadBackupIntent, StandaloneController, initialControllerState, validateBackupIntent } from './standalone-update-controller.mjs';
-import { PodmanStandaloneHost, assertLegacyBackupIdentity, assertLegacyBackupUnitIdentity, assertLegacyBackupTunnelUnitIdentity, containerRuntimeFingerprint, containerRuntimeFingerprintProjection, assertVersion } from '../deploy/updater/standalone-host.mjs';
+import { PodmanStandaloneHost, assertLegacyApiStoppedState, assertLegacyBackupIdentity, assertLegacyBackupUnitIdentity, assertLegacyBackupTunnelUnitIdentity, containerRuntimeFingerprint, containerRuntimeFingerprintProjection, assertVersion } from '../deploy/updater/standalone-host.mjs';
 import { signUpdateChannel } from './update-channel.mjs';
 
 const release = {
@@ -14,6 +14,13 @@ const release = {
   platform: 'linux/amd64', profile: 'core', migrationFingerprint: 'sha256:' + 'b'.repeat(64),
   persistenceFormat: 1, apiEpoch: 1,
 };
+
+test('failed legacy API unit is reset only after Podman proves the Quadlet container is absent', () => {
+  assert.equal(assertLegacyApiStoppedState({ status: 3, stdout: 'failed\n' }, null), true);
+  assert.throws(() => assertLegacyApiStoppedState({ status: 3, stdout: 'failed\n' }, { State: { Running: false } }), /still has a Podman container/);
+  assert.equal(assertLegacyApiStoppedState({ status: 3, stdout: 'inactive\n' }, null), false);
+  assert.equal(assertLegacyApiStoppedState({ status: 4, stdout: 'unknown\n' }, null), false);
+});
 
 function controllerBackupIntent(overrides = {}) {
   return {
