@@ -11,6 +11,7 @@ on:
       - modules/**
       - package.json
       - packages/**
+      - profiles/**
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
       - scripts/profile-build.mjs
@@ -31,6 +32,7 @@ on:
       - modules/**
       - package.json
       - packages/**
+      - profiles/**
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
       - scripts/profile-build.mjs

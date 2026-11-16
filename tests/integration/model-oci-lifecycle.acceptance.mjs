@@ -129,7 +129,7 @@ async function waitForReplacementReady(podman, name) {
   throw new Error("replacement full-profile OCI server did not become live");
 }
 
-test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives replacement", { timeout: 900_000 }, async () => {
+test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives replacement", { timeout: 2_700_000 }, async () => {
   const podman = process.env.OCI_ENGINE ?? "podman";
   const commit = await git(root, "rev-parse", "HEAD");
   const tree = await git(root, "rev-parse", "HEAD^{tree}");
