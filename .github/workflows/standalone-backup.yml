@@ -140,7 +140,7 @@ jobs:
             bash deploy/updater/test-standalone-backup-lock.sh
             bash deploy/updater/test-standalone-backup-startup-fence.sh
           ' bash "$fixture_repo"
-          node --test scripts/standalone-backup-controller.test.mjs
+          node --test "$GITHUB_WORKSPACE/scripts/standalone-backup-controller.test.mjs"
       - name: Remove the disposable backup test user
         if: always()
         run: |
