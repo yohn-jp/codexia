@@ -7,8 +7,19 @@ all:
           ansible_user: codexia
       vars:
         codexia_stage: prepare
+        # Runtime account for read-only inspection; use the actual adopted identity.
+        codexia_service_user: codexia
+        # Required for the explicit host stage; match existing identity on adoption.
+        codexia_service_group: codexia
+        codexia_service_uid: 1001
+        codexia_service_gid: 1001
+        codexia_service_home: /home/codexia
+        codexia_host_approved: false
+        codexia_create_service_account: false
         # Base runtime convergence is a separate pre-initialization stage.
         codexia_base_approved: false
+        # Fresh/empty PostgreSQL initialization needs separate explicit approval.
+        codexia_database_initialization_approved: false
         codexia_frontend_origin: https://codexia.example.invalid
         codexia_browser_auth:
           mode: token

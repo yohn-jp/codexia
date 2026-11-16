@@ -1,0 +1,40 @@
+---
+- name: Inspect the existing Tunnel image without exposing credential values
+  ansible.builtin.command:
+    argv: [podman, inspect, --format, "{% raw %}{{.Config.Image}}{% endraw %}", codexia-tunnel]
+  register: base_runtime_tunnel_image
+  changed_when: false
+- name: Inspect the existing Tunnel network attachments
+  ansible.builtin.command:
+    argv: [podman, inspect, --format, "{% raw %}{{json .NetworkSettings.Networks}}{% endraw %}", codexia-tunnel]
+  register: base_runtime_tunnel_networks
+  changed_when: false
+- name: Inspect the existing Tunnel published ports
+  ansible.builtin.command:
+    argv: [podman, inspect, --format, "{% raw %}{{json .HostConfig.PortBindings}}{% endraw %}", codexia-tunnel]
+  register: base_runtime_tunnel_ports
+  changed_when: false
+- name: Inspect the existing Tunnel credential mount
+  ansible.builtin.command:
+    argv: [podman, inspect, --format, "{% raw %}{{json .Mounts}}{% endraw %}", codexia-tunnel]
+  register: base_runtime_tunnel_mounts
+  changed_when: false
+- name: Inspect the existing Tunnel root filesystem setting
+  ansible.builtin.command:
+    argv: [podman, inspect, --format, "{% raw %}{{.HostConfig.ReadonlyRootfs}}{% endraw %}", codexia-tunnel]
+  register: base_runtime_tunnel_readonly
+  changed_when: false
+- name: Reject existing Tunnel runtime drift before any host mutation
+  ansible.builtin.assert:
+    that:
+      - base_runtime_tunnel_image.stdout == 'docker.io/cloudflare/cloudflared@sha256:b94b96edf2c9c4360f8879c8580cfaa99077f19c849ec595ca2f711b27d4f344'
+      - (base_runtime_tunnel_networks.stdout | from_json | dict2items | map(attribute='key') | list | sort) == ['codexia']
+      - >-
+        (base_runtime_tunnel_ports.stdout | from_json) ==
+        {'2000/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '2000'}]}
+      - (base_runtime_tunnel_mounts.stdout | from_json | selectattr('Destination', 'equalto', '/run/secrets/token') | list | length) == 1
+      - (base_runtime_tunnel_mounts.stdout | from_json | selectattr('Destination', 'equalto', '/run/secrets/token') | map(attribute='RW') | first) == false
+      - (base_runtime_tunnel_mounts.stdout | from_json | selectattr('Type', 'equalto', 'volume') | list | length) == 0
+      - (base_runtime_tunnel_mounts.stdout | from_json | selectattr('Type', 'equalto', 'bind') | rejectattr('Destination', 'equalto', '/run/secrets/token') | list | length) == 0
+      - base_runtime_tunnel_readonly.stdout == 'true'
+    fail_msg: Existing Tunnel image, private network, loopback-only port, protected token mount or read-only root filesystem differs from the canonical runtime; no host resources were changed.

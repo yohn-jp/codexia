@@ -29,6 +29,11 @@
     argv: [podman, inspect, --format, "{% raw %}{{json .HostConfig.PortBindings}}{% endraw %}", codexia-db]
   register: base_runtime_db_ports
   changed_when: false
+- name: Verify the database container's PGDATA and bootstrap credential source
+  ansible.builtin.command:
+    argv: [podman, inspect, --format, "{% raw %}{{json .Config.Env}}{% endraw %}", codexia-db]
+  register: base_runtime_db_environment
+  changed_when: false
 - name: Reject database container storage, network, or port drift
   ansible.builtin.assert:
     that:
@@ -42,6 +47,25 @@
         (base_runtime_db_mounts.stdout | from_json
         | selectattr('Type', 'equalto', 'volume')
         | list | length) == 1
+      - >-
+        (base_runtime_db_mounts.stdout | from_json
+        | selectattr('Destination', 'match', '^/var/lib/postgresql(/|$)')
+        | list | length) == 1
+      - >-
+        (base_runtime_db_mounts.stdout | from_json
+        | selectattr('Destination', 'equalto', '/docker-entrypoint-initdb.d/010-create-app-role.sh')
+        | selectattr('Type', 'equalto', 'bind')
+        | selectattr('Source', 'equalto', '/etc/codexia/postgres/010-create-app-role.sh')
+        | selectattr('RW', 'equalto', false)
+        | list | length) == 1
       - (base_runtime_db_networks.stdout | from_json).keys() | list == ['codexia-data']
       - (base_runtime_db_ports.stdout | from_json) is none or (base_runtime_db_ports.stdout | from_json) == {}
-    fail_msg: Database container has an unexpected data volume, network attachment, or published port.
+      - >-
+        (base_runtime_db_environment.stdout | from_json | select('equalto', 'PGDATA=/var/lib/postgresql/data/pgdata') | list | length) == 1
+      - >-
+        (base_runtime_db_environment.stdout | from_json | select('equalto', 'POSTGRES_DB=codexia') | list | length) == 1
+      - >-
+        (base_runtime_db_environment.stdout | from_json | select('equalto', 'POSTGRES_USER=codexia_admin') | list | length) == 1
+      - >-
+        (base_runtime_db_environment.stdout | from_json | select('equalto', 'POSTGRES_PASSWORD_FILE=/run/secrets/admin-password') | list | length) == 1
+    fail_msg: Database container has unexpected PGDATA, storage, init-script, network, credential-source, or published-port configuration.

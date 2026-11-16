@@ -3,6 +3,9 @@ set -euo pipefail
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 umask 077
+service_user=$(id -un)
+service_uid=$(id -u)
+service_home=$(getent passwd "$service_user" | cut -d: -f6)
 mkdir "$tmp/bin" "$tmp/store"
 export BASE_SECRET_STORE="$tmp/store" BASE_SECRET_LOG="$tmp/commands" BASE_SECRET_EXISTING="$tmp/has-runtime"
 cat > "$tmp/bin/podman" <<'SH'
@@ -29,10 +32,9 @@ cat > "$tmp/test.yml" <<YAML
   connection: local
   gather_facts: false
   vars:
-    ansible_facts:
-      user_uid: 1001
-      user_id: fixture
-    codexia_service_user: fixture
+    codexia_service_user: $service_user
+    codexia_service_uid: $service_uid
+    codexia_service_home: "$service_home"
     codexia_secrets_approved: true
     codexia_auth_token_file: "$tmp/auth"
     codexia_tunnel_token_file: "$tmp/tunnel"

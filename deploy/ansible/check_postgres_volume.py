@@ -41,6 +41,13 @@ def inspect_volume(root: Path) -> dict[str, str]:
                 "reason": "postgres-major-version",
                 "version": version,
             }
+        for directory in ("base", "global", "pg_wal"):
+            entry = pgdata / directory
+            if entry.is_symlink() or not entry.is_dir():
+                return {"state": "mismatch", "reason": f"missing-core-directory-{directory}"}
+        control = pgdata / "global" / "pg_control"
+        if control.is_symlink() or not control.is_file():
+            return {"state": "mismatch", "reason": "missing-pg-control"}
         return {"state": "ready", "version": version}
     except (OSError, UnicodeError):
         return {"state": "mismatch", "reason": "unreadable-volume"}

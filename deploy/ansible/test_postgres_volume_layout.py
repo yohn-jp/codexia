@@ -22,9 +22,23 @@ class PostgresVolumeLayoutTests(unittest.TestCase):
             pgdata.mkdir()
             (pgdata / "PG_VERSION").write_text("17\n", encoding="ascii")
             (pgdata / "global").mkdir()
+            (pgdata / "global" / "pg_control").write_bytes(b"control")
+            (pgdata / "base").mkdir()
+            (pgdata / "pg_wal").mkdir()
             self.assertEqual(
                 inspect_volume(Path(temporary)),
                 {"state": "ready", "version": "17"},
+            )
+
+    def test_postgres_17_version_without_core_cluster_files_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            pgdata = Path(temporary) / "pgdata"
+            pgdata.mkdir()
+            (pgdata / "PG_VERSION").write_text("17\n", encoding="ascii")
+            (pgdata / "global").mkdir()
+            self.assertEqual(
+                inspect_volume(Path(temporary)),
+                {"state": "mismatch", "reason": "missing-core-directory-base"},
             )
 
     def test_other_postgres_major_is_rejected_without_rewriting_the_volume(self):

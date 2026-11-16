@@ -6,7 +6,19 @@ test "$(lsb_release -rs)" = 26.04
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 umask 077
-export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+service_user=${CODEXIA_SERVICE_USER:?missing rootless fixture identity}
+service_uid=$(id -u "$service_user")
+service_home=$(getent passwd "$service_user" | cut -d: -f6)
+test "$(id -un)" != "$service_user"
+sudo -n true
+as_service() {
+  sudo -u "$service_user" env HOME="$service_home" XDG_CONFIG_HOME="$service_home/.config" XDG_DATA_HOME="$service_home/.local/share" XDG_STATE_HOME="$service_home/.local/state" XDG_RUNTIME_DIR="/run/user/$service_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$service_uid/bus" "$@"
+}
+podman() { as_service /usr/bin/podman "$@"; }
+systemctl() {
+  if [[ "${1:-}" == --user ]]; then as_service /usr/bin/systemctl "$@"; else command systemctl "$@"; fi
+}
+export XDG_RUNTIME_DIR="/run/user/$service_uid"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 for _ in $(seq 1 20); do
   if systemctl --user show --property=Version >/dev/null 2>&1; then break; fi
@@ -36,7 +48,9 @@ all:
           ansible_python_interpreter: /usr/bin/python3
       vars:
         codexia_stage: secrets
-        codexia_service_user: $(id -un)
+        codexia_service_user: $service_user
+        codexia_service_uid: $service_uid
+        codexia_service_home: "$service_home"
         codexia_secrets_approved: true
         codexia_auth_token_file: "$tmp/auth"
         codexia_tunnel_token_file: "$tmp/tunnel"

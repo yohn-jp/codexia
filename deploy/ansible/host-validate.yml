@@ -1,0 +1,32 @@
+---
+- name: Validate platform, explicit identity and host operation authorization
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.distribution == 'Ubuntu'
+      - ansible_facts.distribution_version == '26.04'
+      - ansible_facts.architecture == 'x86_64'
+      - ansible_facts.service_mgr == 'systemd'
+      - codexia_host_approved | default(false) | bool
+      - not ansible_check_mode
+      - codexia_service_user is defined
+      - codexia_service_group is defined
+      - codexia_service_uid is defined
+      - codexia_service_gid is defined
+      - codexia_service_home is defined
+      - codexia_service_user is string and codexia_service_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+      - codexia_service_group is string and codexia_service_group is match('^[a-z_][a-z0-9_-]{0,31}$')
+      - codexia_service_user != 'root' and codexia_service_group != 'root'
+      - codexia_service_uid is integer and codexia_service_uid >= 1000 and codexia_service_uid < 65534
+      - codexia_service_gid is integer and codexia_service_gid >= 1000 and codexia_service_gid < 65534
+      - codexia_service_home == '/home/' + codexia_service_user
+    fail_msg: Unsupported host, invalid service identity or missing explicit host-stage approval. Use inspect for observation.
+- name: Observe cgroup v2 before host mutation
+  ansible.builtin.stat:
+    path: /sys/fs/cgroup/cgroup.controllers
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  register: host_cgroup
+- name: Require cgroup v2
+  ansible.builtin.assert:
+    that: host_cgroup.stat.exists
