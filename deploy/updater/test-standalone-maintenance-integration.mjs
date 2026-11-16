@@ -278,7 +278,15 @@ async function runInterruptedBootRecovery({ repoRoot, workDir, stateDir, configP
     await atomicWrite(markerPath, originalMarker);
   } else {
     assert.equal((await readFile(path.join(stateDir, 'route'), 'utf8')), 'blocked\n', 'Writer-drain interruption did not fence ingress');
-    assert.equal(systemdState(SERVICE), 'inactive', 'Writer-drain interruption did not stop the active writer');
+    // The fault shim kills the controller after systemctl stop but before
+    // stopWriter can reset a failed unit after Podman removes its container.
+    // Both inactive and failed are valid interruption boundaries, but only
+    // when the actual writer is absent. Leave reset/restart to boot recovery.
+    assert.ok(['inactive', 'failed'].includes(systemdState(SERVICE)),
+      'Writer-drain interruption did not stop the active writer');
+    const drained = spawnSync('podman', ['container', 'exists', CONTAINER], { timeout: 15000, stdio: 'ignore' });
+    if (drained.error) throw drained.error;
+    assert.equal(drained.status, 1, 'Writer container remains or absence is unobservable after interruption');
   }
 
   const preload = path.join(repoRoot, 'deploy/updater/test-standalone-maintenance-preload.mjs');
