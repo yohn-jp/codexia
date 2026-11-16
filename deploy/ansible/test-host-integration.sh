@@ -70,6 +70,8 @@ if ! printf '%s\n' "$manager_environment" | grep -Fqx "XDG_CONFIG_HOME=$home/.co
   printf '%s\n' "$manager_environment" | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)=' >&2 || true
   echo 'The fixture user manager did not start with its XDG config home.' >&2; exit 1
 fi
+rootless systemctl --user set-environment "HOME=$home" "XDG_CONFIG_HOME=$home/.config" "XDG_RUNTIME_DIR=/run/user/$uid"
+rootless systemctl --user daemon-reexec
 manager_session_environment=$(rootless systemctl --user show-environment | awk -F= '$1 ~ /^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)$/ {print}')
 if ! printf '%s\n' "$manager_session_environment" | grep -Fqx "HOME=$home" || ! printf '%s\n' "$manager_session_environment" | grep -Fqx "XDG_RUNTIME_DIR=/run/user/$uid" || ! printf '%s\n' "$manager_session_environment" | grep -Fqx "XDG_CONFIG_HOME=$home/.config"; then
   printf '%s\n' "$manager_session_environment" >&2
