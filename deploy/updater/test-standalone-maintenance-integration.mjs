@@ -285,6 +285,7 @@ async function runInterruptedBootRecovery({ repoRoot, workDir, stateDir, configP
   const bootEnvironment = {
     ...environment,
     NODE_OPTIONS: [environment.NODE_OPTIONS, `--import=${preload}`].filter(Boolean).join(' '),
+    CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY: 'yes',
   };
   const boot = spawnSync('sh', [wrapper, 'boot', configPath], {
     encoding: 'utf8', timeout: 240000, maxBuffer: 4 * 1024 * 1024, env: bootEnvironment,
