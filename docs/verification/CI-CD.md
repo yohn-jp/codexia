@@ -42,6 +42,7 @@ flowchart TD
   N --> G
 ```
 
+- Within a Runner, use at most two concurrent independent validations, retaining results in canonical task order. Build shared workspace prerequisites once per selected unit/type group; a failed build blocks only tasks that require its outputs. Serialize workspace writers, CPU-heavy model suites and performance measurement with respect to siblings. Browser specs own distinct disposable databases, API/control port pairs, state and trace output directories; do not increase worker count inside a spec. Keep profile generation after the workspace dependency build barrier.
 - Browser writing/reference/WebKit lanes consume the same-profile build output. The lane name does not redefine its test inventory. Each spec retains isolated DB, server, browser context, port and temporary state. Do not rebuild the workspace in each consumer.
 - Hosted catalog owns runtime-base and Build Kit OCI verification and catalog identity. Core/selected/full composition consumes the exact verified catalog and Full server/module build; each selection independently verifies its package closure and offline composition. Avoid rebuilding shared producer identities; measure transfer and disk cost before adding shared artifacts.
 - Standalone OCI checks still exercise the actual selected image, startup and shutdown. Browser build success does not certify an OCI image. Component release packaging may reuse a proven equivalent artifact but must verify the exact image or assets being released.
