@@ -34,6 +34,7 @@ if (selectedTestFile && !/^[a-z0-9-]+\.acceptance\.spec\.ts$/u.test(selectedTest
 
 export default defineConfig({
   testDir: ".",
+  ...(process.env.CODEXIA_E2E_OUTPUT_DIR ? { outputDir: process.env.CODEXIA_E2E_OUTPUT_DIR } : {}),
   testMatch: selectedTestFile ? `**/${selectedTestFile}` : "**/*.spec.ts",
   testIgnore: "**/core64-lifecycle.host.acceptance.spec.ts",
   fullyParallel: false,
