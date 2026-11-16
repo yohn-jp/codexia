@@ -128,6 +128,7 @@ apply_base() {
 diagnose_missing_database_unit() {
   local generator=/usr/lib/systemd/user-generators/podman-user-generator
   local generator_output="$service_home/.local/state/codexia-phase-b-generator-diagnostic-$$"
+  local reload_started reload_status
   printf '%s\n' 'Database unit generation diagnostics:' >&2
   printf '%s\n' '--- systemd user manager environment ---' >&2
   systemctl --user show-environment | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_DATA_HOME|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS)=' >&2 || true
@@ -158,9 +159,32 @@ diagnose_missing_database_unit() {
     fi
   done
   printf '%s\n' '--- user journal for Quadlet generation ---' >&2
-  as_service journalctl --user -b -n 100 --no-pager -o cat --grep='(?i)(podman|quadlet|codexia|generator|failed|error|warn)' >&2 || true
+  as_service journalctl --user -b -n 100 --no-pager -o short-iso --grep='(?i)(podman|quadlet|codexia|generator|failed|error|warn)' >&2 || true
   printf '%s\n' '--- system journal for the disposable user manager ---' >&2
-  sudo journalctl -b -n 100 --no-pager -o cat --grep='(?i)(podman|quadlet|codexia|generator|failed|error|warn)' "_UID=$service_uid" >&2 || true
+  sudo journalctl -b -n 100 --no-pager -o short-iso --grep='(?i)(podman|quadlet|codexia|generator|failed|error|warn)' "_UID=$service_uid" >&2 || true
+  reload_started=$(date --iso-8601=seconds)
+  printf '%s\n' "--- explicit user-manager daemon-reload at $reload_started ---" >&2
+  if as_service systemctl --user daemon-reload >"$tmp/diagnostic-daemon-reload.log" 2>&1; then
+    cat "$tmp/diagnostic-daemon-reload.log" >&2
+  else
+    reload_status=$?
+    printf 'Explicit user-manager daemon-reload exited with status %s\n' "$reload_status" >&2
+    cat "$tmp/diagnostic-daemon-reload.log" >&2
+  fi
+  printf '%s\n' '--- database unit and generated directories after explicit reload ---' >&2
+  systemctl --user show --property=LoadState --property=FragmentPath --property=SourcePath codexia-db.service >&2 || true
+  for path in \
+    "/run/user/$service_uid/systemd/generator.early" \
+    "/run/user/$service_uid/systemd/generator" \
+    "/run/user/$service_uid/systemd/generator.late"; do
+    if [[ -e "$path" ]]; then
+      as_service find "$path" -maxdepth 3 -printf '%M %u:%g %p\n' >&2 || true
+    else
+      printf 'Missing path after reload: %s\n' "$path" >&2
+    fi
+  done
+  printf '%s\n' '--- timestamped journal entries after explicit reload ---' >&2
+  as_service journalctl --user -b --since="$reload_started" --no-pager -o short-iso --grep='(?i)(podman|quadlet|codexia|generator|failed|error|warn)' >&2 || true
   if [[ -x "$generator" ]]; then
     as_service mkdir -p "$generator_output/early" "$generator_output/normal" "$generator_output/late"
     printf '%s\n' '--- isolated debug invocation of podman-user-generator ---' >&2
