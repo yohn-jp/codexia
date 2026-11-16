@@ -68,6 +68,11 @@ done
 printf '%s\n' 'Phase B initial runtime resource checks passed.'
 
 tmp=$(mktemp -d /tmp/codexia-base-runtime.XXXXXX)
+generator_probe_dir=/run/systemd/user-generators
+generator_probe_path="$generator_probe_dir/podman-user-generator"
+generator_probe_log="/run/codexia-phase-b-generator-environment-$service_uid-$$.log"
+generator_probe_installed=false
+generator_probe_dir_created=false
 cleanup() {
   local status=$?
   local cleanup_status=0
@@ -83,6 +88,15 @@ cleanup() {
     "$quadlet_dir/codexia-history.volume" \
     "$quadlet_dir/codexia-db.container" \
     "$quadlet_dir/codexia-tunnel.container" || cleanup_status=1
+  if [[ "$generator_probe_installed" == true ]]; then
+    sudo rm -f -- "$generator_probe_path" || cleanup_status=1
+    generator_probe_installed=false
+  fi
+  sudo rm -f -- "$generator_probe_log" || true
+  if [[ "$generator_probe_dir_created" == true ]]; then
+    sudo rmdir -- "$generator_probe_dir" 2>/dev/null || cleanup_status=1
+    generator_probe_dir_created=false
+  fi
   systemctl --user daemon-reload >/dev/null 2>&1 || true
   systemctl --user reset-failed codexia-tunnel.service codexia-db.service >/dev/null 2>&1 || true
   podman network rm codexia-data codexia >/dev/null 2>&1 || true
@@ -162,6 +176,31 @@ diagnose_missing_database_unit() {
   as_service journalctl --user -b -n 100 --no-pager -o short-iso --grep='(?i)(podman|quadlet|codexia|generator|failed|error|warn)' >&2 || true
   printf '%s\n' '--- system journal for the disposable user manager ---' >&2
   sudo journalctl -b -n 100 --no-pager -o short-iso --grep='(?i)(podman|quadlet|codexia|generator|failed|error|warn)' "_UID=$service_uid" >&2 || true
+  printf '%s\n' '--- install a temporary highest-priority user-generator environment probe ---' >&2
+  if [[ -e "$generator_probe_path" || -L "$generator_probe_path" ]]; then
+    printf 'Refusing to replace an existing generator override: %s\n' "$generator_probe_path" >&2
+  else
+    if [[ ! -d "$generator_probe_dir" ]]; then
+      sudo install -d -m 0755 "$generator_probe_dir" || true
+      generator_probe_dir_created=true
+    fi
+    if sudo install -m 0666 /dev/null "$generator_probe_log"; then
+      generator_probe_installed=true
+      sudo tee "$generator_probe_path" >/dev/null <<EOF
+#!/bin/sh
+{
+  printf 'HOME=%s\n' "\${HOME-}"
+  printf 'XDG_CONFIG_HOME=%s\n' "\${XDG_CONFIG_HOME-}"
+  printf 'XDG_RUNTIME_DIR=%s\n' "\${XDG_RUNTIME_DIR-}"
+} >> "$generator_probe_log"
+exec "$generator" "\$@"
+EOF
+      sudo chmod 0755 "$generator_probe_path"
+      printf 'Installed disposable probe at %s; cleanup trap will remove it.\n' "$generator_probe_path" >&2
+    else
+      printf 'Could not create generator probe log: %s\n' "$generator_probe_log" >&2
+    fi
+  fi
   reload_started=$(date --iso-8601=seconds)
   printf '%s\n' "--- explicit user-manager daemon-reload at $reload_started ---" >&2
   if as_service systemctl --user daemon-reload >"$tmp/diagnostic-daemon-reload.log" 2>&1; then
@@ -185,6 +224,14 @@ diagnose_missing_database_unit() {
   done
   printf '%s\n' '--- timestamped journal entries after explicit reload ---' >&2
   as_service journalctl --user -b --since="$reload_started" --no-pager -o short-iso --grep='(?i)(podman|quadlet|codexia|generator|failed|error|warn)' >&2 || true
+  if [[ "$generator_probe_installed" == true ]]; then
+    printf '%s\n' '--- environment observed by the systemd-launched packaged-generator wrapper ---' >&2
+    if [[ -s "$generator_probe_log" ]]; then
+      cat "$generator_probe_log" >&2
+    else
+      printf 'The systemd reload did not execute the override at %s.\n' "$generator_probe_path" >&2
+    fi
+  fi
   if [[ -x "$generator" ]]; then
     as_service mkdir -p "$generator_output/early" "$generator_output/normal" "$generator_output/late"
     printf '%s\n' '--- isolated debug invocation of podman-user-generator ---' >&2
