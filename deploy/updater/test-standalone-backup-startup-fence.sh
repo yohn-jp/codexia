@@ -211,6 +211,14 @@ node --input-type=module -e '
   };
   const changedFields=differencePaths(expected.apiRuntimeProjection,actualProjection);
   if(changedFields.length)console.error("API runtime identity changed at fields: "+changedFields.join(", "));
+  const changedEnvironmentKeys=changedFields.flatMap(field=>{
+    const match=field.match(/^Config\.Env\[(\d+)\]$/);
+    if(!match)return [];
+    const index=Number(match[1]);
+    const key=value=>typeof value==="string"?value.split("=",1)[0]:"<absent>";
+    return ["Config.Env["+index+"] keys: "+key(expected.apiRuntimeProjection.Config.Env[index])+" -> "+key(actualProjection.Config.Env[index])];
+  });
+  if(changedEnvironmentKeys.length)console.error("API runtime environment key drift: "+changedEnvironmentKeys.join(", "));
   assert.equal(containerRuntimeFingerprint(api,expected.apiSecretIdentities),expected.apiRuntime);
   await host.assertBackupAutostartGated({...expected.autostart,timerWasActive:false,tunnelWasActive:true});
 ' "$repo_root" "$quadlet_dir" "$state_dir" "$snapshot"
@@ -282,6 +290,14 @@ node --input-type=module -e '
   };
   const changedFields=differencePaths(expected.tunnelRuntimeProjection,actualProjection);
   if(changedFields.length)console.error("Tunnel runtime identity changed at fields: "+changedFields.join(", "));
+  const changedEnvironmentKeys=changedFields.flatMap(field=>{
+    const match=field.match(/^Config\.Env\[(\d+)\]$/);
+    if(!match)return [];
+    const index=Number(match[1]);
+    const key=value=>typeof value==="string"?value.split("=",1)[0]:"<absent>";
+    return ["Config.Env["+index+"] keys: "+key(expected.tunnelRuntimeProjection.Config.Env[index])+" -> "+key(actualProjection.Config.Env[index])];
+  });
+  if(changedEnvironmentKeys.length)console.error("Tunnel runtime environment key drift: "+changedEnvironmentKeys.join(", "));
   assert.equal(containerRuntimeFingerprint(actual,expected.tunnelSecretIdentities),expected.tunnelRuntime);
   assert.equal(await host.legacyServiceActive(),false,'Tunnel permit started the API writer');
   await assert.rejects(lstat(host.backupStartupFencePaths().tunnel.permit),{code:"ENOENT"});

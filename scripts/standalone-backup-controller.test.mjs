@@ -5,7 +5,7 @@ import { chmod, lstat, mkdtemp, open, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { atomicWrite, loadBackupIntent, StandaloneController, initialControllerState, validateBackupIntent } from './standalone-update-controller.mjs';
-import { PodmanStandaloneHost, assertLegacyBackupIdentity, assertLegacyBackupUnitIdentity, assertLegacyBackupTunnelUnitIdentity, containerRuntimeFingerprint, assertVersion } from '../deploy/updater/standalone-host.mjs';
+import { PodmanStandaloneHost, assertLegacyBackupIdentity, assertLegacyBackupUnitIdentity, assertLegacyBackupTunnelUnitIdentity, containerRuntimeFingerprint, containerRuntimeFingerprintProjection, assertVersion } from '../deploy/updater/standalone-host.mjs';
 import { signUpdateChannel } from './update-channel.mjs';
 
 const release = {
@@ -702,6 +702,7 @@ test('container runtime fingerprint binds sanitized secret targets without retai
     Mounts: [],
   };
   const fingerprint = containerRuntimeFingerprint(container, secrets);
+  const projection = containerRuntimeFingerprintProjection(container, secrets);
   const reordered = containerRuntimeFingerprint({
     ...container,
     Config: { ...container.Config, CreateCommand: ['podman', 'create', '--label', 'review.marker=fixture-secret-value', '--secret', 'codexia-app-password,target=/run/secrets/app-password,type=mount'] },
@@ -716,6 +717,8 @@ test('container runtime fingerprint binds sanitized secret targets without retai
   assert.match(fingerprint, /^[a-f0-9]{64}$/u);
   assert.ok(!fingerprint.includes('fixture-secret-value'));
   assert.ok(!fingerprint.includes('--secret'));
+  assert.ok(!JSON.stringify(projection).includes('fixture-secret-value'));
+  assert.ok(!JSON.stringify(projection).includes('--secret'));
 });
 
 test('container runtime fingerprint preserves ordered entrypoint and command arguments', () => {
