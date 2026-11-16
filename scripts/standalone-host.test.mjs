@@ -81,11 +81,27 @@ test('runtime verification rejects unreviewed writer and proxy systemd drop-ins'
  assert.throws(()=>assertRuntimeUnitDropIns('/home/codexia/.config/systemd/user/codexia-slot-blue.service.d/override.conf'),/unreviewed drop-in/);
 });
 
+test('runtime capability proof requires no additions and zero live capability sets',async()=>{
+ const {assertRuntimeCapabilitiesDropped,readRuntimeCapabilityStatus}=await import('../deploy/updater/standalone-host.mjs');
+ const container={State:{Pid:123},HostConfig:{CapAdd:[]}};
+ const zeroStatus=['CapInh:\t0000000000000000','CapPrm:\t0000000000000000','CapEff:\t0000000000000000','CapBnd:\t0000000000000000','CapAmb:\t0000000000000000'].join('\n');
+ assert.doesNotThrow(()=>assertRuntimeCapabilitiesDropped(container,zeroStatus,'Writer'));
+ assert.throws(()=>assertRuntimeCapabilitiesDropped({...container,HostConfig:{CapAdd:['CAP_SYS_ADMIN']}},zeroStatus,'Writer'),/unexpected capability additions/);
+ for(const key of ['CapInh','CapPrm','CapEff','CapBnd','CapAmb']){
+  assert.throws(()=>assertRuntimeCapabilitiesDropped(container,zeroStatus.split('\n').filter(line=>!line.startsWith(key+':')).join('\n'),'Writer'),new RegExp(key+' is unobservable'));
+  assert.throws(()=>assertRuntimeCapabilitiesDropped(container,zeroStatus.replace(key+':\t0000000000000000',key+':\tmalformed'),'Writer'),new RegExp(key+' is unobservable'));
+  assert.throws(()=>assertRuntimeCapabilitiesDropped(container,zeroStatus.replace(key+':\t0000000000000000',key+':\t0000000000000001'),'Writer'),new RegExp(key+' must be zero'));
+ }
+ await assert.rejects(readRuntimeCapabilityStatus({...container,State:{Pid:'123'}},'Writer'),/PID must be numeric/);
+ await assert.rejects(readRuntimeCapabilityStatus({...container,State:{Pid:0}},'Writer'),/PID must be numeric/);
+});
+
 test('legacy runtime verification rejects undeclared environment, mounts and systemd resource drift',()=>{
  const imageEnvironment=['PATH=/usr/bin','NODE_ENV=production','CODEXIA_PROFILE=full','CODEXIA_MODULE_PROFILE_PATH=/app/generated/server.mjs','CODEXIA_STANDALONE_IDENTITY=1'];
  const authEnvironment=browserAuthEnvironment({browserAuth:access},origin);
  const unit=imageConfig(release,authEnvironment,runtime).replace('PLACEHOLDER','codexia-slot-blue');
  const containerId='d'.repeat(64);
+ const zeroCapabilityStatus=['CapInh:\t0000000000000000','CapPrm:\t0000000000000000','CapEff:\t0000000000000000','CapBnd:\t0000000000000000','CapAmb:\t0000000000000000'].join('\n');
  const observed={
   Id:containerId,Name:'/codexia-slot-blue',
   Config:{Hostname:containerId.slice(0,12),Env:[...imageEnvironmentFromUnit(imageEnvironment,unit),'HOSTNAME='+containerId.slice(0,12)]},
@@ -97,33 +113,35 @@ test('legacy runtime verification rejects undeclared environment, mounts and sys
    {Destination:'/models',Type:'bind',Source:runtime.modelCachePath,RW:false},
    {Destination:'/tmp',Type:'tmpfs',RW:true},
   ],
-  HostConfig:{PortBindings:{},ReadonlyRootfs:true,CapDrop:['ALL'],SecurityOpt:['no-new-privileges:true'],Memory:runtime.resources.memoryMaxBytes,CpuQuota:0,CpuPeriod:0,Tmpfs:{
+  HostConfig:{PortBindings:{},ReadonlyRootfs:true,CapDrop:['CAP_CHOWN','CAP_DAC_OVERRIDE','CAP_FOWNER','CAP_FSETID','CAP_KILL','CAP_NET_BIND_SERVICE','CAP_SETFCAP','CAP_SETGID','CAP_SETPCAP','CAP_SETUID','CAP_SYS_CHROOT'],CapAdd:[],SecurityOpt:['no-new-privileges:true'],Memory:runtime.resources.memoryMaxBytes,CpuQuota:0,CpuPeriod:0,Tmpfs:{
    '/tmp':'rw,nosuid,nodev,noexec,size=64m','/cache':'rw,nosuid,nodev,noexec,size=512m',
   }},
  };
- assert.doesNotThrow(()=>assertRuntimeObservation(observed,runtime,imageEnvironment,unit));
- assert.doesNotThrow(()=>assertRuntimeObservation({...observed,Mounts:observed.Mounts.filter(mount=>mount.Type!=='tmpfs')},runtime,imageEnvironment,unit));
- assert.doesNotThrow(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,CpuQuota:0,CpuPeriod:0}},runtime,imageEnvironment,unit));
- assert.doesNotThrow(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,Tmpfs:{'/tmp':`${observed.HostConfig.Tmpfs['/tmp']},rprivate,tmpcopyup`,'/cache':`${observed.HostConfig.Tmpfs['/cache']},tmpcopyup,rprivate`}}},runtime,imageEnvironment,unit));
- assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,Tmpfs:{...observed.HostConfig.Tmpfs,'/tmp':`${observed.HostConfig.Tmpfs['/tmp']},exec`}}},runtime,imageEnvironment,unit),/Legacy temporary filesystem drift/);
+ const observe=(container,status=zeroCapabilityStatus)=>assertRuntimeObservation(container,runtime,imageEnvironment,unit,status);
+ assert.doesNotThrow(()=>observe(observed));
+ assert.doesNotThrow(()=>observe({...observed,Mounts:observed.Mounts.filter(mount=>mount.Type!=='tmpfs')}));
+ assert.doesNotThrow(()=>observe({...observed,HostConfig:{...observed.HostConfig,CpuQuota:0,CpuPeriod:0}}));
+ assert.doesNotThrow(()=>observe({...observed,HostConfig:{...observed.HostConfig,Tmpfs:{'/tmp':`${observed.HostConfig.Tmpfs['/tmp']},rprivate,tmpcopyup`,'/cache':`${observed.HostConfig.Tmpfs['/cache']},tmpcopyup,rprivate`}}}));
+ assert.throws(()=>observe({...observed,HostConfig:{...observed.HostConfig,Tmpfs:{...observed.HostConfig.Tmpfs,'/tmp':`${observed.HostConfig.Tmpfs['/tmp']},exec`}}}),/Legacy temporary filesystem drift/);
+ assert.throws(()=>observe(observed,zeroCapabilityStatus.replace('CapEff:\t0000000000000000','CapEff:\t0000000000000001')),/CapEff must be zero/);
  assert.doesNotThrow(()=>assertRuntimeUnit('[Service]\nCPUQuota=250%\n',runtime));
- assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Hostname:'codexia-slot-blue'}},runtime,imageEnvironment,unit),/Podman-generated hostname drift/);
- assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:observed.Config.Env.map(entry=>entry==='HOSTNAME='+containerId.slice(0,12)?'HOSTNAME=injected-host':entry)}},runtime,imageEnvironment,unit),/unexpected runtime environment/);
- assert.throws(()=>assertRuntimeObservation({...observed,Name:'/codexia-slot-green'},runtime,imageEnvironment,unit),/Podman container name drift/);
- assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:[...observed.Config.Env,'CODEXIA_UNREVIEWED=1']}},runtime,imageEnvironment,unit),/Unknown Codexia runtime/);
- assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:[...observed.Config.Env,'CODEXIA_PROFILE=core']}},runtime,imageEnvironment,unit),/duplicate environment/);
- assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:observed.Config.Env.map(entry=>entry==='CODEXIA_DATA_DIR=/data'?'CODEXIA_DATA_DIR=/tmp/data':entry)}},runtime,imageEnvironment,unit),/CODEXIA_DATA_DIR environment drift/);
- assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:[...observed.Config.Env,'NODE_OPTIONS=--require=/tmp/inject.js']}},runtime,imageEnvironment,unit),/unexpected runtime environment/);
- assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:observed.Config.Env.map(entry=>entry==='CODEXIA_DATABASE_USER=codexia'?'CODEXIA_DATABASE_USER=other':entry)}},runtime,imageEnvironment,unit),/CODEXIA_DATABASE_USER environment drift/);
- assert.throws(()=>assertRuntimeObservation({...observed,Config:{...observed.Config,Env:observed.Config.Env.map(entry=>entry==='CODEXIA_ACCESS_AUDIENCE='+access.audience?'CODEXIA_ACCESS_AUDIENCE='+'b'.repeat(64):entry)}},runtime,imageEnvironment,unit),/CODEXIA_ACCESS_AUDIENCE environment drift/);
- assert.throws(()=>assertRuntimeObservation({...observed,Mounts:[...observed.Mounts,{Destination:'/etc',Type:'bind',Source:'/etc',RW:false}]},runtime,imageEnvironment,unit),/persistent and host mounts/);
- assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,Memory:0}},runtime,imageEnvironment,unit),/memory limit drift/);
- assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,CpuQuota:200000}},runtime,imageEnvironment,unit),/unexpected container CPU quota/);
- assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,PortBindings:{'3000/tcp':[{HostPort:'3000'}]}}},runtime,imageEnvironment,unit),/host port/u);
- assert.throws(()=>assertRuntimeObservation({...observed,NetworkSettings:{Networks:{codexia:{}}}},runtime,imageEnvironment,unit),/network drift/u);
- assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,ReadonlyRootfs:false}},runtime,imageEnvironment,unit),/root filesystem is not read-only/u);
- assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,CapDrop:[]}},runtime,imageEnvironment,unit),/capability drop contract drift/u);
- assert.throws(()=>assertRuntimeObservation({...observed,HostConfig:{...observed.HostConfig,SecurityOpt:[]}},runtime,imageEnvironment,unit),/security options drift/u);
+ assert.throws(()=>observe({...observed,Config:{...observed.Config,Hostname:'codexia-slot-blue'}}),/Podman-generated hostname drift/);
+ assert.throws(()=>observe({...observed,Config:{...observed.Config,Env:observed.Config.Env.map(entry=>entry==='HOSTNAME='+containerId.slice(0,12)?'HOSTNAME=injected-host':entry)}}),/unexpected runtime environment/);
+ assert.throws(()=>observe({...observed,Name:'/codexia-slot-green'}),/Podman container name drift/);
+ assert.throws(()=>observe({...observed,Config:{...observed.Config,Env:[...observed.Config.Env,'CODEXIA_UNREVIEWED=1']}}),/Unknown Codexia runtime/);
+ assert.throws(()=>observe({...observed,Config:{...observed.Config,Env:[...observed.Config.Env,'CODEXIA_PROFILE=core']}}),/duplicate environment/);
+ assert.throws(()=>observe({...observed,Config:{...observed.Config,Env:observed.Config.Env.map(entry=>entry==='CODEXIA_DATA_DIR=/data'?'CODEXIA_DATA_DIR=/tmp/data':entry)}}),/CODEXIA_DATA_DIR environment drift/);
+ assert.throws(()=>observe({...observed,Config:{...observed.Config,Env:[...observed.Config.Env,'NODE_OPTIONS=--require=/tmp/inject.js']}}),/unexpected runtime environment/);
+ assert.throws(()=>observe({...observed,Config:{...observed.Config,Env:observed.Config.Env.map(entry=>entry==='CODEXIA_DATABASE_USER=codexia'?'CODEXIA_DATABASE_USER=other':entry)}}),/CODEXIA_DATABASE_USER environment drift/);
+ assert.throws(()=>observe({...observed,Config:{...observed.Config,Env:observed.Config.Env.map(entry=>entry==='CODEXIA_ACCESS_AUDIENCE='+access.audience?'CODEXIA_ACCESS_AUDIENCE='+'b'.repeat(64):entry)}}),/CODEXIA_ACCESS_AUDIENCE environment drift/);
+ assert.throws(()=>observe({...observed,Mounts:[...observed.Mounts,{Destination:'/etc',Type:'bind',Source:'/etc',RW:false}]}),/persistent and host mounts/);
+ assert.throws(()=>observe({...observed,HostConfig:{...observed.HostConfig,Memory:0}}),/memory limit drift/);
+ assert.throws(()=>observe({...observed,HostConfig:{...observed.HostConfig,CpuQuota:200000}}),/unexpected container CPU quota/);
+ assert.throws(()=>observe({...observed,HostConfig:{...observed.HostConfig,PortBindings:{'3000/tcp':[{HostPort:'3000'}]}}}),/host port/u);
+ assert.throws(()=>observe({...observed,NetworkSettings:{Networks:{codexia:{}}}}),/network drift/u);
+ assert.throws(()=>observe({...observed,HostConfig:{...observed.HostConfig,ReadonlyRootfs:false}}),/root filesystem is not read-only/u);
+ assert.throws(()=>observe({...observed,HostConfig:{...observed.HostConfig,CapAdd:['CAP_SYS_ADMIN']}}),/unexpected capability additions/);
+ assert.throws(()=>observe({...observed,HostConfig:{...observed.HostConfig,SecurityOpt:[]}}),/security options drift/u);
  assert.throws(()=>assertRuntimeUnit('[Service]\nCPUQuota=200%\n',runtime),/CPU quota drift/);
 });
 

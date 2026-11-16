@@ -12,6 +12,7 @@ import {
   assertRuntimeUnitDropIns,
   browserAuthEnvironment,
   imageConfig,
+  readRuntimeCapabilityStatus,
   validateRuntimeContract,
 } from './standalone-host.mjs';
 import {
@@ -93,7 +94,8 @@ async function validateSlot(config, runtime, state, expectedImage) {
     assert.equal(content, expected, `${filename} runtime drift`);
     assertRuntimeUnitDropIns(run('systemctl', ['--user', 'show', '--property=DropInPaths', '--value', `${slotName}.service`]));
     if (slot === activeSlot) {
-      assertRuntimeObservation(observed, runtime, JSON.parse(run('podman', ['image', 'inspect', expectedImage]))[0].Config?.Env, expected);
+      const capabilityStatus = await readRuntimeCapabilityStatus(observed, `${slotName} writer`);
+      assertRuntimeObservation(observed, runtime, JSON.parse(run('podman', ['image', 'inspect', expectedImage]))[0].Config?.Env, expected, capabilityStatus);
       assertRuntimeUnit(run('systemctl', ['--user', 'cat', unit]), runtime);
       await assertRuntimeSystemdCpuQuota(unit, runtime);
       const controlGroup = run('systemctl', ['--user', 'show', '--property=ControlGroup', '--value', unit]);

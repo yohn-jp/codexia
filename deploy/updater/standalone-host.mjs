@@ -110,7 +110,29 @@ function assertTmpfsOptions(observed,expected,label){
   assert.ok(actualOptions.every(option=>expectedOptions.includes(option)||podmanOptions.has(option)),label+' drift');
 }
 
-export function assertRuntimeObservation(container,value,imageEnvironment,unitText){
+export function assertRuntimeCapabilitiesDropped(container,status,label='Runtime'){
+  // Podman normalizes DropCapability=all in inspect; the live process masks are the security proof.
+  const additions=container?.HostConfig?.CapAdd;
+  assert.ok(additions===undefined||additions===null||Array.isArray(additions),label+' capability additions are unobservable');
+  assert.deepEqual(additions??[],[],label+' has unexpected capability additions');
+  assert.equal(typeof status,'string',label+' capability status is unobservable');
+  const lines=status.split(/\r?\n/u);
+  for(const key of ['CapInh','CapPrm','CapEff','CapBnd','CapAmb']){
+    const matching=lines.filter(line=>line.startsWith(key+':'));
+    assert.equal(matching.length,1,key+' is unobservable');
+    const match=new RegExp('^'+key+':\\s*([0-9a-f]+)\\s*$','iu').exec(matching[0]);
+    assert.ok(match,key+' is unobservable');
+    assert.equal(BigInt('0x'+match[1]),0n,key+' must be zero for '+label);
+  }
+}
+
+export async function readRuntimeCapabilityStatus(container,label='Runtime'){
+  const pid=container?.State?.Pid;
+  assert.ok(Number.isSafeInteger(pid)&&pid>1,label+' PID must be numeric and positive');
+  return readFile(`/proc/${pid}/status`,'utf8');
+}
+
+export function assertRuntimeObservation(container,value,imageEnvironment,unitText,capabilityStatus){
   const runtime=validateRuntimeContract(value);
   const environment=container?.Config?.Env;
   assert.ok(Array.isArray(environment),'Legacy runtime environment is unobservable');
@@ -163,14 +185,14 @@ export function assertRuntimeObservation(container,value,imageEnvironment,unitTe
   assert.ok(networks&&typeof networks==='object'&&!Array.isArray(networks),'Legacy writer networks are unobservable');
   assert.deepEqual(Object.keys(networks).sort(),['codexia','codexia-data'],'Legacy writer network drift');
   assert.equal(container.HostConfig?.ReadonlyRootfs,true,'Legacy writer root filesystem is not read-only');
-  assert.deepEqual((container.HostConfig?.CapDrop??[]).map(value=>String(value).toLowerCase()).sort(),['all'],'Legacy writer capability drop contract drift');
+  assertRuntimeCapabilitiesDropped(container,capabilityStatus,'Legacy writer');
   const securityOptions=container.HostConfig?.SecurityOpt;
   assert.ok(Array.isArray(securityOptions),'Legacy writer security options are unobservable');
   assert.equal(securityOptions.length,1,'Legacy writer security options drift');
   assert.match(securityOptions[0],/^no-new-privileges(?::true)?$/iu,'Legacy writer no-new-privileges setting is missing or has an unexpected override');
 }
 
-export function assertProxyRuntimeObservation(quadletText,container,activeState,imageInfo,{home=process.env.HOME}={}){
+export function assertProxyRuntimeObservation(quadletText,container,activeState,imageInfo,{home=process.env.HOME,capabilityStatus}={}){
   const images=[...quadletText.matchAll(/^Image=(\S+)$/gmu)].map(match=>match[1]);
   assert.equal(images.length,1,'Proxy Quadlet image identity is unobservable');
   assert.match(images[0],/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u,'Proxy Quadlet image is not digest pinned');
@@ -225,11 +247,11 @@ export function assertProxyRuntimeObservation(quadletText,container,activeState,
 
   const hostConfig=container.HostConfig;
   assert.equal(hostConfig?.ReadonlyRootfs,true,'Private proxy root filesystem is not read-only');
-  assert.deepEqual((hostConfig?.CapDrop??[]).map(value=>String(value).toLowerCase()).sort(),['all'],'Private proxy capability drop contract drift');
+  assertRuntimeCapabilitiesDropped(container,capabilityStatus,'Private proxy');
   assert.ok(Array.isArray(hostConfig?.SecurityOpt),'Private proxy security options are unobservable');
   assert.equal(hostConfig.SecurityOpt.length,1,'Private proxy security options drift');
   assert.match(hostConfig.SecurityOpt[0],/^no-new-privileges(?::true)?$/iu,'Private proxy no-new-privileges setting is missing or has an unexpected override');
-  assert.deepEqual(hostConfig?.Tmpfs,{'/tmp':'rw,nosuid,nodev,noexec,size=16m'},'Private proxy temporary filesystem drift');
+  assertTmpfsOptions(hostConfig?.Tmpfs?.['/tmp'],'rw,nosuid,nodev,noexec,size=16m','Private proxy temporary filesystem');
   assert.equal(container.Config?.User,'0','Private proxy container user drift');
   assert.deepEqual(container.Config?.Entrypoint,['node'],'Private proxy entrypoint drift');
   assert.deepEqual(container.Config?.Cmd,['/config/proxy.mjs'],'Private proxy command drift');
@@ -495,7 +517,8 @@ export class PodmanStandaloneHost{
         if(this.runtime){
           const image=JSON.parse(run('podman',['image','inspect',configured]))[0];
           const expectedUnit=imageConfig({image:configured,profile:this.runtime.profile},this.authEnvironment,this.runtime).replace('PLACEHOLDER',name(slot));
-          assertRuntimeObservation(observed,this.runtime,image.Config?.Env,expectedUnit);
+          const capabilityStatus=await readRuntimeCapabilityStatus(observed,'Legacy writer');
+          assertRuntimeObservation(observed,this.runtime,image.Config?.Env,expectedUnit,capabilityStatus);
           assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value',activeUnit(slot)]));
           assertRuntimeUnit(run('systemctl',['--user','cat',activeUnit(slot)]),this.runtime);
           await assertRuntimeSystemdCpuQuota(activeUnit(slot),this.runtime);
@@ -539,7 +562,8 @@ export class PodmanStandaloneHost{
     assertVersion(version,release,this.authEnvironment.CODEXIA_BROWSER_AUTH);
     if(this.runtime){
       const expectedUnit=imageConfig(release,this.authEnvironment,this.runtime).replace('PLACEHOLDER','codexia-api');
-      assertRuntimeObservation(legacy,this.runtime,image.Config?.Env,expectedUnit);
+      const capabilityStatus=await readRuntimeCapabilityStatus(legacy,'Legacy writer');
+      assertRuntimeObservation(legacy,this.runtime,image.Config?.Env,expectedUnit,capabilityStatus);
       assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value','codexia-api.service']));
       assertRuntimeUnit(run('systemctl',['--user','cat','codexia-api.service']),this.runtime);
       await assertRuntimeSystemdCpuQuota('codexia-api.service',this.runtime);
@@ -611,7 +635,8 @@ export class PodmanStandaloneHost{
     const proxyImage=proxyQuadlet.match(/^Image=(\S+)$/mu)?.[1];
     assert.ok(proxyImage,'Private proxy image is unobservable');
     const proxyImageInfo=JSON.parse(run('podman',['image','inspect',proxyImage]))[0];
-    assertProxyRuntimeObservation(proxyQuadlet,proxyContainer,proxyUnitState,proxyImageInfo,{home:path.resolve(path.dirname(this.config.stateFile),'../../..')});
+    const capabilityStatus=await readRuntimeCapabilityStatus(proxyContainer,'Private proxy');
+    assertProxyRuntimeObservation(proxyQuadlet,proxyContainer,proxyUnitState,proxyImageInfo,{home:path.resolve(path.dirname(this.config.stateFile),'../../..'),capabilityStatus});
     await this.waitReady(name(slot),release);
     const routed=JSON.parse(run('podman',['exec','codexia-api-proxy','node','--input-type=module','-e',proxyProbeCode],{timeout:10000}));
     assert.equal(routed.slot,slot);assertVersion(routed.version,release,this.authEnvironment.CODEXIA_BROWSER_AUTH);

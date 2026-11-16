@@ -131,26 +131,29 @@ test('maintenance requires the running proxy to match its private digest-pinned 
   const proxyImageEnvironment=['PATH=/usr/bin','NODE_ENV=production'];
   const imageInfo={Id:'sha256:'+'c'.repeat(64),RepoDigests:['ghcr.io/yohn-jp/codexia-backend@sha256:'+digest],Config:{Env:proxyImageEnvironment}};
   const containerId='e'.repeat(64);
+  const capabilityStatus=['CapInh:\t0000000000000000','CapPrm:\t0000000000000000','CapEff:\t0000000000000000','CapBnd:\t0000000000000000','CapAmb:\t0000000000000000'].join('\n');
+  const proxyOptions={home,capabilityStatus};
   const container={
-    Id:containerId,Name:'/codexia-api-proxy',State:{Running:true},Image:'sha256:'+'c'.repeat(64),ImageName:'ghcr.io/yohn-jp/codexia-backend@sha256:'+digest,
+    Id:containerId,Name:'/codexia-api-proxy',State:{Running:true,Pid:123},Image:'sha256:'+'c'.repeat(64),ImageName:'ghcr.io/yohn-jp/codexia-backend@sha256:'+digest,
     Config:{Hostname:containerId.slice(0,12),User:'0',Env:[...proxyImageEnvironment,'HOSTNAME='+containerId.slice(0,12)],Entrypoint:['node'],Cmd:['/config/proxy.mjs']},
-    HostConfig:{PortBindings:{},ReadonlyRootfs:true,CapDrop:['ALL'],SecurityOpt:['no-new-privileges:true'],Tmpfs:{'/tmp':'rw,nosuid,nodev,noexec,size=16m'}},
+    HostConfig:{PortBindings:{},ReadonlyRootfs:true,CapDrop:['CAP_CHOWN','CAP_DAC_OVERRIDE','CAP_FOWNER','CAP_FSETID','CAP_KILL','CAP_NET_BIND_SERVICE','CAP_SETFCAP','CAP_SETGID','CAP_SETPCAP','CAP_SETUID','CAP_SYS_CHROOT'],CapAdd:[],SecurityOpt:['no-new-privileges:true'],Tmpfs:{'/tmp':'rw,nosuid,nodev,noexec,size=16m,rprivate,tmpcopyup'}},
     NetworkSettings:{Networks:{codexia:{}}},
     Mounts:[
       {Type:'bind',Source:'/opt/codexia-updater/deploy/updater/proxy.mjs',Destination:'/config/proxy.mjs',RW:false},
       {Type:'bind',Source:home+'/.local/state/codexia-updater',Destination:'/config/state',RW:false},
     ],
   };
-  assertProxyRuntimeObservation(quadlet,container,'active',imageInfo,{home});
-  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Image:'sha256:'+'d'.repeat(64)},'active',imageInfo,{home}),/different image content/u);
-  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,State:{Running:false}},'active',imageInfo,{home}),/not running/u);
-  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,HostConfig:{...container.HostConfig,PortBindings:{'3000/tcp':[{HostIp:'0.0.0.0',HostPort:'3000'}] } }},'active',imageInfo,{home}),/host port/u);
-  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,NetworkSettings:{Networks:{codexia:{},host:{}}}},'active',imageInfo,{home}),/network/u);
-  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Mounts:container.Mounts.map(mount=>mount.Destination==='/config/state'?{...mount,RW:true}:mount)},'active',imageInfo,{home}),/mount/u);
-  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,HostConfig:{...container.HostConfig,ReadonlyRootfs:false}},'active',imageInfo,{home}),/root filesystem is not read-only/u);
-  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,HostConfig:{...container.HostConfig,CapDrop:[]}},'active',imageInfo,{home}),/capability drop/u);
-  assert.throws(()=>assertProxyRuntimeObservation(quadlet.replace('ReadOnly=true','ReadOnly=false'),container,'active',imageInfo,{home}),/Quadlet ReadOnly contract drift/u);
-  assert.throws(()=>assertProxyRuntimeObservation(quadlet, {...container,HostConfig:{...container.HostConfig,SecurityOpt:['no-new-privileges:true','seccomp=unconfined']}},'active',imageInfo,{home}),/security options/u);
-  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Config:{...container.Config,Entrypoint:['sh']}},'active',imageInfo,{home}),/entrypoint/u);
-  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Config:{...container.Config,Env:[...proxyImageEnvironment,'NODE_OPTIONS=--require=/tmp/inject.js']}},'active',imageInfo,{home}),/unexpected runtime environment/u);
+  assertProxyRuntimeObservation(quadlet,container,'active',imageInfo,proxyOptions);
+  assert.throws(()=>assertProxyRuntimeObservation(quadlet,container,'active',imageInfo,{...proxyOptions,capabilityStatus:capabilityStatus.replace('CapEff:\t0000000000000000','CapEff:\t0000000000000001')}),/CapEff must be zero/u);
+  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,HostConfig:{...container.HostConfig,CapAdd:['CAP_SYS_ADMIN']}},'active',imageInfo,proxyOptions),/unexpected capability additions/u);
+  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Image:'sha256:'+'d'.repeat(64)},'active',imageInfo,proxyOptions),/different image content/u);
+  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,State:{Running:false,Pid:123}},'active',imageInfo,proxyOptions),/not running/u);
+  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,HostConfig:{...container.HostConfig,PortBindings:{'3000/tcp':[{HostIp:'0.0.0.0',HostPort:'3000'}] } }},'active',imageInfo,proxyOptions),/host port/u);
+  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,NetworkSettings:{Networks:{codexia:{},host:{}}}},'active',imageInfo,proxyOptions),/network/u);
+  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Mounts:container.Mounts.map(mount=>mount.Destination==='/config/state'?{...mount,RW:true}:mount)},'active',imageInfo,proxyOptions),/mount/u);
+  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,HostConfig:{...container.HostConfig,ReadonlyRootfs:false}},'active',imageInfo,proxyOptions),/root filesystem is not read-only/u);
+  assert.throws(()=>assertProxyRuntimeObservation(quadlet.replace('ReadOnly=true','ReadOnly=false'),container,'active',imageInfo,proxyOptions),/Quadlet ReadOnly contract drift/u);
+  assert.throws(()=>assertProxyRuntimeObservation(quadlet, {...container,HostConfig:{...container.HostConfig,SecurityOpt:['no-new-privileges:true','seccomp=unconfined']}},'active',imageInfo,proxyOptions),/security options/u);
+  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Config:{...container.Config,Entrypoint:['sh']}},'active',imageInfo,proxyOptions),/entrypoint/u);
+  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Config:{...container.Config,Env:[...proxyImageEnvironment,'NODE_OPTIONS=--require=/tmp/inject.js']}},'active',imageInfo,proxyOptions),/unexpected runtime environment/u);
 });

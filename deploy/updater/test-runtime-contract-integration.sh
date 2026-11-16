@@ -478,7 +478,8 @@ if (runtime.modelCachePath) {
 assert.equal(inspect.State?.Running, true, `${name} is not running`);
 const observedImage = typeof inspect.Image === 'string' && inspect.Image.startsWith('sha256:') ? inspect.Image : `sha256:${inspect.Image}`;
 assert.equal(observedImage, image, `${name} image identity is not pinned to the local fixture digest`);
-host.assertRuntimeObservation(inspect, runtime, imageInfo.Config?.Env, quadletText);
+const capabilityStatus = await host.readRuntimeCapabilityStatus(inspect, name);
+host.assertRuntimeObservation(inspect, runtime, imageInfo.Config?.Env, quadletText, capabilityStatus);
 host.assertRuntimeUnit(execFileSync('systemctl', ['--user', 'cat', service], { encoding: 'utf8' }), runtime);
 await host.assertRuntimeSystemdCpuQuota(service, runtime);
 
