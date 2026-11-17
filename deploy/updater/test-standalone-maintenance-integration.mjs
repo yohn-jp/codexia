@@ -642,8 +642,13 @@ async function main() {
   await assertTimerState('inactive', 'disabled');
   await runLiveAnsibleTimerCheck({ repoRoot, workDir, enabled: false, shouldPass: true });
   await runLiveAnsibleTimerCheck({ repoRoot, workDir, enabled: true, shouldPass: false });
-  run('systemctl', ['--user', 'stop', SERVICE]);
-  await waitForUnit(SERVICE, 'inactive');
+  // Reuse the real fencing primitive: Quadlet may remove the container
+  // while leaving the unit failed. Only reset after proving container absence.
+  await new PodmanStandaloneHost(appliedConfig).stopWriter('blue');
+  assert.equal(systemdState(SERVICE), 'inactive');
+  const stopped = spawnSync('podman', ['container', 'exists', CONTAINER], { timeout: 15000, stdio: 'ignore' });
+  if (stopped.error) throw stopped.error;
+  assert.equal(stopped.status, 1, 'Cleanup must prove writer absence');
   run('systemctl', ['--user', 'daemon-reload']);
   for (const unit of MAINTENANCE_UNIT_FILES) {
     const filename = path.join(userUnitDir, unit);
