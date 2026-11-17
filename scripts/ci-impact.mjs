@@ -50,6 +50,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/ansible/host-validate.yml',
   'deploy/ansible/host.yml',
   'deploy/ansible/initialize.yml',
+  'deploy/ansible/initialize-schema.yml',
   'deploy/ansible/inspect.yml',
   'deploy/ansible/install-units.yml',
   'deploy/ansible/inventory.example.yml',

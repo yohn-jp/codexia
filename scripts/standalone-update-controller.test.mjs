@@ -149,3 +149,14 @@ test('fresh schema requires signed release, matching frontend and an empty host 
   assert.ok(!h.trace.some(entry=>entry.startsWith('schema:')));
  }
 });
+
+test('fresh schema failure or mismatched fingerprint never creates a controller journal or activates a writer',async()=>{
+ const {h,controller,persisted}=fixture();
+ h.writers=[];h.target='blocked';
+ h.assertFreshSchemaHost=async()=>{};
+ h.initializeFreshSchema=async()=>{throw Error('untracked schema')};
+ await assert.rejects(controller.initializeFreshSchema(next),/untracked schema/);
+ h.initializeFreshSchema=async()=>({fingerprint:old.migrationFingerprint.replace('c','d'),applied:[]});
+ await assert.rejects(controller.initializeFreshSchema(next),/fingerprint mismatch/);
+ assert.equal(persisted(),undefined);assert.deepEqual(h.writers,[]);assert.equal(h.target,'blocked');
+});

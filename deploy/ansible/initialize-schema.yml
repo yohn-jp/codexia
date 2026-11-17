@@ -12,6 +12,8 @@
 - name: Require disabled updater configuration
   ansible.builtin.assert:
     that: not ((saved_config.content | b64decode | from_json).enabled | bool)
+- name: Verify the existing canonical database storage, private network and credential identities
+  ansible.builtin.include_tasks: verify-base-db-container.yml
 - name: Stage the exact signed release privately
   ansible.builtin.tempfile:
     state: directory
