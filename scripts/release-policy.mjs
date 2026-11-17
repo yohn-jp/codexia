@@ -18,6 +18,20 @@ export function verifiedSourceRun(runs, sha) {
   }
   throw new Error('Release source has no successful main verification');
 }
+/**
+ * Wait only for an absent or genuinely unfinished exact-source main run.
+ * A terminal failure/cancellation requires a new verification/release attempt.
+ * @param {unknown} runs
+ * @param {string} sha
+ * @returns {'ready'|'waiting'|'failed'}
+ */
+export function releaseVerificationState(runs, sha) {
+  if (!/^[a-f0-9]{40}$/.test(sha) || !Array.isArray(runs)) throw new Error('Invalid release source or verification response');
+  const exact = runs.filter(runRecord).filter(run => run.head_sha === sha && run.head_branch === 'main' && run.event === 'push');
+  if (exact.some(run => run.status === 'completed' && run.conclusion === 'success')) return 'ready';
+  if (exact.length > 0 && exact.every(run => run.status === 'completed')) return 'failed';
+  return 'waiting';
+}
 /** @param {unknown} jobs @param {readonly string[]} expectedNames @param {readonly string[]} optionalSkippedNames */
 function assertNamedJobs(jobs, expectedNames, optionalSkippedNames = []) {
   if (!Array.isArray(jobs)) throw new Error('Invalid release verification jobs response');
