@@ -277,7 +277,7 @@ export class StandaloneController {
     assert.equal(tunnel.unitFingerprint,sources.tunnelFingerprint);
     const backupIntent=validateBackupIntent({format:'codexia-backup-intent/v3',kind:'legacy',release,
       identity:{api,tunnel},...autostart,tunnelWasActive:true,timerWasActive:false,createdAt:new Date(this.now()).toISOString()});
-    const intent=validateLegacyCutover({format:'codexia-legacy-cutover/v1',backupIntent,
+    let intent=validateLegacyCutover({format:'codexia-legacy-cutover/v1',backupIntent,
       checkpoint:channel.checkpoint,slot,operationId:randomUUID(),proofHash:proof.checksumManifestSha256,
       apiSource:sources.apiSource,tunnelSource:sources.tunnelSource});
     await this.store.saveCutover(intent);
@@ -288,6 +288,11 @@ export class StandaloneController {
       assertMatchingCutoverBackup(proof,restore,release,await this.host.backupArtifactIdentity(proof.artifactDirectory));
       await this.host.assertLegacyBackupRelease(release,{expectedIdentity:api});
       await this.host.assertLegacyBackupTunnel({expectedIdentity:tunnel});
+      const fresh=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,intent.checkpoint,this.now());
+      assert.ok(fresh.payload.releases.some(item=>item.state==='published'&&JSON.stringify(item)===JSON.stringify(release)),'Legacy release changed before disruption');
+      await this.uiEpoch(release);
+      intent=validateLegacyCutover({...intent,checkpoint:fresh.checkpoint});
+      await this.store.saveCutover(intent);
       await this.saveBackupRecoveryIntent(backupIntent);
       await this.host.installBackupStartupFence();
       await this.host.assertBackupAutostartGated(backupIntent);
@@ -296,7 +301,7 @@ export class StandaloneController {
       await this.host.applyCutoverSources(intent);
       await this.host.startInitialProxy();
       await this.host.assertInitialLegacyAbsent();
-      const state=await this.save({...initialControllerState(release,slot,channel.checkpoint),
+      const state=await this.save({...initialControllerState(release,slot,intent.checkpoint),
         initialActivationPending:true,initialActivationId:intent.operationId});
       return await this.recoverLegacyCutover(state,intent);
     }catch(error){
@@ -330,31 +335,58 @@ export class StandaloneController {
     assert.equal(state.journal.active.slot,intent.slot);
     assert.equal(state.journal.generation,0);
     assert.equal(state.paused,true);
-    await this.host.assertCutoverSources(intent);
-    if(state.initialActivationPending){
+    assert.equal(state.journal.phase,'idle');
+    assert.equal(state.previous,null);
+    assert.equal(state.pending,null);
+    assert.deepEqual(state.failedImages,[]);
+    try{
+      await this.host.assertCutoverSources(intent);
+      if(state.initialActivationPending){
       assert.equal(state.initialActivationId,intent.operationId);
       assert.deepEqual(observed,old,'Pending activation lost its legacy startup fence');
       await this.host.route('blocked');
       await this.host.startInitialProxy();
       state=await this.recoverInitialActivation(state,{legacyCutoverIntent:old});
       if(state.initialActivationPending||state.lastError)throw Error(state.lastError??'Cutover activation remains pending');
-    }else{
-      // A crash after the journal commit but before Tunnel handoff may have
-      // stopped all containers. Use the ordinary boot recovery only after
-      // clearing the now-obsolete legacy backup fence.
+      }else{
+        // A retained cutover intent is explicit authority to resume a
+        // committed first writer with a blocked route, not generic drift.
+        assert.equal(state.lastError,null);
+        assert.ok(state.lastSuccessAt);
+        const obs=await this.host.observe();
+        assertObservation(obs,state.journal);
+        assert.ok(obs.route==='blocked'||obs.route===intent.slot,'Cutover handoff route drift');
+        await this.host.route('blocked');
+        const verified=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,state.journal.checkpoint,this.now());
+        assert.ok(verified.payload.releases.some(item=>item.state==='published'&&JSON.stringify(item)===JSON.stringify(release)),'Cutover release no longer published');
+        await this.uiEpoch(release);
+        await this.host.pullAndVerify(release);
+        await this.host.startInitialProxy();
+        const owner={operationId:intent.operationId,release};
+        await this.host.stopInitialPreflight(intent.slot,owner);
+        await this.host.assertNoPreflight();
+        if(obs.writers.length===0){
+          try{await this.host.prepare(intent.slot,release,owner);}
+          finally{await this.host.stopInitialPreflight(intent.slot,owner);}
+          await this.host.startWriter(intent.slot,release);
+        }
+        await this.host.verifyWriterUnits(state);
+        await this.host.assertCutoverSources(intent);
+        await this.host.route(intent.slot);
+        await this.assertServing(state,intent.slot,release);
+        state=await this.save({...state,journal:{...state.journal,checkpoint:verified.checkpoint}});
+      }
+      await this.assertServing(state,intent.slot,release);
       await this.clearBackupRecoveryIntent();
       await this.clearBackupIntent();
       await this.host.removeBackupStartupFence();
-      state=await this.reconcile(state,{boot:true});
-      if(state.lastError)throw Error(state.lastError);
+      await this.host.startCutoverTunnel(intent);
+      await this.store.clearCutover();
+      return state;
+    }catch(error){
+      await this.host.route('blocked').catch(()=>undefined);
+      throw error;
     }
-    await this.assertServing(state,intent.slot,release);
-    await this.clearBackupRecoveryIntent();
-    await this.clearBackupIntent();
-    await this.host.removeBackupStartupFence();
-    await this.host.startCutoverTunnel(intent);
-    await this.store.clearCutover();
-    return state;
   }
   /** A separate fresh-only operation; it never starts a writer or creates a controller journal. */
   async initializeFreshSchema(value){

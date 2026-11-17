@@ -4,7 +4,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { assertMatchingCutoverBackup, StandaloneController, initialControllerState, atomicWrite, loadControllerState } from './standalone-update-controller.mjs';
+import { switchLegacyTunnelSource, validateLegacyCutover, assertMatchingCutoverBackup, StandaloneController, initialControllerState, atomicWrite, loadControllerState } from './standalone-update-controller.mjs';
 import { signUpdateChannel, verifyUpdateChannel } from './update-channel.mjs';
 const key=generateKeyPairSync('ed25519');
 const pub=key.publicKey.export({type:'spki',format:'pem'});
@@ -259,4 +259,103 @@ test('fresh activation refuses unsigned release, incompatible frontend and exist
   await assert.rejects(controller.activateFresh(next,'blue'));
   assert.ok(!h.trace.includes('proxy'));assert.equal(persisted(),undefined);
  }
+});
+
+function cutoverFixture(){
+ const {h,controller,persisted}=fixture();
+ const hash='d'.repeat(64),apiSource='[Container]\nContainerName=codexia-api\n';
+ const tunnelSource='[Unit]\nRequires=codexia-api.service\nAfter=network-online.target codexia-api.service\n[Container]\nContainerName=codexia-tunnel\n';
+ const api={unitFingerprint:'a'.repeat(64),runtimeFingerprint:'b'.repeat(64)};
+ const tunnel={unitFingerprint:'c'.repeat(64),runtimeFingerprint:'e'.repeat(64)};
+ const autostart={apiWasEnabled:true,tunnelWasEnabled:true,autostartLinks:{
+  api:{generatorTarget:'../codexia-api.service',defaultTargetWants:true},tunnel:{generatorTarget:'../codexia-tunnel.service',defaultTargetWants:true}}};
+ let cutover=null,backup=null,primary=null;
+ Object.assign(controller.store,{
+  loadState:async()=>persisted()??null,
+  loadCutover:async()=>cutover,
+  saveCutover:async value=>{cutover=structuredClone(validateLegacyCutover(value));h.trace.push('intent');},
+  clearCutover:async()=>{cutover=null;h.trace.push('clear-cutover');},
+  loadBackupIntent:async()=>primary,loadBackupRecoveryIntent:async()=>backup,
+  saveBackupRecoveryIntent:async value=>{backup=structuredClone(value);h.trace.push('fence-intent');},
+  clearBackupRecoveryIntent:async()=>{backup=null;},
+  clearBackupIntent:async()=>{primary=null;}
+ });
+ Object.assign(h,{writers:[],target:'blocked',legacyActive:true,tunnelActive:true,apiSource,tunnelSource,
+  routeState:async()=>h.target,pollingTimerActive:async()=>false,
+  legacyServiceActive:async()=>h.legacyActive,tunnelServiceActive:async()=>h.tunnelActive,
+  assertNoSlotSources:async()=>assert.equal(h.writers.length,0),
+  assertNoPreflight:async()=>assert.equal(h.preflight.size,0),
+  assertInitialLegacyAbsent:async()=>{assert.equal(h.apiSource,null);assert.equal(h.legacyActive,false);},
+  backupArtifactIdentity:async()=>hash,
+  captureBackupAutostart:async()=>autostart,
+  assertLegacyBackupRelease:async()=>api,assertLegacyBackupTunnel:async()=>tunnel,
+  assertLegacyRelease:async()=>{assert.ok(h.legacyActive);return {apiEpoch:1};},
+  captureCutoverSources:async()=>({apiSource,tunnelSource,apiFingerprint:api.unitFingerprint,tunnelFingerprint:tunnel.unitFingerprint}),
+  installBackupStartupFence:async()=>{assert.ok(backup);h.trace.push('fence');},
+  assertBackupAutostartGated:async()=>assert.ok(backup),
+  restoreBackupAutostart:async()=>{},
+  removeBackupStartupFence:async()=>{},removeBackupStartupPermits:async()=>{},
+  stopTunnel:async()=>{h.tunnelActive=false;h.trace.push('stop-tunnel');},
+  stopLegacyWriter:async()=>{assert.ok(cutover&&backup);h.legacyActive=false;h.trace.push('stop-legacy');},
+  startLegacyWriter:async()=>{assert.ok(backup);h.legacyActive=true;h.trace.push('start-legacy');},
+  startTunnel:async()=>{assert.ok(h.legacyActive);h.tunnelActive=true;},
+  applyCutoverSources:async intent=>{assert.ok(!h.legacyActive&&!h.tunnelActive);h.apiSource=null;h.tunnelSource=switchLegacyTunnelSource(intent.tunnelSource);},
+  restoreCutoverSources:async intent=>{h.apiSource=intent.apiSource;h.tunnelSource=intent.tunnelSource;},
+  assertCutoverSources:async intent=>{assert.equal(h.apiSource,null);assert.equal(h.tunnelSource,switchLegacyTunnelSource(intent.tunnelSource));},
+  startInitialProxy:async()=>assert.equal(h.target,'blocked'),
+  stopInitialPreflight:async(slot,owner)=>{assert.equal(owner.operationId,cutover.operationId);h.preflight.delete(slot);},
+  verifyWriterUnits:async()=>{},
+  startCutoverTunnel:async()=>{assert.ok(!persisted().initialActivationPending);assert.equal(h.target,'blue');h.tunnelActive=true;h.trace.push('handoff');}
+ });
+ const source={format:'codexia-legacy-backup-proof/v1',release:old,artifactDirectory:'/remote/codexia-20261117T000000Z-12345678-1234-1234-1234-123456789abc',checksumManifestSha256:hash};
+ const receipt={format:'codexia-restore-receipt/v1',checksumManifestSha256:hash};
+ return {h,controller,persisted,source,receipt,cutover:()=>cutover,backup:()=>backup};
+}
+test('legacy cutover verifies evidence and persists the startup fence before writer stop and commits before handoff',async()=>{
+ const {h,controller,persisted,source,receipt,cutover,backup}=cutoverFixture();
+ await assert.rejects(controller.cutoverLegacy(old,'blue',source,{...receipt,checksumManifestSha256:'0'.repeat(64)}),/Restore receipt/);
+ assert.equal(cutover(),null);assert.equal(h.legacyActive,true);
+ const state=await controller.cutoverLegacy(old,'blue',source,receipt);
+ assert.equal(state.initialActivationPending,undefined);assert.deepEqual(persisted(),state);
+ assert.equal(h.legacyActive,false);assert.equal(h.tunnelActive,true);
+ assert.equal(h.target,'blue');assert.deepEqual(h.writers,[{slot:'blue',image:old.image}]);
+ assert.ok(h.trace.indexOf('intent')<h.trace.indexOf('fence'));
+ assert.ok(h.trace.indexOf('fence')<h.trace.indexOf('stop-legacy'));
+ assert.ok(h.trace.indexOf('stop-legacy')<h.trace.indexOf('start:blue'));
+ assert.ok(h.trace.indexOf('start:blue')<h.trace.indexOf('handoff'));
+ assert.equal(cutover(),null);assert.equal(backup(),null);
+});
+test('pre-journal cutover failure restores exact legacy configuration and runtime',async()=>{
+ for(const point of ['stop','sources','proxy']){
+  const {h,controller,persisted,source,receipt,cutover,backup}=cutoverFixture();
+  const apply=h.applyCutoverSources;
+  if(point==='stop'){const stop=h.stopLegacyWriter;h.stopLegacyWriter=async()=>{await stop();throw Error('interrupted stop');};}
+  if(point==='sources')h.applyCutoverSources=async intent=>{await apply(intent);throw Error('interrupted sources');};
+  if(point==='proxy')h.startInitialProxy=async()=>{throw Error('interrupted proxy');};
+  await assert.rejects(controller.cutoverLegacy(old,'blue',source,receipt),/interrupted/);
+  assert.equal(persisted(),undefined);assert.equal(cutover(),null);assert.equal(backup(),null);
+  assert.equal(h.legacyActive,true);assert.equal(h.tunnelActive,true);assert.equal(h.target,'blocked');
+  assert.match(h.apiSource,/ContainerName=codexia-api/);assert.match(h.tunnelSource,/Requires=codexia-api.service/);
+ }
+});
+test('post-journal failure retains the exclusive new ownership and boot can finish handoff',async()=>{
+ for(const point of ['activation','handoff']){
+  const {h,controller,persisted,source,receipt,cutover,backup}=cutoverFixture();
+  const probe=h.probe,handoff=h.startCutoverTunnel;
+  if(point==='activation')h.probe=async()=>{throw Error('failed private probe');};
+  else h.startCutoverTunnel=async()=>{throw Error('failed handoff');};
+  await assert.rejects(controller.cutoverLegacy(old,'blue',source,receipt),/failed/);
+  assert.ok(cutover());assert.ok(persisted());assert.equal(h.legacyActive,false);assert.equal(h.target,'blocked');
+  if(point==='activation')assert.ok(backup());
+  h.probe=probe;h.startCutoverTunnel=handoff;
+  const recovered=await controller.recoverLegacyCutover(persisted(),cutover());
+  assert.equal(recovered.initialActivationPending,undefined);assert.equal(h.target,'blue');assert.equal(h.tunnelActive,true);
+  assert.equal(h.legacyActive,false);assert.equal(cutover(),null);assert.equal(backup(),null);
+ }
+});
+test('Tunnel dependency switch is exact and rejects mixed or duplicate directives',()=>{
+ const legacy='[Unit]\nRequires=codexia-api.service\n# retained\nAfter=network-online.target codexia-api.service\n';
+ assert.equal(switchLegacyTunnelSource(legacy),legacy.replaceAll('codexia-api.service','codexia-api-proxy.service'));
+ assert.throws(()=>switchLegacyTunnelSource(legacy.replace('Requires=codexia-api.service','Requires=codexia-api-proxy.service')),/canonical legacy state/);
+ assert.throws(()=>switchLegacyTunnelSource(legacy+'Requires=codexia-api.service\n'),/canonical legacy state/);
 });
