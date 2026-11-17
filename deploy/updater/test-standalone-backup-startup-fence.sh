@@ -401,7 +401,9 @@ node --input-type=module -e '
   import {readFile,unlink} from "node:fs/promises";
   import path from "node:path";
   import {pathToFileURL} from "node:url";
-  const [root,quadlet,state,fixtureImage]=process.argv.slice(1);
+  const [root,quadlet,state,fixtureImageWithTag]=process.argv.slice(1);
+  // Use the digest-only reference required by the signed release contract.
+  const fixtureImage=fixtureImageWithTag.replace(/:[^/:@]+(?=@sha256:)/u,"");
   const {PodmanStandaloneHost}=await import(pathToFileURL(path.join(root,"deploy/updater/standalone-host.mjs")));
   const {atomicWrite,switchLegacyTunnelSource,clearBackupIntent}=await import(pathToFileURL(path.join(root,"scripts/standalone-update-controller.mjs")));
   const host=new PodmanStandaloneHost({routeFile:path.join(state,"route"),quadletDirectory:quadlet,githubTokenFile:path.join(state,"token"),
