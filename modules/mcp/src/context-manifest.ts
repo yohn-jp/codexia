@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 export const MCP_WRITING_CONTEXT_MAX_CHARACTERS = 50_000;
 export const MCP_WRITING_CONTEXT_MAX_SELECTION_CHARACTERS = 5_000;
