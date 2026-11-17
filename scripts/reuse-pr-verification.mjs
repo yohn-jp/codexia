@@ -42,7 +42,7 @@ export function mergeCandidate(sourceSha, before, git) {
 function assertWorkflowRun(run, context, sha, event) {
   assert.ok(positive(run?.id) && positive(run.run_number) && positive(run.run_attempt), 'Invalid workflow run identity');
   assert.equal(run.workflow_id, context.workflowId, 'Unexpected workflow');
-  assert.equal(run.path, WORKFLOW, 'Unexpected workflow path');
+  assert.equal(run.path, context.workflowPath, 'Unexpected workflow path');
   assert.ok(sameRepo(run.repository, context.repoId) && sameRepo(run.head_repository, context.repoId), 'Foreign repository proof');
   assert.equal(run.head_sha, sha, 'Workflow source mismatch');
   assert.equal(run.event, event, 'Workflow event mismatch');
@@ -61,7 +61,7 @@ function newest(runs) {
   return [...runs].sort((a, b) => b.run_number - a.run_number)[0];
 }
 
-function assertJobBindings(jobs, run) {
+function assertJobRunBindings(jobs, run) {
   assert.ok(Array.isArray(jobs) && jobs.length > 0);
   for (const job of jobs) {
     assert.equal(job.head_sha, run.head_sha, 'Job source mismatch');
@@ -69,6 +69,10 @@ function assertJobBindings(jobs, run) {
     assert.ok(positive(job.run_attempt) && job.run_attempt <= run.run_attempt, 'Job attempt mismatch');
     assert.equal(job.status, 'completed', 'Unfinished job');
   }
+}
+
+function assertCertificationJob(jobs, run) {
+  assertJobRunBindings(jobs, run);
   const cert = jobs.filter(job => job.name === 'certification');
   assert.equal(cert.length, 1, 'Missing or duplicate certification job');
   assert.ok(success(cert[0]), 'Certification did not succeed');
@@ -79,7 +83,7 @@ function assertJobBindings(jobs, run) {
 function assertPrAssociation(run, candidate, repoId) {
   assert.ok(Array.isArray(run.pull_requests));
   const associations = run.pull_requests.filter(pr => pr?.base?.ref === 'main' &&
-    pr.head?.sha === candidate.head && sameRepo(pr.head?.repo, repoId) && sameRepo(pr.base?.repo, repoId));
+    pr.head?.sha === candidate.head && pr.base?.sha === candidate.base && sameRepo(pr.head?.repo, repoId) && sameRepo(pr.base?.repo, repoId));
   assert.equal(associations.length, 1, 'Missing or ambiguous PR association');
   assert.ok(positive(associations[0].number), 'Invalid associated PR number');
   return associations[0].number;
@@ -128,36 +132,53 @@ function assertFullModelJob(plan, jobs) {
   }
 }
 
-/** Recheck the actual merged tree and the existing canonical PR evidence, using read-only API data. */
-export async function verifyReusableMainProof({ sourceSha, before, repository, currentRun, git, request, readArtifact }) {
+function apiList(request, endpoint, key) {
+  return collectGitHubPages((page, perPage) => request(endpoint + (endpoint.includes('?') ? '&' : '?') +
+    'per_page=' + perPage + '&page=' + page), key);
+}
+
+function mainContext(repository, currentRun, sourceSha, workflowPath) {
   assert.equal(repository, 'yohn-jp/codexia', 'Unexpected repository');
   assert.ok(positive(currentRun?.repository?.id) && positive(currentRun.workflow_id));
-  const context = { repoId: currentRun.repository.id, workflowId: currentRun.workflow_id };
+  const context = { repoId: currentRun.repository.id, workflowId: currentRun.workflow_id, workflowPath };
   assertWorkflowRun(currentRun, context, sourceSha, 'push');
   assert.equal(currentRun.head_branch, 'main');
-  const candidate = mergeCandidate(sourceSha, before, git);
-  const list = (endpoint, key) => collectGitHubPages((page, perPage) =>
-    request(endpoint + (endpoint.includes('?') ? '&' : '?') + 'per_page=' + perPage + '&page=' + page), key);
-  const workflowRuns = sha => list('actions/workflows/' + context.workflowId + '/runs?head_sha=' + sha + '&event=pull_request', 'workflow_runs');
-  const jobsFor = id => list('actions/runs/' + id + '/jobs?filter=latest', 'jobs');
-  const runs = await workflowRuns(candidate.head);
-  // Do not take an older green run when a newer run for this exact head is red or pending.
+  return context;
+}
+
+async function mergedPrRun({ context, candidate, request }) {
+  const runs = await apiList(request, 'actions/workflows/' + context.workflowId + '/runs?head_sha=' +
+    candidate.head + '&event=pull_request', 'workflow_runs');
   const run = newest(runs.filter(value => value?.head_sha === candidate.head && value.event === 'pull_request' &&
-    value.workflow_id === context.workflowId && value.path === WORKFLOW &&
+    value.workflow_id === context.workflowId && value.path === context.workflowPath &&
     sameRepo(value.repository, context.repoId) && sameRepo(value.head_repository, context.repoId)));
   assertWorkflowRun(run, context, candidate.head, 'pull_request');
   assert.ok(success(run), 'Latest PR verification is not successful');
   const prNumber = assertPrAssociation(run, candidate, context.repoId);
   const mergedAt = assertMergedPull(await request('pulls/' + prNumber), prNumber, candidate, context.repoId);
-  const [jobs, artifacts] = await Promise.all([jobsFor(run.id), list('actions/runs/' + run.id + '/artifacts', 'artifacts')]);
-  const cert = assertJobBindings(jobs, run);
-  const certSteps = cert.steps?.filter(step => step.name === FULL_CERT_STEP);
-  assert.equal(certSteps?.length, 1, 'Missing or duplicate full certification step');
-  assert.ok(success(certSteps[0]), 'PR certification step did not succeed');
+  const jobs = await apiList(request, 'actions/runs/' + run.id + '/jobs?filter=latest', 'jobs');
+  assertJobRunBindings(jobs, run);
   for (const job of jobs.filter(success)) {
     const completed = Date.parse(job.completed_at);
     assert.ok(Number.isFinite(completed) && completed <= mergedAt, 'PR proof was completed after merge');
   }
+  return { run, jobs, prNumber };
+}
+
+function assertSuccessfulStep(job, name) {
+  const steps = job.steps?.filter(step => step.name === name);
+  assert.equal(steps?.length, 1, 'Missing or duplicate proof step: ' + name);
+  assert.ok(success(steps[0]), 'Required proof step did not succeed: ' + name);
+}
+
+/** Recheck the actual merged tree and the existing canonical PR evidence, using read-only API data. */
+export async function verifyReusableMainProof({ sourceSha, before, repository, currentRun, git, request, readArtifact }) {
+  const context = mainContext(repository, currentRun, sourceSha, WORKFLOW);
+  const candidate = mergeCandidate(sourceSha, before, git);
+  const { run, jobs, prNumber } = await mergedPrRun({ context, candidate, request });
+  const cert = assertCertificationJob(jobs, run);
+  assertSuccessfulStep(cert, FULL_CERT_STEP);
+  const artifacts = await apiList(request, 'actions/runs/' + run.id + '/artifacts', 'artifacts');
   const identity = { runId: run.id, sourceSha: candidate.head };
   const inventory = { identity, artifacts };
   const planArtifact = selectLatestPlanArtifact(artifacts, jobs, identity);
@@ -183,11 +204,81 @@ export async function verifyReusableMainProof({ sourceSha, before, repository, c
   };
 }
 
+// The exact job and positive verification steps are the proof boundary for each
+// independent workflow. These are not substitutes for the canonical source graph.
+export const DEDICATED_PROOFS = Object.freeze({
+  '.github/workflows/ansible-host.yml': {
+    job: 'Verify real Ubuntu rootless host convergence',
+    steps: ['Install supported Ansible control environment', 'Exercise host stage twice and run Quadlet with Actions-only environment isolation'],
+  },
+  '.github/workflows/ansible-base-secrets.yml': {
+    job: 'Verify rootless Podman, PostgreSQL, and Tunnel Quadlets',
+    steps: ['Prepare disposable runtime', 'Check PostgreSQL layout and Tunnel dependency',
+      'Exercise rootless convergence through a separate bootstrap account', 'Remove the disposable fixture user even after test failure'],
+  },
+  '.github/workflows/ansible-runtime-contract.yml': {
+    job: 'Verify real rootless runtime contract on Ubuntu VM',
+    steps: ['Install isolated host test dependencies', 'Prepare an isolated rootless systemd identity',
+      'Check runtime schema, maintenance guards and Ansible validation',
+      'Exercise generated Core and Full Quadlets on disposable rootless Podman',
+      'Remove the disposable VM marker and user manager'],
+  },
+  '.github/workflows/deployment-config.yml': {
+    job: 'Verify Ansible and Terraform configuration',
+    steps: ['Select independent infrastructure checks'],
+  },
+  '.github/workflows/full-model-oci-acceptance.yml': {
+    job: FULL_MODEL_JOB,
+    steps: ['Install a disposable rootless OCI runtime', 'Write the pinned real model file manifest',
+      'Expose the pinned tokenizer at the configured local model path', 'Fail on missing or altered model cache files',
+      'Run the real Full model OCI lifecycle acceptance'],
+  },
+});
+
+function assertInfrastructureSelection(job, files) {
+  // The same merged-base diff must select the same independent scopes as the
+  // existing deployment-config workflow. Require positive evidence for each.
+  const ansible = files.some(file => /^(deploy\/(?:ansible|updater|quadlet|postgres)\/|\.github\/workflows\/deployment-config\.yml$)/u.test(file));
+  const terraform = files.some(file => /^(deploy\/cloudflare\/|\.github\/workflows\/deployment-config\.yml$)/u.test(file));
+  if (ansible || !terraform) assertSuccessfulStep(job, 'Check standalone Ansible configuration');
+  if (terraform || !ansible) {
+    assertSuccessfulStep(job, 'Check all Terraform files');
+    assertSuccessfulStep(job, 'Validate Cloudflare Terraform');
+  }
+}
+
+export async function verifyReusableDedicatedProof({ sourceSha, before, repository, currentRun, git, request }) {
+  const workflowPath = currentRun?.path;
+  assert.ok(Object.hasOwn(DEDICATED_PROOFS, workflowPath), 'Not an independent verification workflow');
+  let context = mainContext(repository, currentRun, sourceSha, workflowPath);
+  const candidate = mergeCandidate(sourceSha, before, git);
+  const definition = DEDICATED_PROOFS[workflowPath];
+  if (workflowPath === '.github/workflows/full-model-oci-acceptance.yml') {
+    // The PR caller lives in Verify; the main supplemental run is standalone.
+    const verify = await request('actions/workflows/verify.yml');
+    assert.equal(verify.path, WORKFLOW);
+    assert.ok(positive(verify.id), 'Invalid Verify workflow identity');
+    context = { ...context, workflowId: verify.id, workflowPath: WORKFLOW };
+  }
+  const { run, jobs, prNumber } = await mergedPrRun({ context, candidate, request });
+  if (context.workflowPath === WORKFLOW) assertSuccessfulStep(assertCertificationJob(jobs, run), FULL_CERT_STEP);
+  else assert.equal(jobs.length, 1, 'Unexpected dedicated PR job inventory');
+  const matches = jobs.filter(job => job.name === definition.job);
+  assert.equal(matches.length, 1, 'Missing or duplicate dedicated proof job');
+  const job = matches[0];
+  assert.ok(success(job) && positive(job.id), 'Dedicated PR proof did not succeed');
+  assert.equal(job.run_attempt, run.run_attempt, 'Dedicated proof is not from latest attempt');
+  for (const step of definition.steps) assertSuccessfulStep(job, step);
+  if (workflowPath === '.github/workflows/deployment-config.yml') assertInfrastructureSelection(job, candidate.files);
+  return { version: 1, sourceSha, tree: candidate.tree, baseSha: candidate.base, headSha: candidate.head,
+    prNumber, workflowPath, proofWorkflowPath: context.workflowPath, runId: run.id, attempt: run.run_attempt, jobId: job.id };
+}
+
 async function main() {
   const [command] = process.argv.slice(2);
   const { GITHUB_REPOSITORY: repository, GITHUB_SHA: sourceSha, GITHUB_RUN_ID: runId, GH_TOKEN: token,
     GITHUB_EVENT_NAME: event, GITHUB_REF: ref, GITHUB_EVENT_PATH: eventPath } = process.env;
-  assert.ok(command === 'plan' || command === 'certify');
+  assert.ok(['plan', 'certify', 'dedicated'].includes(command));
   assert.equal(event, 'push');
   assert.equal(ref, 'refs/heads/main');
   assert.match(sourceSha ?? '', shaPattern);
@@ -209,16 +300,20 @@ async function main() {
     assert.equal(payload.deleted, false);
     const currentRun = await request('actions/runs/' + runId);
     assert.equal(String(currentRun.id), runId);
-    return verifyReusableMainProof({ sourceSha, before: payload.before, repository, currentRun, request,
+    const verify = command === 'dedicated' ? verifyReusableDedicatedProof : verifyReusableMainProof;
+    return verify({ sourceSha, before: payload.before, repository, currentRun, request,
       git: args => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 15000 }),
       readArtifact: async (artifact, filename) => JSON.parse(await extractJsonEntry(await downloadArtifact(artifact, repository, token), filename)),
     });
   };
-  if (command === 'plan') {
+  if (command === 'plan' || command === 'dedicated') {
     try {
       const receipt = await resolve();
       await appendFile(process.env.GITHUB_OUTPUT, 'eligible=true\nreceipt=' + JSON.stringify(receipt) + '\n');
-      console.log('Eligible merged PR source proof: PR #' + receipt.prNumber + ', run ' + receipt.runId);
+      const message = 'Eligible merged PR proof: PR #' + receipt.prNumber + ', run ' + receipt.runId;
+      console.log(message);
+      if (command === 'dedicated' && process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY,
+        message + '; independent verification reused for exact main source ' + sourceSha + '.\n');
     } catch (error) {
       // A missing, incompatible or unavailable proof is a request for full execution, not success.
       console.log('Main source proof unavailable; execute full graph: ' + String(error.message).replace(/[\r\n]/gu, ' ').slice(0, 300));

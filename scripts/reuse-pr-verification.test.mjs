@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mergeCandidate, assertCandidatePlan, assertCompactNeeds, verifyReusableMainProof } from './reuse-pr-verification.mjs';
+import { mergeCandidate, assertCandidatePlan, assertCompactNeeds, verifyReusableMainProof, verifyReusableDedicatedProof, DEDICATED_PROOFS } from './reuse-pr-verification.mjs';
 import { createVerificationPlan, planDigest } from './ci-impact.mjs';
 import { VERIFICATION_GROUPS, requiredBuildProfile } from './ci-contract.mjs';
 
@@ -21,7 +21,7 @@ function fixture(files = ['package.json']) {
   };
   const common = { ...status, workflow_id, path: workflowPath, repository: repo, head_repository: repo, run_attempt: 1 };
   const currentRun = { ...common, id: 30, run_number: 30, head_sha: sourceSha, head_branch: 'main', event: 'push', status: 'in_progress', conclusion: null };
-  const pr = { number: 7, state: 'closed', merged: true, merged_at: merged, merge_commit_sha: sourceSha, head: { sha: head, repo }, base: { ref: 'main', repo } };
+  const pr = { number: 7, state: 'closed', merged: true, merged_at: merged, merge_commit_sha: sourceSha, head: { sha: head, repo }, base: { ref: 'main', sha: base, repo } };
   const prRun = { ...common, id: 20, run_number: 20, head_sha: head, event: 'pull_request',
     pull_requests: [{ number: 7, head: pr.head, base: pr.base }] };
   const plan = createVerificationPlan({ files, event: 'pull_request', sha: head, base });
@@ -115,6 +115,7 @@ test('actual merged diff and original base must equal the canonical PR plan', ()
 test('rejected proof paths fail closed instead of accepting an older green or incomplete result', async () => {
   const mutations = [
     s => { s.pr.merged = false; },
+    s => { s.prRun.pull_requests[0].base.sha = tree; },
     s => { s.pr.merge_commit_sha = base; },
     s => { s.pr.head = { ...s.pr.head, repo: { id: 999 } }; },
     s => { s.prRun.head_repository = { id: 999 }; },
@@ -152,4 +153,51 @@ test('compact certification cannot proceed on a failed plan or executed heavy fa
   assert.doesNotThrow(() => assertCompactNeeds(needs));
   assert.throws(() => assertCompactNeeds({ ...needs, plan: { result: 'failure' } }));
   assert.throws(() => assertCompactNeeds({ ...needs, build: { result: 'success' } }));
+});
+
+
+function dedicatedFixture(workflowPath, files, extraSteps = []) {
+  const { state, args } = fixture(files);
+  const definition = DEDICATED_PROOFS[workflowPath];
+  const model = workflowPath === '.github/workflows/full-model-oci-acceptance.yml';
+  state.currentRun.path = workflowPath;
+  if (model) state.currentRun.workflow_id = 43;
+  else state.prRun.path = workflowPath;
+  const job = { ...state.jobs[0], name: definition.job, id: 500, steps: [...definition.steps, ...extraSteps].map(name => ({ name, ...status })) };
+  if (model) {
+    state.jobs = state.jobs.filter(item => !item.name.startsWith('full-model-oci'));
+    state.jobs.push(job);
+  } else state.jobs = [job];
+  const request = args.request;
+  args.request = endpoint => endpoint === 'actions/workflows/verify.yml' ? Promise.resolve({ id: workflow_id, path: workflowPath === '.github/workflows/full-model-oci-acceptance.yml' ? '.github/workflows/verify.yml' : workflowPath }) : request(endpoint);
+  return { state, args, job };
+}
+
+test('independent runtime proof is reused only for the exact successful PR job and steps', async () => {
+  const { state, args, job } = dedicatedFixture('.github/workflows/ansible-runtime-contract.yml', ['deploy/updater/standalone-host.mjs']);
+  const receipt = await verifyReusableDedicatedProof(args);
+  assert.equal(receipt.jobId, 500);
+  assert.equal(receipt.sourceSha, sourceSha);
+  job.steps.find(step => step.name.startsWith('Exercise generated')).conclusion = 'skipped';
+  await assert.rejects(verifyReusableDedicatedProof(args), /Required proof step/);
+  job.steps.find(step => step.name.startsWith('Exercise generated')).conclusion = 'success';
+  state.prRun.run_attempt = 2;
+  await assert.rejects(verifyReusableDedicatedProof(args), /latest attempt/);
+});
+
+test('infrastructure reuse requires actual selected scopes rather than a green skipped step', async () => {
+  const ansible = dedicatedFixture('.github/workflows/deployment-config.yml', ['deploy/ansible/site.yml'], ['Check standalone Ansible configuration']);
+  assert.equal((await verifyReusableDedicatedProof(ansible.args)).jobId, 500);
+  const terraform = dedicatedFixture('.github/workflows/deployment-config.yml', ['deploy/cloudflare/terraform/main.tf'], ['Check all Terraform files', 'Validate Cloudflare Terraform']);
+  assert.equal((await verifyReusableDedicatedProof(terraform.args)).jobId, 500);
+  const mixed = dedicatedFixture('.github/workflows/deployment-config.yml', ['deploy/ansible/site.yml', 'deploy/cloudflare/terraform/main.tf'], ['Check standalone Ansible configuration']);
+  await assert.rejects(verifyReusableDedicatedProof(mixed.args), /Terraform/);
+});
+
+test('standalone main model job reuses only the successful Verify PR caller lifecycle proof', async () => {
+  const { args, job } = dedicatedFixture('.github/workflows/full-model-oci-acceptance.yml', ['package.json']);
+  const receipt = await verifyReusableDedicatedProof(args);
+  assert.equal(receipt.proofWorkflowPath, '.github/workflows/verify.yml');
+  job.steps.find(step => step.name === 'Fail on missing or altered model cache files').conclusion = 'failure';
+  await assert.rejects(verifyReusableDedicatedProof(args), /Required proof step/);
 });

@@ -216,3 +216,21 @@ test('compact main proof is resolved only on main push, skips all heavy families
   assert.equal(gate.steps.find(step => step.name === 'Certify every required exact-source matrix element').if, "needs.plan.outputs.reuse != 'true'");
   assert.ok(gate.steps.some(step => step.with?.name === 'ci-reuse-proof' && step.if === "needs.plan.outputs.reuse == 'true'"));
 });
+
+
+test('independent main verification reuses exact PR proof without disabling PR or manual execution', async () => {
+  const { DEDICATED_PROOFS } = await import('./reuse-pr-verification.mjs');
+  for (const [filename, proof] of Object.entries(DEDICATED_PROOFS)) {
+    const definition = parse(readFileSync(new URL('../' + filename, import.meta.url), 'utf8'));
+    const job = Object.values(definition.jobs)[0];
+    const gate = job.steps.find(step => step.id === 'reuse');
+    assert.equal(gate.if, "github.event_name == 'push' && github.ref == 'refs/heads/main'");
+    assert.equal(gate.run, 'node scripts/reuse-pr-verification.mjs dedicated');
+    assert.equal(job.permissions.actions, 'read');
+    assert.equal(job.permissions['pull-requests'], 'read');
+    for (const step of job.steps.slice(job.steps.indexOf(gate) + 1)) assert.match(step.if, /steps\.reuse\.outputs\.eligible != 'true'/);
+    for (const name of proof.steps) assert.ok(job.steps.some(step => step.name === name), name);
+    if (!filename.endsWith('full-model-oci-acceptance.yml')) assert.equal(job.name, proof.job);
+  }
+  assert.deepEqual(workflow.jobs.full_model_oci.permissions, { contents: 'read', actions: 'read', 'pull-requests': 'read' });
+});

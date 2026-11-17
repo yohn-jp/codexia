@@ -30,16 +30,33 @@ jobs:
     name: Verify real Ubuntu rootless host convergence
     runs-on: ubuntu-26.04
     timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: ${{ github.event_name == 'push' && '0' || '1' }}
+      - uses: actions/setup-node@v7.1.0
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          node-version: '24.22.3'
+      - name: Resolve reusable independent PR proof
+        id: reuse
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/reuse-pr-verification.mjs dedicated
       - name: Install supported Ansible control environment
+        if: steps.reuse.outputs.eligible != 'true'
         run: |
           python3 -m venv "$RUNNER_TEMP/codexia-ansible"
           "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
       - name: Exercise host stage twice and run Quadlet with Actions-only environment isolation
+        if: steps.reuse.outputs.eligible != 'true'
         env:
           CODEXIA_HOST_PROOF_MODE: actions-fixture
           ANSIBLE_PLAYBOOK: ${{ runner.temp }}/codexia-ansible/bin/ansible-playbook

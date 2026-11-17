@@ -65,6 +65,10 @@ jobs:
     needs:
       - plan
     if: needs.plan.result == 'success' && needs.plan.outputs.full_model_oci == 'true'
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     uses: ./.github/workflows/full-model-oci-acceptance.yml
   unit:
     name: unit-${{ matrix.group }}
