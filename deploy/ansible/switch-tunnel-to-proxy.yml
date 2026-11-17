@@ -1,18 +1,13 @@
 ---
 - name: Recheck the canonical legacy dependency before changing its upstream
   ansible.builtin.include_tasks: verify-tunnel-legacy.yml
-- name: Change only the Tunnel Requires dependency to the private proxy
+- name: Atomically switch both Tunnel dependency lines to the private proxy
   ansible.builtin.replace:
     path: "{{ quadlet_dir }}/codexia-tunnel.container"
-    regexp: '^Requires=codexia-api\.service$'
-    replace: 'Requires=codexia-api-proxy.service'
+    regexp: '^((?:Requires=|After=network-online[.]target )codexia-api)[.]service$'
+    replace: '\1-proxy.service'
     backup: true
-- name: Change only the Tunnel After dependency while preserving network ordering
-  ansible.builtin.replace:
-    path: "{{ quadlet_dir }}/codexia-tunnel.container"
-    regexp: '^(After=.*\s)codexia-api\.service$'
-    replace: '\1codexia-api-proxy.service'
-    backup: true
+    unsafe_writes: false
 - name: Read the Tunnel Quadlet after dependency change
   ansible.builtin.slurp:
     path: "{{ quadlet_dir }}/codexia-tunnel.container"
