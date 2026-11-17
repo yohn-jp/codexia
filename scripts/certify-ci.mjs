@@ -8,6 +8,7 @@ import { validateVerificationPlan } from './ci-impact.mjs';
 import { assertPlanEvidence } from './ci-evidence.mjs';
 import { assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
 import { assertNativeArtifactEvidence } from './ci-native-producer.mjs';
+import { resolveProducerJobAttempts } from './ci-artifact-selection.mjs';
 
 const { GH_TOKEN, GITHUB_REPOSITORY, GITHUB_RUN_ID, CODEXIA_EXPECTED_SHA, CODEXIA_REQUIRED_RESULTS } = process.env;
 assert.match(GITHUB_REPOSITORY ?? '', /^[\w.-]+\/[\w.-]+$/);
@@ -43,8 +44,9 @@ for (const entry of await readdir(directory, { withFileTypes: true })) {
 }
 assertPlanEvidence(plan, jobs, reports);
 const artifacts = await collectGitHubPages(page => request(`actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100&page=${page}`), 'artifacts');
-assertProfileArtifactEvidence(plan, jobs, reports, artifacts, GITHUB_RUN_ID);
-assertNativeArtifactEvidence(plan,jobs,reports,artifacts,GITHUB_RUN_ID);
+const producerJobs = await resolveProducerJobAttempts(jobs, run, request, ['build-core','build-full','hosted-native-catalog']);
+assertProfileArtifactEvidence(plan, producerJobs, reports, artifacts, GITHUB_RUN_ID);
+assertNativeArtifactEvidence(plan,producerJobs,reports,artifacts,GITHUB_RUN_ID);
 const message = `Verified ${plan.mode} plan: ${plan.tasks.length} validations at ${CODEXIA_EXPECTED_SHA}; run ${GITHUB_RUN_ID}. ${plan.excluded.length} explicitly NOT_SELECTED.\n`;
 console.log(message.trim());
 if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, message);

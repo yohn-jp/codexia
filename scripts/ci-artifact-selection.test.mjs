@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { VERIFICATION_GROUPS } from './ci-contract.mjs';
 import { createVerificationPlan, planDigest } from './ci-impact.mjs';
 import { assertPlanEvidence } from './ci-evidence.mjs';
-import { selectLatestEvidenceArtifacts, selectLatestJobArtifact, selectLatestPlanArtifact } from './ci-artifact-selection.mjs';
+import { resolveProducerJobAttempts, selectLatestEvidenceArtifacts, selectLatestJobArtifact, selectLatestPlanArtifact } from './ci-artifact-selection.mjs';
 import { collectGitHubPages } from './release-policy.mjs';
 
 const sourceSha = 'a'.repeat(40);
@@ -138,4 +138,21 @@ test('latest successful job attempt must belong to the exact workflow run and so
   const wrongSourceJobs = successfulJobs.map(item => item.name === 'plan' ? { ...item, head_sha: 'b'.repeat(40) } : item);
   assert.throws(() => selectLatestPlanArtifact(ordinaryArtifacts(), wrongSourceJobs, identity), /source SHA mismatch/);
   assert.throws(() => selectLatestJobArtifact('ci-plan', 'plan', ordinaryArtifacts(), successfulJobs, { runId: 'not-a-run', sourceSha }), /run ID is invalid/);
+});
+
+test('partial rerun resolves a carried-over producer to its original execution attempt', async () => {
+  const old = {...job('build-core', '2026-11-16T12:53:24Z', '2026-11-16T12:54:14Z'), id: 100, run_attempt: 1};
+  const carried = {...old, id: 200, run_attempt: 2};
+  const fresh = {...job('build-full', '2026-11-17T03:37:00Z', '2026-11-17T03:38:00Z'), id: 201, run_attempt: 2};
+  const failed = {...fresh, name: 'hosted-native-catalog', conclusion: 'failure'};
+  const run = {id: Number(runId), run_attempt: 2};
+  const request = async endpoint => {
+    const attempt = Number(/attempts\/(\d+)\/jobs/u.exec(endpoint)[1]);
+    const rows = attempt === 1 ? [old, {...fresh, id: 101, run_attempt: 1, started_at: old.started_at, completed_at: old.completed_at}] : [carried, fresh, failed];
+    return {total_count: rows.length, jobs: rows};
+  };
+  const resolved = await resolveProducerJobAttempts([carried, fresh, failed], run, request, ['build-core','build-full','hosted-native-catalog']);
+  assert.deepEqual(resolved.map(item => item.run_attempt), [1,2,2]);
+  assert.equal(resolved[2].conclusion, 'failure');
+  await assert.rejects(resolveProducerJobAttempts([carried], run, async () => ({total_count:0,jobs:[]}), ['build-core']), /history unavailable/u);
 });
