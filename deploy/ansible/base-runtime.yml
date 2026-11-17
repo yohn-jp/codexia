@@ -276,8 +276,10 @@
     dest: /etc/codexia/postgres/010-create-app-role.sh
     owner: "{{ codexia_service_user }}"
     group: root
-    mode: '0550'
+    mode: '0555'
     force: false
+# The service UID maps to container root, not postgres (UID 999).
+# The canonical script has no credentials; the host parent remains 0750.
 - name: Ensure the init script is readable inside the rootless database container
   become: true
   become_user: root
@@ -286,7 +288,7 @@
     state: file
     owner: "{{ codexia_service_user }}"
     group: root
-    mode: '0550'
+    mode: '0555'
 - name: Verify the existing init script without replacing it
   become: true
   become_user: root
@@ -298,7 +300,7 @@
 - name: Reject an unexpected existing PostgreSQL initializer
   ansible.builtin.assert:
     that:
-      - base_runtime_init_script.stat.mode == '0550'
+      - base_runtime_init_script.stat.mode == '0555'
       - base_runtime_init_script.stat.pw_name == codexia_service_user
       - base_runtime_init_script.stat.checksum == (lookup('ansible.builtin.file', repo_root + '/deploy/postgres/010-create-app-role.sh', rstrip=false) | hash('sha1'))
     fail_msg: Existing PostgreSQL init script differs from the canonical initializer; it was not overwritten.

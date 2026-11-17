@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Read-only gates for tag and commit-addressed publication.
 import { execFileSync } from 'node:child_process';
-import { assertReleaseIdentity, assertVerificationJobs, collectGitHubPages, verifiedSourceRun } from './release-policy.mjs';
+import { assertReleaseIdentity, assertVerificationJobs, collectGitHubPages, releaseVerificationState, verifiedSourceRun } from './release-policy.mjs';
 
 const repository = process.env.GITHUB_REPOSITORY;
 const tag = process.env.GITHUB_REF_NAME;
@@ -34,10 +34,12 @@ const deadline = Date.now() + (commitRelease ? 60 * 60 * 1000 : 0);
 let runs;
 for (;;) {
   runs = await collectGitHubPages(
-    (page, perPage) => request(`actions/workflows/verify.yml/runs?head_sha=${encodeURIComponent(expectedSha)}&branch=main&event=push&status=success&per_page=${perPage}&page=${page}`),
+    (page, perPage) => request(`actions/workflows/verify.yml/runs?head_sha=${encodeURIComponent(expectedSha)}&branch=main&event=push&per_page=${perPage}&page=${page}`),
     'workflow_runs',
   );
-  if (!commitRelease || runs.some(run => run.head_sha === expectedSha && run.status === 'completed' && run.conclusion === 'success')) break;
+  const state = releaseVerificationState(runs, expectedSha);
+  if (!commitRelease || state === 'ready') break;
+  if (state === 'failed') throw new Error('Exact-source main verification completed unsuccessfully; refusing release without waiting for timeout');
   if (Date.now() >= deadline) throw new Error('Timed out waiting for successful exact-source main verification');
   await new Promise(resolve => setTimeout(resolve, 30_000));
 }

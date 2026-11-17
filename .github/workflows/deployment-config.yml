@@ -3,39 +3,21 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - deploy/**
-      - edge/frontend/**
-      - Dockerfile.backend
-      - app/public/**
-      - scripts/build-frontend.mjs
-      - scripts/verify-deployment-config.mjs
-      - scripts/verify-frontend-compatibility*.mjs
-      - scripts/component-release-version*.mjs
-      - scripts/profile-package.mjs
-      - scripts/profile-package.test.mjs
-      - package.json
-      - pnpm-lock.yaml
-      - pnpm-workspace.yaml
-      - docs/deployment/**
-      - .github/workflows/**
+      - deploy/ansible/**
+      - deploy/updater/**
+      - deploy/quadlet/**
+      - deploy/postgres/**
+      - deploy/cloudflare/**
+      - .github/workflows/deployment-config.yml
   push:
     branches: [main]
     paths:
-      - deploy/**
-      - edge/frontend/**
-      - Dockerfile.backend
-      - app/public/**
-      - scripts/build-frontend.mjs
-      - scripts/verify-deployment-config.mjs
-      - scripts/verify-frontend-compatibility*.mjs
-      - scripts/component-release-version*.mjs
-      - scripts/profile-package.mjs
-      - scripts/profile-package.test.mjs
-      - package.json
-      - pnpm-lock.yaml
-      - pnpm-workspace.yaml
-      - docs/deployment/**
-      - .github/workflows/**
+      - deploy/ansible/**
+      - deploy/updater/**
+      - deploy/quadlet/**
+      - deploy/postgres/**
+      - deploy/cloudflare/**
+      - .github/workflows/deployment-config.yml
 permissions:
   contents: read
 concurrency:
@@ -43,29 +25,61 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   configuration:
-    name: Verify route and service contracts
+    name: Verify Ansible and Terraform configuration
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@v7.1.0
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           node-version: '24.22.3'
-      - name: Prepare locked pnpm toolchain
+      - name: Resolve reusable independent PR proof
+        id: reuse
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/reuse-pr-verification.mjs dedicated
+      - name: Select independent infrastructure checks
+        if: steps.reuse.outputs.eligible != 'true'
+        id: impact
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          corepack enable
-          corepack pnpm@12.21.0 --version
-      - name: Install frozen dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Check deployment configuration consistency
-        run: pnpm run verify:deployment
-      - name: Test release identity probes and Access failure diagnostics
-        run: node --test scripts/verify-frontend-compatibility.test.mjs scripts/component-release-version.test.mjs
-      - name: Typecheck and test the Static Assets Worker
-        run: pnpm run typecheck:deployment && pnpm run test:deployment
+          set -euo pipefail
+          # Unknown history or workflow edits require both checks.
+          ansible=true
+          terraform=true
+          if [[ "$BASE_SHA" =~ ^[a-f0-9]{40}$ && "$HEAD_SHA" =~ ^[a-f0-9]{40}$ ]] &&
+             git diff --name-only --no-renames -z "$BASE_SHA...$HEAD_SHA" -- > "$RUNNER_TEMP/infrastructure-paths"; then
+            ansible=false
+            terraform=false
+            while IFS= read -r -d '' file; do
+              case "$file" in
+                deploy/ansible/*|deploy/updater/*|deploy/quadlet/*|deploy/postgres/*) ansible=true ;;
+                deploy/cloudflare/*) terraform=true ;;
+                .github/workflows/deployment-config.yml) ansible=true; terraform=true ;;
+              esac
+            done < "$RUNNER_TEMP/infrastructure-paths"
+            # The workflow was selected: never skip everything on inconsistent event metadata.
+            if [[ "$ansible" == false && "$terraform" == false ]]; then
+              ansible=true
+              terraform=true
+            fi
+          fi
+          echo "ansible=$ansible" >> "$GITHUB_OUTPUT"
+          echo "terraform=$terraform" >> "$GITHUB_OUTPUT"
       - name: Check standalone Ansible configuration
+        if: steps.reuse.outputs.eligible != 'true' && steps.impact.outputs.ansible == 'true'
         run: |
           python3 -m venv "$RUNNER_TEMP/codexia-ansible"
           "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
@@ -76,10 +90,12 @@ jobs:
           python3 -m unittest discover -s deploy/ansible -p 'test_host_contract.py'
           ANSIBLE_PLAYBOOK="$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" bash deploy/ansible/test-host-validation.sh
       - name: Check all Terraform files
+        if: steps.reuse.outputs.eligible != 'true' && steps.impact.outputs.terraform == 'true'
         uses: hashicorp/setup-terraform@v4.0.1
         with:
           terraform_version: 1.17.2
       - name: Validate Cloudflare Terraform
+        if: steps.reuse.outputs.eligible != 'true' && steps.impact.outputs.terraform == 'true'
         working-directory: deploy/cloudflare/terraform
         env:
           GH_TOKEN: ${{ github.token }}

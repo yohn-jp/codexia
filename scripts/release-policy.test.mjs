@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { REQUIRED_VERIFICATION_JOBS, VERIFICATION_LEAF_JOBS } from './ci-contract.mjs';
-import { assertReleaseIdentity, assertVerificationJobs, assertVerificationLeafJobs, collectGitHubPages, verifiedSourceRun } from './release-policy.mjs';
+import { assertReleaseIdentity, assertVerificationJobs, assertVerificationLeafJobs, collectGitHubPages, releaseVerificationState, verifiedSourceRun } from './release-policy.mjs';
 
 const sha = 'a'.repeat(40);
 const run = { id: 1, head_sha: sha, head_branch: 'main', event: 'push', status: 'completed', conclusion: 'success' };
@@ -99,4 +99,39 @@ test('OCI publication refuses existing image tags and fails closed on registry u
     Response.json({ errors: [] }, { status: 404 }),
     new Response('not registry JSON', { status: 404 }),
   ]) await assert.rejects(assertImageTagAbsent(response));
+});
+
+test('main release polling stops on terminal exact-source failure without accepting it', () => {
+  const failed = {...run, conclusion:'failure'};
+  const cancelled = {...run, conclusion:'cancelled'};
+  const active = {...run, id:2, status:'in_progress', conclusion:null};
+  assert.equal(releaseVerificationState([], sha), 'waiting');
+  assert.equal(releaseVerificationState([failed], sha), 'failed');
+  assert.equal(releaseVerificationState([cancelled], sha), 'failed');
+  assert.equal(releaseVerificationState([failed, active], sha), 'waiting');
+  assert.equal(releaseVerificationState([failed, run], sha), 'ready');
+  assert.equal(releaseVerificationState([{...failed, head_sha:'b'.repeat(40)}, {...failed,event:'pull_request'}], sha), 'waiting');
+  assert.throws(() => verifiedSourceRun([failed,cancelled],sha));
+});
+
+
+
+test('compact main release requires positive reuse certification and the exact skipped family inventory', async () => {
+  const { REUSED_MAIN_SKIPPED_JOBS, REUSED_MAIN_CERT_STEP } = await import('./release-policy.mjs');
+  const jobs = [
+    { name: 'plan', status: 'completed', conclusion: 'success' },
+    ...REUSED_MAIN_SKIPPED_JOBS.map(name => ({ name, status: 'completed', conclusion: 'skipped' })),
+    { name: 'certification', status: 'completed', conclusion: 'success', steps: [
+      { name: REUSED_MAIN_CERT_STEP, status: 'completed', conclusion: 'success' },
+      { name: 'Certify every required exact-source matrix element', status: 'completed', conclusion: 'skipped' },
+    ] },
+  ];
+  assert.doesNotThrow(() => assertVerificationJobs(jobs));
+  assert.throws(() => assertVerificationJobs(jobs.slice(1)));
+  assert.throws(() => assertVerificationJobs(jobs.filter(job => job.name !== 'full-model-oci')));
+  assert.throws(() => assertVerificationJobs(jobs.map(job => job.name === 'plan' ? { ...job, conclusion: 'skipped' } : job)));
+  assert.throws(() => assertVerificationJobs(jobs.map(job => job.name === 'certification' ? { ...job, steps: [] } : job)));
+  assert.throws(() => assertVerificationJobs(jobs.map(job => job.name === 'certification' ? { ...job, steps: job.steps.map(step => ({ ...step, conclusion: 'success' })) } : job)));
+  assert.throws(() => assertVerificationJobs([...jobs, { name: 'unknown', status: 'completed', conclusion: 'skipped' }]));
+  assert.throws(() => assertVerificationJobs(jobs.map(job => job.name === 'certification' ? { ...job, conclusion: 'failure' } : job)));
 });

@@ -26,13 +26,17 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: full-model-oci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: false
+  group: full-model-oci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   full-model-oci:
     name: Run pinned Full model lifecycle on rootless Podman
     runs-on: ubuntu-26.04
     timeout-minutes: 150
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     env:
       HF_HUB_DISABLE_TELEMETRY: '1'
       HF_HUB_ETAG_TIMEOUT: '60'
@@ -41,13 +45,21 @@ jobs:
       - name: Check out the exact source without persistent credentials
         uses: actions/checkout@v7.0.1
         with:
-          fetch-depth: 1
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: ${{ github.event_name == 'push' && '0' || '1' }}
           persist-credentials: false
       - name: Set up Node.js
         uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.3'
+      - name: Resolve reusable independent PR proof
+        id: reuse
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/reuse-pr-verification.mjs dedicated
       - name: Install a disposable rootless OCI runtime
+        if: steps.reuse.outputs.eligible != 'true'
         timeout-minutes: 15
         run: |
           set -euo pipefail
@@ -59,6 +71,8 @@ jobs:
           free -h
           df -h "$RUNNER_TEMP"
       - name: Write the pinned real model file manifest
+        if: steps.reuse.outputs.eligible != 'true'
+        id: model-manifest
         run: |
           set -euo pipefail
           cat > "$RUNNER_TEMP/p13-model-files.tsv" <<'MODEL_FILES'
@@ -76,14 +90,16 @@ jobs:
           mogolloni/bge-reranker-v2-m3-onnx	e5023553f6c47f09057da7a19cdd79ef850a4985	onnx/model.onnx	489245	ed283424d9a40dbd6fe2f3081386848a88cc8057b7ab43e02d84077d6b69ba42
           mogolloni/bge-reranker-v2-m3-onnx	e5023553f6c47f09057da7a19cdd79ef850a4985	onnx/model.onnx_data	2271088656	9a748c82efb2079d24650c489e053dbb3c71d8acbbcf04d7b2340db66f2748f7
           MODEL_FILES
+          echo "digest=$(sha256sum "$RUNNER_TEMP/p13-model-files.tsv" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - name: Restore the exact pinned model artifacts
+        if: steps.reuse.outputs.eligible != 'true'
         id: model-cache
         uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ runner.temp }}/codexia-p13-model-cache
-          key: p13-full-models-ubuntu-26.04-${{ hashFiles('.github/workflows/full-model-oci-acceptance.yml', 'tests/integration/model-oci-lifecycle.acceptance.mjs', 'tests/integration/model-oci-lifecycle.container.mjs') }}
+          key: p13-full-models-ubuntu-26.04-manifest-${{ steps.model-manifest.outputs.digest }}
       - name: Download the real model files from their pinned revisions
-        if: steps.model-cache.outputs.cache-hit != 'true'
+        if: steps.reuse.outputs.eligible != 'true' && steps.model-cache.outputs.cache-hit != 'true'
         timeout-minutes: 45
         env:
           CODEXIA_P13_MODEL_CACHE: ${{ runner.temp }}/codexia-p13-model-cache
@@ -105,6 +121,7 @@ jobs:
               --max-workers 4
           done < <(cut -f1,2 "$RUNNER_TEMP/p13-model-files.tsv" | sort -u)
       - name: Expose the pinned tokenizer at the configured local model path
+        if: steps.reuse.outputs.eligible != 'true'
         env:
           CODEXIA_P13_MODEL_CACHE: ${{ runner.temp }}/codexia-p13-model-cache
         run: |
@@ -118,6 +135,7 @@ jobs:
             ln -sfn "$revision/$file" "$model_root/$file"
           done
       - name: Fail on missing or altered model cache files
+        if: steps.reuse.outputs.eligible != 'true'
         env:
           CODEXIA_P13_MODEL_CACHE: ${{ runner.temp }}/codexia-p13-model-cache
         run: |
@@ -145,12 +163,13 @@ jobs:
           done
           printf 'Verified %s pinned real model files outside the checkout.\n' "$(wc -l < "$RUNNER_TEMP/p13-model-files.tsv")"
       - name: Save only the checksum-verified pinned model cache
-        if: success() && steps.model-cache.outputs.cache-hit != 'true'
+        if: success() && steps.model-cache.outputs.cache-hit != 'true' && steps.reuse.outputs.eligible != 'true'
         uses: actions/cache/save@v6.1.0
         with:
           path: ${{ runner.temp }}/codexia-p13-model-cache
-          key: p13-full-models-ubuntu-26.04-${{ hashFiles('.github/workflows/full-model-oci-acceptance.yml', 'tests/integration/model-oci-lifecycle.acceptance.mjs', 'tests/integration/model-oci-lifecycle.container.mjs') }}
+          key: p13-full-models-ubuntu-26.04-manifest-${{ steps.model-manifest.outputs.digest }}
       - name: Run the real Full model OCI lifecycle acceptance
+        if: steps.reuse.outputs.eligible != 'true'
         timeout-minutes: 60
         env:
           CODEXIA_P13_MODEL_CACHE: ${{ runner.temp }}/codexia-p13-model-cache
