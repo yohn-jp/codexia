@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { McpActionClient } from "../api-client.js";
 import { errorResult, guarded, invoke, scopedClient, unavailableModuleAction } from "./shared.js";
 
