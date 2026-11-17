@@ -26,6 +26,7 @@ export function validateControllerState(value) {
   if(initialActivationPending!==undefined){
     assert.equal(initialActivationPending,true,'Invalid initial activation marker');
     assert.match(value.initialActivationId,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u,'Initial activation requires a durable operation identity');
+    if(value.initialActivationFreshDatabaseId!==undefined)assert.match(value.initialActivationFreshDatabaseId,/^[1-9]\d{0,19}:[1-9]\d{0,9}$/u,'Invalid initial activation database identity');
     assert.equal(journal.phase,'idle');
     assert.ok(journal.checkpoint,'Initial activation requires an authenticated checkpoint');
     assert.equal(previous,null);
@@ -35,7 +36,8 @@ export function validateControllerState(value) {
     assert.deepEqual(value.failedImages,[]);
   }
   return {format:value.format,journal,installed,pending,previous,failedImages:[...new Set(value.failedImages)],paused:value.paused,lastError:value.lastError,lastSuccessAt:value.lastSuccessAt,
-    ...(initialActivationPending===true?{initialActivationPending:true,initialActivationId:value.initialActivationId}:{})};
+    ...(initialActivationPending===true?{initialActivationPending:true,initialActivationId:value.initialActivationId,
+      ...(value.initialActivationFreshDatabaseId!==undefined?{initialActivationFreshDatabaseId:value.initialActivationFreshDatabaseId}:{})}:{})};
 }
 
 export async function atomicWrite(filename, content) {
@@ -333,6 +335,15 @@ export class StandaloneController {
       await this.host.route('blocked');
       await this.host.stopInitialPreflight(intent.slot,{operationId:intent.operationId,release});
       await this.host.assertNoSlotSources();
+      // Before the startup fence is written no writer disruption has
+      // occurred. Preserve a still-proven legacy service on admission failure.
+      if(!observed&&await this.host.legacyServiceActive({recoverStopped:true})&&await this.host.tunnelServiceActive()){
+        await this.host.assertLegacyBackupRelease(release,{expectedIdentity:old.identity.api});
+        await this.host.assertLegacyBackupTunnel({expectedIdentity:old.identity.tunnel});
+        await this.host.assertCutoverOriginalSources(intent);
+        await this.store.clearCutover();
+        return null;
+      }
       await this.host.restoreCutoverSources(intent);
       if(!observed)await this.saveBackupRecoveryIntent(old);
       await this.recoverBackupIntent(null);
@@ -438,7 +449,7 @@ export class StandaloneController {
     await this.assertNoBackupIntent();
     await this.host.assertInitialLegacyAbsent();
     assert.equal(await this.host.pollingTimerActive(),false,'Fresh activation requires stopped polling');
-    assert.equal(await this.host.tunnelServiceActive(),false,'Fresh activation must precede public Tunnel handoff');
+    await this.host.assertFreshTunnelInactive();
     const proof=validateFreshSchemaProof(await this.store.loadFreshSchema());
     assert.equal(proof.phase,'complete','Fresh activation requires completed schema proof');
     assert.deepEqual(proof.release,release,'Fresh activation release differs from schema proof');
@@ -449,6 +460,7 @@ export class StandaloneController {
       assert.equal(existing.journal.active.slot,slot,'Fresh activation slot differs from durable journal');
       assert.equal(existing.paused,true,'Fresh activation must remain paused');
       if(existing.initialActivationPending){
+        assert.equal(existing.initialActivationFreshDatabaseId,proof.databaseId,'Pending fresh activation belongs to a different database or lifecycle');
         await this.host.route('blocked');
         await this.host.startInitialProxy();
         return this.reconcile(existing,{boot:true});
@@ -467,7 +479,7 @@ export class StandaloneController {
     await this.host.assertFreshSchemaHost();
     // No writer or preflight has started. A crash from here is covered by
     // the same durable first-activation recovery path as legacy adoption.
-    const state=await this.save({...initialControllerState(release,slot,channel.checkpoint),initialActivationPending:true,initialActivationId:randomUUID()});
+    const state=await this.save({...initialControllerState(release,slot,channel.checkpoint),initialActivationPending:true,initialActivationId:randomUUID(),initialActivationFreshDatabaseId:proof.databaseId});
     return this.reconcile(state,{boot:true});
   }
   async assertServing(state,slot,release){
@@ -771,6 +783,15 @@ export class StandaloneController {
       if(legacyCutoverIntent)assert.deepEqual(await this.loadBackupIntent(),legacyCutoverIntent,'Cutover startup fence identity changed');
       else await this.assertNoBackupIntent();
       await this.host.assertInitialLegacyAbsent();
+      if(state.initialActivationFreshDatabaseId!==undefined){
+        assert.equal(legacyCutoverIntent,null,'Fresh and legacy activation identities conflict');
+        const proof=validateFreshSchemaProof(await this.store.loadFreshSchema());
+        assert.equal(proof.phase,'complete');
+        assert.deepEqual(proof.release,state.installed);
+        assert.equal(proof.databaseId,state.initialActivationFreshDatabaseId);
+        assert.equal(await this.host.freshDatabaseIdentity(),proof.databaseId,'Fresh activation database changed during interruption');
+        await this.host.assertFreshTunnelInactive();
+      }
       assert.equal(await this.host.pollingTimerActive(),false,'Initial activation requires stopped polling');
       const observed=await this.host.observe();
       assertObservation(observed,state.journal);
@@ -802,7 +823,7 @@ export class StandaloneController {
       await this.uiEpoch(state.installed);
       await this.host.route(active.slot);
       await this.assertServing(state,active.slot,state.installed);
-      const {initialActivationPending,initialActivationId,...committed}=state;
+      const {initialActivationPending,initialActivationId,initialActivationFreshDatabaseId,...committed}=state;
       return await this.save({...committed,lastError:null,lastSuccessAt:new Date(this.now()).toISOString()});
     }catch(error){
       await this.host.route('blocked').catch(()=>undefined);

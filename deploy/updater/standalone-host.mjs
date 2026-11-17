@@ -1257,6 +1257,11 @@ export class PodmanStandaloneHost{
     run('systemctl',['--user','daemon-reload']);
     await this.assertCutoverSources(intent);
   }
+  async assertCutoverOriginalSources(intent){
+    const {api,tunnel}=await this.readCutoverSources();
+    assert.equal(api,intent.apiSource,'Original API source drift');
+    assert.equal(tunnel,intent.tunnelSource,'Original Tunnel source drift');
+  }
   async assertCutoverSources(intent){
     const {api,tunnel}=await this.readCutoverSources();
     assert.equal(api,null,'Legacy API source reappeared');
@@ -1292,6 +1297,21 @@ export class PodmanStandaloneHost{
     assert.equal(present,false,'Initial activation refuses an existing legacy Quadlet');
     assert.equal(run('systemctl',['--user','show','--property=LoadState','--value','codexia-api.service']),'not-found','Initial activation refuses a loaded legacy unit');
   }
+  async assertFreshTunnelInactive(){
+    // A legacy-dependent Tunnel Quadlet may have failed dependency activation
+    // during boot. This is safe only with the legacy source absent, no
+    // container, an exact legacy dependency pair and no unit overrides.
+    const {tunnel,tunnelPath}=await this.readCutoverSources();
+    switchLegacyTunnelSource(tunnel);
+    assert.ok(!exists('codexia-tunnel'),'Fresh activation refuses an existing Tunnel container');
+    const unit='codexia-tunnel.service';
+    const properties=systemdProperties(run('systemctl',['--user','show','--property=LoadState,ActiveState,SourcePath,DropInPaths',unit]));
+    if(properties.LoadState==='not-found')return;
+    assert.equal(properties.LoadState,'loaded');
+    assert.equal(properties.SourcePath,tunnelPath,'Fresh Tunnel source drift');
+    assertRuntimeUnitDropIns(properties.DropInPaths??'');
+    assert.ok(['inactive','failed'].includes(properties.ActiveState),'Fresh activation must precede public Tunnel handoff');
+  }
   async assertFreshSchemaHost(){
     await this.assertInitialLegacyAbsent();
     assert.equal(this.config.enabled,false,'Fresh schema initialization requires disabled polling');
@@ -1307,7 +1327,7 @@ export class PodmanStandaloneHost{
       assert.equal(present,false,'Fresh schema refuses existing writer Quadlet: '+container);
       assert.equal(run('systemctl',['--user','show','--property=LoadState','--value',container+'.service']),'not-found','Fresh schema refuses a loaded writer unit: '+container);
     }
-    assert.equal(await this.tunnelServiceActive(),false,'Fresh schema requires the Tunnel stopped');
+    await this.assertFreshTunnelInactive();
     assert.equal(await this.unitActive('codexia-db.service'),true,'Fresh schema requires the canonical database service');
   }
   async freshDatabaseIdentity(){

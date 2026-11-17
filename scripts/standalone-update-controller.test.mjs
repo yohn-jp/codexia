@@ -28,6 +28,7 @@ function fixture(){
  let persisted,freshProof=null;
  const controller=new StandaloneController({host:h,store:{async save(s){persisted=structuredClone(s)},async loadFreshSchema(){return freshProof},async saveFreshSchema(value){freshProof=structuredClone(validateFreshSchemaProof(value))}},publicKey:pub,now:()=>now,observeMilliseconds:0});
  h.freshDatabaseIdentity=async()=> '123456789:12345';
+ h.assertFreshTunnelInactive=async()=>assert.equal(await h.tunnelServiceActive(),false,'Fresh activation requires stopped Tunnel');
  h.inspectFreshSchema=async r=>({pristine:true,fingerprint:r.migrationFingerprint});
  return {h,controller,state:{...initialControllerState(old,'blue',null),paused:false},persisted:()=>persisted,freshProof:()=>freshProof};
 }
@@ -305,6 +306,7 @@ function cutoverFixture(){
   startTunnel:async()=>{assert.ok(h.legacyActive);h.tunnelActive=true;},
   applyCutoverSources:async intent=>{assert.ok(!h.legacyActive&&!h.tunnelActive);h.apiSource=null;h.tunnelSource=switchLegacyTunnelSource(intent.tunnelSource);},
   restoreCutoverSources:async intent=>{h.apiSource=intent.apiSource;h.tunnelSource=intent.tunnelSource;},
+  assertCutoverOriginalSources:async intent=>{assert.equal(h.apiSource,intent.apiSource);assert.equal(h.tunnelSource,intent.tunnelSource);},
   assertCutoverSources:async intent=>{assert.equal(h.apiSource,null);assert.equal(h.tunnelSource,switchLegacyTunnelSource(intent.tunnelSource));},
   startInitialProxy:async()=>assert.equal(h.target,'blocked'),
   stopInitialPreflight:async(slot,owner)=>{assert.equal(owner.operationId,cutover.operationId);h.preflight.delete(slot);},
@@ -379,4 +381,15 @@ test('a matching existing ledger alone is not fresh admission, but a durable pri
  assert.equal(freshProof().phase,'complete');
  h.freshDatabaseIdentity=async()=> '123456789:99999';
  await assert.rejects(controller.initializeFreshSchema(next),/belongs to another database/);
+});
+
+test('boot refuses a fresh initial activation when the original database was replaced',async()=>{
+ const {h,controller,state}=await pendingInitialFixture();
+ const proof={format:'codexia-fresh-schema-proof/v2',phase:'complete',release:old,databaseId:await h.freshDatabaseIdentity(),fingerprint:old.migrationFingerprint};
+ await controller.store.saveFreshSchema(proof);
+ const fresh=await controller.save({...state,initialActivationFreshDatabaseId:proof.databaseId});
+ h.freshDatabaseIdentity=async()=> '123456789:99999';
+ const blocked=await controller.reconcile(fresh,{boot:true});
+ assert.equal(blocked.initialActivationPending,true);assert.match(blocked.lastError,/database changed/);
+ assert.equal(h.target,'blocked');assert.equal(h.writers.length,0);
 });
