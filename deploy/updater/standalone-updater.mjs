@@ -70,11 +70,14 @@ if(command==='backup'){
     result=await controller.backupLegacy(release,{destination:backupArguments[1],recipient:backupArguments[2]});
     // A successful locked backup AND identity-preserving recovery is required.
     const prefix='Encrypted backup committed: ';
-    assert.ok(result.output.startsWith(prefix)&&!/[\r\n]/u.test(result.output),'Backup did not return one committed artifact');
-    const artifactDirectory=await realpath(result.output.slice(prefix.length));
+    const lines=result.output.split('\n');
+    const digestLine=/^Published checksum manifest sha256: ([a-f0-9]{64})$/u.exec(lines[1]??'');
+    assert.ok(lines.length===2&&lines[0].startsWith(prefix)&&!/[\r\n]/u.test(lines[0])&&digestLine,'Backup did not return one committed artifact and publication digest');
+    const artifactDirectory=await realpath(lines[0].slice(prefix.length));
     assert.equal(path.dirname(artifactDirectory),await realpath(backupArguments[1]),'Backup artifact is outside the approved destination');
+    assert.equal(await host.backupArtifactIdentity(artifactDirectory),digestLine[1],'Published backup changed before recording source evidence');
     const proof=validateLegacyBackupProof({format:'codexia-legacy-backup-proof/v1',release,artifactDirectory,
-      checksumManifestSha256:await host.backupArtifactIdentity(artifactDirectory)});
+      checksumManifestSha256:digestLine[1]});
     await atomicWrite(legacyBackupProofFile,JSON.stringify(proof)+'\n');
   }
   console.log(result.output);
