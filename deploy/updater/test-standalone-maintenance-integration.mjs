@@ -257,6 +257,12 @@ async function runInterruptedBootRecovery({ repoRoot, workDir, stateDir, configP
   const markerInfo = await lstat(markerPath);
   assert.ok(markerInfo.isFile() && !markerInfo.isSymbolicLink(), 'Interrupted maintenance marker was not retained');
   assert.equal(JSON.parse(await readFile(markerPath, 'utf8')).runtimeChanged, true, 'Fault-injected transaction did not exercise typed runtime recovery');
+  const directVerify = spawnSync('sh', [wrapper, 'verify', configPath], {
+    encoding: 'utf8', timeout: 240000, maxBuffer: 4 * 1024 * 1024, env: environment,
+  });
+  if (directVerify.error) throw directVerify.error;
+  assert.notEqual(directVerify.status, 0, 'Installed verify accepted pending maintenance');
+  assert.match(directVerify.stderr, /Pending runtime maintenance requires recovery before other operations/u);
   const interruptedState = await loadControllerState(path.join(stateDir, 'controller.json'));
   assert.equal(interruptedState.paused, true, 'Interrupted maintenance did not keep the controller paused');
   await assertTimerState('inactive', 'enabled');
@@ -278,7 +284,10 @@ async function runInterruptedBootRecovery({ repoRoot, workDir, stateDir, configP
     await atomicWrite(markerPath, originalMarker);
   } else {
     assert.equal((await readFile(path.join(stateDir, 'route'), 'utf8')), 'blocked\n', 'Writer-drain interruption did not fence ingress');
-    assert.equal(systemdState(SERVICE), 'inactive', 'Writer-drain interruption did not stop the active writer');
+    assert.ok(['inactive', 'failed'].includes(systemdState(SERVICE)), 'Writer-drain interruption did not stop the active writer');
+    const drained = spawnSync('podman', ['container', 'exists', CONTAINER], { timeout: 15000, stdio: 'ignore' });
+    if (drained.error) throw drained.error;
+    assert.equal(drained.status, 1, 'Writer container remains or absence is unobservable after interruption');
   }
 
   const preload = path.join(repoRoot, 'deploy/updater/test-standalone-maintenance-preload.mjs');
@@ -634,8 +643,11 @@ async function main() {
   await assertTimerState('inactive', 'disabled');
   await runLiveAnsibleTimerCheck({ repoRoot, workDir, enabled: false, shouldPass: true });
   await runLiveAnsibleTimerCheck({ repoRoot, workDir, enabled: true, shouldPass: false });
-  run('systemctl', ['--user', 'stop', SERVICE]);
-  await waitForUnit(SERVICE, 'inactive');
+  await new PodmanStandaloneHost(appliedConfig).stopWriter('blue');
+  assert.equal(systemdState(SERVICE), 'inactive');
+  const stopped = spawnSync('podman', ['container', 'exists', CONTAINER], { timeout: 15000, stdio: 'ignore' });
+  if (stopped.error) throw stopped.error;
+  assert.equal(stopped.status, 1, 'Cleanup must prove writer absence');
   run('systemctl', ['--user', 'daemon-reload']);
   for (const unit of MAINTENANCE_UNIT_FILES) {
     const filename = path.join(userUnitDir, unit);

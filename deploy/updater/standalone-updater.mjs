@@ -1,11 +1,12 @@
 import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { atomicWrite, clearBackupIntent, initialControllerState, loadBackupIntent, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
 import { PodmanStandaloneHost } from './standalone-host.mjs';
 import { verifyUpdateChannel } from '../../scripts/update-channel.mjs';
 import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
-import { maintainStandaloneUpdater, recoverInterruptedMaintenance } from './standalone-maintenance.mjs';
+import { assertMaintenanceSnapshotVerifier, maintainStandaloneUpdater, recoverInterruptedMaintenance } from './standalone-maintenance.mjs';
 
 const [command,configPath,...arguments_]=process.argv.slice(2);
 if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|init|boot|tick|status|verify|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
@@ -32,7 +33,11 @@ const pendingMaintenance=await lstat(maintenanceMarker).then(()=>true,error=>{if
 if(pendingMaintenance){
   assert.equal(await store.loadBackupIntent(),null,'Simultaneous backup and maintenance intents require operator repair');
   assert.equal(await store.loadBackupRecoveryIntent(),null,'Simultaneous backup recovery and maintenance intents require operator repair');
-  assert.ok(command==='boot'||command==='maintain','Pending runtime maintenance requires recovery before other operations');
+  if(command==='verify'){
+    // Rollback verification runs the exact captured old entrypoint under the
+    // parent controller's lock, while the durable recovery marker still exists.
+    await assertMaintenanceSnapshotVerifier({config,configPath,entry:fileURLToPath(import.meta.url)});
+  }else assert.ok(command==='boot'||command==='maintain','Pending runtime maintenance requires recovery before other operations');
 }
 if(command==='boot'){
   const recovered=await recoverInterruptedMaintenance({config,store,publicKey});

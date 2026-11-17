@@ -235,6 +235,16 @@ async function readTransaction(markerPath){
   assert.ok(marker.snapshotRoot.startsWith(path.join(path.dirname(marker.stateFile),'maintenance','snapshots')+path.sep),'Interrupted maintenance snapshot escaped its private state directory');
   return marker;
 }
+export async function assertMaintenanceSnapshotVerifier({config,configPath,entry}){
+  const markerPath=path.join(path.dirname(config.stateFile),'maintenance','in-progress.json');
+  const info=await lstat(markerPath);
+  assert.ok(info.isFile()&&!info.isSymbolicLink()&&(info.mode&0o777)===0o600&&info.uid===process.getuid(),'Invalid maintenance verification marker');
+  const marker=await readTransaction(markerPath);
+  assert.ok(marker&&marker.stateFile===config.stateFile&&marker.routeFile===config.routeFile&&marker.configPath===configPath,'Maintenance verification identity mismatch');
+  const expected=path.join(marker.snapshotRoot,'old-source','deploy/updater/standalone-updater.mjs');
+  assert.equal(entry,expected,'Pending runtime maintenance requires recovery before other operations');
+  assert.equal(await realpath(expected),expected,'Maintenance snapshot verifier must use its real path');
+}
 async function verifyOldCode(marker){
   const oldEntry=path.join(marker.snapshotRoot,'old-source','deploy/updater/standalone-updater.mjs');
   await readFile(oldEntry,'utf8');
