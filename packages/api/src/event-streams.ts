@@ -1,21 +1,26 @@
 import type { ServerResponse } from "node:http";
 
 export class EventStreams {
-  private readonly streams = new Map<ServerResponse, () => void>();
+  private readonly streams = new Map<ServerResponse, { cleanup: () => void; end: () => void; expiresAt?: number }>();
 
   constructor(private readonly limit = 100, private readonly heartbeatMs = 30_000) {}
 
   get full(): boolean { return this.streams.size >= this.limit; }
 
   private disconnect(response: ServerResponse): void {
-    this.streams.get(response)?.();
+    this.streams.get(response)?.cleanup();
     response.destroy();
   }
 
   private write(response: ServerResponse, frame: string): void {
-    if (!this.streams.has(response)) return;
+    const stream = this.streams.get(response);
+    if (!stream) return;
     if (response.destroyed || response.writableEnded) {
-      this.streams.get(response)?.();
+      stream.cleanup();
+      return;
+    }
+    if (stream.expiresAt !== undefined && stream.expiresAt <= Date.now()) {
+      stream.end();
       return;
     }
     // A disconnected consumer can reconnect; never queue additional frames on a slow socket.
@@ -37,7 +42,7 @@ export class EventStreams {
       cleanup();
       try { response.end(); } catch { response.destroy(); }
     };
-    this.streams.set(response, cleanup);
+    this.streams.set(response, { cleanup, end, ...(expiresAt !== undefined ? { expiresAt } : {}) });
     response.once("close", cleanup);
     response.once("finish", cleanup);
     response.on("error", () => this.disconnect(response));
@@ -65,9 +70,6 @@ export class EventStreams {
   }
 
   close(): void {
-    for (const [response, cleanup] of this.streams) {
-      cleanup();
-      try { response.end(); } catch { response.destroy(); }
-    }
+    for (const stream of this.streams.values()) stream.end();
   }
 }

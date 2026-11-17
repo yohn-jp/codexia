@@ -4,7 +4,7 @@ import { readCodexiaEnvironment } from "./environment.js";
 import { createCloudflareAccessVerifier, type CloudflareAccessOptions } from "./cloudflare-access.js";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { readFileSync } from "node:fs";
 import { lstat, readFile, realpath } from "node:fs/promises";
@@ -1093,7 +1093,13 @@ export function createServer(options: ApiServerOptions): Server {
     return host;
   };
 
-  const serveModuleResponse = async (response: Response, raw: ServerResponse, signal: AbortSignal, publicResponse = false): Promise<void> => {
+  const serveModuleResponse = async (response: Response, raw: ServerResponse, signal: AbortSignal, publicResponse = false, expiresAt?: number): Promise<void> => {
+    // Authenticated module SSE (including MCP) must not outlive its admitting grant.
+    const streaming = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() === "text/event-stream";
+    if (streaming && expiresAt !== undefined && expiresAt <= Date.now()) {
+      await response.body?.cancel().catch(() => undefined);
+      throw httpFailure(401, "UNAUTHORIZED", "Authentication expired");
+    }
     if (response.status < 200 || response.status > 599) throw httpFailure(502, "MODULE_HTTP_INVALID_RESPONSE", "Module returned an invalid HTTP response");
     const forbiddenHeaders = new Set(["set-cookie", "content-security-policy", "x-frame-options", "x-content-type-options", "referrer-policy", "cache-control", "connection", "keep-alive", "content-length", "trailer", "transfer-encoding", "upgrade"]);
     response.headers.forEach((value, key) => {
@@ -1108,7 +1114,31 @@ export function createServer(options: ApiServerOptions): Server {
       raw.end();
       return;
     }
-    await pipeline(Readable.fromWeb(response.body as never), raw, { signal });
+    if (!streaming || expiresAt === undefined) {
+      await pipeline(Readable.fromWeb(response.body as never), raw, { signal });
+      return;
+    }
+    const expiry = new AbortController();
+    const grantDeadline = expiresAt;
+    const timer = setTimeout(() => expiry.abort(), Math.max(0, grantDeadline - Date.now()));
+    timer.unref();
+    // A busy event loop can deliver a ready chunk before the expiry timer runs.
+    // Check the absolute deadline before forwarding each chunk as well.
+    const fence = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        if (Date.now() >= grantDeadline) {
+          expiry.abort();
+          callback(new Error("Authentication expired"));
+          return;
+        }
+        callback(null, chunk);
+      },
+    });
+    try {
+      await pipeline(Readable.fromWeb(response.body as never), fence, raw, { signal: AbortSignal.any([signal, expiry.signal]) });
+    } catch (error) {
+      if (!expiry.signal.aborted) throw error;
+    } finally { clearTimeout(timer); }
   };
   const makeWebRequest = (request: IncomingMessage, body: unknown, signal: AbortSignal, relativePath?: string): Request => {
     const method = request.method ?? "GET";
@@ -1544,7 +1574,7 @@ export function createServer(options: ApiServerOptions): Server {
         return;
       }
     }
-    let accessExpiresAt: number | undefined;
+    let accessExpiresAt = hostedPrincipal?.expiresAt;
     // Explicit Authorization always stays on the bearer path, even when Access
     // attaches its own assertion to a programmatic request.
     if (cloudflareAccess && authHeader === undefined && routePath.startsWith("/api/") && !publicRead) {
@@ -2038,7 +2068,7 @@ export function createServer(options: ApiServerOptions): Server {
         const webRequest = makeWebRequest(request, parsedBody, signal, moduleRoute[2] ?? "");
         const moduleResponse = await runtime.invokeHttp(moduleId, contribution.id, webRequest, host);
         if (domainJobId) response.setHeader("X-Codexia-Job-Id", domainJobId);
-        await serveModuleResponse(moduleResponse, response, signal);
+        await serveModuleResponse(moduleResponse, response, signal, false, hostedPrincipal?.expiresAt);
         return;
       }
 

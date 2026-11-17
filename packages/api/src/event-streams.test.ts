@@ -71,3 +71,15 @@ test("heartbeat and expiration use the same safe lifecycle, finish releases capa
     assert.equal(streams.full, false);
   } finally { streams.close(); }
 });
+
+test("publishing at an expired deadline closes before the timer can execute", () => {
+  const streams = new EventStreams(1);
+  const response = new ResponseDouble();
+  try {
+    streams.open(response.asResponse(), "no-store", undefined, Date.now());
+    streams.publish("data: expired\n\n");
+    assert.deepEqual(response.frames, []);
+    assert.equal(response.writableEnded, true);
+    assert.equal(streams.full, false);
+  } finally { streams.close(); }
+});

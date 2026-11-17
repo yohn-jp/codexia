@@ -58,7 +58,7 @@ const HOSTED_GRANT_PUBLIC_JWK = {
   kid: "hosted-grant-test-key",
 };
 
-function hostedGrantToken(expired = false): string {
+function hostedGrantToken(expired = false, lifetimeSeconds = 120): string {
   const now = Math.floor(Date.now() / 1000);
   const encode = (value: unknown): string => Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
   const issuedAt = expired ? now - 120 : now;
@@ -74,7 +74,7 @@ function hostedGrantToken(expired = false): string {
     authorizationRevision: 3,
     iat: issuedAt,
     nbf: issuedAt,
-    exp: expired ? now - 1 : now + 120,
+    exp: expired ? now - 1 : now + lifetimeSeconds,
     jti: expired ? "expired-browser-grant" : "valid-browser-grant",
   })}`;
   const signature = signJwt("sha256", Buffer.from(unsigned, "ascii"), {
@@ -283,6 +283,13 @@ function actionBoundaryRuntime(cacheDirectory: string): ModuleRuntime {
       async handle(request, context) {
         const proposal = await context.propose([await request.json() as ChangeOperation]);
         return Response.json({ source: proposal.source });
+      },
+    }, {
+      id: "streamable", path: "streamable", methods: ["GET"], access: "owner", effect: "propose",
+      async handle() {
+        return new Response(new ReadableStream({
+          start(controller) { controller.enqueue(new TextEncoder().encode("data: ready\n\n")); },
+        }), { headers: { "Content-Type": "text/event-stream" } });
       },
     }, {
       id: "native-propose", path: "native-propose", methods: ["POST"], access: "owner", effect: "propose",
@@ -2138,6 +2145,53 @@ describe("Codexia HTTP boundary", () => {
     });
     assert.equal(expiredGrant.status, 401);
     assert.equal((await expiredGrant.json() as { code: string }).code, "UNAUTHORIZED");
+  });
+
+  it("closes Hosted project, job and MCP event streams at the admitting grant deadline", { timeout: 20000 }, async (t) => {
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-hosted-stream-expiry-"));
+    tempDirs.push(staticDir);
+    const native = await nativeProject(t, "Hosted stream expiry");
+    const api = await startHostedApi(native.store, staticDir, realHostedGrantPolicy(), undefined,
+      actionBoundaryRuntime(resolve(staticDir, "module-cache")), undefined, native.persistence, native.project.id);
+    t.after(api.close);
+    const abort = new AbortController();
+    t.after(() => abort.abort());
+    const endpoints = ["/api/projects/events", "/api/jobs/events", "/mcp"];
+    const headersFor = (path: string, token: string): Record<string, string> => path === "/mcp"
+      ? { Authorization: `Bearer ${token}` }
+      : { Cookie: `__Host-praetorium_access=${token}` };
+    const token = hostedGrantToken(false, 4);
+    const expiresAt = (JSON.parse(Buffer.from(token.split(".")[1]!, "base64url").toString("utf8")) as { exp: number }).exp * 1000;
+    const deadline = setTimeout(() => abort.abort(), 10000);
+    try {
+      const responses = await Promise.all(endpoints.map(path => fetch(api.base + path, {
+        headers: headersFor(path, token), signal: abort.signal,
+      })));
+      for (const response of responses) {
+        assert.equal(response.status, 200);
+        assert.match(response.headers.get("content-type") ?? "", /text\/event-stream/u);
+      }
+      const closedAt: number[] = [];
+      const results = await Promise.allSettled(responses.map(async (response, index) => {
+        try { return await response.text(); }
+        finally { closedAt[index] = Date.now(); }
+      }));
+      assert.ok(closedAt.every(at => at >= expiresAt), "streams must not close before the admitting grant deadline");
+      assert.equal(closedAt.length, endpoints.length);
+      assert.equal(abort.signal.aborted, false, "the server must close the streams, not the test timeout");
+      assert.equal(results[0]?.status, "fulfilled");
+      assert.deepEqual(results[1], { status: "fulfilled", value: ": ok\n\n" });
+      // Node pipeline abort terminates the module stream's socket at expiry.
+      assert.equal(results[2]?.status, "rejected");
+      for (const path of endpoints) {
+        const expired = await fetch(api.base + path, { headers: headersFor(path, token) });
+        assert.equal(expired.status, 401);
+        await expired.arrayBuffer();
+        const fresh = await fetch(api.base + path, { headers: headersFor(path, hostedGrantToken()) });
+        assert.equal(fresh.status, 200);
+        await fresh.body!.cancel();
+      }
+    } finally { clearTimeout(deadline); abort.abort(); }
   });
 
   it("admits only the verified Cloudflare browser owner, never upgrades a bearer and preserves same-origin writes", async (t) => {
