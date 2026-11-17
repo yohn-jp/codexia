@@ -77,7 +77,9 @@ for (const task of tasks) {
             ...(nativeArtifact ? {CODEXIA_NATIVE_PRODUCER_REPORT:process.env.CODEXIA_CI_NATIVE_PRODUCER_REPORT} : {}) });
       } else if (task === 'coverage') {
         node('scripts/ci-workspace.mjs', 'coverage');
-        node('--test', 'scripts/ci-contract.test.mjs', 'scripts/ci-impact.test.mjs', 'scripts/ci-profile-artifact.test.mjs', 'scripts/ci-native-producer.test.mjs');
+        // The canonical root test script already executes these four files.
+        // For coverage-only plans retain the complete contract proof here.
+        if (!plan.tasks.includes('unit-root')) node('--test', 'scripts/ci-contract.test.mjs', 'scripts/ci-impact.test.mjs', 'scripts/ci-profile-artifact.test.mjs', 'scripts/ci-native-producer.test.mjs');
       } else throw new Error(`No runner for ${task}`);
     } catch (caught) { error = String(caught); }
   }

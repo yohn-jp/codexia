@@ -105,7 +105,8 @@ test('every selected task has one execution group and every exclusion has a reas
 });
 
 test('known operational inputs retain root proof without unrelated browser, OCI or Hosted work', async () => {
-  const { OPERATIONAL_ROOT_PATHS, VERIFICATION_TASKS } = await import('./ci-impact.mjs');
+  const { OPERATIONAL_ROOT_PATHS } = await import('./ci-impact.mjs');
+  const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
   for (const file of OPERATIONAL_ROOT_PATHS) {
     const selected = await plan([file]);
     assert.deepEqual(selected.tasks, ['unit-root','coverage'], file);
@@ -143,4 +144,13 @@ test('operational proof remains owned by one exact-head root task and matching i
   assert.ok(!Object.hasOwn(audit.on,'delete'));
   assert.deepEqual(audit.on.push.branches,['main']);
   assert.ok(audit.on.schedule.length && Object.hasOwn(audit.on,'workflow_dispatch'));
+});
+
+test('root and coverage-only plans have a single owner for contract test execution', async () => {
+  const runner = readFileSync(new URL('./ci-group.mjs', import.meta.url),'utf8');
+  const root = JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8'));
+  assert.match(root.scripts['test:scripts'], /node --test 'scripts\/\*\*\/\*\.test\.mjs'/u);
+  assert.match(runner, /if \(!plan\.tasks\.includes\('unit-root'\)\) node\('--test', 'scripts\/ci-contract\.test\.mjs'/u);
+  assert.deepEqual((await plan(['docs/authoring.md'])).tasks, ['coverage']);
+  assert.deepEqual((await plan(['deploy/ansible/host.yml'])).tasks, ['unit-root','coverage']);
 });
