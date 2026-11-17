@@ -18,6 +18,8 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
   'profiles/**',
   'pnpm-lock.yaml',
   'pnpm-workspace.yaml',
+  'scripts/ci-workspace.mjs',
+  'scripts/ci-parallel.mjs',
   'scripts/profile-build.mjs',
   'scripts/profile-package.mjs',
   'scripts/verify-oci.sh',

@@ -155,7 +155,7 @@ test('root and coverage-only plans have a single owner for contract test executi
   const runner = readFileSync(new URL('./ci-group.mjs', import.meta.url),'utf8');
   const root = JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8'));
   assert.match(root.scripts['test:scripts'], /node --test 'scripts\/\*\*\/\*\.test\.mjs'/u);
-  assert.match(runner, /if \(!plan\.tasks\.includes\('unit-root'\)\) node\('--test', 'scripts\/ci-contract\.test\.mjs'/u);
+  assert.match(runner, /if \(!plan\.tasks\.includes\('unit-root'\)\) await node\('--test', 'scripts\/ci-contract\.test\.mjs'/u);
   assert.deepEqual((await plan(['docs/authoring.md'])).tasks, ['coverage']);
   assert.deepEqual((await plan(['deploy/ansible/host.yml'])).tasks, ['unit-root','coverage']);
 });

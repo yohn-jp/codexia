@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { validateVerificationPlan } from './ci-impact.mjs';
+import { collectGitHubPages } from './release-policy.mjs';
 
 /**
  * Select one artifact produced inside the latest successful job attempt window.
@@ -73,4 +74,38 @@ export function selectLatestEvidenceArtifacts(planValue, artifacts, jobs, identi
  */
 export function selectLatestPlanArtifact(artifacts, jobs, identity) {
   return selectLatestJobArtifact('ci-plan', 'plan', artifacts, jobs, identity);
+}
+
+/**
+ * Partial reruns can expose carried-over jobs as new IDs with the current
+ * run_attempt, but their execution timestamps remain those of the original
+ * attempt. Resolve the origin of the latest successful producer by matching
+ * its exact execution window in the attempt-specific REST inventories.
+ * A fresh failed producer is never replaced by an older success.
+ */
+export async function resolveProducerJobAttempts(jobs, run, request, producerNames) {
+  assert.ok(Number.isSafeInteger(run.run_attempt) && run.run_attempt > 0, 'Invalid workflow run attempt');
+  const producers = new Set(producerNames);
+  const successful = jobs.filter(job => producers.has(job.name) && job.status === 'completed' && job.conclusion === 'success');
+  if (run.run_attempt === 1 || successful.length === 0) return jobs;
+  const windows = new Map();
+  for (let attempt = 1; attempt <= run.run_attempt; attempt++) {
+    const history = await collectGitHubPages(page => request('actions/runs/' + run.id + '/attempts/' + attempt + '/jobs?per_page=100&page=' + page), 'jobs');
+    for (const job of successful) {
+      const matches = history.filter(old => old.name === job.name && old.head_sha === job.head_sha &&
+        String(old.run_id) === String(job.run_id) && old.status === job.status && old.conclusion === job.conclusion &&
+        old.started_at === job.started_at && old.completed_at === job.completed_at);
+      assert.ok(matches.length <= 1, 'Ambiguous producer execution window: ' + job.name);
+      if (matches.length === 1 && !windows.has(job.name)) {
+        assert.equal(matches[0].run_attempt, attempt, 'Producer attempt history mismatch: ' + job.name);
+        windows.set(job.name, attempt);
+      }
+    }
+  }
+  return jobs.map(job => {
+    if (!successful.includes(job)) return job;
+    const attempt = windows.get(job.name);
+    assert.ok(attempt, 'Producer execution history unavailable: ' + job.name);
+    return { ...job, run_attempt: attempt };
+  });
 }

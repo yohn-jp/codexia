@@ -9,7 +9,7 @@ import { validateVerificationPlan, planDigest } from './ci-impact.mjs';
 import { assertPlanEvidence } from './ci-evidence.mjs';
 import { assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
 import { assertNativeArtifactEvidence } from './ci-native-producer.mjs';
-import { selectLatestPlanArtifact, selectLatestEvidenceArtifacts } from './ci-artifact-selection.mjs';
+import { selectLatestPlanArtifact, selectLatestEvidenceArtifacts, resolveProducerJobAttempts } from './ci-artifact-selection.mjs';
 import { downloadArtifact, extractJsonEntry, selectedArtifacts } from './download-ci-artifacts.mjs';
 import { collectGitHubPages, REUSED_MAIN_SKIPPED_JOBS } from './release-policy.mjs';
 
@@ -205,8 +205,9 @@ export async function verifyReusableMainProof({ sourceSha, before, repository, c
   // Only digest-verified JSON is read. Never restore or execute code from a PR artifact.
   const reports = await Promise.all(selected.map(item => readArtifact(item, 'report.json')));
   assertPlanEvidence(plan, jobs, reports);
-  assertProfileArtifactEvidence(plan, jobs, reports, artifacts, run.id);
-  assertNativeArtifactEvidence(plan, jobs, reports, artifacts, run.id);
+  const producerJobs = await resolveProducerJobAttempts(jobs, run, request, ['build-core', 'build-full', 'hosted-native-catalog']);
+  assertProfileArtifactEvidence(plan, producerJobs, reports, artifacts, run.id);
+  assertNativeArtifactEvidence(plan, producerJobs, reports, artifacts, run.id);
   for (const job of jobs.filter(job => job.conclusion === 'skipped')) {
     assert.ok(REUSED_MAIN_SKIPPED_JOBS.includes(job.name), 'Unexpected skipped PR job');
   }

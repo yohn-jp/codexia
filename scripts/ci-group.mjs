@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-import { spawnSync, execFileSync } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { readFileSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
 import { VERIFICATION_GROUPS, requiredBuildProfile } from './ci-contract.mjs';
 import { planDigest, validateVerificationPlan } from './ci-impact.mjs';
 import { assertProfileReceipt } from './ci-profile-artifact.mjs';
 import { assertNativeReceipt } from './ci-native-producer.mjs';
+import { runBounded } from './ci-parallel.mjs';
+import { withBrowserFixture } from './ci-browser-fixture.mjs';
 
 const group = process.argv[2];
 const plan = validateVerificationPlan(JSON.parse(readFileSync(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json', 'utf8')));
@@ -14,21 +16,27 @@ const plan = validateVerificationPlan(JSON.parse(readFileSync(process.env.CODEXI
 const sha = execFileSync('git', ['-c', `safe.directory=${process.cwd()}`, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 if (sha !== plan.sha || !plan.groups.includes(group)) throw new Error('Group is not selected for this exact source');
 const tasks = VERIFICATION_GROUPS[group].filter(task => plan.tasks.includes(task));
-const results = [];
+const completed = new Map();
+const limit = Number(process.env.CODEXIA_CI_CONCURRENCY ?? '2');
+if (![1, 2].includes(limit)) throw new Error('CI concurrency must be 1 or 2');
+const groupPreparation = new Map();
+let groupPreparationError;
 const reportDirectory = process.env.CODEXIA_CI_REPORT_DIR ?? path.resolve('ci-results', group);
 mkdirSync(reportDirectory, { recursive: true });
-const run = (command, args, extraEnv = {}) => {
+const run = (command, args, extraEnv = {}) => new Promise((resolve, reject) => {
   console.log(`$ ${command} ${args.join(' ')}`);
-  const result = spawnSync(command, args, { stdio: 'inherit', env: { ...process.env, ...extraEnv } });
-  if (result.error) throw result.error;
-  if (result.signal || result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed (${result.signal ?? result.status})`);
-};
+  const child = spawn(command, args, { stdio: 'inherit', env: { ...process.env, ...extraEnv } });
+  child.once('error', reject);
+  child.once('close', (status, signal) => {
+    if (signal || status !== 0) reject(new Error(`${command} ${args.join(' ')} failed (${signal ?? status})`));
+    else resolve();
+  });
+});
 const node = (...args) => run(process.execPath, args);
 let preparationError;
 let profileArtifact;
 let nativeArtifact;
 try {
-  if (group.startsWith('unit-')) node('scripts/ci-workspace.mjs', 'prepare', 'unit-group', tasks.map(task => task.slice(5)).join(','));
   const requiredProfile = requiredBuildProfile(group);
   if (requiredProfile) {
     // A failed producer or restore is a blocked validation, not a reason to rebuild.
@@ -36,58 +44,87 @@ try {
     profileArtifact = JSON.parse(readFileSync(process.env.CODEXIA_CI_PROFILE_RECEIPT, 'utf8'));
     assertProfileReceipt(profileArtifact, plan, requiredProfile, process.env.GITHUB_RUN_ID);
   }
-  if (group.startsWith('browser-')) node('scripts/verify-browser-runtime.mjs');
+  if (group.startsWith('browser-')) await node('scripts/verify-browser-runtime.mjs');
   if (group.startsWith('hosted-native-') && group !== 'hosted-native-catalog') {
     if (process.env.CODEXIA_CI_NATIVE_RESTORE !== 'success') throw new Error('Hosted Native producer prerequisite failed');
     nativeArtifact = JSON.parse(readFileSync(process.env.CODEXIA_CI_NATIVE_RECEIPT,'utf8'));
     assertNativeReceipt(nativeArtifact,plan,process.env.GITHUB_RUN_ID);
   }
 } catch (error) { preparationError = String(error); }
+const preparationStarted = Date.now();
+if ((group.startsWith('types-') || group.startsWith('unit-')) && !preparationError) {
+  try {
+    const filename = path.resolve(reportDirectory, 'workspace-preparation.json');
+    await run(process.execPath, ['scripts/ci-workspace.mjs', 'prepare', 'selected-group', filename], { CODEXIA_CI_GROUP_TASKS: JSON.stringify(tasks) });
+    const report = JSON.parse(readFileSync(filename, 'utf8'));
+    if (report.length !== tasks.length || report.some((entry, i) => entry.task !== tasks[i])) throw new Error('Invalid workspace preparation report');
+    for (const entry of report) groupPreparation.set(entry.task, entry);
+  } catch (error) { groupPreparationError = String(error); }
+}
 
-for (const task of tasks) {
+const preparationSeconds = (Date.now() - preparationStarted) / 1000;
+console.log(JSON.stringify({ phase: 'shared-workspace-preparation', group, seconds: preparationSeconds, concurrency: limit }));
+
+async function executeTask(task, index) {
   const started = Date.now();
-  let error = preparationError;
-  const blocked = Boolean(preparationError || (task === 'audit-core' && results.some(item => item.task === 'build-core' && item.status !== 'passed')));
+  let error = preparationError || (task !== 'coverage' && (groupPreparationError || groupPreparation.get(task)?.error)) || undefined;
+  let blocked = Boolean(error || (task === 'audit-core' && completed.get('build-core')?.status !== 'passed' && tasks.includes('build-core')));
+  if (blocked && !error) error = 'Core build prerequisite failed';
   if (!blocked) {
     try {
-      if (task.startsWith('unit-')) node('scripts/ci-workspace.mjs', 'unit', task.slice(5));
+      if (task.startsWith('unit-')) await node('scripts/ci-workspace.mjs', 'unit', task.slice(5));
       else if (task.startsWith('typecheck-')) {
-        node('scripts/ci-workspace.mjs', 'prepare', 'typecheck', task.slice(10));
-        node('scripts/ci-workspace.mjs', 'typecheck', task.slice(10));
+        await node('scripts/ci-workspace.mjs', 'typecheck', task.slice(10));
       } else if (task.startsWith('test-types-')) {
-        node('scripts/ci-workspace.mjs', 'prepare', 'test-types', task.slice(11));
-        node('scripts/ci-workspace.mjs', 'test-types', task.slice(11));
+        await node('scripts/ci-workspace.mjs', 'test-types', task.slice(11));
       } else if (task === 'safety') {
-        run('pnpm', ['--filter', '@codexia/api...', 'build']);
-        run('pnpm', ['typecheck:safety']);
-      } else if (task.startsWith('build-')) run('pnpm', ['build'], { CODEXIA_PROFILE: task.slice(6) });
-      else if (task === 'audit-core') run('pnpm', ['audit:core']);
-      else if (task.startsWith('oci-')) run('bash', ['scripts/verify-oci.sh'], { OCI_ENGINE: 'docker', CODEXIA_PROFILE: task.slice(4), CODEXIA_OCI_IMAGE: `codexia-verification:${task.slice(4)}` });
+        await run('pnpm', ['typecheck:safety']);
+      } else if (task.startsWith('build-')) await run('pnpm', ['build'], { CODEXIA_PROFILE: task.slice(6) });
+      else if (task === 'audit-core') await run('pnpm', ['audit:core']);
+      else if (task.startsWith('oci-')) await run('bash', ['scripts/verify-oci.sh'], { OCI_ENGINE: 'docker', CODEXIA_PROFILE: task.slice(4), CODEXIA_OCI_IMAGE: `codexia-verification:${task.slice(4)}` });
       else if (task.startsWith('browser-')) {
         const [, profile, ...suite] = task.split('-');
-        run(process.execPath, ['scripts/run-browser-shard.mjs', '--profile', profile, '--suite', suite.join('-'), '--prebuilt'],
-          { CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task) });
+        let executing = false;
+        try {
+          await withBrowserFixture(task, index, async env => {
+            executing = true;
+            await run(process.execPath, ['scripts/run-browser-shard.mjs', '--profile', profile, '--suite', suite.join('-'), '--prebuilt'],
+              { ...env, CODEXIA_CI_REPORT_DIR: path.join(reportDirectory, task) });
+          });
+        } catch (error) { if (!executing) blocked = true; throw error; }
       } else if (task.startsWith('hosted-native-')) {
         const selection = task.slice(14);
         // Composition consumers have already restored every Full server/module build.
         // profile-package still rebuilds the actual selected UI and verifies its deployed closure.
-        if (selection === 'catalog') run('pnpm', ['--filter', '@codexia/module-*...', 'build']);
-        run(process.execPath, ['scripts/verify-hosted-native.mjs', '--selection', selection],
+        if (selection === 'catalog') await run('pnpm', ['--filter', '@codexia/module-*...', 'build']);
+        await run(process.execPath, ['scripts/verify-hosted-native.mjs', '--selection', selection],
           { CODEXIA_NATIVE_REPORT_PATH: path.join(reportDirectory, 'native-report.json'),
             ...(nativeArtifact ? {CODEXIA_NATIVE_PRODUCER_REPORT:process.env.CODEXIA_CI_NATIVE_PRODUCER_REPORT} : {}) });
       } else if (task === 'coverage') {
-        node('scripts/ci-workspace.mjs', 'coverage');
-        // The canonical root test script already executes these four files.
-        // For coverage-only plans retain the complete contract proof here.
-        if (!plan.tasks.includes('unit-root')) node('--test', 'scripts/ci-contract.test.mjs', 'scripts/ci-impact.test.mjs', 'scripts/ci-profile-artifact.test.mjs', 'scripts/ci-native-producer.test.mjs');
+        await node('scripts/ci-workspace.mjs', 'coverage');
+        // The root test script already covers these contracts. Retain them for coverage-only plans.
+        if (!plan.tasks.includes('unit-root')) await node('--test', 'scripts/ci-contract.test.mjs', 'scripts/ci-impact.test.mjs', 'scripts/ci-profile-artifact.test.mjs', 'scripts/ci-native-producer.test.mjs', 'scripts/ci-parallel.test.mjs', 'scripts/reuse-pr-verification.test.mjs');
       } else throw new Error(`No runner for ${task}`);
     } catch (caught) { error = String(caught); }
   }
   const result = { task, status: blocked ? 'blocked' : error ? 'failed' : 'passed', seconds: (Date.now() - started) / 1000, ...(error ? { error } : {}) };
-  results.push(result);
+  completed.set(task, result);
   console.log(JSON.stringify(result));
+  return result;
 }
-const report = { group, sha, planDigest: planDigest(plan), ...(profileArtifact ? {profileArtifact} : {}), ...(nativeArtifact ? {nativeArtifact} : {}), results };
+// Only proven read-only unit suites can overlap; writers, model tests and root scripts are barriers.
+const independentUnits = new Set(['unit-contracts', 'unit-persistence-contracts', 'unit-app', 'unit-story', 'unit-publishing', 'unit-mcp', 'unit-search']);
+const exclusive = task => {
+  if (group.startsWith('browser-')) return task.endsWith('-redesign-visual'); // performance measurements must not contend with siblings
+  if (group.startsWith('types-')) return groupPreparation.get(task)?.exclusive ?? false;
+  if (group.startsWith('unit-')) return !independentUnits.has(task);
+  return true;
+};
+const executionStarted = Date.now();
+const settled = await runBounded(tasks, executeTask, { limit, exclusive });
+const executionSeconds = (Date.now() - executionStarted) / 1000;
+const results = settled.map((entry, index) => entry.status === 'fulfilled' ? entry.value : { task: tasks[index], status: 'failed', seconds: 0, error: String(entry.reason) });
+const report = { group, sha, planDigest: planDigest(plan), timing: { concurrency: limit, preparationSeconds, executionSeconds }, ...(profileArtifact ? {profileArtifact} : {}), ...(nativeArtifact ? {nativeArtifact} : {}), results };
 writeFileSync(path.join(reportDirectory, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
   `| Validation | Result | Seconds |\n| --- | --- | ---: |\n${results.map(item => `| ${item.task} | ${item.status} | ${item.seconds.toFixed(1)} |`).join('\n')}\n`);

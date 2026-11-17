@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { collectGitHubPages } from './release-policy.mjs';
-import { selectLatestJobArtifact } from './ci-artifact-selection.mjs';
+import { resolveProducerJobAttempts, selectLatestJobArtifact } from './ci-artifact-selection.mjs';
 import { downloadArtifact } from './download-ci-artifacts.mjs';
 
 /** Exact-run immutable producer selection and verified download. The token is
@@ -21,7 +21,8 @@ export async function fetchLatestProducerArtifact({plan,runId,repository,token,p
     collectGitHubPages(page=>request('actions/runs/'+runId+'/jobs?filter=latest&per_page=100&page='+page),'jobs'),
     collectGitHubPages(page=>request('actions/runs/'+runId+'/artifacts?per_page=100&page='+page),'artifacts')]);
   const selected=selectLatestJobArtifact(artifactName,producerJob,artifacts,jobs,{runId,sourceSha:plan.sha});
-  const job=jobs.find(job=>job.name===producerJob);
+  const resolved=await resolveProducerJobAttempts(jobs,run,request,[producerJob]);
+  const job=resolved.find(job=>job.name===producerJob);
   assert.ok(Number.isSafeInteger(job.run_attempt)&&job.run_attempt>0,'Invalid producer attempt');
   const bytes=await downloadArtifact(selected,repository,token,fetch,maxArchive===undefined?{}:{maxArchive});
   return {selected,job,bytes};

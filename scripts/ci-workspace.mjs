@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
-import { readdir, readFile } from 'node:fs/promises';
+import { spawn, spawnSync } from 'node:child_process';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runDependencyBuilds } from './ci-parallel.mjs';
 import { TEST_TYPECHECK_SCOPES, TYPECHECK_TARGETS, UNIT_TARGETS, WORKSPACES } from './ci-contract.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -204,6 +205,52 @@ async function runTestTypecheck(scope) {
   run(process.execPath, ['scripts/typecheck-tests.mjs', scope]);
 }
 
+
+function buildWorkspace() {
+  // Build the same 15 pre-profile packages as build:workspace, not profiles or the UI.
+  buildWorkspaceTargets(WORKSPACES.filter(({ id }) => id !== 'app' && id !== 'api').map(({ id }) => id));
+}
+
+function prerequisiteIds(task) {
+  if (task === 'coverage') return [];
+  if (task.startsWith('unit-')) {
+    const id = getUnitTarget(task.slice(5)).id;
+    return id === 'root' ? [...buildDependencies(['api']), 'api'] : buildDependencies([id]);
+  }
+  if (task === 'safety' || task === 'test-types-app-e2e') {
+    if (rootManifest.devDependencies?.['@codexia/api'] !== 'workspace:*') fail('API workspace dependency is required');
+    return [...buildDependencies(['api']), 'api'];
+  }
+  if (task.startsWith('typecheck-')) return buildDependencies(typecheckWorkspaceIds(task.slice(10)));
+  if (task.startsWith('test-types-')) return buildDependencies(testTypecheckWorkspaceIds(task.slice(11)));
+  fail('Unknown type task ' + task);
+}
+
+async function prepareSelectedGroup(filename) {
+  const tasks = JSON.parse(process.env.CODEXIA_CI_GROUP_TASKS ?? 'null');
+  if (!Array.isArray(tasks) || !tasks.length || new Set(tasks).size !== tasks.length) fail('Invalid group task selection');
+  const requirements = new Map(tasks.map(task => [task, prerequisiteIds(task)]));
+  const targets = [...new Set([...requirements.values()].flat())];
+  const build = async id => {
+    const manifest = packageManifests.get(id);
+    if (!manifest.scripts?.build) fail('Missing dependency build for ' + id);
+    await new Promise((resolve, reject) => {
+      console.log('$ pnpm --filter ' + manifest.name + ' run build');
+      const child = spawn('pnpm', ['--filter', manifest.name, 'run', 'build'], { cwd: root, stdio: 'inherit', env: process.env });
+      child.once('error', reject);
+      child.once('close', (code, signal) => code === 0 && !signal ? resolve() : reject(new Error('Build failed: ' + id + ' (' + (signal ?? code) + ')')));
+    });
+  };
+  const limit = Number(process.env.CODEXIA_CI_CONCURRENCY ?? '2');
+  const builds = await runDependencyBuilds(targets, dependenciesOf, build, limit);
+  const report = tasks.map(task => {
+    const missing = requirements.get(task).filter(id => builds.get(id)?.status !== 'passed');
+    const exclusive = task.startsWith('typecheck-') && typecheckWorkspaceIds(task.slice(10)).some(id => !packageManifests.get(id).scripts?.typecheck);
+    return { task, exclusive, ...(missing.length ? { error: 'Failed workspace prerequisites: ' + missing.join(', ') } : {}) };
+  });
+  await writeFile(filename, JSON.stringify(report));
+}
+
 async function listFiles(directory, { excludeGenerated = true } = {}) {
   const files = [];
   async function visit(current) {
@@ -331,7 +378,9 @@ const [command, targetId, scopeOrTarget, ...extra] = process.argv.slice(2);
 if (extra.length || !command) {
   fail('Usage: node scripts/ci-workspace.mjs <prepare|unit|typecheck|test-types|coverage> [kind] [target]');
 }
-if (command === 'prepare' && targetId === 'unit' && scopeOrTarget) await prepareUnit(scopeOrTarget);
+if (command === 'build-workspace' && !targetId) buildWorkspace();
+else if (command === 'prepare' && targetId === 'selected-group' && scopeOrTarget) await prepareSelectedGroup(scopeOrTarget);
+else if (command === 'prepare' && targetId === 'unit' && scopeOrTarget) await prepareUnit(scopeOrTarget);
 else if (command === 'prepare' && targetId === 'unit-group' && scopeOrTarget) await prepareUnitGroup(scopeOrTarget);
 else if (command === 'prepare' && targetId === 'typecheck' && scopeOrTarget) await prepareTypecheck(scopeOrTarget);
 else if (command === 'prepare' && targetId === 'test-types' && scopeOrTarget) await prepareTestTypecheck(scopeOrTarget);
