@@ -9,7 +9,7 @@ import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
 import { assertMaintenanceSnapshotVerifier, maintainStandaloneUpdater, recoverInterruptedMaintenance } from './standalone-maintenance.mjs';
 
 const [command,configPath,...arguments_]=process.argv.slice(2);
-if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|init|boot|tick|status|verify|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
+if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|verify-bootstrap|init|boot|tick|status|verify|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
 let config=JSON.parse(await readFile(configPath,'utf8'));
 assert.equal(config.format,'codexia-standalone-updater/v1');
 assert.ok(path.isAbsolute(config.stateFile)&&path.isAbsolute(config.publicKeyFile));
@@ -63,23 +63,29 @@ if(command==='backup'){
   }
   console.log(result.output);
   process.exit(0);
-}else if(command==='init'||command==='verify-legacy'){
+}else if(command==='verify-legacy'||command==='verify-bootstrap'){
+  const [legacyFile,candidateFile]=arguments_;
+  assert.equal(arguments_.length,command==='verify-bootstrap'?2:1,'Provide the exact signed release record(s)');
+  assert.ok(arguments_.every(file=>path.isAbsolute(file)),'Absolute signed release record paths are required');
+  assert.equal(config.enabled,false,'Initial candidate preflight requires disabled polling');
+  try{await loadControllerState(config.stateFile);throw Error('Existing state cannot be initialized again');}catch(error){if(error.code!=='ENOENT')throw error;}
+  const legacy=validateUpdateRelease(JSON.parse(await readFile(legacyFile,'utf8')));
+  const candidate=command==='verify-bootstrap'?validateUpdateRelease(JSON.parse(await readFile(candidateFile,'utf8'))):legacy;
+  if(command==='verify-bootstrap')assert.notEqual(legacy.image,candidate.image,'Explicit bootstrap requires a distinct candidate');
+  const result=await controller.verifyInitialCandidate(legacy,candidate);
+  console.log(JSON.stringify(result));
+  process.exit(0);
+}else if(command==='init'){
   const [argument]=arguments_;
   assert.equal(arguments_.length,1,'Provide exactly one signed installed release JSON');
   assert.ok(argument&&path.isAbsolute(argument),'Explicit trusted installed release JSON is required');
   try{await loadControllerState(config.stateFile);throw Error('Existing state cannot be initialized again');}catch(error){if(error.code!=='ENOENT')throw error;}
-  if(command==='init')await controller.recoverBackupIntent(null);
-  else assert.equal(await controller.loadBackupIntent(),null,'Pending backup recovery prevents legacy verification');
+  await controller.recoverBackupIntent(null);
   const release=validateUpdateRelease(JSON.parse(await readFile(argument,'utf8')));
   const channel=verifyUpdateChannel(await host.fetchChannel(),publicKey,null);
   assert.ok(channel.payload.releases.some(r=>r.state==='published'&&JSON.stringify(r)===JSON.stringify(release)),'Installed release must be in trusted signed channel');
   await host.pullAndVerify(release);
   await controller.uiEpoch(release);
-  if(command==='verify-legacy'){
-    await host.assertLegacyRelease(release);
-    console.log('Verified running legacy release and browser authentication');
-    process.exit(0);
-  }
   const slot=config.initialSlot??'blue';
   const observed=await host.observe();
   assert.equal(observed.writers.length,0,'Initialize only after the legacy writer is drained and removed');

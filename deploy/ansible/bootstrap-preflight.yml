@@ -1,0 +1,59 @@
+---
+- name: Require explicit private signed release record paths
+  ansible.builtin.assert:
+    that:
+      - codexia_installed_release_file is defined
+      - codexia_installed_release_file is string
+      - codexia_installed_release_file is match('^/[^\r\n]+$')
+      - codexia_bootstrap_candidate_file is defined
+      - codexia_bootstrap_candidate_file is string
+      - codexia_bootstrap_candidate_file is match('^/[^\r\n]+$')
+    fail_msg: Provide the exact installed and distinct candidate release records from the authenticated channel.
+  no_log: true
+- name: Verify the prepared updater source and saved configuration
+  ansible.builtin.include_tasks: verify-updater-inputs.yml
+- name: Require a disabled pre-journal configuration
+  ansible.builtin.assert:
+    that:
+      - not ((saved_config.content | b64decode | from_json).enabled | bool)
+- name: Verify the dedicated preflight database role without changing it
+  ansible.builtin.include_tasks: preflight.yml
+  vars:
+    preflight_verify_only: true
+- name: Verify the current Tunnel dependency without changing it
+  ansible.builtin.include_tasks: verify-tunnel-legacy.yml
+- name: Stage the selected release records in a disposable private directory
+  ansible.builtin.tempfile:
+    state: directory
+    path: "{{ config_dir }}"
+    prefix: bootstrap-preflight-
+  register: bootstrap_preflight_dir
+- name: Execute the exact signed candidate preflight under the host lock
+  block:
+    - name: Copy the exact release records without exposing their inputs
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ bootstrap_preflight_dir.path }}/{{ item.name }}"
+        mode: '0600'
+      loop:
+        - {src: "{{ codexia_installed_release_file }}", name: legacy.json}
+        - {src: "{{ codexia_bootstrap_candidate_file }}", name: candidate.json}
+      no_log: true
+    - name: Verify candidate image, real frontend epoch and read-only database readiness while legacy writer remains active
+      ansible.builtin.command:
+        argv: [sh, "{{ updater }}", verify-bootstrap, "{{ config_path }}", "{{ bootstrap_preflight_dir.path }}/legacy.json", "{{ bootstrap_preflight_dir.path }}/candidate.json"]
+      register: bootstrap_preflight_result
+      changed_when: false
+    - name: Require the preflight result to explicitly record no activation
+      ansible.builtin.assert:
+        that:
+          - (bootstrap_preflight_result.stdout | from_json).format == 'codexia-bootstrap-preflight/v1'
+          - (bootstrap_preflight_result.stdout | from_json).activated == false
+    - name: Report observed release identity without declaring a cutover
+      ansible.builtin.debug:
+        msg: "{{ bootstrap_preflight_result.stdout | from_json }}"
+  always:
+    - name: Remove only the temporary release input directory
+      ansible.builtin.file:
+        path: "{{ bootstrap_preflight_dir.path }}"
+        state: absent

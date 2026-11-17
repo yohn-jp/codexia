@@ -39,7 +39,7 @@ export function validateUpdateRelease(value) {
  * deployed UI epoch. Throws on incompatible or non-forward releases.
  * Success is compatibility only, never authorization to activate an image.
  */
-export function assertCompatibleUpdate(installedValue, candidateValue, deployedUiEpoch) {
+function assertForwardRelease(installedValue, candidateValue) {
   const installed = validateUpdateRelease(installedValue);
   const candidate = validateUpdateRelease(candidateValue);
   if (candidate.state !== 'published') throw new Error('Candidate release is withdrawn');
@@ -51,8 +51,27 @@ export function assertCompatibleUpdate(installedValue, candidateValue, deployedU
   if (candidate.profile !== installed.profile || candidate.platform !== installed.platform) throw new Error('Release profile or platform changed');
   if (candidate.migrationFingerprint !== installed.migrationFingerprint) throw new Error('Manual database migration required');
   if (candidate.persistenceFormat !== installed.persistenceFormat) throw new Error('Manual persistent-format update required');
+  return { installed, candidate };
+}
+
+export function assertCompatibleUpdate(installedValue, candidateValue, deployedUiEpoch) {
+  const { installed, candidate } = assertForwardRelease(installedValue, candidateValue);
   if (!positiveInteger(deployedUiEpoch) || installed.apiEpoch !== deployedUiEpoch || candidate.apiEpoch !== deployedUiEpoch) {
     throw new Error('Frontend/API compatibility epoch mismatch');
+  }
+  return candidate;
+}
+
+/** Explicit pre-journal bootstrap admission only; never use for routine updates.
+ * Both release records must already have authenticated channel membership.
+ * The old API may not advertise an epoch; only the real UI and new API must
+ * agree. A schema or persistent-format change needs a separate migration.
+ */
+export function assertLegacyBootstrapCandidate(legacyValue, candidateValue, deployedUiEpoch) {
+  const { installed, candidate } = assertForwardRelease(legacyValue, candidateValue);
+  if (installed.state !== 'published') throw new Error('Legacy release is not published');
+  if (!positiveInteger(deployedUiEpoch) || candidate.apiEpoch !== deployedUiEpoch) {
+    throw new Error('Bootstrap candidate and deployed UI epoch mismatch');
   }
   return candidate;
 }

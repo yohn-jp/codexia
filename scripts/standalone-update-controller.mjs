@@ -4,7 +4,7 @@ import { lstat, mkdir, open, readFile, rename, rm, unlink } from 'node:fs/promis
 import path from 'node:path';
 import { advanceJournal, validateJournal } from './update-host-state.mjs';
 import { verifyUpdateChannel, selectUpdateCandidate } from './update-channel.mjs';
-import { validateUpdateRelease } from './update-release-policy.mjs';
+import { assertLegacyBootstrapCandidate, validateUpdateRelease } from './update-release-policy.mjs';
 
 const stable = journal => ['idle','committed'].includes(journal.phase);
 const opposite = slot => slot === 'blue' ? 'green' : 'blue';
@@ -151,6 +151,46 @@ export class StandaloneController {
     assert.equal(observed.profile,release.profile,'Deployed UI profile mismatch');
     assert.equal(observed.apiEpoch,release.apiEpoch,'Deployed UI epoch mismatch');
     return observed.apiEpoch;
+  }
+  // Pre-journal admission only. No writer, route, journal, timer, Tunnel or
+  // database mutation is authorized by this result. The isolated read-only
+  // candidate must become ready while the original legacy writer still serves.
+  async verifyInitialCandidate(legacyValue,candidateValue){
+    const legacy=validateUpdateRelease(legacyValue);
+    const candidate=validateUpdateRelease(candidateValue);
+    const sameImage=legacy.image===candidate.image;
+    if(sameImage)assert.deepEqual(legacy,candidate,'Same-image admission requires the identical release record');
+    await this.assertNoBackupIntent();
+    assert.equal(await this.host.routeState(),'blocked','Initial candidate requires the blocked private proxy route');
+    assert.equal(await this.host.pollingTimerActive(),false,'Initial candidate requires polling stopped');
+    assert.equal(await this.host.legacyServiceActive(),true,'Initial candidate requires a running legacy writer');
+    await this.host.assertNoPreflight();
+    const channel=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,null,this.now());
+    for(const release of [legacy,candidate]){
+      assert.ok(channel.payload.releases.some(r=>r.state==='published'&&JSON.stringify(r)===JSON.stringify(release)),'Initial release must be published in the fresh signed channel');
+    }
+    const uiEpoch=await this.uiEpoch(candidate);
+    if(!sameImage)assertLegacyBootstrapCandidate(legacy,candidate,uiEpoch);
+    await this.host.pullAndVerify(candidate);
+    const options={allowUnadvertisedEpoch:!sameImage};
+    const before=await this.host.assertLegacyRelease(legacy,options);
+    // Only this owned disposable fixture may be removed. Refuse a pre-existing
+    // fixture rather than treating its presence as permission to delete it.
+    await this.host.assertNoPreflight();
+    try{
+      await this.host.prepare('blue',candidate);
+    }finally{
+      await this.host.stopPreflight('blue');
+    }
+    await this.host.assertNoPreflight();
+    assert.equal(await this.host.legacyServiceActive(),true,'Legacy writer changed during initial candidate preflight');
+    assert.equal(await this.host.routeState(),'blocked','Proxy route changed during initial candidate preflight');
+    assert.equal(await this.host.pollingTimerActive(),false,'Polling changed during initial candidate preflight');
+    assert.deepEqual(await this.host.assertLegacyRelease(legacy,options),before,'Legacy identity changed during initial candidate preflight');
+    await this.uiEpoch(candidate);
+    return {format:'codexia-bootstrap-preflight/v1',legacyImage:legacy.image,legacyApiEpoch:before.apiEpoch,
+      candidateImage:candidate.image,candidateSourceSha:candidate.sourceSha,candidateApiEpoch:candidate.apiEpoch,
+      activated:false};
   }
   async assertServing(state,slot,release){
     const obs=await this.host.observe();

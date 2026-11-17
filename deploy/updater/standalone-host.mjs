@@ -881,7 +881,7 @@ export class PodmanStandaloneHost{
     return {route,writers};
   }
   async assertNoPreflight(){
-    for(const slot of ['blue','green'])assert.ok(!exists(preflight(slot)),'Unexpected preflight container prevents backup');
+    for(const slot of ['blue','green'])assert.ok(!exists(preflight(slot)),'Unexpected preflight container prevents exclusive maintenance');
   }
   async routeState(){
     const route=(await readFile(this.config.routeFile,'utf8')).trim();
@@ -1210,7 +1210,7 @@ export class PodmanStandaloneHost{
     for(const field of ['version','sourceSha','platform','profile','migrationFingerprint','persistenceFormat','apiEpoch'])assert.equal(identity[field],release[field],'Artifact '+field+' mismatch');
     assert.equal(run('podman',[...isolated,'node',release.image,'--input-type=module','-e',fingerprintCode]),release.migrationFingerprint);
   }
-  async assertLegacyRelease(value){
+  async assertLegacyRelease(value,{allowUnadvertisedEpoch=false}={}){
     const release=validateUpdateRelease(value);
     const legacy=inspect('codexia-api');
     assert.ok(legacy?.State.Running,'Legacy writer must be running the selected release');
@@ -1222,7 +1222,16 @@ export class PodmanStandaloneHost{
     assert.equal(actual,imageId(image.Id),'Legacy writer image differs from selected immutable release');
     assert.ok(image.RepoDigests?.includes(release.image),'Selected release digest is unobservable');
     const version=JSON.parse(run('podman',['exec','codexia-api','node','--input-type=module','-e',readyCode],{timeout:10000}));
-    assertVersion(version,release,this.authEnvironment.CODEXIA_BROWSER_AUTH);
+    // The exceptional legacy observation is permitted only after the exact
+    // old image, platform, source and runtime identity have been established.
+    // The signed candidate must independently advertise its actual epoch.
+    if(allowUnadvertisedEpoch&&version.apiEpoch===undefined){
+      assertLegacyBackupIdentity({legacy,image,version},release,this.authEnvironment);
+    }else{
+      assertVersion(version,release,this.authEnvironment.CODEXIA_BROWSER_AUTH);
+      assert.equal(image.Os+'/'+image.Architecture,release.platform,'Legacy image platform differs from selected release');
+      assert.equal(image.Labels?.['org.opencontainers.image.revision']??image.Config?.Labels?.['org.opencontainers.image.revision'],release.sourceSha,'Legacy image source differs from selected release');
+    }
     if(this.runtime){
       const expectedUnit=imageConfig(release,this.authEnvironment,this.runtime).replace('PLACEHOLDER','codexia-api');
       const capabilityStatus=await readRuntimeCapabilityStatus(legacy,'Legacy writer');
@@ -1239,6 +1248,7 @@ export class PodmanStandaloneHost{
       const actual=env.find(entry=>entry.startsWith(key+'='))?.slice(key.length+1);
       assert.equal(actual??(key==='CODEXIA_BROWSER_AUTH'?'token':undefined),value,'Legacy browser authentication configuration mismatch: '+key);
     }
+    return {apiEpoch:version.apiEpoch??null};
   }
   async assertLegacyBackupRelease(value,{allowStopped=false,expectedIdentity}={}){
     const release=validateUpdateRelease(value);

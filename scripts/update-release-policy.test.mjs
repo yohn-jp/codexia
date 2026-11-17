@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { assertCompatibleUpdate, validateUpdateRelease } from './update-release-policy.mjs';
+import { assertCompatibleUpdate, assertLegacyBootstrapCandidate, validateUpdateRelease } from './update-release-policy.mjs';
 
 const hash = character => `sha256:${character.repeat(64)}`;
 const image = character => `ghcr.io/yohn-jp/codexia-backend@${hash(character)}`;
@@ -55,4 +55,18 @@ test('rejects schema, persistence, profile and frontend/API incompatibility', ()
   assert.throws(() => assertCompatibleUpdate(installed, candidate, 2));
   assert.throws(() => assertCompatibleUpdate(installed, candidate, undefined));
   assert.throws(() => assertCompatibleUpdate({ ...installed, apiEpoch: 2 }, candidate, 1));
+});
+
+
+test('explicit legacy bootstrap admits only a forward candidate matching the actual UI and unchanged persistence', () => {
+  const legacy = { ...installed, apiEpoch: 2 };
+  assert.deepEqual(assertLegacyBootstrapCandidate(legacy, candidate, 1), candidate);
+  assert.throws(() => assertCompatibleUpdate(legacy, candidate, 1), /epoch mismatch/);
+  for (const change of [
+    { migrationFingerprint: hash('d') }, { persistenceFormat: 2 }, { profile: 'full' },
+    { state: 'withdrawn' }, { version: installed.version }, { image: installed.image },
+    { sourceSha: installed.sourceSha }, { apiEpoch: 2 },
+  ]) assert.throws(() => assertLegacyBootstrapCandidate(legacy, { ...candidate, ...change }, 1));
+  assert.throws(() => assertLegacyBootstrapCandidate({ ...legacy, state: 'withdrawn' }, candidate, 1), /not published/);
+  assert.throws(() => assertLegacyBootstrapCandidate(legacy, candidate, undefined), /epoch mismatch/);
 });
