@@ -82,7 +82,9 @@ test("fresh schema initialization is transactional, repeatable and rejects untra
   const pool = new Pool({ connectionString: target.toString() });
   t.after(async () => {
     await pool.end();
-    await directPool.query(`DROP DATABASE "${db}" WITH (FORCE)`);
+    // Let PostgreSQL wait for the just-closed connections instead of forcibly
+    // terminating sockets that pg is still finishing asynchronously.
+    await directPool.query(`DROP DATABASE "${db}"`);
   });
   await pool.query("CREATE TABLE public.untracked (value text)");
   await assert.rejects(initializeFreshPostgresSchema(target.toString()), /untracked database objects/);
