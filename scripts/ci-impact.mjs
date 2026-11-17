@@ -43,6 +43,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/ansible/acceptance.yml',
   'deploy/ansible/base-runtime.yml',
   'deploy/ansible/base-secrets.yml',
+  'deploy/ansible/bootstrap-preflight.yml',
   'deploy/ansible/check_postgres_volume.py',
   'deploy/ansible/enable.yml',
   'deploy/ansible/host-contract.py',

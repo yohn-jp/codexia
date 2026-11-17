@@ -76,3 +76,60 @@ test('manual acceptance updates and rolls back without enabling normal polling',
  assert.deepEqual(h.writers,[{slot:'blue',image:old.image}]);
  await assert.rejects(controller.tick(state,{manualAcceptance:true}),/requires paused state/);
 });
+
+
+function initialCandidateFixture(){
+ const {h,controller,persisted}=fixture();
+ h.target='blocked';h.writers=[];h.legacyActive=true;h.legacyEpoch=null;h.polling=false;
+ h.routeState=async()=>h.target;
+ h.pollingTimerActive=async()=>h.polling;
+ h.legacyServiceActive=async()=>h.legacyActive;
+ h.assertNoPreflight=async()=>assert.equal(h.preflight.size,0,'Unexpected preflight');
+ h.assertLegacyRelease=async(release,options)=>{
+  h.trace.push('legacy:'+release.version);
+  assert.equal(release.image,old.image);
+  if(h.legacyEpoch===null)assert.equal(options.allowUnadvertisedEpoch,true,'Legacy epoch absent');
+  return {apiEpoch:h.legacyEpoch};
+ };
+ h.prepare=async(slot,release)=>{
+  assert.equal(h.legacyActive,true);assert.equal(h.target,'blocked');
+  h.trace.push('prepare:'+release.version);h.preflight.add(slot);
+  if(h.fail==='prepare')throw Error('candidate DB preflight failed');
+ };
+ return {h,controller,persisted};
+}
+test('legacy bootstrap preflight authenticates a distinct candidate and never activates it',async()=>{
+ const {h,controller,persisted}=initialCandidateFixture();
+ const result=await controller.verifyInitialCandidate(old,next);
+ assert.deepEqual(result,{format:'codexia-bootstrap-preflight/v1',legacyImage:old.image,legacyApiEpoch:null,
+  candidateImage:next.image,candidateSourceSha:next.sourceSha,candidateApiEpoch:1,activated:false});
+ assert.deepEqual(h.trace,['pull:'+next.version,'legacy:'+old.version,'prepare:'+next.version,'legacy:'+old.version]);
+ assert.equal(h.preflight.size,0);assert.equal(h.legacyActive,true);assert.equal(h.target,'blocked');
+ assert.equal(persisted(),undefined);
+});
+test('legacy bootstrap rejects unsigned, incompatible or already running candidates before preflight',async()=>{
+ for(const change of ['unsigned','epoch','schema','polling','route','preexisting']){
+  const {h,controller}=initialCandidateFixture();let candidate=next;
+  if(change==='unsigned')h.releases=[old];
+  if(change==='epoch')h.epoch=2;
+  if(change==='schema'){candidate={...next,migrationFingerprint:'sha256:'+'d'.repeat(64)};h.releases=[old,candidate];}
+  if(change==='polling')h.polling=true;
+  if(change==='route')h.target='blue';
+  if(change==='preexisting')h.preflight.add('green');
+  await assert.rejects(controller.verifyInitialCandidate(old,candidate));
+  assert.ok(!h.trace.some(entry=>entry.startsWith('prepare:')));
+  if(change==='preexisting')assert.ok(h.preflight.has('green'));
+ }
+});
+test('failed bootstrap preflight removes its disposable fixture and retains the legacy writer',async()=>{
+ const {h,controller,persisted}=initialCandidateFixture();h.fail='prepare';
+ await assert.rejects(controller.verifyInitialCandidate(old,next),/candidate DB preflight failed/);
+ assert.equal(h.preflight.size,0);assert.equal(h.legacyActive,true);assert.equal(h.target,'blocked');assert.equal(persisted(),undefined);
+});
+test('same-image initialization still requires an advertised legacy epoch before draining',async()=>{
+ const {h,controller}=initialCandidateFixture();
+ await assert.rejects(controller.verifyInitialCandidate(old,old),/Legacy epoch absent/);
+ h.legacyEpoch=1;
+ const result=await controller.verifyInitialCandidate(old,old);
+ assert.equal(result.legacyApiEpoch,1);assert.equal(result.activated,false);
+});
