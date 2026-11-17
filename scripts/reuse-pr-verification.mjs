@@ -80,13 +80,25 @@ function assertCertificationJob(jobs, run) {
   return cert[0];
 }
 
-function assertPrAssociation(run, candidate, repoId) {
+async function mergedPrNumber(run, candidate, repoId, request) {
   assert.ok(Array.isArray(run.pull_requests));
   const associations = run.pull_requests.filter(pr => pr?.base?.ref === 'main' &&
     pr.head?.sha === candidate.head && pr.base?.sha === candidate.base && sameRepo(pr.head?.repo, repoId) && sameRepo(pr.base?.repo, repoId));
-  assert.equal(associations.length, 1, 'Missing or ambiguous PR association');
-  assert.ok(positive(associations[0].number), 'Invalid associated PR number');
-  return associations[0].number;
+  if (run.pull_requests.length > 0) {
+    assert.equal(associations.length, 1, 'Missing or ambiguous PR association');
+    assert.ok(positive(associations[0].number), 'Invalid associated PR number');
+    return associations[0].number;
+  }
+  // GitHub may clear workflow_run.pull_requests after the PR closes.
+  // Resolve the association from the actual merge commit instead, not a branch search.
+  const pulls = await request('commits/' + candidate.sourceSha + '/pulls?per_page=100&page=1');
+  assert.ok(Array.isArray(pulls) && pulls.length < 100, 'Incomplete merge PR association inventory');
+  const merged = pulls.filter(pr => pr?.merge_commit_sha === candidate.sourceSha &&
+    pr.head?.sha === candidate.head && pr.base?.ref === 'main' && pr.base?.sha === candidate.base &&
+    sameRepo(pr.head?.repo, repoId) && sameRepo(pr.base?.repo, repoId));
+  assert.equal(merged.length, 1, 'Missing or ambiguous merge commit PR association');
+  assert.ok(positive(merged[0].number), 'Invalid associated PR number');
+  return merged[0].number;
 }
 
 function assertMergedPull(pr, number, candidate, repoId) {
@@ -154,8 +166,10 @@ async function mergedPrRun({ context, candidate, request }) {
     sameRepo(value.repository, context.repoId) && sameRepo(value.head_repository, context.repoId)));
   assertWorkflowRun(run, context, candidate.head, 'pull_request');
   assert.ok(success(run), 'Latest PR verification is not successful');
-  const prNumber = assertPrAssociation(run, candidate, context.repoId);
-  const mergedAt = assertMergedPull(await request('pulls/' + prNumber), prNumber, candidate, context.repoId);
+  const prNumber = await mergedPrNumber(run, candidate, context.repoId, request);
+  const pr = await request('pulls/' + prNumber);
+  const mergedAt = assertMergedPull(pr, prNumber, candidate, context.repoId);
+  assert.equal(run.head_branch, pr.head.ref, 'Workflow branch does not identify the merged PR head');
   const jobs = await apiList(request, 'actions/runs/' + run.id + '/jobs?filter=latest', 'jobs');
   assertJobRunBindings(jobs, run);
   for (const job of jobs.filter(success)) {

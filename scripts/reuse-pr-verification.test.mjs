@@ -21,8 +21,8 @@ function fixture(files = ['package.json']) {
   };
   const common = { ...status, workflow_id, path: workflowPath, repository: repo, head_repository: repo, run_attempt: 1 };
   const currentRun = { ...common, id: 30, run_number: 30, head_sha: sourceSha, head_branch: 'main', event: 'push', status: 'in_progress', conclusion: null };
-  const pr = { number: 7, state: 'closed', merged: true, merged_at: merged, merge_commit_sha: sourceSha, head: { sha: head, repo }, base: { ref: 'main', sha: base, repo } };
-  const prRun = { ...common, id: 20, run_number: 20, head_sha: head, event: 'pull_request',
+  const pr = { number: 7, state: 'closed', merged: true, merged_at: merged, merge_commit_sha: sourceSha, head: { sha: head, ref: 'feature/example', repo }, base: { ref: 'main', sha: base, repo } };
+  const prRun = { ...common, id: 20, run_number: 20, head_sha: head, head_branch: 'feature/example', event: 'pull_request',
     pull_requests: [{ number: 7, head: pr.head, base: pr.base }] };
   const plan = createVerificationPlan({ files, event: 'pull_request', sha: head, base });
   const job = (name, run, extra = {}) => ({ name, ...status, run_id: run.id, run_attempt: 1, head_sha: run.head_sha,
@@ -64,7 +64,7 @@ function fixture(files = ['package.json']) {
         producerAttempt: 1, artifactId: native.id, artifactDigest: digest, reportSha256: 'f'.repeat(64), runtimeBaseDigest: digest, buildKitDigest: digest };
     }
   }
-  const state = { pr, prRun, currentRun, jobs, artifacts, contents, reports, runs: [prRun] };
+  const state = { pr, prRun, currentRun, jobs, artifacts, contents, reports, runs: [prRun], mergedPulls: [pr] };
   const page = (key, values) => ({ total_count: values.length, [key]: values });
   const request = async endpoint => {
     if (endpoint.startsWith('actions/workflows/')) {
@@ -72,6 +72,7 @@ function fixture(files = ['package.json']) {
       return page('workflow_runs', state.runs);
     }
     if (endpoint === 'pulls/7') return state.pr;
+    if (endpoint === 'commits/' + sourceSha + '/pulls?per_page=100&page=1') return state.mergedPulls;
     if (endpoint.startsWith('actions/runs/20/jobs?')) return page('jobs', state.jobs);
     if (endpoint.startsWith('actions/runs/20/artifacts?')) return page('artifacts', state.artifacts);
     throw new Error('unexpected API endpoint: ' + endpoint);
@@ -88,6 +89,16 @@ test('same-tree complete PR proof certifies the merged source with exact artifac
   assert.equal(receipt.evidence.length, plan.groups.length);
   assert.equal(receipt.prNumber, 7);
   assert.equal(receipt.tree, tree);
+});
+
+test('closed PR runs with cleared associations resolve only the actual merged PR', async () => {
+  const { state, args } = fixture();
+  state.prRun.pull_requests = [];
+  assert.equal((await verifyReusableMainProof(args)).prNumber, 7);
+  state.mergedPulls = [];
+  await assert.rejects(verifyReusableMainProof(args), /merge commit PR association/);
+  state.mergedPulls = [state.pr, { ...state.pr, number: 8 }];
+  await assert.rejects(verifyReusableMainProof(args), /merge commit PR association/);
 });
 
 test('an affected plan cannot silently replace omitted main obligations', async () => {
@@ -119,6 +130,7 @@ test('rejected proof paths fail closed instead of accepting an older green or in
     s => { s.pr.merge_commit_sha = base; },
     s => { s.pr.head = { ...s.pr.head, repo: { id: 999 } }; },
     s => { s.prRun.head_repository = { id: 999 }; },
+    s => { s.prRun.head_branch = 'unrelated'; },
     s => { s.prRun.conclusion = 'failure'; },
     s => { s.runs.push({ ...s.prRun, id: 21, run_number: 21, conclusion: 'cancelled' }); },
     s => { s.runs.push({ ...s.prRun, id: 21, run_number: 21, status: 'in_progress', conclusion: null }); },
