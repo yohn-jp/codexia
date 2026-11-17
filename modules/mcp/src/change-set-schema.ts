@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 const identitySchema = z.string().min(1).max(256);
 const textSchema = z.string().min(1).max(10_000);
