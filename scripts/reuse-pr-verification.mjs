@@ -2,17 +2,16 @@
 // Read-only certification of a merged PR's source tree; never promote PR bytes here.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { appendFile, writeFile } from 'node:fs/promises';
+import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFile } from 'node:fs/promises';
 import { validateVerificationPlan, planDigest } from './ci-impact.mjs';
 import { assertPlanEvidence } from './ci-evidence.mjs';
 import { assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
 import { assertNativeArtifactEvidence } from './ci-native-producer.mjs';
 import { selectLatestPlanArtifact, selectLatestEvidenceArtifacts } from './ci-artifact-selection.mjs';
 import { downloadArtifact, extractJsonEntry, selectedArtifacts } from './download-ci-artifacts.mjs';
-import { assertVerificationJobs, collectGitHubPages, REUSED_MAIN_SKIPPED_JOBS, verifiedSourceRun } from './release-policy.mjs';
+import { collectGitHubPages, REUSED_MAIN_SKIPPED_JOBS } from './release-policy.mjs';
 
 const WORKFLOW = '.github/workflows/verify.yml';
 const FULL_MODEL_JOB = 'full-model-oci / Run pinned Full model lifecycle on rootless Podman';
@@ -105,6 +104,8 @@ export function assertCandidatePlan(plan, candidate) {
   assert.equal(plan.sha, candidate.head, 'PR plan source mismatch');
   assert.equal(plan.base, candidate.base, 'PR was not verified against the merged base');
   assert.deepEqual(plan.files, candidate.files, 'PR impact does not cover actual merge diff');
+  // Affected selection is not yet a complete input-equivalence proof for excluded obligations.
+  assert.equal(plan.mode, 'full', 'Affected PR proof cannot yet replace complete main verification');
 }
 
 export function assertCompactNeeds(needs) {
@@ -137,10 +138,9 @@ export async function verifyReusableMainProof({ sourceSha, before, repository, c
   const candidate = mergeCandidate(sourceSha, before, git);
   const list = (endpoint, key) => collectGitHubPages((page, perPage) =>
     request(endpoint + (endpoint.includes('?') ? '&' : '?') + 'per_page=' + perPage + '&page=' + page), key);
-  const workflowRuns = (sha, event) => list('actions/workflows/' + context.workflowId + '/runs?head_sha=' + sha +
-    '&event=' + event + (event === 'push' ? '&branch=main' : ''), 'workflow_runs');
+  const workflowRuns = sha => list('actions/workflows/' + context.workflowId + '/runs?head_sha=' + sha + '&event=pull_request', 'workflow_runs');
   const jobsFor = id => list('actions/runs/' + id + '/jobs?filter=latest', 'jobs');
-  const runs = await workflowRuns(candidate.head, 'pull_request');
+  const runs = await workflowRuns(candidate.head);
   // Do not take an older green run when a newer run for this exact head is red or pending.
   const run = newest(runs.filter(value => value?.head_sha === candidate.head && value.event === 'pull_request' &&
     value.workflow_id === context.workflowId && value.path === WORKFLOW &&
@@ -175,24 +175,11 @@ export async function verifyReusableMainProof({ sourceSha, before, repository, c
   for (const job of jobs.filter(job => job.conclusion === 'skipped')) {
     assert.ok(REUSED_MAIN_SKIPPED_JOBS.includes(job.name), 'Unexpected skipped PR job');
   }
-  let baseProof = null;
-  if (plan.mode === 'affected') {
-    const baseRun = newest((await workflowRuns(candidate.base, 'push')).filter(value =>
-      value?.head_sha === candidate.base && value.event === 'push' && value.head_branch === 'main' &&
-      value.workflow_id === context.workflowId && value.path === WORKFLOW &&
-      sameRepo(value.repository, context.repoId) && sameRepo(value.head_repository, context.repoId)));
-    assertWorkflowRun(baseRun, context, candidate.base, 'push');
-    verifiedSourceRun([baseRun], candidate.base);
-    const baseJobs = await jobsFor(baseRun.id);
-    assertJobBindings(baseJobs, baseRun);
-    assertVerificationJobs(baseJobs);
-    baseProof = { runId: baseRun.id, attempt: baseRun.run_attempt };
-  }
   return {
     version: 1, sourceSha, tree: candidate.tree, baseSha: candidate.base, headSha: candidate.head,
     prNumber, runId: run.id, attempt: run.run_attempt, planDigest: planDigest(plan), mode: plan.mode,
     planArtifact: { id: selectedPlan.id, digest: selectedPlan.digest },
-    evidence: selected.map(item => ({ id: item.id, digest: item.digest })), baseProof,
+    evidence: selected.map(item => ({ id: item.id, digest: item.digest })),
   };
 }
 

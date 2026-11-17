@@ -103,3 +103,59 @@ test('every selected task has one execution group and every exclusion has a reas
   assert.equal(selected.excluded.length + selected.tasks.length, VERIFICATION_TASKS.length);
   assert.ok(selected.excluded.every(item => item.reason && !selected.tasks.includes(item.task)));
 });
+
+test('known operational inputs retain root proof without unrelated browser, OCI or Hosted work', async () => {
+  const { OPERATIONAL_ROOT_PATHS } = await import('./ci-impact.mjs');
+  const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
+  for (const file of OPERATIONAL_ROOT_PATHS) {
+    const selected = await plan([file]);
+    assert.deepEqual(selected.tasks, ['unit-root','coverage'], file);
+    assert.equal(selected.full_model_oci, false, file);
+  }
+  for (const file of ['deploy/ansible/new-stage.yml','deploy/updater/new-runtime.mjs','scripts/new-tool.mjs','.github/workflows/unknown.yml']) {
+    assert.deepEqual((await plan([file])).tasks, VERIFICATION_TASKS, file);
+  }
+  const mixed = await plan(['deploy/ansible/host.yml','app/src/api.ts']);
+  assert.ok(mixed.tasks.includes('unit-root') && mixed.tasks.includes('unit-app') && mixed.tasks.includes('browser-core-core'));
+  assert.deepEqual((await plan(['deploy/ansible/host.yml','pnpm-lock.yaml'])).tasks, VERIFICATION_TASKS);
+  assert.deepEqual((await plan(['deploy/ansible/host.yml'], 'push')).tasks, VERIFICATION_TASKS);
+  assert.deepEqual((await plan(null)).tasks, VERIFICATION_TASKS);
+});
+
+test('operational proof remains owned by one exact-head root task and matching independent workflows', async () => {
+  const { OPERATIONAL_ROOT_PATHS } = await import('./ci-impact.mjs');
+  const readWorkflow = name => parse(readFileSync(new URL('../.github/workflows/'+name, import.meta.url), 'utf8'));
+  const infra = readWorkflow('deployment-config.yml');
+  for (const event of ['pull_request','push']) {
+    for (const path of ['deploy/ansible/**','deploy/updater/**','deploy/quadlet/**','deploy/postgres/**','deploy/cloudflare/**']) {
+      assert.ok(infra.on[event].paths.includes(path), path);
+    }
+  }
+  assert.equal(infra.jobs.configuration.steps.find(s=>s.uses?.startsWith('actions/checkout')).with.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
+  const root = JSON.parse(readFileSync(new URL('../package.json', import.meta.url),'utf8'));
+  for (const command of ['verify:deployment','typecheck:deployment','test:deployment']) {
+    assert.ok(root.scripts['test:scripts'].includes('pnpm run '+command));
+    assert.ok(!JSON.stringify(infra.jobs).includes('pnpm run '+command));
+    assert.ok(!JSON.stringify(readWorkflow('frontend-release.yml').jobs).includes('pnpm run '+command));
+  }
+  assert.ok(OPERATIONAL_ROOT_PATHS.includes('docs/deployment/README.md'));
+  assert.ok(OPERATIONAL_ROOT_PATHS.includes('docs/deployment/PHASE-F-DISPOSABLE-CI.md'));
+  const runtime = readWorkflow('ansible-runtime-contract.yml');
+  for (const event of ['pull_request', 'push']) {
+    assert.ok(runtime.on[event].paths.includes('deploy/updater/test-standalone-maintenance-preload.mjs'));
+  }
+  const audit = readWorkflow('repository-audit.yml');
+  assert.ok(!Object.hasOwn(audit.on,'workflow_run'));
+  assert.ok(!Object.hasOwn(audit.on,'delete'));
+  assert.deepEqual(audit.on.push.branches,['main']);
+  assert.ok(audit.on.schedule.length && Object.hasOwn(audit.on,'workflow_dispatch'));
+});
+
+test('root and coverage-only plans have a single owner for contract test execution', async () => {
+  const runner = readFileSync(new URL('./ci-group.mjs', import.meta.url),'utf8');
+  const root = JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8'));
+  assert.match(root.scripts['test:scripts'], /node --test 'scripts\/\*\*\/\*\.test\.mjs'/u);
+  assert.match(runner, /if \(!plan\.tasks\.includes\('unit-root'\)\) node\('--test', 'scripts\/ci-contract\.test\.mjs'/u);
+  assert.deepEqual((await plan(['docs/authoring.md'])).tasks, ['coverage']);
+  assert.deepEqual((await plan(['deploy/ansible/host.yml'])).tasks, ['unit-root','coverage']);
+});

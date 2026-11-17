@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mergeCandidate, assertCandidatePlan, assertCompactNeeds, verifyReusableMainProof } from './reuse-pr-verification.mjs';
 import { createVerificationPlan, planDigest } from './ci-impact.mjs';
-import { REQUIRED_VERIFICATION_JOBS, VERIFICATION_GROUPS, requiredBuildProfile } from './ci-contract.mjs';
-import { REUSED_MAIN_SKIPPED_JOBS } from './release-policy.mjs';
+import { VERIFICATION_GROUPS, requiredBuildProfile } from './ci-contract.mjs';
 
 const sourceSha = 'a'.repeat(40), base = 'b'.repeat(40), head = 'c'.repeat(40), tree = 'd'.repeat(40);
 const repository = 'yohn-jp/codexia', repo = { id: 123 }, workflow_id = 42;
@@ -12,7 +11,7 @@ const digest = 'sha256:' + 'e'.repeat(64);
 const workflowPath = '.github/workflows/verify.yml';
 const status = { status: 'completed', conclusion: 'success' };
 
-function fixture(files = ['docs/README.md']) {
+function fixture(files = ['package.json']) {
   const git = args => {
     if (args[0] === 'rev-list') return [sourceSha, base, head].join(' ') + '\n';
     if (args[0] === 'merge-base') return base + '\n';
@@ -25,7 +24,6 @@ function fixture(files = ['docs/README.md']) {
   const pr = { number: 7, state: 'closed', merged: true, merged_at: merged, merge_commit_sha: sourceSha, head: { sha: head, repo }, base: { ref: 'main', repo } };
   const prRun = { ...common, id: 20, run_number: 20, head_sha: head, event: 'pull_request',
     pull_requests: [{ number: 7, head: pr.head, base: pr.base }] };
-  const baseRun = { ...common, id: 10, run_number: 10, head_sha: base, event: 'push', head_branch: 'main' };
   const plan = createVerificationPlan({ files, event: 'pull_request', sha: head, base });
   const job = (name, run, extra = {}) => ({ name, ...status, run_id: run.id, run_attempt: 1, head_sha: run.head_sha,
     started_at: start, completed_at: end, ...extra });
@@ -66,49 +64,35 @@ function fixture(files = ['docs/README.md']) {
         producerAttempt: 1, artifactId: native.id, artifactDigest: digest, reportSha256: 'f'.repeat(64), runtimeBaseDigest: digest, buildKitDigest: digest };
     }
   }
-  const baseJobs = REQUIRED_VERIFICATION_JOBS.map(name => job(name, baseRun));
-  const state = { pr, prRun, baseRun, currentRun, jobs, artifacts, contents, reports, baseJobs, runs: [prRun], baseRuns: [baseRun] };
+  const state = { pr, prRun, currentRun, jobs, artifacts, contents, reports, runs: [prRun] };
   const page = (key, values) => ({ total_count: values.length, [key]: values });
   const request = async endpoint => {
     if (endpoint.startsWith('actions/workflows/')) {
-      return page('workflow_runs', endpoint.includes('head_sha=' + head) ? state.runs : state.baseRuns);
+      assert.ok(endpoint.includes('head_sha=' + head));
+      return page('workflow_runs', state.runs);
     }
     if (endpoint === 'pulls/7') return state.pr;
     if (endpoint.startsWith('actions/runs/20/jobs?')) return page('jobs', state.jobs);
     if (endpoint.startsWith('actions/runs/20/artifacts?')) return page('artifacts', state.artifacts);
-    if (endpoint.startsWith('actions/runs/10/jobs?')) return page('jobs', state.baseJobs);
     throw new Error('unexpected API endpoint: ' + endpoint);
   };
   const args = { sourceSha, before: base, repository, currentRun, git, request, readArtifact: async item => structuredClone(state.contents.get(item.id)) };
   return { state, args, plan, git };
 }
 
-test('same-tree full PR proof does not require base certification, affected proof inherits exact prior main', async () => {
-  const full = fixture(['package.json']);
-  full.state.baseRuns = [];
-  const fullReceipt = await verifyReusableMainProof(full.args);
-  assert.equal(fullReceipt.mode, 'full');
-  assert.equal(fullReceipt.baseProof, null);
-  assert.equal(fullReceipt.sourceSha, sourceSha);
-  assert.equal(fullReceipt.evidence.length, full.plan.groups.length);
-  const affected = fixture();
-  const receipt = await verifyReusableMainProof(affected.args);
-  assert.equal(receipt.mode, 'affected');
-  assert.deepEqual(receipt.baseProof, { runId: 10, attempt: 1 });
+test('same-tree complete PR proof certifies the merged source with exact artifact identities', async () => {
+  const { args, plan } = fixture();
+  const receipt = await verifyReusableMainProof(args);
+  assert.equal(receipt.mode, 'full');
+  assert.equal(receipt.sourceSha, sourceSha);
+  assert.equal(receipt.evidence.length, plan.groups.length);
   assert.equal(receipt.prNumber, 7);
   assert.equal(receipt.tree, tree);
 });
 
-test('compact main proof also accepts an exact previously compact-certified base', async () => {
-  const { state, args } = fixture();
-  const template = state.baseJobs[0];
-  const cert = state.baseJobs.find(job => job.name === 'certification');
-  cert.steps = [
-    { name: 'Certify reused merged PR proof', ...status },
-    { name: 'Certify every required exact-source matrix element', status: 'completed', conclusion: 'skipped' },
-  ];
-  state.baseJobs = [template, cert, ...REUSED_MAIN_SKIPPED_JOBS.map(name => ({ ...template, name, conclusion: 'skipped' }))];
-  assert.equal((await verifyReusableMainProof(args)).baseProof.runId, 10);
+test('an affected plan cannot silently replace omitted main obligations', async () => {
+  const affected = fixture(['docs/README.md']);
+  await assert.rejects(verifyReusableMainProof(affected.args), /Affected PR proof/);
 });
 
 test('merge identity rejects direct push, wrong first parent, stale base and changed tree', () => {
@@ -145,9 +129,6 @@ test('rejected proof paths fail closed instead of accepting an older green or in
     s => { s.artifacts[0].digest = 'bad'; },
     s => { s.artifacts = s.artifacts.filter(item => !item.name.startsWith('ci-evidence-')); },
     s => { [...s.reports.values()][0].results[0].status = 'failed'; },
-    s => { s.baseRuns = []; },
-    s => { s.baseRun.conclusion = 'failure'; },
-    s => { s.baseJobs = s.baseJobs.slice(1); },
   ];
   for (const mutate of mutations) {
     const { state, args } = fixture();

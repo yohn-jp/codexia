@@ -123,10 +123,8 @@ jobs:
         env:
           CODEXIA_PROFILE: full
         run: pnpm run build:frontend
-      - name: Check Worker types and request routing
-        run: pnpm run typecheck:deployment && pnpm run test:deployment
-      - name: Verify route and runtime configuration
-        run: pnpm run verify:deployment
+      # Shared route/Worker checks are owned by Verify's unit-root task.
+      # The exact main-source certification gate requires that proof before deploy.
       - name: Install pinned Wrangler
         run: npm ci --prefix edge/frontend
       - name: Validate Wrangler assets-only bundle
@@ -151,6 +149,7 @@ jobs:
           retention-days: 2
   certify:
     name: Certify exact-source main push
+    needs: [preflight, build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 70

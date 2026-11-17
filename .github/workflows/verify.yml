@@ -7,6 +7,11 @@ on:
   workflow_dispatch: null
 permissions:
   contents: read
+# Only superseded revisions of the same PR may cancel each other.
+# Main and manual runs retain their own exact-source certification.
+concurrency:
+  group: verify-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   plan:
     name: plan
@@ -523,7 +528,7 @@ jobs:
           retention-days: 7
   certification:
     name: certification
-    if: always()
+    if: ${{ always() && !cancelled() }}
     needs:
       - plan
       - unit
