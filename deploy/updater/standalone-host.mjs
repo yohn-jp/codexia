@@ -6,7 +6,7 @@ import { access, lstat, mkdir, open, readFile, readlink, realpath, rmdir, stat, 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWrite } from '../../scripts/standalone-update-controller.mjs';
-import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
+import { IDENTITY_PROBE_PATHS, probeScopedIdentityAccess, validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
 
 const SLOT = /^(blue|green)$/u;
 const name = slot => {if(!SLOT.test(slot))throw Error('Invalid slot');return 'codexia-slot-'+slot;};
@@ -758,7 +758,7 @@ export function validateFrontendIdentity(value){
 export class PodmanStandaloneHost{
   constructor(config){
     const url=new URL(config.frontendIdentityUrl);
-    assert.equal(url.protocol,'https:');assert.equal(url.pathname,'/desktop/update-identity.json');
+    assert.equal(url.protocol,'https:');assert.equal(url.pathname,IDENTITY_PROBE_PATHS.frontend);
     assert.ok(!url.username&&!url.password&&!url.search&&!url.hash);
     for(const key of ['routeFile','quadletDirectory','githubTokenFile'])assert.ok(path.isAbsolute(config[key]),key+' must be absolute');
     assert.ok(!config.accessClientIdFile===!config.accessClientSecretFile,'Access credentials must be paired');
@@ -842,6 +842,16 @@ export class PodmanStandaloneHost{
     const token=(await readFile(this.config.githubTokenFile,'utf8')).trim();
     if(!token)throw Error('GitHub channel read credential unavailable');
     return boundedJson(channelUrl,{Authorization:'Bearer '+token,Accept:'application/vnd.github.raw+json','X-GitHub-Api-Version':'2022-11-28'});
+  }
+  async probeAccessCredentials(release,{fetchImpl=fetch}={}){
+    const clientId=(await readFile(this.config.accessClientIdFile,'utf8')).trim();
+    const clientSecret=(await readFile(this.config.accessClientSecretFile,'utf8')).trim();
+    assert.ok(clientId&&clientSecret,'Missing Access service credentials');
+    return probeScopedIdentityAccess({
+      origin:new URL(this.url),credentials:{clientId,clientSecret},fetchImpl,checkBoundary:true,
+      validateBackend:value=>{assertVersion(value,release,this.authEnvironment.CODEXIA_BROWSER_AUTH);return value;},
+      validateFrontend:value=>{const identity=validateFrontendIdentity(value);assert.equal(identity.profile,release.profile);assert.equal(identity.apiEpoch,release.apiEpoch);return identity;},
+    });
   }
   async frontendIdentity(){
     const headers={};

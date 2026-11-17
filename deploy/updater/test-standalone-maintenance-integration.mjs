@@ -343,6 +343,11 @@ export function installTestAdapters(hostClass = PodmanStandaloneHost) {
       return signUpdateChannel({format:'codexia-update-channel/v1',sequence:1,issuedAt:new Date(now-1000).toISOString(),
         expiresAt:new Date(now+60000).toISOString(),releases:[state.installed]},privateKey,now);
     };
+    hostClass.prototype.probeAccessCredentials = async function probeSyntheticAccess(release) {
+      const identity=await this.frontendIdentity();
+      assert.equal(identity.profile,release.profile);
+      assert.equal(identity.apiEpoch,release.apiEpoch);
+    };
     hostClass.prototype.frontendIdentity = async function fetchSyntheticFrontend() {
       const id=(await readFile(this.config.accessClientIdFile,'utf8')).trim();
       const secret=(await readFile(this.config.accessClientSecretFile,'utf8')).trim();

@@ -177,9 +177,9 @@ test('probe credential admission requires a fresh signed channel and compatible 
   const installed={format:'codexia-update-release/v1',channel:'stable',state:'published',version:'0.1.0',sourceSha:'a'.repeat(40),image:release.image,platform:'linux/amd64',profile:'core',migrationFingerprint:'sha256:'+'c'.repeat(64),persistenceFormat:1,apiEpoch:1};
   const signed=signUpdateChannel({format:'codexia-update-channel/v1',sequence:1,issuedAt:new Date(now-1000).toISOString(),expiresAt:new Date(now+60000).toISOString(),releases:[installed]},priv,now);
   const state={installed,journal:{checkpoint:verifyUpdateChannel(signed,pub,null,now).checkpoint}};
-  const host={fetchChannel:async()=>signed,frontendIdentity:async()=>({profile:'core',apiEpoch:1})};
+  const host={fetchChannel:async()=>signed,probeAccessCredentials:async release=>{assert.deepEqual(release,installed);}};
   await assertProbeCredentialAccess(host,state,pub);
-  await assert.rejects(assertProbeCredentialAccess({...host,fetchChannel:async()=>{throw Error('secret-value');}},state,pub),error=>error.message==='Probe credentials did not verify the signed channel and deployed frontend identity');
-  await assert.rejects(assertProbeCredentialAccess({...host,frontendIdentity:async()=>({profile:'core',apiEpoch:2})},state,pub),/Probe credentials did not verify/);
+  await assert.rejects(assertProbeCredentialAccess({...host,fetchChannel:async()=>{throw Error('secret-value');}},state,pub),error=>error.message==='Probe credentials did not verify the signed channel and scoped live identity access');
+  await assert.rejects(assertProbeCredentialAccess({...host,probeAccessCredentials:async()=>{throw Error('ACCESS_BOUNDARY');}},state,pub),/Probe credentials did not verify/);
   await assert.rejects(assertProbeCredentialAccess(host,{...state,installed:{...installed,apiEpoch:2}},pub),/Probe credentials did not verify/);
 });

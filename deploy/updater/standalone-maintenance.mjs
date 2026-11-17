@@ -49,11 +49,9 @@ export async function assertProbeCredentialAccess(host,state,publicKey){
   try{
     const verified=verifyUpdateChannel(await host.fetchChannel(),publicKey,state.journal.checkpoint);
     assert.ok(verified.payload.releases.some(release=>release.state==='published'&&isDeepStrictEqual(release,state.installed)));
-    const identity=await host.frontendIdentity();
-    assert.equal(identity.profile,state.installed.profile);
-    assert.equal(identity.apiEpoch,state.installed.apiEpoch);
+    await host.probeAccessCredentials(state.installed);
   }catch{
-    throw Error('Probe credentials did not verify the signed channel and deployed frontend identity');
+    throw Error('Probe credentials did not verify the signed channel and scoped live identity access');
   }
 }
 function plainObject(value){return value!==null&&typeof value==='object'&&!Array.isArray(value);}
