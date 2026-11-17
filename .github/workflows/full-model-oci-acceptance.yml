@@ -26,8 +26,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: full-model-oci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: false
+  group: full-model-oci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   full-model-oci:
     name: Run pinned Full model lifecycle on rootless Podman
@@ -41,6 +41,7 @@ jobs:
       - name: Check out the exact source without persistent credentials
         uses: actions/checkout@v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
           persist-credentials: false
       - name: Set up Node.js
@@ -59,6 +60,7 @@ jobs:
           free -h
           df -h "$RUNNER_TEMP"
       - name: Write the pinned real model file manifest
+        id: model-manifest
         run: |
           set -euo pipefail
           cat > "$RUNNER_TEMP/p13-model-files.tsv" <<'MODEL_FILES'
@@ -76,12 +78,13 @@ jobs:
           mogolloni/bge-reranker-v2-m3-onnx	e5023553f6c47f09057da7a19cdd79ef850a4985	onnx/model.onnx	489245	ed283424d9a40dbd6fe2f3081386848a88cc8057b7ab43e02d84077d6b69ba42
           mogolloni/bge-reranker-v2-m3-onnx	e5023553f6c47f09057da7a19cdd79ef850a4985	onnx/model.onnx_data	2271088656	9a748c82efb2079d24650c489e053dbb3c71d8acbbcf04d7b2340db66f2748f7
           MODEL_FILES
+          echo "digest=$(sha256sum "$RUNNER_TEMP/p13-model-files.tsv" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - name: Restore the exact pinned model artifacts
         id: model-cache
         uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ runner.temp }}/codexia-p13-model-cache
-          key: p13-full-models-ubuntu-26.04-${{ hashFiles('.github/workflows/full-model-oci-acceptance.yml', 'tests/integration/model-oci-lifecycle.acceptance.mjs', 'tests/integration/model-oci-lifecycle.container.mjs') }}
+          key: p13-full-models-ubuntu-26.04-manifest-${{ steps.model-manifest.outputs.digest }}
       - name: Download the real model files from their pinned revisions
         if: steps.model-cache.outputs.cache-hit != 'true'
         timeout-minutes: 45
@@ -149,7 +152,7 @@ jobs:
         uses: actions/cache/save@v6.1.0
         with:
           path: ${{ runner.temp }}/codexia-p13-model-cache
-          key: p13-full-models-ubuntu-26.04-${{ hashFiles('.github/workflows/full-model-oci-acceptance.yml', 'tests/integration/model-oci-lifecycle.acceptance.mjs', 'tests/integration/model-oci-lifecycle.container.mjs') }}
+          key: p13-full-models-ubuntu-26.04-manifest-${{ steps.model-manifest.outputs.digest }}
       - name: Run the real Full model OCI lifecycle acceptance
         timeout-minutes: 60
         env:

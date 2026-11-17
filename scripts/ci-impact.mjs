@@ -34,6 +34,104 @@ export function matchesFullModelOciPath(file) {
     pattern.endsWith('/**') ? file.startsWith(pattern.slice(0, -2)) : file === pattern);
 }
 
+// Reviewed independent inputs: root unit owns script/route/Worker proof;
+// dedicated Ansible, Terraform, audit and static-delivery workflows own
+// their corresponding executable integration proofs. New paths fail closed.
+export const OPERATIONAL_ROOT_PATHS = Object.freeze([
+  'deploy/ansible/acceptance.yml',
+  'deploy/ansible/base-runtime.yml',
+  'deploy/ansible/base-secrets.yml',
+  'deploy/ansible/check_postgres_volume.py',
+  'deploy/ansible/enable.yml',
+  'deploy/ansible/host-contract.py',
+  'deploy/ansible/host-validate.yml',
+  'deploy/ansible/host.yml',
+  'deploy/ansible/initialize.yml',
+  'deploy/ansible/inspect.yml',
+  'deploy/ansible/install-units.yml',
+  'deploy/ansible/inventory.example.yml',
+  'deploy/ansible/maintenance.yml',
+  'deploy/ansible/preflight.yml',
+  'deploy/ansible/prepare.yml',
+  'deploy/ansible/requirements.txt',
+  'deploy/ansible/site.yml',
+  'deploy/ansible/switch-tunnel-to-proxy.yml',
+  'deploy/ansible/test-base-runtime-integration.sh',
+  'deploy/ansible/test-base-secrets-integration.sh',
+  'deploy/ansible/test-base-secrets.sh',
+  'deploy/ansible/test-host-integration.sh',
+  'deploy/ansible/test-host-validation.sh',
+  'deploy/ansible/test-inspect.sh',
+  'deploy/ansible/test-preflight.sh',
+  'deploy/ansible/test-runtime-contract.sh',
+  'deploy/ansible/test-tunnel-dependency.sh',
+  'deploy/ansible/test-verify-timer.sh',
+  'deploy/ansible/test_host_contract.py',
+  'deploy/ansible/test_postgres_volume_layout.py',
+  'deploy/ansible/validate-runtime.yml',
+  'deploy/ansible/verify-base-db-container.yml',
+  'deploy/ansible/verify-base-tunnel-container.yml',
+  'deploy/ansible/verify-postgres-roles.sql',
+  'deploy/ansible/verify-timer.yml',
+  'deploy/ansible/verify-tunnel-legacy.yml',
+  'deploy/ansible/verify.yml',
+  'deploy/updater/codexia-api-proxy.container.example',
+  'deploy/updater/codexia-updater',
+  'deploy/updater/codexia-updater-boot.service.example',
+  'deploy/updater/codexia-updater.service.example',
+  'deploy/updater/codexia-updater.timer.example',
+  'deploy/updater/config.example.json',
+  'deploy/updater/provision-preflight-role.sql',
+  'deploy/updater/proxy.mjs',
+  'deploy/updater/standalone-host.mjs',
+  'deploy/updater/standalone-maintenance.mjs',
+  'deploy/updater/standalone-updater.mjs',
+  'deploy/updater/test-runtime-contract-integration.sh',
+  'deploy/updater/test-standalone-maintenance-integration.mjs',
+  'deploy/updater/test-standalone-maintenance-preload.mjs',
+  'deploy/quadlet/codexia-api.container',
+  'deploy/quadlet/codexia-data.network',
+  'deploy/quadlet/codexia-data.volume',
+  'deploy/quadlet/codexia-db.container',
+  'deploy/quadlet/codexia-history.volume',
+  'deploy/quadlet/codexia-postgres.volume',
+  'deploy/quadlet/codexia-tunnel.container',
+  'deploy/quadlet/codexia.network',
+  'deploy/postgres/010-create-app-role.sh',
+  'deploy/cloudflare/identity-probes.json',
+  'deploy/cloudflare/ui-routes.json',
+  'deploy/cloudflare/terraform/.gitignore',
+  'deploy/cloudflare/terraform/main.tf',
+  'deploy/cloudflare/terraform/terraform.tfvars.example',
+  'deploy/cloudflare/terraform/variables.tf',
+  'deploy/cloudflare/terraform/versions.tf',
+  'edge/frontend/package-lock.json',
+  'edge/frontend/package.json',
+  'edge/frontend/static/_headers',
+  'edge/frontend/static/_redirects',
+  'edge/frontend/test/static-smoke.mjs',
+  'edge/frontend/test/worker.test.ts',
+  'edge/frontend/tsconfig.json',
+  'edge/frontend/wrangler.jsonc',
+  'scripts/audit/export.mjs',
+  'scripts/audit/export.test.mjs',
+  'scripts/audit/repomix.config.json',
+  '.github/workflows/ansible-host.yml',
+  '.github/workflows/ansible-base-secrets.yml',
+  '.github/workflows/ansible-runtime-contract.yml',
+  '.github/workflows/deployment-config.yml',
+  '.github/workflows/repository-audit.yml',
+  'scripts/verify-deployment-config.mjs',
+  'scripts/verify-frontend-compatibility.mjs',
+  'scripts/verify-frontend-compatibility.test.mjs',
+  'scripts/standalone-host.test.mjs',
+  'scripts/standalone-maintenance.test.mjs',
+  'scripts/standalone-update-controller.mjs',
+  'scripts/standalone-update-controller.test.mjs',
+  'docs/deployment/README.md',
+]);
+const operationalRootPaths = new Set(OPERATIONAL_ROOT_PATHS);
+
 export function createVerificationPlan({ files, event, sha, base = null }) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? '') || (base !== null && !/^[a-f0-9]{40}$/.test(base))) throw new Error('Invalid verification source identity');
   const selected = new Set(['coverage']);
@@ -43,6 +141,12 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
   const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
   for (const file of files ?? []) {
     if (typeof file !== 'string' || !file || file.startsWith('/') || file.split('/').includes('..')) { full = true; break; }
+    if (operationalRootPaths.has(file)) {
+      add('unit-root');
+      continue;
+    }
+    // API client source is read by the canonical deployment route assertion.
+    if (file === 'app/src/api.ts') add('unit-root');
     if (file === 'AGENTS.md' || file === 'CONTRIBUTING.md' || file === 'LICENSE' || /^docs\/.*\.md$/u.test(file) || /^README(?:\.[a-z-]+)?\.md$/iu.test(file)) continue;
     // Workspace manifests/configuration, shared contracts and unknown files are global inputs.
     const owner = WORKSPACES.find(item => file.startsWith(`${item.path}/src/`));
