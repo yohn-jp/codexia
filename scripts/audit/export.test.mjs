@@ -25,6 +25,14 @@ test('only regular source blobs, not credentials, data or branch-controlled pack
   assert.ok(exclusion('submodule', '160000', 0));
   for (const path of ['.env.example', 'app/src/index.ts', '.github/workflows/verify.yml', 'docs/architecture/CORE.md', 'packages/core/src/merge.test.ts', 'packages/persistence-postgres/migrations/0001.sql', 'pnpm-lock.yaml']) assert.equal(exclusion(path, '100644', 1), null, path);
 });
+test('vendored project agent skills are excluded without hiding governance or source', () => {
+  for (const path of ['.agents/skills/modern-web-guidance/SKILL.md', '.agents/skills/modern-web-guidance/guides/css/css.md', '.agents/skills/chrome-extensions/SKILL.md']) {
+    assert.equal(exclusion(path, '100644', 1), 'vendored-agent-skill', path);
+  }
+  for (const path of ['AGENTS.md', 'skills-lock.json', '.agents/LICENSE', '.agents/custom.md', '.agents/skills-extra/guide.md', 'packages/core/src/skills.ts']) {
+    assert.equal(exclusion(path, '100644', 1), null, path);
+  }
+});
 test('split parts preserve whole files and reconstruct packed input', () => {
   const files = { 'a.ts': 'small\n', 'b.ts': '😀\n"\\'.repeat(100_000), 'c.ts': '' };
   const output = splitFiles(files, sha);
@@ -58,6 +66,14 @@ test('real Repomix packs immutable Git blobs, skips unsafe input, reuses only ve
     writeFileSync(join(repo, 'source.ts'), 'export const value = 1;\n');
     mkdirSync(join(repo, 'evidence', 'run'), { recursive: true });
     writeFileSync(join(repo, 'evidence', 'run', 'scene.md'), 'historical fixture');
+    for (const skill of ['modern-web-guidance', 'chrome-extensions']) {
+      const skillDir = join(repo, '.agents', 'skills', skill);
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(join(skillDir, 'SKILL.md'), 'vendored guidance\n');
+    }
+    writeFileSync(join(repo, 'AGENTS.md'), 'project instructions\n');
+    writeFileSync(join(repo, 'skills-lock.json'), '{"skills":{}}\n');
+    writeFileSync(join(repo, '.agents', 'LICENSE'), 'upstream license\n');
     mkdirSync(join(repo, 'app', 'src'), { recursive: true });
     writeFileSync(join(repo, 'app', 'src', 'view.ts'), 'export const view = true;\n');
     writeFileSync(join(repo, '.env'), 'PRIVATE_TEST_VALUE=must-not-be-packed\n');
@@ -85,7 +101,16 @@ test('real Repomix packs immutable Git blobs, skips unsafe input, reuses only ve
     assert.equal(Object.hasOwn(files, 'evidence/run/scene.md'), false);
     const manifest = read('site1', second, 'manifest.json');
     assert.ok(manifest.excluded.some(x => x.path === 'evidence/run/scene.md' && x.reason === 'historical-evidence'));
-    assert.equal(manifest.outputs.filter(x => x.name.startsWith('part-')).length, 2);
+    for (const skill of ['modern-web-guidance', 'chrome-extensions']) {
+      const path = '.agents/skills/' + skill + '/SKILL.md';
+      assert.equal(Object.hasOwn(files, path), false);
+      assert.ok(manifest.excluded.some(x => x.path === path && x.reason === 'vendored-agent-skill'));
+    }
+    for (const path of ['AGENTS.md', 'skills-lock.json', '.agents/LICENSE']) {
+      assert.equal(Object.hasOwn(files, path), true, path);
+      assert.ok(manifest.files.some(x => x.path === path), path);
+    }
+    assert.equal(manifest.outputs.filter(x => x.name.startsWith('part-')).length, 3);
     const c = run('site2', [{branch:'main',sha:second}], '/does-not-exist');
     assert.equal(c.snapshots[second].status, 'ready');
     assert.equal(existsSync(join(root, 'site2', 'snapshots', first)), false);
