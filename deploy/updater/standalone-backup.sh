@@ -37,6 +37,9 @@ remote_directory(){
   [[ -n "$remote_addresses" ]] || die 'Cannot verify the backup destination host address'
   while IFS= read -r address; do
     [[ -n "$address" ]] || continue
+    # getent may return an IPv4-mapped IPv6 address. Compare its IPv4 form.
+    case "${address,,}" in ::ffff:*.*) address="${address##*:}";; esac
+    case "${address,,}" in 127.*|::1|0.0.0.0|::) die 'Backup destination resolves to this VM';; esac
     if grep -Fxq "$address" <<< "$local_addresses"; then die 'Backup destination resolves to this VM'; fi
   done <<< "$remote_addresses"
 }
