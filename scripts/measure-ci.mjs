@@ -2,6 +2,7 @@
 // Read-only observed timings. Unseparated legacy phases remain NOT_CHECKED.
 import { writeFile, appendFile } from 'node:fs/promises';
 import { collectGitHubPages } from './release-policy.mjs';
+import { seconds, summarizeCiTiming } from './ci-timing.mjs';
 const args = process.argv.slice(2);
 const option = name => args.includes(name) ? args[args.indexOf(name) + 1] : undefined;
 const repository = process.env.GITHUB_REPOSITORY;
@@ -19,10 +20,9 @@ const request = async endpoint => {
 };
 const runPath = `actions/runs/${runId}${attempt ? `/attempts/${attempt}` : ''}`;
 const run = await request(runPath);
-const jobs = await collectGitHubPages(page => request(`${runPath}/jobs?${attempt ? '' : 'filter=latest&'}per_page=100&page=${page}`), 'jobs');
-const seconds = (start, end) => start && end ? Math.max(0, (Date.parse(end) - Date.parse(start)) / 1000) : null;
+const jobs = await collectGitHubPages(page => request(`actions/runs/${runId}/attempts/${run.run_attempt}/jobs?per_page=100&page=${page}`), 'jobs');
 const observations = jobs.map(job => {
-  const phase = pattern => job.steps.filter(step => pattern.test(step.name)).map(step => ({ name: step.name, seconds: seconds(step.started_at, step.completed_at), result: step.conclusion }));
+  const phase = pattern => (job.steps ?? []).filter(step => pattern.test(step.name)).map(step => ({ name: step.name, seconds: seconds(step.started_at, step.completed_at), result: step.conclusion }));
   return { name: job.name, sha: job.head_sha, result: job.conclusion, queueSeconds: seconds(job.created_at, job.started_at),
     durationSeconds: seconds(job.started_at, job.completed_at),
     runnerPreparation: phase(/Set up job|Initialize containers|setup-node/),
@@ -34,27 +34,16 @@ const observations = jobs.map(job => {
     cache: phase(/Restore content-addressed/),
     artifactPreparation: phase(/Pack immutable profile build|Seal verified native producer evidence/),
     artifactRestore: phase(/Restore exact profile producer|Restore exact native producer/),
-    artifactTransfer: phase(/upload-artifact|download-artifact/), cacheHit: job.steps.find(step => /^Dependency cache hit=/.test(step.name))?.name.split('=')[1] ?? 'NOT_CHECKED',
+    artifactTransfer: phase(/upload-artifact|download-artifact/), cacheHit: (job.steps ?? []).find(step => /^Dependency cache hit=/.test(step.name))?.name.split('=')[1] ?? 'NOT_CHECKED',
   };
 });
-const completed = jobs.filter(job => job.completed_at).map(job => Date.parse(job.completed_at));
-const leafJobs = jobs.filter(job => job.name !== 'certification' && job.completed_at);
-const latestLeaf = leafJobs.sort((a, b) => Date.parse(b.completed_at) - Date.parse(a.completed_at))[0];
-// A rerun starts a new attempt; do not count the idle gap since the original run.
-const attemptStartedAt = run.run_attempt > 1 ? run.run_started_at : run.created_at;
-const completedDurations=observations.map(job=>job.durationSeconds).filter(value=>value!==null);
-const observedRunnerSeconds=completedDurations.reduce((sum,value)=>sum+value,0);
-const report = { runId, createdAt: run.created_at, attemptStartedAt, url: run.html_url, sha: run.head_sha, attempt: run.run_attempt, status: run.status, result: run.conclusion,
-  wallClockSeconds: run.status === 'completed' && completed.length ? (Math.max(...completed) - Date.parse(attemptStartedAt)) / 1000 : null,
-  observedElapsedSeconds: completed.length ? (Math.max(...completed) - Date.parse(attemptStartedAt)) / 1000 : null,
-  runnerSeconds: run.status === 'completed' && completedDurations.length === observations.length ? observedRunnerSeconds : null,
-  observedRunnerSeconds,
-  criticalPath: latestLeaf ? `${latestLeaf.name}${jobs.some(job => job.name === 'certification') ? ' -> certification' : ''}` : null,
+const timing = summarizeCiTiming(run, jobs);
+const report = { runId, createdAt: run.created_at, url: run.html_url, sha: run.head_sha, attempt: run.run_attempt, status: run.status, result: run.conclusion,
+  ...timing,
   warmColdClassification: 'Use per-job cache results; a rerun is not automatically warm.',
-  criticalPathNote: 'Last completed leaf, not a calculated dependency chain. Compare actual predecessor completion and queue intervals.',
   phaseMeasurementNote: 'Empty phase arrays mean not separately instrumented, not zero. Legacy source/browser steps combine phases; OCI combines image build and runtime checks; native verification includes Docker builds and compose. Download-related steps include other work and are not download-only stopwatch measurements.',
   jobs: observations };
 const output = option('--out');
 if (output) await writeFile(output, JSON.stringify(report, null, 2) + '\n');
 console.log(JSON.stringify(report, null, 2));
-if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, `Timing evidence: run ${runId}, last completed leaf ${latestLeaf?.name ?? 'NOT_CHECKED'}. Final wall-clock is measured after workflow completion.\n`);
+if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, `Timing evidence: run ${runId}, certification predecessor ${timing.criticalPath ?? 'NOT_CHECKED'}. Final wall-clock is measured after workflow completion.\n`);
