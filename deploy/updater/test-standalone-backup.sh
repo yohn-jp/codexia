@@ -89,6 +89,19 @@ export PATH="$shim:$PATH"
 export XDG_STATE_HOME="$state_home"
 export CODEXIA_TEST_REMOTE="$remote"
 export CODEXIA_REAL_FINDMNT="$real_findmnt"
+# A hostname can resolve to any address in 127/8, not just the literal
+# address assigned to lo. Unspecified and IPv4-mapped local addresses must
+# also fail before any writer is drained or artifact is created.
+for address in 127.0.0.2 ::ffff:127.0.0.2 0.0.0.0 :: ::1; do
+  if CODEXIA_TEST_REMOTE_ADDRESS="$address" bash "$backup_script" validate-destination "$remote" > "$tmp/local-address.log" 2>&1; then
+    echo "Backup accepted a locally resolved address: $address" >&2
+    exit 1
+  fi
+  grep -q 'Backup destination resolves to this VM' "$tmp/local-address.log"
+done
+for address in 192.0.2.10 2001:db8::10 ::ffff:192.0.2.10; do
+  CODEXIA_TEST_REMOTE_ADDRESS="$address" bash "$backup_script" validate-destination "$remote" >/dev/null
+done
 run_locked_backup() {
   (
     exec 9> "$state_dir/host.lock"
