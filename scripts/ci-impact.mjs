@@ -131,6 +131,18 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'scripts/standalone-maintenance.test.mjs',
   'scripts/standalone-update-controller.mjs',
   'scripts/standalone-update-controller.test.mjs',
+  // Encrypted backup and lifecycle have their own exact-head integration workflow.
+  'deploy/ansible/backup.yml',
+  'deploy/ansible/lifecycle.yml',
+  'deploy/ansible/restore-drill.yml',
+  'deploy/ansible/test-lifecycle-contract.sh',
+  'deploy/ansible/test-lifecycle-contract.yml',
+  'deploy/updater/standalone-backup.sh',
+  'deploy/updater/test-standalone-backup-lock.sh',
+  'deploy/updater/test-standalone-backup-startup-fence.sh',
+  'deploy/updater/test-standalone-backup.sh',
+  'scripts/standalone-backup-controller.test.mjs',
+  '.github/workflows/standalone-backup.yml',
   'docs/deployment/README.md',
   'docs/deployment/PHASE-F-DISPOSABLE-CI.md',
 ]);

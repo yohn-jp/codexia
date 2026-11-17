@@ -159,3 +159,35 @@ test('root and coverage-only plans have a single owner for contract test executi
   assert.deepEqual((await plan(['docs/authoring.md'])).tasks, ['coverage']);
   assert.deepEqual((await plan(['deploy/ansible/host.yml'])).tasks, ['unit-root','coverage']);
 });
+
+test('backup and recovery-only changes retain root and exact-head dedicated integration proof', async () => {
+  const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
+  const backup = parse(readFileSync(new URL('../.github/workflows/standalone-backup.yml', import.meta.url), 'utf8'));
+  const paths = [
+    'deploy/ansible/backup.yml',
+    'deploy/ansible/lifecycle.yml',
+    'deploy/ansible/restore-drill.yml',
+    'deploy/ansible/test-lifecycle-contract.sh',
+    'deploy/ansible/test-lifecycle-contract.yml',
+    'deploy/updater/standalone-backup.sh',
+    'deploy/updater/test-standalone-backup-lock.sh',
+    'deploy/updater/test-standalone-backup-startup-fence.sh',
+    'deploy/updater/test-standalone-backup.sh',
+    'scripts/standalone-backup-controller.test.mjs',
+    '.github/workflows/standalone-backup.yml',
+  ];
+  for (const file of paths) {
+    assert.deepEqual((await plan([file])).tasks, ['unit-root', 'coverage'], file);
+    assert.equal((await plan([file])).full_model_oci, false, file);
+    for (const event of ['pull_request', 'push']) assert.ok(backup.on[event].paths.includes(file), file);
+  }
+  assert.deepEqual(backup.on.pull_request.branches, ['main']);
+  assert.deepEqual(backup.on.push.branches, ['main']);
+  const steps = backup.jobs['backup-drill'].steps;
+  assert.equal(steps.find(s => s.uses?.startsWith('actions/checkout')).with.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
+  assert.ok(steps.some(s => s.run?.includes('bash deploy/ansible/test-lifecycle-contract.sh')));
+  assert.ok(steps.some(s => s.run?.includes('bash deploy/updater/test-standalone-backup.sh')));
+  assert.deepEqual((await plan([...paths, 'pnpm-lock.yaml'])).tasks, VERIFICATION_TASKS);
+  assert.deepEqual((await plan(paths, 'push')).tasks, VERIFICATION_TASKS);
+  assert.deepEqual((await plan(null)).tasks, VERIFICATION_TASKS);
+});
