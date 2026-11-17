@@ -58,11 +58,17 @@
     - name: End host convergence before any application task
       ansible.builtin.meta: end_host
       when: codexia_stage == 'host'
+    - name: Run the isolated recovery drill on the Ansible recovery host
+      ansible.builtin.include_tasks: restore-drill.yml
+      when: codexia_stage == 'restore-drill'
+    - name: End recovery drill before querying or changing the source VM
+      ansible.builtin.meta: end_host
+      when: codexia_stage == 'restore-drill'
     - name: Require explicit standalone deployment inputs
       ansible.builtin.assert:
         that:
           - ansible_facts.user_uid | int != 0
-          - codexia_stage in ['secrets', 'base', 'prepare', 'initialize', 'enable', 'verify', 'maintain', 'acceptance-update', 'acceptance-rollback']
+          - codexia_stage in ['secrets', 'base', 'prepare', 'initialize', 'enable', 'verify', 'maintain', 'backup', 'pause', 'resume', 'rollback', 'acceptance-update', 'acceptance-rollback']
           - codexia_stage in ['secrets', 'base'] or codexia_frontend_origin is match('^https://[a-z0-9.-]+(:[0-9]+)?$')
           - codexia_stage in ['secrets', 'base'] or codexia_proxy_image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
           - codexia_stage in ['secrets', 'base'] or codexia_browser_auth.mode in ['token', 'cloudflare-access']
@@ -121,21 +127,21 @@
     - name: Initialize the exclusive writer
       ansible.builtin.include_tasks: initialize.yml
       when: codexia_stage == 'initialize' and not journal.stat.exists and not ansible_check_mode
-    - name: Require an existing controller for verify, maintain and enable
+    - name: Require an existing controller for initialized lifecycle operations
       ansible.builtin.assert:
         that: journal.stat.exists
-      when: codexia_stage in ['verify', 'maintain', 'enable', 'acceptance-update', 'acceptance-rollback']
+      when: codexia_stage in ['verify', 'maintain', 'enable', 'pause', 'resume', 'rollback', 'acceptance-update', 'acceptance-rollback']
     - name: Verify preflight role and secret after initialization without changing them
       ansible.builtin.include_tasks: preflight.yml
       vars:
         preflight_verify_only: true
-      when: journal.stat.exists
+      when: journal.stat.exists and codexia_stage != 'backup'
     - name: Maintain updater source, configuration and systemd units through the locked controller
       ansible.builtin.include_tasks: maintenance.yml
       when: codexia_stage == 'maintain' and journal.stat.exists and not ansible_check_mode
     - name: Verify initialized controller
       ansible.builtin.include_tasks: verify.yml
-      when: journal.stat.exists
+      when: journal.stat.exists and codexia_stage != 'backup'
     - name: Ensure boot and poll units after initialization (also repairs interrupted unit installation)
       ansible.builtin.include_tasks: install-units.yml
       when: codexia_stage == 'initialize' and not ansible_check_mode
@@ -145,3 +151,9 @@
     - name: Enable automatic updates only after live acceptance
       ansible.builtin.include_tasks: enable.yml
       when: codexia_stage == 'enable' and not ansible_check_mode
+    - name: Run the controller-locked encrypted backup lifecycle
+      ansible.builtin.include_tasks: backup.yml
+      when: codexia_stage == 'backup' and not ansible_check_mode
+    - name: Run the controller-locked pause, resume or rollback lifecycle
+      ansible.builtin.include_tasks: lifecycle.yml
+      when: codexia_stage in ['pause', 'resume', 'rollback'] and not ansible_check_mode

@@ -257,6 +257,12 @@ async function runInterruptedBootRecovery({ repoRoot, workDir, stateDir, configP
   const markerInfo = await lstat(markerPath);
   assert.ok(markerInfo.isFile() && !markerInfo.isSymbolicLink(), 'Interrupted maintenance marker was not retained');
   assert.equal(JSON.parse(await readFile(markerPath, 'utf8')).runtimeChanged, true, 'Fault-injected transaction did not exercise typed runtime recovery');
+  const directVerify = spawnSync('sh', [wrapper, 'verify', configPath], {
+    encoding: 'utf8', timeout: 240000, maxBuffer: 4 * 1024 * 1024, env: environment,
+  });
+  if (directVerify.error) throw directVerify.error;
+  assert.notEqual(directVerify.status, 0, 'Installed verify accepted pending maintenance');
+  assert.match(directVerify.stderr, /Pending runtime maintenance requires recovery before other operations/u);
   const interruptedState = await loadControllerState(path.join(stateDir, 'controller.json'));
   assert.equal(interruptedState.paused, true, 'Interrupted maintenance did not keep the controller paused');
   await assertTimerState('inactive', 'enabled');
