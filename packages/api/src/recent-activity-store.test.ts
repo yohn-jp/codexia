@@ -42,6 +42,46 @@ describe("RecentActivityStore", () => {
     assert.equal((await lstat(resolve(usageDirectory, "recent-activity", "recent-activity-state.json"))).mode & 0o777, 0o600);
   });
 
+  it("fences reordered reports across store instances while merging only the omitted reading page", async (t) => {
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-recent-order-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const history = resolve(root, "history");
+    const writer = "12345678-1234-4234-8234-123456789abc";
+    const otherWriter = "87654321-1234-4234-8234-123456789abc";
+    const first = new RecentActivityStore(history);
+    const put = (store: RecentActivityStore, sequence: number, sentenceOffset: number, pageIndex?: number) =>
+      store.upsert("owner", repository, { sceneId: "scene-one", sentenceOffset, deviceType: "desktop",
+        ...(pageIndex === undefined ? {} : { pageIndex }) }, { writer, sequence });
+    await put(first, 3, 30);
+    const restarted = new RecentActivityStore(history);
+    const current = (await restarted.list("owner", repository))[0]!;
+    assert.equal(current.sentenceOffset, 30);
+    const stale = (await put(restarted, 1, 10))[0]!;
+    assert.deepEqual(stale, current);
+    const olderPage = (await put(restarted, 2, 20, 7))[0]!;
+    assert.equal(olderPage.sentenceOffset, 30);
+    assert.equal(olderPage.pageIndex, 7);
+    assert.equal(olderPage.updatedAt, current.updatedAt);
+    assert.deepEqual((await put(restarted, 1, 10, 2))[0], olderPage);
+    await put(restarted, 5, 50, 9);
+    assert.equal((await put(restarted, 4, 40, 8))[0]?.pageIndex, 9);
+    await put(restarted, 7, 70);
+    await restarted.upsert("owner", repository, { sceneId: "other", sentenceOffset: 80, pageIndex: 12, deviceType: "desktop" }, { writer: otherWriter, sequence: 1 });
+    assert.equal((await put(restarted, 6, 60, 1))[0]?.pageIndex, 12);
+    await put(restarted, 9, 90);
+    await restarted.upsert("owner", repository, { sceneId: "legacy", sentenceOffset: 100, pageIndex: 14, deviceType: "desktop" });
+    assert.equal((await put(restarted, 8, 80, 1))[0]?.pageIndex, 14);
+    await restarted.upsert("another-owner", repository, { sceneId: "other-owner", sentenceOffset: 1, deviceType: "desktop" }, { writer, sequence: 1 });
+    await restarted.upsert("owner", "other-project", { sceneId: "other-project", sentenceOffset: 1, deviceType: "desktop" }, { writer, sequence: 1 });
+    await restarted.upsert("owner", repository, { sceneId: "mobile", sentenceOffset: 1, deviceType: "mobile" }, { writer, sequence: 1 });
+    assert.equal((await restarted.list("another-owner", repository))[0]?.sceneId, "other-owner");
+    assert.equal((await restarted.list("owner", "other-project"))[0]?.sceneId, "other-project");
+    assert.equal((await restarted.list("owner", repository)).find((item) => item.deviceType === "mobile")?.sceneId, "mobile");
+    assert.equal((await lstat(resolve(history, "recent-activity", "recent-activity-order.json"))).mode & 0o777, 0o600);
+    const legacyFile = JSON.parse(await readFile(resolve(history, "recent-activity", "recent-activity-state.json"), "utf8")) as Record<string, unknown>;
+    assert.deepEqual(Object.keys(legacyFile).sort(), ["entries", "legacySources", "version"]);
+  });
+
   it("archives exact canonical bytes and adopts only explicitly mapped rows without regressing live cursors", async (t) => {
     const root = await mkdtemp(resolve(tmpdir(), "codexia-recent-import-"));
     const workspaceDataRoot = resolve(root, "workspace");
