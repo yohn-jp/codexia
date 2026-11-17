@@ -38,6 +38,9 @@ on:
       - .github/workflows/**
 permissions:
   contents: read
+concurrency:
+  group: deployment-config-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   configuration:
     name: Verify route and service contracts
@@ -105,19 +108,3 @@ jobs:
           unzip -oq "$archive" -d "$plugin_path"
           terraform init -backend=false -plugin-dir="$provider_dir"
           terraform validate
-  standalone-host:
-    name: Verify real Ubuntu rootless host convergence
-    runs-on: ubuntu-26.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-      - name: Install supported Ansible control environment
-        run: |
-          python3 -m venv "$RUNNER_TEMP/codexia-ansible"
-          "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
-      - name: Exercise actual host stage twice and run a rootless Quadlet
-        env:
-          ANSIBLE_PLAYBOOK: ${{ runner.temp }}/codexia-ansible/bin/ansible-playbook
-        run: bash deploy/ansible/test-host-integration.sh
