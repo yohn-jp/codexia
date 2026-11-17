@@ -8,12 +8,39 @@ const defaultMigrationDirectory = fileURLToPath(new URL("../migrations/", import
 export async function runPostgresMigrations(
   pool: Pool,
   migrationDirectory = defaultMigrationDirectory,
+  { freshOnly = false }: { freshOnly?: boolean } = {},
 ): Promise<readonly string[]> {
   const migrations = await readMigrationSet(migrationDirectory);
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock(hashtext('codexia.persistence.migrations'))");
+    if (freshOnly) {
+      const observed = await client.query<{ public_schema: boolean; ledger: boolean }>(
+        "SELECT current_schema() = 'public' AS public_schema, to_regclass('public.codexia_schema_migrations') IS NOT NULL AS ledger",
+      );
+      if (observed.rows[0]?.public_schema !== true) throw new Error("Fresh initialization requires the public schema");
+      if (observed.rows[0].ledger) {
+        // An interrupted or repeated initialization may verify an exact ledger,
+        // but must never migrate an existing, partial or newer installation.
+        const recorded = await client.query<MigrationIdentity>("SELECT version, checksum FROM public.codexia_schema_migrations");
+        assertMigrationSet(migrations, recorded.rows);
+        await client.query("COMMIT");
+        return [];
+      }
+      const untracked = await client.query<{ present: boolean }>(`
+        SELECT EXISTS (
+          SELECT 1 FROM pg_namespace WHERE nspname NOT IN ('public', 'pg_catalog', 'information_schema')
+            AND nspname NOT LIKE 'pg_toast%' AND nspname NOT LIKE 'pg_temp_%'
+          UNION ALL SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public'
+          UNION ALL SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'
+          UNION ALL SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = 'public'
+          UNION ALL SELECT 1 FROM pg_extension WHERE extname <> 'plpgsql'
+          UNION ALL SELECT 1 FROM pg_largeobject_metadata
+        ) AS present
+      `);
+      if (untracked.rows[0]?.present !== false) throw new Error("Fresh initialization refuses untracked database objects");
+    }
     await client.query(`
       CREATE TABLE IF NOT EXISTS codexia_schema_migrations (
         version text PRIMARY KEY,
@@ -72,6 +99,17 @@ export async function migratePostgresDatabase(config: PoolConfig | string): Prom
   const pool = new Pool(typeof config === "string" ? { connectionString: config } : config);
   try {
     return await runPostgresMigrations(pool);
+  } finally {
+    await pool.end();
+  }
+}
+
+/** Initialize only a pristine database or verify an already exact migration ledger.
+ * The pristine check and migration run share the canonical transaction/advisory lock. */
+export async function initializeFreshPostgresSchema(config: PoolConfig | string): Promise<readonly string[]> {
+  const pool = new Pool(typeof config === "string" ? { connectionString: config } : config);
+  try {
+    return await runPostgresMigrations(pool, defaultMigrationDirectory, { freshOnly: true });
   } finally {
     await pool.end();
   }

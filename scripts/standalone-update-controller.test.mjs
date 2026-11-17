@@ -133,3 +133,19 @@ test('same-image initialization still requires an advertised legacy epoch before
  const result=await controller.verifyInitialCandidate(old,old);
  assert.equal(result.legacyApiEpoch,1);assert.equal(result.activated,false);
 });
+
+test('fresh schema requires signed release, matching frontend and an empty host before invoking migration',async()=>{
+ const {h,controller,persisted}=fixture();
+ h.writers=[];h.target='blocked';
+ h.assertFreshSchemaHost=async()=>{assert.equal(h.writers.length,0);assert.equal(h.target,'blocked');};
+ h.initializeFreshSchema=async release=>{h.trace.push('schema:'+release.version);return {fingerprint:release.migrationFingerprint,applied:['0001-initial.sql']};};
+ const result=await controller.initializeFreshSchema(next);
+ assert.deepEqual(result,{format:'codexia-fresh-schema/v1',image:next.image,fingerprint:next.migrationFingerprint,applied:['0001-initial.sql'],activated:false});
+ assert.deepEqual(h.trace,['pull:'+next.version,'schema:'+next.version]);assert.equal(persisted(),undefined);
+ for(const invalid of ['unsigned','epoch','writer','route']){
+  h.trace=[];h.releases=invalid==='unsigned'?[old]:[old,next];h.epoch=invalid==='epoch'?2:1;
+  h.writers=invalid==='writer'?[{slot:'blue',image:old.image}]:[];h.target=invalid==='route'?'blue':'blocked';
+  await assert.rejects(controller.initializeFreshSchema(next));
+  assert.ok(!h.trace.some(entry=>entry.startsWith('schema:')));
+ }
+});

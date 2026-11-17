@@ -192,6 +192,22 @@ export class StandaloneController {
       candidateImage:candidate.image,candidateSourceSha:candidate.sourceSha,candidateApiEpoch:candidate.apiEpoch,
       activated:false};
   }
+  /** A separate fresh-only operation; it never starts a writer or creates a controller journal. */
+  async initializeFreshSchema(value){
+    const release=validateUpdateRelease(value);
+    await this.assertNoBackupIntent();
+    await this.host.assertFreshSchemaHost();
+    const channel=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,null,this.now());
+    assert.ok(channel.payload.releases.some(r=>r.state==='published'&&JSON.stringify(r)===JSON.stringify(release)),'Fresh schema release must be published in the signed channel');
+    await this.uiEpoch(release);
+    await this.host.pullAndVerify(release);
+    await this.host.assertFreshSchemaHost();
+    const result=await this.host.initializeFreshSchema(release);
+    assert.equal(result.fingerprint,release.migrationFingerprint,'Initialized schema fingerprint mismatch');
+    await this.host.assertFreshSchemaHost();
+    await this.uiEpoch(release);
+    return {format:'codexia-fresh-schema/v1',image:release.image,fingerprint:result.fingerprint,applied:result.applied,activated:false};
+  }
   async assertServing(state,slot,release){
     const obs=await this.host.observe();
     assertObservation(obs,state.journal);

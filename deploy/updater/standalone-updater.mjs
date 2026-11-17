@@ -9,7 +9,7 @@ import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
 import { assertMaintenanceSnapshotVerifier, maintainStandaloneUpdater, recoverInterruptedMaintenance } from './standalone-maintenance.mjs';
 
 const [command,configPath,...arguments_]=process.argv.slice(2);
-if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|verify-bootstrap|init|boot|tick|status|verify|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
+if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|verify-bootstrap|initialize-schema|init|boot|tick|status|verify|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
 let config=JSON.parse(await readFile(configPath,'utf8'));
 assert.equal(config.format,'codexia-standalone-updater/v1');
 assert.ok(path.isAbsolute(config.stateFile)&&path.isAbsolute(config.publicKeyFile));
@@ -74,6 +74,15 @@ if(command==='backup'){
   if(command==='verify-bootstrap')assert.notEqual(legacy.image,candidate.image,'Explicit bootstrap requires a distinct candidate');
   const result=await controller.verifyInitialCandidate(legacy,candidate);
   console.log(JSON.stringify(result));
+  process.exit(0);
+}else if(command==='initialize-schema'){
+  assert.equal(arguments_.length,2,'Provide an exact signed release record and --approved');
+  const [releaseFile,approval]=arguments_;
+  assert.ok(path.isAbsolute(releaseFile)&&approval==='--approved','Fresh schema initialization requires explicit approval');
+  assert.equal(config.enabled,false,'Fresh schema initialization requires disabled polling');
+  try{await loadControllerState(config.stateFile);throw Error('Existing controller cannot initialize a fresh schema');}catch(error){if(error.code!=='ENOENT')throw error;}
+  const release=validateUpdateRelease(JSON.parse(await readFile(releaseFile,'utf8')));
+  console.log(JSON.stringify(await controller.initializeFreshSchema(release)));
   process.exit(0);
 }else if(command==='init'){
   const [argument]=arguments_;
