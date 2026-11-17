@@ -1764,7 +1764,15 @@ export function createServer(options: ApiServerOptions): Server {
             return;
           }
           const input = parseRecentActivityInput(await readJson(request, parsedBody));
-          sendJson(response, 200, { items: await recentActivity.upsert(activityAuthorScope, projectId, input) });
+          const header = request.headers["x-codexia-recent-activity-order"];
+          let order: { writer: string; sequence: number } | undefined;
+          if (header !== undefined) {
+            const match = typeof header === "string" ? /^([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}):([1-9][0-9]{0,15})$/u.exec(header) : null;
+            const sequence = Number(match?.[2]);
+            if (!match || !Number.isSafeInteger(sequence)) throw httpFailure(400, "INVALID_RECENT_ACTIVITY", "Recent activity order is invalid");
+            order = { writer: match[1]!, sequence };
+          }
+          sendJson(response, 200, { items: await recentActivity.upsert(activityAuthorScope, projectId, input, order) });
           return;
         } catch (error) {
           if (isHttpFailure(error)) throw error;
