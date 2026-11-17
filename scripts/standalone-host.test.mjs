@@ -286,7 +286,7 @@ test('legacy admission binds the running image ID, version and exact auth settin
  const version={name:'codexia',version:release.version,profile:'full',hosted:false,apiEpoch:1,browserAuth:'cloudflare-access'};
  const id='d'.repeat(64);
  const env=Object.entries(browserAuthEnvironment({browserAuth:access},origin)).map(([k,v])=>k+'='+v);
- const valid={legacy:{Image:id,State:{Running:true},Config:{Env:env}},image:{Id:'sha256:'+id,RepoDigests:[release.image]},version};
+ const valid={legacy:{Image:id,State:{Running:true},Config:{Env:env}},image:{Id:'sha256:'+id,RepoDigests:[release.image],Os:'linux',Architecture:'amd64',Labels:{'org.opencontainers.image.revision':fixture.sourceSha}},version};
  const executable=path.join(dir,'podman');
  const fixturePath=path.join(dir,'fixture.json');
  try{
@@ -298,7 +298,21 @@ test('legacy admission binds the running image ID, version and exact auth settin
     'else if(a[0]==="exec")console.log(JSON.stringify(f.version));else process.exit(99);\n',{mode:0o700});
   process.env.PATH=dir+path.delimiter+previous;
   const host=new PodmanStandaloneHost({browserAuth:access,frontendIdentityUrl:origin+'/desktop/update-identity.json',routeFile:'/tmp/route',quadletDirectory:'/tmp',githubTokenFile:'/tmp/token'});
-  await writeFile(fixturePath,JSON.stringify(valid));await host.assertLegacyRelease(fixture);
+  await writeFile(fixturePath,JSON.stringify(valid));
+  assert.deepEqual(await host.assertLegacyRelease(fixture),{apiEpoch:1});
+  const {apiEpoch,...unadvertised}=version;
+  await writeFile(fixturePath,JSON.stringify({...valid,version:unadvertised}));
+  await assert.rejects(host.assertLegacyRelease(fixture),/epoch mismatch/);
+  assert.deepEqual(await host.assertLegacyRelease(fixture,{allowUnadvertisedEpoch:true}),{apiEpoch:null});
+  for(const patch of [
+   {image:{...valid.image,Labels:{'org.opencontainers.image.revision':'e'.repeat(40)}}},
+   {image:{...valid.image,Architecture:'arm64'}},
+   {version:{...version,apiEpoch:2}},
+   {version:{...unadvertised,profile:'core'}},
+  ]){
+   await writeFile(fixturePath,JSON.stringify({...valid,version:unadvertised,...patch}));
+   await assert.rejects(host.assertLegacyRelease(fixture,{allowUnadvertisedEpoch:true}));
+  }
   for(const [patch,pattern] of [
     [{legacy:{...valid.legacy,Image:'e'.repeat(64)}},/image differs/],
     [{version:{...version,version:'0.1.2'}},/strictly equal/],
