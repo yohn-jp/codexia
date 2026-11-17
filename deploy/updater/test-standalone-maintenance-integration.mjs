@@ -284,7 +284,12 @@ async function runInterruptedBootRecovery({ repoRoot, workDir, stateDir, configP
     await atomicWrite(markerPath, originalMarker);
   } else {
     assert.equal((await readFile(path.join(stateDir, 'route'), 'utf8')), 'blocked\n', 'Writer-drain interruption did not fence ingress');
-    assert.ok(['inactive', 'failed'].includes(systemdState(SERVICE)), 'Writer-drain interruption did not stop the active writer');
+    // The fault shim kills the controller after systemctl stop but before
+    // stopWriter can reset a failed unit after Podman removes its container.
+    // Both inactive and failed are valid interruption boundaries, but only
+    // when the actual writer is absent. Leave reset/restart to boot recovery.
+    assert.ok(['inactive', 'failed'].includes(systemdState(SERVICE)),
+      'Writer-drain interruption did not stop the active writer');
     const drained = spawnSync('podman', ['container', 'exists', CONTAINER], { timeout: 15000, stdio: 'ignore' });
     if (drained.error) throw drained.error;
     assert.equal(drained.status, 1, 'Writer container remains or absence is unobservable after interruption');
@@ -643,6 +648,8 @@ async function main() {
   await assertTimerState('inactive', 'disabled');
   await runLiveAnsibleTimerCheck({ repoRoot, workDir, enabled: false, shouldPass: true });
   await runLiveAnsibleTimerCheck({ repoRoot, workDir, enabled: true, shouldPass: false });
+  // Reuse the real fencing primitive: Quadlet may remove the container
+  // while leaving the unit failed. Only reset after proving container absence.
   await new PodmanStandaloneHost(appliedConfig).stopWriter('blue');
   assert.equal(systemdState(SERVICE), 'inactive');
   const stopped = spawnSync('podman', ['container', 'exists', CONTAINER], { timeout: 15000, stdio: 'ignore' });
@@ -662,12 +669,13 @@ async function main() {
   const proxyInfo = await lstat(proxyQuadlet);
   assert.ok(proxyInfo.isFile() && !proxyInfo.isSymbolicLink() && proxyInfo.uid === UID && (proxyInfo.mode & 0o777) === 0o600);
   await rm(proxyQuadlet);
+  assert.deepEqual((await readdir(privateDir)).sort(), ['channel-public.pem', 'config.json', 'github-read-token'], 'Unexpected file exists in the synthetic private config directory');
   for (const file of [configPath, publicKeyFile, githubTokenFile]) {
     const info = await lstat(file);
     assert.ok(info.isFile() && !info.isSymbolicLink() && info.uid === UID && (info.mode & 0o777) === 0o600, `Refusing to remove an unowned private config file: ${file}`);
     await rm(file);
   }
-  assert.deepEqual((await readdir(privateDir)).sort(), ['channel-public.pem', 'github-read-token', 'config.json'], 'Unexpected file remains in the synthetic private config directory');
+  assert.deepEqual(await readdir(privateDir), [], 'Unexpected file remains after fixture cleanup');
   await rmdir(privateDir);
   for (const file of [routeFile, path.join(stateDir, 'controller.json'), path.join(stateDir, 'host.lock')]) await rm(file, { force: true });
   await rm(stateBase, { recursive: true, force: true });

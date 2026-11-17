@@ -235,3 +235,68 @@ test("recent activity coalesces repeated positions and records 50 input reports"
   await expect.poll(() => writes.length, { timeout: 6_000 }).toBe(inputCount + 1);
   expect((await activity(page, f.project.id)).items.some((item) => item.sceneId === f.scene.id)).toBe(true);
 });
+
+for (const departure of [false, true]) {
+  test(`recent activity rejects reversed PUT delivery${departure ? " during pagehide keepalive" : ""}`, async ({ browser, page }) => {
+    const f = await longFixture(page);
+    const editor = page.getByRole("textbox", { name: "本文", exact: true });
+    await editor.press("Control+End");
+    await expect.poll(async () => (await activity(page, f.project.id)).items.some((item) => item.sceneId === f.scene.id && item.deviceType === "desktop" && (item.sentenceOffset ?? 0) > 1)).toBe(true);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const sent: Array<{ sceneId: string; sentenceOffset: number | null; deviceType: string }> = [];
+    const url = `**/api/projects/${f.project.id}/recent-activity`;
+    await page.route(url, async (route) => {
+      if (route.request().method() !== "PUT") return route.continue();
+      sent.push(route.request().postDataJSON());
+      if (sent.length === 1) await held;
+      await route.continue();
+    });
+    try {
+      await editor.press("Control+Home");
+      await expect.poll(() => sent.length, { timeout: 6_000 }).toBe(1);
+      expect(sent[0]?.sentenceOffset).toBe(1);
+      const newerResponse = page.waitForResponse((response) => response.url().endsWith("/recent-activity") &&
+        response.request().method() === "PUT" && (response.request().postDataJSON().sentenceOffset ?? 0) > 1);
+      await editor.press("Control+End");
+      if (departure) {
+        // Observe the real fetch option and trigger the existing lifecycle
+        // handler while the first request is still blocked before delivery.
+        const keepalive = await page.evaluate(() => {
+          const original = window.fetch;
+          let observed = false;
+          window.fetch = (input, init) => {
+            if (String(input).endsWith("/recent-activity") && init?.method === "PUT") observed = init.keepalive === true;
+            return original.call(window, input, init);
+          };
+          try { window.dispatchEvent(new PageTransitionEvent("pagehide")); }
+          finally { window.fetch = original; }
+          return observed;
+        });
+        expect(keepalive).toBe(true);
+      }
+      await expect.poll(() => sent.length, { timeout: 6_000 }).toBeGreaterThanOrEqual(2);
+      const latest = sent.at(-1)!;
+      expect(latest.sentenceOffset ?? 0).toBeGreaterThan(1);
+      // The initial cursor may equal the newer report. Its GET alone cannot
+      // establish reversed delivery; require the newer PUT's own completion.
+      expect((await newerResponse).ok()).toBe(true);
+      await expect.poll(async () => (await activity(page, f.project.id)).items.find((item) => item.deviceType === "desktop")?.sentenceOffset).toBe(latest.sentenceOffset);
+      const newer = (await activity(page, f.project.id)).items.find((item) => item.deviceType === "desktop");
+      const olderResponse = page.waitForResponse((response) => response.url().endsWith("/recent-activity") &&
+        response.request().method() === "PUT" && response.request().postDataJSON().sentenceOffset === 1);
+      release();
+      expect((await olderResponse).ok()).toBe(true);
+      expect((await activity(page, f.project.id)).items.find((item) => item.deviceType === "desktop")).toEqual(newer);
+      const mobile = await browser.newContext({ viewport: { width: 390, height: 900 }, isMobile: true, hasTouch: true });
+      try {
+        const other = await mobile.newPage();
+        await ownerLogin(other, `/mobile/projects/${f.project.id}/scenes/${f.scene.id}?view=writing`);
+        expect((await activity(other, f.project.id)).items.find((item) => item.deviceType === "desktop")?.sentenceOffset).toBe(latest.sentenceOffset);
+      } finally { await mobile.close(); }
+    } finally {
+      release();
+      await page.unroute(url);
+    }
+  });
+}

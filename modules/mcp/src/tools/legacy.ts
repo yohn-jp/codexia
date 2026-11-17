@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { type ActionResult } from "@codexia/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { McpActionClient } from "../api-client.js";
 import { narrativeChangeSetSchema } from "../change-set-schema.js";
 import {

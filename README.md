@@ -10,23 +10,29 @@ The [Codexia reboot RFC](docs/architecture/CODEXIA-REBOOT-RFC.md) contains broad
 
 ## Run locally
 
-Requires Node.js 24+, pnpm 12.10.1 and PostgreSQL.
+Requires Node.js and pnpm versions satisfying [`package.json`](package.json), and a running PostgreSQL server.
 
 ```sh
-createdb codexia
+# Run once as a local PostgreSQL administrator (adjust the admin connection if needed).
+# Choose a private password and enter it when createuser prompts.
+createuser --pwprompt codexia
+createdb --owner=codexia codexia
+
+# Use the same database owner for schema migration and application startup.
+# Replace PASSWORD with the URL-encoded password chosen above.
+export CODEXIA_DATABASE_URL='postgres://codexia:PASSWORD@127.0.0.1:5432/codexia'
+export CODEXIA_AUTH_TOKEN="$(openssl rand -hex 32)"
 pnpm install --frozen-lockfile
 pnpm build
-export CODEXIA_DATABASE_URL='postgres://localhost/codexia'
-pnpm --filter @codexia/persistence-postgres migrate
-export CODEXIA_AUTH_TOKEN="$(openssl rand -hex 32)"
-export CODEXIA_DATABASE_URL='postgres://codexia:password@127.0.0.1:5432/codexia'
 pnpm --filter @codexia/persistence-postgres migrate
 pnpm start
 ```
 
 Open `http://127.0.0.1:3000` and sign in with `CODEXIA_AUTH_TOKEN`. Configuration names are in [.env.example](.env.example); environment files are not automatically loaded. Startup requires a reachable PostgreSQL database. Apply checked migrations explicitly, or set `CODEXIA_DATABASE_MIGRATE_ON_START=1` only when the API role is intended to apply migrations. No Git fallback exists.
 
-Use the work panel to export a portable `codexia-work/v1` JSON snapshot or import one as a new project. This preserves current manuscripts, hierarchy, Knowledge and supported Evidence without turning legacy source conversion into an application feature. Historical revisions and browser drafts are not part of the JSON; see [portable works](docs/authoring-portable.md).\n\nCreate projects and documents in the workspace. Local drafts live in IndexedDB until the server confirms a database revision. Stale saves preserve the draft and expose conflict recovery. Browser recovery belongs to the same browser/origin; clearing its storage removes that recovery copy. Back up PostgreSQL and private host history separately, following [deployment](docs/deployment/README.md).
+Use the work panel to export a portable `codexia-work/v1` JSON snapshot or import one as a new project. This preserves current manuscripts, hierarchy, Knowledge and supported Evidence without turning legacy source conversion into an application feature. Historical revisions and browser drafts are not part of the JSON; see [portable works](docs/authoring-portable.md).
+
+Create projects and documents in the workspace. Local drafts live in IndexedDB until the server confirms a database revision. Stale saves preserve the draft and expose conflict recovery. Browser recovery belongs to the same browser/origin; clearing its storage removes that recovery copy. Back up PostgreSQL and private host history separately, following [deployment](docs/deployment/README.md).
 
 Writing, Research, and Review presets assemble independent Editor, Outline, Inspector, History, and Review panels. Use panel grips and dock targets on desktop, or the keyboard-accessible move controls, to split, tab, reorder, resize, show, and hide panels. **Save layout** stores the arrangement for the current author and desktop/mobile device class in this browser, separately from draft recovery and PostgreSQL. Invalid saved layouts fall back without erasing the prior setting until an explicit save.
 
@@ -59,9 +65,9 @@ Use `PROFILE=full` with the same Dockerfile for the full composition. The existi
 
 [Source audit portal](https://yohn-jp.github.io/codexia/) · [Branch manifest](https://yohn-jp.github.io/codexia/manifest.json)
 
-The repository audit workflow exports each observed remote branch HEAD with the same main-branch Repomix policy, independent of product releases. Select a branch and click **Download full JSON** for Gemini or another reviewer. Download up to nine responsibility-based JSON parts directly from the branch row: architecture, frontend, core/contracts, API, persistence, authoring modules, platform modules, infrastructure/CI, and verification/tooling. Each part identifies the source SHA and original file paths; files are never split internally. The snapshot manifest is available separately, and the full JSON also has a View JSON link. Read the snapshot manifest for original blob hashes, output checksums and excluded paths. The portal does not contain uncommitted changes or claim full coverage of excluded files.
+The repository audit workflow exports each observed remote branch HEAD with the same main-branch Repomix policy, independent of product releases. Main pushes and manual dispatch refresh the portal; branch-only changes are coalesced by the existing 15-minute schedule (plus Actions queue time). Check the exported SHA before reviewing a moving branch. The portal intentionally does not launch a second workflow for every branch push. Select a branch and click **Download full JSON** for Gemini or another reviewer. Download up to nine responsibility-based JSON parts directly from the branch row: architecture, frontend, core/contracts, API, persistence, authoring modules, platform modules, infrastructure/CI, and verification/tooling. Each part identifies the source SHA and original file paths; files are never split internally. The snapshot manifest is available separately, and the full JSON also has a View JSON link. Read the snapshot manifest for original blob hashes, output checksums and excluded paths. The portal does not contain uncommitted changes or claim full coverage of excluded files.
 
-Public Pages deployment requires **Settings → Pages → Build and deployment → Source: GitHub Actions**. Only default-branch publisher runs deploy. Main pushes, branch deletions, manual runs and unprivileged refresh signals from other branch pushes or creations discover all remote HEADs; the scheduled reconciliation (every 15 minutes, subject to Actions scheduling) covers older branches without the signal workflow and missed events. The signal is a wake-up only: no branch artifacts or branch code enter the publisher. The index records the actual observation time. PRs produce a non-publishing preview artifact. Identical HEADs share a snapshot and unchanged, checksum-verified exports may be reused. The site publishes only the current observed branch inventory, not historical snapshots.
+Public Pages deployment requires **Settings → Pages → Build and deployment → Source: GitHub Actions**. Only default-branch publisher runs deploy. Main pushes, manual runs and scheduled reconciliation (every 15 minutes, subject to Actions scheduling) discover all remote HEADs, including branch creations, updates and deletions. No branch artifacts or branch code enter the publisher. The index records the actual observation time. PRs produce a non-publishing preview artifact. Identical HEADs share a snapshot and unchanged, checksum-verified exports may be reused. The site publishes only the current observed branch inventory, not historical snapshots.
 
 For local generation from the repository root, use a separate installation of Repomix 1.19.0 and absolute output paths outside the checkout:
 

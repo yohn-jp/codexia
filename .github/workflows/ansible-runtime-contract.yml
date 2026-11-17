@@ -11,6 +11,7 @@ on:
       - deploy/updater/codexia-api-proxy.container.example
       - deploy/updater/test-runtime-contract-integration.sh
       - deploy/updater/test-standalone-maintenance-integration.mjs
+      - deploy/updater/test-standalone-maintenance-preload.mjs
       - deploy/ansible/prepare.yml
       - deploy/ansible/maintenance.yml
       - deploy/ansible/verify.yml
@@ -36,6 +37,7 @@ on:
       - deploy/updater/codexia-api-proxy.container.example
       - deploy/updater/test-runtime-contract-integration.sh
       - deploy/updater/test-standalone-maintenance-integration.mjs
+      - deploy/updater/test-standalone-maintenance-preload.mjs
       - deploy/ansible/prepare.yml
       - deploy/ansible/maintenance.yml
       - deploy/ansible/verify.yml
@@ -52,25 +54,42 @@ on:
       - .github/workflows/ansible-runtime-contract.yml
 permissions:
   contents: read
+concurrency:
+  group: ansible-runtime-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   runtime-contract:
     name: Verify real rootless runtime contract on Ubuntu VM
     runs-on: ubuntu-26.04
     timeout-minutes: 35
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: ${{ github.event_name == 'push' && '0' || '1' }}
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '22'
+      - name: Resolve reusable independent PR proof
+        id: reuse
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/reuse-pr-verification.mjs dedicated
       - name: Install isolated host test dependencies
+        if: steps.reuse.outputs.eligible != 'true'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends podman buildah uidmap netavark aardvark-dns passt slirp4netns fuse-overlayfs dbus-user-session
           sudo python3 -m venv /opt/codexia-ansible
           sudo /opt/codexia-ansible/bin/pip install ansible-core==2.21.6
       - name: Prepare an isolated rootless systemd identity
+        if: steps.reuse.outputs.eligible != 'true'
         run: |
           set -euo pipefail
           fixture_user=codexia-runtime-contract-test
@@ -164,6 +183,7 @@ jobs:
           sudo chown root:root /etc/codexia-iac-disposable-vm
           sudo chmod 0444 /etc/codexia-iac-disposable-vm
       - name: Check runtime schema, maintenance guards and Ansible validation
+        if: steps.reuse.outputs.eligible != 'true'
         run: |
           node --test scripts/standalone-host.test.mjs scripts/standalone-maintenance.test.mjs
           /opt/codexia-ansible/bin/ansible-playbook -i deploy/ansible/inventory.example.yml deploy/ansible/site.yml --syntax-check
@@ -172,6 +192,7 @@ jobs:
           bash -n deploy/updater/test-runtime-contract-integration.sh
           node --check deploy/updater/test-standalone-maintenance-integration.mjs
       - name: Exercise generated Core and Full Quadlets on disposable rootless Podman
+        if: steps.reuse.outputs.eligible != 'true'
         env:
           CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE: 'yes'
           ANSIBLE_PLAYBOOK: /opt/codexia-ansible/bin/ansible-playbook
@@ -189,7 +210,7 @@ jobs:
             PATH="$PATH" \
             bash "$fixture_repo/deploy/updater/test-runtime-contract-integration.sh"
       - name: Remove the disposable VM marker and user manager
-        if: always()
+        if: always() && steps.reuse.outputs.eligible != 'true'
         run: |
           set +e
           cleanup_failed=0
