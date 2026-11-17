@@ -1,7 +1,8 @@
 ---
 - name: Converge the standalone Codexia updater on an existing rootless VM
-  hosts: codexia
-  gather_facts: true
+  # Explicit recovery dispatch must not depend on the failed source VM or its inventory.
+  hosts: "{{ 'localhost' if (codexia_stage | default('')) == 'restore-drill' else 'codexia' }}"
+  gather_facts: false
   serial: 1
   any_errors_fatal: true
   vars:
@@ -42,10 +43,25 @@
       initialSlot: blue
       browserAuth: "{{ codexia_browser_auth }}"
       runtime: "{{ runtime }}"
-  # Fact gathering runs before user_uid/user_dir exist. Privileged host setup must
-  # not inherit the bootstrap SSH account's rootless runtime paths.
-  environment: "{{ updater_env if codexia_stage != 'host' and ansible_facts.user_uid is defined and ansible_facts.user_dir is defined else {} }}"
+  # Source fact gathering runs before user_uid/user_dir exist. Privileged host setup
+  # and the independent recovery drill must not inherit source runtime paths.
+  environment: "{{ updater_env if codexia_stage not in ['host', 'restore-drill'] and ansible_facts.user_uid is defined and ansible_facts.user_dir is defined else {} }}"
   tasks:
+    - name: Require the explicit local recovery stage and actual execution
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'localhost'
+          - not ansible_check_mode
+        fail_msg: Run restore-drill explicitly on the isolated local recovery host; check mode does not verify a restore.
+      when: codexia_stage == 'restore-drill'
+    - name: Run the isolated recovery drill on the Ansible recovery host
+      ansible.builtin.include_tasks: restore-drill.yml
+      when: codexia_stage == 'restore-drill'
+    - name: End recovery drill before querying or changing the source VM
+      ansible.builtin.meta: end_host
+      when: codexia_stage == 'restore-drill'
+    - name: Gather facts only for source VM operations
+      ansible.builtin.setup:
     - name: Inspect host and existing runtime without converging application state
       ansible.builtin.include_tasks: inspect.yml
       when: codexia_stage == 'inspect'
@@ -58,12 +74,6 @@
     - name: End host convergence before any application task
       ansible.builtin.meta: end_host
       when: codexia_stage == 'host'
-    - name: Run the isolated recovery drill on the Ansible recovery host
-      ansible.builtin.include_tasks: restore-drill.yml
-      when: codexia_stage == 'restore-drill'
-    - name: End recovery drill before querying or changing the source VM
-      ansible.builtin.meta: end_host
-      when: codexia_stage == 'restore-drill'
     - name: Require explicit standalone deployment inputs
       ansible.builtin.assert:
         that:
