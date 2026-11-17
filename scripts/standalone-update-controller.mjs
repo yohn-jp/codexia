@@ -138,6 +138,15 @@ export function assertMatchingCutoverBackup(sourceValue,restore,release,observed
   return source;
 }
 
+export function validateFreshSchemaProof(value){
+  assert.deepEqual(Object.keys(value??{}).sort(),['databaseId','fingerprint','format','phase','release']);
+  assert.equal(value.format,'codexia-fresh-schema-proof/v2');
+  assert.ok(['initializing','complete'].includes(value.phase),'Invalid fresh schema proof phase');
+  const release=validateUpdateRelease(value.release);
+  assert.equal(value.fingerprint,release.migrationFingerprint,'Fresh schema proof fingerprint differs from release');
+  assert.match(value.databaseId,/^[1-9]\d{0,19}:[1-9]\d{0,9}$/u,'Invalid database identity');
+  return {...value,release};
+}
 export function switchLegacyTunnelSource(source){
   assert.ok(typeof source==='string'&&source.length<=65536&&!source.includes('\0'),'Invalid legacy Tunnel source');
   const lines=source.split('\n');
@@ -398,10 +407,27 @@ export class StandaloneController {
     await this.uiEpoch(release);
     await this.host.pullAndVerify(release);
     await this.host.assertFreshSchemaHost();
+    const databaseId=await this.host.freshDatabaseIdentity();
+    const observation=await this.host.inspectFreshSchema(release);
+    assert.equal(observation.fingerprint,release.migrationFingerprint,'Schema observation fingerprint mismatch');
+    let proof=await this.store.loadFreshSchema();
+    if(proof){
+      proof=validateFreshSchemaProof(proof);
+      assert.deepEqual(proof.release,release,'Fresh schema intent belongs to another release');
+      assert.equal(proof.databaseId,databaseId,'Fresh schema intent belongs to another database');
+      if(proof.phase==='complete')assert.equal(observation.pristine,false,'Completed fresh schema ledger is missing');
+    }else{
+      // An arbitrary existing exact ledger is not proof of fresh storage.
+      assert.equal(observation.pristine,true,'Existing database lacks fresh initialization provenance; use legacy adoption');
+      proof=validateFreshSchemaProof({format:'codexia-fresh-schema-proof/v2',phase:'initializing',release,databaseId,fingerprint:release.migrationFingerprint});
+      await this.store.saveFreshSchema(proof);
+    }
     const result=await this.host.initializeFreshSchema(release);
     assert.equal(result.fingerprint,release.migrationFingerprint,'Initialized schema fingerprint mismatch');
+    assert.equal(await this.host.freshDatabaseIdentity(),databaseId,'Database identity changed during fresh schema initialization');
     await this.host.assertFreshSchemaHost();
     await this.uiEpoch(release);
+    await this.store.saveFreshSchema({...proof,phase:'complete'});
     return {format:'codexia-fresh-schema/v1',image:release.image,fingerprint:result.fingerprint,applied:result.applied,activated:false};
   }
   /** Fresh activation is distinct from legacy adoption. The caller has
@@ -413,6 +439,10 @@ export class StandaloneController {
     await this.host.assertInitialLegacyAbsent();
     assert.equal(await this.host.pollingTimerActive(),false,'Fresh activation requires stopped polling');
     assert.equal(await this.host.tunnelServiceActive(),false,'Fresh activation must precede public Tunnel handoff');
+    const proof=validateFreshSchemaProof(await this.store.loadFreshSchema());
+    assert.equal(proof.phase,'complete','Fresh activation requires completed schema proof');
+    assert.deepEqual(proof.release,release,'Fresh activation release differs from schema proof');
+    assert.equal(proof.databaseId,await this.host.freshDatabaseIdentity(),'Fresh activation database differs from schema proof');
     if(existing){
       existing=validateControllerState(existing);
       assert.deepEqual(existing.installed,release,'Fresh activation release differs from durable journal');

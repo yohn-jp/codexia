@@ -4,7 +4,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { switchLegacyTunnelSource, validateLegacyCutover, assertMatchingCutoverBackup, StandaloneController, initialControllerState, atomicWrite, loadControllerState } from './standalone-update-controller.mjs';
+import { validateFreshSchemaProof, switchLegacyTunnelSource, validateLegacyCutover, assertMatchingCutoverBackup, StandaloneController, initialControllerState, atomicWrite, loadControllerState } from './standalone-update-controller.mjs';
 import { signUpdateChannel, verifyUpdateChannel } from './update-channel.mjs';
 const key=generateKeyPairSync('ed25519');
 const pub=key.publicKey.export({type:'spki',format:'pem'});
@@ -25,9 +25,11 @@ function fixture(){
  async route(slot){this.trace.push('route:'+slot);this.target=slot},
  async probe(slot){if(this.fail==='probe'&&slot==='green')throw Error('new writer unhealthy')}
  };
- let persisted;
- const controller=new StandaloneController({host:h,store:{async save(s){persisted=structuredClone(s)}},publicKey:pub,now:()=>now,observeMilliseconds:0});
- return {h,controller,state:{...initialControllerState(old,'blue',null),paused:false},persisted:()=>persisted};
+ let persisted,freshProof=null;
+ const controller=new StandaloneController({host:h,store:{async save(s){persisted=structuredClone(s)},async loadFreshSchema(){return freshProof},async saveFreshSchema(value){freshProof=structuredClone(validateFreshSchemaProof(value))}},publicKey:pub,now:()=>now,observeMilliseconds:0});
+ h.freshDatabaseIdentity=async()=> '123456789:12345';
+ h.inspectFreshSchema=async r=>({pristine:true,fingerprint:r.migrationFingerprint});
+ return {h,controller,state:{...initialControllerState(old,'blue',null),paused:false},persisted:()=>persisted,freshProof:()=>freshProof};
 }
 test('signed candidate switches only after the old writer is stopped',async()=>{
  const {h,controller,state,persisted}=fixture();const result=await controller.tick(state);
@@ -237,6 +239,7 @@ test('fresh activation authenticates exact release and persists intent before an
  h.verifyWriterUnits=async()=>{};
  const start=h.startWriter;
  h.startWriter=async(...args)=>{assert.equal(persisted().initialActivationPending,true);await start.call(h,...args);};
+ await controller.store.saveFreshSchema({format:'codexia-fresh-schema-proof/v2',phase:'complete',release:next,databaseId:await h.freshDatabaseIdentity(),fingerprint:next.migrationFingerprint});
  const result=await controller.activateFresh(next,'blue');
  assert.equal(result.initialActivationPending,undefined);assert.equal(result.lastError,null);
  assert.equal(result.paused,true);assert.equal(result.installed.image,next.image);
@@ -245,7 +248,7 @@ test('fresh activation authenticates exact release and persists intent before an
  const trace=[...h.trace];
  assert.deepEqual(await controller.activateFresh(next,'blue',result),result);
  assert.deepEqual(h.trace,trace,'Settled fresh activation must not restart the writer');
- await assert.rejects(controller.activateFresh(old,'blue',result),/differs from durable journal/);
+ await assert.rejects(controller.activateFresh(old,'blue',result),/differs from schema proof/);
 });
 test('fresh activation refuses unsigned release, incompatible frontend and existing ingress',async()=>{
  for(const invalid of ['unsigned','epoch','tunnel','legacy']){
@@ -254,6 +257,7 @@ test('fresh activation refuses unsigned release, incompatible frontend and exist
   h.pollingTimerActive=async()=>false;h.tunnelServiceActive=async()=>invalid==='tunnel';
   h.assertFreshSchemaHost=async()=>{};
   h.startInitialProxy=async()=>{h.trace.push('proxy');};
+  await controller.store.saveFreshSchema({format:'codexia-fresh-schema-proof/v2',phase:'complete',release:next,databaseId:await h.freshDatabaseIdentity(),fingerprint:next.migrationFingerprint});
   if(invalid==='unsigned')h.releases=[old];
   if(invalid==='epoch')h.epoch=2;
   await assert.rejects(controller.activateFresh(next,'blue'));
@@ -358,4 +362,21 @@ test('Tunnel dependency switch is exact and rejects mixed or duplicate directive
  assert.equal(switchLegacyTunnelSource(legacy),legacy.replaceAll('codexia-api.service','codexia-api-proxy.service'));
  assert.throws(()=>switchLegacyTunnelSource(legacy.replace('Requires=codexia-api.service','Requires=codexia-api-proxy.service')),/canonical legacy state/);
  assert.throws(()=>switchLegacyTunnelSource(legacy+'Requires=codexia-api.service\n'),/canonical legacy state/);
+});
+
+test('a matching existing ledger alone is not fresh admission, but a durable pristine intent supports interruption recovery',async()=>{
+ const {h,controller,freshProof}=fixture();h.target='blocked';h.writers=[];h.assertFreshSchemaHost=async()=>{};
+ let pristine=false,mutations=0;
+ h.inspectFreshSchema=async release=>({pristine,fingerprint:release.migrationFingerprint});
+ h.initializeFreshSchema=async release=>{mutations++;pristine=false;throw Error('interrupted after schema commit');};
+ await assert.rejects(controller.initializeFreshSchema(next),/lacks fresh initialization provenance/);
+ assert.equal(mutations,0);assert.equal(freshProof(),null);
+ pristine=true;
+ await assert.rejects(controller.initializeFreshSchema(next),/interrupted after schema commit/);
+ assert.equal(freshProof().phase,'initializing');assert.equal(mutations,1);
+ h.initializeFreshSchema=async release=>({applied:[],fingerprint:release.migrationFingerprint});
+ await controller.initializeFreshSchema(next);
+ assert.equal(freshProof().phase,'complete');
+ h.freshDatabaseIdentity=async()=> '123456789:99999';
+ await assert.rejects(controller.initializeFreshSchema(next),/belongs to another database/);
 });

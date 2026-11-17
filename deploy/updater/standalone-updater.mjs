@@ -3,7 +3,7 @@ import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { assertMatchingCutoverBackup, validateLegacyBackupProof, validateLegacyCutover, atomicWrite, clearBackupIntent, initialControllerState, loadBackupIntent, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
+import { assertMatchingCutoverBackup, validateLegacyBackupProof, validateLegacyCutover, validateFreshSchemaProof, atomicWrite, clearBackupIntent, initialControllerState, loadBackupIntent, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
 import { PodmanStandaloneHost } from './standalone-host.mjs';
 import { verifyUpdateChannel } from '../../scripts/update-channel.mjs';
 import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
@@ -21,7 +21,10 @@ const publicKey=await readFile(config.publicKeyFile,'utf8');
 const backupIntentFile=path.join(path.dirname(config.stateFile),'backup-intent.json');
 const backupRecoveryFile=path.join(path.dirname(config.stateFile),'backup-recovery.json');
 const cutoverFile=path.join(path.dirname(config.stateFile),'legacy-cutover.json');
+const freshSchemaProofFile=path.join(path.dirname(config.stateFile),'fresh-schema.json');
 const store={
+  loadFreshSchema:()=>readPrivateProof(freshSchemaProofFile).then(validateFreshSchemaProof).catch(error=>{if(error.code==='ENOENT')return null;throw error;}),
+  saveFreshSchema:proof=>atomicWrite(freshSchemaProofFile,JSON.stringify(validateFreshSchemaProof(proof))+'\n'),
   loadState:()=>loadControllerState(config.stateFile).catch(error=>{if(error.code==='ENOENT')return null;throw error;}),
   loadCutover:()=>readPrivateProof(cutoverFile,256*1024).then(validateLegacyCutover).catch(error=>{if(error.code==='ENOENT')return null;throw error;}),
   saveCutover:intent=>atomicWrite(cutoverFile,JSON.stringify(validateLegacyCutover(intent))+'\n'),
@@ -35,7 +38,6 @@ const store={
   clearBackupRecoveryIntent:()=>clearBackupIntent(backupRecoveryFile),
 };
 const legacyBackupProofFile=path.join(path.dirname(config.stateFile),'legacy-backup-proof.json');
-const freshSchemaProofFile=path.join(path.dirname(config.stateFile),'fresh-schema.json');
 async function readPrivateProof(filename,limit=65536){
   const metadata=await lstat(filename);
   assert.ok(metadata.isFile()&&!metadata.isSymbolicLink()&&(metadata.mode&0o777)===0o600&&metadata.size<=limit,'Backup evidence must be a private regular file');
@@ -146,8 +148,7 @@ if(command==='recover-cutover'||(command==='boot'&&pendingCutover)){
   try{await loadControllerState(config.stateFile);throw Error('Existing controller cannot initialize a fresh schema');}catch(error){if(error.code!=='ENOENT')throw error;}
   const release=validateUpdateRelease(JSON.parse(await readFile(releaseFile,'utf8')));
   const result=await controller.initializeFreshSchema(release);
-  await atomicWrite(freshSchemaProofFile,JSON.stringify({format:'codexia-fresh-schema-proof/v1',release,fingerprint:result.fingerprint})+'\n');
-  console.log(JSON.stringify(result));
+   console.log(JSON.stringify(result));
   process.exit(0);
 }else if(command==='init-fresh'){
   assert.equal(arguments_.length,2,'Provide the exact schema-initialized release record and --approved');
@@ -155,9 +156,7 @@ if(command==='recover-cutover'||(command==='boot'&&pendingCutover)){
   assert.ok(path.isAbsolute(releaseFile)&&approval==='--approved','Fresh activation requires explicit approval');
   assert.equal(config.enabled,false,'Fresh activation requires disabled polling');
   const release=validateUpdateRelease(JSON.parse(await readFile(releaseFile,'utf8')));
-  const proof=await readPrivateProof(freshSchemaProofFile);
-  assert.deepEqual(proof,{format:'codexia-fresh-schema-proof/v1',release,fingerprint:release.migrationFingerprint},'Fresh schema evidence does not match the selected release');
-  let existing=null;
+   let existing=null;
   try{existing=await loadControllerState(config.stateFile);}catch(error){if(error.code!=='ENOENT')throw error;}
   const state=await controller.activateFresh(release,config.initialSlot??'blue',existing);
   if(state.initialActivationPending||state.lastError)throw Error(state.lastError??'Fresh activation remains pending');

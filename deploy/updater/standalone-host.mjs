@@ -14,7 +14,7 @@ const preflight = slot => {name(slot);return 'codexia-preflight-'+slot;};
 const channelUrl='https://api.github.com/repos/yohn-jp/codexia/contents/stable-channel.json?ref=codexia-stable-channel';
 const modelCacheRoot='/var/cache/codexia/models';
 const fingerprintCode='import { packagedMigrationFingerprint } from "@codexia/api"; console.log(await packagedMigrationFingerprint());';
-const initializeSchemaCode=`import {readFileSync} from 'node:fs'; import {initializeFreshPostgresSchema,verifyPostgresSchema} from '@codexia/api'; const password=readFileSync('/run/secrets/app-password','utf8').replace(/\\n+$/u,''); if(!/^[a-fA-F0-9]+$/u.test(password))throw Error('Invalid database secret'); const url='postgres://codexia:'+password+'@codexia-db:5432/codexia'; const applied=await initializeFreshPostgresSchema(url); console.log(JSON.stringify({applied,fingerprint:await verifyPostgresSchema(url)}));`;
+const initializeSchemaCode=`import {readFileSync} from 'node:fs'; import {inspectFreshPostgresSchema,initializeFreshPostgresSchema,verifyPostgresSchema} from '@codexia/api'; const password=readFileSync('/run/secrets/app-password','utf8').replace(/\\n+$/u,''); if(!/^[a-fA-F0-9]+$/u.test(password))throw Error('Invalid database secret'); const url='postgres://codexia:'+password+'@codexia-db:5432/codexia'; if(process.argv[1]==='inspect'){console.log(JSON.stringify(await inspectFreshPostgresSchema(url)));}else{const applied=await initializeFreshPostgresSchema(url); console.log(JSON.stringify({applied,fingerprint:await verifyPostgresSchema(url)}));}`;
 const readyCode=`const health=await fetch("http://127.0.0.1:3000/health/ready",{signal:AbortSignal.timeout(5000)});if(!health.ok)process.exit(1);const version=await fetch("http://127.0.0.1:3000/api/version",{signal:AbortSignal.timeout(5000)});if(!version.ok)process.exit(1);console.log(JSON.stringify(await version.json()));`;
 const proxyProbeCode=`const r=await fetch("http://127.0.0.1:3000/api/version",{signal:AbortSignal.timeout(5000)});if(!r.ok)process.exit(1);console.log(JSON.stringify({slot:r.headers.get("x-codexia-upstream-slot"),version:await r.json()}));`;
 const authProbeCode=`import {readFileSync} from "node:fs";const token=readFileSync("/run/secrets/codexia-auth-token","utf8").trim();const r=await fetch("http://codexia-api-proxy:3000/api/v1/persistence/status",{headers:{Authorization:"Bearer "+token},signal:AbortSignal.timeout(5000)});if(!r.ok)process.exit(1);const body=await r.json();if(body.available!==true)process.exit(1);`;
@@ -1310,7 +1310,18 @@ export class PodmanStandaloneHost{
     assert.equal(await this.tunnelServiceActive(),false,'Fresh schema requires the Tunnel stopped');
     assert.equal(await this.unitActive('codexia-db.service'),true,'Fresh schema requires the canonical database service');
   }
-  async initializeFreshSchema(release){
+  async freshDatabaseIdentity(){
+    const identity=run('podman',['exec','codexia-db','sh','-ec',
+      'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "SELECT system_identifier::text || chr(58) || oid::text FROM pg_control_system(), pg_database WHERE datname=current_database()"']);
+    assert.match(identity,/^[1-9]\d{0,19}:[1-9]\d{0,9}$/u,'Canonical database identity is unobservable');
+    return identity;
+  }
+  async inspectFreshSchema(release){
+    const result=await this.initializeFreshSchema(release,{inspectOnly:true});
+    assert.equal(typeof result.pristine,'boolean','Fresh database observation is invalid');
+    return result;
+  }
+  async initializeFreshSchema(release,{inspectOnly=false}={}){
     assert.equal(release.profile,this.runtime?.profile,'Fresh schema release profile differs from runtime contract');
     // Run only the packaged migration authority, not the API entrypoint. No
     // persistent manuscript/history mount, API auth credential or public port.
@@ -1318,7 +1329,8 @@ export class PodmanStandaloneHost{
       '--read-only','--image-volume=ignore','--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=64m',
       '--cap-drop','all','--security-opt','no-new-privileges',
       '--secret','codexia-postgres-app-password,type=mount,target=/run/secrets/app-password',
-      '--entrypoint','node',release.image,'--input-type=module','-e',initializeSchemaCode],{timeout:300000}));
+      '--entrypoint','node',release.image,'--input-type=module','-e',initializeSchemaCode,inspectOnly?'inspect':'initialize'],{timeout:300000}));
+    if(inspectOnly)return result;
     assert.ok(Array.isArray(result.applied)&&result.applied.every(item=>typeof item==='string'),'Invalid migration result');
     return result;
   }
