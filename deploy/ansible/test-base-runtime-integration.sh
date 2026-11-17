@@ -62,6 +62,8 @@ done
 rc=0; podman secret exists codexia-postgres-preflight-password || rc=$?
 test "$rc" = 1
 test ! -e /etc/codexia
+# The disposable test must never adopt or delete a pre-existing updater directory.
+test ! -e /opt/codexia-updater && test ! -L /opt/codexia-updater
 for file in codexia.network codexia-data.network codexia-postgres.volume codexia-data.volume codexia-history.volume codexia-db.container codexia-tunnel.container; do
   as_service test ! -e "$quadlet_dir/$file"
 done
@@ -125,6 +127,13 @@ cleanup() {
     codexia-postgres-app-password \
     codexia-postgres-preflight-password >/dev/null 2>&1 || true
   as_service rm -rf "$service_home/unexpected-tunnel-mount" >/dev/null 2>&1 || true
+  if sudo test -L /opt/codexia-updater; then
+    if [[ "$(sudo readlink /opt/codexia-updater)" == "$tmp" ]]; then sudo rm -- /opt/codexia-updater || cleanup_status=1; else cleanup_status=1; fi
+  elif sudo test -d /opt/codexia-updater; then
+    if [[ "$(sudo stat -c '%u:%a' /opt/codexia-updater)" == "$service_uid:750" || "$(sudo stat -c '%u:%a' /opt/codexia-updater)" == '0:750' ]]; then
+      sudo rmdir -- /opt/codexia-updater || cleanup_status=1
+    else cleanup_status=1; fi
+  fi
   sudo rm -f /etc/codexia/postgres/010-create-app-role.sh || cleanup_status=1
   sudo rmdir /etc/codexia/postgres /etc/codexia 2>/dev/null || true
   if [[ "$tmp" == /tmp/codexia-base-runtime.* && -d "$tmp" && ! -L "$tmp" ]]; then sudo rm -rf -- "$tmp" || cleanup_status=1; fi
@@ -372,6 +381,23 @@ for network in codexia codexia-data; do
 done
 sed -i 's/codexia_database_initialization_approved: false/codexia_database_initialization_approved: true/' "$tmp/base-inventory.yml"
 
+# Reject drift without adopting a foreign directory or following a symlink.
+sudo ln -s "$tmp" /opt/codexia-updater
+if apply_base > "$tmp/source-symlink.log" 2>&1; then
+  echo 'Base accepted a symlinked updater source directory' >&2; exit 1
+fi
+grep -Fq 'Existing updater source directory must be a real service-owned directory' "$tmp/source-symlink.log"
+test ! -e /etc/codexia
+sudo unlink /opt/codexia-updater
+sudo install -d -o root -g root -m 0750 /opt/codexia-updater
+if apply_base > "$tmp/source-owner.log" 2>&1; then
+  echo 'Base accepted a foreign-owned updater source directory' >&2; exit 1
+fi
+grep -Fq 'Existing updater source directory must be a real service-owned directory' "$tmp/source-owner.log"
+test "$(sudo stat -c '%u:%a' /opt/codexia-updater)" = '0:750'
+test ! -e /etc/codexia
+sudo rmdir /opt/codexia-updater
+
 if ! apply_base > "$tmp/first.log" 2>&1; then
   cat "$tmp/first.log" >&2
   diagnose_missing_database_unit
@@ -380,6 +406,13 @@ fi
 grep -Eq 'changed=[1-9]' "$tmp/first.log"
 apply_base > "$tmp/second.log" || { cat "$tmp/second.log"; exit 1; }
 grep -q 'changed=0' "$tmp/second.log"
+test "$(sudo stat -c '%u:%a' /opt/codexia-updater)" = "$service_uid:750"
+# The service account needs no sudo to stage its own source after base.
+if as_service sudo -n true >/dev/null 2>&1; then
+  echo 'Rootless fixture unexpectedly has sudo privileges' >&2; exit 1
+fi
+as_service touch /opt/codexia-updater/.phase-b-write-probe
+as_service rm /opt/codexia-updater/.phase-b-write-probe
 
 # The base stage must load the newly installed Tunnel unit itself while
 # leaving both the Tunnel container and service stopped.

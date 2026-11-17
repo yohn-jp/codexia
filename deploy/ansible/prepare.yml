@@ -1,4 +1,19 @@
 ---
+- name: Inspect the canonical updater source directory before preparing the runtime
+  ansible.builtin.stat:
+    path: "{{ source_dir }}"
+    follow: false
+  register: prepare_source
+- name: Require the pre-provisioned service-owned updater source directory
+  ansible.builtin.assert:
+    that:
+      - source_dir == '/opt/codexia-updater'
+      - prepare_source.stat.exists
+      - prepare_source.stat.isdir | default(false)
+      - not (prepare_source.stat.islnk | default(false))
+      - prepare_source.stat.uid == ansible_facts.user_uid | int
+      - prepare_source.stat.mode == '0750'
+    fail_msg: Run the approved base stage through the bootstrap account to provision the updater source directory; prepare never elevates privileges.
 - name: Verify existing database and networks
   ansible.builtin.command:
     argv: "{{ item }}"
@@ -19,13 +34,6 @@
   changed_when: false
   failed_when: timer.rc not in [3, 4]
   check_mode: false
-- name: Create the fixed updater source directory
-  become: true
-  ansible.builtin.file:
-    path: "{{ source_dir }}"
-    state: directory
-    owner: "{{ ansible_facts.user_id }}"
-    mode: '0750'
 - name: Create updater source and private runtime directories
   ansible.builtin.file:
     path: "{{ item }}"

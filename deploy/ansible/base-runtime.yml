@@ -205,6 +205,25 @@
   when: >-
     base_runtime_containers.results[0].rc == 1 and
     (base_runtime_pgdata_before is skipped or (base_runtime_pgdata_before.stdout | from_json).state == 'empty')
+- name: Require the fixed updater source destination
+  ansible.builtin.assert:
+    that: source_dir == '/opt/codexia-updater'
+    fail_msg: Updater source must use the canonical host directory.
+- name: Inspect the updater source directory without following links
+  become: true
+  become_user: root
+  ansible.builtin.stat:
+    path: "{{ source_dir }}"
+    follow: false
+  register: base_updater_source
+- name: Reject an existing updater source directory with unsafe ownership or mode
+  ansible.builtin.assert:
+    that:
+      - not base_updater_source.stat.exists or (base_updater_source.stat.isdir | default(false))
+      - not base_updater_source.stat.exists or not (base_updater_source.stat.islnk | default(false))
+      - not base_updater_source.stat.exists or base_updater_source.stat.uid == codexia_service_uid
+      - not base_updater_source.stat.exists or base_updater_source.stat.mode == '0750'
+    fail_msg: Existing updater source directory must be a real service-owned directory with mode 0750; it was not modified.
 - name: Inspect the PostgreSQL init-script directory without following links
   become: true
   become_user: root
@@ -243,6 +262,16 @@
       - not base_runtime_existing_init_script.stat.exists or ((base_runtime_existing_init_script.stat.isreg | default(false)) and not (base_runtime_existing_init_script.stat.islnk | default(false)))
       - not base_runtime_existing_init_script.stat.exists or base_runtime_existing_init_script.stat.checksum == (lookup('ansible.builtin.file', repo_root + '/deploy/postgres/010-create-app-role.sh', rstrip=false) | hash('sha1'))
     fail_msg: The PostgreSQL initializer must be a regular file, not a symlink or special file.
+- name: Provision the missing updater source directory through the bootstrap identity
+  become: true
+  become_user: root
+  ansible.builtin.file:
+    path: "{{ source_dir }}"
+    state: directory
+    owner: "{{ codexia_service_user }}"
+    group: "{{ base_runtime_service_identity.stdout.split(':')[3] }}"
+    mode: '0750'
+  when: not base_updater_source.stat.exists
 - name: Ensure the PostgreSQL config parent is traversable by the rootless service account
   become: true
   become_user: root
