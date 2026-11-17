@@ -1,0 +1,80 @@
+---
+- name: Require explicit approval for updater lifecycle operations
+  ansible.builtin.assert:
+    that:
+      - codexia_maintenance_approved | default(false) | bool
+      - codexia_stage in ['pause', 'resume', 'rollback']
+      - journal.stat.exists
+      - (controller_status.stdout | from_json).state.journal.phase in ['idle', 'committed']
+      - (controller_status.stdout | from_json).state.lastError is none
+    fail_msg: Lifecycle operations require an initialized, healthy controller and explicit maintenance approval.
+- name: Require a paused controller with a digest-pinned previous release for rollback
+  ansible.builtin.assert:
+    that:
+      - (controller_status.stdout | from_json).state.paused
+      - (controller_status.stdout | from_json).state.previous is mapping
+      - (controller_status.stdout | from_json).state.previous.image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+      - (controller_status.stdout | from_json).state.previous.image != (controller_status.stdout | from_json).state.installed.image
+    fail_msg: Rollback requires an explicitly paused controller and a digest-pinned previous release; the updater verifies signature and compatibility.
+  when: codexia_stage == 'rollback'
+- name: Select the existing locked rollback operation for the saved enabled state
+  ansible.builtin.set_fact:
+    lifecycle_command: >-
+      {{ 'rollback' if (saved_config.content | b64decode | from_json).enabled | bool else 'acceptance-rollback' }}
+  when: codexia_stage == 'rollback'
+- name: Select the requested pause or resume operation
+  ansible.builtin.set_fact:
+    lifecycle_command: "{{ codexia_stage }}"
+  when: codexia_stage in ['pause', 'resume']
+- name: Record the controller identity before the lifecycle operation
+  ansible.builtin.set_fact:
+    lifecycle_before: "{{ controller_status.stdout | from_json }}"
+- name: Observe the updater timer before the lifecycle operation
+  ansible.builtin.command:
+    argv: [systemctl, --user, is-active, codexia-updater.timer]
+  register: lifecycle_timer_before
+  changed_when: false
+  failed_when: lifecycle_timer_before.rc not in [0, 3]
+- name: Run pause, resume or the selected rollback through the canonical updater lock
+  ansible.builtin.command:
+    argv: [sh, "{{ updater }}", "{{ lifecycle_command }}", "{{ config_path }}"]
+  register: lifecycle_result
+  changed_when: >-
+    (codexia_stage == 'pause' and not lifecycle_before.state.paused) or
+    (codexia_stage == 'resume' and lifecycle_before.state.paused) or
+    codexia_stage == 'rollback'
+- name: Verify the lifecycle command returned a stable controller state
+  ansible.builtin.assert:
+    that:
+      - (lifecycle_result.stdout | from_json).journal.phase in ['idle', 'committed']
+      - (lifecycle_result.stdout | from_json).lastError is none
+      - codexia_stage != 'pause' or (lifecycle_result.stdout | from_json).paused
+      - codexia_stage != 'resume' or not (lifecycle_result.stdout | from_json).paused
+      - codexia_stage != 'rollback' or (lifecycle_result.stdout | from_json).paused
+      - codexia_stage != 'rollback' or (lifecycle_result.stdout | from_json).installed.image == lifecycle_before.state.previous.image
+      - codexia_stage != 'rollback' or lifecycle_before.state.installed.image in (lifecycle_result.stdout | from_json).failedImages
+    fail_msg: The updater lifecycle operation did not preserve its controller and rollback invariants.
+- name: Verify the updater timer state did not change during the lifecycle operation
+  ansible.builtin.command:
+    argv: [systemctl, --user, is-active, codexia-updater.timer]
+  register: lifecycle_timer_after
+  changed_when: false
+  failed_when: lifecycle_timer_after.rc not in [0, 3]
+- name: Require lifecycle operations to preserve polling state
+  ansible.builtin.assert:
+    that:
+      - lifecycle_timer_after.stdout | trim == lifecycle_timer_before.stdout | trim
+    fail_msg: Lifecycle operation changed the polling timer state.
+- name: Verify the serving writer and route after the lifecycle operation
+  ansible.builtin.command:
+    argv: [sh, "{{ updater }}", verify, "{{ config_path }}"]
+  register: lifecycle_verified
+  changed_when: false
+- name: Confirm verification preserved the lifecycle pause state
+  ansible.builtin.assert:
+    that:
+      - (lifecycle_verified.stdout | from_json).state.paused == (lifecycle_result.stdout | from_json).paused
+      - (lifecycle_verified.stdout | from_json).observed.writers | length == 1
+      - (lifecycle_verified.stdout | from_json).observed.route == (lifecycle_verified.stdout | from_json).state.journal.active.slot
+      - codexia_stage != 'rollback' or (lifecycle_verified.stdout | from_json).state.installed.image == lifecycle_before.state.previous.image
+      - codexia_stage != 'rollback' or lifecycle_before.state.installed.image in (lifecycle_verified.stdout | from_json).state.failedImages

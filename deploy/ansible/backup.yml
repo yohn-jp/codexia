@@ -1,0 +1,184 @@
+---
+- name: Require explicit backup approval and protected external inputs
+  ansible.builtin.assert:
+    that:
+      - codexia_backup_approved | default(false) | bool
+      - codexia_backup_destination is string
+      - codexia_backup_destination is match('^/[^\r\n]+$')
+      - codexia_backup_recipient is string
+      - codexia_backup_recipient is match('^age1[0-9a-z]+$')
+    fail_msg: Provide explicit approval, an existing off-VM mount path, and an externally managed age recipient.
+  no_log: true
+- name: Inspect the declared backup destination without following links
+  ansible.builtin.stat:
+    path: "{{ codexia_backup_destination }}"
+    follow: false
+  register: codexia_backup_destination_stat
+  no_log: true
+- name: Require an existing real destination directory
+  ansible.builtin.assert:
+    that:
+      - codexia_backup_destination_stat.stat.isdir | default(false)
+      - not (codexia_backup_destination_stat.stat.islnk | default(false))
+    fail_msg: Backup destination must be an existing directory on an approved off-VM filesystem.
+  no_log: true
+- name: Observe whether a controller journal already exists
+  ansible.builtin.stat:
+    path: "{{ state_dir }}/controller.json"
+    follow: false
+  register: codexia_backup_journal
+- name: Refuse an unknown controller journal path
+  ansible.builtin.assert:
+    that:
+      - not codexia_backup_journal.stat.exists or (codexia_backup_journal.stat.isreg | default(false))
+      - not (codexia_backup_journal.stat.islnk | default(false))
+    fail_msg: Existing controller state must be a regular file before backup.
+  no_log: true
+- name: Verify reviewed updater sources and configuration before executing recovery
+  ansible.builtin.include_tasks: verify-updater-inputs.yml
+- name: Refuse drifted updater units before reloading the user manager
+  ansible.builtin.include_tasks: verify-updater-units.yml
+  vars:
+    allow_missing_updater_units: "{{ not codexia_backup_journal.stat.exists }}"
+- name: Install the canonical boot recovery unit only if absent
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/updater/codexia-updater-boot.service.example"
+    dest: "{{ unit_dir }}/codexia-updater-boot.service"
+    mode: '0600'
+    force: false
+- name: Reload the reviewed recovery unit without starting services
+  ansible.builtin.systemd_service:
+    scope: user
+    daemon_reload: true
+- name: Verify the recovery unit and all existing updater unit overrides after reload
+  ansible.builtin.include_tasks: verify-updater-units.yml
+  vars:
+    allow_missing_updater_units: "{{ not codexia_backup_journal.stat.exists }}"
+- name: Enable backup intent recovery at the next boot without starting services now
+  ansible.builtin.systemd_service:
+    name: codexia-updater-boot.service
+    scope: user
+    enabled: true
+- name: Recover any interrupted backup under the updater lock before preflight
+  ansible.builtin.command:
+    argv: [sh, "{{ updater }}", boot, "{{ config_path }}"]
+  changed_when: false
+  no_log: true
+- name: Observe controller state before taking the backup window
+  ansible.builtin.command:
+    argv: [sh, "{{ updater }}", status, "{{ config_path }}"]
+  register: codexia_backup_before
+  changed_when: false
+  no_log: true
+  when: codexia_backup_journal.stat.exists
+- name: Require the signed release record for a pre-journal legacy backup
+  ansible.builtin.assert:
+    that:
+      - codexia_installed_release_file is defined
+      - codexia_installed_release_file is string
+      - codexia_installed_release_file is match('^/[^\r\n]+$')
+    fail_msg: A pre-journal backup requires the exact signed legacy release record.
+  no_log: true
+  when: not codexia_backup_journal.stat.exists
+- name: Inspect the signed release input on the control node
+  ansible.builtin.stat:
+    path: "{{ codexia_installed_release_file }}"
+    follow: false
+    checksum_algorithm: sha1
+  register: codexia_backup_release_source
+  delegate_to: localhost
+  become: false
+  no_log: true
+  when: not codexia_backup_journal.stat.exists
+- name: Require a regular signed release input
+  ansible.builtin.assert:
+    that:
+      - codexia_backup_release_source.stat.isreg | default(false)
+      - not (codexia_backup_release_source.stat.islnk | default(false))
+    fail_msg: The legacy release record must be a regular non-symlink file.
+  no_log: true
+  when: not codexia_backup_journal.stat.exists
+- name: Inspect any previously staged legacy release record
+  ansible.builtin.stat:
+    path: "{{ config_dir }}/backup-installed-release.json"
+    follow: false
+    checksum_algorithm: sha1
+  register: codexia_backup_release_staged
+  no_log: true
+  when: not codexia_backup_journal.stat.exists
+- name: Reject any staged signed release record that differs from the declared input
+  ansible.builtin.assert:
+    that:
+      - not codexia_backup_release_staged.stat.exists or (codexia_backup_release_staged.stat.isreg | default(false))
+      - not codexia_backup_release_staged.stat.exists or not (codexia_backup_release_staged.stat.islnk | default(false))
+      - not codexia_backup_release_staged.stat.exists or codexia_backup_release_staged.stat.checksum == codexia_backup_release_source.stat.checksum
+      - not codexia_backup_release_staged.stat.exists or codexia_backup_release_staged.stat.mode == '0600'
+      - not codexia_backup_release_staged.stat.exists or codexia_backup_release_staged.stat.pw_name == codexia_service_user
+    fail_msg: A different pre-journal release record is already staged; it was not overwritten.
+  no_log: true
+  when: not codexia_backup_journal.stat.exists
+- name: Stage only the exact signed legacy release input
+  ansible.builtin.copy:
+    src: "{{ codexia_installed_release_file }}"
+    dest: "{{ config_dir }}/backup-installed-release.json"
+    mode: '0600'
+    force: false
+  register: codexia_backup_release_copy
+  no_log: true
+  when: not codexia_backup_journal.stat.exists and not codexia_backup_release_staged.stat.exists
+- name: Run the controller-locked backup window
+  ansible.builtin.command:
+    argv:
+      - sh
+      - "{{ updater }}"
+      - backup
+      - "{{ config_path }}"
+      - "{{ config_dir }}/backup-installed-release.json"
+      - "{{ codexia_backup_destination }}"
+      - "{{ codexia_backup_recipient }}"
+      - --approved
+  register: codexia_legacy_backup_result
+  changed_when: true
+  no_log: true
+  when: not codexia_backup_journal.stat.exists
+- name: Run the controller-locked backup window for an initialized service
+  ansible.builtin.command:
+    argv:
+      - sh
+      - "{{ updater }}"
+      - backup
+      - "{{ config_path }}"
+      - "{{ codexia_backup_destination }}"
+      - "{{ codexia_backup_recipient }}"
+      - --approved
+  register: codexia_backup_result
+  changed_when: true
+  no_log: true
+  when: codexia_backup_journal.stat.exists
+- name: Verify the prior controller journal, pause state, route and writer were restored
+  ansible.builtin.command:
+    argv: [sh, "{{ updater }}", status, "{{ config_path }}"]
+  register: codexia_backup_after
+  changed_when: false
+  no_log: true
+  when: codexia_backup_journal.stat.exists
+- name: Require backup recovery to preserve controller and writer ownership
+  ansible.builtin.assert:
+    that:
+      - (codexia_backup_after.stdout | from_json).state.journal == (codexia_backup_before.stdout | from_json).state.journal
+      - (codexia_backup_after.stdout | from_json).state.paused == (codexia_backup_before.stdout | from_json).state.paused
+      - (codexia_backup_after.stdout | from_json).state.lastError == (codexia_backup_before.stdout | from_json).state.lastError
+      - (codexia_backup_after.stdout | from_json).observed == (codexia_backup_before.stdout | from_json).observed
+    fail_msg: Backup completed without restoring the exact prior controller state and single-writer topology.
+  no_log: true
+  when: codexia_backup_journal.stat.exists
+- name: Require the legacy backup command to confirm artifact publication after locked recovery
+  ansible.builtin.assert:
+    that:
+      - codexia_legacy_backup_result.stdout is match('^Encrypted backup committed: ')
+    fail_msg: Legacy backup did not confirm encrypted artifact publication and identity-preserving recovery.
+  no_log: true
+  when: not codexia_backup_journal.stat.exists
+- name: Report encrypted backup completion without exposing destination inputs
+  ansible.builtin.debug:
+    msg: Encrypted backup completed under the updater lock; controller journal, pause state, timer state, route and writer were restored.

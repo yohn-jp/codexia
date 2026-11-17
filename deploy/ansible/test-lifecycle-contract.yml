@@ -1,0 +1,29 @@
+---
+- name: Exercise the explicit updater lifecycle contract with isolated command shims
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    test_active_image: ghcr.io/yohn-jp/codexia-backend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    test_previous_image: ghcr.io/yohn-jp/codexia-backend@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    test_stage: "{{ lookup('env', 'CODEXIA_LIFECYCLE_STAGE') }}"
+    test_config_enabled: "{{ lookup('env', 'CODEXIA_LIFECYCLE_CONFIG_ENABLED') | bool }}"
+    test_paused: "{{ lookup('env', 'CODEXIA_LIFECYCLE_PAUSED') | bool }}"
+    test_previous: "{{ lookup('env', 'CODEXIA_LIFECYCLE_PREVIOUS') | default(test_previous_image, true) }}"
+  tasks:
+    - name: Provide a synthetic initialized controller and saved configuration
+      ansible.builtin.set_fact:
+        codexia_stage: "{{ test_stage }}"
+        codexia_maintenance_approved: true
+        journal:
+          stat:
+            exists: true
+        saved_config:
+          content: "{{ {'enabled': test_config_enabled} | to_json | b64encode }}"
+        controller_status:
+          stdout: "{{ {'state': {'journal': {'phase': 'idle', 'active': {'slot': 'blue'}}, 'lastError': none, 'paused': test_paused, 'installed': {'image': test_active_image}, 'previous': {'image': test_previous}, 'failedImages': []}} | to_json }}"
+        updater: "{{ lookup('env', 'CODEXIA_LIFECYCLE_FAKE_UPDATER') }}"
+        config_path: /tmp/codexia-lifecycle-test-config.json
+
+    - name: Exercise the production lifecycle tasks
+      ansible.builtin.import_tasks: lifecycle.yml

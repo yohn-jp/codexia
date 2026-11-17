@@ -39,7 +39,7 @@
     "@codexia/module-nlp": "workspace:*",
     "yaml": "^2.9.1",
     "@codexia/module-diagnostics": "workspace:*",
-    "zod": "3.25.76",
+    "zod": "4.6.6",
     "@codexia/migration": "workspace:*"
   },
   "codexiaModule": {
