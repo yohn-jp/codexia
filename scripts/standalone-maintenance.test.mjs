@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {probeCredentialFiles,validateProbeCredential,assertProbeCredentialAccess,assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig} from '../deploy/updater/standalone-maintenance.mjs';
-import {assertProxyRuntimeObservation} from '../deploy/updater/standalone-host.mjs';
+import {assertProxyRuntimeObservation,PodmanStandaloneHost} from '../deploy/updater/standalone-host.mjs';
+import {mkdtemp,rm,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
 
 const runtime={
   format:'codexia-runtime/v1',profile:'core',modelCachePath:null,
@@ -182,4 +185,41 @@ test('probe credential admission requires a fresh signed channel and compatible 
   await assert.rejects(assertProbeCredentialAccess({...host,fetchChannel:async()=>{throw Error('secret-value');}},state,pub),error=>error.message==='Probe credentials did not verify the signed channel and scoped live identity access');
   await assert.rejects(assertProbeCredentialAccess({...host,probeAccessCredentials:async()=>{throw Error('ACCESS_BOUNDARY');}},state,pub),/Probe credentials did not verify/);
   await assert.rejects(assertProbeCredentialAccess(host,{...state,installed:{...installed,apiEpoch:2}},pub),/Probe credentials did not verify/);
+});
+
+test('VM probe credentials use the canonical live identity and denial paths',async()=>{
+ const dir=await mkdtemp(path.join(tmpdir(),'codexia-probe-'));
+ try{
+  const id=path.join(dir,'id'),secret=path.join(dir,'secret');
+  await writeFile(id,'test-client-id\n',{mode:0o600});await writeFile(secret,'test-client-secret\n',{mode:0o600});
+  const host=new PodmanStandaloneHost({...current,accessClientIdFile:id,accessClientSecretFile:secret});
+  const installed={...release,version:'0.1.0',apiEpoch:1};
+  const frontend={format:'codexia-frontend-identity/v1',sourceSha:'a'.repeat(40),version:'0.1.0',profile:'core',apiEpoch:1};
+  const backend={name:'codexia',version:'0.1.0',hosted:false,profile:'core',apiEpoch:1,browserAuth:'token'};
+  const calls=[];
+  function fetcher(failure){
+    return async(url,options)=>{
+      const endpoint=new URL(url).pathname,authenticated=Boolean(options.headers['CF-Access-Client-Id']);
+      assert.equal(options.redirect,'manual');assert.equal(options.cache,'no-store');
+      calls.push([endpoint,authenticated]);
+      if(authenticated){
+        assert.equal(options.headers['CF-Access-Client-Id'],'test-client-id');
+        assert.equal(options.headers['CF-Access-Client-Secret'],'test-client-secret');
+      }
+      if(!authenticated)return new Response(null,{status:failure==='anonymous'&&endpoint==='/api/version'?200:403});
+      if(endpoint==='/api/version')return failure==='backend-denied'?new Response(null,{status:403}):Response.json(failure==='wrong-backend'?{...backend,apiEpoch:2}:backend);
+      if(endpoint==='/desktop/update-identity.json')return Response.json(frontend);
+      return new Response(null,{status:failure==='overbroad'?200:403});
+    };
+  }
+  const observed=await host.probeAccessCredentials(installed,{fetchImpl:fetcher(null)});
+  assert.deepEqual(observed,{backend,deployed:frontend});
+  assert.deepEqual(calls.map(item=>JSON.stringify(item)).sort(),[
+    ['/api/version',true],['/desktop/update-identity.json',true],['/api/version',false],
+    ['/desktop/update-identity.json',false],['/',true],['/api/ready',true],
+  ].map(item=>JSON.stringify(item)).sort());
+  for(const failure of ['anonymous','backend-denied','wrong-backend','overbroad']){
+    await assert.rejects(host.probeAccessCredentials(installed,{fetchImpl:fetcher(failure)}),/Production deployment preflight failed/);
+  }
+ }finally{await rm(dir,{recursive:true,force:true});}
 });

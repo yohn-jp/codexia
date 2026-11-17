@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict';
-// Pure compatibility policy. Inputs MUST already be authenticated by the
+// Compatibility functions are pure. Inputs MUST already be authenticated by the
 // standalone release publication/verification boundary. This module does not
 // establish publisher identity, registry freshness, revocation or deployment authority.
 const fields = [
@@ -164,11 +163,12 @@ async function assertProbeDenied(endpoint, origin, credentials, fetchImpl) {
   }
 }
 
-/** Canonical exact-path identity probe policy shared by release and VM maintenance.
- * Terraform's identity-probes.json is checked against these paths by the release gate.
- * @param {{origin:URL,credentials:{clientId:string,clientSecret:string},fetchImpl?:typeof fetch,checkBoundary?:boolean,validateBackend:(value:any)=>any,validateFrontend:(value:any)=>any}} options
- */
+// Terraform's identity-probes.json is checked against these paths by the release gate.
 export const IDENTITY_PROBE_PATHS=Object.freeze({backend:'/api/version',frontend:'/desktop/update-identity.json'});
+/** Canonical exact-path identity probe shared by release and VM maintenance.
+ * @template Backend, Frontend
+ * @param {{origin:URL,credentials:{clientId:string,clientSecret:string},fetchImpl?:typeof fetch,checkBoundary?:boolean,validateBackend:(value:unknown)=>Backend,validateFrontend:(value:unknown)=>Frontend}} options
+ */
 export async function probeScopedIdentityAccess({origin,credentials,fetchImpl=fetch,checkBoundary=false,validateBackend,validateFrontend}){
   const backend=readLiveJson(IDENTITY_PROBE_PATHS.backend,origin,credentials,fetchImpl).then(validateBackend);
   const deployed=readLiveJson(IDENTITY_PROBE_PATHS.frontend,origin,credentials,fetchImpl).then(validateFrontend);
