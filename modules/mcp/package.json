@@ -27,7 +27,7 @@
   "dependencies": {
     "@codexia/contracts": "workspace:*",
     "@modelcontextprotocol/sdk": "1.32.2",
-    "zod": "3.25.76"
+    "zod": "4.6.6"
   },
   "codexiaModule": {
     "id": "mcp",

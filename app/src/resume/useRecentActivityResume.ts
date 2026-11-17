@@ -12,6 +12,10 @@ const LOCAL_DEBOUNCE_MS = 400;
 const SERVER_DEBOUNCE_MS = 2_000;
 const REFRESH_INTERVAL_MS = 15_000;
 
+// One writer identity and sequence for this document, even if a shell remounts.
+let activityWriter: string | undefined;
+let activitySequence = 0;
+
 interface Binding {
   projectId: string;
   authorScope: string;
@@ -98,7 +102,11 @@ export function useRecentActivityResume({
     if (!pending) return;
     if (bindingRef.current?.authorScope !== pending.binding.authorScope) return;
     const version = ++latestWriteVersionRef.current;
-    void api.putRecentActivity(pending.binding.projectId, pending.input, { keepalive }).then((response) => {
+    // Dispatch immediately, including on pagehide. The server rejects older
+    // reports from this writer, so a delayed PUT cannot rewind the cursor.
+    activityWriter ??= crypto.randomUUID();
+    const order = `${activityWriter}:${++activitySequence}`;
+    void api.putRecentActivity(pending.binding.projectId, pending.input, { keepalive, order }).then((response) => {
       const active = bindingRef.current;
       if (version === latestWriteVersionRef.current && active?.identityKey === pending.binding.identityKey &&
           active.authorScope === pending.binding.authorScope) {
@@ -108,7 +116,7 @@ export function useRecentActivityResume({
       }
     }).catch((caught: unknown) => {
       const active = bindingRef.current;
-      if (active?.identityKey === pending.binding.identityKey) {
+      if (version === latestWriteVersionRef.current && active?.identityKey === pending.binding.identityKey) {
         setError(caught instanceof Error ? caught.message : "再開位置を同期できませんでした。");
       }
     });

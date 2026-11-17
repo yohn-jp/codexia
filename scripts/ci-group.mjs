@@ -102,7 +102,8 @@ async function executeTask(task, index) {
             ...(nativeArtifact ? {CODEXIA_NATIVE_PRODUCER_REPORT:process.env.CODEXIA_CI_NATIVE_PRODUCER_REPORT} : {}) });
       } else if (task === 'coverage') {
         await node('scripts/ci-workspace.mjs', 'coverage');
-        await node('--test', 'scripts/ci-contract.test.mjs', 'scripts/ci-impact.test.mjs', 'scripts/ci-profile-artifact.test.mjs', 'scripts/ci-native-producer.test.mjs', 'scripts/ci-parallel.test.mjs');
+        // The root test script already covers these contracts. Retain them for coverage-only plans.
+        if (!plan.tasks.includes('unit-root')) await node('--test', 'scripts/ci-contract.test.mjs', 'scripts/ci-impact.test.mjs', 'scripts/ci-profile-artifact.test.mjs', 'scripts/ci-native-producer.test.mjs', 'scripts/ci-parallel.test.mjs', 'scripts/reuse-pr-verification.test.mjs');
       } else throw new Error(`No runner for ${task}`);
     } catch (caught) { error = String(caught); }
   }
