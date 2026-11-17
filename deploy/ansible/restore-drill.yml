@@ -80,7 +80,7 @@
   ansible.builtin.assert:
     that:
       - codexia_restore_receipt_output_file is string
-      - codexia_restore_receipt_output_file is match('^/[^\\r\\n]+$')
+      - codexia_restore_receipt_output_file is match('^/[^\r\n]+$')
   when: codexia_restore_receipt_output_file is defined
   delegate_to: localhost
   become: false
