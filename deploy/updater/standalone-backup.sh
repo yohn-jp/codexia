@@ -225,11 +225,15 @@ case "${1:-}" in
     podman run -d --name "$db" --label "$label=$suffix" --network none --security-opt no-new-privileges \
       -e POSTGRES_DB=codexia -e POSTGRES_HOST_AUTH_METHOD=trust -v "$data:/var/lib/postgresql/data" "$PG_IMAGE" >/dev/null
     [[ "$(podman inspect --format "{{index .Config.Labels \"$label\"}}" "$db")" == "$suffix" ]] || die 'Could not verify isolated restore container'
+    # The official image starts a temporary Unix-socket-only server during
+    # initdb. Socket pg_isready can succeed just before that server shuts
+    # down. A real query over the container's loopback waits for the final
+    # server without exposing a host port or joining any network.
     for attempt in $(seq 1 60); do
-      if podman exec "$db" pg_isready -U postgres -d codexia >/dev/null 2>&1; then break; fi
+      if podman exec "$db" psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d codexia -c 'SELECT 1' >/dev/null 2>&1; then break; fi
       sleep 1
     done
-    podman exec "$db" pg_isready -U postgres -d codexia >/dev/null || die 'Isolated DB not ready'
+    podman exec "$db" psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d codexia -c 'SELECT 1' >/dev/null || die 'Isolated DB not ready on final loopback listener'
     podman exec "$db" psql -X -v ON_ERROR_STOP=1 -U postgres -d codexia -c 'CREATE ROLE codexia; CREATE ROLE codexia_admin; CREATE ROLE codexia_preflight;' >/dev/null
     age -d -i "$3" "$dir/database.dump.age" |
       podman exec -i "$db" pg_restore --exit-on-error --no-owner --no-privileges -U postgres -d codexia
