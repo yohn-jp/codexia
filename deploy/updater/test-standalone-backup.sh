@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Real disposable Podman/PostgreSQL/age exercise. The mount/network shims only
 # model an approved remote mount; this test is not off-VM backup evidence.
-set -euo pipefail
+set -Eeuo pipefail
+# The fixture redirects expected-failure output and removes its private scratch
+# tree on exit. Report only source location/status (not command arguments,
+# environment or secret-bearing logs) when an unexpected command fails.
+trap 'printf "Unexpected backup fixture failure at %s:%s (status %s)\n" "${BASH_SOURCE[0]}" "$LINENO" "$?" >&2' ERR
 test "${CODEXIA_DISPOSABLE_BACKUP_TEST:-}" = true
 test "$(id -un)" = codexia-phase-e-test
 test "$(id -u)" != 0
@@ -128,11 +132,12 @@ podman run --detach --name codexia-db --network none \
   --volume "$tmp/admin-password:/run/secrets/admin-password:ro" \
   --env POSTGRES_DB=codexia --env POSTGRES_USER=codexia_admin \
   --env POSTGRES_HOST_AUTH_METHOD=trust "$live_db_image" >/dev/null
+# Wait for the final PostgreSQL server, not the temporary initdb socket.
 for attempt in $(seq 1 60); do
-  if podman exec codexia-db pg_isready -U codexia_admin -d codexia >/dev/null 2>&1; then break; fi
+  if podman exec codexia-db psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia_admin -d codexia -c 'SELECT 1' >/dev/null 2>&1; then break; fi
   sleep 1
 done
-podman exec codexia-db pg_isready -U codexia_admin -d codexia >/dev/null
+podman exec codexia-db psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia_admin -d codexia -c 'SELECT 1' >/dev/null
 podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia \
   -c "CREATE TABLE public.backup_probe(id integer PRIMARY KEY, value text NOT NULL); INSERT INTO public.backup_probe VALUES (1, 'encrypted-fixture-row');" >/dev/null
 podman run --rm --network none --entrypoint /bin/sh \
@@ -200,12 +205,17 @@ if grep -aFq 'encrypted-fixture-row' "$artifact"/*.age; then
 fi
 
 assert_no_drill_resources() {
-  if podman ps --all --format '{{.Names}}' | grep -q '^codexia-restore-drill-'; then
+  local containers volumes
+  containers=$(podman ps --all --format '{{.Names}}')
+  volumes=$(podman volume ls --format '{{.Name}}')
+  if grep -q '^codexia-restore-drill-' <<< "$containers"; then
     echo 'Restore drill left a scratch container behind' >&2
+    grep '^codexia-restore-drill-' <<< "$containers" >&2
     exit 1
   fi
-  if podman volume ls --format '{{.Name}}' | grep -q '^codexia-restore-drill-'; then
+  if grep -q '^codexia-restore-drill-' <<< "$volumes"; then
     echo 'Restore drill left a scratch volume behind' >&2
+    grep '^codexia-restore-drill-' <<< "$volumes" >&2
     exit 1
   fi
 }

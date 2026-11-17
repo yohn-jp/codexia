@@ -58,22 +58,36 @@ jobs:
     name: Verify encrypted backup and isolated PostgreSQL restore
     runs-on: ubuntu-26.04
     timeout-minutes: 35
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: ${{ github.event_name == 'push' && '0' || '1' }}
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 22
+      - name: Resolve reusable independent PR proof
+        id: reuse
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/reuse-pr-verification.mjs dedicated
       - name: Install the pinned Ansible runner
+        if: steps.reuse.outputs.eligible != 'true'
         run: |
           set -euo pipefail
           python3 -m venv "$RUNNER_TEMP/codexia-ansible"
           "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
       - name: Verify pause, resume and rollback Ansible contracts
+        if: steps.reuse.outputs.eligible != 'true'
         run: PATH="$RUNNER_TEMP/codexia-ansible/bin:$PATH" bash deploy/ansible/test-lifecycle-contract.sh
       - name: Prepare a fresh rootless Podman fixture account
+        if: steps.reuse.outputs.eligible != 'true'
         run: |
           set -euo pipefail
           sudo apt-get update -qq
@@ -135,6 +149,7 @@ jobs:
           touch "$RUNNER_TEMP/codexia-phase-e-user-env-generator-created"
           sudo install -m 0755 "$RUNNER_TEMP/codexia-phase-e-user-env-generator.expected" "$user_environment_generator_path"
       - name: Verify controller fence, encrypted artifact integrity and isolated restore
+        if: steps.reuse.outputs.eligible != 'true'
         run: |
           fixture_user=codexia-phase-e-test
           fixture_uid=$(id -u "$fixture_user")
@@ -150,7 +165,7 @@ jobs:
           ' bash "$fixture_repo"
           node --test "$GITHUB_WORKSPACE/scripts/standalone-backup-controller.test.mjs"
       - name: Remove the disposable backup test user
-        if: always()
+        if: always() && steps.reuse.outputs.eligible != 'true'
         run: |
           set +e
           cleanup_failed=0

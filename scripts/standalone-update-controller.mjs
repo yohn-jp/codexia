@@ -25,6 +25,7 @@ export function validateControllerState(value) {
   const initialActivationPending=value.initialActivationPending;
   if(initialActivationPending!==undefined){
     assert.equal(initialActivationPending,true,'Invalid initial activation marker');
+    assert.match(value.initialActivationId,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u,'Initial activation requires a durable operation identity');
     assert.equal(journal.phase,'idle');
     assert.ok(journal.checkpoint,'Initial activation requires an authenticated checkpoint');
     assert.equal(previous,null);
@@ -34,7 +35,7 @@ export function validateControllerState(value) {
     assert.deepEqual(value.failedImages,[]);
   }
   return {format:value.format,journal,installed,pending,previous,failedImages:[...new Set(value.failedImages)],paused:value.paused,lastError:value.lastError,lastSuccessAt:value.lastSuccessAt,
-    ...(initialActivationPending===true?{initialActivationPending:true}:{})};
+    ...(initialActivationPending===true?{initialActivationPending:true,initialActivationId:value.initialActivationId}:{})};
 }
 
 export async function atomicWrite(filename, content) {
@@ -272,7 +273,7 @@ export class StandaloneController {
     await this.host.assertFreshSchemaHost();
     // No writer or preflight has started. A crash from here is covered by
     // the same durable first-activation recovery path as legacy adoption.
-    const state=await this.save({...initialControllerState(release,slot,channel.checkpoint),initialActivationPending:true});
+    const state=await this.save({...initialControllerState(release,slot,channel.checkpoint),initialActivationPending:true,initialActivationId:randomUUID()});
     return this.reconcile(state,{boot:true});
   }
   async assertServing(state,slot,release){
@@ -589,11 +590,12 @@ export class StandaloneController {
       await this.uiEpoch(state.installed);
       await this.host.pullAndVerify(state.installed);
       // A prior attempt may have left only its own read-only preflight.
-      await this.host.stopPreflight(active.slot);
+      const owner={operationId:state.initialActivationId,release:state.installed};
+      await this.host.stopInitialPreflight(active.slot,owner);
       await this.host.assertNoPreflight();
       if(observed.writers.length===0){
-        try{await this.host.prepare(active.slot,state.installed);}
-        finally{await this.host.stopPreflight(active.slot);}
+        try{await this.host.prepare(active.slot,state.installed,owner);}
+        finally{await this.host.stopInitialPreflight(active.slot,owner);}
         await this.host.assertNoPreflight();
         await this.host.startWriter(active.slot,state.installed);
       }
@@ -605,7 +607,7 @@ export class StandaloneController {
       await this.uiEpoch(state.installed);
       await this.host.route(active.slot);
       await this.assertServing(state,active.slot,state.installed);
-      const {initialActivationPending,...committed}=state;
+      const {initialActivationPending,initialActivationId,...committed}=state;
       return await this.save({...committed,lastError:null,lastSuccessAt:new Date(this.now()).toISOString()});
     }catch(error){
       await this.host.route('blocked').catch(()=>undefined);

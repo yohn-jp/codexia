@@ -90,6 +90,10 @@ test("fresh schema initialization is transactional, repeatable and rejects untra
   await assert.rejects(initializeFreshPostgresSchema(target.toString()), /untracked database objects/);
   assert.equal((await pool.query("SELECT to_regclass('public.codexia_schema_migrations') AS ledger")).rows[0].ledger, null);
   await pool.query("DROP TABLE public.untracked");
+  await pool.query('CREATE COLLATION public.untracked FROM "C"');
+  await assert.rejects(initializeFreshPostgresSchema(target.toString()), /untracked database objects/);
+  assert.equal((await pool.query("SELECT to_regclass('public.codexia_schema_migrations') AS ledger")).rows[0].ledger, null);
+  await pool.query("DROP COLLATION public.untracked");
   const applied = await initializeFreshPostgresSchema(target.toString());
   assert.ok(applied.length > 0);
   assert.deepEqual(await initializeFreshPostgresSchema(target.toString()), []);

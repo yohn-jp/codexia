@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -156,7 +157,7 @@ if(command==='backup'){
   // Persist the trusted installed identity before any service activation.
   assert.equal(observed.route,'blocked','Initial activation requires a blocked route');
   await host.assertNoPreflight();
-  let state=await controller.save({...initialControllerState(release,slot,channel.checkpoint),initialActivationPending:true});
+  let state=await controller.save({...initialControllerState(release,slot,channel.checkpoint),initialActivationPending:true,initialActivationId:randomUUID()});
   state=await controller.reconcile(state,{boot:true});
   console.log(JSON.stringify(state,null,2));
   if(state.lastError)process.exitCode=1;

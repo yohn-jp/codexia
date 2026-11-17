@@ -238,6 +238,13 @@ export const DEDICATED_PROOFS = Object.freeze({
       'Exercise generated Core and Full Quadlets on disposable rootless Podman',
       'Remove the disposable VM marker and user manager'],
   },
+  '.github/workflows/standalone-backup.yml': {
+    job: 'Verify encrypted backup and isolated PostgreSQL restore',
+    steps: ['Install the pinned Ansible runner', 'Verify pause, resume and rollback Ansible contracts',
+      'Prepare a fresh rootless Podman fixture account',
+      'Verify controller fence, encrypted artifact integrity and isolated restore',
+      'Remove the disposable backup test user'],
+  },
   '.github/workflows/deployment-config.yml': {
     job: 'Verify Ansible and Terraform configuration',
     steps: ['Select independent infrastructure checks'],

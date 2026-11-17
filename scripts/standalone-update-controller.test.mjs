@@ -177,10 +177,11 @@ async function pendingInitialFixture(){
  h.target='blocked';h.writers=[];
  h.pollingTimerActive=async()=>false;
  h.assertInitialLegacyAbsent=async()=>{};
+ h.stopInitialPreflight=async(slot,owner)=>{assert.equal(owner.operationId,'12345678-1234-4234-8234-123456789abc');h.preflight.delete(slot);};
  h.assertNoPreflight=async()=>assert.equal(h.preflight.size,0,'Unexpected preflight');
  h.verifyWriterUnits=async()=>{};
  const checkpoint=verifyUpdateChannel(await h.fetchChannel(),pub,null,now).checkpoint;
- const state=await controller.save({...initialControllerState(old,'blue',checkpoint),initialActivationPending:true});
+ const state=await controller.save({...initialControllerState(old,'blue',checkpoint),initialActivationPending:true,initialActivationId:'12345678-1234-4234-8234-123456789abc'});
  return {h,controller,persisted,state};
 }
 test('initial activation resumes after journal persistence, before or after writer startup',async()=>{
@@ -198,7 +199,7 @@ test('initial activation resumes after journal persistence, before or after writ
  }
 });
 test('initial activation refuses ordinary lifecycle and failed admission stays durably pending',async()=>{
- for(const failure of ['epoch','withdrawn','foreign-writer','foreign-route','legacy-source','probe']){
+ for(const failure of ['epoch','withdrawn','foreign-writer','foreign-route','legacy-source','foreign-preflight','probe']){
   const {h,controller,persisted,state}=await pendingInitialFixture();
   await assert.rejects(controller.tick(state),/Initial activation must be recovered/);
   if(failure==='epoch')h.epoch=2;
@@ -206,10 +207,15 @@ test('initial activation refuses ordinary lifecycle and failed admission stays d
   if(failure==='foreign-writer')h.writers=[{slot:'green',image:next.image}];
   if(failure==='foreign-route')h.target='green';
   if(failure==='legacy-source')h.assertInitialLegacyAbsent=async()=>{throw Error('Legacy writer source reappeared');};
+  if(failure==='foreign-preflight'){
+    h.preflight.add('blue');
+    h.stopInitialPreflight=async()=>{throw Error('Initial preflight ownership is unverified');};
+  }
   if(failure==='probe')h.probe=async()=>{throw Error('probe failed');};
   const recovered=await controller.reconcile(state,{boot:true});
   assert.equal(recovered.initialActivationPending,true);assert.ok(recovered.lastError);assert.equal(h.target,'blocked');assert.equal(recovered.paused,true);
   assert.deepEqual(persisted(),recovered);
+  if(failure==='foreign-preflight'){assert.ok(h.preflight.has('blue'));assert.ok(!h.trace.includes('start:blue'));}
  }
 });
 test('ordinary committed writer with a blocked route is not treated as interrupted initial activation',async()=>{
@@ -227,6 +233,7 @@ test('fresh activation authenticates exact release and persists intent before an
  h.assertNoPreflight=async()=>assert.equal(h.preflight.size,0);
  h.assertFreshSchemaHost=async()=>{assert.equal(h.writers.length,0);assert.equal(h.target,'blocked');};
  h.startInitialProxy=async()=>{assert.equal(h.target,'blocked');h.trace.push('proxy');};
+ h.stopInitialPreflight=async(slot,owner)=>{assert.equal(owner.operationId,persisted().initialActivationId);h.preflight.delete(slot);};
  h.verifyWriterUnits=async()=>{};
  const start=h.startWriter;
  h.startWriter=async(...args)=>{assert.equal(persisted().initialActivationPending,true);await start.call(h,...args);};

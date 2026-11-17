@@ -1335,13 +1335,17 @@ export class PodmanStandaloneHost{
       await delay(1000);
     }
   }
-  async prepare(slot,release){
+  async prepare(slot,release,owner){
     validateUpdateRelease(release);
-    await this.stopPreflight(slot);
+    if(owner){
+      assert.deepEqual(owner.release,release,'Initial preflight release differs from operation owner');
+      await this.stopInitialPreflight(slot,owner);
+    }else await this.stopPreflight(slot);
     // Only the preflight password is available; the real writer credential and shared volumes are absent.
     const auth=randomBytes(32).toString('hex');
     const runtimeArgs=this.runtime?runtimeContainerArgs(this.runtime):['--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=64m'];
-    run('podman',['run','--detach','--name',preflight(slot),'--network','codexia-data',
+    run('podman',['run','--detach','--name',preflight(slot),
+      ...(owner?['--label','io.codexia.initial-activation='+owner.operationId]:[]),'--network','codexia-data',
       '--read-only',...runtimeArgs,'--tmpfs','/data:rw,nosuid,nodev,noexec,size=128m,mode=1777',
       '--tmpfs','/history:rw,nosuid,nodev,noexec,size=64m,mode=1777','--cap-drop','all','--security-opt','no-new-privileges',
       '--secret','codexia-postgres-preflight-password,type=mount,target=/run/secrets/app-password',
@@ -1356,6 +1360,21 @@ export class PodmanStandaloneHost{
     const observed=inspect(preflight(slot));
     assert.ok(observed?.State.Running,'Preflight not running');
     assert.equal(observed.ImageName??observed.Config?.Image,release.image);
+  }
+  async stopInitialPreflight(slot,{operationId,release}){
+    assert.match(operationId,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u);
+    const observed=inspect(preflight(slot));
+    if(!observed)return;
+    assert.equal(observed.Config?.Labels?.['io.codexia.initial-activation'],operationId,'Initial preflight ownership is unverified');
+    assert.equal(observed.ImageName??observed.Config?.Image,release.image,'Initial preflight image drift');
+    assert.match(observed.Id,/^[a-f0-9]{64}$/u,'Initial preflight container ID is unobservable');
+    assert.ok(Array.isArray(observed.Mounts),'Initial preflight mounts are unobservable');
+    assert.ok(observed.Mounts.every(mount=>mount.Type==='tmpfs'||(mount.Type==='bind'&&mount.RW===false&&
+      this.runtime?.modelCachePath&&mount.Destination==='/models'&&mount.Source===this.runtime.modelCachePath)),
+      'Initial preflight contains an unexpected persistent mount');
+    // Remove the admitted container ID, not a name which could have been reused.
+    run('podman',['rm','--force',observed.Id]);
+    assert.ok(!exists(preflight(slot)),'Initial preflight absence is unverified');
   }
   async stopPreflight(slot){
     const container=preflight(slot);

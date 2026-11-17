@@ -35,6 +35,14 @@ export async function runPostgresMigrations(
           UNION ALL SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public'
           UNION ALL SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'
           UNION ALL SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = 'public'
+          -- Namespace dependencies also cover collations, operators, operator
+          -- classes/families, conversions and text-search objects.
+          UNION ALL SELECT 1 FROM pg_depend d JOIN pg_namespace n ON n.oid = d.refobjid
+            WHERE d.refclassid = 'pg_namespace'::regclass AND n.nspname = 'public'
+          UNION ALL SELECT 1 FROM pg_event_trigger
+          UNION ALL SELECT 1 FROM pg_publication
+          UNION ALL SELECT 1 FROM pg_foreign_server
+          UNION ALL SELECT 1 FROM pg_foreign_data_wrapper
           UNION ALL SELECT 1 FROM pg_extension WHERE extname <> 'plpgsql'
           UNION ALL SELECT 1 FROM pg_largeobject_metadata
         ) AS present
