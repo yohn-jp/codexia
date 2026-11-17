@@ -78,7 +78,7 @@
       ansible.builtin.assert:
         that:
           - ansible_facts.user_uid | int != 0
-          - codexia_stage in ['secrets', 'base', 'prepare', 'initialize', 'bootstrap-preflight', 'initialize-schema', 'enable', 'verify', 'maintain', 'backup', 'pause', 'resume', 'rollback', 'acceptance-update', 'acceptance-rollback']
+          - codexia_stage in ['secrets', 'base', 'prepare', 'initialize', 'bootstrap-preflight', 'initialize-schema', 'initialize-fresh', 'enable', 'verify', 'maintain', 'backup', 'pause', 'resume', 'rollback', 'acceptance-update', 'acceptance-rollback']
           - codexia_stage in ['secrets', 'base'] or codexia_frontend_origin is match('^https://[a-z0-9.-]+(:[0-9]+)?$')
           - codexia_stage in ['secrets', 'base'] or codexia_proxy_image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
           - codexia_stage in ['secrets', 'base'] or codexia_browser_auth.mode in ['token', 'cloudflare-access']
@@ -155,6 +155,16 @@
     - name: End fresh schema initialization before any activation
       ansible.builtin.meta: end_host
       when: codexia_stage == 'initialize-schema'
+    - name: Require actual execution for fresh activation
+      ansible.builtin.assert:
+        that: not ansible_check_mode
+      when: codexia_stage == 'initialize-fresh'
+    - name: Activate the exact fresh schema release through the locked controller
+      ansible.builtin.include_tasks: initialize-fresh.yml
+      when: codexia_stage == 'initialize-fresh'
+    - name: End fresh activation before legacy or polling stages
+      ansible.builtin.meta: end_host
+      when: codexia_stage == 'initialize-fresh'
     - name: Prepare an uninitialized host
       ansible.builtin.include_tasks: prepare.yml
       when: codexia_stage in ['prepare', 'initialize'] and not journal.stat.exists

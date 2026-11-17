@@ -239,6 +239,42 @@ export class StandaloneController {
     await this.uiEpoch(release);
     return {format:'codexia-fresh-schema/v1',image:release.image,fingerprint:result.fingerprint,applied:result.applied,activated:false};
   }
+  /** Fresh activation is distinct from legacy adoption. The caller has
+   * verified the durable schema receipt and owns the host-wide lock. */
+  async activateFresh(value,slot,existing=null){
+    const release=validateUpdateRelease(value);
+    assert.ok(['blue','green'].includes(slot),'Invalid initial slot');
+    await this.assertNoBackupIntent();
+    await this.host.assertFreshLegacyAbsent();
+    assert.equal(await this.host.pollingTimerActive(),false,'Fresh activation requires stopped polling');
+    assert.equal(await this.host.tunnelServiceActive(),false,'Fresh activation must precede public Tunnel handoff');
+    if(existing){
+      existing=validateControllerState(existing);
+      assert.deepEqual(existing.installed,release,'Fresh activation release differs from durable journal');
+      assert.equal(existing.journal.active.slot,slot,'Fresh activation slot differs from durable journal');
+      assert.equal(existing.paused,true,'Fresh activation must remain paused');
+      if(existing.initialActivationPending){
+        await this.host.route('blocked');
+        await this.host.startInitialProxy();
+        return this.reconcile(existing,{boot:true});
+      }
+      assert.ok(['idle','committed'].includes(existing.journal.phase)&&existing.lastError===null,'Fresh activation journal is not settled');
+      await this.uiEpoch(release);
+      await this.assertServing(existing,slot,release);
+      return existing;
+    }
+    await this.host.assertFreshSchemaHost();
+    const channel=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,null,this.now());
+    assert.ok(channel.payload.releases.some(r=>r.state==='published'&&JSON.stringify(r)===JSON.stringify(release)),'Fresh activation release must be published in the signed channel');
+    await this.uiEpoch(release);
+    await this.host.pullAndVerify(release);
+    await this.host.startInitialProxy();
+    await this.host.assertFreshSchemaHost();
+    // No writer or preflight has started. A crash from here is covered by
+    // the same durable first-activation recovery path as legacy adoption.
+    const state=await this.save({...initialControllerState(release,slot,channel.checkpoint),initialActivationPending:true});
+    return this.reconcile(state,{boot:true});
+  }
   async assertServing(state,slot,release){
     const obs=await this.host.observe();
     assertObservation(obs,state.journal);

@@ -216,3 +216,38 @@ test('ordinary committed writer with a blocked route is not treated as interrupt
  assert.equal(result.initialActivationPending,undefined);assert.match(result.lastError,/Topology reconciliation blocked/);
  assert.equal(h.target,'blocked');
 });
+
+test('fresh activation authenticates exact release and persists intent before any writer starts',async()=>{
+ const {h,controller,persisted}=fixture();
+ h.target='blocked';h.writers=[];
+ h.assertFreshLegacyAbsent=async()=>{};
+ h.pollingTimerActive=async()=>false;h.tunnelServiceActive=async()=>false;
+ h.assertNoPreflight=async()=>assert.equal(h.preflight.size,0);
+ h.assertFreshSchemaHost=async()=>{assert.equal(h.writers.length,0);assert.equal(h.target,'blocked');};
+ h.startInitialProxy=async()=>{assert.equal(h.target,'blocked');h.trace.push('proxy');};
+ h.verifyWriterUnits=async()=>{};
+ const start=h.startWriter;
+ h.startWriter=async(...args)=>{assert.equal(persisted().initialActivationPending,true);await start.call(h,...args);};
+ const result=await controller.activateFresh(next,'blue');
+ assert.equal(result.initialActivationPending,undefined);assert.equal(result.lastError,null);
+ assert.equal(result.paused,true);assert.equal(result.installed.image,next.image);
+ assert.ok(h.trace.indexOf('proxy')<h.trace.indexOf('start:blue'));
+ assert.equal(h.target,'blue');
+ const trace=[...h.trace];
+ assert.deepEqual(await controller.activateFresh(next,'blue',result),result);
+ assert.deepEqual(h.trace,trace,'Settled fresh activation must not restart the writer');
+ await assert.rejects(controller.activateFresh(old,'blue',result),/differs from durable journal/);
+});
+test('fresh activation refuses unsigned release, incompatible frontend and existing ingress',async()=>{
+ for(const invalid of ['unsigned','epoch','tunnel','legacy']){
+  const {h,controller,persisted}=fixture();h.target='blocked';h.writers=[];
+  h.assertFreshLegacyAbsent=async()=>{if(invalid==='legacy')throw Error('legacy source exists');};
+  h.pollingTimerActive=async()=>false;h.tunnelServiceActive=async()=>invalid==='tunnel';
+  h.assertFreshSchemaHost=async()=>{};
+  h.startInitialProxy=async()=>{h.trace.push('proxy');};
+  if(invalid==='unsigned')h.releases=[old];
+  if(invalid==='epoch')h.epoch=2;
+  await assert.rejects(controller.activateFresh(next,'blue'));
+  assert.ok(!h.trace.includes('proxy'));assert.equal(persisted(),undefined);
+ }
+});

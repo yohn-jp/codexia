@@ -1217,15 +1217,23 @@ export class PodmanStandaloneHost{
     for(const field of ['version','sourceSha','platform','profile','migrationFingerprint','persistenceFormat','apiEpoch'])assert.equal(identity[field],release[field],'Artifact '+field+' mismatch');
     assert.equal(run('podman',[...isolated,'node',release.image,'--input-type=module','-e',fingerprintCode]),release.migrationFingerprint);
   }
+  async assertFreshLegacyAbsent(){
+    assert.ok(!exists('codexia-api'),'Fresh activation refuses an existing legacy container');
+    const filename=path.join(this.config.quadletDirectory,'codexia-api.container');
+    const present=await lstat(filename).then(()=>true,error=>{if(error.code==='ENOENT')return false;throw error;});
+    assert.equal(present,false,'Fresh activation refuses an existing legacy Quadlet');
+    assert.equal(run('systemctl',['--user','show','--property=LoadState','--value','codexia-api.service']),'not-found','Fresh activation refuses a loaded legacy unit');
+  }
   async assertFreshSchemaHost(){
+    await this.assertFreshLegacyAbsent();
     assert.equal(this.config.enabled,false,'Fresh schema initialization requires disabled polling');
     assert.equal(await this.routeState(),'blocked','Fresh schema requires a blocked private route');
     assert.equal(await this.pollingTimerActive(),false,'Fresh schema requires polling stopped');
     await this.assertNoPreflight();
-    for(const container of ['codexia-api',name('blue'),name('green'),'codexia-schema-initializer']){
+    for(const container of [name('blue'),name('green'),'codexia-schema-initializer']){
       assert.ok(!exists(container),'Fresh schema requires no existing writer or initializer container: '+container);
     }
-    for(const container of ['codexia-api',name('blue'),name('green')]){
+    for(const container of [name('blue'),name('green')]){
       const filename=path.join(this.config.quadletDirectory,container+'.container');
       const present=await lstat(filename).then(()=>true,error=>{if(error.code==='ENOENT')return false;throw error;});
       assert.equal(present,false,'Fresh schema refuses existing writer Quadlet: '+container);
@@ -1382,8 +1390,8 @@ export class PodmanStandaloneHost{
     await this.waitReady(name(slot),release);
     const after=await this.observe();assert.deepEqual(after.writers,[{slot,image:release.image}]);
   }
-  async probe(slot,release){
-    const proxyQuadlet=await readFile(path.join(this.config.quadletDirectory,'codexia-api-proxy.container'),'utf8');
+  async assertProxyRuntime(){
+    const proxyQuadlet=await regularPrivateText(path.join(this.config.quadletDirectory,'codexia-api-proxy.container'),{privateOnly:true});
     const proxyContainer=inspect('codexia-api-proxy');
     assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value','codexia-api-proxy.service']));
     const proxyUnitState=run('systemctl',['--user','show','--property=ActiveState','--value','codexia-api-proxy.service']);
@@ -1392,6 +1400,28 @@ export class PodmanStandaloneHost{
     const proxyImageInfo=JSON.parse(run('podman',['image','inspect',proxyImage]))[0];
     const capabilityStatus=await readRuntimeCapabilityStatus(proxyContainer,'Private proxy');
     assertProxyRuntimeObservation(proxyQuadlet,proxyContainer,proxyUnitState,proxyImageInfo,{home:path.resolve(path.dirname(this.config.stateFile),'../../..'),capabilityStatus});
+  }
+  async startInitialProxy(){
+    assert.equal(await this.routeState(),'blocked','Private proxy must start with admission blocked');
+    const filename=path.join(this.config.quadletDirectory,'codexia-api-proxy.container');
+    await regularPrivateText(filename,{privateOnly:true});
+    run('systemctl',['--user','daemon-reload']);
+    assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value','codexia-api-proxy.service']));
+    assert.equal(run('systemctl',['--user','show','--property=SourcePath','--value','codexia-api-proxy.service']),filename,'Private proxy unit source drift');
+    run('systemctl',['--user','start','codexia-api-proxy.service'],{timeout:120000});
+    await this.assertProxyRuntime();
+    const deadline=Date.now()+15000;
+    for(;;){
+      try{
+        const status=run('podman',['exec','codexia-api-proxy','node','--input-type=module','-e',
+          'const r=await fetch("http://127.0.0.1:3000/api/version",{signal:AbortSignal.timeout(3000)});console.log(r.status);'],{timeout:5000});
+        assert.equal(status,'503','Blocked proxy unexpectedly admitted traffic');
+        break;
+      }catch(error){if(Date.now()>=deadline)throw error;await delay(250);}
+    }
+  }
+  async probe(slot,release){
+    await this.assertProxyRuntime();
     await this.waitReady(name(slot),release);
     const routed=JSON.parse(run('podman',['exec','codexia-api-proxy','node','--input-type=module','-e',proxyProbeCode],{timeout:10000}));
     assert.equal(routed.slot,slot);assertVersion(routed.version,release,this.authEnvironment.CODEXIA_BROWSER_AUTH);

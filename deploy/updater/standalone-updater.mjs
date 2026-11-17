@@ -9,7 +9,7 @@ import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
 import { assertMaintenanceSnapshotVerifier, maintainStandaloneUpdater, recoverInterruptedMaintenance } from './standalone-maintenance.mjs';
 
 const [command,configPath,...arguments_]=process.argv.slice(2);
-if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|verify-bootstrap|verify-cutover-backup|initialize-schema|init|recover-initial|boot|tick|status|verify|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
+if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|verify-bootstrap|verify-cutover-backup|initialize-schema|init-fresh|init|recover-initial|boot|tick|status|verify|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
 let config=JSON.parse(await readFile(configPath,'utf8'));
 assert.equal(config.format,'codexia-standalone-updater/v1');
 assert.ok(path.isAbsolute(config.stateFile)&&path.isAbsolute(config.publicKeyFile));
@@ -29,6 +29,7 @@ const store={
   clearBackupRecoveryIntent:()=>clearBackupIntent(backupRecoveryFile),
 };
 const legacyBackupProofFile=path.join(path.dirname(config.stateFile),'legacy-backup-proof.json');
+const freshSchemaProofFile=path.join(path.dirname(config.stateFile),'fresh-schema.json');
 async function readPrivateProof(filename){
   const metadata=await lstat(filename);
   assert.ok(metadata.isFile()&&!metadata.isSymbolicLink()&&(metadata.mode&0o777)===0o600&&metadata.size<=65536,'Backup evidence must be a private regular file');
@@ -117,7 +118,23 @@ if(command==='backup'){
   assert.equal(config.enabled,false,'Fresh schema initialization requires disabled polling');
   try{await loadControllerState(config.stateFile);throw Error('Existing controller cannot initialize a fresh schema');}catch(error){if(error.code!=='ENOENT')throw error;}
   const release=validateUpdateRelease(JSON.parse(await readFile(releaseFile,'utf8')));
-  console.log(JSON.stringify(await controller.initializeFreshSchema(release)));
+  const result=await controller.initializeFreshSchema(release);
+  await atomicWrite(freshSchemaProofFile,JSON.stringify({format:'codexia-fresh-schema-proof/v1',release,fingerprint:result.fingerprint})+'\n');
+  console.log(JSON.stringify(result));
+  process.exit(0);
+}else if(command==='init-fresh'){
+  assert.equal(arguments_.length,2,'Provide the exact schema-initialized release record and --approved');
+  const [releaseFile,approval]=arguments_;
+  assert.ok(path.isAbsolute(releaseFile)&&approval==='--approved','Fresh activation requires explicit approval');
+  assert.equal(config.enabled,false,'Fresh activation requires disabled polling');
+  const release=validateUpdateRelease(JSON.parse(await readFile(releaseFile,'utf8')));
+  const proof=await readPrivateProof(freshSchemaProofFile);
+  assert.deepEqual(proof,{format:'codexia-fresh-schema-proof/v1',release,fingerprint:release.migrationFingerprint},'Fresh schema evidence does not match the selected release');
+  let existing=null;
+  try{existing=await loadControllerState(config.stateFile);}catch(error){if(error.code!=='ENOENT')throw error;}
+  const state=await controller.activateFresh(release,config.initialSlot??'blue',existing);
+  if(state.initialActivationPending||state.lastError)throw Error(state.lastError??'Fresh activation remains pending');
+  console.log(JSON.stringify({format:'codexia-fresh-activation/v1',image:state.installed.image,slot:state.journal.active.slot,activated:true,publicHandoff:false,changed:!existing||existing.initialActivationPending===true}));
   process.exit(0);
 }else if(command==='init'){
   const [argument]=arguments_;
