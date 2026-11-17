@@ -6,6 +6,8 @@ For backend read/performance work, read [Backend read model](docs/architecture/B
 
 For UI and interaction work, read [Design and UX contract](docs/design/UX-CONTRACT.md). It is the canonical presentation and experience contract, including acceptance scenarios; it preserves the existing stack, distinct Desktop/Mobile shells and shared authoring, durability and authorization boundaries. Mockups are not specifications. Keep execution prompts and verification results in PRs or test artifacts, not in maintained product documentation.
 
+For Web frontend design, implementation and review, use the project-local [Modern Web Guidance](.agents/skills/modern-web-guidance/SKILL.md) skill alongside the canonical UI contract.
+
 For standalone VM configuration, read [Infrastructure as code](docs/deployment/IAC.md), the normative Ansible desired-state and lifecycle contract. Keep Cloudflare Terraform, protected release publication and the exclusive updater as distinct authorities. Transitional manual runbooks do not supersede the target contract.
 
 ## Authority
