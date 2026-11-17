@@ -100,3 +100,24 @@ test('OCI publication refuses existing image tags and fails closed on registry u
     new Response('not registry JSON', { status: 404 }),
   ]) await assert.rejects(assertImageTagAbsent(response));
 });
+
+
+test('compact main release requires positive reuse certification and the exact skipped family inventory', async () => {
+  const { REUSED_MAIN_SKIPPED_JOBS, REUSED_MAIN_CERT_STEP } = await import('./release-policy.mjs');
+  const jobs = [
+    { name: 'plan', status: 'completed', conclusion: 'success' },
+    ...REUSED_MAIN_SKIPPED_JOBS.map(name => ({ name, status: 'completed', conclusion: 'skipped' })),
+    { name: 'certification', status: 'completed', conclusion: 'success', steps: [
+      { name: REUSED_MAIN_CERT_STEP, status: 'completed', conclusion: 'success' },
+      { name: 'Certify every required exact-source matrix element', status: 'completed', conclusion: 'skipped' },
+    ] },
+  ];
+  assert.doesNotThrow(() => assertVerificationJobs(jobs));
+  assert.throws(() => assertVerificationJobs(jobs.slice(1)));
+  assert.throws(() => assertVerificationJobs(jobs.filter(job => job.name !== 'full-model-oci')));
+  assert.throws(() => assertVerificationJobs(jobs.map(job => job.name === 'plan' ? { ...job, conclusion: 'skipped' } : job)));
+  assert.throws(() => assertVerificationJobs(jobs.map(job => job.name === 'certification' ? { ...job, steps: [] } : job)));
+  assert.throws(() => assertVerificationJobs(jobs.map(job => job.name === 'certification' ? { ...job, steps: job.steps.map(step => ({ ...step, conclusion: 'success' })) } : job)));
+  assert.throws(() => assertVerificationJobs([...jobs, { name: 'unknown', status: 'completed', conclusion: 'skipped' }]));
+  assert.throws(() => assertVerificationJobs(jobs.map(job => job.name === 'certification' ? { ...job, conclusion: 'failure' } : job)));
+});
