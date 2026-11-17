@@ -663,12 +663,13 @@ async function main() {
   const proxyInfo = await lstat(proxyQuadlet);
   assert.ok(proxyInfo.isFile() && !proxyInfo.isSymbolicLink() && proxyInfo.uid === UID && (proxyInfo.mode & 0o777) === 0o600);
   await rm(proxyQuadlet);
+  assert.deepEqual((await readdir(privateDir)).sort(), ['channel-public.pem', 'github-read-token', 'config.json'], 'Unexpected file exists in the synthetic private config directory');
   for (const file of [configPath, publicKeyFile, githubTokenFile]) {
     const info = await lstat(file);
     assert.ok(info.isFile() && !info.isSymbolicLink() && info.uid === UID && (info.mode & 0o777) === 0o600, `Refusing to remove an unowned private config file: ${file}`);
     await rm(file);
   }
-  assert.deepEqual((await readdir(privateDir)).sort(), ['channel-public.pem', 'github-read-token', 'config.json'], 'Unexpected file remains in the synthetic private config directory');
+  assert.deepEqual(await readdir(privateDir), [], 'Unexpected file remains after fixture cleanup');
   await rmdir(privateDir);
   for (const file of [routeFile, path.join(stateDir, 'controller.json'), path.join(stateDir, 'host.lock')]) await rm(file, { force: true });
   await rm(stateBase, { recursive: true, force: true });
