@@ -137,6 +137,53 @@ for stage in pause resume rollback; do
   expected="$stage"; [[ "$stage" != rollback ]] || expected=acceptance-rollback
   [[ "$(cat "$operation_file")" == "$expected" ]]
 done
+# Restore is an independent local operation, even if the source is down or not
+# present in the inventory. Exercise the real site dispatcher and recovery
+# tasks; only the already separately tested Podman/age drill helper is stubbed.
+cp "$root/deploy/ansible/restore-drill.yml" "$tmp/site/"
+mkdir -p "$tmp/recovery-repo/deploy/updater" "$tmp/recovery-backup"
+touch "$tmp/recovery-key"
+chmod 0600 "$tmp/recovery-key"
+cat > "$tmp/recovery-repo/deploy/updater/standalone-backup.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ $# == 4 && "$1" == drill && -d "$2" && -f "$3" && "$4" == --approved ]]
+printf 'executed\n' >> "$2/drill-invoked"
+printf 'Isolated restore verified: database and history fingerprints match\n'
+SH
+cat > "$tmp/unavailable-source.yml" <<'YAML'
+all:
+  children:
+    codexia:
+      hosts:
+        unavailable-source:
+          ansible_connection: ssh
+          ansible_host: 127.0.0.1
+          ansible_port: 1
+YAML
+restore_args=(
+  "$tmp/site/site.yml" -e codexia_stage=restore-drill
+  -e "repo_root=$tmp/recovery-repo"
+  -e "codexia_backup_directory=$tmp/recovery-backup"
+  -e "codexia_recovery_identity_file=$tmp/recovery-key"
+)
+for inventory in "$tmp/unavailable-source.yml" 'localhost,'; do
+  connection=()
+  [[ "$inventory" != 'localhost,' ]] || connection=(-c local)
+  ansible-playbook -i "$inventory" "${connection[@]}" "${restore_args[@]}" \
+    -e codexia_restore_drill_approved=true > "$tmp/restore-dispatch.log" 2>&1 || { cat "$tmp/restore-dispatch.log" >&2; exit 1; }
+done
+[[ "$(wc -l < "$tmp/recovery-backup/drill-invoked")" == 2 ]]
+for mode in unapproved check; do
+  extra=()
+  [[ "$mode" != check ]] || extra=(--check -e codexia_restore_drill_approved=true)
+  if ansible-playbook -i "$tmp/unavailable-source.yml" "${restore_args[@]}" "${extra[@]}" > "$tmp/restore-$mode.log" 2>&1; then
+    echo "Restore dispatcher unexpectedly accepted $mode" >&2
+    exit 1
+  fi
+done
+[[ "$(wc -l < "$tmp/recovery-backup/drill-invoked")" == 2 ]]
+
 # The same source/configuration guard used before verify and backup must
 # reject drift before invoking an installed updater, even before a journal exists.
 guard="$tmp/guard"

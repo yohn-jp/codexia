@@ -30,7 +30,15 @@ bash deploy/updater/standalone-backup.sh drill \
   /absolute/remote/backup/directory /absolute/private/age-identity --approved
 ```
 
-The same operation is available through `site.yml` as `codexia_stage=restore-drill`. Run that stage from the isolated recovery host with its local inventory entry and provide the approval, mounted backup directory and recovery identity path as protected inputs. The stage delegates validation and scratch restore to that local host without running source-VM service checks.
+The same operation is available through `site.yml` as an explicitly selected local recovery stage. Run it on the isolated recovery host, with the approval, mounted backup directory and recovery identity path supplied through protected local inputs:
+
+```sh
+ansible-playbook -i localhost, -c local deploy/ansible/site.yml \
+  -e @/private/recovery-inputs.yml --ask-vault-pass \
+  -e codexia_stage=restore-drill -e codexia_restore_drill_approved=true
+```
+
+Pass `codexia_stage=restore-drill` explicitly as an extra variable: the dispatcher selects localhost before gathering any source-VM facts, does not require the source VM or its inventory, and runs the recovery tasks only once. Check mode and a source-host-selected recovery stage are rejected rather than reported as restore evidence.
 
 The directory must resolve to an approved remote filesystem whose source host is not this recovery VM. The recovery identity must be a regular non-symlink file owned by the recovery user with mode `0400` or `0600`. The script verifies fixed ciphertext checksums and decrypts the manifest before creating scratch resources. It restores into uniquely named, labeled PostgreSQL and history volumes with no network and no published ports, then compares the restored logical fingerprints. Cleanup removes only resources with the exact generated drill label, verifies every scratch object is absent, and returns failure if a removal or absence check fails. The success message is printed only after cleanup succeeds; the exit trap retries cleanup after an interrupted or failed removal. It cannot select or restore into production volume names. The Ansible restore-drill include delegates to the local recovery host and checks the private-key path and mode without reading the key contents.
 
