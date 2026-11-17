@@ -213,3 +213,26 @@ test('standalone main model job reuses only the successful Verify PR caller life
   job.steps.find(step => step.name === 'Fail on missing or altered model cache files').conclusion = 'failure';
   await assert.rejects(verifyReusableDedicatedProof(args), /Required proof step/);
 });
+
+
+test('standalone backup main reuse requires real pre-merge encrypted restore and cleanup proof', async () => {
+  const workflowPath = '.github/workflows/standalone-backup.yml';
+  const { state, args, job } = dedicatedFixture(workflowPath, ['deploy/updater/standalone-backup.sh']);
+  const receipt = await verifyReusableDedicatedProof(args);
+  assert.equal(receipt.workflowPath, workflowPath);
+  assert.equal(receipt.proofWorkflowPath, workflowPath);
+  assert.equal(receipt.jobId, 500);
+  for (const step of job.steps) {
+    step.conclusion = 'skipped';
+    await assert.rejects(verifyReusableDedicatedProof(args), /Required proof step/);
+    step.conclusion = 'success';
+  }
+  state.prRun.run_attempt = 2;
+  await assert.rejects(verifyReusableDedicatedProof(args), /latest attempt/);
+  state.prRun.run_attempt = 1;
+  job.completed_at = '2026-11-17T10:07:00Z';
+  await assert.rejects(verifyReusableDedicatedProof(args), /completed after merge/);
+  job.completed_at = end;
+  state.prRun.conclusion = 'failure';
+  await assert.rejects(verifyReusableDedicatedProof(args), /not successful/);
+});
