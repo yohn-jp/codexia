@@ -1,0 +1,46 @@
+name: Standalone updater acceptance
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+  packages: read
+concurrency:
+  group: standalone-updater-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  rootless-updater-lifecycle:
+    name: Signed lifecycle and recovery
+    runs-on: ubuntu-26.04
+    timeout-minutes: 100
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    steps:
+      - name: Check out exact source without persistent credentials
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Test the acceptance helper and metadata shim
+        run: |
+          set -euo pipefail
+          bash -n deploy/ansible/test-phase-f-disposable.sh
+          node --test scripts/phase-f-disposable.test.mjs
+      - name: Run signed lifecycle and failure recovery against actual pinned release images
+        env:
+          CODEXIA_DISPOSABLE_HOST: phase-f-integration
+          GH_TOKEN: ${{ github.token }}
+        run: bash deploy/ansible/test-phase-f-disposable.sh
+      - name: Upload signed disposable evidence without private key material
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: standalone-updater-acceptance-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codexia-phase-f-evidence/
+          if-no-files-found: error
+          retention-days: 7

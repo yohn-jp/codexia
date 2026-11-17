@@ -44,9 +44,20 @@ test('the certified twenty-job inventory retains all fifty-nine obligations besi
   }
   assert.equal(modelJobConfig.steps.find(item => item.name === 'Download the real model files from their pinned revisions').env.HF_HOME,
     '${{ runner.temp }}/huggingface-home');
+  const manifest = modelJobConfig.steps.find(item => item.id === 'model-manifest');
+  assert.match(manifest.run, /sha256sum.*p13-model-files\.tsv/u);
+  const restore = modelJobConfig.steps.find(item => item.id === 'model-cache');
+  const save = modelJobConfig.steps.find(item => item.uses?.startsWith('actions/cache/save@'));
+  assert.equal(restore.with.key, 'p13-full-models-ubuntu-26.04-manifest-${{ steps.model-manifest.outputs.digest }}');
+  assert.equal(save.with.key, restore.with.key);
+  assert.match(modelJobConfig.steps.find(item => item.name === 'Fail on missing or altered model cache files').run, /sha256sum --check --strict/u);
+  assert.equal(modelJobConfig.steps.find(item => item.uses?.startsWith('actions/checkout@')).with.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
 });
 test('browser groups depend on profile producers; independent groups cannot cancel other evidence', () => {
-  assert.equal(workflow.concurrency, undefined);
+  assert.deepEqual(workflow.concurrency, {
+    group: 'verify-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}',
+    'cancel-in-progress': "${{ github.event_name == 'pull_request' }}",
+  });
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.equal(workflow.jobs.plan.name, 'plan');
   for (const [id, job] of Object.entries(workflow.jobs).filter(([id]) => !['plan', 'certification', 'full_model_oci'].includes(id))) {
@@ -59,7 +70,7 @@ test('browser groups depend on profile producers; independent groups cannot canc
     assert.ok(job.steps.some(step => step.uses === 'actions/upload-artifact@v7.0.2' && step.if === 'always()'));
   }
   const gate = workflow.jobs.certification;
-  assert.equal(gate.if, 'always()');
+  assert.equal(gate.if, '${{ always() && !cancelled() }}');
   assert.deepEqual(gate.needs.toSorted(), ['plan', 'unit', 'types', 'build', 'oci', 'browser', 'hosted_catalog', 'hosted'].toSorted());
   const planSelector = gate.steps.find(step => step.id === 'select-plan');
   const planDownload = gate.steps.find(step => step.run?.includes('node scripts/download-ci-artifacts.mjs') && step.env?.CODEXIA_CI_ARTIFACT_KIND === 'plan');
