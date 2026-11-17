@@ -4,7 +4,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { StandaloneController, initialControllerState, atomicWrite, loadControllerState } from './standalone-update-controller.mjs';
+import { assertMatchingCutoverBackup, StandaloneController, initialControllerState, atomicWrite, loadControllerState } from './standalone-update-controller.mjs';
 import { signUpdateChannel } from './update-channel.mjs';
 const key=generateKeyPairSync('ed25519');
 const pub=key.publicKey.export({type:'spki',format:'pem'});
@@ -132,4 +132,15 @@ test('same-image initialization still requires an advertised legacy epoch before
  h.legacyEpoch=1;
  const result=await controller.verifyInitialCandidate(old,old);
  assert.equal(result.legacyApiEpoch,1);assert.equal(result.activated,false);
+});
+
+test('cutover proof binds the exact source release and verified ciphertext manifest',()=>{
+ const hash='d'.repeat(64);
+ const source={format:'codexia-legacy-backup-proof/v1',release:old,artifactDirectory:'/remote/codexia-20261117T000000Z-12345678-1234-1234-1234-123456789abc',checksumManifestSha256:hash};
+ const receipt={format:'codexia-restore-receipt/v1',checksumManifestSha256:hash};
+ assert.deepEqual(assertMatchingCutoverBackup(source,receipt,old,hash),source);
+ assert.throws(()=>assertMatchingCutoverBackup(source,receipt,next,hash),/selected legacy release/);
+ assert.throws(()=>assertMatchingCutoverBackup(source,{...receipt,checksumManifestSha256:'e'.repeat(64)},old,hash),/Restore receipt/);
+ assert.throws(()=>assertMatchingCutoverBackup(source,receipt,old,'e'.repeat(64)),/Current off-VM artifact/);
+ assert.throws(()=>assertMatchingCutoverBackup(source,{...receipt,approved:true},old,hash));
 });

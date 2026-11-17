@@ -150,6 +150,7 @@ set -euo pipefail
 [[ $# == 4 && "$1" == drill && -d "$2" && -f "$3" && "$4" == --approved ]]
 printf 'executed\n' >> "$2/drill-invoked"
 printf 'Isolated restore verified: database and history fingerprints match\n'
+printf 'Verified checksum manifest sha256: %064d\n' 0
 SH
 cat > "$tmp/unavailable-source.yml" <<'YAML'
 all:

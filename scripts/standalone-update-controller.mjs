@@ -106,6 +106,25 @@ export async function clearBackupIntent(filename) {
   try { await parent.sync(); } finally { await parent.close(); }
 }
 
+export function validateLegacyBackupProof(value){
+  assert.deepEqual(Object.keys(value??{}).sort(),['artifactDirectory','checksumManifestSha256','format','release']);
+  assert.equal(value.format,'codexia-legacy-backup-proof/v1');
+  assert.ok(typeof value.artifactDirectory==='string'&&path.isAbsolute(value.artifactDirectory)&&!/[\r\n\0]/u.test(value.artifactDirectory),'Backup artifact directory is invalid');
+  assert.match(path.basename(value.artifactDirectory),/^codexia-\d{8}T\d{6}Z-[a-f0-9-]{36}$/u,'Backup artifact name is invalid');
+  assert.match(value.checksumManifestSha256,/^[a-f0-9]{64}$/u,'Backup manifest checksum is invalid');
+  return {...value,release:validateUpdateRelease(value.release)};
+}
+
+export function assertMatchingCutoverBackup(sourceValue,restore,release,observedHash){
+  const source=validateLegacyBackupProof(sourceValue);
+  assert.deepEqual(Object.keys(restore??{}).sort(),['checksumManifestSha256','format']);
+  assert.equal(restore.format,'codexia-restore-receipt/v1');
+  assert.deepEqual(source.release,validateUpdateRelease(release),'Backup was not taken for the selected legacy release');
+  assert.equal(restore.checksumManifestSha256,source.checksumManifestSha256,'Restore receipt does not match the source backup');
+  assert.equal(observedHash,source.checksumManifestSha256,'Current off-VM artifact differs from the verified backup');
+  return source;
+}
+
 export function initialControllerState(installed,slot,checkpoint) {
   return validateControllerState({format:'codexia-standalone-controller/v1',
     journal:{format:'codexia-updater-journal/v1',generation:0,phase:'idle',active:{slot,image:installed.image},candidate:null,checkpoint},
