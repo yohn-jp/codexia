@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig} from '../deploy/updater/standalone-maintenance.mjs';
+import {probeCredentialFiles,validateProbeCredential,assertProbeCredentialAccess,assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig} from '../deploy/updater/standalone-maintenance.mjs';
 import {assertProxyRuntimeObservation} from '../deploy/updater/standalone-host.mjs';
 
 const runtime={
@@ -156,4 +156,30 @@ test('maintenance requires the running proxy to match its private digest-pinned 
   assert.throws(()=>assertProxyRuntimeObservation(quadlet, {...container,HostConfig:{...container.HostConfig,SecurityOpt:['no-new-privileges:true','seccomp=unconfined']}},'active',imageInfo,proxyOptions),/security options/u);
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Config:{...container.Config,Entrypoint:['sh']}},'active',imageInfo,proxyOptions),/entrypoint/u);
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Config:{...container.Config,Env:[...proxyImageEnvironment,'NODE_OPTIONS=--require=/tmp/inject.js']}},'active',imageInfo,proxyOptions),/unexpected runtime environment/u);
+});
+
+
+test('probe rotation targets only three canonical private credential files and rejects unsafe values',()=>{
+  const targets=probeCredentialFiles(current,'/home/codexia/.config/codexia-updater/config.json');
+  assert.deepEqual(targets.map(x=>x.target),[current.githubTokenFile,current.accessClientIdFile,current.accessClientSecretFile]);
+  assert.throws(()=>probeCredentialFiles({...current,githubTokenFile:current.publicKeyFile},'/home/codexia/.config/codexia-updater/config.json'),/canonical private path/);
+  assert.throws(()=>probeCredentialFiles({...current,accessClientSecretFile:undefined},'/home/codexia/.config/codexia-updater/config.json'),/canonical private path/);
+  for(const bad of ['', 'with space','two\nlines','abc\r\n','x'.repeat(8193)])assert.throws(()=>validateProbeCredential(bad),/Invalid protected probe credential/);
+  validateProbeCredential('valid-token\n');
+});
+test('probe credential admission requires a fresh signed channel and compatible real frontend',async()=>{
+  const {generateKeyPairSync}=await import('node:crypto');
+  const {signUpdateChannel,verifyUpdateChannel}=await import('./update-channel.mjs');
+  const key=generateKeyPairSync('ed25519');
+  const pub=key.publicKey.export({type:'spki',format:'pem'});
+  const priv=key.privateKey.export({type:'pkcs8',format:'pem'});
+  const now=Date.now();
+  const installed={format:'codexia-update-release/v1',channel:'stable',state:'published',version:'0.1.0',sourceSha:'a'.repeat(40),image:release.image,platform:'linux/amd64',profile:'core',migrationFingerprint:'sha256:'+'c'.repeat(64),persistenceFormat:1,apiEpoch:1};
+  const signed=signUpdateChannel({format:'codexia-update-channel/v1',sequence:1,issuedAt:new Date(now-1000).toISOString(),expiresAt:new Date(now+60000).toISOString(),releases:[installed]},priv,now);
+  const state={installed,journal:{checkpoint:verifyUpdateChannel(signed,pub,null,now).checkpoint}};
+  const host={fetchChannel:async()=>signed,frontendIdentity:async()=>({profile:'core',apiEpoch:1})};
+  await assertProbeCredentialAccess(host,state,pub);
+  await assert.rejects(assertProbeCredentialAccess({...host,fetchChannel:async()=>{throw Error('secret-value');}},state,pub),error=>error.message==='Probe credentials did not verify the signed channel and deployed frontend identity');
+  await assert.rejects(assertProbeCredentialAccess({...host,frontendIdentity:async()=>({profile:'core',apiEpoch:2})},state,pub),/Probe credentials did not verify/);
+  await assert.rejects(assertProbeCredentialAccess(host,{...state,installed:{...installed,apiEpoch:2}},pub),/Probe credentials did not verify/);
 });

@@ -54,6 +54,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/ansible/install-units.yml',
   'deploy/ansible/inventory.example.yml',
   'deploy/ansible/maintenance.yml',
+  'deploy/ansible/rotate-probe-credentials.yml',
   'deploy/ansible/preflight.yml',
   'deploy/ansible/prepare.yml',
   'deploy/ansible/requirements.txt',
