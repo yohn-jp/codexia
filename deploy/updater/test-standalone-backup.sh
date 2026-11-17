@@ -249,6 +249,12 @@ assert_no_drill_resources
 
 bash "$backup_script" drill "$artifact" "$tmp/age-identity" --approved > "$tmp/drill.log"
 grep -q 'Isolated restore verified: database and history fingerprints match' "$tmp/drill.log"
+manifest_hash="$(sha256sum "$artifact/SHA256SUMS" | cut -d' ' -f1)"
+grep -Fxq "Verified checksum manifest sha256: $manifest_hash" "$tmp/drill.log"
+test "$(bash "$backup_script" validate-artifact "$artifact")" = "$manifest_hash"
+if bash "$backup_script" validate-artifact "$tmp/tampered" > "$tmp/tampered-identity.log" 2>&1; then
+  echo 'Artifact evidence accepted tampered ciphertext' >&2; exit 1
+fi
 assert_no_drill_resources
 
 # A scratch-container removal failure must fail the drill and withhold success;
@@ -270,7 +276,7 @@ if CODEXIA_REAL_PODMAN="$real_podman" CODEXIA_FAIL_DRILL_REMOVE=true CODEXIA_FAI
 fi
 test -f "$tmp/fail-drill-remove-once"
 grep -q 'Restore drill cleanup failed: isolated database container removal failed' "$tmp/cleanup-failure.log"
-if grep -q 'Isolated restore verified:' "$tmp/cleanup-failure.log"; then
+if grep -Eq 'Isolated restore verified:|Verified checksum manifest sha256:' "$tmp/cleanup-failure.log"; then
   echo 'Restore drill printed success before cleanup completed' >&2
   exit 1
 fi

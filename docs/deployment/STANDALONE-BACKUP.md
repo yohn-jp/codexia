@@ -21,6 +21,12 @@ Install updated updater source and configuration with the read-only `prepare` st
 
 The destination must be an existing absolute NFS, CIFS or SSHFS mount whose source host resolves to an address that is not assigned to this VM. This rejects loopback and same-VM mounts; it does not prove the remote storage's ownership, immutability or custody. The database custom-format dump and history-volume archive stream directly into age ciphertext. The encrypted manifest stores logical fingerprints of public PostgreSQL table rows and history file names/content; the artifact directory records SHA-256 checksums. These checksums detect corruption but do not authenticate who created an artifact: the age recipient is public, so anyone can encrypt a fabricated artifact to it. Production recovery evidence therefore also requires independently verified write protection or a signed storage receipt before the artifact is treated as an authentic backup. A partial directory is published only after all ciphertext and checksums have been synchronized. The backup database image pin matches the deployed PostgreSQL 17 Quadlet pin.
 
+## Legacy cutover backup evidence
+
+After a successful controller-locked legacy backup and identity-preserving recovery, the source updater records a private `legacy-backup-proof.json` in its existing state directory, binding the exact signed legacy release to the committed off-VM artifact path and SHA-256 of its fixed ciphertext manifest. Only the latest successful source proof is selected. Backups produced before this proof exists must be repeated.
+
+The isolated drill verifies the same manifest before and after restoration and emits its SHA-256 only after successful fingerprint comparison and scratch cleanup. Set `codexia_restore_receipt_output_file=/private/new-restore-receipt.json` on the isolated recovery host. Transfer that private receipt to the trusted Ansible control node and pass `codexia_restore_receipt_file=/private/new-restore-receipt.json` to legacy initialization. The receipt is an operator-protected recovery-host record, not a cryptographic attestation of host identity. The source updater rechecks the off-VM mount, every ciphertext checksum, the exact legacy release and receipt binding before writer disruption. Missing or different proof blocks initialization. This does not prove zero RPO or full production acceptance.
+
 ## Isolated restore drill
 
 Run the drill on an isolated recovery host with Podman and the external recovery identity:

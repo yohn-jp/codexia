@@ -53,3 +53,5 @@ all:
         codexia_acceptance_approved: false
         # codexia_installed_release_file: /private/installed-release.json
         # codexia_bootstrap_candidate_file: /private/bootstrap-candidate.json
+        # codexia_restore_receipt_file: /private/verified-restore-receipt.json
+        # On isolated recovery host: codexia_restore_receipt_output_file: /private/new-restore-receipt.json

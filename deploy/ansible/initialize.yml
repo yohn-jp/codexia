@@ -4,6 +4,9 @@
     that:
       - codexia_maintenance_approved | default(false) | bool
       - codexia_installed_release_file is defined
+      - codexia_restore_receipt_file is defined
+      - codexia_restore_receipt_file is string
+      - codexia_restore_receipt_file is match('^/[^\r\n]+$')
     fail_msg: Verify the offline backup and legacy runtime settings before approving maintenance.
 - name: Install the selected signed-channel release record
   ansible.builtin.copy:
@@ -14,6 +17,30 @@
   ansible.builtin.command:
     argv: [sh, "{{ updater }}", verify-legacy, "{{ config_path }}", "{{ config_dir }}/installed-release.json"]
   changed_when: false
+- name: Stage the protected restore receipt on the source host
+  ansible.builtin.tempfile:
+    state: directory
+    path: "{{ config_dir }}"
+    prefix: cutover-proof-
+  register: codexia_cutover_proof_dir
+- name: Require exact restored backup before legacy writer disruption
+  block:
+    - name: Copy the isolated recovery host's receipt from the trusted control node
+      ansible.builtin.copy:
+        src: "{{ codexia_restore_receipt_file }}"
+        dest: "{{ codexia_cutover_proof_dir.path }}/restore.json"
+        mode: '0600'
+      no_log: true
+    - name: Revalidate off-VM artifact integrity and matching source and restore evidence
+      ansible.builtin.command:
+        argv: [sh, "{{ updater }}", verify-cutover-backup, "{{ config_path }}", "{{ config_dir }}/installed-release.json", "{{ codexia_cutover_proof_dir.path }}/restore.json"]
+      changed_when: false
+      no_log: true
+  always:
+    - name: Remove only the temporary cutover receipt directory
+      ansible.builtin.file:
+        path: "{{ codexia_cutover_proof_dir.path }}"
+        state: absent
 - name: Inspect legacy Quadlet
   ansible.builtin.stat:
     path: "{{ quadlet_dir }}/codexia-api.container"

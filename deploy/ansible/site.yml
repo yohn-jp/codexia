@@ -173,12 +173,26 @@
     - name: Maintain updater source, configuration and systemd units through the locked controller
       ansible.builtin.include_tasks: maintenance.yml
       when: codexia_stage == 'maintain' and journal.stat.exists and not ansible_check_mode
-    - name: Verify initialized controller
-      ansible.builtin.include_tasks: verify.yml
-      when: journal.stat.exists and codexia_stage != 'backup'
+    - name: Verify reviewed inputs before resuming interrupted initialization
+      ansible.builtin.include_tasks: verify-updater-inputs.yml
+      when: journal.stat.exists and codexia_stage == 'initialize' and not ansible_check_mode
+    - name: Refuse drift in existing boot and poll units before installation
+      ansible.builtin.include_tasks: verify-updater-units.yml
+      vars:
+        allow_missing_updater_units: true
+      when: journal.stat.exists and codexia_stage == 'initialize' and not ansible_check_mode
+    - name: Recover only an explicitly pending first activation under the host lock
+      ansible.builtin.command:
+        argv: [sh, "{{ updater }}", recover-initial, "{{ config_path }}"]
+      register: initial_recovery
+      changed_when: (initial_recovery.stdout | from_json).recovered
+      when: journal.stat.exists and codexia_stage == 'initialize' and not ansible_check_mode
     - name: Ensure boot and poll units after initialization (also repairs interrupted unit installation)
       ansible.builtin.include_tasks: install-units.yml
       when: codexia_stage == 'initialize' and not ansible_check_mode
+    - name: Verify initialized controller
+      ansible.builtin.include_tasks: verify.yml
+      when: journal.stat.exists and codexia_stage != 'backup'
     - name: Exercise a compatible update or rollback without enabling automatic polling
       ansible.builtin.include_tasks: acceptance.yml
       when: codexia_stage in ['acceptance-update', 'acceptance-rollback'] and not ansible_check_mode

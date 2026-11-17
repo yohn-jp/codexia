@@ -1180,6 +1180,12 @@ export class PodmanStandaloneHost{
     }
     return (result.stdout??'').trim();
   }
+  async backupArtifactIdentity(directory){
+    const script=fileURLToPath(new URL('./standalone-backup.sh',import.meta.url));
+    const value=run('bash',[script,'validate-artifact',directory],{timeout:6*60*60*1000});
+    assert.match(value,/^[a-f0-9]{64}$/u,'Backup artifact checksum manifest identity is unobservable');
+    return value;
+  }
   async validateBackupDestination(destination){
     const script=fileURLToPath(new URL('./standalone-backup.sh',import.meta.url));
     const result=spawnSync('bash',[script,'validate-destination',destination],{
