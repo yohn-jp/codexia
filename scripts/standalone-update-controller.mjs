@@ -22,7 +22,19 @@ export function validateControllerState(value) {
   assert.equal(typeof value.paused,'boolean');
   assert.ok(value.lastError===null||typeof value.lastError==='string');
   assert.ok(value.lastSuccessAt===null||typeof value.lastSuccessAt==='string');
-  return {format:value.format,journal,installed,pending,previous,failedImages:[...new Set(value.failedImages)],paused:value.paused,lastError:value.lastError,lastSuccessAt:value.lastSuccessAt};
+  const initialActivationPending=value.initialActivationPending;
+  if(initialActivationPending!==undefined){
+    assert.equal(initialActivationPending,true,'Invalid initial activation marker');
+    assert.equal(journal.phase,'idle');
+    assert.ok(journal.checkpoint,'Initial activation requires an authenticated checkpoint');
+    assert.equal(previous,null);
+    assert.equal(pending,null);
+    assert.equal(value.paused,true,'Initial activation must remain paused');
+    assert.equal(value.lastSuccessAt,null);
+    assert.deepEqual(value.failedImages,[]);
+  }
+  return {format:value.format,journal,installed,pending,previous,failedImages:[...new Set(value.failedImages)],paused:value.paused,lastError:value.lastError,lastSuccessAt:value.lastSuccessAt,
+    ...(initialActivationPending===true?{initialActivationPending:true}:{})};
 }
 
 export async function atomicWrite(filename, content) {
@@ -482,7 +494,56 @@ export class StandaloneController {
       return this.save({...state,paused:true,lastError});
     }
   }
+  // Only an explicitly persisted initial activation may recover a blocked
+  // route with an already-started writer. Ordinary committed topology drift
+  // is still rejected. Caller owns the host-wide lock.
+  async recoverInitialActivation(state){
+    state=validateControllerState(state);
+    assert.equal(state.initialActivationPending,true);
+    const active=state.journal.active;
+    try{
+      await this.assertNoBackupIntent();
+      assert.equal(await this.host.pollingTimerActive(),false,'Initial activation requires stopped polling');
+      const observed=await this.host.observe();
+      assertObservation(observed,state.journal);
+      assert.ok(observed.route==='blocked'||observed.route===active.slot,'Unexpected initial activation route');
+      // Close admission before any recovery effects; a crashed writer may
+      // already be running but has not yet earned durable serving proof.
+      await this.host.route('blocked');
+      const verified=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,state.journal.checkpoint,this.now());
+      assert.ok(verified.payload.releases.some(release=>release.state==='published'&&JSON.stringify(release)===JSON.stringify(state.installed)),
+        'Initial release is absent or withdrawn from the fresh signed channel');
+      state=await this.save({...state,journal:{...state.journal,checkpoint:verified.checkpoint}});
+      await this.uiEpoch(state.installed);
+      await this.host.pullAndVerify(state.installed);
+      // A prior attempt may have left only its own read-only preflight.
+      await this.host.stopPreflight(active.slot);
+      await this.host.assertNoPreflight();
+      if(observed.writers.length===0){
+        try{await this.host.prepare(active.slot,state.installed);}
+        finally{await this.host.stopPreflight(active.slot);}
+        await this.host.assertNoPreflight();
+        await this.host.startWriter(active.slot,state.installed);
+      }
+      const after=await this.host.observe();
+      assertObservation(after,state.journal);
+      assert.ok(isOnlyWriter(after,active.slot,state.installed.image),'Initial writer is not exclusive');
+      await this.host.verifyWriterUnits(state);
+      await this.uiEpoch(state.installed);
+      await this.host.route(active.slot);
+      await this.assertServing(state,active.slot,state.installed);
+      const {initialActivationPending,...committed}=state;
+      return await this.save({...committed,lastError:null,lastSuccessAt:new Date(this.now()).toISOString()});
+    }catch(error){
+      await this.host.route('blocked').catch(()=>undefined);
+      return this.save({...state,paused:true,lastError:'Initial activation blocked: '+safeError(error)});
+    }
+  }
   async reconcile(state,{boot=false}={}){
+    if(state.initialActivationPending){
+      assert.ok(boot,'Initial activation must be recovered before ordinary lifecycle operations');
+      return this.recoverInitialActivation(state);
+    }
     if(!stable(state.journal))return this.restoreOld(state,'Interrupted update recovered from durable journal');
     const active=state.journal.active;
     try{

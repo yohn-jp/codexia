@@ -9,7 +9,7 @@ import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
 import { assertMaintenanceSnapshotVerifier, maintainStandaloneUpdater, recoverInterruptedMaintenance } from './standalone-maintenance.mjs';
 
 const [command,configPath,...arguments_]=process.argv.slice(2);
-if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|verify-bootstrap|init|boot|tick|status|verify|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
+if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|verify-bootstrap|init|recover-initial|boot|tick|status|verify|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
 let config=JSON.parse(await readFile(configPath,'utf8'));
 assert.equal(config.format,'codexia-standalone-updater/v1');
 assert.ok(path.isAbsolute(config.stateFile)&&path.isAbsolute(config.publicKeyFile));
@@ -54,6 +54,7 @@ if(command==='backup'){
   state=await controller.recoverBackupIntent(state??null);
   let result;
   if(state){
+    assert.ok(!state.initialActivationPending,'Recover initial activation before backup');
     assert.equal(backupArguments.length,2,'Initialized backup usage: backup /absolute/config.json /absolute/remote/destination age1-recipient --approved');
     result=await controller.backup(state,{destination:backupArguments[0],recipient:backupArguments[1]});
   }else{
@@ -81,6 +82,8 @@ if(command==='backup'){
   assert.ok(argument&&path.isAbsolute(argument),'Explicit trusted installed release JSON is required');
   try{await loadControllerState(config.stateFile);throw Error('Existing state cannot be initialized again');}catch(error){if(error.code!=='ENOENT')throw error;}
   await controller.recoverBackupIntent(null);
+  assert.equal(config.enabled,false,'Initial activation requires disabled polling');
+  assert.equal(await host.pollingTimerActive(),false,'Initial activation requires stopped polling');
   const release=validateUpdateRelease(JSON.parse(await readFile(argument,'utf8')));
   const channel=verifyUpdateChannel(await host.fetchChannel(),publicKey,null);
   assert.ok(channel.payload.releases.some(r=>r.state==='published'&&JSON.stringify(r)===JSON.stringify(release)),'Installed release must be in trusted signed channel');
@@ -90,16 +93,28 @@ if(command==='backup'){
   const observed=await host.observe();
   assert.equal(observed.writers.length,0,'Initialize only after the legacy writer is drained and removed');
   // Persist the trusted installed identity before any service activation.
-  let state=await controller.save(initialControllerState(release,slot,channel.checkpoint));
+  assert.equal(observed.route,'blocked','Initial activation requires a blocked route');
+  await host.assertNoPreflight();
+  let state=await controller.save({...initialControllerState(release,slot,channel.checkpoint),initialActivationPending:true});
   state=await controller.reconcile(state,{boot:true});
   console.log(JSON.stringify(state,null,2));
   if(state.lastError)process.exitCode=1;
+}else if(command==='recover-initial'){
+  assert.equal(arguments_.length,0);
+  const state=await loadControllerState(config.stateFile);
+  if(!state.initialActivationPending){console.log(JSON.stringify({recovered:false}));process.exit(0);}
+  assert.equal(config.enabled,false,'Initial activation recovery requires disabled polling');
+  const recovered=await controller.reconcile(state,{boot:true});
+  if(recovered.initialActivationPending||recovered.lastError)throw Error(recovered.lastError??'Initial activation remains pending');
+  console.log(JSON.stringify({recovered:true}));
+  process.exit(0);
 }else if(command==='maintain'){
   assert.equal(arguments_.length,1,'Provide exactly one staged maintenance manifest');
   const [argument]=arguments_;
   assert.ok(path.isAbsolute(argument),'An absolute staged maintenance manifest is required');
   assert.equal(await controller.loadBackupIntent(),null,'Pending backup recovery prevents runtime maintenance');
   const state=await loadControllerState(config.stateFile);
+  assert.ok(!state.initialActivationPending,'Recover initial activation before runtime maintenance');
   const result=await maintainStandaloneUpdater({config,manifestPath:argument,publicKey,state,store});
   console.log(JSON.stringify(result));
   process.exit(0);
@@ -107,7 +122,9 @@ if(command==='backup'){
   assert.equal(arguments_.length,0,'This controller command does not accept positional arguments');
   let state;
   try{state=await loadControllerState(config.stateFile);}catch(error){if(command!=='boot'||error.code!=='ENOENT')throw error;}
+  if(state?.initialActivationPending&&command!=='boot'&&command!=='status')throw Error('Recover initial activation before ordinary lifecycle operations');
   if(command==='boot'){
+    if(state?.initialActivationPending)assert.equal(config.enabled,false,'Initial activation recovery requires disabled polling');
     state=await controller.recoverBackupIntent(state??null);
     if(!state){console.log('No controller state or interrupted backup recovery intent; legacy runtime unchanged');process.exit(0);}
     state=await controller.reconcile(state,{boot:true});

@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { StandaloneController, initialControllerState, atomicWrite, loadControllerState } from './standalone-update-controller.mjs';
-import { signUpdateChannel } from './update-channel.mjs';
+import { signUpdateChannel, verifyUpdateChannel } from './update-channel.mjs';
 const key=generateKeyPairSync('ed25519');
 const pub=key.publicKey.export({type:'spki',format:'pem'});
 const priv=key.privateKey.export({type:'pkcs8',format:'pem'});
@@ -132,4 +132,49 @@ test('same-image initialization still requires an advertised legacy epoch before
  h.legacyEpoch=1;
  const result=await controller.verifyInitialCandidate(old,old);
  assert.equal(result.legacyApiEpoch,1);assert.equal(result.activated,false);
+});
+
+async function pendingInitialFixture(){
+ const {h,controller,persisted}=fixture();
+ h.target='blocked';h.writers=[];
+ h.pollingTimerActive=async()=>false;
+ h.assertNoPreflight=async()=>assert.equal(h.preflight.size,0,'Unexpected preflight');
+ h.verifyWriterUnits=async()=>{};
+ const checkpoint=verifyUpdateChannel(await h.fetchChannel(),pub,null,now).checkpoint;
+ const state=await controller.save({...initialControllerState(old,'blue',checkpoint),initialActivationPending:true});
+ return {h,controller,persisted,state};
+}
+test('initial activation resumes after journal persistence, before or after writer startup',async()=>{
+ for(const phase of ['journal','preflight','writer','route']){
+  const {h,controller,persisted,state}=await pendingInitialFixture();
+  if(phase==='preflight')h.preflight.add('blue');
+  if(['writer','route'].includes(phase))h.writers=[{slot:'blue',image:old.image}];
+  if(phase==='route')h.target='blue';
+  const recovered=await controller.reconcile(state,{boot:true});
+  assert.equal(recovered.initialActivationPending,undefined);
+  assert.equal(recovered.lastError,null);assert.equal(recovered.paused,true);
+  assert.equal(h.target,'blue');assert.deepEqual(h.writers,[{slot:'blue',image:old.image}]);assert.equal(h.preflight.size,0);
+  assert.equal(h.trace.filter(s=>s==='start:blue').length,['journal','preflight'].includes(phase)?1:0);
+  assert.deepEqual(persisted(),recovered);
+ }
+});
+test('initial activation refuses ordinary lifecycle and failed admission stays durably pending',async()=>{
+ for(const failure of ['epoch','withdrawn','foreign-writer','foreign-route','probe']){
+  const {h,controller,persisted,state}=await pendingInitialFixture();
+  await assert.rejects(controller.tick(state),/Initial activation must be recovered/);
+  if(failure==='epoch')h.epoch=2;
+  if(failure==='withdrawn'){h.sequence=2;h.releases=[next];}
+  if(failure==='foreign-writer')h.writers=[{slot:'green',image:next.image}];
+  if(failure==='foreign-route')h.target='green';
+  if(failure==='probe')h.probe=async()=>{throw Error('probe failed');};
+  const recovered=await controller.reconcile(state,{boot:true});
+  assert.equal(recovered.initialActivationPending,true);assert.ok(recovered.lastError);assert.equal(h.target,'blocked');assert.equal(recovered.paused,true);
+  assert.deepEqual(persisted(),recovered);
+ }
+});
+test('ordinary committed writer with a blocked route is not treated as interrupted initial activation',async()=>{
+ const {h,controller,state}=fixture();h.target='blocked';
+ const result=await controller.reconcile(state,{boot:true});
+ assert.equal(result.initialActivationPending,undefined);assert.match(result.lastError,/Topology reconciliation blocked/);
+ assert.equal(h.target,'blocked');
 });
