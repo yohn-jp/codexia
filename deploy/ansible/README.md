@@ -30,7 +30,7 @@ After successful `initialize-schema`, run `codexia_stage=initialize-fresh` with 
 
 After `prepare`, use the existing private inventory and set `codexia_stage=bootstrap-preflight`, `codexia_installed_release_file` and `codexia_bootstrap_candidate_file` to the exact signed-channel release records. The installed image and source are checked against the live legacy writer; a missing legacy API epoch is recorded as null, not inferred. The distinct forward candidate must match the actual deployed UI epoch and retain the same profile, platform, migration fingerprint and persistence format. The protected read-only database preflight must become ready before any writer is stopped. The stage does not initialize a journal, change routing, stop the legacy writer, enable polling or authorize activation. A successful result is admission evidence only; #181's durable cutover/recovery and verified off-VM backup remain separate prerequisites. Missing signed historical release identity, incompatible schema/format, or failed preflight blocks the operation.
 
-Ordinary same-image `initialize` also verifies the isolated candidate before stopping the existing legacy writer. It still requires the legacy API to advertise its exact epoch.
+Ordinary same-image `initialize` provisions reviewed boot recovery first and uses one locked cutover operation with matching restore evidence, durable legacy source/identity intent and startup fence. A pre-journal interruption restores the legacy topology; post-journal recovery resumes only the journal-owned writer before Tunnel handoff. It still requires the legacy API to advertise its exact epoch.
 
 ## Locked updater lifecycle
 

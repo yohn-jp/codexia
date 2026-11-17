@@ -138,6 +138,32 @@ export function assertMatchingCutoverBackup(sourceValue,restore,release,observed
   return source;
 }
 
+export function switchLegacyTunnelSource(source){
+  assert.ok(typeof source==='string'&&source.length<=65536&&!source.includes('\0'),'Invalid legacy Tunnel source');
+  const lines=source.split('\n');
+  for(const [before,after] of [['Requires=codexia-api.service','Requires=codexia-api-proxy.service'],['After=network-online.target codexia-api.service','After=network-online.target codexia-api-proxy.service']]){
+    assert.equal(lines.filter(line=>line===before).length,1,'Tunnel is not in canonical legacy state');
+    assert.ok(!lines.includes(after),'Tunnel already contains proxy dependency');
+    lines[lines.indexOf(before)]=after;
+  }
+  return lines.join('\n');
+}
+export function validateLegacyCutover(value){
+  assert.deepEqual(Object.keys(value??{}).sort(),['apiSource','backupIntent','checkpoint','format','operationId','proofHash','slot','tunnelSource'].sort());
+  assert.equal(value.format,'codexia-legacy-cutover/v1');
+  const backupIntent=validateBackupIntent(value.backupIntent);
+  assert.equal(backupIntent.kind,'legacy');
+  assert.equal(backupIntent.timerWasActive,false,'Cutover requires stopped polling');
+  assert.equal(backupIntent.tunnelWasActive,true,'Legacy cutover requires the original serving Tunnel');
+  assert.ok(typeof value.apiSource==='string'&&value.apiSource.length>0&&value.apiSource.length<=65536&&!value.apiSource.includes('\0'));
+  switchLegacyTunnelSource(value.tunnelSource);
+  assert.match(value.operationId,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u);
+  assert.match(value.proofHash,/^[a-f0-9]{64}$/u);
+  initialControllerState(backupIntent.release,value.slot,value.checkpoint);
+  assert.ok(value.checkpoint,'Cutover requires an authenticated checkpoint');
+  return {...value,backupIntent};
+}
+
 export function initialControllerState(installed,slot,checkpoint) {
   return validateControllerState({format:'codexia-standalone-controller/v1',
     journal:{format:'codexia-updater-journal/v1',generation:0,phase:'idle',active:{slot,image:installed.image},candidate:null,checkpoint},
@@ -187,7 +213,7 @@ export class StandaloneController {
   // Pre-journal admission only. No writer, route, journal, timer, Tunnel or
   // database mutation is authorized by this result. The isolated read-only
   // candidate must become ready while the original legacy writer still serves.
-  async verifyInitialCandidate(legacyValue,candidateValue){
+  async verifyInitialCandidate(legacyValue,candidateValue,{owner,slot='blue'}={}){
     const legacy=validateUpdateRelease(legacyValue);
     const candidate=validateUpdateRelease(candidateValue);
     const sameImage=legacy.image===candidate.image;
@@ -210,9 +236,10 @@ export class StandaloneController {
     // fixture rather than treating its presence as permission to delete it.
     await this.host.assertNoPreflight();
     try{
-      await this.host.prepare('blue',candidate);
+      await this.host.prepare(slot,candidate,owner);
     }finally{
-      await this.host.stopPreflight('blue');
+      if(owner)await this.host.stopInitialPreflight(slot,owner);
+      else await this.host.stopPreflight(slot);
     }
     await this.host.assertNoPreflight();
     assert.equal(await this.host.legacyServiceActive(),true,'Legacy writer changed during initial candidate preflight');
@@ -223,6 +250,111 @@ export class StandaloneController {
     return {format:'codexia-bootstrap-preflight/v1',legacyImage:legacy.image,legacyApiEpoch:before.apiEpoch,
       candidateImage:candidate.image,candidateSourceSha:candidate.sourceSha,candidateApiEpoch:candidate.apiEpoch,
       activated:false};
+  }
+  /** Same-release legacy adoption, with a durable snapshot and the existing
+   * backup startup fence. All effects occur under the caller's host lock. */
+  async cutoverLegacy(value,slot,source,restore){
+    const release=validateUpdateRelease(value);
+    assert.equal(await this.store.loadState(),null,'Legacy cutover requires no controller journal');
+    assert.equal(await this.store.loadCutover(),null,'Recover interrupted cutover first');
+    await this.assertNoBackupIntent();
+    await this.host.removeBackupStartupFence();
+    assert.equal(await this.host.routeState(),'blocked');
+    assert.equal(await this.host.pollingTimerActive(),false);
+    assert.equal(await this.host.legacyServiceActive(),true);
+    assert.equal(await this.host.tunnelServiceActive(),true);
+    await this.host.assertNoSlotSources();
+    await this.host.assertNoPreflight();
+    const channel=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,null,this.now());
+    assert.ok(channel.payload.releases.some(r=>r.state==='published'&&JSON.stringify(r)===JSON.stringify(release)),'Legacy cutover release is not published');
+    await this.uiEpoch(release);
+    const proof=assertMatchingCutoverBackup(source,restore,release,await this.host.backupArtifactIdentity(source.artifactDirectory));
+    const autostart=await this.host.captureBackupAutostart();
+    const api=await this.host.assertLegacyBackupRelease(release);
+    const tunnel=await this.host.assertLegacyBackupTunnel();
+    const sources=await this.host.captureCutoverSources(release);
+    assert.equal(api.unitFingerprint,sources.apiFingerprint);
+    assert.equal(tunnel.unitFingerprint,sources.tunnelFingerprint);
+    const backupIntent=validateBackupIntent({format:'codexia-backup-intent/v3',kind:'legacy',release,
+      identity:{api,tunnel},...autostart,tunnelWasActive:true,timerWasActive:false,createdAt:new Date(this.now()).toISOString()});
+    const intent=validateLegacyCutover({format:'codexia-legacy-cutover/v1',backupIntent,
+      checkpoint:channel.checkpoint,slot,operationId:randomUUID(),proofHash:proof.checksumManifestSha256,
+      apiSource:sources.apiSource,tunnelSource:sources.tunnelSource});
+    await this.store.saveCutover(intent);
+    try{
+      await this.verifyInitialCandidate(release,release,{owner:{operationId:intent.operationId,release},slot});
+      // Recheck the exact off-VM evidence and identities immediately before
+      // recording the startup fence and stopping the writer.
+      assertMatchingCutoverBackup(proof,restore,release,await this.host.backupArtifactIdentity(proof.artifactDirectory));
+      await this.host.assertLegacyBackupRelease(release,{expectedIdentity:api});
+      await this.host.assertLegacyBackupTunnel({expectedIdentity:tunnel});
+      await this.saveBackupRecoveryIntent(backupIntent);
+      await this.host.installBackupStartupFence();
+      await this.host.assertBackupAutostartGated(backupIntent);
+      await this.host.stopTunnel();
+      await this.host.stopLegacyWriter();
+      await this.host.applyCutoverSources(intent);
+      await this.host.startInitialProxy();
+      await this.host.assertInitialLegacyAbsent();
+      const state=await this.save({...initialControllerState(release,slot,channel.checkpoint),
+        initialActivationPending:true,initialActivationId:intent.operationId});
+      return await this.recoverLegacyCutover(state,intent);
+    }catch(error){
+      // The journal is the irreversible ownership boundary. Before it exists
+      // restore the old sources and writer; after it exists retain evidence
+      // and retry only the new controller. Never delete a journal to roll back.
+      const persisted=await this.store.loadState();
+      if(!persisted)await this.recoverLegacyCutover(null,intent);
+      else await this.host.route('blocked').catch(()=>undefined);
+      throw error;
+    }
+  }
+  async recoverLegacyCutover(state,value){
+    const intent=validateLegacyCutover(value);
+    const old=intent.backupIntent;
+    const release=old.release;
+    const observed=await this.loadBackupIntent();
+    if(observed)assert.deepEqual(observed,old,'Cutover and backup recovery identities disagree');
+    if(!state){
+      await this.host.route('blocked');
+      await this.host.stopInitialPreflight(intent.slot,{operationId:intent.operationId,release});
+      await this.host.assertNoSlotSources();
+      await this.host.restoreCutoverSources(intent);
+      if(!observed)await this.saveBackupRecoveryIntent(old);
+      await this.recoverBackupIntent(null);
+      await this.store.clearCutover();
+      return null;
+    }
+    state=validateControllerState(state);
+    assert.deepEqual(state.installed,release,'Cutover journal release differs from durable intent');
+    assert.equal(state.journal.active.slot,intent.slot);
+    assert.equal(state.journal.generation,0);
+    assert.equal(state.paused,true);
+    await this.host.assertCutoverSources(intent);
+    if(state.initialActivationPending){
+      assert.equal(state.initialActivationId,intent.operationId);
+      assert.deepEqual(observed,old,'Pending activation lost its legacy startup fence');
+      await this.host.route('blocked');
+      await this.host.startInitialProxy();
+      state=await this.recoverInitialActivation(state,{legacyCutoverIntent:old});
+      if(state.initialActivationPending||state.lastError)throw Error(state.lastError??'Cutover activation remains pending');
+    }else{
+      // A crash after the journal commit but before Tunnel handoff may have
+      // stopped all containers. Use the ordinary boot recovery only after
+      // clearing the now-obsolete legacy backup fence.
+      await this.clearBackupRecoveryIntent();
+      await this.clearBackupIntent();
+      await this.host.removeBackupStartupFence();
+      state=await this.reconcile(state,{boot:true});
+      if(state.lastError)throw Error(state.lastError);
+    }
+    await this.assertServing(state,intent.slot,release);
+    await this.clearBackupRecoveryIntent();
+    await this.clearBackupIntent();
+    await this.host.removeBackupStartupFence();
+    await this.host.startCutoverTunnel(intent);
+    await this.store.clearCutover();
+    return state;
   }
   /** A separate fresh-only operation; it never starts a writer or creates a controller journal. */
   async initializeFreshSchema(value){
@@ -569,12 +701,13 @@ export class StandaloneController {
   // Only an explicitly persisted initial activation may recover a blocked
   // route with an already-started writer. Ordinary committed topology drift
   // is still rejected. Caller owns the host-wide lock.
-  async recoverInitialActivation(state){
+  async recoverInitialActivation(state,{legacyCutoverIntent=null}={}){
     state=validateControllerState(state);
     assert.equal(state.initialActivationPending,true);
     const active=state.journal.active;
     try{
-      await this.assertNoBackupIntent();
+      if(legacyCutoverIntent)assert.deepEqual(await this.loadBackupIntent(),legacyCutoverIntent,'Cutover startup fence identity changed');
+      else await this.assertNoBackupIntent();
       await this.host.assertInitialLegacyAbsent();
       assert.equal(await this.host.pollingTimerActive(),false,'Initial activation requires stopped polling');
       const observed=await this.host.observe();

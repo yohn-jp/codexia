@@ -5,7 +5,7 @@ import { constants as fsConstants } from 'node:fs';
 import { access, lstat, mkdir, open, readFile, readlink, realpath, rmdir, stat, symlink, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { atomicWrite } from '../../scripts/standalone-update-controller.mjs';
+import { atomicWrite, switchLegacyTunnelSource } from '../../scripts/standalone-update-controller.mjs';
 import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
 
 const SLOT = /^(blue|green)$/u;
@@ -1216,6 +1216,74 @@ export class PodmanStandaloneHost{
     assert.equal(identity.format,'codexia-backend-identity/v1');
     for(const field of ['version','sourceSha','platform','profile','migrationFingerprint','persistenceFormat','apiEpoch'])assert.equal(identity[field],release[field],'Artifact '+field+' mismatch');
     assert.equal(run('podman',[...isolated,'node',release.image,'--input-type=module','-e',fingerprintCode]),release.migrationFingerprint);
+  }
+  async assertNoSlotSources(){
+    for(const slot of ['blue','green']){
+      const container=name(slot);
+      assert.ok(!exists(container),'Unexpected slot container prevents legacy cutover');
+      const filename=path.join(this.config.quadletDirectory,container+'.container');
+      const present=await lstat(filename).then(()=>true,error=>{if(error.code==='ENOENT')return false;throw error;});
+      assert.equal(present,false,'Unexpected slot source prevents legacy cutover');
+      assert.equal(run('systemctl',['--user','show','--property=LoadState','--value',activeUnit(slot)]),'not-found','Unexpected slot service prevents legacy cutover');
+    }
+  }
+  async captureCutoverSources(release){
+    const api=await this.legacyBackupUnitSnapshot(release);
+    const tunnel=await this.legacyBackupTunnelSnapshot();
+    switchLegacyTunnelSource(tunnel.source);
+    return {apiSource:api.source,tunnelSource:tunnel.source,apiFingerprint:api.unitFingerprint,tunnelFingerprint:tunnel.unitFingerprint};
+  }
+  async readCutoverSources(){
+    const apiPath=path.join(this.config.quadletDirectory,'codexia-api.container');
+    const tunnelPath=path.join(this.config.quadletDirectory,'codexia-tunnel.container');
+    const api=await regularPrivateText(apiPath).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
+    const tunnel=await regularPrivateText(tunnelPath);
+    return {apiPath,tunnelPath,api,tunnel};
+  }
+  async applyCutoverSources(intent){
+    const {apiPath,tunnelPath,api,tunnel}=await this.readCutoverSources();
+    assert.equal(api,intent.apiSource,'Legacy API source changed before cutover');
+    assert.equal(tunnel,intent.tunnelSource,'Legacy Tunnel source changed before cutover');
+    assert.equal(await this.legacyServiceActive({recoverStopped:true}),false);
+    assert.equal(await this.tunnelServiceActive(),false);
+    assert.ok(!exists('codexia-api'),'Legacy container remains after stopping its service');
+    await this.assertNoSlotSources();
+    await unlink(apiPath);
+    await syncDirectory(path.dirname(apiPath));
+    await atomicWrite(tunnelPath,switchLegacyTunnelSource(tunnel));
+    // The legacy API is gone; its drop-in must not create a phantom unit.
+    // Keep the Tunnel fence until private serving is proven.
+    await this.removeBackupStartupFenceFile(this.backupStartupFencePaths().api);
+    run('systemctl',['--user','daemon-reload']);
+    await this.assertCutoverSources(intent);
+  }
+  async assertCutoverSources(intent){
+    const {api,tunnel}=await this.readCutoverSources();
+    assert.equal(api,null,'Legacy API source reappeared');
+    assert.equal(tunnel,switchLegacyTunnelSource(intent.tunnelSource),'Cutover Tunnel source drift');
+    await this.assertInitialLegacyAbsent();
+  }
+  async restoreCutoverSources(intent){
+    const {apiPath,tunnelPath,api,tunnel}=await this.readCutoverSources();
+    assert.ok(api===null||api===intent.apiSource,'Unknown API source prevents recovery');
+    assert.ok(tunnel===intent.tunnelSource||tunnel===switchLegacyTunnelSource(intent.tunnelSource),'Unknown Tunnel source prevents recovery');
+    await this.assertNoSlotSources();
+    if(tunnel!==intent.tunnelSource){
+      if(await this.tunnelServiceActive())await this.stopTunnel();
+      await atomicWrite(tunnelPath,intent.tunnelSource);
+    }
+    if(api===null)await atomicWrite(apiPath,intent.apiSource);
+    run('systemctl',['--user','daemon-reload']);
+  }
+  async startCutoverTunnel(intent){
+    await this.assertCutoverSources(intent);
+    const unit='codexia-tunnel.service';
+    assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value',unit]));
+    assert.equal(run('systemctl',['--user','show','--property=SourcePath','--value',unit]),path.join(this.config.quadletDirectory,'codexia-tunnel.container'));
+    run('systemctl',['--user','start',unit],{timeout:120000});
+    assert.equal(await this.tunnelServiceActive(),true);
+    const identity=await this.assertLegacyBackupTunnel();
+    assert.equal(identity.runtimeFingerprint,intent.backupIntent.identity.tunnel.runtimeFingerprint,'Tunnel runtime drift after private handoff');
   }
   async assertInitialLegacyAbsent(){
     assert.ok(!exists('codexia-api'),'Initial activation refuses an existing legacy container');

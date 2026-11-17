@@ -3,14 +3,14 @@ import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { assertMatchingCutoverBackup, validateLegacyBackupProof, atomicWrite, clearBackupIntent, initialControllerState, loadBackupIntent, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
+import { assertMatchingCutoverBackup, validateLegacyBackupProof, validateLegacyCutover, atomicWrite, clearBackupIntent, initialControllerState, loadBackupIntent, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
 import { PodmanStandaloneHost } from './standalone-host.mjs';
 import { verifyUpdateChannel } from '../../scripts/update-channel.mjs';
 import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
 import { assertMaintenanceSnapshotVerifier, maintainStandaloneUpdater, recoverInterruptedMaintenance } from './standalone-maintenance.mjs';
 
 const [command,configPath,...arguments_]=process.argv.slice(2);
-if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|verify-bootstrap|verify-cutover-backup|initialize-schema|init-fresh|init|recover-initial|boot|tick|status|verify|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
+if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|verify-bootstrap|verify-cutover-backup|cutover|recover-cutover|initialize-schema|init-fresh|init|recover-initial|boot|tick|status|verify|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
 let config=JSON.parse(await readFile(configPath,'utf8'));
 assert.equal(config.format,'codexia-standalone-updater/v1');
 assert.ok(path.isAbsolute(config.stateFile)&&path.isAbsolute(config.publicKeyFile));
@@ -20,7 +20,12 @@ assert.equal(path.dirname(config.stateFile),process.env.CODEXIA_UPDATER_LOCK_DIR
 const publicKey=await readFile(config.publicKeyFile,'utf8');
 const backupIntentFile=path.join(path.dirname(config.stateFile),'backup-intent.json');
 const backupRecoveryFile=path.join(path.dirname(config.stateFile),'backup-recovery.json');
+const cutoverFile=path.join(path.dirname(config.stateFile),'legacy-cutover.json');
 const store={
+  loadState:()=>loadControllerState(config.stateFile).catch(error=>{if(error.code==='ENOENT')return null;throw error;}),
+  loadCutover:()=>readPrivateProof(cutoverFile,256*1024).then(validateLegacyCutover).catch(error=>{if(error.code==='ENOENT')return null;throw error;}),
+  saveCutover:intent=>atomicWrite(cutoverFile,JSON.stringify(validateLegacyCutover(intent))+'\n'),
+  clearCutover:()=>clearBackupIntent(cutoverFile),
   save:state=>atomicWrite(config.stateFile,JSON.stringify(state)+'\n'),
   saveBackupIntent:intent=>atomicWrite(backupIntentFile,JSON.stringify(intent)+'\n'),
   loadBackupIntent:()=>loadBackupIntent(backupIntentFile),
@@ -31,15 +36,18 @@ const store={
 };
 const legacyBackupProofFile=path.join(path.dirname(config.stateFile),'legacy-backup-proof.json');
 const freshSchemaProofFile=path.join(path.dirname(config.stateFile),'fresh-schema.json');
-async function readPrivateProof(filename){
+async function readPrivateProof(filename,limit=65536){
   const metadata=await lstat(filename);
-  assert.ok(metadata.isFile()&&!metadata.isSymbolicLink()&&(metadata.mode&0o777)===0o600&&metadata.size<=65536,'Backup evidence must be a private regular file');
+  assert.ok(metadata.isFile()&&!metadata.isSymbolicLink()&&(metadata.mode&0o777)===0o600&&metadata.size<=limit,'Backup evidence must be a private regular file');
   if(typeof process.getuid==='function')assert.equal(metadata.uid,process.getuid(),'Backup evidence owner differs from the service user');
   return JSON.parse(await readFile(filename,'utf8'));
 }
 const maintenanceMarker=path.join(path.dirname(config.stateFile),'maintenance','in-progress.json');
+const pendingCutover=await store.loadCutover();
+if(pendingCutover)assert.ok(['boot','recover-cutover'].includes(command),'Interrupted legacy cutover must recover before other operations');
 const pendingMaintenance=await lstat(maintenanceMarker).then(()=>true,error=>{if(error.code==='ENOENT')return false;if(command==='boot'||command==='maintain')return true;throw error;});
 if(pendingMaintenance){
+  assert.equal(pendingCutover,null,'Simultaneous cutover and maintenance intents require operator repair');
   assert.equal(await store.loadBackupIntent(),null,'Simultaneous backup and maintenance intents require operator repair');
   assert.equal(await store.loadBackupRecoveryIntent(),null,'Simultaneous backup recovery and maintenance intents require operator repair');
   if(command==='verify'){
@@ -55,7 +63,25 @@ if(command==='boot'){
 const host=new PodmanStandaloneHost(config);
 if(command!=='maintain')await host.assertRuntimeSources();
 const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
-if(command==='backup'){
+if(command==='recover-cutover'||(command==='boot'&&pendingCutover)){
+  assert.equal(arguments_.length,0);
+  assert.equal(config.enabled,false,'Legacy cutover recovery requires disabled polling');
+  if(!pendingCutover){console.log(JSON.stringify({recovered:false}));process.exit(0);}
+  const state=await controller.recoverLegacyCutover(await store.loadState(),pendingCutover);
+  console.log(JSON.stringify({recovered:true,initialized:state!==null}));
+  process.exit(0);
+}else if(command==='cutover'){
+  assert.equal(arguments_.length,3,'Provide exact signed legacy release, isolated restore receipt and --approved');
+  const [releaseFile,receiptFile,approval]=arguments_;
+  assert.ok(path.isAbsolute(releaseFile)&&path.isAbsolute(receiptFile)&&approval==='--approved','Legacy cutover requires explicit approval');
+  assert.equal(config.enabled,false,'Legacy cutover requires disabled polling');
+  const release=validateUpdateRelease(JSON.parse(await readFile(releaseFile,'utf8')));
+  const source=validateLegacyBackupProof(await readPrivateProof(legacyBackupProofFile));
+  const restore=await readPrivateProof(receiptFile);
+  const state=await controller.cutoverLegacy(release,config.initialSlot??'blue',source,restore);
+  console.log(JSON.stringify({format:'codexia-legacy-cutover/v1',activated:true,slot:state.journal.active.slot}));
+  process.exit(0);
+}else if(command==='backup'){
   if(arguments_.at(-1)!=='--approved')throw new Error('Backup requires the explicit --approved maintenance attestation');
   const backupArguments=arguments_.slice(0,-1);
   let state;
