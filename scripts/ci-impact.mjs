@@ -129,6 +129,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'scripts/standalone-update-controller.mjs',
   'scripts/standalone-update-controller.test.mjs',
   'docs/deployment/README.md',
+  'docs/deployment/PHASE-F-DISPOSABLE-CI.md',
 ]);
 const operationalRootPaths = new Set(OPERATIONAL_ROOT_PATHS);
 

@@ -139,6 +139,11 @@ test('operational proof remains owned by one exact-head root task and matching i
     assert.ok(!JSON.stringify(readWorkflow('frontend-release.yml').jobs).includes('pnpm run '+command));
   }
   assert.ok(OPERATIONAL_ROOT_PATHS.includes('docs/deployment/README.md'));
+  assert.ok(OPERATIONAL_ROOT_PATHS.includes('docs/deployment/PHASE-F-DISPOSABLE-CI.md'));
+  const runtime = readWorkflow('ansible-runtime-contract.yml');
+  for (const event of ['pull_request', 'push']) {
+    assert.ok(runtime.on[event].paths.includes('deploy/updater/test-standalone-maintenance-preload.mjs'));
+  }
   const audit = readWorkflow('repository-audit.yml');
   assert.ok(!Object.hasOwn(audit.on,'workflow_run'));
   assert.ok(!Object.hasOwn(audit.on,'delete'));

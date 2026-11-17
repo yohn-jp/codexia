@@ -11,6 +11,7 @@ on:
       - deploy/updater/codexia-api-proxy.container.example
       - deploy/updater/test-runtime-contract-integration.sh
       - deploy/updater/test-standalone-maintenance-integration.mjs
+      - deploy/updater/test-standalone-maintenance-preload.mjs
       - deploy/ansible/prepare.yml
       - deploy/ansible/maintenance.yml
       - deploy/ansible/verify.yml
@@ -34,6 +35,7 @@ on:
       - deploy/updater/codexia-api-proxy.container.example
       - deploy/updater/test-runtime-contract-integration.sh
       - deploy/updater/test-standalone-maintenance-integration.mjs
+      - deploy/updater/test-standalone-maintenance-preload.mjs
       - deploy/ansible/prepare.yml
       - deploy/ansible/maintenance.yml
       - deploy/ansible/verify.yml
@@ -48,6 +50,9 @@ on:
       - .github/workflows/ansible-runtime-contract.yml
 permissions:
   contents: read
+concurrency:
+  group: ansible-runtime-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   runtime-contract:
     name: Verify real rootless runtime contract on Ubuntu VM
