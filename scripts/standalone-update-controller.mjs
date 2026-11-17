@@ -245,7 +245,7 @@ export class StandaloneController {
     const release=validateUpdateRelease(value);
     assert.ok(['blue','green'].includes(slot),'Invalid initial slot');
     await this.assertNoBackupIntent();
-    await this.host.assertFreshLegacyAbsent();
+    await this.host.assertInitialLegacyAbsent();
     assert.equal(await this.host.pollingTimerActive(),false,'Fresh activation requires stopped polling');
     assert.equal(await this.host.tunnelServiceActive(),false,'Fresh activation must precede public Tunnel handoff');
     if(existing){
@@ -574,6 +574,7 @@ export class StandaloneController {
     const active=state.journal.active;
     try{
       await this.assertNoBackupIntent();
+      await this.host.assertInitialLegacyAbsent();
       assert.equal(await this.host.pollingTimerActive(),false,'Initial activation requires stopped polling');
       const observed=await this.host.observe();
       assertObservation(observed,state.journal);
@@ -596,6 +597,7 @@ export class StandaloneController {
         await this.host.assertNoPreflight();
         await this.host.startWriter(active.slot,state.installed);
       }
+      await this.host.assertInitialLegacyAbsent();
       const after=await this.host.observe();
       assertObservation(after,state.journal);
       assert.ok(isOnlyWriter(after,active.slot,state.installed.image),'Initial writer is not exclusive');

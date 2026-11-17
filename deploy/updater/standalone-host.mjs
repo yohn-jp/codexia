@@ -1217,15 +1217,15 @@ export class PodmanStandaloneHost{
     for(const field of ['version','sourceSha','platform','profile','migrationFingerprint','persistenceFormat','apiEpoch'])assert.equal(identity[field],release[field],'Artifact '+field+' mismatch');
     assert.equal(run('podman',[...isolated,'node',release.image,'--input-type=module','-e',fingerprintCode]),release.migrationFingerprint);
   }
-  async assertFreshLegacyAbsent(){
-    assert.ok(!exists('codexia-api'),'Fresh activation refuses an existing legacy container');
+  async assertInitialLegacyAbsent(){
+    assert.ok(!exists('codexia-api'),'Initial activation refuses an existing legacy container');
     const filename=path.join(this.config.quadletDirectory,'codexia-api.container');
     const present=await lstat(filename).then(()=>true,error=>{if(error.code==='ENOENT')return false;throw error;});
-    assert.equal(present,false,'Fresh activation refuses an existing legacy Quadlet');
-    assert.equal(run('systemctl',['--user','show','--property=LoadState','--value','codexia-api.service']),'not-found','Fresh activation refuses a loaded legacy unit');
+    assert.equal(present,false,'Initial activation refuses an existing legacy Quadlet');
+    assert.equal(run('systemctl',['--user','show','--property=LoadState','--value','codexia-api.service']),'not-found','Initial activation refuses a loaded legacy unit');
   }
   async assertFreshSchemaHost(){
-    await this.assertFreshLegacyAbsent();
+    await this.assertInitialLegacyAbsent();
     assert.equal(this.config.enabled,false,'Fresh schema initialization requires disabled polling');
     assert.equal(await this.routeState(),'blocked','Fresh schema requires a blocked private route');
     assert.equal(await this.pollingTimerActive(),false,'Fresh schema requires polling stopped');

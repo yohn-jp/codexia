@@ -176,6 +176,7 @@ async function pendingInitialFixture(){
  const {h,controller,persisted}=fixture();
  h.target='blocked';h.writers=[];
  h.pollingTimerActive=async()=>false;
+ h.assertInitialLegacyAbsent=async()=>{};
  h.assertNoPreflight=async()=>assert.equal(h.preflight.size,0,'Unexpected preflight');
  h.verifyWriterUnits=async()=>{};
  const checkpoint=verifyUpdateChannel(await h.fetchChannel(),pub,null,now).checkpoint;
@@ -197,13 +198,14 @@ test('initial activation resumes after journal persistence, before or after writ
  }
 });
 test('initial activation refuses ordinary lifecycle and failed admission stays durably pending',async()=>{
- for(const failure of ['epoch','withdrawn','foreign-writer','foreign-route','probe']){
+ for(const failure of ['epoch','withdrawn','foreign-writer','foreign-route','legacy-source','probe']){
   const {h,controller,persisted,state}=await pendingInitialFixture();
   await assert.rejects(controller.tick(state),/Initial activation must be recovered/);
   if(failure==='epoch')h.epoch=2;
   if(failure==='withdrawn'){h.sequence=2;h.releases=[next];}
   if(failure==='foreign-writer')h.writers=[{slot:'green',image:next.image}];
   if(failure==='foreign-route')h.target='green';
+  if(failure==='legacy-source')h.assertInitialLegacyAbsent=async()=>{throw Error('Legacy writer source reappeared');};
   if(failure==='probe')h.probe=async()=>{throw Error('probe failed');};
   const recovered=await controller.reconcile(state,{boot:true});
   assert.equal(recovered.initialActivationPending,true);assert.ok(recovered.lastError);assert.equal(h.target,'blocked');assert.equal(recovered.paused,true);
@@ -220,7 +222,7 @@ test('ordinary committed writer with a blocked route is not treated as interrupt
 test('fresh activation authenticates exact release and persists intent before any writer starts',async()=>{
  const {h,controller,persisted}=fixture();
  h.target='blocked';h.writers=[];
- h.assertFreshLegacyAbsent=async()=>{};
+ h.assertInitialLegacyAbsent=async()=>{};
  h.pollingTimerActive=async()=>false;h.tunnelServiceActive=async()=>false;
  h.assertNoPreflight=async()=>assert.equal(h.preflight.size,0);
  h.assertFreshSchemaHost=async()=>{assert.equal(h.writers.length,0);assert.equal(h.target,'blocked');};
@@ -241,7 +243,7 @@ test('fresh activation authenticates exact release and persists intent before an
 test('fresh activation refuses unsigned release, incompatible frontend and existing ingress',async()=>{
  for(const invalid of ['unsigned','epoch','tunnel','legacy']){
   const {h,controller,persisted}=fixture();h.target='blocked';h.writers=[];
-  h.assertFreshLegacyAbsent=async()=>{if(invalid==='legacy')throw Error('legacy source exists');};
+  h.assertInitialLegacyAbsent=async()=>{if(invalid==='legacy')throw Error('legacy source exists');};
   h.pollingTimerActive=async()=>false;h.tunnelServiceActive=async()=>invalid==='tunnel';
   h.assertFreshSchemaHost=async()=>{};
   h.startInitialProxy=async()=>{h.trace.push('proxy');};

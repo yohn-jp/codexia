@@ -19,6 +19,10 @@
   ansible.builtin.include_tasks: verify-updater-units.yml
   vars:
     allow_missing_updater_units: true
+- name: Provision boot recovery before any durable first activation
+  ansible.builtin.include_tasks: install-units.yml
+  vars:
+    recovery_install_only: true
 - name: Stage the signed release privately
   ansible.builtin.tempfile:
     state: directory

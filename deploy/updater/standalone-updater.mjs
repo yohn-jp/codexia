@@ -150,6 +150,7 @@ if(command==='backup'){
   await host.pullAndVerify(release);
   await controller.uiEpoch(release);
   const slot=config.initialSlot??'blue';
+  await host.assertInitialLegacyAbsent();
   const observed=await host.observe();
   assert.equal(observed.writers.length,0,'Initialize only after the legacy writer is drained and removed');
   // Persist the trusted installed identity before any service activation.
