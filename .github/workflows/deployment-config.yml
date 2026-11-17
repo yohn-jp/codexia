@@ -28,13 +28,28 @@ jobs:
     name: Verify Ansible and Terraform configuration
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
+      - uses: actions/setup-node@v7.1.0
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          node-version: '24.22.3'
+      - name: Resolve reusable independent PR proof
+        id: reuse
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/reuse-pr-verification.mjs dedicated
       - name: Select independent infrastructure checks
+        if: steps.reuse.outputs.eligible != 'true'
         id: impact
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -64,7 +79,7 @@ jobs:
           echo "ansible=$ansible" >> "$GITHUB_OUTPUT"
           echo "terraform=$terraform" >> "$GITHUB_OUTPUT"
       - name: Check standalone Ansible configuration
-        if: steps.impact.outputs.ansible == 'true'
+        if: steps.reuse.outputs.eligible != 'true' && steps.impact.outputs.ansible == 'true'
         run: |
           python3 -m venv "$RUNNER_TEMP/codexia-ansible"
           "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
@@ -75,12 +90,12 @@ jobs:
           python3 -m unittest discover -s deploy/ansible -p 'test_host_contract.py'
           ANSIBLE_PLAYBOOK="$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" bash deploy/ansible/test-host-validation.sh
       - name: Check all Terraform files
-        if: steps.impact.outputs.terraform == 'true'
+        if: steps.reuse.outputs.eligible != 'true' && steps.impact.outputs.terraform == 'true'
         uses: hashicorp/setup-terraform@v4.0.1
         with:
           terraform_version: 1.17.2
       - name: Validate Cloudflare Terraform
-        if: steps.impact.outputs.terraform == 'true'
+        if: steps.reuse.outputs.eligible != 'true' && steps.impact.outputs.terraform == 'true'
         working-directory: deploy/cloudflare/terraform
         env:
           GH_TOKEN: ${{ github.token }}

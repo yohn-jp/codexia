@@ -17,7 +17,13 @@ jobs:
     name: plan
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     outputs:
+      reuse: ${{ steps.reuse.outputs.eligible }}
+      reuse_receipt: ${{ steps.reuse.outputs.receipt }}
       plan: ${{ steps.select.outputs.plan }}
       unit: ${{ steps.select.outputs.unit }}
       types: ${{ steps.select.outputs.types }}
@@ -42,6 +48,12 @@ jobs:
           CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
         run: node scripts/ci-impact.mjs
+      - name: Resolve reusable merged PR source proof
+        id: reuse
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/reuse-pr-verification.mjs plan
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: ci-plan
@@ -53,12 +65,16 @@ jobs:
     needs:
       - plan
     if: needs.plan.result == 'success' && needs.plan.outputs.full_model_oci == 'true'
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     uses: ./.github/workflows/full-model-oci-acceptance.yml
   unit:
     name: unit-${{ matrix.group }}
     needs:
       - plan
-    if: needs.plan.result == 'success' && needs.plan.outputs.unit != '[]'
+    if: needs.plan.result == 'success' && needs.plan.outputs.reuse != 'true' && needs.plan.outputs.unit != '[]'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -140,7 +156,7 @@ jobs:
     name: types-${{ matrix.group }}
     needs:
       - plan
-    if: needs.plan.result == 'success' && needs.plan.outputs.types != '[]'
+    if: needs.plan.result == 'success' && needs.plan.outputs.reuse != 'true' && needs.plan.outputs.types != '[]'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -193,7 +209,7 @@ jobs:
     name: build-${{ matrix.profile }}
     needs:
       - plan
-    if: needs.plan.result == 'success' && needs.plan.outputs.build != '[]'
+    if: needs.plan.result == 'success' && needs.plan.outputs.reuse != 'true' && needs.plan.outputs.build != '[]'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -256,7 +272,7 @@ jobs:
     name: oci-${{ matrix.profile }}
     needs:
       - plan
-    if: needs.plan.result == 'success' && needs.plan.outputs.oci != '[]'
+    if: needs.plan.result == 'success' && needs.plan.outputs.reuse != 'true' && needs.plan.outputs.oci != '[]'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -292,7 +308,7 @@ jobs:
     needs:
       - plan
       - build
-    if: always() && !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.browser != '[]'
+    if: always() && !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.reuse != 'true' && needs.plan.outputs.browser != '[]'
     permissions:
       contents: read
       actions: read
@@ -387,7 +403,7 @@ jobs:
     name: hosted-native-catalog
     needs:
       - plan
-    if: needs.plan.result == 'success' && needs.plan.outputs.hosted_catalog == 'true'
+    if: needs.plan.result == 'success' && needs.plan.outputs.reuse != 'true' && needs.plan.outputs.hosted_catalog == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -443,7 +459,7 @@ jobs:
       - plan
       - build
       - hosted_catalog
-    if: always() && !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.hosted != '[]'
+    if: always() && !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.reuse != 'true' && needs.plan.outputs.hosted != '[]'
     permissions:
       contents: read
       actions: read
@@ -531,15 +547,18 @@ jobs:
     permissions:
       contents: read
       actions: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: ${{ needs.plan.outputs.reuse == 'true' && '0' || '1' }}
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.22.3
       - name: Select latest exact-run plan and job inventory
+        if: needs.plan.outputs.reuse != 'true'
         id: select-plan
         env:
           GH_TOKEN: ${{ github.token }}
@@ -549,6 +568,7 @@ jobs:
           CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: node scripts/select-ci-plan.mjs
       - name: Download selected plan by exact artifact ID
+        if: needs.plan.outputs.reuse != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -558,6 +578,7 @@ jobs:
           CODEXIA_CI_ARTIFACT_KIND: plan
         run: node scripts/download-ci-artifacts.mjs
       - name: Select latest exact-run execution evidence
+        if: needs.plan.outputs.reuse != 'true'
         id: select-evidence
         env:
           GITHUB_RUN_ID: ${{ github.run_id }}
@@ -566,6 +587,7 @@ jobs:
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
         run: node scripts/select-ci-evidence.mjs
       - name: Download selected execution evidence by exact artifact ID
+        if: needs.plan.outputs.reuse != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -575,6 +597,7 @@ jobs:
           CODEXIA_CI_ARTIFACT_KIND: evidence
         run: node scripts/download-ci-artifacts.mjs
       - name: Certify every required exact-source matrix element
+        if: needs.plan.outputs.reuse != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -582,6 +605,21 @@ jobs:
           CODEXIA_CI_EVIDENCE_DIR: ${{ runner.temp }}/ci-evidence
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
         run: node scripts/certify-ci.mjs
+      - name: Certify reused merged PR proof
+        if: needs.plan.outputs.reuse == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_REQUIRED_RESULTS: ${{ toJSON(needs) }}
+          CODEXIA_REUSE_RECEIPT: ${{ needs.plan.outputs.reuse_receipt }}
+          CODEXIA_REUSE_PROOF_PATH: ${{ runner.temp }}/ci-reuse-proof.json
+        run: node scripts/reuse-pr-verification.mjs certify
+      - uses: actions/upload-artifact@v7.0.2
+        if: needs.plan.outputs.reuse == 'true'
+        with:
+          name: ci-reuse-proof
+          path: ${{ runner.temp }}/ci-reuse-proof.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Record measured workflow timings
         if: always()
         env:

@@ -69,8 +69,30 @@ export function assertVerificationLeafJobs(jobs) {
   assertNamedJobs(jobs, VERIFICATION_LEAF_JOBS);
 }
 
+// GitHub emits these literal matrix-name placeholders when entire families are skipped.
+// The compact path requires positive certification-step evidence, never skipped status alone.
+export const REUSED_MAIN_SKIPPED_JOBS = Object.freeze([
+  'full-model-oci', 'unit-${{ matrix.group }}', 'types-${{ matrix.group }}',
+  'build-${{ matrix.profile }}', 'oci-${{ matrix.profile }}', 'browser-${{ matrix.group }}',
+  'hosted-native-catalog', 'hosted-native-${{ matrix.selection }}',
+]);
+export const REUSED_MAIN_CERT_STEP = 'Certify reused merged PR proof';
+
 /** @param {unknown} jobs */
 export function assertVerificationJobs(jobs) {
+  if (!Array.isArray(jobs)) throw new Error('Invalid release verification jobs response');
+  const cert = jobs.find(job => record(job) && job.name === 'certification');
+  /** @type {Record<string, unknown>[]} */
+  const steps = record(cert) && Array.isArray(cert.steps) ? cert.steps.filter(record) : [];
+  const reuseSteps = steps.filter(step => step.name === REUSED_MAIN_CERT_STEP);
+  if (reuseSteps.length > 0 && reuseSteps.some(step => step.conclusion === 'success')) {
+    if (reuseSteps.length !== 1 || reuseSteps[0]?.status !== 'completed') throw new Error('Ambiguous reused main certification');
+    const normal = steps.filter(step => step.name === 'Certify every required exact-source matrix element');
+    if (normal.length !== 1 || normal[0]?.status !== 'completed' || normal[0]?.conclusion !== 'skipped') throw new Error('Conflicting main certification modes');
+    assertNamedJobs(jobs, ['plan', 'certification'], REUSED_MAIN_SKIPPED_JOBS);
+    if (jobs.length !== 2 + REUSED_MAIN_SKIPPED_JOBS.length) throw new Error('Incomplete compact main verification inventory');
+    return;
+  }
   // Main Verify skips the PR-only call; the standalone workflow owns matching main pushes.
   assertNamedJobs(jobs, REQUIRED_VERIFICATION_JOBS, ['full-model-oci']);
 }

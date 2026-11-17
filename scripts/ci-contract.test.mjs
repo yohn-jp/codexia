@@ -193,3 +193,44 @@ test('balanced browser lanes retain all independent spec and browser combination
     assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-webkit'],['auth-recovery','ui-v1','webkit'].map(id=>'browser-'+profile+'-'+id));
   }
 });
+
+
+
+test('compact main proof is resolved only on main push, skips all heavy families and independently certifies', async () => {
+  const { REUSED_MAIN_SKIPPED_JOBS, REUSED_MAIN_CERT_STEP } = await import('./release-policy.mjs');
+  const plan = workflow.jobs.plan;
+  const reuse = plan.steps.find(step => step.id === 'reuse');
+  assert.equal(reuse.if, "github.event_name == 'push' && github.ref == 'refs/heads/main'");
+  assert.equal(reuse.run, 'node scripts/reuse-pr-verification.mjs plan');
+  assert.equal(plan.permissions.actions, 'read');
+  assert.equal(plan.permissions['pull-requests'], 'read');
+  const families = ['unit', 'types', 'build', 'oci', 'browser', 'hosted_catalog', 'hosted'];
+  for (const name of families) assert.match(workflow.jobs[name].if, /needs\.plan\.outputs\.reuse != 'true'/);
+  assert.deepEqual(REUSED_MAIN_SKIPPED_JOBS, ['full_model_oci', ...families].map(name => workflow.jobs[name].name));
+  const gate = workflow.jobs.certification;
+  assert.equal(gate.permissions['pull-requests'], 'read');
+  const reused = gate.steps.find(step => step.name === REUSED_MAIN_CERT_STEP);
+  assert.equal(reused.if, "needs.plan.outputs.reuse == 'true'");
+  assert.equal(reused.run, 'node scripts/reuse-pr-verification.mjs certify');
+  assert.match(reused.env.CODEXIA_REUSE_RECEIPT, /needs\.plan\.outputs\.reuse_receipt/);
+  assert.equal(gate.steps.find(step => step.name === 'Certify every required exact-source matrix element').if, "needs.plan.outputs.reuse != 'true'");
+  assert.ok(gate.steps.some(step => step.with?.name === 'ci-reuse-proof' && step.if === "needs.plan.outputs.reuse == 'true'"));
+});
+
+
+test('independent main verification reuses exact PR proof without disabling PR or manual execution', async () => {
+  const { DEDICATED_PROOFS } = await import('./reuse-pr-verification.mjs');
+  for (const [filename, proof] of Object.entries(DEDICATED_PROOFS)) {
+    const definition = parse(readFileSync(new URL('../' + filename, import.meta.url), 'utf8'));
+    const job = Object.values(definition.jobs)[0];
+    const gate = job.steps.find(step => step.id === 'reuse');
+    assert.equal(gate.if, "github.event_name == 'push' && github.ref == 'refs/heads/main'");
+    assert.equal(gate.run, 'node scripts/reuse-pr-verification.mjs dedicated');
+    assert.equal(job.permissions.actions, 'read');
+    assert.equal(job.permissions['pull-requests'], 'read');
+    for (const step of job.steps.slice(job.steps.indexOf(gate) + 1)) assert.match(step.if, /steps\.reuse\.outputs\.eligible != 'true'/);
+    for (const name of proof.steps) assert.ok(job.steps.some(step => step.name === name), name);
+    if (!filename.endsWith('full-model-oci-acceptance.yml')) assert.equal(job.name, proof.job);
+  }
+  assert.deepEqual(workflow.jobs.full_model_oci.permissions, { contents: 'read', actions: 'read', 'pull-requests': 'read' });
+});
