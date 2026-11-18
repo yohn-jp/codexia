@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
-import { chmod, lstat, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, readFile, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyUpdateChannel } from '../../scripts/update-channel.mjs';
-import { atomicWrite, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
-import { PodmanStandaloneHost, validateRuntimeContract } from './standalone-host.mjs';
+import { atomicWrite, clearBackupIntent, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
+import { PodmanStandaloneHost, ensureDirectoryTreeDurable, validateRuntimeContract } from './standalone-host.mjs';
 
 export const MAINTENANCE_SOURCE_FILES = Object.freeze([
   'deploy/updater/codexia-updater',
@@ -237,7 +237,7 @@ async function snapshotFiles(files,snapshotRoot){
     const content=await readRegularFile(entry.target,{required:!entry.allowMissing});
     const backup=path.join(snapshotRoot,'previous',String(index).padStart(3,'0'));
     if(content!==null){
-      await mkdir(path.dirname(backup),{recursive:true,mode:0o700});
+      await ensureDirectoryTreeDurable(path.dirname(backup));
       await atomicWrite(backup,content);
     }
     records.push({target:entry.target,backup,exists:content!==null});
@@ -363,7 +363,7 @@ async function recoverInterrupted(config,store,markerPath,publicKey){
     assertStateExceptPause(JSON.parse(await readFile(path.join(marker.snapshotRoot,'controller.json'),'utf8')),after);
     if(after.paused!==marker.originalPaused)await store.save(withPause(after,marker.originalPaused));
     await restoreTimerPolling(marker.timerState);
-    await rm(markerPath,{force:true});
+    await clearBackupIntent(markerPath);
     await rm(marker.snapshotRoot,{recursive:true,force:true}).catch(()=>{});
     return true;
   }catch(error){
@@ -421,7 +421,7 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
   const stateDir=path.dirname(config.stateFile);
   const maintenanceDir=path.join(stateDir,'maintenance');
   const markerPath=path.join(maintenanceDir,'in-progress.json');
-  await mkdir(maintenanceDir,{recursive:true,mode:0o700});
+  await ensureDirectoryTreeDurable(maintenanceDir);
   const recovered=await recoverInterrupted(config,store,markerPath,publicKey);
   if(recovered){
     state=await loadControllerState(config.stateFile);
@@ -489,7 +489,7 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
   const initialTimer=timerState();
   assert.equal(updaterServiceState(),'inactive','Updater poll service must be idle before maintenance');
   const snapshotRoot=path.join(maintenanceDir,'snapshots',randomUUID());
-  await mkdir(snapshotRoot,{recursive:true,mode:0o700});
+  await ensureDirectoryTreeDurable(snapshotRoot);
   const records=await snapshotFiles(files.map(({target,allowMissing})=>({target,allowMissing})),snapshotRoot);
   await atomicWrite(path.join(snapshotRoot,'controller.json'),JSON.stringify(state)+'\n');
   const oldSourceRoot=path.join(snapshotRoot,'old-source');
@@ -497,7 +497,7 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
     const oldContent=await readRegularFile(path.join(manifest.sourceDir,relative),{required:relative!=='deploy/updater/standalone-maintenance.mjs'});
     if(oldContent===null)continue;
     const backup=path.join(oldSourceRoot,relative);
-    await mkdir(path.dirname(backup),{recursive:true,mode:0o700});
+    await ensureDirectoryTreeDurable(path.dirname(backup));
     await atomicWrite(backup,oldContent);
   }
   assert.ok(await readFile(path.join(oldSourceRoot,'deploy/updater/standalone-updater.mjs'),'utf8'),'Existing updater entrypoint is required for rollback verification');
@@ -538,7 +538,7 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
     if(finalState.paused!==state.paused)await store.save(withPause(finalState,state.paused));
     assert.equal(await readFile(config.routeFile,'utf8'),routeContent,'Maintenance changed the active proxy route');
     await restoreTimerPolling(initialTimer);
-    await rm(markerPath,{force:true});
+    await clearBackupIntent(markerPath);
     await rm(snapshotRoot,{recursive:true,force:true}).catch(()=>{});
     return {format:'codexia-updater-maintenance/v1',updatedFiles:files.length,recoveredInterruptedMaintenance:recovered,...(credentialRotation?{probeCredentialsRotated:true}:{})};
   }catch(error){
@@ -564,7 +564,7 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
       if(credentialRotation)await assertProbeCredentialAccess(oldHost,state,publicKey);
       if(currentState.paused!==state.paused)await store.save(withPause(currentState,state.paused));
       await restoreTimerPolling(initialTimer);
-      await rm(markerPath,{force:true});
+      await clearBackupIntent(markerPath);
       await rm(snapshotRoot,{recursive:true,force:true});
     }catch(rollbackError){
       const currentState=await loadControllerState(config.stateFile);

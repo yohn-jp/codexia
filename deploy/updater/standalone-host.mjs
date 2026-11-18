@@ -436,7 +436,7 @@ function systemdProperties(text){
   }));
 }
 async function syncDirectory(directory){const handle=await open(directory,'r');try{await handle.sync();}finally{await handle.close();}}
-async function ensureDirectoryTreeDurable(directory){
+export async function ensureDirectoryTreeDurable(directory){
   const absolute=path.resolve(directory),root=path.parse(absolute).root;
   let current=root;
   for(const part of absolute.slice(root.length).split(path.sep).filter(Boolean)){
