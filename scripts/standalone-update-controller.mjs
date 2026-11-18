@@ -198,9 +198,12 @@ export function switchLegacyTunnelSource(source){
   return lines.join('\n');
 }
 export function validateLegacyCutover(value){
-  assert.deepEqual(Object.keys(value??{}).sort(),['apiSource','backupIntent','checkpoint','format','operationId','proofHash','slot','tunnelSource'].sort());
-  assert.equal(value.format,'codexia-legacy-cutover/v1');
+  const legacyKeys=['apiSource','backupIntent','checkpoint','format','operationId','proofHash','slot','tunnelSource'].sort();
+  const bootstrapKeys=[...legacyKeys,'candidateRelease'].sort();
+  assert.deepEqual(Object.keys(value??{}).sort(),value?.format==='codexia-legacy-cutover/v2'?bootstrapKeys:legacyKeys);
+  assert.ok(['codexia-legacy-cutover/v1','codexia-legacy-cutover/v2'].includes(value.format));
   const backupIntent=validateBackupIntent(value.backupIntent);
+  const candidateRelease=value.format==='codexia-legacy-cutover/v2'?validateUpdateRelease(value.candidateRelease):backupIntent.release;
   assert.equal(backupIntent.kind,'legacy');
   assert.equal(backupIntent.timerWasActive,false,'Cutover requires stopped polling');
   assert.equal(backupIntent.tunnelWasActive,true,'Legacy cutover requires the original serving Tunnel');
@@ -208,9 +211,9 @@ export function validateLegacyCutover(value){
   switchLegacyTunnelSource(value.tunnelSource);
   assert.match(value.operationId,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u);
   assert.match(value.proofHash,/^[a-f0-9]{64}$/u);
-  initialControllerState(backupIntent.release,value.slot,value.checkpoint);
+  initialControllerState(candidateRelease,value.slot,value.checkpoint);
   assert.ok(value.checkpoint,'Cutover requires an authenticated checkpoint');
-  return {...value,backupIntent};
+  return {...value,backupIntent,...(value.format==='codexia-legacy-cutover/v2'?{candidateRelease}:{})};
 }
 
 export function initialControllerState(installed,slot,checkpoint) {
@@ -303,7 +306,11 @@ export class StandaloneController {
   /** Same-release legacy adoption, with a durable snapshot and the existing
    * backup startup fence. All effects occur under the caller's host lock. */
   async cutoverLegacy(value,slot,source,restore){
-    const release=validateUpdateRelease(value);
+    return this.bootstrapCutover(value,value,slot,source,restore);
+  }
+  async bootstrapCutover(legacyValue,candidateValue,slot,source,restore){
+    const release=validateUpdateRelease(legacyValue);
+    const candidate=validateUpdateRelease(candidateValue);
     assert.equal(await this.store.loadState(),null,'Legacy cutover requires no controller journal');
     assert.equal(await this.store.loadCutover(),null,'Recover interrupted cutover first');
     await this.assertNoBackupIntent();
@@ -315,8 +322,9 @@ export class StandaloneController {
     await this.host.assertNoSlotSources();
     await this.host.assertNoPreflight();
     const channel=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,null,this.now());
-    assert.ok(channel.payload.releases.some(r=>r.state==='published'&&JSON.stringify(r)===JSON.stringify(release)),'Legacy cutover release is not published');
-    await this.uiEpoch(release);
+    for(const item of [release,candidate])assert.ok(channel.payload.releases.some(r=>r.state==='published'&&JSON.stringify(r)===JSON.stringify(item)),'Bootstrap cutover release is not published');
+    const candidateUiEpoch=await this.uiEpoch(candidate);
+    if(release.image!==candidate.image)assertLegacyBootstrapCandidate(release,candidate,candidateUiEpoch);
     const proof=assertMatchingCutoverBackup(source,restore,release,await this.host.backupArtifactIdentity(source.artifactDirectory));
     const autostart=await this.host.captureBackupAutostart();
     const api=await this.host.assertLegacyBackupRelease(release);
@@ -326,20 +334,20 @@ export class StandaloneController {
     assert.equal(tunnel.unitFingerprint,sources.tunnelFingerprint);
     const backupIntent=validateBackupIntent({format:'codexia-backup-intent/v3',kind:'legacy',release,
       identity:{api,tunnel},...autostart,tunnelWasActive:true,timerWasActive:false,createdAt:new Date(this.now()).toISOString()});
-    let intent=validateLegacyCutover({format:'codexia-legacy-cutover/v1',backupIntent,
+    let intent=validateLegacyCutover({format:'codexia-legacy-cutover/v2',backupIntent,candidateRelease:candidate,
       checkpoint:channel.checkpoint,slot,operationId:randomUUID(),proofHash:proof.checksumManifestSha256,
       apiSource:sources.apiSource,tunnelSource:sources.tunnelSource});
     await this.store.saveCutover(intent);
     try{
-      await this.verifyInitialCandidate(release,release,{owner:{operationId:intent.operationId,release},slot});
+      await this.verifyInitialCandidate(release,candidate,{owner:{operationId:intent.operationId,release:candidate},slot});
       // Recheck the exact off-VM evidence and identities immediately before
       // recording the startup fence and stopping the writer.
       assertMatchingCutoverBackup(proof,restore,release,await this.host.backupArtifactIdentity(proof.artifactDirectory));
       await this.host.assertLegacyBackupRelease(release,{expectedIdentity:api});
       await this.host.assertLegacyBackupTunnel({expectedIdentity:tunnel});
       const fresh=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,intent.checkpoint,this.now());
-      assert.ok(fresh.payload.releases.some(item=>item.state==='published'&&JSON.stringify(item)===JSON.stringify(release)),'Legacy release changed before disruption');
-      await this.uiEpoch(release);
+      for(const item of [release,candidate])assert.ok(fresh.payload.releases.some(entry=>entry.state==='published'&&JSON.stringify(entry)===JSON.stringify(item)),'Bootstrap release changed before disruption');
+      await this.uiEpoch(candidate);
       intent=validateLegacyCutover({...intent,checkpoint:fresh.checkpoint});
       await this.store.saveCutover(intent);
       await this.saveBackupRecoveryIntent(backupIntent);
@@ -350,7 +358,7 @@ export class StandaloneController {
       await this.host.applyCutoverSources(intent);
       await this.host.startInitialProxy();
       await this.host.assertInitialLegacyAbsent();
-      const state=await this.save({...initialControllerState(release,slot,intent.checkpoint),
+      const state=await this.save({...initialControllerState(candidate,slot,intent.checkpoint),
         initialActivationPending:true,initialActivationId:intent.operationId});
       return await this.recoverLegacyCutover(state,intent);
     }catch(error){
@@ -366,7 +374,7 @@ export class StandaloneController {
   async recoverLegacyCutover(state,value){
     const intent=validateLegacyCutover(value);
     const old=intent.backupIntent;
-    const release=old.release;
+    const release=intent.candidateRelease??old.release;
     const observed=await this.loadBackupIntent();
     if(observed)assert.deepEqual(observed,old,'Cutover and backup recovery identities disagree');
     if(!state){
@@ -376,7 +384,7 @@ export class StandaloneController {
       // Before the startup fence is written no writer disruption has
       // occurred. Preserve a still-proven legacy service on admission failure.
       if(!observed&&await this.host.legacyServiceActive({recoverStopped:true})&&await this.host.tunnelServiceActive()){
-        await this.host.assertLegacyBackupRelease(release,{expectedIdentity:old.identity.api});
+        await this.host.assertLegacyBackupRelease(old.release,{expectedIdentity:old.identity.api});
         await this.host.assertLegacyBackupTunnel({expectedIdentity:old.identity.tunnel});
         await this.host.assertCutoverOriginalSources(intent);
         await this.store.clearCutover();

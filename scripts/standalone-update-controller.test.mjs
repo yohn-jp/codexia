@@ -274,11 +274,11 @@ function cutoverFixture(){
  const tunnel={unitFingerprint:'c'.repeat(64),runtimeFingerprint:'e'.repeat(64)};
  const autostart={apiWasEnabled:true,tunnelWasEnabled:true,autostartLinks:{
   api:{generatorTarget:'../codexia-api.service',defaultTargetWants:true},tunnel:{generatorTarget:'../codexia-tunnel.service',defaultTargetWants:true}}};
- let cutover=null,backup=null,primary=null;
+ let cutover=null,backup=null,primary=null,cutoverHistory=null;
  Object.assign(controller.store,{
   loadState:async()=>persisted()??null,
   loadCutover:async()=>cutover,
-  saveCutover:async value=>{cutover=structuredClone(validateLegacyCutover(value));h.trace.push('intent');},
+  saveCutover:async value=>{cutover=structuredClone(validateLegacyCutover(value));cutoverHistory=structuredClone(cutover);h.trace.push('intent');},
   clearCutover:async()=>{cutover=null;h.trace.push('clear-cutover');},
   loadBackupIntent:async()=>primary,loadBackupRecoveryIntent:async()=>backup,
   saveBackupRecoveryIntent:async value=>{backup=structuredClone(value);h.trace.push('fence-intent');},
@@ -315,7 +315,7 @@ function cutoverFixture(){
  });
  const source={format:'codexia-legacy-backup-proof/v1',release:old,artifactDirectory:'/remote/codexia-20261117T000000Z-12345678-1234-1234-1234-123456789abc',checksumManifestSha256:hash};
  const receipt={format:'codexia-restore-receipt/v1',checksumManifestSha256:hash};
- return {h,controller,persisted,source,receipt,cutover:()=>cutover,backup:()=>backup};
+ return {h,controller,persisted,source,receipt,cutover:()=>cutover,cutoverHistory:()=>cutoverHistory,backup:()=>backup};
 }
 test('legacy cutover verifies evidence and persists the startup fence before writer stop and commits before handoff',async()=>{
  const {h,controller,persisted,source,receipt,cutover,backup}=cutoverFixture();
@@ -330,6 +330,52 @@ test('legacy cutover verifies evidence and persists the startup fence before wri
  assert.ok(h.trace.indexOf('stop-legacy')<h.trace.indexOf('start:blue'));
  assert.ok(h.trace.indexOf('start:blue')<h.trace.indexOf('handoff'));
  assert.equal(cutover(),null);assert.equal(backup(),null);
+});
+test('bootstrap cutover binds restore evidence to legacy release and journals a distinct signed candidate',async()=>{
+ const {h,controller,persisted,source,receipt,cutover,cutoverHistory,backup}=cutoverFixture();
+ const state=await controller.bootstrapCutover(old,next,'blue',source,receipt);
+ assert.equal(cutoverHistory().backupIntent.release.image,old.image);
+ assert.equal(cutoverHistory().candidateRelease.image,next.image);
+ assert.equal(source.release.image,old.image);
+ assert.equal(state.installed.image,next.image);
+ assert.equal(state.journal.active.image,next.image);
+ assert.deepEqual(h.writers,[{slot:'blue',image:next.image}]);
+ assert.equal(h.target,'blue');assert.deepEqual(persisted(),state);
+ assert.equal(backup(),null);
+});
+test('bootstrap cutover leaves legacy serving when the candidate violates the old-epoch transition policy',async()=>{
+ const {h,controller,persisted,source,receipt,cutover}=cutoverFixture();
+ const incompatible={...next,migrationFingerprint:'sha256:'+'f'.repeat(64)};
+ h.releases=[old,incompatible];
+ await assert.rejects(controller.bootstrapCutover(old,incompatible,'blue',source,receipt),/bootstrap candidate|migration|fingerprint/i);
+ assert.equal(persisted(),undefined);assert.equal(cutover(),null);
+ assert.equal(h.legacyActive,true);assert.equal(h.tunnelActive,true);assert.equal(h.target,'blocked');
+});
+test('bootstrap cutover rechecks both signed release records immediately before writer disruption',async()=>{
+ const {h,controller,persisted,source,receipt,cutover}=cutoverFixture();
+ const prepare=h.prepare;h.prepare=async(...args)=>{await prepare.apply(h,args);h.releases=[old];h.sequence=2;};
+ await assert.rejects(controller.bootstrapCutover(old,next,'blue',source,receipt),/Bootstrap release changed before disruption/);
+ assert.equal(persisted(),undefined);assert.equal(cutover(),null);
+ assert.equal(h.legacyActive,true);assert.equal(h.tunnelActive,true);assert.equal(h.target,'blocked');
+});
+test('distinct candidate post-journal recovery resumes only the candidate with route blocked until serving proof',async()=>{
+ const {h,controller,persisted,source,receipt,cutover}=cutoverFixture();
+ const probe=h.probe;h.probe=async()=>{throw Error('candidate probe interrupted');};
+ await assert.rejects(controller.bootstrapCutover(old,next,'blue',source,receipt),/candidate probe interrupted/);
+ assert.equal(persisted().installed.image,next.image);assert.ok(cutover());assert.equal(h.legacyActive,false);
+ assert.equal(h.target,'blocked');h.probe=probe;
+ const recovered=await controller.recoverLegacyCutover(persisted(),cutover());
+ assert.equal(recovered.installed.image,next.image);assert.deepEqual(h.writers,[{slot:'blue',image:next.image}]);
+ assert.equal(h.target,'blue');assert.equal(h.legacyActive,false);assert.equal(cutover(),null);
+});
+test('versioned cutover intent validation retains preexisting v1 recovery records',async()=>{
+ const {controller,source,receipt,cutoverHistory}=cutoverFixture();
+ await controller.cutoverLegacy(old,'blue',source,receipt);
+ const current=cutoverHistory();
+ const legacy={...current,format:'codexia-legacy-cutover/v1'};delete legacy.candidateRelease;
+ const decoded=validateLegacyCutover(legacy);
+ assert.equal(decoded.candidateRelease,undefined);
+ assert.deepEqual(validateLegacyCutover(decoded),decoded);
 });
 test('pre-journal cutover failure restores exact legacy configuration and runtime',async()=>{
  for(const point of ['stop','sources','proxy']){
