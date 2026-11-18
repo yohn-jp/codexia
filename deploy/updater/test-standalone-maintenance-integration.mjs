@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { generateKeyPairSync } from 'node:crypto';
+import { signUpdateChannel } from '../../scripts/update-channel.mjs';
 import { chmod, lstat, mkdir, readFile, readdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -324,6 +326,37 @@ export function installTestAdapters(hostClass = PodmanStandaloneHost) {
   const verifyWriterUnitsWithPinnedIdentity = hostClass.prototype.verifyWriterUnits;
   assert.match(expectedImage ?? '', /^sha256:[a-f0-9]{64}$/u, 'Synthetic local image identity is missing');
 
+  // Only this disposable test adapter emulates the external metadata endpoints.
+  // The actual maintenance file writes, lock, systemd timer and recovery are real.
+  if (process.env.CODEXIA_RUNTIME_MAINTENANCE_PROBE_KEY) {
+    hostClass.prototype.fetchChannel = async function fetchSyntheticChannel() {
+      const token=(await readFile(this.config.githubTokenFile,'utf8')).trim();
+      assert.ok(['fixture-old-github','fixture-new-github'].includes(token),'Synthetic GitHub token rejected');
+      const canonical=this.config.githubTokenFile===path.join(path.dirname(this.config.publicKeyFile),'github-read-token');
+      if(canonical&&token==='fixture-new-github'){
+        if(process.env.CODEXIA_RUNTIME_MAINTENANCE_PROBE_FAILURE==='after-write')throw Error('Synthetic post-write credential rejection');
+        if(process.env.CODEXIA_RUNTIME_MAINTENANCE_PROBE_FAILURE==='crash')process.kill(process.pid,'SIGKILL');
+      }
+      const state=await loadControllerState(this.config.stateFile);
+      const now=Date.now();
+      const privateKey=await readFile(process.env.CODEXIA_RUNTIME_MAINTENANCE_PROBE_KEY,'utf8');
+      return signUpdateChannel({format:'codexia-update-channel/v1',sequence:1,issuedAt:new Date(now-1000).toISOString(),
+        expiresAt:new Date(now+60000).toISOString(),releases:[state.installed]},privateKey,now);
+    };
+    hostClass.prototype.probeAccessCredentials = async function probeSyntheticAccess(release) {
+      const identity=await this.frontendIdentity();
+      assert.equal(identity.profile,release.profile);
+      assert.equal(identity.apiEpoch,release.apiEpoch);
+    };
+    hostClass.prototype.frontendIdentity = async function fetchSyntheticFrontend() {
+      const id=(await readFile(this.config.accessClientIdFile,'utf8')).trim();
+      const secret=(await readFile(this.config.accessClientSecretFile,'utf8')).trim();
+      assert.ok((id==='fixture-old-id'&&secret==='fixture-old-secret')||(id==='fixture-new-id'&&secret==='fixture-new-secret'),'Synthetic Access pair rejected');
+      const state=await loadControllerState(this.config.stateFile);
+      return {profile:state.installed.profile,apiEpoch:state.installed.apiEpoch};
+    };
+  }
+
   hostClass.prototype.assertRuntimeSources = async function assertSyntheticRuntimeSources() {
     validateRuntimeContract(this.runtime);
     assert.equal(this.runtime.modelCachePath, null, 'Locked maintenance fixture must not mount host model data');
@@ -366,9 +399,11 @@ export function installTestAdapters(hostClass = PodmanStandaloneHost) {
     } finally {
       for (const { filename, content } of restoredUnits.reverse()) await atomicWrite(filename, content);
     }
-    await validateSlot(this.config, this.runtime, state, expectedImage);
     const observed = await this.observe();
-    assert.deepEqual(observed.writers, [{ slot: state.journal.active.slot, image: state.installed.image }], 'Synthetic maintenance must retain exactly one active writer');
+    if(observed.writers.length){
+      assert.deepEqual(observed.writers, [{ slot: state.journal.active.slot, image: state.installed.image }], 'Synthetic maintenance must retain exactly one active writer');
+      await validateSlot(this.config, this.runtime, state, expectedImage);
+    }else assert.equal(observed.route,'blocked','Absent writer is only admissible during blocked recovery');
   };
 
   hostClass.prototype.convergeWriterUnits = async function convergeSyntheticWriterUnits(state) {
@@ -423,18 +458,25 @@ export function installTestAdapters(hostClass = PodmanStandaloneHost) {
 }
 
 async function performMaintenance(manifestPath, outcome) {
-  installTestAdapters();
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  let maintain=maintainStandaloneUpdater;
+  if(manifest.rotateProbeCredentials){
+    const installedHost=await import(pathToFileURL(path.join(SOURCE_ROOT,'deploy/updater/standalone-host.mjs')).href);
+    const installedMaintenance=await import(pathToFileURL(path.join(SOURCE_ROOT,'deploy/updater/standalone-maintenance.mjs')).href);
+    installTestAdapters(installedHost.PodmanStandaloneHost);
+    maintain=installedMaintenance.maintainStandaloneUpdater;
+  }else installTestAdapters();
   const config = JSON.parse(await readFile(manifest.configPath, 'utf8'));
   const state = await loadControllerState(config.stateFile);
   const publicKey = await readFile(config.publicKeyFile, 'utf8');
   const store = { save: value => atomicWrite(config.stateFile, JSON.stringify(value) + '\n') };
   if (outcome === 'expect-failure') {
-    await assert.rejects(maintainStandaloneUpdater({ config, manifestPath, publicKey, state, store }), /Updater maintenance failed; previous source\/config\/units were restored/u);
+    await assert.rejects(maintain({ config, manifestPath, publicKey, state, store }), /Updater maintenance failed; previous source\/config\/units were restored/u);
   } else if (outcome === 'expect-success') {
-    const result = await maintainStandaloneUpdater({ config, manifestPath, publicKey, state, store });
+    const result = await maintain({ config, manifestPath, publicKey, state, store });
     assert.equal(result.format, 'codexia-updater-maintenance/v1');
-  } else if (outcome === 'expect-interruption') await maintainStandaloneUpdater({ config, manifestPath, publicKey, state, store });
+    if(manifest.rotateProbeCredentials)assert.equal(result.probeCredentialsRotated,true);
+  } else if (outcome === 'expect-interruption') await maintain({ config, manifestPath, publicKey, state, store });
   else throw new Error('Unknown synthetic maintenance test outcome');
 }
 
@@ -644,6 +686,118 @@ async function main() {
     expectedState: appliedState, expectedRuntime: appliedConfig.runtime, interruption: 'after-writer-drain',
   });
 
+  // Credential-only transaction on the installed runtime: old/new endpoint
+  // admission is synthetic, but the existing production transaction/recovery
+  // logic, actual rootless timer, writer and private files are exercised.
+  const probeKey=generateKeyPairSync('ed25519');
+  const probeKeyFile=path.join(workDir,'fixture-probe-private.pem');
+  await writeFile(probeKeyFile,probeKey.privateKey.export({type:'pkcs8',format:'pem'}),{mode:0o600,flag:'wx'});
+  await atomicWrite(publicKeyFile,probeKey.publicKey.export({type:'spki',format:'pem'}));
+  const accessIdFile=path.join(privateDir,'access-client-id');
+  const accessSecretFile=path.join(privateDir,'access-client-secret');
+  const credentialConfig={...appliedConfig,accessClientIdFile:accessIdFile,accessClientSecretFile:accessSecretFile};
+  await atomicWrite(configPath,JSON.stringify(credentialConfig,null,2)+'\n');
+  const credentialFiles=[
+    [githubTokenFile,'fixture-old-github','fixture-new-github'],
+    [accessIdFile,'fixture-old-id','fixture-new-id'],
+    [accessSecretFile,'fixture-old-secret','fixture-new-secret'],
+  ];
+  const credentialRoot=path.join(stateDir,'maintenance','candidates',nonce+'-credentials');
+  await mkdir(path.join(credentialRoot,'credentials'),{recursive:true,mode:0o700});
+  for(const [filename,oldValue,newValue] of credentialFiles){
+    await atomicWrite(filename,oldValue+'\n');
+    await atomicWrite(path.join(credentialRoot,'credentials',path.basename(filename)),newValue+'\n');
+  }
+  const credentialManifest=path.join(credentialRoot,'manifest.json');
+  await atomicWrite(credentialManifest,JSON.stringify({format:'codexia-updater-maintenance/v1',candidateRoot:credentialRoot,
+    configPath,sourceDir:SOURCE_ROOT,unitDir:userUnitDir,rotateProbeCredentials:true})+'\n');
+  const credentialEnvironment={...environment,CODEXIA_RUNTIME_MAINTENANCE_PROBE_KEY:probeKeyFile,
+    CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY:'yes',
+    NODE_OPTIONS:'--import='+pathToFileURL(path.join(repoRoot,'deploy/updater/test-standalone-maintenance-preload.mjs')).href};
+  let writerBefore=JSON.parse(run('podman',['inspect','--type','container',CONTAINER]))[0].Id;
+  const checkCredentials=async(useNew)=>{
+    for(const [filename,oldValue,newValue] of credentialFiles){
+      assert.ok((await readFile(filename,'utf8'))===(useNew?newValue:oldValue)+'\n','Credential rollback or installation mismatch');
+      assert.equal((await lstat(filename)).mode&0o777,0o600);
+    }
+    assert.deepEqual(await loadControllerState(path.join(stateDir,'controller.json')),appliedState);
+    assert.equal((await readFile(routeFile,'utf8')),'blue\n');
+    assert.equal(JSON.parse(run('podman',['inspect','--type','container',CONTAINER]))[0].Id,writerBefore,'Credential maintenance restarted the writer');
+    assert.equal(await readFile(configPath,'utf8'),JSON.stringify(credentialConfig,null,2)+'\n');
+    await assertTimerState('active','enabled');
+    await assert.rejects(lstat(path.join(stateDir,'maintenance','in-progress.json')),{code:'ENOENT'});
+  };
+  const runCredentialMaintenance=(outcome,failure)=>spawnSync('flock',['--exclusive','--nonblock','--no-fork',lockFile,
+    process.execPath,testEntry,'--maintain',credentialManifest,outcome],{encoding:'utf8',timeout:240000,
+    env:{...credentialEnvironment,...(failure?{CODEXIA_RUNTIME_MAINTENANCE_PROBE_FAILURE:failure}:{})}});
+  const failedCredentials=runCredentialMaintenance('expect-failure','after-write');
+  assert.equal(failedCredentials.status,0,'Credential failure did not restore the old values: '+failedCredentials.stderr);
+  await checkCredentials(false);
+  const crashedCredentials=runCredentialMaintenance('expect-interruption','crash');
+  assert.equal(crashedCredentials.signal,'SIGKILL','Credential interruption was not injected after writing the new values');
+  assert.ok((await lstat(path.join(stateDir,'maintenance','in-progress.json'))).isFile());
+  assert.equal(await readFile(githubTokenFile,'utf8'),'fixture-new-github\n');
+  // A stopped foreign slot must block recovery even while the committed writer is live.
+  const foreignName='codexia-slot-green';
+  const foreignId=run('podman',['create','--name',foreignName,expectedImage]);
+  try{
+    const refused=spawnSync('sh',[path.join(SOURCE_ROOT,'deploy/updater/codexia-updater'),'boot',configPath],
+      {encoding:'utf8',timeout:240000,env:credentialEnvironment});
+    assert.notEqual(refused.status,0,'Recovery accepted a stopped foreign slot alongside the committed writer');
+    assert.equal((await readFile(routeFile,'utf8')),'blocked\n');
+    assert.equal((await loadControllerState(path.join(stateDir,'controller.json'))).paused,true);
+    assert.ok((await lstat(path.join(stateDir,'maintenance','in-progress.json'))).isFile());
+    assert.equal(JSON.parse(run('podman',['inspect','--type','container',CONTAINER]))[0].Id,writerBefore,'Recovery restarted the committed writer');
+    const foreign=JSON.parse(run('podman',['inspect','--type','container',foreignName]))[0];
+    assert.equal(foreign.Id,foreignId);
+    assert.equal(foreign.State.Running,false);
+  }finally{
+    run('podman',['rm',foreignId]);
+  }
+  const recoveredCredentials=spawnSync('sh',[path.join(SOURCE_ROOT,'deploy/updater/codexia-updater'),'boot',configPath],
+    {encoding:'utf8',timeout:240000,env:credentialEnvironment});
+  assert.equal(recoveredCredentials.status,0,'Credential interruption was not recovered by canonical boot: '+recoveredCredentials.stderr);
+  await checkCredentials(false);
+
+  // Reproduce the state after a VM/user-manager restart: the maintenance
+  // process was killed after the writes and the old slot no longer exists.
+  const rebootCredentials=runCredentialMaintenance('expect-interruption','crash');
+  assert.equal(rebootCredentials.signal,'SIGKILL');
+  assert.equal(await readFile(githubTokenFile,'utf8'),'fixture-new-github\n');
+  await new PodmanStandaloneHost(credentialConfig).stopWriter('blue');
+  assert.equal(spawnSync('podman',['container','exists',CONTAINER],{stdio:'ignore'}).status,1);
+  // A native service that shadows the generated Quadlet is not authority
+  // to restart the committed writer. Refuse it before its ExecStart runs.
+  const shadow=path.join(userUnitDir,SERVICE);
+  const canary=path.join(workDir,'unexpected-writer-unit-start');
+  await writeFile(shadow,`[Service]\nType=oneshot\nExecStart=/usr/bin/touch ${canary}\n`,{mode:0o600,flag:'wx'});
+  try{
+    run('systemctl',['--user','daemon-reload']);
+    const refused=spawnSync('sh',[path.join(SOURCE_ROOT,'deploy/updater/codexia-updater'),'boot',configPath],
+      {encoding:'utf8',timeout:240000,env:credentialEnvironment});
+    assert.notEqual(refused.status,0,'Recovery accepted a shadow writer unit');
+    await assert.rejects(lstat(canary),{code:'ENOENT'});
+    assert.equal(spawnSync('podman',['container','exists',CONTAINER],{stdio:'ignore'}).status,1);
+    assert.equal((await readFile(routeFile,'utf8')),'blocked\n');
+    assert.equal((await loadControllerState(path.join(stateDir,'controller.json'))).paused,true);
+    assert.ok((await lstat(path.join(stateDir,'maintenance','in-progress.json'))).isFile());
+  }finally{
+    await rm(shadow);
+    run('systemctl',['--user','daemon-reload']);
+  }
+  const recoveredAbsentWriter=spawnSync('sh',[path.join(SOURCE_ROOT,'deploy/updater/codexia-updater'),'boot',configPath],
+    {encoding:'utf8',timeout:240000,env:credentialEnvironment});
+  assert.equal(recoveredAbsentWriter.status,0,'Credential interruption with stopped writer failed boot recovery: '+recoveredAbsentWriter.stderr);
+  const restartedWriter=JSON.parse(run('podman',['inspect','--type','container',CONTAINER]))[0].Id;
+  assert.notEqual(restartedWriter,writerBefore,'Stopped writer was not recreated');
+  writerBefore=restartedWriter;
+  await checkCredentials(false);
+  const successfulCredentials=runCredentialMaintenance('expect-success');
+  assert.equal(successfulCredentials.status,0,'Credential transaction failed: '+successfulCredentials.stderr);
+  await checkCredentials(true);
+  await rm(credentialRoot,{recursive:true,force:true});
+  await rm(probeKeyFile);
+
   run('systemctl', ['--user', 'disable', '--now', 'codexia-updater.timer']);
   await assertTimerState('inactive', 'disabled');
   await runLiveAnsibleTimerCheck({ repoRoot, workDir, enabled: false, shouldPass: true });
@@ -669,8 +823,8 @@ async function main() {
   const proxyInfo = await lstat(proxyQuadlet);
   assert.ok(proxyInfo.isFile() && !proxyInfo.isSymbolicLink() && proxyInfo.uid === UID && (proxyInfo.mode & 0o777) === 0o600);
   await rm(proxyQuadlet);
-  assert.deepEqual((await readdir(privateDir)).sort(), ['channel-public.pem', 'config.json', 'github-read-token'], 'Unexpected file exists in the synthetic private config directory');
-  for (const file of [configPath, publicKeyFile, githubTokenFile]) {
+  assert.deepEqual((await readdir(privateDir)).sort(), ['access-client-id', 'access-client-secret', 'channel-public.pem', 'config.json', 'github-read-token'], 'Unexpected file exists in the synthetic private config directory');
+  for (const file of [configPath, publicKeyFile, githubTokenFile, accessIdFile, accessSecretFile]) {
     const info = await lstat(file);
     assert.ok(info.isFile() && !info.isSymbolicLink() && info.uid === UID && (info.mode & 0o777) === 0o600, `Refusing to remove an unowned private config file: ${file}`);
     await rm(file);

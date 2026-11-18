@@ -6,7 +6,7 @@ import { access, lstat, mkdir, open, readFile, readlink, realpath, rmdir, stat, 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWrite, switchLegacyTunnelSource } from '../../scripts/standalone-update-controller.mjs';
-import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
+import { IDENTITY_PROBE_PATHS, probeScopedIdentityAccess, validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
 
 const SLOT = /^(blue|green)$/u;
 const name = slot => {if(!SLOT.test(slot))throw Error('Invalid slot');return 'codexia-slot-'+slot;};
@@ -436,7 +436,7 @@ function systemdProperties(text){
   }));
 }
 async function syncDirectory(directory){const handle=await open(directory,'r');try{await handle.sync();}finally{await handle.close();}}
-async function ensureDirectoryTreeDurable(directory){
+export async function ensureDirectoryTreeDurable(directory){
   const absolute=path.resolve(directory),root=path.parse(absolute).root;
   let current=root;
   for(const part of absolute.slice(root.length).split(path.sep).filter(Boolean)){
@@ -759,7 +759,7 @@ export function validateFrontendIdentity(value){
 export class PodmanStandaloneHost{
   constructor(config){
     const url=new URL(config.frontendIdentityUrl);
-    assert.equal(url.protocol,'https:');assert.equal(url.pathname,'/desktop/update-identity.json');
+    assert.equal(url.protocol,'https:');assert.equal(url.pathname,IDENTITY_PROBE_PATHS.frontend);
     assert.ok(!url.username&&!url.password&&!url.search&&!url.hash);
     for(const key of ['routeFile','quadletDirectory','githubTokenFile'])assert.ok(path.isAbsolute(config[key]),key+' must be absolute');
     assert.ok(!config.accessClientIdFile===!config.accessClientSecretFile,'Access credentials must be paired');
@@ -843,6 +843,16 @@ export class PodmanStandaloneHost{
     const token=(await readFile(this.config.githubTokenFile,'utf8')).trim();
     if(!token)throw Error('GitHub channel read credential unavailable');
     return boundedJson(channelUrl,{Authorization:'Bearer '+token,Accept:'application/vnd.github.raw+json','X-GitHub-Api-Version':'2022-11-28'});
+  }
+  async probeAccessCredentials(release,{fetchImpl=fetch}={}){
+    const clientId=(await readFile(this.config.accessClientIdFile,'utf8')).trim();
+    const clientSecret=(await readFile(this.config.accessClientSecretFile,'utf8')).trim();
+    assert.ok(clientId&&clientSecret,'Missing Access service credentials');
+    return probeScopedIdentityAccess({
+      origin:new URL(this.url),credentials:{clientId,clientSecret},fetchImpl,checkBoundary:true,
+      validateBackend:value=>{assertVersion(value,release,this.authEnvironment.CODEXIA_BROWSER_AUTH);return value;},
+      validateFrontend:value=>{const identity=validateFrontendIdentity(value);assert.equal(identity.profile,release.profile);assert.equal(identity.apiEpoch,release.apiEpoch);return identity;},
+    });
   }
   async frontendIdentity(){
     const headers={};
@@ -1216,6 +1226,20 @@ export class PodmanStandaloneHost{
     assert.equal(identity.format,'codexia-backend-identity/v1');
     for(const field of ['version','sourceSha','platform','profile','migrationFingerprint','persistenceFormat','apiEpoch'])assert.equal(identity[field],release[field],'Artifact '+field+' mismatch');
     assert.equal(run('podman',[...isolated,'node',release.image,'--input-type=module','-e',fingerprintCode]),release.migrationFingerprint);
+  }
+  async assertNoWriterContainers(allowedRunningSlot=null){
+    assert.ok(allowedRunningSlot===null||SLOT.test(allowedRunningSlot),'Invalid allowed writer slot');
+    for(const slot of ['blue','green'])if(slot!==allowedRunningSlot)assert.ok(!exists(name(slot)),'Unexpected stopped or running slot container prevents writer recovery');
+  }
+  async assertCommittedWriterUnitSource(slot){
+    const unit=activeUnit(slot);
+    const source=path.join(this.config.quadletDirectory,name(slot)+'.container');
+    const properties=systemdProperties(run('systemctl',['--user','show','--property=LoadState,FragmentPath,SourcePath,DropInPaths',unit]));
+    assert.equal(properties.LoadState,'loaded','Committed writer unit is not loaded');
+    assert.equal(properties.SourcePath,source,'Committed writer unit does not reference its reviewed Quadlet');
+    assert.ok(path.isAbsolute(process.env.XDG_RUNTIME_DIR??''),'Rootless systemd runtime directory is unavailable');
+    assert.equal(properties.FragmentPath,path.join(process.env.XDG_RUNTIME_DIR,'systemd','generator',unit),'Committed writer unit is not a generated Quadlet');
+    assertRuntimeUnitDropIns(properties.DropInPaths??'');
   }
   async assertNoSlotSources(){
     for(const slot of ['blue','green']){

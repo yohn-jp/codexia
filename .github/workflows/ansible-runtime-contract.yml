@@ -16,6 +16,7 @@ on:
       - deploy/ansible/initialize-schema.yml
       - deploy/ansible/initialize-fresh.yml
       - deploy/ansible/maintenance.yml
+      - deploy/ansible/rotate-probe-credentials.yml
       - deploy/ansible/verify.yml
       - deploy/ansible/verify-updater-inputs.yml
       - deploy/ansible/verify-updater-units.yml
@@ -44,6 +45,7 @@ on:
       - deploy/ansible/initialize-schema.yml
       - deploy/ansible/initialize-fresh.yml
       - deploy/ansible/maintenance.yml
+      - deploy/ansible/rotate-probe-credentials.yml
       - deploy/ansible/verify.yml
       - deploy/ansible/verify-updater-inputs.yml
       - deploy/ansible/verify-updater-units.yml

@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
-import { chmod, lstat, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, readFile, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { atomicWrite, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
-import { PodmanStandaloneHost, validateRuntimeContract } from './standalone-host.mjs';
+import { fileURLToPath } from 'node:url';
+import { verifyUpdateChannel } from '../../scripts/update-channel.mjs';
+import { atomicWrite, clearBackupIntent, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
+import { PodmanStandaloneHost, ensureDirectoryTreeDurable, validateRuntimeContract } from './standalone-host.mjs';
 
 export const MAINTENANCE_SOURCE_FILES = Object.freeze([
   'deploy/updater/codexia-updater',
@@ -25,6 +27,33 @@ export const MAINTENANCE_UNIT_FILES = Object.freeze([
   'codexia-updater.timer',
 ]);
 
+const probeCredentialNames=Object.freeze({
+  githubTokenFile:'github-read-token',
+  accessClientIdFile:'access-client-id',
+  accessClientSecretFile:'access-client-secret',
+});
+export function probeCredentialFiles(config,configPath){
+  const parent=path.dirname(configPath);
+  return Object.entries(probeCredentialNames).map(([key,name])=>{
+    const target=path.join(parent,name);
+    assert.ok(config[key]===target,'Probe credential must use its canonical private path: '+key);
+    return {key,target,candidate:path.join('credentials',name)};
+  });
+}
+export function validateProbeCredential(content){
+  // Never include a credential or an assertion diff in an error.
+  assert.ok(typeof content==='string'&&Buffer.byteLength(content)<=8192&&/^[!-~]+(?:\n)?$/u.test(content),
+    'Invalid protected probe credential');
+}
+export async function assertProbeCredentialAccess(host,state,publicKey){
+  try{
+    const verified=verifyUpdateChannel(await host.fetchChannel(),publicKey,state.journal.checkpoint);
+    assert.ok(verified.payload.releases.some(release=>release.state==='published'&&isDeepStrictEqual(release,state.installed)));
+    await host.probeAccessCredentials(state.installed);
+  }catch{
+    throw Error('Probe credentials did not verify the signed channel and scoped live identity access');
+  }
+}
 function plainObject(value){return value!==null&&typeof value==='object'&&!Array.isArray(value);}
 
 export function validateMaintenanceConfig(current,candidate){
@@ -79,6 +108,35 @@ export async function transitionRuntimeWriter({currentHost,targetHost,slot,relea
   await targetHost.startWriter(slot,release);
   await targetHost.route(slot);
   try{await verify();}catch(error){await targetHost.route('blocked').catch(()=>undefined);throw error;}
+}
+
+/** Restore only the journal-owned writer after a credential-only interruption.
+ * A committed image needs no new release admission; never overwrite an unknown
+ * stopped container or discard an unrelated disposable preflight. */
+export async function recoverProbeCredentialWriter({host,state}){
+  assert.ok(['idle','committed'].includes(state.journal.phase)&&!state.initialActivationPending&&state.lastError===null,'Credential recovery requires a stable committed writer');
+  assert.ok(host.runtime,'Credential recovery requires the reviewed typed runtime');
+  const {slot,image}=state.journal.active;
+  assert.equal(image,state.installed.image,'Committed writer image differs from release');
+  await host.assertRuntimeSources();
+  await host.assertInitialLegacyAbsent();
+  await host.assertNoPreflight();
+  await host.verifyWriterUnits(state);
+  await host.assertCommittedWriterUnitSource(slot);
+  const observed=await host.observe();
+  assert.equal(observed.route,'blocked','Credential recovery requires blocked admission');
+  if(observed.writers.length===0){
+    await host.assertNoWriterContainers();
+    await host.startWriter(slot,state.installed);
+    await host.verifyWriterUnits(state);
+  }else{
+    assert.deepEqual(observed.writers,[{slot,image}],'Unexpected writer prevents credential recovery');
+    await host.assertNoWriterContainers(slot);
+  }
+  const after=await host.observe();
+  assert.equal(after.route,'blocked','Writer recovery changed the private route');
+  assert.deepEqual(after.writers,[{slot,image}],'Committed writer recovery is unverified');
+  await host.assertNoWriterContainers(slot);
 }
 
 export async function preflightMaintenanceRuntime({currentConfig,nextConfig,currentHost,candidateHost,currentController,candidateController,state,activeSlot}){
@@ -184,8 +242,8 @@ async function snapshotFiles(files,snapshotRoot){
     const content=await readRegularFile(entry.target,{required:!entry.allowMissing});
     const backup=path.join(snapshotRoot,'previous',String(index).padStart(3,'0'));
     if(content!==null){
-      await mkdir(path.dirname(backup),{recursive:true,mode:0o700});
-      await writeFile(backup,content,{mode:0o600,flag:'wx'});
+      await ensureDirectoryTreeDurable(path.dirname(backup));
+      await atomicWrite(backup,content);
     }
     records.push({target:entry.target,backup,exists:content!==null});
   }
@@ -224,7 +282,15 @@ async function readTransaction(markerPath){
   if(marker.runtimeChanged===undefined)marker.runtimeChanged=false;
   assert.equal(typeof marker.runtimeChanged,'boolean');
   assert.ok(marker.timerState&&['active','inactive'].includes(marker.timerState.active)&&['enabled','disabled'].includes(marker.timerState.enabled));
+  if(marker.probeCredentialsRotated!==undefined)assert.equal(marker.probeCredentialsRotated,true,'Invalid probe credential recovery marker');
+  const credentialTargets=Object.values(probeCredentialNames).map(name=>path.join(path.dirname(marker.configPath),name));
+  if(marker.probeCredentialsRotated){
+    assert.ok(!marker.runtimeChanged&&!marker.proxyRestartRequired,'Credential-only recovery cannot change writer or proxy configuration');
+    assert.deepEqual(marker.files.map(item=>item.target).sort(),[...credentialTargets].sort(),'Credential recovery requires exactly the canonical credential targets');
+    assert.ok(marker.files.every(item=>item.exists),'Credential rotation requires existing protected inputs');
+  }
   const allowedTargets=new Set([
+    ...(marker.probeCredentialsRotated?credentialTargets:[]),
     ...MAINTENANCE_SOURCE_FILES.map(relative=>path.join(marker.sourceDir,relative)),
     ...MAINTENANCE_UNIT_FILES.map(filename=>path.join(marker.unitDir,filename)),
     marker.configPath,
@@ -292,19 +358,28 @@ async function recoverInterrupted(config,store,markerPath,publicKey){
         currentHost:oldHost,targetHost:oldHost,slot:stateBefore.journal.active.slot,release:stateBefore.installed,state:stateBefore,
         verify:async()=>{await oldHost.verifyWriterUnits(stateBefore);await oldController.assertServing(stateBefore,stateBefore.journal.active.slot,stateBefore.installed);},
       });
-    }else if(marker.proxyRestartRequired)await oldHost.route(marker.routeContent.trim());
-    else await oldHost.route(marker.routeContent.trim());
+    }else{
+      if(marker.probeCredentialsRotated)await recoverProbeCredentialWriter({host:oldHost,state:stateBefore});
+      await oldHost.route(marker.routeContent.trim());
+    }
     await verifyOldCode(marker);
+    if(marker.probeCredentialsRotated)await assertProbeCredentialAccess(oldHost,stateBefore,publicKey);
     const after=await loadControllerState(marker.stateFile);
     assertStateExceptPause(JSON.parse(await readFile(path.join(marker.snapshotRoot,'controller.json'),'utf8')),after);
     if(after.paused!==marker.originalPaused)await store.save(withPause(after,marker.originalPaused));
     await restoreTimerPolling(marker.timerState);
-    await rm(markerPath,{force:true});
+    await clearBackupIntent(markerPath);
     await rm(marker.snapshotRoot,{recursive:true,force:true}).catch(()=>{});
     return true;
   }catch(error){
     await blockRoute().catch(()=>undefined);
     await keepTimerStopped().catch(()=>undefined);
+    // A failure after restoring the prior pause flag must not leave an
+    // apparently enabled controller while the durable marker is retained.
+    try{
+      const state=await loadControllerState(config.stateFile);
+      if(!state.paused)await store.save(withPause(state,true));
+    }catch{}
     throw error;
   }
 }
@@ -343,7 +418,7 @@ async function candidateFiles(entries,root){
   return result;
 }
 async function checkFilesApplied(files){
-  for(const entry of files)assert.equal(await readRegularFile(entry.target),entry.content,'Maintenance file installation differs from its candidate');
+  for(const entry of files)assert.ok((await readRegularFile(entry.target))===entry.content,'Maintenance file installation differs from its candidate');
 }
 
 export async function maintainStandaloneUpdater({config,manifestPath,publicKey,state,store}){
@@ -351,7 +426,7 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
   const stateDir=path.dirname(config.stateFile);
   const maintenanceDir=path.join(stateDir,'maintenance');
   const markerPath=path.join(maintenanceDir,'in-progress.json');
-  await mkdir(maintenanceDir,{recursive:true,mode:0o700});
+  await ensureDirectoryTreeDurable(maintenanceDir);
   const recovered=await recoverInterrupted(config,store,markerPath,publicKey);
   if(recovered){
     state=await loadControllerState(config.stateFile);
@@ -361,7 +436,8 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
   assert.equal(state.lastError,null,'Maintenance refuses a controller with a recorded error');
 
   const manifest=JSON.parse(await readFile(manifestPath,'utf8'));
-  assert.deepEqual(Object.keys(manifest).sort(),['candidateRoot','configPath','format','sourceDir','unitDir']);
+  const credentialRotation=manifest.rotateProbeCredentials===true;
+  assert.deepEqual(Object.keys(manifest).sort(),['candidateRoot','configPath','format','sourceDir','unitDir',...(credentialRotation?['rotateProbeCredentials']:[])].sort());
   assert.equal(manifest.format,'codexia-updater-maintenance/v1');
   for(const key of ['candidateRoot','configPath','sourceDir','unitDir'])assert.ok(path.isAbsolute(manifest[key]),'Maintenance manifest paths must be absolute');
   const candidateRoot=path.resolve(manifest.candidateRoot);
@@ -373,7 +449,7 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
   assert.equal(path.resolve(manifest.unitDir),path.join(serviceHome,'.config','systemd','user'),'Maintenance unit directory is outside the service user configuration');
   assert.equal(path.resolve(manifest.sourceDir),'/opt/codexia-updater','Maintenance source directory differs from the canonical installation');
 
-  const candidateConfig=JSON.parse(await readCandidate(candidateRoot,'config.json'));
+  const candidateConfig=credentialRotation?config:JSON.parse(await readCandidate(candidateRoot,'config.json'));
   const nextConfig=validateMaintenanceConfig(config,candidateConfig);
   const candidateHost=new PodmanStandaloneHost(nextConfig);
   const currentHost=new PodmanStandaloneHost(config);
@@ -385,10 +461,28 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
   const currentController=new StandaloneController({host:currentHost,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
   await preflightMaintenanceRuntime({currentConfig:config,nextConfig,currentHost,candidateHost,currentController,candidateController:controller,state,activeSlot});
 
-  const entries=filesFor(manifest,{...config,...nextConfig},candidateConfig);
+  const entries=credentialRotation?probeCredentialFiles(config,manifest.configPath):filesFor(manifest,{...config,...nextConfig},candidateConfig);
   const files=await candidateFiles(entries,candidateRoot);
-  const proxyIndex=files.findIndex(entry=>entry.candidate==='quadlet/codexia-api-proxy.container');
-  assertProxyImageStable(await readRegularFile(files[proxyIndex].target),files[proxyIndex].content);
+  if(credentialRotation){
+    // The installed runtime must already understand this recovery marker.
+    // Never combine credential rotation with a source/runtime upgrade.
+    assert.equal(fileURLToPath(import.meta.url),path.join(manifest.sourceDir,'deploy/updater/standalone-maintenance.mjs'),
+      'Install the reviewed maintenance runtime before rotating credentials');
+    assert.ok(currentHost.runtime,'Credential rotation requires the reviewed typed runtime');
+    const stagedConfig={...config};
+    for(const entry of files){
+      validateProbeCredential(entry.content);
+      validateProbeCredential(await readRegularFile(entry.target));
+      const staged=path.join(candidateRoot,entry.candidate);
+      await readRegularFile(staged);
+      stagedConfig[entry.key]=staged;
+    }
+    await assertProbeCredentialAccess(currentHost,state,publicKey);
+    await assertProbeCredentialAccess(new PodmanStandaloneHost(stagedConfig),state,publicKey);
+  }else{
+    const proxyIndex=files.findIndex(entry=>entry.candidate==='quadlet/codexia-api-proxy.container');
+    assertProxyImageStable(await readRegularFile(files[proxyIndex].target),files[proxyIndex].content);
+  }
   let proxyRestartRequired=false;
   for(const entry of files){
     if(entry.candidate!=='deploy/updater/proxy.mjs'&&entry.candidate!=='quadlet/codexia-api-proxy.container')continue;
@@ -400,16 +494,16 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
   const initialTimer=timerState();
   assert.equal(updaterServiceState(),'inactive','Updater poll service must be idle before maintenance');
   const snapshotRoot=path.join(maintenanceDir,'snapshots',randomUUID());
-  await mkdir(snapshotRoot,{recursive:true,mode:0o700});
+  await ensureDirectoryTreeDurable(snapshotRoot);
   const records=await snapshotFiles(files.map(({target,allowMissing})=>({target,allowMissing})),snapshotRoot);
-  await writeFile(path.join(snapshotRoot,'controller.json'),JSON.stringify(state)+'\n',{mode:0o600,flag:'wx'});
+  await atomicWrite(path.join(snapshotRoot,'controller.json'),JSON.stringify(state)+'\n');
   const oldSourceRoot=path.join(snapshotRoot,'old-source');
   for(const relative of MAINTENANCE_SOURCE_FILES){
     const oldContent=await readRegularFile(path.join(manifest.sourceDir,relative),{required:relative!=='deploy/updater/standalone-maintenance.mjs'});
     if(oldContent===null)continue;
     const backup=path.join(oldSourceRoot,relative);
-    await mkdir(path.dirname(backup),{recursive:true,mode:0o700});
-    await writeFile(backup,oldContent,{mode:0o600,flag:'wx'});
+    await ensureDirectoryTreeDurable(path.dirname(backup));
+    await atomicWrite(backup,oldContent);
   }
   assert.ok(await readFile(path.join(oldSourceRoot,'deploy/updater/standalone-updater.mjs'),'utf8'),'Existing updater entrypoint is required for rollback verification');
   const marker={
@@ -417,6 +511,7 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
     configPath:manifest.configPath,sourceDir:manifest.sourceDir,unitDir:manifest.unitDir,
     stateFile:config.stateFile,routeFile:config.routeFile,routeContent,quadletDir:config.quadletDirectory,
     originalPaused:state.paused,timerState:initialTimer,updaterServiceState:'inactive',proxyRestartRequired,runtimeChanged,
+    ...(credentialRotation?{probeCredentialsRotated:true}:{}),
   };
   await atomicWrite(markerPath,JSON.stringify(marker)+'\n');
   try{
@@ -425,6 +520,7 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
     await writeCandidates(files);
     run('systemctl',['--user','daemon-reload']);
     await checkFilesApplied(files);
+    if(credentialRotation)await assertProbeCredentialAccess(candidateHost,state,publicKey);
     for(const filename of MAINTENANCE_UNIT_FILES){
       const unitName=filename.replace(/\.example$/u,'');
       const target=path.join(manifest.unitDir,filename);
@@ -447,9 +543,9 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
     if(finalState.paused!==state.paused)await store.save(withPause(finalState,state.paused));
     assert.equal(await readFile(config.routeFile,'utf8'),routeContent,'Maintenance changed the active proxy route');
     await restoreTimerPolling(initialTimer);
-    await rm(markerPath,{force:true});
+    await clearBackupIntent(markerPath);
     await rm(snapshotRoot,{recursive:true,force:true}).catch(()=>{});
-    return {format:'codexia-updater-maintenance/v1',updatedFiles:files.length,recoveredInterruptedMaintenance:recovered};
+    return {format:'codexia-updater-maintenance/v1',updatedFiles:files.length,recoveredInterruptedMaintenance:recovered,...(credentialRotation?{probeCredentialsRotated:true}:{})};
   }catch(error){
     try{
       await restoreFiles(records);
@@ -470,9 +566,10 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
       const currentState=await loadControllerState(config.stateFile);
       assertStateExceptPause(state,currentState);
       await verifyOldCode(marker);
+      if(credentialRotation)await assertProbeCredentialAccess(oldHost,state,publicKey);
       if(currentState.paused!==state.paused)await store.save(withPause(currentState,state.paused));
       await restoreTimerPolling(initialTimer);
-      await rm(markerPath,{force:true});
+      await clearBackupIntent(markerPath);
       await rm(snapshotRoot,{recursive:true,force:true});
     }catch(rollbackError){
       const currentState=await loadControllerState(config.stateFile);

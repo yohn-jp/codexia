@@ -50,6 +50,8 @@ all:
         # codexia_preflight_password: supply via encrypted extra-vars (64 hex chars)
         # Initialize only after a verified offline backup and runtime review.
         codexia_maintenance_approved: false
+        # Explicitly rotate only GitHub read and paired Access probe files.
+        codexia_probe_credential_rotation_approved: false
         codexia_acceptance_approved: false
         # codexia_installed_release_file: /private/installed-release.json
         # codexia_bootstrap_candidate_file: /private/bootstrap-candidate.json

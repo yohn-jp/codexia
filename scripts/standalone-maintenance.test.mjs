@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig} from '../deploy/updater/standalone-maintenance.mjs';
-import {assertProxyRuntimeObservation} from '../deploy/updater/standalone-host.mjs';
+import {probeCredentialFiles,validateProbeCredential,assertProbeCredentialAccess,recoverProbeCredentialWriter,assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig} from '../deploy/updater/standalone-maintenance.mjs';
+import {assertProxyRuntimeObservation,PodmanStandaloneHost} from '../deploy/updater/standalone-host.mjs';
+import {mkdtemp,rm,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
 
 const runtime={
   format:'codexia-runtime/v1',profile:'core',modelCachePath:null,
@@ -156,4 +159,91 @@ test('maintenance requires the running proxy to match its private digest-pinned 
   assert.throws(()=>assertProxyRuntimeObservation(quadlet, {...container,HostConfig:{...container.HostConfig,SecurityOpt:['no-new-privileges:true','seccomp=unconfined']}},'active',imageInfo,proxyOptions),/security options/u);
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Config:{...container.Config,Entrypoint:['sh']}},'active',imageInfo,proxyOptions),/entrypoint/u);
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Config:{...container.Config,Env:[...proxyImageEnvironment,'NODE_OPTIONS=--require=/tmp/inject.js']}},'active',imageInfo,proxyOptions),/unexpected runtime environment/u);
+});
+
+
+test('probe rotation targets only three canonical private credential files and rejects unsafe values',()=>{
+  const targets=probeCredentialFiles(current,'/home/codexia/.config/codexia-updater/config.json');
+  assert.deepEqual(targets.map(x=>x.target),[current.githubTokenFile,current.accessClientIdFile,current.accessClientSecretFile]);
+  assert.throws(()=>probeCredentialFiles({...current,githubTokenFile:current.publicKeyFile},'/home/codexia/.config/codexia-updater/config.json'),/canonical private path/);
+  assert.throws(()=>probeCredentialFiles({...current,accessClientSecretFile:undefined},'/home/codexia/.config/codexia-updater/config.json'),/canonical private path/);
+  for(const bad of ['', 'with space','two\nlines','abc\r\n','x'.repeat(8193)])assert.throws(()=>validateProbeCredential(bad),/Invalid protected probe credential/);
+  validateProbeCredential('valid-token\n');
+});
+test('probe credential admission requires a fresh signed channel and compatible real frontend',async()=>{
+  const {generateKeyPairSync}=await import('node:crypto');
+  const {signUpdateChannel,verifyUpdateChannel}=await import('./update-channel.mjs');
+  const key=generateKeyPairSync('ed25519');
+  const pub=key.publicKey.export({type:'spki',format:'pem'});
+  const priv=key.privateKey.export({type:'pkcs8',format:'pem'});
+  const now=Date.now();
+  const installed={format:'codexia-update-release/v1',channel:'stable',state:'published',version:'0.1.0',sourceSha:'a'.repeat(40),image:release.image,platform:'linux/amd64',profile:'core',migrationFingerprint:'sha256:'+'c'.repeat(64),persistenceFormat:1,apiEpoch:1};
+  const signed=signUpdateChannel({format:'codexia-update-channel/v1',sequence:1,issuedAt:new Date(now-1000).toISOString(),expiresAt:new Date(now+60000).toISOString(),releases:[installed]},priv,now);
+  const state={installed,journal:{checkpoint:verifyUpdateChannel(signed,pub,null,now).checkpoint}};
+  const host={fetchChannel:async()=>signed,probeAccessCredentials:async release=>{assert.deepEqual(release,installed);}};
+  await assertProbeCredentialAccess(host,state,pub);
+  await assert.rejects(assertProbeCredentialAccess({...host,fetchChannel:async()=>{throw Error('secret-value');}},state,pub),error=>error.message==='Probe credentials did not verify the signed channel and scoped live identity access');
+  await assert.rejects(assertProbeCredentialAccess({...host,probeAccessCredentials:async()=>{throw Error('ACCESS_BOUNDARY');}},state,pub),/Probe credentials did not verify/);
+  await assert.rejects(assertProbeCredentialAccess(host,{...state,installed:{...installed,apiEpoch:2}},pub),/Probe credentials did not verify/);
+});
+
+test('VM probe credentials use the canonical live identity and denial paths',async()=>{
+ const dir=await mkdtemp(path.join(tmpdir(),'codexia-probe-'));
+ try{
+  const id=path.join(dir,'id'),secret=path.join(dir,'secret');
+  await writeFile(id,'test-client-id\n',{mode:0o600});await writeFile(secret,'test-client-secret\n',{mode:0o600});
+  const host=new PodmanStandaloneHost({...current,accessClientIdFile:id,accessClientSecretFile:secret});
+  const installed={...release,version:'0.1.0',apiEpoch:1};
+  const frontend={format:'codexia-frontend-identity/v1',sourceSha:'a'.repeat(40),version:'0.1.0',profile:'core',apiEpoch:1};
+  const backend={name:'codexia',version:'0.1.0',hosted:false,profile:'core',apiEpoch:1,browserAuth:'token'};
+  const calls=[];
+  function fetcher(failure){
+    return async(url,options)=>{
+      const endpoint=new URL(url).pathname,authenticated=Boolean(options.headers['CF-Access-Client-Id']);
+      assert.equal(options.redirect,'manual');assert.equal(options.cache,'no-store');
+      calls.push([endpoint,authenticated]);
+      if(authenticated){
+        assert.equal(options.headers['CF-Access-Client-Id'],'test-client-id');
+        assert.equal(options.headers['CF-Access-Client-Secret'],'test-client-secret');
+      }
+      if(!authenticated)return new Response(null,{status:failure==='anonymous'&&endpoint==='/api/version'?200:403});
+      if(endpoint==='/api/version')return failure==='backend-denied'?new Response(null,{status:403}):Response.json(failure==='wrong-backend'?{...backend,apiEpoch:2}:backend);
+      if(endpoint==='/desktop/update-identity.json')return Response.json(frontend);
+      return new Response(null,{status:failure==='overbroad'?200:403});
+    };
+  }
+  const observed=await host.probeAccessCredentials(installed,{fetchImpl:fetcher(null)});
+  assert.deepEqual(observed,{backend,deployed:frontend});
+  assert.deepEqual(calls.map(item=>JSON.stringify(item)).sort(),[
+    ['/api/version',true],['/desktop/update-identity.json',true],['/api/version',false],
+    ['/desktop/update-identity.json',false],['/',true],['/api/ready',true],
+  ].map(item=>JSON.stringify(item)).sort());
+  for(const failure of ['anonymous','backend-denied','wrong-backend','overbroad']){
+    await assert.rejects(host.probeAccessCredentials(installed,{fetchImpl:fetcher(failure)}),/Production deployment preflight failed/);
+  }
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('credential recovery restarts only the absent committed writer behind blocked admission',async()=>{
+ const installed={...release};
+ const state={installed,journal:{phase:'idle',active:{slot:'blue',image:installed.image}},lastError:null};
+ for(const kind of ['absent','present','present-with-stopped-foreign','foreign','stopped-foreign','foreign-preflight','source-drift','shadow-unit']){
+   let writers=['present','present-with-stopped-foreign'].includes(kind)?[{slot:'blue',image:installed.image}]:kind==='foreign'?[{slot:'green',image:installed.image}]:[];
+   const trace=[];
+   const host={runtime:current.runtime,
+     assertRuntimeSources:async()=>{},assertInitialLegacyAbsent:async()=>{},
+     assertNoPreflight:async()=>{if(kind==='foreign-preflight')throw Error('foreign preflight');},
+     verifyWriterUnits:async()=>{if(kind==='source-drift')throw Error('source drift');},
+     assertCommittedWriterUnitSource:async()=>{if(kind==='shadow-unit')throw Error('not a generated Quadlet');},
+     observe:async()=>({route:'blocked',writers}),
+     assertNoWriterContainers:async(allowedSlot)=>{
+       assert.equal(allowedSlot,writers.length?'blue':undefined);
+       if(['stopped-foreign','present-with-stopped-foreign'].includes(kind))throw Error('stopped foreign container');
+     },
+     startWriter:async(slot,r)=>{trace.push(slot);assert.equal(r,installed);writers=[{slot,image:r.image}];}
+   };
+   if(['absent','present'].includes(kind))await recoverProbeCredentialWriter({host,state});
+   else await assert.rejects(recoverProbeCredentialWriter({host,state}));
+   assert.deepEqual(trace,kind==='absent'?['blue']:[]);
+ }
 });

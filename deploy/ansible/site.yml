@@ -78,7 +78,7 @@
       ansible.builtin.assert:
         that:
           - ansible_facts.user_uid | int != 0
-          - codexia_stage in ['secrets', 'base', 'prepare', 'initialize', 'bootstrap-preflight', 'initialize-schema', 'initialize-fresh', 'enable', 'verify', 'maintain', 'backup', 'pause', 'resume', 'rollback', 'acceptance-update', 'acceptance-rollback']
+          - codexia_stage in ['secrets', 'base', 'prepare', 'initialize', 'bootstrap-preflight', 'initialize-schema', 'initialize-fresh', 'enable', 'verify', 'maintain', 'rotate-probe-credentials', 'backup', 'pause', 'resume', 'rollback', 'acceptance-update', 'acceptance-rollback']
           - codexia_stage in ['secrets', 'base'] or codexia_frontend_origin is match('^https://[a-z0-9.-]+(:[0-9]+)?$')
           - codexia_stage in ['secrets', 'base'] or codexia_proxy_image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
           - codexia_stage in ['secrets', 'base'] or codexia_browser_auth.mode in ['token', 'cloudflare-access']
@@ -192,7 +192,7 @@
     - name: Require an existing controller for initialized lifecycle operations
       ansible.builtin.assert:
         that: journal.stat.exists
-      when: codexia_stage in ['verify', 'maintain', 'enable', 'pause', 'resume', 'rollback', 'acceptance-update', 'acceptance-rollback']
+      when: codexia_stage in ['verify', 'maintain', 'rotate-probe-credentials', 'enable', 'pause', 'resume', 'rollback', 'acceptance-update', 'acceptance-rollback']
     - name: Verify preflight role and secret after initialization without changing them
       ansible.builtin.include_tasks: preflight.yml
       vars:
@@ -201,6 +201,9 @@
     - name: Maintain updater source, configuration and systemd units through the locked controller
       ansible.builtin.include_tasks: maintenance.yml
       when: codexia_stage == 'maintain' and journal.stat.exists and not ansible_check_mode
+    - name: Rotate only protected GitHub and Access probe credentials through locked maintenance
+      ansible.builtin.include_tasks: rotate-probe-credentials.yml
+      when: codexia_stage == 'rotate-probe-credentials' and journal.stat.exists
     - name: Verify reviewed inputs before resuming interrupted initialization
       ansible.builtin.include_tasks: verify-updater-inputs.yml
       when: journal.stat.exists and codexia_stage == 'initialize' and not ansible_check_mode
