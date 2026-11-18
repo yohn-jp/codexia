@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {mkdtemp,writeFile,readFile,rm,mkdir,readdir,symlink} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {browserAuthEnvironment,imageConfig,assertVersion,PodmanStandaloneHost,validateRuntimeContract,runtimeContainerArgs,runWithSensitiveInput,postgresAppPasswordChangeInput,assertRuntimeObservation,assertRuntimeUnit,assertModelCacheOutsideVolumes,postgresRotationRuntimeFingerprint,assertPostgresRotationRuntimeFingerprint} from '../deploy/updater/standalone-host.mjs';
+import {browserAuthEnvironment,imageConfig,assertVersion,PodmanStandaloneHost,validateRuntimeContract,runtimeContainerArgs,runWithSensitiveInput,postgresAppPasswordChangeInput,assertRuntimeObservation,assertRuntimeUnit,assertModelCacheOutsideVolumes,postgresRotationRuntimeFingerprint,assertPostgresRotationRuntimeFingerprint,normalizePostgresRotationNetworks} from '../deploy/updater/standalone-host.mjs';
 const origin='https://codexia.example.invalid';
 const access={mode:'cloudflare-access',issuer:'https://example.cloudflareaccess.com',audience:'a'.repeat(64),origin,ownerEmail:'owner@example.invalid'};
 const release={image:'ghcr.io/yohn-jp/codexia-backend@sha256:'+'b'.repeat(64),version:'0.1.0',profile:'full',apiEpoch:1};
@@ -426,13 +426,22 @@ test('database runtime ownership binds the reviewed storage, image, mount secret
  assert.throws(()=>assertPasswordRotationDatabaseRuntime({...args,networkId:'other'}));
 });
 
-test('PostgreSQL restart fingerprint reports changed component names without values',()=>{
- const baseline={Config:{Env:['PGDATA=/var/lib/postgresql/data'],Hostname:'<podman-generated>'},HostConfig:{ReadonlyRootfs:true},Networks:[{name:'codexia-data',NetworkID:'network-id'}]};
+test('PostgreSQL restart fingerprint reports changed network fields without values',()=>{
+ const baseline={Config:{Env:['PGDATA=/var/lib/postgresql/data'],Hostname:'<podman-generated>'},HostConfig:{ReadonlyRootfs:true},Networks:[{name:'codexia-data',NetworkID:'network-id',Aliases:['codexia-db','old-generated-id'],Links:[],DriverOpts:{}}]};
  const expected=postgresRotationRuntimeFingerprint(baseline);
  const snapshot={runtimeDigest:expected.digest,runtimeComponents:expected.components};
  assert.equal(assertPostgresRotationRuntimeFingerprint(snapshot,baseline),expected.digest);
- const changed={...baseline,Networks:[{name:'codexia-data',NetworkID:'replacement-network-id'}]};
- assert.throws(()=>assertPostgresRotationRuntimeFingerprint(snapshot,changed),/Database runtime ownership changed \(components: Networks\)/u);
+ const changed={...baseline,Networks:[{...baseline.Networks[0],Aliases:['codexia-db','new-generated-id']}]};
+ assert.throws(()=>assertPostgresRotationRuntimeFingerprint(snapshot,changed),/Networks\.codexia-data\.Aliases/u);
+});
+
+test('PostgreSQL rotation normalizes only Podman-generated network aliases',()=>{
+ const oldId='a'.repeat(64),newId='b'.repeat(64);
+ const aliases=id=>[{name:'codexia-data',NetworkID:'network-id',Aliases:['codexia-db',id,id.slice(0,12),'explicit-alias'],Links:[],DriverOpts:{}}];
+ const oldNetworks=normalizePostgresRotationNetworks(aliases(oldId),oldId,oldId.slice(0,12));
+ const newNetworks=normalizePostgresRotationNetworks(aliases(newId),newId,newId.slice(0,12));
+ assert.deepEqual(oldNetworks,newNetworks);
+ assert.deepEqual(oldNetworks[0].Aliases,['codexia-db','explicit-alias']);
 });
 
 test('database recovery checks on-disk identity before starting any stopped or failed unit',async()=>{

@@ -547,9 +547,21 @@ export function assertLegacyBackupIdentity({legacy,image,version},release,authEn
   }
 }
 function sha256(value){return createHash('sha256').update(value).digest('hex');}
+export function normalizePostgresRotationNetworks(networks,containerId,generatedHostname){
+  assert.ok(Array.isArray(networks),'PostgreSQL runtime networks are unobservable');
+  assert.match(containerId,/^[a-f0-9]{64}$/u,'PostgreSQL runtime container ID is invalid');
+  assert.match(generatedHostname,/^[a-f0-9]{12}$/u,'PostgreSQL runtime hostname is invalid');
+  return networks.map(network=>({...network,Aliases:[...(network.Aliases??[])].filter(alias=>alias!==containerId&&alias!==generatedHostname).sort()}));
+}
 export function postgresRotationRuntimeFingerprint(projection){
   assert.ok(projection&&typeof projection==='object'&&!Array.isArray(projection),'PostgreSQL runtime fingerprint projection is invalid');
   const components=Object.fromEntries(Object.entries(projection).map(([name,value])=>[name,sha256(JSON.stringify(value))]));
+  if(Array.isArray(projection.Networks))for(const network of projection.Networks){
+    assert.match(network?.name??'',/^[A-Za-z0-9_.-]+$/u,'PostgreSQL runtime network name is invalid');
+    for(const field of ['NetworkID','Aliases','Links','DriverOpts'])if(Object.hasOwn(network,field)){
+      components[`Networks.${network.name}.${field}`]=sha256(JSON.stringify(network[field]));
+    }
+  }
   return {digest:sha256(JSON.stringify(projection)),components};
 }
 export function assertPostgresRotationRuntimeFingerprint(snapshot,projection){
@@ -1570,6 +1582,7 @@ export class PodmanStandaloneHost{
       volumePath:snapshot.resources.volumes['codexia-postgres'].path,networkId:snapshot.resources.networks['codexia-data']});
     const secrets=await this.quadletSecretIdentities(snapshot.databaseQuadlet);
     const projection=containerRuntimeFingerprintProjection(db,secrets);
+    projection.Networks=normalizePostgresRotationNetworks(projection.Networks,db.Id,db.Config.Hostname);
     const mount=projection.SecretMounts.find(secret=>secret.name===appSecret);
     assert.ok(mount?.type==='mount'&&mount.target==='/run/secrets/app-password','Unexpected PostgreSQL app secret mount');
     mount.id='rotating';
