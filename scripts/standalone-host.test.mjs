@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {mkdtemp,writeFile,readFile,rm,mkdir,symlink} from 'node:fs/promises';
+import {mkdtemp,writeFile,readFile,rm,mkdir,readdir,symlink} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {browserAuthEnvironment,imageConfig,assertVersion,PodmanStandaloneHost,validateRuntimeContract,runtimeContainerArgs,runWithSensitiveInput,postgresAppPasswordChangeInput,assertRuntimeObservation,assertRuntimeUnit,assertModelCacheOutsideVolumes} from '../deploy/updater/standalone-host.mjs';
@@ -338,16 +338,19 @@ test('legacy admission binds the running image ID, version and exact auth settin
  }finally{process.env.PATH=previous;await rm(dir,{recursive:true,force:true});}
 });
 
-test('rotation meets the canonical secret, stdin-only SQL and immutable replacement boundaries',async()=>{
+test('rotation uses a protected input file for immutable secret replacement and stdin for SQL',async()=>{
  const {createHash}=await import('node:crypto');
  const host=Object.create(PodmanStandaloneHost.prototype);
  assert.equal(typeof host.replacePostgresAppSecret,'function');
  const directory=await mkdtemp(path.join(tmpdir(),'codexia-password-commands-'));
+ const snapshotDirectory=path.join(directory,'maintenance-snapshots','123e4567-e89b-42d3-a456-426614174000');
+ await mkdir(snapshotDirectory,{recursive:true,mode:0o700});
+ host.config={publicKeyFile:path.join(directory,'channel-public.pem')};
  const oldPath=process.env.PATH;
  const old='1'.repeat(64),next='2'.repeat(64)+'\n';
  const secretFile=path.join(directory,'secret');
  const digest=value=>createHash('sha256').update(value).digest('hex');
- const snapshot={originalSecretId:'first',previousDigest:digest(old),replacementDigest:digest(next),operationId:'operation'};
+ const snapshot={originalSecretId:'first',previousDigest:digest(old),replacementDigest:digest(next),operationId:'123e4567-e89b-42d3-a456-426614174000'};
  const secret=(id,value)=>({ID:id,Spec:{Name:'codexia-postgres-app-password',Labels:{}},SecretData:value});
  try{
   await writeFile(secretFile,JSON.stringify(secret('first',old)));
@@ -361,8 +364,9 @@ if(args[1]==='exists')process.exit(fs.existsSync(file)?0:1);
 if(args[1]==='inspect'){console.log('['+fs.readFileSync(file,'utf8')+']');process.exit(0);}
 if(args[1]==='rm'){fs.unlinkSync(file);process.exit(0);}
 if(args[1]==='create'){
+ if(args.at(-1)==='-'){console.error('Error: stdin data was not provided');process.exit(125);}
  const label=args[args.indexOf('--label')+1].split('=');
- fs.writeFileSync(file,JSON.stringify({ID:'second',Spec:{Name:args.at(-2),Labels:{[label[0]]:label[1]}},SecretData:fs.readFileSync(0,'utf8')}));
+ fs.writeFileSync(file,JSON.stringify({ID:'second',Spec:{Name:args.at(-2),Labels:{[label[0]]:label[1]}},SecretData:fs.readFileSync(args.at(-1),'utf8')}));
  process.exit(0);
 }
 process.exit(99);
@@ -370,8 +374,10 @@ process.exit(99);
   process.env.PATH=directory+path.delimiter+oldPath;
   await host.changePostgresAppPassword(next);
   assert.equal(await readFile(path.join(directory,'stdin'),'utf8'),postgresAppPasswordChangeInput(next));
+  await writeFile(path.join(snapshotDirectory,'postgres-app-password-input'),'partial',{mode:0o600});
   await host.replacePostgresAppSecret(next,snapshot);
   assert.equal(JSON.parse(await readFile(secretFile,'utf8')).SecretData,next);
+  assert.deepEqual(await readdir(snapshotDirectory),[],'Temporary secret input remained after Podman accepted it');
   await host.replacePostgresAppSecret(old,snapshot);
   assert.equal(JSON.parse(await readFile(secretFile,'utf8')).SecretData,old);
   await rm(secretFile);

@@ -393,6 +393,49 @@ function assertKnownRotationSecret(secret,snapshot){
     (secret.owner===snapshot.operationId&&[snapshot.previousDigest,snapshot.replacementDigest].includes(digest)),
     'Unrecognized canonical app secret prevents recovery');
 }
+async function prepareRotationSecretInput(config,snapshot,password){
+  assert.match(snapshot.operationId,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u,
+    'Rotation secret input operation identity is invalid');
+  const root=path.join(path.dirname(config.publicKeyFile),'maintenance-snapshots',snapshot.operationId);
+  const directory=await lstat(root);
+  assert.ok(directory.isDirectory()&&!directory.isSymbolicLink(),'Rotation secret input directory is not a private directory');
+  assert.equal(directory.mode&0o777,0o700,'Rotation secret input directory permissions drift');
+  if(typeof process.getuid==='function')assert.equal(directory.uid,process.getuid(),'Rotation secret input directory owner drift');
+  assert.equal(await realpath(root),path.resolve(root),'Rotation secret input directory cannot traverse a symlink');
+  assert.ok([snapshot.previousDigest,snapshot.replacementDigest].includes(sha256(password)),
+    'Rotation secret input is not bound to the recovery snapshot');
+  const filename=path.join(root,'postgres-app-password-input');
+  let info;
+  try{info=await lstat(filename);}catch(error){if(error.code!=='ENOENT')throw error;}
+  let handle;
+  if(info){
+    assert.ok(info.isFile()&&!info.isSymbolicLink(),'Unexpected existing rotation secret input');
+    assert.equal(info.mode&0o777,0o600,'Existing rotation secret input permissions drift');
+    if(typeof process.getuid==='function')assert.equal(info.uid,process.getuid(),'Existing rotation secret input owner drift');
+    // This fixed temporary path is never an authority for credentials. A
+    // power loss can leave a partial file, so overwrite it only after proving
+    // its private directory, owner, mode and inode.
+    handle=await open(filename,'r+');
+    const opened=await handle.stat();
+    assert.ok(opened.isFile()&&opened.dev===info.dev&&opened.ino===info.ino,'Rotation secret input changed while opening');
+    await handle.truncate(0);
+  }else handle=await open(filename,'wx',0o600);
+  try{await handle.writeFile(password);await handle.sync();}
+  finally{await handle.close();}
+  const written=await lstat(filename);
+  assert.ok(written.isFile()&&!written.isSymbolicLink()&&(written.mode&0o777)===0o600,
+    'Rotation secret input was not written as a protected regular file');
+  return filename;
+}
+async function removeRotationSecretInput(filename){
+  let info;
+  try{info=await lstat(filename);}catch(error){if(error.code==='ENOENT')return;throw error;}
+  assert.ok(info.isFile()&&!info.isSymbolicLink()&&(info.mode&0o777)===0o600,
+    'Refusing to remove a changed rotation secret input');
+  if(typeof process.getuid==='function')assert.equal(info.uid,process.getuid(),'Rotation secret input owner changed');
+  assert.equal(await realpath(path.dirname(filename)),path.dirname(filename),'Rotation secret input parent changed');
+  await unlink(filename);
+}
 export function assertPasswordRotationDbUnit({properties,sourcePath,runtimeDir,source,reviewed}){
   assert.equal(properties.LoadState,'loaded','Database service is not loaded');
   assert.equal(properties.NeedDaemonReload,'no','Database unit requires reload');
@@ -1565,7 +1608,9 @@ export class PodmanStandaloneHost{
     assertKnownRotationSecret(existing,snapshot);
     if(existing?.password!==target){
       if(existing)run('podman',['secret','rm',existing.id]);
-      runWithSensitiveInput('podman',['secret','create','--label',rotationLabel+'='+snapshot.operationId,appSecret,'-'],target);
+      const inputFile=await prepareRotationSecretInput(this.config,snapshot,target);
+      try{run('podman',['secret','create','--label',rotationLabel+'='+snapshot.operationId,appSecret,inputFile]);}
+      finally{await removeRotationSecretInput(inputFile);}
     }
     const after=readRotationSecret(appSecret);
     assertKnownRotationSecret(after,snapshot);
