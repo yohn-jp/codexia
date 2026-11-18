@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, open, readFile, rename, rm, unlink } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, realpath, rename, rm, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { advanceJournal, validateJournal } from './update-host-state.mjs';
 import { verifyUpdateChannel, selectUpdateCandidate } from './update-channel.mjs';
@@ -121,22 +121,60 @@ export async function clearBackupIntent(filename) {
   try { await parent.sync(); } finally { await parent.close(); }
 }
 
-export function validateLegacyBackupProof(value){
-  assert.deepEqual(Object.keys(value??{}).sort(),['artifactDirectory','checksumManifestSha256','format','release']);
-  assert.equal(value.format,'codexia-legacy-backup-proof/v1');
+function validateBackupProofIdentity(value){
   assert.ok(typeof value.artifactDirectory==='string'&&path.isAbsolute(value.artifactDirectory)&&!/[\r\n\0]/u.test(value.artifactDirectory),'Backup artifact directory is invalid');
   assert.match(path.basename(value.artifactDirectory),/^codexia-\d{8}T\d{6}Z-[a-f0-9-]{36}$/u,'Backup artifact name is invalid');
   assert.match(value.checksumManifestSha256,/^[a-f0-9]{64}$/u,'Backup manifest checksum is invalid');
   return {...value,release:validateUpdateRelease(value.release)};
 }
 
-export function assertMatchingCutoverBackup(sourceValue,restore,release,observedHash){
-  const source=validateLegacyBackupProof(sourceValue);
+export function validateLegacyBackupProof(value){
+  assert.deepEqual(Object.keys(value??{}).sort(),['artifactDirectory','checksumManifestSha256','format','release']);
+  assert.equal(value.format,'codexia-legacy-backup-proof/v1');
+  return validateBackupProofIdentity(value);
+}
+
+export function validateControllerBackupProof(value){
+  assert.deepEqual(Object.keys(value??{}).sort(),['artifactDirectory','checksumManifestSha256','databaseId','format','journalGeneration','release']);
+  assert.equal(value.format,'codexia-controller-backup-proof/v1');
+  assert.ok(Number.isSafeInteger(value.journalGeneration)&&value.journalGeneration>=0,'Invalid backup journal generation');
+  assert.match(value.databaseId,/^[1-9]\d{0,19}:[1-9]\d{0,9}$/u,'Invalid backup database identity');
+  return validateBackupProofIdentity(value);
+}
+
+export async function verifyBackupPublication(output,destination,host){
+  const prefix='Encrypted backup committed: ';
+  const lines=output.split('\n');
+  const digestLine=/^Published checksum manifest sha256: ([a-f0-9]{64})$/u.exec(lines[1]??'');
+  assert.ok(lines.length===2&&lines[0].startsWith(prefix)&&!/[\r\n]/u.test(lines[0])&&digestLine,'Backup did not return one committed artifact and publication digest');
+  const artifactDirectory=await realpath(lines[0].slice(prefix.length));
+  assert.equal(path.dirname(artifactDirectory),await realpath(destination),'Backup artifact is outside the approved destination');
+  assert.equal(await host.backupArtifactIdentity(artifactDirectory),digestLine[1],'Published backup changed before recording source evidence');
+  return {artifactDirectory,checksumManifestSha256:digestLine[1]};
+}
+
+function assertMatchingBackupArtifact(source,restore,observedHash){
   assert.deepEqual(Object.keys(restore??{}).sort(),['checksumManifestSha256','format']);
   assert.equal(restore.format,'codexia-restore-receipt/v1');
-  assert.deepEqual(source.release,validateUpdateRelease(release),'Backup was not taken for the selected legacy release');
   assert.equal(restore.checksumManifestSha256,source.checksumManifestSha256,'Restore receipt does not match the source backup');
   assert.equal(observedHash,source.checksumManifestSha256,'Current off-VM artifact differs from the verified backup');
+}
+
+export function assertMatchingCutoverBackup(sourceValue,restore,release,observedHash){
+  const source=validateLegacyBackupProof(sourceValue);
+  assert.deepEqual(source.release,validateUpdateRelease(release),'Backup was not taken for the selected legacy release');
+  assertMatchingBackupArtifact(source,restore,observedHash);
+  return source;
+}
+
+export function assertMatchingControllerBackup(sourceValue,restore,state,databaseId,observedHash){
+  const source=validateControllerBackupProof(sourceValue);
+  state=validateControllerState(state);
+  assert.ok(stable(state.journal)&&!state.initialActivationPending&&state.lastError===null,'Backup evidence requires a stable initialized controller');
+  assert.equal(source.journalGeneration,state.journal.generation,'Backup was taken for a different controller generation');
+  assert.deepEqual(source.release,state.installed,'Backup was taken for a different installed release');
+  assert.equal(source.databaseId,databaseId,'Backup was taken for a different database identity');
+  assertMatchingBackupArtifact(source,restore,observedHash);
   return source;
 }
 

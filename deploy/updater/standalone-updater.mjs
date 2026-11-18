@@ -1,16 +1,16 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, readFile, realpath } from 'node:fs/promises';
+import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { assertMatchingCutoverBackup, validateLegacyBackupProof, validateLegacyCutover, validateFreshSchemaProof, atomicWrite, clearBackupIntent, initialControllerState, loadBackupIntent, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
+import { assertMatchingControllerBackup, assertMatchingCutoverBackup, validateControllerBackupProof, verifyBackupPublication, validateLegacyBackupProof, validateLegacyCutover, validateFreshSchemaProof, atomicWrite, clearBackupIntent, initialControllerState, loadBackupIntent, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
 import { PodmanStandaloneHost } from './standalone-host.mjs';
 import { verifyUpdateChannel } from '../../scripts/update-channel.mjs';
 import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
 import { assertMaintenanceSnapshotVerifier, maintainStandaloneUpdater, recoverInterruptedMaintenance } from './standalone-maintenance.mjs';
 
 const [command,configPath,...arguments_]=process.argv.slice(2);
-if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|verify-bootstrap|verify-cutover-backup|cutover|recover-cutover|initialize-schema|init-fresh|init|recover-initial|boot|tick|status|verify|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
+if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|verify-bootstrap|verify-cutover-backup|verify-maintenance-backup|cutover|recover-cutover|initialize-schema|init-fresh|init|recover-initial|boot|tick|status|verify|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
 let config=JSON.parse(await readFile(configPath,'utf8'));
 assert.equal(config.format,'codexia-standalone-updater/v1');
 assert.ok(path.isAbsolute(config.stateFile)&&path.isAbsolute(config.publicKeyFile));
@@ -38,6 +38,7 @@ const store={
   clearBackupRecoveryIntent:()=>clearBackupIntent(backupRecoveryFile),
 };
 const legacyBackupProofFile=path.join(path.dirname(config.stateFile),'legacy-backup-proof.json');
+const controllerBackupProofFile=path.join(path.dirname(config.stateFile),'controller-backup-proof.json');
 async function readPrivateProof(filename,limit=65536){
   const metadata=await lstat(filename);
   assert.ok(metadata.isFile()&&!metadata.isSymbolicLink()&&(metadata.mode&0o777)===0o600&&metadata.size<=limit,'Backup evidence must be a private regular file');
@@ -93,25 +94,39 @@ if(command==='recover-cutover'||(command==='boot'&&pendingCutover)){
   if(state){
     assert.ok(!state.initialActivationPending,'Recover initial activation before backup');
     assert.equal(backupArguments.length,2,'Initialized backup usage: backup /absolute/config.json /absolute/remote/destination age1-recipient --approved');
+    const databaseId=await host.freshDatabaseIdentity();
     result=await controller.backup(state,{destination:backupArguments[0],recipient:backupArguments[1]});
+    assert.deepEqual(result.state.journal,state.journal,'Backup recovery changed the controller journal');
+    assert.deepEqual(result.state.installed,state.installed,'Backup recovery changed the installed release');
+    assert.equal(await host.freshDatabaseIdentity(),databaseId,'Database identity changed during backup');
+    const publication=await verifyBackupPublication(result.output,backupArguments[0],host);
+    const proof=validateControllerBackupProof({format:'codexia-controller-backup-proof/v1',release:state.installed,
+      journalGeneration:state.journal.generation,databaseId,...publication});
+    await atomicWrite(controllerBackupProofFile,JSON.stringify(proof)+'\n');
   }else{
     assert.equal(backupArguments.length,3,'Legacy backup usage: backup /absolute/config.json /absolute/signed-release.json /absolute/remote/destination age1-recipient --approved');
     assert.ok(path.isAbsolute(backupArguments[0]),'Explicit signed legacy release JSON is required before controller initialization');
     const release=validateUpdateRelease(JSON.parse(await readFile(backupArguments[0],'utf8')));
     result=await controller.backupLegacy(release,{destination:backupArguments[1],recipient:backupArguments[2]});
     // A successful locked backup AND identity-preserving recovery is required.
-    const prefix='Encrypted backup committed: ';
-    const lines=result.output.split('\n');
-    const digestLine=/^Published checksum manifest sha256: ([a-f0-9]{64})$/u.exec(lines[1]??'');
-    assert.ok(lines.length===2&&lines[0].startsWith(prefix)&&!/[\r\n]/u.test(lines[0])&&digestLine,'Backup did not return one committed artifact and publication digest');
-    const artifactDirectory=await realpath(lines[0].slice(prefix.length));
-    assert.equal(path.dirname(artifactDirectory),await realpath(backupArguments[1]),'Backup artifact is outside the approved destination');
-    assert.equal(await host.backupArtifactIdentity(artifactDirectory),digestLine[1],'Published backup changed before recording source evidence');
-    const proof=validateLegacyBackupProof({format:'codexia-legacy-backup-proof/v1',release,artifactDirectory,
-      checksumManifestSha256:digestLine[1]});
+    const publication=await verifyBackupPublication(result.output,backupArguments[1],host);
+    const proof=validateLegacyBackupProof({format:'codexia-legacy-backup-proof/v1',release,...publication});
     await atomicWrite(legacyBackupProofFile,JSON.stringify(proof)+'\n');
   }
   console.log(result.output);
+  process.exit(0);
+}else if(command==='verify-maintenance-backup'){
+  assert.equal(arguments_.length,1,'Provide the isolated restore receipt');
+  assert.ok(path.isAbsolute(arguments_[0]),'An absolute receipt path is required');
+  await controller.assertNoBackupIntent();
+  const state=await loadControllerState(config.stateFile);
+  const proof=validateControllerBackupProof(await readPrivateProof(controllerBackupProofFile));
+  const receipt=await readPrivateProof(arguments_[0]);
+  const databaseId=await host.freshDatabaseIdentity();
+  assertMatchingControllerBackup(proof,receipt,state,databaseId,await host.backupArtifactIdentity(proof.artifactDirectory));
+  await host.verifyWriterUnits(state);
+  await controller.assertServing(state,state.journal.active.slot,state.installed);
+  console.log(JSON.stringify({format:'codexia-controller-backup-verification/v1',verified:true,checksumManifestSha256:proof.checksumManifestSha256}));
   process.exit(0);
 }else if(command==='verify-cutover-backup'){
   assert.equal(arguments_.length,2,'Provide the selected legacy release and isolated restore receipt');

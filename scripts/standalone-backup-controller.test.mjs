@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { generateKeyPairSync } from 'node:crypto';
-import { chmod, lstat, mkdtemp, open, rm, symlink } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, open, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { atomicWrite, loadBackupIntent, StandaloneController, initialControllerState, validateBackupIntent } from './standalone-update-controller.mjs';
+import { assertMatchingControllerBackup, validateControllerBackupProof, verifyBackupPublication, atomicWrite, loadBackupIntent, StandaloneController, initialControllerState, validateBackupIntent } from './standalone-update-controller.mjs';
 import { PodmanStandaloneHost, assertLegacyApiStoppedState, assertLegacyBackupIdentity, assertLegacyBackupUnitIdentity, assertLegacyBackupTunnelUnitIdentity, containerRuntimeFingerprint, containerRuntimeFingerprintProjection, assertVersion } from '../deploy/updater/standalone-host.mjs';
 import { signUpdateChannel } from './update-channel.mjs';
 
@@ -20,6 +20,34 @@ test('failed legacy API unit is reset only after Podman proves the Quadlet conta
   assert.throws(() => assertLegacyApiStoppedState({ status: 3, stdout: 'failed\n' }, { State: { Running: false } }), /still has a Podman container/);
   assert.equal(assertLegacyApiStoppedState({ status: 3, stdout: 'inactive\n' }, null), false);
   assert.equal(assertLegacyApiStoppedState({ status: 4, stdout: 'unknown\n' }, null), false);
+});
+
+test('initialized backup evidence binds exact artifact, release, generation and database identity', async () => {
+  const root=await mkdtemp(path.join(tmpdir(),'codexia-backup-proof-'));
+  try{
+    const artifactDirectory=path.join(root,'codexia-20261117T000000Z-12345678-1234-1234-1234-123456789abc');
+    await mkdir(artifactDirectory);
+    const hash='d'.repeat(64);
+    const output='Encrypted backup committed: '+artifactDirectory+'\nPublished checksum manifest sha256: '+hash;
+    const host={backupArtifactIdentity:async directory=>{assert.equal(directory,artifactDirectory);return hash;}};
+    const publication=await verifyBackupPublication(output,root,host);
+    const state=initialControllerState(release,'blue',null);
+    const databaseId='123456789:12345';
+    const source={format:'codexia-controller-backup-proof/v1',release,journalGeneration:state.journal.generation,databaseId,...publication};
+    const receipt={format:'codexia-restore-receipt/v1',checksumManifestSha256:hash};
+    assert.deepEqual(validateControllerBackupProof(source),source);
+    assert.deepEqual(assertMatchingControllerBackup(source,receipt,state,databaseId,hash),source);
+    assert.throws(()=>assertMatchingControllerBackup(source,receipt,{...state,journal:{...state.journal,generation:1}},databaseId,hash),/different controller generation/);
+    assert.throws(()=>assertMatchingControllerBackup({...source,release:{...release,version:'1.2.4'}},receipt,state,databaseId,hash),/different installed release/);
+    assert.throws(()=>assertMatchingControllerBackup(source,receipt,state,'123456789:12346',hash),/different database identity/);
+    assert.throws(()=>assertMatchingControllerBackup(source,{...receipt,checksumManifestSha256:'e'.repeat(64)},state,databaseId,hash),/Restore receipt/);
+    assert.throws(()=>assertMatchingControllerBackup(source,receipt,state,databaseId,'e'.repeat(64)),/Current off-VM artifact/);
+    assert.throws(()=>assertMatchingControllerBackup(source,receipt,{...state,lastError:'error'},databaseId,hash),/stable initialized controller/);
+    assert.throws(()=>validateControllerBackupProof({...source,approval:true}));
+    await assert.rejects(verifyBackupPublication(output+'\nextra',root,host),/one committed artifact/);
+    await assert.rejects(verifyBackupPublication(output,artifactDirectory,host),/outside the approved destination/);
+    await assert.rejects(verifyBackupPublication(output,root,{backupArtifactIdentity:async()=>'e'.repeat(64)}),/Published backup changed/);
+  }finally{await rm(root,{recursive:true,force:true});}
 });
 
 function controllerBackupIntent(overrides = {}) {
