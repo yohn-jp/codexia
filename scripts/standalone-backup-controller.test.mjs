@@ -114,6 +114,7 @@ test('backup intent is durable, owner-private, and rejects symlinks or undeclare
 
 function fixture({ paused = false, timerActive = true, backupFailure = false, restoreFailure = false, destinationFailure = false } = {}) {
   let backupIntent = null;
+  let recoveryIntent = null;
   const host = {
     routeValue: 'blue',
     writers: [{ slot: 'blue', image: release.image }],
@@ -164,6 +165,9 @@ function fixture({ paused = false, timerActive = true, backupFailure = false, re
       async saveBackupIntent(value) { host.trace.push('intent-save'); backupIntent = structuredClone(value); },
       async loadBackupIntent() { return backupIntent && structuredClone(backupIntent); },
       async clearBackupIntent() { host.trace.push('intent-clear'); backupIntent = null; },
+      async saveBackupRecoveryIntent(value) { host.trace.push('recovery-intent-save'); recoveryIntent = structuredClone(value); },
+      async loadBackupRecoveryIntent() { return recoveryIntent && structuredClone(recoveryIntent); },
+      async clearBackupRecoveryIntent() { host.trace.push('recovery-intent-clear'); recoveryIntent = null; },
     },
     publicKey: null,
     observeMilliseconds: 0,
@@ -216,6 +220,37 @@ test('boot recovery resumes an interrupted controller backup from each persisted
     assert.equal(host.routeValue, 'blue', boundary.name);
     assert.equal(host.timerActive, true, boundary.name);
     assert.equal(await controller.store.loadBackupIntent(), null, boundary.name);
+  }
+});
+
+test('controller backup recovery retains durable evidence when primary or recovery unlink reports failure', async () => {
+  for (const failure of ['primary','recovery','primary-resave']) {
+    const { host, controller, state, persisted } = fixture();
+    const intent = controllerBackupIntent();
+    await controller.store.saveBackupIntent(intent);
+    const primaryClear = controller.store.clearBackupIntent;
+    const recoveryClear = controller.store.clearBackupRecoveryIntent;
+    const savePrimary = controller.store.saveBackupIntent;
+    if(failure==='recovery'){
+      controller.store.clearBackupRecoveryIntent=async()=>{await recoveryClear();throw Error('fsync failed after recovery unlink');};
+    }else{
+      controller.store.clearBackupIntent=async()=>{await primaryClear();throw Error('fsync failed after primary unlink');};
+      if(failure==='primary-resave')controller.store.saveBackupIntent=async()=>{throw Error('primary re-save failed');};
+    }
+    await assert.rejects(controller.recoverBackupIntent({...state,paused:true}), /fsync failed/);
+    assert.equal(host.routeValue,'blocked');
+    assert.equal(host.timerActive,false);
+    assert.equal(persisted().paused,true);
+    assert.deepEqual(await controller.loadBackupIntent(),intent,'At least one durable recovery record must survive');
+    controller.store.clearBackupIntent=primaryClear;
+    controller.store.clearBackupRecoveryIntent=recoveryClear;
+    controller.store.saveBackupIntent=savePrimary;
+    const recovered=await controller.recoverBackupIntent(persisted());
+    assert.equal(recovered.paused,false);
+    assert.equal(recovered.lastError,null);
+    assert.equal(host.routeValue,'blue');
+    assert.equal(host.timerActive,true);
+    assert.equal(await controller.loadBackupIntent(),null);
   }
 });
 
