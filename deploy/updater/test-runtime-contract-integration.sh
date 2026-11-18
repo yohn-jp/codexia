@@ -263,9 +263,9 @@ chmod 0600 "$QUADLET_DIR/codexia-db.container"
 sed -i "/^\[Service\]$/i Label=codexia.runtime-contract-test=$NONCE" "$QUADLET_DIR/codexia-db.container"
 if sudo test -e /etc/codexia/postgres || sudo test -L /etc/codexia/postgres; then die 'refusing existing PostgreSQL init source directory'; fi
 if ! sudo test -d /etc/codexia; then sudo install -d -m 0755 /etc/codexia; PG_IAC_DIR_CREATED=1; fi
-sudo install -d -m 0755 /etc/codexia/postgres
+sudo install -d -o "$UID_VALUE" -g root -m 0750 /etc/codexia/postgres
 PG_INIT_DIR_CREATED=1
-sudo install -o "$UID_VALUE" -g "$(id -gn)" -m 0600 "$REPO_ROOT/deploy/postgres/010-create-app-role.sh" /etc/codexia/postgres/010-create-app-role.sh
+sudo install -o "$UID_VALUE" -g root -m 0555 "$REPO_ROOT/deploy/postgres/010-create-app-role.sh" /etc/codexia/postgres/010-create-app-role.sh
 OWNED_UNITS=(
   codexia-slot-blue.service codexia-slot-green.service codexia-db.service
   codexia-api-proxy.service codexia-updater-boot.service codexia-updater.service codexia-updater.timer
