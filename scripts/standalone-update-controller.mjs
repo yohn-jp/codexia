@@ -22,7 +22,22 @@ export function validateControllerState(value) {
   assert.equal(typeof value.paused,'boolean');
   assert.ok(value.lastError===null||typeof value.lastError==='string');
   assert.ok(value.lastSuccessAt===null||typeof value.lastSuccessAt==='string');
-  return {format:value.format,journal,installed,pending,previous,failedImages:[...new Set(value.failedImages)],paused:value.paused,lastError:value.lastError,lastSuccessAt:value.lastSuccessAt};
+  const initialActivationPending=value.initialActivationPending;
+  if(initialActivationPending!==undefined){
+    assert.equal(initialActivationPending,true,'Invalid initial activation marker');
+    assert.match(value.initialActivationId,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u,'Initial activation requires a durable operation identity');
+    if(value.initialActivationFreshDatabaseId!==undefined)assert.match(value.initialActivationFreshDatabaseId,/^[1-9]\d{0,19}:[1-9]\d{0,9}$/u,'Invalid initial activation database identity');
+    assert.equal(journal.phase,'idle');
+    assert.ok(journal.checkpoint,'Initial activation requires an authenticated checkpoint');
+    assert.equal(previous,null);
+    assert.equal(pending,null);
+    assert.equal(value.paused,true,'Initial activation must remain paused');
+    assert.equal(value.lastSuccessAt,null);
+    assert.deepEqual(value.failedImages,[]);
+  }
+  return {format:value.format,journal,installed,pending,previous,failedImages:[...new Set(value.failedImages)],paused:value.paused,lastError:value.lastError,lastSuccessAt:value.lastSuccessAt,
+    ...(initialActivationPending===true?{initialActivationPending:true,initialActivationId:value.initialActivationId,
+      ...(value.initialActivationFreshDatabaseId!==undefined?{initialActivationFreshDatabaseId:value.initialActivationFreshDatabaseId}:{})}:{})};
 }
 
 export async function atomicWrite(filename, content) {
@@ -106,6 +121,60 @@ export async function clearBackupIntent(filename) {
   try { await parent.sync(); } finally { await parent.close(); }
 }
 
+export function validateLegacyBackupProof(value){
+  assert.deepEqual(Object.keys(value??{}).sort(),['artifactDirectory','checksumManifestSha256','format','release']);
+  assert.equal(value.format,'codexia-legacy-backup-proof/v1');
+  assert.ok(typeof value.artifactDirectory==='string'&&path.isAbsolute(value.artifactDirectory)&&!/[\r\n\0]/u.test(value.artifactDirectory),'Backup artifact directory is invalid');
+  assert.match(path.basename(value.artifactDirectory),/^codexia-\d{8}T\d{6}Z-[a-f0-9-]{36}$/u,'Backup artifact name is invalid');
+  assert.match(value.checksumManifestSha256,/^[a-f0-9]{64}$/u,'Backup manifest checksum is invalid');
+  return {...value,release:validateUpdateRelease(value.release)};
+}
+
+export function assertMatchingCutoverBackup(sourceValue,restore,release,observedHash){
+  const source=validateLegacyBackupProof(sourceValue);
+  assert.deepEqual(Object.keys(restore??{}).sort(),['checksumManifestSha256','format']);
+  assert.equal(restore.format,'codexia-restore-receipt/v1');
+  assert.deepEqual(source.release,validateUpdateRelease(release),'Backup was not taken for the selected legacy release');
+  assert.equal(restore.checksumManifestSha256,source.checksumManifestSha256,'Restore receipt does not match the source backup');
+  assert.equal(observedHash,source.checksumManifestSha256,'Current off-VM artifact differs from the verified backup');
+  return source;
+}
+
+export function validateFreshSchemaProof(value){
+  assert.deepEqual(Object.keys(value??{}).sort(),['databaseId','fingerprint','format','phase','release']);
+  assert.equal(value.format,'codexia-fresh-schema-proof/v2');
+  assert.ok(['initializing','complete'].includes(value.phase),'Invalid fresh schema proof phase');
+  const release=validateUpdateRelease(value.release);
+  assert.equal(value.fingerprint,release.migrationFingerprint,'Fresh schema proof fingerprint differs from release');
+  assert.match(value.databaseId,/^[1-9]\d{0,19}:[1-9]\d{0,9}$/u,'Invalid database identity');
+  return {...value,release};
+}
+export function switchLegacyTunnelSource(source){
+  assert.ok(typeof source==='string'&&source.length<=65536&&!source.includes('\0'),'Invalid legacy Tunnel source');
+  const lines=source.split('\n');
+  for(const [before,after] of [['Requires=codexia-api.service','Requires=codexia-api-proxy.service'],['After=network-online.target codexia-api.service','After=network-online.target codexia-api-proxy.service']]){
+    assert.equal(lines.filter(line=>line===before).length,1,'Tunnel is not in canonical legacy state');
+    assert.ok(!lines.includes(after),'Tunnel already contains proxy dependency');
+    lines[lines.indexOf(before)]=after;
+  }
+  return lines.join('\n');
+}
+export function validateLegacyCutover(value){
+  assert.deepEqual(Object.keys(value??{}).sort(),['apiSource','backupIntent','checkpoint','format','operationId','proofHash','slot','tunnelSource'].sort());
+  assert.equal(value.format,'codexia-legacy-cutover/v1');
+  const backupIntent=validateBackupIntent(value.backupIntent);
+  assert.equal(backupIntent.kind,'legacy');
+  assert.equal(backupIntent.timerWasActive,false,'Cutover requires stopped polling');
+  assert.equal(backupIntent.tunnelWasActive,true,'Legacy cutover requires the original serving Tunnel');
+  assert.ok(typeof value.apiSource==='string'&&value.apiSource.length>0&&value.apiSource.length<=65536&&!value.apiSource.includes('\0'));
+  switchLegacyTunnelSource(value.tunnelSource);
+  assert.match(value.operationId,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u);
+  assert.match(value.proofHash,/^[a-f0-9]{64}$/u);
+  initialControllerState(backupIntent.release,value.slot,value.checkpoint);
+  assert.ok(value.checkpoint,'Cutover requires an authenticated checkpoint');
+  return {...value,backupIntent};
+}
+
 export function initialControllerState(installed,slot,checkpoint) {
   return validateControllerState({format:'codexia-standalone-controller/v1',
     journal:{format:'codexia-updater-journal/v1',generation:0,phase:'idle',active:{slot,image:installed.image},candidate:null,checkpoint},
@@ -155,7 +224,7 @@ export class StandaloneController {
   // Pre-journal admission only. No writer, route, journal, timer, Tunnel or
   // database mutation is authorized by this result. The isolated read-only
   // candidate must become ready while the original legacy writer still serves.
-  async verifyInitialCandidate(legacyValue,candidateValue){
+  async verifyInitialCandidate(legacyValue,candidateValue,{owner,slot='blue'}={}){
     const legacy=validateUpdateRelease(legacyValue);
     const candidate=validateUpdateRelease(candidateValue);
     const sameImage=legacy.image===candidate.image;
@@ -178,9 +247,10 @@ export class StandaloneController {
     // fixture rather than treating its presence as permission to delete it.
     await this.host.assertNoPreflight();
     try{
-      await this.host.prepare('blue',candidate);
+      await this.host.prepare(slot,candidate,owner);
     }finally{
-      await this.host.stopPreflight('blue');
+      if(owner)await this.host.stopInitialPreflight(slot,owner);
+      else await this.host.stopPreflight(slot);
     }
     await this.host.assertNoPreflight();
     assert.equal(await this.host.legacyServiceActive(),true,'Legacy writer changed during initial candidate preflight');
@@ -191,6 +261,226 @@ export class StandaloneController {
     return {format:'codexia-bootstrap-preflight/v1',legacyImage:legacy.image,legacyApiEpoch:before.apiEpoch,
       candidateImage:candidate.image,candidateSourceSha:candidate.sourceSha,candidateApiEpoch:candidate.apiEpoch,
       activated:false};
+  }
+  /** Same-release legacy adoption, with a durable snapshot and the existing
+   * backup startup fence. All effects occur under the caller's host lock. */
+  async cutoverLegacy(value,slot,source,restore){
+    const release=validateUpdateRelease(value);
+    assert.equal(await this.store.loadState(),null,'Legacy cutover requires no controller journal');
+    assert.equal(await this.store.loadCutover(),null,'Recover interrupted cutover first');
+    await this.assertNoBackupIntent();
+    await this.host.removeBackupStartupFence();
+    assert.equal(await this.host.routeState(),'blocked');
+    assert.equal(await this.host.pollingTimerActive(),false);
+    assert.equal(await this.host.legacyServiceActive(),true);
+    assert.equal(await this.host.tunnelServiceActive(),true);
+    await this.host.assertNoSlotSources();
+    await this.host.assertNoPreflight();
+    const channel=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,null,this.now());
+    assert.ok(channel.payload.releases.some(r=>r.state==='published'&&JSON.stringify(r)===JSON.stringify(release)),'Legacy cutover release is not published');
+    await this.uiEpoch(release);
+    const proof=assertMatchingCutoverBackup(source,restore,release,await this.host.backupArtifactIdentity(source.artifactDirectory));
+    const autostart=await this.host.captureBackupAutostart();
+    const api=await this.host.assertLegacyBackupRelease(release);
+    const tunnel=await this.host.assertLegacyBackupTunnel();
+    const sources=await this.host.captureCutoverSources(release);
+    assert.equal(api.unitFingerprint,sources.apiFingerprint);
+    assert.equal(tunnel.unitFingerprint,sources.tunnelFingerprint);
+    const backupIntent=validateBackupIntent({format:'codexia-backup-intent/v3',kind:'legacy',release,
+      identity:{api,tunnel},...autostart,tunnelWasActive:true,timerWasActive:false,createdAt:new Date(this.now()).toISOString()});
+    let intent=validateLegacyCutover({format:'codexia-legacy-cutover/v1',backupIntent,
+      checkpoint:channel.checkpoint,slot,operationId:randomUUID(),proofHash:proof.checksumManifestSha256,
+      apiSource:sources.apiSource,tunnelSource:sources.tunnelSource});
+    await this.store.saveCutover(intent);
+    try{
+      await this.verifyInitialCandidate(release,release,{owner:{operationId:intent.operationId,release},slot});
+      // Recheck the exact off-VM evidence and identities immediately before
+      // recording the startup fence and stopping the writer.
+      assertMatchingCutoverBackup(proof,restore,release,await this.host.backupArtifactIdentity(proof.artifactDirectory));
+      await this.host.assertLegacyBackupRelease(release,{expectedIdentity:api});
+      await this.host.assertLegacyBackupTunnel({expectedIdentity:tunnel});
+      const fresh=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,intent.checkpoint,this.now());
+      assert.ok(fresh.payload.releases.some(item=>item.state==='published'&&JSON.stringify(item)===JSON.stringify(release)),'Legacy release changed before disruption');
+      await this.uiEpoch(release);
+      intent=validateLegacyCutover({...intent,checkpoint:fresh.checkpoint});
+      await this.store.saveCutover(intent);
+      await this.saveBackupRecoveryIntent(backupIntent);
+      await this.host.installBackupStartupFence();
+      await this.host.assertBackupAutostartGated(backupIntent);
+      await this.host.stopTunnel();
+      await this.host.stopLegacyWriter();
+      await this.host.applyCutoverSources(intent);
+      await this.host.startInitialProxy();
+      await this.host.assertInitialLegacyAbsent();
+      const state=await this.save({...initialControllerState(release,slot,intent.checkpoint),
+        initialActivationPending:true,initialActivationId:intent.operationId});
+      return await this.recoverLegacyCutover(state,intent);
+    }catch(error){
+      // The journal is the irreversible ownership boundary. Before it exists
+      // restore the old sources and writer; after it exists retain evidence
+      // and retry only the new controller. Never delete a journal to roll back.
+      const persisted=await this.store.loadState();
+      if(!persisted)await this.recoverLegacyCutover(null,intent);
+      else await this.host.route('blocked').catch(()=>undefined);
+      throw error;
+    }
+  }
+  async recoverLegacyCutover(state,value){
+    const intent=validateLegacyCutover(value);
+    const old=intent.backupIntent;
+    const release=old.release;
+    const observed=await this.loadBackupIntent();
+    if(observed)assert.deepEqual(observed,old,'Cutover and backup recovery identities disagree');
+    if(!state){
+      await this.host.route('blocked');
+      await this.host.stopInitialPreflight(intent.slot,{operationId:intent.operationId,release});
+      await this.host.assertNoSlotSources();
+      // Before the startup fence is written no writer disruption has
+      // occurred. Preserve a still-proven legacy service on admission failure.
+      if(!observed&&await this.host.legacyServiceActive({recoverStopped:true})&&await this.host.tunnelServiceActive()){
+        await this.host.assertLegacyBackupRelease(release,{expectedIdentity:old.identity.api});
+        await this.host.assertLegacyBackupTunnel({expectedIdentity:old.identity.tunnel});
+        await this.host.assertCutoverOriginalSources(intent);
+        await this.store.clearCutover();
+        return null;
+      }
+      await this.host.restoreCutoverSources(intent);
+      if(!observed)await this.saveBackupRecoveryIntent(old);
+      await this.recoverBackupIntent(null);
+      await this.store.clearCutover();
+      return null;
+    }
+    state=validateControllerState(state);
+    assert.deepEqual(state.installed,release,'Cutover journal release differs from durable intent');
+    assert.equal(state.journal.active.slot,intent.slot);
+    assert.equal(state.journal.generation,0);
+    assert.equal(state.paused,true);
+    assert.equal(state.journal.phase,'idle');
+    assert.equal(state.previous,null);
+    assert.equal(state.pending,null);
+    assert.deepEqual(state.failedImages,[]);
+    try{
+      await this.host.assertCutoverSources(intent);
+      if(state.initialActivationPending){
+      assert.equal(state.initialActivationId,intent.operationId);
+      assert.deepEqual(observed,old,'Pending activation lost its legacy startup fence');
+      await this.host.route('blocked');
+      await this.host.startInitialProxy();
+      state=await this.recoverInitialActivation(state,{legacyCutoverIntent:old});
+      if(state.initialActivationPending||state.lastError)throw Error(state.lastError??'Cutover activation remains pending');
+      }else{
+        // A retained cutover intent is explicit authority to resume a
+        // committed first writer with a blocked route, not generic drift.
+        assert.equal(state.lastError,null);
+        assert.ok(state.lastSuccessAt);
+        const obs=await this.host.observe();
+        assertObservation(obs,state.journal);
+        assert.ok(obs.route==='blocked'||obs.route===intent.slot,'Cutover handoff route drift');
+        await this.host.route('blocked');
+        const verified=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,state.journal.checkpoint,this.now());
+        assert.ok(verified.payload.releases.some(item=>item.state==='published'&&JSON.stringify(item)===JSON.stringify(release)),'Cutover release no longer published');
+        await this.uiEpoch(release);
+        await this.host.pullAndVerify(release);
+        await this.host.startInitialProxy();
+        const owner={operationId:intent.operationId,release};
+        await this.host.stopInitialPreflight(intent.slot,owner);
+        await this.host.assertNoPreflight();
+        if(obs.writers.length===0){
+          try{await this.host.prepare(intent.slot,release,owner);}
+          finally{await this.host.stopInitialPreflight(intent.slot,owner);}
+          await this.host.startWriter(intent.slot,release);
+        }
+        await this.host.verifyWriterUnits(state);
+        await this.host.assertCutoverSources(intent);
+        await this.host.route(intent.slot);
+        await this.assertServing(state,intent.slot,release);
+        state=await this.save({...state,journal:{...state.journal,checkpoint:verified.checkpoint}});
+      }
+      await this.assertServing(state,intent.slot,release);
+      await this.clearBackupRecoveryIntent();
+      await this.clearBackupIntent();
+      await this.host.removeBackupStartupFence();
+      await this.host.startCutoverTunnel(intent);
+      await this.store.clearCutover();
+      return state;
+    }catch(error){
+      await this.host.route('blocked').catch(()=>undefined);
+      throw error;
+    }
+  }
+  /** A separate fresh-only operation; it never starts a writer or creates a controller journal. */
+  async initializeFreshSchema(value){
+    const release=validateUpdateRelease(value);
+    await this.assertNoBackupIntent();
+    await this.host.assertFreshSchemaHost();
+    const channel=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,null,this.now());
+    assert.ok(channel.payload.releases.some(r=>r.state==='published'&&JSON.stringify(r)===JSON.stringify(release)),'Fresh schema release must be published in the signed channel');
+    await this.uiEpoch(release);
+    await this.host.pullAndVerify(release);
+    await this.host.assertFreshSchemaHost();
+    const databaseId=await this.host.freshDatabaseIdentity();
+    const observation=await this.host.inspectFreshSchema(release);
+    assert.equal(observation.fingerprint,release.migrationFingerprint,'Schema observation fingerprint mismatch');
+    let proof=await this.store.loadFreshSchema();
+    if(proof){
+      proof=validateFreshSchemaProof(proof);
+      assert.deepEqual(proof.release,release,'Fresh schema intent belongs to another release');
+      assert.equal(proof.databaseId,databaseId,'Fresh schema intent belongs to another database');
+      if(proof.phase==='complete')assert.equal(observation.pristine,false,'Completed fresh schema ledger is missing');
+    }else{
+      // An arbitrary existing exact ledger is not proof of fresh storage.
+      assert.equal(observation.pristine,true,'Existing database lacks fresh initialization provenance; use legacy adoption');
+      proof=validateFreshSchemaProof({format:'codexia-fresh-schema-proof/v2',phase:'initializing',release,databaseId,fingerprint:release.migrationFingerprint});
+      await this.store.saveFreshSchema(proof);
+    }
+    const result=await this.host.initializeFreshSchema(release);
+    assert.equal(result.fingerprint,release.migrationFingerprint,'Initialized schema fingerprint mismatch');
+    assert.equal(await this.host.freshDatabaseIdentity(),databaseId,'Database identity changed during fresh schema initialization');
+    await this.host.assertFreshSchemaHost();
+    await this.uiEpoch(release);
+    await this.store.saveFreshSchema({...proof,phase:'complete'});
+    return {format:'codexia-fresh-schema/v1',image:release.image,fingerprint:result.fingerprint,applied:result.applied,activated:false};
+  }
+  /** Fresh activation is distinct from legacy adoption. The caller has
+   * verified the durable schema receipt and owns the host-wide lock. */
+  async activateFresh(value,slot,existing=null){
+    const release=validateUpdateRelease(value);
+    assert.ok(['blue','green'].includes(slot),'Invalid initial slot');
+    await this.assertNoBackupIntent();
+    await this.host.assertInitialLegacyAbsent();
+    assert.equal(await this.host.pollingTimerActive(),false,'Fresh activation requires stopped polling');
+    await this.host.assertFreshTunnelInactive();
+    const proof=validateFreshSchemaProof(await this.store.loadFreshSchema());
+    assert.equal(proof.phase,'complete','Fresh activation requires completed schema proof');
+    assert.deepEqual(proof.release,release,'Fresh activation release differs from schema proof');
+    assert.equal(proof.databaseId,await this.host.freshDatabaseIdentity(),'Fresh activation database differs from schema proof');
+    if(existing){
+      existing=validateControllerState(existing);
+      assert.deepEqual(existing.installed,release,'Fresh activation release differs from durable journal');
+      assert.equal(existing.journal.active.slot,slot,'Fresh activation slot differs from durable journal');
+      assert.equal(existing.paused,true,'Fresh activation must remain paused');
+      if(existing.initialActivationPending){
+        assert.equal(existing.initialActivationFreshDatabaseId,proof.databaseId,'Pending fresh activation belongs to a different database or lifecycle');
+        await this.host.route('blocked');
+        await this.host.startInitialProxy();
+        return this.reconcile(existing,{boot:true});
+      }
+      assert.ok(['idle','committed'].includes(existing.journal.phase)&&existing.lastError===null,'Fresh activation journal is not settled');
+      await this.uiEpoch(release);
+      await this.assertServing(existing,slot,release);
+      return existing;
+    }
+    await this.host.assertFreshSchemaHost();
+    const channel=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,null,this.now());
+    assert.ok(channel.payload.releases.some(r=>r.state==='published'&&JSON.stringify(r)===JSON.stringify(release)),'Fresh activation release must be published in the signed channel');
+    await this.uiEpoch(release);
+    await this.host.pullAndVerify(release);
+    await this.host.startInitialProxy();
+    await this.host.assertFreshSchemaHost();
+    // No writer or preflight has started. A crash from here is covered by
+    // the same durable first-activation recovery path as legacy adoption.
+    const state=await this.save({...initialControllerState(release,slot,channel.checkpoint),initialActivationPending:true,initialActivationId:randomUUID(),initialActivationFreshDatabaseId:proof.databaseId});
+    return this.reconcile(state,{boot:true});
   }
   async assertServing(state,slot,release){
     const obs=await this.host.observe();
@@ -482,7 +772,69 @@ export class StandaloneController {
       return this.save({...state,paused:true,lastError});
     }
   }
+  // Only an explicitly persisted initial activation may recover a blocked
+  // route with an already-started writer. Ordinary committed topology drift
+  // is still rejected. Caller owns the host-wide lock.
+  async recoverInitialActivation(state,{legacyCutoverIntent=null}={}){
+    state=validateControllerState(state);
+    assert.equal(state.initialActivationPending,true);
+    const active=state.journal.active;
+    try{
+      if(legacyCutoverIntent)assert.deepEqual(await this.loadBackupIntent(),legacyCutoverIntent,'Cutover startup fence identity changed');
+      else await this.assertNoBackupIntent();
+      await this.host.assertInitialLegacyAbsent();
+      if(state.initialActivationFreshDatabaseId!==undefined){
+        assert.equal(legacyCutoverIntent,null,'Fresh and legacy activation identities conflict');
+        const proof=validateFreshSchemaProof(await this.store.loadFreshSchema());
+        assert.equal(proof.phase,'complete');
+        assert.deepEqual(proof.release,state.installed);
+        assert.equal(proof.databaseId,state.initialActivationFreshDatabaseId);
+        assert.equal(await this.host.freshDatabaseIdentity(),proof.databaseId,'Fresh activation database changed during interruption');
+        await this.host.assertFreshTunnelInactive();
+      }
+      assert.equal(await this.host.pollingTimerActive(),false,'Initial activation requires stopped polling');
+      const observed=await this.host.observe();
+      assertObservation(observed,state.journal);
+      assert.ok(observed.route==='blocked'||observed.route===active.slot,'Unexpected initial activation route');
+      // Close admission before any recovery effects; a crashed writer may
+      // already be running but has not yet earned durable serving proof.
+      await this.host.route('blocked');
+      const verified=verifyUpdateChannel(await this.host.fetchChannel(),this.publicKey,state.journal.checkpoint,this.now());
+      assert.ok(verified.payload.releases.some(release=>release.state==='published'&&JSON.stringify(release)===JSON.stringify(state.installed)),
+        'Initial release is absent or withdrawn from the fresh signed channel');
+      state=await this.save({...state,journal:{...state.journal,checkpoint:verified.checkpoint}});
+      await this.uiEpoch(state.installed);
+      await this.host.pullAndVerify(state.installed);
+      // A prior attempt may have left only its own read-only preflight.
+      const owner={operationId:state.initialActivationId,release:state.installed};
+      await this.host.stopInitialPreflight(active.slot,owner);
+      await this.host.assertNoPreflight();
+      if(observed.writers.length===0){
+        try{await this.host.prepare(active.slot,state.installed,owner);}
+        finally{await this.host.stopInitialPreflight(active.slot,owner);}
+        await this.host.assertNoPreflight();
+        await this.host.startWriter(active.slot,state.installed);
+      }
+      await this.host.assertInitialLegacyAbsent();
+      const after=await this.host.observe();
+      assertObservation(after,state.journal);
+      assert.ok(isOnlyWriter(after,active.slot,state.installed.image),'Initial writer is not exclusive');
+      await this.host.verifyWriterUnits(state);
+      await this.uiEpoch(state.installed);
+      await this.host.route(active.slot);
+      await this.assertServing(state,active.slot,state.installed);
+      const {initialActivationPending,initialActivationId,initialActivationFreshDatabaseId,...committed}=state;
+      return await this.save({...committed,lastError:null,lastSuccessAt:new Date(this.now()).toISOString()});
+    }catch(error){
+      await this.host.route('blocked').catch(()=>undefined);
+      return this.save({...state,paused:true,lastError:'Initial activation blocked: '+safeError(error)});
+    }
+  }
   async reconcile(state,{boot=false}={}){
+    if(state.initialActivationPending){
+      assert.ok(boot,'Initial activation must be recovered before ordinary lifecycle operations');
+      return this.recoverInitialActivation(state);
+    }
     if(!stable(state.journal))return this.restoreOld(state,'Interrupted update recovered from durable journal');
     const active=state.journal.active;
     try{

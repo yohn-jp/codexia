@@ -1,0 +1,59 @@
+---
+- name: Require explicit approval and the exact schema-initialized release
+  ansible.builtin.assert:
+    that:
+      - codexia_maintenance_approved | default(false) | bool
+      - codexia_installed_release_file is defined
+      - codexia_installed_release_file is string
+      - codexia_installed_release_file.startswith('/')
+  no_log: true
+- name: Verify the prepared runtime without replacing its sources
+  ansible.builtin.include_tasks: verify-updater-inputs.yml
+- name: Verify the canonical database runtime and effective read-only preflight grants
+  ansible.builtin.include_tasks: verify-base-db-container.yml
+- name: Verify preflight grants without mutating the database
+  ansible.builtin.include_tasks: preflight.yml
+  vars:
+    preflight_verify_only: true
+- name: Refuse drift in previously installed recovery units
+  ansible.builtin.include_tasks: verify-updater-units.yml
+  vars:
+    allow_missing_updater_units: true
+- name: Provision boot recovery before any durable first activation
+  ansible.builtin.include_tasks: install-units.yml
+  vars:
+    recovery_install_only: true
+- name: Stage the signed release privately
+  ansible.builtin.tempfile:
+    state: directory
+    path: "{{ config_dir }}"
+    prefix: fresh-activation-
+  register: fresh_activation_dir
+- name: Run the locked first activation without public handoff
+  block:
+    - name: Copy the selected release record
+      ansible.builtin.copy:
+        src: "{{ codexia_installed_release_file }}"
+        dest: "{{ fresh_activation_dir.path }}/release.json"
+        mode: '0600'
+      no_log: true
+    - name: Activate or recover exactly the fresh schema release
+      ansible.builtin.command:
+        argv: [sh, "{{ updater }}", init-fresh, "{{ config_path }}", "{{ fresh_activation_dir.path }}/release.json", --approved]
+      register: fresh_activation
+      changed_when: (fresh_activation.stdout | from_json).changed
+    - name: Require successful private activation without public handoff
+      ansible.builtin.assert:
+        that:
+          - (fresh_activation.stdout | from_json).format == 'codexia-fresh-activation/v1'
+          - (fresh_activation.stdout | from_json).activated
+          - not (fresh_activation.stdout | from_json).publicHandoff
+    - name: Install recovery units while leaving automatic polling disabled
+      ansible.builtin.include_tasks: install-units.yml
+    - name: Verify the resulting initialized private runtime
+      ansible.builtin.include_tasks: verify.yml
+  always:
+    - name: Remove the temporary release directory
+      ansible.builtin.file:
+        path: "{{ fresh_activation_dir.path }}"
+        state: absent

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {probeCredentialFiles,validateProbeCredential,assertProbeCredentialAccess,assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig} from '../deploy/updater/standalone-maintenance.mjs';
+import {probeCredentialFiles,validateProbeCredential,assertProbeCredentialAccess,recoverProbeCredentialWriter,assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig} from '../deploy/updater/standalone-maintenance.mjs';
 import {assertProxyRuntimeObservation,PodmanStandaloneHost} from '../deploy/updater/standalone-host.mjs';
 import {mkdtemp,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -222,4 +222,24 @@ test('VM probe credentials use the canonical live identity and denial paths',asy
     await assert.rejects(host.probeAccessCredentials(installed,{fetchImpl:fetcher(failure)}),/Production deployment preflight failed/);
   }
  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('credential recovery restarts only the absent committed writer behind blocked admission',async()=>{
+ const installed={...release};
+ const state={installed,journal:{phase:'idle',active:{slot:'blue',image:installed.image}},lastError:null};
+ for(const kind of ['absent','present','foreign','stopped-foreign','foreign-preflight','source-drift']){
+   let writers=kind==='present'?[{slot:'blue',image:installed.image}]:kind==='foreign'?[{slot:'green',image:installed.image}]:[];
+   const trace=[];
+   const host={runtime:current.runtime,
+     assertRuntimeSources:async()=>{},assertInitialLegacyAbsent:async()=>{},
+     assertNoPreflight:async()=>{if(kind==='foreign-preflight')throw Error('foreign preflight');},
+     verifyWriterUnits:async()=>{if(kind==='source-drift')throw Error('source drift');},
+     observe:async()=>({route:'blocked',writers}),
+     assertNoWriterContainers:async()=>{if(kind==='stopped-foreign')throw Error('stopped foreign container');},
+     startWriter:async(slot,r)=>{trace.push(slot);assert.equal(r,installed);writers=[{slot,image:r.image}];}
+   };
+   if(['absent','present'].includes(kind))await recoverProbeCredentialWriter({host,state});
+   else await assert.rejects(recoverProbeCredentialWriter({host,state}));
+   assert.deepEqual(trace,kind==='absent'?['blue']:[]);
+ }
 });

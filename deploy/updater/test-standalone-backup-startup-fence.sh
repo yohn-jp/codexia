@@ -389,3 +389,68 @@ node --input-type=module -e '
   await host.removeBackupStartupFence();
 ' "$repo_root" "$quadlet_dir" "$state_dir"
 printf '%s\n' 'Rootless Quadlet stop removal, interrupted startup gating, and pre-restart Tunnel drift rejection succeeded.'
+
+
+# Exercise the actual source adapter with the same isolated rootless units.
+# Only the canonical dependency pair is added; the fixture remains a sleep
+# container, not a real application release or production acceptance.
+systemctl --user reset-failed codexia-api.service codexia-tunnel.service || true
+node --input-type=module -e '
+  import assert from "node:assert/strict";
+  import {execFileSync,spawnSync} from "node:child_process";
+  import {readFile,unlink} from "node:fs/promises";
+  import path from "node:path";
+  import {pathToFileURL} from "node:url";
+  const [root,quadlet,state,fixtureImageWithTag]=process.argv.slice(1);
+  // Use the digest-only reference required by the signed release contract.
+  const fixtureImage=fixtureImageWithTag.replace(/:[^/:@]+(?=@sha256:)/u,"");
+  const {PodmanStandaloneHost}=await import(pathToFileURL(path.join(root,"deploy/updater/standalone-host.mjs")));
+  const {atomicWrite,switchLegacyTunnelSource,clearBackupIntent}=await import(pathToFileURL(path.join(root,"scripts/standalone-update-controller.mjs")));
+  const host=new PodmanStandaloneHost({routeFile:path.join(state,"route"),quadletDirectory:quadlet,githubTokenFile:path.join(state,"token"),
+    stateFile:path.join(state,"controller.json"),frontendIdentityUrl:"https://backup-test.invalid/desktop/update-identity.json",browserAuth:{mode:"token"}});
+  const apiPath=path.join(quadlet,"codexia-api.container"),tunnelPath=path.join(quadlet,"codexia-tunnel.container");
+  const apiSource=await readFile(apiPath,"utf8");
+  const tunnelSource=(await readFile(tunnelPath,"utf8")).replace("[Unit]\n","[Unit]\nRequires=codexia-api.service\nAfter=network-online.target codexia-api.service\n");
+  const intent={apiSource,tunnelSource};
+  const recovery=path.join(state,"backup-recovery.json");
+  await atomicWrite(tunnelPath,tunnelSource);
+  await atomicWrite(recovery,"fixture fence\n");
+  execFileSync("systemctl",["--user","daemon-reload"]);
+  await host.installBackupStartupFence();
+  // Simulate interruption after removal of the old API source but before
+  // replacing the Tunnel dependency pair.
+  await unlink(apiPath);
+  execFileSync("systemctl",["--user","daemon-reload"]);
+  await host.restoreCutoverSources(intent);
+  await host.assertCutoverOriginalSources(intent);
+  await host.installBackupStartupFence();
+  await host.applyCutoverSources(intent);
+  await host.assertCutoverSources(intent);
+  assert.equal(await readFile(tunnelPath,"utf8"),switchLegacyTunnelSource(tunnelSource));
+  await host.restoreCutoverSources(intent);
+  await host.installBackupStartupFence();
+  await host.assertCutoverOriginalSources(intent);
+  await clearBackupIntent(recovery);
+  await host.removeBackupStartupFence();
+
+  // Ownership and image checks must protect an unrelated container using
+  // the reserved name; the exact owned disposable container is removable.
+  const operationId="12345678-1234-4234-8234-123456789abc";
+  const preflight="codexia-preflight-blue";
+  const present=()=>spawnSync("podman",["container","exists",preflight]).status;
+  assert.equal(present(),1);
+  const create=label=>execFileSync("podman",["create","--name",preflight,"--label","io.codexia.initial-activation="+label,
+    "--network","none","--image-volume=ignore","--tmpfs","/var/lib/postgresql/data:rw","--entrypoint","/bin/sleep",fixtureImage,"300"]);
+  try{
+    create("foreign");
+    await assert.rejects(host.stopInitialPreflight("blue",{operationId,release:{image:fixtureImage}}),/ownership is unverified/);
+    assert.equal(present(),0);
+    execFileSync("podman",["rm",preflight]);
+    create(operationId);
+    await host.stopInitialPreflight("blue",{operationId,release:{image:fixtureImage}});
+    assert.equal(present(),1);
+  }finally{
+    if(present()===0)execFileSync("podman",["rm","--force",preflight]);
+  }
+' "$repo_root" "$quadlet_dir" "$state_dir" "$fixture_image"
+printf '%s\n' 'Verified actual locked cutover source recovery and initial preflight ownership fencing.'

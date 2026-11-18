@@ -13,6 +13,8 @@ on:
       - deploy/updater/test-standalone-maintenance-integration.mjs
       - deploy/updater/test-standalone-maintenance-preload.mjs
       - deploy/ansible/prepare.yml
+      - deploy/ansible/initialize-schema.yml
+      - deploy/ansible/initialize-fresh.yml
       - deploy/ansible/maintenance.yml
       - deploy/ansible/rotate-probe-credentials.yml
       - deploy/ansible/verify.yml
@@ -40,6 +42,8 @@ on:
       - deploy/updater/test-standalone-maintenance-integration.mjs
       - deploy/updater/test-standalone-maintenance-preload.mjs
       - deploy/ansible/prepare.yml
+      - deploy/ansible/initialize-schema.yml
+      - deploy/ansible/initialize-fresh.yml
       - deploy/ansible/maintenance.yml
       - deploy/ansible/rotate-probe-credentials.yml
       - deploy/ansible/verify.yml

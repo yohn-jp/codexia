@@ -150,6 +150,7 @@ set -euo pipefail
 [[ $# == 4 && "$1" == drill && -d "$2" && -f "$3" && "$4" == --approved ]]
 printf 'executed\n' >> "$2/drill-invoked"
 printf 'Isolated restore verified: database and history fingerprints match\n'
+printf 'Verified checksum manifest sha256: %064d\n' 0
 SH
 cat > "$tmp/unavailable-source.yml" <<'YAML'
 all:
@@ -167,11 +168,20 @@ restore_args=(
   -e "codexia_backup_directory=$tmp/recovery-backup"
   -e "codexia_recovery_identity_file=$tmp/recovery-key"
 )
+receipt_index=0
 for inventory in "$tmp/unavailable-source.yml" 'localhost,'; do
+  receipt_index=$((receipt_index+1))
+  receipt="$tmp/restore-receipt-$receipt_index.json"
   connection=()
   [[ "$inventory" != 'localhost,' ]] || connection=(-c local)
   ansible-playbook -i "$inventory" "${connection[@]}" "${restore_args[@]}" \
-    -e codexia_restore_drill_approved=true > "$tmp/restore-dispatch.log" 2>&1 || { cat "$tmp/restore-dispatch.log" >&2; exit 1; }
+    -e codexia_restore_drill_approved=true -e "codexia_restore_receipt_output_file=$receipt" > "$tmp/restore-dispatch.log" 2>&1 || { cat "$tmp/restore-dispatch.log" >&2; exit 1; }
+  [[ "$(stat -c %a "$receipt")" == 600 ]]
+  python3 - "$receipt" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    assert json.load(f) == {"format": "codexia-restore-receipt/v1", "checksumManifestSha256": "0"*64}
+PY
 done
 [[ "$(wc -l < "$tmp/recovery-backup/drill-invoked")" == 2 ]]
 for mode in unapproved check; do

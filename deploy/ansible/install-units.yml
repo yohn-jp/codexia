@@ -1,5 +1,5 @@
 ---
-- name: Install boot and poll units after successful initialization
+- name: Install reviewed boot and poll units
   ansible.builtin.copy:
     src: "{{ repo_root }}/deploy/updater/{{ item }}.example"
     dest: "{{ unit_dir }}/{{ item }}"
@@ -14,4 +14,4 @@
     scope: user
     daemon_reload: true
     enabled: true
-    state: started
+    state: "{{ omit if (recovery_install_only | default(false) | bool) else 'started' }}"

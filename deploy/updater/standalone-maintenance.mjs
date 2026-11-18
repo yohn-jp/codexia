@@ -110,6 +110,30 @@ export async function transitionRuntimeWriter({currentHost,targetHost,slot,relea
   try{await verify();}catch(error){await targetHost.route('blocked').catch(()=>undefined);throw error;}
 }
 
+/** Restore only the journal-owned writer after a credential-only interruption.
+ * A committed image needs no new release admission; never overwrite an unknown
+ * stopped container or discard an unrelated disposable preflight. */
+export async function recoverProbeCredentialWriter({host,state}){
+  assert.ok(['idle','committed'].includes(state.journal.phase)&&!state.initialActivationPending&&state.lastError===null,'Credential recovery requires a stable committed writer');
+  assert.ok(host.runtime,'Credential recovery requires the reviewed typed runtime');
+  const {slot,image}=state.journal.active;
+  assert.equal(image,state.installed.image,'Committed writer image differs from release');
+  await host.assertRuntimeSources();
+  await host.assertInitialLegacyAbsent();
+  await host.assertNoPreflight();
+  await host.verifyWriterUnits(state);
+  const observed=await host.observe();
+  assert.equal(observed.route,'blocked','Credential recovery requires blocked admission');
+  if(observed.writers.length===0){
+    await host.assertNoWriterContainers();
+    await host.startWriter(slot,state.installed);
+    await host.verifyWriterUnits(state);
+  }else assert.deepEqual(observed.writers,[{slot,image}],'Unexpected writer prevents credential recovery');
+  const after=await host.observe();
+  assert.equal(after.route,'blocked','Writer recovery changed the private route');
+  assert.deepEqual(after.writers,[{slot,image}],'Committed writer recovery is unverified');
+}
+
 export async function preflightMaintenanceRuntime({currentConfig,nextConfig,currentHost,candidateHost,currentController,candidateController,state,activeSlot}){
   const adoptingRuntime=currentConfig.runtime===undefined&&nextConfig.runtime!==undefined;
   const observedHost=adoptingRuntime?candidateHost:currentHost;
@@ -329,8 +353,10 @@ async function recoverInterrupted(config,store,markerPath,publicKey){
         currentHost:oldHost,targetHost:oldHost,slot:stateBefore.journal.active.slot,release:stateBefore.installed,state:stateBefore,
         verify:async()=>{await oldHost.verifyWriterUnits(stateBefore);await oldController.assertServing(stateBefore,stateBefore.journal.active.slot,stateBefore.installed);},
       });
-    }else if(marker.proxyRestartRequired)await oldHost.route(marker.routeContent.trim());
-    else await oldHost.route(marker.routeContent.trim());
+    }else{
+      if(marker.probeCredentialsRotated)await recoverProbeCredentialWriter({host:oldHost,state:stateBefore});
+      await oldHost.route(marker.routeContent.trim());
+    }
     await verifyOldCode(marker);
     if(marker.probeCredentialsRotated)await assertProbeCredentialAccess(oldHost,stateBefore,publicKey);
     const after=await loadControllerState(marker.stateFile);
@@ -343,6 +369,12 @@ async function recoverInterrupted(config,store,markerPath,publicKey){
   }catch(error){
     await blockRoute().catch(()=>undefined);
     await keepTimerStopped().catch(()=>undefined);
+    // A failure after restoring the prior pause flag must not leave an
+    // apparently enabled controller while the durable marker is retained.
+    try{
+      const state=await loadControllerState(config.stateFile);
+      if(!state.paused)await store.save(withPause(state,true));
+    }catch{}
     throw error;
   }
 }
@@ -431,6 +463,7 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
     // Never combine credential rotation with a source/runtime upgrade.
     assert.equal(fileURLToPath(import.meta.url),path.join(manifest.sourceDir,'deploy/updater/standalone-maintenance.mjs'),
       'Install the reviewed maintenance runtime before rotating credentials');
+    assert.ok(currentHost.runtime,'Credential rotation requires the reviewed typed runtime');
     const stagedConfig={...config};
     for(const entry of files){
       validateProbeCredential(entry.content);
@@ -458,14 +491,14 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
   const snapshotRoot=path.join(maintenanceDir,'snapshots',randomUUID());
   await mkdir(snapshotRoot,{recursive:true,mode:0o700});
   const records=await snapshotFiles(files.map(({target,allowMissing})=>({target,allowMissing})),snapshotRoot);
-  await writeFile(path.join(snapshotRoot,'controller.json'),JSON.stringify(state)+'\n',{mode:0o600,flag:'wx'});
+  await atomicWrite(path.join(snapshotRoot,'controller.json'),JSON.stringify(state)+'\n');
   const oldSourceRoot=path.join(snapshotRoot,'old-source');
   for(const relative of MAINTENANCE_SOURCE_FILES){
     const oldContent=await readRegularFile(path.join(manifest.sourceDir,relative),{required:relative!=='deploy/updater/standalone-maintenance.mjs'});
     if(oldContent===null)continue;
     const backup=path.join(oldSourceRoot,relative);
     await mkdir(path.dirname(backup),{recursive:true,mode:0o700});
-    await writeFile(backup,oldContent,{mode:0o600,flag:'wx'});
+    await atomicWrite(backup,oldContent);
   }
   assert.ok(await readFile(path.join(oldSourceRoot,'deploy/updater/standalone-updater.mjs'),'utf8'),'Existing updater entrypoint is required for rollback verification');
   const marker={

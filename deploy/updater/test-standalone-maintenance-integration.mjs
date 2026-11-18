@@ -399,9 +399,11 @@ export function installTestAdapters(hostClass = PodmanStandaloneHost) {
     } finally {
       for (const { filename, content } of restoredUnits.reverse()) await atomicWrite(filename, content);
     }
-    await validateSlot(this.config, this.runtime, state, expectedImage);
     const observed = await this.observe();
-    assert.deepEqual(observed.writers, [{ slot: state.journal.active.slot, image: state.installed.image }], 'Synthetic maintenance must retain exactly one active writer');
+    if(observed.writers.length){
+      assert.deepEqual(observed.writers, [{ slot: state.journal.active.slot, image: state.installed.image }], 'Synthetic maintenance must retain exactly one active writer');
+      await validateSlot(this.config, this.runtime, state, expectedImage);
+    }else assert.equal(observed.route,'blocked','Absent writer is only admissible during blocked recovery');
   };
 
   hostClass.prototype.convergeWriterUnits = async function convergeSyntheticWriterUnits(state) {
@@ -712,7 +714,7 @@ async function main() {
   const credentialEnvironment={...environment,CODEXIA_RUNTIME_MAINTENANCE_PROBE_KEY:probeKeyFile,
     CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY:'yes',
     NODE_OPTIONS:'--import='+pathToFileURL(path.join(repoRoot,'deploy/updater/test-standalone-maintenance-preload.mjs')).href};
-  const writerBefore=JSON.parse(run('podman',['inspect','--type','container',CONTAINER]))[0].Id;
+  let writerBefore=JSON.parse(run('podman',['inspect','--type','container',CONTAINER]))[0].Id;
   const checkCredentials=async(useNew)=>{
     for(const [filename,oldValue,newValue] of credentialFiles){
       assert.ok((await readFile(filename,'utf8'))===(useNew?newValue:oldValue)+'\n','Credential rollback or installation mismatch');
@@ -738,6 +740,21 @@ async function main() {
   const recoveredCredentials=spawnSync('sh',[path.join(SOURCE_ROOT,'deploy/updater/codexia-updater'),'boot',configPath],
     {encoding:'utf8',timeout:240000,env:credentialEnvironment});
   assert.equal(recoveredCredentials.status,0,'Credential interruption was not recovered by canonical boot: '+recoveredCredentials.stderr);
+  await checkCredentials(false);
+
+  // Reproduce the state after a VM/user-manager restart: the maintenance
+  // process was killed after the writes and the old slot no longer exists.
+  const rebootCredentials=runCredentialMaintenance('expect-interruption','crash');
+  assert.equal(rebootCredentials.signal,'SIGKILL');
+  assert.equal(await readFile(githubTokenFile,'utf8'),'fixture-new-github\n');
+  await new PodmanStandaloneHost(credentialConfig).stopWriter('blue');
+  assert.equal(spawnSync('podman',['container','exists',CONTAINER],{stdio:'ignore'}).status,1);
+  const recoveredAbsentWriter=spawnSync('sh',[path.join(SOURCE_ROOT,'deploy/updater/codexia-updater'),'boot',configPath],
+    {encoding:'utf8',timeout:240000,env:credentialEnvironment});
+  assert.equal(recoveredAbsentWriter.status,0,'Credential interruption with stopped writer failed boot recovery: '+recoveredAbsentWriter.stderr);
+  const restartedWriter=JSON.parse(run('podman',['inspect','--type','container',CONTAINER]))[0].Id;
+  assert.notEqual(restartedWriter,writerBefore,'Stopped writer was not recreated');
+  writerBefore=restartedWriter;
   await checkCredentials(false);
   const successfulCredentials=runCredentialMaintenance('expect-success');
   assert.equal(successfulCredentials.status,0,'Credential transaction failed: '+successfulCredentials.stderr);
