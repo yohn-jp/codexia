@@ -45,6 +45,12 @@ export function validateProbeCredential(content){
   assert.ok(typeof content==='string'&&Buffer.byteLength(content)<=8192&&/^[!-~]+(?:\n)?$/u.test(content),
     'Invalid protected probe credential');
 }
+export function validatePostgresAppPassword(content){
+  // Preserve a possible final LF exactly, but never include secret bytes in errors.
+  assert.ok(typeof content==='string'&&Buffer.byteLength(content)<=8192&&/^[a-fA-F0-9]{64}(?:\n)?$/u.test(content),
+    'Invalid protected app password');
+  return content;
+}
 export async function assertProbeCredentialAccess(host,state,publicKey){
   try{
     const verified=verifyUpdateChannel(await host.fetchChannel(),publicKey,state.journal.checkpoint);
@@ -55,6 +61,30 @@ export async function assertProbeCredentialAccess(host,state,publicKey){
   }
 }
 function plainObject(value){return value!==null&&typeof value==='object'&&!Array.isArray(value);}
+export function validateAppPasswordRotationManifest(manifest,manifestPath,serviceHome){
+  const keys=['appPasswordFile','candidateRoot','configPath','format','restoreReceiptFile','rotatePostgresAppPassword','sourceDir','unitDir'];
+  assert.ok(plainObject(manifest),'App-password maintenance manifest must be an object');
+  assert.deepEqual(Object.keys(manifest).sort(),keys,'Unexpected app-password maintenance manifest fields');
+  assert.equal(manifest.format,'codexia-updater-maintenance/v1');
+  assert.equal(manifest.rotatePostgresAppPassword,true,'App-password rotation must be explicitly selected');
+  for(const key of ['candidateRoot','configPath','sourceDir','unitDir','appPasswordFile','restoreReceiptFile']){
+    assert.ok(typeof manifest[key]==='string'&&path.isAbsolute(manifest[key])&&!/[\r\n\0]/u.test(manifest[key]),
+      'App-password maintenance paths must be absolute');
+  }
+  const candidateRoot=path.resolve(manifest.candidateRoot);
+  assert.equal(path.resolve(manifestPath),path.join(candidateRoot,'manifest.json'),'Maintenance manifest must be staged with its candidate');
+  assert.equal(path.resolve(manifest.appPasswordFile),path.join(candidateRoot,'credentials','postgres-app-password'),
+    'App-password candidate path is outside the fixed private staging location');
+  assert.equal(path.resolve(manifest.restoreReceiptFile),path.join(candidateRoot,'restore-receipt.json'),
+    'Restore receipt path is outside the fixed private staging location');
+  assert.ok(typeof serviceHome==='string'&&path.isAbsolute(serviceHome),'Service home must be absolute');
+  assert.equal(path.resolve(manifest.configPath),path.join(serviceHome,'.config','codexia-updater','config.json'),
+    'Maintenance may update only the canonical private configuration');
+  assert.equal(path.resolve(manifest.unitDir),path.join(serviceHome,'.config','systemd','user'),
+    'Maintenance unit directory is outside the service user configuration');
+  assert.equal(path.resolve(manifest.sourceDir),'/opt/codexia-updater','Maintenance source directory differs from the canonical installation');
+  return {appPasswordFile:manifest.appPasswordFile,restoreReceiptFile:manifest.restoreReceiptFile};
+}
 
 export function validateMaintenanceConfig(current,candidate){
   assert.ok(plainObject(current)&&plainObject(candidate),'Maintenance configuration must be an object');
@@ -445,7 +475,6 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
   assert.equal(await realpath(candidateRoot),candidateRoot,'Maintenance candidate root cannot traverse a symlink');
   assert.ok(candidateRoot.startsWith(path.join(maintenanceDir,'candidates')+path.sep),'Maintenance candidate must remain in its private staging directory');
   assert.equal(path.resolve(manifest.configPath),path.join(path.dirname(config.publicKeyFile),'config.json'),'Maintenance may update only the canonical private configuration');
-  const serviceHome=path.dirname(path.dirname(path.dirname(config.publicKeyFile)));
   assert.equal(path.resolve(manifest.unitDir),path.join(serviceHome,'.config','systemd','user'),'Maintenance unit directory is outside the service user configuration');
   assert.equal(path.resolve(manifest.sourceDir),'/opt/codexia-updater','Maintenance source directory differs from the canonical installation');
 

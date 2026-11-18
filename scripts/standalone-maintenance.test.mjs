@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {probeCredentialFiles,validateProbeCredential,assertProbeCredentialAccess,recoverProbeCredentialWriter,assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig} from '../deploy/updater/standalone-maintenance.mjs';
+import {probeCredentialFiles,validateProbeCredential,validatePostgresAppPassword,validateAppPasswordRotationManifest,assertProbeCredentialAccess,recoverProbeCredentialWriter,assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig} from '../deploy/updater/standalone-maintenance.mjs';
 import {assertProxyRuntimeObservation,PodmanStandaloneHost} from '../deploy/updater/standalone-host.mjs';
 import {mkdtemp,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -169,6 +169,28 @@ test('probe rotation targets only three canonical private credential files and r
   assert.throws(()=>probeCredentialFiles({...current,accessClientSecretFile:undefined},'/home/codexia/.config/codexia-updater/config.json'),/canonical private path/);
   for(const bad of ['', 'with space','two\nlines','abc\r\n','x'.repeat(8193)])assert.throws(()=>validateProbeCredential(bad),/Invalid protected probe credential/);
   validateProbeCredential('valid-token\n');
+});
+test('app-password rotation accepts only a fixed private candidate and matching receipt path',()=>{
+  const root='/home/codexia/.local/state/codexia-updater/maintenance/candidates/test';
+  const manifest={format:'codexia-updater-maintenance/v1',candidateRoot:root,
+    configPath:'/home/codexia/.config/codexia-updater/config.json',sourceDir:'/opt/codexia-updater',
+    unitDir:'/home/codexia/.config/systemd/user',rotatePostgresAppPassword:true,
+    appPasswordFile:root+'/credentials/postgres-app-password',restoreReceiptFile:root+'/restore-receipt.json'};
+  assert.deepEqual(validateAppPasswordRotationManifest(manifest,root+'/manifest.json','/home/codexia'),
+    {appPasswordFile:manifest.appPasswordFile,restoreReceiptFile:manifest.restoreReceiptFile});
+  assert.throws(()=>validateAppPasswordRotationManifest({...manifest,arbitraryTarget:'/etc/passwd'},root+'/manifest.json','/home/codexia'));
+  assert.throws(()=>validateAppPasswordRotationManifest({...manifest,appPasswordFile:'/tmp/password'},root+'/manifest.json','/home/codexia'));
+  assert.throws(()=>validateAppPasswordRotationManifest({...manifest,restoreReceiptFile:'/tmp/receipt.json'},root+'/manifest.json','/home/codexia'));
+  assert.throws(()=>validateAppPasswordRotationManifest(manifest,root+'/elsewhere.json','/home/codexia'));
+});
+test('app-password validation accepts exactly 32-byte hexadecimal values without echoing invalid input',()=>{
+  const password='a'.repeat(64);
+  assert.equal(validatePostgresAppPassword(password),password);
+  assert.equal(validatePostgresAppPassword(password+'\n'),password+'\n');
+  for(const candidate of ['short','g'.repeat(64),password+'\n\n','s'.repeat(8193)]){
+    assert.throws(()=>validatePostgresAppPassword(candidate),error=>
+      error instanceof Error&&error.message==='Invalid protected app password'&&!error.message.includes(candidate));
+  }
 });
 test('probe credential admission requires a fresh signed channel and compatible real frontend',async()=>{
   const {generateKeyPairSync}=await import('node:crypto');
