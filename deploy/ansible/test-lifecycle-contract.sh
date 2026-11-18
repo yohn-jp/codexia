@@ -107,6 +107,59 @@ run_case rollback-requires-failed-image-suppression rollback true true active fa
 run_case rollback-verification-preserves-failed-image rollback true true active fail-after-rollback '' false '' true
 run_case lifecycle-preserves-timer rollback true true active fail-after-rollback '' false inactive
 
+## Rotation must stop before inspecting or staging protected files without approval,
+## and check mode must never authorize a real password mutation.
+for mode in unapproved check-mode; do
+  log="$tmp/rotate-app-password-$mode.log"
+  if [[ "$mode" == unapproved ]]; then
+    if ansible-playbook -i localhost, -c local "$root/deploy/ansible/test-app-password-rotation-gate.yml" > "$log" 2>&1; then
+      cat "$log" >&2
+      echo 'App-password rotation unexpectedly passed without explicit approval' >&2
+      exit 1
+    fi
+    rg -Fq 'PostgreSQL app password rotation requires an initialized controller, verified backup and restore receipt, and explicit approval.' "$log"
+  else
+    if ansible-playbook --check -i localhost, -c local "$root/deploy/ansible/test-app-password-rotation-gate.yml" \
+      -e codexia_app_password_rotation_approved=true > "$log" 2>&1; then
+      cat "$log" >&2
+      echo 'App-password rotation unexpectedly passed in check mode' >&2
+      exit 1
+    fi
+    rg -Fq 'PostgreSQL app password rotation requires an initialized controller, verified backup and restore receipt, and explicit approval.' "$log"
+  fi
+done
+
+rotation_password='0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+rotation_password_file="$tmp/app-password"
+rotation_receipt_file="$tmp/restore-receipt.json"
+printf '%s\n' "$rotation_password" > "$rotation_password_file"
+printf '%s\n' '{"format":"codexia-restore-receipt/v1"}' > "$rotation_receipt_file"
+chmod 0600 "$rotation_password_file" "$rotation_receipt_file"
+CODEXIA_TEST_APP_PASSWORD_FILE="$rotation_password_file" CODEXIA_TEST_RESTORE_RECEIPT_FILE="$rotation_receipt_file" \
+  ansible-playbook -i localhost, -c local "$root/deploy/ansible/test-app-password-rotation.yml" > "$tmp/rotate-app-password-valid.log" 2>&1 || {
+    cat "$tmp/rotate-app-password-valid.log" >&2
+    echo 'Valid protected app-password inputs were rejected' >&2
+    exit 1
+  }
+chmod 0644 "$rotation_password_file"
+if CODEXIA_TEST_APP_PASSWORD_FILE="$rotation_password_file" CODEXIA_TEST_RESTORE_RECEIPT_FILE="$rotation_receipt_file" \
+  ansible-playbook -i localhost, -c local "$root/deploy/ansible/test-app-password-rotation.yml" > "$tmp/rotate-app-password-mode.log" 2>&1; then
+  cat "$tmp/rotate-app-password-mode.log" >&2
+  echo 'Unprotected app-password file was accepted' >&2
+  exit 1
+fi
+! grep -Fq "$rotation_password" "$tmp/rotate-app-password-mode.log"
+chmod 0600 "$rotation_password_file"
+mv "$rotation_receipt_file" "$tmp/restore-receipt-target.json"
+ln -s "$tmp/restore-receipt-target.json" "$rotation_receipt_file"
+if CODEXIA_TEST_APP_PASSWORD_FILE="$rotation_password_file" CODEXIA_TEST_RESTORE_RECEIPT_FILE="$rotation_receipt_file" \
+  ansible-playbook -i localhost, -c local "$root/deploy/ansible/test-app-password-rotation.yml" > "$tmp/rotate-app-password-symlink.log" 2>&1; then
+  cat "$tmp/rotate-app-password-symlink.log" >&2
+  echo 'Symlinked restore receipt was accepted' >&2
+  exit 1
+fi
+! grep -Fq "$rotation_password" "$tmp/rotate-app-password-symlink.log"
+
 ## Run the real site dispatcher with only the host-specific verification tasks stubbed.
 mkdir -p "$tmp/site" "$tmp/site-state"
 cp "$root/deploy/ansible/"{site,lifecycle,validate-runtime}.yml "$tmp/site/"
