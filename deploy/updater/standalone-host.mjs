@@ -1464,12 +1464,12 @@ export class PodmanStandaloneHost{
     if(owner){
       assert.deepEqual(owner.release,release,'Initial preflight release differs from operation owner');
       await this.stopInitialPreflight(slot,owner);
-    }else await this.stopPreflight(slot);
+    }else await this.stopPreflight(slot,release.image);
     // Only the preflight password is available; the real writer credential and shared volumes are absent.
     const auth=randomBytes(32).toString('hex');
     const runtimeArgs=this.runtime?runtimeContainerArgs(this.runtime):['--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=64m'];
     run('podman',['run','--detach','--name',preflight(slot),
-      ...(owner?['--label','io.codexia.initial-activation='+owner.operationId]:[]),'--network','codexia-data',
+      ...(owner?['--label','io.codexia.initial-activation='+owner.operationId]:['--label','io.codexia.preflight-image='+release.image]),'--network','codexia-data',
       '--read-only',...runtimeArgs,'--tmpfs','/data:rw,nosuid,nodev,noexec,size=128m,mode=1777',
       '--tmpfs','/history:rw,nosuid,nodev,noexec,size=64m,mode=1777','--cap-drop','all','--security-opt','no-new-privileges',
       '--secret','codexia-postgres-preflight-password,type=mount,target=/run/secrets/app-password',
@@ -1489,21 +1489,25 @@ export class PodmanStandaloneHost{
     assert.match(operationId,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u);
     const observed=inspect(preflight(slot));
     if(!observed)return;
-    assert.equal(observed.Config?.Labels?.['io.codexia.initial-activation'],operationId,'Initial preflight ownership is unverified');
-    assert.equal(observed.ImageName??observed.Config?.Image,release.image,'Initial preflight image drift');
-    assert.match(observed.Id,/^[a-f0-9]{64}$/u,'Initial preflight container ID is unobservable');
-    assert.ok(Array.isArray(observed.Mounts),'Initial preflight mounts are unobservable');
+    await this.removeOwnedPreflight(slot,observed,'io.codexia.initial-activation',operationId,release.image);
+  }
+  async stopPreflight(slot,expectedImage){
+    assert.match(expectedImage,/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u,'Preflight cleanup requires a journal-owned image');
+    const observed=inspect(preflight(slot));
+    if(!observed)return;
+    await this.removeOwnedPreflight(slot,observed,'io.codexia.preflight-image',expectedImage,expectedImage);
+  }
+  async removeOwnedPreflight(slot,observed,label,value,expectedImage){
+    assert.equal(observed.Config?.Labels?.[label],value,label==='io.codexia.initial-activation'?'Initial preflight ownership is unverified':'Preflight ownership is unverified');
+    assert.equal(observed.ImageName??observed.Config?.Image,expectedImage,'Preflight image drift');
+    assert.match(observed.Id,/^[a-f0-9]{64}$/u,'Preflight container ID is unobservable');
+    assert.ok(Array.isArray(observed.Mounts),'Preflight mounts are unobservable');
     assert.ok(observed.Mounts.every(mount=>mount.Type==='tmpfs'||(mount.Type==='bind'&&mount.RW===false&&
       this.runtime?.modelCachePath&&mount.Destination==='/models'&&mount.Source===this.runtime.modelCachePath)),
-      'Initial preflight contains an unexpected persistent mount');
-    // Remove the admitted container ID, not a name which could have been reused.
+      'Preflight contains an unexpected persistent mount');
+    // Remove only the admitted container ID. Do not remove attached volumes.
     run('podman',['rm','--force',observed.Id]);
-    assert.ok(!exists(preflight(slot)),'Initial preflight absence is unverified');
-  }
-  async stopPreflight(slot){
-    const container=preflight(slot);
-    if(exists(container))run('podman',['rm','--force','--volumes',container]);
-    if(exists(container))throw Error('Preflight still exists');
+    assert.ok(!exists(preflight(slot)),'Preflight absence is unverified');
   }
   async stopWriter(slot){
     const container=name(slot),unit=activeUnit(slot);
@@ -1524,11 +1528,13 @@ export class PodmanStandaloneHost{
   async startWriter(slot,release){
     validateUpdateRelease(release);
     const obs=await this.observe();assert.equal(obs.writers.length,0,'Refusing second writer');
+    await this.assertNoWriterContainers();
+    await this.assertNoPreflight();
     await mkdir(this.config.quadletDirectory,{recursive:true,mode:0o700});
     if(this.runtime)assert.equal(this.runtime.profile,release.profile,'Runtime contract release profile mismatch');
     await atomicWrite(path.join(this.config.quadletDirectory,name(slot)+'.container'),imageConfig(release,this.authEnvironment,this.runtime??undefined).replace('PLACEHOLDER',name(slot)));
     run('systemctl',['--user','daemon-reload']);
-    assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value',activeUnit(slot)]));
+    await this.assertCommittedWriterUnitSource(slot);
     run('systemctl',['--user','start',activeUnit(slot)],{timeout:120000});
     await this.waitReady(name(slot),release);
     const after=await this.observe();assert.deepEqual(after.writers,[{slot,image:release.image}]);
@@ -1564,6 +1570,7 @@ export class PodmanStandaloneHost{
     }
   }
   async probe(slot,release){
+    await this.assertNoWriterContainers(slot);
     await this.assertProxyRuntime();
     await this.waitReady(name(slot),release);
     const routed=JSON.parse(run('podman',['exec','codexia-api-proxy','node','--input-type=module','-e',proxyProbeCode],{timeout:10000}));

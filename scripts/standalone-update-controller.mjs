@@ -288,7 +288,7 @@ export class StandaloneController {
       await this.host.prepare(slot,candidate,owner);
     }finally{
       if(owner)await this.host.stopInitialPreflight(slot,owner);
-      else await this.host.stopPreflight(slot);
+      else await this.host.stopPreflight(slot,candidate.image);
     }
     await this.host.assertNoPreflight();
     assert.equal(await this.host.legacyServiceActive(),true,'Legacy writer changed during initial candidate preflight');
@@ -578,7 +578,7 @@ export class StandaloneController {
         if(observed.writers.length===0){
           await this.host.pullAndVerify(state.installed);
           await this.host.prepare(intent.slot,state.installed);
-          await this.host.stopPreflight(intent.slot);
+          await this.host.stopPreflight(intent.slot,state.installed.image);
           observed=await this.host.observe();
           assertObservation(observed,state.journal);
           assert.equal(observed.writers.length,0,'Unexpected writer appeared during backup recovery');
@@ -777,7 +777,7 @@ export class StandaloneController {
       const obs=await this.host.observe();
       assertObservation(obs,state.journal);
       // Always stop the isolated preflight, which cannot mutate canon.
-      if(candidate)await this.host.stopPreflight(candidate.slot);
+      if(candidate)await this.host.stopPreflight(candidate.slot,candidate.image);
       if(!isOnlyWriter(obs,old.slot,old.image)||obs.route!==old.slot){
         await this.host.route('blocked');
         if(candidate)await this.host.stopWriter(candidate.slot);
@@ -788,7 +788,7 @@ export class StandaloneController {
         if(!isOnlyWriter(fenced,old.slot,old.image)){
           await this.host.pullAndVerify(state.installed);
           await this.host.prepare(old.slot,state.installed);
-          await this.host.stopPreflight(old.slot);
+          await this.host.stopPreflight(old.slot,state.installed.image);
           await this.host.startWriter(old.slot,state.installed);
         }
         await this.host.route(old.slot);
@@ -882,7 +882,7 @@ export class StandaloneController {
         await this.host.route('blocked');
         await this.host.pullAndVerify(state.installed);
         await this.host.prepare(active.slot,state.installed);
-        await this.host.stopPreflight(active.slot);
+        await this.host.stopPreflight(active.slot,state.installed.image);
         await this.host.startWriter(active.slot,state.installed);
         await this.host.route(active.slot);
       }
@@ -928,7 +928,7 @@ export class StandaloneController {
       state=await this.transition(state,{to:'draining',proof:{oldAdmissionClosed:true}});
       await this.host.stopWriter(old.slot);
       let obs=await this.host.observe();assertObservation(obs,state.journal);assert.equal(obs.writers.length,0,'Old writer is not fenced');
-      await this.host.stopPreflight(slot);
+      await this.host.stopPreflight(slot,candidate.image);
       await this.host.startWriter(slot,candidate);
       obs=await this.host.observe();assertObservation(obs,state.journal);assert.ok(isOnlyWriter(obs,slot,candidate.image),'New writer not exclusive');
       await this.host.route(slot);
