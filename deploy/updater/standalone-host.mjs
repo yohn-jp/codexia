@@ -1227,8 +1227,9 @@ export class PodmanStandaloneHost{
     for(const field of ['version','sourceSha','platform','profile','migrationFingerprint','persistenceFormat','apiEpoch'])assert.equal(identity[field],release[field],'Artifact '+field+' mismatch');
     assert.equal(run('podman',[...isolated,'node',release.image,'--input-type=module','-e',fingerprintCode]),release.migrationFingerprint);
   }
-  async assertNoWriterContainers(){
-    for(const slot of ['blue','green'])assert.ok(!exists(name(slot)),'Unexpected stopped or running slot container prevents writer recovery');
+  async assertNoWriterContainers(allowedRunningSlot=null){
+    assert.ok(allowedRunningSlot===null||SLOT.test(allowedRunningSlot),'Invalid allowed writer slot');
+    for(const slot of ['blue','green'])if(slot!==allowedRunningSlot)assert.ok(!exists(name(slot)),'Unexpected stopped or running slot container prevents writer recovery');
   }
   async assertCommittedWriterUnitSource(slot){
     const unit=activeUnit(slot);

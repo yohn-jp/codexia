@@ -129,10 +129,14 @@ export async function recoverProbeCredentialWriter({host,state}){
     await host.assertNoWriterContainers();
     await host.startWriter(slot,state.installed);
     await host.verifyWriterUnits(state);
-  }else assert.deepEqual(observed.writers,[{slot,image}],'Unexpected writer prevents credential recovery');
+  }else{
+    assert.deepEqual(observed.writers,[{slot,image}],'Unexpected writer prevents credential recovery');
+    await host.assertNoWriterContainers(slot);
+  }
   const after=await host.observe();
   assert.equal(after.route,'blocked','Writer recovery changed the private route');
   assert.deepEqual(after.writers,[{slot,image}],'Committed writer recovery is unverified');
+  await host.assertNoWriterContainers(slot);
 }
 
 export async function preflightMaintenanceRuntime({currentConfig,nextConfig,currentHost,candidateHost,currentController,candidateController,state,activeSlot}){

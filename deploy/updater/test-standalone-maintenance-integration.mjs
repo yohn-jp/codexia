@@ -737,6 +737,23 @@ async function main() {
   assert.equal(crashedCredentials.signal,'SIGKILL','Credential interruption was not injected after writing the new values');
   assert.ok((await lstat(path.join(stateDir,'maintenance','in-progress.json'))).isFile());
   assert.equal(await readFile(githubTokenFile,'utf8'),'fixture-new-github\n');
+  // A stopped foreign slot must block recovery even while the committed writer is live.
+  const foreignName='codexia-slot-green';
+  const foreignId=run('podman',['create','--name',foreignName,expectedImage]);
+  try{
+    const refused=spawnSync('sh',[path.join(SOURCE_ROOT,'deploy/updater/codexia-updater'),'boot',configPath],
+      {encoding:'utf8',timeout:240000,env:credentialEnvironment});
+    assert.notEqual(refused.status,0,'Recovery accepted a stopped foreign slot alongside the committed writer');
+    assert.equal((await readFile(routeFile,'utf8')),'blocked\n');
+    assert.equal((await loadControllerState(path.join(stateDir,'controller.json'))).paused,true);
+    assert.ok((await lstat(path.join(stateDir,'maintenance','in-progress.json'))).isFile());
+    assert.equal(JSON.parse(run('podman',['inspect','--type','container',CONTAINER]))[0].Id,writerBefore,'Recovery restarted the committed writer');
+    const foreign=JSON.parse(run('podman',['inspect','--type','container',foreignName]))[0];
+    assert.equal(foreign.Id,foreignId);
+    assert.equal(foreign.State.Running,false);
+  }finally{
+    run('podman',['rm',foreignId]);
+  }
   const recoveredCredentials=spawnSync('sh',[path.join(SOURCE_ROOT,'deploy/updater/codexia-updater'),'boot',configPath],
     {encoding:'utf8',timeout:240000,env:credentialEnvironment});
   assert.equal(recoveredCredentials.status,0,'Credential interruption was not recovered by canonical boot: '+recoveredCredentials.stderr);
