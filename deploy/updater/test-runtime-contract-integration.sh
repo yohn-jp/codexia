@@ -35,8 +35,6 @@ CREATED_QUADLET_DIR=0
 CREATED_USER_UNIT_DIR=0
 CREATED_CONTAINERS_DIR=0
 CREATED_SYSTEMD_CONFIG_DIR=0
-PG_INIT_DIR_CREATED=0
-PG_IAC_DIR_CREATED=0
 declare -a OWNED_FILES=()
 declare -a OWNED_SECRETS=()
 declare -a OWNED_UNITS=()
@@ -104,11 +102,6 @@ cleanup() {
       rmdir -- "$MODEL_DIR" >/dev/null 2>&1 || true
     fi
     systemctl --user daemon-reload >/dev/null 2>&1 || true
-    if (( PG_INIT_DIR_CREATED )); then
-      sudo rm -f -- /etc/codexia/postgres/010-create-app-role.sh
-      sudo rmdir -- /etc/codexia/postgres 2>/dev/null || true
-      sudo rmdir -- /etc/codexia 2>/dev/null || true
-    fi
     (( CREATED_USER_UNIT_DIR == 0 )) || rmdir -- "$USER_UNIT_DIR" 2>/dev/null || true
     (( CREATED_QUADLET_DIR == 0 )) || rmdir -- "$QUADLET_DIR" 2>/dev/null || true
     (( CREATED_SYSTEMD_CONFIG_DIR == 0 )) || rmdir -- "$CONFIG_HOME/systemd" 2>/dev/null || true
@@ -134,7 +127,7 @@ trap 'exit 143' TERM
 [[ "$(uname -m)" == x86_64 ]] || die 'requires amd64/x86_64'
 virt="$(systemd-detect-virt --vm 2>/dev/null || true)"
 [[ -n "$virt" && "$virt" != none && "$virt" != container ]] || die 'requires a disposable VM'
-for command in buildah flock node od podman sha256sum sudo systemctl systemd-detect-virt; do need "$command"; done
+for command in buildah flock node od podman sha256sum systemctl systemd-detect-virt; do need "$command"; done
 (( $(node -p 'Number(process.versions.node.split(".")[0])') >= 22 )) || die 'requires Node.js >=22'
 [[ "$HOME" == /* && "$HOME" != *[[:space:]]* && "$CONFIG_HOME" == /* && "$CONFIG_HOME" != *[[:space:]]* ]] || die 'HOME/XDG_CONFIG_HOME must be absolute paths without whitespace'
 [[ -d "$CONFIG_HOME" && ! -L "$CONFIG_HOME" && "$(stat -c '%u' "$CONFIG_HOME")" == "$UID_VALUE" ]] || die 'XDG_CONFIG_HOME must be a real directory owned by the service user'
@@ -261,11 +254,11 @@ cp -- "$REPO_ROOT/deploy/quadlet/codexia-db.container" "$QUADLET_DIR/codexia-db.
 chmod 0600 "$QUADLET_DIR/codexia-db.container"
 [[ "$(grep -c '^\[Service\]$' "$QUADLET_DIR/codexia-db.container")" == 1 ]] || die 'canonical database Quadlet has an unexpected Service section'
 sed -i "/^\[Service\]$/i Label=codexia.runtime-contract-test=$NONCE" "$QUADLET_DIR/codexia-db.container"
-if sudo test -e /etc/codexia/postgres || sudo test -L /etc/codexia/postgres; then die 'refusing existing PostgreSQL init source directory'; fi
-if ! sudo test -d /etc/codexia; then sudo install -d -m 0755 /etc/codexia; PG_IAC_DIR_CREATED=1; fi
-sudo install -d -o "$UID_VALUE" -g root -m 0750 /etc/codexia/postgres
-PG_INIT_DIR_CREATED=1
-sudo install -o "$UID_VALUE" -g root -m 0555 "$REPO_ROOT/deploy/postgres/010-create-app-role.sh" /etc/codexia/postgres/010-create-app-role.sh
+[[ -d /etc/codexia && ! -L /etc/codexia && "$(stat -c '%u:%g:%a' /etc/codexia)" == '0:0:755' ]] || die 'root-provisioned PostgreSQL IAC fixture directory is absent or drifted'
+[[ -d /etc/codexia/postgres && ! -L /etc/codexia/postgres && "$(stat -c '%u:%g:%a' /etc/codexia/postgres)" == "$UID_VALUE:0:750" ]] || die 'root-provisioned PostgreSQL init directory is absent or drifted'
+[[ -f /etc/codexia/postgres/010-create-app-role.sh && ! -L /etc/codexia/postgres/010-create-app-role.sh ]] || die 'root-provisioned PostgreSQL init script is absent or drifted'
+[[ "$(stat -c '%u:%g:%a' /etc/codexia/postgres/010-create-app-role.sh)" == "$UID_VALUE:0:555" ]] || die 'PostgreSQL init script ownership or mode differs from canonical rootless runtime'
+cmp -s "$REPO_ROOT/deploy/postgres/010-create-app-role.sh" /etc/codexia/postgres/010-create-app-role.sh || die 'PostgreSQL init script differs from the canonical source'
 OWNED_UNITS=(
   codexia-slot-blue.service codexia-slot-green.service codexia-db.service
   codexia-api-proxy.service codexia-updater-boot.service codexia-updater.service codexia-updater.timer
