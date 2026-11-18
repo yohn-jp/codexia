@@ -16,7 +16,7 @@ import {
   type RevisionId,
   type SaveDocumentCommand,
 } from "@codexia/persistence-contracts";
-import { createPostgresPersistence, migratePostgresDatabase, packagedMigrationFingerprint, verifyPostgresSchema } from "./index.js";
+import { createPostgresPersistence, inspectFreshPostgresSchema, initializeFreshPostgresSchema, migratePostgresDatabase, packagedMigrationFingerprint, verifyPostgresSchema } from "./index.js";
 
 const connectionString = process.env.CODEXIA_TEST_DATABASE_URL;
 if (!connectionString) throw new Error("CODEXIA_TEST_DATABASE_URL is required for PostgreSQL integration tests");
@@ -72,6 +72,38 @@ before(async () => {
 after(async () => {
   await persistence.close();
   await directPool.end();
+});
+
+test("fresh schema initialization is transactional, repeatable and rejects untracked or partial schemas", async (t) => {
+  const db = "codexia_fresh_" + randomUUID().replaceAll("-", "");
+  await directPool.query(`CREATE DATABASE "${db}"`);
+  const target = new URL(connectionString);
+  target.pathname = "/" + db;
+  const pool = new Pool({ connectionString: target.toString() });
+  t.after(async () => {
+    await pool.end();
+    // Let PostgreSQL wait for the just-closed connections instead of forcibly
+    // terminating sockets that pg is still finishing asynchronously.
+    await directPool.query(`DROP DATABASE "${db}"`);
+  });
+  assert.deepEqual(await inspectFreshPostgresSchema(target.toString()),{pristine:true,fingerprint:await packagedMigrationFingerprint()});
+  await pool.query("CREATE TABLE public.untracked (value text)");
+  await assert.rejects(initializeFreshPostgresSchema(target.toString()), /untracked database objects/);
+  await assert.rejects(inspectFreshPostgresSchema(target.toString()), /untracked database objects/);
+  assert.equal((await pool.query("SELECT to_regclass('public.codexia_schema_migrations') AS ledger")).rows[0].ledger, null);
+  await pool.query("DROP TABLE public.untracked");
+  await pool.query('CREATE COLLATION public.untracked FROM "C"');
+  await assert.rejects(initializeFreshPostgresSchema(target.toString()), /untracked database objects/);
+  assert.equal((await pool.query("SELECT to_regclass('public.codexia_schema_migrations') AS ledger")).rows[0].ledger, null);
+  await pool.query("DROP COLLATION public.untracked");
+  const applied = await initializeFreshPostgresSchema(target.toString());
+  assert.ok(applied.length > 0);
+  assert.deepEqual(await initializeFreshPostgresSchema(target.toString()), []);
+  assert.deepEqual(await inspectFreshPostgresSchema(target.toString()),{pristine:false,fingerprint:await packagedMigrationFingerprint()});
+  assert.equal(await verifyPostgresSchema(target.toString()), await packagedMigrationFingerprint());
+  await pool.query("DELETE FROM public.codexia_schema_migrations WHERE version = (SELECT max(version) FROM public.codexia_schema_migrations)");
+  await assert.rejects(initializeFreshPostgresSchema(target.toString()), /Missing applied migration/);
+  assert.equal(Number((await pool.query("SELECT count(*) FROM public.codexia_schema_migrations")).rows[0].count), applied.length - 1);
 });
 
 test("the exact migration ledger can be verified with read-only database transactions", async () => {

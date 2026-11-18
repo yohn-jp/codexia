@@ -5,7 +5,7 @@ import { constants as fsConstants } from 'node:fs';
 import { access, lstat, mkdir, open, readFile, readlink, realpath, rmdir, stat, symlink, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { atomicWrite } from '../../scripts/standalone-update-controller.mjs';
+import { atomicWrite, switchLegacyTunnelSource } from '../../scripts/standalone-update-controller.mjs';
 import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
 
 const SLOT = /^(blue|green)$/u;
@@ -14,6 +14,7 @@ const preflight = slot => {name(slot);return 'codexia-preflight-'+slot;};
 const channelUrl='https://api.github.com/repos/yohn-jp/codexia/contents/stable-channel.json?ref=codexia-stable-channel';
 const modelCacheRoot='/var/cache/codexia/models';
 const fingerprintCode='import { packagedMigrationFingerprint } from "@codexia/api"; console.log(await packagedMigrationFingerprint());';
+const initializeSchemaCode=`import {readFileSync} from 'node:fs'; import {inspectFreshPostgresSchema,initializeFreshPostgresSchema,verifyPostgresSchema} from '@codexia/api'; const password=readFileSync('/run/secrets/app-password','utf8').replace(/\\n+$/u,''); if(!/^[a-fA-F0-9]+$/u.test(password))throw Error('Invalid database secret'); const url='postgres://codexia:'+password+'@codexia-db:5432/codexia'; if(process.argv[1]==='inspect'){console.log(JSON.stringify(await inspectFreshPostgresSchema(url)));}else{const applied=await initializeFreshPostgresSchema(url); console.log(JSON.stringify({applied,fingerprint:await verifyPostgresSchema(url)}));}`;
 const readyCode=`const health=await fetch("http://127.0.0.1:3000/health/ready",{signal:AbortSignal.timeout(5000)});if(!health.ok)process.exit(1);const version=await fetch("http://127.0.0.1:3000/api/version",{signal:AbortSignal.timeout(5000)});if(!version.ok)process.exit(1);console.log(JSON.stringify(await version.json()));`;
 const proxyProbeCode=`const r=await fetch("http://127.0.0.1:3000/api/version",{signal:AbortSignal.timeout(5000)});if(!r.ok)process.exit(1);console.log(JSON.stringify({slot:r.headers.get("x-codexia-upstream-slot"),version:await r.json()}));`;
 const authProbeCode=`import {readFileSync} from "node:fs";const token=readFileSync("/run/secrets/codexia-auth-token","utf8").trim();const r=await fetch("http://codexia-api-proxy:3000/api/v1/persistence/status",{headers:{Authorization:"Bearer "+token},signal:AbortSignal.timeout(5000)});if(!r.ok)process.exit(1);const body=await r.json();if(body.available!==true)process.exit(1);`;
@@ -1179,6 +1180,12 @@ export class PodmanStandaloneHost{
     }
     return (result.stdout??'').trim();
   }
+  async backupArtifactIdentity(directory){
+    const script=fileURLToPath(new URL('./standalone-backup.sh',import.meta.url));
+    const value=run('bash',[script,'validate-artifact',directory],{timeout:6*60*60*1000});
+    assert.match(value,/^[a-f0-9]{64}$/u,'Backup artifact checksum manifest identity is unobservable');
+    return value;
+  }
   async validateBackupDestination(destination){
     const script=fileURLToPath(new URL('./standalone-backup.sh',import.meta.url));
     const result=spawnSync('bash',[script,'validate-destination',destination],{
@@ -1209,6 +1216,143 @@ export class PodmanStandaloneHost{
     assert.equal(identity.format,'codexia-backend-identity/v1');
     for(const field of ['version','sourceSha','platform','profile','migrationFingerprint','persistenceFormat','apiEpoch'])assert.equal(identity[field],release[field],'Artifact '+field+' mismatch');
     assert.equal(run('podman',[...isolated,'node',release.image,'--input-type=module','-e',fingerprintCode]),release.migrationFingerprint);
+  }
+  async assertNoSlotSources(){
+    for(const slot of ['blue','green']){
+      const container=name(slot);
+      assert.ok(!exists(container),'Unexpected slot container prevents legacy cutover');
+      const filename=path.join(this.config.quadletDirectory,container+'.container');
+      const present=await lstat(filename).then(()=>true,error=>{if(error.code==='ENOENT')return false;throw error;});
+      assert.equal(present,false,'Unexpected slot source prevents legacy cutover');
+      assert.equal(run('systemctl',['--user','show','--property=LoadState','--value',activeUnit(slot)]),'not-found','Unexpected slot service prevents legacy cutover');
+    }
+  }
+  async captureCutoverSources(release){
+    const api=await this.legacyBackupUnitSnapshot(release);
+    const tunnel=await this.legacyBackupTunnelSnapshot();
+    switchLegacyTunnelSource(tunnel.source);
+    return {apiSource:api.source,tunnelSource:tunnel.source,apiFingerprint:api.unitFingerprint,tunnelFingerprint:tunnel.unitFingerprint};
+  }
+  async readCutoverSources(){
+    const apiPath=path.join(this.config.quadletDirectory,'codexia-api.container');
+    const tunnelPath=path.join(this.config.quadletDirectory,'codexia-tunnel.container');
+    const api=await regularPrivateText(apiPath).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
+    const tunnel=await regularPrivateText(tunnelPath);
+    return {apiPath,tunnelPath,api,tunnel};
+  }
+  async applyCutoverSources(intent){
+    const {apiPath,tunnelPath,api,tunnel}=await this.readCutoverSources();
+    assert.equal(api,intent.apiSource,'Legacy API source changed before cutover');
+    assert.equal(tunnel,intent.tunnelSource,'Legacy Tunnel source changed before cutover');
+    assert.equal(await this.legacyServiceActive({recoverStopped:true}),false);
+    assert.equal(await this.tunnelServiceActive(),false);
+    assert.ok(!exists('codexia-api'),'Legacy container remains after stopping its service');
+    await this.assertNoSlotSources();
+    await unlink(apiPath);
+    await syncDirectory(path.dirname(apiPath));
+    await atomicWrite(tunnelPath,switchLegacyTunnelSource(tunnel));
+    // The legacy API is gone; its drop-in must not create a phantom unit.
+    // Keep the Tunnel fence until private serving is proven.
+    await this.removeBackupStartupFenceFile(this.backupStartupFencePaths().api);
+    run('systemctl',['--user','daemon-reload']);
+    await this.assertCutoverSources(intent);
+  }
+  async assertCutoverOriginalSources(intent){
+    const {api,tunnel}=await this.readCutoverSources();
+    assert.equal(api,intent.apiSource,'Original API source drift');
+    assert.equal(tunnel,intent.tunnelSource,'Original Tunnel source drift');
+  }
+  async assertCutoverSources(intent){
+    const {api,tunnel}=await this.readCutoverSources();
+    assert.equal(api,null,'Legacy API source reappeared');
+    assert.equal(tunnel,switchLegacyTunnelSource(intent.tunnelSource),'Cutover Tunnel source drift');
+    await this.assertInitialLegacyAbsent();
+  }
+  async restoreCutoverSources(intent){
+    const {apiPath,tunnelPath,api,tunnel}=await this.readCutoverSources();
+    assert.ok(api===null||api===intent.apiSource,'Unknown API source prevents recovery');
+    assert.ok(tunnel===intent.tunnelSource||tunnel===switchLegacyTunnelSource(intent.tunnelSource),'Unknown Tunnel source prevents recovery');
+    await this.assertNoSlotSources();
+    if(tunnel!==intent.tunnelSource){
+      if(await this.tunnelServiceActive())await this.stopTunnel();
+      await atomicWrite(tunnelPath,intent.tunnelSource);
+    }
+    if(api===null)await atomicWrite(apiPath,intent.apiSource);
+    run('systemctl',['--user','daemon-reload']);
+  }
+  async startCutoverTunnel(intent){
+    await this.assertCutoverSources(intent);
+    const unit='codexia-tunnel.service';
+    assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value',unit]));
+    assert.equal(run('systemctl',['--user','show','--property=SourcePath','--value',unit]),path.join(this.config.quadletDirectory,'codexia-tunnel.container'));
+    run('systemctl',['--user','start',unit],{timeout:120000});
+    assert.equal(await this.tunnelServiceActive(),true);
+    const identity=await this.assertLegacyBackupTunnel();
+    assert.equal(identity.runtimeFingerprint,intent.backupIntent.identity.tunnel.runtimeFingerprint,'Tunnel runtime drift after private handoff');
+  }
+  async assertInitialLegacyAbsent(){
+    assert.ok(!exists('codexia-api'),'Initial activation refuses an existing legacy container');
+    const filename=path.join(this.config.quadletDirectory,'codexia-api.container');
+    const present=await lstat(filename).then(()=>true,error=>{if(error.code==='ENOENT')return false;throw error;});
+    assert.equal(present,false,'Initial activation refuses an existing legacy Quadlet');
+    assert.equal(run('systemctl',['--user','show','--property=LoadState','--value','codexia-api.service']),'not-found','Initial activation refuses a loaded legacy unit');
+  }
+  async assertFreshTunnelInactive(){
+    // A legacy-dependent Tunnel Quadlet may have failed dependency activation
+    // during boot. This is safe only with the legacy source absent, no
+    // container, an exact legacy dependency pair and no unit overrides.
+    const {tunnel,tunnelPath}=await this.readCutoverSources();
+    switchLegacyTunnelSource(tunnel);
+    assert.ok(!exists('codexia-tunnel'),'Fresh activation refuses an existing Tunnel container');
+    const unit='codexia-tunnel.service';
+    const properties=systemdProperties(run('systemctl',['--user','show','--property=LoadState,ActiveState,SourcePath,DropInPaths',unit]));
+    if(properties.LoadState==='not-found')return;
+    assert.equal(properties.LoadState,'loaded');
+    assert.equal(properties.SourcePath,tunnelPath,'Fresh Tunnel source drift');
+    assertRuntimeUnitDropIns(properties.DropInPaths??'');
+    assert.ok(['inactive','failed'].includes(properties.ActiveState),'Fresh activation must precede public Tunnel handoff');
+  }
+  async assertFreshSchemaHost(){
+    await this.assertInitialLegacyAbsent();
+    assert.equal(this.config.enabled,false,'Fresh schema initialization requires disabled polling');
+    assert.equal(await this.routeState(),'blocked','Fresh schema requires a blocked private route');
+    assert.equal(await this.pollingTimerActive(),false,'Fresh schema requires polling stopped');
+    await this.assertNoPreflight();
+    for(const container of [name('blue'),name('green'),'codexia-schema-initializer']){
+      assert.ok(!exists(container),'Fresh schema requires no existing writer or initializer container: '+container);
+    }
+    for(const container of [name('blue'),name('green')]){
+      const filename=path.join(this.config.quadletDirectory,container+'.container');
+      const present=await lstat(filename).then(()=>true,error=>{if(error.code==='ENOENT')return false;throw error;});
+      assert.equal(present,false,'Fresh schema refuses existing writer Quadlet: '+container);
+      assert.equal(run('systemctl',['--user','show','--property=LoadState','--value',container+'.service']),'not-found','Fresh schema refuses a loaded writer unit: '+container);
+    }
+    await this.assertFreshTunnelInactive();
+    assert.equal(await this.unitActive('codexia-db.service'),true,'Fresh schema requires the canonical database service');
+  }
+  async freshDatabaseIdentity(){
+    const identity=run('podman',['exec','codexia-db','sh','-ec',
+      'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "SELECT system_identifier::text || chr(58) || oid::text FROM pg_control_system(), pg_database WHERE datname=current_database()"']);
+    assert.match(identity,/^[1-9]\d{0,19}:[1-9]\d{0,9}$/u,'Canonical database identity is unobservable');
+    return identity;
+  }
+  async inspectFreshSchema(release){
+    const result=await this.initializeFreshSchema(release,{inspectOnly:true});
+    assert.equal(typeof result.pristine,'boolean','Fresh database observation is invalid');
+    return result;
+  }
+  async initializeFreshSchema(release,{inspectOnly=false}={}){
+    assert.equal(release.profile,this.runtime?.profile,'Fresh schema release profile differs from runtime contract');
+    // Run only the packaged migration authority, not the API entrypoint. No
+    // persistent manuscript/history mount, API auth credential or public port.
+    const result=JSON.parse(run('podman',['run','--rm','--name','codexia-schema-initializer','--network','codexia-data',
+      '--read-only','--image-volume=ignore','--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=64m',
+      '--cap-drop','all','--security-opt','no-new-privileges',
+      '--secret','codexia-postgres-app-password,type=mount,target=/run/secrets/app-password',
+      '--entrypoint','node',release.image,'--input-type=module','-e',initializeSchemaCode,inspectOnly?'inspect':'initialize'],{timeout:300000}));
+    if(inspectOnly)return result;
+    assert.ok(Array.isArray(result.applied)&&result.applied.every(item=>typeof item==='string'),'Invalid migration result');
+    return result;
   }
   async assertLegacyRelease(value,{allowUnadvertisedEpoch=false}={}){
     const release=validateUpdateRelease(value);
@@ -1291,13 +1435,17 @@ export class PodmanStandaloneHost{
       await delay(1000);
     }
   }
-  async prepare(slot,release){
+  async prepare(slot,release,owner){
     validateUpdateRelease(release);
-    await this.stopPreflight(slot);
+    if(owner){
+      assert.deepEqual(owner.release,release,'Initial preflight release differs from operation owner');
+      await this.stopInitialPreflight(slot,owner);
+    }else await this.stopPreflight(slot);
     // Only the preflight password is available; the real writer credential and shared volumes are absent.
     const auth=randomBytes(32).toString('hex');
     const runtimeArgs=this.runtime?runtimeContainerArgs(this.runtime):['--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=64m'];
-    run('podman',['run','--detach','--name',preflight(slot),'--network','codexia-data',
+    run('podman',['run','--detach','--name',preflight(slot),
+      ...(owner?['--label','io.codexia.initial-activation='+owner.operationId]:[]),'--network','codexia-data',
       '--read-only',...runtimeArgs,'--tmpfs','/data:rw,nosuid,nodev,noexec,size=128m,mode=1777',
       '--tmpfs','/history:rw,nosuid,nodev,noexec,size=64m,mode=1777','--cap-drop','all','--security-opt','no-new-privileges',
       '--secret','codexia-postgres-preflight-password,type=mount,target=/run/secrets/app-password',
@@ -1312,6 +1460,21 @@ export class PodmanStandaloneHost{
     const observed=inspect(preflight(slot));
     assert.ok(observed?.State.Running,'Preflight not running');
     assert.equal(observed.ImageName??observed.Config?.Image,release.image);
+  }
+  async stopInitialPreflight(slot,{operationId,release}){
+    assert.match(operationId,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u);
+    const observed=inspect(preflight(slot));
+    if(!observed)return;
+    assert.equal(observed.Config?.Labels?.['io.codexia.initial-activation'],operationId,'Initial preflight ownership is unverified');
+    assert.equal(observed.ImageName??observed.Config?.Image,release.image,'Initial preflight image drift');
+    assert.match(observed.Id,/^[a-f0-9]{64}$/u,'Initial preflight container ID is unobservable');
+    assert.ok(Array.isArray(observed.Mounts),'Initial preflight mounts are unobservable');
+    assert.ok(observed.Mounts.every(mount=>mount.Type==='tmpfs'||(mount.Type==='bind'&&mount.RW===false&&
+      this.runtime?.modelCachePath&&mount.Destination==='/models'&&mount.Source===this.runtime.modelCachePath)),
+      'Initial preflight contains an unexpected persistent mount');
+    // Remove the admitted container ID, not a name which could have been reused.
+    run('podman',['rm','--force',observed.Id]);
+    assert.ok(!exists(preflight(slot)),'Initial preflight absence is unverified');
   }
   async stopPreflight(slot){
     const container=preflight(slot);
@@ -1346,8 +1509,8 @@ export class PodmanStandaloneHost{
     await this.waitReady(name(slot),release);
     const after=await this.observe();assert.deepEqual(after.writers,[{slot,image:release.image}]);
   }
-  async probe(slot,release){
-    const proxyQuadlet=await readFile(path.join(this.config.quadletDirectory,'codexia-api-proxy.container'),'utf8');
+  async assertProxyRuntime(){
+    const proxyQuadlet=await regularPrivateText(path.join(this.config.quadletDirectory,'codexia-api-proxy.container'),{privateOnly:true});
     const proxyContainer=inspect('codexia-api-proxy');
     assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value','codexia-api-proxy.service']));
     const proxyUnitState=run('systemctl',['--user','show','--property=ActiveState','--value','codexia-api-proxy.service']);
@@ -1356,6 +1519,28 @@ export class PodmanStandaloneHost{
     const proxyImageInfo=JSON.parse(run('podman',['image','inspect',proxyImage]))[0];
     const capabilityStatus=await readRuntimeCapabilityStatus(proxyContainer,'Private proxy');
     assertProxyRuntimeObservation(proxyQuadlet,proxyContainer,proxyUnitState,proxyImageInfo,{home:path.resolve(path.dirname(this.config.stateFile),'../../..'),capabilityStatus});
+  }
+  async startInitialProxy(){
+    assert.equal(await this.routeState(),'blocked','Private proxy must start with admission blocked');
+    const filename=path.join(this.config.quadletDirectory,'codexia-api-proxy.container');
+    await regularPrivateText(filename,{privateOnly:true});
+    run('systemctl',['--user','daemon-reload']);
+    assertRuntimeUnitDropIns(run('systemctl',['--user','show','--property=DropInPaths','--value','codexia-api-proxy.service']));
+    assert.equal(run('systemctl',['--user','show','--property=SourcePath','--value','codexia-api-proxy.service']),filename,'Private proxy unit source drift');
+    run('systemctl',['--user','start','codexia-api-proxy.service'],{timeout:120000});
+    await this.assertProxyRuntime();
+    const deadline=Date.now()+15000;
+    for(;;){
+      try{
+        const status=run('podman',['exec','codexia-api-proxy','node','--input-type=module','-e',
+          'const r=await fetch("http://127.0.0.1:3000/api/version",{signal:AbortSignal.timeout(3000)});console.log(r.status);'],{timeout:5000});
+        assert.equal(status,'503','Blocked proxy unexpectedly admitted traffic');
+        break;
+      }catch(error){if(Date.now()>=deadline)throw error;await delay(250);}
+    }
+  }
+  async probe(slot,release){
+    await this.assertProxyRuntime();
     await this.waitReady(name(slot),release);
     const routed=JSON.parse(run('podman',['exec','codexia-api-proxy','node','--input-type=module','-e',proxyProbeCode],{timeout:10000}));
     assert.equal(routed.slot,slot);assertVersion(routed.version,release,this.authEnvironment.CODEXIA_BROWSER_AUTH);

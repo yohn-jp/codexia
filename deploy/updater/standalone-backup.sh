@@ -43,6 +43,16 @@ remote_directory(){
     if grep -Fxq "$address" <<< "$local_addresses"; then die 'Backup destination resolves to this VM'; fi
   done <<< "$remote_addresses"
 }
+# Identify the exact ciphertext set without interpreting filenames from the manifest.
+validate_artifact(){
+  local dir="$1" file
+  remote_directory "$dir"
+  for file in database.dump.age history.tar.age manifest.age SHA256SUMS; do
+    [[ -f "$dir/$file" && ! -L "$dir/$file" ]] || die 'Backup artifact contains a missing or unsafe file'
+  done
+  (cd "$dir" && sha256sum database.dump.age history.tar.age manifest.age | cmp - SHA256SUMS) || die 'Backup ciphertext checksum mismatch'
+  sha256sum "$dir/SHA256SUMS" | cut -d' ' -f1
+}
 case "$operation" in
   backup-locked)
     mkdir -p "$STATE_DIR"
@@ -58,6 +68,11 @@ case "$operation" in
     mkdir -p "$STATE_DIR"
     exec 9>"$lock_file"
     flock --exclusive --nonblock 9 || die 'Updater or backup already running'
+    ;;
+  validate-artifact)
+    [[ $# == 2 ]] || die 'Usage: validate-artifact /absolute/remote/backup'
+    validate_artifact "$2"
+    exit 0
     ;;
   validate-destination)
     [[ $# == 2 ]] || die 'Usage: validate-destination /absolute/remote/mount'
@@ -106,7 +121,7 @@ backup_artifact(){
   local destination="$1" recipient="$2"
   require_quiesced
   podman volume exists codexia-history || die 'History volume absent'
-  local stamp staging final db_hash history_hash
+  local stamp staging final db_hash history_hash artifact_hash
   stamp="$(date -u +%Y%m%dT%H%M%SZ)-$(cat /proc/sys/kernel/random/uuid)"
   staging="$destination/.codexia-$stamp.partial"; final="$destination/codexia-$stamp"
   mkdir "$staging"
@@ -122,12 +137,13 @@ backup_artifact(){
   [[ "$(history_fingerprint codexia-history)" == "$history_hash" ]] || die 'History changed during backup'
   printf 'codexia-backup/v1\n%s\n%s\n' "$db_hash" "$history_hash" | age -r "$recipient" -o "$staging/manifest.age"
   (cd "$staging"; sha256sum database.dump.age history.tar.age manifest.age > SHA256SUMS)
+  artifact_hash="$(sha256sum "$staging/SHA256SUMS" | cut -d' ' -f1)"
   sync -f "$staging"
   [[ ! -e "$final" ]] || die 'Backup already exists'
   mv -T -- "$staging" "$final"
   sync -f "$destination"
   trap - EXIT
-  printf 'Encrypted backup committed: %s\n' "$final"
+  printf 'Encrypted backup committed: %s\nPublished checksum manifest sha256: %s\n' "$final" "$artifact_hash"
 }
 assert_restore_resource_absent(){
   local kind="$1" resource="$2" status=0
@@ -150,7 +166,7 @@ case "${1:-}" in
     [[ "$identity_owner" == "$(id -u)" ]] || die 'Recovery identity must be owned by the current recovery user'
     dir="$(realpath -- "$2")"
     # Validate fixed ciphertext names, never execute filenames from the checksum file.
-    (cd "$dir"; sha256sum database.dump.age history.tar.age manifest.age | cmp - SHA256SUMS)
+    artifact_hash="$(validate_artifact "$dir")"
     manifest="$(age -d -i "$3" "$dir/manifest.age")"
     mapfile -t fields <<< "$manifest"
     [[ "${#fields[@]}" == 3 && "${fields[0]}" == codexia-backup/v1 && "${fields[1]}" =~ ^[0-9a-f]{64}$ && "${fields[2]}" =~ ^[0-9a-f]{64}$ ]] || die 'Invalid decrypted backup manifest'
@@ -242,7 +258,9 @@ case "${1:-}" in
     [[ "$(history_fingerprint "$history")" == "${fields[2]}" ]] || die 'Restored history fingerprint mismatch'
     cleanup_restore_resources
     trap - EXIT
+    [[ "$(validate_artifact "$dir")" == "$artifact_hash" ]] || die 'Backup artifact changed during the restore drill'
     printf 'Isolated restore verified: database and history fingerprints match\n'
+    printf 'Verified checksum manifest sha256: %s\n' "$artifact_hash"
     ;;
   *) die 'Use backup-locked or the explicitly approved drill';;
 esac

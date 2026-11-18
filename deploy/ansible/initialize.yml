@@ -4,64 +4,51 @@
     that:
       - codexia_maintenance_approved | default(false) | bool
       - codexia_installed_release_file is defined
+      - codexia_restore_receipt_file is defined
+      - codexia_restore_receipt_file is string
+      - codexia_restore_receipt_file is match('^/[^\r\n]+$')
     fail_msg: Verify the offline backup and legacy runtime settings before approving maintenance.
 - name: Install the selected signed-channel release record
   ansible.builtin.copy:
     src: "{{ codexia_installed_release_file }}"
     dest: "{{ config_dir }}/installed-release.json"
     mode: '0600'
-- name: Verify signed release, image, deployed frontend and running legacy API before stopping it
-  ansible.builtin.command:
-    argv: [sh, "{{ updater }}", verify-legacy, "{{ config_path }}", "{{ config_dir }}/installed-release.json"]
-  changed_when: false
-- name: Inspect legacy Quadlet
-  ansible.builtin.stat:
-    path: "{{ quadlet_dir }}/codexia-api.container"
-  register: legacy
-- name: Require the running legacy writer's Quadlet
-  ansible.builtin.assert:
-    that: legacy.stat.exists
-- name: Verify the Tunnel is still attached to the legacy writer before stopping it
-  ansible.builtin.include_tasks: verify-tunnel-legacy.yml
-- name: Save legacy Quadlet outside the generator directory
-  ansible.builtin.copy:
-    src: "{{ quadlet_dir }}/codexia-api.container"
-    dest: "{{ config_dir }}/legacy-api.container"
-    remote_src: true
-    mode: '0600'
-    force: false
-  when: legacy.stat.exists
-- name: Verify saved legacy Quadlet matches the current source before removing it
-  ansible.builtin.command:
-    argv: [cmp, -s, "{{ quadlet_dir }}/codexia-api.container", "{{ config_dir }}/legacy-api.container"]
-  changed_when: false
-- name: Stop legacy writer
-  ansible.builtin.systemd_service:
-    name: codexia-api.service
-    scope: user
-    state: stopped
-  when: legacy.stat.exists
-- name: Remove legacy Quadlet after stopping it
-  ansible.builtin.file:
-    path: "{{ quadlet_dir }}/codexia-api.container"
-    state: absent
-- name: Switch the Tunnel dependency to the private proxy while preserving network ordering
-  ansible.builtin.include_tasks: switch-tunnel-to-proxy.yml
-- name: Reload rootless systemd
-  ansible.builtin.systemd_service:
-    scope: user
-    daemon_reload: true
-- name: Start the private proxy
-  ansible.builtin.systemd_service:
-    name: codexia-api-proxy.service
-    scope: user
-    state: started
-- name: Initialize via canonical locked controller (fences writers and validates preflight)
-  ansible.builtin.command:
-    argv: [sh, "{{ updater }}", init, "{{ config_path }}", "{{ config_dir }}/installed-release.json"]
-  changed_when: true
-- name: Start the existing Tunnel after removing its legacy writer dependency
-  ansible.builtin.systemd_service:
-    name: codexia-tunnel.service
-    scope: user
-    state: started
+- name: Verify the reviewed updater source and recovery unit inputs
+  ansible.builtin.include_tasks: verify-updater-inputs.yml
+- name: Refuse drift in any existing boot and poll units
+  ansible.builtin.include_tasks: verify-updater-units.yml
+  vars:
+    allow_missing_updater_units: true
+- name: Provision boot recovery before any disruptive cutover
+  ansible.builtin.include_tasks: install-units.yml
+  vars:
+    recovery_install_only: true
+- name: Stage the protected restore receipt on the source host
+  ansible.builtin.tempfile:
+    state: directory
+    path: "{{ config_dir }}"
+    prefix: cutover-proof-
+  register: codexia_cutover_proof_dir
+- name: Require exact restored backup before legacy writer disruption
+  block:
+    - name: Copy the isolated recovery host's receipt from the trusted control node
+      ansible.builtin.copy:
+        src: "{{ codexia_restore_receipt_file }}"
+        dest: "{{ codexia_cutover_proof_dir.path }}/restore.json"
+        mode: '0600'
+      no_log: true
+    - name: Verify evidence and perform the exclusive durable cutover in one locked operation
+      ansible.builtin.command:
+        argv: [sh, "{{ updater }}", cutover, "{{ config_path }}", "{{ config_dir }}/installed-release.json", "{{ codexia_cutover_proof_dir.path }}/restore.json", --approved]
+      register: cutover_result
+      changed_when: true
+      no_log: true
+    - name: Require successful private activation and Tunnel handoff
+      ansible.builtin.assert:
+        that:
+          - (cutover_result.stdout | from_json).activated
+  always:
+    - name: Remove only the temporary cutover receipt directory
+      ansible.builtin.file:
+        path: "{{ codexia_cutover_proof_dir.path }}"
+        state: absent
