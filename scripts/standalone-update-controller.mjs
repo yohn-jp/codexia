@@ -564,12 +564,18 @@ export class StandaloneController {
     let legacyRecoveryIntentCleared=false;
     let legacyRecoveryIntentClearAttempted=false;
     let legacyRecoveryIntentSaved=false;
+    let controllerIntentClearAttempted=false;
+    let controllerIntentCleared=false;
+    let controllerRecoveryIntentClearAttempted=false;
+    let controllerRecoveryIntentCleared=false;
     try{
       if(intent.kind==='controller'){
         assert.ok(state,'Controller backup intent has no durable controller state');
         assert.equal(state.journal.generation,intent.journalGeneration,'Controller journal changed during backup recovery');
         assert.equal(state.journal.active.slot,intent.slot,'Controller active slot changed during backup recovery');
         assert.equal(state.installed.image,intent.image,'Controller release changed during backup recovery');
+        // Keep an independent durable copy until the primary clear is committed.
+        await this.saveBackupRecoveryIntent(intent);
         await this.host.route('blocked');
         if(await this.host.pollingTimerActive())await this.host.stopPollingTimer();
         await this.host.assertNoPreflight();
@@ -590,7 +596,12 @@ export class StandaloneController {
         if(intent.timerWasActive&&!timerActive)await this.host.startPollingTimer();
         else if(!intent.timerWasActive&&timerActive)await this.host.stopPollingTimer();
         state=await this.save({...state,paused:intent.priorPaused,lastError:intent.priorLastError});
+        controllerIntentClearAttempted=true;
         await this.clearBackupIntent();
+        controllerIntentCleared=true;
+        controllerRecoveryIntentClearAttempted=true;
+        await this.clearBackupRecoveryIntent();
+        controllerRecoveryIntentCleared=true;
         return state;
       }
 
@@ -673,6 +684,15 @@ export class StandaloneController {
         await this.host.stopTunnel().catch(()=>undefined);
         if(legacyApiStartedByRecovery&&!legacyApiIdentityVerified)await this.host.stopLegacyWriter().catch(()=>undefined);
       }else{
+        // An unlink may have succeeded even if parent fsync failed. Re-create
+        // the affected recovery record before returning a blocked topology.
+        if(controllerIntentClearAttempted&&!controllerIntentCleared){
+          try{await this.saveBackupIntent(intent);}catch{}
+        }
+        if(controllerRecoveryIntentClearAttempted&&!controllerRecoveryIntentCleared){
+          try{await this.saveBackupRecoveryIntent(intent);}
+          catch{try{await this.saveBackupIntent(intent);}catch{}}
+        }
         await this.host.route('blocked').catch(()=>undefined);
         await this.host.stopPollingTimer().catch(()=>undefined);
       }
