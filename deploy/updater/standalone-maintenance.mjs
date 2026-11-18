@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
 import { chmod, lstat, readFile, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyUpdateChannel } from '../../scripts/update-channel.mjs';
-import { atomicWrite, clearBackupIntent, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
-import { PodmanStandaloneHost, ensureDirectoryTreeDurable, validateRuntimeContract } from './standalone-host.mjs';
+import { assertMatchingControllerBackup, validateControllerBackupProof, atomicWrite, clearBackupIntent, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
+import { PodmanStandaloneHost, ensureDirectoryTreeDurable, validatePostgresAppPassword, validateRuntimeContract } from './standalone-host.mjs';
+export { validatePostgresAppPassword };
 
 export const MAINTENANCE_SOURCE_FILES = Object.freeze([
   'deploy/updater/codexia-updater',
@@ -45,12 +46,6 @@ export function validateProbeCredential(content){
   assert.ok(typeof content==='string'&&Buffer.byteLength(content)<=8192&&/^[!-~]+(?:\n)?$/u.test(content),
     'Invalid protected probe credential');
 }
-export function validatePostgresAppPassword(content){
-  // Preserve a possible final LF exactly, but never include secret bytes in errors.
-  assert.ok(typeof content==='string'&&Buffer.byteLength(content)<=8192&&/^[a-fA-F0-9]{64}(?:\n)?$/u.test(content),
-    'Invalid protected app password');
-  return content;
-}
 export async function assertProbeCredentialAccess(host,state,publicKey){
   try{
     const verified=verifyUpdateChannel(await host.fetchChannel(),publicKey,state.journal.checkpoint);
@@ -62,12 +57,12 @@ export async function assertProbeCredentialAccess(host,state,publicKey){
 }
 function plainObject(value){return value!==null&&typeof value==='object'&&!Array.isArray(value);}
 export function validateAppPasswordRotationManifest(manifest,manifestPath,serviceHome){
-  const keys=['appPasswordFile','candidateRoot','configPath','format','restoreReceiptFile','rotatePostgresAppPassword','sourceDir','unitDir'];
+  const keys=['appPasswordFile','candidateRoot','configPath','databaseQuadletFile','format','restoreReceiptFile','rotatePostgresAppPassword','sourceDir','unitDir'];
   assert.ok(plainObject(manifest),'App-password maintenance manifest must be an object');
   assert.deepEqual(Object.keys(manifest).sort(),keys,'Unexpected app-password maintenance manifest fields');
   assert.equal(manifest.format,'codexia-updater-maintenance/v1');
   assert.equal(manifest.rotatePostgresAppPassword,true,'App-password rotation must be explicitly selected');
-  for(const key of ['candidateRoot','configPath','sourceDir','unitDir','appPasswordFile','restoreReceiptFile']){
+  for(const key of ['candidateRoot','configPath','sourceDir','unitDir','appPasswordFile','restoreReceiptFile','databaseQuadletFile']){
     assert.ok(typeof manifest[key]==='string'&&path.isAbsolute(manifest[key])&&!/[\r\n\0]/u.test(manifest[key]),
       'App-password maintenance paths must be absolute');
   }
@@ -77,13 +72,30 @@ export function validateAppPasswordRotationManifest(manifest,manifestPath,servic
     'App-password candidate path is outside the fixed private staging location');
   assert.equal(path.resolve(manifest.restoreReceiptFile),path.join(candidateRoot,'restore-receipt.json'),
     'Restore receipt path is outside the fixed private staging location');
+  assert.equal(manifest.databaseQuadletFile,path.join(candidateRoot,'quadlet','codexia-db.container'),'Database Quadlet must use its fixed private staging path');
   assert.ok(typeof serviceHome==='string'&&path.isAbsolute(serviceHome),'Service home must be absolute');
+  assert.equal(path.dirname(candidateRoot),path.join(serviceHome,'.config','codexia-updater','maintenance','candidates'),
+    'App-password candidate must use the private staging root outside the proxy mount');
   assert.equal(path.resolve(manifest.configPath),path.join(serviceHome,'.config','codexia-updater','config.json'),
     'Maintenance may update only the canonical private configuration');
   assert.equal(path.resolve(manifest.unitDir),path.join(serviceHome,'.config','systemd','user'),
     'Maintenance unit directory is outside the service user configuration');
   assert.equal(path.resolve(manifest.sourceDir),'/opt/codexia-updater','Maintenance source directory differs from the canonical installation');
-  return {appPasswordFile:manifest.appPasswordFile,restoreReceiptFile:manifest.restoreReceiptFile};
+  return {appPasswordFile:manifest.appPasswordFile,restoreReceiptFile:manifest.restoreReceiptFile,databaseQuadletFile:manifest.databaseQuadletFile};
+}
+export function validatePostgresAppPasswordRotation(value,snapshotRoot){
+  assert.ok(plainObject(value),'App-password recovery marker must be an object');
+  assert.deepEqual(Object.keys(value).sort(),['databaseId','format','previousPasswordFile','releaseImage','secretName','slot'],
+    'Unexpected app-password recovery marker fields');
+  assert.equal(value.format,'codexia-postgres-app-password-rotation/v1');
+  assert.equal(value.secretName,'codexia-postgres-app-password','App-password recovery may replace only its canonical Podman secret');
+  assert.ok(path.isAbsolute(snapshotRoot),'App-password recovery snapshot path must be absolute');
+  assert.equal(path.resolve(value.previousPasswordFile),path.join(path.resolve(snapshotRoot),'postgres-app-password'),
+    'App-password recovery secret escaped its private snapshot');
+  assert.match(value.databaseId,/^[1-9]\d{0,19}:[1-9]\d{0,9}$/u,'Invalid app-password recovery database identity');
+  assert.ok(['blue','green'].includes(value.slot),'Invalid app-password recovery writer slot');
+  assert.match(value.releaseImage,/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u,'Invalid app-password recovery release image');
+  return value;
 }
 
 export function validateMaintenanceConfig(current,candidate){
@@ -176,6 +188,109 @@ export async function preflightMaintenanceRuntime({currentConfig,nextConfig,curr
   await observedHost.verifyWriterUnits(state);
   await observedController.assertServing(state,activeSlot,state.installed);
   return adoptingRuntime;
+}
+
+function assertRotationState(state){
+  assert.equal(state.paused,true,'App-password rotation requires a paused controller');
+  assert.ok(['committed','idle'].includes(state.journal.phase)&&!state.initialActivationPending&&state.lastError===null,
+    'App-password rotation requires a stable initialized journal');
+  assert.equal(state.journal.active.image,state.installed.image,'Committed writer image differs from the installed release');
+}
+
+export async function applyPostgresAppPassword({host,state,snapshot,password,recovering,verify}){
+  assertRotationState(state);
+  validatePostgresAppPassword(password);
+  const {slot,image}=state.journal.active;
+  await host.route('blocked');
+  try{
+    await host.assertPasswordRotationSources(snapshot);
+    await host.assertRuntimeSources();
+    await host.assertInitialLegacyAbsent();
+    await host.assertNoPreflight();
+    await host.verifyWriterUnits(state);
+    await host.assertCommittedWriterUnitSource(slot);
+    const running=await host.passwordRotationDatabase(snapshot);
+    if(running)assert.equal(await host.passwordRotationDatabaseId(),snapshot.databaseId,'Database identity changed');
+    else assert.ok(recovering,'Database disappeared before rotation');
+    const observed=await host.observe();
+    assert.equal(observed.route,'blocked');
+    if(observed.writers.length){
+      assert.deepEqual(observed.writers,[{slot,image}],'Unexpected writer prevents app-password rotation');
+      await host.assertNoWriterContainers(slot);
+      await host.stopWriter(slot);
+    }else assert.ok(recovering,'Committed writer disappeared before rotation');
+    await host.assertNoWriterContainers();
+    // The forward operation uses the currently admitted DB. Recovery can begin
+    // with a missing secret and no DB, so restore the mount first in that case.
+    if(!recovering)await host.changePostgresAppPassword(password);
+    await host.stopPasswordRotationDatabase(snapshot);
+    await host.replacePostgresAppSecret(password,snapshot);
+    await host.startPasswordRotationDatabase(snapshot);
+    assert.equal(await host.passwordRotationDatabaseId(),snapshot.databaseId,'Restarted database identity changed');
+    if(recovering)await host.changePostgresAppPassword(password);
+    await host.verifyPostgresAppPassword(password);
+    await host.verifyWriterUnits(state);
+    await host.assertCommittedWriterUnitSource(slot);
+    await host.startWriter(slot,state.installed);
+    await host.verifyBlockedPasswordRotation(slot,state.installed);
+    await host.route(slot);
+    await verify();
+  }catch(error){
+    await host.route('blocked').catch(()=>{});
+    throw error;
+  }
+}
+
+const rotationFormat='codexia-maintenance-postgres-app-password/v1';
+function rotationSnapshotRoot(config,id){
+  assert.match(id,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u,'Invalid rotation snapshot identity');
+  // The private proxy mounts the state directory read-only. Keep rollback
+  // credentials in the service account's controller configuration directory.
+  return path.join(path.dirname(config.publicKeyFile),'maintenance-snapshots',id);
+}
+async function readBoundedPrivateFile(filename,limit){
+  const info=await lstat(filename);
+  assert.ok(info.isFile()&&!info.isSymbolicLink()&&info.size>0&&info.size<=limit,'Invalid protected maintenance input');
+  return readRegularFile(filename);
+}
+export async function checkRotationBackup({stateDir,receiptFile,state,host,databaseId}){
+  assertRotationState(state);
+  const proof=validateControllerBackupProof(JSON.parse(await readBoundedPrivateFile(path.join(stateDir,'controller-backup-proof.json'),65536)));
+  const receipt=JSON.parse(await readBoundedPrivateFile(receiptFile,65536));
+  return assertMatchingControllerBackup(proof,receipt,state,databaseId,await host.backupArtifactIdentity(proof.artifactDirectory));
+}
+
+export async function savePasswordRotationSnapshot({config,state,snapshot,previousPassword,timer}){
+  const root=rotationSnapshotRoot(config,snapshot.operationId);
+  await ensureDirectoryTreeDurable(root);
+  assert.equal((await lstat(root)).mode&0o777,0o700,'Rotation snapshot directory must be private');
+  const previousPasswordFile=path.join(root,'postgres-app-password');
+  const rotation=validatePostgresAppPasswordRotation({format:'codexia-postgres-app-password-rotation/v1',secretName:'codexia-postgres-app-password',
+    previousPasswordFile,databaseId:snapshot.databaseId,slot:state.journal.active.slot,releaseImage:state.installed.image},root);
+  const {databaseQuadlet,...identity}=snapshot;
+  await atomicWrite(previousPasswordFile,validatePostgresAppPassword(previousPassword));
+  await atomicWrite(path.join(root,'codexia-db.container'),databaseQuadlet);
+  await atomicWrite(path.join(root,'identity.json'),JSON.stringify(identity)+'\n');
+  await atomicWrite(path.join(root,'controller.json'),JSON.stringify(state)+'\n');
+  return {format:rotationFormat,operationId:snapshot.operationId,timer,rotation};
+}
+export async function loadPasswordRotationSnapshot({config,state,marker}){
+  assert.deepEqual(Object.keys(marker).sort(),['format','operationId','rotation','timer']);
+  assert.equal(marker.format,rotationFormat);
+  timerActivationCommand(marker.timer);
+  const root=rotationSnapshotRoot(config,marker.operationId);
+  const rotation=validatePostgresAppPasswordRotation(marker.rotation,root);
+  assert.deepEqual(JSON.parse(await readBoundedPrivateFile(path.join(root,'controller.json'),1024*1024)),state,'Rotation controller snapshot changed');
+  assertRotationState(state);
+  assert.equal(rotation.slot,state.journal.active.slot);
+  assert.equal(rotation.releaseImage,state.installed.image);
+  const identity=JSON.parse(await readBoundedPrivateFile(path.join(root,'identity.json'),128*1024));
+  assert.equal(identity.operationId,marker.operationId);
+  assert.equal(identity.databaseId,rotation.databaseId);
+  const databaseQuadlet=await readBoundedPrivateFile(path.join(root,'codexia-db.container'),65536);
+  const password=validatePostgresAppPassword(await readBoundedPrivateFile(rotation.previousPasswordFile,65));
+  assert.ok(createHash('sha256').update(password).digest('hex')===identity.previousDigest,'Previous password snapshot is unverified');
+  return {snapshot:{...identity,databaseQuadlet},password};
 }
 
 async function restartProxyService(){
@@ -298,6 +413,7 @@ async function readTransaction(markerPath){
   let raw;
   try{raw=await readFile(markerPath,'utf8');}catch(error){if(error.code==='ENOENT')return null;throw error;}
   const marker=JSON.parse(raw);
+  if(marker.format===rotationFormat)return marker;
   assert.equal(marker.format,'codexia-maintenance-transaction/v1');
   assert.ok(path.isAbsolute(marker.snapshotRoot)&&path.isAbsolute(marker.configPath)&&path.isAbsolute(marker.sourceDir)&&path.isAbsolute(marker.unitDir));
   assert.ok(Array.isArray(marker.files)&&marker.files.every(item=>typeof item.target==='string'&&typeof item.backup==='string'&&typeof item.exists==='boolean'));
@@ -368,6 +484,11 @@ async function recoverInterrupted(config,store,markerPath,publicKey){
     if(typeof process.getuid==='function')assert.equal(markerInfo.uid,process.getuid(),'Interrupted maintenance marker owner drift');
     const marker=await readTransaction(markerPath);
     assert.ok(marker,'Interrupted maintenance marker disappeared during recovery');
+    if(marker.format===rotationFormat){
+      try{await recoverPasswordRotation({config,store,publicKey,marker,markerPath});}
+      catch{throw Error('Interrupted password rotation recovery is unverified');}
+      return true;
+    }
     assert.equal(marker.stateFile,config.stateFile,'Interrupted maintenance belongs to a different controller');
     assert.equal(marker.routeFile,config.routeFile,'Interrupted maintenance belongs to a different route');
     const stateBefore=await loadControllerState(marker.stateFile);
@@ -451,6 +572,81 @@ async function checkFilesApplied(files){
   for(const entry of files)assert.ok((await readRegularFile(entry.target))===entry.content,'Maintenance file installation differs from its candidate');
 }
 
+async function assertRotationControlUnits(config){
+  const unitDir=path.resolve(config.quadletDirectory,'../../../.config/systemd/user');
+  for(const unit of MAINTENANCE_UNIT_FILES)await assertUnitLoaded(unit,path.join(unitDir,unit));
+  const boot='codexia-updater-boot.service';
+  const dependencies=property=>run('systemctl',['--user','show','--property='+property,'--value',boot]).split(/\s+/u);
+  assert.ok(dependencies('Wants').includes('codexia-db.service')&&!dependencies('Requires').includes('codexia-db.service')&&
+    dependencies('Requires').includes('codexia-api-proxy.service')&&dependencies('After').includes('codexia-db.service'),
+    'Install the independently recoverable database boot unit before rotation');
+}
+
+async function finishRotation({config,state,host,controller,marker,markerPath,snapshot,password,recovering}){
+  await assertRotationControlUnits(config);
+  await stopTimerPolling();
+  const verify=async()=>{
+    await host.assertPasswordRotationSources(snapshot);
+    assert.equal(await host.passwordRotationDatabaseId(),snapshot.databaseId);
+    await host.verifyWriterUnits(state);
+    await controller.assertServing(state,state.journal.active.slot,state.installed);
+    assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed during rotation');
+  };
+  await applyPostgresAppPassword({state,host,snapshot,password,recovering,verify});
+  await restoreTimerPolling(marker.timer);
+  await clearBackupIntent(markerPath);
+  await rm(rotationSnapshotRoot(config,marker.operationId),{recursive:true,force:true}).catch(()=>{});
+}
+
+async function recoverPasswordRotation({config,store,publicKey,marker,markerPath}){
+  const state=await loadControllerState(config.stateFile);
+  const {snapshot,password}=await loadPasswordRotationSnapshot({config,state,marker});
+  const host=new PodmanStandaloneHost(config);
+  const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
+  await finishRotation({config,host,controller,state,marker,markerPath,snapshot,password,recovering:true});
+}
+
+async function rotatePostgresAppPassword({config,manifest,manifestPath,serviceHome,state,publicKey,store,markerPath}){
+  assertRotationState(state);
+  validateAppPasswordRotationManifest(manifest,manifestPath,serviceHome);
+  assert.equal(path.dirname(config.publicKeyFile),path.dirname(manifest.configPath),'Candidate belongs to another controller');
+  assert.equal(config.quadletDirectory,path.join(serviceHome,'.config','containers','systemd'));
+  const root=path.resolve(manifest.candidateRoot);
+  assert.equal(await realpath(root),root,'Password staging root must not traverse a symlink');
+  assert.equal((await lstat(root)).mode&0o777,0o700,'Password staging root must be private');
+  await readBoundedPrivateFile(manifestPath,65536);
+  const password=validatePostgresAppPassword(await readBoundedPrivateFile(manifest.appPasswordFile,65));
+  const reviewed=await readBoundedPrivateFile(manifest.databaseQuadletFile,65536);
+  // Boot must execute this transaction reader after a power loss.
+  assert.equal(fileURLToPath(import.meta.url),path.join(manifest.sourceDir,'deploy/updater/standalone-maintenance.mjs'),
+    'Install the reviewed updater before rotating the application password');
+  const host=new PodmanStandaloneHost(config);
+  assert.ok(host.runtime,'Rotation requires a typed writer runtime');
+  const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
+  await controller.assertNoBackupIntent();
+  await assertRotationControlUnits(config);
+  await host.assertRuntimeSources();
+  await host.assertInitialLegacyAbsent();
+  await host.assertNoPreflight();
+  await host.verifyWriterUnits(state);
+  await host.assertCommittedWriterUnitSource(state.journal.active.slot);
+  await controller.assertServing(state,state.journal.active.slot,state.installed);
+  const {snapshot,previousPassword}=await host.capturePasswordRotation(reviewed,password,randomUUID());
+  assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed before backup admission');
+  await checkRotationBackup({stateDir:path.dirname(config.stateFile),receiptFile:manifest.restoreReceiptFile,state,host,databaseId:snapshot.databaseId});
+  assert.equal(updaterServiceState(),'inactive','Polling must be idle at rotation admission');
+  const marker=await savePasswordRotationSnapshot({config,state,snapshot,previousPassword,timer:timerState()});
+  await atomicWrite(markerPath,JSON.stringify(marker)+'\n');
+  try{
+    await finishRotation({config,state,host,controller,marker,markerPath,snapshot,password,recovering:false});
+  }catch{
+    try{await recoverInterrupted(config,store,markerPath,publicKey);}
+    catch{throw Error('Password rotation could not verify rollback; recovery remains blocked');}
+    throw Error('Password rotation failed; the previous app credential and serving release were restored');
+  }
+  return {format:'codexia-updater-maintenance/v1',postgresAppPasswordRotated:true};
+}
+
 export async function maintainStandaloneUpdater({config,manifestPath,publicKey,state,store}){
   assert.equal(path.dirname(config.stateFile),process.env.CODEXIA_UPDATER_LOCK_DIRECTORY,'Maintenance must use the canonical host lock');
   const stateDir=path.dirname(config.stateFile);
@@ -466,6 +662,10 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
   assert.equal(state.lastError,null,'Maintenance refuses a controller with a recorded error');
 
   const manifest=JSON.parse(await readFile(manifestPath,'utf8'));
+  const serviceHome=path.resolve(config.quadletDirectory,'../../..');
+  if(manifest.rotatePostgresAppPassword===true){
+    return rotatePostgresAppPassword({config,manifest,manifestPath,serviceHome,state,publicKey,store,markerPath});
+  }
   const credentialRotation=manifest.rotateProbeCredentials===true;
   assert.deepEqual(Object.keys(manifest).sort(),['candidateRoot','configPath','format','sourceDir','unitDir',...(credentialRotation?['rotateProbeCredentials']:[])].sort());
   assert.equal(manifest.format,'codexia-updater-maintenance/v1');

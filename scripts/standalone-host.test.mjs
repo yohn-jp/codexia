@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {mkdtemp,writeFile,readFile,rm,mkdir,symlink} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {browserAuthEnvironment,imageConfig,assertVersion,PodmanStandaloneHost,validateRuntimeContract,runtimeContainerArgs,assertRuntimeObservation,assertRuntimeUnit,assertModelCacheOutsideVolumes} from '../deploy/updater/standalone-host.mjs';
+import {browserAuthEnvironment,imageConfig,assertVersion,PodmanStandaloneHost,validateRuntimeContract,runtimeContainerArgs,runWithSensitiveInput,postgresAppPasswordChangeInput,assertRuntimeObservation,assertRuntimeUnit,assertModelCacheOutsideVolumes} from '../deploy/updater/standalone-host.mjs';
 const origin='https://codexia.example.invalid';
 const access={mode:'cloudflare-access',issuer:'https://example.cloudflareaccess.com',audience:'a'.repeat(64),origin,ownerEmail:'owner@example.invalid'};
 const release={image:'ghcr.io/yohn-jp/codexia-backend@sha256:'+'b'.repeat(64),version:'0.1.0',profile:'full',apiEpoch:1};
@@ -17,6 +17,20 @@ const imageEnvironmentFromUnit=(imageEnvironment,unit)=>{
  for(const [,entry] of unit.matchAll(/^Environment=(.*)$/gmu))env.set(entry.slice(0,entry.indexOf('=')),entry.slice(entry.indexOf('=')+1));
  return [...env].map(([key,value])=>key+'='+value);
 };
+
+test('sensitive host commands receive credential bytes on stdin and suppress command diagnostics',()=>{
+ const password='a'.repeat(64);
+ const result=runWithSensitiveInput(process.execPath,['-e','process.stdout.write(require("node:fs").readFileSync(0))'],password+'\n');
+ assert.equal(result,password+'\n');
+ assert.throws(()=>runWithSensitiveInput(process.execPath,['-e','const v=require("node:fs").readFileSync(0,"utf8");process.stderr.write(v);process.exit(7)'],password),
+  error=>error instanceof Error&&!error.message.includes(password));
+});
+test('PostgreSQL app-password change sends the credential only as psql stdin input',()=>{
+ const password='a'.repeat(64);
+ assert.equal(postgresAppPasswordChangeInput(password),'\\password codexia\n'+password+'\n'+password+'\n');
+ assert.equal(postgresAppPasswordChangeInput(password+'\n'),'\\password codexia\n'+password+'\n'+password+'\n');
+ assert.throws(()=>postgresAppPasswordChangeInput('short'),/Invalid protected app password/);
+});
 
 test('typed runtime contract produces the same bounded model, cache and resource settings for a release',()=>{
  assert.deepEqual(validateRuntimeContract(runtime),runtime);
@@ -321,4 +335,94 @@ test('legacy admission binds the running image ID, version and exact auth settin
    await writeFile(fixturePath,JSON.stringify({...valid,...patch}));await assert.rejects(host.assertLegacyRelease(fixture),pattern);
   }
  }finally{process.env.PATH=previous;await rm(dir,{recursive:true,force:true});}
+});
+
+test('rotation meets the canonical secret, stdin-only SQL and immutable replacement boundaries',async()=>{
+ const {createHash}=await import('node:crypto');
+ const host=Object.create(PodmanStandaloneHost.prototype);
+ assert.equal(typeof host.replacePostgresAppSecret,'function');
+ const directory=await mkdtemp(path.join(tmpdir(),'codexia-password-commands-'));
+ const oldPath=process.env.PATH;
+ const old='1'.repeat(64),next='2'.repeat(64)+'\n';
+ const secretFile=path.join(directory,'secret');
+ const digest=value=>createHash('sha256').update(value).digest('hex');
+ const snapshot={originalSecretId:'first',previousDigest:digest(old),replacementDigest:digest(next),operationId:'operation'};
+ const secret=(id,value)=>({ID:id,Spec:{Name:'codexia-postgres-app-password',Labels:{}},SecretData:value});
+ try{
+  await writeFile(secretFile,JSON.stringify(secret('first',old)));
+  await writeFile(path.join(directory,'podman'),`#!${process.execPath}
+const fs=require('fs'),path=require('path');
+const args=process.argv.slice(2),dir=__dirname,file=path.join(dir,'secret');
+fs.appendFileSync(path.join(dir,'argv'),JSON.stringify(args)+'\\n');
+if(args[0]==='exec'){fs.writeFileSync(path.join(dir,'stdin'),fs.readFileSync(0));process.exit(0);}
+if(args[0]!=='secret')process.exit(99);
+if(args[1]==='exists')process.exit(fs.existsSync(file)?0:1);
+if(args[1]==='inspect'){console.log('['+fs.readFileSync(file,'utf8')+']');process.exit(0);}
+if(args[1]==='rm'){fs.unlinkSync(file);process.exit(0);}
+if(args[1]==='create'){
+ const label=args[args.indexOf('--label')+1].split('=');
+ fs.writeFileSync(file,JSON.stringify({ID:'second',Spec:{Name:args.at(-2),Labels:{[label[0]]:label[1]}},SecretData:fs.readFileSync(0,'utf8')}));
+ process.exit(0);
+}
+process.exit(99);
+`,{mode:0o700});
+  process.env.PATH=directory+path.delimiter+oldPath;
+  await host.changePostgresAppPassword(next);
+  assert.equal(await readFile(path.join(directory,'stdin'),'utf8'),postgresAppPasswordChangeInput(next));
+  await host.replacePostgresAppSecret(next,snapshot);
+  assert.equal(JSON.parse(await readFile(secretFile,'utf8')).SecretData,next);
+  await host.replacePostgresAppSecret(old,snapshot);
+  assert.equal(JSON.parse(await readFile(secretFile,'utf8')).SecretData,old);
+  await rm(secretFile);
+  await host.replacePostgresAppSecret(old,snapshot);
+  assert.equal(JSON.parse(await readFile(secretFile,'utf8')).SecretData,old);
+  await writeFile(secretFile,JSON.stringify(secret('foreign',next)));
+  await assert.rejects(host.replacePostgresAppSecret(old,snapshot),/unrecognized/i);
+  assert.equal(JSON.parse(await readFile(secretFile,'utf8')).ID,'foreign');
+  const argv=await readFile(path.join(directory,'argv'),'utf8');
+  assert.ok(!argv.includes(old)&&!argv.includes(next.trim())&&!argv.includes('\\\\password'));
+ }finally{process.env.PATH=oldPath;await rm(directory,{recursive:true,force:true});}
+});
+
+test('DB source ownership rejects shadowed units and drift from the reviewed source before start or stop',async()=>{
+ const {assertPasswordRotationDbUnit}=await import('../deploy/updater/standalone-host.mjs');
+ assert.equal(typeof assertPasswordRotationDbUnit,'function');
+ const sourcePath='/home/c/.config/containers/systemd/codexia-db.container',source=await readFile(new URL('../deploy/quadlet/codexia-db.container',import.meta.url),'utf8');
+ const properties={LoadState:'loaded',NeedDaemonReload:'no',DropInPaths:'',RequiredBy:'codexia-slot-blue.service',BoundBy:'',ConsistsOf:'',PropagatesStopTo:'',SourcePath:sourcePath,FragmentPath:'/run/user/10/systemd/generator/codexia-db.service'};
+ const args={properties,sourcePath,runtimeDir:'/run/user/10',source,reviewed:source};
+ assert.doesNotThrow(()=>assertPasswordRotationDbUnit(args));
+ for(const drift of [{SourcePath:'/tmp/db.container'},{FragmentPath:'/tmp/db.service'},{DropInPaths:'/unreviewed.conf'},{NeedDaemonReload:'yes'},{RequiredBy:'foreign.service'},{BoundBy:'foreign.service'},{ConsistsOf:'foreign.service'},{PropagatesStopTo:'foreign.service'}]){
+  assert.throws(()=>assertPasswordRotationDbUnit({...args,properties:{...properties,...drift}}));
+ }
+ assert.throws(()=>assertPasswordRotationDbUnit({...args,source:source+'Environment=EXTRA=yes\n'}));
+});
+
+test('database runtime ownership binds the reviewed storage, image, mount secrets and isolated network',async()=>{
+ const {assertPasswordRotationDatabaseRuntime}=await import('../deploy/updater/standalone-host.mjs');
+ assert.equal(typeof assertPasswordRotationDatabaseRuntime,'function');
+ const image='docker.io/library/postgres:17-bookworm@sha256:'+'e'.repeat(64);
+ const container={State:{Running:true},Config:{Image:image,Env:['PGDATA=/var/lib/postgresql/data/pgdata','POSTGRES_DB=codexia','POSTGRES_USER=codexia_admin','POSTGRES_PASSWORD_FILE=/run/secrets/admin-password']},
+  HostConfig:{PortBindings:null,ReadonlyRootfs:true},Mounts:[
+   {Type:'volume',Name:'codexia-postgres',Source:'/vol/db',Destination:'/var/lib/postgresql/data',RW:true},
+   {Type:'bind',Source:'/etc/codexia/postgres/010-create-app-role.sh',Destination:'/docker-entrypoint-initdb.d/010-create-app-role.sh',RW:false}],
+  NetworkSettings:{Networks:{'codexia-data':{NetworkID:'original'}}}};
+ const args={container,image,volumePath:'/vol/db',networkId:'original'};
+ assert.doesNotThrow(()=>assertPasswordRotationDatabaseRuntime(args));
+ assert.doesNotThrow(()=>assertPasswordRotationDatabaseRuntime({...args,container:{...container,Mounts:[...container.Mounts,{Type:'tmpfs',Destination:'/tmp',RW:true}]}}));
+ assert.throws(()=>assertPasswordRotationDatabaseRuntime({...args,container:{...container,Mounts:[...container.Mounts,{Type:'tmpfs',Destination:'/var/lib/postgresql/data/pgdata',RW:true}]}}));
+ for(const changed of [{...container,Mounts:[{...container.Mounts[0],Source:'/foreign'},container.Mounts[1]]},
+  {...container,Mounts:[...container.Mounts,{Type:'volume',Name:'foreign',Destination:'/extra'}]},
+  {...container,Config:{...container.Config,Image:'localhost/foreign'}},
+  {...container,HostConfig:{...container.HostConfig,PortBindings:{'5432/tcp':[{}]}}}]){
+  assert.throws(()=>assertPasswordRotationDatabaseRuntime({...args,container:changed}));
+ }
+ assert.throws(()=>assertPasswordRotationDatabaseRuntime({...args,networkId:'other'}));
+});
+
+test('database recovery checks on-disk identity before starting any stopped or failed unit',async()=>{
+ const host=Object.create(PodmanStandaloneHost.prototype);
+ assert.equal(typeof host.startPasswordRotationDatabase,'function');
+ host.assertPasswordRotationSources=async()=>{throw Error('physical database identity changed');};
+ await assert.rejects(host.startPasswordRotationDatabase({}),/physical database identity changed/);
+ await assert.rejects(host.stopPasswordRotationDatabase({}),/physical database identity changed/);
 });
