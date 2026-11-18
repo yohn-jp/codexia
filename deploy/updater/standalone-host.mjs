@@ -1230,6 +1230,16 @@ export class PodmanStandaloneHost{
   async assertNoWriterContainers(){
     for(const slot of ['blue','green'])assert.ok(!exists(name(slot)),'Unexpected stopped or running slot container prevents writer recovery');
   }
+  async assertCommittedWriterUnitSource(slot){
+    const unit=activeUnit(slot);
+    const source=path.join(this.config.quadletDirectory,name(slot)+'.container');
+    const properties=systemdProperties(run('systemctl',['--user','show','--property=LoadState,FragmentPath,SourcePath,DropInPaths',unit]));
+    assert.equal(properties.LoadState,'loaded','Committed writer unit is not loaded');
+    assert.equal(properties.SourcePath,source,'Committed writer unit does not reference its reviewed Quadlet');
+    assert.ok(path.isAbsolute(process.env.XDG_RUNTIME_DIR??''),'Rootless systemd runtime directory is unavailable');
+    assert.equal(properties.FragmentPath,path.join(process.env.XDG_RUNTIME_DIR,'systemd','generator',unit),'Committed writer unit is not a generated Quadlet');
+    assertRuntimeUnitDropIns(properties.DropInPaths??'');
+  }
   async assertNoSlotSources(){
     for(const slot of ['blue','green']){
       const container=name(slot);

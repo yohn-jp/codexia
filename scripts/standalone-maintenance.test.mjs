@@ -227,13 +227,14 @@ test('VM probe credentials use the canonical live identity and denial paths',asy
 test('credential recovery restarts only the absent committed writer behind blocked admission',async()=>{
  const installed={...release};
  const state={installed,journal:{phase:'idle',active:{slot:'blue',image:installed.image}},lastError:null};
- for(const kind of ['absent','present','foreign','stopped-foreign','foreign-preflight','source-drift']){
+ for(const kind of ['absent','present','foreign','stopped-foreign','foreign-preflight','source-drift','shadow-unit']){
    let writers=kind==='present'?[{slot:'blue',image:installed.image}]:kind==='foreign'?[{slot:'green',image:installed.image}]:[];
    const trace=[];
    const host={runtime:current.runtime,
      assertRuntimeSources:async()=>{},assertInitialLegacyAbsent:async()=>{},
      assertNoPreflight:async()=>{if(kind==='foreign-preflight')throw Error('foreign preflight');},
      verifyWriterUnits:async()=>{if(kind==='source-drift')throw Error('source drift');},
+     assertCommittedWriterUnitSource:async()=>{if(kind==='shadow-unit')throw Error('not a generated Quadlet');},
      observe:async()=>({route:'blocked',writers}),
      assertNoWriterContainers:async()=>{if(kind==='stopped-foreign')throw Error('stopped foreign container');},
      startWriter:async(slot,r)=>{trace.push(slot);assert.equal(r,installed);writers=[{slot,image:r.image}];}

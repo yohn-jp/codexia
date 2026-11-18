@@ -122,6 +122,7 @@ export async function recoverProbeCredentialWriter({host,state}){
   await host.assertInitialLegacyAbsent();
   await host.assertNoPreflight();
   await host.verifyWriterUnits(state);
+  await host.assertCommittedWriterUnitSource(slot);
   const observed=await host.observe();
   assert.equal(observed.route,'blocked','Credential recovery requires blocked admission');
   if(observed.writers.length===0){

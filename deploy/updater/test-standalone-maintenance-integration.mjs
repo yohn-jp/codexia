@@ -749,6 +749,25 @@ async function main() {
   assert.equal(await readFile(githubTokenFile,'utf8'),'fixture-new-github\n');
   await new PodmanStandaloneHost(credentialConfig).stopWriter('blue');
   assert.equal(spawnSync('podman',['container','exists',CONTAINER],{stdio:'ignore'}).status,1);
+  // A native service that shadows the generated Quadlet is not authority
+  // to restart the committed writer. Refuse it before its ExecStart runs.
+  const shadow=path.join(userUnitDir,SERVICE);
+  const canary=path.join(workDir,'unexpected-writer-unit-start');
+  await writeFile(shadow,`[Service]\nType=oneshot\nExecStart=/usr/bin/touch ${canary}\n`,{mode:0o600,flag:'wx'});
+  try{
+    run('systemctl',['--user','daemon-reload']);
+    const refused=spawnSync('sh',[path.join(SOURCE_ROOT,'deploy/updater/codexia-updater'),'boot',configPath],
+      {encoding:'utf8',timeout:240000,env:credentialEnvironment});
+    assert.notEqual(refused.status,0,'Recovery accepted a shadow writer unit');
+    await assert.rejects(lstat(canary),{code:'ENOENT'});
+    assert.equal(spawnSync('podman',['container','exists',CONTAINER],{stdio:'ignore'}).status,1);
+    assert.equal((await readFile(routeFile,'utf8')),'blocked\n');
+    assert.equal((await loadControllerState(path.join(stateDir,'controller.json'))).paused,true);
+    assert.ok((await lstat(path.join(stateDir,'maintenance','in-progress.json'))).isFile());
+  }finally{
+    await rm(shadow);
+    run('systemctl',['--user','daemon-reload']);
+  }
   const recoveredAbsentWriter=spawnSync('sh',[path.join(SOURCE_ROOT,'deploy/updater/codexia-updater'),'boot',configPath],
     {encoding:'utf8',timeout:240000,env:credentialEnvironment});
   assert.equal(recoveredAbsentWriter.status,0,'Credential interruption with stopped writer failed boot recovery: '+recoveredAbsentWriter.stderr);
