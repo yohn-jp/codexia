@@ -547,6 +547,21 @@ export function assertLegacyBackupIdentity({legacy,image,version},release,authEn
   }
 }
 function sha256(value){return createHash('sha256').update(value).digest('hex');}
+export function postgresRotationRuntimeFingerprint(projection){
+  assert.ok(projection&&typeof projection==='object'&&!Array.isArray(projection),'PostgreSQL runtime fingerprint projection is invalid');
+  const components=Object.fromEntries(Object.entries(projection).map(([name,value])=>[name,sha256(JSON.stringify(value))]));
+  return {digest:sha256(JSON.stringify(projection)),components};
+}
+export function assertPostgresRotationRuntimeFingerprint(snapshot,projection){
+  const actual=postgresRotationRuntimeFingerprint(projection);
+  assert.ok(snapshot.runtimeComponents&&typeof snapshot.runtimeComponents==='object'&&!Array.isArray(snapshot.runtimeComponents),
+    'PostgreSQL runtime recovery components are unobservable');
+  const changed=[...new Set([...Object.keys(snapshot.runtimeComponents),...Object.keys(actual.components)])]
+    .filter(name=>snapshot.runtimeComponents[name]!==actual.components[name]).sort();
+  assert.equal(actual.digest,snapshot.runtimeDigest,'Database runtime ownership changed'+(changed.length?' (components: '+changed.join(', ')+')':''));
+  assert.deepEqual(changed,[],'PostgreSQL runtime recovery components changed');
+  return actual.digest;
+}
 function imageId(value){return typeof value==='string'?value.replace(/^sha256:/u,''):'';}
 function imageRepository(reference){const name=reference.split('@',1)[0];const slash=name.lastIndexOf('/');return name.slice(0,slash+1)+name.slice(slash+1).split(':',1)[0];}
 function imageHasDigest(image,reference){
@@ -1558,7 +1573,10 @@ export class PodmanStandaloneHost{
     const mount=projection.SecretMounts.find(secret=>secret.name===appSecret);
     assert.ok(mount?.type==='mount'&&mount.target==='/run/secrets/app-password','Unexpected PostgreSQL app secret mount');
     mount.id='rotating';
-    return sha256(JSON.stringify(projection));
+    const fingerprint=postgresRotationRuntimeFingerprint(projection);
+    if(snapshot.runtimeComponents===undefined)snapshot.runtimeComponents=fingerprint.components;
+    else assertPostgresRotationRuntimeFingerprint(snapshot,projection);
+    return fingerprint.digest;
   }
   async passwordRotationDatabase(snapshot){
     const observed=await this.rotationDatabaseRuntime(snapshot);
