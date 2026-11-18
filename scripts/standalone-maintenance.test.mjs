@@ -295,6 +295,21 @@ test('boot recovery runs when the database failed or needs to be explicitly stop
   assert.ok(boot.indexOf('await recoverInterruptedMaintenance')<boot.indexOf("await host.unitActive('codexia-db.service')"));
 });
 
+test('PostgreSQL rotation failures identify the fenced maintenance phase',async()=>{
+  const {applyPostgresAppPassword}=await import('../deploy/updater/standalone-maintenance.mjs');
+  const state={journal:{phase:'committed',active:{slot:'blue',image:release.image}},installed:release,paused:true,lastError:null};
+  let route='blue';
+  const host={
+    route:async value=>{route=value;},assertPasswordRotationSources:async()=>{},assertRuntimeSources:async()=>{},
+    assertInitialLegacyAbsent:async()=>{},assertNoPreflight:async()=>{},verifyWriterUnits:async()=>{},
+    assertCommittedWriterUnitSource:async()=>{},passwordRotationDatabase:async()=>true,passwordRotationDatabaseId:async()=> '123:42',
+    observe:async()=>({route,writers:[state.journal.active]}),assertNoWriterContainers:async()=>{},stopWriter:async()=>{},
+    changePostgresAppPassword:async()=>{throw Error('psql failed (status 1): database rejected [redacted] authentication');},
+  };
+  await assert.rejects(applyPostgresAppPassword({host,state,snapshot:{databaseId:'123:42'},password:'b'.repeat(64),recovering:false,verify:async()=>{}}),
+    error=>error.message.includes('failed during SQL role update')&&error.cause?.message.includes('database rejected [redacted]')&&route==='blocked');
+});
+
 test('interrupted password rotation restores old SQL and mounted credentials at each disruption boundary',async()=>{
   const {applyPostgresAppPassword}=await import('../deploy/updater/standalone-maintenance.mjs');
   assert.equal(typeof applyPostgresAppPassword,'function');

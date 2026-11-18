@@ -18,12 +18,13 @@ const imageEnvironmentFromUnit=(imageEnvironment,unit)=>{
  return [...env].map(([key,value])=>key+'='+value);
 };
 
-test('sensitive host commands receive credential bytes on stdin and suppress command diagnostics',()=>{
+test('sensitive host command failures retain diagnostics while redacting credential bytes',()=>{
  const password='a'.repeat(64);
  const result=runWithSensitiveInput(process.execPath,['-e','process.stdout.write(require("node:fs").readFileSync(0))'],password+'\n');
  assert.equal(result,password+'\n');
- assert.throws(()=>runWithSensitiveInput(process.execPath,['-e','const v=require("node:fs").readFileSync(0,"utf8");process.stderr.write(v);process.exit(7)'],password),
-  error=>error instanceof Error&&!error.message.includes(password));
+ const input='\\password codexia\n'+password+'\n'+password+'\n';
+ assert.throws(()=>runWithSensitiveInput(process.execPath,['-e','const v=require("node:fs").readFileSync(0,"utf8").split("\\n")[1];process.stderr.write("database rejected "+v+" authentication");process.exit(7)'],input),
+  error=>error instanceof Error&&!error.message.includes(password)&&error.message.includes('database rejected [redacted] authentication'));
 });
 test('PostgreSQL app-password change sends the credential only as psql stdin input',()=>{
  const password='a'.repeat(64);

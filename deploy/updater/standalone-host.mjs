@@ -356,7 +356,12 @@ export function runWithSensitiveInput(binary,args,input,{timeout=120000,env=proc
   assert.ok(typeof binary==='string'&&Array.isArray(args)&&args.every(value=>typeof value==='string'));
   assert.ok(typeof input==='string'||Buffer.isBuffer(input),'Sensitive command input must be bytes');
   const result=spawnSync(binary,args,{encoding:'utf8',input,timeout,maxBuffer:4*1024*1024,env,stdio:['pipe','pipe','pipe']});
-  if(result.error||result.status!==0)throw new Error(binary+' '+String(args[0]??'')+' failed (status '+String(result.status??'unknown')+')');
+  if(result.error||result.status!==0){
+    let diagnostic=String(result.stderr??'').slice(0,4096);
+    const sensitiveLines=[...new Set(String(input).split(/\r?\n/u).filter(line=>line.length>=8))];
+    for(const line of sensitiveLines)diagnostic=diagnostic.replaceAll(line,'[redacted]');
+    throw new Error(binary+' '+String(args[0]??'')+' failed (status '+String(result.status??'unknown')+')'+(diagnostic?': '+diagnostic.trim() : ''));
+  }
   return result.stdout;
 }
 export function validatePostgresAppPassword(content){

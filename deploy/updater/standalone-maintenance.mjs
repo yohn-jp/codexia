@@ -201,19 +201,23 @@ export async function applyPostgresAppPassword({host,state,snapshot,password,rec
   assertRotationState(state);
   validatePostgresAppPassword(password);
   const {slot,image}=state.journal.active;
-  await host.route('blocked');
+  let phase='route fence';
   try{
+    await host.route('blocked');
+    phase='source admission';
     await host.assertPasswordRotationSources(snapshot);
     await host.assertRuntimeSources();
     await host.assertInitialLegacyAbsent();
     await host.assertNoPreflight();
     await host.verifyWriterUnits(state);
     await host.assertCommittedWriterUnitSource(slot);
+    phase='database identity admission';
     const running=await host.passwordRotationDatabase(snapshot);
     if(running)assert.equal(await host.passwordRotationDatabaseId(),snapshot.databaseId,'Database identity changed');
     else assert.ok(recovering,'Database disappeared before rotation');
     const observed=await host.observe();
     assert.equal(observed.route,'blocked');
+    phase='writer fence';
     if(observed.writers.length){
       assert.deepEqual(observed.writers,[{slot,image}],'Unexpected writer prevents app-password rotation');
       await host.assertNoWriterContainers(slot);
@@ -222,22 +226,29 @@ export async function applyPostgresAppPassword({host,state,snapshot,password,rec
     await host.assertNoWriterContainers();
     // The forward operation uses the currently admitted DB. Recovery can begin
     // with a missing secret and no DB, so restore the mount first in that case.
-    if(!recovering)await host.changePostgresAppPassword(password);
+    if(!recovering){phase='SQL role update';await host.changePostgresAppPassword(password);}
+    phase='database stop';
     await host.stopPasswordRotationDatabase(snapshot);
+    phase='immutable secret replacement';
     await host.replacePostgresAppSecret(password,snapshot);
+    phase='database restart and identity verification';
     await host.startPasswordRotationDatabase(snapshot);
     assert.equal(await host.passwordRotationDatabaseId(),snapshot.databaseId,'Restarted database identity changed');
-    if(recovering)await host.changePostgresAppPassword(password);
+    if(recovering){phase='SQL role restore';await host.changePostgresAppPassword(password);}
+    phase='credential verification';
     await host.verifyPostgresAppPassword(password);
     await host.verifyWriterUnits(state);
     await host.assertCommittedWriterUnitSource(slot);
+    phase='writer restart and route verification';
     await host.startWriter(slot,state.installed);
     await host.verifyBlockedPasswordRotation(slot,state.installed);
+    phase='route restore and final verification';
     await host.route(slot);
     await verify();
   }catch(error){
     await host.route('blocked').catch(()=>{});
-    throw error;
+    const detail=error instanceof Error?error.message:'unknown failure';
+    throw Error(`PostgreSQL app-password rotation failed during ${phase}: ${detail}`,{cause:error});
   }
 }
 
@@ -486,7 +497,7 @@ async function recoverInterrupted(config,store,markerPath,publicKey){
     assert.ok(marker,'Interrupted maintenance marker disappeared during recovery');
     if(marker.format===rotationFormat){
       try{await recoverPasswordRotation({config,store,publicKey,marker,markerPath});}
-      catch{throw Error('Interrupted password rotation recovery is unverified');}
+      catch(error){throw Error('Interrupted password rotation recovery is unverified',{cause:error});}
       return true;
     }
     assert.equal(marker.stateFile,config.stateFile,'Interrupted maintenance belongs to a different controller');
@@ -639,10 +650,10 @@ async function rotatePostgresAppPassword({config,manifest,manifestPath,serviceHo
   await atomicWrite(markerPath,JSON.stringify(marker)+'\n');
   try{
     await finishRotation({config,state,host,controller,marker,markerPath,snapshot,password,recovering:false});
-  }catch{
+  }catch(rotationError){
     try{await recoverInterrupted(config,store,markerPath,publicKey);}
-    catch{throw Error('Password rotation could not verify rollback; recovery remains blocked');}
-    throw Error('Password rotation failed; the previous app credential and serving release were restored');
+    catch(recoveryError){throw new AggregateError([rotationError,recoveryError],'Password rotation could not verify rollback; recovery remains blocked');}
+    throw Error('Password rotation failed; the previous app credential and serving release were restored',{cause:rotationError});
   }
   return {format:'codexia-updater-maintenance/v1',postgresAppPasswordRotated:true};
 }
