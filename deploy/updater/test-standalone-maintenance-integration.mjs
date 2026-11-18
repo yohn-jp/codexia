@@ -809,6 +809,34 @@ async function main() {
   const stopped = spawnSync('podman', ['container', 'exists', CONTAINER], { timeout: 15000, stdio: 'ignore' });
   if (stopped.error) throw stopped.error;
   assert.equal(stopped.status, 1, 'Cleanup must prove writer absence');
+  // Exercise the actual common adapter, not the synthetic start override.
+  const commonHost=new PodmanStandaloneHost(appliedConfig);
+  const committed=(await loadControllerState(appliedConfig.stateFile)).installed;
+  const commonSource=path.join(appliedConfig.quadletDirectory,'codexia-slot-blue.container');
+  const originalSource=await readFile(commonSource,'utf8');
+  const commonCanary=path.join(workDir,'common-writer-shadow-executed');
+  const commonShadow=path.join(userUnitDir,SERVICE);
+  await writeFile(commonShadow,`[Service]\nType=oneshot\nExecStart=/usr/bin/touch ${commonCanary}\n`,{mode:0o600,flag:'wx'});
+  try{
+    await assert.rejects(commonHost.startWriter('blue',committed),/reviewed Quadlet|generated Quadlet/);
+    await assert.rejects(lstat(commonCanary),{code:'ENOENT'});
+    assert.equal(spawnSync('podman',['container','exists',CONTAINER],{stdio:'ignore'}).status,1);
+  }finally{
+    await rm(commonShadow);
+    await atomicWrite(commonSource,originalSource);
+    run('systemctl',['--user','daemon-reload']);
+  }
+  const unknownSlot=run('podman',['create','--name','codexia-slot-green',expectedImage]);
+  try{
+    await assert.rejects(commonHost.startWriter('blue',committed),/Unexpected stopped or running slot container/);
+    assert.equal(JSON.parse(run('podman',['inspect','--type','container',unknownSlot]))[0].Id,unknownSlot);
+    assert.equal(await readFile(commonSource,'utf8'),originalSource);
+  }finally{run('podman',['rm',unknownSlot]);}
+  const unknownPreflight=run('podman',['create','--name','codexia-preflight-blue',expectedImage]);
+  try{
+    await assert.rejects(commonHost.prepare('blue',committed),/Preflight ownership is unverified/);
+    assert.equal(JSON.parse(run('podman',['inspect','--type','container',unknownPreflight]))[0].Id,unknownPreflight);
+  }finally{run('podman',['rm',unknownPreflight]);}
   run('systemctl', ['--user', 'daemon-reload']);
   for (const unit of MAINTENANCE_UNIT_FILES) {
     const filename = path.join(userUnitDir, unit);
