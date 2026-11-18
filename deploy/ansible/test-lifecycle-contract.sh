@@ -117,7 +117,7 @@ for mode in unapproved check-mode; do
       echo 'App-password rotation unexpectedly passed without explicit approval' >&2
       exit 1
     fi
-    rg -Fq 'PostgreSQL app password rotation requires an initialized controller, verified backup and restore receipt, and explicit approval.' "$log"
+    grep -Fq 'PostgreSQL app password rotation requires an initialized controller, verified backup and restore receipt, and explicit approval.' "$log"
   else
     if ansible-playbook --check -i localhost, -c local "$root/deploy/ansible/test-app-password-rotation-gate.yml" \
       -e codexia_app_password_rotation_approved=true > "$log" 2>&1; then
@@ -125,7 +125,7 @@ for mode in unapproved check-mode; do
       echo 'App-password rotation unexpectedly passed in check mode' >&2
       exit 1
     fi
-    rg -Fq 'PostgreSQL app password rotation requires an initialized controller, verified backup and restore receipt, and explicit approval.' "$log"
+    grep -Fq 'PostgreSQL app password rotation requires an initialized controller, verified backup and restore receipt, and explicit approval.' "$log"
   fi
 done
 
