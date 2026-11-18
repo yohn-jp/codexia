@@ -52,8 +52,14 @@ all:
         codexia_maintenance_approved: false
         # Explicitly rotate only GitHub read and paired Access probe files.
         codexia_probe_credential_rotation_approved: false
+        # PostgreSQL app password rotation is downtime-tolerant and requires a
+        # current off-VM backup plus matching isolated restore receipt.
+        codexia_app_password_rotation_approved: false
+        codexia_postgres_app_password_rotation_file: /private/new-postgres-app-password
+        codexia_app_password_restore_receipt_file: /private/verified-restore-receipt.json
         codexia_acceptance_approved: false
         # codexia_installed_release_file: /private/installed-release.json
         # codexia_bootstrap_candidate_file: /private/bootstrap-candidate.json
-        # codexia_restore_receipt_file: /private/verified-restore-receipt.json
+        # App-password rotation uses a distinct protected new credential and the
+        # exact current-generation restore receipt from an isolated restore drill.
         # On isolated recovery host: codexia_restore_receipt_output_file: /private/new-restore-receipt.json

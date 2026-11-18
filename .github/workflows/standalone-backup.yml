@@ -17,10 +17,17 @@ on:
       - deploy/ansible/verify-updater-units.yml
       - deploy/ansible/lifecycle.yml
       - deploy/ansible/restore-drill.yml
+      - deploy/ansible/rotate-app-password.yml
+      - deploy/ansible/validate-app-password-rotation-inputs.yml
+      - deploy/ansible/test-app-password-rotation.yml
+      - deploy/ansible/test-app-password-rotation-gate.yml
       - deploy/ansible/test-lifecycle-contract.sh
       - deploy/ansible/test-lifecycle-contract.yml
       - deploy/quadlet/codexia-db.container
       - deploy/ansible/site.yml
+      - deploy/ansible/README.md
+      - deploy/ansible/inventory.example.yml
+      - docs/deployment/IAC.md
       - deploy/ansible/validate-runtime.yml
       - deploy/ansible/requirements.txt
       - .github/workflows/standalone-backup.yml
@@ -41,10 +48,17 @@ on:
       - deploy/ansible/verify-updater-units.yml
       - deploy/ansible/lifecycle.yml
       - deploy/ansible/restore-drill.yml
+      - deploy/ansible/rotate-app-password.yml
+      - deploy/ansible/validate-app-password-rotation-inputs.yml
+      - deploy/ansible/test-app-password-rotation.yml
+      - deploy/ansible/test-app-password-rotation-gate.yml
       - deploy/ansible/test-lifecycle-contract.sh
       - deploy/ansible/test-lifecycle-contract.yml
       - deploy/quadlet/codexia-db.container
       - deploy/ansible/site.yml
+      - deploy/ansible/README.md
+      - deploy/ansible/inventory.example.yml
+      - docs/deployment/IAC.md
       - deploy/ansible/validate-runtime.yml
       - deploy/ansible/requirements.txt
       - .github/workflows/standalone-backup.yml

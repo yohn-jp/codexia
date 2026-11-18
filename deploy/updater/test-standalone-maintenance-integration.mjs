@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { signUpdateChannel } from '../../scripts/update-channel.mjs';
-import { chmod, lstat, mkdir, readFile, readdir, rm, rmdir, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -33,6 +33,9 @@ import {
 const UID = process.getuid();
 const SERVICE = 'codexia-slot-blue.service';
 const CONTAINER = 'codexia-slot-blue';
+const ROTATION_PROXY_CONTAINER = 'codexia-api-proxy';
+const POSTGRES_IMAGE = 'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536';
+const BACKUP_DIGEST_FIXTURE = 'e'.repeat(64);
 const SOURCE_ROOT = '/opt/codexia-updater';
 const SOURCE_MARKER = path.join(SOURCE_ROOT, '.codexia-runtime-contract-source');
 const FAILURE_CPU = 175;
@@ -326,6 +329,44 @@ export function installTestAdapters(hostClass = PodmanStandaloneHost) {
   const verifyWriterUnitsWithPinnedIdentity = hostClass.prototype.verifyWriterUnits;
   assert.match(expectedImage ?? '', /^sha256:[a-f0-9]{64}$/u, 'Synthetic local image identity is missing');
 
+  if (process.env.CODEXIA_RUNTIME_MAINTENANCE_BACKUP_DIGEST) {
+    const backupDigest = process.env.CODEXIA_RUNTIME_MAINTENANCE_BACKUP_DIGEST;
+    assert.match(backupDigest, /^[a-f0-9]{64}$/u);
+    // The disposable VM has no off-VM backup destination. Keep proof/receipt
+    // structure, release, generation and live PostgreSQL identity real while
+    // substituting only the external artifact digest lookup.
+    hostClass.prototype.backupArtifactIdentity = async function syntheticPublishedArtifact(directory) {
+      assert.ok(path.basename(directory).startsWith('codexia-'), 'Synthetic backup path lost its artifact identity');
+      return backupDigest;
+    };
+    hostClass.prototype.assertProxyRuntime = async function assertDisposableStableProxy() {
+      assert.equal(systemdState(`${ROTATION_PROXY_CONTAINER}.service`), 'active', 'Stable proxy fixture is not active');
+      const [proxy] = JSON.parse(run('podman', ['inspect', '--type', 'container', ROTATION_PROXY_CONTAINER]));
+      assert.equal(proxy.State?.Running, true, 'Stable proxy fixture is not running');
+      assert.equal(normalizeImageId(proxy.Image), expectedImage, 'Stable proxy fixture image changed');
+      assert.deepEqual(Object.keys(proxy.NetworkSettings?.Networks ?? {}).sort(), ['codexia']);
+    };
+    hostClass.prototype.verifyBlockedPasswordRotation = async function verifyBlockedPostgresRotation(slot, release) {
+      assert.deepEqual(await this.observe(), { route: 'blocked', writers: [{ slot, image: release.image }] });
+      await this.assertProxyRuntime();
+      await this.waitReady(`codexia-slot-${slot}`, release);
+      const response = run('podman', ['exec', ROTATION_PROXY_CONTAINER, 'node', '--input-type=module', '-e',
+        'const r=await fetch("http://127.0.0.1:3000/api/version",{signal:AbortSignal.timeout(3000)});process.stdout.write(String(r.status));']);
+      assert.equal(response, '503', 'Stable proxy fixture admitted traffic while rotation was fenced');
+    };
+    hostClass.prototype.probe = async function probePostgresRotationWriter(slot, release) {
+      await this.assertProxyRuntime();
+      await this.waitReady(`codexia-slot-${slot}`, release);
+      const result = JSON.parse(run('podman', ['exec', ROTATION_PROXY_CONTAINER, 'node', '--input-type=module', '-e',
+        'const r=await fetch("http://127.0.0.1:3000/api/version",{signal:AbortSignal.timeout(3000)});if(!r.ok)process.exit(1);process.stdout.write(JSON.stringify({slot:r.headers.get("x-codexia-upstream-slot"),version:await r.json()}));']));
+      assert.equal(result.slot, slot, 'Stable proxy selected a different writer slot');
+      assert.equal(result.version.name, 'codexia');
+      assert.equal(result.version.version, release.version);
+      assert.equal(result.version.profile, release.profile);
+      assert.equal(result.version.apiEpoch, release.apiEpoch);
+    };
+  }
+
   // Only this disposable test adapter emulates the external metadata endpoints.
   // The actual maintenance file writes, lock, systemd timer and recovery are real.
   if (process.env.CODEXIA_RUNTIME_MAINTENANCE_PROBE_KEY) {
@@ -486,6 +527,277 @@ async function assertTimerState(active, enabled) {
     enabled: run('systemctl', ['--user', 'show', '--property=UnitFileState', '--value', 'codexia-updater.timer']),
   };
   assert.deepEqual(observed, { active, enabled }, 'Locked maintenance changed updater polling state');
+}
+
+function runAppPasswordQuery(sql) {
+  return run('podman', ['exec', '-i', 'codexia-db', 'sh', '-ec',
+    'export PGPASSWORD="$(cat /run/secrets/app-password)"; exec psql -X -w -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia -d codexia'],
+  { input: sql, stdio: ['pipe', 'pipe', 'pipe'] });
+}
+
+async function createPasswordRotationCandidate({ stateDir, config, userUnitDir, password }) {
+  const candidateRoot = path.join(path.dirname(config.publicKeyFile), 'maintenance', 'candidates', randomBytes(16).toString('hex'));
+  await mkdir(candidateRoot, { recursive: true, mode: 0o700 });
+  const credentials = path.join(candidateRoot, 'credentials');
+  const quadlet = path.join(candidateRoot, 'quadlet', 'codexia-db.container');
+  await mkdir(credentials, { recursive: true, mode: 0o700 });
+  await mkdir(path.dirname(quadlet), { recursive: true, mode: 0o700 });
+  await writeFile(path.join(credentials, 'postgres-app-password'), password, { mode: 0o600, flag: 'wx' });
+  await writeFile(quadlet, await readFile(path.join(config.quadletDirectory, 'codexia-db.container')), { mode: 0o600, flag: 'wx' });
+
+  const backupDigest = BACKUP_DIGEST_FIXTURE;
+  const state = await loadControllerState(config.stateFile);
+  const databaseId = await new PodmanStandaloneHost(config).passwordRotationDatabaseId();
+  const artifactName = `codexia-${new Date().toISOString().replace(/[-:]/gu, '').replace(/\.\d{3}Z$/u, 'Z')}-${randomUUID()}`;
+  const artifactDirectory = path.join(path.dirname(stateDir), artifactName);
+  await mkdir(artifactDirectory, { mode: 0o700 });
+  const proof = {
+    format: 'codexia-controller-backup-proof/v1', artifactDirectory, checksumManifestSha256: backupDigest,
+    databaseId, journalGeneration: state.journal.generation, release: state.installed,
+  };
+  await atomicWrite(path.join(stateDir, 'controller-backup-proof.json'), JSON.stringify(proof) + '\n');
+  const receipt = { format: 'codexia-restore-receipt/v1', checksumManifestSha256: backupDigest };
+  const receiptFile = path.join(candidateRoot, 'restore-receipt.json');
+  await writeFile(receiptFile, JSON.stringify(receipt) + '\n', { mode: 0o600, flag: 'wx' });
+  const manifest = {
+    format: 'codexia-updater-maintenance/v1', rotatePostgresAppPassword: true,
+    candidateRoot: candidateRoot, configPath: path.join(path.dirname(config.publicKeyFile), 'config.json'),
+    sourceDir: SOURCE_ROOT, unitDir: userUnitDir,
+    appPasswordFile: path.join(credentials, 'postgres-app-password'), restoreReceiptFile: receiptFile,
+    databaseQuadletFile: quadlet,
+  };
+  const manifestPath = path.join(candidateRoot, 'manifest.json');
+  await writeFile(manifestPath, JSON.stringify(manifest) + '\n', { mode: 0o600, flag: 'wx' });
+  return { root: candidateRoot, manifestPath, manifest, state, databaseId, artifactDirectory };
+}
+
+async function runRotationCandidate({ repoRoot, candidate, configPath, environment, expectedStatus = 0, killAtSecretCreate = false }) {
+  const wrapper = path.join(SOURCE_ROOT, 'deploy/updater/codexia-updater');
+  const preload = path.join(repoRoot, 'deploy/updater/test-standalone-maintenance-preload.mjs');
+  let env = {
+    ...environment,
+    CODEXIA_RUNTIME_MAINTENANCE_APP_PASSWORD_ROTATION: 'yes',
+    CODEXIA_RUNTIME_MAINTENANCE_BACKUP_DIGEST: BACKUP_DIGEST_FIXTURE,
+    NODE_OPTIONS: [environment.NODE_OPTIONS, `--import=${preload}`].filter(Boolean).join(' '),
+  };
+  let observedFile;
+  if (killAtSecretCreate) {
+    const faultBin = path.join(candidate.root, 'fault-bin');
+    await mkdir(faultBin, { mode: 0o700 });
+    observedFile = path.join(candidate.root, 'secret-created-before-process-death');
+    const podmanPath = execFileSync('which', ['podman'], { encoding: 'utf8' }).trim();
+    const shim = [
+      '#!/bin/sh',
+      `"${podmanPath}" "$@"`,
+      'status=$?',
+      'if [ "$status" -ne 0 ]; then exit "$status"; fi',
+      'if [ "$1" = secret ] && [ "$2" = create ]; then',
+      '  for argument do',
+      '    if [ "$argument" = codexia-postgres-app-password ]; then',
+      `      printf '%s\\n' created > "${observedFile}"`,
+      '      kill -KILL "$PPID"',
+      '      break',
+      '    fi',
+      '  done',
+      'fi',
+      'exit "$status"',
+    ].join('\n') + '\n';
+    await writeFile(path.join(faultBin, 'podman'), shim, { mode: 0o700, flag: 'wx' });
+    env = {
+      ...env, PATH: faultBin + path.delimiter + env.PATH,
+      CODEXIA_RUNTIME_MAINTENANCE_KILL_AT: 'after-new-secret-create',
+    };
+  }
+  const child = spawnSync('sh', [wrapper, 'maintain', configPath, candidate.manifestPath], {
+    encoding: 'utf8', timeout: 240000, maxBuffer: 4 * 1024 * 1024, env,
+  });
+  if (child.error) throw child.error;
+  if (killAtSecretCreate) {
+    assert.equal(child.signal, 'SIGKILL', `Rotation did not die after replacing the canonical secret: ${child.stdout}\n${child.stderr}`);
+    assert.equal((await readFile(observedFile, 'utf8')).trim(), 'created');
+  } else if (expectedStatus === 0 && child.status !== 0) {
+    throw new Error(`PostgreSQL password rotation failed (${child.status}):\n${child.stdout}\n${child.stderr}`);
+  } else if (expectedStatus !== 0) assert.notEqual(child.status, 0, 'Rotation unexpectedly succeeded');
+  return child;
+}
+
+async function startStableRotationProxy({ repoRoot, config, proxyQuadlet, originalProxyText, expectedImage, nonce }) {
+  const source = `[Unit]\nDescription=Disposable Codexia stable proxy for PostgreSQL rotation ${nonce}\n` +
+    `[Container]\nImage=${expectedImage}\nContainerName=codexia-api-proxy\nNetwork=codexia.network\n` +
+    `Volume=${path.join(repoRoot, 'deploy/updater/proxy.mjs')}:/config/proxy.mjs:ro,Z\n` +
+    `Volume=${path.dirname(config.stateFile)}:/config/state:ro,Z\n` +
+    `User=0\nEntrypoint=node\nExec=/config/proxy.mjs\nReadOnly=true\nNoNewPrivileges=true\nDropCapability=all\n` +
+    `Tmpfs=/tmp:rw,nosuid,nodev,noexec,size=16m\nLabel=codexia.runtime-contract-test=${nonce}\n` +
+    `[Service]\nRestart=on-failure\nRestartSec=1\nTimeoutStartSec=30\n[Install]\nWantedBy=default.target\n`;
+  await atomicWrite(proxyQuadlet, source);
+  try {
+    run('systemctl', ['--user', 'daemon-reload']);
+    run('systemctl', ['--user', 'restart', 'codexia-api-proxy.service']);
+    await waitForUnit('codexia-api-proxy.service', 'active');
+  } catch (error) {
+    await atomicWrite(proxyQuadlet, originalProxyText);
+    run('systemctl', ['--user', 'daemon-reload']);
+    throw error;
+  }
+  return async () => {
+    let stopError;
+    try { await run('systemctl', ['--user', 'stop', 'codexia-api-proxy.service']); }
+    catch (error) { stopError = error; }
+    await atomicWrite(proxyQuadlet, originalProxyText);
+    run('systemctl', ['--user', 'daemon-reload']);
+    if (stopError) throw stopError;
+  };
+}
+
+async function restoreBootManagerEnvironment(values) {
+  for (const [name, value] of Object.entries(values)) {
+    run('systemctl', ['--user', value === null ? 'unset-environment' : 'set-environment', ...(value === null ? [name] : [`${name}=${value}`])]);
+  }
+}
+
+async function probeRemoteAppPassword(password, suffix) {
+  const secretName = `codexia-rotation-auth-${suffix}`;
+  const secretDirectory = await mkdtemp(path.join(os.tmpdir(), 'codexia-postgres-auth-probe-'));
+  await chmod(secretDirectory, 0o700);
+  const passwordFile = path.join(secretDirectory, 'password');
+  let secretCreated = false;
+  try {
+    await writeFile(passwordFile, password, { mode: 0o600, flag: 'wx' });
+    await chmod(passwordFile, 0o600);
+    const fileInfo = await lstat(passwordFile);
+    assert.ok(fileInfo.isFile() && !fileInfo.isSymbolicLink() && fileInfo.uid === UID && (fileInfo.mode & 0o777) === 0o600,
+      'Isolated PostgreSQL authentication probe file is not private');
+    const created = spawnSync('podman', ['secret', 'create', secretName, passwordFile], {
+      encoding: 'utf8', timeout: 30000,
+    });
+    assert.equal(created.status, 0, `Could not stage isolated PostgreSQL authentication probe: ${created.stderr}`);
+    secretCreated = true;
+    return spawnSync('podman', ['run', '--rm', '--network', 'codexia-data', '--secret',
+      `${secretName},type=mount,target=/run/secrets/probe-password`, '--entrypoint', 'sh', POSTGRES_IMAGE,
+      '-ec', 'export PGPASSWORD="$(cat /run/secrets/probe-password)"; exec psql -X -w -qAt -h codexia-db -U codexia -d codexia -c "SELECT 1"'], {
+      encoding: 'utf8', timeout: 30000,
+    });
+  } finally {
+    try {
+      if (secretCreated) run('podman', ['secret', 'rm', secretName]);
+    } finally {
+      await rm(secretDirectory, { recursive: true, force: true });
+    }
+  }
+}
+
+async function exercisePostgresPasswordRotation({ repoRoot, config, userUnitDir, workDir, nonce, expectedImage, originalProxyText, proxyQuadlet, environment }) {
+  const restoreProxy = await startStableRotationProxy({ repoRoot, config, proxyQuadlet, originalProxyText, expectedImage, nonce });
+  const markerPath = path.join(path.dirname(config.stateFile), 'maintenance', 'in-progress.json');
+  const privateDir = path.dirname(config.publicKeyFile);
+  let originalState = null;
+  let candidate = null;
+  let interruptedCandidate = null;
+  try {
+  originalState = await loadControllerState(config.stateFile);
+  assert.ok(['committed', 'idle'].includes(originalState.journal.phase), 'Rotation fixture requires a committed controller');
+  const pausedState = { ...originalState, paused: true };
+  await atomicWrite(config.stateFile, JSON.stringify(pausedState) + '\n');
+  const database = new PodmanStandaloneHost(config);
+  const databaseIdentity = await database.passwordRotationDatabaseId();
+  runAppPasswordQuery('CREATE TABLE IF NOT EXISTS public.runtime_rotation_probe(value text PRIMARY KEY);\n' +
+    'INSERT INTO public.runtime_rotation_probe(value) VALUES (\'' + nonce + '\') ON CONFLICT DO NOTHING;\n');
+
+  const publishedPassword = randomBytes(32).toString('hex');
+  candidate = await createPasswordRotationCandidate({ stateDir: path.dirname(config.stateFile), config, userUnitDir, password: publishedPassword });
+  const oldSecretId = JSON.parse(run('podman', ['secret', 'inspect', 'codexia-postgres-app-password']))[0].ID;
+  await runRotationCandidate({ repoRoot, candidate, configPath: path.join(path.dirname(config.publicKeyFile), 'config.json'), stateDir: path.dirname(config.stateFile), environment });
+  await assert.rejects(lstat(path.join(path.dirname(config.stateFile), 'maintenance', 'in-progress.json')), { code: 'ENOENT' }, 'Successful rotation retained its recovery marker');
+  const newSecretId = JSON.parse(run('podman', ['secret', 'inspect', 'codexia-postgres-app-password']))[0].ID;
+  assert.notEqual(newSecretId, oldSecretId, 'Immutable Podman secret ID did not change on rotation');
+  assert.equal(await database.passwordRotationDatabaseId(), databaseIdentity, 'Successful rotation replaced the PostgreSQL identity');
+  assert.equal(await database.verifyPostgresAppPassword(publishedPassword), undefined);
+  assert.equal(runAppPasswordQuery('SELECT value FROM public.runtime_rotation_probe;'), nonce, 'Application data changed during rotation');
+  const publishedAuth = await probeRemoteAppPassword(publishedPassword, randomUUID());
+  assert.equal(publishedAuth.status, 0, `New PostgreSQL app password did not authenticate: ${publishedAuth.stderr}`);
+  assert.equal(publishedAuth.stdout.trim(), '1', 'New PostgreSQL app password did not return the authenticated probe result');
+  const oldAuth = await probeRemoteAppPassword(await readFile(path.join(workDir, 'postgres-app-password.initial'), 'utf8'), randomUUID());
+  assert.notEqual(oldAuth.status, 0, 'Old PostgreSQL app password still authenticated after rotation');
+  assert.match(`${oldAuth.stdout ?? ''}${oldAuth.stderr ?? ''}`, /password authentication failed/iu, 'Stale password rejection did not come from PostgreSQL authentication');
+  assert.equal((await readFile(config.routeFile, 'utf8')).trim(), 'blue');
+  assert.equal(systemdState('codexia-slot-blue.service'), 'active');
+  assert.equal(systemdState('codexia-db.service'), 'active');
+  assert.equal((await loadControllerState(config.stateFile)).paused, true, 'Rotation changed the paused journal state');
+  await assertTimerState('active', 'enabled');
+
+  const currentSecretId = newSecretId;
+  const interruptedPassword = randomBytes(32).toString('hex');
+  interruptedCandidate = await createPasswordRotationCandidate({ stateDir: path.dirname(config.stateFile), config, userUnitDir, password: interruptedPassword });
+  const interruption = await runRotationCandidate({ repoRoot, candidate: interruptedCandidate, configPath: path.join(path.dirname(config.publicKeyFile), 'config.json'), stateDir: path.dirname(config.stateFile), environment, killAtSecretCreate: true });
+  assert.equal(interruption.signal, 'SIGKILL');
+  const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+  assert.equal(marker.format, 'codexia-maintenance-postgres-app-password/v1');
+  assert.equal((await readFile(config.routeFile, 'utf8')).trim(), 'blocked');
+  assert.equal((await loadControllerState(config.stateFile)).paused, true);
+  assert.ok(['inactive', 'failed'].includes(systemdState('codexia-slot-blue.service')));
+  assert.ok(['inactive', 'failed'].includes(systemdState('codexia-db.service')));
+  await assertTimerState('inactive', 'enabled');
+
+  const watchedEnvironment = ['NODE_OPTIONS', 'XDG_STATE_HOME', 'CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE', 'CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY',
+    'CODEXIA_RUNTIME_MAINTENANCE_BACKUP_DIGEST', 'CODEXIA_RUNTIME_MAINTENANCE_IMAGE', 'CODEXIA_RUNTIME_MAINTENANCE_NONCE'];
+  const managerEnv = run('systemctl', ['--user', 'show-environment']).split('\n');
+  const restore = Object.fromEntries(watchedEnvironment.map(name => [name, managerEnv.find(line => line.startsWith(name + '='))?.slice(name.length + 1) ?? null]));
+  const preload = path.join(repoRoot, 'deploy/updater/test-standalone-maintenance-preload.mjs');
+  run('systemctl', ['--user', 'set-environment',
+    `NODE_OPTIONS=--import=${preload}`, `XDG_STATE_HOME=${path.dirname(path.dirname(config.stateFile))}`,
+    'CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE=yes',
+    'CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY=yes',
+    `CODEXIA_RUNTIME_MAINTENANCE_BACKUP_DIGEST=${BACKUP_DIGEST_FIXTURE}`,
+    `CODEXIA_RUNTIME_MAINTENANCE_IMAGE=${expectedImage}`, `CODEXIA_RUNTIME_MAINTENANCE_NONCE=${nonce}`]);
+  try {
+    run('systemctl', ['--user', 'start', 'codexia-updater-boot.service'], { timeout: 240000 });
+  } finally {
+    await restoreBootManagerEnvironment(restore);
+  }
+  await assert.rejects(lstat(markerPath), { code: 'ENOENT' }, 'Boot recovery retained the password marker');
+  assert.equal((await readFile(config.routeFile, 'utf8')).trim(), 'blue', 'Boot recovery did not restore ingress');
+  assert.equal(await database.passwordRotationDatabaseId(), databaseIdentity, 'Boot recovery changed the physical database identity');
+  assert.equal(await database.verifyPostgresAppPassword(publishedPassword), undefined, 'Boot recovery did not restore the previous SQL role credential');
+  assert.equal(runAppPasswordQuery('SELECT value FROM public.runtime_rotation_probe;'), nonce, 'Boot recovery changed persistent application data');
+  const recoveredAuth = await probeRemoteAppPassword(publishedPassword, randomUUID());
+  assert.equal(recoveredAuth.status, 0, `Recovered PostgreSQL app password did not authenticate: ${recoveredAuth.stderr}`);
+  const failedNewAuth = await probeRemoteAppPassword(interruptedPassword, randomUUID());
+  assert.notEqual(failedNewAuth.status, 0, 'Interrupted PostgreSQL app password authenticated after rollback');
+  assert.match(`${failedNewAuth.stdout ?? ''}${failedNewAuth.stderr ?? ''}`, /password authentication failed/iu, 'Interrupted password was rejected for a reason other than PostgreSQL authentication');
+  const recoveredSecretId = JSON.parse(run('podman', ['secret', 'inspect', 'codexia-postgres-app-password']))[0].ID;
+  assert.notEqual(recoveredSecretId, currentSecretId, 'Boot recovery did not recreate the immutable prior Podman secret');
+  assert.equal(systemdState('codexia-db.service'), 'active');
+  assert.equal(systemdState('codexia-slot-blue.service'), 'active');
+  assert.equal((await loadControllerState(config.stateFile)).paused, true, 'Boot recovery changed the paused journal state');
+  await assertTimerState('active', 'enabled');
+  const proxied = JSON.parse(run('podman', ['exec', 'codexia-api-proxy', 'node', '--input-type=module', '-e',
+    'const r=await fetch("http://127.0.0.1:3000/api/version",{signal:AbortSignal.timeout(3000)});if(!r.ok)process.exit(1);process.stdout.write(JSON.stringify({slot:r.headers.get("x-codexia-upstream-slot"),version:await r.json()}));']));
+  assert.equal(proxied.slot, 'blue', 'Proxy did not route to the recovered writer');
+  assert.equal(proxied.version.name, 'codexia');
+
+  } finally {
+    let restoreError;
+    try { await restoreProxy(); } catch (error) { restoreError = error; }
+    const recoveryPending = await lstat(markerPath).then(() => true, error => error.code === 'ENOENT' ? false : Promise.reject(error));
+    if (originalState && !recoveryPending) {
+      await atomicWrite(config.stateFile, JSON.stringify(originalState) + '\n');
+    }
+    for (const root of [candidate?.root, interruptedCandidate?.root]) {
+      if (root) await rm(root, { recursive: true, force: true });
+    }
+    for (const artifact of [candidate?.artifactDirectory, interruptedCandidate?.artifactDirectory]) {
+      if (artifact) await rm(artifact, { recursive: true, force: true });
+    }
+    await rm(path.join(path.dirname(config.stateFile), 'controller-backup-proof.json'), { force: true });
+    await rm(path.join(privateDir, 'maintenance'), { recursive: true, force: true });
+    if (recoveryPending) {
+      process.stderr.write(`Preserving PostgreSQL rollback snapshot while recovery marker remains: ${markerPath}\n`);
+    } else {
+      await rm(path.join(privateDir, 'maintenance-snapshots'), { recursive: true, force: true });
+    }
+    assert.equal(await readFile(proxyQuadlet, 'utf8'), originalProxyText, 'Proxy fixture did not restore the production Quadlet text');
+    if (restoreError) throw restoreError;
+  }
 }
 
 async function main() {
@@ -797,6 +1109,11 @@ async function main() {
   await checkCredentials(true);
   await rm(credentialRoot,{recursive:true,force:true});
   await rm(probeKeyFile);
+
+  await exercisePostgresPasswordRotation({
+    repoRoot, config: appliedConfig, userUnitDir, workDir, nonce, expectedImage,
+    originalProxyText: proxyText, proxyQuadlet, environment,
+  });
 
   run('systemctl', ['--user', 'disable', '--now', 'codexia-updater.timer']);
   await assertTimerState('inactive', 'disabled');

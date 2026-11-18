@@ -105,6 +105,13 @@ jobs:
           sudo usermod --groups '' "$fixture_user"
           fixture_uid=$(id -u "$fixture_user")
           fixture_home=$(getent passwd "$fixture_user" | cut -d: -f6)
+          test ! -e /etc/codexia && test ! -L /etc/codexia
+          sudo install -d -o root -g root -m 0755 /etc/codexia
+          touch "$RUNNER_TEMP/codexia-runtime-contract.pg-iac-dir-created"
+          sudo install -d -o "$fixture_user" -g root -m 0750 /etc/codexia/postgres
+          touch "$RUNNER_TEMP/codexia-runtime-contract.pg-init-dir-created"
+          sudo install -o "$fixture_user" -g root -m 0555 "$GITHUB_WORKSPACE/deploy/postgres/010-create-app-role.sh" /etc/codexia/postgres/010-create-app-role.sh
+          touch "$RUNNER_TEMP/codexia-runtime-contract.pg-init-file-created"
           fixture_repo="$fixture_home/codexia-runtime-contract-repo"
           test ! -e "$fixture_repo" && test ! -L "$fixture_repo"
           touch "$RUNNER_TEMP/codexia-runtime-contract.repo-copy-created"
@@ -221,6 +228,46 @@ jobs:
           set +e
           cleanup_failed=0
           fixture_user=codexia-runtime-contract-test
+          fixture_uid=$(id -u "$fixture_user" 2>/dev/null || true)
+          if test -f "$RUNNER_TEMP/codexia-runtime-contract.pg-init-file-created"; then
+            if test -n "$fixture_uid" \
+              && sudo test -f /etc/codexia/postgres/010-create-app-role.sh \
+              && sudo test ! -L /etc/codexia/postgres/010-create-app-role.sh \
+              && test "$(sudo stat -c '%u:%g:%a' /etc/codexia/postgres/010-create-app-role.sh)" = "$fixture_uid:0:555" \
+              && sudo cmp -s "$GITHUB_WORKSPACE/deploy/postgres/010-create-app-role.sh" /etc/codexia/postgres/010-create-app-role.sh; then
+              sudo rm -- /etc/codexia/postgres/010-create-app-role.sh || cleanup_failed=1
+              rm -f "$RUNNER_TEMP/codexia-runtime-contract.pg-init-file-created" || cleanup_failed=1
+            else
+              echo 'Refusing to remove an unexpected PostgreSQL init fixture' >&2
+              sudo stat -c 'PostgreSQL init fixture: %n owner=%u:%g mode=%a type=%F' /etc/codexia/postgres/010-create-app-role.sh >&2 || true
+              cleanup_failed=1
+            fi
+          fi
+          if test -f "$RUNNER_TEMP/codexia-runtime-contract.pg-init-dir-created"; then
+            if test -n "$fixture_uid" \
+              && sudo test -d /etc/codexia/postgres && sudo test ! -L /etc/codexia/postgres \
+              && test "$(sudo stat -c '%u:%g:%a' /etc/codexia/postgres)" = "$fixture_uid:0:750" \
+              && test -z "$(sudo find /etc/codexia/postgres -mindepth 1 -maxdepth 1 -print -quit)"; then
+              sudo rmdir -- /etc/codexia/postgres || cleanup_failed=1
+              rm -f "$RUNNER_TEMP/codexia-runtime-contract.pg-init-dir-created" || cleanup_failed=1
+            else
+              echo 'Refusing to remove an unexpected PostgreSQL init directory' >&2
+              sudo stat -c 'PostgreSQL init directory: %n owner=%u:%g mode=%a type=%F' /etc/codexia/postgres >&2 || true
+              cleanup_failed=1
+            fi
+          fi
+          if test -f "$RUNNER_TEMP/codexia-runtime-contract.pg-iac-dir-created"; then
+            if sudo test -d /etc/codexia && sudo test ! -L /etc/codexia \
+              && test "$(sudo stat -c '%u:%g:%a' /etc/codexia)" = '0:0:755' \
+              && test -z "$(sudo find /etc/codexia -mindepth 1 -maxdepth 1 -print -quit)"; then
+              sudo rmdir -- /etc/codexia || cleanup_failed=1
+              rm -f "$RUNNER_TEMP/codexia-runtime-contract.pg-iac-dir-created" || cleanup_failed=1
+            else
+              echo 'Refusing to remove an unexpected /etc/codexia fixture directory' >&2
+              sudo stat -c 'Codexia fixture directory: %n owner=%u:%g mode=%a type=%F' /etc/codexia >&2 || true
+              cleanup_failed=1
+            fi
+          fi
           if test -f "$RUNNER_TEMP/codexia-runtime-contract.marker-created"; then
             sudo rm -f /etc/codexia-iac-disposable-vm || cleanup_failed=1
             rm -f "$RUNNER_TEMP/codexia-runtime-contract.marker-created" || cleanup_failed=1

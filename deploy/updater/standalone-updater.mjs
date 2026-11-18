@@ -64,6 +64,7 @@ if(command==='boot'){
   if(recovered)config=JSON.parse(await readFile(configPath,'utf8'));
 }
 const host=new PodmanStandaloneHost(config);
+if(command==='boot')assert.ok(await host.unitActive('codexia-db.service'),'Boot requires the canonical database service after maintenance recovery');
 if(command!=='maintain')await host.assertRuntimeSources();
 const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
 if(command==='recover-cutover'||(command==='boot'&&pendingCutover)){

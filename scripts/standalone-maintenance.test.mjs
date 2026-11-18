@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {probeCredentialFiles,validateProbeCredential,assertProbeCredentialAccess,recoverProbeCredentialWriter,assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig} from '../deploy/updater/standalone-maintenance.mjs';
+import {probeCredentialFiles,validateProbeCredential,validatePostgresAppPassword,validateAppPasswordRotationManifest,validatePostgresAppPasswordRotation,assertProbeCredentialAccess,recoverProbeCredentialWriter,assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig} from '../deploy/updater/standalone-maintenance.mjs';
 import {assertProxyRuntimeObservation,PodmanStandaloneHost} from '../deploy/updater/standalone-host.mjs';
-import {mkdtemp,rm,writeFile} from 'node:fs/promises';
+import {mkdtemp,rm,writeFile,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 
@@ -170,6 +170,44 @@ test('probe rotation targets only three canonical private credential files and r
   for(const bad of ['', 'with space','two\nlines','abc\r\n','x'.repeat(8193)])assert.throws(()=>validateProbeCredential(bad),/Invalid protected probe credential/);
   validateProbeCredential('valid-token\n');
 });
+test('app-password rotation accepts only a fixed private candidate and matching receipt path',()=>{
+  const root='/home/codexia/.config/codexia-updater/maintenance/candidates/test';
+  const manifest={format:'codexia-updater-maintenance/v1',candidateRoot:root,
+    configPath:'/home/codexia/.config/codexia-updater/config.json',sourceDir:'/opt/codexia-updater',
+    unitDir:'/home/codexia/.config/systemd/user',rotatePostgresAppPassword:true,
+    appPasswordFile:root+'/credentials/postgres-app-password',restoreReceiptFile:root+'/restore-receipt.json',databaseQuadletFile:root+'/quadlet/codexia-db.container'};
+  assert.deepEqual(validateAppPasswordRotationManifest(manifest,root+'/manifest.json','/home/codexia'),
+    {appPasswordFile:manifest.appPasswordFile,restoreReceiptFile:manifest.restoreReceiptFile,databaseQuadletFile:manifest.databaseQuadletFile});
+  assert.throws(()=>validateAppPasswordRotationManifest({...manifest,databaseQuadletFile:'/tmp/db.container'},root+'/manifest.json','/home/codexia'));
+  assert.throws(()=>validateAppPasswordRotationManifest({...manifest,arbitraryTarget:'/etc/passwd'},root+'/manifest.json','/home/codexia'));
+  assert.throws(()=>validateAppPasswordRotationManifest({...manifest,appPasswordFile:'/tmp/password'},root+'/manifest.json','/home/codexia'));
+  assert.throws(()=>validateAppPasswordRotationManifest({...manifest,restoreReceiptFile:'/tmp/receipt.json'},root+'/manifest.json','/home/codexia'));
+  assert.throws(()=>validateAppPasswordRotationManifest(manifest,root+'/elsewhere.json','/home/codexia'));
+  const mounted='/home/codexia/.local/state/codexia-updater/maintenance/candidates/test';
+  const visible={...manifest,candidateRoot:mounted,appPasswordFile:mounted+'/credentials/postgres-app-password',
+    restoreReceiptFile:mounted+'/restore-receipt.json',databaseQuadletFile:mounted+'/quadlet/codexia-db.container'};
+  assert.throws(()=>validateAppPasswordRotationManifest(visible,mounted+'/manifest.json','/home/codexia'),/private staging root/);
+
+});
+test('app-password validation accepts exactly 32-byte hexadecimal values without echoing invalid input',()=>{
+  const password='a'.repeat(64);
+  assert.equal(validatePostgresAppPassword(password),password);
+  assert.equal(validatePostgresAppPassword(password+'\n'),password+'\n');
+  for(const candidate of ['short','g'.repeat(64),password+'\n\n','s'.repeat(8193)]){
+    assert.throws(()=>validatePostgresAppPassword(candidate),error=>
+      error instanceof Error&&error.message==='Invalid protected app password'&&!error.message.includes(candidate));
+  }
+});
+test('app-password recovery marker binds only the canonical secret, database and previous password snapshot',()=>{
+  const snapshotRoot='/home/codexia/.local/state/codexia-updater/maintenance/snapshots/operation';
+  const marker={format:'codexia-postgres-app-password-rotation/v1',secretName:'codexia-postgres-app-password',
+    previousPasswordFile:snapshotRoot+'/postgres-app-password',databaseId:'123456789:12345',slot:'blue',releaseImage:release.image};
+  assert.deepEqual(validatePostgresAppPasswordRotation(marker,snapshotRoot),marker);
+  assert.throws(()=>validatePostgresAppPasswordRotation({...marker,secretName:'codexia-auth-token'},snapshotRoot));
+  assert.throws(()=>validatePostgresAppPasswordRotation({...marker,previousPasswordFile:'/tmp/secret'},snapshotRoot));
+  assert.throws(()=>validatePostgresAppPasswordRotation({...marker,databaseId:'unknown'},snapshotRoot));
+  assert.throws(()=>validatePostgresAppPasswordRotation({...marker,newPassword:'a'.repeat(64)},snapshotRoot));
+});
 test('probe credential admission requires a fresh signed channel and compatible real frontend',async()=>{
   const {generateKeyPairSync}=await import('node:crypto');
   const {signUpdateChannel,verifyUpdateChannel}=await import('./update-channel.mjs');
@@ -246,4 +284,175 @@ test('credential recovery restarts only the absent committed writer behind block
    else await assert.rejects(recoverProbeCredentialWriter({host,state}));
    assert.deepEqual(trace,kind==='absent'?['blue']:[]);
  }
+});
+
+test('boot recovery runs when the database failed or needs to be explicitly stopped',async()=>{
+  const unit=await readFile(new URL('../deploy/updater/codexia-updater-boot.service.example',import.meta.url),'utf8');
+  assert.match(unit,/^Wants=codexia-db\.service$/mu);
+  assert.match(unit,/^Requires=codexia-api-proxy\.service$/mu);
+  assert.match(unit,/^After=codexia-db\.service codexia-api-proxy\.service$/mu);
+  const boot=await readFile(new URL('../deploy/updater/standalone-updater.mjs',import.meta.url),'utf8');
+  assert.ok(boot.indexOf('await recoverInterruptedMaintenance')<boot.indexOf("await host.unitActive('codexia-db.service')"));
+});
+
+test('PostgreSQL rotation failures identify the fenced maintenance phase',async()=>{
+  const {applyPostgresAppPassword}=await import('../deploy/updater/standalone-maintenance.mjs');
+  const state={journal:{phase:'committed',active:{slot:'blue',image:release.image}},installed:release,paused:true,lastError:null};
+  let route='blue';
+  const host={
+    route:async value=>{route=value;},assertPasswordRotationSources:async()=>{},assertRuntimeSources:async()=>{},
+    assertInitialLegacyAbsent:async()=>{},assertNoPreflight:async()=>{},verifyWriterUnits:async()=>{},
+    assertCommittedWriterUnitSource:async()=>{},passwordRotationDatabase:async()=>true,passwordRotationDatabaseId:async()=> '123:42',
+    observe:async()=>({route,writers:[state.journal.active]}),assertNoWriterContainers:async()=>{},stopWriter:async()=>{},
+    changePostgresAppPassword:async()=>{throw Error('psql failed (status 1): database rejected [redacted] authentication');},
+  };
+  await assert.rejects(applyPostgresAppPassword({host,state,snapshot:{databaseId:'123:42'},password:'b'.repeat(64),recovering:false,verify:async()=>{}}),
+    error=>error.message.includes('failed during SQL role update')&&error.cause?.message.includes('database rejected [redacted]')&&route==='blocked');
+});
+
+test('interrupted password rotation restores old SQL and mounted credentials at each disruption boundary',async()=>{
+  const {applyPostgresAppPassword}=await import('../deploy/updater/standalone-maintenance.mjs');
+  assert.equal(typeof applyPostgresAppPassword,'function');
+  const old='a'.repeat(64),candidate='b'.repeat(64);
+  const state={journal:{phase:'committed',active:{slot:'blue',image:release.image}},installed:release,paused:true,lastError:null};
+  const expected={databaseId:'123:42',databaseQuadlet:'reviewed',identity:{volume:'original'},originalSecretId:'old',operationId:'transaction',replacementDigest:'digest'};
+  for(const crash of ['block','stop-writer','sql','stop-db','delete','create','start-db','start-writer','serve']){
+    let secret=old,role=old,database=true,writer=true,route='blue',fault=crash;
+    const done=where=>{if(where===fault){fault=null;throw Error('simulated interruption');}};
+    const host={
+      route:async slot=>{route=slot;done('block');},
+      assertPasswordRotationSources:async()=>{},
+      passwordRotationDatabase:async()=>{assert.equal(route,'blocked');return database;},
+      verifyWriterUnits:async()=>{},assertCommittedWriterUnitSource:async()=>{},assertRuntimeSources:async()=>{},
+      assertInitialLegacyAbsent:async()=>{},assertNoPreflight:async()=>{},assertNoWriterContainers:async()=>{},
+      observe:async()=>({writers:writer?[state.journal.active]:[],route}),
+      stopWriter:async()=>{writer=false;done('stop-writer');},
+      passwordRotationDatabaseId:async()=>{assert.ok(database);return '123:42';},
+      changePostgresAppPassword:async value=>{assert.ok(database&&!writer);role=value;done('sql');},
+      stopPasswordRotationDatabase:async()=>{assert.ok(!writer);database=false;done('stop-db');},
+      replacePostgresAppSecret:async value=>{assert.ok(!database&&!writer);secret=null;done('delete');secret=value;done('create');},
+      startPasswordRotationDatabase:async()=>{assert.ok(secret);database=true;done('start-db');},
+      verifyPostgresAppPassword:async value=>{assert.equal(role,value);assert.equal(secret,value);},
+      startWriter:async()=>{assert.equal(role,secret);writer=true;done('start-writer');},
+      verifyBlockedPasswordRotation:async()=>{assert.ok(writer&&database);assert.equal(route,'blocked');},
+    };
+    const verify=async()=>{assert.equal(route,'blue');done('serve');};
+    const args={state,host,snapshot:expected,verify};
+    await assert.rejects(applyPostgresAppPassword({...args,password:candidate,recovering:false}),/simulated interruption/);
+    await applyPostgresAppPassword({...args,password:old,recovering:true});
+    await applyPostgresAppPassword({...args,password:old,recovering:true});
+    assert.deepEqual({secret,role,database,writer,route},{secret:old,role:old,database:true,writer:true,route:'blue'});
+  }
+});
+
+test('rotation refuses an unpaused controller and unexpected runtime identities before stopping a writer',async()=>{
+  const {applyPostgresAppPassword}=await import('../deploy/updater/standalone-maintenance.mjs');
+  assert.equal(typeof applyPostgresAppPassword,'function');
+  const state={journal:{phase:'committed',active:{slot:'blue',image:release.image}},installed:release,paused:true,lastError:null};
+  const host={route:async()=>{},assertPasswordRotationSources:async()=>{throw Error('Quadlet drift');}};
+  const args={host,state,snapshot:{},password:'a'.repeat(64),recovering:true};
+  await assert.rejects(applyPostgresAppPassword({...args,state:{...state,paused:false}}),/paused/);
+  await assert.rejects(applyPostgresAppPassword(args),/Quadlet drift/);
+});
+
+test('locked rotation checks current publication, private receipt and paused journal before capturing a rollback token',async()=>{
+  const {checkRotationBackup}=await import('../deploy/updater/standalone-maintenance.mjs');
+  assert.equal(typeof checkRotationBackup,'function');
+  const {initialControllerState}=await import('./standalone-update-controller.mjs');
+  const full={...release,format:'codexia-update-release/v1',channel:'stable',state:'published',version:'1.2.3',sourceSha:'c'.repeat(40),
+    platform:'linux/amd64',migrationFingerprint:'sha256:'+'a'.repeat(64),persistenceFormat:1,apiEpoch:1};
+  const state=initialControllerState(full,'blue',null);
+  const root=await mkdtemp(path.join(tmpdir(),'rotation-proof-'));
+  try{
+    const hash='f'.repeat(64),databaseId='123:42',receiptFile=path.join(root,'receipt.json');
+    const source={format:'codexia-controller-backup-proof/v1',release:full,databaseId,journalGeneration:state.journal.generation,
+      artifactDirectory:'/mnt/backups/codexia-20261117T000000Z-12345678-1234-1234-1234-123456789abc',checksumManifestSha256:hash};
+    await writeFile(path.join(root,'controller-backup-proof.json'),JSON.stringify(source),{mode:0o600});
+    const receipt={format:'codexia-restore-receipt/v1',checksumManifestSha256:hash};
+    await writeFile(receiptFile,JSON.stringify(receipt),{mode:0o600});
+    const host={backupArtifactIdentity:async directory=>{assert.equal(directory,source.artifactDirectory);return hash;}};
+    const args={state,stateDir:root,receiptFile,host,databaseId};
+    assert.deepEqual(await checkRotationBackup(args),source);
+    await assert.rejects(checkRotationBackup({...args,databaseId:'111:22'}));
+    await assert.rejects(checkRotationBackup({...args,state:{...state,paused:false}}));
+    await assert.rejects(checkRotationBackup({...args,host:{backupArtifactIdentity:async()=>'e'.repeat(64)}}));
+    await writeFile(receiptFile,JSON.stringify({...receipt,checksumManifestSha256:'e'.repeat(64)}));
+    await assert.rejects(checkRotationBackup(args));
+  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('private rollback snapshots survive process death and cannot trust a changed controller or corrupt previous password',async()=>{
+  const {savePasswordRotationSnapshot,loadPasswordRotationSnapshot}=await import('../deploy/updater/standalone-maintenance.mjs');
+  assert.equal(typeof savePasswordRotationSnapshot,'function');
+  const {createHash,randomUUID}=await import('node:crypto');
+  const root=await mkdtemp(path.join(tmpdir(),'rotation-snapshot-'));
+  const password='f'.repeat(64),operationId=randomUUID();
+  const config={...current,stateFile:path.join(root,'state','controller.json'),publicKeyFile:path.join(root,'private','channel.pem')};
+  const state={installed:release,journal:{phase:'committed',active:{slot:'blue',image:release.image}},paused:true,lastError:null};
+  const snapshot={operationId,databaseId:'123:42',databaseQuadlet:'exact\n',previousDigest:createHash('sha256').update(password).digest('hex')};
+  try{
+    const marker=await savePasswordRotationSnapshot({config,state,snapshot,previousPassword:password,timer:{active:'inactive',enabled:'disabled'}});
+    assert.ok(!JSON.stringify(marker).includes(password));
+    assert.ok(!marker.rotation.previousPasswordFile.startsWith(path.dirname(config.stateFile)+'/'));
+    const contents=await loadPasswordRotationSnapshot({config,state,marker});
+    assert.deepEqual(contents.snapshot,snapshot);
+    assert.equal(contents.password,password);
+    await assert.rejects(loadPasswordRotationSnapshot({config,state:{...state,lastError:'drift'},marker}));
+    await writeFile(marker.rotation.previousPasswordFile,'e'.repeat(64));
+    await assert.rejects(loadPasswordRotationSnapshot({config,state,marker}),/snapshot/i);
+    await assert.rejects(loadPasswordRotationSnapshot({config,state,marker:{...marker,operationId:'../../arbitrary'}}));
+  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('maintain routes a staged PostgreSQL request through the paused admission gate',async()=>{
+  const {maintainStandaloneUpdater}=await import('../deploy/updater/standalone-maintenance.mjs');
+  const {mkdir}=await import('node:fs/promises');
+  const root=await mkdtemp(path.join(tmpdir(),'rotation-entry-')),before=process.env.CODEXIA_UPDATER_LOCK_DIRECTORY;
+  const stateDir=path.join(root,'.local/state/codexia-updater'),candidateRoot=path.join(root,'.config/codexia-updater/maintenance/candidates/operation');
+  const config={...current,stateFile:path.join(stateDir,'controller.json'),quadletDirectory:path.join(root,'.config/containers/systemd'),publicKeyFile:path.join(root,'.config/codexia-updater/channel.pem')};
+  const manifestPath=path.join(candidateRoot,'manifest.json');
+  try{
+    process.env.CODEXIA_UPDATER_LOCK_DIRECTORY=stateDir;
+    await mkdir(candidateRoot,{recursive:true,mode:0o700});
+    await writeFile(manifestPath,JSON.stringify({format:'codexia-updater-maintenance/v1',candidateRoot,sourceDir:'/opt/codexia-updater',
+      configPath:path.join(root,'.config/codexia-updater/config.json'),unitDir:path.join(root,'.config/systemd/user'),rotatePostgresAppPassword:true,
+      appPasswordFile:path.join(candidateRoot,'credentials/postgres-app-password'),restoreReceiptFile:path.join(candidateRoot,'restore-receipt.json'),
+      databaseQuadletFile:path.join(candidateRoot,'quadlet/codexia-db.container')}),{mode:0o600});
+    await assert.rejects(maintainStandaloneUpdater({config,manifestPath,state:{paused:false,journal:{phase:'idle'},lastError:null}}),/paused/);
+  }finally{
+    if(before===undefined)delete process.env.CODEXIA_UPDATER_LOCK_DIRECTORY;else process.env.CODEXIA_UPDATER_LOCK_DIRECTORY=before;
+    await rm(root,{recursive:true,force:true});
+  }
+});
+
+test('boot retains the durable rotation marker, paused journal and stopped timer on snapshot identity drift',async()=>{
+  const {recoverInterruptedMaintenance,savePasswordRotationSnapshot}=await import('../deploy/updater/standalone-maintenance.mjs');
+  const {initialControllerState,atomicWrite}=await import('./standalone-update-controller.mjs');
+  const {createHash,randomUUID}=await import('node:crypto');
+  const root=await mkdtemp(path.join(tmpdir(),'codexia-boot-rotation-'));
+  const stateDir=path.join(root,'state'),oldPath=process.env.PATH,oldLock=process.env.CODEXIA_UPDATER_LOCK_DIRECTORY;
+  const config={...current,publicKeyFile:path.join(root,'private','channel.pem'),stateFile:path.join(stateDir,'controller.json'),routeFile:path.join(stateDir,'route')};
+  const full={...release,format:'codexia-update-release/v1',channel:'stable',state:'published',version:'1.2.3',sourceSha:'c'.repeat(40),
+    platform:'linux/amd64',migrationFingerprint:'sha256:'+'a'.repeat(64),persistenceFormat:1,apiEpoch:1};
+  const state=initialControllerState(full,'blue',null),password='a'.repeat(64);
+  const snapshot={databaseId:'123:42',databaseQuadlet:'reviewed',operationId:randomUUID(),previousDigest:createHash('sha256').update(password).digest('hex')};
+  try{
+    process.env.PATH=root+path.delimiter+oldPath;process.env.CODEXIA_UPDATER_LOCK_DIRECTORY=stateDir;
+    await writeFile(path.join(root,'systemctl'),'#!/bin/sh\ncase "$2" in\nstop) echo stopped > "$(dirname "$0")/timer" ;;\nis-enabled) echo disabled; exit 1 ;;\nis-active) echo inactive; exit 3 ;;\n*) exit 99 ;;\nesac\n',{mode:0o700});
+    await atomicWrite(config.stateFile,JSON.stringify(state));
+    await atomicWrite(config.routeFile,'blue\n');
+    const marker=await savePasswordRotationSnapshot({config,state,snapshot,previousPassword:password,timer:{active:'active',enabled:'enabled'}});
+    const markerPath=path.join(stateDir,'maintenance/in-progress.json');
+    await atomicWrite(markerPath,JSON.stringify(marker));
+    await writeFile(marker.rotation.previousPasswordFile,'b'.repeat(64));
+    await assert.rejects(recoverInterruptedMaintenance({config,store:{},publicKey:''}),/rotation recovery is unverified/);
+    assert.deepEqual(JSON.parse(await readFile(markerPath,'utf8')),marker);
+    assert.equal(await readFile(config.routeFile,'utf8'),'blocked\n');
+    assert.equal(await readFile(path.join(root,'timer'),'utf8'),'stopped\n');
+    assert.equal(JSON.parse(await readFile(config.stateFile,'utf8')).paused,true);
+  }finally{
+    process.env.PATH=oldPath;
+    if(oldLock===undefined)delete process.env.CODEXIA_UPDATER_LOCK_DIRECTORY;else process.env.CODEXIA_UPDATER_LOCK_DIRECTORY=oldLock;
+    await rm(root,{recursive:true,force:true});
+  }
 });

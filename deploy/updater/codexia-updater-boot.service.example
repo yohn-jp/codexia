@@ -1,6 +1,7 @@
 [Unit]
 Description=Restore only the committed Codexia writer from durable state
-Requires=codexia-db.service codexia-api-proxy.service
+Wants=codexia-db.service
+Requires=codexia-api-proxy.service
 After=codexia-db.service codexia-api-proxy.service
 [Service]
 Type=oneshot

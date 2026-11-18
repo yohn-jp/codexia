@@ -52,10 +52,17 @@ cleanup() {
     for container in codexia-slot-blue codexia-slot-green codexia-api-proxy "$PROXY_FIXTURE_CONTAINER"; do
       if podman container exists "$container" >/dev/null 2>&1; then
         actual="$(normalize_image_id "$(podman inspect --type container --format '{{.Image}}' "$container" 2>/dev/null || true)")"
-        [[ -n "$IMAGE_ID" && "$actual" == "$IMAGE_ID" ]] && podman rm --force "$container" >/dev/null 2>&1 || true
+        label="$(podman inspect --type container --format '{{ index .Config.Labels "codexia.runtime-contract-test" }}' "$container" 2>/dev/null || true)"
+        if [[ -n "$IMAGE_ID" && "$actual" == "$IMAGE_ID" && "$label" == "$NONCE" ]]; then podman rm --force "$container" >/dev/null 2>&1 || true; fi
       fi
     done
-    for volume in codexia-data codexia-history; do
+    if podman container exists codexia-db >/dev/null 2>&1; then
+      actual="$(normalize_image_id "$(podman inspect --type container --format '{{.Image}}' codexia-db 2>/dev/null || true)")"
+      expected="$(podman image inspect --format '{{.Id}}' docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536 2>/dev/null || true)"
+      label="$(podman inspect --type container --format '{{ index .Config.Labels "codexia.runtime-contract-test" }}' codexia-db 2>/dev/null || true)"
+      if [[ -n "$expected" && "$actual" == "$expected" && "$label" == "$NONCE" ]]; then podman rm --force codexia-db >/dev/null 2>&1 || true; fi
+    fi
+    for volume in codexia-data codexia-history codexia-postgres; do
       if podman volume exists "$volume" >/dev/null 2>&1; then
         label="$(podman volume inspect --format '{{ index .Labels "codexia-runtime-contract-test" }}' "$volume" 2>/dev/null || true)"
         [[ -n "$NONCE" && "$label" == "$NONCE" ]] && podman volume rm "$volume" >/dev/null 2>&1 || true
@@ -74,8 +81,8 @@ cleanup() {
       case "$(basename -- "$file")" in
         codexia-slot-blue.container) grep -Fq "Image=$IMAGE_ID" "$file" && grep -Fq 'ContainerName=codexia-slot-blue' "$file" && rm -f -- "$file" || true ;;
         codexia-slot-green.container) grep -Fq "Image=$IMAGE_ID" "$file" && grep -Fq 'ContainerName=codexia-slot-green' "$file" && rm -f -- "$file" || true ;;
-        codexia.network|codexia-data.network|codexia-data.volume|codexia-history.volume) grep -Fq "Label=codexia-runtime-contract-test=$NONCE" "$file" && rm -f -- "$file" || true ;;
-        codexia-db.service) grep -Fq "Description=Codexia runtime acceptance dependency $NONCE" "$file" && rm -f -- "$file" || true ;;
+        codexia.network|codexia-data.network|codexia-data.volume|codexia-history.volume|codexia-postgres.volume) grep -Fq "Label=codexia-runtime-contract-test=$NONCE" "$file" && rm -f -- "$file" || true ;;
+        codexia-db.container) grep -Fq 'ContainerName=codexia-db' "$file" && grep -Fq 'Image=docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536' "$file" && grep -Fq "Label=codexia.runtime-contract-test=$NONCE" "$file" && rm -f -- "$file" || true ;;
         codexia-runtime-contract-proxy-fixture.container) grep -Fq "ContainerName=$PROXY_FIXTURE_CONTAINER" "$file" && grep -Fq "Label=codexia-runtime-contract-test=$NONCE" "$file" && rm -f -- "$file" || true ;;
         codexia-api-proxy.container) grep -Fq 'ContainerName=codexia-api-proxy' "$file" && grep -Eq '^Image=ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$' "$file" && grep -Fq "Label=codexia-runtime-contract-test=$NONCE" "$file" && rm -f -- "$file" || true ;;
       esac
@@ -155,8 +162,8 @@ must_not_exist() {
 for identity in codexia-api codexia-db codexia-api-proxy codexia-slot-blue codexia-slot-green "$PROXY_FIXTURE_CONTAINER"; do must_not_exist container "$identity"; done
 for identity in codexia codexia-data; do must_not_exist network "$identity"; done
 for identity in codexia-data codexia-history codexia-postgres; do must_not_exist volume "$identity"; done
-for identity in codexia-postgres-app-password codexia-auth-token codexia-postgres-preflight-password; do must_not_exist secret "$identity"; done
-quadlet_names=(codexia-slot-blue.container codexia-slot-green.container codexia-runtime-contract-proxy-fixture.container codexia-api-proxy.container codexia.network codexia-data.network codexia-data.volume codexia-history.volume codexia-db.container)
+for identity in codexia-postgres-app-password codexia-postgres-admin-password codexia-postgres-preflight-password codexia-auth-token; do must_not_exist secret "$identity"; done
+quadlet_names=(codexia-slot-blue.container codexia-slot-green.container codexia-runtime-contract-proxy-fixture.container codexia-api-proxy.container codexia.network codexia-data.network codexia-data.volume codexia-history.volume codexia-postgres.volume codexia-db.container)
 quadlet_roots=("$QUADLET_DIR" "$RUNTIME_DIR/containers/systemd" "/etc/containers/systemd/users/$UID_VALUE" /etc/containers/systemd/users)
 for root in "${quadlet_roots[@]}"; do
   for filename in "${quadlet_names[@]}"; do
@@ -237,21 +244,27 @@ write_owned_file "$QUADLET_DIR/codexia-history.volume" 0600 <<EOF
 VolumeName=codexia-history
 Label=codexia-runtime-contract-test=$NONCE
 EOF
-write_owned_file "$USER_UNIT_DIR/codexia-db.service" 0600 <<EOF
-[Unit]
-Description=Codexia runtime acceptance dependency $NONCE
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/bin/true
-ExecStop=/usr/bin/true
+write_owned_file "$QUADLET_DIR/codexia-postgres.volume" 0600 <<EOF
+[Volume]
+VolumeName=codexia-postgres
+Label=codexia-runtime-contract-test=$NONCE
 EOF
+OWNED_FILES+=("$QUADLET_DIR/codexia-db.container")
+cp -- "$REPO_ROOT/deploy/quadlet/codexia-db.container" "$QUADLET_DIR/codexia-db.container"
+chmod 0600 "$QUADLET_DIR/codexia-db.container"
+[[ "$(grep -c '^\[Service\]$' "$QUADLET_DIR/codexia-db.container")" == 1 ]] || die 'canonical database Quadlet has an unexpected Service section'
+sed -i "/^\[Service\]$/i Label=codexia.runtime-contract-test=$NONCE" "$QUADLET_DIR/codexia-db.container"
+[[ -d /etc/codexia && ! -L /etc/codexia && "$(stat -c '%u:%g:%a' /etc/codexia)" == '0:0:755' ]] || die 'root-provisioned PostgreSQL IAC fixture directory is absent or drifted'
+[[ -d /etc/codexia/postgres && ! -L /etc/codexia/postgres && "$(stat -c '%u:%g:%a' /etc/codexia/postgres)" == "$UID_VALUE:0:750" ]] || die 'root-provisioned PostgreSQL init directory is absent or drifted'
+[[ -f /etc/codexia/postgres/010-create-app-role.sh && ! -L /etc/codexia/postgres/010-create-app-role.sh ]] || die 'root-provisioned PostgreSQL init script is absent or drifted'
+[[ "$(stat -c '%u:%g:%a' /etc/codexia/postgres/010-create-app-role.sh)" == "$UID_VALUE:0:555" ]] || die 'PostgreSQL init script ownership or mode differs from canonical rootless runtime'
+cmp -s "$REPO_ROOT/deploy/postgres/010-create-app-role.sh" /etc/codexia/postgres/010-create-app-role.sh || die 'PostgreSQL init script differs from the canonical source'
 OWNED_UNITS=(
   codexia-slot-blue.service codexia-slot-green.service codexia-db.service
   codexia-api-proxy.service codexia-updater-boot.service codexia-updater.service codexia-updater.timer
   "$PROXY_FIXTURE_UNIT"
   codexia-network.service codexia-data-network.service
-  codexia-data-volume.service codexia-history-volume.service
+  codexia-data-volume.service codexia-history-volume.service codexia-postgres-volume.service
 )
 
 cat > "$WORK_DIR/image/health.mjs" <<'EOF'
@@ -281,8 +294,18 @@ image_label="$(podman image inspect --format '{{ index .Labels "codexia.runtime-
 printf '%s\n' 'synthetic secret fixture' > "$WORK_DIR/secret"
 podman secret create codexia-auth-token "$WORK_DIR/secret" >/dev/null
 OWNED_SECRETS+=(codexia-auth-token)
-podman secret create codexia-postgres-app-password "$WORK_DIR/secret" >/dev/null
-OWNED_SECRETS+=(codexia-postgres-app-password)
+INITIAL_APP_PASSWORD="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+ADMIN_PASSWORD="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+PREFLIGHT_PASSWORD="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+printf '%s' "$INITIAL_APP_PASSWORD" > "$WORK_DIR/postgres-app-password.initial"
+printf '%s' "$ADMIN_PASSWORD" > "$WORK_DIR/postgres-admin-password"
+printf '%s' "$PREFLIGHT_PASSWORD" > "$WORK_DIR/postgres-preflight-password"
+chmod 0600 "$WORK_DIR"/postgres-*-password*
+unset INITIAL_APP_PASSWORD ADMIN_PASSWORD PREFLIGHT_PASSWORD
+podman secret create codexia-postgres-admin-password "$WORK_DIR/postgres-admin-password" >/dev/null
+podman secret create codexia-postgres-app-password "$WORK_DIR/postgres-app-password.initial" >/dev/null
+podman secret create codexia-postgres-preflight-password "$WORK_DIR/postgres-preflight-password" >/dev/null
+OWNED_SECRETS+=(codexia-postgres-admin-password codexia-postgres-app-password codexia-postgres-preflight-password)
 
 OWNED_FILES+=("$QUADLET_DIR/codexia-slot-blue.container" "$QUADLET_DIR/codexia-slot-green.container")
 node --input-type=module - "$REPO_ROOT" "$QUADLET_DIR" "$WORK_DIR" "$IMAGE_ID" "$MODEL_DIR" <<'NODE'
@@ -377,7 +400,7 @@ diagnose_missing_generated_unit() {
     else printf 'Unavailable generator: %s\n' "$generator" >&2; fi
   done
 }
-for unit in codexia-slot-blue.service codexia-slot-green.service "$PROXY_FIXTURE_UNIT" codexia-network.service codexia-data-network.service codexia-data-volume.service codexia-history-volume.service; do
+for unit in codexia-db.service codexia-postgres-volume.service codexia-slot-blue.service codexia-slot-green.service "$PROXY_FIXTURE_UNIT" codexia-network.service codexia-data-network.service codexia-data-volume.service codexia-history-volume.service; do
   if ! systemctl --user cat "$unit" >/dev/null; then
     diagnose_missing_generated_unit "$unit"
     die "Quadlet did not generate $unit"
@@ -724,4 +747,4 @@ CODEXIA_RUNTIME_MAINTENANCE_IMAGE="$IMAGE_ID" \
 CODEXIA_RUNTIME_MAINTENANCE_NONCE="$NONCE" \
   node "$SCRIPT_DIR/test-standalone-maintenance-integration.mjs" --run "$REPO_ROOT" "$QUADLET_DIR" "$USER_UNIT_DIR" "$WORK_DIR"
 
-printf 'PASS: pinned synthetic Core/Full Quadlets, rootless Podman/systemd, effective resource limits, read-only models, blue/green persistence, fail-closed locked boot recovery after process kill, real timer verification and post-update restart\n'
+printf 'PASS: pinned synthetic Core/Full Quadlets, rootless Podman/systemd, effective resource limits, read-only models, blue/green persistence, fail-closed locked boot recovery after process kill, real timer verification, PostgreSQL app-password authentication and immutable secret rotation, crash recovery through the systemd boot unit, preserved database identity/data, and post-update restart\n'
