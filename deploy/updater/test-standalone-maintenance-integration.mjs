@@ -764,7 +764,8 @@ async function exercisePostgresPasswordRotation({ repoRoot, config, userUnitDir,
   } finally {
     let restoreError;
     try { await restoreProxy(); } catch (error) { restoreError = error; }
-    if (originalState && !await lstat(markerPath).then(() => true, error => error.code === 'ENOENT' ? false : Promise.reject(error))) {
+    const recoveryPending = await lstat(markerPath).then(() => true, error => error.code === 'ENOENT' ? false : Promise.reject(error));
+    if (originalState && !recoveryPending) {
       await atomicWrite(config.stateFile, JSON.stringify(originalState) + '\n');
     }
     for (const root of [candidate?.root, interruptedCandidate?.root]) {
@@ -775,7 +776,11 @@ async function exercisePostgresPasswordRotation({ repoRoot, config, userUnitDir,
     }
     await rm(path.join(path.dirname(config.stateFile), 'controller-backup-proof.json'), { force: true });
     await rm(path.join(privateDir, 'maintenance'), { recursive: true, force: true });
-    await rm(path.join(privateDir, 'maintenance-snapshots'), { recursive: true, force: true });
+    if (recoveryPending) {
+      process.stderr.write(`Preserving PostgreSQL rollback snapshot while recovery marker remains: ${markerPath}\n`);
+    } else {
+      await rm(path.join(privateDir, 'maintenance-snapshots'), { recursive: true, force: true });
+    }
     assert.equal(await readFile(proxyQuadlet, 'utf8'), originalProxyText, 'Proxy fixture did not restore the production Quadlet text');
     if (restoreError) throw restoreError;
   }
