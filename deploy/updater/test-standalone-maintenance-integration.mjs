@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { signUpdateChannel } from '../../scripts/update-channel.mjs';
-import { chmod, lstat, mkdir, readFile, readdir, rm, rmdir, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -657,18 +657,32 @@ async function restoreBootManagerEnvironment(values) {
 
 async function probeRemoteAppPassword(password, suffix) {
   const secretName = `codexia-rotation-auth-${suffix}`;
-  const created = spawnSync('podman', ['secret', 'create', secretName, '-'], {
-    input: password, encoding: 'utf8', timeout: 30000,
-  });
-  assert.equal(created.status, 0, `Could not stage isolated PostgreSQL authentication probe: ${created.stderr}`);
+  const secretDirectory = await mkdtemp(path.join(os.tmpdir(), 'codexia-postgres-auth-probe-'));
+  await chmod(secretDirectory, 0o700);
+  const passwordFile = path.join(secretDirectory, 'password');
+  let secretCreated = false;
   try {
+    await writeFile(passwordFile, password, { mode: 0o600, flag: 'wx' });
+    await chmod(passwordFile, 0o600);
+    const fileInfo = await lstat(passwordFile);
+    assert.ok(fileInfo.isFile() && !fileInfo.isSymbolicLink() && fileInfo.uid === UID && (fileInfo.mode & 0o777) === 0o600,
+      'Isolated PostgreSQL authentication probe file is not private');
+    const created = spawnSync('podman', ['secret', 'create', secretName, passwordFile], {
+      encoding: 'utf8', timeout: 30000,
+    });
+    assert.equal(created.status, 0, `Could not stage isolated PostgreSQL authentication probe: ${created.stderr}`);
+    secretCreated = true;
     return spawnSync('podman', ['run', '--rm', '--network', 'codexia-data', '--secret',
       `${secretName},type=mount,target=/run/secrets/probe-password`, '--entrypoint', 'sh', POSTGRES_IMAGE,
       '-ec', 'export PGPASSWORD="$(cat /run/secrets/probe-password)"; exec psql -X -w -qAt -h codexia-db -U codexia -d codexia -c "SELECT 1"'], {
       encoding: 'utf8', timeout: 30000,
     });
   } finally {
-    run('podman', ['secret', 'rm', secretName]);
+    try {
+      if (secretCreated) run('podman', ['secret', 'rm', secretName]);
+    } finally {
+      await rm(secretDirectory, { recursive: true, force: true });
+    }
   }
 }
 
