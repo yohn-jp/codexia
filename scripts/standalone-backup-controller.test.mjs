@@ -224,15 +224,20 @@ test('boot recovery resumes an interrupted controller backup from each persisted
 });
 
 test('controller backup recovery retains durable evidence when primary or recovery unlink reports failure', async () => {
-  for (const failure of ['primary','recovery','primary-resave']) {
+  for (const failure of ['primary','recovery','primary-resave','recovery-resave']) {
     const { host, controller, state, persisted } = fixture();
     const intent = controllerBackupIntent();
     await controller.store.saveBackupIntent(intent);
     const primaryClear = controller.store.clearBackupIntent;
     const recoveryClear = controller.store.clearBackupRecoveryIntent;
     const savePrimary = controller.store.saveBackupIntent;
-    if(failure==='recovery'){
+    const saveRecovery = controller.store.saveBackupRecoveryIntent;
+    if(failure==='recovery'||failure==='recovery-resave'){
       controller.store.clearBackupRecoveryIntent=async()=>{await recoveryClear();throw Error('fsync failed after recovery unlink');};
+      if(failure==='recovery-resave'){
+        let calls=0;
+        controller.store.saveBackupRecoveryIntent=async(value)=>{if(++calls>1)throw Error('recovery re-save failed');await saveRecovery(value);};
+      }
     }else{
       controller.store.clearBackupIntent=async()=>{await primaryClear();throw Error('fsync failed after primary unlink');};
       if(failure==='primary-resave')controller.store.saveBackupIntent=async()=>{throw Error('primary re-save failed');};
@@ -245,6 +250,7 @@ test('controller backup recovery retains durable evidence when primary or recove
     controller.store.clearBackupIntent=primaryClear;
     controller.store.clearBackupRecoveryIntent=recoveryClear;
     controller.store.saveBackupIntent=savePrimary;
+    controller.store.saveBackupRecoveryIntent=saveRecovery;
     const recovered=await controller.recoverBackupIntent(persisted());
     assert.equal(recovered.paused,false);
     assert.equal(recovered.lastError,null);

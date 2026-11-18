@@ -690,7 +690,8 @@ export class StandaloneController {
           try{await this.saveBackupIntent(intent);}catch{}
         }
         if(controllerRecoveryIntentClearAttempted&&!controllerRecoveryIntentCleared){
-          try{await this.saveBackupRecoveryIntent(intent);}catch{}
+          try{await this.saveBackupRecoveryIntent(intent);}
+          catch{try{await this.saveBackupIntent(intent);}catch{}}
         }
         await this.host.route('blocked').catch(()=>undefined);
         await this.host.stopPollingTimer().catch(()=>undefined);
