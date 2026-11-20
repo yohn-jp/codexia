@@ -172,9 +172,12 @@ function stableId(projectId: string, key: string): DocumentId {
   const value = hash(`${projectId}\0${key}`); return `${value.slice(0,8)}-${value.slice(8,12)}-5${value.slice(13,16)}-a${value.slice(17,20)}-${value.slice(20,32)}` as DocumentId;
 }
 function makeReader(manifest: Manifest): SnapshotReader {
+  const documentKinds = new Map<string, string>(manifest.documents.map((document) => [String(document.id), document.kind]));
   return { snapshot: structuredClone(manifest.snapshot),
     async read(filePath, encoding = "utf8") { safePath(filePath); const file = manifest.files[filePath]; if (!file) return null;
-      const bytes = Buffer.from(file.content, file.encoding); return {content: bytes.toString(encoding), revision: file.revision}; },
+      const bytes = Buffer.from(file.content, file.encoding);
+      const documentKind = file.metadata && file.documentId ? documentKinds.get(file.documentId) : undefined;
+      return {content: bytes.toString(encoding), revision: file.revision, ...(documentKind ? {documentKind} : {})}; },
     async list(prefix) { if (prefix) safePath(prefix); return Object.keys(manifest.files).filter((key) => !prefix || key === prefix || key.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)).sort(); },
     async listRevisions(prefix) { return (await this.list(prefix)).map((path) => ({ path, revision: manifest.files[path]!.revision })); }
   };
@@ -603,6 +606,12 @@ export class CoreStore implements MutationCoordinator {
     const manuscriptCreates = new Set<string>();
 
     for (const write of ordered) {
+      if (write.textChanges !== undefined) {
+        const currentFile = manifest.files[write.path];
+        if (operation.effect !== "manuscript" || !currentFile?.documentId || currentFile.metadata) {
+          fail(422, "invalid_document_changes", "Exact text changes may only target an existing PostgreSQL manuscript");
+        }
+      }
       if (write.path === "meta/project.yaml") {
         if (write.content === null) {
           fail(422, "invalid_project_metadata", "Project metadata cannot be deleted");
@@ -732,7 +741,7 @@ export class CoreStore implements MutationCoordinator {
           projectId,
           documentId: document.id,
           baseRevisionId: revision.id,
-          changes: [{ fromUtf16: 0, toUtf16: revision.markdown.length, insert: write.content }],
+          changes: write.textChanges ?? [{ fromUtf16: 0, toUtf16: revision.markdown.length, insert: write.content }],
           resultingSha256: hash(write.content),
           authorId,
           clientId: "core",

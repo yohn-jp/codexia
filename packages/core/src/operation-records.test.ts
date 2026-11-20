@@ -60,6 +60,20 @@ test("operation and proposal digests bind PostgreSQL identity and canonical evid
  assert.deepEqual(normalizedProposal(proposal).snapshot,snapshot);
 });
 
+test("ranged manuscript writes are included in proposal approval digests", () => {
+  const operation = goldenOperation();
+  operation.writes[0]!.textChanges = [{ fromUtf16: 2, toUtf16: 4, insert: "new" }];
+  const normalized = normalizedOperation(operation);
+  assert.deepEqual(normalized.writes[0]!.textChanges, [{ fromUtf16: 2, toUtf16: 4, insert: "new" }]);
+  assert.notEqual(operationDigest(operation), operationDigest({
+    ...operation,
+    writes: [{ ...operation.writes[0]!, textChanges: [{ fromUtf16: 3, toUtf16: 4, insert: "new" }] }],
+  }));
+  const legacy = goldenOperation();
+  assert.equal(normalizedOperation(legacy).writes[0]!.textChanges, undefined);
+  assert.doesNotThrow(() => assertPersistedProposal(goldenProposal()), "old operation payloads remain valid");
+});
+
 test("persisted proposal validation enforces record binding and safe content", () => {
   const proposal = goldenProposal();
   assert.doesNotThrow(() => assertPersistedProposal(proposal));
