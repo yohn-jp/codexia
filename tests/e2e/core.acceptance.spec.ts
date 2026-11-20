@@ -477,7 +477,8 @@ test("undo during an in-flight save preserves the request and saves the restored
 test("writing UI protects multiple document drafts separately from PostgreSQL revision durability", async ({ page }) => {
   const f = await fixture(page); const gate = await holdSaves(page, f);
   try {
-    await editor(page).fill("Scene One protected draft.");
+    await replaceEditor(page, "Scene One protected draft.");
+    await expectEditor(page, "Scene One protected draft.");
     // Establish the exact durable recovery record and an in-flight, unacknowledged
     // PostgreSQL save before switching documents.
     await expect.poll(async () => (await drafts(page)).some((d) => d.documentId === f.one.document.id && d.markdown === "Scene One protected draft.")).toBe(true);
@@ -486,7 +487,8 @@ test("writing UI protects multiple document drafts separately from PostgreSQL re
     // The guarded selection is asynchronous: do not type until Scene Two owns
     // the mounted editor, otherwise the test edits Scene One again.
     await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
-    await editor(page).fill("Scene Two independent draft.");
+    await replaceEditor(page, "Scene Two independent draft.");
+    await expectEditor(page, "Scene Two independent draft.");
     await expect.poll(async () => {
       const records = await drafts(page);
       return records.find((entry) => entry.documentId === f.one.document.id)?.markdown
