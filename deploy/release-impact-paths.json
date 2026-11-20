@@ -37,7 +37,12 @@
     "tsconfig.base.json",
     ".github/workflows/verify.yml",
     ".github/workflows/frontend-release.yml",
-    ".github/workflows/production-preflight.yml"
+    ".github/workflows/production-preflight.yml",
+    "deploy/release-impact-paths.json",
+    "scripts/release-impact.mjs",
+    "scripts/release-impact.test.mjs",
+    "scripts/release-source-gate.mjs",
+    "scripts/release-source-gate.test.mjs"
   ],
   "backend": [
     "Dockerfile.backend",
@@ -67,6 +72,11 @@
     "pnpm-lock.yaml",
     "pnpm-workspace.yaml",
     "tsconfig.base.json",
-    ".github/workflows/backend-release.yml"
+    ".github/workflows/backend-release.yml",
+    "deploy/release-impact-paths.json",
+    "scripts/release-impact.mjs",
+    "scripts/release-impact.test.mjs",
+    "scripts/release-source-gate.mjs",
+    "scripts/release-source-gate.test.mjs"
   ]
 }
