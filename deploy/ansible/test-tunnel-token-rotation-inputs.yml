@@ -1,0 +1,10 @@
+---
+- name: Test protected Tunnel token rotation input validation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    codexia_tunnel_token_file: "{{ lookup('env', 'CODEXIA_TEST_TUNNEL_TOKEN_FILE') }}"
+  tasks:
+    - name: Validate a protected Tunnel token input with the production validator
+      ansible.builtin.import_tasks: validate-tunnel-token-rotation-inputs.yml
