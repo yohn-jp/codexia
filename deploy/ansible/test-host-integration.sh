@@ -97,7 +97,6 @@ cleanup() {
   if [[ "$manager_dropin_installed" == true ]]; then
     if sudo test -f "$manager_dropin" && sudo cmp -s "$tmp/user-manager.conf" "$manager_dropin"; then
       sudo rm -- "$manager_dropin" || cleanup_status=1
-      sudo rmdir "$manager_dropin_dir" 2>/dev/null || true
       sudo systemctl daemon-reload >/dev/null 2>&1 || cleanup_status=1
     else
       printf 'Refusing to remove a changed user-manager fixture drop-in: %s\n' "$manager_dropin" >&2
