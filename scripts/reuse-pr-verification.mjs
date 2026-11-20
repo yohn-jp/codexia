@@ -176,7 +176,7 @@ async function mergedPrRun({ context, candidate, request }) {
     const completed = Date.parse(job.completed_at);
     assert.ok(Number.isFinite(completed) && completed <= mergedAt, 'PR proof was completed after merge');
   }
-  return { run, jobs, prNumber };
+  return { run, jobs, prNumber, mergedAt, headRef: pr.head.ref };
 }
 
 function assertSuccessfulStep(job, name) {
@@ -189,7 +189,7 @@ function assertSuccessfulStep(job, name) {
 export async function verifyReusableMainProof({ sourceSha, before, repository, currentRun, git, request, readArtifact }) {
   const context = mainContext(repository, currentRun, sourceSha, WORKFLOW);
   const candidate = mergeCandidate(sourceSha, before, git);
-  const { run, jobs, prNumber } = await mergedPrRun({ context, candidate, request });
+  const { run, jobs, prNumber, mergedAt, headRef } = await mergedPrRun({ context, candidate, request });
   const cert = assertCertificationJob(jobs, run);
   assertSuccessfulStep(cert, FULL_CERT_STEP);
   const artifacts = await apiList(request, 'actions/runs/' + run.id + '/artifacts', 'artifacts');
@@ -213,7 +213,7 @@ export async function verifyReusableMainProof({ sourceSha, before, repository, c
   }
   return {
     version: 1, sourceSha, tree: candidate.tree, baseSha: candidate.base, headSha: candidate.head,
-    prNumber, runId: run.id, attempt: run.run_attempt, planDigest: planDigest(plan), mode: plan.mode,
+    prNumber, runId: run.id, attempt: run.run_attempt, mergedAt: new Date(mergedAt).toISOString(), headRef, planDigest: planDigest(plan), mode: plan.mode,
     planArtifact: { id: selectedPlan.id, digest: selectedPlan.digest },
     evidence: selected.map(item => ({ id: item.id, digest: item.digest })),
   };

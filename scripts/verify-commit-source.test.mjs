@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -39,6 +39,9 @@ test('commit publication CLI requires exact main source and the complete success
     const env = { ...process.env, GH_TOKEN: 'test', GITHUB_REPOSITORY: 'owner/repo', GITHUB_SHA: sha, GITHUB_REF: 'refs/heads/main', GITHUB_REF_NAME: 'main', CODEXIA_COMMIT_RELEASE: '1' };
     const run = changes => spawnSync(process.execPath, ['--import', mock, 'scripts/verify-release-source.mjs'], { env: { ...env, ...changes }, encoding: 'utf8' });
     assert.equal(run({}).status, 0);
+    const output = path.join(directory,'verified-source.txt');
+    assert.equal(run({ GITHUB_OUTPUT: output }).status, 0);
+    assert.match(readFileSync(output,'utf8'),/^run-id=1\n$/u);
     assert.equal(run({ WAIT: '1' }).status, 0);
     for (const changes of [{ TIMEOUT: '1' }, { API_ERROR: '1' }, { FAIL_JOB: 'certification' }, { FAIL_JOB: REQUIRED_VERIFICATION_JOBS[0] }, { GITHUB_SHA: 'a'.repeat(40) }, { GITHUB_REF: 'refs/heads/other' }]) {
       const result = run(changes);

@@ -212,7 +212,7 @@ test('maintenance activates changed proxy source and verifies the replacement be
 test('maintenance requires the running proxy to match its private digest-pinned runtime contract',()=>{
   const digest='a'.repeat(64);
   const home='/home/codexia';
-  const quadlet='[Container]\nImage=ghcr.io/yohn-jp/codexia-backend@sha256:'+digest+'\nContainerName=codexia-api-proxy\nNetwork=codexia.network\nVolume=/opt/codexia-updater/deploy/updater/proxy.mjs:/config/proxy.mjs:ro,Z\nVolume=%h/.local/state/codexia-updater:/config/state:ro,Z\nUser=0\nEntrypoint=node\nExec=/config/proxy.mjs\nReadOnly=true\nNoNewPrivileges=true\nDropCapability=all\nTmpfs=/tmp:rw,nosuid,nodev,noexec,size=16m\n';
+  const quadlet='[Container]\nImage=ghcr.io/yohn-jp/codexia-backend@sha256:'+digest+'\nContainerName=codexia-api-proxy\nNetwork=codexia.network\nVolume=/opt/codexia-updater/deploy/updater/proxy.mjs:/config/proxy.mjs:ro,Z\nVolume=%h/.local/state/codexia-updater:/config/state:ro,Z\nUser=0\nEntrypoint=node\nExec=/config/proxy.mjs\nPodmanArgs=--image-volume=ignore\nReadOnly=true\nNoNewPrivileges=true\nDropCapability=all\nTmpfs=/tmp:rw,nosuid,nodev,noexec,size=16m\n';
   const proxyImageEnvironment=['PATH=/usr/bin','NODE_ENV=production'];
   const imageInfo={Id:'sha256:'+'c'.repeat(64),RepoDigests:['ghcr.io/yohn-jp/codexia-backend@sha256:'+digest],Config:{Env:proxyImageEnvironment}};
   const containerId='e'.repeat(64);
@@ -229,6 +229,8 @@ test('maintenance requires the running proxy to match its private digest-pinned 
     ],
   };
   assertProxyRuntimeObservation(quadlet,container,'active',imageInfo,proxyOptions);
+  assert.doesNotThrow(()=>assertProxyRuntimeObservation(quadlet,{...container,Image:container.Image.replace(/^sha256:/u,'')},'active',{...imageInfo,Id:imageInfo.Id.replace(/^sha256:/u,'')},proxyOptions),
+    'Accept Podman’s equivalent bare 64-hex image ID while retaining the pinned RepoDigest and container/image equality checks');
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,container,'active',imageInfo,{...proxyOptions,capabilityStatus:capabilityStatus.replace('CapEff:\t0000000000000000','CapEff:\t0000000000000001')}),/CapEff must be zero/u);
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,HostConfig:{...container.HostConfig,CapAdd:['CAP_SYS_ADMIN']}},'active',imageInfo,proxyOptions),/unexpected capability additions/u);
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Image:'sha256:'+'d'.repeat(64)},'active',imageInfo,proxyOptions),/different image content/u);
@@ -236,8 +238,12 @@ test('maintenance requires the running proxy to match its private digest-pinned 
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,HostConfig:{...container.HostConfig,PortBindings:{'3000/tcp':[{HostIp:'0.0.0.0',HostPort:'3000'}] } }},'active',imageInfo,proxyOptions),/host port/u);
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,NetworkSettings:{Networks:{codexia:{},host:{}}}},'active',imageInfo,proxyOptions),/network/u);
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Mounts:container.Mounts.map(mount=>mount.Destination==='/config/state'?{...mount,RW:true}:mount)},'active',imageInfo,proxyOptions),/mount/u);
+  assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Mounts:[...container.Mounts,{Type:'volume',Name:'unexpected',Source:'/tmp/unexpected',Destination:'/data',RW:true}]},'active',imageInfo,proxyOptions),/mounts differ/u,
+    'Reject anonymous image-declared volumes even when configured proxy binds are correct');
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,HostConfig:{...container.HostConfig,ReadonlyRootfs:false}},'active',imageInfo,proxyOptions),/root filesystem is not read-only/u);
   assert.throws(()=>assertProxyRuntimeObservation(quadlet.replace('ReadOnly=true','ReadOnly=false'),container,'active',imageInfo,proxyOptions),/Quadlet ReadOnly contract drift/u);
+  assert.doesNotThrow(()=>assertProxyRuntimeObservation(quadlet.replace('PodmanArgs=--image-volume=ignore\n',''),container,'active',imageInfo,proxyOptions),
+    'A previously reviewed unit may omit this Podman option when its observed mounts still satisfy the runtime contract');
   assert.throws(()=>assertProxyRuntimeObservation(quadlet, {...container,HostConfig:{...container.HostConfig,SecurityOpt:['no-new-privileges:true','seccomp=unconfined']}},'active',imageInfo,proxyOptions),/security options/u);
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Config:{...container.Config,Entrypoint:['sh']}},'active',imageInfo,proxyOptions),/entrypoint/u);
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Config:{...container.Config,Env:[...proxyImageEnvironment,'NODE_OPTIONS=--require=/tmp/inject.js']}},'active',imageInfo,proxyOptions),/unexpected runtime environment/u);

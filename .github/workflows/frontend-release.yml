@@ -25,6 +25,10 @@ on:
       - scripts/verify-release-source.mjs
       - scripts/verify-deployment-config.mjs
       - scripts/verify-frontend-artifact*.mjs
+      - scripts/frontend-promotion-contract.test.mjs
+      - scripts/frontend-promotion-handoff.test.mjs
+      - scripts/component-release-record*.mjs
+      - scripts/reuse-pr-verification*.mjs
       - scripts/verify-frontend-compatibility*.mjs
       - scripts/update-release-policy.mjs
       - scripts/build-frontend.mjs
@@ -61,6 +65,10 @@ on:
       - scripts/verify-release-source.mjs
       - scripts/verify-deployment-config.mjs
       - scripts/verify-frontend-artifact*.mjs
+      - scripts/frontend-promotion-contract.test.mjs
+      - scripts/frontend-promotion-handoff.test.mjs
+      - scripts/component-release-record*.mjs
+      - scripts/reuse-pr-verification*.mjs
       - scripts/verify-frontend-compatibility*.mjs
       - scripts/update-release-policy.mjs
       - scripts/build-frontend.mjs
@@ -84,6 +92,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     environment: codexia-production
+    outputs:
+      frontend-version: ${{ steps.probe.outputs.frontendVersion }}
+      frontend-source-sha: ${{ steps.probe.outputs.frontendSourceSha }}
+      frontend-profile: ${{ steps.probe.outputs.frontendProfile }}
+      frontend-api-epoch: ${{ steps.probe.outputs.frontendApiEpoch }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -93,71 +106,22 @@ jobs:
         with:
           node-version: '24.22.3'
       - name: Probe production identity endpoints and Access boundary
+        id: probe
         env:
           CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
         run: node scripts/verify-frontend-compatibility.mjs preflight
-  build:
-    name: Build and verify UI assets
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    outputs:
-      artifact-id: ${{ steps.upload.outputs.artifact-id }}
-      artifact-digest: ${{ steps.upload.outputs.artifact-digest }}
-      artifact-name: ${{ steps.producer.outputs.artifact-name }}
-      producer-attempt: ${{ steps.producer.outputs.attempt }}
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@v7.1.0
-        with:
-          node-version: '24.22.3'
-      - name: Prepare locked pnpm toolchain
-        run: |
-          corepack enable
-          corepack pnpm@12.21.0 --version
-      - name: Install frozen dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Build UI without building the API
-        env:
-          CODEXIA_PROFILE: full
-        run: pnpm run build:frontend
-      # Shared route/Worker checks are owned by Verify's unit-root task.
-      # The exact main-source certification gate requires that proof before deploy.
-      - name: Install pinned Wrangler
-        run: npm ci --prefix edge/frontend
-      - name: Validate Wrangler assets-only bundle
-        run: edge/frontend/node_modules/.bin/wrangler deploy --dry-run --config edge/frontend/wrangler.jsonc --outdir "$RUNNER_TEMP/codexia-frontend-worker"
-      - name: Install browser for static delivery verification
-        run: pnpm exec playwright install --with-deps chromium
-      - name: Exercise actual static asset server and browser entrypoints
-        run: node edge/frontend/test/static-smoke.mjs
-      - name: Identify immutable frontend artifact for this producer attempt
-        id: producer
-        if: github.event_name == 'push'
-        run: |
-          echo "attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-          echo "artifact-name=codexia-frontend-$GITHUB_SHA-attempt-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v7.0.2
-        id: upload
-        if: github.event_name == 'push'
-        with:
-          name: ${{ steps.producer.outputs.artifact-name }}
-          path: app/dist
-          if-no-files-found: error
-          retention-days: 2
   certify:
     name: Certify exact-source main push
-    needs: [preflight, build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 70
     permissions:
       contents: read
       actions: read
+    outputs:
+      verify-run-id: ${{ steps.source.outputs.run-id }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -167,10 +131,113 @@ jobs:
         with:
           node-version: '24.22.3'
       - name: Require complete exact-source main verification
+        id: source
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_COMMIT_RELEASE: '1'
         run: node scripts/verify-release-source.mjs
+  build:
+    name: Build and verify UI assets
+    needs: [preflight]
+    if: always() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      artifact-id: ${{ steps.promotion.outputs.artifactId || steps.upload.outputs.artifact-id }}
+      artifact-digest: ${{ steps.promotion.outputs.artifactDigest || steps.upload.outputs.artifact-digest }}
+      artifact-name: ${{ steps.promotion.outputs.artifactName || steps.producer.outputs.artifact-name }}
+      producer-run-id: ${{ steps.promotion.outputs.producerRunId || steps.producer.outputs.run-id }}
+      producer-attempt: ${{ steps.promotion.outputs.producerAttempt || steps.producer.outputs.attempt }}
+      producer-sha: ${{ steps.promotion.outputs.producerSha || steps.producer.outputs.source-sha }}
+      producer-version: ${{ steps.promotion.outputs.producerVersion || steps.producer.outputs.version }}
+      producer-event: ${{ steps.promotion.outputs.promoted == 'true' && 'pull_request' || steps.producer.outputs.event }}
+      producer-pr-number: ${{ steps.promotion.outputs.producerPrNumber || steps.producer.outputs.pr-number }}
+      producer-workflow-id: ${{ steps.promotion.outputs.producerWorkflowId }}
+      producer-verify-run-id: ${{ steps.promotion.outputs.producerVerifyRunId }}
+      producer-proof-run-id: ${{ steps.promotion.outputs.producerProofRunId }}
+      producer-tree: ${{ steps.promotion.outputs.producerTree }}
+      producer-base-sha: ${{ steps.promotion.outputs.producerBaseSha }}
+      producer-plan-digest: ${{ steps.promotion.outputs.producerPlanDigest }}
+      producer-verify-attempt: ${{ steps.promotion.outputs.producerVerifyAttempt }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: ${{ github.event_name == 'push' && '0' || '1' }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Select exact tested PR frontend artifact
+        id: promotion
+        if: github.event_name == 'push' && needs.preflight.result == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
+          CODEXIA_LIVE_FRONTEND_VERSION: ${{ needs.preflight.outputs.frontend-version }}
+          CODEXIA_LIVE_FRONTEND_SOURCE_SHA: ${{ needs.preflight.outputs.frontend-source-sha }}
+          CODEXIA_LIVE_FRONTEND_PROFILE: ${{ needs.preflight.outputs.frontend-profile }}
+          CODEXIA_LIVE_FRONTEND_API_EPOCH: ${{ needs.preflight.outputs.frontend-api-epoch }}
+        run: node scripts/verify-frontend-artifact.mjs select-promotion
+      - name: Prepare locked pnpm toolchain
+        if: github.event_name == 'pull_request' || steps.promotion.outputs.promoted != 'true'
+        run: |
+          corepack enable
+          corepack pnpm@12.21.0 --version
+      - name: Install frozen dependencies
+        if: github.event_name == 'pull_request' || steps.promotion.outputs.promoted != 'true'
+        run: pnpm install --frozen-lockfile
+      - name: Build UI without building the API
+        if: github.event_name == 'pull_request' || steps.promotion.outputs.promoted != 'true'
+        env:
+          CODEXIA_PROFILE: full
+        run: pnpm run build:frontend
+      # Shared route/Worker checks are owned by Verify's unit-root task.
+      # The exact main-source certification gate requires that proof before deploy.
+      - name: Install pinned Wrangler
+        if: github.event_name == 'pull_request' || steps.promotion.outputs.promoted != 'true'
+        run: npm ci --prefix edge/frontend
+      - name: Validate Wrangler assets-only bundle
+        if: github.event_name == 'pull_request' || steps.promotion.outputs.promoted != 'true'
+        run: edge/frontend/node_modules/.bin/wrangler deploy --dry-run --config edge/frontend/wrangler.jsonc --outdir "$RUNNER_TEMP/codexia-frontend-worker"
+      - name: Install browser for static delivery verification
+        if: github.event_name == 'pull_request' || steps.promotion.outputs.promoted != 'true'
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Exercise actual static asset server and browser entrypoints
+        if: github.event_name == 'pull_request' || steps.promotion.outputs.promoted != 'true'
+        run: node edge/frontend/test/static-smoke.mjs
+      - name: Identify immutable frontend artifact for this producer attempt
+        id: producer
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && steps.promotion.outputs.promoted != 'true')
+        env:
+          CODEXIA_PR_NUMBER: ${{ github.event.pull_request.number }}
+          CODEXIA_PRODUCER_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          echo "attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          echo "run-id=$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "source-sha=$CODEXIA_PRODUCER_SHA" >> "$GITHUB_OUTPUT"
+          echo "event=$GITHUB_EVENT_NAME" >> "$GITHUB_OUTPUT"
+          producer_version=$(node -p "require('./app/dist/desktop/update-identity.json').version")
+          echo "version=$producer_version" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            echo "pr-number=$CODEXIA_PR_NUMBER" >> "$GITHUB_OUTPUT"
+            echo "artifact-name=codexia-frontend-pr-$CODEXIA_PR_NUMBER-$GITHUB_RUN_ID-$CODEXIA_PRODUCER_SHA-attempt-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          else
+            echo "artifact-name=codexia-frontend-$GITHUB_SHA-attempt-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/upload-artifact@v7.0.2
+        id: upload
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && steps.promotion.outputs.promoted != 'true')
+        with:
+          name: ${{ steps.producer.outputs.artifact-name }}
+          path: app/dist
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 14 || 2 }}
+  # Independent source certification still gates deployment after build selection.
   deploy:
     name: Deploy UI Static Assets
     needs: [preflight, build, certify]
@@ -181,10 +248,12 @@ jobs:
     permissions:
       contents: write
       actions: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v7.1.0
         with:
@@ -194,15 +263,31 @@ jobs:
       - name: Verify exact frontend artifact provenance
         env:
           GH_TOKEN: ${{ github.token }}
+          CODEXIA_VERIFY_RUN_ID: ${{ needs.build.outputs.producer-verify-run-id || needs.certify.outputs.verify-run-id }}
+          CODEXIA_FRONTEND_SOURCE_VERIFY_RUN_ID: ${{ needs.build.outputs.producer-verify-run-id }}
+          CODEXIA_FRONTEND_CERTIFIED_VERIFY_RUN_ID: ${{ needs.certify.outputs.verify-run-id }}
+          CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
           CODEXIA_FRONTEND_ARTIFACT_ID: ${{ needs.build.outputs.artifact-id }}
           CODEXIA_FRONTEND_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact-digest }}
           CODEXIA_FRONTEND_ARTIFACT_NAME: ${{ needs.build.outputs.artifact-name }}
+          CODEXIA_FRONTEND_PRODUCER_EVENT: ${{ needs.build.outputs.producer-event }}
+          CODEXIA_FRONTEND_PRODUCER_RUN_ID: ${{ needs.build.outputs.producer-run-id }}
           CODEXIA_FRONTEND_PRODUCER_ATTEMPT: ${{ needs.build.outputs.producer-attempt }}
+          CODEXIA_FRONTEND_PRODUCER_SHA: ${{ needs.build.outputs.producer-sha }}
+          CODEXIA_FRONTEND_PRODUCER_VERSION: ${{ needs.build.outputs.producer-version }}
+          CODEXIA_FRONTEND_PRODUCER_PR_NUMBER: ${{ needs.build.outputs.producer-pr-number }}
+          CODEXIA_FRONTEND_PRODUCER_WORKFLOW_ID: ${{ needs.build.outputs.producer-workflow-id }}
+          CODEXIA_FRONTEND_PRODUCER_TREE: ${{ needs.build.outputs.producer-tree }}
+          CODEXIA_FRONTEND_PRODUCER_BASE_SHA: ${{ needs.build.outputs.producer-base-sha }}
+          CODEXIA_FRONTEND_PR_VERIFY_RUN_ID: ${{ needs.build.outputs.producer-proof-run-id }}
+          CODEXIA_FRONTEND_VERIFY_ATTEMPT: ${{ needs.build.outputs.producer-verify-attempt }}
+          CODEXIA_FRONTEND_VERIFY_PLAN_DIGEST: ${{ needs.build.outputs.producer-plan-digest }}
         run: node scripts/verify-frontend-artifact.mjs
       - name: Verify live backend API compatibility before switching UI
         id: compatibility
         env:
           CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
+          CODEXIA_FRONTEND_PRODUCER_SHA: ${{ needs.build.outputs.producer-sha }}
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
         run: node scripts/verify-frontend-compatibility.mjs
@@ -218,6 +303,7 @@ jobs:
         if: always() && steps.compatibility.outcome == 'success'
         env:
           CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
+          CODEXIA_FRONTEND_PRODUCER_SHA: ${{ needs.build.outputs.producer-sha }}
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
         run: node scripts/verify-frontend-compatibility.mjs deployed
@@ -225,4 +311,19 @@ jobs:
         if: always() && steps.compatibility.outcome == 'success' && steps.verify-deployed.outcome == 'success' && (steps.deploy-assets.outcome == 'success' || steps.compatibility.outputs.deploy == 'false')
         env:
           GH_TOKEN: ${{ github.token }}
+          CODEXIA_FRONTEND_PRODUCER_EVENT: ${{ needs.build.outputs.producer-event }}
+          CODEXIA_FRONTEND_PRODUCER_RUN_ID: ${{ needs.build.outputs.producer-run-id }}
+          CODEXIA_FRONTEND_PRODUCER_ATTEMPT: ${{ needs.build.outputs.producer-attempt }}
+          CODEXIA_FRONTEND_PRODUCER_SHA: ${{ needs.build.outputs.producer-sha }}
+          CODEXIA_FRONTEND_PRODUCER_VERSION: ${{ needs.build.outputs.producer-version }}
+          CODEXIA_FRONTEND_ARTIFACT_ID: ${{ needs.build.outputs.artifact-id }}
+          CODEXIA_FRONTEND_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact-digest }}
+          CODEXIA_FRONTEND_PRODUCER_PR_NUMBER: ${{ needs.build.outputs.producer-pr-number }}
+          CODEXIA_FRONTEND_PRODUCER_WORKFLOW_ID: ${{ needs.build.outputs.producer-workflow-id }}
+          CODEXIA_FRONTEND_VERIFY_RUN_ID: ${{ needs.build.outputs.producer-verify-run-id || needs.certify.outputs.verify-run-id }}
+          CODEXIA_FRONTEND_PR_VERIFY_RUN_ID: ${{ needs.build.outputs.producer-proof-run-id }}
+          CODEXIA_FRONTEND_VERIFY_ATTEMPT: ${{ needs.build.outputs.producer-verify-attempt }}
+          CODEXIA_FRONTEND_VERIFY_PLAN_DIGEST: ${{ needs.build.outputs.producer-plan-digest }}
+          CODEXIA_FRONTEND_PRODUCER_TREE: ${{ needs.build.outputs.producer-tree }}
+          CODEXIA_FRONTEND_PRODUCER_BASE_SHA: ${{ needs.build.outputs.producer-base-sha }}
         run: node scripts/record-component-release.mjs frontend

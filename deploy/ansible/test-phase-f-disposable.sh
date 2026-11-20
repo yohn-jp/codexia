@@ -299,6 +299,7 @@ postgres_image=$(sed -n 's/^Image=//p' "$source_dir/deploy/quadlet/codexia-db.co
 } 2>&1 | as_service tee "$evidence_dir/postgres-init-access.txt"
 
 as_service /usr/bin/systemctl --user daemon-reload
+user_systemctl start codexia-data-volume.service codexia-history-volume.service
 user_systemctl start codexia-db.service
 db_ready=false
 for attempt in $(seq 1 90); do
@@ -317,7 +318,7 @@ done
   exit 1
 }
 
-base_image=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).image)' "$evidence_dir/release-0.1.236.json")
+base_image=$(as_service /usr/bin/jq -r .image "$evidence_dir/release-0.1.236.json")
 database_id_before=$(rootless inspect --format '{{.Id}}' codexia-db)
 data_volume_before=$(rootless volume inspect --format '{{.Name}}|{{.Mountpoint}}' codexia-data)
 history_volume_before=$(rootless volume inspect --format '{{.Name}}|{{.Mountpoint}}' codexia-history)
@@ -405,16 +406,28 @@ run_updater() {
     CODEXIA_PHASE_F_CHANNEL_FILE="$channel_file" \
     CODEXIA_PHASE_F_FRONTEND_URL="$frontend_url" \
     CODEXIA_PHASE_F_FRONTEND_IDENTITY_FILE="$frontend_identity_file" \
-    "$updater" "$@"
+    sh "$updater" "$@"
 }
-run_updater init "$config_file" "$evidence_dir/release-0.1.236.json" > "$test_root/init.json"
+if ! run_updater init "$config_file" "$evidence_dir/release-0.1.236.json" > "$test_root/init.json"; then
+  printf 'Disposable initial activation failed; safe state detail follows:\n' >&2
+  if [[ -s "$test_root/init.json" ]]; then
+    /usr/bin/jq -r '(.lastError // empty), (.journal.phase // empty)' "$test_root/init.json" >&2 || true
+  else
+    printf 'Updater returned no state JSON.\n' >&2
+  fi
+  printf 'Disposable proxy image identities (digest and content IDs only):\n' >&2
+  rootless image inspect --format 'imageID={{.Id}} repoDigests={{json .RepoDigests}}' "$base_image" >&2 || true
+  rootless inspect --type container --format 'containerImage={{.Image}} containerImageName={{.ImageName}}' codexia-api-proxy >&2 || true
+  rootless inspect --type container --format 'proxyMounts={{json .Mounts}}' codexia-api-proxy >&2 || true
+  exit 1
+fi
 
 assert_controller_status() {
   local file=$1 expected_image=$2 expected_route=$3 expected_phase=$4 expected_paused=$5
   node --input-type=module - "$file" "$expected_image" "$expected_route" "$expected_phase" "$expected_paused" <<'NODE'
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-const [, file, image, route, phase, paused] = process.argv;
+  const [file, image, route, phase, paused] = process.argv.slice(2);
 const result = JSON.parse(readFileSync(file, 'utf8'));
 assert.equal(result.state.installed.image, image);
 assert.equal(result.state.journal.phase, phase);
@@ -449,7 +462,7 @@ NODE
 
 run_updater acceptance-update "$config_file" > "$test_root/update.json"
 run_updater status "$config_file" > "$test_root/status-updated.json"
-middle_image=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).image)' "$evidence_dir/release-0.1.245.json")
+middle_image=$(as_service /usr/bin/jq -r .image "$evidence_dir/release-0.1.245.json")
 assert_controller_status "$test_root/status-updated.json" "$middle_image" green committed true
 run_updater acceptance-rollback "$config_file" > "$test_root/rollback.json"
 run_updater verify "$config_file" > "$test_root/verify-rollback.json"
@@ -476,7 +489,7 @@ NODE
 
 # Advance the signed test channel to a third published image so the earlier rollback does not suppress it.
 as_service install -m 0600 "$evidence_dir/channel-sequence-2.json" "$channel_file"
-newest_image=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).image)' "$evidence_dir/release-0.1.254.json")
+newest_image=$(as_service /usr/bin/jq -r .image "$evidence_dir/release-0.1.254.json")
 crash_bin="$fixture_data/crash-bin"
 as_service install -d -m 0700 "$crash_bin"
 cat > "$test_root/systemctl-crash" <<EOF
@@ -495,15 +508,15 @@ EOF
 sudo install -o "$service_user" -g "$service_group" -m 0700 "$test_root/systemctl-crash" "$crash_bin/systemctl"
 set +e
 as_service env \
-  PATH="$crash_bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  PATH="$crash_bin:$node_path:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   NODE_OPTIONS="--import=$loader" \
   CODEXIA_PHASE_F_CHANNEL_FILE="$channel_file" \
   CODEXIA_PHASE_F_FRONTEND_URL="$frontend_url" \
   CODEXIA_PHASE_F_FRONTEND_IDENTITY_FILE="$frontend_identity_file" \
-  "$updater" acceptance-update "$config_file" > "$test_root/interrupted-update.out" 2> "$test_root/interrupted-update.err"
+  sh "$updater" acceptance-update "$config_file" > "$test_root/interrupted-update.out" 2> "$test_root/interrupted-update.err"
 interrupt_status=$?
 set -e
-[[ "$interrupt_status" == 137 && -s "$fixture_data/interruption-injected" ]] || {
+[[ "$interrupt_status" == 137 ]] && as_service test -s "$fixture_data/interruption-injected" || {
   cat "$test_root/interrupted-update.err" >&2
   echo 'The updater was not interrupted after stopping the prior writer.' >&2
   exit 1
@@ -512,7 +525,7 @@ run_updater status "$config_file" > "$test_root/status-interrupted.json"
 node --input-type=module - "$test_root/status-interrupted.json" "$base_image" "$newest_image" <<'NODE'
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-const [, file, activeImage, candidateImage] = process.argv;
+const [file, activeImage, candidateImage] = process.argv.slice(2);
 const { state, observed } = JSON.parse(readFileSync(file, 'utf8'));
 assert.equal(state.journal.phase, 'draining');
 assert.equal(state.installed.image, activeImage);
@@ -531,7 +544,7 @@ run_updater pause "$config_file" > "$test_root/pause-recovery.json"
 run_updater verify "$config_file" > "$test_root/verify-recovery.json"
 run_updater status "$config_file" > "$test_root/status-recovered.json"
 assert_controller_status "$test_root/status-recovered.json" "$base_image" blue idle true
-recovery_error=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).state.lastError ?? "")' "$test_root/boot-recovery.json")
+recovery_error=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).lastError ?? "")' "$test_root/boot-recovery.json")
 [[ "$recovery_error" == 'Interrupted update recovered from durable journal' ]]
 
 # Deliberate disposable route-state drift must be rejected by the existing host verifier; it remains closed.
@@ -547,10 +560,10 @@ grep -Fq 'Proxy route mismatch' "$test_root/drift.err"
 rootless exec codexia-api-proxy node --input-type=module -e 'const response=await fetch("http://127.0.0.1:3000/api/version"); if(response.status!==503) process.exit(1)' \
   || { echo 'The proxy did not fail closed while the disposable route was blocked.' >&2; exit 1; }
 
-node --input-type=module - "$evidence_dir" "$GITHUB_SHA" "$project_id" <<'NODE'
+as_service "$node_bin" --input-type=module - "$evidence_dir" "$GITHUB_SHA" "$project_id" <<'NODE'
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
-const [, directory, sourceSha, projectId] = process.argv;
+const [directory, sourceSha, projectId] = process.argv.slice(2);
 const result = {
   format: 'codexia-phase-f-disposable-results/v1', sourceSha,
   testOnlySigning: 'PASS: fresh ephemeral Ed25519 key; channel verifier mechanics only, not production publisher authority.',
