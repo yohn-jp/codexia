@@ -162,6 +162,43 @@ test("exact revision acknowledgement removes its draft without reviving deleted 
   expect((await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
 });
 
+test("a committed save with a lost response is reconciled after reload with the same operation identity", async ({ page }) => {
+  const f = await fixture(page);
+  const text = "Committed before its response was lost.";
+  const before = await read(page, f);
+  let resolveLost!: () => void;
+  const lost = new Promise<void>((resolve) => { resolveLost = resolve; });
+  const requests: Array<{ idempotencyKey: string | undefined; clientId: string | undefined; body: string | null }> = [];
+  await page.route(`**${documentPath(f)}`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.continue();
+    requests.push({
+      idempotencyKey: route.request().headers()["idempotency-key"],
+      clientId: route.request().headers()["x-client-id"],
+      body: route.request().postData(),
+    });
+    if (requests.length === 1) {
+      const committed = await route.fetch();
+      expect(committed.ok()).toBe(true);
+      await route.abort();
+      resolveLost();
+      return;
+    }
+    await route.continue();
+  });
+
+  await replaceEditor(page, text);
+  await lost;
+  await expect.poll(async () => (await drafts(page)).find((draft) => draft.documentId === f.one.document.id)?.pendingSave).toMatchObject({ markdown: text });
+  await page.reload();
+  await expectEditor(page, text);
+  await expect.poll(() => requests.length).toBe(2);
+  await saved(page, f, text);
+  expect(requests[1]).toEqual(requests[0]);
+  const after = await read(page, f);
+  expect(after.revision.id).not.toBe(before.revision.id);
+  expect((await drafts(page)).filter((draft) => draft.documentId === f.one.document.id)).toEqual([]);
+});
+
 test("undoing an autosave draft back to the saved revision removes only that draft and never sends it", async ({ page }) => {
   const f = await fixture(page);
   await page.clock.install();
