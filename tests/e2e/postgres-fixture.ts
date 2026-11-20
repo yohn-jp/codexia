@@ -18,6 +18,11 @@ export async function expectDeviceDraft(page: Page): Promise<void> {
 export async function expectServerSaved(page: Page): Promise<void> {
   await expect(page.locator(".pg-save-state summary")).toHaveText("保存済み", { timeout: 15_000 });
 }
+export async function expectServerSaveFailure(page: Page): Promise<void> {
+  const details = await openProtectionDetails(page);
+  await expect(details.locator("summary")).toHaveText("要確認", { timeout: 15_000 });
+  await expect(details).toContainText("サーバー: PostgreSQLへの保存を確認できません");
+}
 export async function openRevisionHistory(scope: Page | Locator): Promise<void> {
   const menu = scope.locator(".pg-editor-command-menu");
   if (!await menu.evaluate((element) => (element as HTMLDetailsElement).open)) await menu.locator("summary").click();

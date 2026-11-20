@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import { createWritingFixture, expectDeviceDraft, expectServerSaved, openRevisionHistory, ownerLogin, manuscriptEditor } from "./postgres-fixture";
+import { createWritingFixture, expectDeviceDraft, expectServerSaveFailure, expectServerSaved, openRevisionHistory, ownerLogin, manuscriptEditor } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
@@ -291,7 +291,7 @@ for (const shell of ["desktop", "mobile"] as const) {
     await editor.click();
     await page.keyboard.insertText("はじめの本文。");
     await expect(editor).toHaveText("はじめの本文。");
-    await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+    await expectServerSaved(page);
   });
 }
 
@@ -434,7 +434,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   const interruptedDraft = "再読み込み後に復旧するDraft";
   await otherEditor.fill(interruptedDraft);
   await expectDeviceDraft(otherPage);
-  await expect(otherPage.getByText("PostgreSQL保存を確認できません")).toBeVisible({ timeout: 15_000 });
+  await expectServerSaveFailure(otherPage);
   await otherPage.unroute("**/api/v1/persistence/projects/*/documents/*");
   await otherPage.reload();
   await expect(otherPage.getByRole("heading", { name: "Database workspace" })).toBeVisible();

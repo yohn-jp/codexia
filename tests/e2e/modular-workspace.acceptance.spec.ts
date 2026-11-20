@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
-import { authToken, expectDeviceDraft, expectServerSaved, manuscriptEditor, ownerLogin, openRevisionHistory } from "./postgres-fixture";
+import { authToken, expectDeviceDraft, expectServerSaveFailure, expectServerSaved, manuscriptEditor, ownerLogin, openRevisionHistory } from "./postgres-fixture";
 
 const profile = process.env.CODEXIA_PROFILE ?? "core";
 const INITIAL_SCENE_ONE = "# Scene One\n\nThe first line of the story.\nBeacon Quay appears in this scene.\n";
@@ -815,7 +815,7 @@ test("editor remains unavailable until delayed browser recovery completes, then 
   const draft = "Recovered after delayed IndexedDB readiness.";
   await page.locator(".cm-content").fill(draft);
   await expectDraft(page, fixture.scene.document.id, draft);
-  await expect(page.getByText("PostgreSQL保存を確認できません", { exact: true })).toBeVisible();
+  await expectServerSaveFailure(page);
 
   await page.addInitScript(() => {
     type RecoveryGate = { opened: boolean; release?: () => void };
@@ -958,7 +958,7 @@ test("PostgreSQL API restart preserves canonical content and replays the exact b
   });
   expect(login.status()).toBe(200);
   releaseSave();
-  await expect(page.getByText("PostgreSQL保存を確認できません", { exact: true })).toBeVisible();
+  await expectServerSaveFailure(page);
   expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(INITIAL_SCENE_ONE);
 
   await page.reload();
