@@ -299,6 +299,7 @@ postgres_image=$(sed -n 's/^Image=//p' "$source_dir/deploy/quadlet/codexia-db.co
 } 2>&1 | as_service tee "$evidence_dir/postgres-init-access.txt"
 
 as_service /usr/bin/systemctl --user daemon-reload
+user_systemctl start codexia-data-volume.service codexia-history-volume.service
 user_systemctl start codexia-db.service
 db_ready=false
 for attempt in $(seq 1 90); do

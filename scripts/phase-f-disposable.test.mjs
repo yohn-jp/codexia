@@ -96,6 +96,8 @@ test('Phase F integration helper is valid shell and exercises the existing locke
   assert.match(helper, /postgres_image=\$\(sed -n 's\/\^Image=\/\/p' "\$source_dir\/deploy\/quadlet\/codexia-db\.container"\)/u);
   assert.equal((helper.match(/as_service \/usr\/bin\/jq -r \.image "\$evidence_dir\/release-0\.1\.(?:236|245|254)\.json"/gu) ?? []).length, 3,
     'Read private release fixtures as their owner, not as the unrelated GitHub runner account');
+  assert.match(helper, /user_systemctl start codexia-data-volume\.service codexia-history-volume\.service[\s\S]*?user_systemctl start codexia-db\.service[\s\S]*?data_volume_before=/u,
+    'Create the data/history volume fixtures before recording their runtime identities');
   assert.match(helper, /codexia-updater(?:\.sh)?/u);
 });
 
