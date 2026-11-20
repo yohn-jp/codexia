@@ -747,4 +747,4 @@ CODEXIA_RUNTIME_MAINTENANCE_IMAGE="$IMAGE_ID" \
 CODEXIA_RUNTIME_MAINTENANCE_NONCE="$NONCE" \
   node "$SCRIPT_DIR/test-standalone-maintenance-integration.mjs" --run "$REPO_ROOT" "$QUADLET_DIR" "$USER_UNIT_DIR" "$WORK_DIR"
 
-printf 'PASS: pinned synthetic Core/Full Quadlets, rootless Podman/systemd, effective resource limits, read-only models, blue/green persistence, fail-closed locked boot recovery after process kill, real timer verification, PostgreSQL app-password authentication and immutable secret rotation, crash recovery through the systemd boot unit, preserved database identity/data, and post-update restart\n'
+printf 'PASS: pinned synthetic Core/Full Quadlets, rootless Podman/systemd, effective resource limits, read-only models, blue/green persistence, fail-closed locked boot recovery after process kill, real timer verification, PostgreSQL app-password authentication and immutable secret rotation, standalone API-token old/new authentication and immutable secret rotation, rollback and completed-marker crash recovery through the systemd boot unit, preserved database identity/data, and post-update restart\n'

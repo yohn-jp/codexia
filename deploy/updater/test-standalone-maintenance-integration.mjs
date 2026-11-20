@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { signUpdateChannel } from '../../scripts/update-channel.mjs';
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, rmdir, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, rmdir, watch, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -571,6 +571,107 @@ async function createPasswordRotationCandidate({ stateDir, config, userUnitDir, 
   return { root: candidateRoot, manifestPath, manifest, state, databaseId, artifactDirectory };
 }
 
+async function createApiAuthTokenCandidate({config,token}){
+  const candidateRoot=path.join(path.dirname(config.publicKeyFile),'maintenance','candidates','api-token-'+randomBytes(16).toString('hex'));
+  await mkdir(path.join(candidateRoot,'credentials'),{recursive:true,mode:0o700});
+  const apiAuthTokenFile=path.join(candidateRoot,'credentials','api-auth-token');
+  await writeFile(apiAuthTokenFile,token,{mode:0o600,flag:'wx'});
+  const manifest={format:'codexia-updater-maintenance/v1',candidateRoot,
+    configPath:path.join(path.dirname(config.publicKeyFile),'config.json'),sourceDir:SOURCE_ROOT,
+    unitDir:path.resolve(config.quadletDirectory,'../../../.config/systemd/user'),
+    rotateApiAuthToken:true,apiAuthTokenFile};
+  const manifestPath=path.join(candidateRoot,'manifest.json');
+  await writeFile(manifestPath,JSON.stringify(manifest)+'\n',{mode:0o600,flag:'wx'});
+  return {candidateRoot,manifestPath};
+}
+
+async function runApiAuthTokenRotationCandidate({candidate,configPath,environment,killAtSecretCreate=false,killAtCompletedMarker=false}){
+  const wrapper=path.join(SOURCE_ROOT,'deploy/updater/codexia-updater');
+  const preload=path.join(SOURCE_ROOT,'deploy/updater/test-standalone-maintenance-preload.mjs');
+  let env={...environment,CODEXIA_RUNTIME_MAINTENANCE_AUTH_TOKEN_ROTATION:'yes',
+    NODE_OPTIONS:[environment.NODE_OPTIONS,`--import=${preload}`].filter(Boolean).join(' ')};
+  let observedFile;
+  if(killAtSecretCreate){
+    const faultBin=path.join(candidate.candidateRoot,'fault-bin');
+    await mkdir(faultBin,{mode:0o700});
+    observedFile=path.join(candidate.candidateRoot,'secret-created-before-process-death');
+    const podmanPath=execFileSync('which',['podman'],{encoding:'utf8'}).trim();
+    const shim=['#!/bin/sh',`"${podmanPath}" "$@"`,'status=$?','if [ "$status" -ne 0 ]; then exit "$status"; fi',
+      'if [ "$1" = secret ] && [ "$2" = create ]; then','  for argument do',
+      '    if [ "$argument" = codexia-auth-token ]; then',`      printf '%s\\n' created > "${observedFile}"`,
+      '      kill -KILL "$PPID"','      break','    fi','  done','fi','exit "$status"'].join('\n')+'\n';
+    await writeFile(path.join(faultBin,'podman'),shim,{mode:0o700,flag:'wx'});
+    env={...env,PATH:faultBin+path.delimiter+env.PATH};
+  }
+  if(killAtCompletedMarker){
+    const markerPath=path.join(path.dirname(configPath),'../../.local/state/codexia-updater/maintenance/in-progress.json');
+    const watcher=watch(path.dirname(markerPath));
+    const child=spawn('sh',[wrapper,'maintain',configPath,candidate.manifestPath],{env,stdio:'ignore'});
+    let watchdog;
+    const killer=(async()=>{
+      for await(const event of watcher){
+        if(!event.filename||String(event.filename)!=='in-progress.json')continue;
+        try{
+          const marker=JSON.parse(await readFile(markerPath,'utf8'));
+          if(marker.phase==='completed'){child.kill('SIGKILL');return true;}
+        }catch(error){if(error.code!=='ENOENT')throw error;}
+      }
+      return false;
+    })();
+    const closed=await Promise.race([new Promise((resolve,reject)=>{
+      child.once('error',reject);
+      child.once('close',(code,signal)=>resolve({code,signal}));
+    }),new Promise((_,reject)=>{watchdog=setTimeout(()=>{child.kill('SIGKILL');reject(Error('API token completion marker was not observed'));},120000);})]);
+    clearTimeout(watchdog);
+    watcher.close();
+    assert.equal(await killer,true,'API token completion marker watcher ended unexpectedly');
+    assert.equal(closed.signal,'SIGKILL','API token completion fault injection did not kill at its durable commit marker');
+    return {signal:closed.signal};
+  }
+  const child=spawnSync('sh',[wrapper,'maintain',configPath,candidate.manifestPath],
+    {encoding:'utf8',timeout:240000,maxBuffer:4*1024*1024,env});
+  if(child.error)throw child.error;
+  if(killAtSecretCreate){
+    assert.equal(child.signal,'SIGKILL','API token fault injection did not terminate after secret creation');
+    assert.equal((await readFile(observedFile,'utf8')).trim(),'created');
+  }else if(child.status!==0){
+    throw Error(`API token rotation failed with status ${String(child.status)}`);
+  }
+  return child;
+}
+
+async function proxyApiTokenStatus(token){
+  const script="let token='';for await(const chunk of process.stdin)token+=chunk;token=token.replace(/\\n$/u,'');const r=await fetch('http://127.0.0.1:3000/api/v1/persistence/status',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(5000)});process.stdout.write(String(r.status));";
+  const result=spawnSync('podman',['exec','-i','codexia-api-proxy','node','--input-type=module','-e',script],
+    {encoding:'utf8',input:token,timeout:15000,maxBuffer:1024*1024});
+  if(result.error)throw result.error;
+  assert.equal(result.status,0,'Private proxy auth probe failed');
+  return result.stdout.trim();
+}
+
+function readPodmanApiAuthTokenSecret(){
+  const result=spawnSync('podman',['secret','inspect','--showsecret','codexia-auth-token'],{encoding:'utf8',timeout:15000,maxBuffer:1024*1024});
+  if(result.error)throw result.error;
+  assert.equal(result.status,0,'Canonical API token secret could not be inspected');
+  const [secret]=JSON.parse(result.stdout);
+  assert.ok(typeof secret?.ID==='string'&&typeof secret?.SecretData==='string','Canonical API token secret identity is invalid');
+  return secret;
+}
+
+async function recoverMaintenanceAtBoot({config,expectedImage,nonce}){
+  const watchedEnvironment=['NODE_OPTIONS','XDG_STATE_HOME','CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE','CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY',
+    'CODEXIA_RUNTIME_MAINTENANCE_BACKUP_DIGEST','CODEXIA_RUNTIME_MAINTENANCE_IMAGE','CODEXIA_RUNTIME_MAINTENANCE_NONCE'];
+  const managerEnvironment=run('systemctl',['--user','show-environment']).split('\n');
+  const restore=Object.fromEntries(watchedEnvironment.map(name=>[name,managerEnvironment.find(line=>line.startsWith(name+'='))?.slice(name.length+1)??null]));
+  const preload=path.join(SOURCE_ROOT,'deploy/updater/test-standalone-maintenance-preload.mjs');
+  run('systemctl',['--user','set-environment',`NODE_OPTIONS=--import=${preload}`,
+    `XDG_STATE_HOME=${path.dirname(path.dirname(config.stateFile))}`,'CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE=yes',
+    'CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY=yes',`CODEXIA_RUNTIME_MAINTENANCE_BACKUP_DIGEST=${BACKUP_DIGEST_FIXTURE}`,
+    `CODEXIA_RUNTIME_MAINTENANCE_IMAGE=${expectedImage}`,`CODEXIA_RUNTIME_MAINTENANCE_NONCE=${nonce}`]);
+  try{run('systemctl',['--user','start','codexia-updater-boot.service'],{timeout:240000});}
+  finally{await restoreBootManagerEnvironment(restore);}
+}
+
 async function runRotationCandidate({ repoRoot, candidate, configPath, environment, expectedStatus = 0, killAtSecretCreate = false }) {
   const wrapper = path.join(SOURCE_ROOT, 'deploy/updater/codexia-updater');
   const preload = path.join(repoRoot, 'deploy/updater/test-standalone-maintenance-preload.mjs');
@@ -798,6 +899,70 @@ async function exercisePostgresPasswordRotation({ repoRoot, config, userUnitDir,
     assert.equal(await readFile(proxyQuadlet, 'utf8'), originalProxyText, 'Proxy fixture did not restore the production Quadlet text');
     if (restoreError) throw restoreError;
   }
+}
+
+async function exerciseApiAuthTokenRotation({config,workDir,expectedImage,environment}){
+  const state=await loadControllerState(config.stateFile);
+  assert.equal(state.paused,true,'API token rotation fixture requires a paused controller');
+  const initialSecret=readPodmanApiAuthTokenSecret();
+  const previousToken=initialSecret.SecretData;
+  const initialSecretId=initialSecret.ID;
+  const host=new PodmanStandaloneHost(config);
+  await host.verifyApiAuthToken(state.journal.active.slot,previousToken,200);
+  const replacementToken=randomBytes(32).toString('hex');
+  const candidate=await createApiAuthTokenCandidate({config,token:replacementToken});
+  try{
+    await runApiAuthTokenRotationCandidate({candidate,configPath:path.join(path.dirname(config.publicKeyFile),'config.json'),environment});
+    await assert.rejects(lstat(path.join(path.dirname(config.stateFile),'maintenance','in-progress.json')),{code:'ENOENT'},'Successful API token rotation retained a recovery marker');
+    const rotatedSecret=readPodmanApiAuthTokenSecret();
+    assert.notEqual(rotatedSecret.ID,initialSecretId,'Immutable API token secret ID did not change');
+    await host.verifyApiAuthToken(state.journal.active.slot,replacementToken,200);
+    await host.verifyApiAuthToken(state.journal.active.slot,previousToken,401);
+    assert.equal(await proxyApiTokenStatus(replacementToken),'200');
+    assert.equal(await proxyApiTokenStatus(previousToken),'401');
+    assert.equal((await readFile(config.routeFile,'utf8')).trim(),state.journal.active.slot);
+    assert.equal((await loadControllerState(config.stateFile)).paused,true,'API token rotation changed pause state');
+    await assertTimerState('active','enabled');
+
+    const interruptedToken=randomBytes(32).toString('hex');
+    const interrupted=await createApiAuthTokenCandidate({config,token:interruptedToken});
+    try{
+      await runApiAuthTokenRotationCandidate({candidate:interrupted,configPath:path.join(path.dirname(config.publicKeyFile),'config.json'),environment,killAtSecretCreate:true});
+      const marker=JSON.parse(await readFile(path.join(path.dirname(config.stateFile),'maintenance','in-progress.json'),'utf8'));
+      assert.equal(marker.format,'codexia-maintenance-api-auth-token/v1');
+      assert.equal(marker.phase,'applying');
+      assert.equal((await readFile(config.routeFile,'utf8')).trim(),'blocked');
+      assert.ok(['inactive','failed'].includes(systemdState(`codexia-slot-${state.journal.active.slot}.service`)));
+      await assertTimerState('inactive','enabled');
+
+      await recoverMaintenanceAtBoot({config,expectedImage,nonce:process.env.CODEXIA_RUNTIME_MAINTENANCE_NONCE});
+      await assert.rejects(lstat(path.join(path.dirname(config.stateFile),'maintenance','in-progress.json')),{code:'ENOENT'},'Boot recovery retained the API token marker');
+      assert.equal((await readFile(config.routeFile,'utf8')).trim(),state.journal.active.slot);
+      await host.verifyApiAuthToken(state.journal.active.slot,replacementToken,200);
+      await host.verifyApiAuthToken(state.journal.active.slot,interruptedToken,401);
+      assert.equal(await proxyApiTokenStatus(replacementToken),'200');
+      assert.equal(await proxyApiTokenStatus(interruptedToken),'401');
+      assert.equal((await loadControllerState(config.stateFile)).paused,true,'API token recovery changed pause state');
+      await assertTimerState('active','enabled');
+    }finally{await rm(interrupted.candidateRoot,{recursive:true,force:true});}
+
+    const completedToken=randomBytes(32).toString('hex');
+    const completed=await createApiAuthTokenCandidate({config,token:completedToken});
+    try{
+      await runApiAuthTokenRotationCandidate({candidate:completed,configPath:path.join(path.dirname(config.publicKeyFile),'config.json'),environment,killAtCompletedMarker:true});
+      const completedMarker=JSON.parse(await readFile(path.join(path.dirname(config.stateFile),'maintenance','in-progress.json'),'utf8'));
+      assert.equal(completedMarker.phase,'completed');
+      assert.equal((await readFile(config.routeFile,'utf8')).trim(),state.journal.active.slot);
+      await assertTimerState('active','enabled');
+      await recoverMaintenanceAtBoot({config,expectedImage,nonce:process.env.CODEXIA_RUNTIME_MAINTENANCE_NONCE});
+      await assert.rejects(lstat(path.join(path.dirname(config.stateFile),'maintenance','in-progress.json')),{code:'ENOENT'},'Committed boot recovery retained the API token marker');
+      await host.verifyApiAuthToken(state.journal.active.slot,completedToken,200);
+      await host.verifyApiAuthToken(state.journal.active.slot,replacementToken,401);
+      assert.equal(await proxyApiTokenStatus(completedToken),'200');
+      assert.equal(await proxyApiTokenStatus(replacementToken),'401');
+      await assertTimerState('active','enabled');
+    }finally{await rm(completed.candidateRoot,{recursive:true,force:true});}
+  }finally{await rm(candidate.candidateRoot,{recursive:true,force:true});}
 }
 
 async function main() {
@@ -1114,6 +1279,7 @@ async function main() {
     repoRoot, config: appliedConfig, userUnitDir, workDir, nonce, expectedImage,
     originalProxyText: proxyText, proxyQuadlet, environment,
   });
+  await exerciseApiAuthTokenRotation({config:appliedConfig,workDir,expectedImage,environment});
 
   run('systemctl', ['--user', 'disable', '--now', 'codexia-updater.timer']);
   await assertTimerState('inactive', 'disabled');

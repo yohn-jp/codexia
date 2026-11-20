@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
-import { chmod, lstat, readFile, realpath, rm } from 'node:fs/promises';
+import { chmod, lstat, open, readFile, realpath, rm, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyUpdateChannel } from '../../scripts/update-channel.mjs';
 import { assertMatchingControllerBackup, validateControllerBackupProof, atomicWrite, clearBackupIntent, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
-import { PodmanStandaloneHost, ensureDirectoryTreeDurable, validatePostgresAppPassword, validateRuntimeContract } from './standalone-host.mjs';
+import { PodmanStandaloneHost, ensureDirectoryTreeDurable, validatePostgresAppPassword, validateRuntimeContract, validateStandaloneAuthToken } from './standalone-host.mjs';
 export { validatePostgresAppPassword };
+export { validateStandaloneAuthToken };
 
 export const MAINTENANCE_SOURCE_FILES = Object.freeze([
   'deploy/updater/codexia-updater',
@@ -83,6 +84,113 @@ export function validateAppPasswordRotationManifest(manifest,manifestPath,servic
   assert.equal(path.resolve(manifest.sourceDir),'/opt/codexia-updater','Maintenance source directory differs from the canonical installation');
   return {appPasswordFile:manifest.appPasswordFile,restoreReceiptFile:manifest.restoreReceiptFile,databaseQuadletFile:manifest.databaseQuadletFile};
 }
+export function validateApiAuthTokenRotationManifest(manifest,manifestPath,serviceHome){
+  const keys=['apiAuthTokenFile','candidateRoot','configPath','format','rotateApiAuthToken','sourceDir','unitDir'];
+  assert.ok(plainObject(manifest),'API token maintenance manifest must be an object');
+  assert.deepEqual(Object.keys(manifest).sort(),keys,'Unexpected API token maintenance manifest fields');
+  assert.equal(manifest.format,'codexia-updater-maintenance/v1');
+  assert.equal(manifest.rotateApiAuthToken,true,'API token rotation must be explicitly selected');
+  for(const key of ['candidateRoot','configPath','sourceDir','unitDir','apiAuthTokenFile'])
+    assert.ok(typeof manifest[key]==='string'&&path.isAbsolute(manifest[key])&&!/[\r\n\0]/u.test(manifest[key]),'API token maintenance paths must be absolute');
+  const candidateRoot=path.resolve(manifest.candidateRoot);
+  assert.equal(path.resolve(manifestPath),path.join(candidateRoot,'manifest.json'),'API token manifest must be staged with its candidate');
+  assert.equal(path.resolve(manifest.apiAuthTokenFile),path.join(candidateRoot,'credentials','api-auth-token'),'API token candidate escaped its fixed private staging path');
+  assert.equal(path.dirname(candidateRoot),path.join(serviceHome,'.config','codexia-updater','maintenance','candidates'),'API token candidate must use private updater staging');
+  assert.equal(path.resolve(manifest.configPath),path.join(serviceHome,'.config','codexia-updater','config.json'),'API token maintenance belongs to another controller');
+  assert.equal(path.resolve(manifest.unitDir),path.join(serviceHome,'.config','systemd','user'),'API token maintenance unit path drift');
+  assert.equal(path.resolve(manifest.sourceDir),'/opt/codexia-updater','API token maintenance source path drift');
+  return {apiAuthTokenFile:manifest.apiAuthTokenFile};
+}
+
+const apiTokenRotationFormat='codexia-maintenance-api-auth-token/v1';
+export async function saveApiAuthTokenSnapshot({config,state,snapshot,previousToken,replacementToken,timer}){
+  const root=rotationSnapshotRoot(config,snapshot.operationId);
+  await ensureDirectoryTreeDurable(root);
+  assert.equal((await lstat(root)).mode&0o777,0o700,'API token snapshot directory must be private');
+  validateStandaloneAuthToken(previousToken);validateStandaloneAuthToken(replacementToken);
+  assert.equal(createHash('sha256').update(previousToken).digest('hex'),snapshot.previousDigest,'Previous API token differs from its captured identity');
+  assert.equal(createHash('sha256').update(replacementToken).digest('hex'),snapshot.replacementDigest,'Replacement API token differs from its admitted candidate');
+  const previousTokenFile=path.join(root,'api-auth-token');
+  const replacementTokenFile=path.join(root,'api-auth-token-replacement');
+  await atomicWrite(previousTokenFile,previousToken);
+  await atomicWrite(replacementTokenFile,replacementToken);
+  await atomicWrite(path.join(root,'controller.json'),JSON.stringify(state)+'\n');
+  const rotation={format:'codexia-api-auth-token-rotation/v1',secretName:'codexia-auth-token',operationId:snapshot.operationId,
+    originalSecretId:snapshot.originalSecretId,previousDigest:snapshot.previousDigest,replacementDigest:snapshot.replacementDigest,
+    previousTokenFile,replacementTokenFile,slot:state.journal.active.slot,releaseImage:state.installed.image};
+  return {format:apiTokenRotationFormat,phase:'applying',operationId:snapshot.operationId,timer,rotation,
+    configPath:path.join(path.dirname(config.publicKeyFile),'config.json'),stateFile:config.stateFile,routeFile:config.routeFile};
+}
+async function validateApiAuthTokenSnapshotIdentity({config,state,marker}){
+  assert.deepEqual(Object.keys(marker).sort(),['configPath','format','operationId','phase','routeFile','rotation','stateFile','timer'].sort());
+  assert.equal(marker.format,apiTokenRotationFormat);
+  assert.ok(['applying','completed','rolled-back'].includes(marker.phase),'API token recovery phase is invalid');
+  timerActivationCommand(marker.timer);
+  assert.equal(marker.configPath,path.join(path.dirname(config.publicKeyFile),'config.json'));
+  assert.equal(marker.stateFile,config.stateFile);
+  assert.equal(marker.routeFile,config.routeFile);
+  const root=rotationSnapshotRoot(config,marker.operationId);
+  const rotation=marker.rotation;
+  assert.ok(plainObject(rotation),'API token recovery identity is invalid');
+  assert.deepEqual(Object.keys(rotation).sort(),['format','operationId','originalSecretId','previousDigest','previousTokenFile','releaseImage','replacementDigest','replacementTokenFile','secretName','slot'].sort());
+  assert.equal(rotation.format,'codexia-api-auth-token-rotation/v1');
+  assert.equal(rotation.operationId,marker.operationId);
+  assert.equal(rotation.secretName,'codexia-auth-token');
+  assert.equal(path.resolve(rotation.previousTokenFile),path.join(root,'api-auth-token'));
+  assert.equal(path.resolve(rotation.replacementTokenFile),path.join(root,'api-auth-token-replacement'));
+  assert.match(rotation.originalSecretId,/^[A-Za-z0-9_-]{1,128}$/u);
+  assert.match(rotation.previousDigest,/^[a-f0-9]{64}$/u);assert.match(rotation.replacementDigest,/^[a-f0-9]{64}$/u);
+  assert.ok(['blue','green'].includes(rotation.slot));
+  assert.match(rotation.releaseImage,/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u);
+  const controller=JSON.parse(await readBoundedPrivateFile(path.join(root,'controller.json'),1024*1024));
+  assert.deepEqual(controller,state,'API token controller snapshot changed');
+  assertApiTokenRotationState(state);
+  assert.equal(rotation.slot,state.journal.active.slot);assert.equal(rotation.releaseImage,state.installed.image);
+  return {root,rotation};
+}
+export async function loadApiAuthTokenSnapshot({config,state,marker}){
+  const {root,rotation}=await validateApiAuthTokenSnapshotIdentity({config,state,marker});
+  assert.equal(marker.phase,'applying','A committed API token rotation no longer needs rollback credentials');
+  const previousToken=validateStandaloneAuthToken(await readBoundedPrivateFile(rotation.previousTokenFile,8192));
+  const replacementToken=validateStandaloneAuthToken(await readBoundedPrivateFile(rotation.replacementTokenFile,8192));
+  assert.equal(createHash('sha256').update(previousToken).digest('hex'),rotation.previousDigest,'Previous API token snapshot digest drift');
+  assert.equal(createHash('sha256').update(replacementToken).digest('hex'),rotation.replacementDigest,'Replacement API token snapshot digest drift');
+  assert.ok(previousToken.replace(/\n$/u,'')!==replacementToken.replace(/\n$/u,''),'API token recovery snapshot contains identical credentials');
+  return {snapshot:{...rotation},previousToken,replacementToken};
+}
+function assertApiTokenRotationState(state){
+  assert.equal(state.paused,true,'API token rotation requires a paused controller');
+  assert.ok(['committed','idle'].includes(state.journal.phase)&&!state.initialActivationPending&&state.lastError===null,
+    'API token rotation requires a stable initialized controller');
+  assert.equal(state.journal.active.image,state.installed.image,'Committed writer image differs from release');
+}
+export async function recoverApiAuthTokenWriter({host,controller,state,snapshot,previousToken,replacementToken}){
+  assertApiTokenRotationState(state);
+  const slot=state.journal.active.slot;
+  await host.assertRuntimeSources();
+  await host.assertInitialLegacyAbsent();
+  await host.assertNoPreflight();
+  await host.verifyWriterUnits(state);
+  await host.assertCommittedWriterUnitSource(slot);
+  host.assertApiAuthTokenSecret(snapshot);
+  const observed=await host.observe();
+  assert.equal(observed.route,'blocked','API token recovery requires blocked admission');
+  if(observed.writers.length){
+    assert.deepEqual(observed.writers,[{slot,image:state.installed.image}],'Unexpected writer prevents API token recovery');
+    await host.assertNoWriterContainers(slot);
+    await host.stopWriter(slot);
+  }else await host.assertNoWriterContainers();
+  await host.assertNoWriterContainers();
+  host.assertApiAuthTokenSecret(snapshot);
+  await host.replaceApiAuthToken(previousToken,snapshot);
+  await host.startWriter(slot,state.installed);
+  await host.verifyWriterUnits(state);
+  await host.assertCommittedWriterUnitSource(slot);
+  await host.verifyApiAuthToken(slot,previousToken,200);
+  await host.verifyApiAuthToken(slot,replacementToken,401);
+  await host.route(slot);
+  await controller.assertServing(state,slot,state.installed);
+}
 export function validatePostgresAppPasswordRotation(value,snapshotRoot){
   assert.ok(plainObject(value),'App-password recovery marker must be an object');
   assert.deepEqual(Object.keys(value).sort(),['databaseId','format','previousPasswordFile','releaseImage','secretName','slot'],
@@ -150,6 +258,25 @@ export async function transitionRuntimeWriter({currentHost,targetHost,slot,relea
   await targetHost.startWriter(slot,release);
   await targetHost.route(slot);
   try{await verify();}catch(error){await targetHost.route('blocked').catch(()=>undefined);throw error;}
+}
+
+export async function transitionAuthTokenWriter({host,state,oldToken,newToken,snapshot,verify}){
+  const slot=state?.journal?.active?.slot;
+  assert.ok(['blue','green'].includes(slot),'API token rotation requires the committed writer slot');
+  assert.equal(state.journal.active.image,state.installed?.image,'Committed writer image differs from release');
+  validateStandaloneAuthToken(oldToken);
+  validateStandaloneAuthToken(newToken);
+  assert.ok(oldToken.replace(/\n$/u,'')!==newToken.replace(/\n$/u,''),'Replacement API token must differ from the current token');
+  assert.equal(typeof verify,'function','API token rotation verification is unavailable');
+  await host.route('blocked');
+  await host.stopWriter(slot);
+  await host.replaceApiAuthToken(newToken,snapshot);
+  await host.startWriter(slot,state.installed);
+  await host.verifyWriterUnits(state);
+  await host.verifyApiAuthToken(slot,newToken,200);
+  await host.verifyApiAuthToken(slot,oldToken,401);
+  await host.route(slot);
+  await verify();
 }
 
 /** Restore only the journal-owned writer after a credential-only interruption.
@@ -424,7 +551,7 @@ async function readTransaction(markerPath){
   let raw;
   try{raw=await readFile(markerPath,'utf8');}catch(error){if(error.code==='ENOENT')return null;throw error;}
   const marker=JSON.parse(raw);
-  if(marker.format===rotationFormat)return marker;
+  if(marker.format===rotationFormat||marker.format===apiTokenRotationFormat)return marker;
   assert.equal(marker.format,'codexia-maintenance-transaction/v1');
   assert.ok(path.isAbsolute(marker.snapshotRoot)&&path.isAbsolute(marker.configPath)&&path.isAbsolute(marker.sourceDir)&&path.isAbsolute(marker.unitDir));
   assert.ok(Array.isArray(marker.files)&&marker.files.every(item=>typeof item.target==='string'&&typeof item.backup==='string'&&typeof item.exists==='boolean'));
@@ -498,6 +625,11 @@ async function recoverInterrupted(config,store,markerPath,publicKey){
     if(marker.format===rotationFormat){
       try{await recoverPasswordRotation({config,store,publicKey,marker,markerPath});}
       catch(error){throw Error('Interrupted password rotation recovery is unverified',{cause:error});}
+      return true;
+    }
+    if(marker.format===apiTokenRotationFormat){
+      try{await recoverApiAuthTokenRotation({config,store,publicKey,marker,markerPath});}
+      catch(error){throw Error('Interrupted API token rotation recovery is unverified',{cause:error});}
       return true;
     }
     assert.equal(marker.stateFile,config.stateFile,'Interrupted maintenance belongs to a different controller');
@@ -617,6 +749,139 @@ async function recoverPasswordRotation({config,store,publicKey,marker,markerPath
   await finishRotation({config,host,controller,state,marker,markerPath,snapshot,password,recovering:true});
 }
 
+async function finishApiAuthTokenRotation({config,state,host,controller,marker,markerPath,snapshot,previousToken,replacementToken,recovering}){
+  await assertRotationControlUnits(config);
+  await stopTimerPolling();
+  if(recovering){
+    await recoverApiAuthTokenWriter({host,controller,state,snapshot,previousToken,replacementToken});
+    assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed during API token recovery');
+    await restoreTimerPolling(marker.timer);
+    marker.phase='rolled-back';
+    await atomicWrite(markerPath,JSON.stringify(marker)+'\n');
+    await clearApiAuthTokenRotationSnapshot({config,marker,markerPath}).catch(()=>undefined);
+  }else{
+    const verify=async()=>{
+      host.assertApiAuthTokenSecret(snapshot);
+      await host.verifyWriterUnits(state);
+      await controller.assertServing(state,state.journal.active.slot,state.installed);
+      assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed during API token rotation');
+    };
+    await transitionAuthTokenWriter({host,state,oldToken:previousToken,newToken:replacementToken,snapshot,verify});
+    assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed during API token rotation');
+    await restoreTimerPolling(marker.timer);
+    marker.phase='completed';
+    await atomicWrite(markerPath,JSON.stringify(marker)+'\n');
+    // A SIGKILL after the durable completion marker is finalized by boot
+    // recovery against the replacement secret; rollback credentials are no
+    // longer needed after both direct auth probes and serving readiness pass.
+    await clearApiAuthTokenRotationSnapshot({config,marker,markerPath}).catch(()=>undefined);
+  }
+}
+
+async function clearApiAuthTokenRotationSnapshot({config,marker,markerPath}){
+  const root=rotationSnapshotRoot(config,marker.operationId);
+  for(const filename of [marker.rotation.previousTokenFile,marker.rotation.replacementTokenFile]){
+    assert.equal(path.dirname(filename),root,'API token snapshot file escaped its fixed directory');
+    let info;
+    try{info=await lstat(filename);}catch(error){if(error.code==='ENOENT')continue;throw error;}
+    assert.ok(info.isFile()&&!info.isSymbolicLink()&&(info.mode&0o777)===0o600,'API token snapshot file is not private');
+    if(typeof process.getuid==='function')assert.equal(info.uid,process.getuid(),'API token snapshot owner drift');
+    await unlink(filename);
+  }
+  const directory=await open(root,'r');try{await directory.sync();}finally{await directory.close();}
+  await clearBackupIntent(markerPath);
+  await rm(root,{recursive:true,force:true}).catch(()=>{});
+}
+
+async function completeApiAuthTokenRotation({config,state,host,controller,marker,markerPath,rotation,expectedDigest}){
+  await assertRotationControlUnits(config);
+  await stopTimerPolling();
+  await host.assertRuntimeSources();
+  await host.assertInitialLegacyAbsent();
+  await host.assertNoPreflight();
+  await host.verifyWriterUnits(state);
+  await host.assertCommittedWriterUnitSource(rotation.slot);
+  host.assertApiAuthTokenSecret(rotation,expectedDigest);
+  const observed=await host.observe();
+  assert.equal(observed.route,'blocked','Completed API token recovery requires blocked admission');
+  if(observed.writers.length){
+    assert.deepEqual(observed.writers,[{slot:rotation.slot,image:rotation.releaseImage}],'Unexpected writer prevents completed API token recovery');
+    await host.assertNoWriterContainers(rotation.slot);
+  }else{
+    await host.assertNoWriterContainers();
+    await host.startWriter(rotation.slot,state.installed);
+  }
+  await host.verifyWriterUnits(state);
+  await host.verifyMountedApiAuthToken(rotation.slot);
+  await host.route(rotation.slot);
+  await controller.assertServing(state,rotation.slot,state.installed);
+  assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed during completed API token recovery');
+  await restoreTimerPolling(marker.timer);
+  await clearApiAuthTokenRotationSnapshot({config,marker,markerPath});
+}
+
+async function recoverApiAuthTokenRotation({config,store,publicKey,marker,markerPath}){
+  const state=await loadControllerState(config.stateFile);
+  const host=new PodmanStandaloneHost(config);
+  const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
+  if(marker.phase==='completed'||marker.phase==='rolled-back'){
+    const {rotation}=await validateApiAuthTokenSnapshotIdentity({config,state,marker});
+    await completeApiAuthTokenRotation({config,state,host,controller,marker,markerPath,rotation,
+      expectedDigest:marker.phase==='completed'?rotation.replacementDigest:rotation.previousDigest});
+  }else{
+    const {snapshot,previousToken,replacementToken}=await loadApiAuthTokenSnapshot({config,state,marker});
+    await finishApiAuthTokenRotation({config,state,host,controller,marker,markerPath,snapshot,previousToken,replacementToken,recovering:true});
+  }
+}
+
+async function rotateApiAuthToken({config,manifest,manifestPath,serviceHome,state,publicKey,store,markerPath}){
+  assertApiTokenRotationState(state);
+  validateApiAuthTokenRotationManifest(manifest,manifestPath,serviceHome);
+  assert.equal(path.dirname(config.publicKeyFile),path.dirname(manifest.configPath),'Candidate belongs to another controller');
+  assert.equal(config.quadletDirectory,path.join(serviceHome,'.config','containers','systemd'));
+  const root=path.resolve(manifest.candidateRoot);
+  assert.equal(await realpath(root),root,'API token staging root must not traverse a symlink');
+  assert.equal((await lstat(root)).mode&0o777,0o700,'API token staging root must be private');
+  await readBoundedPrivateFile(manifestPath,65536);
+  const replacementToken=validateStandaloneAuthToken(await readBoundedPrivateFile(manifest.apiAuthTokenFile,8193));
+  assert.equal(fileURLToPath(import.meta.url),path.join(manifest.sourceDir,'deploy/updater/standalone-maintenance.mjs'),
+    'Install the reviewed updater before rotating the API token');
+  const host=new PodmanStandaloneHost(config);
+  assert.ok(host.runtime,'API token rotation requires a typed writer runtime');
+  const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
+  await controller.assertNoBackupIntent();
+  await assertRotationControlUnits(config);
+  await host.assertRuntimeSources();
+  await host.assertInitialLegacyAbsent();
+  await host.assertNoPreflight();
+  await host.verifyWriterUnits(state);
+  await host.assertCommittedWriterUnitSource(state.journal.active.slot);
+  await controller.assertServing(state,state.journal.active.slot,state.installed);
+  const snapshot=await host.captureApiAuthTokenRotation(replacementToken,randomUUID(),state);
+  const previousToken=snapshot.token;
+  delete snapshot.token;
+  assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed before API token rotation');
+  assert.equal(updaterServiceState(),'inactive','Polling must be idle at API token rotation admission');
+  const marker=await saveApiAuthTokenSnapshot({config,state,snapshot,previousToken,replacementToken,timer:timerState()});
+  await atomicWrite(markerPath,JSON.stringify(marker)+'\n');
+  try{
+    await finishApiAuthTokenRotation({config,state,host,controller,marker,markerPath,snapshot,previousToken,replacementToken,recovering:false});
+  }catch(rotationError){
+    try{await recoverInterrupted(config,store,markerPath,publicKey);}
+    catch(recoveryError){throw new AggregateError([rotationError,recoveryError],'API token rotation rollback could not be verified; recovery remains blocked');}
+    try{
+      await host.verifyApiAuthToken(state.journal.active.slot,replacementToken,200);
+      await controller.assertServing(state,state.journal.active.slot,state.installed);
+      return {format:'codexia-updater-maintenance/v1',apiAuthTokenRotated:true,recoveredCompletion:true};
+    }catch{
+      try{await host.verifyApiAuthToken(state.journal.active.slot,previousToken,200);}
+      catch(recoveryError){throw new AggregateError([rotationError,recoveryError],'API token rotation outcome could not be verified; recovery remains blocked');}
+    }
+    throw Error('API token rotation failed; the previous token and serving release were restored',{cause:rotationError});
+  }
+  return {format:'codexia-updater-maintenance/v1',apiAuthTokenRotated:true};
+}
+
 async function rotatePostgresAppPassword({config,manifest,manifestPath,serviceHome,state,publicKey,store,markerPath}){
   assertRotationState(state);
   validateAppPasswordRotationManifest(manifest,manifestPath,serviceHome);
@@ -676,6 +941,9 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
   const serviceHome=path.resolve(config.quadletDirectory,'../../..');
   if(manifest.rotatePostgresAppPassword===true){
     return rotatePostgresAppPassword({config,manifest,manifestPath,serviceHome,state,publicKey,store,markerPath});
+  }
+  if(manifest.rotateApiAuthToken===true){
+    return rotateApiAuthToken({config,manifest,manifestPath,serviceHome,state,publicKey,store,markerPath});
   }
   const credentialRotation=manifest.rotateProbeCredentials===true;
   assert.deepEqual(Object.keys(manifest).sort(),['candidateRoot','configPath','format','sourceDir','unitDir',...(credentialRotation?['rotateProbeCredentials']:[])].sort());

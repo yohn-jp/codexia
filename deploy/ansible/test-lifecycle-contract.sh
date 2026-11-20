@@ -160,6 +160,55 @@ if CODEXIA_TEST_APP_PASSWORD_FILE="$rotation_password_file" CODEXIA_TEST_RESTORE
 fi
 ! grep -Fq "$rotation_password" "$tmp/rotate-app-password-symlink.log"
 
+## API token rotation requires operator approval and a protected, non-symlink token input.
+for mode in unapproved check-mode; do
+  log="$tmp/rotate-api-token-$mode.log"
+  if [[ "$mode" == unapproved ]]; then
+    if ansible-playbook -i localhost, -c local "$root/deploy/ansible/test-api-auth-token-rotation.yml" > "$log" 2>&1; then
+      cat "$log" >&2
+      echo 'API token rotation unexpectedly passed without explicit approval' >&2
+      exit 1
+    fi
+  else
+    if ansible-playbook --check -i localhost, -c local "$root/deploy/ansible/test-api-auth-token-rotation.yml" \
+      -e codexia_api_auth_token_rotation_approved=true > "$log" 2>&1; then
+      cat "$log" >&2
+      echo 'API token rotation unexpectedly passed in check mode' >&2
+      exit 1
+    fi
+  fi
+  grep -Fq 'API token rotation requires an initialized reviewed controller, a paused writer, and explicit approval.' "$log"
+done
+
+api_token='fixture-standalone-api-token-0123456789'
+api_token_file="$tmp/api-auth-token"
+printf '%s' "$api_token" > "$api_token_file"
+chmod 0600 "$api_token_file"
+CODEXIA_TEST_API_AUTH_TOKEN_FILE="$api_token_file" ansible-playbook -i localhost, -c local \
+  "$root/deploy/ansible/test-api-auth-token-rotation-inputs.yml" > "$tmp/rotate-api-token-valid.log" 2>&1 || {
+    cat "$tmp/rotate-api-token-valid.log" >&2
+    echo 'Valid protected API token input was rejected' >&2
+    exit 1
+  }
+chmod 0644 "$api_token_file"
+if CODEXIA_TEST_API_AUTH_TOKEN_FILE="$api_token_file" ansible-playbook -i localhost, -c local \
+  "$root/deploy/ansible/test-api-auth-token-rotation-inputs.yml" > "$tmp/rotate-api-token-mode.log" 2>&1; then
+  cat "$tmp/rotate-api-token-mode.log" >&2
+  echo 'Unprotected API token input was accepted' >&2
+  exit 1
+fi
+! grep -Fq "$api_token" "$tmp/rotate-api-token-mode.log"
+chmod 0600 "$api_token_file"
+mv "$api_token_file" "$tmp/api-auth-token-target"
+ln -s "$tmp/api-auth-token-target" "$api_token_file"
+if CODEXIA_TEST_API_AUTH_TOKEN_FILE="$api_token_file" ansible-playbook -i localhost, -c local \
+  "$root/deploy/ansible/test-api-auth-token-rotation-inputs.yml" > "$tmp/rotate-api-token-symlink.log" 2>&1; then
+  cat "$tmp/rotate-api-token-symlink.log" >&2
+  echo 'Symlinked API token input was accepted' >&2
+  exit 1
+fi
+! grep -Fq "$api_token" "$tmp/rotate-api-token-symlink.log"
+
 ## Run the real site dispatcher with only the host-specific verification tasks stubbed.
 mkdir -p "$tmp/site" "$tmp/site-state"
 cp "$root/deploy/ansible/"{site,lifecycle,validate-runtime}.yml "$tmp/site/"

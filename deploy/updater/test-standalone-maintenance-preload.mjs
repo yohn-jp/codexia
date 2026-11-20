@@ -8,6 +8,7 @@ const fixtureSourceRoot = '/opt/codexia-updater';
 const updaterEntry = path.join(fixtureSourceRoot, 'deploy/updater/standalone-updater.mjs');
 const bootRecoveryEnabled = process.env.CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY === 'yes';
 const appPasswordRotationEnabled = process.env.CODEXIA_RUNTIME_MAINTENANCE_APP_PASSWORD_ROTATION === 'yes';
+const apiAuthTokenRotationEnabled = process.env.CODEXIA_RUNTIME_MAINTENANCE_AUTH_TOKEN_ROTATION === 'yes';
 
 function isInside(parent, candidate) {
   const relative = path.relative(parent, candidate);
@@ -32,11 +33,12 @@ export function oldSourceVerifierEntry(argv, env) {
 let adapterEntry = null;
 if (bootRecoveryEnabled && path.resolve(process.argv[1] ?? '') === updaterEntry && process.argv[2] === 'boot') {
   adapterEntry = updaterEntry;
-} else if (appPasswordRotationEnabled && path.resolve(process.argv[1] ?? '') === updaterEntry && process.argv[2] === 'maintain') {
+} else if ((appPasswordRotationEnabled || apiAuthTokenRotationEnabled) && path.resolve(process.argv[1] ?? '') === updaterEntry && process.argv[2] === 'maintain') {
   const manifestPath = path.resolve(process.argv[4] ?? '');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   const privateCandidates = path.join(os.homedir(), '.config', 'codexia-updater', 'maintenance', 'candidates');
-  assert.ok(manifest.rotatePostgresAppPassword === true, 'Rotation adapter requires the explicit app-password request');
+  if (appPasswordRotationEnabled) assert.ok(manifest.rotatePostgresAppPassword === true, 'Rotation adapter requires the explicit app-password request');
+  if (apiAuthTokenRotationEnabled) assert.ok(manifest.rotateApiAuthToken === true, 'Rotation adapter requires the explicit API token request');
   assert.equal(path.dirname(manifestPath), manifest.candidateRoot, 'Rotation manifest differs from its private candidate directory');
   assert.equal(path.dirname(manifest.candidateRoot), privateCandidates, 'Rotation input escaped the private candidate staging tree');
   adapterEntry = updaterEntry;
