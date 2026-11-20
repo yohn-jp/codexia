@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
-import { authToken, ownerLogin, openRevisionHistory } from "./postgres-fixture";
+import { authToken, manuscriptEditor, ownerLogin, openRevisionHistory } from "./postgres-fixture";
 
 const profile = process.env.CODEXIA_PROFILE ?? "core";
 const INITIAL_SCENE_ONE = "# Scene One\n\nThe first line of the story.\nBeacon Quay appears in this scene.\n";
@@ -766,7 +766,11 @@ test("failed IndexedDB open blocks editing and preserves the PostgreSQL manuscri
   const fixture = await openFixtureScene(page, "desktop");
 
   const draft = "Existing recovery record survives an unavailable browser journal.";
-  await page.locator(".cm-content").fill(draft);
+  const editor = manuscriptEditor(page);
+  await editor.click();
+  await editor.press("ControlOrMeta+a");
+  await page.keyboard.insertText(draft);
+  await expect(editor).toHaveText(draft);
   await expectDraft(page, fixture.scene.document.id, draft);
   const beforeFailure = await readJournal(page);
   expect(beforeFailure.some((entry) => entry.documentId === fixture.scene.document.id && entry.markdown === draft)).toBe(true);
