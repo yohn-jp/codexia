@@ -825,6 +825,12 @@ test("NarrativeChangeSet preserves all nine source operation kinds in one identi
   assert.deepEqual(details.sourceChangeSet, changeSet);
   assert.equal(details.sourceFingerprint.length, 64);
   assert.deepEqual(details.operationMap, data.operationMap);
+  const rangeOperation = coreProposal.operations.find((operation) => operation.message.includes("replace-manuscript"));
+  assert.deepEqual(rangeOperation?.writes[0]?.textChanges, [{
+    fromUtf16: "---\ntitle: Door\n---\n".length,
+    toUtf16: "---\ntitle: Door\n---\n".length + 3,
+    insert: "She",
+  }]);
   const persisted = details as unknown as Record<string, unknown>;
   assert.equal(persisted.sourceFingerprint, data.sourceFingerprint);
   assert.deepEqual(persisted.resultPaths, data.resultPaths);

@@ -172,9 +172,12 @@ function stableId(projectId: string, key: string): DocumentId {
   const value = hash(`${projectId}\0${key}`); return `${value.slice(0,8)}-${value.slice(8,12)}-5${value.slice(13,16)}-a${value.slice(17,20)}-${value.slice(20,32)}` as DocumentId;
 }
 function makeReader(manifest: Manifest): SnapshotReader {
+  const documentKinds = new Map<string, string>(manifest.documents.map((document) => [String(document.id), document.kind]));
   return { snapshot: structuredClone(manifest.snapshot),
     async read(filePath, encoding = "utf8") { safePath(filePath); const file = manifest.files[filePath]; if (!file) return null;
-      const bytes = Buffer.from(file.content, file.encoding); return {content: bytes.toString(encoding), revision: file.revision}; },
+      const bytes = Buffer.from(file.content, file.encoding);
+      const documentKind = file.metadata && file.documentId ? documentKinds.get(file.documentId) : undefined;
+      return {content: bytes.toString(encoding), revision: file.revision, ...(documentKind ? {documentKind} : {})}; },
     async list(prefix) { if (prefix) safePath(prefix); return Object.keys(manifest.files).filter((key) => !prefix || key === prefix || key.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)).sort(); },
     async listRevisions(prefix) { return (await this.list(prefix)).map((path) => ({ path, revision: manifest.files[path]!.revision })); }
   };
@@ -600,9 +603,16 @@ export class CoreStore implements MutationCoordinator {
     for (const [path, file] of Object.entries(manifest.files)) {
       if (file.documentId && file.metadata) paths.set(path, file.documentId);
     }
+    const logicalIds = new Set(this.snapshotIndex(manifest).logicalDocumentIds);
     const manuscriptCreates = new Set<string>();
 
     for (const write of ordered) {
+      if (write.textChanges !== undefined) {
+        const currentFile = manifest.files[write.path];
+        if (operation.effect !== "manuscript" || !currentFile?.documentId || currentFile.metadata) {
+          fail(422, "invalid_document_changes", "Exact text changes may only target an existing PostgreSQL manuscript");
+        }
+      }
       if (write.path === "meta/project.yaml") {
         if (write.content === null) {
           fail(422, "invalid_project_metadata", "Project metadata cannot be deleted");
@@ -678,6 +688,14 @@ export class CoreStore implements MutationCoordinator {
             expectedVersion: existing.version,
           });
         } else {
+          const archivedPath = await tx.getModuleRecord(projectId, PATHS, id);
+          if (archivedPath) {
+            fail(409, "hierarchy_path_reserved", "The hierarchy path is reserved by retained document history");
+          }
+          const logicalId = typeof data.id === "string" ? data.id : id;
+          if (logicalIds.has(logicalId)) {
+            fail(409, "hierarchy_id_exists", "The hierarchy ID already belongs to an active document");
+          }
           const manuscript = manuscriptPath
             ? operation.writes.find((candidate) => candidate.path === manuscriptPath)
             : undefined;
@@ -694,6 +712,7 @@ export class CoreStore implements MutationCoordinator {
             authorId,
             idempotencyKey: `${operation.id}:${operation.generation}:${id}`,
           })).document;
+          logicalIds.add(logicalId);
           if (manuscriptPath) manuscriptCreates.add(manuscriptPath);
           documents.push(document);
         }
@@ -732,7 +751,7 @@ export class CoreStore implements MutationCoordinator {
           projectId,
           documentId: document.id,
           baseRevisionId: revision.id,
-          changes: [{ fromUtf16: 0, toUtf16: revision.markdown.length, insert: write.content }],
+          changes: write.textChanges ?? [{ fromUtf16: 0, toUtf16: revision.markdown.length, insert: write.content }],
           resultingSha256: hash(write.content),
           authorId,
           clientId: "core",
@@ -854,6 +873,9 @@ export class CoreStore implements MutationCoordinator {
       if(input.kind==="chapter"){parentId=volume.id;path=`plot/volumes/${input.volumeId}/chapters/${input.id}/chapter.yaml`;}
       else {const chapter=this.findDocument(manifest,input.chapterId);if(chapter.kind!=="chapter"||chapter.parentId!==volume.id)fail(422,"invalid_hierarchy_parent","The chapter must belong to the volume");parentId=chapter.id;path=`plot/volumes/${input.volumeId}/chapters/${input.chapterId}/scenes/${input.id}.yaml`;const manuscript=`manuscript/${input.volumeId}/${input.chapterId}/${input.id}.md`;writes.push({path:manuscript,revision:null,content:input.manuscriptBody??""});}}
     if(await reader.read(path))fail(409,"hierarchy_path_exists","The hierarchy path already exists");
+    const archivedPath = await this.persistence.read((currentReader) =>
+      currentReader.getModuleRecord(pid(projectId), PATHS, stableId(projectId, path)));
+    if (archivedPath) fail(409, "hierarchy_path_reserved", "The hierarchy path is reserved by retained document history");
     const siblings=(index.documentsByParentId.get(parentId)??[]).filter((document)=>document.kind===input.kind);
     writes.unshift({path,revision:null,content:YAML.stringify({id:input.id,title:input.title,order:nextOrderKey(siblings.map((document)=>document.orderKey))})});
     return this.buildOperation(projectId,writes,"structure",`Create ${input.kind} ${input.id}`,manifest.snapshot);
