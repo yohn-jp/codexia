@@ -57,6 +57,36 @@ test('incompatible frontend leaves the installed writer untouched',async()=>{
  const {h,controller,state}=fixture();h.epoch=2;const result=await controller.tick(state);
  assert.equal(result.installed.image,old.image);assert.equal(h.target,'blue');assert.match(result.lastError,/epoch mismatch/);
 });
+test('a recovered signed poll with no candidate clears only its channel error',async()=>{
+ const {h,controller,state,persisted}=fixture();
+ h.releases=[old];
+ const fetchChannel=h.fetchChannel.bind(h);
+ h.fetchChannel=async()=>{throw Error('channel temporarily unavailable')};
+ const failed=await controller.tick(state);
+ assert.match(failed.lastError,/^Update channel check failed: channel temporarily unavailable$/u);
+ assert.equal(failed.journal.checkpoint,null);
+ h.fetchChannel=fetchChannel;
+ const recovered=await controller.tick(failed);
+ assert.equal(recovered.lastError,null);
+ assert.equal(recovered.journal.checkpoint.sequence,h.sequence);
+ assert.deepEqual(persisted(),recovered);
+ assert.deepEqual(h.trace,[]);
+});
+test('a polling outage and recovery preserve interruption evidence and rejected images',async()=>{
+ const {h,controller,state}=fixture();
+ const lastError='Interrupted update recovered from durable journal';
+ const protectedState={...state,lastError,failedImages:[next.image]};
+ const fetchChannel=h.fetchChannel.bind(h);
+ h.fetchChannel=async()=>{throw Error('channel temporarily unavailable')};
+ const failed=await controller.tick(protectedState);
+ assert.equal(failed.lastError,lastError);
+ h.fetchChannel=fetchChannel;
+ const recovered=await controller.tick(failed);
+ assert.equal(recovered.lastError,lastError);
+ assert.deepEqual(recovered.failedImages,[next.image]);
+ assert.equal(recovered.installed.image,old.image);
+ assert.deepEqual(h.trace,[]);
+});
 test('pause and explicit rollback preserve exclusive admission',async()=>{
  const {h,controller,state}=fixture();let result=await controller.tick({...state,paused:true});assert.equal(result.installed.image,old.image);
  result=await controller.tick({...result,paused:false});assert.equal(result.installed.image,next.image);
