@@ -740,7 +740,14 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         throw new Error("PostgreSQLの保存結果を確認できませんでした。");
       }
       if (controller.signal.aborted) return;
-      const acknowledgement = await currentJournal.acknowledgePersistenceDraftSave(pending.projectId, pending.documentId, authorScope, pending, result.revision.id);
+      const replayHead = existingPending ? await api.persistenceDocument(pending.projectId, pending.documentId, controller.signal) : undefined;
+      if (existingPending && (!replayHead || !replayHead.revision || replayHead.document.projectId !== pending.projectId || replayHead.document.id !== pending.documentId || replayHead.document.headRevisionId !== replayHead.revision.id)) {
+        throw new Error("再送した保存操作の最新Revisionを確認できませんでした。回復下書きは保持しています。");
+      }
+      const replayWasSuperseded = Boolean(replayHead?.revision && replayHead.revision.id !== result.revision.id);
+      const acknowledgedDocument = replayHead?.document ?? result.document;
+      const acknowledgedRevision = replayHead?.revision ?? result.revision;
+      const acknowledgement = await currentJournal.acknowledgePersistenceDraftSave(pending.projectId, pending.documentId, authorScope, pending, result.revision.id, !replayWasSuperseded);
       const removed = acknowledgement.acknowledged && !acknowledgement.draft;
       if (removed) {
         const ownershipKey = JSON.stringify([pending.projectId, pending.documentId]);
@@ -752,19 +759,34 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       const remaining = acknowledgement.acknowledged ? acknowledgement.draft : await currentJournal.getPersistenceDraft(pending.projectId, pending.documentId, authorScope);
       pendingSaveRef.current.delete(pendingKey);
       const latest = activeRef.current;
+      if (replayWasSuperseded) {
+        if (latest && inScope(latest) && replayHead?.revision) {
+          const hasNewerText = latest.generation > pending.generation || latest.markdown !== pending.markdown;
+          if (!acknowledgement.acknowledged) {
+            publishEditor({ ...latest, document: replayHead.document, revision: replayHead.revision, recovery: "failed", save: "failed", error: "保存済みRevisionの照合を回復Journalへ反映できませんでした。下書きを保持して再確認してください。", remoteConflict: replayHead.revision });
+          } else if (!hasNewerText) {
+            publishEditor({ ...latest, document: replayHead.document, revision: replayHead.revision, baseRevisionId: replayHead.revision.id, baseMarkdown: replayHead.revision.markdown, markdown: replayHead.revision.markdown, dirty: false, recovery: "stored", save: "saved", error: "", remoteConflict: null });
+          } else {
+            publishEditor({ ...latest, document: replayHead.document, revision: replayHead.revision, dirty: true, recovery: remaining ? "stored" : "pending", save: "failed", error: "保存操作の後にPostgreSQL上のRevisionが更新されました。回復Draftを保持し、比較してから適用してください。", remoteConflict: replayHead.revision });
+          }
+        } else if (latest?.document.id === pending.documentId && latest.document.projectId === pending.projectId) {
+          setResumeEpoch((value) => value + 1);
+        }
+        return;
+      }
       if (latest && inScope(latest)) {
         const hasNewerText = latest.generation > pending.generation || latest.markdown !== pending.markdown;
         const ownNewerDraft = hasNewerText && remaining !== undefined && remaining.generation === latest.generation + 1 && remaining.markdown === latest.markdown && remaining.baseRevisionId === result.revision.id && remaining.baseMarkdown === pending.markdown;
         const otherTab = Boolean(remaining && !ownNewerDraft);
         if (otherTab) {
-          publishEditor({ ...latest, document: result.document, revision: result.revision, baseRevisionId: result.revision.id, baseMarkdown: pending.markdown, dirty: hasNewerText, recovery: "other-tab", save: "failed", error: "この文書のより新しい回復記録が別タブに残っています。自動保存を停止しました。", remoteConflict: null });
+          publishEditor({ ...latest, document: acknowledgedDocument, revision: acknowledgedRevision, baseRevisionId: acknowledgedRevision.id, baseMarkdown: pending.markdown, dirty: hasNewerText, recovery: "other-tab", save: "failed", error: "この文書のより新しい回復記録が別タブに残っています。自動保存を停止しました。", remoteConflict: null });
           return;
         }
         publishEditor({
           ...latest,
-          document: result.document,
-          revision: result.revision,
-          baseRevisionId: result.revision.id,
+          document: acknowledgedDocument,
+          revision: acknowledgedRevision,
+          baseRevisionId: acknowledgedRevision.id,
           baseMarkdown: pending.markdown,
           dirty: hasNewerText,
           // A newer draft may already exist under the old base Revision at this generation.

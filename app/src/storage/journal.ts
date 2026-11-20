@@ -336,7 +336,7 @@ export class BrowserJournal {
   }
 
   /** Acknowledge only the exact operation, rebasing a newer draft atomically when possible. */
-  async acknowledgePersistenceDraftSave(projectId: string, documentId: string, authorScope: string, operation: PersistenceDraftOperation, revisionId: string): Promise<PersistenceDraftSaveAcknowledgement> {
+  async acknowledgePersistenceDraftSave(projectId: string, documentId: string, authorScope: string, operation: PersistenceDraftOperation, revisionId: string, rebaseNewerDraft = true): Promise<PersistenceDraftSaveAcknowledgement> {
     const key = persistenceDraftKey(projectId, documentId, authorScope);
     try {
       const transaction = this.database.transaction(PERSISTENCE_DRAFT_STORE, "readwrite", { durability: "strict" });
@@ -353,7 +353,7 @@ export class BrowserJournal {
       }
       const draft = { ...existing };
       delete draft.pendingSave;
-      const sameLineage = existing.generation > operation.generation && existing.baseRevisionId === operation.baseRevisionId && existing.baseMarkdown === operation.baseMarkdown;
+      const sameLineage = rebaseNewerDraft && existing.generation > operation.generation && existing.baseRevisionId === operation.baseRevisionId && existing.baseMarkdown === operation.baseMarkdown;
       const updated: PersistenceDraftEntry = {
         ...draft,
         ...(sameLineage ? { baseRevisionId: revisionId, baseMarkdown: operation.markdown, generation: existing.generation + 1 } : {}),
