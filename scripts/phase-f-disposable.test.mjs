@@ -98,6 +98,14 @@ test('Phase F integration helper is valid shell and exercises the existing locke
     'Read private release fixtures as their owner, not as the unrelated GitHub runner account');
   assert.match(helper, /user_systemctl start codexia-data-volume\.service codexia-history-volume\.service[\s\S]*?user_systemctl start codexia-db\.service[\s\S]*?data_volume_before=/u,
     'Create the data/history volume fixtures before recording their runtime identities');
+  assert.match(helper, /sh "\$updater" "\$@"/u, 'Invoke the mode-0600 updater wrapper the same way as the canonical Ansible stage');
+  assert.match(helper, /PATH="\$crash_bin:\$node_path:/u, 'Keep the pinned Node runtime on the injected crash path');
+  assert.match(helper, /\[\[ "\$interrupt_status" == 137 \]\] && as_service test -s "\$fixture_data\/interruption-injected"/u,
+    'Inspect the service-private interruption marker as its owner');
+  assert.equal((helper.match(/process\.argv\.slice\(2\)/gu) ?? []).length, 3,
+    'Skip Node’s executable and stdin marker when reading script arguments');
+  assert.match(helper, /as_service "\$node_bin" --input-type=module - "\$evidence_dir"/u,
+    'Write lifecycle evidence as its directory owner');
   assert.match(helper, /codexia-updater(?:\.sh)?/u);
 });
 

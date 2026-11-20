@@ -406,7 +406,7 @@ run_updater() {
     CODEXIA_PHASE_F_CHANNEL_FILE="$channel_file" \
     CODEXIA_PHASE_F_FRONTEND_URL="$frontend_url" \
     CODEXIA_PHASE_F_FRONTEND_IDENTITY_FILE="$frontend_identity_file" \
-    "$updater" "$@"
+    sh "$updater" "$@"
 }
 run_updater init "$config_file" "$evidence_dir/release-0.1.236.json" > "$test_root/init.json"
 
@@ -415,7 +415,7 @@ assert_controller_status() {
   node --input-type=module - "$file" "$expected_image" "$expected_route" "$expected_phase" "$expected_paused" <<'NODE'
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-const [, file, image, route, phase, paused] = process.argv;
+  const [file, image, route, phase, paused] = process.argv.slice(2);
 const result = JSON.parse(readFileSync(file, 'utf8'));
 assert.equal(result.state.installed.image, image);
 assert.equal(result.state.journal.phase, phase);
@@ -496,15 +496,15 @@ EOF
 sudo install -o "$service_user" -g "$service_group" -m 0700 "$test_root/systemctl-crash" "$crash_bin/systemctl"
 set +e
 as_service env \
-  PATH="$crash_bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  PATH="$crash_bin:$node_path:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   NODE_OPTIONS="--import=$loader" \
   CODEXIA_PHASE_F_CHANNEL_FILE="$channel_file" \
   CODEXIA_PHASE_F_FRONTEND_URL="$frontend_url" \
   CODEXIA_PHASE_F_FRONTEND_IDENTITY_FILE="$frontend_identity_file" \
-  "$updater" acceptance-update "$config_file" > "$test_root/interrupted-update.out" 2> "$test_root/interrupted-update.err"
+  sh "$updater" acceptance-update "$config_file" > "$test_root/interrupted-update.out" 2> "$test_root/interrupted-update.err"
 interrupt_status=$?
 set -e
-[[ "$interrupt_status" == 137 && -s "$fixture_data/interruption-injected" ]] || {
+[[ "$interrupt_status" == 137 ]] && as_service test -s "$fixture_data/interruption-injected" || {
   cat "$test_root/interrupted-update.err" >&2
   echo 'The updater was not interrupted after stopping the prior writer.' >&2
   exit 1
@@ -513,7 +513,7 @@ run_updater status "$config_file" > "$test_root/status-interrupted.json"
 node --input-type=module - "$test_root/status-interrupted.json" "$base_image" "$newest_image" <<'NODE'
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-const [, file, activeImage, candidateImage] = process.argv;
+const [file, activeImage, candidateImage] = process.argv.slice(2);
 const { state, observed } = JSON.parse(readFileSync(file, 'utf8'));
 assert.equal(state.journal.phase, 'draining');
 assert.equal(state.installed.image, activeImage);
@@ -548,10 +548,10 @@ grep -Fq 'Proxy route mismatch' "$test_root/drift.err"
 rootless exec codexia-api-proxy node --input-type=module -e 'const response=await fetch("http://127.0.0.1:3000/api/version"); if(response.status!==503) process.exit(1)' \
   || { echo 'The proxy did not fail closed while the disposable route was blocked.' >&2; exit 1; }
 
-node --input-type=module - "$evidence_dir" "$GITHUB_SHA" "$project_id" <<'NODE'
+as_service "$node_bin" --input-type=module - "$evidence_dir" "$GITHUB_SHA" "$project_id" <<'NODE'
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
-const [, directory, sourceSha, projectId] = process.argv;
+const [directory, sourceSha, projectId] = process.argv.slice(2);
 const result = {
   format: 'codexia-phase-f-disposable-results/v1', sourceSha,
   testOnlySigning: 'PASS: fresh ephemeral Ed25519 key; channel verifier mechanics only, not production publisher authority.',
