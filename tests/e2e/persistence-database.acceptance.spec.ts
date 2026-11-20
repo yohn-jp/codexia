@@ -17,7 +17,7 @@ test("Knowledge browse searches literal aliases and pages the same project on De
   try {
     await persistence.transaction(async transaction => {
       for (let index = 0; index < ids.length; index += 1) {
-        await transaction.saveKnowledgeNode({ projectId: fixture.project.id as ProjectId, id: ids[index]!, type: index % 2 ? "person" : "place",
+        await transaction.saveKnowledgeNode({ projectId: fixture.project.id as ProjectId, id: ids[index]!, type: index === 0 ? "my_custom_type" : index % 2 ? "person" : "place",
           name: index === 10 || index === 11 ? "同じ名前" : index === 500 ? longJapaneseName : `Browse ${String(index).padStart(4, "0")}`,
           attributes: {}, status: index % 2 ? "confirmed" : "proposed", expectedVersion: null });
       }
@@ -104,6 +104,37 @@ test("Knowledge browse searches literal aliases and pages the same project on De
   await search.fill("Browse 0000");
   await expect(targetSelect).toHaveValue(targetNodeId);
   await expect(targetSelect.locator(`option[value="${targetNodeId}"]`)).toContainText("選択中");
+
+  // An older same-epoch server ignores q/type/status and returns its legacy
+  // `{nodes}` contract. The new UI must accept the payload without claiming
+  // server search or complete coverage.
+  const legacyResponse = await page.request.get(new URL(`/api/v1/persistence/projects/${fixture.project.id}/nodes?limit=500`, base).toString());
+  const legacyNodes = (await legacyResponse.json() as { nodes: unknown[] }).nodes;
+  expect(legacyNodes).toHaveLength(500);
+  await search.fill("Browse 0001");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(1);
+  const oldServerRoute = async (route: import("@playwright/test").Route) => {
+    const params = new URL(route.request().url()).searchParams;
+    if (params.has("q")) await route.fulfill({ json: { nodes: legacyNodes.slice(0, 50) } });
+    else if (params.get("limit") === "500") await route.fulfill({ json: { nodes: legacyNodes } });
+    else await route.continue();
+  };
+  await page.route(nodeRoute, oldServerRoute);
+  await search.fill("Browse 0000");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(1);
+  await expect(page.locator(".pg-knowledge p[role=status]")).toContainText("網羅状況は不明");
+  await expect(page.locator(".pg-knowledge p[role=status]")).toContainText("500件");
+  await expect(page.locator(".pg-knowledge p[role=status]")).toContainText("別名検索と続きの取得は利用できず");
+  await expect(page.getByRole("button", { name: "続きのKnowledgeを読み込む" })).toHaveCount(0);
+  await search.fill("Browse 0499");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(1);
+  await search.fill("Literal%_!Alias");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(0);
+  await expect(page.locator(".pg-knowledge p[role=status]")).toContainText("網羅状況は不明");
+  await page.unroute(nodeRoute, oldServerRoute);
+  await search.fill("");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(50);
+  await expect(page.getByLabel("種類で絞り込み").locator("option[value='my_custom_type']")).toBeAttached();
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(new URL(`/mobile/projects/${fixture.project.id}/scenes/${fixture.scene.id}?view=writing`, base).toString());

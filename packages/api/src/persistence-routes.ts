@@ -103,7 +103,7 @@ function parseKnowledgeCursor(value: string | null): KnowledgeCursor | undefined
     const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<KnowledgeCursor>;
     if (typeof parsed.projectId !== "string" || !Number.isSafeInteger(parsed.version) || (parsed.version as number) < 1 ||
       typeof parsed.query !== "string" || typeof parsed.type !== "string" || typeof parsed.status !== "string" ||
-      typeof parsed.name !== "string" || typeof parsed.id !== "string" || !/^[0-9a-f-]{36}$/iu.test(parsed.id)) throw new Error();
+      typeof parsed.name !== "string" || typeof parsed.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(parsed.id)) throw new Error();
     return parsed as KnowledgeCursor;
   } catch { return failure(400, "INVALID_CURSOR", "Knowledge cursor is invalid"); }
 }
@@ -312,13 +312,17 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
       const nodes = await listNativeKnowledgeNodes(persistence, projectId, limit, selectedProjectVersion());
       return { status: 200, body: { nodes } };
       }
-      if (query.length > 128 || (type && !["person", "place", "event", "setting", "term"].includes(type)) ||
+      if (query.length > 128 || type.length > 64 || /[\u0000-\u001f\u007f]/u.test(type) ||
         (status && !["proposed", "confirmed", "retired"].includes(status))) failure(400, "INVALID_QUERY", "Knowledge filters are invalid");
       const limit = requestLimit(url.searchParams.get("limit"), 50, 100);
       if (suppliedCursor && (suppliedCursor.projectId !== projectId || suppliedCursor.query !== query || suppliedCursor.type !== type || suppliedCursor.status !== status)) {
         failure(400, "INVALID_CURSOR", "Knowledge cursor does not match these filters");
       }
-      const version = suppliedCursor?.version ?? selectedProjectVersion();
+      const requestedVersion = selectedProjectVersion();
+      if (suppliedCursor && requestedVersion !== undefined && suppliedCursor.version !== requestedVersion) {
+        failure(400, "INVALID_CURSOR", "Knowledge cursor does not match the selected project version");
+      }
+      const version = suppliedCursor?.version ?? requestedVersion;
       const page = await nativeRead(async reader => {
         const project = await reader.getProject(projectId);
         if (!project) throw new NativeKnowledgeServiceError("snapshot_unavailable", "The selected native Knowledge snapshot is unavailable");

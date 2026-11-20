@@ -272,6 +272,31 @@ test("Knowledge browse searches literals and aliases, pages 501 nodes in stable 
   assert.ok(filtered.every(node => node.type === "person" && node.status === "confirmed"));
 });
 
+test("Knowledge keyset cursors use PostgreSQL lower semantics and preserve custom node types", async () => {
+  const project = await createProject(`knowledge-unicode-${randomUUID()}`);
+  const names = ["İstanbul", "istanbul", "Istanbul", "ıstanbul"];
+  const ids = names.map(() => randomUUID() as KnowledgeNodeId);
+  await persistence.transaction(async transaction => {
+    for (let index = 0; index < names.length; index += 1) {
+      await transaction.saveKnowledgeNode({ projectId: project.id, id: ids[index]!, type: "my_custom_type", name: names[index]!, attributes: {}, status: "confirmed", expectedVersion: null });
+    }
+  });
+  const all = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { limit: 10 }));
+  assert.deepEqual(all.map(node => node.type), names.map(() => "my_custom_type"));
+  const paged: KnowledgeNodeId[] = [];
+  let after: { name: string; id: KnowledgeNodeId } | undefined;
+  for (;;) {
+    const page = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { limit: 1, after }));
+    paged.push(...page.map(node => node.id));
+    if (page.length === 0) break;
+    const last = page[0]!;
+    after = { name: last.name, id: last.id };
+  }
+  assert.deepEqual(paged, all.map(node => node.id));
+  const custom = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { type: "my_custom_type", limit: 10 }));
+  assert.equal(custom.length, names.length);
+});
+
 test("database foreign keys prevent Knowledge relations from crossing projects", async () => {
   const firstProject = await createProject(`scope-a-${randomUUID()}`);
   const secondProject = await createProject(`scope-b-${randomUUID()}`);
