@@ -102,7 +102,10 @@ test("appearance modes follow system preference initially and persist explicit l
 
 test("revision history keeps immutable content through a foreground refresh", async ({ page }) => {
   const f = await fixture(page); const text = "Saved immutable version.";
-  await editor(page).fill(text); await saved(page, f, text);
+  await editor(page).click();
+  await editor(page).press("ControlOrMeta+a");
+  await page.keyboard.insertText(text);
+  await saved(page, f, text);
   await openRevisionHistory(page);
   await expect(page.getByRole("region", { name: "Revision履歴" })).toContainText(f.one.revision.markdown.trim());
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
