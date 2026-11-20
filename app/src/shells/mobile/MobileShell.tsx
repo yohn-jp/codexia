@@ -176,33 +176,39 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
     setReferenceSheet(null);
   }, [location.pathname, activeView]);
 
+  const revealCurrentScene = useCallback((): boolean => {
+    const content = referenceContentRef.current;
+    const current = content?.querySelector<HTMLElement>('.pg-outline-document[aria-current="page"]');
+    if (!content || !current) return false;
+    void content.getScrollElement().then((scrollElement) => {
+      const viewport = scrollElement.getBoundingClientRect();
+      const target = current.getBoundingClientRect();
+      const centeredTop = scrollElement.scrollTop + target.top - viewport.top - (viewport.height - target.height) / 2;
+      scrollElement.scrollTop = Math.max(0, centeredTop);
+    });
+    return true;
+  }, []);
+
   useLayoutEffect(() => {
     if (referenceSheet !== "outline") return;
-    let cancelled = false;
-    let frame = 0;
-    let attempts = 0;
-    const revealCurrentScene = () => {
-      if (cancelled || attempts++ >= 8) return;
-      const content = referenceContentRef.current;
-      const current = content?.querySelector<HTMLElement>('.pg-outline-document[aria-current="page"]');
-      if (!content || !current) {
-        frame = window.requestAnimationFrame(revealCurrentScene);
-        return;
-      }
-      void content.getScrollElement().then((scrollElement) => {
-        if (cancelled) return;
-        const viewport = scrollElement.getBoundingClientRect();
-        const target = current.getBoundingClientRect();
-        const centeredTop = scrollElement.scrollTop + target.top - viewport.top - (viewport.height - target.height) / 2;
-        scrollElement.scrollTop = Math.max(0, centeredTop);
-      });
-    };
-    frame = window.requestAnimationFrame(revealCurrentScene);
+    const content = referenceContentRef.current;
+    if (!content) return;
+    let settled = false;
+    const observer = new MutationObserver(() => {
+      if (settled || !revealCurrentScene()) return;
+      settled = true;
+      observer.disconnect();
+    });
+    observer.observe(content, { childList: true, subtree: true, attributes: true });
+    if (revealCurrentScene()) {
+      settled = true;
+      observer.disconnect();
+    }
     return () => {
-      cancelled = true;
-      window.cancelAnimationFrame(frame);
+      settled = true;
+      observer.disconnect();
     };
-  }, [referenceSheet, workspacePanelRequest?.sequence, location.key]);
+  }, [referenceSheet, workspacePanelRequest?.sequence, location.key, revealCurrentScene]);
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -578,6 +584,7 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
       <IonModal
         className="mobile-shell-reference-modal"
         isOpen={referenceSheet !== null}
+        onDidPresent={() => { if (referenceSheet === "outline") revealCurrentScene(); }}
         onDidDismiss={onReferenceDismissed}
         breakpoints={[0, 0.56, 0.88, 1]}
         initialBreakpoint={0.56}
