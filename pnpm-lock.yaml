@@ -574,6 +574,9 @@ importers:
 
   packages/persistence-postgres:
     dependencies:
+      '@codexia/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@codexia/persistence-contracts':
         specifier: workspace:*
         version: link:../persistence-contracts

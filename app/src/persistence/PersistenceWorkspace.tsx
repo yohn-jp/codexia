@@ -975,7 +975,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         parentId: (newDocumentParent || null) as DocumentId | null,
         kind: documentKind,
         title,
-        orderKey: String(documents.length).padStart(8, "0"),
+        appendToEnd: true,
         markdown: "",
         idempotencyKey: crypto.randomUUID(),
       });

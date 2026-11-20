@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { nextOrderKey } from "@codexia/contracts";
 import {
   PersistenceError,
   type Assertion,
@@ -1167,6 +1168,7 @@ class PostgresTransaction implements PersistenceTransaction {
       kind: command.kind,
       title: command.title,
       orderKey: command.orderKey,
+      ...(command.appendToEnd ? { appendToEnd: true } : {}),
       markdown: command.markdown,
       authorId: command.authorId,
     });
@@ -1190,10 +1192,20 @@ class PostgresTransaction implements PersistenceTransaction {
     const documentId = command.documentId ?? randomUUID() as DocumentId;
     const parentId = command.parentId ?? null;
     if (parentId && !(await this.getDocument(command.projectId, parentId))) throw notFound("parent document", parentId);
+    let orderKey = command.orderKey;
+    if (command.appendToEnd) {
+      const lastSibling = await this.query(
+        `SELECT order_key FROM document
+         WHERE project_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND deleted_at IS NULL
+         ORDER BY order_key DESC, id DESC LIMIT 1`,
+        [command.projectId, parentId],
+      );
+      orderKey = nextOrderKey(lastSibling.rows[0] ? [asString(lastSibling.rows[0].order_key)] : []);
+    }
     await this.query(
       `INSERT INTO document(project_id, id, parent_id, kind, title, order_key)
        VALUES ($1, $2, $3, $4, $5, $6)`,
-      [command.projectId, documentId, parentId, command.kind, command.title, command.orderKey],
+      [command.projectId, documentId, parentId, command.kind, command.title, orderKey],
     );
     const revision = await this.insertRevision({
       projectId: command.projectId,
