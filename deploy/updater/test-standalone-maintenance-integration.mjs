@@ -367,6 +367,47 @@ export function installTestAdapters(hostClass = PodmanStandaloneHost) {
     };
   }
 
+  if(process.env.CODEXIA_RUNTIME_MAINTENANCE_TUNNEL_ROTATION==='yes'){
+    const tunnelActive=async()=>systemdState('codexia-tunnel.service')==='active';
+    const readTunnelSecret=()=>{
+      const [secret]=JSON.parse(run('podman',['secret','inspect','--showsecret','codexia-tunnel-token']));
+      assert.ok(secret?.ID&&typeof secret.SecretData==='string','Disposable Tunnel secret is unobservable');
+      return {id:secret.ID,owner:secret.Spec?.Labels?.['io.codexia.tunnel-token-rotation'],token:secret.SecretData};
+    };
+    hostClass.prototype.tunnelServiceActive=async function syntheticTunnelServiceActive(){return tunnelActive();};
+    hostClass.prototype.tunnelRotationServiceActive=async function syntheticTunnelRotationServiceActive(){return tunnelActive();};
+    hostClass.prototype.tunnelServiceActive=async function syntheticTunnelServiceActive(){return tunnelActive();};
+    hostClass.prototype.assertTunnelStoppedForRotation=async function assertSyntheticTunnelStopped(){
+      assert.equal(await tunnelActive(),false,'Disposable Tunnel service is not stopped for secret replacement');
+      assert.equal(spawnSync('podman',['container','exists','codexia-tunnel'],{stdio:'ignore'}).status,1,
+        'Disposable Tunnel container unexpectedly exists while its synthetic systemd service is stopped');
+    };
+    hostClass.prototype.captureTunnelTokenRotation=async function captureSyntheticTunnelRotation(replacement,operationId,state){
+      assert.equal(await tunnelActive(),true,'Tunnel rotation requires active synthetic service');
+      const current=readTunnelSecret();
+      const digest=value=>createHash('sha256').update(value).digest('hex');
+      assert.notEqual(current.token,replacement,'Synthetic Tunnel replacement must differ');
+      assert.deepEqual(await this.observe(),{route:state.journal.active.slot,writers:[{slot:state.journal.active.slot,image:state.installed.image}]});
+      return {operationId,originalSecretId:current.id,previousDigest:digest(current.token),replacementDigest:digest(replacement),
+        sourceDigest:createHash('sha256').update('synthetic-tunnel-quadlet').digest('hex'),
+        fragmentDigest:createHash('sha256').update('synthetic-tunnel-unit').digest('hex'),
+        imageId:expectedImage.slice('sha256:'.length),runtimeDigest:createHash('sha256').update('synthetic-tunnel-runtime').digest('hex')};
+    };
+    hostClass.prototype.assertTunnelTokenRotationSources=async function assertSyntheticTunnelSources(snapshot){
+      const current=readTunnelSecret();
+      const digest=createHash('sha256').update(current.token).digest('hex');
+      assert.ok((current.id===snapshot.originalSecretId&&digest===snapshot.previousDigest)||
+        (current.owner===snapshot.operationId&&[snapshot.previousDigest,snapshot.replacementDigest].includes(digest)),
+      'Synthetic Tunnel secret changed outside its rotation');
+      return current;
+    };
+    hostClass.prototype.verifyTunnelTokenRotation=async function verifySyntheticTunnelRotation(snapshot,expectedDigest){
+      const current=await this.assertTunnelTokenRotationSources(snapshot);
+      assert.equal(createHash('sha256').update(current.token).digest('hex'),expectedDigest);
+      assert.equal(await tunnelActive(),true,'Synthetic Tunnel did not return active');
+    };
+  }
+
   // Only this disposable test adapter emulates the external metadata endpoints.
   // The actual maintenance file writes, lock, systemd timer and recovery are real.
   if (process.env.CODEXIA_RUNTIME_MAINTENANCE_PROBE_KEY) {
@@ -628,6 +669,41 @@ async function runApiAuthTokenRotationCandidate({repoRoot,candidate,configPath,e
   return child;
 }
 
+async function createTunnelTokenCandidate({config,userUnitDir,token}){
+  const candidateRoot=path.join(path.dirname(config.publicKeyFile),'maintenance','candidates','tunnel-token-'+randomBytes(16).toString('hex'));
+  await mkdir(path.join(candidateRoot,'credentials'),{recursive:true,mode:0o700});
+  const tunnelTokenFile=path.join(candidateRoot,'credentials','tunnel-token');
+  await writeFile(tunnelTokenFile,token,{mode:0o600,flag:'wx'});
+  const manifest={format:'codexia-updater-maintenance/v1',candidateRoot,
+    configPath:path.join(path.dirname(config.publicKeyFile),'config.json'),sourceDir:SOURCE_ROOT,
+    unitDir:userUnitDir,rotateTunnelToken:true,tunnelTokenFile};
+  const manifestPath=path.join(candidateRoot,'manifest.json');
+  await writeFile(manifestPath,JSON.stringify(manifest)+'\n',{mode:0o600,flag:'wx'});
+  return {candidateRoot,manifestPath};
+}
+async function runTunnelTokenRotationCandidate({repoRoot,candidate,configPath,environment,killAtSecretCreate=false}){
+  const wrapper=path.join(SOURCE_ROOT,'deploy/updater/codexia-updater');
+  const preload=path.join(repoRoot,'deploy/updater/test-standalone-maintenance-preload.mjs');
+  let env={...environment,CODEXIA_RUNTIME_MAINTENANCE_TUNNEL_ROTATION:'yes',
+    NODE_OPTIONS:[environment.NODE_OPTIONS,`--import=${preload}`].filter(Boolean).join(' ')};
+  if(killAtSecretCreate){
+    const faultBin=path.join(candidate.candidateRoot,'fault-bin');
+    await mkdir(faultBin,{mode:0o700});
+    const podmanPath=execFileSync('which',['podman'],{encoding:'utf8'}).trim();
+    const shim=['#!/bin/sh',`"${podmanPath}" "$@"`,'status=$?','if [ "$status" -ne 0 ]; then exit "$status"; fi',
+      'if [ "$1" = secret ] && [ "$2" = create ]; then','  for argument do',
+      '    if [ "$argument" = codexia-tunnel-token ]; then','      kill -KILL "$PPID"','      break','    fi','  done','fi','exit "$status"'].join('\n')+'\n';
+    await writeFile(path.join(faultBin,'podman'),shim,{mode:0o700,flag:'wx'});
+    env={...env,PATH:faultBin+path.delimiter+env.PATH};
+  }
+  const child=spawnSync('sh',[wrapper,'maintain',configPath,candidate.manifestPath],
+    {encoding:'utf8',timeout:240000,maxBuffer:4*1024*1024,env});
+  if(child.error)throw child.error;
+  if(killAtSecretCreate){assert.equal(child.signal,'SIGKILL','Tunnel token fault injection did not stop after secret creation');}
+  else assert.equal(child.status,0,`Tunnel token maintenance failed (${child.status}):\n${child.stdout}\n${child.stderr}`);
+  return child;
+}
+
 async function proxyApiTokenStatus(token){
   const script="let token='';for await(const chunk of process.stdin)token+=chunk;token=token.replace(/\\n$/u,'');const r=await fetch('http://127.0.0.1:3000/api/v1/persistence/status',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(5000)});process.stdout.write(String(r.status));";
   const result=spawnSync('podman',['exec','-i','codexia-api-proxy','node','--input-type=module','-e',script],
@@ -646,9 +722,10 @@ function readPodmanApiAuthTokenSecret(){
   return secret;
 }
 
-async function recoverMaintenanceAtBoot({repoRoot,config,expectedImage,nonce}){
+async function recoverMaintenanceAtBoot({repoRoot,config,expectedImage,nonce,tunnelRotation=false}){
   const watchedEnvironment=['NODE_OPTIONS','XDG_STATE_HOME','CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE','CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY',
-    'CODEXIA_RUNTIME_MAINTENANCE_BACKUP_DIGEST','CODEXIA_RUNTIME_MAINTENANCE_IMAGE','CODEXIA_RUNTIME_MAINTENANCE_NONCE'];
+    'CODEXIA_RUNTIME_MAINTENANCE_BACKUP_DIGEST','CODEXIA_RUNTIME_MAINTENANCE_IMAGE','CODEXIA_RUNTIME_MAINTENANCE_NONCE',
+    'CODEXIA_RUNTIME_MAINTENANCE_TUNNEL_ROTATION'];
   const managerEnvironment=run('systemctl',['--user','show-environment']).split('\n');
   const restore=Object.fromEntries(watchedEnvironment.map(name=>[name,managerEnvironment.find(line=>line.startsWith(name+'='))?.slice(name.length+1)??null]));
   const preload=path.join(repoRoot,'deploy/updater/test-standalone-maintenance-preload.mjs');
@@ -656,6 +733,7 @@ async function recoverMaintenanceAtBoot({repoRoot,config,expectedImage,nonce}){
     `XDG_STATE_HOME=${path.dirname(path.dirname(config.stateFile))}`,'CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE=yes',
     'CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY=yes',`CODEXIA_RUNTIME_MAINTENANCE_BACKUP_DIGEST=${BACKUP_DIGEST_FIXTURE}`,
     `CODEXIA_RUNTIME_MAINTENANCE_IMAGE=${expectedImage}`,`CODEXIA_RUNTIME_MAINTENANCE_NONCE=${nonce}`]);
+  if(tunnelRotation)run('systemctl',['--user','set-environment','CODEXIA_RUNTIME_MAINTENANCE_TUNNEL_ROTATION=yes']);
   try{
     const unit='codexia-updater-boot.service';
     const previousInvocation=run('systemctl',['--user','show','--property=InvocationID','--value',unit]);
@@ -980,6 +1058,84 @@ async function exerciseApiAuthTokenRotation({repoRoot,config,workDir,expectedIma
   }
 }
 
+async function exerciseTunnelTokenRotation({repoRoot,config,userUnitDir,workDir,expectedImage,environment,nonce}){
+  const markerPath=path.join(path.dirname(config.stateFile),'maintenance','in-progress.json');
+  const tunnelUnitFile=path.join(userUnitDir,'codexia-tunnel.service');
+  const oldToken='fixture-tunnel-token-old-'+randomBytes(12).toString('hex');
+  const newToken='fixture-tunnel-token-new-'+randomBytes(12).toString('hex');
+  const interruptedToken='fixture-tunnel-token-interrupted-'+randomBytes(12).toString('hex');
+  const secretInput=path.join(workDir,'synthetic-tunnel-token-input');
+  let created=false;
+  let unitCreated=false;
+  const readSecret=()=>JSON.parse(run('podman',['secret','inspect','--showsecret','codexia-tunnel-token']))[0];
+  try{
+    const exists=spawnSync('podman',['secret','exists','codexia-tunnel-token'],{stdio:'ignore'});
+    assert.notEqual(exists.status,0,'Tunnel-token integration fixture requires an unused canonical secret name');
+    await writeFile(secretInput,oldToken,{mode:0o600,flag:'wx'});
+    run('podman',['secret','create','codexia-tunnel-token',secretInput]);
+    created=true;
+    await rm(secretInput,{force:true});
+    await writeFile(tunnelUnitFile,'[Unit]\nDescription=Disposable synthetic Tunnel service\n[Service]\nType=simple\nExecStart=/usr/bin/sleep infinity\nRestart=no\n',{mode:0o600,flag:'wx'});
+    unitCreated=true;
+    run('systemctl',['--user','daemon-reload']);
+    run('systemctl',['--user','start','codexia-tunnel.service']);
+    const stateBefore=await loadControllerState(config.stateFile);
+    const initialSecretId=readSecret().ID;
+    const candidate=await createTunnelTokenCandidate({config,userUnitDir,token:newToken});
+    try{
+      await runTunnelTokenRotationCandidate({repoRoot,candidate,configPath:path.join(path.dirname(config.publicKeyFile),'config.json'),environment});
+      await assert.rejects(lstat(markerPath),{code:'ENOENT'},'Successful Tunnel token rotation retained its marker');
+      const rotated=readSecret();
+      assert.notEqual(rotated.ID,initialSecretId,'Tunnel Podman secret ID did not change');
+      assert.equal(rotated.SecretData,newToken,'Tunnel secret did not receive the protected replacement');
+      assert.equal(systemdState('codexia-tunnel.service'),'active','Tunnel service did not return to its prior active state');
+      assert.equal((await loadControllerState(config.stateFile)).paused,stateBefore.paused,'Tunnel token rotation changed pause state');
+      assert.equal((await readFile(config.routeFile,'utf8')).trim(),stateBefore.journal.active.slot,'Tunnel token rotation changed the API route');
+      await assertTimerState('active','enabled');
+      await new PodmanStandaloneHost(config).probe(stateBefore.journal.active.slot,stateBefore.installed);
+
+      const interrupted=await createTunnelTokenCandidate({config,userUnitDir,token:interruptedToken});
+      try{
+        await runTunnelTokenRotationCandidate({repoRoot,candidate:interrupted,configPath:path.join(path.dirname(config.publicKeyFile),'config.json'),
+          environment,killAtSecretCreate:true});
+        const pending=JSON.parse(await readFile(markerPath,'utf8'));
+        assert.equal(pending.format,'codexia-maintenance-tunnel-token/v1');
+        assert.equal(readSecret().SecretData,interruptedToken,'Fault injection missed the post-secret boundary');
+        assert.equal(systemdState('codexia-tunnel.service'),'inactive','Interrupted Tunnel remained active after its secret changed');
+        run('systemctl',['--user','start','codexia-tunnel.service']);
+        assert.equal(systemdState('codexia-tunnel.service'),'inactive','Rotation startup fence admitted Tunnel before boot recovery');
+        await assertTimerState('inactive','enabled');
+        await recoverMaintenanceAtBoot({repoRoot,config,expectedImage,nonce,tunnelRotation:true});
+        await assert.rejects(lstat(markerPath),{code:'ENOENT'},'Tunnel boot recovery retained its marker');
+        assert.equal(readSecret().SecretData,newToken,'Boot recovery did not restore the prior Tunnel token');
+        assert.equal(systemdState('codexia-tunnel.service'),'active','Boot recovery did not restore the Tunnel service');
+        assert.equal((await readFile(config.routeFile,'utf8')).trim(),stateBefore.journal.active.slot,'Boot recovery changed the API route');
+        assert.equal((await loadControllerState(config.stateFile)).paused,stateBefore.paused,'Tunnel boot recovery changed pause state');
+        await assertTimerState('active','enabled');
+        await new PodmanStandaloneHost(config).probe(stateBefore.journal.active.slot,stateBefore.installed);
+      }finally{await rm(interrupted.candidateRoot,{recursive:true,force:true});}
+    }finally{await rm(candidate.candidateRoot,{recursive:true,force:true});}
+  }finally{
+    const pending=await lstat(markerPath).then(()=>true,error=>error.code==='ENOENT'?false:Promise.reject(error));
+    if(created&&!pending){
+      const secret=readSecret();
+      run('podman',['secret','rm',secret.ID]);
+    }
+    await rm(secretInput,{force:true});
+    if(unitCreated&&!pending){
+      if(systemdState('codexia-tunnel.service')==='active')run('systemctl',['--user','stop','codexia-tunnel.service']);
+      await rm(tunnelUnitFile,{force:true});
+      run('systemctl',['--user','daemon-reload']);
+    }
+    if(!pending){
+      const privateDir=path.dirname(config.publicKeyFile);
+      for(const directory of [path.join(privateDir,'maintenance','candidates'),path.join(privateDir,'maintenance'),path.join(privateDir,'maintenance-snapshots')]){
+        try{await rmdir(directory);}catch(error){if(error.code!=='ENOENT')throw error;}
+      }
+    }
+  }
+}
+
 async function main() {
   assert.notEqual(UID, 0, 'Must run as a non-root disposable service user');
   assert.notEqual(os.userInfo().username, 'codexia', 'Refusing the production Codexia service identity');
@@ -1296,6 +1452,7 @@ async function main() {
   });
   await exerciseApiAuthTokenRotation({repoRoot,config:appliedConfig,workDir,expectedImage,environment,
     originalProxyText:proxyText,proxyQuadlet,nonce});
+  await exerciseTunnelTokenRotation({repoRoot,config:appliedConfig,userUnitDir,workDir,expectedImage,environment,nonce});
 
   run('systemctl', ['--user', 'disable', '--now', 'codexia-updater.timer']);
   await assertTimerState('inactive', 'disabled');

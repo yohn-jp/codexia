@@ -377,7 +377,31 @@ const appSecret='codexia-postgres-app-password';
 const rotationLabel='io.codexia.app-password-rotation';
 const authTokenSecret='codexia-auth-token';
 const authTokenRotationLabel='io.codexia.auth-token-rotation';
+const tunnelTokenSecret='codexia-tunnel-token';
+const tunnelTokenRotationLabel='io.codexia.tunnel-token-rotation';
 const databaseUnit='codexia-db.service';
+export function validateStandaloneTunnelToken(content){
+  assert.ok(typeof content==='string'&&Buffer.byteLength(content)<=8192&&/^[!-~]+(?:\n)?$/u.test(content),
+    'Invalid protected Tunnel token');
+  return content;
+}
+function readTunnelTokenSecret(){
+  const result=spawnSync('podman',['secret','exists',tunnelTokenSecret],{stdio:'ignore',timeout:15000});
+  if(result.status===1)return null;
+  assert.equal(result.status,0,'Podman Tunnel secret existence is unobservable');
+  try{
+    const [secret]=JSON.parse(runWithSensitiveInput('podman',['secret','inspect','--showsecret',tunnelTokenSecret],''));
+    assert.ok(secret.Spec.Name===tunnelTokenSecret&&typeof secret.ID==='string'&&secret.ID);
+    return {id:secret.ID,owner:secret.Spec.Labels?.[tunnelTokenRotationLabel],token:validateStandaloneTunnelToken(secret.SecretData)};
+  }catch{throw Error('Canonical Tunnel secret is unobservable');}
+}
+function assertKnownTunnelTokenSecret(secret,snapshot){
+  if(!secret)return;
+  const digest=sha256(secret.token);
+  assert.ok((secret.id===snapshot.originalSecretId&&digest===snapshot.previousDigest)||
+    (secret.owner===snapshot.operationId&&[snapshot.previousDigest,snapshot.replacementDigest].includes(digest)),
+    'Unrecognized canonical Tunnel secret prevents recovery');
+}
 function readRotationSecret(secretName){
   const result=spawnSync('podman',['secret','exists',secretName],{stdio:'ignore',timeout:15000});
   if(result.status===1)return null;
@@ -429,7 +453,7 @@ function assertKnownRotationSecret(secret,snapshot){
     'Unrecognized canonical app secret prevents recovery');
 }
 async function prepareRotationSecretInput(config,snapshot,password,inputName='postgres-app-password-input'){
-  assert.ok(['postgres-app-password-input','api-auth-token-input'].includes(inputName),'Unsupported maintenance secret input');
+  assert.ok(['postgres-app-password-input','api-auth-token-input','tunnel-token-input'].includes(inputName),'Unsupported maintenance secret input');
   assert.match(snapshot.operationId,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u,
     'Rotation secret input operation identity is invalid');
   const root=path.join(path.dirname(config.publicKeyFile),'maintenance-snapshots',snapshot.operationId);
@@ -1119,6 +1143,22 @@ export class PodmanStandaloneHost{
     assert.equal(active,running,'Tunnel service and container state disagree');
     return active;
   }
+  async tunnelRotationServiceActive(){
+    const properties=systemdProperties(run('systemctl',['--user','show','--property=ActiveState,SubState','codexia-tunnel.service']));
+    const container=inspect('codexia-tunnel');
+    if(properties.ActiveState==='active'){
+      assert.ok(container?.State.Running,'Active Tunnel service has no running owned container');
+      return true;
+    }
+    assert.ok(['inactive','failed'].includes(properties.ActiveState),'Tunnel rotation service state is not safely observable');
+    assert.equal(container,null,'Inactive Tunnel service retains an unverified container');
+    if(properties.ActiveState==='failed'){
+      run('systemctl',['--user','reset-failed','codexia-tunnel.service']);
+      assert.equal(run('systemctl',['--user','show','--property=ActiveState','--value','codexia-tunnel.service']),'inactive',
+        'Failed Tunnel service could not be reset after proving container absence');
+    }
+    return false;
+  }
   async generatedWantTarget(entry){
     const runtime=process.env.XDG_RUNTIME_DIR??'';
     assert.ok(path.isAbsolute(runtime),'Rootless systemd runtime directory is unavailable');
@@ -1218,6 +1258,88 @@ export class PodmanStandaloneHost{
     run('systemctl',['--user','daemon-reload']);
     await this.assertBackupStartupFence();
   }
+  tunnelRotationStartupFence(){
+    const entries=this.backupStartupFencePaths();
+    const runtime=process.env.XDG_RUNTIME_DIR??'';
+    const stateDir=path.dirname(this.config.stateFile);
+    const marker=path.join(stateDir,'maintenance','in-progress.json');
+    const permit=path.join(runtime,'codexia-tunnel-token-rotation.permit');
+    assert.ok(path.isAbsolute(runtime),'Rootless systemd runtime directory is unavailable');
+    return {unit:'codexia-tunnel.service',permit,marker,directory:entries.tunnel.directory,
+      file:path.join(entries.tunnel.directory,'91-codexia-tunnel-token-rotation.conf'),
+      content:`ConditionPathExists=|!${marker}\nConditionPathExists=|${permit}\n`};
+  }
+  async assertTunnelRotationStartupFence(){
+    const entry=this.tunnelRotationStartupFence();
+    assert.equal(await regularPrivateText(entry.file,{privateOnly:true}),entry.content,'Tunnel rotation startup fence differs from the reviewed condition');
+    const properties=systemdProperties(run('systemctl',['--user','show','--property=LoadState,DropInPaths',entry.unit]));
+    assert.equal(properties.LoadState,'loaded','Tunnel service is not loaded with its rotation startup fence');
+    assert.deepEqual((properties.DropInPaths??'').trim().split(/\s+/u).filter(Boolean),[entry.file],
+      'Tunnel rotation fence is overridden by another systemd drop-in');
+  }
+  async installTunnelRotationStartupFence(){
+    const entry=this.tunnelRotationStartupFence();
+    await this.ensureBackupStartupFenceFile(entry);
+    run('systemctl',['--user','daemon-reload']);
+    await this.assertTunnelRotationStartupFence();
+  }
+  async removeTunnelRotationStartupFence(){
+    const entry=this.tunnelRotationStartupFence();
+    let marker=null,metadata;
+    try{metadata=await lstat(entry.marker);}catch(error){if(error.code!=='ENOENT')throw error;}
+    if(metadata){
+      assert.ok(metadata.isFile()&&!metadata.isSymbolicLink(),'Tunnel rotation marker must be a regular file before fence removal');
+      assert.equal(metadata.mode&0o777,0o600,'Tunnel rotation marker permissions drift before fence removal');
+      if(typeof process.getuid==='function')assert.equal(metadata.uid,process.getuid(),'Tunnel rotation marker owner drift before fence removal');
+      marker=JSON.parse(await readFile(entry.marker,'utf8'));
+    }
+    if(marker)assert.ok(marker.format==='codexia-maintenance-tunnel-token/v1'&&['completed','rolled-back'].includes(marker.phase),
+      'Cannot remove the Tunnel startup fence while rotation recovery is pending');
+    const removed=await this.removeBackupStartupFenceFile(entry);
+    if(removed)run('systemctl',['--user','daemon-reload']);
+  }
+  async withTunnelRotationPermit(operation){
+    const entry=this.tunnelRotationStartupFence();
+    await this.assertTunnelRotationStartupFence();
+    const markerInfo=await lstat(entry.marker);
+    assert.ok(markerInfo.isFile()&&!markerInfo.isSymbolicLink(),'Tunnel permit marker must be a regular file');
+    assert.equal(markerInfo.mode&0o777,0o600,'Tunnel permit marker permissions drift');
+    if(typeof process.getuid==='function')assert.equal(markerInfo.uid,process.getuid(),'Tunnel permit marker owner drift');
+    const marker=JSON.parse(await readFile(entry.marker,'utf8'));
+    assert.equal(marker.format,'codexia-maintenance-tunnel-token/v1','Tunnel permit requires its durable rotation marker');
+    await ensureDirectoryTreeDurable(path.dirname(entry.permit));
+    const temporary=path.join(path.dirname(entry.permit),'.'+path.basename(entry.permit)+'.'+process.pid+'.'+randomBytes(8).toString('hex')+'.tmp');
+    const handle=await open(temporary,'wx',0o600);
+    const target=`/proc/${process.pid}/fd/${handle.fd}`;
+    let installed=false;
+    try{
+      await handle.writeFile('codexia-tunnel-token-rotation-permit/v1\n','utf8');
+      await handle.sync();
+      await unlink(temporary);
+      await symlink(target,entry.permit);
+      installed=true;
+      await syncDirectory(path.dirname(entry.permit));
+      await this.assertTunnelRotationStartupFence();
+      return await operation();
+    }finally{
+      if(installed){
+        try{
+          assert.equal(await readlink(entry.permit),target,'Tunnel rotation permit changed while a service was starting');
+          await unlink(entry.permit);
+          await syncDirectory(path.dirname(entry.permit));
+        }finally{await handle.close();}
+      }else{
+        await unlink(temporary).catch(()=>undefined);
+        await handle.close();
+      }
+    }
+  }
+  async startTunnelForRotation(snapshot){
+    await this.assertTunnelTokenRotationSources(snapshot);
+    await this.assertTunnelRotationStartupFence();
+    await this.withTunnelRotationPermit(async()=>run('systemctl',['--user','start','codexia-tunnel.service'],{timeout:120000}));
+    assert.equal(await this.tunnelServiceActive(),true,'Tunnel token rotation did not start the reviewed service');
+  }
   async removeBackupStartupFence(){
     const entries=this.backupStartupFencePaths();
     const api=await this.removeBackupStartupFenceFile(entries.api);
@@ -1280,8 +1402,13 @@ export class PodmanStandaloneHost{
     assert.equal(path.resolve(properties.SourcePath??''),sourcePath,'Legacy systemd unit does not reference the expected Quadlet source: '+unit);
     const dropIns=(properties.DropInPaths??'').trim().split(/\s+/u).filter(Boolean);
     for(const dropIn of dropIns){
-      assert.equal(dropIn,entry.file,'Legacy service has an unreviewed systemd drop-in: '+unit);
-      assert.equal(await regularPrivateText(dropIn,{privateOnly:true}),entry.content,'Legacy service backup fence differs from the reviewed condition: '+unit);
+      const rotationFence=unit==='codexia-tunnel.service'?this.tunnelRotationStartupFence():null;
+      if(rotationFence&&dropIn===rotationFence.file){
+        assert.equal(await regularPrivateText(dropIn,{privateOnly:true}),rotationFence.content,'Tunnel rotation startup fence differs from the reviewed condition');
+      }else{
+        assert.equal(dropIn,entry.file,'Legacy service has an unreviewed systemd drop-in: '+unit);
+        assert.equal(await regularPrivateText(dropIn,{privateOnly:true}),entry.content,'Legacy service backup fence differs from the reviewed condition: '+unit);
+      }
     }
     assert.ok(path.isAbsolute(process.env.XDG_RUNTIME_DIR??''),'Rootless systemd runtime directory is unavailable');
     const fragmentRoot=path.resolve(process.env.XDG_RUNTIME_DIR,'systemd','generator');
@@ -1657,6 +1784,94 @@ export class PodmanStandaloneHost{
   async verifyPostgresAppPassword(password){
     assert.ok(readRotationSecret(appSecret)?.password===password,'Canonical secret bytes changed');
     assert.equal(passwordRotationPsql('codexia','SELECT current_user;\n').trim(),'codexia','Database app authentication failed');
+  }
+  async tunnelTokenRuntimeDigest(source,tunnel){
+    const projection=containerRuntimeFingerprintProjection(tunnel,await this.quadletSecretIdentities(source));
+    const mount=projection.SecretMounts.find(secret=>secret.name===tunnelTokenSecret);
+    assert.ok(mount?.type==='mount'&&mount.target==='/run/secrets/token','Tunnel token mount differs from the reviewed Quadlet');
+    mount.id='rotating';
+    const containerId=String(tunnel.Id??tunnel.ID??'').replace(/^sha256:/u,'');
+    const generatedHostname=tunnel.Config?.Hostname;
+    assert.match(containerId,/^[a-f0-9]{64}$/u,'Tunnel runtime container identity is invalid');
+    assert.match(generatedHostname??'',/^[a-f0-9]{12}$/u,'Tunnel runtime hostname is invalid');
+    projection.Networks=projection.Networks.map(network=>({...network,
+      Aliases:[...(network.Aliases??[])].filter(alias=>alias!==containerId&&alias!==generatedHostname).sort()}));
+    return sha256(JSON.stringify(canonical(projection)));
+  }
+  async captureTunnelTokenRotation(replacement,operationId,state){
+    const candidate=validateStandaloneTunnelToken(replacement);
+    const current=readTunnelTokenSecret();
+    assert.ok(current,'Canonical Tunnel token secret is missing');
+    assert.ok(current.token.replace(/\n$/u,'')!==candidate.replace(/\n$/u,''),'Replacement Tunnel token must differ from the current token');
+    assert.equal(await this.tunnelServiceActive(),true,'Tunnel token rotation requires the exact active Tunnel service');
+    const unit=await this.legacyBackupTunnelSnapshot();
+    assert.equal(quadletField(unit.source,'ContainerName'),'codexia-tunnel');
+    assert.equal(quadletField(unit.source,'Secret'),`${tunnelTokenSecret},type=mount,target=/run/secrets/token`,
+      'Tunnel Quadlet secret mount differs from the reviewed token mount');
+    assert.equal(quadletField(unit.source,'Exec'),'tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token-file /run/secrets/token',
+      'Tunnel Quadlet command differs from the reviewed token-file command');
+    assert.deepEqual(unit.secretIdentities.map(secret=>secret.name),[tunnelTokenSecret],'Tunnel Quadlet contains an unexpected secret');
+    assert.ok(unit.source.split(/\r?\n/u).includes('Requires=codexia-api-proxy.service')&&
+      unit.source.split(/\r?\n/u).includes('After=network-online.target codexia-api-proxy.service'),
+      'Tunnel must use the reviewed private proxy dependency');
+    const observed=inspect('codexia-tunnel');
+    assert.ok(observed?.State.Running,'Tunnel token rotation requires its running container');
+    assert.ok(unit.secretIdentities.some(secret=>secret.name===tunnelTokenSecret&&secret.id===current.id),
+      'Tunnel Quadlet does not reference the canonical token secret');
+    const projection=containerRuntimeFingerprintProjection(observed,unit.secretIdentities);
+    const tokenMount=projection.SecretMounts.find(secret=>secret.name===tunnelTokenSecret);
+    assert.ok(tokenMount?.type==='mount'&&tokenMount.target==='/run/secrets/token'&&tokenMount.id===current.id,
+      'Running Tunnel does not use its exact canonical token secret');
+    const controllerObservation=await this.observe();
+    assert.deepEqual(controllerObservation,{route:state.journal.active.slot,writers:[{slot:state.journal.active.slot,image:state.installed.image}]},
+      'Tunnel token rotation requires the committed writer serving its route');
+    return {operationId,originalSecretId:current.id,previousDigest:sha256(current.token),replacementDigest:sha256(candidate),
+      sourceDigest:sha256(unit.source),fragmentDigest:sha256((await this.readBackupQuadletUnit('codexia-tunnel.service','codexia-tunnel.container')).fragment),
+      imageId:unit.imageId,runtimeDigest:await this.tunnelTokenRuntimeDigest(unit.source,observed)};
+  }
+  async assertTunnelTokenRotationSources(snapshot){
+    const unit=await this.readBackupQuadletUnit('codexia-tunnel.service','codexia-tunnel.container');
+    assert.equal(quadletField(unit.source,'ContainerName'),'codexia-tunnel');
+    assert.equal(quadletField(unit.source,'Secret'),`${tunnelTokenSecret},type=mount,target=/run/secrets/token`);
+    assert.equal(quadletField(unit.source,'Exec'),'tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token-file /run/secrets/token');
+    assert.ok(unit.source.split(/\r?\n/u).includes('Requires=codexia-api-proxy.service')&&
+      unit.source.split(/\r?\n/u).includes('After=network-online.target codexia-api-proxy.service'));
+    assert.equal(sha256(unit.source),snapshot.sourceDigest,'Tunnel Quadlet source changed during token rotation');
+    assert.equal(sha256(unit.fragment),snapshot.fragmentDigest,'Generated Tunnel unit changed during token rotation');
+    const image=JSON.parse(run('podman',['image','inspect',quadletField(unit.source,'Image')]))[0];
+    assertLegacyBackupTunnelUnitIdentity({...unit,image,secretIdentities:[]});
+    assert.equal(imageId(image.Id),snapshot.imageId,'Tunnel image identity changed during token rotation');
+    const secret=readTunnelTokenSecret();
+    assertKnownTunnelTokenSecret(secret,snapshot);
+    return secret;
+  }
+  async verifyTunnelTokenRotation(snapshot,expectedDigest){
+    const secret=await this.assertTunnelTokenRotationSources(snapshot);
+    assert.ok(secret&&sha256(secret.token)===expectedDigest,'Canonical Tunnel token bytes differ from the expected rotation state');
+    assert.equal(await this.tunnelServiceActive(),true,'Tunnel service did not become active');
+    const observed=inspect('codexia-tunnel');
+    assert.ok(observed?.State.Running,'Tunnel container is not running');
+    assert.equal(await this.tunnelTokenRuntimeDigest((await this.legacyBackupTunnelSnapshot()).source,observed),snapshot.runtimeDigest,
+      'Tunnel runtime changed during token rotation');
+  }
+  async assertTunnelStoppedForRotation(snapshot){
+    await this.assertTunnelTokenRotationSources(snapshot);
+    assert.equal(await this.tunnelRotationServiceActive(),false,'Tunnel service is not stopped for secret replacement');
+    assert.equal(inspect('codexia-tunnel'),null,'Stopped Tunnel container remains during secret replacement');
+  }
+  async replaceTunnelToken(token,snapshot){
+    const target=validateStandaloneTunnelToken(token);
+    const existing=readTunnelTokenSecret();
+    assertKnownTunnelTokenSecret(existing,snapshot);
+    if(existing?.token!==target){
+      if(existing)run('podman',['secret','rm',existing.id]);
+      const inputFile=await prepareRotationSecretInput(this.config,snapshot,target,'tunnel-token-input');
+      try{run('podman',['secret','create','--label',tunnelTokenRotationLabel+'='+snapshot.operationId,tunnelTokenSecret,inputFile]);}
+      finally{await removeRotationSecretInput(inputFile);}
+    }
+    const after=readTunnelTokenSecret();
+    assertKnownTunnelTokenSecret(after,snapshot);
+    assert.ok(after?.token===target,'Canonical Tunnel secret replacement is unverified');
   }
   async verifyBlockedPasswordRotation(slot,release){
     assert.deepEqual(await this.observe(),{route:'blocked',writers:[{slot,image:release.image}]},'Exclusive writer or blocked route changed');
