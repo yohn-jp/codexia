@@ -513,6 +513,12 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     const currentJournal = journalRef.current;
     if (sessionBlockedRef.current || !currentProject || !currentJournal || !nextDocumentId) return;
     const openSequence = ++openSequenceRef.current;
+    revisionPageSequenceRef.current += 1;
+    setShowRevisions(false);
+    setRevisions([]);
+    setRevisionCursor(null);
+    setRevisionPageLoading(false);
+    setRevisionPageError("");
     setLoading(true);
     setPageError("");
     setNotice("");
@@ -1327,13 +1333,14 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     if (!project || project.id !== requestedProjectId) return;
     const navigationGeneration = openSequenceRef.current;
     const requestSequence = ++revisionPageSequenceRef.current;
-    const requestIsCurrent = () => !sessionBlockedRef.current &&
+    const requestOwnsState = () => requestSequence === revisionPageSequenceRef.current;
+    const sameDocumentNavigation = () => !sessionBlockedRef.current &&
       requestSequence === revisionPageSequenceRef.current &&
       projectIdRef.current === requestedProjectId &&
       openSequenceRef.current === navigationGeneration &&
       activeRef.current?.document.projectId === requestedProjectId &&
-      activeRef.current.document.id === requestedDocumentId &&
-      activeRef.current.revision.id === requestedRevisionId;
+      activeRef.current.document.id === requestedDocumentId;
+    const requestIsCurrent = () => sameDocumentNavigation() && activeRef.current?.revision.id === requestedRevisionId;
     setRevisionPageLoading(true);
     setRevisionPageError("");
     try {
@@ -1348,7 +1355,15 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     } catch (error) {
       if (requestIsCurrent()) setRevisionPageError(error instanceof Error ? error.message : "Revision履歴を読み込めませんでした。");
     } finally {
-      if (requestIsCurrent()) setRevisionPageLoading(false);
+      if (!requestOwnsState()) return;
+      if (sameDocumentNavigation() && activeRef.current?.revision.id !== requestedRevisionId) {
+        setRevisions([]);
+        setRevisionCursor(null);
+        setRevisionPageError("");
+        void loadRevisionPage(undefined, true);
+      } else if (sameDocumentNavigation()) {
+        setRevisionPageLoading(false);
+      }
     }
   }
 

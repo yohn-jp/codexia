@@ -224,6 +224,92 @@ test("revision history responses and errors stay bound to the scene that request
   await failureResponse;
   await expect(page.getByText("A履歴の取得失敗", { exact: true })).toHaveCount(0);
   await expect(editor(page)).toContainText(bCurrent);
+
+  await openManuscriptScene(page, scene);
+  await page.unroute(historyUrl);
+  let releaseInitial!: () => void;
+  let markInitialStarted!: () => void;
+  const initialGate = new Promise<void>((resolve) => { releaseInitial = resolve; });
+  const initialStarted = new Promise<void>((resolve) => { markInitialStarted = resolve; });
+  await page.route(historyUrl, async (route) => {
+    markInitialStarted();
+    await initialGate;
+    await route.continue();
+  });
+  await openRevisionHistory(page);
+  await initialStarted;
+  const failedDocumentPath = `/api/v1/persistence/projects/${project.id}/documents/${second.id}`;
+  const failedDocumentRoute = (url: URL) => url.pathname === failedDocumentPath;
+  await page.route(failedDocumentRoute, (route) => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "対象の文書を開けませんでした。" }) }));
+  await page.locator(`.pg-document-list .pg-outline-item[data-document-id="${second.id}"] > .pg-outline-row > .pg-outline-document`).click();
+  await expect(page.locator(".pg-editor-column [role=alert]")).toContainText("対象の文書を開けませんでした。");
+  const initialResponse = page.waitForResponse((response) => historyUrl(new URL(response.url())));
+  releaseInitial();
+  await initialResponse;
+  await expect(page.getByRole("region", { name: "Revision履歴", exact: true })).toHaveCount(0);
+  await page.unroute(historyUrl);
+  await page.unroute(failedDocumentRoute);
+  await openManuscriptScene(page, scene);
+  await openRevisionHistory(page);
+  await expect(page.getByRole("region", { name: "Revision履歴", exact: true }).getByRole("status")).toHaveCount(0);
+});
+
+test("revision history restarts a blocked page after a save on the same scene", async ({ page }) => {
+  test.setTimeout(90_000);
+  const { project, scene } = await createWritingFixture(page);
+  const documentPath = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
+  const revisionsResponse = await page.request.get(documentPath);
+  expect(revisionsResponse.ok()).toBe(true);
+  let current = (await revisionsResponse.json() as { revision: { id: string; markdown: string } }).revision;
+  for (let number = 2; number <= 51; number += 1) {
+    const markdown = `Revision ${number}.`;
+    const response = await page.request.patch(documentPath, {
+      headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": randomUUID(), "X-Client-Id": "revision-page-save-test" },
+      data: {
+        baseRevisionId: current.id,
+        changes: [{ fromUtf16: 0, toUtf16: current.markdown.length, insert: markdown }],
+        resultingSha256: createHash("sha256").update(markdown).digest("hex"),
+        clientId: "revision-page-save-test",
+      },
+    });
+    expect(response.status()).toBe(200);
+    current = (await response.json() as { revision: { id: string; markdown: string } }).revision;
+  }
+  await page.goto(`/desktop/projects/${project.id}/scenes/${scene.id}`);
+  await expect(editor(page)).toContainText(current.markdown);
+  await openRevisionHistory(page);
+  const history = page.getByRole("region", { name: "Revision履歴", exact: true });
+  await expect(history.locator("article")).toHaveCount(50);
+
+  let releasePage!: () => void;
+  let markPageStarted!: () => void;
+  let markRefreshStarted!: () => void;
+  const pageGate = new Promise<void>((resolve) => { releasePage = resolve; });
+  const pageStarted = new Promise<void>((resolve) => { markPageStarted = resolve; });
+  const refreshStarted = new Promise<void>((resolve) => { markRefreshStarted = resolve; });
+  let pageBlocked = false;
+  await page.route((url) => url.pathname === `${documentPath}/revisions`, async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.has("before") && !pageBlocked) {
+      pageBlocked = true;
+      markPageStarted();
+      await pageGate;
+    } else if (!url.searchParams.has("before")) {
+      markRefreshStarted();
+    }
+    await route.continue();
+  });
+  await history.getByRole("button", { name: "さらに古いRevisionを読む", exact: true }).click();
+  await pageStarted;
+  const savedMarkdown = "A new receipt arrives while history is loading.";
+  await editor(page).fill(savedMarkdown);
+  await expect.poll(async () => persistedMarkdown(page, project.id, scene.id)).toBe(savedMarkdown);
+  await expect(page.getByRole("button", { name: "今すぐ保存", exact: true })).toBeDisabled();
+  releasePage();
+  await refreshStarted;
+  await expect(history.locator("article")).toHaveCount(50);
+  await expect(history).toContainText(savedMarkdown);
+  await expect(history.getByRole("button", { name: "さらに古いRevisionを読む", exact: true })).toBeEnabled();
 });
 
 test("revision history pages tied PostgreSQL revisions through retry, navigation, and restore", async ({ page }) => {
