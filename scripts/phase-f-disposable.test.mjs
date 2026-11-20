@@ -94,6 +94,8 @@ test('Phase F integration helper is valid shell and exercises the existing locke
   assert.match(helper, /sudo stat --printf='host-file=%n mode=%a uid=%u gid=%g owner=%U group=%G\\n' "\$postgres_init_script"/u);
   assert.match(helper, /rootless run --rm --user postgres --entrypoint \/bin\/sh[\s\S]*?--volume "\$postgres_init_script:\/docker-entrypoint-initdb\.d\/010-create-app-role\.sh:ro,Z"[\s\S]*?test -r \/docker-entrypoint-initdb\.d\/010-create-app-role\.sh[\s\S]*?user_systemctl start codexia-db\.service/u);
   assert.match(helper, /postgres_image=\$\(sed -n 's\/\^Image=\/\/p' "\$source_dir\/deploy\/quadlet\/codexia-db\.container"\)/u);
+  assert.equal((helper.match(/as_service \/usr\/bin\/jq -r \.image "\$evidence_dir\/release-0\.1\.(?:236|245|254)\.json"/gu) ?? []).length, 3,
+    'Read private release fixtures as their owner, not as the unrelated GitHub runner account');
   assert.match(helper, /codexia-updater(?:\.sh)?/u);
 });
 

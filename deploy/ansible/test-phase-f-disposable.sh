@@ -317,7 +317,7 @@ done
   exit 1
 }
 
-base_image=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).image)' "$evidence_dir/release-0.1.236.json")
+base_image=$(as_service /usr/bin/jq -r .image "$evidence_dir/release-0.1.236.json")
 database_id_before=$(rootless inspect --format '{{.Id}}' codexia-db)
 data_volume_before=$(rootless volume inspect --format '{{.Name}}|{{.Mountpoint}}' codexia-data)
 history_volume_before=$(rootless volume inspect --format '{{.Name}}|{{.Mountpoint}}' codexia-history)
@@ -449,7 +449,7 @@ NODE
 
 run_updater acceptance-update "$config_file" > "$test_root/update.json"
 run_updater status "$config_file" > "$test_root/status-updated.json"
-middle_image=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).image)' "$evidence_dir/release-0.1.245.json")
+middle_image=$(as_service /usr/bin/jq -r .image "$evidence_dir/release-0.1.245.json")
 assert_controller_status "$test_root/status-updated.json" "$middle_image" green committed true
 run_updater acceptance-rollback "$config_file" > "$test_root/rollback.json"
 run_updater verify "$config_file" > "$test_root/verify-rollback.json"
@@ -476,7 +476,7 @@ NODE
 
 # Advance the signed test channel to a third published image so the earlier rollback does not suppress it.
 as_service install -m 0600 "$evidence_dir/channel-sequence-2.json" "$channel_file"
-newest_image=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).image)' "$evidence_dir/release-0.1.254.json")
+newest_image=$(as_service /usr/bin/jq -r .image "$evidence_dir/release-0.1.254.json")
 crash_bin="$fixture_data/crash-bin"
 as_service install -d -m 0700 "$crash_bin"
 cat > "$test_root/systemctl-crash" <<EOF
