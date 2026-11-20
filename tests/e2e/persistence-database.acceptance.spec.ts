@@ -225,6 +225,65 @@ test("Knowledge relation pagination keeps the forty-first fetched relation actio
   }).toBe("confirmed");
 });
 
+for (const shell of ["desktop", "mobile"] as const) {
+  test(`${shell} move destinations exclude descendants and identify same-title paths`, async ({ page }) => {
+    if (shell === "mobile") await page.setViewportSize({ width: 390, height: 844 });
+    await ownerLogin(page, `/${shell}/`);
+    const origin = new URL(page.url()).origin;
+    const document = (title: string, kind: string, parentId: string | null) => ({
+      id: crypto.randomUUID(), revisionId: crypto.randomUUID(), title, kind, parentId, orderKey: title, markdown: title,
+    });
+    const volume = document("移動する巻", "volume", null);
+    const child = document("子章", "chapter", volume.id);
+    const grandchild = document("孫シーン", "scene", child.id);
+    const firstParent = document("別巻甲", "volume", null);
+    const secondParent = document("別巻乙", "volume", null);
+    const first = document("同名の章", "chapter", firstParent.id);
+    const second = document("同名の章", "chapter", secondParent.id);
+    const archive = await page.request.post("/api/v1/persistence/import", {
+      headers: { Origin: origin },
+      data: { format: "codexia-work/v1", project: { title: `Move ${crypto.randomUUID()}`, settings: {} },
+        documents: [volume, child, grandchild, firstParent, secondParent, first, second],
+        knowledge: { nodes: [], aliases: [], relations: [] },
+        evidence: { anchors: [], mentions: [], assertions: [], assertionEvidence: [], unresolved: { anchors: [], mentions: [], assertionEvidence: [] } },
+        moduleRecords: [], omittedRecords: [] },
+    });
+    expect(archive.status()).toBe(201);
+    const { project } = await archive.json() as { project: { id: string } };
+    const projectRoute = `/api/v1/persistence/projects/${project.id}/documents`;
+    await page.goto(`/${shell}/projects/${project.id}/scenes/${volume.id}${shell === "mobile" ? "?view=writing" : ""}`);
+    await expect(manuscriptEditor(page)).toContainText(volume.markdown);
+    if (shell === "mobile") await page.getByRole("button", { name: "構成", exact: true }).click();
+    const scope = shell === "mobile" ? page.locator("ion-modal.mobile-shell-reference-modal") : page.locator('[data-workspace-panel="outline"]');
+    await scope.getByText("選択文書の構成を変更", { exact: true }).click();
+    const targets = scope.getByLabel("移動先");
+    for (const unavailable of [volume, child, grandchild]) await expect(targets.locator(`option[value="${unavailable.id}"]`)).toHaveCount(0);
+    await expect(targets.locator(`option[value="${first.id}"]`)).toContainText("別巻甲");
+    await expect(targets.locator(`option[value="${second.id}"]`)).toContainText("別巻乙");
+
+    if (shell === "desktop") {
+      await targets.selectOption(first.id);
+      const candidate = await page.request.get(`${projectRoute}/${first.id}`);
+      expect(candidate.ok()).toBe(true);
+      const { document: current } = await candidate.json() as { document: { version: number } };
+      const reassigned = await page.request.patch(`${projectRoute}/${first.id}/metadata`, {
+        headers: { Origin: origin },
+        data: { parentId: child.id, expectedVersion: current.version },
+      });
+      expect(reassigned.ok()).toBe(true);
+      await scope.getByRole("button", { name: "文書を移動" }).click();
+      await expect(page.getByText("Document hierarchy cannot contain a cycle", { exact: true }).first()).toBeVisible();
+      await expect(targets).toHaveValue(first.id);
+      await targets.selectOption(second.id);
+      await scope.getByRole("button", { name: "文書を移動" }).click();
+      await expect.poll(async () => {
+        const response = await page.request.get(`${projectRoute}/${volume.id}`);
+        return ((await response.json()) as { document: { parentId: string | null } }).document.parentId;
+      }).toBe(second.id);
+    }
+  });
+}
+
 test("revision comparison separates distant manuscript edits", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 });
   const { project, scene } = await createWritingFixture(page);
