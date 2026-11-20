@@ -95,13 +95,14 @@ export function MobileReadingPager({
     setDragOffset(dx);
   };
 
-  const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const finishPointerGesture = (event: ReactPointerEvent<HTMLDivElement>, commit: boolean) => {
     const gesture = gestureRef.current;
     if (!gesture || gesture.id !== event.pointerId) return;
     gestureRef.current = null;
     try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* already released */ }
     setDragging(false);
     setDragOffset(0);
+    if (!commit) return;
     if (gesture.moved) {
       const dx = event.clientX - gesture.x;
       if (Math.abs(dx) >= 56) turn(dx < 0 ? "next" : "previous");
@@ -113,6 +114,9 @@ export function MobileReadingPager({
     else turn(zone === (mode === "vertical" ? "left" : "right") ? "next" : "previous");
   };
 
+  const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => finishPointerGesture(event, true);
+  const onPointerCancel = (event: ReactPointerEvent<HTMLDivElement>) => finishPointerGesture(event, false);
+
   const pageOffset = isMobile ? pageTranslateX(pageIndex, pageWidth, mode === "vertical" ? "rtl" : "ltr") : 0;
   return (
     <div
@@ -121,7 +125,7 @@ export function MobileReadingPager({
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
+      onPointerCancel={onPointerCancel}
       data-page-index={pageIndex}
       data-page-count={pageCount}
       aria-label={`読書ページ ${pageIndex + 1} / ${pageCount}`}
