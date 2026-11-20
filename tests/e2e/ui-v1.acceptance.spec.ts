@@ -234,7 +234,7 @@ test("UX canon puts Japanese prose before optional chrome at every shell width",
 test("UX canon preserves focus and recovery when journal storage fails and returns", async ({ page }) => {
   const { scene } = await createWritingFixture(page); await denyWrites(page, true);
   const text = "保存領域が戻るまで失わない原稿。";
-  await editor(page).fill(text); await expect(page.getByRole("alert").first()).toBeVisible(); await expectMarkdown(page, text);
+  await editor(page).click(); await editor(page).press("ControlOrMeta+a"); await page.keyboard.insertText(text); await expect(page.getByRole("alert").first()).toBeVisible(); await expectMarkdown(page, text);
   await denyWrites(page, false); await editor(page).press("End"); await editor(page).press("!");
   await expect.poll(async () => (await readPersistenceDrafts(page)).some((draft) => draft.documentId === scene.id && draft.markdown.includes(text)) || page.getByText("PostgreSQLへ保存済み", { exact: true }).isVisible()).toBeTruthy();
   await expect(editor(page)).toContainText(text);
