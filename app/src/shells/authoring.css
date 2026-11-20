@@ -579,14 +579,17 @@
 }
 .st-studio-shell .native-review-diff-overview > div:last-child { border-inline-start-color: var(--success); }
 .st-studio-shell .pg-revisions { margin-block: 24px; padding-block: 10px; border-top: 1px solid var(--st-folio-edge); }
-.st-studio-shell .pg-revision-difference { margin-block: 12px; border-block: 1px solid var(--st-folio-edge); }
-.st-studio-shell .pg-revision-difference > summary { min-height: 40px; display: flex; align-items: center; color: var(--accent-strong); cursor: pointer; }
-.st-studio-shell .pg-revision-diff-preview { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 12px; align-items: start; padding-block: 10px; }
-.st-studio-shell .pg-revision-diff-preview > div { min-width: 0; padding: 12px; background: var(--st-rail-selected); }
-.st-studio-shell .pg-revision-diff-preview h4 { margin: 0 0 8px; color: var(--muted); font: 600 11px/1.4 var(--manuscript-serif, serif); }
-.st-studio-shell .pg-revision-diff-preview pre { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; font: 14px/1.7 var(--manuscript-serif, serif); }
+.pg-workspace .pg-revision-difference { margin-block: 12px; border-block: 1px solid var(--st-folio-edge); }
+.pg-workspace .pg-revision-difference > summary { min-height: 40px; display: flex; align-items: center; color: var(--accent-strong); cursor: pointer; }
+.pg-workspace .pg-revision-diff-metadata,
+.pg-workspace .pg-revision-diff-hunk { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding-block: 10px; }
+.pg-workspace .pg-revision-diff-metadata dd { margin: 0; overflow-wrap: anywhere; }
+.pg-workspace .pg-revision-diff-hunk > div { min-width: 0; padding: 12px; background: var(--st-rail-selected); }
+.pg-workspace .pg-revision-diff-preview h4 { margin: 0 0 8px; color: var(--muted); font: 600 11px/1.4 var(--manuscript-serif, serif); }
+.pg-workspace .pg-revision-diff-preview pre { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; font: 14px/1.7 var(--manuscript-serif, serif); }
 @media (max-width: 640px) {
-  .mobile-shell .pg-revision-diff-preview { grid-template-columns: minmax(0, 1fr); }
+  .pg-workspace .pg-revision-diff-metadata,
+  .pg-workspace .pg-revision-diff-hunk { grid-template-columns: minmax(0, 1fr); }
 }
 @container st-main (inline-size < 62rem) {
   .st-studio-breadcrumb { max-inline-size: 35vw; }

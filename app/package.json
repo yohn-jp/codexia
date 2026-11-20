@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",
+    "@codemirror/merge": "6.12.3",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",
     "@ionic/core": "9.0.11",
