@@ -902,6 +902,11 @@ async function exercisePostgresPasswordRotation({ repoRoot, config, userUnitDir,
 }
 
 async function exerciseApiAuthTokenRotation({config,workDir,expectedImage,environment}){
+  const configPath=path.join(path.dirname(config.publicKeyFile),'config.json');
+  const stateBeforePause=await loadControllerState(config.stateFile);
+  if(!stateBeforePause.paused){
+    run('sh',[path.join(SOURCE_ROOT,'deploy/updater/codexia-updater'),'pause',configPath],{env:environment});
+  }
   const state=await loadControllerState(config.stateFile);
   assert.equal(state.paused,true,'API token rotation fixture requires a paused controller');
   const initialSecret=readPodmanApiAuthTokenSecret();
@@ -963,6 +968,9 @@ async function exerciseApiAuthTokenRotation({config,workDir,expectedImage,enviro
       await assertTimerState('active','enabled');
     }finally{await rm(completed.candidateRoot,{recursive:true,force:true});}
   }finally{await rm(candidate.candidateRoot,{recursive:true,force:true});}
+  if(!stateBeforePause.paused){
+    run('sh',[path.join(SOURCE_ROOT,'deploy/updater/codexia-updater'),'resume',configPath],{env:environment});
+  }
 }
 
 async function main() {
