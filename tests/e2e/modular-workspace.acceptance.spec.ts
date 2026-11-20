@@ -1169,9 +1169,15 @@ test("mobile outline sheet reveals the current and adjacent rows at 320 and 390 
     await page.setViewportSize({ width, height: 844 });
     await page.goto(targetUrl);
     await expect(page.getByRole("heading", { name: target.title, exact: true })).toBeVisible();
+    await page.evaluate(() => {
+      const windowWithSheet = window as Window & { __referenceSheetPresented?: boolean };
+      windowWithSheet.__referenceSheetPresented = false;
+      document.addEventListener("ionModalDidPresent", () => { windowWithSheet.__referenceSheetPresented = true; }, { once: true });
+    });
     await page.getByRole("button", { name: "構成", exact: true }).click();
     const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
     await expect(sheet).toBeVisible();
+    await expect.poll(() => page.evaluate(() => (window as Window & { __referenceSheetPresented?: boolean }).__referenceSheetPresented)).toBe(true);
     const geometry = await sheet.locator(".mobile-shell-reference-content").evaluate(async (element) => {
       const scrollElement = await (element as HTMLIonContentElement).getScrollElement();
       const current = element.querySelector<HTMLElement>('.pg-outline-document[aria-current="page"]');
