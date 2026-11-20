@@ -1,5 +1,7 @@
 import type { ServerResponse } from "node:http";
 
+import { scheduleAtDeadline } from "./deadline-timer.js";
+
 export class EventStreams {
   private readonly streams = new Map<ServerResponse, { cleanup: () => void; end: () => void; expiresAt?: number }>();
 
@@ -32,11 +34,11 @@ export class EventStreams {
   open(response: ServerResponse, cacheControl: string, initialFrame?: string, expiresAt?: number): void {
     if (this.full) throw new Error("Event stream capacity exhausted");
     let heartbeat: ReturnType<typeof setInterval> | undefined;
-    let expiration: ReturnType<typeof setTimeout> | undefined;
+    let cancelExpiration: (() => void) | undefined;
     const cleanup = () => {
       this.streams.delete(response);
       clearInterval(heartbeat);
-      clearTimeout(expiration);
+      cancelExpiration?.();
     };
     const end = () => {
       cleanup();
@@ -59,8 +61,7 @@ export class EventStreams {
       heartbeat = setInterval(() => this.write(response, ": heartbeat\n\n"), this.heartbeatMs);
       heartbeat.unref();
       if (expiresAt !== undefined) {
-        expiration = setTimeout(end, Math.max(0, Math.min(2_147_483_647, expiresAt - Date.now())));
-        expiration.unref();
+        cancelExpiration = scheduleAtDeadline(expiresAt, end);
       }
     } catch { this.disconnect(response); }
   }
