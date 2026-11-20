@@ -260,7 +260,15 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const [knowledgeListError, setKnowledgeListError] = useState("");
   const [knowledgeListLoading, setKnowledgeListLoading] = useState(false);
   const [knowledgeListRetryEpoch, setKnowledgeListRetryEpoch] = useState(0);
+  const [knowledgeQuery, setKnowledgeQuery] = useState("");
+  const [knowledgeTypeFilter, setKnowledgeTypeFilter] = useState("");
+  const [knowledgeStatusFilter, setKnowledgeStatusFilter] = useState("");
+  const [knowledgeNextCursor, setKnowledgeNextCursor] = useState<string | null>(null);
+  const [knowledgeComplete, setKnowledgeComplete] = useState(false);
+  const [knowledgePageLoading, setKnowledgePageLoading] = useState(false);
+  const knowledgeBrowseSequenceRef = useRef(0);
   const [nodeId, setNodeId] = useState("");
+  const [selectedKnowledgeNode, setSelectedKnowledgeNode] = useState<KnowledgeNode | null>(null);
   const [nodeEvidence, setNodeEvidence] = useState<{ projectId: string; nodeId: string; evidence: PersistenceAnchorView[] } | null>(null);
   const [nodeEvidenceError, setNodeEvidenceError] = useState("");
   const [evidenceJump, setEvidenceJump] = useState<EvidenceJump>();
@@ -343,7 +351,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       return next;
     });
   }, [documents, documentId, projectId]);
-  const selectedNode = nodes.find((candidate) => candidate.id === nodeId && candidate.projectId === projectId) ?? null;
+  const selectedNode = nodes.find((candidate) => candidate.id === nodeId && candidate.projectId === projectId)
+    ?? (selectedKnowledgeNode?.id === nodeId && selectedKnowledgeNode.projectId === projectId ? selectedKnowledgeNode : null);
   const selectedNodeEvidence = nodeEvidence?.projectId === projectId && nodeEvidence.nodeId === selectedNode?.id ? nodeEvidence.evidence : null;
 
   const publishEditor = useCallback((next: ActiveDocument | null) => {
@@ -436,6 +445,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       setDocuments([]);
       setNodes([]);
       setNodeId("");
+      setSelectedKnowledgeNode(null);
       publishEditor(null);
     }
     void api.persistenceDocuments(projectId, undefined, controller.signal).then((documentResult) => {
@@ -456,9 +466,11 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
 
   useEffect(() => {
     if (sessionBlocked) return;
+    const sequence = ++knowledgeBrowseSequenceRef.current;
     if (!projectId) {
       setNodes([]);
       setNodeId("");
+      setSelectedKnowledgeNode(null);
       setKnowledgeListError("");
       setKnowledgeListLoading(false);
       return;
@@ -466,19 +478,47 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     const controller = new AbortController();
     setKnowledgeListError("");
     setKnowledgeListLoading(true);
-    void api.persistenceNodes(projectId, 500, controller.signal).then((result) => {
-      if (controller.signal.aborted || sessionBlockedRef.current || projectIdRef.current !== projectId) return;
+    setKnowledgePageLoading(false);
+    setKnowledgeNextCursor(null);
+    setKnowledgeComplete(false);
+    setNodes([]);
+    const delay = window.setTimeout(() => void api.persistenceKnowledgePage(projectId, {
+      q: knowledgeQuery, type: knowledgeTypeFilter, status: knowledgeStatusFilter,
+    }, controller.signal).then((result) => {
+      if (controller.signal.aborted || sequence !== knowledgeBrowseSequenceRef.current || sessionBlockedRef.current || projectIdRef.current !== projectId) return;
       setNodes(result.nodes);
-      setNodeId((current) => current && result.nodes.some((item) => item.id === current) ? current : "");
+      setKnowledgeNextCursor(result.nextCursor);
+      setKnowledgeComplete(result.nextCursor === null);
+      setKnowledgeListError("");
     }).catch((error: unknown) => {
-      if (!controller.signal.aborted && projectIdRef.current === projectId) {
+      if (!controller.signal.aborted && sequence === knowledgeBrowseSequenceRef.current && projectIdRef.current === projectId) {
         setKnowledgeListError(error instanceof Error ? error.message : "Knowledge一覧を読み込めませんでした。");
       }
     }).finally(() => {
-      if (!controller.signal.aborted && projectIdRef.current === projectId) setKnowledgeListLoading(false);
-    });
-    return () => controller.abort();
-  }, [projectId, knowledgeListRetryEpoch, resumeEpoch, sessionBlocked]);
+      if (!controller.signal.aborted && sequence === knowledgeBrowseSequenceRef.current && projectIdRef.current === projectId) setKnowledgeListLoading(false);
+    }), 200);
+    return () => { window.clearTimeout(delay); controller.abort(); };
+  }, [projectId, knowledgeQuery, knowledgeTypeFilter, knowledgeStatusFilter, knowledgeListRetryEpoch, resumeEpoch, sessionBlocked]);
+
+  const loadMoreKnowledge = useCallback(async () => {
+    if (!projectId || !knowledgeNextCursor || knowledgePageLoading) return;
+    const cursor = knowledgeNextCursor;
+    const selectedProjectId = projectId;
+    const sequence = knowledgeBrowseSequenceRef.current;
+    setKnowledgePageLoading(true);
+    try {
+      const result = await api.persistenceKnowledgePage(selectedProjectId, {
+        q: knowledgeQuery, type: knowledgeTypeFilter, status: knowledgeStatusFilter, cursor,
+      });
+      if (sequence !== knowledgeBrowseSequenceRef.current || projectIdRef.current !== selectedProjectId) return;
+      setNodes(current => [...current, ...result.nodes]);
+      setKnowledgeNextCursor(result.nextCursor);
+      setKnowledgeComplete(result.nextCursor === null);
+      setKnowledgeListError("");
+    } catch (error) {
+      if (sequence === knowledgeBrowseSequenceRef.current && projectIdRef.current === selectedProjectId) setKnowledgeListError(error instanceof Error ? error.message : "Knowledge一覧を読み込めませんでした。");
+    } finally { if (sequence === knowledgeBrowseSequenceRef.current && projectIdRef.current === selectedProjectId) setKnowledgePageLoading(false); }
+  }, [projectId, knowledgeNextCursor, knowledgePageLoading, knowledgeQuery, knowledgeTypeFilter, knowledgeStatusFilter]);
 
   useEffect(() => {
     if (sessionBlocked) return;
@@ -1349,6 +1389,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       });
       setNodes((current) => [...current, result.node].sort((a, b) => a.name.localeCompare(b.name, "ja")));
       setNodeId(result.node.id);
+      setSelectedKnowledgeNode(result.node);
       setKnowledgeName("");
       setNotice("Knowledge候補を保存しました。内容を確認してから確定してください。");
     } catch (error) {
@@ -1906,25 +1947,51 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             <button type="submit" disabled={!project || !knowledgeName.trim()}>候補を保存</button>
           </form>
           <label htmlFor="pg-knowledge-target">Text AnchorのKnowledge先</label>
-          <select id="pg-knowledge-target" value={nodeId} onChange={(event) => setNodeId(event.target.value)} disabled={nodes.length === 0}>
+          <select id="pg-knowledge-target" value={nodeId} onChange={(event) => setNodeId(event.target.value)} disabled={nodes.length === 0 && !selectedNode}>
             <option value="">Knowledgeを選択</option>
+            {selectedNode && !nodes.some(item => item.id === selectedNode.id) && <option value={selectedNode.id}>{selectedNode.name} · 選択中</option>}
             {nodes.map((node) => <option key={node.id} value={node.id}>{node.name} · {node.status === "confirmed" ? "確定" : node.status === "proposed" ? "候補" : "退役"}</option>)}
           </select>
         </details>
+          <search aria-label="Knowledgeを検索・絞り込み">
+            <form onSubmit={(event) => event.preventDefault()}>
+              <label htmlFor="pg-knowledge-search">名前または別名で検索</label>
+              <input id="pg-knowledge-search" type="search" maxLength={128} value={knowledgeQuery} onChange={event => setKnowledgeQuery(event.target.value)} placeholder="名前・別名" />
+              <label htmlFor="pg-knowledge-filter-type">種類で絞り込み</label>
+              <select id="pg-knowledge-filter-type" value={knowledgeTypeFilter} onChange={event => setKnowledgeTypeFilter(event.target.value)}>
+                <option value="">すべての種類</option><option value="person">人物</option><option value="place">場所</option><option value="event">出来事</option><option value="setting">設定</option><option value="term">用語</option>
+              </select>
+              <label htmlFor="pg-knowledge-filter-status">状態で絞り込み</label>
+              <select id="pg-knowledge-filter-status" value={knowledgeStatusFilter} onChange={event => setKnowledgeStatusFilter(event.target.value)}>
+                <option value="">すべての状態</option><option value="confirmed">作者確定</option><option value="proposed">未確認候補</option><option value="retired">退役</option>
+              </select>
+            </form>
+          </search>
+          <p role="status" aria-live="polite">
+            {knowledgeListLoading ? "Knowledgeを検索しています。" : knowledgeListError
+              ? `${nodes.length}件取得済み。Knowledgeの取得に失敗しました。`
+              : nodes.length === 0 && knowledgeComplete
+              ? "該当するKnowledgeはありません。"
+              : knowledgeComplete ? `すべての絞り込み結果を取得済み（${nodes.length}件）。`
+                : `${nodes.length}件取得済み。続きがあります。`}
+          </p>
           <ul className="pg-knowledge-list">
             {knowledgeListLoading && nodes.length === 0 && <li role="status">Knowledge一覧を読み込んでいます。</li>}
             {nodes.map((node) => <li key={node.id}>
-              <button type="button" className={node.id === nodeId ? "is-selected" : ""} onClick={() => setNodeId(node.id)}>
+              <button type="button" className={node.id === nodeId ? "is-selected" : ""} onClick={() => { setNodeId(node.id); setSelectedKnowledgeNode(node); }}>
                 <span>{node.name}</span><small>{knowledgeTypeLabel(node.type)} · {node.status === "confirmed" ? "作者確定" : node.status === "proposed" ? "未確認候補" : "退役"}</small>
               </button>
               {node.status === "proposed" && <button type="button" onClick={() => void confirmKnowledge(node)}>内容を確認して確定</button>}
             </li>)}
           </ul>
+          {knowledgeNextCursor && <button type="button" onClick={() => void loadMoreKnowledge()} disabled={knowledgePageLoading}>
+            {knowledgePageLoading ? "読み込み中…" : "続きのKnowledgeを読み込む"}
+          </button>}
           {knowledgeListError && <div className="pg-alert" role="alert">
             <p>Knowledge一覧を読み込めませんでした。{knowledgeListError}</p>
             <button type="button" onClick={() => setKnowledgeListRetryEpoch((value) => value + 1)} disabled={knowledgeListLoading}>再試行</button>
           </div>}
-          {selectedNode && <KnowledgeContextInspector key={selectedNode.id} node={selectedNode} nodes={nodes} documentId={active?.document.id} revisionId={active?.revision.id} clean={Boolean(active&&!active.dirty&&!active.remoteConflict&&active.save==="saved")} selectedEvidenceId={selectedEvidenceId??""} evidenceLoadKey={(active?.evidenceLoadKey??0)+nativeReviewEpoch} onOpenEvidence={(item)=>void openNodeEvidence(item)} onNodeUpdate={(updated)=>setNodes(current=>current.map(item=>item.id===updated.id?updated:item))} onMerge={(target,source)=>{setNodes(current=>current.filter(item=>item.id!==source.id).map(item=>item.id===target.id?target:item));setNodeId(target.id);setNotice("Knowledgeを統合しました。")}} />}
+          {selectedNode && <KnowledgeContextInspector key={selectedNode.id} node={selectedNode} nodes={nodes} documentId={active?.document.id} revisionId={active?.revision.id} clean={Boolean(active&&!active.dirty&&!active.remoteConflict&&active.save==="saved")} selectedEvidenceId={selectedEvidenceId??""} evidenceLoadKey={(active?.evidenceLoadKey??0)+nativeReviewEpoch} onOpenEvidence={(item)=>void openNodeEvidence(item)} onNodeUpdate={(updated)=>{setSelectedKnowledgeNode(updated);setNodes(current=>current.map(item=>item.id===updated.id?updated:item));}} onMerge={(target,source)=>{setSelectedKnowledgeNode(target);setNodes(current=>current.filter(item=>item.id!==source.id).map(item=>item.id===target.id?target:item));setNodeId(target.id);setNotice("Knowledgeを統合しました。")}} />}
           {selectedNode && <section aria-label="Knowledgeの根拠">
             <h3>{selectedNode.name}の根拠</h3>
             {nodeEvidenceError && <p role="alert">{nodeEvidenceError}</p>}

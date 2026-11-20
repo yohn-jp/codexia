@@ -29,6 +29,7 @@ import {
   type JsonObject,
   type KnowledgeAlias,
   type KnowledgeNode,
+  type KnowledgeNodeSearch,
   type KnowledgeNodeId,
   type KnowledgeProjectionBatch,
   type KnowledgeProjectionBatchLimits,
@@ -669,6 +670,27 @@ class PostgresTransaction implements PersistenceTransaction {
     const result = await this.query(
       "SELECT * FROM knowledge_node WHERE project_id = $1 AND deleted_at IS NULL ORDER BY name, id LIMIT $2",
       [projectId, limit],
+    );
+    return result.rows.map(mapKnowledgeNode);
+  }
+
+  async searchKnowledgeNodes(projectId: ProjectId, search: KnowledgeNodeSearch): Promise<readonly KnowledgeNode[]> {
+    if (!Number.isInteger(search.limit) || search.limit < 1 || search.limit > 101) throw validationError("Knowledge search page size must be between 1 and 101");
+    const query = search.query?.toLocaleLowerCase("en-US");
+    const escaped = query?.replace(/[!%_]/gu, "!$&");
+    const result = await this.query(
+      `SELECT n.* FROM knowledge_node n
+       WHERE n.project_id = $1 AND n.deleted_at IS NULL
+         AND ($2::text IS NULL OR lower(n.name) LIKE '%' || $2 || '%' ESCAPE '!'
+           OR EXISTS (SELECT 1 FROM knowledge_alias a WHERE a.project_id = n.project_id AND a.node_id = n.id
+             AND a.status IN ('proposed','confirmed','ambiguous')
+             AND lower(a.surface) LIKE '%' || $2 || '%' ESCAPE '!'))
+         AND ($3::text IS NULL OR n.type = $3)
+         AND ($4::text IS NULL OR n.status = $4)
+         AND ($5::text IS NULL OR (lower(n.name), n.id) > ($5, $6::uuid))
+       ORDER BY lower(n.name), n.id LIMIT $7`,
+      [projectId, escaped ?? null, search.type ?? null, search.status ?? null,
+        search.after?.name.toLocaleLowerCase("en-US") ?? null, search.after?.id ?? null, search.limit],
     );
     return result.rows.map(mapKnowledgeNode);
   }

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { Persistence, ProjectId } from "@codexia/persistence-contracts";
 import { handlePersistenceRoute } from "./persistence-routes.js";
@@ -80,4 +81,41 @@ test("persistence status reports database health and knowledge lists are bounded
     url: `/api/v1/persistence/projects/${projectId}/nodes?limit=501`,
   });
   assert.equal(overLimit?.status, 400);
+});
+
+test("Knowledge browse returns a filter-bound page cursor and rejects stale project snapshots", async () => {
+  const projectId = randomUUID() as ProjectId;
+  const ids = [randomUUID(), randomUUID(), randomUUID()];
+  let projectVersion = 7;
+  const requested: Array<{ limit: number; after?: { name: string; id: string } }> = [];
+  const persistence = {
+    async read<T>(work: (reader: unknown) => Promise<T>) {
+      return work({
+        async getProject(selectedProjectId: ProjectId) { assert.equal(selectedProjectId, projectId); return { id: projectId, version: projectVersion }; },
+        async searchKnowledgeNodes(_selectedProjectId: ProjectId, search: { limit: number; after?: { name: string; id: string } }) {
+          requested.push(search);
+          const nodes = ids.map((id, index) => ({ id, projectId, type: "person", name: `Node ${index}`, attributes: {}, status: "confirmed", version: 1, deletedAt: null, createdAt: "now", updatedAt: "now" }));
+          return nodes.slice(search.after ? 1 : 0, search.after ? 2 : 2);
+        },
+      });
+    },
+  } as unknown as Persistence;
+  const base = { persistence, body: null, requestHeaders: {}, async requireAuthor() { return "author"; } };
+  const first = await handlePersistenceRoute({ ...base, method: "GET", url: `/api/v1/persistence/projects/${projectId}/nodes?q=deep&limit=1` });
+  assert.equal(first?.status, 200);
+  const firstBody = first?.body as { nodes: Array<{ id: string }>; nextCursor: string | null; projectVersion: number };
+  assert.equal(firstBody.nodes.length, 1);
+  assert.ok(firstBody.nextCursor);
+  assert.equal(firstBody.projectVersion, 7);
+  const second = await handlePersistenceRoute({ ...base, method: "GET", url: `/api/v1/persistence/projects/${projectId}/nodes?q=deep&limit=1&cursor=${firstBody.nextCursor}` });
+  assert.equal(second?.status, 200);
+  assert.deepEqual(requested[1]?.after, { name: "Node 0", id: ids[0] });
+  assert.equal((second?.body as { nodes: Array<{ id: string }> }).nodes[0]?.id, ids[1]);
+  const mismatched = await handlePersistenceRoute({ ...base, method: "GET", url: `/api/v1/persistence/projects/${projectId}/nodes?q=other&cursor=${firstBody.nextCursor}` });
+  assert.equal(mismatched?.status, 400);
+  const tooLong = await handlePersistenceRoute({ ...base, method: "GET", url: `/api/v1/persistence/projects/${projectId}/nodes?q=${"x".repeat(129)}` });
+  assert.equal(tooLong?.status, 400);
+  projectVersion += 1;
+  const stale = await handlePersistenceRoute({ ...base, method: "GET", url: `/api/v1/persistence/projects/${projectId}/nodes?q=deep&cursor=${firstBody.nextCursor}` });
+  assert.equal(stale?.status, 409);
 });

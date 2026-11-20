@@ -77,11 +77,13 @@ export function KnowledgeContextInspector({
   const [busy, setBusy] = useState(false);
   const [reload, setReload] = useState(0);
   const [mergeTarget, setMergeTarget] = useState("");
+  const [mergeTargetNode, setMergeTargetNode] = useState<KnowledgeNode | null>(null);
   const [mergePreview, setMergePreview] = useState<Awaited<ReturnType<typeof api.previewPersistenceMerge>> | null>(null);
   const [mergeConfirm, setMergeConfirm] = useState(false);
   const [storyEntityId, setStoryEntityId] = useState(String(node.attributes.storyEntityId ?? ""));
   const [surface, setSurface] = useState("");
   const [target, setTarget] = useState("");
+  const [targetNode, setTargetNode] = useState<KnowledgeNode | null>(null);
   const [relationType, setRelationType] = useState("");
   const [statement, setStatement] = useState("");
   const [modality, setModality] = useState<Modality>("fact");
@@ -286,7 +288,8 @@ export function KnowledgeContextInspector({
           />
           <details className="kci__edit-disclosure"><summary>関係を追加</summary><form className="kci__form kci__form--relation" onSubmit={(event) => {
             event.preventDefault();
-            const other = nodes.find((candidate) => candidate.id === target && candidate.projectId === projectId && candidate.status !== "retired");
+            const other = nodes.find((candidate) => candidate.id === target && candidate.projectId === projectId && candidate.status !== "retired")
+              ?? (targetNode?.id === target && targetNode.projectId === projectId && targetNode.status !== "retired" ? targetNode : undefined);
             if (!other) return;
             void mutate(async () => {
               await api.savePersistenceRelation(projectId, node.id, {
@@ -300,6 +303,7 @@ export function KnowledgeContextInspector({
               });
               setRelationType("");
               setTarget("");
+              setTargetNode(null);
             });
           }}>
             <p className="kci__form-title">関係候補を登録</p>
@@ -307,8 +311,9 @@ export function KnowledgeContextInspector({
               <input value={relationType} onChange={(event) => setRelationType(event.target.value)} maxLength={128} required />
             </label>
             <label className="kci__field">関係先
-              <select value={target} onChange={(event) => setTarget(event.target.value)} required>
+              <select value={target} onChange={(event) => { const id = event.target.value; setTarget(id); setTargetNode(nodes.find(candidate => candidate.id === id) ?? null); }} required>
                 <option value="">Knowledgeを選択</option>
+                {targetNode && targetNode.id === target && !nodes.some(candidate => candidate.id === targetNode.id) && <option value={targetNode.id}>{targetNode.name} · {targetNode.type} · 選択中</option>}
                 {nodes.filter((candidate) => candidate.id !== node.id && candidate.projectId === projectId && candidate.status !== "retired").map((candidate) => <option value={candidate.id} key={candidate.id}>{candidate.name} · {candidate.type} · {candidate.status}</option>)}
               </select>
             </label>
@@ -413,10 +418,12 @@ export function KnowledgeContextInspector({
           <label className="kci__field">統合先
             <select value={mergeTarget} onChange={(event) => {
               setMergeTarget(event.target.value);
+              setMergeTargetNode(nodes.find(candidate => candidate.id === event.target.value) ?? null);
               setMergePreview(null);
               setMergeConfirm(false);
             }}>
               <option value="">選択</option>
+              {mergeTargetNode && mergeTargetNode.id === mergeTarget && !nodes.some(candidate => candidate.id === mergeTargetNode.id) && <option value={mergeTargetNode.id}>{mergeTargetNode.name} · {mergeTargetNode.type} · {mergeTargetNode.id}</option>}
               {nodes.filter((candidate) => candidate.id !== node.id && candidate.type === node.type && candidate.status === "confirmed" && !candidate.deletedAt).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} · {candidate.type} · {candidate.id}</option>)}
             </select>
           </label>

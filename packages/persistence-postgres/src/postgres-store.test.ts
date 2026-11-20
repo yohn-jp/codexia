@@ -11,6 +11,7 @@ import {
   type DocumentId,
   type EvidenceId,
   type KnowledgeNodeId,
+  type KnowledgeAliasId,
   type KnowledgeProjectionBatch,
   type ProjectId,
   type RevisionId,
@@ -228,6 +229,46 @@ test("PostgreSQL health checks and Knowledge lists use the canonical project rec
   const nodes = await persistence.read((reader) => reader.listKnowledgeNodes(project.id));
   assert.deepEqual(nodes.map((node) => node.name), ["Apple", "Zebra"]);
   assert.deepEqual((await persistence.read((reader) => reader.listKnowledgeNodes(project.id, 1))).map((node) => node.name), ["Apple"]);
+});
+
+test("Knowledge browse searches literals and aliases, pages 501 nodes in stable order, and stays project scoped", async () => {
+  const project = await createProject(`knowledge-browse-${randomUUID()}`);
+  const otherProject = await createProject(`knowledge-browse-decoy-${randomUUID()}`);
+  const ids = Array.from({ length: 501 }, () => randomUUID() as KnowledgeNodeId);
+  await persistence.transaction(async transaction => {
+    for (let index = 0; index < ids.length; index += 1) {
+      await transaction.saveKnowledgeNode({ projectId: project.id, id: ids[index]!, type: index % 2 ? "person" : "place",
+        name: `Browse ${String(index).padStart(4, "0")}`, attributes: {}, status: index % 2 ? "confirmed" : "proposed", expectedVersion: null });
+    }
+    await transaction.saveKnowledgeAlias({ projectId: project.id, id: randomUUID() as KnowledgeAliasId, nodeId: ids[500]!,
+      surface: "Literal%_!Alias", normalized: "literal%_!alias", scope: null, status: "confirmed" });
+    const decoyId = randomUUID() as KnowledgeNodeId;
+    await transaction.saveKnowledgeNode({ projectId: otherProject.id, id: decoyId, type: "person", name: "Unrelated", attributes: {}, status: "confirmed", expectedVersion: null });
+    await transaction.saveKnowledgeAlias({ projectId: otherProject.id, id: randomUUID() as KnowledgeAliasId, nodeId: decoyId,
+      surface: "Literal%_!Alias", normalized: "literal%_!alias", scope: null, status: "confirmed" });
+  });
+
+  const loaded: string[] = [];
+  let after: { name: string; id: KnowledgeNodeId } | undefined;
+  for (;;) {
+    const page = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { limit: 101, after }));
+    loaded.push(...page.map(node => node.id));
+    if (page.length < 101) break;
+    const last = page.at(-1)!;
+    after = { name: last.name, id: last.id };
+  }
+  assert.equal(loaded.length, 501);
+  assert.equal(new Set(loaded).size, 501);
+  assert.deepEqual(loaded, ids);
+  const literal = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { query: "%_!", limit: 10 }));
+  assert.deepEqual(literal.map(node => node.id), [ids[500]]);
+  const alias = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { query: "literal%_!alias", limit: 10 }));
+  assert.deepEqual(alias.map(node => node.id), [ids[500]]);
+  const scoped = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { query: "Unrelated", limit: 10 }));
+  assert.deepEqual(scoped, []);
+  const filtered = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { type: "person", status: "confirmed", limit: 10 }));
+  assert.ok(filtered.length > 0);
+  assert.ok(filtered.every(node => node.type === "person" && node.status === "confirmed"));
 });
 
 test("database foreign keys prevent Knowledge relations from crossing projects", async () => {
