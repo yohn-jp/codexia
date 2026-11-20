@@ -69,7 +69,36 @@ export interface PersistenceDraftEntry {
   baseMarkdown: string;
   markdown: string;
   generation: number;
+  /** Exact server operation whose response may have been lost. */
+  pendingSave?: PersistenceDraftOperation;
   updatedAt: number;
+}
+
+export interface PersistenceDraftOperation {
+  baseRevisionId: string;
+  baseMarkdown: string;
+  markdown: string;
+  /** Exact UTF-16 patch submitted to PostgreSQL for this operation. */
+  changes: Array<{ from: number; to: number; insert: string }>;
+  generation: number;
+  idempotencyKey: string;
+  clientId: string;
+}
+
+export interface PersistenceDraftSaveAcknowledgement {
+  acknowledged: boolean;
+  draft?: PersistenceDraftEntry;
+}
+
+function samePersistenceDraftOperation(left: PersistenceDraftOperation | undefined, right: PersistenceDraftOperation): boolean {
+  return Boolean(left && typeof left === "object" && typeof left.baseRevisionId === "string" && typeof left.baseMarkdown === "string" &&
+    typeof left.markdown === "string" && Number.isSafeInteger(left.generation) && typeof left.idempotencyKey === "string" &&
+    typeof left.clientId === "string" && Array.isArray(left.changes) && left.changes.every((change) => Boolean(change && typeof change === "object" &&
+      Number.isSafeInteger(change.from) && Number.isSafeInteger(change.to) && typeof change.insert === "string")) &&
+    left.baseRevisionId === right.baseRevisionId && left.baseMarkdown === right.baseMarkdown &&
+    left.markdown === right.markdown && left.generation === right.generation && left.idempotencyKey === right.idempotencyKey &&
+    left.clientId === right.clientId && left.changes.length === right.changes.length &&
+    left.changes.every((change, index) => change.from === right.changes[index]?.from && change.to === right.changes[index]?.to && change.insert === right.changes[index]?.insert));
 }
 
 export function persistenceDraftKey(projectId: string, documentId: string, authorScope: string): string {
@@ -259,7 +288,7 @@ export class BrowserJournal {
   }
 
   /** Persist PostgreSQL recovery state before attempting any remote write. */
-  async putPersistenceDraft(entry: Omit<PersistenceDraftEntry, "version" | "key" | "updatedAt">): Promise<boolean> {
+  async putPersistenceDraft(entry: Omit<PersistenceDraftEntry, "version" | "key" | "updatedAt" | "pendingSave">): Promise<boolean> {
     try {
       if (!entry.projectId || !entry.documentId || !entry.authorScope || !entry.baseRevisionId ||
           !Number.isSafeInteger(entry.generation) || entry.generation < 1) {
@@ -275,11 +304,84 @@ export class BrowserJournal {
         await done;
         return sameGeneration;
       }
-      store.put({ ...entry, version: 1, key, updatedAt: Date.now() } satisfies PersistenceDraftEntry);
+      store.put({ ...entry, ...(existing?.pendingSave ? { pendingSave: existing.pendingSave } : {}), version: 1, key, updatedAt: Date.now() } satisfies PersistenceDraftEntry);
       await done;
       return true;
     } catch (error) {
       if (error instanceof JournalError) throw error;
+      throw storageMessage(error, "database draft");
+    }
+  }
+
+  /** Bind the save identity to the exact durable draft before sending it. */
+  async bindPersistenceDraftSave(projectId: string, documentId: string, authorScope: string, operation: PersistenceDraftOperation): Promise<boolean> {
+    const key = persistenceDraftKey(projectId, documentId, authorScope);
+    try {
+      const transaction = this.database.transaction(PERSISTENCE_DRAFT_STORE, "readwrite", { durability: "strict" });
+      const done = transactionDone(transaction);
+      const store = transaction.objectStore(PERSISTENCE_DRAFT_STORE);
+      const existing = await requestValue(store.get(key)) as PersistenceDraftEntry | undefined;
+      const sameLineage = Boolean(existing && existing.generation >= operation.generation && existing.baseRevisionId === operation.baseRevisionId &&
+        existing.baseMarkdown === operation.baseMarkdown && existing.pendingSave && samePersistenceDraftOperation(existing.pendingSave, operation));
+      if (sameLineage) { await done; return true; }
+      const sameDraft = existing?.generation === operation.generation && existing.baseRevisionId === operation.baseRevisionId &&
+        existing.baseMarkdown === operation.baseMarkdown && existing.markdown === operation.markdown;
+      if (!existing || !sameDraft || existing.pendingSave) { await done; return false; }
+      store.put({ ...existing, pendingSave: operation, updatedAt: Date.now() });
+      await done;
+      return true;
+    } catch (error) {
+      throw storageMessage(error, "database draft");
+    }
+  }
+
+  /** Acknowledge only the exact operation, rebasing a newer draft atomically when possible. */
+  async acknowledgePersistenceDraftSave(projectId: string, documentId: string, authorScope: string, operation: PersistenceDraftOperation, revisionId: string, rebaseNewerDraft = true): Promise<PersistenceDraftSaveAcknowledgement> {
+    const key = persistenceDraftKey(projectId, documentId, authorScope);
+    try {
+      const transaction = this.database.transaction(PERSISTENCE_DRAFT_STORE, "readwrite", { durability: "strict" });
+      const done = transactionDone(transaction);
+      const store = transaction.objectStore(PERSISTENCE_DRAFT_STORE);
+      const existing = await requestValue(store.get(key)) as PersistenceDraftEntry | undefined;
+      if (!existing || !samePersistenceDraftOperation(existing.pendingSave, operation)) { await done; return { acknowledged: false }; }
+      const exactDraft = existing.generation === operation.generation && existing.baseRevisionId === operation.baseRevisionId &&
+        existing.baseMarkdown === operation.baseMarkdown && existing.markdown === operation.markdown;
+      if (exactDraft) {
+        store.delete(key);
+        await done;
+        return { acknowledged: true };
+      }
+      const draft = { ...existing };
+      delete draft.pendingSave;
+      const sameLineage = rebaseNewerDraft && existing.generation > operation.generation && existing.baseRevisionId === operation.baseRevisionId && existing.baseMarkdown === operation.baseMarkdown;
+      const updated: PersistenceDraftEntry = {
+        ...draft,
+        ...(sameLineage ? { baseRevisionId: revisionId, baseMarkdown: operation.markdown, generation: existing.generation + 1 } : {}),
+        updatedAt: Date.now(),
+      };
+      store.put(updated);
+      await done;
+      return { acknowledged: true, draft: updated };
+    } catch (error) {
+      throw storageMessage(error, "database draft");
+    }
+  }
+
+  /** Drop a definitively rejected operation without disturbing the recovery draft. */
+  async clearPersistenceDraftSave(projectId: string, documentId: string, authorScope: string, operation: PersistenceDraftOperation): Promise<boolean> {
+    const key = persistenceDraftKey(projectId, documentId, authorScope);
+    try {
+      const transaction = this.database.transaction(PERSISTENCE_DRAFT_STORE, "readwrite", { durability: "strict" });
+      const done = transactionDone(transaction);
+      const store = transaction.objectStore(PERSISTENCE_DRAFT_STORE);
+      const existing = await requestValue(store.get(key)) as PersistenceDraftEntry | undefined;
+      if (!existing || !samePersistenceDraftOperation(existing.pendingSave, operation)) { await done; return false; }
+      const draft = { ...existing };
+      delete draft.pendingSave;
+      store.put({ ...draft, updatedAt: Date.now() });
+      await done;
+      return true;
+    } catch (error) {
       throw storageMessage(error, "database draft");
     }
   }
