@@ -451,6 +451,77 @@ test("scratch still protects text and accepts a new image after an oversized att
   await expect.poll(async () => (await scratchRecords(page)).find((r) => r.key.includes(f.one.document.id))?.text).toContain("replacement.png");
 });
 
+test("an untouched or stale tab cannot overwrite protected scratch text and images", async ({ page, context }) => {
+  const f = await fixture(page);
+  const second = await context.newPage();
+  try {
+    await second.goto(page.url());
+    await expectEditor(second, f.one.revision.markdown);
+    await scratch(second);
+    await expect(memo(second)).toBeEnabled();
+    await scratch(page);
+    await memo(page).fill("First tab's protected text.");
+    await image(page).setInputFiles(png);
+    await expect.poll(async () => (await scratchRecords(page)).find((r) => r.key.includes(f.one.document.id))?.text).toContain(png.name);
+    await second.getByRole("button", { name: "読む", exact: true }).click();
+    await expect(second.getByRole("region", { name: "原稿の閲覧" })).toBeVisible();
+    await second.reload();
+    await expectEditor(second, f.one.revision.markdown);
+    await scratch(second);
+    await expect(memo(second)).toHaveValue("First tab's protected text.");
+    await expect(second.locator(".scratch-panel").getByRole("img", { name: png.name })).toBeVisible();
+
+    await memo(page).fill("First tab's newer protected text.");
+    await expect.poll(async () => (await scratchRecords(page)).find((r) => r.key.includes(f.one.document.id))?.text).toContain("newer protected text");
+    await memo(second).fill("Second tab's stale edit.");
+    await expect(second.locator(".scratch-panel").getByRole("alert")).toContainText("別タブ");
+    await expect(memo(second)).toHaveValue("Second tab's stale edit.");
+    await page.reload();
+    await expectEditor(page, f.one.revision.markdown);
+    await scratch(page);
+    await expect(memo(page)).toHaveValue("First tab's newer protected text.");
+    await expect(page.locator(".scratch-panel").getByRole("img", { name: png.name })).toBeVisible();
+  } finally {
+    await second.close();
+  }
+});
+
+test("navigation does not replace a scratch record while it is loading or unreadable", async ({ page }) => {
+  const f = await fixture(page);
+  await scratch(page);
+  await memo(page).fill("Protected scratch before simulating read failure.");
+  const record = () => scratchRecords(page).then((records) => records.find((item) => item.key.includes(f.one.document.id)));
+  await expect.poll(async () => (await record())?.text).toContain("Protected scratch");
+  const original = await record();
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("hold-scratch-read") !== "1") return;
+    const get = IDBObjectStore.prototype.get;
+    IDBObjectStore.prototype.get = function (query) {
+      const request = get.call(this, query);
+      if (this.name === "pgScratch") Object.defineProperty(request, "onsuccess", { set() {} });
+      return request;
+    };
+  });
+  await page.evaluate(() => sessionStorage.setItem("hold-scratch-read", "1"));
+  await page.reload();
+  await expectEditor(page, f.one.revision.markdown);
+  await scratch(page);
+  await expect(memo(page)).toBeDisabled();
+  await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+  await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
+  expect(await record()).toMatchObject(original!);
+  await page.evaluate(() => sessionStorage.removeItem("hold-scratch-read"));
+  const unreadable = { ...original, text: "Malformed original recovery bytes" };
+  await writeRecords(page, [unreadable], "pgScratch");
+  await page.goto(`/desktop/projects/${f.projectId}/scenes/${f.one.document.id}`);
+  await expectEditor(page, f.one.revision.markdown);
+  await scratch(page);
+  await expect(page.locator(".scratch-panel").getByRole("alert")).toBeVisible();
+  await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+  await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
+  expect(await record()).toMatchObject(unreadable);
+});
+
 test("resuming an older scratch generation cannot replace newer unprotected input", async ({ page }) => {
   await fixture(page); await scratch(page); await memo(page).fill("Protected older scratch generation.");
   await editor(page).click(); await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Protected older scratch generation."))).toBe(true);

@@ -728,14 +728,21 @@ export class BrowserJournal {
     }
   }
 
-  async putScratch(projectId: string, path: string, text: string, authorScope: string): Promise<void> {
+  async putScratch(projectId: string, path: string, text: string, authorScope: string, expectedText: string): Promise<boolean> {
     if (!authorScope) throw new JournalError("The scratch note has no author identity scope.");
     const record: ScratchRecord = { key: JSON.stringify([documentKey(projectId, path), authorScope]), text, updatedAt: Date.now() };
     try {
       const transaction = this.database.transaction(SCRATCH_STORE, "readwrite", { durability: "strict" });
       const done = transactionDone(transaction);
-      transaction.objectStore(SCRATCH_STORE).put(record);
+      const store = transaction.objectStore(SCRATCH_STORE);
+      const existing = await requestValue(store.get(record.key)) as ScratchRecord | undefined;
+      if ((existing?.text ?? "") !== expectedText) {
+        await done;
+        return false;
+      }
+      store.put(record);
       await done;
+      return true;
     } catch (error) {
       throw storageMessage(error, "scratch note");
     }
