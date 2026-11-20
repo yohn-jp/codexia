@@ -72,6 +72,31 @@ function documentKindLabel(kind: string): string {
   }
 }
 
+function documentMoveTargets(documents: PersistenceDocument[], selected: PersistenceDocument): Array<{ id: string; label: string }> {
+  const byId = new Map<string, PersistenceDocument>(documents
+    .filter((document) => document.projectId === selected.projectId)
+    .map((document) => [document.id, document]));
+  const targets: Array<{ id: string; label: string }> = [];
+  const labelCounts = new Map<string, number>();
+  for (const target of byId.values()) {
+    const visited = new Set<string>();
+    const names: string[] = [];
+    let ancestor: PersistenceDocument | undefined = target;
+    while (ancestor && ancestor.id !== selected.id && !visited.has(ancestor.id)) {
+      visited.add(ancestor.id);
+      if (names.length < 3) names.push(ancestor.title);
+      ancestor = ancestor.parentId ? byId.get(ancestor.parentId) : undefined;
+    }
+    if (ancestor) continue;
+    const prefix = visited.size > names.length ? "… / " : "";
+    const label = prefix + names.reverse().join(" / ") + " · " + documentKindLabel(target.kind);
+    labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
+    targets.push({ id: target.id, label });
+  }
+  return targets.map((target) => labelCounts.get(target.label) === 1
+    ? target : { ...target, label: target.label + " · " + target.id });
+}
+
 function knowledgeTypeLabel(type: string): string {
   const labels: Record<string, string> = {
     person: "人物", character: "人物", place: "場所", event: "出来事",
@@ -278,6 +303,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const selectedDocument = documents.find((candidate) => candidate.id === documentId) ?? null;
   const canCreateDocument = outlineReadyProject === projectId && !!projectId && documents.length < 999;
   const documentOutline = useMemo(() => buildDocumentOutline(documents), [documents]);
+  const activeDocument = active?.document;
+  const moveTargets = useMemo(() => activeDocument ? documentMoveTargets(documents, activeDocument) : [], [documents, activeDocument]);
+  const moveTargetAvailable = !moveParent || moveTargets.some((target) => target.id === moveParent);
   useEffect(() => {
     if (!documentId || !projectId) {
       lastOutlineSelectionRef.current = "";
@@ -1656,7 +1684,15 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           </details>
           {active && <details><summary>選択文書の構成を変更</summary>
             <form onSubmit={(event) => { event.preventDefault(); if (renameTitle.trim()) void editStructure({ title: renameTitle.trim() }); }}><label htmlFor="pg-rename">新しい文書名</label><input id="pg-rename" value={renameTitle} onChange={(event) => setRenameTitle(event.target.value)} required maxLength={256} /><button type="submit">文書名を変更</button></form>
-            <form onSubmit={(event) => { event.preventDefault(); void editStructure({ parentId: moveParent || null }); }}><label htmlFor="pg-move">移動先</label><select id="pg-move" value={moveParent} onChange={(event) => setMoveParent(event.target.value)}><option value="">作品の直下</option>{documents.filter((item) => item.id !== active.document.id).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select><button type="submit">文書を移動</button></form>
+            <form onSubmit={(event) => { event.preventDefault(); if (moveTargetAvailable) void editStructure({ parentId: moveParent || null }); }}>
+              <label htmlFor="pg-move">移動先</label>
+              <select id="pg-move" value={moveParent} onChange={(event) => setMoveParent(event.target.value)}>
+                <option value="">作品の直下</option>
+                {!moveTargetAvailable && <option value={moveParent} disabled>選んだ移動先は利用できません</option>}
+                {moveTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}
+              </select>
+              <button type="submit" disabled={!moveTargetAvailable}>文書を移動</button>
+            </form>
             <form onSubmit={(event) => { event.preventDefault(); void editStructure({ orderKey: String(orderRank).padStart(8, "0") }); }}><label htmlFor="pg-order">並び順</label><input id="pg-order" type="number" min="0" max="99999999" value={orderRank} onChange={(event) => setOrderRank(Number(event.target.value))} /><button type="submit">並び順を変更</button></form>
             <button type="button" onClick={() => { if (window.confirm(`「${active.document.title}」を削除しますか？保存済みRevisionは保持されます。`)) void editStructure({}, true); }}>文書を削除</button>
           </details>}
