@@ -261,8 +261,6 @@ export async function transitionRuntimeWriter({currentHost,targetHost,slot,relea
 }
 
 export async function transitionAuthTokenWriter({host,state,oldToken,newToken,snapshot,verify}){
-  let phase='admission checks';
-  try{
   const slot=state?.journal?.active?.slot;
   assert.ok(['blue','green'].includes(slot),'API token rotation requires the committed writer slot');
   assert.equal(state.journal.active.image,state.installed?.image,'Committed writer image differs from release');
@@ -270,25 +268,15 @@ export async function transitionAuthTokenWriter({host,state,oldToken,newToken,sn
   validateStandaloneAuthToken(newToken);
   assert.ok(oldToken.replace(/\n$/u,'')!==newToken.replace(/\n$/u,''),'Replacement API token must differ from the current token');
   assert.equal(typeof verify,'function','API token rotation verification is unavailable');
-  phase='route block';
   await host.route('blocked');
-  phase='writer stop';
   await host.stopWriter(slot);
-  phase='secret replacement';
   await host.replaceApiAuthToken(newToken,snapshot);
-  phase='writer start';
   await host.startWriter(slot,state.installed);
-  phase='writer and token verification';
   await host.verifyWriterUnits(state);
   await host.verifyApiAuthToken(slot,newToken,200);
   await host.verifyApiAuthToken(slot,oldToken,401);
-  phase='route restore';
   await host.route(slot);
-  phase='final serving verification';
   await verify();
-  }catch(error){
-    throw Error(`API token rotation failed during ${phase}`,{cause:error});
-  }
 }
 
 /** Restore only the journal-owned writer after a credential-only interruption.
@@ -762,21 +750,14 @@ async function recoverPasswordRotation({config,store,publicKey,marker,markerPath
 }
 
 async function finishApiAuthTokenRotation({config,state,host,controller,marker,markerPath,snapshot,previousToken,replacementToken,recovering}){
-  let phase='control unit verification';
-  try{
   await assertRotationControlUnits(config);
-  phase='polling stop';
   await stopTimerPolling();
   if(recovering){
-    phase='interrupted writer recovery';
     await recoverApiAuthTokenWriter({host,controller,state,snapshot,previousToken,replacementToken});
     assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed during API token recovery');
-    phase='polling restore';
     await restoreTimerPolling(marker.timer);
     marker.phase='rolled-back';
-    phase='recovery marker update';
     await atomicWrite(markerPath,JSON.stringify(marker)+'\n');
-    phase='snapshot cleanup';
     await clearApiAuthTokenRotationSnapshot({config,marker,markerPath}).catch(()=>undefined);
   }else{
     const verify=async()=>{
@@ -785,22 +766,15 @@ async function finishApiAuthTokenRotation({config,state,host,controller,marker,m
       await controller.assertServing(state,state.journal.active.slot,state.installed);
       assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed during API token rotation');
     };
-    phase='writer transition';
     await transitionAuthTokenWriter({host,state,oldToken:previousToken,newToken:replacementToken,snapshot,verify});
     assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed during API token rotation');
-    phase='polling restore';
     await restoreTimerPolling(marker.timer);
     marker.phase='completed';
-    phase='completion marker update';
     await atomicWrite(markerPath,JSON.stringify(marker)+'\n');
     // A SIGKILL after the durable completion marker is finalized by boot
     // recovery against the replacement secret; rollback credentials are no
     // longer needed after both direct auth probes and serving readiness pass.
     await clearApiAuthTokenRotationSnapshot({config,marker,markerPath}).catch(()=>undefined);
-  }
-  }catch(error){
-    if(error instanceof Error&&error.message.startsWith('API token rotation failed during '))throw error;
-    throw Error(`API token rotation failed during ${phase}`,{cause:error});
   }
 }
 
@@ -903,7 +877,7 @@ async function rotateApiAuthToken({config,manifest,manifestPath,serviceHome,stat
       try{await host.verifyApiAuthToken(state.journal.active.slot,previousToken,200);}
       catch(recoveryError){throw new AggregateError([rotationError,recoveryError],'API token rotation outcome could not be verified; recovery remains blocked');}
     }
-    throw Error(`${rotationError.message}; the previous token and serving release were restored`,{cause:rotationError});
+    throw Error('API token rotation failed; the previous token and serving release were restored',{cause:rotationError});
   }
   return {format:'codexia-updater-maintenance/v1',apiAuthTokenRotated:true};
 }

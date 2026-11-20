@@ -585,9 +585,9 @@ async function createApiAuthTokenCandidate({config,token}){
   return {candidateRoot,manifestPath};
 }
 
-async function runApiAuthTokenRotationCandidate({candidate,configPath,environment,killAtSecretCreate=false,killAtCompletedMarker=false}){
+async function runApiAuthTokenRotationCandidate({repoRoot,candidate,configPath,environment,killAtSecretCreate=false,killAtCompletedMarker=false}){
   const wrapper=path.join(SOURCE_ROOT,'deploy/updater/codexia-updater');
-  const preload=path.join(SOURCE_ROOT,'deploy/updater/test-standalone-maintenance-preload.mjs');
+  const preload=path.join(repoRoot,'deploy/updater/test-standalone-maintenance-preload.mjs');
   let env={...environment,CODEXIA_RUNTIME_MAINTENANCE_AUTH_TOKEN_ROTATION:'yes',
     NODE_OPTIONS:[environment.NODE_OPTIONS,`--import=${preload}`].filter(Boolean).join(' ')};
   let observedFile;
@@ -635,12 +635,8 @@ async function runApiAuthTokenRotationCandidate({candidate,configPath,environmen
     assert.equal(child.signal,'SIGKILL','API token fault injection did not terminate after secret creation');
     assert.equal((await readFile(observedFile,'utf8')).trim(),'created');
   }else if(child.status!==0){
-    const safePhases=new Set(['control unit verification','polling stop','interrupted writer recovery','polling restore',
-      'recovery marker update','snapshot cleanup','admission checks','route block','writer stop','secret replacement',
-      'writer start','writer and token verification','route restore','final serving verification','writer transition','completion marker update']);
-    const observed=`${child.stdout??''}\n${child.stderr??''}`.match(/API token rotation failed during ([a-z ]+)/u)?.[1]?.trim();
-    const phase=observed&&safePhases.has(observed)?observed:null;
-    throw Error(`API token rotation failed with status ${String(child.status)}${phase?` during ${phase}`:''}`);
+    const loadFailure=/ERR_MODULE_NOT_FOUND|Cannot find module|Cannot find package/u.test(`${child.stdout??''}\n${child.stderr??''}`);
+    throw Error(`API token rotation failed with status ${String(child.status)}${loadFailure?' while loading its test preload':''}`);
   }
   return child;
 }
@@ -907,10 +903,10 @@ async function exercisePostgresPasswordRotation({ repoRoot, config, userUnitDir,
 }
 
 async function exerciseApiAuthTokenRotation({repoRoot,config,workDir,expectedImage,environment,originalProxyText,proxyQuadlet,nonce}){
+  const stateBeforePause=await loadControllerState(config.stateFile);
   const restoreProxy=await startStableRotationProxy({repoRoot,config,proxyQuadlet,originalProxyText,expectedImage,nonce});
   try{
   const configPath=path.join(path.dirname(config.publicKeyFile),'config.json');
-  const stateBeforePause=await loadControllerState(config.stateFile);
   if(!stateBeforePause.paused){
     run('sh',[path.join(SOURCE_ROOT,'deploy/updater/codexia-updater'),'pause',configPath],{env:environment});
   }
@@ -925,7 +921,7 @@ async function exerciseApiAuthTokenRotation({repoRoot,config,workDir,expectedIma
   const replacementToken=randomBytes(32).toString('hex');
   const candidate=await createApiAuthTokenCandidate({config,token:replacementToken});
   try{
-    await runApiAuthTokenRotationCandidate({candidate,configPath:path.join(path.dirname(config.publicKeyFile),'config.json'),environment});
+    await runApiAuthTokenRotationCandidate({repoRoot,candidate,configPath:path.join(path.dirname(config.publicKeyFile),'config.json'),environment});
     await assert.rejects(lstat(path.join(path.dirname(config.stateFile),'maintenance','in-progress.json')),{code:'ENOENT'},'Successful API token rotation retained a recovery marker');
     const rotatedSecret=readPodmanApiAuthTokenSecret();
     assert.notEqual(rotatedSecret.ID,initialSecretId,'Immutable API token secret ID did not change');
@@ -940,7 +936,7 @@ async function exerciseApiAuthTokenRotation({repoRoot,config,workDir,expectedIma
     const interruptedToken=randomBytes(32).toString('hex');
     const interrupted=await createApiAuthTokenCandidate({config,token:interruptedToken});
     try{
-      await runApiAuthTokenRotationCandidate({candidate:interrupted,configPath:path.join(path.dirname(config.publicKeyFile),'config.json'),environment,killAtSecretCreate:true});
+      await runApiAuthTokenRotationCandidate({repoRoot,candidate:interrupted,configPath:path.join(path.dirname(config.publicKeyFile),'config.json'),environment,killAtSecretCreate:true});
       const marker=JSON.parse(await readFile(path.join(path.dirname(config.stateFile),'maintenance','in-progress.json'),'utf8'));
       assert.equal(marker.format,'codexia-maintenance-api-auth-token/v1');
       assert.equal(marker.phase,'applying');
@@ -962,7 +958,7 @@ async function exerciseApiAuthTokenRotation({repoRoot,config,workDir,expectedIma
     const completedToken=randomBytes(32).toString('hex');
     const completed=await createApiAuthTokenCandidate({config,token:completedToken});
     try{
-      await runApiAuthTokenRotationCandidate({candidate:completed,configPath:path.join(path.dirname(config.publicKeyFile),'config.json'),environment,killAtCompletedMarker:true});
+      await runApiAuthTokenRotationCandidate({repoRoot,candidate:completed,configPath:path.join(path.dirname(config.publicKeyFile),'config.json'),environment,killAtCompletedMarker:true});
       const completedMarker=JSON.parse(await readFile(path.join(path.dirname(config.stateFile),'maintenance','in-progress.json'),'utf8'));
       assert.equal(completedMarker.phase,'completed');
       assert.equal((await readFile(config.routeFile,'utf8')).trim(),state.journal.active.slot);
@@ -976,10 +972,12 @@ async function exerciseApiAuthTokenRotation({repoRoot,config,workDir,expectedIma
       await assertTimerState('active','enabled');
     }finally{await rm(completed.candidateRoot,{recursive:true,force:true});}
   }finally{await rm(candidate.candidateRoot,{recursive:true,force:true});}
-  if(!stateBeforePause.paused){
-    run('sh',[path.join(SOURCE_ROOT,'deploy/updater/codexia-updater'),'resume',configPath],{env:environment});
+  }finally{
+    const recoveryPending=await lstat(path.join(path.dirname(config.stateFile),'maintenance','in-progress.json'))
+      .then(()=>true,error=>error.code==='ENOENT'?false:Promise.reject(error));
+    if(!recoveryPending)await atomicWrite(config.stateFile,JSON.stringify(stateBeforePause)+'\n');
+    await restoreProxy();
   }
-  }finally{await restoreProxy();}
 }
 
 async function main() {
