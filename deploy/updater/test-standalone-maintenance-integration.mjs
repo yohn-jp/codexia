@@ -656,7 +656,14 @@ async function recoverMaintenanceAtBoot({repoRoot,config,expectedImage,nonce}){
     `XDG_STATE_HOME=${path.dirname(path.dirname(config.stateFile))}`,'CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE=yes',
     'CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY=yes',`CODEXIA_RUNTIME_MAINTENANCE_BACKUP_DIGEST=${BACKUP_DIGEST_FIXTURE}`,
     `CODEXIA_RUNTIME_MAINTENANCE_IMAGE=${expectedImage}`,`CODEXIA_RUNTIME_MAINTENANCE_NONCE=${nonce}`]);
-  try{run('systemctl',['--user','start','codexia-updater-boot.service'],{timeout:240000});}
+  try{
+    const unit='codexia-updater-boot.service';
+    const previousInvocation=run('systemctl',['--user','show','--property=InvocationID','--value',unit]);
+    run('systemctl',['--user','restart',unit],{timeout:240000});
+    const currentInvocation=run('systemctl',['--user','show','--property=InvocationID','--value',unit]);
+    assert.match(currentInvocation,/^[a-f0-9]{32}$/u,'Boot recovery invocation identity is unavailable');
+    assert.notEqual(currentInvocation,previousInvocation,'Simulated boot did not start a fresh recovery invocation');
+  }
   finally{await restoreBootManagerEnvironment(restore);}
 }
 
