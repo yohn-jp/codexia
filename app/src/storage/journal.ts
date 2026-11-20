@@ -6,6 +6,7 @@ import {
   type ProposalStatus,
   type SnapshotId,
 } from "@codexia/contracts";
+import type { TextChange } from "../editor/evidence";
 
 const DATABASE_NAME = "scriptorium-recovery";
 const DATABASE_VERSION = 5;
@@ -69,9 +70,16 @@ export interface PersistenceDraftEntry {
   baseMarkdown: string;
   markdown: string;
   generation: number;
+  textChanges?: PersistenceDraftTextChanges;
   /** Exact server operation whose response may have been lost. */
   pendingSave?: PersistenceDraftOperation;
   updatedAt: number;
+}
+
+export interface PersistenceDraftTextChanges {
+  changes: TextChange[];
+  /** When present, offsets are relative to this pending save's resulting text. */
+  afterSaveKey?: string;
 }
 
 export interface PersistenceDraftOperation {
@@ -354,6 +362,12 @@ export class BrowserJournal {
       const draft = { ...existing };
       delete draft.pendingSave;
       const sameLineage = rebaseNewerDraft && existing.generation > operation.generation && existing.baseRevisionId === operation.baseRevisionId && existing.baseMarkdown === operation.baseMarkdown;
+      if (sameLineage) {
+        draft.textChanges = draft.textChanges?.afterSaveKey === operation.idempotencyKey
+          ? { changes: draft.textChanges.changes } : undefined;
+      } else if (draft.textChanges?.afterSaveKey) {
+        delete draft.textChanges;
+      }
       const updated: PersistenceDraftEntry = {
         ...draft,
         ...(sameLineage ? { baseRevisionId: revisionId, baseMarkdown: operation.markdown, generation: existing.generation + 1 } : {}),
@@ -378,6 +392,7 @@ export class BrowserJournal {
       if (!existing || !samePersistenceDraftOperation(existing.pendingSave, operation)) { await done; return false; }
       const draft = { ...existing };
       delete draft.pendingSave;
+      if (draft.textChanges?.afterSaveKey) delete draft.textChanges;
       store.put({ ...draft, updatedAt: Date.now() });
       await done;
       return true;
