@@ -30,8 +30,8 @@ import { TermAwareRubyText } from "../editor/TermAwareRubyText";
 import { WRITING_SYMBOLS } from "../editor/writingSymbols";
 import { loadTypographySettings, storeTypographySettings, TYPOGRAPHY_PRESETS, typographyPresetValues, type TypographyPresetId } from "../editor/typography";
 import { ManuscriptInput, type ManuscriptInputHandle, type ManuscriptPosition, type EvidenceRangeRequest } from "../editor/ManuscriptInput";
-import { initializeDocumentEvidence, markEvidenceNeedsReview, type DocumentEvidenceState, type EditorEvidenceAdapter, type TextChange } from "../editor/evidence";
-import { BrowserJournal } from "../storage/journal";
+import { applyTextChanges, composeTextChanges, initializeDocumentEvidence, markEvidenceNeedsReview, type DocumentEvidenceState, type EditorEvidenceAdapter, type TextChange } from "../editor/evidence";
+import { BrowserJournal, type PersistenceDraftTextChanges } from "../storage/journal";
 import { createPostgresEditorEvidenceAdapter } from "../editor/postgresEvidenceAdapter";
 import { NativeChangeSetReview } from "./NativeChangeSetReview";
 
@@ -47,6 +47,7 @@ interface ActiveDocument {
   baseRevisionId: string;
   baseMarkdown: string;
   markdown: string;
+  textChanges?: PersistenceDraftTextChanges;
   generation: number;
   dirty: boolean;
   recovery: "pending" | "stored" | "failed" | "other-tab";
@@ -558,12 +559,14 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       const baseMarkdown = draft?.baseMarkdown ?? revision.markdown;
       const baseRevisionId = draft?.baseRevisionId ?? revision.id;
       const dirty = markdown !== baseMarkdown || (staleDraft && markdown !== revision.markdown);
+      const textChanges = recoveredTextChanges(draft?.textChanges, baseMarkdown, markdown, recoverablePending);
       publishEditor({
         document: read.document,
         revision,
         baseRevisionId,
         baseMarkdown,
         markdown,
+        textChanges,
         generation: dirty ? Math.max(1, draft?.generation ?? 0) : draft?.generation ?? 0,
         dirty,
         recovery: dirty ? "pending" : "stored",
@@ -612,6 +615,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           baseRevisionId: value.baseRevisionId,
           baseMarkdown: value.baseMarkdown,
           markdown: value.markdown,
+          textChanges: value.textChanges,
           generation: value.generation,
         });
         if (stored) ownedDraftsRef.current.set(ownershipKey, ownership);
@@ -743,7 +747,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         baseRevisionId: current.baseRevisionId,
         baseMarkdown: current.baseMarkdown,
         markdown: current.markdown,
-        changes: minimalTextChanges(current.baseMarkdown, current.markdown),
+        changes: current.textChanges && current.textChanges.afterSaveKey === undefined
+          ? current.textChanges.changes : minimalTextChanges(current.baseMarkdown, current.markdown),
         generation: current.generation,
         idempotencyKey: crypto.randomUUID(),
         clientId: clientIdRef.current ||= crypto.randomUUID(),
@@ -808,7 +813,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           if (!acknowledgement.acknowledged) {
             publishEditor({ ...latest, document: replayHead.document, revision: replayHead.revision, recovery: "failed", save: "failed", error: "保存済みRevisionの照合を回復Journalへ反映できませんでした。下書きを保持して再確認してください。", remoteConflict: replayHead.revision });
           } else if (!hasNewerText) {
-            publishEditor({ ...latest, document: replayHead.document, revision: replayHead.revision, baseRevisionId: replayHead.revision.id, baseMarkdown: replayHead.revision.markdown, markdown: replayHead.revision.markdown, dirty: false, recovery: "stored", save: "saved", error: "", remoteConflict: null });
+            publishEditor({ ...latest, document: replayHead.document, revision: replayHead.revision, baseRevisionId: replayHead.revision.id, baseMarkdown: replayHead.revision.markdown, markdown: replayHead.revision.markdown, textChanges: undefined, dirty: false, recovery: "stored", save: "saved", error: "", remoteConflict: null });
           } else {
             publishEditor({ ...latest, document: replayHead.document, revision: replayHead.revision, dirty: true, recovery: remaining ? "stored" : "pending", save: "failed", error: "保存操作の後にPostgreSQL上のRevisionが更新されました。回復Draftを保持し、比較してから適用してください。", remoteConflict: replayHead.revision });
           }
@@ -822,7 +827,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         const ownNewerDraft = hasNewerText && remaining !== undefined && remaining.generation === latest.generation + 1 && remaining.markdown === latest.markdown && remaining.baseRevisionId === result.revision.id && remaining.baseMarkdown === pending.markdown;
         const otherTab = Boolean(remaining && !ownNewerDraft);
         if (otherTab) {
-          publishEditor({ ...latest, document: acknowledgedDocument, revision: acknowledgedRevision, baseRevisionId: acknowledgedRevision.id, baseMarkdown: pending.markdown, dirty: hasNewerText, recovery: "other-tab", save: "failed", error: "この文書のより新しい回復記録が別タブに残っています。自動保存を停止しました。", remoteConflict: null });
+          publishEditor({ ...latest, document: acknowledgedDocument, revision: acknowledgedRevision, baseRevisionId: acknowledgedRevision.id, baseMarkdown: pending.markdown, textChanges: undefined, dirty: hasNewerText, recovery: "other-tab", save: "failed", error: "この文書のより新しい回復記録が別タブに残っています。自動保存を停止しました。", remoteConflict: null });
           return;
         }
         publishEditor({
@@ -831,6 +836,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           revision: acknowledgedRevision,
           baseRevisionId: acknowledgedRevision.id,
           baseMarkdown: pending.markdown,
+          textChanges: hasNewerText && latest.textChanges?.afterSaveKey === pending.idempotencyKey
+            ? { changes: latest.textChanges.changes } : undefined,
           dirty: hasNewerText,
           // A newer draft may already exist under the old base Revision at this generation.
           // Advance the generation so IndexedDB can persist the rebased record before retrying.
@@ -1041,6 +1048,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           publishEditor({
             ...current,
             markdown,
+            textChanges: composeDraftChanges(current, pending, markdown, minimalTextChanges(current.markdown, markdown)),
             generation: current.generation + 1,
             dirty: markdown !== current.baseMarkdown || Boolean(pending && markdown !== pending.markdown),
             recovery: current.recovery === "other-tab" ? "other-tab" : "pending",
@@ -1163,6 +1171,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       const imported: ActiveDocument = {
         ...latest,
         markdown,
+        textChanges: undefined,
         generation: latest.generation + 1,
         dirty: markdown !== latest.baseMarkdown,
         recovery: "pending",
@@ -1410,6 +1419,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       publishEditor({
         ...latest, document: restored.document, revision: restored.revision,
         baseRevisionId: restored.revision.id, baseMarkdown: restored.revision.markdown, markdown: restored.revision.markdown,
+        textChanges: undefined,
         generation: latest.generation + 1, dirty: false, recovery: "stored", save: "saved", error: "", remoteConflict: null,
         evidence: initializeDocumentEvidence(restored.revision.markdown, restored.revision.id, snapshot), evidenceLoadKey: latest.evidenceLoadKey + 1,
       });
@@ -1466,6 +1476,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         baseRevisionId: read.revision.id,
         baseMarkdown: read.revision.markdown,
         markdown: read.revision.markdown,
+        textChanges: undefined,
         generation: current.generation + 1,
         dirty: false,
         recovery: "stored",
@@ -1491,6 +1502,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       revision: remote,
       baseRevisionId: remote.id,
       baseMarkdown: remote.markdown,
+      textChanges: undefined,
       generation: current.generation + 1,
       dirty: current.markdown !== remote.markdown,
       recovery: "pending",
@@ -1502,11 +1514,12 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     setNotice("下書きを最新Revision全体へ適用します。IndexedDBへ再保存後、通常の競合検出を通して保存します。");
   }
 
-  const onEditorChange = useCallback((markdown: string, _changes: TextChange[]) => {
+  const onEditorChange = useCallback((markdown: string, changes: TextChange[]) => {
     const current = activeRef.current;
     if (!current || markdown === current.markdown) return;
     const pending = pendingSaveRef.current.get(JSON.stringify([current.document.projectId, current.document.id]));
-    publishEditor({ ...current, markdown, generation: current.generation + 1, dirty: markdown !== current.baseMarkdown || Boolean(pending && markdown !== pending.markdown), recovery: current.recovery === "other-tab" ? "other-tab" : "pending", save: current.save === "saving" ? "saving" : current.recovery === "other-tab" ? "failed" : "idle", error: current.recovery === "other-tab" ? current.error : "" });
+    const textChanges = composeDraftChanges(current, pending, markdown, changes);
+    publishEditor({ ...current, markdown, textChanges, generation: current.generation + 1, dirty: markdown !== current.baseMarkdown || Boolean(pending && markdown !== pending.markdown), recovery: current.recovery === "other-tab" ? "other-tab" : "pending", save: current.save === "saving" ? "saving" : current.recovery === "other-tab" ? "failed" : "idle", error: current.recovery === "other-tab" ? current.error : "" });
   }, [publishEditor]);
 
   const selectProject = async (nextProjectId: string): Promise<void> => {
@@ -1964,6 +1977,35 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       onSwitchMode={async () => { if (!await protectTransition()) return false; window.location.assign(switchPath); return true; }}
     />
   </div>;
+}
+
+function composeDraftChanges(current: ActiveDocument, pending: PendingSave | undefined, markdown: string, changes: TextChange[]): PersistenceDraftTextChanges {
+  const baseMarkdown = pending?.markdown ?? current.baseMarkdown;
+  const afterSaveKey = pending?.idempotencyKey;
+  if (markdown === baseMarkdown) return { changes: [], afterSaveKey };
+  const previous = current.textChanges;
+  const preceding = current.markdown === baseMarkdown ? [] : previous && previous.afterSaveKey === afterSaveKey
+    ? previous.changes : minimalTextChanges(baseMarkdown, current.markdown);
+  return {
+    changes: composeTextChanges(baseMarkdown, preceding, changes)
+      .filter((change) => baseMarkdown.slice(change.from, change.to) !== change.insert),
+    afterSaveKey,
+  };
+}
+
+function recoveredTextChanges(value: PersistenceDraftTextChanges | undefined, base: string, markdown: string, pending: PendingSave | undefined): PersistenceDraftTextChanges | undefined {
+  if (!value || !Array.isArray(value.changes)) return undefined;
+  if (value.afterSaveKey !== undefined) {
+    if (!pending || value.afterSaveKey !== pending.idempotencyKey) return undefined;
+    base = pending.markdown;
+  }
+  let previousEnd = 0;
+  for (const change of value.changes) {
+    if (!change || !Number.isSafeInteger(change.from) || !Number.isSafeInteger(change.to) ||
+        change.from < previousEnd || change.to < change.from || change.to > base.length || typeof change.insert !== "string") return undefined;
+    previousEnd = change.to;
+  }
+  return applyTextChanges(base, value.changes) === markdown ? value : undefined;
 }
 
 function minimalTextChanges(source: string, target: string): TextChange[] {
