@@ -202,9 +202,9 @@ export function assertProxyRuntimeObservation(quadletText,container,activeState,
   assert.equal(container?.State?.Running,true,'Private proxy container is not running');
   const observed=container.ImageName??container.Config?.Image;
   assert.equal(observed,images[0],'Running private proxy image differs from its pinned Quadlet');
-  assert.ok(imageInfo&&typeof imageInfo.Id==='string'&&imageInfo.Id.startsWith('sha256:'),'Pinned proxy image content identity is unobservable');
+  assert.match(imageId(imageInfo?.Id),/^[a-f0-9]{64}$/u,'Pinned proxy image content identity is unobservable');
   assert.ok(Array.isArray(imageInfo.RepoDigests)&&imageInfo.RepoDigests.includes(images[0]),'Pinned proxy digest is not present in the local image');
-  assert.equal(container.Image,imageInfo.Id,'Running private proxy container uses different image content');
+  assert.equal(imageId(container.Image),imageId(imageInfo.Id),'Running private proxy container uses different image content');
   assertContainerEnvironment(container,imageInfo.Config?.Env,quadletText,'Private proxy');
 
   for(const [directive,expected] of [

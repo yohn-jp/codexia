@@ -147,6 +147,8 @@ test('maintenance requires the running proxy to match its private digest-pinned 
     ],
   };
   assertProxyRuntimeObservation(quadlet,container,'active',imageInfo,proxyOptions);
+  assert.doesNotThrow(()=>assertProxyRuntimeObservation(quadlet,{...container,Image:container.Image.replace(/^sha256:/u,'')},'active',{...imageInfo,Id:imageInfo.Id.replace(/^sha256:/u,'')},proxyOptions),
+    'Accept Podman’s equivalent bare 64-hex image ID while retaining the pinned RepoDigest and container/image equality checks');
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,container,'active',imageInfo,{...proxyOptions,capabilityStatus:capabilityStatus.replace('CapEff:\t0000000000000000','CapEff:\t0000000000000001')}),/CapEff must be zero/u);
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,HostConfig:{...container.HostConfig,CapAdd:['CAP_SYS_ADMIN']}},'active',imageInfo,proxyOptions),/unexpected capability additions/u);
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Image:'sha256:'+'d'.repeat(64)},'active',imageInfo,proxyOptions),/different image content/u);
