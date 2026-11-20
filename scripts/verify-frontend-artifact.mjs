@@ -442,6 +442,7 @@ export async function verifyFrontendArtifact({ env = process.env, fetchImpl = fe
       apiPages(request,'runs/'+expected.runId+'/attempts/'+expected.producerAttempt+'/jobs','jobs'),
     ]);
     expected.currentAttempt=positiveInteger(run.run_attempt,'Frontend producer workflow attempt');
+    assert.equal(expected.currentAttempt,positiveInteger(env.GITHUB_RUN_ATTEMPT,'Current frontend release attempt'),'Frontend release attempt mismatch');
     assert.equal(expected.version,readComponentVersion('frontend',String(run.run_number)),'Main frontend producer version mismatch');
     assertFrontendArtifactEvidence(run,selectedArtifact,jobs,expected,producerAttemptJobs);
     artifact=selectedArtifact;

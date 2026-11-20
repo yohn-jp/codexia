@@ -167,6 +167,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: ${{ github.event_name == 'push' && '0' || '1' }}
           persist-credentials: false
       - uses: actions/setup-node@v7.1.0
         with:
@@ -220,7 +221,8 @@ jobs:
           echo "run-id=$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
           echo "source-sha=$CODEXIA_PRODUCER_SHA" >> "$GITHUB_OUTPUT"
           echo "event=$GITHUB_EVENT_NAME" >> "$GITHUB_OUTPUT"
-          echo "version=$(node -p \"require('./app/dist/desktop/update-identity.json').version\")" >> "$GITHUB_OUTPUT"
+          producer_version=$(node -p "require('./app/dist/desktop/update-identity.json').version")
+          echo "version=$producer_version" >> "$GITHUB_OUTPUT"
           if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
             echo "pr-number=$CODEXIA_PR_NUMBER" >> "$GITHUB_OUTPUT"
             echo "artifact-name=codexia-frontend-pr-$CODEXIA_PR_NUMBER-$GITHUB_RUN_ID-$CODEXIA_PRODUCER_SHA-attempt-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
@@ -234,7 +236,7 @@ jobs:
           name: ${{ steps.producer.outputs.artifact-name }}
           path: app/dist
           if-no-files-found: error
-          retention-days: 14
+          retention-days: ${{ github.event_name == 'pull_request' && 14 || 2 }}
   # Independent source certification still gates deployment after build selection.
   deploy:
     name: Deploy UI Static Assets
@@ -251,6 +253,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v7.1.0
         with:

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
@@ -20,11 +21,14 @@ test('frontend PR producer remains read-only and main promotion requires exact s
   assert.equal(promote.env.CODEXIA_LIVE_FRONTEND_VERSION,'${{ needs.preflight.outputs.frontend-version }}');
   const prProducer=build.steps.find(step=>step.id==='producer');
   assert.equal(prProducer.env.CODEXIA_PR_NUMBER,'${{ github.event.pull_request.number }}');
+  execFileSync('bash',['-n'],{input:prProducer.run});
+  const buildCheckout=build.steps.find(step=>step.uses==='actions/checkout@v7.0.1');
+  assert.equal(buildCheckout.with['fetch-depth'],"${{ github.event_name == 'push' && '0' || '1' }}");
   const upload=build.steps.find(step=>step.id==='upload');
   assert.ok(upload);
   assert.match(upload.if,/pull_request/u);
   assert.match(upload.if,/promoted != 'true'/u);
-  assert.equal(upload.with['retention-days'],14);
+  assert.equal(upload.with['retention-days'],"${{ github.event_name == 'pull_request' && 14 || 2 }}");
   const fallback=build.steps.find(step=>step.run?.includes('pnpm run build:frontend'));
   assert.match(fallback.if,/promoted != 'true'/u);
 });
@@ -39,6 +43,8 @@ test('frontend deploy rechecks producer artifact, exact main source and deployed
   assert.match(deploy.if,/push/u);
   assert.match(deploy.if,/refs\/heads\/main/u);
   const verifyArtifact=deploy.steps.find(step=>step.run?.includes('verify-frontend-artifact.mjs'));
+  const deployCheckout=deploy.steps.find(step=>step.uses==='actions/checkout@v7.0.1');
+  assert.equal(deployCheckout.with['fetch-depth'],0);
   const compatibility=deploy.steps.find(step=>step.run?.includes('verify-frontend-compatibility.mjs')&&!step.run.includes('deployed'));
   const deployed=deploy.steps.find(step=>step.run?.includes('verify-frontend-compatibility.mjs deployed'));
   const record=deploy.steps.find(step=>step.run?.includes('record-component-release.mjs frontend'));

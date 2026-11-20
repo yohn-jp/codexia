@@ -10,7 +10,6 @@ const positive=value=>Number.isSafeInteger(value)&&value>0;
 export function buildComponentReleaseRecord(component,sourceSha,identity,producer,mainTree){
   assert.ok(['frontend','backend'].includes(component),'Unknown component');
   assert.match(sourceSha??'',sha,'Component source SHA is invalid');
-  const titleCase=component[0].toUpperCase()+component.slice(1);
   let version,metadata;
   if(component==='frontend'){
     assertFrontendIdentity(identity);
@@ -38,12 +37,11 @@ export function buildComponentReleaseRecord(component,sourceSha,identity,produce
     }
     version=identity.version;
     metadata={component,version,sourceSha,profile:identity.profile,requiredApiEpoch:identity.apiEpoch,worker:'codexia-frontend',
-      producer:{event:producer.event,sourceSha:producer.sourceSha,version:producer.version,workflowRunId:producer.workflowRunId,
+      ...(producer.event==='pull_request'?{producer:{event:producer.event,sourceSha:producer.sourceSha,version:producer.version,workflowRunId:producer.workflowRunId,
         workflowAttempt:producer.workflowAttempt,artifactId:producer.artifactId,artifactDigest:'sha256:'+producer.artifactDigest,
-        profile:producer.profile,apiEpoch:producer.apiEpoch,
-        ...(producer.event==='pull_request'?{prNumber:producer.prNumber,workflowId:producer.workflowId,verifyRunId:producer.verifyRunId,
-          proofRunId:producer.proofRunId,verifyAttempt:producer.verifyAttempt,planDigest:producer.planDigest,sourceTree:producer.sourceTree,
-          mergeBaseSha:producer.mergeBaseSha}:{})}};
+        profile:producer.profile,apiEpoch:producer.apiEpoch,prNumber:producer.prNumber,workflowId:producer.workflowId,verifyRunId:producer.verifyRunId,
+        proofRunId:producer.proofRunId,verifyAttempt:producer.verifyAttempt,planDigest:producer.planDigest,sourceTree:producer.sourceTree,
+        mergeBaseSha:producer.mergeBaseSha}}:{})};
   }else{
     version=readComponentVersion('backend');
     const digestPattern=/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u;
@@ -55,5 +53,5 @@ export function buildComponentReleaseRecord(component,sourceSha,identity,produce
   }
   const tag=component+'-v'+version;
   const body='Certified component release.\n\n```json\n'+JSON.stringify(metadata,null,2)+'\n```';
-  return {tag,title:titleCase+' v'+version,targetSha:sourceSha,metadata,body};
+  return {tag,title:component+' v'+version,targetSha:sourceSha,metadata,body};
 }
