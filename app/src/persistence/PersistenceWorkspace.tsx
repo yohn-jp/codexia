@@ -29,7 +29,7 @@ import { MobileReadingPager } from "../editor/MobileReadingPager";
 import { TermAwareRubyText } from "../editor/TermAwareRubyText";
 import { WRITING_SYMBOLS } from "../editor/writingSymbols";
 import { loadTypographySettings, storeTypographySettings, TYPOGRAPHY_PRESETS, typographyPresetValues, type TypographyPresetId } from "../editor/typography";
-import { ManuscriptInput, type ManuscriptInputHandle, type EvidenceRangeRequest } from "../editor/ManuscriptInput";
+import { ManuscriptInput, type ManuscriptInputHandle, type ManuscriptPosition, type EvidenceRangeRequest } from "../editor/ManuscriptInput";
 import { initializeDocumentEvidence, markEvidenceNeedsReview, type DocumentEvidenceState, type EditorEvidenceAdapter, type TextChange } from "../editor/evidence";
 import { BrowserJournal } from "../storage/journal";
 import { createPostgresEditorEvidenceAdapter } from "../editor/postgresEvidenceAdapter";
@@ -55,6 +55,15 @@ interface ActiveDocument {
   remoteConflict: DocumentRevision | null;
   evidence: DocumentEvidenceState;
   evidenceLoadKey: number;
+}
+
+type ContinuePosition = ({ kind: "writing" } & ManuscriptPosition) | { kind: "reading"; pageIndex: number };
+
+interface ContinueRequest {
+  projectId: string;
+  documentId: string;
+  intent: number;
+  position: ContinuePosition;
 }
 
 interface OutlineDocument extends PersistenceDocument {
@@ -249,6 +258,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const clientIdRef = useRef("");
   const openSequenceRef = useRef(0);
   const selectionIntentRef = useRef(0);
+  const continueRequestRef = useRef<ContinueRequest | undefined>(undefined);
   const panelRequestSequenceRef = useRef(0);
   const [resumeEpoch, setResumeEpoch] = useState(0);
   const [legacyImportBusy, setLegacyImportBusy] = useState(false);
@@ -565,8 +575,17 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       });
       if (draft && staleDraft && !recoverablePending) setNotice("ブラウザーに保存された下書きのbase Revisionが変わっています。比較してから、どちらを使うか選んでください。");
       if (recoverablePending) setNotice("応答が失われた可能性のある保存操作を照合しています。");
-      const position = loadWritingResume(authorScope, currentProject.id);
-      if (position?.sceneId === nextDocumentId) requestAnimationFrame(() => { if (activeRef.current?.document.id === nextDocumentId) editorRef.current?.restorePosition(position); });
+      const requested = continueRequestRef.current;
+      const explicitPosition = requested?.projectId === currentProject.id && requested.documentId === nextDocumentId &&
+        requested.intent === selectionIntentRef.current;
+      if (!explicitPosition) {
+        const position = loadWritingResume(authorScope, currentProject.id);
+        const intent = selectionIntentRef.current;
+        if (position?.sceneId === nextDocumentId) requestAnimationFrame(() => {
+          if (intent === selectionIntentRef.current && activeRef.current?.document.projectId === currentProject.id &&
+              activeRef.current.document.id === nextDocumentId) editorRef.current?.restorePosition(position);
+        });
+      }
       setReadingPage(loadReadingPage(authorScope, currentProject.id, nextDocumentId));
       setRevisions([]);
       setShowRevisions(false);
@@ -1042,15 +1061,22 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     return () => registerProtection?.(null);
   }, [registerProtection, protectTransition]);
 
-  const selectDocument = useCallback(async (nextId: string): Promise<boolean> => {
+  const selectDocument = useCallback(async (nextId: string, position?: ContinuePosition): Promise<boolean> => {
     // Navigation preflight is asynchronous. Only the latest requested selection
     // may publish a document, even when an earlier request finishes later.
     const intent = ++selectionIntentRef.current;
+    continueRequestRef.current = undefined;
     setEvidenceJump(undefined);
-    if (nextId === documentId && selectionRef.current?.documentId === nextId &&
-        activeRef.current?.document.id === nextId) return true;
+    const alreadyOpen = nextId === documentId && selectionRef.current?.documentId === nextId &&
+      activeRef.current?.document.id === nextId;
+    if (alreadyOpen && !position) return true;
     if (!await protectTransition()) return false;
     if (intent !== selectionIntentRef.current) return false;
+    if (position) {
+      continueRequestRef.current = { projectId, documentId: nextId, intent, position };
+      setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
+    }
+    if (alreadyOpen) return true;
     openSequenceRef.current += 1;
     publishEditor(null);
     selectionRef.current = { projectId, documentId: nextId };
@@ -1060,6 +1086,29 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     setDocumentId(nextId);
     return true;
   }, [authorScope, documentId, projectId, protectTransition, publishEditor, updateRouteSelection]);
+
+  const requestedContinue = continueRequestRef.current;
+  const activeContinue = requestedContinue?.projectId === active?.document.projectId &&
+    requestedContinue?.documentId === active?.document.id && requestedContinue?.intent === selectionIntentRef.current
+    ? requestedContinue : undefined;
+  useEffect(() => {
+    if (!activeContinue || continueRequestRef.current !== activeContinue || sessionBlockedRef.current) return;
+    if (activeContinue.position.kind === "reading") {
+      continueRequestRef.current = undefined;
+      setReadingPage(activeContinue.position.pageIndex);
+      setReading(true);
+    } else {
+      setReading(false);
+    }
+  }, [activeContinue]);
+  const consumeWritingContinue = useCallback((position: ManuscriptPosition) => {
+    const request = continueRequestRef.current;
+    const current = activeRef.current;
+    if (!request || request.position !== position || request.intent !== selectionIntentRef.current ||
+        current?.document.id !== request.documentId || current.document.projectId !== request.projectId || sessionBlockedRef.current) return false;
+    continueRequestRef.current = undefined;
+    return true;
+  }, []);
 
   const beforeLegacyImport = useCallback(async (): Promise<void> => {
     legacyImportTargetRef.current = null;
@@ -1462,6 +1511,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
 
   const selectProject = async (nextProjectId: string): Promise<void> => {
     if (nextProjectId === projectId || !await protectTransition()) return;
+    selectionIntentRef.current += 1;
+    continueRequestRef.current = undefined;
     openSequenceRef.current += 1;
     publishEditor(null);
     selectionRef.current = { projectId: nextProjectId, documentId: "" };
@@ -1617,16 +1668,12 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
                 const handoff = formatHandoffHint(candidate.deviceType, candidate.updatedAt, Date.now(), resume.deviceType);
                 return <p key={candidate.sceneId}>
                   <span>{title}</span>{handoff && <small>{handoff}</small>}
-                  <button type="button" onClick={() => { void selectDocument(candidate.sceneId).then((opened) => {
-                    if (!opened) return;
-                    setReading(false);
-                    requestAnimationFrame(() => editorRef.current?.restorePosition({ cursorSentenceIndex: candidate.sentenceOffset, scrollTop: candidate.scrollTop ?? 0 }));
-                  }); }}>続きを書く</button>
-                  {candidate.pageIndex !== null && <button type="button" onClick={() => { void selectDocument(candidate.sceneId).then((opened) => {
-                    if (!opened) return;
-                    setReading(true);
-                    setReadingPage(candidate.pageIndex ?? 0);
-                  }); }}>読書位置を開く</button>}
+                  <button type="button" onClick={() => void selectDocument(candidate.sceneId, {
+                    kind: "writing", cursorSentenceIndex: candidate.sentenceOffset, scrollTop: candidate.scrollTop ?? 0,
+                  })}>続きを書く</button>
+                  {candidate.pageIndex !== null && <button type="button" onClick={() => void selectDocument(candidate.sceneId, {
+                    kind: "reading", pageIndex: candidate.pageIndex ?? 0,
+                  })}>読書位置を開く</button>}
                 </p>;
               })}
             </section>
@@ -1724,6 +1771,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             termResolutionKey={moduleSnapshot ? snapshotKey(moduleSnapshot) : ""}
             onTermNavigate={handleTermNavigate}
             onCursorPositionChange={(cursorSentenceIndex, scrollTop) => { editorPositionRef.current = { cursorSentenceIndex, scrollTop }; resume.onWritingPosition(active.document.id, cursorSentenceIndex, scrollTop); }}
+            requestedPosition={!reading && activeContinue?.position.kind === "writing" ? activeContinue.position : undefined}
+            consumeRequestedPosition={consumeWritingContinue}
             onSelectionChange={(selection) => { textSelectionRef.current = selection; }}
             value={active.markdown}
             externalTextRevision={active.generation}
