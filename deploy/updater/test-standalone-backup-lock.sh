@@ -27,7 +27,7 @@ cat > "$shim/findmnt" <<'SH'
 #!/bin/sh
 if [ "${1:-}" = -T ] && [ "${2:-}" = "${CODEXIA_TEST_REMOTE:-}" ] && [ "${3:-}" = -n ] && [ "${4:-}" = -o ]; then
   case "${5:-}" in
-    FSTYPE) printf '%s\n' nfs4 ;;
+    FSTYPE) printf '%s\n' "${CODEXIA_TEST_REMOTE_TYPE:-nfs4}" ;;
     SOURCE) printf '%s\n' "${CODEXIA_TEST_REMOTE_SOURCE:-backup.example.invalid:/export}" ;;
     *) exit 2 ;;
   esac
@@ -41,13 +41,14 @@ cat > "$shim/getent" <<'SH'
 case "${2:-}" in
   localhost) printf '%s\n' '127.0.0.1 STREAM localhost' ;;
   backup.example.invalid) printf '%s\n' "${CODEXIA_TEST_REMOTE_ADDRESS:-192.0.2.10} STREAM backup.example.invalid" ;;
+  2001:db8::1|2001:db8::2) printf '%s STREAM %s\n' "$2" "$2" ;;
   *) exit 2 ;;
 esac
 SH
 cat > "$shim/ip" <<'SH'
 #!/bin/sh
 [ "${1:-}" = -o ] && [ "${2:-}" = address ] && [ "${3:-}" = show ] || exit 2
-printf '%s\n' '1: lo inet 127.0.0.1/8 scope host lo' '1: lo inet6 ::1/128 scope host lo'
+printf '%s\n' '1: lo inet 127.0.0.1/8 scope host lo' '1: lo inet6 ::1/128 scope host lo' '2: eth0 inet6 2001:db8::1/64 scope global'
 SH
 chmod 0700 "$shim/podman" "$shim/age" "$shim/findmnt" "$shim/getent" "$shim/ip"
 export PATH="$shim:$PATH"
@@ -73,6 +74,20 @@ if CODEXIA_TEST_REMOTE_ADDRESS=127.0.0.1 bash "$backup_script" validate-destinat
   exit 1
 fi
 grep -q 'Backup destination resolves to this VM' "$tmp/local-address-destination.log"
+
+for source in 'backup@[2001:db8::2]:/backups' '[2001:db8::2]:/backups' \
+              'backup@backup.example.invalid:/backups' 'backup.example.invalid:/backups'; do
+  CODEXIA_TEST_REMOTE_TYPE=fuse.sshfs CODEXIA_TEST_REMOTE_SOURCE="$source" \
+    bash "$backup_script" validate-destination "$remote" | grep -q 'Backup destination preflight passed'
+done
+for source in 'backup@[2001:db8::1]:/backups' '[::1]:/backups' 'backup@[2001:db8::3]:/backups'; do
+  if CODEXIA_TEST_REMOTE_TYPE=sshfs CODEXIA_TEST_REMOTE_SOURCE="$source" \
+    bash "$backup_script" validate-destination "$remote" > "$tmp/sshfs-destination.log" 2>&1; then
+    echo "Destination preflight accepted an unsafe or unresolvable SSHFS source: $source" >&2
+    exit 1
+  fi
+  grep -Eq 'Backup destination (is mounted from|resolves to) this VM|Cannot verify the backup destination host address' "$tmp/sshfs-destination.log"
+done
 
 # Hold the canonical lock in a sibling process. A caller with only the legacy
 # boolean marker must not treat that unrelated lock holder as its capability.
