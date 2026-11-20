@@ -34,6 +34,7 @@ import { applyTextChanges, composeTextChanges, initializeDocumentEvidence, markE
 import { BrowserJournal, type PersistenceDraftTextChanges } from "../storage/journal";
 import { createPostgresEditorEvidenceAdapter } from "../editor/postgresEvidenceAdapter";
 import { NativeChangeSetReview } from "./NativeChangeSetReview";
+import { RevisionDifference } from "./RevisionDifference";
 
 interface EvidenceJump extends EvidenceRangeRequest {
   projectId: string;
@@ -2173,22 +2174,12 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
 
           {showRevisions && <section className="pg-revisions" aria-label="Revision履歴">
             <h3>Revision履歴</h3>
-            {revisions.map((revision) => {
-              const difference = revision.id === active.revision.id ? null : revisionDifferencePreview(revision.markdown, active.revision.markdown);
-              return <article key={revision.id} data-revision-id={revision.id}>
+            {revisions.map((revision) => <article key={revision.id} data-revision-id={revision.id}>
               <p>{new Date(revision.createdAt).toLocaleString()} · {revision.id === active.revision.id ? "現在" : "保存済み"}</p>
               <pre>{revision.markdown.slice(0, 700) || "（空の原稿）"}</pre>
-              {difference && <details className="pg-revision-difference">
-                <summary>最新版との違い</summary>
-                <section className="pg-revision-diff-preview" aria-label="原稿Revisionの比較">
-                  <div><h4>以前の本文</h4><pre>{difference.before}</pre></div>
-                  <span aria-hidden="true">→</span>
-                  <div><h4>最新版</h4><pre>{difference.after}</pre></div>
-                </section>
-              </details>}
+              {revision.id !== active.revision.id && <RevisionDifference previous={revision} current={active.revision} />}
               {revision.id !== active.revision.id && <button type="button" disabled={loading || restoring || active.dirty} onClick={() => void restoreRevision(revision)}>このRevisionを新しいRevisionとして復元</button>}
-            </article>;
-            })}
+              </article>)}
             {revisionPageError && <p role="alert">{revisionPageError}</p>}
             {revisionPageLoading && <p role="status">古いRevision履歴を読み込んでいます。</p>}
             {revisionCursor && <button type="button" disabled={loading || restoring || revisionPageLoading || active.dirty || Boolean(active.remoteConflict)} onClick={loadMoreRevisions}>さらに古いRevisionを読む</button>}
@@ -2362,16 +2353,4 @@ function minimalTextChanges(source: string, target: string): TextChange[] {
   const to = sourcePoints.slice(0, sourcePoints.length - suffix).join("").length;
   const insert = targetPoints.slice(prefix, targetPoints.length - suffix).join("");
   return [{ from, to, insert }];
-}
-
-function revisionDifferencePreview(previous: string, latest: string): { before: string; after: string } | null {
-  const change = minimalTextChanges(previous, latest)[0];
-  if (!change) return null;
-  const contextStart = Math.max(0, change.from - 48);
-  const contextBefore = previous.slice(contextStart, change.from);
-  const contextAfter = previous.slice(change.to, change.to + 48);
-  return {
-    before: `${contextBefore}${previous.slice(change.from, change.to) || "（追加前）"}${contextAfter}`,
-    after: `${contextBefore}${change.insert || "（削除）"}${contextAfter}`,
-  };
 }

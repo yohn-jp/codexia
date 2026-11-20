@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { createWritingFixture, openRevisionHistory, ownerLogin, manuscriptEditor } from "./postgres-fixture";
 
@@ -489,6 +490,48 @@ for (const shell of ["desktop", "mobile"] as const) {
     }
   });
 }
+
+test("revision comparison separates distant manuscript edits", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  const { project, scene } = await createWritingFixture(page);
+  const path = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
+  const response = await page.request.get(path);
+  expect(response.ok()).toBe(true);
+  let { revision } = await response.json() as { revision: { id: string; markdown: string } };
+  const middle = Array.from({ length: 200 }, (_, index) => `変わらない第 ${index} 段落には｜青空《あおぞら》が続きます。\n\n`).join("");
+  for (const value of [`冒頭は旧稿。\n\n${middle}結末には旧稿。\n`, `冒頭は改稿。\n\n${middle}結末には新しい追加行。\n`]) {
+    const saved = await page.request.patch(path, {
+      headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": crypto.randomUUID(), "X-Client-Id": "revision-diff-fixture" },
+      data: {
+        baseRevisionId: revision.id,
+        changes: [{ fromUtf16: 0, toUtf16: revision.markdown.length, insert: value }],
+        resultingSha256: createHash("sha256").update(value).digest("hex"),
+      },
+    });
+    expect(saved.ok()).toBe(true);
+    ({ revision } = await saved.json() as { revision: typeof revision });
+  }
+  for (const shell of ["desktop", "mobile"] as const) {
+    if (shell === "mobile") await page.setViewportSize({ width: 320, height: 760 });
+    await page.goto(`/${shell}/projects/${project.id}/scenes/${scene.id}${shell === "mobile" ? "?view=writing" : ""}`);
+    await expect(manuscriptEditor(page)).toContainText("冒頭は改稿。");
+    await openRevisionHistory(page);
+    const previous = page.getByRole("region", { name: "Revision履歴" }).locator("article").filter({ hasText: "冒頭は旧稿。" });
+    const diff = previous.locator(".pg-revision-diff-preview");
+    await expect(diff).toHaveCount(0);
+    const workerStarted = page.waitForEvent("worker");
+    await previous.getByText("最新版との違い", { exact: true }).click();
+    expect(new URL((await workerStarted).url()).origin).toBe(new URL(page.url()).origin);
+    const hunks = diff.locator(".pg-revision-diff-hunk");
+    await expect(hunks).toHaveCount(2);
+    await expect(diff).toContainText(revision.id);
+    await expect(diff).toContainText("結末には新しい追加行。");
+    await expect(diff).not.toContainText("第 100 段落");
+    if (shell === "mobile") {
+      expect(await hunks.first().evaluate(element => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(1);
+    }
+  }
+});
 
 test("a 501-document PostgreSQL work opens its final scene through the canonical deep link", async ({page}) => {
   test.setTimeout(90000);
