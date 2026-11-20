@@ -84,6 +84,10 @@ async function main() {
   const targetIdentity = await embeddedIdentity(targetId);
   assert.equal(targetIdentity.sourceSha, targetSha);
   assert.equal(targetIdentity.version, targetVersion);
+  await writeFile(path.join(root, 'images.json'), JSON.stringify({
+    format: 'codexia-schema-maintenance-ci-images/v1', nonce, baseId, targetId,
+    baseIdentity, targetIdentity, migration,
+  }) + '\n', { mode: 0o600, flag: 'wx' });
 
   const { PodmanStandaloneHost } = await import(pathToFileURL(path.join(repoRoot, 'deploy/updater/standalone-host.mjs')).href);
   const host = new PodmanStandaloneHost({

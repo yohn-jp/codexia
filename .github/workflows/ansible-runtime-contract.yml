@@ -13,6 +13,7 @@ on:
       - deploy/updater/test-standalone-maintenance-integration.mjs
       - deploy/updater/test-standalone-maintenance-preload.mjs
       - deploy/updater/test-schema-maintenance-postgres-integration.mjs
+      - deploy/updater/test-schema-maintenance-recovery-integration.mjs
       - deploy/ansible/prepare.yml
       - deploy/ansible/initialize-schema.yml
       - deploy/ansible/initialize-fresh.yml
@@ -54,6 +55,7 @@ on:
       - deploy/updater/test-standalone-maintenance-integration.mjs
       - deploy/updater/test-standalone-maintenance-preload.mjs
       - deploy/updater/test-schema-maintenance-postgres-integration.mjs
+      - deploy/updater/test-schema-maintenance-recovery-integration.mjs
       - deploy/ansible/rotate-api-auth-token.yml
       - deploy/ansible/rotate-tunnel-token.yml
       - deploy/ansible/validate-tunnel-token-rotation-inputs.yml
@@ -231,10 +233,12 @@ jobs:
           bash -n deploy/updater/test-runtime-contract-integration.sh
           node --check deploy/updater/test-standalone-maintenance-integration.mjs
           node --check deploy/updater/test-schema-maintenance-postgres-integration.mjs
+          node --check deploy/updater/test-schema-maintenance-recovery-integration.mjs
       - name: Exercise generated Core and Full Quadlets on disposable rootless Podman
         if: steps.reuse.outputs.eligible != 'true'
         env:
           CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE: 'yes'
+          CODEXIA_RUNTIME_ACCEPTANCE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           ANSIBLE_PLAYBOOK: /opt/codexia-ansible/bin/ansible-playbook
         run: |
           fixture_user=codexia-runtime-contract-test
@@ -247,6 +251,7 @@ jobs:
             XDG_RUNTIME_DIR="/run/user/$fixture_uid" \
             DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" \
             CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE=yes \
+            CODEXIA_RUNTIME_ACCEPTANCE_SOURCE_SHA="$CODEXIA_RUNTIME_ACCEPTANCE_SOURCE_SHA" \
             PATH="$PATH" \
             bash "$fixture_repo/deploy/updater/test-runtime-contract-integration.sh"
       - name: Remove the disposable VM marker and user manager
