@@ -38,6 +38,7 @@ on:
       - scripts/standalone-host.test.mjs
       - scripts/standalone-maintenance.test.mjs
       - scripts/standalone-update-controller.mjs
+      - scripts/standalone-schema-maintenance.mjs
       - .github/workflows/ansible-runtime-contract.yml
   push:
     branches: [main]
@@ -79,6 +80,7 @@ on:
       - scripts/standalone-host.test.mjs
       - scripts/standalone-maintenance.test.mjs
       - scripts/standalone-update-controller.mjs
+      - scripts/standalone-schema-maintenance.mjs
       - .github/workflows/ansible-runtime-contract.yml
 permissions:
   contents: read

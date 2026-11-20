@@ -52,9 +52,18 @@ const schemaMarkerStore={
   load:async()=>validateSchemaMaintenanceIntent(JSON.parse(await readFile(maintenanceMarker,'utf8'))),
   clear:()=>clearBackupIntent(maintenanceMarker),
 };
+async function readSchemaMarkerIfPresent(){
+  let metadata;
+  try{metadata=await lstat(maintenanceMarker);}catch(error){if(error.code==='ENOENT')return null;throw error;}
+  assert.ok(metadata.isFile()&&!metadata.isSymbolicLink()&&(metadata.mode&0o777)===0o600,'Maintenance marker must be a private regular file');
+  if(typeof process.getuid==='function')assert.equal(metadata.uid,process.getuid(),'Maintenance marker owner differs from the service user');
+  const value=JSON.parse(await readFile(maintenanceMarker,'utf8'));
+  return value?.format==='codexia-schema-maintenance/v1'?validateSchemaMaintenanceIntent(value):null;
+}
 const pendingCutover=await store.loadCutover();
 if(pendingCutover)assert.ok(['boot','recover-cutover'].includes(command),'Interrupted legacy cutover must recover before other operations');
 const pendingMaintenance=await lstat(maintenanceMarker).then(()=>true,error=>{if(error.code==='ENOENT')return false;if(command==='boot'||command==='maintain')return true;throw error;});
+const pendingSchemaMarker=pendingMaintenance?await readSchemaMarkerIfPresent():null;
 if(pendingMaintenance){
   assert.equal(pendingCutover,null,'Simultaneous cutover and maintenance intents require operator repair');
   assert.equal(await store.loadBackupIntent(),null,'Simultaneous backup and maintenance intents require operator repair');
@@ -63,11 +72,11 @@ if(pendingMaintenance){
     // Rollback verification runs the exact captured old entrypoint under the
     // parent controller's lock, while the durable recovery marker still exists.
     await assertMaintenanceSnapshotVerifier({config,configPath,entry:fileURLToPath(import.meta.url)});
-  }else assert.ok(command==='boot'||command==='maintain'||command==='schema-maintenance','Pending runtime maintenance requires recovery before other operations');
+  }else assert.ok(command==='boot'||command==='maintain','Pending runtime maintenance requires recovery before other operations');
 }
+if(command==='schema-maintenance')assert.equal(pendingMaintenance,false,'An existing maintenance marker must be recovered before starting schema maintenance');
 if(command==='boot'){
-  const raw=JSON.parse(await readFile(maintenanceMarker,'utf8'));
-  if(raw.format==='codexia-schema-maintenance/v1'){
+  if(pendingSchemaMarker){
     const host=new PodmanStandaloneHost(config);
     const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
     await recoverSchemaMaintenance({controller,state:await store.loadState(),markerStore:schemaMarkerStore,stateFile:config.stateFile,routeFile:config.routeFile});
