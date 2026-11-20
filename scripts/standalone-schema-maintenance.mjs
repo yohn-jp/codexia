@@ -37,7 +37,7 @@ export function validateSchemaMaintenanceIntent(value) {
   assert.equal(typeof value.priorPaused, 'boolean');
   assert.equal(typeof value.priorTimerWasActive, 'boolean');
   assert.ok(['blue', 'green'].includes(value.priorSlot));
-  assert.ok(typeof value.stateFile === 'string' && typeof value.routeFile === 'string');
+  assert.ok(typeof value.stateFile === 'string' && typeof value.routeFile === 'string' && value.stateFile.startsWith('/') && value.routeFile.startsWith('/'));
   const { installed: priorRelease, target: targetRelease } = assertSameEpochAdditiveTarget(value.priorRelease, value.targetRelease);
   return { ...value, priorRelease, targetRelease };
 }
@@ -54,6 +54,18 @@ async function assertWriter(controller, state, slot, release, route) {
   assert.deepEqual(observed.writers, [{ slot, image: release.image }], 'Schema maintenance writer is not exclusive');
   assert.equal(observed.route, route, 'Schema maintenance route is not as expected');
   await controller.host.probe(slot, release);
+}
+
+async function ensureWriter(controller, state, slot, release) {
+  const observed = await controller.host.observe();
+  if (observed.writers.length === 0) {
+    const owner = { operationId: randomUUID(), release };
+    try { await controller.host.prepare(slot, release, owner); }
+    finally { await controller.host.stopInitialPreflight(slot, owner); }
+    await controller.host.startWriter(slot, release);
+  } else if (observed.writers.length !== 1 || observed.writers[0].slot !== slot || observed.writers[0].image !== release.image) {
+    throw new Error('Schema maintenance encountered a foreign or mixed writer');
+  }
 }
 
 /**
@@ -92,8 +104,8 @@ export async function runSchemaMaintenance({ controller, state: stateValue, targ
     state = targetState(state, target, channel.checkpoint, intent.priorSlot);
     await markerStore.save({ ...intent, phase: 'committed' });
     await controller.save(state);
-    await controller.host.startWriter(intent.priorSlot, target);
-    const route = state.paused ? 'blocked' : intent.priorSlot;
+    await ensureWriter(controller, state, intent.priorSlot, target);
+    const route = intent.priorSlot;
     await controller.host.route(route);
     await assertWriter(controller, state, intent.priorSlot, target, route);
     if (timerWasActive && !state.paused) await controller.host.startPollingTimer();
@@ -108,9 +120,15 @@ export async function runSchemaMaintenance({ controller, state: stateValue, targ
 
 /** Recover only an interrupted marker. Prior state is restored only when the
  * target migration has not committed; an uncertain fingerprint remains blocked. */
-export async function recoverSchemaMaintenance({ controller, state: stateValue, markerStore }) {
+export async function recoverSchemaMaintenance({ controller, state: stateValue, markerStore, stateFile, routeFile }) {
   const marker = validateSchemaMaintenanceIntent(await markerStore.load());
   let state = validateControllerState(stateValue);
+  assert.equal(marker.stateFile, stateFile, 'Schema maintenance state path changed during recovery');
+  assert.equal(marker.routeFile, routeFile, 'Schema maintenance route path changed during recovery');
+  assert.equal(await controller.host.freshDatabaseIdentity(), marker.databaseId, 'Schema maintenance database identity changed during recovery');
+  const priorState = state.installed.image === marker.priorRelease.image && state.journal.active.image === marker.priorRelease.image && state.journal.generation === marker.journalGeneration;
+  const targetStatePersisted = state.installed.image === marker.targetRelease.image && state.journal.active.image === marker.targetRelease.image && state.journal.generation === marker.journalGeneration + 1;
+  assert.ok(priorState || targetStatePersisted, 'Schema maintenance controller state does not match the durable marker');
   await controller.host.route('blocked');
   await controller.host.stopPollingTimer().catch(() => undefined);
   const observeFingerprint = async release => controller.host.schemaFingerprint(release).catch(() => null);
@@ -122,12 +140,16 @@ export async function recoverSchemaMaintenance({ controller, state: stateValue, 
   const release = targetCommitted ? marker.targetRelease : marker.priorRelease;
   const slot = marker.priorSlot;
   state = targetCommitted ? targetState(state, release, state.journal.checkpoint, slot) : state;
-  const recoveredPaused = targetCommitted ? marker.priorPaused : marker.priorPaused;
-  await controller.save({ ...state, paused: recoveredPaused, lastError: null });
-  await controller.host.startWriter(slot, release);
-  const route = recoveredPaused ? 'blocked' : slot;
-  await controller.host.route(route);
-  await assertWriter(controller, state, slot, release, route);
+  const recoveredPaused = marker.priorPaused;
+  const channel = verifyUpdateChannel(await controller.host.fetchChannel(), controller.publicKey, state.journal.checkpoint, controller.now());
+  const recoveredState = targetCommitted && !targetStatePersisted ? targetState(state, release, channel.checkpoint, slot) : { ...state, journal: { ...state.journal, checkpoint: channel.checkpoint }, paused: recoveredPaused, lastError: null };
+  await controller.save(recoveredState);
+  state = recoveredState;
+  await ensureWriter(controller, state, slot, release);
+  // Paused preserves serving traffic; only the polling timer remains stopped.
+  const servingRoute = slot;
+  await controller.host.route(servingRoute);
+  await assertWriter(controller, state, slot, release, servingRoute);
   if (marker.priorTimerWasActive && !recoveredPaused) await controller.host.startPollingTimer();
   await markerStore.clear();
   return state;

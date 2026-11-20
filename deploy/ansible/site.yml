@@ -78,7 +78,7 @@
       ansible.builtin.assert:
         that:
           - ansible_facts.user_uid | int != 0
-          - codexia_stage in ['secrets', 'base', 'prepare', 'initialize', 'bootstrap-preflight', 'bootstrap-cutover', 'initialize-schema', 'initialize-fresh', 'enable', 'verify', 'maintain', 'rotate-probe-credentials', 'rotate-api-auth-token', 'rotate-app-password', 'rotate-tunnel-token', 'backup', 'pause', 'resume', 'rollback', 'acceptance-update', 'acceptance-rollback']
+          - codexia_stage in ['secrets', 'base', 'prepare', 'initialize', 'bootstrap-preflight', 'bootstrap-cutover', 'initialize-schema', 'initialize-fresh', 'enable', 'verify', 'maintain', 'rotate-probe-credentials', 'rotate-api-auth-token', 'rotate-app-password', 'rotate-tunnel-token', 'schema-maintenance', 'backup', 'pause', 'resume', 'rollback', 'acceptance-update', 'acceptance-rollback']
           - codexia_stage in ['secrets', 'base'] or codexia_frontend_origin is match('^https://[a-z0-9.-]+(:[0-9]+)?$')
           - codexia_stage in ['secrets', 'base'] or codexia_proxy_image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
           - codexia_stage in ['secrets', 'base'] or codexia_browser_auth.mode in ['token', 'cloudflare-access']
@@ -206,7 +206,7 @@
     - name: Require an existing controller for initialized lifecycle operations
       ansible.builtin.assert:
         that: journal.stat.exists
-      when: codexia_stage in ['verify', 'maintain', 'rotate-probe-credentials', 'rotate-api-auth-token', 'rotate-app-password', 'rotate-tunnel-token', 'enable', 'pause', 'resume', 'rollback', 'acceptance-update', 'acceptance-rollback']
+      when: codexia_stage in ['verify', 'maintain', 'rotate-probe-credentials', 'rotate-api-auth-token', 'rotate-app-password', 'rotate-tunnel-token', 'schema-maintenance', 'enable', 'pause', 'resume', 'rollback', 'acceptance-update', 'acceptance-rollback']
     - name: Verify preflight role and secret after initialization without changing them
       ansible.builtin.include_tasks: preflight.yml
       vars:
@@ -232,6 +232,9 @@
     - name: Rotate only the Tunnel token through locked secret replacement and service recovery
       ansible.builtin.include_tasks: rotate-tunnel-token.yml
       when: codexia_stage == 'rotate-tunnel-token' and journal.stat.exists
+    - name: Run the explicitly approved same-epoch additive schema maintenance
+      ansible.builtin.include_tasks: schema-maintenance.yml
+      when: codexia_stage == 'schema-maintenance' and journal.stat.exists and not ansible_check_mode
     - name: Verify reviewed inputs before resuming interrupted initialization
       ansible.builtin.include_tasks: verify-updater-inputs.yml
       when: journal.stat.exists and codexia_stage == 'initialize' and not ansible_check_mode
