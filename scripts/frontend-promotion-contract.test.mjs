@@ -9,6 +9,7 @@ const {parse}=require('yaml');
 const workflow=parse(readFileSync(new URL('../.github/workflows/frontend-release.yml',import.meta.url),'utf8'));
 
 test('frontend PR producer remains read-only and main promotion requires exact source proof and live identity',()=>{
+  assert.equal(workflow.concurrency.group, 'codexia-frontend-${{ github.event.pull_request.number || github.ref }}');
   const build=workflow.jobs.build;
   assert.deepEqual(build.needs,['source','preflight']);
   assert.equal(build.permissions.contents,'read');
