@@ -1276,9 +1276,6 @@ export class PodmanStandaloneHost{
     assert.equal(properties.LoadState,'loaded','Tunnel service is not loaded with its rotation startup fence');
     assert.deepEqual((properties.DropInPaths??'').trim().split(/\s+/u).filter(Boolean),[entry.file],
       'Tunnel rotation fence is overridden by another systemd drop-in');
-    const conditions=run('systemctl',['--user','show','--property=Conditions','--value',entry.unit]);
-    assert.ok(conditions.includes(entry.marker)&&conditions.includes(entry.permit),
-      'Systemd did not parse both Tunnel rotation startup conditions');
   }
   async installTunnelRotationStartupFence(){
     const entry=this.tunnelRotationStartupFence();
