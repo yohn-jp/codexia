@@ -1767,7 +1767,16 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         {pageError && <p className="pg-alert" role="alert">{pageError}</p>}
         {notice && <p className="pg-notice" role="status">{notice}</p>}
         {journalError && <p className="pg-alert" role="alert">{journalError}</p>}
-        {!project && <section className="pg-empty"><h2>{hosted ? "割り当てられた作品を読み込んでいます" : "最初の作品を作成してください"}</h2><p>{hosted ? "Hosted環境では割り当てられた作品だけを利用できます。" : "作品、原稿Revision、Knowledge、EvidenceはPostgreSQLへ保存されます。"}</p>{!hosted && <button type="button" onClick={() => openCreation("project")}>最初の作品を作成</button>}</section>}
+        {!project && <section className="pg-empty">
+          {hosted ? <>
+            <h2>{loading ? "割り当てられた作品を確認しています" : pageError ? "割当作品を確認できません" : "割り当てられた作品がありません"}</h2>
+            <p>Hosted環境では割り当てられた作品だけを利用できます。</p>
+          </> : <>
+            <h2>最初の作品を作成してください</h2>
+            <p>作品、原稿Revision、Knowledge、EvidenceはPostgreSQLへ保存されます。</p>
+            <button type="button" onClick={() => openCreation("project")}>最初の作品を作成</button>
+          </>}
+        </section>}
         {project && !selectedDocument && !active && !outlineError && <section className="pg-empty"><h2>{project.title}</h2><p>編集を始める文書を作成してください。</p><button type="button" onClick={() => openCreation("document")}>最初の文書を作成</button></section>}
         {active && <section className="pg-editor" aria-label={active.document.title}>
           <div className="pg-editor-heading">
