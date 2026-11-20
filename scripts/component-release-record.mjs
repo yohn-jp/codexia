@@ -15,7 +15,7 @@ export function buildComponentReleaseRecord(component,sourceSha,identity,produce
     assertFrontendIdentity(identity);
     assert.equal(identity.profile,'full','Released frontend must be the Full profile');
     assert.ok(producer&&typeof producer==='object'&&!Array.isArray(producer),'Frontend producer receipt is missing');
-    assert.ok(['push','pull_request'].includes(producer.event),'Unsupported frontend producer event');
+    assert.ok(['push','workflow_run','pull_request'].includes(producer.event),'Unsupported frontend producer event');
     assert.match(producer.sourceSha??'',sha,'Frontend producer source SHA is invalid');
     assert.equal(identity.sourceSha,producer.sourceSha,'Frontend producer source does not match embedded asset identity');
     assert.equal(identity.version,producer.version,'Frontend producer version does not match embedded asset identity');
