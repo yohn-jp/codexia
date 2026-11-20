@@ -149,6 +149,24 @@ test('Phase F channel factory derives signed sequences from certified embedded r
   assert.throws(() => parseComponentRelease(releaseInfo('0.1.2', source('a'), 'b'), '0.1.2', source('b'), image('b'), image('e'), compatibility), /release metadata|source/i);
   assert.throws(() => parseComponentRelease(releaseInfo('0.1.1', source('a'), 'a'), '0.1.1', source('a'), image('a'), image('f'), compatibility), /Full image digest/i);
   assert.throws(() => parseComponentRelease({ ...releaseInfo('0.1.1', source('a'), 'a'), prerelease: true }, '0.1.1', source('a'), image('a'), image('d'), compatibility), /prerelease/i);
+
+  const mainSha=source('f'),producerSha=source('e'),tree=source('d'),base=source('c'),version='0.1.4';
+  const promotedProducer={event:'pull_request',sourceSha:producerSha,version,workflowRunId:100,workflowRunNumber:99,workflowAttempt:2,
+    workflowId:72,prNumber:23,verifyRunId:101,proofRunId:102,verifyAttempt:1,planDigest:'a'.repeat(64),sourceTree:tree,mergeBaseSha:base,
+    artifacts:{core:{id:201,digest:'sha256:'+'b'.repeat(64),producerAttempt:2,archiveSha256:'c'.repeat(64)},
+      full:{id:202,digest:'sha256:'+'d'.repeat(64),producerAttempt:2,archiveSha256:'e'.repeat(64)}}};
+  const promotedMetadata={component:'backend',version,sourceSha:mainSha,providedApiEpoch:1,persistenceFormat:1,
+    images:{core:image('f'),full:image('a')},producer:promotedProducer};
+  const promotedRelease={tag_name:'backend-v'+version,draft:false,prerelease:false,
+    body:'Certified component release.\n\n```json\n'+JSON.stringify(promotedMetadata)+'\n```'};
+  const parsedPromotion=parseComponentRelease(promotedRelease,version,producerSha,image('f'),image('a'),compatibility);
+  const promotedIdentity={format:'codexia-backend-identity/v1',version,sourceSha:producerSha,platform:'linux/amd64',profile:'core',
+    migrationFingerprint:'sha256:'+'9'.repeat(64),persistenceFormat:1,apiEpoch:1};
+  const promotedChannelRelease=bindCertifiedImage(promotedIdentity,parsedPromotion,image('f'),compatibility);
+  assert.equal(promotedChannelRelease.sourceSha,producerSha);
+  assert.equal(parsedPromotion.sourceSha,mainSha);
+  assert.throws(()=>parseComponentRelease({...promotedRelease,body:'Certified component release.\n\n```json\n'+JSON.stringify({...promotedMetadata,producer:{...promotedProducer,sourceSha:mainSha}})+'\n```'},
+    version,producerSha,image('f'),image('a'),compatibility),/source/i);
 });
 
 test('Phase F fetch loader intercepts only exact disposable channel and identity URLs', { timeout: 15_000 }, async t => {

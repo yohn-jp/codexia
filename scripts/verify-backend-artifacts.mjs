@@ -28,8 +28,11 @@ export function selectBackendArtifacts(run, artifacts, jobs, expected) {
   const currentAttempt = positiveInteger(expected.currentAttempt, 'Backend workflow attempt');
   assert.equal(run.id, runId, 'Backend workflow run mismatch');
   assert.equal(run.run_attempt, currentAttempt, 'Backend workflow attempt mismatch');
-  assert.equal(run.event, 'push', 'Backend producer event must be a push');
-  assert.equal(run.head_branch, 'main', 'Backend producer branch must be main');
+  const event = expected.event ?? 'push';
+  assert.ok(['push', 'pull_request'].includes(event), 'Backend producer event is invalid');
+  assert.equal(run.event, event, 'Backend producer event mismatch');
+  if (event === 'push') assert.equal(run.head_branch, 'main', 'Backend producer branch must be main');
+  else assert.equal(run.head_branch, expected.headBranch, 'Backend PR producer branch mismatch');
   assert.equal(run.head_sha, expected.sourceSha, 'Backend producer source mismatch');
   assert.ok(Array.isArray(artifacts) && Array.isArray(jobs), 'Invalid backend artifact inventory');
   const identity = { runId, sourceSha: expected.sourceSha };

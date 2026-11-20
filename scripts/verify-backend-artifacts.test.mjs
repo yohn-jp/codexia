@@ -40,9 +40,18 @@ test('backend evidence fails closed on duplicate, wrong run, SHA, digest, expire
     assert.throws(()=>selectBackendArtifacts(run,artifacts.map(item=>item.id===12?{...item,...change}:item),jobs,expected));
   }
   assert.throws(()=>selectBackendArtifacts(run,[...artifacts,{...artifacts[2],id:99}],jobs,expected),/one fresh/);
-  assert.throws(()=>selectBackendArtifacts({...run,event:'pull_request'},artifacts,jobs,expected),/must be a push/);
+  assert.throws(()=>selectBackendArtifacts({...run,event:'pull_request'},artifacts,jobs,expected),/event mismatch/);
   assert.throws(()=>selectBackendArtifacts({...run,run_attempt:2},artifacts,jobs,expected),/attempt mismatch/);
   assert.throws(()=>selectBackendArtifacts(run,artifacts,[jobs[0],{...jobs[1],conclusion:'failure'}],expected),/did not succeed/);
   assert.throws(()=>selectBackendArtifacts(run,artifacts,[...jobs,jobs[1]],expected),/exactly one latest/);
   assert.throws(()=>selectBackendArtifacts(run,artifacts.map(item=>item.id===12?{...item,name:item.name.replace('attempt-3','attempt-4')}:item),jobs,expected),/newer than current/);
+});
+
+test('backend PR artifacts bind both tested profiles to the merged PR source and latest attempt',()=>{
+  const prRun={...run,event:'pull_request',head_branch:'feature/backend',run_attempt:3};
+  const prExpected={...expected,event:'pull_request',headBranch:'feature/backend'};
+  const {jobs,artifacts}=fixture();
+  assert.deepEqual(selectBackendArtifacts(prRun,artifacts,jobs,prExpected).map(item=>item.profile),['core','full']);
+  assert.throws(()=>selectBackendArtifacts(prRun,artifacts,jobs,expected),/event mismatch/);
+  assert.throws(()=>selectBackendArtifacts({...prRun,head_branch:'other'},artifacts,jobs,prExpected),/branch mismatch/);
 });

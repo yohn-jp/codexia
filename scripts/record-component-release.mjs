@@ -36,7 +36,14 @@ export function componentReleaseRecordFromEnvironment(env=process.env){
   const core=env.CODEXIA_CERTIFIED_IMAGE,full=env.CODEXIA_CERTIFIED_FULL_IMAGE;
   assert.match(core??'',digest);assert.match(full??'',digest);assert.notEqual(core,full);
   const compatibility=JSON.parse(readFileSync(new URL('../deploy/update-compatibility.json',import.meta.url),'utf8'));
-  return buildComponentReleaseRecord(component,sha,null,{core,full,compatibility});
+  const producer={core,full,compatibility,event:env.CODEXIA_BACKEND_PRODUCER_EVENT};
+  if(producer.event==='pull_request'){
+    const directory=env.CODEXIA_BACKEND_PROMOTION_DIR;
+    assert.ok(typeof directory==='string'&&path.isAbsolute(directory),'Backend promotion receipt directory is invalid');
+    producer.receipt=JSON.parse(readFileSync(path.join(directory,'codexia-backend-promotion.json'),'utf8'));
+    producer.mainTree=execFileSync('git',['rev-parse','HEAD^{tree}'],{encoding:'utf8'}).trim();
+  }else assert.equal(producer.event,'push','Backend producer event is invalid');
+  return buildComponentReleaseRecord(component,sha,null,producer);
 }
 
 async function main(){

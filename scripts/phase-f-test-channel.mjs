@@ -49,10 +49,31 @@ export function parseComponentRelease(apiRelease, expectedVersion, expectedSourc
   assert.match(expectedCoreImage, digestImage);
   assert.match(expectedFullImage, digestImage);
   const metadata = parseFencedMetadata(apiRelease.body);
-  assert.deepEqual(Object.keys(metadata).sort(), ['component', 'images', 'persistenceFormat', 'providedApiEpoch', 'sourceSha', 'version']);
+  const legacyKeys=['component','images','persistenceFormat','providedApiEpoch','sourceSha','version'];
+  assert.deepEqual(Object.keys(metadata).sort(),metadata.producer ? [...legacyKeys,'producer'].sort() : legacyKeys);
   assert.equal(metadata.component, 'backend');
   assert.equal(metadata.version, expectedVersion, 'Backend release version differs from its certified record');
-  assert.equal(metadata.sourceSha, expectedSourceSha, 'Backend release source differs from its certified record');
+  assert.match(metadata.sourceSha??'',/^[a-f0-9]{40}$/u,'Backend release main authority SHA is invalid');
+  const imageSourceSha=metadata.producer?.sourceSha??metadata.sourceSha;
+  assert.equal(imageSourceSha, expectedSourceSha, 'Backend image producer source differs from its certified record');
+  if(metadata.producer){
+    const producer=metadata.producer;
+    assert.deepEqual(Object.keys(producer).sort(),['artifacts','event','mergeBaseSha','planDigest','prNumber','proofRunId','sourceSha','sourceTree','verifyAttempt','verifyRunId','version','workflowAttempt','workflowId','workflowRunId','workflowRunNumber'].sort());
+    assert.equal(producer.event,'pull_request');
+    assert.equal(producer.version,metadata.version);
+    assert.notEqual(producer.sourceSha,metadata.sourceSha,'Backend producer and main authority must be distinct');
+    for(const key of ['sourceSha','sourceTree','mergeBaseSha']) assert.match(producer[key]??'',/^[a-f0-9]{40}$/u,'Backend producer '+key+' is invalid');
+    for(const key of ['workflowRunId','workflowRunNumber','workflowAttempt','workflowId','prNumber','verifyRunId','proofRunId','verifyAttempt']) assert.ok(Number.isSafeInteger(producer[key])&&producer[key]>0,'Backend producer '+key+' is invalid');
+    assert.match(producer.planDigest??'',/^[a-f0-9]{64}$/u,'Backend producer plan digest is invalid');
+    assert.deepEqual(Object.keys(producer.artifacts??{}).sort(),['core','full']);
+    for(const profile of ['core','full']){
+      const artifact=producer.artifacts[profile];
+      assert.deepEqual(Object.keys(artifact??{}).sort(),['archiveSha256','digest','id','producerAttempt']);
+      assert.ok(Number.isSafeInteger(artifact.id)&&artifact.id>0&&Number.isSafeInteger(artifact.producerAttempt)&&artifact.producerAttempt>0);
+      assert.match(artifact.digest,/^sha256:[a-f0-9]{64}$/u);
+      assert.match(artifact.archiveSha256,/^[a-f0-9]{64}$/u);
+    }
+  }
   assert.equal(metadata.providedApiEpoch, expectedCompatibility.apiEpoch, 'Backend release API epoch differs from this host contract');
   assert.equal(metadata.persistenceFormat, expectedCompatibility.persistenceFormat, 'Backend release persistence format differs from this host contract');
   assert.deepEqual(Object.keys(metadata.images).sort(), ['core', 'full']);
@@ -65,11 +86,11 @@ export function parseComponentRelease(apiRelease, expectedVersion, expectedSourc
 export function bindCertifiedImage(identityValue, metadata, image, expectedCompatibility = compatibility) {
   const identity = validateBackendIdentity(identityValue);
   assert.equal(metadata.images.core, image);
-  assert.equal(metadata.sourceSha, identity.sourceSha);
+  assert.equal(metadata.producer?.sourceSha??metadata.sourceSha, identity.sourceSha);
   assert.equal(metadata.version, identity.version);
   assert.equal(metadata.providedApiEpoch, identity.apiEpoch);
   assert.equal(metadata.persistenceFormat, identity.persistenceFormat);
-  return releaseFromIdentity(identity, image, metadata.sourceSha, metadata.version, expectedCompatibility, 'core');
+  return releaseFromIdentity(identity, image, metadata.producer?.sourceSha??metadata.sourceSha, metadata.version, expectedCompatibility, 'core');
 }
 
 /** Generate two signed test snapshots; the private key exists only in memory in this CI process. */
@@ -119,28 +140,34 @@ async function githubPages(resource, key, token) {
   return collectGitHubPages(async (page, perPage) => githubJson(resource + separator + 'per_page=' + perPage + '&page=' + page, token), key);
 }
 
-async function verifySourceCertification(record, releaseApiRecord, token) {
+async function verifySourceCertification(record, releaseApiRecord, metadata, token) {
+  const authoritySha=metadata.sourceSha;
+  if(metadata.producer){
+    const commit=await githubJson('git/commits/'+authoritySha,token);
+    assert.equal(commit?.sha,authoritySha,'Backend release main authority commit is unavailable');
+    assert.equal(commit?.tree?.sha,metadata.producer.sourceTree,'Backend producer tree differs from exact main authority tree');
+  }
   const tagRef = await githubJson('git/ref/tags/' + encodeURIComponent(record.tag), token);
   assert.equal(tagRef?.object?.type, 'commit', 'Certified backend tag must directly name its source commit');
-  assert.equal(tagRef.object.sha, record.sourceSha, 'Certified backend tag/source mismatch');
-  const runs = await githubPages('actions/workflows/verify.yml/runs?head_sha=' + record.sourceSha + '&branch=main&event=push&status=success', 'workflow_runs', token);
-  const sourceRun = verifiedSourceRun(runs, record.sourceSha);
+  assert.equal(tagRef.object.sha, authoritySha, 'Certified backend tag/main authority mismatch');
+  const runs = await githubPages('actions/workflows/verify.yml/runs?head_sha=' + authoritySha + '&branch=main&event=push&status=success', 'workflow_runs', token);
+  const sourceRun = verifiedSourceRun(runs, authoritySha);
   const sourceJobs = await githubPages('actions/runs/' + sourceRun.id + '/jobs?filter=latest', 'jobs', token);
   assertVerificationJobs(sourceJobs);
-  const backendRuns = await githubPages('actions/workflows/backend-release.yml/runs?head_sha=' + record.sourceSha + '&branch=main&event=push&status=completed', 'workflow_runs', token);
-  const backendRun = backendRuns.find(run => run?.head_sha === record.sourceSha && run?.head_branch === 'main' &&
+  const backendRuns = await githubPages('actions/workflows/backend-release.yml/runs?head_sha=' + authoritySha + '&branch=main&event=push&status=completed', 'workflow_runs', token);
+  const backendRun = backendRuns.find(run => run?.head_sha === authoritySha && run?.head_branch === 'main' &&
     run?.event === 'push' && run?.status === 'completed' && run?.conclusion === 'success');
   assert.ok(backendRun, 'Source has no successful main backend release workflow');
   const backendJobs = await githubPages('actions/runs/' + backendRun.id + '/jobs?filter=latest', 'jobs', token);
-  for (const name of [
-    'Build and test backend OCI image (core)',
-    'Build and test backend OCI image (full)',
-    'Publish immutable GHCR image',
-  ]) {
+  const names=metadata.producer ? ['Resolve verified backend promotion','Build and test backend OCI image (core)',
+    'Build and test backend OCI image (full)','Publish immutable GHCR image'] :
+    ['Build and test backend OCI image (core)','Build and test backend OCI image (full)','Publish immutable GHCR image'];
+  for (const name of names) {
     const matches = backendJobs.filter(job => job?.name === name);
     assert.equal(matches.length, 1, 'Expected one certified backend workflow job: ' + name);
     assert.equal(matches[0].status, 'completed', 'Backend job was not completed: ' + name);
-    assert.equal(matches[0].conclusion, 'success', 'Backend job did not pass: ' + name);
+    if(metadata.producer&&name.startsWith('Build and test backend OCI image')) assert.equal(matches[0].conclusion,'skipped','Promoted backend build should be skipped: '+name);
+    else assert.equal(matches[0].conclusion, 'success', 'Backend job did not pass: ' + name);
   }
   if (releaseApiRecord.created_at && backendRun.updated_at) {
     assert.ok(Date.parse(releaseApiRecord.created_at) <= Date.parse(backendRun.updated_at), 'Backend release record was created after its successful publication workflow completed');
@@ -152,17 +179,18 @@ function podmanJson(args) {
   return execFileSync('podman', args, { encoding: 'utf8', timeout: 60_000, maxBuffer: 4 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
-function verifyPulledImage(record) {
+function verifyPulledImage(record, metadata) {
+  const producerSha=metadata.producer?.sourceSha??metadata.sourceSha;
   execFileSync('podman', ['pull', '--arch', 'amd64', '--quiet', record.core], { stdio: 'inherit', timeout: 300_000 });
   const image = JSON.parse(podmanJson(['image', 'inspect', record.core]))[0];
   assert.ok(image.RepoDigests?.includes(record.core), 'Pulled backend image does not bind the exact certified digest');
   assert.equal(image.Os + '/' + image.Architecture, 'linux/amd64');
   const revision = image.Labels?.['org.opencontainers.image.revision'] ?? image.Config?.Labels?.['org.opencontainers.image.revision'];
-  assert.equal(revision, record.sourceSha, 'OCI revision label differs from the certified source');
+  assert.equal(revision, producerSha, 'OCI revision label differs from the certified producer source');
   const identity = JSON.parse(podmanJson(['run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'all',
     '--security-opt', 'no-new-privileges', '--entrypoint', 'cat', record.core, '/app/update-identity.json']));
-  assert.equal(identity.sourceSha, record.sourceSha);
-  assert.equal(identity.version, record.version);
+  assert.equal(identity.sourceSha, producerSha);
+  assert.equal(identity.version, metadata.version);
   assert.equal(identity.profile, 'core');
   assert.equal(identity.platform, 'linux/amd64');
   assert.equal(identity.apiEpoch, compatibility.apiEpoch);
@@ -186,7 +214,7 @@ async function main() {
   for (const record of records) {
     const apiRelease = await githubJson('releases/tags/' + encodeURIComponent(record.tag), token);
     const metadata = parseComponentRelease(apiRelease, record.version, record.sourceSha, record.core, record.full, compatibility);
-    const certification = await verifySourceCertification(record, apiRelease, token);
+    const certification = await verifySourceCertification(record, apiRelease, metadata, token);
     verifiedRecords.push({ record, metadata, certification });
   }
   // Do not pass the read-only Actions token to Podman or any image process.
@@ -194,7 +222,7 @@ async function main() {
   const identities = [];
   const releases = [];
   for (const { record, metadata, certification } of verifiedRecords) {
-    const identity = verifyPulledImage(record);
+    const identity = verifyPulledImage(record,metadata);
     const release = bindCertifiedImage(identity, metadata, record.core, compatibility);
     releases.push(release);
     identities.push({ ...record, metadata, identity, certification, release });

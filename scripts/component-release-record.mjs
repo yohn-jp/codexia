@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { assertFrontendIdentity } from './verify-frontend-compatibility.mjs';
 import { readComponentVersion } from './component-release-version.mjs';
+import { validateBackendIdentity } from './backend-update-identity.mjs';
 
 const sha=/^[a-f0-9]{40}$/u;
 const digest=/^[a-f0-9]{64}$/u;
@@ -43,13 +44,50 @@ export function buildComponentReleaseRecord(component,sourceSha,identity,produce
         proofRunId:producer.proofRunId,verifyAttempt:producer.verifyAttempt,planDigest:producer.planDigest,sourceTree:producer.sourceTree,
         mergeBaseSha:producer.mergeBaseSha}}:{})};
   }else{
-    version=readComponentVersion('backend');
     const digestPattern=/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u;
     const core=producer?.core,full=producer?.full;
     assert.match(core??'',digestPattern);assert.match(full??'',digestPattern);assert.notEqual(core,full);
     const compatibility=producer.compatibility;
     assert.ok(compatibility&&Number.isSafeInteger(compatibility.apiEpoch)&&compatibility.apiEpoch>0);
+    version=readComponentVersion('backend');
     metadata={component,version,sourceSha,providedApiEpoch:compatibility.apiEpoch,persistenceFormat:compatibility.persistenceFormat,images:{core,full}};
+    if(producer.event==='pull_request'){
+      const receipt=producer.receipt;
+      assert.ok(receipt&&typeof receipt==='object'&&!Array.isArray(receipt),'Backend promotion receipt is missing');
+      assert.equal(receipt.format,'codexia-backend-promotion/v1');
+      assert.equal(receipt.event,'pull_request');
+      assert.equal(receipt.mainSha,sourceSha,'Backend promotion main authority mismatch');
+      assert.match(receipt.sourceSha??'',sha,'Backend producer source SHA is invalid');
+      assert.notEqual(receipt.sourceSha,sourceSha,'Backend producer source must remain distinct from main release authority');
+      assert.equal(receipt.version,readComponentVersion('backend',String(receipt.workflowRunNumber)),'Backend producer version does not match its workflow run number');
+      assert.equal(receipt.sourceTree,producer.mainTree,'Backend producer tree differs from exact main tree');
+      for(const key of ['workflowRunId','workflowAttempt','workflowId','prNumber','verifyRunId','proofRunId','verifyAttempt']) assert.ok(positive(receipt[key]),'Backend producer '+key+' is invalid');
+      for(const key of ['planDigest']) assert.match(receipt[key]??'',digest,'Backend producer '+key+' is invalid');
+      for(const key of ['sourceTree','mergeBaseSha']) assert.match(receipt[key]??'',sha,'Backend producer '+key+' is invalid');
+      assert.ok(receipt.artifacts&&typeof receipt.artifacts==='object','Backend producer artifacts are missing');
+      for(const profile of ['core','full']){
+        const artifact=receipt.artifacts[profile];
+        assert.ok(artifact&&typeof artifact==='object','Backend '+profile+' producer artifact is missing');
+        assert.ok(positive(artifact.id)&&positive(artifact.producerAttempt),'Backend '+profile+' producer artifact identity is invalid');
+        assert.match(artifact.digest??'',/^sha256:[a-f0-9]{64}$/u,'Backend '+profile+' producer artifact digest is invalid');
+        assert.match(artifact.archiveSha256??'',digest,'Backend '+profile+' handoff archive digest is invalid');
+        const identity=validateBackendIdentity(artifact.identity);
+        assert.equal(identity.sourceSha,receipt.sourceSha,'Backend '+profile+' image producer SHA mismatch');
+        assert.equal(identity.version,receipt.version,'Backend '+profile+' image version mismatch');
+        assert.equal(identity.profile,profile,'Backend '+profile+' image profile mismatch');
+        assert.equal(identity.apiEpoch,compatibility.apiEpoch,'Backend '+profile+' API epoch mismatch');
+        assert.equal(identity.persistenceFormat,compatibility.persistenceFormat,'Backend '+profile+' persistence format mismatch');
+      }
+      const coreIdentity=receipt.artifacts.core.identity,fullIdentity=receipt.artifacts.full.identity;
+      for(const key of ['version','sourceSha','platform','migrationFingerprint','apiEpoch','persistenceFormat']) assert.equal(coreIdentity[key],fullIdentity[key],'Backend Core and Full identity mismatch: '+key);
+      version=receipt.version;
+      metadata.producer={event:'pull_request',sourceSha:receipt.sourceSha,version:receipt.version,workflowRunId:receipt.workflowRunId,
+        workflowRunNumber:receipt.workflowRunNumber,workflowAttempt:receipt.workflowAttempt,workflowId:receipt.workflowId,prNumber:receipt.prNumber,verifyRunId:receipt.verifyRunId,
+        proofRunId:receipt.proofRunId,verifyAttempt:receipt.verifyAttempt,planDigest:receipt.planDigest,sourceTree:receipt.sourceTree,
+        mergeBaseSha:receipt.mergeBaseSha,artifacts:Object.fromEntries(['core','full'].map(profile=>{
+          const artifact=receipt.artifacts[profile];return [profile,{id:artifact.id,digest:artifact.digest,producerAttempt:artifact.producerAttempt,archiveSha256:artifact.archiveSha256}];
+        }))};
+    }
   }
   const tag=component+'-v'+version;
   const body='Certified component release.\n\n```json\n'+JSON.stringify(metadata,null,2)+'\n```';
