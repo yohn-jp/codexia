@@ -889,13 +889,18 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     const title = projectTitle.trim();
     if (!title || creationInFlightRef.current) return;
     creationInFlightRef.current = true;
-    if (!await protectTransition()) { creationInFlightRef.current = false; return; }
+    let creationStarted = false;
+    try {
+      if (!await protectTransition()) return;
+      creationStarted = true;
+    } finally {
+      if (!creationStarted) creationInFlightRef.current = false;
+    }
     const previousIntent = projectCreationIntentRef.current;
     const intent = previousIntent?.title === title
       ? previousIntent
       : { id: crypto.randomUUID() as ProjectId, title };
     projectCreationIntentRef.current = intent;
-    creationInFlightRef.current = true;
     setLoading(true);
     setPageError("");
     try {
@@ -1012,8 +1017,14 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     const title = documentTitle.trim();
     if (!title || creationInFlightRef.current) return;
     creationInFlightRef.current = true;
-    if (!await protectTransition()) { creationInFlightRef.current = false; return; }
-    if (!canCreateDocument) { setPageError("完全な目次を取得できていないか、文書数が現在の作品構成上限に達しています。"); return; }
+    let creationStarted = false;
+    try {
+      if (!await protectTransition()) return;
+      if (!canCreateDocument) { setPageError("完全な目次を取得できていないか、文書数が現在の作品構成上限に達しています。"); return; }
+      creationStarted = true;
+    } finally {
+      if (!creationStarted) creationInFlightRef.current = false;
+    }
     const parentId = (newDocumentParent || null) as DocumentId | null;
     const orderKey = String(documents.length).padStart(8, "0");
     const previousIntent = documentCreationIntentRef.current;
@@ -1030,7 +1041,6 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           idempotencyKey: crypto.randomUUID(),
         };
     documentCreationIntentRef.current = intent;
-    creationInFlightRef.current = true;
     setLoading(true);
     setPageError("");
     try {
