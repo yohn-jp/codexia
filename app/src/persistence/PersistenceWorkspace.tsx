@@ -357,6 +357,10 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const [knowledgeType, setKnowledgeType] = useState("person");
   const [revisions, setRevisions] = useState<DocumentRevision[]>([]);
   const [showRevisions, setShowRevisions] = useState(false);
+  const [revisionCursor, setRevisionCursor] = useState<string | null>(null);
+  const [revisionPageLoading, setRevisionPageLoading] = useState(false);
+  const [revisionPageError, setRevisionPageError] = useState("");
+  const revisionPageSequenceRef = useRef(0);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
   const [requestedPanel, setRequestedPanel] = useState<WorkspacePanelRequest>();
   const [creationIntent, setCreationIntent] = useState<"project" | "document">();
@@ -637,6 +641,12 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     const currentJournal = journalRef.current;
     if (sessionBlockedRef.current || !currentProject || !currentJournal || !nextDocumentId) return;
     const openSequence = ++openSequenceRef.current;
+    revisionPageSequenceRef.current += 1;
+    setShowRevisions(false);
+    setRevisions([]);
+    setRevisionCursor(null);
+    setRevisionPageLoading(false);
+    setRevisionPageError("");
     setLoading(true);
     setPageError("");
     setNotice("");
@@ -708,8 +718,12 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         });
       }
       setReadingPage(loadReadingPage(authorScope, currentProject.id, nextDocumentId));
+      revisionPageSequenceRef.current += 1;
       setRevisions([]);
       setShowRevisions(false);
+      setRevisionCursor(null);
+      setRevisionPageLoading(false);
+      setRevisionPageError("");
     } catch (error) {
       if (openSequence === openSequenceRef.current) setPageError(error instanceof Error ? error.message : "文書を開けませんでした。");
     } finally {
@@ -1560,27 +1574,71 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     }
   }
 
-  async function loadRevisions(): Promise<void> {
+  async function loadRevisionPage(before: string | undefined, replace: boolean): Promise<void> {
     const requestedDocument = activeRef.current;
-    if (!project || !requestedDocument || requestedDocument.document.projectId !== project.id) return;
-    const requestedProjectId = project.id;
+    if (!requestedDocument) return;
+    const requestedProjectId = requestedDocument.document.projectId;
     const requestedDocumentId = requestedDocument.document.id;
     const requestedRevisionId = requestedDocument.revision.id;
+    if (!project || project.id !== requestedProjectId) return;
     const navigationGeneration = openSequenceRef.current;
-    const requestIsCurrent = () => !sessionBlockedRef.current &&
+    const requestSequence = ++revisionPageSequenceRef.current;
+    const requestOwnsState = () => requestSequence === revisionPageSequenceRef.current;
+    const sameDocumentNavigation = () => !sessionBlockedRef.current &&
+      requestSequence === revisionPageSequenceRef.current &&
       projectIdRef.current === requestedProjectId &&
       openSequenceRef.current === navigationGeneration &&
       activeRef.current?.document.projectId === requestedProjectId &&
-      activeRef.current.document.id === requestedDocumentId &&
-      activeRef.current.revision.id === requestedRevisionId;
+      activeRef.current.document.id === requestedDocumentId;
+    const requestIsCurrent = () => sameDocumentNavigation() && activeRef.current?.revision.id === requestedRevisionId;
+    setRevisionPageLoading(true);
+    setRevisionPageError("");
     try {
-      const page = await api.persistenceRevisions(requestedProjectId, requestedDocumentId, 50);
+      const page = await api.persistenceRevisions(requestedProjectId, requestedDocumentId, 50, before);
       if (!requestIsCurrent()) return;
-      setRevisions([...page.revisions]);
-      setShowRevisions((value) => !value);
+      setRevisions((current) => {
+        if (replace) return [...page.revisions];
+        const seen = new Set(current.map((revision) => revision.id));
+        return [...current, ...page.revisions.filter((revision) => !seen.has(revision.id))];
+      });
+      setRevisionCursor(page.nextBefore);
     } catch (error) {
-      if (requestIsCurrent()) setPageError(error instanceof Error ? error.message : "Revision履歴を読み込めませんでした。");
+      if (requestIsCurrent()) setRevisionPageError(error instanceof Error ? error.message : "Revision履歴を読み込めませんでした。");
+    } finally {
+      if (!requestOwnsState()) return;
+      if (sameDocumentNavigation() && activeRef.current?.revision.id !== requestedRevisionId) {
+        setRevisions([]);
+        setRevisionCursor(null);
+        setRevisionPageError("");
+        void loadRevisionPage(undefined, true);
+      } else if (sameDocumentNavigation()) {
+        setRevisionPageLoading(false);
+      }
     }
+  }
+
+  async function loadRevisions(): Promise<void> {
+    if (showRevisions) {
+      revisionPageSequenceRef.current += 1;
+      setShowRevisions(false);
+      setRevisions([]);
+      setRevisionCursor(null);
+      setRevisionPageLoading(false);
+      setRevisionPageError("");
+      return;
+    }
+    const requestedDocument = activeRef.current;
+    if (!project || !requestedDocument || requestedDocument.document.projectId !== project.id) return;
+    setShowRevisions(true);
+    setRevisions([]);
+    setRevisionCursor(null);
+    setRevisionPageError("");
+    void loadRevisionPage(undefined, true);
+  }
+
+  function loadMoreRevisions(): void {
+    if (!revisionCursor || revisionPageLoading) return;
+    void loadRevisionPage(revisionCursor, false);
   }
 
   async function restoreRevision(source: DocumentRevision): Promise<void> {
@@ -1625,7 +1683,12 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         evidence: initializeDocumentEvidence(restored.revision.markdown, restored.revision.id, snapshot), evidenceLoadKey: latest.evidenceLoadKey + 1,
       });
       setNotice("選んだRevisionを新しいPostgreSQL Revisionとして復元しました。");
+      revisionPageSequenceRef.current += 1;
       setShowRevisions(false);
+      setRevisions([]);
+      setRevisionCursor(null);
+      setRevisionPageLoading(false);
+      setRevisionPageError("");
     } catch (error) {
       if (!stillSelected()) { setResumeEpoch((value) => value + 1); return; }
       if (error instanceof ApiError && error.status === 409) {
@@ -2112,7 +2175,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             <h3>Revision履歴</h3>
             {revisions.map((revision) => {
               const difference = revision.id === active.revision.id ? null : revisionDifferencePreview(revision.markdown, active.revision.markdown);
-              return <article key={revision.id}>
+              return <article key={revision.id} data-revision-id={revision.id}>
               <p>{new Date(revision.createdAt).toLocaleString()} · {revision.id === active.revision.id ? "現在" : "保存済み"}</p>
               <pre>{revision.markdown.slice(0, 700) || "（空の原稿）"}</pre>
               {difference && <details className="pg-revision-difference">
@@ -2126,6 +2189,10 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
               {revision.id !== active.revision.id && <button type="button" disabled={loading || restoring || active.dirty} onClick={() => void restoreRevision(revision)}>このRevisionを新しいRevisionとして復元</button>}
             </article>;
             })}
+            {revisionPageError && <p role="alert">{revisionPageError}</p>}
+            {revisionPageLoading && <p role="status">古いRevision履歴を読み込んでいます。</p>}
+            {revisionCursor && <button type="button" disabled={loading || restoring || revisionPageLoading || active.dirty || Boolean(active.remoteConflict)} onClick={loadMoreRevisions}>さらに古いRevisionを読む</button>}
+            {revisionPageError && revisions.length === 0 && <button type="button" disabled={revisionPageLoading} onClick={() => void loadRevisionPage(undefined, true)}>Revision履歴を再試行</button>}
           </section>}
         </section>}
       </main>);
