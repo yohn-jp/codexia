@@ -327,6 +327,7 @@ export function installTestAdapters(hostClass = PodmanStandaloneHost) {
   const expectedImage = process.env.CODEXIA_RUNTIME_MAINTENANCE_IMAGE;
   const stopWriterWithRuntimeProof = hostClass.prototype.stopWriter;
   const verifyWriterUnitsWithPinnedIdentity = hostClass.prototype.verifyWriterUnits;
+  const assertProxyRuntimeWithPinnedRepoDigest = hostClass.prototype.assertProxyRuntime;
   assert.match(expectedImage ?? '', /^sha256:[a-f0-9]{64}$/u, 'Synthetic local image identity is missing');
 
   if (process.env.CODEXIA_RUNTIME_MAINTENANCE_BACKUP_DIGEST) {
@@ -341,10 +342,10 @@ export function installTestAdapters(hostClass = PodmanStandaloneHost) {
     };
     hostClass.prototype.assertProxyRuntime = async function assertDisposableStableProxy() {
       assert.equal(systemdState(`${ROTATION_PROXY_CONTAINER}.service`), 'active', 'Stable proxy fixture is not active');
-      const [proxy] = JSON.parse(run('podman', ['inspect', '--type', 'container', ROTATION_PROXY_CONTAINER]));
-      assert.equal(proxy.State?.Running, true, 'Stable proxy fixture is not running');
-      assert.equal(normalizeImageId(proxy.Image), expectedImage, 'Stable proxy fixture image changed');
-      assert.deepEqual(Object.keys(proxy.NetworkSettings?.Networks ?? {}).sort(), ['codexia']);
+      // The local synthetic app image is not the proxy image. Keep the
+      // production RepoDigest, container/image identity, mount, network,
+      // capability and read-only checks for the pinned proxy fixture.
+      await assertProxyRuntimeWithPinnedRepoDigest.call(this);
     };
     hostClass.prototype.verifyBlockedPasswordRotation = async function verifyBlockedPostgresRotation(slot, release) {
       assert.deepEqual(await this.observe(), { route: 'blocked', writers: [{ slot, image: release.image }] });
@@ -804,7 +805,7 @@ async function startStableRotationProxy({ repoRoot, config, proxyQuadlet, origin
     `Volume=${path.dirname(config.stateFile)}:/config/state:ro,Z\n` +
     `User=0\nEntrypoint=node\nExec=/config/proxy.mjs\nReadOnly=true\nNoNewPrivileges=true\nDropCapability=all\n` +
     `Tmpfs=/tmp:rw,nosuid,nodev,noexec,size=16m\nLabel=codexia.runtime-contract-test=${nonce}\n` +
-    `[Service]\nRestart=on-failure\nRestartSec=1\nTimeoutStartSec=30\n[Install]\nWantedBy=default.target\n`;
+    `PodmanArgs=--image-volume=ignore\n[Service]\nRestart=on-failure\nRestartSec=1\nTimeoutStartSec=30\n[Install]\nWantedBy=default.target\n`;
   await atomicWrite(proxyQuadlet, source);
   try {
     run('systemctl', ['--user', 'daemon-reload']);
@@ -1180,7 +1181,10 @@ async function main() {
     persistenceFormat: 1, apiEpoch: 1,
   };
   const initialState = { ...initialControllerState(release, 'blue', null), paused: false };
-  const proxyDigest = 'ghcr.io/yohn-jp/codexia-backend@sha256:' + 'd'.repeat(64);
+  // The running rotation proxy needs a real RepoDigest for exact runtime
+  // attestation. This is the immutable core image from certified release
+  // backend-v0.1.342; the synthetic d…d placeholder below cannot be pulled.
+  const proxyDigest = 'ghcr.io/yohn-jp/codexia-backend@sha256:c426ce5958440536f9a65f2f08161bdc709e4c8b8264680844f7a3080280f92f';
   const nonce = process.env.CODEXIA_RUNTIME_MAINTENANCE_NONCE;
   assert.match(nonce ?? '', /^[a-f0-9]{32}$/u, 'Synthetic maintenance ownership nonce is missing');
   const proxyText = `[Container]\nImage=${proxyDigest}\nContainerName=codexia-api-proxy\nNetwork=codexia.network\nLabel=codexia-runtime-contract-test=${nonce}\n`;
