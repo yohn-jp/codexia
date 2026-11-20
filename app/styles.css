@@ -358,7 +358,7 @@ rt { color: var(--ruby-muted); font-size: 0.55em; }
   .print-view { display: block !important; min-height: 0; overflow: visible; padding: 0; border: 0; color: black; background: white; white-space: pre-wrap; }
   .print-view.is-vertical { writing-mode: vertical-rl; }
   html:has(> body > .pg-print-document),
-  body:has(> .pg-print-document) { height: auto; max-height: none; overflow: visible; }
+  body:has(> .pg-print-document) { height: auto; min-height: 0; max-height: none; overflow: visible; }
   body:has(> .pg-print-document) { position: static; transform: none; background: white; }
   body:has(> .pg-print-document) > #root { display: none !important; }
   .pg-print-document { max-width: none; overflow-wrap: anywhere; }
