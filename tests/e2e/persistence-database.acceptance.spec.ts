@@ -62,13 +62,24 @@ test("replays ambiguous project and document creates with retained client intent
   expect(projects.filter((item) => item.title === projectTitle)).toHaveLength(1);
   expect(projectBodies).toHaveLength(1);
 
+  // A completed intent is cleared, so an independent same-title submission
+  // must allocate a fresh project id rather than replaying the prior create.
+  await outline.getByLabel("作品名").fill(projectTitle);
+  await outline.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
+  await expect(page.getByRole("heading", { name: projectTitle, exact: true })).toBeVisible();
+  const projectsAfterSameTitle = await page.request.get("/api/v1/persistence/projects");
+  const sameTitleProjects = (await projectsAfterSameTitle.json() as Array<{ id: string; title: string }>).filter((item) => item.title === projectTitle);
+  expect(sameTitleProjects).toHaveLength(2);
+  expect(projectBodies).toHaveLength(2);
+  expect(projectBodies[1]?.id).not.toBe(projectBodies[0]?.id);
+
   const createDocument = outline.locator(".pg-library-create-document");
   await createDocument.locator("summary").click();
   await createDocument.getByLabel("文書名").fill(documentTitle);
   await createDocument.getByRole("button", { name: "作成", exact: true }).click();
   await expect(page.getByRole("heading", { name: documentTitle, exact: true })).toBeVisible();
 
-  const project = projects.find((item) => item.title === projectTitle)!;
+  const project = sameTitleProjects[1]!;
   const documentsResponse = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents`);
   expect(documentsResponse.ok()).toBe(true);
   const documents = (await documentsResponse.json() as { documents: Array<{ id: string; title: string }> }).documents;
