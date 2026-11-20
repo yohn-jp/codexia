@@ -37,7 +37,7 @@ on:
 permissions:
   contents: read
 env:
-  CODEXIA_SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
+  CODEXIA_SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}
   CODEXIA_VERIFY_RUN_ID: ${{ github.event.workflow_run.id || '' }}
 concurrency:
   group: codexia-backend-${{ github.event.pull_request.number || github.event.workflow_run.head_sha || github.sha }}
