@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { matchesGlob } from 'node:path';
 import { test } from 'node:test';
 import { REQUIRED_VERIFICATION_JOBS } from './ci-contract.mjs';
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
@@ -8,6 +9,34 @@ const { parse } = require('yaml');
 
 test('full verification uses twenty jobs including planning and certification', () => {
   assert.equal(REQUIRED_VERIFICATION_JOBS.length, 20);
+});
+
+test('PR and main release triggers follow their component build inputs', () => {
+  const releases = ['frontend', 'backend'].map(component => parse(
+    readFileSync(new URL(`../.github/workflows/${component}-release.yml`, import.meta.url), 'utf8')
+  ));
+  const changes = [
+    ['Desktop authoring', ['app/src/main.tsx'], [true, false]],
+    ['Story browser entry', ['modules/story/src/browser.tsx'], [true, false]],
+    ['Backend API', ['packages/api/src/server.ts'], [false, true]],
+    ['Base compiler settings', ['tsconfig.base.json'], [true, true]],
+    ['Docker context', ['.dockerignore'], [false, true]],
+    ['Dockerfile context override', ['Dockerfile.backend.dockerignore'], [false, true]],
+    ['Mixed Story changes', ['modules/story/src/browser.tsx', 'modules/story/src/index.ts'], [true, true]],
+  ];
+  for (const event of ['pull_request', 'push']) {
+    for (const [label, files, expected] of changes) {
+      const triggered = releases.map(release => files.some(file => {
+        let included = false;
+        for (const pattern of release.on[event].paths) {
+          const exclude = pattern.startsWith('!');
+          if (matchesGlob(file, exclude ? pattern.slice(1) : pattern)) included = !exclude;
+        }
+        return included;
+      }));
+      assert.deepEqual(triggered, expected, `${event}: ${label}`);
+    }
+  }
 });
 
 const plan = async (files, event = 'pull_request') => {
