@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import type { ChangeOperation, SnapshotId, SnapshotReader } from "@codexia/contracts";
 import { assertChangeOperation } from "@codexia/contracts";
-import { createLegacySourceReader, inspectLegacyProject, isSecretLegacyPath, proposeMigrationImport } from "./index.js";
+import { createLegacySourceReader, inspectLegacyProject, isSecretLegacyPath, planExactFileImport, proposeMigrationImport } from "./index.js";
 
 const snapshot: SnapshotId = { projectId: "new-project", projectVersion: 1 };
 
@@ -17,6 +17,29 @@ type TargetFiles = Map<string, { content: string; revision: string }>;
 function digest(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
 }
+
+test("an exact legacy import compares binary and UTF-8 content in the target encoding", async () => {
+  const bytes = Buffer.from([0, 255, 128, 32, 1]);
+  let stored = bytes;
+  const target: SnapshotReader = {
+    snapshot,
+    async read(_path, encoding = "utf8") {
+      return { content: stored.toString(encoding), revision: digest(stored) };
+    },
+    async list() { return []; },
+  };
+  const check = (source: Buffer) => planExactFileImport({
+    context: { target, source: createLegacySourceReader(os.tmpdir()), snapshot, projectId: snapshot.projectId, enabledModules: new Set() },
+    producerId: "filesystem", source: "cover.jpg", target: "assets/cover.jpg", category: "authoritative",
+    bytes: source, detail: "Binary fixture", message: "Import fixture",
+  });
+  assert.equal((await check(bytes)).entry.disposition, "unchanged");
+  assert.equal((await check(Buffer.concat([bytes, Buffer.from([10])]))).entry.disposition, "conflict");
+  stored = Buffer.from(bytes.toString("base64"));
+  assert.equal((await check(bytes)).entry.disposition, "conflict");
+  stored = Buffer.from("日本語の本文");
+  assert.equal((await check(Buffer.from("日本語の本文"))).entry.disposition, "unchanged");
+});
 
 function targetReader(files: TargetFiles): SnapshotReader {
   return {
