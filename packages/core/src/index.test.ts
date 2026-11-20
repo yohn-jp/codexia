@@ -89,6 +89,43 @@ test("disjoint operations approved together can apply in sequence",async()=>{con
 test("binary module artifacts preserve exact bytes and metadata-backed revisions",async()=>{const p=await project(),reader=await core.reader(p.id),op=operation(reader.snapshot,"assets/image.bin",Buffer.from([0,255,128,32]).toString("base64"));op.writes[0]!.encoding="base64";await accept(p.id,op);const next=await core.reader(p.id);assert.equal((await next.read("assets/image.bin","base64"))?.content,op.writes[0]!.content);assert.deepEqual(await next.listRevisions!("assets"),[{path:"assets/image.bin",revision:(await next.read("assets/image.bin"))!.revision}]);});
 test("search and writing statistics share immutable Unicode-aware scene data",async()=>{const p=await hierarchy(),reader=await core.reader(p.id),search=await core.searchSnapshot(p.id,"😀",20,reader.snapshot),stats=await core.writingStatsSnapshot(p.id,reader.snapshot);assert.equal(search.results[0]?.offset,5);assert.equal(stats.stats.totalCharCount,5);assert.deepEqual(stats.snapshot,search.snapshot);});
 test("reorder and recursive deletion mutate hierarchy while keeping revision history",async()=>{const p=await hierarchy();const second=await core.buildCreateHierarchyOperation(p.id,{kind:"scene",id:"s2",title:"Second",volumeId:"v1",chapterId:"c1",manuscriptBody:"Second"});await accept(p.id,second.operation);const reorder=await core.buildReorderHierarchyOperation(p.id,{kind:"scene",volumeId:"v1",chapterId:"c1",orderedIds:["s2","s1"]});await accept(p.id,reorder.operation);assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters[0]?.scenes.map(x=>x.id),["s2","s1"]);const docs=await persistence.read(r=>r.listDocuments(p.id));const scene=docs.find(d=>d.title==="Scene")!;const removal=await core.buildDeleteHierarchyOperation(p.id,{kind:"volume",id:"v1"});await accept(p.id,removal.operation);assert.equal((await core.tree(p.id)).volumes.length,0);assert.equal((await persistence.read(r=>r.getRevision(p.id,scene.id,scene.headRevisionId!)))?.markdown,"Text 😀\n");});
+test("PostgreSQL append keys preserve creation order across digit boundaries and reordered siblings", async () => {
+  const p = await project();
+  const create = async (input: Parameters<typeof core.buildCreateHierarchyOperation>[1]) => {
+    const built = await core.buildCreateHierarchyOperation(p.id, input);
+    await accept(p.id, built.operation);
+  };
+  const volumeIds = Array.from({ length: 10 }, (_, index) => `volume-${index + 1}`);
+  for (const [index, id] of volumeIds.entries()) await create({ kind: "volume", id, title: `Volume ${index + 1}` });
+  const chapterIds = Array.from({ length: 10 }, (_, index) => `chapter-${index + 1}`);
+  for (const [index, id] of chapterIds.entries()) await create({
+    kind: "chapter", id, title: `Chapter ${index + 1}`, volumeId: volumeIds[0]!,
+  });
+  const sceneIds = Array.from({ length: 10 }, (_, index) => `scene-${index + 1}`);
+  for (const [index, id] of sceneIds.entries()) await create({
+    kind: "scene", id, title: `Scene ${index + 1}`, volumeId: volumeIds[0]!, chapterId: chapterIds[0]!,
+  });
+
+  const before = await persistence.read(reader => reader.listDocuments(p.id));
+  assert.deepEqual((await core.tree(p.id)).volumes.map(volume => volume.id), volumeIds);
+  assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters.map(chapter => chapter.id), chapterIds);
+  assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters[0]?.scenes.map(scene => scene.id), sceneIds);
+  assert.equal(before.find(document => document.kind === "volume" && document.title === "Volume 10")?.orderKey, "0000000010");
+  assert.equal(before.find(document => document.kind === "chapter" && document.title === "Chapter 10")?.orderKey, "0000000010");
+  assert.equal(before.find(document => document.kind === "scene" && document.title === "Scene 10")?.orderKey, "0000000010");
+
+  const reorder = await core.buildReorderHierarchyOperation(p.id, { kind: "volume", orderedIds: [...volumeIds].reverse() });
+  await accept(p.id, reorder.operation);
+  const beforeAppend = await persistence.read(reader => reader.listDocuments(p.id));
+  const oldVolumeKeys = new Map(beforeAppend.filter(document => document.kind === "volume").map(document => [document.title, document.orderKey]));
+  await create({ kind: "volume", id: "volume-11", title: "Volume 11" });
+  const afterAppend = await persistence.read(reader => reader.listDocuments(p.id));
+  for (const document of afterAppend.filter(document => document.kind === "volume" && document.title !== "Volume 11")) {
+    assert.equal(document.orderKey, oldVolumeKeys.get(document.title), "append does not rewrite existing order keys");
+  }
+  assert.equal(afterAppend.find(document => document.kind === "volume" && document.title === "Volume 11")?.orderKey, "0000000010");
+  assert.deepEqual((await core.tree(p.id)).volumes.map(volume => volume.id), [...volumeIds].reverse().concat("volume-11"));
+});
 test("manuscript history restores by appending an immutable revision",async()=>{const p=await hierarchy(),reader=await core.reader(p.id),path="manuscript/v1/c1/s1.md",old=await reader.read(path);const history=await core.listManuscriptSnapshots(p.id,"s1");await accept(p.id,operation(reader.snapshot,path,"New",old!.revision));const restore=await core.buildRestoreOperation(p.id,{sceneId:"s1",snapshotId:history.snapshots[0]!.id});await accept(p.id,restore.operation);assert.equal((await core.readScene(p.id,"s1")).text,"Text 😀\n");assert.equal((await core.listManuscriptSnapshots(p.id,"s1")).snapshots.length,3);});
 test("unsafe paths and unbound manuscript artifacts cannot bypass canonical documents",async()=>{const p=await project(),reader=await core.reader(p.id);await assert.rejects(reader.read("../secret"));await assert.rejects(accept(p.id,operation(reader.snapshot,"manuscript/unbound.md","illegal")),/canonical document/);assert.equal(await (await core.reader(p.id)).read("manuscript/unbound.md"),null);});
 test("independent approved proposals survive unrelated project changes", async () => {

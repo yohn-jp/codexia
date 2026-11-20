@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import YAML from "yaml";
 import {
+  nextOrderKey,
   snapshotScopeRevision,
   type ChangeOperation,
   type ModuleActionContext,
@@ -653,7 +654,7 @@ export async function buildNarrativeChangeProposal(context: ModuleActionContext,
         const parentKey = type === "chapter" ? "volume" : "chapter";
         const parentId = String(raw[parentKey]);
         const siblings = [...entities.values()].filter((entity) => entity.type === type && entity.raw[parentKey] === parentId);
-        raw.order = siblings.reduce((max, entity) => Math.max(max, typeof entity.raw.order === "number" ? entity.raw.order : 0), 0) + 1;
+        raw.order = nextOrderKey(siblings.map((entity) => String(entity.raw.order ?? "")));
       }
       const entity: WorkEntity = { id, type: type as StoryEntityType, filePath: path, raw, ...(typeof raw.body === "string" ? { body: raw.body } : {}) };
       setFileWrite(files, reads, writes, path, outputYaml(raw)); entities.set(id, entity);

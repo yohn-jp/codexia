@@ -40,6 +40,16 @@ export interface ModelUsageStore {
 export interface FileRevision { path: string; revision: string | null }
 /** Binds a directory membership and every listed file revision, including absent members. */
 export interface ScopeRevision { prefix: string; revision: string }
+/** Return a decimal order key after every existing text-ordered key without rewriting them. */
+export function nextOrderKey(orderKeys: readonly string[]): string {
+  const last = [...orderKeys].sort((left, right) => left < right ? -1 : left > right ? 1 : 0).at(-1);
+  if (last === undefined) return "0000000001";
+  if (!/^\d+$/.test(last)) return `${last}0`;
+  const incremented = (BigInt(last) + 1n).toString().padStart(last.length, "0");
+  // An unpadded boundary such as 9 -> 10 would sort backwards as text. Extending
+  // the greatest existing key stays after it, and remains a decimal Story order.
+  return incremented > last ? incremented : `${last}0`;
+}
 /** Contents are full UTF-8 or base64; null is an explicit deletion. */
 export interface FileChange extends FileRevision { content: string | null; encoding?: "utf8" | "base64" }
 export type EffectClass = "manuscript" | "structure" | "metadata" | "settings" | "migration";
