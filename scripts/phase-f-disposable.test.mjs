@@ -13,6 +13,7 @@ const frontendUrl = 'https://codexia-phase-f.fixture.invalid/desktop/update-iden
 
 test('Standalone updater acceptance runs only on demand, without duplicating Full-model OCI', async () => {
   const workflow = await readFile(path.join(root, '.github/workflows/standalone-updater-acceptance.yml'), 'utf8');
+  const proxyQuadlet = await readFile(path.join(root, 'deploy/updater/codexia-api-proxy.container.example'), 'utf8');
   const evidenceDoc = await readFile(path.join(root, 'docs/deployment/PHASE-F-DISPOSABLE-CI.md'), 'utf8');
   const runtimeJob = workflow.split('  rootless-updater-lifecycle:', 2)[1];
   assert.match(workflow, /runs-on: ubuntu-26\.04/u);
@@ -21,6 +22,7 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
   assert.doesNotMatch(workflow, /full-model-oci-acceptance\.yml/u);
   assert.match(workflow, /cancel-in-progress: true/u);
   assert.match(workflow, /test-phase-f-disposable\.sh/u);
+  assert.match(proxyQuadlet, /^PodmanArgs=--image-volume=ignore$/mu);
   assert.match(workflow, /contents: read/u);
   assert.match(workflow, /actions: read/u);
   assert.match(workflow, /packages: read/u);

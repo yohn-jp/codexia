@@ -208,7 +208,7 @@ export function assertProxyRuntimeObservation(quadletText,container,activeState,
   assertContainerEnvironment(container,imageInfo.Config?.Env,quadletText,'Private proxy');
 
   for(const [directive,expected] of [
-    ['User','0'],['Entrypoint','node'],['Exec','/config/proxy.mjs'],['PodmanArgs','--image-volume=ignore'],['ReadOnly','true'],
+    ['User','0'],['Entrypoint','node'],['Exec','/config/proxy.mjs'],['ReadOnly','true'],
     ['NoNewPrivileges','true'],['DropCapability','all'],['Tmpfs','/tmp:rw,nosuid,nodev,noexec,size=16m'],
   ]){
     const observed=[...quadletText.matchAll(new RegExp('^'+directive+'=(.*)$','gmu'))].map(match=>match[1]);

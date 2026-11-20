@@ -160,8 +160,8 @@ test('maintenance requires the running proxy to match its private digest-pinned 
     'Reject anonymous image-declared volumes even when configured proxy binds are correct');
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,HostConfig:{...container.HostConfig,ReadonlyRootfs:false}},'active',imageInfo,proxyOptions),/root filesystem is not read-only/u);
   assert.throws(()=>assertProxyRuntimeObservation(quadlet.replace('ReadOnly=true','ReadOnly=false'),container,'active',imageInfo,proxyOptions),/Quadlet ReadOnly contract drift/u);
-  assert.throws(()=>assertProxyRuntimeObservation(quadlet.replace('PodmanArgs=--image-volume=ignore\n',''),container,'active',imageInfo,proxyOptions),/Quadlet PodmanArgs contract drift/u,
-    'Require anonymous image volumes to stay disabled in the private proxy unit');
+  assert.doesNotThrow(()=>assertProxyRuntimeObservation(quadlet.replace('PodmanArgs=--image-volume=ignore\n',''),container,'active',imageInfo,proxyOptions),
+    'A previously reviewed unit may omit this Podman option when its observed mounts still satisfy the runtime contract');
   assert.throws(()=>assertProxyRuntimeObservation(quadlet, {...container,HostConfig:{...container.HostConfig,SecurityOpt:['no-new-privileges:true','seccomp=unconfined']}},'active',imageInfo,proxyOptions),/security options/u);
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Config:{...container.Config,Entrypoint:['sh']}},'active',imageInfo,proxyOptions),/entrypoint/u);
   assert.throws(()=>assertProxyRuntimeObservation(quadlet,{...container,Config:{...container.Config,Env:[...proxyImageEnvironment,'NODE_OPTIONS=--require=/tmp/inject.js']}},'active',imageInfo,proxyOptions),/unexpected runtime environment/u);

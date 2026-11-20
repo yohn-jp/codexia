@@ -544,7 +544,7 @@ run_updater pause "$config_file" > "$test_root/pause-recovery.json"
 run_updater verify "$config_file" > "$test_root/verify-recovery.json"
 run_updater status "$config_file" > "$test_root/status-recovered.json"
 assert_controller_status "$test_root/status-recovered.json" "$base_image" blue idle true
-recovery_error=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).state.lastError ?? "")' "$test_root/boot-recovery.json")
+recovery_error=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).lastError ?? "")' "$test_root/boot-recovery.json")
 [[ "$recovery_error" == 'Interrupted update recovered from durable journal' ]]
 
 # Deliberate disposable route-state drift must be rejected by the existing host verifier; it remains closed.
