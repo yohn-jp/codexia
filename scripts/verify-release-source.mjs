@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Read-only gates for tag and commit-addressed publication.
 import { execFileSync } from 'node:child_process';
+import { appendFile } from 'node:fs/promises';
 import { assertReleaseIdentity, assertVerificationJobs, collectGitHubPages, releaseVerificationState, verifiedSourceRun } from './release-policy.mjs';
 
 const repository = process.env.GITHUB_REPOSITORY;
@@ -50,3 +51,4 @@ const jobs = await collectGitHubPages(
 );
 assertVerificationJobs(jobs);
 console.log(`Verified release ${tag} source ${expectedSha} with run ${verified.id}. No publication performed by this gate.`);
+if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `run-id=${verified.id}\n`);

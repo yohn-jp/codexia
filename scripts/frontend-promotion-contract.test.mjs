@@ -1,0 +1,54 @@
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+import { test } from 'node:test';
+
+const require=createRequire(new URL('../packages/core/package.json',import.meta.url));
+const {parse}=require('yaml');
+const workflow=parse(readFileSync(new URL('../.github/workflows/frontend-release.yml',import.meta.url),'utf8'));
+
+test('frontend PR producer remains read-only and main promotion requires exact source proof and live identity',()=>{
+  const build=workflow.jobs.build;
+  assert.deepEqual(build.needs,['preflight']);
+  assert.equal(build.permissions.contents,'read');
+  assert.equal(build.permissions.actions,'read');
+  assert.equal(build.permissions['pull-requests'],'read');
+  assert.doesNotMatch(JSON.stringify(build),/secrets\./u);
+  const promote=build.steps.find(step=>step.run?.includes('verify-frontend-artifact.mjs select-promotion'));
+  assert.ok(promote);
+  assert.equal(promote.env.CODEXIA_VERIFY_RUN_ID,undefined);
+  assert.equal(promote.env.CODEXIA_LIVE_FRONTEND_VERSION,'${{ needs.preflight.outputs.frontend-version }}');
+  const prProducer=build.steps.find(step=>step.id==='producer');
+  assert.equal(prProducer.env.CODEXIA_PR_NUMBER,'${{ github.event.pull_request.number }}');
+  const upload=build.steps.find(step=>step.id==='upload');
+  assert.ok(upload);
+  assert.match(upload.if,/pull_request/u);
+  assert.match(upload.if,/promoted != 'true'/u);
+  assert.equal(upload.with['retention-days'],14);
+  const fallback=build.steps.find(step=>step.run?.includes('pnpm run build:frontend'));
+  assert.match(fallback.if,/promoted != 'true'/u);
+});
+
+test('frontend deploy rechecks producer artifact, exact main source and deployed bytes before recording',()=>{
+  const certify=workflow.jobs.certify;
+  assert.equal(certify.needs,undefined);
+  assert.equal(certify.outputs['verify-run-id'],'${{ steps.source.outputs.run-id }}');
+  const source=certify.steps.find(step=>step.run?.includes('verify-release-source.mjs'));
+  assert.ok(source);
+  const deploy=workflow.jobs.deploy;
+  assert.match(deploy.if,/push/u);
+  assert.match(deploy.if,/refs\/heads\/main/u);
+  const verifyArtifact=deploy.steps.find(step=>step.run?.includes('verify-frontend-artifact.mjs'));
+  const compatibility=deploy.steps.find(step=>step.run?.includes('verify-frontend-compatibility.mjs')&&!step.run.includes('deployed'));
+  const deployed=deploy.steps.find(step=>step.run?.includes('verify-frontend-compatibility.mjs deployed'));
+  const record=deploy.steps.find(step=>step.run?.includes('record-component-release.mjs frontend'));
+  assert.ok(verifyArtifact&&compatibility&&deployed&&record);
+  assert.ok(deploy.steps.indexOf(verifyArtifact)<deploy.steps.indexOf(compatibility));
+  assert.ok(deploy.steps.indexOf(deployed)<deploy.steps.indexOf(record));
+  assert.equal(verifyArtifact.env.CODEXIA_FRONTEND_PRODUCER_SHA,'${{ needs.build.outputs.producer-sha }}');
+  assert.equal(compatibility.env.CODEXIA_FRONTEND_PRODUCER_SHA,'${{ needs.build.outputs.producer-sha }}');
+  assert.equal(record.env.CODEXIA_FRONTEND_PRODUCER_SHA,'${{ needs.build.outputs.producer-sha }}');
+  assert.equal(verifyArtifact.env.CODEXIA_VERIFY_RUN_ID,"${{ needs.build.outputs.producer-verify-run-id || needs.certify.outputs.verify-run-id }}");
+  assert.equal(verifyArtifact.env.CODEXIA_FRONTEND_SOURCE_VERIFY_RUN_ID,'${{ needs.build.outputs.producer-verify-run-id }}');
+  assert.equal(verifyArtifact.env.CODEXIA_FRONTEND_CERTIFIED_VERIFY_RUN_ID,'${{ needs.certify.outputs.verify-run-id }}');
+});
