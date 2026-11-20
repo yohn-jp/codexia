@@ -291,7 +291,7 @@ IMAGE_ID="$(normalize_image_id "$(podman image inspect --format '{{.Id}}' "$IMAG
 image_label="$(podman image inspect --format '{{ index .Labels "codexia.runtime-contract-test" }}' "$IMAGE_TAG")"
 [[ "$image_label" == "$NONCE" ]] || die 'synthetic fixture image ownership label mismatch'
 
-printf '%s\n' 'synthetic secret fixture' > "$WORK_DIR/secret"
+printf '%s\n' 'synthetic-runtime-auth-token-fixture-0123456789' > "$WORK_DIR/secret"
 podman secret create codexia-auth-token "$WORK_DIR/secret" >/dev/null
 OWNED_SECRETS+=(codexia-auth-token)
 INITIAL_APP_PASSWORD="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
