@@ -135,21 +135,25 @@ test("IME composition blocks navigation while coalesced editor state stays curre
   const f = await fixture(page);
   await page.evaluate(() => {
     window.print = () => {
-      const content = document.querySelector("#manuscript");
-      document.documentElement.dataset.printedManuscript = Array.from(content?.querySelectorAll(".cm-line") ?? [], (line) => line.textContent ?? "").join("\n").replace(/\n+$/u, "");
+      document.documentElement.dataset.printedManuscript = document.querySelector(".pg-print-manuscript")?.textContent ?? "";
     };
   });
-  const text = "Printed from the newest editor input."; await editor(page).fill(text);
+  const text = "Printed from the newest editor input."; await replaceEditor(page, text);
   await editor(page).evaluate((element) => element.dispatchEvent(new CompositionEvent("compositionstart", { data: "にほんご", bubbles: true })));
   await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
   await expect(page.getByRole("heading", { name: "Scene One", exact: true })).toBeVisible();
   await expect(page.locator(".pg-editor-column").getByRole("alert").first()).toContainText("日本語入力の変換が完了していません");
   await editor(page).evaluate((element) => element.dispatchEvent(new CompositionEvent("compositionend", { data: "日本語", bubbles: true })));
   const composedText = `${text} 日本語入力`;
-  await editor(page).fill(composedText);
+  await replaceEditor(page, composedText);
   await page.locator(".pg-editor-command-menu > summary").click();
   await page.getByRole("button", { name: "印刷", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-printed-manuscript", composedText);
+  await page.emulateMedia({ media: "print" });
+  await expect(page.locator(".pg-print-manuscript")).toBeVisible();
+  await expect(editor(page)).toBeHidden();
+  await expect(page.locator(".pg-editor-command-menu")).toBeHidden();
+  await page.emulateMedia({ media: "screen" });
   await saved(page, f, composedText); await openRevisionHistory(page);
   await expect(page.getByRole("region", { name: "Revision履歴" })).toContainText(composedText);
 });
