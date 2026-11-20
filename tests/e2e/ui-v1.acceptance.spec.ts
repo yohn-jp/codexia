@@ -1,6 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
+import { createHash, randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 import { createWritingFixture, openManuscriptScene, openRevisionHistory, ownerLogin, readPersistenceDrafts, manuscriptEditor as editor, readManuscriptMarkdown as markdown } from "./postgres-fixture";
+
+const requirePersistence = createRequire(new URL("../../packages/persistence-postgres/package.json", import.meta.url));
+type TestPostgresClient = {
+  connect(): Promise<void>;
+  query(sql: string, parameters?: unknown[]): Promise<unknown>;
+  end(): Promise<void>;
+};
+const { Client } = requirePersistence("pg") as { Client: new (options: { connectionString: string }) => TestPostgresClient };
 
 test.use({ hasTouch: true });
 async function expectMarkdown(page: Page, text: string) { await expect.poll(() => markdown(page)).toBe(text); }
@@ -214,6 +224,160 @@ test("revision history responses and errors stay bound to the scene that request
   await failureResponse;
   await expect(page.getByText("A履歴の取得失敗", { exact: true })).toHaveCount(0);
   await expect(editor(page)).toContainText(bCurrent);
+});
+
+test("revision history pages tied PostgreSQL revisions through retry, navigation, and restore", async ({ page }) => {
+  test.setTimeout(120_000);
+  const { project, scene, second } = await createWritingFixture(page);
+  const documentPath = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
+  const historyUrl = (url: URL) => url.pathname === `${documentPath}/revisions`;
+  const documentResponse = await page.request.get(documentPath);
+  expect(documentResponse.ok()).toBe(true);
+  let revision = (await documentResponse.json() as { revision: { id: string; markdown: string } }).revision;
+  const initialRevision = revision;
+  let revisionCount = 1;
+
+  async function seedTo(count: number): Promise<void> {
+    while (revisionCount < count) {
+      const markdown = `Stored revision ${String(revisionCount + 1).padStart(3, "0")}.`;
+      const response = await page.request.patch(documentPath, {
+        headers: {
+          Origin: new URL(page.url()).origin,
+          "Idempotency-Key": randomUUID(),
+          "X-Client-Id": "revision-history-pagination-test",
+        },
+        data: {
+          baseRevisionId: revision.id,
+          changes: [{ fromUtf16: 0, toUtf16: revision.markdown.length, insert: markdown }],
+          resultingSha256: createHash("sha256").update(markdown).digest("hex"),
+          clientId: "revision-history-pagination-test",
+        },
+      });
+      expect(response.status()).toBe(200);
+      revision = (await response.json() as { revision: { id: string; markdown: string } }).revision;
+      revisionCount += 1;
+    }
+  }
+
+  async function tieRevisionTimes(): Promise<void> {
+    const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
+    expect(databaseUrl, "the browser test must use its disposable PostgreSQL database").toBeTruthy();
+    const client = new Client({ connectionString: databaseUrl! });
+    try {
+      await client.connect();
+      await client.query("BEGIN");
+      // The disposable fixture deliberately creates an otherwise impossible timestamp tie.
+      await client.query("SET LOCAL session_replication_role = replica");
+      await client.query(
+        "UPDATE document_revision SET created_at = $1 WHERE project_id = $2 AND document_id = $3",
+        [new Date("2020-01-01T00:00:00.000Z"), project.id, scene.id],
+      );
+      await client.query("COMMIT");
+    } finally {
+      await client.end();
+    }
+  }
+
+  async function reopenScene(): Promise<void> {
+    await page.goto(`/desktop/projects/${project.id}/scenes/${scene.id}`);
+    await expect(editor(page)).toContainText(revision.markdown);
+  }
+
+  await seedTo(50);
+  await tieRevisionTimes();
+  await reopenScene();
+  await openRevisionHistory(page);
+  const history = page.getByRole("region", { name: "Revision履歴", exact: true });
+  await expect(history.locator("article")).toHaveCount(50);
+  await expect(history.getByRole("button", { name: "さらに古いRevisionを読む", exact: true })).toHaveCount(0);
+
+  await seedTo(51);
+  await tieRevisionTimes();
+  await reopenScene();
+  await openRevisionHistory(page);
+  await expect(history.locator("article")).toHaveCount(50);
+  const nextPage = history.getByRole("button", { name: "さらに古いRevisionを読む", exact: true });
+  await expect(nextPage).toBeVisible();
+  await nextPage.click();
+  await expect(history.locator("article")).toHaveCount(51);
+  await expect(history).toContainText("最初の本文。");
+
+  await seedTo(150);
+  await tieRevisionTimes();
+  await reopenScene();
+  await openRevisionHistory(page);
+  await expect(history.locator("article")).toHaveCount(50);
+  let failOnePage = true;
+  await page.route(historyUrl, async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.has("before") && failOnePage) {
+      failOnePage = false;
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "履歴ページ取得失敗", code: "TEST_FAILURE" }) });
+      return;
+    }
+    await route.continue();
+  });
+  await history.getByRole("button", { name: "さらに古いRevisionを読む", exact: true }).click();
+  await expect(history.getByRole("alert")).toContainText("履歴ページ取得失敗");
+  await expect(history.locator("article")).toHaveCount(50);
+  await history.getByRole("button", { name: "さらに古いRevisionを読む", exact: true }).click();
+  await expect(history.locator("article")).toHaveCount(100);
+  const pageIds = await history.locator("article").evaluateAll((articles) => articles.map((article) => article.getAttribute("data-revision-id")));
+  expect(new Set(pageIds).size).toBe(100);
+
+  let releasePage!: () => void;
+  let markPageStarted!: () => void;
+  const pageGate = new Promise<void>((resolve) => { releasePage = resolve; });
+  const pageStarted = new Promise<void>((resolve) => { markPageStarted = resolve; });
+  await page.unroute(historyUrl);
+  await page.route(historyUrl, async (route) => {
+    if (new URL(route.request().url()).searchParams.has("before")) {
+      markPageStarted();
+      await pageGate;
+    }
+    await route.continue();
+  });
+  await history.getByRole("button", { name: "さらに古いRevisionを読む", exact: true }).click();
+  await pageStarted;
+  const stalePageResponse = page.waitForResponse((response) => historyUrl(new URL(response.url())) && new URL(response.url()).searchParams.has("before"));
+  await openManuscriptScene(page, second);
+  releasePage();
+  await stalePageResponse;
+  await expect(history).toHaveCount(0);
+  await page.unroute(historyUrl);
+  await openRevisionHistory(page);
+  await expect(page.getByRole("region", { name: "Revision履歴", exact: true })).not.toContainText("Stored revision");
+
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.goto(`/mobile/projects/${project.id}/scenes/${scene.id}?view=writing`);
+  await expect(editor(page)).toContainText(revision.markdown);
+  await openRevisionHistory(page);
+  const mobileHistory = page.getByRole("region", { name: "Revision履歴", exact: true });
+  const mobileNextPage = mobileHistory.getByRole("button", { name: "さらに古いRevisionを読む", exact: true });
+  await expect(mobileNextPage).toBeVisible();
+  await mobileNextPage.scrollIntoViewIfNeeded();
+  const buttonBounds = await mobileNextPage.boundingBox();
+  expect(buttonBounds).toBeTruthy();
+  expect(buttonBounds!.x).toBeGreaterThanOrEqual(0);
+  expect(buttonBounds!.x + buttonBounds!.width).toBeLessThanOrEqual(360);
+  await mobileNextPage.click();
+  await expect(mobileHistory.locator("article")).toHaveCount(100);
+  await mobileHistory.getByRole("button", { name: "さらに古いRevisionを読む", exact: true }).click();
+  await expect(mobileHistory.locator("article")).toHaveCount(150);
+  const mobileIds = await mobileHistory.locator("article").evaluateAll((articles) => articles.map((article) => article.getAttribute("data-revision-id")));
+  expect(new Set(mobileIds).size).toBe(150);
+  const originalRevision = mobileHistory.locator(`article[data-revision-id="${initialRevision.id}"]`);
+  await expect(originalRevision).toContainText("最初の本文。");
+  await originalRevision.getByRole("button", { name: "このRevisionを新しいRevisionとして復元", exact: true }).click();
+  await expect(editor(page)).toContainText("最初の本文。");
+  await expect(page.getByRole("region", { name: "Revision履歴", exact: true })).toHaveCount(0);
+  const restoredResponse = await page.request.get(documentPath);
+  expect(restoredResponse.ok()).toBe(true);
+  const restored = (await restoredResponse.json() as { document: { headRevisionId: string }; revision: { id: string; markdown: string } });
+  expect(restored.revision.markdown).toBe(initialRevision.markdown);
+  expect(restored.document.headRevisionId).toBe(restored.revision.id);
+  expect(restored.revision.id).not.toBe(initialRevision.id);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
 });
 
 test("a failed Knowledge list does not block the initial document and can be retried in its panel", async ({ page }) => {
