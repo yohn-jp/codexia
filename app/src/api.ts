@@ -147,6 +147,11 @@ export interface PersistenceStatus {
   provider: "postgres" | null;
 }
 
+export interface PersistenceProjectPage {
+  projects: PersistenceProject[];
+  nextCursor: string | null;
+}
+
 export interface PersistenceNodeRead {
   node: KnowledgeNode;
   aliases: KnowledgeAlias[];
@@ -515,6 +520,14 @@ export const api = {
     "/api/v1/persistence/import", { method: "POST", body: JSON.stringify(archive), ...(signal ? { signal } : {}) }),
   persistenceProjects: (limit = 100, signal?: AbortSignal) => request(dto.persistenceProjects,
     `/api/v1/persistence/projects?${new URLSearchParams({ limit: String(limit) })}`, { ...(signal ? { signal } : {}) }),
+  persistenceProjectPage: async (limit = 200, cursor?: string, signal?: AbortSignal): Promise<PersistenceProjectPage> => {
+    const query = new URLSearchParams({ page: "1", limit: String(limit) });
+    if (cursor !== undefined) query.set("cursor", cursor);
+    const result = await request((value): value is PersistenceProjectPage | PersistenceProject[] =>
+      dto.persistenceProjectPage(value) || dto.persistenceProjects(value),
+    `/api/v1/persistence/projects?${query}`, { ...(signal ? { signal } : {}) });
+    return Array.isArray(result) ? { projects: result, nextCursor: null } : result;
+  },
   createPersistenceProject: (command: CreateProjectCommand, signal?: AbortSignal) => request(dto.persistenceProject, "/api/v1/persistence/projects", {
     method: "POST", body: JSON.stringify(command), ...(signal ? { signal } : {}),
   }),

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import type { KnowledgeAliasId, KnowledgeNodeId, ProjectId } from "@codexia/persistence-contracts";
@@ -117,6 +118,110 @@ test("Knowledge browse searches literal aliases and pages the same project on De
   await expect(page.getByRole("status").filter({ hasText: "100件取得済み" })).toBeVisible();
 });
 
+test("PostgreSQL project pages expose records beyond 200 and deep links retain the requested identity", async ({ page }) => {
+  test.setTimeout(120_000);
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  await ownerLogin(page);
+  const origin = new URL(page.url()).origin;
+  // Seed more than two complete pages so a small, intentionally preloaded
+  // disposable database cannot shrink the second page to a short tail.
+  const projects = Array.from({ length: 405 }, (_, index) => ({ title: `Project pagination ${crypto.randomUUID()} ${index}` }));
+  const created: Array<{ id: string; title: string }> = [];
+  for (let offset = 0; offset < projects.length; offset += 10) {
+    const batch = await Promise.all(projects.slice(offset, offset + 10).map(async (project) => {
+      const response = await page.request.post(new URL("/api/v1/persistence/projects", origin).toString(), { headers: { Origin: origin }, data: project });
+      expect(response.status()).toBe(201);
+      return (await response.json() as { project: { id: string; title: string } }).project;
+    }));
+    created.push(...batch);
+  }
+
+  let pageRequests = 0;
+  await page.route(/\/api\/v1\/persistence\/projects\?page=/u, async (route) => {
+    pageRequests++;
+    await route.continue();
+  });
+  const target = created[0]!;
+  await page.goto(new URL(`/desktop/projects/${target.id}`, origin).toString());
+  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: target.title, exact: true })).toBeVisible();
+  await expect(page.getByLabel("作品", { exact: true })).toHaveValue(target.id);
+  expect(pageRequests, "a direct project link must request its target without enumerating the project library").toBe(0);
+
+  const library = page.getByLabel("作品と文書");
+  const firstPageResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/api/v1/persistence/projects" && url.searchParams.get("page") === "1" && !url.searchParams.has("cursor");
+  });
+  await library.getByRole("button", { name: "作品一覧を読み込む" }).click();
+  const firstPage = await (await firstPageResponse).json() as { projects: Array<{ id: string }>; nextCursor: string | null };
+  expect(firstPage.projects).toHaveLength(200);
+  expect(firstPage.nextCursor).toBeTruthy();
+  await expect(library.getByRole("button", { name: "さらに作品を読み込む" })).toBeVisible();
+  const secondPageResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/api/v1/persistence/projects" && url.searchParams.get("page") === "1" && url.searchParams.has("cursor");
+  });
+  await library.getByRole("button", { name: "さらに作品を読み込む" }).click();
+  const secondPage = await (await secondPageResponse).json() as { projects: Array<{ id: string }>; nextCursor: string | null };
+  expect(secondPage.projects).toHaveLength(200);
+  expect(secondPage.projects.some((item) => !firstPage.projects.some((first) => first.id === item.id))).toBe(true);
+  await expect(page.getByLabel("作品", { exact: true }).locator(`option[value="${target.id}"]`)).toBeAttached();
+  await expect(page.getByText(/読み込み済みの作品: 40[0-1]/u)).toBeVisible();
+  expect(pageRequests).toBe(2);
+
+  const missingId = crypto.randomUUID();
+  await page.goto(new URL(`/desktop/projects/${missingId}`, origin).toString());
+  await expect(page.getByRole("main").getByRole("alert")).toContainText(missingId);
+  await expect(page.getByLabel("作品", { exact: true })).toHaveValue(missingId);
+  expect(pageRequests, "an unavailable direct link must not silently fall back to library enumeration").toBe(2);
+
+});
+
+test("outline supports guarded keyboard navigation, search, zoom and mobile sizing", async ({ page }) => {
+  expect(databaseUrl).toBeTruthy();
+  const fixture = await createWritingFixture(page, "desktop", `Outline ${crypto.randomUUID()}`);
+  const headers = { Origin: new URL(page.url()).origin };
+  const create = async (parentId: string | undefined, kind: string, title: string, orderKey: string) => {
+    const response = await page.request.post(`/api/v1/persistence/projects/${fixture.project.id}/documents`, { headers: { ...headers, "Idempotency-Key": crypto.randomUUID() }, data: { ...(parentId ? { parentId } : {}), kind, title, orderKey, markdown: "" } });
+    expect(response.status()).toBe(201);
+    return (await response.json() as { document: { id: string; title: string } }).document;
+  };
+  const volume = await create(undefined, "volume", "Volume One", "0");
+  const chapter = await create(volume.id, "chapter", "Chapter One", "0");
+  const nestedScene = await create(chapter.id, "scene", `Outline scene ${crypto.randomUUID()}`, "0");
+  await page.goto(`/desktop/projects/${fixture.project.id}/scenes/${nestedScene.id}`);
+  const outline = page.locator('[data-workspace-panel="outline"]');
+  const rows = outline.locator(".pg-outline-document");
+  await rows.first().focus();
+  await rows.first().press("ArrowDown");
+  await expect(rows.nth(1)).toBeFocused();
+  await rows.nth(1).press("Home");
+  await expect(rows.first()).toBeFocused();
+  const leaf = outline.getByRole("button", { name: `${nestedScene.title} シーン` });
+  await leaf.focus();
+  await leaf.press("ArrowRight");
+  await expect(leaf).toBeFocused();
+  await outline.getByLabel("構成を検索").fill(nestedScene.title);
+  await expect(outline.locator(".pg-outline-document")).toHaveCount(3);
+  await expect(leaf).toBeVisible();
+  const chapterRow = outline.locator(".pg-outline-document").filter({ hasText: "Chapter One" });
+  await chapterRow.focus();
+  await chapterRow.press("Tab");
+  await expect(outline.getByRole("button", { name: "Chapter Oneを拡大" })).toBeFocused();
+  await outline.getByRole("button", { name: "Chapter Oneを拡大" }).press("Enter");
+  await expect(outline.getByRole("navigation", { name: "構成の階層" })).toContainText("Chapter One");
+  await outline.getByLabel("構成を検索").fill("no matching outline item");
+  await expect(outline.locator(".pg-outline-document")).toHaveCount(0);
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.goto(`/mobile/projects/${fixture.project.id}/scenes/${nestedScene.id}?view=writing`);
+  await expect(page.getByRole("heading", { name: nestedScene.title, exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "構成" }).click();
+  await expect(page.locator(".pg-outline-document").first()).toBeVisible();
+  await page.evaluate(() => { document.body.style.zoom = "200%"; });
+  await expect(page.locator(".pg-outline-document").first()).toBeVisible();
+});
+
 async function openResearchInspector(page: import("@playwright/test").Page) {
   const toolbar = page.getByRole("toolbar", { name: "ワークスペース配置" });
   await toolbar.getByRole("button", { name: "調査", exact: true }).click();
@@ -126,6 +231,128 @@ async function openResearchInspector(page: import("@playwright/test").Page) {
     await knowledgeTools.locator("summary").click();
   }
 }
+
+test("replays ambiguous project and document creates with retained client intent", async ({ page }) => {
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  const projectTitle = `Replay project ${crypto.randomUUID()}`;
+  const documentTitle = `Replay scene ${crypto.randomUUID()}`;
+  let projectTimeoutInjected = false;
+  let documentTimeoutInjected = false;
+  const projectBodies: Array<{ id?: string; title: string }> = [];
+  const documentBodies: Array<{ documentId?: string; idempotencyKey?: string; title: string }> = [];
+  await page.route("**/api/v1/persistence/projects", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const body = route.request().postDataJSON() as { id?: string; title: string };
+    projectBodies.push(body);
+    if (!projectTimeoutInjected) {
+      projectTimeoutInjected = true;
+      const response = await route.fetch();
+      expect(response.status()).toBe(201);
+      await route.fulfill({ status: 504, contentType: "application/json", body: JSON.stringify({ error: "synthetic gateway timeout" }) });
+      return;
+    }
+    await route.continue();
+  });
+  await page.route("**/api/v1/persistence/projects/*/documents", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const body = route.request().postDataJSON() as { documentId?: string; idempotencyKey?: string; title: string };
+    documentBodies.push(body);
+    if (!documentTimeoutInjected) {
+      documentTimeoutInjected = true;
+      const response = await route.fetch();
+      expect(response.status()).toBe(201);
+      await route.fulfill({ status: 504, contentType: "application/json", body: JSON.stringify({ error: "synthetic gateway timeout" }) });
+      return;
+    }
+    await route.continue();
+  });
+
+  let projectReadMissed = false;
+  await page.route("**/api/v1/persistence/projects/*", async (route) => {
+    const id = projectBodies[0]?.id;
+    if (projectTimeoutInjected && !projectReadMissed && route.request().method() === "GET" &&
+        new URL(route.request().url()).pathname === `/api/v1/persistence/projects/${id}`) {
+      projectReadMissed = true;
+      await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+      return;
+    }
+    await route.continue();
+  });
+  let documentReadMissed = false;
+  await page.route("**/api/v1/persistence/projects/*/documents/*", async (route) => {
+    const id = documentBodies[0]?.documentId;
+    if (documentTimeoutInjected && !documentReadMissed && route.request().method() === "GET" &&
+        new URL(route.request().url()).pathname.endsWith(`/documents/${id}`)) {
+      documentReadMissed = true;
+      await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+      return;
+    }
+    await route.continue();
+  });
+
+  await ownerLogin(page, "/desktop/");
+  const outline = page.locator('[data-workspace-panel="outline"]');
+  await outline.locator(".pg-library-create > summary").click();
+  await outline.getByLabel("作品名").fill(projectTitle);
+  await outline.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
+  await expect(page.getByRole("main", { name: "PostgreSQL原稿編集" }).getByText("synthetic gateway timeout", { exact: true })).toBeVisible();
+  expect(projectReadMissed).toBe(true);
+  await expect(outline.getByLabel("作品名")).toHaveValue(projectTitle);
+  await outline.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
+  await expect(page.getByRole("heading", { name: projectTitle, exact: true })).toBeVisible();
+
+  const projectsResponse = await page.request.get("/api/v1/persistence/projects");
+  expect(projectsResponse.ok()).toBe(true);
+  const projects = await projectsResponse.json() as Array<{ id: string; title: string }>;
+  expect(projects.filter((item) => item.title === projectTitle)).toHaveLength(1);
+  expect(projectBodies).toHaveLength(2);
+  expect(projectBodies[1]).toEqual(projectBodies[0]);
+
+  // A completed intent is cleared, so an independent same-title submission
+  // must allocate a fresh project id rather than replaying the prior create.
+  await outline.getByLabel("作品名").fill(projectTitle);
+  await outline.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
+  await expect.poll(() => projectBodies.length).toBe(3);
+  const projectId = projectBodies[2]?.id;
+  expect(projectId).toBeTruthy();
+  await expect(outline.getByLabel("作品", { exact: true })).toHaveValue(projectId!);
+  const projectsAfterSameTitle = await page.request.get("/api/v1/persistence/projects");
+  const sameTitleProjects = (await projectsAfterSameTitle.json() as Array<{ id: string; title: string }>).filter((item) => item.title === projectTitle);
+  expect(sameTitleProjects).toHaveLength(2);
+  expect(projectBodies).toHaveLength(3);
+  expect(projectId).not.toBe(projectBodies[0]?.id);
+
+  const createDocument = outline.locator(".pg-library-create-document");
+  await createDocument.locator("summary").click();
+  await createDocument.getByLabel("文書名").fill(documentTitle);
+  await createDocument.getByRole("button", { name: "作成", exact: true }).click();
+  await expect(page.getByRole("main", { name: "PostgreSQL原稿編集" }).getByText("synthetic gateway timeout", { exact: true })).toBeVisible();
+  expect(documentReadMissed).toBe(true);
+  await expect(createDocument.getByLabel("文書名")).toHaveValue(documentTitle);
+  await createDocument.getByRole("button", { name: "作成", exact: true }).click();
+  await expect(page.getByRole("heading", { name: documentTitle, exact: true })).toBeVisible();
+
+  const documentsResponse = await page.request.get(`/api/v1/persistence/projects/${projectId}/documents`);
+  expect(documentsResponse.ok()).toBe(true);
+  const documents = (await documentsResponse.json() as { documents: Array<{ id: string; title: string }> }).documents;
+  expect(documents.filter((item) => item.title === documentTitle)).toHaveLength(1);
+  expect(documentBodies).toHaveLength(2);
+  expect(documentBodies[1]).toEqual(documentBodies[0]);
+
+  await createDocument.getByLabel("文書名").fill(documentTitle);
+  await createDocument.getByRole("button", { name: "作成", exact: true }).click();
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/v1/persistence/projects/${projectId}/documents`);
+    const { documents } = await response.json() as { documents: Array<{ id: string; title: string }> };
+    return documents.filter((item) => item.title === documentTitle).length;
+  }).toBe(2);
+  const afterSecondCreate = await page.request.get(`/api/v1/persistence/projects/${projectId}/documents`);
+  const allDocuments = (await afterSecondCreate.json() as { documents: Array<{ id: string; title: string }> }).documents;
+  expect(allDocuments.filter((item) => item.title === documentTitle)).toHaveLength(2);
+  expect(documentBodies).toHaveLength(3);
+  expect(documentBodies[2]?.documentId).not.toBe(documentBodies[0]?.documentId);
+  expect(documentBodies[2]?.idempotencyKey).not.toBe(documentBodies[0]?.idempotencyKey);
+});
 
 
 test("Git store selector cannot bypass PostgreSQL-only authoring", async ({ page }) => {
@@ -139,6 +366,47 @@ test("Git store selector cannot bypass PostgreSQL-only authoring", async ({ page
   await expect(page.getByRole("alert")).toContainText("Gitワークスペースへの切替は提供していません");
   await expect(page.getByRole("heading", { name: "Database workspace" })).toHaveCount(0);
 });
+
+for (const shell of ["desktop", "mobile"] as const) {
+  test(`${shell} standalone authoring opens the first project and document forms from the empty editor`, async ({ page }) => {
+    await page.setViewportSize(shell === "desktop" ? { width: 1280, height: 900 } : { width: 390, height: 844 });
+    let showProject = false;
+    await page.route((url) => url.pathname === "/api/v1/persistence/projects", async (route) => {
+      if (!showProject && route.request().method() === "GET") return route.fulfill({ json: [] });
+      if (route.request().method() !== "POST") return route.continue();
+      const response = await route.fetch();
+      showProject = response.ok();
+      await route.fulfill({ response });
+    });
+    await ownerLogin(page, shell === "desktop" ? "/desktop/" : "/mobile/?view=writing");
+    const firstProject = page.getByRole("button", { name: "最初の作品を作成" });
+    await firstProject.click();
+    const projectName = page.getByLabel("作品名", { exact: true });
+    await expect(projectName).toBeFocused();
+    if (shell === "mobile") {
+      await page.getByRole("navigation").getByRole("button", { name: "書く", exact: true }).click();
+    } else {
+      await page.locator(".pg-library-create > summary").click();
+    }
+    await expect(firstProject).toBeVisible();
+    await firstProject.click();
+    await expect(projectName).toBeFocused();
+    await projectName.fill(`Empty state ${shell} ${crypto.randomUUID()}`);
+    await page.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
+    await expect(page.getByText("編集を始める文書を作成してください。", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "最初の文書を作成" }).click();
+    const documentName = page.getByLabel("文書名", { exact: true });
+    await expect(documentName).toBeFocused();
+    await documentName.fill("最初のシーン");
+    await page.locator(".pg-library-create-document").getByRole("button", { name: "作成", exact: true }).click();
+    const editor = manuscriptEditor(page);
+    await expect(editor).toBeVisible();
+    await editor.click();
+    await page.keyboard.insertText("はじめの本文。");
+    await expect(editor).toHaveText("はじめの本文。");
+    await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+  });
+}
 
 test("Hosted permission metadata does not force Git workspace fallback", async ({ page }) => {
   expect(databaseUrl).toBeTruthy();
@@ -395,6 +663,48 @@ for (const shell of ["desktop", "mobile"] as const) {
     }
   });
 }
+
+test("revision comparison separates distant manuscript edits", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  const { project, scene } = await createWritingFixture(page);
+  const path = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
+  const response = await page.request.get(path);
+  expect(response.ok()).toBe(true);
+  let { revision } = await response.json() as { revision: { id: string; markdown: string } };
+  const middle = Array.from({ length: 200 }, (_, index) => `変わらない第 ${index} 段落には｜青空《あおぞら》が続きます。\n\n`).join("");
+  for (const value of [`冒頭は旧稿。\n\n${middle}結末には旧稿。\n`, `冒頭は改稿。\n\n${middle}結末には新しい追加行。\n`]) {
+    const saved = await page.request.patch(path, {
+      headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": crypto.randomUUID(), "X-Client-Id": "revision-diff-fixture" },
+      data: {
+        baseRevisionId: revision.id,
+        changes: [{ fromUtf16: 0, toUtf16: revision.markdown.length, insert: value }],
+        resultingSha256: createHash("sha256").update(value).digest("hex"),
+      },
+    });
+    expect(saved.ok()).toBe(true);
+    ({ revision } = await saved.json() as { revision: typeof revision });
+  }
+  for (const shell of ["desktop", "mobile"] as const) {
+    if (shell === "mobile") await page.setViewportSize({ width: 320, height: 760 });
+    await page.goto(`/${shell}/projects/${project.id}/scenes/${scene.id}${shell === "mobile" ? "?view=writing" : ""}`);
+    await expect(manuscriptEditor(page)).toContainText("冒頭は改稿。");
+    await openRevisionHistory(page);
+    const previous = page.getByRole("region", { name: "Revision履歴" }).locator("article").filter({ hasText: "冒頭は旧稿。" });
+    const diff = previous.locator(".pg-revision-diff-preview");
+    await expect(diff).toHaveCount(0);
+    const workerStarted = page.waitForEvent("worker");
+    await previous.getByText("最新版との違い", { exact: true }).click();
+    expect(new URL((await workerStarted).url()).origin).toBe(new URL(page.url()).origin);
+    const hunks = diff.locator(".pg-revision-diff-hunk");
+    await expect(hunks).toHaveCount(2);
+    await expect(diff).toContainText(revision.id);
+    await expect(diff).toContainText("結末には新しい追加行。");
+    await expect(diff).not.toContainText("第 100 段落");
+    if (shell === "mobile") {
+      expect(await hunks.first().evaluate(element => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(1);
+    }
+  }
+});
 
 test("a 501-document PostgreSQL work opens its final scene through the canonical deep link", async ({page}) => {
   test.setTimeout(90000);

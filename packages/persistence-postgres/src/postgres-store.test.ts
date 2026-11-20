@@ -14,6 +14,7 @@ import {
   type KnowledgeAliasId,
   type KnowledgeProjectionBatch,
   type ProjectId,
+  type ProjectPageCursor,
   type RevisionId,
   type SaveDocumentCommand,
 } from "@codexia/persistence-contracts";
@@ -1067,6 +1068,29 @@ test("startup project inventory uses bounded stable keyset pages", async () => {
     assert.ok(ids.includes(first.id) && ids.includes(second.id));
     assert.deepEqual(ids,[...new Set(ids)].sort());
   });
+});
+
+test("project page preserves deterministic keyset order across more than 200 projects", async () => {
+  const rows = Array.from({ length: 205 }, (_, index) => ({ id: randomUUID(), title: `pagination-${index}` }));
+  await directPool.query(`INSERT INTO project(id,title) SELECT id,title FROM jsonb_to_recordset($1::jsonb) AS row(id uuid,title text)`, [JSON.stringify(rows)]);
+  const collected: string[] = [];
+  let after: ProjectPageCursor | undefined;
+  let pages = 0;
+  for (;;) {
+    const page = await persistence.read((reader) => {
+      assert.ok(reader.listProjectPage);
+      return reader.listProjectPage(101, after);
+    });
+    assert.ok(page.length <= 101);
+    collected.push(...page.filter((project) => project.title.startsWith("pagination-")).map((project) => project.id));
+    pages++;
+    if (page.length < 101) break;
+    const last = page.at(-1)!;
+    after = { updatedAt: last.updatedAt, id: last.id };
+  }
+  assert.ok(pages >= 3, "205 projects must cross the default page boundary");
+  assert.deepEqual(new Set(collected), new Set(rows.map((row) => row.id)));
+  assert.equal(collected.length, rows.length, "pages must not repeat project identities");
 });
 
 test("portable module inventory omits arbitrarily many retained authority records without reading their bodies", async () => {

@@ -248,6 +248,21 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
   stdio = await startStdioClient(host, projectId);
   http = await startHttpClient(host, projectId);
 
+  // Exercise project discovery through the real PostgreSQL-backed MCP client
+  // beyond the former single-page boundary.
+  const paginationRows = Array.from({ length: 205 }, (_, index) => ({ id: randomUUID(), title: `MCP pagination ${index}` }));
+  for (let offset = 0; offset < paginationRows.length; offset += 20) {
+    await Promise.all(paginationRows.slice(offset, offset + 20).map((row) => persistence.transaction((tx) => tx.createProject(row))));
+  }
+  const projectPage1 = success(await stdio.client.callTool({ name: "list_projects", arguments: { limit: 200 } }), "native MCP project page 1").data;
+  assert.equal(projectPage1.projects.length, 200);
+  assert.equal(typeof projectPage1.next_cursor, "string");
+  const projectPage2 = success(await stdio.client.callTool({ name: "list_projects", arguments: { limit: 200, cursor: projectPage1.next_cursor } }), "native MCP project page 2").data;
+  assert.ok(projectPage2.projects.length > 0);
+  const discoveredIds = [...projectPage1.projects, ...projectPage2.projects].map((item) => item.id);
+  assert.equal(new Set(discoveredIds).size, discoveredIds.length, "MCP keyset pages must not repeat projects");
+  assert.ok(paginationRows.every((row) => discoveredIds.includes(row.id)), "both MCP pages must expose every project in the >200 fixture");
+
   for (const [name, connection] of [["stdio", stdio], ["Streamable HTTP", http]]) {
     const catalog = await connection.client.listTools();
     const toolNames = catalog.tools.map(tool => tool.name);

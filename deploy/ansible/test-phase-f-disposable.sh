@@ -603,13 +603,14 @@ const result = {
   interruptedUpdateRecovery: 'PASS: killed updater after old writer stop; boot restored the recorded prior writer and pause was retained.',
   drift: 'PASS: invalid disposable route state was rejected by the updater verifier and remained blocked.',
   preserved: { projectId, postgresContainer: 'same container ID before/after transitions', volumes: ['codexia-data', 'codexia-history'] },
+  ansibleContinuity: 'Host, secrets, and base runtime convergence ran before this updater fixture in the same disposable workflow; see ansible-convergence-results.json for the same-identity evidence.',
   simulated: ['stable-channel endpoint', 'frontend identity endpoint'],
   notChecked: [
     'Production signed channel and production publisher authority',
     'Live public identity, Cloudflare Access denial, and human author UI acceptance',
     'VM reboot during update',
     'Remote backup destination, external recovery key custody, target recovery host, and measured RPO/RTO',
-    'End-to-end Ansible fresh/repeat apply, adoption, and D cutover',
+    'Continuous Ansible prepare, schema initialization, first activation, enable, and D cutover on this updater fixture',
   ],
 };
 await writeFile(path.join(directory, 'lifecycle-results.json'), JSON.stringify(result, null, 2) + '\n', { mode: 0o644 });
