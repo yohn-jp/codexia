@@ -106,6 +106,8 @@ test('Phase F integration helper is valid shell and exercises the existing locke
     'Skip Node’s executable and stdin marker when reading script arguments');
   assert.match(helper, /as_service "\$node_bin" --input-type=module - "\$evidence_dir"/u,
     'Write lifecycle evidence as its directory owner');
+  assert.match(helper, /if ! run_updater init[\s\S]*?safe state detail follows[\s\S]*?\.lastError \/\/ empty[\s\S]*?\.journal\.phase/u,
+    'Expose only safe controller state when fixture initialization fails');
   assert.match(helper, /codexia-updater(?:\.sh)?/u);
 });
 

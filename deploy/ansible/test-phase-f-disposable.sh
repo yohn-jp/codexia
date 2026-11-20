@@ -408,7 +408,15 @@ run_updater() {
     CODEXIA_PHASE_F_FRONTEND_IDENTITY_FILE="$frontend_identity_file" \
     sh "$updater" "$@"
 }
-run_updater init "$config_file" "$evidence_dir/release-0.1.236.json" > "$test_root/init.json"
+if ! run_updater init "$config_file" "$evidence_dir/release-0.1.236.json" > "$test_root/init.json"; then
+  printf 'Disposable initial activation failed; safe state detail follows:\n' >&2
+  if [[ -s "$test_root/init.json" ]]; then
+    /usr/bin/jq -r '(.lastError // empty), (.journal.phase // empty)' "$test_root/init.json" >&2 || true
+  else
+    printf 'Updater returned no state JSON.\n' >&2
+  fi
+  exit 1
+fi
 
 assert_controller_status() {
   local file=$1 expected_image=$2 expected_route=$3 expected_phase=$4 expected_paused=$5
