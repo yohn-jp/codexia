@@ -1,8 +1,9 @@
-import { assertProjectPath, type SnapshotReader } from "@codexia/contracts";
+import { assertProjectPath, type ModuleActionContext, type SnapshotId, type SnapshotReader } from "@codexia/contracts";
 import YAML from "yaml";
 
 export type PublishingScope = "all" | "volume" | "chapter";
 export type ShareScopeKind = "project" | "volume" | "chapter" | "scene";
+export type PublishingOrder = number | string;
 
 export interface PublishingScene {
   id: string;
@@ -11,20 +12,20 @@ export interface PublishingScene {
   path: string;
   volumeId: string;
   chapterId: string;
-  order?: number;
+  order?: PublishingOrder;
 }
 
 export interface PublishingChapter {
   id: string;
   title: string;
-  order?: number;
+  order?: PublishingOrder;
   scenes: PublishingScene[];
 }
 
 export interface PublishingVolume {
   id: string;
   title: string;
-  order?: number;
+  order?: PublishingOrder;
   chapters: PublishingChapter[];
 }
 
@@ -45,6 +46,11 @@ export interface PublicScene {
   body: string;
 }
 
+interface CoreTreeScene { id: string; title: string }
+interface CoreTreeChapter { id: string; title: string; scenes: CoreTreeScene[] }
+interface CoreTreeVolume { id: string; title: string; chapters: CoreTreeChapter[] }
+interface CoreTree { title: string; volumes: CoreTreeVolume[] }
+
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -62,19 +68,21 @@ function nodeTitle(data: Record<string, unknown>, fallback: string): string {
   return fallback;
 }
 
-function nodeOrder(data: Record<string, unknown>): number | undefined {
-  return typeof data.order === "number" && Number.isFinite(data.order) ? data.order : undefined;
+function nodeOrder(data: Record<string, unknown>): PublishingOrder | undefined {
+  if (typeof data.order === "number" && Number.isFinite(data.order)) return data.order;
+  if (typeof data.order === "string" && data.order.length > 0) return data.order;
+  return undefined;
 }
 
-function compareOrdered(
-  left: { id: string; title: string; order?: number },
-  right: { id: string; title: string; order?: number },
-): number {
-  if (left.order !== undefined && right.order !== undefined && left.order !== right.order) {
-    return left.order - right.order;
+function compareOrdered(left: { id: string; title: string; order?: PublishingOrder }, right: { id: string; title: string; order?: PublishingOrder }): number {
+  if (left.order !== undefined && right.order !== undefined) {
+    const order = typeof left.order === "number" && typeof right.order === "number"
+      ? left.order - right.order
+      : String(left.order) < String(right.order) ? -1 : String(left.order) > String(right.order) ? 1 : 0;
+    return order || left.id.localeCompare(right.id);
   }
-  if (left.order !== undefined && right.order === undefined) return -1;
-  if (left.order === undefined && right.order !== undefined) return 1;
+  if (left.order !== undefined) return -1;
+  if (right.order !== undefined) return 1;
   return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
 }
 
@@ -130,6 +138,116 @@ function folderIds(files: string[], prefix: string): string[] {
   }))];
 }
 
+function coreTree(value: unknown): CoreTree {
+  const data = record(value);
+  const validNode = (node: unknown): node is { id: string; title: string } => {
+    const item = record(node);
+    return typeof item?.id === "string" && typeof item.title === "string";
+  };
+  if (!data || typeof data.title !== "string" || !Array.isArray(data.volumes)) {
+    throw new Error("Core hierarchy response is invalid");
+  }
+  for (const volume of data.volumes) {
+    const volumeData = record(volume);
+    if (!validNode(volume) || !Array.isArray(volumeData?.chapters)) {
+      throw new Error("Core hierarchy response is invalid");
+    }
+    for (const chapter of volumeData.chapters) {
+      const chapterData = record(chapter);
+      if (!validNode(chapter) || !Array.isArray(chapterData?.scenes) || !chapterData.scenes.every(validNode)) {
+        throw new Error("Core hierarchy response is invalid");
+      }
+    }
+  }
+  return data as unknown as CoreTree;
+}
+
+function sameSnapshot(left: unknown, right: SnapshotId): boolean {
+  const snapshot = record(left);
+  return snapshot?.projectId === right.projectId && snapshot.projectVersion === right.projectVersion;
+}
+
+export async function readPublishingProjectFromCore(context: ModuleActionContext): Promise<PublishingProject> {
+  const { reader } = context;
+  const coreResult = await context.invoke("core.tree", {}, context.signal);
+  if (!coreResult.ok) throw new Error("Core hierarchy read failed: " + coreResult.error.message);
+  if (!sameSnapshot(coreResult.snapshot, reader.snapshot)) {
+    throw new Error("Core hierarchy belongs to another snapshot");
+  }
+  const coreData = record(coreResult.data);
+  if (!coreData || !sameSnapshot(coreData.snapshot, reader.snapshot)) {
+    throw new Error("Core hierarchy belongs to another snapshot");
+  }
+  const hierarchy = coreTree(coreData.tree);
+  const projectMetadata = await readYaml(reader, "meta/project.yaml");
+  const subtitle = typeof projectMetadata?.subtitle === "string" && projectMetadata.subtitle.trim()
+    ? projectMetadata.subtitle.trim()
+    : undefined;
+  const files = await reader.list("plot/volumes");
+  const volumeOrders = new Map<string, PublishingOrder>();
+  const chapterOrders = new Map<string, PublishingOrder>();
+  for (const volumeId of folderIds(files, "plot/volumes/")) {
+    const volumePath = "plot/volumes/" + volumeId + "/volume.yaml";
+    const volumeData = await readYaml(reader, volumePath) ?? { id: volumeId };
+    const volumeOrder = nodeOrder(volumeData);
+    if (volumeOrder !== undefined) volumeOrders.set(nodeId(volumeData, volumeId), volumeOrder);
+    const chapterPrefix = "plot/volumes/" + volumeId + "/chapters/";
+    for (const chapterId of folderIds(files, chapterPrefix)) {
+      const chapterBase = chapterPrefix + chapterId;
+      const chapterData = await readYaml(reader, chapterBase + "/chapter.yaml") ?? { id: chapterId };
+      const chapterOrder = nodeOrder(chapterData);
+      if (chapterOrder !== undefined) chapterOrders.set(nodeId(chapterData, chapterId), chapterOrder);
+    }
+  }
+
+  const sceneMetadata = new Map<string, { title: string; body: string; path: string; order?: PublishingOrder }>();
+  for (const sceneFile of files.filter((path) => /\/scenes\/[^/]+\.yaml$/u.test(path))) {
+    const sceneData = await readYaml(reader, sceneFile);
+    if (!sceneData) continue;
+    const basename = sceneFile.split("/").at(-1)!.slice(0, -".yaml".length);
+    const id = nodeId(sceneData, basename);
+    if (sceneMetadata.has(id)) throw new Error("Duplicate scene identity in publishing snapshot: " + id);
+    const bodyPath = manuscriptPath(sceneFile, sceneData, id);
+    const manuscript = await reader.read(bodyPath);
+    const order = nodeOrder(sceneData);
+    sceneMetadata.set(id, {
+      title: nodeTitle(sceneData, id),
+      body: manuscript ? manuscriptBody(manuscript.content, bodyPath) : "",
+      path: bodyPath,
+      ...(order === undefined ? {} : { order }),
+    });
+  }
+
+  const seenSceneIds = new Set<string>();
+  const volumes: PublishingVolume[] = hierarchy.volumes.map((volume) => ({
+    id: volume.id,
+    title: volume.title,
+    ...(volumeOrders.has(volume.id) ? { order: volumeOrders.get(volume.id)! } : {}),
+    chapters: volume.chapters.map((chapter) => ({
+      id: chapter.id,
+      title: chapter.title,
+      ...(chapterOrders.has(chapter.id) ? { order: chapterOrders.get(chapter.id)! } : {}),
+      scenes: chapter.scenes.map((scene) => {
+        if (seenSceneIds.has(scene.id)) throw new Error("Duplicate scene identity in Core hierarchy: " + scene.id);
+        seenSceneIds.add(scene.id);
+        const metadata = sceneMetadata.get(scene.id);
+        if (!metadata) throw new Error("Scene metadata is missing from the publishing snapshot: " + scene.id);
+        return {
+          id: scene.id,
+          title: scene.title,
+          body: metadata.body,
+          path: metadata.path,
+          volumeId: volume.id,
+          chapterId: chapter.id,
+          ...(metadata.order === undefined ? {} : { order: metadata.order }),
+        };
+      }),
+    })),
+  }));
+  return { title: hierarchy.title, ...(subtitle ? { subtitle } : {}), volumes };
+}
+
+/** Read a public snapshot projection without composing actions or crossing its authorization boundary. */
 export async function readPublishingProject(reader: SnapshotReader): Promise<PublishingProject> {
   const projectMetadata = await readYaml(reader, "meta/project.yaml");
   const title = projectMetadata ? nodeTitle(projectMetadata, "Project") : "Project";
@@ -137,60 +255,75 @@ export async function readPublishingProject(reader: SnapshotReader): Promise<Pub
     ? projectMetadata.subtitle.trim()
     : undefined;
   const files = await reader.list("plot/volumes");
-  const volumeIds = folderIds(files, "plot/volumes/");
-  const volumes: PublishingVolume[] = [];
-
-  for (const volumeId of volumeIds) {
-    const volumePath = "plot/volumes/" + volumeId + "/volume.yaml";
-    const volumeData = await readYaml(reader, volumePath) ?? { id: volumeId };
+  const volumesByPath = new Map<string, PublishingVolume>();
+  const volumesById = new Map<string, PublishingVolume>();
+  const chaptersByPath = new Map<string, PublishingChapter>();
+  const chaptersById = new Map<string, PublishingChapter>();
+  const chapterVolumeIds = new Map<PublishingChapter, string>();
+  for (const volumePathId of folderIds(files, "plot/volumes/")) {
+    const volumeData = await readYaml(reader, `plot/volumes/${volumePathId}/volume.yaml`) ?? { id: volumePathId };
+    const volumeId = nodeId(volumeData, volumePathId);
     const volumeOrder = nodeOrder(volumeData);
     const volume: PublishingVolume = {
-      id: nodeId(volumeData, volumeId),
+      id: volumeId,
       title: nodeTitle(volumeData, volumeId),
       ...(volumeOrder === undefined ? {} : { order: volumeOrder }),
       chapters: [],
     };
-    const chapterPrefix = "plot/volumes/" + volumeId + "/chapters/";
-    const chapterIds = folderIds(files, chapterPrefix);
-    for (const chapterId of chapterIds) {
-      const chapterBase = chapterPrefix + chapterId;
-      const chapterData = await readYaml(reader, chapterBase + "/chapter.yaml") ?? { id: chapterId };
+    volumesByPath.set(volumePathId, volume);
+    volumesById.set(volumeId, volume);
+    const chapterPrefix = `plot/volumes/${volumePathId}/chapters/`;
+    for (const chapterPathId of folderIds(files, chapterPrefix)) {
+      const chapterBase = `${chapterPrefix}${chapterPathId}`;
+      const chapterData = await readYaml(reader, `${chapterBase}/chapter.yaml`) ?? { id: chapterPathId };
+      const chapterId = nodeId(chapterData, chapterPathId);
       const chapterOrder = nodeOrder(chapterData);
+      const parentVolume = typeof chapterData.volume === "string"
+        ? volumesById.get(chapterData.volume) ?? volume
+        : volume;
       const chapter: PublishingChapter = {
-        id: nodeId(chapterData, chapterId),
+        id: chapterId,
         title: nodeTitle(chapterData, chapterId),
         ...(chapterOrder === undefined ? {} : { order: chapterOrder }),
         scenes: [],
       };
-      const sceneFiles = files.filter((path) =>
-        path.startsWith(chapterBase + "/scenes/") && path.endsWith(".yaml"));
-      for (const sceneFile of sceneFiles) {
-        const sceneData = await readYaml(reader, sceneFile);
-        if (!sceneData) continue;
-        const basename = sceneFile.split("/").at(-1)!.slice(0, -".yaml".length);
-        const id = nodeId(sceneData, basename);
-        const bodyPath = manuscriptPath(sceneFile, sceneData, id);
-        const manuscript = await reader.read(bodyPath);
-        const sceneOrder = nodeOrder(sceneData);
-        chapter.scenes.push({
-          id,
-          title: nodeTitle(sceneData, id),
-          body: manuscript ? manuscriptBody(manuscript.content, bodyPath) : "",
-          path: bodyPath,
-          volumeId: volume.id,
-          chapterId: chapter.id,
-          ...(sceneOrder === undefined ? {} : { order: sceneOrder }),
-        });
-      }
-      chapter.scenes.sort(compareOrdered);
-      volume.chapters.push(chapter);
+      parentVolume.chapters.push(chapter);
+      chaptersByPath.set(`${volumePathId}/${chapterPathId}`, chapter);
+      chaptersById.set(chapterId, chapter);
+      chapterVolumeIds.set(chapter, parentVolume.id);
     }
-    volume.chapters.sort(compareOrdered);
-    volumes.push(volume);
   }
 
-  volumes.sort(compareOrdered);
-  return { title, ...(subtitle ? { subtitle } : {}), volumes };
+  for (const sceneFile of files.filter((path) => /\/scenes\/[^/]+\.yaml$/u.test(path))) {
+    const sceneData = await readYaml(reader, sceneFile);
+    if (!sceneData) continue;
+    const match = /^plot\/volumes\/([^/]+)\/chapters\/([^/]+)\/scenes\/([^/]+)\.yaml$/u.exec(sceneFile);
+    if (!match) continue;
+    const basename = match[3]!;
+    const id = nodeId(sceneData, basename);
+    const chapter = typeof sceneData.chapter === "string"
+      ? chaptersById.get(sceneData.chapter) ?? chaptersByPath.get(`${match[1]}/${match[2]}`)
+      : chaptersByPath.get(`${match[1]}/${match[2]}`);
+    if (!chapter) continue;
+    const bodyPath = manuscriptPath(sceneFile, sceneData, id);
+    const manuscript = await reader.read(bodyPath);
+    const order = nodeOrder(sceneData);
+    chapter.scenes.push({
+      id,
+      title: nodeTitle(sceneData, id),
+      body: manuscript ? manuscriptBody(manuscript.content, bodyPath) : "",
+      path: bodyPath,
+      volumeId: chapterVolumeIds.get(chapter) ?? "",
+      chapterId: chapter.id,
+      ...(order === undefined ? {} : { order }),
+    });
+  }
+
+  for (const volume of volumesByPath.values()) {
+    volume.chapters.sort(compareOrdered);
+    for (const chapter of volume.chapters) chapter.scenes.sort(compareOrdered);
+  }
+  return { title, ...(subtitle ? { subtitle } : {}), volumes: [...volumesByPath.values()].sort(compareOrdered) };
 }
 
 export function collectPublishingScenes(
