@@ -14,6 +14,78 @@ async function openResearchInspector(page: import("@playwright/test").Page) {
   }
 }
 
+test("replays ambiguous project and document creates with retained client intent", async ({ page }) => {
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  const projectTitle = `Replay project ${crypto.randomUUID()}`;
+  const documentTitle = `Replay scene ${crypto.randomUUID()}`;
+  let projectTimeoutInjected = false;
+  let documentTimeoutInjected = false;
+  const projectBodies: Array<{ id?: string; title: string }> = [];
+  const documentBodies: Array<{ documentId?: string; idempotencyKey?: string; title: string }> = [];
+  await page.route("**/api/v1/persistence/projects", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const body = route.request().postDataJSON() as { id?: string; title: string };
+    projectBodies.push(body);
+    if (!projectTimeoutInjected) {
+      projectTimeoutInjected = true;
+      const response = await route.fetch();
+      expect(response.status()).toBe(201);
+      await route.fulfill({ status: 504, contentType: "application/json", body: JSON.stringify({ error: "synthetic gateway timeout" }) });
+      return;
+    }
+    await route.continue();
+  });
+  await page.route("**/api/v1/persistence/projects/*/documents", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const body = route.request().postDataJSON() as { documentId?: string; idempotencyKey?: string; title: string };
+    documentBodies.push(body);
+    if (!documentTimeoutInjected) {
+      documentTimeoutInjected = true;
+      const response = await route.fetch();
+      expect(response.status()).toBe(201);
+      await route.fulfill({ status: 504, contentType: "application/json", body: JSON.stringify({ error: "synthetic gateway timeout" }) });
+      return;
+    }
+    await route.continue();
+  });
+
+  await ownerLogin(page, "/desktop/");
+  const outline = page.locator('[data-workspace-panel="outline"]');
+  await outline.locator(".pg-library-create > summary").click();
+  await outline.getByLabel("作品名").fill(projectTitle);
+  await outline.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
+  await expect(page.getByRole("heading", { name: projectTitle, exact: true })).toBeVisible();
+
+  const projectsResponse = await page.request.get("/api/v1/persistence/projects");
+  expect(projectsResponse.ok()).toBe(true);
+  const projects = await projectsResponse.json() as Array<{ id: string; title: string }>;
+  expect(projects.filter((item) => item.title === projectTitle)).toHaveLength(1);
+  expect(projectBodies).toHaveLength(1);
+
+  const createDocument = outline.locator(".pg-library-create-document");
+  await createDocument.locator("summary").click();
+  await createDocument.getByLabel("文書名").fill(documentTitle);
+  await createDocument.getByRole("button", { name: "作成", exact: true }).click();
+  await expect(page.getByRole("heading", { name: documentTitle, exact: true })).toBeVisible();
+
+  const project = projects.find((item) => item.title === projectTitle)!;
+  const documentsResponse = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents`);
+  expect(documentsResponse.ok()).toBe(true);
+  const documents = (await documentsResponse.json() as { documents: Array<{ id: string; title: string }> }).documents;
+  expect(documents.filter((item) => item.title === documentTitle)).toHaveLength(1);
+  expect(documentBodies).toHaveLength(1);
+
+  await createDocument.getByLabel("文書名").fill(documentTitle);
+  await createDocument.getByRole("button", { name: "作成", exact: true }).click();
+  await expect.poll(async () => (await page.request.get(`/api/v1/persistence/projects/${project.id}/documents`)).json()).toMatchObject({ documents: expect.arrayContaining([expect.objectContaining({ title: documentTitle })]) });
+  const afterSecondCreate = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents`);
+  const allDocuments = (await afterSecondCreate.json() as { documents: Array<{ id: string; title: string }> }).documents;
+  expect(allDocuments.filter((item) => item.title === documentTitle)).toHaveLength(2);
+  expect(documentBodies).toHaveLength(2);
+  expect(documentBodies[1]?.documentId).not.toBe(documentBodies[0]?.documentId);
+  expect(documentBodies[1]?.idempotencyKey).not.toBe(documentBodies[0]?.idempotencyKey);
+});
+
 
 test("Git store selector cannot bypass PostgreSQL-only authoring", async ({ page }) => {
   await page.route("**/api/v1/persistence/status", async (route) => {
