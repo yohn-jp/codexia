@@ -91,7 +91,9 @@ test("legacy draft import retains the confirmed PostgreSQL revision and creates 
     document.addEventListener("selectionchange", record);
   });
   try {
-    await editor(page).fill(text);
+    await editor(page).click();
+    await editor(page).press("ControlOrMeta+a");
+    await page.keyboard.insertText(text);
   } finally {
     const afterFill = await markdown(page);
     const events = await page.evaluate(() => (window as Window & { __codexiaFillProbe?: unknown }).__codexiaFillProbe ?? []);
