@@ -177,11 +177,7 @@ test("both production Shells preserve recoverable Japanese drafts and the Mobile
     await page.setViewportSize({ width: mode === "mobile" ? 390 : 1280, height: 900 });
     const { project, scene } = await createWritingFixture(page, mode);
     const text = "東京《とうきょう》へ向かう。\n日本語😀の本文。";
-    await page.locator(".cm-content").click({ position: { x: 1, y: 1 } });
-    await page.keyboard.press("Control+a");
-    await page.keyboard.press("Backspace");
-    await page.keyboard.insertText(text);
-    await expectMarkdown(page, text);
+    await replaceReaderText(page, text);
     // "Saved" can reflect the previous revision. The reader must open only
     // after this exact manuscript is durable in PostgreSQL.
     await expect.poll(async () => {
@@ -212,8 +208,10 @@ async function visibleReaderParagraphs(page: Page): Promise<string[]> {
 async function replaceReaderText(page: Page, text: string): Promise<void> {
   await expect(editor(page)).toBeVisible();
   await page.locator(".cm-content").click({ position: { x: 1, y: 1 } });
-  await page.keyboard.press("Control+a");
-  await page.keyboard.press("Backspace");
+  for (let attempt = 0; attempt < 8 && await markdown(page) !== ""; attempt += 1) {
+    await page.keyboard.press("Control+a");
+    await page.keyboard.press("Backspace");
+  }
   await page.keyboard.insertText(text);
   await expectMarkdown(page, text);
 }
