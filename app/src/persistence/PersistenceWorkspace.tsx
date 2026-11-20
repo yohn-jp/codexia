@@ -887,7 +887,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   async function createProject(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const title = projectTitle.trim();
-    if (!title || creationInFlightRef.current || !await protectTransition()) return;
+    if (!title || creationInFlightRef.current) return;
+    creationInFlightRef.current = true;
+    if (!await protectTransition()) { creationInFlightRef.current = false; return; }
     const previousIntent = projectCreationIntentRef.current;
     const intent = previousIntent?.title === title
       ? previousIntent
@@ -914,6 +916,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             ? readError
             : createError;
         }
+      }
+      if (result.project.id !== intent.id || result.project.title !== intent.title) {
+        throw new Error("作成応答が要求した作品と一致しませんでした。作品名を確認してください。");
       }
       setProjects((current) => current.some((item) => item.id === result.project.id)
         ? current.map((item) => item.id === result.project.id ? result.project : item)
@@ -1005,12 +1010,14 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     event.preventDefault();
     if (!project) return;
     const title = documentTitle.trim();
-    if (!title || creationInFlightRef.current || !await protectTransition()) return;
+    if (!title || creationInFlightRef.current) return;
+    creationInFlightRef.current = true;
+    if (!await protectTransition()) { creationInFlightRef.current = false; return; }
     if (!canCreateDocument) { setPageError("完全な目次を取得できていないか、文書数が現在の作品構成上限に達しています。"); return; }
     const parentId = (newDocumentParent || null) as DocumentId | null;
     const orderKey = String(documents.length).padStart(8, "0");
     const previousIntent = documentCreationIntentRef.current;
-    const intent = previousIntent && previousIntent.projectId === project.id && previousIntent.parentId === parentId && previousIntent.kind === documentKind && previousIntent.title === title && previousIntent.orderKey === orderKey
+    const intent = previousIntent && previousIntent.projectId === project.id && previousIntent.parentId === parentId && previousIntent.kind === documentKind && previousIntent.title === title
       ? previousIntent
       : {
           projectId: project.id,
@@ -1045,6 +1052,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             ? readError
             : createError;
         }
+      }
+      if (result.document.id !== intent.documentId || result.document.projectId !== intent.projectId || result.document.title !== intent.title) {
+        throw new Error("作成応答が要求した文書と一致しませんでした。文書名を確認してください。");
       }
       // Re-read the canonical order after creation; an appended document can
       // share an orderKey with an existing sibling or sort before it.
