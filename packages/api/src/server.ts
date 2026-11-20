@@ -2090,9 +2090,9 @@ export function createServer(options: ApiServerOptions): Server {
         await createScratch(projectId, await readJson(request, parsedBody), hosted ? `hosted:${author!.userId}` : "owner", response); return;
       }
       if (suffix === "review-queue" && method === "GET") {
-        if (!coreStore.listProposals) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
-        const proposals = await coreStore.listProposals(projectId);
-        sendJson(response, 200, { snapshot: (await options.store.observe(projectId)).snapshot, proposals: proposals.slice(0, 1000) }); return;
+        if (!coreStore.listProposalsSnapshot) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
+        const result = await coreStore.listProposalsSnapshot(projectId);
+        sendJson(response, 200, { snapshot: result.snapshot, proposals: result.proposals.slice(0, 1000) }); return;
       }
 
       if (suffix.startsWith("modules/") || suffix.startsWith("actions/")) throw httpFailure(404, "NOT_FOUND", "API route not found");

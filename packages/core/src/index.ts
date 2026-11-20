@@ -473,14 +473,16 @@ export class CoreStore implements MutationCoordinator {
   private async proposalStatus(reader:PersistenceReader,projectId:string,proposalId:string):Promise<{recordVersion:number;status:ProposalStatus}|null> {
     const record=await reader.getModuleRecord(pid(projectId),AUTHORITY,`proposal:${proposalId}`); return record ? {recordVersion:record.version,status:record.value as unknown as ProposalStatus}:null;
   }
-  async listProposals(projectId:string):Promise<ProposalStatus[]> { return this.persistence.read(async reader => {
+  async listProposalsSnapshot(projectId:string):Promise<{snapshot:SnapshotId;proposals:ProposalStatus[]}> { return this.persistence.read(async reader => {
       const project=await reader.getProject(pid(projectId));
       if(!project) fail(404,"project_not_found","Project not found");
-      return (await reader.listModuleRecords(pid(projectId),AUTHORITY)).filter(record=>record.key.startsWith("proposal:")).map(record=>{
+      const proposals=(await reader.listModuleRecords(pid(projectId),AUTHORITY)).filter(record=>record.key.startsWith("proposal:")).map(record=>{
         const status=record.value as unknown as ProposalStatus;
         return {...status,stale:status.proposal.snapshot.projectVersion!==project.version};
       });
+      return {snapshot:{projectId,projectVersion:project.version},proposals};
     }); }
+  async listProposals(projectId:string):Promise<ProposalStatus[]> { return (await this.listProposalsSnapshot(projectId)).proposals; }
   async reviewQueue(projectIds: readonly string[] | null): Promise<{ unresolvedCount: number; items: Array<{ projectId: string; proposal: ProposalStatus }> }> {
     return this.persistence.read(async reader => {
       const { unresolvedCount, records } = await reader.listProposalReviewQueue(projectIds === null ? null : projectIds.map(pid), AUTHORITY, 1000);
