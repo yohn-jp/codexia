@@ -7,7 +7,7 @@ import {
   keymap,
   placeholder as cmPlaceholder,
 } from "@codemirror/view";
-import { forwardRef, useEffect, useImperativeHandle, useRef, type CSSProperties } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, type CSSProperties } from "react";
 import { bracketPairsExtension } from "./cm/bracketPairs";
 import { editorCompositionExtension, isViewComposing } from "./cm/compositionGuard";
 import { ellipsisNormalizeExtension } from "./cm/ellipsisNormalize";
@@ -24,9 +24,14 @@ export interface ManuscriptInputHandle {
   flushComposition(): Promise<string>;
   readForNavigation(): string;
   insert(symbol: WritingSymbolId): void;
-  restorePosition(position: { cursorSentenceIndex: number | null; scrollTop: number }): void;
+  restorePosition(position: ManuscriptPosition): void;
   getScrollTop(): number;
   getSelection(): { from: number; to: number; text: string } | null;
+}
+
+export interface ManuscriptPosition {
+  cursorSentenceIndex: number | null;
+  scrollTop: number;
 }
 
 export interface EvidenceRangeRequest {
@@ -44,6 +49,8 @@ export interface ManuscriptInputProps {
   onSelectionLengthChange?: (length: number) => void;
   onSelectionChange?: (selection: { from: number; to: number; text: string } | null) => void;
   onCursorPositionChange?: (cursorSentenceIndex: number | null, scrollTop: number) => void;
+  requestedPosition?: ManuscriptPosition;
+  consumeRequestedPosition?: (position: ManuscriptPosition) => boolean;
   placeholder?: string;
   labelledBy: string;
   style?: CSSProperties;
@@ -68,6 +75,8 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
   onSelectionLengthChange,
   onSelectionChange,
   onCursorPositionChange,
+  requestedPosition,
+  consumeRequestedPosition,
   placeholder,
   labelledBy,
   style,
@@ -102,10 +111,25 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
   const latestRef = useRef({ onChange, onSelectionLengthChange, onSelectionChange, onCursorPositionChange });
   latestRef.current = { onChange, onSelectionLengthChange, onSelectionChange, onCursorPositionChange };
 
-  function sentencePositionIndex(doc: EditorState["doc"], text?: string) {
+  const sentencePositionIndex = useCallback((doc: EditorState["doc"], text?: string) => {
     const cache = sentencePositionIndexRef.current ??= createUiSentencePositionIndexCache<EditorState["doc"]>();
     return cache.get(doc, text);
-  }
+  }, []);
+
+  const restorePosition = useCallback((position: ManuscriptPosition) => {
+    const view = viewRef.current;
+    if (!view) return;
+    const offset = sentencePositionIndex(view.state.doc).offsetAtIndex(position.cursorSentenceIndex);
+    suppressPositionRef.current = true;
+    if (offset !== null) {
+      view.dispatch({
+        selection: { anchor: Math.max(0, Math.min(offset, view.state.doc.length)) },
+        annotations: Transaction.addToHistory.of(false),
+      });
+    }
+    view.scrollDOM.scrollTop = Math.max(0, position.scrollTop);
+    requestAnimationFrame(() => { suppressPositionRef.current = false; });
+  }, [sentencePositionIndex]);
 
   function reportPosition(view: EditorView): void {
     if (suppressPositionRef.current) return;
@@ -151,20 +175,7 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
       });
       view.focus();
     },
-    restorePosition(position) {
-      const view = viewRef.current;
-      if (!view) return;
-      const offset = sentencePositionIndex(view.state.doc).offsetAtIndex(position.cursorSentenceIndex);
-      suppressPositionRef.current = true;
-      if (offset !== null) {
-        view.dispatch({
-          selection: { anchor: Math.max(0, Math.min(offset, view.state.doc.length)) },
-          annotations: Transaction.addToHistory.of(false),
-        });
-      }
-      view.scrollDOM.scrollTop = Math.max(0, position.scrollTop);
-      requestAnimationFrame(() => { suppressPositionRef.current = false; });
-    },
+    restorePosition,
     getScrollTop() {
       return Math.max(0, viewRef.current?.scrollDOM.scrollTop ?? 0);
     },
@@ -175,7 +186,7 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
       if (selection.empty) return null;
       return { from: selection.from, to: selection.to, text: view.state.sliceDoc(selection.from, selection.to) };
     },
-  }), []);
+  }), [restorePosition]);
 
   useEffect(() => {
     const parent = containerRef.current;
@@ -279,6 +290,14 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
       annotations: [Transaction.addToHistory.of(false), externalDocumentSync.of(true)],
     });
   }, [externalTextRevision, value]);
+
+  useEffect(() => {
+    if (!requestedPosition || !consumeRequestedPosition) return;
+    const frame = requestAnimationFrame(() => {
+      if (viewRef.current && consumeRequestedPosition(requestedPosition)) restorePosition(requestedPosition);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [consumeRequestedPosition, requestedPosition, restorePosition]);
 
   useEffect(() => {
     if (!evidenceRangeRequest || !onEvidenceRangeResult) return;

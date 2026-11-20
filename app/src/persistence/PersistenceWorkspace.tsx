@@ -29,7 +29,7 @@ import { MobileReadingPager } from "../editor/MobileReadingPager";
 import { TermAwareRubyText } from "../editor/TermAwareRubyText";
 import { WRITING_SYMBOLS } from "../editor/writingSymbols";
 import { loadTypographySettings, storeTypographySettings, TYPOGRAPHY_PRESETS, typographyPresetValues, type TypographyPresetId } from "../editor/typography";
-import { ManuscriptInput, type ManuscriptInputHandle, type EvidenceRangeRequest } from "../editor/ManuscriptInput";
+import { ManuscriptInput, type ManuscriptInputHandle, type ManuscriptPosition, type EvidenceRangeRequest } from "../editor/ManuscriptInput";
 import { applyTextChanges, composeTextChanges, initializeDocumentEvidence, markEvidenceNeedsReview, type DocumentEvidenceState, type EditorEvidenceAdapter, type TextChange } from "../editor/evidence";
 import { BrowserJournal, type PersistenceDraftTextChanges } from "../storage/journal";
 import { createPostgresEditorEvidenceAdapter } from "../editor/postgresEvidenceAdapter";
@@ -58,6 +58,15 @@ interface ActiveDocument {
   evidenceLoadKey: number;
 }
 
+type ContinuePosition = ({ kind: "writing" } & ManuscriptPosition) | { kind: "reading"; pageIndex: number };
+
+interface ContinueRequest {
+  projectId: string;
+  documentId: string;
+  intent: number;
+  position: ContinuePosition;
+}
+
 interface OutlineDocument extends PersistenceDocument {
   children: OutlineDocument[];
   misplaced?: boolean;
@@ -71,6 +80,31 @@ function documentKindLabel(kind: string): string {
     case "note": return "ノート";
     default: return "文書";
   }
+}
+
+function documentMoveTargets(documents: PersistenceDocument[], selected: PersistenceDocument): Array<{ id: string; label: string }> {
+  const byId = new Map<string, PersistenceDocument>(documents
+    .filter((document) => document.projectId === selected.projectId)
+    .map((document) => [document.id, document]));
+  const targets: Array<{ id: string; label: string }> = [];
+  const labelCounts = new Map<string, number>();
+  for (const target of byId.values()) {
+    const visited = new Set<string>();
+    const names: string[] = [];
+    let ancestor: PersistenceDocument | undefined = target;
+    while (ancestor && ancestor.id !== selected.id && !visited.has(ancestor.id)) {
+      visited.add(ancestor.id);
+      if (names.length < 3) names.push(ancestor.title);
+      ancestor = ancestor.parentId ? byId.get(ancestor.parentId) : undefined;
+    }
+    if (ancestor) continue;
+    const prefix = visited.size > names.length ? "… / " : "";
+    const label = prefix + names.reverse().join(" / ") + " · " + documentKindLabel(target.kind);
+    labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
+    targets.push({ id: target.id, label });
+  }
+  return targets.map((target) => labelCounts.get(target.label) === 1
+    ? target : { ...target, label: target.label + " · " + target.id });
 }
 
 function knowledgeTypeLabel(type: string): string {
@@ -250,6 +284,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const clientIdRef = useRef("");
   const openSequenceRef = useRef(0);
   const selectionIntentRef = useRef(0);
+  const continueRequestRef = useRef<ContinueRequest | undefined>(undefined);
   const panelRequestSequenceRef = useRef(0);
   const [resumeEpoch, setResumeEpoch] = useState(0);
   const [legacyImportBusy, setLegacyImportBusy] = useState(false);
@@ -279,6 +314,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const selectedDocument = documents.find((candidate) => candidate.id === documentId) ?? null;
   const canCreateDocument = outlineReadyProject === projectId && !!projectId && documents.length < 999;
   const documentOutline = useMemo(() => buildDocumentOutline(documents), [documents]);
+  const activeDocument = active?.document;
+  const moveTargets = useMemo(() => activeDocument ? documentMoveTargets(documents, activeDocument) : [], [documents, activeDocument]);
+  const moveTargetAvailable = !moveParent || moveTargets.some((target) => target.id === moveParent);
   useEffect(() => {
     if (!documentId || !projectId) {
       lastOutlineSelectionRef.current = "";
@@ -568,8 +606,17 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       });
       if (draft && staleDraft && !recoverablePending) setNotice("ブラウザーに保存された下書きのbase Revisionが変わっています。比較してから、どちらを使うか選んでください。");
       if (recoverablePending) setNotice("応答が失われた可能性のある保存操作を照合しています。");
-      const position = loadWritingResume(authorScope, currentProject.id);
-      if (position?.sceneId === nextDocumentId) requestAnimationFrame(() => { if (activeRef.current?.document.id === nextDocumentId) editorRef.current?.restorePosition(position); });
+      const requested = continueRequestRef.current;
+      const explicitPosition = requested?.projectId === currentProject.id && requested.documentId === nextDocumentId &&
+        requested.intent === selectionIntentRef.current;
+      if (!explicitPosition) {
+        const position = loadWritingResume(authorScope, currentProject.id);
+        const intent = selectionIntentRef.current;
+        if (position?.sceneId === nextDocumentId) requestAnimationFrame(() => {
+          if (intent === selectionIntentRef.current && activeRef.current?.document.projectId === currentProject.id &&
+              activeRef.current.document.id === nextDocumentId) editorRef.current?.restorePosition(position);
+        });
+      }
       setReadingPage(loadReadingPage(authorScope, currentProject.id, nextDocumentId));
       setRevisions([]);
       setShowRevisions(false);
@@ -1050,15 +1097,22 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     return () => registerProtection?.(null);
   }, [registerProtection, protectTransition]);
 
-  const selectDocument = useCallback(async (nextId: string): Promise<boolean> => {
+  const selectDocument = useCallback(async (nextId: string, position?: ContinuePosition): Promise<boolean> => {
     // Navigation preflight is asynchronous. Only the latest requested selection
     // may publish a document, even when an earlier request finishes later.
     const intent = ++selectionIntentRef.current;
+    continueRequestRef.current = undefined;
     setEvidenceJump(undefined);
-    if (nextId === documentId && selectionRef.current?.documentId === nextId &&
-        activeRef.current?.document.id === nextId) return true;
+    const alreadyOpen = nextId === documentId && selectionRef.current?.documentId === nextId &&
+      activeRef.current?.document.id === nextId;
+    if (alreadyOpen && !position) return true;
     if (!await protectTransition()) return false;
     if (intent !== selectionIntentRef.current) return false;
+    if (position) {
+      continueRequestRef.current = { projectId, documentId: nextId, intent, position };
+      setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
+    }
+    if (alreadyOpen) return true;
     openSequenceRef.current += 1;
     publishEditor(null);
     selectionRef.current = { projectId, documentId: nextId };
@@ -1068,6 +1122,29 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     setDocumentId(nextId);
     return true;
   }, [authorScope, documentId, projectId, protectTransition, publishEditor, updateRouteSelection]);
+
+  const requestedContinue = continueRequestRef.current;
+  const activeContinue = requestedContinue?.projectId === active?.document.projectId &&
+    requestedContinue?.documentId === active?.document.id && requestedContinue?.intent === selectionIntentRef.current
+    ? requestedContinue : undefined;
+  useEffect(() => {
+    if (!activeContinue || continueRequestRef.current !== activeContinue || sessionBlockedRef.current) return;
+    if (activeContinue.position.kind === "reading") {
+      continueRequestRef.current = undefined;
+      setReadingPage(activeContinue.position.pageIndex);
+      setReading(true);
+    } else {
+      setReading(false);
+    }
+  }, [activeContinue]);
+  const consumeWritingContinue = useCallback((position: ManuscriptPosition) => {
+    const request = continueRequestRef.current;
+    const current = activeRef.current;
+    if (!request || request.position !== position || request.intent !== selectionIntentRef.current ||
+        current?.document.id !== request.documentId || current.document.projectId !== request.projectId || sessionBlockedRef.current) return false;
+    continueRequestRef.current = undefined;
+    return true;
+  }, []);
 
   const beforeLegacyImport = useCallback(async (): Promise<void> => {
     legacyImportTargetRef.current = null;
@@ -1475,6 +1552,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
 
   const selectProject = async (nextProjectId: string): Promise<void> => {
     if (nextProjectId === projectId || !await protectTransition()) return;
+    selectionIntentRef.current += 1;
+    continueRequestRef.current = undefined;
     openSequenceRef.current += 1;
     publishEditor(null);
     selectionRef.current = { projectId: nextProjectId, documentId: "" };
@@ -1630,16 +1709,12 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
                 const handoff = formatHandoffHint(candidate.deviceType, candidate.updatedAt, Date.now(), resume.deviceType);
                 return <p key={candidate.sceneId}>
                   <span>{title}</span>{handoff && <small>{handoff}</small>}
-                  <button type="button" onClick={() => { void selectDocument(candidate.sceneId).then((opened) => {
-                    if (!opened) return;
-                    setReading(false);
-                    requestAnimationFrame(() => editorRef.current?.restorePosition({ cursorSentenceIndex: candidate.sentenceOffset, scrollTop: candidate.scrollTop ?? 0 }));
-                  }); }}>続きを書く</button>
-                  {candidate.pageIndex !== null && <button type="button" onClick={() => { void selectDocument(candidate.sceneId).then((opened) => {
-                    if (!opened) return;
-                    setReading(true);
-                    setReadingPage(candidate.pageIndex ?? 0);
-                  }); }}>読書位置を開く</button>}
+                  <button type="button" onClick={() => void selectDocument(candidate.sceneId, {
+                    kind: "writing", cursorSentenceIndex: candidate.sentenceOffset, scrollTop: candidate.scrollTop ?? 0,
+                  })}>続きを書く</button>
+                  {candidate.pageIndex !== null && <button type="button" onClick={() => void selectDocument(candidate.sceneId, {
+                    kind: "reading", pageIndex: candidate.pageIndex ?? 0,
+                  })}>読書位置を開く</button>}
                 </p>;
               })}
             </section>
@@ -1669,7 +1744,15 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           </details>
           {active && <details><summary>選択文書の構成を変更</summary>
             <form onSubmit={(event) => { event.preventDefault(); if (renameTitle.trim()) void editStructure({ title: renameTitle.trim() }); }}><label htmlFor="pg-rename">新しい文書名</label><input id="pg-rename" value={renameTitle} onChange={(event) => setRenameTitle(event.target.value)} required maxLength={256} /><button type="submit">文書名を変更</button></form>
-            <form onSubmit={(event) => { event.preventDefault(); void editStructure({ parentId: moveParent || null }); }}><label htmlFor="pg-move">移動先</label><select id="pg-move" value={moveParent} onChange={(event) => setMoveParent(event.target.value)}><option value="">作品の直下</option>{documents.filter((item) => item.id !== active.document.id).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select><button type="submit">文書を移動</button></form>
+            <form onSubmit={(event) => { event.preventDefault(); if (moveTargetAvailable) void editStructure({ parentId: moveParent || null }); }}>
+              <label htmlFor="pg-move">移動先</label>
+              <select id="pg-move" value={moveParent} onChange={(event) => setMoveParent(event.target.value)}>
+                <option value="">作品の直下</option>
+                {!moveTargetAvailable && <option value={moveParent} disabled>選んだ移動先は利用できません</option>}
+                {moveTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}
+              </select>
+              <button type="submit" disabled={!moveTargetAvailable}>文書を移動</button>
+            </form>
             <form onSubmit={(event) => { event.preventDefault(); void editStructure({ orderKey: String(orderRank).padStart(8, "0") }); }}><label htmlFor="pg-order">並び順</label><input id="pg-order" type="number" min="0" max="99999999" value={orderRank} onChange={(event) => setOrderRank(Number(event.target.value))} /><button type="submit">並び順を変更</button></form>
             <button type="button" onClick={() => { if (window.confirm(`「${active.document.title}」を削除しますか？保存済みRevisionは保持されます。`)) void editStructure({}, true); }}>文書を削除</button>
           </details>}
@@ -1737,6 +1820,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             termResolutionKey={moduleSnapshot ? snapshotKey(moduleSnapshot) : ""}
             onTermNavigate={handleTermNavigate}
             onCursorPositionChange={(cursorSentenceIndex, scrollTop) => { editorPositionRef.current = { cursorSentenceIndex, scrollTop }; resume.onWritingPosition(active.document.id, cursorSentenceIndex, scrollTop); }}
+            requestedPosition={!reading && activeContinue?.position.kind === "writing" ? activeContinue.position : undefined}
+            consumeRequestedPosition={consumeWritingContinue}
             onSelectionChange={(selection) => { textSelectionRef.current = selection; }}
             value={active.markdown}
             externalTextRevision={active.generation}
