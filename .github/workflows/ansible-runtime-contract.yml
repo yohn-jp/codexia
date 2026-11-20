@@ -15,6 +15,7 @@ on:
       - deploy/ansible/prepare.yml
       - deploy/ansible/initialize-schema.yml
       - deploy/ansible/initialize-fresh.yml
+      - deploy/ansible/enable.yml
       - deploy/ansible/maintenance.yml
       - deploy/ansible/rotate-probe-credentials.yml
       - deploy/ansible/rotate-api-auth-token.yml
@@ -56,6 +57,7 @@ on:
       - deploy/ansible/prepare.yml
       - deploy/ansible/initialize-schema.yml
       - deploy/ansible/initialize-fresh.yml
+      - deploy/ansible/enable.yml
       - deploy/ansible/maintenance.yml
       - deploy/ansible/rotate-probe-credentials.yml
       - deploy/ansible/verify.yml

@@ -10,7 +10,7 @@ import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
 import { assertMaintenanceSnapshotVerifier, maintainStandaloneUpdater, recoverInterruptedMaintenance } from './standalone-maintenance.mjs';
 
 const [command,configPath,...arguments_]=process.argv.slice(2);
-if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|verify-bootstrap|verify-cutover-backup|verify-maintenance-backup|cutover|bootstrap-cutover|recover-cutover|initialize-schema|init-fresh|init|recover-initial|boot|tick|status|verify|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
+if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|verify-bootstrap|verify-cutover-backup|verify-maintenance-backup|cutover|bootstrap-cutover|recover-cutover|initialize-schema|init-fresh|init|recover-initial|boot|tick|status|verify|verify-resume|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
 let config=JSON.parse(await readFile(configPath,'utf8'));
 assert.equal(config.format,'codexia-standalone-updater/v1');
 assert.ok(path.isAbsolute(config.stateFile)&&path.isAbsolute(config.publicKeyFile));
@@ -247,10 +247,12 @@ if(command==='recover-cutover'||(command==='boot'&&pendingCutover)){
     state=await controller.reconcile(state,{boot:true});
   }
   else if(command==='status'){console.log(JSON.stringify({state,backupIntent:await controller.loadBackupIntent(),observed:await host.observe()},null,2));process.exit(0);}
-  else if(command==='verify'){
-    assert.equal(await controller.loadBackupIntent(),null,'Pending backup recovery prevents service verification');
+  else if(command==='verify'||command==='verify-resume'){
+    const resumeVerification=command==='verify-resume';
+    assert.equal(await controller.loadBackupIntent(),null,resumeVerification?'Pending backup recovery prevents resume verification':'Pending backup recovery prevents service verification');
     assert.ok(['idle','committed'].includes(state.journal.phase),'Unreconciled journal requires operator repair');
-    assert.equal(state.lastError,null,'Controller has a recorded error');
+    if(resumeVerification)assert.ok(state.lastError===null||state.lastError==='Interrupted update recovered from durable journal','Only the supported recovered-update error may be cleared by resume');
+    else assert.equal(state.lastError,null,'Controller has a recorded error');
     await host.verifyWriterUnits(state);
     await controller.assertServing(state,state.journal.active.slot,state.installed);
     console.log(JSON.stringify({state,observed:await host.observe()},null,2));

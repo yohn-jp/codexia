@@ -212,6 +212,11 @@
       vars:
         preflight_verify_only: true
       when: journal.stat.exists and codexia_stage != 'backup'
+    - name: Require explicit acceptance approval before enabling or reconciling polling
+      ansible.builtin.assert:
+        that: codexia_acceptance_approved | default(false) | bool
+        fail_msg: Automatic updates require explicit live-acceptance approval.
+      when: codexia_stage == 'enable'
     - name: Maintain updater source, configuration and systemd units through the locked controller
       ansible.builtin.include_tasks: maintenance.yml
       when: codexia_stage == 'maintain' and journal.stat.exists and not ansible_check_mode

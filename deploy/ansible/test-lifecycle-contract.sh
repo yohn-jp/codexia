@@ -4,7 +4,8 @@ command -v ansible-playbook >/dev/null || { echo 'ansible-playbook is required' 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 playbook="$root/deploy/ansible/test-lifecycle-contract.yml"
 tmp="$(mktemp -d)"
-trap 'rm -rf -- "$tmp"' EXIT
+api_pid=
+trap '[[ -z "${api_pid:-}" ]] || kill "$api_pid" 2>/dev/null || true; rm -rf -- "$tmp"' EXIT
 mkdir -m 0700 "$tmp/bin"
 
 cat > "$tmp/bin/codexia-lifecycle-updater" <<'SH'
@@ -12,6 +13,10 @@ cat > "$tmp/bin/codexia-lifecycle-updater" <<'SH'
 set -euo pipefail
 operation="${1:?}"
 case "$operation" in
+  verify-resume)
+    [ "${CODEXIA_LIFECYCLE_BAD_RECOVERY:-false}" != true ] || exit 9
+    printf '%s\n' '{"state":{"journal":{"phase":"idle","active":{"slot":"blue"}},"lastError":"Interrupted update recovered from durable journal","paused":false,"installed":{"image":"ghcr.io/yohn-jp/codexia-backend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"previous":{"image":"ghcr.io/yohn-jp/codexia-backend@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"failedImages":[]},"observed":{"writers":[{"slot":"blue","image":"ghcr.io/yohn-jp/codexia-backend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],"route":"blue"}}'
+    ;;
   pause|resume|rollback|acceptance-rollback)
     printf '%s\n' "$operation" > "$CODEXIA_LIFECYCLE_OPERATION_FILE"
     case "$operation" in
@@ -29,9 +34,12 @@ case "$operation" in
     esac
     ;;
   verify)
-    selected="$(cat -- "$CODEXIA_LIFECYCLE_OPERATION_FILE")"
+    selected="${CODEXIA_LIFECYCLE_STAGE:-}"
+    if [ -n "${CODEXIA_LIFECYCLE_OPERATION_FILE:-}" ] && [ -f "$CODEXIA_LIFECYCLE_OPERATION_FILE" ]; then
+      selected="$(cat -- "$CODEXIA_LIFECYCLE_OPERATION_FILE")"
+    fi
     case "$selected" in
-      pause) paused=true; slot=blue; image=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
+      pause|enable) paused=true; slot=blue; image=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
       resume) paused=false; slot=blue; image=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
       rollback|acceptance-rollback) paused=true; slot=green; image=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ;;
       *) exit 9 ;;
@@ -43,7 +51,7 @@ case "$operation" in
         if [ -e "$CODEXIA_LIFECYCLE_OPERATION_FILE.drop-verified-failed-image" ]; then failed_images='[]'; fi
         ;;
     esac
-    printf '{"state":{"journal":{"phase":"idle","active":{"slot":"%s"}},"lastError":null,"paused":%s,"installed":{"image":"ghcr.io/yohn-jp/codexia-backend@sha256:%s"},"previous":{"image":"ghcr.io/yohn-jp/codexia-backend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"failedImages":%s},"observed":{"writers":[{"slot":"%s"}],"route":"%s"}}\n' "$slot" "$paused" "$image" "$failed_images" "$slot" "$slot"
+    printf '{"state":{"journal":{"phase":"idle","active":{"slot":"%s"}},"lastError":null,"paused":%s,"installed":{"image":"ghcr.io/yohn-jp/codexia-backend@sha256:%s","version":"1.2.3","profile":"core","apiEpoch":1},"previous":{"image":"ghcr.io/yohn-jp/codexia-backend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"failedImages":%s},"observed":{"writers":[{"slot":"%s","image":"ghcr.io/yohn-jp/codexia-backend@sha256:%s"}],"route":"%s"}}\n' "$slot" "$paused" "$image" "$failed_images" "$slot" "$image" "$slot"
     ;;
   *) exit 8 ;;
 esac
@@ -239,6 +247,180 @@ for stage in pause resume rollback; do
   expected="$stage"; [[ "$stage" != rollback ]] || expected=acceptance-rollback
   [[ "$(cat "$operation_file")" == "$expected" ]]
 done
+
+# Explicit resume may clear only the supported recovered-update error after a
+# locked read-only check of the exact writer and route. This exercises the real
+# site dispatcher and verify-resume task with disposable command fixtures.
+cp "$root/deploy/ansible/verify.yml" "$tmp/site/"
+for task_file in verify-updater-inputs.yml verify-updater-units.yml verify-timer.yml; do
+  printf '%s\n' '---' '- ansible.builtin.debug:' '    msg: "isolated contract stub"' > "$tmp/site/$task_file"
+done
+recovery_operation="$tmp/site-resume-recovered.operation"
+CODEXIA_LIFECYCLE_STAGE=resume CODEXIA_LIFECYCLE_CONFIG_ENABLED=false CODEXIA_LIFECYCLE_PAUSED=true \
+  CODEXIA_LIFECYCLE_TIMER_STATE=inactive CODEXIA_LIFECYCLE_RECOVERY_ERROR='Interrupted update recovered from durable journal' \
+  CODEXIA_LIFECYCLE_FAKE_UPDATER="$tmp/bin/codexia-lifecycle-updater" CODEXIA_LIFECYCLE_OPERATION_FILE="$recovery_operation" PATH="$tmp/bin:$PATH" \
+  ansible-playbook -i 'codexia,' -c local "$tmp/site/site.yml" \
+    -e codexia_stage=resume -e codexia_maintenance_approved=true -e "state_dir=$tmp/site-state" \
+    -e 'codexia_frontend_origin=https://fixture.invalid' -e "codexia_proxy_image=ghcr.io/yohn-jp/codexia-backend@sha256:$(printf '%064d' 0)" \
+    -e '{"codexia_browser_auth":{"mode":"token"},"codexia_runtime":{"format":"codexia-runtime/v1","profile":"core","modelCachePath":null,"tmpfs":{"tempSize":"64m","moduleCacheSize":"1g"},"resources":{"memoryMaxBytes":null,"cpuQuotaPercent":null}}}' \
+    -e "updater=$tmp/bin/codexia-lifecycle-updater" -e 'config_path=/tmp/codexia-lifecycle-test-config.json' \
+    > "$tmp/site-resume-recovered.log" 2>&1 || { cat "$tmp/site-resume-recovered.log" >&2; exit 1; }
+[[ "$(cat "$recovery_operation")" == resume ]]
+rejected_operation="$tmp/site-resume-rejected.operation"
+if CODEXIA_LIFECYCLE_STAGE=resume CODEXIA_LIFECYCLE_CONFIG_ENABLED=false CODEXIA_LIFECYCLE_PAUSED=true \
+  CODEXIA_LIFECYCLE_TIMER_STATE=inactive CODEXIA_LIFECYCLE_RECOVERY_ERROR='Interrupted update recovered from durable journal' CODEXIA_LIFECYCLE_BAD_RECOVERY=true \
+  CODEXIA_LIFECYCLE_FAKE_UPDATER="$tmp/bin/codexia-lifecycle-updater" CODEXIA_LIFECYCLE_OPERATION_FILE="$rejected_operation" PATH="$tmp/bin:$PATH" \
+  ansible-playbook -i 'codexia,' -c local "$tmp/site/site.yml" \
+    -e codexia_stage=resume -e codexia_maintenance_approved=true -e "state_dir=$tmp/site-state" \
+    -e 'codexia_frontend_origin=https://fixture.invalid' -e "codexia_proxy_image=ghcr.io/yohn-jp/codexia-backend@sha256:$(printf '%064d' 0)" \
+    -e '{"codexia_browser_auth":{"mode":"token"},"codexia_runtime":{"format":"codexia-runtime/v1","profile":"core","modelCachePath":null,"tmpfs":{"tempSize":"64m","moduleCacheSize":"1g"},"resources":{"memoryMaxBytes":null,"cpuQuotaPercent":null}}}' \
+    -e "updater=$tmp/bin/codexia-lifecycle-updater" -e 'config_path=/tmp/codexia-lifecycle-test-config.json' \
+    > "$tmp/site-resume-rejected.log" 2>&1; then
+  cat "$tmp/site-resume-rejected.log" >&2
+  echo 'Unsupported resume recovery state unexpectedly passed' >&2
+  exit 1
+fi
+[[ ! -e "$rejected_operation" ]]
+
+# Exercise the real enable task from the site stage. The fixture starts with an
+# enabled controller config and an inactive, disabled timer to model a crash
+# after the config write. Its identity endpoint and systemctl shim are local.
+cp "$root/deploy/ansible/enable.yml" "$tmp/site/"
+cp "$root/deploy/ansible/verify-timer.yml" "$tmp/site/"
+enabled_config="$tmp/enable-config.json"
+printf '{"enabled":true}\n' > "$enabled_config"
+chmod 0600 "$enabled_config"
+cat > "$tmp/site/verify-updater-inputs.yml" <<YAML
+---
+- ansible.builtin.slurp:
+    src: "$enabled_config"
+  register: saved_config
+YAML
+mkdir -p "$tmp/api" "$tmp/enable-bin"
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -keyout "$tmp/api/key.pem" -out "$tmp/api/cert.pem" \
+  -subj '/CN=127.0.0.1' -addext 'subjectAltName=IP:127.0.0.1' > /dev/null 2>&1
+cat > "$tmp/api/server.py" <<'PY'
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json, os, ssl
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        version_file = os.environ.get("CODEXIA_FIXTURE_API_VERSION_FILE")
+        version = open(version_file).read().strip() if version_file and os.path.exists(version_file) else "1.2.3"
+        body = {"name": "codexia", "version": version, "profile": "core", "apiEpoch": 1, "browserAuth": "token"}
+        payload = json.dumps(body).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+    def log_message(self, *args): pass
+server = HTTPServer(("127.0.0.1", 0), Handler)
+context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.load_cert_chain(os.environ["CODEXIA_FIXTURE_CERT"], os.environ["CODEXIA_FIXTURE_KEY"])
+server.socket = context.wrap_socket(server.socket, server_side=True)
+with open(os.environ["CODEXIA_FIXTURE_PORT_FILE"], "w") as port_file:
+    port_file.write(str(server.server_port))
+server.serve_forever()
+PY
+CODEXIA_FIXTURE_PORT_FILE="$tmp/api/port" CODEXIA_FIXTURE_API_VERSION_FILE="$tmp/api/version" CODEXIA_FIXTURE_CERT="$tmp/api/cert.pem" CODEXIA_FIXTURE_KEY="$tmp/api/key.pem" \
+  python3 "$tmp/api/server.py" > "$tmp/api/server.log" 2>&1 &
+api_pid=$!
+for attempt in {1..50}; do [[ -s "$tmp/api/port" ]] && break; sleep 0.1; done
+[[ -s "$tmp/api/port" ]] || { cat "$tmp/api/server.log" >&2; exit 1; }
+api_port="$(cat "$tmp/api/port")"
+cat > "$tmp/enable-bin/systemctl" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+state_file="${CODEXIA_ENABLE_TIMER_STATE_FILE:?}"
+read_state() { mapfile -t values < "$state_file"; }
+write_state() { printf '%s\n%s\n' "$1" "$2" > "$state_file"; }
+if [[ "$*" == '--user show --property=Version' ]]; then echo 'Version=259'; exit 0; fi
+read_state
+case "${2:-}" in
+  show)
+    printf 'LoadState=loaded\nActiveState=%s\nUnitFileState=%s\n' "${values[1]}" "${values[0]}"
+    ;;
+  is-active)
+    echo "${values[1]}"
+    [[ "${values[1]}" == active ]] && exit 0 || exit 3
+    ;;
+  is-enabled)
+    echo "${values[0]}"
+    [[ "${values[0]}" == enabled ]] && exit 0 || exit 1
+    ;;
+  enable) write_state enabled "${values[1]}" ;;
+  start) write_state "${values[0]}" active ;;
+  *) echo "unexpected systemctl fixture invocation: $*" >&2; exit 99 ;;
+esac
+SH
+chmod 0700 "$tmp/enable-bin/systemctl"
+printf 'disabled\ninactive\n' > "$tmp/timer-state"
+printf '1.2.3\n' > "$tmp/api/version"
+printf 'fixture-access-id\n' > "$tmp/access-id"
+printf 'fixture-access-secret\n' > "$tmp/access-secret"
+chmod 0600 "$tmp/access-id" "$tmp/access-secret"
+enable_operation="$tmp/enable.operation"
+CODEXIA_LIFECYCLE_STAGE=enable CODEXIA_LIFECYCLE_CONFIG_ENABLED=true CODEXIA_LIFECYCLE_PAUSED=true \
+  CODEXIA_LIFECYCLE_TIMER_STATE=inactive CODEXIA_LIFECYCLE_FAKE_UPDATER="$tmp/bin/codexia-lifecycle-updater" \
+  CODEXIA_LIFECYCLE_OPERATION_FILE="$enable_operation" CODEXIA_ENABLE_TIMER_STATE_FILE="$tmp/timer-state" \
+  SSL_CERT_FILE="$tmp/api/cert.pem" PATH="$tmp/enable-bin:$tmp/bin:$PATH" \
+  ansible-playbook -i 'codexia,' -c local "$tmp/site/site.yml" \
+    -e codexia_stage=enable -e codexia_acceptance_approved=true \
+    -e codexia_frontend_origin="https://127.0.0.1:$api_port" -e "codexia_proxy_image=ghcr.io/yohn-jp/codexia-backend@sha256:$(printf '%064d' 0)" \
+    -e '{"codexia_browser_auth":{"mode":"token"},"codexia_runtime":{"format":"codexia-runtime/v1","profile":"core","modelCachePath":null,"tmpfs":{"tempSize":"64m","moduleCacheSize":"1g"},"resources":{"memoryMaxBytes":null,"cpuQuotaPercent":null}}}' \
+    -e "state_dir=$tmp/site-state" -e "updater=$tmp/bin/codexia-lifecycle-updater" \
+    -e "config_path=$enabled_config" -e "codexia_access_id_file=$tmp/access-id" -e "codexia_access_secret_file=$tmp/access-secret" \
+    -e "repo_root=$root" > "$tmp/site-enable.log" 2>&1 || { cat "$tmp/site-enable.log" >&2; exit 1; }
+[[ "$(cat "$enable_operation")" == resume ]]
+[[ "$(sed -n '1p' "$tmp/timer-state")" == enabled && "$(sed -n '2p' "$tmp/timer-state")" == active ]]
+python3 - "$enabled_config" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    assert json.load(f)["enabled"] is True
+PY
+# Missing acceptance approval fails before the updater or timer is changed.
+printf 'disabled\ninactive\n' > "$tmp/timer-state"
+unapproved_operation="$tmp/enable-unapproved.operation"
+if CODEXIA_LIFECYCLE_STAGE=enable CODEXIA_LIFECYCLE_CONFIG_ENABLED=true CODEXIA_LIFECYCLE_PAUSED=true \
+  CODEXIA_LIFECYCLE_TIMER_STATE=inactive CODEXIA_LIFECYCLE_FAKE_UPDATER="$tmp/bin/codexia-lifecycle-updater" \
+  CODEXIA_LIFECYCLE_OPERATION_FILE="$unapproved_operation" CODEXIA_ENABLE_TIMER_STATE_FILE="$tmp/timer-state" \
+  SSL_CERT_FILE="$tmp/api/cert.pem" PATH="$tmp/enable-bin:$tmp/bin:$PATH" \
+  ansible-playbook -i 'codexia,' -c local "$tmp/site/site.yml" \
+    -e codexia_stage=enable -e codexia_frontend_origin="https://127.0.0.1:$api_port" \
+    -e "codexia_proxy_image=ghcr.io/yohn-jp/codexia-backend@sha256:$(printf '%064d' 0)" \
+    -e '{"codexia_browser_auth":{"mode":"token"},"codexia_runtime":{"format":"codexia-runtime/v1","profile":"core","modelCachePath":null,"tmpfs":{"tempSize":"64m","moduleCacheSize":"1g"},"resources":{"memoryMaxBytes":null,"cpuQuotaPercent":null}}}' \
+    -e "state_dir=$tmp/site-state" -e "updater=$tmp/bin/codexia-lifecycle-updater" \
+    -e "config_path=$enabled_config" -e "codexia_access_id_file=$tmp/access-id" -e "codexia_access_secret_file=$tmp/access-secret" \
+    -e "repo_root=$root" > "$tmp/site-enable-unapproved.log" 2>&1; then
+  cat "$tmp/site-enable-unapproved.log" >&2
+  echo 'Enable unexpectedly passed without acceptance approval' >&2
+  exit 1
+fi
+[[ ! -e "$unapproved_operation" ]]
+[[ "$(sed -n '1p' "$tmp/timer-state")" == disabled && "$(sed -n '2p' "$tmp/timer-state")" == inactive ]]
+# A failed live identity check likewise leaves the forward interruption for
+# review instead of starting the timer.
+printf '9.9.9\n' > "$tmp/api/version"
+identity_operation="$tmp/enable-identity-mismatch.operation"
+if CODEXIA_LIFECYCLE_STAGE=enable CODEXIA_LIFECYCLE_CONFIG_ENABLED=true CODEXIA_LIFECYCLE_PAUSED=true \
+  CODEXIA_LIFECYCLE_TIMER_STATE=inactive CODEXIA_LIFECYCLE_FAKE_UPDATER="$tmp/bin/codexia-lifecycle-updater" \
+  CODEXIA_LIFECYCLE_OPERATION_FILE="$identity_operation" CODEXIA_ENABLE_TIMER_STATE_FILE="$tmp/timer-state" \
+  SSL_CERT_FILE="$tmp/api/cert.pem" PATH="$tmp/enable-bin:$tmp/bin:$PATH" \
+  ansible-playbook -i 'codexia,' -c local "$tmp/site/site.yml" \
+    -e codexia_stage=enable -e codexia_acceptance_approved=true \
+    -e codexia_frontend_origin="https://127.0.0.1:$api_port" \
+    -e "codexia_proxy_image=ghcr.io/yohn-jp/codexia-backend@sha256:$(printf '%064d' 0)" \
+    -e '{"codexia_browser_auth":{"mode":"token"},"codexia_runtime":{"format":"codexia-runtime/v1","profile":"core","modelCachePath":null,"tmpfs":{"tempSize":"64m","moduleCacheSize":"1g"},"resources":{"memoryMaxBytes":null,"cpuQuotaPercent":null}}}' \
+    -e "state_dir=$tmp/site-state" -e "updater=$tmp/bin/codexia-lifecycle-updater" \
+    -e "config_path=$enabled_config" -e "codexia_access_id_file=$tmp/access-id" -e "codexia_access_secret_file=$tmp/access-secret" \
+    -e "repo_root=$root" > "$tmp/site-enable-identity-mismatch.log" 2>&1; then
+  cat "$tmp/site-enable-identity-mismatch.log" >&2
+  echo 'Enable unexpectedly passed with a mismatched live API identity' >&2
+  exit 1
+fi
+[[ ! -e "$identity_operation" ]]
+[[ "$(sed -n '1p' "$tmp/timer-state")" == disabled && "$(sed -n '2p' "$tmp/timer-state")" == inactive ]]
+kill "$api_pid"
 # Restore is an independent local operation, even if the source is down or not
 # present in the inventory. Exercise the real site dispatcher and recovery
 # tasks; only the already separately tested Podman/age drill helper is stubbed.

@@ -32,13 +32,15 @@ cat > "$tmp/timer.yml" <<YAML
         src: "$tmp/config.json"
       register: saved_config
     - ansible.builtin.include_tasks: "$repo_root/deploy/ansible/verify-timer.yml"
+      vars:
+        allow_enable_interruption: "{{ lookup('env', 'CODEXIA_TEST_ENABLE_RECOVERY') | default('false', true) | bool }}"
 YAML
 
 run_timer_check() {
-  local controller_enabled=$1 timer_active=$2 timer_enabled=$3 expected=$4
+  local controller_enabled=$1 timer_active=$2 timer_enabled=$3 recovery=$4 expected=$5
   printf '{"enabled":%s}\n' "$controller_enabled" > "$tmp/config.json"
   local status=0
-  PATH="$tmp/bin:$PATH" CODEXIA_TEST_TIMER_ACTIVE="$timer_active" CODEXIA_TEST_TIMER_ENABLED="$timer_enabled" \
+  PATH="$tmp/bin:$PATH" CODEXIA_TEST_TIMER_ACTIVE="$timer_active" CODEXIA_TEST_TIMER_ENABLED="$timer_enabled" CODEXIA_TEST_ENABLE_RECOVERY="$recovery" \
     "$ansible" -i localhost, "$tmp/timer.yml" > "$tmp/result.log" 2>&1 || status=$?
   if [[ "$expected" == pass && "$status" -ne 0 ]]; then cat "$tmp/result.log" >&2; exit 1; fi
   if [[ "$expected" == fail && "$status" -eq 0 ]]; then
@@ -47,9 +49,14 @@ run_timer_check() {
   fi
 }
 
-run_timer_check true active enabled pass
-run_timer_check false inactive disabled pass
-run_timer_check false active enabled fail
-run_timer_check true inactive disabled fail
-run_timer_check false failed disabled fail
-printf '%s\n' 'Polling timer verification accepts only state matching the persisted controller configuration.'
+run_timer_check true active enabled false pass
+run_timer_check false inactive disabled false pass
+run_timer_check false active enabled false fail
+run_timer_check true inactive disabled false fail
+run_timer_check false failed disabled false fail
+run_timer_check true inactive disabled true pass
+run_timer_check true inactive enabled true pass
+run_timer_check true active enabled true pass
+run_timer_check true active disabled true fail
+run_timer_check false active enabled true fail
+printf '%s\n' 'Polling timer verification accepts normal matching state and only the approved enable forward states.'

@@ -5,7 +5,7 @@
   ansible.builtin.include_tasks: verify-updater-units.yml
 - name: Verify live serving topology and persistence through the canonical locked controller
   ansible.builtin.command:
-    argv: [sh, "{{ updater }}", verify, "{{ config_path }}"]
+    argv: [sh, "{{ updater }}", "{{ 'verify-resume' if codexia_stage == 'resume' else 'verify' }}", "{{ config_path }}"]
   register: controller_status
   changed_when: false
   check_mode: false
@@ -13,7 +13,10 @@
   ansible.builtin.assert:
     that:
       - status.state.journal.phase in ['idle', 'committed']
-      - status.state.lastError is none
+      - >-
+        status.state.lastError is none or
+        (codexia_stage == 'resume' and
+          status.state.lastError == 'Interrupted update recovered from durable journal')
       - status.observed.writers | length == 1
       - status.observed.route == status.state.journal.active.slot
       - status.observed.writers[0].slot == status.state.journal.active.slot
@@ -22,3 +25,5 @@
     status: "{{ controller_status.stdout | from_json }}"
 - name: Verify polling timer health
   ansible.builtin.include_tasks: verify-timer.yml
+  vars:
+    allow_enable_interruption: "{{ codexia_stage == 'enable' and (codexia_acceptance_approved | default(false) | bool) }}"

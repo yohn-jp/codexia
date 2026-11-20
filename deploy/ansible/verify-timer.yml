@@ -18,6 +18,12 @@
     that:
       - updater_timer_active.stdout | trim in ['active', 'inactive']
       - updater_timer_enabled.stdout | trim in ['enabled', 'disabled']
-      - "(updater_timer_active.stdout | trim == 'active') == ((saved_config.content | b64decode | from_json).enabled | bool)"
-      - "(updater_timer_enabled.stdout | trim == 'enabled') == ((saved_config.content | b64decode | from_json).enabled | bool)"
-    fail_msg: Polling timer activation differs from the initialized controller configuration.
+      - >-
+        ((updater_timer_active.stdout | trim == 'active') == ((saved_config.content | b64decode | from_json).enabled | bool)) and
+        ((updater_timer_enabled.stdout | trim == 'enabled') == ((saved_config.content | b64decode | from_json).enabled | bool))
+        or
+        (allow_enable_interruption | default(false) | bool and
+          (saved_config.content | b64decode | from_json).enabled | bool and
+          ((updater_timer_enabled.stdout | trim == 'disabled' and updater_timer_active.stdout | trim == 'inactive') or
+           (updater_timer_enabled.stdout | trim == 'enabled' and updater_timer_active.stdout | trim in ['inactive', 'active'])))
+    fail_msg: Polling timer activation differs from the initialized controller configuration outside an approved enable recovery.

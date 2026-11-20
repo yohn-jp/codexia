@@ -6,7 +6,10 @@
       - codexia_stage in ['pause', 'resume', 'rollback']
       - journal.stat.exists
       - (controller_status.stdout | from_json).state.journal.phase in ['idle', 'committed']
-      - (controller_status.stdout | from_json).state.lastError is none
+      - >-
+        (controller_status.stdout | from_json).state.lastError is none or
+        (codexia_stage == 'resume' and
+          (controller_status.stdout | from_json).state.lastError == 'Interrupted update recovered from durable journal')
     fail_msg: Lifecycle operations require an initialized, healthy controller and explicit maintenance approval.
 - name: Require a paused controller with a digest-pinned previous release for rollback
   ansible.builtin.assert:
