@@ -19,6 +19,7 @@ export function MobileReadingPager({
   const pageCountRef = useRef(1);
   const gestureRef = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
   const [pageWidth, setPageWidth] = useState(0);
+  const [contentWidth, setContentWidth] = useState(0);
   const [pageCount, setPageCount] = useState(1);
   const [dragOffset, setDragOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -37,10 +38,13 @@ export function MobileReadingPager({
     if (!isMobile) {
       pageCountRef.current = 1;
       setPageCount(1);
+      setContentWidth(0);
       return;
     }
     content.style.setProperty("--reading-page-width", `${width}px`);
-    const count = measureColumnPageCount(content.scrollWidth, width);
+    const measuredContentWidth = content.scrollWidth;
+    setContentWidth(measuredContentWidth);
+    const count = measureColumnPageCount(measuredContentWidth, width);
     pageCountRef.current = count;
     setPageCount(count);
     const clamped = clampPageIndex(pageIndexRef.current, count);
@@ -117,7 +121,7 @@ export function MobileReadingPager({
   const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => finishPointerGesture(event, true);
   const onPointerCancel = (event: ReactPointerEvent<HTMLDivElement>) => finishPointerGesture(event, false);
 
-  const pageOffset = isMobile ? pageTranslateX(pageIndex, pageWidth, mode === "vertical" ? "rtl" : "ltr") : 0;
+  const pageOffset = isMobile ? pageTranslateX(pageIndex, pageWidth, mode === "vertical" ? "rtl" : "ltr", contentWidth) : 0;
   return (
     <div
       ref={viewportRef}
