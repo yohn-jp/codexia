@@ -536,7 +536,7 @@ export const api = {
   deletePersistenceDocument: (projectId: string, documentId: string, expectedVersion: number) => request(dto.persistenceDocumentEnvelope, persistencePath(projectId, `documents/${encodeURIComponent(documentId)}`), { method: "DELETE", body: JSON.stringify({ expectedVersion }) }),
   createPersistenceDocument: (
     projectId: string,
-    command: Omit<CreateDocumentCommand, "projectId" | "authorId" | "orderKey"> & { orderKey?: string },
+    command: Omit<CreateDocumentCommand, "projectId" | "authorId">,
     signal?: AbortSignal,
   ) => request(dto.persistenceWrite, persistencePath(projectId, "documents"), {
     method: "POST",

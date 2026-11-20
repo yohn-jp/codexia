@@ -369,7 +369,7 @@ test("Web append creates at the canonical end of each parent's ordered siblings"
   const documentsPath = `${base}/api/v1/persistence/projects/${projectId}/documents`;
   const append = (parent: keyof typeof parents, title: string, key: string) => fetch(documentsPath, {
     method: "POST", headers: { ...headers, "Idempotency-Key": key },
-    body: JSON.stringify({ kind: "scene", title, parentId: parents[parent], markdown: "", appendToEnd: true }),
+    body: JSON.stringify({ kind: "scene", title, parentId: parents[parent], markdown: "", orderKey: "0000", appendToEnd: true }),
   });
   const empty = await append("empty", "First scene", "append-empty");
   assert.equal(empty.status, 201);

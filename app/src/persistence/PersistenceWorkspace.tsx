@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type CSSProperties, type ReactNode } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { snapshotKey } from "@codexia/contracts";
+import { nextOrderKey, snapshotKey } from "@codexia/contracts";
 import type { EditorTermSpan } from "../editor/terms";
 import { useRecentActivityResume } from "../resume/useRecentActivityResume";
 import { formatHandoffHint, loadWritingResume, loadReadingPage, mergeContinueCandidates } from "../resume/continueCandidates";
@@ -1018,16 +1018,20 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     setLoading(true);
     setPageError("");
     try {
+      const parentId = (newDocumentParent || null) as DocumentId | null;
+      const siblingKeys = documents.filter((document) => document.parentId === parentId).map((document) => document.orderKey);
       const result = await api.createPersistenceDocument(project.id, {
-        parentId: (newDocumentParent || null) as DocumentId | null,
+        parentId,
         kind: documentKind,
         title,
+        // Older same-epoch backends use the supplied key; current PostgreSQL
+        // derives the authoritative key while holding the project lock.
+        orderKey: nextOrderKey(siblingKeys),
         appendToEnd: true,
         markdown: "",
         idempotencyKey: crypto.randomUUID(),
       });
-      // Re-read the canonical order after creation; an appended document can
-      // share an orderKey with an existing sibling or sort before it.
+      // Refresh the canonical outline instead of assuming local order.
       if (projectIdRef.current !== project.id) return;
       setDocumentTitle("");
       let documentResult: Awaited<ReturnType<typeof api.persistenceDocuments>>;

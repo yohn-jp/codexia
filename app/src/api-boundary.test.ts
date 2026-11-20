@@ -87,14 +87,14 @@ test("Web append requests leave sibling order selection to the canonical persist
   globalThis.fetch = async (input, init) => {
     assert.equal(String(input), "/api/v1/persistence/projects/project-1/documents");
     assert.deepEqual(JSON.parse(String(init?.body)), {
-      kind: "scene", title: "New scene", parentId: "chapter-1", markdown: "", appendToEnd: true,
+      kind: "scene", title: "New scene", parentId: "chapter-1", markdown: "", orderKey: "0000000005", appendToEnd: true,
       idempotencyKey: "append-idempotency-key",
     });
     assert.equal(new Headers(init?.headers).get("Idempotency-Key"), "append-idempotency-key");
     return Response.json({ document, revision, replayed: false });
   };
   const created = await api.createPersistenceDocument("project-1", {
-    kind: "scene", title: "New scene", parentId: "chapter-1" as import("@codexia/persistence-contracts").DocumentId, markdown: "", appendToEnd: true,
+    kind: "scene", title: "New scene", parentId: "chapter-1" as import("@codexia/persistence-contracts").DocumentId, markdown: "", orderKey: "0000000005", appendToEnd: true,
     idempotencyKey: "append-idempotency-key",
   });
   assert.equal(created.document.orderKey, "0000000011");

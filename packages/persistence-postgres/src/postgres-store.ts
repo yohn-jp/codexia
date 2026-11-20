@@ -1200,7 +1200,12 @@ class PostgresTransaction implements PersistenceTransaction {
          ORDER BY order_key DESC, id DESC LIMIT 1`,
         [command.projectId, parentId],
       );
-      orderKey = nextOrderKey(lastSibling.rows[0] ? [asString(lastSibling.rows[0].order_key)] : []);
+      const previousKey = lastSibling.rows[0] ? asString(lastSibling.rows[0].order_key) : null;
+      orderKey = nextOrderKey(previousKey === null ? [] : [previousKey]);
+      if (previousKey !== null) {
+        const comparison = await this.query("SELECT $1::text > $2::text AS advances", [orderKey, previousKey]);
+        if (comparison.rows[0]?.advances !== true) throw validationError("Append order is incompatible with the PostgreSQL collation");
+      }
     }
     await this.query(
       `INSERT INTO document(project_id, id, parent_id, kind, title, order_key)
