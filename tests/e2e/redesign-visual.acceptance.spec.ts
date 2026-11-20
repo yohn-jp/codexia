@@ -132,13 +132,16 @@ async function selectTheme(page: Page, mode: "light" | "dark" | "paper"): Promis
 }
 
 async function selectMobileTheme(page: Page, mode: "light" | "dark" | "paper"): Promise<void> {
+  const returnToWriting = page.getByRole("button", { name: "執筆画面へ戻る" });
   if (await page.getByLabel("外観").count() === 0 || !await page.getByLabel("外観").isVisible()) {
     await page.getByRole("button", { name: "設定を開く" }).click();
+    await expect(returnToWriting).toBeVisible();
+    await selectTheme(page, mode);
+    await returnToWriting.click();
+    await expect(manuscriptEditor(page)).toBeVisible();
+    return;
   }
   await selectTheme(page, mode);
-  if (await page.getByRole("button", { name: "執筆画面へ戻る" }).isVisible()) {
-    await page.getByRole("button", { name: "執筆画面へ戻る" }).click();
-  }
 }
 
 async function openMobileReferenceSheet(page: Page, buttonName: "構成" | "知識・保存", panel: "outline" | "inspector"): Promise<void> {
@@ -351,6 +354,8 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
   await expect(page.locator("ion-modal")).toContainText("PostgreSQL保存済み");
   await page.screenshot({ path: "evidence/ui-redesign-v2/after-mobile-knowledge.png" });
   await page.getByRole("button", { name: "閉じる" }).click();
+  await expect(page.locator("ion-modal.mobile-shell-reference-modal")).toBeHidden();
+  await expect(page.getByRole("button", { name: "構成", exact: true })).toBeVisible();
   await selectMobileTheme(page, "dark");
   await openMobileReferenceSheet(page, "構成", "outline");
   await page.screenshot({ path: "evidence/ui-redesign-v2/after-mobile-reference-dark.png" });
