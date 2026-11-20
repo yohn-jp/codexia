@@ -5,9 +5,7 @@ test.use({ hasTouch: true, viewport: { width: 390, height: 844 } });
 
 async function replaceEditor(page: Parameters<typeof createWritingFixture>[0], text: string): Promise<void> {
   const field = editor(page);
-  await field.click();
-  await field.press("ControlOrMeta+a");
-  await page.keyboard.insertText(text);
+  await field.fill(text);
 }
 
 async function visibleParagraphs(page: Parameters<typeof createWritingFixture>[0]): Promise<string[]> {
