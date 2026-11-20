@@ -24,6 +24,7 @@ evidence_dir=$RUNNER_TEMP/codexia-phase-f-evidence
 runtime_owned=false
 source_owned=false
 phase_dir_owned=false
+identity_server_pid=''
 mkdir -p "$evidence_dir"
 
 as_service() {
@@ -40,6 +41,11 @@ cleanup() {
   local status=$? cleanup_status=0 observed_uid observed_home
   trap - EXIT
   set +e
+  if [[ -n "$identity_server_pid" ]]; then
+    kill "$identity_server_pid" >/dev/null 2>&1 || true
+    wait "$identity_server_pid" >/dev/null 2>&1 || true
+    identity_server_pid=''
+  fi
   if [[ "$runtime_owned" == true ]] && getent passwd "$service_user" >/dev/null 2>&1; then
     observed_uid=$(id -u "$service_user" 2>/dev/null || true)
     observed_home=$(getent passwd "$service_user" | cut -d: -f6)
@@ -52,6 +58,7 @@ cleanup() {
         codexia-slot-green.service codexia-api-proxy.service codexia-tunnel.service codexia-db.service \
         codexia-postgres-volume.service codexia-data-volume.service codexia-history-volume.service >/dev/null 2>&1 || true
       user_systemctl disable codexia-updater-boot.service >/dev/null 2>&1 || true
+      user_systemctl disable codexia-updater.timer >/dev/null 2>&1 || true
       rootless rm -f codexia-preflight-blue codexia-preflight-green codexia-slot-blue codexia-slot-green \
         codexia-api-proxy codexia-tunnel codexia-db >/dev/null 2>&1 || true
       as_service rm -f \
@@ -209,6 +216,91 @@ sudo install -o "$service_user" -g "$service_group" -m 0600 "$tmp/inputs/github-
 sudo install -o "$service_user" -g "$service_group" -m 0600 "$tmp/inputs/access-client-id" "$phase_dir/access-client-id"
 sudo install -o "$service_user" -g "$service_group" -m 0600 "$tmp/inputs/access-client-secret" "$phase_dir/access-client-secret"
 
+printf '%s\n' '=== Start a loopback HTTPS identity fixture with synthetic Access headers ==='
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout "$tmp/identity-server.key" -out "$tmp/identity-server.crt" -days 1 \
+  -subj '/CN=127.0.0.1' \
+  -addext 'subjectAltName=IP:127.0.0.1,DNS:localhost' \
+  -addext 'basicConstraints=critical,CA:TRUE' \
+  -addext 'keyUsage=critical,keyCertSign,digitalSignature,keyEncipherment' \
+  -addext 'extendedKeyUsage=serverAuth' >/dev/null 2>&1
+chmod 0600 "$tmp/identity-server.key" "$tmp/identity-server.crt"
+sudo install -o "$service_user" -g "$service_group" -m 0644 "$tmp/identity-server.crt" "$phase_dir/identity-server.crt"
+cat > "$tmp/identity-server.mjs" <<'NODE'
+import https from 'node:https';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+const release = JSON.parse(readFileSync(process.env.PHASE_F_RELEASE_FILE, 'utf8'));
+const expectedId = readFileSync(process.env.PHASE_F_ACCESS_ID_FILE, 'utf8').trim();
+const expectedSecret = readFileSync(process.env.PHASE_F_ACCESS_SECRET_FILE, 'utf8').trim();
+const server = https.createServer({
+  key: readFileSync(process.env.PHASE_F_SERVER_KEY),
+  cert: readFileSync(process.env.PHASE_F_SERVER_CERT),
+}, (request, response) => {
+  const source = typeof request.headers['x-phase-f-probe'] === 'string' ? request.headers['x-phase-f-probe'] : 'ansible-enable';
+  const authenticated = request.headers['cf-access-client-id'] === expectedId &&
+    request.headers['cf-access-client-secret'] === expectedSecret;
+  const allowed = request.method === 'GET' && request.url === '/api/version' && authenticated;
+  appendFileSync(process.env.PHASE_F_REQUEST_LOG, source + ':' + (allowed ? '200' : '403') + '\n', { mode: 0o600 });
+  response.writeHead(allowed ? 200 : 403, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+  response.end(allowed ? JSON.stringify({
+    name: 'codexia', version: release.version, profile: release.profile,
+    apiEpoch: release.apiEpoch, browserAuth: 'token',
+  }) : JSON.stringify({ error: 'fixture Access authentication required' }));
+});
+server.listen(0, '127.0.0.1', () => {
+  writeFileSync(process.env.PHASE_F_PORT_FILE, String(server.address().port), { mode: 0o600, flag: 'wx' });
+});
+process.on('SIGTERM', () => server.close(() => process.exit(0)));
+NODE
+PHASE_F_RELEASE_FILE="$phase_dir/release-0.1.236.json" \
+PHASE_F_ACCESS_ID_FILE="$tmp/inputs/access-client-id" \
+PHASE_F_ACCESS_SECRET_FILE="$tmp/inputs/access-client-secret" \
+PHASE_F_SERVER_KEY="$tmp/identity-server.key" \
+PHASE_F_SERVER_CERT="$tmp/identity-server.crt" \
+PHASE_F_REQUEST_LOG="$tmp/identity-requests.log" \
+PHASE_F_PORT_FILE="$tmp/identity-port" \
+  /usr/bin/node "$tmp/identity-server.mjs" >"$tmp/identity-server.log" 2>&1 &
+identity_server_pid=$!
+for _ in $(seq 1 50); do
+  [[ -s "$tmp/identity-port" ]] && break
+  kill -0 "$identity_server_pid" 2>/dev/null || { cat "$tmp/identity-server.log" >&2; fail 'Loopback HTTPS identity fixture failed to start.'; }
+  sleep 0.1
+done
+[[ -s "$tmp/identity-port" ]] || fail 'Loopback HTTPS identity fixture did not become ready.'
+frontend_origin="https://127.0.0.1:$(cat "$tmp/identity-port")"
+frontend_identity_url="$frontend_origin/desktop/update-identity.json"
+SSL_CERT_FILE="$tmp/identity-server.crt" /usr/bin/node --input-type=module - \
+  "$tmp/identity-server.crt" "$frontend_origin" "$tmp/inputs/access-client-id" "$tmp/inputs/access-client-secret" <<'NODE'
+import assert from 'node:assert/strict';
+import { request } from 'node:https';
+import { readFileSync } from 'node:fs';
+const [caFile, origin, idFile, secretFile] = process.argv.slice(2);
+const ca = readFileSync(caFile);
+const id = readFileSync(idFile, 'utf8').trim();
+const secret = readFileSync(secretFile, 'utf8').trim();
+async function probe(headers) {
+  return new Promise((resolve, reject) => {
+    const requestValue = request(new URL('/api/version', origin), { ca, headers }, response => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', chunk => { body += chunk; });
+      response.on('end', () => resolve({ status: response.statusCode, body: JSON.parse(body) }));
+    });
+    requestValue.on('error', reject);
+    requestValue.end();
+  });
+}
+const anonymous = await probe({ 'X-Phase-F-Probe': 'anonymous' });
+assert.equal(anonymous.status, 403);
+const authenticated = await probe({
+  'CF-Access-Client-Id': id,
+  'CF-Access-Client-Secret': secret,
+  'X-Phase-F-Probe': 'authenticated',
+});
+assert.equal(authenticated.status, 200);
+assert.deepEqual(authenticated.body, { name: 'codexia', version: '0.1.236', profile: 'core', apiEpoch: 1, browserAuth: 'token' });
+NODE
+
 proxy_image=$(as_service /usr/bin/jq -r '.image' "$phase_dir/release-0.1.236.json")
 [[ "$proxy_image" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] || fail 'Certified fixture proxy image is not digest pinned.'
 cat > "$tmp/inventory.yml" <<YAML
@@ -229,7 +321,7 @@ all:
         codexia_secrets_approved: true
         codexia_base_approved: true
         codexia_database_initialization_approved: true
-        codexia_frontend_origin: https://codexia-phase-f.fixture.invalid
+        codexia_frontend_origin: "$frontend_origin"
         codexia_browser_auth:
           mode: token
         codexia_runtime:
@@ -257,20 +349,25 @@ all:
 YAML
 sudo install -o "$service_user" -g "$service_group" -m 0600 "$tmp/inventory.yml" "$phase_dir/inventory.yml"
 sudo install -o "$service_user" -g "$service_group" -m 0600 "$tmp/inputs/preflight-password" "$phase_dir/preflight-password"
-/usr/bin/node --input-type=module - "$tmp/stage-vars.json" "$tmp/inputs/preflight-password" "$phase_dir" "$service_uid" "$source_root" <<'NODE'
+/usr/bin/node --input-type=module - "$tmp/stage-vars.json" "$tmp/inputs/preflight-password" "$phase_dir" "$service_uid" "$source_root" "$frontend_identity_url" "$phase_dir/identity-server.crt" <<'NODE'
 import { readFile, writeFile } from 'node:fs/promises';
-const [output, passwordFile, directory, uid, source] = process.argv.slice(2);
+const [output, passwordFile, directory, uid, source, frontendUrl, caPath] = process.argv.slice(2);
 const password = (await readFile(passwordFile, 'utf8')).trim();
 if (!/^[a-f0-9]{64}$/u.test(password)) throw new Error('Disposable preflight credential has invalid format');
 const vars = {
   codexia_preflight_password: password,
+  // Synthetic gate for the loopback identity fixture only; this is not live acceptance.
+  codexia_acceptance_approved: true,
   updater_env: {
     XDG_RUNTIME_DIR: '/run/user/' + uid,
     XDG_STATE_HOME: '/home/codexia-ci-host/.local/state',
     NODE_OPTIONS: '--import=' + source + '/scripts/phase-f-fetch-loader.mjs',
     CODEXIA_PHASE_F_CHANNEL_FILE: directory + '/channel-sequence-1.json',
-    CODEXIA_PHASE_F_FRONTEND_URL: 'https://codexia-phase-f.fixture.invalid/desktop/update-identity.json',
+    CODEXIA_PHASE_F_FRONTEND_URL: frontendUrl,
     CODEXIA_PHASE_F_FRONTEND_IDENTITY_FILE: directory + '/simulated-frontend-identity.json',
+    SSL_CERT_FILE: caPath,
+    no_proxy: '127.0.0.1,localhost',
+    NO_PROXY: '127.0.0.1,localhost',
   },
 };
 await writeFile(output, JSON.stringify(vars) + '\n', { mode: 0o600, flag: 'wx' });
@@ -406,6 +503,21 @@ assert_database_snapshot
 [[ "$(rootless volume inspect --format '{{.Name}}|{{.Mountpoint}}|{{.CreatedAt}}' codexia-history)" == "$history_identity" ]] || fail 'Repeated fresh activation replaced history storage.'
 project_probe "$project_id"
 [[ "$(as_service cat "$service_home/.local/state/codexia-updater/route")" == blue ]] || fail 'Repeated fresh activation changed the private route.'
+
+printf '%s\n' '=== Exercise Ansible enable through loopback HTTPS, then pause the fixture ==='
+apply_service enable "$tmp/enable.log"
+grep -Fxq 'anonymous:403' "$tmp/identity-requests.log" || fail 'Unauthenticated loopback identity probe was not rejected.'
+grep -Fxq 'authenticated:200' "$tmp/identity-requests.log" || fail 'Synthetic Access-authenticated identity probe was not accepted.'
+grep -Fxq 'ansible-enable:200' "$tmp/identity-requests.log" || fail 'Ansible enable did not authenticate to the synthetic identity endpoint.'
+[[ "$(user_systemctl is-active codexia-updater.timer)" == active ]] || fail 'Ansible enable did not start the polling timer.'
+[[ "$(user_systemctl is-enabled codexia-updater.timer)" == enabled ]] || fail 'Ansible enable did not enable the polling timer.'
+apply_service pause "$tmp/pause.log"
+[[ "$(user_systemctl is-active codexia-updater.timer)" == active ]] || fail 'Pause unexpectedly changed the polling timer state.'
+[[ "$(user_systemctl is-enabled codexia-updater.timer)" == enabled ]] || fail 'Pause unexpectedly changed the polling timer enablement.'
+kill "$identity_server_pid"
+wait "$identity_server_pid" || true
+identity_server_pid=''
+printf '%s\n' 'PASS: Ansible enable and pause used only synthetic loopback TLS/Access fixture credentials; anonymous probe was denied.'
 printf '%s\n' 'PASS: real Ansible base→prepare→schema→fresh activation repeat convergence kept one PostgreSQL identity and project data.'
 
 /usr/bin/node --input-type=module - "$evidence_dir/app-convergence-results.json" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$RUNNER_NAME" "$service_uid" "$database_identity" "$ledger_after_schema" "$writer_id" "$proxy_id" "$data_identity" "$history_identity" "$project_id" "$proxy_image" <<'NODE'
@@ -428,12 +540,13 @@ const result = {
     prepare: 'PASS: real Ansible prepare and no-change repeat on the same database.',
     initializeSchema: 'PASS: exact signed Core release initialized a fresh schema; the repeated migration task reported unchanged, migration ledger was identical, and database identity was stable.',
     initializeFresh: 'PASS: exact signed release privately activated with polling/public handoff disabled; repeat activation task reported unchanged and writer, proxy, data/history volumes, route and API-created project ID/content persisted.',
+    enablePause: 'PASS: Ansible enable verified a loopback HTTPS /api/version response and exact synthetic Access headers, enabled polling, then the normal pause stage preserved timer state. An unauthenticated request to that fixture returned 403. No public Cloudflare Access or public identity was contacted.',
   },
   identities: { databaseContainerId, postgresVolumeIdentity, clusterSystemIdentifier, migrationLedger, writerId, proxyId, dataIdentity, historyIdentity, projectId, image },
   notChecked: [
     'Adoption of an already-serving complete application deployment',
-    'Ansible enable, automatic polling, D cutover, Terraform or Cloudflare handoff',
-    'Target-VM reboot, external Access/public author acceptance, remote restore host and measured RPO/RTO',
+    'Real public enable acceptance and long-running polling, D cutover, Terraform or Cloudflare handoff',
+    'Target-VM reboot, real external Access/public identity and author acceptance, remote restore host and measured RPO/RTO',
   ],
 };
 await writeFile(file, JSON.stringify(result, null, 2) + '\n', { mode: 0o644, flag: 'wx' });
