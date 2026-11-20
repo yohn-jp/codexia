@@ -539,6 +539,36 @@ run_updater boot "$config_file" > "$test_root/boot-recovery.json" 2> "$test_root
 boot_status=$?
 set -e
 [[ "$boot_status" == 1 ]]
+run_updater verify-resume "$config_file" > "$test_root/verify-resume-recovery.json"
+node --input-type=module - "$test_root/verify-resume-recovery.json" <<'NODE'
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+const { state, observed } = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+assert.equal(state.journal.phase, 'idle');
+assert.equal(state.lastError, 'Interrupted update recovered from durable journal');
+assert.equal(observed.writers.length, 1);
+assert.equal(observed.route, state.journal.active.slot);
+NODE
+as_service "$node_bin" --input-type=module - "$state_dir/controller.json" <<'NODE'
+import { readFile, writeFile } from 'node:fs/promises';
+const file = process.argv[2];
+const state = JSON.parse(await readFile(file, 'utf8'));
+state.lastError = 'Unrecognized recovery error';
+await writeFile(file, JSON.stringify(state) + '\n');
+NODE
+set +e
+run_updater verify-resume "$config_file" > "$test_root/verify-resume-rejected.out" 2> "$test_root/verify-resume-rejected.err"
+verify_resume_status=$?
+set -e
+[[ "$verify_resume_status" != 0 ]]
+grep -Fq 'Only the supported recovered-update error may be cleared by resume' "$test_root/verify-resume-rejected.err"
+as_service "$node_bin" --input-type=module - "$state_dir/controller.json" <<'NODE'
+import { readFile, writeFile } from 'node:fs/promises';
+const file = process.argv[2];
+const state = JSON.parse(await readFile(file, 'utf8'));
+state.lastError = 'Interrupted update recovered from durable journal';
+await writeFile(file, JSON.stringify(state) + '\n');
+NODE
 run_updater resume "$config_file" > "$test_root/resume-recovery.json"
 run_updater pause "$config_file" > "$test_root/pause-recovery.json"
 run_updater verify "$config_file" > "$test_root/verify-recovery.json"

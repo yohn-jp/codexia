@@ -28,6 +28,10 @@
     content: "{{ desired_config | combine({'enabled': true}) | to_nice_json }}\n"
     dest: "{{ config_path }}"
     mode: '0600'
+- name: Read the enabled controller configuration back before starting polling
+  ansible.builtin.slurp:
+    src: "{{ config_path }}"
+  register: saved_config
 - name: Resume only a paused controller via its locked command
   ansible.builtin.command:
     argv: [sh, "{{ updater }}", resume, "{{ config_path }}"]
@@ -39,3 +43,7 @@
     scope: user
     enabled: true
     state: started
+- name: Verify polling is active and enabled after convergence
+  ansible.builtin.include_tasks: verify-timer.yml
+  vars:
+    allow_enable_interruption: false

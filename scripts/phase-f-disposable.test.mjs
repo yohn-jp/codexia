@@ -48,6 +48,8 @@ test('Phase F integration helper is valid shell and exercises the existing locke
     'acceptance-update',
     'acceptance-rollback',
     'Interrupted update recovered from durable journal',
+    'verify-resume',
+    'Only the supported recovered-update error may be cleared by resume',
     'Proxy route mismatch',
     '503',
     'notChecked',
