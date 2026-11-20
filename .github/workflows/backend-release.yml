@@ -4,9 +4,12 @@ on:
     branches: [main]
     paths:
       - Dockerfile.backend
+      - .dockerignore
+      - Dockerfile.backend.dockerignore
       - deploy/backend/**
       - packages/**
       - modules/**
+      - '!modules/story/src/browser.tsx'
       - profiles/**
       - scripts/profile-build.mjs
       - scripts/profile-package.mjs
@@ -26,14 +29,18 @@ on:
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
+      - tsconfig.base.json
       - .github/workflows/backend-release.yml
   push:
     branches: [main]
     paths:
       - Dockerfile.backend
+      - .dockerignore
+      - Dockerfile.backend.dockerignore
       - deploy/backend/**
       - packages/**
       - modules/**
+      - '!modules/story/src/browser.tsx'
       - profiles/**
       - scripts/profile-build.mjs
       - scripts/profile-package.mjs
@@ -53,6 +60,7 @@ on:
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
+      - tsconfig.base.json
       - .github/workflows/backend-release.yml
 permissions:
   contents: read
