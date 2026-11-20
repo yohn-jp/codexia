@@ -3,6 +3,13 @@ import { collectGitHubPages } from './release-policy.mjs';
 import { resolveProducerJobAttempts, selectLatestJobArtifact } from './ci-artifact-selection.mjs';
 import { downloadArtifact } from './download-ci-artifacts.mjs';
 
+export function listProducerArtifacts(request,runId,artifactName) {
+  return collectGitHubPages((page,perPage)=>{
+    const query=new URLSearchParams({name:artifactName,per_page:String(perPage),page:String(page)});
+    return request('actions/runs/'+runId+'/artifacts?'+query);
+  },'artifacts');
+}
+
 /** Exact-run immutable producer selection and verified download. The token is
  * confined to GitHub REST metadata and the existing authenticated redirect path. */
 export async function fetchLatestProducerArtifact({plan,runId,repository,token,producerJob,artifactName,maxArchive}) {
@@ -19,7 +26,7 @@ export async function fetchLatestProducerArtifact({plan,runId,repository,token,p
   assert.equal(run.head_sha,plan.sha,'Producer source mismatch');
   const [jobs,artifacts]=await Promise.all([
     collectGitHubPages(page=>request('actions/runs/'+runId+'/jobs?filter=latest&per_page=100&page='+page),'jobs'),
-    collectGitHubPages(page=>request('actions/runs/'+runId+'/artifacts?per_page=100&page='+page),'artifacts')]);
+    listProducerArtifacts(request,runId,artifactName)]);
   const selected=selectLatestJobArtifact(artifactName,producerJob,artifacts,jobs,{runId,sourceSha:plan.sha});
   const resolved=await resolveProducerJobAttempts(jobs,run,request,[producerJob]);
   const job=resolved.find(job=>job.name===producerJob);
