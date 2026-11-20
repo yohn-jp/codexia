@@ -78,7 +78,7 @@
       ansible.builtin.assert:
         that:
           - ansible_facts.user_uid | int != 0
-          - codexia_stage in ['secrets', 'base', 'prepare', 'initialize', 'bootstrap-preflight', 'initialize-schema', 'initialize-fresh', 'enable', 'verify', 'maintain', 'rotate-probe-credentials', 'rotate-app-password', 'backup', 'pause', 'resume', 'rollback', 'acceptance-update', 'acceptance-rollback']
+          - codexia_stage in ['secrets', 'base', 'prepare', 'initialize', 'bootstrap-preflight', 'bootstrap-cutover', 'initialize-schema', 'initialize-fresh', 'enable', 'verify', 'maintain', 'rotate-probe-credentials', 'rotate-app-password', 'backup', 'pause', 'resume', 'rollback', 'acceptance-update', 'acceptance-rollback']
           - codexia_stage in ['secrets', 'base'] or codexia_frontend_origin is match('^https://[a-z0-9.-]+(:[0-9]+)?$')
           - codexia_stage in ['secrets', 'base'] or codexia_proxy_image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
           - codexia_stage in ['secrets', 'base'] or codexia_browser_auth.mode in ['token', 'cloudflare-access']
@@ -134,7 +134,7 @@
       register: legacy_cutover
     - name: Refuse unrelated lifecycle while cutover is pending
       ansible.builtin.assert:
-        that: codexia_stage == 'initialize' and not ansible_check_mode
+        that: codexia_stage in ['initialize', 'bootstrap-cutover'] and not ansible_check_mode
       when: legacy_cutover.stat.exists
     - name: Verify reviewed inputs before recovering pending cutover
       ansible.builtin.include_tasks: verify-updater-inputs.yml
@@ -161,6 +161,20 @@
     - name: End bootstrap preflight before other lifecycle operations
       ansible.builtin.meta: end_host
       when: codexia_stage == 'bootstrap-preflight'
+    - name: Require pre-journal bootstrap cutover
+      ansible.builtin.assert:
+        that:
+          - not journal.stat.exists
+          - not ansible_check_mode
+          - codexia_stage == 'bootstrap-cutover'
+        fail_msg: Distinct legacy cutover requires a prepared pre-journal host and an actual execution.
+      when: codexia_stage == 'bootstrap-cutover' and not journal.stat.exists
+    - name: Cut over from the exact legacy release to the separately signed candidate
+      ansible.builtin.include_tasks: bootstrap-cutover.yml
+      when: codexia_stage == 'bootstrap-cutover' and not journal.stat.exists
+    - name: End distinct bootstrap cutover before other lifecycle operations
+      ansible.builtin.meta: end_host
+      when: codexia_stage == 'bootstrap-cutover'
     - name: Require pre-journal fresh schema initialization
       ansible.builtin.assert:
         that:
@@ -223,7 +237,7 @@
       when: journal.stat.exists and codexia_stage == 'initialize' and not ansible_check_mode
     - name: Ensure boot and poll units after initialization (also repairs interrupted unit installation)
       ansible.builtin.include_tasks: install-units.yml
-      when: codexia_stage == 'initialize' and not ansible_check_mode
+      when: codexia_stage in ['initialize', 'bootstrap-cutover'] and not ansible_check_mode
     - name: Verify initialized controller
       ansible.builtin.include_tasks: verify.yml
       when: journal.stat.exists and codexia_stage != 'backup'

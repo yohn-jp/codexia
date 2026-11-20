@@ -1,0 +1,59 @@
+---
+- name: Require a maintenance window, exact release records and verified legacy restore
+  ansible.builtin.assert:
+    that:
+      - codexia_maintenance_approved | default(false) | bool
+      - codexia_installed_release_file is defined
+      - codexia_bootstrap_candidate_file is defined
+      - codexia_restore_receipt_file is defined
+      - codexia_restore_receipt_file is string
+      - codexia_restore_receipt_file is match('^/[^\r\n]+$')
+    fail_msg: Verify the legacy-bound off-VM backup and isolated restore receipt, then approve the distinct candidate cutover.
+- name: Preserve exact legacy and candidate signed release records privately
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ config_dir }}/{{ item.dest }}"
+    mode: '0600'
+  loop:
+    - {src: "{{ codexia_installed_release_file }}", dest: installed-release.json}
+    - {src: "{{ codexia_bootstrap_candidate_file }}", dest: bootstrap-candidate.json}
+- name: Verify reviewed updater source and recovery unit inputs
+  ansible.builtin.include_tasks: verify-updater-inputs.yml
+- name: Refuse drift in existing boot and poll units
+  ansible.builtin.include_tasks: verify-updater-units.yml
+  vars:
+    allow_missing_updater_units: true
+- name: Provision boot recovery before candidate cutover
+  ansible.builtin.include_tasks: install-units.yml
+  vars:
+    recovery_install_only: true
+- name: Stage the protected restore receipt on the source host
+  ansible.builtin.tempfile:
+    state: directory
+    path: "{{ config_dir }}"
+    prefix: bootstrap-cutover-proof-
+  register: codexia_bootstrap_cutover_proof_dir
+- name: Verify evidence and perform the locked distinct-release cutover
+  block:
+    - name: Copy isolated recovery receipt from the trusted control node
+      ansible.builtin.copy:
+        src: "{{ codexia_restore_receipt_file }}"
+        dest: "{{ codexia_bootstrap_cutover_proof_dir.path }}/restore.json"
+        mode: '0600'
+      no_log: true
+    - name: Cut over from the legacy release to the signed candidate
+      ansible.builtin.command:
+        argv: [sh, "{{ updater }}", bootstrap-cutover, "{{ config_path }}", "{{ config_dir }}/installed-release.json", "{{ config_dir }}/bootstrap-candidate.json", "{{ codexia_bootstrap_cutover_proof_dir.path }}/restore.json", --approved]
+      register: bootstrap_cutover_result
+      changed_when: true
+      no_log: true
+    - name: Require successful candidate activation and handoff
+      ansible.builtin.assert:
+        that:
+          - (bootstrap_cutover_result.stdout | from_json).activated
+          - (bootstrap_cutover_result.stdout | from_json).legacyImage != (bootstrap_cutover_result.stdout | from_json).candidateImage
+  always:
+    - name: Remove only the temporary cutover receipt directory
+      ansible.builtin.file:
+        path: "{{ codexia_bootstrap_cutover_proof_dir.path }}"
+        state: absent

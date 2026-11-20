@@ -10,7 +10,7 @@ import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
 import { assertMaintenanceSnapshotVerifier, maintainStandaloneUpdater, recoverInterruptedMaintenance } from './standalone-maintenance.mjs';
 
 const [command,configPath,...arguments_]=process.argv.slice(2);
-if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|verify-bootstrap|verify-cutover-backup|verify-maintenance-backup|cutover|recover-cutover|initialize-schema|init-fresh|init|recover-initial|boot|tick|status|verify|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
+if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|verify-bootstrap|verify-cutover-backup|verify-maintenance-backup|cutover|bootstrap-cutover|recover-cutover|initialize-schema|init-fresh|init|recover-initial|boot|tick|status|verify|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
 let config=JSON.parse(await readFile(configPath,'utf8'));
 assert.equal(config.format,'codexia-standalone-updater/v1');
 assert.ok(path.isAbsolute(config.stateFile)&&path.isAbsolute(config.publicKeyFile));
@@ -84,6 +84,20 @@ if(command==='recover-cutover'||(command==='boot'&&pendingCutover)){
   const restore=await readPrivateProof(receiptFile);
   const state=await controller.cutoverLegacy(release,config.initialSlot??'blue',source,restore);
   console.log(JSON.stringify({format:'codexia-legacy-cutover/v1',activated:true,slot:state.journal.active.slot}));
+  process.exit(0);
+}else if(command==='bootstrap-cutover'){
+  assert.equal(arguments_.length,4,'Provide exact signed legacy and candidate releases, isolated restore receipt and --approved');
+  const [legacyFile,candidateFile,receiptFile,approval]=arguments_;
+  assert.ok([legacyFile,candidateFile,receiptFile].every(path.isAbsolute)&&approval==='--approved','Bootstrap cutover requires explicit approval and absolute evidence paths');
+  assert.equal(config.enabled,false,'Bootstrap cutover requires disabled polling');
+  const legacy=validateUpdateRelease(JSON.parse(await readFile(legacyFile,'utf8')));
+  const candidate=validateUpdateRelease(JSON.parse(await readFile(candidateFile,'utf8')));
+  assert.notEqual(legacy.image,candidate.image,'Bootstrap cutover requires a distinct signed candidate');
+  const source=validateLegacyBackupProof(await readPrivateProof(legacyBackupProofFile));
+  const restore=await readPrivateProof(receiptFile);
+  const state=await controller.bootstrapCutover(legacy,candidate,config.initialSlot??'blue',source,restore);
+  console.log(JSON.stringify({format:'codexia-legacy-cutover/v2',activated:true,slot:state.journal.active.slot,
+    legacyImage:legacy.image,candidateImage:state.installed.image}));
   process.exit(0);
 }else if(command==='backup'){
   if(arguments_.at(-1)!=='--approved')throw new Error('Backup requires the explicit --approved maintenance attestation');
