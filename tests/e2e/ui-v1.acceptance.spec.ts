@@ -177,7 +177,7 @@ test("both production Shells preserve recoverable Japanese drafts and the Mobile
     await page.setViewportSize({ width: mode === "mobile" ? 390 : 1280, height: 900 });
     const { project, scene } = await createWritingFixture(page, mode);
     const text = "東京《とうきょう》へ向かう。\n日本語😀の本文。";
-    await editor(page).click();
+    await page.locator(".cm-content").click({ position: { x: 1, y: 1 } });
     await page.keyboard.press("ControlOrMeta+a");
     await page.keyboard.insertText(text);
     await expectMarkdown(page, text);
@@ -210,7 +210,7 @@ async function visibleReaderParagraphs(page: Page): Promise<string[]> {
 
 async function replaceReaderText(page: Page, text: string): Promise<void> {
   await expect(editor(page)).toBeVisible();
-  await editor(page).click();
+  await page.locator(".cm-content").click({ position: { x: 1, y: 1 } });
   await page.keyboard.press("ControlOrMeta+a");
   await page.keyboard.insertText(text);
   await expectMarkdown(page, text);
