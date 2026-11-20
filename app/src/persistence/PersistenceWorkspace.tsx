@@ -221,6 +221,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const [documentId, setDocumentId] = useState("");
   const lastOutlineSelectionRef = useRef("");
   const [nodes, setNodes] = useState<KnowledgeNode[]>([]);
+  const [knowledgeListError, setKnowledgeListError] = useState("");
+  const [knowledgeListLoading, setKnowledgeListLoading] = useState(false);
+  const [knowledgeListRetryEpoch, setKnowledgeListRetryEpoch] = useState(0);
   const [nodeId, setNodeId] = useState("");
   const [nodeEvidence, setNodeEvidence] = useState<{ projectId: string; nodeId: string; evidence: PersistenceAnchorView[] } | null>(null);
   const [nodeEvidenceError, setNodeEvidenceError] = useState("");
@@ -381,7 +384,6 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     setOutlineError("");
     if (!projectId) {
       setDocuments([]);
-      setNodes([]);
       setDocumentId("");
       publishEditor(null);
       return;
@@ -393,19 +395,15 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       loadedDocumentsProjectRef.current = projectId;
       setDocuments([]);
       setNodes([]);
+      setNodeId("");
       publishEditor(null);
     }
-    void Promise.all([
-      api.persistenceDocuments(projectId, undefined, controller.signal),
-      api.persistenceNodes(projectId, 500, controller.signal),
-    ]).then(([documentResult, nodeResult]) => {
+    void api.persistenceDocuments(projectId, undefined, controller.signal).then((documentResult) => {
       if (controller.signal.aborted || sessionBlockedRef.current || projectIdRef.current !== projectId) return;
       setDocuments(documentResult.documents);
       setOutlineReadyProject(projectId);
-      setNodes(nodeResult.nodes);
       setDocumentId((current) => current && documentResult.documents.some((item) => item.id === current)
         ? current : documentResult.documents.find((item) => projectId === selectionRef.current?.projectId && item.id === selectionRef.current.documentId)?.id ?? documentResult.documents[0]?.id ?? "");
-      setNodeId((current) => current && nodeResult.nodes.some((item) => item.id === current) ? current : "");
     }).catch((error: unknown) => {
       if (!controller.signal.aborted && projectIdRef.current === projectId) {
         setOutlineError(error instanceof Error ? error.message : "作品の内容を読み込めませんでした。");
@@ -415,6 +413,32 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     });
     return () => controller.abort();
   }, [projectId, publishEditor, resumeEpoch, sessionBlocked]);
+
+  useEffect(() => {
+    if (sessionBlocked) return;
+    if (!projectId) {
+      setNodes([]);
+      setNodeId("");
+      setKnowledgeListError("");
+      setKnowledgeListLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setKnowledgeListError("");
+    setKnowledgeListLoading(true);
+    void api.persistenceNodes(projectId, 500, controller.signal).then((result) => {
+      if (controller.signal.aborted || sessionBlockedRef.current || projectIdRef.current !== projectId) return;
+      setNodes(result.nodes);
+      setNodeId((current) => current && result.nodes.some((item) => item.id === current) ? current : "");
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted && projectIdRef.current === projectId) {
+        setKnowledgeListError(error instanceof Error ? error.message : "Knowledge一覧を読み込めませんでした。");
+      }
+    }).finally(() => {
+      if (!controller.signal.aborted && projectIdRef.current === projectId) setKnowledgeListLoading(false);
+    });
+    return () => controller.abort();
+  }, [projectId, knowledgeListRetryEpoch, resumeEpoch, sessionBlocked]);
 
   useEffect(() => {
     if (sessionBlocked) return;
@@ -1222,13 +1246,25 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   }
 
   async function loadRevisions(): Promise<void> {
-    if (!project || !active) return;
+    const requestedDocument = activeRef.current;
+    if (!project || !requestedDocument || requestedDocument.document.projectId !== project.id) return;
+    const requestedProjectId = project.id;
+    const requestedDocumentId = requestedDocument.document.id;
+    const requestedRevisionId = requestedDocument.revision.id;
+    const navigationGeneration = openSequenceRef.current;
+    const requestIsCurrent = () => !sessionBlockedRef.current &&
+      projectIdRef.current === requestedProjectId &&
+      openSequenceRef.current === navigationGeneration &&
+      activeRef.current?.document.projectId === requestedProjectId &&
+      activeRef.current.document.id === requestedDocumentId &&
+      activeRef.current.revision.id === requestedRevisionId;
     try {
-      const page = await api.persistenceRevisions(project.id, active.document.id, 50);
+      const page = await api.persistenceRevisions(requestedProjectId, requestedDocumentId, 50);
+      if (!requestIsCurrent()) return;
       setRevisions([...page.revisions]);
       setShowRevisions((value) => !value);
     } catch (error) {
-      setPageError(error instanceof Error ? error.message : "Revision履歴を読み込めませんでした。");
+      if (requestIsCurrent()) setPageError(error instanceof Error ? error.message : "Revision履歴を読み込めませんでした。");
     }
   }
 
@@ -1722,6 +1758,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           </select>
         </details>
           <ul className="pg-knowledge-list">
+            {knowledgeListLoading && nodes.length === 0 && <li role="status">Knowledge一覧を読み込んでいます。</li>}
             {nodes.map((node) => <li key={node.id}>
               <button type="button" className={node.id === nodeId ? "is-selected" : ""} onClick={() => setNodeId(node.id)}>
                 <span>{node.name}</span><small>{knowledgeTypeLabel(node.type)} · {node.status === "confirmed" ? "作者確定" : node.status === "proposed" ? "未確認候補" : "退役"}</small>
@@ -1729,6 +1766,10 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
               {node.status === "proposed" && <button type="button" onClick={() => void confirmKnowledge(node)}>内容を確認して確定</button>}
             </li>)}
           </ul>
+          {knowledgeListError && <div className="pg-alert" role="alert">
+            <p>Knowledge一覧を読み込めませんでした。{knowledgeListError}</p>
+            <button type="button" onClick={() => setKnowledgeListRetryEpoch((value) => value + 1)} disabled={knowledgeListLoading}>再試行</button>
+          </div>}
           {selectedNode && <KnowledgeContextInspector key={selectedNode.id} node={selectedNode} nodes={nodes} documentId={active?.document.id} revisionId={active?.revision.id} clean={Boolean(active&&!active.dirty&&!active.remoteConflict&&active.save==="saved")} selectedEvidenceId={selectedEvidenceId??""} evidenceLoadKey={(active?.evidenceLoadKey??0)+nativeReviewEpoch} onOpenEvidence={(item)=>void openNodeEvidence(item)} onNodeUpdate={(updated)=>setNodes(current=>current.map(item=>item.id===updated.id?updated:item))} onMerge={(target,source)=>{setNodes(current=>current.filter(item=>item.id!==source.id).map(item=>item.id===target.id?target:item));setNodeId(target.id);setNotice("Knowledgeを統合しました。")}} />}
           {selectedNode && <section aria-label="Knowledgeの根拠">
             <h3>{selectedNode.name}の根拠</h3>

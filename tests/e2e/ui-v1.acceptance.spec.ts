@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import { createWritingFixture, ownerLogin, readPersistenceDrafts, manuscriptEditor as editor, readManuscriptMarkdown as markdown } from "./postgres-fixture";
+import { createWritingFixture, openManuscriptScene, openRevisionHistory, ownerLogin, readPersistenceDrafts, manuscriptEditor as editor, readManuscriptMarkdown as markdown } from "./postgres-fixture";
 
 test.use({ hasTouch: true });
 async function expectMarkdown(page: Page, text: string) { await expect.poll(() => markdown(page)).toBe(text); }
@@ -18,6 +18,11 @@ async function previewLegacy(page: Page) {
   await expect(page.getByRole("region", { name: "旧Draftのプレビュー" })).toBeVisible();
 }
 async function sourceExists(page: Page) { return page.evaluate((key) => localStorage.getItem(key) !== null, legacyKey); }
+async function persistedMarkdown(page: Page, projectId: string, documentId: string): Promise<string> {
+  const response = await page.request.get(`/api/v1/persistence/projects/${projectId}/documents/${documentId}`);
+  if (!response.ok()) return "";
+  return ((await response.json()) as { revision: { markdown: string } }).revision.markdown;
+}
 async function denyWrites(page: Page, enabled: boolean) {
   await page.evaluate((enabled) => {
     const probe = window as Window & { __originalIdbPut?: typeof IDBObjectStore.prototype.put; __denyPgDraftWrites?: boolean };
@@ -149,6 +154,119 @@ test("the launcher remembers an explicit choice while direct Shell links keep th
   await expect(page).toHaveURL(/desktop/u);
   await page.goto("/mobile/"); await expect(page.getByLabel("アクセス・トークン")).toBeVisible();
   await page.goto("/"); await expect(page).toHaveURL(/desktop/u);
+});
+
+test("revision history responses and errors stay bound to the scene that requested them", async ({ page }) => {
+  const { project, scene, second } = await createWritingFixture(page);
+  const aPast = "Aだけにある過去本文。";
+  const aCurrent = "Aの現在本文。";
+  const bPast = "Bだけにある過去本文。";
+  const bCurrent = "Bの現在本文。";
+  await editor(page).fill(aPast);
+  await expect.poll(() => persistedMarkdown(page, project.id, scene.id)).toBe(aPast);
+  await editor(page).fill(aCurrent);
+  await expect.poll(() => persistedMarkdown(page, project.id, scene.id)).toBe(aCurrent);
+  await openManuscriptScene(page, second);
+  await editor(page).fill(bPast);
+  await expect.poll(() => persistedMarkdown(page, project.id, second.id)).toBe(bPast);
+  await editor(page).fill(bCurrent);
+  await expect.poll(() => persistedMarkdown(page, project.id, second.id)).toBe(bCurrent);
+  await openManuscriptScene(page, scene);
+
+  const historyUrl = (url: URL) => url.pathname === `/api/v1/persistence/projects/${project.id}/documents/${scene.id}/revisions`;
+  let releaseHistory!: () => void;
+  let markHistoryStarted!: () => void;
+  const historyGate = new Promise<void>((resolve) => { releaseHistory = resolve; });
+  const historyStarted = new Promise<void>((resolve) => { markHistoryStarted = resolve; });
+  await page.route(historyUrl, async (route) => {
+    markHistoryStarted();
+    await historyGate;
+    await route.continue();
+  });
+  await openRevisionHistory(page);
+  await historyStarted;
+  await openManuscriptScene(page, second);
+  const historyResponse = page.waitForResponse((response) => historyUrl(new URL(response.url())));
+  releaseHistory();
+  await historyResponse;
+  await openRevisionHistory(page);
+  const history = page.getByRole("region", { name: "Revision履歴", exact: true });
+  await expect(history).toBeVisible();
+  await expect(history).toContainText(bPast);
+  await expect(history).not.toContainText(aPast);
+
+  await openManuscriptScene(page, scene);
+  await page.unroute(historyUrl);
+  let releaseFailure!: () => void;
+  let markFailureStarted!: () => void;
+  const failureGate = new Promise<void>((resolve) => { releaseFailure = resolve; });
+  const failureStarted = new Promise<void>((resolve) => { markFailureStarted = resolve; });
+  await page.route(historyUrl, async (route) => {
+    markFailureStarted();
+    await failureGate;
+    await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "A履歴の取得失敗", code: "TEST_FAILURE" }) });
+  });
+  await openRevisionHistory(page);
+  await failureStarted;
+  await openManuscriptScene(page, second);
+  const failureResponse = page.waitForResponse((response) => historyUrl(new URL(response.url())));
+  releaseFailure();
+  await failureResponse;
+  await expect(page.getByText("A履歴の取得失敗", { exact: true })).toHaveCount(0);
+  await expect(editor(page)).toContainText(bCurrent);
+});
+
+test("a failed Knowledge list does not block the initial document and can be retried in its panel", async ({ page }) => {
+  await ownerLogin(page);
+  const headers = { Origin: new URL(page.url()).origin };
+  const createdProject = await page.request.post("/api/v1/persistence/projects", { headers, data: { title: `Knowledge failure ${crypto.randomUUID()}` } });
+  expect(createdProject.status()).toBe(201);
+  const { project } = await createdProject.json() as { project: { id: string } };
+  const createdDocument = await page.request.post(`/api/v1/persistence/projects/${project.id}/documents`, {
+    headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
+    data: { kind: "scene", title: "唯一のシーン", orderKey: "a", markdown: "初期本文。" },
+  });
+  expect(createdDocument.status()).toBe(201);
+  const document = (await createdDocument.json() as { document: { id: string } }).document;
+  const nodesUrl = (url: URL) => url.pathname === `/api/v1/persistence/projects/${project.id}/nodes`;
+  let releaseKnowledgeFailure!: () => void;
+  let markKnowledgeStarted!: () => void;
+  const knowledgeFailureGate = new Promise<void>((resolve) => { releaseKnowledgeFailure = resolve; });
+  const knowledgeRequestStarted = new Promise<void>((resolve) => { markKnowledgeStarted = resolve; });
+  let nodeRequestCount = 0;
+  await page.route(nodesUrl, async (route) => {
+    nodeRequestCount += 1;
+    if (nodeRequestCount === 1) {
+      markKnowledgeStarted();
+      await knowledgeFailureGate;
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Knowledge一覧を利用できません。", code: "TEST_FAILURE" }) });
+      return;
+    }
+    await route.continue();
+  });
+  const documentListResponse = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/v1/persistence/projects/${project.id}/documents`);
+  await page.goto(`/desktop/projects/${project.id}`);
+  await documentListResponse;
+  await knowledgeRequestStarted;
+  releaseKnowledgeFailure();
+  await page.waitForResponse((response) => nodesUrl(new URL(response.url())));
+
+  await expect(page.locator(`.pg-document-list [data-document-id="${document.id}"]`)).toBeVisible();
+  const manuscript = editor(page);
+  await expect(manuscript).toContainText("初期本文。");
+  const draft = "Knowledge一覧が使えなくても編集して保存できる。";
+  await manuscript.fill(draft);
+  await expect.poll(() => persistedMarkdown(page, project.id, document.id)).toBe(draft);
+
+  const toolbar = page.getByRole("toolbar", { name: "ワークスペース配置" });
+  const panelMenu = toolbar.locator("details");
+  if (!await panelMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await panelMenu.locator("summary").click();
+  await toolbar.getByRole("button", { name: "知識と根拠を表示", exact: true }).click();
+  const knowledge = page.locator('[data-workspace-panel="inspector"] .pg-knowledge');
+  await expect(knowledge.getByRole("alert")).toContainText("Knowledge一覧を利用できません。");
+  await knowledge.getByRole("button", { name: "再試行", exact: true }).click();
+  await expect(knowledge.getByRole("alert")).toHaveCount(0);
+  await expect(manuscript).toContainText(draft);
 });
 
 test("recovery retry after pagehide retains its exact PostgreSQL draft", async ({ page }) => {
