@@ -11,8 +11,7 @@ const image=c=>'ghcr.io/yohn-jp/codexia-backend@'+hash(c);
 const release=(v,c)=>({format:'codexia-update-release/v1',channel:'stable',state:'published',version:v,sourceSha:c.repeat(40),image:image(c),platform:'linux/amd64',profile:'core',migrationFingerprint:hash('e'),persistenceFormat:1,apiEpoch:1});
 test('credentialed stable publisher inspects image identity without starting image code',async()=>{
   const source=await readFile(new URL('./publish-stable-channel.mjs',import.meta.url),'utf8');
-  assert.match(source,/output\(\['create','--entrypoint','\/bin\/false',image\]\)/u);
-  assert.ok(source.includes("output(['cp',container+':/app/update-identity.json',identityPath])"));
+  assert.match(source,/inspectBackendImageWithoutExecution\(image,/u);
   assert.doesNotMatch(source,/output\(\['run'/u);
 });
 test('bootstrap, monotonic publish, refresh and withdrawal preserve immutable identities',()=>{

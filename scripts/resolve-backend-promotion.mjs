@@ -12,12 +12,11 @@ import { downloadArtifact, extractArtifactFiles } from './download-ci-artifacts.
 import { collectGitHubPages } from './release-policy.mjs';
 import { verifyFrontendMainPromotionProof } from './verify-frontend-artifact.mjs';
 import { compareFrontendVersions } from './verify-frontend-compatibility.mjs';
-import { validateBackendIdentity } from './backend-update-identity.mjs';
+import { expectedBackendMigrationFingerprint, inspectBackendImageWithoutExecution as inspectDockerImage } from './backend-image-inspection.mjs';
 
 const REPOSITORY = 'yohn-jp/codexia';
 const IMAGE_FILE = 'codexia-backend-image.tar.gz';
 const IMAGE = 'codexia-backend-ci';
-const PROFILES = ['core', 'full'];
 const RECORD = 'codexia-backend-promotion.json';
 const MAX_IMAGE_BYTES = 512 * 1024 * 1024;
 
@@ -95,34 +94,9 @@ async function assertBackendVersionTagFree(version,token,fetchImpl){
   throw new Error('Backend producer version tag is already reserved');
 }
 
-async function expectedMigrationFingerprint() {
-  const source = `import { readMigrationSet, migrationSetFingerprint } from './packages/persistence-postgres/src/migration-set.ts';
-console.log(migrationSetFingerprint(await readMigrationSet('./packages/persistence-postgres/migrations')));`;
-  return execFileSync(process.execPath,['--experimental-strip-types','--input-type=module','-e',source],{encoding:'utf8'}).trim();
-}
-
-export function inspectBackendImageWithoutExecution(archivePath, profile, sourceSha, version, migrationFingerprint, compatibility, destination) {
+export async function inspectBackendImageWithoutExecution(archivePath, profile, sourceSha, version, migrationFingerprint, compatibility, destination) {
   execFileSync('bash',['-o','pipefail','-c','gzip -dc -- "$1" | docker load','backend-image-load',archivePath],{stdio:'inherit'});
-  const inspect=()=>JSON.parse(execFileSync('docker',['image','inspect',IMAGE],{encoding:'utf8'}))[0];
-  const image=inspect();
-  assert.equal(image.Os+'/'+image.Architecture,'linux/amd64','Promoted backend image platform mismatch');
-  assert.equal(image.Config?.Labels?.['org.opencontainers.image.revision'],sourceSha,'Promoted backend OCI revision mismatch');
-  const container=execFileSync('docker',['create','--entrypoint','/bin/false',IMAGE],{encoding:'utf8'}).trim();
-  const identityPath=path.join(destination,'identity-'+profile+'.json');
-  try { execFileSync('docker',['cp',container+':/app/update-identity.json',identityPath],{stdio:'ignore'}); }
-  finally { execFileSync('docker',['rm','--force',container],{stdio:'ignore'}); }
-  const identity=validateBackendIdentity(JSON.parse(awaitReadText(identityPath)));
-  assert.equal(identity.sourceSha,sourceSha,'Promoted backend producer SHA mismatch');
-  assert.equal(identity.version,version,'Promoted backend producer version mismatch');
-  assert.equal(identity.profile,profile,'Promoted backend profile mismatch');
-  assert.equal(identity.migrationFingerprint,migrationFingerprint,'Promoted backend migration fingerprint mismatch');
-  assert.equal(identity.apiEpoch,compatibility.apiEpoch,'Promoted backend API epoch mismatch');
-  assert.equal(identity.persistenceFormat,compatibility.persistenceFormat,'Promoted backend persistence format mismatch');
-  return identity;
-}
-
-function awaitReadText(filename){
-  return execFileSync(process.execPath,['-e',"process.stdout.write(require('node:fs').readFileSync(process.argv[1],'utf8'))",filename],{encoding:'utf8'});
+  return inspectDockerImage(IMAGE,{sourceSha,version,profile,migrationFingerprint,compatibility},{tempRoot:destination});
 }
 
 async function resolve({env=process.env,fetchImpl=fetch}={}) {
@@ -153,7 +127,7 @@ async function resolve({env=process.env,fetchImpl=fetch}={}) {
   assertBackendPromotionVersion(version,latest);
   await assertBackendVersionTagFree(version,token,fetchImpl);
   const compatibility=JSON.parse(await readFile(new URL('../deploy/update-compatibility.json',import.meta.url),'utf8'));
-  const migrationFingerprint=await expectedMigrationFingerprint();
+  const migrationFingerprint=await expectedBackendMigrationFingerprint();
   const outputDir=env.CODEXIA_BACKEND_PROMOTION_DIR;
   assert.ok(typeof outputDir==='string'&&path.isAbsolute(outputDir),'Backend promotion handoff directory must be absolute');
   await mkdir(outputDir,{recursive:true});
@@ -169,7 +143,7 @@ async function resolve({env=process.env,fetchImpl=fetch}={}) {
       const files=await extractArtifactFiles(bytes,extracted,{maxArchive:MAX_IMAGE_BYTES,maxUncompressed:MAX_IMAGE_BYTES});
       assert.deepEqual(files,[IMAGE_FILE],'Backend producer artifact contains unexpected files');
       const archive=path.join(extracted,IMAGE_FILE);
-      const identity=inspectBackendImageWithoutExecution(archive,item.profile,proof.headSha,version,migrationFingerprint,compatibility,scratch);
+      const identity=await inspectBackendImageWithoutExecution(archive,item.profile,proof.headSha,version,migrationFingerprint,compatibility,scratch);
       const handoffArchive=path.join(outputDir,item.profile+'-'+IMAGE_FILE);
       await rename(archive,handoffArchive);
       receipt.artifacts[item.profile]={id:item.artifact.id,digest:item.artifact.digest,producerAttempt:item.producerAttempt,

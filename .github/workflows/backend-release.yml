@@ -28,6 +28,10 @@ on:
       - scripts/verify-backend-artifacts*.mjs
       - scripts/resolve-backend-promotion*.mjs
       - scripts/verify-backend-promotion-handoff.mjs
+      - scripts/verify-existing-backend-release.mjs
+      - scripts/verify-existing-backend-release.test.mjs
+      - scripts/backend-image-inspection.mjs
+      - scripts/backend-image-inspection.test.mjs
       - scripts/publish-stable-channel.mjs
       - scripts/phase-f-test-channel.mjs
       - scripts/phase-f-disposable.test.mjs
@@ -68,6 +72,10 @@ on:
       - scripts/verify-backend-artifacts*.mjs
       - scripts/resolve-backend-promotion*.mjs
       - scripts/verify-backend-promotion-handoff.mjs
+      - scripts/verify-existing-backend-release.mjs
+      - scripts/verify-existing-backend-release.test.mjs
+      - scripts/backend-image-inspection.mjs
+      - scripts/backend-image-inspection.test.mjs
       - scripts/publish-stable-channel.mjs
       - scripts/phase-f-test-channel.mjs
       - scripts/phase-f-disposable.test.mjs
@@ -88,6 +96,7 @@ concurrency:
 jobs:
   promotion:
     name: Resolve verified backend promotion
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -217,6 +226,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_BACKEND_ARTIFACT_DIR: ${{ runner.temp }}/backend-images
+          CODEXIA_BACKEND_ARTIFACT_MANIFEST: ${{ runner.temp }}/backend-images/codexia-backend-build.json
         run: node scripts/verify-backend-artifacts.mjs
       - uses: actions/download-artifact@v7.0.0
         if: ${{ needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true' }}
@@ -244,6 +254,8 @@ jobs:
           PRODUCER_SHA: ${{ needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true' && needs.promotion.outputs.producer-sha || github.sha }}
           PRODUCER_VERSION: ${{ needs.promotion.outputs.producer-version }}
           PRODUCER_EVENT: ${{ needs.promotion.outputs.producer-event }}
+          CODEXIA_BACKEND_PROMOTION_DIR: ${{ runner.temp }}/backend-promotion
+          CODEXIA_BACKEND_ARTIFACT_MANIFEST: ${{ runner.temp }}/backend-images/codexia-backend-build.json
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -277,7 +289,9 @@ jobs:
               # Retry or partial publication: never replace an existing SHA tag.
               [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
               docker pull "$IMAGE@$digest"
-              test "$(docker image inspect --format '{{.Id}}' "$IMAGE@$digest")" = "$tested_id"
+              if [[ "$(docker image inspect --format '{{.Id}}' "$IMAGE@$digest")" != "$tested_id" ]]; then
+                node scripts/verify-existing-backend-release.mjs "$IMAGE@$digest" "$MAIN_SHA" "$PRODUCER_SHA" "$PRODUCER_VERSION" "$profile" "$PRODUCER_EVENT"
+              fi
             fi
             if [[ "$profile" == core ]]; then
               echo "image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
@@ -297,6 +311,7 @@ jobs:
           CODEXIA_BACKEND_PRODUCER_SHA: ${{ steps.push-image.outputs.producer-sha }}
           CODEXIA_BACKEND_PRODUCER_VERSION: ${{ steps.push-image.outputs.producer-version }}
           CODEXIA_BACKEND_PROMOTION_DIR: ${{ runner.temp }}/backend-promotion
+          CODEXIA_BACKEND_ARTIFACT_MANIFEST: ${{ runner.temp }}/backend-images/codexia-backend-build.json
         run: node scripts/record-component-release.mjs backend
 
   stable-channel:

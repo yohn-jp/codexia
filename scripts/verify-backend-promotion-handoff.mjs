@@ -11,6 +11,7 @@ import { verifyFrontendMainPromotionProof } from './verify-frontend-artifact.mjs
 import { selectBackendArtifacts, assertBackendProducerAttempt } from './verify-backend-artifacts.mjs';
 import { selectBackendPromotionRun, inspectBackendImageWithoutExecution } from './resolve-backend-promotion.mjs';
 import { readComponentVersion } from './component-release-version.mjs';
+import { expectedBackendMigrationFingerprint } from './backend-image-inspection.mjs';
 
 const REPOSITORY='yohn-jp/codexia';
 const DIRECTORY=process.env.CODEXIA_BACKEND_PROMOTION_DIR;
@@ -77,8 +78,7 @@ export async function verifyBackendPromotionHandoff({env=process.env}={}){
   }
   assert.equal(Object.keys(receipt.artifacts).sort().join(','),'core,full');
   const compatibility=JSON.parse(await readFile(new URL('../deploy/update-compatibility.json',import.meta.url),'utf8'));
-  const expectedFingerprint=execFileSync(process.execPath,['--experimental-strip-types','--input-type=module','-e',
-    "import { readMigrationSet, migrationSetFingerprint } from './packages/persistence-postgres/src/migration-set.ts'; console.log(migrationSetFingerprint(await readMigrationSet('./packages/persistence-postgres/migrations')));"],{encoding:'utf8'}).trim();
+  const expectedFingerprint=await expectedBackendMigrationFingerprint();
   const scratch=await mkdtemp(path.join(env.RUNNER_TEMP||tmpdir(),'codexia-backend-promotion-check-'));
   try{
     let firstIdentity;
@@ -87,7 +87,7 @@ export async function verifyBackendPromotionHandoff({env=process.env}={}){
       const archive=path.join(DIRECTORY,profile+'-codexia-backend-image.tar.gz');
       const bytes=await readFile(archive);
       assert.equal(createHash('sha256').update(bytes).digest('hex'),item.archiveSha256,'Backend handoff archive digest mismatch');
-      const identity=inspectBackendImageWithoutExecution(archive,profile,proof.headSha,receipt.version,expectedFingerprint,compatibility,scratch);
+      const identity=await inspectBackendImageWithoutExecution(archive,profile,proof.headSha,receipt.version,expectedFingerprint,compatibility,scratch);
       assert.deepEqual(identity,item.identity,'Backend image identity differs from the verified receipt');
       if(firstIdentity){
         for(const key of ['version','sourceSha','platform','migrationFingerprint','apiEpoch','persistenceFormat']) assert.equal(identity[key],firstIdentity[key],'Core and Full image identities differ: '+key);

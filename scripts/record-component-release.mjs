@@ -42,7 +42,13 @@ export function componentReleaseRecordFromEnvironment(env=process.env){
     assert.ok(typeof directory==='string'&&path.isAbsolute(directory),'Backend promotion receipt directory is invalid');
     producer.receipt=JSON.parse(readFileSync(path.join(directory,'codexia-backend-promotion.json'),'utf8'));
     producer.mainTree=execFileSync('git',['rev-parse','HEAD^{tree}'],{encoding:'utf8'}).trim();
-  }else assert.equal(producer.event,'push','Backend producer event is invalid');
+  }else{
+    assert.equal(producer.event,'push','Backend producer event is invalid');
+    const manifest=env.CODEXIA_BACKEND_ARTIFACT_MANIFEST;
+    assert.ok(typeof manifest==='string'&&path.isAbsolute(manifest),'Backend build manifest path is invalid');
+    producer.receipt=JSON.parse(readFileSync(manifest,'utf8'));
+    producer.mainTree=execFileSync('git',['rev-parse','HEAD^{tree}'],{encoding:'utf8'}).trim();
+  }
   return buildComponentReleaseRecord(component,sha,null,producer);
 }
 

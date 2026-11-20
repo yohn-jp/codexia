@@ -78,6 +78,8 @@ export function buildComponentReleaseRecord(component,sourceSha,identity,produce
         assert.equal(identity.apiEpoch,compatibility.apiEpoch,'Backend '+profile+' API epoch mismatch');
         assert.equal(identity.persistenceFormat,compatibility.persistenceFormat,'Backend '+profile+' persistence format mismatch');
       }
+      assert.notEqual(receipt.artifacts.core.id,receipt.artifacts.full.id,'Backend Core and Full artifacts must be distinct');
+      assert.notEqual(receipt.artifacts.core.digest,receipt.artifacts.full.digest,'Backend Core and Full artifact digests must be distinct');
       const coreIdentity=receipt.artifacts.core.identity,fullIdentity=receipt.artifacts.full.identity;
       for(const key of ['version','sourceSha','platform','migrationFingerprint','apiEpoch','persistenceFormat']) assert.equal(coreIdentity[key],fullIdentity[key],'Backend Core and Full identity mismatch: '+key);
       version=receipt.version;
@@ -87,8 +89,34 @@ export function buildComponentReleaseRecord(component,sourceSha,identity,produce
         mergeBaseSha:receipt.mergeBaseSha,artifacts:Object.fromEntries(['core','full'].map(profile=>{
           const artifact=receipt.artifacts[profile];return [profile,{id:artifact.id,digest:artifact.digest,producerAttempt:artifact.producerAttempt,archiveSha256:artifact.archiveSha256}];
         }))};
+    }else if(producer.event==='push'&&producer.receipt){
+      const receipt=producer.receipt;
+      assert.ok(receipt&&typeof receipt==='object'&&!Array.isArray(receipt),'Backend build receipt is missing');
+      assert.equal(receipt.format,'codexia-backend-build/v1');
+      assert.equal(receipt.event,'push');
+      assert.equal(receipt.sourceSha,sourceSha,'Backend build source differs from main release authority');
+      assert.equal(receipt.version,readComponentVersion('backend',String(receipt.workflowRunNumber)),'Backend build version differs from its workflow run number');
+      assert.equal(receipt.sourceTree,producer.mainTree,'Backend build tree differs from exact main tree');
+      assert.ok(positive(receipt.workflowRunId)&&positive(receipt.workflowRunNumber),'Backend build run identity is invalid');
+      assert.match(receipt.sourceTree??'',sha,'Backend build source tree is invalid');
+      assert.ok(receipt.artifacts&&typeof receipt.artifacts==='object','Backend build artifact receipt is missing');
+      for(const profile of ['core','full']){
+        const artifact=receipt.artifacts[profile];
+        assert.ok(artifact&&typeof artifact==='object','Backend '+profile+' build artifact is missing');
+        assert.ok(positive(artifact.id)&&positive(artifact.producerAttempt),'Backend '+profile+' build artifact identity is invalid');
+        assert.match(artifact.digest??'',/^sha256:[a-f0-9]{64}$/u,'Backend '+profile+' build artifact digest is invalid');
+        assert.match(artifact.archiveSha256??'',digest,'Backend '+profile+' build archive digest is invalid');
+      }
+      assert.notEqual(receipt.artifacts.core.id,receipt.artifacts.full.id,'Backend Core and Full artifacts must be distinct');
+      assert.notEqual(receipt.artifacts.core.digest,receipt.artifacts.full.digest,'Backend Core and Full artifact digests must be distinct');
+      version=receipt.version;
+      metadata.producer={event:'push',sourceSha:receipt.sourceSha,version:receipt.version,workflowRunId:receipt.workflowRunId,
+        workflowRunNumber:receipt.workflowRunNumber,sourceTree:receipt.sourceTree,artifacts:Object.fromEntries(['core','full'].map(profile=>{
+          const artifact=receipt.artifacts[profile];return [profile,{id:artifact.id,digest:artifact.digest,producerAttempt:artifact.producerAttempt,archiveSha256:artifact.archiveSha256}];
+        }))};
     }
   }
+  metadata.version=version;
   const tag=component+'-v'+version;
   const body='Certified component release.\n\n```json\n'+JSON.stringify(metadata,null,2)+'\n```';
   return {tag,title:component+' v'+version,targetSha:sourceSha,metadata,body};

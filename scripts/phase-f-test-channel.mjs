@@ -58,13 +58,20 @@ export function parseComponentRelease(apiRelease, expectedVersion, expectedSourc
   assert.equal(imageSourceSha, expectedSourceSha, 'Backend image producer source differs from its certified record');
   if(metadata.producer){
     const producer=metadata.producer;
-    assert.deepEqual(Object.keys(producer).sort(),['artifacts','event','mergeBaseSha','planDigest','prNumber','proofRunId','sourceSha','sourceTree','verifyAttempt','verifyRunId','version','workflowAttempt','workflowId','workflowRunId','workflowRunNumber'].sort());
-    assert.equal(producer.event,'pull_request');
+    const common=['artifacts','event','sourceSha','sourceTree','version','workflowRunId','workflowRunNumber'];
+    const prFields=['mergeBaseSha','planDigest','prNumber','proofRunId','verifyAttempt','verifyRunId','workflowAttempt','workflowId'];
+    assert.ok(['push','pull_request'].includes(producer.event),'Backend producer event is invalid');
+    assert.deepEqual(Object.keys(producer).sort(),[...common,...(producer.event==='pull_request'?prFields:[])].sort());
     assert.equal(producer.version,metadata.version);
-    assert.notEqual(producer.sourceSha,metadata.sourceSha,'Backend producer and main authority must be distinct');
-    for(const key of ['sourceSha','sourceTree','mergeBaseSha']) assert.match(producer[key]??'',/^[a-f0-9]{40}$/u,'Backend producer '+key+' is invalid');
-    for(const key of ['workflowRunId','workflowRunNumber','workflowAttempt','workflowId','prNumber','verifyRunId','proofRunId','verifyAttempt']) assert.ok(Number.isSafeInteger(producer[key])&&producer[key]>0,'Backend producer '+key+' is invalid');
-    assert.match(producer.planDigest??'',/^[a-f0-9]{64}$/u,'Backend producer plan digest is invalid');
+    if(producer.event==='pull_request')assert.notEqual(producer.sourceSha,metadata.sourceSha,'Backend producer and main authority must be distinct');
+    else assert.equal(producer.sourceSha,metadata.sourceSha,'Main producer SHA differs from release authority');
+    for(const key of ['sourceSha','sourceTree']) assert.match(producer[key]??'',/^[a-f0-9]{40}$/u,'Backend producer '+key+' is invalid');
+    for(const key of ['workflowRunId','workflowRunNumber']) assert.ok(Number.isSafeInteger(producer[key])&&producer[key]>0,'Backend producer '+key+' is invalid');
+    if(producer.event==='pull_request'){
+      for(const key of ['workflowAttempt','workflowId','prNumber','verifyRunId','proofRunId','verifyAttempt']) assert.ok(Number.isSafeInteger(producer[key])&&producer[key]>0,'Backend producer '+key+' is invalid');
+      assert.match(producer.planDigest??'',/^[a-f0-9]{64}$/u,'Backend producer plan digest is invalid');
+      assert.match(producer.mergeBaseSha??'',/^[a-f0-9]{40}$/u,'Backend producer merge base is invalid');
+    }
     assert.deepEqual(Object.keys(producer.artifacts??{}).sort(),['core','full']);
     for(const profile of ['core','full']){
       const artifact=producer.artifacts[profile];
@@ -73,6 +80,8 @@ export function parseComponentRelease(apiRelease, expectedVersion, expectedSourc
       assert.match(artifact.digest,/^sha256:[a-f0-9]{64}$/u);
       assert.match(artifact.archiveSha256,/^[a-f0-9]{64}$/u);
     }
+    assert.notEqual(producer.artifacts.core.id,producer.artifacts.full.id,'Backend Core and Full producer artifact IDs must be distinct');
+    assert.notEqual(producer.artifacts.core.digest,producer.artifacts.full.digest,'Backend Core and Full producer artifact digests must be distinct');
   }
   assert.equal(metadata.providedApiEpoch, expectedCompatibility.apiEpoch, 'Backend release API epoch differs from this host contract');
   assert.equal(metadata.persistenceFormat, expectedCompatibility.persistenceFormat, 'Backend release persistence format differs from this host contract');
@@ -155,10 +164,15 @@ async function verifySourceCertification(record, releaseApiRecord, metadata, tok
   const sourceJobs = await githubPages('actions/runs/' + sourceRun.id + '/jobs?filter=latest', 'jobs', token);
   assertVerificationJobs(sourceJobs);
   const backendRuns = await githubPages('actions/workflows/backend-release.yml/runs?head_sha=' + authoritySha + '&branch=main&event=push&status=completed', 'workflow_runs', token);
+  const releasedAt=releaseApiRecord.created_at?Date.parse(releaseApiRecord.created_at):NaN;
   const backendRun = backendRuns.find(run => run?.head_sha === authoritySha && run?.head_branch === 'main' &&
-    run?.event === 'push' && run?.status === 'completed' && run?.conclusion === 'success');
+    run?.event === 'push' && run?.status === 'completed' && run?.conclusion === 'success'&&
+    Number.isFinite(releasedAt)&&Number.isFinite(Date.parse(run.created_at))&&Number.isFinite(Date.parse(run.updated_at))&&
+    Date.parse(run.created_at)<=releasedAt&&releasedAt<=Date.parse(run.updated_at)&&
+    (metadata.producer?.event!=='push'||(run.id===metadata.producer.workflowRunId&&run.run_number===metadata.producer.workflowRunNumber)));
   assert.ok(backendRun, 'Source has no successful main backend release workflow');
   const backendJobs = await githubPages('actions/runs/' + backendRun.id + '/jobs?filter=latest', 'jobs', token);
+  const promoted=metadata.producer?.event==='pull_request';
   const names=metadata.producer ? ['Resolve verified backend promotion','Build and test backend OCI image (core)',
     'Build and test backend OCI image (full)','Publish immutable GHCR image'] :
     ['Build and test backend OCI image (core)','Build and test backend OCI image (full)','Publish immutable GHCR image'];
@@ -166,11 +180,8 @@ async function verifySourceCertification(record, releaseApiRecord, metadata, tok
     const matches = backendJobs.filter(job => job?.name === name);
     assert.equal(matches.length, 1, 'Expected one certified backend workflow job: ' + name);
     assert.equal(matches[0].status, 'completed', 'Backend job was not completed: ' + name);
-    if(metadata.producer&&name.startsWith('Build and test backend OCI image')) assert.equal(matches[0].conclusion,'skipped','Promoted backend build should be skipped: '+name);
+    if(promoted&&name.startsWith('Build and test backend OCI image')) assert.equal(matches[0].conclusion,'skipped','Promoted backend build should be skipped: '+name);
     else assert.equal(matches[0].conclusion, 'success', 'Backend job did not pass: ' + name);
-  }
-  if (releaseApiRecord.created_at && backendRun.updated_at) {
-    assert.ok(Date.parse(releaseApiRecord.created_at) <= Date.parse(backendRun.updated_at), 'Backend release record was created after its successful publication workflow completed');
   }
   return { verificationRunId: sourceRun.id, backendReleaseRunId: backendRun.id };
 }

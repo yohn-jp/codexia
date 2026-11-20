@@ -184,6 +184,18 @@ test('Phase F channel factory derives signed sequences from certified embedded r
   assert.equal(parsedPromotion.sourceSha,mainSha);
   assert.throws(()=>parseComponentRelease({...promotedRelease,body:'Certified component release.\n\n```json\n'+JSON.stringify({...promotedMetadata,producer:{...promotedProducer,sourceSha:mainSha}})+'\n```'},
     version,producerSha,image('f'),image('a'),compatibility),/source/i);
+
+  const mainProducer={event:'push',sourceSha:mainSha,version,workflowRunId:103,workflowRunNumber:99,sourceTree:tree,
+    artifacts:{core:{id:203,digest:'sha256:'+'1'.repeat(64),producerAttempt:1,archiveSha256:'2'.repeat(64)},
+      full:{id:204,digest:'sha256:'+'3'.repeat(64),producerAttempt:1,archiveSha256:'4'.repeat(64)}}};
+  const mainRelease={tag_name:'backend-v'+version,draft:false,prerelease:false,
+    body:'Certified component release.\n\n```json\n'+JSON.stringify({...promotedMetadata,producer:mainProducer})+'\n```'};
+  const parsedMain=parseComponentRelease(mainRelease,version,mainSha,image('f'),image('a'),compatibility);
+  assert.equal(parsedMain.producer.event,'push');
+  const duplicateIdMetadata={...promotedMetadata,producer:{...mainProducer,
+    artifacts:{...mainProducer.artifacts,full:{...mainProducer.artifacts.full,id:203}}}};
+  assert.throws(()=>parseComponentRelease({...mainRelease,body:'Certified component release.\n\n```json\n'+JSON.stringify(duplicateIdMetadata)+'\n```'},
+    version,mainSha,image('f'),image('a'),compatibility),/distinct/);
 });
 
 test('Phase F fetch loader intercepts only exact disposable channel and identity URLs', { timeout: 15_000 }, async t => {

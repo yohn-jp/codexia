@@ -1,13 +1,14 @@
 import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { authenticateHistoricalChannel, signUpdateChannel } from './update-channel.mjs';
 import { initialStableChannelRegistry, nextStableChannelRegistry, signStableChannelRegistry, verifyStableChannelRegistry } from './stable-channel-registry.mjs';
 import { validateUpdateRelease } from './update-release-policy.mjs';
+import { expectedBackendMigrationFingerprint, inspectBackendImageWithoutExecution } from './backend-image-inspection.mjs';
 import { validateBackendIdentity } from './backend-update-identity.mjs';
 
 const REPO = 'yohn-jp/codexia';
@@ -182,23 +183,15 @@ async function main() {
     if(!/^[a-f0-9]{40}$/u.test(producerSha)||!producerVersion)throw new Error('Certified backend producer identity required');
     const output=(args)=>execFileSync('docker',args,{encoding:'utf8',timeout:300000,maxBuffer:1024*1024}).trim();
     const compatibility=JSON.parse(readFileSync(new URL('../deploy/update-compatibility.json',import.meta.url),'utf8'));
-    const expectedFingerprint=execFileSync(process.execPath,['--experimental-strip-types','--input-type=module','-e',
-      "import { readMigrationSet, migrationSetFingerprint } from './packages/persistence-postgres/src/migration-set.ts'; console.log(migrationSetFingerprint(await readMigrationSet('./packages/persistence-postgres/migrations')));"],{encoding:'utf8'}).trim();
+    const expectedFingerprint=await expectedBackendMigrationFingerprint();
     const scratch=await mkdtemp(path.join(process.env.RUNNER_TEMP||tmpdir(),'codexia-stable-identity-'));
     const releases=[];
     try {
       for(const [profile,image] of [['core',process.env.CODEXIA_CERTIFIED_IMAGE],['full',process.env.CODEXIA_CERTIFIED_FULL_IMAGE]]){
         if(!/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u.test(image??''))throw new Error('Certified immutable '+profile+' image required');
         output(['pull','--platform','linux/amd64',image]);
-        const container=output(['create','--entrypoint','/bin/false',image]);
-        const identityPath=path.join(scratch,profile+'-identity.json');
-        try { output(['cp',container+':/app/update-identity.json',identityPath]); }
-        finally { output(['rm','--force',container]); }
-        const identity=validateBackendIdentity(JSON.parse(await readFile(identityPath,'utf8')));
-        const observed=JSON.parse(output(['image','inspect',image]))[0];
-        if(observed.Os+'/'+observed.Architecture!==identity.platform||observed.Config.Labels?.['org.opencontainers.image.revision']!==producerSha||!observed.RepoDigests?.includes(image))throw new Error('Published digest or OCI identity mismatch');
-        if(identity.sourceSha!==producerSha||identity.version!==producerVersion||identity.profile!==profile||identity.apiEpoch!==compatibility.apiEpoch||identity.persistenceFormat!==compatibility.persistenceFormat)throw new Error('Published backend producer identity mismatch');
-        if(identity.migrationFingerprint!==expectedFingerprint)throw new Error('Packaged migration fingerprint mismatch');
+        const identity=await inspectBackendImageWithoutExecution(image,{image,sourceSha:producerSha,version:producerVersion,profile,
+          migrationFingerprint:expectedFingerprint,compatibility},{tempRoot:scratch});
         releases.push(releaseFromIdentity(identity,image,producerSha,producerVersion,compatibility,profile));
       }
     } finally { await rm(scratch,{recursive:true,force:true}); }
