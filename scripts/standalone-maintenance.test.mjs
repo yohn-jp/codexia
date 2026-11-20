@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {probeCredentialFiles,validateProbeCredential,validatePostgresAppPassword,validateAppPasswordRotationManifest,validatePostgresAppPasswordRotation,assertProbeCredentialAccess,recoverProbeCredentialWriter,assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig,validateStandaloneAuthToken,transitionAuthTokenWriter,validateApiAuthTokenRotationManifest,saveApiAuthTokenSnapshot,loadApiAuthTokenSnapshot} from '../deploy/updater/standalone-maintenance.mjs';
-import {assertProxyRuntimeObservation,PodmanStandaloneHost} from '../deploy/updater/standalone-host.mjs';
+import {assertApiAuthTokenSecretIdentity,assertProxyRuntimeObservation,PodmanStandaloneHost} from '../deploy/updater/standalone-host.mjs';
 import {mkdtemp,rm,writeFile,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -101,6 +101,24 @@ test('API token rotation snapshots bind both tokens to the exact controller and 
     await writeFile(marker.rotation.replacementTokenFile,'different-standalone-token-0123456789');
     await assert.rejects(loadApiAuthTokenSnapshot({config,state,marker}),/snapshot/i);
   }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('API token recovery accepts the untouched original secret only for rolled-back state',async()=>{
+  const operationId='4e170b80-c68c-4b3e-96a0-8a04942dd8b7';
+  const previousToken='old-standalone-auth-token-0123456789';
+  const replacementToken='new-standalone-auth-token-0123456789';
+  const {createHash}=await import('node:crypto');
+  const snapshot={operationId,originalSecretId:'secret-id-original',
+    previousDigest:createHash('sha256').update(previousToken).digest('hex'),
+    replacementDigest:createHash('sha256').update(replacementToken).digest('hex')};
+  const original={id:snapshot.originalSecretId,owner:undefined,token:previousToken};
+  const ownedPrevious={id:'secret-id-restored',owner:operationId,token:previousToken};
+  const ownedReplacement={id:'secret-id-replacement',owner:operationId,token:replacementToken};
+  assert.doesNotThrow(()=>assertApiAuthTokenSecretIdentity(original,snapshot,snapshot.previousDigest));
+  assert.doesNotThrow(()=>assertApiAuthTokenSecretIdentity(ownedPrevious,snapshot,snapshot.previousDigest));
+  assert.doesNotThrow(()=>assertApiAuthTokenSecretIdentity(ownedReplacement,snapshot,snapshot.replacementDigest));
+  assert.throws(()=>assertApiAuthTokenSecretIdentity(original,snapshot,snapshot.replacementDigest));
+  assert.throws(()=>assertApiAuthTokenSecretIdentity({...ownedReplacement,owner:undefined},snapshot,snapshot.replacementDigest));
 });
 
 test('approved locked maintenance accepts only a valid same-profile runtime contract change',()=>{

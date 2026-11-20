@@ -410,6 +410,17 @@ function assertKnownAuthTokenSecret(secret,snapshot){
     (secret.owner===snapshot.operationId&&[snapshot.previousDigest,snapshot.replacementDigest].includes(digest)),
     'Unrecognized canonical API token prevents recovery');
 }
+export function assertApiAuthTokenSecretIdentity(secret,snapshot,expectedDigest=null){
+  assert.ok(secret,'Canonical API token secret is missing');
+  assertKnownAuthTokenSecret(secret,snapshot);
+  if(expectedDigest===null)return;
+  const digest=sha256(secret.token);
+  const matchesPrevious=expectedDigest===snapshot.previousDigest&&digest===snapshot.previousDigest&&
+    (secret.id===snapshot.originalSecretId||secret.owner===snapshot.operationId);
+  const matchesReplacement=expectedDigest===snapshot.replacementDigest&&digest===snapshot.replacementDigest&&
+    secret.owner===snapshot.operationId;
+  assert.ok(matchesPrevious||matchesReplacement,'Canonical API token secret does not match the committed rotation');
+}
 function assertKnownRotationSecret(secret,snapshot){
   if(!secret)return;
   const digest=sha256(secret.password);
@@ -1684,10 +1695,7 @@ export class PodmanStandaloneHost{
   }
   assertApiAuthTokenSecret(snapshot,expectedDigest=null){
     const secret=readAuthTokenSecret();
-    assertKnownAuthTokenSecret(secret,snapshot);
-    if(expectedDigest!==null){
-      assert.ok(secret?.owner===snapshot.operationId&&sha256(secret.token)===expectedDigest,'Canonical API token secret does not match the committed rotation');
-    }
+    assertApiAuthTokenSecretIdentity(secret,snapshot,expectedDigest);
   }
   async verifyMountedApiAuthToken(slot){
     const secret=readAuthTokenSecret();
