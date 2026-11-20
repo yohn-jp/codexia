@@ -796,8 +796,10 @@ async function runRotationCandidate({ repoRoot, candidate, configPath, environme
 }
 
 async function startStableRotationProxy({ repoRoot, config, proxyQuadlet, originalProxyText, expectedImage, nonce }) {
+  const pinnedProxy = originalProxyText.match(/^Image=(ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64})$/mu)?.[1];
+  assert.ok(pinnedProxy, 'Stable proxy fixture requires the original digest-pinned proxy image');
   const source = `[Unit]\nDescription=Disposable Codexia stable proxy for PostgreSQL rotation ${nonce}\n` +
-    `[Container]\nImage=${expectedImage}\nContainerName=codexia-api-proxy\nNetwork=codexia.network\n` +
+    `[Container]\nImage=${pinnedProxy}\nContainerName=codexia-api-proxy\nNetwork=codexia.network\n` +
     `Volume=${path.join(repoRoot, 'deploy/updater/proxy.mjs')}:/config/proxy.mjs:ro,Z\n` +
     `Volume=${path.dirname(config.stateFile)}:/config/state:ro,Z\n` +
     `User=0\nEntrypoint=node\nExec=/config/proxy.mjs\nReadOnly=true\nNoNewPrivileges=true\nDropCapability=all\n` +
