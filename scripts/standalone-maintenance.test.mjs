@@ -6,8 +6,6 @@ import {assertApiAuthTokenSecretIdentity,assertProxyRuntimeObservation,PodmanSta
 import {mkdir,mkdtemp,rm,writeFile,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { installApiAuthTokenCompletionInterruption } from '../deploy/updater/test-standalone-maintenance-preload.mjs';
 
 const runtime={
   format:'codexia-runtime/v1',profile:'core',modelCachePath:null,
@@ -78,7 +76,7 @@ test('API token completed-marker interruption is bound to prior-token snapshot c
   const marker={format:'codexia-maintenance-api-auth-token/v1',phase:'completed',rotation:{previousTokenFile:snapshotFile}};
   await writeFile(markerPath,JSON.stringify(marker));
   await writeFile(snapshotFile,'synthetic rollback token');
-  const preloadUrl=pathToFileURL(path.resolve('deploy/updater/test-standalone-maintenance-preload.mjs')).href;
+  const preloadUrl=new URL('../deploy/updater/test-standalone-maintenance-preload.mjs',import.meta.url).href;
   const source=`import {installApiAuthTokenCompletionInterruption} from ${JSON.stringify(preloadUrl)};\n`+
     `import {unlink} from 'node:fs/promises';\n`+
     `installApiAuthTokenCompletionInterruption(process.argv[1]);\n`+

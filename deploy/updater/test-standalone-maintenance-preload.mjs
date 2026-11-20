@@ -95,31 +95,3 @@ if (apiAuthTokenRotationEnabled && apiAuthTokenCompletionInterruptionEnabled &&
   const markerPath = path.join(path.dirname(config.stateFile), 'maintenance', 'in-progress.json');
   installApiAuthTokenCompletionInterruption(markerPath);
 }
-
-if (apiAuthTokenRotationEnabled && apiAuthTokenCompletionInterruptionEnabled &&
-    path.resolve(process.argv[1] ?? '') === updaterEntry && process.argv[2] === 'maintain') {
-  const configPath = path.resolve(process.argv[3] ?? '');
-  assert.equal(path.dirname(configPath), path.join(os.homedir(), '.config', 'codexia-updater'),
-    'Completion interruption requires the disposable updater configuration');
-  const config = JSON.parse(await readFile(configPath, 'utf8'));
-  const stateHome = path.resolve(process.env.XDG_STATE_HOME ?? '');
-  assert.ok(path.isAbsolute(stateHome) && stateHome === process.env.XDG_STATE_HOME,
-    'Completion interruption requires the exact disposable state directory');
-  assert.equal(path.dirname(config.stateFile), path.join(stateHome, 'codexia-updater'),
-    'Completion interruption state differs from the disposable updater');
-  const markerPath = path.join(path.dirname(config.stateFile), 'maintenance', 'in-progress.json');
-  const originalUnlink = fsPromises.unlink;
-  fsPromises.unlink = async function guardedCompletionUnlink(filename, ...args) {
-    const candidate = path.resolve(String(filename));
-    if (candidate.endsWith(`${path.sep}api-auth-token`)) {
-      const marker = JSON.parse(await readFile(markerPath, 'utf8'));
-      assert.equal(marker.format, 'codexia-maintenance-api-auth-token/v1');
-      assert.equal(marker.phase, 'completed', 'Completion interruption reached token cleanup before durable completion');
-      assert.equal(candidate, marker.rotation.previousTokenFile,
-        'Completion interruption may stop only before prior-token snapshot cleanup');
-      process.kill(process.pid, 'SIGKILL');
-    }
-    return Reflect.apply(originalUnlink, this, [filename, ...args]);
-  };
-  syncBuiltinESMExports();
-}
