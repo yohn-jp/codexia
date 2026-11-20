@@ -226,6 +226,11 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const [active, setActive] = useState<ActiveDocument | null>(null);
   const activeRef = useRef<ActiveDocument | null>(null);
   const pendingSaveRef = useRef(new Map<string, PendingSave>());
+  // Tracks only recovery records this editor instance successfully wrote. A clean
+  // undo may remove that exact stale record, while IndexedDB's compare-and-delete
+  // keeps a newer tab generation safe.
+  const ownedDraftsRef = useRef(new Map<string, { generation: number; baseRevisionId: string; baseMarkdown: string; markdown: string }>());
+  const draftChainsRef = useRef(new Map<string, Promise<boolean>>());
   const saveInFlightRef = useRef(false);
   const restoreInFlightRef = useRef(false);
   const [restoring, setRestoring] = useState(false);
@@ -335,7 +340,18 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       pageWasHiddenRef.current = false;
       setResumeEpoch((value) => value + 1);
     };
-    const beforeUnload = (event: BeforeUnloadEvent) => { const current = activeRef.current; if (current?.dirty && current.recovery !== "stored") { event.preventDefault(); event.returnValue = ""; } };
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      const current = activeRef.current;
+      if (!current) return;
+      const key = JSON.stringify([current.document.projectId, current.document.id]);
+      const owned = ownedDraftsRef.current.get(key);
+      const unsafeUndo = Boolean(!current.dirty && current.markdown === current.baseMarkdown &&
+        ((owned && current.generation > owned.generation) || draftChainsRef.current.has(key)));
+      if ((current.dirty && current.recovery !== "stored") || unsafeUndo) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    };
     window.addEventListener("pagehide", onPageHide); window.addEventListener("pageshow", onPageShow); window.addEventListener("beforeunload", beforeUnload);
     return () => { window.removeEventListener("pagehide", onPageHide); window.removeEventListener("pageshow", onPageShow); window.removeEventListener("beforeunload", beforeUnload); };
   }, [resume.flush]);
@@ -523,17 +539,41 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const persistDraft = useCallback(async (value: ActiveDocument): Promise<boolean> => {
     const currentJournal = journalRef.current;
     if (!currentJournal) throw new Error(journalError || "IndexedDB回復Journalを利用できません。");
-    if (!value.dirty || value.generation < 1) return true;
-    if (value.recovery === "other-tab") return false;
-    return currentJournal.putPersistenceDraft({
-      projectId: value.document.projectId,
-      documentId: value.document.id,
-      authorScope,
-      baseRevisionId: value.baseRevisionId,
-      baseMarkdown: value.baseMarkdown,
-      markdown: value.markdown,
-      generation: value.generation,
+    if (value.recovery === "other-tab") return !value.dirty;
+    const ownershipKey = JSON.stringify([value.document.projectId, value.document.id]);
+    const ownership = { generation: value.generation, baseRevisionId: value.baseRevisionId, baseMarkdown: value.baseMarkdown, markdown: value.markdown };
+    const preceding = draftChainsRef.current.get(ownershipKey) ?? Promise.resolve(true);
+    const operation = preceding.catch(() => true).then(async () => {
+      if (value.dirty && value.generation > 0) {
+        const stored = await currentJournal.putPersistenceDraft({
+          projectId: value.document.projectId,
+          documentId: value.document.id,
+          authorScope,
+          baseRevisionId: value.baseRevisionId,
+          baseMarkdown: value.baseMarkdown,
+          markdown: value.markdown,
+          generation: value.generation,
+        });
+        if (stored) ownedDraftsRef.current.set(ownershipKey, ownership);
+        return stored;
+      }
+
+      const owned = ownedDraftsRef.current.get(ownershipKey);
+      const latest = activeRef.current;
+      const pending = pendingSaveRef.current.get(ownershipKey);
+      if (!owned || latest?.document.id !== value.document.id || latest.document.projectId !== value.document.projectId ||
+          latest.dirty || latest.generation !== value.generation || latest.markdown !== value.markdown ||
+          value.markdown !== value.baseMarkdown || value.generation <= owned.generation ||
+          (pending && pending.generation === owned.generation && pending.markdown === owned.markdown)) return true;
+      // The journal compares generation and content in one transaction, so a
+      // newer tab record cannot be removed by this undo cleanup.
+      await currentJournal.removePersistenceDraft(value.document.projectId, value.document.id, authorScope, owned.generation, owned);
+      if (ownedDraftsRef.current.get(ownershipKey) === owned) ownedDraftsRef.current.delete(ownershipKey);
+      return true;
     });
+    draftChainsRef.current.set(ownershipKey, operation);
+    try { return await operation; }
+    finally { if (draftChainsRef.current.get(ownershipKey) === operation) draftChainsRef.current.delete(ownershipKey); }
   }, [authorScope, journalError]);
 
   const revalidateActiveDocument = useCallback(async (signal: AbortSignal): Promise<void> => {
@@ -590,7 +630,15 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   }, [documentId, journal, openDocument, projectId, revalidateActiveDocument, resumeEpoch, sessionBlocked]);
 
   useEffect(() => {
-    if (!journal || !active?.dirty || active.generation < 1 || active.recovery === "other-tab") return;
+    if (!journal || !active || active.generation < 1) return;
+    if (!active.dirty) {
+      let cancelled = false;
+      void persistDraft(active).catch((error: unknown) => {
+        if (!cancelled) setJournalError(error instanceof Error ? error.message : "回復Journalの古い下書きを解除できませんでした。");
+      });
+      return () => { cancelled = true; };
+    }
+    if (active.recovery === "other-tab") return;
     let cancelled = false;
     let timer: number | undefined;
     const current = active;
@@ -665,6 +713,13 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       }
       if (controller.signal.aborted) return;
       const removed = await currentJournal.removePersistenceDraft(pending.projectId, pending.documentId, authorScope, pending.generation, pending);
+      if (removed) {
+        const ownershipKey = JSON.stringify([pending.projectId, pending.documentId]);
+        const owned = ownedDraftsRef.current.get(ownershipKey);
+        if (owned?.generation === pending.generation && owned.markdown === pending.markdown && owned.baseRevisionId === pending.baseRevisionId && owned.baseMarkdown === pending.baseMarkdown) {
+          ownedDraftsRef.current.delete(ownershipKey);
+        }
+      }
       const remaining = removed ? undefined : await currentJournal.getPersistenceDraft(pending.projectId, pending.documentId, authorScope);
       pendingSaveRef.current.delete(pendingKey);
       const latest = activeRef.current;
@@ -880,7 +935,17 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       await protectEditorTransition(() => activeRef.current, () => {
         const markdown = editorRef.current?.readForNavigation();
         const current = activeRef.current;
-        if (current && markdown !== undefined && markdown !== current.markdown) publishEditor({ ...current, markdown, generation: current.generation + 1, dirty: markdown !== current.baseMarkdown, recovery: "pending" });
+        if (current && markdown !== undefined && markdown !== current.markdown) {
+          const pending = pendingSaveRef.current.get(JSON.stringify([current.document.projectId, current.document.id]));
+          publishEditor({
+            ...current,
+            markdown,
+            generation: current.generation + 1,
+            dirty: markdown !== current.baseMarkdown || Boolean(pending && markdown !== pending.markdown),
+            recovery: current.recovery === "other-tab" ? "other-tab" : "pending",
+            save: current.recovery === "other-tab" ? "failed" : current.save === "saving" ? "saving" : "idle",
+          });
+        }
       }, persistDraft);
       return true;
     } catch (error) {

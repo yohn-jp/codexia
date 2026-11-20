@@ -16,6 +16,11 @@ async function editorMarkdown(page: Page): Promise<string> {
 async function expectEditor(page: Page, markdown: string): Promise<void> {
   await expect.poll(() => editorMarkdown(page)).toBe(markdown.replace(/\n+$/u, ""));
 }
+async function replaceEditor(page: Page, markdown: string): Promise<void> {
+  await editor(page).click();
+  await editor(page).press("ControlOrMeta+a");
+  await page.keyboard.insertText(markdown);
+}
 
 async function fixture(page: Page): Promise<Fixture> {
   const login = await page.request.post("/api/login", { headers: mutationHeaders(), data: { token: authToken } });
@@ -155,6 +160,76 @@ test("exact revision acknowledgement removes its draft without reviving deleted 
   await expect.poll(async () => (await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
   await reopen(page, f); await expectEditor(page, text);
   expect((await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
+});
+
+test("undoing an autosave draft back to the saved revision removes only that draft and never sends it", async ({ page }) => {
+  const f = await fixture(page);
+  await page.clock.install();
+  await page.clock.pauseAt(new Date());
+  const savedMarkdown = f.one.revision.markdown;
+  const patchBodies: string[] = [];
+  await page.route(`**${documentPath(f)}`, async (route) => {
+    if (route.request().method() === "PATCH") patchBodies.push(route.request().postData() ?? "");
+    await route.continue();
+  });
+
+  await replaceEditor(page, "Temporary draft that must be undone.");
+  await expect.poll(async () => (await drafts(page)).find((d) => d.documentId === f.one.document.id)?.markdown).toBe("Temporary draft that must be undone.");
+  await expect(page.getByText("IndexedDB回復Journalに保存済み", { exact: true })).toBeVisible();
+  await replaceEditor(page, savedMarkdown);
+  await expectEditor(page, savedMarkdown);
+  await expect.poll(async () => (await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
+  await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+  await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
+  await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
+  await expectEditor(page, savedMarkdown);
+  await expect.poll(async () => (await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
+  await page.clock.fastForward(1_100);
+  expect(patchBodies).toEqual([]);
+  await page.reload();
+  await expectEditor(page, savedMarkdown);
+  expect((await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
+  await page.clock.fastForward(1_100);
+  expect(patchBodies).toEqual([]);
+  expect((await read(page, f)).revision).toEqual(f.one.revision);
+});
+
+test("undo cleanup cannot remove a higher-generation draft written by another tab", async ({ page, context }) => {
+  const f = await fixture(page);
+  await page.clock.install();
+  await page.clock.pauseAt(new Date());
+  const savedMarkdown = f.one.revision.markdown;
+  await replaceEditor(page, "First tab temporary draft.");
+  await expect.poll(async () => (await drafts(page)).find((d) => d.documentId === f.one.document.id)?.markdown).toBe("First tab temporary draft.");
+
+  const second = await context.newPage();
+  await second.clock.install();
+  await second.clock.pauseAt(new Date());
+  await second.goto(page.url());
+  await expectEditor(second, "First tab temporary draft.");
+  await replaceEditor(second, "Newer second-tab draft.");
+  await expect.poll(async () => (await drafts(second)).find((d) => d.documentId === f.one.document.id)?.markdown).toBe("Newer second-tab draft.");
+
+  await replaceEditor(page, savedMarkdown);
+  await expectEditor(page, savedMarkdown);
+  await expect.poll(async () => (await drafts(page)).find((d) => d.documentId === f.one.document.id)?.markdown).toBe("Newer second-tab draft.");
+  await second.close();
+});
+
+test("undo during an in-flight save preserves the request and saves the restored text afterward", async ({ page }) => {
+  const f = await fixture(page);
+  const savedMarkdown = f.one.revision.markdown;
+  const gate = await holdSaves(page, f);
+  try {
+    await replaceEditor(page, "B sent before undo.");
+    await gate.seen;
+    await replaceEditor(page, savedMarkdown);
+    await expect.poll(async () => (await drafts(page)).find((d) => d.documentId === f.one.document.id)?.markdown).toBe(savedMarkdown);
+    gate.release();
+    await saved(page, f, savedMarkdown);
+    await expectEditor(page, savedMarkdown);
+    await expect.poll(async () => (await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
+  } finally { gate.release(); }
 });
 
 test("writing UI protects multiple document drafts separately from PostgreSQL revision durability", async ({ page }) => {
