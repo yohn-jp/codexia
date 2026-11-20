@@ -91,9 +91,7 @@ test("legacy draft import retains the confirmed PostgreSQL revision and creates 
     document.addEventListener("selectionchange", record);
   });
   try {
-    await editor(page).click();
-    await editor(page).press("ControlOrMeta+a");
-    await page.keyboard.insertText(text);
+    await editor(page).fill(text);
   } finally {
     const afterFill = await markdown(page);
     const events = await page.evaluate(() => (window as Window & { __codexiaFillProbe?: unknown }).__codexiaFillProbe ?? []);
@@ -179,7 +177,9 @@ test("both production Shells preserve recoverable Japanese drafts and the Mobile
     await page.setViewportSize({ width: mode === "mobile" ? 390 : 1280, height: 900 });
     const { project, scene } = await createWritingFixture(page, mode);
     const text = "東京《とうきょう》へ向かう。\n日本語😀の本文。";
-    await editor(page).fill(text);
+    await editor(page).click();
+    await editor(page).press("ControlOrMeta+a");
+    await page.keyboard.insertText(text);
     await expectMarkdown(page, text);
     // "Saved" can reflect the previous revision. The reader must open only
     // after this exact manuscript is durable in PostgreSQL.
@@ -193,6 +193,77 @@ test("both production Shells preserve recoverable Japanese drafts and the Mobile
     await page.reload();
     if (mode === "mobile") await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "書く", exact: true }).click();
     await expectMarkdown(page, text);
+  }
+});
+
+async function visibleReaderParagraphs(page: Page): Promise<string[]> {
+  return page.locator(".reading-pager-content .ruby-line").evaluateAll((elements) => {
+    const viewport = document.querySelector<HTMLElement>(".reading-pager");
+    if (!viewport) return [];
+    const box = viewport.getBoundingClientRect();
+    return elements.filter((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.right > box.left && rect.left < box.right && rect.bottom > box.top && rect.top < box.bottom;
+    }).map((element) => element.textContent ?? "");
+  });
+}
+
+async function replaceReaderText(page: Page, text: string): Promise<void> {
+  const content = editor(page).locator(".cm-content");
+  await content.click();
+  await content.press("ControlOrMeta+a");
+  await page.keyboard.insertText(text);
+  await expectMarkdown(page, text);
+}
+
+test("Mobile reader keeps first-to-last Japanese paragraphs visible at supported widths and cancels touch gestures", async ({ page }) => {
+  for (const width of [320, 390]) {
+    for (const direction of ["horizontal", "vertical"] as const) {
+      await page.setViewportSize({ width, height: 844 });
+      const { project, scene } = await createWritingFixture(page, "mobile");
+      const text = Array.from({ length: 130 }, (_, index) => `第${index + 1}段落｜日本語の本文を読む。`).join("\n");
+      await replaceReaderText(page, text);
+      await expect.poll(async () => {
+        const response = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}`);
+        return response.ok() ? ((await response.json()) as { revision: { markdown: string } }).revision.markdown : "";
+      }).toBe(text);
+      await page.getByRole("button", { name: "読む", exact: true }).click();
+      const displayMenu = page.locator(".pg-editor-display-menu");
+      if (!await displayMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await displayMenu.locator("summary").click();
+      await page.getByLabel("組方向").selectOption(direction);
+      await expect.poll(() => visibleReaderParagraphs(page)).toContainEqual(expect.stringContaining("第1段落"));
+
+      const pager = page.locator(".reading-pager");
+      const beforePage = await pager.getAttribute("data-page-index");
+      const beforeClass = await pager.getAttribute("class");
+      const box = await pager.boundingBox();
+      expect(box).not.toBeNull();
+      const cdp = await page.context().newCDPSession(page);
+      const x = direction === "vertical" ? box!.x + 30 : box!.x + box!.width - 30;
+      const y = box!.y + box!.height / 2;
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y, id: 7 }] });
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+      await expect(pager).toHaveAttribute("data-page-index", beforePage!);
+      await expect(pager).toHaveAttribute("class", beforeClass!);
+
+      await page.getByRole("button", { name: "次のページ", exact: true }).click();
+      await expect.poll(async () => {
+        const paragraphs = await visibleReaderParagraphs(page);
+        return paragraphs.length > 0 && paragraphs.some((paragraph) => paragraph.includes("第"));
+      }).toBe(true);
+      await expect.poll(() => pager.getAttribute("data-page-index")).not.toBe(beforePage);
+      await page.getByRole("button", { name: "前のページ", exact: true }).click();
+      await expect(pager).toHaveAttribute("data-page-index", "0");
+      await expect.poll(() => visibleReaderParagraphs(page)).toContainEqual(expect.stringContaining("第1段落"));
+
+      const tapX = direction === "vertical" ? x : box!.x + box!.width - 30;
+      await page.mouse.click(tapX, y);
+      await expect.poll(() => pager.getAttribute("data-page-index")).not.toBe("0");
+      for (let index = 0; index < 20 && Number(await pager.getAttribute("data-page-index")) < Number(await pager.getAttribute("data-page-count")) - 1; index += 1) {
+        await page.getByRole("button", { name: "次のページ", exact: true }).click();
+      }
+      await expect.poll(() => visibleReaderParagraphs(page)).toContainEqual(expect.stringContaining("第130段落"));
+    }
   }
 });
 
