@@ -194,6 +194,47 @@ test("Git store selector cannot bypass PostgreSQL-only authoring", async ({ page
   await expect(page.getByRole("heading", { name: "Database workspace" })).toHaveCount(0);
 });
 
+for (const shell of ["desktop", "mobile"] as const) {
+  test(`${shell} standalone authoring opens the first project and document forms from the empty editor`, async ({ page }) => {
+    await page.setViewportSize(shell === "desktop" ? { width: 1280, height: 900 } : { width: 390, height: 844 });
+    let showProject = false;
+    await page.route((url) => url.pathname === "/api/v1/persistence/projects", async (route) => {
+      if (!showProject && route.request().method() === "GET") return route.fulfill({ json: [] });
+      if (route.request().method() !== "POST") return route.continue();
+      const response = await route.fetch();
+      showProject = response.ok();
+      await route.fulfill({ response });
+    });
+    await ownerLogin(page, shell === "desktop" ? "/desktop/" : "/mobile/?view=writing");
+    const firstProject = page.getByRole("button", { name: "最初の作品を作成" });
+    await firstProject.click();
+    const projectName = page.getByLabel("作品名", { exact: true });
+    await expect(projectName).toBeFocused();
+    if (shell === "mobile") {
+      await page.getByRole("navigation").getByRole("button", { name: "書く", exact: true }).click();
+    } else {
+      await page.locator(".pg-library-create > summary").click();
+    }
+    await expect(firstProject).toBeVisible();
+    await firstProject.click();
+    await expect(projectName).toBeFocused();
+    await projectName.fill(`Empty state ${shell} ${crypto.randomUUID()}`);
+    await page.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
+    await expect(page.getByText("編集を始める文書を作成してください。", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "最初の文書を作成" }).click();
+    const documentName = page.getByLabel("文書名", { exact: true });
+    await expect(documentName).toBeFocused();
+    await documentName.fill("最初のシーン");
+    await page.locator(".pg-library-create-document").getByRole("button", { name: "作成", exact: true }).click();
+    const editor = manuscriptEditor(page);
+    await expect(editor).toBeVisible();
+    await editor.click();
+    await page.keyboard.insertText("はじめの本文。");
+    await expect(editor).toHaveText("はじめの本文。");
+    await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+  });
+}
+
 test("Hosted permission metadata does not force Git workspace fallback", async ({ page }) => {
   expect(databaseUrl).toBeTruthy();
   await page.route("**/api/session", async (route) => {
