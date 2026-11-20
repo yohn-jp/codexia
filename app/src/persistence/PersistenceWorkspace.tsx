@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { snapshotKey } from "@codexia/contracts";
+import { nextOrderKey, snapshotKey } from "@codexia/contracts";
 import type { EditorTermSpan } from "../editor/terms";
 import { useRecentActivityResume } from "../resume/useRecentActivityResume";
 import { formatHandoffHint, loadWritingResume, loadReadingPage, mergeContinueCandidates } from "../resume/continueCandidates";
@@ -34,6 +34,7 @@ import { applyTextChanges, composeTextChanges, initializeDocumentEvidence, markE
 import { BrowserJournal, type PersistenceDraftTextChanges } from "../storage/journal";
 import { createPostgresEditorEvidenceAdapter } from "../editor/postgresEvidenceAdapter";
 import { NativeChangeSetReview } from "./NativeChangeSetReview";
+import { RevisionDifference } from "./RevisionDifference";
 
 interface EvidenceJump extends EvidenceRangeRequest {
   projectId: string;
@@ -283,7 +284,11 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const [proposals, setProposals] = useState<JournalProposal[]>([]);
   const [moduleError, setModuleError] = useState("");
   const [projects, setProjects] = useState<PersistenceProject[]>([]);
-  const [projectId, setProjectId] = useState("");
+  const [projectId, setProjectId] = useState(() => selectionRef.current?.projectId ?? "");
+  const [projectPageReady, setProjectPageReady] = useState(false);
+  const [projectPageLoading, setProjectPageLoading] = useState(false);
+  const [projectNextCursor, setProjectNextCursor] = useState<string | null>(null);
+  const projectPageSequenceRef = useRef(0);
   const [nativeReviewEpoch, setNativeReviewEpoch] = useState(0);
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
@@ -334,6 +339,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     kind: string;
     title: string;
     orderKey: string;
+    appendToEnd: true;
     markdown: string;
     idempotencyKey: string;
   } | null>(null);
@@ -498,19 +504,70 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   useEffect(() => {
     if (sessionBlocked) return;
     const controller = new AbortController();
-    setLoading(true);
-    void api.persistenceProjects(200, controller.signal).then((values) => {
+    const deepLinkProjectId = parseApplicationLocation(window.location.href)?.resource?.projectId;
+    if (deepLinkProjectId) {
+      setProjectId(deepLinkProjectId);
+      setPageError("");
+      return () => controller.abort();
+    }
+    setProjectPageLoading(true);
+    void api.persistenceProjectPage(200, undefined, controller.signal).then((page) => {
       if (controller.signal.aborted || sessionBlockedRef.current) return;
-      setProjects(values);
-      setProjectId((current) => current && values.some((value) => value.id === current) ? current : values.find((value) => value.id === selectionRef.current?.projectId)?.id ?? values[0]?.id ?? "");
+      setProjects(page.projects);
+      setProjectPageReady(true);
+      setProjectNextCursor(page.nextCursor);
+      setProjectId((current) => current || page.projects[0]?.id || "");
       setPageError("");
     }).catch((error: unknown) => {
       if (!controller.signal.aborted) setPageError(error instanceof Error ? error.message : "作品一覧を読み込めませんでした。");
     }).finally(() => {
-      if (!controller.signal.aborted) setLoading(false);
+      if (!controller.signal.aborted) setProjectPageLoading(false);
     });
     return () => controller.abort();
   }, [resumeEpoch, sessionBlocked]);
+
+  useEffect(() => {
+    if (sessionBlocked || !projectId || projects.some((project) => project.id === projectId)) return;
+    const controller = new AbortController();
+    const requestedProjectId = projectId;
+    void api.persistenceProject(requestedProjectId, controller.signal).then(({ project }) => {
+      if (controller.signal.aborted || projectIdRef.current !== requestedProjectId || sessionBlockedRef.current) return;
+      setProjects((current) => current.some((item) => item.id === project.id)
+        ? current.map((item) => item.id === project.id ? project : item)
+        : [project, ...current]);
+      setPageError("");
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted && projectIdRef.current === requestedProjectId) {
+        setPageError(`指定された作品 (${requestedProjectId}) を読み込めませんでした。${error instanceof Error ? error.message : "作品を取得できませんでした。"}`);
+      }
+    });
+    return () => controller.abort();
+  }, [projectId, projects, sessionBlocked]);
+
+  async function loadMoreProjects(): Promise<void> {
+    if (projectPageLoading || (projectPageReady && !projectNextCursor)) return;
+    const sequence = ++projectPageSequenceRef.current;
+    const cursor = projectPageReady ? projectNextCursor ?? undefined : undefined;
+    setProjectPageLoading(true);
+    try {
+      const page = await api.persistenceProjectPage(200, cursor);
+      if (sequence !== projectPageSequenceRef.current || sessionBlockedRef.current) return;
+      setProjects((current) => {
+        const byId = new Map(current.map((project) => [project.id, project]));
+        for (const project of page.projects) byId.set(project.id, project);
+        return [...byId.values()];
+      });
+      setProjectPageReady(true);
+      setProjectNextCursor(page.nextCursor);
+      setPageError("");
+    } catch (error) {
+      if (sequence === projectPageSequenceRef.current) {
+        setPageError(error instanceof Error ? error.message : "作品一覧を読み込めませんでした。");
+      }
+    } finally {
+      if (sequence === projectPageSequenceRef.current) setProjectPageLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (sessionBlocked) return;
@@ -1168,7 +1225,6 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       if (!creationStarted) creationInFlightRef.current = false;
     }
     const parentId = (newDocumentParent || null) as DocumentId | null;
-    const orderKey = String(documents.length).padStart(8, "0");
     const previousIntent = documentCreationIntentRef.current;
     const intent = previousIntent && previousIntent.projectId === project.id && previousIntent.parentId === parentId && previousIntent.kind === documentKind && previousIntent.title === title
       ? previousIntent
@@ -1178,7 +1234,11 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           parentId,
           kind: documentKind,
           title,
-          orderKey,
+          // Older same-epoch backends use this advisory key. Modern PostgreSQL
+          // assigns the actual key inside the project transaction. Replays
+          // retain both values from this original intent.
+          orderKey: nextOrderKey(documents.filter((document) => document.parentId === parentId).map((document) => document.orderKey)),
+          appendToEnd: true as const,
           markdown: "",
           idempotencyKey: crypto.randomUUID(),
         };
@@ -1208,8 +1268,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       if (result.document.id !== intent.documentId || result.document.projectId !== intent.projectId || result.document.title !== intent.title) {
         throw new Error("作成応答が要求した文書と一致しませんでした。文書名を確認してください。");
       }
-      // Re-read the canonical order after creation; an appended document can
-      // share an orderKey with an existing sibling or sort before it.
+      // Refresh the canonical outline instead of assuming local order.
       if (projectIdRef.current !== project.id) return;
       setDocumentTitle("");
       let documentResult: Awaited<ReturnType<typeof api.persistenceDocuments>>;
@@ -1956,10 +2015,16 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   });
   const library = (<aside className="pg-library" aria-label="作品と文書">
         <section>
-          {projects.length > 0 && <label htmlFor="pg-project">作品</label>}
-          {projects.length > 0 && <select id="pg-project" value={projectId} onChange={(event) => void selectProject(event.target.value)}>
+          {(projects.length > 0 || projectId) && <label htmlFor="pg-project">作品</label>}
+          {(projects.length > 0 || projectId) && <select id="pg-project" value={projectId} onChange={(event) => void selectProject(event.target.value)}>
+            {projectId && !projects.some((item) => item.id === projectId) && <option value={projectId} disabled>指定した作品を取得できません ({projectId})</option>}
             {projects.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
           </select>}
+          {projectId && projects.length === 0 && <p>指定された作品ID: {projectId}</p>}
+          {(!projectPageReady || projectNextCursor) && <button type="button" onClick={() => void loadMoreProjects()} disabled={projectPageLoading}>
+            {projectPageLoading ? "作品一覧を読み込み中" : projectPageReady ? "さらに作品を読み込む" : "作品一覧を読み込む"}
+          </button>}
+          {projectPageReady && <p>読み込み済みの作品: {projects.length}</p>}
           {!hosted && <details className="pg-library-create">
             <summary>作品を作成</summary>
             <form onSubmit={(event) => void createProject(event)}>
@@ -2173,22 +2238,12 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
 
           {showRevisions && <section className="pg-revisions" aria-label="Revision履歴">
             <h3>Revision履歴</h3>
-            {revisions.map((revision) => {
-              const difference = revision.id === active.revision.id ? null : revisionDifferencePreview(revision.markdown, active.revision.markdown);
-              return <article key={revision.id} data-revision-id={revision.id}>
+            {revisions.map((revision) => <article key={revision.id} data-revision-id={revision.id}>
               <p>{new Date(revision.createdAt).toLocaleString()} · {revision.id === active.revision.id ? "現在" : "保存済み"}</p>
               <pre>{revision.markdown.slice(0, 700) || "（空の原稿）"}</pre>
-              {difference && <details className="pg-revision-difference">
-                <summary>最新版との違い</summary>
-                <section className="pg-revision-diff-preview" aria-label="原稿Revisionの比較">
-                  <div><h4>以前の本文</h4><pre>{difference.before}</pre></div>
-                  <span aria-hidden="true">→</span>
-                  <div><h4>最新版</h4><pre>{difference.after}</pre></div>
-                </section>
-              </details>}
+              {revision.id !== active.revision.id && <RevisionDifference previous={revision} current={active.revision} />}
               {revision.id !== active.revision.id && <button type="button" disabled={loading || restoring || active.dirty} onClick={() => void restoreRevision(revision)}>このRevisionを新しいRevisionとして復元</button>}
-            </article>;
-            })}
+              </article>)}
             {revisionPageError && <p role="alert">{revisionPageError}</p>}
             {revisionPageLoading && <p role="status">古いRevision履歴を読み込んでいます。</p>}
             {revisionCursor && <button type="button" disabled={loading || restoring || revisionPageLoading || active.dirty || Boolean(active.remoteConflict)} onClick={loadMoreRevisions}>さらに古いRevisionを読む</button>}
@@ -2362,16 +2417,4 @@ function minimalTextChanges(source: string, target: string): TextChange[] {
   const to = sourcePoints.slice(0, sourcePoints.length - suffix).join("").length;
   const insert = targetPoints.slice(prefix, targetPoints.length - suffix).join("");
   return [{ from, to, insert }];
-}
-
-function revisionDifferencePreview(previous: string, latest: string): { before: string; after: string } | null {
-  const change = minimalTextChanges(previous, latest)[0];
-  if (!change) return null;
-  const contextStart = Math.max(0, change.from - 48);
-  const contextBefore = previous.slice(contextStart, change.from);
-  const contextAfter = previous.slice(change.to, change.to + 48);
-  return {
-    before: `${contextBefore}${previous.slice(change.from, change.to) || "（追加前）"}${contextAfter}`,
-    after: `${contextBefore}${change.insert || "（削除）"}${contextAfter}`,
-  };
 }

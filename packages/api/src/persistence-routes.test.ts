@@ -33,13 +33,18 @@ test("hosted PostgreSQL routes are scoped to the assigned project", async () => 
   assert.deepEqual(projects?.body, [project]);
   assert.deepEqual(lookedUp, [assignedProjectId]);
 
+  const page = await handlePersistenceRoute({ ...base, method: "GET", url: "/api/v1/persistence/projects?page=1&limit=20" });
+  assert.equal(page?.status, 200);
+  assert.deepEqual(page?.body, { projects: [project], nextCursor: null });
+  assert.deepEqual(lookedUp, [assignedProjectId, assignedProjectId]);
+
   const unassigned = await handlePersistenceRoute({
     ...base,
     method: "GET",
     url: "/api/v1/persistence/projects/another-project",
   });
   assert.equal(unassigned?.status, 404);
-  assert.deepEqual(lookedUp, [assignedProjectId]);
+  assert.deepEqual(lookedUp, [assignedProjectId, assignedProjectId]);
 
   const creation = await handlePersistenceRoute({ ...base, method: "POST", url: "/api/v1/persistence/projects" });
   assert.equal(creation?.status, 403);
@@ -80,4 +85,33 @@ test("persistence status reports database health and knowledge lists are bounded
     url: `/api/v1/persistence/projects/${projectId}/nodes?limit=501`,
   });
   assert.equal(overLimit?.status, 400);
+});
+
+test("persistence project page uses the bounded keyset reader and encodes continuation", async () => {
+  const projects = [
+    { id: "00000000-0000-4000-8000-000000000001" as ProjectId, title: "One", updatedAt: "2026-01-01T00:00:00.000Z" },
+    { id: "00000000-0000-4000-8000-000000000002" as ProjectId, title: "Two", updatedAt: "2026-01-01T00:00:00.000Z" },
+  ];
+  const calls: unknown[] = [];
+  const persistence = {
+    async read<T>(work: (reader: unknown) => Promise<T>) {
+      return work({ async listProjectPage(limit: number, after?: unknown) { calls.push([limit, after]); return after ? [projects[1]] : projects; } });
+    },
+  } as unknown as Persistence;
+  const result = await handlePersistenceRoute({
+    persistence, method: "GET", url: "/api/v1/persistence/projects?page=1&limit=1", body: null, requestHeaders: {},
+    async requireAuthor() { return "author"; },
+  });
+  assert.equal(result?.status, 200);
+  const cursor = "eyJ1cGRhdGVkQXQiOiIyMDI2LTAxLTAxVDAwOjAwOjAwLjAwMFoiLCJpZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSJ9";
+  assert.deepEqual(result?.body, { projects: [projects[0]], nextCursor: cursor });
+  const next = await handlePersistenceRoute({
+    persistence, method: "GET", url: `/api/v1/persistence/projects?page=1&limit=1&cursor=${cursor}`, body: null, requestHeaders: {},
+    async requireAuthor() { return "author"; },
+  });
+  assert.deepEqual(next?.body, { projects: [projects[1]], nextCursor: null });
+  assert.deepEqual(calls, [
+    [2, undefined],
+    [2, { updatedAt: projects[0]!.updatedAt, id: projects[0]!.id }],
+  ]);
 });

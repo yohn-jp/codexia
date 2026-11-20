@@ -149,7 +149,8 @@ test("evidence on a deleted document round trips as unresolved without restoring
 
 test("unresolved evidence links require bundled anchors and graph records before import", async () => {
   const sourceId = randomUUID() as ProjectId;
-  await persistence.transaction(tx => tx.createProject({ id: sourceId, title: "Unresolved link validation" }));
+  const title = `Unresolved link validation ${sourceId}`;
+  await persistence.transaction(tx => tx.createProject({ id: sourceId, title }));
   const archive = await exportWorkArchive(persistence, sourceId);
   const anchorId = randomUUID() as EvidenceId;
   const nodeId = randomUUID() as KnowledgeNodeId;
@@ -161,9 +162,9 @@ test("unresolved evidence links require bundled anchors and graph records before
   archive.evidence.unresolved.anchors.push(unresolvedAnchor);
   archive.evidence.unresolved.mentions.push({ evidenceId: anchorId, nodeId, status: "confirmed", source: "author", confidence: null, extractorVersion: null });
   archive.evidence.unresolved.assertionEvidence.push({ assertionId, evidenceId: anchorId, role: "supports" });
-  const before = await persistence.read(reader => reader.listProjects(200));
   await assert.rejects(importWorkArchive(persistence, archive, "owner"), /missing evidence or knowledge|missing evidence or assertion/u);
-  assert.equal((await persistence.read(reader => reader.listProjects(200))).length, before.length);
+  const projects = await persistence.read(reader => reader.listProjects(200));
+  assert.deepEqual(projects.filter(project => project.title === title).map(project => project.id), [sourceId]);
 
   archive.knowledge.nodes.push({ id: nodeId, type: "place", name: "旧地点", attributes: {}, status: "confirmed" });
   archive.evidence.assertions.push({ id: assertionId, proposition: { text: "旧記録" }, modality: "stated", perspective: "author", narrativeTime: {}, confidence: null, status: "confirmed" });

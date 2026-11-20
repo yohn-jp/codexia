@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { nextOrderKey } from "@codexia/contracts";
 import {
   PersistenceError,
   type Assertion,
@@ -40,6 +41,7 @@ import {
   type PersistenceReader,
   type PersistenceTransaction,
   type Project,
+  type ProjectPageCursor,
   type ProjectId,
   type RevisionId,
   type RestoreDocumentRevisionCommand,
@@ -551,6 +553,23 @@ class PostgresTransaction implements PersistenceTransaction {
   async listProjects(limit = 100): Promise<readonly Project[]> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError("Project page size must be between 1 and 200");
     const result = await this.query("SELECT * FROM project ORDER BY updated_at DESC, id LIMIT $1", [limit]);
+    return result.rows.map(mapProject);
+  }
+
+  async listProjectPage(limit: number, after?: ProjectPageCursor): Promise<readonly Project[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 201) throw validationError("Project page read must be between 1 and 201");
+    if (after && (!Number.isFinite(Date.parse(after.updatedAt)) || new Date(after.updatedAt).toISOString() !== after.updatedAt ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(after.id))) {
+      throw validationError("Project page cursor is invalid");
+    }
+    const result = await this.query(
+      `SELECT * FROM project
+       WHERE ($2::timestamptz IS NULL OR date_trunc('milliseconds',updated_at) < $2::timestamptz OR
+         (date_trunc('milliseconds',updated_at) = $2::timestamptz AND id > $3::uuid))
+       ORDER BY date_trunc('milliseconds',updated_at) DESC, id ASC
+       LIMIT $1`,
+      [limit, after?.updatedAt ?? null, after?.id ?? null],
+    );
     return result.rows.map(mapProject);
   }
 
@@ -1167,6 +1186,7 @@ class PostgresTransaction implements PersistenceTransaction {
       kind: command.kind,
       title: command.title,
       orderKey: command.orderKey,
+      ...(command.appendToEnd ? { appendToEnd: true } : {}),
       markdown: command.markdown,
       authorId: command.authorId,
     });
@@ -1190,10 +1210,25 @@ class PostgresTransaction implements PersistenceTransaction {
     const documentId = command.documentId ?? randomUUID() as DocumentId;
     const parentId = command.parentId ?? null;
     if (parentId && !(await this.getDocument(command.projectId, parentId))) throw notFound("parent document", parentId);
+    let orderKey = command.orderKey;
+    if (command.appendToEnd) {
+      const lastSibling = await this.query(
+        `SELECT order_key FROM document
+         WHERE project_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND deleted_at IS NULL
+         ORDER BY order_key DESC, id DESC LIMIT 1`,
+        [command.projectId, parentId],
+      );
+      const previousKey = lastSibling.rows[0] ? asString(lastSibling.rows[0].order_key) : null;
+      orderKey = nextOrderKey(previousKey === null ? [] : [previousKey]);
+      if (previousKey !== null) {
+        const comparison = await this.query("SELECT $1::text > $2::text AS advances", [orderKey, previousKey]);
+        if (comparison.rows[0]?.advances !== true) throw validationError("Append order is incompatible with the PostgreSQL collation");
+      }
+    }
     await this.query(
       `INSERT INTO document(project_id, id, parent_id, kind, title, order_key)
        VALUES ($1, $2, $3, $4, $5, $6)`,
-      [command.projectId, documentId, parentId, command.kind, command.title, command.orderKey],
+      [command.projectId, documentId, parentId, command.kind, command.title, orderKey],
     );
     const revision = await this.insertRevision({
       projectId: command.projectId,

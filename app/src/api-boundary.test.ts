@@ -73,3 +73,29 @@ test("complete workspace document reads cover 999 records and reject an ambiguou
   count=1000;
   await assert.rejects(api.persistenceDocuments("project-1"),(error:unknown)=>error instanceof ApiError&&error.code==="SNAPSHOT_TOO_LARGE");
 });
+
+test("Web append requests leave sibling order selection to the canonical persistence transaction", async () => {
+  const document = {
+    id: "document-1", projectId: "project-1", parentId: "chapter-1", kind: "scene", title: "New scene",
+    orderKey: "0000000011", headRevisionId: "revision-1", version: 1,
+    createdAt: "2026-11-20T00:00:00.000Z", updatedAt: "2026-11-20T00:00:00.000Z",
+  };
+  const revision = {
+    id: "revision-1", projectId: "project-1", documentId: "document-1", parentRevisionId: null,
+    markdown: "", sha256: "a".repeat(64), authorId: "author", createdAt: "2026-11-20T00:00:00.000Z",
+  };
+  globalThis.fetch = async (input, init) => {
+    assert.equal(String(input), "/api/v1/persistence/projects/project-1/documents");
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      kind: "scene", title: "New scene", parentId: "chapter-1", markdown: "", orderKey: "0000000005", appendToEnd: true,
+      idempotencyKey: "append-idempotency-key",
+    });
+    assert.equal(new Headers(init?.headers).get("Idempotency-Key"), "append-idempotency-key");
+    return Response.json({ document, revision, replayed: false });
+  };
+  const created = await api.createPersistenceDocument("project-1", {
+    kind: "scene", title: "New scene", parentId: "chapter-1" as import("@codexia/persistence-contracts").DocumentId, markdown: "", orderKey: "0000000005", appendToEnd: true,
+    idempotencyKey: "append-idempotency-key",
+  });
+  assert.equal(created.document.orderKey, "0000000011");
+});

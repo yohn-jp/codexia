@@ -1,0 +1,27 @@
+---
+- name: Require a protected control-node file for the replacement Tunnel token
+  ansible.builtin.assert:
+    that:
+      - codexia_tunnel_token_file is string
+      - codexia_tunnel_token_file.startswith('/')
+  no_log: true
+- name: Inspect the replacement Tunnel token on the control node
+  ansible.builtin.stat:
+    path: "{{ codexia_tunnel_token_file }}"
+    follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  register: tunnel_token_rotation_input
+  delegate_to: localhost
+  become: false
+  no_log: true
+- name: Require a regular protected Tunnel token file with a bounded size
+  ansible.builtin.assert:
+    that:
+      - tunnel_token_rotation_input.stat.isreg | default(false)
+      - not (tunnel_token_rotation_input.stat.islnk | default(false))
+      - tunnel_token_rotation_input.stat.mode in ['0400', '0600']
+      - tunnel_token_rotation_input.stat.size > 0
+      - tunnel_token_rotation_input.stat.size <= 8192
+  no_log: true
