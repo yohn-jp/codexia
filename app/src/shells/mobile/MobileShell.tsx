@@ -399,7 +399,7 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
   const mobileTitle = activeView === "writing" && documentTitle ? documentTitle : title;
   return (
     <IonApp className={`mobile-shell mobile-shell-view-${activeView}${writingKeyboardVisible ? " mobile-shell-keyboard-open" : ""}`}>
-      <IonPage className="mobile-shell-page" data-mobile-view={activeView}>
+      <IonPage id="ion-view-container-root" className="mobile-shell-page" data-mobile-view={activeView}>
         <IonHeader className="mobile-shell-ion-header">
           <div className="mobile-shell-identity-bar">
             <IonButton type="button" className="mobile-shell-back" fill="clear" aria-label="前の画面に戻る" onClick={goBack}>‹</IonButton>
@@ -555,7 +555,7 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
         handle={true}
         handleBehavior="cycle"
         expandToScroll={false}
-        htmlAttributes={{ "aria-labelledby": "mobile-shell-reference-title" }}
+        htmlAttributes={{ "aria-label": "原稿の参照" }}
       >
         <IonContent className="mobile-shell-reference-content" scrollY={true}>
           <div className="mobile-shell-reference-top">

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { generateKeyPairSync } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { validateFreshSchemaProof, switchLegacyTunnelSource, validateLegacyCutover, assertMatchingCutoverBackup, StandaloneController, initialControllerState, atomicWrite, loadControllerState } from './standalone-update-controller.mjs';
@@ -12,7 +12,7 @@ const priv=key.privateKey.export({type:'pkcs8',format:'pem'});
 const now=Date.parse('2026-11-12T12:00:00Z');
 const old={format:'codexia-update-release/v1',channel:'stable',state:'published',version:'0.1.0',sourceSha:'a'.repeat(40),image:'ghcr.io/yohn-jp/codexia-backend@sha256:'+'a'.repeat(64),platform:'linux/amd64',profile:'core',migrationFingerprint:'sha256:'+'c'.repeat(64),persistenceFormat:1,apiEpoch:1};
 const next={...old,version:'0.1.1',sourceSha:'b'.repeat(40),image:'ghcr.io/yohn-jp/codexia-backend@sha256:'+'b'.repeat(64)};
-function fixture(){
+function fixture(timing={}){
  const h={writers:[{slot:'blue',image:old.image}],target:'blue',preflight:new Set(),trace:[],fail:null,epoch:1,sequence:1,releases:[old,next],
  async observe(){return {route:this.target,writers:structuredClone(this.writers)}},
  async fetchChannel(){return signUpdateChannel({format:'codexia-update-channel/v1',sequence:this.sequence,issuedAt:new Date(now-1000).toISOString(),expiresAt:new Date(now+60000).toISOString(),releases:this.releases},priv,now)},
@@ -26,7 +26,7 @@ function fixture(){
  async probe(slot){if(this.fail==='probe'&&slot==='green')throw Error('new writer unhealthy')}
  };
  let persisted,freshProof=null;
- const controller=new StandaloneController({host:h,store:{async save(s){persisted=structuredClone(s)},async loadFreshSchema(){return freshProof},async saveFreshSchema(value){freshProof=structuredClone(validateFreshSchemaProof(value))}},publicKey:pub,now:()=>now,observeMilliseconds:0});
+ const controller=new StandaloneController({host:h,store:{async save(s){persisted=structuredClone(s)},async loadFreshSchema(){return freshProof},async saveFreshSchema(value){freshProof=structuredClone(validateFreshSchemaProof(value))}},publicKey:pub,now:()=>now,observeMilliseconds:0,...timing});
  h.freshDatabaseIdentity=async()=> '123456789:12345';
  h.assertFreshTunnelInactive=async()=>assert.equal(await h.tunnelServiceActive(),false,'Fresh activation requires stopped Tunnel');
  h.inspectFreshSchema=async r=>({pristine:true,fingerprint:r.migrationFingerprint});
@@ -38,6 +38,25 @@ test('signed candidate switches only after the old writer is stopped',async()=>{
  assert.deepEqual(h.writers,[{slot:'green',image:next.image}]);assert.equal(h.target,'green');
  assert.ok(h.trace.indexOf('prepare:green')<h.trace.indexOf('stop:blue'));assert.ok(h.trace.indexOf('stop:blue')<h.trace.indexOf('start:green'));
  assert.deepEqual(persisted(),result);
+});
+test('the polling unit budgets maximum observation and the controller commits after default and maximum intervals', async () => {
+ const service=await readFile(new URL('../deploy/updater/codexia-updater.service.example',import.meta.url),'utf8');
+ const timeoutMilliseconds=Number(/^TimeoutStartSec=(\d+)$/mu.exec(service)?.[1])*1000;
+ const defaultConfig=JSON.parse(await readFile(new URL('../deploy/updater/config.example.json',import.meta.url),'utf8'));
+ const maximumObservationMilliseconds=60*60*1000;
+ const preparationAllowance=30*60*1000;
+ assert.equal(timeoutMilliseconds,maximumObservationMilliseconds+preparationAllowance);
+ for(const observeMilliseconds of [defaultConfig.observeMilliseconds,maximumObservationMilliseconds]){
+  let clock=now;
+  const {controller,state,persisted}=fixture({now:()=>clock,observeMilliseconds,sleep:async milliseconds=>{
+   assert.equal(persisted().journal.phase,'observing');
+   clock+=milliseconds;
+  }});
+  const result=await controller.tick(state);
+  assert.equal(clock-now,observeMilliseconds);
+  assert.equal(result.journal.phase,'committed');
+  assert.equal(result.installed.image,next.image);
+ }
 });
 test('failed preflight preserves the old service and suppresses that digest',async()=>{
  const {h,controller,state}=fixture();h.fail='prepare';let result=await controller.tick(state);

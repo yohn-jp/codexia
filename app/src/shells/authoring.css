@@ -598,7 +598,8 @@
   .st-studio-topbar { flex-wrap: wrap; padding-block: 8px; }
   .st-studio-identity { flex: 1 1 100%; }
   .st-studio-breadcrumb { max-inline-size: calc(100vw - 160px); }
-  .st-studio-masthead-actions { flex-wrap: wrap; }
+  .st-studio-masthead-actions { flex: 1 1 100%; flex-wrap: wrap; }
+  .st-studio-mobile-link { flex: 0 0 auto; margin-inline-start: auto; }
 }
 @media (max-width: 760px) {
   /* A narrow Desktop route remains a Desktop shell and remains usable. */

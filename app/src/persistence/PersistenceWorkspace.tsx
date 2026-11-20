@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type CSSProperties, type ReactNode } from "react";
+import { createPortal, flushSync } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { snapshotKey } from "@codexia/contracts";
 import type { EditorTermSpan } from "../editor/terms";
@@ -194,6 +195,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const pageWasHiddenRef = useRef(false);
   const loadedDocumentsProjectRef = useRef<string | null>(null);
   const [reading, setReading] = useState(false);
+  const [printSnapshot, setPrintSnapshot] = useState<{ documentId: string; generation: number; markdown: string } | null>(null);
   const [readingDirection, setReadingDirection] = useState<"horizontal" | "vertical">("horizontal");
   const [readingPage, setReadingPage] = useState(0);
   const [typography, setTypography] = useState(loadTypographySettings);
@@ -1625,7 +1627,16 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             <details className="pg-editor-command-menu">
               <summary>その他</summary>
               <div>
-                <button type="button" onClick={() => { if (!editorRef.current) return; try { editorRef.current.readForNavigation(); window.print(); } catch (error) { setPageError(error instanceof Error ? error.message : "変換を確定してください。"); } }}>印刷</button>
+                <button type="button" onClick={() => {
+                  if (!editorRef.current) return;
+                  try {
+                    const markdown = editorRef.current.readForNavigation();
+                    flushSync(() => setPrintSnapshot({ documentId: active.document.id, generation: active.generation, markdown }));
+                    window.print();
+                  } catch (error) {
+                    setPageError(error instanceof Error ? error.message : "変換を確定してください。");
+                  }
+                }}>印刷</button>
                 <button type="button" onClick={() => void loadRevisions()} disabled={active.dirty || Boolean(active.remoteConflict)}>Revision履歴</button>
                 <button type="button" onClick={() => void createAnchor()} disabled={active.dirty || Boolean(active.remoteConflict) || active.save !== "saved"}>選択範囲をText Anchorにする</button>
               </div>
@@ -1817,6 +1828,14 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const currentDesktopDurability = desktopDurabilityFor(active) ?? (loading ? "uncertain" : undefined);
   const currentPending = active ? pendingSaveRef.current.get(JSON.stringify([active.document.projectId, active.document.id])) : undefined;
   return <div className={`pg-workspace pg-shell pg-${mode}`}>
+    {active && createPortal(
+      <article className="print-view pg-print-document" style={typographyStyle}>
+        <h1>{active.document.title}</h1>
+        <div className="pg-print-manuscript">{printSnapshot?.documentId === active.document.id && printSnapshot.generation === active.generation
+          ? printSnapshot.markdown : active.markdown}</div>
+      </article>,
+      document.body,
+    )}
     <Shell mode={mode}
       header={<><h1>Database workspace</h1><JobInbox /><ThemeControl mode={theme} error={themeError} onChange={(next) => { setTheme(next); applyThemeMode(next); try { persistThemeMode(next); setThemeError(""); } catch { setThemeError("外観設定をこのブラウザーへ保存できませんでした。"); } }} /><button type="button" onClick={() => void protectTransition().then((allowed) => { if (allowed) onSignOut(); })}>ログアウト</button></>}
       documentTitle={active?.document.title}
