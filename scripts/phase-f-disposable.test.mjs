@@ -25,6 +25,11 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
   assert.match(workflow, /cancel-in-progress: true/u);
   assert.match(workflow, /test-phase-f-ansible-continuity\.sh/u);
   assert.match(workflow, /bash -n deploy\/ansible\/test-phase-f-ansible-app\.sh/u);
+  const appRepoRoot = appContinuity.indexOf('repo_root=$(cd');
+  const appAccessibleCwd = appContinuity.indexOf('\ncd /tmp\n');
+  const appChannelGeneration = appContinuity.indexOf('sudo -H -u "$service_user" env', appAccessibleCwd);
+  assert.ok(appRepoRoot >= 0 && appAccessibleCwd > appRepoRoot && appChannelGeneration > appAccessibleCwd,
+    'Resolve checkout paths before fixture-user sudo, then run from an accessible cwd');
   assert.match(workflow, /ansible-core|requirements\.txt/u);
   assert.match(proxyQuadlet, /^PodmanArgs=--image-volume=ignore$/mu);
   assert.match(workflow, /contents: read/u);

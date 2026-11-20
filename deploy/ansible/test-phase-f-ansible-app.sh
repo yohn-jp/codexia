@@ -13,6 +13,9 @@ ansible_playbook=$ANSIBLE_PLAYBOOK
 [[ -x "$ansible_playbook" ]] || fail 'The isolated Ansible control environment is unavailable.'
 
 repo_root=$(cd "$(dirname "$0")/../.." && pwd -P)
+# The runner checkout is not traversable by the service user. Resolve every
+# source path first, then use an accessible cwd for direct sudo-as-service calls.
+cd /tmp
 service_user=codexia-ci-host
 service_uid=22001
 service_group=codexia-ci-host
