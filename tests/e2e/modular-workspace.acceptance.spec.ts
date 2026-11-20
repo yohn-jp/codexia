@@ -1249,6 +1249,58 @@ test("mobile reference sheet scene selection uses the existing guarded navigatio
   await expectDraft(page, fixture.scene.document.id, draft);
 });
 
+test("mobile outline sheet reveals the current and adjacent rows at 320 and 390 CSS pixels", async ({ page }) => {
+  expect(authToken.length).toBeGreaterThanOrEqual(32);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn(page, "mobile");
+  const fixture = await openFixtureScene(page, "mobile");
+  const documentsUrl = `/api/v1/persistence/projects/${fixture.project.id}/documents`;
+  const documentsResponse = await page.request.get(documentsUrl);
+  expect(documentsResponse.ok()).toBe(true);
+  const existing = await documentsResponse.json() as { documents: Array<{ id: string; parentId: string | null }> };
+  const parentId = existing.documents.find((document) => document.id === fixture.scene.document.id)?.parentId;
+  expect(parentId).toBeTruthy();
+  const created: Array<{ id: string; title: string }> = [];
+  for (let index = 0; index < 24; index += 1) {
+    const title = `Outline ${String(index + 1).padStart(2, "0")}`;
+    const response = await page.request.post(documentsUrl, {
+      headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": crypto.randomUUID() },
+      data: { kind: "scene", parentId, title, orderKey: String(index + 10).padStart(4, "0"), markdown: `# ${title}\n\n本文。` },
+    });
+    expect(response.status(), await response.text()).toBe(201);
+    const body = await response.json() as { document: { id: string; title: string } };
+    created.push(body.document);
+  }
+  const target = created.at(-2)!;
+  const targetUrl = `/mobile/projects/${fixture.project.id}/scenes/${target.id}?view=writing`;
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto(targetUrl);
+    await expect(page.getByRole("heading", { name: target.title, exact: true })).toBeVisible();
+    await page.evaluate(() => {
+      const windowWithSheet = window as Window & { __referenceSheetPresented?: boolean };
+      windowWithSheet.__referenceSheetPresented = false;
+      document.addEventListener("ionModalDidPresent", () => { windowWithSheet.__referenceSheetPresented = true; }, { once: true });
+    });
+    await page.getByRole("button", { name: "構成", exact: true }).click();
+    const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
+    await expect(sheet).toBeVisible();
+    await expect.poll(() => page.evaluate(() => (window as Window & { __referenceSheetPresented?: boolean }).__referenceSheetPresented)).toBe(true);
+    const geometry = await sheet.locator(".mobile-shell-reference-content").evaluate(async (element) => {
+      const scrollElement = await (element as HTMLIonContentElement).getScrollElement();
+      const current = element.querySelector<HTMLElement>('.pg-outline-document[aria-current="page"]');
+      const next = current?.closest("li")?.nextElementSibling?.querySelector<HTMLElement>(".pg-outline-document");
+      if (!current || !next) return null;
+      const viewport = scrollElement.getBoundingClientRect();
+      const intersects = (target: DOMRect) => target.top < viewport.bottom && target.bottom > viewport.top;
+      return { current: intersects(current.getBoundingClientRect()), next: intersects(next.getBoundingClientRect()), scrollTop: scrollElement.scrollTop };
+    });
+    expect(geometry).toMatchObject({ current: true, next: true });
+    await sheet.locator('.pg-outline-document').filter({ hasText: created.at(-1)!.title }).click();
+    await expect(page).toHaveURL(new RegExp(`/scenes/${created.at(-1)!.id}`));
+  }
+});
+
 
 test("mobile contextual reference refuses to cover a composing manuscript", async ({ page }) => {
   expect(authToken.length).toBeGreaterThanOrEqual(32);

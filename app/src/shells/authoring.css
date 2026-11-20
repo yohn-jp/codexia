@@ -453,10 +453,19 @@
 .st-studio-shell .st-workspace-panel[data-workspace-panel="outline"] .pg-outline-item { min-width: 0; }
 .st-studio-shell .st-workspace-panel[data-workspace-panel="outline"] .pg-outline-row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
+  grid-template-columns: 24px minmax(0, 1fr) auto;
   align-items: stretch;
   gap: 3px;
 }
+.st-studio-shell .st-workspace-panel[data-workspace-panel="outline"] .pg-outline-zoom {
+  min-height: 34px;
+  padding: 4px 6px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.st-studio-shell .st-workspace-panel[data-workspace-panel="outline"] .pg-outline-search { display: block; margin-block-start: 10px; color: var(--muted); font-size: 11px; }
+.st-studio-shell .st-workspace-panel[data-workspace-panel="outline"] #pg-outline-search { width: 100%; min-height: 34px; margin-block-start: 4px; }
+.st-studio-shell .st-workspace-panel[data-workspace-panel="outline"] .pg-outline-breadcrumb { display: flex; flex-wrap: wrap; gap: 3px; margin-block: 8px; color: var(--muted); font-size: 11px; }
 .st-studio-shell .st-workspace-panel[data-workspace-panel="outline"] .pg-outline-row > .pg-outline-toggle,
 .st-studio-shell .st-workspace-panel[data-workspace-panel="outline"] .pg-outline-row > .pg-outline-spacer {
   display: grid;
