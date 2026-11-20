@@ -224,6 +224,9 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const [documentId, setDocumentId] = useState("");
   const lastOutlineSelectionRef = useRef("");
   const [nodes, setNodes] = useState<KnowledgeNode[]>([]);
+  const [knowledgeListError, setKnowledgeListError] = useState("");
+  const [knowledgeListLoading, setKnowledgeListLoading] = useState(false);
+  const [knowledgeListRetryEpoch, setKnowledgeListRetryEpoch] = useState(0);
   const [nodeId, setNodeId] = useState("");
   const [nodeEvidence, setNodeEvidence] = useState<{ projectId: string; nodeId: string; evidence: PersistenceAnchorView[] } | null>(null);
   const [nodeEvidenceError, setNodeEvidenceError] = useState("");
@@ -276,10 +279,10 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const resume = useRecentActivityResume({ binding: projectId ? { projectId, authorScope, projectScopeKey: projectId } : null, enabled: Boolean(projectId) });
   const project = projects.find((candidate) => candidate.id === projectId) ?? null;
   const selectedDocument = documents.find((candidate) => candidate.id === documentId) ?? null;
-  const canCreateDocument = !hosted && outlineReadyProject === projectId && !!projectId && documents.length < 999;
+  const canCreateDocument = outlineReadyProject === projectId && !!projectId && documents.length < 999;
   const documentOutline = useMemo(() => buildDocumentOutline(documents), [documents]);
   useEffect(() => {
-    if (!creationIntent || hosted) return;
+    if (!creationIntent || (hosted && creationIntent === "project")) return;
     let cancelled = false;
     let attempts = 0;
     const focusCreation = () => {
@@ -301,7 +304,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     return () => { cancelled = true; };
   }, [creationIntent, hosted, requestedPanel?.sequence]);
   const openCreation = useCallback((kind: "project" | "document") => {
-    if (hosted) return;
+    if (hosted && kind === "project") return;
     setCreationIntent(kind);
     if (mode === "mobile") {
       const sequence = ++panelRequestSequenceRef.current;
@@ -415,7 +418,6 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     setOutlineError("");
     if (!projectId) {
       setDocuments([]);
-      setNodes([]);
       setDocumentId("");
       publishEditor(null);
       return;
@@ -427,19 +429,15 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       loadedDocumentsProjectRef.current = projectId;
       setDocuments([]);
       setNodes([]);
+      setNodeId("");
       publishEditor(null);
     }
-    void Promise.all([
-      api.persistenceDocuments(projectId, undefined, controller.signal),
-      api.persistenceNodes(projectId, 500, controller.signal),
-    ]).then(([documentResult, nodeResult]) => {
+    void api.persistenceDocuments(projectId, undefined, controller.signal).then((documentResult) => {
       if (controller.signal.aborted || sessionBlockedRef.current || projectIdRef.current !== projectId) return;
       setDocuments(documentResult.documents);
       setOutlineReadyProject(projectId);
-      setNodes(nodeResult.nodes);
       setDocumentId((current) => current && documentResult.documents.some((item) => item.id === current)
         ? current : documentResult.documents.find((item) => projectId === selectionRef.current?.projectId && item.id === selectionRef.current.documentId)?.id ?? documentResult.documents[0]?.id ?? "");
-      setNodeId((current) => current && nodeResult.nodes.some((item) => item.id === current) ? current : "");
     }).catch((error: unknown) => {
       if (!controller.signal.aborted && projectIdRef.current === projectId) {
         setOutlineError(error instanceof Error ? error.message : "作品の内容を読み込めませんでした。");
@@ -449,6 +447,32 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     });
     return () => controller.abort();
   }, [projectId, publishEditor, resumeEpoch, sessionBlocked]);
+
+  useEffect(() => {
+    if (sessionBlocked) return;
+    if (!projectId) {
+      setNodes([]);
+      setNodeId("");
+      setKnowledgeListError("");
+      setKnowledgeListLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setKnowledgeListError("");
+    setKnowledgeListLoading(true);
+    void api.persistenceNodes(projectId, 500, controller.signal).then((result) => {
+      if (controller.signal.aborted || sessionBlockedRef.current || projectIdRef.current !== projectId) return;
+      setNodes(result.nodes);
+      setNodeId((current) => current && result.nodes.some((item) => item.id === current) ? current : "");
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted && projectIdRef.current === projectId) {
+        setKnowledgeListError(error instanceof Error ? error.message : "Knowledge一覧を読み込めませんでした。");
+      }
+    }).finally(() => {
+      if (!controller.signal.aborted && projectIdRef.current === projectId) setKnowledgeListLoading(false);
+    });
+    return () => controller.abort();
+  }, [projectId, knowledgeListRetryEpoch, resumeEpoch, sessionBlocked]);
 
   useEffect(() => {
     if (sessionBlocked) return;
@@ -1311,13 +1335,25 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   }
 
   async function loadRevisions(): Promise<void> {
-    if (!project || !active) return;
+    const requestedDocument = activeRef.current;
+    if (!project || !requestedDocument || requestedDocument.document.projectId !== project.id) return;
+    const requestedProjectId = project.id;
+    const requestedDocumentId = requestedDocument.document.id;
+    const requestedRevisionId = requestedDocument.revision.id;
+    const navigationGeneration = openSequenceRef.current;
+    const requestIsCurrent = () => !sessionBlockedRef.current &&
+      projectIdRef.current === requestedProjectId &&
+      openSequenceRef.current === navigationGeneration &&
+      activeRef.current?.document.projectId === requestedProjectId &&
+      activeRef.current.document.id === requestedDocumentId &&
+      activeRef.current.revision.id === requestedRevisionId;
     try {
-      const page = await api.persistenceRevisions(project.id, active.document.id, 50);
+      const page = await api.persistenceRevisions(requestedProjectId, requestedDocumentId, 50);
+      if (!requestIsCurrent()) return;
       setRevisions([...page.revisions]);
       setShowRevisions((value) => !value);
     } catch (error) {
-      setPageError(error instanceof Error ? error.message : "Revision履歴を読み込めませんでした。");
+      if (requestIsCurrent()) setPageError(error instanceof Error ? error.message : "Revision履歴を読み込めませんでした。");
     }
   }
 
@@ -1590,18 +1626,20 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
               <button type="submit" disabled={loading || !projectTitle.trim()}>作成</button>
             </form>
           </details>}
-          {!hosted && <details>
-            <summary>作品のエクスポート・インポート</summary>
-            <p>Markdown本文・構成・Knowledge・Evidence・作者データを作品JSONで持ち出し、別の作品として取り込めます。PostgreSQLの全Revision履歴やブラウザーの下書きは含まれません。</p>
+          <details>
+            <summary>{hosted ? "作品のエクスポート" : "作品のエクスポート・インポート"}</summary>
+            <p>Markdown本文・構成・Knowledge・Evidence・作者データを作品JSONで持ち出せます。PostgreSQLの全Revision履歴やブラウザーの下書きは含まれません。</p>
             {project && <button type="button" disabled={workTransferBusy || loading} onClick={() => void exportCurrentWork()}>
               選択中の作品をJSONでエクスポート
             </button>}
-            <label htmlFor="pg-work-import">作品JSONをインポート（既存作品は上書きしません）</label>
-            <input id="pg-work-import" type="file" accept=".json,application/json" disabled={workTransferBusy || loading}
-              onChange={(event) => void importPortableWork(event)} />
+            {!hosted && <>
+              <label htmlFor="pg-work-import">作品JSONをインポート（既存作品は上書きしません）</label>
+              <input id="pg-work-import" type="file" accept=".json,application/json" disabled={workTransferBusy || loading}
+                onChange={(event) => void importPortableWork(event)} />
+            </>}
             {workTransferBusy && <p role="status">作品データを処理中です。</p>}
             {workTransferStatus && <p role="status">{workTransferStatus}</p>}
-          </details>}
+          </details>
         </section>
         {project && <section>
           <h2>目次</h2>
@@ -1637,7 +1675,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             beforeImport={beforeLegacyImport}
             onImport={importLegacyDraft}
           />}
-          {!hosted && <details className="pg-library-create-document">
+          <details className="pg-library-create-document">
             <summary>巻・章・シーンを追加</summary>
             <form onSubmit={(event) => void createDocument(event)}>
               <label htmlFor="pg-document-title">文書名</label>
@@ -1650,7 +1688,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
               </select>
               <button type="submit" disabled={loading || !canCreateDocument || !documentTitle.trim()}>作成</button>
             </form>
-          </details>}
+          </details>
           {active && <details><summary>選択文書の構成を変更</summary>
             <form onSubmit={(event) => { event.preventDefault(); if (renameTitle.trim()) void editStructure({ title: renameTitle.trim() }); }}><label htmlFor="pg-rename">新しい文書名</label><input id="pg-rename" value={renameTitle} onChange={(event) => setRenameTitle(event.target.value)} required maxLength={256} /><button type="submit">文書名を変更</button></form>
             <form onSubmit={(event) => { event.preventDefault(); void editStructure({ parentId: moveParent || null }); }}><label htmlFor="pg-move">移動先</label><select id="pg-move" value={moveParent} onChange={(event) => setMoveParent(event.target.value)}><option value="">作品の直下</option>{documents.filter((item) => item.id !== active.document.id).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select><button type="submit">文書を移動</button></form>
@@ -1664,7 +1702,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         {notice && <p className="pg-notice" role="status">{notice}</p>}
         {journalError && <p className="pg-alert" role="alert">{journalError}</p>}
         {!project && <section className="pg-empty"><h2>{hosted ? "割り当てられた作品を読み込んでいます" : "最初の作品を作成してください"}</h2><p>{hosted ? "Hosted環境では割り当てられた作品だけを利用できます。" : "作品、原稿Revision、Knowledge、EvidenceはPostgreSQLへ保存されます。"}</p>{!hosted && <button type="button" onClick={() => openCreation("project")}>最初の作品を作成</button>}</section>}
-        {project && !selectedDocument && !active && !outlineError && <section className="pg-empty"><h2>{project.title}</h2><p>編集を始める文書を作成してください。</p>{!hosted && <button type="button" onClick={() => openCreation("document")}>最初の文書を作成</button>}</section>}
+        {project && !selectedDocument && !active && !outlineError && <section className="pg-empty"><h2>{project.title}</h2><p>編集を始める文書を作成してください。</p><button type="button" onClick={() => openCreation("document")}>最初の文書を作成</button></section>}
         {active && <section className="pg-editor" aria-label={active.document.title}>
           <div className="pg-editor-heading">
             <div><p className="eyebrow">{project?.title}</p><h2>{active.document.title}</h2></div>
@@ -1811,6 +1849,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           </select>
         </details>
           <ul className="pg-knowledge-list">
+            {knowledgeListLoading && nodes.length === 0 && <li role="status">Knowledge一覧を読み込んでいます。</li>}
             {nodes.map((node) => <li key={node.id}>
               <button type="button" className={node.id === nodeId ? "is-selected" : ""} onClick={() => setNodeId(node.id)}>
                 <span>{node.name}</span><small>{knowledgeTypeLabel(node.type)} · {node.status === "confirmed" ? "作者確定" : node.status === "proposed" ? "未確認候補" : "退役"}</small>
@@ -1818,6 +1857,10 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
               {node.status === "proposed" && <button type="button" onClick={() => void confirmKnowledge(node)}>内容を確認して確定</button>}
             </li>)}
           </ul>
+          {knowledgeListError && <div className="pg-alert" role="alert">
+            <p>Knowledge一覧を読み込めませんでした。{knowledgeListError}</p>
+            <button type="button" onClick={() => setKnowledgeListRetryEpoch((value) => value + 1)} disabled={knowledgeListLoading}>再試行</button>
+          </div>}
           {selectedNode && <KnowledgeContextInspector key={selectedNode.id} node={selectedNode} nodes={nodes} documentId={active?.document.id} revisionId={active?.revision.id} clean={Boolean(active&&!active.dirty&&!active.remoteConflict&&active.save==="saved")} selectedEvidenceId={selectedEvidenceId??""} evidenceLoadKey={(active?.evidenceLoadKey??0)+nativeReviewEpoch} onOpenEvidence={(item)=>void openNodeEvidence(item)} onNodeUpdate={(updated)=>setNodes(current=>current.map(item=>item.id===updated.id?updated:item))} onMerge={(target,source)=>{setNodes(current=>current.filter(item=>item.id!==source.id).map(item=>item.id===target.id?target:item));setNodeId(target.id);setNotice("Knowledgeを統合しました。")}} />}
           {selectedNode && <section aria-label="Knowledgeの根拠">
             <h3>{selectedNode.name}の根拠</h3>

@@ -143,11 +143,12 @@ function validateGraph(archive: WorkArchive): void {
   unique(archive.evidence.assertions.map((item) => item.id), "assertion");
   unique([...archive.evidence.anchors, ...archive.evidence.unresolved.anchors].map((item) => item.id), "evidence");
   unique(archive.moduleRecords.map((item) => JSON.stringify([item.moduleId, item.key])), "module record");
-  unique(archive.evidence.mentions.map((item) => JSON.stringify([item.evidenceId, item.nodeId])), "mention");
-  unique(archive.evidence.assertionEvidence.map((item) => JSON.stringify([item.assertionId, item.evidenceId])), "assertion evidence");
+  unique([...archive.evidence.mentions, ...archive.evidence.unresolved.mentions].map((item) => JSON.stringify([item.evidenceId, item.nodeId])), "mention");
+  unique([...archive.evidence.assertionEvidence, ...archive.evidence.unresolved.assertionEvidence].map((item) => JSON.stringify([item.assertionId, item.evidenceId])), "assertion evidence");
   const documents = new Map(archive.documents.map((item) => [item.id, item]));
   const nodes = new Set(archive.knowledge.nodes.map((item) => item.id));
   const activeAnchors = new Set(archive.evidence.anchors.map((item) => item.id));
+  const unresolvedAnchors = new Set(archive.evidence.unresolved.anchors.map((item) => item.id));
   const assertions = new Set(archive.evidence.assertions.map((item) => item.id));
   for (const document of archive.documents) {
     const visited = new Set<string>([document.id]);
@@ -179,9 +180,19 @@ function validateGraph(archive: WorkArchive): void {
       fail(400, "INVALID_WORK_ARCHIVE", "Mention references missing current evidence or knowledge");
     }
   }
+  for (const mention of archive.evidence.unresolved.mentions) {
+    if (!nodes.has(mention.nodeId) || !unresolvedAnchors.has(mention.evidenceId)) {
+      fail(400, "INVALID_WORK_ARCHIVE", "Unresolved mention references missing evidence or knowledge");
+    }
+  }
   for (const link of archive.evidence.assertionEvidence) {
     if (!assertions.has(link.assertionId) || !activeAnchors.has(link.evidenceId)) {
       fail(400, "INVALID_WORK_ARCHIVE", "Assertion link references missing current evidence or assertion");
+    }
+  }
+  for (const link of archive.evidence.unresolved.assertionEvidence) {
+    if (!assertions.has(link.assertionId) || !unresolvedAnchors.has(link.evidenceId)) {
+      fail(400, "INVALID_WORK_ARCHIVE", "Unresolved assertion link references missing evidence or assertion");
     }
   }
   for (const record of archive.moduleRecords) {

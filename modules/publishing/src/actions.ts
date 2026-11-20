@@ -12,7 +12,7 @@ import {
   type ShareGrant,
 } from "./grants.js";
 import { buildPlaintextExport, type PlaintextOptions } from "./plaintext.js";
-import { readPublishingProject, resolveShareScope, type ShareScope } from "./project.js";
+import { readPublishingProjectFromCore, resolveShareScope, type ShareScope } from "./project.js";
 import { collectScenesForVerticalPrint, composeVerticalPrintText } from "./verticalPrint.js";
 
 type RecordValue = Record<string, unknown>;
@@ -146,13 +146,13 @@ export function createPublishingActions(): ModuleAction[] {
   const actions: ModuleAction[] = [];
 
   actions.push(defineAction(valueSchema(parsePlaintextInput), "publishing.export.plaintext", "compute", async (input, context) => {
-    const project = await readPublishingProject(context.reader);
+    const project = await readPublishingProjectFromCore(context);
     const exported = buildPlaintextExport(project, input);
     return { filename: exported.filename, mediaType: "text/plain; charset=utf-8", contentBase64: Buffer.from(exported.text, "utf8").toString("base64") };
   }));
 
   actions.push(defineAction(valueSchema(parseEpubInput), "publishing.export.epub", "compute", async (input, context) => {
-    const project = await readPublishingProject(context.reader);
+    const project = await readPublishingProjectFromCore(context);
     const options = { ...input, ...(input.coverPath ? {} : {}) };
     // The legacy import moves .arcadia/cover.jpg to the module-owned path.
     if (input.coverPath === ".arcadia/cover.jpg") options.coverPath = DEFAULT_EPUB_COVER_PATH;
@@ -162,14 +162,14 @@ export function createPublishingActions(): ModuleAction[] {
   }));
 
   actions.push(defineAction(valueSchema(parseVerticalInput), "publishing.export.vertical-print", "compute", async (input, context) => {
-    const project = await readPublishingProject(context.reader);
+    const project = await readPublishingProjectFromCore(context);
     const scenes = collectScenesForVerticalPrint(project, input.scope, input.id);
     const text = composeVerticalPrintText(scenes.map((scene) => ({ id: scene.id, title: scene.title, body: scene.body })));
     return { text, sectionCount: scenes.length };
   }));
 
   actions.push(defineAction(valueSchema((value) => object(value)), "publishing.project.tree", "read", async (_input, context) => {
-    const project = await readPublishingProject(context.reader);
+    const project = await readPublishingProjectFromCore(context);
     return {
       title: project.title,
       volumes: project.volumes.map((volume) => ({
@@ -204,7 +204,7 @@ export function createPublishingActions(): ModuleAction[] {
   }));
 
   actions.push(defineAction(valueSchema(parseShareCreateInput), "publishing.shares.create", "propose", async (input, context) => {
-    const project = await readPublishingProject(context.reader);
+    const project = await readPublishingProjectFromCore(context);
     resolveShareScope(project, input.scope);
     const { grants, content } = await readShareGrants(context.reader);
     const { grant, rawToken } = createShareGrant(input);
