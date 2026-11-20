@@ -5,6 +5,7 @@ import { createVerificationPlan, planDigest } from './ci-impact.mjs';
 import { assertPlanEvidence } from './ci-evidence.mjs';
 import { resolveProducerJobAttempts, selectLatestEvidenceArtifacts, selectLatestJobArtifact, selectLatestPlanArtifact } from './ci-artifact-selection.mjs';
 import { collectGitHubPages } from './release-policy.mjs';
+import { listProducerArtifacts } from './ci-producer-artifact.mjs';
 
 const sourceSha = 'a'.repeat(40);
 const runId = '40127302099';
@@ -77,6 +78,27 @@ test('selection sees latest artifacts on later complete REST pages', async () =>
   }), 'artifacts');
   const selected = selectLatestEvidenceArtifacts(plan, paginated, successfulJobs, identity);
   assert.equal(selected.find(item => item.name === 'ci-evidence-oci-core').id, 12_572_824_349);
+});
+
+test('producer restore inventories only the exact artifact name and still rejects incomplete pages', async () => {
+  const artifactName='ci-profile-build-core';
+  const records=Array.from({length:101},(_,index)=>artifact(index+1,artifactName,'2026-10-24T19:50:00Z'));
+  const requested=[];
+  const request=async endpoint=>{
+    const url=new URL(endpoint,'https://api.github.com/');
+    assert.equal(url.pathname,`/actions/runs/${runId}/artifacts`);
+    assert.equal(url.searchParams.get('name'),artifactName);
+    const page=Number(url.searchParams.get('page'));
+    const perPage=Number(url.searchParams.get('per_page'));
+    requested.push(page);
+    return {total_count:records.length,artifacts:records.slice((page-1)*perPage,page*perPage)};
+  };
+  assert.deepEqual(await listProducerArtifacts(request,runId,artifactName),records);
+  assert.deepEqual(requested,[1,2]);
+  await assert.rejects(
+    listProducerArtifacts(async()=>({total_count:1,artifacts:[]}),runId,artifactName),
+    /Incomplete GitHub pagination/u,
+  );
 });
 
 test('a latest failed artifact remains selected and cannot certify', () => {

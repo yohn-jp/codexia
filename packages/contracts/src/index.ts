@@ -40,6 +40,12 @@ export interface ModelUsageStore {
 export interface FileRevision { path: string; revision: string | null }
 /** Binds a directory membership and every listed file revision, including absent members. */
 export interface ScopeRevision { prefix: string; revision: string }
+/** Binds the canonical PostgreSQL membership of one hierarchy sibling set. */
+export interface DocumentSetRevision {
+  kind: "volume" | "chapter" | "scene";
+  parentId: string | null;
+  documentIds: string[];
+}
 /** Contents are full UTF-8 or base64; null is an explicit deletion. */
 export interface FileChange extends FileRevision { content: string | null; encoding?: "utf8" | "base64" }
 export type EffectClass = "manuscript" | "structure" | "metadata" | "settings" | "migration";
@@ -51,6 +57,7 @@ export interface ChangeOperation {
   effect: EffectClass;
   reads: FileRevision[];
   readScopes?: ScopeRevision[];
+  readDocumentSets?: DocumentSetRevision[];
   writes: FileChange[];
   message: string;
   evidenceIds?: string[];
@@ -389,6 +396,23 @@ export function assertChangeOperation(value: unknown): asserts value is ChangeOp
         throw new ContractError("Invalid scope revision");
       }
       prefixes.add(scope.prefix);
+    }
+  }
+  if (v.readDocumentSets !== undefined) {
+    if (!Array.isArray(v.readDocumentSets) || v.readDocumentSets.length > 32) throw new ContractError("Invalid document-set preconditions");
+    const sets = new Set<string>();
+    for (const set of v.readDocumentSets) {
+      if (!set || typeof set !== "object" || !["volume", "chapter", "scene"].includes(set.kind) ||
+          (set.kind === "volume" ? set.parentId !== null : (typeof set.parentId !== "string" || !set.parentId)) ||
+          !Array.isArray(set.documentIds) || set.documentIds.length > 1000 ||
+          set.documentIds.some((id) => typeof id !== "string" || !id)) {
+        throw new ContractError("Invalid document-set precondition");
+      }
+      const ids = [...set.documentIds].sort();
+      if (new Set(ids).size !== ids.length) throw new ContractError("Duplicate document in document-set precondition");
+      const key = JSON.stringify([set.kind, set.parentId]);
+      if (sets.has(key)) throw new ContractError("Duplicate document-set precondition");
+      sets.add(key);
     }
   }
   const seen = new Set<string>();

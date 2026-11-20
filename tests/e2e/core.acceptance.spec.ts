@@ -5,7 +5,7 @@ import { authToken, ownerLogin, manuscriptEditor as editor, readManuscriptMarkdo
 const rootPath = "/api/v1/persistence/projects";
 const appBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
 const appOrigin = new URL(appBaseURL).origin;
-interface Draft { key: string; projectId: string; documentId: string; authorScope: string; markdown: string; generation: number; baseRevisionId: string; baseMarkdown: string; version: number; updatedAt: number }
+interface Draft { key: string; projectId: string; documentId: string; authorScope: string; markdown: string; generation: number; baseRevisionId: string; baseMarkdown: string; pendingSave?: { markdown: string }; version: number; updatedAt: number }
 interface Read { document: { id: string; title: string; headRevisionId: string }; revision: { id: string; markdown: string } }
 interface Fixture { projectId: string; one: Read; two: Read }
 const documentPath = (fixture: Fixture, documentId = fixture.one.document.id) => `${rootPath}/${fixture.projectId}/documents/${documentId}`;
@@ -166,6 +166,189 @@ test("exact revision acknowledgement removes its draft without reviving deleted 
   expect((await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
 });
 
+test("a committed save with a lost response is reconciled after reload with the same operation identity", async ({ page }) => {
+  const f = await fixture(page);
+  const text = "Committed before its response was lost.";
+  const before = await read(page, f);
+  let resolveLost!: () => void;
+  const lost = new Promise<void>((resolve) => { resolveLost = resolve; });
+  const requests: Array<{ idempotencyKey: string | undefined; clientId: string | undefined; body: string | null }> = [];
+  await page.route(`**${documentPath(f)}`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.continue();
+    requests.push({
+      idempotencyKey: route.request().headers()["idempotency-key"],
+      clientId: route.request().headers()["x-client-id"],
+      body: route.request().postData(),
+    });
+    if (requests.length === 1) {
+      const committed = await route.fetch();
+      expect(committed.ok()).toBe(true);
+      await route.abort();
+      resolveLost();
+      return;
+    }
+    await route.continue();
+  });
+
+  await replaceEditor(page, text);
+  await lost;
+  await expect.poll(async () => (await drafts(page)).find((draft) => draft.documentId === f.one.document.id)?.pendingSave).toMatchObject({ markdown: text });
+  await page.reload();
+  await expectEditor(page, text);
+  await expect.poll(() => requests.length).toBe(2);
+  await saved(page, f, text);
+  expect(requests[1]).toEqual(requests[0]);
+  const after = await read(page, f);
+  expect(after.revision.id).not.toBe(before.revision.id);
+  expect((await drafts(page)).filter((draft) => draft.documentId === f.one.document.id)).toEqual([]);
+});
+
+test("replaying a saved operation after a newer remote revision shows the current head", async ({ page }) => {
+  const f = await fixture(page);
+  const submitted = "B committed before its response was lost.";
+  const remote = "Remote D became the current head.";
+  const requests: Array<{ idempotencyKey: string | undefined; clientId: string | undefined; body: string | null }> = [];
+  let resolveLost!: () => void;
+  const lost = new Promise<void>((resolve) => { resolveLost = resolve; });
+  await page.route(`**${documentPath(f)}`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.continue();
+    requests.push({ idempotencyKey: route.request().headers()["idempotency-key"], clientId: route.request().headers()["x-client-id"], body: route.request().postData() });
+    if (requests.length === 1) {
+      const committed = await route.fetch();
+      expect(committed.ok()).toBe(true);
+      await route.abort();
+      resolveLost();
+      return;
+    }
+    const replay = await route.fetch();
+    expect(replay.ok()).toBe(true);
+    expect((await replay.json() as Read).revision.markdown).toBe(submitted);
+    await route.fulfill({ response: replay });
+  });
+
+  await replaceEditor(page, submitted);
+  await lost;
+  await replace(page, f, remote);
+  await page.reload();
+  await expectEditor(page, remote);
+  await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+  expect(requests).toHaveLength(2);
+  expect(requests[1]).toEqual(requests[0]);
+  const latest = await read(page, f);
+  expect(latest.revision.markdown).toBe(remote);
+  expect((await drafts(page)).filter((draft) => draft.documentId === f.one.document.id)).toEqual([]);
+});
+
+test("a lost save response survives newer input, reloads, and rebases the newer draft after acknowledgement", async ({ page }) => {
+  const f = await fixture(page);
+  const submitted = "Submitted B before newer input.";
+  const newer = "Newer C entered while B was saving.";
+  const before = await read(page, f);
+  let committed!: () => void;
+  let release!: () => void;
+  let lost!: () => void;
+  const committedPromise = new Promise<void>((resolve) => { committed = resolve; });
+  const responseGate = new Promise<void>((resolve) => { release = resolve; });
+  const lostPromise = new Promise<void>((resolve) => { lost = resolve; });
+  const requests: Array<{ idempotencyKey: string | undefined; clientId: string | undefined; body: string | null }> = [];
+  await page.route(`**${documentPath(f)}`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.continue();
+    requests.push({
+      idempotencyKey: route.request().headers()["idempotency-key"],
+      clientId: route.request().headers()["x-client-id"],
+      body: route.request().postData(),
+    });
+    if (requests.length === 1) {
+      const committedResponse = await route.fetch();
+      expect(committedResponse.ok()).toBe(true);
+      committed();
+      await responseGate;
+      await route.abort();
+      lost();
+      return;
+    }
+    await route.continue();
+  });
+
+  await replaceEditor(page, submitted);
+  await committedPromise;
+  await replaceEditor(page, newer);
+  await expect.poll(async () => {
+    const draft = (await drafts(page)).find((entry) => entry.documentId === f.one.document.id);
+    return { markdown: draft?.markdown, pending: draft?.pendingSave?.markdown };
+  }).toEqual({ markdown: newer, pending: submitted });
+  release();
+  await lostPromise;
+  await page.reload();
+  await expectEditor(page, newer);
+  await saved(page, f, newer);
+  expect(requests).toHaveLength(3);
+  expect(requests[1]).toEqual(requests[0]);
+  expect(requests[2]?.idempotencyKey).not.toBe(requests[0]?.idempotencyKey);
+  expect(requests[2]?.body).not.toBe(requests[0]?.body);
+  const after = await read(page, f);
+  expect(after.revision.markdown).toBe(newer);
+  const revisionResponse = await page.request.get(`${documentPath(f)}/revisions?limit=50`);
+  expect(revisionResponse.ok()).toBe(true);
+  const revisionPage = await revisionResponse.json() as { revisions: Array<{ id: string; markdown: string }> };
+  expect(revisionPage.revisions).toHaveLength(3);
+  expect(revisionPage.revisions.map((revision) => revision.markdown)).toContain(submitted);
+  expect(revisionPage.revisions.map((revision) => revision.markdown)).toContain(newer);
+  expect((await drafts(page)).filter((draft) => draft.documentId === f.one.document.id)).toEqual([]);
+  expect(after.revision.id).not.toBe(before.revision.id);
+});
+
+test("a newer draft stays protected when a replayed save is already superseded remotely", async ({ page }) => {
+  const f = await fixture(page);
+  const submitted = "B committed before its response was lost.";
+  const newer = "Newer local C stays recoverable.";
+  const remote = "Remote D became the current head.";
+  let committed!: () => void;
+  let release!: () => void;
+  let lost!: () => void;
+  const committedPromise = new Promise<void>((resolve) => { committed = resolve; });
+  const responseGate = new Promise<void>((resolve) => { release = resolve; });
+  const lostPromise = new Promise<void>((resolve) => { lost = resolve; });
+  const requests: Array<{ idempotencyKey: string | undefined; clientId: string | undefined; body: string | null }> = [];
+  await page.route(`**${documentPath(f)}`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.continue();
+    requests.push({ idempotencyKey: route.request().headers()["idempotency-key"], clientId: route.request().headers()["x-client-id"], body: route.request().postData() });
+    if (requests.length === 1) {
+      const committedResponse = await route.fetch();
+      expect(committedResponse.ok()).toBe(true);
+      committed();
+      await responseGate;
+      await route.abort();
+      lost();
+      return;
+    }
+    const replay = await route.fetch();
+    expect(replay.ok()).toBe(true);
+    expect((await replay.json() as Read).revision.markdown).toBe(submitted);
+    await route.fulfill({ response: replay });
+  });
+
+  await replaceEditor(page, submitted);
+  await committedPromise;
+  await replaceEditor(page, newer);
+  await expect.poll(async () => {
+    const draft = (await drafts(page)).find((entry) => entry.documentId === f.one.document.id);
+    return { markdown: draft?.markdown, pending: draft?.pendingSave?.markdown };
+  }).toEqual({ markdown: newer, pending: submitted });
+  await replace(page, f, remote);
+  release();
+  await lostPromise;
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Revision競合" })).toBeVisible();
+  await expectEditor(page, newer);
+  await expect.poll(async () => (await drafts(page)).find((draft) => draft.documentId === f.one.document.id)?.pendingSave).toBeUndefined();
+  expect(requests).toHaveLength(2);
+  expect(requests[1]).toEqual(requests[0]);
+  expect((await read(page, f)).revision.markdown).toBe(remote);
+  const draft = (await drafts(page)).find((entry) => entry.documentId === f.one.document.id);
+  expect(draft).toMatchObject({ markdown: newer, baseRevisionId: f.one.revision.id, baseMarkdown: f.one.revision.markdown });
+});
+
 test("undoing an autosave draft back to the saved revision removes only that draft and never sends it", async ({ page }) => {
   const f = await fixture(page);
   await page.clock.install();
@@ -272,12 +455,20 @@ test("new typing survives an older in-flight PostgreSQL save and exact acknowled
 
 test("new typing survives recovery against a newer PostgreSQL base revision", async ({ page }) => {
   const f = await fixture(page); const gate = await holdSaves(page, f);
+  const writes: string[] = [];
+  page.on("request", (request) => { if (request.method() === "PATCH" && request.url().includes(documentPath(f))) writes.push(request.url()); });
   try {
     await editor(page).fill("Recovered draft before competing revision."); await gate.seen;
     await replace(page, f, "Competing PostgreSQL revision.");
     await editor(page).fill("Newest input before conflict arrives."); gate.release();
     await expect(page.getByRole("heading", { name: "Revision競合" })).toBeVisible();
     await expectEditor(page, "Newest input before conflict arrives.");
+    await expect.poll(async () => (await drafts(page)).find((draft) => draft.documentId === f.one.document.id)?.pendingSave).toBeUndefined();
+    const writesBeforeReload = writes.length;
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Revision競合" })).toBeVisible();
+    await expectEditor(page, "Newest input before conflict arrives.");
+    expect(writes).toHaveLength(writesBeforeReload);
     await page.getByRole("button", { name: "比較後、この回復Draftを最新版へ適用" }).click();
     await saved(page, f, "Newest input before conflict arrives.");
   } finally { gate.release(); }

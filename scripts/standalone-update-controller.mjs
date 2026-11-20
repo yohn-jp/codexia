@@ -240,6 +240,7 @@ function isOnlyWriter(observation,slot,image) {
   return observation.writers.length===1&&observation.writers[0].slot===slot&&observation.writers[0].image===image;
 }
 const safeError=error=>String(error instanceof Error?error.message:error).slice(0,1000);
+const pollingChannelErrorPrefix='Update channel check failed: ';
 
 /** Caller holds the host-wide OS flock. Adapter methods perform and observe real effects. */
 export class StandaloneController {
@@ -927,9 +928,12 @@ export class StandaloneController {
     if(!stable(state.journal)||state.paused&&!manualRollback&&!manualAcceptance)return state;
     if(state.lastError?.startsWith('Topology reconciliation blocked:'))return state;
     let candidate;
+    let checkingChannel=true;
+    const regularPoll=!manualRollback&&!manualAcceptance;
     const old=state.journal.active;
     try{
       const channel=await this.channel(state);state=channel.state;
+      checkingChannel=false;
       const epoch=await this.uiEpoch(state.installed);
       if(manualRollback){
         if(!state.previous)throw new Error('No previous release recorded');
@@ -937,7 +941,12 @@ export class StandaloneController {
         if(!candidate)throw new Error('Previous release absent or withdrawn from fresh signed channel');
         assertRollbackCompatible(state.installed,candidate,epoch);
       } else candidate=selectUpdateCandidate(channel.verified,state.installed,epoch);
-      if(!candidate||(!manualRollback&&state.failedImages.includes(candidate.image)))return state;
+      if(!candidate||(!manualRollback&&state.failedImages.includes(candidate.image))){
+        // A healthy signed poll can clear its own prior channel failure without
+        // dropping a stopped update, rejected digest, or other recorded failure.
+        return regularPoll&&state.lastError?.startsWith(pollingChannelErrorPrefix)
+          ? this.save({...state,lastError:null}) : state;
+      }
       const slot=opposite(old.slot);
       state=await this.transition(state,{to:'detected',candidate:{slot,image:candidate.image},checkpoint:channel.verified.checkpoint},{pending:candidate});
       state=await this.transition(state,{to:'verified',proof:{channelVerified:true}});
@@ -976,6 +985,10 @@ export class StandaloneController {
     }catch(error){
       const reason=safeError(error);
       if(!stable(state.journal))return this.restoreOld(state,reason);
+      if(regularPoll&&checkingChannel){
+        if(state.lastError&&!state.lastError.startsWith(pollingChannelErrorPrefix))return state;
+        return this.save({...state,lastError:pollingChannelErrorPrefix+reason});
+      }
       // Before any cutover, an unavailable channel or invalid manifest cannot disrupt the active API.
       return this.save({...state,lastError:reason});
     }

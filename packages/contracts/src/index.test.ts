@@ -27,6 +27,13 @@ test("untrusted recovery rejects traversal, duplicate writes and missing precond
   assert.throws(() => assertChangeOperation({ ...operation, writes: [{ path: "x", content: "x" }] }));
 });
 
+test("document-set preconditions bind exact canonical hierarchy membership", () => {
+  const set = { kind: "scene" as const, parentId: "chapter-id", documentIds: ["scene-a", "scene-b"] };
+  assert.doesNotThrow(() => assertChangeOperation({ ...operation, readDocumentSets: [set] }));
+  assert.throws(() => assertChangeOperation({ ...operation, readDocumentSets: [{ ...set, documentIds: ["scene-a", "scene-a"] }] }));
+  assert.throws(() => assertChangeOperation({ ...operation, readDocumentSets: [{ ...set, parentId: "" }] }));
+});
+
 test("scope guards bind unseen insertions, deletions and file revisions independent of listing order", async () => {
   const files = new Map([["bible/a.yaml", "a".repeat(64)], ["bible/b.yaml", "b".repeat(64)]]);
   let reverse = false;

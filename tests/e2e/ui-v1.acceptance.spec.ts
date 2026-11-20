@@ -151,6 +151,90 @@ test("the launcher remembers an explicit choice while direct Shell links keep th
   await page.goto("/"); await expect(page).toHaveURL(/desktop/u);
 });
 
+test("mobile reference sheet has a named dialog and excludes the background from assistive technology", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await createWritingFixture(page, "mobile");
+  const pageRoot = page.locator("#ion-view-container-root");
+  const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
+
+  const outlineTrigger = page.getByRole("button", { name: "構成", exact: true });
+  await outlineTrigger.click();
+  await expect(page.getByRole("dialog", { name: "原稿の参照", exact: true })).toBeVisible();
+  await expect(pageRoot).toHaveAttribute("aria-hidden", "true");
+  await expect(page.getByRole("navigation", { name: "モバイル画面" })).toHaveCount(0);
+  const focusStaysInSheet = () => sheet.evaluate((element) => {
+    const documentFocus = element.ownerDocument.activeElement;
+    const shadowFocus = element.shadowRoot?.activeElement;
+    return documentFocus === element
+      ? Boolean(shadowFocus && element.shadowRoot?.contains(shadowFocus))
+      : Boolean(documentFocus && element.contains(documentFocus));
+  });
+
+  await page.keyboard.press("Tab");
+  await expect.poll(focusStaysInSheet).toBe(true);
+  await page.keyboard.press("Shift+Tab");
+  await expect.poll(focusStaysInSheet).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(sheet).not.toBeVisible();
+  await expect(pageRoot).not.toHaveAttribute("aria-hidden", "true");
+  await expect(outlineTrigger).toBeFocused();
+
+  const inspectorTrigger = page.getByRole("button", { name: "知識・保存", exact: true });
+  await inspectorTrigger.click();
+  await expect(page.getByRole("dialog", { name: "原稿の参照", exact: true })).toBeVisible();
+  await expect(pageRoot).toHaveAttribute("aria-hidden", "true");
+  await sheet.getByRole("button", { name: "閉じる", exact: true }).click();
+  await expect(sheet).not.toBeVisible();
+  await expect(pageRoot).not.toHaveAttribute("aria-hidden", "true");
+  await expect(inspectorTrigger).toBeFocused();
+});
+
+test("desktop mode switch stays visible and operable at 320 CSS pixels", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 844 });
+  const title = "320pxでも切れずに参照できる長い作品名".repeat(4);
+  const { project, scene } = await createWritingFixture(page, "desktop", title);
+  const desktopShell = page.locator(".st-desktop-shell");
+  const modeSwitch = page.getByRole("button", { name: "モバイル ↗", exact: true });
+
+  for (const width of [320, 640, 1280, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(desktopShell).toBeVisible();
+    await expect(page).toHaveURL(/\/desktop\//u);
+    await expect(modeSwitch).toBeVisible();
+    await expect(page.locator(".st-studio-breadcrumb strong")).toHaveText(title);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
+    const box = await modeSwitch.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+  }
+
+  const pointerBox = await modeSwitch.boundingBox();
+  expect(pointerBox).not.toBeNull();
+  await page.mouse.click(pointerBox!.x + pointerBox!.width / 2, pointerBox!.y + pointerBox!.height / 2);
+  await expect(page).toHaveURL(/\/mobile\//u);
+  await expect(page.getByRole("textbox", { name: "本文", exact: true })).toContainText("最初の本文。");
+
+  await page.goto(`/desktop/projects/${project.id}/scenes/${scene.id}`);
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    if (await modeSwitch.evaluate((element) => document.activeElement === element)) break;
+    await page.keyboard.press("Tab");
+  }
+  await expect(modeSwitch).toBeFocused();
+  const focusState = await modeSwitch.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return { outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth, left: rect.left, right: rect.right };
+  });
+  expect(focusState.outlineStyle).toBe("solid");
+  expect(focusState.outlineWidth).toBe("3px");
+  expect(focusState.left).toBeGreaterThanOrEqual(0);
+  expect(focusState.right).toBeLessThanOrEqual(320);
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/mobile\//u);
+  await expect(page.getByRole("textbox", { name: "本文", exact: true })).toContainText("最初の本文。");
+});
+
 test("recovery retry after pagehide retains its exact PostgreSQL draft", async ({ page }) => {
   const { project, scene } = await createWritingFixture(page);
   const text = "頁を隠しても残る日本語のDraft。";
