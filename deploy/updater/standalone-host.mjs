@@ -1810,18 +1810,19 @@ export class PodmanStandaloneHost{
     assert.equal(observed,snapshot.runtimeDigest,'Database runtime ownership changed');
     return true;
   }
-  async stopPreflightPasswordRotationDatabase(snapshot){
-    await this.assertPreflightPasswordRotationSources(snapshot);
-    await this.preflightPasswordRotationDatabase(snapshot);
-    run('systemctl',['--user','stop',databaseUnit]);
-    assert.ok(!exists('codexia-db'),'Database was not cleanly stopped for preflight-secret replacement');
-  }
-  async startPreflightPasswordRotationDatabase(snapshot){
+  async ensurePreflightPasswordRotationDatabase(snapshot){
     await this.assertPreflightPasswordRotationSources(snapshot,{databaseRunning:false});
-    assert.ok(!exists('codexia-db'),'Unknown DB container prevents preflight-secret remount');
-    run('systemctl',['--user','start',databaseUnit]);
-    assert.ok(await this.preflightPasswordRotationDatabase(snapshot),'Database startup unverified after preflight-secret replacement');
-    assert.equal(await this.passwordRotationDatabaseId(),snapshot.databaseId,'Restarted database identity changed');
+    if(!await this.preflightPasswordRotationDatabase(snapshot)){
+      run('systemctl',['--user','start',databaseUnit]);
+      assert.ok(await this.preflightPasswordRotationDatabase(snapshot),'Database startup unverified during preflight rotation recovery');
+    }
+    const deadline=Date.now()+90000;
+    let databaseId;
+    while(databaseId===undefined){
+      try{databaseId=await this.passwordRotationDatabaseId();}
+      catch(error){if(Date.now()>=deadline)throw error;await delay(500);}
+    }
+    assert.equal(databaseId,snapshot.databaseId,'Preflight rotation database identity changed');
   }
   async assertPasswordRotationSources(snapshot){
     assert.equal(await this.passwordRotationUnit(snapshot.databaseQuadlet),snapshot.fragmentDigest,'Database generated unit changed');
@@ -1846,10 +1847,10 @@ export class PodmanStandaloneHost{
     projection.Networks=normalizePostgresRotationNetworks(projection.Networks,db.Id,db.Config.Hostname);
     const appMount=projection.SecretMounts.find(secret=>secret.name===appSecret);
     assert.ok(appMount?.type==='mount'&&appMount.target==='/run/secrets/app-password','Unexpected PostgreSQL app secret mount');
-    const preflightMount=projection.SecretMounts.find(secret=>secret.name===preflightSecret);
-    assert.ok(preflightMount?.type==='mount'&&preflightMount.target==='/run/secrets/preflight-password','Unexpected PostgreSQL preflight secret mount');
     assert.ok(rotatingSecret===appSecret||rotatingSecret===preflightSecret,'Unsupported PostgreSQL rotation secret');
-    projection.SecretMounts.find(secret=>secret.name===rotatingSecret).id='rotating';
+    if(rotatingSecret===appSecret)appMount.id='rotating';
+    else assert.ok(!projection.SecretMounts.some(secret=>secret.name===preflightSecret),
+      'The read-only preflight secret must be isolated from the database container');
     const fingerprint=postgresRotationRuntimeFingerprint(projection);
     if(snapshot.runtimeComponents===undefined)snapshot.runtimeComponents=fingerprint.components;
     else assertPostgresRotationRuntimeFingerprint(snapshot,projection);

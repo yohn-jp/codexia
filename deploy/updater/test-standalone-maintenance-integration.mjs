@@ -17,6 +17,7 @@ import {
   browserAuthEnvironment,
   imageConfig,
   readRuntimeCapabilityStatus,
+  runWithSensitiveInput,
   validateRuntimeContract,
 } from './standalone-host.mjs';
 import {
@@ -1033,9 +1034,21 @@ async function exercisePreflightPasswordRotation({repoRoot,config,userUnitDir,wo
     const database=new PodmanStandaloneHost(config);
     const state=await loadControllerState(config.stateFile);
     const databaseIdentity=await database.passwordRotationDatabaseId();
+    const databaseContainerId=()=>JSON.parse(run('podman',['inspect','--type','container','codexia-db']))[0].Id;
+    const initialDatabaseContainerId=databaseContainerId();
     const appPassword=JSON.parse(run('podman',['secret','inspect','--showsecret','codexia-postgres-app-password']))[0].SecretData;
     const oldPassword=JSON.parse(run('podman',['secret','inspect','--showsecret','codexia-postgres-preflight-password']))[0].SecretData;
     const oldSecretId=JSON.parse(run('podman',['secret','inspect','codexia-postgres-preflight-password']))[0].ID;
+    assert.match(oldPassword,/^[a-f0-9]{64}$/u,'Invalid fixture preflight password');
+    runAppPasswordQuery('CREATE TABLE public.runtime_preflight_rotation_probe(value text PRIMARY KEY);\n' +
+      'INSERT INTO public.runtime_preflight_rotation_probe(value) VALUES (\''+nonce+'\');\n');
+    const provision=await readFile(path.join(repoRoot,'deploy/updater/provision-preflight-role.sql'),'utf8');
+    runWithSensitiveInput('podman',['exec','-i','codexia-db','sh','-ec',
+      'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -w -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia_admin -d codexia'],
+      '\\set preflight_password '+oldPassword+'\n'+provision);
+    await database.verifyPostgresPreflightPassword(oldPassword);
+    const rejectPreflightPassword=password=>assert.rejects(database.verifyPostgresPreflightPassword(password,{secretRequired:false}),
+      /password authentication failed/iu);
     const replacement=randomBytes(32).toString('hex');
     candidate=await createPreflightPasswordRotationCandidate({stateDir,config,userUnitDir,password:replacement});
     await runPreflightPasswordRotationCandidate({repoRoot,candidate,configPath:candidate.manifest.configPath,environment});
@@ -1045,9 +1058,9 @@ async function exercisePreflightPasswordRotation({repoRoot,config,userUnitDir,wo
     assert.equal(rotatedSecret.SecretData,replacement);
     await database.verifyPostgresPreflightPassword(replacement);
     await database.verifyPostgresAppPassword(appPassword);
-    await assert.rejects(database.verifyPostgresPreflightPassword(oldPassword),
-      'Old preflight password still authenticated after successful rotation');
+    await rejectPreflightPassword(oldPassword);
     assert.equal(await database.passwordRotationDatabaseId(),databaseIdentity,'Preflight rotation changed the database identity');
+    assert.equal(databaseContainerId(),initialDatabaseContainerId,'Preflight rotation restarted PostgreSQL');
     assert.deepEqual(await loadControllerState(config.stateFile),state,'Preflight rotation changed the controller state');
     assert.equal((await readFile(config.routeFile,'utf8')),'blue\n','Preflight rotation changed the committed route');
     assert.equal(systemdState('codexia-slot-blue.service'),'active');
@@ -1062,8 +1075,7 @@ async function exercisePreflightPasswordRotation({repoRoot,config,userUnitDir,wo
     assert.equal(marker.phase,'applying');
     assert.equal((await readFile(config.routeFile,'utf8')),'blocked\n','Preflight SQL interruption did not keep the route fenced');
     await database.verifyPostgresPreflightPassword(interruptedPassword,{secretRequired:false});
-    await assert.rejects(database.verifyPostgresPreflightPassword(replacement),
-      'Prior preflight password remained valid after the SQL-only interruption');
+    await rejectPreflightPassword(replacement);
     assert.equal((await loadControllerState(config.stateFile)).paused,state.paused,'Preflight interruption changed pause state');
     assert.ok(['inactive','failed'].includes(systemdState('codexia-slot-blue.service')));
     assert.equal(systemdState('codexia-db.service'),'active','SQL-only interruption stopped the database before secret replacement');
@@ -1075,10 +1087,9 @@ async function exercisePreflightPasswordRotation({repoRoot,config,userUnitDir,wo
     assert.equal(await database.passwordRotationDatabaseId(),databaseIdentity,'Boot recovery changed the database identity');
     await database.verifyPostgresPreflightPassword(replacement);
     await database.verifyPostgresAppPassword(appPassword);
-    await assert.rejects(database.verifyPostgresPreflightPassword(interruptedPassword,{secretRequired:false}),
-      'Boot recovery did not reject the interrupted preflight password');
+    await rejectPreflightPassword(interruptedPassword);
     const recoveredSecret=JSON.parse(run('podman',['secret','inspect','--showsecret','codexia-postgres-preflight-password']))[0];
-    assert.notEqual(recoveredSecret.ID,rotatedSecret.ID,'Boot recovery did not recreate the prior immutable preflight secret');
+    assert.equal(recoveredSecret.ID,rotatedSecret.ID,'SQL-only recovery replaced the original immutable preflight secret');
     assert.equal(recoveredSecret.SecretData,replacement,'Boot recovery restored a different prior preflight secret');
     assert.deepEqual(await loadControllerState(config.stateFile),state,'Boot recovery changed the controller state');
     assert.equal(systemdState('codexia-slot-blue.service'),'active');
@@ -1095,7 +1106,7 @@ async function exercisePreflightPasswordRotation({repoRoot,config,userUnitDir,wo
     assert.equal(afterSecretMarker.phase,'applying');
     assert.equal((await readFile(config.routeFile,'utf8')),'blocked\n','Secret-replacement interruption did not keep the route fenced');
     assert.ok(['inactive','failed'].includes(systemdState('codexia-slot-blue.service')));
-    assert.ok(['inactive','failed'].includes(systemdState('codexia-db.service')),'Secret-replacement interruption left the old DB mount running');
+    assert.equal(systemdState('codexia-db.service'),'active','Secret replacement stopped PostgreSQL');
     const interruptedSecret=JSON.parse(run('podman',['secret','inspect','--showsecret','codexia-postgres-preflight-password']))[0];
     assert.equal(interruptedSecret.SecretData,interruptedAfterSecret,'Secret-replacement interruption did not persist the new secret object');
     await assertTimerState('inactive','enabled');
@@ -1104,11 +1115,13 @@ async function exercisePreflightPasswordRotation({repoRoot,config,userUnitDir,wo
     assert.equal((await readFile(config.routeFile,'utf8')),'blue\n');
     assert.equal(await database.passwordRotationDatabaseId(),databaseIdentity,'Recovery after secret replacement changed database identity');
     await database.verifyPostgresPreflightPassword(replacement);
-    await assert.rejects(database.verifyPostgresPreflightPassword(interruptedAfterSecret,{secretRequired:false}),
-      'Recovery after secret replacement did not restore the previous SQL password');
+    await rejectPreflightPassword(interruptedAfterSecret);
     const afterSecretRecovered=JSON.parse(run('podman',['secret','inspect','--showsecret','codexia-postgres-preflight-password']))[0];
     assert.notEqual(afterSecretRecovered.ID,interruptedSecret.ID,'Recovery after secret replacement did not recreate the prior secret');
     assert.equal(afterSecretRecovered.SecretData,replacement);
+    assert.equal(databaseContainerId(),initialDatabaseContainerId,'Interrupted preflight rotation restarted PostgreSQL');
+    assert.equal(runAppPasswordQuery('SELECT value FROM public.runtime_preflight_rotation_probe;'),nonce,
+      'Application data changed during preflight rotation or recovery');
     assert.equal(systemdState('codexia-slot-blue.service'),'active');
     assert.equal(systemdState('codexia-db.service'),'active');
     await assertTimerState('active','enabled');

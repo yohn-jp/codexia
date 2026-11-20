@@ -983,10 +983,11 @@ async function finalizePreflightPasswordRotation({config,store,publicKey,marker,
   await host.assertNoPreflight();
   await host.verifyWriterUnits(state);
   await host.assertCommittedWriterUnitSource(state.journal.active.slot);
-  await host.assertPreflightPasswordRotationSources(snapshot);
+  await host.ensurePreflightPasswordRotationDatabase(snapshot);
   await host.verifyPostgresPreflightPasswordDigest(snapshot,expectedDigest);
   const route=await readFile(config.routeFile,'utf8');
   assert.ok(route===marker.routeContent||route==='blocked\n','Preflight-password recovery route differs from its snapshot');
+  if(route==='blocked\n')await recoverProbeCredentialWriter({host,state});
   await host.route(marker.routeContent.trim());
   await controller.assertServing(state,state.journal.active.slot,state.installed);
   assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed during preflight-password completion');
@@ -1007,36 +1008,18 @@ async function rollbackPreflightPasswordRotation({config,store,publicKey,marker,
   await host.assertNoPreflight();
   await host.verifyWriterUnits(state);
   await host.assertCommittedWriterUnitSource(state.journal.active.slot);
-  const databaseRunning=await host.preflightPasswordRotationDatabase(snapshot);
-  if(databaseRunning){
-    await host.assertPreflightPasswordRotationSources(snapshot);
-    const observed=await host.observe();
-    assert.equal(observed.route,'blocked','Preflight-password rollback requires blocked admission');
-    if(observed.writers.length){
-      assert.deepEqual(observed.writers,[{slot:state.journal.active.slot,image:state.installed.image}],
-        'Unexpected writer prevents preflight-password rollback');
-      await host.assertNoWriterContainers(state.journal.active.slot);
-      await host.stopWriter(state.journal.active.slot);
-    }
-    await host.assertNoWriterContainers();
-    await host.changePostgresPreflightPassword(previousPassword);
-    await host.verifyPostgresPreflightPassword(previousPassword,{secretRequired:false});
-    await host.stopPreflightPasswordRotationDatabase(snapshot);
-  }else{
-    await host.assertPreflightPasswordRotationSources(snapshot,{databaseRunning:false});
-    const observed=await host.observe();
-    assert.equal(observed.route,'blocked','Preflight-password rollback requires blocked admission');
-    if(observed.writers.length){
-      assert.deepEqual(observed.writers,[{slot:state.journal.active.slot,image:state.installed.image}],
-        'Unexpected writer prevents preflight-password rollback');
-      await host.assertNoWriterContainers(state.journal.active.slot);
-      await host.stopWriter(state.journal.active.slot);
-    }
-    await host.assertNoWriterContainers();
+  const observed=await host.observe();
+  assert.equal(observed.route,'blocked','Preflight-password rollback requires blocked admission');
+  if(observed.writers.length){
+    assert.deepEqual(observed.writers,[{slot:state.journal.active.slot,image:state.installed.image}],
+      'Unexpected writer prevents preflight-password rollback');
+    await host.assertNoWriterContainers(state.journal.active.slot);
+    await host.stopWriter(state.journal.active.slot);
   }
-  await host.replacePostgresPreflightSecret(previousPassword,snapshot);
-  await host.startPreflightPasswordRotationDatabase(snapshot);
+  await host.assertNoWriterContainers();
+  await host.ensurePreflightPasswordRotationDatabase(snapshot);
   await host.changePostgresPreflightPassword(previousPassword);
+  await host.replacePostgresPreflightSecret(previousPassword,snapshot);
   await host.verifyPostgresPreflightPassword(previousPassword);
   await host.assertPreflightPasswordRotationSources(snapshot);
   const route=await readFile(config.routeFile,'utf8');
@@ -1392,17 +1375,12 @@ async function rotatePostgresPreflightPassword({config,manifest,manifestPath,ser
     await host.assertNoWriterContainers();
     await host.changePostgresPreflightPassword(password);
     await host.verifyPostgresPreflightPassword(password,{secretRequired:false});
-    await host.stopPreflightPasswordRotationDatabase(snapshot);
     await host.replacePostgresPreflightSecret(password,snapshot);
-    await host.startPreflightPasswordRotationDatabase(snapshot);
     await host.verifyPostgresPreflightPassword(password);
     await host.assertPreflightPasswordRotationSources(snapshot);
     await host.startWriter(state.journal.active.slot,state.installed);
     await host.verifyBlockedPasswordRotation(state.journal.active.slot,state.installed);
-    await host.route(state.journal.active.slot);
-    await controller.assertServing(state,state.journal.active.slot,state.installed);
     assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed during preflight password rotation');
-    assert.equal(await readFile(config.routeFile,'utf8'),routeContent,'Preflight password rotation changed API routing');
     marker.phase='completed';
     await atomicWrite(markerPath,JSON.stringify(marker)+'\n');
     await finalizePreflightPasswordRotation({config,store,publicKey,marker,markerPath,state,expectedDigest:snapshot.replacementDigest});
