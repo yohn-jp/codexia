@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
-import { authToken, manuscriptEditor, ownerLogin, openRevisionHistory } from "./postgres-fixture";
+import { authToken, expectDeviceDraft, expectServerSaved, manuscriptEditor, ownerLogin, openRevisionHistory } from "./postgres-fixture";
 
 const profile = process.env.CODEXIA_PROFILE ?? "core";
 const INITIAL_SCENE_ONE = "# Scene One\n\nThe first line of the story.\nBeacon Quay appears in this scene.\n";
@@ -515,7 +515,7 @@ async function openFixtureScene(page: Page, mode: "desktop" | "mobile", sceneInd
   await expect.poll(async () => page.getByRole("textbox", { name: "本文", exact: true }).locator(".cm-line")
     .evaluateAll((lines) => lines.map((line) => line.textContent ?? "").join("\n").replace(/\n+$/u, "")))
     .toBe(scene!.revision.markdown.replace(/\n+$/u, ""));
-  await expect(page.getByText("IndexedDB回復Journalに保存済み", { exact: true })).toBeVisible();
+  await expectDeviceDraft(page);
   return fixture;
 }
 
@@ -864,7 +864,7 @@ test("editor remains unavailable until delayed browser recovery completes, then 
   await expectDraft(page, fixture.scene.document.id, draft);
   await page.unroute(`**${documentUrl}`);
   await page.getByRole("button", { name: /今すぐ保存|PostgreSQLへ再試行/u }).click();
-  await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+  await expectServerSaved(page);
   expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(draft);
 });
 
@@ -967,7 +967,7 @@ test("PostgreSQL API restart preserves canonical content and replays the exact b
   await expectDraft(page, fixture.scene.document.id, authorText);
   await page.unroute(`**${documentUrl}`);
   await page.getByRole("button", { name: /今すぐ保存|PostgreSQLへ再試行/u }).click();
-  await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+  await expectServerSaved(page);
   expect((await readPersistedDocument(page, fixture.project.id, fixture.scene.document.id)).markdown).toBe(authorText);
   expect((await readJournal(page)).some((entry) => entry.documentId === fixture.scene.document.id)).toBe(false);
 });
@@ -1216,9 +1216,9 @@ test("mobile writing reference sheet keeps the editor mounted and preserves the 
   await expect(page).toHaveURL(currentUrl);
 
   await sheet.getByRole("tab", { name: "構成" }).press("ArrowRight");
-  await expect(sheet.getByRole("tab", { name: "保存状態" })).toHaveAttribute("aria-selected", "true");
+  await expect(sheet.getByRole("tab", { name: "知識・根拠" })).toHaveAttribute("aria-selected", "true");
   await expect(sheet.locator('[data-mobile-reference-panel="inspector"]')).toBeVisible();
-  await expect(sheet.getByRole("status", { name: "原稿のPostgreSQL保存状態" })).toContainText(/PostgreSQL未保存|PostgreSQLへ保存中|PostgreSQL保存済み|保存状態を要確認/u);
+  await expect(page.locator(".pg-save-state summary")).toHaveText(/この端末に下書きがあります|保存中|保存済み|要確認/u);
   await expect(manuscript).toHaveAttribute("data-stable-editor", "present");
   await sheet.getByRole("button", { name: "閉じる" }).click();
   await expect(sheet).not.toBeVisible();

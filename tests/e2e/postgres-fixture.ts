@@ -6,6 +6,18 @@ export interface FixtureDocument { id: string; title: string; kind: string; head
 
 /** Shared manuscript operator; callers own the scenario and text assertions. */
 export const manuscriptEditor = (page: Page) => page.getByRole("textbox", { name: "本文", exact: true });
+export async function openProtectionDetails(page: Page): Promise<Locator> {
+  const details = page.locator(".pg-save-state");
+  if (!await details.evaluate((element) => (element as HTMLDetailsElement).open)) await details.locator("summary").click();
+  return details;
+}
+export async function expectDeviceDraft(page: Page): Promise<void> {
+  const details = await openProtectionDetails(page);
+  await expect(details).toContainText("この端末: 回復用の下書きを保持しています");
+}
+export async function expectServerSaved(page: Page): Promise<void> {
+  await expect(page.locator(".pg-save-state summary")).toHaveText("保存済み", { timeout: 15_000 });
+}
 export async function openRevisionHistory(scope: Page | Locator): Promise<void> {
   const menu = scope.locator(".pg-editor-command-menu");
   if (!await menu.evaluate((element) => (element as HTMLDetailsElement).open)) await menu.locator("summary").click();
@@ -66,7 +78,7 @@ export async function fillDraft(page: Page, text: string): Promise<void> {
   const editor = manuscriptEditor(page);
   await editor.fill(text);
   await expect(editor).toHaveText(text);
-  await expect(page.getByText("IndexedDB回復Journalに保存済み", { exact: true })).toBeVisible();
+  await expectDeviceDraft(page);
 }
 
 export async function createWritingFixture(page: Page, mode: "desktop" | "mobile" = "desktop", title = "日本語の原稿", manuscript = "最初の本文。\n次の文章です。"): Promise<{ project: FixtureProject; scene: FixtureDocument; second: FixtureDocument }> {

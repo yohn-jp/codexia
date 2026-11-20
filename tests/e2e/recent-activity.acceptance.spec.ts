@@ -5,7 +5,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
-import { createWritingFixture, manuscriptEditor, ownerLogin } from "./postgres-fixture";
+import { createWritingFixture, expectServerSaved, manuscriptEditor, ownerLogin } from "./postgres-fixture";
 const configuredBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
 async function unusedTcpPort(): Promise<number> {
   const server = createServer();
@@ -140,7 +140,7 @@ async function longFixture(page: Page) {
   const f = await createWritingFixture(page);
   const editor = page.getByRole("textbox", { name: "本文", exact: true });
   await editor.fill("読書位置を別の端末へ引き継ぐための文章です。\n\n".repeat(100));
-  await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+  await expectServerSaved(page);
   return f;
 }
 async function nativeFixture() {

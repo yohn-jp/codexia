@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { createWritingFixture } from "./postgres-fixture";
+import { createWritingFixture, expectDeviceDraft } from "./postgres-fixture";
 
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
 
@@ -91,7 +91,7 @@ for (const mode of ["desktop", "mobile"] as const) {
     const editor = page.getByRole("textbox", { name: "本文", exact: true });
     const draft = "提案レビュー中も保持する未保存の原稿😀";
     await editor.fill(draft);
-    await expect(page.getByText("IndexedDB回復Journalに保存済み")).toBeVisible();
+    await expectDeviceDraft(page);
 
     await openReview(page, mode);
     await expect(page.locator(".native-changeset-card")).toContainText(proposal.changeSetId);

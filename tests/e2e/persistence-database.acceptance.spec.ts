@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import { createWritingFixture, openRevisionHistory, ownerLogin, manuscriptEditor } from "./postgres-fixture";
+import { createWritingFixture, expectDeviceDraft, expectServerSaved, openRevisionHistory, ownerLogin, manuscriptEditor } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
@@ -340,8 +340,8 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   const editor = page.getByRole("textbox", { name: "本文", exact: true });
   await expect(editor).toBeVisible();
   await editor.fill(firstDraft);
-  await expect(page.getByText("PostgreSQLへ保存済み")).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText("IndexedDB回復Journalに保存済み")).toBeVisible();
+  await expectServerSaved(page);
+  await expectDeviceDraft(page);
 
   await editor.press("Control+A");
   await page.locator(".pg-editor-command-menu > summary").click();
@@ -418,13 +418,13 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   const winningDraft = "PostgreSQL側の先行Revision";
   const recoveredDraft = "別タブの回復Draft";
   await editor.fill(winningDraft);
-  await expect(page.getByText("PostgreSQLへ保存済み")).toBeVisible({ timeout: 15_000 });
+  await expectServerSaved(page);
   await otherEditor.fill(recoveredDraft);
   await expect(otherPage.getByRole("heading", { name: "Revision競合" })).toBeVisible({ timeout: 15_000 });
   await expect(otherPage.locator(".pg-conflict")).toContainText(winningDraft);
   await expect(otherPage.locator(".pg-conflict")).toContainText(recoveredDraft);
   await otherPage.getByRole("button", { name: "比較後、この回復Draftを最新版へ適用" }).click();
-  await expect(otherPage.getByText("PostgreSQLへ保存済み")).toBeVisible({ timeout: 15_000 });
+  await expectServerSaved(otherPage);
   await expect(otherEditor).toContainText(recoveredDraft);
 
   await otherPage.route("**/api/v1/persistence/projects/*/documents/*", async (route) => {
@@ -433,7 +433,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   });
   const interruptedDraft = "再読み込み後に復旧するDraft";
   await otherEditor.fill(interruptedDraft);
-  await expect(otherPage.getByText("IndexedDB回復Journalに保存済み")).toBeVisible();
+  await expectDeviceDraft(otherPage);
   await expect(otherPage.getByText("PostgreSQL保存を確認できません")).toBeVisible({ timeout: 15_000 });
   await otherPage.unroute("**/api/v1/persistence/projects/*/documents/*");
   await otherPage.reload();
@@ -443,7 +443,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await otherPage.locator(".pg-document-list").getByRole("button", { name: new RegExp(documentTitle, "u") }).click();
   const recoveredEditor = otherPage.getByRole("textbox", { name: "本文", exact: true });
   await expect(recoveredEditor).toContainText(interruptedDraft);
-  await expect(otherPage.getByText("PostgreSQLへ保存済み")).toBeVisible({ timeout: 15_000 });
+  await expectServerSaved(otherPage);
   await otherPage.close();
   expect(contentSecurityPolicyViolations).toEqual([]);
 });

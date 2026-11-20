@@ -227,7 +227,7 @@
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-column {
   display: block;
   min-height: 100%;
-  padding: 14px clamp(14px, 4.2vw, 22px) 24px;
+  padding: 2px clamp(14px, 4.2vw, 22px) 24px;
   background: var(--mobile-paper);
 }
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor {
@@ -235,7 +235,7 @@
   display: grid;
   width: 100%;
   max-width: 48rem;
-  gap: 10px;
+  gap: 4px;
   margin-inline: auto;
   padding: 0;
   border: 0;
@@ -278,14 +278,36 @@
   overflow-wrap: anywhere;
 }
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-save-state {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-start;
-  gap: 2px 10px;
+  position: relative;
+  display: block;
+  justify-self: start;
   color: var(--mobile-muted);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.35;
   text-align: start;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-save-state summary {
+  min-width: 44px;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid var(--mobile-line);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-save-state-detail {
+  position: static;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--mobile-line);
+  border-radius: 8px;
+  background: var(--mobile-paper);
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-save-state-detail p {
+  margin: 3px 0;
+  font-size: 12px;
+  line-height: 1.4;
 }
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions {
   display: flex;
@@ -313,7 +335,7 @@
   background: transparent;
   font-size: 12px;
 }
-.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions[aria-label="主な原稿操作"] > button:first-child {
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-actions[aria-label="原稿の操作"] > button:first-child {
   border-color: var(--mobile-accent);
   color: var(--mobile-paper);
   background: var(--mobile-accent);
@@ -323,7 +345,7 @@
   display: flex;
   min-height: 44px;
   align-items: center;
-  padding: 0 8px;
+  padding: 0 4px;
   color: var(--mobile-muted);
   font-size: 11px;
   cursor: pointer;
@@ -356,6 +378,11 @@
 }
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-symbol-menu[open] > div {
   flex-flow: row wrap;
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-symbol-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-display-menu[open] > div {
   display: grid;
@@ -665,7 +692,7 @@
 }
 @media (max-width: 360px) {
   .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-heading { grid-template-columns: minmax(0, 1fr); }
-  .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-save-state { grid-template-columns: repeat(2, max-content); justify-items: start; text-align: start; }
+  .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-save-state { justify-self: start; text-align: start; }
   .mobile-shell-protection { font-size: 9px; }
 }
 @media (prefers-reduced-motion: reduce) {
