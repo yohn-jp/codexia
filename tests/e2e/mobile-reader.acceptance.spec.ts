@@ -29,6 +29,8 @@ test("mobile reader keeps Japanese pages visible in both writing directions", as
     return response.ok() ? ((await response.json()) as { revision: { markdown: string } }).revision.markdown : "";
   }).toBe(text);
   await page.getByRole("button", { name: "読む", exact: true }).click();
+  const displayMenu = page.locator(".pg-editor-display-menu");
+  if (!await displayMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await displayMenu.locator("summary").click();
   await page.getByLabel("組方向").selectOption("vertical");
   await expect.poll(() => visibleParagraphs(page)).toContainEqual(expect.stringContaining("第1段落"));
   const before = await page.locator(".reading-pager").getAttribute("data-page-index");
