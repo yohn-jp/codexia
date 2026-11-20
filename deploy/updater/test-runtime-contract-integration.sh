@@ -269,11 +269,17 @@ OWNED_UNITS=(
 
 cat > "$WORK_DIR/image/health.mjs" <<'EOF'
 import http from 'node:http';
+import { readFileSync } from 'node:fs';
 const version={name:'codexia',version:'0.1.0',profile:process.env.CODEXIA_PROFILE,hosted:false,apiEpoch:1,browserAuth:'token'};
+const authToken=readFileSync(process.env.CODEXIA_AUTH_TOKEN_FILE,'utf8').trim();
 http.createServer((request,response)=>{
   const route=new URL(request.url,'http://localhost').pathname;
   if(route==='/health/ready'){response.writeHead(200,{'Content-Type':'text/plain'});response.end('ready');return;}
   if(route==='/api/version'){response.writeHead(200,{'Content-Type':'application/json'});response.end(JSON.stringify(version));return;}
+  if(route==='/api/v1/persistence/status'){
+    if(request.headers.authorization!==`Bearer ${authToken}`){response.writeHead(401,{'Content-Type':'application/json'});response.end(JSON.stringify({code:'UNAUTHORIZED'}));return;}
+    response.writeHead(200,{'Content-Type':'application/json'});response.end(JSON.stringify({available:true,provider:'postgres'}));return;
+  }
   response.writeHead(404);response.end();
 }).listen(Number(process.env.PORT||3000),process.env.HOST||'0.0.0.0');
 EOF

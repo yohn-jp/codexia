@@ -901,7 +901,9 @@ async function exercisePostgresPasswordRotation({ repoRoot, config, userUnitDir,
   }
 }
 
-async function exerciseApiAuthTokenRotation({config,workDir,expectedImage,environment}){
+async function exerciseApiAuthTokenRotation({repoRoot,config,workDir,expectedImage,environment,originalProxyText,proxyQuadlet,nonce}){
+  const restoreProxy=await startStableRotationProxy({repoRoot,config,proxyQuadlet,originalProxyText,expectedImage,nonce});
+  try{
   const configPath=path.join(path.dirname(config.publicKeyFile),'config.json');
   const stateBeforePause=await loadControllerState(config.stateFile);
   if(!stateBeforePause.paused){
@@ -914,6 +916,7 @@ async function exerciseApiAuthTokenRotation({config,workDir,expectedImage,enviro
   const initialSecretId=initialSecret.ID;
   const host=new PodmanStandaloneHost(config);
   await host.verifyApiAuthToken(state.journal.active.slot,previousToken,200);
+  assert.equal(await proxyApiTokenStatus(previousToken),'200','Stable fixture proxy did not authenticate the original API token');
   const replacementToken=randomBytes(32).toString('hex');
   const candidate=await createApiAuthTokenCandidate({config,token:replacementToken});
   try{
@@ -971,6 +974,7 @@ async function exerciseApiAuthTokenRotation({config,workDir,expectedImage,enviro
   if(!stateBeforePause.paused){
     run('sh',[path.join(SOURCE_ROOT,'deploy/updater/codexia-updater'),'resume',configPath],{env:environment});
   }
+  }finally{await restoreProxy();}
 }
 
 async function main() {
@@ -1287,7 +1291,8 @@ async function main() {
     repoRoot, config: appliedConfig, userUnitDir, workDir, nonce, expectedImage,
     originalProxyText: proxyText, proxyQuadlet, environment,
   });
-  await exerciseApiAuthTokenRotation({config:appliedConfig,workDir,expectedImage,environment});
+  await exerciseApiAuthTokenRotation({repoRoot,config:appliedConfig,workDir,expectedImage,environment,
+    originalProxyText:proxyText,proxyQuadlet,nonce});
 
   run('systemctl', ['--user', 'disable', '--now', 'codexia-updater.timer']);
   await assertTimerState('inactive', 'disabled');
