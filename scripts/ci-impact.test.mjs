@@ -16,6 +16,10 @@ test('PR paths and completed-Verify release impact retain component build inputs
   const releases = ['frontend', 'backend'].map(component => parse(
     readFileSync(new URL(`../.github/workflows/${component}-release.yml`, import.meta.url), 'utf8')
   ));
+  const releaseScope = JSON.parse(readFileSync(new URL('../deploy/release-impact-paths.json', import.meta.url), 'utf8'));
+  for (const [index, component] of ['frontend','backend'].entries()) {
+    assert.deepEqual(releases[index].on.pull_request.paths, releaseScope[component], component + ' release path drift');
+  }
   const changes = [
     ['Desktop authoring', ['app/src/main.tsx'], [true, false]],
     ['Story browser entry', ['modules/story/src/browser.tsx'], [true, false]],
