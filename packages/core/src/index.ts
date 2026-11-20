@@ -172,9 +172,12 @@ function stableId(projectId: string, key: string): DocumentId {
   const value = hash(`${projectId}\0${key}`); return `${value.slice(0,8)}-${value.slice(8,12)}-5${value.slice(13,16)}-a${value.slice(17,20)}-${value.slice(20,32)}` as DocumentId;
 }
 function makeReader(manifest: Manifest): SnapshotReader {
+  const documentKinds = new Map<string, string>(manifest.documents.map((document) => [String(document.id), document.kind]));
   return { snapshot: structuredClone(manifest.snapshot),
     async read(filePath, encoding = "utf8") { safePath(filePath); const file = manifest.files[filePath]; if (!file) return null;
-      const bytes = Buffer.from(file.content, file.encoding); return {content: bytes.toString(encoding), revision: file.revision}; },
+      const bytes = Buffer.from(file.content, file.encoding);
+      const documentKind = file.metadata && file.documentId ? documentKinds.get(file.documentId) : undefined;
+      return {content: bytes.toString(encoding), revision: file.revision, ...(documentKind ? {documentKind} : {})}; },
     async list(prefix) { if (prefix) safePath(prefix); return Object.keys(manifest.files).filter((key) => !prefix || key === prefix || key.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)).sort(); },
     async listRevisions(prefix) { return (await this.list(prefix)).map((path) => ({ path, revision: manifest.files[path]!.revision })); }
   };
