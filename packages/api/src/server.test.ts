@@ -2739,6 +2739,11 @@ describe("Codexia HTTP boundary", () => {
       headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
     });
     try {
+      const responseBeforeRead = await Promise.race([
+        completedRead.then(() => false),
+        responsePromise.then(() => true),
+      ]);
+      assert.equal(responseBeforeRead, false, "HTTP response completed before the review-list read hook");
       await completedRead;
       await native.persistence.transaction((tx) => tx.createDocument({
         projectId: native.project.id, kind: "volume", title: "Concurrent edit", orderKey: "0001",
