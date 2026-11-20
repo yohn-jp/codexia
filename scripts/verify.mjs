@@ -8,6 +8,7 @@ const commands = [
   ["pnpm", ["typecheck:tests"]],
   ["pnpm", ["typecheck:safety"]],
   ["pnpm", ["test"]],
+  ["node", ["--test", "tests/integration/story-range-evidence.test.mjs"]],
   ["pnpm", ["build"], { CODEXIA_PROFILE: "core" }],
   ["pnpm", ["audit:core"], { CODEXIA_PROFILE: "core" }],
   ["pnpm", ["exec", "playwright", "test", "--config", "tests/e2e/playwright.config.ts"], { CODEXIA_PROFILE: "core" }],
