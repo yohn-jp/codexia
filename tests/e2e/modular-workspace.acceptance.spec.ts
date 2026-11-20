@@ -81,6 +81,114 @@ async function openMobileTransitionFixture(page: Page): Promise<{
   return { server: fixture, navigation, editor };
 }
 
+async function openDesktopTabsFixture(page: Page): Promise<{
+  server: { url: string; stop(): Promise<void> };
+  tabs: ReturnType<Page["getByRole"]>;
+}> {
+  const fixture = await startMobileTransitionFixture();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`${fixture.url}/desktop-tabs`);
+  const tabs = page.getByRole("tablist", { name: "パネル" });
+  await expect(tabs).toBeVisible();
+  await expect(tabs.getByRole("tab")).toHaveCount(2);
+  return { server: fixture, tabs };
+}
+
+type DesktopTabsFixtureWindow = Window & {
+  __desktopTabsFixture?: {
+    guardCalls: number;
+    arm(outcomes: Array<boolean | "delayed">): void;
+    releaseGuard(): void;
+    changeScope(scope: string): void;
+  };
+};
+
+async function armDesktopTabsGuard(page: Page, outcomes: Array<boolean | "delayed">): Promise<void> {
+  await page.evaluate((next) => {
+    const fixture = (window as DesktopTabsFixtureWindow).__desktopTabsFixture;
+    if (!fixture) throw new Error("Desktop tabs fixture was not initialized.");
+    fixture.arm(next);
+  }, outcomes);
+}
+
+async function desktopTabsGuardCalls(page: Page): Promise<number> {
+  return page.evaluate(() => (window as DesktopTabsFixtureWindow).__desktopTabsFixture?.guardCalls ?? -1);
+}
+
+test("desktop stack tabs use roving focus and keep the rendered panel association valid", async ({ page }) => {
+  const fixture = await openDesktopTabsFixture(page);
+  try {
+    const { tabs } = fixture;
+    const inspector = tabs.getByRole("tab", { name: "Inspector", exact: true });
+    const outline = tabs.getByRole("tab", { name: "Outline", exact: true });
+    const panel = page.getByRole("tabpanel");
+
+    await expect(inspector).toHaveAttribute("aria-selected", "true");
+    await expect(inspector).toHaveJSProperty("tabIndex", 0);
+    await expect(outline).toHaveJSProperty("tabIndex", -1);
+    await expect(tabs.locator('[role="tab"][tabindex="0"]')).toHaveCount(1);
+    await expect(tabs.locator("[aria-controls]")).toHaveCount(0);
+    await expect(panel).toHaveAttribute("aria-labelledby", await inspector.getAttribute("id") ?? "");
+    await expect.poll(() => panel.evaluate((element) => {
+      const tab = element.ownerDocument.getElementById(element.getAttribute("aria-labelledby") ?? "");
+      return tab?.getAttribute("role") === "tab" && tab.getAttribute("aria-selected") === "true";
+    })).toBe(true);
+
+    await inspector.focus();
+    await page.keyboard.press("Tab");
+    await expect(panel).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(inspector).toBeFocused();
+
+    await page.keyboard.press("ArrowRight");
+    await expect(outline).toHaveAttribute("aria-selected", "true");
+    await expect(outline).toHaveJSProperty("tabIndex", 0);
+    await expect(outline).toBeFocused();
+    await expect(page.getByTestId("fixture-outline")).toBeVisible();
+    await expect(page.getByTestId("fixture-inspector")).toHaveCount(0);
+
+    await page.keyboard.press("End");
+    await expect(inspector).toHaveAttribute("aria-selected", "true");
+    await expect(inspector).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(outline).toHaveAttribute("aria-selected", "true");
+    await expect(outline).toBeFocused();
+  } finally {
+    await fixture.server.stop();
+  }
+});
+
+test("desktop tab guard denial retains selection and a delayed transition cannot focus an obsolete tab", async ({ page }) => {
+  const fixture = await openDesktopTabsFixture(page);
+  try {
+    const { tabs } = fixture;
+    const inspector = tabs.getByRole("tab", { name: "Inspector", exact: true });
+    const outline = tabs.getByRole("tab", { name: "Outline", exact: true });
+
+    await armDesktopTabsGuard(page, [false]);
+    await inspector.focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect(inspector).toHaveAttribute("aria-selected", "true");
+    await expect(inspector).toBeFocused();
+    await expect(outline).toHaveJSProperty("tabIndex", -1);
+    await expect.poll(() => desktopTabsGuardCalls(page)).toBe(1);
+
+    await armDesktopTabsGuard(page, ["delayed"]);
+    await page.keyboard.press("ArrowLeft");
+    await expect.poll(() => desktopTabsGuardCalls(page)).toBe(1);
+    const obsoleteTabId = await outline.getAttribute("id");
+    await page.evaluate(() => (window as DesktopTabsFixtureWindow).__desktopTabsFixture?.changeScope("new-scope"));
+    await expect(page.getByTestId("desktop-tabs-scope")).toHaveText("new-scope");
+    await expect(tabs).toHaveCount(0);
+    await page.evaluate(() => (window as DesktopTabsFixtureWindow).__desktopTabsFixture?.releaseGuard());
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect(page.getByRole("tablist", { name: "パネル" })).toHaveCount(0);
+    expect(await page.evaluate(() => document.activeElement?.id ?? "")).not.toBe(obsoleteTabId);
+  } finally {
+    await fixture.server.stop();
+  }
+});
+
 async function armMobileTransitionFixture(page: Page, outcomes: Array<boolean | "delayed">): Promise<void> {
   await page.evaluate((nextOutcomes) => window.__mobileTransitionFixture?.arm(nextOutcomes), outcomes);
 }
@@ -1139,6 +1247,58 @@ test("mobile reference sheet scene selection uses the existing guarded navigatio
   await expect(page.getByRole("heading", { name: "Scene Two" })).toBeVisible();
   await expect(page.locator('[data-workspace-panel="editor"] .cm-content')).toBeVisible();
   await expectDraft(page, fixture.scene.document.id, draft);
+});
+
+test("mobile outline sheet reveals the current and adjacent rows at 320 and 390 CSS pixels", async ({ page }) => {
+  expect(authToken.length).toBeGreaterThanOrEqual(32);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn(page, "mobile");
+  const fixture = await openFixtureScene(page, "mobile");
+  const documentsUrl = `/api/v1/persistence/projects/${fixture.project.id}/documents`;
+  const documentsResponse = await page.request.get(documentsUrl);
+  expect(documentsResponse.ok()).toBe(true);
+  const existing = await documentsResponse.json() as { documents: Array<{ id: string; parentId: string | null }> };
+  const parentId = existing.documents.find((document) => document.id === fixture.scene.document.id)?.parentId;
+  expect(parentId).toBeTruthy();
+  const created: Array<{ id: string; title: string }> = [];
+  for (let index = 0; index < 24; index += 1) {
+    const title = `Outline ${String(index + 1).padStart(2, "0")}`;
+    const response = await page.request.post(documentsUrl, {
+      headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": crypto.randomUUID() },
+      data: { kind: "scene", parentId, title, orderKey: String(index + 10).padStart(4, "0"), markdown: `# ${title}\n\n本文。` },
+    });
+    expect(response.status(), await response.text()).toBe(201);
+    const body = await response.json() as { document: { id: string; title: string } };
+    created.push(body.document);
+  }
+  const target = created.at(-2)!;
+  const targetUrl = `/mobile/projects/${fixture.project.id}/scenes/${target.id}?view=writing`;
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto(targetUrl);
+    await expect(page.getByRole("heading", { name: target.title, exact: true })).toBeVisible();
+    await page.evaluate(() => {
+      const windowWithSheet = window as Window & { __referenceSheetPresented?: boolean };
+      windowWithSheet.__referenceSheetPresented = false;
+      document.addEventListener("ionModalDidPresent", () => { windowWithSheet.__referenceSheetPresented = true; }, { once: true });
+    });
+    await page.getByRole("button", { name: "構成", exact: true }).click();
+    const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
+    await expect(sheet).toBeVisible();
+    await expect.poll(() => page.evaluate(() => (window as Window & { __referenceSheetPresented?: boolean }).__referenceSheetPresented)).toBe(true);
+    const geometry = await sheet.locator(".mobile-shell-reference-content").evaluate(async (element) => {
+      const scrollElement = await (element as HTMLIonContentElement).getScrollElement();
+      const current = element.querySelector<HTMLElement>('.pg-outline-document[aria-current="page"]');
+      const next = current?.closest("li")?.nextElementSibling?.querySelector<HTMLElement>(".pg-outline-document");
+      if (!current || !next) return null;
+      const viewport = scrollElement.getBoundingClientRect();
+      const intersects = (target: DOMRect) => target.top < viewport.bottom && target.bottom > viewport.top;
+      return { current: intersects(current.getBoundingClientRect()), next: intersects(next.getBoundingClientRect()), scrollTop: scrollElement.scrollTop };
+    });
+    expect(geometry).toMatchObject({ current: true, next: true });
+    await sheet.locator('.pg-outline-document').filter({ hasText: created.at(-1)!.title }).click();
+    await expect(page).toHaveURL(new RegExp(`/scenes/${created.at(-1)!.id}`));
+  }
 });
 
 

@@ -78,30 +78,14 @@ test("keyboard select-all replacement saves exactly the intended manuscript", as
   }).toBe(text);
 });
 
-test("legacy draft import retains the confirmed PostgreSQL revision and creates a new generation", async ({ page }, testInfo) => {
+test("legacy draft import retains the confirmed PostgreSQL revision and creates a new generation", async ({ page }) => {
   const { project, scene } = await createWritingFixture(page); const text = "先に確定した本文。";
-  const beforeFill = await markdown(page);
-  await editor(page).evaluate(element => {
-    const probe = window as Window & { __codexiaFillProbe?: Array<{ type: string; inputType: string | null; selection: string; text: string }> };
-    const events: NonNullable<typeof probe.__codexiaFillProbe> = [];
-    probe.__codexiaFillProbe = events;
-    const record = (event: Event) => {
-      const selection = window.getSelection();
-      events.push({ type: event.type, inputType: event instanceof InputEvent ? event.inputType : null,
-        selection: selection?.toString() ?? "", text: element.textContent ?? "" });
-    };
-    for (const type of ["beforeinput", "input", "keydown", "keyup", "compositionstart", "compositionend"]) {
-      element.addEventListener(type, record, { capture: true });
-    }
-    document.addEventListener("selectionchange", record);
-  });
-  try {
-    await editor(page).fill(text);
-  } finally {
-    const afterFill = await markdown(page);
-    const events = await page.evaluate(() => (window as Window & { __codexiaFillProbe?: unknown }).__codexiaFillProbe ?? []);
-    await testInfo.attach("manuscript-fill-probe", { body: JSON.stringify({ beforeFill, afterFill, events }, null, 2), contentType: "application/json" });
-  }
+  // Use the same user-facing replacement path that passes in WebKit. The
+  // legacy fill probe was diagnostic only and can append to a contenteditable
+  // document in WebKit while Chromium masks the automation difference.
+  await editor(page).click();
+  await editor(page).press("ControlOrMeta+a");
+  await page.keyboard.insertText(text);
   // "Saved" may still describe the previous revision until the async PATCH
   // completes. Pin only a revision whose canonical PostgreSQL body is this text.
   const url = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;

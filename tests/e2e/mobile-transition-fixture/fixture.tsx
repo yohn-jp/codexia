@@ -5,6 +5,7 @@ import type { ChangeOperation } from "@codexia/contracts";
 import { MobileShell } from "../../../app/src/shells/mobile/MobileShell";
 import type { WorkspacePanel } from "../../../app/src/application/contracts";
 import { BrowserJournal, documentKey, journalEntryKey, projectKey, type JournalEntry } from "../../../app/src/storage/journal";
+import { renderDesktopTabsFixture } from "./desktop-tabs";
 
 type GuardOutcome = boolean | "delayed";
 
@@ -189,4 +190,6 @@ function FixtureApplication(): ReactNode {
   </>;
 }
 
-createRoot(document.getElementById("root")!).render(<BrowserRouter><FixtureApplication /></BrowserRouter>);
+const root = document.getElementById("root")!;
+if (window.location.pathname === "/desktop-tabs") renderDesktopTabsFixture(root);
+else createRoot(root).render(<BrowserRouter><FixtureApplication /></BrowserRouter>);
