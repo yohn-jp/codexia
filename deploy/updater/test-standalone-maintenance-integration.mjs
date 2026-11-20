@@ -635,7 +635,12 @@ async function runApiAuthTokenRotationCandidate({candidate,configPath,environmen
     assert.equal(child.signal,'SIGKILL','API token fault injection did not terminate after secret creation');
     assert.equal((await readFile(observedFile,'utf8')).trim(),'created');
   }else if(child.status!==0){
-    throw Error(`API token rotation failed with status ${String(child.status)}`);
+    const safePhases=new Set(['control unit verification','polling stop','interrupted writer recovery','polling restore',
+      'recovery marker update','snapshot cleanup','admission checks','route block','writer stop','secret replacement',
+      'writer start','writer and token verification','route restore','final serving verification','writer transition','completion marker update']);
+    const observed=`${child.stdout??''}\n${child.stderr??''}`.match(/API token rotation failed during ([a-z ]+)/u)?.[1]?.trim();
+    const phase=observed&&safePhases.has(observed)?observed:null;
+    throw Error(`API token rotation failed with status ${String(child.status)}${phase?` during ${phase}`:''}`);
   }
   return child;
 }
