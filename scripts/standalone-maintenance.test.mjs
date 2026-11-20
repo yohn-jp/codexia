@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import {probeCredentialFiles,validateProbeCredential,validatePostgresAppPassword,validateAppPasswordRotationManifest,validatePostgresAppPasswordRotation,assertProbeCredentialAccess,recoverProbeCredentialWriter,assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig,validateStandaloneAuthToken,transitionAuthTokenWriter,validateApiAuthTokenRotationManifest,saveApiAuthTokenSnapshot,loadApiAuthTokenSnapshot} from '../deploy/updater/standalone-maintenance.mjs';
 import {assertApiAuthTokenSecretIdentity,assertProxyRuntimeObservation,PodmanStandaloneHost} from '../deploy/updater/standalone-host.mjs';
-import {mkdtemp,rm,writeFile,readFile} from 'node:fs/promises';
+import {mkdir,mkdtemp,rm,writeFile,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { installApiAuthTokenCompletionInterruption } from '../deploy/updater/test-standalone-maintenance-preload.mjs';
 
 const runtime={
   format:'codexia-runtime/v1',profile:'core',modelCachePath:null,
@@ -64,6 +67,28 @@ test('API token writer transition tests new and stale credentials while fenced',
   await transitionAuthTokenWriter({host,state,oldToken,newToken,verify:async()=>events.push('serving')});
   assert.deepEqual(events,['route:blocked','stop:green','replace:true','start:green','units',
     'auth:green:true:200','auth:green:false:401','route:green','serving']);
+});
+
+test('API token completed-marker interruption is bound to prior-token snapshot cleanup',async()=>{
+  const root=await mkdtemp(path.join(tmpdir(),'codexia-api-token-completion-hook-'));
+  const markerPath=path.join(root,'maintenance','in-progress.json');
+  const snapshotFile=path.join(root,'snapshots','operation','api-auth-token');
+  await mkdir(path.dirname(snapshotFile),{recursive:true});
+  await mkdir(path.dirname(markerPath),{recursive:true});
+  const marker={format:'codexia-maintenance-api-auth-token/v1',phase:'completed',rotation:{previousTokenFile:snapshotFile}};
+  await writeFile(markerPath,JSON.stringify(marker));
+  await writeFile(snapshotFile,'synthetic rollback token');
+  const preloadUrl=pathToFileURL(path.resolve('deploy/updater/test-standalone-maintenance-preload.mjs')).href;
+  const source=`import {installApiAuthTokenCompletionInterruption} from ${JSON.stringify(preloadUrl)};\n`+
+    `import {unlink} from 'node:fs/promises';\n`+
+    `installApiAuthTokenCompletionInterruption(process.argv[1]);\n`+
+    `await unlink(process.argv[2]);\n`;
+  try{
+    const child=spawnSync(process.execPath,['--input-type=module','-e',source,markerPath,snapshotFile],{encoding:'utf8'});
+    assert.equal(child.signal,'SIGKILL','The hook must terminate at the prior-token snapshot unlink');
+    assert.deepEqual(JSON.parse(await readFile(markerPath,'utf8')),marker,'The completed marker must remain durable');
+    assert.equal(await readFile(snapshotFile,'utf8'),'synthetic rollback token','The prior-token snapshot must remain available for boot recovery');
+  }finally{await rm(root,{recursive:true,force:true});}
 });
 
 test('API token rotation manifest admits only its fixed private staged input',()=>{

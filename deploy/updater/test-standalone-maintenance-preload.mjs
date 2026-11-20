@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { lstat, readFile } from 'node:fs/promises';
+import fsPromises, { lstat, readFile } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -9,6 +10,24 @@ const updaterEntry = path.join(fixtureSourceRoot, 'deploy/updater/standalone-upd
 const bootRecoveryEnabled = process.env.CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY === 'yes';
 const appPasswordRotationEnabled = process.env.CODEXIA_RUNTIME_MAINTENANCE_APP_PASSWORD_ROTATION === 'yes';
 const apiAuthTokenRotationEnabled = process.env.CODEXIA_RUNTIME_MAINTENANCE_AUTH_TOKEN_ROTATION === 'yes';
+const apiAuthTokenCompletionInterruptionEnabled = process.env.CODEXIA_RUNTIME_MAINTENANCE_KILL_AT === 'after-api-auth-completion-marker';
+
+export function installApiAuthTokenCompletionInterruption(markerPath) {
+  const originalUnlink = fsPromises.unlink;
+  fsPromises.unlink = async function guardedCompletionUnlink(filename, ...args) {
+    const candidate = path.resolve(String(filename));
+    if (candidate.endsWith(`${path.sep}api-auth-token`)) {
+      const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+      assert.equal(marker.format, 'codexia-maintenance-api-auth-token/v1');
+      assert.equal(marker.phase, 'completed', 'Completion interruption reached token cleanup before durable completion');
+      assert.equal(candidate, marker.rotation.previousTokenFile,
+        'Completion interruption may stop only before prior-token snapshot cleanup');
+      process.kill(process.pid, 'SIGKILL');
+    }
+    return Reflect.apply(originalUnlink, this, [filename, ...args]);
+  };
+  syncBuiltinESMExports();
+}
 
 function isInside(parent, candidate) {
   const relative = path.relative(parent, candidate);
@@ -60,4 +79,47 @@ if (adapterEntry) {
   const testModule = await import(new URL('./test-standalone-maintenance-integration.mjs', import.meta.url));
   assert.equal(typeof testModule.installTestAdapters, 'function', 'Disposable runtime adapter is unavailable');
   testModule.installTestAdapters(hostModule.PodmanStandaloneHost);
+}
+
+if (apiAuthTokenRotationEnabled && apiAuthTokenCompletionInterruptionEnabled &&
+    path.resolve(process.argv[1] ?? '') === updaterEntry && process.argv[2] === 'maintain') {
+  const configPath = path.resolve(process.argv[3] ?? '');
+  assert.equal(path.dirname(configPath), path.join(os.homedir(), '.config', 'codexia-updater'),
+    'Completion interruption requires the disposable updater configuration');
+  const config = JSON.parse(await readFile(configPath, 'utf8'));
+  const stateHome = path.resolve(process.env.XDG_STATE_HOME ?? '');
+  assert.ok(path.isAbsolute(stateHome) && stateHome === process.env.XDG_STATE_HOME,
+    'Completion interruption requires the exact disposable state directory');
+  assert.equal(path.dirname(config.stateFile), path.join(stateHome, 'codexia-updater'),
+    'Completion interruption state differs from the disposable updater');
+  const markerPath = path.join(path.dirname(config.stateFile), 'maintenance', 'in-progress.json');
+  installApiAuthTokenCompletionInterruption(markerPath);
+}
+
+if (apiAuthTokenRotationEnabled && apiAuthTokenCompletionInterruptionEnabled &&
+    path.resolve(process.argv[1] ?? '') === updaterEntry && process.argv[2] === 'maintain') {
+  const configPath = path.resolve(process.argv[3] ?? '');
+  assert.equal(path.dirname(configPath), path.join(os.homedir(), '.config', 'codexia-updater'),
+    'Completion interruption requires the disposable updater configuration');
+  const config = JSON.parse(await readFile(configPath, 'utf8'));
+  const stateHome = path.resolve(process.env.XDG_STATE_HOME ?? '');
+  assert.ok(path.isAbsolute(stateHome) && stateHome === process.env.XDG_STATE_HOME,
+    'Completion interruption requires the exact disposable state directory');
+  assert.equal(path.dirname(config.stateFile), path.join(stateHome, 'codexia-updater'),
+    'Completion interruption state differs from the disposable updater');
+  const markerPath = path.join(path.dirname(config.stateFile), 'maintenance', 'in-progress.json');
+  const originalUnlink = fsPromises.unlink;
+  fsPromises.unlink = async function guardedCompletionUnlink(filename, ...args) {
+    const candidate = path.resolve(String(filename));
+    if (candidate.endsWith(`${path.sep}api-auth-token`)) {
+      const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+      assert.equal(marker.format, 'codexia-maintenance-api-auth-token/v1');
+      assert.equal(marker.phase, 'completed', 'Completion interruption reached token cleanup before durable completion');
+      assert.equal(candidate, marker.rotation.previousTokenFile,
+        'Completion interruption may stop only before prior-token snapshot cleanup');
+      process.kill(process.pid, 'SIGKILL');
+    }
+    return Reflect.apply(originalUnlink, this, [filename, ...args]);
+  };
+  syncBuiltinESMExports();
 }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { signUpdateChannel } from '../../scripts/update-channel.mjs';
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, rmdir, watch, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -604,29 +604,16 @@ async function runApiAuthTokenRotationCandidate({repoRoot,candidate,configPath,e
     env={...env,PATH:faultBin+path.delimiter+env.PATH};
   }
   if(killAtCompletedMarker){
-    const markerPath=path.join(path.dirname(configPath),'../../.local/state/codexia-updater/maintenance/in-progress.json');
-    const watcher=watch(path.dirname(markerPath));
-    const child=spawn('sh',[wrapper,'maintain',configPath,candidate.manifestPath],{env,stdio:'ignore'});
-    let watchdog;
-    const killer=(async()=>{
-      for await(const event of watcher){
-        if(!event.filename||String(event.filename)!=='in-progress.json')continue;
-        try{
-          const marker=JSON.parse(await readFile(markerPath,'utf8'));
-          if(marker.phase==='completed'){child.kill('SIGKILL');return true;}
-        }catch(error){if(error.code!=='ENOENT')throw error;}
-      }
-      return false;
-    })();
-    const closed=await Promise.race([new Promise((resolve,reject)=>{
-      child.once('error',reject);
-      child.once('close',(code,signal)=>resolve({code,signal}));
-    }),new Promise((_,reject)=>{watchdog=setTimeout(()=>{child.kill('SIGKILL');reject(Error('API token completion marker was not observed'));},120000);})]);
-    clearTimeout(watchdog);
-    watcher.close();
-    assert.equal(await killer,true,'API token completion marker watcher ended unexpectedly');
-    assert.equal(closed.signal,'SIGKILL','API token completion fault injection did not kill at its durable commit marker');
-    return {signal:closed.signal};
+    const completedEnvironment={...env,CODEXIA_RUNTIME_MAINTENANCE_KILL_AT:'after-api-auth-completion-marker'};
+    const child=spawnSync('sh',[wrapper,'maintain',configPath,candidate.manifestPath],
+      {encoding:'utf8',timeout:240000,maxBuffer:4*1024*1024,env:completedEnvironment});
+    if(child.error)throw child.error;
+    assert.equal(child.signal,'SIGKILL','API token completion fault injection did not stop before rollback snapshot cleanup');
+    const config=JSON.parse(await readFile(configPath,'utf8'));
+    const markerPath=path.join(path.dirname(config.stateFile),'maintenance','in-progress.json');
+    const marker=JSON.parse(await readFile(markerPath,'utf8'));
+    assert.equal(marker.phase,'completed','API token fault injection did not preserve its durable completion marker');
+    return {signal:child.signal};
   }
   const child=spawnSync('sh',[wrapper,'maintain',configPath,candidate.manifestPath],
     {encoding:'utf8',timeout:240000,maxBuffer:4*1024*1024,env});
