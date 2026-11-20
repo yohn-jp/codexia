@@ -649,7 +649,7 @@ export class CoreStore implements MutationCoordinator {
             ? `plot/volumes/${scene[1]}/chapters/${scene[2]}/chapter.yaml`
             : null;
         const parentId = parentPath ? paths.get(parentPath) : null;
-        if (parentPath && !parentId) fail(422, "missing_hierarchy_parent", "Hierarchy parent is missing");
+        if (!existing && parentPath && !parentId) fail(422, "missing_hierarchy_parent", "Hierarchy parent is missing");
 
         const title = typeof data.title === "string"
           ? data.title
@@ -669,7 +669,10 @@ export class CoreStore implements MutationCoordinator {
           document = await tx.updateDocument({
             projectId,
             documentId: id,
-            parentId: parentId as DocumentId | null,
+            // The projected metadata path may describe the document's former
+            // hierarchy location. Parent identity is canonical in PostgreSQL;
+            // updating a title or order must not reparent an existing record.
+            parentId: existing.parentId,
             title,
             orderKey: String(data.order ?? existing.orderKey),
             expectedVersion: existing.version,
@@ -794,6 +797,24 @@ export class CoreStore implements MutationCoordinator {
           fail(409, "scope_conflict", `The scope changed: ${scope.prefix}`);
         }
       }
+      for (const set of operation.readDocumentSets ?? []) {
+        const siblings = (await transaction.listDocuments(pid(projectId), set.parentId as DocumentId | null, 1000))
+          .filter((document) => document.kind === set.kind)
+          .map((document) => document.id)
+          .sort();
+        if (JSON.stringify(siblings) !== JSON.stringify([...set.documentIds].sort())) {
+          fail(409, "scope_conflict", `The ${set.kind} sibling set changed`);
+        }
+      }
+      const legacyHierarchyReorder = !operation.readDocumentSets?.length &&
+        operation.effect === "structure" && operation.message === "Reorder hierarchy" &&
+        operation.writes.length > 0 && operation.writes.every(({ path }) =>
+          /^plot\/volumes\/[^/]+\/volume\.yaml$/.test(path) ||
+          /^plot\/volumes\/[^/]+\/chapters\/[^/]+\/chapter\.yaml$/.test(path) ||
+          /^plot\/volumes\/[^/]+\/chapters\/[^/]+\/scenes\/[^/]+\.yaml$/.test(path));
+      if (legacyHierarchyReorder && manifest.snapshot.projectVersion !== operation.baseProjectVersion) {
+        fail(409, "scope_conflict", "A legacy hierarchy reorder cannot be applied after project content changed");
+      }
 
       const authorId = state.approvedByOperationId?.[operation.id]
         ?? (state as ProposalStatus & { approvedBy?: string }).approvedBy;
@@ -853,7 +874,14 @@ export class CoreStore implements MutationCoordinator {
   async buildReorderHierarchyOperation(projectId:string,input:ReorderHierarchyInput,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
     const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest);let parent:Document|undefined;if(input.kind==="chapter")parent=this.findDocument(manifest,input.volumeId,index);if(input.kind==="scene")parent=this.findDocument(manifest,input.chapterId,index);
     const siblings=(index.documentsByParentId.get(parent?.id??null)??[]).filter((document)=>document.kind===input.kind);const expected=siblings.map((document)=>this.logicalId(index,document)).sort();if(JSON.stringify([...input.orderedIds].sort())!==JSON.stringify(expected))fail(422,"invalid_hierarchy_order","Reorder must include every sibling exactly once");
-    const writes=input.orderedIds.map((id,order)=>{const document=this.findDocument(manifest,id,index),path=index.pathsByDocumentId.get(document.id)?.metadataPath,entry=path ? manifest.files[path] : undefined;if(!path||!entry)fail(409,"snapshot_unavailable","Document metadata is missing from the project snapshot");return {path,revision:entry.revision,content:YAML.stringify({...YAML.parse(entry.content),order:String(order).padStart(10,"0")})};});return this.buildOperation(projectId,writes,"structure","Reorder hierarchy",manifest.snapshot);
+    const writes=input.orderedIds.map((id,order)=>{const document=this.findDocument(manifest,id,index),path=index.pathsByDocumentId.get(document.id)?.metadataPath,entry=path ? manifest.files[path] : undefined;if(!path||!entry)fail(409,"snapshot_unavailable","Document metadata is missing from the project snapshot");return {path,revision:entry.revision,content:YAML.stringify({...YAML.parse(entry.content),order:String(order).padStart(10,"0")})};});
+    const built=await this.buildOperation(projectId,writes,"structure","Reorder hierarchy",manifest.snapshot);
+    built.operation.readDocumentSets=[{
+      kind: input.kind,
+      parentId: parent?.id ?? null,
+      documentIds: siblings.map((document) => document.id).sort(),
+    }];
+    return built;
   }
   async buildRestoreOperation(projectId:string,input:{sceneId:string;snapshotId:string}|string,revisionId?:string,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
     const sceneId=typeof input==="string"?input:input.sceneId,sourceId=typeof input==="string"?revisionId:input.snapshotId;const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId,index);

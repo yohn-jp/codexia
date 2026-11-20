@@ -77,6 +77,11 @@ export function normalizedOperation(operation: ChangeOperation): ChangeOperation
     ...(operation.readScopes === undefined ? {} : {
       readScopes: operation.readScopes.map(({ prefix, revision }) => ({ prefix, revision })),
     }),
+    ...(operation.readDocumentSets === undefined ? {} : {
+      readDocumentSets: operation.readDocumentSets.map(({ kind, parentId, documentIds }) => ({
+        kind, parentId, documentIds: [...documentIds].sort(),
+      })),
+    }),
     writes: operation.writes.map((change) => ({
       path: change.path,
       revision: change.revision,
