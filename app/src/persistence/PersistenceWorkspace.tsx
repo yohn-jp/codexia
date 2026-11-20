@@ -289,6 +289,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const [collapsedDocumentIds, setCollapsedDocumentIds] = useState<Set<string>>(() => new Set());
   const [outlineQuery, setOutlineQuery] = useState("");
   const [outlineZoomRoot, setOutlineZoomRoot] = useState<string | null>(null);
+  const [outlineFocusedId, setOutlineFocusedId] = useState("");
   const outlineTypeaheadRef = useRef({ value: "", at: 0 });
   const [documentId, setDocumentId] = useState("");
   const lastOutlineSelectionRef = useRef("");
@@ -354,7 +355,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const zoomNode = outlineZoomRoot ? findOutlineNode(documentOutline, outlineZoomRoot) : null;
   const zoomResults = zoomNode ? filterDocumentOutline([zoomNode], outlineQuery) : [];
   const visibleDocumentOutline = zoomNode ? zoomResults : filteredDocumentOutline;
-  const outlineFocusId = findOutlineNode(visibleDocumentOutline, documentId)?.id ?? firstOutlineNodeId(visibleDocumentOutline);
+  const outlineFocusId = findOutlineNode(visibleDocumentOutline, outlineFocusedId)?.id
+    ?? findOutlineNode(visibleDocumentOutline, documentId)?.id
+    ?? firstOutlineNodeId(visibleDocumentOutline);
   const zoomAncestors = outlineZoomRoot ? (outlineAncestors(documentOutline, outlineZoomRoot) ?? []) : [];
   const activeDocument = active?.document;
   const moveTargets = useMemo(() => activeDocument ? documentMoveTargets(documents, activeDocument) : [], [documents, activeDocument]);
@@ -1605,6 +1608,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     setProjectId(nextProjectId);
     setOutlineQuery("");
     setOutlineZoomRoot(null);
+    setOutlineFocusedId("");
     setReading(false);
   };
 
@@ -1749,11 +1753,12 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         <button type="button" className={`pg-outline-document${item.id === documentId ? " is-selected" : ""}`}
           tabIndex={item.id === outlineFocusId ? 0 : -1}
           aria-current={item.id === documentId ? "page" : undefined}
+          onFocus={() => setOutlineFocusedId(item.id)}
           onClick={() => void selectDocument(item.id)}>
           <span>{item.title}</span>
           <small>{item.misplaced ? `未配置 · ${documentKindLabel(item.kind)}` : documentKindLabel(item.kind)}</small>
         </button>
-        {hasChildren && <button type="button" tabIndex={-1} className="pg-outline-zoom" aria-label={`${item.title}を拡大`} onClick={() => setOutlineZoomRoot(item.id)}>拡大</button>}
+        {hasChildren && <button type="button" tabIndex={item.id === outlineFocusId ? 0 : -1} className="pg-outline-zoom" aria-label={`${item.title}を拡大`} onClick={() => setOutlineZoomRoot(item.id)}>拡大</button>}
       </div>
       {hasChildren && expanded ? <ul className="pg-document-children">{renderOutline(item.children, forceExpanded)}</ul> : null}
     </li>;

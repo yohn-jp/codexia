@@ -31,7 +31,11 @@ test("outline supports guarded keyboard navigation, search, zoom and mobile sizi
   await outline.getByLabel("構成を検索").fill(nestedScene.title);
   await expect(outline.locator(".pg-outline-document")).toHaveCount(3);
   await expect(leaf).toBeVisible();
-  await outline.getByRole("button", { name: "Chapter Oneを拡大" }).click();
+  const chapterRow = outline.locator(".pg-outline-document").filter({ hasText: "Chapter One" });
+  await chapterRow.focus();
+  await chapterRow.press("Tab");
+  await expect(outline.getByRole("button", { name: "Chapter Oneを拡大" })).toBeFocused();
+  await outline.getByRole("button", { name: "Chapter Oneを拡大" }).press("Enter");
   await expect(outline.getByRole("navigation", { name: "構成の階層" })).toContainText("Chapter One");
   await outline.getByLabel("構成を検索").fill("no matching outline item");
   await expect(outline.locator(".pg-outline-document")).toHaveCount(0);
