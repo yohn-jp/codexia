@@ -13,6 +13,7 @@ const frontendUrl = 'https://codexia-phase-f.fixture.invalid/desktop/update-iden
 
 test('Standalone updater acceptance runs only on demand, without duplicating Full-model OCI', async () => {
   const workflow = await readFile(path.join(root, '.github/workflows/standalone-updater-acceptance.yml'), 'utf8');
+  const proxyQuadlet = await readFile(path.join(root, 'deploy/updater/codexia-api-proxy.container.example'), 'utf8');
   const evidenceDoc = await readFile(path.join(root, 'docs/deployment/PHASE-F-DISPOSABLE-CI.md'), 'utf8');
   const runtimeJob = workflow.split('  rootless-updater-lifecycle:', 2)[1];
   assert.match(workflow, /runs-on: ubuntu-26\.04/u);
@@ -21,6 +22,7 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
   assert.doesNotMatch(workflow, /full-model-oci-acceptance\.yml/u);
   assert.match(workflow, /cancel-in-progress: true/u);
   assert.match(workflow, /test-phase-f-disposable\.sh/u);
+  assert.match(proxyQuadlet, /^PodmanArgs=--image-volume=ignore$/mu);
   assert.match(workflow, /contents: read/u);
   assert.match(workflow, /actions: read/u);
   assert.match(workflow, /packages: read/u);
@@ -94,6 +96,21 @@ test('Phase F integration helper is valid shell and exercises the existing locke
   assert.match(helper, /sudo stat --printf='host-file=%n mode=%a uid=%u gid=%g owner=%U group=%G\\n' "\$postgres_init_script"/u);
   assert.match(helper, /rootless run --rm --user postgres --entrypoint \/bin\/sh[\s\S]*?--volume "\$postgres_init_script:\/docker-entrypoint-initdb\.d\/010-create-app-role\.sh:ro,Z"[\s\S]*?test -r \/docker-entrypoint-initdb\.d\/010-create-app-role\.sh[\s\S]*?user_systemctl start codexia-db\.service/u);
   assert.match(helper, /postgres_image=\$\(sed -n 's\/\^Image=\/\/p' "\$source_dir\/deploy\/quadlet\/codexia-db\.container"\)/u);
+  assert.equal((helper.match(/as_service \/usr\/bin\/jq -r \.image "\$evidence_dir\/release-0\.1\.(?:236|245|254)\.json"/gu) ?? []).length, 3,
+    'Read private release fixtures as their owner, not as the unrelated GitHub runner account');
+  assert.match(helper, /user_systemctl start codexia-data-volume\.service codexia-history-volume\.service[\s\S]*?user_systemctl start codexia-db\.service[\s\S]*?data_volume_before=/u,
+    'Create the data/history volume fixtures before recording their runtime identities');
+  assert.match(helper, /sh "\$updater" "\$@"/u, 'Invoke the mode-0600 updater wrapper the same way as the canonical Ansible stage');
+  assert.match(helper, /PATH="\$crash_bin:\$node_path:/u, 'Keep the pinned Node runtime on the injected crash path');
+  assert.match(helper, /\[\[ "\$interrupt_status" == 137 \]\] && as_service test -s "\$fixture_data\/interruption-injected"/u,
+    'Inspect the service-private interruption marker as its owner');
+  assert.equal((helper.match(/process\.argv\.slice\(2\)/gu) ?? []).length, 3,
+    'Skip Node’s executable and stdin marker when reading script arguments');
+  assert.match(helper, /as_service "\$node_bin" --input-type=module - "\$evidence_dir"/u,
+    'Write lifecycle evidence as its directory owner');
+  assert.match(helper, /if ! run_updater init[\s\S]*?safe state detail follows[\s\S]*?\.lastError \/\/ empty[\s\S]*?\.journal\.phase/u,
+    'Expose only safe controller state when fixture initialization fails');
+  assert.match(helper, /Disposable proxy image identities \(digest and content IDs only\)[\s\S]*?imageID=\{\{\.Id\}\} repoDigests=\{\{json \.RepoDigests\}\}[\s\S]*?containerImage=\{\{\.Image\}\} containerImageName=\{\{\.ImageName\}\}[\s\S]*?proxyMounts=\{\{json \.Mounts\}\}/u);
   assert.match(helper, /codexia-updater(?:\.sh)?/u);
 });
 
