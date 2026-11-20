@@ -207,12 +207,7 @@ async function visibleReaderParagraphs(page: Page): Promise<string[]> {
 
 async function replaceReaderText(page: Page, text: string): Promise<void> {
   await expect(editor(page)).toBeVisible();
-  await page.locator(".cm-content").click({ position: { x: 1, y: 1 } });
-  for (let attempt = 0; attempt < 8 && await markdown(page) !== ""; attempt += 1) {
-    await page.keyboard.press("Control+a");
-    await page.keyboard.press("Backspace");
-  }
-  await page.keyboard.insertText(text);
+  await editor(page).fill(text);
   await expectMarkdown(page, text);
 }
 
