@@ -230,25 +230,27 @@ function persistSelectionSafely(authorScope: string, selection: { projectId: str
   try { writeWorkspaceSelection(window.localStorage, authorScope, selection); } catch { /* Route and journal state do not depend on preferences. */ }
 }
 
-export function PersistenceWorkspace({ mode, authorScope, onSignOut, registerProtection, sessionBlocked = false }: {
+export function PersistenceWorkspace({ mode, authorScope, hosted = false, onSignOut, registerProtection, sessionBlocked = false }: {
   mode: "desktop" | "mobile";
   authorScope: string;
+  hosted?: boolean;
   onSignOut: () => void;
   registerProtection?: (guard: (() => Promise<boolean>) | null) => void;
   sessionBlocked?: boolean;
 }) {
-  if (mode === "mobile") return <MobilePersistenceWorkspace authorScope={authorScope} onSignOut={onSignOut} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
-  return <PersistenceWorkspaceController mode="desktop" authorScope={authorScope} onSignOut={onSignOut} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
+  if (mode === "mobile") return <MobilePersistenceWorkspace hosted={hosted} authorScope={authorScope} onSignOut={onSignOut} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
+  return <PersistenceWorkspaceController mode="desktop" hosted={hosted} authorScope={authorScope} onSignOut={onSignOut} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
 }
 
-function MobilePersistenceWorkspace({ authorScope, onSignOut, registerProtection, sessionBlocked }: { authorScope: string; onSignOut: () => void; registerProtection?: (guard: (() => Promise<boolean>) | null) => void; sessionBlocked: boolean }) {
+function MobilePersistenceWorkspace({ hosted, authorScope, onSignOut, registerProtection, sessionBlocked }: { hosted: boolean; authorScope: string; onSignOut: () => void; registerProtection?: (guard: (() => Promise<boolean>) | null) => void; sessionBlocked: boolean }) {
   const navigate = useNavigate();
   const navigateUrl = useCallback((url: string, replace: boolean) => { navigate(url, { replace }); }, [navigate]);
-  return <PersistenceWorkspaceController mode="mobile" authorScope={authorScope} onSignOut={onSignOut} navigateUrl={navigateUrl} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
+  return <PersistenceWorkspaceController mode="mobile" hosted={hosted} authorScope={authorScope} onSignOut={onSignOut} navigateUrl={navigateUrl} registerProtection={registerProtection} sessionBlocked={sessionBlocked} />;
 }
 
-function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigateUrl, registerProtection, sessionBlocked = false }: {
+function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, navigateUrl, registerProtection, sessionBlocked = false }: {
   mode: "desktop" | "mobile";
+  hosted: boolean;
   authorScope: string;
   onSignOut: () => void;
   navigateUrl?: (url: string, replace: boolean) => void;
@@ -356,8 +358,13 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const [knowledgeType, setKnowledgeType] = useState("person");
   const [revisions, setRevisions] = useState<DocumentRevision[]>([]);
   const [showRevisions, setShowRevisions] = useState(false);
+  const [revisionCursor, setRevisionCursor] = useState<string | null>(null);
+  const [revisionPageLoading, setRevisionPageLoading] = useState(false);
+  const [revisionPageError, setRevisionPageError] = useState("");
+  const revisionPageSequenceRef = useRef(0);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
   const [requestedPanel, setRequestedPanel] = useState<WorkspacePanelRequest>();
+  const [creationIntent, setCreationIntent] = useState<"project" | "document">();
 
   const resume = useRecentActivityResume({ binding: projectId ? { projectId, authorScope, projectScopeKey: projectId } : null, enabled: Boolean(projectId) });
   const project = projects.find((candidate) => candidate.id === projectId) ?? null;
@@ -375,6 +382,36 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const activeDocument = active?.document;
   const moveTargets = useMemo(() => activeDocument ? documentMoveTargets(documents, activeDocument) : [], [documents, activeDocument]);
   const moveTargetAvailable = !moveParent || moveTargets.some((target) => target.id === moveParent);
+  useEffect(() => {
+    if (!creationIntent || (hosted && creationIntent === "project")) return;
+    let cancelled = false;
+    let attempts = 0;
+    const focusCreation = () => {
+      if (cancelled || attempts++ >= 120) return;
+      const selector = creationIntent === "project" ? ".pg-library-create" : ".pg-library-create-document";
+      const details = Array.from(document.querySelectorAll<HTMLDetailsElement>(selector))
+        .find((candidate) => candidate.getClientRects().length > 0);
+      const input = details?.querySelector<HTMLInputElement>("input");
+      if (!details || !input) {
+        window.setTimeout(focusCreation, 50);
+        return;
+      }
+      details.open = true;
+      input.focus();
+      if (document.activeElement === input) setCreationIntent(undefined);
+      else window.setTimeout(focusCreation, 50);
+    };
+    window.setTimeout(focusCreation, 0);
+    return () => { cancelled = true; };
+  }, [creationIntent, hosted, requestedPanel?.sequence]);
+  const openCreation = useCallback((kind: "project" | "document") => {
+    if (hosted && kind === "project") return;
+    setCreationIntent(kind);
+    if (mode === "mobile") {
+      const sequence = ++panelRequestSequenceRef.current;
+      setRequestedPanel({ id: "outline", sequence });
+    }
+  }, [hosted, mode]);
   useEffect(() => {
     if (!documentId || !projectId) {
       lastOutlineSelectionRef.current = "";
@@ -605,6 +642,12 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     const currentJournal = journalRef.current;
     if (sessionBlockedRef.current || !currentProject || !currentJournal || !nextDocumentId) return;
     const openSequence = ++openSequenceRef.current;
+    revisionPageSequenceRef.current += 1;
+    setShowRevisions(false);
+    setRevisions([]);
+    setRevisionCursor(null);
+    setRevisionPageLoading(false);
+    setRevisionPageError("");
     setLoading(true);
     setPageError("");
     setNotice("");
@@ -676,8 +719,12 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         });
       }
       setReadingPage(loadReadingPage(authorScope, currentProject.id, nextDocumentId));
+      revisionPageSequenceRef.current += 1;
       setRevisions([]);
       setShowRevisions(false);
+      setRevisionCursor(null);
+      setRevisionPageLoading(false);
+      setRevisionPageError("");
     } catch (error) {
       if (openSequence === openSequenceRef.current) setPageError(error instanceof Error ? error.message : "文書を開けませんでした。");
     } finally {
@@ -1028,6 +1075,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       setProjectId(result.project.id);
       setDocumentId("");
       setProjectTitle("");
+      if (mode === "mobile" && projects.length === 0) {
+        setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
+      }
       projectCreationIntentRef.current = null;
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "作品を作成できませんでした。");
@@ -1187,6 +1237,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
       persistSelectionSafely(authorScope, selectionRef.current);
       updateRouteSelection(selectionRef.current, false);
       setDocumentId(result.document.id);
+      if (mode === "mobile" && documents.length === 0) {
+        setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
+      }
       documentCreationIntentRef.current = null;
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "文書を作成できませんでした。");
@@ -1524,27 +1577,71 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     }
   }
 
-  async function loadRevisions(): Promise<void> {
+  async function loadRevisionPage(before: string | undefined, replace: boolean): Promise<void> {
     const requestedDocument = activeRef.current;
-    if (!project || !requestedDocument || requestedDocument.document.projectId !== project.id) return;
-    const requestedProjectId = project.id;
+    if (!requestedDocument) return;
+    const requestedProjectId = requestedDocument.document.projectId;
     const requestedDocumentId = requestedDocument.document.id;
     const requestedRevisionId = requestedDocument.revision.id;
+    if (!project || project.id !== requestedProjectId) return;
     const navigationGeneration = openSequenceRef.current;
-    const requestIsCurrent = () => !sessionBlockedRef.current &&
+    const requestSequence = ++revisionPageSequenceRef.current;
+    const requestOwnsState = () => requestSequence === revisionPageSequenceRef.current;
+    const sameDocumentNavigation = () => !sessionBlockedRef.current &&
+      requestSequence === revisionPageSequenceRef.current &&
       projectIdRef.current === requestedProjectId &&
       openSequenceRef.current === navigationGeneration &&
       activeRef.current?.document.projectId === requestedProjectId &&
-      activeRef.current.document.id === requestedDocumentId &&
-      activeRef.current.revision.id === requestedRevisionId;
+      activeRef.current.document.id === requestedDocumentId;
+    const requestIsCurrent = () => sameDocumentNavigation() && activeRef.current?.revision.id === requestedRevisionId;
+    setRevisionPageLoading(true);
+    setRevisionPageError("");
     try {
-      const page = await api.persistenceRevisions(requestedProjectId, requestedDocumentId, 50);
+      const page = await api.persistenceRevisions(requestedProjectId, requestedDocumentId, 50, before);
       if (!requestIsCurrent()) return;
-      setRevisions([...page.revisions]);
-      setShowRevisions((value) => !value);
+      setRevisions((current) => {
+        if (replace) return [...page.revisions];
+        const seen = new Set(current.map((revision) => revision.id));
+        return [...current, ...page.revisions.filter((revision) => !seen.has(revision.id))];
+      });
+      setRevisionCursor(page.nextBefore);
     } catch (error) {
-      if (requestIsCurrent()) setPageError(error instanceof Error ? error.message : "Revision履歴を読み込めませんでした。");
+      if (requestIsCurrent()) setRevisionPageError(error instanceof Error ? error.message : "Revision履歴を読み込めませんでした。");
+    } finally {
+      if (!requestOwnsState()) return;
+      if (sameDocumentNavigation() && activeRef.current?.revision.id !== requestedRevisionId) {
+        setRevisions([]);
+        setRevisionCursor(null);
+        setRevisionPageError("");
+        void loadRevisionPage(undefined, true);
+      } else if (sameDocumentNavigation()) {
+        setRevisionPageLoading(false);
+      }
     }
+  }
+
+  async function loadRevisions(): Promise<void> {
+    if (showRevisions) {
+      revisionPageSequenceRef.current += 1;
+      setShowRevisions(false);
+      setRevisions([]);
+      setRevisionCursor(null);
+      setRevisionPageLoading(false);
+      setRevisionPageError("");
+      return;
+    }
+    const requestedDocument = activeRef.current;
+    if (!project || !requestedDocument || requestedDocument.document.projectId !== project.id) return;
+    setShowRevisions(true);
+    setRevisions([]);
+    setRevisionCursor(null);
+    setRevisionPageError("");
+    void loadRevisionPage(undefined, true);
+  }
+
+  function loadMoreRevisions(): void {
+    if (!revisionCursor || revisionPageLoading) return;
+    void loadRevisionPage(revisionCursor, false);
   }
 
   async function restoreRevision(source: DocumentRevision): Promise<void> {
@@ -1589,7 +1686,12 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         evidence: initializeDocumentEvidence(restored.revision.markdown, restored.revision.id, snapshot), evidenceLoadKey: latest.evidenceLoadKey + 1,
       });
       setNotice("選んだRevisionを新しいPostgreSQL Revisionとして復元しました。");
+      revisionPageSequenceRef.current += 1;
       setShowRevisions(false);
+      setRevisions([]);
+      setRevisionCursor(null);
+      setRevisionPageLoading(false);
+      setRevisionPageError("");
     } catch (error) {
       if (!stillSelected()) { setResumeEpoch((value) => value + 1); return; }
       if (error instanceof ApiError && error.status === 409) {
@@ -1861,23 +1963,25 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           {projects.length > 0 && <select id="pg-project" value={projectId} onChange={(event) => void selectProject(event.target.value)}>
             {projects.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
           </select>}
-          <details className="pg-library-create">
+          {!hosted && <details className="pg-library-create">
             <summary>作品を作成</summary>
             <form onSubmit={(event) => void createProject(event)}>
               <label htmlFor="pg-project-title">作品名</label>
               <input id="pg-project-title" value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} maxLength={256} required placeholder="作品名" />
               <button type="submit" disabled={loading || !projectTitle.trim()}>作成</button>
             </form>
-          </details>
+          </details>}
           <details>
-            <summary>作品のエクスポート・インポート</summary>
-            <p>Markdown本文・構成・Knowledge・Evidence・作者データを作品JSONで持ち出し、別の作品として取り込めます。PostgreSQLの全Revision履歴やブラウザーの下書きは含まれません。</p>
+            <summary>{hosted ? "作品のエクスポート" : "作品のエクスポート・インポート"}</summary>
+            <p>Markdown本文・構成・Knowledge・Evidence・作者データを作品JSONで持ち出せます。PostgreSQLの全Revision履歴やブラウザーの下書きは含まれません。</p>
             {project && <button type="button" disabled={workTransferBusy || loading} onClick={() => void exportCurrentWork()}>
               選択中の作品をJSONでエクスポート
             </button>}
-            <label htmlFor="pg-work-import">作品JSONをインポート（既存作品は上書きしません）</label>
-            <input id="pg-work-import" type="file" accept=".json,application/json" disabled={workTransferBusy || loading}
-              onChange={(event) => void importPortableWork(event)} />
+            {!hosted && <>
+              <label htmlFor="pg-work-import">作品JSONをインポート（既存作品は上書きしません）</label>
+              <input id="pg-work-import" type="file" accept=".json,application/json" disabled={workTransferBusy || loading}
+                onChange={(event) => void importPortableWork(event)} />
+            </>}
             {workTransferBusy && <p role="status">作品データを処理中です。</p>}
             {workTransferStatus && <p role="status">{workTransferStatus}</p>}
           </details>
@@ -1953,8 +2057,17 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
         {pageError && <p className="pg-alert" role="alert">{pageError}</p>}
         {notice && <p className="pg-notice" role="status">{notice}</p>}
         {journalError && <p className="pg-alert" role="alert">{journalError}</p>}
-        {!project && <section className="pg-empty"><h2>最初の作品を作成してください</h2><p>作品、原稿Revision、Knowledge、EvidenceはPostgreSQLへ保存されます。</p></section>}
-        {project && !selectedDocument && !active && !outlineError && <section className="pg-empty"><h2>{project.title}</h2><p>編集を始める文書を作成してください。</p></section>}
+        {!project && <section className="pg-empty">
+          {hosted ? <>
+            <h2>{loading ? "割り当てられた作品を確認しています" : pageError ? "割当作品を確認できません" : "割り当てられた作品がありません"}</h2>
+            <p>Hosted環境では割り当てられた作品だけを利用できます。</p>
+          </> : <>
+            <h2>最初の作品を作成してください</h2>
+            <p>作品、原稿Revision、Knowledge、EvidenceはPostgreSQLへ保存されます。</p>
+            <button type="button" onClick={() => openCreation("project")}>最初の作品を作成</button>
+          </>}
+        </section>}
+        {project && !selectedDocument && !active && !outlineError && <section className="pg-empty"><h2>{project.title}</h2><p>編集を始める文書を作成してください。</p><button type="button" onClick={() => openCreation("document")}>最初の文書を作成</button></section>}
         {active && <section className="pg-editor" aria-label={active.document.title}>
           <div className="pg-editor-heading">
             <div><p className="eyebrow">{project?.title}</p><h2>{active.document.title}</h2></div>
@@ -2065,7 +2178,7 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             <h3>Revision履歴</h3>
             {revisions.map((revision) => {
               const difference = revision.id === active.revision.id ? null : revisionDifferencePreview(revision.markdown, active.revision.markdown);
-              return <article key={revision.id}>
+              return <article key={revision.id} data-revision-id={revision.id}>
               <p>{new Date(revision.createdAt).toLocaleString()} · {revision.id === active.revision.id ? "現在" : "保存済み"}</p>
               <pre>{revision.markdown.slice(0, 700) || "（空の原稿）"}</pre>
               {difference && <details className="pg-revision-difference">
@@ -2079,6 +2192,10 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
               {revision.id !== active.revision.id && <button type="button" disabled={loading || restoring || active.dirty} onClick={() => void restoreRevision(revision)}>このRevisionを新しいRevisionとして復元</button>}
             </article>;
             })}
+            {revisionPageError && <p role="alert">{revisionPageError}</p>}
+            {revisionPageLoading && <p role="status">古いRevision履歴を読み込んでいます。</p>}
+            {revisionCursor && <button type="button" disabled={loading || restoring || revisionPageLoading || active.dirty || Boolean(active.remoteConflict)} onClick={loadMoreRevisions}>さらに古いRevisionを読む</button>}
+            {revisionPageError && revisions.length === 0 && <button type="button" disabled={revisionPageLoading} onClick={() => void loadRevisionPage(undefined, true)}>Revision履歴を再試行</button>}
           </section>}
         </section>}
       </main>);
