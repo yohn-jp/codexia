@@ -113,6 +113,7 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
   const [referenceSheet, setReferenceSheet] = useState<ReferenceSheet | null>(null);
   const [openingReference, setOpeningReference] = useState(false);
   const openingReferenceRef = useRef(false);
+  const referenceContentRef = useRef<HTMLIonContentElement | null>(null);
   const referenceTriggerRef = useRef<HTMLButtonElement | null>(null);
   const referenceOriginRef = useRef("");
   const routeIdentityRef = useRef(location.pathname + location.search);
@@ -174,6 +175,40 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
   useEffect(() => {
     setReferenceSheet(null);
   }, [location.pathname, activeView]);
+
+  const revealCurrentScene = useCallback((): boolean => {
+    const content = referenceContentRef.current;
+    const current = content?.querySelector<HTMLElement>('.pg-outline-document[aria-current="page"]');
+    if (!content || !current) return false;
+    void content.getScrollElement().then((scrollElement) => {
+      const viewport = scrollElement.getBoundingClientRect();
+      const target = current.getBoundingClientRect();
+      const centeredTop = scrollElement.scrollTop + target.top - viewport.top - (viewport.height - target.height) / 2;
+      scrollElement.scrollTop = Math.max(0, centeredTop);
+    });
+    return true;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (referenceSheet !== "outline") return;
+    const content = referenceContentRef.current;
+    if (!content) return;
+    let settled = false;
+    const observer = new MutationObserver(() => {
+      if (settled || !revealCurrentScene()) return;
+      settled = true;
+      observer.disconnect();
+    });
+    observer.observe(content, { childList: true, subtree: true, attributes: true });
+    if (revealCurrentScene()) {
+      settled = true;
+      observer.disconnect();
+    }
+    return () => {
+      settled = true;
+      observer.disconnect();
+    };
+  }, [referenceSheet, workspacePanelRequest?.sequence, location.key, revealCurrentScene]);
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -549,6 +584,7 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
       <IonModal
         className="mobile-shell-reference-modal"
         isOpen={referenceSheet !== null}
+        onDidPresent={() => { if (referenceSheet === "outline") revealCurrentScene(); }}
         onDidDismiss={onReferenceDismissed}
         breakpoints={[0, 0.56, 0.88, 1]}
         initialBreakpoint={0.56}
@@ -557,7 +593,7 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
         expandToScroll={false}
         htmlAttributes={{ "aria-label": "原稿の参照" }}
       >
-        <IonContent className="mobile-shell-reference-content" scrollY={true}>
+        <IonContent ref={referenceContentRef} className="mobile-shell-reference-content" scrollY={true}>
           <div className="mobile-shell-reference-top">
             <div>
               <p className="mobile-shell-reference-eyebrow">WRITING CONTEXT</p>

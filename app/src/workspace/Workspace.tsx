@@ -209,13 +209,21 @@ function WorkspaceTree({ node, mode, layoutEditing, depth, catalog, visibleCount
                 type="button"
                 role="tab"
                 aria-selected={selected}
-                aria-controls={domId("st-workspace-pane", child.panelId)}
+                tabIndex={selected ? 0 : -1}
                 draggable={mode === "desktop"}
                 onDragStart={(event) => {
                   event.dataTransfer.setData("text/plain", child.panelId);
                   event.dataTransfer.effectAllowed = "move";
                 }}
-                onClick={() => { if (!selected) onActivate(child.panelId); }}
+                onClick={(event) => {
+                  if (selected) return;
+                  const tablist = event.currentTarget.closest<HTMLElement>('[role="tablist"]');
+                  void onActivate(child.panelId).then((allowed) => {
+                    if (!allowed && tablist?.isConnected) {
+                      tablist.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.focus();
+                    }
+                  });
+                }}
                 onKeyDown={(event) => {
                   const currentIndex = node.children.findIndex((item) => item.panelId === child.panelId);
                   let nextIndex = currentIndex;
@@ -227,7 +235,12 @@ function WorkspaceTree({ node, mode, layoutEditing, depth, catalog, visibleCount
                   event.preventDefault();
                   const next = node.children[nextIndex]!;
                   const trigger = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>("[role=tab]")[nextIndex];
-                  void onActivate(next.panelId).then((allowed) => { if (allowed) trigger?.focus(); });
+                  void onActivate(next.panelId).then((allowed) => {
+                    if (!allowed || !trigger) return;
+                    window.requestAnimationFrame(() => {
+                      if (trigger.isConnected && trigger.getAttribute("aria-selected") === "true") trigger.focus();
+                    });
+                  });
                 }}
               >{title}</button>
             );
@@ -373,6 +386,8 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   const routeSuppressedByPanelRequestRef = useRef("");
   const pendingRouteSelectionRef = useRef(false);
   const pendingPanelTransitionRef = useRef<PendingPanelTransitionCommit | null>(null);
+  const workspaceIdentityRef = useRef({ scope, mode });
+  useLayoutEffect(() => { workspaceIdentityRef.current = { scope, mode }; }, [scope, mode]);
   const visibleIds = useMemo(() => visiblePanelIds(layout.root), [layout.root]);
 
   const retryPendingRouteSelection = useCallback((): void => {
@@ -571,7 +586,12 @@ export function Workspace({ scope, mode, panels, onActivePanelChange, beforeLayo
   };
 
   const activateTab = (panelId: string): Promise<boolean> => {
-    return changeLayout((current) => activateWorkspacePanel(current, panelId), "パネルを選びました。次回も使うには配置を保存してください。")
+    return changeLayout(
+      (current) => activateWorkspacePanel(current, panelId),
+      "パネルを選びました。次回も使うには配置を保存してください。",
+      true,
+      () => workspaceIdentityRef.current.scope === scope && workspaceIdentityRef.current.mode === mode,
+    )
       .then((allowed) => { if (allowed) onActivePanelChange?.(panelId); return allowed; });
   };
 

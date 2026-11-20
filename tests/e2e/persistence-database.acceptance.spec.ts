@@ -4,6 +4,50 @@ import { createWritingFixture, openRevisionHistory, ownerLogin, manuscriptEditor
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
 
+test("outline supports guarded keyboard navigation, search, zoom and mobile sizing", async ({ page }) => {
+  expect(databaseUrl).toBeTruthy();
+  const fixture = await createWritingFixture(page, "desktop", `Outline ${crypto.randomUUID()}`);
+  const headers = { Origin: new URL(page.url()).origin };
+  const create = async (parentId: string | undefined, kind: string, title: string, orderKey: string) => {
+    const response = await page.request.post(`/api/v1/persistence/projects/${fixture.project.id}/documents`, { headers: { ...headers, "Idempotency-Key": crypto.randomUUID() }, data: { ...(parentId ? { parentId } : {}), kind, title, orderKey, markdown: "" } });
+    expect(response.status()).toBe(201);
+    return (await response.json() as { document: { id: string; title: string } }).document;
+  };
+  const volume = await create(undefined, "volume", "Volume One", "0");
+  const chapter = await create(volume.id, "chapter", "Chapter One", "0");
+  const nestedScene = await create(chapter.id, "scene", `Outline scene ${crypto.randomUUID()}`, "0");
+  await page.goto(`/desktop/projects/${fixture.project.id}/scenes/${nestedScene.id}`);
+  const outline = page.locator('[data-workspace-panel="outline"]');
+  const rows = outline.locator(".pg-outline-document");
+  await rows.first().focus();
+  await rows.first().press("ArrowDown");
+  await expect(rows.nth(1)).toBeFocused();
+  await rows.nth(1).press("Home");
+  await expect(rows.first()).toBeFocused();
+  const leaf = outline.getByRole("button", { name: `${nestedScene.title} シーン` });
+  await leaf.focus();
+  await leaf.press("ArrowRight");
+  await expect(leaf).toBeFocused();
+  await outline.getByLabel("構成を検索").fill(nestedScene.title);
+  await expect(outline.locator(".pg-outline-document")).toHaveCount(3);
+  await expect(leaf).toBeVisible();
+  const chapterRow = outline.locator(".pg-outline-document").filter({ hasText: "Chapter One" });
+  await chapterRow.focus();
+  await chapterRow.press("Tab");
+  await expect(outline.getByRole("button", { name: "Chapter Oneを拡大" })).toBeFocused();
+  await outline.getByRole("button", { name: "Chapter Oneを拡大" }).press("Enter");
+  await expect(outline.getByRole("navigation", { name: "構成の階層" })).toContainText("Chapter One");
+  await outline.getByLabel("構成を検索").fill("no matching outline item");
+  await expect(outline.locator(".pg-outline-document")).toHaveCount(0);
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.goto(`/mobile/projects/${fixture.project.id}/scenes/${nestedScene.id}?view=writing`);
+  await expect(page.getByRole("heading", { name: nestedScene.title, exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "構成" }).click();
+  await expect(page.locator(".pg-outline-document").first()).toBeVisible();
+  await page.evaluate(() => { document.body.style.zoom = "200%"; });
+  await expect(page.locator(".pg-outline-document").first()).toBeVisible();
+});
+
 async function openResearchInspector(page: import("@playwright/test").Page) {
   const toolbar = page.getByRole("toolbar", { name: "ワークスペース配置" });
   await toolbar.getByRole("button", { name: "調査", exact: true }).click();
@@ -264,6 +308,65 @@ test("Knowledge relation pagination keeps the forty-first fetched relation actio
     return result.relations.find(relation => relation.id === last.id)?.status;
   }).toBe("confirmed");
 });
+
+for (const shell of ["desktop", "mobile"] as const) {
+  test(`${shell} move destinations exclude descendants and identify same-title paths`, async ({ page }) => {
+    if (shell === "mobile") await page.setViewportSize({ width: 390, height: 844 });
+    await ownerLogin(page, `/${shell}/`);
+    const origin = new URL(page.url()).origin;
+    const document = (title: string, kind: string, parentId: string | null) => ({
+      id: crypto.randomUUID(), revisionId: crypto.randomUUID(), title, kind, parentId, orderKey: title, markdown: title,
+    });
+    const volume = document("移動する巻", "volume", null);
+    const child = document("子章", "chapter", volume.id);
+    const grandchild = document("孫シーン", "scene", child.id);
+    const firstParent = document("別巻甲", "volume", null);
+    const secondParent = document("別巻乙", "volume", null);
+    const first = document("同名の章", "chapter", firstParent.id);
+    const second = document("同名の章", "chapter", secondParent.id);
+    const archive = await page.request.post("/api/v1/persistence/import", {
+      headers: { Origin: origin },
+      data: { format: "codexia-work/v1", project: { title: `Move ${crypto.randomUUID()}`, settings: {} },
+        documents: [volume, child, grandchild, firstParent, secondParent, first, second],
+        knowledge: { nodes: [], aliases: [], relations: [] },
+        evidence: { anchors: [], mentions: [], assertions: [], assertionEvidence: [], unresolved: { anchors: [], mentions: [], assertionEvidence: [] } },
+        moduleRecords: [], omittedRecords: [] },
+    });
+    expect(archive.status()).toBe(201);
+    const { project } = await archive.json() as { project: { id: string } };
+    const projectRoute = `/api/v1/persistence/projects/${project.id}/documents`;
+    await page.goto(`/${shell}/projects/${project.id}/scenes/${volume.id}${shell === "mobile" ? "?view=writing" : ""}`);
+    await expect(manuscriptEditor(page)).toContainText(volume.markdown);
+    if (shell === "mobile") await page.getByRole("button", { name: "構成", exact: true }).click();
+    const scope = shell === "mobile" ? page.locator("ion-modal.mobile-shell-reference-modal") : page.locator('[data-workspace-panel="outline"]');
+    await scope.getByText("選択文書の構成を変更", { exact: true }).click();
+    const targets = scope.getByLabel("移動先");
+    for (const unavailable of [volume, child, grandchild]) await expect(targets.locator(`option[value="${unavailable.id}"]`)).toHaveCount(0);
+    await expect(targets.locator(`option[value="${first.id}"]`)).toContainText("別巻甲");
+    await expect(targets.locator(`option[value="${second.id}"]`)).toContainText("別巻乙");
+
+    if (shell === "desktop") {
+      await targets.selectOption(first.id);
+      const candidate = await page.request.get(`${projectRoute}/${first.id}`);
+      expect(candidate.ok()).toBe(true);
+      const { document: current } = await candidate.json() as { document: { version: number } };
+      const reassigned = await page.request.patch(`${projectRoute}/${first.id}/metadata`, {
+        headers: { Origin: origin },
+        data: { parentId: child.id, expectedVersion: current.version },
+      });
+      expect(reassigned.ok()).toBe(true);
+      await scope.getByRole("button", { name: "文書を移動" }).click();
+      await expect(page.getByText("Document hierarchy cannot contain a cycle", { exact: true }).first()).toBeVisible();
+      await expect(targets).toHaveValue(first.id);
+      await targets.selectOption(second.id);
+      await scope.getByRole("button", { name: "文書を移動" }).click();
+      await expect.poll(async () => {
+        const response = await page.request.get(`${projectRoute}/${volume.id}`);
+        return ((await response.json()) as { document: { parentId: string | null } }).document.parentId;
+      }).toBe(second.id);
+    }
+  });
+}
 
 test("a 501-document PostgreSQL work opens its final scene through the canonical deep link", async ({page}) => {
   test.setTimeout(90000);
