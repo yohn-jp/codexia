@@ -580,10 +580,14 @@
 .mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-row,
 .mobile-shell .mobile-shell-reference-pane .pg-outline-row {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: stretch;
   gap: 2px;
 }
+.mobile-shell .pg-outline-zoom { min-height: 44px; padding: 6px; color: var(--mobile-muted); font-size: 10px; }
+.mobile-shell .pg-outline-search { display: block; margin-block-start: 10px; color: var(--mobile-muted); font-size: 12px; }
+.mobile-shell #pg-outline-search { width: 100%; min-height: 44px; margin-block-start: 4px; }
+.mobile-shell .pg-outline-breadcrumb { display: flex; flex-wrap: wrap; gap: 4px; margin-block: 8px; color: var(--mobile-muted); font-size: 12px; }
 .mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-toggle,
 .mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-spacer,
 .mobile-shell .mobile-shell-reference-pane .pg-outline-toggle,
