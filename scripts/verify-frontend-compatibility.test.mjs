@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assertBackendCompatibility, probeLiveDeployment, verifyFrontendCompatibility } from './verify-frontend-compatibility.mjs';
+import { assertBackendCompatibility, probeLiveDeployment, verifyFrontendCompatibility, frontendPreflightOutputs } from './verify-frontend-compatibility.mjs';
 
 const frontend = { format: 'codexia-frontend-identity/v1', version: '0.1.2', sourceSha: 'a'.repeat(40), profile: 'full', apiEpoch: 1 };
 const backend = { name: 'codexia', hosted: false, version: '0.1.3', profile: 'full', apiEpoch: 1 };
@@ -42,6 +42,19 @@ test('release admission still rejects incompatible epoch and skips exact deploye
   const exact = await verifyFrontendCompatibility({ frontend, env, fetchImpl: async (url, options) => normal(url, options) });
   assert.equal(exact.deploy, false);
   await assert.rejects(verifyFrontendCompatibility({ frontend: { ...frontend, apiEpoch: 2 }, env, fetchImpl: async (url, options) => normal(url, options) }), /API epochs are incompatible/);
+});
+
+test('promoted frontend keeps its PR producer identity while release source remains the merge SHA',async()=>{
+  const mergeSha='c'.repeat(40),producerSha='d'.repeat(40);
+  const promotedEnv={...env,GITHUB_SHA:mergeSha,CODEXIA_FRONTEND_PRODUCER_SHA:producerSha};
+  const promoted={...frontend,sourceSha:producerSha};
+  const result=await verifyFrontendCompatibility({frontend:promoted,env:promotedEnv,fetchImpl:async(url,options)=>
+    url.pathname==='/api/version'?normal(url,options):response({...promoted,version:'0.1.0',sourceSha:'e'.repeat(40)})
+  });
+  assert.equal(result.deploy,true);
+  assert.deepEqual(frontendPreflightOutputs(frontend),{frontendVersion:frontend.version,frontendSourceSha:frontend.sourceSha,
+    frontendProfile:frontend.profile,frontendApiEpoch:String(frontend.apiEpoch)});
+  await assert.rejects(verifyFrontendCompatibility({frontend:promoted,env:{...promotedEnv,CODEXIA_FRONTEND_PRODUCER_SHA:'f'.repeat(40)},fetchImpl:normal}),/artifact source mismatch/);
 });
 test('preflight distinguishes redirects, network failures, and invalid JSON', async () => {
   await assert.rejects(probeLiveDeployment({ env, fetchImpl: async url => url.pathname === '/api/version' ? new Response('', { status: 302, headers: { location: 'https://example.invalid/login' } }) : new Response('not JSON') }), /ACCESS_DENIED[\s\S]*IDENTITY_INVALID_JSON/);

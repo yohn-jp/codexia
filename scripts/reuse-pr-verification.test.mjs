@@ -150,6 +150,13 @@ test('rejected proof paths fail closed instead of accepting an older green or in
   }
 });
 
+test('merged PR source proof carries the verified merge time for artifact producer ordering', async () => {
+  const { args } = fixture(['package.json']);
+  const receipt = await verifyReusableMainProof(args);
+  assert.equal(receipt.mergedAt, new Date(merged).toISOString());
+  assert.equal(receipt.headRef,'feature/example');
+});
+
 test('selected producer and Full-model evidence must still be valid for full proof', async () => {
   const { state, args } = fixture(['package.json']);
   state.jobs.find(job => job.name.startsWith('full-model-oci / ')).conclusion = 'failure';

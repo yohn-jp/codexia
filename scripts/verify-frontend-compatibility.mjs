@@ -28,6 +28,12 @@ export function assertFrontendIdentity(identity) {
   return identity;
 }
 
+/** Nonsecret deployed identity fields passed from the protected preflight to the build selector. */
+export function frontendPreflightOutputs(identity) {
+  assertFrontendIdentity(identity);
+  return {frontendVersion:identity.version,frontendSourceSha:identity.sourceSha,frontendProfile:identity.profile,frontendApiEpoch:String(identity.apiEpoch)};
+}
+
 /** @param {string} version */
 function versionParts(version) {
   assert.ok(typeof version === 'string' && semver.test(version), 'Frontend version is invalid');
@@ -129,7 +135,7 @@ export async function probeLiveDeployment({ env = process.env, fetchImpl = fetch
  */
 export async function verifyFrontendCompatibility({ frontend, env = process.env, fetchImpl = fetch, mode = 'predeploy' }) {
   assertFrontendIdentity(frontend);
-  assert.equal(frontend.sourceSha, env.GITHUB_SHA, 'Frontend artifact source mismatch');
+  assert.equal(frontend.sourceSha, env.CODEXIA_FRONTEND_PRODUCER_SHA ?? env.GITHUB_SHA, 'Frontend artifact source mismatch');
   assert.equal(frontend.profile, 'full', 'Production frontend artifact must use the Full profile');
   if (mode === 'deployed') {
     const { origin, clientId, clientSecret } = readFrontendReleaseConfiguration(env);
@@ -154,6 +160,10 @@ async function main() {
     const { backend, deployed } = await probeLiveDeployment({ checkBoundary: true });
     const { apiEpoch } = JSON.parse(readFileSync(new URL('../deploy/frontend-compatibility.json', import.meta.url), 'utf8'));
     assertBackendCompatibility(backend, 'full', apiEpoch);
+    if(process.env.GITHUB_OUTPUT){
+      const outputs=frontendPreflightOutputs(deployed);
+      appendFileSync(process.env.GITHUB_OUTPUT,Object.entries(outputs).map(([key,value])=>key+'='+value+'\n').join(''));
+    }
     console.log(`Verified protected production identities: backend ${backend.version} (epoch ${backend.apiEpoch}), frontend ${deployed.version} (epoch ${deployed.apiEpoch}), candidate API epoch ${apiEpoch}; anonymous identity requests denied; out-of-scope CI requests blocked at Access or the edge.`);
     return;
   }
