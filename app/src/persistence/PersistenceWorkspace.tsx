@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { snapshotKey } from "@codexia/contracts";
@@ -108,6 +108,35 @@ function buildDocumentOutline(documents: readonly PersistenceDocument[]): Outlin
   // The document list already comes from PostgreSQL in order_key, id order.
   // Grouping preserves that sibling order, including ties and non-ASCII keys.
   return roots;
+}
+
+function filterDocumentOutline(items: readonly OutlineDocument[], query: string): OutlineDocument[] {
+  const normalized = query.trim().toLocaleLowerCase();
+  if (!normalized) return [...items];
+  return items.flatMap((item) => {
+    const children = filterDocumentOutline(item.children, normalized);
+    return item.title.toLocaleLowerCase().includes(normalized) || children.length > 0
+      ? [{ ...item, children }]
+      : [];
+  });
+}
+
+function findOutlineNode(items: readonly OutlineDocument[], id: string): OutlineDocument | null {
+  for (const item of items) {
+    if (item.id === id) return item;
+    const found = findOutlineNode(item.children, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+function outlineAncestors(items: readonly OutlineDocument[], id: string, ancestors: OutlineDocument[] = []): OutlineDocument[] | null {
+  for (const item of items) {
+    if (item.id === id) return ancestors;
+    const found = outlineAncestors(item.children, id, [...ancestors, item]);
+    if (found) return found;
+  }
+  return null;
 }
 
 interface PendingSave {
@@ -220,6 +249,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   projectIdRef.current = projectId;
   const [documents, setDocuments] = useState<PersistenceDocument[]>([]);
   const [collapsedDocumentIds, setCollapsedDocumentIds] = useState<Set<string>>(() => new Set());
+  const [outlineQuery, setOutlineQuery] = useState("");
+  const [outlineZoomRoot, setOutlineZoomRoot] = useState<string | null>(null);
+  const outlineTypeaheadRef = useRef({ value: "", at: 0 });
   const [documentId, setDocumentId] = useState("");
   const lastOutlineSelectionRef = useRef("");
   const [nodes, setNodes] = useState<KnowledgeNode[]>([]);
@@ -279,6 +311,10 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const selectedDocument = documents.find((candidate) => candidate.id === documentId) ?? null;
   const canCreateDocument = outlineReadyProject === projectId && !!projectId && documents.length < 999;
   const documentOutline = useMemo(() => buildDocumentOutline(documents), [documents]);
+  const filteredDocumentOutline = useMemo(() => filterDocumentOutline(documentOutline, outlineQuery), [documentOutline, outlineQuery]);
+  const zoomNode = outlineZoomRoot ? findOutlineNode(documentOutline, outlineZoomRoot) : null;
+  const visibleDocumentOutline = zoomNode ? [filterDocumentOutline([zoomNode], outlineQuery)[0] ?? zoomNode] : filteredDocumentOutline;
+  const zoomAncestors = outlineZoomRoot ? (outlineAncestors(documentOutline, outlineZoomRoot) ?? []) : [];
   useEffect(() => {
     if (!documentId || !projectId) {
       lastOutlineSelectionRef.current = "";
@@ -1482,6 +1518,8 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     updateRouteSelection(selectionRef.current, false);
     setDocumentId("");
     setProjectId(nextProjectId);
+    setOutlineQuery("");
+    setOutlineZoomRoot(null);
     setReading(false);
   };
 
@@ -1569,7 +1607,44 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     "--editor-font-family": editorFontFamily,
     "--reader-max-width": `${typography.maxWidth}px`,
   } as CSSProperties;
-  const renderOutline = (items: OutlineDocument[]): ReactNode => items.map((item) => {
+  const handleOutlineKeyDown = (event: KeyboardEvent<HTMLUListElement>): void => {
+    if (event.nativeEvent.isComposing) return;
+    const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(".pg-outline-document")];
+    const current = event.target instanceof HTMLButtonElement && event.target.classList.contains("pg-outline-document") ? event.target : null;
+    if (!current) return;
+    const index = buttons.indexOf(current);
+    if (event.key === "Enter") { event.preventDefault(); current.click(); return; }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      const next = event.key === "ArrowDown" ? index + 1 : event.key === "ArrowUp" ? index - 1 : event.key === "Home" ? 0 : buttons.length - 1;
+      buttons[Math.max(0, Math.min(buttons.length - 1, next))]?.focus();
+      return;
+    }
+    const item = current.closest<HTMLElement>(".pg-outline-item");
+    if (event.key === "ArrowRight" && item) {
+      event.preventDefault();
+      const toggle = item.querySelector<HTMLButtonElement>(":scope > .pg-outline-row > .pg-outline-toggle");
+      if (toggle?.getAttribute("aria-expanded") === "false") toggle.click();
+      else buttons[index + 1]?.focus();
+      return;
+    }
+    if (event.key === "ArrowLeft" && item) {
+      event.preventDefault();
+      const toggle = item.querySelector<HTMLButtonElement>(":scope > .pg-outline-row > .pg-outline-toggle");
+      if (toggle?.getAttribute("aria-expanded") === "true") toggle.click();
+      else item.parentElement?.closest<HTMLElement>(".pg-outline-item")?.querySelector<HTMLButtonElement>(":scope > .pg-outline-row > .pg-outline-document")?.focus();
+      return;
+    }
+    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const now = Date.now();
+      const typeahead = outlineTypeaheadRef.current;
+      typeahead.value = now - typeahead.at < 700 ? typeahead.value + event.key : event.key;
+      typeahead.at = now;
+      const match = buttons.find((button) => button.textContent?.trim().toLocaleLowerCase().startsWith(typeahead.value.toLocaleLowerCase()));
+      if (match) { event.preventDefault(); match.focus(); }
+    }
+  };
+  const renderOutline = (items: OutlineDocument[], forceExpanded = false): ReactNode => items.map((item) => {
     const hasChildren = item.children.length > 0;
     const collapsed = collapsedDocumentIds.has(item.id);
     return <li key={item.id} className="pg-outline-item" data-kind={item.kind} data-document-id={item.id}>
@@ -1583,13 +1658,15 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
             return next;
           })}>{collapsed ? "›" : "⌄"}</button> : <span className="pg-outline-spacer" aria-hidden="true" />}
         <button type="button" className={`pg-outline-document${item.id === documentId ? " is-selected" : ""}`}
+          tabIndex={item.id === documentId ? 0 : -1}
           aria-current={item.id === documentId ? "page" : undefined}
           onClick={() => void selectDocument(item.id)}>
           <span>{item.title}</span>
           <small>{item.misplaced ? `未配置 · ${documentKindLabel(item.kind)}` : documentKindLabel(item.kind)}</small>
         </button>
+        {hasChildren && <button type="button" className="pg-outline-zoom" aria-label={`${item.title}を拡大`} onClick={() => setOutlineZoomRoot(item.id)}>拡大</button>}
       </div>
-      {hasChildren && !collapsed ? <ul className="pg-document-children">{renderOutline(item.children)}</ul> : null}
+      {hasChildren && (forceExpanded || !collapsed) ? <ul className="pg-document-children">{renderOutline(item.children, forceExpanded)}</ul> : null}
     </li>;
   });
   const library = (<aside className="pg-library" aria-label="作品と文書">
@@ -1646,7 +1723,14 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
           </details>
           {outlineError && <p className="pg-alert" role="alert">{outlineError}</p>}
           {!outlineError && documents.length >= 999 && <p>現在の作品構成上限に達しています。文書を追加できません。</p>}
-          <ul className="pg-document-list">{renderOutline(documentOutline)}</ul>
+          <label className="pg-outline-search" htmlFor="pg-outline-search">構成を検索</label>
+          <input id="pg-outline-search" value={outlineQuery} onChange={(event) => setOutlineQuery(event.target.value)} placeholder="文書名を検索" />
+          {project && <nav className="pg-outline-breadcrumb" aria-label="構成の階層">
+            <button type="button" onClick={() => setOutlineZoomRoot(null)} aria-current={outlineZoomRoot ? undefined : "page"}>全体</button>
+            {zoomAncestors.map((ancestor) => <span key={ancestor.id}><span aria-hidden="true"> › </span><button type="button" onClick={() => setOutlineZoomRoot(ancestor.id)}>{ancestor.title}</button></span>)}
+            {zoomNode && <span><span aria-hidden="true"> › </span><strong>{zoomNode.title}</strong></span>}
+          </nav>}
+          <ul className="pg-document-list" onKeyDown={handleOutlineKeyDown}>{renderOutline(visibleDocumentOutline, Boolean(outlineQuery || outlineZoomRoot))}</ul>
           {journal && active && <PersistenceLegacyDraftImport
             targetKey={JSON.stringify([authorScope, projectId, active.document.id, active.revision.id])}
             targetLabel={`${project.title} / ${active.document.title}`}

@@ -4,6 +4,40 @@ import { createWritingFixture, openRevisionHistory, ownerLogin, manuscriptEditor
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
 
+test("outline supports guarded keyboard navigation, search, zoom and mobile sizing", async ({ page }) => {
+  expect(databaseUrl).toBeTruthy();
+  const fixture = await createWritingFixture(page, "desktop", `Outline ${crypto.randomUUID()}`);
+  const headers = { Origin: new URL(page.url()).origin };
+  const create = async (parentId: string | undefined, kind: string, title: string, orderKey: string) => {
+    const response = await page.request.post(`/api/v1/persistence/projects/${fixture.project.id}/documents`, { headers: { ...headers, "Idempotency-Key": crypto.randomUUID() }, data: { ...(parentId ? { parentId } : {}), kind, title, orderKey, markdown: "" } });
+    expect(response.status()).toBe(201);
+    return (await response.json() as { document: { id: string; title: string } }).document;
+  };
+  const volume = await create(undefined, "volume", "Volume One", "0");
+  const chapter = await create(volume.id, "chapter", "Chapter One", "0");
+  const nestedScene = await create(chapter.id, "scene", `Outline scene ${crypto.randomUUID()}`, "0");
+  await page.goto(`/desktop/projects/${fixture.project.id}/scenes/${nestedScene.id}`);
+  const outline = page.locator('[data-workspace-panel="outline"]');
+  const rows = outline.locator(".pg-outline-document");
+  await rows.first().focus();
+  await rows.first().press("ArrowDown");
+  await expect(rows.nth(1)).toBeFocused();
+  await rows.nth(1).press("Home");
+  await expect(rows.first()).toBeFocused();
+  await outline.getByLabel("構成を検索").fill(nestedScene.title);
+  await expect(outline.locator(".pg-outline-document")).toHaveCount(3);
+  await expect(outline.getByRole("button", { name: `${nestedScene.title} シーン` })).toBeVisible();
+  await outline.getByRole("button", { name: "Chapter Oneを拡大" }).click();
+  await expect(outline.getByRole("navigation", { name: "構成の階層" })).toContainText("Chapter One");
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.goto(`/mobile/projects/${fixture.project.id}/scenes/${nestedScene.id}?view=writing`);
+  await expect(page.getByRole("heading", { name: nestedScene.title, exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "構成" }).click();
+  await expect(page.locator(".pg-outline-document").first()).toBeVisible();
+  await page.evaluate(() => { document.body.style.zoom = "200%"; });
+  await expect(page.locator(".pg-outline-document").first()).toBeVisible();
+});
+
 async function openResearchInspector(page: import("@playwright/test").Page) {
   const toolbar = page.getByRole("toolbar", { name: "ワークスペース配置" });
   await toolbar.getByRole("button", { name: "調査", exact: true }).click();
