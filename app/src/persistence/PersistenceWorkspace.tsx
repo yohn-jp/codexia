@@ -914,6 +914,9 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       setProjectId(result.project.id);
       setDocumentId("");
       setProjectTitle("");
+      if (mode === "mobile" && projects.length === 0) {
+        setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
+      }
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "作品を作成できませんでした。");
     } finally {
@@ -1031,6 +1034,9 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       persistSelectionSafely(authorScope, selectionRef.current);
       updateRouteSelection(selectionRef.current, false);
       setDocumentId(result.document.id);
+      if (mode === "mobile" && documents.length === 0) {
+        setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
+      }
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "文書を作成できませんでした。");
     } finally {
