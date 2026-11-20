@@ -744,6 +744,9 @@ describe("Codexia HTTP boundary", () => {
     const projects = await fetch(`${apiServer.base}/api/projects`, { headers: readerHeaders });
     assert.equal(projects.status, 200);
     assert.deepEqual(await projects.json(), [native.project]);
+    const projectPage = await fetch(`${apiServer.base}/api/projects?page=1&limit=20`, { headers: readerHeaders });
+    assert.equal(projectPage.status, 200);
+    assert.deepEqual(await projectPage.json(), { projects: [native.project], nextCursor: null });
     const otherRepository = await fetch(`${apiServer.base}/api/projects/another-project/tree`, { headers: readerHeaders });
     assert.equal(otherRepository.status, 404);
     const ambiguous = await fetch(`${apiServer.base}/api/projects`, {

@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ReorderHierarchyInput } from "@codexia/core";
-import type { Persistence } from "@codexia/persistence-contracts";
+import type { Persistence, ProjectPageCursor } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema } from "@codexia/persistence-postgres";
 export { inspectFreshPostgresSchema, initializeFreshPostgresSchema, packagedMigrationFingerprint, verifyPostgresSchema } from "@codexia/persistence-postgres";
 import { ModuleRuntime, type ActionHostContext, type DomainJobActionExecutor, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
@@ -23,6 +23,7 @@ import { HistoricalModelUsageStore } from "./historical-store.js";
 import { JobHistoryError, JobHistoryStore, type JobEvent } from "./job-history-store.js";
 import { RecentActivityStore } from "./recent-activity-store.js";
 import { handlePersistenceRoute } from "./persistence-routes.js";
+import { decodeProjectPageCursor, encodeProjectPageCursor } from "./project-pagination.js";
 import {
   createHostedAuthorizationPolicy,
   HostedAuthorizationError,
@@ -1762,7 +1763,22 @@ export function createServer(options: ApiServerOptions): Server {
       }
       return;
     }
-    if (routePath === "/api/projects" && method === "GET") { sendJson(response, 200, await listProjects()); return; }
+    if (routePath === "/api/projects" && method === "GET") {
+      const pageRequested = query.get("page") === "1" || query.has("cursor");
+      if (query.has("page") && query.get("page") !== "1") throw httpFailure(400, "INVALID_QUERY", "page must be 1 when requesting project pagination");
+      if (!pageRequested) { sendJson(response, 200, await listProjects()); return; }
+      const limit = boundedInt(query.get("limit"), 200, 1, 200);
+      let cursor: ProjectPageCursor | undefined;
+      try { cursor = decodeProjectPageCursor(query.get("cursor")); }
+      catch { throw httpFailure(400, "INVALID_CURSOR", "Project cursor is invalid"); }
+      if (hosted) {
+        sendJson(response, 200, { projects: await listProjects(), nextCursor: null });
+        return;
+      }
+      const page = await options.store.listProjectsPage(limit, cursor);
+      sendJson(response, 200, { projects: page.projects, nextCursor: page.nextCursor ? encodeProjectPageCursor(page.nextCursor) : null });
+      return;
+    }
     if (routePath === "/api/projects" && method === "POST") {
       if (hosted) throw httpFailure(403, "HOSTED_ASSIGNMENT_IMMUTABLE", "Hosted runtimes can only use their assigned project");
       await requireWritePermission();

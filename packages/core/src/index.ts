@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { KNOWLEDGE_CONTEXT_PATH, projectKnowledgeContext } from "./knowledge-context.js";
 import YAML from "yaml";
 import { assertChangeOperation, assertProjectPath, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type FileChange, type MutationCoordinator } from "@codexia/contracts";
-import { PersistenceError, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
+import { PersistenceError, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
 import { createSnapshotIndex, estimateSnapshotIndexBytes, type SnapshotIndex } from "./snapshot-index.js";
 export type { Project } from "@codexia/persistence-contracts";
@@ -205,6 +205,17 @@ export class CoreStore implements MutationCoordinator {
   private snapshotIndexBytes = 0;
   constructor(options: CoreStoreOptions) { this.persistence = options.persistence; }
   async listProjects(): Promise<Project[]> { return [...await this.persistence.read((reader) => reader.listProjects(200))]; }
+  async listProjectsPage(limit = 100, after?: ProjectPageCursor): Promise<{ projects: Project[]; nextCursor: ProjectPageCursor | null }> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new RangeError("Project page size must be between 1 and 200");
+    const rows = await this.persistence.read((reader) => {
+      if (!reader.listProjectPage) throw new Error("Project pagination is unavailable from this persistence adapter");
+      return reader.listProjectPage(limit + 1, after);
+    });
+    const hasMore = rows.length > limit;
+    const projects = [...rows.slice(0, limit)];
+    const last = projects.at(-1);
+    return { projects, nextCursor: hasMore && last ? { updatedAt: last.updatedAt, id: last.id } : null };
+  }
   async createProject(input: {title: string; settings?: JsonObject}): Promise<Project> { return this.persistence.transaction((tx) => tx.createProject(input)); }
   private async currentManifest(reader: PersistenceReader, projectId: string, knownProject?: Project): Promise<Manifest> {
     const project = knownProject ?? await reader.getProject(pid(projectId));

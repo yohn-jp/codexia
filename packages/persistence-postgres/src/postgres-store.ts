@@ -40,6 +40,7 @@ import {
   type PersistenceReader,
   type PersistenceTransaction,
   type Project,
+  type ProjectPageCursor,
   type ProjectId,
   type RevisionId,
   type RestoreDocumentRevisionCommand,
@@ -550,6 +551,23 @@ class PostgresTransaction implements PersistenceTransaction {
   async listProjects(limit = 100): Promise<readonly Project[]> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw validationError("Project page size must be between 1 and 200");
     const result = await this.query("SELECT * FROM project ORDER BY updated_at DESC, id LIMIT $1", [limit]);
+    return result.rows.map(mapProject);
+  }
+
+  async listProjectPage(limit: number, after?: ProjectPageCursor): Promise<readonly Project[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 201) throw validationError("Project page read must be between 1 and 201");
+    if (after && (!Number.isFinite(Date.parse(after.updatedAt)) || new Date(after.updatedAt).toISOString() !== after.updatedAt ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(after.id))) {
+      throw validationError("Project page cursor is invalid");
+    }
+    const result = await this.query(
+      `SELECT * FROM project
+       WHERE ($2::timestamptz IS NULL OR date_trunc('milliseconds',updated_at) < $2::timestamptz OR
+         (date_trunc('milliseconds',updated_at) = $2::timestamptz AND id > $3::uuid))
+       ORDER BY date_trunc('milliseconds',updated_at) DESC, id ASC
+       LIMIT $1`,
+      [limit, after?.updatedAt ?? null, after?.id ?? null],
+    );
     return result.rows.map(mapProject);
   }
 

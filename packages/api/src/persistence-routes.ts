@@ -13,6 +13,7 @@ import {
 } from "@codexia/persistence-contracts";
 import { planKnowledgeMerge, applyKnowledgeMerge } from "./knowledge-merge.js";
 import { WorkArchiveError, exportWorkArchive, importWorkArchive } from "./work-archive.js";
+import { decodeProjectPageCursor, encodeProjectPageCursor } from "./project-pagination.js";
 import {
   NativeKnowledgeServiceError, applyNativeChangeSet, approveNativeChangeSet, getNativeChangeSet,
   getNativeAssertion, getNativeKnowledgeNode, listNativeEvidenceForAssertion, listNativeEvidenceForDocument,
@@ -142,6 +143,26 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
     }
     if (url.pathname === "/api/v1/persistence/projects") {
       if (input.method === "GET") {
+        const pageRequested = url.searchParams.get("page") === "1" || url.searchParams.has("cursor");
+        if (url.searchParams.has("page") && url.searchParams.get("page") !== "1") failure(400, "INVALID_QUERY", "page must be 1 when requesting project pagination");
+        if (pageRequested) {
+          const limit = requestLimit(url.searchParams.get("limit"), 200, 200);
+          let cursor;
+          try { cursor = decodeProjectPageCursor(url.searchParams.get("cursor")); }
+          catch { failure(400, "INVALID_CURSOR", "Project cursor is invalid"); }
+          if (input.assignedProjectId) {
+            const project = await persistence.read((reader) => reader.getProject(input.assignedProjectId! as ProjectId));
+            return { status: 200, body: { projects: project ? [project] : [], nextCursor: null } };
+          }
+          const rows = await persistence.read((reader) => {
+            if (!reader.listProjectPage) failure(503, "PROJECT_PAGINATION_UNAVAILABLE", "Project pagination is unavailable");
+            return reader.listProjectPage(limit + 1, cursor);
+          });
+          const hasMore = rows.length > limit;
+          const projects = rows.slice(0, limit);
+          const last = projects.at(-1);
+          return { status: 200, body: { projects, nextCursor: hasMore && last ? encodeProjectPageCursor({ updatedAt: last.updatedAt, id: last.id }) : null } };
+        }
         const limit = requestLimit(url.searchParams.get("limit"), 100, 200);
         if (input.assignedProjectId) {
           const project = await persistence.read((reader) => reader.getProject(input.assignedProjectId! as ProjectId));

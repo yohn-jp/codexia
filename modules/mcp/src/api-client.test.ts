@@ -73,6 +73,30 @@ test("stdio API client can bind a requested owner project", async () => {
   assert.equal(client.forProject("project-two").projectId, "project-two");
 });
 
+test("stdio API client follows bounded project pages and accepts the legacy array response", async () => {
+  const calls: string[] = [];
+  const cursor = Buffer.from(JSON.stringify({ updatedAt: "2026-11-20T00:00:00.000Z", id: "00000000-0000-4000-8000-000000000001" })).toString("base64url");
+  const fetcher: typeof fetch = async (input) => {
+    const url = String(input);
+    calls.push(url);
+    const query = new URL(url).searchParams;
+    if (query.get("cursor") === cursor) return Response.json({ projects: [{ id: "project-two", title: "Two" }], nextCursor: null });
+    return Response.json({ projects: [{ id: "project-one", title: "One" }], nextCursor: cursor });
+  };
+  const client = new ApiClient({ baseUrl: "https://codexia.test", token: "test-token", fetch: fetcher });
+  const first = await client.listProjectPage(1);
+  assert.deepEqual(first.projects, [{ id: "project-one", title: "One" }]);
+  assert.equal(first.nextCursor, cursor);
+  const second = await client.listProjectPage(1, first.nextCursor ?? undefined);
+  assert.deepEqual(second, { projects: [{ id: "project-two", title: "Two" }], nextCursor: null });
+  assert.equal(new URL(calls[0]!).searchParams.get("page"), "1");
+  assert.equal(new URL(calls[0]!).searchParams.get("limit"), "1");
+  assert.equal(new URL(calls[1]!).searchParams.get("cursor"), cursor);
+
+  const legacy = new ApiClient({ baseUrl: "https://codexia.test", token: "test-token", fetch: async () => Response.json([{ id: "project-one", title: "One" }]) });
+  assert.deepEqual(await legacy.listProjectPage(), { projects: [{ id: "project-one", title: "One" }], nextCursor: null });
+});
+
 test("stdio API client forwards MCP cancellation to each fetch", async () => {
   const observed: Array<AbortSignal | null | undefined> = [];
   const fetcher: typeof fetch = async (_input, init = {}) => {
