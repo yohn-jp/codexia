@@ -1,0 +1,9 @@
+---
+- name: Test protected API token rotation input validation
+  hosts: all
+  gather_facts: false
+  vars:
+    codexia_api_auth_token_rotation_file: "{{ lookup('env', 'CODEXIA_TEST_API_AUTH_TOKEN_FILE') }}"
+  tasks:
+    - name: Validate protected replacement API token input
+      ansible.builtin.import_tasks: validate-api-auth-token-rotation-inputs.yml

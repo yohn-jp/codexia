@@ -1,0 +1,28 @@
+---
+- name: Require a private control-node file for the replacement API token
+  ansible.builtin.assert:
+    that:
+      - codexia_api_auth_token_rotation_file is string
+      - codexia_api_auth_token_rotation_file.startswith('/')
+  no_log: true
+- name: Inspect replacement token file metadata without reading its contents
+  ansible.builtin.stat:
+    path: "{{ codexia_api_auth_token_rotation_file }}"
+    follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  register: api_auth_token_rotation_input
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+- name: Require a regular protected token file with bounded size
+  ansible.builtin.assert:
+    that:
+      - api_auth_token_rotation_input.stat.isreg | default(false)
+      - not (api_auth_token_rotation_input.stat.islnk | default(false))
+      - api_auth_token_rotation_input.stat.mode in ['0400', '0600']
+      - api_auth_token_rotation_input.stat.size >= 32
+      - api_auth_token_rotation_input.stat.size <= 8193
+  no_log: true

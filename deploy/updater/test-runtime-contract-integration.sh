@@ -269,11 +269,17 @@ OWNED_UNITS=(
 
 cat > "$WORK_DIR/image/health.mjs" <<'EOF'
 import http from 'node:http';
+import { readFileSync } from 'node:fs';
 const version={name:'codexia',version:'0.1.0',profile:process.env.CODEXIA_PROFILE,hosted:false,apiEpoch:1,browserAuth:'token'};
+const authToken=readFileSync(process.env.CODEXIA_AUTH_TOKEN_FILE,'utf8').trim();
 http.createServer((request,response)=>{
   const route=new URL(request.url,'http://localhost').pathname;
   if(route==='/health/ready'){response.writeHead(200,{'Content-Type':'text/plain'});response.end('ready');return;}
   if(route==='/api/version'){response.writeHead(200,{'Content-Type':'application/json'});response.end(JSON.stringify(version));return;}
+  if(route==='/api/v1/persistence/status'){
+    if(request.headers.authorization!==`Bearer ${authToken}`){response.writeHead(401,{'Content-Type':'application/json'});response.end(JSON.stringify({code:'UNAUTHORIZED'}));return;}
+    response.writeHead(200,{'Content-Type':'application/json'});response.end(JSON.stringify({available:true,provider:'postgres'}));return;
+  }
   response.writeHead(404);response.end();
 }).listen(Number(process.env.PORT||3000),process.env.HOST||'0.0.0.0');
 EOF
@@ -291,7 +297,7 @@ IMAGE_ID="$(normalize_image_id "$(podman image inspect --format '{{.Id}}' "$IMAG
 image_label="$(podman image inspect --format '{{ index .Labels "codexia.runtime-contract-test" }}' "$IMAGE_TAG")"
 [[ "$image_label" == "$NONCE" ]] || die 'synthetic fixture image ownership label mismatch'
 
-printf '%s\n' 'synthetic secret fixture' > "$WORK_DIR/secret"
+printf '%s\n' 'synthetic-runtime-auth-token-fixture-0123456789' > "$WORK_DIR/secret"
 podman secret create codexia-auth-token "$WORK_DIR/secret" >/dev/null
 OWNED_SECRETS+=(codexia-auth-token)
 INITIAL_APP_PASSWORD="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
@@ -747,4 +753,4 @@ CODEXIA_RUNTIME_MAINTENANCE_IMAGE="$IMAGE_ID" \
 CODEXIA_RUNTIME_MAINTENANCE_NONCE="$NONCE" \
   node "$SCRIPT_DIR/test-standalone-maintenance-integration.mjs" --run "$REPO_ROOT" "$QUADLET_DIR" "$USER_UNIT_DIR" "$WORK_DIR"
 
-printf 'PASS: pinned synthetic Core/Full Quadlets, rootless Podman/systemd, effective resource limits, read-only models, blue/green persistence, fail-closed locked boot recovery after process kill, real timer verification, PostgreSQL app-password authentication and immutable secret rotation, crash recovery through the systemd boot unit, preserved database identity/data, and post-update restart\n'
+printf 'PASS: pinned synthetic Core/Full Quadlets, rootless Podman/systemd, effective resource limits, read-only models, blue/green persistence, fail-closed locked boot recovery after process kill, real timer verification, PostgreSQL app-password authentication and immutable secret rotation, standalone API-token old/new authentication and immutable secret rotation, rollback and completed-marker crash recovery through the systemd boot unit, preserved database identity/data, and post-update restart\n'

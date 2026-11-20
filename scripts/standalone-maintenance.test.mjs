@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
-import {probeCredentialFiles,validateProbeCredential,validatePostgresAppPassword,validateAppPasswordRotationManifest,validatePostgresAppPasswordRotation,assertProbeCredentialAccess,recoverProbeCredentialWriter,assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig} from '../deploy/updater/standalone-maintenance.mjs';
-import {assertProxyRuntimeObservation,PodmanStandaloneHost} from '../deploy/updater/standalone-host.mjs';
-import {mkdtemp,rm,writeFile,readFile} from 'node:fs/promises';
+import {probeCredentialFiles,validateProbeCredential,validatePostgresAppPassword,validateAppPasswordRotationManifest,validatePostgresAppPasswordRotation,assertProbeCredentialAccess,recoverProbeCredentialWriter,assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig,validateStandaloneAuthToken,transitionAuthTokenWriter,validateApiAuthTokenRotationManifest,saveApiAuthTokenSnapshot,loadApiAuthTokenSnapshot} from '../deploy/updater/standalone-maintenance.mjs';
+import {assertApiAuthTokenSecretIdentity,assertProxyRuntimeObservation,PodmanStandaloneHost} from '../deploy/updater/standalone-host.mjs';
+import {mkdir,mkdtemp,rm,writeFile,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 
@@ -37,6 +38,110 @@ test('maintenance preserves enabled state and immutable release and auth inputs'
     {observeMilliseconds:1000},
     {observeMilliseconds:4000000},
   ])assert.throws(()=>validateMaintenanceConfig(current,{...candidate,...patch}));
+});
+
+test('standalone auth token validation accepts only the API contract',()=>{
+  const token='new-standalone-auth-token-0123456789';
+  assert.ok(validateStandaloneAuthToken(token)===token,'Valid standalone API token was changed');
+  assert.ok(validateStandaloneAuthToken(token+'\n')===token+'\n','Optional final LF was not preserved');
+  for(const invalid of ['', 'short', ' leading-token-'+('x'.repeat(32)), 'x'.repeat(31)+'\n', 'x'.repeat(32)+'\n\n', 'x'.repeat(32)+'\u00e9']) {
+    assert.throws(()=>validateStandaloneAuthToken(invalid));
+  }
+});
+
+test('API token writer transition tests new and stale credentials while fenced',async()=>{
+  const events=[];
+  const host={
+    async route(value){events.push('route:'+value);},
+    async stopWriter(slot){events.push('stop:'+slot);},
+    async replaceApiAuthToken(token){events.push('replace:'+String(token===newToken));},
+    async startWriter(slot){events.push('start:'+slot);},
+    async verifyWriterUnits(){events.push('units');},
+    async verifyApiAuthToken(slot,token,status){events.push(`auth:${slot}:${String(token===newToken)}:${status}`);},
+  };
+  const state={journal:{active:{slot:'green',image:release.image}},installed:release};
+  const oldToken='old-standalone-auth-token-0123456789';
+  const newToken='new-standalone-auth-token-0123456789';
+  await transitionAuthTokenWriter({host,state,oldToken,newToken,verify:async()=>events.push('serving')});
+  assert.deepEqual(events,['route:blocked','stop:green','replace:true','start:green','units',
+    'auth:green:true:200','auth:green:false:401','route:green','serving']);
+});
+
+test('API token completed-marker interruption is bound to prior-token snapshot cleanup',async()=>{
+  const root=await mkdtemp(path.join(tmpdir(),'codexia-api-token-completion-hook-'));
+  const markerPath=path.join(root,'maintenance','in-progress.json');
+  const snapshotFile=path.join(root,'snapshots','operation','api-auth-token');
+  await mkdir(path.dirname(snapshotFile),{recursive:true});
+  await mkdir(path.dirname(markerPath),{recursive:true});
+  const marker={format:'codexia-maintenance-api-auth-token/v1',phase:'completed',rotation:{previousTokenFile:snapshotFile}};
+  await writeFile(markerPath,JSON.stringify(marker));
+  await writeFile(snapshotFile,'synthetic rollback token');
+  const preloadUrl=new URL('../deploy/updater/test-standalone-maintenance-preload.mjs',import.meta.url).href;
+  const source=`import {installApiAuthTokenCompletionInterruption} from ${JSON.stringify(preloadUrl)};\n`+
+    `import {unlink} from 'node:fs/promises';\n`+
+    `installApiAuthTokenCompletionInterruption(process.argv[1]);\n`+
+    `await unlink(process.argv[2]);\n`;
+  try{
+    const child=spawnSync(process.execPath,['--input-type=module','-e',source,markerPath,snapshotFile],{encoding:'utf8'});
+    assert.equal(child.signal,'SIGKILL','The hook must terminate at the prior-token snapshot unlink');
+    assert.deepEqual(JSON.parse(await readFile(markerPath,'utf8')),marker,'The completed marker must remain durable');
+    assert.equal(await readFile(snapshotFile,'utf8'),'synthetic rollback token','The prior-token snapshot must remain available for boot recovery');
+  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('API token rotation manifest admits only its fixed private staged input',()=>{
+  const root='/home/codexia/.config/codexia-updater/maintenance/candidates/api-token';
+  const manifest={format:'codexia-updater-maintenance/v1',rotateApiAuthToken:true,candidateRoot:root,
+    configPath:'/home/codexia/.config/codexia-updater/config.json',sourceDir:'/opt/codexia-updater',
+    unitDir:'/home/codexia/.config/systemd/user',apiAuthTokenFile:root+'/credentials/api-auth-token'};
+  const args={manifest,manifestPath:root+'/manifest.json',serviceHome:'/home/codexia'};
+  assert.deepEqual(validateApiAuthTokenRotationManifest(args.manifest,args.manifestPath,args.serviceHome),{apiAuthTokenFile:manifest.apiAuthTokenFile});
+  for(const patch of [{apiAuthTokenFile:'/tmp/token'}, {unitDir:'/tmp/systemd'}, {rotateApiAuthToken:false}, {configPath:'/tmp/config.json'}]) {
+    assert.throws(()=>validateApiAuthTokenRotationManifest({...manifest,...patch},args.manifestPath,args.serviceHome));
+  }
+});
+
+test('API token rotation snapshots bind both tokens to the exact controller and survive interruption',async()=>{
+  const root=await mkdtemp(path.join(tmpdir(),'api-token-rotation-snapshot-'));
+  const {randomUUID}=await import('node:crypto');
+  const config={...current,stateFile:path.join(root,'state','controller.json'),publicKeyFile:path.join(root,'private','channel.pem')};
+  const state={installed:release,journal:{phase:'committed',active:{slot:'blue',image:release.image}},paused:true,lastError:null};
+  const previousToken='old-standalone-auth-token-0123456789';
+  const replacementToken='new-standalone-auth-token-0123456789';
+  const snapshot={operationId:randomUUID(),originalSecretId:'secret-id-previous',previousDigest:'a'.repeat(64),replacementDigest:'b'.repeat(64)};
+  const {createHash}=await import('node:crypto');
+  snapshot.previousDigest=createHash('sha256').update(previousToken).digest('hex');
+  snapshot.replacementDigest=createHash('sha256').update(replacementToken).digest('hex');
+  try{
+    const marker=await saveApiAuthTokenSnapshot({config,state,snapshot,previousToken,replacementToken,timer:{active:'inactive',enabled:'disabled'}});
+    assert.ok(!JSON.stringify(marker).includes(previousToken));
+    assert.ok(!JSON.stringify(marker).includes(replacementToken));
+    const loaded=await loadApiAuthTokenSnapshot({config,state,marker});
+    for(const key of Object.keys(snapshot))assert.equal(loaded.snapshot[key],snapshot[key]);
+    assert.ok(loaded.previousToken===previousToken,'Previous API token snapshot changed');
+    assert.ok(loaded.replacementToken===replacementToken,'Replacement API token snapshot changed');
+    await assert.rejects(loadApiAuthTokenSnapshot({config,state:{...state,lastError:'drift'},marker}),/controller snapshot/i);
+    await writeFile(marker.rotation.replacementTokenFile,'different-standalone-token-0123456789');
+    await assert.rejects(loadApiAuthTokenSnapshot({config,state,marker}),/snapshot/i);
+  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('API token recovery accepts the untouched original secret only for rolled-back state',async()=>{
+  const operationId='4e170b80-c68c-4b3e-96a0-8a04942dd8b7';
+  const previousToken='old-standalone-auth-token-0123456789';
+  const replacementToken='new-standalone-auth-token-0123456789';
+  const {createHash}=await import('node:crypto');
+  const snapshot={operationId,originalSecretId:'secret-id-original',
+    previousDigest:createHash('sha256').update(previousToken).digest('hex'),
+    replacementDigest:createHash('sha256').update(replacementToken).digest('hex')};
+  const original={id:snapshot.originalSecretId,owner:undefined,token:previousToken};
+  const ownedPrevious={id:'secret-id-restored',owner:operationId,token:previousToken};
+  const ownedReplacement={id:'secret-id-replacement',owner:operationId,token:replacementToken};
+  assert.doesNotThrow(()=>assertApiAuthTokenSecretIdentity(original,snapshot,snapshot.previousDigest));
+  assert.doesNotThrow(()=>assertApiAuthTokenSecretIdentity(ownedPrevious,snapshot,snapshot.previousDigest));
+  assert.doesNotThrow(()=>assertApiAuthTokenSecretIdentity(ownedReplacement,snapshot,snapshot.replacementDigest));
+  assert.throws(()=>assertApiAuthTokenSecretIdentity(original,snapshot,snapshot.replacementDigest));
+  assert.throws(()=>assertApiAuthTokenSecretIdentity({...ownedReplacement,owner:undefined},snapshot,snapshot.replacementDigest));
 });
 
 test('approved locked maintenance accepts only a valid same-profile runtime contract change',()=>{

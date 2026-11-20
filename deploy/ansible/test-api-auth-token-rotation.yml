@@ -1,0 +1,12 @@
+---
+- name: Test API token rotation approval gates before staging
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    journal:
+      stat:
+        exists: true
+  tasks:
+    - name: Exercise the production API token rotation approval gate
+      ansible.builtin.import_tasks: rotate-api-auth-token.yml

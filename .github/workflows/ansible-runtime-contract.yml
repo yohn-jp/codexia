@@ -17,6 +17,11 @@ on:
       - deploy/ansible/initialize-fresh.yml
       - deploy/ansible/maintenance.yml
       - deploy/ansible/rotate-probe-credentials.yml
+      - deploy/ansible/rotate-api-auth-token.yml
+      - deploy/ansible/validate-api-auth-token-rotation-inputs.yml
+      - deploy/ansible/test-api-auth-token-rotation.yml
+      - deploy/ansible/test-api-auth-token-rotation-inputs.yml
+      - deploy/ansible/inventory.example.yml
       - deploy/ansible/verify.yml
       - deploy/ansible/verify-updater-inputs.yml
       - deploy/ansible/verify-updater-units.yml
@@ -41,6 +46,13 @@ on:
       - deploy/updater/test-runtime-contract-integration.sh
       - deploy/updater/test-standalone-maintenance-integration.mjs
       - deploy/updater/test-standalone-maintenance-preload.mjs
+      - deploy/ansible/rotate-api-auth-token.yml
+      - deploy/ansible/validate-api-auth-token-rotation-inputs.yml
+      - deploy/ansible/test-api-auth-token-rotation.yml
+      - deploy/ansible/test-api-auth-token-rotation-inputs.yml
+      - deploy/ansible/inventory.example.yml
+      - deploy/ansible/README.md
+      - docs/deployment/IAC.md
       - deploy/ansible/prepare.yml
       - deploy/ansible/initialize-schema.yml
       - deploy/ansible/initialize-fresh.yml

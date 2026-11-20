@@ -375,6 +375,8 @@ export function postgresAppPasswordChangeInput(content){
 }
 const appSecret='codexia-postgres-app-password';
 const rotationLabel='io.codexia.app-password-rotation';
+const authTokenSecret='codexia-auth-token';
+const authTokenRotationLabel='io.codexia.auth-token-rotation';
 const databaseUnit='codexia-db.service';
 function readRotationSecret(secretName){
   const result=spawnSync('podman',['secret','exists',secretName],{stdio:'ignore',timeout:15000});
@@ -386,6 +388,39 @@ function readRotationSecret(secretName){
     return {id:secret.ID,owner:secret.Spec.Labels?.[rotationLabel],password:validatePostgresAppPassword(secret.SecretData)};
   }catch{throw Error('Canonical PostgreSQL secret is unobservable');}
 }
+export function validateStandaloneAuthToken(content){
+  assert.ok(typeof content==='string'&&Buffer.byteLength(content)<=8192&&/^[!-~]{32,8192}(?:\n)?$/u.test(content),
+    'Invalid protected standalone API token');
+  return content;
+}
+function readAuthTokenSecret(){
+  const result=spawnSync('podman',['secret','exists',authTokenSecret],{stdio:'ignore',timeout:15000});
+  if(result.status===1)return null;
+  assert.equal(result.status,0,'Podman API token secret existence is unobservable');
+  try{
+    const [secret]=JSON.parse(runWithSensitiveInput('podman',['secret','inspect','--showsecret',authTokenSecret],''));
+    assert.ok(secret.Spec.Name===authTokenSecret&&typeof secret.ID==='string'&&secret.ID);
+    return {id:secret.ID,owner:secret.Spec.Labels?.[authTokenRotationLabel],token:validateStandaloneAuthToken(secret.SecretData)};
+  }catch{throw Error('Canonical API token secret is unobservable');}
+}
+function assertKnownAuthTokenSecret(secret,snapshot){
+  if(!secret)return;
+  const digest=sha256(secret.token);
+  assert.ok((secret.id===snapshot.originalSecretId&&digest===snapshot.previousDigest)||
+    (secret.owner===snapshot.operationId&&[snapshot.previousDigest,snapshot.replacementDigest].includes(digest)),
+    'Unrecognized canonical API token prevents recovery');
+}
+export function assertApiAuthTokenSecretIdentity(secret,snapshot,expectedDigest=null){
+  assert.ok(secret,'Canonical API token secret is missing');
+  assertKnownAuthTokenSecret(secret,snapshot);
+  if(expectedDigest===null)return;
+  const digest=sha256(secret.token);
+  const matchesPrevious=expectedDigest===snapshot.previousDigest&&digest===snapshot.previousDigest&&
+    (secret.id===snapshot.originalSecretId||secret.owner===snapshot.operationId);
+  const matchesReplacement=expectedDigest===snapshot.replacementDigest&&digest===snapshot.replacementDigest&&
+    secret.owner===snapshot.operationId;
+  assert.ok(matchesPrevious||matchesReplacement,'Canonical API token secret does not match the committed rotation');
+}
 function assertKnownRotationSecret(secret,snapshot){
   if(!secret)return;
   const digest=sha256(secret.password);
@@ -393,7 +428,8 @@ function assertKnownRotationSecret(secret,snapshot){
     (secret.owner===snapshot.operationId&&[snapshot.previousDigest,snapshot.replacementDigest].includes(digest)),
     'Unrecognized canonical app secret prevents recovery');
 }
-async function prepareRotationSecretInput(config,snapshot,password){
+async function prepareRotationSecretInput(config,snapshot,password,inputName='postgres-app-password-input'){
+  assert.ok(['postgres-app-password-input','api-auth-token-input'].includes(inputName),'Unsupported maintenance secret input');
   assert.match(snapshot.operationId,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u,
     'Rotation secret input operation identity is invalid');
   const root=path.join(path.dirname(config.publicKeyFile),'maintenance-snapshots',snapshot.operationId);
@@ -404,7 +440,7 @@ async function prepareRotationSecretInput(config,snapshot,password){
   assert.equal(await realpath(root),path.resolve(root),'Rotation secret input directory cannot traverse a symlink');
   assert.ok([snapshot.previousDigest,snapshot.replacementDigest].includes(sha256(password)),
     'Rotation secret input is not bound to the recovery snapshot');
-  const filename=path.join(root,'postgres-app-password-input');
+  const filename=path.join(root,inputName);
   let info;
   try{info=await lstat(filename);}catch(error){if(error.code!=='ENOENT')throw error;}
   let handle;
@@ -1646,6 +1682,45 @@ export class PodmanStandaloneHost{
     const after=readRotationSecret(appSecret);
     assertKnownRotationSecret(after,snapshot);
     assert.ok(after?.password===target,'Canonical app secret replacement is unverified');
+  }
+  async captureApiAuthTokenRotation(replacement,operationId,state){
+    const candidate=validateStandaloneAuthToken(replacement);
+    const current=readAuthTokenSecret();
+    assert.ok(current,'Canonical API token secret is missing');
+    assert.ok(current.token.replace(/\n$/u,'')!==candidate.replace(/\n$/u,''),'Replacement API token must differ from the current token');
+    const observation=await this.observe();
+    assert.deepEqual(observation,{route:state.journal.active.slot,writers:[{slot:state.journal.active.slot,image:state.installed.image}]},
+      'API token rotation requires the exact committed writer serving its route');
+    return {operationId,originalSecretId:current.id,previousDigest:sha256(current.token),replacementDigest:sha256(candidate),token:current.token};
+  }
+  assertApiAuthTokenSecret(snapshot,expectedDigest=null){
+    const secret=readAuthTokenSecret();
+    assertApiAuthTokenSecretIdentity(secret,snapshot,expectedDigest);
+  }
+  async verifyMountedApiAuthToken(slot){
+    const secret=readAuthTokenSecret();
+    assert.ok(secret,'Canonical API token secret is missing');
+    await this.verifyApiAuthToken(slot,secret.token,200);
+  }
+  async replaceApiAuthToken(token,snapshot){
+    const target=validateStandaloneAuthToken(token);
+    const existing=readAuthTokenSecret();
+    assertKnownAuthTokenSecret(existing,snapshot);
+    if(existing?.token!==target){
+      if(existing)run('podman',['secret','rm',existing.id]);
+      const inputFile=await prepareRotationSecretInput(this.config,snapshot,target,'api-auth-token-input');
+      try{run('podman',['secret','create','--label',authTokenRotationLabel+'='+snapshot.operationId,authTokenSecret,inputFile]);}
+      finally{await removeRotationSecretInput(inputFile);}
+    }
+    const after=readAuthTokenSecret();
+    assertKnownAuthTokenSecret(after,snapshot);
+    assert.ok(after?.token===target,'Canonical API token replacement is unverified');
+  }
+  async verifyApiAuthToken(slot,token,expectedStatus){
+    assert.ok(['blue','green'].includes(slot));
+    assert.ok([200,401].includes(expectedStatus));
+    const script=`let value='';for await(const chunk of process.stdin)value+=chunk;const token=value.replace(/\\n$/u,'');const r=await fetch('http://127.0.0.1:3000/api/v1/persistence/status',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(5000)});if(r.status!==${expectedStatus})process.exit(1);if(${expectedStatus}===200){const body=await r.json();if(body.available!==true)process.exit(1)}else{const body=await r.json();if(body.code!=='UNAUTHORIZED')process.exit(1)}`;
+    runWithSensitiveInput('podman',['exec','-i',name(slot),'node','--input-type=module','-e',script],validateStandaloneAuthToken(token),{timeout:15000});
   }
   async freshDatabaseIdentity(){
     const identity=run('podman',['exec','codexia-db','sh','-ec',
