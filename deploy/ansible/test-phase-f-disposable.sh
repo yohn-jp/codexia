@@ -418,6 +418,7 @@ if ! run_updater init "$config_file" "$evidence_dir/release-0.1.236.json" > "$te
   printf 'Disposable proxy image identities (digest and content IDs only):\n' >&2
   rootless image inspect --format 'imageID={{.Id}} repoDigests={{json .RepoDigests}}' "$base_image" >&2 || true
   rootless inspect --type container --format 'containerImage={{.Image}} containerImageName={{.ImageName}}' codexia-api-proxy >&2 || true
+  rootless inspect --type container --format 'proxyMounts={{json .Mounts}}' codexia-api-proxy >&2 || true
   exit 1
 fi
 

@@ -108,7 +108,7 @@ test('Phase F integration helper is valid shell and exercises the existing locke
     'Write lifecycle evidence as its directory owner');
   assert.match(helper, /if ! run_updater init[\s\S]*?safe state detail follows[\s\S]*?\.lastError \/\/ empty[\s\S]*?\.journal\.phase/u,
     'Expose only safe controller state when fixture initialization fails');
-  assert.match(helper, /Disposable proxy image identities \(digest and content IDs only\)[\s\S]*?imageID=\{\{\.Id\}\} repoDigests=\{\{json \.RepoDigests\}\}[\s\S]*?containerImage=\{\{\.Image\}\} containerImageName=\{\{\.ImageName\}\}/u);
+  assert.match(helper, /Disposable proxy image identities \(digest and content IDs only\)[\s\S]*?imageID=\{\{\.Id\}\} repoDigests=\{\{json \.RepoDigests\}\}[\s\S]*?containerImage=\{\{\.Image\}\} containerImageName=\{\{\.ImageName\}\}[\s\S]*?proxyMounts=\{\{json \.Mounts\}\}/u);
   assert.match(helper, /codexia-updater(?:\.sh)?/u);
 });
 
