@@ -49,6 +49,16 @@ export interface TextChange {
   insert: string;
 }
 
+export function applyTextChanges(source: string, changes: readonly TextChange[]): string {
+  let offset = 0;
+  const parts: string[] = [];
+  for (const change of changes) {
+    parts.push(source.slice(offset, change.from), change.insert);
+    offset = change.to;
+  }
+  return parts.join("") + source.slice(offset);
+}
+
 interface TextPiece {
   kind: "source" | "inserted";
   from: number;

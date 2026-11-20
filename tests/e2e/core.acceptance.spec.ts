@@ -95,6 +95,61 @@ async function scratchRecords(page: Page): Promise<Array<{ key: string; text: st
 // Each former Git lifecycle scenario below now exercises the corresponding PostgreSQL
 // revision, browser recovery, or explicit removal boundary. No Git fixture is created.
 
+for (const recoverPendingSave of [false, true]) {
+  test(`a save protects a confirmed quote between separate editor changes${recoverPendingSave ? " after recovering a lost save response" : ""}`, async ({ page }) => {
+    const f = await fixture(page);
+    const { revision } = await replace(page, f, "A引用Z");
+    const anchorPath = `${documentPath(f)}/anchors`;
+    const anchor = await page.request.post(anchorPath, {
+      headers: mutationHeaders(),
+      data: { revisionId: revision.id, fromUtf16: 1, toUtf16: 3, status: "confirmed" },
+    });
+    expect(anchor.status()).toBe(201);
+    await reopen(page, f);
+    await expectEditor(page, "A引用Z");
+
+    let releaseResponse!: () => void;
+    const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    if (recoverPendingSave) {
+      let markCommitted!: () => void;
+      const committed = new Promise<void>((resolve) => { markCommitted = resolve; });
+      await page.route(`**${documentPath(f)}`, async (route) => {
+        if (route.request().method() !== "PATCH") return route.continue();
+        const response = await route.fetch();
+        expect(response.ok()).toBe(true);
+        markCommitted();
+        await responseGate;
+        await route.fulfill({ status: 504, json: { error: "応答を受信できませんでした", code: "TEST_GATEWAY_ERROR" } });
+      });
+      await editor(page).press("Home");
+      await editor(page).press("Shift+ArrowRight");
+      await page.keyboard.insertText("P");
+      await committed;
+    }
+
+    await editor(page).press("Home");
+    await editor(page).press("Shift+ArrowRight");
+    await page.keyboard.insertText("X");
+    await editor(page).press("End");
+    await editor(page).press("Shift+ArrowLeft");
+    await page.keyboard.insertText("Y");
+    if (recoverPendingSave) {
+      await expect.poll(async () => (await drafts(page)).find((draft) => draft.documentId === f.one.document.id)?.markdown).toBe("X引用Y");
+      releaseResponse();
+      await expect(page.getByText("応答を受信できませんでした", { exact: true }).first()).toBeVisible();
+      await page.unroute(`**${documentPath(f)}`);
+      await page.reload();
+    }
+    await saved(page, f, "X引用Y");
+
+    const response = await page.request.get(anchorPath);
+    expect(response.ok()).toBe(true);
+    expect((await response.json()).anchors).toMatchObject([
+      { anchor: { fromUtf16: 1, toUtf16: 3, status: "confirmed" }, quote: "引用" },
+    ]);
+  });
+}
+
 test("appearance modes follow system preference initially and persist explicit light, dark, and paper choices", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "light" }); await ownerLogin(page);
   await expect(page.locator("html")).toHaveAttribute("data-zp-theme", "light");
