@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { assertBackendImageIdentity } from './backend-image-inspection.mjs';
+import { verifyBuiltBackendImageIdentity } from './verify-backend-image-identity.mjs';
 
 test('static backend image identity binds producer, profile, platform and compatibility',()=>{
   const sourceSha='a'.repeat(40),version='0.1.90',fingerprint='sha256:'+'b'.repeat(64),image='ghcr.io/yohn-jp/codexia-backend@sha256:'+'c'.repeat(64);
@@ -19,4 +20,9 @@ test('container identity inspection never starts an image process',async()=>{
   assert.match(source,/\['create','--entrypoint','\/bin\/false',imageRef\]/u);
   assert.ok(source.includes("['cp',container+':/app/update-identity.json',identityPath]"));
   assert.doesNotMatch(source,/docker.*run|\['run'/u);
+});
+
+test('built-image identity CLI rejects malformed producer data before Docker inspection',async()=>{
+  await assert.rejects(()=>verifyBuiltBackendImageIdentity({args:['image','a'.repeat(40),'bad','core']}),/version is invalid/);
+  await assert.rejects(()=>verifyBuiltBackendImageIdentity({args:['image','bad','0.1.1','core']}),/source SHA is invalid/);
 });

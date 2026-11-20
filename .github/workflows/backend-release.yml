@@ -32,6 +32,7 @@ on:
       - scripts/verify-existing-backend-release.test.mjs
       - scripts/backend-image-inspection.mjs
       - scripts/backend-image-inspection.test.mjs
+      - scripts/verify-backend-image-identity.mjs
       - scripts/publish-stable-channel.mjs
       - scripts/phase-f-test-channel.mjs
       - scripts/phase-f-disposable.test.mjs
@@ -76,6 +77,7 @@ on:
       - scripts/verify-existing-backend-release.test.mjs
       - scripts/backend-image-inspection.mjs
       - scripts/backend-image-inspection.test.mjs
+      - scripts/verify-backend-image-identity.mjs
       - scripts/publish-stable-channel.mjs
       - scripts/phase-f-test-channel.mjs
       - scripts/phase-f-disposable.test.mjs
@@ -183,6 +185,11 @@ jobs:
         env:
           PROFILE: ${{ matrix.profile }}
         run: bash scripts/verify-backend-image.sh docker codexia-backend-ci "$(git rev-parse HEAD)" "$PROFILE"
+      - name: Verify embedded identity without starting image code
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PROFILE: ${{ matrix.profile }}
+        run: node scripts/verify-backend-image-identity.mjs codexia-backend-ci "$SOURCE_SHA" "$CODEXIA_RELEASE_VERSION" "$PROFILE"
       - name: Save the exact tested image for publication
         run: docker save codexia-backend-ci | gzip > "$RUNNER_TEMP/codexia-backend-image.tar.gz"
       - uses: actions/upload-artifact@v7.0.2
@@ -239,7 +246,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_REPOSITORY_ID: ${{ github.repository_id }}
           CODEXIA_BACKEND_PROMOTION_DIR: ${{ runner.temp }}/backend-promotion
-        run: node scripts/verify-backend-promotion-handoff.mjs
+        run: |
+          if ! node scripts/verify-backend-promotion-handoff.mjs; then
+            echo 'Post-selection promotion recheck failed. The build matrix was skipped, so this run will not fall back to rebuilding.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
       - uses: docker/login-action@v4.8.0
         with:
           registry: ghcr.io
