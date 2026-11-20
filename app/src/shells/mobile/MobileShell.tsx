@@ -113,6 +113,7 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
   const [referenceSheet, setReferenceSheet] = useState<ReferenceSheet | null>(null);
   const [openingReference, setOpeningReference] = useState(false);
   const openingReferenceRef = useRef(false);
+  const referenceContentRef = useRef<HTMLIonContentElement | null>(null);
   const referenceTriggerRef = useRef<HTMLButtonElement | null>(null);
   const referenceOriginRef = useRef("");
   const routeIdentityRef = useRef(location.pathname + location.search);
@@ -174,6 +175,34 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
   useEffect(() => {
     setReferenceSheet(null);
   }, [location.pathname, activeView]);
+
+  useLayoutEffect(() => {
+    if (referenceSheet !== "outline") return;
+    let cancelled = false;
+    let frame = 0;
+    let attempts = 0;
+    const revealCurrentScene = () => {
+      if (cancelled || attempts++ >= 8) return;
+      const content = referenceContentRef.current;
+      const current = content?.querySelector<HTMLElement>('.pg-outline-document[aria-current="page"]');
+      if (!content || !current) {
+        frame = window.requestAnimationFrame(revealCurrentScene);
+        return;
+      }
+      void content.getScrollElement().then((scrollElement) => {
+        if (cancelled) return;
+        const viewport = scrollElement.getBoundingClientRect();
+        const target = current.getBoundingClientRect();
+        const centeredTop = scrollElement.scrollTop + target.top - viewport.top - (viewport.height - target.height) / 2;
+        scrollElement.scrollTop = Math.max(0, centeredTop);
+      });
+    };
+    frame = window.requestAnimationFrame(revealCurrentScene);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [referenceSheet, workspacePanelRequest?.sequence, location.key]);
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -557,7 +586,7 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
         expandToScroll={false}
         htmlAttributes={{ "aria-label": "原稿の参照" }}
       >
-        <IonContent className="mobile-shell-reference-content" scrollY={true}>
+        <IonContent ref={referenceContentRef} className="mobile-shell-reference-content" scrollY={true}>
           <div className="mobile-shell-reference-top">
             <div>
               <p className="mobile-shell-reference-eyebrow">WRITING CONTEXT</p>
