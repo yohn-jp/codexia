@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { authenticateHistoricalChannel, signUpdateChannel } from './update-channel.mjs';
+import { initialStableChannelRegistry, nextStableChannelRegistry, signStableChannelRegistry, verifyStableChannelRegistry } from './stable-channel-registry.mjs';
 import { validateUpdateRelease } from './update-release-policy.mjs';
 import { readComponentVersion } from './component-release-version.mjs';
 import { validateBackendIdentity, fingerprintProbe } from './backend-update-identity.mjs';
@@ -11,6 +12,8 @@ import { validateBackendIdentity, fingerprintProbe } from './backend-update-iden
 const REPO = 'yohn-jp/codexia';
 const REF = 'codexia-stable-channel';
 const FILE = 'stable-channel.json';
+const REGISTRY = 'stable-channel-registry.json';
+const MAX_CHANNEL_BYTES = 1024 * 1024;
 const nowIso = ms => new Date(ms).toISOString();
 const cmp = (a,b) => {
   const left=a.split('.').map(Number),right=b.split('.').map(Number);
@@ -18,12 +21,37 @@ const cmp = (a,b) => {
   return 0;
 };
 
-export function nextChannel(previous, command, now) {
+function releaseScope(release) { return `${release.platform}/${release.profile}`; }
+function channelPayload(sequence, releases, now) {
+  return {format:'codexia-update-channel/v1',sequence,issuedAt:nowIso(now),expiresAt:nowIso(now+12*60*60*1000),releases};
+}
+function fitChannelReleases(sequence, releases, historicalReleases, now, protectImages = []) {
+  const historyByScope = new Map();
+  for (const release of historicalReleases) {
+    if (release.state !== 'published') continue;
+    const scope=releaseScope(release),list=historyByScope.get(scope)??[];
+    list.push(release.image);historyByScope.set(scope,list);
+  }
+  const retained = new Set([...historyByScope.values()].flatMap(items=>items.slice(-2)));
+  for(const image of protectImages)retained.add(image);
+  const current = [...releases];
+  const fits = () => Buffer.byteLength(JSON.stringify(channelPayload(sequence,current,now))) <= MAX_CHANNEL_BYTES && current.length <= 1000;
+  while (!fits()) {
+    const index=current.findIndex(release=>!retained.has(release.image));
+    if (index<0) throw new Error('Stable channel cannot fit its protected rollback releases within v1 limits');
+    current.splice(index,1);
+  }
+  return current;
+}
+
+export function nextChannelWithRegistry(previous, command, now, registry = null) {
   if (!Number.isSafeInteger(now)) throw new Error('Invalid publisher time');
   if (command.mode === 'bootstrap') {
     if (previous !== null) throw new Error('Existing channel cannot be bootstrapped again');
   } else if (!previous) throw new Error('Channel must be explicitly bootstrapped');
   const releases = previous ? previous.releases.map(validateUpdateRelease) : [];
+  const history = (registry?.releases ?? releases).map(validateUpdateRelease);
+  const protectImages=[];
   if (command.mode === 'publish') {
     const candidates = (command.releases ?? [command.release]).map(validateUpdateRelease);
     if (candidates.length === 0) throw new Error('No certified releases supplied');
@@ -33,7 +61,7 @@ export function nextChannel(previous, command, now) {
     let added = false;
     for (const candidate of candidates) {
       if (candidate.state !== 'published') throw new Error('Only published releases may be added');
-      const scoped = releases.filter(r=>r.platform===candidate.platform&&r.profile===candidate.profile);
+      const scoped = history.filter(r=>r.platform===candidate.platform&&r.profile===candidate.profile);
       const sameVersion = scoped.find(r=>r.version===candidate.version);
       if (sameVersion) {
         if (sameVersion.state === 'withdrawn') throw new Error('Withdrawn version cannot be republished');
@@ -41,20 +69,27 @@ export function nextChannel(previous, command, now) {
         continue;
       }
       if (scoped.some(r=>cmp(candidate.version,r.version)<=0 || r.image===candidate.image || r.sourceSha===candidate.sourceSha)) throw new Error('Release version or artifact identity must advance');
-      releases.push(candidate);
+      releases.push(candidate);history.push(candidate);
       added = true;
     }
     if (!added) return null;
   } else if (command.mode === 'withdraw') {
     if (typeof command.image !== 'string') throw new Error('Withdrawal requires exact digest image');
-    const matches = releases.filter(r=>r.image===command.image&&r.state==='published');
+    const matches = history.filter(r=>r.image===command.image&&r.state==='published');
     if (matches.length === 0) throw new Error('No published release matches withdrawal');
+    protectImages.push(command.image);
     for (let i=0;i<releases.length;i++) if (releases[i].image===command.image) releases[i]={...releases[i],state:'withdrawn'};
+    for (let i=0;i<history.length;i++) if (history[i].image===command.image) history[i]={...history[i],state:'withdrawn'};
   } else if (!['refresh','bootstrap'].includes(command.mode)) throw new Error('Invalid channel operation');
   if (previous && Date.parse(previous.issuedAt)>now) throw new Error('Publisher clock is behind channel');
   const sequence=(previous?.sequence ?? 0)+1;
   if (!Number.isSafeInteger(sequence)) throw new Error('Channel sequence exhausted');
-  return {format:'codexia-update-channel/v1',sequence,issuedAt:nowIso(now),expiresAt:nowIso(now+12*60*60*1000),releases};
+  const retained=fitChannelReleases(sequence,releases,history,now,protectImages);
+  return {channel:channelPayload(sequence,retained,now),history};
+}
+
+export function nextChannel(previous, command, now, registry = null) {
+  return nextChannelWithRegistry(previous,command,now,registry)?.channel ?? null;
 }
 
 export function releaseFromIdentity(identity, image, expectedSha, expectedVersion, compatibility, expectedProfile) {
@@ -71,7 +106,7 @@ async function request(token, resource, options={}) {
   const response=await fetch('https://api.github.com/repos/'+REPO+'/'+resource,{
     ...options, headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json',
       'X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'},
-    redirect:'error',signal:AbortSignal.timeout(15000),
+    redirect:'error',signal:AbortSignal.timeout(30000),
   });
   if (!response.ok && response.status!==404) throw new Error('Channel repository request failed: HTTP '+response.status);
   return response;
@@ -85,15 +120,58 @@ async function main() {
   const pub=createPublicKey(createPrivateKey(privatePem)).export({type:'spki',format:'pem'}).toString();
   const head=await request(token,'git/ref/heads/'+REF);
   if (!head.ok) throw new Error('Operator must provision dedicated stable channel branch');
-  const resource='contents/'+FILE;
-  const old=await request(token,resource+'?ref='+REF);
-  let previous=null, previousSha;
-  if(old.ok){
-    const entry=await old.json();
-    if(entry.type!=='file'||entry.encoding!=='base64'||typeof entry.content!=='string'||typeof entry.sha!=='string'||entry.size>2*1024*1024)throw new Error('Invalid existing channel file');
-    previous=authenticateHistoricalChannel(JSON.parse(Buffer.from(entry.content,'base64').toString('utf8')),pub);
-    previousSha=entry.sha;
-  } else if(mode!=='bootstrap') throw new Error('Stable channel file missing; refusing implicit reset');
+  const ref=await head.json();
+  if(ref.object?.type!=='commit'||typeof ref.object.sha!=='string')throw new Error('Invalid stable channel branch head');
+  const commitResponse=await request(token,'git/commits/'+ref.object.sha);
+  if(!commitResponse.ok)throw new Error('Stable channel branch commit is unavailable');
+  const headCommit=await commitResponse.json();
+  const treeResponse=await request(token,'git/trees/'+headCommit.tree.sha+'?recursive=1');
+  if(!treeResponse.ok)throw new Error('Stable channel branch tree is unavailable');
+  const tree=await treeResponse.json();
+  if(tree.truncated)throw new Error('Stable channel branch tree is truncated; refusing incomplete history read');
+  const entries=new Map((tree.tree??[]).filter(entry=>entry.type==='blob').map(entry=>[entry.path,entry]));
+  const readAt=async (commitSha,file)=>{
+    let commit=headCommit;
+    if(commitSha!==ref.object.sha){
+      const response=await request(token,'git/commits/'+commitSha);
+      if(!response.ok)throw new Error('Stable channel parent commit is unavailable');
+      commit=await response.json();
+    }
+    let listing=entries;
+    if(commitSha!==ref.object.sha){
+      const response=await request(token,'git/trees/'+commit.tree.sha+'?recursive=1');
+      if(!response.ok)throw new Error('Stable channel parent tree is unavailable');
+      const parentTree=await response.json();
+      if(parentTree.truncated)throw new Error('Stable channel parent tree is truncated; refusing incomplete history read');
+      listing=new Map((parentTree.tree??[]).filter(entry=>entry.type==='blob').map(entry=>[entry.path,entry]));
+    }
+    const entry=listing.get(file);if(!entry)return null;
+    const blobResponse=await request(token,'git/blobs/'+entry.sha);
+    if(!blobResponse.ok)throw new Error('Stable channel blob is unavailable: '+file);
+    const blob=await blobResponse.json();
+    if(blob.encoding!=='base64'||typeof blob.content!=='string'||blob.size>100*1024*1024)throw new Error('Invalid stable channel blob: '+file);
+    const bytes=Buffer.from(blob.content,'base64');if(bytes.length!==blob.size)throw new Error('Truncated stable channel blob: '+file);
+    return bytes;
+  };
+  const oldBytes=await readAt(ref.object.sha,FILE);
+  let previous=null;
+  if(oldBytes)previous=authenticateHistoricalChannel(JSON.parse(oldBytes.toString('utf8')),pub);
+  else if(mode!=='bootstrap')throw new Error('Stable channel file missing; refusing implicit reset');
+  let registry=null;
+  const registryBytes=await readAt(ref.object.sha,REGISTRY);
+  if(registryBytes){
+    if(!oldBytes)throw new Error('Stable registry exists without its bound channel');
+    registry=verifyStableChannelRegistry(JSON.parse(registryBytes.toString('utf8')),pub,oldBytes);
+    if(registry.channelSequence!==previous.sequence)throw new Error('Stable registry sequence differs from channel');
+  } else if(oldBytes){
+    const parentSha=headCommit.parents?.[0]?.sha;
+    if(parentSha){
+      const parentRegistry=await readAt(parentSha,REGISTRY);
+      if(parentRegistry)throw new Error('Stable channel history registry disappeared; refusing reset');
+    }
+    // One-time migration: the old signed channel is still the complete registry.
+    registry=initialStableChannelRegistry(previous,oldBytes);
+  }
   let command={mode};
   if(mode==='publish'){
     const source=process.env.GITHUB_SHA;
@@ -115,13 +193,23 @@ async function main() {
     command={mode,releases};
   } else if(mode==='withdraw') command={mode,image:process.env.CODEXIA_WITHDRAW_IMAGE};
   const now=Date.now();
-  const next=nextChannel(previous,command,now);
-  if(next===null){console.log('Backend version already advertised; no change.');return;}
-  const signed=signUpdateChannel(next,privatePem,now);
-  const write=await request(token,resource,{method:'PUT',body:JSON.stringify({branch:REF,
-    message:'publish signed Codexia stable channel sequence '+next.sequence,
-    content:Buffer.from(JSON.stringify(signed)+'\n').toString('base64'),...(previousSha?{sha:previousSha}:{})})});
-  if(!write.ok)throw new Error('Channel update failed; no fallback publication');
-  console.log('Published stable channel sequence '+next.sequence);
+  const result=nextChannelWithRegistry(previous,command,now,registry);
+  if(result===null){console.log('Backend version already recorded; no change.');return;}
+  const signed=signUpdateChannel(result.channel,privatePem,now);
+  const channelBytes=Buffer.from(JSON.stringify(signed)+'\n');
+  const nextRegistry=nextStableChannelRegistry(registry??{releases:[]},result.channel,channelBytes,result.history);
+  const signedRegistry=signStableChannelRegistry(nextRegistry,privatePem,channelBytes);
+  const newTreeResponse=await request(token,'git/trees',{method:'POST',body:JSON.stringify({base_tree:headCommit.tree.sha,tree:[
+    {path:FILE,mode:'100644',type:'blob',content:channelBytes.toString('utf8')},
+    {path:REGISTRY,mode:'100644',type:'blob',content:JSON.stringify(signedRegistry)+'\n'},
+  ]})});
+  if(!newTreeResponse.ok)throw new Error('Stable channel tree creation failed');
+  const newTree=await newTreeResponse.json();
+  const newCommitResponse=await request(token,'git/commits',{method:'POST',body:JSON.stringify({message:'publish signed Codexia stable channel sequence '+result.channel.sequence,tree:newTree.sha,parents:[ref.object.sha]})});
+  if(!newCommitResponse.ok)throw new Error('Stable channel commit creation failed');
+  const newCommit=await newCommitResponse.json();
+  const advance=await request(token,'git/refs/heads/'+REF,{method:'PATCH',body:JSON.stringify({sha:newCommit.sha,force:false})});
+  if(!advance.ok)throw new Error('Stable channel branch advanced concurrently; retry from the new authenticated head');
+  console.log('Published stable channel sequence '+result.channel.sequence+' with authenticated history');
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) await main();
