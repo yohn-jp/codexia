@@ -28,7 +28,7 @@ export function selectBackendArtifacts(run, artifacts, jobs, expected) {
   const currentAttempt = positiveInteger(expected.currentAttempt, 'Backend workflow attempt');
   assert.equal(run.id, runId, 'Backend workflow run mismatch');
   assert.equal(run.run_attempt, currentAttempt, 'Backend workflow attempt mismatch');
-  assert.equal(run.event, 'push', 'Backend producer event must be a push');
+  assert.equal(run.event, expected.event || 'push', 'Backend producer event mismatch');
   assert.equal(run.head_branch, 'main', 'Backend producer branch must be main');
   assert.equal(run.head_sha, expected.sourceSha, 'Backend producer source mismatch');
   assert.ok(Array.isArray(artifacts) && Array.isArray(jobs), 'Invalid backend artifact inventory');
@@ -82,10 +82,10 @@ async function githubJson(url, token, fetchImpl) {
 
 export async function verifyBackendArtifacts({env=process.env,fetchImpl=fetch}={}) {
   assert.equal(env.GITHUB_REPOSITORY, REPOSITORY);
-  assert.equal(env.GITHUB_EVENT_NAME, 'push');
+  assert.ok(['push','workflow_run'].includes(env.GITHUB_EVENT_NAME), 'Backend publication requires main or verified completion');
   assert.equal(env.GITHUB_REF, 'refs/heads/main');
   const expected = {runId:positiveInteger(env.GITHUB_RUN_ID,'Backend workflow run ID'),
-    currentAttempt:positiveInteger(env.GITHUB_RUN_ATTEMPT,'Backend workflow attempt'),sourceSha:env.GITHUB_SHA};
+    currentAttempt:positiveInteger(env.GITHUB_RUN_ATTEMPT,'Backend workflow attempt'),sourceSha:env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA,event:env.GITHUB_EVENT_NAME};
   assert.match(expected.sourceSha, /^[a-f0-9]{40}$/u);
   assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),expected.sourceSha,'Backend publish checkout source mismatch');
   const token = env.GH_TOKEN;
