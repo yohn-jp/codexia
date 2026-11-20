@@ -27,6 +27,21 @@ test("Git store selector cannot bypass PostgreSQL-only authoring", async ({ page
   await expect(page.getByRole("heading", { name: "Database workspace" })).toHaveCount(0);
 });
 
+test("standalone empty states open the existing project and document forms", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/desktop/?empty=desktop");
+  await page.getByLabel("アクセス・トークン").fill(authToken);
+  await page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
+  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
+  await page.getByRole("button", { name: "最初の作品を作成" }).click();
+  await expect(page.getByLabel("作品名")).toBeFocused();
+  await page.getByLabel("作品名").fill(`Empty state desktop ${crypto.randomUUID()}`);
+  await page.getByRole("button", { name: "作成", exact: true }).click();
+  await expect(page.getByText("編集を始める文書を作成してください。", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "最初の文書を作成" }).click();
+  await expect(page.getByLabel("文書名")).toBeFocused();
+});
+
 test("Hosted permission metadata does not force Git workspace fallback", async ({ page }) => {
   expect(databaseUrl).toBeTruthy();
   await page.route("**/api/session", async (route) => {

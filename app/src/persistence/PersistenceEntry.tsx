@@ -8,6 +8,7 @@ type EntryState = "checking" | "signed-out" | "database" | "failed";
 export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
   const [state, setState] = useState<EntryState>("checking");
   const [accessMode, setAccessMode] = useState(false);
+  const [hostedMode, setHostedMode] = useState(false);
   const [authorScope, setAuthorScope] = useState("owner");
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
@@ -29,6 +30,7 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
       const version = await api.version();
       if (sequence !== inspectSequenceRef.current) return;
       versionChecked = true;
+      setHostedMode(version.hosted);
       setAccessMode(version.browserAuth === "cloudflare-access");
       const session = await api.session();
       if (version.browserAuth === "cloudflare-access" && session.authorScope !== "owner") {
@@ -97,7 +99,7 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
 
   if (state === "database") return <>
     <div inert={sessionBlocked} hidden={sessionBlocked} style={{ display: sessionBlocked ? "none" : "contents" }}>
-      <PersistenceWorkspace mode={mode} authorScope={authorScope} sessionBlocked={sessionBlocked} registerProtection={registerProtection} onSignOut={() => {
+      <PersistenceWorkspace mode={mode} hosted={hostedMode} authorScope={authorScope} sessionBlocked={sessionBlocked} registerProtection={registerProtection} onSignOut={() => {
         if (accessMode) { window.location.assign("/cdn-cgi/access/logout"); return; }
         void api.logout().finally(() => { workspaceScopeRef.current = null; setState("signed-out"); });
       }} />
