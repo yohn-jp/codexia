@@ -87,6 +87,9 @@ export function normalizedOperation(operation: ChangeOperation): ChangeOperation
       revision: change.revision,
       content: change.content,
       ...(change.encoding === undefined ? {} : { encoding: change.encoding }),
+      ...(change.textChanges === undefined ? {} : {
+        textChanges: change.textChanges.map(({ fromUtf16, toUtf16, insert }) => ({ fromUtf16, toUtf16, insert })),
+      }),
     })),
     message: operation.message,
     ...(operation.evidenceIds === undefined ? {} : { evidenceIds: [...operation.evidenceIds] }),

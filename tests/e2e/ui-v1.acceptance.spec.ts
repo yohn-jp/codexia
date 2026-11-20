@@ -377,9 +377,10 @@ test("recovery retry after pagehide retains its exact PostgreSQL draft", async (
 test("both production Shells preserve recoverable Japanese drafts and the Mobile writing and reading flow", async ({ page }) => {
   for (const mode of ["desktop", "mobile"] as const) {
     await page.setViewportSize({ width: mode === "mobile" ? 390 : 1280, height: 900 });
-    const { project, scene } = await createWritingFixture(page, mode);
+    const { project, scene } = await createWritingFixture(page, mode, undefined, "");
     const text = "東京《とうきょう》へ向かう。\n日本語😀の本文。";
-    await editor(page).fill(text);
+    await editor(page).click();
+    await page.keyboard.insertText(text);
     await expectMarkdown(page, text);
     // "Saved" can reflect the previous revision. The reader must open only
     // after this exact manuscript is durable in PostgreSQL.
@@ -393,6 +394,73 @@ test("both production Shells preserve recoverable Japanese drafts and the Mobile
     await page.reload();
     if (mode === "mobile") await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "書く", exact: true }).click();
     await expectMarkdown(page, text);
+  }
+});
+
+async function visibleReaderParagraphs(page: Page): Promise<string[]> {
+  return page.locator(".reading-pager-content .ruby-line").evaluateAll((elements) => {
+    const viewport = document.querySelector<HTMLElement>(".reading-pager");
+    if (!viewport) return [];
+    const box = viewport.getBoundingClientRect();
+    return elements.filter((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.right > box.left && rect.left < box.right && rect.bottom > box.top && rect.top < box.bottom;
+    }).map((element) => element.textContent ?? "");
+  });
+}
+
+test("Mobile reader keeps first-to-last Japanese paragraphs visible at supported widths and cancels touch gestures", async ({ page, browserName }) => {
+  for (const width of [320, 390]) {
+    for (const direction of ["horizontal", "vertical"] as const) {
+      await page.setViewportSize({ width, height: 844 });
+      const text = Array.from({ length: 130 }, (_, index) => `第${index + 1}段落｜日本語の本文を読む。`).join("\n");
+      await createWritingFixture(page, "mobile", undefined, text);
+      await page.getByRole("button", { name: "読む", exact: true }).click();
+      const displayMenu = page.locator(".pg-editor-display-menu");
+      if (!await displayMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await displayMenu.locator("summary").click();
+      await page.getByLabel("組方向").selectOption(direction);
+      await expect.poll(() => visibleReaderParagraphs(page)).toContainEqual(expect.stringContaining("第1段落"));
+
+      const pager = page.locator(".reading-pager");
+      const beforePage = await pager.getAttribute("data-page-index");
+      const beforeClass = await pager.getAttribute("class");
+      const box = await pager.boundingBox();
+      expect(box).not.toBeNull();
+      const x = direction === "vertical" ? box!.x + 30 : box!.x + box!.width - 30;
+      const y = box!.y + box!.height / 2;
+      if (browserName === "chromium") {
+        const cdp = await page.context().newCDPSession(page);
+        try {
+          for (const movedX of [null, direction === "vertical" ? x + 70 : x - 70]) {
+            await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y, id: 7 }] });
+            if (movedX !== null) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: movedX, y, id: 7 }] });
+            await cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+            await expect(pager).toHaveAttribute("data-page-index", beforePage!);
+            await expect(pager).toHaveAttribute("class", beforeClass!);
+          }
+        } finally {
+          await cdp.detach();
+        }
+      }
+
+      await page.getByRole("button", { name: "次のページ", exact: true }).click();
+      await expect.poll(async () => {
+        const paragraphs = await visibleReaderParagraphs(page);
+        return paragraphs.length > 0 && paragraphs.some((paragraph) => paragraph.includes("第"));
+      }).toBe(true);
+      await expect.poll(() => pager.getAttribute("data-page-index")).not.toBe(beforePage);
+      await page.getByRole("button", { name: "前のページ", exact: true }).click();
+      await expect(pager).toHaveAttribute("data-page-index", "0");
+      await expect.poll(() => visibleReaderParagraphs(page)).toContainEqual(expect.stringContaining("第1段落"));
+
+      const tapX = direction === "vertical" ? x : box!.x + box!.width - 30;
+      await page.mouse.click(tapX, y);
+      await expect.poll(() => pager.getAttribute("data-page-index")).not.toBe("0");
+      for (let index = 0; index < 20 && Number(await pager.getAttribute("data-page-index")) < Number(await pager.getAttribute("data-page-count")) - 1; index += 1) {
+        await page.getByRole("button", { name: "次のページ", exact: true }).click();
+      }
+      await expect.poll(() => visibleReaderParagraphs(page)).toContainEqual(expect.stringContaining("第130段落"));
+    }
   }
 });
 

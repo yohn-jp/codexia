@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import YAML from "yaml";
 import {
+  nextOrderKey,
   snapshotScopeRevision,
   type ActionResult,
   type ChangeProposal,
@@ -1174,7 +1175,7 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
         const parentField = type === "chapter" ? "volume" : "chapter";
         const parent = data[parentField];
         const siblings = [...story.entities.values()].filter((entity) => entity.type === type && entity.raw[parentField] === parent);
-        data.order = siblings.reduce((max, sibling) => Math.max(max, typeof sibling.raw.order === "number" ? sibling.raw.order : 0), 0) + 1;
+        data.order = nextOrderKey(siblings.map((sibling) => String(sibling.raw.order ?? "")));
       }
       if (type === "chapter") {
         const volume = story.entities.get(String(data.volume));
@@ -1220,7 +1221,7 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
         const insertAt = hasPosition ? Math.min((input.position as number) - 1, existingScenes.length) : existingScenes.length;
         const finalIds = existingScenes.map((entity) => entity.id);
         finalIds.splice(insertAt, 0, id);
-        data.order = insertAt + 1;
+        if (hasPosition) data.order = insertAt + 1;
         filesToWrite[0] = { path, revision: null, content: yamlContent(data) };
         if (hasPosition) {
           for (const sceneId of finalIds) {

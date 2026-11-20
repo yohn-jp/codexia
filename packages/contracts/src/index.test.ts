@@ -1,9 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertChangeOperation, BUILTIN_MODULE_IDS, createDocumentSource, snapshotKey, snapshotScopeRevision, type SnapshotReader, type ChangeOperation } from "./index.js";
+import { assertChangeOperation, BUILTIN_MODULE_IDS, createDocumentSource, nextOrderKey, snapshotKey, snapshotScopeRevision, type SnapshotReader, type ChangeOperation } from "./index.js";
 test("built-in module IDs remain a frozen canonical tuple", () => {
   assert.deepEqual(BUILTIN_MODULE_IDS, ["story", "diagnostics", "nlp", "semantic", "speaker", "assistant", "publishing", "mcp", "search"]);
   assert.equal(Object.isFrozen(BUILTIN_MODULE_IDS), true);
+});
+
+test("next order keys append after padded, unpadded and reordered text keys", () => {
+  assert.equal(nextOrderKey([]), "0000000001");
+  assert.equal(nextOrderKey(["0000000009"]), "0000000010");
+  assert.equal(nextOrderKey(["9"]), "90", "10 sorts before an unpadded 9 in PostgreSQL text order");
+  assert.equal(nextOrderKey(["0000000001", "0000000000"]), "0000000002");
+  assert.equal(nextOrderKey(["0000000000", "0000000009"]), "0000000010");
 });
 
 const operation: ChangeOperation = {
@@ -25,6 +33,21 @@ test("untrusted recovery rejects traversal, duplicate writes and missing precond
   }
   assert.throws(() => assertChangeOperation({ ...operation, writes: [...operation.writes, ...operation.writes] }));
   assert.throws(() => assertChangeOperation({ ...operation, writes: [{ path: "x", content: "x" }] }));
+});
+
+test("exact manuscript changes validate ordered UTF-16 ranges and remain optional for legacy operations", () => {
+  const ranged = { ...operation, writes: [{ ...operation.writes[0]!, textChanges: [{ fromUtf16: 1, toUtf16: 3, insert: "日本語" }] }] };
+  assert.doesNotThrow(() => assertChangeOperation(ranged));
+  assert.doesNotThrow(() => assertChangeOperation(operation), "legacy full-document operations remain valid");
+  for (const textChanges of [
+    [{ fromUtf16: -1, toUtf16: 0, insert: "x" }],
+    [{ fromUtf16: 3, toUtf16: 2, insert: "x" }],
+    [{ fromUtf16: 0, toUtf16: 2, insert: "x" }, { fromUtf16: 1, toUtf16: 1, insert: "y" }],
+    [{ fromUtf16: 0.5, toUtf16: 1, insert: "x" }],
+  ]) {
+    assert.throws(() => assertChangeOperation({ ...operation, writes: [{ ...operation.writes[0]!, textChanges }] }));
+  }
+  assert.throws(() => assertChangeOperation({ ...operation, effect: "metadata", writes: [{ ...operation.writes[0]!, textChanges: [{ fromUtf16: 0, toUtf16: 0, insert: "x" }] }] }));
 });
 
 test("document-set preconditions bind exact canonical hierarchy membership", () => {

@@ -73,6 +73,8 @@ test("mobile reading pagination clamps pages, measures columns, and follows writ
   assert.equal(clampPageIndex(Number.NaN, 4), 0);
   assert.equal(pageTranslateX(2, 320, "ltr"), -640);
   assert.equal(pageTranslateX(2, 320, "rtl"), 640);
+  assert.equal(pageTranslateX(0, 320, "rtl", 960), -640);
+  assert.equal(pageTranslateX(1, 320, "rtl", 960), -320);
   assert.equal(tapZoneAtX(10, 0, 400), "left");
   assert.equal(tapZoneAtX(390, 0, 400), "right");
   assert.equal(tapZoneAtX(200, 0, 400), "center");

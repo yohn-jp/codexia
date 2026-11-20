@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import YAML from "yaml";
 import {
+  nextOrderKey,
   snapshotScopeRevision,
   type ChangeOperation,
   type ModuleActionContext,
@@ -25,6 +26,7 @@ type NarrativeChangeSet = {
   diagnostics: ObjectValue;
 };
 type VirtualFile = { content: string; revision: string | null };
+type StoryWrite = { revision: string | null; content: string | null; textChanges?: ChangeOperation["writes"][number]["textChanges"] };
 type WorkEntity = { id: string; type: StoryEntityType; filePath: string; raw: ObjectValue; body?: string };
 
 const ID = /^[A-Za-z0-9_-]{1,256}$/;
@@ -486,7 +488,7 @@ function evidenceIdMap(changeSet: NarrativeChangeSet): Map<string, string> {
   return new Map(changeSet.evidence.map((source) => [String(source.id), `story-evidence-${safeHash(`${changeSet.id}\0${source.id}`)}`]));
 }
 function linkedEvidenceIds(op: NarrativeOperation, ids: Map<string, string>): string[] { return op.evidenceIds.map((id) => ids.get(id)!).filter(Boolean); }
-function makeOperation(context: ModuleActionContext, changeSetId: string, source: NarrativeOperation, reads: Map<string, string | null>, writes: Map<string, { revision: string | null; content: string | null }>, evidenceIds: string[], readScopes?: Awaited<ReturnType<typeof storyEntityScopes>>): ChangeOperation {
+function makeOperation(context: ModuleActionContext, changeSetId: string, source: NarrativeOperation, reads: Map<string, string | null>, writes: Map<string, StoryWrite>, evidenceIds: string[], readScopes?: Awaited<ReturnType<typeof storyEntityScopes>>): ChangeOperation {
   const operationId = `story-cs-${safeHash(`${context.projectId}\0${changeSetId}\0${source.id}`)}`;
   const effect: ChangeOperation["effect"] = source.kind === "manuscript.replace-range" ? "manuscript" :
     source.kind === "scene.create" || source.kind === "scene.insert" || source.kind === "entity.create" ? "structure" : "metadata";
@@ -498,7 +500,12 @@ function makeOperation(context: ModuleActionContext, changeSetId: string, source
     effect,
     reads: [...reads].map(([path, revision]) => ({ path, revision })),
     ...(readScopes ? { readScopes } : {}),
-    writes: [...writes].map(([path, write]) => ({ path, revision: write.revision, content: write.content })),
+    writes: [...writes].map(([path, write]) => ({
+      path,
+      revision: write.revision,
+      content: write.content,
+      ...(write.textChanges === undefined ? {} : { textChanges: write.textChanges.map((change) => ({ ...change })) }),
+    })),
     message: `Story change set ${source.id}: ${source.kind}`,
     evidenceIds,
   };
@@ -522,14 +529,14 @@ async function storyEntityScopes(context: ModuleActionContext, files: Map<string
     revision: await snapshotScopeRevision(reader, prefix),
   })));
 }
-function setFileWrite(files: Map<string, VirtualFile>, reads: Map<string, string | null>, writes: Map<string, { revision: string | null; content: string | null }>, path: string, content: string): void {
+function setFileWrite(files: Map<string, VirtualFile>, reads: Map<string, string | null>, writes: Map<string, StoryWrite>, path: string, content: string, textChanges?: StoryWrite["textChanges"]): void {
   const prior = files.get(path);
   const revision = reads.has(path) ? reads.get(path) ?? null : prior?.revision ?? null;
   reads.set(path, revision);
-  writes.set(path, { revision, content });
+  writes.set(path, { revision, content, ...(textChanges === undefined ? {} : { textChanges }) });
   files.set(path, { content, revision: revisionOf(content) });
 }
-function writeEntity(entity: WorkEntity, content: string, files: Map<string, VirtualFile>, reads: Map<string, string | null>, writes: Map<string, { revision: string | null; content: string | null }>): void {
+function writeEntity(entity: WorkEntity, content: string, files: Map<string, VirtualFile>, reads: Map<string, string | null>, writes: Map<string, StoryWrite>): void {
   setFileWrite(files, reads, writes, entity.filePath, content);
 }
 function validateEntityValues(type: string, id: string, values: ObjectValue, entities: Map<string, WorkEntity>): ObjectValue {
@@ -594,7 +601,7 @@ export async function buildNarrativeChangeProposal(context: ModuleActionContext,
       : undefined;
     const target = op.target as ObjectValue;
     const condition = op.precondition as ObjectValue;
-    const reads = new Map<string, string | null>(), writes = new Map<string, { revision: string | null; content: string | null }>();
+    const reads = new Map<string, string | null>(), writes = new Map<string, StoryWrite>();
     const findUnique = (id: string): WorkEntity | undefined => {
       if (story.duplicateIds.has(id)) fail(`Duplicate entity ID in Story snapshot: ${id}`, "operation_precondition_conflict");
       return entityBySourceId(entities, id);
@@ -623,9 +630,14 @@ export async function buildNarrativeChangeProposal(context: ModuleActionContext,
       const start = Number(replacementRange.start), end = Number(replacementRange.end);
       if (end > doc.body.length) fail("Manuscript replacement range exceeds the selected body", "operation_precondition_conflict");
       const leftTrim = doc.rawBody.length - doc.rawBody.trimStart().length;
-      const body = doc.rawBody.slice(0, leftTrim + start) + String(op.replacement) + doc.rawBody.slice(leftTrim + end);
+      const replacement = String(op.replacement);
+      const body = doc.rawBody.slice(0, leftTrim + start) + replacement + doc.rawBody.slice(leftTrim + end);
       const next = doc.prefix + body;
-      setFileWrite(files, reads, writes, manuscript.filePath, next);
+      setFileWrite(files, reads, writes, manuscript.filePath, next, [{
+        fromUtf16: doc.prefix.length + leftTrim + start,
+        toUtf16: doc.prefix.length + leftTrim + end,
+        insert: replacement,
+      }]);
       manuscript.body = body.trim();
     } else if (op.kind === "entity.create" || op.kind === "scene.create") {
       const id = String(op.kind === "scene.create" ? target.sceneId : target.entityId);
@@ -653,7 +665,7 @@ export async function buildNarrativeChangeProposal(context: ModuleActionContext,
         const parentKey = type === "chapter" ? "volume" : "chapter";
         const parentId = String(raw[parentKey]);
         const siblings = [...entities.values()].filter((entity) => entity.type === type && entity.raw[parentKey] === parentId);
-        raw.order = siblings.reduce((max, entity) => Math.max(max, typeof entity.raw.order === "number" ? entity.raw.order : 0), 0) + 1;
+        raw.order = nextOrderKey(siblings.map((entity) => String(entity.raw.order ?? "")));
       }
       const entity: WorkEntity = { id, type: type as StoryEntityType, filePath: path, raw, ...(typeof raw.body === "string" ? { body: raw.body } : {}) };
       setFileWrite(files, reads, writes, path, outputYaml(raw)); entities.set(id, entity);

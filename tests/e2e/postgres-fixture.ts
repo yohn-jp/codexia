@@ -69,19 +69,19 @@ export async function fillDraft(page: Page, text: string): Promise<void> {
   await expect(page.getByText("IndexedDB回復Journalに保存済み", { exact: true })).toBeVisible();
 }
 
-export async function createWritingFixture(page: Page, mode: "desktop" | "mobile" = "desktop", title = "日本語の原稿"): Promise<{ project: FixtureProject; scene: FixtureDocument; second: FixtureDocument }> {
+export async function createWritingFixture(page: Page, mode: "desktop" | "mobile" = "desktop", title = "日本語の原稿", manuscript = "最初の本文。\n次の文章です。"): Promise<{ project: FixtureProject; scene: FixtureDocument; second: FixtureDocument }> {
   await ownerLogin(page, `/${mode}/`);
   const headers = { Origin: new URL(page.url()).origin };
   const createdProject = await page.request.post(new URL("/api/v1/persistence/projects", page.url()).toString(), { headers, data: { title: `Writing ${crypto.randomUUID()}` } });
   expect(createdProject.status()).toBe(201);
   const { project } = await createdProject.json() as { project: FixtureProject };
-  async function create(title: string, orderKey: string): Promise<FixtureDocument> {
-    const response = await page.request.post(new URL(`/api/v1/persistence/projects/${project.id}/documents`, page.url()).toString(), { headers: { ...headers, "Idempotency-Key": crypto.randomUUID() }, data: { kind: "scene", title, orderKey, markdown: "最初の本文。\n次の文章です。" } });
+  async function create(title: string, orderKey: string, markdown: string): Promise<FixtureDocument> {
+    const response = await page.request.post(new URL(`/api/v1/persistence/projects/${project.id}/documents`, page.url()).toString(), { headers: { ...headers, "Idempotency-Key": crypto.randomUUID() }, data: { kind: "scene", title, orderKey, markdown } });
     expect(response.status()).toBe(201);
     return (await response.json() as { document: FixtureDocument }).document;
   }
-  const scene = await create(title, "a");
-  const second = await create("次のシーン", "b");
+  const scene = await create(title, "a", manuscript);
+  const second = await create("次のシーン", "b", "最初の本文。\n次の文章です。");
   // Fixture setup must not race an unrelated prior project's guarded selector.
   // Exercise the supported canonical deep link instead of mutating UI selection.
   const writingRoute = `/${mode}/projects/${project.id}/scenes/${scene.id}${mode === "mobile" ? "?view=writing" : ""}`;

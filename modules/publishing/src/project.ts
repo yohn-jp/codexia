@@ -97,7 +97,7 @@ async function readYaml(reader: SnapshotReader, path: string): Promise<Record<st
   }
   const result = record(parsed);
   if (!result) throw new Error("Expected a YAML mapping in " + path);
-  return result;
+  return file.documentKind ? { ...result, kind: file.documentKind } : result;
 }
 
 function manuscriptBody(document: string, filePath: string): string {
@@ -257,11 +257,12 @@ export async function readPublishingProject(reader: SnapshotReader): Promise<Pub
   const files = await reader.list("plot/volumes");
   const volumesByPath = new Map<string, PublishingVolume>();
   const volumesById = new Map<string, PublishingVolume>();
-  const chaptersByPath = new Map<string, PublishingChapter>();
   const chaptersById = new Map<string, PublishingChapter>();
   const chapterVolumeIds = new Map<PublishingChapter, string>();
-  for (const volumePathId of folderIds(files, "plot/volumes/")) {
-    const volumeData = await readYaml(reader, `plot/volumes/${volumePathId}/volume.yaml`) ?? { id: volumePathId };
+  for (const volumeFile of files.filter((path) => /^plot\/volumes\/[^/]+\/volume\.yaml$/u.test(path))) {
+    const volumePathId = volumeFile.split("/")[2]!;
+    const volumeData = await readYaml(reader, volumeFile);
+    if (!volumeData || volumeData.kind !== "volume") continue;
     const volumeId = nodeId(volumeData, volumePathId);
     const volumeOrder = nodeOrder(volumeData);
     const volume: PublishingVolume = {
@@ -273,14 +274,14 @@ export async function readPublishingProject(reader: SnapshotReader): Promise<Pub
     volumesByPath.set(volumePathId, volume);
     volumesById.set(volumeId, volume);
     const chapterPrefix = `plot/volumes/${volumePathId}/chapters/`;
-    for (const chapterPathId of folderIds(files, chapterPrefix)) {
-      const chapterBase = `${chapterPrefix}${chapterPathId}`;
-      const chapterData = await readYaml(reader, `${chapterBase}/chapter.yaml`) ?? { id: chapterPathId };
+    for (const chapterFile of files.filter((path) => path.startsWith(chapterPrefix) && /^plot\/volumes\/[^/]+\/chapters\/[^/]+\/chapter\.yaml$/u.test(path))) {
+      const chapterPathId = chapterFile.split("/")[4]!;
+      const chapterData = await readYaml(reader, chapterFile);
+      if (!chapterData || chapterData.kind !== "chapter") continue;
       const chapterId = nodeId(chapterData, chapterPathId);
       const chapterOrder = nodeOrder(chapterData);
-      const parentVolume = typeof chapterData.volume === "string"
-        ? volumesById.get(chapterData.volume) ?? volume
-        : volume;
+      const parentVolume = typeof chapterData.volume === "string" ? volumesById.get(chapterData.volume) : undefined;
+      if (!parentVolume) continue;
       const chapter: PublishingChapter = {
         id: chapterId,
         title: nodeTitle(chapterData, chapterId),
@@ -288,22 +289,19 @@ export async function readPublishingProject(reader: SnapshotReader): Promise<Pub
         scenes: [],
       };
       parentVolume.chapters.push(chapter);
-      chaptersByPath.set(`${volumePathId}/${chapterPathId}`, chapter);
       chaptersById.set(chapterId, chapter);
       chapterVolumeIds.set(chapter, parentVolume.id);
     }
   }
 
-  for (const sceneFile of files.filter((path) => /\/scenes\/[^/]+\.yaml$/u.test(path))) {
+  for (const sceneFile of files.filter((path) => /^plot\/volumes\/[^/]+\/chapters\/[^/]+\/scenes\/[^/]+\.yaml$/u.test(path))) {
     const sceneData = await readYaml(reader, sceneFile);
-    if (!sceneData) continue;
+    if (!sceneData || sceneData.kind !== "scene") continue;
     const match = /^plot\/volumes\/([^/]+)\/chapters\/([^/]+)\/scenes\/([^/]+)\.yaml$/u.exec(sceneFile);
     if (!match) continue;
     const basename = match[3]!;
     const id = nodeId(sceneData, basename);
-    const chapter = typeof sceneData.chapter === "string"
-      ? chaptersById.get(sceneData.chapter) ?? chaptersByPath.get(`${match[1]}/${match[2]}`)
-      : chaptersByPath.get(`${match[1]}/${match[2]}`);
+    const chapter = typeof sceneData.chapter === "string" ? chaptersById.get(sceneData.chapter) : undefined;
     if (!chapter) continue;
     const bodyPath = manuscriptPath(sceneFile, sceneData, id);
     const manuscript = await reader.read(bodyPath);

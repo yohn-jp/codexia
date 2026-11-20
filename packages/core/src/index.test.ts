@@ -15,6 +15,33 @@ async function hierarchy(){const p=await project();for(const input of [{kind:"vo
 function operation(snapshot:SnapshotId,path:string,content:string|null,revision:string|null=null):ChangeOperation{return {id:randomUUID(),generation:0,projectId:snapshot.projectId,baseProjectVersion:snapshot.projectVersion,effect:"metadata",reads:[{path,revision}],writes:[{path,revision,content}],message:"Write approved data"};}
 
 test("PostgreSQL is sole project authority, hierarchy creation preserves canonical scene bodies",async()=>{const p=await hierarchy();assert.equal((await core.listProjects()).some(x=>x.id===p.id),true);const tree=await core.tree(p.id);assert.equal(tree.volumes[0]?.chapters[0]?.scenes[0]?.id,"s1");assert.equal((await core.readScene(p.id,"s1")).text,"Text 😀\n");const docs=await persistence.read(r=>r.listDocuments(p.id));assert.equal(docs.length,3);assert.equal((await persistence.read(r=>r.getRevision(p.id,docs.find(d=>d.kind==="scene")!.id,docs.find(d=>d.kind==="scene")!.headRevisionId!)))?.markdown,"Text 😀\n");});
+test("PostgreSQL projection labels a note with misleading scene ancestry by its canonical document kind", async () => {
+  const p = await hierarchy();
+  const documents = await persistence.read((reader) => reader.listDocuments(p.id));
+  const scene = documents.find((document) => document.kind === "scene")!;
+  const chapter = documents.find((document) => document.kind === "chapter")!;
+  const note = await persistence.transaction((transaction) => transaction.createDocument({
+    projectId: p.id,
+    kind: "note",
+    parentId: scene.id,
+    title: "Author note",
+    orderKey: "0002",
+    markdown: "Private note body",
+    authorId: "owner",
+    idempotencyKey: randomUUID(),
+  }));
+  const reader = await core.reader(p.id);
+  const misleadingPath = `plot/volumes/${chapter.id}/chapters/${scene.id}/scenes/${note.document.id}.yaml`;
+  const projectedNote = await reader.read(misleadingPath);
+  assert.equal(YAML.parse(projectedNote!.content).kind, undefined, "the immutable projection bytes remain unchanged");
+  assert.equal(projectedNote!.documentKind, "note");
+  const pinnedReader = await core.reader(p.id, reader.snapshot);
+  assert.equal((await pinnedReader.read(misleadingPath))?.documentKind, "note", "pinned stored snapshots expose their canonical document kind");
+  const tree = await core.tree(p.id);
+  assert.deepEqual(tree.volumes.map((volume) => volume.id), ["v1"]);
+  assert.deepEqual(tree.volumes[0]?.chapters.map((chapter) => chapter.id), ["c1"]);
+  assert.deepEqual(tree.volumes[0]?.chapters[0]?.scenes.map((item) => item.id), ["s1"]);
+});
 test("native document snapshots expose authoritative chapter and scene parent identities", async () => {
   const p = await project();
   const create = (kind: string, parentId: import("@codexia/persistence-contracts").DocumentId | null, title: string) =>
@@ -89,6 +116,43 @@ test("disjoint operations approved together can apply in sequence",async()=>{con
 test("binary module artifacts preserve exact bytes and metadata-backed revisions",async()=>{const p=await project(),reader=await core.reader(p.id),op=operation(reader.snapshot,"assets/image.bin",Buffer.from([0,255,128,32]).toString("base64"));op.writes[0]!.encoding="base64";await accept(p.id,op);const next=await core.reader(p.id);assert.equal((await next.read("assets/image.bin","base64"))?.content,op.writes[0]!.content);assert.deepEqual(await next.listRevisions!("assets"),[{path:"assets/image.bin",revision:(await next.read("assets/image.bin"))!.revision}]);});
 test("search and writing statistics share immutable Unicode-aware scene data",async()=>{const p=await hierarchy(),reader=await core.reader(p.id),search=await core.searchSnapshot(p.id,"😀",20,reader.snapshot),stats=await core.writingStatsSnapshot(p.id,reader.snapshot);assert.equal(search.results[0]?.offset,5);assert.equal(stats.stats.totalCharCount,5);assert.deepEqual(stats.snapshot,search.snapshot);});
 test("reorder and recursive deletion mutate hierarchy while keeping revision history",async()=>{const p=await hierarchy();const second=await core.buildCreateHierarchyOperation(p.id,{kind:"scene",id:"s2",title:"Second",volumeId:"v1",chapterId:"c1",manuscriptBody:"Second"});await accept(p.id,second.operation);const reorder=await core.buildReorderHierarchyOperation(p.id,{kind:"scene",volumeId:"v1",chapterId:"c1",orderedIds:["s2","s1"]});await accept(p.id,reorder.operation);assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters[0]?.scenes.map(x=>x.id),["s2","s1"]);const docs=await persistence.read(r=>r.listDocuments(p.id));const scene=docs.find(d=>d.title==="Scene")!;const removal=await core.buildDeleteHierarchyOperation(p.id,{kind:"volume",id:"v1"});await accept(p.id,removal.operation);assert.equal((await core.tree(p.id)).volumes.length,0);assert.equal((await persistence.read(r=>r.getRevision(p.id,scene.id,scene.headRevisionId!)))?.markdown,"Text 😀\n");});
+test("PostgreSQL append keys preserve creation order across digit boundaries and reordered siblings", async () => {
+  const p = await project();
+  const create = async (input: Parameters<typeof core.buildCreateHierarchyOperation>[1]) => {
+    const built = await core.buildCreateHierarchyOperation(p.id, input);
+    await accept(p.id, built.operation);
+  };
+  const volumeIds = Array.from({ length: 10 }, (_, index) => `volume-${index + 1}`);
+  for (const [index, id] of volumeIds.entries()) await create({ kind: "volume", id, title: `Volume ${index + 1}` });
+  const chapterIds = Array.from({ length: 10 }, (_, index) => `chapter-${index + 1}`);
+  for (const [index, id] of chapterIds.entries()) await create({
+    kind: "chapter", id, title: `Chapter ${index + 1}`, volumeId: volumeIds[0]!,
+  });
+  const sceneIds = Array.from({ length: 10 }, (_, index) => `scene-${index + 1}`);
+  for (const [index, id] of sceneIds.entries()) await create({
+    kind: "scene", id, title: `Scene ${index + 1}`, volumeId: volumeIds[0]!, chapterId: chapterIds[0]!,
+  });
+
+  const before = await persistence.read(reader => reader.listDocuments(p.id));
+  assert.deepEqual((await core.tree(p.id)).volumes.map(volume => volume.id), volumeIds);
+  assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters.map(chapter => chapter.id), chapterIds);
+  assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters[0]?.scenes.map(scene => scene.id), sceneIds);
+  assert.equal(before.find(document => document.kind === "volume" && document.title === "Volume 10")?.orderKey, "0000000010");
+  assert.equal(before.find(document => document.kind === "chapter" && document.title === "Chapter 10")?.orderKey, "0000000010");
+  assert.equal(before.find(document => document.kind === "scene" && document.title === "Scene 10")?.orderKey, "0000000010");
+
+  const reorder = await core.buildReorderHierarchyOperation(p.id, { kind: "volume", orderedIds: [...volumeIds].reverse() });
+  await accept(p.id, reorder.operation);
+  const beforeAppend = await persistence.read(reader => reader.listDocuments(p.id));
+  const oldVolumeKeys = new Map(beforeAppend.filter(document => document.kind === "volume").map(document => [document.title, document.orderKey]));
+  await create({ kind: "volume", id: "volume-11", title: "Volume 11" });
+  const afterAppend = await persistence.read(reader => reader.listDocuments(p.id));
+  for (const document of afterAppend.filter(document => document.kind === "volume" && document.title !== "Volume 11")) {
+    assert.equal(document.orderKey, oldVolumeKeys.get(document.title), "append does not rewrite existing order keys");
+  }
+  assert.equal(afterAppend.find(document => document.kind === "volume" && document.title === "Volume 11")?.orderKey, "0000000010");
+  assert.deepEqual((await core.tree(p.id)).volumes.map(volume => volume.id), [...volumeIds].reverse().concat("volume-11"));
+});
 test("reordering a moved scene preserves its authoritative PostgreSQL parent", async () => {
   const p = await hierarchy();
   const secondChapter = await core.buildCreateHierarchyOperation(p.id, {
