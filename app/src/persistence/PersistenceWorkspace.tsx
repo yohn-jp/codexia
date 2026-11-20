@@ -10,7 +10,7 @@ import { availableModulePanels } from "../application/AvailableModulePanels";
 import { workspaceContributions } from "../contributions/catalog";
 import { ProposalReview } from "../contributions/ProposalReview";
 import type { JournalProposal } from "../storage/journal";
-import type { Document as PersistenceDocument, DocumentId, DocumentRevision, EvidenceId, KnowledgeNode, KnowledgeNodeId, Project as PersistenceProject, RevisionId } from "@codexia/persistence-contracts";
+import type { Document as PersistenceDocument, DocumentId, DocumentRevision, EvidenceId, KnowledgeNode, KnowledgeNodeId, Project as PersistenceProject, ProjectId, RevisionId } from "@codexia/persistence-contracts";
 import { api, type PersistenceAnchorView } from "../api";
 import { KnowledgeContextInspector } from "./KnowledgeContextInspector";
 import { readWorkspaceSelectionForLocation, workspaceSelectionPath, writeWorkspaceSelection } from "./selection";
@@ -325,6 +325,18 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const selectionIntentRef = useRef(0);
   const continueRequestRef = useRef<ContinueRequest | undefined>(undefined);
   const panelRequestSequenceRef = useRef(0);
+  const creationInFlightRef = useRef(false);
+  const projectCreationIntentRef = useRef<{ id: ProjectId; title: string } | null>(null);
+  const documentCreationIntentRef = useRef<{
+    projectId: string;
+    documentId: DocumentId;
+    parentId: DocumentId | null;
+    kind: string;
+    title: string;
+    orderKey: string;
+    markdown: string;
+    idempotencyKey: string;
+  } | null>(null);
   const [resumeEpoch, setResumeEpoch] = useState(0);
   const [legacyImportBusy, setLegacyImportBusy] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -1000,12 +1012,47 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   async function createProject(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const title = projectTitle.trim();
-    if (!title || !await protectTransition()) return;
+    if (!title || creationInFlightRef.current) return;
+    creationInFlightRef.current = true;
+    let creationStarted = false;
+    try {
+      if (!await protectTransition()) return;
+      creationStarted = true;
+    } finally {
+      if (!creationStarted) creationInFlightRef.current = false;
+    }
+    const previousIntent = projectCreationIntentRef.current;
+    const intent = previousIntent?.title === title
+      ? previousIntent
+      : { id: crypto.randomUUID() as ProjectId, title };
+    projectCreationIntentRef.current = intent;
     setLoading(true);
     setPageError("");
     try {
-      const result = await api.createPersistenceProject({ title });
-      setProjects((current) => [result.project, ...current]);
+      let result: Awaited<ReturnType<typeof api.createPersistenceProject>>;
+      try {
+        result = await api.createPersistenceProject({ id: intent.id, title: intent.title });
+      } catch (createError) {
+        // A timed-out response may have committed the project. Read the exact
+        // client id before allowing another submission to allocate a project.
+        try {
+          const existing = await api.persistenceProject(intent.id);
+          if (existing.project.title !== intent.title) {
+            throw new Error("同じ作品IDに別の作品が存在するため、作成を完了できませんでした。作品名を確認してください。");
+          }
+          result = existing;
+        } catch (readError) {
+          throw readError instanceof Error && !(readError instanceof ApiError && readError.status === 404)
+            ? readError
+            : createError;
+        }
+      }
+      if (result.project.id !== intent.id || result.project.title !== intent.title) {
+        throw new Error("作成応答が要求した作品と一致しませんでした。作品名を確認してください。");
+      }
+      setProjects((current) => current.some((item) => item.id === result.project.id)
+        ? current.map((item) => item.id === result.project.id ? result.project : item)
+        : [result.project, ...current]);
       if (!await protectTransition()) return;
       selectionRef.current = { projectId: result.project.id, documentId: "" };
       persistSelectionSafely(authorScope, selectionRef.current);
@@ -1016,9 +1063,11 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       if (mode === "mobile" && projects.length === 0) {
         setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
       }
+      projectCreationIntentRef.current = null;
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "作品を作成できませんでした。");
     } finally {
+      creationInFlightRef.current = false;
       setLoading(false);
     }
   }
@@ -1094,19 +1143,57 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     event.preventDefault();
     if (!project) return;
     const title = documentTitle.trim();
-    if (!title || !await protectTransition()) return;
-    if (!canCreateDocument) { setPageError("完全な目次を取得できていないか、文書数が現在の作品構成上限に達しています。"); return; }
+    if (!title || creationInFlightRef.current) return;
+    creationInFlightRef.current = true;
+    let creationStarted = false;
+    try {
+      if (!await protectTransition()) return;
+      if (!canCreateDocument) { setPageError("完全な目次を取得できていないか、文書数が現在の作品構成上限に達しています。"); return; }
+      creationStarted = true;
+    } finally {
+      if (!creationStarted) creationInFlightRef.current = false;
+    }
+    const parentId = (newDocumentParent || null) as DocumentId | null;
+    const orderKey = String(documents.length).padStart(8, "0");
+    const previousIntent = documentCreationIntentRef.current;
+    const intent = previousIntent && previousIntent.projectId === project.id && previousIntent.parentId === parentId && previousIntent.kind === documentKind && previousIntent.title === title
+      ? previousIntent
+      : {
+          projectId: project.id,
+          documentId: crypto.randomUUID() as DocumentId,
+          parentId,
+          kind: documentKind,
+          title,
+          orderKey,
+          markdown: "",
+          idempotencyKey: crypto.randomUUID(),
+        };
+    documentCreationIntentRef.current = intent;
     setLoading(true);
     setPageError("");
     try {
-      const result = await api.createPersistenceDocument(project.id, {
-        parentId: (newDocumentParent || null) as DocumentId | null,
-        kind: documentKind,
-        title,
-        orderKey: String(documents.length).padStart(8, "0"),
-        markdown: "",
-        idempotencyKey: crypto.randomUUID(),
-      });
+      let result: Awaited<ReturnType<typeof api.createPersistenceDocument>>;
+      try {
+        result = await api.createPersistenceDocument(project.id, intent);
+      } catch (createError) {
+        // Recover a committed document after an ambiguous timeout or a
+        // canonical duplicate response, using the exact document id.
+        try {
+          const existing = await api.persistenceDocument(project.id, intent.documentId);
+          if (existing.document.title !== intent.title) {
+            throw new Error("同じ文書IDに別の文書が存在するため、作成を完了できませんでした。文書名を確認してください。");
+          }
+          if (!existing.revision) throw new Error("作成済み文書のRevisionを確認できませんでした。");
+          result = { document: existing.document, revision: existing.revision, replayed: true };
+        } catch (readError) {
+          throw readError instanceof Error && !(readError instanceof ApiError && readError.status === 404)
+            ? readError
+            : createError;
+        }
+      }
+      if (result.document.id !== intent.documentId || result.document.projectId !== intent.projectId || result.document.title !== intent.title) {
+        throw new Error("作成応答が要求した文書と一致しませんでした。文書名を確認してください。");
+      }
       // Re-read the canonical order after creation; an appended document can
       // share an orderKey with an existing sibling or sort before it.
       if (projectIdRef.current !== project.id) return;
@@ -1136,9 +1223,11 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       if (mode === "mobile" && documents.length === 0) {
         setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
       }
+      documentCreationIntentRef.current = null;
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "文書を作成できませんでした。");
     } finally {
+      creationInFlightRef.current = false;
       setLoading(false);
     }
   }
