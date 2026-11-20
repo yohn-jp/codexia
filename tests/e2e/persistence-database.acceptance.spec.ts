@@ -9,7 +9,9 @@ test("PostgreSQL project pages expose records beyond 200 and deep links retain t
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   await ownerLogin(page);
   const origin = new URL(page.url()).origin;
-  const projects = Array.from({ length: 205 }, (_, index) => ({ title: `Project pagination ${crypto.randomUUID()} ${index}` }));
+  // Seed more than two complete pages so a small, intentionally preloaded
+  // disposable database cannot shrink the second page to a short tail.
+  const projects = Array.from({ length: 405 }, (_, index) => ({ title: `Project pagination ${crypto.randomUUID()} ${index}` }));
   const created: Array<{ id: string; title: string }> = [];
   for (let offset = 0; offset < projects.length; offset += 10) {
     const batch = await Promise.all(projects.slice(offset, offset + 10).map(async (project) => {
