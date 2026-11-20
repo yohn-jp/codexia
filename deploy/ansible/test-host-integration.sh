@@ -60,18 +60,21 @@ rootless() (
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"
 )
 cleanup() {
-  local status=$?
+  local test_status=$?
+  local status=$test_status
   local cleanup_status=0
   trap - EXIT
   set +e
   if [[ "$host_identity_expected" == true ]] && getent passwd "$user" >/dev/null 2>&1 && \
       [[ "$(id -u "$user" 2>/dev/null)" == "$uid" && "$(getent passwd "$user" | cut -d: -f6)" == "$home" ]]; then
     rootless systemctl --user stop codexia-fixture-network.service >/dev/null 2>&1 || true
-    /usr/bin/sudo -u "$user" env HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_RUNTIME_DIR="/run/user/$uid" \
-      DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" /usr/bin/podman network rm codexia-fixture >/dev/null 2>&1 || true
-    if rootless /usr/bin/podman network exists codexia-fixture >/dev/null 2>&1; then
-      printf 'Fixture Podman network remains after cleanup: codexia-fixture\n' >&2
-      cleanup_status=1
+    if [[ "$fixture_quadlet_installed" == true ]]; then
+      rootless /usr/bin/podman network rm codexia-fixture >"$tmp/network-rm.log" 2>&1 || true
+      if rootless /usr/bin/podman network exists codexia-fixture >/dev/null 2>&1; then
+        printf 'Fixture Podman network remains after cleanup: codexia-fixture\n' >&2
+        cat "$tmp/network-rm.log" >&2
+        cleanup_status=1
+      fi
     fi
     if [[ "$fixture_quadlet_installed" == true ]]; then rootless rm -f -- "$fixture_quadlet" || cleanup_status=1; fi
     if [[ "$fixture_unit_dropin_installed" == true ]]; then
@@ -106,7 +109,7 @@ cleanup() {
   if [[ "$manager_dropin_dir_created" == true ]]; then sudo rmdir "$manager_dropin_dir" 2>/dev/null || cleanup_status=1; fi
   rm -rf -- "$tmp" || cleanup_status=1
   if (( status == 0 && cleanup_status != 0 )); then status=$cleanup_status; fi
-  printf 'Ansible host fixture cleanup finished with test status %s and cleanup status %s.\n' "$status" "$cleanup_status" >&2
+  printf 'Ansible host fixture cleanup finished with test status %s, cleanup status %s, final status %s.\n' "$test_status" "$cleanup_status" "$status" >&2
   exit "$status"
 }
 trap cleanup EXIT
