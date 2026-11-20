@@ -75,7 +75,8 @@ export interface ProjectObservation {
 }
 export interface SnapshotReader {
   snapshot: SnapshotId;
-  read(path: string, encoding?: "utf8" | "base64"): Promise<{ content: string; revision: string } | null>;
+  /** Canonical kind for metadata files, including legacy immutable projections without kind in their bytes. */
+  read(path: string, encoding?: "utf8" | "base64"): Promise<{ content: string; revision: string; documentKind?: string } | null>;
   list(prefix: string): Promise<string[]>;
   /** Optional metadata-backed path revisions; values must match read(path).revision. */
   listRevisions?(prefix: string): Promise<FileRevision[]>;

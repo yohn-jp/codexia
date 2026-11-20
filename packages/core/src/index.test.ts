@@ -15,6 +15,33 @@ async function hierarchy(){const p=await project();for(const input of [{kind:"vo
 function operation(snapshot:SnapshotId,path:string,content:string|null,revision:string|null=null):ChangeOperation{return {id:randomUUID(),generation:0,projectId:snapshot.projectId,baseProjectVersion:snapshot.projectVersion,effect:"metadata",reads:[{path,revision}],writes:[{path,revision,content}],message:"Write approved data"};}
 
 test("PostgreSQL is sole project authority, hierarchy creation preserves canonical scene bodies",async()=>{const p=await hierarchy();assert.equal((await core.listProjects()).some(x=>x.id===p.id),true);const tree=await core.tree(p.id);assert.equal(tree.volumes[0]?.chapters[0]?.scenes[0]?.id,"s1");assert.equal((await core.readScene(p.id,"s1")).text,"Text 😀\n");const docs=await persistence.read(r=>r.listDocuments(p.id));assert.equal(docs.length,3);assert.equal((await persistence.read(r=>r.getRevision(p.id,docs.find(d=>d.kind==="scene")!.id,docs.find(d=>d.kind==="scene")!.headRevisionId!)))?.markdown,"Text 😀\n");});
+test("PostgreSQL projection labels a note with misleading scene ancestry by its canonical document kind", async () => {
+  const p = await hierarchy();
+  const documents = await persistence.read((reader) => reader.listDocuments(p.id));
+  const scene = documents.find((document) => document.kind === "scene")!;
+  const chapter = documents.find((document) => document.kind === "chapter")!;
+  const note = await persistence.transaction((transaction) => transaction.createDocument({
+    projectId: p.id,
+    kind: "note",
+    parentId: scene.id,
+    title: "Author note",
+    orderKey: "0002",
+    markdown: "Private note body",
+    authorId: "owner",
+    idempotencyKey: randomUUID(),
+  }));
+  const reader = await core.reader(p.id);
+  const misleadingPath = `plot/volumes/${chapter.id}/chapters/${scene.id}/scenes/${note.document.id}.yaml`;
+  const projectedNote = await reader.read(misleadingPath);
+  assert.equal(YAML.parse(projectedNote!.content).kind, undefined, "the immutable projection bytes remain unchanged");
+  assert.equal(projectedNote!.documentKind, "note");
+  const pinnedReader = await core.reader(p.id, reader.snapshot);
+  assert.equal((await pinnedReader.read(misleadingPath))?.documentKind, "note", "pinned stored snapshots expose their canonical document kind");
+  const tree = await core.tree(p.id);
+  assert.deepEqual(tree.volumes.map((volume) => volume.id), ["v1"]);
+  assert.deepEqual(tree.volumes[0]?.chapters.map((chapter) => chapter.id), ["c1"]);
+  assert.deepEqual(tree.volumes[0]?.chapters[0]?.scenes.map((item) => item.id), ["s1"]);
+});
 test("native document snapshots expose authoritative chapter and scene parent identities", async () => {
   const p = await project();
   const create = (kind: string, parentId: import("@codexia/persistence-contracts").DocumentId | null, title: string) =>
