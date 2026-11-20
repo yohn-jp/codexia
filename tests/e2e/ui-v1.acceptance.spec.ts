@@ -178,7 +178,7 @@ test("both production Shells preserve recoverable Japanese drafts and the Mobile
     const { project, scene } = await createWritingFixture(page, mode);
     const text = "東京《とうきょう》へ向かう。\n日本語😀の本文。";
     await editor(page).click();
-    await editor(page).press("ControlOrMeta+a");
+    await page.keyboard.press("ControlOrMeta+a");
     await page.keyboard.insertText(text);
     await expectMarkdown(page, text);
     // "Saved" can reflect the previous revision. The reader must open only
@@ -209,9 +209,9 @@ async function visibleReaderParagraphs(page: Page): Promise<string[]> {
 }
 
 async function replaceReaderText(page: Page, text: string): Promise<void> {
-  const content = editor(page).locator(".cm-content");
-  await content.click();
-  await content.press("ControlOrMeta+a");
+  await expect(editor(page)).toBeVisible();
+  await editor(page).click();
+  await page.keyboard.press("ControlOrMeta+a");
   await page.keyboard.insertText(text);
   await expectMarkdown(page, text);
 }
