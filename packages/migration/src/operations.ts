@@ -62,7 +62,7 @@ export async function planExactFileImport(input: {
     };
   }
 
-  const existing = await context.target.read(input.target);
+  const existing = await context.target.read(input.target, encoding);
   if (existing?.content === content) {
     return {
       entry: {
@@ -114,7 +114,7 @@ export async function planGeneratedFileImport(input: {
   message: string;
   existing?: { content: string; revision: string } | null;
 }): Promise<PlannedFileImport> {
-  const existing = input.existing === undefined ? await input.context.target.read(input.target) : input.existing;
+  const existing = input.existing === undefined ? await input.context.target.read(input.target, input.encoding) : input.existing;
   if (existing?.content === input.content) {
     return {
       entry: {
