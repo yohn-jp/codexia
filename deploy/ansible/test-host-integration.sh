@@ -3,7 +3,7 @@
 set -euo pipefail
 umask 077
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+trap 'rm -rf -- "$tmp"' EXIT
 test "$(lsb_release -rs)" = 26.04
 test "$(uname -m)" = x86_64
 # Default is the strict, clean target-VM proof. Actions may explicitly select
@@ -17,6 +17,19 @@ esac
 user=codexia-ci-host
 uid=22001
 home="/home/$user"
+manager_dropin_dir="/run/systemd/system/user@$uid.service.d"
+manager_dropin="$manager_dropin_dir/10-codexia-ci-xdg.conf"
+generator_dir=/run/systemd/user-generators
+generator_wrapper="$generator_dir/podman-user-generator"
+fixture_quadlet="$home/.config/containers/systemd/codexia-fixture.network"
+fixture_unit_dropin="$home/.config/systemd/user/codexia-fixture-network.service.d/10-codexia-ci-runtime.conf"
+host_identity_expected=false
+manager_dropin_installed=false
+manager_dropin_dir_created=false
+generator_dir_created=false
+generator_wrapper_installed=false
+fixture_quadlet_installed=false
+fixture_unit_dropin_installed=false
 if getent passwd "$user" || getent passwd "$uid" || getent group "$user" || getent group "$uid"; then
   echo 'Fixture identity already exists; refusing adoption' >&2; exit 1
 fi
@@ -40,21 +53,80 @@ all:
         codexia_service_home: $home
 YAML
 apply() { env -u XDG_CONFIG_HOME "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i "$tmp/inventory.yml" deploy/ansible/site.yml; }
+rootless() (
+  # The runner checkout is intentionally inaccessible to the fixture account.
+  cd /
+  sudo -H -u "$user" env HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_DATA_HOME="$home/.local/share" XDG_STATE_HOME="$home/.local/state" XDG_RUNTIME_DIR="/run/user/$uid" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"
+)
+cleanup() {
+  local status=$?
+  local cleanup_status=0
+  trap - EXIT
+  set +e
+  if [[ "$host_identity_expected" == true ]] && getent passwd "$user" >/dev/null 2>&1 && \
+      [[ "$(id -u "$user" 2>/dev/null)" == "$uid" && "$(getent passwd "$user" | cut -d: -f6)" == "$home" ]]; then
+    rootless systemctl --user stop codexia-fixture-network.service >/dev/null 2>&1 || true
+    /usr/bin/sudo -u "$user" env HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_RUNTIME_DIR="/run/user/$uid" \
+      DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" /usr/bin/podman network rm codexia-fixture >/dev/null 2>&1 || true
+    if rootless /usr/bin/podman network exists codexia-fixture >/dev/null 2>&1; then
+      printf 'Fixture Podman network remains after cleanup: codexia-fixture\n' >&2
+      cleanup_status=1
+    fi
+    if [[ "$fixture_quadlet_installed" == true ]]; then rootless rm -f -- "$fixture_quadlet" || cleanup_status=1; fi
+    if [[ "$fixture_unit_dropin_installed" == true ]]; then
+      rootless rm -f -- "$fixture_unit_dropin" || cleanup_status=1
+      rootless rmdir -- "$(dirname "$fixture_unit_dropin")" 2>/dev/null || true
+    fi
+    rootless rm -f -- "/run/user/$uid/codexia-podman-user-generator.log" \
+      "/run/user/$uid/codexia-podman-user-generator-effective.log" || cleanup_status=1
+    rootless systemctl --user daemon-reload >/dev/null 2>&1 || cleanup_status=1
+  elif [[ "$host_identity_expected" == true ]] && getent passwd "$user" >/dev/null 2>&1; then
+    printf 'Refusing to clean a changed host fixture identity: %s\n' "$user" >&2
+    cleanup_status=1
+  fi
+  if [[ "$generator_wrapper_installed" == true ]]; then
+    if sudo test -f "$generator_wrapper" && sudo cmp -s "$tmp/podman-user-generator" "$generator_wrapper"; then
+      sudo rm -- "$generator_wrapper" || cleanup_status=1
+    else
+      printf 'Refusing to remove a changed Podman generator wrapper: %s\n' "$generator_wrapper" >&2
+      cleanup_status=1
+    fi
+  fi
+  if [[ "$generator_dir_created" == true ]]; then sudo rmdir "$generator_dir" 2>/dev/null || cleanup_status=1; fi
+  if [[ "$manager_dropin_installed" == true ]]; then
+    if sudo test -f "$manager_dropin" && sudo cmp -s "$tmp/user-manager.conf" "$manager_dropin"; then
+      sudo rm -- "$manager_dropin" || cleanup_status=1
+      sudo rmdir "$manager_dropin_dir" 2>/dev/null || true
+      sudo systemctl daemon-reload >/dev/null 2>&1 || cleanup_status=1
+    else
+      printf 'Refusing to remove a changed user-manager fixture drop-in: %s\n' "$manager_dropin" >&2
+      cleanup_status=1
+    fi
+  fi
+  if [[ "$manager_dropin_dir_created" == true ]]; then sudo rmdir "$manager_dropin_dir" 2>/dev/null || cleanup_status=1; fi
+  rm -rf -- "$tmp" || cleanup_status=1
+  if (( status == 0 && cleanup_status != 0 )); then status=$cleanup_status; fi
+  printf 'Ansible host fixture cleanup finished with test status %s and cleanup status %s.\n' "$status" "$cleanup_status" >&2
+  exit "$status"
+}
+trap cleanup EXIT
 # On the Actions runner only, isolate the fixture manager from known runner
 # environment contamination. The clean proof does not set these variables.
 if [[ "$proof_mode" == actions-fixture ]]; then
-manager_dropin_dir="/run/systemd/system/user@$uid.service.d"
-sudo install -d -m 0755 "$manager_dropin_dir"
-manager_dropin="$manager_dropin_dir/10-codexia-ci-xdg.conf"
-test ! -e "$manager_dropin"
-cat <<EOF | sudo tee "$manager_dropin" >/dev/null
+  if [[ ! -d "$manager_dropin_dir" ]]; then sudo install -d -m 0755 "$manager_dropin_dir"; manager_dropin_dir_created=true; fi
+  test ! -e "$manager_dropin" && test ! -L "$manager_dropin"
+  cat > "$tmp/user-manager.conf" <<EOF
 [Service]
 Environment=HOME=$home
 Environment=XDG_CONFIG_HOME=$home/.config
 Environment=XDG_RUNTIME_DIR=/run/user/$uid
 EOF
-sudo systemctl daemon-reload
+  manager_dropin_installed=true
+  sudo install -m 0644 "$tmp/user-manager.conf" "$manager_dropin"
+  sudo systemctl daemon-reload
 fi
+host_identity_expected=true
 apply | tee "$tmp/first.log"
 grep -Eq 'changed=[1-9][0-9]*' "$tmp/first.log"
 apply | tee "$tmp/second.log"
@@ -62,12 +134,6 @@ grep -q 'changed=0' "$tmp/second.log"
 test "$(id -u "$user")" = "$uid"
 test "$(id -g "$user")" = "$uid"
 test "$(loginctl show-user "$user" --property=Linger --value)" = yes
-rootless() (
-  # The runner checkout is intentionally inaccessible to the fixture account.
-  cd /
-  sudo -H -u "$user" env HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_DATA_HOME="$home/.local/share" XDG_STATE_HOME="$home/.local/state" XDG_RUNTIME_DIR="/run/user/$uid" \
-    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"
-)
 # Check the actual inherited paths; an unset/empty XDG_CONFIG_HOME means
 # the standard HOME/.config default, not a missing configuration.
 assert_runtime_environment() {
@@ -115,11 +181,14 @@ fi
 env | grep -E '^(HOME|XDG_CONFIG_HOME|XDG_RUNTIME_DIR)=' > "$generator_effective_log" || true
 exec /usr/lib/systemd/user-generators/podman-user-generator "\$@"
 EOF
-sudo install -d -m 0755 "$generator_dir"
+if [[ ! -d "$generator_dir" ]]; then sudo install -d -m 0755 "$generator_dir"; generator_dir_created=true; fi
 sudo install -m 0755 "$tmp/podman-user-generator" "$generator_wrapper"
+generator_wrapper_installed=true
 test -f /sys/fs/cgroup/cgroup.controllers
 test "$(rootless /usr/bin/podman info --format '{{.Host.Security.Rootless}}')" = true
 rootless mkdir -p "$home/.config/containers/systemd"
+rootless test ! -e "$fixture_quadlet" && rootless test ! -L "$fixture_quadlet"
+fixture_quadlet_installed=true
 cat <<'QUADLET' | rootless tee "$home/.config/containers/systemd/codexia-fixture.network" >/dev/null
 [Network]
 NetworkName=codexia-fixture
@@ -130,15 +199,17 @@ rootless chmod 0600 "$home/.config/containers/systemd/codexia-fixture.network"
 # Only the Actions fixture receives a service drop-in. The clean proof
 # must run the generated service with the environment it actually inherits.
 if [[ "$proof_mode" == actions-fixture ]]; then
-unit_dropin_dir="$home/.config/systemd/user/codexia-fixture-network.service.d"
-rootless install -d -m 0755 "$unit_dropin_dir"
-cat <<EOF | rootless tee "$unit_dropin_dir/10-codexia-ci-runtime.conf" >/dev/null
+  unit_dropin_dir="$home/.config/systemd/user/codexia-fixture-network.service.d"
+  rootless test ! -e "$fixture_unit_dropin" && rootless test ! -L "$fixture_unit_dropin"
+  fixture_unit_dropin_installed=true
+  rootless install -d -m 0755 "$unit_dropin_dir"
+  cat <<EOF | rootless tee "$unit_dropin_dir/10-codexia-ci-runtime.conf" >/dev/null
 [Service]
 Environment=HOME=$home
 Environment=XDG_CONFIG_HOME=$home/.config
 Environment=XDG_RUNTIME_DIR=/run/user/$uid
 EOF
-rootless chmod 0600 "$unit_dropin_dir/10-codexia-ci-runtime.conf"
+  rootless chmod 0600 "$unit_dropin_dir/10-codexia-ci-runtime.conf"
 fi
 rootless systemctl --user daemon-reload
 if ! sudo test -s "$generator_log"; then
