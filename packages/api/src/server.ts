@@ -1,4 +1,5 @@
 import { EventStreams } from "./event-streams.js";
+import { scheduleAtDeadline } from "./deadline-timer.js";
 import { authorizationFailure } from "./authorization-error.js";
 import { readCodexiaEnvironment } from "./environment.js";
 import { createCloudflareAccessVerifier, type CloudflareAccessOptions } from "./cloudflare-access.js";
@@ -1120,8 +1121,7 @@ export function createServer(options: ApiServerOptions): Server {
     }
     const expiry = new AbortController();
     const grantDeadline = expiresAt;
-    const timer = setTimeout(() => expiry.abort(), Math.max(0, grantDeadline - Date.now()));
-    timer.unref();
+    const cancelExpiry = scheduleAtDeadline(grantDeadline, () => expiry.abort());
     // A busy event loop can deliver a ready chunk before the expiry timer runs.
     // Check the absolute deadline before forwarding each chunk as well.
     const fence = new Transform({
@@ -1138,7 +1138,7 @@ export function createServer(options: ApiServerOptions): Server {
       await pipeline(Readable.fromWeb(response.body as never), fence, raw, { signal: AbortSignal.any([signal, expiry.signal]) });
     } catch (error) {
       if (!expiry.signal.aborted) throw error;
-    } finally { clearTimeout(timer); }
+    } finally { cancelExpiry(); }
   };
   const makeWebRequest = (request: IncomingMessage, body: unknown, signal: AbortSignal, relativePath?: string): Request => {
     const method = request.method ?? "GET";
