@@ -40,7 +40,8 @@ test('backend evidence fails closed on duplicate, wrong run, SHA, digest, expire
     assert.throws(()=>selectBackendArtifacts(run,artifacts.map(item=>item.id===12?{...item,...change}:item),jobs,expected));
   }
   assert.throws(()=>selectBackendArtifacts(run,[...artifacts,{...artifacts[2],id:99}],jobs,expected),/one fresh/);
-  assert.throws(()=>selectBackendArtifacts({...run,event:'pull_request'},artifacts,jobs,expected),/must be a push/);
+  assert.throws(()=>selectBackendArtifacts({...run,event:'pull_request'},artifacts,jobs,expected),/event mismatch/);
+  assert.deepEqual(selectBackendArtifacts({...run,event:'workflow_run'},artifacts,jobs,{...expected,event:'workflow_run'}).map(item=>item.profile),['core','full']);
   assert.throws(()=>selectBackendArtifacts({...run,run_attempt:2},artifacts,jobs,expected),/attempt mismatch/);
   assert.throws(()=>selectBackendArtifacts(run,artifacts,[jobs[0],{...jobs[1],conclusion:'failure'}],expected),/did not succeed/);
   assert.throws(()=>selectBackendArtifacts(run,artifacts,[...jobs,jobs[1]],expected),/exactly one latest/);
