@@ -1175,7 +1175,6 @@ class PostgresTransaction implements PersistenceTransaction {
     if (replay) return replay;
     if (!(await this.getProject(command.projectId))) throw notFound("project", command.projectId);
 
-    await this.lockProject(command.projectId);
     const activeDocuments = asNumber((await this.query(
       "SELECT count(*)::integer AS active_count FROM document WHERE project_id = $1 AND deleted_at IS NULL",
       [command.projectId],
