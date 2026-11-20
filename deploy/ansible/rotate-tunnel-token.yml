@@ -1,0 +1,72 @@
+---
+- name: Require explicit approval for Tunnel token rotation
+  ansible.builtin.assert:
+    that:
+      - codexia_tunnel_token_rotation_approved | default(false) | bool
+      - not ansible_check_mode
+      - journal.stat.exists
+    fail_msg: Tunnel token rotation requires an initialized reviewed runtime, a protected replacement token, and explicit approval.
+- name: Verify installed reviewed sources and units before Tunnel token rotation
+  ansible.builtin.include_tasks: verify-updater-inputs.yml
+- name: Verify the installed updater units before Tunnel token rotation
+  ansible.builtin.include_tasks: verify-updater-units.yml
+- name: Validate the protected Tunnel token candidate
+  ansible.builtin.include_tasks: validate-tunnel-token-rotation-inputs.yml
+- name: Create the private Tunnel token candidate parent
+  ansible.builtin.file:
+    path: "{{ config_dir }}/maintenance/candidates"
+    state: directory
+    mode: '0700'
+- name: Allocate the private Tunnel token candidate
+  ansible.builtin.tempfile:
+    state: directory
+    path: "{{ config_dir }}/maintenance/candidates"
+    prefix: tunnel-token-
+  register: tunnel_token_candidate
+- name: Apply Tunnel token rotation through the installed updater lock
+  block:
+    - name: Create private credential staging directory
+      ansible.builtin.file:
+        path: "{{ tunnel_token_candidate.path }}/credentials"
+        state: directory
+        mode: '0700'
+    - name: Stage the protected Tunnel token without logging or diff
+      ansible.builtin.copy:
+        src: "{{ codexia_tunnel_token_file }}"
+        dest: "{{ tunnel_token_candidate.path }}/credentials/tunnel-token"
+        mode: '0600'
+      no_log: true
+      diff: false
+    - name: Write the strict Tunnel token maintenance manifest
+      ansible.builtin.copy:
+        content: >-
+          {{
+            {
+              'format': 'codexia-updater-maintenance/v1',
+              'candidateRoot': tunnel_token_candidate.path,
+              'sourceDir': source_dir,
+              'unitDir': unit_dir,
+              'configPath': config_path,
+              'rotateTunnelToken': true,
+              'tunnelTokenFile': tunnel_token_candidate.path + '/credentials/tunnel-token'
+            } | to_nice_json
+          }}
+          {{ '\n' }}
+        dest: "{{ tunnel_token_candidate.path }}/manifest.json"
+        mode: '0600'
+    - name: Rotate and verify the Tunnel token under the canonical host lock
+      ansible.builtin.command:
+        argv: [sh, "{{ updater }}", maintain, "{{ config_path }}", "{{ tunnel_token_candidate.path }}/manifest.json"]
+      environment: "{{ updater_env }}"
+      register: tunnel_token_rotation_result
+      changed_when: true
+      no_log: true
+    - name: Require a verified Tunnel token transaction
+      ansible.builtin.assert:
+        that: (tunnel_token_rotation_result.stdout | from_json).tunnelTokenRotated
+  always:
+    - name: Remove the staged Tunnel token
+      ansible.builtin.file:
+        path: "{{ tunnel_token_candidate.path }}"
+        state: absent
+      no_log: true

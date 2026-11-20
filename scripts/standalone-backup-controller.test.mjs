@@ -1083,6 +1083,7 @@ test('legacy startup fence allows only marker-free starts or a unit-specific rec
       browserAuth: { mode: 'token' },
     });
     const paths = host.backupStartupFencePaths();
+    const rotation = host.tunnelRotationStartupFence();
 
     assert.match(paths.api.content, /^\[Unit\]\nConditionPathExists=\|!/u);
     assert.match(paths.api.content, /backup-recovery\.json/u);
@@ -1090,6 +1091,9 @@ test('legacy startup fence allows only marker-free starts or a unit-specific rec
     assert.notEqual(paths.api.permit, paths.tunnel.permit);
     assert.ok(paths.api.content.includes(paths.api.permit));
     assert.ok(paths.tunnel.content.includes(paths.tunnel.permit));
+    assert.match(rotation.content, /^\[Unit\]\nConditionPathExists=\|!/u);
+    assert.ok(rotation.content.includes(rotation.marker));
+    assert.ok(rotation.content.includes(rotation.permit));
   } finally {
     if (originalRuntime === undefined) delete process.env.XDG_RUNTIME_DIR;
     else process.env.XDG_RUNTIME_DIR = originalRuntime;
