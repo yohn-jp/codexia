@@ -20,6 +20,10 @@ on:
       - deploy/ansible/rotate-probe-credentials.yml
       - deploy/ansible/rotate-api-auth-token.yml
       - deploy/ansible/rotate-tunnel-token.yml
+      - deploy/ansible/rotate-preflight-password.yml
+      - deploy/ansible/validate-preflight-password-rotation-inputs.yml
+      - deploy/ansible/test-preflight-password-rotation-gate.yml
+      - deploy/ansible/test-preflight-password-rotation-inputs.yml
       - deploy/ansible/validate-tunnel-token-rotation-inputs.yml
       - deploy/ansible/test-tunnel-token-rotation-gate.yml
       - deploy/ansible/test-tunnel-token-rotation-inputs.yml
@@ -53,6 +57,10 @@ on:
       - deploy/updater/test-standalone-maintenance-preload.mjs
       - deploy/ansible/rotate-api-auth-token.yml
       - deploy/ansible/rotate-tunnel-token.yml
+      - deploy/ansible/rotate-preflight-password.yml
+      - deploy/ansible/validate-preflight-password-rotation-inputs.yml
+      - deploy/ansible/test-preflight-password-rotation-gate.yml
+      - deploy/ansible/test-preflight-password-rotation-inputs.yml
       - deploy/ansible/validate-tunnel-token-rotation-inputs.yml
       - deploy/ansible/test-tunnel-token-rotation-gate.yml
       - deploy/ansible/test-tunnel-token-rotation-inputs.yml

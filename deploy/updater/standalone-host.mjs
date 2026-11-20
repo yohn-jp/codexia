@@ -373,8 +373,14 @@ export function postgresAppPasswordChangeInput(content){
   const password=validatePostgresAppPassword(content).replace(/\n$/u,'');
   return '\\password codexia\n'+password+'\n'+password+'\n';
 }
+export function postgresPreflightPasswordChangeInput(content){
+  const password=validatePostgresAppPassword(content).replace(/\n$/u,'');
+  return '\\password codexia_preflight\n'+password+'\n'+password+'\n';
+}
 const appSecret='codexia-postgres-app-password';
 const rotationLabel='io.codexia.app-password-rotation';
+const preflightSecret='codexia-postgres-preflight-password';
+const preflightRotationLabel='io.codexia.preflight-password-rotation';
 const authTokenSecret='codexia-auth-token';
 const authTokenRotationLabel='io.codexia.auth-token-rotation';
 const tunnelTokenSecret='codexia-tunnel-token';
@@ -402,15 +408,23 @@ function assertKnownTunnelTokenSecret(secret,snapshot){
     (secret.owner===snapshot.operationId&&[snapshot.previousDigest,snapshot.replacementDigest].includes(digest)),
     'Unrecognized canonical Tunnel secret prevents recovery');
 }
-function readRotationSecret(secretName){
+function readRotationSecret(secretName,ownerLabel=rotationLabel){
   const result=spawnSync('podman',['secret','exists',secretName],{stdio:'ignore',timeout:15000});
   if(result.status===1)return null;
   assert.equal(result.status,0,'Podman secret existence is unobservable');
   try{
     const [secret]=JSON.parse(runWithSensitiveInput('podman',['secret','inspect','--showsecret',secretName],''));
     assert.ok(secret.Spec.Name===secretName&&typeof secret.ID==='string'&&secret.ID);
-    return {id:secret.ID,owner:secret.Spec.Labels?.[rotationLabel],password:validatePostgresAppPassword(secret.SecretData)};
+    return {id:secret.ID,owner:secret.Spec.Labels?.[ownerLabel],password:validatePostgresAppPassword(secret.SecretData)};
   }catch{throw Error('Canonical PostgreSQL secret is unobservable');}
+}
+function readPreflightPasswordSecret(){return readRotationSecret(preflightSecret,preflightRotationLabel);}
+function assertKnownPreflightPasswordSecret(secret,snapshot){
+  if(!secret)return;
+  const digest=sha256(secret.password);
+  assert.ok((secret.id===snapshot.originalSecretId&&digest===snapshot.previousDigest)||
+    (secret.owner===snapshot.operationId&&[snapshot.previousDigest,snapshot.replacementDigest].includes(digest)),
+    'Unrecognized preflight password secret prevents recovery');
 }
 export function validateStandaloneAuthToken(content){
   assert.ok(typeof content==='string'&&Buffer.byteLength(content)<=8192&&/^[!-~]{32,8192}(?:\n)?$/u.test(content),
@@ -453,7 +467,7 @@ function assertKnownRotationSecret(secret,snapshot){
     'Unrecognized canonical app secret prevents recovery');
 }
 async function prepareRotationSecretInput(config,snapshot,password,inputName='postgres-app-password-input'){
-  assert.ok(['postgres-app-password-input','api-auth-token-input','tunnel-token-input'].includes(inputName),'Unsupported maintenance secret input');
+  assert.ok(['postgres-app-password-input','postgres-preflight-password-input','api-auth-token-input','tunnel-token-input'].includes(inputName),'Unsupported maintenance secret input');
   assert.match(snapshot.operationId,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u,
     'Rotation secret input operation identity is invalid');
   const root=path.join(path.dirname(config.publicKeyFile),'maintenance-snapshots',snapshot.operationId);
@@ -534,6 +548,12 @@ function passwordRotationPsql(role,input){
   const admin=role==='codexia_admin';
   const credential=admin?'admin-password':'app-password';
   const command='export PGPASSWORD="$(cat /run/secrets/'+credential+')"; exec psql -X -w -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U '+role+' -d codexia';
+  return runWithSensitiveInput('podman',['exec','-i','codexia-db','sh','-ec',command],input);
+}
+function preflightPasswordPsql(password){
+  const input=validatePostgresAppPassword(password).replace(/\n$/u,'')+
+    '\nSELECT current_user || chr(58) || current_setting(\'transaction_read_only\');\n';
+  const command='IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -w -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia_preflight -d codexia';
   return runWithSensitiveInput('podman',['exec','-i','codexia-db','sh','-ec',command],input);
 }
 function exists(container){
@@ -1725,13 +1745,91 @@ export class PodmanStandaloneHost{
     await this.verifyPostgresAppPassword(original.password);
     return {snapshot,previousPassword:original.password};
   }
+  async capturePreflightPasswordRotation(reviewed,replacement,operationId){
+    const fragmentDigest=await this.passwordRotationUnit(reviewed);
+    const original=readPreflightPasswordSecret();
+    const admin=readRotationSecret('codexia-postgres-admin-password');
+    const app=readRotationSecret(appSecret);
+    assert.ok(original&&admin&&app,'Database secret identity cannot be proven');
+    assert.ok([original,admin,app].every(secret=>secret.password.trimEnd()!==replacement.trimEnd()),
+      'Replacement must be independent of existing database credentials');
+    const databaseId=await this.passwordRotationDatabaseId();
+    const resources=await this.rotationResources(databaseId);
+    const snapshot={databaseQuadlet:reviewed,fragmentDigest,operationId,databaseId,resources,adminSecretId:admin.id,
+      appSecretId:app.id,originalSecretId:original.id,previousDigest:sha256(original.password),replacementDigest:sha256(replacement),
+      sourceDigest:sha256(reviewed)};
+    snapshot.runtimeDigest=await this.rotationDatabaseRuntime(snapshot,preflightSecret);
+    assert.ok(snapshot.runtimeDigest,'Rotation requires the canonical running database');
+    await this.verifyPostgresPreflightPassword(original.password);
+    return {snapshot,previousPassword:original.password};
+  }
+  async assertPreflightPasswordRotationSources(snapshot,{databaseRunning=true}={}){
+    assert.equal(await this.passwordRotationUnit(snapshot.databaseQuadlet),snapshot.fragmentDigest,'Database generated unit changed');
+    assert.deepEqual(await this.rotationResources(snapshot.databaseId),snapshot.resources,'Database resources changed');
+    assert.equal(readRotationSecret('codexia-postgres-admin-password')?.id,snapshot.adminSecretId,
+      'Database administrator credential identity changed');
+    assert.equal(readRotationSecret(appSecret)?.id,snapshot.appSecretId,'Database application credential identity changed');
+    assertKnownPreflightPasswordSecret(readPreflightPasswordSecret(),snapshot);
+    if(databaseRunning){
+      const runtime=await this.rotationDatabaseRuntime(snapshot,preflightSecret);
+      assert.equal(runtime,snapshot.runtimeDigest,'Database runtime ownership changed');
+      assert.equal(await this.passwordRotationDatabaseId(),snapshot.databaseId,'Database identity changed');
+    }
+  }
+  async changePostgresPreflightPassword(password){
+    passwordRotationPsql('codexia_admin',postgresPreflightPasswordChangeInput(password));
+  }
+  async verifyPostgresPreflightPassword(password,{secretRequired=true}={}){
+    const target=validatePostgresAppPassword(password);
+    if(secretRequired)assert.equal(readPreflightPasswordSecret()?.password,target,'Canonical preflight secret bytes changed');
+    assert.equal(preflightPasswordPsql(target).trim(),'codexia_preflight:on','Preflight database authentication is not read-only');
+  }
+  async verifyPostgresPreflightPasswordDigest(snapshot,expectedDigest){
+    const secret=readPreflightPasswordSecret();
+    assertKnownPreflightPasswordSecret(secret,snapshot);
+    assert.ok(secret&&sha256(secret.password)===expectedDigest,'Canonical preflight secret differs from the expected recovery state');
+    await this.verifyPostgresPreflightPassword(secret.password);
+  }
+  async replacePostgresPreflightSecret(password,snapshot){
+    const target=validatePostgresAppPassword(password);
+    const existing=readPreflightPasswordSecret();
+    assertKnownPreflightPasswordSecret(existing,snapshot);
+    if(existing?.password!==target){
+      if(existing)run('podman',['secret','rm',existing.id]);
+      const inputFile=await prepareRotationSecretInput(this.config,snapshot,target,'postgres-preflight-password-input');
+      try{run('podman',['secret','create','--label',preflightRotationLabel+'='+snapshot.operationId,preflightSecret,inputFile]);}
+      finally{await removeRotationSecretInput(inputFile);}
+    }
+    const after=readPreflightPasswordSecret();
+    assertKnownPreflightPasswordSecret(after,snapshot);
+    assert.ok(after?.password===target,'Canonical preflight secret replacement is unverified');
+  }
+  async preflightPasswordRotationDatabase(snapshot){
+    const observed=await this.rotationDatabaseRuntime(snapshot,preflightSecret);
+    if(observed===null)return false;
+    assert.equal(observed,snapshot.runtimeDigest,'Database runtime ownership changed');
+    return true;
+  }
+  async stopPreflightPasswordRotationDatabase(snapshot){
+    await this.assertPreflightPasswordRotationSources(snapshot);
+    await this.preflightPasswordRotationDatabase(snapshot);
+    run('systemctl',['--user','stop',databaseUnit]);
+    assert.ok(!exists('codexia-db'),'Database was not cleanly stopped for preflight-secret replacement');
+  }
+  async startPreflightPasswordRotationDatabase(snapshot){
+    await this.assertPreflightPasswordRotationSources(snapshot,{databaseRunning:false});
+    assert.ok(!exists('codexia-db'),'Unknown DB container prevents preflight-secret remount');
+    run('systemctl',['--user','start',databaseUnit]);
+    assert.ok(await this.preflightPasswordRotationDatabase(snapshot),'Database startup unverified after preflight-secret replacement');
+    assert.equal(await this.passwordRotationDatabaseId(),snapshot.databaseId,'Restarted database identity changed');
+  }
   async assertPasswordRotationSources(snapshot){
     assert.equal(await this.passwordRotationUnit(snapshot.databaseQuadlet),snapshot.fragmentDigest,'Database generated unit changed');
     assert.deepEqual(await this.rotationResources(snapshot.databaseId),snapshot.resources,'Database resources changed');
     assert.equal(readRotationSecret('codexia-postgres-admin-password')?.id,snapshot.adminSecretId,'Database administrator credential identity changed');
     assertKnownRotationSecret(readRotationSecret(appSecret),snapshot);
   }
-  async rotationDatabaseRuntime(snapshot){
+  async rotationDatabaseRuntime(snapshot,rotatingSecret=appSecret){
     const db=inspect('codexia-db');
     const properties=systemdProperties(run('systemctl',['--user','show','--property=ActiveState,SubState',databaseUnit]));
     if(!db){
@@ -1746,9 +1844,12 @@ export class PodmanStandaloneHost{
     const secrets=await this.quadletSecretIdentities(snapshot.databaseQuadlet);
     const projection=containerRuntimeFingerprintProjection(db,secrets);
     projection.Networks=normalizePostgresRotationNetworks(projection.Networks,db.Id,db.Config.Hostname);
-    const mount=projection.SecretMounts.find(secret=>secret.name===appSecret);
-    assert.ok(mount?.type==='mount'&&mount.target==='/run/secrets/app-password','Unexpected PostgreSQL app secret mount');
-    mount.id='rotating';
+    const appMount=projection.SecretMounts.find(secret=>secret.name===appSecret);
+    assert.ok(appMount?.type==='mount'&&appMount.target==='/run/secrets/app-password','Unexpected PostgreSQL app secret mount');
+    const preflightMount=projection.SecretMounts.find(secret=>secret.name===preflightSecret);
+    assert.ok(preflightMount?.type==='mount'&&preflightMount.target==='/run/secrets/preflight-password','Unexpected PostgreSQL preflight secret mount');
+    assert.ok(rotatingSecret===appSecret||rotatingSecret===preflightSecret,'Unsupported PostgreSQL rotation secret');
+    projection.SecretMounts.find(secret=>secret.name===rotatingSecret).id='rotating';
     const fingerprint=postgresRotationRuntimeFingerprint(projection);
     if(snapshot.runtimeComponents===undefined)snapshot.runtimeComponents=fingerprint.components;
     else assertPostgresRotationRuntimeFingerprint(snapshot,projection);
