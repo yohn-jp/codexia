@@ -969,7 +969,13 @@ async function exerciseApiAuthTokenRotation({repoRoot,config,workDir,expectedIma
   }finally{
     const recoveryPending=await lstat(path.join(path.dirname(config.stateFile),'maintenance','in-progress.json'))
       .then(()=>true,error=>error.code==='ENOENT'?false:Promise.reject(error));
-    if(!recoveryPending)await atomicWrite(config.stateFile,JSON.stringify(stateBeforePause)+'\n');
+    if(!recoveryPending){
+      await atomicWrite(config.stateFile,JSON.stringify(stateBeforePause)+'\n');
+      const privateDir=path.dirname(config.publicKeyFile);
+      for(const directory of [path.join(privateDir,'maintenance','candidates'),path.join(privateDir,'maintenance'),path.join(privateDir,'maintenance-snapshots')]){
+        try{await rmdir(directory);}catch(error){if(error.code!=='ENOENT')throw error;}
+      }
+    }
     await restoreProxy();
   }
 }
