@@ -81,6 +81,114 @@ async function openMobileTransitionFixture(page: Page): Promise<{
   return { server: fixture, navigation, editor };
 }
 
+async function openDesktopTabsFixture(page: Page): Promise<{
+  server: { url: string; stop(): Promise<void> };
+  tabs: ReturnType<Page["getByRole"]>;
+}> {
+  const fixture = await startMobileTransitionFixture();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`${fixture.url}/desktop-tabs`);
+  const tabs = page.getByRole("tablist", { name: "パネル" });
+  await expect(tabs).toBeVisible();
+  await expect(tabs.getByRole("tab")).toHaveCount(2);
+  return { server: fixture, tabs };
+}
+
+type DesktopTabsFixtureWindow = Window & {
+  __desktopTabsFixture?: {
+    guardCalls: number;
+    arm(outcomes: Array<boolean | "delayed">): void;
+    releaseGuard(): void;
+    changeScope(scope: string): void;
+  };
+};
+
+async function armDesktopTabsGuard(page: Page, outcomes: Array<boolean | "delayed">): Promise<void> {
+  await page.evaluate((next) => {
+    const fixture = (window as DesktopTabsFixtureWindow).__desktopTabsFixture;
+    if (!fixture) throw new Error("Desktop tabs fixture was not initialized.");
+    fixture.arm(next);
+  }, outcomes);
+}
+
+async function desktopTabsGuardCalls(page: Page): Promise<number> {
+  return page.evaluate(() => (window as DesktopTabsFixtureWindow).__desktopTabsFixture?.guardCalls ?? -1);
+}
+
+test("desktop stack tabs use roving focus and keep the rendered panel association valid", async ({ page }) => {
+  const fixture = await openDesktopTabsFixture(page);
+  try {
+    const { tabs } = fixture;
+    const inspector = tabs.getByRole("tab", { name: "Inspector", exact: true });
+    const outline = tabs.getByRole("tab", { name: "Outline", exact: true });
+    const panel = page.getByRole("tabpanel");
+
+    await expect(inspector).toHaveAttribute("aria-selected", "true");
+    await expect(inspector).toHaveJSProperty("tabIndex", 0);
+    await expect(outline).toHaveJSProperty("tabIndex", -1);
+    await expect(tabs.locator('[role="tab"][tabindex="0"]')).toHaveCount(1);
+    await expect(tabs.locator("[aria-controls]")).toHaveCount(0);
+    await expect(panel).toHaveAttribute("aria-labelledby", await inspector.getAttribute("id") ?? "");
+    await expect.poll(() => panel.evaluate((element) => {
+      const tab = element.ownerDocument.getElementById(element.getAttribute("aria-labelledby") ?? "");
+      return tab?.getAttribute("role") === "tab" && tab.getAttribute("aria-selected") === "true";
+    })).toBe(true);
+
+    await inspector.focus();
+    await page.keyboard.press("Tab");
+    await expect(panel).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(inspector).toBeFocused();
+
+    await page.keyboard.press("ArrowRight");
+    await expect(outline).toHaveAttribute("aria-selected", "true");
+    await expect(outline).toHaveJSProperty("tabIndex", 0);
+    await expect(outline).toBeFocused();
+    await expect(page.getByTestId("fixture-outline")).toBeVisible();
+    await expect(page.getByTestId("fixture-inspector")).toHaveCount(0);
+
+    await page.keyboard.press("End");
+    await expect(inspector).toHaveAttribute("aria-selected", "true");
+    await expect(inspector).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(outline).toHaveAttribute("aria-selected", "true");
+    await expect(outline).toBeFocused();
+  } finally {
+    await fixture.server.stop();
+  }
+});
+
+test("desktop tab guard denial retains selection and a delayed transition cannot focus an obsolete tab", async ({ page }) => {
+  const fixture = await openDesktopTabsFixture(page);
+  try {
+    const { tabs } = fixture;
+    const inspector = tabs.getByRole("tab", { name: "Inspector", exact: true });
+    const outline = tabs.getByRole("tab", { name: "Outline", exact: true });
+
+    await armDesktopTabsGuard(page, [false]);
+    await inspector.focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect(inspector).toHaveAttribute("aria-selected", "true");
+    await expect(inspector).toBeFocused();
+    await expect(outline).toHaveJSProperty("tabIndex", -1);
+    await expect.poll(() => desktopTabsGuardCalls(page)).toBe(1);
+
+    await armDesktopTabsGuard(page, ["delayed"]);
+    await page.keyboard.press("ArrowLeft");
+    await expect.poll(() => desktopTabsGuardCalls(page)).toBe(1);
+    const obsoleteTabId = await outline.getAttribute("id");
+    await page.evaluate(() => (window as DesktopTabsFixtureWindow).__desktopTabsFixture?.changeScope("new-scope"));
+    await expect(page.getByTestId("desktop-tabs-scope")).toHaveText("new-scope");
+    await expect(tabs).toHaveCount(0);
+    await page.evaluate(() => (window as DesktopTabsFixtureWindow).__desktopTabsFixture?.releaseGuard());
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect(page.getByRole("tablist", { name: "パネル" })).toHaveCount(0);
+    expect(await page.evaluate(() => document.activeElement?.id ?? "")).not.toBe(obsoleteTabId);
+  } finally {
+    await fixture.server.stop();
+  }
+});
+
 async function armMobileTransitionFixture(page: Page, outcomes: Array<boolean | "delayed">): Promise<void> {
   await page.evaluate((nextOutcomes) => window.__mobileTransitionFixture?.arm(nextOutcomes), outcomes);
 }
