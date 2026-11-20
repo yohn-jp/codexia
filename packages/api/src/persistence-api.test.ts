@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { test } from "node:test";
-import type { CoreStore } from "@codexia/core";
+import { CoreStore } from "@codexia/core";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import { createServer } from "./server.js";
 
@@ -212,4 +212,101 @@ test("authenticated PostgreSQL API saves, replays, follows Evidence, conflicts a
   const restored = await restore.json() as { document: { headRevisionId: string }; revision: { id: string; markdown: string } };
   assert.equal(restored.revision.markdown, initialMarkdown);
   assert.equal(restored.document.headRevisionId, restored.revision.id);
+});
+
+test("concurrent document POSTs stay within 999 active documents and deletion frees a slot", { skip: !connectionString }, async (t) => {
+  await migratePostgresDatabase(connectionString!);
+  const persistence = createPostgresPersistence(connectionString!);
+  const store = new CoreStore({ persistence });
+  const temporaryRoot = await mkdtemp(resolve(tmpdir(), "codexia-document-limit-"));
+  const server = createServer({
+    store,
+    authToken: ACCESS_TOKEN,
+    staticDir: temporaryRoot,
+    usageDirectory: temporaryRoot,
+    persistence,
+  });
+  await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = `http://127.0.0.1:${address.port}`;
+  t.after(async () => {
+    await new Promise<void>((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
+    await persistence.close();
+    await rm(temporaryRoot, { recursive: true, force: true });
+  });
+
+  const login = await fetch(`${base}/api/login`, {
+    method: "POST",
+    headers: { Origin: base, "Content-Type": "application/json" },
+    body: JSON.stringify({ token: ACCESS_TOKEN }),
+  });
+  assert.equal(login.status, 200);
+  const cookie = login.headers.get("set-cookie")?.split(";", 1)[0];
+  assert.ok(cookie);
+  const ownerHeaders = { Cookie: cookie!, Origin: base, "Content-Type": "application/json" };
+  const projectResponse = await fetch(`${base}/api/v1/persistence/projects`, {
+    method: "POST", headers: ownerHeaders, body: JSON.stringify({ title: `Document cap ${randomUUID()}` }),
+  });
+  assert.equal(projectResponse.status, 201);
+  const projectId = (await projectResponse.json() as { project: { id: string } }).project.id;
+
+  let firstSeed: { id: string; version: number } | undefined;
+  await persistence.transaction(async (transaction) => {
+    for (let index = 0; index < 998; index++) {
+      const created = await transaction.createDocument({
+        projectId: projectId as import("@codexia/persistence-contracts").ProjectId,
+        kind: "volume",
+        title: `Seed ${index + 1}`,
+        orderKey: String(index + 1).padStart(4, "0"),
+        markdown: "",
+        authorId: "test-owner",
+        idempotencyKey: `seed-${index}-${randomUUID()}`,
+      });
+      if (index === 0) firstSeed = { id: created.document.id, version: created.document.version };
+    }
+  });
+  assert.ok(firstSeed);
+
+  const documentPath = `${base}/api/v1/persistence/projects/${projectId}/documents`;
+  const createRequest = (title: string, key: string) => fetch(documentPath, {
+    method: "POST",
+    headers: { ...ownerHeaders, "Idempotency-Key": key },
+    body: JSON.stringify({ kind: "volume", title, orderKey: "0999", markdown: "" }),
+  });
+  const attempts = await Promise.all([
+    createRequest("Concurrent A", "document-cap-a"),
+    createRequest("Concurrent B", "document-cap-b"),
+  ]);
+  assert.deepEqual(attempts.map((response) => response.status).sort(), [201, 409]);
+  const successfulIndex = attempts.findIndex((response) => response.status === 201);
+  const failedIndex = 1 - successfulIndex;
+  const created = await attempts[successfulIndex]!.json() as { document: { id: string }; replayed: boolean };
+  const rejected = await attempts[failedIndex]!.json() as { code: string; error: string };
+  assert.equal(created.replayed, false);
+  assert.equal(rejected.code, "PERSISTENCE_CONFLICT");
+  assert.match(rejected.error, /at most 999 active documents/u);
+
+  const replay = await createRequest(successfulIndex === 0 ? "Concurrent A" : "Concurrent B",
+    successfulIndex === 0 ? "document-cap-a" : "document-cap-b");
+  assert.equal(replay.status, 201);
+  assert.deepEqual(await replay.json(), { ...created, replayed: true });
+
+  const treeResponse = await fetch(`${base}/api/projects/${projectId}/tree`, { headers: { Cookie: cookie! } });
+  assert.equal(treeResponse.status, 200);
+  assert.equal(((await treeResponse.json() as { tree: { volumes: unknown[] } }).tree.volumes).length, 999);
+  const archiveResponse = await fetch(`${base}/api/v1/persistence/projects/${projectId}/archive`, { headers: { Cookie: cookie! } });
+  assert.equal(archiveResponse.status, 200);
+  assert.equal(((await archiveResponse.json() as { documents: unknown[] }).documents).length, 999);
+
+  const deletion = await fetch(`${documentPath}/${firstSeed.id}`, {
+    method: "DELETE", headers: ownerHeaders,
+    body: JSON.stringify({ expectedVersion: firstSeed.version }),
+  });
+  assert.equal(deletion.status, 200);
+  const afterDelete = await createRequest("After deletion", "document-cap-after-delete");
+  assert.equal(afterDelete.status, 201);
+  const finalArchive = await fetch(`${base}/api/v1/persistence/projects/${projectId}/archive`, { headers: { Cookie: cookie! } });
+  assert.equal(finalArchive.status, 200);
+  assert.equal(((await finalArchive.json() as { documents: unknown[] }).documents).length, 999);
 });
