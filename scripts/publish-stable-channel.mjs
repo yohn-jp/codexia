@@ -174,7 +174,7 @@ async function main() {
   }
   let command={mode};
   if(mode==='publish'){
-    const source=process.env.GITHUB_SHA;
+    const source=process.env.CODEXIA_SOURCE_SHA || process.env.GITHUB_SHA;
     if(!source||execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim()!==source)throw new Error('Certified immutable main source required');
     const output=(args)=>execFileSync('docker',args,{encoding:'utf8',timeout:300000,maxBuffer:1024*1024}).trim();
     const version=readComponentVersion('backend');
