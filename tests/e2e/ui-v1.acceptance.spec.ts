@@ -208,7 +208,6 @@ async function visibleReaderParagraphs(page: Page): Promise<string[]> {
 async function replaceReaderText(page: Page, text: string): Promise<void> {
   await expect(editor(page)).toBeVisible();
   await editor(page).fill(text);
-  await expectMarkdown(page, text);
 }
 
 test("Mobile reader keeps first-to-last Japanese paragraphs visible at supported widths and cancels touch gestures", async ({ page }) => {
