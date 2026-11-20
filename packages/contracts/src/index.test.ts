@@ -27,6 +27,21 @@ test("untrusted recovery rejects traversal, duplicate writes and missing precond
   assert.throws(() => assertChangeOperation({ ...operation, writes: [{ path: "x", content: "x" }] }));
 });
 
+test("exact manuscript changes validate ordered UTF-16 ranges and remain optional for legacy operations", () => {
+  const ranged = { ...operation, writes: [{ ...operation.writes[0]!, textChanges: [{ fromUtf16: 1, toUtf16: 3, insert: "日本語" }] }] };
+  assert.doesNotThrow(() => assertChangeOperation(ranged));
+  assert.doesNotThrow(() => assertChangeOperation(operation), "legacy full-document operations remain valid");
+  for (const textChanges of [
+    [{ fromUtf16: -1, toUtf16: 0, insert: "x" }],
+    [{ fromUtf16: 3, toUtf16: 2, insert: "x" }],
+    [{ fromUtf16: 0, toUtf16: 2, insert: "x" }, { fromUtf16: 1, toUtf16: 1, insert: "y" }],
+    [{ fromUtf16: 0.5, toUtf16: 1, insert: "x" }],
+  ]) {
+    assert.throws(() => assertChangeOperation({ ...operation, writes: [{ ...operation.writes[0]!, textChanges }] }));
+  }
+  assert.throws(() => assertChangeOperation({ ...operation, effect: "metadata", writes: [{ ...operation.writes[0]!, textChanges: [{ fromUtf16: 0, toUtf16: 0, insert: "x" }] }] }));
+});
+
 test("document-set preconditions bind exact canonical hierarchy membership", () => {
   const set = { kind: "scene" as const, parentId: "chapter-id", documentIds: ["scene-a", "scene-b"] };
   assert.doesNotThrow(() => assertChangeOperation({ ...operation, readDocumentSets: [set] }));

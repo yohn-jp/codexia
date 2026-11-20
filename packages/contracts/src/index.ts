@@ -47,7 +47,12 @@ export interface DocumentSetRevision {
   documentIds: string[];
 }
 /** Contents are full UTF-8 or base64; null is an explicit deletion. */
-export interface FileChange extends FileRevision { content: string | null; encoding?: "utf8" | "base64" }
+export interface FileChange extends FileRevision {
+  content: string | null;
+  encoding?: "utf8" | "base64";
+  /** Exact PostgreSQL manuscript edits; omitted by legacy full-document proposals. */
+  textChanges?: readonly { fromUtf16: number; toUtf16: number; insert: string }[];
+}
 export type EffectClass = "manuscript" | "structure" | "metadata" | "settings" | "migration";
 export interface ChangeOperation {
   id: string;
@@ -430,6 +435,22 @@ export function assertChangeOperation(value: unknown): asserts value is ChangeOp
     if (item.content !== null && typeof item.content !== "string") throw new ContractError("Invalid recoverable content");
     if (item.encoding !== undefined && item.encoding !== "utf8" && item.encoding !== "base64") throw new ContractError("Invalid encoding");
     size += item.content?.length ?? 0;
+    if (item.textChanges !== undefined) {
+      if (v.effect !== "manuscript" || item.content === null || item.encoding === "base64" ||
+          !Array.isArray(item.textChanges) || item.textChanges.length < 1 || item.textChanges.length > 256) {
+        throw new ContractError("Invalid manuscript text changes");
+      }
+      let previousEnd = 0;
+      for (const change of item.textChanges) {
+        if (!change || typeof change !== "object" || !Number.isSafeInteger(change.fromUtf16) ||
+            !Number.isSafeInteger(change.toUtf16) || change.fromUtf16 < previousEnd ||
+            change.toUtf16 < change.fromUtf16 || typeof change.insert !== "string") {
+          throw new ContractError("Invalid manuscript text change range");
+        }
+        previousEnd = change.toUtf16;
+        size += change.insert.length;
+      }
+    }
     if (size > 8 * 1024 * 1024) throw new ContractError("Operation payload exceeds limit");
   }
 }

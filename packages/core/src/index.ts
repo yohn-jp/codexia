@@ -603,6 +603,12 @@ export class CoreStore implements MutationCoordinator {
     const manuscriptCreates = new Set<string>();
 
     for (const write of ordered) {
+      if (write.textChanges !== undefined) {
+        const currentFile = manifest.files[write.path];
+        if (operation.effect !== "manuscript" || !currentFile?.documentId || currentFile.metadata) {
+          fail(422, "invalid_document_changes", "Exact text changes may only target an existing PostgreSQL manuscript");
+        }
+      }
       if (write.path === "meta/project.yaml") {
         if (write.content === null) {
           fail(422, "invalid_project_metadata", "Project metadata cannot be deleted");
@@ -730,7 +736,7 @@ export class CoreStore implements MutationCoordinator {
           projectId,
           documentId: document.id,
           baseRevisionId: revision.id,
-          changes: [{ fromUtf16: 0, toUtf16: revision.markdown.length, insert: write.content }],
+          changes: write.textChanges ?? [{ fromUtf16: 0, toUtf16: revision.markdown.length, insert: write.content }],
           resultingSha256: hash(write.content),
           authorId,
           clientId: "core",
