@@ -15,13 +15,15 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
   const workflow = await readFile(path.join(root, '.github/workflows/standalone-updater-acceptance.yml'), 'utf8');
   const proxyQuadlet = await readFile(path.join(root, 'deploy/updater/codexia-api-proxy.container.example'), 'utf8');
   const evidenceDoc = await readFile(path.join(root, 'docs/deployment/PHASE-F-DISPOSABLE-CI.md'), 'utf8');
+  const continuity = await readFile(path.join(root, 'deploy/ansible/test-phase-f-ansible-continuity.sh'), 'utf8');
   const runtimeJob = workflow.split('  rootless-updater-lifecycle:', 2)[1];
   assert.match(workflow, /runs-on: ubuntu-26\.04/u);
   assert.match(workflow, /\n  workflow_dispatch:/u);
   assert.doesNotMatch(workflow, /\n  (?:pull_request|push|schedule|workflow_run):/u);
   assert.doesNotMatch(workflow, /full-model-oci-acceptance\.yml/u);
   assert.match(workflow, /cancel-in-progress: true/u);
-  assert.match(workflow, /test-phase-f-disposable\.sh/u);
+  assert.match(workflow, /test-phase-f-ansible-continuity\.sh/u);
+  assert.match(workflow, /ansible-core|requirements\.txt/u);
   assert.match(proxyQuadlet, /^PodmanArgs=--image-volume=ignore$/mu);
   assert.match(workflow, /contents: read/u);
   assert.match(workflow, /actions: read/u);
@@ -33,9 +35,23 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
   assert.match(runtimeJob, /permissions:\s*\n\s+contents: read\s*\n\s+actions: read\s*\n\s+packages: read/u);
   assert.doesNotMatch(runtimeJob, /(?:contents|actions|packages):\s*write/u);
   assert.doesNotMatch(workflow, /environment:\s*codexia-production|CODEXIA_CHANNEL_SIGNING_KEY|CODEXIA_PRODUCTION_SSH|terraform apply|ansible_host:/u);
-  for (const marker of ['NOT_CHECKED', 'does not execute the Ansible lifecycle', 'Production preflight', 'VM reboot']) {
+  for (const marker of ['NOT_CHECKED', 'same Ubuntu 26.04 runner', 'complete serving-host drift', 'VM reboot']) {
     assert.ok(evidenceDoc.includes(marker), 'Missing evidence boundary: ' + marker);
   }
+  const continuitySyntax = spawnSync('bash', ['-n', path.join(root, 'deploy/ansible/test-phase-f-ansible-continuity.sh')], { encoding: 'utf8' });
+  assert.equal(continuitySyntax.status, 0, continuitySyntax.stderr);
+  for (const marker of [
+    'test-host-integration.sh',
+    'test-base-secrets-integration.sh',
+    'test-base-runtime-integration.sh',
+    'test-phase-f-disposable.sh',
+    'CODEXIA_HOST_PROOF_MODE=actions-fixture',
+    'CODEXIA_SERVICE_USER=$service_user',
+    "format: 'codexia-phase-f-ansible-continuity/v1'",
+    'identityContinuity',
+    'workflowRunId',
+    'notChecked',
+  ]) assert.ok(continuity.includes(marker), 'Missing same-host Ansible continuity proof: ' + marker);
 });
 
 test('Phase F integration helper is valid shell and exercises the existing locked updater paths', async () => {
@@ -114,6 +130,7 @@ test('Phase F integration helper is valid shell and exercises the existing locke
     'Expose only safe controller state when fixture initialization fails');
   assert.match(helper, /Disposable proxy image identities \(digest and content IDs only\)[\s\S]*?imageID=\{\{\.Id\}\} repoDigests=\{\{json \.RepoDigests\}\}[\s\S]*?containerImage=\{\{\.Image\}\} containerImageName=\{\{\.ImageName\}\}[\s\S]*?proxyMounts=\{\{json \.Mounts\}\}/u);
   assert.match(helper, /codexia-updater(?:\.sh)?/u);
+  assert.match(helper, /ansible-convergence-results\.json/u);
 });
 
 test('Phase F channel factory derives signed sequences from certified embedded release identities', async () => {

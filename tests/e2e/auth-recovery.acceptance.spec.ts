@@ -116,7 +116,8 @@ test("an unknown hosted grant requests refresh and retries the initial session c
   });
 
   await page.goto("/desktop/");
-  await expect(page.getByText("最初の作品を作成してください")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "割り当てられた作品がありません" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "最初の作品を作成" })).toHaveCount(0);
   expect(sessionRequests).toBe(3);
   expect(refreshRequests).toBe(1);
   expect(reauthRequests).toBe(0);
@@ -245,8 +246,10 @@ test("concurrent tabs serialize a rotated hosted grant through the browser lock"
   });
 
   await Promise.all([page.goto("/desktop/?tab=first"), secondPage.goto("/desktop/?tab=second")]);
-  await expect(page.getByText("最初の作品を作成してください")).toBeVisible();
-  await expect(secondPage.getByText("最初の作品を作成してください")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "割り当てられた作品がありません" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "最初の作品を作成" })).toHaveCount(0);
+  await expect(secondPage.getByRole("heading", { name: "割り当てられた作品がありません" })).toBeVisible();
+  await expect(secondPage.getByRole("button", { name: "最初の作品を作成" })).toHaveCount(0);
   expect(new URL(page.url()).origin).toBe(new URL(secondPage.url()).origin);
   expect(await page.evaluate(() => Boolean(navigator.locks)), "Chromium must expose Web Locks for this cross-tab acceptance").toBe(true);
   expect(initialSessionRequests).toBeGreaterThanOrEqual(2);
