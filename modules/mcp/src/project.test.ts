@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { registerProjectTools } from "./project.js";
+import { registerProjectTools } from "./tools/project.js";
 
 test("list_projects returns and accepts its continuation cursor", async () => {
   const registered = new Map<string, (args: unknown, extra: { signal: AbortSignal }) => Promise<unknown>>();
