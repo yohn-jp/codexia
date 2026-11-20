@@ -16,6 +16,7 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
   const proxyQuadlet = await readFile(path.join(root, 'deploy/updater/codexia-api-proxy.container.example'), 'utf8');
   const evidenceDoc = await readFile(path.join(root, 'docs/deployment/PHASE-F-DISPOSABLE-CI.md'), 'utf8');
   const continuity = await readFile(path.join(root, 'deploy/ansible/test-phase-f-ansible-continuity.sh'), 'utf8');
+  const appContinuity = await readFile(path.join(root, 'deploy/ansible/test-phase-f-ansible-app.sh'), 'utf8');
   const runtimeJob = workflow.split('  rootless-updater-lifecycle:', 2)[1];
   assert.match(workflow, /runs-on: ubuntu-26\.04/u);
   assert.match(workflow, /\n  workflow_dispatch:/u);
@@ -23,6 +24,7 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
   assert.doesNotMatch(workflow, /full-model-oci-acceptance\.yml/u);
   assert.match(workflow, /cancel-in-progress: true/u);
   assert.match(workflow, /test-phase-f-ansible-continuity\.sh/u);
+  assert.match(workflow, /bash -n deploy\/ansible\/test-phase-f-ansible-app\.sh/u);
   assert.match(workflow, /ansible-core|requirements\.txt/u);
   assert.match(proxyQuadlet, /^PodmanArgs=--image-volume=ignore$/mu);
   assert.match(workflow, /contents: read/u);
@@ -40,6 +42,8 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
   }
   const continuitySyntax = spawnSync('bash', ['-n', path.join(root, 'deploy/ansible/test-phase-f-ansible-continuity.sh')], { encoding: 'utf8' });
   assert.equal(continuitySyntax.status, 0, continuitySyntax.stderr);
+  const appSyntax = spawnSync('bash', ['-n', path.join(root, 'deploy/ansible/test-phase-f-ansible-app.sh')], { encoding: 'utf8' });
+  assert.equal(appSyntax.status, 0, appSyntax.stderr);
   for (const marker of [
     'test-host-integration.sh',
     'test-base-secrets-integration.sh',
@@ -52,6 +56,22 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
     'workflowRunId',
     'notChecked',
   ]) assert.ok(continuity.includes(marker), 'Missing same-host Ansible continuity proof: ' + marker);
+  for (const marker of [
+    'codexia_stage=$stage',
+    'apply_runner secrets',
+    'apply_runner base',
+    'apply_service prepare',
+    'apply_service initialize-schema',
+    'apply_service initialize-fresh',
+    'migration_ledger',
+    'pg_control_system()',
+    'codexia-api-proxy',
+    'Phase F Ansible application continuity',
+    'refusing adoption',
+    'notChecked',
+    'app-convergence-results.json',
+  ]) assert.ok(appContinuity.includes(marker), 'Missing fresh application continuity proof: ' + marker);
+  assert.match(continuity, /test-phase-f-ansible-app\.sh/u);
 });
 
 test('Phase F integration helper is valid shell and exercises the existing locked updater paths', async () => {
