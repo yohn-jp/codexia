@@ -1058,7 +1058,8 @@ async function exerciseApiAuthTokenRotation({repoRoot,config,workDir,expectedIma
   }
 }
 
-async function exerciseTunnelTokenRotation({repoRoot,config,userUnitDir,workDir,expectedImage,environment,nonce}){
+async function exerciseTunnelTokenRotation({repoRoot,config,userUnitDir,workDir,expectedImage,environment,nonce,originalProxyText,proxyQuadlet}){
+  const restoreProxy=await startStableRotationProxy({repoRoot,config,proxyQuadlet,originalProxyText,expectedImage,nonce});
   const markerPath=path.join(path.dirname(config.stateFile),'maintenance','in-progress.json');
   const tunnelUnitFile=path.join(userUnitDir,'codexia-tunnel.service');
   const oldToken='fixture-tunnel-token-old-'+randomBytes(12).toString('hex');
@@ -1133,6 +1134,7 @@ async function exerciseTunnelTokenRotation({repoRoot,config,userUnitDir,workDir,
         try{await rmdir(directory);}catch(error){if(error.code!=='ENOENT')throw error;}
       }
     }
+    await restoreProxy();
   }
 }
 
@@ -1452,7 +1454,8 @@ async function main() {
   });
   await exerciseApiAuthTokenRotation({repoRoot,config:appliedConfig,workDir,expectedImage,environment,
     originalProxyText:proxyText,proxyQuadlet,nonce});
-  await exerciseTunnelTokenRotation({repoRoot,config:appliedConfig,userUnitDir,workDir,expectedImage,environment,nonce});
+  await exerciseTunnelTokenRotation({repoRoot,config:appliedConfig,userUnitDir,workDir,expectedImage,environment,nonce,
+    originalProxyText:proxyText,proxyQuadlet});
 
   run('systemctl', ['--user', 'disable', '--now', 'codexia-updater.timer']);
   await assertTimerState('inactive', 'disabled');
