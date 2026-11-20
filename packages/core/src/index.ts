@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { KNOWLEDGE_CONTEXT_PATH, projectKnowledgeContext } from "./knowledge-context.js";
 import YAML from "yaml";
-import { assertChangeOperation, assertProjectPath, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type FileChange, type MutationCoordinator } from "@codexia/contracts";
+import { assertChangeOperation, assertProjectPath, nextOrderKey, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type FileChange, type MutationCoordinator } from "@codexia/contracts";
 import { PersistenceError, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
 import { createSnapshotIndex, estimateSnapshotIndexBytes, type SnapshotIndex } from "./snapshot-index.js";
@@ -687,7 +687,9 @@ export class CoreStore implements MutationCoordinator {
             parentId: parentId as DocumentId | null,
             kind,
             title,
-            orderKey: String(data.order ?? "0"),
+            orderKey: String(data.order ?? nextOrderKey(documents
+              .filter((candidate) => candidate.kind === kind && candidate.parentId === parentId)
+              .map((candidate) => candidate.orderKey))),
             markdown: manuscript?.content ?? "",
             authorId,
             idempotencyKey: `${operation.id}:${operation.generation}:${id}`,
@@ -846,11 +848,14 @@ export class CoreStore implements MutationCoordinator {
   async buildCreateHierarchyOperation(projectId:string,input:CreateHierarchyInput,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
     if(!input||!["volume","chapter","scene"].includes(input.kind)||typeof input.id!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(input.id)||!input.title?.trim())fail(400,"invalid_hierarchy_operation","A path-safe identity and title are required");
     const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest);if(index.logicalDocumentIds.has(input.id))fail(409,"hierarchy_id_exists","The hierarchy identity already exists");
-    const reader=makeReader(manifest),writes:FileChange[]=[];let path:string;
+    const reader=makeReader(manifest),writes:FileChange[]=[];let path:string,parentId:DocumentId|null=null;
     if(input.kind==="volume")path=`plot/volumes/${input.id}/volume.yaml`;
-    else {const volume=this.findDocument(manifest,input.volumeId);if(volume.kind!=="volume")fail(422,"invalid_hierarchy_parent","The parent must be a volume");path=`plot/volumes/${input.volumeId}/chapters/${input.id}/chapter.yaml`;
-      if(input.kind==="scene"){const chapter=this.findDocument(manifest,input.chapterId);if(chapter.kind!=="chapter"||chapter.parentId!==volume.id)fail(422,"invalid_hierarchy_parent","The chapter must belong to the volume");path=`plot/volumes/${input.volumeId}/chapters/${input.chapterId}/scenes/${input.id}.yaml`;const manuscript=`manuscript/${input.volumeId}/${input.chapterId}/${input.id}.md`;writes.push({path:manuscript,revision:null,content:input.manuscriptBody??""});}}
-    if(await reader.read(path))fail(409,"hierarchy_path_exists","The hierarchy path already exists");writes.unshift({path,revision:null,content:YAML.stringify({id:input.id,title:input.title,order:manifest.documents.length+1})});
+    else {const volume=this.findDocument(manifest,input.volumeId);if(volume.kind!=="volume")fail(422,"invalid_hierarchy_parent","The parent must be a volume");
+      if(input.kind==="chapter"){parentId=volume.id;path=`plot/volumes/${input.volumeId}/chapters/${input.id}/chapter.yaml`;}
+      else {const chapter=this.findDocument(manifest,input.chapterId);if(chapter.kind!=="chapter"||chapter.parentId!==volume.id)fail(422,"invalid_hierarchy_parent","The chapter must belong to the volume");parentId=chapter.id;path=`plot/volumes/${input.volumeId}/chapters/${input.chapterId}/scenes/${input.id}.yaml`;const manuscript=`manuscript/${input.volumeId}/${input.chapterId}/${input.id}.md`;writes.push({path:manuscript,revision:null,content:input.manuscriptBody??""});}}
+    if(await reader.read(path))fail(409,"hierarchy_path_exists","The hierarchy path already exists");
+    const siblings=(index.documentsByParentId.get(parentId)??[]).filter((document)=>document.kind===input.kind);
+    writes.unshift({path,revision:null,content:YAML.stringify({id:input.id,title:input.title,order:nextOrderKey(siblings.map((document)=>document.orderKey))})});
     return this.buildOperation(projectId,writes,"structure",`Create ${input.kind} ${input.id}`,manifest.snapshot);
   }
   async buildDeleteHierarchyOperation(projectId:string,input:HierarchyTarget,pinned?:SnapshotId):Promise<BuiltChangeOperation>{

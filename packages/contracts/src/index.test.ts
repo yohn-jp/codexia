@@ -1,9 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertChangeOperation, BUILTIN_MODULE_IDS, createDocumentSource, snapshotKey, snapshotScopeRevision, type SnapshotReader, type ChangeOperation } from "./index.js";
+import { assertChangeOperation, BUILTIN_MODULE_IDS, createDocumentSource, nextOrderKey, snapshotKey, snapshotScopeRevision, type SnapshotReader, type ChangeOperation } from "./index.js";
 test("built-in module IDs remain a frozen canonical tuple", () => {
   assert.deepEqual(BUILTIN_MODULE_IDS, ["story", "diagnostics", "nlp", "semantic", "speaker", "assistant", "publishing", "mcp", "search"]);
   assert.equal(Object.isFrozen(BUILTIN_MODULE_IDS), true);
+});
+
+test("next order keys append after padded, unpadded and reordered text keys", () => {
+  assert.equal(nextOrderKey([]), "0000000001");
+  assert.equal(nextOrderKey(["0000000009"]), "0000000010");
+  assert.equal(nextOrderKey(["9"]), "90", "10 sorts before an unpadded 9 in PostgreSQL text order");
+  assert.equal(nextOrderKey(["0000000001", "0000000000"]), "0000000002");
+  assert.equal(nextOrderKey(["0000000000", "0000000009"]), "0000000010");
 });
 
 const operation: ChangeOperation = {
