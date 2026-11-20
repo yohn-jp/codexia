@@ -39,7 +39,11 @@ test("mobile reader keeps Japanese pages visible in both writing directions", as
   await page.locator(".reading-pager").dispatchEvent("pointercancel", { pointerId: 11, pointerType: "touch", clientX: 120, clientY: 120, button: 0 });
   await expect(page.locator(".reading-pager")).toHaveAttribute("data-page-index", before!);
   await expect(page.locator(".reading-pager")).toHaveAttribute("class", beforeChrome!);
+  const beforeTransform = await page.locator(".reading-pager-content").evaluate((element) => getComputedStyle(element).transform);
   await page.getByRole("button", { name: "次のページ", exact: true }).click();
+  await expect.poll(() => visibleParagraphs(page)).toSatisfy((paragraphs) => paragraphs.length > 0 && paragraphs.some((paragraph) => paragraph.includes("第")));
   await expect.poll(() => visibleParagraphs(page)).not.toContainEqual(expect.stringContaining("第1段落"));
   await expect.poll(() => page.locator(".reading-pager").getAttribute("data-page-index")).not.toBe(before);
+  const afterTransform = await page.locator(".reading-pager-content").evaluate((element) => getComputedStyle(element).transform);
+  expect(Number(afterTransform.match(/matrix\([^,]+, [^,]+, [^,]+, [^,]+, ([^,]+)/)?.[1] ?? Number.NaN)).toBeGreaterThan(Number(beforeTransform.match(/matrix\([^,]+, [^,]+, [^,]+, [^,]+, ([^,]+)/)?.[1] ?? Number.NaN));
 });
