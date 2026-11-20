@@ -254,6 +254,9 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
         kind: requiredString(body.kind, "kind", 64),
         title: requiredString(body.title, "title", 256),
         orderKey: typeof body.orderKey === "string" ? body.orderKey : "0000",
+        ...(body.appendToEnd === undefined || body.appendToEnd === false
+          ? {}
+          : body.appendToEnd === true ? { appendToEnd: true } : failure(400, "INVALID_BODY", "appendToEnd must be a boolean")),
         markdown: typeof body.markdown === "string" ? body.markdown : failure(400, "INVALID_BODY", "markdown must be a string"),
         authorId,
         idempotencyKey: idempotencyKey(input.requestHeaders?.["idempotency-key"]),

@@ -117,6 +117,8 @@ export interface CreateDocumentCommand {
   kind: DocumentKind;
   title: string;
   orderKey: string;
+  /** Derive an append key from the active same-parent siblings under the project transaction lock. */
+  appendToEnd?: boolean;
   markdown: string;
   authorId: ActorId;
   idempotencyKey: IdempotencyKey;

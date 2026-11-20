@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { snapshotKey } from "@codexia/contracts";
+import { nextOrderKey, snapshotKey } from "@codexia/contracts";
 import type { EditorTermSpan } from "../editor/terms";
 import { useRecentActivityResume } from "../resume/useRecentActivityResume";
 import { formatHandoffHint, loadWritingResume, loadReadingPage, mergeContinueCandidates } from "../resume/continueCandidates";
@@ -335,6 +335,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     kind: string;
     title: string;
     orderKey: string;
+    appendToEnd: true;
     markdown: string;
     idempotencyKey: string;
   } | null>(null);
@@ -1169,7 +1170,6 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       if (!creationStarted) creationInFlightRef.current = false;
     }
     const parentId = (newDocumentParent || null) as DocumentId | null;
-    const orderKey = String(documents.length).padStart(8, "0");
     const previousIntent = documentCreationIntentRef.current;
     const intent = previousIntent && previousIntent.projectId === project.id && previousIntent.parentId === parentId && previousIntent.kind === documentKind && previousIntent.title === title
       ? previousIntent
@@ -1179,7 +1179,11 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           parentId,
           kind: documentKind,
           title,
-          orderKey,
+          // Older same-epoch backends use this advisory key. Modern PostgreSQL
+          // assigns the actual key inside the project transaction. Replays
+          // retain both values from this original intent.
+          orderKey: nextOrderKey(documents.filter((document) => document.parentId === parentId).map((document) => document.orderKey)),
+          appendToEnd: true as const,
           markdown: "",
           idempotencyKey: crypto.randomUUID(),
         };
@@ -1209,8 +1213,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       if (result.document.id !== intent.documentId || result.document.projectId !== intent.projectId || result.document.title !== intent.title) {
         throw new Error("作成応答が要求した文書と一致しませんでした。文書名を確認してください。");
       }
-      // Re-read the canonical order after creation; an appended document can
-      // share an orderKey with an existing sibling or sort before it.
+      // Refresh the canonical outline instead of assuming local order.
       if (projectIdRef.current !== project.id) return;
       setDocumentTitle("");
       let documentResult: Awaited<ReturnType<typeof api.persistenceDocuments>>;
