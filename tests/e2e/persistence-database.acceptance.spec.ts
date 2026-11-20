@@ -61,6 +61,51 @@ test("PostgreSQL project pages expose records beyond 200 and deep links retain t
   await expect(page.getByRole("main").getByRole("alert")).toContainText(missingId);
   await expect(page.getByLabel("作品", { exact: true })).toHaveValue(missingId);
   expect(pageRequests, "an unavailable direct link must not silently fall back to library enumeration").toBe(2);
+
+});
+
+test("outline supports guarded keyboard navigation, search, zoom and mobile sizing", async ({ page }) => {
+  expect(databaseUrl).toBeTruthy();
+  const fixture = await createWritingFixture(page, "desktop", `Outline ${crypto.randomUUID()}`);
+  const headers = { Origin: new URL(page.url()).origin };
+  const create = async (parentId: string | undefined, kind: string, title: string, orderKey: string) => {
+    const response = await page.request.post(`/api/v1/persistence/projects/${fixture.project.id}/documents`, { headers: { ...headers, "Idempotency-Key": crypto.randomUUID() }, data: { ...(parentId ? { parentId } : {}), kind, title, orderKey, markdown: "" } });
+    expect(response.status()).toBe(201);
+    return (await response.json() as { document: { id: string; title: string } }).document;
+  };
+  const volume = await create(undefined, "volume", "Volume One", "0");
+  const chapter = await create(volume.id, "chapter", "Chapter One", "0");
+  const nestedScene = await create(chapter.id, "scene", `Outline scene ${crypto.randomUUID()}`, "0");
+  await page.goto(`/desktop/projects/${fixture.project.id}/scenes/${nestedScene.id}`);
+  const outline = page.locator('[data-workspace-panel="outline"]');
+  const rows = outline.locator(".pg-outline-document");
+  await rows.first().focus();
+  await rows.first().press("ArrowDown");
+  await expect(rows.nth(1)).toBeFocused();
+  await rows.nth(1).press("Home");
+  await expect(rows.first()).toBeFocused();
+  const leaf = outline.getByRole("button", { name: `${nestedScene.title} シーン` });
+  await leaf.focus();
+  await leaf.press("ArrowRight");
+  await expect(leaf).toBeFocused();
+  await outline.getByLabel("構成を検索").fill(nestedScene.title);
+  await expect(outline.locator(".pg-outline-document")).toHaveCount(3);
+  await expect(leaf).toBeVisible();
+  const chapterRow = outline.locator(".pg-outline-document").filter({ hasText: "Chapter One" });
+  await chapterRow.focus();
+  await chapterRow.press("Tab");
+  await expect(outline.getByRole("button", { name: "Chapter Oneを拡大" })).toBeFocused();
+  await outline.getByRole("button", { name: "Chapter Oneを拡大" }).press("Enter");
+  await expect(outline.getByRole("navigation", { name: "構成の階層" })).toContainText("Chapter One");
+  await outline.getByLabel("構成を検索").fill("no matching outline item");
+  await expect(outline.locator(".pg-outline-document")).toHaveCount(0);
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.goto(`/mobile/projects/${fixture.project.id}/scenes/${nestedScene.id}?view=writing`);
+  await expect(page.getByRole("heading", { name: nestedScene.title, exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "構成" }).click();
+  await expect(page.locator(".pg-outline-document").first()).toBeVisible();
+  await page.evaluate(() => { document.body.style.zoom = "200%"; });
+  await expect(page.locator(".pg-outline-document").first()).toBeVisible();
 });
 
 async function openResearchInspector(page: import("@playwright/test").Page) {
@@ -72,6 +117,128 @@ async function openResearchInspector(page: import("@playwright/test").Page) {
     await knowledgeTools.locator("summary").click();
   }
 }
+
+test("replays ambiguous project and document creates with retained client intent", async ({ page }) => {
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  const projectTitle = `Replay project ${crypto.randomUUID()}`;
+  const documentTitle = `Replay scene ${crypto.randomUUID()}`;
+  let projectTimeoutInjected = false;
+  let documentTimeoutInjected = false;
+  const projectBodies: Array<{ id?: string; title: string }> = [];
+  const documentBodies: Array<{ documentId?: string; idempotencyKey?: string; title: string }> = [];
+  await page.route("**/api/v1/persistence/projects", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const body = route.request().postDataJSON() as { id?: string; title: string };
+    projectBodies.push(body);
+    if (!projectTimeoutInjected) {
+      projectTimeoutInjected = true;
+      const response = await route.fetch();
+      expect(response.status()).toBe(201);
+      await route.fulfill({ status: 504, contentType: "application/json", body: JSON.stringify({ error: "synthetic gateway timeout" }) });
+      return;
+    }
+    await route.continue();
+  });
+  await page.route("**/api/v1/persistence/projects/*/documents", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const body = route.request().postDataJSON() as { documentId?: string; idempotencyKey?: string; title: string };
+    documentBodies.push(body);
+    if (!documentTimeoutInjected) {
+      documentTimeoutInjected = true;
+      const response = await route.fetch();
+      expect(response.status()).toBe(201);
+      await route.fulfill({ status: 504, contentType: "application/json", body: JSON.stringify({ error: "synthetic gateway timeout" }) });
+      return;
+    }
+    await route.continue();
+  });
+
+  let projectReadMissed = false;
+  await page.route("**/api/v1/persistence/projects/*", async (route) => {
+    const id = projectBodies[0]?.id;
+    if (projectTimeoutInjected && !projectReadMissed && route.request().method() === "GET" &&
+        new URL(route.request().url()).pathname === `/api/v1/persistence/projects/${id}`) {
+      projectReadMissed = true;
+      await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+      return;
+    }
+    await route.continue();
+  });
+  let documentReadMissed = false;
+  await page.route("**/api/v1/persistence/projects/*/documents/*", async (route) => {
+    const id = documentBodies[0]?.documentId;
+    if (documentTimeoutInjected && !documentReadMissed && route.request().method() === "GET" &&
+        new URL(route.request().url()).pathname.endsWith(`/documents/${id}`)) {
+      documentReadMissed = true;
+      await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+      return;
+    }
+    await route.continue();
+  });
+
+  await ownerLogin(page, "/desktop/");
+  const outline = page.locator('[data-workspace-panel="outline"]');
+  await outline.locator(".pg-library-create > summary").click();
+  await outline.getByLabel("作品名").fill(projectTitle);
+  await outline.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
+  await expect(page.getByRole("main", { name: "PostgreSQL原稿編集" }).getByText("synthetic gateway timeout", { exact: true })).toBeVisible();
+  expect(projectReadMissed).toBe(true);
+  await expect(outline.getByLabel("作品名")).toHaveValue(projectTitle);
+  await outline.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
+  await expect(page.getByRole("heading", { name: projectTitle, exact: true })).toBeVisible();
+
+  const projectsResponse = await page.request.get("/api/v1/persistence/projects");
+  expect(projectsResponse.ok()).toBe(true);
+  const projects = await projectsResponse.json() as Array<{ id: string; title: string }>;
+  expect(projects.filter((item) => item.title === projectTitle)).toHaveLength(1);
+  expect(projectBodies).toHaveLength(2);
+  expect(projectBodies[1]).toEqual(projectBodies[0]);
+
+  // A completed intent is cleared, so an independent same-title submission
+  // must allocate a fresh project id rather than replaying the prior create.
+  await outline.getByLabel("作品名").fill(projectTitle);
+  await outline.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
+  await expect.poll(() => projectBodies.length).toBe(3);
+  const projectId = projectBodies[2]?.id;
+  expect(projectId).toBeTruthy();
+  await expect(outline.getByLabel("作品", { exact: true })).toHaveValue(projectId!);
+  const projectsAfterSameTitle = await page.request.get("/api/v1/persistence/projects");
+  const sameTitleProjects = (await projectsAfterSameTitle.json() as Array<{ id: string; title: string }>).filter((item) => item.title === projectTitle);
+  expect(sameTitleProjects).toHaveLength(2);
+  expect(projectBodies).toHaveLength(3);
+  expect(projectId).not.toBe(projectBodies[0]?.id);
+
+  const createDocument = outline.locator(".pg-library-create-document");
+  await createDocument.locator("summary").click();
+  await createDocument.getByLabel("文書名").fill(documentTitle);
+  await createDocument.getByRole("button", { name: "作成", exact: true }).click();
+  await expect(page.getByRole("main", { name: "PostgreSQL原稿編集" }).getByText("synthetic gateway timeout", { exact: true })).toBeVisible();
+  expect(documentReadMissed).toBe(true);
+  await expect(createDocument.getByLabel("文書名")).toHaveValue(documentTitle);
+  await createDocument.getByRole("button", { name: "作成", exact: true }).click();
+  await expect(page.getByRole("heading", { name: documentTitle, exact: true })).toBeVisible();
+
+  const documentsResponse = await page.request.get(`/api/v1/persistence/projects/${projectId}/documents`);
+  expect(documentsResponse.ok()).toBe(true);
+  const documents = (await documentsResponse.json() as { documents: Array<{ id: string; title: string }> }).documents;
+  expect(documents.filter((item) => item.title === documentTitle)).toHaveLength(1);
+  expect(documentBodies).toHaveLength(2);
+  expect(documentBodies[1]).toEqual(documentBodies[0]);
+
+  await createDocument.getByLabel("文書名").fill(documentTitle);
+  await createDocument.getByRole("button", { name: "作成", exact: true }).click();
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/v1/persistence/projects/${projectId}/documents`);
+    const { documents } = await response.json() as { documents: Array<{ id: string; title: string }> };
+    return documents.filter((item) => item.title === documentTitle).length;
+  }).toBe(2);
+  const afterSecondCreate = await page.request.get(`/api/v1/persistence/projects/${projectId}/documents`);
+  const allDocuments = (await afterSecondCreate.json() as { documents: Array<{ id: string; title: string }> }).documents;
+  expect(allDocuments.filter((item) => item.title === documentTitle)).toHaveLength(2);
+  expect(documentBodies).toHaveLength(3);
+  expect(documentBodies[2]?.documentId).not.toBe(documentBodies[0]?.documentId);
+  expect(documentBodies[2]?.idempotencyKey).not.toBe(documentBodies[0]?.idempotencyKey);
+});
 
 
 test("Git store selector cannot bypass PostgreSQL-only authoring", async ({ page }) => {
@@ -85,6 +252,47 @@ test("Git store selector cannot bypass PostgreSQL-only authoring", async ({ page
   await expect(page.getByRole("alert")).toContainText("Gitワークスペースへの切替は提供していません");
   await expect(page.getByRole("heading", { name: "Database workspace" })).toHaveCount(0);
 });
+
+for (const shell of ["desktop", "mobile"] as const) {
+  test(`${shell} standalone authoring opens the first project and document forms from the empty editor`, async ({ page }) => {
+    await page.setViewportSize(shell === "desktop" ? { width: 1280, height: 900 } : { width: 390, height: 844 });
+    let showProject = false;
+    await page.route((url) => url.pathname === "/api/v1/persistence/projects", async (route) => {
+      if (!showProject && route.request().method() === "GET") return route.fulfill({ json: [] });
+      if (route.request().method() !== "POST") return route.continue();
+      const response = await route.fetch();
+      showProject = response.ok();
+      await route.fulfill({ response });
+    });
+    await ownerLogin(page, shell === "desktop" ? "/desktop/" : "/mobile/?view=writing");
+    const firstProject = page.getByRole("button", { name: "最初の作品を作成" });
+    await firstProject.click();
+    const projectName = page.getByLabel("作品名", { exact: true });
+    await expect(projectName).toBeFocused();
+    if (shell === "mobile") {
+      await page.getByRole("navigation").getByRole("button", { name: "書く", exact: true }).click();
+    } else {
+      await page.locator(".pg-library-create > summary").click();
+    }
+    await expect(firstProject).toBeVisible();
+    await firstProject.click();
+    await expect(projectName).toBeFocused();
+    await projectName.fill(`Empty state ${shell} ${crypto.randomUUID()}`);
+    await page.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
+    await expect(page.getByText("編集を始める文書を作成してください。", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "最初の文書を作成" }).click();
+    const documentName = page.getByLabel("文書名", { exact: true });
+    await expect(documentName).toBeFocused();
+    await documentName.fill("最初のシーン");
+    await page.locator(".pg-library-create-document").getByRole("button", { name: "作成", exact: true }).click();
+    const editor = manuscriptEditor(page);
+    await expect(editor).toBeVisible();
+    await editor.click();
+    await page.keyboard.insertText("はじめの本文。");
+    await expect(editor).toHaveText("はじめの本文。");
+    await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+  });
+}
 
 test("Hosted permission metadata does not force Git workspace fallback", async ({ page }) => {
   expect(databaseUrl).toBeTruthy();
@@ -282,6 +490,65 @@ test("Knowledge relation pagination keeps the forty-first fetched relation actio
     return result.relations.find(relation => relation.id === last.id)?.status;
   }).toBe("confirmed");
 });
+
+for (const shell of ["desktop", "mobile"] as const) {
+  test(`${shell} move destinations exclude descendants and identify same-title paths`, async ({ page }) => {
+    if (shell === "mobile") await page.setViewportSize({ width: 390, height: 844 });
+    await ownerLogin(page, `/${shell}/`);
+    const origin = new URL(page.url()).origin;
+    const document = (title: string, kind: string, parentId: string | null) => ({
+      id: crypto.randomUUID(), revisionId: crypto.randomUUID(), title, kind, parentId, orderKey: title, markdown: title,
+    });
+    const volume = document("移動する巻", "volume", null);
+    const child = document("子章", "chapter", volume.id);
+    const grandchild = document("孫シーン", "scene", child.id);
+    const firstParent = document("別巻甲", "volume", null);
+    const secondParent = document("別巻乙", "volume", null);
+    const first = document("同名の章", "chapter", firstParent.id);
+    const second = document("同名の章", "chapter", secondParent.id);
+    const archive = await page.request.post("/api/v1/persistence/import", {
+      headers: { Origin: origin },
+      data: { format: "codexia-work/v1", project: { title: `Move ${crypto.randomUUID()}`, settings: {} },
+        documents: [volume, child, grandchild, firstParent, secondParent, first, second],
+        knowledge: { nodes: [], aliases: [], relations: [] },
+        evidence: { anchors: [], mentions: [], assertions: [], assertionEvidence: [], unresolved: { anchors: [], mentions: [], assertionEvidence: [] } },
+        moduleRecords: [], omittedRecords: [] },
+    });
+    expect(archive.status()).toBe(201);
+    const { project } = await archive.json() as { project: { id: string } };
+    const projectRoute = `/api/v1/persistence/projects/${project.id}/documents`;
+    await page.goto(`/${shell}/projects/${project.id}/scenes/${volume.id}${shell === "mobile" ? "?view=writing" : ""}`);
+    await expect(manuscriptEditor(page)).toContainText(volume.markdown);
+    if (shell === "mobile") await page.getByRole("button", { name: "構成", exact: true }).click();
+    const scope = shell === "mobile" ? page.locator("ion-modal.mobile-shell-reference-modal") : page.locator('[data-workspace-panel="outline"]');
+    await scope.getByText("選択文書の構成を変更", { exact: true }).click();
+    const targets = scope.getByLabel("移動先");
+    for (const unavailable of [volume, child, grandchild]) await expect(targets.locator(`option[value="${unavailable.id}"]`)).toHaveCount(0);
+    await expect(targets.locator(`option[value="${first.id}"]`)).toContainText("別巻甲");
+    await expect(targets.locator(`option[value="${second.id}"]`)).toContainText("別巻乙");
+
+    if (shell === "desktop") {
+      await targets.selectOption(first.id);
+      const candidate = await page.request.get(`${projectRoute}/${first.id}`);
+      expect(candidate.ok()).toBe(true);
+      const { document: current } = await candidate.json() as { document: { version: number } };
+      const reassigned = await page.request.patch(`${projectRoute}/${first.id}/metadata`, {
+        headers: { Origin: origin },
+        data: { parentId: child.id, expectedVersion: current.version },
+      });
+      expect(reassigned.ok()).toBe(true);
+      await scope.getByRole("button", { name: "文書を移動" }).click();
+      await expect(page.getByText("Document hierarchy cannot contain a cycle", { exact: true }).first()).toBeVisible();
+      await expect(targets).toHaveValue(first.id);
+      await targets.selectOption(second.id);
+      await scope.getByRole("button", { name: "文書を移動" }).click();
+      await expect.poll(async () => {
+        const response = await page.request.get(`${projectRoute}/${volume.id}`);
+        return ((await response.json()) as { document: { parentId: string | null } }).document.parentId;
+      }).toBe(second.id);
+    }
+  });
+}
 
 test("a 501-document PostgreSQL work opens its final scene through the canonical deep link", async ({page}) => {
   test.setTimeout(90000);

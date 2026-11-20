@@ -12,7 +12,7 @@ jobs:
   rootless-updater-lifecycle:
     name: Signed lifecycle and recovery
     runs-on: ubuntu-26.04
-    timeout-minutes: 100
+    timeout-minutes: 150
     permissions:
       contents: read
       actions: read
@@ -30,12 +30,21 @@ jobs:
         run: |
           set -euo pipefail
           bash -n deploy/ansible/test-phase-f-disposable.sh
+          bash -n deploy/ansible/test-phase-f-ansible-continuity.sh
           node --test scripts/phase-f-disposable.test.mjs
-      - name: Run signed lifecycle and failure recovery against actual pinned release images
+      - name: Install isolated Ansible control environment for host continuity
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends python3-venv jq
+          python3 -m venv "$RUNNER_TEMP/codexia-ansible"
+          "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
+      - name: Run Ansible host/base convergence and signed lifecycle on one disposable VM
         env:
           CODEXIA_DISPOSABLE_HOST: phase-f-integration
           GH_TOKEN: ${{ github.token }}
-        run: bash deploy/ansible/test-phase-f-disposable.sh
+          ANSIBLE_PLAYBOOK: ${{ runner.temp }}/codexia-ansible/bin/ansible-playbook
+        run: bash deploy/ansible/test-phase-f-ansible-continuity.sh
       - name: Upload signed disposable evidence without private key material
         if: always()
         uses: actions/upload-artifact@v7.0.2

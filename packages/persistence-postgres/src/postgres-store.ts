@@ -69,6 +69,7 @@ type DbRow = QueryResultRow;
 const KNOWLEDGE_PROJECTION_NODE_BATCH_SIZE = 32;
 const KNOWLEDGE_PROJECTION_EVIDENCE_BATCH_SIZE = 128;
 const KNOWLEDGE_PROJECTION_REVISION_BATCH_SIZE = 32;
+const MAX_ACTIVE_DOCUMENTS_PER_PROJECT = 999;
 
 function chunks<T>(values: readonly T[], size: number): T[][] {
   const result: T[][] = [];
@@ -1192,7 +1193,18 @@ class PostgresTransaction implements PersistenceTransaction {
     if (replay) return replay;
     if (!(await this.getProject(command.projectId))) throw notFound("project", command.projectId);
 
-    await this.lockProject(command.projectId);
+    const activeDocuments = asNumber((await this.query(
+      "SELECT count(*)::integer AS active_count FROM document WHERE project_id = $1 AND deleted_at IS NULL",
+      [command.projectId],
+    )).rows[0]!.active_count);
+    if (activeDocuments >= MAX_ACTIVE_DOCUMENTS_PER_PROJECT) {
+      throw new PersistenceError("conflict", `Project is limited to at most ${MAX_ACTIVE_DOCUMENTS_PER_PROJECT} active documents`, {
+        resource: "document_limit",
+        id: command.projectId,
+        expected: MAX_ACTIVE_DOCUMENTS_PER_PROJECT,
+        actual: activeDocuments,
+      });
+    }
     const documentId = command.documentId ?? randomUUID() as DocumentId;
     const parentId = command.parentId ?? null;
     if (parentId && !(await this.getDocument(command.projectId, parentId))) throw notFound("parent document", parentId);
