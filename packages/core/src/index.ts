@@ -802,6 +802,15 @@ export class CoreStore implements MutationCoordinator {
           fail(409, "scope_conflict", `The ${set.kind} sibling set changed`);
         }
       }
+      const legacyHierarchyReorder = !operation.readDocumentSets?.length &&
+        operation.effect === "structure" && operation.message === "Reorder hierarchy" &&
+        operation.writes.length > 0 && operation.writes.every(({ path }) =>
+          /^plot\/volumes\/[^/]+\/volume\.yaml$/.test(path) ||
+          /^plot\/volumes\/[^/]+\/chapters\/[^/]+\/chapter\.yaml$/.test(path) ||
+          /^plot\/volumes\/[^/]+\/chapters\/[^/]+\/scenes\/[^/]+\.yaml$/.test(path));
+      if (legacyHierarchyReorder && manifest.snapshot.projectVersion !== operation.baseProjectVersion) {
+        fail(409, "scope_conflict", "A legacy hierarchy reorder cannot be applied after project content changed");
+      }
 
       const authorId = state.approvedByOperationId?.[operation.id]
         ?? (state as ProposalStatus & { approvedBy?: string }).approvedBy;
