@@ -130,6 +130,10 @@ function findOutlineNode(items: readonly OutlineDocument[], id: string): Outline
   return null;
 }
 
+function firstOutlineNodeId(items: readonly OutlineDocument[]): string | null {
+  return items[0]?.id ?? null;
+}
+
 function outlineAncestors(items: readonly OutlineDocument[], id: string, ancestors: OutlineDocument[] = []): OutlineDocument[] | null {
   for (const item of items) {
     if (item.id === id) return ancestors;
@@ -313,7 +317,9 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const documentOutline = useMemo(() => buildDocumentOutline(documents), [documents]);
   const filteredDocumentOutline = useMemo(() => filterDocumentOutline(documentOutline, outlineQuery), [documentOutline, outlineQuery]);
   const zoomNode = outlineZoomRoot ? findOutlineNode(documentOutline, outlineZoomRoot) : null;
-  const visibleDocumentOutline = zoomNode ? [filterDocumentOutline([zoomNode], outlineQuery)[0] ?? zoomNode] : filteredDocumentOutline;
+  const zoomResults = zoomNode ? filterDocumentOutline([zoomNode], outlineQuery) : [];
+  const visibleDocumentOutline = zoomNode ? zoomResults : filteredDocumentOutline;
+  const outlineFocusId = findOutlineNode(visibleDocumentOutline, documentId)?.id ?? firstOutlineNodeId(visibleDocumentOutline);
   const zoomAncestors = outlineZoomRoot ? (outlineAncestors(documentOutline, outlineZoomRoot) ?? []) : [];
   useEffect(() => {
     if (!documentId || !projectId) {
@@ -1624,8 +1630,10 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
     if (event.key === "ArrowRight" && item) {
       event.preventDefault();
       const toggle = item.querySelector<HTMLButtonElement>(":scope > .pg-outline-row > .pg-outline-toggle");
-      if (toggle?.getAttribute("aria-expanded") === "false") toggle.click();
-      else buttons[index + 1]?.focus();
+      if (!toggle) return;
+      const focusChild = () => item.querySelector<HTMLButtonElement>(":scope > .pg-document-children > .pg-outline-item > .pg-outline-row > .pg-outline-document")?.focus();
+      if (toggle.getAttribute("aria-expanded") === "false") { toggle.click(); window.requestAnimationFrame(focusChild); }
+      else focusChild();
       return;
     }
     if (event.key === "ArrowLeft" && item) {
@@ -1647,26 +1655,28 @@ function PersistenceWorkspaceController({ mode, authorScope, onSignOut, navigate
   const renderOutline = (items: OutlineDocument[], forceExpanded = false): ReactNode => items.map((item) => {
     const hasChildren = item.children.length > 0;
     const collapsed = collapsedDocumentIds.has(item.id);
+    const expanded = forceExpanded || !collapsed;
     return <li key={item.id} className="pg-outline-item" data-kind={item.kind} data-document-id={item.id}>
       <div className="pg-outline-row">
         {hasChildren ? <button type="button" className="pg-outline-toggle"
-          aria-label={collapsed ? `${item.title}を展開` : `${item.title}を折りたたむ`}
-          aria-expanded={!collapsed}
+          tabIndex={-1}
+          aria-label={expanded ? `${item.title}を折りたたむ` : `${item.title}を展開`}
+          aria-expanded={expanded}
           onClick={() => setCollapsedDocumentIds((current) => {
             const next = new Set(current);
             if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
             return next;
           })}>{collapsed ? "›" : "⌄"}</button> : <span className="pg-outline-spacer" aria-hidden="true" />}
         <button type="button" className={`pg-outline-document${item.id === documentId ? " is-selected" : ""}`}
-          tabIndex={item.id === documentId ? 0 : -1}
+          tabIndex={item.id === outlineFocusId ? 0 : -1}
           aria-current={item.id === documentId ? "page" : undefined}
           onClick={() => void selectDocument(item.id)}>
           <span>{item.title}</span>
           <small>{item.misplaced ? `未配置 · ${documentKindLabel(item.kind)}` : documentKindLabel(item.kind)}</small>
         </button>
-        {hasChildren && <button type="button" className="pg-outline-zoom" aria-label={`${item.title}を拡大`} onClick={() => setOutlineZoomRoot(item.id)}>拡大</button>}
+        {hasChildren && <button type="button" tabIndex={-1} className="pg-outline-zoom" aria-label={`${item.title}を拡大`} onClick={() => setOutlineZoomRoot(item.id)}>拡大</button>}
       </div>
-      {hasChildren && (forceExpanded || !collapsed) ? <ul className="pg-document-children">{renderOutline(item.children, forceExpanded)}</ul> : null}
+      {hasChildren && expanded ? <ul className="pg-document-children">{renderOutline(item.children, forceExpanded)}</ul> : null}
     </li>;
   });
   const library = (<aside className="pg-library" aria-label="作品と文書">

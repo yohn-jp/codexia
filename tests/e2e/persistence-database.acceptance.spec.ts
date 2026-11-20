@@ -24,11 +24,17 @@ test("outline supports guarded keyboard navigation, search, zoom and mobile sizi
   await expect(rows.nth(1)).toBeFocused();
   await rows.nth(1).press("Home");
   await expect(rows.first()).toBeFocused();
+  const leaf = outline.getByRole("button", { name: `${nestedScene.title} シーン` });
+  await leaf.focus();
+  await leaf.press("ArrowRight");
+  await expect(leaf).toBeFocused();
   await outline.getByLabel("構成を検索").fill(nestedScene.title);
   await expect(outline.locator(".pg-outline-document")).toHaveCount(3);
-  await expect(outline.getByRole("button", { name: `${nestedScene.title} シーン` })).toBeVisible();
+  await expect(leaf).toBeVisible();
   await outline.getByRole("button", { name: "Chapter Oneを拡大" }).click();
   await expect(outline.getByRole("navigation", { name: "構成の階層" })).toContainText("Chapter One");
+  await outline.getByLabel("構成を検索").fill("no matching outline item");
+  await expect(outline.locator(".pg-outline-document")).toHaveCount(0);
   await page.setViewportSize({ width: 320, height: 900 });
   await page.goto(`/mobile/projects/${fixture.project.id}/scenes/${nestedScene.id}?view=writing`);
   await expect(page.getByRole("heading", { name: nestedScene.title, exact: true })).toBeVisible();
