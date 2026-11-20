@@ -8,6 +8,7 @@ type EntryState = "checking" | "signed-out" | "database" | "failed";
 export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
   const [state, setState] = useState<EntryState>("checking");
   const [accessMode, setAccessMode] = useState(false);
+  const [hostedMode, setHostedMode] = useState(false);
   const [authorScope, setAuthorScope] = useState("owner");
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
@@ -29,6 +30,7 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
       const version = await api.version();
       if (sequence !== inspectSequenceRef.current) return;
       versionChecked = true;
+      setHostedMode(version.hosted);
       setAccessMode(version.browserAuth === "cloudflare-access");
       const session = await api.session();
       if (version.browserAuth === "cloudflare-access" && session.authorScope !== "owner") {
@@ -95,11 +97,37 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
     }
   }
 
+  async function completeLogout(): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    setSessionBlocked(true);
+    setMessage("");
+    try {
+      await api.logout();
+      workspaceScopeRef.current = null;
+      setSessionBlocked(false);
+      setState("signed-out");
+    } catch (error) {
+      const detail = error instanceof Error ? ` ${error.message}` : "";
+      setMessage(`ログアウトの完了を確認できませんでした。原稿を保護したまま認証状態を再確認し、必要ならログアウトを再試行してください。${detail}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reenterHosted(): Promise<void> {
+    if (!protectionRef.current || !await protectionRef.current()) {
+      setMessage("入力を保護できないためHosted環境への移動を停止しました。接続を再確認してください。");
+      return;
+    }
+    window.location.assign("/_platform/reauth");
+  }
+
   if (state === "database") return <>
     <div inert={sessionBlocked} hidden={sessionBlocked} style={{ display: sessionBlocked ? "none" : "contents" }}>
-      <PersistenceWorkspace mode={mode} authorScope={authorScope} sessionBlocked={sessionBlocked} registerProtection={registerProtection} onSignOut={() => {
-        if (accessMode) { window.location.assign("/cdn-cgi/access/logout"); return; }
-        void api.logout().finally(() => { workspaceScopeRef.current = null; setState("signed-out"); });
+      <PersistenceWorkspace mode={mode} hosted={hostedMode} authorScope={authorScope} sessionBlocked={sessionBlocked} registerProtection={registerProtection} onSignOut={() => {
+        if (accessMode && !hostedMode) { window.location.assign("/cdn-cgi/access/logout"); return; }
+        void completeLogout();
       }} />
     </div>
     {sessionBlocked && <main className={`pg-entry pg-${mode}`}><section className="pg-login" aria-labelledby="pg-recheck-title">
@@ -107,6 +135,8 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
       <p role="alert">{message}</p>
       <p>編集中の原稿は現在の画面に保持しています。認証と接続を確認するまで編集を停止します。</p>
       <button type="button" disabled={busy} onClick={() => void inspect()}>再試行</button>
+      {(!accessMode || hostedMode) && <button type="button" disabled={busy} onClick={() => void completeLogout()}>ログアウトを再試行</button>}
+      {hostedMode && <button type="button" disabled={busy} onClick={() => void reenterHosted()}>Praetoriumから再入場</button>}
       <button type="button" disabled={busy} onClick={() => void (async () => {
         if (!protectionRef.current || !await protectionRef.current()) { setMessage("入力を保護できないため再読み込みを停止しました。接続を再確認してください。"); return; }
         window.location.reload();
@@ -121,6 +151,15 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
       <p role="alert">{message}</p>
       <button type="button" disabled={busy} onClick={() => void inspect()}>再試行</button>
       <button type="button" disabled={busy} onClick={() => window.location.reload()}>ページを再読み込み</button>
+      <a href="/">画面選択へ戻る</a>
+    </section>
+  </main>;
+  if (hostedMode) return <main className={`pg-entry pg-${mode}`}>
+    <section className="pg-login" aria-labelledby="pg-hosted-entry-title">
+      <p className="eyebrow">Codexia · Hosted</p>
+      <h1 id="pg-hosted-entry-title">Praetoriumから再入場してください</h1>
+      <p>このHosted環境の認証はPraetorium Instance Accessが管理しています。GatewayからこのInstanceへ再入場してください。</p>
+      <a href="/_platform/reauth">Praetoriumから再入場</a>
       <a href="/">画面選択へ戻る</a>
     </section>
   </main>;

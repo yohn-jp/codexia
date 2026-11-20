@@ -1,6 +1,6 @@
 import { api } from "../api";
 import type { RevisionId } from "@codexia/persistence-contracts";
-import { composeTextChanges, parseMarkdownBlocks, type EditorEvidenceAdapter, type EditorEvidenceIdentity, type EditorEvidenceSnapshot, type EditorPersistenceSaveResult, type TextAnchor, type TextChange } from "./evidence";
+import { applyTextChanges, composeTextChanges, parseMarkdownBlocks, type EditorEvidenceAdapter, type EditorEvidenceIdentity, type EditorEvidenceSnapshot, type EditorPersistenceSaveResult, type TextAnchor } from "./evidence";
 
 export interface PersistenceEditorBinding {
   projectId: string;
@@ -86,12 +86,6 @@ function assertionLabel(assertion: { modality: string; proposition: Record<strin
   const proposition = JSON.stringify(assertion.proposition);
   const summary = proposition.length > 140 ? `${proposition.slice(0, 137)}…` : proposition;
   return `${assertion.modality}: ${summary}`;
-}
-
-function applyTextChanges(source: string, changes: readonly TextChange[]): string {
-  let result = source;
-  for (const change of [...changes].reverse()) result = `${result.slice(0, change.from)}${change.insert}${result.slice(change.to)}`;
-  return result;
 }
 
 async function sha256(value: string): Promise<string> {

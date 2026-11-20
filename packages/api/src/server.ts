@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ReorderHierarchyInput } from "@codexia/core";
-import type { Persistence } from "@codexia/persistence-contracts";
+import type { Persistence, ProjectPageCursor } from "@codexia/persistence-contracts";
 import { createPostgresPersistence, migratePostgresDatabase, verifyPostgresSchema } from "@codexia/persistence-postgres";
 export { inspectFreshPostgresSchema, initializeFreshPostgresSchema, packagedMigrationFingerprint, verifyPostgresSchema } from "@codexia/persistence-postgres";
 import { ModuleRuntime, type ActionHostContext, type DomainJobActionExecutor, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
@@ -23,6 +23,7 @@ import { HistoricalModelUsageStore } from "./historical-store.js";
 import { JobHistoryError, JobHistoryStore, type JobEvent } from "./job-history-store.js";
 import { RecentActivityStore } from "./recent-activity-store.js";
 import { handlePersistenceRoute } from "./persistence-routes.js";
+import { decodeProjectPageCursor, encodeProjectPageCursor } from "./project-pagination.js";
 import {
   createHostedAuthorizationPolicy,
   HostedAuthorizationError,
@@ -930,7 +931,7 @@ export function createServer(options: ApiServerOptions): Server {
           const result = await coreStore.resolveDocumentScene(projectId, (input as { path: string }).path, context.reader.snapshot);
           const document = result.sceneId === null ? await context.reader.read((input as { path: string }).path) : undefined;
           return { ok: true, snapshot: result.snapshot, data: { sceneId: result.sceneId,
-            ...(document !== undefined ? { document: document ? { path: (input as { path: string }).path, ...document } : null } : {}) } };
+            ...(document !== undefined ? { document: document ? { path: (input as { path: string }).path, content: document.content, revision: document.revision } : null } : {}) } };
         },
       } },
       { module: "core", action: make("core.search", searchInput, async (context, input) => {
@@ -1762,7 +1763,22 @@ export function createServer(options: ApiServerOptions): Server {
       }
       return;
     }
-    if (routePath === "/api/projects" && method === "GET") { sendJson(response, 200, await listProjects()); return; }
+    if (routePath === "/api/projects" && method === "GET") {
+      const pageRequested = query.get("page") === "1" || query.has("cursor");
+      if (query.has("page") && query.get("page") !== "1") throw httpFailure(400, "INVALID_QUERY", "page must be 1 when requesting project pagination");
+      if (!pageRequested) { sendJson(response, 200, await listProjects()); return; }
+      const limit = boundedInt(query.get("limit"), 200, 1, 200);
+      let cursor: ProjectPageCursor | undefined;
+      try { cursor = decodeProjectPageCursor(query.get("cursor")); }
+      catch { throw httpFailure(400, "INVALID_CURSOR", "Project cursor is invalid"); }
+      if (hosted) {
+        sendJson(response, 200, { projects: await listProjects(), nextCursor: null });
+        return;
+      }
+      const page = await options.store.listProjectsPage(limit, cursor);
+      sendJson(response, 200, { projects: page.projects, nextCursor: page.nextCursor ? encodeProjectPageCursor(page.nextCursor) : null });
+      return;
+    }
     if (routePath === "/api/projects" && method === "POST") {
       if (hosted) throw httpFailure(403, "HOSTED_ASSIGNMENT_IMMUTABLE", "Hosted runtimes can only use their assigned project");
       await requireWritePermission();
@@ -2090,9 +2106,9 @@ export function createServer(options: ApiServerOptions): Server {
         await createScratch(projectId, await readJson(request, parsedBody), hosted ? `hosted:${author!.userId}` : "owner", response); return;
       }
       if (suffix === "review-queue" && method === "GET") {
-        if (!coreStore.listProposals) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
-        const proposals = await coreStore.listProposals(projectId);
-        sendJson(response, 200, { snapshot: (await options.store.observe(projectId)).snapshot, proposals: proposals.slice(0, 1000) }); return;
+        if (!coreStore.listProposalsSnapshot) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
+        const result = await coreStore.listProposalsSnapshot(projectId);
+        sendJson(response, 200, { snapshot: result.snapshot, proposals: result.proposals.slice(0, 1000) }); return;
       }
 
       if (suffix.startsWith("modules/") || suffix.startsWith("actions/")) throw httpFailure(404, "NOT_FOUND", "API route not found");

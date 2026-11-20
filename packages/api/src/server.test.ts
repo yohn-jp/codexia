@@ -744,6 +744,9 @@ describe("Codexia HTTP boundary", () => {
     const projects = await fetch(`${apiServer.base}/api/projects`, { headers: readerHeaders });
     assert.equal(projects.status, 200);
     assert.deepEqual(await projects.json(), [native.project]);
+    const projectPage = await fetch(`${apiServer.base}/api/projects?page=1&limit=20`, { headers: readerHeaders });
+    assert.equal(projectPage.status, 200);
+    assert.deepEqual(await projectPage.json(), { projects: [native.project], nextCursor: null });
     const otherRepository = await fetch(`${apiServer.base}/api/projects/another-project/tree`, { headers: readerHeaders });
     assert.equal(otherRepository.status, 404);
     const ambiguous = await fetch(`${apiServer.base}/api/projects`, {
@@ -2702,6 +2705,63 @@ describe("Codexia HTTP boundary", () => {
     assert.equal(detail.status, 200);
     assert.equal((await detail.json() as { project: { id: string } }).project.id, native.project.id);
     assert.equal((await fetch(`${apiServer.base}/api/projects/missing`, { headers: auth })).status, 404);
+  });
+
+  it("keeps review-queue projectVersion and stale status on one PostgreSQL snapshot", async (t) => {
+    const native = await nativeProject(t, "Review queue snapshot");
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-api-review-snapshot-"));
+    tempDirs.push(staticDir);
+    const apiServer = await startCustomApi(native.store, staticDir, { persistence: native.persistence });
+    t.after(apiServer.close);
+
+    const snapshot = (await native.store.observe(native.project.id)).snapshot;
+    const operation: ChangeOperation = {
+      id: randomUUID(), generation: 0, projectId: native.project.id,
+      baseProjectVersion: snapshot.projectVersion, effect: "metadata", reads: [],
+      writes: [{ path: "meta/pending-review.md", revision: null, content: "Pending review\n" }],
+      message: "Pending review fixture",
+    };
+    const proposal: ChangeProposal = {
+      id: randomUUID(), snapshot, operations: [operation], source: "author",
+    };
+    await native.store.propose(native.project.id, proposal);
+
+    let readCompleted!: () => void;
+    const completedRead = new Promise<void>((resolveRead) => { readCompleted = resolveRead; });
+    let releaseRead!: () => void;
+    const heldRead = new Promise<void>((resolveRead) => { releaseRead = resolveRead; });
+    const listProposalsSnapshot = native.store.listProposalsSnapshot.bind(native.store);
+    native.store.listProposalsSnapshot = async (projectId) => {
+      const result = await listProposalsSnapshot(projectId);
+      readCompleted();
+      await heldRead;
+      return result;
+    };
+
+    const responsePromise = fetch(`${apiServer.base}/api/projects/${native.project.id}/review-queue`, {
+      headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+    });
+    try {
+      const responseBeforeRead = await Promise.race([
+        completedRead.then(() => false),
+        responsePromise.then(() => true),
+      ]);
+      assert.equal(responseBeforeRead, false, "HTTP response completed before the review-list read hook");
+      await completedRead;
+      await native.persistence.transaction((tx) => tx.createDocument({
+        projectId: native.project.id, kind: "volume", title: "Concurrent edit", orderKey: "0001",
+        markdown: "", authorId: "owner", idempotencyKey: randomUUID(),
+      }));
+    } finally {
+      releaseRead();
+    }
+
+    const response = await responsePromise;
+    assert.equal(response.status, 200);
+    const body = await response.json() as { snapshot: SnapshotId; proposals: ProposalStatus[] };
+    assert.deepEqual(body.snapshot, snapshot);
+    assert.equal(body.proposals.find((item) => item.proposal.id === proposal.id)?.stale, false);
+    assert.equal((await native.store.observe(native.project.id)).snapshot.projectVersion, snapshot.projectVersion + 1);
   });
 
   it("review queue delegates once with the admitted project inventory and preserves the exact count", async (t) => {

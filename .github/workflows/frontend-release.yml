@@ -37,6 +37,7 @@ on:
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
+      - tsconfig.base.json
       - .github/workflows/verify.yml
       - .github/workflows/frontend-release.yml
       - .github/workflows/production-preflight.yml
@@ -77,6 +78,7 @@ on:
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
+      - tsconfig.base.json
       - .github/workflows/verify.yml
       - .github/workflows/frontend-release.yml
       - .github/workflows/production-preflight.yml

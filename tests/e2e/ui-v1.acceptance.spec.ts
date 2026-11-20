@@ -1,6 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
+import { createHash, randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
-import { createWritingFixture, ownerLogin, readPersistenceDrafts, manuscriptEditor as editor, readManuscriptMarkdown as markdown } from "./postgres-fixture";
+import { createWritingFixture, openManuscriptScene, openRevisionHistory, ownerLogin, readPersistenceDrafts, manuscriptEditor as editor, readManuscriptMarkdown as markdown } from "./postgres-fixture";
+
+const requirePersistence = createRequire(new URL("../../packages/persistence-postgres/package.json", import.meta.url));
+type TestPostgresClient = {
+  connect(): Promise<void>;
+  query(sql: string, parameters?: unknown[]): Promise<unknown>;
+  end(): Promise<void>;
+};
+const { Client } = requirePersistence("pg") as { Client: new (options: { connectionString: string }) => TestPostgresClient };
 
 test.use({ hasTouch: true });
 async function expectMarkdown(page: Page, text: string) { await expect.poll(() => markdown(page)).toBe(text); }
@@ -18,6 +28,11 @@ async function previewLegacy(page: Page) {
   await expect(page.getByRole("region", { name: "旧Draftのプレビュー" })).toBeVisible();
 }
 async function sourceExists(page: Page) { return page.evaluate((key) => localStorage.getItem(key) !== null, legacyKey); }
+async function persistedMarkdown(page: Page, projectId: string, documentId: string): Promise<string> {
+  const response = await page.request.get(`/api/v1/persistence/projects/${projectId}/documents/${documentId}`);
+  if (!response.ok()) return "";
+  return ((await response.json()) as { revision: { markdown: string } }).revision.markdown;
+}
 async function denyWrites(page: Page, enabled: boolean) {
   await page.evaluate((enabled) => {
     const probe = window as Window & { __originalIdbPut?: typeof IDBObjectStore.prototype.put; __denyPgDraftWrites?: boolean };
@@ -73,30 +88,14 @@ test("keyboard select-all replacement saves exactly the intended manuscript", as
   }).toBe(text);
 });
 
-test("legacy draft import retains the confirmed PostgreSQL revision and creates a new generation", async ({ page }, testInfo) => {
+test("legacy draft import retains the confirmed PostgreSQL revision and creates a new generation", async ({ page }) => {
   const { project, scene } = await createWritingFixture(page); const text = "先に確定した本文。";
-  const beforeFill = await markdown(page);
-  await editor(page).evaluate(element => {
-    const probe = window as Window & { __codexiaFillProbe?: Array<{ type: string; inputType: string | null; selection: string; text: string }> };
-    const events: NonNullable<typeof probe.__codexiaFillProbe> = [];
-    probe.__codexiaFillProbe = events;
-    const record = (event: Event) => {
-      const selection = window.getSelection();
-      events.push({ type: event.type, inputType: event instanceof InputEvent ? event.inputType : null,
-        selection: selection?.toString() ?? "", text: element.textContent ?? "" });
-    };
-    for (const type of ["beforeinput", "input", "keydown", "keyup", "compositionstart", "compositionend"]) {
-      element.addEventListener(type, record, { capture: true });
-    }
-    document.addEventListener("selectionchange", record);
-  });
-  try {
-    await editor(page).fill(text);
-  } finally {
-    const afterFill = await markdown(page);
-    const events = await page.evaluate(() => (window as Window & { __codexiaFillProbe?: unknown }).__codexiaFillProbe ?? []);
-    await testInfo.attach("manuscript-fill-probe", { body: JSON.stringify({ beforeFill, afterFill, events }, null, 2), contentType: "application/json" });
-  }
+  // Use the same user-facing replacement path that passes in WebKit. The
+  // legacy fill probe was diagnostic only and can append to a contenteditable
+  // document in WebKit while Chromium masks the automation difference.
+  await editor(page).click();
+  await editor(page).press("ControlOrMeta+a");
+  await page.keyboard.insertText(text);
   // "Saved" may still describe the previous revision until the async PATCH
   // completes. Pin only a revision whose canonical PostgreSQL body is this text.
   const url = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
@@ -151,6 +150,443 @@ test("the launcher remembers an explicit choice while direct Shell links keep th
   await page.goto("/"); await expect(page).toHaveURL(/desktop/u);
 });
 
+test("revision history responses and errors stay bound to the scene that requested them", async ({ page }) => {
+  const { project, scene, second } = await createWritingFixture(page);
+  const aPast = "Aだけにある過去本文。";
+  const aCurrent = "Aの現在本文。";
+  const bPast = "Bだけにある過去本文。";
+  const bCurrent = "Bの現在本文。";
+  await editor(page).fill(aPast);
+  await expect.poll(() => persistedMarkdown(page, project.id, scene.id)).toBe(aPast);
+  await editor(page).fill(aCurrent);
+  await expect.poll(() => persistedMarkdown(page, project.id, scene.id)).toBe(aCurrent);
+  await openManuscriptScene(page, second);
+  await editor(page).fill(bPast);
+  await expect.poll(() => persistedMarkdown(page, project.id, second.id)).toBe(bPast);
+  await editor(page).fill(bCurrent);
+  await expect.poll(() => persistedMarkdown(page, project.id, second.id)).toBe(bCurrent);
+  await openManuscriptScene(page, scene);
+
+  const historyUrl = (url: URL) => url.pathname === `/api/v1/persistence/projects/${project.id}/documents/${scene.id}/revisions`;
+  let releaseHistory!: () => void;
+  let markHistoryStarted!: () => void;
+  const historyGate = new Promise<void>((resolve) => { releaseHistory = resolve; });
+  const historyStarted = new Promise<void>((resolve) => { markHistoryStarted = resolve; });
+  await page.route(historyUrl, async (route) => {
+    markHistoryStarted();
+    await historyGate;
+    await route.continue();
+  });
+  await openRevisionHistory(page);
+  await historyStarted;
+  await openManuscriptScene(page, second);
+  const historyResponse = page.waitForResponse((response) => historyUrl(new URL(response.url())));
+  releaseHistory();
+  await historyResponse;
+  await openRevisionHistory(page);
+  const history = page.getByRole("region", { name: "Revision履歴", exact: true });
+  await expect(history).toBeVisible();
+  await expect(history).toContainText(bPast);
+  await expect(history).not.toContainText(aPast);
+
+  await openManuscriptScene(page, scene);
+  await page.unroute(historyUrl);
+  let releaseFailure!: () => void;
+  let markFailureStarted!: () => void;
+  const failureGate = new Promise<void>((resolve) => { releaseFailure = resolve; });
+  const failureStarted = new Promise<void>((resolve) => { markFailureStarted = resolve; });
+  await page.route(historyUrl, async (route) => {
+    markFailureStarted();
+    await failureGate;
+    await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "A履歴の取得失敗", code: "TEST_FAILURE" }) });
+  });
+  await openRevisionHistory(page);
+  await failureStarted;
+  await openManuscriptScene(page, second);
+  const failureResponse = page.waitForResponse((response) => historyUrl(new URL(response.url())));
+  releaseFailure();
+  await failureResponse;
+  await expect(page.getByText("A履歴の取得失敗", { exact: true })).toHaveCount(0);
+  await expect(editor(page)).toContainText(bCurrent);
+
+  await openManuscriptScene(page, scene);
+  await page.unroute(historyUrl);
+  let releaseInitial!: () => void;
+  let markInitialStarted!: () => void;
+  const initialGate = new Promise<void>((resolve) => { releaseInitial = resolve; });
+  const initialStarted = new Promise<void>((resolve) => { markInitialStarted = resolve; });
+  await page.route(historyUrl, async (route) => {
+    markInitialStarted();
+    await initialGate;
+    await route.continue();
+  });
+  await openRevisionHistory(page);
+  await initialStarted;
+  const failedDocumentPath = `/api/v1/persistence/projects/${project.id}/documents/${second.id}`;
+  const failedDocumentRoute = (url: URL) => url.pathname === failedDocumentPath;
+  await page.route(failedDocumentRoute, (route) => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "対象の文書を開けませんでした。" }) }));
+  await page.locator(`.pg-document-list .pg-outline-item[data-document-id="${second.id}"] > .pg-outline-row > .pg-outline-document`).click();
+  await expect(page.locator(".pg-editor-column [role=alert]")).toContainText("対象の文書を開けませんでした。");
+  const initialResponse = page.waitForResponse((response) => historyUrl(new URL(response.url())));
+  releaseInitial();
+  await initialResponse;
+  await expect(page.getByRole("region", { name: "Revision履歴", exact: true })).toHaveCount(0);
+  await page.unroute(historyUrl);
+  await page.unroute(failedDocumentRoute);
+  await openManuscriptScene(page, scene);
+  await openRevisionHistory(page);
+  await expect(page.getByRole("region", { name: "Revision履歴", exact: true }).getByRole("status")).toHaveCount(0);
+});
+
+test("revision history restarts a blocked page after a save on the same scene", async ({ page }) => {
+  test.setTimeout(90_000);
+  const { project, scene } = await createWritingFixture(page);
+  const documentPath = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
+  const revisionsResponse = await page.request.get(documentPath);
+  expect(revisionsResponse.ok()).toBe(true);
+  let current = (await revisionsResponse.json() as { revision: { id: string; markdown: string } }).revision;
+  for (let number = 2; number <= 51; number += 1) {
+    const markdown = `Revision ${number}.`;
+    const response = await page.request.patch(documentPath, {
+      headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": randomUUID(), "X-Client-Id": "revision-page-save-test" },
+      data: {
+        baseRevisionId: current.id,
+        changes: [{ fromUtf16: 0, toUtf16: current.markdown.length, insert: markdown }],
+        resultingSha256: createHash("sha256").update(markdown).digest("hex"),
+        clientId: "revision-page-save-test",
+      },
+    });
+    expect(response.status()).toBe(200);
+    current = (await response.json() as { revision: { id: string; markdown: string } }).revision;
+  }
+  await page.goto(`/desktop/projects/${project.id}/scenes/${scene.id}`);
+  await expect(editor(page)).toContainText(current.markdown);
+  await openRevisionHistory(page);
+  const history = page.getByRole("region", { name: "Revision履歴", exact: true });
+  await expect(history.locator("article")).toHaveCount(50);
+
+  let releasePage!: () => void;
+  let markPageStarted!: () => void;
+  let markRefreshStarted!: () => void;
+  const pageGate = new Promise<void>((resolve) => { releasePage = resolve; });
+  const pageStarted = new Promise<void>((resolve) => { markPageStarted = resolve; });
+  const refreshStarted = new Promise<void>((resolve) => { markRefreshStarted = resolve; });
+  let pageBlocked = false;
+  await page.route((url) => url.pathname === `${documentPath}/revisions`, async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.has("before") && !pageBlocked) {
+      pageBlocked = true;
+      markPageStarted();
+      await pageGate;
+    } else if (!url.searchParams.has("before")) {
+      markRefreshStarted();
+    }
+    await route.continue();
+  });
+  await history.getByRole("button", { name: "さらに古いRevisionを読む", exact: true }).click();
+  await pageStarted;
+  const savedMarkdown = "A new receipt arrives while history is loading.";
+  await editor(page).fill(savedMarkdown);
+  await expect.poll(async () => persistedMarkdown(page, project.id, scene.id)).toBe(savedMarkdown);
+  await expect(page.getByRole("button", { name: "今すぐ保存", exact: true })).toBeDisabled();
+  releasePage();
+  await refreshStarted;
+  await expect(history.locator("article")).toHaveCount(50);
+  await expect(history).toContainText(savedMarkdown);
+  await expect(history.getByRole("button", { name: "さらに古いRevisionを読む", exact: true })).toBeEnabled();
+});
+
+test("revision history pages tied PostgreSQL revisions through retry, navigation, and restore", async ({ page }) => {
+  test.setTimeout(120_000);
+  const { project, scene, second } = await createWritingFixture(page);
+  const documentPath = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
+  const historyUrl = (url: URL) => url.pathname === `${documentPath}/revisions`;
+  const documentResponse = await page.request.get(documentPath);
+  expect(documentResponse.ok()).toBe(true);
+  let revision = (await documentResponse.json() as { revision: { id: string; markdown: string } }).revision;
+  const initialRevision = revision;
+  let revisionCount = 1;
+
+  async function seedTo(count: number): Promise<void> {
+    while (revisionCount < count) {
+      const markdown = `Stored revision ${String(revisionCount + 1).padStart(3, "0")}.`;
+      const response = await page.request.patch(documentPath, {
+        headers: {
+          Origin: new URL(page.url()).origin,
+          "Idempotency-Key": randomUUID(),
+          "X-Client-Id": "revision-history-pagination-test",
+        },
+        data: {
+          baseRevisionId: revision.id,
+          changes: [{ fromUtf16: 0, toUtf16: revision.markdown.length, insert: markdown }],
+          resultingSha256: createHash("sha256").update(markdown).digest("hex"),
+          clientId: "revision-history-pagination-test",
+        },
+      });
+      expect(response.status()).toBe(200);
+      revision = (await response.json() as { revision: { id: string; markdown: string } }).revision;
+      revisionCount += 1;
+    }
+  }
+
+  async function tieRevisionTimes(): Promise<void> {
+    const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
+    expect(databaseUrl, "the browser test must use its disposable PostgreSQL database").toBeTruthy();
+    const client = new Client({ connectionString: databaseUrl! });
+    try {
+      await client.connect();
+      await client.query("BEGIN");
+      // The disposable fixture deliberately creates an otherwise impossible timestamp tie.
+      await client.query("SET LOCAL session_replication_role = replica");
+      await client.query(
+        "UPDATE document_revision SET created_at = $1 WHERE project_id = $2 AND document_id = $3",
+        [new Date("2020-01-01T00:00:00.000Z"), project.id, scene.id],
+      );
+      await client.query("COMMIT");
+    } finally {
+      await client.end();
+    }
+  }
+
+  async function reopenScene(): Promise<void> {
+    await page.goto(`/desktop/projects/${project.id}/scenes/${scene.id}`);
+    await expect(editor(page)).toContainText(revision.markdown);
+  }
+
+  await seedTo(50);
+  await tieRevisionTimes();
+  await reopenScene();
+  await openRevisionHistory(page);
+  const history = page.getByRole("region", { name: "Revision履歴", exact: true });
+  await expect(history.locator("article")).toHaveCount(50);
+  await expect(history.getByRole("button", { name: "さらに古いRevisionを読む", exact: true })).toHaveCount(0);
+
+  await seedTo(51);
+  await tieRevisionTimes();
+  await reopenScene();
+  await openRevisionHistory(page);
+  await expect(history.locator("article")).toHaveCount(50);
+  const nextPage = history.getByRole("button", { name: "さらに古いRevisionを読む", exact: true });
+  await expect(nextPage).toBeVisible();
+  await nextPage.click();
+  await expect(history.locator("article")).toHaveCount(51);
+  await expect(history).toContainText("最初の本文。");
+
+  await seedTo(150);
+  await tieRevisionTimes();
+  await reopenScene();
+  await openRevisionHistory(page);
+  await expect(history.locator("article")).toHaveCount(50);
+  let failOnePage = true;
+  await page.route(historyUrl, async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.has("before") && failOnePage) {
+      failOnePage = false;
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "履歴ページ取得失敗", code: "TEST_FAILURE" }) });
+      return;
+    }
+    await route.continue();
+  });
+  await history.getByRole("button", { name: "さらに古いRevisionを読む", exact: true }).click();
+  await expect(history.getByRole("alert")).toContainText("履歴ページ取得失敗");
+  await expect(history.locator("article")).toHaveCount(50);
+  await history.getByRole("button", { name: "さらに古いRevisionを読む", exact: true }).click();
+  await expect(history.locator("article")).toHaveCount(100);
+  const pageIds = await history.locator("article").evaluateAll((articles) => articles.map((article) => article.getAttribute("data-revision-id")));
+  expect(new Set(pageIds).size).toBe(100);
+
+  let releasePage!: () => void;
+  let markPageStarted!: () => void;
+  const pageGate = new Promise<void>((resolve) => { releasePage = resolve; });
+  const pageStarted = new Promise<void>((resolve) => { markPageStarted = resolve; });
+  await page.unroute(historyUrl);
+  await page.route(historyUrl, async (route) => {
+    if (new URL(route.request().url()).searchParams.has("before")) {
+      markPageStarted();
+      await pageGate;
+    }
+    await route.continue();
+  });
+  await history.getByRole("button", { name: "さらに古いRevisionを読む", exact: true }).click();
+  await pageStarted;
+  const stalePageResponse = page.waitForResponse((response) => historyUrl(new URL(response.url())) && new URL(response.url()).searchParams.has("before"));
+  await openManuscriptScene(page, second);
+  releasePage();
+  await stalePageResponse;
+  await expect(history).toHaveCount(0);
+  await page.unroute(historyUrl);
+  await openRevisionHistory(page);
+  await expect(page.getByRole("region", { name: "Revision履歴", exact: true })).not.toContainText("Stored revision");
+
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.goto(`/mobile/projects/${project.id}/scenes/${scene.id}?view=writing`);
+  await expect(editor(page)).toContainText(revision.markdown);
+  await openRevisionHistory(page);
+  const mobileHistory = page.getByRole("region", { name: "Revision履歴", exact: true });
+  const mobileNextPage = mobileHistory.getByRole("button", { name: "さらに古いRevisionを読む", exact: true });
+  await expect(mobileNextPage).toBeVisible();
+  await mobileNextPage.scrollIntoViewIfNeeded();
+  const buttonBounds = await mobileNextPage.boundingBox();
+  expect(buttonBounds).toBeTruthy();
+  expect(buttonBounds!.x).toBeGreaterThanOrEqual(0);
+  expect(buttonBounds!.x + buttonBounds!.width).toBeLessThanOrEqual(360);
+  await mobileNextPage.click();
+  await expect(mobileHistory.locator("article")).toHaveCount(100);
+  await mobileHistory.getByRole("button", { name: "さらに古いRevisionを読む", exact: true }).click();
+  await expect(mobileHistory.locator("article")).toHaveCount(150);
+  const mobileIds = await mobileHistory.locator("article").evaluateAll((articles) => articles.map((article) => article.getAttribute("data-revision-id")));
+  expect(new Set(mobileIds).size).toBe(150);
+  const originalRevision = mobileHistory.locator(`article[data-revision-id="${initialRevision.id}"]`);
+  await expect(originalRevision).toContainText("最初の本文。");
+  await originalRevision.getByRole("button", { name: "このRevisionを新しいRevisionとして復元", exact: true }).click();
+  await expect(editor(page)).toContainText("最初の本文。");
+  await expect(page.getByRole("region", { name: "Revision履歴", exact: true })).toHaveCount(0);
+  const restoredResponse = await page.request.get(documentPath);
+  expect(restoredResponse.ok()).toBe(true);
+  const restored = (await restoredResponse.json() as { document: { headRevisionId: string }; revision: { id: string; markdown: string } });
+  expect(restored.revision.markdown).toBe(initialRevision.markdown);
+  expect(restored.document.headRevisionId).toBe(restored.revision.id);
+  expect(restored.revision.id).not.toBe(initialRevision.id);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
+});
+
+test("a failed Knowledge list does not block the initial document and can be retried in its panel", async ({ page }) => {
+  await ownerLogin(page);
+  const headers = { Origin: new URL(page.url()).origin };
+  const createdProject = await page.request.post("/api/v1/persistence/projects", { headers, data: { title: `Knowledge failure ${crypto.randomUUID()}` } });
+  expect(createdProject.status()).toBe(201);
+  const { project } = await createdProject.json() as { project: { id: string } };
+  const createdDocument = await page.request.post(`/api/v1/persistence/projects/${project.id}/documents`, {
+    headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
+    data: { kind: "scene", title: "唯一のシーン", orderKey: "a", markdown: "初期本文。" },
+  });
+  expect(createdDocument.status()).toBe(201);
+  const document = (await createdDocument.json() as { document: { id: string } }).document;
+  const nodesUrl = (url: URL) => url.pathname === `/api/v1/persistence/projects/${project.id}/nodes`;
+  let releaseKnowledgeFailure!: () => void;
+  let markKnowledgeStarted!: () => void;
+  const knowledgeFailureGate = new Promise<void>((resolve) => { releaseKnowledgeFailure = resolve; });
+  const knowledgeRequestStarted = new Promise<void>((resolve) => { markKnowledgeStarted = resolve; });
+  let nodeRequestCount = 0;
+  await page.route(nodesUrl, async (route) => {
+    nodeRequestCount += 1;
+    if (nodeRequestCount === 1) {
+      markKnowledgeStarted();
+      await knowledgeFailureGate;
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Knowledge一覧を利用できません。", code: "TEST_FAILURE" }) });
+      return;
+    }
+    await route.continue();
+  });
+  const documentListResponse = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/v1/persistence/projects/${project.id}/documents`);
+  await page.goto(`/desktop/projects/${project.id}`);
+  await documentListResponse;
+  await knowledgeRequestStarted;
+  releaseKnowledgeFailure();
+  await page.waitForResponse((response) => nodesUrl(new URL(response.url())));
+
+  await expect(page.locator(`.pg-document-list [data-document-id="${document.id}"]`)).toBeVisible();
+  const manuscript = editor(page);
+  await expect(manuscript).toContainText("初期本文。");
+  const draft = "Knowledge一覧が使えなくても編集して保存できる。";
+  await manuscript.fill(draft);
+  await expect.poll(() => persistedMarkdown(page, project.id, document.id)).toBe(draft);
+
+  const toolbar = page.getByRole("toolbar", { name: "ワークスペース配置" });
+  const panelMenu = toolbar.locator("details");
+  if (!await panelMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await panelMenu.locator("summary").click();
+  await toolbar.getByRole("button", { name: "知識と根拠を表示", exact: true }).click();
+  const knowledge = page.locator('[data-workspace-panel="inspector"] .pg-knowledge');
+  await expect(knowledge.getByRole("alert")).toContainText("Knowledge一覧を利用できません。");
+  await knowledge.getByRole("button", { name: "再試行", exact: true }).click();
+  await expect(knowledge.getByRole("alert")).toHaveCount(0);
+  await expect(manuscript).toContainText(draft);
+});
+
+test("mobile reference sheet has a named dialog and excludes the background from assistive technology", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await createWritingFixture(page, "mobile");
+  const pageRoot = page.locator("#ion-view-container-root");
+  const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
+
+  const outlineTrigger = page.getByRole("button", { name: "構成", exact: true });
+  await outlineTrigger.click();
+  await expect(page.getByRole("dialog", { name: "原稿の参照", exact: true })).toBeVisible();
+  await expect(pageRoot).toHaveAttribute("aria-hidden", "true");
+  await expect(page.getByRole("navigation", { name: "モバイル画面" })).toHaveCount(0);
+  const focusStaysInSheet = () => sheet.evaluate((element) => {
+    const documentFocus = element.ownerDocument.activeElement;
+    const shadowFocus = element.shadowRoot?.activeElement;
+    return documentFocus === element
+      ? Boolean(shadowFocus && element.shadowRoot?.contains(shadowFocus))
+      : Boolean(documentFocus && element.contains(documentFocus));
+  });
+
+  await page.keyboard.press("Tab");
+  await expect.poll(focusStaysInSheet).toBe(true);
+  await page.keyboard.press("Shift+Tab");
+  await expect.poll(focusStaysInSheet).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(sheet).not.toBeVisible();
+  await expect(pageRoot).not.toHaveAttribute("aria-hidden", "true");
+  await expect(outlineTrigger).toBeFocused();
+
+  const inspectorTrigger = page.getByRole("button", { name: "知識・保存", exact: true });
+  await inspectorTrigger.click();
+  await expect(page.getByRole("dialog", { name: "原稿の参照", exact: true })).toBeVisible();
+  await expect(pageRoot).toHaveAttribute("aria-hidden", "true");
+  await sheet.getByRole("button", { name: "閉じる", exact: true }).click();
+  await expect(sheet).not.toBeVisible();
+  await expect(pageRoot).not.toHaveAttribute("aria-hidden", "true");
+  await expect(inspectorTrigger).toBeFocused();
+});
+
+test("desktop mode switch stays visible and operable at 320 CSS pixels", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 844 });
+  const title = "320pxでも切れずに参照できる長い作品名".repeat(4);
+  const { project, scene } = await createWritingFixture(page, "desktop", title);
+  const desktopShell = page.locator(".st-desktop-shell");
+  const modeSwitch = page.getByRole("button", { name: "モバイル ↗", exact: true });
+
+  for (const width of [320, 640, 1280, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(desktopShell).toBeVisible();
+    await expect(page).toHaveURL(/\/desktop\//u);
+    await expect(modeSwitch).toBeVisible();
+    await expect(page.locator(".st-studio-breadcrumb strong")).toHaveText(title);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
+    const box = await modeSwitch.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+  }
+
+  const pointerBox = await modeSwitch.boundingBox();
+  expect(pointerBox).not.toBeNull();
+  await page.mouse.click(pointerBox!.x + pointerBox!.width / 2, pointerBox!.y + pointerBox!.height / 2);
+  await expect(page).toHaveURL(/\/mobile\//u);
+  await expect(page.getByRole("textbox", { name: "本文", exact: true })).toContainText("最初の本文。");
+
+  await page.goto(`/desktop/projects/${project.id}/scenes/${scene.id}`);
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    if (await modeSwitch.evaluate((element) => document.activeElement === element)) break;
+    await page.keyboard.press("Tab");
+  }
+  await expect(modeSwitch).toBeFocused();
+  const focusState = await modeSwitch.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return { outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth, left: rect.left, right: rect.right };
+  });
+  expect(focusState.outlineStyle).toBe("solid");
+  expect(focusState.outlineWidth).toBe("3px");
+  expect(focusState.left).toBeGreaterThanOrEqual(0);
+  expect(focusState.right).toBeLessThanOrEqual(320);
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/mobile\//u);
+  await expect(page.getByRole("textbox", { name: "本文", exact: true })).toContainText("最初の本文。");
+});
+
 test("recovery retry after pagehide retains its exact PostgreSQL draft", async ({ page }) => {
   const { project, scene } = await createWritingFixture(page);
   const text = "頁を隠しても残る日本語のDraft。";
@@ -175,9 +611,10 @@ test("recovery retry after pagehide retains its exact PostgreSQL draft", async (
 test("both production Shells preserve recoverable Japanese drafts and the Mobile writing and reading flow", async ({ page }) => {
   for (const mode of ["desktop", "mobile"] as const) {
     await page.setViewportSize({ width: mode === "mobile" ? 390 : 1280, height: 900 });
-    const { project, scene } = await createWritingFixture(page, mode);
+    const { project, scene } = await createWritingFixture(page, mode, undefined, "");
     const text = "東京《とうきょう》へ向かう。\n日本語😀の本文。";
-    await editor(page).fill(text);
+    await editor(page).click();
+    await page.keyboard.insertText(text);
     await expectMarkdown(page, text);
     // "Saved" can reflect the previous revision. The reader must open only
     // after this exact manuscript is durable in PostgreSQL.
@@ -191,6 +628,73 @@ test("both production Shells preserve recoverable Japanese drafts and the Mobile
     await page.reload();
     if (mode === "mobile") await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "書く", exact: true }).click();
     await expectMarkdown(page, text);
+  }
+});
+
+async function visibleReaderParagraphs(page: Page): Promise<string[]> {
+  return page.locator(".reading-pager-content .ruby-line").evaluateAll((elements) => {
+    const viewport = document.querySelector<HTMLElement>(".reading-pager");
+    if (!viewport) return [];
+    const box = viewport.getBoundingClientRect();
+    return elements.filter((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.right > box.left && rect.left < box.right && rect.bottom > box.top && rect.top < box.bottom;
+    }).map((element) => element.textContent ?? "");
+  });
+}
+
+test("Mobile reader keeps first-to-last Japanese paragraphs visible at supported widths and cancels touch gestures", async ({ page, browserName }) => {
+  for (const width of [320, 390]) {
+    for (const direction of ["horizontal", "vertical"] as const) {
+      await page.setViewportSize({ width, height: 844 });
+      const text = Array.from({ length: 130 }, (_, index) => `第${index + 1}段落｜日本語の本文を読む。`).join("\n");
+      await createWritingFixture(page, "mobile", undefined, text);
+      await page.getByRole("button", { name: "読む", exact: true }).click();
+      const displayMenu = page.locator(".pg-editor-display-menu");
+      if (!await displayMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await displayMenu.locator("summary").click();
+      await page.getByLabel("組方向").selectOption(direction);
+      await expect.poll(() => visibleReaderParagraphs(page)).toContainEqual(expect.stringContaining("第1段落"));
+
+      const pager = page.locator(".reading-pager");
+      const beforePage = await pager.getAttribute("data-page-index");
+      const beforeClass = await pager.getAttribute("class");
+      const box = await pager.boundingBox();
+      expect(box).not.toBeNull();
+      const x = direction === "vertical" ? box!.x + 30 : box!.x + box!.width - 30;
+      const y = box!.y + box!.height / 2;
+      if (browserName === "chromium") {
+        const cdp = await page.context().newCDPSession(page);
+        try {
+          for (const movedX of [null, direction === "vertical" ? x + 70 : x - 70]) {
+            await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y, id: 7 }] });
+            if (movedX !== null) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: movedX, y, id: 7 }] });
+            await cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+            await expect(pager).toHaveAttribute("data-page-index", beforePage!);
+            await expect(pager).toHaveAttribute("class", beforeClass!);
+          }
+        } finally {
+          await cdp.detach();
+        }
+      }
+
+      await page.getByRole("button", { name: "次のページ", exact: true }).click();
+      await expect.poll(async () => {
+        const paragraphs = await visibleReaderParagraphs(page);
+        return paragraphs.length > 0 && paragraphs.some((paragraph) => paragraph.includes("第"));
+      }).toBe(true);
+      await expect.poll(() => pager.getAttribute("data-page-index")).not.toBe(beforePage);
+      await page.getByRole("button", { name: "前のページ", exact: true }).click();
+      await expect(pager).toHaveAttribute("data-page-index", "0");
+      await expect.poll(() => visibleReaderParagraphs(page)).toContainEqual(expect.stringContaining("第1段落"));
+
+      const tapX = direction === "vertical" ? x : box!.x + box!.width - 30;
+      await page.mouse.click(tapX, y);
+      await expect.poll(() => pager.getAttribute("data-page-index")).not.toBe("0");
+      for (let index = 0; index < 20 && Number(await pager.getAttribute("data-page-index")) < Number(await pager.getAttribute("data-page-count")) - 1; index += 1) {
+        await page.getByRole("button", { name: "次のページ", exact: true }).click();
+      }
+      await expect.poll(() => visibleReaderParagraphs(page)).toContainEqual(expect.stringContaining("第130段落"));
+    }
   }
 });
 

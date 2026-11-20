@@ -13,7 +13,7 @@ import { composeVerticalPrintText } from "./verticalPrint.js";
 import { createPublishingMigrationProducer } from "./migration.js";
 import { hashShareToken, SHARE_GRANTS_PATH, type ShareGrant } from "./grants.js";
 import { EPISODES_PATH } from "./episodes.js";
-import type { PublishingProject } from "./project.js";
+import { readPublishingProject, readPublishingProjectFromCore, type PublishingProject } from "./project.js";
 
 const BASE_VERSION = 1;
 const NEXT_VERSION = 2;
@@ -25,13 +25,14 @@ function makeSnapshot(projectVersion = BASE_VERSION, updatedVersion?: number): S
 
 class MemoryReader implements SnapshotReader {
   readonly files: Map<string, Buffer>;
-  constructor(files: Map<string, Buffer | string>, public snapshot: SnapshotId = makeSnapshot()) {
+  constructor(files: Map<string, Buffer | string>, public snapshot: SnapshotId = makeSnapshot(), readonly documentKinds = new Map<string, string>()) {
     this.files = new Map([...files].map(([path, content]) => [path, Buffer.isBuffer(content) ? Buffer.from(content) : Buffer.from(content, "utf8")]));
   }
   async read(path: string, encoding: "utf8" | "base64" = "utf8") {
     const bytes = this.files.get(path);
     if (!bytes) return null;
-    return { content: encoding === "base64" ? bytes.toString("base64") : bytes.toString("utf8"), revision: createHash("sha256").update(bytes).digest("hex") };
+    const documentKind = this.documentKinds.get(path);
+    return { content: encoding === "base64" ? bytes.toString("base64") : bytes.toString("utf8"), revision: createHash("sha256").update(bytes).digest("hex"), ...(documentKind ? { documentKind } : {}) };
   }
   async list(prefix: string) { return [...this.files.keys()].filter((path) => path.startsWith(prefix)).sort(); }
 }
@@ -39,10 +40,10 @@ class MemoryReader implements SnapshotReader {
 function fixtureFiles(): Map<string, Buffer | string> {
   return new Map([
     ["meta/project.yaml", "title: 星の図書館\nsubtitle: 第二巻\n"],
-    ["plot/volumes/vol-1/volume.yaml", "id: vol-1\ntitle: 第一巻\norder: 1\n"],
-    ["plot/volumes/vol-1/chapters/ch-1/chapter.yaml", "id: ch-1\ntitle: はじまり\norder: 1\n"],
-    ["plot/volumes/vol-1/chapters/ch-1/scenes/sc-1.yaml", "id: sc-1\ntitle: 夜の駅\norder: 1\nmanuscript: manuscript/vol-1/ch-1/sc-1.md\n"],
-    ["plot/volumes/vol-1/chapters/ch-1/scenes/sc-2.yaml", "id: sc-2\ntitle: 朝の港\norder: 2\nmanuscript: manuscript/vol-1/ch-1/sc-2.md\n"],
+    ["plot/volumes/vol-1/volume.yaml", "kind: volume\nid: vol-1\ntitle: 第一巻\norder: 1\n"],
+    ["plot/volumes/vol-1/chapters/ch-1/chapter.yaml", "kind: chapter\nid: ch-1\ntitle: はじまり\nvolume: vol-1\norder: 1\n"],
+    ["plot/volumes/vol-1/chapters/ch-1/scenes/sc-1.yaml", "kind: scene\nid: sc-1\ntitle: 夜の駅\nvolume: vol-1\nchapter: ch-1\norder: 1\nmanuscript: manuscript/vol-1/ch-1/sc-1.md\n"],
+    ["plot/volumes/vol-1/chapters/ch-1/scenes/sc-2.yaml", "kind: scene\nid: sc-2\ntitle: 朝の港\nvolume: vol-1\nchapter: ch-1\norder: 2\nmanuscript: manuscript/vol-1/ch-1/sc-2.md\n"],
     ["manuscript/vol-1/ch-1/sc-1.md", "---\ntitle: 夜の駅\nprivateNote: 保持\n---\n|星《ほし》の駅で、《《彼女》》は待った。 & <物語>。\n"],
     ["manuscript/vol-1/ch-1/sc-2.md", "海から朝日が昇った。\n"],
     ["bible/characters/character-ari/profile.yaml", "id: character-ari\nname: アリ\naliases: [あり]\nnotes: 星を読む人\n"],
@@ -66,7 +67,27 @@ function actionContext(reader: SnapshotReader, proposals: ChangeProposal[]): Mod
   return {
     projectId: "module-project-1",
     reader,
-    invoke: async () => ({ ok: false, snapshot: reader.snapshot, error: { code: "unused", message: "unused", retryable: false } }),
+    invoke: async (actionId) => actionId === "core.tree"
+      ? {
+        ok: true,
+        snapshot: reader.snapshot,
+        data: {
+          snapshot: reader.snapshot,
+          tree: {
+            title: project.title,
+            volumes: project.volumes.map((volume) => ({
+              id: volume.id,
+              title: volume.title,
+              chapters: volume.chapters.map((chapter) => ({
+                id: chapter.id,
+                title: chapter.title,
+                scenes: chapter.scenes.map(({ id, title }) => ({ id, title })),
+              })),
+            })),
+          },
+        },
+      }
+      : { ok: false, snapshot: reader.snapshot, error: { code: "unused", message: "unused", retryable: false } },
     listActions: async () => [],
     linkedReader: async () => reader,
     signal: new AbortController().signal,
@@ -77,6 +98,14 @@ function actionContext(reader: SnapshotReader, proposals: ChangeProposal[]): Mod
     },
     runJob: async () => ({ ok: false, id: "unused", snapshot: reader.snapshot, error: { code: "unused", message: "unused", retryable: false } }),
   };
+}
+
+function contextWithCoreTree(reader: SnapshotReader, tree: unknown): ModuleActionContext {
+  const context = actionContext(reader, []);
+  context.invoke = async (actionId) => actionId === "core.tree"
+    ? { ok: true, snapshot: reader.snapshot, data: { snapshot: reader.snapshot, tree } }
+    : { ok: false, snapshot: reader.snapshot, error: { code: "unused", message: "unused", retryable: false } };
+  return context;
 }
 
 async function createPublishing() {
@@ -105,7 +134,7 @@ function applyOperation(reader: MemoryReader, operation: ChangeOperation, newCom
     if (write.content === null) files.delete(write.path);
     else files.set(write.path, write.encoding === "base64" ? Buffer.from(write.content, "base64") : Buffer.from(write.content, "utf8"));
   }
-  return new MemoryReader(files, makeSnapshot(newCommit));
+  return new MemoryReader(files, makeSnapshot(newCommit), reader.documentKinds);
 }
 
 test("source plaintext conversion and vertical print keep Japanese text and scene order", () => {
@@ -119,6 +148,118 @@ test("source plaintext conversion and vertical print keep Japanese text and scen
     { id: "empty", title: "空", body: " \n" },
     { id: "sc-2", title: "朝の港", body: "海。\n" },
   ]), "夜の駅\n\n|星《ほし》の駅。\n\n朝の港\n\n海。\n");
+});
+
+test("publishing follows Core hierarchy after a scene moves while retaining its manuscript path", async () => {
+  const reader = new MemoryReader(new Map([
+    ["meta/project.yaml", "title: 移動する作品\n"],
+    ["plot/volumes/vol-a/volume.yaml", "kind: volume\nid: vol-a\ntitle: 章Aの巻\norder: 0000000001\n"],
+    ["plot/volumes/vol-a/chapters/ch-a/chapter.yaml", "kind: chapter\nid: ch-a\ntitle: 章A\nvolume: vol-a\norder: 0000000001\n"],
+    ["plot/volumes/vol-a/chapters/ch-a/scenes/sc-moving.yaml", "kind: scene\nid: sc-moving\ntitle: 移動した場面\nvolume: vol-b\nchapter: ch-b\norder: 0000000001\nmanuscript: manuscript/vol-a/ch-a/sc-moving.md\n"],
+    ["plot/volumes/vol-b/volume.yaml", "kind: volume\nid: vol-b\ntitle: 章Bの巻\norder: 0000000002\n"],
+    ["plot/volumes/vol-b/chapters/ch-b/chapter.yaml", "kind: chapter\nid: ch-b\ntitle: 章B\nvolume: vol-b\norder: 0000000001\n"],
+    ["manuscript/vol-a/ch-a/sc-moving.md", "元のパスに残る本文。\n"],
+  ]));
+  const tree = {
+    title: "移動する作品",
+    volumes: [
+      { id: "vol-a", title: "章Aの巻", chapters: [{ id: "ch-a", title: "章A", scenes: [] }] },
+      { id: "vol-b", title: "章Bの巻", chapters: [{ id: "ch-b", title: "章B", scenes: [{ id: "sc-moving", title: "移動した場面" }] }] },
+    ],
+  };
+  const context = contextWithCoreTree(reader, tree);
+  const publishing = await readPublishingProjectFromCore(context);
+  const publicPublishing = await readPublishingProject(reader);
+  const fromA = buildPlaintextExport(publishing, { scope: "chapter", id: "ch-a" }).text;
+  const fromB = buildPlaintextExport(publishing, { scope: "chapter", id: "ch-b" }).text;
+  assert.doesNotMatch(fromA, /元のパスに残る本文/u);
+  assert.equal(fromB.match(/元のパスに残る本文/gu)?.length, 1);
+  assert.equal(publishing.volumes[1]?.chapters[0]?.scenes[0]?.path, "manuscript/vol-a/ch-a/sc-moving.md");
+  assert.equal(publicPublishing.volumes[1]?.chapters[0]?.scenes[0]?.id, "sc-moving");
+
+  const exported = await buildEpubExport(publishing, { scope: "all" }, reader, []);
+  const zip = await JSZip.loadAsync(exported.buffer);
+  assert.equal(await zip.file("OEBPS/scene-sc-moving.xhtml")!.async("string").then((xhtml) => xhtml.match(/元のパスに残る本文/gu)?.length), 1);
+  const opf = await zip.file("OEBPS/content.opf")!.async("string");
+  assert.equal(opf.match(/idref="item-sc-moving"/gu)?.length, 1);
+});
+
+test("public share projection excludes author notes in pinned snapshots through immutable reader metadata", async () => {
+  const files = fixtureFiles();
+  const canonicalKinds = new Map([
+    ["plot/volumes/vol-1/volume.yaml", "volume"],
+    ["plot/volumes/vol-1/chapters/ch-1/chapter.yaml", "chapter"],
+    ["plot/volumes/vol-1/chapters/ch-1/scenes/sc-1.yaml", "scene"],
+    ["plot/volumes/vol-1/chapters/ch-1/scenes/sc-2.yaml", "scene"],
+  ]);
+  for (const path of canonicalKinds.keys()) files.set(path, String(files.get(path)).replace(/^kind: .*\n/u, ""));
+  const notePath = "plot/volumes/ch-1/chapters/sc-1/scenes/note-1.yaml";
+  files.set(
+    notePath,
+    "id: note-1\ntitle: Private Author Note\nvolume: ch-1\nchapter: sc-1\nmanuscript: documents/note-1.md\n",
+  );
+  files.set("documents/note-1.md", "Private note body must not appear.");
+  canonicalKinds.set(notePath, "note");
+  const publishing = await readPublishingProject(new MemoryReader(files, makeSnapshot(), canonicalKinds));
+  assert.deepEqual(publishing.volumes.map((volume) => volume.id), ["vol-1"]);
+  assert.deepEqual(publishing.volumes[0]?.chapters.map((chapter) => chapter.id), ["ch-1"]);
+  assert.deepEqual(publishing.volumes[0]?.chapters[0]?.scenes.map((scene) => scene.id), ["sc-1", "sc-2"]);
+  assert.doesNotMatch(JSON.stringify(publishing), /Private Author Note|Private note body/u);
+});
+
+test("publishing keeps Core's string order-key sequence in volume, chapter, text, and EPUB output", async () => {
+  const reader = new MemoryReader(new Map([
+    ["meta/project.yaml", "title: 順序の作品\n"],
+    ["plot/volumes/vol-a/volume.yaml", "id: vol-a\ntitle: Alpha volume\norder: 2\n"],
+    ["plot/volumes/vol-a/chapters/ch-alpha/chapter.yaml", "id: ch-alpha\ntitle: Alpha chapter\nvolume: vol-a\norder: 2\n"],
+    ["plot/volumes/vol-a/chapters/ch-alpha/scenes/sc-a.yaml", "id: sc-a\ntitle: Alpha scene\nvolume: vol-a\nchapter: ch-alpha\norder: 2\nmanuscript: manuscript/vol-a/ch-alpha/sc-a.md\n"],
+    ["plot/volumes/vol-z/volume.yaml", 'id: vol-z\ntitle: Zulu volume\norder: "0000000002"\n'],
+    ["plot/volumes/vol-z/chapters/ch-alpha-z/chapter.yaml", 'id: ch-alpha-z\ntitle: Alpha chapter\nvolume: vol-z\norder: "0000000010"\n'],
+    ["plot/volumes/vol-z/chapters/ch-z/chapter.yaml", 'id: ch-z\ntitle: Zulu chapter\nvolume: vol-z\norder: "0000000002"\n'],
+    ["plot/volumes/vol-z/chapters/ch-z/scenes/sc-alpha.yaml", 'id: sc-alpha\ntitle: Alpha scene\nvolume: vol-z\nchapter: ch-z\norder: "0000000010"\nmanuscript: manuscript/vol-z/ch-z/sc-alpha.md\n'],
+    ["plot/volumes/vol-z/chapters/ch-z/scenes/sc-zulu.yaml", 'id: sc-zulu\ntitle: Zulu scene\nvolume: vol-z\nchapter: ch-z\norder: "0000000002"\nmanuscript: manuscript/vol-z/ch-z/sc-zulu.md\n'],
+    ["manuscript/vol-a/ch-alpha/sc-a.md", "本文 Alpha。\n"],
+    ["manuscript/vol-z/ch-z/sc-alpha.md", "本文 Alpha scene。\n"],
+    ["manuscript/vol-z/ch-z/sc-zulu.md", "本文 Zulu。\n"],
+  ]));
+  const tree = {
+    title: "順序の作品",
+    volumes: [
+      { id: "vol-z", title: "Zulu volume", chapters: [
+        { id: "ch-z", title: "Zulu chapter", scenes: [
+          { id: "sc-zulu", title: "Zulu scene" },
+          { id: "sc-alpha", title: "Alpha scene" },
+        ] },
+        { id: "ch-alpha-z", title: "Alpha chapter", scenes: [] },
+      ] },
+      { id: "vol-a", title: "Alpha volume", chapters: [
+        { id: "ch-alpha", title: "Alpha chapter", scenes: [{ id: "sc-a", title: "Alpha scene" }] },
+      ] },
+    ],
+  };
+
+  const publishing = await readPublishingProjectFromCore(contextWithCoreTree(reader, tree));
+  assert.deepEqual(publishing.volumes.map((volume) => volume.id), ["vol-z", "vol-a"]);
+  assert.deepEqual(publishing.volumes[0]?.chapters.map((chapter) => chapter.id), ["ch-z", "ch-alpha-z"]);
+  assert.deepEqual(publishing.volumes[0]?.chapters[0]?.scenes.map((scene) => scene.id), ["sc-zulu", "sc-alpha"]);
+  assert.equal(publishing.volumes[0]?.order, "0000000002");
+  assert.equal(publishing.volumes[1]?.order, 2, "legacy numeric order metadata remains readable");
+  assert.equal(publishing.volumes[0]?.chapters[0]?.order, "0000000002");
+  assert.equal(publishing.volumes[0]?.chapters[0]?.scenes[0]?.order, "0000000002");
+
+  const plaintext = buildPlaintextExport(publishing, { scope: "all" }).text;
+  assert.ok(plaintext.indexOf("# Zulu scene") < plaintext.indexOf("# Alpha scene"));
+  assert.ok(plaintext.indexOf("# Alpha chapter") < 0, "chapter titles are not substituted for scenes");
+  assert.ok(plaintext.indexOf("本文 Zulu。") < plaintext.indexOf("本文 Alpha scene。"));
+  assert.ok(plaintext.indexOf("本文 Alpha scene。") < plaintext.indexOf("本文 Alpha。"));
+
+  const exported = await buildEpubExport(publishing, { scope: "all" }, reader, []);
+  const zip = await JSZip.loadAsync(exported.buffer);
+  const opf = await zip.file("OEBPS/content.opf")!.async("string");
+  const zuluSpine = opf.indexOf('idref="item-sc-zulu"');
+  const alphaSceneSpine = opf.indexOf('idref="item-sc-alpha"');
+  const alphaVolumeSpine = opf.indexOf('idref="item-sc-a"');
+  assert.ok(zuluSpine >= 0 && zuluSpine < alphaSceneSpine && alphaSceneSpine < alphaVolumeSpine);
 });
 
 test("real EPUB ZIP contains EPUB3 manifest, Japanese XHTML, appendix, and binary cover bytes", async () => {
@@ -236,7 +377,11 @@ test("episode edits propose metadata operations and preserve unknown YAML and pu
 test("a share activates only after its PostgreSQL apply and revocation is checked on every public read", async () => {
   const definition = await createPublishing();
   const proposals: ChangeProposal[] = [];
-  let remote = new MemoryReader(fixtureFiles());
+  const files = fixtureFiles();
+  const notePath = "plot/volumes/vol-1/chapters/ch-1/scenes/note-1.yaml";
+  files.set(notePath, "id: note-1\ntitle: Private Author Note\nvolume: vol-1\nchapter: ch-1\nmanuscript: documents/note-1.md\n");
+  files.set("documents/note-1.md", "Private note body must not appear.");
+  let remote = new MemoryReader(files, makeSnapshot(), new Map([[notePath, "note"]]));
   const context = actionContext(remote, proposals);
   const created = await invokeAction(definition, "publishing.shares.create", {
     kind: "chapter", id: "ch-1", label: "校正用", expiresInHours: 24,
@@ -249,7 +394,13 @@ test("a share activates only after its PostgreSQL apply and revocation is checke
 
   const publicBase = definition.http!.find((item) => item.id === "publishing.http.public-share")!;
   const publicScene = definition.http!.find((item) => item.id === "publishing.http.public-share-scene")!;
-  const publicContext = (reader: SnapshotReader) => actionContext(reader, []);
+  const publicContext = (reader: SnapshotReader) => {
+    const context = actionContext(reader, []);
+    context.invoke = async () => ({ ok: false, snapshot: reader.snapshot, error: {
+      code: "public_action_unavailable", message: "Public routes cannot invoke composed actions", retryable: false,
+    } });
+    return context;
+  };
   const url = "https://codexia.invalid/api/public/projects/local-publishing-7/modules/publishing/share/" + encodeURIComponent(token);
   const beforePublish = await publicBase.handle(new Request(url), publicContext(remote));
   assert.equal(beforePublish.status, 404, "an unpushed checkpoint/proposal is not public");
@@ -264,6 +415,7 @@ test("a share activates only after its PostgreSQL apply and revocation is checke
   const metadata = await metadataResponse.json() as { sceneCount: number; tree: Array<{ chapters: Array<{ scenes: Array<{ id: string }> }> }> };
   assert.equal(metadata.sceneCount, 2);
   assert.deepEqual(metadata.tree[0]!.chapters[0]!.scenes.map((scene) => scene.id), ["sc-1", "sc-2"]);
+  assert.doesNotMatch(JSON.stringify(metadata), /Private Author Note|Private note body/u);
   const sceneUrl = url + "/scenes/sc-1";
   assert.equal((await publicScene.handle(new Request(sceneUrl), publicContext(remote))).status, 200);
   assert.equal((await publicScene.handle(new Request(url + "/scenes/out-of-scope"), publicContext(remote))).status, 404);

@@ -13,32 +13,53 @@ export function PersistenceScratch({ projectId, documentId, authorScope, journal
   const [draft, setDraft] = useState<Scratch>(empty);
   const draftRef = useRef(draft);
   const [error, setError] = useState("");
+  const [attachmentError, setAttachmentError] = useState("");
   const [protectedGeneration, setProtectedGeneration] = useState(-1);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const pendingRead = useRef<Promise<void>>(Promise.resolve());
   const saveTail = useRef<Promise<void>>(Promise.resolve());
+  const protectedScratch = useRef<{ text: string; generation: number } | null>(null);
   const path = `scratch/${documentId}`;
   function publish(value: Scratch) { draftRef.current = value; setDraft(value); }
   async function protect(): Promise<void> {
-    await pendingRead.current;
+    let read = pendingRead.current;
+    await read;
+    while (pendingRead.current !== read) {
+      read = pendingRead.current;
+      await read;
+    }
     const current = draftRef.current;
-    const task = saveTail.current.catch(() => {}).then(() => journal.putScratch(projectId, path, JSON.stringify(current), authorScope));
+    const known = protectedScratch.current;
+    if (!known || current.generation <= known.generation) return;
+    const task = saveTail.current.catch(() => {}).then(async () => {
+      const base = protectedScratch.current;
+      if (!base || current.generation <= base.generation) return;
+      const text = JSON.stringify(current);
+      if (!await journal.putScratch(projectId, path, text, authorScope, base.text)) {
+        throw new Error("別タブでスクラッチが更新されました。現在の入力を保持しています。");
+      }
+      protectedScratch.current = { text, generation: current.generation };
+    });
     saveTail.current = task;
     try { await task; setProtectedGeneration(current.generation); setError(""); }
     catch (cause) { const message = cause instanceof Error ? cause.message : "スクラッチを保護できませんでした。"; setError(message); throw cause; }
-    if (draftRef.current.generation !== current.generation) throw new Error("スクラッチに新しい入力があります。記録が完了してから再試行してください。");
+    if (pendingRead.current !== read || draftRef.current.generation !== current.generation) throw new Error("スクラッチに新しい入力があります。記録が完了してから再試行してください。");
   }
   const protectRef = useRef(protect); protectRef.current = protect;
   useEffect(() => {
     let cancelled = false;
     void journal.getScratch(projectId, path, authorScope).then((raw) => {
       if (cancelled) return;
+      let initial = empty();
       if (raw) {
         const parsed: unknown = JSON.parse(raw);
         if (!parsed || typeof parsed !== "object" || typeof (parsed as Scratch).text !== "string" || !Array.isArray((parsed as Scratch).images) || !(parsed as Scratch).images.every((image) => image && typeof image.name === "string" && typeof image.data === "string" && image.data.startsWith("data:image/")) || !Number.isSafeInteger((parsed as Scratch).generation) || (parsed as Scratch).generation < 0) throw new Error("スクラッチの回復記録を確認できませんでした。元の記録は保持しています。");
-        publish(parsed as Scratch); setProtectedGeneration((parsed as Scratch).generation);
+        initial = parsed as Scratch;
       }
+      protectedScratch.current = { text: raw, generation: initial.generation };
+      publish(initial);
+      setProtectedGeneration(initial.generation);
       setLoading(false);
     }).catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : "スクラッチを読み込めませんでした。"); });
     registerGuard(() => protectRef.current());
@@ -46,6 +67,7 @@ export function PersistenceScratch({ projectId, documentId, authorScope, journal
   }, [journal, projectId, path, authorScope]);
   useEffect(() => { if (!loading && draft.generation > 0) void protectRef.current().catch(() => {}); }, [draft.generation, loading]);
   async function attach(files: File[]) {
+    setAttachmentError("");
     const task = pendingRead.current.then(async () => {
       let total = draftRef.current.images.reduce((sum, item) => sum + item.data.length * 0.75, 0);
       const images: Scratch["images"] = [];
@@ -59,8 +81,16 @@ export function PersistenceScratch({ projectId, documentId, authorScope, journal
       const current = draftRef.current;
       publish({ ...current, images: [...current.images, ...images], generation: current.generation + 1 });
     });
-    pendingRead.current = task;
-    try { await task; await protectRef.current(); } catch (cause) { setError(cause instanceof Error ? cause.message : "画像を保護できませんでした。"); }
+    // A rejected attachment does not invalidate the existing scratch draft.
+    const settled = task.catch(() => {});
+    pendingRead.current = settled;
+    try {
+      await task;
+    } catch (cause) {
+      if (pendingRead.current === settled) setAttachmentError(cause instanceof Error ? cause.message : "画像を読み込めませんでした。");
+      return;
+    }
+    await protectRef.current().catch(() => {});
   }
   async function saveNote() {
     if (!canCreateNote) return;
@@ -79,6 +109,7 @@ export function PersistenceScratch({ projectId, documentId, authorScope, journal
     {draft.images.map((image, index) => <img key={index} src={image.data} alt={image.name} width="120" />)}
     <button type="button" disabled={loading || saving} onClick={() => void protect().catch(() => {})}>続ける</button>
     <button type="button" disabled={!canCreateNote || loading || saving || (!draft.text && !draft.images.length)} onClick={() => void saveNote()}>ノートとしてPostgreSQLへ保存</button>
+    {attachmentError && <p role="alert">{attachmentError}</p>}
     {error && <p role="alert">{error}</p>}
   </details>;
 }

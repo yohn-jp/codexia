@@ -4,17 +4,45 @@ import YAML from "yaml";
 import { before, after, test } from "node:test";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import type { ChangeOperation, ChangeProposal, SnapshotId } from "@codexia/contracts";
-import { CoreStore } from "./index.js";
+import { CoreError, CoreStore } from "./index.js";
 const connectionString=process.env.CODEXIA_TEST_DATABASE_URL;
 if(!connectionString)throw new Error("CODEXIA_TEST_DATABASE_URL is required for Core PostgreSQL integration tests");
 const persistence=createPostgresPersistence(connectionString),core=new CoreStore({persistence});
 before(()=>migratePostgresDatabase(connectionString));after(()=>persistence.close());
 async function project(){return core.createProject({title:`Core ${randomUUID()}`});}
 async function accept(projectId:string,operation:ChangeOperation,snapshot?:SnapshotId){const proposal:ChangeProposal={id:randomUUID(),snapshot:snapshot??{projectId,projectVersion:operation.baseProjectVersion},source:"author",operations:[operation]};await core.propose(projectId,proposal);await core.approve(projectId,{proposalId:proposal.id,operationIds:[operation.id],authorScope:"author"});return core.apply(projectId,operation);}
+async function approve(projectId:string,built:{operation:ChangeOperation;snapshot:SnapshotId}){const proposal:ChangeProposal={id:randomUUID(),snapshot:built.snapshot,source:"author",operations:[built.operation]};await core.propose(projectId,proposal);await core.approve(projectId,{proposalId:proposal.id,operationIds:[built.operation.id],authorScope:"author"});return proposal;}
 async function hierarchy(){const p=await project();for(const input of [{kind:"volume",id:"v1",title:"Volume"},{kind:"chapter",id:"c1",title:"Chapter",volumeId:"v1"},{kind:"scene",id:"s1",title:"Scene",volumeId:"v1",chapterId:"c1",manuscriptBody:"Text 😀\n"}] as const){const built=await core.buildCreateHierarchyOperation(p.id,input);await accept(p.id,built.operation,built.snapshot);}return p;}
 function operation(snapshot:SnapshotId,path:string,content:string|null,revision:string|null=null):ChangeOperation{return {id:randomUUID(),generation:0,projectId:snapshot.projectId,baseProjectVersion:snapshot.projectVersion,effect:"metadata",reads:[{path,revision}],writes:[{path,revision,content}],message:"Write approved data"};}
 
 test("PostgreSQL is sole project authority, hierarchy creation preserves canonical scene bodies",async()=>{const p=await hierarchy();assert.equal((await core.listProjects()).some(x=>x.id===p.id),true);const tree=await core.tree(p.id);assert.equal(tree.volumes[0]?.chapters[0]?.scenes[0]?.id,"s1");assert.equal((await core.readScene(p.id,"s1")).text,"Text 😀\n");const docs=await persistence.read(r=>r.listDocuments(p.id));assert.equal(docs.length,3);assert.equal((await persistence.read(r=>r.getRevision(p.id,docs.find(d=>d.kind==="scene")!.id,docs.find(d=>d.kind==="scene")!.headRevisionId!)))?.markdown,"Text 😀\n");});
+test("PostgreSQL projection labels a note with misleading scene ancestry by its canonical document kind", async () => {
+  const p = await hierarchy();
+  const documents = await persistence.read((reader) => reader.listDocuments(p.id));
+  const scene = documents.find((document) => document.kind === "scene")!;
+  const chapter = documents.find((document) => document.kind === "chapter")!;
+  const note = await persistence.transaction((transaction) => transaction.createDocument({
+    projectId: p.id,
+    kind: "note",
+    parentId: scene.id,
+    title: "Author note",
+    orderKey: "0002",
+    markdown: "Private note body",
+    authorId: "owner",
+    idempotencyKey: randomUUID(),
+  }));
+  const reader = await core.reader(p.id);
+  const misleadingPath = `plot/volumes/${chapter.id}/chapters/${scene.id}/scenes/${note.document.id}.yaml`;
+  const projectedNote = await reader.read(misleadingPath);
+  assert.equal(YAML.parse(projectedNote!.content).kind, undefined, "the immutable projection bytes remain unchanged");
+  assert.equal(projectedNote!.documentKind, "note");
+  const pinnedReader = await core.reader(p.id, reader.snapshot);
+  assert.equal((await pinnedReader.read(misleadingPath))?.documentKind, "note", "pinned stored snapshots expose their canonical document kind");
+  const tree = await core.tree(p.id);
+  assert.deepEqual(tree.volumes.map((volume) => volume.id), ["v1"]);
+  assert.deepEqual(tree.volumes[0]?.chapters.map((chapter) => chapter.id), ["c1"]);
+  assert.deepEqual(tree.volumes[0]?.chapters[0]?.scenes.map((item) => item.id), ["s1"]);
+});
 test("native document snapshots expose authoritative chapter and scene parent identities", async () => {
   const p = await project();
   const create = (kind: string, parentId: import("@codexia/persistence-contracts").DocumentId | null, title: string) =>
@@ -89,6 +117,179 @@ test("disjoint operations approved together can apply in sequence",async()=>{con
 test("binary module artifacts preserve exact bytes and metadata-backed revisions",async()=>{const p=await project(),reader=await core.reader(p.id),op=operation(reader.snapshot,"assets/image.bin",Buffer.from([0,255,128,32]).toString("base64"));op.writes[0]!.encoding="base64";await accept(p.id,op);const next=await core.reader(p.id);assert.equal((await next.read("assets/image.bin","base64"))?.content,op.writes[0]!.content);assert.deepEqual(await next.listRevisions!("assets"),[{path:"assets/image.bin",revision:(await next.read("assets/image.bin"))!.revision}]);});
 test("search and writing statistics share immutable Unicode-aware scene data",async()=>{const p=await hierarchy(),reader=await core.reader(p.id),search=await core.searchSnapshot(p.id,"😀",20,reader.snapshot),stats=await core.writingStatsSnapshot(p.id,reader.snapshot);assert.equal(search.results[0]?.offset,5);assert.equal(stats.stats.totalCharCount,5);assert.deepEqual(stats.snapshot,search.snapshot);});
 test("reorder and recursive deletion mutate hierarchy while keeping revision history",async()=>{const p=await hierarchy();const second=await core.buildCreateHierarchyOperation(p.id,{kind:"scene",id:"s2",title:"Second",volumeId:"v1",chapterId:"c1",manuscriptBody:"Second"});await accept(p.id,second.operation);const reorder=await core.buildReorderHierarchyOperation(p.id,{kind:"scene",volumeId:"v1",chapterId:"c1",orderedIds:["s2","s1"]});await accept(p.id,reorder.operation);assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters[0]?.scenes.map(x=>x.id),["s2","s1"]);const docs=await persistence.read(r=>r.listDocuments(p.id));const scene=docs.find(d=>d.title==="Scene")!;const removal=await core.buildDeleteHierarchyOperation(p.id,{kind:"volume",id:"v1"});await accept(p.id,removal.operation);assert.equal((await core.tree(p.id)).volumes.length,0);assert.equal((await persistence.read(r=>r.getRevision(p.id,scene.id,scene.headRevisionId!)))?.markdown,"Text 😀\n");});
+test("PostgreSQL append keys preserve creation order across digit boundaries and reordered siblings", async () => {
+  const p = await project();
+  const create = async (input: Parameters<typeof core.buildCreateHierarchyOperation>[1]) => {
+    const built = await core.buildCreateHierarchyOperation(p.id, input);
+    await accept(p.id, built.operation);
+  };
+  const volumeIds = Array.from({ length: 10 }, (_, index) => `volume-${index + 1}`);
+  for (const [index, id] of volumeIds.entries()) await create({ kind: "volume", id, title: `Volume ${index + 1}` });
+  const chapterIds = Array.from({ length: 10 }, (_, index) => `chapter-${index + 1}`);
+  for (const [index, id] of chapterIds.entries()) await create({
+    kind: "chapter", id, title: `Chapter ${index + 1}`, volumeId: volumeIds[0]!,
+  });
+  const sceneIds = Array.from({ length: 10 }, (_, index) => `scene-${index + 1}`);
+  for (const [index, id] of sceneIds.entries()) await create({
+    kind: "scene", id, title: `Scene ${index + 1}`, volumeId: volumeIds[0]!, chapterId: chapterIds[0]!,
+  });
+
+  const before = await persistence.read(reader => reader.listDocuments(p.id));
+  assert.deepEqual((await core.tree(p.id)).volumes.map(volume => volume.id), volumeIds);
+  assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters.map(chapter => chapter.id), chapterIds);
+  assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters[0]?.scenes.map(scene => scene.id), sceneIds);
+  assert.equal(before.find(document => document.kind === "volume" && document.title === "Volume 10")?.orderKey, "0000000010");
+  assert.equal(before.find(document => document.kind === "chapter" && document.title === "Chapter 10")?.orderKey, "0000000010");
+  assert.equal(before.find(document => document.kind === "scene" && document.title === "Scene 10")?.orderKey, "0000000010");
+
+  const reorder = await core.buildReorderHierarchyOperation(p.id, { kind: "volume", orderedIds: [...volumeIds].reverse() });
+  await accept(p.id, reorder.operation);
+  const beforeAppend = await persistence.read(reader => reader.listDocuments(p.id));
+  const oldVolumeKeys = new Map(beforeAppend.filter(document => document.kind === "volume").map(document => [document.title, document.orderKey]));
+  await create({ kind: "volume", id: "volume-11", title: "Volume 11" });
+  const afterAppend = await persistence.read(reader => reader.listDocuments(p.id));
+  for (const document of afterAppend.filter(document => document.kind === "volume" && document.title !== "Volume 11")) {
+    assert.equal(document.orderKey, oldVolumeKeys.get(document.title), "append does not rewrite existing order keys");
+  }
+  assert.equal(afterAppend.find(document => document.kind === "volume" && document.title === "Volume 11")?.orderKey, "0000000010");
+  assert.deepEqual((await core.tree(p.id)).volumes.map(volume => volume.id), [...volumeIds].reverse().concat("volume-11"));
+});
+test("reordering a moved scene preserves its authoritative PostgreSQL parent", async () => {
+  const p = await hierarchy();
+  const secondChapter = await core.buildCreateHierarchyOperation(p.id, {
+    kind: "chapter", id: "c2", title: "Second chapter", volumeId: "v1",
+  });
+  await accept(p.id, secondChapter.operation);
+  const secondScene = await core.buildCreateHierarchyOperation(p.id, {
+    kind: "scene", id: "s2", title: "Second scene", volumeId: "v1", chapterId: "c2",
+  });
+  await accept(p.id, secondScene.operation);
+
+  const documents = await persistence.read(reader => reader.listDocuments(p.id));
+  const scene = documents.find(document => document.kind === "scene" && document.title === "Scene")!;
+  const chapter = documents.find(document => document.kind === "chapter" && document.id !== scene.parentId)!;
+  await persistence.transaction(tx => tx.updateDocument({
+    projectId: p.id, documentId: scene.id, parentId: chapter.id,
+    expectedVersion: scene.version,
+  }));
+
+  const reorder = await core.buildReorderHierarchyOperation(p.id, {
+    kind: "scene", volumeId: "v1", chapterId: "c2", orderedIds: ["s1", "s2"],
+  });
+  await accept(p.id, reorder.operation);
+  const after = await persistence.read(reader => reader.getDocument(p.id, scene.id));
+  assert.equal(after?.parentId, chapter.id);
+  assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters.find(item => item.id === "c2")?.scenes.map(item => item.id), ["s1", "s2"]);
+});
+
+test("approved reorder rejects a changed sibling set atomically", async () => {
+  const p = await hierarchy();
+  const second = await core.buildCreateHierarchyOperation(p.id, {
+    kind: "scene", id: "s2", title: "Second", volumeId: "v1", chapterId: "c1",
+  });
+  await accept(p.id, second.operation);
+  const reorder = await core.buildReorderHierarchyOperation(p.id, {
+    kind: "scene", volumeId: "v1", chapterId: "c1", orderedIds: ["s2", "s1"],
+  });
+  const proposal: ChangeProposal = {
+    id: randomUUID(), snapshot: reorder.snapshot, source: "author", operations: [reorder.operation],
+  };
+  await core.propose(p.id, proposal);
+  await core.approve(p.id, { proposalId: proposal.id, operationIds: [reorder.operation.id], authorScope: "owner" });
+
+  const third = await core.buildCreateHierarchyOperation(p.id, {
+    kind: "scene", id: "s3", title: "Third", volumeId: "v1", chapterId: "c1",
+  });
+  await accept(p.id, third.operation);
+  const before = await persistence.read(reader => reader.listDocuments(p.id));
+  await assert.rejects(core.apply(p.id, reorder.operation), /sibling set changed/);
+  const after = await persistence.read(reader => reader.listDocuments(p.id));
+  assert.deepEqual(after.map(document => [document.id, document.parentId, document.orderKey]),
+    before.map(document => [document.id, document.parentId, document.orderKey]));
+});
+
+test("approved reorder detects a sibling moved in from another compatibility path", async () => {
+  const p = await hierarchy();
+  const secondChapter = await core.buildCreateHierarchyOperation(p.id, {
+    kind: "chapter", id: "c2", title: "Second chapter", volumeId: "v1",
+  });
+  await accept(p.id, secondChapter.operation);
+  const second = await core.buildCreateHierarchyOperation(p.id, {
+    kind: "scene", id: "s2", title: "Second", volumeId: "v1", chapterId: "c2",
+  });
+  await accept(p.id, second.operation);
+  const fourth = await core.buildCreateHierarchyOperation(p.id, {
+    kind: "scene", id: "s4", title: "Fourth", volumeId: "v1", chapterId: "c2",
+  });
+  await accept(p.id, fourth.operation);
+  const third = await core.buildCreateHierarchyOperation(p.id, {
+    kind: "scene", id: "s3", title: "Third", volumeId: "v1", chapterId: "c1",
+  });
+  await accept(p.id, third.operation);
+
+  const reorder = await core.buildReorderHierarchyOperation(p.id, {
+    kind: "scene", volumeId: "v1", chapterId: "c2", orderedIds: ["s4", "s2"],
+  });
+  const proposal: ChangeProposal = {
+    id: randomUUID(), snapshot: reorder.snapshot, source: "author", operations: [reorder.operation],
+  };
+  await core.propose(p.id, proposal);
+  await core.approve(p.id, { proposalId: proposal.id, operationIds: [reorder.operation.id], authorScope: "owner" });
+
+  const documents = await persistence.read(reader => reader.listDocuments(p.id));
+  const moved = documents.find(document => document.kind === "scene" && document.title === "Third")!;
+  const destination = documents.find(document => document.kind === "chapter" && document.title === "Second chapter")!;
+  await persistence.transaction(tx => tx.updateDocument({
+    projectId: p.id, documentId: moved.id, parentId: destination.id,
+    expectedVersion: moved.version,
+  }));
+  const staleParentPath = "plot/volumes/v1/chapters/c1/scenes/s3.yaml";
+  assert.ok(await (await core.reader(p.id)).read(staleParentPath));
+
+  const before = await persistence.read(reader => reader.listDocuments(p.id));
+  await assert.rejects(core.apply(p.id, reorder.operation), /sibling set changed/);
+  const after = await persistence.read(reader => reader.listDocuments(p.id));
+  assert.deepEqual(after.map(document => [document.id, document.parentId, document.orderKey]),
+    before.map(document => [document.id, document.parentId, document.orderKey]));
+});
+
+test("legacy approved reorders apply only while their exact base version is current", async () => {
+  const currentProject = await hierarchy();
+  const currentSecond = await core.buildCreateHierarchyOperation(currentProject.id, {
+    kind: "scene", id: "s2", title: "Second", volumeId: "v1", chapterId: "c1",
+  });
+  await accept(currentProject.id, currentSecond.operation);
+  const currentReorder = await core.buildReorderHierarchyOperation(currentProject.id, {
+    kind: "scene", volumeId: "v1", chapterId: "c1", orderedIds: ["s2", "s1"],
+  });
+  delete currentReorder.operation.readDocumentSets;
+  await accept(currentProject.id, currentReorder.operation);
+  assert.deepEqual((await core.tree(currentProject.id)).volumes[0]?.chapters[0]?.scenes.map(scene => scene.id), ["s2", "s1"]);
+
+  const staleProject = await hierarchy();
+  const staleSecond = await core.buildCreateHierarchyOperation(staleProject.id, {
+    kind: "scene", id: "s2", title: "Second", volumeId: "v1", chapterId: "c1",
+  });
+  await accept(staleProject.id, staleSecond.operation);
+  const staleReorder = await core.buildReorderHierarchyOperation(staleProject.id, {
+    kind: "scene", volumeId: "v1", chapterId: "c1", orderedIds: ["s2", "s1"],
+  });
+  delete staleReorder.operation.readDocumentSets;
+  const proposal: ChangeProposal = {
+    id: randomUUID(), snapshot: staleReorder.snapshot, source: "author", operations: [staleReorder.operation],
+  };
+  await core.propose(staleProject.id, proposal);
+  await core.approve(staleProject.id, { proposalId: proposal.id, operationIds: [staleReorder.operation.id], authorScope: "owner" });
+  const third = await core.buildCreateHierarchyOperation(staleProject.id, {
+    kind: "scene", id: "s3", title: "Third", volumeId: "v1", chapterId: "c1",
+  });
+  await accept(staleProject.id, third.operation);
+  const before = await persistence.read(reader => reader.listDocuments(staleProject.id));
+  await assert.rejects(core.apply(staleProject.id, staleReorder.operation), /legacy hierarchy reorder/);
+  const after = await persistence.read(reader => reader.listDocuments(staleProject.id));
+  assert.deepEqual(after.map(document => [document.id, document.parentId, document.orderKey]),
+    before.map(document => [document.id, document.parentId, document.orderKey]));
+});
 test("manuscript history restores by appending an immutable revision",async()=>{const p=await hierarchy(),reader=await core.reader(p.id),path="manuscript/v1/c1/s1.md",old=await reader.read(path);const history=await core.listManuscriptSnapshots(p.id,"s1");await accept(p.id,operation(reader.snapshot,path,"New",old!.revision));const restore=await core.buildRestoreOperation(p.id,{sceneId:"s1",snapshotId:history.snapshots[0]!.id});await accept(p.id,restore.operation);assert.equal((await core.readScene(p.id,"s1")).text,"Text 😀\n");assert.equal((await core.listManuscriptSnapshots(p.id,"s1")).snapshots.length,3);});
 test("unsafe paths and unbound manuscript artifacts cannot bypass canonical documents",async()=>{const p=await project(),reader=await core.reader(p.id);await assert.rejects(reader.read("../secret"));await assert.rejects(accept(p.id,operation(reader.snapshot,"manuscript/unbound.md","illegal")),/canonical document/);assert.equal(await (await core.reader(p.id)).read("manuscript/unbound.md"),null);});
 test("independent approved proposals survive unrelated project changes", async () => {
@@ -322,4 +523,131 @@ test("proposal detail, list and review queue agree after a content revision", as
   assert.equal(detail?.stale,true);
   assert.deepEqual((await core.listProposals(p.id)).find(item=>item.proposal.id===proposal.id),detail);
   assert.deepEqual((await core.reviewQueue([p.id])).items.find(item=>item.proposal.proposal.id===proposal.id)?.proposal,detail);
+});
+
+test("two approved hierarchy creates with the same logical ID cannot both apply", async () => {
+  const p = await hierarchy();
+  const secondChapter = await core.buildCreateHierarchyOperation(p.id, {
+    kind: "chapter", id: "c2", title: "Second chapter", volumeId: "v1",
+  });
+  await accept(p.id, secondChapter.operation);
+  const first = await core.buildCreateHierarchyOperation(p.id, {
+    kind: "scene", id: "duplicate-scene", title: "First proposal", volumeId: "v1", chapterId: "c1",
+    manuscriptBody: "First body",
+  });
+  const second = await core.buildCreateHierarchyOperation(p.id, {
+    kind: "scene", id: "duplicate-scene", title: "Second proposal", volumeId: "v1", chapterId: "c2",
+    manuscriptBody: "Second body",
+  });
+  await approve(p.id, first);
+  await approve(p.id, second);
+
+  await core.apply(p.id, first.operation);
+  const before = await persistence.read(async (reader) => {
+    const documents = await reader.listDocuments(p.id, undefined, 1000);
+    const history: Array<readonly [string, string[]]> = [];
+    for (const document of documents) {
+      history.push([document.id, (await reader.listRevisions(p.id, document.id, 100)).revisions.map((revision) => revision.id)]);
+    }
+    return { documents: documents.map((document) => document.id), history };
+  });
+  await assert.rejects(core.apply(p.id, second.operation), (error: unknown) =>
+    error instanceof CoreError && error.code === "hierarchy_id_exists");
+  const after = await persistence.read(async (reader) => {
+    const documents = await reader.listDocuments(p.id, undefined, 1000);
+    const history: Array<readonly [string, string[]]> = [];
+    for (const document of documents) {
+      history.push([document.id, (await reader.listRevisions(p.id, document.id, 100)).revisions.map((revision) => revision.id)]);
+    }
+    return { documents: documents.map((document) => document.id), history };
+  });
+  assert.deepEqual(after, before, "a rejected logical duplicate must leave no document or revision history");
+});
+
+test("existing duplicate logical IDs keep their first-match reads", async () => {
+  const p = await project();
+  await persistence.transaction(async (transaction) => {
+    const volume = (await transaction.createDocument({
+      projectId: p.id, kind: "volume", title: "Legacy volume", orderKey: "0001", markdown: "",
+      authorId: "author", idempotencyKey: randomUUID(),
+    })).document;
+    const chapter = (await transaction.createDocument({
+      projectId: p.id, parentId: volume.id, kind: "chapter", title: "Legacy chapter", orderKey: "0001", markdown: "",
+      authorId: "author", idempotencyKey: randomUUID(),
+    })).document;
+    for (const [suffix, orderKey, markdown] of [["first", "0001", "First legacy body"], ["second", "0002", "Second legacy body"]] as const) {
+      const sceneId = randomUUID() as import("@codexia/persistence-contracts").DocumentId;
+      const metadataPath = `plot/volumes/v-legacy/chapters/c-legacy/scenes/${suffix}.yaml`;
+      const manuscriptPath = `manuscript/v-legacy/c-legacy/${suffix}.md`;
+      const scene = (await transaction.createDocument({
+        projectId: p.id, documentId: sceneId, parentId: chapter.id, kind: "scene", title: suffix,
+        orderKey, markdown, authorId: "author", idempotencyKey: randomUUID(),
+      })).document;
+      await transaction.saveModuleRecord({
+        projectId: p.id,
+        moduleId: "core.document-paths",
+        key: scene.id,
+        value: {
+          metadataPath, manuscriptPath,
+          metadata: { id: "legacy-duplicate", title: suffix, order: orderKey },
+        },
+        expectedVersion: null,
+      });
+    }
+    await transaction.saveModuleRecord({
+      projectId: p.id, moduleId: "core.document-paths", key: volume.id,
+      value: { metadataPath: "plot/volumes/v-legacy/volume.yaml", metadata: { id: "v-legacy", title: "Legacy volume" } },
+      expectedVersion: null,
+    });
+    await transaction.saveModuleRecord({
+      projectId: p.id, moduleId: "core.document-paths", key: chapter.id,
+      value: { metadataPath: "plot/volumes/v-legacy/chapters/c-legacy/chapter.yaml", metadata: { id: "c-legacy", title: "Legacy chapter" } },
+      expectedVersion: null,
+    });
+  });
+
+  const tree = await core.tree(p.id);
+  assert.deepEqual(tree.volumes[0]?.chapters[0]?.scenes.map((scene) => scene.id), ["legacy-duplicate", "legacy-duplicate"]);
+  assert.equal((await core.readScene(p.id, "legacy-duplicate")).text, "First legacy body");
+});
+
+test("deleted hierarchy paths stay reserved while revisions and evidence remain addressable", async () => {
+  const p = await hierarchy();
+  const scene = (await persistence.read((reader) => reader.listDocuments(p.id))).find((document) => document.kind === "scene")!;
+  const revisionId = scene.headRevisionId!;
+  const evidenceId = randomUUID() as import("@codexia/persistence-contracts").EvidenceId;
+  await persistence.transaction((transaction) => transaction.saveEvidenceAnchor({
+    projectId: p.id, id: evidenceId, documentId: scene.id, revisionId,
+    fromUtf16: 0, toUtf16: "Text 😀\n".length,
+    quoteSha256: createHash("sha256").update("Text 😀\n").digest("hex"),
+    status: "confirmed", expectedVersion: null,
+  }));
+  const volume = (await persistence.read((reader) => reader.listDocuments(p.id))).find((document) => document.kind === "volume")!;
+  const removal = await core.buildDeleteHierarchyOperation(p.id, { kind: "volume", id: "v1" });
+  await accept(p.id, removal.operation);
+
+  assert.equal(await persistence.read((reader) => reader.getDocument(p.id, volume.id)), undefined);
+  assert.equal((await persistence.read((reader) => reader.getRevision(p.id, scene.id, revisionId)))?.markdown, "Text 😀\n");
+  assert.ok((await persistence.read((reader) => reader.listEvidenceDocumentIds(p.id))).includes(scene.id));
+  assert.equal((await persistence.read((reader) => reader.getEvidenceAnchor(p.id, evidenceId)))?.documentId, scene.id);
+  await assert.rejects(
+    core.buildCreateHierarchyOperation(p.id, { kind: "volume", id: "v1", title: "Recreated volume" }),
+    (error: unknown) => error instanceof CoreError && error.code === "hierarchy_path_reserved",
+  );
+});
+
+test("a path deleted after proposal approval is rejected before recreating its retained document row", async () => {
+  const p = await project();
+  const pending = await core.buildCreateHierarchyOperation(p.id, { kind: "volume", id: "raced-volume", title: "Pending" });
+  await approve(p.id, pending);
+  const competing = await core.buildCreateHierarchyOperation(p.id, { kind: "volume", id: "raced-volume", title: "Competing" });
+  await accept(p.id, competing.operation);
+  const existing = (await persistence.read((reader) => reader.listDocuments(p.id))).find((document) => document.kind === "volume")!;
+  const removal = await core.buildDeleteHierarchyOperation(p.id, { kind: "volume", id: "raced-volume" });
+  await accept(p.id, removal.operation);
+
+  await assert.rejects(core.apply(p.id, pending.operation), (error: unknown) =>
+    error instanceof CoreError && error.code === "hierarchy_path_reserved");
+  assert.deepEqual(await persistence.read((reader) => reader.listDocuments(p.id)), []);
+  assert.ok(await persistence.read((reader) => reader.getRevision(p.id, existing.id, existing.headRevisionId!)));
 });

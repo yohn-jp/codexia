@@ -162,14 +162,18 @@ function sentenceOffsets(text: string): SentenceOffset[] {
       segmenter ??= new Intl.Segmenter("ja", { granularity: "sentence" });
       const raw = [...segmenter.segment(line)].map(({ segment, index: start }) => ({ start, end: start + segment.length }));
       const merged: SentenceOffset[] = [];
-      const depthAt = (end: number) => {
-        let depth = 0;
-        for (let cursor = 0; cursor < end; cursor++) {
-          if (line[cursor] === "「" || line[cursor] === "『") depth++;
-          else if (line[cursor] === "」" || line[cursor] === "』") depth = Math.max(0, depth - 1);
-        }
-        return depth;
-      };
+      // Build the bracket-depth prefix once. The old depthAt implementation
+      // rescanned the line from zero for every sentence boundary, making a
+      // long paragraph quadratic in its number of sentences.
+      const depthBefore = new Uint32Array(line.length + 1);
+      for (let cursor = 0; cursor < line.length; cursor++) {
+        const char = line[cursor];
+        const depth = depthBefore[cursor] ?? 0;
+        depthBefore[cursor + 1] = char === "「" || char === "『"
+          ? depth + 1
+          : char === "」" || char === "』" ? Math.max(0, depth - 1) : depth;
+      }
+      const depthAt = (end: number) => depthBefore[Math.max(0, Math.min(end, line.length))] ?? 0;
       if (raw.length === 0) raw.push({ start: 0, end: line.length });
       let start = raw[0]?.start ?? 0;
       let end = raw[0]?.end ?? line.length;

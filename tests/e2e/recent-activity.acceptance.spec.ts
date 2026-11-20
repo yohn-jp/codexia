@@ -1,10 +1,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
-import { createWritingFixture, ownerLogin } from "./postgres-fixture";
+import { createWritingFixture, manuscriptEditor, ownerLogin } from "./postgres-fixture";
 const configuredBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
 async function unusedTcpPort(): Promise<number> {
   const server = createServer();
@@ -151,6 +152,76 @@ async function nativeFixture() {
   await native.page.getByLabel("アクセス・トークン").fill(authToken);
   await native.page.getByRole("button", { name: "PostgreSQL作品を開く" }).click();
   return native;
+}
+
+for (const kind of ["writing", "reading", "superseded reading"] as const) {
+  test(`a delayed scene handles the chosen remote ${kind} position`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const { project, scene, second } = await createWritingFixture(page, "mobile");
+    const path = `/api/v1/persistence/projects/${project.id}/documents/${second.id}`;
+    const read = await page.request.get(path);
+    expect(read.ok()).toBe(true);
+    const { revision } = await read.json() as { revision: { id: string; markdown: string } };
+    const prefix = "第一文です。第二文です。";
+    const body = prefix + "第三文の始めです。\n\n" + "続きの原稿を読書ページへ表示します。\n\n".repeat(120);
+    const patched = await page.request.patch(path, {
+      headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": randomUUID(), "X-Client-Id": "handoff-fixture" },
+      data: {
+        baseRevisionId: revision.id,
+        changes: [{ fromUtf16: 0, toUtf16: revision.markdown.length, insert: body }],
+        resultingSha256: createHash("sha256").update(body).digest("hex"),
+      },
+    });
+    expect(patched.ok()).toBe(true);
+    await remotePosition(page, project.id, second.id, 3);
+    await page.reload();
+    await expect(manuscriptEditor(page)).toBeVisible();
+
+    let releaseLoad!: () => void;
+    const loadGate = new Promise<void>((resolve) => { releaseLoad = resolve; });
+    let observeLoad!: () => void;
+    const loadStarted = new Promise<void>((resolve) => { observeLoad = resolve; });
+    await page.route((url) => url.pathname === path, async (route) => {
+      observeLoad();
+      await loadGate;
+      await route.continue();
+    });
+    await page.getByRole("button", { name: "構成", exact: true }).click();
+    const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
+    await sheet.locator(".pg-library-continue summary").click();
+    const candidate = sheet.getByRole("region", { name: "続きから" }).locator("p").filter({ hasText: second.title });
+    try {
+      await candidate.getByRole("button", { name: kind === "writing" ? "続きを書く" : "読書位置を開く" }).click();
+      await loadStarted;
+      await expect(manuscriptEditor(page)).toHaveCount(0);
+      if (kind === "superseded reading") {
+        await expect(sheet).toBeHidden();
+        await page.getByRole("button", { name: "作品", exact: true }).click();
+        await page.locator(`.pg-outline-item[data-document-id="${scene.id}"] .pg-outline-document`).click();
+        await page.getByRole("button", { name: "書く", exact: true }).click();
+      }
+    } finally {
+      releaseLoad();
+    }
+    await expect(sheet).toBeHidden();
+    if (kind === "superseded reading") {
+      await expect(page).toHaveURL(new RegExp(`/scenes/${scene.id}(?:\\?|$)`));
+      await expect(manuscriptEditor(page)).toContainText("最初の本文。");
+      await expect(page.locator(".reading-pager")).toHaveCount(0);
+      return;
+    }
+    await expect(page.getByRole("heading", { name: second.title, exact: true })).toBeVisible();
+    if (kind === "reading") {
+      await expect(page.locator(".reading-pager")).toHaveAttribute("data-page-index", "2");
+    } else {
+      // The editor stays unfocused on mobile to keep the soft keyboard closed.
+      // Read its logical selection instead of focusing the contenteditable from the test.
+      await expect.poll(() => manuscriptEditor(page).evaluate((element) => {
+        const content = element as HTMLElement & { cmTile?: { root: { view: { state: { selection: { main: { head: number } } } } } } };
+        return content.cmTile?.root.view.state.selection.main.head;
+      })).toBe(prefix.length);
+    }
+  });
 }
 
 test("recent activity hands off only numeric positions across devices, projects, and API restart", async ({ browser, page }) => {

@@ -77,11 +77,19 @@ export function normalizedOperation(operation: ChangeOperation): ChangeOperation
     ...(operation.readScopes === undefined ? {} : {
       readScopes: operation.readScopes.map(({ prefix, revision }) => ({ prefix, revision })),
     }),
+    ...(operation.readDocumentSets === undefined ? {} : {
+      readDocumentSets: operation.readDocumentSets.map(({ kind, parentId, documentIds }) => ({
+        kind, parentId, documentIds: [...documentIds].sort(),
+      })),
+    }),
     writes: operation.writes.map((change) => ({
       path: change.path,
       revision: change.revision,
       content: change.content,
       ...(change.encoding === undefined ? {} : { encoding: change.encoding }),
+      ...(change.textChanges === undefined ? {} : {
+        textChanges: change.textChanges.map(({ fromUtf16, toUtf16, insert }) => ({ fromUtf16, toUtf16, insert })),
+      }),
     })),
     message: operation.message,
     ...(operation.evidenceIds === undefined ? {} : { evidenceIds: [...operation.evidenceIds] }),

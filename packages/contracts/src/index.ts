@@ -40,8 +40,29 @@ export interface ModelUsageStore {
 export interface FileRevision { path: string; revision: string | null }
 /** Binds a directory membership and every listed file revision, including absent members. */
 export interface ScopeRevision { prefix: string; revision: string }
+/** Return a decimal order key after every existing text-ordered key without rewriting them. */
+export function nextOrderKey(orderKeys: readonly string[]): string {
+  const last = [...orderKeys].sort((left, right) => left < right ? -1 : left > right ? 1 : 0).at(-1);
+  if (last === undefined) return "0000000001";
+  if (!/^\d+$/.test(last)) return `${last}0`;
+  const incremented = (BigInt(last) + 1n).toString().padStart(last.length, "0");
+  // An unpadded boundary such as 9 -> 10 would sort backwards as text. Extending
+  // the greatest existing key stays after it, and remains a decimal Story order.
+  return incremented > last ? incremented : `${last}0`;
+}
+/** Binds the canonical PostgreSQL membership of one hierarchy sibling set. */
+export interface DocumentSetRevision {
+  kind: "volume" | "chapter" | "scene";
+  parentId: string | null;
+  documentIds: string[];
+}
 /** Contents are full UTF-8 or base64; null is an explicit deletion. */
-export interface FileChange extends FileRevision { content: string | null; encoding?: "utf8" | "base64" }
+export interface FileChange extends FileRevision {
+  content: string | null;
+  encoding?: "utf8" | "base64";
+  /** Exact PostgreSQL manuscript edits; omitted by legacy full-document proposals. */
+  textChanges?: readonly { fromUtf16: number; toUtf16: number; insert: string }[];
+}
 export type EffectClass = "manuscript" | "structure" | "metadata" | "settings" | "migration";
 export interface ChangeOperation {
   id: string;
@@ -51,6 +72,7 @@ export interface ChangeOperation {
   effect: EffectClass;
   reads: FileRevision[];
   readScopes?: ScopeRevision[];
+  readDocumentSets?: DocumentSetRevision[];
   writes: FileChange[];
   message: string;
   evidenceIds?: string[];
@@ -68,7 +90,8 @@ export interface ProjectObservation {
 }
 export interface SnapshotReader {
   snapshot: SnapshotId;
-  read(path: string, encoding?: "utf8" | "base64"): Promise<{ content: string; revision: string } | null>;
+  /** Canonical kind for metadata files, including legacy immutable projections without kind in their bytes. */
+  read(path: string, encoding?: "utf8" | "base64"): Promise<{ content: string; revision: string; documentKind?: string } | null>;
   list(prefix: string): Promise<string[]>;
   /** Optional metadata-backed path revisions; values must match read(path).revision. */
   listRevisions?(prefix: string): Promise<FileRevision[]>;
@@ -391,6 +414,23 @@ export function assertChangeOperation(value: unknown): asserts value is ChangeOp
       prefixes.add(scope.prefix);
     }
   }
+  if (v.readDocumentSets !== undefined) {
+    if (!Array.isArray(v.readDocumentSets) || v.readDocumentSets.length > 32) throw new ContractError("Invalid document-set preconditions");
+    const sets = new Set<string>();
+    for (const set of v.readDocumentSets) {
+      if (!set || typeof set !== "object" || !["volume", "chapter", "scene"].includes(set.kind) ||
+          (set.kind === "volume" ? set.parentId !== null : (typeof set.parentId !== "string" || !set.parentId)) ||
+          !Array.isArray(set.documentIds) || set.documentIds.length > 1000 ||
+          set.documentIds.some((id) => typeof id !== "string" || !id)) {
+        throw new ContractError("Invalid document-set precondition");
+      }
+      const ids = [...set.documentIds].sort();
+      if (new Set(ids).size !== ids.length) throw new ContractError("Duplicate document in document-set precondition");
+      const key = JSON.stringify([set.kind, set.parentId]);
+      if (sets.has(key)) throw new ContractError("Duplicate document-set precondition");
+      sets.add(key);
+    }
+  }
   const seen = new Set<string>();
   let size = 0;
   for (const item of [...v.reads, ...v.writes]) {
@@ -406,6 +446,22 @@ export function assertChangeOperation(value: unknown): asserts value is ChangeOp
     if (item.content !== null && typeof item.content !== "string") throw new ContractError("Invalid recoverable content");
     if (item.encoding !== undefined && item.encoding !== "utf8" && item.encoding !== "base64") throw new ContractError("Invalid encoding");
     size += item.content?.length ?? 0;
+    if (item.textChanges !== undefined) {
+      if (v.effect !== "manuscript" || item.content === null || item.encoding === "base64" ||
+          !Array.isArray(item.textChanges) || item.textChanges.length < 1 || item.textChanges.length > 256) {
+        throw new ContractError("Invalid manuscript text changes");
+      }
+      let previousEnd = 0;
+      for (const change of item.textChanges) {
+        if (!change || typeof change !== "object" || !Number.isSafeInteger(change.fromUtf16) ||
+            !Number.isSafeInteger(change.toUtf16) || change.fromUtf16 < previousEnd ||
+            change.toUtf16 < change.fromUtf16 || typeof change.insert !== "string") {
+          throw new ContractError("Invalid manuscript text change range");
+        }
+        previousEnd = change.toUtf16;
+        size += change.insert.length;
+      }
+    }
     if (size > 8 * 1024 * 1024) throw new ContractError("Operation payload exceeds limit");
   }
 }

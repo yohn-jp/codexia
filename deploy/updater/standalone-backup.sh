@@ -25,9 +25,12 @@ remote_directory(){
       else remote_host="${remote_host%%/*}"; fi
       ;;
     fuse.sshfs|sshfs)
-      remote_host="${mount_source%%:*}"
-      remote_host="${remote_host##*@}"
-      if [[ "$remote_host" == \[*\] ]]; then remote_host="${remote_host#\[}"; remote_host="${remote_host%\]}"; fi
+      if [[ "$mount_source" =~ ^([^@/:]+@)?\[([^][]+)\]: ]]; then
+        remote_host="${BASH_REMATCH[2]}"
+      else
+        remote_host="${mount_source%%:*}"
+        remote_host="${remote_host##*@}"
+      fi
       ;;
   esac
   [[ -n "$remote_host" ]] || die 'Cannot verify that the backup destination is off-VM'

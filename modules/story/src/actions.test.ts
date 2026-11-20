@@ -601,6 +601,87 @@ test("scene creation inserts by position in one proposal and includes every chan
   assert.equal(proposals.length, 1);
 });
 
+test("Story creation appends string order keys under the selected parent without rewriting siblings", async () => {
+  const files = fixtureFiles();
+  const chapterPath = "plot/volumes/vol-main/chapters/ch-main-1/chapter.yaml";
+  const firstScenePath = "plot/volumes/vol-main/chapters/ch-main-1/scenes/sc-1.yaml";
+  const secondScenePath = "plot/volumes/vol-main/chapters/ch-main-1/scenes/sc-2.yaml";
+  for (const [path, order] of [[chapterPath, "0000000009"], [firstScenePath, "0000000009"], [secondScenePath, "0000000010"]] as const) {
+    const metadata = YAML.parse(files.get(path)!) as Record<string, unknown>;
+    metadata.order = order;
+    files.set(path, yaml(metadata));
+  }
+  const originalSiblings = new Map([chapterPath, firstScenePath, secondScenePath].map(path => [path, files.get(path)!]));
+  const proposals: Array<{ id: string; operations: ChangeOperation[] }> = [];
+  const context = makeActionContext(makeReader(files), { proposals });
+
+  const chapter = await invoke<{ id: string; filePath: string }>("story.entities.create", {
+    type: "chapter", id: "ch-appended", title: "Appended chapter", volume: "vol-main",
+  }, context);
+  const chapterWrite = proposals[0]!.operations[0]!.writes.find(write => write.path.endsWith("/ch-appended/chapter.yaml"))!;
+  assert.equal(chapter.data.filePath, "plot/volumes/vol-main/chapters/ch-appended/chapter.yaml");
+  assert.equal(YAML.parse(chapterWrite.content!).order, "0000000010");
+
+  const scene = await invoke<{ id: string; filePath: string }>("story.entities.create", {
+    type: "scene", id: "sc-appended", title: "Appended scene", chapter: "ch-main-1", volume: "vol-main",
+  }, context);
+  const sceneOperation = proposals[1]!.operations[0]!;
+  const sceneWrite = sceneOperation.writes.find(write => write.path.endsWith("/sc-appended.yaml"))!;
+  assert.equal(scene.data.filePath, "plot/volumes/vol-main/chapters/ch-main-1/scenes/sc-appended.yaml");
+  assert.equal(YAML.parse(sceneWrite.content!).order, "0000000011");
+  assert.deepEqual(sceneOperation.writes.map(write => write.path).sort(), [
+    "manuscript/vol-main/ch-main-1/sc-appended.md",
+    "plot/volumes/vol-main/chapters/ch-main-1/scenes/sc-appended.yaml",
+  ].sort());
+  for (const [path, content] of originalSiblings) assert.equal(files.get(path), content);
+});
+
+test("NarrativeChangeSet defaults chapter and scene order from projected string keys", async () => {
+  const files = fixtureFiles();
+  const chapterPath = "plot/volumes/vol-main/chapters/ch-main-1/chapter.yaml";
+  const firstScenePath = "plot/volumes/vol-main/chapters/ch-main-1/scenes/sc-1.yaml";
+  const secondScenePath = "plot/volumes/vol-main/chapters/ch-main-1/scenes/sc-2.yaml";
+  for (const [path, order] of [[chapterPath, "0000000009"], [firstScenePath, "0000000009"], [secondScenePath, "0000000010"]] as const) {
+    const metadata = YAML.parse(files.get(path)!) as Record<string, unknown>;
+    metadata.order = order;
+    files.set(path, yaml(metadata));
+  }
+  const reader = makeReader(files);
+  const proposals: Array<{ id: string; operations: ChangeOperation[] }> = [];
+  const context = makeActionContext(reader, { proposals });
+  context.invoke = async (actionId) => actionId === "core.proposals.get"
+    ? { ok: false, snapshot: reader.snapshot, error: { code: "PROPOSAL_NOT_FOUND", message: "missing", retryable: false } }
+    : { ok: false, snapshot: reader.snapshot, error: { code: "missing_action", message: "not wired", retryable: false } };
+  const entities = (await invoke<Array<{ id: string; revision: string }>>("story.entities.list", {}, context)).data;
+  const revisionFor = (id: string) => entities.find(entity => entity.id === id)!.revision;
+  const changeSet = {
+    schemaVersion: 1,
+    id: "ncs-default-order",
+    projectId: context.projectId,
+    goal: "Append hierarchy records",
+    status: "proposed",
+    assessment: { confidence: 0.9, risk: "low" },
+    operations: [
+      { id: "chapter-create", kind: "entity.create", precondition: { kind: "absent" }, target: { entityId: "ch-appended", entityType: "chapter" }, values: { id: "ch-appended", title: "Appended chapter", volume: "vol-main" }, evidenceIds: ["evidence-one"], assessment: { confidence: 0.9, risk: "low" } },
+      { id: "scene-create", kind: "scene.create", precondition: { kind: "absent" }, target: { sceneId: "sc-appended" }, values: { id: "sc-appended", title: "Appended scene", volume: "vol-main", chapter: "ch-main-1" }, evidenceIds: ["evidence-one"], assessment: { confidence: 0.9, risk: "low" } },
+    ],
+    evidence: [{ id: "evidence-one", sourceKind: "entity", sourceId: "char-uma", revision: revisionFor("char-uma") }],
+    diagnostics: { before: null, after: null },
+  };
+
+  const result = await actionById("story.changes.propose").invoke(changeSet, context);
+  assert.equal(result.ok, true, result.ok ? undefined : `${result.error.code}: ${result.error.message}`);
+  if (!result.ok) return;
+  const operations = result.proposals?.[0]?.operations ?? [];
+  const chapterWrite = operations[0]!.writes.find(write => write.path.endsWith("/ch-appended/chapter.yaml"))!;
+  const sceneWrite = operations[1]!.writes.find(write => write.path.endsWith("/sc-appended.yaml"))!;
+  assert.equal(YAML.parse(chapterWrite.content!).order, "0000000010");
+  assert.equal(YAML.parse(sceneWrite.content!).order, "0000000011");
+  assert.equal(operations[0]!.writes.some(write => write.path === chapterPath), false);
+  assert.equal(operations[1]!.writes.some(write => write.path === firstScenePath || write.path === secondScenePath), false);
+  assert.equal(proposals.length, 1);
+});
+
 test("series bindings use stable repository identity and preserve unknown settings", async () => {
   const settings = {
     version: 1,
@@ -744,6 +825,12 @@ test("NarrativeChangeSet preserves all nine source operation kinds in one identi
   assert.deepEqual(details.sourceChangeSet, changeSet);
   assert.equal(details.sourceFingerprint.length, 64);
   assert.deepEqual(details.operationMap, data.operationMap);
+  const rangeOperation = coreProposal.operations.find((operation) => operation.message.includes("replace-manuscript"));
+  assert.deepEqual(rangeOperation?.writes[0]?.textChanges, [{
+    fromUtf16: "---\ntitle: Door\n---\n".length,
+    toUtf16: "---\ntitle: Door\n---\n".length + 3,
+    insert: "She",
+  }]);
   const persisted = details as unknown as Record<string, unknown>;
   assert.equal(persisted.sourceFingerprint, data.sourceFingerprint);
   assert.deepEqual(persisted.resultPaths, data.resultPaths);

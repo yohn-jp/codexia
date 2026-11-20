@@ -1287,7 +1287,7 @@ export class PodmanStandaloneHost{
     assert.ok(path.isAbsolute(runtime),'Rootless systemd runtime directory is unavailable');
     return {unit:'codexia-tunnel.service',permit,marker,directory:entries.tunnel.directory,
       file:path.join(entries.tunnel.directory,'91-codexia-tunnel-token-rotation.conf'),
-      content:`ConditionPathExists=|!${marker}\nConditionPathExists=|${permit}\n`};
+      content:`[Unit]\nConditionPathExists=|!${marker}\nConditionPathExists=|${permit}\n`};
   }
   async assertTunnelRotationStartupFence(){
     const entry=this.tunnelRotationStartupFence();

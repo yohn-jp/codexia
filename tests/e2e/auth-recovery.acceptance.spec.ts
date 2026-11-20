@@ -1,7 +1,22 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { ownerLogin, fixtureProject } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
+
+async function mockAuthenticatedWorkspace(page: Page, hosted: boolean, session?: () => { status: number; body: unknown }): Promise<void> {
+  await page.route("**/api/version", (route) => route.fulfill({ json: { name: "codexia", version: "test", hosted, profile: hosted ? "hosted" : "core" } }));
+  await page.route("**/api/session", (route) => {
+    const response = session?.() ?? { status: 200, body: { authenticated: true, authorScope: hosted ? "hosted:synthetic-author" : "owner", ...(hosted ? { permissions: ["read", "write"] } : {}) } };
+    return route.fulfill({ status: response.status, json: response.body });
+  });
+  await page.route("**/api/v1/persistence/status", (route) => route.fulfill({ json: { available: true, provider: "postgres" } }));
+  await page.route("**/api/v1/persistence/projects*", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/jobs", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/jobs/events", (route) => route.fulfill({ headers: { "content-type": "text/event-stream" }, body: "" }));
+  await page.route("**/api/inbox", (route) => route.fulfill({ json: { items: [], unreadCount: 0 } }));
+  await page.goto("/desktop/");
+  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
+}
 
 for (const shell of ["desktop", "mobile"] as const) {
   test(`Access SSO enters the ${shell} shell, reauthenticates and logs out without a Codexia token`, async ({ page }) => {
@@ -101,10 +116,72 @@ test("an unknown hosted grant requests refresh and retries the initial session c
   });
 
   await page.goto("/desktop/");
-  await expect(page.getByText("最初の作品を作成してください")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "割り当てられた作品がありません" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "最初の作品を作成" })).toHaveCount(0);
   expect(sessionRequests).toBe(3);
   expect(refreshRequests).toBe(1);
   expect(reauthRequests).toBe(0);
+});
+
+test("a failed standalone logout keeps the editor protected and lets the author retry", async ({ page }) => {
+  await mockAuthenticatedWorkspace(page, false);
+  let logoutRequests = 0;
+  let serverLoggedOut = false;
+  await page.route("**/api/logout", async (route) => {
+    logoutRequests += 1;
+    if (logoutRequests === 1) { await route.abort(); return; }
+    serverLoggedOut = true;
+    await route.fulfill({ json: { authenticated: false } });
+  });
+
+  await page.getByRole("button", { name: "ログアウト", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "認証・接続を再確認してください" })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("ログアウトの完了を確認できませんでした");
+  await expect(page.getByLabel("アクセス・トークン")).toHaveCount(0);
+  await page.getByRole("button", { name: "ログアウトを再試行" }).click();
+  await expect(page.getByRole("heading", { name: "作品を開く" })).toBeVisible();
+  expect(logoutRequests).toBe(2);
+  expect(serverLoggedOut).toBe(true);
+});
+
+test("a lost Hosted logout response can be retried and returns to the Praetorium entry path", async ({ page }) => {
+  await mockAuthenticatedWorkspace(page, true);
+  let logoutRequests = 0;
+  let serverLoggedOut = false;
+  let tokenLogins = 0;
+  await page.route("**/api/login", (route) => { tokenLogins += 1; return route.fulfill({ status: 410 }); });
+  await page.route("**/_platform/logout", async (route) => {
+    logoutRequests += 1;
+    if (logoutRequests === 1) { serverLoggedOut = true; await route.abort(); return; }
+    await route.fulfill({ status: serverLoggedOut ? 204 : 500 });
+  });
+
+  await page.getByRole("button", { name: "ログアウト", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "認証・接続を再確認してください" })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("ログアウトの完了を確認できませんでした");
+  await expect(page.getByLabel("アクセス・トークン")).toHaveCount(0);
+  await page.getByRole("button", { name: "ログアウトを再試行" }).click();
+  await expect(page.getByRole("heading", { name: "Praetoriumから再入場してください" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Praetoriumから再入場" })).toHaveAttribute("href", "/_platform/reauth");
+  expect(logoutRequests).toBe(2);
+  expect(serverLoggedOut).toBe(true);
+  expect(tokenLogins).toBe(0);
+});
+
+test("an expired Hosted grant returns through Praetorium without showing a token form", async ({ page }) => {
+  let expired = false;
+  let reauthRequests = 0;
+  await mockAuthenticatedWorkspace(page, true, () => expired
+    ? { status: 401, body: { error: "Authentication required", code: "UNAUTHORIZED" } }
+    : { status: 200, body: { authenticated: true, authorScope: "hosted:synthetic-author", permissions: ["read", "write"] } });
+  await page.route("**/_platform/refresh", (route) => route.fulfill({ status: 401, json: { error: "Session expired" } }));
+  await page.route("**/_platform/reauth", (route) => { reauthRequests += 1; return route.fulfill({ contentType: "text/html", body: "Praetorium re-entry" }); });
+  expired = true;
+
+  await page.reload();
+  await expect(page).toHaveURL(/\/_platform\/reauth$/u);
+  expect(reauthRequests).toBe(1);
+  await expect(page.getByLabel("アクセス・トークン")).toHaveCount(0);
 });
 
 test("concurrent tabs serialize a rotated hosted grant through the browser lock", async ({ page }) => {
@@ -169,8 +246,10 @@ test("concurrent tabs serialize a rotated hosted grant through the browser lock"
   });
 
   await Promise.all([page.goto("/desktop/?tab=first"), secondPage.goto("/desktop/?tab=second")]);
-  await expect(page.getByText("最初の作品を作成してください")).toBeVisible();
-  await expect(secondPage.getByText("最初の作品を作成してください")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "割り当てられた作品がありません" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "最初の作品を作成" })).toHaveCount(0);
+  await expect(secondPage.getByRole("heading", { name: "割り当てられた作品がありません" })).toBeVisible();
+  await expect(secondPage.getByRole("button", { name: "最初の作品を作成" })).toHaveCount(0);
   expect(new URL(page.url()).origin).toBe(new URL(secondPage.url()).origin);
   expect(await page.evaluate(() => Boolean(navigator.locks)), "Chromium must expose Web Locks for this cross-tab acceptance").toBe(true);
   expect(initialSessionRequests).toBeGreaterThanOrEqual(2);

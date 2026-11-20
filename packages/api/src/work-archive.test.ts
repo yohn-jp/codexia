@@ -147,6 +147,34 @@ test("evidence on a deleted document round trips as unresolved without restoring
   assert.deepEqual(restored.evidence.assertions, archive.evidence.assertions);
 });
 
+test("unresolved evidence links require bundled anchors and graph records before import", async () => {
+  const sourceId = randomUUID() as ProjectId;
+  const title = `Unresolved link validation ${sourceId}`;
+  await persistence.transaction(tx => tx.createProject({ id: sourceId, title }));
+  const archive = await exportWorkArchive(persistence, sourceId);
+  const anchorId = randomUUID() as EvidenceId;
+  const nodeId = randomUUID() as KnowledgeNodeId;
+  const assertionId = randomUUID() as import("@codexia/persistence-contracts").AssertionId;
+  const unresolvedAnchor = {
+    id: anchorId, documentId: randomUUID(), revisionId: randomUUID(), fromUtf16: 0, toUtf16: 1,
+    quoteSha256: "a".repeat(64), status: "orphaned" as const,
+  };
+  archive.evidence.unresolved.anchors.push(unresolvedAnchor);
+  archive.evidence.unresolved.mentions.push({ evidenceId: anchorId, nodeId, status: "confirmed", source: "author", confidence: null, extractorVersion: null });
+  archive.evidence.unresolved.assertionEvidence.push({ assertionId, evidenceId: anchorId, role: "supports" });
+  await assert.rejects(importWorkArchive(persistence, archive, "owner"), /missing evidence or knowledge|missing evidence or assertion/u);
+  const projects = await persistence.read(reader => reader.listProjects(200));
+  assert.deepEqual(projects.filter(project => project.title === title).map(project => project.id), [sourceId]);
+
+  archive.knowledge.nodes.push({ id: nodeId, type: "place", name: "旧地点", attributes: {}, status: "confirmed" });
+  archive.evidence.assertions.push({ id: assertionId, proposition: { text: "旧記録" }, modality: "stated", perspective: "author", narrativeTime: {}, confidence: null, status: "confirmed" });
+  const imported = await importWorkArchive(persistence, archive, "owner");
+  const restored = await exportWorkArchive(persistence, imported.project.id);
+  assert.deepEqual(restored.evidence.unresolved.anchors, [unresolvedAnchor]);
+  assert.deepEqual(restored.evidence.unresolved.mentions, archive.evidence.unresolved.mentions);
+  assert.deepEqual(restored.evidence.unresolved.assertionEvidence, archive.evidence.unresolved.assertionEvidence);
+});
+
 test("overlapping identical portable import requests replay the committed project", { timeout: 15000 }, async () => {
   const sourceId = randomUUID() as ProjectId;
   await persistence.transaction(tx => tx.createProject({ id: sourceId, title: "Concurrent " + sourceId }));

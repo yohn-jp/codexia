@@ -5,7 +5,7 @@ import { authToken, ownerLogin, manuscriptEditor as editor, readManuscriptMarkdo
 const rootPath = "/api/v1/persistence/projects";
 const appBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
 const appOrigin = new URL(appBaseURL).origin;
-interface Draft { key: string; projectId: string; documentId: string; authorScope: string; markdown: string; generation: number; baseRevisionId: string; baseMarkdown: string; version: number; updatedAt: number }
+interface Draft { key: string; projectId: string; documentId: string; authorScope: string; markdown: string; generation: number; baseRevisionId: string; baseMarkdown: string; pendingSave?: { markdown: string }; version: number; updatedAt: number }
 interface Read { document: { id: string; title: string; headRevisionId: string }; revision: { id: string; markdown: string } }
 interface Fixture { projectId: string; one: Read; two: Read }
 const documentPath = (fixture: Fixture, documentId = fixture.one.document.id) => `${rootPath}/${fixture.projectId}/documents/${documentId}`;
@@ -95,6 +95,61 @@ async function scratchRecords(page: Page): Promise<Array<{ key: string; text: st
 // Each former Git lifecycle scenario below now exercises the corresponding PostgreSQL
 // revision, browser recovery, or explicit removal boundary. No Git fixture is created.
 
+for (const recoverPendingSave of [false, true]) {
+  test(`a save protects a confirmed quote between separate editor changes${recoverPendingSave ? " after recovering a lost save response" : ""}`, async ({ page }) => {
+    const f = await fixture(page);
+    const { revision } = await replace(page, f, "A引用Z");
+    const anchorPath = `${documentPath(f)}/anchors`;
+    const anchor = await page.request.post(anchorPath, {
+      headers: mutationHeaders(),
+      data: { revisionId: revision.id, fromUtf16: 1, toUtf16: 3, status: "confirmed" },
+    });
+    expect(anchor.status()).toBe(201);
+    await reopen(page, f);
+    await expectEditor(page, "A引用Z");
+
+    let releaseResponse!: () => void;
+    const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    if (recoverPendingSave) {
+      let markCommitted!: () => void;
+      const committed = new Promise<void>((resolve) => { markCommitted = resolve; });
+      await page.route(`**${documentPath(f)}`, async (route) => {
+        if (route.request().method() !== "PATCH") return route.continue();
+        const response = await route.fetch();
+        expect(response.ok()).toBe(true);
+        markCommitted();
+        await responseGate;
+        await route.fulfill({ status: 504, json: { error: "応答を受信できませんでした", code: "TEST_GATEWAY_ERROR" } });
+      });
+      await editor(page).press("Home");
+      await editor(page).press("Shift+ArrowRight");
+      await page.keyboard.insertText("P");
+      await committed;
+    }
+
+    await editor(page).press("Home");
+    await editor(page).press("Shift+ArrowRight");
+    await page.keyboard.insertText("X");
+    await editor(page).press("End");
+    await editor(page).press("Shift+ArrowLeft");
+    await page.keyboard.insertText("Y");
+    if (recoverPendingSave) {
+      await expect.poll(async () => (await drafts(page)).find((draft) => draft.documentId === f.one.document.id)?.markdown).toBe("X引用Y");
+      releaseResponse();
+      await expect(page.getByText("応答を受信できませんでした", { exact: true }).first()).toBeVisible();
+      await page.unroute(`**${documentPath(f)}`);
+      await page.reload();
+    }
+    await saved(page, f, "X引用Y");
+
+    const response = await page.request.get(anchorPath);
+    expect(response.ok()).toBe(true);
+    expect((await response.json()).anchors).toMatchObject([
+      { anchor: { fromUtf16: 1, toUtf16: 3, status: "confirmed" }, quote: "引用" },
+    ]);
+  });
+}
+
 test("appearance modes follow system preference initially and persist explicit light, dark, and paper choices", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "light" }); await ownerLogin(page);
   await expect(page.locator("html")).toHaveAttribute("data-zp-theme", "light");
@@ -135,21 +190,25 @@ test("IME composition blocks navigation while coalesced editor state stays curre
   const f = await fixture(page);
   await page.evaluate(() => {
     window.print = () => {
-      const content = document.querySelector("#manuscript");
-      document.documentElement.dataset.printedManuscript = Array.from(content?.querySelectorAll(".cm-line") ?? [], (line) => line.textContent ?? "").join("\n").replace(/\n+$/u, "");
+      document.documentElement.dataset.printedManuscript = document.querySelector(".pg-print-manuscript")?.textContent ?? "";
     };
   });
-  const text = "Printed from the newest editor input."; await editor(page).fill(text);
+  const text = "Printed from the newest editor input."; await replaceEditor(page, text);
   await editor(page).evaluate((element) => element.dispatchEvent(new CompositionEvent("compositionstart", { data: "にほんご", bubbles: true })));
   await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
   await expect(page.getByRole("heading", { name: "Scene One", exact: true })).toBeVisible();
   await expect(page.locator(".pg-editor-column").getByRole("alert").first()).toContainText("日本語入力の変換が完了していません");
   await editor(page).evaluate((element) => element.dispatchEvent(new CompositionEvent("compositionend", { data: "日本語", bubbles: true })));
   const composedText = `${text} 日本語入力`;
-  await editor(page).fill(composedText);
+  await replaceEditor(page, composedText);
   await page.locator(".pg-editor-command-menu > summary").click();
   await page.getByRole("button", { name: "印刷", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-printed-manuscript", composedText);
+  await page.emulateMedia({ media: "print" });
+  await expect(page.locator(".pg-print-manuscript")).toBeVisible();
+  await expect(editor(page)).toBeHidden();
+  await expect(page.locator(".pg-editor-command-menu")).toBeHidden();
+  await page.emulateMedia({ media: "screen" });
   await saved(page, f, composedText); await openRevisionHistory(page);
   await expect(page.getByRole("region", { name: "Revision履歴" })).toContainText(composedText);
 });
@@ -160,6 +219,189 @@ test("exact revision acknowledgement removes its draft without reviving deleted 
   await expect.poll(async () => (await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
   await reopen(page, f); await expectEditor(page, text);
   expect((await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
+});
+
+test("a committed save with a lost response is reconciled after reload with the same operation identity", async ({ page }) => {
+  const f = await fixture(page);
+  const text = "Committed before its response was lost.";
+  const before = await read(page, f);
+  let resolveLost!: () => void;
+  const lost = new Promise<void>((resolve) => { resolveLost = resolve; });
+  const requests: Array<{ idempotencyKey: string | undefined; clientId: string | undefined; body: string | null }> = [];
+  await page.route(`**${documentPath(f)}`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.continue();
+    requests.push({
+      idempotencyKey: route.request().headers()["idempotency-key"],
+      clientId: route.request().headers()["x-client-id"],
+      body: route.request().postData(),
+    });
+    if (requests.length === 1) {
+      const committed = await route.fetch();
+      expect(committed.ok()).toBe(true);
+      await route.abort();
+      resolveLost();
+      return;
+    }
+    await route.continue();
+  });
+
+  await replaceEditor(page, text);
+  await lost;
+  await expect.poll(async () => (await drafts(page)).find((draft) => draft.documentId === f.one.document.id)?.pendingSave).toMatchObject({ markdown: text });
+  await page.reload();
+  await expectEditor(page, text);
+  await expect.poll(() => requests.length).toBe(2);
+  await saved(page, f, text);
+  expect(requests[1]).toEqual(requests[0]);
+  const after = await read(page, f);
+  expect(after.revision.id).not.toBe(before.revision.id);
+  expect((await drafts(page)).filter((draft) => draft.documentId === f.one.document.id)).toEqual([]);
+});
+
+test("replaying a saved operation after a newer remote revision shows the current head", async ({ page }) => {
+  const f = await fixture(page);
+  const submitted = "B committed before its response was lost.";
+  const remote = "Remote D became the current head.";
+  const requests: Array<{ idempotencyKey: string | undefined; clientId: string | undefined; body: string | null }> = [];
+  let resolveLost!: () => void;
+  const lost = new Promise<void>((resolve) => { resolveLost = resolve; });
+  await page.route(`**${documentPath(f)}`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.continue();
+    requests.push({ idempotencyKey: route.request().headers()["idempotency-key"], clientId: route.request().headers()["x-client-id"], body: route.request().postData() });
+    if (requests.length === 1) {
+      const committed = await route.fetch();
+      expect(committed.ok()).toBe(true);
+      await route.abort();
+      resolveLost();
+      return;
+    }
+    const replay = await route.fetch();
+    expect(replay.ok()).toBe(true);
+    expect((await replay.json() as Read).revision.markdown).toBe(submitted);
+    await route.fulfill({ response: replay });
+  });
+
+  await replaceEditor(page, submitted);
+  await lost;
+  await replace(page, f, remote);
+  await page.reload();
+  await expectEditor(page, remote);
+  await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+  expect(requests).toHaveLength(2);
+  expect(requests[1]).toEqual(requests[0]);
+  const latest = await read(page, f);
+  expect(latest.revision.markdown).toBe(remote);
+  expect((await drafts(page)).filter((draft) => draft.documentId === f.one.document.id)).toEqual([]);
+});
+
+test("a lost save response survives newer input, reloads, and rebases the newer draft after acknowledgement", async ({ page }) => {
+  const f = await fixture(page);
+  const submitted = "Submitted B before newer input.";
+  const newer = "Newer C entered while B was saving.";
+  const before = await read(page, f);
+  let committed!: () => void;
+  let release!: () => void;
+  let lost!: () => void;
+  const committedPromise = new Promise<void>((resolve) => { committed = resolve; });
+  const responseGate = new Promise<void>((resolve) => { release = resolve; });
+  const lostPromise = new Promise<void>((resolve) => { lost = resolve; });
+  const requests: Array<{ idempotencyKey: string | undefined; clientId: string | undefined; body: string | null }> = [];
+  await page.route(`**${documentPath(f)}`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.continue();
+    requests.push({
+      idempotencyKey: route.request().headers()["idempotency-key"],
+      clientId: route.request().headers()["x-client-id"],
+      body: route.request().postData(),
+    });
+    if (requests.length === 1) {
+      const committedResponse = await route.fetch();
+      expect(committedResponse.ok()).toBe(true);
+      committed();
+      await responseGate;
+      await route.abort();
+      lost();
+      return;
+    }
+    await route.continue();
+  });
+
+  await replaceEditor(page, submitted);
+  await committedPromise;
+  await replaceEditor(page, newer);
+  await expect.poll(async () => {
+    const draft = (await drafts(page)).find((entry) => entry.documentId === f.one.document.id);
+    return { markdown: draft?.markdown, pending: draft?.pendingSave?.markdown };
+  }).toEqual({ markdown: newer, pending: submitted });
+  release();
+  await lostPromise;
+  await page.reload();
+  await expectEditor(page, newer);
+  await saved(page, f, newer);
+  expect(requests).toHaveLength(3);
+  expect(requests[1]).toEqual(requests[0]);
+  expect(requests[2]?.idempotencyKey).not.toBe(requests[0]?.idempotencyKey);
+  expect(requests[2]?.body).not.toBe(requests[0]?.body);
+  const after = await read(page, f);
+  expect(after.revision.markdown).toBe(newer);
+  const revisionResponse = await page.request.get(`${documentPath(f)}/revisions?limit=50`);
+  expect(revisionResponse.ok()).toBe(true);
+  const revisionPage = await revisionResponse.json() as { revisions: Array<{ id: string; markdown: string }> };
+  expect(revisionPage.revisions).toHaveLength(3);
+  expect(revisionPage.revisions.map((revision) => revision.markdown)).toContain(submitted);
+  expect(revisionPage.revisions.map((revision) => revision.markdown)).toContain(newer);
+  expect((await drafts(page)).filter((draft) => draft.documentId === f.one.document.id)).toEqual([]);
+  expect(after.revision.id).not.toBe(before.revision.id);
+});
+
+test("a newer draft stays protected when a replayed save is already superseded remotely", async ({ page }) => {
+  const f = await fixture(page);
+  const submitted = "B committed before its response was lost.";
+  const newer = "Newer local C stays recoverable.";
+  const remote = "Remote D became the current head.";
+  let committed!: () => void;
+  let release!: () => void;
+  let lost!: () => void;
+  const committedPromise = new Promise<void>((resolve) => { committed = resolve; });
+  const responseGate = new Promise<void>((resolve) => { release = resolve; });
+  const lostPromise = new Promise<void>((resolve) => { lost = resolve; });
+  const requests: Array<{ idempotencyKey: string | undefined; clientId: string | undefined; body: string | null }> = [];
+  await page.route(`**${documentPath(f)}`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.continue();
+    requests.push({ idempotencyKey: route.request().headers()["idempotency-key"], clientId: route.request().headers()["x-client-id"], body: route.request().postData() });
+    if (requests.length === 1) {
+      const committedResponse = await route.fetch();
+      expect(committedResponse.ok()).toBe(true);
+      committed();
+      await responseGate;
+      await route.abort();
+      lost();
+      return;
+    }
+    const replay = await route.fetch();
+    expect(replay.ok()).toBe(true);
+    expect((await replay.json() as Read).revision.markdown).toBe(submitted);
+    await route.fulfill({ response: replay });
+  });
+
+  await replaceEditor(page, submitted);
+  await committedPromise;
+  await replaceEditor(page, newer);
+  await expect.poll(async () => {
+    const draft = (await drafts(page)).find((entry) => entry.documentId === f.one.document.id);
+    return { markdown: draft?.markdown, pending: draft?.pendingSave?.markdown };
+  }).toEqual({ markdown: newer, pending: submitted });
+  await replace(page, f, remote);
+  release();
+  await lostPromise;
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Revision競合" })).toBeVisible();
+  await expectEditor(page, newer);
+  await expect.poll(async () => (await drafts(page)).find((draft) => draft.documentId === f.one.document.id)?.pendingSave).toBeUndefined();
+  expect(requests).toHaveLength(2);
+  expect(requests[1]).toEqual(requests[0]);
+  expect((await read(page, f)).revision.markdown).toBe(remote);
+  const draft = (await drafts(page)).find((entry) => entry.documentId === f.one.document.id);
+  expect(draft).toMatchObject({ markdown: newer, baseRevisionId: f.one.revision.id, baseMarkdown: f.one.revision.markdown });
 });
 
 test("undoing an autosave draft back to the saved revision removes only that draft and never sends it", async ({ page }) => {
@@ -235,7 +477,8 @@ test("undo during an in-flight save preserves the request and saves the restored
 test("writing UI protects multiple document drafts separately from PostgreSQL revision durability", async ({ page }) => {
   const f = await fixture(page); const gate = await holdSaves(page, f);
   try {
-    await editor(page).fill("Scene One protected draft.");
+    await replaceEditor(page, "Scene One protected draft.");
+    await expectEditor(page, "Scene One protected draft.");
     // Establish the exact durable recovery record and an in-flight, unacknowledged
     // PostgreSQL save before switching documents.
     await expect.poll(async () => (await drafts(page)).some((d) => d.documentId === f.one.document.id && d.markdown === "Scene One protected draft.")).toBe(true);
@@ -244,7 +487,8 @@ test("writing UI protects multiple document drafts separately from PostgreSQL re
     // The guarded selection is asynchronous: do not type until Scene Two owns
     // the mounted editor, otherwise the test edits Scene One again.
     await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
-    await editor(page).fill("Scene Two independent draft.");
+    await replaceEditor(page, "Scene Two independent draft.");
+    await expectEditor(page, "Scene Two independent draft.");
     await expect.poll(async () => {
       const records = await drafts(page);
       return records.find((entry) => entry.documentId === f.one.document.id)?.markdown
@@ -268,12 +512,20 @@ test("new typing survives an older in-flight PostgreSQL save and exact acknowled
 
 test("new typing survives recovery against a newer PostgreSQL base revision", async ({ page }) => {
   const f = await fixture(page); const gate = await holdSaves(page, f);
+  const writes: string[] = [];
+  page.on("request", (request) => { if (request.method() === "PATCH" && request.url().includes(documentPath(f))) writes.push(request.url()); });
   try {
     await editor(page).fill("Recovered draft before competing revision."); await gate.seen;
     await replace(page, f, "Competing PostgreSQL revision.");
     await editor(page).fill("Newest input before conflict arrives."); gate.release();
     await expect(page.getByRole("heading", { name: "Revision競合" })).toBeVisible();
     await expectEditor(page, "Newest input before conflict arrives.");
+    await expect.poll(async () => (await drafts(page)).find((draft) => draft.documentId === f.one.document.id)?.pendingSave).toBeUndefined();
+    const writesBeforeReload = writes.length;
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Revision競合" })).toBeVisible();
+    await expectEditor(page, "Newest input before conflict arrives.");
+    expect(writes).toHaveLength(writesBeforeReload);
     await page.getByRole("button", { name: "比較後、この回復Draftを最新版へ適用" }).click();
     await saved(page, f, "Newest input before conflict arrives.");
   } finally { gate.release(); }
@@ -424,6 +676,98 @@ test("a pending scratch image read is flushed to its captured document before na
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
   await expect.poll(async () => (await scratchRecords(page)).some((r) => r.key.includes(f.one.document.id) && r.text.includes("Attachment belongs to Scene One.") && r.text.includes("data:image/png;base64"))).toBe(true);
   expect((await scratchRecords(page)).some((r) => r.key.includes(f.two.document.id) && r.text.includes("Attachment belongs to Scene One."))).toBe(false);
+});
+
+test("scratch still protects text and accepts a new image after an oversized attachment", async ({ page }) => {
+  const f = await fixture(page);
+  await scratch(page);
+  await image(page).setInputFiles(png);
+  const attachment = page.locator(".scratch-panel").getByRole("img", { name: png.name });
+  await expect(attachment).toBeVisible();
+  await image(page).setInputFiles({ name: "too-large.png", mimeType: "image/png", buffer: Buffer.alloc(3 * 1024 * 1024 + 1) });
+  await expect(page.locator(".scratch-panel").getByRole("alert")).toContainText("3MB以下");
+  await memo(page).fill("Scratch remains usable after a rejected attachment.");
+  await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+  await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
+  await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
+  await expect(page.getByRole("heading", { name: "Scene One", exact: true })).toBeVisible();
+  await scratch(page);
+  await expect(memo(page)).toHaveValue("Scratch remains usable after a rejected attachment.");
+  await expect(attachment).toBeVisible();
+  await image(page).setInputFiles({ ...png, name: "replacement.png" });
+  await expect(page.locator(".scratch-panel").getByRole("img", { name: "replacement.png" })).toBeVisible();
+  await expect.poll(async () => (await scratchRecords(page)).find((r) => r.key.includes(f.one.document.id))?.text).toContain("replacement.png");
+});
+
+test("an untouched or stale tab cannot overwrite protected scratch text and images", async ({ page, context }) => {
+  const f = await fixture(page);
+  const second = await context.newPage();
+  try {
+    await second.goto(page.url());
+    await expectEditor(second, f.one.revision.markdown);
+    await scratch(second);
+    await expect(memo(second)).toBeEnabled();
+    await scratch(page);
+    await memo(page).fill("First tab's protected text.");
+    await image(page).setInputFiles(png);
+    await expect.poll(async () => (await scratchRecords(page)).find((r) => r.key.includes(f.one.document.id))?.text).toContain(png.name);
+    await second.getByRole("button", { name: "読む", exact: true }).click();
+    await expect(second.getByRole("region", { name: "原稿の閲覧" })).toBeVisible();
+    await second.reload();
+    await expectEditor(second, f.one.revision.markdown);
+    await scratch(second);
+    await expect(memo(second)).toHaveValue("First tab's protected text.");
+    await expect(second.locator(".scratch-panel").getByRole("img", { name: png.name })).toBeVisible();
+
+    await memo(page).fill("First tab's newer protected text.");
+    await expect.poll(async () => (await scratchRecords(page)).find((r) => r.key.includes(f.one.document.id))?.text).toContain("newer protected text");
+    await memo(second).fill("Second tab's stale edit.");
+    await expect(second.locator(".scratch-panel").getByRole("alert")).toContainText("別タブ");
+    await expect(memo(second)).toHaveValue("Second tab's stale edit.");
+    await page.reload();
+    await expectEditor(page, f.one.revision.markdown);
+    await scratch(page);
+    await expect(memo(page)).toHaveValue("First tab's newer protected text.");
+    await expect(page.locator(".scratch-panel").getByRole("img", { name: png.name })).toBeVisible();
+  } finally {
+    await second.close();
+  }
+});
+
+test("navigation does not replace a scratch record while it is loading or unreadable", async ({ page }) => {
+  const f = await fixture(page);
+  await scratch(page);
+  await memo(page).fill("Protected scratch before simulating read failure.");
+  const record = () => scratchRecords(page).then((records) => records.find((item) => item.key.includes(f.one.document.id)));
+  await expect.poll(async () => (await record())?.text).toContain("Protected scratch");
+  const original = await record();
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("hold-scratch-read") !== "1") return;
+    const get = IDBObjectStore.prototype.get;
+    IDBObjectStore.prototype.get = function (query) {
+      const request = get.call(this, query);
+      if (this.name === "pgScratch") Object.defineProperty(request, "onsuccess", { set() {} });
+      return request;
+    };
+  });
+  await page.evaluate(() => sessionStorage.setItem("hold-scratch-read", "1"));
+  await page.reload();
+  await expectEditor(page, f.one.revision.markdown);
+  await scratch(page);
+  await expect(memo(page)).toBeDisabled();
+  await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+  await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
+  expect(await record()).toMatchObject(original!);
+  await page.evaluate(() => sessionStorage.removeItem("hold-scratch-read"));
+  const unreadable = { ...original, text: "Malformed original recovery bytes" };
+  await writeRecords(page, [unreadable], "pgScratch");
+  await page.goto(`/desktop/projects/${f.projectId}/scenes/${f.one.document.id}`);
+  await expectEditor(page, f.one.revision.markdown);
+  await scratch(page);
+  await expect(page.locator(".scratch-panel").getByRole("alert")).toBeVisible();
+  await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+  await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
+  expect(await record()).toMatchObject(unreadable);
 });
 
 test("resuming an older scratch generation cannot replace newer unprotected input", async ({ page }) => {
