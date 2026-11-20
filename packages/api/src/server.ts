@@ -930,7 +930,7 @@ export function createServer(options: ApiServerOptions): Server {
           const result = await coreStore.resolveDocumentScene(projectId, (input as { path: string }).path, context.reader.snapshot);
           const document = result.sceneId === null ? await context.reader.read((input as { path: string }).path) : undefined;
           return { ok: true, snapshot: result.snapshot, data: { sceneId: result.sceneId,
-            ...(document !== undefined ? { document: document ? { path: (input as { path: string }).path, ...document } : null } : {}) } };
+            ...(document !== undefined ? { document: document ? { path: (input as { path: string }).path, content: document.content, revision: document.revision } : null } : {}) } };
         },
       } },
       { module: "core", action: make("core.search", searchInput, async (context, input) => {

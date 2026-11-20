@@ -6,6 +6,7 @@ import {
   type ProposalStatus,
   type SnapshotId,
 } from "@codexia/contracts";
+import type { TextChange } from "../editor/evidence";
 
 const DATABASE_NAME = "scriptorium-recovery";
 const DATABASE_VERSION = 5;
@@ -69,9 +70,16 @@ export interface PersistenceDraftEntry {
   baseMarkdown: string;
   markdown: string;
   generation: number;
+  textChanges?: PersistenceDraftTextChanges;
   /** Exact server operation whose response may have been lost. */
   pendingSave?: PersistenceDraftOperation;
   updatedAt: number;
+}
+
+export interface PersistenceDraftTextChanges {
+  changes: TextChange[];
+  /** When present, offsets are relative to this pending save's resulting text. */
+  afterSaveKey?: string;
 }
 
 export interface PersistenceDraftOperation {
@@ -354,6 +362,12 @@ export class BrowserJournal {
       const draft = { ...existing };
       delete draft.pendingSave;
       const sameLineage = rebaseNewerDraft && existing.generation > operation.generation && existing.baseRevisionId === operation.baseRevisionId && existing.baseMarkdown === operation.baseMarkdown;
+      if (sameLineage) {
+        draft.textChanges = draft.textChanges?.afterSaveKey === operation.idempotencyKey
+          ? { changes: draft.textChanges.changes } : undefined;
+      } else if (draft.textChanges?.afterSaveKey) {
+        delete draft.textChanges;
+      }
       const updated: PersistenceDraftEntry = {
         ...draft,
         ...(sameLineage ? { baseRevisionId: revisionId, baseMarkdown: operation.markdown, generation: existing.generation + 1 } : {}),
@@ -378,6 +392,7 @@ export class BrowserJournal {
       if (!existing || !samePersistenceDraftOperation(existing.pendingSave, operation)) { await done; return false; }
       const draft = { ...existing };
       delete draft.pendingSave;
+      if (draft.textChanges?.afterSaveKey) delete draft.textChanges;
       store.put({ ...draft, updatedAt: Date.now() });
       await done;
       return true;
@@ -830,14 +845,21 @@ export class BrowserJournal {
     }
   }
 
-  async putScratch(projectId: string, path: string, text: string, authorScope: string): Promise<void> {
+  async putScratch(projectId: string, path: string, text: string, authorScope: string, expectedText: string): Promise<boolean> {
     if (!authorScope) throw new JournalError("The scratch note has no author identity scope.");
     const record: ScratchRecord = { key: JSON.stringify([documentKey(projectId, path), authorScope]), text, updatedAt: Date.now() };
     try {
       const transaction = this.database.transaction(SCRATCH_STORE, "readwrite", { durability: "strict" });
       const done = transactionDone(transaction);
-      transaction.objectStore(SCRATCH_STORE).put(record);
+      const store = transaction.objectStore(SCRATCH_STORE);
+      const existing = await requestValue(store.get(record.key)) as ScratchRecord | undefined;
+      if ((existing?.text ?? "") !== expectedText) {
+        await done;
+        return false;
+      }
+      store.put(record);
       await done;
+      return true;
     } catch (error) {
       throw storageMessage(error, "scratch note");
     }

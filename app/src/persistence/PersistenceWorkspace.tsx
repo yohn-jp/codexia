@@ -29,9 +29,9 @@ import { MobileReadingPager } from "../editor/MobileReadingPager";
 import { TermAwareRubyText } from "../editor/TermAwareRubyText";
 import { WRITING_SYMBOLS } from "../editor/writingSymbols";
 import { loadTypographySettings, storeTypographySettings, TYPOGRAPHY_PRESETS, typographyPresetValues, type TypographyPresetId } from "../editor/typography";
-import { ManuscriptInput, type ManuscriptInputHandle, type EvidenceRangeRequest } from "../editor/ManuscriptInput";
-import { initializeDocumentEvidence, markEvidenceNeedsReview, type DocumentEvidenceState, type EditorEvidenceAdapter, type TextChange } from "../editor/evidence";
-import { BrowserJournal } from "../storage/journal";
+import { ManuscriptInput, type ManuscriptInputHandle, type ManuscriptPosition, type EvidenceRangeRequest } from "../editor/ManuscriptInput";
+import { applyTextChanges, composeTextChanges, initializeDocumentEvidence, markEvidenceNeedsReview, type DocumentEvidenceState, type EditorEvidenceAdapter, type TextChange } from "../editor/evidence";
+import { BrowserJournal, type PersistenceDraftTextChanges } from "../storage/journal";
 import { createPostgresEditorEvidenceAdapter } from "../editor/postgresEvidenceAdapter";
 import { NativeChangeSetReview } from "./NativeChangeSetReview";
 
@@ -47,6 +47,7 @@ interface ActiveDocument {
   baseRevisionId: string;
   baseMarkdown: string;
   markdown: string;
+  textChanges?: PersistenceDraftTextChanges;
   generation: number;
   dirty: boolean;
   recovery: "pending" | "stored" | "failed" | "other-tab";
@@ -55,6 +56,15 @@ interface ActiveDocument {
   remoteConflict: DocumentRevision | null;
   evidence: DocumentEvidenceState;
   evidenceLoadKey: number;
+}
+
+type ContinuePosition = ({ kind: "writing" } & ManuscriptPosition) | { kind: "reading"; pageIndex: number };
+
+interface ContinueRequest {
+  projectId: string;
+  documentId: string;
+  intent: number;
+  position: ContinuePosition;
 }
 
 interface OutlineDocument extends PersistenceDocument {
@@ -251,6 +261,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const clientIdRef = useRef("");
   const openSequenceRef = useRef(0);
   const selectionIntentRef = useRef(0);
+  const continueRequestRef = useRef<ContinueRequest | undefined>(undefined);
   const panelRequestSequenceRef = useRef(0);
   const [resumeEpoch, setResumeEpoch] = useState(0);
   const [legacyImportBusy, setLegacyImportBusy] = useState(false);
@@ -581,12 +592,14 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       const baseMarkdown = draft?.baseMarkdown ?? revision.markdown;
       const baseRevisionId = draft?.baseRevisionId ?? revision.id;
       const dirty = markdown !== baseMarkdown || (staleDraft && markdown !== revision.markdown);
+      const textChanges = recoveredTextChanges(draft?.textChanges, baseMarkdown, markdown, recoverablePending);
       publishEditor({
         document: read.document,
         revision,
         baseRevisionId,
         baseMarkdown,
         markdown,
+        textChanges,
         generation: dirty ? Math.max(1, draft?.generation ?? 0) : draft?.generation ?? 0,
         dirty,
         recovery: dirty ? "pending" : "stored",
@@ -598,8 +611,17 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       });
       if (draft && staleDraft && !recoverablePending) setNotice("ブラウザーに保存された下書きのbase Revisionが変わっています。比較してから、どちらを使うか選んでください。");
       if (recoverablePending) setNotice("応答が失われた可能性のある保存操作を照合しています。");
-      const position = loadWritingResume(authorScope, currentProject.id);
-      if (position?.sceneId === nextDocumentId) requestAnimationFrame(() => { if (activeRef.current?.document.id === nextDocumentId) editorRef.current?.restorePosition(position); });
+      const requested = continueRequestRef.current;
+      const explicitPosition = requested?.projectId === currentProject.id && requested.documentId === nextDocumentId &&
+        requested.intent === selectionIntentRef.current;
+      if (!explicitPosition) {
+        const position = loadWritingResume(authorScope, currentProject.id);
+        const intent = selectionIntentRef.current;
+        if (position?.sceneId === nextDocumentId) requestAnimationFrame(() => {
+          if (intent === selectionIntentRef.current && activeRef.current?.document.projectId === currentProject.id &&
+              activeRef.current.document.id === nextDocumentId) editorRef.current?.restorePosition(position);
+        });
+      }
       setReadingPage(loadReadingPage(authorScope, currentProject.id, nextDocumentId));
       setRevisions([]);
       setShowRevisions(false);
@@ -626,6 +648,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           baseRevisionId: value.baseRevisionId,
           baseMarkdown: value.baseMarkdown,
           markdown: value.markdown,
+          textChanges: value.textChanges,
           generation: value.generation,
         });
         if (stored) ownedDraftsRef.current.set(ownershipKey, ownership);
@@ -757,7 +780,8 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         baseRevisionId: current.baseRevisionId,
         baseMarkdown: current.baseMarkdown,
         markdown: current.markdown,
-        changes: minimalTextChanges(current.baseMarkdown, current.markdown),
+        changes: current.textChanges && current.textChanges.afterSaveKey === undefined
+          ? current.textChanges.changes : minimalTextChanges(current.baseMarkdown, current.markdown),
         generation: current.generation,
         idempotencyKey: crypto.randomUUID(),
         clientId: clientIdRef.current ||= crypto.randomUUID(),
@@ -822,7 +846,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           if (!acknowledgement.acknowledged) {
             publishEditor({ ...latest, document: replayHead.document, revision: replayHead.revision, recovery: "failed", save: "failed", error: "保存済みRevisionの照合を回復Journalへ反映できませんでした。下書きを保持して再確認してください。", remoteConflict: replayHead.revision });
           } else if (!hasNewerText) {
-            publishEditor({ ...latest, document: replayHead.document, revision: replayHead.revision, baseRevisionId: replayHead.revision.id, baseMarkdown: replayHead.revision.markdown, markdown: replayHead.revision.markdown, dirty: false, recovery: "stored", save: "saved", error: "", remoteConflict: null });
+            publishEditor({ ...latest, document: replayHead.document, revision: replayHead.revision, baseRevisionId: replayHead.revision.id, baseMarkdown: replayHead.revision.markdown, markdown: replayHead.revision.markdown, textChanges: undefined, dirty: false, recovery: "stored", save: "saved", error: "", remoteConflict: null });
           } else {
             publishEditor({ ...latest, document: replayHead.document, revision: replayHead.revision, dirty: true, recovery: remaining ? "stored" : "pending", save: "failed", error: "保存操作の後にPostgreSQL上のRevisionが更新されました。回復Draftを保持し、比較してから適用してください。", remoteConflict: replayHead.revision });
           }
@@ -836,7 +860,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         const ownNewerDraft = hasNewerText && remaining !== undefined && remaining.generation === latest.generation + 1 && remaining.markdown === latest.markdown && remaining.baseRevisionId === result.revision.id && remaining.baseMarkdown === pending.markdown;
         const otherTab = Boolean(remaining && !ownNewerDraft);
         if (otherTab) {
-          publishEditor({ ...latest, document: acknowledgedDocument, revision: acknowledgedRevision, baseRevisionId: acknowledgedRevision.id, baseMarkdown: pending.markdown, dirty: hasNewerText, recovery: "other-tab", save: "failed", error: "この文書のより新しい回復記録が別タブに残っています。自動保存を停止しました。", remoteConflict: null });
+          publishEditor({ ...latest, document: acknowledgedDocument, revision: acknowledgedRevision, baseRevisionId: acknowledgedRevision.id, baseMarkdown: pending.markdown, textChanges: undefined, dirty: hasNewerText, recovery: "other-tab", save: "failed", error: "この文書のより新しい回復記録が別タブに残っています。自動保存を停止しました。", remoteConflict: null });
           return;
         }
         publishEditor({
@@ -845,6 +869,8 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           revision: acknowledgedRevision,
           baseRevisionId: acknowledgedRevision.id,
           baseMarkdown: pending.markdown,
+          textChanges: hasNewerText && latest.textChanges?.afterSaveKey === pending.idempotencyKey
+            ? { changes: latest.textChanges.changes } : undefined,
           dirty: hasNewerText,
           // A newer draft may already exist under the old base Revision at this generation.
           // Advance the generation so IndexedDB can persist the rebased record before retrying.
@@ -1061,6 +1087,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           publishEditor({
             ...current,
             markdown,
+            textChanges: composeDraftChanges(current, pending, markdown, minimalTextChanges(current.markdown, markdown)),
             generation: current.generation + 1,
             dirty: markdown !== current.baseMarkdown || Boolean(pending && markdown !== pending.markdown),
             recovery: current.recovery === "other-tab" ? "other-tab" : "pending",
@@ -1081,15 +1108,22 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     return () => registerProtection?.(null);
   }, [registerProtection, protectTransition]);
 
-  const selectDocument = useCallback(async (nextId: string): Promise<boolean> => {
+  const selectDocument = useCallback(async (nextId: string, position?: ContinuePosition): Promise<boolean> => {
     // Navigation preflight is asynchronous. Only the latest requested selection
     // may publish a document, even when an earlier request finishes later.
     const intent = ++selectionIntentRef.current;
+    continueRequestRef.current = undefined;
     setEvidenceJump(undefined);
-    if (nextId === documentId && selectionRef.current?.documentId === nextId &&
-        activeRef.current?.document.id === nextId) return true;
+    const alreadyOpen = nextId === documentId && selectionRef.current?.documentId === nextId &&
+      activeRef.current?.document.id === nextId;
+    if (alreadyOpen && !position) return true;
     if (!await protectTransition()) return false;
     if (intent !== selectionIntentRef.current) return false;
+    if (position) {
+      continueRequestRef.current = { projectId, documentId: nextId, intent, position };
+      setRequestedPanel({ id: "editor", sequence: ++panelRequestSequenceRef.current });
+    }
+    if (alreadyOpen) return true;
     openSequenceRef.current += 1;
     publishEditor(null);
     selectionRef.current = { projectId, documentId: nextId };
@@ -1099,6 +1133,29 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     setDocumentId(nextId);
     return true;
   }, [authorScope, documentId, projectId, protectTransition, publishEditor, updateRouteSelection]);
+
+  const requestedContinue = continueRequestRef.current;
+  const activeContinue = requestedContinue?.projectId === active?.document.projectId &&
+    requestedContinue?.documentId === active?.document.id && requestedContinue?.intent === selectionIntentRef.current
+    ? requestedContinue : undefined;
+  useEffect(() => {
+    if (!activeContinue || continueRequestRef.current !== activeContinue || sessionBlockedRef.current) return;
+    if (activeContinue.position.kind === "reading") {
+      continueRequestRef.current = undefined;
+      setReadingPage(activeContinue.position.pageIndex);
+      setReading(true);
+    } else {
+      setReading(false);
+    }
+  }, [activeContinue]);
+  const consumeWritingContinue = useCallback((position: ManuscriptPosition) => {
+    const request = continueRequestRef.current;
+    const current = activeRef.current;
+    if (!request || request.position !== position || request.intent !== selectionIntentRef.current ||
+        current?.document.id !== request.documentId || current.document.projectId !== request.projectId || sessionBlockedRef.current) return false;
+    continueRequestRef.current = undefined;
+    return true;
+  }, []);
 
   const beforeLegacyImport = useCallback(async (): Promise<void> => {
     legacyImportTargetRef.current = null;
@@ -1153,6 +1210,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       const imported: ActiveDocument = {
         ...latest,
         markdown,
+        textChanges: undefined,
         generation: latest.generation + 1,
         dirty: markdown !== latest.baseMarkdown,
         recovery: "pending",
@@ -1400,6 +1458,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       publishEditor({
         ...latest, document: restored.document, revision: restored.revision,
         baseRevisionId: restored.revision.id, baseMarkdown: restored.revision.markdown, markdown: restored.revision.markdown,
+        textChanges: undefined,
         generation: latest.generation + 1, dirty: false, recovery: "stored", save: "saved", error: "", remoteConflict: null,
         evidence: initializeDocumentEvidence(restored.revision.markdown, restored.revision.id, snapshot), evidenceLoadKey: latest.evidenceLoadKey + 1,
       });
@@ -1456,6 +1515,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         baseRevisionId: read.revision.id,
         baseMarkdown: read.revision.markdown,
         markdown: read.revision.markdown,
+        textChanges: undefined,
         generation: current.generation + 1,
         dirty: false,
         recovery: "stored",
@@ -1481,6 +1541,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       revision: remote,
       baseRevisionId: remote.id,
       baseMarkdown: remote.markdown,
+      textChanges: undefined,
       generation: current.generation + 1,
       dirty: current.markdown !== remote.markdown,
       recovery: "pending",
@@ -1492,15 +1553,18 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     setNotice("下書きを最新Revision全体へ適用します。IndexedDBへ再保存後、通常の競合検出を通して保存します。");
   }
 
-  const onEditorChange = useCallback((markdown: string, _changes: TextChange[]) => {
+  const onEditorChange = useCallback((markdown: string, changes: TextChange[]) => {
     const current = activeRef.current;
     if (!current || markdown === current.markdown) return;
     const pending = pendingSaveRef.current.get(JSON.stringify([current.document.projectId, current.document.id]));
-    publishEditor({ ...current, markdown, generation: current.generation + 1, dirty: markdown !== current.baseMarkdown || Boolean(pending && markdown !== pending.markdown), recovery: current.recovery === "other-tab" ? "other-tab" : "pending", save: current.save === "saving" ? "saving" : current.recovery === "other-tab" ? "failed" : "idle", error: current.recovery === "other-tab" ? current.error : "" });
+    const textChanges = composeDraftChanges(current, pending, markdown, changes);
+    publishEditor({ ...current, markdown, textChanges, generation: current.generation + 1, dirty: markdown !== current.baseMarkdown || Boolean(pending && markdown !== pending.markdown), recovery: current.recovery === "other-tab" ? "other-tab" : "pending", save: current.save === "saving" ? "saving" : current.recovery === "other-tab" ? "failed" : "idle", error: current.recovery === "other-tab" ? current.error : "" });
   }, [publishEditor]);
 
   const selectProject = async (nextProjectId: string): Promise<void> => {
     if (nextProjectId === projectId || !await protectTransition()) return;
+    selectionIntentRef.current += 1;
+    continueRequestRef.current = undefined;
     openSequenceRef.current += 1;
     publishEditor(null);
     selectionRef.current = { projectId: nextProjectId, documentId: "" };
@@ -1658,16 +1722,12 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
                 const handoff = formatHandoffHint(candidate.deviceType, candidate.updatedAt, Date.now(), resume.deviceType);
                 return <p key={candidate.sceneId}>
                   <span>{title}</span>{handoff && <small>{handoff}</small>}
-                  <button type="button" onClick={() => { void selectDocument(candidate.sceneId).then((opened) => {
-                    if (!opened) return;
-                    setReading(false);
-                    requestAnimationFrame(() => editorRef.current?.restorePosition({ cursorSentenceIndex: candidate.sentenceOffset, scrollTop: candidate.scrollTop ?? 0 }));
-                  }); }}>続きを書く</button>
-                  {candidate.pageIndex !== null && <button type="button" onClick={() => { void selectDocument(candidate.sceneId).then((opened) => {
-                    if (!opened) return;
-                    setReading(true);
-                    setReadingPage(candidate.pageIndex ?? 0);
-                  }); }}>読書位置を開く</button>}
+                  <button type="button" onClick={() => void selectDocument(candidate.sceneId, {
+                    kind: "writing", cursorSentenceIndex: candidate.sentenceOffset, scrollTop: candidate.scrollTop ?? 0,
+                  })}>続きを書く</button>
+                  {candidate.pageIndex !== null && <button type="button" onClick={() => void selectDocument(candidate.sceneId, {
+                    kind: "reading", pageIndex: candidate.pageIndex ?? 0,
+                  })}>読書位置を開く</button>}
                 </p>;
               })}
             </section>
@@ -1765,6 +1825,8 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             termResolutionKey={moduleSnapshot ? snapshotKey(moduleSnapshot) : ""}
             onTermNavigate={handleTermNavigate}
             onCursorPositionChange={(cursorSentenceIndex, scrollTop) => { editorPositionRef.current = { cursorSentenceIndex, scrollTop }; resume.onWritingPosition(active.document.id, cursorSentenceIndex, scrollTop); }}
+            requestedPosition={!reading && activeContinue?.position.kind === "writing" ? activeContinue.position : undefined}
+            consumeRequestedPosition={consumeWritingContinue}
             onSelectionChange={(selection) => { textSelectionRef.current = selection; }}
             value={active.markdown}
             externalTextRevision={active.generation}
@@ -1956,6 +2018,35 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       onSwitchMode={async () => { if (!await protectTransition()) return false; window.location.assign(switchPath); return true; }}
     />
   </div>;
+}
+
+function composeDraftChanges(current: ActiveDocument, pending: PendingSave | undefined, markdown: string, changes: TextChange[]): PersistenceDraftTextChanges {
+  const baseMarkdown = pending?.markdown ?? current.baseMarkdown;
+  const afterSaveKey = pending?.idempotencyKey;
+  if (markdown === baseMarkdown) return { changes: [], afterSaveKey };
+  const previous = current.textChanges;
+  const preceding = current.markdown === baseMarkdown ? [] : previous && previous.afterSaveKey === afterSaveKey
+    ? previous.changes : minimalTextChanges(baseMarkdown, current.markdown);
+  return {
+    changes: composeTextChanges(baseMarkdown, preceding, changes)
+      .filter((change) => baseMarkdown.slice(change.from, change.to) !== change.insert),
+    afterSaveKey,
+  };
+}
+
+function recoveredTextChanges(value: PersistenceDraftTextChanges | undefined, base: string, markdown: string, pending: PendingSave | undefined): PersistenceDraftTextChanges | undefined {
+  if (!value || !Array.isArray(value.changes)) return undefined;
+  if (value.afterSaveKey !== undefined) {
+    if (!pending || value.afterSaveKey !== pending.idempotencyKey) return undefined;
+    base = pending.markdown;
+  }
+  let previousEnd = 0;
+  for (const change of value.changes) {
+    if (!change || !Number.isSafeInteger(change.from) || !Number.isSafeInteger(change.to) ||
+        change.from < previousEnd || change.to < change.from || change.to > base.length || typeof change.insert !== "string") return undefined;
+    previousEnd = change.to;
+  }
+  return applyTextChanges(base, value.changes) === markdown ? value : undefined;
 }
 
 function minimalTextChanges(source: string, target: string): TextChange[] {

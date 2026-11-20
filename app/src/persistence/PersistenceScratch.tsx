@@ -19,13 +19,28 @@ export function PersistenceScratch({ projectId, documentId, authorScope, journal
   const [saving, setSaving] = useState(false);
   const pendingRead = useRef<Promise<void>>(Promise.resolve());
   const saveTail = useRef<Promise<void>>(Promise.resolve());
+  const protectedScratch = useRef<{ text: string; generation: number } | null>(null);
   const path = `scratch/${documentId}`;
   function publish(value: Scratch) { draftRef.current = value; setDraft(value); }
   async function protect(): Promise<void> {
-    const read = pendingRead.current;
+    let read = pendingRead.current;
     await read;
+    while (pendingRead.current !== read) {
+      read = pendingRead.current;
+      await read;
+    }
     const current = draftRef.current;
-    const task = saveTail.current.catch(() => {}).then(() => journal.putScratch(projectId, path, JSON.stringify(current), authorScope));
+    const known = protectedScratch.current;
+    if (!known || current.generation <= known.generation) return;
+    const task = saveTail.current.catch(() => {}).then(async () => {
+      const base = protectedScratch.current;
+      if (!base || current.generation <= base.generation) return;
+      const text = JSON.stringify(current);
+      if (!await journal.putScratch(projectId, path, text, authorScope, base.text)) {
+        throw new Error("別タブでスクラッチが更新されました。現在の入力を保持しています。");
+      }
+      protectedScratch.current = { text, generation: current.generation };
+    });
     saveTail.current = task;
     try { await task; setProtectedGeneration(current.generation); setError(""); }
     catch (cause) { const message = cause instanceof Error ? cause.message : "スクラッチを保護できませんでした。"; setError(message); throw cause; }
@@ -36,11 +51,15 @@ export function PersistenceScratch({ projectId, documentId, authorScope, journal
     let cancelled = false;
     void journal.getScratch(projectId, path, authorScope).then((raw) => {
       if (cancelled) return;
+      let initial = empty();
       if (raw) {
         const parsed: unknown = JSON.parse(raw);
         if (!parsed || typeof parsed !== "object" || typeof (parsed as Scratch).text !== "string" || !Array.isArray((parsed as Scratch).images) || !(parsed as Scratch).images.every((image) => image && typeof image.name === "string" && typeof image.data === "string" && image.data.startsWith("data:image/")) || !Number.isSafeInteger((parsed as Scratch).generation) || (parsed as Scratch).generation < 0) throw new Error("スクラッチの回復記録を確認できませんでした。元の記録は保持しています。");
-        publish(parsed as Scratch); setProtectedGeneration((parsed as Scratch).generation);
+        initial = parsed as Scratch;
       }
+      protectedScratch.current = { text: raw, generation: initial.generation };
+      publish(initial);
+      setProtectedGeneration(initial.generation);
       setLoading(false);
     }).catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : "スクラッチを読み込めませんでした。"); });
     registerGuard(() => protectRef.current());
