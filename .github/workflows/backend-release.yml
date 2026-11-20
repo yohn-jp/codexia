@@ -31,6 +31,11 @@ on:
       - pnpm-workspace.yaml
       - tsconfig.base.json
       - .github/workflows/backend-release.yml
+      - deploy/release-impact-paths.json
+      - scripts/release-impact.mjs
+      - scripts/release-impact.test.mjs
+      - scripts/release-source-gate.mjs
+      - scripts/release-source-gate.test.mjs
   workflow_run:
     workflows: [Verify Codexia]
     types: [completed]
