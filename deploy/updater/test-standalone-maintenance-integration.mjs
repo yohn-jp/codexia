@@ -659,12 +659,12 @@ function readPodmanApiAuthTokenSecret(){
   return secret;
 }
 
-async function recoverMaintenanceAtBoot({config,expectedImage,nonce}){
+async function recoverMaintenanceAtBoot({repoRoot,config,expectedImage,nonce}){
   const watchedEnvironment=['NODE_OPTIONS','XDG_STATE_HOME','CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE','CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY',
     'CODEXIA_RUNTIME_MAINTENANCE_BACKUP_DIGEST','CODEXIA_RUNTIME_MAINTENANCE_IMAGE','CODEXIA_RUNTIME_MAINTENANCE_NONCE'];
   const managerEnvironment=run('systemctl',['--user','show-environment']).split('\n');
   const restore=Object.fromEntries(watchedEnvironment.map(name=>[name,managerEnvironment.find(line=>line.startsWith(name+'='))?.slice(name.length+1)??null]));
-  const preload=path.join(SOURCE_ROOT,'deploy/updater/test-standalone-maintenance-preload.mjs');
+  const preload=path.join(repoRoot,'deploy/updater/test-standalone-maintenance-preload.mjs');
   run('systemctl',['--user','set-environment',`NODE_OPTIONS=--import=${preload}`,
     `XDG_STATE_HOME=${path.dirname(path.dirname(config.stateFile))}`,'CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE=yes',
     'CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY=yes',`CODEXIA_RUNTIME_MAINTENANCE_BACKUP_DIGEST=${BACKUP_DIGEST_FIXTURE}`,
@@ -944,7 +944,7 @@ async function exerciseApiAuthTokenRotation({repoRoot,config,workDir,expectedIma
       assert.ok(['inactive','failed'].includes(systemdState(`codexia-slot-${state.journal.active.slot}.service`)));
       await assertTimerState('inactive','enabled');
 
-      await recoverMaintenanceAtBoot({config,expectedImage,nonce:process.env.CODEXIA_RUNTIME_MAINTENANCE_NONCE});
+      await recoverMaintenanceAtBoot({repoRoot,config,expectedImage,nonce:process.env.CODEXIA_RUNTIME_MAINTENANCE_NONCE});
       await assert.rejects(lstat(path.join(path.dirname(config.stateFile),'maintenance','in-progress.json')),{code:'ENOENT'},'Boot recovery retained the API token marker');
       assert.equal((await readFile(config.routeFile,'utf8')).trim(),state.journal.active.slot);
       await host.verifyApiAuthToken(state.journal.active.slot,replacementToken,200);
@@ -963,7 +963,7 @@ async function exerciseApiAuthTokenRotation({repoRoot,config,workDir,expectedIma
       assert.equal(completedMarker.phase,'completed');
       assert.equal((await readFile(config.routeFile,'utf8')).trim(),state.journal.active.slot);
       await assertTimerState('active','enabled');
-      await recoverMaintenanceAtBoot({config,expectedImage,nonce:process.env.CODEXIA_RUNTIME_MAINTENANCE_NONCE});
+      await recoverMaintenanceAtBoot({repoRoot,config,expectedImage,nonce:process.env.CODEXIA_RUNTIME_MAINTENANCE_NONCE});
       await assert.rejects(lstat(path.join(path.dirname(config.stateFile),'maintenance','in-progress.json')),{code:'ENOENT'},'Committed boot recovery retained the API token marker');
       await host.verifyApiAuthToken(state.journal.active.slot,completedToken,200);
       await host.verifyApiAuthToken(state.journal.active.slot,replacementToken,401);
