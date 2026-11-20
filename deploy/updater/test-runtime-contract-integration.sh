@@ -76,6 +76,12 @@ cleanup() {
     done
     for secret in "${OWNED_SECRETS[@]}"; do podman secret rm "$secret" >/dev/null 2>&1 || true; done
     [[ -z "$IMAGE_TAG" ]] || podman image rm "$IMAGE_TAG" >/dev/null 2>&1 || true
+    for image_tag in "localhost/codexia-schema-base:$NONCE" "localhost/codexia-schema-target:$NONCE"; do
+      if podman image exists "$image_tag" >/dev/null 2>&1; then
+        label="$(podman image inspect --format '{{ index .Labels "codexia.runtime-contract-test" }}' "$image_tag" 2>/dev/null || true)"
+        [[ -n "$NONCE" && "$label" == "$NONCE" ]] && podman image rm "$image_tag" >/dev/null 2>&1 || true
+      fi
+    done
     for file in "${OWNED_FILES[@]}"; do
       [[ -f "$file" && ! -L "$file" ]] || continue
       case "$(basename -- "$file")" in
@@ -674,6 +680,10 @@ remove_effective_override_text() {
   (( ${#candidates[@]} == 1 )) || die 'could not identify the unique newly created systemd CPUQuota override file'
   sed -i -E '/^(CPUQuota|CPUQuotaPerSecUSec)=/d' -- "${candidates[0]}"
 }
+
+systemctl --user start codexia-db.service
+wait_for_unit codexia-db.service active
+node "$SCRIPT_DIR/test-schema-maintenance-postgres-integration.mjs" "$REPO_ROOT" "$WORK_DIR" "$NONCE" "${GITHUB_SHA:?GitHub source revision is required}"
 
 systemctl --user start codexia-slot-blue.service
 wait_for_unit codexia-slot-blue.service active
