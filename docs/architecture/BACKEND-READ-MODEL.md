@@ -9,6 +9,11 @@ Normative architecture for PostgreSQL-backed reads and derived computation. [Cor
 - Distinguish canonical records, durable pinned projections (which support historical readers across restart), and evictable in-memory indexes. An in-memory cache is never a substitute for durable historical availability, approvals, receipts or read-set validation. No TTL may define currentness.
 - Keep the existing public HTTP/MCP DTOs, errors, IDs, ordering, Unicode semantics and authorization contracts. No API epoch, migration fingerprint or persistence-format change is implied by internal optimization.
 
+## Project library
+
+- Owner project discovery is a bounded keyset read ordered by `updatedAt` descending and project ID ascending. `GET /api/v1/persistence/projects?page=1&limit=200` returns `{ projects, nextCursor }`; pass the opaque `nextCursor` as `cursor` to continue. MCP `list_projects` exposes the same continuation as `next_cursor`.
+- The no-page HTTP response remains the legacy array for existing clients. Hosted pages contain only the assigned project and never enumerate the owner library. A project deep link reads its requested identity directly; a missing target is an error and must not select the first listed project.
+
 ## Read paths and ownership
 
 | Path | Required behavior | Owner |
