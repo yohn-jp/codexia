@@ -430,6 +430,27 @@ test("a pending scratch image read is flushed to its captured document before na
   expect((await scratchRecords(page)).some((r) => r.key.includes(f.two.document.id) && r.text.includes("Attachment belongs to Scene One."))).toBe(false);
 });
 
+test("scratch still protects text and accepts a new image after an oversized attachment", async ({ page }) => {
+  const f = await fixture(page);
+  await scratch(page);
+  await image(page).setInputFiles(png);
+  const attachment = page.locator(".scratch-panel").getByRole("img", { name: png.name });
+  await expect(attachment).toBeVisible();
+  await image(page).setInputFiles({ name: "too-large.png", mimeType: "image/png", buffer: Buffer.alloc(3 * 1024 * 1024 + 1) });
+  await expect(page.locator(".scratch-panel").getByRole("alert")).toContainText("3MB以下");
+  await memo(page).fill("Scratch remains usable after a rejected attachment.");
+  await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+  await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
+  await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
+  await expect(page.getByRole("heading", { name: "Scene One", exact: true })).toBeVisible();
+  await scratch(page);
+  await expect(memo(page)).toHaveValue("Scratch remains usable after a rejected attachment.");
+  await expect(attachment).toBeVisible();
+  await image(page).setInputFiles({ ...png, name: "replacement.png" });
+  await expect(page.locator(".scratch-panel").getByRole("img", { name: "replacement.png" })).toBeVisible();
+  await expect.poll(async () => (await scratchRecords(page)).find((r) => r.key.includes(f.one.document.id))?.text).toContain("replacement.png");
+});
+
 test("resuming an older scratch generation cannot replace newer unprotected input", async ({ page }) => {
   await fixture(page); await scratch(page); await memo(page).fill("Protected older scratch generation.");
   await editor(page).click(); await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Protected older scratch generation."))).toBe(true);
