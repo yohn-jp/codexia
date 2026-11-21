@@ -1,4 +1,3 @@
-import { createHmac } from 'node:crypto';
 
 const requiredSettings = Object.freeze([
   ['VITE_CODEXIA_OAUTH_ISSUER', 'OAuth issuer'],
@@ -9,7 +8,6 @@ const requiredSettings = Object.freeze([
 ]);
 const scopesSetting = 'VITE_CODEXIA_OAUTH_SCOPES';
 const configFormat = 'codexia-web-oauth-config/v1';
-const sha256Pattern = /^[a-f0-9]{64}$/u;
 
 function configured(value) {
   return value !== undefined && value !== null && value !== '';
@@ -66,20 +64,16 @@ export function readFrontendOAuthConfig(env = process.env) {
   });
 }
 
-/** Stable identity for the public OAuth configuration embedded in a static bundle. */
-export function frontendOAuthConfigHash(env = process.env) {
-  const config = readFrontendOAuthConfig(env);
-  // Domain-separated fingerprint of public metadata; the key is public, not an authentication secret.
-  return createHmac('sha256', configFormat)
-    .update(JSON.stringify({ format: configFormat, settings: config }))
-    .digest('hex');
+/** Exact identity for the public OAuth configuration embedded in a static bundle. */
+export function frontendOAuthConfigIdentity(env = process.env) {
+  return JSON.stringify({ format: configFormat, settings: readFrontendOAuthConfig(env) });
 }
 
 /** Reject promotion or release artifacts that were built with different public OAuth settings. */
 export function assertFrontendOAuthConfigIdentity(identity, env = process.env) {
-  const expected = frontendOAuthConfigHash(env);
-  if (!identity || typeof identity !== 'object' || Array.isArray(identity) || identity.oauthConfigSha256 !== expected ||
-      typeof identity.oauthConfigSha256 !== 'string' || !sha256Pattern.test(identity.oauthConfigSha256)) {
+  const expected = frontendOAuthConfigIdentity(env);
+  if (!identity || typeof identity !== 'object' || Array.isArray(identity) ||
+      typeof identity.oauthConfigIdentity !== 'string' || identity.oauthConfigIdentity !== expected) {
     throw new Error('Frontend artifact OAuth configuration does not match the current public settings.');
   }
   return identity;
