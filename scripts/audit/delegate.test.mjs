@@ -130,10 +130,10 @@ test('compact packet preserves fenced diff containing a source heading collision
     const result = buildDelegation(f);
     assert.equal(result.reviews[head].published, 1);
     const compact = readFileSync(join(f.site, 'reviews', head, 'gemini-diff.md'), 'utf8');
-    assert.match(compact, /\\+# Full file at head/);
+    assert.ok(compact.includes('+# Full file at head'));
     assert.match(compact, /Review this file and relevant cross-file behavior/);
     assert.match(compact, /END_OF_PACKET/);
-    const markers = compact.match(/^\\x60{3,}$/gmu) ?? [];
+    const markers = compact.match(/^`{3,}$/gmu) ?? [];
     assert.equal(markers.length % 2, 0, 'All fenced blocks must close');
   } finally { rmSync(f.base, { recursive: true, force: true }); }
 });
