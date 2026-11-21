@@ -26,8 +26,8 @@
 - name: Reject implicit preflight password rotation
   ansible.builtin.assert:
     that: >-
-      ((existing_secret.stdout | from_json | first).SecretData | regex_replace('\\n$', ''))
-      == codexia_preflight_password
+      (existing_secret.stdout | from_json | first).SecretData
+      in [codexia_preflight_password, codexia_preflight_password ~ '\n']
   no_log: true
   when: secret_exists.rc == 0
 - name: Reject reuse of the existing writer or administrator credential

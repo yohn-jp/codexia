@@ -1053,14 +1053,25 @@ async function exercisePreflightPasswordRotation({repoRoot,config,userUnitDir,wo
     await database.verifyPostgresPreflightPassword(oldPassword);
     const rejectPreflightPassword=password=>assert.rejects(database.verifyPostgresPreflightPassword(password,{secretRequired:false}),
       /password authentication failed/iu);
-    const replacement=randomBytes(32).toString('hex')+'\n';
-    candidate=await createPreflightPasswordRotationCandidate({stateDir,config,userUnitDir,password:replacement});
+    const replacement=randomBytes(32).toString('hex');
+    candidate=await createPreflightPasswordRotationCandidate({stateDir,config,userUnitDir,password:replacement+'\n'});
     await runPreflightPasswordRotationCandidate({repoRoot,candidate,configPath:candidate.manifest.configPath,environment});
     await assert.rejects(lstat(markerPath),{code:'ENOENT'},'Successful preflight rotation retained its recovery marker');
     const rotatedSecret=JSON.parse(run('podman',['secret','inspect','--showsecret','codexia-postgres-preflight-password']))[0];
     assert.notEqual(rotatedSecret.ID,oldSecretId,'Immutable preflight Podman secret did not change');
-    assert.equal(rotatedSecret.SecretData,replacement,'LF-suffixed rotation input bytes were not preserved in the Podman secret');
+    assert.equal(rotatedSecret.SecretData,replacement,'Rotation did not store the 64-character PostgreSQL password');
     await database.verifyPostgresPreflightPassword(replacement);
+    const preflightPlaybook=path.join(workDir,'verify-rotated-preflight.json');
+    await writeFile(preflightPlaybook,JSON.stringify([{
+      hosts:'localhost',connection:'local',gather_facts:false,
+      vars:{ansible_python_interpreter:'/usr/bin/python3',repo_root:repoRoot,
+        codexia_preflight_password:replacement,preflight_verify_only:true},
+      tasks:[{'ansible.builtin.include_tasks':path.join(repoRoot,'deploy/ansible/preflight.yml')}],
+    }]),{mode:0o600,flag:'wx'});
+    try{
+      const result=run(process.env.ANSIBLE_PLAYBOOK??'ansible-playbook',['-i','localhost,',preflightPlaybook]);
+      assert.match(result,/changed=0\s/u,'Ansible verify unexpectedly modified the rotated preflight credential');
+    }finally{await rm(preflightPlaybook,{force:true});}
     await database.verifyPostgresAppPassword(appPassword);
     await rejectPreflightPassword(oldPassword);
     assert.equal(await database.passwordRotationDatabaseId(),databaseIdentity,'Preflight rotation changed the database identity');
@@ -1078,7 +1089,7 @@ async function exercisePreflightPasswordRotation({repoRoot,config,userUnitDir,wo
     assert.equal(marker.format,'codexia-maintenance-postgres-preflight-password/v1');
     assert.equal(marker.phase,'applying');
     assert.equal(marker.rotation.previousDigest,createHash('sha256').update(replacement).digest('hex'),
-      'Durable previous-password digest did not preserve the exact LF-suffixed secret bytes');
+      'Durable previous-password digest did not match the exact stored 64-character secret');
     assert.equal((await readFile(config.routeFile,'utf8')),'blocked\n','Preflight SQL interruption did not keep the route fenced');
     await database.verifyPostgresPreflightPassword(interruptedPassword,{secretRequired:false});
     await rejectPreflightPassword(replacement);
