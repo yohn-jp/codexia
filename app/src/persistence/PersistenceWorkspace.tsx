@@ -361,6 +361,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const [newDocumentParent, setNewDocumentParent] = useState("");
   const [knowledgeName, setKnowledgeName] = useState("");
   const [knowledgeType, setKnowledgeType] = useState("person");
+  const [knowledgeCreateError, setKnowledgeCreateError] = useState<{ projectId: string; message: string } | null>(null);
   const [revisions, setRevisions] = useState<DocumentRevision[]>([]);
   const [showRevisions, setShowRevisions] = useState(false);
   const [revisionCursor, setRevisionCursor] = useState<string | null>(null);
@@ -1661,6 +1662,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   async function createKnowledge(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (!project || !knowledgeName.trim()) return;
+    setKnowledgeCreateError(null);
     const id = crypto.randomUUID() as KnowledgeNodeId;
     try {
       const result = await api.savePersistenceNode(project.id, id, {
@@ -1676,7 +1678,11 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       setKnowledgeName("");
       setNotice("Knowledge候補を保存しました。内容を確認してから確定してください。");
     } catch (error) {
-      setPageError(error instanceof Error ? error.message : "Knowledgeを保存できませんでした。");
+      if (projectIdRef.current === project.id) {
+        const message = error instanceof Error ? error.message : "Knowledgeを保存できませんでした。";
+        if (mode === "mobile") setPageError(message);
+        else setKnowledgeCreateError({ projectId: project.id, message });
+      }
     }
   }
 
@@ -2362,6 +2368,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             {nodes.map((node) => <option key={node.id} value={node.id}>{node.name} · {node.status === "confirmed" ? "確定" : node.status === "proposed" ? "候補" : "退役"}</option>)}
           </select>
         </details>
+          {knowledgeCreateError?.projectId === projectId && <p className="pg-alert" role="alert">{knowledgeCreateError.message}</p>}
           <search aria-label="Knowledgeを検索・絞り込み">
             <form onSubmit={(event) => event.preventDefault()}>
               <label htmlFor="pg-knowledge-search">名前または別名で検索</label>

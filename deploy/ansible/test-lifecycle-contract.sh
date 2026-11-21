@@ -160,13 +160,20 @@ done
 preflight_rotation_password='abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789'
 preflight_rotation_file="$tmp/preflight-password"
 preflight_restore_receipt="$tmp/preflight-restore-receipt.json"
-printf '%s\n' "$preflight_rotation_password" > "$preflight_rotation_file"
+printf '%s' "$preflight_rotation_password" > "$preflight_rotation_file"
 printf '%s\n' '{"format":"codexia-restore-receipt/v1"}' > "$preflight_restore_receipt"
 chmod 0600 "$preflight_rotation_file" "$preflight_restore_receipt"
 CODEXIA_TEST_PREFLIGHT_PASSWORD_FILE="$preflight_rotation_file" CODEXIA_TEST_PREFLIGHT_RESTORE_RECEIPT_FILE="$preflight_restore_receipt" \
-  ansible-playbook -i localhost, -c local "$root/deploy/ansible/test-preflight-password-rotation-inputs.yml" > "$tmp/preflight-rotation-valid.log" 2>&1 || {
-    cat "$tmp/preflight-rotation-valid.log" >&2
-    echo 'Valid protected preflight-password inputs were rejected' >&2
+  ansible-playbook -i localhost, -c local "$root/deploy/ansible/test-preflight-password-rotation-inputs.yml" > "$tmp/preflight-rotation-valid-no-lf.log" 2>&1 || {
+    cat "$tmp/preflight-rotation-valid-no-lf.log" >&2
+    echo 'Valid protected preflight-password input without LF was rejected' >&2
+    exit 1
+  }
+printf '%s\n' "$preflight_rotation_password" > "$preflight_rotation_file"
+CODEXIA_TEST_PREFLIGHT_PASSWORD_FILE="$preflight_rotation_file" CODEXIA_TEST_PREFLIGHT_RESTORE_RECEIPT_FILE="$preflight_restore_receipt" \
+  ansible-playbook -i localhost, -c local "$root/deploy/ansible/test-preflight-password-rotation-inputs.yml" > "$tmp/preflight-rotation-valid-lf.log" 2>&1 || {
+    cat "$tmp/preflight-rotation-valid-lf.log" >&2
+    echo 'Valid protected preflight-password input with final LF was rejected' >&2
     exit 1
   }
 chmod 0644 "$preflight_rotation_file"
