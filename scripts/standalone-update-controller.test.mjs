@@ -91,6 +91,40 @@ test('a recovered signed poll with no candidate clears only its channel error',a
  assert.deepEqual(persisted(),recovered);
  assert.deepEqual(h.trace,[]);
 });
+test('boot clears a prior channel polling error only after the installed service verifies',async()=>{
+ const {h,controller,state,persisted}=fixture();
+ const failed={...state,lastError:'Update channel check failed: channel temporarily unavailable'};
+ const recovered=await controller.reconcile(failed,{boot:true});
+ assert.equal(recovered.lastError,null);
+ assert.equal(h.target,'blue');assert.deepEqual(h.writers,[{slot:'blue',image:old.image}]);
+ assert.deepEqual(persisted(),recovered);
+ h.target='blocked';
+ const blocked=await controller.reconcile(failed,{boot:true});
+ assert.match(blocked.lastError,/Topology reconciliation blocked/);
+ assert.equal(h.target,'blocked');
+});
+test('update refuses to drain a current release missing from the signed channel',async()=>{
+ const {h,controller,state}=fixture();h.releases=[next];
+ const result=await controller.tick(state);
+ assert.match(result.lastError,/Installed release absent or withdrawn/u);
+ assert.equal(result.installed.image,old.image);assert.equal(h.target,'blue');
+ assert.deepEqual(h.writers,[{slot:'blue',image:old.image}]);
+ assert.ok(!h.trace.includes('stop:blue'));
+});
+test('update preserves the active writer when its release is withdrawn at final channel recheck',async()=>{
+ const {h,controller,state}=fixture();
+ const prepare=h.prepare.bind(h);
+ h.prepare=async(slot,release)=>{
+  await prepare(slot,release);
+  h.sequence++;
+  h.releases=[next];
+ };
+ const result=await controller.tick(state);
+ assert.equal(result.installed.image,old.image);
+ assert.match(result.lastError,/Installed release absent or withdrawn before cutover/u);
+ assert.equal(h.target,'blue');assert.deepEqual(h.writers,[{slot:'blue',image:old.image}]);
+ assert.ok(!h.trace.includes('stop:blue'));
+});
 test('a polling outage and recovery preserve interruption evidence and rejected images',async()=>{
  const {h,controller,state}=fixture();
  const lastError='Interrupted update recovered from durable journal';
