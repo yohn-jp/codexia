@@ -273,18 +273,24 @@ test('browser artifacts bind the selected module closure to every reachable UI e
   const directory = await mkdtemp(path.join(tmpdir(), 'codexia-browser-closure-'));
   const source = '../modules/story/dist/browser.js';
   const manifests = new Map();
-  async function emit(ui, withModule) {
+  async function emit(ui, withModule, modern = false) {
     const output = path.join(directory, 'app/dist', ui);
     await mkdir(path.join(output, '.vite'), { recursive: true });
     await mkdir(path.join(output, 'assets'), { recursive: true });
+    const worker = 'assets/revision-difference-worker-XyZ00001.js';
     const manifest = {
-      'index.html': { file: 'assets/index-AbCd1234.js', isEntry: true, css: ['assets/styles-EfGh5678.css'], dynamicImports: withModule ? [source] : [] },
+      'index.html': { file: 'assets/index-AbCd1234.js', isEntry: true, css: ['assets/styles-EfGh5678.css'],
+        dynamicImports: [...(modern && ui ? ['index.html'] : []), ...(withModule ? [source] : [])],
+        ...(modern && ui ? { imports: ['_shared.js'], assets: [worker] } : {}),
+      },
+      ...(modern && ui ? { '_shared.js': { file: 'assets/shared-AbCd1234.js' } } : {}),
       ...(withModule ? { [source]: { file: 'assets/story-AbCd1234.js', isDynamicEntry: true, src: source } } : {}),
     };
-    const worker = 'assets/revision-difference-worker-XyZ00001.js';
-    for (const file of ['assets/index-AbCd1234.js', 'assets/styles-EfGh5678.css', ...(withModule ? ['assets/story-AbCd1234.js'] : []), ...(ui ? [worker] : [])]) {
+    for (const file of ['assets/index-AbCd1234.js', 'assets/styles-EfGh5678.css', ...(withModule ? ['assets/story-AbCd1234.js'] : []), ...(modern && ui ? ['assets/shared-AbCd1234.js'] : []), ...(ui ? [worker] : [])]) {
       const body = ui && file === 'assets/index-AbCd1234.js'
-        ? `new Worker("${'/' + ui + '/' + worker}");`
+        ? modern
+          ? `new Worker(new URL(\`/${ui}/${worker}\`,\`\`+import.meta.url),{type:\`module\`});`
+          : `new Worker(new URL("/${ui}/${worker}",import.meta.url),{type:"module"});`
         : '/* fixture */';
       await writeFile(path.join(output, file), body);
     }
@@ -316,6 +322,16 @@ test('browser artifacts bind the selected module closure to every reachable UI e
     launcher['index.html'].dynamicImports = [];
     await writeFile(path.join(directory, 'app/dist/.vite/manifest.json'), JSON.stringify(launcher));
     await assert.rejects(browserArtifactRecords(directory, ['story']), /different browser module closure/);
+    // Vite 8/Rolldown may refer back to its own index.html entry and list a
+    // shared chunk and the authoring Worker as assets. Both remain closed over
+    // the expected app entry and selected browser modules.
+    await emit('', true, true);
+    await emit('desktop', true, true);
+    await emit('mobile', true, true);
+    const modernRecords = await browserArtifactRecords(directory, ['story']);
+    assert.equal(modernRecords.files.filter(({ path: name }) => name.includes('revision-difference-worker')).length, 2);
+    await writeFile(path.join(directory, 'app/dist/mobile/assets/index-AbCd1234.js'), '/* missing Worker URL */');
+    await assert.rejects(browserArtifactRecords(directory, ['story']), /does not reference its revision comparison worker/);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
