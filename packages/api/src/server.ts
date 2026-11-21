@@ -3,7 +3,7 @@ import { scheduleAtDeadline } from "./deadline-timer.js";
 import { authorizationFailure } from "./authorization-error.js";
 import { readCodexiaEnvironment } from "./environment.js";
 import { createCloudflareAccessVerifier, type CloudflareAccessOptions } from "./cloudflare-access.js";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -60,6 +60,30 @@ const RUNTIME_CONTROL_JWKS_TIMEOUT_MS = 1_000;
 const MAX_JSON_BYTES = 12 * 1024 * 1024;
 const MAX_SNAPSHOT_FILES = 1000;
 const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
+const CORE_ACTION_OPERATION_ID_PREFIX = "core_action_v1_";
+
+function coreActionOperationId(
+  projectId: string,
+  actionId: string,
+  snapshot: SnapshotId,
+  proposalId: string,
+  input: unknown,
+): string {
+  const identity = JSON.stringify({
+    version: 1,
+    projectId,
+    actionId,
+    projectVersion: snapshot.projectVersion,
+    proposalId,
+    input,
+  });
+  if (identity === undefined) throw new Error("Core action input must be JSON serializable");
+  return CORE_ACTION_OPERATION_ID_PREFIX + createHash("sha256").update(identity, "utf8").digest("hex");
+}
+
+function isCoreActionOperationId(operationId: string): boolean {
+  return /^core_action_v1_[0-9a-f]{64}$/u.test(operationId);
+}
 const POSTGRES_REVISION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const MAX_SCRATCH_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const API_DRAIN_TIMEOUT_MS = 5_000;
@@ -851,7 +875,7 @@ export function createServer(options: ApiServerOptions): Server {
     const makeProposal = (
       id: string,
       inputSchema: ValueSchema,
-      build: (context: ModuleActionContext, input: unknown) => Promise<{ snapshot: SnapshotId; operation: ChangeOperation }>,
+      build: (context: ModuleActionContext, input: unknown, existingProposal: ChangeProposal | null) => Promise<{ snapshot: SnapshotId; operation: ChangeOperation }>,
     ): ModuleAction => ({
       id,
       effect: "propose",
@@ -863,13 +887,29 @@ export function createServer(options: ApiServerOptions): Server {
         });
         try {
           if (context.signal.aborted) return failAction("action_cancelled", "Action was cancelled");
-          const built = await build(context, input);
+          const proposalId = isRecord(input) && typeof input.proposalId === "string" ? input.proposalId : undefined;
+          const existing = proposalId && coreStore.getProposal
+            ? await coreStore.getProposal(projectId, proposalId)
+            : null;
+          if (existing && existing.proposal.id !== proposalId) {
+            return failAction("proposal_identity_invalid", "Core returned a mismatched proposal identity");
+          }
+          const built = await build(context, input, existing?.proposal ?? null);
           if (context.signal.aborted) return failAction("action_cancelled", "Action was cancelled");
           if (snapshotKey(built.snapshot) !== snapshotKey(context.reader.snapshot)) {
             return failAction("snapshot_changed", "The proposed operation was built from a different snapshot", true);
           }
-          const proposalId = isRecord(input) && typeof input.proposalId === "string" ? input.proposalId : undefined;
-          const proposal = await context.propose([built.operation], undefined, proposalId);
+          const operationId = proposalId
+            ? coreActionOperationId(projectId, id, built.snapshot, proposalId, input)
+            : built.operation.id;
+          const existingOperationId = existing?.proposal.operations.length === 1
+            ? existing.proposal.operations[0]!.id
+            : undefined;
+          const operation = {
+            ...built.operation,
+            id: existingOperationId && !isCoreActionOperationId(existingOperationId) ? existingOperationId : operationId,
+          };
+          const proposal = await context.propose([operation], undefined, proposalId);
           return { ok: true, snapshot: context.reader.snapshot, data: { proposal } };
         } catch (error) {
           const candidate = error as { code?: unknown; message?: unknown; retryable?: unknown; status?: unknown };
@@ -882,8 +922,13 @@ export function createServer(options: ApiServerOptions): Server {
       },
     });
     return [
-      { module: "core", action: makeProposal("core.hierarchy.create", hierarchyCreateInput, (context, input) =>
-        options.store.buildCreateHierarchyOperation(projectId, input as CreateHierarchyInput, context.reader.snapshot)) },
+      { module: "core", action: makeProposal("core.hierarchy.create", hierarchyCreateInput, (context, input, existingProposal) =>
+        options.store.buildCreateHierarchyOperation(
+          projectId,
+          input as CreateHierarchyInput,
+          context.reader.snapshot,
+          existingProposal !== null && snapshotKey(existingProposal.snapshot) === snapshotKey(context.reader.snapshot),
+        )) },
       { module: "core", action: makeProposal("core.hierarchy.delete", hierarchyDeleteInput, (context, input) =>
         options.store.buildDeleteHierarchyOperation(projectId, (input as { target: HierarchyTarget }).target, context.reader.snapshot)) },
       { module: "core", action: makeProposal("core.hierarchy.reorder", hierarchyReorderInput, (context, input) =>
