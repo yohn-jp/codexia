@@ -38,6 +38,7 @@ on:
       - scripts/create-backend-deployment-certificates.mjs
       - scripts/verify-backend-push-handoff.mjs
       - scripts/push-deployment-*.test.mjs
+      - scripts/backend-deployment-handoff-contract.test.mjs
       - scripts/verify-backend-push-handoff.test.mjs
       - .github/workflows/backend-deployment-handoff.yml
       - scripts/publish-stable-channel.mjs

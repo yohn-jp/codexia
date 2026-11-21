@@ -181,7 +181,6 @@ export async function verifyBackendPushHandoff(options = {}) {
   assert.equal(triggered?.head_repository?.full_name, REPOSITORY, 'Backend publication source repository mismatch');
   assert.ok(positive(triggered?.id) && positive(triggered?.run_attempt), 'Backend publication run identity is invalid');
   assert.match(triggered?.head_sha ?? '', sha, 'Backend publication main SHA is invalid');
-  assert.equal(env.GITHUB_SHA, triggered.head_sha, 'Handoff checkout SHA differs from backend publication source');
   assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), triggered.head_sha,
     'Handoff checkout differs from backend publication SHA');
   const token = env.GH_TOKEN || env.GITHUB_TOKEN;
