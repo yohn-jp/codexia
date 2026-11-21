@@ -230,6 +230,8 @@ sudo -H -u "$service_user" env HOME="$service_home" XDG_CONFIG_HOME="$service_ho
 for file in test-channel-public.pem channel-fresh-schema.json simulated-frontend-identity-fresh-schema.json release-0.1.455.json; do
   sudo install -o "$service_user" -g "$service_group" -m 0600 "$phase_dir/channel/$file" "$phase_dir/$file"
 done
+sudo install -o "$(id -u)" -g "$(id -g)" -m 0600 \
+  "$phase_dir/release-0.1.455.json" "$tmp/release-0.1.455.json"
 sudo install -o "$service_user" -g "$service_group" -m 0600 "$tmp/inputs/github-read-token" "$phase_dir/github-read-token"
 sudo install -o "$service_user" -g "$service_group" -m 0600 "$tmp/inputs/access-client-id" "$phase_dir/access-client-id"
 sudo install -o "$service_user" -g "$service_group" -m 0600 "$tmp/inputs/access-client-secret" "$phase_dir/access-client-secret"
@@ -270,7 +272,7 @@ server.listen(0, '127.0.0.1', () => {
 });
 process.on('SIGTERM', () => server.close(() => process.exit(0)));
 NODE
-PHASE_F_RELEASE_FILE="$phase_dir/release-0.1.455.json" \
+PHASE_F_RELEASE_FILE="$tmp/release-0.1.455.json" \
 PHASE_F_ACCESS_ID_FILE="$tmp/inputs/access-client-id" \
 PHASE_F_ACCESS_SECRET_FILE="$tmp/inputs/access-client-secret" \
 PHASE_F_SERVER_KEY="$tmp/identity-server.key" \
@@ -289,7 +291,7 @@ frontend_origin="https://127.0.0.1:$(cat "$tmp/identity-port")"
 frontend_identity_url="$frontend_origin/desktop/update-identity.json"
 SSL_CERT_FILE="$tmp/identity-server.crt" /usr/bin/node --input-type=module - \
   "$tmp/identity-server.crt" "$frontend_origin" "$tmp/inputs/access-client-id" "$tmp/inputs/access-client-secret" \
-  "$phase_dir/release-0.1.455.json" <<'NODE'
+  "$tmp/release-0.1.455.json" <<'NODE'
 import assert from 'node:assert/strict';
 import { request } from 'node:https';
 import { readFileSync } from 'node:fs';

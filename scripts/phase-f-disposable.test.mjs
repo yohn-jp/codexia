@@ -82,6 +82,8 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
     'apply_service enable',
     'apply_service pause',
     "fetch(origin + '/api/v1/persistence/projects'",
+    '"$phase_dir/release-0.1.455.json" "$tmp/release-0.1.455.json"',
+    'PHASE_F_RELEASE_FILE="$tmp/release-0.1.455.json"',
     'migration_ledger',
     'pg_control_system()',
     'codexia-api-proxy',
