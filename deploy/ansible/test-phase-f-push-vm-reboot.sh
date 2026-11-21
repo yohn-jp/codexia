@@ -170,7 +170,12 @@ guest_sudo <<'GUEST'
 set -Eeuo pipefail
 install -d -o codexia -g codexia -m 0700 /home/codexia/.local/state/phase-f-vm-reboot
 install -d -o codexia -g codexia -m 0700 /home/codexia/.local/share
+install -d -o codexia -g codexia -m 0700 /home/codexia/.config
+install -d -o codexia -g codexia -m 0700 /home/codexia/.config/containers
 install -d -o codexia -g codexia -m 0700 /home/codexia/.config/containers/systemd
+test "$(stat -c '%U:%G' /home/codexia/.config)" = codexia:codexia
+test "$(stat -c '%U:%G' /home/codexia/.config/containers)" = codexia:codexia
+test "$(stat -c '%U:%G' /home/codexia/.config/containers/systemd)" = codexia:codexia
 secret_file=/home/codexia/.local/state/phase-f-vm-reboot/postgres-password
 sudo -u codexia bash -c 'umask 077; openssl rand -hex 32 > "$1"' _ "$secret_file"
 cd /
