@@ -428,7 +428,7 @@ function sourceDomainJobRuntime(cacheDirectory: string): {
 async function startCustomApi(
   store: CoreStore,
   staticDir: string,
-  options: Partial<Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence" | "cloudflareAccess">> = {},
+  options: Partial<Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence" | "cloudflareAccess" | "oauthOwner">> = {},
 ) {
   const server = createServer({ store, authToken: ACCESS_TOKEN, staticDir, persistence: admissionPersistence(store), ...options });
   await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
@@ -2289,6 +2289,91 @@ describe("Codexia HTTP boundary", () => {
 
     assert.equal((await send("/api/login", { Origin: origin, "Content-Type": "application/json" }, { method: "POST", body: JSON.stringify({ token: ACCESS_TOKEN }) })).status, 410);
     assert.equal((await send("/api/logout", { ...browser, Origin: origin }, { method: "POST" })).status, 410);
+  });
+
+  it("authorizes standalone owner writes only with a verified API-audience OAuth access token", async (t) => {
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-oauth-owner-"));
+    tempDirs.push(staticDir);
+    const issuer = "https://identity.example.test/";
+    const audience = "https://api.codexia.example";
+    const key = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const jwk = { ...key.publicKey.export({ format: "jwk" }), kid: "oauth-owner-test-key", alg: "RS256", use: "sig" };
+    const now = Math.floor(Date.now() / 1000);
+    const token = (overrides: Record<string, unknown> = {}, typ = "at+jwt", kid = jwk.kid) => {
+      const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+      const unsigned = encode({ alg: "RS256", typ, kid }) + "." + encode({
+        iss: issuer, sub: "owner-subject", aud: audience, client_id: "codexia-web",
+        scope: "codexia:api", iat: now, exp: now + 300, jti: randomUUID(), ...overrides,
+      });
+      return unsigned + "." + signJwt("RSA-SHA256", Buffer.from(unsigned), key.privateKey).toString("base64url");
+    };
+    const persistence = await nativePersistence(t);
+    const store = new CoreStore({ persistence });
+    const api = await startCustomApi(store, staticDir, {
+      persistence, usageDirectory: staticDir,
+      oauthOwner: {
+        issuer, audience, jwksUrl: "https://identity.example.test/.well-known/jwks.json",
+        ownerSubject: "owner-subject", requiredScopes: ["codexia:api"],
+        fetch: async (input) => {
+          assert.equal(String(input), "https://identity.example.test/.well-known/jwks.json");
+          return Response.json({ keys: [jwk] });
+        },
+      },
+    });
+    t.after(api.close);
+    const headers = (credential: string) => ({ Authorization: `Bearer ${credential}` });
+    const valid = token();
+    const session = await fetch(api.base + "/api/session", { headers: headers(valid) });
+    assert.equal(session.status, 200);
+    assert.deepEqual(await session.json(), { authenticated: true, authorScope: "owner" });
+
+    const write = await fetch(api.base + "/api/projects", {
+      method: "POST", headers: { ...headers(valid), "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "OAuth owner project" }),
+    });
+    assert.equal(write.status, 201, await write.text());
+    const list = await fetch(api.base + "/api/projects", { headers: headers(valid) });
+    assert.equal(list.status, 200);
+    const projects = await list.json() as { title: string }[];
+    assert.ok(projects.some((project) => project.title === "OAuth owner project"));
+
+    const wrongOwner = await fetch(api.base + "/api/projects", {
+      method: "POST", headers: { ...headers(token({ sub: "other-subject" })), "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Denied project" }),
+    });
+    assert.equal(wrongOwner.status, 403);
+    const noScope = await fetch(api.base + "/api/projects", {
+      method: "POST", headers: { ...headers(token({ scope: "profile" })), "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Denied project" }),
+    });
+    assert.equal(noScope.status, 403);
+    const invalidTokens = [
+      token({ iss: "https://wrong.example.test/" }), token({ aud: "https://other-api.example" }),
+      token({ exp: now - 30 }), token({}, "JWT"),
+    ];
+    for (const [index, invalid] of invalidTokens.entries()) {
+      assert.equal((await fetch(api.base + "/api/session", { headers: headers(invalid) })).status, 401, `invalid OAuth token case ${index}`);
+    }
+    assert.equal((await fetch(api.base + "/api/session", { headers: headers(token({}, "at+jwt", "unpublished-key")) })).status, 401, "unknown signing keys fail closed");
+    const legacyBearerWrite = await fetch(api.base + "/api/projects", {
+      method: "POST", headers: { ...headers(ACCESS_TOKEN), "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Legacy bearer cannot author" }),
+    });
+    assert.equal(legacyBearerWrite.status, 403);
+    const bothCredentials = await fetch(api.base + "/api/projects", {
+      headers: { ...headers(valid), Cookie: "scriptorium_session=present" },
+    });
+    assert.equal(bothCredentials.status, 400);
+
+    const unavailableApi = await startCustomApi(store, staticDir, {
+      oauthOwner: {
+        issuer, audience, jwksUrl: "https://identity.example.test/.well-known/unavailable.json",
+        ownerSubject: "owner-subject", requiredScopes: ["codexia:api"],
+        fetch: async () => new Response(null, { status: 503 }),
+      },
+    });
+    t.after(unavailableApi.close);
+    assert.equal((await fetch(unavailableApi.base + "/api/session", { headers: headers(valid) })).status, 503, "unavailable JWKS fails closed without treating it as bad credentials");
   });
 
   it("marks a session cookie Secure when HTTPS is asserted by a trusted proxy", async (t) => {

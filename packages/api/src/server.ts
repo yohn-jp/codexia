@@ -3,6 +3,7 @@ import { scheduleAtDeadline } from "./deadline-timer.js";
 import { authorizationFailure } from "./authorization-error.js";
 import { readCodexiaEnvironment } from "./environment.js";
 import { createCloudflareAccessVerifier, type CloudflareAccessOptions } from "./cloudflare-access.js";
+import { createOAuthOwnerAuthenticator, OAuthAuthenticationError, type OAuthOwnerOptions } from "./oauth-owner.js";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable, Transform } from "node:stream";
@@ -133,6 +134,8 @@ export interface ApiServerOptions {
   authToken?: string;
   /** Opt-in dedicated standalone owner SSO. Never used in hosted mode. */
   cloudflareAccess?: CloudflareAccessOptions;
+  /** Optional standalone API-audience OAuth access tokens for the configured owner. */
+  oauthOwner?: OAuthOwnerOptions;
   /** Defaults to `<cwd>/app/dist`. */
   staticDir?: string;
   /** Trust X-Forwarded-Proto when TLS terminates at a reverse proxy. */
@@ -574,6 +577,8 @@ export function createServer(options: ApiServerOptions): Server {
   if (options.cloudflareAccess && (hosted || !options.trustProxy)) {
     throw new Error("Cloudflare Access browser authentication requires standalone mode and the trusted HTTPS proxy");
   }
+  if (options.oauthOwner && hosted) throw new Error("Standalone OAuth owner authentication is not available in Hosted mode");
+  const authenticateOAuthOwner = options.oauthOwner ? createOAuthOwnerAuthenticator(options.oauthOwner) : undefined;
   const cloudflareAccess = options.cloudflareAccess ? createCloudflareAccessVerifier(options.cloudflareAccess) : undefined;
   const assignment = hosted?.assignment;
   if (assignment && parseRuntimeAssignment(assignment).instanceId !== assignment.instanceId) {
@@ -1606,6 +1611,22 @@ export function createServer(options: ApiServerOptions): Server {
     const bearer = typeof authHeader === "string" && authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
     if (hosted && accessCookies.length > 1) { fail(response, 401, "UNAUTHORIZED", "Hosted access cookie is ambiguous"); return; }
     if (hosted && accessToken && bearer) { fail(response, 400, "AMBIGUOUS_CREDENTIALS", "Send either a hosted browser grant or a bearer grant"); return; }
+    if (!hosted && routePath.startsWith("/api/") && !publicRead && !publicModuleRoute && sessionId && bearer) {
+      fail(response, 400, "AMBIGUOUS_CREDENTIALS", "Send either an owner session cookie or a bearer credential");
+      return;
+    }
+    let oauthPrincipal: Awaited<ReturnType<NonNullable<typeof authenticateOAuthOwner>>> | undefined;
+    const isLegacyBearer = Boolean(bearer && constantTimeEqual(bearer, options.authToken ?? ""));
+    if (bearer && authenticateOAuthOwner && !isLegacyBearer) {
+      try { oauthPrincipal = await authenticateOAuthOwner(bearer); }
+      catch (error) {
+        const failure = error instanceof OAuthAuthenticationError
+          ? error
+          : new OAuthAuthenticationError(401, "OAUTH_TOKEN_INVALID", "OAuth access token is invalid or unverifiable");
+        fail(response, failure.status, failure.code, failure.message);
+        return;
+      }
+    }
     let hostedPrincipal: HostedPrincipal | undefined;
     const presentedHostedToken = hosted ? accessToken ?? (bearer || undefined) : undefined;
     if (hosted && presentedHostedToken) {
@@ -1635,8 +1656,10 @@ export function createServer(options: ApiServerOptions): Server {
     const isCookie = hosted ? Boolean(accessToken && hostedPrincipal) : cloudflareAccess
       ? accessExpiresAt !== undefined : Boolean(session && session.expiresAt > Date.now());
     if (sessionId && !isCookie) sessions.delete(sessionId);
-    const isBearer = hosted ? Boolean(bearer && hostedPrincipal) : !isCookie && bearer.length > 0 && constantTimeEqual(bearer, options.authToken!);
-    const hasAuth = hosted ? Boolean(hostedPrincipal) : isCookie || isBearer;
+    const isOAuthAuthor = Boolean(oauthPrincipal);
+    const isBearer = hosted ? Boolean(bearer && hostedPrincipal) : !isCookie && isLegacyBearer;
+    const isAuthor = isCookie || isOAuthAuthor;
+    const hasAuth = hosted ? Boolean(hostedPrincipal) : isAuthor || isBearer;
     if (routePath.startsWith("/api/") && !publicRead && !publicModuleRoute && !hasAuth) {
       response.setHeader("WWW-Authenticate",
         hosted && routePath.endsWith("/modules/mcp/streamable")
@@ -1676,11 +1699,11 @@ export function createServer(options: ApiServerOptions): Server {
           throw httpFailure(failure.status, failure.code, failure.message);
         }
       }
-      if (!isCookie) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An owner session is required");
+      if (!isAuthor) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An owner identity is required");
       return undefined;
     };
     const requireAuthorSession = async (): Promise<HostedPrincipal | undefined> => {
-      if (!isCookie) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author browser session is required");
+      if (!isAuthor) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author identity is required");
       return requireWritePermission();
     };
     const authorizeActionProposal = async (): Promise<void> => {
@@ -1738,7 +1761,7 @@ export function createServer(options: ApiServerOptions): Server {
     if (routePath === "/api/session" && method === "GET") {
       sendJson(response, 200, {
         authenticated: true,
-        authorScope: hosted ? `hosted:${hostedPrincipal!.userId}` : isCookie ? "owner" : "",
+        authorScope: hosted ? `hosted:${hostedPrincipal!.userId}` : isAuthor ? "owner" : "",
         ...(hosted ? { permissions: [...hostedPrincipal!.permissions] } : {}),
       });
       return;
@@ -1757,20 +1780,20 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
     if (routePath === "/api/jobs/events" && method === "GET") {
-      if (!isCookie) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job events require an owner session"); return; }
+      if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job events require an owner identity"); return; }
       if (jobEventStreams.full) throw httpFailure(503, "JOB_EVENT_STREAM_LIMIT", "Too many job event streams are open");
       jobEventStreams.open(response, "no-cache", ": ok\n\n", accessExpiresAt);
       return;
     }
     if (routePath === "/api/jobs" && method === "GET") {
-      if (!isCookie) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job history requires an owner session"); return; }
+      if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job history requires an owner identity"); return; }
       try { sendJson(response, 200, await jobHistory.listJobs(hosted?.projectId)); }
       catch { throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "Job history is temporarily unavailable"); }
       return;
     }
     const jobMatch = routePath.match(/^\/api\/jobs\/([^/]+)$/u);
     if (jobMatch && method === "GET") {
-      if (!isCookie) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job history requires an owner session"); return; }
+      if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job history requires an owner identity"); return; }
       const jobId = parseProjectId(jobMatch[1]!);
       try {
         const job = await jobHistory.getJob(jobId, hosted?.projectId);
@@ -1783,7 +1806,7 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
     if (routePath === "/api/inbox" && method === "GET") {
-      if (!isCookie) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Inbox requires an owner session"); return; }
+      if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Inbox requires an owner identity"); return; }
       try { sendJson(response, 200, await jobHistory.listInbox({ unreadOnly: query.get("unread") === "1", ...(hosted ? { projectId: hosted.projectId } : {}) })); }
       catch { throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "Inbox is temporarily unavailable"); }
       return;
@@ -1845,7 +1868,7 @@ export function createServer(options: ApiServerOptions): Server {
       assertAssignedProject(projectId);
       const suffix = projectRoot[2] ?? "";
       if (suffix === "recent-activity" && (method === "GET" || method === "PUT")) {
-        if (!hosted && !isCookie) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Recent activity requires an owner session"); return; }
+        if (!hosted && !isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Recent activity requires an owner identity"); return; }
         if (method === "PUT") await requireWritePermission();
         const activityAuthorScope = hosted ? `hosted:${hostedPrincipal!.userId}` : "owner";
 
@@ -2001,7 +2024,7 @@ export function createServer(options: ApiServerOptions): Server {
           ? isBearer ? "mcp" : "author"
           : isBearer || descriptor.module === "mcp" ? "mcp" : "module";
         const prefer = request.headers.prefer;
-        const respondAsyncRequested = isCookie && (Array.isArray(prefer) ? prefer : [prefer ?? ""])
+        const respondAsyncRequested = isAuthor && (Array.isArray(prefer) ? prefer : [prefer ?? ""])
           .flatMap((value) => value.split(","))
           .some((value) => value.trim().toLowerCase() === "respond-async");
         const jobController = respondAsyncRequested && descriptor.module !== "core" ? new AbortController() : undefined;
@@ -2376,6 +2399,21 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   }
   const authToken = readCodexiaEnvironment("AUTH_TOKEN")?.trim();
   if (!authToken || authToken.length < 32) throw new Error("CODEXIA_AUTH_TOKEN is required and must contain at least 32 characters");
+  const oauthValues = {
+    issuer: readCodexiaEnvironment("OAUTH_ISSUER"),
+    audience: readCodexiaEnvironment("OAUTH_AUDIENCE"),
+    jwksUrl: readCodexiaEnvironment("OAUTH_JWKS_URL"),
+    ownerSubject: readCodexiaEnvironment("OAUTH_OWNER_SUBJECT"),
+  };
+  const oauthConfigured = Object.values(oauthValues).some((value) => value !== undefined);
+  if (oauthConfigured && Object.values(oauthValues).some((value) => !value)) {
+    throw new Error("OAuth owner mode requires OAUTH_ISSUER, OAUTH_AUDIENCE, OAUTH_JWKS_URL, and OAUTH_OWNER_SUBJECT");
+  }
+  const oauthOwner: OAuthOwnerOptions | undefined = oauthConfigured ? {
+    issuer: oauthValues.issuer!, audience: oauthValues.audience!, jwksUrl: oauthValues.jwksUrl!,
+    ownerSubject: oauthValues.ownerSubject!,
+    requiredScopes: (readCodexiaEnvironment("OAUTH_REQUIRED_SCOPES") ?? "codexia:api").split(/\s+/u).filter(Boolean),
+  } : undefined;
   const profile = readCodexiaEnvironment("PROFILE") ?? process.env.CODEXIA_BUILD_PROFILE ?? "core";
   const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory);
   const persistenceOptions = await postgresPersistenceOptions();
@@ -2392,6 +2430,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
         origin: readCodexiaEnvironment("ACCESS_ORIGIN") ?? "",
         ownerEmail: readCodexiaEnvironment("ACCESS_OWNER_EMAIL") ?? "",
       } } : {}),
+      ...(oauthOwner ? { oauthOwner } : {}),
       trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
       runtimeOptions,
       usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
