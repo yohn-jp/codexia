@@ -157,6 +157,49 @@ test("state-event ordering and draft status prevent unconfirmed changes from bec
   assert.ok(history.data?.entries.some((entry) => entry.kind === "ownership"));
 });
 
+test("rule events derive locations only from explicit or typed scene locations", () => {
+  const entities = [
+    entity("scene-explicit", "scene", { order: 1, location: "loc-explicit" }),
+    entity("scene-person-first", "scene", { order: 2 }),
+    entity("scene-location-first", "scene", { order: 3 }),
+    entity("scene-people-only", "scene", { order: 4 }),
+    entity("scene-wrong-type-location", "scene", { order: 5, location: "char-e" }),
+    entity("char-a", "character"),
+    entity("char-b", "character"),
+    entity("char-c", "character"),
+    entity("char-d", "character"),
+    entity("char-e", "character"),
+    entity("loc-linked", "location"),
+    entity("loc-explicit", "location"),
+  ];
+  const story: StoryGraphInput = {
+    snapshot,
+    entities: new Map(entities.map((item) => [item.id, item])),
+    links: [
+      { from: "scene-explicit", to: "char-a", kind: "appears" },
+      { from: "scene-explicit", to: "loc-linked", kind: "appears" },
+      { from: "scene-person-first", to: "char-b", kind: "appears" },
+      { from: "scene-person-first", to: "loc-linked", kind: "appears" },
+      { from: "scene-location-first", to: "loc-linked", kind: "appears" },
+      { from: "scene-location-first", to: "char-c", kind: "appears" },
+      { from: "scene-people-only", to: "char-d", kind: "appears" },
+      { from: "scene-wrong-type-location", to: "char-e", kind: "appears" },
+    ],
+  };
+
+  const locationEvents = listRuleStateEvents(story).data.filter(
+    (event) => event.kind === "location" && event.payload.via === "appears",
+  );
+  assert.deepEqual(
+    locationEvents.map((event) => [event.sceneId, event.subject, event.object]),
+    [
+      ["scene-explicit", "char-a", "loc-explicit"],
+      ["scene-person-first", "char-b", "loc-linked"],
+      ["scene-location-first", "char-c", "loc-linked"],
+    ],
+  );
+});
+
 test("reader disclosure uses first story-order mention, longest registered name, and summary changes", () => {
   const entities = [
     entity("char-alice", "character", {}, { name: "アリス" }),
