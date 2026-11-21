@@ -1,6 +1,6 @@
 # iOS client and personal-device distribution
 
-> **Accepted design target; iOS packaging, unsigned IPA delivery, login, installation and on-device acceptance are not implemented or verified by this document.**
+> **Status:** An opt-in GitHub Actions workflow builds and uploads an unsigned IPA. Native OAuth and physical-device installation and acceptance remain unverified.
 > Authentication and resource permissions are defined by [API authentication and authorization](../architecture/API-AUTHN-AUTHZ.md). Presentation remains governed by the [Design and UX contract](../design/UX-CONTRACT.md), [Mobile interactions](../architecture/MOBILE-INTERACTION-UX.md) and [Core architecture](../architecture/CORE.md).
 
 ## Purpose and non-goals
@@ -36,7 +36,7 @@ The browser and native clients authenticate to the **same backend API policy** u
 
 ## Build and delivery
 
-Build the native iOS project on an ephemeral **GitHub Actions macOS runner** with a pinned supported Xcode toolchain; use existing pinned pnpm and profile/build inputs. Keep the iOS packaging job isolated from ordinary frontend, backend and PR verification. Trigger it explicitly (`workflow_dispatch`) or from an intentional app release; do not run macOS packaging for every main push or unrelated pull request. Preserve source identity and the frontend/API compatibility contract.
+The opt-in [iOS unsigned IPA workflow](../../.github/workflows/ios-unsigned-ipa.yml) builds the selected Mobile profile on an ephemeral **GitHub Actions macOS runner** with pinned Node, pnpm and Xcode inputs. It validates the bundled web assets, builds without Apple signing credentials, records package identity and uploads the unsigned IPA as a seven-day Actions artifact. Trigger it explicitly with `workflow_dispatch`; it is isolated from ordinary frontend, backend and PR verification. The IPA requires a separate signing step before installation. Preserve source identity and the frontend/API compatibility contract.
 
 Package the unsigned `.app` into an **unsigned, structurally valid IPA** (including `Payload/<AppName>.app` and required metadata). Validate Xcode build exit status, bundle ID, supported architectures, entitlements, IPA archive structure and asset inclusion. The repository/CI must never store Apple Account credentials, development signing identities or personal provisioning profiles. Publish only the nonsecret unsigned artifact to a restricted-retention Actions artifact; distribution/public GitHub Releases are not assumed necessary.
 
