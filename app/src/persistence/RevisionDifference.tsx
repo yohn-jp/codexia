@@ -1,4 +1,4 @@
-import type { Change } from "@codemirror/merge";
+import { presentableDiff, type Change } from "@codemirror/merge";
 import type { DocumentRevision } from "@codexia/persistence-contracts";
 import { useEffect, useState } from "react";
 
@@ -21,23 +21,19 @@ export function RevisionDifference({ previous, current }: { previous: DocumentRe
   useEffect(() => {
     if (!open || previousText === currentText) return;
     setResult(undefined);
-    let worker: Worker;
-    try {
-      worker = new Worker(new URL("./revision-difference-worker.ts", import.meta.url), { type: "module" });
-    } catch {
-      setResult({ pair, changes: null });
-      return;
-    }
-    worker.onmessage = (event: MessageEvent<readonly Change[]>) => {
-      setResult({ pair, changes: event.data });
-      worker.terminate();
+    let cancelled = false;
+    const task = window.setTimeout(() => {
+      if (cancelled) return;
+      try {
+        setResult({ pair, changes: presentableDiff(previousText, currentText, { scanLimit: 1000, timeout: 50 }) });
+      } catch {
+        setResult({ pair, changes: null });
+      }
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(task);
     };
-    worker.onerror = () => {
-      setResult({ pair, changes: null });
-      worker.terminate();
-    };
-    worker.postMessage({ previous: previousText, current: currentText });
-    return () => worker.terminate();
   }, [currentText, open, pair, previousText]);
   if (previousText === currentText) return null;
   const comparison = result?.pair === pair ? result.changes : undefined;
