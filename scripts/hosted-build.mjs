@@ -79,6 +79,51 @@ function isWithin(rootDirectory, candidate) {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
+/** Resolve pnpm's hashed virtual-store directory through its installed linker metadata. */
+export async function installedPnpmLockIdentity({ nodeModulesDirectory, packageName, packageVersion, packageDirectory, lock }) {
+  const pnpmStore = path.join(nodeModulesDirectory, '.pnpm');
+  const modulesPath = path.join(nodeModulesDirectory, '.modules.yaml');
+  let metadata;
+  try {
+    const yamlUrl = pathToFileURL(path.join(root, 'node_modules/.pnpm/node_modules/yaml/dist/index.js'));
+    const yaml = await import(yamlUrl.href);
+    metadata = yaml.parse(await readFile(modulesPath, 'utf8'));
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw new Error(`Cannot read installed pnpm module metadata: ${modulesPath}`);
+  }
+  if (!metadata || typeof metadata !== 'object' || !metadata.hoistedDependencies ||
+      typeof metadata.hoistedDependencies !== 'object' || Array.isArray(metadata.hoistedDependencies)) return null;
+
+  const storeRoot = await realpath(pnpmStore);
+  const packageRoot = await realpath(packageDirectory);
+  if (!isWithin(storeRoot, packageRoot)) {
+    throw new Error(`Installed runtime package escapes the pnpm virtual store: ${packageName}@${packageVersion}`);
+  }
+
+  const base = `${packageName}@${packageVersion}`;
+  const matches = new Set();
+  for (const [identity, hoisted] of Object.entries(metadata.hoistedDependencies)) {
+    if ((identity !== base && !identity.startsWith(`${base}(`)) || !Object.hasOwn(lock.snapshots, identity)) continue;
+    if (!hoisted || typeof hoisted !== 'object' || Array.isArray(hoisted) || !Object.hasOwn(hoisted, packageName)) continue;
+    const linkPath = path.join(pnpmStore, 'node_modules', packageName);
+    const link = await lstat(linkPath).catch((error) => error?.code === 'ENOENT' ? undefined : Promise.reject(error));
+    if (!link) continue;
+    if (!link.isSymbolicLink()) {
+      throw new Error(`Installed pnpm linker path is not a symlink: ${packageName}`);
+    }
+    const linkedPackage = await realpath(linkPath);
+    if (!isWithin(storeRoot, linkedPackage)) {
+      throw new Error(`Installed pnpm linker path escapes the virtual store: ${packageName}`);
+    }
+    if (linkedPackage === packageRoot) matches.add(identity);
+  }
+  if (matches.size > 1) {
+    throw new Error(`Installed pnpm package has ambiguous lock snapshot metadata: ${base}`);
+  }
+  return matches.size === 1 ? [...matches][0] : null;
+}
+
 async function walkFiles(directory, relativeDirectory, output) {
   const entries = await readdir(directory, { withFileTypes: true });
   entries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
@@ -507,7 +552,16 @@ export async function runtimePackageRecords(deployedDirectory, serverIds) {
         .split('_').map((peer) => `(${peer.replaceAll('+', '/')})`).join('');
       lockIdentity = `${base}${peerSuffix}`;
       if (!Object.hasOwn(lock.snapshots, lockIdentity)) {
-        throw new Error(`Installed pnpm snapshot is missing from the source lockfile: ${lockIdentity}`);
+        lockIdentity = await installedPnpmLockIdentity({
+          nodeModulesDirectory: nodeModules,
+          packageName: item.name,
+          packageVersion: item.version,
+          packageDirectory: item.directory,
+          lock,
+        });
+        if (!lockIdentity) {
+          throw new Error(`Installed pnpm snapshot is missing from the source lockfile: ${base}`);
+        }
       }
       const packageCandidates = Object.entries(lock.packages)
         .filter(([key]) => key === base || key.startsWith(`${base}(`));

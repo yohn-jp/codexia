@@ -1,5 +1,5 @@
 import react from "@vitejs/plugin-react";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
@@ -17,6 +17,14 @@ const generatedBrowserModules = browserModuleProfilePath
 const ui = process.env.CODEXIA_UI ?? process.env.SCRIPTORIUM_UI ?? "launcher";
 if (!["launcher", "desktop", "mobile"].includes(ui)) throw new Error("Invalid CODEXIA_UI");
 const uiDirectory = ui === "launcher" ? "" : ui;
+ 
+// OAuth browser fixture assets must not overwrite app/dist while other shards
+ // serve the canonical non-OAuth shells from the same CI checkout.
+const isolatedBuildRoot = process.env.CODEXIA_VITE_BUILD_OUTPUT_ROOT;
+if (isolatedBuildRoot && !isAbsolute(isolatedBuildRoot)) {
+  throw new Error("CODEXIA_VITE_BUILD_OUTPUT_ROOT must be an absolute directory");
+}
+const buildRoot = isolatedBuildRoot ?? resolve(appRoot, "dist");
 
 export default defineConfig({
   root: appRoot,
@@ -35,7 +43,7 @@ export default defineConfig({
     }],
   },
   build: {
-    outDir: resolve(appRoot, "dist", uiDirectory),
+    outDir: resolve(buildRoot, uiDirectory),
     emptyOutDir: true,
     manifest: true,
     cssCodeSplit: false,

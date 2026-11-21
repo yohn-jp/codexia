@@ -1,0 +1,13 @@
+# Native iOS authentication
+
+The iOS shell is a separate public OAuth client of Codexia's embedded Better Auth OAuth Provider. Better Auth owns upstream OIDC federation and issues the access token accepted by Codexia's API. The iOS client never sends an upstream ID token as an API bearer.
+
+The native Capacitor bridge uses AppAuth-iOS for HTTPS OIDC discovery and Authorization Code + PKCE S256 in the platform system authentication session. AppAuth requests use an ephemeral cookie-free URL session that refuses redirects. The exact registered redirect URI is `jp.yohn.codexia:/oauth2redirect`; AppAuth generates and validates the authorization state and PKCE transaction. Only the provider-issued refresh token is persisted in iOS Keychain with device-only accessibility; access tokens remain in native and JavaScript runtime memory. Refresh token rotation is written to Keychain before the new API access token is returned.
+
+Native API requests use the plugin's restricted HTTPS transport, not WebView `fetch`: the bridge accepts only the configured HTTPS origin and `/api/*`, disables redirects, rejects cookies and non-Bearer authorization, uses an ephemeral cookie-free URL session, and does not forward `Set-Cookie` to the WebView. Native responses are buffered, so the job event SSE stream is explicitly unavailable in this shell; it must not fall back to a CORS-blocked WebView request or reconnect indefinitely.
+
+The API transport requires `VITE_CODEXIA_API_ORIGIN` to be an explicit HTTPS origin. Native OAuth remains disabled unless `VITE_CODEXIA_OAUTH_IOS_CLIENT_ID` is set. The public resource indicator uses `VITE_CODEXIA_API_AUDIENCE` when supplied, otherwise it is `${VITE_CODEXIA_API_ORIGIN}/api`. The issuer and OAuth endpoints are fixed by the Better Auth contract under that API origin. The native OAuth client ID is public configuration, not a secret; do not set a client secret in the iOS bundle.
+
+Sign-out clears the in-memory access token and Keychain refresh token, then requests refresh-token revocation. Better Auth 1.7.27 does not individually revoke already-issued API JWTs; those short-lived tokens can remain valid until their expiration.
+
+`npm test` runs native configuration, API-origin, callback-scheme, and bridge guard checks. The unsigned iOS workflow installs the isolated Capacitor toolchain before bundling, generates the project, registers the callback scheme, and resolves AppAuth through Swift Package Manager. Its macOS build verifies native compilation and IPA structure, not a configured provider, live API, signed install, or physical-device acceptance.

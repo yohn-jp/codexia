@@ -18,6 +18,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Shared internal ownership and maintainability | [Internal boundaries](architecture/INTERNAL-BOUNDARIES.md) |
 | Storage, snapshots, mutation and authentication | [Core architecture](architecture/CORE.md) |
 | OAuth/OIDC API resource-server authentication, authorization and BOLA prevention | [API authentication and authorization](architecture/API-AUTHN-AUTHZ.md) — accepted target, not deployed behavior |
+| Standalone MCP OAuth resource metadata and operation scopes | [Standalone MCP OAuth](architecture/MCP-OAUTH.md) |
 | Backend read models, snapshot reuse and scalability | [Backend read model](architecture/BACKEND-READ-MODEL.md) — normative target |
 | Panels, foreground reads, search and terminology | [Modular workspace](architecture/MODULAR-WORKSPACE.md) |
 | External AI integration and internal LLM freeze | [MCP-first creative architecture](architecture/MCP-FIRST.md) |

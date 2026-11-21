@@ -223,6 +223,12 @@ export interface RuntimeVersion {
 
 let hostedMode: boolean | undefined;
 let oauthAccessToken: string | undefined;
+export interface NativeApiSession {
+  apiOrigin: string | null;
+  accessTokenFor(requestUrl: string): Promise<string | null>;
+  fetchRequest(requestUrl: string, init: RequestInit): Promise<Response>;
+}
+let nativeApiSession: NativeApiSession | undefined;
 const configuredApiOrigin = (import.meta as ImportMeta & { env?: { VITE_CODEXIA_API_ORIGIN?: string } }).env?.VITE_CODEXIA_API_ORIGIN;
 type HostedRefreshResult = { status: number; ok: boolean; error?: string; code?: string };
 let hostedRefresh: Promise<HostedRefreshResult> | undefined;
@@ -353,10 +359,35 @@ async function fetchHostedRequest(path: string, init: RequestInit): Promise<Resp
   assertDocumentCanStartRequest(init);
   const headers = new Headers(init.headers);
   if (init.body !== undefined && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  const csrf = csrfToken();
+  const csrf = nativeApiSession ? null : csrfToken();
   const method = (init.method ?? "GET").toUpperCase();
-  if (csrf && !oauthAccessToken && !["GET", "HEAD", "OPTIONS"].includes(method)) headers.set("X-CSRF-Token", csrf);
   const apiRequest = path.startsWith("/api/");
+  if (apiRequest && nativeApiSession) {
+    const configuredOrigin = nativeApiSession.apiOrigin;
+    if (!configuredOrigin) throw new ApiError("Native API origin is not configured.", 503, "NATIVE_API_ORIGIN_MISSING");
+    const originUrl = new URL(configuredOrigin);
+    if (originUrl.protocol !== "https:" || originUrl.pathname !== "/" || originUrl.search || originUrl.hash || originUrl.username || originUrl.password) {
+      throw new ApiError("Native API origin is invalid.", 503, "NATIVE_API_ORIGIN_INVALID");
+    }
+    const resolved = apiRequestUrl(path, originUrl.origin);
+    const requestUrl = new URL(resolved, originUrl.origin);
+    if (requestUrl.origin !== originUrl.origin || !requestUrl.pathname.startsWith("/api/")) {
+      throw new ApiError("Native API request escaped its configured origin.", 503, "NATIVE_API_ORIGIN_MISMATCH");
+    }
+    const accessToken = await nativeApiSession.accessTokenFor(requestUrl.toString());
+    if (accessToken !== null && (typeof accessToken !== "string" || !accessToken)) {
+      throw new ApiError("Native authentication returned an invalid API token.", 503, "NATIVE_API_TOKEN_INVALID");
+    }
+    headers.delete("Authorization");
+    headers.delete("X-CSRF-Token");
+    if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+    return nativeApiSession.fetchRequest(requestUrl.toString(), {
+      ...init,
+      headers,
+      credentials: "omit",
+    });
+  }
+  if (csrf && !oauthAccessToken && !["GET", "HEAD", "OPTIONS"].includes(method)) headers.set("X-CSRF-Token", csrf);
   if (apiRequest && oauthAccessToken) headers.set("Authorization", `Bearer ${oauthAccessToken}`);
   return fetch(apiRequest ? apiRequestUrl(path, configuredApiOrigin) : path, {
     ...init,
@@ -370,6 +401,28 @@ async function fetchHostedRequest(path: string, init: RequestInit): Promise<Resp
 /** Store an API access token only in the current JavaScript runtime. */
 export function setOAuthAccessToken(token: string | null): void {
   oauthAccessToken = token ?? undefined;
+}
+
+/** Install an explicit native HTTPS API transport; never use WebView cookies for API data. */
+export function configureNativeApiSession(session: NativeApiSession): void {
+  if (!session || typeof session.accessTokenFor !== "function" || typeof session.fetchRequest !== "function") {
+    throw new TypeError("Native API session transport is invalid.");
+  }
+  if (session.apiOrigin !== null) {
+    const origin = new URL(session.apiOrigin);
+    if (origin.protocol !== "https:" || origin.pathname !== "/" || origin.search || origin.hash || origin.username || origin.password) {
+      throw new TypeError("Native API origin must be an explicit HTTPS origin.");
+    }
+    apiRequestUrl("/api/session", origin.origin);
+  }
+  oauthAccessToken = undefined;
+  nativeApiSession = session;
+}
+
+/** Return API request routing to the normal browser configuration. */
+export function clearNativeApiSession(): void {
+  nativeApiSession = undefined;
+  oauthAccessToken = undefined;
 }
 
 async function fetchHostedResponseForLifecycle(path: string, init: RequestInit, lifecycle: number): Promise<Response> {
@@ -428,6 +481,9 @@ async function request<T>(guard: ResponseGuard<T>, path: string, init: RequestIn
 }
 
 async function requestEventStream(path: string, signal: AbortSignal): Promise<Response> {
+  if (nativeApiSession) {
+    throw new ApiError("Native job event streaming is unavailable; use the Job Inbox refresh action.", 501, "NATIVE_STREAM_UNSUPPORTED");
+  }
   const init = { headers: { Accept: "text/event-stream" }, signal };
   const lifecycle = documentLifecycle;
   return withDocumentDepartureClassification(lifecycle, init, async () => {

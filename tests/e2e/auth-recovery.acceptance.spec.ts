@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { ownerLogin, fixtureProject } from "./postgres-fixture";
+import { ownerLogin, fixtureProject, createWritingFixture, manuscriptEditor, readPersistenceDrafts } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 
@@ -142,6 +142,69 @@ test("a failed standalone logout keeps the editor protected and lets the author 
   await expect(page.getByRole("heading", { name: "作品を開く" })).toBeVisible();
   expect(logoutRequests).toBe(2);
   expect(serverLoggedOut).toBe(true);
+});
+
+
+test("recovery-session failure cannot discard an unjournaled manuscript through logout retry", async ({ page }) => {
+  // Authoritative acceptance for #454: simulate an IndexedDB draft failure
+  // and an independently failing session refresh on a real PostgreSQL document.
+  const origin = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
+  const base = new URL(origin);
+  const login = await page.request.post(new URL("/api/login", base).toString(), {
+    headers: { Origin: base.origin },
+    data: { token: authToken },
+  });
+  expect(login.status()).toBe(200);
+
+  const { project, scene } = await createWritingFixture(page);
+  let unavailable = false;
+  let logoutRequests = 0;
+  let saveRequests = 0;
+  await page.route("**/api/session", route => unavailable
+    ? route.fulfill({ status: 503, json: { error: "Temporary authentication outage" } })
+    : route.continue());
+  page.on("request", request => {
+    if (new URL(request.url()).pathname === "/api/logout") logoutRequests += 1;
+  });
+  await page.route("**/api/v1/persistence/projects/*/documents/*", route => {
+    if (route.request().method() === "PATCH") saveRequests += 1;
+    return route.continue();
+  });
+
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.put;
+    const scope = window as Window & { __recoveryJournalWritesDenied?: boolean };
+    scope.__recoveryJournalWritesDenied = true;
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore["put"]>) {
+      if (this.name === "persistenceDrafts" && scope.__recoveryJournalWritesDenied) {
+        throw new DOMException("Synthetic draft quota failure", "QuotaExceededError");
+      }
+      return original.apply(this, args);
+    };
+  });
+
+  const currentInput = "復帰中も喪失させない未保護の入力。";
+  await manuscriptEditor(page).fill(currentInput);
+  await expect(manuscriptEditor(page)).toHaveText(currentInput);
+  await expect(page.locator(".pg-save-state summary")).toHaveText("要確認");
+  expect((await readPersistenceDrafts(page)).some(draft => draft.documentId === scene.id && draft.markdown === currentInput)).toBe(false);
+
+  unavailable = true;
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+  await expect(page.getByRole("heading", { name: "認証・接続を再確認してください" })).toBeVisible();
+  await page.getByRole("button", { name: "ログアウトを再試行" }).click();
+  await expect(page.getByRole("alert")).toContainText("入力を保護できないためログアウトを停止しました");
+  expect(logoutRequests, "no logout request can precede durable draft protection").toBe(0);
+  expect(saveRequests, "no document patch may have protected the input in PostgreSQL").toBe(0);
+  const server = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}`);
+  expect(server.ok()).toBe(true);
+  expect((await server.json() as { revision: { markdown: string } }).revision.markdown).not.toContain(currentInput);
+
+  await page.evaluate(() => { (window as Window & { __recoveryJournalWritesDenied?: boolean }).__recoveryJournalWritesDenied = false; });
+  await page.getByRole("button", { name: "ログアウトを再試行" }).click();
+  await expect(page.getByRole("heading", { name: "作品を開く" })).toBeVisible();
+  expect(logoutRequests, "only the protected retry is allowed to send logout").toBe(1);
+  expect((await readPersistenceDrafts(page)).some(draft => draft.documentId === scene.id && draft.markdown === currentInput)).toBe(true);
 });
 
 test("a lost Hosted logout response can be retried and returns to the Praetorium entry path", async ({ page }) => {

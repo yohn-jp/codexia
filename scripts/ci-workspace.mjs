@@ -286,10 +286,12 @@ function sourcePatternFromRunnerPattern(pattern) {
 }
 
 function runnerPatterns(script, label) {
-  const segment = script.split(/\s*&&\s*/u).find((part) => part.includes('--test'));
-  if (!segment) fail(`${label} has no Node test runner command`);
-  const tokens = segment.slice(segment.indexOf('--test') + '--test'.length).trim().split(/\s+/u).filter(Boolean);
-  const patterns = tokens.map((token) => token.replace(/^['"]|['"]$/gu, '')).filter((token) => !token.startsWith('--'));
+  const segments = script.split(/\s*&&\s*/u).filter((part) => part.includes('--test'));
+  if (segments.length === 0) fail(`${label} has no Node test runner command`);
+  const patterns = segments.flatMap((segment) => {
+    const tokens = segment.slice(segment.indexOf('--test') + '--test'.length).trim().split(/\s+/u).filter(Boolean);
+    return tokens.map((token) => token.replace(/^['"]|['"]$/gu, '')).filter((token) => !token.startsWith('--'));
+  });
   if (patterns.length === 0) fail(`${label} has no explicit test file pattern`);
   return patterns.map(sourcePatternFromRunnerPattern);
 }

@@ -134,6 +134,17 @@ test('test-only changes select their owner while non-executable documentation se
   assert.deepEqual((await plan(['docs/authoring.md'])).tasks, ['coverage']);
 });
 
+test('OAuth browser acceptance is selected in both profile browser lanes', async () => {
+  const selected = await plan(['tests/e2e/oauth-web.acceptance.spec.ts']);
+  assert.ok(selected.tasks.includes('test-types-app-e2e'));
+  for (const profile of ['core', 'full']) {
+    assert.ok(selected.tasks.includes(`build-${profile}`));
+    assert.ok(selected.tasks.includes(`browser-${profile}-oauth-web`));
+    assert.ok(selected.groups.includes(`browser-${profile}-webkit`));
+  }
+  assert.ok(!selected.tasks.includes('unit-api'));
+});
+
 test('every selected task has one execution group and every exclusion has a reason', async () => {
   const { VERIFICATION_GROUPS, VERIFICATION_TASKS } = await import('./ci-contract.mjs');
   const mapped = Object.values(VERIFICATION_GROUPS).flat();

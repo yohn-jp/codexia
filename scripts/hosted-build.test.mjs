@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, readFile, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { MODULE_PERSISTENCE_FORMATS, resolveBuildCatalogSelection } from '../packages/module-runtime/dist/index.js';
-import { assertCleanRevisionSnapshot, browserArtifactRecords, browserManifestEntryFiles, calculateBuildDigests, canonicalJson, catalogFor, persistenceForModules, resourceDeclarationFor } from './hosted-build.mjs';
+import { assertCleanRevisionSnapshot, browserArtifactRecords, browserManifestEntryFiles, calculateBuildDigests, canonicalJson, catalogFor, installedPnpmLockIdentity, persistenceForModules, resourceDeclarationFor } from './hosted-build.mjs';
 import { assertSigstoreBundleMatches, assertSupportedCosignVersion, createSlsaStatement } from './hosted-attestation.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -43,6 +43,92 @@ test('hosted browser artifact binding follows hashed Vite entry and stylesheet f
     'index.html': { file: 'assets/index-AbCd1234.js', isEntry: true },
     'style.css': { file: '../styles.css' },
   }), /content-hashed application stylesheet/u);
+});
+
+async function pnpmIdentityFixture(identities, { escapingTarget } = {}) {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-pnpm-identity-'));
+  const nodeModulesDirectory = path.join(directory, 'node_modules');
+  const pnpmStore = path.join(nodeModulesDirectory, '.pnpm');
+  const packageDirectory = escapingTarget ?? path.join(pnpmStore,
+    '@scope+pkg@1.0.0_peer-one@1.0.0_peer-two@1.0.0_0123456789abcdef0123456789abcdef',
+    'node_modules', '@scope', 'pkg');
+  await mkdir(packageDirectory, { recursive: true });
+  const linkPath = path.join(pnpmStore, 'node_modules', '@scope', 'pkg');
+  await mkdir(path.dirname(linkPath), { recursive: true });
+  await symlink(packageDirectory, linkPath, 'dir');
+  await mkdir(nodeModulesDirectory, { recursive: true });
+  const modulesYaml = [
+    'hoistedDependencies:',
+    ...identities.flatMap((identity) => [`  ${JSON.stringify(identity)}:`, '    "@scope/pkg": private']),
+  ].join('\n');
+  await writeFile(path.join(nodeModulesDirectory, '.modules.yaml'), `${modulesYaml}\n`);
+  return {
+    directory,
+    nodeModulesDirectory,
+    packageDirectory,
+    lock: { snapshots: Object.fromEntries(identities.map((identity) => [identity, {}])) },
+  };
+}
+
+test('pnpm shortened virtual-store names resolve only through the unique full installer lock identity', async () => {
+  const identity = '@scope/pkg@1.0.0(peer-one@1.0.0)(peer-two@1.0.0)';
+  const fixture = await pnpmIdentityFixture([identity]);
+  try {
+    assert.equal(await installedPnpmLockIdentity({
+      nodeModulesDirectory: fixture.nodeModulesDirectory,
+      packageName: '@scope/pkg',
+      packageVersion: '1.0.0',
+      packageDirectory: fixture.packageDirectory,
+      lock: fixture.lock,
+    }), identity);
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('pnpm installer metadata refuses missing, ambiguous, and escaping lock identities', async () => {
+  const valid = '@scope/pkg@1.0.0(peer-one@1.0.0)';
+  const other = '@scope/pkg@1.0.0(peer-two@1.0.0)';
+  const missing = await pnpmIdentityFixture([valid]);
+  try {
+    assert.equal(await installedPnpmLockIdentity({
+      nodeModulesDirectory: missing.nodeModulesDirectory,
+      packageName: '@scope/pkg',
+      packageVersion: '1.0.0',
+      packageDirectory: missing.packageDirectory,
+      lock: { snapshots: {} },
+    }), null, 'an installer key absent from the source lock cannot be trusted');
+  } finally {
+    await rm(missing.directory, { recursive: true, force: true });
+  }
+
+  const ambiguous = await pnpmIdentityFixture([valid, other]);
+  try {
+    await assert.rejects(installedPnpmLockIdentity({
+      nodeModulesDirectory: ambiguous.nodeModulesDirectory,
+      packageName: '@scope/pkg',
+      packageVersion: '1.0.0',
+      packageDirectory: ambiguous.packageDirectory,
+      lock: ambiguous.lock,
+    }), /ambiguous lock snapshot metadata/u);
+  } finally {
+    await rm(ambiguous.directory, { recursive: true, force: true });
+  }
+
+  const escapedRoot = await mkdtemp(path.join(tmpdir(), 'codexia-pnpm-identity-escape-'));
+  const escaped = await pnpmIdentityFixture([valid], { escapingTarget: path.join(escapedRoot, 'outside') });
+  try {
+    await assert.rejects(installedPnpmLockIdentity({
+      nodeModulesDirectory: escaped.nodeModulesDirectory,
+      packageName: '@scope/pkg',
+      packageVersion: '1.0.0',
+      packageDirectory: escaped.packageDirectory,
+      lock: escaped.lock,
+    }), /escapes the pnpm virtual store/u);
+  } finally {
+    await rm(escaped.directory, { recursive: true, force: true });
+    await rm(escapedRoot, { recursive: true, force: true });
+  }
 });
 
 async function shippedModuleData() {
