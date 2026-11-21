@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { cp, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { initialControllerState } from '../../scripts/standalone-update-controller.mjs';
+import { runSchemaMaintenance } from '../../scripts/standalone-schema-maintenance.mjs';
+import { signUpdateChannel, verifyUpdateChannel } from '../../scripts/update-channel.mjs';
 
 function run(command, args, options = {}) {
   try {
@@ -118,8 +121,57 @@ async function main() {
   assert.equal(seed, 'preserve-me', 'Existing PostgreSQL seed data was not preserved');
   await assert.rejects(host.applyAdditiveSchema(targetRelease, baseIdentity.migrationFingerprint, targetIdentity.migrationFingerprint),
     /failed|differs|prior state/u, 'The old migration fingerprint was admitted after the commit');
+  const priorMaintenanceRelease = {
+    format: 'codexia-update-release/v1', channel: 'stable', state: 'published',
+    version: baseIdentity.version, sourceSha: baseIdentity.sourceSha,
+    image: `ghcr.io/yohn-jp/codexia-backend@${baseId}`,
+    platform: baseIdentity.platform, profile: baseIdentity.profile,
+    migrationFingerprint: baseIdentity.migrationFingerprint,
+    persistenceFormat: baseIdentity.persistenceFormat, apiEpoch: baseIdentity.apiEpoch,
+  };
+  const targetMaintenanceRelease = {
+    ...priorMaintenanceRelease,
+    version: targetIdentity.version, sourceSha: targetIdentity.sourceSha,
+    image: `ghcr.io/yohn-jp/codexia-backend@${targetId}`,
+    migrationFingerprint: targetIdentity.migrationFingerprint,
+  };
+  const nextMaintenanceRelease = {
+    ...targetMaintenanceRelease,
+    version: `${targetVersion.split('.')[0]}.${targetVersion.split('.')[1]}.${Number(targetVersion.split('.')[2]) + 1}`,
+    sourceSha: createHash('sha1').update(`schema-incompatible:${nonce}`).digest('hex'),
+    image: `ghcr.io/yohn-jp/codexia-backend@sha256:${'e'.repeat(64)}`,
+    migrationFingerprint: `sha256:${'f'.repeat(64)}`,
+  };
+  const migratedDatabaseId = await host.freshDatabaseIdentity();
+  const migratedSchemaFingerprint = await host.schemaFingerprint(targetRelease);
+  const signingKey = generateKeyPairSync('ed25519');
+  const publicKey = signingKey.publicKey.export({ type: 'spki', format: 'pem' });
+  const privateKey = signingKey.privateKey.export({ type: 'pkcs8', format: 'pem' });
+  const now = Date.now();
+  const channel = signUpdateChannel({ format: 'codexia-update-channel/v1', sequence: 1,
+    issuedAt: new Date(now - 1000).toISOString(), expiresAt: new Date(now + 60 * 60 * 1000).toISOString(),
+    releases: [priorMaintenanceRelease, targetMaintenanceRelease, nextMaintenanceRelease] }, privateKey, now);
+  const checkpoint = verifyUpdateChannel(channel, publicKey, null, now).checkpoint;
+  const maintenanceState = initialControllerState(targetMaintenanceRelease, 'blue', checkpoint);
+  for (const field of ['apiEpoch', 'persistenceFormat']) {
+    const incompatibleTarget = { ...nextMaintenanceRelease, [field]: nextMaintenanceRelease[field] + 1 };
+    const forbiddenHost = new Proxy({}, { get: () => () => { throw new Error('Host operation reached before incompatible maintenance was rejected'); } });
+    await assert.rejects(runSchemaMaintenance({
+      controller: { host: forbiddenHost, publicKey, now: () => now },
+      state: maintenanceState,
+      target: incompatibleTarget,
+    }), new RegExp(`Same-epoch schema target changed ${field}`), `Incompatible ${field} transition was admitted`);
+    assert.equal(await host.freshDatabaseIdentity(), migratedDatabaseId,
+      `Rejected ${field} transition changed the PostgreSQL identity`);
+    assert.equal(await host.schemaFingerprint(targetRelease), migratedSchemaFingerprint,
+      `Rejected ${field} transition changed the live disposable schema`);
+    const preservedSeed = run('podman', ['exec', 'codexia-db', 'sh', '-ec',
+      'export PGPASSWORD="$(cat /run/secrets/admin-password)"; psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "SELECT value FROM public.codexia_schema_maintenance_seed WHERE id=\'fixture-seed\'"']);
+    assert.equal(preservedSeed, 'preserve-me', `Rejected ${field} transition changed fixture data`);
+  }
   console.log(JSON.stringify({ format: 'codexia-schema-maintenance-postgres-proof/v1',
     databaseIdentityPreserved: true, seedPreserved: true, priorFingerprintRejected: true,
+    incompatibleApiEpochRejectedBeforeMutation: true, incompatiblePersistenceFormatRejectedBeforeMutation: true,
     baseImageId: baseId, candidateImageId: targetId, migration, fingerprint: targetIdentity.migrationFingerprint }));
 }
 
