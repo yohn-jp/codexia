@@ -164,7 +164,7 @@ export async function resolveExactMainCoverageProof({ plan: planValue, current, 
   const read = readArtifact ?? (async (artifact, filename) => extractJsonEntry(
     await downloadArtifact(artifact, repository, token, request), filename));
   const certificationJob = exactJob(jobs, 'certification', run);
-  if (certificationJob.steps?.some(step => step.name === COMPACT_CERTIFICATION_STEP)) {
+  if (certificationJob.steps?.some(step => step.name === COMPACT_CERTIFICATION_STEP && step.conclusion === 'success')) {
     return resolveCompactMainCoverageProof({ plan, run, jobs, current, repository, token, request, read });
   }
   const coverageJob = assertCertifiedMainRun(run, jobs, current, plan.base);

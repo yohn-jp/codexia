@@ -60,7 +60,8 @@ function mainEvidence({ latestConclusion = 'success' } = {}) {
   }
   const certification = { id: jobId++, run_id: run.id, run_attempt: run.run_attempt, head_sha: sourceSha, name: 'certification',
     status: 'completed', conclusion: 'success', started_at: start, completed_at: end,
-    steps: [{ name: 'Certify every required exact-source matrix element', conclusion: 'success' }] };
+    steps: [{ name: 'Certify every required exact-source matrix element', conclusion: 'success' },
+      { name: 'Certify reused merged PR proof', conclusion: 'skipped' }] };
   jobs.push(certification);
   return { plan, run, jobs, artifacts, reports };
 }
