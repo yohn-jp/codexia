@@ -568,6 +568,38 @@ test("re-approving an already applied proposal does not regress its durable stat
   assert.equal(after?.approvedByOperationId?.[op.id], "owner");
 });
 
+test("duplicate approved proposals share one manuscript application and settle on replay", async () => {
+  const p = await hierarchy();
+  const reader = await core.reader(p.id);
+  const path = "manuscript/v1/c1/s1.md";
+  const current = (await reader.read(path))!;
+  const op: ChangeOperation = { ...operation(reader.snapshot, path, "One new manuscript revision", current.revision), effect: "manuscript" };
+  const proposals: ChangeProposal[] = Array.from({ length: 3 }, () => ({
+    id: randomUUID(), snapshot: reader.snapshot, operations: [op], source: "author",
+  }));
+  for (const proposal of proposals) await core.propose(p.id, proposal);
+  const approveDuplicate = (proposal: ChangeProposal) => core.approve(p.id, {
+    proposalId: proposal.id, operationIds: [op.id], authorScope: "owner",
+  });
+  await approveDuplicate(proposals[0]!);
+  await approveDuplicate(proposals[1]!);
+  const [receipt, retried] = await Promise.all([core.apply(p.id, op), core.apply(p.id, op)]);
+  assert.deepEqual(retried, receipt);
+  assert.equal((await core.getProposal(p.id, proposals[2]!.id))?.state, "proposed");
+  for (const proposal of proposals.slice(0, 2)) {
+    const status = await core.getProposal(p.id, proposal.id);
+    assert.equal(status?.state, "applied");
+    assert.deepEqual(status?.applications, [receipt]);
+  }
+  await approveDuplicate(proposals[2]!);
+  assert.deepEqual(await core.apply(p.id, op), receipt);
+  assert.deepEqual((await core.getProposal(p.id, proposals[2]!.id))?.applications, [receipt]);
+  assert.equal((await core.reader(p.id)).snapshot.projectVersion, receipt.projectVersion);
+  const history = await core.listManuscriptSnapshots(p.id, "s1");
+  assert.equal(history.snapshots.length, 2, "replay wrote a second manuscript revision");
+  assert.equal((await core.readScene(p.id, "s1")).text, "One new manuscript revision");
+});
+
 test("pinned manuscript history never includes or restores a future revision", async () => {
   const p = await hierarchy();
   const old = await core.reader(p.id);

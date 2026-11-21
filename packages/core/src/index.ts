@@ -800,21 +800,37 @@ export class CoreStore implements MutationCoordinator {
       await transaction.assertProjectVersion(pid(projectId));
       const proposalRecords = (await transaction.listModuleRecords(pid(projectId), AUTHORITY))
         .filter((record) => record.key.startsWith("proposal:"));
-      const approved = proposalRecords.find((record) => {
-        const status = record.value as unknown as ProposalStatus;
-        return status.approvedOperationIds.includes(operation.id) &&
-          status.proposal.operations.some((candidate) => operationDigest(candidate) === operationDigest(operation));
-      });
-      if (!approved) {
+      const digest = operationDigest(operation);
+      const approved = proposalRecords
+        .map((record) => ({ record, status: record.value as unknown as ProposalStatus }))
+        .filter(({ status }) => status.approvedOperationIds.includes(operation.id) && status.proposal.operations.some(
+          (candidate) => candidate.id === operation.id && operationDigest(candidate) === digest,
+        ));
+      const first = approved[0];
+      if (!first) {
         fail(403, "operation_not_approved", "The exact operation must be approved by an authenticated author");
       }
 
-      const state = approved.value as unknown as ProposalStatus;
-      const replay = state.applications.find((receipt) =>
-        receipt.operationId === operation.id && receipt.generation === operation.generation,
-      );
-      if (replay) return replay;
+      const applicationFor = (status: ProposalStatus) => status.applications.find((receipt) =>
+        receipt.operationId === operation.id && receipt.generation === operation.generation);
+      const recordApplication = async (receipt: ApplyReceipt) => {
+        // All exact approved copies describe the same applied operation.
+        for (const { record, status } of approved) {
+          if (applicationFor(status)) continue;
+          status.applications.push(receipt);
+          status.appliedOperationIds.push(operation.id);
+          if (status.appliedOperationIds.length === status.proposal.operations.length) status.state = "applied";
+          await transaction.saveModuleRecord({
+            projectId: pid(projectId), moduleId: AUTHORITY, key: record.key,
+            value: status as unknown as JsonObject, expectedVersion: record.version,
+          });
+        }
+        return receipt;
+      };
+      const replay = approved.map(({ status }) => applicationFor(status)).find((receipt) => receipt !== undefined);
+      if (replay) return recordApplication(replay);
 
+      const state = first.status;
       const manifest = await this.currentManifest(transaction, projectId);
       const reader = makeReader(manifest);
       await assertEvidenceRevisions(reader, state.proposal, operation);
@@ -863,17 +879,7 @@ export class CoreStore implements MutationCoordinator {
         })),
       };
 
-      state.applications.push(receipt);
-      state.appliedOperationIds.push(operation.id);
-      if (state.appliedOperationIds.length === state.proposal.operations.length) state.state = "applied";
-      await transaction.saveModuleRecord({
-        projectId: pid(projectId),
-        moduleId: AUTHORITY,
-        key: approved.key,
-        value: state as unknown as JsonObject,
-        expectedVersion: approved.version,
-      });
-      return receipt;
+      return recordApplication(receipt);
     });
   }
   private async buildOperation(projectId:string,writes:FileChange[],effect:ChangeOperation["effect"],message:string,pinned?:SnapshotId):Promise<BuiltChangeOperation> {const reader=await this.reader(projectId,pinned);return {snapshot:reader.snapshot,operation:{id:randomUUID(),generation:0,projectId,baseProjectVersion:reader.snapshot.projectVersion,effect,reads:writes.map(({path,revision})=>({path,revision})),writes,message}};}

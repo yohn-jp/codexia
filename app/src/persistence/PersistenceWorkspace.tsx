@@ -290,6 +290,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const refreshKnowledgeBrowse = useCallback(() => setKnowledgeListRetryEpoch((current) => current + 1), []);
   const [nodeId, setNodeId] = useState("");
   const [selectedKnowledgeNode, setSelectedKnowledgeNode] = useState<KnowledgeNode | null>(null);
+  const [knowledgeSelectionError, setKnowledgeSelectionError] = useState<{ projectId: string; nodeId: string; message: string } | null>(null);
   const [nodeEvidence, setNodeEvidence] = useState<{ projectId: string; nodeId: string; evidence: PersistenceAnchorView[] } | null>(null);
   const [nodeEvidenceError, setNodeEvidenceError] = useState("");
   const [evidenceJump, setEvidenceJump] = useState<EvidenceJump>();
@@ -430,6 +431,8 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   }, [documents, documentId, projectId]);
   const selectedNode = nodes.find((candidate) => candidate.id === nodeId && candidate.projectId === projectId)
     ?? (selectedKnowledgeNode?.id === nodeId && selectedKnowledgeNode.projectId === projectId ? selectedKnowledgeNode : null);
+  const selectedNodeError = knowledgeSelectionError?.projectId === projectId && knowledgeSelectionError.nodeId === nodeId
+    ? knowledgeSelectionError.message : "";
   const visibleKnowledgeNodes = knowledgeLegacyMode ? nodes.filter((node) =>
     node.name.toLocaleLowerCase().includes(knowledgeQuery.trim().toLocaleLowerCase()) &&
     (!knowledgeTypeFilter || node.type === knowledgeTypeFilter) &&
@@ -674,6 +677,22 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       if (sequence === knowledgeBrowseSequenceRef.current && projectIdRef.current === selectedProjectId && !sessionBlockedRef.current) setKnowledgeListError(error instanceof Error ? error.message : "Knowledge一覧を読み込めませんでした。");
     } finally { if (sequence === knowledgeBrowseSequenceRef.current && projectIdRef.current === selectedProjectId && !sessionBlockedRef.current) setKnowledgePageLoading(false); }
   }, [projectId, knowledgeNextCursor, knowledgePageLoading, knowledgeQuery, knowledgeTypeFilter, knowledgeStatusFilter]);
+
+  useEffect(() => {
+    setKnowledgeSelectionError(null);
+    if (sessionBlocked || !projectId || !nodeId || selectedNode) return;
+    // A canonical evidence link can point outside the current browse page.
+    const controller = new AbortController();
+    const isCurrent = () => !controller.signal.aborted && !sessionBlockedRef.current && projectIdRef.current === projectId;
+    void api.persistenceNode(projectId, nodeId, controller.signal).then(({ node }) => {
+      if (!isCurrent()) return;
+      if (node.projectId !== projectId || node.id !== nodeId) throw new Error("Knowledgeの識別情報が一致しません。");
+      setSelectedKnowledgeNode(node);
+    }).catch((error: unknown) => {
+      if (isCurrent()) setKnowledgeSelectionError({ projectId, nodeId, message: error instanceof Error ? error.message : "Knowledge詳細を読み込めませんでした。" });
+    });
+    return () => controller.abort();
+  }, [projectId, nodeId, selectedNode?.id, sessionBlocked]);
 
   useEffect(() => {
     if (sessionBlocked) return;
@@ -2370,6 +2389,9 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             <p>Knowledge一覧を読み込めませんでした。{knowledgeListError}</p>
             <button type="button" onClick={() => setKnowledgeListRetryEpoch((value) => value + 1)} disabled={knowledgeListLoading}>再試行</button>
           </div>}
+          {nodeId && !selectedNode && (selectedNodeError
+            ? <p className="pg-alert" role="alert">{selectedNodeError}</p>
+            : <p role="status">Knowledge詳細を読み込んでいます。</p>)}
           {selectedNode && <KnowledgeContextInspector key={selectedNode.id} node={selectedNode} nodes={nodes} documentId={active?.document.id} revisionId={active?.revision.id} clean={Boolean(active&&!active.dirty&&!active.remoteConflict&&active.save==="saved")} selectedEvidenceId={selectedEvidenceId??""} evidenceLoadKey={(active?.evidenceLoadKey??0)+nativeReviewEpoch} onOpenEvidence={(item)=>void openNodeEvidence(item)} onDataChanged={refreshKnowledgeBrowse} onNodeUpdate={(updated)=>{setSelectedKnowledgeNode(updated);refreshKnowledgeBrowse();}} onMerge={(target,source)=>{setSelectedKnowledgeNode(target);setNodeId(target.id);refreshKnowledgeBrowse();setNotice("Knowledgeを統合しました。")}} />}
           {selectedNode && <section aria-label="Knowledgeの根拠">
             <h3>{selectedNode.name}の根拠</h3>
