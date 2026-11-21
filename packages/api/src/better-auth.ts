@@ -10,8 +10,10 @@ import {
   verifyOAuthQueryParams,
 } from "@better-auth/oauth-provider";
 import { oauthProviderResourceClient } from "@better-auth/oauth-provider/resource-client";
+import { decodeProtectedHeader } from "jose";
 import { MCP_OAUTH_SCOPES } from "@codexia/contracts";
 import { CODEXIA_OWNER_SCOPE } from "./oauth-owner.js";
+import { createJwtAccessTokenRevocationAdapter, type VerifiedJwtAccessToken } from "./jwt-access-token-revocation.js";
 export { CODEXIA_OWNER_SCOPE };
 
 export const CODEXIA_AUTH_SCHEMA = "codexia_auth";
@@ -163,6 +165,28 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
     ],
   });
   const resourceClient = oauthProviderResourceClient(auth).getActions();
+  const accessTokenRevocation = createJwtAccessTokenRevocationAdapter({
+    issuer,
+    audience,
+    pool,
+    async verifyToken(token): Promise<VerifiedJwtAccessToken> {
+      const payload = await resourceClient.verifyBearerToken(token, {
+        verifyOptions: {
+          issuer,
+          audience: [audience, `${issuer}/oauth2/userinfo`],
+          algorithms: ["ES256"],
+          requiredClaims: ["iss", "sub", "aud", "exp", "iat", "jti", "client_id"],
+        },
+        jwksUrl: `${issuer}/jwks`,
+      });
+      if (typeof payload.iss !== "string" || typeof payload.sub !== "string" ||
+          typeof payload.exp !== "number" || typeof payload.iat !== "number" ||
+          typeof payload.jti !== "string" || typeof payload.client_id !== "string") {
+        throw new Error("Verified OAuth access token is missing a required revocation claim");
+      }
+      return { ...payload, typ: decodeProtectedHeader(token).typ } as VerifiedJwtAccessToken;
+    },
+  });
 
   return {
     auth,
@@ -171,7 +195,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
     audience,
     toHeaders: fromNodeHeaders,
     advertisePublicClientTokenAuth,
-    handler: auth.handler,
+    handler: (request: Request) => accessTokenRevocation.handle(request, auth.handler),
     authorizationServerMetadata: oauthProviderAuthServerMetadata(auth),
     openIdConfigMetadata: oauthProviderOpenIdConfigMetadata(auth),
     async getConsentContext(headers: Headers, oauthQuery: string): Promise<OAuthConsentContext> {
@@ -203,7 +227,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
     },
     async verifyActiveAccessToken(token: string): Promise<boolean> {
       try {
-        await resourceClient.verifyBearerToken(token, {
+        const payload = await resourceClient.verifyBearerToken(token, {
           verifyOptions: { issuer, audience, algorithms: ["ES256"], typ: "at+jwt", requiredClaims: ["iss", "sub", "aud", "exp", "iat", "jti", "client_id"] },
           remoteVerify: {
             force: true,
@@ -212,7 +236,8 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
             clientSecret: config.oauthIntrospectionClientSecret,
           },
         });
-        return true;
+        if (typeof payload.iss !== "string" || typeof payload.jti !== "string") return false;
+        return !await accessTokenRevocation.isRevoked(payload.iss, payload.jti);
       } catch (error) {
         const statusCode = typeof error === "object" && error !== null && "statusCode" in error
           ? Number((error as { statusCode: unknown }).statusCode)

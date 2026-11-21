@@ -214,6 +214,89 @@ test("Better Auth signed-out OIDC login reaches the Fastify OAuth route and admi
     assert.notEqual(refreshed.refresh_token, token.refresh_token);
     assert.equal(refreshed.token_type, "Bearer");
 
+    const foreignRevoke = await apiRequest(`${baseAuth}/oauth2/revoke`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: fixture.foreignClientId, token: accessToken, token_type_hint: "access_token" }),
+    });
+    assert.equal(foreignRevoke.status, 200, "a foreign registered client receives the RFC 7009 success response");
+    assert.equal((await apiRequest(`${origin}/api/session`, { headers: { authorization: `Bearer ${accessToken}` } })).status, 200,
+      "a foreign client cannot revoke the token owner's jti");
+    assert.equal(await fixture.readRevocationRecord(claims.jti as string), null, "a foreign client cannot create a durable revocation record");
+
+    const unregisteredClientRevoke = await apiRequest(`${baseAuth}/oauth2/revoke`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: `unregistered-${randomUUID()}`, token: accessToken, token_type_hint: "access_token" }),
+    });
+    const unregisteredClientError = await unregisteredClientRevoke.json() as { error?: string };
+    assert.ok(unregisteredClientRevoke.status >= 400 && unregisteredClientRevoke.status < 500,
+      "unregistered clients must still be rejected before revocation");
+    assert.equal(unregisteredClientError.error, "invalid_client");
+
+    const unknownRevoke = await apiRequest(`${baseAuth}/oauth2/revoke`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: fixture.webClientId, token: `unknown-${randomUUID()}`, token_type_hint: "access_token" }),
+    });
+    assert.equal(unknownRevoke.status, 200, "an unknown token receives the RFC 7009 success response");
+
+    t.mock.timers.enable({ apis: ["Date"], now: ((claims.exp as number) + 1) * 1_000 });
+    try {
+      assert.equal((await apiRequest(`${origin}/api/session`, { headers: { authorization: `Bearer ${accessToken}` } })).status, 401,
+        "an expired access token is denied by API admission");
+      const expiredRevoke = await apiRequest(`${baseAuth}/oauth2/revoke`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ client_id: fixture.webClientId, token: accessToken, token_type_hint: "access_token" }),
+      });
+      assert.equal(expiredRevoke.status, 200, "an expired token receives the RFC 7009 success response");
+      assert.equal(await fixture.readRevocationRecord(claims.jti as string), null, "expired tokens must not create durable revocation records");
+    } finally {
+      t.mock.timers.reset();
+    }
+    assert.equal((await apiRequest(`${origin}/api/session`, { headers: { authorization: `Bearer ${accessToken}` } })).status, 200,
+      "an expired token is not accidentally persisted as a revocation after the clock returns");
+
+    const accessRevoke = await apiRequest(`${baseAuth}/oauth2/revoke`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: fixture.webClientId, token: accessToken, token_type_hint: "access_token" }),
+    });
+    assert.equal(accessRevoke.status, 200, "the registered owning client can revoke an individual JWT access token");
+    assert.deepEqual(await fixture.readRevocationRecord(claims.jti as string), {
+      issuer: fixture.issuer,
+      jti: claims.jti,
+      client_id: fixture.webClientId,
+      subject: fixture.ownerSubject,
+      session_id: typeof claims.sid === "string" ? claims.sid : null,
+      expires_at: new Date((claims.exp as number) * 1_000),
+    }, "revocation is durably bound to the exact issuer, jti, client, subject and session");
+    assert.equal((await apiRequest(`${origin}/api/session`, { headers: { authorization: `Bearer ${accessToken}` } })).status, 401,
+      "the exact revoked jti is denied by API admission");
+    const revokedIntrospection = await apiRequest(`${baseAuth}/oauth2/introspect`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: fixture.introspectionClientId,
+        client_secret: fixture.introspectionClientSecret,
+        token: accessToken,
+        token_type_hint: "access_token",
+      }),
+    });
+    assert.equal(revokedIntrospection.status, 200);
+    assert.deepEqual(await revokedIntrospection.json(), { active: false },
+      "OAuth introspection must report an individually revoked JWT as inactive");
+    const expiredRecordJti = `expired-${randomUUID()}`;
+    await fixture.seedExpiredRevocationRecord(expiredRecordJti);
+    assert.equal(await fixture.pruneExpiredRevocations(), 1, "the maintenance prune removes only the expired record");
+    assert.equal(await fixture.readRevocationRecord(expiredRecordJti), null, "the expired revocation record is removed from PostgreSQL");
+    assert.ok(await fixture.readRevocationRecord(claims.jti as string), "the active revocation record remains in PostgreSQL");
+    assert.equal((await apiRequest(`${origin}/api/session`, { headers: { authorization: `Bearer ${accessToken}` } })).status, 401,
+      "the live revocation remains effective after expired-record pruning");
+    assert.equal((await apiRequest(`${origin}/api/session`, { headers: { authorization: `Bearer ${String(refreshed.access_token)}` } })).status, 200,
+      "revoking one access token does not revoke a sibling token from the same session");
+
     const refreshRevoke = await apiRequest(`${baseAuth}/oauth2/revoke`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -226,15 +309,6 @@ test("Better Auth signed-out OIDC login reaches the Fastify OAuth route and admi
       body: new URLSearchParams({ grant_type: "refresh_token", client_id: fixture.webClientId, refresh_token: String(refreshed.refresh_token), resource: fixture.audience }),
     });
     assert.equal(reusedRefresh.status, 400, "revoked refresh token must not be reusable");
-
-    const accessRevoke = await apiRequest(`${baseAuth}/oauth2/revoke`, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ client_id: fixture.webClientId, token: accessToken, token_type_hint: "access_token" }),
-    });
-    assert.equal(accessRevoke.status, 400, "Better Auth 1.7.26 explicitly does not support individual JWT access-token revocation");
-    assert.match(await accessRevoke.text(), /unsupported_token_type/u);
-    assert.equal((await apiRequest(`${origin}/api/session`, { headers: { authorization: `Bearer ${accessToken}` } })).status, 200);
 
     const logout = await client.signOut();
     assert.equal(logout.error, null);

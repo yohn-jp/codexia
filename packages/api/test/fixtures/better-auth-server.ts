@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createServer } from "../../src/server.js";
 import { createBetterAuthRuntime, CODEXIA_OWNER_SCOPE } from "../../src/better-auth.js";
+import { migrateJwtAccessTokenRevocationSchema, pruneExpiredJwtAccessTokenRevocations } from "../../src/jwt-access-token-revocation.js";
 import { generateKeyPair, SignJWT, exportJWK } from "jose";
 import { Pool } from "pg";
 import type { CoreStore } from "@codexia/core";
@@ -19,8 +20,20 @@ export interface BetterAuthFixture {
   readonly audience: string;
   readonly idpIssuer: string;
   readonly webClientId: string;
+  readonly foreignClientId: string;
   readonly ownerSubject: string;
   readonly introspectionClientId: string;
+  readonly introspectionClientSecret: string;
+  readRevocationRecord(jti: string): Promise<{
+    issuer: string;
+    jti: string;
+    client_id: string;
+    subject: string;
+    session_id: string | null;
+    expires_at: Date;
+  } | null>;
+  seedExpiredRevocationRecord(jti: string): Promise<void>;
+  pruneExpiredRevocations(): Promise<number>;
   close(): Promise<void>;
 }
 
@@ -211,6 +224,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     };
     runtime = createBetterAuthRuntime(runtimeConfig);
     await (await runtime.auth.$context).runMigrations();
+    await migrateJwtAccessTokenRevocationSchema(runtime.pool);
 
     const makeApi = (withOwner: boolean): Server => createServer({
       // OAuth fixture does not provision Full runtime manifests; browser coverage
@@ -269,6 +283,21 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
         skip_consent: false,
       },
     });
+    const foreignClient = await runtime.auth.api.adminCreateOAuthClient({
+      headers: new Headers({ cookie: cookie.header() }),
+      body: {
+        redirect_uris: [`${apiOrigin}/foreign-client`],
+        client_name: "Codexia Fixture Foreign Public Client",
+        resources: [audience],
+        scope: `openid ${CODEXIA_OWNER_SCOPE} offline_access`,
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        application_type: "native",
+        require_pkce: true,
+        skip_consent: false,
+      },
+    });
     const introspectionClient = await runtime.auth.api.adminCreateOAuthClient({
       headers: new Headers({ cookie: cookie.header() }),
       body: {
@@ -300,8 +329,36 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       audience,
       idpIssuer,
       webClientId: webClient.client_id,
+      foreignClientId: foreignClient.client_id,
       ownerSubject,
       introspectionClientId: introspectionClient.client_id,
+      introspectionClientSecret: introspectionClient.client_secret,
+      async readRevocationRecord(jti) {
+        const result = await runtime!.pool.query<{
+          issuer: string;
+          jti: string;
+          client_id: string;
+          subject: string;
+          session_id: string | null;
+          expires_at: Date;
+        }>(
+          "SELECT issuer, jti, client_id, subject, session_id, expires_at FROM codexia_auth.oauth_jwt_access_token_revocation WHERE jti = $1",
+          [jti],
+        );
+        return result.rows[0] ?? null;
+      },
+      async seedExpiredRevocationRecord(jti) {
+        await runtime!.pool.query(
+          `INSERT INTO codexia_auth.oauth_jwt_access_token_revocation
+             (issuer, jti, client_id, subject, issued_at, expires_at, revoked_at)
+           VALUES ($1, $2, 'fixture-client', 'fixture-subject', CURRENT_TIMESTAMP - INTERVAL '2 days',
+                   CURRENT_TIMESTAMP - INTERVAL '1 day', CURRENT_TIMESTAMP - INTERVAL '1 day')`,
+          [issuer, jti],
+        );
+      },
+      async pruneExpiredRevocations() {
+        return pruneExpiredJwtAccessTokenRevocations(runtime!.pool);
+      },
       async close() {
         if (apiServer) await close(apiServer);
         if (bootstrapServer) await close(bootstrapServer);
