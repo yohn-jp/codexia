@@ -8,7 +8,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { MODULE_PERSISTENCE_FORMATS, resolveBuildCatalogSelection } from '../packages/module-runtime/dist/index.js';
 import { assertCleanRevisionSnapshot, browserArtifactRecords, browserManifestEntryFiles, calculateBuildDigests, canonicalJson, catalogFor, persistenceForModules, resourceDeclarationFor, validateHostedArtifactDirectory } from './hosted-build.mjs';
-import { assertSigstoreBundleMatches, assertSupportedCosignVersion, createSlsaStatement, pinnedCosignBinary } from './hosted-attestation.mjs';
+import { assertSigstoreBundleMatches, assertSupportedCosignVersion, createSlsaStatement, pinnedCosignBinary, publishBundle } from './hosted-attestation.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const moduleIds = ['story', 'diagnostics', 'nlp', 'semantic', 'speaker', 'assistant', 'publishing', 'mcp', 'search'];
@@ -34,6 +34,29 @@ test('pinned cosign executes a private byte snapshot after digest and version va
   } finally {
     if (staged) await staged.cleanup();
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('provenance upload sends and reads back only the exact verified bundle bytes', async () => {
+  const originalFetch = globalThis.fetch;
+  const signedBundleBytes = Buffer.from('{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json"}');
+  const requests = [];
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    return options.method === 'PUT' ? new Response(null, { status: 201 }) : new Response(signedBundleBytes, { status: 200 });
+  };
+  try {
+    assert.equal(await publishBundle('https://registry.example.test/bundles/sha256:abc', signedBundleBytes), 'https://registry.example.test/bundles/sha256:abc');
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].options.method, 'PUT');
+    assert.deepEqual(Buffer.from(requests[0].options.body), signedBundleBytes);
+    assert.equal(requests[0].options.headers['if-none-match'], '*');
+    assert.equal(requests[0].options.redirect, 'error');
+    assert.equal(requests[1].options.redirect, 'error');
+    await assert.rejects(publishBundle('http://registry.example.test/bundle', signedBundleBytes), /HTTPS URL/u);
+    assert.equal(requests.length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 

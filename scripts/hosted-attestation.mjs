@@ -304,7 +304,7 @@ function validatePublishUrl(value) {
   return url;
 }
 
-async function publishBundle(url, bytes, tokenEnvironmentVariable) {
+export async function publishBundle(url, bytes, tokenEnvironmentVariable) {
   const target = validatePublishUrl(url);
   const tokenName = tokenEnvironmentVariable;
   if (tokenName !== undefined && !/^[A-Z_][A-Z0-9_]*$/u.test(tokenName)) fail('--registry-token-env must be an environment variable name');
