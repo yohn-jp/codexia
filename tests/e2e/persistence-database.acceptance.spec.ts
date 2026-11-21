@@ -2,10 +2,57 @@ import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import type { KnowledgeAliasId, KnowledgeNodeId, ProjectId } from "@codexia/persistence-contracts";
-import { createWritingFixture, expectDeviceDraft, expectServerSaveFailure, expectServerSaved, openManuscriptScene, openProtectionDetails, openRevisionHistory, ownerLogin, readManuscriptMarkdown, readPersistenceDrafts, manuscriptEditor } from "./postgres-fixture";
+import { createWritingFixture, expectDeviceDraft, expectServerSaveFailure, expectServerSaved, fillDraft, openManuscriptScene, openProtectionDetails, openRevisionHistory, ownerLogin, readManuscriptMarkdown, readPersistenceDrafts, manuscriptEditor } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
+
+test("an unavailable explicit scene route stays non-editable until the author selects a document", async ({ page }) => {
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  for (const mode of ["desktop", "mobile"] as const) {
+    const fixture = await createWritingFixture(page, mode, `Missing route ${mode} ${crypto.randomUUID()}`, `Untouched ${mode} manuscript.`);
+    await fillDraft(page, `Unrelated ${mode} draft.`);
+    const missingSceneId = crypto.randomUUID();
+    const route = (projectId: string, sceneId?: string) => {
+      const suffix = sceneId ? `/scenes/${sceneId}` : "";
+      return new URL(`/${mode}/projects/${projectId}${suffix}${mode === "mobile" ? "?view=writing" : ""}`, page.url()).toString();
+    };
+
+    await page.goto(route(fixture.project.id, missingSceneId));
+    await expect(page.getByRole("heading", { name: "指定された文書が見つかりません" })).toBeVisible();
+    await expect(manuscriptEditor(page)).toHaveCount(0);
+    expect(new URL(page.url()).pathname).toContain(`/projects/${fixture.project.id}/scenes/${missingSceneId}`);
+    const storedDraft = (await readPersistenceDrafts(page)).find(draft => draft.projectId === fixture.project.id && draft.documentId === fixture.scene.id);
+    expect(storedDraft?.markdown).toBe(`Unrelated ${mode} draft.`);
+
+    if (mode === "mobile") {
+      await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "作品", exact: true }).click();
+      const secondScene = page.locator(`.pg-document-list .pg-outline-item[data-document-id="${fixture.second.id}"] > .pg-outline-row > .pg-outline-document`);
+      await secondScene.click();
+      await expect(secondScene).toHaveAttribute("aria-current", "page");
+      await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "書く", exact: true }).click();
+    } else await openManuscriptScene(page, fixture.second);
+    await expect(manuscriptEditor(page)).toBeVisible();
+    expect(new URL(page.url()).pathname).toContain(`/projects/${fixture.project.id}/scenes/${fixture.second.id}`);
+    await expect(manuscriptEditor(page)).toContainText("最初の本文。");
+
+    await page.goto(route(fixture.project.id, fixture.scene.id));
+    await expect(manuscriptEditor(page)).toBeVisible();
+    await expect(page.getByRole("heading", { name: fixture.scene.title, exact: true })).toBeVisible();
+    expect(new URL(page.url()).pathname).toContain(`/projects/${fixture.project.id}/scenes/${fixture.scene.id}`);
+
+    await page.goto(route(fixture.project.id));
+    await expect(manuscriptEditor(page)).toBeVisible();
+    expect(new URL(page.url()).pathname).toMatch(new RegExp(`/projects/${fixture.project.id}/scenes/[^/]+$`));
+
+    const missingProjectId = crypto.randomUUID();
+    await page.goto(route(missingProjectId, missingSceneId));
+    await expect(manuscriptEditor(page)).toHaveCount(0);
+    expect(new URL(page.url()).pathname).toContain(`/projects/${missingProjectId}/scenes/${missingSceneId}`);
+    await expect(page.getByRole("alert")).toContainText("を読み込めませんでした");
+    await expect(page.getByRole("heading", { name: "指定された文書が見つかりません" })).toHaveCount(0);
+  }
+});
 
 test("Knowledge browse searches literal aliases and pages the same project on Desktop and Mobile", async ({ page }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
