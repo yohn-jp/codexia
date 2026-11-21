@@ -141,9 +141,13 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
   async function completeLogout(): Promise<void> {
     if (busy) return;
     setBusy(true);
-    setSessionBlocked(true);
     setMessage("");
     try {
+      if (!protectionRef.current || !await protectionRef.current()) {
+        setMessage("入力を保護できないためログアウトを停止しました。接続を確認して再試行してください。");
+        return;
+      }
+      setSessionBlocked(true);
       await api.logout();
       workspaceScopeRef.current = null;
       setSessionBlocked(false);

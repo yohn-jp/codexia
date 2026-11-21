@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { ownerLogin, fixtureProject } from "./postgres-fixture";
+import { createWritingFixture, fillDraft, manuscriptEditor, ownerLogin, fixtureProject } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 
@@ -142,6 +142,45 @@ test("a failed standalone logout keeps the editor protected and lets the author 
   await expect(page.getByRole("heading", { name: "作品を開く" })).toBeVisible();
   expect(logoutRequests).toBe(2);
   expect(serverLoggedOut).toBe(true);
+});
+
+test("a failed pageshow session check cannot retry logout while the latest manuscript is unprotected", async ({ page }) => {
+  const fixture = await createWritingFixture(page, "desktop", `Unprotected logout retry ${crypto.randomUUID()}`, "Initial manuscript.");
+  await fillDraft(page, "Previously protected manuscript.");
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore["put"]>) {
+      if (this.name === "persistenceDrafts") throw new DOMException("Injected browser journal failure", "QuotaExceededError");
+      return original.apply(this, args);
+    };
+  });
+  await manuscriptEditor(page).fill("Latest manuscript that failed browser protection.");
+  await expect(manuscriptEditor(page)).toContainText("Latest manuscript that failed browser protection.");
+
+  let sessionUnavailable = false;
+  let logoutRequests = 0;
+  await page.route("**/api/session", (route) => sessionUnavailable
+    ? route.fulfill({ status: 503, json: { error: "Session check unavailable" } })
+    : route.continue());
+  await page.route("**/api/logout", async (route) => {
+    logoutRequests += 1;
+    await route.fulfill({ json: { authenticated: false } });
+  });
+  sessionUnavailable = true;
+  await page.evaluate(() => {
+    window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+  });
+  await expect(page.getByRole("heading", { name: "認証・接続を再確認してください" })).toBeVisible();
+  await page.getByRole("button", { name: "ログアウトを再試行" }).click();
+  expect(logoutRequests).toBe(0);
+  await expect(page.getByRole("alert")).toContainText("保護できない");
+
+  sessionUnavailable = false;
+  await page.getByRole("button", { name: "再試行", exact: true }).click();
+  await expect(manuscriptEditor(page)).toContainText("Latest manuscript that failed browser protection.");
+  await expect(page.getByRole("heading", { name: fixture.scene.title, exact: true })).toBeVisible();
+  expect(logoutRequests).toBe(0);
 });
 
 test("a lost Hosted logout response can be retried and returns to the Praetorium entry path", async ({ page }) => {
