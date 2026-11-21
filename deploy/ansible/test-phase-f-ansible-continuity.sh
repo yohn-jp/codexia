@@ -76,6 +76,10 @@ env "${service_environment[@]}" bash "$repo_root/deploy/ansible/test-base-runtim
 grep -Fq 'Verified real rootless Podman secret creation, exact adoption, idempotence and existing-data missing-secret denial.' "$tmp/base-secrets.log"
 grep -Fq 'Verified rootless Quadlet convergence, fresh PostgreSQL init, no-change repeat, data adoption, mismatch denial' "$tmp/base-runtime.log"
 
+printf '%s\n' '=== Clean Ansible application convergence on the same disposable service identity ==='
+bash "$repo_root/deploy/ansible/test-phase-f-ansible-app.sh" | tee "$tmp/app-convergence.log"
+grep -Fq 'PASS: real Ansible base→prepare→schema→fresh activation repeat convergence kept one PostgreSQL identity and project data.' "$tmp/app-convergence.log"
+
 node --input-type=module - "$evidence_dir/ansible-convergence-results.json" <<'NODE'
 import { writeFile } from 'node:fs/promises';
 const [file] = process.argv.slice(2);
@@ -95,10 +99,11 @@ const result = {
     host: 'PASS: real Ansible host stage created the rootless identity, then a second apply reported changed=0; generated rootless Quadlet network ran and was cleaned.',
     secrets: 'PASS: real Ansible secrets stage created the synthetic secrets, repeated with changed=0, adopted the disposable PostgreSQL volume, and rejected a missing secret for existing data.',
     baseRuntime: 'PASS: real Ansible base stage converged and repeated with changed=0; disposable database/data adoption, schema/role/secret and Tunnel drift denials succeeded on the same service identity.',
+    application: 'PASS: after the prior base fixture was fully cleaned, a second clean resource set on the same service identity ran Ansible secrets, base, prepare, initialize-schema and initialize-fresh. Secrets, base and prepare repeats reported changed=0; the schema and activation operation tasks reported unchanged. The PostgreSQL container, cluster system identifier, PostgreSQL volume mountpoint and app data volume identities remained unchanged, and an API-created project survived the repeated initialize-fresh stage.',
   },
-  lifecycleBoundary: 'The signed updater lifecycle follows in the same workflow run on its own isolated fixture identity; it does not claim one continuous Ansible application cutover.',
+  lifecycleBoundary: 'The signed updater lifecycle follows in the same workflow run on its own isolated fixture identity and state. The application scenario is clean fresh initialization, not adoption of an already-running application.',
   notChecked: [
-    'Complete Ansible prepare, schema initialization, first activation, enable, and D cutover on one application fixture',
+    'Ansible enable, D cutover and automatic polling on the application fixture',
     'Adoption of a complete existing application deployment end-to-end',
     'Target VM reboot, external Access and author UI acceptance, remote restore host, and measured RPO/RTO',
   ],

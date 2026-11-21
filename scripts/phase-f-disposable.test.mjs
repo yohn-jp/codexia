@@ -16,6 +16,7 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
   const proxyQuadlet = await readFile(path.join(root, 'deploy/updater/codexia-api-proxy.container.example'), 'utf8');
   const evidenceDoc = await readFile(path.join(root, 'docs/deployment/PHASE-F-DISPOSABLE-CI.md'), 'utf8');
   const continuity = await readFile(path.join(root, 'deploy/ansible/test-phase-f-ansible-continuity.sh'), 'utf8');
+  const appContinuity = await readFile(path.join(root, 'deploy/ansible/test-phase-f-ansible-app.sh'), 'utf8');
   const runtimeJob = workflow.split('  rootless-updater-lifecycle:', 2)[1];
   assert.match(workflow, /runs-on: ubuntu-26\.04/u);
   assert.match(workflow, /\n  workflow_dispatch:/u);
@@ -23,6 +24,18 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
   assert.doesNotMatch(workflow, /full-model-oci-acceptance\.yml/u);
   assert.match(workflow, /cancel-in-progress: true/u);
   assert.match(workflow, /test-phase-f-ansible-continuity\.sh/u);
+  assert.match(workflow, /bash -n deploy\/ansible\/test-phase-f-ansible-app\.sh/u);
+  assert.match(workflow, /sudo python3 -m venv \/opt\/codexia-ansible/u);
+  assert.match(workflow, /ANSIBLE_PLAYBOOK: \/opt\/codexia-ansible\/bin\/ansible-playbook/u);
+  const appRepoRoot = appContinuity.indexOf('repo_root=$(cd');
+  const appAccessibleCwd = appContinuity.indexOf('\ncd /tmp\n');
+  const appChannelGeneration = appContinuity.indexOf('sudo -H -u "$service_user" env', appAccessibleCwd);
+  assert.ok(appRepoRoot >= 0 && appAccessibleCwd > appRepoRoot && appChannelGeneration > appAccessibleCwd,
+    'Resolve checkout paths before fixture-user sudo, then run from an accessible cwd');
+  const serviceAnsibleProbe = appContinuity.indexOf('service_ansible_version=$(as_service "$ansible_playbook" --version)');
+  const firstSecretsStage = appContinuity.indexOf('apply_runner secrets');
+  assert.ok(serviceAnsibleProbe >= 0 && firstSecretsStage > serviceAnsibleProbe,
+    'Verify the service account can run the pinned Ansible controller before database setup');
   assert.match(workflow, /ansible-core|requirements\.txt/u);
   assert.match(proxyQuadlet, /^PodmanArgs=--image-volume=ignore$/mu);
   assert.match(workflow, /contents: read/u);
@@ -40,6 +53,8 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
   }
   const continuitySyntax = spawnSync('bash', ['-n', path.join(root, 'deploy/ansible/test-phase-f-ansible-continuity.sh')], { encoding: 'utf8' });
   assert.equal(continuitySyntax.status, 0, continuitySyntax.stderr);
+  const appSyntax = spawnSync('bash', ['-n', path.join(root, 'deploy/ansible/test-phase-f-ansible-app.sh')], { encoding: 'utf8' });
+  assert.equal(appSyntax.status, 0, appSyntax.stderr);
   for (const marker of [
     'test-host-integration.sh',
     'test-base-secrets-integration.sh',
@@ -52,6 +67,35 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
     'workflowRunId',
     'notChecked',
   ]) assert.ok(continuity.includes(marker), 'Missing same-host Ansible continuity proof: ' + marker);
+  for (const marker of [
+    'install_fixture_manager_xdg',
+    'phase_f_xdg_generator_path',
+    'manager XDG environment verified after systemd environment generation',
+    'tar -C "$repo_root" -cf - deploy scripts packages/persistence-postgres/migrations',
+    'service_ansible_version=$(as_service "$ansible_playbook" --version)',
+    'codexia_stage=$stage',
+    'apply_runner secrets',
+    'apply_runner base',
+    'apply_service prepare',
+    'apply_service initialize-schema',
+    'apply_service initialize-fresh',
+    "fetch(origin + '/api/v1/persistence/projects'",
+    'migration_ledger',
+    'pg_control_system()',
+    'codexia-api-proxy',
+    'Phase F Ansible application continuity',
+    'refusing adoption',
+    'notChecked',
+    'app-convergence-results.json',
+  ]) assert.ok(appContinuity.includes(marker), 'Missing fresh application continuity proof: ' + marker);
+  assert.doesNotMatch(appContinuity, /origin \+ '\/api\/projects'/u,
+    'Application continuity must verify writes through the PostgreSQL persistence API');
+  assert.match(continuity, /test-phase-f-ansible-app\.sh/u);
+});
+
+test('Phase F release provenance uses publication time inside the exact successful run window', async () => {
+  const channelFactory = await readFile(path.join(root, 'scripts/phase-f-test-channel.mjs'), 'utf8');
+  assert.match(channelFactory, /publicationInWorkflowWindow\(releaseApiRecord, run\)/u);
 });
 
 test('Phase F integration helper is valid shell and exercises the existing locked updater paths', async () => {
@@ -158,11 +202,18 @@ test('Phase F channel factory derives signed sequences from certified embedded r
       migrationFingerprint: 'sha256:' + 'c'.repeat(64), persistenceFormat: 1, apiEpoch: 1,
     }, metadata, coreImage, compatibility);
   });
-  const channels = createSignedTestChannels(records, { now: Date.parse('2026-11-16T12:00:00.000Z') });
+  const freshSchemaRelease = {
+    ...records[2], version: '0.1.4', sourceSha: source('d'), image: image('d'),
+    migrationFingerprint: 'sha256:' + 'd'.repeat(64),
+  };
+  const channels = createSignedTestChannels(records, {
+    now: Date.parse('2026-11-16T12:00:00.000Z'), freshSchemaRelease,
+  });
   assert.equal(channels.first.verified.payload.sequence, 1);
   assert.equal(channels.second.verified.payload.sequence, 2);
   assert.equal(channels.first.candidate.version, '0.1.2');
   assert.equal(channels.second.candidate.version, '0.1.3');
+  assert.equal(JSON.parse(Buffer.from(channels.freshSchema.envelope.payload, 'base64').toString('utf8')).releases[0].version, '0.1.4');
   assert.throws(() => parseComponentRelease(releaseInfo('0.1.2', source('a'), 'b'), '0.1.2', source('b'), image('b'), image('e'), compatibility), /release metadata|source/i);
   assert.throws(() => parseComponentRelease(releaseInfo('0.1.1', source('a'), 'a'), '0.1.1', source('a'), image('a'), image('f'), compatibility), /Full image digest/i);
   assert.throws(() => parseComponentRelease({ ...releaseInfo('0.1.1', source('a'), 'a'), prerelease: true }, '0.1.1', source('a'), image('a'), image('d'), compatibility), /prerelease/i);
