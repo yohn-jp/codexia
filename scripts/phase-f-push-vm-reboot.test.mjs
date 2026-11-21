@@ -37,6 +37,7 @@ test('Phase F VM fixture requires a real guest reboot and durable PostgreSQL evi
   assert.match(fixture, /Image=docker\.io\/library\/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536/u);
   assert.match(fixture, /CODEXIA_HOST_CONVERGENCE/u);
   assert.match(fixture, /codexia_service_uid.*22001/u);
+  assert.match(fixture, /install -d -o codexia -g codexia -m 0700 \/home\/codexia\/\.local\/share/u);
   assert.match(fixture, /pg_control_system\(\)/u);
   assert.match(fixture, /systemctl reboot/u);
   assert.match(fixture, /random\/boot_id/u);

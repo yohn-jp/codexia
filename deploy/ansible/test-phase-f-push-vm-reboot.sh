@@ -169,6 +169,7 @@ phase=fixture-postgres-install
 guest_sudo <<'GUEST'
 set -Eeuo pipefail
 install -d -o codexia -g codexia -m 0700 /home/codexia/.local/state/phase-f-vm-reboot
+install -d -o codexia -g codexia -m 0700 /home/codexia/.local/share
 install -d -o codexia -g codexia -m 0700 /home/codexia/.config/containers/systemd
 secret_file=/home/codexia/.local/state/phase-f-vm-reboot/postgres-password
 sudo -u codexia bash -c 'umask 077; openssl rand -hex 32 > "$1"' _ "$secret_file"
