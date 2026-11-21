@@ -208,13 +208,35 @@ test('real workspace preparation overlaps independent builds and blocks dependen
       const log = event => fs.appendFileSync(${JSON.stringify(events)}, JSON.stringify({id, event}) + '\\n');
       log('start');
       if (id === 'persistence-postgres' && !fs.existsSync(path.join(__dirname, 'persistence-contracts.done'))) process.exit(3);
-      setTimeout(() => {
+      const independent = ['contracts', 'persistence-contracts'];
+      const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+      async function waitForIndependentPeer() {
+        if (!independent.includes(id)) return;
+        fs.writeFileSync(path.join(__dirname, id + '.started'), '');
+        const timeoutMs = 10000;
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+          if (independent.every(peer => fs.existsSync(path.join(__dirname, peer + '.started')))) {
+            log('barrier-release');
+            return;
+          }
+          await pause(10);
+        }
+        const message = 'Timed out waiting for independent builds ' + independent.join(' and ') + ' within ' + timeoutMs + 'ms';
+        log('barrier-timeout');
+        process.stderr.write(message + '\\n');
+        process.exit(4);
+      }
+      waitForIndependentPeer().then(() => {
         if (process.env.CODEXIA_FAIL_BUILD === id) process.exit(2);
         fs.writeFileSync(path.join(__dirname, id + '.done'), '');
         log('end');
-      }, 100);
+      });
     `);
+    // Prevent pnpm's automatic install from delaying the fake builds in this isolated workspace.
+    await mkdir(path.join(fixture.projectRoot, 'node_modules'));
     for (const workspace of WORKSPACES) {
+      await mkdir(path.join(fixture.projectRoot, workspace.path, 'node_modules'), { recursive: true });
       const manifestPath = path.join(fixture.projectRoot, workspace.path, 'package.json');
       const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
       manifest.scripts.build = `node ${probe} ${workspace.id}`;
@@ -228,18 +250,22 @@ test('real workspace preparation overlaps independent builds and blocks dependen
     assert.equal(success.status, 0, success.stderr);
     const successReport = JSON.parse(await readFile(reportPath, 'utf8'));
     assert.deepEqual(successReport.map(entry => entry.task), tasks);
-    assert.ok(successReport.every(entry => !entry.error));
-    const observed = (await readFile(events, 'utf8')).trim().split('\n').map(JSON.parse);
+    const observedLines = (await readFile(events, 'utf8')).trim().split('\n');
+    assert.ok(successReport.every(entry => !entry.error), `${JSON.stringify(successReport)}\n${success.stdout}\n${success.stderr}\n${observedLines.join('\n')}`);
+    const observed = observedLines.map(JSON.parse);
     assert.ok(observed.some(event => event.id === 'persistence-postgres' && event.event === 'end'));
+    assert.equal(observed.filter(event => event.event === 'barrier-release').length, 2, 'the independent-build barrier releases only after both peers start');
     let active = 0;
     let maximum = 0;
     for (const event of observed) {
-      active += event.event === 'start' ? 1 : -1;
+      if (event.event === 'start') active += 1;
+      if (event.event === 'end') active -= 1;
       maximum = Math.max(maximum, active);
     }
     assert.equal(maximum, 2, 'independent builds overlap within the two-workspace limit');
     assert.equal(active, 0);
     for (const workspace of WORKSPACES) await rm(path.join(fixture.projectRoot, `${workspace.id}.done`), { force: true });
+    for (const id of ['contracts', 'persistence-contracts']) await rm(path.join(fixture.projectRoot, `${id}.started`), { force: true });
     await rm(events);
     const failed = runProject(fixture.projectRoot, args, { ...env, CODEXIA_FAIL_BUILD: 'persistence-contracts' });
     assert.equal(failed.status, 0, failed.stderr);

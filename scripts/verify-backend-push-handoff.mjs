@@ -24,6 +24,8 @@ export function assertTrustedBackendPublicationRun(run, expected) {
   assert.ok(run && typeof run === 'object', 'Backend publication run is missing');
   assert.equal(run.id, expected.id, 'Backend publication run ID mismatch');
   assert.equal(run.run_attempt, expected.attempt, 'Backend publication run attempt mismatch');
+  assert.ok(positive(expected.runNumber), 'Backend publication expected run number is invalid');
+  assert.equal(run.run_number, expected.runNumber, 'Backend publication run number mismatch');
   assert.equal(run.path, WORKFLOW_PATH, 'Unexpected backend publication workflow');
   assert.equal(run.event, 'workflow_run', 'Backend publisher must follow verified main Verify');
   assert.equal(run.head_branch, 'main', 'Backend publication branch must be main');
@@ -34,6 +36,11 @@ export function assertTrustedBackendPublicationRun(run, expected) {
   assert.match(run.head_sha ?? '', sha, 'Backend publication main SHA is invalid');
   assert.equal(run.head_sha, expected.headSha, 'Backend publication source differs from the expected main SHA');
   return run;
+}
+
+export function backendReleaseValidationEnvironment(env, run) {
+  assert.ok(positive(run?.id) && positive(run?.run_number), 'Backend publication run identity is invalid');
+  return { ...env, GITHUB_RUN_ID: String(run.id), GITHUB_RUN_NUMBER: String(run.run_number) };
 }
 
 export function selectPushDeploymentCertificateArtifact(artifacts, run) {
@@ -79,9 +86,10 @@ export function createHandoffDeploymentOutputs({ fullImage, producerSha, fullCer
   assert.equal(certificate.identity.profile, 'full');
   assert.equal(certificate.image, fullImage);
   assert.equal(certificate.producer.sourceSha, producerSha);
+  assert.ok(positive(certificate.identity.apiEpoch), 'Certified Full backend API epoch is invalid');
   const encodedCertificate = Buffer.from(JSON.stringify(certificate)).toString('base64');
   assert.ok(encodedCertificate.length <= JOB_OUTPUT_LIMIT, 'Verified Full deployment certificate exceeds the job output limit');
-  return Object.freeze({ fullImage, producerSha, fullCertificate: encodedCertificate });
+  return Object.freeze({ fullImage, producerSha, fullApiEpoch: String(certificate.identity.apiEpoch), fullCertificate: encodedCertificate });
 }
 
 async function githubJson(resource, token, fetchImpl = fetch) {
@@ -143,7 +151,7 @@ async function verifyArtifactAndRelease({ env, payload, run, token, fetchImpl = 
     const backendWorkflowEvent = payload?.workflow_run?.event;
     assert.equal(backendWorkflowEvent, 'workflow_run', 'Backend publication was not triggered by the completed Verify workflow');
     const releaseEnv = {
-      ...env,
+      ...backendReleaseValidationEnvironment(env, run),
       GITHUB_REPOSITORY: REPOSITORY,
       GITHUB_REF: 'refs/heads/main',
       GITHUB_SHA: run.head_sha,
@@ -193,7 +201,8 @@ export async function verifyBackendPushHandoff(options = {}) {
   assert.equal(triggered?.conclusion, 'success', 'Failed backend publication cannot hand off an image');
   assert.equal(triggered?.repository?.full_name, REPOSITORY, 'Backend publication repository mismatch');
   assert.equal(triggered?.head_repository?.full_name, REPOSITORY, 'Backend publication source repository mismatch');
-  assert.ok(positive(triggered?.id) && positive(triggered?.run_attempt), 'Backend publication run identity is invalid');
+  assert.ok(positive(triggered?.id) && positive(triggered?.run_attempt) && positive(triggered?.run_number),
+    'Backend publication run identity is invalid');
   assert.match(triggered?.head_sha ?? '', sha, 'Backend publication main SHA is invalid');
   assert.match(env.CODEXIA_PUBLISHER_RUN_ID ?? '', /^[1-9][0-9]*$/u, 'Trusted publisher run ID is required');
   const publisherRunId = Number(env.CODEXIA_PUBLISHER_RUN_ID);
@@ -204,7 +213,10 @@ export async function verifyBackendPushHandoff(options = {}) {
   const token = env.GH_TOKEN || env.GITHUB_TOKEN;
   assert.ok(typeof token === 'string' && token.length > 0, 'Actions read token is required');
   const run = assertTrustedBackendPublicationRun(await githubJson(`actions/runs/${publisherRunId}`, token, fetchImpl), {
-    id: publisherRunId, attempt: triggered.run_attempt, headSha: triggered.head_sha,
+    id: publisherRunId,
+    attempt: triggered.run_attempt,
+    runNumber: triggered.run_number,
+    headSha: triggered.head_sha,
   });
   const result = await verifyArtifactAndRelease({ env, payload, run, token, fetchImpl });
   if (result.skipped) {
@@ -216,7 +228,7 @@ export async function verifyBackendPushHandoff(options = {}) {
   if (env.GITHUB_OUTPUT) {
     const outputs = createHandoffDeploymentOutputs(result);
     await appendFile(env.GITHUB_OUTPUT,
-      `full-image=${outputs.fullImage}\nproducer-sha=${outputs.producerSha}\nfull-certificate=${outputs.fullCertificate}\n`);
+      `full-image=${outputs.fullImage}\nfull-api-epoch=${outputs.fullApiEpoch}\nproducer-sha=${outputs.producerSha}\nfull-certificate=${outputs.fullCertificate}\n`);
   }
   if (env.GITHUB_STEP_SUMMARY) {
     await writeFile(env.GITHUB_STEP_SUMMARY,

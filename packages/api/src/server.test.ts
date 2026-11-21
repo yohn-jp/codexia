@@ -1546,6 +1546,29 @@ describe("Codexia HTTP boundary", () => {
     await assert.rejects(new HistoricalModelUsageStore(alias).list(SNAPSHOT.projectId), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_path_invalid");
   });
 
+  it("keeps accepted offset timestamps readable and rejects normalized dates outside the stored format", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "codexia-api-model-history-offsets-"));
+    tempDirs.push(root);
+    const store = new HistoricalModelUsageStore(resolve(root, "host-history"));
+    const offsetEvent = usageEvent(SNAPSHOT.projectId, "offset-event", "2026-10-17T01:00:00+01:00");
+    await store.append({ ...offsetEvent, completedAt: "2026-10-17T01:00:01+01:00" });
+    assert.deepEqual((await store.list(SNAPSHOT.projectId)).events, [{
+      ...offsetEvent,
+      startedAt: "2026-10-17T00:00:00.000Z",
+      completedAt: "2026-10-17T00:00:01.000Z",
+    }]);
+
+    await assert.rejects(store.append({
+      ...offsetEvent, id: "year-underflow", startedAt: "0000-01-01T00:00:00+01:00", completedAt: "0000-01-01T00:00:01+01:00",
+    }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_invalid");
+    await assert.rejects(store.append({
+      ...offsetEvent, id: "year-overflow", startedAt: "9999-12-31T23:59:59-01:00", completedAt: "9999-12-31T23:59:59-01:00",
+    }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_invalid");
+    await assert.rejects(store.append({
+      ...offsetEvent, id: "invalid-calendar-day", startedAt: "2026-02-30T00:00:00Z", completedAt: "2026-02-30T00:00:01Z",
+    }), (error: unknown) => error instanceof HistoricalModelUsageError && error.code === "model_usage_event_invalid");
+  });
+
   it("stores only bounded worker lifecycle metadata and durable completion inbox state", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "codexia-api-job-history-"));
     tempDirs.push(root);

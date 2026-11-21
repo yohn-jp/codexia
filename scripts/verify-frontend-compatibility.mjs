@@ -96,6 +96,25 @@ export function assertBackendCompatibility(backend, profile, apiEpoch) {
   assert.equal(backend.apiEpoch, apiEpoch, 'Frontend and backend API epochs are incompatible');
 }
 
+/** Admit backend recovery only when the observed deployed Full frontend matches the certified candidate epoch. */
+export function assertCertifiedBackendFrontendCompatibility(frontend, candidateApiEpoch) {
+  assertFrontendIdentity(frontend);
+  assert.ok(Number.isSafeInteger(candidateApiEpoch) && candidateApiEpoch > 0, 'Certified backend API epoch is invalid');
+  assert.equal(frontend.profile, 'full', 'Production backend recovery requires the Full frontend profile');
+  assert.equal(frontend.apiEpoch, candidateApiEpoch, 'Frontend and backend API epochs are incompatible');
+  return frontend;
+}
+
+/** Read the API epoch only from the verified backend certificate output. */
+export function readCertifiedBackendApiEpoch(env) {
+  const value = env.CODEXIA_EXPECTED_BACKEND_API_EPOCH;
+  assert.ok(typeof value === 'string' && /^[1-9][0-9]*$/u.test(value),
+    'Certified backend API epoch is missing or invalid');
+  const apiEpoch = Number(value);
+  assert.ok(Number.isSafeInteger(apiEpoch), 'Certified backend API epoch is missing or invalid');
+  return apiEpoch;
+}
+
 /** @param {NodeJS.ProcessEnv | Record<string, string | undefined>} env */
 export function readFrontendReleaseConfiguration(env) {
   const configuredOrigin = env.CODEXIA_PUBLIC_ORIGIN;
@@ -127,6 +146,16 @@ export async function probeLiveDeployment({ env = process.env, fetchImpl = fetch
   const { origin, clientId, clientSecret } = readFrontendReleaseConfiguration(env);
   const credentials = { clientId, clientSecret };
   return probeScopedIdentityAccess({origin,credentials,fetchImpl,checkBoundary,validateBackend:assertBackendIdentity,validateFrontend:assertFrontendIdentity});
+}
+
+/** Probe only the deployed frontend identity for a certified backend recovery. */
+export async function probeLiveFrontendForBackendDeployment({ env = process.env, fetchImpl = fetch, checkBoundary = false } = {}) {
+  const { origin, clientId, clientSecret } = readFrontendReleaseConfiguration(env);
+  const { deployed } = await probeScopedIdentityAccess({
+    origin, credentials: { clientId, clientSecret }, fetchImpl, checkBoundary, includeBackend: false,
+    validateFrontend: assertFrontendIdentity,
+  });
+  return deployed;
 }
 
 /**
@@ -165,6 +194,17 @@ async function main() {
       appendFileSync(process.env.GITHUB_OUTPUT,Object.entries(outputs).map(([key,value])=>key+'='+value+'\n').join(''));
     }
     console.log(`Verified protected production identities: backend ${backend.version} (epoch ${backend.apiEpoch}), frontend ${deployed.version} (epoch ${deployed.apiEpoch}), candidate API epoch ${apiEpoch}; anonymous identity requests denied; out-of-scope CI requests blocked at Access or the edge.`);
+    return;
+  }
+  if (process.argv[2] === 'backend-preflight') {
+    const candidateApiEpoch = readCertifiedBackendApiEpoch(process.env);
+    const deployed = await probeLiveFrontendForBackendDeployment({ checkBoundary: true });
+    assertCertifiedBackendFrontendCompatibility(deployed, candidateApiEpoch);
+    if (process.env.GITHUB_OUTPUT) {
+      const outputs = frontendPreflightOutputs(deployed);
+      appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(outputs).map(([key, value]) => key + '=' + value + '\n').join(''));
+    }
+    console.log(`Verified protected frontend ${deployed.version} (API epoch ${deployed.apiEpoch}) against the certified backend API epoch ${candidateApiEpoch}; anonymous identity requests denied; out-of-scope CI requests blocked at Access or the edge.`);
     return;
   }
   const frontend = loadBuiltFrontend();

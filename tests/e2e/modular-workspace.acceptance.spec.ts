@@ -318,6 +318,67 @@ test("mobile browser back and forward synchronize guarded routes and workspace p
   }
 });
 
+test("a newer browser history selection supersedes a pending guarded popstate", async ({ page }) => {
+  expect(authToken.length).toBeGreaterThanOrEqual(32);
+  await page.addInitScript(() => {
+    const descriptor = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, "oncomplete");
+    if (!descriptor?.get || !descriptor.set) throw new Error("IndexedDB transaction completion hooks are unavailable.");
+    let holdNext = false;
+    let heldResolve: (() => void) | undefined;
+    const hooks = window as Window & {
+      __holdNextPersistenceJournalCompletion?: () => void;
+      __waitForHeldPersistenceJournalCompletion?: () => Promise<void>;
+      __releasePersistenceJournalCompletion?: () => void;
+    };
+    const held = new Promise<void>((resolve) => { heldResolve = resolve; });
+    let release: (() => void) | undefined;
+    hooks.__holdNextPersistenceJournalCompletion = () => { holdNext = true; };
+    hooks.__waitForHeldPersistenceJournalCompletion = () => held;
+    hooks.__releasePersistenceJournalCompletion = () => release?.();
+    Object.defineProperty(IDBTransaction.prototype, "oncomplete", {
+      configurable: true,
+      enumerable: descriptor.enumerable,
+      get() { return descriptor.get!.call(this); },
+      set(handler: ((this: IDBTransaction, event: Event) => unknown) | null) {
+        if (holdNext && this.mode === "readwrite" && Array.from(this.objectStoreNames).includes("persistenceDrafts")) {
+          holdNext = false;
+          descriptor.set!.call(this, function (this: IDBTransaction, event: Event) {
+            heldResolve?.();
+            release = () => handler?.call(this, event);
+          });
+        } else descriptor.set!.call(this, handler);
+      },
+    });
+  });
+  await signIn(page, "desktop");
+  const fixture = await openFixtureScene(page, "desktop");
+  const second = fixture.scenes[1]!;
+  const secondRoute = new RegExp(`/desktop/projects/${fixture.project.id}/scenes/${second.document.id}$`);
+  const secondSceneButton = page.locator(`.pg-document-list .pg-outline-item[data-document-id="${second.document.id}"] > .pg-outline-row > .pg-outline-document`);
+  await secondSceneButton.click();
+  await expect(secondSceneButton).toHaveAttribute("aria-current", "page");
+  const secondDraft = "The forward history entry must remain the active manuscript.";
+  await page.route(`**/api/v1/persistence/projects/${fixture.project.id}/documents/${second.document.id}`, () => new Promise(() => undefined));
+  await replaceEditor(page, secondDraft);
+  await expectDraft(page, second.document.id, secondDraft);
+  await page.evaluate(() => (window as Window & { __holdNextPersistenceJournalCompletion?: () => void }).__holdNextPersistenceJournalCompletion?.());
+
+  await page.evaluate(() => history.back());
+  await expect(page).toHaveURL(new RegExp(`/desktop/projects/${fixture.project.id}/scenes/${fixture.scene.document.id}$`));
+  await page.evaluate(async () => {
+    const hooks = window as Window & { __waitForHeldPersistenceJournalCompletion?: () => Promise<void> };
+    await hooks.__waitForHeldPersistenceJournalCompletion?.();
+  });
+  await page.evaluate(() => history.forward());
+  await expect(page).toHaveURL(secondRoute);
+  await page.evaluate(() => (window as Window & { __releasePersistenceJournalCompletion?: () => void }).__releasePersistenceJournalCompletion?.());
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+
+  await expect(page).toHaveURL(secondRoute);
+  await expect(secondSceneButton).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { name: second.document.title, exact: true })).toBeVisible();
+});
+
 test("mobile late panel requests are fenced by route and author-scope changes", async ({ page }) => {
   const fixture = await openMobileTransitionFixture(page);
   try {
