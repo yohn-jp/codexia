@@ -24,7 +24,11 @@ export function matchesRotationCredential(secret, operationId, expectedDigest) {
   const expected = Buffer.from(expectedDigest, 'hex');
   // Read-only legacy compatibility: existing on-disk v1 rotation markers
   // contain unsalted SHA-256. Do not issue any new markers using that scheme.
-  const legacy = createHash('sha256').update(secret).digest();
+  // Legacy v1 marker recovery only: this SHA-256 value was persisted before the
+  // scrypt migration and cannot be re-derived with a different KDF. It is not
+  // used to issue new credentials or new rotation markers. Removing this read
+  // path before updater retirement (#430) would strand interrupted rollbacks.
+  const legacy = createHash('sha256').update(secret).digest(); // lgtm[js/insufficient-password-hash] -- required to verify already-persisted v1 recovery markers; new markers use scrypt
   if (timingSafeEqual(legacy, expected)) return true;
   return timingSafeEqual(Buffer.from(rotationCredentialDigest(secret, operationId), 'hex'), expected);
 }
