@@ -23,7 +23,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm run build && node --test dist/*.test.js && node --import tsx --test test/better-auth.integration.test.ts",
     "start": "node dist/server.js",
-    "migrate:auth": "node dist/migrate-auth.js"
+    "migrate:auth": "node dist/migrate-auth.js",
+    "prune:auth-revocations": "node dist/prune-auth-revocations.js"
   },
   "dependencies": {
     "@better-auth/oauth-provider": "1.7.26",

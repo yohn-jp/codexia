@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createServer } from "../../src/server.js";
 import { createBetterAuthRuntime, CODEXIA_OWNER_SCOPE } from "../../src/better-auth.js";
-import { migrateJwtAccessTokenRevocationSchema } from "../../src/jwt-access-token-revocation.js";
+import { migrateJwtAccessTokenRevocationSchema, pruneExpiredJwtAccessTokenRevocations } from "../../src/jwt-access-token-revocation.js";
 import { generateKeyPair, SignJWT, exportJWK } from "jose";
 import { Pool } from "pg";
 import type { CoreStore } from "@codexia/core";
@@ -32,6 +32,8 @@ export interface BetterAuthFixture {
     session_id: string | null;
     expires_at: Date;
   } | null>;
+  seedExpiredRevocationRecord(jti: string): Promise<void>;
+  pruneExpiredRevocations(): Promise<number>;
   close(): Promise<void>;
 }
 
@@ -340,6 +342,18 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
           [jti],
         );
         return result.rows[0] ?? null;
+      },
+      async seedExpiredRevocationRecord(jti) {
+        await runtime!.pool.query(
+          `INSERT INTO codexia_auth.oauth_jwt_access_token_revocation
+             (issuer, jti, client_id, subject, issued_at, expires_at, revoked_at)
+           VALUES ($1, $2, 'fixture-client', 'fixture-subject', CURRENT_TIMESTAMP - INTERVAL '2 days',
+                   CURRENT_TIMESTAMP - INTERVAL '1 day', CURRENT_TIMESTAMP - INTERVAL '1 day')`,
+          [issuer, jti],
+        );
+      },
+      async pruneExpiredRevocations() {
+        return pruneExpiredJwtAccessTokenRevocations(runtime!.pool);
       },
       async close() {
         if (apiServer) await close(apiServer);

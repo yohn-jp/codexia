@@ -120,6 +120,11 @@ export async function migrateJwtAccessTokenRevocationSchema(pool: Pool): Promise
   await pool.query(`CREATE INDEX IF NOT EXISTS oauth_jwt_access_token_revocation_expiry_idx ON ${REVOCATION_TABLE} (expires_at)`);
 }
 
+export async function pruneExpiredJwtAccessTokenRevocations(pool: Pool): Promise<number> {
+  const result = await pool.query(`DELETE FROM ${REVOCATION_TABLE} WHERE expires_at <= CURRENT_TIMESTAMP`);
+  return result.rowCount ?? 0;
+}
+
 export function createJwtAccessTokenRevocationAdapter(options: JwtAccessTokenRevocationOptions) {
   const isRevoked = async (issuer: string, jti: string): Promise<boolean> => {
     const result = await options.pool.query(

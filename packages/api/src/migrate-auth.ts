@@ -1,6 +1,7 @@
 import { readCodexiaEnvironment } from "./environment.js";
 import { CODEXIA_AUTH_SCHEMA, createBetterAuthRuntime, type BetterAuthRuntimeConfig } from "./better-auth.js";
 import { migrateJwtAccessTokenRevocationSchema } from "./jwt-access-token-revocation.js";
+import type { Pool } from "pg";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -39,19 +40,23 @@ export function requireExplicitApply(args: readonly string[]): void {
   }
 }
 
+export async function assertAuthMigrationDatabaseIdentity(pool: Pool): Promise<void> {
+  const result = await pool.query<{ schema_name: string | null; role_name: string; owns_schema: boolean }>(
+    "SELECT current_schema() AS schema_name, current_user AS role_name, " +
+      "(SELECT pg_get_userbyid(nspowner) = current_user FROM pg_namespace WHERE nspname = $1) AS owns_schema",
+    [CODEXIA_AUTH_SCHEMA],
+  );
+  const identity = result.rows[0];
+  if (identity?.schema_name !== CODEXIA_AUTH_SCHEMA || identity.role_name !== CODEXIA_AUTH_RUNTIME_ROLE || !identity.owns_schema) {
+    throw new Error(`Auth migration requires role ${CODEXIA_AUTH_RUNTIME_ROLE} to own ${CODEXIA_AUTH_SCHEMA} and use it as current_schema()`);
+  }
+}
+
 export async function migrateBetterAuth(): Promise<void> {
   const config = readBetterAuthMigrationConfig();
   const runtime = createBetterAuthRuntime(config);
   try {
-    const result = await runtime.pool.query<{ schema_name: string | null; role_name: string; owns_schema: boolean }>(
-      "SELECT current_schema() AS schema_name, current_user AS role_name, " +
-        "(SELECT pg_get_userbyid(nspowner) = current_user FROM pg_namespace WHERE nspname = $1) AS owns_schema",
-      [CODEXIA_AUTH_SCHEMA],
-    );
-    const identity = result.rows[0];
-    if (identity?.schema_name !== CODEXIA_AUTH_SCHEMA || identity.role_name !== CODEXIA_AUTH_RUNTIME_ROLE || !identity.owns_schema) {
-      throw new Error(`Auth migration requires role ${CODEXIA_AUTH_RUNTIME_ROLE} to own ${CODEXIA_AUTH_SCHEMA} and use it as current_schema()`);
-    }
+    await assertAuthMigrationDatabaseIdentity(runtime.pool);
     await (await runtime.auth.$context).runMigrations();
     await migrateJwtAccessTokenRevocationSchema(runtime.pool);
     process.stdout.write(`Better Auth PostgreSQL migrations completed for schema ${CODEXIA_AUTH_SCHEMA}.\n`);

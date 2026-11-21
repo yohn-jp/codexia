@@ -44,8 +44,9 @@ async function apiRequest(input: RequestInfo | URL, init: RequestInit = {}): Pro
 }
 
 test("Better Auth signed-out OIDC login reaches the Fastify OAuth route and admits the configured owner", async (t) => {
-  const databaseUrl = process.env.CODEXIA_TEST_DATABASE_URL;
-  assert.ok(databaseUrl, "CODEXIA_TEST_DATABASE_URL must name a disposable PostgreSQL test database");
+  const databaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
+  assert.equal(process.env.CODEXIA_AUTH_TEST_DISPOSABLE, "1", "CODEXIA_AUTH_TEST_DISPOSABLE=1 must authorize the dedicated PostgreSQL auth fixture");
+  assert.ok(databaseUrl, "CODEXIA_AUTH_TEST_DATABASE_URL must name a disposable PostgreSQL auth test database");
   assert.throws(() => assertDisposableAuthFixtureDatabaseUrl("postgres://test:test@db.example.test/codexia_auth_test"), /loopback/u);
   assert.throws(() => assertDisposableAuthFixtureDatabaseUrl("postgres://test:test@127.0.0.1/codexia_auth"), /disposable/u);
   assert.doesNotThrow(() => assertDisposableAuthFixtureDatabaseUrl(databaseUrl));
@@ -287,6 +288,13 @@ test("Better Auth signed-out OIDC login reaches the Fastify OAuth route and admi
     assert.equal(revokedIntrospection.status, 200);
     assert.deepEqual(await revokedIntrospection.json(), { active: false },
       "OAuth introspection must report an individually revoked JWT as inactive");
+    const expiredRecordJti = `expired-${randomUUID()}`;
+    await fixture.seedExpiredRevocationRecord(expiredRecordJti);
+    assert.equal(await fixture.pruneExpiredRevocations(), 1, "the maintenance prune removes only the expired record");
+    assert.equal(await fixture.readRevocationRecord(expiredRecordJti), null, "the expired revocation record is removed from PostgreSQL");
+    assert.ok(await fixture.readRevocationRecord(claims.jti as string), "the active revocation record remains in PostgreSQL");
+    assert.equal((await apiRequest(`${origin}/api/session`, { headers: { authorization: `Bearer ${accessToken}` } })).status, 401,
+      "the live revocation remains effective after expired-record pruning");
     assert.equal((await apiRequest(`${origin}/api/session`, { headers: { authorization: `Bearer ${String(refreshed.access_token)}` } })).status, 200,
       "revoking one access token does not revoke a sibling token from the same session");
 
