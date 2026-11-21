@@ -98,6 +98,7 @@ function ScopeFields({
   const volume = tree?.volumes.find((item) => item.id === volumeId);
   const chapters = volume?.chapters ?? [];
   return <div style={{ display: "grid", gap: 8 }}>
+    {tree && <p style={{ margin: 0 }}>作品 {tree.title}</p>}
     <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
       <legend>範囲</legend>
       {(["all", "volume", "chapter"] as const).map((value) => (
@@ -185,7 +186,7 @@ function ExportPanels({ contributionId, context, tree, treeError }: { contributi
 
   return <>
     {contributionId === "publishing.export.plaintext" && <Panel title="書き出し">
-      <p style={{ margin: 0 }}>全文・巻・章をプレーンテキストで保存します。</p>
+      <p style={{ margin: 0 }}>選択した範囲の保存済み本文をテキストファイルに書き出します。読者への受け渡しはファイルを取得した後に行います。</p>
       {sharedScope("publishing-plaintext-scope")}
       <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
         <legend>原稿記法</legend>
@@ -209,7 +210,7 @@ function ExportPanels({ contributionId, context, tree, treeError }: { contributi
     {contributionId === "publishing.export.epub" && <EpubPanel context={context} tree={tree} treeError={treeError} />}
 
     {contributionId === "publishing.export.vertical-print" && <Panel title="縦書き PDF">
-      <p style={{ margin: 0 }}>縦書きの本文をプレビューし、ブラウザ印刷から PDF に保存できます。</p>
+      <p style={{ margin: 0 }}>選択した範囲の保存済み本文を縦書きで確認できます。PDF ファイルの作成はブラウザーの印刷画面で行います。</p>
       <ScopeFields tree={tree} scope={verticalScope} setScope={setVerticalScope}
         {...verticalScopeState} disabled={Boolean(busy)} radioName="publishing-vertical-scope" />
       <label>組版
@@ -282,7 +283,7 @@ function EpubPanel({ context, tree, treeError }: { context: BrowserModuleContext
     finally { setBusy(false); }
   }
   return <Panel title="EPUB 書き出し">
-    <p style={{ margin: 0 }}>目次、ルビ、傍点を含む EPUB3 を作成します。図鑑付録とプロジェクト内表紙を追加できます。</p>
+    <p style={{ margin: 0 }}>選択した範囲の保存済み本文を、目次・ルビ・傍点を含む EPUB3 ファイルに書き出します。読者への受け渡しはファイルを取得した後に行います。</p>
     <ScopeFields tree={tree} scope={scope} setScope={setScope} volumeId={volumeId} setVolumeId={setVolumeId}
       chapterId={chapterId} setChapterId={setChapterId} disabled={busy} radioName="publishing-epub-scope" />
     <label><input type="checkbox" checked={cover} onChange={(event) => setCover(event.target.checked)} />表紙を含める</label>
@@ -414,13 +415,20 @@ function ShareLinksPanel({ context, tree }: { context: BrowserModuleContext; tre
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
-  const [revealed, setRevealed] = useState<{ url: string; proposalId: string } | null>(null);
-  const options = useMemo(() => {
+  const [revealed, setRevealed] = useState<{ url: string; proposalId: string; target: string } | null>(null);
+  const targets = useMemo(() => {
     const volumes = tree?.volumes ?? [];
-    if (kind === "volume") return volumes.map((item) => ({ id: item.id, title: item.title }));
-    if (kind === "chapter") return volumes.flatMap((volume) => volume.chapters.map((chapter) => ({ id: chapter.id, title: volume.title + " / " + chapter.title })));
-    return volumes.flatMap((volume) => volume.chapters.flatMap((chapter) => chapter.scenes.map((scene) => ({ id: scene.id, title: volume.title + " / " + chapter.title + " / " + scene.title }))));
-  }, [tree, kind]);
+    return {
+      volume: volumes.map(({ id, title }) => ({ id, title })),
+      chapter: volumes.flatMap((volume) => volume.chapters.map((chapter) => ({
+        id: chapter.id, title: volume.title + " / " + chapter.title,
+      }))),
+      scene: volumes.flatMap((volume) => volume.chapters.flatMap((chapter) => chapter.scenes.map((scene) => ({
+        id: scene.id, title: volume.title + " / " + chapter.title + " / " + scene.title,
+      })))),
+    };
+  }, [tree]);
+  const options = targets[kind];
 
   async function reload() {
     const data = await invoke(context, "publishing.shares.list", {});
@@ -433,39 +441,44 @@ function ShareLinksPanel({ context, tree }: { context: BrowserModuleContext; tre
   }, [options, scopeId]);
 
   async function create() {
-    if (!scopeId) { setError("共有範囲を選択してください"); return; }
+    const target = options.find((item) => item.id === scopeId);
+    if (!target) { setError("共有範囲を選択してください"); return; }
     setBusy(true); setError(""); setStatus(""); setRevealed(null);
     try {
       const data = await invoke(context, "publishing.shares.create", { kind, id: scopeId, label, expiresInHours: Number(hours) });
       const token = String(data.token);
       const url = window.location.origin + "/r/publishing/" +
         encodeURIComponent(context.snapshot.projectId) + "/" + encodeURIComponent(token);
-      setRevealed({ url, proposalId: String(data.proposalId) });
-      setStatus(String(data.activation));
+      setRevealed({ url, proposalId: String(data.proposalId), target: target.title });
+      setStatus("リンク発行の提案を作成しました。");
       setLabel("");
-      await reload();
-    } catch (cause) { setError(messageOf(cause)); }
+      await reload().catch((cause) => setError(messageOf(cause)));
+    } catch (cause) {
+      setError("リンク発行の結果を確認できません。レビューと共有リンク一覧で対象を確認してください。 " + messageOf(cause));
+    }
     finally { setBusy(false); }
   }
   async function revoke(id: string) {
     if (!window.confirm("この共有リンクを失効する変更をレビューに追加しますか？")) return;
     setBusy(true); setError(""); setStatus("");
     try {
-      const data = await invoke(context, "publishing.shares.revoke", { id });
-      setStatus(String(data.activation));
+      await invoke(context, "publishing.shares.revoke", { id });
+      setStatus("リンク失効の提案を作成しました。承認して適用すると、以後のリンク経由の閲覧が止まります。");
       await reload();
     } catch (cause) { setError(messageOf(cause)); }
     finally { setBusy(false); }
   }
   return <Panel title="読み取り専用共有リンク">
-    <p style={{ margin: 0 }}>リンクは範囲と有効期限に制限されます。作成・失効は提案として保存され、公開後に読者へ反映されます。</p>
+    <p style={{ margin: 0 }}>読者は有効期限まで、選択した範囲の保存済み本文を閲覧できます。公開中に原稿を保存すると、読者がアクセスしたときの本文も変わります。</p>
+    <p style={{ margin: 0 }}>リンクが失効すると、以後のリンク経由の閲覧が止まります。読者がすでに保存したコピーは手元に残ります。</p>
     {revealed && <div style={{ border: "1px solid #547a40", padding: 10, overflowWrap: "anywhere" }}>
-      <p>リンクはこの画面に一度だけ表示されます。コピーして共有してください。</p>
+      <p>発行提案中 {revealed.target}</p>
+      <p>URLは今回だけ表示されます。控えておき、提案 {revealed.proposalId} を承認して適用した後に読者へ渡してください。</p>
       <code>{revealed.url}</code>
-      <p>提案 {revealed.proposalId} の承認と公開後にリンクが有効になります。</p>
       <button type="button" style={buttonStyle()} onClick={() => setRevealed(null)}>閉じる</button>
     </div>}
     <form onSubmit={(event) => { event.preventDefault(); void create(); }} style={{ display: "grid", gap: 8 }}>
+      {tree && <p style={{ margin: 0 }}>作品 {tree.title}</p>}
       <label>範囲
         <select style={fieldStyle()} value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}>
           <option value="volume">巻</option><option value="chapter">章</option><option value="scene">節</option>
@@ -477,17 +490,21 @@ function ShareLinksPanel({ context, tree }: { context: BrowserModuleContext; tre
         </select>
       </label>
       <label>表示名 <input style={fieldStyle()} value={label} onChange={(event) => setLabel(event.target.value)} maxLength={120} /></label>
-      <label>有効期限（時間） <input style={fieldStyle()} type="number" min={1} max={87600} value={hours} onChange={(event) => setHours(event.target.value)} /></label>
-      <button type="submit" style={buttonStyle()} disabled={busy || !scopeId}>{busy ? "準備中…" : "共有リンクを作成"}</button>
+      <label>提案作成からの有効時間（時間） <input style={fieldStyle()} type="number" min={1} max={87600} value={hours} onChange={(event) => setHours(event.target.value)} /></label>
+      <button type="submit" style={buttonStyle()} disabled={busy || !options.some((item) => item.id === scopeId)}>{busy ? "準備中…" : "リンク発行の提案を作成"}</button>
     </form>
     <ul style={{ listStyle: "none", padding: 0, display: "grid", gap: 8 }}>
       {shares.map((share) => {
-        const scopeId = typeof share.scope === "string" ? share.scope : share.scope.id;
-        const title = options.find((item) => item.id === scopeId)?.title ?? scopeId;
+        const scope = share.scope;
+        const title = typeof scope === "string"
+          ? Object.values(targets).flat().find((item) => item.id === scope)?.title ?? scope
+          : scope.kind === "project" ? tree?.title ?? scope.id
+            : targets[scope.kind].find((item) => item.id === scope.id)?.title ?? scope.id;
+        const state = share.revokedAt ? "失効済み" : share.active ? "公開済み" : "期限切れ";
         return <li key={share.id} style={{ border: "1px solid #aaa", padding: 8, display: "flex", justifyContent: "space-between", gap: 8 }}>
           <span><strong>{share.label || title}</strong><br />{title}<br />{share.tokenPrefix ? share.tokenPrefix + "…" : share.id.slice(0, 8)} · {new Date(share.expiresAt).toLocaleString("ja-JP")}
-            {share.revokedAt ? " · 失効済み" : ""}</span>
-          {!share.revokedAt && <button type="button" style={buttonStyle(true)} disabled={busy} onClick={() => void revoke(share.id)}>失効</button>}
+            <br /><span>{state}</span></span>
+          {!share.revokedAt && <button type="button" style={buttonStyle(true)} disabled={busy} onClick={() => void revoke(share.id)}>失効の提案</button>}
         </li>;
       })}
     </ul>

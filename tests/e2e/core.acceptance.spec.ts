@@ -934,3 +934,40 @@ test("Issue 42: failed PostgreSQL availability preserves the author session and 
   await page.getByLabel("作品", { exact: true }).selectOption(f.projectId); await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
   await expectEditor(page, f.one.revision.markdown);
 });
+
+test("publishing lists link states and chapter names independently of the new link selection", async ({ page }) => {
+  test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing contribution is selected by the full profile.");
+  const { projectId } = await fixture(page);
+  const volumeId = randomUUID();
+  const chapterId = randomUUID();
+  const sceneId = randomUUID();
+  const tree = { title: "潮待ち", volumes: [{ id: volumeId, title: "第一巻", chapters: [{
+    id: chapterId, title: "第二章", scenes: [{ id: sceneId, title: "出港" }],
+  }] }] };
+  const shares = [
+    { label: "現行リンク", active: true, expiresAt: "2099-02-01T00:00:00Z" },
+    { label: "期限切れのリンク", active: false, expiresAt: "2000-02-01T00:00:00Z" },
+    { label: "失効したリンク", active: false, expiresAt: "2099-02-01T00:00:00Z", revokedAt: "2000-01-02T00:00:00Z" },
+  ].map((share) => ({ ...share, id: randomUUID(), scope: { kind: "chapter", id: chapterId }, createdAt: "2000-01-01T00:00:00Z" }));
+
+  for (const [action, data] of Object.entries({ "publishing.project.tree": tree, "publishing.shares.list": { shares } })) {
+    await page.route(`**/api/projects/${projectId}/actions/${action}`, async (route) => {
+      const response = await route.fetch();
+      const result = await response.json();
+      await route.fulfill({ response, json: { ...result, data } });
+    });
+  }
+  const menu = page.locator(".st-workspace-panel-menu");
+  await menu.locator("summary").click();
+  await menu.getByRole("button", { name: "読み取り専用共有リンクを表示", exact: true }).click();
+  const panel = page.locator('[data-workspace-panel="module:publishing.share-links"]');
+  await expect(panel.getByRole("combobox", { name: "対象", exact: true })).toHaveValue(chapterId);
+  await panel.getByRole("combobox", { name: "範囲", exact: true }).selectOption("volume");
+  await expect(panel.getByRole("combobox", { name: "対象", exact: true })).toHaveValue(volumeId);
+
+  for (const [label, state] of [["現行リンク", "公開済み"], ["期限切れのリンク", "期限切れ"], ["失効したリンク", "失効済み"]]) {
+    const row = panel.getByRole("listitem").filter({ has: page.getByText(label, { exact: true }) });
+    await expect(row).toContainText("第一巻 / 第二章");
+    await expect(row.getByText(state, { exact: true })).toBeVisible();
+  }
+});
