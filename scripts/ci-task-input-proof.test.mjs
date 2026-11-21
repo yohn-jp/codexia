@@ -18,7 +18,7 @@ function proof(task, overrides = {}) {
     planDigest,
     workflowRunId: 42,
     workflowAttempt: 1,
-    workflowJob: 'types-tests',
+    workflowJob: 'types',
     runtime: { platform: 'linux', arch: 'x64', nodeVersion: 'v24.22.3', execPath: '/opt/node/bin/node',
       cwd: '/home/runner/work/codexia/codexia', imageOS: 'ubuntu24', imageVersion: '20261115.1' },
     inputClosure: Object.fromEntries(dimensions.map(name => [name, name.charCodeAt(0).toString(16).padStart(64, '0')])),
@@ -86,19 +86,21 @@ test('task proof trust requires an exact successful main run, matching job attem
   const artifact = { id: 91, name: 'ci-evidence-types-tests', digest: `sha256:${'c'.repeat(64)}`, expired: false,
     workflow_run: { id: 42, head_sha: sourceSha } };
   assert.doesNotThrow(() => assertTrustedTaskInputProof({ inputProof, identity, run, job, artifact,
-    expected: { repositoryId: 9, workflowId: 7, jobName: 'types-tests', artifactName: 'ci-evidence-types-tests', artifactId: 91, artifactDigest: artifact.digest } }));
+    expected: { repositoryId: 9, workflowId: 7, jobName: 'types-tests', workflowJob: 'types', artifactName: 'ci-evidence-types-tests', artifactId: 91, artifactDigest: artifact.digest } }));
   assert.throws(() => assertTrustedTaskInputProof({ inputProof, identity, run: { ...run, conclusion: 'failure' }, job, artifact,
-    expected: { repositoryId: 9, workflowId: 7, jobName: 'types-tests', artifactName: 'ci-evidence-types-tests', artifactId: 91, artifactDigest: artifact.digest } }), /main run did not succeed/);
+    expected: { repositoryId: 9, workflowId: 7, jobName: 'types-tests', workflowJob: 'types', artifactName: 'ci-evidence-types-tests', artifactId: 91, artifactDigest: artifact.digest } }), /main run did not succeed/);
   assert.throws(() => assertTrustedTaskInputProof({ inputProof, identity, run, job: { ...job, run_attempt: 1 }, artifact,
-    expected: { repositoryId: 9, workflowId: 7, jobName: 'types-tests', artifactName: 'ci-evidence-types-tests', artifactId: 91, artifactDigest: artifact.digest } }), /job attempt mismatch/);
+    expected: { repositoryId: 9, workflowId: 7, jobName: 'types-tests', workflowJob: 'types', artifactName: 'ci-evidence-types-tests', artifactId: 91, artifactDigest: artifact.digest } }), /job attempt mismatch/);
   assert.throws(() => assertTrustedTaskInputProof({ inputProof, identity, run, job, artifact: { ...artifact, expired: true },
-    expected: { repositoryId: 9, workflowId: 7, jobName: 'types-tests', artifactName: 'ci-evidence-types-tests', artifactId: 91, artifactDigest: artifact.digest } }), /artifact is expired/);
+    expected: { repositoryId: 9, workflowId: 7, jobName: 'types-tests', workflowJob: 'types', artifactName: 'ci-evidence-types-tests', artifactId: 91, artifactDigest: artifact.digest } }), /artifact is expired/);
+  assert.throws(() => assertTrustedTaskInputProof({ inputProof: { ...inputProof, workflowJob: 'types-tests' }, identity, run, job, artifact,
+    expected: { repositoryId: 9, workflowId: 7, jobName: 'types-tests', workflowJob: 'types', artifactName: 'ci-evidence-types-tests', artifactId: 91, artifactDigest: artifact.digest } }), /workflow job ID mismatch/);
 });
 
 test('task proof reuse metadata is limited to a complete coverage receipt and stays outside the plan digest', () => {
   const plan = createVerificationPlan({ files: ['docs/README.md'], event: 'pull_request', sha: sourceSha, base: 'd'.repeat(40) });
   const receipt = { task: 'coverage', sourceSha: plan.base, proofSourceSha: plan.base, planDigest: 'e'.repeat(64), workflowRunId: 42,
-    workflowAttempt: 1, workflowId: 7, repositoryId: 9, jobId: 84, workflowJob: 'types-tests',
+    workflowAttempt: 1, workflowId: 7, repositoryId: 9, jobId: 84, workflowJob: 'types',
     artifactId: 91, artifactName: 'ci-evidence-types-tests', artifactDigest: `sha256:${'c'.repeat(64)}`,
     inputClosure: proof('coverage').inputClosure, runtime: proof('coverage').runtime,
     certification: { sourceSha: plan.base, workflowRunId: 42, workflowAttempt: 1, workflowId: 7, repositoryId: 9,
@@ -131,7 +133,7 @@ test('a PR task proof is trusted only through a successful exact-main certificat
   const certificationStep = { name: 'Certify reused merged PR proof', conclusion: 'success' };
   const certification = { sourceSha, workflowRunId: 53, workflowAttempt: 3, workflowId: 7, repositoryId: 9,
     jobId: 85, step: certificationStep.name };
-  const expected = { repositoryId: 9, workflowId: 7, jobName: 'types-tests', jobId: 84,
+  const expected = { repositoryId: 9, workflowId: 7, jobName: 'types-tests', workflowJob: 'types', jobId: 84,
     artifactId: 91, artifactName: 'ci-evidence-types-tests', artifactDigest: artifact.digest };
   assert.doesNotThrow(() => assertTrustedCertifiedSourceTaskInputProof({ inputProof, identity, sourceRun, job,
     artifact, mainRun, certificationJob, certificationStep, certification, expected }));
@@ -178,14 +180,14 @@ test('report-only coverage input closure is accepted only for the full-plan stat
   const tasks = VERIFICATION_GROUPS['types-tests'].filter(task => plan.tasks.includes(task));
   const digest = createPlanDigest(plan);
   const workflowIdentity = {
-    workflowRunId: 701, workflowAttempt: 1, workflowJob: 'types-tests',
+    workflowRunId: 701, workflowAttempt: 1, workflowJob: 'types',
     workflowRef: 'yohn-jp/codexia/.github/workflows/verify.yml@refs/heads/main', workflowSha: sourceSha,
   };
   const runtime = { platform: 'linux', arch: 'x64', nodeVersion: 'v24.22.3', execPath: '/opt/node/bin/node',
     cwd: '/home/runner/work/codexia/codexia', imageOS: 'ubuntu24', imageVersion: '20261115.1' };
   const inputProof = {
     format: 'codexia-ci-task-input-proof/v2', task: 'coverage', mode: 'static-coverage', status: 'passed', runtime,
-    sourceSha, planDigest: digest, workflowRunId: 701, workflowAttempt: 1, workflowJob: 'types-tests',
+    sourceSha, planDigest: digest, workflowRunId: 701, workflowAttempt: 1, workflowJob: 'types',
     inputClosure: Object.fromEntries(dimensions.map(name => [name, name.charCodeAt(0).toString(16).padStart(64, '0')])),
   };
   const report = {
