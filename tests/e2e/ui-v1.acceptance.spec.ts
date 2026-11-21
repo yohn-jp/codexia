@@ -711,6 +711,14 @@ test("Mobile reader keeps first-to-last Japanese paragraphs visible at supported
             await expect(pager).toHaveAttribute("data-page-index", beforePage!);
             await expect(pager).toHaveAttribute("class", beforeClass!);
           }
+          const centerX = box!.x + box!.width / 2;
+          const forwardX = centerX + (direction === "vertical" ? 70 : -70);
+          for (const [start, end, expectedPage] of [[centerX, forwardX, "1"], [forwardX, centerX, "0"]] as const) {
+            await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: start, y, id: 7 }] });
+            await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: end, y, id: 7 }] });
+            await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+            await expect(pager).toHaveAttribute("data-page-index", expectedPage);
+          }
         } finally {
           await cdp.detach();
         }
