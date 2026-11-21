@@ -272,6 +272,30 @@ test("Knowledge browse searches literals and aliases, pages 501 nodes in stable 
   assert.ok(filtered.every(node => node.type === "person" && node.status === "confirmed"));
 });
 
+test("Knowledge search returns retired nodes only for the explicit retired filter", async () => {
+  const project = await createProject(`knowledge-retired-${randomUUID()}`);
+  const nodes = [];
+  for (const name of ["Retired Ada One", "Retired Ada Two"]) {
+    const id = randomUUID() as KnowledgeNodeId;
+    await persistence.transaction(transaction => transaction.saveKnowledgeNode({
+      projectId: project.id, id, type: "person", name, attributes: {}, status: "confirmed", expectedVersion: null,
+    }));
+    const current = await persistence.read(reader => reader.getKnowledgeNode(project.id, id));
+    await persistence.transaction(transaction => transaction.saveKnowledgeNode({
+      projectId: project.id, id, type: "person", name, attributes: {}, status: "retired", expectedVersion: current!.version,
+    }));
+    nodes.push(await persistence.read(reader => reader.getKnowledgeNode(project.id, id)));
+  }
+  const firstPage = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { status: "retired", query: "Ada", limit: 1 }));
+  assert.equal(firstPage.length, 1);
+  const secondPage = await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, {
+    status: "retired", query: "Ada", limit: 10, after: { name: firstPage[0]!.name, id: firstPage[0]!.id },
+  }));
+  assert.deepEqual([firstPage[0], ...secondPage].map(node => node.id), nodes.map(node => node!.id));
+  assert.deepEqual(await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { status: "confirmed", limit: 10 })), []);
+  assert.deepEqual(await persistence.read(reader => reader.searchKnowledgeNodes!(project.id, { limit: 10 })), []);
+});
+
 test("Knowledge keyset cursors use PostgreSQL lower semantics and preserve custom node types", async () => {
   const project = await createProject(`knowledge-unicode-${randomUUID()}`);
   const names = ["İstanbul", "istanbul", "Istanbul", "ıstanbul"];
