@@ -24,6 +24,7 @@ jobs:
     outputs:
       reuse: ${{ steps.reuse.outputs.eligible }}
       reuse_receipt: ${{ steps.reuse.outputs.receipt }}
+      safety_task_reuse: ${{ steps.safety-proof.outputs.safety_task_reuse }}
       plan: ${{ steps.select.outputs.plan }}
       unit: ${{ steps.select.outputs.unit }}
       types: ${{ steps.select.outputs.types }}
@@ -54,10 +55,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/reuse-pr-verification.mjs plan
+      - name: Resolve exact first-parent safety task proof
+        id: safety-proof
+        env:
+          GH_TOKEN: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.token || '' }}
+        run: node scripts/ci-task-proof.mjs plan
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: ci-plan
-          path: ${{ runner.temp }}/ci-plan/ci-plan.json
+          path: |
+            ${{ runner.temp }}/ci-plan/ci-plan.json
+            ${{ runner.temp }}/ci-plan/safety-task-proof.json
           if-no-files-found: error
           retention-days: 7
   full_model_oci:
@@ -168,6 +176,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: ${{ matrix.group == 'sources' && needs.plan.outputs.safety_task_reuse == 'true' && '0' || '1' }}
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.22.3
@@ -553,7 +562,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-          fetch-depth: ${{ needs.plan.outputs.reuse == 'true' && '0' || '1' }}
+          fetch-depth: ${{ (needs.plan.outputs.reuse == 'true' || needs.plan.outputs.safety_task_reuse == 'true') && '0' || '1' }}
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.22.3

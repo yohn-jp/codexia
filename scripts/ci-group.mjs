@@ -8,6 +8,7 @@ import { assertProfileReceipt } from './ci-profile-artifact.mjs';
 import { assertNativeReceipt } from './ci-native-producer.mjs';
 import { runBounded } from './ci-parallel.mjs';
 import { withBrowserFixture } from './ci-browser-fixture.mjs';
+import { computeSafetyTaskInputFingerprint, matchesSafetyTaskProof } from './ci-task-inputs.mjs';
 
 const group = process.argv[2];
 const plan = validateVerificationPlan(JSON.parse(readFileSync(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json', 'utf8')));
@@ -62,11 +63,18 @@ if ((group.startsWith('types-') || group.startsWith('unit-')) && !preparationErr
   } catch (error) { groupPreparationError = String(error); }
 }
 
+let safetyFingerprint;
+if (group === 'types-sources' && tasks.includes('safety') && !preparationError && !groupPreparationError) {
+  try { safetyFingerprint = await computeSafetyTaskInputFingerprint(); }
+  catch (error) { console.log('Could not fingerprint safety inputs; execute the task normally: ' + String(error)); }
+}
+
 const preparationSeconds = (Date.now() - preparationStarted) / 1000;
 console.log(JSON.stringify({ phase: 'shared-workspace-preparation', group, seconds: preparationSeconds, concurrency: limit }));
 
 async function executeTask(task, index) {
   const started = Date.now();
+  let reuse;
   let error = preparationError || (task !== 'coverage' && (groupPreparationError || groupPreparation.get(task)?.error)) || undefined;
   let blocked = Boolean(error || (task === 'audit-core' && completed.get('build-core')?.status !== 'passed' && tasks.includes('build-core')));
   if (blocked && !error) error = 'Core build prerequisite failed';
@@ -78,7 +86,23 @@ async function executeTask(task, index) {
       } else if (task.startsWith('test-types-')) {
         await node('scripts/ci-workspace.mjs', 'test-types', task.slice(11));
       } else if (task === 'safety') {
-        await run('pnpm', ['typecheck:safety']);
+        const proofPath = path.join(path.dirname(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json'), 'safety-task-proof.json');
+        let proof;
+        try { proof = JSON.parse(readFileSync(proofPath, 'utf8')); } catch { proof = undefined; }
+        const receipt = proof?.eligible === true ? proof.receipt : undefined;
+        const parents = execFileSync('git', ['-c', `safe.directory=${process.cwd()}`, 'rev-list', '--parents', '-n', '1', sha], { encoding: 'utf8' }).trim().split(/\s+/u);
+        const sameInputs = parents.length === 3 && matchesSafetyTaskProof({receipt,fingerprint:safetyFingerprint,sourceSha:sha,
+          parentSha:parents[1],event:process.env.GITHUB_EVENT_NAME,ref:process.env.GITHUB_REF,mode:plan.mode});
+        if (sameInputs && process.env.GITHUB_EVENT_NAME === 'push' && process.env.GITHUB_REF === 'refs/heads/main') {
+          reuse = receipt;
+          console.log('Reusing safety task proof from the exact first-parent fingerprint');
+        } else {
+          await run('pnpm', ['typecheck:safety']);
+          if (safetyFingerprint) {
+            const after = await computeSafetyTaskInputFingerprint();
+            if (after.digest !== safetyFingerprint.digest) throw new Error('Safety task inputs changed during execution');
+          }
+        }
       } else if (task.startsWith('build-')) await run('pnpm', ['build'], { CODEXIA_PROFILE: task.slice(6) });
       else if (task === 'audit-core') await run('pnpm', ['audit:core']);
       else if (task.startsWith('oci-')) await run('bash', ['scripts/verify-oci.sh'], { OCI_ENGINE: 'docker', CODEXIA_PROFILE: task.slice(4), CODEXIA_OCI_IMAGE: `codexia-verification:${task.slice(4)}` });
@@ -107,7 +131,8 @@ async function executeTask(task, index) {
       } else throw new Error(`No runner for ${task}`);
     } catch (caught) { error = String(caught); }
   }
-  const result = { task, status: blocked ? 'blocked' : error ? 'failed' : 'passed', seconds: (Date.now() - started) / 1000, ...(error ? { error } : {}) };
+  const result = { task, status: blocked ? 'blocked' : error ? 'failed' : 'passed', seconds: (Date.now() - started) / 1000,
+    ...(reuse ? { reuse } : {}), ...(error ? { error } : {}) };
   completed.set(task, result);
   console.log(JSON.stringify(result));
   return result;
@@ -124,7 +149,9 @@ const executionStarted = Date.now();
 const settled = await runBounded(tasks, executeTask, { limit, exclusive });
 const executionSeconds = (Date.now() - executionStarted) / 1000;
 const results = settled.map((entry, index) => entry.status === 'fulfilled' ? entry.value : { task: tasks[index], status: 'failed', seconds: 0, error: String(entry.reason) });
-const report = { group, sha, planDigest: planDigest(plan), timing: { concurrency: limit, preparationSeconds, executionSeconds }, ...(profileArtifact ? {profileArtifact} : {}), ...(nativeArtifact ? {nativeArtifact} : {}), results };
+const report = { group, sha, planDigest: planDigest(plan), timing: { concurrency: limit, preparationSeconds, executionSeconds },
+  ...(safetyFingerprint ? { taskInputs: { safety: safetyFingerprint } } : {}),
+  ...(profileArtifact ? {profileArtifact} : {}), ...(nativeArtifact ? {nativeArtifact} : {}), results };
 writeFileSync(path.join(reportDirectory, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
   `| Validation | Result | Seconds |\n| --- | --- | ---: |\n${results.map(item => `| ${item.task} | ${item.status} | ${item.seconds.toFixed(1)} |`).join('\n')}\n`);

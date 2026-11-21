@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { VERIFICATION_GROUPS } from './ci-contract.mjs';
 import { planDigest, validateVerificationPlan } from './ci-impact.mjs';
+import { assertTaskInputFingerprint } from './ci-task-inputs.mjs';
 
 export function assertPlanEvidence(plan, jobs, reports) {
   validateVerificationPlan(plan);
@@ -37,4 +38,29 @@ export function assertPlanEvidence(plan, jobs, reports) {
     assert.deepEqual(report.results.map(item => item.task), expected, 'Execution evidence omitted or duplicated a validation');
     assert.ok(report.results.every(item => item.status === 'passed'), 'A selected validation failed, was blocked or skipped');
   }
+}
+
+export function assertSafetyTaskEvidence(planValue, reports) {
+  const plan = validateVerificationPlan(planValue);
+  const group = reports.find(report => report.group === 'types-sources');
+  const task = group?.results?.find(result => result.task === 'safety');
+  if (!plan.tasks.includes('safety')) {
+    assert.equal(task?.reuse, undefined, 'Unselected safety task cannot carry a reuse proof');
+    return null;
+  }
+  assert.ok(task, 'Selected safety task is missing');
+  if (group.taskInputs?.safety) assertTaskInputFingerprint(group.taskInputs.safety);
+  if (task.reuse) {
+    assert.equal(plan.event, 'push', 'Safety task reuse is main-push only');
+    assert.equal(plan.mode, 'full', 'Safety task reuse must retain the full canonical plan');
+    assert.equal(task.status, 'passed', 'Reused safety task is not passed');
+    assert.ok(group.taskInputs?.safety, 'Reused safety task is missing its input fingerprint');
+    const receipt = task.reuse;
+    assert.equal(receipt.format, 'codexia-safety-task-proof/v1');
+    assert.equal(receipt.sourceSha, plan.sha);
+    assert.equal(assertTaskInputFingerprint(receipt.fingerprint).digest, group.taskInputs.safety.digest,
+      'Safety task fingerprint differs from its first-parent proof');
+    return receipt;
+  }
+  return null;
 }

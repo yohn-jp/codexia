@@ -5,10 +5,11 @@ import { appendFile, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { collectGitHubPages } from './release-policy.mjs';
 import { validateVerificationPlan } from './ci-impact.mjs';
-import { assertPlanEvidence } from './ci-evidence.mjs';
+import { assertPlanEvidence, assertSafetyTaskEvidence } from './ci-evidence.mjs';
 import { assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
 import { assertNativeArtifactEvidence } from './ci-native-producer.mjs';
 import { resolveProducerJobAttempts } from './ci-artifact-selection.mjs';
+import { revalidateSafetyTaskProof } from './ci-task-proof.mjs';
 
 const { GH_TOKEN, GITHUB_REPOSITORY, GITHUB_RUN_ID, CODEXIA_EXPECTED_SHA, CODEXIA_REQUIRED_RESULTS } = process.env;
 assert.match(GITHUB_REPOSITORY ?? '', /^[\w.-]+\/[\w.-]+$/);
@@ -43,6 +44,16 @@ for (const entry of await readdir(directory, { withFileTypes: true })) {
   reports.push(JSON.parse(await readFile(path.join(directory, entry.name, 'report.json'), 'utf8')));
 }
 assertPlanEvidence(plan, jobs, reports);
+const reusedSafety = assertSafetyTaskEvidence(plan, reports);
+if (reusedSafety) {
+  const proofPath = path.join(path.dirname(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json'), 'safety-task-proof.json');
+  const envelope = JSON.parse(await readFile(proofPath, 'utf8'));
+  assert.equal(envelope.format, 'codexia-safety-task-proof/v1');
+  assert.equal(envelope.eligible, true, 'Reused safety task has no preselected proof');
+  assert.deepEqual(envelope.receipt, reusedSafety, 'Execution receipt differs from selected safety proof');
+  const group = reports.find(report => report.group === 'types-sources');
+  await revalidateSafetyTaskProof({ receipt: reusedSafety, fingerprint: group.taskInputs.safety });
+}
 const artifacts = await collectGitHubPages(page => request(`actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100&page=${page}`), 'artifacts');
 const producerJobs = await resolveProducerJobAttempts(jobs, run, request, ['build-core','build-full','hosted-native-catalog']);
 assertProfileArtifactEvidence(plan, producerJobs, reports, artifacts, GITHUB_RUN_ID);

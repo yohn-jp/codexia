@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mergeCandidate, assertCandidatePlan, assertCompactNeeds, verifyReusableMainProof, verifyReusableDedicatedProof, DEDICATED_PROOFS } from './reuse-pr-verification.mjs';
+import { mergeCandidate, assertCandidatePlan, assertCandidateTaskPlan, assertCompactNeeds, verifyReusableMainProof, verifyReusableDedicatedProof, DEDICATED_PROOFS } from './reuse-pr-verification.mjs';
 import { createVerificationPlan, planDigest } from './ci-impact.mjs';
 import { VERIFICATION_GROUPS, requiredBuildProfile } from './ci-contract.mjs';
 
@@ -104,6 +104,20 @@ test('closed PR runs with cleared associations resolve only the actual merged PR
 test('an affected plan cannot silently replace omitted main obligations', async () => {
   const affected = fixture(['docs/README.md']);
   await assert.rejects(verifyReusableMainProof(affected.args), /Affected PR proof/);
+});
+
+test('partial task proof is bound to the exact affected diff and only an omitted task',()=>{
+  const candidate={head,base,files:['docs/README.md']};
+  const plan=createVerificationPlan({files:candidate.files,event:'pull_request',sha:head,base});
+  assert.equal(plan.mode,'affected');
+  assert.ok(!plan.tasks.includes('safety'));
+  assert.equal(assertCandidateTaskPlan(plan,candidate).sha,head);
+  const differentDiff=createVerificationPlan({files:['docs/architecture/CORE.md'],event:'pull_request',sha:head,base});
+  assert.throws(()=>assertCandidateTaskPlan(differentDiff,candidate),/actual merge diff/);
+  const safetySelected=createVerificationPlan({files:['app/src/example.ts'],event:'pull_request',sha:head,base});
+  assert.throws(()=>assertCandidateTaskPlan(safetySelected,{...candidate,files:['app/src/example.ts']}),/already selected/);
+  const full=createVerificationPlan({event:'push',sha:head,base:null});
+  assert.throws(()=>assertCandidateTaskPlan(full,candidate),/pull_request/);
 });
 
 test('merge identity rejects direct push, wrong first parent, stale base and changed tree', () => {

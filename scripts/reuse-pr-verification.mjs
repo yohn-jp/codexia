@@ -124,6 +124,17 @@ export function assertCandidatePlan(plan, candidate) {
   assert.equal(plan.mode, 'full', 'Affected PR proof cannot yet replace complete main verification');
 }
 
+export function assertCandidateTaskPlan(plan,candidate,task='safety'){
+  validateVerificationPlan(plan);
+  assert.equal(plan.event,'pull_request');
+  assert.equal(plan.sha,candidate.head,'PR plan source mismatch');
+  assert.equal(plan.base,candidate.base,'PR was not verified against the merged base');
+  assert.deepEqual(plan.files,candidate.files,'PR impact does not cover actual merge diff');
+  assert.equal(plan.mode,'affected','Task-level reuse applies only when the PR proof is affected');
+  assert.ok(!plan.tasks.includes(task),'The PR already selected this task; task reuse is unnecessary');
+  return plan;
+}
+
 export function assertCompactNeeds(needs) {
   const families = ['plan', 'unit', 'types', 'build', 'oci', 'browser', 'hosted_catalog', 'hosted'];
   assert.deepEqual(Object.keys(needs).sort(), families.sort(), 'Incomplete compact DAG outcomes');
@@ -186,7 +197,7 @@ function assertSuccessfulStep(job, name) {
 }
 
 /** Recheck the actual merged tree and the existing canonical PR evidence, using read-only API data. */
-export async function verifyReusableMainProof({ sourceSha, before, repository, currentRun, git, request, readArtifact }) {
+async function verifyReusableMainEvidence({ sourceSha, before, repository, currentRun, git, request, readArtifact, taskProof=false }) {
   const context = mainContext(repository, currentRun, sourceSha, WORKFLOW);
   const candidate = mergeCandidate(sourceSha, before, git);
   const { run, jobs, prNumber, mergedAt, headRef } = await mergedPrRun({ context, candidate, request });
@@ -198,7 +209,8 @@ export async function verifyReusableMainProof({ sourceSha, before, repository, c
   const planArtifact = selectLatestPlanArtifact(artifacts, jobs, identity);
   const [selectedPlan] = selectedArtifacts(inventory, [planArtifact.id], identity, 'plan');
   const plan = await readArtifact(selectedPlan, 'ci-plan.json');
-  assertCandidatePlan(plan, candidate);
+  if(taskProof)assertCandidateTaskPlan(plan,candidate);
+  else assertCandidatePlan(plan, candidate);
   assertFullModelJob(plan, jobs);
   const evidence = selectLatestEvidenceArtifacts(plan, artifacts, jobs, identity);
   const selected = selectedArtifacts(inventory, evidence.map(item => item.id), identity, 'evidence');
@@ -211,12 +223,23 @@ export async function verifyReusableMainProof({ sourceSha, before, repository, c
   for (const job of jobs.filter(job => job.conclusion === 'skipped')) {
     assert.ok(REUSED_MAIN_SKIPPED_JOBS.includes(job.name), 'Unexpected skipped PR job');
   }
-  return {
+  const receipt={
     version: 1, sourceSha, tree: candidate.tree, baseSha: candidate.base, headSha: candidate.head,
     prNumber, runId: run.id, attempt: run.run_attempt, mergedAt: new Date(mergedAt).toISOString(), headRef, planDigest: planDigest(plan), mode: plan.mode,
     planArtifact: { id: selectedPlan.id, digest: selectedPlan.digest },
     evidence: selected.map(item => ({ id: item.id, digest: item.digest })),
   };
+  return {receipt,candidate,plan,reports,selected,artifacts,jobs,run};
+}
+
+export async function verifyReusableMainProof(input){
+  return (await verifyReusableMainEvidence(input)).receipt;
+}
+
+export async function verifyReusableMainTaskProof(input){
+  const result=await verifyReusableMainEvidence({...input,taskProof:true});
+  assert.ok(!result.plan.tasks.includes('safety'));
+  return result;
 }
 
 // The exact job and positive verification steps are the proof boundary for each
