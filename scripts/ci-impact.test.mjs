@@ -221,6 +221,22 @@ test('operational proof remains owned by one exact-head root task and matching i
   assert.ok(Object.hasOwn(audit.on,'pull_request'));
 });
 
+test('Mitogen launcher changes select the rootless contract on PR and main', async () => {
+  const launcher = 'deploy/ansible/ci-mitogen-playbook.sh';
+  const workflow = parse(readFileSync(new URL('../.github/workflows/ansible-base-secrets.yml', import.meta.url), 'utf8'));
+  const fixture = workflow.jobs['rootless-secrets'].steps.find(step => step.env?.ANSIBLE_PLAYBOOK);
+  assert.equal(fixture.env.ANSIBLE_PLAYBOOK, '${{ github.workspace }}/' + launcher);
+  for (const event of ['pull_request', 'push']) {
+    assert.ok(workflow.on[event].paths.includes(launcher), event);
+  }
+  assert.deepEqual((await plan([launcher])).tasks, ['unit-root', 'coverage']);
+  const shared = 'app/src/api.ts';
+  assert.deepEqual((await plan([launcher, shared])).tasks, (await plan([shared])).tasks);
+  for (const event of ['push', 'workflow_dispatch']) {
+    assert.equal((await plan([launcher], event)).mode, 'full');
+  }
+});
+
 test('iOS packaging workflow changes retain root proof and its shared inputs stay fully verified', async () => {
   const { OPERATIONAL_ROOT_PATHS } = await import('./ci-impact.mjs');
   const workflowPath = '.github/workflows/ios-unsigned-ipa.yml';
