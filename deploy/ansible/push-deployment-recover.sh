@@ -81,14 +81,72 @@ tunnel_link_created="${recovery_fields[5]}"
 release_present="${recovery_fields[6]}"
 previous_image="${recovery_fields[7]}"
 [[ "$previous_image" == '-' ]] && previous_image=''
-if systemctl --user cat codexia-tunnel.service >/dev/null 2>&1 &&
-   ! systemctl --user stop codexia-tunnel.service >/dev/null 2>&1; then
-  echo 'Could not stop the active Tunnel during interrupted deployment recovery; recovery intent retained' >&2
+stop_loaded_unit(){
+  local unit="$1" load_state active_status
+  load_state="$(systemctl --user show --property=LoadState --value "$unit")" || {
+    echo "Could not inspect systemd load state for $unit" >&2
+    return 1
+  }
+  case "$load_state" in
+    loaded)
+      systemctl --user stop "$unit" >/dev/null 2>&1 || {
+        echo "Could not stop $unit" >&2
+        return 1
+      }
+      if systemctl --user is-active --quiet "$unit"; then
+        echo "$unit remains active after stop" >&2
+        return 1
+      else
+        active_status=$?
+      fi
+      [[ "$active_status" == 3 ]] || {
+        echo "Could not verify that $unit is inactive" >&2
+        return 1
+      }
+      ;;
+    not-found)
+      return 2
+      ;;
+    *)
+      echo "Unexpected systemd load state for $unit: $load_state" >&2
+      return 1
+      ;;
+  esac
+}
+api_load_status=0
+stop_loaded_unit codexia-tunnel.service || api_load_status=$?
+[[ "$api_load_status" == 0 || "$api_load_status" == 2 ]] || {
+  echo 'Could not stop and verify the application Tunnel; recovery intent retained' >&2
   exit 1
-fi
-if [[ "$had_unit" == true || -e "$active_unit" || -L "$active_unit" ]] &&
-   ! systemctl --user stop codexia-api.service >/dev/null 2>&1; then
-  echo 'Could not stop the active API during interrupted deployment recovery; recovery intent retained' >&2
+}
+api_load_status=0
+stop_loaded_unit codexia-api.service || api_load_status=$?
+if [[ "$api_load_status" == 2 ]]; then
+  [[ "$had_unit" == false ]] || {
+    echo 'Prior API service is missing from systemd; recovery intent retained' >&2
+    exit 1
+  }
+  container_status=0
+  podman container exists codexia-api >/dev/null 2>&1 || container_status=$?
+  case "$container_status" in
+    1) ;;
+    0)
+      running="$(podman inspect --format '{{.State.Running}}' codexia-api 2>/dev/null)" || {
+        echo 'Could not inspect the API container while its systemd unit is absent; recovery intent retained' >&2
+        exit 1
+      }
+      [[ "$running" == false ]] || {
+        echo 'API container may still be running without a loaded systemd unit; recovery intent retained' >&2
+        exit 1
+      }
+      ;;
+    *)
+      echo 'Could not inspect API container state while its systemd unit is absent; recovery intent retained' >&2
+      exit 1
+      ;;
+  esac
+elif [[ "$api_load_status" != 0 ]]; then
+  echo 'Could not stop and verify the active API; recovery intent retained' >&2
   exit 1
 fi
 
