@@ -3,8 +3,7 @@
 set -euo pipefail
 umask 077
 readonly PG_IMAGE='docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536'
-readonly STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/codexia-updater"
-push_deployment_mode=false
+readonly STATE_DIR="${CODEXIA_PUSH_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/codexia-deploy}"
 die(){ printf '%s\n' "$*" >&2; exit 1; }
 for cmd in podman age sha256sum flock findmnt sync stat getent ip; do command -v "$cmd" >/dev/null || die "Missing dependency: $cmd"; done
 lock_file="$STATE_DIR/host.lock"
@@ -68,28 +67,14 @@ validate_artifact(){
 }
 case "$operation" in
   backup-locked)
-    if [[ $# -gt 3 ]]; then
-      [[ ( $# == 8 || $# == 9 ) && "${4:-}" == --approved && "${5:-}" == --lock-file && -n "${6:-}" && "${7:-}" == --lock-fd && -n "${8:-}" ]] || die 'Push backup requires explicit approval and an inherited maintenance lock descriptor'
-      if [[ $# == 9 ]]; then
-        [[ "${9:-}" == --push-deployment ]] || die 'Invalid push backup mode'
-        push_deployment_mode=true
-      fi
-      verify_lock_descriptor "$6" "$8"
-    else
-      mkdir -p "$STATE_DIR"
-      [[ "${CODEXIA_UPDATER_LOCK_HELD:-}" == 1 && "${CODEXIA_UPDATER_LOCK_DIRECTORY:-}" == "$STATE_DIR" ]] || die 'Internal backup requires the canonical controller lock'
-      lock_fd="${CODEXIA_UPDATER_LOCK_FD:-}"
-      [[ "$lock_fd" =~ ^[0-9]+$ && -e "/proc/self/fd/$lock_fd" ]] || die 'Controller lock descriptor was not inherited from the updater'
-      fd_identity="$(stat -Lc '%d:%i' -- "/proc/self/fd/$lock_fd" 2>/dev/null || true)"
-      lock_identity="$(stat -Lc '%d:%i' -- "$lock_file" 2>/dev/null || true)"
-      [[ -n "$fd_identity" && "$fd_identity" == "$lock_identity" ]] || die 'Inherited descriptor does not identify the canonical controller lock'
-      flock --exclusive --nonblock "$lock_fd" || die 'Inherited descriptor does not hold the updater lock'
-    fi
+    [[ $# == 8 && "${4:-}" == --approved && "${5:-}" == --lock-file && "${7:-}" == --lock-fd ]] ||
+      die 'Push backup requires explicit approval and an inherited host lock'
+    verify_lock_descriptor "$6" "$8"
     ;;
   drill)
     mkdir -p "$STATE_DIR"
     exec 9>"$lock_file"
-    flock --exclusive --nonblock 9 || die 'Updater or backup already running'
+    flock --exclusive --nonblock 9 || die 'Backup or deployment already running'
     ;;
   validate-artifact)
     [[ $# == 2 ]] || die 'Usage: validate-artifact /absolute/remote/backup'
@@ -102,19 +87,12 @@ case "$operation" in
     printf '%s\n' 'Backup destination preflight passed'
     exit 0
     ;;
-  *) die 'Use the controller backup command or the explicitly approved drill';;
+  *) die 'Unsupported backup operation';;
 esac
 
-# v1 receipts fingerprinted public tables only. Keep that projection for
-# existing receipts; v2 adds Better Auth's codexia_auth schema. Explicit
-# table/row order and UTC keep the logical representation deterministic.
+# Canonical v2 fingerprint: application tables and Better Auth schema.
 db_fingerprint(){
-  local container="$1" user="$2" format="$3" schema_filter
-  case "$format" in
-    codexia-backup/v1) schema_filter="n.nspname='public'" ;;
-    codexia-backup/v2) schema_filter="n.nspname IN ('public','codexia_auth')" ;;
-    *) die 'Unsupported database fingerprint format' ;;
-  esac
+  local container="$1" user="$2" schema_filter="n.nspname IN ('public','codexia_auth')"
   podman exec -i "$container" sh -ec '
     if [ -r /run/secrets/admin-password ]; then export PGPASSWORD="$(cat /run/secrets/admin-password)"; fi
     exec psql -X -qAt -v ON_ERROR_STOP=1 -U "$1" -d codexia
@@ -139,32 +117,23 @@ history_fingerprint(){
     -v "$volume:/history:ro" "$PG_IMAGE" -euo pipefail -c 'cd /history; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum' | sha256sum | cut -d' ' -f1
 }
 require_quiesced(){
-  if [[ "$push_deployment_mode" == true ]]; then
-    for unit in codexia-api.service codexia-api-proxy.service codexia-tunnel.service codexia-updater-boot.service codexia-updater.service codexia-updater.timer; do
-      local unit_status=0
-      systemctl --user is-active --quiet "$unit" || unit_status=$?
-      case "$unit_status" in
-        0) die "Push deployment requires inactive systemd unit: $unit";;
-        3|4) ;;
-        *) die "Cannot verify push deployment unit state: $unit";;
-      esac
-    done
-    if [[ -e "$STATE_DIR/route" || -L "$STATE_DIR/route" ]]; then
-      [[ -f "$STATE_DIR/route" && ! -L "$STATE_DIR/route" && "$(cat "$STATE_DIR/route")" == blocked ]] ||
-        die 'Push backup refuses an unsafe legacy route marker'
-    fi
-  else
-    [[ "$(cat "$STATE_DIR/route")" == blocked ]] || die 'Block the proxy before backup'
-  fi
-  for container in codexia-api codexia-slot-blue codexia-slot-green codexia-preflight-blue codexia-preflight-green; do
-    local status=0
-    podman container exists "$container" || status=$?
+  local status unit
+  for unit in codexia-api.service codexia-tunnel.service; do
+    status=0
+    systemctl --user is-active --quiet "$unit" || status=$?
     case "$status" in
-      0) [[ "$(podman inspect --format '{{.State.Running}}' "$container")" == false ]] || die "Writer/preflight still running: $container";;
-      1) ;;
-      *) die "Cannot inspect $container";;
+      0) die "Push deployment requires inactive systemd unit: $unit";;
+      3|4) ;;
+      *) die "Cannot verify systemd unit state: $unit";;
     esac
   done
+  status=0
+  podman container exists codexia-api || status=$?
+  case "$status" in
+    0) [[ "$(podman inspect --format '{{.State.Running}}' codexia-api)" == false ]] || die 'API writer is still running';;
+    1) ;;
+    *) die 'Cannot inspect API writer';;
+  esac
 }
 backup_artifact(){
   local destination="$1" recipient="$2"
@@ -175,14 +144,14 @@ backup_artifact(){
   staging="$destination/.codexia-$stamp.partial"; final="$destination/codexia-$stamp"
   mkdir "$staging"
   trap 'rm -rf -- "$staging"' EXIT
-  db_hash="$(db_fingerprint codexia-db codexia_admin codexia-backup/v2)"
+  db_hash="$(db_fingerprint codexia-db codexia_admin)"
   history_hash="$(history_fingerprint codexia-history)"
   podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec pg_dump -U codexia_admin -d codexia -Fc' |
     age -r "$recipient" -o "$staging/database.dump.age"
   podman volume export codexia-history | age -r "$recipient" -o "$staging/history.tar.age"
   # Recheck the stopped state and both logical fingerprints before publication.
   require_quiesced
-  [[ "$(db_fingerprint codexia-db codexia_admin codexia-backup/v2)" == "$db_hash" ]] || die 'Database changed during backup'
+  [[ "$(db_fingerprint codexia-db codexia_admin)" == "$db_hash" ]] || die 'Database changed during backup'
   [[ "$(history_fingerprint codexia-history)" == "$history_hash" ]] || die 'History changed during backup'
   printf 'codexia-backup/v2\n%s\n%s\n' "$db_hash" "$history_hash" | age -r "$recipient" -o "$staging/manifest.age"
   (cd "$staging"; sha256sum database.dump.age history.tar.age manifest.age > SHA256SUMS)
@@ -201,10 +170,9 @@ assert_restore_resource_absent(){
 }
 case "${1:-}" in
   backup-locked)
-    [[ $# == 3 || $# == 8 || $# == 9 ]] || die 'Usage: backup-locked /remote/mount age1-recipient [--approved --lock-file /absolute/lock --lock-fd fd [--push-deployment]]'
+    [[ $# == 8 ]] || die 'Usage: backup-locked /remote/mount age1-recipient --approved --lock-file /absolute/lock --lock-fd fd'
     remote_directory "$2"
     [[ "$3" =~ ^age1[0-9a-z]+$ ]] || die 'Provide an age public recipient, not a private key'
-    if [[ $# -ge 8 ]]; then [[ "${4:-}" == --approved ]] || die 'Push backup requires explicit approval'; fi
     backup_artifact "$2" "$3"
     ;;
   drill)
@@ -219,7 +187,7 @@ case "${1:-}" in
     artifact_hash="$(validate_artifact "$dir")"
     manifest="$(age -d -i "$3" "$dir/manifest.age")"
     mapfile -t fields <<< "$manifest"
-    [[ "${#fields[@]}" == 3 && "${fields[0]}" =~ ^codexia-backup/v[12]$ && "${fields[1]}" =~ ^[0-9a-f]{64}$ && "${fields[2]}" =~ ^[0-9a-f]{64}$ ]] || die 'Invalid decrypted backup manifest'
+    [[ "${#fields[@]}" == 3 && "${fields[0]}" == codexia-backup/v2 && "${fields[1]}" =~ ^[0-9a-f]{64}$ && "${fields[2]}" =~ ^[0-9a-f]{64}$ ]] || die 'Invalid decrypted backup manifest'
     suffix="$(cat /proc/sys/kernel/random/uuid)"
     db="codexia-restore-drill-$suffix"; data="$db-data"; history="$db-history"
     label="io.codexia.restore-drill"
@@ -304,7 +272,7 @@ case "${1:-}" in
     age -d -i "$3" "$dir/database.dump.age" |
       podman exec -i "$db" pg_restore --exit-on-error --no-owner --no-privileges -U postgres -d codexia
     age -d -i "$3" "$dir/history.tar.age" | podman volume import "$history" -
-    [[ "$(db_fingerprint "$db" postgres "${fields[0]}")" == "${fields[1]}" ]] || die 'Restored database logical fingerprint mismatch'
+    [[ "$(db_fingerprint "$db" postgres)" == "${fields[1]}" ]] || die 'Restored database logical fingerprint mismatch'
     [[ "$(history_fingerprint "$history")" == "${fields[2]}" ]] || die 'Restored history fingerprint mismatch'
     cleanup_restore_resources
     trap - EXIT
