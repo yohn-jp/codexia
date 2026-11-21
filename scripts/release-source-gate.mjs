@@ -7,6 +7,10 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { componentReleaseAffected } from './release-impact.mjs';
+import { collectGitHubPages } from './release-policy.mjs';
+import { selectLatestPlanArtifact } from './ci-artifact-selection.mjs';
+import { downloadArtifact, extractJsonEntry } from './download-ci-artifacts.mjs';
+import { validateVerificationPlan } from './ci-impact.mjs';
 
 export function verifiedReleaseEvent(payload, env, checkoutSha) {
   const run = payload?.workflow_run;
@@ -28,20 +32,46 @@ export function verifiedReleaseEvent(payload, env, checkoutSha) {
   return run;
 }
 
-export function selectReleaseSource(component, source, main, git) {
+export function selectReleaseSource(component, source, main, git, before) {
   assert.match(source, /^[a-f0-9]{40}$/u);
   assert.match(main, /^[a-f0-9]{40}$/u);
   const history = git('rev-list', '--first-parent', main).trim().split('\n');
   const index = history.indexOf(source);
   assert.ok(index >= 0, 'Verified source is outside the first-parent history of main');
-  const changed = revision => {
-    const files = git('diff-tree', '--root', '--diff-merges=first-parent', '--no-commit-id',
-      '--name-only', '--no-renames', '-r', '-z', revision, '--').split('\0').filter(Boolean);
+  const changed = (revision, base) => {
+    const output = base === undefined
+      ? git('diff-tree', '--root', '--diff-merges=first-parent', '--no-commit-id',
+        '--name-only', '--no-renames', '-r', '-z', revision, '--')
+      : git('diff', '--name-only', '--no-renames', '-z', base, revision, '--');
+    const files = output.split('\0').filter(Boolean);
     return files.length > 0 && componentReleaseAffected(component, files);
   };
-  if (!changed(source)) return { affected: false };
-  const successor = history.slice(0, index).find(changed);
+  // An unknown push boundary cannot prove that the component was unaffected.
+  if (before !== null && !changed(source, before)) return { affected: false };
+  const successor = history.slice(0, index).find(revision => changed(revision));
   return successor ? { affected: false, successor } : { affected: true };
+}
+
+async function readVerifiedPushBase(run, repository, token) {
+  assert.ok(token, 'Release requires Actions read permission');
+  const request = async endpoint => {
+    const response = await fetch('https://api.github.com/repos/' + repository + '/actions/runs/' + run.id + '/' + endpoint, {
+      headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json' },
+      redirect: 'error', signal: AbortSignal.timeout(15_000),
+    });
+    assert.ok(response.ok, 'Failed to read the verified push plan inventory');
+    return response.json();
+  };
+  const [jobs, artifacts] = await Promise.all([
+    collectGitHubPages((page, count) => request(`jobs?filter=latest&page=${page}&per_page=${count}`), 'jobs'),
+    collectGitHubPages((page, count) => request(`artifacts?page=${page}&per_page=${count}`), 'artifacts'),
+  ]);
+  const planArtifact = selectLatestPlanArtifact(artifacts, jobs, { runId: run.id, sourceSha: run.head_sha });
+  const data = await extractJsonEntry(await downloadArtifact(planArtifact, repository, token), 'ci-plan.json');
+  const plan = validateVerificationPlan(JSON.parse(data));
+  assert.equal(plan.event, 'push');
+  assert.equal(plan.sha, run.head_sha);
+  return plan.base;
 }
 
 const main = async () => {
@@ -53,7 +83,11 @@ const main = async () => {
   const run = verifiedReleaseEvent(JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH,'utf8')),process.env,checkoutSha);
   git('fetch', '--no-tags', 'origin', 'refs/heads/main');
   const remoteMain = git('rev-parse', 'FETCH_HEAD').trim();
-  const { affected, successor } = selectReleaseSource(component, checkoutSha, remoteMain, git);
+  let before = await readVerifiedPushBase(run, process.env.GITHUB_REPOSITORY, process.env.GH_TOKEN).catch(() => null);
+  if (before !== null) {
+    try { git('cat-file', '-e', before + '^{commit}'); } catch { before = null; }
+  }
+  const { affected, successor } = selectReleaseSource(component, checkoutSha, remoteMain, git, before);
   if (affected) {
     assert.ok(process.env.GH_TOKEN, 'Release requires Actions read permission');
     execFileSync(process.execPath, ['scripts/verify-release-source.mjs'], {
@@ -63,7 +97,7 @@ const main = async () => {
   const output = 'affected=' + String(affected) + '\nsource-sha=' + checkoutSha +
     '\nverify-run-id=' + run.id + '\n';
   appendFileSync(process.env.GITHUB_OUTPUT,output);
-  console.log(JSON.stringify({component,affected,sourceSha:checkoutSha,verifyRunId:run.id,
+  console.log(JSON.stringify({component,affected,sourceSha:checkoutSha,verifyRunId:run.id,pushBase:before,
     ...(successor ? {skipped:'superseded by a newer component change',successor} : {})}));
 };
 if(process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)){

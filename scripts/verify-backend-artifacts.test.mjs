@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { selectBackendArtifacts, assertBackendProducerAttempt } from './verify-backend-artifacts.mjs';
+import { buildBackendBuildReceipt, selectBackendArtifacts, assertBackendProducerAttempt } from './verify-backend-artifacts.mjs';
+import { readComponentVersion } from './component-release-version.mjs';
 
 const sha='a'.repeat(40), digest='sha256:'+'b'.repeat(64);
 const expected={runId:123,currentAttempt:3,sourceSha:sha};
@@ -59,4 +60,33 @@ test('backend source artifact is distinct from the Verify completion workflow en
   assert.doesNotThrow(()=>assertBackendProducerAttempt(selected[1],[workflowJobs[1]],proof));
   assert.throws(()=>selectBackendArtifacts(completion,workflowArtifacts,workflowJobs,{...proof,workflowSha:sha}));
   assert.throws(()=>selectBackendArtifacts(completion,workflowArtifacts,workflowJobs,{...proof,sourceSha:workflowSha}));
+});
+
+test('backend PR artifacts bind both tested profiles to the merged PR source and latest attempt',()=>{
+  const prRun={...run,event:'pull_request',head_branch:'feature/backend',run_attempt:3};
+  const prExpected={...expected,event:'pull_request',headBranch:'feature/backend'};
+  const {jobs,artifacts}=fixture();
+  assert.deepEqual(selectBackendArtifacts(prRun,artifacts,jobs,prExpected).map(item=>item.profile),['core','full']);
+  assert.throws(()=>selectBackendArtifacts(prRun,artifacts,jobs,expected),/event mismatch/);
+  assert.throws(()=>selectBackendArtifacts({...prRun,head_branch:'other'},artifacts,jobs,prExpected),/branch mismatch/);
+});
+
+test('main build receipt binds the exact source tree, artifacts and partial rerun attempts',()=>{
+  const receipt=buildBackendBuildReceipt({sourceSha:sha,workflowRunId:123,workflowRunNumber:450,sourceTree:'c'.repeat(40),artifacts:[
+    {profile:'core',id:10,digest,producerAttempt:1,archiveSha256:'d'.repeat(64)},
+    {profile:'full',id:12,digest:'sha256:'+'e'.repeat(64),producerAttempt:3,archiveSha256:'f'.repeat(64)},
+  ]});
+  assert.equal(receipt.format,'codexia-backend-build/v1');
+  const completionReceipt=buildBackendBuildReceipt({sourceSha:sha,workflowRunId:123,workflowRunNumber:450,sourceTree:'c'.repeat(40),event:'workflow_run',artifacts:[
+    {profile:'core',id:10,digest,producerAttempt:1,archiveSha256:'d'.repeat(64)},
+    {profile:'full',id:12,digest:'sha256:'+'e'.repeat(64),producerAttempt:3,archiveSha256:'f'.repeat(64)},
+  ]});
+  assert.equal(completionReceipt.event,'workflow_run');
+  assert.equal(receipt.version,readComponentVersion('backend','450'));
+  assert.equal(receipt.artifacts.core.producerAttempt,1);
+  assert.equal(receipt.artifacts.full.producerAttempt,3);
+  assert.throws(()=>buildBackendBuildReceipt({sourceSha:sha,workflowRunId:123,workflowRunNumber:450,sourceTree:'c'.repeat(40),artifacts:[
+    {profile:'core',id:10,digest,producerAttempt:1,archiveSha256:'d'.repeat(64)},
+    {profile:'core',id:12,digest:'sha256:'+'e'.repeat(64),producerAttempt:3,archiveSha256:'f'.repeat(64)},
+  ]}),/Duplicate/);
 });

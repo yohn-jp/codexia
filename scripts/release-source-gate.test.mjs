@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { selectReleaseSource, verifiedReleaseEvent } from './release-source-gate.mjs';
 
@@ -25,6 +26,24 @@ test('only exact successful main Verify completion can authorize a privileged re
   assert.throws(()=>verifiedReleaseEvent({workflow_run:run},env,'b'.repeat(40)));
 });
 
+test('full main verification persists the real push boundary as release evidence', t => {
+  const directory=mkdtempSync(path.join(tmpdir(),'codexia-verification-boundary-'));
+  t.after(()=>rmSync(directory,{recursive:true,force:true}));
+  const eventPath=path.join(directory,'event.json');
+  const planPath=path.join(directory,'plan.json');
+  const before='b'.repeat(40);
+  writeFileSync(eventPath,JSON.stringify({before,after:sha,ref:'refs/heads/main'}));
+  execFileSync(process.execPath,[fileURLToPath(new URL('./ci-impact.mjs',import.meta.url))],{env:{
+    ...process.env, CODEXIA_EXPECTED_SHA:sha, CODEXIA_CI_PLAN_PATH:planPath, GITHUB_EVENT_PATH:eventPath,
+    GITHUB_EVENT_NAME:'push', GITHUB_OUTPUT:'', GITHUB_STEP_SUMMARY:'',
+  }});
+  const plan=JSON.parse(readFileSync(planPath,'utf8'));
+  assert.equal(plan.base,before);
+  assert.equal(plan.sha,sha);
+  assert.equal(plan.mode,'full');
+  assert.deepEqual(plan.excluded,[]);
+});
+
 test('only a newer change to the same component supersedes an affected source', t => {
   const cwd = mkdtempSync(path.join(tmpdir(), 'codexia-release-source-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -45,6 +64,11 @@ test('only a newer change to the same component supersedes an affected source', 
   const unrelated = commit('docs/notes.md', 'documentation');
   assert.equal(selectReleaseSource('frontend', frontend, unrelated, git).affected, true);
   assert.equal(selectReleaseSource('frontend', unrelated, unrelated, git).affected, false);
+  assert.equal(selectReleaseSource('backend', unrelated, unrelated, git, frontend).affected, true,
+    'A single push may include a backend change before its final documentation commit');
+  assert.equal(selectReleaseSource('frontend', unrelated, unrelated, git, frontend).affected, false);
+  assert.equal(selectReleaseSource('frontend', unrelated, unrelated, git, null).affected, true,
+    'A missing push plan cannot silently drop a release');
   assert.equal(selectReleaseSource('backend', backend, unrelated, git).affected, true);
 
   const updated = commit('app/src/source.ts', 'new frontend');

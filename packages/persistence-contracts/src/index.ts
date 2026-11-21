@@ -191,6 +191,14 @@ export interface KnowledgeNode {
   updatedAt: string;
 }
 
+export interface KnowledgeNodeSearch {
+  query?: string;
+  type?: string;
+  status?: KnowledgeNodeStatus;
+  after?: { name: string; id: KnowledgeNodeId };
+  limit: number;
+}
+
 export interface SaveKnowledgeNodeCommand {
   projectId: ProjectId;
   id: KnowledgeNodeId;
@@ -538,6 +546,8 @@ export interface PersistenceReader {
   listProjectRevisionHistory(projectId: ProjectId, heads: readonly DocumentRevisionKey[], limit: number): Promise<readonly Pick<DocumentRevision, "id" | "documentId" | "createdAt">[]>;
   getKnowledgeNode(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<KnowledgeNode | undefined>;
   listKnowledgeNodes(projectId: ProjectId, limit?: number): Promise<readonly KnowledgeNode[]>;
+  /** Bounded stable Knowledge browse; aliases are searched only within this project and node. */
+  searchKnowledgeNodes?(projectId: ProjectId, search: KnowledgeNodeSearch): Promise<readonly KnowledgeNode[]>;
   /** Export-only complete canonical scope, including retired nodes. */
   listAllKnowledgeNodes(projectId: ProjectId, limit?: number): Promise<readonly KnowledgeNode[]>;
   /** Export-only project assertion inventory, including unlinked assertions. */
