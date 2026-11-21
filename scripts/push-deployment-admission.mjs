@@ -6,15 +6,10 @@ const image = /^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u;
 const positive = value => Number.isSafeInteger(value) && value > 0;
 const exactKeys = (value, expected) => value && typeof value === 'object' && !Array.isArray(value) &&
   Object.keys(value).sort().join(',') === [...expected].sort().join(',');
+const immutableImage = value => typeof value === 'string' && image.test(value);
 
-/**
- * Admit a push-deployment candidate against the independently observed current
- * API identity. The certificate must come from an authenticated, protected
- * release workflow; this function validates its bindings but does not verify
- * GitHub's artifact provenance, OCI signatures, SSH authorization, or runtime
- * health. Success is compatibility admission, not permission to activate.
- */
-export function assertPushDeploymentAdmission(certificate, installedValue, { expectedMainSha, deployedUiEpoch }) {
+/** Validate a deploy certificate and its complete authenticated release receipt. */
+export function validatePushDeploymentCertificate(certificate, expectedMainSha) {
   if (!exactKeys(certificate, ['format', 'verifiedMainSha', 'verifiedMainTree', 'verifyRun', 'producer', 'image', 'identity']) ||
       certificate.format !== 'codexia-backend-deployment-certificate/v1') {
     throw new Error('Invalid push deployment certificate');
@@ -22,7 +17,7 @@ export function assertPushDeploymentAdmission(certificate, installedValue, { exp
   if (!sha.test(expectedMainSha ?? '') || certificate.verifiedMainSha !== expectedMainSha) {
     throw new Error('Certificate main revision differs from the expected main revision');
   }
-  if (!sha.test(certificate.verifiedMainTree ?? '') || !image.test(certificate.image ?? '')) {
+  if (!sha.test(certificate.verifiedMainTree ?? '') || !immutableImage(certificate.image)) {
     throw new Error('Invalid certified source tree or immutable image');
   }
 
@@ -35,19 +30,59 @@ export function assertPushDeploymentAdmission(certificate, installedValue, { exp
   }
 
   const producer = certificate.producer;
-  if (!exactKeys(producer, ['sourceSha', 'sourceTree', 'runId', 'attempt', 'artifactId', 'artifactDigest']) ||
+  if (!exactKeys(producer, ['event', 'sourceSha', 'sourceTree', 'runId', 'attempt', 'artifactId', 'artifactDigest', 'receipt']) ||
+      !['push', 'workflow_run', 'pull_request'].includes(producer.event) ||
       !sha.test(producer.sourceSha ?? '') || producer.sourceTree !== certificate.verifiedMainTree ||
       !positive(producer.runId) || !positive(producer.attempt) || !positive(producer.artifactId) ||
       !digest.test(producer.artifactDigest ?? '')) {
     throw new Error('Producer artifact is not bound to the certified main source tree');
   }
+  const receipt = producer.receipt;
+  const promotion = receipt?.format === 'codexia-backend-promotion/v1';
+  const expectedFormat = promotion ? 'codexia-backend-promotion/v1' : 'codexia-backend-build/v1';
+  if (receipt?.format !== expectedFormat || receipt.event !== producer.event || receipt.sourceSha !== producer.sourceSha ||
+      receipt.sourceTree !== producer.sourceTree || receipt.workflowRunId !== producer.runId ||
+      receipt.version !== certificate.identity?.version) {
+    throw new Error('Producer receipt does not match the certificate identity');
+  }
+  if (promotion && (receipt.mainSha !== expectedMainSha || !positive(receipt.workflowId) || !positive(receipt.prNumber))) {
+    throw new Error('Producer promotion receipt is not bound to certified main');
+  }
+  const artifact = receipt.artifacts?.[certificate.identity?.profile];
+  if (!artifact || artifact.id !== producer.artifactId || artifact.digest !== producer.artifactDigest ||
+      artifact.producerAttempt !== producer.attempt || !/^[a-f0-9]{64}$/u.test(artifact.archiveSha256 ?? '')) {
+    throw new Error('Producer artifact does not match the complete release receipt');
+  }
+  const candidate = validateBackendIdentity(certificate.identity);
+  if (candidate.sourceSha !== producer.sourceSha) throw new Error('Certified image identity source differs from producer source');
+  if (promotion) {
+    const receiptIdentity = validateBackendIdentity(artifact.identity);
+    if (JSON.stringify(receiptIdentity) !== JSON.stringify(candidate)) {
+      throw new Error('Producer promotion receipt identity differs from certified image');
+    }
+  }
+  return Object.freeze({
+    format: certificate.format, verifiedMainSha: certificate.verifiedMainSha,
+    verifiedMainTree: certificate.verifiedMainTree, verifyRun: Object.freeze({ ...run }),
+    producer: Object.freeze({ ...producer }), image: certificate.image,
+    identity: Object.freeze({ ...candidate }),
+  });
+}
 
+/**
+ * Admit a push-deployment candidate against the independently observed current
+ * API identity. The certificate must come from an authenticated, protected
+ * release workflow; this function validates its bindings but does not verify
+ * GitHub's artifact provenance, OCI signatures, SSH authorization, or runtime
+ * health. Success is compatibility admission, not permission to activate.
+ */
+export function assertPushDeploymentAdmission(certificate, installedValue, { expectedMainSha, deployedUiEpoch }) {
+  const admitted = validatePushDeploymentCertificate(certificate, expectedMainSha);
+  const { producer, identity: candidate, image: candidateImage, verifiedMainSha, verifyRun } = admitted;
   if (!exactKeys(installedValue, ['image', 'identity']) || !image.test(installedValue.image ?? '')) {
     throw new Error('Invalid observed installed image identity');
   }
   const installed = validateBackendIdentity(installedValue.identity);
-  const candidate = validateBackendIdentity(certificate.identity);
-  if (candidate.sourceSha !== producer.sourceSha) throw new Error('Certified image identity source differs from producer source');
   if (!positive(deployedUiEpoch) || installed.apiEpoch !== deployedUiEpoch || candidate.apiEpoch !== deployedUiEpoch) {
     throw new Error('Push deployment frontend/API epoch mismatch');
   }
@@ -60,12 +95,12 @@ export function assertPushDeploymentAdmission(certificate, installedValue, { exp
   if (candidate.migrationFingerprint !== installed.migrationFingerprint) {
     throw new Error('Manual database migration required');
   }
-  if (candidate.sourceSha === installed.sourceSha || certificate.image === installedValue.image) {
+  if (candidate.sourceSha === installed.sourceSha || candidateImage === installedValue.image) {
     throw new Error('Push deployment candidate must differ from the installed release');
   }
 
-  return Object.freeze({ image: certificate.image, identity: Object.freeze({ ...candidate }),
-    verifiedMainSha: certificate.verifiedMainSha, verifyRunId: run.id, verifyAttempt: run.attempt,
+  return Object.freeze({ image: candidateImage, identity: Object.freeze({ ...candidate }),
+    verifiedMainSha, verifyRunId: verifyRun.id, verifyAttempt: verifyRun.attempt,
     producerRunId: producer.runId, producerAttempt: producer.attempt, artifactId: producer.artifactId,
     artifactDigest: producer.artifactDigest });
 }
