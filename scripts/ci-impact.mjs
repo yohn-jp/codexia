@@ -229,7 +229,7 @@ function assertTaskInputReuse(plan, reuse) {
   for (const key of ['workflowRunId', 'workflowAttempt', 'workflowId', 'repositoryId', 'jobId', 'artifactId']) {
     if (!Number.isSafeInteger(proof[key]) || proof[key] < 1) throw new Error(`Invalid task proof ${key}`);
   }
-  if (proof.workflowJob !== 'types-tests' || proof.artifactName !== 'ci-evidence-types-tests') throw new Error('Invalid task proof producer identity');
+  if (proof.workflowJob !== 'types' || proof.artifactName !== 'ci-evidence-types-tests') throw new Error('Invalid task proof producer identity');
   if (!/^sha256:[a-f0-9]{64}$/u.test(proof.artifactDigest ?? '')) throw new Error('Invalid task proof artifact digest');
   if (!proof.inputClosure || typeof proof.inputClosure !== 'object' || Array.isArray(proof.inputClosure) ||
       JSON.stringify(Object.keys(proof.inputClosure).sort()) !== JSON.stringify([...INPUT_PROOF_DIMENSIONS].sort()) ||
