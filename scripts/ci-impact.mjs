@@ -26,6 +26,8 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
   'scripts/verify-oci.sh',
   'scripts/verify-oci-http.mjs',
   'tests/integration/model-oci-lifecycle.acceptance.mjs',
+  'tests/integration/model-oci-lifecycle-arguments.mjs',
+  'tests/integration/model-oci-lifecycle-arguments.test.mjs',
   'tests/integration/model-oci-lifecycle.container.mjs',
   'tests/integration/model-postgres-fixture.mjs',
   '.github/workflows/verify.yml',

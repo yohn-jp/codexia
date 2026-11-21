@@ -10,10 +10,11 @@ export function validateOciEngine(value) {
 
 export function validateModelCachePath(value, fallback) {
   const configured = value ?? fallback;
-  if (!isAbsolute(configured) || /[:,\0\r\n]/u.test(configured)) {
-    throw new Error("CODEXIA_P13_MODEL_CACHE must be an absolute path without OCI mount delimiters");
+  const resolved = resolve(configured);
+  if (!isAbsolute(resolved) || /[:,\0\r\n]/u.test(resolved)) {
+    throw new Error("CODEXIA_P13_MODEL_CACHE must resolve to a path without OCI mount delimiters");
   }
-  return resolve(configured);
+  return resolved;
 }
 
 export function validateImageReference(value, fallback) {
