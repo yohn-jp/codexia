@@ -8,6 +8,12 @@ on:
       - deploy/updater/test-standalone-backup-lock.sh
       - deploy/updater/test-standalone-backup-startup-fence.sh
       - deploy/updater/test-standalone-backup.sh
+      - Dockerfile.backend
+      - package.json
+      - pnpm-lock.yaml
+      - packages/api/package.json
+      - packages/api/tsconfig.json
+      - packages/api/src/job-history-store.ts
       - deploy/updater/standalone-host.mjs
       - deploy/updater/standalone-updater.mjs
       - scripts/standalone-update-controller.mjs
@@ -51,6 +57,12 @@ on:
       - deploy/updater/test-standalone-backup-lock.sh
       - deploy/updater/test-standalone-backup-startup-fence.sh
       - deploy/updater/test-standalone-backup.sh
+      - Dockerfile.backend
+      - package.json
+      - pnpm-lock.yaml
+      - packages/api/package.json
+      - packages/api/tsconfig.json
+      - packages/api/src/job-history-store.ts
       - deploy/updater/standalone-host.mjs
       - deploy/updater/standalone-updater.mjs
       - scripts/standalone-update-controller.mjs
@@ -115,6 +127,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/reuse-pr-verification.mjs dedicated
+      - name: Build the backend history writer fixture
+        if: steps.reuse.outputs.eligible != 'true'
+        run: |
+          corepack enable
+          corepack prepare pnpm@12.21.0 --activate
+          pnpm install --frozen-lockfile
+          pnpm --filter '@codexia/api...' build
       - name: Install the pinned Ansible runner
         if: steps.reuse.outputs.eligible != 'true'
         run: |
@@ -144,6 +163,8 @@ jobs:
           sudo -u "$fixture_user" install -d -m 0700 "$fixture_repo"
           git -C "$GITHUB_WORKSPACE" archive HEAD | sudo -u "$fixture_user" tar -xf - -C "$fixture_repo"
           printf '%s\n' 'codexia-phase-e-fixture-repo/v1' | sudo -u "$fixture_user" tee "$fixture_repo/.codexia-phase-e-fixture" >/dev/null
+          sudo install -d -o "$fixture_user" -g "$fixture_user" -m 0755 "$fixture_repo/packages/api/dist"
+          sudo install -o "$fixture_user" -g "$fixture_user" -m 0644 "$GITHUB_WORKSPACE/packages/api/dist/job-history-store.js" "$fixture_repo/packages/api/dist/job-history-store.js"
           test "$(sudo stat -c '%u' "$fixture_repo")" = "$fixture_uid"
           test "$(sudo stat -c '%u' "$fixture_repo/.codexia-phase-e-fixture")" = "$fixture_uid"
           subuid_max=$(awk -F: 'BEGIN { max = 100000 } { end = $2 + $3; if (end > max) max = end } END { print max }' /etc/subuid)
