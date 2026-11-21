@@ -47,7 +47,7 @@
       ansible.builtin.include_tasks:
         file: auth-runtime.yml
         apply:
-          become: true
+          become: "{{ ansible_facts.user_id != codexia_service_user }}"
           become_user: "{{ codexia_service_user }}"
           environment: "{{ service_runtime_env }}"
       when: codexia_stage == 'auth-runtime'
