@@ -791,7 +791,7 @@ test("outline supports guarded keyboard navigation, search, zoom and mobile sizi
   await expect(rows.nth(1)).toBeFocused();
   await rows.nth(1).press("Home");
   await expect(rows.first()).toBeFocused();
-  const leaf = outline.getByRole("button", { name: `${nestedScene.title} シーン` });
+  const leaf = outline.getByRole("treeitem", { name: `${nestedScene.title} シーン` });
   await leaf.focus();
   await leaf.press("ArrowRight");
   await expect(leaf).toBeFocused();
@@ -1478,7 +1478,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await otherPage.goto("/desktop/?store=postgres");
   await expect(otherPage.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await otherPage.getByLabel("作品", { exact: true }).selectOption({ label: projectTitle });
-  const otherDocument = otherPage.locator(".pg-document-list").getByRole("button", { name: new RegExp(documentTitle, "u") });
+  const otherDocument = otherPage.locator(".pg-document-list").getByRole("treeitem", { name: new RegExp(documentTitle, "u") });
   await expect(otherDocument).toBeVisible();
   await otherDocument.click();
   const otherEditor = otherPage.getByRole("textbox", { name: "本文", exact: true });
@@ -1509,8 +1509,8 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await otherPage.reload();
   await expect(otherPage.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await otherPage.getByLabel("作品", { exact: true }).selectOption({ label: projectTitle });
-  await expect(otherPage.locator(".pg-document-list").getByRole("button", { name: new RegExp(documentTitle, "u") })).toBeVisible();
-  await otherPage.locator(".pg-document-list").getByRole("button", { name: new RegExp(documentTitle, "u") }).click();
+  await expect(otherPage.locator(".pg-document-list").getByRole("treeitem", { name: new RegExp(documentTitle, "u") })).toBeVisible();
+  await otherPage.locator(".pg-document-list").getByRole("treeitem", { name: new RegExp(documentTitle, "u") }).click();
   const recoveredEditor = otherPage.getByRole("textbox", { name: "本文", exact: true });
   await expect(recoveredEditor).toContainText(interruptedDraft);
   await expectServerSaved(otherPage);
