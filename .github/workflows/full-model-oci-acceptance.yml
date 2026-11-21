@@ -18,6 +18,7 @@ on:
       - scripts/ci-workspace.mjs
       - scripts/ci-parallel.mjs
       - scripts/profile-build.mjs
+      - scripts/read-regular-file.mjs
       - scripts/profile-package.mjs
       - scripts/verify-oci.sh
       - scripts/verify-oci-http.mjs

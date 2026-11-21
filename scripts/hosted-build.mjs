@@ -49,6 +49,7 @@ const recipeFiles = [
   'package.json',
   'pnpm-workspace.yaml',
   'scripts/profile-build.mjs',
+  'scripts/read-regular-file.mjs',
   'scripts/profile-package.mjs',
   'scripts/hosted-build.mjs',
   'scripts/composition-persistence.mjs',

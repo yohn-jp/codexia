@@ -1,5 +1,6 @@
 import { lstat, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
+import { readRegularFile } from './read-regular-file.mjs';
 
 /**
  * Resolve a dependency exactly as Node does from an installed package: walk
@@ -66,10 +67,13 @@ export async function listPnpmPackageRoots(nodeModulesDirectory) {
     if (!moduleStat?.isDirectory() || moduleStat.isSymbolicLink()) continue;
     for (const packageDirectory of await packageDirectories(packageNodeModules)) {
       const manifestPath = path.join(packageDirectory, 'package.json');
-      const manifestStat = await lstat(manifestPath).catch(() => undefined);
-      if (!manifestStat?.isFile() || manifestStat.isSymbolicLink()) continue;
+      const manifestText = await readRegularFile(manifestPath).catch((error) => {
+        if (error?.code === 'ENOENT' || error?.code === 'ERR_NOT_REGULAR_FILE') return undefined;
+        throw error;
+      });
+      if (manifestText === undefined) continue;
       const resolved = await realpath(packageDirectory);
-      const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+      const manifest = JSON.parse(manifestText);
       if (typeof manifest.name !== 'string' || typeof manifest.version !== 'string') continue;
       result.push({
         name: manifest.name,

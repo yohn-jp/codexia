@@ -21,6 +21,7 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
   'scripts/ci-workspace.mjs',
   'scripts/ci-parallel.mjs',
   'scripts/profile-build.mjs',
+  'scripts/read-regular-file.mjs',
   'scripts/profile-package.mjs',
   'scripts/verify-oci.sh',
   'scripts/verify-oci-http.mjs',
