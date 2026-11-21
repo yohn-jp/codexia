@@ -487,7 +487,7 @@ test("direct-link, active scene, and project activation resume after persisted p
   release();
   await expect(page.getByRole("textbox", { name: "本文", exact: true })).toContainText("The first line of the story.");
   expect(reads).toBeGreaterThanOrEqual(2);
-  await page.locator(".pg-document-list").getByRole("button", { name: new RegExp(scenes[1]!.title) }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: new RegExp(scenes[1]!.title) }).click();
   await expect(page.getByRole("textbox", { name: "本文", exact: true })).toContainText("The second line of the story.");
   await page.goBack();
   await expect(page.getByRole("textbox", { name: "本文", exact: true })).toContainText("The first line of the story.");
