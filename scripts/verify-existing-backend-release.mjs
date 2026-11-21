@@ -29,9 +29,9 @@ export function assertExistingBackendReleaseBinding(release,tagRef,expected){
       compatibility:expected.compatibility,event:'pull_request',receipt:expected.receipt,mainTree:expected.mainTree});
     assert.deepEqual(metadata,record.metadata,'Existing backend release does not bind this exact promoted producer receipt');
   }else{
-    assert.equal(expected.event,'push');
+    assert.ok(['push','workflow_run'].includes(expected.event),'Main backend producer event mismatch');
     const record=buildComponentReleaseRecord('backend',expected.mainSha,null,{core:metadata.images.core,full:metadata.images.full,
-      compatibility:expected.compatibility,event:'push',receipt:expected.receipt,mainTree:expected.mainTree});
+      compatibility:expected.compatibility,event:expected.event,receipt:expected.receipt,mainTree:expected.mainTree});
     assert.deepEqual(metadata,record.metadata,'Existing backend release does not bind this exact main build receipt');
   }
   return metadata;
@@ -64,7 +64,9 @@ export async function verifyExistingBackendRelease({env=process.env,args=process
   assert.equal(env.GITHUB_REF,'refs/heads/main');
   assert.match(image??'',digestImage);assert.match(mainSha??'',/^[a-f0-9]{40}$/u);
   assert.match(producerSha??'',/^[a-f0-9]{40}$/u);assert.match(version??'',/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u);
-  assert.ok(['core','full'].includes(profile));assert.ok(['push','pull_request'].includes(event));
+  assert.ok(['core','full'].includes(profile));assert.ok(['push','workflow_run','pull_request'].includes(event));
+  const publicationEvent=env.GITHUB_EVENT_NAME;
+  assert.ok(['push','workflow_run'].includes(publicationEvent),'Invalid main publication event');
   const token=env.GH_TOKEN;assert.ok(typeof token==='string'&&token.length>0,'GitHub Actions read token required');
   const compatibility=JSON.parse(await readFile(new URL('../deploy/update-compatibility.json',import.meta.url),'utf8'));
   const release=await request('releases/tags/backend-v'+version,token);
@@ -91,12 +93,12 @@ export async function verifyExistingBackendRelease({env=process.env,args=process
   else assert.equal(producerSha,mainSha,'Main producer SHA mismatch');
   const created=Date.parse(release.created_at);
   assert.ok(Number.isFinite(created),'Existing backend release creation time is invalid');
-  const runs=await pages('actions/workflows/backend-release.yml/runs?head_sha='+mainSha+'&branch=main&event=push','workflow_runs',token);
+  const runs=await pages('actions/workflows/backend-release.yml/runs?head_sha='+mainSha+'&branch=main&event='+publicationEvent,'workflow_runs',token);
   for(const run of runs){
-    if(run?.path!=='.github/workflows/backend-release.yml'||run.event!=='push'||run.head_branch!=='main'||run.head_sha!==mainSha||
+    if(run?.path!=='.github/workflows/backend-release.yml'||run.event!==publicationEvent||run.head_branch!=='main'||run.head_sha!==mainSha||
       run.status!=='completed'||run.conclusion!=='success'||!Number.isFinite(Date.parse(run.created_at))||!Number.isFinite(Date.parse(run.updated_at))||
       Date.parse(run.created_at)>created||created>Date.parse(run.updated_at))continue;
-    if(event==='push'&&(run.id!==receipt.workflowRunId||run.run_number!==receipt.workflowRunNumber))continue;
+    if(event!=='pull_request'&&(run.id!==receipt.workflowRunId||run.run_number!==receipt.workflowRunNumber))continue;
     const jobs=await pages('actions/runs/'+run.id+'/jobs?filter=latest','jobs',token);
     if(successfulPublicationJobs(jobs,event==='pull_request',true))return {release,metadata,publicationRunId:run.id};
   }

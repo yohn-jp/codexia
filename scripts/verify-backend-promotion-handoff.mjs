@@ -33,9 +33,9 @@ function positive(value,label){
 
 export async function verifyBackendPromotionHandoff({env=process.env}={}){
   assert.equal(env.GITHUB_REPOSITORY,REPOSITORY);
-  assert.equal(env.GITHUB_EVENT_NAME,'push');
+  assert.equal(env.GITHUB_EVENT_NAME,'workflow_run');
   assert.equal(env.GITHUB_REF,'refs/heads/main');
-  assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),env.GITHUB_SHA);
+  assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA);
   assert.ok(typeof env.GH_TOKEN==='string'&&env.GH_TOKEN.length>0,'GitHub Actions read token required');
   assert.ok(typeof DIRECTORY==='string'&&path.isAbsolute(DIRECTORY),'Backend promotion directory is invalid');
   const token=env.GH_TOKEN;
@@ -43,7 +43,7 @@ export async function verifyBackendPromotionHandoff({env=process.env}={}){
   const proof=await verifyFrontendMainPromotionProof({env});
   assert.equal(receipt.format,'codexia-backend-promotion/v1');
   assert.equal(receipt.event,'pull_request');
-  assert.equal(receipt.mainSha,env.GITHUB_SHA);
+  assert.equal(receipt.mainSha,env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA);
   assert.equal(receipt.sourceSha,proof.headSha);
   assert.equal(receipt.sourceTree,proof.tree);
   assert.equal(receipt.mergeBaseSha,proof.baseSha);

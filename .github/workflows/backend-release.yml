@@ -45,60 +45,59 @@ on:
       - pnpm-workspace.yaml
       - tsconfig.base.json
       - .github/workflows/backend-release.yml
-  push:
-    branches: [main]
-    paths:
-      - Dockerfile.backend
-      - .dockerignore
-      - Dockerfile.backend.dockerignore
-      - deploy/backend/**
-      - packages/**
-      - modules/**
-      - '!modules/story/src/browser.tsx'
-      - profiles/**
-      - scripts/profile-build.mjs
-      - scripts/profile-package.mjs
-      - scripts/runtime-package-closure.mjs
-      - scripts/verify-backend-image.sh
-      - scripts/backend-update-identity*.mjs
-      - scripts/component-release-version*.mjs
-      - scripts/record-component-release.mjs
-      - scripts/backend-registry-tag.mjs
-      - deploy/update-compatibility.json
-      - scripts/verify-release-source.mjs
-      - scripts/release-policy.mjs
-      - scripts/ci-contract.mjs
-      - scripts/ci-artifact-selection.mjs
-      - scripts/download-ci-artifacts*.mjs
-      - scripts/verify-backend-artifacts*.mjs
-      - scripts/resolve-backend-promotion*.mjs
-      - scripts/verify-backend-promotion-handoff.mjs
-      - scripts/verify-existing-backend-release.mjs
-      - scripts/verify-existing-backend-release.test.mjs
-      - scripts/backend-image-inspection.mjs
-      - scripts/backend-image-inspection.test.mjs
-      - scripts/verify-backend-image-identity.mjs
-      - scripts/publish-stable-channel.mjs
-      - scripts/phase-f-test-channel.mjs
-      - scripts/phase-f-disposable.test.mjs
-      - scripts/component-release-record.test.mjs
-      - scripts/publish-stable-channel.test.mjs
-      - scripts/verify-frontend-artifact.mjs
-      - scripts/reuse-pr-verification.mjs
-      - package.json
-      - pnpm-lock.yaml
-      - pnpm-workspace.yaml
-      - tsconfig.base.json
-      - .github/workflows/backend-release.yml
+      - deploy/release-impact-paths.json
+      - scripts/release-impact.mjs
+      - scripts/release-impact.test.mjs
+      - scripts/release-source-gate.mjs
+      - scripts/release-source-gate.test.mjs
+  workflow_run:
+    workflows: [Verify Codexia]
+    types: [completed]
 permissions:
   contents: read
+env:
+  CODEXIA_SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}
+  CODEXIA_VERIFY_RUN_ID: ${{ github.event.workflow_run.id || '' }}
 concurrency:
-  group: codexia-backend-${{ github.event.pull_request.number || github.sha }}
+  group: codexia-backend-${{ github.event.pull_request.number || github.event.workflow_run.head_sha || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  source:
+    name: Authorize exact-source backend release
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_sha == github.sha &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.repository.full_name == github.repository &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      affected: ${{ steps.gate.outputs.affected }}
+      verify-run-id: ${{ steps.gate.outputs.verify-run-id }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Verify completed source and select changed backend paths
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-source-gate.mjs backend
   promotion:
     name: Resolve verified backend promotion
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: source
+    if: needs.source.result == 'success' && needs.source.outputs.affected == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -108,7 +107,7 @@ jobs:
       promoted: ${{ steps.resolve.outputs.promoted == 'true' && steps.handoff.outcome == 'success' }}
       producer-sha: ${{ steps.resolve.outputs.promoted == 'true' && steps.handoff.outcome == 'success' && steps.resolve.outputs.sourceSha || '' }}
       producer-version: ${{ steps.resolve.outputs.promoted == 'true' && steps.handoff.outcome == 'success' && steps.resolve.outputs.version || '' }}
-      producer-event: ${{ steps.resolve.outputs.promoted == 'true' && steps.handoff.outcome == 'success' && 'pull_request' || 'push' }}
+      producer-event: ${{ steps.resolve.outputs.promoted == 'true' && steps.handoff.outcome == 'success' && 'pull_request' || 'workflow_run' }}
       producer-run-id: ${{ steps.resolve.outputs.workflowRunId }}
       producer-attempt: ${{ steps.resolve.outputs.workflowAttempt }}
       producer-workflow-id: ${{ steps.resolve.outputs.workflowId }}
@@ -122,13 +121,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.3'
       - uses: docker/setup-buildx-action@v4.4.1
-        if: github.event_name == 'push'
+        if: github.event_name == 'workflow_run'
       - name: Resolve exact tested backend promotion or select main build
         id: resolve
         env:
@@ -141,7 +141,7 @@ jobs:
         if: steps.resolve.outputs.promoted == 'true'
         continue-on-error: true
         with:
-          name: codexia-backend-promotion-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          name: codexia-backend-promotion-${{ github.event.workflow_run.head_sha }}-attempt-${{ github.run_attempt }}
           compression-level: 0
           path: ${{ runner.temp }}/backend-promotion/
           if-no-files-found: error
@@ -153,8 +153,11 @@ jobs:
     name: Build and test backend OCI image (${{ matrix.profile }})
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    needs: promotion
-    if: ${{ always() && (github.event_name == 'pull_request' || !(needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true')) }}
+    needs: [source, promotion]
+    if: >-
+      always() && (github.event_name == 'pull_request' ||
+      (needs.source.result == 'success' && needs.source.outputs.affected == 'true' &&
+      !(needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true')))
     strategy:
       fail-fast: false
       matrix:
@@ -164,7 +167,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v7.1.0
         with:
@@ -174,7 +177,7 @@ jobs:
       - uses: docker/setup-buildx-action@v4.4.1
       - name: Build API-only image
         env:
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
           PROFILE: ${{ matrix.profile }}
         run: |
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
@@ -187,28 +190,32 @@ jobs:
         run: bash scripts/verify-backend-image.sh docker codexia-backend-ci "$(git rev-parse HEAD)" "$PROFILE"
       - name: Verify embedded identity without starting image code
         env:
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
           PROFILE: ${{ matrix.profile }}
         run: node scripts/verify-backend-image-identity.mjs codexia-backend-ci "$SOURCE_SHA" "$CODEXIA_RELEASE_VERSION" "$PROFILE"
       - name: Save the exact tested image for publication
         run: docker save codexia-backend-ci | gzip > "$RUNNER_TEMP/codexia-backend-image.tar.gz"
       - uses: actions/upload-artifact@v7.0.2
         with:
-          name: codexia-backend-image-${{ github.event.pull_request.head.sha || github.sha }}-${{ matrix.profile }}-attempt-${{ github.run_attempt }}
+          name: codexia-backend-image-${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}-${{ matrix.profile }}-attempt-${{ github.run_attempt }}
           compression-level: 0
           path: ${{ runner.temp }}/codexia-backend-image.tar.gz
           if-no-files-found: error
           retention-days: 2
   publish:
     name: Publish immutable GHCR image
-    needs: [build-test, promotion]
+    needs: [source, build-test, promotion]
     outputs:
       certified-image: ${{ steps.push-image.outputs.image }}
       certified-full-image: ${{ steps.push-image.outputs.full-image }}
       producer-sha: ${{ steps.push-image.outputs.producer-sha }}
       producer-version: ${{ steps.push-image.outputs.producer-version }}
       producer-event: ${{ steps.push-image.outputs.producer-event }}
-    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && ((needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true' && needs.build-test.result == 'skipped') || ((needs.promotion.result != 'success' || needs.promotion.outputs.promoted != 'true') && needs.build-test.result == 'success')) }}
+    if: >-
+      always() && github.event_name == 'workflow_run' &&
+      needs.source.result == 'success' && needs.source.outputs.affected == 'true' &&
+      ((needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true' && needs.build-test.result == 'skipped') ||
+      ((needs.promotion.result != 'success' || needs.promotion.outputs.promoted != 'true') && needs.build-test.result == 'success'))
     runs-on: ubuntu-24.04
     timeout-minutes: 70
     permissions:
@@ -218,7 +225,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v7.1.0
         with:
@@ -238,7 +246,7 @@ jobs:
       - uses: actions/download-artifact@v7.0.0
         if: ${{ needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true' }}
         with:
-          name: codexia-backend-promotion-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          name: codexia-backend-promotion-${{ github.event.workflow_run.head_sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/backend-promotion
       - name: Recheck promoted backend producer provenance and identity
         if: ${{ needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true' }}
@@ -260,9 +268,9 @@ jobs:
         id: push-image
         env:
           IMAGE: ghcr.io/yohn-jp/codexia-backend
-          MAIN_SHA: ${{ github.sha }}
+          MAIN_SHA: ${{ github.event.workflow_run.head_sha }}
           PROMOTED: ${{ needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true' }}
-          PRODUCER_SHA: ${{ needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true' && needs.promotion.outputs.producer-sha || github.sha }}
+          PRODUCER_SHA: ${{ needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true' && needs.promotion.outputs.producer-sha || github.event.workflow_run.head_sha }}
           PRODUCER_VERSION: ${{ needs.promotion.outputs.producer-version }}
           PRODUCER_EVENT: ${{ needs.promotion.outputs.producer-event }}
           CODEXIA_BACKEND_PROMOTION_DIR: ${{ runner.temp }}/backend-promotion
@@ -272,7 +280,7 @@ jobs:
           set -euo pipefail
           if [[ "$PROMOTED" != true ]]; then
             PRODUCER_VERSION="$(node scripts/component-release-version.mjs backend)"
-            PRODUCER_EVENT=push
+            PRODUCER_EVENT=workflow_run
             PRODUCER_SHA="$MAIN_SHA"
           fi
           echo "producer-sha=$PRODUCER_SHA" >> "$GITHUB_OUTPUT"
@@ -328,7 +336,7 @@ jobs:
   stable-channel:
     name: Advertise certified stable backend
     needs: publish
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CODEXIA_STABLE_CHANNEL_ENABLED == 'true'
+    if: github.event_name == 'workflow_run' && github.ref == 'refs/heads/main' && vars.CODEXIA_STABLE_CHANNEL_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: codexia-stable-channel
@@ -341,7 +349,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
       - uses: actions/setup-node@v7.1.0
         with:

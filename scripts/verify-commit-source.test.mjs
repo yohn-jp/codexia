@@ -42,7 +42,7 @@ test('commit publication CLI requires exact main source and the complete success
     const output = path.join(directory,'verified-source.txt');
     assert.equal(run({ GITHUB_OUTPUT: output }).status, 0);
     assert.match(readFileSync(output,'utf8'),/^run-id=1\n$/u);
-    assert.equal(run({ WAIT: '1' }).status, 0);
+    assert.notEqual(run({ WAIT: '1' }).status, 0, 'Missing completed Verify proof must fail promptly without polling');
     for (const changes of [{ TIMEOUT: '1' }, { API_ERROR: '1' }, { FAIL_JOB: 'certification' }, { FAIL_JOB: REQUIRED_VERIFICATION_JOBS[0] }, { GITHUB_SHA: 'a'.repeat(40) }, { GITHUB_REF: 'refs/heads/other' }]) {
       const result = run(changes);
       assert.notEqual(result.status, 0, result.stdout);
