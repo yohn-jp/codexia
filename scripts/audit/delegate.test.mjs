@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, chmodSync, rmSync, existsSync } from 'node:fs';
@@ -57,7 +58,7 @@ if(a[1]==='preview'){
   return { base, root, site, bin, ancestor, feature, main };
 }
 
-test('per-file OCR packets are complete, source-verified, and redact unverified deleted lines', () => {
+test('one Gemini Markdown covers all verified files and redacts unverified deleted lines', () => {
   const f = fixture();
   try {
     const result = buildDelegation(f);
@@ -71,16 +72,30 @@ test('per-file OCR packets are complete, source-verified, and redact unverified 
     assert.equal(summary.mergeBase, f.ancestor);
     assert.deepEqual(summary.files.map(x => x.path), ['src/alpha.ts']);
     assert.deepEqual(summary.skipped.map(x => x.path), ['.env']);
-    const text = readFileSync(join(dir, 'files', '0001.md'), 'utf8');
+    const text = readFileSync(join(dir, 'gemini-review.md'), 'utf8');
     assert.match(text, /export const value = 2;/);
     assert.match(text, /Check regressions/);
+    assert.match(text, /PACKET_ID/);
+    assert.match(text, /END_OF_PACKET/);
+    assert.match(text, /INCLUDED: 1/);
+    assert.match(text, /not-in-verified-head-export/);
+    assert.match(text, /HEAD_SHA:/);
+    const compact = readFileSync(join(dir, 'gemini-diff.md'), 'utf8');
+    assert.match(compact, /Diff-only packet/);
+    assert.doesNotMatch(compact, /# Full file at head/);
+    assert.ok(!existsSync(join(dir, 'files')));
     assert.match(text, /removed line withheld/);
     assert.doesNotMatch(text, /export const value = 1;/);
     assert.doesNotMatch(text, /do-not-leak/);
     assert.ok(existsSync(join(dir, 'preview.json')));
     assert.ok(existsSync(join(dir, 'rules.json')));
     assert.match(readFileSync(join(f.site, 'index.html'), 'utf8'), new RegExp(f.feature));
-    for (const output of summary.outputs) assert.ok(existsSync(join(dir, output.name)));
+    for (const output of summary.outputs) {
+      assert.ok(existsSync(join(dir, output.name)));
+      const content = readFileSync(join(dir, output.name));
+      assert.equal(output.bytes, content.length);
+      assert.equal(output.sha256, createHash('sha256').update(content).digest('hex'));
+    }
   } finally { rmSync(f.base, { recursive: true, force: true }); }
 });
 
