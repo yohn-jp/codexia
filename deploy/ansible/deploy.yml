@@ -118,7 +118,7 @@
   ansible.builtin.command:
     argv: [podman, create, --entrypoint, /bin/false, "{{ codexia_image }}"]
   register: codexia_candidate_container
-  changed_when: true
+  changed_when: false
 
 - name: Read the candidate backend identity file without starting its entrypoint
   block:
@@ -129,7 +129,7 @@
           - cp
           - "{{ codexia_candidate_container.stdout }}:/app/update-identity.json"
           - "{{ home }}/.local/state/codexia-updater/candidate-identity.json"
-      changed_when: true
+      changed_when: false
     - name: Read candidate backend identity metadata
       ansible.builtin.slurp:
         src: "{{ home }}/.local/state/codexia-updater/candidate-identity.json"
@@ -138,7 +138,7 @@
     - name: Remove the stopped metadata container
       ansible.builtin.command:
         argv: [podman, rm, --force, "{{ codexia_candidate_container.stdout }}"]
-      changed_when: true
+      changed_when: false
       failed_when: false
 
 - name: Require candidate image source, profile and database compatibility identity
@@ -402,8 +402,8 @@
     systemctl --user stop codexia-tunnel.service >/dev/null 2>&1 || true
     systemctl --user stop codexia-api.service >/dev/null 2>&1 || true
     if [[ -n "$current_image" ]]; then
-      if ! CODEXIA_PUSH_BACKUP_MODE=1 CODEXIA_PUSH_STATE_DIR="$state_dir" CODEXIA_PUSH_LOCK_FD=9 \
-        "$backup_program" backup-push-locked "$backup_destination" "$backup_recipient"; then
+      if ! "$backup_program" backup-locked "$backup_destination" "$backup_recipient" \
+        --approved --lock-file "$lock_file" --lock-fd 9; then
         restore_previous || echo 'Previous API recovery failed after backup failure' >&2
         echo 'Encrypted off-VM backup failed; candidate was not applied' >&2
         exit 1

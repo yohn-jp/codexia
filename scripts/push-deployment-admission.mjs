@@ -1,4 +1,5 @@
 import { validateBackendIdentity } from './backend-update-identity.mjs';
+import { isDeepStrictEqual } from 'node:util';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -98,12 +99,21 @@ export function assertPushDeploymentAdmission(certificate, installedValue, { exp
   if (candidate.migrationFingerprint !== installed.migrationFingerprint) {
     throw new Error('Manual database migration required');
   }
-  if (candidate.sourceSha === installed.sourceSha || candidateImage === installedValue.image) {
+  if (candidateImage === installedValue.image) {
+    if (!isDeepStrictEqual(candidate, installed)) {
+      throw new Error('Installed image digest does not have the certified candidate identity');
+    }
+    return Object.freeze({ image: candidateImage, identity: Object.freeze({ ...candidate }), unchanged: true,
+      verifiedMainSha, verifyRunId: verifyRun.id, verifyAttempt: verifyRun.attempt,
+      producerRunId: producer.runId, producerAttempt: producer.attempt, artifactId: producer.artifactId,
+      artifactDigest: producer.artifactDigest });
+  }
+  if (candidate.sourceSha === installed.sourceSha) {
     throw new Error('Push deployment candidate must differ from the installed release');
   }
 
   return Object.freeze({ image: candidateImage, identity: Object.freeze({ ...candidate }),
-    verifiedMainSha, verifyRunId: verifyRun.id, verifyAttempt: verifyRun.attempt,
+    unchanged: false, verifiedMainSha, verifyRunId: verifyRun.id, verifyAttempt: verifyRun.attempt,
     producerRunId: producer.runId, producerAttempt: producer.attempt, artifactId: producer.artifactId,
     artifactDigest: producer.artifactDigest });
 }

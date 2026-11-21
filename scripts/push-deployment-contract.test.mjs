@@ -6,6 +6,7 @@ import { test } from 'node:test';
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../.github/workflows/backend-release.yml', import.meta.url), 'utf8'));
+const handoff = parse(readFileSync(new URL('../.github/workflows/backend-deployment-handoff.yml', import.meta.url), 'utf8'));
 const site = parse(readFileSync(new URL('../deploy/ansible/site.yml', import.meta.url), 'utf8'))[0];
 
 test('pull request backend validation cannot obtain production credentials or deploy', () => {
@@ -20,16 +21,16 @@ test('pull request backend validation cannot obtain production credentials or de
   }
 });
 
-test('production deployment consumes the certified Full digest and provenance certificate after main publication', () => {
-  const deploy = workflow.jobs['deploy-production'];
+test('production deployment consumes the verified Full digest and provenance certificate after main publication', () => {
+  const deploy = handoff.jobs['deploy-production'];
   assert.ok(deploy, 'certified production deployment job is required');
-  assert.deepEqual(deploy.needs, ['source', 'publish']);
+  assert.deepEqual(deploy.needs, ['verify-handoff']);
   assert.match(deploy.if, /github\.event_name == 'workflow_run'/u);
-  assert.match(deploy.if, /github\.event\.workflow_run\.event == 'push'/u);
+  assert.match(deploy.if, /github\.event\.workflow_run\.event == 'workflow_run'/u);
   assert.match(deploy.if, /github\.event\.workflow_run\.head_branch == 'main'/u);
-  assert.match(deploy.if, /needs\.publish\.result == 'success'/u);
-  assert.match(deploy.if, /needs\.publish\.outputs\.certified-full-image != ''/u);
-  assert.match(deploy.if, /needs\.publish\.outputs\.deployment-certificate != ''/u);
+  assert.match(deploy.if, /needs\.verify-handoff\.result == 'success'/u);
+  assert.match(deploy.if, /needs\.verify-handoff\.outputs\.certified-full-image != ''/u);
+  assert.match(deploy.if, /needs\.verify-handoff\.outputs\.deployment-certificate != ''/u);
   assert.match(deploy.if, /vars\.CODEXIA_PUSH_DEPLOYMENT_ENABLED == 'true'/u);
   assert.equal(deploy.environment.name, 'codexia-production');
   assert.equal(deploy.concurrency.group, 'codexia-production');
@@ -49,14 +50,16 @@ test('production deployment consumes the certified Full digest and provenance ce
   const liveUi = deploy.steps.find(step => step.name === 'Verify live application identities and Access boundary for release admission');
   assert.ok(liveUi, 'the job must admit the current frontend epoch before deployment');
   assert.equal(liveUi.env.CODEXIA_ACCESS_CLIENT_ID, '${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}');
-  const certificate = workflow.jobs.publish.steps.find(step => step.name === 'Create provenance-bound Full push deployment certificate');
-  assert.ok(certificate, 'the publisher must bind the exact successful main verification and image artifact');
-  assert.equal(certificate.env.CODEXIA_CERTIFIED_FULL_IMAGE, '${{ steps.push-image.outputs.full-image }}');
+  const verify = handoff.jobs['verify-handoff'];
+  assert.equal(verify.outputs['certified-full-image'], '${{ steps.verify.outputs.full-image }}');
+  assert.equal(verify.outputs['deployment-certificate'], '${{ steps.verify.outputs.full-certificate }}');
+  assert.ok(verify.steps.some(step => step.run === 'node scripts/verify-backend-push-handoff.mjs'),
+    'deployment output must come only from the independent certificate and publication verifier');
   const ansible = deploy.steps.find(step => step.name === 'Converge certified backend digest');
   assert.ok(ansible, 'production deployment must apply the digest through Ansible');
-  assert.equal(ansible.env.CODEXIA_CERTIFIED_FULL_IMAGE, '${{ needs.publish.outputs.certified-full-image }}');
+  assert.equal(ansible.env.CODEXIA_CERTIFIED_FULL_IMAGE, '${{ needs.verify-handoff.outputs.certified-full-image }}');
   assert.equal(ansible.env.CODEXIA_PROFILE, 'full');
-  assert.equal(ansible.env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64, '${{ needs.publish.outputs.deployment-certificate }}');
+  assert.equal(ansible.env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64, '${{ needs.verify-handoff.outputs.deployment-certificate }}');
   assert.match(ansible.run, /codexia_stage: deploy/u);
   assert.match(ansible.run, /codexia_image:/u);
 });
@@ -91,7 +94,7 @@ test('Ansible routes the push stage through the codexia runtime and host lock', 
   assert.equal(transaction.args.executable, '/bin/bash');
   assert.equal(transaction.no_log, true, 'the deployment transaction must not log secret values');
   assert.match(transaction['ansible.builtin.shell'], /default\.target\.wants/u, 'the API must recover after a VM reboot');
-  assert.match(transaction['ansible.builtin.shell'], /backup-push-locked/u, 'updates must commit an encrypted off-VM backup under the same lock');
+  assert.match(transaction['ansible.builtin.shell'], /backup-locked[\s\S]*--approved[\s\S]*--lock-file[\s\S]*--lock-fd/u, 'updates must commit an encrypted off-VM backup under the same lock');
   assert.match(transaction['ansible.builtin.shell'], /restore_previous/u, 'failed candidate activation must restore the prior release');
   assert.match(transaction['ansible.builtin.shell'], /deploy-transaction\.json/u, 'a durable transaction intent must make interrupted deployments recoverable');
   assert.match(transaction['ansible.builtin.shell'], /current_image.*candidate_image/su, 'same-digest application must be idempotent');

@@ -1,6 +1,6 @@
 # Push deployment
 
-The backend release workflow publishes the Full image by immutable OCI digest and creates a provenance certificate bound to successful exact-main verification, the producer artifact and the inspected image identity. The production job checks the live UI/API epoch and Access boundary, connects to the `yohnark.github` tailnet using GitHub OIDC, checks the pinned SSH host key for `100.100.1.68`, and runs Ansible as `codexia`. Cloudflare Tunnel remains the application ingress; it is not used for VM management.
+The backend release workflow publishes Core and Full images by immutable OCI digest and emits certificates bound to successful exact-main verification, the producer artifact and inspected image identities. A separate read-only handoff workflow rechecks the backend publication, artifact receipt and both images before exposing deployment inputs. The production job then checks the live UI/API epoch and Access boundary, connects to the `yohnark.github` tailnet using GitHub OIDC, checks the pinned SSH host key for `100.100.1.68`, and runs Ansible as `codexia`. Cloudflare Tunnel remains the application ingress; it is not used for VM management.
 
 The deployment job is gated by the `CODEXIA_PUSH_DEPLOYMENT_ENABLED` variable in the `codexia-production` GitHub Environment. Keep the value unset or set it to `false` until the new service identity, data, secrets, backup destination and rollback path have passed target-host acceptance. The existing signed pull channel remains available during this transition. Retire its publisher and VM polling units only after the push path serves the accepted production state.
 
@@ -24,7 +24,7 @@ The private age identity used for restore verification stays on a separate recov
 
 ## Deployment contract
 
-The production job runs only for a successful main `Verify Codexia` run whose corresponding backend publication produced a certified Full digest and deployment certificate. It consumes `needs.publish.outputs.certified-full-image`, its producer SHA and certificate; it does not resolve a tag or build a second image. The pull request validation job has no production Environment and cannot mint a Tailscale OIDC identity.
+The production job runs only after the read-only handoff workflow verifies a successful main `Verify Codexia` run, the corresponding backend publication, and the certified Full digest and deployment certificate. It consumes the handoff job outputs; it does not resolve a tag or build a second image. Pull request validation and the handoff verifier have no production Environment and cannot mint a Tailscale OIDC identity.
 
 The Ansible `deploy` stage requires a running, healthy Full API under the `codexia` rootless account. It verifies that the certificate identity matches the exact image digest and requires the candidate's migration fingerprint, API epoch and persistence format to equal the running image and deployed UI. Its Quadlet disables startup schema migration. A database change requires a separately reviewed database maintenance and backup operation; replacing a container does not restore or roll back PostgreSQL.
 

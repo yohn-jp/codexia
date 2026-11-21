@@ -102,7 +102,28 @@ test('rejects malformed or mutable images and incomplete provenance', () => {
   }
   assert.throws(() => assertPushDeploymentAdmission(certificate({ image: installed().image }), installed(), {
     expectedMainSha: sha('b'), deployedUiEpoch: 1,
-  }), /differ from the installed/);
+  }), /certified candidate identity/u);
+});
+
+test('admits an exact same-digest reapplication as an idempotent no-op', () => {
+  const base = certificate();
+  const installedValue = installed();
+  const receipt = structuredClone(base.producer.receipt);
+  receipt.sourceSha = sha('a');
+  const sameRelease = {
+    ...base,
+    producer: { ...base.producer, sourceSha: sha('a'), receipt },
+    image: installedValue.image,
+    identity: installedValue.identity,
+  };
+  const admitted = assertPushDeploymentAdmission(sameRelease, installedValue, {
+    expectedMainSha: sha('b'), deployedUiEpoch: 1,
+  });
+  assert.equal(admitted.unchanged, true);
+  assert.throws(() => assertPushDeploymentAdmission({
+    ...sameRelease,
+    image: `ghcr.io/yohn-jp/codexia-backend@${digest('9')}`,
+  }, installedValue, { expectedMainSha: sha('b'), deployedUiEpoch: 1 }), /differ from the installed/u);
 });
 
 test('CLI admits the same certificate and installed identity Ansible supplies', () => {
