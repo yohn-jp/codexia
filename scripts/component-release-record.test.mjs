@@ -2,6 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as releaseRecord from './component-release-record.mjs';
 import { readComponentVersion } from './component-release-version.mjs';
+import { parseComponentRelease } from './phase-f-test-channel.mjs';
+
+test('backend source proof uses the release publication time and the workflow windows', () => {
+  const release = { created_at:'2026-11-15T16:24:04Z', published_at:'2026-11-15T16:33:36Z' };
+  const run = { created_at:'2026-11-15T16:24:07Z', updated_at:'2026-11-15T16:33:40Z' };
+  assert.equal(releaseRecord.publicationInWorkflowWindow(release, run), true);
+  assert.equal(releaseRecord.publicationInWorkflowWindow({ ...release, published_at: null }, run), false);
+  assert.equal(releaseRecord.publicationInWorkflowWindow({ ...release, published_at: '2026-11-15T16:33:41Z' }, run), false);
+});
 
 test('frontend release metadata separates the merge source from immutable promoted asset identity',()=>{
   assert.equal(typeof releaseRecord.buildComponentReleaseRecord,'function','frontend release record builder is missing');
@@ -84,6 +93,18 @@ test('main fallback release records the exact build artifacts separately from ma
       full:{id:702,digest:'sha256:'+'3'.repeat(64),producerAttempt:2,archiveSha256:'4'.repeat(64)}}});
   const completion=releaseRecord.buildComponentReleaseRecord('backend',sourceSha,null,{core:image('5'),full:image('6'),compatibility,event:'workflow_run',receipt:{...receipt,event:'workflow_run'},mainTree:tree});
   assert.equal(completion.metadata.producer.event,'workflow_run');
+  const completionEnv={GITHUB_EVENT_NAME:'workflow_run',GITHUB_SHA:'d'.repeat(40),GITHUB_RUN_ID:'700',CODEXIA_VERIFY_RUN_ID:'702'};
+  const publication=releaseRecord.backendPublicationFromEnvironment(completionEnv,sourceSha);
+  const historicalProducer={core:image('5'),full:image('6'),compatibility,event:'workflow_run',receipt:{...receipt,event:'workflow_run'},mainTree:tree,publication};
+  const historical=releaseRecord.buildComponentReleaseRecord('backend',sourceSha,null,historicalProducer);
+  assert.equal(historical.targetSha,sourceSha);
+  assert.deepEqual(historical.metadata.publication,{event:'workflow_run',workflowHeadSha:'d'.repeat(40),workflowRunId:700,verifyRunId:702});
+  assert.deepEqual(parseComponentRelease({tag_name:historical.tag,draft:false,prerelease:false,body:historical.body},
+    version,sourceSha,image('5'),image('6'),compatibility),historical.metadata);
+  assert.throws(()=>releaseRecord.buildComponentReleaseRecord('backend',sourceSha,null,{
+    ...historicalProducer,publication:{...publication,workflowRunId:703},
+  }),/another publication workflow/);
+  assert.equal(releaseRecord.backendPublicationFromEnvironment({...completionEnv,GITHUB_SHA:sourceSha},sourceSha),undefined);
   assert.throws(()=>releaseRecord.buildComponentReleaseRecord('backend',sourceSha,null,{core:image('5'),full:image('6'),compatibility,
     event:'push',receipt:{...receipt,artifacts:{...receipt.artifacts,core:{...receipt.artifacts.core,id:702}}},mainTree:tree}),/distinct/);
 });

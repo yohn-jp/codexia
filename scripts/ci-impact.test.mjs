@@ -189,7 +189,9 @@ test('operational proof remains owned by one exact-head root task and matching i
   assert.ok(!Object.hasOwn(audit.on,'workflow_run'));
   assert.ok(!Object.hasOwn(audit.on,'delete'));
   assert.deepEqual(audit.on.push.branches,['main']);
-  assert.ok(audit.on.schedule.length && Object.hasOwn(audit.on,'workflow_dispatch'));
+  assert.equal(Object.hasOwn(audit.on,'schedule'),false);
+  assert.ok(Object.hasOwn(audit.on,'workflow_dispatch'));
+  assert.ok(Object.hasOwn(audit.on,'pull_request'));
 });
 
 test('root and coverage-only plans have a single owner for contract test execution', async () => {
