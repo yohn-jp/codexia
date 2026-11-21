@@ -32,6 +32,10 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
   const appChannelGeneration = appContinuity.indexOf('sudo -H -u "$service_user" env', appAccessibleCwd);
   assert.ok(appRepoRoot >= 0 && appAccessibleCwd > appRepoRoot && appChannelGeneration > appAccessibleCwd,
     'Resolve checkout paths before fixture-user sudo, then run from an accessible cwd');
+  const serviceAnsibleProbe = appContinuity.indexOf('service_ansible_version=$(as_service "$ansible_playbook" --version)');
+  const firstSecretsStage = appContinuity.indexOf('apply_runner secrets');
+  assert.ok(serviceAnsibleProbe >= 0 && firstSecretsStage > serviceAnsibleProbe,
+    'Verify the service account can run the pinned Ansible controller before database setup');
   assert.match(workflow, /ansible-core|requirements\.txt/u);
   assert.match(proxyQuadlet, /^PodmanArgs=--image-volume=ignore$/mu);
   assert.match(workflow, /contents: read/u);
