@@ -7,7 +7,7 @@ import { performance } from 'node:perf_hooks';
 import { chromium, expect as playwrightExpect } from '@playwright/test';
 import { buildIdentity, distribution, save, sourceIdentity } from './common.mjs';
 import { installBrowserProbes } from './browser-probes.mjs';
-import { manuscriptEditor, selectManuscriptProject, openManuscriptScene } from '../../tests/e2e/postgres-fixture.ts';
+import { manuscriptEditor, expectServerSaved, selectManuscriptProject, openManuscriptScene } from '../../tests/e2e/postgres-fixture.ts';
 
 const expect = playwrightExpect.configure({ timeout: 60000 });
 const [datasetPathArg, output, repeatsArg = '20'] = process.argv.slice(2);
@@ -166,7 +166,7 @@ try {
         if (!response.ok()) throw new Error(`PostgreSQL document save failed: HTTP ${response.status()}`);
         const receipt = await response.json();
         if (!receipt.revision?.id || !receipt.document?.headRevisionId) throw new Error('Document save response did not include its revision receipt');
-        await expect(page.getByText('PostgreSQLへ保存済み', { exact: true })).toBeVisible();
+        await expectServerSaved(page);
         return receipt;
       }, { sceneId: scene.id, documentBytes: scene.bytes, saveIndex: saveIndex + 1 });
       const end = await page.evaluate(() => performance.now());

@@ -23,9 +23,6 @@ export interface ApplicationShellProps {
   header: ReactNode;
   /** Production-authorized buttons/status for the Desktop Studio masthead. */
   desktopActions?: ReactNode;
-  desktopDurability?: "draft" | "saving" | "uncertain" | "saved";
-  desktopDurabilityDetail?: string;
-  desktopDurabilityLabel?: string;
   documentTitle?: string;
   documentContext?: string;
   library: ReactNode;

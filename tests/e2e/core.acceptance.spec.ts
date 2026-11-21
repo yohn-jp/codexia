@@ -1,6 +1,6 @@
 import { expect, request, test, type Page } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
-import { authToken, ownerLogin, manuscriptEditor as editor, readManuscriptMarkdown, openRevisionHistory } from "./postgres-fixture";
+import { authToken, expectDeviceDraft, expectServerSaved, ownerLogin, manuscriptEditor as editor, readManuscriptMarkdown, openRevisionHistory } from "./postgres-fixture";
 
 const rootPath = "/api/v1/persistence/projects";
 const appBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
@@ -76,7 +76,7 @@ async function writeRecords(page: Page, records: unknown[], store = "persistence
 }
 async function saved(page: Page, f: Fixture, text: string): Promise<void> {
   await expect.poll(async () => (await read(page, f)).revision.markdown).toBe(text);
-  await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+  await expectServerSaved(page);
 }
 async function reopen(page: Page, f: Fixture): Promise<void> {
   await page.goto(`/desktop/projects/${f.projectId}/scenes/${f.one.document.id}`);
@@ -204,7 +204,10 @@ test("IME composition blocks navigation while coalesced editor state stays curre
   await editor(page).evaluate((element) => element.dispatchEvent(new CompositionEvent("compositionstart", { data: "にほんご", bubbles: true })));
   await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
   await expect(page.getByRole("heading", { name: "Scene One", exact: true })).toBeVisible();
-  await expect(page.locator(".pg-editor-column").getByRole("alert").first()).toContainText("日本語入力の変換が完了していません");
+  const editorAlert = page.locator(".pg-editor-column").getByRole("alert");
+  await expect(editorAlert).toContainText("日本語入力の変換が完了していません");
+  await expect(editorAlert).toHaveCount(1);
+  await expect(page.getByRole("alert")).toHaveCount(1);
   await editor(page).evaluate((element) => element.dispatchEvent(new CompositionEvent("compositionend", { data: "日本語", bubbles: true })));
   const composedText = `${text} 日本語入力`;
   await replaceEditor(page, composedText);
@@ -293,7 +296,7 @@ test("replaying a saved operation after a newer remote revision shows the curren
   await replace(page, f, remote);
   await page.reload();
   await expectEditor(page, remote);
-  await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+  await expectServerSaved(page);
   expect(requests).toHaveLength(2);
   expect(requests[1]).toEqual(requests[0]);
   const latest = await read(page, f);
@@ -423,7 +426,7 @@ test("undoing an autosave draft back to the saved revision removes only that dra
 
   await replaceEditor(page, "Temporary draft that must be undone.");
   await expect.poll(async () => (await drafts(page)).find((d) => d.documentId === f.one.document.id)?.markdown).toBe("Temporary draft that must be undone.");
-  await expect(page.getByText("IndexedDB回復Journalに保存済み", { exact: true })).toBeVisible();
+  await expectDeviceDraft(page);
   await replaceEditor(page, savedMarkdown);
   await expectEditor(page, savedMarkdown);
   await expect.poll(async () => (await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);

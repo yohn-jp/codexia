@@ -9,6 +9,7 @@ import { assertVerificationJobs, collectGitHubPages, verifiedSourceRun } from '.
 import { assertCompatibleUpdate, validateUpdateRelease } from './update-release-policy.mjs';
 import { selectUpdateCandidate, signUpdateChannel, verifyUpdateChannel } from './update-channel.mjs';
 import { validateBackendIdentity } from './backend-update-identity.mjs';
+import { assertBackendPublication, publicationInWorkflowWindow } from './component-release-record.mjs';
 
 const REPOSITORY = 'yohn-jp/codexia';
 const compatibility = JSON.parse(await readFile(new URL('../deploy/update-compatibility.json', import.meta.url), 'utf8'));
@@ -50,7 +51,9 @@ export function parseComponentRelease(apiRelease, expectedVersion, expectedSourc
   assert.match(expectedFullImage, digestImage);
   const metadata = parseFencedMetadata(apiRelease.body);
   const legacyKeys=['component','images','persistenceFormat','providedApiEpoch','sourceSha','version'];
-  assert.deepEqual(Object.keys(metadata).sort(),metadata.producer ? [...legacyKeys,'producer'].sort() : legacyKeys);
+  assert.deepEqual(Object.keys(metadata).sort(),[
+    ...legacyKeys, ...(metadata.producer ? ['producer'] : []), ...(metadata.publication ? ['publication'] : []),
+  ].sort());
   assert.equal(metadata.component, 'backend');
   assert.equal(metadata.version, expectedVersion, 'Backend release version differs from its certified record');
   assert.match(metadata.sourceSha??'',/^[a-f0-9]{40}$/u,'Backend release main authority SHA is invalid');
@@ -82,6 +85,15 @@ export function parseComponentRelease(apiRelease, expectedVersion, expectedSourc
     }
     assert.notEqual(producer.artifacts.core.id,producer.artifacts.full.id,'Backend Core and Full producer artifact IDs must be distinct');
     assert.notEqual(producer.artifacts.core.digest,producer.artifacts.full.digest,'Backend Core and Full producer artifact digests must be distinct');
+  }
+  if (metadata.publication) {
+    const publication = assertBackendPublication(metadata.publication);
+    assert.notEqual(publication.workflowHeadSha, metadata.sourceSha);
+    if (metadata.producer?.event === 'pull_request') assert.equal(publication.verifyRunId, metadata.producer.verifyRunId);
+    else {
+      assert.equal(metadata.producer?.event, 'workflow_run');
+      assert.equal(publication.workflowRunId, metadata.producer.workflowRunId);
+    }
   }
   assert.equal(metadata.providedApiEpoch, expectedCompatibility.apiEpoch, 'Backend release API epoch differs from this host contract');
   assert.equal(metadata.persistenceFormat, expectedCompatibility.persistenceFormat, 'Backend release persistence format differs from this host contract');
@@ -163,12 +175,15 @@ async function verifySourceCertification(record, releaseApiRecord, metadata, tok
   const sourceRun = verifiedSourceRun(runs, authoritySha);
   const sourceJobs = await githubPages('actions/runs/' + sourceRun.id + '/jobs?filter=latest', 'jobs', token);
   assertVerificationJobs(sourceJobs);
-  const backendRuns = await githubPages('actions/workflows/backend-release.yml/runs?head_sha=' + authoritySha + '&branch=main&status=completed', 'workflow_runs', token);
-  const releasedAt=releaseApiRecord.created_at?Date.parse(releaseApiRecord.created_at):NaN;
-  const backendRun = backendRuns.find(run => run?.head_sha === authoritySha && run?.head_branch === 'main' &&
+  const publication = metadata.publication;
+  if (publication) assert.equal(publication.verifyRunId, sourceRun.id, 'Backend publication used another source verification run');
+  const workflowHeadSha = publication?.workflowHeadSha ?? authoritySha;
+  const backendRuns = publication ? [await githubJson('actions/runs/' + publication.workflowRunId, token)] :
+    await githubPages('actions/workflows/backend-release.yml/runs?head_sha=' + workflowHeadSha + '&branch=main&status=completed', 'workflow_runs', token);
+  const backendRun = backendRuns.find(run => run?.head_sha === workflowHeadSha && run?.head_branch === 'main' &&
     ['push','workflow_run'].includes(run?.event) && run?.status === 'completed' && run?.conclusion === 'success'&&
-    Number.isFinite(releasedAt)&&Number.isFinite(Date.parse(run.created_at))&&Number.isFinite(Date.parse(run.updated_at))&&
-    Date.parse(run.created_at)<=releasedAt&&releasedAt<=Date.parse(run.updated_at)&&
+    (!publication || (run.id === publication.workflowRunId && run.event === publication.event && run.path === '.github/workflows/backend-release.yml')) &&
+    publicationInWorkflowWindow(releaseApiRecord, run)&&
     (!['push','workflow_run'].includes(metadata.producer?.event)||(run.event===metadata.producer.event&&run.id===metadata.producer.workflowRunId&&run.run_number===metadata.producer.workflowRunNumber)));
   assert.ok(backendRun, 'Source has no successful main backend release workflow');
   const backendJobs = await githubPages('actions/runs/' + backendRun.id + '/jobs?filter=latest', 'jobs', token);
