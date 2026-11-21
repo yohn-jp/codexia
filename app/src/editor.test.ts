@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Text } from "@codemirror/state";
+import { EditorState, Text } from "@codemirror/state";
 import { resolveBracketInput } from "./editor/cm/bracketLogic";
-import { normalizeEllipsisInsert } from "./editor/cm/ellipsisNormalize";
+import { ellipsisNormalizeExtension, normalizeEllipsisInsert } from "./editor/cm/ellipsisNormalize";
 import { documentBody, parseRubySegments, replaceDocumentBody } from "./editor/ruby";
 import { planWritingSymbol } from "./editor/writingSymbols";
 import { normalizeTypographySettings } from "./editor/typography";
@@ -21,6 +21,12 @@ test("single ellipses normalize to the source's two-character form", () => {
   assert.equal(normalizeEllipsisInsert("", "…", ""), "……");
   assert.equal(normalizeEllipsisInsert("前", "…", "後"), "……");
   assert.equal(normalizeEllipsisInsert("", "……", ""), "……");
+});
+
+test("typing after a complete ellipsis pair does not duplicate either character", () => {
+  const state = EditorState.create({ doc: "前……後", extensions: [ellipsisNormalizeExtension()] });
+  const updated = state.update({ changes: { from: 3, insert: "y" } }).state;
+  assert.equal(updated.doc.toString(), "前……y後");
 });
 
 test("ruby parsing keeps the source's explicit Aozora syntax and frontmatter bytes", () => {

@@ -334,6 +334,20 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const saveDocumentRef = useRef<() => Promise<void>>(async () => undefined);
   const scratchGuardRef = useRef<(() => Promise<void>) | null>(null);
   const editorRef = useRef<ManuscriptInputHandle>(null);
+  const [editorPortalContainer] = useState<HTMLElement | null>(() => {
+    if (typeof document === "undefined") return null;
+    const container = document.createElement("div");
+    container.className = "pg-preserved-editor-container";
+    container.hidden = true;
+    container.inert = true;
+    container.setAttribute("aria-hidden", "true");
+    return container;
+  });
+  const editorPortalParkingRef = useRef<HTMLDivElement>(null);
+  const attachEditorPortalParking = useCallback((parking: HTMLDivElement | null) => {
+    editorPortalParkingRef.current = parking;
+    if (parking && editorPortalContainer) parking.append(editorPortalContainer);
+  }, [editorPortalContainer]);
   const transitionErrorRef = useRef("");
   const clientIdRef = useRef("");
   const openSequenceRef = useRef(0);
@@ -2433,7 +2447,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       </aside>);
   const panels: WorkspacePanel[] = [
     { id: "outline", title: "作品と構成", render: () => library },
-    { id: "editor", title: "原稿", render: () => editor },
+    { id: "editor", title: "原稿", preserveContainer: editorPortalContainer ?? undefined, preserveParkingRef: editorPortalParkingRef, render: () => editor },
     { id: "inspector", title: "知識と根拠", render: () => knowledge },
   ];
   const readCurrentEditor = (): BrowserEditorDocument | null => {
@@ -2454,6 +2468,8 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const currentDesktopDurability = desktopDurabilityFor(active) ?? (loading ? "uncertain" : undefined);
   const currentPending = active ? pendingSaveRef.current.get(JSON.stringify([active.document.projectId, active.document.id])) : undefined;
   return <div className={`pg-workspace pg-shell pg-${mode}`}>
+    <div className="pg-preserved-editor-parking" hidden inert aria-hidden="true" ref={attachEditorPortalParking} />
+    {editorPortalContainer ? createPortal(editor, editorPortalContainer) : null}
     {active && createPortal(
       <article className="print-view pg-print-document" style={typographyStyle}>
         <h1>{active.document.title}</h1>
