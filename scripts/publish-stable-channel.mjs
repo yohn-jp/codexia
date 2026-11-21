@@ -1,13 +1,15 @@
 import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { authenticateHistoricalChannel, signUpdateChannel } from './update-channel.mjs';
 import { initialStableChannelRegistry, nextStableChannelRegistry, signStableChannelRegistry, verifyStableChannelRegistry } from './stable-channel-registry.mjs';
 import { validateUpdateRelease } from './update-release-policy.mjs';
-import { readComponentVersion } from './component-release-version.mjs';
-import { validateBackendIdentity, fingerprintProbe } from './backend-update-identity.mjs';
+import { expectedBackendMigrationFingerprint, inspectBackendImageWithoutExecution } from './backend-image-inspection.mjs';
+import { validateBackendIdentity } from './backend-update-identity.mjs';
 
 const REPO = 'yohn-jp/codexia';
 const REF = 'codexia-stable-channel';
@@ -176,20 +178,23 @@ async function main() {
   if(mode==='publish'){
     const source=process.env.GITHUB_SHA;
     if(!source||execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim()!==source)throw new Error('Certified immutable main source required');
+    const producerSha=process.env.CODEXIA_BACKEND_PRODUCER_SHA||source;
+    const producerVersion=process.env.CODEXIA_BACKEND_PRODUCER_VERSION;
+    if(!/^[a-f0-9]{40}$/u.test(producerSha)||!producerVersion)throw new Error('Certified backend producer identity required');
     const output=(args)=>execFileSync('docker',args,{encoding:'utf8',timeout:300000,maxBuffer:1024*1024}).trim();
-    const version=readComponentVersion('backend');
     const compatibility=JSON.parse(readFileSync(new URL('../deploy/update-compatibility.json',import.meta.url),'utf8'));
+    const expectedFingerprint=await expectedBackendMigrationFingerprint();
+    const scratch=await mkdtemp(path.join(process.env.RUNNER_TEMP||tmpdir(),'codexia-stable-identity-'));
     const releases=[];
-    for(const [profile,image] of [['core',process.env.CODEXIA_CERTIFIED_IMAGE],['full',process.env.CODEXIA_CERTIFIED_FULL_IMAGE]]){
-      if(!/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u.test(image??''))throw new Error('Certified immutable '+profile+' image required');
-      output(['pull','--platform','linux/amd64',image]);
-      const identity=JSON.parse(output(['run','--rm','--network','none','--read-only','--entrypoint','cat',image,'/app/update-identity.json']));
-      const observedFingerprint=output(['run','--rm','--network','none','--read-only','--entrypoint','node',image,'--input-type=module','-e',fingerprintProbe]);
-      if(observedFingerprint!==identity.migrationFingerprint)throw new Error('Packaged migration fingerprint mismatch');
-      const observed=JSON.parse(output(['image','inspect',image]))[0];
-      if(observed.Os+'/'+observed.Architecture!==identity.platform||observed.Config.Labels?.['org.opencontainers.image.revision']!==source||!observed.RepoDigests?.includes(image))throw new Error('Published digest or OCI identity mismatch');
-      releases.push(releaseFromIdentity(identity,image,source,version,compatibility,profile));
-    }
+    try {
+      for(const [profile,image] of [['core',process.env.CODEXIA_CERTIFIED_IMAGE],['full',process.env.CODEXIA_CERTIFIED_FULL_IMAGE]]){
+        if(!/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u.test(image??''))throw new Error('Certified immutable '+profile+' image required');
+        output(['pull','--platform','linux/amd64',image]);
+        const identity=await inspectBackendImageWithoutExecution(image,{image,sourceSha:producerSha,version:producerVersion,profile,
+          migrationFingerprint:expectedFingerprint,compatibility},{tempRoot:scratch});
+        releases.push(releaseFromIdentity(identity,image,producerSha,producerVersion,compatibility,profile));
+      }
+    } finally { await rm(scratch,{recursive:true,force:true}); }
     command={mode,releases};
   } else if(mode==='withdraw') command={mode,image:process.env.CODEXIA_WITHDRAW_IMAGE};
   const now=Date.now();
