@@ -30,17 +30,17 @@ test('result writers claim new files exclusively and save uses private collision
   try {
     const result = join(root, 'result.json');
     await writeNewJsonResult(result, { status: 'complete' });
-    assert.deepEqual(JSON.parse(await readFile(result, 'utf8')), { status: 'complete' });
+    assert.deepEqual(JSON.parse((await readRegularFile(result)).toString('utf8')), { status: 'complete' });
     assert.equal((await lstat(result)).mode & 0o777, 0o600);
     await assert.rejects(writeNewJsonResult(result, { status: 'overwritten' }), { code: 'EEXIST' });
-    assert.deepEqual(JSON.parse(await readFile(result, 'utf8')), { status: 'complete' });
+    assert.deepEqual(JSON.parse((await readRegularFile(result)).toString('utf8')), { status: 'complete' });
 
     const updated = join(root, 'progress.json');
     await save(updated, { status: 'running' });
     assert.equal((await lstat(updated)).mode & 0o777, 0o600);
     await save(updated, { status: 'complete' });
-    assert.deepEqual(JSON.parse(await readFile(updated, 'utf8')), { status: 'complete' });
-    assert.deepEqual((await readdir(root)).filter(name => name.endsWith('.tmp')), []);
+    assert.deepEqual(JSON.parse((await readRegularFile(updated)).toString('utf8')), { status: 'complete' });
+    assert.deepEqual((await readdir(root)).sort(), ['progress.json', 'result.json']);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 test('summaries exclude failed and timed-out workload latency while preserving completed observations and rejections', async () => {
