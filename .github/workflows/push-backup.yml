@@ -1,0 +1,46 @@
+name: Verify Push Backup
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - deploy/backup/**
+      - deploy/ansible/deploy.yml
+      - deploy/ansible/restore-drill.yml
+      - deploy/ansible/push-deployment-recover.sh
+      - scripts/push-deployment-backup.test.mjs
+      - scripts/push-deployment-recovery.test.mjs
+      - .github/workflows/push-backup.yml
+  push:
+    branches: [main]
+    paths:
+      - deploy/backup/**
+      - deploy/ansible/deploy.yml
+      - deploy/ansible/restore-drill.yml
+      - deploy/ansible/push-deployment-recover.sh
+      - scripts/push-deployment-backup.test.mjs
+      - scripts/push-deployment-recovery.test.mjs
+      - .github/workflows/push-backup.yml
+permissions:
+  contents: read
+concurrency:
+  group: push-backup-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  backup-contract:
+    name: Verify push backup locks, writer quiescence and interrupted deployment recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Check backup and recovery shell syntax
+        run: |
+          bash -n deploy/backup/backup.sh
+          bash -n deploy/ansible/push-deployment-recover.sh
+      - name: Verify push backup lock and recovery contract
+        run: node --test scripts/push-deployment-backup.test.mjs scripts/push-deployment-recovery.test.mjs

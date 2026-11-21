@@ -1,0 +1,63 @@
+name: Push deployment host bootstrap
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/push-host.yml
+      - deploy/ansible/test-host-integration.sh
+      - deploy/ansible/test-push-host.sh
+      - deploy/ansible/host.yml
+      - deploy/ansible/host-validate.yml
+      - deploy/ansible/site.yml
+      - deploy/ansible/requirements.txt
+      - docs/deployment/PHASE-F-PUSH-HOST-CI.md
+      - scripts/push-host.test.mjs
+permissions:
+  contents: read
+concurrency:
+  group: push-host-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  disposable-host-bootstrap:
+    name: Ansible host bootstrap for codexia service account
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact source without persistent credentials
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Check the isolated fixture contract
+        run: |
+          set -euo pipefail
+          bash -n deploy/ansible/test-host-integration.sh
+          bash -n deploy/ansible/test-push-host.sh
+          node --test scripts/push-host.test.mjs
+      - name: Install the pinned Ansible control environment
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends python3-venv
+          sudo python3 -m venv /opt/codexia-ansible
+          sudo /opt/codexia-ansible/bin/pip install -r deploy/ansible/requirements.txt
+      - name: Converge and observe the disposable codexia host identity
+        env:
+          CODEXIA_DISPOSABLE_HOST: push-host
+          ANSIBLE_PLAYBOOK: /opt/codexia-ansible/bin/ansible-playbook
+        run: bash deploy/ansible/test-push-host.sh
+      - name: Upload run-bound host bootstrap evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: push-host-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/codexia-push-host/host-fixture-outcome.json
+            ${{ runner.temp }}/codexia-push-host/host-convergence-bounded.log
+          if-no-files-found: warn
+          retention-days: 7
