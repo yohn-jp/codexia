@@ -51,7 +51,7 @@ test("legacy draft import preserves active input when its journal debounce is pe
   const { scene } = await createWritingFixture(page); await seedLegacy(page); await previewLegacy(page);
   await page.route("**/api/v1/persistence/projects/*/documents/*", (route) => route.request().method() === "PATCH" ? route.abort("failed") : route.continue());
   const text = "現在入力中の原稿を旧記録で消さない。";
-  await editor(page).fill(text);
+  await editor(page).click(); await editor(page).press("ControlOrMeta+a"); await page.keyboard.insertText(text);
   await page.getByRole("button", { name: "この文書へ取り込む" }).click();
   await expectMarkdown(page, text); expect(await sourceExists(page)).toBe(true);
   await expect.poll(async () => (await readPersistenceDrafts(page)).some((draft) => draft.documentId === scene.id && draft.markdown === text)).toBe(true);

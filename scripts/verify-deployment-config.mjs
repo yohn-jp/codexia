@@ -131,7 +131,10 @@ assert.match(ingress, /for key, probe in local\.identity_probes[\s\S]*?aud_tag =
 assert.match(terraformVariables, /variable "access_ci_policy_id"/u);
 const release = await read('.github/workflows/frontend-release.yml');
 const preflight = await read('.github/workflows/production-preflight.yml');
-assert.match(release, /needs: \[preflight, build, certify\]/u);
+assert.match(release, /needs: \[source, preflight, build\]/u);
+assert.match(release, /workflow_run:[\s\S]*?types: \[completed\]/u);
+assert.match(release, /release-source-gate\.mjs frontend/u);
+assert.doesNotMatch(release, /timeout-minutes: 70/u, 'Frontend release must not reserve a runner while waiting for Verify');
 const preflightJob = release.split('  preflight:\n')[1].split('  build:\n')[0];
 const deployJob = release.split('  deploy:\n')[1];
 assert.match(preflightJob, /environment: codexia-production/u);

@@ -55,6 +55,7 @@ export function KnowledgeContextInspector({
   selectedEvidenceId,
   evidenceLoadKey,
   onOpenEvidence,
+  onDataChanged,
   onMerge,
   onNodeUpdate,
 }: {
@@ -66,6 +67,7 @@ export function KnowledgeContextInspector({
   selectedEvidenceId: string;
   evidenceLoadKey: number;
   onOpenEvidence: (item: PersistenceAnchorView) => void;
+  onDataChanged: () => void;
   onMerge: (target: KnowledgeNode, source: KnowledgeNode) => void;
   onNodeUpdate: (node: KnowledgeNode) => void;
 }) {
@@ -77,11 +79,13 @@ export function KnowledgeContextInspector({
   const [busy, setBusy] = useState(false);
   const [reload, setReload] = useState(0);
   const [mergeTarget, setMergeTarget] = useState("");
+  const [mergeTargetNode, setMergeTargetNode] = useState<KnowledgeNode | null>(null);
   const [mergePreview, setMergePreview] = useState<Awaited<ReturnType<typeof api.previewPersistenceMerge>> | null>(null);
   const [mergeConfirm, setMergeConfirm] = useState(false);
   const [storyEntityId, setStoryEntityId] = useState(String(node.attributes.storyEntityId ?? ""));
   const [surface, setSurface] = useState("");
   const [target, setTarget] = useState("");
+  const [targetNode, setTargetNode] = useState<KnowledgeNode | null>(null);
   const [relationType, setRelationType] = useState("");
   const [statement, setStatement] = useState("");
   const [modality, setModality] = useState<Modality>("fact");
@@ -128,12 +132,13 @@ export function KnowledgeContextInspector({
     return () => abort.abort();
   }, [projectId]);
 
-  const mutate = async (action: () => Promise<unknown>): Promise<void> => {
+  const mutate = async (action: () => Promise<unknown>, refreshBrowse = false): Promise<void> => {
     if (busy) return;
     setBusy(true);
     setError("");
     try {
       await action();
+      if (refreshBrowse) onDataChanged();
       setReload((current) => current + 1);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "保存できませんでした。");
@@ -149,7 +154,7 @@ export function KnowledgeContextInspector({
       normalized: alias.normalized,
       scope: alias.scope,
       status,
-    }));
+    }), true);
 
   const relationSave = (relation: KnowledgeRelation, status: KnowledgeRelation["status"]): Promise<void> =>
     mutate(() => api.savePersistenceRelation(projectId, relation.sourceId, {
@@ -160,7 +165,7 @@ export function KnowledgeContextInspector({
       validity: relation.validity,
       status,
       expectedVersion: relation.version,
-    }));
+    }), true);
 
   const assertionSave = (assertion: Assertion, status: Assertion["status"]): Promise<void> =>
     mutate(() => api.savePersistenceAssertion(projectId, assertion.id, {
@@ -171,7 +176,7 @@ export function KnowledgeContextInspector({
       confidence: assertion.confidence,
       status,
       expectedVersion: assertion.version,
-    }));
+    }), true);
 
   const current = anchors.find((item) =>
     item.anchor.id === selectedEvidenceId &&
@@ -264,7 +269,7 @@ export function KnowledgeContextInspector({
                 status: "proposed",
               });
               setSurface("");
-            });
+            }, true);
           }}>
             <label className="kci__field">別名候補
               <input value={surface} onChange={(event) => setSurface(event.target.value)} maxLength={512} required />
@@ -286,7 +291,8 @@ export function KnowledgeContextInspector({
           />
           <details className="kci__edit-disclosure"><summary>関係を追加</summary><form className="kci__form kci__form--relation" onSubmit={(event) => {
             event.preventDefault();
-            const other = nodes.find((candidate) => candidate.id === target && candidate.projectId === projectId && candidate.status !== "retired");
+            const other = nodes.find((candidate) => candidate.id === target && candidate.projectId === projectId && candidate.status !== "retired")
+              ?? (targetNode?.id === target && targetNode.projectId === projectId && targetNode.status !== "retired" ? targetNode : undefined);
             if (!other) return;
             void mutate(async () => {
               await api.savePersistenceRelation(projectId, node.id, {
@@ -300,15 +306,17 @@ export function KnowledgeContextInspector({
               });
               setRelationType("");
               setTarget("");
-            });
+              setTargetNode(null);
+            }, true);
           }}>
             <p className="kci__form-title">関係候補を登録</p>
             <label className="kci__field">関係の種類
               <input value={relationType} onChange={(event) => setRelationType(event.target.value)} maxLength={128} required />
             </label>
             <label className="kci__field">関係先
-              <select value={target} onChange={(event) => setTarget(event.target.value)} required>
+              <select value={target} onChange={(event) => { const id = event.target.value; setTarget(id); setTargetNode(nodes.find(candidate => candidate.id === id) ?? null); }} required>
                 <option value="">Knowledgeを選択</option>
+                {targetNode && targetNode.id === target && !nodes.some(candidate => candidate.id === targetNode.id) && <option value={targetNode.id}>{targetNode.name} · {targetNode.type} · 選択中</option>}
                 {nodes.filter((candidate) => candidate.id !== node.id && candidate.projectId === projectId && candidate.status !== "retired").map((candidate) => <option value={candidate.id} key={candidate.id}>{candidate.name} · {candidate.type} · {candidate.status}</option>)}
               </select>
             </label>
@@ -382,7 +390,7 @@ export function KnowledgeContextInspector({
                 expectedAnchorVersion: current.anchor.version,
               });
               setStatement("");
-            });
+            }, true);
           }}>
             <label className="kci__field">命題
               <textarea value={statement} onChange={(event) => setStatement(event.target.value)} maxLength={4000} required />
@@ -413,10 +421,12 @@ export function KnowledgeContextInspector({
           <label className="kci__field">統合先
             <select value={mergeTarget} onChange={(event) => {
               setMergeTarget(event.target.value);
+              setMergeTargetNode(nodes.find(candidate => candidate.id === event.target.value) ?? null);
               setMergePreview(null);
               setMergeConfirm(false);
             }}>
               <option value="">選択</option>
+              {mergeTargetNode && mergeTargetNode.id === mergeTarget && !nodes.some(candidate => candidate.id === mergeTargetNode.id) && <option value={mergeTargetNode.id}>{mergeTargetNode.name} · {mergeTargetNode.type} · {mergeTargetNode.id}</option>}
               {nodes.filter((candidate) => candidate.id !== node.id && candidate.type === node.type && candidate.status === "confirmed" && !candidate.deletedAt).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} · {candidate.type} · {candidate.id}</option>)}
             </select>
           </label>
