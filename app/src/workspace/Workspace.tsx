@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from "react";
-import { Panel, PanelGroup, PanelResizeHandle, setNonce } from "react-resizable-panels";
+import { Group, Panel, Separator } from "react-resizable-panels";
 import type { UiMode, WorkspacePanel, WorkspacePanelRequest } from "../application/contracts";
 import {
   activateWorkspacePanel,
@@ -17,10 +17,6 @@ import {
 import { loadWorkspaceSnapshot, presetTitle, saveWorkspaceSnapshot, type WorkspaceLoad, type WorkspaceStorage } from "./persistence";
 import "./workspace.css";
 import type { FloatingPanelLayout } from "./floating";
-
-const styleNonce = typeof document === "undefined" ? undefined
-  : document.querySelector<HTMLMetaElement>('meta[name="codexia-style-nonce"]')?.content;
-if (styleNonce) setNonce(styleNonce);
 
 interface WorkspaceProps {
   scope: string;
@@ -295,19 +291,23 @@ function WorkspaceTree({ node, mode, layoutEditing, depth, catalog, visibleCount
   }
 
   return (
-    <PanelGroup
+    <Group
       className={`st-workspace-split st-workspace-split-${node.direction}`}
       id={`st-workspace-${node.id}`}
-      direction={node.direction}
-      onLayout={(sizes) => { if (resizeGestureRef.current) onResize(node.id, sizes); }}
+      orientation={node.direction}
+      onLayoutChange={(layout) => {
+        if (resizeGestureRef.current) {
+          onResize(node.id, node.children.map((_, index) =>
+            layout[`st-workspace-panel-${node.id}-${index}`] ?? node.sizes[index]!));
+        }
+      }}
     >
       {node.children.flatMap((child, index) => [
           <Panel
             key={child.type === "leaf" ? child.panelId : child.id}
             id={`st-workspace-panel-${node.id}-${index}`}
-            order={index + 1}
-            defaultSize={node.sizes[index]}
-            minSize={12}
+            defaultSize={`${node.sizes[index]}%`}
+            minSize="12%"
             className="st-workspace-resizable-panel"
           >
             <WorkspaceTree
@@ -325,7 +325,7 @@ function WorkspaceTree({ node, mode, layoutEditing, depth, catalog, visibleCount
             />
           </Panel>,
           ...(index < node.children.length - 1 ? [
-            <PanelResizeHandle
+            <Separator
               key={`resize-${node.id}-${index}`}
               className={`st-workspace-resize-handle st-workspace-resize-${node.direction}`}
               aria-label={depth === 0 && index === 0
@@ -344,7 +344,7 @@ function WorkspaceTree({ node, mode, layoutEditing, depth, catalog, visibleCount
             />,
           ] : []),
         ])}
-    </PanelGroup>
+    </Group>
   );
 }
 

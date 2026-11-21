@@ -21,7 +21,7 @@
     "@codexia/persistence-contracts": "workspace:*",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "react-resizable-panels": "2.1.9",
+    "react-resizable-panels": "4.24.0",
     "react-router-dom": "7.18.5"
   },
   "devDependencies": {
