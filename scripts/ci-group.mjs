@@ -126,7 +126,7 @@ async function executeTaskInContext(task, index, scope) {
         const reuse = plan.taskInputReuse?.coverage;
         let reusable = false;
         if (reuse && plan.base === reuse.sourceSha && process.env.GITHUB_RUN_ID && process.env.GITHUB_RUN_ATTEMPT) {
-          const baselineProof = { ...reuse, format: 'codexia-ci-task-input-proof/v2', mode: 'static-coverage', status: 'passed' };
+          const baselineProof = { ...reuse, sourceSha: reuse.proofSourceSha, format: 'codexia-ci-task-input-proof/v2', mode: 'static-coverage', status: 'passed' };
           reusable = selectEquivalentTaskProofs({ tasks: ['coverage'], baseline: [baselineProof], candidate: [candidateProof],
             baselineIdentity: { sourceSha: reuse.proofSourceSha, planDigest: reuse.planDigest,
               workflowRunId: reuse.workflowRunId, workflowAttempt: reuse.workflowAttempt },
