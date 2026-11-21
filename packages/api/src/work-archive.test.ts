@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
+import { CoreError, CoreStore } from "@codexia/core";
+import type { ChangeOperation, ChangeProposal } from "@codexia/contracts";
 import type { DocumentId, EvidenceId, KnowledgeNodeId, Persistence, PersistenceTransaction, ProjectId } from "@codexia/persistence-contracts";
 import { handlePersistenceRoute } from "./persistence-routes.js";
 import { exportWorkArchive, importWorkArchive } from "./work-archive.js";
@@ -9,6 +11,7 @@ import { exportWorkArchive, importWorkArchive } from "./work-archive.js";
 const connectionString = process.env.CODEXIA_TEST_DATABASE_URL;
 if (!connectionString) throw new Error("CODEXIA_TEST_DATABASE_URL is required for portable work integration tests");
 const persistence = createPostgresPersistence(connectionString);
+const core = new CoreStore({ persistence });
 before(async () => { await migratePostgresDatabase(connectionString); });
 after(() => persistence.close());
 
@@ -69,6 +72,73 @@ test("a portable work round trip reconstitutes manuscript, hierarchy, knowledge,
   assert.deepEqual(restored.evidence.assertionEvidence, archive.evidence.assertionEvidence);
   assert.equal(restored.evidence.anchors[0]?.id, evidenceId);
   assert.equal(restored.moduleRecords[0]?.value.editorNote, "保持");
+});
+
+test("portable import keeps deleted mapped hierarchy paths reserved in PostgreSQL", async () => {
+  const source = await core.createProject({ title: "Archive reservation " + randomUUID() });
+  for (const input of [
+    { kind: "volume", id: "reserve-volume", title: "Volume" },
+    { kind: "chapter", id: "reserve-chapter", title: "Chapter", volumeId: "reserve-volume" },
+    { kind: "scene", id: "reserve-scene", title: "Scene", volumeId: "reserve-volume", chapterId: "reserve-chapter", manuscriptBody: "Retained text" },
+  ] as const) {
+    const built = await core.buildCreateHierarchyOperation(source.id, input);
+    const proposal: ChangeProposal = { id: randomUUID(), snapshot: built.snapshot, operations: [built.operation], source: "author" };
+    await core.propose(source.id, proposal);
+    await core.approve(source.id, { proposalId: proposal.id, operationIds: [built.operation.id], authorScope: "owner" });
+    await core.apply(source.id, built.operation);
+  }
+
+  const archive = await exportWorkArchive(persistence, source.id);
+  const imported = await importWorkArchive(persistence, archive, "owner");
+  const deletion = await core.buildDeleteHierarchyOperation(imported.project.id, {
+    kind: "scene", id: "reserve-scene", volumeId: "reserve-volume", chapterId: "reserve-chapter",
+  });
+  const deletionProposal: ChangeProposal = {
+    id: randomUUID(), snapshot: deletion.snapshot, operations: [deletion.operation], source: "author",
+  };
+  await core.propose(imported.project.id, deletionProposal);
+  await core.approve(imported.project.id, {
+    proposalId: deletionProposal.id, operationIds: [deletion.operation.id], authorScope: "owner",
+  });
+  await core.apply(imported.project.id, deletion.operation);
+
+  await assert.rejects(
+    core.buildCreateHierarchyOperation(imported.project.id, {
+      kind: "scene", id: "reserve-scene", title: "Reused", volumeId: "reserve-volume", chapterId: "reserve-chapter",
+    }),
+    (error: unknown) => error instanceof CoreError && error.code === "hierarchy_path_reserved",
+  );
+  const newScene = await core.buildCreateHierarchyOperation(imported.project.id, {
+    kind: "scene", id: "unused-scene", title: "Unused path", volumeId: "reserve-volume", chapterId: "reserve-chapter",
+  });
+  const newProposal: ChangeProposal = {
+    id: randomUUID(), snapshot: newScene.snapshot, operations: [newScene.operation], source: "author",
+  };
+  await core.propose(imported.project.id, newProposal);
+  await core.approve(imported.project.id, {
+    proposalId: newProposal.id, operationIds: [newScene.operation.id], authorScope: "owner",
+  });
+  await core.apply(imported.project.id, newScene.operation);
+
+  const sourceScene = archive.documents.find(document => document.kind === "scene")!;
+  assert.ok(await persistence.read(reader => reader.getRevision(source.id, sourceScene.id as DocumentId, sourceScene.revisionId as import("@codexia/persistence-contracts").RevisionId)));
+  assert.equal((await exportWorkArchive(persistence, imported.project.id)).documents.some(document => document.id === sourceScene.id), false);
+  assert.ok(await persistence.read(reader => reader.listDocuments(imported.project.id)).then(documents => documents.some(document => document.title === "Unused path")));
+
+  // Exercise the transactional guard independently of proposal-time validation:
+  // construct an approved hierarchy write and require apply to reject the retained mapping.
+  const snapshot = (await core.observe(imported.project.id)).snapshot;
+  const path = "plot/volumes/reserve-volume/chapters/reserve-chapter/scenes/reserve-scene.yaml";
+  const operation: ChangeOperation = {
+    id: randomUUID(), generation: 0, projectId: imported.project.id, baseProjectVersion: snapshot.projectVersion,
+    effect: "structure", reads: [{ path, revision: null }],
+    writes: [{ path, revision: null, content: "id: reserve-scene\ntitle: Reused\n" }], message: "Attempt reserved path",
+  };
+  const proposal: ChangeProposal = { id: randomUUID(), snapshot, operations: [operation], source: "author" };
+  await core.propose(imported.project.id, proposal);
+  await core.approve(imported.project.id, { proposalId: proposal.id, operationIds: [operation.id], authorScope: "owner" });
+  await assert.rejects(core.apply(imported.project.id, operation), (error: unknown) =>
+    error instanceof CoreError && error.code === "hierarchy_path_reserved");
 });
 
 test("invalid imported references fail without creating a partial work", async () => {
