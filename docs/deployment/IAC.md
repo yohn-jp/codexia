@@ -14,9 +14,10 @@ The canonical production tasks are in [Ansible](../../deploy/ansible/README.md) 
 | `base` | Networks, persistent volumes, PostgreSQL and Tunnel Quadlets |
 | `auth-runtime` | Explicit Better Auth role, schema, and runtime secret provisioning; no migrations or activation |
 | `deploy` | Approved pristine-schema first activation or certified image update, encrypted off-VM backup, application health and rollback |
+| `deploy-lifecycle-fixture` | GitHub Actions disposable-host verification only; local `localhost` connection, run-bound source evidence and the shared deployment transaction, with production admission kept on `deploy` |
 | `restore-drill` | Isolated encrypted backup restoration and checksum verification |
 
-Unsupported operations fail closed. Database schema changes require a separate approved migration process; image-only deployment refuses incompatible migration fingerprints, persistence formats and API epochs.
+Unsupported operations fail closed. The lifecycle fixture stage targets only a local `localhost` inventory entry and requires a matching GitHub Actions run with exact run-bound image evidence. It is not a production deployment input. Database schema changes require a separate approved migration process; image-only deployment refuses incompatible migration fingerprints, persistence formats and API epochs.
 
 Runtime state lives only in `~/.local/state/codexia-deploy`, with the host lock, deployment release record and interruption recovery intent. There is no polling journal or route selector.
 

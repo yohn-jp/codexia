@@ -1,0 +1,172 @@
+---
+- name: Require a verification-only, run-bound Full image proof
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.user_id == 'codexia'
+      - codexia_service_user == 'codexia'
+      - codexia_lifecycle_verification_file is string and codexia_lifecycle_verification_file is match('^/[^\r\n]+$')
+      - codexia_lifecycle_candidate_key is string and codexia_lifecycle_candidate_key in ['head', 'compatible', 'failed']
+      - codexia_backup_destination is string and codexia_backup_destination is match('^/[^\r\n]+$')
+      - codexia_backup_recipient is string and codexia_backup_recipient is match('^age1[0-9a-z]+$')
+      - not ansible_check_mode
+    fail_msg: Disposable lifecycle deployment requires the rootless codexia identity, verified image evidence and an isolated remote backup mount.
+
+- name: Read the run-bound lifecycle image proof from the workflow workspace
+  ansible.builtin.slurp:
+    src: "{{ codexia_lifecycle_verification_file }}"
+  delegate_to: localhost
+  become: false
+  register: codexia_lifecycle_verification_source
+  no_log: true
+
+- name: Require the PR image or compatible image to match its verification proof
+  ansible.builtin.assert:
+    that:
+      - codexia_lifecycle_verification.format == 'codexia-push-app-lifecycle-evidence/v1'
+      - codexia_lifecycle_verification.sourceSha == lookup('ansible.builtin.env', 'CODEXIA_LIFECYCLE_SOURCE_SHA')
+      - codexia_lifecycle_verification.runId == lookup('ansible.builtin.env', 'GITHUB_RUN_ID') | int
+      - codexia_lifecycle_verification.runAttempt == lookup('ansible.builtin.env', 'GITHUB_RUN_ATTEMPT') | int
+      - codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].profile == 'full'
+      - codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].image is match('^ghcr\\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+      - codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].identity.profile == 'full'
+      - codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].identity.platform == 'linux/amd64'
+      - codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].identity.sourceSha is match('^[a-f0-9]{40}$')
+      - codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].identity.migrationFingerprint is match('^sha256:[a-f0-9]{64}$')
+      - codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].identity.apiEpoch is integer
+      - codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].identity.persistenceFormat is integer
+    fail_msg: Lifecycle image is not bound to this run or lacks a complete Full identity.
+  vars:
+    codexia_lifecycle_verification: "{{ codexia_lifecycle_verification_source.content | b64decode | from_json }}"
+
+- name: Select the current disposable lifecycle candidate identity
+  ansible.builtin.set_fact:
+    codexia_image: "{{ codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].image }}"
+    codexia_profile: full
+    codexia_source_sha: "{{ codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].identity.sourceSha }}"
+    codexia_deployed_ui_epoch: "{{ codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].identity.apiEpoch }}"
+    codexia_lifecycle_fixture: true
+    codexia_deployment_certificate_source:
+      content: "{{ {'identity': codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].identity} | to_json | b64encode }}"
+    codexia_candidate_identity_file:
+      content: "{{ codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].identity | to_json | b64encode }}"
+  vars:
+    codexia_lifecycle_verification: "{{ codexia_lifecycle_verification_source.content | b64decode | from_json }}"
+
+- name: Recover interrupted disposable deployment before examining the active API
+  ansible.builtin.command:
+    argv: ["{{ home }}/.local/bin/codexia-deploy-recover"]
+  environment:
+    CODEXIA_PUSH_STATE_DIR: "{{ home }}/.local/state/codexia-deploy"
+    CODEXIA_PUSH_QUADLET_DIR: "{{ quadlet_dir }}"
+  register: codexia_deploy_recovery
+  changed_when: "'RECOVERED_PREVIOUS_RELEASE' in codexia_deploy_recovery.stdout or 'CLEANED_COMMITTED_TRANSACTION' in codexia_deploy_recovery.stdout"
+
+- name: Verify the isolated SSHFS destination before changing services
+  ansible.builtin.command:
+    argv: ["{{ home }}/.local/bin/codexia-backup", validate-destination, "{{ codexia_backup_destination }}"]
+  environment:
+    CODEXIA_PUSH_STATE_DIR: "{{ home }}/.local/state/codexia-deploy"
+    HOME: "{{ home }}"
+    XDG_STATE_HOME: "{{ home }}/.local/state"
+  changed_when: false
+
+- name: Pull the immutable OCI digest into the disposable service account
+  ansible.builtin.command:
+    argv: [podman, pull, "{{ codexia_image }}"]
+  changed_when: false
+
+- name: Inspect the candidate repository digest
+  ansible.builtin.command:
+    argv: [podman, image, inspect, --format, "{{ '{{' }}json .RepoDigests{{ '}}' }}", "{{ codexia_image }}"]
+  register: codexia_lifecycle_candidate_digests
+  changed_when: false
+  failed_when: >-
+    codexia_lifecycle_candidate_digests.rc != 0 or
+    (codexia_image not in (codexia_lifecycle_candidate_digests.stdout | from_json) and
+    ('localhost:5000/yohn-jp/codexia-backend@' + codexia_image.split('@')[-1]) not in (codexia_lifecycle_candidate_digests.stdout | from_json))
+
+- name: Create a stopped metadata container for the actual candidate image
+  ansible.builtin.command:
+    argv: [podman, create, --entrypoint, /bin/false, "{{ codexia_image }}"]
+  register: codexia_lifecycle_candidate_container
+  changed_when: false
+
+- name: Read the embedded identity from the actual candidate image
+  block:
+    - name: Copy the candidate image identity without executing it
+      ansible.builtin.command:
+        argv:
+          - podman
+          - cp
+          - "{{ codexia_lifecycle_candidate_container.stdout }}:/app/update-identity.json"
+          - "{{ home }}/.local/state/codexia-deploy/lifecycle-candidate-identity.json"
+      changed_when: false
+    - name: Load candidate image identity
+      ansible.builtin.slurp:
+        src: "{{ home }}/.local/state/codexia-deploy/lifecycle-candidate-identity.json"
+      register: codexia_lifecycle_actual_identity
+  always:
+    - name: Remove the stopped metadata container
+      ansible.builtin.command:
+        argv: [podman, rm, --force, "{{ codexia_lifecycle_candidate_container.stdout }}"]
+      changed_when: false
+      failed_when: false
+
+- name: Require observed OCI identity to equal the run-bound verification evidence
+  ansible.builtin.assert:
+    that:
+      - codexia_lifecycle_observed_identity == codexia_lifecycle_expected_identity
+      - codexia_lifecycle_observed_identity.sourceSha == codexia_source_sha
+      - codexia_lifecycle_observed_identity.profile == 'full'
+      - codexia_lifecycle_observed_identity.migrationFingerprint is match('^sha256:[a-f0-9]{64}$')
+    fail_msg: The pulled OCI image identity differs from its verification evidence.
+  vars:
+    codexia_lifecycle_verification: "{{ codexia_lifecycle_verification_source.content | b64decode | from_json }}"
+    codexia_lifecycle_expected_identity: "{{ codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].identity }}"
+    codexia_lifecycle_observed_identity: "{{ codexia_lifecycle_actual_identity.content | b64decode | from_json }}"
+
+- name: Observe existing API container state
+  ansible.builtin.command:
+    argv: [podman, container, exists, codexia-api]
+  register: codexia_current_container_exists
+  changed_when: false
+  failed_when: codexia_current_container_exists.rc not in [0, 1]
+
+- name: Observe current API identity before a compatible image transition
+  ansible.builtin.command:
+    argv: [podman, exec, codexia-api, cat, /app/update-identity.json]
+  register: codexia_current_identity_result
+  changed_when: false
+  when: codexia_current_container_exists.rc == 0
+
+- name: Require the existing API and user service to be healthy before an update
+  ansible.builtin.command:
+    argv: [systemctl, --user, is-active, codexia-api.service]
+  register: codexia_current_api_service
+  changed_when: false
+  failed_when: codexia_current_api_service.stdout != 'active'
+  when: codexia_current_container_exists.rc == 0
+
+- name: Require identical database and API compatibility before updating
+  ansible.builtin.assert:
+    that:
+      - codexia_lifecycle_expected_identity.migrationFingerprint == codexia_lifecycle_current_identity.migrationFingerprint
+      - codexia_lifecycle_expected_identity.apiEpoch == codexia_lifecycle_current_identity.apiEpoch
+      - codexia_lifecycle_expected_identity.persistenceFormat == codexia_lifecycle_current_identity.persistenceFormat
+    fail_msg: The lifecycle candidate is incompatible with the current disposable database or API epoch.
+  vars:
+    codexia_lifecycle_verification: "{{ codexia_lifecycle_verification_source.content | b64decode | from_json }}"
+    codexia_lifecycle_expected_identity: "{{ codexia_lifecycle_verification.candidates[codexia_lifecycle_candidate_key].identity }}"
+    codexia_lifecycle_current_identity: "{{ codexia_current_identity_result.stdout | from_json }}"
+  when: codexia_current_container_exists.rc == 0
+
+- name: Require explicit disposable approvals for pristine database initialization
+  ansible.builtin.assert:
+    that:
+      - codexia_initial_install_approved | default(false) | bool
+      - codexia_database_initialization_approved | default(false) | bool
+    fail_msg: First lifecycle activation requires explicit test-fixture approvals.
+  when: codexia_current_container_exists.rc == 1
+
+- name: Apply or recover the API Quadlet under the shared host lock
+  ansible.builtin.include_tasks: deploy-transaction.yml

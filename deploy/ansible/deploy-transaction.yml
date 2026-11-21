@@ -1,0 +1,494 @@
+- name: Create push deployment state directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: codexia
+    group: "{{ codexia_service_group | default('codexia') }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ home }}/.local/state/codexia-deploy", mode: '0700'}
+    - {path: "{{ home }}/.local/bin", mode: '0700'}
+    - {path: "{{ quadlet_dir }}", mode: '0750'}
+
+- name: Install the encrypted backup helper for the rootless deployment identity
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/backup/backup.sh"
+    dest: "{{ home }}/.local/bin/codexia-backup"
+    owner: codexia
+    group: "{{ codexia_service_group | default('codexia') }}"
+    mode: '0700'
+
+- name: Install the interrupted deployment recovery helper
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/ansible/push-deployment-recover.sh"
+    dest: "{{ home }}/.local/bin/codexia-deploy-recover"
+    owner: codexia
+    group: "{{ codexia_service_group | default('codexia') }}"
+    mode: '0700'
+
+- name: Recover an interrupted push deployment before examining the active API
+  ansible.builtin.command:
+    argv: ["{{ home }}/.local/bin/codexia-deploy-recover"]
+  environment:
+    CODEXIA_PUSH_STATE_DIR: "{{ home }}/.local/state/codexia-deploy"
+    CODEXIA_PUSH_QUADLET_DIR: "{{ quadlet_dir }}"
+  register: codexia_deploy_recovery
+  changed_when: "'RECOVERED_PREVIOUS_RELEASE' in codexia_deploy_recovery.stdout or 'CLEANED_COMMITTED_TRANSACTION' in codexia_deploy_recovery.stdout"
+
+- name: Verify the protected off-VM backup mount before pulling or stopping services
+  ansible.builtin.command:
+    argv:
+      - "{{ home }}/.local/bin/codexia-backup"
+      - validate-destination
+      - "{{ codexia_backup_destination }}"
+  environment:
+    CODEXIA_PUSH_STATE_DIR: "{{ home }}/.local/state/codexia-deploy"
+    HOME: "{{ home }}"
+    XDG_STATE_HOME: "{{ home }}/.local/state"
+  register: codexia_backup_destination_check
+  changed_when: false
+
+- name: Pull the exact certified OCI digest
+  ansible.builtin.command:
+    argv: [podman, pull, "{{ codexia_image }}"]
+  register: codexia_pull
+  changed_when: "'Storing signatures' in codexia_pull.stdout or 'Copying blob' in codexia_pull.stdout"
+
+- name: Inspect the pulled image repository digests
+  ansible.builtin.command:
+    argv:
+      - podman
+      - image
+      - inspect
+      - --format
+      - "{{ '{{' }}json .RepoDigests{{ '}}' }}"
+      - "{{ codexia_image }}"
+  register: codexia_image_digests
+  changed_when: false
+
+- name: Require the pulled image to retain the certified immutable digest
+  ansible.builtin.assert:
+    that:
+      - codexia_image in (codexia_image_digests.stdout | from_json) or ((codexia_lifecycle_fixture | default(false) | bool) and ('localhost:5000/yohn-jp/codexia-backend@' + codexia_image.split('@')[-1]) in (codexia_image_digests.stdout | from_json))
+    fail_msg: Pulled OCI image does not contain the certified immutable digest.
+  when: not (codexia_lifecycle_fixture | default(false) | bool)
+
+- name: Create a stopped metadata container without executing the candidate image
+  ansible.builtin.command:
+    argv: [podman, create, --entrypoint, /bin/false, "{{ codexia_image }}"]
+  register: codexia_candidate_container
+  changed_when: false
+
+- name: Read the candidate backend identity file without starting its entrypoint
+  block:
+    - name: Copy the embedded identity from the stopped image
+      ansible.builtin.command:
+        argv:
+          - podman
+          - cp
+          - "{{ codexia_candidate_container.stdout }}:/app/update-identity.json"
+          - "{{ home }}/.local/state/codexia-deploy/candidate-identity.json"
+      changed_when: false
+    - name: Read candidate backend identity metadata
+      ansible.builtin.slurp:
+        src: "{{ home }}/.local/state/codexia-deploy/candidate-identity.json"
+      register: codexia_candidate_identity_file
+  always:
+    - name: Remove the stopped metadata container
+      ansible.builtin.command:
+        argv: [podman, rm, --force, "{{ codexia_candidate_container.stdout }}"]
+      changed_when: false
+      failed_when: false
+
+- name: Require candidate image source, profile and database compatibility identity
+  ansible.builtin.assert:
+    that:
+      - codexia_candidate_identity.format == 'codexia-backend-identity/v1'
+      - codexia_candidate_identity == codexia_deployment_certificate.identity
+      - codexia_candidate_identity.sourceSha == codexia_source_sha
+      - codexia_candidate_identity.profile == codexia_profile
+      - codexia_candidate_identity.platform == 'linux/amd64'
+      - codexia_candidate_identity.migrationFingerprint is match('^sha256:[a-f0-9]{64}$')
+      - codexia_candidate_identity.apiEpoch is integer and codexia_candidate_identity.apiEpoch > 0
+      - codexia_candidate_identity.persistenceFormat is integer and codexia_candidate_identity.persistenceFormat > 0
+    fail_msg: Candidate image metadata does not match the certified Full source or runtime contract.
+  vars:
+    codexia_candidate_identity: "{{ codexia_candidate_identity_file.content | b64decode | from_json }}"
+    codexia_deployment_certificate: "{{ codexia_deployment_certificate_source.content | b64decode | from_json }}"
+
+- name: Observe the current rootless API container
+  ansible.builtin.command:
+    argv: [podman, container, exists, codexia-api]
+  register: codexia_current_container_exists
+  changed_when: false
+  failed_when: codexia_current_container_exists.rc not in [0, 1]
+
+- name: Inspect the canonical API Quadlet without following links
+  ansible.builtin.stat:
+    path: "{{ quadlet_dir }}/codexia-api.container"
+    follow: false
+  register: codexia_current_api_unit
+
+- name: Require the existing API unit before an image-only update
+  ansible.builtin.assert:
+    that:
+      - codexia_current_api_unit.stat.exists
+      - codexia_current_api_unit.stat.isreg | default(false)
+      - not (codexia_current_api_unit.stat.islnk | default(false))
+      - codexia_current_api_unit.stat.pw_name == 'codexia'
+      - codexia_current_api_unit.stat.gr_name == (codexia_service_group | default('codexia'))
+    fail_msg: An existing API container must have a regular codexia-owned Quadlet so rollback can restore its exact definition.
+  when: codexia_current_container_exists.rc == 0
+
+- name: Require an active generated systemd unit before an image-only update
+  ansible.builtin.command:
+    argv: [systemctl, --user, is-active, codexia-api.service]
+  register: codexia_current_api_service
+  changed_when: false
+  failed_when: codexia_current_api_service.rc != 0 or codexia_current_api_service.stdout != 'active'
+  when: codexia_current_container_exists.rc == 0
+
+- name: Require the current API container to be healthy before an image-only update
+  ansible.builtin.command:
+    argv: [podman, inspect, --format, "{% raw %}{{.State.Health.Status}}{% endraw %}", codexia-api]
+  register: codexia_current_api_health
+  changed_when: false
+  failed_when: codexia_current_api_health.rc != 0 or codexia_current_api_health.stdout != 'healthy'
+  when: codexia_current_container_exists.rc == 0
+
+- name: Refuse a fresh activation over stale Quadlet state
+  ansible.builtin.assert:
+    that:
+      - not codexia_current_api_unit.stat.exists
+    fail_msg: The API unit exists without a running container; recover the recorded release before starting a first activation.
+  when: codexia_current_container_exists.rc == 1
+
+- name: Require a healthy current API writer before a compatible update
+  ansible.builtin.command:
+    argv: [podman, exec, codexia-api, cat, /app/update-identity.json]
+  register: codexia_current_identity_result
+  changed_when: false
+  when: codexia_current_container_exists.rc == 0
+
+- name: Observe the image content identity currently running in the API container
+  ansible.builtin.command:
+    argv: [podman, inspect, --format, "{% raw %}{{.Image}}{% endraw %}", codexia-api]
+  register: codexia_current_api_image_id
+  changed_when: false
+  when: codexia_current_container_exists.rc == 0
+
+- name: Resolve the immutable GHCR digest of the running API image
+  ansible.builtin.command:
+    argv:
+      - podman
+      - image
+      - inspect
+      - --format
+      - "{% raw %}{{json .RepoDigests}}{% endraw %}"
+      - "{{ codexia_current_api_image_id.stdout }}"
+  register: codexia_current_api_repo_digests
+  changed_when: false
+  when: codexia_current_container_exists.rc == 0
+
+- name: Require one canonical immutable digest for the installed API image
+  ansible.builtin.assert:
+    that:
+      - codexia_installed_image_digests | length == 1
+    fail_msg: The installed API image has no unique canonical GHCR digest; rollout admission fails closed.
+  vars:
+    codexia_installed_image_digests: "{{ codexia_current_api_repo_digests.stdout | from_json | select('match', '^' + ('localhost:5000/yohn-jp/codexia-backend' if (codexia_lifecycle_fixture | default(false) | bool) else 'ghcr\\.io/yohn-jp/codexia-backend') + '@sha256:[a-f0-9]{64}$') | list }}"
+  when: codexia_current_container_exists.rc == 0
+
+- name: Admit the published candidate against installed API and deployed UI identities
+  ansible.builtin.command:
+    argv:
+      - node
+      - "{{ repo_root }}/scripts/push-deployment-admission.mjs"
+      - --admit
+      - "{{ codexia_deployment_certificate_file }}"
+      - "{{ {'image': (codexia_current_api_repo_digests.stdout | from_json | select('match', '^ghcr\\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$') | list | first), 'identity': (codexia_current_identity_result.stdout | from_json)} | to_json | b64encode }}"
+      - "{{ codexia_verified_main_sha }}"
+      - "{{ codexia_deployed_ui_epoch | string }}"
+  delegate_to: localhost
+  become: false
+  environment:
+    HOME: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+    PATH: "{{ lookup('ansible.builtin.env', 'PATH') }}"
+  register: codexia_deployment_admission
+  changed_when: false
+  no_log: true
+  when:
+    - codexia_current_container_exists.rc == 0
+    - not (codexia_lifecycle_fixture | default(false) | bool)
+
+- name: Refuse database or API compatibility changes during an image-only rollout
+  ansible.builtin.assert:
+    that:
+      - codexia_candidate_identity.migrationFingerprint == codexia_current_identity.migrationFingerprint
+      - codexia_candidate_identity.apiEpoch == codexia_current_identity.apiEpoch
+      - codexia_candidate_identity.persistenceFormat == codexia_current_identity.persistenceFormat
+    fail_msg: Database migration, API epoch or persistence format changed; use the explicit database maintenance procedure.
+  vars:
+    codexia_candidate_identity: "{{ codexia_candidate_identity_file.content | b64decode | from_json }}"
+    codexia_current_identity: "{{ codexia_current_identity_result.stdout | from_json }}"
+  when: codexia_current_container_exists.rc == 0
+
+- name: Refuse implicit first activation without explicit verified schema approval
+  ansible.builtin.assert:
+    that:
+      - codexia_initial_install_approved | default(false) | bool
+      - codexia_database_initialization_approved | default(false) | bool
+    fail_msg: A fresh activation requires a separately initialized and verified database plus explicit approval.
+  when: codexia_current_container_exists.rc == 1
+
+- name: Render a digest-specific candidate Quadlet outside the active unit path
+  ansible.builtin.copy:
+    content: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/codexia-api.container') | replace('CODEXIA_BACKEND_IMAGE', codexia_image) | replace('CODEXIA_BACKEND_PROFILE', codexia_profile) }}"
+    dest: "{{ home }}/.local/state/codexia-deploy/candidate-{{ codexia_image.split('sha256:')[-1] }}.container"
+    owner: codexia
+    group: "{{ codexia_service_group | default('codexia') }}"
+    mode: '0600'
+
+- name: Apply or recover the API Quadlet under the host lock
+  ansible.builtin.shell: |
+    set -Eeuo pipefail
+    state_dir={{ (home + '/.local/state/codexia-deploy') | quote }}
+    unit_dir={{ quadlet_dir | quote }}
+    active_unit="$unit_dir/codexia-api.container"
+    wants_dir="$unit_dir/default.target.wants"
+    api_wants_link="$wants_dir/codexia-api.service"
+    tunnel_wants_link="$wants_dir/codexia-tunnel.service"
+    candidate_unit={{ (home + '/.local/state/codexia-deploy/candidate-' + codexia_image.split('sha256:')[-1] + '.container') | quote }}
+    backup_program={{ (home + '/.local/bin/codexia-backup') | quote }}
+    backup_destination={{ codexia_backup_destination | quote }}
+    backup_recipient={{ codexia_backup_recipient | quote }}
+    candidate_image={{ codexia_image | quote }}
+    candidate_identity={{ (codexia_candidate_identity_file.content | b64decode | from_json) | to_json | quote }}
+    release_state="$state_dir/deployed-release.json"
+    transaction_intent="$state_dir/deploy-transaction.json"
+    lock_file="$state_dir/host.lock"
+    mkdir -p "$state_dir" "$unit_dir"
+    exec 9>"$lock_file"
+    flock --exclusive --nonblock 9 || { echo 'Another Codexia deployment or backup holds the host lock' >&2; exit 75; }
+    mkdir -p "$wants_dir"
+    api_link_created=false
+    tunnel_link_created=false
+    ensure_wants_link(){
+      local link="$1" target="$2" created_name="$3"
+      if [[ -e "$link" || -L "$link" ]]; then
+        [[ -L "$link" && "$(readlink -- "$link")" == "$target" ]] || { echo "Unexpected systemd activation link: $link" >&2; return 1; }
+      else
+        ln -s -- "$target" "$link"
+        printf -v "$created_name" '%s' true
+      fi
+    }
+    ensure_wants_link "$api_wants_link" ../codexia-api.service api_link_created
+    tunnel_present=false
+    if systemctl --user cat codexia-tunnel.service >/dev/null 2>&1; then
+      ensure_wants_link "$tunnel_wants_link" ../codexia-tunnel.service tunnel_link_created
+      tunnel_present=true
+    fi
+    current_image=''
+    if podman container exists codexia-api; then
+      current_image="$(podman inspect --format '{{ '{{' }}.ImageName{{ '}}' }}' codexia-api)"
+    fi
+    if [[ "$current_image" == "$candidate_image" && -f "$active_unit" && ! -L "$active_unit" ]] && cmp -s -- "$candidate_unit" "$active_unit"; then
+      systemctl --user daemon-reload
+      systemctl --user is-active --quiet codexia-api.service
+      podman inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' codexia-api | grep -Fxq healthy
+      if [[ "$tunnel_present" == true ]]; then systemctl --user start codexia-tunnel.service; fi
+      echo "UNCHANGED $candidate_image"
+      exit 0
+    fi
+    had_unit=false
+    if [[ -f "$active_unit" && ! -L "$active_unit" ]]; then
+      cp --preserve=mode,ownership "$active_unit" "$state_dir/rollback-api.container"
+      had_unit=true
+    fi
+    tunnel_was_active=false
+    if systemctl --user is-active --quiet codexia-tunnel.service; then tunnel_was_active=true; fi
+    release_present=false
+    if [[ -e "$release_state" || -L "$release_state" ]]; then
+      [[ -f "$release_state" && ! -L "$release_state" ]] || { echo 'Previous deployment record is not a regular file' >&2; exit 1; }
+      cp --preserve=mode,ownership "$release_state" "$state_dir/rollback-release.json"
+      release_present=true
+    fi
+    rollback_image=''
+    if [[ "$had_unit" == true ]]; then
+      mapfile -t rollback_images < <(sed -n 's/^Image=//p' "$state_dir/rollback-api.container")
+      [[ ${#rollback_images[@]} == 1 && "${rollback_images[0]}" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] || {
+        echo 'Prior API Quadlet has no unique immutable image identity; deployment stopped before changing services' >&2
+        exit 1
+      }
+      rollback_image="${rollback_images[0]}"
+      if [[ "$release_present" == true ]]; then
+        recorded_image="$(node - "$state_dir/rollback-release.json" <<'NODE'
+    const fs = require('node:fs');
+    const value = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+    process.stdout.write(typeof value.image === 'string' ? value.image : '');
+    NODE
+        )"
+        [[ "$recorded_image" == "$rollback_image" ]] || {
+          echo 'Prior deployment record does not match its Quadlet image; deployment stopped before changing services' >&2
+          exit 1
+        }
+      fi
+      if [[ -n "$current_image" && "$current_image" != "$rollback_image" ]]; then
+        echo 'Running API image does not match its prior Quadlet; deployment stopped before changing services' >&2
+        exit 1
+      fi
+    fi
+    if ! node - "$transaction_intent" "$had_unit" "$tunnel_was_active" "$api_link_created" "$tunnel_link_created" "$release_present" <<'NODE'
+    const fs = require('node:fs');
+    const [target, hadUnit, tunnelWasActive, apiLinkCreated, tunnelLinkCreated, releasePresent] = process.argv.slice(2);
+    const asBoolean = value => {
+      if (value === 'true') return true;
+      if (value === 'false') return false;
+      throw new Error('Invalid transaction state');
+    };
+    fs.writeFileSync(target, JSON.stringify({format: 'codexia-deploy-transaction/v1', phase: 'pending',
+      hadUnit: asBoolean(hadUnit), tunnelWasActive: asBoolean(tunnelWasActive),
+      apiLinkCreated: asBoolean(apiLinkCreated), tunnelLinkCreated: asBoolean(tunnelLinkCreated),
+      releasePresent: asBoolean(releasePresent)}) + '\n', {mode: 0o600, flag: 'wx'});
+    NODE
+    then
+      echo 'Could not record the deployment transaction intent' >&2
+      exit 1
+    fi
+    restore_previous(){
+      local restore_status=0
+      if [[ "$tunnel_present" == true ]]; then systemctl --user stop codexia-tunnel.service >/dev/null 2>&1 || restore_status=1; fi
+      # Before first activation there may be no generated API service to stop.
+      # Do not turn a failed pristine-schema check into an unrecoverable pending
+      # transaction merely because systemctl cannot find that absent unit.
+      if [[ "$had_unit" == true || -e "$active_unit" || -L "$active_unit" ]]; then
+        systemctl --user stop codexia-api.service >/dev/null 2>&1 || restore_status=1
+      fi
+      if [[ "$restore_status" == 0 && "$had_unit" == true ]]; then
+        install -m 0644 "$state_dir/rollback-api.container" "$active_unit" || restore_status=1
+        systemctl --user daemon-reload || restore_status=1
+        systemctl --user start codexia-api.service || restore_status=1
+        for attempt in $(seq 1 30); do
+          if podman inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' codexia-api 2>/dev/null | grep -Fxq healthy; then break; fi
+          sleep 2
+        done
+        podman inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' codexia-api 2>/dev/null | grep -Fxq healthy || restore_status=1
+        restored_image="$(podman inspect --format '{{ '{{' }}.ImageName{{ '}}' }}' codexia-api 2>/dev/null)" || restore_status=1
+        [[ "$restored_image" == "$rollback_image" ]] || restore_status=1
+        if [[ "$tunnel_was_active" == true && "$restore_status" == 0 ]]; then systemctl --user start codexia-tunnel.service || restore_status=1; fi
+      elif [[ "$restore_status" == 0 ]]; then
+        rm -f -- "$active_unit"
+        if [[ "$api_link_created" == true ]]; then rm -f -- "$api_wants_link"; fi
+        if [[ "$tunnel_link_created" == true ]]; then rm -f -- "$tunnel_wants_link"; fi
+        systemctl --user daemon-reload || restore_status=1
+      fi
+      if [[ "$restore_status" == 0 ]]; then
+        if [[ "$release_present" == true ]]; then
+          install -m 0600 "$state_dir/rollback-release.json" "$release_state" || restore_status=1
+        else
+          rm -f -- "$release_state" || restore_status=1
+        fi
+      fi
+      if [[ "$restore_status" == 0 ]]; then
+        rm -f -- "$transaction_intent" "$transaction_intent.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json" || restore_status=1
+      fi
+      return "$restore_status"
+    }
+    if { [[ "$tunnel_present" == true ]] && ! systemctl --user stop codexia-tunnel.service >/dev/null 2>&1; } ||
+       { [[ "$had_unit" == true ]] && ! systemctl --user stop codexia-api.service >/dev/null 2>&1; }; then
+      echo 'Could not stop the active API and Tunnel; deployment transaction remains pending for recovery' >&2
+      exit 1
+    fi
+    if ! "$backup_program" backup-locked "$backup_destination" "$backup_recipient" \
+      --approved --lock-file "$lock_file" --lock-fd 9; then
+      restore_previous || echo 'Previous API recovery failed after backup failure' >&2
+      echo 'Encrypted off-VM backup failed; candidate was not applied' >&2
+      exit 1
+    fi
+    if [[ "$had_unit" != true ]]; then
+      if ! podman run --rm --network codexia-data \
+        --secret=codexia-postgres-app-password,type=mount,target=/run/secrets/app-password \
+        --env CODEXIA_DATABASE_PASSWORD_FILE=/run/secrets/app-password \
+        --entrypoint=node "$candidate_image" --input-type=module -e '
+          import { readFileSync } from "node:fs";
+          import { initializeFreshPostgresSchema } from "@codexia/persistence-postgres";
+          const password = readFileSync(process.env.CODEXIA_DATABASE_PASSWORD_FILE, "utf8").trim();
+          if (!/^[a-fA-F0-9]{64}$/u.test(password)) throw new Error("Database application secret is invalid");
+          const connectionString = `postgres://codexia:${password}@codexia-db:5432/codexia`;
+          const applied = await initializeFreshPostgresSchema(connectionString);
+          console.log(applied.length ? `INITIALIZED_FRESH_SCHEMA ${applied.join(",")}` : "VERIFIED_EXACT_SCHEMA");
+        '; then
+        restore_previous || echo 'First activation rollback failed after schema initialization error' >&2
+        echo 'Fresh database initialization failed; no API was activated' >&2
+        exit 1
+      fi
+    fi
+    if ! install -m 0644 "$candidate_unit" "$active_unit" ||
+       ! systemctl --user daemon-reload ||
+       ! systemctl --user start codexia-api.service; then
+      restore_previous || echo 'Previous API recovery failed after candidate start failure' >&2
+      echo 'Candidate API failed to start; deployment transaction remains pending if rollback is unverified' >&2
+      exit 1
+    fi
+    healthy=false
+    for attempt in $(seq 1 30); do
+      if podman inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' codexia-api 2>/dev/null | grep -Fxq healthy; then healthy=true; break; fi
+      sleep 2
+    done
+    if [[ "$healthy" != true ]]; then
+      restore_previous || echo 'Previous API recovery failed after readiness failure' >&2
+      echo 'Candidate API readiness failed; deployment transaction remains pending if rollback is unverified' >&2
+      exit 1
+    fi
+    running_image="$(podman inspect --format '{{ '{{' }}.ImageName{{ '}}' }}' codexia-api 2>/dev/null)" || running_image=''
+    if [[ "$running_image" != "$candidate_image" ]]; then
+      restore_previous || echo 'Previous API recovery failed after candidate image mismatch' >&2
+      echo 'Candidate API image identity did not match the certified digest; deployment transaction remains pending if rollback is unverified' >&2
+      exit 1
+    fi
+    if [[ "$tunnel_present" == true ]]; then
+      if ! systemctl --user start codexia-tunnel.service; then
+        restore_previous || echo 'Previous API recovery failed after Tunnel start failure' >&2
+        echo 'Application Tunnel did not start; deployment transaction remains pending if rollback is unverified' >&2
+        exit 1
+      fi
+    fi
+    if ! node - "$candidate_image" "$current_image" "$candidate_identity" > "$release_state.tmp" <<'NODE'
+    const [image, previousImage, identity] = process.argv.slice(2);
+    process.stdout.write(JSON.stringify({format: 'codexia-push-deployment/v1', image, previousImage, identity: JSON.parse(identity)}) + '\n');
+    NODE
+    then
+      restore_previous || echo 'Previous API recovery failed after release record failure' >&2
+      echo 'Could not commit the successful deployment record; previous Quadlet was restored' >&2
+      exit 1
+    fi
+    if ! chmod 0600 "$release_state.tmp" || ! mv -f -- "$release_state.tmp" "$release_state"; then
+      restore_previous || echo 'Previous API recovery failed after release record failure' >&2
+      echo 'Could not commit the successful deployment record; previous Quadlet was restored' >&2
+      exit 1
+    fi
+    if ! node - "$transaction_intent" <<'NODE'
+    const fs = require('node:fs');
+    const target = process.argv[2];
+    const value = JSON.parse(fs.readFileSync(target, 'utf8'));
+    if (value.format !== 'codexia-deploy-transaction/v1' || value.phase !== 'pending') process.exit(2);
+    const temporary = `${target}.tmp`;
+    fs.writeFileSync(temporary, JSON.stringify({...value, phase: 'committed'}) + '\n', {mode: 0o600, flag: 'wx'});
+    fs.renameSync(temporary, target);
+    NODE
+    then
+      restore_previous || echo 'Previous API recovery failed after transaction commit failure' >&2
+      echo 'Could not commit the deployment transaction intent; previous Quadlet was restored' >&2
+      exit 1
+    fi
+    rm -f -- "$transaction_intent" "$transaction_intent.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json" || echo 'Committed deployment cleanup was incomplete; next deployment will finish it' >&2
+    echo "UPDATED $candidate_image"
+  args:
+    executable: /bin/bash
+  register: codexia_deploy_transaction
+  changed_when: "'UPDATED ' in codexia_deploy_transaction.stdout"
+  no_log: true
+
+- name: Report the admitted image deployment result
+  ansible.builtin.debug:
+    msg: "{{ 'Updated' if codexia_deploy_transaction.changed else 'Verified already active' }} image {{ codexia_image }}."

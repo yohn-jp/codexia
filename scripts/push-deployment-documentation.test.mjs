@@ -21,6 +21,8 @@ test('push deployment distinguishes approved first activation from image-only up
   assert.match(push, /For an image-only update, the Ansible `deploy` stage requires a running, healthy Full API/u);
   assert.doesNotMatch(push, /The Ansible `deploy` stage requires a running, healthy Full API under the `codexia` rootless account\./u);
   assert.match(push, /token-authenticated API.*Only after successful first activation/u);
+  assert.match(push, /first `deploy` activation, with both explicit approvals, creates the application schema/u);
+  assert.doesNotMatch(push, /current production job is an image-update path, not a fresh VM initializer/u);
 });
 
 test('deployment and iOS docs distinguish explicit access-token revocation from logout', () => {
