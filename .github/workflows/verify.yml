@@ -291,6 +291,11 @@ jobs:
         with:
           name: ci-plan
           path: ${{ runner.temp }}/ci-plan
+      - name: Install the parser used by host-side OCI HTTP verification
+        run: |
+          corepack enable
+          corepack pnpm@12.21.0 --version
+          pnpm install --filter . --frozen-lockfile --ignore-scripts
       - name: Run selected validations
         env:
           CODEXIA_CI_REPORT_DIR: ${{ runner.temp }}/ci-evidence/oci-${{ matrix.profile }}
