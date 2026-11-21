@@ -150,11 +150,14 @@ async function captureScreenshots(baseURL, token, title) {
         const page = await context.newPage();
         await page.goto(`${baseURL}/${mode}/`, { waitUntil: 'domcontentloaded' });
         const login = page.getByLabel('アクセス・トークン');
+        const workspace = page.getByRole('heading', { name: 'Database workspace' });
+        // The API check completes asynchronously; do not sample visibility before React has rendered.
+        await login.or(workspace).first().waitFor({ state: 'visible', timeout: 20_000 });
         if (await login.isVisible()) {
           await login.fill(token);
           await page.getByRole('button', { name: 'PostgreSQL作品を開く' }).click();
         }
-        await page.getByRole('heading', { name: 'Database workspace' }).waitFor({ timeout: 20_000 });
+        await workspace.waitFor({ timeout: 20_000 });
         const projectsResponse = await page.request.get(`${baseURL}/api/v1/persistence/projects`);
         if (!projectsResponse.ok()) throw new Error(`${mode} projects returned ${projectsResponse.status()}`);
         const projects = await projectsResponse.json();
