@@ -43,6 +43,8 @@ test('Phase F VM fixture requires a real guest reboot and durable PostgreSQL evi
   assert.match(fixture, /install -d -o codexia -g codexia -m 0700 \/home\/codexia\/\.config\n/u);
   assert.match(fixture, /test "\$\(stat -c '%U:%G' \/home\/codexia\/\.config\)" = codexia:codexia/u);
   assert.match(fixture, /pg_control_system\(\)/u);
+  assert.match(fixture, /Pre-reboot fixture state \(nonsecret run-local values\)/u);
+  assert.match(fixture, /Pre-reboot field presence/u);
   assert.match(fixture, /systemctl reboot/u);
   assert.match(fixture, /random\/boot_id/u);
   assert.match(fixture, /current_boot.*!=.*boot_id_before/u);

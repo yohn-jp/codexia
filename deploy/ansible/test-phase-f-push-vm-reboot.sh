@@ -265,7 +265,16 @@ boot_id_before=$(printf '%s\n' "$state_before" | sed -n 's/^boot_id=//p')
 identity_before=$(printf '%s\n' "$state_before" | sed -n 's/^cluster_id=//p')
 volume_before=$(printf '%s\n' "$state_before" | sed -n 's/^volume=//p')
 image_id_before=$(printf '%s\n' "$state_before" | sed -n 's/^image_id=//p')
-[[ -n "$boot_id_before" && -n "$identity_before" && -n "$volume_before" && -n "$image_id_before" ]] || fail 'Pre-reboot PostgreSQL identities were incomplete.'
+if [[ -z "$boot_id_before" || -z "$identity_before" || -z "$volume_before" || -z "$image_id_before" ]]; then
+  failure_code=PRE_REBOOT_IDENTITIES_INCOMPLETE
+  printf 'Pre-reboot fixture state (nonsecret run-local values):\n%s\n' "$state_before" >&2
+  printf 'Pre-reboot field presence: boot_id=%s cluster_id=%s volume=%s image_id=%s\n' \
+    "$([[ -n "$boot_id_before" ]] && printf present || printf missing)" \
+    "$([[ -n "$identity_before" ]] && printf present || printf missing)" \
+    "$([[ -n "$volume_before" ]] && printf present || printf missing)" \
+    "$([[ -n "$image_id_before" ]] && printf present || printf missing)" >&2
+  fail 'Pre-reboot PostgreSQL identities were incomplete.'
+fi
 [[ "$(printf '%s\n' "$state_before" | sed -n 's/^marker=//p')" == persisted-before-real-guest-reboot ]] || fail 'Pre-reboot marker row was unexpected.'
 
 phase=request-guest-reboot
