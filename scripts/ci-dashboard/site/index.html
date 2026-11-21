@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Codexia GitHub Actions timing, critical dependency chains and PR CI history">
+  <title>CI Observatory — Codexia</title>
+  <link rel="stylesheet" href="./dashboard.css">
+  <script type="module" src="./dashboard.js"></script>
+</head>
+<body>
+  <a class="skip" href="#analysis">分析へ移動</a>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="../" aria-label="Repository Audit Pagesへ戻る">
+        <span class="brand-mark" aria-hidden="true">C<span class="tiny-dot"></span></span>
+        <span>CODEXIA <span class="soft">/ ENGINEERING</span></span>
+      </a>
+      <nav class="utility" aria-label="関連リンク">
+        <a href="../">Source audit</a>
+        <a href="https://github.com/yohn-jp/codexia/actions" target="_blank" rel="noopener noreferrer">GitHub Actions</a>
+      </nav>
+    </header>
+    <main id="analysis">
+      <div class="eyebrow"><span class="live-dot" aria-hidden="true"></span> ACTIONS TELEMETRY / READ-ONLY</div>
+      <div class="heading">
+        <div>
+          <h1>CI Observatory<span class="title-end">.</span></h1>
+          <p class="intro">PRの実測タイムラインから、認証完了を左右する経路と次の改善対象を特定する。</p>
+        </div>
+        <div class="control">
+          <label for="pr">対象PR・リビジョン</label>
+          <select id="pr" aria-label="分析対象のPRを選択" disabled><option>データを取得しています</option></select>
+        </div>
+      </div>
+      <div class="status" id="status" role="status">実測データを読み込んでいます。</div>
+      <section class="metrics" aria-label="主要指標">
+        <div class="metric"><span class="metric-label">OBSERVED PR WINDOW</span><strong id="wall">—</strong><small>観測されたWorkflowの開始〜終了</small></div>
+        <div class="metric"><span class="metric-label">VERIFY CERTIFICATION</span><strong id="gate">—</strong><small>最新Verifyの認証完了まで</small></div>
+        <div class="metric"><span class="metric-label">RUNNER TIME</span><strong id="runner">—</strong><small>ジョブ実行時間の合計（課金額ではない）</small></div>
+        <div class="metric"><span class="metric-label">QUEUE INTERVALS</span><strong id="queue">—</strong><small>GitHub API上のジョブ待機時間合計</small></div>
+      </section>
+      <div class="body-grid">
+        <section class="panel timeline-panel" aria-labelledby="timeline-title">
+          <div class="panel-head">
+            <div><div class="eyebrow">01 / EXECUTION</div><h2 id="timeline-title">Job timeline</h2></div>
+            <div class="legend"><span class="key"><i class="swatch exec"></i>実行</span><span class="key"><i class="swatch wait"></i>待機</span><span class="key"><i class="swatch critical"></i>Blocking chain</span></div>
+          </div>
+          <p class="panel-note">選択したPR HEADの観測Workflowを表示。薄い区間はジョブ作成〜開始。橙色はVerify certificationへ至る推定依存チェーン。</p>
+          <div class="timeline-scroll"><div class="timeline" id="timeline" aria-label="ジョブ実行タイムライン"></div></div>
+          <div class="panel-foot" id="timeline-foot">—</div>
+        </section>
+        <aside class="panel insight-panel" aria-labelledby="chain-title">
+          <div class="eyebrow">02 / DEPENDENCY</div>
+          <h2 id="chain-title">Blocking chain</h2>
+          <p class="panel-note">認証完了から依存関係を遡り、各段階で直前に完了した親ジョブを追跡。</p>
+          <ol id="chain" class="chain"></ol>
+          <p class="disclaimer" id="chain-note">未計測</p>
+          <div class="divider"></div>
+          <div class="eyebrow">RUN CONTEXT</div>
+          <div id="context" class="context"></div>
+        </aside>
+      </div>
+      <div class="body-grid lower">
+        <section class="panel" aria-labelledby="steps-title">
+          <div class="panel-head"><div><div class="eyebrow">03 / STEP COST</div><h2 id="steps-title">Longest observed steps</h2></div></div>
+          <p class="panel-note">セットアップやテストなどの実測ステップ時間。Download専用時間を推定していません。</p>
+          <div class="table-scroll"><table><thead><tr><th>Step / job</th><th>Phase</th><th class="numeric">Elapsed</th></tr></thead><tbody id="steps"></tbody></table></div>
+        </section>
+        <section class="panel" aria-labelledby="history-title">
+          <div class="panel-head"><div><div class="eyebrow">04 / HISTORY</div><h2 id="history-title">PR revision history</h2></div><div class="small-legend">最新の取得範囲</div></div>
+          <p class="panel-note">完了した観測範囲を比較。Workflowの欠落・再実行・異なる検証計画には注意。</p>
+          <div class="history-stat" id="history-stat">—</div>
+          <div class="history" id="history"></div>
+        </section>
+      </div>
+      <footer>READ-ONLY OBSERVATIONS · GitHub Actions job / step timestamps · <a href="https://github.com/yohn-jp/codexia/blob/main/docs/verification/CI-DASHBOARD.md">計測の定義と限界</a></footer>
+    </main>
+  </div>
+</body>
+</html>

@@ -29,7 +29,7 @@ concurrency:
 jobs:
   build:
     name: Build unsigned iOS IPA
-    runs-on: macos-15
+    runs-on: xcode-27
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7.0.1
@@ -41,8 +41,9 @@ jobs:
           node-version: 24.22.3
       - name: Select pinned Xcode toolchain
         run: |
-          sudo xcode-select --switch /Applications/Xcode_16.4.app/Contents/Developer
           xcodebuild -version
+          xcodebuild -version | grep -E '^Xcode 27\.'
+          xcodebuild -showsdks | grep -E 'iphoneos27\.'
       - name: Prepare pnpm
         run: |
           corepack enable
@@ -80,6 +81,7 @@ jobs:
           -configuration Release
           -sdk iphoneos
           -derivedDataPath build/DerivedData
+          IPHONEOS_DEPLOYMENT_TARGET=27.0
           CODE_SIGNING_ALLOWED=NO
           CODE_SIGNING_REQUIRED=NO
           CODE_SIGN_IDENTITY=""
