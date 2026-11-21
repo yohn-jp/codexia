@@ -1,9 +1,183 @@
 import { createHash } from "node:crypto";
 import { expect, test } from "@playwright/test";
+import { createPostgresPersistence } from "@codexia/persistence-postgres";
+import type { KnowledgeAliasId, KnowledgeNodeId, ProjectId } from "@codexia/persistence-contracts";
 import { createWritingFixture, openRevisionHistory, ownerLogin, manuscriptEditor } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
+
+test("Knowledge browse searches literal aliases and pages the same project on Desktop and Mobile", async ({ page }) => {
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  const fixture = await createWritingFixture(page, "desktop", `Knowledge browse ${crypto.randomUUID()}`);
+  const persistence = createPostgresPersistence(databaseUrl!);
+  const ids = Array.from({ length: 501 }, () => crypto.randomUUID() as KnowledgeNodeId);
+  const duplicateIds = [ids[10]!, ids[11]!].sort();
+  const longJapaneseName = "長い日本語のKnowledge名".repeat(30);
+  try {
+    await persistence.transaction(async transaction => {
+      for (let index = 0; index < ids.length; index += 1) {
+        await transaction.saveKnowledgeNode({ projectId: fixture.project.id as ProjectId, id: ids[index]!, type: index === 0 ? "my_custom_type" : index % 2 ? "person" : "place",
+          name: index === 10 || index === 11 ? "同じ名前" : index === 500 ? longJapaneseName : `Browse ${String(index).padStart(4, "0")}`,
+          attributes: {}, status: index % 2 ? "confirmed" : "proposed", expectedVersion: null });
+      }
+      await transaction.saveKnowledgeAlias({ projectId: fixture.project.id as ProjectId, id: crypto.randomUUID() as KnowledgeAliasId,
+        nodeId: ids[500]!, surface: "Literal%_!Alias", normalized: "literal%_!alias", scope: null, status: "confirmed" });
+      const unrelatedProject = await transaction.createProject({ title: `Knowledge browse unrelated ${crypto.randomUUID()}` });
+      const unrelatedNode = crypto.randomUUID() as KnowledgeNodeId;
+      await transaction.saveKnowledgeNode({ projectId: unrelatedProject.id, id: unrelatedNode, type: "person", name: "unrelated decoy", attributes: {}, status: "confirmed", expectedVersion: null });
+      await transaction.saveKnowledgeAlias({ projectId: unrelatedProject.id, id: crypto.randomUUID() as KnowledgeAliasId,
+        nodeId: unrelatedNode, surface: "Literal%_!Alias", normalized: "literal%_!alias", scope: null, status: "confirmed" });
+    });
+  } finally { await persistence.close(); }
+
+  const base = new URL(page.url()).origin;
+  const url = (query: string) => {
+    const params = new URLSearchParams({ limit: "50", q: query, type: "", status: "" });
+    return new URL(`/api/v1/persistence/projects/${fixture.project.id}/nodes?${params}`, base).toString();
+  };
+  const sameNameResponse = await page.request.get(url("同じ名前"));
+  expect(sameNameResponse.ok()).toBe(true);
+  const sameName = await sameNameResponse.json() as { nodes: Array<{ id: string }> };
+  expect(sameName.nodes.map(node => node.id)).toEqual(duplicateIds);
+
+  await page.reload();
+  await openResearchInspector(page);
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(50);
+  await expect(page.getByRole("button", { name: "続きのKnowledgeを読み込む" })).toBeVisible();
+  await page.getByRole("button", { name: "続きのKnowledgeを読み込む" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "100件取得済み" })).toBeVisible();
+  await expect(page.locator(".pg-knowledge-list")).toContainText("Browse 0050");
+
+  const search = page.getByLabel("名前または別名で検索");
+  let releaseContinuation!: () => void;
+  let continuationStarted!: () => void;
+  const continuationGate = new Promise<void>(resolve => { releaseContinuation = resolve; });
+  const started = new Promise<void>(resolve => { continuationStarted = resolve; });
+  const nodeRoute = new RegExp(`/api/v1/persistence/projects/${fixture.project.id}/nodes\\?`);
+  const holdContinuation = async (route: import("@playwright/test").Route) => {
+    const requestedUrl = new URL(route.request().url());
+    if (requestedUrl.searchParams.has("cursor") && requestedUrl.searchParams.get("q") === "") {
+      const response = await route.fetch();
+      continuationStarted();
+      await continuationGate;
+      await route.fulfill({ response });
+    } else await route.continue();
+  };
+  await page.route(nodeRoute, holdContinuation);
+  await page.getByRole("button", { name: "続きのKnowledgeを読み込む" }).click();
+  await started;
+  await search.fill("Browse 0100");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(1);
+  releaseContinuation();
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "続きのKnowledgeを読み込む" })).toHaveCount(0);
+  await page.unroute(nodeRoute, holdContinuation);
+
+  await search.fill("literal%_!alias");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(1);
+  await expect(page.locator(".pg-knowledge-list")).toContainText(longJapaneseName);
+  await expect(page.getByText("すべての絞り込み結果を取得済み（1件）。")).toBeVisible();
+
+  await search.fill("not present in this project");
+  await expect(page.getByText("該当するKnowledgeはありません。", { exact: true })).toBeVisible();
+  const failBrowse = async (route: import("@playwright/test").Route) => {
+    if (new URL(route.request().url()).searchParams.get("q") === "unavailable") await route.fulfill({ status: 503, body: "unavailable" });
+    else await route.continue();
+  };
+  await page.route(nodeRoute, failBrowse);
+  await search.fill("unavailable");
+  await expect(page.getByRole("alert")).toContainText("Knowledge一覧を読み込めませんでした");
+  await expect(page.locator(".pg-knowledge p[role=status]")).toContainText("Knowledgeの取得に失敗しました");
+  await page.unroute(nodeRoute, failBrowse);
+
+  await search.fill("");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(50);
+  const selectedNode = page.locator(".pg-knowledge-list li").filter({ hasText: "Browse 0000" }).getByRole("button").first();
+  await selectedNode.click();
+  const detail = page.getByRole("region", { name: "Knowledge詳細" });
+  const relationDisclosure = detail.locator("details").filter({ hasText: "関係を追加" });
+  await relationDisclosure.locator("summary").click();
+  const targetSelect = relationDisclosure.locator("select");
+  const targetNodeId = ids[1]!;
+  await targetSelect.selectOption(targetNodeId);
+  await search.fill("Browse 0000");
+  await expect(targetSelect).toHaveValue(targetNodeId);
+  await expect(targetSelect.locator(`option[value="${targetNodeId}"]`)).toContainText("選択中");
+  await search.fill("");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(50);
+  const textAnchorTarget = page.locator("#pg-knowledge-target");
+  await textAnchorTarget.selectOption(ids[2]!);
+  await search.fill("Browse 0000");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(1);
+  await expect(textAnchorTarget).toHaveValue(ids[2]!);
+  await expect(textAnchorTarget.locator(`option[value="${ids[2]}"]`)).toContainText("選択中");
+
+  // An older same-epoch server ignores q/type/status and returns its legacy
+  // `{nodes}` contract. The new UI must accept the payload without claiming
+  // server search or complete coverage.
+  const legacyResponse = await page.request.get(new URL(`/api/v1/persistence/projects/${fixture.project.id}/nodes?limit=500`, base).toString());
+  const legacyNodes = (await legacyResponse.json() as { nodes: unknown[] }).nodes;
+  expect(legacyNodes).toHaveLength(500);
+  await search.fill("Browse 0001");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(1);
+  const oldServerRoute = async (route: import("@playwright/test").Route) => {
+    const params = new URL(route.request().url()).searchParams;
+    if (params.has("q")) await route.fulfill({ json: { nodes: legacyNodes.slice(0, 50) } });
+    else if (params.get("limit") === "500") await route.fulfill({ json: { nodes: legacyNodes } });
+    else await route.continue();
+  };
+  await page.route(nodeRoute, oldServerRoute);
+  await search.fill("Browse 0000");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(1);
+  await expect(page.locator(".pg-knowledge p[role=status]")).toContainText("網羅状況は不明");
+  await expect(page.locator(".pg-knowledge p[role=status]")).toContainText("500件");
+  await expect(page.locator(".pg-knowledge p[role=status]")).toContainText("別名検索と続きの取得は利用できず");
+  await expect(page.getByRole("button", { name: "続きのKnowledgeを読み込む" })).toHaveCount(0);
+  await search.fill("Browse 0499");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(1);
+  await search.fill("Literal%_!Alias");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(0);
+  await expect(page.locator(".pg-knowledge p[role=status]")).toContainText("網羅状況は不明");
+  await page.unroute(nodeRoute, oldServerRoute);
+  await search.fill("");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(50);
+  await expect(page.getByLabel("種類で絞り込み").locator("option[value='my_custom_type']")).toBeAttached();
+
+  // A mutation from a later page must restart the active filtered browse from
+  // page one without injecting the now nonmatching node into the result set.
+  const statusFilter = page.getByLabel("状態で絞り込み");
+  await statusFilter.selectOption("proposed");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(50);
+  for (const expectedCount of [100, 150]) {
+    await page.getByRole("button", { name: "続きのKnowledgeを読み込む" }).click();
+    await expect(page.locator(".pg-knowledge-list li")).toHaveCount(expectedCount);
+  }
+  const mutationTarget = page.locator(".pg-knowledge-list li").filter({ hasText: "Browse 0200" });
+  await expect(mutationTarget).toHaveCount(1);
+  await mutationTarget.getByRole("button").first().click();
+  const anchorTarget = page.locator("#pg-knowledge-target");
+  const selectedId = await anchorTarget.inputValue();
+  expect(selectedId).toBeTruthy();
+  await mutationTarget.getByRole("button", { name: "内容を確認して確定" }).click();
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(50);
+  await expect(mutationTarget).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "続きのKnowledgeを読み込む" })).toBeVisible();
+  await expect(anchorTarget).toHaveValue(selectedId);
+  await expect(anchorTarget.locator(`option[value="${selectedId}"]`)).toContainText("選択中");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(new URL(`/mobile/projects/${fixture.project.id}/scenes/${fixture.scene.id}?view=writing`, base).toString());
+  await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "知識", exact: true }).click();
+  await expect(page.locator(".pg-knowledge")).toBeVisible();
+  await search.fill("literal%_!alias");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(1);
+  await expect(page.locator(".pg-knowledge-list")).toContainText(longJapaneseName);
+  await search.fill("");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(50);
+  await page.getByRole("button", { name: "続きのKnowledgeを読み込む" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "100件取得済み" })).toBeVisible();
+});
 
 test("PostgreSQL project pages expose records beyond 200 and deep links retain the requested identity", async ({ page }) => {
   test.setTimeout(120_000);
