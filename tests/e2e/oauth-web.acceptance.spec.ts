@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
+import { createPostgresPersistence } from "@codexia/persistence-postgres";
+import type { DocumentId, ProjectId } from "@codexia/persistence-contracts";
 import { startBetterAuthFixture } from "../../packages/api/test/fixtures/better-auth-server.js";
 
 const appRoot = resolve("app");
@@ -28,10 +30,9 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
   const ciFixtureDatabase = process.env.CI === "true" && database.hostname === "postgres" && /^codexia_ci_[a-f0-9]{32}$/u.test(databaseName);
   assert.ok(["127.0.0.1", "localhost", "[::1]"].includes(database.hostname) || ciFixtureDatabase, "OAuth fixture database must be local or the uniquely named disposable CI database");
 
-    // Auth clients, OAuth sessions, token records and JWT checks use PostgreSQL. The fixture's CoreStore,
-    // persistence object, and job history are in-memory/test doubles; this proves protected list admission,
-    // not PostgreSQL manuscript row persistence.
-    const fixture = await startBetterAuthFixture({ databaseUrl: fixtureDatabaseUrl, staticDirectory: appAssets });
+    // Auth clients, OAuth sessions, token records, JWT checks and manuscript CoreStore/persistence use PostgreSQL.
+    // The job-history list is a separate in-memory test double.
+    const fixture = await startBetterAuthFixture({ databaseUrl: fixtureDatabaseUrl, staticDirectory: appAssets, usePostgresPersistence: true });
   let context: Awaited<ReturnType<typeof browser.newContext>> | undefined;
   try {
     const build = spawnSync("pnpm", ["--filter", "@codexia/app", "build"], {
@@ -178,6 +179,69 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     assert.equal(Boolean(ownerList.headers.cookie), false, "protected data list calls must omit the Better Auth session cookie");
     assert.equal(Boolean(tokenRequest.headers.cookie), false, "public-client token exchange must omit ambient cookies");
     if (typeof tokenResponse.id_token === "string") assert.ok(apiSession.headers.authorization !== `Bearer ${tokenResponse.id_token}`, "the API must never receive the upstream ID token");
+
+    const projectList = seen.find((request) => request.pathname === "/api/v1/persistence/projects" && request.method === "GET" && request.status === 200);
+    assert.ok(projectList, "the owner bearer token must read the PostgreSQL-backed project list");
+    assert.ok(projectList.headers.authorization === `Bearer ${String(tokenResponse.access_token)}`, "the project list must use the OAuth access token");
+    assert.equal(Boolean(projectList.headers.cookie), false, "the project list must omit the Better Auth session cookie");
+
+    const projectTitle = `OAuth browser acceptance ${crypto.randomUUID()}`;
+    await page.getByRole("button", { name: "最初の作品を作成" }).click();
+    await page.getByLabel("作品名").fill(projectTitle);
+    const projectCreatePromise = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/v1/persistence/projects" && response.request().method() === "POST" && response.status() === 201);
+    await page.locator("details.pg-library-create").locator("button[type=submit]").click();
+    const projectCreateResponse = await projectCreatePromise;
+    const createdProject = (await projectCreateResponse.json() as { project: { id: string; title: string } }).project;
+    assert.equal(createdProject.title, projectTitle);
+
+    const createDocument = async (kind: "volume" | "chapter" | "scene", title: string, parentLabel: string | null) => {
+      const form = page.locator("details.pg-library-create-document");
+      if (!await form.evaluate((element) => (element as HTMLDetailsElement).open)) await form.locator("summary").click();
+      await form.getByLabel("文書名").fill(title);
+      await form.getByLabel("種類").selectOption(kind);
+      await form.getByLabel("追加先").selectOption(parentLabel ? { label: parentLabel } : { label: "作品の直下" });
+      const responsePromise = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/v1/persistence/projects/${createdProject.id}/documents` && response.request().method() === "POST" && response.status() === 201);
+      await form.locator("button[type=submit]").click();
+      const response = await responsePromise;
+      return (await response.json() as { document: { id: string; title: string }; revision: { id: string } }).document;
+    };
+    const volume = await createDocument("volume", "OAuth Volume", null);
+    const chapter = await createDocument("chapter", "OAuth Chapter", volume.title);
+    const scene = await createDocument("scene", "OAuth Scene", chapter.title);
+    await page.getByRole("heading", { name: scene.title, exact: true }).waitFor();
+    const manuscript = "Bearer-authenticated manuscript text survives PostgreSQL revision storage.";
+    await page.getByRole("textbox", { name: "本文", exact: true }).fill(manuscript);
+    const savePromise = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/v1/persistence/projects/${createdProject.id}/documents/${scene.id}` && response.request().method() === "PATCH" && response.status() === 200);
+    await savePromise;
+    await expect(page.locator(".pg-save-state summary")).toHaveText("保存済み", { timeout: 15_000 });
+
+    const persisted = createPostgresPersistence(fixtureDatabaseUrl);
+    try {
+      const saved = await persisted.read(async (reader) => {
+        const project = await reader.getProject(createdProject.id as ProjectId);
+        const document = await reader.getDocument(createdProject.id as ProjectId, scene.id as DocumentId);
+        const revision = document?.headRevisionId
+          ? await reader.getRevision(createdProject.id as ProjectId, scene.id as DocumentId, document.headRevisionId)
+          : undefined;
+        return { project, document, revision };
+      });
+      assert.equal(saved.project?.title, projectTitle, "project row must exist in PostgreSQL");
+      assert.equal(saved.document?.title, scene.title, "document row must exist in PostgreSQL");
+      assert.equal(saved.revision?.markdown, manuscript, "the authenticated Web save must persist its manuscript revision in PostgreSQL");
+    } finally {
+      await persisted.close();
+    }
+
+    applyResponseStatuses();
+    const projectCreateRequest = seen.find((request) => request.pathname === "/api/v1/persistence/projects" && request.method === "POST");
+    const documentCreateRequest = seen.find((request) => request.pathname === `/api/v1/persistence/projects/${createdProject.id}/documents` && request.method === "POST");
+    const manuscriptSaveRequest = seen.find((request) => request.pathname === `/api/v1/persistence/projects/${createdProject.id}/documents/${scene.id}` && request.method === "PATCH");
+    for (const request of [projectCreateRequest, documentCreateRequest, manuscriptSaveRequest]) {
+      assert.ok(request, "project, document and manuscript mutation requests must be observed");
+      assert.ok(request.headers.authorization === `Bearer ${String(tokenResponse.access_token)}`, "each author mutation must use the OAuth access token");
+      assert.equal(Boolean(request.headers.cookie), false, "author mutation requests must omit ambient cookies");
+      assert.equal(request.status, request.method === "PATCH" ? 200 : 201);
+    }
   } finally {
     if (context) await context.close();
     await fixture.close();
