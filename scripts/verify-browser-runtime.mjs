@@ -13,7 +13,7 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 process.chdir(root);
 
 // Derive browser requirements from the canonical CI task inventory.
-// The WebKit group also contains Chromium UI/auth tasks.
+// Each lane must contain exactly one browser project; no cross-browser tasks.
 const browserGroup = process.env.CODEXIA_CI_BROWSER_GROUP;
 const groupTasks = VERIFICATION_GROUPS[`browser-${browserGroup}`];
 assert.ok(Array.isArray(groupTasks) && groupTasks.length > 0, "Unknown CI browser group");
@@ -26,9 +26,9 @@ const requiredProjects = new Set(groupTasks.map(task => {
   assert.ok(project === "chromium" || project === "webkit", `Unknown browser project: ${task}`);
   return project;
 }));
-assert.ok(requiredProjects.has("chromium"), "Every browser group must validate Chromium");
+assert.equal(requiredProjects.size, 1, "Each browser group must use exactly one browser project");
 const expectedImageDigest = requiredProjects.has("webkit")
-  ? "sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579"
+  ? "sha256:17c30d6e4ce83c9127cd99e417a2c23a30e2b627ecbc95f04737c33d74b640e2"
   : "sha256:d11b4fa1128d937fcda9dd0106d138b65c3e72cbad07d4801547aa66fc1c4725";
 assert.equal(process.platform, "linux", "Browser verification requires the Linux Noble container");
 assert.equal(process.arch, "x64", "The pinned Playwright image digest is the Linux amd64 image");
@@ -62,8 +62,9 @@ async function verifyBrowser(name, browserType) {
   }
 }
 
-const browsers = { chromium: await verifyBrowser("Chromium", chromium) };
-if (requiredProjects.has("webkit")) browsers.webkit = await verifyBrowser("WebKit", webkit);
+const browserProject = requiredProjects.values().next().value;
+const browserType = browserProject === "webkit" ? webkit : chromium;
+const browsers = { [browserProject]: await verifyBrowser(browserProject, browserType) };
 process.stdout.write(`PLAYWRIGHT_RUNTIME PASS ${JSON.stringify({
   os: "ubuntu-noble",
   imageDigest: expectedImageDigest,
