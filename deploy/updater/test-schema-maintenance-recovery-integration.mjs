@@ -146,10 +146,13 @@ async function adapters(fixture) {
     await host.convergePreflightSchemaGrants();
     const preflightPassword = (await readFile(path.join(fixture.workDir, 'postgres-preflight-password'), 'utf8')).trim();
     assert.match(preflightPassword, /^[a-fA-F0-9]{64}$/u);
+    const probeTable = item.image === fixture.targetRelease.image ? 'codexia_schema_maintenance_ci' : 'codexia_schema_migrations';
     const preflightRead = run('podman', ['exec', '-i', 'codexia-db', 'sh', '-ec',
-      'IFS= read -r PGPASSWORD; export PGPASSWORD; psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia_preflight -d codexia -c "SELECT count(*) FROM public.codexia_schema_maintenance_ci"'],
+      `IFS= read -r PGPASSWORD; export PGPASSWORD; psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia_preflight -d codexia -c "SELECT count(*) FROM public.${probeTable}"`],
     { input: preflightPassword + '\n' });
-    assert.equal(preflightRead, '0', 'Canonical read-only preflight did not receive SELECT on the new migration table');
+    assert.match(preflightRead, /^\d+$/u, 'Canonical read-only preflight could not SELECT the migration ledger');
+    if (probeTable === 'codexia_schema_maintenance_ci') assert.equal(preflightRead, '0', 'Canonical read-only preflight did not receive SELECT on the new migration table');
+    else assert.ok(Number(preflightRead) >= 3, 'Prior-release preflight could not read its installed migration ledger');
     const auth = randomBytes(32).toString('hex');
     const label = 'io.codexia.initial-activation=' + owner.operationId;
     run('podman', ['run', '--detach', '--name', 'codexia-preflight-blue', '--label', label,
