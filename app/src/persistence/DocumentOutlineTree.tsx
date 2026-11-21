@@ -143,6 +143,7 @@ export function DocumentOutlineTree({
           : <button {...item.getProps()} type="button"
               className={`pg-outline-document${id === selectedId ? " is-selected" : ""}`}
               aria-current={id === selectedId ? "page" : undefined}
+              aria-selected={id === selectedId}
               aria-label={`${node.title} ${node.misplaced ? `未配置 · ${kindLabel(node.kind)}` : kindLabel(node.kind)}`}
               onFocus={() => item.setFocused()}
               onClick={() => { item.setFocused(); item.primaryAction(); }}>
