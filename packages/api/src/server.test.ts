@@ -12,6 +12,7 @@ import type { Persistence, PersistenceReader } from "@codexia/persistence-contra
 import { CoreStore, type CoreStore as CoreStoreShape } from "@codexia/core";
 import { ModuleRuntime, type ModuleLoader, type ModuleRuntimeOptions, type WorkerJobLifecycleListener, type WorkerJobLifecycleSnapshot } from "@codexia/module-runtime";
 import { createHostedAuthorizationPolicy } from "./hosted-policy.js";
+import { advertisePublicClientTokenAuth } from "./better-auth.js";
 import { HistoricalModelUsageError, HistoricalModelUsageStore } from "./historical-store.js";
 import { JobHistoryError, JobHistoryStore, type WorkerJobLifecycle } from "./job-history-store.js";
 import "./recent-activity-store.test.js";
@@ -428,7 +429,7 @@ function sourceDomainJobRuntime(cacheDirectory: string): {
 async function startCustomApi(
   store: CoreStore,
   staticDir: string,
-  options: Partial<Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence" | "cloudflareAccess" | "oauthOwner" | "corsAllowedOrigins">> = {},
+  options: Partial<Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence" | "cloudflareAccess" | "oauthOwner" | "betterAuth" | "corsAllowedOrigins">> = {},
 ) {
   const server = createServer({ store, authToken: ACCESS_TOKEN, staticDir, persistence: admissionPersistence(store), ...options });
   await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
@@ -631,6 +632,41 @@ afterEach(async () => {
 });
 
 describe("Codexia HTTP boundary", () => {
+  it("routes Better Auth discovery and token requests through the Fastify entry point", async (t) => {
+    const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-better-auth-routes-"));
+    tempDirs.push(staticDir);
+    const delegated: Array<{ method: string; path: string; body: string }> = [];
+    const metadata = Response.json({
+      issuer: "https://api.example.test/api/auth",
+      token_endpoint_auth_methods_supported: ["client_secret_post"],
+    });
+    const fake = {
+      handler: async (request: Request) => {
+        const body = request.method === "GET" ? "" : await request.text();
+        delegated.push({ method: request.method, path: new URL(request.url).pathname, body });
+        return Response.json({ accepted: true });
+      },
+      authorizationServerMetadata: async () => metadata.clone(),
+      openIdConfigMetadata: async () => metadata.clone(),
+    } as unknown as NonNullable<ApiServerOptions["betterAuth"]>;
+    const api = await startCustomApi(makeStore(), staticDir, { betterAuth: fake });
+    t.after(api.close);
+
+    for (const path of ["/.well-known/oauth-authorization-server/api/auth", "/.well-known/openid-configuration/api/auth"]) {
+      const response = await fetch(`${api.base}${path}`);
+      assert.equal(response.status, 200);
+      const document = await response.json() as { token_endpoint_auth_methods_supported: string[] };
+      assert.ok(document.token_endpoint_auth_methods_supported.includes("none"));
+    }
+    const token = await fetch(`${api.base}/api/auth/oauth2/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "grant_type=authorization_code&code=fixture-code",
+    });
+    assert.equal(token.status, 200);
+    assert.deepEqual(delegated, [{ method: "POST", path: "/api/auth/oauth2/token", body: "grant_type=authorization_code&code=fixture-code" }]);
+  });
+
   it("distinguishes runtime-control key outages from invalid credentials and reuses verified JWKS", async (t) => {
     const staticDir = await mkdtemp(resolve(tmpdir(), "codexia-control-jwks-"));
     tempDirs.push(staticDir);
