@@ -85,7 +85,9 @@ export async function installedPnpmLockIdentity({ nodeModulesDirectory, packageN
   const modulesPath = path.join(nodeModulesDirectory, '.modules.yaml');
   let metadata;
   try {
-    metadata = JSON.parse(await readFile(modulesPath, 'utf8'));
+    const yamlUrl = pathToFileURL(path.join(root, 'node_modules/.pnpm/node_modules/yaml/dist/index.js'));
+    const yaml = await import(yamlUrl.href);
+    metadata = yaml.parse(await readFile(modulesPath, 'utf8'));
   } catch (error) {
     if (error?.code === 'ENOENT') return null;
     throw new Error(`Cannot read installed pnpm module metadata: ${modulesPath}`);
