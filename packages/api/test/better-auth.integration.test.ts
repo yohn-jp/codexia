@@ -149,12 +149,13 @@ test("Better Auth signed-out OIDC login reaches the Fastify OAuth route and admi
 
     (globalThis as unknown as { window: { location: { search: string } } }).window.location.search = resumedUrl.search;
     const context = await client.$fetch("/oauth2/consent-context", { method: "POST", body: {} }) as {
-      data?: { requestedScopes: string[]; client: { name: string } };
+      data?: { requestedScopes: string[]; client: { name: string }; redirectUri: string };
       error?: unknown;
     };
     assert.ok(context.data, `Fastify consent context failed: ${JSON.stringify(context.error)}`);
     assert.deepEqual(context.data.requestedScopes, ["openid", "codexia:api", "offline_access"]);
     assert.equal(context.data.client.name, "Codexia Fixture Web");
+    assert.equal(context.data.redirectUri, new URLSearchParams(resumedUrl.search).get("redirect_uri"), "the server-verified consent context must bind the registered callback");
 
     const consent = await client.$fetch("/oauth2/consent", { method: "POST", body: { accept: true } }) as {
       data?: { url: string };

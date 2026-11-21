@@ -38,6 +38,8 @@ export interface BetterAuthRuntimeConfig {
 export interface OAuthConsentContext {
   readonly client: { readonly name: string };
   readonly requestedScopes: readonly string[];
+  /** Redirect URI from the authorization query verified with the server's signing key. */
+  readonly redirectUri: string;
 }
 
 const SUPPORTED_OAUTH_SCOPES = ["openid", "email", "profile", "offline_access", CODEXIA_OWNER_SCOPE, ...CODEXIA_MCP_SCOPES] as const;
@@ -204,6 +206,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
       if (!await verifyOAuthQueryParams(oauthQuery, config.authSecret)) throw new Error("OAuth consent request signature is invalid or expired");
       const params = new URLSearchParams(oauthQuery);
       const clientId = signedQueryParam(params, "client_id");
+      const redirectUri = signedQueryParam(params, "redirect_uri");
       const scope = signedQueryParam(params, "scope");
       const requestedScopes = [...new Set(scope.split(/\s+/u).filter(Boolean))];
       const resourceValues = params.getAll("resource");
@@ -216,7 +219,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
       const context = await auth.$context;
       const linkedResources = await context.adapter.findMany({ model: "oauthClientResource", where: [{ field: "clientId", value: clientId }] });
       if (!linkedResources.some((resource) => typeof resource === "object" && resource !== null && "resourceId" in resource && resource.resourceId === audience)) throw new Error("OAuth client is not linked to the requested API resource");
-      return { client: { name: publicClient.client_name ?? "Unknown client" }, requestedScopes };
+      return { client: { name: publicClient.client_name ?? "Unknown client" }, requestedScopes, redirectUri };
     },
     isOwnerClient(clientId: string): boolean {
       return config.ownerClientIds.includes(clientId);

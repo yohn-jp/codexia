@@ -5,7 +5,7 @@ const scopeDescriptions: Readonly<Record<string, string>> = {
   openid: "Codexiaアカウントでサインインします。",
   email: "アカウントのメールアドレスを確認します。",
   profile: "アカウントのプロフィールを確認します。",
-  offline_access: "再認証なしでの更新を許可します。更新トークンはクライアントの保護領域に保存されます。",
+  offline_access: "再認証なしで利用を継続する更新トークンの発行を許可します。",
   "codexia:api": "作品データへのアクセスを要求します。各操作はサーバー側の作者権限と対象データの認可に従います。",
   "mcp:read": "割り当てられた作品の参照だけを許可します。",
   "mcp:compute": "割り当てられた作品に対する解析・計算を許可します。",
@@ -36,7 +36,7 @@ export function OAuthConsentPage() {
     setMessage("");
     try {
       const result = await submitOAuthConsent(accept);
-      window.location.assign(sameOriginOAuthContinuation(result.url, window.location.origin));
+      window.location.assign(sameOriginOAuthContinuation(result.url, window.location.origin, context?.redirectUri));
     } catch {
       setMessage("認可を完了できませんでした。内容を保護したまま再試行してください。");
       setBusy(false);
