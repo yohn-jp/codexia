@@ -99,13 +99,18 @@ function recordFile(root, entry, head, mergeBase, headFiles, mainFiles, rule, ol
   // The exact source must be the same immutable Git blob accepted by Repomix.
   if (!matchesPacked(git(root, ['show', `${head}:${path}`]), headFiles[path])) return { reason: 'packed-source-mismatch' };
   const verifiedOld = trustedPreimage(root, mergeBase, oldPath, mainFiles);
+  // A copy or rename whose source still exists at HEAD must not disclose
+  // unrelated, potentially unverified changes from that source path.
+  const oldStillExists = oldPath && oldPath !== path &&
+    git(root, ['ls-tree', '-r', '--name-only', head, '--', ':(literal)' + oldPath]).trim().split('\n').includes(oldPath);
+  const diffPaths = oldPath && oldPath !== path && !oldStillExists ? [oldPath, path] : [path];
   let patch = git(root, ['--no-pager', 'diff', '--no-ext-diff', '--no-textconv', '--no-color',
-    '--no-renames', mergeBase, head, '--', ...[...new Set([oldPath, path].filter(Boolean))].map(x => ':(literal)' + x)]);
+    '--no-renames', mergeBase, head, '--', ...diffPaths.map(x => ':(literal)' + x)]);
   if (oldPath && !verifiedOld) {
     patch = patch.split('\n').map(line => line.startsWith('-') && !line.startsWith('--- ')
       ? '-[removed line withheld: preimage not present in verified main export]' : line).join('\n');
   }
-  const body = [
+  const metaAndDiff = [
     '# OCR Delegate review input',
     '',
     `- Path: ${JSON.stringify(path)}`,
@@ -116,11 +121,13 @@ function recordFile(root, entry, head, mergeBase, headFiles, mainFiles, rule, ol
     `- Preimage: ${oldPath ? (verifiedOld ? 'verified against main Repomix' : 'unverified; removed lines redacted') : 'not applicable'}`,
     `- Insertions/deletions (OCR): +${entry.insertions}/-${entry.deletions}`,
     '', '# OCR rules', '', fenced(rule), '', '# Unified diff', '', fenced(patch),
-    '', '# Full file at head', '', fenced(headFiles[path]), '',
-    'Review this file and relevant cross-file behavior. Report reachable defects with evidence; do not claim that this input is a completed review.',
-    '',
-  ].join('\n');
-  return { content: body, preimage: oldPath ? (verifiedOld ? 'verified' : 'redacted') : 'none' };
+  ];
+  const footer = ['', 'Review this file and relevant cross-file behavior. Report reachable defects with evidence; do not claim that this input is a completed review.', ''];
+  return {
+    content: [...metaAndDiff, '', '# Full file at head', '', fenced(headFiles[path]), ...footer].join('\n'),
+    compactContent: [...metaAndDiff, ...footer].join('\n'),
+    preimage: oldPath ? (verifiedOld ? 'verified' : 'redacted') : 'none',
+  };
 }
 
 function emit(dir, name, content, outputs) {
@@ -174,7 +181,7 @@ function oneBranch({ root, site, bin, base, head, mainFiles, headFiles }) {
     const result = recordFile(root, entry, head, mergeBase, headFiles, mainFiles, perFileRules.get(entry.path), oldPath);
     if (!result.content) { skipped.push({ path: entry.path, status: entry.status, reason: result.reason }); continue; }
     fullParts.push(result.content);
-    compactParts.push(result.content.split('\n# Full file at head\n')[0]);
+    compactParts.push(result.compactContent);
     files.push({ path: entry.path, status: entry.status, insertions: entry.insertions, deletions: entry.deletions,
       preimage: result.preimage });
   }
