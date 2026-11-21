@@ -49,6 +49,9 @@ on:
   workflow_run:
     workflows: [Verify Codexia]
     types: [completed]
+    # Only completed main-source Verify runs can authorize publication.
+    # PR Verify completions have no release authority and need no run event.
+    branches: [main]
 permissions:
   contents: read
 env:
