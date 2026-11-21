@@ -10,7 +10,7 @@ on:
       - deploy/ansible/host-validate.yml
       - deploy/ansible/site.yml
       - deploy/ansible/requirements.txt
-      - docs/deployment/PHASE-F-PUSH-HOST-CI.md
+      - docs/deployment/PUSH-HOST-CI.md
       - scripts/push-host.test.mjs
 permissions:
   contents: read
