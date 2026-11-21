@@ -2,8 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { BrowserJournal } from "../storage/journal";
 
-interface Scratch { text: string; images: Array<{ name: string; data: string }>; generation: number }
+interface ScratchNoteRequest { idempotencyKey: string; orderKey: string; markdown: string }
+interface Scratch { text: string; images: Array<{ name: string; data: string }>; generation: number; pendingNoteRequest?: ScratchNoteRequest }
 const empty = (): Scratch => ({ text: "", images: [], generation: 0 });
+
+function scratchMarkdown(value: Pick<Scratch, "text" | "images">): string {
+  return value.text + value.images.map((image) => `\n\n![${image.name.replace(/[\[\]\\]/gu, "")}](${image.data})`).join("");
+}
 
 /** Private scratch remains outside the manuscript until explicitly saved as a note. */
 export function PersistenceScratch({ projectId, documentId, authorScope, journal, canCreateNote, registerGuard, onSaved }: {
@@ -54,8 +59,10 @@ export function PersistenceScratch({ projectId, documentId, authorScope, journal
       let initial = empty();
       if (raw) {
         const parsed: unknown = JSON.parse(raw);
-        if (!parsed || typeof parsed !== "object" || typeof (parsed as Scratch).text !== "string" || !Array.isArray((parsed as Scratch).images) || !(parsed as Scratch).images.every((image) => image && typeof image.name === "string" && typeof image.data === "string" && image.data.startsWith("data:image/")) || !Number.isSafeInteger((parsed as Scratch).generation) || (parsed as Scratch).generation < 0) throw new Error("スクラッチの回復記録を確認できませんでした。元の記録は保持しています。");
-        initial = parsed as Scratch;
+        const candidate = parsed as Scratch;
+        const pendingRequest = candidate?.pendingNoteRequest as ScratchNoteRequest | undefined;
+        if (!parsed || typeof parsed !== "object" || typeof candidate.text !== "string" || !Array.isArray(candidate.images) || !candidate.images.every((image) => image && typeof image.name === "string" && typeof image.data === "string" && image.data.startsWith("data:image/")) || !Number.isSafeInteger(candidate.generation) || candidate.generation < 0 || (candidate.pendingNoteRequest !== undefined && (!pendingRequest || typeof pendingRequest.idempotencyKey !== "string" || !pendingRequest.idempotencyKey || typeof pendingRequest.orderKey !== "string" || !pendingRequest.orderKey || typeof pendingRequest.markdown !== "string"))) throw new Error("スクラッチの回復記録を確認できませんでした。元の記録は保持しています。");
+        initial = candidate;
       }
       protectedScratch.current = { text: raw, generation: initial.generation };
       publish(initial);
@@ -97,18 +104,44 @@ export function PersistenceScratch({ projectId, documentId, authorScope, journal
     setSaving(true);
     try {
       await protect();
-      const current = draftRef.current;
-      await api.createPersistenceDocument(projectId, { parentId: documentId as never, title: "スクラッチ", kind: "note", orderKey: String(Date.now()), markdown: current.text + current.images.map((image) => `\n\n![${image.name.replace(/[\[\]\\]/gu, "")}](${image.data})`).join(""), idempotencyKey: crypto.randomUUID() });
+      let current = draftRef.current;
+      let request = current.pendingNoteRequest;
+      if (!request) {
+        request = {
+          idempotencyKey: crypto.randomUUID(),
+          orderKey: String(Date.now()),
+          markdown: scratchMarkdown(current),
+        };
+        current = { ...current, pendingNoteRequest: request, generation: current.generation + 1 };
+        publish(current);
+        await protect();
+      }
+      await api.createPersistenceDocument(projectId, { parentId: documentId as never, title: "スクラッチ", kind: "note", orderKey: request.orderKey, markdown: request.markdown, idempotencyKey: request.idempotencyKey });
       await onSaved();
+      const latest = draftRef.current;
+      if (latest.pendingNoteRequest?.idempotencyKey === request.idempotencyKey) {
+        publish({ ...latest, pendingNoteRequest: undefined, generation: latest.generation + 1 });
+        try { await protect(); }
+        catch (cause) {
+          const unconfirmed = draftRef.current;
+          if (!unconfirmed.pendingNoteRequest) publish({ ...unconfirmed, pendingNoteRequest: request, generation: unconfirmed.generation + 1 });
+          throw cause;
+        }
+      }
+      setError("");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "スクラッチを保存できませんでした。"); }
     finally { setSaving(false); }
   }
+  const pendingMatchesCurrent = Boolean(draft.pendingNoteRequest && draft.pendingNoteRequest.markdown === scratchMarkdown(draft));
   return <details className="scratch-panel"><summary>スクラッチ · {protectedGeneration === draft.generation ? "Draft を保護済み" : "記録中"}</summary>
     <label htmlFor="pg-scratch">本文に含まれないメモ</label><textarea id="pg-scratch" value={draft.text} disabled={loading || saving} onChange={(event) => publish({ ...draftRef.current, text: event.target.value, generation: draftRef.current.generation + 1 })} />
     <label>画像を添付<input aria-label="スクラッチ画像を添付" type="file" accept="image/*" multiple disabled={loading || saving} onChange={(event) => { void attach(Array.from(event.target.files ?? [])); event.target.value = ""; }} /></label>
     {draft.images.map((image, index) => <img key={index} src={image.data} alt={image.name} width="120" />)}
     <button type="button" disabled={loading || saving} onClick={() => void protect().catch(() => {})}>続ける</button>
-    <button type="button" disabled={!canCreateNote || loading || saving || (!draft.text && !draft.images.length)} onClick={() => void saveNote()}>ノートとしてPostgreSQLへ保存</button>
+    {draft.pendingNoteRequest && !pendingMatchesCurrent && <p role="status">前回送信した内容の保存結果が未確認です。照合では現在のスクラッチを保持します。</p>}
+    <button type="button" disabled={!canCreateNote || loading || saving || (!draft.text && !draft.images.length && !draft.pendingNoteRequest)} onClick={() => void saveNote()}>
+      {draft.pendingNoteRequest ? pendingMatchesCurrent ? "保存結果を再試行" : "前のノート保存を照合" : "ノートとしてPostgreSQLへ保存"}
+    </button>
     {attachmentError && <p role="alert">{attachmentError}</p>}
     {error && <p role="alert">{error}</p>}
   </details>;
