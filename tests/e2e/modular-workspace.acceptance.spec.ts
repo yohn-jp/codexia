@@ -546,6 +546,13 @@ async function expectDraft(page: Page, documentId: string, text: string): Promis
   )).toBe(true);
 }
 
+async function replaceEditor(page: Page, markdown: string): Promise<void> {
+  const editor = manuscriptEditor(page);
+  await editor.click();
+  await editor.press("ControlOrMeta+a");
+  await page.keyboard.insertText(markdown);
+}
+
 async function readPersistedDocument(page: Page, projectId: string, documentId: string): Promise<{ id: string; markdown: string }> {
   const response = await page.request.get(`/api/v1/persistence/projects/${projectId}/documents/${documentId}`);
   expect(response.ok()).toBe(true);
@@ -947,7 +954,7 @@ test("PostgreSQL API restart preserves canonical content and replays the exact b
     await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Synthetic interrupted save" }) });
   });
 
-  await page.locator(".cm-content").fill(authorText);
+  await replaceEditor(page, authorText);
   await expectDraft(page, fixture.scene.document.id, authorText);
   await saveStarted;
   await restartApi();

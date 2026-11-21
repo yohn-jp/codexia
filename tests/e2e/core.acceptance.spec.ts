@@ -204,7 +204,10 @@ test("IME composition blocks navigation while coalesced editor state stays curre
   await editor(page).evaluate((element) => element.dispatchEvent(new CompositionEvent("compositionstart", { data: "にほんご", bubbles: true })));
   await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
   await expect(page.getByRole("heading", { name: "Scene One", exact: true })).toBeVisible();
-  await expect(page.locator(".pg-editor-column").getByRole("alert").first()).toContainText("日本語入力の変換が完了していません");
+  const editorAlert = page.locator(".pg-editor-column").getByRole("alert");
+  await expect(editorAlert).toContainText("日本語入力の変換が完了していません");
+  await expect(editorAlert).toHaveCount(1);
+  await expect(page.getByRole("alert")).toHaveCount(1);
   await editor(page).evaluate((element) => element.dispatchEvent(new CompositionEvent("compositionend", { data: "日本語", bubbles: true })));
   const composedText = `${text} 日本語入力`;
   await replaceEditor(page, composedText);
@@ -602,7 +605,7 @@ test("full MCP proposal payload and approval state survive Core process and cach
 test("a PostgreSQL update during author approval keeps the conflicting editor draft visible", async ({ page }) => {
   const f = await fixture(page); const proposal = await submitProposal(page, f); const gate = await holdSaves(page, f);
   try {
-    await editor(page).fill("Author input must survive rejected approval."); await gate.seen;
+    await replaceEditor(page, "Author input must survive rejected approval."); await gate.seen;
     await replace(page, f, "Another writer advanced the project.");
     const approval = await page.request.post(`/api/projects/${f.projectId}/approvals`, { headers: mutationHeaders(), data: { proposalId: proposal.id, operationIds: [proposal.operation.id] } }); expect(approval.status()).toBe(204);
     const applied = await page.request.post(`/api/projects/${f.projectId}/apply`, { headers: mutationHeaders(), data: proposal.operation }); expect(applied.status()).toBe(409);

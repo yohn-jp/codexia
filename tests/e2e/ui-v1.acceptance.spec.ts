@@ -226,7 +226,9 @@ test("revision history responses and errors stay bound to the scene that request
   const failedDocumentRoute = (url: URL) => url.pathname === failedDocumentPath;
   await page.route(failedDocumentRoute, (route) => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "対象の文書を開けませんでした。" }) }));
   await page.locator(`.pg-document-list .pg-outline-item[data-document-id="${second.id}"] > .pg-outline-row > .pg-outline-document`).click();
-  await expect(page.locator(".pg-editor-column [role=alert]")).toContainText("対象の文書を開けませんでした。");
+  const editorAlert = page.locator(".pg-editor-column").getByRole("alert");
+  await expect(editorAlert).toHaveText("対象の文書を開けませんでした。");
+  await expect(editorAlert).toHaveCount(1);
   const initialResponse = page.waitForResponse((response) => historyUrl(new URL(response.url())));
   releaseInitial();
   await initialResponse;

@@ -233,7 +233,10 @@ test("PostgreSQL project pages expose records beyond 200 and deep links retain t
 
   const missingId = crypto.randomUUID();
   await page.goto(new URL(`/desktop/projects/${missingId}`, origin).toString());
-  await expect(page.getByRole("main").getByRole("alert")).toContainText(missingId);
+  const editorAlert = page.locator(".pg-editor-column").getByRole("alert");
+  await expect(editorAlert).toContainText(missingId);
+  await expect(editorAlert).toHaveCount(1);
+  await expect(page.getByRole("alert")).toHaveCount(1);
   await expect(page.getByLabel("作品", { exact: true })).toHaveValue(missingId);
   expect(pageRequests, "an unavailable direct link must not silently fall back to library enumeration").toBe(2);
 
@@ -356,7 +359,10 @@ test("replays ambiguous project and document creates with retained client intent
   await outline.locator(".pg-library-create > summary").click();
   await outline.getByLabel("作品名").fill(projectTitle);
   await outline.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
-  await expect(page.getByRole("main", { name: "PostgreSQL原稿編集" }).getByText("synthetic gateway timeout", { exact: true })).toBeVisible();
+  const editorAlert = page.getByRole("main", { name: "PostgreSQL原稿編集" }).getByRole("alert");
+  await expect(editorAlert).toHaveText("synthetic gateway timeout");
+  await expect(editorAlert).toHaveCount(1);
+  await expect(page.getByRole("alert")).toHaveCount(1);
   expect(projectReadMissed).toBe(true);
   await expect(outline.getByLabel("作品名")).toHaveValue(projectTitle);
   await outline.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
@@ -387,7 +393,8 @@ test("replays ambiguous project and document creates with retained client intent
   await createDocument.locator("summary").click();
   await createDocument.getByLabel("文書名").fill(documentTitle);
   await createDocument.getByRole("button", { name: "作成", exact: true }).click();
-  await expect(page.getByRole("main", { name: "PostgreSQL原稿編集" }).getByText("synthetic gateway timeout", { exact: true })).toBeVisible();
+  await expect(editorAlert).toHaveText("synthetic gateway timeout");
+  await expect(editorAlert).toHaveCount(1);
   expect(documentReadMissed).toBe(true);
   await expect(createDocument.getByLabel("文書名")).toHaveValue(documentTitle);
   await createDocument.getByRole("button", { name: "作成", exact: true }).click();
