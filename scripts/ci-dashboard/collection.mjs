@@ -7,9 +7,13 @@ const MAX_RUNS = 20;
 const CONCURRENCY = 4;
 
 export function identity(run) {
-  const pr = (run.pull_requests ?? []).find(value => Number.isSafeInteger(value?.number) &&
-    /^[a-f0-9]{40}$/u.test(value.head?.sha ?? ''));
-  return pr ? { number: pr.number, sha: pr.head.sha } : null;
+  const associations = Array.isArray(run?.pull_requests) ? run.pull_requests : [];
+  if (!associations.length || associations.some(value =>
+    !Number.isSafeInteger(value?.number) || value.number < 1)) return null;
+  const numbers = [...new Set(associations.map(value => value.number))];
+  const sha = typeof run.head_sha === 'string' && /^[a-f0-9]{40}$/iu.test(run.head_sha)
+    ? run.head_sha.toLowerCase() : null;
+  return numbers.length === 1 && sha ? { number: numbers[0], sha } : null;
 }
 
 export function selectRuns(runs, maxPRs = MAX_PRS, maxRuns = MAX_RUNS) {
@@ -27,11 +31,26 @@ export function selectRuns(runs, maxPRs = MAX_PRS, maxRuns = MAX_RUNS) {
   const eligible = [...groups.values()].filter(group =>
     [...group.runs.values()].some(run => run.name === 'Verify Codexia')).slice(0, maxPRs);
   let count = 0;
-  return eligible.map(group => ({
-    number: group.number,
-    sha: group.sha,
-    runs: [...group.runs.values()].filter(() => count++ < maxRuns),
-  })).filter(group => group.runs.length > 0);
+  const selected = [];
+  for (const group of eligible) {
+    const remaining = maxRuns - count;
+    if (remaining <= 0) break;
+    const candidates = [...group.runs.values()];
+    const sampleTruncated = candidates.length > remaining;
+    const selectedRuns = candidates.slice(0, remaining);
+    if (sampleTruncated && !selectedRuns.some(run => run.name === 'Verify Codexia')) {
+      selectedRuns[selectedRuns.length - 1] = candidates.find(run => run.name === 'Verify Codexia');
+    }
+    selected.push({
+      number: group.number,
+      sha: group.sha,
+      runs: selectedRuns,
+      sampleTruncated,
+    });
+    count += selectedRuns.length;
+    if (sampleTruncated) break;
+  }
+  return selected;
 }
 
 async function parallel(items, callback) {
@@ -58,6 +77,7 @@ export async function collect(request, source) {
     if (data.workflow_runs.length < 100) break;
     if (page === MAX_PAGES) limited = true;
   }
+  const unresolvedRunCount = runs.filter(run => identity(run) === null).length;
   const groups = selectRuns(runs);
   const selected = groups.flatMap(group => group.runs.map(run => ({ run, number: group.number, sha: group.sha })));
   const records = await parallel(selected, async record => {
@@ -77,7 +97,9 @@ export async function collect(request, source) {
     return { number: record.number, sha: record.sha, observed: observeRun(run, jobs, source) };
   });
   const prs = groups.map(group => summarizePR(group.number, group.sha, records.filter(item =>
-    item.number === group.number && item.sha === group.sha).map(item => item.observed)));
+    item.number === group.number && item.sha === group.sha).map(item => item.observed), {
+    sampleTruncated: group.sampleTruncated,
+  }));
   return {
     schema: 'codexia-ci-dashboard/v1',
     observedAt: new Date().toISOString(),
@@ -86,8 +108,10 @@ export async function collect(request, source) {
       selectedRuns: selected.length,
       selectedPRs: prs.length,
       scannedPages: pages,
-      historyTruncated: limited || groups.length >= MAX_PRS || selected.length >= MAX_RUNS,
-      note: 'Bounded recent pull_request workflow sample. Other checks, missing PR associations and unscanned history may be absent. Not merge certification.',
+      unresolvedRunCount,
+      historyTruncated: limited || groups.length >= MAX_PRS || selected.length >= MAX_RUNS ||
+        groups.some(group => group.sampleTruncated),
+      note: 'Bounded recent pull_request workflow sample. Runs without one unambiguous PR number and a valid executed head SHA are excluded and counted as unresolved. Other checks and unscanned history may be absent. Not merge certification.',
     },
     prs,
   };

@@ -119,19 +119,27 @@ export function observeRun(run, jobs, verifySource) {
   };
 }
 
-export function summarizePR(number, sha, runs) {
+export function summarizePR(number, sha, runs, { sampleTruncated = false } = {}) {
   const ordered = [...runs].sort((a,b) => stamp(a.createdAt) - stamp(b.createdAt));
   const starts = ordered.map(r => stamp(r.createdAt)).filter(v => v !== null);
   const ends = ordered.map(r => stamp(r.completedAt)).filter(v => v !== null);
-  const complete = ordered.length > 0 && ordered.every(r => r.status === 'completed');
+  const verify = ordered.find(r => r.name === 'Verify Codexia') ?? null;
+  const complete = ordered.length > 0 && verify !== null && !sampleTruncated &&
+    ordered.every(r => r.status === 'completed');
   const elapsedSeconds = complete && starts.length === ordered.length && ends.length === ordered.length
     ? (Math.max(...ends) - Math.min(...starts)) / 1000 : null;
-  const verify = ordered.find(r => r.name === 'Verify Codexia') ?? null;
   return {
     number, sha, createdAt: ordered.at(0)?.createdAt ?? null,
-    complete, elapsedSeconds,
+    complete, sampleTruncated, elapsedSeconds,
     runnerSeconds: complete && ordered.every(r => r.timing.runnerSeconds !== null)
       ? ordered.reduce((sum,r) => sum + r.timing.runnerSeconds, 0) : null,
     verifyId: verify?.id ?? null, runs: ordered,
   };
+}
+
+export function comparableHistory(items) {
+  return items.filter(item => item.complete === true && item.sampleTruncated !== true &&
+    item.verifyId !== null && item.verifyId !== undefined && item.elapsedSeconds !== null &&
+    Array.isArray(item.runs) && item.runs.length > 0 &&
+    item.runs.every(run => run.timing.comparable));
 }

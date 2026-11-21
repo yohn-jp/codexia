@@ -15,8 +15,8 @@ Status: **implemented as read-only observability; the first live Actions collect
 
 Collector: [collect.mjs](../../scripts/ci-dashboard/collect.mjs); analyzer: [analysis.mjs](../../scripts/ci-dashboard/analysis.mjs); [static client](../../scripts/ci-dashboard/site/).
 
-1. The browser queries up to two recent pages of repository pull_request Actions runs (up to 200 records). Include only GitHub-provided PR number and exact PR head SHA.
-2. Group by PR number and head SHA. Keep the latest run per workflow ID, and only groups containing an observed Verify Codexia. Bound the display to 20 PR revisions and 20 workflow runs to stay within GitHub's unauthenticated API rate limit. Mark truncated history.
+1. The browser queries up to two recent pages of repository pull_request Actions runs (up to 200 records). A run is attributable only when `run.head_sha` is a valid executed source SHA and GitHub associates it with exactly one distinct PR number. The mutable `pull_requests[].head.sha` is not used for grouping. Runs with missing or ambiguous source/PR identity are excluded and counted as unresolved.
+2. Group by PR number and executed `run.head_sha`. Keep the latest run per workflow ID, and only groups containing an observed Verify Codexia. Bound the display to 20 PR revisions and 20 workflow runs to stay within GitHub's unauthenticated API rate limit. If the workflow cap cuts a group, keep Verify visible, mark the group as truncated, and exclude it from comparable history. Mark truncated history.
 3. Fetch attempt-scoped job inventories and recorded step timestamps. Fail the view on incomplete job pagination; never infer skipped or cancelled work as successful validation.
 4. Only public run/job/step metadata is held in the browser for display. No downloaded logs, tokens, artifacts or executable PR code.
 
@@ -30,7 +30,7 @@ Collector: [collect.mjs](../../scripts/ci-dashboard/collect.mjs); analyzer: [ana
 | Queue intervals | Sum of recorded job creation-to-start intervals. Does not isolate runner capacity, dependency waiting or network pulls. |
 | Blocking chain | Walk the current Verify YAML needs graph backwards from successful certification, selecting each latest completed predecessor. The DAG comes from the workflow file; dynamic job names are matched to its templates. |
 | Longest steps | API step start-to-end intervals. Install/container phases are not pure download timings. |
-| History p50 / p90 | Nearest-rank of complete initial-attempt selected workflow windows; not normalized for full/affected plans, runner/image, cache or missing external checks. |
+| History p50 / p90 | Nearest-rank of complete initial-attempt PR/source groups containing Verify and not cut by the workflow cap; truncated or Verify-less groups are excluded. Not normalized for full/affected plans, runner/image, cache or missing external checks. |
 
 The chain is the **observed latest-finishing dependency chain**, not a calculated counterfactual critical path or guaranteed saving. For unavailable or ambiguous DAG/timestamps, show unknown rather than inventing a value. A long job outside the certification path may still affect total workflow completion but not the certification gate.
 
