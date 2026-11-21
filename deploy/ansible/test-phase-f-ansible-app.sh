@@ -449,12 +449,14 @@ if [ "\$(id -u)" = "$service_uid" ]; then
     'CODEXIA_PHASE_F_CHANNEL_FILE=$phase_dir/channel-bootstrap.json' \
     'CODEXIA_PHASE_F_FRONTEND_URL=$frontend_identity_url' \
     'CODEXIA_PHASE_F_FRONTEND_IDENTITY_FILE=$phase_dir/simulated-frontend-identity-fresh-schema.json' \
-    'SSL_CERT_FILE=$phase_dir/identity-server.crt' \
-    'no_proxy=127.0.0.1,localhost' \
-    'NO_PROXY=127.0.0.1,localhost'
+    'SSL_CERT_FILE=$phase_dir/identity-server.crt'
 fi
 EOF
   user_systemctl daemon-reload
+  # Ansible task environment carries the loopback bypass where it is needed.
+  # Keeping it off the shared manager environment prevents Podman from
+  # propagating it into the strict legacy/runtime container environment.
+  user_systemctl unset-environment no_proxy NO_PROXY
   local manager_environment
   manager_environment=$(user_systemctl show-environment)
   grep -Fxq "XDG_CONFIG_HOME=$service_home/.config" <<<"$manager_environment" || fail 'Fixture user manager has the wrong XDG_CONFIG_HOME after generator reload.'
@@ -464,8 +466,7 @@ EOF
   grep -Fxq "CODEXIA_PHASE_F_FRONTEND_URL=$frontend_identity_url" <<<"$manager_environment" || fail 'Fixture user manager is missing the loopback identity URL.'
   grep -Fxq "CODEXIA_PHASE_F_FRONTEND_IDENTITY_FILE=$phase_dir/simulated-frontend-identity-fresh-schema.json" <<<"$manager_environment" || fail 'Fixture user manager is missing the simulated identity document.'
   grep -Fxq "SSL_CERT_FILE=$phase_dir/identity-server.crt" <<<"$manager_environment" || fail 'Fixture user manager is missing the loopback TLS certificate.'
-  grep -Fxq 'no_proxy=127.0.0.1,localhost' <<<"$manager_environment" || fail 'Fixture user manager does not bypass proxies for loopback.'
-  grep -Fxq 'NO_PROXY=127.0.0.1,localhost' <<<"$manager_environment" || fail 'Fixture user manager does not bypass proxies for loopback.'
+  if grep -Eq '^(no_proxy|NO_PROXY)=' <<<"$manager_environment"; then fail 'Fixture user manager must not export proxy bypasses to Podman containers.'; fi
   printf '%s\\n' 'Phase F fixture manager XDG and updater environment verified after systemd environment generation.'
 }
 require_no_change() {

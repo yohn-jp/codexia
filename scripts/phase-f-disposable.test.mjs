@@ -70,6 +70,8 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
   for (const marker of [
     'install_fixture_manager_xdg',
     'phase_f_xdg_generator_path',
+    'unset-environment no_proxy NO_PROXY',
+    'Fixture user manager must not export proxy bypasses to Podman containers.',
     'Phase F fixture manager XDG and updater environment verified after systemd environment generation.',
     'NODE_OPTIONS=--import=$source_root/scripts/phase-f-fetch-loader.mjs',
     'CODEXIA_PHASE_F_CHANNEL_FILE=$phase_dir/channel-bootstrap.json',
@@ -77,7 +79,7 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
     'CODEXIA_PHASE_F_FRONTEND_IDENTITY_FILE=$phase_dir/simulated-frontend-identity-fresh-schema.json',
     'channel-bootstrap.json',
     'SSL_CERT_FILE=$phase_dir/identity-server.crt',
-    'NO_PROXY=127.0.0.1,localhost',
+    "NO_PROXY: '127.0.0.1,localhost'",
     'tar -C "$repo_root" -cf - deploy scripts packages/persistence-postgres/migrations',
     'service_ansible_version=$(as_service "$ansible_playbook" --version)',
     'codexia_stage=$stage',
