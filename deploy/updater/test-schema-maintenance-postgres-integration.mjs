@@ -155,12 +155,24 @@ async function main() {
   const maintenanceState = initialControllerState(targetMaintenanceRelease, 'blue', checkpoint);
   for (const field of ['apiEpoch', 'persistenceFormat']) {
     const incompatibleTarget = { ...nextMaintenanceRelease, [field]: nextMaintenanceRelease[field] + 1 };
-    const forbiddenHost = new Proxy({}, { get: () => () => { throw new Error('Host operation reached before incompatible maintenance was rejected'); } });
+    const sideEffects = [];
+    const forbiddenHost = new Proxy({}, { get: () => () => {
+      sideEffects.push('host operation');
+      throw new Error('Host operation reached before incompatible maintenance was rejected');
+    } });
     await assert.rejects(runSchemaMaintenance({
-      controller: { host: forbiddenHost, publicKey, now: () => now },
+      controller: {
+        host: forbiddenHost,
+        publicKey,
+        now: () => now,
+        async uiEpoch() { sideEffects.push('controller.uiEpoch'); throw new Error('controller.uiEpoch reached before incompatible guard'); },
+        async save() { sideEffects.push('controller.save'); throw new Error('controller.save reached before incompatible guard'); },
+      },
       state: maintenanceState,
       target: incompatibleTarget,
+      markerStore: { async save() { sideEffects.push('markerStore.save'); throw new Error('markerStore.save reached before incompatible guard'); } },
     }), new RegExp(`Same-epoch schema target changed ${field}`), `Incompatible ${field} transition was admitted`);
+    assert.deepEqual(sideEffects, [], `Rejected ${field} transition reached a host, controller, or recovery-marker effect`);
     assert.equal(await host.freshDatabaseIdentity(), migratedDatabaseId,
       `Rejected ${field} transition changed the PostgreSQL identity`);
     assert.equal(await host.schemaFingerprint(targetRelease), migratedSchemaFingerprint,

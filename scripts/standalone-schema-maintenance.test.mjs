@@ -48,10 +48,14 @@ function fixture(fingerprint, { targetPersisted = false, writers } = {}) {
       async probe(slot, release) { trace.push('probe:'+release.image+':'+route); },
     },
     async uiEpoch(release) { trace.push('epoch:'+release.image); assert.equal(release.apiEpoch, 1); },
-    async save(value) { saved = structuredClone(value); return saved; },
+    async save(value) { trace.push('controller.save'); saved = structuredClone(value); return saved; },
     async assertServing() {},
   };
-  const markerStore = { async load() { return marker; }, async clear() { trace.push('clear'); } };
+  const markerStore = {
+    async load() { return marker; },
+    async save() { trace.push('markerStore.save'); throw new Error('markerStore.save reached before incompatible guard'); },
+    async clear() { trace.push('clear'); },
+  };
   return { controller, state, marker, markerStore, trace, saved: () => saved };
 }
 
