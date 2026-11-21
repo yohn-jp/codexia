@@ -4,7 +4,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { IDENTITY_PROBE_PATHS, probeScopedIdentityAccess, readLiveJson } from './update-release-policy.mjs';
+import { IDENTITY_PROBE_PATHS, probeScopedIdentityAccess, readLiveJson } from './identity-probe-client.mjs';
 
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 const shaPattern = /^[a-f0-9]{40}$/u;
