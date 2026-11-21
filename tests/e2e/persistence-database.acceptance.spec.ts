@@ -284,6 +284,11 @@ test("outline supports guarded keyboard navigation, search, zoom and mobile sizi
 });
 
 async function openResearchInspector(page: import("@playwright/test").Page) {
+  // A visible contenteditable can precede the CodeMirror EditorView being
+  // connected after reload. Focusing and observing CodeMirror's focus class
+  // proves the editor is ready before its navigation guard runs.
+  await manuscriptEditor(page).focus();
+  await expect(page.locator(".cm-editor")).toHaveClass(/cm-focused/u);
   const toolbar = page.getByRole("toolbar", { name: "ワークスペース配置" });
   await toolbar.getByRole("button", { name: "調査", exact: true }).click();
   await expect(page.locator('[data-workspace-panel="inspector"]')).toBeVisible();
