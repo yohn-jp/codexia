@@ -42,8 +42,10 @@ export const VERIFICATION_GROUPS = {
   'oci-core': ['oci-core'],
   'oci-full': ['oci-full'],
   ...Object.fromEntries(PROFILES.flatMap(profile => [
-    [`browser-${profile}-writing`, ['core', 'native-review', 'persistence-database', 'redesign-visual'].map(id => `browser-${profile}-${id}`)],
-    [`browser-${profile}-reference`, ['modular-workspace', 'review-contributions', 'recent-activity', 'job-inbox'].map(id => `browser-${profile}-${id}`)],
+    [`browser-${profile}-writing`, ['core', 'native-review', 'persistence-database'].map(id => `browser-${profile}-${id}`)],
+    // Run the performance-sensitive visual shard only after the shorter
+    // reference tasks, avoiding an exclusive tail on the critical writing lane.
+    [`browser-${profile}-reference`, ['modular-workspace', 'review-contributions', 'recent-activity', 'job-inbox', 'redesign-visual'].map(id => `browser-${profile}-${id}`)],
     [`browser-${profile}-webkit`, ['auth-recovery', 'ui-v1', 'webkit'].map(id => `browser-${profile}-${id}`)],
   ])),
   ...Object.fromEntries(NATIVE_SELECTIONS.map(id => [`hosted-native-${id}`, [`hosted-native-${id}`]])),
