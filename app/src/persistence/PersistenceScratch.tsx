@@ -6,6 +6,11 @@ interface ScratchNoteRequest { idempotencyKey: string; orderKey: string; markdow
 interface Scratch { text: string; images: Array<{ name: string; data: string }>; generation: number; pendingNoteRequest?: ScratchNoteRequest }
 const empty = (): Scratch => ({ text: "", images: [], generation: 0 });
 
+export interface ScratchGuard {
+  protect(): Promise<void>;
+  hasUnprotectedInput(): boolean;
+}
+
 function scratchMarkdown(value: Pick<Scratch, "text" | "images">): string {
   return value.text + value.images.map((image) => `\n\n![${image.name.replace(/[\[\]\\]/gu, "")}](${image.data})`).join("");
 }
@@ -13,7 +18,7 @@ function scratchMarkdown(value: Pick<Scratch, "text" | "images">): string {
 /** Private scratch remains outside the manuscript until explicitly saved as a note. */
 export function PersistenceScratch({ projectId, documentId, authorScope, journal, canCreateNote, registerGuard, onSaved }: {
   projectId: string; documentId: string; authorScope: string; journal: BrowserJournal; canCreateNote: boolean;
-  registerGuard(guard: (() => Promise<void>) | null): void; onSaved(): Promise<void>;
+  registerGuard(guard: ScratchGuard | null): void; onSaved(): Promise<void>;
 }) {
   const [draft, setDraft] = useState<Scratch>(empty);
   const draftRef = useRef(draft);
@@ -27,6 +32,11 @@ export function PersistenceScratch({ projectId, documentId, authorScope, journal
   const protectedScratch = useRef<{ text: string; generation: number } | null>(null);
   const path = `scratch/${documentId}`;
   function publish(value: Scratch) { draftRef.current = value; setDraft(value); }
+  function hasUnprotectedInput(): boolean {
+    const current = draftRef.current;
+    const known = protectedScratch.current;
+    return Boolean(known && current.generation > known.generation);
+  }
   async function protect(): Promise<void> {
     let read = pendingRead.current;
     await read;
@@ -69,9 +79,9 @@ export function PersistenceScratch({ projectId, documentId, authorScope, journal
       setProtectedGeneration(initial.generation);
       setLoading(false);
     }).catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : "スクラッチを読み込めませんでした。"); });
-    registerGuard(() => protectRef.current());
+    registerGuard({ protect: () => protectRef.current(), hasUnprotectedInput });
     return () => { cancelled = true; registerGuard(null); };
-  }, [journal, projectId, path, authorScope]);
+  }, [journal, projectId, path, authorScope, registerGuard]);
   useEffect(() => { if (!loading && draft.generation > 0) void protectRef.current().catch(() => {}); }, [draft.generation, loading]);
   async function attach(files: File[]) {
     setAttachmentError("");

@@ -848,6 +848,86 @@ test("an untouched or stale tab cannot overwrite protected scratch text and imag
   }
 });
 
+test("an unprotected scratch warns before reload and the protected other-tab value remains recoverable", async ({ page, context }) => {
+  const f = await fixture(page);
+  const second = await context.newPage();
+  let pageDialogs = 0;
+  let secondDialogs = 0;
+  let secondDialogAction: "dismiss" | "accept" = "dismiss";
+  page.on("dialog", async (dialog) => {
+    if (dialog.type() !== "beforeunload") return dialog.dismiss();
+    pageDialogs++;
+    await dialog.accept();
+  });
+  second.on("dialog", async (dialog) => {
+    if (dialog.type() !== "beforeunload") return dialog.dismiss();
+    secondDialogs++;
+    if (secondDialogAction === "dismiss") await dialog.dismiss();
+    else await dialog.accept();
+  });
+  try {
+    await second.goto(page.url());
+    await expectEditor(second, f.one.revision.markdown);
+    await scratch(page);
+    await scratch(second);
+    await memo(page).fill("Tab A protected scratch.");
+    await expect.poll(async () => (await scratchRecords(page)).find((record) => record.key.includes(f.one.document.id))?.text).toContain("Tab A protected scratch.");
+
+    await page.reload();
+    expect(pageDialogs).toBe(0);
+    await scratch(page);
+    await expect(memo(page)).toHaveValue("Tab A protected scratch.");
+
+    await memo(second).fill("Tab B conflicting scratch.");
+    await expect(second.locator(".scratch-panel").getByRole("alert")).toContainText("別タブ");
+    expect((await scratchRecords(second)).find((record) => record.key.includes(f.one.document.id))?.text).toContain("Tab A protected scratch.");
+
+    await second.reload({ timeout: 5_000 }).catch(() => undefined);
+    expect(secondDialogs).toBe(1);
+    await expect(memo(second)).toHaveValue("Tab B conflicting scratch.");
+    expect((await scratchRecords(second)).find((record) => record.key.includes(f.one.document.id))?.text).toContain("Tab A protected scratch.");
+
+    secondDialogAction = "accept";
+    await second.reload({ timeout: 5_000 }).catch(() => undefined);
+    expect(secondDialogs).toBe(2);
+    await scratch(second);
+    await expect(memo(second)).toHaveValue("Tab A protected scratch.");
+    await second.reload();
+    expect(secondDialogs).toBe(2);
+    await scratch(second);
+    await expect(memo(second)).toHaveValue("Tab A protected scratch.");
+  } finally {
+    await second.close();
+  }
+});
+
+test("scratch storage failure warns before reload and keeps the last protected record", async ({ page }) => {
+  const f = await fixture(page);
+  await scratch(page);
+  await memo(page).fill("Last protected scratch.");
+  await expect.poll(async () => (await scratchRecords(page)).find((record) => record.key.includes(f.one.document.id))?.text).toContain("Last protected scratch.");
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, value: unknown, key?: IDBValidKey) {
+      if (this.name === "pgScratch") throw new DOMException("Scratch quota failure", "QuotaExceededError");
+      return key === undefined ? original.call(this, value) : original.call(this, value, key);
+    };
+  });
+  await memo(page).fill("Unprotected scratch during storage failure.");
+  await expect(page.locator(".scratch-panel [role=alert]")).toBeVisible();
+  let dialogs = 0;
+  page.on("dialog", async (dialog) => {
+    if (dialog.type() !== "beforeunload") return dialog.dismiss();
+    dialogs++;
+    await dialog.dismiss();
+  });
+
+  await page.reload({ timeout: 5_000 }).catch(() => undefined);
+  expect(dialogs).toBe(1);
+  await expect(memo(page)).toHaveValue("Unprotected scratch during storage failure.");
+  expect((await scratchRecords(page)).find((record) => record.key.includes(f.one.document.id))?.text).toContain("Last protected scratch.");
+});
+
 test("navigation does not replace a scratch record while it is loading or unreadable", async ({ page }) => {
   const f = await fixture(page);
   await scratch(page);
