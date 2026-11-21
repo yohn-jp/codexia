@@ -602,7 +602,7 @@ test("full MCP proposal payload and approval state survive Core process and cach
 test("a PostgreSQL update during author approval keeps the conflicting editor draft visible", async ({ page }) => {
   const f = await fixture(page); const proposal = await submitProposal(page, f); const gate = await holdSaves(page, f);
   try {
-    await editor(page).fill("Author input must survive rejected approval."); await gate.seen;
+    await replaceEditor(page, "Author input must survive rejected approval."); await gate.seen;
     await replace(page, f, "Another writer advanced the project.");
     const approval = await page.request.post(`/api/projects/${f.projectId}/approvals`, { headers: mutationHeaders(), data: { proposalId: proposal.id, operationIds: [proposal.operation.id] } }); expect(approval.status()).toBe(204);
     const applied = await page.request.post(`/api/projects/${f.projectId}/apply`, { headers: mutationHeaders(), data: proposal.operation }); expect(applied.status()).toBe(409);
