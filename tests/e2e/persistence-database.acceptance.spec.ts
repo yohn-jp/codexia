@@ -486,8 +486,6 @@ for (const { mode, width, forceAppendFallback = false } of [
       await symbolMenu.getByRole("button", { name: "三点リーダーを挿入" }).click();
       expect((await symbolResponse).ok()).toBe(true);
       await expect.poll(async () => (await storedDocumentMarkdown(page, project.id, scene.id)).markdown).toBe(nextEdit);
-      await displayMenu.locator("summary").click();
-      await editor.focus();
       await expect(editor).toBeFocused();
       const typedEdit = nextEdit.slice(0, caretPosition + "……".length) + "y" + nextEdit.slice(caretPosition + "……".length);
       const typingResponse = page.waitForResponse((response) => response.request().method() === "PATCH" && new URL(response.url()).pathname === `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`, { timeout: 15_000 });
@@ -496,6 +494,7 @@ for (const { mode, width, forceAppendFallback = false } of [
       expect(typedSave.ok()).toBe(true);
       expect((typedSave.request().postDataJSON() as { resultingSha256: string }).resultingSha256).toBe(createHash("sha256").update(typedEdit).digest("hex"));
       await expect.poll(async () => (await storedDocumentMarkdown(page, project.id, scene.id)).markdown).toBe(typedEdit);
+      await displayMenu.locator("summary").click();
 
       await openRevisionHistory(page);
       const revisionsResponse = await page.request.get(new URL(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}/revisions?limit=50`, page.url()).toString());
