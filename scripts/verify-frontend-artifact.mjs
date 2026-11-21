@@ -44,7 +44,7 @@ function assertOptionalFrontendPRAssociation(run,expected){
  * @param {unknown} artifact
  * @param {unknown[]} jobs
  * @param {unknown[]} producerAttemptJobs
- * @param {{runId:string|number,currentAttempt:string|number,producerAttempt:string|number,sourceSha:string,artifactId:string|number,artifactName:string,artifactDigest:string}} expected
+ * @param {{runId:string|number,currentAttempt:string|number,producerAttempt:string|number,sourceSha:string,artifactId:string|number,artifactName:string,artifactDigest:string,event?:string,workflowSha?:string}} expected
  */
 export function assertFrontendArtifactEvidence(run, artifact, jobs, expected, producerAttemptJobs = jobs) {
   assert.ok(run && typeof run === 'object' && !Array.isArray(run), 'Frontend producer workflow run metadata is invalid');
@@ -55,24 +55,26 @@ export function assertFrontendArtifactEvidence(run, artifact, jobs, expected, pr
   const currentAttempt = positiveInteger(expected.currentAttempt, 'Frontend workflow run attempt');
   const producerAttempt = positiveInteger(expected.producerAttempt, 'Frontend producer job attempt');
   const artifactId = positiveInteger(expected.artifactId, 'Frontend artifact ID');
+  const workflowSha = expected.event === 'workflow_run' ? expected.workflowSha : expected.sourceSha;
+  assert.match(workflowSha ?? '', shaPattern, 'Frontend producer workflow SHA is invalid');
 
   assert.equal(String(run.id), runId, 'Frontend producer run ID mismatch');
   assert.ok(producerAttempt <= currentAttempt, 'Frontend producer attempt is newer than the workflow attempt');
   assert.equal(run.run_attempt, currentAttempt, 'Frontend workflow run attempt mismatch');
   assert.equal(run.event, expected.event || 'push', 'Frontend producer event mismatch');
   assert.equal(run.head_branch, 'main', 'Frontend producer branch must be main');
-  assert.equal(run.head_sha, expected.sourceSha, 'Frontend producer source SHA mismatch');
+  assert.equal(run.head_sha, workflowSha, 'Frontend producer workflow SHA mismatch');
 
   assert.equal(expected.artifactName, `codexia-frontend-${expected.sourceSha}-attempt-${producerAttempt}`, 'Frontend artifact name does not bind the producer attempt');
   const selected = selectLatestJobArtifact(expected.artifactName, 'Build and verify UI assets', [artifact], jobs, {
     runId,
-    sourceSha: expected.sourceSha,
+    sourceSha: workflowSha,
   });
   assert.equal(selected.id, artifactId, 'Frontend artifact ID does not match the build job output');
   const producerJobs = producerAttemptJobs.filter(job => job && typeof job === 'object' && job.name === 'Build and verify UI assets');
   assert.equal(producerJobs.length, 1, 'Expected exactly one latest frontend artifact producer job');
   assert.equal(producerJobs[0].run_attempt, producerAttempt, 'Frontend artifact producer attempt mismatch');
-  assert.equal(selectLatestJobArtifact(expected.artifactName, 'Build and verify UI assets', [artifact], producerAttemptJobs, {runId, sourceSha: expected.sourceSha}).id, artifactId, 'Frontend artifact does not belong to the declared producer attempt');
+  assert.equal(selectLatestJobArtifact(expected.artifactName, 'Build and verify UI assets', [artifact], producerAttemptJobs, {runId, sourceSha: workflowSha}).id, artifactId, 'Frontend artifact does not belong to the declared producer attempt');
   assert.equal(artifact.digest, `sha256:${expected.artifactDigest}`, 'Frontend artifact digest mismatch');
 }
 
@@ -455,6 +457,7 @@ export async function verifyFrontendArtifact({ env = process.env, fetchImpl = fe
     assert.equal(expected.sourceSha,sourceSha,'Main frontend artifact producer source mismatch');
     assert.equal(expected.artifactName,`codexia-frontend-${expected.sourceSha}-attempt-${expected.producerAttempt}`,'Frontend artifact name does not bind source and producer attempt');
     expected.event=env.GITHUB_EVENT_NAME;
+    expected.workflowSha=env.GITHUB_SHA;
     const producerApi=apiBase+'/actions';
     const request=endpoint=>githubJson(producerApi+'/'+endpoint,token,fetchImpl);
     const [run,selectedArtifact,jobs,producerAttemptJobs]=await Promise.all([

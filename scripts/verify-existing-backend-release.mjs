@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildComponentReleaseRecord } from './component-release-record.mjs';
+import { backendPublicationFromEnvironment, buildComponentReleaseRecord, publicationInWorkflowWindow } from './component-release-record.mjs';
 import { collectGitHubPages } from './release-policy.mjs';
 
 const REPOSITORY='yohn-jp/codexia';
@@ -26,12 +26,12 @@ export function assertExistingBackendReleaseBinding(release,tagRef,expected){
   assert.equal(metadata.images[expected.profile],expected.image,'Existing backend release does not bind the immutable registry digest');
   if(expected.event==='pull_request'){
     const record=buildComponentReleaseRecord('backend',expected.mainSha,null,{core:metadata.images.core,full:metadata.images.full,
-      compatibility:expected.compatibility,event:'pull_request',receipt:expected.receipt,mainTree:expected.mainTree});
+      compatibility:expected.compatibility,event:'pull_request',receipt:expected.receipt,mainTree:expected.mainTree,publication:expected.publication});
     assert.deepEqual(metadata,record.metadata,'Existing backend release does not bind this exact promoted producer receipt');
   }else{
     assert.ok(['push','workflow_run'].includes(expected.event),'Main backend producer event mismatch');
     const record=buildComponentReleaseRecord('backend',expected.mainSha,null,{core:metadata.images.core,full:metadata.images.full,
-      compatibility:expected.compatibility,event:expected.event,receipt:expected.receipt,mainTree:expected.mainTree});
+      compatibility:expected.compatibility,event:expected.event,receipt:expected.receipt,mainTree:expected.mainTree,publication:expected.publication});
     assert.deepEqual(metadata,record.metadata,'Existing backend release does not bind this exact main build receipt');
   }
   return metadata;
@@ -88,16 +88,17 @@ export async function verifyExistingBackendRelease({env=process.env,args=process
     assert.equal(receipt.version,version,'Backend build receipt version mismatch');
     assert.equal(receipt.sourceTree,mainTree,'Backend build receipt tree mismatch');
   }
-  const metadata=assertExistingBackendReleaseBinding(release,tagRef,{image,mainSha,producerSha,version,profile,event,receipt,mainTree,compatibility});
+  const publication=backendPublicationFromEnvironment(env,mainSha);
+  const metadata=assertExistingBackendReleaseBinding(release,tagRef,{image,mainSha,producerSha,version,profile,event,receipt,mainTree,compatibility,publication});
   if(event==='pull_request')assert.equal(metadata.producer.sourceSha,producerSha,'Existing release producer SHA mismatch');
   else assert.equal(producerSha,mainSha,'Main producer SHA mismatch');
-  const created=Date.parse(release.created_at);
-  assert.ok(Number.isFinite(created),'Existing backend release creation time is invalid');
-  const runs=await pages('actions/workflows/backend-release.yml/runs?head_sha='+mainSha+'&branch=main&event='+publicationEvent,'workflow_runs',token);
+  const workflowHeadSha=publication?.workflowHeadSha??mainSha;
+  const runs=publication ? [await request('actions/runs/'+publication.workflowRunId,token)] :
+    await pages('actions/workflows/backend-release.yml/runs?head_sha='+workflowHeadSha+'&branch=main&event='+publicationEvent,'workflow_runs',token);
   for(const run of runs){
-    if(run?.path!=='.github/workflows/backend-release.yml'||run.event!==publicationEvent||run.head_branch!=='main'||run.head_sha!==mainSha||
-      run.status!=='completed'||run.conclusion!=='success'||!Number.isFinite(Date.parse(run.created_at))||!Number.isFinite(Date.parse(run.updated_at))||
-      Date.parse(run.created_at)>created||created>Date.parse(run.updated_at))continue;
+    if(run?.path!=='.github/workflows/backend-release.yml'||run.event!==publicationEvent||run.head_branch!=='main'||run.head_sha!==workflowHeadSha||
+      run.status!=='completed'||run.conclusion!=='success'||!publicationInWorkflowWindow(release,run))continue;
+    if(publication&&run.id!==publication.workflowRunId)continue;
     if(event!=='pull_request'&&(run.id!==receipt.workflowRunId||run.run_number!==receipt.workflowRunNumber))continue;
     const jobs=await pages('actions/runs/'+run.id+'/jobs?filter=latest','jobs',token);
     if(successfulPublicationJobs(jobs,event==='pull_request',true))return {release,metadata,publicationRunId:run.id};

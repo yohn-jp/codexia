@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildComponentReleaseRecord } from './component-release-record.mjs';
+import { backendPublicationFromEnvironment, buildComponentReleaseRecord } from './component-release-record.mjs';
 
 const repository='yohn-jp/codexia';
 const digest=/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u;
@@ -36,7 +36,7 @@ export function componentReleaseRecordFromEnvironment(env=process.env){
   const core=env.CODEXIA_CERTIFIED_IMAGE,full=env.CODEXIA_CERTIFIED_FULL_IMAGE;
   assert.match(core??'',digest);assert.match(full??'',digest);assert.notEqual(core,full);
   const compatibility=JSON.parse(readFileSync(new URL('../deploy/update-compatibility.json',import.meta.url),'utf8'));
-  const producer={core,full,compatibility,event:env.CODEXIA_BACKEND_PRODUCER_EVENT};
+  const producer={core,full,compatibility,event:env.CODEXIA_BACKEND_PRODUCER_EVENT,publication:backendPublicationFromEnvironment(env,sha)};
   if(producer.event==='pull_request'){
     const directory=env.CODEXIA_BACKEND_PROMOTION_DIR;
     assert.ok(typeof directory==='string'&&path.isAbsolute(directory),'Backend promotion receipt directory is invalid');
