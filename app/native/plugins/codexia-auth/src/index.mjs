@@ -1,30 +1,32 @@
-import { registerPlugin } from "@capacitor/core";
 import { CALLBACK_URI } from "./constants.mjs";
 
-const NativeAuth = registerPlugin("CodexiaAuth");
+let nativePluginPromise;
 
-export function createNativeAuth(config, { apiRequest = (options) => NativeAuth.apiRequest(options) } = {}) {
+export function createNativeAuth(config, { apiRequest, nativePlugin } = {}) {
   if (!config || config.redirectUri !== CALLBACK_URI) throw new TypeError("Native OAuth configuration is invalid.");
   const apiOrigin = new URL(config.apiOrigin);
-  const fetchRequest = createNativeApiTransport(config.apiOrigin, { apiRequest });
+  const getPlugin = () => nativePlugin ? Promise.resolve(nativePlugin) : getNativeAuthPlugin();
+  const fetchRequest = createNativeApiTransport(config.apiOrigin, {
+    apiRequest: apiRequest ?? ((options) => getPlugin().then((plugin) => plugin.apiRequest(options))),
+  });
 
   return Object.freeze({
     async signIn() {
-      return accessTokenValue(await NativeAuth.signIn(config), "Sign-in");
+      return accessTokenValue(await (await getPlugin()).signIn(config), "Sign-in");
     },
     async accessTokenFor(requestUrl) {
       validateApiRequestUrl(requestUrl, apiOrigin);
-      return accessTokenValue(await NativeAuth.accessToken(config), "API access");
+      return accessTokenValue(await (await getPlugin()).accessToken(config), "API access");
     },
     fetchRequest,
     async signOut() {
-      const result = await NativeAuth.signOut(config);
+      const result = await (await getPlugin()).signOut(config);
       return { revoked: result?.revoked === true };
     },
   });
 }
 
-export function createNativeApiTransport(apiOriginValue, { apiRequest = (options) => NativeAuth.apiRequest(options) } = {}) {
+export function createNativeApiTransport(apiOriginValue, { apiRequest } = {}) {
   const apiOrigin = new URL(apiOriginValue);
   if (apiOrigin.protocol !== "https:" || apiOrigin.pathname !== "/" || apiOrigin.search || apiOrigin.hash || apiOrigin.username || apiOrigin.password) {
     throw new TypeError("Native API origin must be an explicit HTTPS origin.");
@@ -47,7 +49,7 @@ export function createNativeApiTransport(apiOriginValue, { apiRequest = (options
         throw new TypeError("Native API requests support JSON string bodies only.");
       }
       if (init.signal?.aborted) throw new DOMException("The request was aborted.", "AbortError");
-      const result = await apiRequest({
+      const result = await (apiRequest ?? defaultApiRequest)({
         apiOrigin: apiOrigin.toString(),
         url: target.toString(),
         method,
@@ -62,6 +64,17 @@ export function createNativeApiTransport(apiOriginValue, { apiRequest = (options
         : result.body;
       return new Response(responseBody, { status, headers: new Headers(result.headers) });
   };
+}
+
+async function defaultApiRequest(options) {
+  return (await getNativeAuthPlugin()).apiRequest(options);
+}
+
+function getNativeAuthPlugin() {
+  if (!nativePluginPromise) {
+    nativePluginPromise = import("@capacitor/core").then(({ registerPlugin }) => registerPlugin("CodexiaAuth"));
+  }
+  return nativePluginPromise;
 }
 
 function validateApiRequestUrl(requestUrl, apiOrigin) {
