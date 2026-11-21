@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { spawn, execFileSync } from 'node:child_process';
 import { readFileSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
@@ -8,6 +9,7 @@ import { assertProfileReceipt } from './ci-profile-artifact.mjs';
 import { assertNativeReceipt } from './ci-native-producer.mjs';
 import { runBounded } from './ci-parallel.mjs';
 import { withBrowserFixture } from './ci-browser-fixture.mjs';
+import { assertTaskProducerInventory, sanitizeProducerArguments } from './ci-task-input-proof.mjs';
 
 const group = process.argv[2];
 const plan = validateVerificationPlan(JSON.parse(readFileSync(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json', 'utf8')));
@@ -20,10 +22,15 @@ const completed = new Map();
 const limit = Number(process.env.CODEXIA_CI_CONCURRENCY ?? '2');
 if (![1, 2].includes(limit)) throw new Error('CI concurrency must be 1 or 2');
 const groupPreparation = new Map();
+const taskInvocationContext = new AsyncLocalStorage();
+const groupInvocations = [];
 let groupPreparationError;
 const reportDirectory = process.env.CODEXIA_CI_REPORT_DIR ?? path.resolve('ci-results', group);
 mkdirSync(reportDirectory, { recursive: true });
 const run = (command, args, extraEnv = {}) => new Promise((resolve, reject) => {
+  const active = taskInvocationContext.getStore();
+  const record = { executable: String(command), arguments: sanitizeProducerArguments(args.map(String)), environmentKeys: Object.keys(extraEnv).sort() };
+  (active?.invocations ?? groupInvocations).push(record);
   console.log(`$ ${command} ${args.join(' ')}`);
   const child = spawn(command, args, { stdio: 'inherit', env: { ...process.env, ...extraEnv } });
   child.once('error', reject);
@@ -65,7 +72,12 @@ if ((group.startsWith('types-') || group.startsWith('unit-')) && !preparationErr
 const preparationSeconds = (Date.now() - preparationStarted) / 1000;
 console.log(JSON.stringify({ phase: 'shared-workspace-preparation', group, seconds: preparationSeconds, concurrency: limit }));
 
-async function executeTask(task, index) {
+function executeTask(task, index) {
+  const scope = { invocations: [] };
+  return taskInvocationContext.run(scope, () => executeTaskInContext(task, index, scope));
+}
+
+async function executeTaskInContext(task, index, scope) {
   const started = Date.now();
   let error = preparationError || (task !== 'coverage' && (groupPreparationError || groupPreparation.get(task)?.error)) || undefined;
   let blocked = Boolean(error || (task === 'audit-core' && completed.get('build-core')?.status !== 'passed' && tasks.includes('build-core')));
@@ -107,7 +119,7 @@ async function executeTask(task, index) {
       } else throw new Error(`No runner for ${task}`);
     } catch (caught) { error = String(caught); }
   }
-  const result = { task, status: blocked ? 'blocked' : error ? 'failed' : 'passed', seconds: (Date.now() - started) / 1000, ...(error ? { error } : {}) };
+  const result = { task, status: blocked ? 'blocked' : error ? 'failed' : 'passed', seconds: (Date.now() - started) / 1000, invocations: scope.invocations, ...(error ? { error } : {}) };
   completed.set(task, result);
   console.log(JSON.stringify(result));
   return result;
@@ -124,7 +136,41 @@ const executionStarted = Date.now();
 const settled = await runBounded(tasks, executeTask, { limit, exclusive });
 const executionSeconds = (Date.now() - executionStarted) / 1000;
 const results = settled.map((entry, index) => entry.status === 'fulfilled' ? entry.value : { task: tasks[index], status: 'failed', seconds: 0, error: String(entry.reason) });
-const report = { group, sha, planDigest: planDigest(plan), timing: { concurrency: limit, preparationSeconds, executionSeconds }, ...(profileArtifact ? {profileArtifact} : {}), ...(nativeArtifact ? {nativeArtifact} : {}), results };
+const digest = planDigest(plan);
+const reportResults = results;
+let producerInventory = null;
+let workflowIdentity = null;
+if (process.env.GITHUB_RUN_ID !== undefined) {
+  workflowIdentity = {
+    workflowRunId: Number(process.env.GITHUB_RUN_ID),
+    workflowAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+    workflowJob: process.env.GITHUB_JOB,
+    workflowRef: process.env.GITHUB_WORKFLOW_REF,
+    workflowSha: process.env.GITHUB_WORKFLOW_SHA,
+  };
+  producerInventory = assertTaskProducerInventory({
+    plan,
+    report: { group, sha, planDigest: digest, ...workflowIdentity, results: reportResults },
+    inventory: {
+      format: 'codexia-ci-task-producer-inventory/v1',
+      group,
+      sourceSha: sha,
+      planDigest: digest,
+      ...workflowIdentity,
+      runner: {
+        os: process.env.RUNNER_OS ?? process.platform,
+        arch: process.env.RUNNER_ARCH ?? process.arch,
+        imageOS: process.env.ImageOS ?? null,
+        imageVersion: process.env.ImageVersion ?? null,
+        nodeVersion: process.version,
+      },
+      selectedTasks: tasks,
+      groupInvocations,
+      taskInvocations: results.map(({ task, status, invocations }) => ({ task, status, invocations })),
+    },
+  });
+}
+const report = { group, sha, planDigest: digest, ...(workflowIdentity ?? {}), timing: { concurrency: limit, preparationSeconds, executionSeconds }, ...(profileArtifact ? {profileArtifact} : {}), ...(nativeArtifact ? {nativeArtifact} : {}), results: reportResults, ...(producerInventory ? { producerInventory } : {}) };
 writeFileSync(path.join(reportDirectory, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
   `| Validation | Result | Seconds |\n| --- | --- | ---: |\n${results.map(item => `| ${item.task} | ${item.status} | ${item.seconds.toFixed(1)} |`).join('\n')}\n`);

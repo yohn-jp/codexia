@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assertBackendPromotionVersion, selectBackendPromotionRun } from './resolve-backend-promotion.mjs';
+import { assertBackendPromotionVersion, backendPromotionReceiptIdentity, selectBackendPromotionRun } from './resolve-backend-promotion.mjs';
 
 const sha='a'.repeat(40), branch='feature/backend-change';
 const proof={headSha:sha,headRef:branch,prNumber:23,mergedAt:'2026-11-19T12:00:00Z'};
@@ -25,4 +25,11 @@ test('backend PR promotion requires a strict SemVer advance over published backe
   assert.ok(assertBackendPromotionVersion('1.0.0','0.99.99'));
   assert.ok(assertBackendPromotionVersion('0.1.0',null));
   for(const version of ['0.1.89','0.1.88','latest','01.2.3']) assert.throws(()=>assertBackendPromotionVersion(version,'0.1.89'));
+});
+
+test('promotion receipt retains the complete validated OCI identity schema',()=>{
+  const identity={format:'codexia-backend-identity/v1',version:'0.1.88',sourceSha:sha,profile:'full',platform:'linux/amd64',
+    migrationFingerprint:'sha256:'+'b'.repeat(64),apiEpoch:1,persistenceFormat:1};
+  assert.deepEqual(backendPromotionReceiptIdentity(identity),identity);
+  assert.throws(()=>backendPromotionReceiptIdentity({...identity,format:'codexia-backend-identity/v0'}),/Invalid backend update identity/);
 });
