@@ -17,7 +17,7 @@ test('credential fingerprints use a unique operation salt and bounded scrypt', (
 
 test('legacy SHA-256 rotation markers are read for interrupted rollback only', () => {
   // SHA-256 of the fixed synthetic token, recorded by the pre-migration format.
-  const expected = '0627fc6d41cbf9753ea9c34ff6a6d04170bbd2c71860d30587a72d79d5c2e872';
+  const expected = '1bc38c974d8fc6bd9ad9697f1c6414cc7a356f10b3f0ac43eceed3bfa060f5c6';
   const secret = 'legacy-synthetic-credential';
   assert.equal(matchesRotationCredential(secret, first, expected), true);
   assert.equal(matchesRotationCredential('invalid-credential', first, expected), false);

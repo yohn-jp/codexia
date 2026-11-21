@@ -6,6 +6,7 @@ import { chmod, lstat, open, readFile, realpath, rm, unlink } from 'node:fs/prom
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyUpdateChannel } from '../../scripts/update-channel.mjs';
+import { matchesRotationCredential } from '../../scripts/rotation-credential-digest.mjs';
 import { assertMatchingControllerBackup, validateControllerBackupProof, atomicWrite, clearBackupIntent, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
 import { PodmanStandaloneHost, ensureDirectoryTreeDurable, validatePostgresAppPassword, validateRuntimeContract, validateStandaloneAuthToken, validateStandaloneTunnelToken } from './standalone-host.mjs';
 export { validatePostgresAppPassword };
@@ -191,7 +192,7 @@ export async function saveTunnelTokenSnapshot({config,state,snapshot,previousTok
   const root=rotationSnapshotRoot(config,snapshot.operationId);
   await ensureDirectoryTreeDurable(root);
   assert.equal((await lstat(root)).mode&0o777,0o700,'Tunnel token snapshot directory must be private');
-  assert.equal(createHash('sha256').update(previousToken).digest('hex'),snapshot.previousDigest,'Previous Tunnel token differs from captured identity');
+  assert.equal(matchesRotationCredential(previousToken,snapshot.operationId,snapshot.previousDigest),true,'Previous Tunnel token differs from captured identity');
   const previousTokenFile=path.join(root,'tunnel-token');
   await atomicWrite(previousTokenFile,previousToken);
   await atomicWrite(path.join(root,'controller.json'),JSON.stringify(state)+'\n');
@@ -212,7 +213,7 @@ export async function loadTunnelTokenSnapshot({config,state,marker}){
   assertTunnelTokenRotationState(state);
   assert.equal(marker.routeContent,`${state.journal.active.slot}\n`,'Tunnel token route differs from the committed writer');
   const previousToken=validateTunnelToken(await readBoundedPrivateFile(marker.previousTokenFile,8193));
-  assert.equal(createHash('sha256').update(previousToken).digest('hex'),rotation.previousDigest,'Previous Tunnel token snapshot digest drift');
+  assert.equal(matchesRotationCredential(previousToken,rotation.operationId,rotation.previousDigest),true,'Previous Tunnel token snapshot digest drift');
   return {snapshot:{...rotation},previousToken,root};
 }
 
@@ -250,7 +251,7 @@ function validatePreflightPasswordRotationMarker(marker,config){
 export async function savePreflightPasswordRotationSnapshot({config,state,snapshot,previousPassword,timer,routeContent}){
   assertPreflightPasswordRotationState(state);
   validatePostgresPreflightPassword(previousPassword);
-  assert.equal(createHash('sha256').update(previousPassword).digest('hex'),snapshot.previousDigest);
+  assert.equal(matchesRotationCredential(previousPassword,snapshot.operationId,snapshot.previousDigest),true);
   assert.equal(routeContent,`${state.journal.active.slot}\n`,'Preflight-password route differs from the committed writer');
   assert.ok(typeof snapshot.databaseQuadlet==='string'&&snapshot.databaseQuadlet.length>0);
   const root=rotationSnapshotRoot(config,snapshot.operationId);
@@ -295,7 +296,7 @@ export async function loadPreflightPasswordRotationSnapshot({config,state,marker
   let previousPassword=null;
   if(marker.phase==='applying'){
     previousPassword=validatePostgresPreflightPassword(await readBoundedPrivateFile(marker.previousPasswordFile,65));
-    assert.equal(createHash('sha256').update(previousPassword).digest('hex'),rotation.previousDigest,
+    assert.equal(matchesRotationCredential(previousPassword,rotation.operationId,rotation.previousDigest),true,
       'Previous preflight password snapshot digest drift');
   }
   return {snapshot:{...identity,databaseQuadlet},controllerState,previousPassword};
@@ -307,8 +308,8 @@ export async function saveApiAuthTokenSnapshot({config,state,snapshot,previousTo
   await ensureDirectoryTreeDurable(root);
   assert.equal((await lstat(root)).mode&0o777,0o700,'API token snapshot directory must be private');
   validateStandaloneAuthToken(previousToken);validateStandaloneAuthToken(replacementToken);
-  assert.equal(createHash('sha256').update(previousToken).digest('hex'),snapshot.previousDigest,'Previous API token differs from its captured identity');
-  assert.equal(createHash('sha256').update(replacementToken).digest('hex'),snapshot.replacementDigest,'Replacement API token differs from its admitted candidate');
+  assert.equal(matchesRotationCredential(previousToken,snapshot.operationId,snapshot.previousDigest),true,'Previous API token differs from its captured identity');
+  assert.equal(matchesRotationCredential(replacementToken,snapshot.operationId,snapshot.replacementDigest),true,'Replacement API token differs from its admitted candidate');
   const previousTokenFile=path.join(root,'api-auth-token');
   const replacementTokenFile=path.join(root,'api-auth-token-replacement');
   await atomicWrite(previousTokenFile,previousToken);
@@ -352,8 +353,8 @@ export async function loadApiAuthTokenSnapshot({config,state,marker}){
   assert.equal(marker.phase,'applying','A committed API token rotation no longer needs rollback credentials');
   const previousToken=validateStandaloneAuthToken(await readBoundedPrivateFile(rotation.previousTokenFile,8192));
   const replacementToken=validateStandaloneAuthToken(await readBoundedPrivateFile(rotation.replacementTokenFile,8192));
-  assert.equal(createHash('sha256').update(previousToken).digest('hex'),rotation.previousDigest,'Previous API token snapshot digest drift');
-  assert.equal(createHash('sha256').update(replacementToken).digest('hex'),rotation.replacementDigest,'Replacement API token snapshot digest drift');
+  assert.equal(matchesRotationCredential(previousToken,rotation.operationId,rotation.previousDigest),true,'Previous API token snapshot digest drift');
+  assert.equal(matchesRotationCredential(replacementToken,rotation.operationId,rotation.replacementDigest),true,'Replacement API token snapshot digest drift');
   assert.ok(previousToken.replace(/\n$/u,'')!==replacementToken.replace(/\n$/u,''),'API token recovery snapshot contains identical credentials');
   return {snapshot:{...rotation},previousToken,replacementToken};
 }
@@ -627,7 +628,7 @@ export async function loadPasswordRotationSnapshot({config,state,marker}){
   assert.equal(identity.databaseId,rotation.databaseId);
   const databaseQuadlet=await readBoundedPrivateFile(path.join(root,'codexia-db.container'),65536);
   const password=validatePostgresAppPassword(await readBoundedPrivateFile(rotation.previousPasswordFile,65));
-  assert.ok(createHash('sha256').update(password).digest('hex')===identity.previousDigest,'Previous password snapshot is unverified');
+  assert.ok(matchesRotationCredential(password,identity.operationId,identity.previousDigest),'Previous password snapshot is unverified');
   return {snapshot:{...identity,databaseQuadlet},password};
 }
 
@@ -1069,8 +1070,9 @@ async function restoreTunnelTokenRotation({config,store,publicKey,marker,markerP
   const secret=await host.assertTunnelTokenRotationSources(snapshot);
   const active=await host.tunnelRotationServiceActive();
   if(secret){
-    const digest=createHash('sha256').update(secret.token).digest('hex');
-    assert.ok(digest===snapshot.previousDigest||digest===snapshot.replacementDigest,'Tunnel recovery found an unrecognized token');
+    const digest=[snapshot.previousDigest,snapshot.replacementDigest]
+      .find(expected=>matchesRotationCredential(secret.token,snapshot.operationId,expected));
+    assert.ok(digest,'Tunnel recovery found an unrecognized token');
     if(active)await host.verifyTunnelTokenRotation(snapshot,digest);
   }else assert.equal(active,false,'Tunnel service is active while its canonical token secret is missing');
   if(active)await host.stopTunnel();
@@ -1120,7 +1122,7 @@ async function finalizeTunnelTokenRotation({config,store,publicKey,marker,marker
   assert.ok(route===marker.routeContent||route==='blocked\n','Tunnel completion route differs from its snapshot');
   await host.installTunnelRotationStartupFence();
   const secret=await host.assertTunnelTokenRotationSources(rotation);
-  assert.ok(secret&&createHash('sha256').update(secret.token).digest('hex')===expectedDigest,
+  assert.ok(secret&&matchesRotationCredential(secret.token,rotation.operationId,expectedDigest),
     'Tunnel token does not match its durable terminal marker');
   if(await host.tunnelRotationServiceActive())await host.verifyTunnelTokenRotation(rotation,expectedDigest);
   else{

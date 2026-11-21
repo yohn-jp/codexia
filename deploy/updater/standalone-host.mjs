@@ -447,7 +447,7 @@ function assertKnownAuthTokenSecret(secret,snapshot){
   if(!secret)return;
   assert.ok(knownRotationCredential(secret,snapshot,'token'),'Unrecognized canonical API token prevents recovery');
 }
-export export function assertApiAuthTokenSecretIdentity(secret,snapshot,expectedDigest=null){
+export function assertApiAuthTokenSecretIdentity(secret,snapshot,expectedDigest=null){
   assert.ok(secret,'Canonical API token secret is missing');
   assertKnownAuthTokenSecret(secret,snapshot);
   if(expectedDigest===null)return;
