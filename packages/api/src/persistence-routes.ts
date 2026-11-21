@@ -526,6 +526,7 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
           const nodeId = requiredString(body.nodeId, "nodeId") as KnowledgeNodeId;
           const status = allowedStatus(body.status ?? "proposed", ["proposed", "confirmed", "ambiguous", "rejected"] as const, "status");
           const result = await persistence.transaction(async (transaction) => {
+            await transaction.assertProjectVersion(projectId);
             const anchor = await transaction.getEvidenceAnchor(projectId, evidenceId);
             if (!anchor || anchor.documentId !== documentId) failure(404, "PERSISTENCE_NOT_FOUND", "Text Anchor was not found");
             if (status === "confirmed" && (anchor.status !== "confirmed" || anchor.fromUtf16 === anchor.toUtf16)) {
