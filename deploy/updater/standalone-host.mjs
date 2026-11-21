@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { rotationCredentialDigest, matchesRotationCredential } from '../../scripts/rotation-credential-digest.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
@@ -402,12 +403,15 @@ function readTunnelTokenSecret(){
     return {id:secret.ID,owner:secret.Spec.Labels?.[tunnelTokenRotationLabel],token:validateStandaloneTunnelToken(secret.SecretData)};
   }catch{throw Error('Canonical Tunnel secret is unobservable');}
 }
+function knownRotationCredential(secret,snapshot,field){
+  const previous=matchesRotationCredential(secret[field],snapshot.operationId,snapshot.previousDigest);
+  return (secret.id===snapshot.originalSecretId&&previous)||
+    (secret.owner===snapshot.operationId&&
+      (previous||matchesRotationCredential(secret[field],snapshot.operationId,snapshot.replacementDigest)));
+}
 function assertKnownTunnelTokenSecret(secret,snapshot){
   if(!secret)return;
-  const digest=sha256(secret.token);
-  assert.ok((secret.id===snapshot.originalSecretId&&digest===snapshot.previousDigest)||
-    (secret.owner===snapshot.operationId&&[snapshot.previousDigest,snapshot.replacementDigest].includes(digest)),
-    'Unrecognized canonical Tunnel secret prevents recovery');
+  assert.ok(knownRotationCredential(secret,snapshot,'token'),'Unrecognized canonical Tunnel secret prevents recovery');
 }
 function readRotationSecret(secretName,ownerLabel=rotationLabel){
   const result=spawnSync('podman',['secret','exists',secretName],{stdio:'ignore',timeout:15000});
@@ -422,10 +426,7 @@ function readRotationSecret(secretName,ownerLabel=rotationLabel){
 function readPreflightPasswordSecret(){return readRotationSecret(preflightSecret,preflightRotationLabel);}
 function assertKnownPreflightPasswordSecret(secret,snapshot){
   if(!secret)return;
-  const digest=sha256(secret.password);
-  assert.ok((secret.id===snapshot.originalSecretId&&digest===snapshot.previousDigest)||
-    (secret.owner===snapshot.operationId&&[snapshot.previousDigest,snapshot.replacementDigest].includes(digest)),
-    'Unrecognized preflight password secret prevents recovery');
+  assert.ok(knownRotationCredential(secret,snapshot,'password'),'Unrecognized preflight password secret prevents recovery');
 }
 export function validateStandaloneAuthToken(content){
   assert.ok(typeof content==='string'&&Buffer.byteLength(content)<=8192&&/^[!-~]{32,8192}(?:\n)?$/u.test(content),
@@ -444,28 +445,23 @@ function readAuthTokenSecret(){
 }
 function assertKnownAuthTokenSecret(secret,snapshot){
   if(!secret)return;
-  const digest=sha256(secret.token);
-  assert.ok((secret.id===snapshot.originalSecretId&&digest===snapshot.previousDigest)||
-    (secret.owner===snapshot.operationId&&[snapshot.previousDigest,snapshot.replacementDigest].includes(digest)),
-    'Unrecognized canonical API token prevents recovery');
+  assert.ok(knownRotationCredential(secret,snapshot,'token'),'Unrecognized canonical API token prevents recovery');
 }
-export function assertApiAuthTokenSecretIdentity(secret,snapshot,expectedDigest=null){
+export export function assertApiAuthTokenSecretIdentity(secret,snapshot,expectedDigest=null){
   assert.ok(secret,'Canonical API token secret is missing');
   assertKnownAuthTokenSecret(secret,snapshot);
   if(expectedDigest===null)return;
-  const digest=sha256(secret.token);
-  const matchesPrevious=expectedDigest===snapshot.previousDigest&&digest===snapshot.previousDigest&&
+  const matchesPrevious=expectedDigest===snapshot.previousDigest&&
+    matchesRotationCredential(secret.token,snapshot.operationId,snapshot.previousDigest)&&
     (secret.id===snapshot.originalSecretId||secret.owner===snapshot.operationId);
-  const matchesReplacement=expectedDigest===snapshot.replacementDigest&&digest===snapshot.replacementDigest&&
+  const matchesReplacement=expectedDigest===snapshot.replacementDigest&&
+    matchesRotationCredential(secret.token,snapshot.operationId,snapshot.replacementDigest)&&
     secret.owner===snapshot.operationId;
   assert.ok(matchesPrevious||matchesReplacement,'Canonical API token secret does not match the committed rotation');
 }
 function assertKnownRotationSecret(secret,snapshot){
   if(!secret)return;
-  const digest=sha256(secret.password);
-  assert.ok((secret.id===snapshot.originalSecretId&&digest===snapshot.previousDigest)||
-    (secret.owner===snapshot.operationId&&[snapshot.previousDigest,snapshot.replacementDigest].includes(digest)),
-    'Unrecognized canonical app secret prevents recovery');
+  assert.ok(knownRotationCredential(secret,snapshot,'password'),'Unrecognized canonical app secret prevents recovery');
 }
 async function prepareRotationSecretInput(config,snapshot,password,inputName='postgres-app-password-input'){
   assert.ok(['postgres-app-password-input','postgres-preflight-password-input','api-auth-token-input','tunnel-token-input'].includes(inputName),'Unsupported maintenance secret input');
@@ -477,7 +473,7 @@ async function prepareRotationSecretInput(config,snapshot,password,inputName='po
   assert.equal(directory.mode&0o777,0o700,'Rotation secret input directory permissions drift');
   if(typeof process.getuid==='function')assert.equal(directory.uid,process.getuid(),'Rotation secret input directory owner drift');
   assert.equal(await realpath(root),path.resolve(root),'Rotation secret input directory cannot traverse a symlink');
-  assert.ok([snapshot.previousDigest,snapshot.replacementDigest].includes(sha256(password)),
+  assert.ok([snapshot.previousDigest,snapshot.replacementDigest].some(digest=>matchesRotationCredential(password,snapshot.operationId,digest)),
     'Rotation secret input is not bound to the recovery snapshot');
   const filename=path.join(root,inputName);
   let info;
@@ -1748,7 +1744,7 @@ export class PodmanStandaloneHost{
     const databaseId=await this.passwordRotationDatabaseId();
     const resources=await this.rotationResources(databaseId);
     const snapshot={databaseQuadlet:reviewed,fragmentDigest,operationId,databaseId,resources,adminSecretId:admin.id,
-      originalSecretId:original.id,previousDigest:sha256(original.password),replacementDigest:sha256(replacement)};
+      originalSecretId:original.id,previousDigest:rotationCredentialDigest(original.password,operationId),replacementDigest:rotationCredentialDigest(replacement,operationId)};
     snapshot.runtimeDigest=await this.rotationDatabaseRuntime(snapshot);
     assert.ok(snapshot.runtimeDigest,'Rotation requires the canonical running database');
     await this.verifyPostgresAppPassword(original.password);
@@ -1765,7 +1761,7 @@ export class PodmanStandaloneHost{
     const databaseId=await this.passwordRotationDatabaseId();
     const resources=await this.rotationResources(databaseId);
     const snapshot={databaseQuadlet:reviewed,fragmentDigest,operationId,databaseId,resources,adminSecretId:admin.id,
-      appSecretId:app.id,originalSecretId:original.id,previousDigest:sha256(original.password),replacementDigest:sha256(replacement),
+      appSecretId:app.id,originalSecretId:original.id,previousDigest:rotationCredentialDigest(original.password,operationId),replacementDigest:rotationCredentialDigest(replacement,operationId),
       sourceDigest:sha256(reviewed)};
     snapshot.runtimeDigest=await this.rotationDatabaseRuntime(snapshot,preflightSecret);
     assert.ok(snapshot.runtimeDigest,'Rotation requires the canonical running database');
@@ -1796,7 +1792,7 @@ export class PodmanStandaloneHost{
   async verifyPostgresPreflightPasswordDigest(snapshot,expectedDigest){
     const secret=readPreflightPasswordSecret();
     assertKnownPreflightPasswordSecret(secret,snapshot);
-    assert.ok(secret&&sha256(secret.password)===expectedDigest,'Canonical preflight secret differs from the expected recovery state');
+    assert.ok(secret&&matchesRotationCredential(secret.password,snapshot.operationId,expectedDigest),'Canonical preflight secret differs from the expected recovery state');
     await this.verifyPostgresPreflightPassword(secret.password);
   }
   async replacePostgresPreflightSecret(password,snapshot){
@@ -1936,7 +1932,7 @@ export class PodmanStandaloneHost{
     const controllerObservation=await this.observe();
     assert.deepEqual(controllerObservation,{route:state.journal.active.slot,writers:[{slot:state.journal.active.slot,image:state.installed.image}]},
       'Tunnel token rotation requires the committed writer serving its route');
-    return {operationId,originalSecretId:current.id,previousDigest:sha256(current.token),replacementDigest:sha256(candidate),
+    return {operationId,originalSecretId:current.id,previousDigest:rotationCredentialDigest(current.token,operationId),replacementDigest:rotationCredentialDigest(candidate,operationId),
       sourceDigest:sha256(unit.source),fragmentDigest:sha256((await this.readBackupQuadletUnit('codexia-tunnel.service','codexia-tunnel.container')).fragment),
       imageId:unit.imageId,runtimeDigest:await this.tunnelTokenRuntimeDigest(unit.source,observed)};
   }
@@ -1958,7 +1954,7 @@ export class PodmanStandaloneHost{
   }
   async verifyTunnelTokenRotation(snapshot,expectedDigest){
     const secret=await this.assertTunnelTokenRotationSources(snapshot);
-    assert.ok(secret&&sha256(secret.token)===expectedDigest,'Canonical Tunnel token bytes differ from the expected rotation state');
+    assert.ok(secret&&matchesRotationCredential(secret.token,snapshot.operationId,expectedDigest),'Canonical Tunnel token bytes differ from the expected rotation state');
     assert.equal(await this.tunnelServiceActive(),true,'Tunnel service did not become active');
     const observed=inspect('codexia-tunnel');
     assert.ok(observed?.State.Running,'Tunnel container is not running');
@@ -2017,7 +2013,7 @@ export class PodmanStandaloneHost{
     const observation=await this.observe();
     assert.deepEqual(observation,{route:state.journal.active.slot,writers:[{slot:state.journal.active.slot,image:state.installed.image}]},
       'API token rotation requires the exact committed writer serving its route');
-    return {operationId,originalSecretId:current.id,previousDigest:sha256(current.token),replacementDigest:sha256(candidate),token:current.token};
+    return {operationId,originalSecretId:current.id,previousDigest:rotationCredentialDigest(current.token,operationId),replacementDigest:rotationCredentialDigest(candidate,operationId),token:current.token};
   }
   assertApiAuthTokenSecret(snapshot,expectedDigest=null){
     const secret=readAuthTokenSecret();

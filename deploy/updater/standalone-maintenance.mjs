@@ -24,6 +24,7 @@ export const MAINTENANCE_SOURCE_FILES = Object.freeze([
   'deploy/updater/provision-preflight-role.sql',
   'deploy/updater/standalone-backup.sh',
   'scripts/standalone-schema-maintenance.mjs',
+  'scripts/rotation-credential-digest.mjs',
   'scripts/standalone-update-controller.mjs',
   'scripts/update-host-state.mjs',
   'scripts/update-channel.mjs',
