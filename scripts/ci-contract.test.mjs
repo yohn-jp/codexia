@@ -32,6 +32,14 @@ test('the certified twenty-job inventory retains all fifty-nine obligations besi
   assert.equal(workflow.jobs.certification.needs.includes('full_model_oci'), false);
   assert.equal(Object.hasOwn(fullModelWorkflow.on, 'workflow_call'), true);
   assert.equal(Object.hasOwn(fullModelWorkflow.on, 'pull_request'), false);
+  const apiUnitJob = workflow.jobs.unit;
+  assert.equal(apiUnitJob.env.CODEXIA_AUTH_TEST_DATABASE_URL,
+    'postgres://codexia:codexia@127.0.0.1:5432/codexia_auth_test');
+  assert.equal(apiUnitJob.env.CODEXIA_AUTH_TEST_DISPOSABLE, '1');
+  const authDatabase = apiUnitJob.steps.find(step => step.name === 'Create isolated Better Auth persistence database');
+  assert.equal(authDatabase.if, "matrix.group == 'core'");
+  assert.equal(authDatabase.env.POSTGRES_CONTAINER, '${{ job.services.postgres.id }}');
+  assert.match(authDatabase.run, /createdb -U codexia codexia_auth_test/u);
   const modelJobConfig = fullModelWorkflow.jobs['full-model-oci'];
   assert.ok(!Object.values(modelJobConfig.env).some(value => String(value).includes('${{ runner.')));
   for (const stepName of [
