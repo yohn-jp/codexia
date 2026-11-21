@@ -4,6 +4,8 @@ PostgreSQL is the sole authority for projects, document hierarchy, Markdown bodi
 
 ## Ownership and dependency direction
 
+The [API authentication and authorization contract](API-AUTHN-AUTHZ.md) defines the accepted, not-yet-deployed OAuth resource-server and object-level authorization target. This document and the existing deployment references remain authoritative for current supported modes until that contract is implemented and verified.
+
 Desktop and Mobile shells use the authenticated API. API admission owns authentication, project authorization, origin checks, cancellation and lifecycle draining. Dedicated standalone deployments may verify Cloudflare Access browser identity directly; the configured single author retains the same owner scope. Explicit MCP bearer credentials retain their restricted authority and cannot acquire browser author privileges from an Access assertion. Local standalone token sessions and Hosted grants remain separate modes. Core coordinates module snapshots and approved mutations through Persistence; the PostgreSQL adapter owns transactions and record validation. Core never imports optional module implementations or model providers.
 
 | Area | Owner |

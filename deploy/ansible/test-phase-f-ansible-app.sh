@@ -13,6 +13,9 @@ ansible_playbook=$ANSIBLE_PLAYBOOK
 [[ -x "$ansible_playbook" ]] || fail 'The isolated Ansible control environment is unavailable.'
 
 repo_root=$(cd "$(dirname "$0")/../.." && pwd -P)
+# The runner checkout is not traversable by the service user. Resolve every
+# source path first, then use an accessible cwd for direct sudo-as-service calls.
+cd /tmp
 service_user=codexia-ci-host
 service_uid=22001
 service_group=codexia-ci-host
@@ -25,6 +28,10 @@ runtime_owned=false
 source_owned=false
 phase_dir_owned=false
 identity_server_pid=''
+phase_f_xdg_generator_dir=/run/systemd/user-environment-generators
+phase_f_xdg_generator_path="$phase_f_xdg_generator_dir/99-codexia-phase-f-xdg-$service_uid-$$"
+phase_f_xdg_generator_installed=false
+phase_f_xdg_generator_dir_created=false
 mkdir -p "$evidence_dir"
 
 as_service() {
@@ -99,6 +106,15 @@ cleanup() {
         rc=0; rootless secret exists "$resource" >/dev/null 2>&1 || rc=$?
         [[ "$rc" == 1 ]] || cleanup_status=1
       done
+      if [[ "$phase_f_xdg_generator_installed" == true ]]; then
+        sudo rm -f -- "$phase_f_xdg_generator_path" || cleanup_status=1
+        phase_f_xdg_generator_installed=false
+        user_systemctl daemon-reload >/dev/null 2>&1 || cleanup_status=1
+      fi
+      if [[ "$phase_f_xdg_generator_dir_created" == true ]]; then
+        sudo rmdir -- "$phase_f_xdg_generator_dir" 2>/dev/null || cleanup_status=1
+        phase_f_xdg_generator_dir_created=false
+      fi
       as_service rm -rf -- "$service_home/.config/codexia-updater" "$service_home/.local/state/codexia-updater" || cleanup_status=1
       if sudo test -d /opt/codexia-updater && ! sudo test -L /opt/codexia-updater; then
         if [[ "$(sudo stat -c '%u:%a' /opt/codexia-updater 2>/dev/null)" == "$service_uid:750" ]]; then
@@ -143,6 +159,8 @@ trap cleanup EXIT
 
 [[ "$(id -u "$service_user" 2>/dev/null || true)" == "$service_uid" ]] || fail 'Expected Ansible-created disposable service identity is absent.'
 [[ "$(getent passwd "$service_user" | cut -d: -f6)" == "$service_home" ]] || fail 'Disposable service home differs from fixture contract.'
+service_ansible_version=$(as_service "$ansible_playbook" --version)
+[[ "$service_ansible_version" == 'ansible-playbook [core 2.21.6]'* ]] || fail "Fixture service user resolved an unexpected Ansible version: $service_ansible_version"
 as_service /usr/bin/test ! -L "$service_home/.local" || fail 'Service local data parent is a symlink; refusing fixture setup.'
 as_service /usr/bin/test ! -e "$phase_dir" || fail 'Application fixture state already exists; refusing adoption.'
 as_service /usr/bin/test ! -L "$phase_dir" || fail 'Application fixture state is a symlink; refusing adoption.'
@@ -199,7 +217,7 @@ phase_dir_owned=true
 [[ ! -e "$source_root" && ! -L "$source_root" ]] || fail 'Temporary Ansible source path already exists.'
 sudo install -d -o root -g root -m 0755 "$source_root"
 source_owned=true
-tar -C "$repo_root" -cf - deploy scripts | sudo tar -C "$source_root" -xf -
+tar -C "$repo_root" -cf - deploy scripts packages/persistence-postgres/migrations | sudo tar -C "$source_root" -xf -
 sudo chmod -R a+rX "$source_root"
 
 printf '%s\n' '=== Generate ephemeral signed channel from certified Core release records as the fixture user ==='
@@ -207,9 +225,9 @@ sudo -H -u "$service_user" env HOME="$service_home" XDG_CONFIG_HOME="$service_ho
   XDG_DATA_HOME="$service_home/.local/share" XDG_STATE_HOME="$service_home/.local/state" \
   XDG_RUNTIME_DIR="/run/user/$service_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$service_uid/bus" \
   GH_TOKEN="$GH_TOKEN" GITHUB_SHA="$GITHUB_SHA" \
-  /usr/bin/node "$source_root/scripts/phase-f-test-channel.mjs" --out "$phase_dir/channel"
+  /usr/bin/node "$source_root/scripts/phase-f-test-channel.mjs" --out "$phase_dir/channel" --schema-release-0.1.455
 
-for file in test-channel-public.pem channel-sequence-1.json simulated-frontend-identity.json release-0.1.236.json; do
+for file in test-channel-public.pem channel-fresh-schema.json simulated-frontend-identity-fresh-schema.json release-0.1.455.json; do
   sudo install -o "$service_user" -g "$service_group" -m 0600 "$phase_dir/channel/$file" "$phase_dir/$file"
 done
 sudo install -o "$service_user" -g "$service_group" -m 0600 "$tmp/inputs/github-read-token" "$phase_dir/github-read-token"
@@ -252,7 +270,7 @@ server.listen(0, '127.0.0.1', () => {
 });
 process.on('SIGTERM', () => server.close(() => process.exit(0)));
 NODE
-PHASE_F_RELEASE_FILE="$phase_dir/release-0.1.236.json" \
+PHASE_F_RELEASE_FILE="$phase_dir/release-0.1.455.json" \
 PHASE_F_ACCESS_ID_FILE="$tmp/inputs/access-client-id" \
 PHASE_F_ACCESS_SECRET_FILE="$tmp/inputs/access-client-secret" \
 PHASE_F_SERVER_KEY="$tmp/identity-server.key" \
@@ -270,14 +288,16 @@ done
 frontend_origin="https://127.0.0.1:$(cat "$tmp/identity-port")"
 frontend_identity_url="$frontend_origin/desktop/update-identity.json"
 SSL_CERT_FILE="$tmp/identity-server.crt" /usr/bin/node --input-type=module - \
-  "$tmp/identity-server.crt" "$frontend_origin" "$tmp/inputs/access-client-id" "$tmp/inputs/access-client-secret" <<'NODE'
+  "$tmp/identity-server.crt" "$frontend_origin" "$tmp/inputs/access-client-id" "$tmp/inputs/access-client-secret" \
+  "$phase_dir/release-0.1.455.json" <<'NODE'
 import assert from 'node:assert/strict';
 import { request } from 'node:https';
 import { readFileSync } from 'node:fs';
-const [caFile, origin, idFile, secretFile] = process.argv.slice(2);
+const [caFile, origin, idFile, secretFile, releaseFile] = process.argv.slice(2);
 const ca = readFileSync(caFile);
 const id = readFileSync(idFile, 'utf8').trim();
 const secret = readFileSync(secretFile, 'utf8').trim();
+const release = JSON.parse(readFileSync(releaseFile, 'utf8'));
 async function probe(headers) {
   return new Promise((resolve, reject) => {
     const requestValue = request(new URL('/api/version', origin), { ca, headers }, response => {
@@ -298,10 +318,13 @@ const authenticated = await probe({
   'X-Phase-F-Probe': 'authenticated',
 });
 assert.equal(authenticated.status, 200);
-assert.deepEqual(authenticated.body, { name: 'codexia', version: '0.1.236', profile: 'core', apiEpoch: 1, browserAuth: 'token' });
+assert.deepEqual(authenticated.body, {
+  name: 'codexia', version: release.version, profile: release.profile,
+  apiEpoch: release.apiEpoch, browserAuth: 'token',
+});
 NODE
 
-proxy_image=$(as_service /usr/bin/jq -r '.image' "$phase_dir/release-0.1.236.json")
+proxy_image=$(as_service /usr/bin/jq -r '.image' "$phase_dir/release-0.1.455.json")
 [[ "$proxy_image" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] || fail 'Certified fixture proxy image is not digest pinned.'
 cat > "$tmp/inventory.yml" <<YAML
 all:
@@ -344,7 +367,7 @@ all:
         codexia_access_id_file: "$phase_dir/access-client-id"
         codexia_access_secret_file: "$phase_dir/access-client-secret"
         codexia_maintenance_approved: true
-        codexia_installed_release_file: "$phase_dir/release-0.1.236.json"
+        codexia_installed_release_file: "$phase_dir/release-0.1.455.json"
         codexia_observe_milliseconds: 60000
 YAML
 sudo install -o "$service_user" -g "$service_group" -m 0600 "$tmp/inventory.yml" "$phase_dir/inventory.yml"
@@ -362,9 +385,9 @@ const vars = {
     XDG_RUNTIME_DIR: '/run/user/' + uid,
     XDG_STATE_HOME: '/home/codexia-ci-host/.local/state',
     NODE_OPTIONS: '--import=' + source + '/scripts/phase-f-fetch-loader.mjs',
-    CODEXIA_PHASE_F_CHANNEL_FILE: directory + '/channel-sequence-1.json',
+    CODEXIA_PHASE_F_CHANNEL_FILE: directory + '/channel-fresh-schema.json',
     CODEXIA_PHASE_F_FRONTEND_URL: frontendUrl,
-    CODEXIA_PHASE_F_FRONTEND_IDENTITY_FILE: directory + '/simulated-frontend-identity.json',
+    CODEXIA_PHASE_F_FRONTEND_IDENTITY_FILE: directory + '/simulated-frontend-identity-fresh-schema.json',
     SSL_CERT_FILE: caPath,
     no_proxy: '127.0.0.1,localhost',
     NO_PROXY: '127.0.0.1,localhost',
@@ -386,6 +409,30 @@ apply_service() {
     -i "$phase_dir/inventory.yml" "$source_root/deploy/ansible/site.yml" \
     -e "codexia_stage=$stage" -e "@$phase_dir/stage-vars.json" > "$log" 2>&1 || status=$?
   if (( status != 0 )); then cat "$log" >&2; return "$status"; fi
+}
+install_fixture_manager_xdg() {
+  # systemd reruns user environment generators during daemon-reload. Keep the
+  # correction scoped to this disposable service UID and remove it at cleanup.
+  if [[ ! -d "$phase_f_xdg_generator_dir" ]]; then
+    sudo install -d -m 0755 "$phase_f_xdg_generator_dir"
+    phase_f_xdg_generator_dir_created=true
+  fi
+  [[ ! -e "$phase_f_xdg_generator_path" && ! -L "$phase_f_xdg_generator_path" ]] ||
+    fail "Refusing to replace an existing user environment generator: $phase_f_xdg_generator_path"
+  sudo install -m 0755 /dev/null "$phase_f_xdg_generator_path"
+  phase_f_xdg_generator_installed=true
+  sudo tee "$phase_f_xdg_generator_path" >/dev/null <<EOF
+#!/bin/sh
+if [ "\$(id -u)" = "$service_uid" ]; then
+  printf '%s\\n' 'XDG_CONFIG_HOME=$service_home/.config' 'XDG_RUNTIME_DIR=/run/user/$service_uid'
+fi
+EOF
+  user_systemctl daemon-reload
+  local manager_environment
+  manager_environment=$(user_systemctl show-environment)
+  grep -Fxq "XDG_CONFIG_HOME=$service_home/.config" <<<"$manager_environment" || fail 'Fixture user manager has the wrong XDG_CONFIG_HOME after generator reload.'
+  grep -Fxq "XDG_RUNTIME_DIR=/run/user/$service_uid" <<<"$manager_environment" || fail 'Fixture user manager has the wrong XDG_RUNTIME_DIR after generator reload.'
+  printf '%s\\n' 'Phase F fixture manager XDG environment verified after systemd environment generation.'
 }
 require_no_change() {
   local log=$1
@@ -425,9 +472,10 @@ const login = await fetch(origin + '/api/login', { method: 'POST', headers: { Or
 if (!login.ok) throw new Error('Disposable app login failed');
 const cookie = login.headers.get('set-cookie')?.split(';', 1)[0];
 if (!cookie) throw new Error('Disposable app session cookie unavailable');
-const response = await fetch(origin + '/api/projects', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ title: 'Phase F Ansible application continuity' }) });
-if (!response.ok) throw new Error('Disposable project creation failed: ' + response.status);
-const project = await response.json();
+const response = await fetch(origin + '/api/v1/persistence/projects', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ title: 'Phase F Ansible application continuity' }) });
+if (response.status !== 201) throw new Error('Disposable project creation failed: ' + response.status);
+const created = await response.json();
+const project = created.project;
 if (typeof project.id !== 'string' || !project.id) throw new Error('Disposable project identity unavailable');
 process.stdout.write(project.id);
 NODE
@@ -441,9 +489,10 @@ const login = await fetch(origin + '/api/login', { method: 'POST', headers: { Or
 assert.equal(login.ok, true);
 const cookie = login.headers.get('set-cookie')?.split(';', 1)[0];
 assert.ok(cookie);
-const response = await fetch(origin + '/api/projects', { headers: { Origin: origin, Cookie: cookie } });
+const response = await fetch(origin + '/api/v1/persistence/projects', { headers: { Origin: origin, Cookie: cookie } });
 assert.equal(response.ok, true);
 const projects = await response.json();
+assert.ok(Array.isArray(projects));
 assert.ok(projects.some(project => project.id === process.argv[2] && project.title === 'Phase F Ansible application continuity'));
 NODE
   fi
@@ -454,6 +503,7 @@ apply_runner secrets "$tmp/secrets-first.log"
 grep -Eq 'changed=[1-9]' "$tmp/secrets-first.log"
 apply_runner secrets "$tmp/secrets-repeat.log"
 require_no_change "$tmp/secrets-repeat.log"
+install_fixture_manager_xdg
 apply_runner base "$tmp/base-first.log"
 grep -Eq 'changed=[1-9]' "$tmp/base-first.log"
 rootless exec codexia-db pg_isready -U codexia -d codexia >/dev/null

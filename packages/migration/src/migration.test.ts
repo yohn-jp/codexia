@@ -7,8 +7,8 @@ import os from "node:os";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import type { ChangeOperation, SnapshotId, SnapshotReader } from "@codexia/contracts";
-import { assertChangeOperation } from "@codexia/contracts";
-import { createLegacySourceReader, inspectLegacyProject, isSecretLegacyPath, planExactFileImport, proposeMigrationImport } from "./index.js";
+import { assertChangeOperation, BUILTIN_MODULE_IDS } from "@codexia/contracts";
+import { createLegacySourceReader, inspectLegacyProject, isSecretLegacyPath, MigrationProducerRegistry, planExactFileImport, proposeMigrationImport } from "./index.js";
 
 const snapshot: SnapshotId = { projectId: "new-project", projectVersion: 1 };
 
@@ -52,6 +52,24 @@ function targetReader(files: TargetFiles): SnapshotReader {
     },
   };
 }
+
+test("legacy inspection defaults to all built-in modules and preserves an explicit subset", async (t) => {
+  const sourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-migration-modules-"));
+  t.after(() => fs.rm(sourceRoot, { recursive: true, force: true }));
+  const registry = new MigrationProducerRegistry();
+  const observed: string[][] = [];
+  registry.register({
+    id: "module-fixture",
+    async inspect({ enabledModules }) {
+      observed.push([...enabledModules]);
+      return { entries: [], operations: [], recovery: [] };
+    },
+  });
+  const options = { sourceRoot, registry, target: targetReader(new Map()) };
+  await inspectLegacyProject(options);
+  await inspectLegacyProject({ ...options, enabledModules: ["search"] });
+  assert.deepEqual(observed, [BUILTIN_MODULE_IDS, ["search"]]);
+});
 
 function applyOperations(files: TargetFiles, operations: ChangeOperation[]): void {
   for (const operation of operations) {

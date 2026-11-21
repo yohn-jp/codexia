@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, writeFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
-import { manuscriptEditor, ownerLogin, openRevisionHistory } from "./postgres-fixture";
+import { expectServerSaved, manuscriptEditor, ownerLogin, openRevisionHistory } from "./postgres-fixture";
 
 const prose = [
   "　港町の朝は、潮の匂いと、まだ眠っている街の静けさから始まる。凪は古い灯台の階段を上りながら、昨夜から胸に残っている小さな違和感を、ひとつずつ確かめていた。",
@@ -122,7 +122,7 @@ async function buildManuscript(page: Page, mode: "desktop" | "mobile") {
   await page.goto(new URL(`/${mode}/projects/${project.id}/scenes/${firstScene.id}${mode === "mobile" ? "?view=writing" : ""}`, page.url()).toString());
   await expect(manuscriptEditor(page)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
-  await expect(page.locator(".pg-save-state")).toContainText("PostgreSQLへ保存済み");
+  await expectServerSaved(page);
   await expect(manuscriptEditor(page)).toContainText("誰かが選ばなかった未来");
   return { project, firstScene };
 }
@@ -351,7 +351,7 @@ test("renders and exercises the full Quiet Page authoring surfaces", async ({ pa
 
   await openMobileReferenceSheet(page, "知識・保存", "inspector");
   await expect(page.locator("ion-modal")).toContainText("真鍮の羅針盤");
-  await expect(page.locator("ion-modal")).toContainText("PostgreSQL保存済み");
+  await expectServerSaved(page);
   await page.screenshot({ path: "evidence/ui-redesign-v2/after-mobile-knowledge.png" });
   await page.getByRole("button", { name: "閉じる" }).click();
   await expect(page.locator("ion-modal.mobile-shell-reference-modal")).toBeHidden();
@@ -388,7 +388,7 @@ test("mobile manuscript disclosures remain operable at 320 and 390 CSS pixels", 
     await page.setViewportSize({ width, height: 844 });
     await page.goto(new URL(`/mobile/projects/${project.id}/scenes/${firstScene.id}?view=writing`, page.url()).toString());
     await expect(manuscriptEditor(page)).toBeVisible();
-    await expect(page.locator(".pg-save-state")).toContainText("PostgreSQLへ保存済み");
+    await expectServerSaved(page);
     const command = page.locator(".pg-editor-command-menu");
     await command.locator("summary").click();
     // A visible DOM node is not necessarily hit-testable when clipped.
@@ -404,13 +404,12 @@ test("mobile manuscript disclosures remain operable at 320 and 390 CSS pixels", 
     await fontSize.click();
     await fontSize.fill("18");
     await expect(fontSize).toHaveValue("18");
-    await display.locator("summary").click();
+    if (!await display.evaluate((element) => (element as HTMLDetailsElement).open)) await display.locator("summary").click();
     const symbols = page.locator(".pg-editor-symbol-menu");
-    await symbols.locator("summary").click();
     const symbol = width === 390 ? { label: "三点リーダーを挿入", text: "……" } : { label: "ダッシュを挿入", text: "――" };
     await symbols.getByRole("button", { name: symbol.label }).click();
     await expect(manuscriptEditor(page)).toContainText(symbol.text);
-    await symbols.locator("summary").click();
+    await display.locator("summary").click();
     // The normal autosave may finish before a manual save can be clicked.
     await expect.poll(async () => {
       const response = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${firstScene.id}`);
@@ -418,7 +417,7 @@ test("mobile manuscript disclosures remain operable at 320 and 390 CSS pixels", 
       const { revision } = await response.json() as { revision: { markdown: string } };
       return revision.markdown;
     }, { timeout: 15_000 }).toContain(symbol.text);
-    await expect(page.locator(".pg-save-state")).toContainText("PostgreSQLへ保存済み");
+    await expectServerSaved(page);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
   }
 });

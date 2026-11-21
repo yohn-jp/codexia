@@ -17,6 +17,7 @@ import {
   browserAuthEnvironment,
   imageConfig,
   readRuntimeCapabilityStatus,
+  runWithSensitiveInput,
   validateRuntimeContract,
 } from './standalone-host.mjs';
 import {
@@ -577,6 +578,11 @@ function runAppPasswordQuery(sql) {
   { input: sql, stdio: ['pipe', 'pipe', 'pipe'] });
 }
 
+function rotationBackupArtifactDirectory(stateDir) {
+  const timestamp = new Date().toISOString().replace(/[-:]/gu, '').replace(/\.\d{3}Z$/u, 'Z');
+  return path.join(path.dirname(stateDir), `codexia-${timestamp}-${randomUUID()}`);
+}
+
 async function createPasswordRotationCandidate({ stateDir, config, userUnitDir, password }) {
   const candidateRoot = path.join(path.dirname(config.publicKeyFile), 'maintenance', 'candidates', randomBytes(16).toString('hex'));
   await mkdir(candidateRoot, { recursive: true, mode: 0o700 });
@@ -590,8 +596,7 @@ async function createPasswordRotationCandidate({ stateDir, config, userUnitDir, 
   const backupDigest = BACKUP_DIGEST_FIXTURE;
   const state = await loadControllerState(config.stateFile);
   const databaseId = await new PodmanStandaloneHost(config).passwordRotationDatabaseId();
-  const artifactName = `codexia-${new Date().toISOString().replace(/[-:]/gu, '').replace(/\.\d{3}Z$/u, 'Z')}-${randomUUID()}`;
-  const artifactDirectory = path.join(path.dirname(stateDir), artifactName);
+  const artifactDirectory = rotationBackupArtifactDirectory(stateDir);
   await mkdir(artifactDirectory, { mode: 0o700 });
   const proof = {
     format: 'codexia-controller-backup-proof/v1', artifactDirectory, checksumManifestSha256: backupDigest,
@@ -611,6 +616,50 @@ async function createPasswordRotationCandidate({ stateDir, config, userUnitDir, 
   const manifestPath = path.join(candidateRoot, 'manifest.json');
   await writeFile(manifestPath, JSON.stringify(manifest) + '\n', { mode: 0o600, flag: 'wx' });
   return { root: candidateRoot, manifestPath, manifest, state, databaseId, artifactDirectory };
+}
+
+async function createPreflightPasswordRotationCandidate({stateDir,config,userUnitDir,password}){
+  const candidateRoot=path.join(path.dirname(config.publicKeyFile),'maintenance','candidates',randomBytes(16).toString('hex'));
+  const credentials=path.join(candidateRoot,'credentials');
+  const quadlet=path.join(candidateRoot,'quadlet','codexia-db.container');
+  await mkdir(credentials,{recursive:true,mode:0o700});
+  await mkdir(path.dirname(quadlet),{recursive:true,mode:0o700});
+  await writeFile(path.join(credentials,'postgres-preflight-password'),password,{mode:0o600,flag:'wx'});
+  await writeFile(quadlet,await readFile(path.join(config.quadletDirectory,'codexia-db.container')),{mode:0o600,flag:'wx'});
+  const state=await loadControllerState(config.stateFile);
+  const databaseId=await new PodmanStandaloneHost(config).passwordRotationDatabaseId();
+  const checksum=BACKUP_DIGEST_FIXTURE;
+  const artifactDirectory=rotationBackupArtifactDirectory(stateDir);
+  await mkdir(artifactDirectory,{mode:0o700});
+  await atomicWrite(path.join(stateDir,'controller-backup-proof.json'),JSON.stringify({
+    format:'codexia-controller-backup-proof/v1',artifactDirectory,checksumManifestSha256:checksum,
+    databaseId,journalGeneration:state.journal.generation,release:state.installed,
+  })+'\n');
+  const receiptFile=path.join(candidateRoot,'restore-receipt.json');
+  await writeFile(receiptFile,JSON.stringify({format:'codexia-restore-receipt/v1',checksumManifestSha256:checksum})+'\n',{mode:0o600,flag:'wx'});
+  const manifest={format:'codexia-updater-maintenance/v1',rotatePostgresPreflightPassword:true,candidateRoot,
+    configPath:path.join(path.dirname(config.publicKeyFile),'config.json'),sourceDir:SOURCE_ROOT,unitDir:userUnitDir,
+    preflightPasswordFile:path.join(credentials,'postgres-preflight-password'),restoreReceiptFile:receiptFile,
+    databaseQuadletFile:quadlet};
+  const manifestPath=path.join(candidateRoot,'manifest.json');
+  await writeFile(manifestPath,JSON.stringify(manifest)+'\n',{mode:0o600,flag:'wx'});
+  return {root:candidateRoot,manifestPath,manifest,databaseId,artifactDirectory};
+}
+
+async function runPreflightPasswordRotationCandidate({repoRoot,candidate,configPath,environment,killAfterSql=false,killAfterSecret=false}){
+  const wrapper=path.join(SOURCE_ROOT,'deploy/updater/codexia-updater');
+  const preload=path.join(repoRoot,'deploy/updater/test-standalone-maintenance-preload.mjs');
+  const env={...environment,CODEXIA_RUNTIME_MAINTENANCE_PREFLIGHT_PASSWORD_ROTATION:'yes',
+    CODEXIA_RUNTIME_MAINTENANCE_BACKUP_DIGEST:BACKUP_DIGEST_FIXTURE,
+    ...(killAfterSql?{CODEXIA_RUNTIME_MAINTENANCE_KILL_AFTER_PREFLIGHT_SQL:'yes'}:{}),
+    ...(killAfterSecret?{CODEXIA_RUNTIME_MAINTENANCE_KILL_AFTER_PREFLIGHT_SECRET:'yes'}:{}),
+    NODE_OPTIONS:[environment.NODE_OPTIONS,`--import=${preload}`].filter(Boolean).join(' ')};
+  const child=spawnSync('sh',[wrapper,'maintain',configPath,candidate.manifestPath],
+    {encoding:'utf8',timeout:240000,maxBuffer:4*1024*1024,env});
+  if(child.error)throw child.error;
+  if(killAfterSql||killAfterSecret)assert.equal(child.signal,'SIGKILL','Preflight interruption did not stop at its requested transaction boundary');
+  else assert.equal(child.status,0,`Preflight password rotation failed (${child.status}):\n${child.stdout}\n${child.stderr}`);
+  return child;
 }
 
 async function createApiAuthTokenCandidate({config,token}){
@@ -723,10 +772,10 @@ function readPodmanApiAuthTokenSecret(){
   return secret;
 }
 
-async function recoverMaintenanceAtBoot({repoRoot,config,expectedImage,nonce,tunnelRotation=false}){
+async function recoverMaintenanceAtBoot({repoRoot,config,expectedImage,nonce,tunnelRotation=false,preflightRotation=false}){
   const watchedEnvironment=['NODE_OPTIONS','XDG_STATE_HOME','CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE','CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY',
     'CODEXIA_RUNTIME_MAINTENANCE_BACKUP_DIGEST','CODEXIA_RUNTIME_MAINTENANCE_IMAGE','CODEXIA_RUNTIME_MAINTENANCE_NONCE',
-    'CODEXIA_RUNTIME_MAINTENANCE_TUNNEL_ROTATION'];
+    'CODEXIA_RUNTIME_MAINTENANCE_TUNNEL_ROTATION','CODEXIA_RUNTIME_MAINTENANCE_PREFLIGHT_PASSWORD_ROTATION'];
   const managerEnvironment=run('systemctl',['--user','show-environment']).split('\n');
   const restore=Object.fromEntries(watchedEnvironment.map(name=>[name,managerEnvironment.find(line=>line.startsWith(name+'='))?.slice(name.length+1)??null]));
   const preload=path.join(repoRoot,'deploy/updater/test-standalone-maintenance-preload.mjs');
@@ -735,6 +784,7 @@ async function recoverMaintenanceAtBoot({repoRoot,config,expectedImage,nonce,tun
     'CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY=yes',`CODEXIA_RUNTIME_MAINTENANCE_BACKUP_DIGEST=${BACKUP_DIGEST_FIXTURE}`,
     `CODEXIA_RUNTIME_MAINTENANCE_IMAGE=${expectedImage}`,`CODEXIA_RUNTIME_MAINTENANCE_NONCE=${nonce}`]);
   if(tunnelRotation)run('systemctl',['--user','set-environment','CODEXIA_RUNTIME_MAINTENANCE_TUNNEL_ROTATION=yes']);
+  if(preflightRotation)run('systemctl',['--user','set-environment','CODEXIA_RUNTIME_MAINTENANCE_PREFLIGHT_PASSWORD_ROTATION=yes']);
   try{
     const unit='codexia-updater-boot.service';
     const previousInvocation=run('systemctl',['--user','show','--property=InvocationID','--value',unit]);
@@ -974,6 +1024,136 @@ async function exercisePostgresPasswordRotation({ repoRoot, config, userUnitDir,
     }
     assert.equal(await readFile(proxyQuadlet, 'utf8'), originalProxyText, 'Proxy fixture did not restore the production Quadlet text');
     if (restoreError) throw restoreError;
+  }
+}
+
+async function exercisePreflightPasswordRotation({repoRoot,config,userUnitDir,workDir,expectedImage,originalProxyText,proxyQuadlet,environment,nonce}){
+  const restoreProxy=await startStableRotationProxy({repoRoot,config,proxyQuadlet,originalProxyText,expectedImage,nonce});
+  const stateDir=path.dirname(config.stateFile);
+  const markerPath=path.join(stateDir,'maintenance','in-progress.json');
+  let candidate;
+  let interrupted;
+  let interruptedBeforeSecret;
+  try{
+    const database=new PodmanStandaloneHost(config);
+    const state=await loadControllerState(config.stateFile);
+    const databaseIdentity=await database.passwordRotationDatabaseId();
+    const databaseContainerId=()=>JSON.parse(run('podman',['inspect','--type','container','codexia-db']))[0].Id;
+    const initialDatabaseContainerId=databaseContainerId();
+    const appPassword=JSON.parse(run('podman',['secret','inspect','--showsecret','codexia-postgres-app-password']))[0].SecretData;
+    const oldPassword=JSON.parse(run('podman',['secret','inspect','--showsecret','codexia-postgres-preflight-password']))[0].SecretData;
+    const oldSecretId=JSON.parse(run('podman',['secret','inspect','codexia-postgres-preflight-password']))[0].ID;
+    assert.match(oldPassword,/^[a-f0-9]{64}$/u,'Invalid fixture preflight password');
+    runAppPasswordQuery('CREATE TABLE public.runtime_preflight_rotation_probe(value text PRIMARY KEY);\n' +
+      'INSERT INTO public.runtime_preflight_rotation_probe(value) VALUES (\''+nonce+'\');\n');
+    const provision=await readFile(path.join(repoRoot,'deploy/updater/provision-preflight-role.sql'),'utf8');
+    runWithSensitiveInput('podman',['exec','-i','codexia-db','sh','-ec',
+      'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -w -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia_admin -d codexia'],
+      '\\set preflight_password '+oldPassword+'\n'+provision);
+    await database.verifyPostgresPreflightPassword(oldPassword);
+    const rejectPreflightPassword=password=>assert.rejects(database.verifyPostgresPreflightPassword(password,{secretRequired:false}),
+      /password authentication failed/iu);
+    const replacement=randomBytes(32).toString('hex');
+    candidate=await createPreflightPasswordRotationCandidate({stateDir,config,userUnitDir,password:replacement+'\n'});
+    await runPreflightPasswordRotationCandidate({repoRoot,candidate,configPath:candidate.manifest.configPath,environment});
+    await assert.rejects(lstat(markerPath),{code:'ENOENT'},'Successful preflight rotation retained its recovery marker');
+    const rotatedSecret=JSON.parse(run('podman',['secret','inspect','--showsecret','codexia-postgres-preflight-password']))[0];
+    assert.notEqual(rotatedSecret.ID,oldSecretId,'Immutable preflight Podman secret did not change');
+    assert.equal(rotatedSecret.SecretData,replacement,'Rotation did not store the 64-character PostgreSQL password');
+    await database.verifyPostgresPreflightPassword(replacement);
+    const preflightPlaybook=path.join(workDir,'verify-rotated-preflight.json');
+    await writeFile(preflightPlaybook,JSON.stringify([{
+      hosts:'localhost',connection:'local',gather_facts:false,
+      vars:{ansible_python_interpreter:'/usr/bin/python3',repo_root:repoRoot,
+        codexia_preflight_password:replacement,preflight_verify_only:true},
+      tasks:[{'ansible.builtin.include_tasks':path.join(repoRoot,'deploy/ansible/preflight.yml')}],
+    }]),{mode:0o600,flag:'wx'});
+    try{
+      const result=run(process.env.ANSIBLE_PLAYBOOK??'ansible-playbook',['-i','localhost,',preflightPlaybook]);
+      assert.match(result,/changed=0\s/u,'Ansible verify unexpectedly modified the rotated preflight credential');
+    }finally{await rm(preflightPlaybook,{force:true});}
+    await database.verifyPostgresAppPassword(appPassword);
+    await rejectPreflightPassword(oldPassword);
+    assert.equal(await database.passwordRotationDatabaseId(),databaseIdentity,'Preflight rotation changed the database identity');
+    assert.equal(databaseContainerId(),initialDatabaseContainerId,'Preflight rotation restarted PostgreSQL');
+    assert.deepEqual(await loadControllerState(config.stateFile),state,'Preflight rotation changed the controller state');
+    assert.equal((await readFile(config.routeFile,'utf8')),'blue\n','Preflight rotation changed the committed route');
+    assert.equal(systemdState('codexia-slot-blue.service'),'active');
+    assert.equal(systemdState('codexia-db.service'),'active');
+    await assertTimerState('active','enabled');
+
+    const interruptedPassword=randomBytes(32).toString('hex');
+    interrupted=await createPreflightPasswordRotationCandidate({stateDir,config,userUnitDir,password:interruptedPassword});
+    await runPreflightPasswordRotationCandidate({repoRoot,candidate:interrupted,configPath:interrupted.manifest.configPath,environment,killAfterSql:true});
+    const marker=JSON.parse(await readFile(markerPath,'utf8'));
+    assert.equal(marker.format,'codexia-maintenance-postgres-preflight-password/v1');
+    assert.equal(marker.phase,'applying');
+    assert.equal(marker.rotation.previousDigest,createHash('sha256').update(replacement).digest('hex'),
+      'Durable previous-password digest did not match the exact stored 64-character secret');
+    assert.equal((await readFile(config.routeFile,'utf8')),'blocked\n','Preflight SQL interruption did not keep the route fenced');
+    await database.verifyPostgresPreflightPassword(interruptedPassword,{secretRequired:false});
+    await rejectPreflightPassword(replacement);
+    assert.equal((await loadControllerState(config.stateFile)).paused,state.paused,'Preflight interruption changed pause state');
+    assert.ok(['inactive','failed'].includes(systemdState('codexia-slot-blue.service')));
+    assert.equal(systemdState('codexia-db.service'),'active','SQL-only interruption stopped the database before secret replacement');
+    await assertTimerState('inactive','enabled');
+
+    await recoverMaintenanceAtBoot({repoRoot,config,expectedImage,nonce,preflightRotation:true});
+    await assert.rejects(lstat(markerPath),{code:'ENOENT'},'Boot recovery retained the preflight password marker');
+    assert.equal((await readFile(config.routeFile,'utf8')),'blue\n','Boot recovery did not restore the committed route');
+    assert.equal(await database.passwordRotationDatabaseId(),databaseIdentity,'Boot recovery changed the database identity');
+    await database.verifyPostgresPreflightPassword(replacement);
+    await database.verifyPostgresAppPassword(appPassword);
+    await rejectPreflightPassword(interruptedPassword);
+    const recoveredSecret=JSON.parse(run('podman',['secret','inspect','--showsecret','codexia-postgres-preflight-password']))[0];
+    assert.equal(recoveredSecret.ID,rotatedSecret.ID,'SQL-only recovery replaced the original immutable preflight secret');
+    assert.equal(recoveredSecret.SecretData,replacement,'Boot recovery restored a different prior preflight secret');
+    assert.deepEqual(await loadControllerState(config.stateFile),state,'Boot recovery changed the controller state');
+    assert.equal(systemdState('codexia-slot-blue.service'),'active');
+    assert.equal(systemdState('codexia-db.service'),'active');
+    await assertTimerState('active','enabled');
+
+    const interruptedAfterSecret=randomBytes(32).toString('hex');
+    interruptedBeforeSecret=interrupted;
+    const afterSecretCandidate=await createPreflightPasswordRotationCandidate({stateDir,config,userUnitDir,password:interruptedAfterSecret});
+    interrupted=afterSecretCandidate;
+    await runPreflightPasswordRotationCandidate({repoRoot,candidate:afterSecretCandidate,
+      configPath:afterSecretCandidate.manifest.configPath,environment,killAfterSecret:true});
+    const afterSecretMarker=JSON.parse(await readFile(markerPath,'utf8'));
+    assert.equal(afterSecretMarker.phase,'applying');
+    assert.equal((await readFile(config.routeFile,'utf8')),'blocked\n','Secret-replacement interruption did not keep the route fenced');
+    assert.ok(['inactive','failed'].includes(systemdState('codexia-slot-blue.service')));
+    assert.equal(systemdState('codexia-db.service'),'active','Secret replacement stopped PostgreSQL');
+    const interruptedSecret=JSON.parse(run('podman',['secret','inspect','--showsecret','codexia-postgres-preflight-password']))[0];
+    assert.equal(interruptedSecret.SecretData,interruptedAfterSecret,'Secret-replacement interruption did not persist the new secret object');
+    await assertTimerState('inactive','enabled');
+    await recoverMaintenanceAtBoot({repoRoot,config,expectedImage,nonce,preflightRotation:true});
+    await assert.rejects(lstat(markerPath),{code:'ENOENT'},'Recovery after secret replacement retained its marker');
+    assert.equal((await readFile(config.routeFile,'utf8')),'blue\n');
+    assert.equal(await database.passwordRotationDatabaseId(),databaseIdentity,'Recovery after secret replacement changed database identity');
+    await database.verifyPostgresPreflightPassword(replacement);
+    await rejectPreflightPassword(interruptedAfterSecret);
+    const afterSecretRecovered=JSON.parse(run('podman',['secret','inspect','--showsecret','codexia-postgres-preflight-password']))[0];
+    assert.notEqual(afterSecretRecovered.ID,interruptedSecret.ID,'Recovery after secret replacement did not recreate the prior secret');
+    assert.equal(afterSecretRecovered.SecretData,replacement);
+    assert.equal(databaseContainerId(),initialDatabaseContainerId,'Interrupted preflight rotation restarted PostgreSQL');
+    assert.equal(runAppPasswordQuery('SELECT value FROM public.runtime_preflight_rotation_probe;'),nonce,
+      'Application data changed during preflight rotation or recovery');
+    assert.equal(systemdState('codexia-slot-blue.service'),'active');
+    assert.equal(systemdState('codexia-db.service'),'active');
+    await assertTimerState('active','enabled');
+  }finally{
+    let restoreError;
+    try{await restoreProxy();}catch(error){restoreError=error;}
+    const recoveryPending=await lstat(markerPath).then(()=>true,error=>error.code==='ENOENT'?false:Promise.reject(error));
+    for(const entry of [candidate,interruptedBeforeSecret,interrupted]){
+      if(entry?.root)await rm(entry.root,{recursive:true,force:true});
+      if(entry?.artifactDirectory)await rm(entry.artifactDirectory,{recursive:true,force:true});
+    }
+    await rm(path.join(stateDir,'controller-backup-proof.json'),{force:true});
+    if(recoveryPending)process.stderr.write(`Preserving PostgreSQL preflight rollback snapshot while marker remains: ${markerPath}\n`);
+    else await rm(path.join(path.dirname(config.publicKeyFile),'maintenance-snapshots'),{recursive:true,force:true});
+    if(restoreError)throw restoreError;
   }
 }
 
@@ -1454,6 +1634,8 @@ async function main() {
   await rm(credentialRoot,{recursive:true,force:true});
   await rm(probeKeyFile);
 
+  await exercisePreflightPasswordRotation({repoRoot,config:appliedConfig,userUnitDir,workDir,expectedImage,environment,
+    originalProxyText:proxyText,proxyQuadlet,nonce});
   await exercisePostgresPasswordRotation({
     repoRoot, config: appliedConfig, userUnitDir, workDir, nonce, expectedImage,
     originalProxyText: proxyText, proxyQuadlet, environment,

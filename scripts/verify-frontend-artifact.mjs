@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readComponentVersion } from './component-release-version.mjs';
 import { selectLatestJobArtifact } from './ci-artifact-selection.mjs';
-import { downloadArtifact, extractArtifactFiles, MAX_ASSET_ARCHIVE, MAX_ASSET_BYTES } from './download-ci-artifacts.mjs';
+import { downloadArtifact, extractArtifactFiles, extractJsonEntry, MAX_ASSET_ARCHIVE, MAX_ASSET_BYTES } from './download-ci-artifacts.mjs';
 import { assertVerificationJobs, collectGitHubPages, verifiedSourceRun } from './release-policy.mjs';
 import { assertFrontendIdentity, compareFrontendVersions } from './verify-frontend-compatibility.mjs';
 import { verifyReusableMainProof } from './reuse-pr-verification.mjs';
@@ -17,6 +17,11 @@ const repository = 'yohn-jp/codexia';
 const shaPattern = /^[a-f0-9]{40}$/u;
 const digestPattern = /^[a-f0-9]{64}$/u;
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
+
+export async function readFrontendPromotionProofArtifact(artifact, filename, token, fetchImpl = fetch) {
+  const archive = await downloadArtifact(artifact, repository, token, fetchImpl);
+  return JSON.parse(await extractJsonEntry(archive, filename));
+}
 
 function positiveInteger(value, label) {
   const number = Number(value);
@@ -44,7 +49,7 @@ function assertOptionalFrontendPRAssociation(run,expected){
  * @param {unknown} artifact
  * @param {unknown[]} jobs
  * @param {unknown[]} producerAttemptJobs
- * @param {{runId:string|number,currentAttempt:string|number,producerAttempt:string|number,sourceSha:string,artifactId:string|number,artifactName:string,artifactDigest:string}} expected
+ * @param {{runId:string|number,currentAttempt:string|number,producerAttempt:string|number,sourceSha:string,artifactId:string|number,artifactName:string,artifactDigest:string,event?:string,workflowSha?:string}} expected
  */
 export function assertFrontendArtifactEvidence(run, artifact, jobs, expected, producerAttemptJobs = jobs) {
   assert.ok(run && typeof run === 'object' && !Array.isArray(run), 'Frontend producer workflow run metadata is invalid');
@@ -55,24 +60,26 @@ export function assertFrontendArtifactEvidence(run, artifact, jobs, expected, pr
   const currentAttempt = positiveInteger(expected.currentAttempt, 'Frontend workflow run attempt');
   const producerAttempt = positiveInteger(expected.producerAttempt, 'Frontend producer job attempt');
   const artifactId = positiveInteger(expected.artifactId, 'Frontend artifact ID');
+  const workflowSha = expected.event === 'workflow_run' ? expected.workflowSha : expected.sourceSha;
+  assert.match(workflowSha ?? '', shaPattern, 'Frontend producer workflow SHA is invalid');
 
   assert.equal(String(run.id), runId, 'Frontend producer run ID mismatch');
   assert.ok(producerAttempt <= currentAttempt, 'Frontend producer attempt is newer than the workflow attempt');
   assert.equal(run.run_attempt, currentAttempt, 'Frontend workflow run attempt mismatch');
-  assert.equal(run.event, 'push', 'Frontend producer event must be a main push');
+  assert.equal(run.event, expected.event || 'push', 'Frontend producer event mismatch');
   assert.equal(run.head_branch, 'main', 'Frontend producer branch must be main');
-  assert.equal(run.head_sha, expected.sourceSha, 'Frontend producer source SHA mismatch');
+  assert.equal(run.head_sha, workflowSha, 'Frontend producer workflow SHA mismatch');
 
   assert.equal(expected.artifactName, `codexia-frontend-${expected.sourceSha}-attempt-${producerAttempt}`, 'Frontend artifact name does not bind the producer attempt');
   const selected = selectLatestJobArtifact(expected.artifactName, 'Build and verify UI assets', [artifact], jobs, {
     runId,
-    sourceSha: expected.sourceSha,
+    sourceSha: workflowSha,
   });
   assert.equal(selected.id, artifactId, 'Frontend artifact ID does not match the build job output');
   const producerJobs = producerAttemptJobs.filter(job => job && typeof job === 'object' && job.name === 'Build and verify UI assets');
   assert.equal(producerJobs.length, 1, 'Expected exactly one latest frontend artifact producer job');
   assert.equal(producerJobs[0].run_attempt, producerAttempt, 'Frontend artifact producer attempt mismatch');
-  assert.equal(selectLatestJobArtifact(expected.artifactName, 'Build and verify UI assets', [artifact], producerAttemptJobs, {runId, sourceSha: expected.sourceSha}).id, artifactId, 'Frontend artifact does not belong to the declared producer attempt');
+  assert.equal(selectLatestJobArtifact(expected.artifactName, 'Build and verify UI assets', [artifact], producerAttemptJobs, {runId, sourceSha: workflowSha}).id, artifactId, 'Frontend artifact does not belong to the declared producer attempt');
   assert.equal(artifact.digest, `sha256:${expected.artifactDigest}`, 'Frontend artifact digest mismatch');
 }
 
@@ -233,19 +240,38 @@ const apiPages = (request, endpoint, key) => collectGitHubPages((page, perPage) 
 /** Re-run the canonical merged-tree/full-plan resolver from the exact current main Verify run. */
 export async function verifyFrontendMainPromotionProof({env=process.env,fetchImpl=fetch}={}) {
   assert.equal(env.GITHUB_REPOSITORY, repository, 'Frontend promotion repository mismatch');
-  assert.equal(env.GITHUB_EVENT_NAME, 'push', 'Frontend promotion requires a main push');
+  assert.ok(['push','workflow_run'].includes(env.GITHUB_EVENT_NAME), 'Frontend promotion requires verified main source');
   assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Frontend promotion requires main');
-  assert.match(env.GITHUB_SHA ?? '', shaPattern, 'Frontend main source SHA is invalid');
-  assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),env.GITHUB_SHA,'Frontend promotion checkout source mismatch');
+  const sourceSha = env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA;
+  assert.match(sourceSha ?? '', shaPattern, 'Frontend main source SHA is invalid');
+  assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),sourceSha,'Frontend promotion checkout source mismatch');
   const configuredRunId=env.CODEXIA_VERIFY_RUN_ID;
   const token=env.GH_TOKEN;assert.ok(typeof token==='string'&&token.length>0,'GitHub Actions read token required for frontend promotion');
   const request=endpoint=>githubJson(apiBase+'/'+endpoint,token,fetchImpl);
   const payload=JSON.parse(await readFile(env.GITHUB_EVENT_PATH,'utf8'));
-  assert.equal(payload.ref,'refs/heads/main');
-  assert.equal(payload.after,env.GITHUB_SHA);
-  assert.equal(payload.forced,false);
-  assert.equal(payload.deleted,false);
-  assert.match(payload.before??'',shaPattern,'Main push first parent is invalid');
+  let before;
+  if(env.GITHUB_EVENT_NAME==='push'){
+    assert.equal(payload.ref,'refs/heads/main');
+    assert.equal(payload.after,sourceSha);
+    assert.equal(payload.forced,false);
+    assert.equal(payload.deleted,false);
+    before=payload.before;
+  }else{
+    const eventRun=payload.workflow_run;
+    assert.equal(eventRun?.id,Number(configuredRunId),'Frontend promotion verification event mismatch');
+    assert.equal(eventRun?.path,'.github/workflows/verify.yml','Unexpected frontend promotion workflow');
+    assert.equal(eventRun?.event,'push','Frontend promotion requires a main Verify push');
+    assert.equal(eventRun?.head_branch,'main','Frontend promotion requires main');
+    assert.equal(eventRun?.head_sha,sourceSha,'Frontend promotion event source mismatch');
+    assert.equal(eventRun?.status,'completed');
+    assert.equal(eventRun?.conclusion,'success');
+    assert.equal(eventRun?.repository?.full_name,repository);
+    const commit=await request('commits/'+sourceSha);
+    assert.equal(commit.sha,sourceSha,'Frontend promotion main commit mismatch');
+    assert.ok(Array.isArray(commit.parents)&&commit.parents.length>0,'Main commit has no first parent');
+    before=commit.parents[0].sha;
+  }
+  assert.match(before??'',shaPattern,'Main push first parent is invalid');
   let currentRun;
   const protectedConsumer=Boolean(configuredRunId);
   if(configuredRunId){
@@ -253,16 +279,16 @@ export async function verifyFrontendMainPromotionProof({env=process.env,fetchImp
     currentRun=await request('actions/runs/'+verifyRunId);
     assert.equal(String(currentRun.id),String(verifyRunId));
   }else{
-    const runInventory=await request('actions/workflows/verify.yml/runs?head_sha='+env.GITHUB_SHA+'&event=push&per_page=100');
+    const runInventory=await request('actions/workflows/verify.yml/runs?head_sha='+sourceSha+'&event=push&per_page=100');
     assert.ok(Array.isArray(runInventory.workflow_runs),'Invalid exact-source main Verify run inventory');
-    currentRun=selectExactMainVerifyRun(runInventory.workflow_runs,{sourceSha:env.GITHUB_SHA,repository,repositoryId:currentRepositoryId(env)});
+    currentRun=selectExactMainVerifyRun(runInventory.workflow_runs,{sourceSha:sourceSha,repository,repositoryId:currentRepositoryId(env)});
   }
   const verifyRunId=positiveInteger(currentRun.id,'Exact main Verify run ID');
-  if(protectedConsumer) verifiedSourceRun([currentRun],env.GITHUB_SHA);
+  if(protectedConsumer) verifiedSourceRun([currentRun],sourceSha);
   else {
     assert.equal(currentRun.path,'.github/workflows/verify.yml','Exact source proof is not from Verify');
     assert.equal(currentRun.head_branch,'main','Exact source proof branch is not main');
-    assert.equal(currentRun.head_sha,env.GITHUB_SHA,'Exact source proof SHA mismatch');
+    assert.equal(currentRun.head_sha,sourceSha,'Exact source proof SHA mismatch');
     assert.equal(currentRun.event,'push','Exact source proof event mismatch');
     if(currentRun.status==='completed') assert.equal(currentRun.conclusion,'success','Latest exact-source main Verify run did not succeed');
     else assert.equal(currentRun.conclusion,null,'Incomplete exact-source main Verify run has a conclusion');
@@ -275,9 +301,9 @@ export async function verifyFrontendMainPromotionProof({env=process.env,fetchImp
     const jobs=await apiPages(request,'actions/runs/'+verifyRunId+'/jobs?filter=latest','jobs');
     assertVerificationJobs(jobs);
   }
-  const proof=await verifyReusableMainProof({sourceSha:env.GITHUB_SHA,before:payload.before,repository:env.GITHUB_REPOSITORY,currentRun,request,
+  const proof=await verifyReusableMainProof({sourceSha:sourceSha,before,repository:env.GITHUB_REPOSITORY,currentRun,request,
     git:args=>execFileSync('git',args,{encoding:'utf8',maxBuffer:16*1024*1024,timeout:15000}),
-    readArtifact:async(artifact,filename)=>JSON.parse(await extractJsonEntry(await downloadArtifact(artifact,repository,token,fetchImpl),filename))});
+    readArtifact:(artifact,filename)=>readFrontendPromotionProofArtifact(artifact,filename,token,fetchImpl)});
   return {...proof,sourceVerifyRunId:verifyRunId};
 }
 
@@ -295,7 +321,7 @@ async function selectMergedFrontendArtifact({proof,env,fetchImpl}) {
   ]);
   const artifactName='codexia-frontend-pr-'+proof.prNumber+'-'+producerRun.id+'-'+proof.headSha+'-attempt-'+producerRun.run_attempt;
   const artifact=assertFrontendPromotionArtifactEvidence(producerRun,producerJobs,artifacts,proof,{repositoryId,workflowId:workflow.id,
-    sourceSha:proof.headSha,mainSha:env.GITHUB_SHA,mainTree:proof.tree,baseSha:proof.baseSha,headBranch:proof.headRef,prNumber:proof.prNumber,
+    sourceSha:proof.headSha,mainSha:env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA,mainTree:proof.tree,baseSha:proof.baseSha,headBranch:proof.headRef,prNumber:proof.prNumber,
     mergedAt:proof.mergedAt,artifactName});
   return {workflow,producerRun,producerJobs,artifactName,artifact};
 }
@@ -397,10 +423,11 @@ async function writePromotionOutputs(file,output){
 /** @param {{env?:NodeJS.ProcessEnv,fetchImpl?:typeof fetch}} options */
 export async function verifyFrontendArtifact({ env = process.env, fetchImpl = fetch } = {}) {
   assert.equal(env.GITHUB_REPOSITORY, repository, 'Frontend artifact repository mismatch');
-  assert.equal(env.GITHUB_EVENT_NAME, 'push', 'Frontend artifact must come from a push event');
+  assert.ok(['push','workflow_run'].includes(env.GITHUB_EVENT_NAME), 'Frontend artifact must come from a verified main release');
   assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Frontend artifact must come from main');
-  assert.match(env.GITHUB_SHA ?? '', shaPattern, 'Frontend artifact source SHA is invalid');
-  assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), env.GITHUB_SHA, 'Frontend deploy checkout source mismatch');
+  const sourceSha = env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA;
+  assert.match(sourceSha ?? '', shaPattern, 'Frontend artifact source SHA is invalid');
+  assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), sourceSha, 'Frontend deploy checkout source mismatch');
   if(env.CODEXIA_FRONTEND_SOURCE_VERIFY_RUN_ID) assert.equal(String(env.CODEXIA_FRONTEND_SOURCE_VERIFY_RUN_ID),String(env.CODEXIA_VERIFY_RUN_ID),'Selected main Verify run differs from deploy certification');
   if(env.CODEXIA_FRONTEND_SOURCE_VERIFY_RUN_ID&&env.CODEXIA_FRONTEND_CERTIFIED_VERIFY_RUN_ID) assert.equal(String(env.CODEXIA_FRONTEND_SOURCE_VERIFY_RUN_ID),String(env.CODEXIA_FRONTEND_CERTIFIED_VERIFY_RUN_ID),'Promoted artifact used a different main Verify run than deployment certification');
   const token = env.GH_TOKEN;
@@ -430,10 +457,12 @@ export async function verifyFrontendArtifact({ env = process.env, fetchImpl = fe
       planDigest:env.CODEXIA_FRONTEND_VERIFY_PLAN_DIGEST,
     },{env,fetchImpl});
   }else{
-    assert.equal(env.CODEXIA_FRONTEND_PRODUCER_EVENT,'push','Frontend artifact producer event is unsupported');
+    assert.equal(env.CODEXIA_FRONTEND_PRODUCER_EVENT,env.GITHUB_EVENT_NAME,'Frontend artifact producer event mismatch');
     assert.equal(expected.runId,positiveInteger(env.GITHUB_RUN_ID,'Frontend release workflow run ID'),'Main frontend artifact must be built by the current release run');
-    assert.equal(expected.sourceSha,env.GITHUB_SHA,'Main frontend artifact producer source mismatch');
+    assert.equal(expected.sourceSha,sourceSha,'Main frontend artifact producer source mismatch');
     assert.equal(expected.artifactName,`codexia-frontend-${expected.sourceSha}-attempt-${expected.producerAttempt}`,'Frontend artifact name does not bind source and producer attempt');
+    expected.event=env.GITHUB_EVENT_NAME;
+    expected.workflowSha=env.GITHUB_SHA;
     const producerApi=apiBase+'/actions';
     const request=endpoint=>githubJson(producerApi+'/'+endpoint,token,fetchImpl);
     const [run,selectedArtifact,jobs,producerAttemptJobs]=await Promise.all([

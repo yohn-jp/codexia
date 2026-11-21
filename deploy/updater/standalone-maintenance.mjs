@@ -10,6 +10,10 @@ import { assertMatchingControllerBackup, validateControllerBackupProof, atomicWr
 import { PodmanStandaloneHost, ensureDirectoryTreeDurable, validatePostgresAppPassword, validateRuntimeContract, validateStandaloneAuthToken, validateStandaloneTunnelToken } from './standalone-host.mjs';
 export { validatePostgresAppPassword };
 export { validateStandaloneAuthToken };
+export function validatePostgresPreflightPassword(content){
+  try{return validatePostgresAppPassword(content);}
+  catch{throw Error('Invalid protected PostgreSQL preflight password');}
+}
 
 export const MAINTENANCE_SOURCE_FILES = Object.freeze([
   'deploy/updater/codexia-updater',
@@ -17,7 +21,9 @@ export const MAINTENANCE_SOURCE_FILES = Object.freeze([
   'deploy/updater/standalone-host.mjs',
   'deploy/updater/standalone-maintenance.mjs',
   'deploy/updater/proxy.mjs',
+  'deploy/updater/provision-preflight-role.sql',
   'deploy/updater/standalone-backup.sh',
+  'scripts/standalone-schema-maintenance.mjs',
   'scripts/standalone-update-controller.mjs',
   'scripts/update-host-state.mjs',
   'scripts/update-channel.mjs',
@@ -84,6 +90,34 @@ export function validateAppPasswordRotationManifest(manifest,manifestPath,servic
     'Maintenance unit directory is outside the service user configuration');
   assert.equal(path.resolve(manifest.sourceDir),'/opt/codexia-updater','Maintenance source directory differs from the canonical installation');
   return {appPasswordFile:manifest.appPasswordFile,restoreReceiptFile:manifest.restoreReceiptFile,databaseQuadletFile:manifest.databaseQuadletFile};
+}
+export function validatePreflightPasswordRotationManifest(manifest,manifestPath,serviceHome){
+  const keys=['candidateRoot','configPath','databaseQuadletFile','format','preflightPasswordFile','restoreReceiptFile','rotatePostgresPreflightPassword','sourceDir','unitDir'];
+  assert.ok(plainObject(manifest),'Preflight-password maintenance manifest must be an object');
+  assert.deepEqual(Object.keys(manifest).sort(),keys,'Unexpected preflight-password maintenance manifest fields');
+  assert.equal(manifest.format,'codexia-updater-maintenance/v1');
+  assert.equal(manifest.rotatePostgresPreflightPassword,true,'Preflight-password rotation must be explicitly selected');
+  for(const key of ['candidateRoot','configPath','sourceDir','unitDir','preflightPasswordFile','restoreReceiptFile','databaseQuadletFile'])
+    assert.ok(typeof manifest[key]==='string'&&path.isAbsolute(manifest[key])&&!/[\r\n\0]/u.test(manifest[key]),
+      'Preflight-password maintenance paths must be absolute');
+  const candidateRoot=path.resolve(manifest.candidateRoot);
+  assert.equal(path.resolve(manifestPath),path.join(candidateRoot,'manifest.json'),'Maintenance manifest must be staged with its candidate');
+  assert.equal(path.resolve(manifest.preflightPasswordFile),path.join(candidateRoot,'credentials','postgres-preflight-password'),
+    'Preflight-password candidate path is outside the fixed private staging location');
+  assert.equal(path.resolve(manifest.restoreReceiptFile),path.join(candidateRoot,'restore-receipt.json'),
+    'Restore receipt path is outside the fixed private staging location');
+  assert.equal(manifest.databaseQuadletFile,path.join(candidateRoot,'quadlet','codexia-db.container'),
+    'Database Quadlet must use its fixed private staging path');
+  assert.ok(typeof serviceHome==='string'&&path.isAbsolute(serviceHome),'Service home must be absolute');
+  assert.equal(path.dirname(candidateRoot),path.join(serviceHome,'.config','codexia-updater','maintenance','candidates'),
+    'Preflight-password candidate must use private staging outside the proxy mount');
+  assert.equal(path.resolve(manifest.configPath),path.join(serviceHome,'.config','codexia-updater','config.json'),
+    'Maintenance may update only the canonical private configuration');
+  assert.equal(path.resolve(manifest.unitDir),path.join(serviceHome,'.config','systemd','user'),
+    'Maintenance unit directory is outside the service user configuration');
+  assert.equal(path.resolve(manifest.sourceDir),'/opt/codexia-updater','Maintenance source directory differs from the canonical installation');
+  return {preflightPasswordFile:manifest.preflightPasswordFile,restoreReceiptFile:manifest.restoreReceiptFile,
+    databaseQuadletFile:manifest.databaseQuadletFile};
 }
 export function validateApiAuthTokenRotationManifest(manifest,manifestPath,serviceHome){
   const keys=['apiAuthTokenFile','candidateRoot','configPath','format','rotateApiAuthToken','sourceDir','unitDir'];
@@ -179,6 +213,91 @@ export async function loadTunnelTokenSnapshot({config,state,marker}){
   const previousToken=validateTunnelToken(await readBoundedPrivateFile(marker.previousTokenFile,8193));
   assert.equal(createHash('sha256').update(previousToken).digest('hex'),rotation.previousDigest,'Previous Tunnel token snapshot digest drift');
   return {snapshot:{...rotation},previousToken,root};
+}
+
+const preflightPasswordRotationFormat='codexia-maintenance-postgres-preflight-password/v1';
+function assertPreflightPasswordRotationState(state){
+  assert.ok(['idle','committed'].includes(state.journal.phase)&&!state.initialActivationPending&&state.lastError===null,
+    'Preflight password rotation requires a stable initialized controller');
+  assert.equal(state.journal.active.image,state.installed.image,'Committed writer image differs from the installed release');
+}
+function validatePreflightPasswordRotationMarker(marker,config){
+  assert.ok(plainObject(marker),'Preflight-password recovery marker must be an object');
+  assert.deepEqual(Object.keys(marker).sort(),['configPath','format','operationId','phase','previousPasswordFile','routeContent','routeFile','rotation','stateFile','timer'].sort());
+  assert.equal(marker.format,preflightPasswordRotationFormat);
+  assert.ok(['applying','completed','rolled-back'].includes(marker.phase),'Preflight-password recovery phase is invalid');
+  timerActivationCommand(marker.timer);
+  assert.equal(marker.configPath,path.join(path.dirname(config.publicKeyFile),'config.json'));
+  assert.equal(marker.stateFile,config.stateFile);
+  assert.equal(marker.routeFile,config.routeFile);
+  assert.ok(['blue\n','green\n'].includes(marker.routeContent),'Preflight-password route snapshot is invalid');
+  assert.match(marker.operationId,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u);
+  const root=rotationSnapshotRoot(config,marker.operationId);
+  assert.equal(path.resolve(marker.previousPasswordFile),path.join(root,'postgres-preflight-password'));
+  assert.ok(plainObject(marker.rotation),'Preflight-password recovery identity is invalid');
+  const keys=['adminSecretId','appSecretId','controllerDigest','databaseId','fragmentDigest','operationId','originalSecretId',
+    'previousDigest','replacementDigest','resourcesDigest','runtimeDigest','sourceDigest'];
+  assert.deepEqual(Object.keys(marker.rotation).sort(),keys.sort());
+  assert.equal(marker.rotation.operationId,marker.operationId);
+  for(const key of ['adminSecretId','appSecretId','originalSecretId'])assert.match(marker.rotation[key],/^[A-Za-z0-9_-]{1,128}$/u);
+  assert.match(marker.rotation.databaseId,/^[1-9]\d{0,19}:[1-9]\d{0,9}$/u);
+  for(const key of ['controllerDigest','fragmentDigest','previousDigest','replacementDigest','resourcesDigest','runtimeDigest','sourceDigest'])
+    assert.match(marker.rotation[key],/^[a-f0-9]{64}$/u);
+  assert.notEqual(marker.rotation.previousDigest,marker.rotation.replacementDigest,'Preflight password must differ from its rollback credential');
+  return {root,rotation:marker.rotation};
+}
+export async function savePreflightPasswordRotationSnapshot({config,state,snapshot,previousPassword,timer,routeContent}){
+  assertPreflightPasswordRotationState(state);
+  validatePostgresPreflightPassword(previousPassword);
+  assert.equal(createHash('sha256').update(previousPassword).digest('hex'),snapshot.previousDigest);
+  assert.equal(routeContent,`${state.journal.active.slot}\n`,'Preflight-password route differs from the committed writer');
+  assert.ok(typeof snapshot.databaseQuadlet==='string'&&snapshot.databaseQuadlet.length>0);
+  const root=rotationSnapshotRoot(config,snapshot.operationId);
+  await ensureDirectoryTreeDurable(root);
+  assert.equal((await lstat(root)).mode&0o777,0o700,'Preflight-password snapshot directory must be private');
+  const previousPasswordFile=path.join(root,'postgres-preflight-password');
+  const {databaseQuadlet,...identity}=snapshot;
+  identity.controllerDigest=createHash('sha256').update(JSON.stringify(state)).digest('hex');
+  identity.resourcesDigest=createHash('sha256').update(JSON.stringify(snapshot.resources)).digest('hex');
+  await atomicWrite(previousPasswordFile,previousPassword);
+  await atomicWrite(path.join(root,'codexia-db.container'),databaseQuadlet);
+  await atomicWrite(path.join(root,'identity.json'),JSON.stringify(identity)+'\n');
+  await atomicWrite(path.join(root,'controller.json'),JSON.stringify(state)+'\n');
+  const marker={format:preflightPasswordRotationFormat,phase:'applying',operationId:snapshot.operationId,timer,routeContent,
+    configPath:path.join(path.dirname(config.publicKeyFile),'config.json'),stateFile:config.stateFile,routeFile:config.routeFile,
+    previousPasswordFile,rotation:{operationId:snapshot.operationId,adminSecretId:snapshot.adminSecretId,appSecretId:snapshot.appSecretId,
+      originalSecretId:snapshot.originalSecretId,previousDigest:snapshot.previousDigest,replacementDigest:snapshot.replacementDigest,
+      sourceDigest:snapshot.sourceDigest,fragmentDigest:snapshot.fragmentDigest,databaseId:snapshot.databaseId,
+      resourcesDigest:identity.resourcesDigest,runtimeDigest:snapshot.runtimeDigest,controllerDigest:identity.controllerDigest}};
+  validatePreflightPasswordRotationMarker(marker,config);
+  return marker;
+}
+export async function loadPreflightPasswordRotationSnapshot({config,state,marker}){
+  const {root,rotation}=validatePreflightPasswordRotationMarker(marker,config);
+  assert.ok(['applying','completed','rolled-back'].includes(marker.phase));
+  const controllerState=JSON.parse(await readBoundedPrivateFile(path.join(root,'controller.json'),1024*1024));
+  const normalizedState={...state,paused:controllerState.paused};
+  assert.deepEqual(normalizedState,controllerState,'Preflight-password controller changed outside fail-closed pause');
+  assert.ok(state.paused===controllerState.paused||state.paused===true,
+    'Preflight-password recovery cannot unpause a controller that was previously paused');
+  assertPreflightPasswordRotationState(controllerState);
+  assertPreflightPasswordRotationState(state);
+  assert.equal(createHash('sha256').update(JSON.stringify(controllerState)).digest('hex'),rotation.controllerDigest,
+    'Preflight-password controller identity changed');
+  assert.equal(marker.routeContent,`${controllerState.journal.active.slot}\n`,'Preflight-password route differs from committed writer');
+  const identity=JSON.parse(await readBoundedPrivateFile(path.join(root,'identity.json'),128*1024));
+  assert.equal(identity.operationId,marker.operationId);
+  assert.equal(identity.databaseId,rotation.databaseId);
+  assert.equal(identity.controllerDigest,rotation.controllerDigest);
+  assert.equal(identity.resourcesDigest,rotation.resourcesDigest);
+  const databaseQuadlet=await readBoundedPrivateFile(path.join(root,'codexia-db.container'),65536);
+  let previousPassword=null;
+  if(marker.phase==='applying'){
+    previousPassword=validatePostgresPreflightPassword(await readBoundedPrivateFile(marker.previousPasswordFile,65));
+    assert.equal(createHash('sha256').update(previousPassword).digest('hex'),rotation.previousDigest,
+      'Previous preflight password snapshot digest drift');
+  }
+  return {snapshot:{...identity,databaseQuadlet},controllerState,previousPassword};
 }
 
 const apiTokenRotationFormat='codexia-maintenance-api-auth-token/v1';
@@ -470,8 +589,9 @@ async function readBoundedPrivateFile(filename,limit){
   assert.ok(info.isFile()&&!info.isSymbolicLink()&&info.size>0&&info.size<=limit,'Invalid protected maintenance input');
   return readRegularFile(filename);
 }
-export async function checkRotationBackup({stateDir,receiptFile,state,host,databaseId}){
-  assertRotationState(state);
+export async function checkRotationBackup({stateDir,receiptFile,state,host,databaseId,requirePaused=true}){
+  if(requirePaused)assertRotationState(state);
+  else assertPreflightPasswordRotationState(state);
   const proof=validateControllerBackupProof(JSON.parse(await readBoundedPrivateFile(path.join(stateDir,'controller-backup-proof.json'),65536)));
   const receipt=JSON.parse(await readBoundedPrivateFile(receiptFile,65536));
   return assertMatchingControllerBackup(proof,receipt,state,databaseId,await host.backupArtifactIdentity(proof.artifactDirectory));
@@ -630,7 +750,7 @@ async function readTransaction(markerPath){
   let raw;
   try{raw=await readFile(markerPath,'utf8');}catch(error){if(error.code==='ENOENT')return null;throw error;}
   const marker=JSON.parse(raw);
-  if(marker.format===rotationFormat||marker.format===apiTokenRotationFormat||marker.format===tunnelTokenRotationFormat)return marker;
+  if(marker.format===rotationFormat||marker.format===preflightPasswordRotationFormat||marker.format===apiTokenRotationFormat||marker.format===tunnelTokenRotationFormat)return marker;
   assert.equal(marker.format,'codexia-maintenance-transaction/v1');
   assert.ok(path.isAbsolute(marker.snapshotRoot)&&path.isAbsolute(marker.configPath)&&path.isAbsolute(marker.sourceDir)&&path.isAbsolute(marker.unitDir));
   assert.ok(Array.isArray(marker.files)&&marker.files.every(item=>typeof item.target==='string'&&typeof item.backup==='string'&&typeof item.exists==='boolean'));
@@ -704,6 +824,11 @@ async function recoverInterrupted(config,store,markerPath,publicKey){
     if(marker.format===rotationFormat){
       try{await recoverPasswordRotation({config,store,publicKey,marker,markerPath});}
       catch(error){throw Error('Interrupted password rotation recovery is unverified',{cause:error});}
+      return true;
+    }
+    if(marker.format===preflightPasswordRotationFormat){
+      try{await recoverPreflightPasswordRotation({config,store,publicKey,marker,markerPath});}
+      catch(error){throw Error('Interrupted preflight-password recovery is unverified',{cause:error});}
       return true;
     }
     if(marker.format===apiTokenRotationFormat){
@@ -831,6 +956,100 @@ async function recoverPasswordRotation({config,store,publicKey,marker,markerPath
   const host=new PodmanStandaloneHost(config);
   const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
   await finishRotation({config,host,controller,state,marker,markerPath,snapshot,password,recovering:true});
+}
+
+async function clearPreflightPasswordSnapshot({config,marker,markerPath}){
+  const root=rotationSnapshotRoot(config,marker.operationId);
+  let info;
+  try{info=await lstat(marker.previousPasswordFile);}catch(error){if(error.code!=='ENOENT')throw error;}
+  if(info){
+    assert.ok(info.isFile()&&!info.isSymbolicLink()&&(info.mode&0o777)===0o600,'Preflight password snapshot is not private');
+    if(typeof process.getuid==='function')assert.equal(info.uid,process.getuid(),'Preflight password snapshot owner drift');
+    assert.equal(path.dirname(marker.previousPasswordFile),root,'Preflight password snapshot escaped its fixed directory');
+    await unlink(marker.previousPasswordFile);
+    const directory=await open(root,'r');try{await directory.sync();}finally{await directory.close();}
+  }
+  await clearBackupIntent(markerPath);
+  await rm(root,{recursive:true,force:true}).catch(()=>{});
+}
+async function finalizePreflightPasswordRotation({config,store,publicKey,marker,markerPath,state,expectedDigest}){
+  const {snapshot,controllerState}=await loadPreflightPasswordRotationSnapshot({config,state,marker});
+  assert.equal(createHash('sha256').update(JSON.stringify(controllerState)).digest('hex'),marker.rotation.controllerDigest,
+    'Preflight-password controller identity changed');
+  await assertRotationControlUnits(config);
+  await stopTimerPolling();
+  const host=new PodmanStandaloneHost(config);
+  const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
+  await host.assertRuntimeSources();
+  await host.assertInitialLegacyAbsent();
+  await host.assertNoPreflight();
+  await host.verifyWriterUnits(state);
+  await host.assertCommittedWriterUnitSource(state.journal.active.slot);
+  await host.ensurePreflightPasswordRotationDatabase(snapshot);
+  await host.verifyPostgresPreflightPasswordDigest(snapshot,expectedDigest);
+  const route=await readFile(config.routeFile,'utf8');
+  assert.ok(route===marker.routeContent||route==='blocked\n','Preflight-password recovery route differs from its snapshot');
+  if(route==='blocked\n')await recoverProbeCredentialWriter({host,state});
+  await host.route(marker.routeContent.trim());
+  await controller.assertServing(state,state.journal.active.slot,state.installed);
+  assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed during preflight-password completion');
+  if(state.paused!==controllerState.paused)await store.save(withPause(state,controllerState.paused));
+  assert.deepEqual(await loadControllerState(config.stateFile),controllerState,
+    'Preflight-password completion did not restore the original pause state');
+  assert.equal(await readFile(config.routeFile,'utf8'),marker.routeContent,'Preflight-password completion did not restore the route');
+  await restoreTimerPolling(marker.timer);
+  await clearPreflightPasswordSnapshot({config,marker,markerPath});
+}
+async function rollbackPreflightPasswordRotation({config,store,publicKey,marker,markerPath,state,controllerState,snapshot,previousPassword}){
+  await assertRotationControlUnits(config);
+  await stopTimerPolling();
+  const host=new PodmanStandaloneHost(config);
+  const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
+  await host.assertRuntimeSources();
+  await host.assertInitialLegacyAbsent();
+  await host.assertNoPreflight();
+  await host.verifyWriterUnits(state);
+  await host.assertCommittedWriterUnitSource(state.journal.active.slot);
+  const observed=await host.observe();
+  assert.equal(observed.route,'blocked','Preflight-password rollback requires blocked admission');
+  if(observed.writers.length){
+    assert.deepEqual(observed.writers,[{slot:state.journal.active.slot,image:state.installed.image}],
+      'Unexpected writer prevents preflight-password rollback');
+    await host.assertNoWriterContainers(state.journal.active.slot);
+    await host.stopWriter(state.journal.active.slot);
+  }
+  await host.assertNoWriterContainers();
+  await host.ensurePreflightPasswordRotationDatabase(snapshot);
+  await host.changePostgresPreflightPassword(previousPassword);
+  await host.replacePostgresPreflightSecret(previousPassword,snapshot);
+  await host.verifyPostgresPreflightPassword(previousPassword);
+  await host.assertPreflightPasswordRotationSources(snapshot);
+  const route=await readFile(config.routeFile,'utf8');
+  assert.ok(route===marker.routeContent||route==='blocked\n','Preflight-password recovery route differs from its snapshot');
+  await host.startWriter(state.journal.active.slot,state.installed);
+  await host.verifyBlockedPasswordRotation(state.journal.active.slot,state.installed);
+  await host.route(marker.routeContent.trim());
+  await controller.assertServing(state,state.journal.active.slot,state.installed);
+  assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed during preflight-password rollback');
+  if(state.paused!==controllerState.paused)await store.save(withPause(state,controllerState.paused));
+  assert.deepEqual(await loadControllerState(config.stateFile),controllerState,
+    'Preflight-password rollback did not restore the original pause state');
+  assert.equal(await readFile(config.routeFile,'utf8'),marker.routeContent,'Preflight-password rollback did not restore the route');
+  marker.phase='rolled-back';
+  await atomicWrite(markerPath,JSON.stringify(marker)+'\n');
+  await restoreTimerPolling(marker.timer);
+  await clearPreflightPasswordSnapshot({config,marker,markerPath});
+}
+async function recoverPreflightPasswordRotation({config,store,publicKey,marker,markerPath}){
+  const state=await loadControllerState(config.stateFile);
+  if(marker.phase==='completed'||marker.phase==='rolled-back'){
+    const expectedDigest=marker.phase==='completed'?marker.rotation.replacementDigest:marker.rotation.previousDigest;
+    await finalizePreflightPasswordRotation({config,store,publicKey,marker,markerPath,state,expectedDigest});
+  }else{
+    const {snapshot,controllerState,previousPassword}=await loadPreflightPasswordRotationSnapshot({config,state,marker});
+    assert.ok(previousPassword,'Applying preflight-password rotation lacks its rollback credential');
+    await rollbackPreflightPasswordRotation({config,store,publicKey,marker,markerPath,state,controllerState,snapshot,previousPassword});
+  }
 }
 
 async function restoreTunnelTokenRotation({config,store,publicKey,marker,markerPath,state,snapshot,previousToken}){
@@ -1112,6 +1331,75 @@ async function rotateApiAuthToken({config,manifest,manifestPath,serviceHome,stat
   return {format:'codexia-updater-maintenance/v1',apiAuthTokenRotated:true};
 }
 
+async function rotatePostgresPreflightPassword({config,manifest,manifestPath,serviceHome,state,publicKey,store,markerPath}){
+  assertPreflightPasswordRotationState(state);
+  const {preflightPasswordFile,restoreReceiptFile,databaseQuadletFile}=validatePreflightPasswordRotationManifest(manifest,manifestPath,serviceHome);
+  assert.equal(path.dirname(config.publicKeyFile),path.dirname(manifest.configPath),'Candidate belongs to another controller');
+  assert.equal(config.quadletDirectory,path.join(serviceHome,'.config','containers','systemd'));
+  const root=path.resolve(manifest.candidateRoot);
+  assert.equal(await realpath(root),root,'Preflight-password candidate must not traverse a symlink');
+  assert.equal((await lstat(root)).mode&0o777,0o700,'Preflight-password candidate must be private');
+  await readBoundedPrivateFile(manifestPath,65536);
+  const password=validatePostgresPreflightPassword(await readBoundedPrivateFile(preflightPasswordFile,65)).replace(/\n$/u,'');
+  const reviewed=await readBoundedPrivateFile(databaseQuadletFile,65536);
+  assert.equal(fileURLToPath(import.meta.url),path.join(manifest.sourceDir,'deploy/updater/standalone-maintenance.mjs'),
+    'Install the reviewed updater before rotating the preflight password');
+  const host=new PodmanStandaloneHost(config);
+  assert.ok(host.runtime,'Preflight password rotation requires a typed writer runtime');
+  const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
+  await controller.assertNoBackupIntent();
+  await assertRotationControlUnits(config);
+  await host.assertRuntimeSources();
+  await host.assertInitialLegacyAbsent();
+  await host.assertNoPreflight();
+  await host.verifyWriterUnits(state);
+  await host.assertCommittedWriterUnitSource(state.journal.active.slot);
+  await controller.assertServing(state,state.journal.active.slot,state.installed);
+  const {snapshot,previousPassword}=await host.capturePreflightPasswordRotation(reviewed,password,randomUUID());
+  assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed before preflight rotation admission');
+  const routeContent=await readFile(config.routeFile,'utf8');
+  assert.equal(routeContent,`${state.journal.active.slot}\n`,'Preflight password rotation requires the exact committed route');
+  await checkRotationBackup({stateDir:path.dirname(config.stateFile),receiptFile:restoreReceiptFile,state,host,
+    databaseId:snapshot.databaseId,requirePaused:false});
+  const initialTimer=timerState();
+  assert.equal(updaterServiceState(),'inactive','Polling must be idle at preflight rotation admission');
+  const marker=await savePreflightPasswordRotationSnapshot({config,state,snapshot,previousPassword,timer:initialTimer,routeContent});
+  await atomicWrite(markerPath,JSON.stringify(marker)+'\n');
+  try{
+    await stopTimerPolling();
+    await host.route('blocked');
+    await host.assertPreflightPasswordRotationSources(snapshot);
+    const observed=await host.observe();
+    assert.deepEqual(observed,{route:'blocked',writers:[{slot:state.journal.active.slot,image:state.installed.image}],},
+      'Preflight password rotation could not fence the exact committed writer');
+    await host.assertNoWriterContainers(state.journal.active.slot);
+    await host.stopWriter(state.journal.active.slot);
+    await host.assertNoWriterContainers();
+    await host.changePostgresPreflightPassword(password);
+    await host.verifyPostgresPreflightPassword(password,{secretRequired:false});
+    await host.replacePostgresPreflightSecret(password,snapshot);
+    await host.verifyPostgresPreflightPassword(password);
+    await host.assertPreflightPasswordRotationSources(snapshot);
+    await host.startWriter(state.journal.active.slot,state.installed);
+    await host.verifyBlockedPasswordRotation(state.journal.active.slot,state.installed);
+    assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed during preflight password rotation');
+    marker.phase='completed';
+    await atomicWrite(markerPath,JSON.stringify(marker)+'\n');
+    await finalizePreflightPasswordRotation({config,store,publicKey,marker,markerPath,state,expectedDigest:snapshot.replacementDigest});
+    return {format:'codexia-updater-maintenance/v1',postgresPreflightPasswordRotated:true};
+  }catch(rotationError){
+    const durable=await readTransaction(markerPath).catch(()=>null);
+    if(marker.phase==='completed'&&durable===null)
+      return {format:'codexia-updater-maintenance/v1',postgresPreflightPasswordRotated:true,recoveredCompletion:true};
+    try{await recoverInterrupted(config,store,markerPath,publicKey);}
+    catch(recoveryError){throw new AggregateError([rotationError,recoveryError],
+      'Preflight password rotation could not verify its previous credential; recovery remains blocked');}
+    if(durable?.format===preflightPasswordRotationFormat&&durable.phase==='completed')
+      return {format:'codexia-updater-maintenance/v1',postgresPreflightPasswordRotated:true,recoveredCompletion:true};
+    throw Error('Preflight password rotation failed; the prior read-only credential was restored',{cause:rotationError});
+  }
+}
+
 async function rotatePostgresAppPassword({config,manifest,manifestPath,serviceHome,state,publicKey,store,markerPath}){
   assertRotationState(state);
   validateAppPasswordRotationManifest(manifest,manifestPath,serviceHome);
@@ -1169,6 +1457,9 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
 
   const manifest=JSON.parse(await readFile(manifestPath,'utf8'));
   const serviceHome=path.resolve(config.quadletDirectory,'../../..');
+  if(manifest.rotatePostgresPreflightPassword===true){
+    return rotatePostgresPreflightPassword({config,manifest,manifestPath,serviceHome,state,publicKey,store,markerPath});
+  }
   if(manifest.rotatePostgresAppPassword===true){
     return rotatePostgresAppPassword({config,manifest,manifestPath,serviceHome,state,publicKey,store,markerPath});
   }

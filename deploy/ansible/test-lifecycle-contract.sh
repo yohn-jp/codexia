@@ -137,6 +137,54 @@ for mode in unapproved check-mode; do
   fi
 done
 
+## Preflight-password rotation requires its own explicit approval.
+for mode in unapproved check-mode; do
+  log="$tmp/rotate-preflight-password-$mode.log"
+  if [[ "$mode" == unapproved ]]; then
+    if ansible-playbook -i localhost, -c local "$root/deploy/ansible/test-preflight-password-rotation-gate.yml" > "$log" 2>&1; then
+      cat "$log" >&2
+      echo 'Preflight-password rotation unexpectedly passed without explicit approval' >&2
+      exit 1
+    fi
+  else
+    if ansible-playbook --check -i localhost, -c local "$root/deploy/ansible/test-preflight-password-rotation-gate.yml" \
+      -e codexia_preflight_password_rotation_approved=true > "$log" 2>&1; then
+      cat "$log" >&2
+      echo 'Preflight-password rotation unexpectedly passed in check mode' >&2
+      exit 1
+    fi
+  fi
+  grep -Fq 'PostgreSQL preflight-password rotation requires an initialized controller, verified backup and restore receipt, and explicit approval.' "$log"
+done
+
+preflight_rotation_password='abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789'
+preflight_rotation_file="$tmp/preflight-password"
+preflight_restore_receipt="$tmp/preflight-restore-receipt.json"
+printf '%s' "$preflight_rotation_password" > "$preflight_rotation_file"
+printf '%s\n' '{"format":"codexia-restore-receipt/v1"}' > "$preflight_restore_receipt"
+chmod 0600 "$preflight_rotation_file" "$preflight_restore_receipt"
+CODEXIA_TEST_PREFLIGHT_PASSWORD_FILE="$preflight_rotation_file" CODEXIA_TEST_PREFLIGHT_RESTORE_RECEIPT_FILE="$preflight_restore_receipt" \
+  ansible-playbook -i localhost, -c local "$root/deploy/ansible/test-preflight-password-rotation-inputs.yml" > "$tmp/preflight-rotation-valid-no-lf.log" 2>&1 || {
+    cat "$tmp/preflight-rotation-valid-no-lf.log" >&2
+    echo 'Valid protected preflight-password input without LF was rejected' >&2
+    exit 1
+  }
+printf '%s\n' "$preflight_rotation_password" > "$preflight_rotation_file"
+CODEXIA_TEST_PREFLIGHT_PASSWORD_FILE="$preflight_rotation_file" CODEXIA_TEST_PREFLIGHT_RESTORE_RECEIPT_FILE="$preflight_restore_receipt" \
+  ansible-playbook -i localhost, -c local "$root/deploy/ansible/test-preflight-password-rotation-inputs.yml" > "$tmp/preflight-rotation-valid-lf.log" 2>&1 || {
+    cat "$tmp/preflight-rotation-valid-lf.log" >&2
+    echo 'Valid protected preflight-password input with final LF was rejected' >&2
+    exit 1
+  }
+chmod 0644 "$preflight_rotation_file"
+if CODEXIA_TEST_PREFLIGHT_PASSWORD_FILE="$preflight_rotation_file" CODEXIA_TEST_PREFLIGHT_RESTORE_RECEIPT_FILE="$preflight_restore_receipt" \
+  ansible-playbook -i localhost, -c local "$root/deploy/ansible/test-preflight-password-rotation-inputs.yml" > "$tmp/preflight-rotation-mode.log" 2>&1; then
+  cat "$tmp/preflight-rotation-mode.log" >&2
+  echo 'Unprotected preflight-password file was accepted' >&2
+  exit 1
+fi
+! grep -Fq "$preflight_rotation_password" "$tmp/preflight-rotation-mode.log"
+
 rotation_password='0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 rotation_password_file="$tmp/app-password"
 rotation_receipt_file="$tmp/restore-receipt.json"
@@ -531,7 +579,7 @@ done
 # reject drift before invoking an installed updater, even before a journal exists.
 guard="$tmp/guard"
 mkdir -p "$guard/source/deploy/updater" "$guard/source/scripts" "$guard/quadlet"
-for file in deploy/updater/{codexia-updater,standalone-updater.mjs,standalone-host.mjs,standalone-maintenance.mjs,proxy.mjs,standalone-backup.sh} scripts/{standalone-update-controller.mjs,update-host-state.mjs,update-channel.mjs,update-release-policy.mjs}; do
+for file in deploy/updater/{codexia-updater,standalone-updater.mjs,standalone-host.mjs,standalone-maintenance.mjs,proxy.mjs,provision-preflight-role.sql,standalone-backup.sh} scripts/{standalone-update-controller.mjs,standalone-schema-maintenance.mjs,update-host-state.mjs,update-channel.mjs,update-release-policy.mjs}; do
   install -m 0600 "$root/$file" "$guard/source/$file"
 done
 printf 'fixture proxy\n' > "$guard/quadlet/codexia-api-proxy.container"

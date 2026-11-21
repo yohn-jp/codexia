@@ -25,6 +25,17 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
   assert.match(workflow, /cancel-in-progress: true/u);
   assert.match(workflow, /test-phase-f-ansible-continuity\.sh/u);
   assert.match(workflow, /bash -n deploy\/ansible\/test-phase-f-ansible-app\.sh/u);
+  assert.match(workflow, /sudo python3 -m venv \/opt\/codexia-ansible/u);
+  assert.match(workflow, /ANSIBLE_PLAYBOOK: \/opt\/codexia-ansible\/bin\/ansible-playbook/u);
+  const appRepoRoot = appContinuity.indexOf('repo_root=$(cd');
+  const appAccessibleCwd = appContinuity.indexOf('\ncd /tmp\n');
+  const appChannelGeneration = appContinuity.indexOf('sudo -H -u "$service_user" env', appAccessibleCwd);
+  assert.ok(appRepoRoot >= 0 && appAccessibleCwd > appRepoRoot && appChannelGeneration > appAccessibleCwd,
+    'Resolve checkout paths before fixture-user sudo, then run from an accessible cwd');
+  const serviceAnsibleProbe = appContinuity.indexOf('service_ansible_version=$(as_service "$ansible_playbook" --version)');
+  const firstSecretsStage = appContinuity.indexOf('apply_runner secrets');
+  assert.ok(serviceAnsibleProbe >= 0 && firstSecretsStage > serviceAnsibleProbe,
+    'Verify the service account can run the pinned Ansible controller before database setup');
   assert.match(workflow, /ansible-core|requirements\.txt/u);
   assert.match(proxyQuadlet, /^PodmanArgs=--image-volume=ignore$/mu);
   assert.match(workflow, /contents: read/u);
@@ -57,6 +68,11 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
     'notChecked',
   ]) assert.ok(continuity.includes(marker), 'Missing same-host Ansible continuity proof: ' + marker);
   for (const marker of [
+    'install_fixture_manager_xdg',
+    'phase_f_xdg_generator_path',
+    'manager XDG environment verified after systemd environment generation',
+    'tar -C "$repo_root" -cf - deploy scripts packages/persistence-postgres/migrations',
+    'service_ansible_version=$(as_service "$ansible_playbook" --version)',
     'codexia_stage=$stage',
     'apply_runner secrets',
     'apply_runner base',
@@ -65,6 +81,7 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
     'apply_service initialize-fresh',
     'apply_service enable',
     'apply_service pause',
+    "fetch(origin + '/api/v1/persistence/projects'",
     'migration_ledger',
     'pg_control_system()',
     'codexia-api-proxy',
@@ -79,7 +96,14 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
     'notChecked',
     'app-convergence-results.json',
   ]) assert.ok(appContinuity.includes(marker), 'Missing fresh application continuity proof: ' + marker);
+  assert.doesNotMatch(appContinuity, /origin \+ '\/api\/projects'/u,
+    'Application continuity must verify writes through the PostgreSQL persistence API');
   assert.match(continuity, /test-phase-f-ansible-app\.sh/u);
+});
+
+test('Phase F release provenance uses publication time inside the exact successful run window', async () => {
+  const channelFactory = await readFile(path.join(root, 'scripts/phase-f-test-channel.mjs'), 'utf8');
+  assert.match(channelFactory, /publicationInWorkflowWindow\(releaseApiRecord, run\)/u);
 });
 
 test('Phase F integration helper is valid shell and exercises the existing locked updater paths', async () => {
@@ -186,14 +210,51 @@ test('Phase F channel factory derives signed sequences from certified embedded r
       migrationFingerprint: 'sha256:' + 'c'.repeat(64), persistenceFormat: 1, apiEpoch: 1,
     }, metadata, coreImage, compatibility);
   });
-  const channels = createSignedTestChannels(records, { now: Date.parse('2026-11-16T12:00:00.000Z') });
+  const freshSchemaRelease = {
+    ...records[2], version: '0.1.4', sourceSha: source('d'), image: image('d'),
+    migrationFingerprint: 'sha256:' + 'd'.repeat(64),
+  };
+  const channels = createSignedTestChannels(records, {
+    now: Date.parse('2026-11-16T12:00:00.000Z'), freshSchemaRelease,
+  });
   assert.equal(channels.first.verified.payload.sequence, 1);
   assert.equal(channels.second.verified.payload.sequence, 2);
   assert.equal(channels.first.candidate.version, '0.1.2');
   assert.equal(channels.second.candidate.version, '0.1.3');
+  assert.equal(JSON.parse(Buffer.from(channels.freshSchema.envelope.payload, 'base64').toString('utf8')).releases[0].version, '0.1.4');
   assert.throws(() => parseComponentRelease(releaseInfo('0.1.2', source('a'), 'b'), '0.1.2', source('b'), image('b'), image('e'), compatibility), /release metadata|source/i);
   assert.throws(() => parseComponentRelease(releaseInfo('0.1.1', source('a'), 'a'), '0.1.1', source('a'), image('a'), image('f'), compatibility), /Full image digest/i);
   assert.throws(() => parseComponentRelease({ ...releaseInfo('0.1.1', source('a'), 'a'), prerelease: true }, '0.1.1', source('a'), image('a'), image('d'), compatibility), /prerelease/i);
+
+  const mainSha=source('f'),producerSha=source('e'),tree=source('d'),base=source('c'),version='0.1.4';
+  const promotedProducer={event:'pull_request',sourceSha:producerSha,version,workflowRunId:100,workflowRunNumber:99,workflowAttempt:2,
+    workflowId:72,prNumber:23,verifyRunId:101,proofRunId:102,verifyAttempt:1,planDigest:'a'.repeat(64),sourceTree:tree,mergeBaseSha:base,
+    artifacts:{core:{id:201,digest:'sha256:'+'b'.repeat(64),producerAttempt:2,archiveSha256:'c'.repeat(64)},
+      full:{id:202,digest:'sha256:'+'d'.repeat(64),producerAttempt:2,archiveSha256:'e'.repeat(64)}}};
+  const promotedMetadata={component:'backend',version,sourceSha:mainSha,providedApiEpoch:1,persistenceFormat:1,
+    images:{core:image('f'),full:image('a')},producer:promotedProducer};
+  const promotedRelease={tag_name:'backend-v'+version,draft:false,prerelease:false,
+    body:'Certified component release.\n\n```json\n'+JSON.stringify(promotedMetadata)+'\n```'};
+  const parsedPromotion=parseComponentRelease(promotedRelease,version,producerSha,image('f'),image('a'),compatibility);
+  const promotedIdentity={format:'codexia-backend-identity/v1',version,sourceSha:producerSha,platform:'linux/amd64',profile:'core',
+    migrationFingerprint:'sha256:'+'9'.repeat(64),persistenceFormat:1,apiEpoch:1};
+  const promotedChannelRelease=bindCertifiedImage(promotedIdentity,parsedPromotion,image('f'),compatibility);
+  assert.equal(promotedChannelRelease.sourceSha,producerSha);
+  assert.equal(parsedPromotion.sourceSha,mainSha);
+  assert.throws(()=>parseComponentRelease({...promotedRelease,body:'Certified component release.\n\n```json\n'+JSON.stringify({...promotedMetadata,producer:{...promotedProducer,sourceSha:mainSha}})+'\n```'},
+    version,producerSha,image('f'),image('a'),compatibility),/source/i);
+
+  const mainProducer={event:'push',sourceSha:mainSha,version,workflowRunId:103,workflowRunNumber:99,sourceTree:tree,
+    artifacts:{core:{id:203,digest:'sha256:'+'1'.repeat(64),producerAttempt:1,archiveSha256:'2'.repeat(64)},
+      full:{id:204,digest:'sha256:'+'3'.repeat(64),producerAttempt:1,archiveSha256:'4'.repeat(64)}}};
+  const mainRelease={tag_name:'backend-v'+version,draft:false,prerelease:false,
+    body:'Certified component release.\n\n```json\n'+JSON.stringify({...promotedMetadata,producer:mainProducer})+'\n```'};
+  const parsedMain=parseComponentRelease(mainRelease,version,mainSha,image('f'),image('a'),compatibility);
+  assert.equal(parsedMain.producer.event,'push');
+  const duplicateIdMetadata={...promotedMetadata,producer:{...mainProducer,
+    artifacts:{...mainProducer.artifacts,full:{...mainProducer.artifacts.full,id:203}}}};
+  assert.throws(()=>parseComponentRelease({...mainRelease,body:'Certified component release.\n\n```json\n'+JSON.stringify(duplicateIdMetadata)+'\n```'},
+    version,mainSha,image('f'),image('a'),compatibility),/distinct/);
 });
 
 test('Phase F fetch loader intercepts only exact disposable channel and identity URLs', { timeout: 15_000 }, async t => {

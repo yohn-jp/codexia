@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { matchesGlob } from 'node:path';
 import { test } from 'node:test';
 import { REQUIRED_VERIFICATION_JOBS } from './ci-contract.mjs';
+import { componentReleaseAffected } from './release-impact.mjs';
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
 
@@ -11,10 +12,14 @@ test('full verification uses twenty jobs including planning and certification', 
   assert.equal(REQUIRED_VERIFICATION_JOBS.length, 20);
 });
 
-test('PR and main release triggers follow their component build inputs', () => {
+test('PR paths and completed-Verify release impact retain component build inputs', () => {
   const releases = ['frontend', 'backend'].map(component => parse(
     readFileSync(new URL(`../.github/workflows/${component}-release.yml`, import.meta.url), 'utf8')
   ));
+  const releaseScope = JSON.parse(readFileSync(new URL('../deploy/release-impact-paths.json', import.meta.url), 'utf8'));
+  for (const [index, component] of ['frontend','backend'].entries()) {
+    assert.deepEqual(releases[index].on.pull_request.paths, releaseScope[component], component + ' release path drift');
+  }
   const changes = [
     ['Desktop authoring', ['app/src/main.tsx'], [true, false]],
     ['Story browser entry', ['modules/story/src/browser.tsx'], [true, false]],
@@ -24,16 +29,23 @@ test('PR and main release triggers follow their component build inputs', () => {
     ['Dockerfile context override', ['Dockerfile.backend.dockerignore'], [false, true]],
     ['Mixed Story changes', ['modules/story/src/browser.tsx', 'modules/story/src/index.ts'], [true, true]],
   ];
-  for (const event of ['pull_request', 'push']) {
+  for (const release of releases) {
+    assert.deepEqual(release.on.workflow_run.workflows, ['Verify Codexia']);
+    assert.deepEqual(release.on.workflow_run.types, ['completed']);
+    assert.equal(release.on.push, undefined);
+  }
+  for (const event of ['pull_request', 'workflow_run']) {
     for (const [label, files, expected] of changes) {
-      const triggered = releases.map(release => files.some(file => {
-        let included = false;
-        for (const pattern of release.on[event].paths) {
-          const exclude = pattern.startsWith('!');
-          if (matchesGlob(file, exclude ? pattern.slice(1) : pattern)) included = !exclude;
-        }
-        return included;
-      }));
+      const triggered = releases.map((release, i) => event === 'workflow_run'
+        ? componentReleaseAffected(['frontend', 'backend'][i], files)
+        : files.some(file => {
+          let included = false;
+          for (const pattern of release.on.pull_request.paths) {
+            const exclude = pattern.startsWith('!');
+            if (matchesGlob(file, exclude ? pattern.slice(1) : pattern)) included = !exclude;
+          }
+          return included;
+        }));
       assert.deepEqual(triggered, expected, `${event}: ${label}`);
     }
   }
@@ -177,7 +189,9 @@ test('operational proof remains owned by one exact-head root task and matching i
   assert.ok(!Object.hasOwn(audit.on,'workflow_run'));
   assert.ok(!Object.hasOwn(audit.on,'delete'));
   assert.deepEqual(audit.on.push.branches,['main']);
-  assert.ok(audit.on.schedule.length && Object.hasOwn(audit.on,'workflow_dispatch'));
+  assert.equal(Object.hasOwn(audit.on,'schedule'),false);
+  assert.ok(Object.hasOwn(audit.on,'workflow_dispatch'));
+  assert.ok(Object.hasOwn(audit.on,'pull_request'));
 });
 
 test('root and coverage-only plans have a single owner for contract test execution', async () => {

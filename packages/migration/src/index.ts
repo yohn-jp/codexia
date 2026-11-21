@@ -1,5 +1,5 @@
-import { assertChangeOperation, snapshotKey } from "@codexia/contracts";
-import type { ChangeOperation, ModuleId } from "@codexia/contracts";
+import { assertChangeOperation, BUILTIN_MODULE_IDS, snapshotKey } from "@codexia/contracts";
+import type { ChangeOperation } from "@codexia/contracts";
 import { createLegacySourceReader } from "./source.js";
 import { createMigrationProducerRegistry } from "./registry.js";
 import { stableMigrationId } from "./operations.js";
@@ -22,17 +22,6 @@ export { createSqliteProducer } from "./producers/sqlite.js";
 export { createWorkspaceProducer } from "./producers/workspace.js";
 export { createPendingGitProducer } from "./producers/git.js";
 
-const MODULE_IDS: readonly ModuleId[] = [
-  "story",
-  "diagnostics",
-  "nlp",
-  "semantic",
-  "speaker",
-  "assistant",
-  "publishing",
-  "mcp",
-];
-
 function emptyContribution(): MigrationContribution {
   return { entries: [], operations: [], recovery: [] };
 }
@@ -53,7 +42,7 @@ export async function inspectLegacyProject(options: InspectLegacyOptions): Promi
     target,
     projectId: target.snapshot.projectId,
     snapshot: target.snapshot,
-    enabledModules: new Set(options.enabledModules ?? MODULE_IDS),
+    enabledModules: new Set(options.enabledModules ?? BUILTIN_MODULE_IDS),
     ...(options.legacyProjectMappings
       ? {
           legacyProjectMappings: Object.fromEntries(

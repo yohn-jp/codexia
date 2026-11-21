@@ -1,0 +1,59 @@
+# iOS client and personal-device distribution
+
+> **Accepted design target; iOS packaging, unsigned IPA delivery, login, installation and on-device acceptance are not implemented or verified by this document.**
+> Authentication and resource permissions are defined by [API authentication and authorization](../architecture/API-AUTHN-AUTHZ.md). Presentation remains governed by the [Design and UX contract](../design/UX-CONTRACT.md), [Mobile interactions](../architecture/MOBILE-INTERACTION-UX.md) and [Core architecture](../architecture/CORE.md).
+
+## Purpose and non-goals
+
+Provide an installable, thin iOS client for the existing Codexia Mobile shell on a privately owned iPhone, without buying a Mac or requiring Apple Developer Program membership **for the intended personal sideload workflow**. The app is an API client, not a self-hosted Core, PostgreSQL or MCP server. Retain the deployed Web UI/PWA and the existing standalone VM; App Store/TestFlight publication, public distribution, a second mobile UI, local manuscript authority and built-in secrets are out of scope.
+
+This design does not assume that a free signing workflow has been proven on the physical device. An IPA generated on GitHub Actions and an IPA that can be installed and kept operational under Apple's free provisioning restrictions are **different acceptance outcomes**.
+
+## Data plane and boundaries
+
+```text
+Browser / PWA -> Access-protected Workers static UI --+
+                                                      +--> HTTPS Codexia API origin
+Installed iOS -> bundled Mobile shell ----------------+           |
+                       |                                          v
+                 managed OAuth/OIDC login              Cloudflare Edge / Tunnel
+                       |                                          |
+                 API access token                            Fastify API
+                                                                  |
+                                                         Core / PostgreSQL
+```
+
+The browser and native clients authenticate to the **same backend API policy** using API-audience OAuth access tokens. Cloudflare Access remains a policy for delivering the Web UI, not proof of the API caller. Both clients retain their separate OIDC code/PKCE redirects and local session handling. The proposed separately addressable API requires explicit Cloudflare routing and CORS changes; see the current same-hostname arrangement in [Deployment](README.md). The app connects only to a configured HTTPS API hostname, not directly to a VM address, internal database, or Tunnel connector.
+
+## Client implementation
+
+- **Capacitor** is the first-choice native shell; use existing React, Ionic React, CodeMirror and `app/src/entries/mobile.tsx` instead of recreating the editor in SwiftUI or introducing a second authoring coordinator. Keep the browser Mobile build operational.
+- Bundle a dedicated production Mobile Vite build as Capacitor `webDir`; do not load the live Web UI through Capacitor `server.url` in a production package. Its existing `/mobile/` Vite asset base and `BrowserRouter` expect an HTTP path and must be adapted for the bundled `capacitor://localhost`/local WebView origin without changing browser deployment semantics. Resolve deep links, asset loading, refresh/navigation and CSP under WKWebView.
+- Configure the API endpoint as a **nonsecret** build/deployment setting, constrained to an HTTPS allowlist. No `CODEXIA_AUTH_TOKEN`, client secret, Cloudflare service token or author JWT is ever placed in the app, JavaScript assets, logs or GitHub build artifacts.
+- Use the platform system authentication session for OAuth Authorization Code + PKCE (S256), with exact app redirect registration, redirect/state handling, cancellation, reauthentication and token expiry. Use OS-protected Keychain-backed credentials for iOS token persistence; do not place access/refresh tokens in WebView IndexedDB or `localStorage`. A reviewed native bridge may attach the token to authorized API requests without exposing a long-lived secret to arbitrary WebView content.
+- Keep browser recovery and native credentials separate. Current IndexedDB drafts remain **recoverable local state**, not the manuscript authority. Verify stable app identifier and upgrade/re-sign behavior before assuming an update preserves drafts. Logout, expired credentials, revoked access and switching backend origins must not silently discard uncommitted drafts.
+- Client/network errors, offline resumes, large edits, uploads and server-side 401/403/409 responses must preserve the same authoring and conflict-recovery guarantees as Mobile Web. External links, OAuth callbacks and file handling must not permit navigation to an untrusted privileged origin.
+
+## Build and delivery
+
+Build the native iOS project on an ephemeral **GitHub Actions macOS runner** with a pinned supported Xcode toolchain; use existing pinned pnpm and profile/build inputs. Keep the iOS packaging job isolated from ordinary frontend, backend and PR verification. Trigger it explicitly (`workflow_dispatch`) or from an intentional app release; do not run macOS packaging for every main push or unrelated pull request. Preserve source identity and the frontend/API compatibility contract.
+
+Package the unsigned `.app` into an **unsigned, structurally valid IPA** (including `Payload/<AppName>.app` and required metadata). Validate Xcode build exit status, bundle ID, supported architectures, entitlements, IPA archive structure and asset inclusion. The repository/CI must never store Apple Account credentials, development signing identities or personal provisioning profiles. Publish only the nonsecret unsigned artifact to a restricted-retention Actions artifact; distribution/public GitHub Releases are not assumed necessary.
+
+### Free personal installation boundary
+
+- **Apple's official Personal Team flow** ordinarily requires signing and device provisioning through Xcode, with a seven-day provisioning expiry and a maximum of three installed apps per device. Official TestFlight requires a paid developer membership and is **not** the no-fee option.
+- **SideStore** is a community sideload/re-sign option, not an Apple-supported distribution channel; its own documentation describes first-time installation using a computer, then attempting later app refresh on-device. iPhone-only initial bootstrap methods are experimental until independently verified; do not claim SideInstaller, AltLoad or similar services are a validated production dependency.
+- Prefer the least-privileged documented initial setup route compatible with available hardware (Windows/Linux via iloader + SideStore if needed). Verify authenticity, source and Apple Account credential exposure before using any third-party signer. Do not assume SideStore refresh always succeeds or that an unsigned GitHub artifact can be installed without a separate signing step.
+- Refresh or re-provision **before** expiration and recover gracefully after expiry; app reinstall, certificate changes or bundle-ID changes can erase local recovery data. Never describe seven-day free signing as perpetual native installation.
+
+## Acceptance contract
+
+1. Build a structurally valid unsigned IPA on the configured macOS runner without Apple credentials; capture run, source SHA, Xcode/Capacitor versions, architecture and artifact digest.
+2. Install the package on the actual target iPhone through a documented no-fee signing path; confirm app launch, author login through the system browser, PKCE callback, valid API audience and protected bearer requests. CI build success alone is not this result.
+3. Confirm Mobile shell navigation, safe areas, editor focus/IME/keyboard, CodeMirror editing, recovery journaling, project switching, file import/export, SSE and error/retry behavior in WKWebView.
+4. Exercise create/edit, save receipt, revision conflict, explicit proposal approval/apply and denied cross-object actions against a disposable instance using the **same API authorization contract as the Web UI**; no static owner token is embedded.
+5. Refresh/re-sign and install a subsequent build; confirm drafts, author scope, settings, Core data, project identity and secure login persist or fail safely with a documented recovery path.
+6. Validate expiry, revoked token, offline operation, lost response, app force quit, unsigned/disallowed artifact and wrong API origin. Never claim acceptance for unexecuted physical-device tests.
+
+References: [Capacitor iOS](https://capacitorjs.com/docs/ios), [Apple free developer account and Personal Team restrictions](https://developer.apple.com/help/account/basics/about-your-developer-account/), [SideStore installation](https://docs.sidestore.io/docs/installation/install), [SideStore FAQ](https://docs.sidestore.io/docs/faq), [RFC 8252](https://www.rfc-editor.org/rfc/rfc8252).

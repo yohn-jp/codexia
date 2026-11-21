@@ -9,7 +9,9 @@
     - deploy/updater/standalone-host.mjs
     - deploy/updater/standalone-maintenance.mjs
     - deploy/updater/proxy.mjs
+    - deploy/updater/provision-preflight-role.sql
     - deploy/updater/standalone-backup.sh
+    - scripts/standalone-schema-maintenance.mjs
     - scripts/standalone-update-controller.mjs
     - scripts/update-host-state.mjs
     - scripts/update-channel.mjs

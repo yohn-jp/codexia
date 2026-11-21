@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
-import { createWritingFixture, openManuscriptScene, openRevisionHistory, ownerLogin, readPersistenceDrafts, manuscriptEditor as editor, readManuscriptMarkdown as markdown } from "./postgres-fixture";
+import { createWritingFixture, expectDeviceDraft, expectServerSaved, openManuscriptScene, openProtectionDetails, openRevisionHistory, ownerLogin, readPersistenceDrafts, manuscriptEditor as editor, readManuscriptMarkdown as markdown } from "./postgres-fixture";
 
 const requirePersistence = createRequire(new URL("../../packages/persistence-postgres/package.json", import.meta.url));
 type TestPostgresClient = {
@@ -51,7 +51,7 @@ test("legacy draft import preserves active input when its journal debounce is pe
   const { scene } = await createWritingFixture(page); await seedLegacy(page); await previewLegacy(page);
   await page.route("**/api/v1/persistence/projects/*/documents/*", (route) => route.request().method() === "PATCH" ? route.abort("failed") : route.continue());
   const text = "現在入力中の原稿を旧記録で消さない。";
-  await editor(page).fill(text);
+  await editor(page).click(); await editor(page).press("ControlOrMeta+a"); await page.keyboard.insertText(text);
   await page.getByRole("button", { name: "この文書へ取り込む" }).click();
   await expectMarkdown(page, text); expect(await sourceExists(page)).toBe(true);
   await expect.poll(async () => (await readPersistenceDrafts(page)).some((draft) => draft.documentId === scene.id && draft.markdown === text)).toBe(true);
@@ -106,7 +106,7 @@ test("legacy draft import retains the confirmed PostgreSQL revision and creates 
   const before = await page.request.get(url); const original = await before.json();
   await seedLegacy(page); await previewLegacy(page); await page.getByRole("button", { name: "この文書へ取り込む" }).click();
   await expect(editor(page)).toHaveText("旧記録の日本語原稿😀");
-  await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+  await expectServerSaved(page);
   const pinned = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}?revision=${original.revision.id}`);
   expect((await pinned.json()).revision.markdown).toBe(text); expect(await sourceExists(page)).toBe(false);
 });
@@ -226,7 +226,9 @@ test("revision history responses and errors stay bound to the scene that request
   const failedDocumentRoute = (url: URL) => url.pathname === failedDocumentPath;
   await page.route(failedDocumentRoute, (route) => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "対象の文書を開けませんでした。" }) }));
   await page.locator(`.pg-document-list .pg-outline-item[data-document-id="${second.id}"] > .pg-outline-row > .pg-outline-document`).click();
-  await expect(page.locator(".pg-editor-column [role=alert]")).toContainText("対象の文書を開けませんでした。");
+  const editorAlert = page.locator(".pg-editor-column").getByRole("alert");
+  await expect(editorAlert).toHaveText("対象の文書を開けませんでした。");
+  await expect(editorAlert).toHaveCount(1);
   const initialResponse = page.waitForResponse((response) => historyUrl(new URL(response.url())));
   releaseInitial();
   await initialResponse;
@@ -541,6 +543,39 @@ test("mobile reference sheet has a named dialog and excludes the background from
   await expect(inspectorTrigger).toBeFocused();
 });
 
+test("mobile Knowledge write failures stay visible in the global status after leaving the editor", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const { project } = await createWritingFixture(page, "mobile");
+  const failure = "Knowledge候補を保存できませんでした。";
+  await page.route(`**/api/v1/persistence/projects/${project.id}/nodes/*`, async (route) => {
+    if (route.request().method() === "PUT") {
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: failure }) });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.getByRole("button", { name: "知識・保存", exact: true }).click();
+  const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
+  await expect(page.getByRole("dialog", { name: "原稿の参照", exact: true })).toBeVisible();
+  await sheet.locator(".pg-knowledge-tools > summary").click();
+  await sheet.getByLabel("Knowledge候補を追加").fill("失敗する候補");
+  await sheet.getByRole("button", { name: "候補を保存", exact: true }).click();
+  const status = sheet.getByRole("region", { name: "保存と回復の状態" });
+  await expect(status.getByRole("alert")).toHaveText(failure);
+  await expect(status.getByRole("alert")).toBeVisible();
+  await expect(status).toHaveCSS("position", "static");
+
+  await sheet.getByRole("button", { name: "閉じる", exact: true }).click();
+  await expect(sheet).toBeHidden();
+  await page.getByRole("button", { name: "設定を開く", exact: true }).click();
+  const globalStatus = page.locator(".mobile-shell-status").first();
+  await expect(globalStatus.getByRole("alert")).toHaveText(failure);
+  await expect(globalStatus.getByRole("alert")).toBeVisible();
+  await expect(page.locator(".pg-editor-column")).toBeHidden();
+  await expect(page.getByRole("alert")).toHaveCount(1);
+});
+
 test("desktop mode switch stays visible and operable at 320 CSS pixels", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 844 });
   const title = "320pxでも切れずに参照できる長い作品名".repeat(4);
@@ -605,7 +640,7 @@ test("recovery retry after pagehide retains its exact PostgreSQL draft", async (
     const response = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}`);
     return response.ok() ? ((await response.json()) as { revision: { markdown: string } }).revision.markdown : "";
   }).toBe(text);
-  await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+  await expectServerSaved(page);
 });
 
 test("both production Shells preserve recoverable Japanese drafts and the Mobile writing and reading flow", async ({ page }) => {
@@ -656,6 +691,10 @@ test("Mobile reader keeps first-to-last Japanese paragraphs visible at supported
       await expect.poll(() => visibleReaderParagraphs(page)).toContainEqual(expect.stringContaining("第1段落"));
 
       const pager = page.locator(".reading-pager");
+      const pagerBounds = await pager.boundingBox();
+      expect(pagerBounds).not.toBeNull();
+      expect(pagerBounds!.x).toBeGreaterThanOrEqual(0);
+      expect(pagerBounds!.x + pagerBounds!.width).toBeLessThanOrEqual(width);
       const beforePage = await pager.getAttribute("data-page-index");
       const beforeClass = await pager.getAttribute("class");
       const box = await pager.boundingBox();
@@ -718,7 +757,7 @@ test("profile-selected workspace panels remain discoverable in the PostgreSQL wo
 test("UX canon keeps the manuscript visible and stable through PostgreSQL save responses", async ({ page }) => {
   await createWritingFixture(page); await editor(page).evaluate((element) => { element.dataset.originalEditor = "retained"; });
   await editor(page).fill("保存応答でも選択と同じエディタを保持する。");
-  await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+  await expectServerSaved(page);
   await expect(editor(page)).toHaveAttribute("data-original-editor", "retained");
   await editor(page).press("Control+A");
   await page.locator(".pg-editor-command-menu > summary").click();
@@ -740,7 +779,7 @@ test("UX canon preserves focus and recovery when journal storage fails and retur
   const text = "保存領域が戻るまで失わない原稿。";
   await editor(page).click(); await editor(page).press("ControlOrMeta+a"); await page.keyboard.insertText(text); await expect(page.getByRole("alert").first()).toBeVisible(); await expectMarkdown(page, text);
   await denyWrites(page, false); await editor(page).press("End"); await editor(page).press("!");
-  await expect.poll(async () => (await readPersistenceDrafts(page)).some((draft) => draft.documentId === scene.id && draft.markdown.includes(text)) || page.getByText("PostgreSQLへ保存済み", { exact: true }).isVisible()).toBeTruthy();
+  await expect.poll(async () => (await readPersistenceDrafts(page)).some((draft) => draft.documentId === scene.id && draft.markdown.includes(text)) || (await page.locator(".pg-save-state summary").textContent()) === "保存済み").toBeTruthy();
   await expect(editor(page)).toContainText(text);
 });
 
@@ -774,7 +813,7 @@ test("Full WebKit terminology stays safe across a held native Shell departure wi
   await expectMarkdown(page, "最初の本文。\n次の文章です。");
   await editor(page).click(); await editor(page).press("ControlOrMeta+a"); await page.keyboard.insertText(text);
   await expectMarkdown(page, text);
-  await expect(page.getByText("IndexedDB回復Journalに保存済み", { exact: true })).toBeVisible();
+  await expectDeviceDraft(page);
   await editor(page).dispatchEvent("compositionstart", { data: "とうきょう" });
   await page.getByRole("button", { name: "モバイル ↗" }).click();
   await expect(page).toHaveURL(/desktop/u); await expectMarkdown(page, text);
@@ -815,4 +854,84 @@ test("desktop author can download a portable work and import it without replacin
   const original = await page.request.get("/api/v1/persistence/projects/" + project.id + "/documents/" + scene.id);
   expect(original.ok()).toBe(true);
   expect((await original.json() as { revision: { markdown: string } }).revision.markdown).toContain("最初の本文。");
+});
+
+test("keeps the manuscript near its scene title with one concise protection status", async ({ page }) => {
+  const { project, scene } = await createWritingFixture(page);
+  const measured: Array<{ mode: string; width: number; height: number; top: number; protectionCount: number; pageWidth: number }> = [];
+  for (const sample of [
+    { mode: "desktop" as const, width: 1440, height: 900 },
+    { mode: "desktop" as const, width: 1024, height: 768 },
+    { mode: "mobile" as const, width: 390, height: 844 },
+    { mode: "mobile" as const, width: 320, height: 760 },
+  ]) {
+    await page.setViewportSize({ width: sample.width, height: sample.height });
+    const path = `/${sample.mode}/projects/${project.id}/scenes/${scene.id}${sample.mode === "mobile" ? "?view=writing" : ""}`;
+    await page.goto(new URL(path, page.url()).toString());
+    await expect(editor(page)).toBeVisible();
+    const geometry = await page.evaluate(() => {
+      const firstLine = document.querySelector<HTMLElement>(".pg-editor .cm-line");
+      if (!firstLine) throw new Error("The first manuscript line is missing");
+      const { top, bottom, left, right, height } = firstLine.getBoundingClientRect();
+      const visible = (element: Element) => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+      };
+      return {
+        firstLine: { top, bottom, left, right, height },
+        actionBounds: [...document.querySelectorAll<HTMLElement>(".pg-editor-actions > *")].map((element) => { const rect = element.getBoundingClientRect(); return { label: element.textContent?.trim(), x: rect.x, y: rect.y, width: rect.width, height: rect.height }; }),
+        visibleProtection: [...document.querySelectorAll(".st-studio-durability, .pg-save-state, .mobile-shell-protection, .mobile-shell-reference-durability")]
+          .filter(visible).map((element) => element.textContent?.trim()),
+        visibleAlerts: [...document.querySelectorAll('[role="alert"]')].filter(visible).map((element) => element.textContent?.trim()),
+        pageWidth: document.documentElement.scrollWidth,
+      };
+    });
+    measured.push({ mode: sample.mode, width: sample.width, height: sample.height, top: geometry.firstLine.top, protectionCount: geometry.visibleProtection.length, pageWidth: geometry.pageWidth });
+    console.log(`authoring elements ${sample.width}: ${JSON.stringify(geometry.actionBounds)}`);
+    await page.screenshot({ path: `/dev/shm/codexia-authoring-after-${sample.mode}-${sample.width}.png` });
+  }
+  console.log(`authoring after: ${JSON.stringify(measured)}`);
+  for (const sample of measured) {
+    const target = sample.mode === "desktop" ? sample.height / 3 : sample.height / 4;
+    expect(sample.top, `${sample.mode} ${sample.width}x${sample.height}`).toBeLessThanOrEqual(target);
+    expect(sample.protectionCount, `${sample.mode} ${sample.width}x${sample.height}`).toBe(1);
+    expect(sample.pageWidth, `${sample.mode} ${sample.width}x${sample.height}`).toBe(sample.width);
+  }
+  await expectServerSaved(page);
+  const protection = await openProtectionDetails(page);
+  await expect(protection).toContainText("この端末: 回復用の下書きを保持しています");
+  await expect(protection).toContainText("サーバー: PostgreSQLへの保存を確認しました");
+  expect(await page.locator(".pg-editor-actions").count()).toBe(1);
+});
+
+test("journal writes do not spam live save status while a server receipt remains exact", async ({ page }) => {
+  const { scene } = await createWritingFixture(page, "mobile");
+  const details = await openProtectionDetails(page);
+  await expect(details).toContainText("この端末: 回復用の下書きを保持しています");
+  await expect(details).toContainText("サーバー: PostgreSQLへの保存を確認しました");
+  await page.evaluate(() => {
+    const summary = document.querySelector(".pg-save-state summary");
+    if (!summary) throw new Error("The save status disclosure is missing");
+    const probe = window as Window & { __saveStatusChanges?: string[] };
+    probe.__saveStatusChanges = [];
+    new MutationObserver(() => {
+      if (summary.getAttribute("aria-live") === "polite") probe.__saveStatusChanges?.push(summary.textContent?.trim() ?? "");
+    })
+      .observe(summary, { subtree: true, childList: true, characterData: true });
+  });
+  await editor(page).fill("");
+  await editor(page).pressSequentially("abcdefgh", { delay: 140 });
+  await expectDeviceDraft(page);
+  const summary = page.locator(".pg-save-state summary");
+  await expect(summary).toHaveText("この端末に下書きがあります");
+  await expect(summary).toHaveAttribute("aria-live", "off");
+  expect(await page.evaluate(() => (window as Window & { __saveStatusChanges?: string[] }).__saveStatusChanges ?? [])).toEqual([]);
+  await expectServerSaved(page);
+  await expect(summary).toHaveAttribute("aria-live", "polite");
+  const changes = await page.evaluate(() => (window as Window & { __saveStatusChanges?: string[] }).__saveStatusChanges ?? []);
+  expect(changes.length).toBeLessThanOrEqual(3);
+  expect(changes).not.toContain("この端末に下書きがあります");
+  await expect(details).toContainText("サーバー: PostgreSQLへの保存を確認しました");
+  await expect(details.locator("summary")).toHaveText("保存済み");
 });

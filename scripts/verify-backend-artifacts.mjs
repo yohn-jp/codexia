@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { createReadStream } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { selectLatestJobArtifact } from './ci-artifact-selection.mjs';
 import { downloadArtifact, extractArtifactFiles } from './download-ci-artifacts.mjs';
 import { collectGitHubPages } from './release-policy.mjs';
+import { readComponentVersion } from './component-release-version.mjs';
 
 const REPOSITORY = 'yohn-jp/codexia';
 const PROFILES = ['core', 'full'];
@@ -26,13 +30,18 @@ export function selectBackendArtifacts(run, artifacts, jobs, expected) {
   assert.match(expected.sourceSha, /^[a-f0-9]{40}$/u);
   const runId = positiveInteger(expected.runId, 'Backend producer run ID');
   const currentAttempt = positiveInteger(expected.currentAttempt, 'Backend workflow attempt');
+  const workflowSha = expected.event === 'workflow_run' ? expected.workflowSha : expected.sourceSha;
+  assert.match(workflowSha ?? '', /^[a-f0-9]{40}$/u, 'Backend producer workflow SHA is invalid');
   assert.equal(run.id, runId, 'Backend workflow run mismatch');
   assert.equal(run.run_attempt, currentAttempt, 'Backend workflow attempt mismatch');
-  assert.equal(run.event, 'push', 'Backend producer event must be a push');
-  assert.equal(run.head_branch, 'main', 'Backend producer branch must be main');
-  assert.equal(run.head_sha, expected.sourceSha, 'Backend producer source mismatch');
+  const event = expected.event ?? 'push';
+  assert.ok(['push', 'workflow_run', 'pull_request'].includes(event), 'Backend producer event is invalid');
+  assert.equal(run.event, event, 'Backend producer event mismatch');
+  if (event !== 'pull_request') assert.equal(run.head_branch, 'main', 'Backend producer branch must be main');
+  else assert.equal(run.head_branch, expected.headBranch, 'Backend PR producer branch mismatch');
+  assert.equal(run.head_sha, workflowSha, 'Backend producer workflow SHA mismatch');
   assert.ok(Array.isArray(artifacts) && Array.isArray(jobs), 'Invalid backend artifact inventory');
-  const identity = { runId, sourceSha: expected.sourceSha };
+  const identity = { runId, sourceSha: workflowSha };
   const selected = PROFILES.map(profile => {
     const jobName = 'Build and test backend OCI image (' + profile + ')';
     const producers = jobs.filter(job => job?.name === jobName);
@@ -66,9 +75,40 @@ export function assertBackendProducerAttempt(selected, jobs, expected) {
   const producers = jobs.filter(job => job?.name === selected.jobName);
   assert.equal(producers.length, 1, 'Expected one backend job in declared producer attempt');
   assert.equal(producers[0].run_attempt, selected.producerAttempt, 'Backend producer attempt mismatch');
+  const workflowSha = expected.event === 'workflow_run' ? expected.workflowSha : expected.sourceSha;
   assert.equal(selectLatestJobArtifact(selected.artifact.name, selected.jobName, [selected.artifact], jobs,
-    { runId: expected.runId, sourceSha: expected.sourceSha }).id, selected.artifact.id,
+    { runId: expected.runId, sourceSha: workflowSha }).id, selected.artifact.id,
     'Backend artifact does not belong to its declared producer attempt');
+}
+
+export function buildBackendBuildReceipt({sourceSha,workflowRunId,workflowRunNumber,sourceTree,artifacts,event='push'}){
+  assert.ok(['push','workflow_run'].includes(event),'Invalid main backend artifact producer event');
+  assert.match(sourceSha??'',/^[a-f0-9]{40}$/u);
+  assert.match(sourceTree??'',/^[a-f0-9]{40}$/u);
+  for(const [value,label] of [[workflowRunId,'Backend workflow run ID'],[workflowRunNumber,'Backend workflow run number']])
+    assert.ok(Number.isSafeInteger(value)&&value>0,label+' is invalid');
+  assert.ok(Array.isArray(artifacts)&&artifacts.length===2,'Expected Core and Full backend artifacts');
+  const receipt={format:'codexia-backend-build/v1',event,sourceSha,version:readComponentVersion('backend',String(workflowRunNumber)),
+    workflowRunId,workflowRunNumber,sourceTree,artifacts:{}};
+  for(const artifact of artifacts){
+    assert.ok(['core','full'].includes(artifact.profile),'Invalid backend artifact profile');
+    assert.ok(!receipt.artifacts[artifact.profile],'Duplicate backend artifact profile');
+    assert.ok(Number.isSafeInteger(artifact.id)&&artifact.id>0,'Backend artifact ID is invalid');
+    assert.match(artifact.digest??'',/^sha256:[a-f0-9]{64}$/u,'Backend artifact digest is invalid');
+    assert.ok(Number.isSafeInteger(artifact.producerAttempt)&&artifact.producerAttempt>0,'Backend producer attempt is invalid');
+    assert.match(artifact.archiveSha256??'',/^[a-f0-9]{64}$/u,'Backend archive digest is invalid');
+    receipt.artifacts[artifact.profile]={id:artifact.id,digest:artifact.digest,producerAttempt:artifact.producerAttempt,archiveSha256:artifact.archiveSha256};
+  }
+  assert.deepEqual(Object.keys(receipt.artifacts).sort(),['core','full']);
+  assert.notEqual(receipt.artifacts.core.id,receipt.artifacts.full.id);
+  assert.notEqual(receipt.artifacts.core.digest,receipt.artifacts.full.digest);
+  return receipt;
+}
+
+async function sha256File(filename){
+  const hash=createHash('sha256');
+  for await(const chunk of createReadStream(filename))hash.update(chunk);
+  return hash.digest('hex');
 }
 
 async function githubJson(url, token, fetchImpl) {
@@ -82,16 +122,19 @@ async function githubJson(url, token, fetchImpl) {
 
 export async function verifyBackendArtifacts({env=process.env,fetchImpl=fetch}={}) {
   assert.equal(env.GITHUB_REPOSITORY, REPOSITORY);
-  assert.equal(env.GITHUB_EVENT_NAME, 'push');
+  assert.ok(['push','workflow_run'].includes(env.GITHUB_EVENT_NAME),'Backend publication must use verified main source');
   assert.equal(env.GITHUB_REF, 'refs/heads/main');
   const expected = {runId:positiveInteger(env.GITHUB_RUN_ID,'Backend workflow run ID'),
-    currentAttempt:positiveInteger(env.GITHUB_RUN_ATTEMPT,'Backend workflow attempt'),sourceSha:env.GITHUB_SHA};
+    currentAttempt:positiveInteger(env.GITHUB_RUN_ATTEMPT,'Backend workflow attempt'),sourceSha:env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA,
+    event:env.GITHUB_EVENT_NAME,workflowSha:env.GITHUB_SHA};
   assert.match(expected.sourceSha, /^[a-f0-9]{40}$/u);
   assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),expected.sourceSha,'Backend publish checkout source mismatch');
   const token = env.GH_TOKEN;
   assert.ok(typeof token === 'string' && token.length > 0, 'GitHub Actions read token required');
   const destination = env.CODEXIA_BACKEND_ARTIFACT_DIR;
   assert.ok(typeof destination === 'string' && path.isAbsolute(destination), 'Backend artifact destination must be absolute');
+  const manifestPath=env.CODEXIA_BACKEND_ARTIFACT_MANIFEST;
+  assert.ok(typeof manifestPath==='string'&&path.isAbsolute(manifestPath),'Backend artifact manifest path must be absolute');
   const api = 'https://api.github.com/repos/' + REPOSITORY + '/actions/runs/' + expected.runId;
   const read = suffix => githubJson(api + suffix, token, fetchImpl);
   const [run,artifacts,jobs] = await Promise.all([
@@ -110,8 +153,16 @@ export async function verifyBackendArtifacts({env=process.env,fetchImpl=fetch}={
     const archive = await downloadArtifact(item.artifact,REPOSITORY,token,fetchImpl,{maxArchive:MAX_IMAGE_ARCHIVE,downloadTimeoutMs:180_000});
     const files = await extractArtifactFiles(archive,path.join(destination,item.profile),{maxArchive:MAX_IMAGE_ARCHIVE,maxUncompressed:MAX_IMAGE_BYTES});
     assert.deepEqual(files,[IMAGE_FILE],'Unexpected backend artifact contents');
+    item.archiveSha256=await sha256File(path.join(destination,item.profile,IMAGE_FILE));
     console.log('Verified '+item.profile+' backend artifact '+item.artifact.id+' from run '+expected.runId+' attempt '+item.producerAttempt+' source '+expected.sourceSha);
   }
+  const manifest=buildBackendBuildReceipt({sourceSha:expected.sourceSha,workflowRunId:expected.runId,
+    workflowRunNumber:positiveInteger(env.GITHUB_RUN_NUMBER,'Backend workflow run number'),
+    sourceTree:execFileSync('git',['rev-parse','HEAD^{tree}'],{encoding:'utf8'}).trim(),
+    event:env.GITHUB_EVENT_NAME,artifacts:selected.map(item=>({profile:item.profile,id:item.artifact.id,digest:item.artifact.digest,
+      producerAttempt:item.producerAttempt,archiveSha256:item.archiveSha256}))});
+  await mkdir(path.dirname(manifestPath),{recursive:true});
+  await writeFile(manifestPath,JSON.stringify(manifest,null,2)+'\n',{mode:0o600});
   return selected;
 }
 

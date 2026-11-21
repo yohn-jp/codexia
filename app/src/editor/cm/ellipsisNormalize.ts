@@ -27,8 +27,10 @@ export function ellipsisNormalizeExtension(): Extension {
         replacements.push({ from: fromA, to: toA, insert: text });
         return;
       }
-      const from = Math.max(0, fromA - 1);
-      const to = Math.min(doc.length, toA + 1);
+      let from = fromA;
+      let to = toA;
+      while (from > 0 && doc.sliceString(from - 1, from) === "…") from -= 1;
+      while (to < doc.length && doc.sliceString(to, to + 1) === "…") to += 1;
       const combined = doc.sliceString(from, fromA) + text + doc.sliceString(toA, to);
       const normalized = combined.replace(ELLIPSIS_LONE, "……");
       if (normalized !== combined) changed = true;

@@ -222,7 +222,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const sha = process.env.CODEXIA_EXPECTED_SHA ?? execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const event = process.env.GITHUB_EVENT_NAME ?? 'workflow_dispatch';
   const payload = process.env.GITHUB_EVENT_PATH ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')) : {};
-  const base = payload.pull_request?.base?.sha ?? null;
+  const pushBase = event === 'push' && payload.after === sha && /^[a-f0-9]{40}$/u.test(payload.before ?? '') &&
+    !/^0{40}$/u.test(payload.before) ? payload.before : null;
+  const base = payload.pull_request?.base?.sha ?? pushBase;
   let files = null;
   if (event === 'pull_request' && /^[a-f0-9]{40}$/.test(base ?? '')) {
     try {
