@@ -820,7 +820,7 @@ test("editor remains unavailable until delayed browser recovery completes, then 
   });
 
   const draft = "Recovered after delayed IndexedDB readiness.";
-  await page.locator(".cm-content").fill(draft);
+  await replaceEditor(page, draft);
   await expectDraft(page, fixture.scene.document.id, draft);
   await expectServerSaveFailure(page);
 
