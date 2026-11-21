@@ -352,10 +352,37 @@ manifest_hash="$(sha256sum "$artifact/SHA256SUMS" | cut -d' ' -f1)"
 grep -Fxq "Verified checksum manifest sha256: $manifest_hash" "$tmp/drill.log"
 test "$(bash "$backup_script" validate-artifact "$artifact")" = "$manifest_hash"
 
+# A v1 receipt deliberately remains a public-only fingerprint, even when the
+# archive contains codexia_auth tables, matching the pre-v2 receipt contract.
+legacy_db_hash=$(podman exec -i codexia-db sh -ec '
+  export PGPASSWORD="$(cat /run/secrets/admin-password)"
+  exec psql -X -qAt -v ON_ERROR_STOP=1 -U "$1" -d codexia
+' sh codexia_admin <<'SQL' | sha256sum | cut -d' ' -f1
+SET TIME ZONE 'UTC';
+SET DateStyle TO ISO, YMD;
+SELECT format('SELECT %L; SELECT to_jsonb(t)::text FROM %I.%I t ORDER BY to_jsonb(t)::text COLLATE "C";', n.nspname || '.' || c.relname, n.nspname, c.relname)
+FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+WHERE n.nspname='public' AND c.relkind IN ('r','p')
+ORDER BY n.nspname, c.relname
+\gexec
+SQL
+)
+legacy_history_hash=$(age -d -i "$tmp/age-identity" "$artifact/manifest.age" | sed -n '3p')
+[[ "$legacy_db_hash" =~ ^[0-9a-f]{64}$ && "$legacy_history_hash" =~ ^[0-9a-f]{64}$ ]]
+mkdir "$tmp/legacy-v1"
+cp "$artifact/database.dump.age" "$tmp/legacy-v1/database.dump.age"
+cp "$artifact/history.tar.age" "$tmp/legacy-v1/history.tar.age"
+printf 'codexia-backup/v1\n%s\n%s\n' "$legacy_db_hash" "$legacy_history_hash" |
+  age -r "$recipient" -o "$tmp/legacy-v1/manifest.age"
+(cd "$tmp/legacy-v1" && sha256sum database.dump.age history.tar.age manifest.age > SHA256SUMS)
+bash "$backup_script" drill "$tmp/legacy-v1" "$tmp/age-identity" --approved > "$tmp/legacy-v1.log"
+grep -q 'Isolated restore verified: database and history fingerprints match' "$tmp/legacy-v1.log"
+assert_no_drill_resources
+
 # A validly re-encrypted public-only dump must not pass restore verification
 # when the source backup also contained Better Auth schema state.
 mkdir "$tmp/auth-schema-omitted"
-podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec pg_dump -U codexia_admin -d codexia -Fc -n public' |
+podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec pg_dump -U codexia_admin -d codexia -Fc --exclude-schema=codexia_auth' |
   age -r "$recipient" -o "$tmp/auth-schema-omitted/database.dump.age"
 cp "$artifact/history.tar.age" "$tmp/auth-schema-omitted/history.tar.age"
 cp "$artifact/manifest.age" "$tmp/auth-schema-omitted/manifest.age"
@@ -364,7 +391,10 @@ if bash "$backup_script" drill "$tmp/auth-schema-omitted" "$tmp/age-identity" --
   echo 'Restore drill accepted a backup with omitted codexia_auth state' >&2
   exit 1
 fi
-grep -q 'Restored database logical fingerprint mismatch' "$tmp/auth-schema-omitted.log"
+if ! grep -q 'Restored database logical fingerprint mismatch' "$tmp/auth-schema-omitted.log"; then
+  cat "$tmp/auth-schema-omitted.log" >&2
+  exit 1
+fi
 assert_no_drill_resources
 
 if bash "$backup_script" validate-artifact "$tmp/tampered" > "$tmp/tampered-identity.log" 2>&1; then

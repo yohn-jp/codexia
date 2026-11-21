@@ -105,22 +105,25 @@ case "$operation" in
   *) die 'Use the controller backup command or the explicitly approved drill';;
 esac
 
-# Hash the complete Codexia data and auth schema table contents, including the
-# migration ledger, revision history, Knowledge, Evidence, approval state and
-# Better Auth state. Explicit table/row order and UTC ensure a restored database
-# has the same logical representation. A database without codexia_auth keeps
-# the same fingerprint projection as before.
+# v1 receipts fingerprinted public tables only. Keep that projection for
+# existing receipts; v2 adds Better Auth's codexia_auth schema. Explicit
+# table/row order and UTC keep the logical representation deterministic.
 db_fingerprint(){
-  local container="$1" user="$2"
+  local container="$1" user="$2" format="$3" schema_filter
+  case "$format" in
+    codexia-backup/v1) schema_filter="n.nspname='public'" ;;
+    codexia-backup/v2) schema_filter="n.nspname IN ('public','codexia_auth')" ;;
+    *) die 'Unsupported database fingerprint format' ;;
+  esac
   podman exec -i "$container" sh -ec '
     if [ -r /run/secrets/admin-password ]; then export PGPASSWORD="$(cat /run/secrets/admin-password)"; fi
     exec psql -X -qAt -v ON_ERROR_STOP=1 -U "$1" -d codexia
-  ' sh "$user" <<'SQL' | sha256sum | cut -d' ' -f1
+  ' sh "$user" <<SQL | sha256sum | cut -d' ' -f1
 SET TIME ZONE 'UTC';
 SET DateStyle TO ISO, YMD;
 SELECT format('SELECT %L; SELECT to_jsonb(t)::text FROM %I.%I t ORDER BY to_jsonb(t)::text COLLATE "C";', n.nspname || '.' || c.relname, n.nspname, c.relname)
 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-WHERE n.nspname IN ('public','codexia_auth') AND c.relkind IN ('r','p')
+WHERE $schema_filter AND c.relkind IN ('r','p')
 ORDER BY n.nspname, c.relname
 \gexec
 SQL
@@ -172,16 +175,16 @@ backup_artifact(){
   staging="$destination/.codexia-$stamp.partial"; final="$destination/codexia-$stamp"
   mkdir "$staging"
   trap 'rm -rf -- "$staging"' EXIT
-  db_hash="$(db_fingerprint codexia-db codexia_admin)"
+  db_hash="$(db_fingerprint codexia-db codexia_admin codexia-backup/v2)"
   history_hash="$(history_fingerprint codexia-history)"
   podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec pg_dump -U codexia_admin -d codexia -Fc' |
     age -r "$recipient" -o "$staging/database.dump.age"
   podman volume export codexia-history | age -r "$recipient" -o "$staging/history.tar.age"
   # Recheck the stopped state and both logical fingerprints before publication.
   require_quiesced
-  [[ "$(db_fingerprint codexia-db codexia_admin)" == "$db_hash" ]] || die 'Database changed during backup'
+  [[ "$(db_fingerprint codexia-db codexia_admin codexia-backup/v2)" == "$db_hash" ]] || die 'Database changed during backup'
   [[ "$(history_fingerprint codexia-history)" == "$history_hash" ]] || die 'History changed during backup'
-  printf 'codexia-backup/v1\n%s\n%s\n' "$db_hash" "$history_hash" | age -r "$recipient" -o "$staging/manifest.age"
+  printf 'codexia-backup/v2\n%s\n%s\n' "$db_hash" "$history_hash" | age -r "$recipient" -o "$staging/manifest.age"
   (cd "$staging"; sha256sum database.dump.age history.tar.age manifest.age > SHA256SUMS)
   artifact_hash="$(sha256sum "$staging/SHA256SUMS" | cut -d' ' -f1)"
   sync -f "$staging"
@@ -216,7 +219,7 @@ case "${1:-}" in
     artifact_hash="$(validate_artifact "$dir")"
     manifest="$(age -d -i "$3" "$dir/manifest.age")"
     mapfile -t fields <<< "$manifest"
-    [[ "${#fields[@]}" == 3 && "${fields[0]}" == codexia-backup/v1 && "${fields[1]}" =~ ^[0-9a-f]{64}$ && "${fields[2]}" =~ ^[0-9a-f]{64}$ ]] || die 'Invalid decrypted backup manifest'
+    [[ "${#fields[@]}" == 3 && "${fields[0]}" =~ ^codexia-backup/v[12]$ && "${fields[1]}" =~ ^[0-9a-f]{64}$ && "${fields[2]}" =~ ^[0-9a-f]{64}$ ]] || die 'Invalid decrypted backup manifest'
     suffix="$(cat /proc/sys/kernel/random/uuid)"
     db="codexia-restore-drill-$suffix"; data="$db-data"; history="$db-history"
     label="io.codexia.restore-drill"
@@ -301,7 +304,7 @@ case "${1:-}" in
     age -d -i "$3" "$dir/database.dump.age" |
       podman exec -i "$db" pg_restore --exit-on-error --no-owner --no-privileges -U postgres -d codexia
     age -d -i "$3" "$dir/history.tar.age" | podman volume import "$history" -
-    [[ "$(db_fingerprint "$db" postgres)" == "${fields[1]}" ]] || die 'Restored database logical fingerprint mismatch'
+    [[ "$(db_fingerprint "$db" postgres "${fields[0]}")" == "${fields[1]}" ]] || die 'Restored database logical fingerprint mismatch'
     [[ "$(history_fingerprint "$history")" == "${fields[2]}" ]] || die 'Restored history fingerprint mismatch'
     cleanup_restore_resources
     trap - EXIT
