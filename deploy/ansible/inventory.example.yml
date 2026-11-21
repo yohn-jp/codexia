@@ -2,74 +2,27 @@ all:
   children:
     codexia:
       hosts:
-        standalone:
+        node:
           ansible_host: codexia.example.invalid
           ansible_user: codexia
       vars:
-        codexia_stage: prepare
-        codexia_observe_milliseconds: 300000
-        # Runtime account for read-only inspection; use the actual adopted identity.
+        # Supported stages: inspect, host, secrets, base, deploy, restore-drill.
+        codexia_stage: inspect
         codexia_service_user: codexia
-        # Required for the explicit host stage; match existing identity on adoption.
         codexia_service_group: codexia
         codexia_service_uid: 1001
         codexia_service_gid: 1001
         codexia_service_home: /home/codexia
         codexia_host_approved: false
         codexia_create_service_account: false
-        # Base runtime convergence is a separate pre-initialization stage.
-        codexia_base_approved: false
-        # Fresh/empty PostgreSQL initialization needs separate explicit approval.
-        codexia_database_initialization_approved: false
-        codexia_frontend_origin: https://codexia.example.invalid
-        codexia_browser_auth:
-          mode: token
-        codexia_runtime:
-          format: codexia-runtime/v1
-          profile: core
-          modelCachePath: null
-          tmpfs:
-            tempSize: 64m
-            moduleCacheSize: 1g
-          resources:
-            memoryMaxBytes: null
-            cpuQuotaPercent: null
-        # Pin a certified backend digest for the private proxy.
-        codexia_proxy_image: ghcr.io/yohn-jp/codexia-backend@sha256:REPLACE_WITH_VERIFIED_DIGEST
-        # Base secrets: exact protected file content; do not commit these inputs.
         codexia_secrets_approved: false
+        codexia_base_approved: false
+        codexia_database_initialization_approved: false
+        # Required only for explicitly approved base-secret convergence.
         codexia_auth_token_file: /private/api-auth-token
         codexia_tunnel_token_file: /private/tunnel-token
-        # Rotate only after the replacement token is created through the
-        # external Cloudflare secret authority; the stage changes the local secret.
-        codexia_tunnel_token_rotation_approved: false
         codexia_postgres_admin_password_file: /private/postgres-admin-password
         codexia_postgres_app_password_file: /private/postgres-app-password
-        # Private control-node files; use Ansible Vault for the secret variable.
-        codexia_public_key_file: /private/channel-public.pem
-        codexia_github_token_file: /private/github-read-token
-        codexia_access_id_file: /private/access-client-id
-        codexia_access_secret_file: /private/access-client-secret
-        # codexia_preflight_password: supply via encrypted extra-vars (64 hex chars)
-        # Initialize only after a verified offline backup and runtime review.
-        codexia_maintenance_approved: false
-        # Explicitly rotate only GitHub read and paired Access probe files.
-        codexia_probe_credential_rotation_approved: false
-        # Standalone API token rotation restarts the active API writer and
-        # invalidates in-memory login sessions. Pause first and update callers.
-        codexia_api_auth_token_rotation_approved: false
-        codexia_api_auth_token_rotation_file: /private/new-api-auth-token
-        # PostgreSQL app password rotation is downtime-tolerant and requires a
-        # current off-VM backup plus matching isolated restore receipt.
-        codexia_app_password_rotation_approved: false
-        codexia_postgres_app_password_rotation_file: /private/new-postgres-app-password
-        codexia_app_password_restore_receipt_file: /private/verified-restore-receipt.json
-        codexia_preflight_password_rotation_approved: false
-        codexia_postgres_preflight_password_rotation_file: /private/new-postgres-preflight-password
-        codexia_preflight_password_restore_receipt_file: /private/verified-restore-receipt.json
-        codexia_acceptance_approved: false
-        # codexia_installed_release_file: /private/installed-release.json
-        # codexia_bootstrap_candidate_file: /private/bootstrap-candidate.json
-        # App-password rotation uses a distinct protected new credential and the
-        # exact current-generation restore receipt from an isolated restore drill.
-        # On isolated recovery host: codexia_restore_receipt_output_file: /private/new-restore-receipt.json
+        # Protected push-deployment parameters are supplied at execution,
+        # not stored as credentials or production values in this inventory.
+        codexia_initial_install_approved: false

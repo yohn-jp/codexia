@@ -1,21 +1,21 @@
-name: Phase F push-host fixture
+name: Push deployment host bootstrap
 on:
   workflow_dispatch:
   pull_request:
     paths:
-      - .github/workflows/phase-f-push-host.yml
+      - .github/workflows/push-host.yml
       - deploy/ansible/test-host-integration.sh
-      - deploy/ansible/test-phase-f-push-host.sh
+      - deploy/ansible/test-push-host.sh
       - deploy/ansible/host.yml
       - deploy/ansible/host-validate.yml
       - deploy/ansible/site.yml
       - deploy/ansible/requirements.txt
       - docs/deployment/PHASE-F-PUSH-HOST-CI.md
-      - scripts/phase-f-push-host.test.mjs
+      - scripts/push-host.test.mjs
 permissions:
   contents: read
 concurrency:
-  group: phase-f-push-host-${{ github.ref }}
+  group: push-host-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   disposable-host-bootstrap:
@@ -37,8 +37,8 @@ jobs:
         run: |
           set -euo pipefail
           bash -n deploy/ansible/test-host-integration.sh
-          bash -n deploy/ansible/test-phase-f-push-host.sh
-          node --test scripts/phase-f-push-host.test.mjs
+          bash -n deploy/ansible/test-push-host.sh
+          node --test scripts/push-host.test.mjs
       - name: Install the pinned Ansible control environment
         run: |
           set -euo pipefail
@@ -48,16 +48,16 @@ jobs:
           sudo /opt/codexia-ansible/bin/pip install -r deploy/ansible/requirements.txt
       - name: Converge and observe the disposable codexia host identity
         env:
-          CODEXIA_DISPOSABLE_HOST: phase-f-push-host
+          CODEXIA_DISPOSABLE_HOST: push-host
           ANSIBLE_PLAYBOOK: /opt/codexia-ansible/bin/ansible-playbook
-        run: bash deploy/ansible/test-phase-f-push-host.sh
+        run: bash deploy/ansible/test-push-host.sh
       - name: Upload run-bound host bootstrap evidence
         if: always()
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: phase-f-push-host-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          name: push-host-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/codexia-phase-f-push-host/host-fixture-outcome.json
-            ${{ runner.temp }}/codexia-phase-f-push-host/host-convergence-bounded.log
+            ${{ runner.temp }}/codexia-push-host/host-fixture-outcome.json
+            ${{ runner.temp }}/codexia-push-host/host-convergence-bounded.log
           if-no-files-found: warn
           retention-days: 7

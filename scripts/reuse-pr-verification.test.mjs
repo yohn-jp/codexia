@@ -192,24 +192,12 @@ function dedicatedFixture(workflowPath, files, extraSteps = []) {
   return { state, args, job };
 }
 
-test('independent runtime proof is reused only for the exact successful PR job and steps', async () => {
-  const { state, args, job } = dedicatedFixture('.github/workflows/ansible-runtime-contract.yml', ['deploy/updater/standalone-host.mjs']);
-  const receipt = await verifyReusableDedicatedProof(args);
-  assert.equal(receipt.jobId, 500);
-  assert.equal(receipt.sourceSha, sourceSha);
-  job.steps.find(step => step.name.startsWith('Exercise generated')).conclusion = 'skipped';
-  await assert.rejects(verifyReusableDedicatedProof(args), /Required proof step/);
-  job.steps.find(step => step.name.startsWith('Exercise generated')).conclusion = 'success';
-  state.prRun.run_attempt = 2;
-  await assert.rejects(verifyReusableDedicatedProof(args), /latest attempt/);
-});
-
 test('infrastructure reuse requires actual selected scopes rather than a green skipped step', async () => {
-  const ansible = dedicatedFixture('.github/workflows/deployment-config.yml', ['deploy/ansible/site.yml'], ['Check standalone Ansible configuration']);
+  const ansible = dedicatedFixture('.github/workflows/deployment-config.yml', ['deploy/ansible/site.yml'], ['Check Ansible configuration']);
   assert.equal((await verifyReusableDedicatedProof(ansible.args)).jobId, 500);
   const terraform = dedicatedFixture('.github/workflows/deployment-config.yml', ['deploy/cloudflare/terraform/main.tf'], ['Check all Terraform files', 'Validate Cloudflare Terraform']);
   assert.equal((await verifyReusableDedicatedProof(terraform.args)).jobId, 500);
-  const mixed = dedicatedFixture('.github/workflows/deployment-config.yml', ['deploy/ansible/site.yml', 'deploy/cloudflare/terraform/main.tf'], ['Check standalone Ansible configuration']);
+  const mixed = dedicatedFixture('.github/workflows/deployment-config.yml', ['deploy/ansible/site.yml', 'deploy/cloudflare/terraform/main.tf'], ['Check Ansible configuration']);
   await assert.rejects(verifyReusableDedicatedProof(mixed.args), /Terraform/);
 });
 
@@ -222,9 +210,9 @@ test('standalone main model job reuses only the successful Verify PR caller life
 });
 
 
-test('standalone backup main reuse requires real pre-merge encrypted restore and cleanup proof', async () => {
-  const workflowPath = '.github/workflows/standalone-backup.yml';
-  const { state, args, job } = dedicatedFixture(workflowPath, ['deploy/updater/standalone-backup.sh']);
+test('push backup reuse requires exact pre-merge lock and recovery proof', async () => {
+  const workflowPath = '.github/workflows/push-backup.yml';
+  const { state, args, job } = dedicatedFixture(workflowPath, ['deploy/backup/backup.sh']);
   const receipt = await verifyReusableDedicatedProof(args);
   assert.equal(receipt.workflowPath, workflowPath);
   assert.equal(receipt.proofWorkflowPath, workflowPath);

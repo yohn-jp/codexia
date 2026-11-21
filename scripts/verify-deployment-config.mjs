@@ -53,7 +53,8 @@ assert.match(terraformMain, /pattern\s+=\s+"\$\{var\.app_hostname\}\$\{each\.val
 assert.match(terraformMain, /service\s+=\s+var\.origin_service/u);
 assert.match(terraformMain, /required\s+=\s+true/u);
 assert.match(terraformMain, /originRoutes/u);
-assert.match(terraformVariables, /condition\s*=\s*contains\(\["http:\/\/codexia-api:3000", "http:\/\/codexia-api-proxy:3000"\], var\.origin_service\)/u);
+assert.match(terraformVariables, /condition\s*=\s*var\.origin_service\s*==\s*"http:\/\/codexia-api:3000"/u);
+assert.doesNotMatch(terraformVariables, /codexia-api-proxy/u, "retired proxy ingress must not be an accepted origin");
 
 assert.match(apiSource, /style-src-attr 'unsafe-inline'/u);
 assert.ok(apiClient.includes('"/api/login"'), 'the UI API client must keep using same-origin API paths');
@@ -96,7 +97,7 @@ assert.ok(tunnelQuadlet.split('\n').includes('Image=docker.io/cloudflare/cloudfl
 assert.match(tunnelQuadlet, /Secret=codexia-tunnel-token/u);
 assert.match(tunnelQuadlet, /Network=codexia\.network/u);
 assert.doesNotMatch(tunnelQuadlet, /^Network=codexia-data\.network$/mu, 'the Tunnel must not join the PostgreSQL network');
-assert.match(tunnelQuadlet, /^Requires=codexia-api\.service$/mu, 'the initial Tunnel dependency stays with the legacy API');
+assert.match(tunnelQuadlet, /^Requires=codexia-api\.service$/mu, 'the Tunnel dependency stays with the canonical API');
 assert.match(tunnelQuadlet, /^After=network-online\.target codexia-api\.service$/mu, 'the initial Tunnel dependency preserves network ordering');
 assert.match(tunnelQuadlet, /PublishPort=127\.0\.0\.1:2000:2000\/tcp/u, 'Tunnel metrics must bind to host loopback only');
 assert.doesNotMatch(tunnelQuadlet, /^PublishPort=(?!127\.0\.0\.1:2000:2000\/tcp)/mu, 'the Tunnel must not publish a public host port');

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Disposable Phase F host/bootstrap slice for the push deployment account.
+# Disposable Push host/bootstrap slice for the push deployment account.
 set -Eeuo pipefail
 umask 077
 
 fail() { printf '%s\n' "$*" >&2; exit 1; }
-[[ "${GITHUB_ACTIONS:-}" == true && "${CODEXIA_DISPOSABLE_HOST:-}" == phase-f-push-host ]] || \
-  fail 'Run only inside the dedicated disposable Phase F push-host workflow.'
-[[ "$(lsb_release -rs)" == 26.04 && "$(uname -m)" == x86_64 ]] || fail 'Unsupported Phase F host.'
+[[ "${GITHUB_ACTIONS:-}" == true && "${CODEXIA_DISPOSABLE_HOST:-}" == push-host ]] || \
+  fail 'Run only inside the dedicated disposable Push push-host workflow.'
+[[ "$(lsb_release -rs)" == 26.04 && "$(uname -m)" == x86_64 ]] || fail 'Unsupported Push host.'
 [[ "$(id -u)" != 0 ]] || fail 'The workflow must use its non-root bootstrap identity.'
 [[ -n "${RUNNER_TEMP:-}" && -d "$RUNNER_TEMP" && "${GITHUB_SHA:-}" =~ ^[a-f0-9]{40}$ && "${GITHUB_RUN_ID:-}" =~ ^[0-9]+$ ]] || \
   fail 'GitHub run evidence environment is incomplete.'
@@ -28,7 +28,7 @@ if getent passwd "$service_user" >/dev/null 2>&1 || getent passwd "$service_uid"
   fail 'Push-host fixture identity already exists; refusing adoption.'
 fi
 
-evidence_dir="$RUNNER_TEMP/codexia-phase-f-push-host"
+evidence_dir="$RUNNER_TEMP/codexia-push-host"
 mkdir -m 0700 "$evidence_dir"
 log_file="$evidence_dir/host-convergence.log"
 identity_owned=false
@@ -73,7 +73,7 @@ cleanup() {
 import { writeFile } from 'node:fs/promises';
 const [file, exitStatus, cleanupStatus, lastPhase] = process.argv.slice(2);
 const result = {
-  format: 'codexia-phase-f-push-host-result/v1',
+  format: 'codexia-push-host-result/v1',
   sourceSha: process.env.GITHUB_SHA,
   workflowRunId: process.env.GITHUB_RUN_ID,
   runAttempt: process.env.GITHUB_RUN_ATTEMPT,
@@ -96,15 +96,15 @@ const result = {
     userManager: Number(exitStatus) === 0 ? 'PASS: fixture verified the lingering user manager and rootless Podman/Quadlet network' : 'NOT_ESTABLISHED: fixture exited before all post-convergence assertions completed',
     reboot: 'NOT_CHECKED: this runner was not rebooted; a nested disposable VM reboot proof remains future fixture work',
   },
-  lifecycleBoundary: 'This proves host/account bootstrap only. It does not invoke updater stages or establish secrets, application readiness, database continuity, rollback, target-host reboot, or production acceptance.',
+  lifecycleBoundary: 'This proves host/account bootstrap only. It does not invoke obsolete control paths or establish secrets, application readiness, database continuity, rollback, target-host reboot, or production acceptance.',
 };
 if (!/^[a-f0-9]{40}$/u.test(result.sourceSha ?? '') || !/^\d+$/u.test(result.workflowRunId ?? '') || !result.runnerName) {
-  throw new Error('Refusing unbound Phase F push-host evidence.');
+  throw new Error('Refusing unbound Push push-host evidence.');
 }
 await writeFile(file, JSON.stringify(result, null, 2) + '\n', { mode: 0o644, flag: 'wx' });
 NODE
   then :; else cleanup_status=1; status=1; fi
-  printf 'Phase F push-host cleanup finished with test status %s and cleanup status %s.\n' "$status" "$cleanup_status" >&2
+  printf 'Push push-host cleanup finished with test status %s and cleanup status %s.\n' "$status" "$cleanup_status" >&2
   exit "$status"
 }
 trap cleanup EXIT

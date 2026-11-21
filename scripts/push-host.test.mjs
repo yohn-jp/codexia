@@ -7,22 +7,22 @@ import { test } from 'node:test';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 test('push-host fixture is a manual, isolated Ansible bootstrap proof', async () => {
-  const workflow = await readFile(path.join(root, '.github/workflows/phase-f-push-host.yml'), 'utf8');
-  const helper = await readFile(path.join(root, 'deploy/ansible/test-phase-f-push-host.sh'), 'utf8');
+  const workflow = await readFile(path.join(root, '.github/workflows/push-host.yml'), 'utf8');
+  const helper = await readFile(path.join(root, 'deploy/ansible/test-push-host.sh'), 'utf8');
   const hostHelper = await readFile(path.join(root, 'deploy/ansible/test-host-integration.sh'), 'utf8');
-  const doc = await readFile(path.join(root, 'docs/deployment/PHASE-F-PUSH-HOST-CI.md'), 'utf8');
+  const doc = await readFile(path.join(root, 'docs/deployment/PUSH-HOST-CI.md'), 'utf8');
 
   assert.match(workflow, /^on:\n  workflow_dispatch:\n  pull_request:/mu);
-  assert.match(workflow, /\.github\/workflows\/phase-f-push-host\.yml/u);
+  assert.match(workflow, /\.github\/workflows\/push-host\.yml/u);
   assert.doesNotMatch(workflow, /^  (?:push|schedule|workflow_run):/mu);
   assert.match(workflow, /runs-on: ubuntu-26\.04/u);
   assert.match(workflow, /contents: read/u);
-  assert.doesNotMatch(workflow, /(?:contents|actions|packages):\s*write|codexia-production|CODEXIA_.*(?:TOKEN|KEY|SECRET)|standalone-updater/u);
-  assert.match(workflow, /test-phase-f-push-host\.sh/u);
+  assert.doesNotMatch(workflow, /(?:contents|actions|packages):\s*write|codexia-production|CODEXIA_.*(?:TOKEN|KEY|SECRET)|legacy-updater/u);
+  assert.match(workflow, /test-push-host\.sh/u);
   assert.match(workflow, /host-fixture-outcome\.json/u);
   assert.match(workflow, /if: always\(\)/u);
   assert.match(workflow, /if-no-files-found: warn/u);
-  assert.match(helper, /CODEXIA_DISPOSABLE_HOST.*phase-f-push-host/u);
+  assert.match(helper, /CODEXIA_DISPOSABLE_HOST.*push-host/u);
   assert.match(helper, /service_user=codexia/u);
   assert.match(helper, /CODEXIA_HOST_FIXTURE_USER="\$service_user"/u);
   assert.match(helper, /refusing adoption/u);
@@ -40,7 +40,7 @@ test('push-host fixture is a manual, isolated Ansible bootstrap proof', async ()
   assert.match(hostHelper, /codexia_service_user: \$user/u);
   assert.match(hostHelper, /CODEXIA_HOST_CONVERGENCE/u);
   assert.match(hostHelper, /"\$CODEXIA_HOST_CONVERGENCE" "\$tmp\/inventory\.yml" host/u);
-  for (const marker of ['pull requests', 'codexia', 'NOT_CHECKED', 'reboot', 'updater', 'CODEXIA_HOST_CONVERGENCE']) {
+  for (const marker of ['pull requests', 'codexia', 'NOT_CHECKED', 'reboot', 'CODEXIA_HOST_CONVERGENCE']) {
     assert.ok(doc.toLowerCase().includes(marker.toLowerCase()), `Missing evidence boundary: ${marker}`);
   }
 });

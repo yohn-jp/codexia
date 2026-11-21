@@ -1,6 +1,6 @@
 # Base secret convergence
 
-The standalone lifecycle uses the canonical names referenced by the existing Quadlet and updater runtime. The `secrets` stage adopts matching base credentials, or creates missing ones only before application data or containers exist. It never rotates a credential, deletes a secret, starts a service or edits the controller.
+The push-deployment runtime uses the canonical Podman secret names referenced by the API, database and Tunnel Quadlets. The `secrets` stage adopts matching base credentials, or creates missing ones only before application data or containers exist. It never rotates a credential, deletes a secret, starts a service or edits the controller.
 
 Run from the separate bootstrap SSH account with a private inventory and protected control-node files containing exact secret content. Ansible switches to the declared rootless service account for secret and Podman operations; that service account does not need sudo:
 

@@ -31,14 +31,14 @@ Codexiaを、原稿の執筆・作品世界の知識管理・物語の整合性�
 | Assistant | `assistant.qa`、`continuation`、`reader.reaction`、`stateEvents.draft` 等と文脈・出典・プレビューの実装 | 既存Provider実行を凍結。文脈取得と提案の共通部分のみ再利用し、外部AI/MCPを主経路にする |
 | UI | Desktop/Mobile、共有保存・復旧、可変パネル、Reading | 既存シェルを維持して創作ワークフローを完成させる |
 | 交換・復旧 | `codexia-work/v1`、PostgreSQLバックアップ | 作品交換と運用バックアップを区別し、未解決Evidenceを保持 |
-| 配備 | Workers静的UI、Tunnel、Rootless Podman、Quadlet、SHA固定GHCR発行 | 既存構成に更新制御を追加。Kubernetes等への移行は不要 |
+| 配備 | Workers静的UI、Tunnel、Rootless Podman、Quadlet、SHA固定GHCR発行 | Tailscale/SSH/AnsibleのPush型に統一。Kubernetes等への移行は不要 |
 
 ### 2.2 解決すべき設計上の差分
 
 - Storyの `readStorySnapshot` は、Coreの固定Snapshotから `bible/`・`plot/`・`manuscript/` 等のファイル形状を読み、独自Story Entityを組み立てる。これはGitへの復帰を意味しないが、KnowledgeのUUIDとStoryのID、文書の正規ID、Evidenceの関係を統一的に扱えるかを確認する必要がある。単にパスを全置換するのではなく、既存の投影・互換契約と実利用を追跡する。
 - CoreのKnowledge型とPersistence型には状態名・表現の相違がある。変換境界、損失の有無、正本の優先を確認し、必要な場合だけ修正する。
 - RFCの軽量Lexical Linkerと、現行のOptional Search/Terminologyの責務を整合させる。本計画ではCoreが手動のKnowledge/Evidenceと確認済み参照を提供し、継続的な自動抽出・検索は既存Optional機能の明示的な有効化に従う。Core-onlyでモデルや索引を必須化しない。
-- 配備・更新の正本は [Deployment](../deployment/README.md)、[Standalone updater](../deployment/STANDALONE-UPDATER.md)、[Update release](../deployment/UPDATE-RELEASE.md)。本書はこれらの実装・運用受入の進捗を定義しない。
+- 配備・更新の正本は [Deployment](../deployment/README.md)、[Push deployment](../deployment/PUSH-DEPLOYMENT.md)、[Backup](../deployment/BACKUP.md)。本書はこれらの実装・運用受入の進捗を定義しない。
 
 本計画は `CORE.md`、`INTERNAL-BOUNDARIES.md`、`MODULES.md`、`MODULAR-WORKSPACE.md`、`UX-CONTRACT.md` の既存契約を維持する。矛盾するRFC記述を採用する場合は、実装前に正本の文書を明示的に改訂する。設計案を暗黙に受入条件へ昇格させない。
 
@@ -127,7 +127,7 @@ Knowledge/Evidenceの統合契約を基礎として、Temporal Story、Narrative
 
 ## 6. 運用系列
 
-独立したコンポーネント配布、互換性、署名チャネル、単一Writer切替、バックアップ・復元は [Deployment](../deployment/README.md)、[Update release](../deployment/UPDATE-RELEASE.md)、[Standalone updater](../deployment/STANDALONE-UPDATER.md)、[Standalone backup](../deployment/STANDALONE-BACKUP.md) を正本とする。CIの実行と認証は [CI/CD architecture](../verification/CI-CD.md) に従う。実VMの受入は運用手順で証明し、設計提案を本番稼働の証拠としない。
+独立したコンポーネント配布、デプロイ時のAPIとDBの互換判定、バックアップ・復元は [Deployment](../deployment/README.md)、[Push deployment](../deployment/PUSH-DEPLOYMENT.md)、[Backup](../deployment/BACKUP.md) を正本とする。CIの実行と認証は [CI/CD architecture](../verification/CI-CD.md) に従う。実VMの受入は運用手順で証明し、設計提案を本番稼働の証拠としない。
 
 ## 7. 共通検証・リリースガバナンス
 
