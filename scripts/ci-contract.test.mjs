@@ -100,38 +100,37 @@ test('browser groups depend on profile producers; independent groups cannot canc
 });
 test('browser groups retain immutable runtime and restore the exact producer before running selected shards', () => {
   const browser = workflow.jobs.browser;
-  const mcrDigest = 'sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579';
   const chromiumDigest = 'sha256:d11b4fa1128d937fcda9dd0106d138b65c3e72cbad07d4801547aa66fc1c4725';
+  const webkitDigest = 'sha256:17c30d6e4ce83c9127cd99e417a2c23a30e2b627ecbc95f04737c33d74b640e2';
   assert.equal(browser.container.image, [
-    "${{ endsWith(matrix.group, '-webkit') && 'mcr.microsoft.com/playwright@",
-    mcrDigest,
-    "' || format('ghcr.io/{0}/playwright-ubuntu-chromium@",
-    chromiumDigest,
-    "', github.repository) }}",
+    "${{ format('ghcr.io/{0}/playwright-ubuntu-{1}@{2}', github.repository, endsWith(matrix.group, '-webkit') && 'webkit' || 'chromium', endsWith(matrix.group, '-webkit') && '",
+    webkitDigest,
+    "' || '", chromiumDigest, "') }}",
   ].join(''));
   assert.equal(browser.container.options, '--init --ipc=host');
   assert.deepEqual(browser.container.credentials, {
-    username: "${{ endsWith(matrix.group, '-webkit') && '' || github.actor }}",
-    password: "${{ endsWith(matrix.group, '-webkit') && '' || secrets.GITHUB_TOKEN }}",
+    username: '${{ github.actor }}',
+    password: '${{ secrets.GITHUB_TOKEN }}',
   });
   assert.equal(browser.permissions.packages, 'read');
   assert.equal(browser.env.CODEXIA_CI_BROWSER_GROUP, '${{ matrix.group }}');
   assert.equal(browser.env.CODEXIA_PLAYWRIGHT_IMAGE_DIGEST, [
-    "${{ endsWith(matrix.group, '-webkit') && '", mcrDigest,
+    "${{ endsWith(matrix.group, '-webkit') && '", webkitDigest,
     "' || '", chromiumDigest, "' }}",
   ].join(''));
   const runtime = readFileSync(new URL('./verify-browser-runtime.mjs', import.meta.url), 'utf8');
   assert.match(runtime, /VERIFICATION_GROUPS/);
-  assert.match(runtime, /requiredProjects/);
+  assert.match(runtime, /requiredProjects.size, 1/);
   for (const profile of PROFILES) {
-    for (const lane of ['writing', 'reference']) {
-      const tasks = VERIFICATION_GROUPS[`browser-${profile}-${lane}`];
-      assert.ok(tasks.length > 0);
-      assert.ok(tasks.every(task => BROWSER_SHARDS.some(shard => task === `browser-${profile}-${shard.id}` && shard.project === 'chromium')));
-    }
-    const mixed = VERIFICATION_GROUPS[`browser-${profile}-webkit`];
-    assert.ok(mixed.includes(`browser-${profile}-webkit`));
-    assert.ok(mixed.includes(`browser-${profile}-ui-v1`));
+    const writing = VERIFICATION_GROUPS[`browser-${profile}-writing`];
+    const reference = VERIFICATION_GROUPS[`browser-${profile}-reference`];
+    const webkit = VERIFICATION_GROUPS[`browser-${profile}-webkit`];
+    assert.deepEqual(webkit, [`browser-${profile}-webkit`], 'WebKit lane must contain no Chromium tasks');
+    assert.ok(reference.includes(`browser-${profile}-auth-recovery`), 'Chromium auth coverage must be preserved');
+    assert.ok(reference.includes(`browser-${profile}-ui-v1`), 'Chromium UI coverage must be preserved');
+    assert.ok([...writing, ...reference].every(task =>
+      BROWSER_SHARDS.some(shard => task === `browser-${profile}-${shard.id}` && shard.project === 'chromium')));
+    assert.deepEqual(new Set([...writing, ...reference, ...webkit]).size, BROWSER_SHARDS.length, 'No browser shard can be omitted or repeated');
   }
   const diagnostics = browser.steps.find(step => step.uses === 'actions/upload-artifact@v7.0.2' && step.with.name.startsWith('playwright-failure-'));
   assert.ok(diagnostics);
