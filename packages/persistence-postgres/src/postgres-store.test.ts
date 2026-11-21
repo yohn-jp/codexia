@@ -389,6 +389,62 @@ test("UTF-16 edits, idempotency, revision restoration and stale-head conflicts",
   );
 });
 
+test("native restore of identical text keeps confirmed evidence and mentions", async () => {
+  const project = await createProject(`native-restore-anchor-${randomUUID()}`);
+  const initial = await createDocument(project.id, "ABCDEF");
+  const evidenceId = randomUUID() as EvidenceId;
+  const nodeId = randomUUID() as KnowledgeNodeId;
+  await persistence.transaction(async transaction => {
+    await transaction.saveKnowledgeNode({ projectId:project.id, id:nodeId, type:"character", name:"Entity", attributes:{}, status:"confirmed", expectedVersion:null });
+    await transaction.saveEvidenceAnchor({ projectId:project.id, id:evidenceId, documentId:initial.document.id, revisionId:initial.revision.id, fromUtf16:1, toUtf16:3, quoteSha256:sha256("BC"), status:"confirmed", expectedVersion:null });
+    await transaction.saveMentionLink({ projectId:project.id, evidenceId, nodeId, status:"confirmed", source:"author", confidence:1, extractorVersion:null });
+  });
+  const duplicate = await persistence.transaction(transaction => transaction.saveDocument(saveCommand(
+    project.id, initial.document.id, initial.revision.id, "ABCDEF", [], "native-identical-save",
+  )));
+  const restored = await persistence.transaction(transaction => transaction.restoreDocumentRevision({
+    projectId:project.id, documentId:initial.document.id, baseRevisionId:duplicate.revision.id,
+    sourceRevisionId:initial.revision.id, authorId:"author", idempotencyKey:"native-identical-restore",
+  }));
+  const state = await persistence.read(async reader => ({
+    anchor:await reader.getEvidenceAnchor(project.id, evidenceId),
+    links:await reader.listMentionLinks(project.id, evidenceId),
+    history:await reader.listEvidenceHistory(project.id, evidenceId),
+  }));
+  assert.equal(restored.revision.markdown, "ABCDEF");
+  assert.equal(state.anchor?.revisionId, restored.revision.id);
+  assert.equal(state.anchor?.fromUtf16, 1);
+  assert.equal(state.anchor?.toUtf16, 3);
+  assert.equal(state.anchor?.quoteSha256, sha256("BC"));
+  assert.equal(state.anchor?.status, "confirmed");
+  assert.equal(state.links[0]?.status, "confirmed");
+  assert.equal(state.history.length, 3);
+
+  const changedSource = await createDocument(project.id, "ABXDEF");
+  const changed = await persistence.transaction(transaction => transaction.saveDocument(saveCommand(
+    project.id, changedSource.document.id, changedSource.revision.id, "ABCDEF",
+    [{fromUtf16:2,toUtf16:3,insert:"C"}], "native-changed-save",
+  )));
+  const changedEvidence = randomUUID() as EvidenceId;
+  const changedNode = randomUUID() as KnowledgeNodeId;
+  await persistence.transaction(async transaction => {
+    await transaction.saveKnowledgeNode({ projectId:project.id, id:changedNode, type:"character", name:"Changed entity", attributes:{}, status:"confirmed", expectedVersion:null });
+    await transaction.saveEvidenceAnchor({ projectId:project.id, id:changedEvidence, documentId:changedSource.document.id, revisionId:changed.revision.id, fromUtf16:1, toUtf16:3, quoteSha256:sha256("BC"), status:"confirmed", expectedVersion:null });
+    await transaction.saveMentionLink({ projectId:project.id, evidenceId:changedEvidence, nodeId:changedNode, status:"confirmed", source:"author", confidence:1, extractorVersion:null });
+  });
+  const changedRestore = await persistence.transaction(transaction => transaction.restoreDocumentRevision({
+    projectId:project.id, documentId:changedSource.document.id, baseRevisionId:changed.revision.id,
+    sourceRevisionId:changedSource.revision.id, authorId:"author", idempotencyKey:"native-changed-restore",
+  }));
+  const changedState = await persistence.read(async reader => ({
+    anchor:await reader.getEvidenceAnchor(project.id, changedEvidence),
+    links:await reader.listMentionLinks(project.id, changedEvidence),
+  }));
+  assert.equal(changedRestore.revision.markdown, "ABXDEF");
+  assert.equal(changedState.anchor?.status, "needs_review");
+  assert.equal(changedState.links[0]?.status, "proposed");
+});
+
 test("document saves advance persistent anchors atomically and revoke stale mention confirmation", async () => {
   const project = await createProject(`anchor-follow-${randomUUID()}`);
   const initial = await createDocument(project.id, "前文 東京 の後文");
