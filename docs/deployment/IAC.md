@@ -1,6 +1,8 @@
 # Standalone infrastructure as code
 
-**Normative target architecture.** Ansible is the single desired-state authority for the Codexia-managed configuration of a standalone VM. The implementation is being migrated from the existing updater-only playbook; the target requirements below are binding for new implementation, not a claim that they are already implemented. Hosted runtime, hypervisor provisioning, initial OS installation and external infrastructure are out of scope.
+**Migration status.** This document describes the existing pull-updater authority and its target convergence contract. Issue [#430](https://github.com/yohn-jp/codexia/issues/430) replaces that deployment authority with GitHub Actions → Tailscale → SSH → Ansible → rootless Podman Quadlet. The new push path is documented in [Push deployment](PUSH-DEPLOYMENT.md) and is still behind a disabled production gate until target-host acceptance. Until acceptance is recorded, retain this document's recovery and data-preservation rules for the live pull runtime; it is not the final authority model for the migrated system.
+
+The host image, SSH trust enrollment, external backup destination and external infrastructure remain operator-provided inputs. The requested migration permits rebuilding the VM and changing the service user to `codexia`, but does not permit deleting persistent data or secrets before their recovery has been verified.
 
 ## 1. Ownership and boundaries
 

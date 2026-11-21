@@ -1,4 +1,9 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { assertPushDeploymentAdmission, validatePushDeploymentCertificate } from './push-deployment-admission.mjs';
 
@@ -97,5 +102,45 @@ test('rejects malformed or mutable images and incomplete provenance', () => {
   }
   assert.throws(() => assertPushDeploymentAdmission(certificate({ image: installed().image }), installed(), {
     expectedMainSha: sha('b'), deployedUiEpoch: 1,
-  }), /differ from the installed/);
+  }), /certified candidate identity/u);
+});
+
+test('admits an exact same-digest reapplication as an idempotent no-op', () => {
+  const base = certificate();
+  const installedValue = installed();
+  const receipt = structuredClone(base.producer.receipt);
+  receipt.sourceSha = sha('a');
+  const sameRelease = {
+    ...base,
+    producer: { ...base.producer, sourceSha: sha('a'), receipt },
+    image: installedValue.image,
+    identity: installedValue.identity,
+  };
+  const admitted = assertPushDeploymentAdmission(sameRelease, installedValue, {
+    expectedMainSha: sha('b'), deployedUiEpoch: 1,
+  });
+  assert.equal(admitted.unchanged, true);
+  assert.throws(() => assertPushDeploymentAdmission({
+    ...sameRelease,
+    image: `ghcr.io/yohn-jp/codexia-backend@${digest('9')}`,
+  }, installedValue, { expectedMainSha: sha('b'), deployedUiEpoch: 1 }), /differ from the installed/u);
+});
+
+test('CLI admits the same certificate and installed identity Ansible supplies', () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'codexia-push-admission-'));
+  try {
+    const certificatePath = path.join(directory, 'certificate.json');
+    writeFileSync(certificatePath, JSON.stringify(certificate()));
+    const installedValue = Buffer.from(JSON.stringify(installed())).toString('base64');
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./push-deployment-admission.mjs', import.meta.url)),
+      '--admit', certificatePath, installedValue, sha('b'), '1'], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Admitted certified image/u);
+    const rejected = spawnSync(process.execPath, [fileURLToPath(new URL('./push-deployment-admission.mjs', import.meta.url)),
+      '--admit', certificatePath, installedValue, sha('9'), '1'], { encoding: 'utf8' });
+    assert.equal(rejected.status, 1);
+    assert.match(rejected.stderr, /main revision/u);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

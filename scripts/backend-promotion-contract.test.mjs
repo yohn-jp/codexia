@@ -6,6 +6,7 @@ import { test } from 'node:test';
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../.github/workflows/backend-release.yml', import.meta.url), 'utf8'));
+const handoff = parse(readFileSync(new URL('../.github/workflows/backend-deployment-handoff.yml', import.meta.url), 'utf8'));
 
 test('backend promotion resolver and publisher checkouts include full merge history', () => {
   for (const [jobName, proofScript] of [
@@ -28,5 +29,10 @@ test('backend publication requires a still-eligible component source before regi
   assert.ok(gate >= 0 && gate < publication);
   assert.match(steps[gate].run, /release-source-gate\.mjs backend/u);
   assert.equal(steps[publication].if, "steps.freshness.outputs.affected == 'true'");
-  assert.match(workflow.jobs['stable-channel'].if, /needs\.publish\.outputs\.certified-image != ''/u);
+  const deploy = handoff.jobs['deploy-production'];
+  assert.deepEqual(deploy.needs, ['verify-handoff']);
+  assert.match(deploy.if, /needs\.verify-handoff\.outputs\.certified-full-image != ''/u);
+  assert.match(deploy.if, /needs\.verify-handoff\.outputs\.deployment-certificate != ''/u);
+  assert.match(deploy.if, /vars\.CODEXIA_PUSH_DEPLOYMENT_ENABLED == 'true'/u);
+  assert.ok(workflow.jobs['stable-channel'], 'the pull channel remains available until push cutover acceptance');
 });
