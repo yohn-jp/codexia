@@ -1259,6 +1259,13 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = "";
     if (!file || workTransferBusy || !await protectTransition()) return;
+    const importSelection = selectionRef.current
+      ? { ...selectionRef.current }
+      : { projectId, documentId };
+    const importEditor = activeRef.current;
+    const importEditorIdentity = importEditor
+      ? { projectId: importEditor.document.projectId, documentId: importEditor.document.id, generation: importEditor.generation, markdown: importEditor.markdown }
+      : null;
     if (file.size > 12 * 1024 * 1024) {
       setPageError("JSONファイルが12 MiBの受信上限を超えています。");
       return;
@@ -1271,6 +1278,27 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       const imported = await api.importWorkArchive(raw);
       setProjects((current) => current.some((item) => item.id === imported.project.id)
         ? current : [imported.project, ...current]);
+      // Import commits before its response arrives. Protect input written while
+      // the request was pending before changing the selected work. If protection
+      // fails, keep the source editor in place and leave the imported work in the
+      // project list so it can be opened without submitting the archive again.
+      if (!await protectTransition()) {
+        setWorkTransferStatus("作品JSONは取り込み済みです。元の原稿を保持しました。取り込み済みの作品は一覧から開けます。");
+        return;
+      }
+      const latestSelection = selectionRef.current ?? { projectId, documentId };
+      const latestEditor = activeRef.current;
+      const sameSelection = latestSelection.projectId === importSelection.projectId &&
+        latestSelection.documentId === importSelection.documentId;
+      const sameEditor = importEditorIdentity === null
+        ? latestEditor === null
+        : latestEditor?.document.projectId === importEditorIdentity.projectId && latestEditor.document.id === importEditorIdentity.documentId;
+      if (!sameSelection || !sameEditor) {
+        setWorkTransferStatus("作品JSONは取り込み済みです。現在の選択を保持しました。取り込み済みの作品は一覧から開けます。");
+        return;
+      }
+      const protectedInterveningInput = Boolean(importEditorIdentity && latestEditor &&
+        (latestEditor.generation !== importEditorIdentity.generation || latestEditor.markdown !== importEditorIdentity.markdown));
       openSequenceRef.current += 1;
       publishEditor(null);
       selectionRef.current = { projectId: imported.project.id, documentId: "" };
@@ -1279,6 +1307,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       setDocumentId("");
       setProjectId(imported.project.id);
       setWorkTransferStatus((imported.replayed ? "このJSONは既に取り込み済みです。" : "新しい作品としてJSONを取り込みました。") +
+        (protectedInterveningInput ? " 待機中の原稿は回復下書きに保護しました。" : "") +
         (imported.unresolvedAnchors ? " 旧RevisionのEvidence " + imported.unresolvedAnchors + " 件は記録を保持し、現在の文書には自動リンクしていません。" : "") +
         (imported.omittedRecords ? " 元データで機密設定など " + imported.omittedRecords + " 項目は除外済みです。" : ""));
     } catch (error) {
