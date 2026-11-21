@@ -82,6 +82,8 @@ test('main fallback release records the exact build artifacts separately from ma
   assert.deepEqual(record.metadata.producer,{event:'push',sourceSha,version,workflowRunId:700,workflowRunNumber:451,sourceTree:tree,
     artifacts:{core:{id:701,digest:'sha256:'+'1'.repeat(64),producerAttempt:2,archiveSha256:'2'.repeat(64)},
       full:{id:702,digest:'sha256:'+'3'.repeat(64),producerAttempt:2,archiveSha256:'4'.repeat(64)}}});
+  const completion=releaseRecord.buildComponentReleaseRecord('backend',sourceSha,null,{core:image('5'),full:image('6'),compatibility,event:'workflow_run',receipt:{...receipt,event:'workflow_run'},mainTree:tree});
+  assert.equal(completion.metadata.producer.event,'workflow_run');
   assert.throws(()=>releaseRecord.buildComponentReleaseRecord('backend',sourceSha,null,{core:image('5'),full:image('6'),compatibility,
     event:'push',receipt:{...receipt,artifacts:{...receipt.artifacts,core:{...receipt.artifacts.core,id:702}}},mainTree:tree}),/distinct/);
 });

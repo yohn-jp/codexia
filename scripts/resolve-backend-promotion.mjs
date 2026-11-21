@@ -101,9 +101,9 @@ export async function inspectBackendImageWithoutExecution(archivePath, profile, 
 
 async function resolve({env=process.env,fetchImpl=fetch}={}) {
   assert.equal(env.GITHUB_REPOSITORY,REPOSITORY,'Backend promotion repository mismatch');
-  assert.equal(env.GITHUB_EVENT_NAME,'push','Backend promotion requires a main push');
+  assert.equal(env.GITHUB_EVENT_NAME,'workflow_run','Backend promotion requires completed Verify');
   assert.equal(env.GITHUB_REF,'refs/heads/main','Backend promotion requires main');
-  assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),env.GITHUB_SHA,'Backend promotion checkout differs from main');
+  assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),(env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA),'Backend promotion checkout differs from verified main');
   const token=env.GH_TOKEN;
   assert.ok(typeof token==='string'&&token.length>0,'GitHub Actions read token required');
   const proof=await verifyFrontendMainPromotionProof({env,fetchImpl});
@@ -136,7 +136,7 @@ async function resolve({env=process.env,fetchImpl=fetch}={}) {
     const receipt={format:'codexia-backend-promotion/v1',event:'pull_request',sourceSha:proof.headSha,version,
       workflowRunId:run.id,workflowRunNumber:run.run_number,workflowAttempt:run.run_attempt,workflowId:workflow.id,prNumber:proof.prNumber,
       verifyRunId:proof.sourceVerifyRunId,proofRunId:proof.runId,verifyAttempt:proof.attempt,planDigest:proof.planDigest,
-      sourceTree:proof.tree,mergeBaseSha:proof.baseSha,mainSha:env.GITHUB_SHA,artifacts:{}};
+      sourceTree:proof.tree,mergeBaseSha:proof.baseSha,mainSha:env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA,artifacts:{}};
     for(const item of selected){
       const bytes=await downloadArtifact(item.artifact,REPOSITORY,token,fetchImpl,{maxArchive:MAX_IMAGE_BYTES,downloadTimeoutMs:180_000});
       const extracted=path.join(scratch,item.profile);
@@ -160,7 +160,7 @@ async function main(){
   const env=process.env;
   let result;
   try {
-    if(env.GITHUB_EVENT_NAME!=='push') throw new Error('Promotion is only selected for main pushes');
+    if(env.GITHUB_EVENT_NAME!=='workflow_run') throw new Error('Backend promotion is only selected after completed Verify');
     result=await resolve({env});
   } catch(error) {
     result={promoted:false,reason:'Using exact main-source backend build: '+String(error instanceof Error?error.message:'promotion proof unavailable').replace(/[\r\n]/gu,' ').slice(0,300)};
