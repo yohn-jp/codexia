@@ -164,7 +164,7 @@ async function verifySourceCertification(record, releaseApiRecord, metadata, tok
   const sourceJobs = await githubPages('actions/runs/' + sourceRun.id + '/jobs?filter=latest', 'jobs', token);
   assertVerificationJobs(sourceJobs);
   const backendRuns = await githubPages('actions/workflows/backend-release.yml/runs?head_sha=' + authoritySha + '&branch=main&status=completed', 'workflow_runs', token);
-  const releasedAt=releaseApiRecord.created_at?Date.parse(releaseApiRecord.created_at):NaN;
+  const releasedAt=releaseApiRecord.published_at?Date.parse(releaseApiRecord.published_at):NaN;
   const backendRun = backendRuns.find(run => run?.head_sha === authoritySha && run?.head_branch === 'main' &&
     ['push','workflow_run'].includes(run?.event) && run?.status === 'completed' && run?.conclusion === 'success'&&
     Number.isFinite(releasedAt)&&Number.isFinite(Date.parse(run.created_at))&&Number.isFinite(Date.parse(run.updated_at))&&
