@@ -405,6 +405,13 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     ?? firstOutlineNodeId(visibleDocumentOutline);
   const zoomAncestors = outlineZoomRoot ? (outlineAncestors(documentOutline, outlineZoomRoot) ?? []) : [];
   const activeDocument = active?.document;
+  const writingContext = useMemo(() => {
+    const ancestors = activeDocument && outlineReadyProject === activeDocument.projectId
+      ? outlineAncestors(documentOutline, activeDocument.id)
+      : null;
+    return [...(ancestors ?? [])].reverse().map((ancestor) => ancestor.title)
+      .concat(project ? [project.title] : []).join(" / ");
+  }, [activeDocument, documentOutline, outlineReadyProject, project]);
   const moveTargets = useMemo(() => activeDocument ? documentMoveTargets(documents, activeDocument) : [], [documents, activeDocument]);
   const moveTargetAvailable = !moveParent || moveTargets.some((target) => target.id === moveParent);
   useEffect(() => {
@@ -2357,7 +2364,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         {project && !missingExplicitRouteDocument && !selectedDocument && !active && !outlineError && <section className="pg-empty"><h2>{project.title}</h2><p>編集を始める文書を作成してください。</p><button type="button" onClick={() => openCreation("document")}>最初の文書を作成</button></section>}
         {active && <section className="pg-editor" data-reader={reading ? "true" : undefined} aria-label={active.document.title}>
           <div className="pg-editor-heading">
-            <div><p className="eyebrow">{project?.title}</p><h2>{active.document.title}</h2></div>
+            <div><p className="eyebrow">{writingContext}</p><h2>{active.document.title}</h2></div>
             <details className="pg-save-state" data-state={desktopDurabilityFor(active)}>
               <summary aria-live={active.error || active.remoteConflict || active.recovery === "failed" || active.recovery === "other-tab"
                 ? "off"
@@ -2629,7 +2636,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     <Shell mode={mode}
       header={<><h1>Database workspace</h1><JobInbox /><ThemeControl mode={theme} error={themeError} onChange={(next) => { setTheme(next); applyThemeMode(next); try { persistThemeMode(next); setThemeError(""); } catch { setThemeError("外観設定をこのブラウザーへ保存できませんでした。"); } }} /><button type="button" onClick={() => void protectTransition().then((allowed) => { if (allowed) onSignOut(); })}>ログアウト</button></>}
       documentTitle={active?.document.title}
-      documentContext={project?.title}
+      documentContext={writingContext}
       library={library} editor={editor} tools={knowledge}
       status={<>
         {loading && <p role="status">PostgreSQLの状態を読み込んでいます。</p>}
