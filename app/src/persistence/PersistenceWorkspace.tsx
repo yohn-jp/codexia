@@ -1670,8 +1670,11 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     remove = false,
     requestedDocumentId?: string,
   ): Promise<void> {
-    const targetDocumentId = requestedDocumentId ?? activeRef.current?.document.id;
-    const target = documents.find((document) => document.id === targetDocumentId && document.projectId === projectId);
+    const selectedDocument = activeRef.current?.document;
+    const targetDocumentId = requestedDocumentId ?? selectedDocument?.id;
+    const target = selectedDocument?.id === targetDocumentId && selectedDocument.projectId === projectId
+      ? selectedDocument
+      : documents.find((document) => document.id === targetDocumentId && document.projectId === projectId);
     if (!target || projectIdRef.current !== projectId || structureMutationRef.current) return;
     structureMutationRef.current = true;
     try {
