@@ -45,6 +45,12 @@ Deploy the compatible static UI and immutable API image, then enable the VM sett
 
 The UI uses relative `/api/...` URLs, so production has no `VITE_API_URL` or API-origin secret. UI and API share one origin and the API does not send `Access-Control-Allow-Origin`; browser CORS is intentionally disabled. External MCP/API clients must use their supported authorization flow and do not receive a CORS exception.
 
+### OAuth public Web client (prepared, not deployed)
+
+The browser now supports an optional public OAuth client configuration in `app/.env.example`. It contains only public endpoints, client ID, API resource/audience, exact desktop/mobile redirect URIs, and scopes. Register both redirect URIs on the same public Web client. The browser uses Authorization Code + PKCE S256, validates the one-time state callback, keeps the verifier only in tab-scoped session storage during redirect, and keeps the API access token in JavaScript memory. OAuth API calls send `Authorization: Bearer` and omit cookies. No refresh token is requested or persisted; after access-token expiry or page reload, the user signs in again. OAuth sign-out clears the in-memory bearer.
+
+The current static UI origin is `https://codexia.yohn.jp`; its Access-protected asset delivery stays unchanged. `VITE_CODEXIA_API_ORIGIN` is unset for the current same-origin route and must be set to an operator-approved HTTPS origin before cross-origin deployment. No separate API hostname has been selected or deployed. The OAuth issuer, API audience, registered client and redirect URIs, API hostname, exact backend CORS allowlist, Cloudflare Access application/policy, Tunnel hostname mapping and live authorization acceptance therefore remain operator/IdP prerequisites. Keep the origin and database private. The API must allow only the exact Web origin and required preflight headers/methods, without credentialed or wildcard CORS; the identity provider's token endpoint must also permit the registered Web origin to exchange the PKCE code. The client setting alone does not establish either boundary.
+
 ## Build and release ownership
 
 [CI/CD architecture](../verification/CI-CD.md) owns verification, artifact certification and release admission. The following describes component artifacts, operational configuration and deployment ownership. A successful component build does not by itself authorize publication.
