@@ -211,7 +211,7 @@ test('iOS packaging workflow changes retain root proof and its shared inputs sta
   for (const input of ['app/native/**', 'scripts/html-document.mjs', 'scripts/ios/**', 'scripts/read-regular-file.mjs']) {
     assert.ok(workflow.on.pull_request.paths.includes(input), input);
   }
-  assert.equal(workflow.jobs.build['runs-on'], 'macos-15');
+  assert.equal(workflow.jobs.build['runs-on'], 'xcode-27');
   assert.ok(workflow.jobs.build.steps.some(step => step.run?.includes('scripts/ios/validate-web-bundle.mjs')));
   assert.ok(workflow.jobs.build.steps.some(step => step.run?.includes('scripts/ios/package-unsigned-ipa.mjs')));
 
@@ -275,4 +275,22 @@ test('push backup changes retain root and independent exact-head verification', 
   assert.ok(steps.some(s => s.run?.includes('scripts/push-deployment-backup.test.mjs')));
   assert.deepEqual((await plan([...source, 'pnpm-lock.yaml'])).tasks, VERIFICATION_TASKS);
   assert.deepEqual((await plan(source, 'push')).tasks, VERIFICATION_TASKS);
+});
+
+test('iOS packaging and CI dashboard changes remain root-scoped, mixed source remains fully covered', async () => {
+  const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
+  for (const file of [
+    '.github/workflows/ios-unsigned-ipa.yml',
+    'scripts/ios/package-unsigned-ipa.mjs',
+    'app/native/package.json',
+    'scripts/ci-dashboard/analysis.mjs',
+    'scripts/ci-dashboard/site/dashboard.js',
+  ]) {
+    assert.deepEqual((await plan([file])).tasks, ['unit-root', 'coverage'], file);
+    assert.equal((await plan([file])).full_model_oci, false);
+  }
+  const changed = await plan(['.github/workflows/ios-unsigned-ipa.yml', 'app/src/main.tsx']);
+  assert.ok(changed.tasks.includes('build-full') && changed.tasks.includes('browser-full-webkit'));
+  assert.deepEqual((await plan(['scripts/ci-dashboard/analysis.mjs', 'unknown/unreviewed.txt'])).tasks, VERIFICATION_TASKS);
+  assert.deepEqual((await plan(['.github/workflows/ios-unsigned-ipa.yml'], 'push')).tasks, VERIFICATION_TASKS);
 });

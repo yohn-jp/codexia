@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: repository-audit-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'pages' }}
@@ -56,6 +57,15 @@ jobs:
       - name: Generate deterministic per-file OCR Delegate inputs
         run: |
           node scripts/audit/delegate.mjs "$RUNNER_TEMP/audit-site" "$CODEXIA_AUDIT_OCR_BIN"
+      - name: Bundle CI dashboard in the existing Pages artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            node scripts/ci-dashboard/collect.mjs "$RUNNER_TEMP/audit-site" --preview
+          else
+            node scripts/ci-dashboard/collect.mjs "$RUNNER_TEMP/audit-site"
+          fi
       - name: Require current PR's review materials
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         env:

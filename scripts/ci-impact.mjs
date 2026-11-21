@@ -35,7 +35,8 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
 
 /** @param {string} file */
 export function matchesFullModelOciPath(file) {
-  return typeof file === 'string' && FULL_MODEL_OCI_PATHS.some(pattern =>
+  // The standalone Capacitor shell is never part of the backend Full-model OCI input graph.
+  return typeof file === 'string' && !file.startsWith('app/native/') && FULL_MODEL_OCI_PATHS.some(pattern =>
     pattern.endsWith('/**') ? file.startsWith(pattern.slice(0, -2)) : file === pattern);
 }
 
@@ -44,6 +45,7 @@ export function matchesFullModelOciPath(file) {
 // their corresponding executable integration proofs. New paths fail closed.
 export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   '.github/workflows/ansible-base-secrets.yml',
+  '.github/workflows/ios-unsigned-ipa.yml',
   '.github/workflows/ansible-host.yml',
   '.github/workflows/backend-deployment-handoff.yml',
   '.github/workflows/deployment-config.yml',
@@ -125,6 +127,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'scripts/verify-frontend-compatibility.test.mjs',
 ]);
 const operationalRootPaths = new Set(OPERATIONAL_ROOT_PATHS);
+export const OPERATIONAL_ROOT_PREFIXES = Object.freeze(['scripts/ci-dashboard/', 'scripts/ios/', 'app/native/']);
 
 export function createVerificationPlan({ files, event, sha, base = null }) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? '') || (base !== null && !/^[a-f0-9]{40}$/.test(base))) throw new Error('Invalid verification source identity');
@@ -135,7 +138,7 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
   const browser = profiles => profiles.forEach(profile => BROWSER_SHARDS.forEach(({ id }) => add(`browser-${profile}-${id}`)));
   for (const file of files ?? []) {
     if (typeof file !== 'string' || !file || file.startsWith('/') || file.split('/').includes('..')) { full = true; break; }
-    if (operationalRootPaths.has(file)) {
+    if (operationalRootPaths.has(file) || OPERATIONAL_ROOT_PREFIXES.some(prefix => file.startsWith(prefix) && file.length > prefix.length)) {
       add('unit-root');
       continue;
     }

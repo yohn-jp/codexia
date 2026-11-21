@@ -1,6 +1,6 @@
 # iOS client and personal-device distribution
 
-> **Status:** An opt-in GitHub Actions workflow builds and uploads an unsigned IPA. Native OAuth and physical-device installation and acceptance remain unverified.
+> **Accepted architecture with native client and unsigned IPA CI under development. The Xcode 27 build, signed installation and physical-device acceptance require independent execution evidence.**
 > Authentication and resource permissions are defined by [API authentication and authorization](../architecture/API-AUTHN-AUTHZ.md). Presentation remains governed by the [Design and UX contract](../design/UX-CONTRACT.md), [Mobile interactions](../architecture/MOBILE-INTERACTION-UX.md) and [Core architecture](../architecture/CORE.md).
 
 ## Purpose and non-goals
@@ -27,7 +27,7 @@ The browser and native clients use separate public clients of Codexia's embedded
 
 ## Client implementation
 
-- **Capacitor** is the first-choice native shell; use existing React, Ionic React, CodeMirror and `app/src/entries/mobile.tsx` instead of recreating the editor in SwiftUI or introducing a second authoring coordinator. Keep the browser Mobile build operational.
+- **React 19 + Ionic React 9 + Capacitor 8** remain the client stack. Swift/SwiftUI is not a second authoring UI; native Swift is reserved for narrowly required bridges (system authentication, Keychain and OS APIs). **Capacitor** is the first-choice native shell; use existing React, Ionic React, CodeMirror and `app/src/entries/mobile.tsx` instead of recreating the editor in SwiftUI or introducing a second authoring coordinator. Keep the browser Mobile build operational.
 - Bundle a dedicated production Mobile Vite build as Capacitor `webDir`; do not load the live Web UI through Capacitor `server.url` in a production package. Its existing `/mobile/` Vite asset base and `BrowserRouter` expect an HTTP path and must be adapted for the bundled `capacitor://localhost`/local WebView origin without changing browser deployment semantics. Resolve deep links, asset loading, refresh/navigation and CSP under WKWebView.
 - Configure the API endpoint as a **nonsecret** build/deployment setting, constrained to an HTTPS allowlist. No `CODEXIA_AUTH_TOKEN`, client secret, Cloudflare service token or author JWT is ever placed in the app, JavaScript assets, logs or GitHub build artifacts.
 - Register a separate iOS public client with Codexia's Better Auth OAuth Provider; use the platform system authentication session, provider metadata discovery, OAuth Authorization Code + PKCE (S256), an exact app redirect, state/nonce handling, cancellation, reauthentication, and token expiry. Better Auth performs upstream OIDC federation and issues the Codexia API access token. Send only that access token to API routes; never send the upstream ID token as an API bearer.
@@ -37,7 +37,7 @@ The browser and native clients use separate public clients of Codexia's embedded
 
 ## Build and delivery
 
-The dedicated [iOS unsigned IPA workflow](../../.github/workflows/ios-unsigned-ipa.yml) builds the selected Mobile profile on an ephemeral **GitHub Actions macOS runner** with pinned Node, pnpm and Xcode inputs. It validates the bundled web assets, builds without Apple signing credentials, records package identity and uploads the unsigned IPA as a seven-day Actions artifact. Pull requests that touch native iOS, its authentication entry points or bundle tooling build the Core IPA at the exact PR head. Use `workflow_dispatch` to select the Core or Full profile manually. The IPA requires a separate signing step before installation. Preserve source identity and the frontend/API compatibility contract.
+The minimum supported iOS deployment target is **iOS 27.0** (independent of the Web/PWA), with **GitHub Actions `xcode-27` ARM64** as the iOS packaging runner. Require Xcode major 27 and the iOS 27 SDK at build time, explicitly set `IPHONEOS_DEPLOYMENT_TARGET=27.0`, and reject IPA artifacts with another minimum OS. The dedicated [iOS unsigned IPA workflow](../../.github/workflows/ios-unsigned-ipa.yml) uses the selected Xcode 27 toolchain and pinned Node, pnpm and profile inputs. Pull requests that touch native iOS, its authentication entry points or bundle tooling build the Core IPA at the exact PR head. Use `workflow_dispatch` to select Core or Full manually. The workflow validates the bundled web assets and retains the unsigned IPA as an Actions artifact for seven days. Preserve source identity and the frontend/API compatibility contract.
 
 Package the unsigned `.app` into an **unsigned, structurally valid IPA** (including `Payload/<AppName>.app` and required metadata). Validate Xcode build exit status, bundle ID, supported architectures, entitlements, IPA archive structure and asset inclusion. The repository/CI must never store Apple Account credentials, development signing identities or personal provisioning profiles. Publish only the nonsecret unsigned artifact to a restricted-retention Actions artifact; distribution/public GitHub Releases are not assumed necessary.
 
