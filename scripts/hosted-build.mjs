@@ -74,7 +74,7 @@ export function canonicalJson(value) {
 }
 
 export function validateHostedArtifactDirectory(directory) {
-  if (typeof directory !== 'string' || !/^\/tmp\/codexia-hosted-artifact-[a-f0-9]{32}$/u.test(directory)) {
+  if (typeof directory !== 'string' || !/^\/tmp\/codexia-hosted-artifact-[a-f0-9]{32}(?:[a-f0-9]{32})?$/u.test(directory)) {
     throw new Error('Invalid hosted artifact staging directory');
   }
   return directory;
@@ -823,7 +823,7 @@ async function main() {
     await compose(opts['--input-base64url'], opts['--source'], opts['--artifact-directory']);
     return;
   }
-  throw new Error('Usage: hosted-build.mjs catalog --producer-revision <sha> --runtime-base-digest <digest> --build-kit-digest <digest> [--out <file>] | compose --input-base64url <input> --source <repo@digest>');
+  throw new Error('Usage: hosted-build.mjs catalog --producer-revision <sha> --runtime-base-digest <digest> --build-kit-digest <digest> [--out <file>] | compose --input-base64url <input> --source <repo@digest> --artifact-directory /tmp/codexia-hosted-artifact-<hex>');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

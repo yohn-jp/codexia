@@ -13,8 +13,9 @@ import { assertSigstoreBundleMatches, assertSupportedCosignVersion, createSlsaSt
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const moduleIds = ['story', 'diagnostics', 'nlp', 'semantic', 'speaker', 'assistant', 'publishing', 'mcp', 'search'];
 
-test('hosted artifact staging accepts only isolated random paths under /tmp', () => {
+test('hosted artifact staging accepts only isolated build-specific paths under /tmp', () => {
   assert.equal(validateHostedArtifactDirectory(`/tmp/codexia-hosted-artifact-${'a'.repeat(32)}`), `/tmp/codexia-hosted-artifact-${'a'.repeat(32)}`);
+  assert.equal(validateHostedArtifactDirectory(`/tmp/codexia-hosted-artifact-${'b'.repeat(64)}`), `/tmp/codexia-hosted-artifact-${'b'.repeat(64)}`);
   assert.throws(() => validateHostedArtifactDirectory('/tmp/codexia-hosted-artifact-fixed'), /Invalid hosted artifact/u);
   assert.throws(() => validateHostedArtifactDirectory('/tmp/escape'), /Invalid hosted artifact/u);
 });

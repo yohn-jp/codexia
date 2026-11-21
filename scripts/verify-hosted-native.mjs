@@ -11,7 +11,7 @@ import { trustedModuleData } from './hosted-build.mjs';
 import { resolveBuildCatalogSelection } from '../packages/module-runtime/dist/index.js';
 import { createHostedNativeReport, hostedNativeComposeCases, parseHostedNativeSelection } from './hosted-native-selection.mjs';
 import { assertNativeProducerReport } from './ci-native-producer.mjs';
-import { writeFileExclusive } from './hosted-file.mjs';
+import { writeFileExclusive } from './hosted-output.mjs';
 
 const selection = parseHostedNativeSelection(process.argv.slice(2));
 assert.equal(process.env.CI, 'true', 'This native contract check owns a disposable CI runner only');
@@ -112,7 +112,7 @@ try {
       platform: 'linux/amd64', options: {},
     };
     const encoded = Buffer.from(JSON.stringify(input)).toString('base64url');
-    const artifact = path.join(tmpdir(), `codexia-hosted-artifact-${randomBytes(16).toString('hex')}`);
+    const artifact = path.join('/tmp', `codexia-hosted-artifact-${randomBytes(16).toString('hex')}`);
     artifacts.add(artifact);
     run(process.execPath, ['scripts/hosted-build.mjs', 'compose', '--input-base64url', encoded,
       '--source', `ghcr.io/yohn-jp/codexia/verification@${buildKitDigest}`, '--artifact-directory', artifact],
@@ -160,6 +160,6 @@ try {
   console.log(JSON.stringify({ ...result, reportPath }));
 } finally {
   await rm(output, { recursive: true, force: true });
-  // This directory is the native Producer's fixed output, on this disposable runner only.
+  // Remove only the random artifact roots created by this disposable verifier run.
   if (process.env.CI === 'true') await Promise.all([...artifacts].map(artifact => rm(artifact, { recursive: true, force: true })));
 }

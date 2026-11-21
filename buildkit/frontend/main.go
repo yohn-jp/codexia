@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -125,11 +126,10 @@ func build(ctx context.Context, gateway client.Client) (*client.Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("apply immutable Build Kit image configuration: %w", err)
 	}
-	artifactToken := make([]byte, 16)
-	if _, err := rand.Read(artifactToken); err != nil {
-		return nil, fmt.Errorf("create hosted artifact staging token: %w", err)
-	}
-	artifactDirectory := fmt.Sprintf("/tmp/codexia-hosted-artifact-%s", hex.EncodeToString(artifactToken))
+	artifactKey := sha256.Sum256([]byte(encodedInput))
+	// This output path is deterministic for BuildKit cache reuse and lives in
+	// this LLB command's isolated root filesystem, never the host /tmp.
+	artifactDirectory := fmt.Sprintf("/tmp/codexia-hosted-artifact-%x", artifactKey)
 	buildOutput := buildState.Dir("/opt/codexia").With(llb.Network(pb.NetMode_NONE)).Run(
 		llb.Args([]string{"/usr/local/bin/node", "/opt/codexia/scripts/hosted-build.mjs", "compose", "--input-base64url", encodedInput, "--source", frontendRef, "--artifact-directory", artifactDirectory}),
 	).Root()
