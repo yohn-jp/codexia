@@ -53,7 +53,8 @@ async function assertWriter(controller, state, slot, release, route) {
   const observed = await controller.host.observe();
   assert.deepEqual(observed.writers, [{ slot, image: release.image }], 'Schema maintenance writer is not exclusive');
   assert.equal(observed.route, route, 'Schema maintenance route is not as expected');
-  await controller.host.probe(slot, release);
+  if (route === 'blocked') await controller.host.verifyBlockedPasswordRotation(slot, release);
+  else await controller.host.probe(slot, release);
 }
 
 async function ensureWriter(controller, state, slot, release, operationId) {

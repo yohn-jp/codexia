@@ -42,6 +42,7 @@ function fixture(fingerprint, { targetPersisted = false, writers } = {}) {
       async fetchChannel() { return signedChannel(2); },
       async startWriter(slot, release) { trace.push('start:'+slot+':'+release.image); currentWriters=[{slot,image:release.image}]; },
       async observe() { return { route, writers: currentWriters }; },
+      async verifyBlockedPasswordRotation(slot, release) { trace.push('ready:'+release.image+':'+route); assert.equal(route,'blocked'); },
       async prepare(slot, release, owner) { trace.push('prepare:'+owner.operationId); assert.equal(route,'blocked'); assert.equal(release.image, currentWriters[0]?.image ?? release.image); },
       async stopInitialPreflight(slot, owner) { trace.push('stop-preflight:'+owner.operationId); },
       async probe(slot, release) { trace.push('probe:'+release.image+':'+route); },
@@ -63,7 +64,7 @@ test('committed schema marker admits only the target runtime during recovery', a
   assert.equal(fixtureValue.saved().paused, false);
   assert.ok(!fixtureValue.trace.some(item => item.startsWith('start:')),'Exact target writer should be retained during recovery');
   assert.ok(fixtureValue.trace.includes('route:blue'));
-  assert.ok(fixtureValue.trace.indexOf('probe:'+next.image+':blocked') < fixtureValue.trace.indexOf('route:blue'), 'Writer must be proven while the route is blocked');
+  assert.ok(fixtureValue.trace.indexOf('ready:'+next.image+':blocked') < fixtureValue.trace.indexOf('route:blue'), 'Writer must be proven ready while the route is blocked');
   assert.ok(fixtureValue.trace.includes('epoch:'+next.image), 'Recovery must recheck the current signed API epoch');
   assert.ok(fixtureValue.trace.includes('clear'));
 });
@@ -76,7 +77,7 @@ test('unpersisted target recovery commits exactly once and reuses the durable pr
   assert.equal(result.previous?.image, old.image);
   assert.ok(fixtureValue.trace.includes('prepare:'+fixtureValue.marker.operationId));
   assert.ok(fixtureValue.trace.includes('stop-preflight:'+fixtureValue.marker.operationId));
-  assert.ok(fixtureValue.trace.indexOf('probe:'+next.image+':blocked') < fixtureValue.trace.indexOf('route:blue'));
+  assert.ok(fixtureValue.trace.indexOf('ready:'+next.image+':blocked') < fixtureValue.trace.indexOf('route:blue'));
 });
 
 test('ambiguous schema marker remains blocked', async () => {
