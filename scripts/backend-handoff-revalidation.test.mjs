@@ -94,7 +94,10 @@ test('manual context is built from the authenticated API run and exact checked-o
   assert.equal('GITHUB_EVENT_PATH' in context.env, false);
   await assert.rejects(prepareManualVerifierContext({ env: { ...envForWrapper, GITHUB_EVENT_NAME: 'push' }, fetchImpl: async () => ({ ok: true, json: async () => run() }) }));
   await assert.rejects(prepareManualVerifierContext({ env: { ...envForWrapper, CODEXIA_MANUAL_REVALIDATION: 'false' }, fetchImpl: async () => ({ ok: true, json: async () => run() }) }));
-  await assert.rejects(prepareManualVerifierContext({ env: envForWrapper, fetchImpl: async () => ({ ok: true, json: async () => run() }) }), /Publisher checkout differs/u);
+  await assert.rejects(prepareManualVerifierContext({
+    env: { ...envForWrapper, CODEXIA_PUBLISHER_SHA: sha('a') },
+    fetchImpl: async () => ({ ok: true, json: async () => run() }),
+  }), /Publisher checkout differs/u);
 });
 
 test('manual publisher selection requires a separate exact source SHA input', async () => {
