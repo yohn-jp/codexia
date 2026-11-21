@@ -1,6 +1,6 @@
 import { expect, request, test, type Page } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
-import { authToken, expectDeviceDraft, expectServerSaved, ownerLogin, manuscriptEditor as editor, readManuscriptMarkdown, openRevisionHistory } from "./postgres-fixture";
+import { authToken, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaved, ownerLogin, manuscriptEditor as editor, readManuscriptMarkdown, openRevisionHistory } from "./postgres-fixture";
 
 const rootPath = "/api/v1/persistence/projects";
 const appBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
@@ -432,6 +432,11 @@ test("undoing an autosave draft back to the saved revision removes only that dra
   await replaceEditor(page, savedMarkdown);
   await expectEditor(page, savedMarkdown);
   await expect.poll(async () => (await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
+  await expectServerSaved(page);
+  await expectNoUnsavedDeviceChanges(page);
+  await editor(page).press("Control+A");
+  await page.locator(".pg-editor-command-menu > summary").click();
+  await expect(page.getByRole("button", { name: "選択範囲をText Anchorにする" })).toBeEnabled();
   await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
   await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
@@ -465,6 +470,7 @@ test("undo cleanup cannot remove a higher-generation draft written by another ta
   await replaceEditor(page, savedMarkdown);
   await expectEditor(page, savedMarkdown);
   await expect.poll(async () => (await drafts(page)).find((d) => d.documentId === f.one.document.id)?.markdown).toBe("Newer second-tab draft.");
+  await expect(page.locator(".pg-save-state")).toContainText("別タブに下書きがあります");
   await second.close();
 });
 
@@ -512,11 +518,16 @@ test("writing UI protects multiple document drafts separately from PostgreSQL re
 test("new typing survives an older in-flight PostgreSQL save and exact acknowledgement", async ({ page }) => {
   const f = await fixture(page); const gate = await holdSaves(page, f);
   try {
+    expect((await drafts(page)).filter(draft => draft.documentId === f.one.document.id)).toEqual([]);
+    await expectNoUnsavedDeviceChanges(page);
     await editor(page).fill("First generation awaiting acknowledgement."); await gate.seen;
     await editor(page).fill("Newer generation while save is in flight.");
     await expect.poll(async () => (await drafts(page)).some((d) => d.markdown === "Newer generation while save is in flight.")).toBe(true);
+    await expectDeviceDraft(page);
     gate.release(); await saved(page, f, "Newer generation while save is in flight.");
     await expectEditor(page, "Newer generation while save is in flight.");
+    await expect.poll(async () => (await drafts(page)).filter(draft => draft.documentId === f.one.document.id)).toEqual([]);
+    await expectNoUnsavedDeviceChanges(page);
   } finally { gate.release(); }
 });
 
