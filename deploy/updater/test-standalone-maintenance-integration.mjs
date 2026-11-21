@@ -1053,13 +1053,13 @@ async function exercisePreflightPasswordRotation({repoRoot,config,userUnitDir,wo
     await database.verifyPostgresPreflightPassword(oldPassword);
     const rejectPreflightPassword=password=>assert.rejects(database.verifyPostgresPreflightPassword(password,{secretRequired:false}),
       /password authentication failed/iu);
-    const replacement=randomBytes(32).toString('hex');
+    const replacement=randomBytes(32).toString('hex')+'\n';
     candidate=await createPreflightPasswordRotationCandidate({stateDir,config,userUnitDir,password:replacement});
     await runPreflightPasswordRotationCandidate({repoRoot,candidate,configPath:candidate.manifest.configPath,environment});
     await assert.rejects(lstat(markerPath),{code:'ENOENT'},'Successful preflight rotation retained its recovery marker');
     const rotatedSecret=JSON.parse(run('podman',['secret','inspect','--showsecret','codexia-postgres-preflight-password']))[0];
     assert.notEqual(rotatedSecret.ID,oldSecretId,'Immutable preflight Podman secret did not change');
-    assert.equal(rotatedSecret.SecretData,replacement);
+    assert.equal(rotatedSecret.SecretData,replacement,'LF-suffixed rotation input bytes were not preserved in the Podman secret');
     await database.verifyPostgresPreflightPassword(replacement);
     await database.verifyPostgresAppPassword(appPassword);
     await rejectPreflightPassword(oldPassword);
@@ -1077,6 +1077,8 @@ async function exercisePreflightPasswordRotation({repoRoot,config,userUnitDir,wo
     const marker=JSON.parse(await readFile(markerPath,'utf8'));
     assert.equal(marker.format,'codexia-maintenance-postgres-preflight-password/v1');
     assert.equal(marker.phase,'applying');
+    assert.equal(marker.rotation.previousDigest,createHash('sha256').update(replacement).digest('hex'),
+      'Durable previous-password digest did not preserve the exact LF-suffixed secret bytes');
     assert.equal((await readFile(config.routeFile,'utf8')),'blocked\n','Preflight SQL interruption did not keep the route fenced');
     await database.verifyPostgresPreflightPassword(interruptedPassword,{secretRequired:false});
     await rejectPreflightPassword(replacement);
