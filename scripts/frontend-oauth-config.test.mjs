@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import {
   assertFrontendOAuthConfigIdentity,
-  frontendOAuthConfigHash,
+  frontendOAuthConfigIdentity,
   readFrontendOAuthConfig,
 } from './frontend-oauth-config.mjs';
 
@@ -17,7 +17,7 @@ const settings = {
 
 test('no OAuth public settings preserve non-OAuth authentication builds', () => {
   assert.equal(readFrontendOAuthConfig({}), null);
-  assert.match(frontendOAuthConfigHash({}), /^[a-f0-9]{64}$/u);
+  assert.deepEqual(JSON.parse(frontendOAuthConfigIdentity({})), { format: 'codexia-web-oauth-config/v1', settings: null });
 });
 
 test('OAuth public settings require every Web shell callback and a complete client', () => {
@@ -70,7 +70,7 @@ test('OAuth public settings reject a callback registered on another origin', () 
 });
 
 test('OAuth configuration identity changes whenever the public client settings change', () => {
-  const baseline = frontendOAuthConfigHash(settings);
+  const baseline = frontendOAuthConfigIdentity(settings);
   for (const [key, value] of [
     ['VITE_CODEXIA_OAUTH_ISSUER', 'https://codexia.example.test/oauth'],
     ['VITE_CODEXIA_OAUTH_CLIENT_ID', 'another-public-client'],
@@ -79,7 +79,7 @@ test('OAuth configuration identity changes whenever the public client settings c
     ['VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI', 'https://codexia.example.test/mobile/callback'],
     ['VITE_CODEXIA_OAUTH_SCOPES', 'openid codexia:api extra:scope'],
   ]) {
-    assert.notEqual(frontendOAuthConfigHash({ ...settings, [key]: value }), baseline, key);
+    assert.notEqual(frontendOAuthConfigIdentity({ ...settings, [key]: value }), baseline, key);
   }
 });
 
@@ -90,13 +90,13 @@ test('frontend artifacts are admitted only when their OAuth configuration matche
     sourceSha: 'a'.repeat(40),
     profile: 'full',
     apiEpoch: 1,
-    oauthConfigSha256: frontendOAuthConfigHash(settings),
+    oauthConfigIdentity: frontendOAuthConfigIdentity(settings),
   };
   assert.doesNotThrow(() => assertFrontendOAuthConfigIdentity(identity, settings));
   assert.throws(() => assertFrontendOAuthConfigIdentity(identity, {
     ...settings,
     VITE_CODEXIA_OAUTH_CLIENT_ID: 'stale-client',
   }), /OAuth configuration does not match the current public settings/u);
-  assert.throws(() => assertFrontendOAuthConfigIdentity({ ...identity, oauthConfigSha256: undefined }, settings),
+  assert.throws(() => assertFrontendOAuthConfigIdentity({ ...identity, oauthConfigIdentity: undefined }, settings),
     /OAuth configuration does not match the current public settings/u);
 });
