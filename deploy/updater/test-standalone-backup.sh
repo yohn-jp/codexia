@@ -130,7 +130,7 @@ podman volume create codexia-history >/dev/null
 history_created=true
 # Match the backend image's COPY-UP ownership for the empty named volume:
 # Dockerfile.backend defines /history as node:node (UID/GID 1000).
-podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+podman run --rm --network none --read-only --cap-drop all --cap-add chown --security-opt no-new-privileges \
   --user 0:0 --entrypoint /bin/bash --volume codexia-history:/history \
   "$backend_node_image" -e -c 'chown 1000:1000 /history && chmod 0700 /history'
 printf 'fixture-only-admin-password' > "$tmp/admin-password"
