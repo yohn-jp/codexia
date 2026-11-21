@@ -218,16 +218,16 @@ sudo -H -u "$service_user" env HOME="$service_home" XDG_CONFIG_HOME="$service_ho
   XDG_DATA_HOME="$service_home/.local/share" XDG_STATE_HOME="$service_home/.local/state" \
   XDG_RUNTIME_DIR="/run/user/$service_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$service_uid/bus" \
   GH_TOKEN="$GH_TOKEN" GITHUB_SHA="$GITHUB_SHA" \
-  /usr/bin/node "$source_root/scripts/phase-f-test-channel.mjs" --out "$phase_dir/channel"
+  /usr/bin/node "$source_root/scripts/phase-f-test-channel.mjs" --out "$phase_dir/channel" --schema-release-0.1.455
 
-for file in test-channel-public.pem channel-sequence-1.json simulated-frontend-identity.json release-0.1.236.json; do
+for file in test-channel-public.pem channel-fresh-schema.json simulated-frontend-identity-fresh-schema.json release-0.1.455.json; do
   sudo install -o "$service_user" -g "$service_group" -m 0600 "$phase_dir/channel/$file" "$phase_dir/$file"
 done
 sudo install -o "$service_user" -g "$service_group" -m 0600 "$tmp/inputs/github-read-token" "$phase_dir/github-read-token"
 sudo install -o "$service_user" -g "$service_group" -m 0600 "$tmp/inputs/access-client-id" "$phase_dir/access-client-id"
 sudo install -o "$service_user" -g "$service_group" -m 0600 "$tmp/inputs/access-client-secret" "$phase_dir/access-client-secret"
 
-proxy_image=$(as_service /usr/bin/jq -r '.image' "$phase_dir/release-0.1.236.json")
+proxy_image=$(as_service /usr/bin/jq -r '.image' "$phase_dir/release-0.1.455.json")
 [[ "$proxy_image" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] || fail 'Certified fixture proxy image is not digest pinned.'
 cat > "$tmp/inventory.yml" <<YAML
 all:
@@ -270,7 +270,7 @@ all:
         codexia_access_id_file: "$phase_dir/access-client-id"
         codexia_access_secret_file: "$phase_dir/access-client-secret"
         codexia_maintenance_approved: true
-        codexia_installed_release_file: "$phase_dir/release-0.1.236.json"
+        codexia_installed_release_file: "$phase_dir/release-0.1.455.json"
         codexia_observe_milliseconds: 60000
 YAML
 sudo install -o "$service_user" -g "$service_group" -m 0600 "$tmp/inventory.yml" "$phase_dir/inventory.yml"
@@ -286,9 +286,9 @@ const vars = {
     XDG_RUNTIME_DIR: '/run/user/' + uid,
     XDG_STATE_HOME: '/home/codexia-ci-host/.local/state',
     NODE_OPTIONS: '--import=' + source + '/scripts/phase-f-fetch-loader.mjs',
-    CODEXIA_PHASE_F_CHANNEL_FILE: directory + '/channel-sequence-1.json',
+    CODEXIA_PHASE_F_CHANNEL_FILE: directory + '/channel-fresh-schema.json',
     CODEXIA_PHASE_F_FRONTEND_URL: 'https://codexia-phase-f.fixture.invalid/desktop/update-identity.json',
-    CODEXIA_PHASE_F_FRONTEND_IDENTITY_FILE: directory + '/simulated-frontend-identity.json',
+    CODEXIA_PHASE_F_FRONTEND_IDENTITY_FILE: directory + '/simulated-frontend-identity-fresh-schema.json',
   },
 };
 await writeFile(output, JSON.stringify(vars) + '\n', { mode: 0o600, flag: 'wx' });

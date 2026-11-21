@@ -31,6 +31,11 @@ const records = [
     full: 'ghcr.io/yohn-jp/codexia-backend@sha256:0140e204470757e048ebe4130ca3ae80a156724d497b5904099ac9884694280f',
   },
 ];
+const freshSchemaRecord = {
+  tag: 'backend-v0.1.455', version: '0.1.455', sourceSha: '46f7f76fb5596f3bd36c2eeca62bff2f81594912',
+  core: 'ghcr.io/yohn-jp/codexia-backend@sha256:417ff8030928cfb07891f94ca5f7e273d2c5c85225163424b2329aa86bd3a4bd',
+  full: 'ghcr.io/yohn-jp/codexia-backend@sha256:ad06016c93827236eeaa5cd606a89123f2b3e02e0cfc0cac45addcaf7294ebcb',
+};
 
 const fingerprintProbe = 'import { packagedMigrationFingerprint } from "@codexia/api"; console.log(await packagedMigrationFingerprint());';
 
@@ -115,7 +120,7 @@ export function bindCertifiedImage(identityValue, metadata, image, expectedCompa
 }
 
 /** Generate two signed test snapshots; the private key exists only in memory in this CI process. */
-export function createSignedTestChannels(releaseValues, { now = Date.now() } = {}) {
+export function createSignedTestChannels(releaseValues, { now = Date.now(), freshSchemaRelease = null } = {}) {
   assert.equal(releaseValues.length, 3, 'Three certified identities are required for update, rollback, and interrupted-update coverage');
   const releases = releaseValues.map(validateUpdateRelease);
   assert.equal(new Set(releases.map(value => value.image)).size, releases.length, 'Fixture releases must use distinct immutable images');
@@ -136,11 +141,23 @@ export function createSignedTestChannels(releaseValues, { now = Date.now() } = {
   const secondEnvelope = signUpdateChannel(snapshot(2, releases), privateKeyPem, now);
   const second = verifyUpdateChannel(secondEnvelope, publicKeyPem, first.checkpoint, now);
   assert.equal(selectUpdateCandidate(second, releases[1], releases[1].apiEpoch).image, releases[2].image);
+  let freshSchemaEnvelope = null;
+  if (freshSchemaRelease) {
+    const schemaRelease = validateUpdateRelease(freshSchemaRelease);
+    assert.equal(schemaRelease.state, 'published', 'Fresh-schema release must be published');
+    assert.equal(schemaRelease.apiEpoch, releases[0].apiEpoch, 'Fresh-schema release API epoch differs from the fixture UI');
+    assert.equal(schemaRelease.persistenceFormat, releases[0].persistenceFormat, 'Fresh-schema release persistence format differs from the fixture database');
+    assert.equal(schemaRelease.profile, releases[0].profile, 'Fresh-schema release profile differs from the lifecycle fixture');
+    assert.equal(schemaRelease.platform, releases[0].platform, 'Fresh-schema release platform differs from the lifecycle fixture');
+    freshSchemaEnvelope = signUpdateChannel(snapshot(1, [schemaRelease]), privateKeyPem, now);
+    assert.deepEqual(verifyUpdateChannel(freshSchemaEnvelope, publicKeyPem, null, now).payload.releases, [schemaRelease]);
+  }
   return {
     publicKeyPem,
     releases,
     first: { envelope: firstEnvelope, verified: first, candidate: releases[1] },
     second: { envelope: secondEnvelope, verified: second, candidate: releases[2] },
+    freshSchema: freshSchemaEnvelope ? { envelope: freshSchemaEnvelope } : null,
   };
 }
 
@@ -232,12 +249,14 @@ async function main() {
   const args = process.argv.slice(2);
   assert.equal(args[0], '--out', 'Usage: phase-f-test-channel.mjs --out /absolute/output/directory');
   assert.ok(path.isAbsolute(args[1]), 'Output path must be absolute');
+  assert.ok(args.length === 2 || (args.length === 3 && args[2] === '--schema-release-0.1.455'), 'Unknown Phase F channel option');
+  const includeFreshSchemaRelease = args.length === 3;
   const out = args[1];
   await mkdir(out, { recursive: true, mode: 0o755 });
   const token = process.env.GH_TOKEN;
   assert.ok(token, 'Actions read-only token required to verify source certification');
   const verifiedRecords = [];
-  for (const record of records) {
+  for (const record of [...records, ...(includeFreshSchemaRelease ? [freshSchemaRecord] : [])]) {
     const apiRelease = await githubJson('releases/tags/' + encodeURIComponent(record.tag), token);
     const metadata = parseComponentRelease(apiRelease, record.version, record.sourceSha, record.core, record.full, compatibility);
     const certification = await verifySourceCertification(record, apiRelease, metadata, token);
@@ -254,10 +273,19 @@ async function main() {
     identities.push({ ...record, metadata, identity, certification, release });
     await writeFile(path.join(out, 'release-' + record.version + '.json'), JSON.stringify(release, null, 2) + '\n', { mode: 0o644 });
   }
-  const channels = createSignedTestChannels(releases);
+  const channels = createSignedTestChannels(releases.slice(0, records.length), {
+    ...(includeFreshSchemaRelease ? { freshSchemaRelease: releases.at(-1) } : {}),
+  });
   await writeFile(path.join(out, 'test-channel-public.pem'), channels.publicKeyPem, { mode: 0o644 });
   await writeFile(path.join(out, 'channel-sequence-1.json'), JSON.stringify(channels.first.envelope) + '\n', { mode: 0o644 });
   await writeFile(path.join(out, 'channel-sequence-2.json'), JSON.stringify(channels.second.envelope) + '\n', { mode: 0o644 });
+  if (channels.freshSchema) {
+    await writeFile(path.join(out, 'channel-fresh-schema.json'), JSON.stringify(channels.freshSchema.envelope) + '\n', { mode: 0o644 });
+    await writeFile(path.join(out, 'simulated-frontend-identity-fresh-schema.json'), JSON.stringify({
+      format: 'codexia-frontend-identity/v1', version: releases.at(-1).version, sourceSha: releases.at(-1).sourceSha,
+      profile: releases.at(-1).profile, apiEpoch: releases.at(-1).apiEpoch,
+    }) + '\n', { mode: 0o644 });
+  }
   const frontendIdentity = {
     format: 'codexia-frontend-identity/v1', version: releases[0].version, sourceSha: releases[0].sourceSha,
     profile: releases[0].profile, apiEpoch: releases[0].apiEpoch,
@@ -269,7 +297,9 @@ async function main() {
     channelSigning: 'Fresh ephemeral Ed25519 test key; mechanics only, not production publisher authority.',
     releases: identities,
   }, null, 2) + '\n', { mode: 0o644 });
-  console.log('Verified three published Core release images and generated two ephemeral-key signed test channel sequences.');
+  console.log(includeFreshSchemaRelease
+    ? 'Verified three lifecycle Core releases plus the published fresh-schema Core release, then generated ephemeral-key signed fixture channels.'
+    : 'Verified three published Core release images and generated two ephemeral-key signed test channel sequences.');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -32,7 +32,7 @@
       ansible.builtin.command:
         argv: [sh, "{{ updater }}", initialize-schema, "{{ config_path }}", "{{ fresh_schema_dir.path }}/release.json", --approved]
       register: fresh_schema_result
-      changed_when: (fresh_schema_result.stdout | from_json).applied | length > 0
+      changed_when: fresh_schema_result.rc == 0 and (fresh_schema_result.stdout | from_json).applied | length > 0
     - name: Verify exact schema result without declaring writer activation
       ansible.builtin.assert:
         that:

@@ -202,11 +202,18 @@ test('Phase F channel factory derives signed sequences from certified embedded r
       migrationFingerprint: 'sha256:' + 'c'.repeat(64), persistenceFormat: 1, apiEpoch: 1,
     }, metadata, coreImage, compatibility);
   });
-  const channels = createSignedTestChannels(records, { now: Date.parse('2026-11-16T12:00:00.000Z') });
+  const freshSchemaRelease = {
+    ...records[2], version: '0.1.4', sourceSha: source('d'), image: image('d'),
+    migrationFingerprint: 'sha256:' + 'd'.repeat(64),
+  };
+  const channels = createSignedTestChannels(records, {
+    now: Date.parse('2026-11-16T12:00:00.000Z'), freshSchemaRelease,
+  });
   assert.equal(channels.first.verified.payload.sequence, 1);
   assert.equal(channels.second.verified.payload.sequence, 2);
   assert.equal(channels.first.candidate.version, '0.1.2');
   assert.equal(channels.second.candidate.version, '0.1.3');
+  assert.equal(JSON.parse(Buffer.from(channels.freshSchema.envelope.payload, 'base64').toString('utf8')).releases[0].version, '0.1.4');
   assert.throws(() => parseComponentRelease(releaseInfo('0.1.2', source('a'), 'b'), '0.1.2', source('b'), image('b'), image('e'), compatibility), /release metadata|source/i);
   assert.throws(() => parseComponentRelease(releaseInfo('0.1.1', source('a'), 'a'), '0.1.1', source('a'), image('a'), image('f'), compatibility), /Full image digest/i);
   assert.throws(() => parseComponentRelease({ ...releaseInfo('0.1.1', source('a'), 'a'), prerelease: true }, '0.1.1', source('a'), image('a'), image('d'), compatibility), /prerelease/i);
