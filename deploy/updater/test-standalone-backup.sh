@@ -149,6 +149,8 @@ done
 podman exec codexia-db psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia_admin -d codexia -c 'SELECT 1' >/dev/null
 podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia \
   -c "CREATE TABLE public.backup_probe(id integer PRIMARY KEY, value text NOT NULL); INSERT INTO public.backup_probe VALUES (1, 'encrypted-fixture-row');" >/dev/null
+podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia \
+  -c "CREATE SCHEMA codexia_auth; CREATE TABLE codexia_auth.backup_probe(id integer PRIMARY KEY, value text NOT NULL); INSERT INTO codexia_auth.backup_probe VALUES (1, 'auth-recovery-fixture-row');" >/dev/null
 write_backend_history() {
   local job_id="$1"
   podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
@@ -286,7 +288,7 @@ test -f "$artifact/database.dump.age"
 test -f "$artifact/history.tar.age"
 test -f "$artifact/manifest.age"
 (cd "$artifact" && sha256sum --check SHA256SUMS)
-if grep -aFq 'encrypted-fixture-row' "$artifact"/*.age; then
+if grep -aFq 'encrypted-fixture-row' "$artifact"/*.age || grep -aFq 'auth-recovery-fixture-row' "$artifact"/*.age; then
   echo 'Database fixture plaintext appeared in encrypted backup artifacts' >&2
   exit 1
 fi
@@ -349,6 +351,22 @@ grep -q 'Isolated restore verified: database and history fingerprints match' "$t
 manifest_hash="$(sha256sum "$artifact/SHA256SUMS" | cut -d' ' -f1)"
 grep -Fxq "Verified checksum manifest sha256: $manifest_hash" "$tmp/drill.log"
 test "$(bash "$backup_script" validate-artifact "$artifact")" = "$manifest_hash"
+
+# A validly re-encrypted public-only dump must not pass restore verification
+# when the source backup also contained Better Auth schema state.
+mkdir "$tmp/auth-schema-omitted"
+podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec pg_dump -U codexia_admin -d codexia -Fc -n public' |
+  age -r "$recipient" -o "$tmp/auth-schema-omitted/database.dump.age"
+cp "$artifact/history.tar.age" "$tmp/auth-schema-omitted/history.tar.age"
+cp "$artifact/manifest.age" "$tmp/auth-schema-omitted/manifest.age"
+(cd "$tmp/auth-schema-omitted" && sha256sum database.dump.age history.tar.age manifest.age > SHA256SUMS)
+if bash "$backup_script" drill "$tmp/auth-schema-omitted" "$tmp/age-identity" --approved > "$tmp/auth-schema-omitted.log" 2>&1; then
+  echo 'Restore drill accepted a backup with omitted codexia_auth state' >&2
+  exit 1
+fi
+grep -q 'Restored database logical fingerprint mismatch' "$tmp/auth-schema-omitted.log"
+assert_no_drill_resources
+
 if bash "$backup_script" validate-artifact "$tmp/tampered" > "$tmp/tampered-identity.log" 2>&1; then
   echo 'Artifact evidence accepted tampered ciphertext' >&2; exit 1
 fi

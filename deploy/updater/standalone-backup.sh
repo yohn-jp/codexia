@@ -100,9 +100,11 @@ case "$operation" in
   *) die 'Use the controller backup command or the explicitly approved drill';;
 esac
 
-# Hash complete canonical public-table contents, including the migration ledger,
-# revision history, Knowledge, Evidence and approval state. Explicit table/row
-# order and UTC ensure a restored database has the same logical representation.
+# Hash the complete Codexia data and auth schema table contents, including the
+# migration ledger, revision history, Knowledge, Evidence, approval state and
+# Better Auth state. Explicit table/row order and UTC ensure a restored database
+# has the same logical representation. A database without codexia_auth keeps
+# the same fingerprint projection as before.
 db_fingerprint(){
   local container="$1" user="$2"
   podman exec -i "$container" sh -ec '
@@ -113,7 +115,7 @@ SET TIME ZONE 'UTC';
 SET DateStyle TO ISO, YMD;
 SELECT format('SELECT %L; SELECT to_jsonb(t)::text FROM %I.%I t ORDER BY to_jsonb(t)::text COLLATE "C";', n.nspname || '.' || c.relname, n.nspname, c.relname)
 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-WHERE n.nspname='public' AND c.relkind IN ('r','p')
+WHERE n.nspname IN ('public','codexia_auth') AND c.relkind IN ('r','p')
 ORDER BY n.nspname, c.relname
 \gexec
 SQL
