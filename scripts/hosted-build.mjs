@@ -53,7 +53,6 @@ const recipeFiles = [
   'scripts/read-regular-file.mjs',
   'scripts/profile-package.mjs',
   'scripts/hosted-build.mjs',
-  'scripts/read-regular-file.mjs',
   'scripts/composition-persistence.mjs',
   'scripts/hosted-smoke.mjs',
   'scripts/runtime-package-closure.mjs',
