@@ -37,6 +37,7 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     const buildEnvironment = {
       ...process.env,
       CODEXIA_PROFILE: process.env.CODEXIA_PROFILE ?? "core",
+      CODEXIA_VITE_BUILD_OUTPUT_ROOT: appAssets,
       VITE_CODEXIA_OAUTH_ISSUER: fixture.issuer,
       VITE_CODEXIA_OAUTH_CLIENT_ID: fixture.webClientId,
       VITE_CODEXIA_API_AUDIENCE: fixture.audience,
@@ -47,8 +48,7 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     // Never mutate app/dist: other Playwright shards concurrently serve its
     // standard (non-OAuth) shells from the same checkout.
     for (const ui of ["launcher", "desktop", "mobile"]) {
-      const outputDirectory = resolve(appAssets, ui === "launcher" ? "" : ui);
-      const build = spawnSync("pnpm", ["--filter", "@codexia/app", "exec", "vite", "build", "--outDir", outputDirectory], {
+      const build = spawnSync("pnpm", ["--filter", "@codexia/app", "exec", "vite", "build"], {
         cwd: resolve("."),
         encoding: "utf8",
         env: { ...buildEnvironment, CODEXIA_UI: ui },
