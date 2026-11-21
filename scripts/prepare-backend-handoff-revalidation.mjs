@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { appendFile, writeFile } from 'node:fs/promises';
+import { appendFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -45,20 +45,17 @@ export async function resolveManualPublisherRun({ env, checkoutSha, fetchImpl = 
   };
 }
 
-export async function writePublisherRunEvent(run, runnerTemp, outputPath) {
-  assert.match(runnerTemp ?? '', /^\//u, 'Runner temporary directory must be absolute');
+export async function writePublisherSourceOutput(run, outputPath) {
   assert.match(outputPath ?? '', /^\//u, 'Workflow output path must be absolute');
-  const eventPath = path.join(runnerTemp, 'codexia-publisher-run.json');
-  await writeFile(eventPath, JSON.stringify({ workflow_run: run }) + '\n', { mode: 0o600, flag: 'wx' });
-  await appendFile(outputPath, `publisher_event_path=${eventPath}\npublisher_source_sha=${run.head_sha}\n`);
-  return eventPath;
+  assert.match(run?.head_sha ?? '', sha, 'Verified publisher source SHA is invalid');
+  await appendFile(outputPath, `publisher_source_sha=${run.head_sha}\n`);
 }
 
 async function main() {
   const env = process.env;
   const checkoutSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const run = await resolveManualPublisherRun({ env, checkoutSha });
-  await writePublisherRunEvent(run, env.RUNNER_TEMP, env.GITHUB_OUTPUT);
+  await writePublisherSourceOutput(run, env.GITHUB_OUTPUT);
   console.log(`Selected successful main backend publisher run ${run.id}, attempt ${run.run_attempt}, source ${run.head_sha}`);
 }
 
