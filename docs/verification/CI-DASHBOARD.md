@@ -46,7 +46,7 @@ The sample does **not** establish all required checks: bounded history can omit 
 
 ## CI impact and iOS agreement
 
-Pure changes under **scripts/ci-dashboard/**, **scripts/ios/** and **app/native/**, or to the manual iOS IPA workflow, select the canonical **unit-root + coverage** task pair instead of the full browser/OCI graph. Unknown paths remain full; mixed shared application changes retain affected tests. This addresses the unnecessary all-tasks selection observed in [#449](https://github.com/yohn-jp/codexia/issues/449). Its measured improvement must still be checked against a real PR run.
+Pure changes under **scripts/ci-dashboard/**, **scripts/ios/** and **app/native/**, or to the iOS IPA workflow, select the canonical **unit-root + coverage** task pair instead of the full browser/OCI graph. Unknown paths remain full; mixed shared application changes retain affected tests. This addresses the unnecessary all-tasks selection observed in [#449](https://github.com/yohn-jp/codexia/issues/449). Its measured improvement must still be checked against a real PR run.
 
 The unsigned IPA workflow runs for native-related PR changes or manual dispatch, and moves to **xcode-27 ARM64** and **iOS 27.0 minimum**. React + Ionic + Capacitor remain the architecture; Swift/SwiftUI do not replace the editor. A native unsigned archive does not prove Simulator acceptance, Apple signing, Keychain or physical installation. See [iOS client contract](../deployment/IOS-CLIENT.md).
 
