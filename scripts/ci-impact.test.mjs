@@ -164,7 +164,7 @@ test('known operational inputs retain root proof without unrelated browser, OCI 
     assert.deepEqual(selected.tasks, ['unit-root','coverage'], file);
     assert.equal(selected.full_model_oci, false, file);
   }
-  for (const file of ['deploy/ansible/new-stage.yml','deploy/updater/new-runtime.mjs','scripts/new-tool.mjs','.github/workflows/unknown.yml']) {
+  for (const file of ['deploy/ansible/new-stage.yml','deploy/backup/new-runtime.mjs','scripts/new-tool.mjs','.github/workflows/unknown.yml']) {
     assert.deepEqual((await plan([file])).tasks, VERIFICATION_TASKS, file);
   }
   const mixed = await plan(['deploy/ansible/host.yml','app/src/api.ts']);
@@ -179,7 +179,7 @@ test('operational proof remains owned by one exact-head root task and matching i
   const readWorkflow = name => parse(readFileSync(new URL('../.github/workflows/'+name, import.meta.url), 'utf8'));
   const infra = readWorkflow('deployment-config.yml');
   for (const event of ['pull_request','push']) {
-    for (const path of ['deploy/ansible/**','deploy/updater/**','deploy/quadlet/**','deploy/postgres/**','deploy/cloudflare/**']) {
+    for (const path of ['deploy/ansible/**','deploy/backup/**','deploy/quadlet/**','deploy/postgres/**','deploy/cloudflare/**']) {
       assert.ok(infra.on[event].paths.includes(path), path);
     }
   }
@@ -191,12 +191,8 @@ test('operational proof remains owned by one exact-head root task and matching i
     assert.ok(!JSON.stringify(readWorkflow('frontend-release.yml').jobs).includes('pnpm run '+command));
   }
   assert.ok(OPERATIONAL_ROOT_PATHS.includes('docs/deployment/README.md'));
-  assert.ok(OPERATIONAL_ROOT_PATHS.includes('docs/deployment/PHASE-F-DISPOSABLE-CI.md'));
+  assert.ok(OPERATIONAL_ROOT_PATHS.includes('docs/deployment/BACKUP.md'));
   assert.ok(OPERATIONAL_ROOT_PATHS.includes('.github/workflows/tailscale-connectivity.yml'));
-  const runtime = readWorkflow('ansible-runtime-contract.yml');
-  for (const event of ['pull_request', 'push']) {
-    assert.ok(runtime.on[event].paths.includes('deploy/updater/test-standalone-maintenance-preload.mjs'));
-  }
   const audit = readWorkflow('repository-audit.yml');
   assert.ok(!Object.hasOwn(audit.on,'workflow_run'));
   assert.ok(!Object.hasOwn(audit.on,'delete'));
@@ -215,36 +211,30 @@ test('root and coverage-only plans have a single owner for contract test executi
   assert.deepEqual((await plan(['deploy/ansible/host.yml'])).tasks, ['unit-root','coverage']);
 });
 
-test('backup and recovery-only changes retain root and exact-head dedicated integration proof', async () => {
+test('push backup changes retain root and independent exact-head verification', async () => {
   const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
-  const backup = parse(readFileSync(new URL('../.github/workflows/standalone-backup.yml', import.meta.url), 'utf8'));
-  const paths = [
-    'deploy/ansible/backup.yml',
-    'deploy/ansible/lifecycle.yml',
+  const backup = parse(readFileSync(new URL('../.github/workflows/push-backup.yml', import.meta.url), 'utf8'));
+  const source = [
+    'deploy/backup/backup.sh',
+    'deploy/ansible/deploy.yml',
     'deploy/ansible/restore-drill.yml',
-    'deploy/ansible/test-lifecycle-contract.sh',
-    'deploy/ansible/test-lifecycle-contract.yml',
-    'deploy/updater/standalone-backup.sh',
-    'deploy/updater/test-standalone-backup-lock.sh',
-    'deploy/updater/test-standalone-backup-startup-fence.sh',
-    'deploy/updater/test-standalone-backup.sh',
-    'scripts/standalone-backup-controller.test.mjs',
+    'deploy/ansible/push-deployment-recover.sh',
     'scripts/push-deployment-backup.test.mjs',
-    '.github/workflows/standalone-backup.yml',
+    'scripts/push-deployment-recovery.test.mjs',
+    '.github/workflows/push-backup.yml',
   ];
-  for (const file of paths) {
+  for (const file of source) {
     assert.deepEqual((await plan([file])).tasks, ['unit-root', 'coverage'], file);
     assert.equal((await plan([file])).full_model_oci, false, file);
-    for (const event of ['pull_request', 'push']) assert.ok(backup.on[event].paths.includes(file), file);
+    for (const event of ['pull_request', 'push']) {
+      const paths = backup.on[event].paths;
+      assert.ok(paths.some(p => p === file || (p.endsWith('/**') && file.startsWith(p.slice(0, -2)))), file);
+    }
   }
-  assert.deepEqual(backup.on.pull_request.branches, ['main']);
-  assert.deepEqual(backup.on.push.branches, ['main']);
-  const steps = backup.jobs['backup-drill'].steps;
+  const steps = backup.jobs['backup-contract'].steps;
   assert.equal(steps.find(s => s.uses?.startsWith('actions/checkout')).with.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
-  assert.ok(steps.some(s => s.run?.includes('bash deploy/ansible/test-lifecycle-contract.sh')));
-  assert.ok(steps.some(s => s.run?.includes('bash deploy/updater/test-standalone-backup.sh')));
+  assert.ok(steps.some(s => s.run?.includes('bash -n deploy/backup/backup.sh')));
   assert.ok(steps.some(s => s.run?.includes('scripts/push-deployment-backup.test.mjs')));
-  assert.deepEqual((await plan([...paths, 'pnpm-lock.yaml'])).tasks, VERIFICATION_TASKS);
-  assert.deepEqual((await plan(paths, 'push')).tasks, VERIFICATION_TASKS);
-  assert.deepEqual((await plan(null)).tasks, VERIFICATION_TASKS);
+  assert.deepEqual((await plan([...source, 'pnpm-lock.yaml'])).tasks, VERIFICATION_TASKS);
+  assert.deepEqual((await plan(source, 'push')).tasks, VERIFICATION_TASKS);
 });

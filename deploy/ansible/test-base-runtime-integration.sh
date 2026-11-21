@@ -3,20 +3,20 @@
 set -Eeuo pipefail
 runtime_test_error() {
   local status=$?
-  printf 'Phase B runtime integration failed at line %s (status %s): %s\n' "${BASH_LINENO[0]:-$LINENO}" "$status" "$BASH_COMMAND" >&2
+  printf 'Base runtime integration failed at line %s (status %s): %s\n' "${BASH_LINENO[0]:-$LINENO}" "$status" "$BASH_COMMAND" >&2
   return 0
 }
 trap runtime_test_error ERR
-printf '%s\n' 'Starting Phase B runtime integration test.'
+printf '%s\n' 'Starting Base runtime integration test.'
 test "${GITHUB_ACTIONS:-}" = true
-test "${CODEXIA_DISPOSABLE_HOST:-}" = phase-b-integration
+test "${CODEXIA_DISPOSABLE_HOST:-}" = base-integration
 test "$(lsb_release -rs)" = 26.04
 service_user=${CODEXIA_SERVICE_USER:?missing rootless fixture identity}
 service_uid=$(id -u "$service_user")
 service_home=$(getent passwd "$service_user" | cut -d: -f6)
 test "$(id -un)" != "$service_user"
 sudo -n true
-printf '%s\n' 'Phase B runtime preflight checks passed.'
+printf '%s\n' 'Base runtime preflight checks passed.'
 as_service() {
   sudo -u "$service_user" env HOME="$service_home" XDG_CONFIG_HOME="$service_home/.config" XDG_DATA_HOME="$service_home/.local/share" XDG_STATE_HOME="$service_home/.local/state" XDG_RUNTIME_DIR="/run/user/$service_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$service_uid/bus" bash -c 'cd "$HOME" && exec "$@"' bash "$@"
 }
@@ -33,17 +33,17 @@ else
   exit "$status"
 fi
 test "$rootless_info" = true
-printf '%s\n' 'Phase B rootless Podman info verified.'
+printf '%s\n' 'Base rootless Podman info verified.'
 test "$(id -u)" != 0
 
 export XDG_RUNTIME_DIR="/run/user/$service_uid"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 systemctl --user show --property=Version >/dev/null
-printf '%s\n' 'Phase B rootless systemd manager verified.'
+printf '%s\n' 'Base rootless systemd manager verified.'
 
 quadlet_dir="$service_home/.config/containers/systemd"
 as_service test ! -e "$service_home/unexpected-tunnel-mount"
-for container in codexia-db codexia-tunnel codexia-api codexia-api-proxy; do
+for container in codexia-db codexia-tunnel codexia-api; do
   rc=0; podman container exists "$container" || rc=$?
   test "$rc" = 1
 done
@@ -59,25 +59,21 @@ podman volume exists codexia-postgres
 for secret in codexia-auth-token codexia-tunnel-token codexia-postgres-admin-password codexia-postgres-app-password; do
   podman secret exists "$secret"
 done
-rc=0; podman secret exists codexia-postgres-preflight-password || rc=$?
-test "$rc" = 1
 test ! -e /etc/codexia
-# The disposable test must never adopt or delete a pre-existing updater directory.
-test ! -e /opt/codexia-updater && test ! -L /opt/codexia-updater
 for file in codexia.network codexia-data.network codexia-postgres.volume codexia-data.volume codexia-history.volume codexia-db.container codexia-tunnel.container; do
   as_service test ! -e "$quadlet_dir/$file"
 done
-printf '%s\n' 'Phase B initial runtime resource checks passed.'
+printf '%s\n' 'Base initial runtime resource checks passed.'
 
 tmp=$(mktemp -d /tmp/codexia-base-runtime.XXXXXX)
 tunnel_quadlet_saved="$service_home/.codexia-tunnel.container.saved-$service_uid-$$"
 generator_probe_dir=/run/systemd/user-generators
 generator_probe_path="$generator_probe_dir/podman-user-generator"
-generator_probe_log="/run/codexia-phase-b-generator-environment-$service_uid-$$.log"
+generator_probe_log="/run/codexia-base-generator-environment-$service_uid-$$.log"
 generator_probe_installed=false
 generator_probe_dir_created=false
 user_environment_generator_dir=/run/systemd/user-environment-generators
-user_environment_generator_path="$user_environment_generator_dir/99-codexia-phase-b-xdg-$service_uid-$$"
+user_environment_generator_path="$user_environment_generator_dir/99-codexia-base-xdg-$service_uid-$$"
 user_environment_generator_installed=false
 user_environment_generator_dir_created=false
 cleanup() {
@@ -124,21 +120,13 @@ cleanup() {
     codexia-tunnel-token \
     codexia-tunnel-token-wrong \
     codexia-postgres-admin-password \
-    codexia-postgres-app-password \
-    codexia-postgres-preflight-password >/dev/null 2>&1 || true
+    codexia-postgres-app-password >/dev/null 2>&1 || true
   as_service rm -rf "$service_home/unexpected-tunnel-mount" >/dev/null 2>&1 || true
-  if sudo test -L /opt/codexia-updater; then
-    if [[ "$(sudo readlink /opt/codexia-updater)" == "$tmp" ]]; then sudo rm -- /opt/codexia-updater || cleanup_status=1; else cleanup_status=1; fi
-  elif sudo test -d /opt/codexia-updater; then
-    if [[ "$(sudo stat -c '%u:%a' /opt/codexia-updater)" == "$service_uid:750" || "$(sudo stat -c '%u:%a' /opt/codexia-updater)" == '0:750' ]]; then
-      sudo rmdir -- /opt/codexia-updater || cleanup_status=1
-    else cleanup_status=1; fi
-  fi
   sudo rm -f /etc/codexia/postgres/010-create-app-role.sh || cleanup_status=1
   sudo rmdir /etc/codexia/postgres /etc/codexia 2>/dev/null || true
   if [[ "$tmp" == /tmp/codexia-base-runtime.* && -d "$tmp" && ! -L "$tmp" ]]; then sudo rm -rf -- "$tmp" || cleanup_status=1; fi
   if (( status == 0 && cleanup_status != 0 )); then status=$cleanup_status; fi
-  printf 'Phase B runtime integration cleanup finished with test status %s and cleanup status %s.\n' "$status" "$cleanup_status" >&2
+  printf 'Base runtime integration cleanup finished with test status %s and cleanup status %s.\n' "$status" "$cleanup_status" >&2
   exit "$status"
 }
 trap cleanup EXIT
@@ -167,7 +155,7 @@ EOF
 as_service systemctl --user daemon-reload
 systemctl --user show-environment | grep -Fxq "XDG_CONFIG_HOME=$service_home/.config"
 systemctl --user show-environment | grep -Fxq "XDG_RUNTIME_DIR=/run/user/$service_uid"
-printf '%s\n' 'Phase B fixture manager XDG environment verified after systemd environment generation.'
+printf '%s\n' 'Base fixture manager XDG environment verified after systemd environment generation.'
 
 repo_root=$(pwd)
 cat > "$tmp/base-inventory.yml" <<YAML
@@ -191,7 +179,7 @@ apply_base() {
 }
 diagnose_missing_database_unit() {
   local generator=/usr/lib/systemd/user-generators/podman-user-generator
-  local generator_output="$service_home/.local/state/codexia-phase-b-generator-diagnostic-$$"
+  local generator_output="$service_home/.local/state/codexia-base-generator-diagnostic-$$"
   local reload_started reload_status
   printf '%s\n' 'Database unit generation diagnostics:' >&2
   printf '%s\n' '--- systemd user manager environment ---' >&2
@@ -381,23 +369,6 @@ for network in codexia codexia-data; do
 done
 sed -i 's/codexia_database_initialization_approved: false/codexia_database_initialization_approved: true/' "$tmp/base-inventory.yml"
 
-# Reject drift without adopting a foreign directory or following a symlink.
-sudo ln -s "$tmp" /opt/codexia-updater
-if apply_base > "$tmp/source-symlink.log" 2>&1; then
-  echo 'Base accepted a symlinked updater source directory' >&2; exit 1
-fi
-grep -Fq 'Existing updater source directory must be a real service-owned directory' "$tmp/source-symlink.log"
-test ! -e /etc/codexia
-sudo unlink /opt/codexia-updater
-sudo install -d -o root -g root -m 0750 /opt/codexia-updater
-if apply_base > "$tmp/source-owner.log" 2>&1; then
-  echo 'Base accepted a foreign-owned updater source directory' >&2; exit 1
-fi
-grep -Fq 'Existing updater source directory must be a real service-owned directory' "$tmp/source-owner.log"
-test "$(sudo stat -c '%u:%a' /opt/codexia-updater)" = '0:750'
-test ! -e /etc/codexia
-sudo rmdir /opt/codexia-updater
-
 if ! apply_base > "$tmp/first.log" 2>&1; then
   cat "$tmp/first.log" >&2
   diagnose_missing_database_unit
@@ -406,14 +377,6 @@ fi
 grep -Eq 'changed=[1-9]' "$tmp/first.log"
 apply_base > "$tmp/second.log" || { cat "$tmp/second.log"; exit 1; }
 grep -q 'changed=0' "$tmp/second.log"
-test "$(sudo stat -c '%u:%a' /opt/codexia-updater)" = "$service_uid:750"
-# The service account needs no sudo to stage its own source after base.
-if as_service sudo -n true >/dev/null 2>&1; then
-  echo 'Rootless fixture unexpectedly has sudo privileges' >&2; exit 1
-fi
-as_service touch /opt/codexia-updater/.phase-b-write-probe
-as_service rm /opt/codexia-updater/.phase-b-write-probe
-
 # The base stage must load the newly installed Tunnel unit itself while
 # leaving both the Tunnel container and service stopped.
 test "$(systemctl --user show --property=LoadState --value codexia-tunnel.service)" = loaded
@@ -589,11 +552,11 @@ rc=0; podman container exists codexia-tunnel || rc=$?
 test "$rc" = 1
 test "$(podman inspect --format '{{json .HostConfig.PortBindings}}' codexia-db | jq -c 'if . == null then {} else . end')" = '{}'
 
-legacy_requires=$(systemctl --user show --property=Requires --value codexia-tunnel.service)
-legacy_after=$(systemctl --user show --property=After --value codexia-tunnel.service)
-case " $legacy_requires " in *' codexia-api.service '*) ;; *) echo 'Tunnel did not require the legacy API unit' >&2; exit 1;; esac
-case " $legacy_after " in *' codexia-api.service '*) ;; *) echo 'Tunnel was not ordered after the legacy API unit' >&2; exit 1;; esac
-case " $legacy_after " in *' network-online.target '*) ;; *) echo 'Tunnel lost network-online ordering' >&2; exit 1;; esac
+api_requires=$(systemctl --user show --property=Requires --value codexia-tunnel.service)
+api_after=$(systemctl --user show --property=After --value codexia-tunnel.service)
+case " $api_requires " in *' codexia-api.service '*) ;; *) echo 'Tunnel did not require the API unit' >&2; exit 1;; esac
+case " $api_after " in *' codexia-api.service '*) ;; *) echo 'Tunnel was not ordered after the API unit' >&2; exit 1;; esac
+case " $api_after " in *' network-online.target '*) ;; *) echo 'Tunnel lost network-online ordering' >&2; exit 1;; esac
 
 # A database containing only a user-defined type and no migration ledger is
 # not pristine. Role recovery must reject it and preserve the type and volume.
@@ -647,58 +610,6 @@ apply_base > "$tmp/schema-adoption.log" || { cat "$tmp/schema-adoption.log"; exi
 grep -q 'changed=0' "$tmp/schema-adoption.log"
 
 podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/app-password)"; psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia -d codexia -c "CREATE TABLE public.phase_b_adoption_probe(id integer PRIMARY KEY, value text NOT NULL); INSERT INTO public.phase_b_adoption_probe VALUES (1, '\''preserved-data'\'');"' >/dev/null
-
-preflight_password=$(printf '%064d' 3)
-cat > "$tmp/preflight.yml" <<YAML
-- hosts: localhost
-  connection: local
-  gather_facts: false
-  become: true
-  become_user: $service_user
-  environment:
-    HOME: "$service_home"
-    XDG_CONFIG_HOME: "$service_home/.config"
-    XDG_RUNTIME_DIR: "/run/user/$service_uid"
-    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/$service_uid/bus"
-  vars:
-    ansible_python_interpreter: /usr/bin/python3
-    repo_root: "$repo_root"
-    codexia_preflight_password: "$preflight_password"
-    preflight_verify_only: false
-  tasks:
-    - ansible.builtin.include_tasks: "$repo_root/deploy/ansible/preflight.yml"
-YAML
-apply_preflight() {
-  "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$tmp/preflight.yml" "$@"
-}
-apply_preflight > "$tmp/preflight-first.log" || { cat "$tmp/preflight-first.log"; exit 1; }
-grep -Eq 'changed=[1-9]' "$tmp/preflight-first.log"
-apply_preflight > "$tmp/preflight-second.log" || { cat "$tmp/preflight-second.log"; exit 1; }
-grep -q 'changed=0' "$tmp/preflight-second.log"
-apply_preflight -e preflight_verify_only=true > "$tmp/preflight-verify.log" || { cat "$tmp/preflight-verify.log"; exit 1; }
-grep -q 'changed=0' "$tmp/preflight-verify.log"
-test "$(printf '%s\n' "$preflight_password" | podman exec -i codexia-db sh -ec 'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -qAt -h 127.0.0.1 -U codexia_preflight -d codexia -c "SELECT current_user || chr(58) || current_setting('\''default_transaction_read_only'\'')"')" = 'codexia_preflight:on'
-test "$(printf '%s\n' "$preflight_password" | podman exec -i codexia-db sh -ec 'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -qAt -h 127.0.0.1 -U codexia_preflight -d codexia -c "SELECT value FROM public.phase_b_adoption_probe WHERE id=1"')" = preserved-data
-if printf '%s\n' "$preflight_password" | podman exec -i codexia-db sh -ec 'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia_preflight -d codexia -c "INSERT INTO public.phase_b_adoption_probe VALUES (2, '\''forbidden'\'')"' > "$tmp/preflight-write.log" 2>&1; then
-  echo 'The preflight role unexpectedly wrote to the persistent database' >&2
-  exit 1
-fi
-
-# A previously rotated immutable secret may retain its final LF while the
-# inventory and PostgreSQL password use the 64 hex chars without it.
-podman secret rm codexia-postgres-preflight-password >/dev/null
-printf '%s\n' "$preflight_password" | podman secret create codexia-postgres-preflight-password - >/dev/null
-test "$(podman secret inspect --showsecret codexia-postgres-preflight-password | jq -r '.[0].SecretData | length')" -eq 65
-apply_preflight -e preflight_verify_only=true > "$tmp/preflight-verify-lf-secret.log" || { cat "$tmp/preflight-verify-lf-secret.log"; exit 1; }
-grep -q 'changed=0' "$tmp/preflight-verify-lf-secret.log"
-podman secret rm codexia-postgres-preflight-password >/dev/null
-printf '%s\n\n' "$preflight_password" | podman secret create codexia-postgres-preflight-password - >/dev/null
-if apply_preflight -e preflight_verify_only=true > "$tmp/preflight-verify-two-lfs.log"; then
-  echo 'Preflight verification accepted a secret with two trailing line feeds' >&2
-  exit 1
-fi
-podman secret rm codexia-postgres-preflight-password >/dev/null
-printf '%s' "$preflight_password" | podman secret create codexia-postgres-preflight-password - >/dev/null
 
 # A role privilege mismatch must fail verification without silently repairing it.
 podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c 'ALTER ROLE codexia WITH SUPERUSER' >/dev/null
@@ -765,48 +676,4 @@ rc=0; systemctl --user is-active codexia-db.service >/dev/null 2>&1 || rc=$?
 test "$rc" != 0
 test "$(podman unshare cat "$mountpoint/pgdata/PG_VERSION")" = 16
 
-switch_playbook="$tmp/switch-tunnel.yml"
-cat > "$switch_playbook" <<YAML
-- hosts: localhost
-  connection: local
-  gather_facts: false
-  become: true
-  become_user: $service_user
-  environment:
-    HOME: "$service_home"
-    XDG_CONFIG_HOME: "$service_home/.config"
-    XDG_DATA_HOME: "$service_home/.local/share"
-    XDG_STATE_HOME: "$service_home/.local/state"
-    XDG_RUNTIME_DIR: "/run/user/$service_uid"
-    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/$service_uid/bus"
-  vars:
-    ansible_python_interpreter: /usr/bin/python3
-    quadlet_dir: "$quadlet_dir"
-  tasks:
-    - ansible.builtin.include_tasks: "$repo_root/deploy/ansible/switch-tunnel-to-proxy.yml"
-YAML
-"${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$switch_playbook" > "$tmp/switch-tunnel.log" || { cat "$tmp/switch-tunnel.log"; exit 1; }
-systemctl --user daemon-reload
-proxy_requires=$(systemctl --user show --property=Requires --value codexia-tunnel.service)
-proxy_after=$(systemctl --user show --property=After --value codexia-tunnel.service)
-case " $proxy_requires " in *' codexia-api-proxy.service '*) ;; *) echo 'Tunnel did not switch to the private proxy dependency' >&2; exit 1;; esac
-case " $proxy_requires " in *' codexia-api.service '*) echo 'Tunnel retained the legacy writer dependency' >&2; exit 1;; esac
-case " $proxy_after " in *' codexia-api-proxy.service '*) ;; *) echo 'Tunnel was not ordered after the private proxy' >&2; exit 1;; esac
-case " $proxy_after " in *' network-online.target '*) ;; *) echo 'Tunnel lost network-online ordering during switch' >&2; exit 1;; esac
-rc=0; systemctl --user is-active codexia-tunnel.service >/dev/null 2>&1 || rc=$?
-test "$rc" != 0
-rc=0; podman container exists codexia-tunnel || rc=$?
-test "$rc" = 1
-if "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i localhost, "$switch_playbook" > "$tmp/switch-repeat.log" 2>&1; then
-  echo 'Tunnel dependency switch accepted an already switched or unexpected state' >&2
-  exit 1
-fi
-
-for secret in fixture-auth-token fixture-tunnel-token "$(printf '%064d' 1)" "$(printf '%064d' 2)" "$preflight_password"; do
-  if grep -Fq "$secret" "$tmp"/*.log; then
-    echo 'A database credential appeared in an Ansible or test log' >&2
-    exit 1
-  fi
-done
-
-printf '%s\n' 'Verified rootless Quadlet convergence, fresh PostgreSQL init, no-change repeat, data adoption, mismatch denial, pinned roles, private networks, no DB ports, and controlled legacy/proxy Tunnel dependency.'
+printf '%s\n' 'Verified rootless Quadlet convergence, fresh PostgreSQL init, no-change repeat, data adoption, mismatch denial, pinned roles, private networks and no DB ports.'

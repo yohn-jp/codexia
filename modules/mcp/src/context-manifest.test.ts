@@ -3,8 +3,23 @@ import test from "node:test";
 import {
   createMcpWritingContext,
   MCP_WRITING_CONTEXT_MAX_CHARACTERS,
+  mcpWritingContextSelectionSchema,
   McpWritingContextInputError,
 } from "./context-manifest.js";
+
+test("selection character limits count Unicode code points while offsets count UTF-16 units", () => {
+  const input = { projectId: "p", sceneId: "s", manuscriptId: "m", manuscriptRevision: "r", manuscriptText: "" };
+  const selectedText = "𠮷".repeat(5_000);
+  const selection = mcpWritingContextSelectionSchema.parse({ from: 0, to: selectedText.length, text: selectedText });
+  for (const manifestOnly of [false, true]) {
+    const context = createMcpWritingContext({ ...input, selection, manifestOnly });
+    assert.equal(context.manifest.parts[2]?.size.source_character_count, 5_000);
+    assert.equal(context.manifest.parts[2]?.size.included_character_count, manifestOnly ? 0 : 5_000);
+  }
+  assert.throws(() => createMcpWritingContext({ ...input, selection: { ...selection, to: 5_000 } }), McpWritingContextInputError);
+  const overLimit = selectedText + "𠮷";
+  assert.throws(() => createMcpWritingContext({ ...input, selection: { from: 0, to: overLimit.length, text: overLimit } }), McpWritingContextInputError);
+});
 
 test("writing context preserves source identity, bounds, and selection provenance", () => {
   const manuscriptText = "本文".repeat(MCP_WRITING_CONTEXT_MAX_CHARACTERS);

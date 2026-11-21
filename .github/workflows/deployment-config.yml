@@ -4,7 +4,7 @@ on:
     branches: [main]
     paths:
       - deploy/ansible/**
-      - deploy/updater/**
+      - deploy/backup/**
       - deploy/quadlet/**
       - deploy/postgres/**
       - deploy/cloudflare/**
@@ -13,7 +13,7 @@ on:
     branches: [main]
     paths:
       - deploy/ansible/**
-      - deploy/updater/**
+      - deploy/backup/**
       - deploy/quadlet/**
       - deploy/postgres/**
       - deploy/cloudflare/**
@@ -65,7 +65,7 @@ jobs:
             terraform=false
             while IFS= read -r -d '' file; do
               case "$file" in
-                deploy/ansible/*|deploy/updater/*|deploy/quadlet/*|deploy/postgres/*) ansible=true ;;
+                deploy/ansible/*|deploy/backup/*|deploy/quadlet/*|deploy/postgres/*) ansible=true ;;
                 deploy/cloudflare/*) terraform=true ;;
                 .github/workflows/deployment-config.yml) ansible=true; terraform=true ;;
               esac
@@ -78,14 +78,13 @@ jobs:
           fi
           echo "ansible=$ansible" >> "$GITHUB_OUTPUT"
           echo "terraform=$terraform" >> "$GITHUB_OUTPUT"
-      - name: Check standalone Ansible configuration
+      - name: Check Ansible configuration
         if: steps.reuse.outputs.eligible != 'true' && steps.impact.outputs.ansible == 'true'
         run: |
           python3 -m venv "$RUNNER_TEMP/codexia-ansible"
           "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
           "$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" -i deploy/ansible/inventory.example.yml deploy/ansible/site.yml --syntax-check
           ANSIBLE_PLAYBOOK="$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" bash deploy/ansible/test-base-secrets.sh
-          ANSIBLE_PLAYBOOK="$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" bash deploy/ansible/test-preflight.sh
           ANSIBLE_PLAYBOOK="$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" bash deploy/ansible/test-inspect.sh
           python3 -m unittest discover -s deploy/ansible -p 'test_host_contract.py'
           ANSIBLE_PLAYBOOK="$RUNNER_TEMP/codexia-ansible/bin/ansible-playbook" bash deploy/ansible/test-host-validation.sh

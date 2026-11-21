@@ -1,137 +1,57 @@
 ---
-- name: Converge the standalone Codexia updater on an existing rootless VM
-  # Explicit recovery dispatch must not depend on the failed source VM or its inventory.
+- name: Converge the Codexia push-deployment runtime
+  # Recovery is always local; host, bootstrap and deployment target the declared VM.
   hosts: "{{ 'localhost' if (codexia_stage | default('')) == 'restore-drill' else 'codexia' }}"
   gather_facts: false
   serial: 1
   any_errors_fatal: true
   vars:
     repo_root: "{{ playbook_dir }}/../.."
-    home: "{{ codexia_service_home | default(ansible_facts.user_dir) }}"
-    config_dir: "{{ home }}/.config/codexia-updater"
-    state_dir: "{{ home }}/.local/state/codexia-updater"
+    home: "{{ codexia_service_home | default(ansible_facts.user_dir | default('')) }}"
     quadlet_dir: "{{ home }}/.config/containers/systemd"
-    unit_dir: "{{ home }}/.config/systemd/user"
-    source_dir: /opt/codexia-updater
-    config_path: "{{ config_dir }}/config.json"
-    updater: "{{ source_dir }}/deploy/updater/codexia-updater"
-    maintenance_dir: "{{ state_dir }}/maintenance"
-    desired_proxy_quadlet: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/updater/codexia-api-proxy.container.example') | replace('ghcr.io/yohn-jp/codexia-backend@sha256:REPLACE_WITH_VERIFIED_DIGEST', codexia_proxy_image) + '\n' }}"
-    runtime: "{{ codexia_runtime | default({}) }}"
-    updater_env:
-      XDG_RUNTIME_DIR: "/run/user/{{ codexia_service_uid | default(ansible_facts.user_uid) }}"
-      XDG_STATE_HOME: "{{ home }}/.local/state"
     service_runtime_env:
       HOME: "{{ home }}"
       XDG_CONFIG_HOME: "{{ home }}/.config"
       XDG_DATA_HOME: "{{ home }}/.local/share"
       XDG_STATE_HOME: "{{ home }}/.local/state"
-      XDG_RUNTIME_DIR: "/run/user/{{ codexia_service_uid | default(ansible_facts.user_uid) }}"
-      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ codexia_service_uid | default(ansible_facts.user_uid) }}/bus"
-    desired_config:
-      format: codexia-standalone-updater/v1
-      enabled: false
-      stateFile: "{{ state_dir }}/controller.json"
-      routeFile: "{{ state_dir }}/route"
-      quadletDirectory: "{{ quadlet_dir }}"
-      publicKeyFile: "{{ config_dir }}/channel-public.pem"
-      githubTokenFile: "{{ config_dir }}/github-read-token"
-      frontendIdentityUrl: "{{ codexia_frontend_origin }}/desktop/update-identity.json"
-      accessClientIdFile: "{{ config_dir }}/access-client-id"
-      accessClientSecretFile: "{{ config_dir }}/access-client-secret"
-      observeMilliseconds: "{{ codexia_observe_milliseconds | default(300000) }}"
-      initialSlot: blue
-      browserAuth: "{{ codexia_browser_auth }}"
-      runtime: "{{ runtime }}"
-  # Source fact gathering runs before user_uid/user_dir exist. Privileged host setup
-  # and the independent recovery drill must not inherit source runtime paths.
-  environment: "{{ updater_env if codexia_stage not in ['host', 'restore-drill'] and ansible_facts.user_uid is defined and ansible_facts.user_dir is defined else {} }}"
+      XDG_RUNTIME_DIR: "/run/user/{{ codexia_service_uid | default(ansible_facts.user_uid | default(0)) }}"
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ codexia_service_uid | default(ansible_facts.user_uid | default(0)) }}/bus"
+  environment: "{{ service_runtime_env if (codexia_stage | default('')) in ['secrets', 'base', 'deploy'] and ansible_facts.user_uid is defined else {} }}"
   tasks:
-    - name: Require the explicit local recovery stage and actual execution
+    - name: Reject unsupported or obsolete deployment operations
+      ansible.builtin.assert:
+        that:
+          - codexia_stage in ['inspect', 'host', 'secrets', 'base', 'deploy', 'restore-drill']
+        fail_msg: Select inspect, host, secrets, base, deploy or restore-drill; obsolete pull-updater operations are not supported.
+
+    - name: Require local execution for a restore drill
       ansible.builtin.assert:
         that:
           - inventory_hostname == 'localhost'
           - not ansible_check_mode
-        fail_msg: Run restore-drill explicitly on the isolated local recovery host; check mode does not verify a restore.
+        fail_msg: Restore drills run on an isolated local recovery host.
       when: codexia_stage == 'restore-drill'
-    - name: Run the isolated recovery drill on the Ansible recovery host
+
+    - name: Verify an encrypted backup in isolated recovery storage
       ansible.builtin.include_tasks: restore-drill.yml
       when: codexia_stage == 'restore-drill'
-    - name: End recovery drill before querying or changing the source VM
+
+    - name: End isolated recovery before connecting to the VM
       ansible.builtin.meta: end_host
       when: codexia_stage == 'restore-drill'
-    - name: Gather facts only for source VM operations
+
+    - name: Gather target host facts
       ansible.builtin.setup:
-    - name: Inspect host and existing runtime without converging application state
+
+    - name: Inspect the current host without mutation
       ansible.builtin.include_tasks: inspect.yml
       when: codexia_stage == 'inspect'
-    - name: End read-only inspection before any convergence task
-      ansible.builtin.meta: end_host
-      when: codexia_stage == 'inspect'
-    - name: Converge the supported host baseline without touching application services
+
+    - name: Converge the rootless host account and dependencies
       ansible.builtin.include_tasks: host.yml
       when: codexia_stage == 'host'
-    - name: End host convergence before any application task
-      ansible.builtin.meta: end_host
-      when: codexia_stage == 'host'
-    - name: Validate the certified push deployment before application mutation
-      ansible.builtin.assert:
-        that:
-          - codexia_stage == 'deploy'
-          - ansible_facts.user_id == 'codexia'
-          - codexia_service_user == 'codexia'
-          - codexia_image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
-          - codexia_source_sha is match('^[a-f0-9]{40}$')
-          - codexia_profile == 'full'
-          - codexia_verified_main_sha is match('^[a-f0-9]{40}$')
-          - codexia_deployed_ui_epoch is integer and codexia_deployed_ui_epoch > 0
-          - codexia_deployment_certificate_file is string and codexia_deployment_certificate_file is match('^/[^\r\n]+$')
-          - codexia_backup_destination is string and codexia_backup_destination is match('^/[^\r\n]+$')
-          - codexia_backup_recipient is string and codexia_backup_recipient is match('^age1[0-9a-z]+$')
-          - not ansible_check_mode
-        fail_msg: Push deployment requires the codexia SSH identity, certified immutable Full digest, exact-main certificate, compatible deployed UI, and protected off-VM backup inputs.
-      when: codexia_stage == 'deploy'
-    - name: Deploy certified backend under host lock
-      ansible.builtin.include_tasks:
-        file: deploy.yml
-        apply:
-          environment: "{{ service_runtime_env }}"
-      when: codexia_stage == 'deploy'
-    - name: End push deployment before updater lifecycle stages
-      ansible.builtin.meta: end_host
-      when: codexia_stage == 'deploy'
-    - name: Require explicit standalone deployment inputs
-      ansible.builtin.assert:
-        that:
-          - ansible_facts.user_uid | int != 0
-          - codexia_stage in ['secrets', 'base', 'prepare', 'initialize', 'bootstrap-preflight', 'bootstrap-cutover', 'initialize-schema', 'initialize-fresh', 'enable', 'verify', 'maintain', 'rotate-probe-credentials', 'rotate-api-auth-token', 'rotate-app-password', 'rotate-preflight-password', 'rotate-tunnel-token', 'schema-maintenance', 'backup', 'pause', 'resume', 'rollback', 'acceptance-update', 'acceptance-rollback']
-          - codexia_stage in ['secrets', 'base'] or codexia_frontend_origin is match('^https://[a-z0-9.-]+(:[0-9]+)?$')
-          - codexia_stage in ['secrets', 'base'] or codexia_proxy_image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
-          - codexia_stage in ['secrets', 'base'] or codexia_browser_auth.mode in ['token', 'cloudflare-access']
-          - (codexia_observe_milliseconds | default(300000)) is integer
-          - (codexia_observe_milliseconds | default(300000)) >= 60000
-          - (codexia_observe_milliseconds | default(300000)) <= 3600000
-    - name: Validate the shared runtime contract before application convergence
-      ansible.builtin.include_tasks: validate-runtime.yml
-      when: codexia_stage not in ['secrets', 'base']
-    - name: Check rootless prerequisites (do not replace the existing host installation)
-      ansible.builtin.command:
-        argv: [sh, -ec, 'command -v podman; command -v flock; node -e "if (parseInt(process.versions.node,10) < 22) process.exit(1)"']
-      changed_when: false
-      check_mode: false
-      become: "{{ codexia_stage in ['secrets', 'base'] }}"
-      become_user: "{{ codexia_service_user if codexia_stage in ['secrets', 'base'] else omit }}"
-      environment: "{{ service_runtime_env if codexia_stage in ['secrets', 'base'] else updater_env }}"
-      when: codexia_stage != 'base'
-    - name: Check rootless systemd
-      ansible.builtin.command:
-        argv: [systemctl, --user, show, --property=Version]
-      changed_when: false
-      check_mode: false
-      become: "{{ codexia_stage in ['secrets', 'base'] }}"
-      become_user: "{{ codexia_service_user if codexia_stage in ['secrets', 'base'] else omit }}"
-      environment: "{{ service_runtime_env if codexia_stage in ['secrets', 'base'] else updater_env }}"
-    - name: Converge base Podman secrets before application initialization
+
+    - name: Install only explicitly authorized base credentials
       ansible.builtin.include_tasks:
         file: base-secrets.yml
         apply:
@@ -139,10 +59,8 @@
           become_user: "{{ codexia_service_user }}"
           environment: "{{ service_runtime_env }}"
       when: codexia_stage == 'secrets'
-    - name: End secret convergence before application or updater operations
-      ansible.builtin.meta: end_host
-      when: codexia_stage == 'secrets'
-    - name: Converge canonical rootless networks, volumes, PostgreSQL, and Tunnel Quadlets
+
+    - name: Converge canonical database, networks, volumes and Tunnel Quadlets
       ansible.builtin.include_tasks:
         file: base-runtime.yml
         apply:
@@ -150,149 +68,27 @@
           become_user: "{{ codexia_service_user }}"
           environment: "{{ service_runtime_env }}"
       when: codexia_stage == 'base'
-    - name: End base convergence before application or updater operations
-      ansible.builtin.meta: end_host
-      when: codexia_stage == 'base'
-    - name: Inspect pending legacy cutover before preparation or ordinary lifecycle
-      ansible.builtin.stat:
-        path: "{{ state_dir }}/legacy-cutover.json"
-        follow: false
-      register: legacy_cutover
-    - name: Refuse unrelated lifecycle while cutover is pending
-      ansible.builtin.assert:
-        that: codexia_stage in ['initialize', 'bootstrap-cutover'] and not ansible_check_mode
-      when: legacy_cutover.stat.exists
-    - name: Verify reviewed inputs before recovering pending cutover
-      ansible.builtin.include_tasks: verify-updater-inputs.yml
-      when: legacy_cutover.stat.exists
-    - name: Recover pending cutover under the canonical lock before preparation
-      ansible.builtin.command:
-        argv: [sh, "{{ updater }}", recover-cutover, "{{ config_path }}"]
-      register: cutover_recovery
-      changed_when: (cutover_recovery.stdout | from_json).recovered
-      when: legacy_cutover.stat.exists
-    - name: Check for durable controller state
-      ansible.builtin.stat:
-        path: "{{ state_dir }}/controller.json"
-      register: journal
-    - name: Require pre-journal bootstrap preflight
+
+    - name: Require a certified immutable release for the push deployment
       ansible.builtin.assert:
         that:
-          - not journal.stat.exists
-        fail_msg: The explicit bootstrap preflight is only for a pre-journal legacy deployment.
-      when: codexia_stage == 'bootstrap-preflight'
-    - name: Verify a distinct signed bootstrap candidate without stopping the existing writer
-      ansible.builtin.include_tasks: bootstrap-preflight.yml
-      when: codexia_stage == 'bootstrap-preflight' and not ansible_check_mode
-    - name: End bootstrap preflight before other lifecycle operations
-      ansible.builtin.meta: end_host
-      when: codexia_stage == 'bootstrap-preflight'
-    - name: Require pre-journal bootstrap cutover
-      ansible.builtin.assert:
-        that:
-          - not journal.stat.exists
+          - ansible_facts.user_id == 'codexia'
+          - codexia_service_user == 'codexia'
+          - codexia_image is match('^ghcr\\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+          - codexia_source_sha is match('^[a-f0-9]{40}$')
+          - codexia_profile == 'full'
+          - codexia_verified_main_sha is match('^[a-f0-9]{40}$')
+          - codexia_deployed_ui_epoch is integer and codexia_deployed_ui_epoch > 0
+          - codexia_deployment_certificate_file is string and codexia_deployment_certificate_file is match('^/[^\\r\\n]+$')
+          - codexia_backup_destination is string and codexia_backup_destination is match('^/[^\\r\\n]+$')
+          - codexia_backup_recipient is string and codexia_backup_recipient is match('^age1[0-9a-z]+$')
           - not ansible_check_mode
-          - codexia_stage == 'bootstrap-cutover'
-        fail_msg: Distinct legacy cutover requires a prepared pre-journal host and an actual execution.
-      when: codexia_stage == 'bootstrap-cutover' and not journal.stat.exists
-    - name: Cut over from the exact legacy release to the separately signed candidate
-      ansible.builtin.include_tasks: bootstrap-cutover.yml
-      when: codexia_stage == 'bootstrap-cutover' and not journal.stat.exists
-    - name: End distinct bootstrap cutover before other lifecycle operations
-      ansible.builtin.meta: end_host
-      when: codexia_stage == 'bootstrap-cutover'
-    - name: Require pre-journal fresh schema initialization
-      ansible.builtin.assert:
-        that:
-          - not journal.stat.exists
-          - not ansible_check_mode
-      when: codexia_stage == 'initialize-schema'
-    - name: Initialize only a fresh schema with the reviewed signed release
-      ansible.builtin.include_tasks: initialize-schema.yml
-      when: codexia_stage == 'initialize-schema'
-    - name: End fresh schema initialization before any activation
-      ansible.builtin.meta: end_host
-      when: codexia_stage == 'initialize-schema'
-    - name: Require actual execution for fresh activation
-      ansible.builtin.assert:
-        that: not ansible_check_mode
-      when: codexia_stage == 'initialize-fresh'
-    - name: Activate the exact fresh schema release through the locked controller
-      ansible.builtin.include_tasks: initialize-fresh.yml
-      when: codexia_stage == 'initialize-fresh'
-    - name: End fresh activation before legacy or polling stages
-      ansible.builtin.meta: end_host
-      when: codexia_stage == 'initialize-fresh'
-    - name: Prepare an uninitialized host
-      ansible.builtin.include_tasks: prepare.yml
-      when: codexia_stage in ['prepare', 'initialize'] and not journal.stat.exists
-    - name: Initialize the exclusive writer
-      ansible.builtin.include_tasks: initialize.yml
-      when: codexia_stage == 'initialize' and not journal.stat.exists and not ansible_check_mode
-    - name: Require an existing controller for initialized lifecycle operations
-      ansible.builtin.assert:
-        that: journal.stat.exists
-      when: codexia_stage in ['verify', 'maintain', 'rotate-probe-credentials', 'rotate-api-auth-token', 'rotate-app-password', 'rotate-preflight-password', 'rotate-tunnel-token', 'schema-maintenance', 'enable', 'pause', 'resume', 'rollback', 'acceptance-update', 'acceptance-rollback']
-    - name: Verify preflight role and secret after initialization without changing them
-      ansible.builtin.include_tasks: preflight.yml
-      vars:
-        preflight_verify_only: true
-      when: journal.stat.exists and codexia_stage != 'backup'
-    - name: Require explicit acceptance approval before enabling or reconciling polling
-      ansible.builtin.assert:
-        that: codexia_acceptance_approved | default(false) | bool
-        fail_msg: Automatic updates require explicit live-acceptance approval.
-      when: codexia_stage == 'enable'
-    - name: Maintain updater source, configuration and systemd units through the locked controller
-      ansible.builtin.include_tasks: maintenance.yml
-      when: codexia_stage == 'maintain' and journal.stat.exists and not ansible_check_mode
-    - name: Rotate only protected GitHub and Access probe credentials through locked maintenance
-      ansible.builtin.include_tasks: rotate-probe-credentials.yml
-      when: codexia_stage == 'rotate-probe-credentials' and journal.stat.exists
-    - name: Rotate only the standalone Codexia API token through locked maintenance
-      ansible.builtin.include_tasks: rotate-api-auth-token.yml
-      when: codexia_stage == 'rotate-api-auth-token' and journal.stat.exists
-    - name: Rotate only the PostgreSQL app password through backup-gated locked maintenance
-      ansible.builtin.include_tasks: rotate-app-password.yml
-      when: codexia_stage == 'rotate-app-password' and journal.stat.exists
-    - name: Rotate only the PostgreSQL preflight password through backup-gated locked maintenance
-      ansible.builtin.include_tasks: rotate-preflight-password.yml
-      when: codexia_stage == 'rotate-preflight-password' and journal.stat.exists
-    - name: Rotate only the Tunnel token through locked secret replacement and service recovery
-      ansible.builtin.include_tasks: rotate-tunnel-token.yml
-      when: codexia_stage == 'rotate-tunnel-token' and journal.stat.exists
-    - name: Run the explicitly approved same-epoch additive schema maintenance
-      ansible.builtin.include_tasks: schema-maintenance.yml
-      when: codexia_stage == 'schema-maintenance' and journal.stat.exists and not ansible_check_mode
-    - name: Verify reviewed inputs before resuming interrupted initialization
-      ansible.builtin.include_tasks: verify-updater-inputs.yml
-      when: journal.stat.exists and codexia_stage == 'initialize' and not ansible_check_mode
-    - name: Refuse drift in existing boot and poll units before installation
-      ansible.builtin.include_tasks: verify-updater-units.yml
-      vars:
-        allow_missing_updater_units: true
-      when: journal.stat.exists and codexia_stage == 'initialize' and not ansible_check_mode
-    - name: Recover only an explicitly pending first activation under the host lock
-      ansible.builtin.command:
-        argv: [sh, "{{ updater }}", recover-initial, "{{ config_path }}"]
-      register: initial_recovery
-      changed_when: (initial_recovery.stdout | from_json).recovered
-      when: journal.stat.exists and codexia_stage == 'initialize' and not ansible_check_mode
-    - name: Ensure boot and poll units after initialization (also repairs interrupted unit installation)
-      ansible.builtin.include_tasks: install-units.yml
-      when: codexia_stage in ['initialize', 'bootstrap-cutover'] and not ansible_check_mode
-    - name: Verify initialized controller
-      ansible.builtin.include_tasks: verify.yml
-      when: journal.stat.exists and codexia_stage != 'backup'
-    - name: Exercise a compatible update or rollback without enabling automatic polling
-      ansible.builtin.include_tasks: acceptance.yml
-      when: codexia_stage in ['acceptance-update', 'acceptance-rollback'] and not ansible_check_mode
-    - name: Enable automatic updates only after live acceptance
-      ansible.builtin.include_tasks: enable.yml
-      when: codexia_stage == 'enable' and not ansible_check_mode
-    - name: Run the controller-locked encrypted backup lifecycle
-      ansible.builtin.include_tasks: backup.yml
-      when: codexia_stage == 'backup' and not ansible_check_mode
-    - name: Run the controller-locked pause, resume or rollback lifecycle
-      ansible.builtin.include_tasks: lifecycle.yml
-      when: codexia_stage in ['pause', 'resume', 'rollback'] and not ansible_check_mode
+        fail_msg: Push deployment requires the rootless service identity, certified image, exact-main provenance and protected backup inputs.
+      when: codexia_stage == 'deploy'
+
+    - name: Deploy the certified image under a serialized host lock
+      ansible.builtin.include_tasks:
+        file: deploy.yml
+        apply:
+          environment: "{{ service_runtime_env }}"
+      when: codexia_stage == 'deploy'

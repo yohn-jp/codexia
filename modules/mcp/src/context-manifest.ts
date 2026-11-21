@@ -71,7 +71,7 @@ export function createMcpWritingContext(input: McpWritingContextInput) {
     selection &&
     (selection.to < selection.from ||
       selection.to - selection.from !== selection.text.length ||
-      selection.text.length > MCP_WRITING_CONTEXT_MAX_SELECTION_CHARACTERS)
+      takeCharacters(selection.text, MCP_WRITING_CONTEXT_MAX_SELECTION_CHARACTERS).trimmed)
   ) {
     throw new McpWritingContextInputError(
       "Selection range is invalid or text exceeds the 5000 character limit",

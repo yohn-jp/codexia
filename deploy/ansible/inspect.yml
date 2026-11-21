@@ -10,7 +10,7 @@
       - codexia_service_user is defined
       - codexia_service_user is match('^[a-z_][a-z0-9_-]{0,31}$')
       - codexia_service_user != 'root'
-    fail_msg: Unsupported standalone host or missing explicit runtime account.
+    fail_msg: Unsupported host or missing explicit runtime account.
 - name: Observe cgroup v2 availability
   ansible.builtin.stat:
     path: /sys/fs/cgroup/cgroup.controllers
@@ -76,19 +76,12 @@
         - .local/share/containers/storage
         - .config/containers/systemd/codexia-db.container
         - .config/containers/systemd/codexia-api.container
-        - .config/containers/systemd/codexia-api-proxy.container
         - .config/containers/systemd/codexia-tunnel.container
         - .config/containers/systemd/codexia.network
         - .config/containers/systemd/codexia-data.network
         - .config/containers/systemd/codexia-postgres.volume
         - .config/containers/systemd/codexia-data.volume
         - .config/containers/systemd/codexia-history.volume
-        - .config/systemd/user/codexia-updater-boot.service
-        - .config/systemd/user/codexia-updater.service
-        - .config/systemd/user/codexia-updater.timer
-        - .config/codexia-updater/config.json
-        - .local/state/codexia-updater/controller.json
-        - .local/state/codexia-updater/route
       register: inspect_files
     - name: Observe user lingering
       ansible.builtin.command:
@@ -149,7 +142,7 @@
         - name: Observe container identities
           ansible.builtin.command:
             argv: [podman, container, exists, "{{ item }}"]
-          loop: [codexia-db, codexia-api, codexia-api-proxy, codexia-tunnel, codexia-slot-blue, codexia-slot-green, codexia-preflight-blue, codexia-preflight-green]
+          loop: [codexia-db, codexia-api, codexia-tunnel]
           register: inspect_containers
           changed_when: false
           failed_when: inspect_containers.rc not in [0, 1]

@@ -66,14 +66,12 @@ test('production deployment consumes the verified Full digest and provenance cer
 });
 
 test('Ansible routes the push stage through the codexia runtime and host lock', () => {
-  const route = site.tasks.find(task => task.name === 'Deploy certified backend under host lock');
+  const route = site.tasks.find(task => task.name === 'Deploy the certified image under a serialized host lock');
   assert.ok(route, 'site.yml must route the push deployment stage');
   assert.equal(route['ansible.builtin.include_tasks'].file, 'deploy.yml');
   assert.equal(route.when, "codexia_stage == 'deploy'");
 
-  const stop = site.tasks.find(task => task.name === 'End push deployment before updater lifecycle stages');
-  assert.equal(stop['ansible.builtin.meta'], 'end_host');
-  assert.equal(stop.when, "codexia_stage == 'deploy'");
+  assert.ok(site.tasks.every(task => !JSON.stringify(task).includes('codexia-updater')));
 
   const deployment = parse(readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8'));
   assert.ok(deployment.some(task => task.name === 'Admit the published candidate against installed API and deployed UI identities'));
@@ -108,13 +106,62 @@ test('the production Quadlet binds an immutable image and disables startup schem
   assert.match(quadlet, /^Environment=CODEXIA_DATABASE_MIGRATE_ON_START=0$/mu);
 });
 
-test('push rollout admits backups by verified writer shutdown instead of a legacy proxy route marker', () => {
+test('push rollout admits backups only after canonical API and Tunnel shutdown', () => {
   const deployment = readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8');
-  const backup = readFileSync(new URL('../deploy/updater/standalone-backup.sh', import.meta.url), 'utf8');
-  assert.match(deployment, /backup-locked[\s\S]*--push-deployment/u);
-  assert.match(backup, /--push-deployment/u);
+  const backup = readFileSync(new URL('../deploy/backup/backup.sh', import.meta.url), 'utf8');
+  assert.match(deployment, /backup-locked[\s\S]*--approved[\s\S]*--lock-file/u);
   assert.match(backup, /Push deployment requires inactive systemd unit/u);
-  assert.match(backup, /codexia-updater-boot\.service[\s\S]*codexia-updater\.service[\s\S]*codexia-updater\.timer/u);
+  assert.doesNotMatch(backup, /codexia-updater|--push-deployment/u);
+});
+
+test('push activation keeps one canonical API writer and exposes Tunnel only after readiness', () => {
+  const deploy = parse(readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8'));
+  const transaction = deploy.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
+  assert.ok(transaction, 'the app activation must remain one serialized transaction');
+  const shell = transaction['ansible.builtin.shell'];
+
+  const stopTunnel = shell.indexOf('systemctl --user stop codexia-tunnel.service');
+  const stopApi = shell.indexOf('systemctl --user stop codexia-api.service');
+  const installCandidate = shell.indexOf('install -m 0644 "$candidate_unit" "$active_unit"');
+  const startCandidate = shell.indexOf('systemctl --user start codexia-api.service', installCandidate);
+  const readiness = shell.indexOf('if [[ "$healthy" != true ]]');
+  const startTunnel = shell.indexOf('systemctl --user start codexia-tunnel.service', readiness);
+  const commitRelease = shell.indexOf('mv -f -- "$release_state.tmp" "$release_state"');
+  for (const [name, position] of Object.entries({ stopTunnel, stopApi, installCandidate, startCandidate, readiness, startTunnel, commitRelease })) {
+    assert.notEqual(position, -1, `deployment transaction must include ${name}`);
+  }
+  assert.ok(stopTunnel < stopApi, 'Tunnel ingress must stop before the API writer is changed');
+  assert.ok(stopApi < installCandidate, 'the old writer must stop before the candidate unit is installed');
+  assert.ok(installCandidate < startCandidate && startCandidate < readiness,
+    'candidate readiness must be observed after starting its canonical API service');
+  assert.ok(readiness < startTunnel && startTunnel < commitRelease,
+    'Tunnel ingress and the release record must follow candidate readiness');
+
+  const apiUnit = readFileSync(new URL('../deploy/quadlet/codexia-api.container', import.meta.url), 'utf8');
+  const tunnelUnit = readFileSync(new URL('../deploy/quadlet/codexia-tunnel.container', import.meta.url), 'utf8');
+  const databaseUnit = readFileSync(new URL('../deploy/quadlet/codexia-db.container', import.meta.url), 'utf8');
+  assert.match(apiUnit, /^ContainerName=codexia-api$/mu);
+  assert.match(apiUnit, /^Network=codexia\.network$/mu);
+  assert.match(apiUnit, /^Network=codexia-data\.network$/mu);
+  assert.match(apiUnit, /^Volume=codexia-data\.volume:\/data$/mu);
+  assert.match(apiUnit, /^Volume=codexia-history\.volume:\/history$/mu);
+  assert.match(tunnelUnit, /^Requires=codexia-api\.service$/mu);
+  assert.match(tunnelUnit, /^After=network-online\.target codexia-api\.service$/mu);
+  assert.match(tunnelUnit, /^Network=codexia\.network$/mu);
+  assert.match(databaseUnit, /^ContainerName=codexia-db$/mu);
+  assert.match(databaseUnit, /^Volume=codexia-postgres\.volume:\/var\/lib\/postgresql\/data$/mu);
+  assert.match(databaseUnit, /^Environment=POSTGRES_DB=codexia$/mu);
+  assert.match(databaseUnit, /^Environment=POSTGRES_USER=codexia_admin$/mu);
+  assert.doesNotMatch(shell, /codexia-db\.container|codexia-postgres\.volume|podman volume/u,
+    'an image-only API rollout must leave canonical PostgreSQL storage untouched');
+
+  const restore = shell.indexOf('restore_previous(){');
+  const restoreStartApi = shell.indexOf('systemctl --user start codexia-api.service', restore);
+  const restoreHealth = shell.indexOf('podman inspect --format', restoreStartApi);
+  const restoreStartTunnel = shell.indexOf('systemctl --user start codexia-tunnel.service', restoreHealth);
+  assert.ok(restore !== -1 && restoreStartApi > restore && restoreHealth > restoreStartApi && restoreStartTunnel > restoreHealth,
+    'rollback must restore and health-check the previous API before restoring Tunnel ingress');
+  assert.match(shell, /Candidate API readiness failed; previous Quadlet was restored/u);
 });
 
 test('main-only manual Tailnet diagnostic verifies pinned SSH as codexia without joining PR validation or deployment', () => {

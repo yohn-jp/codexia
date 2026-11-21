@@ -6,8 +6,7 @@ const TRAILING_PUNCTUATION_RE = /[。！？」』]+$/;
 /** 文から文末表現（末尾の句読点・記号を除いた末尾1文字）を抽出する。空文字はnullを返す。 */
 export function extractEnding(sentence: string): string | null {
   const trimmed = sentence.replace(TRAILING_PUNCTUATION_RE, "").trim();
-  if (trimmed.length === 0) return null;
-  return trimmed.slice(-1);
+  return trimmed.match(/.$/u)?.[0] ?? null;
 }
 
 /** 濁点・半濁点を清音に正規化する（例: "だ"→"た"）。「浮かんだ」「歩いた」のような

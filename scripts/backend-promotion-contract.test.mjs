@@ -34,5 +34,5 @@ test('backend publication requires a still-eligible component source before regi
   assert.match(deploy.if, /needs\.verify-handoff\.outputs\.certified-full-image != ''/u);
   assert.match(deploy.if, /needs\.verify-handoff\.outputs\.deployment-certificate != ''/u);
   assert.match(deploy.if, /vars\.CODEXIA_PUSH_DEPLOYMENT_ENABLED == 'true'/u);
-  assert.ok(workflow.jobs['stable-channel'], 'the pull channel remains available until push cutover acceptance');
+  assert.equal(workflow.jobs['stable-channel'], undefined, 'retired pull publication must not exist');
 });

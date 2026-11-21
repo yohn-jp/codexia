@@ -405,6 +405,13 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     ?? firstOutlineNodeId(visibleDocumentOutline);
   const zoomAncestors = outlineZoomRoot ? (outlineAncestors(documentOutline, outlineZoomRoot) ?? []) : [];
   const activeDocument = active?.document;
+  const writingContext = useMemo(() => {
+    const ancestors = activeDocument && outlineReadyProject === activeDocument.projectId
+      ? outlineAncestors(documentOutline, activeDocument.id)
+      : null;
+    return [...(ancestors ?? [])].reverse().map((ancestor) => ancestor.title)
+      .concat(project ? [project.title] : []).join(" / ");
+  }, [activeDocument, documentOutline, outlineReadyProject, project]);
   const moveTargets = useMemo(() => activeDocument ? documentMoveTargets(documents, activeDocument) : [], [documents, activeDocument]);
   const moveTargetAvailable = !moveParent || moveTargets.some((target) => target.id === moveParent);
   useEffect(() => {
@@ -986,7 +993,21 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     if (!journal || !active || active.generation < 1) return;
     if (!active.dirty) {
       let cancelled = false;
-      void persistDraft(active).catch((error: unknown) => {
+      void persistDraft(active).then(async () => {
+        if (cancelled || active.recovery !== "pending" || active.save !== "idle" || active.remoteConflict) return;
+        const { projectId, id } = active.document;
+        const remaining = await journal.getPersistenceDraft(projectId, id, authorScope);
+        const latest = activeRef.current;
+        if (cancelled || !latest || sessionBlockedRef.current || latest.document.projectId !== projectId || latest.document.id !== id ||
+            latest.generation !== active.generation || latest.dirty || latest.recovery !== "pending" || latest.save !== "idle" ||
+            latest.remoteConflict || latest.baseRevisionId !== latest.revision.id || latest.markdown !== latest.revision.markdown ||
+            pendingSaveRef.current.has(JSON.stringify([projectId, id]))) return;
+        if (remaining) {
+          publishEditor({ ...latest, recovery: "other-tab", save: "failed", error: "別タブの回復用の下書きを保持しています。" });
+        } else {
+          publishEditor({ ...latest, recovery: "stored", save: "saved" });
+        }
+      }).catch((error: unknown) => {
         if (!cancelled) setJournalError(error instanceof Error ? error.message : "回復Journalの古い下書きを解除できませんでした。");
       });
       return () => { cancelled = true; };
@@ -1018,7 +1039,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       if (timer !== undefined) window.clearTimeout(timer);
     };
     // Save only after this exact editor generation has been written to IndexedDB.
-  }, [active?.document.id, active?.generation, active?.baseRevisionId, active?.markdown, journal, persistDraft, publishEditor, sessionBlocked]);
+  }, [active?.document.id, active?.generation, active?.baseRevisionId, active?.markdown, authorScope, journal, persistDraft, publishEditor, sessionBlocked]);
 
   const saveDocument = useCallback(async (): Promise<void> => {
     const currentJournal = journalRef.current;
@@ -2325,6 +2346,9 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           </details>}
         </section>}
       </aside>);
+  const pendingSaveForDisplay = active
+    ? pendingSaveRef.current.get(JSON.stringify([active.document.projectId, active.document.id]))
+    : undefined;
   const editor = (<main className="pg-editor-column" aria-label="PostgreSQL原稿編集">
         {mode === "desktop" && pageError && <p className="pg-alert" role="alert">{pageError}</p>}
         {notice && <p className="pg-notice" role="status">{notice}</p>}
@@ -2343,7 +2367,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         {project && !missingExplicitRouteDocument && !selectedDocument && !active && !outlineError && <section className="pg-empty"><h2>{project.title}</h2><p>編集を始める文書を作成してください。</p><button type="button" onClick={() => openCreation("document")}>最初の文書を作成</button></section>}
         {active && <section className="pg-editor" data-reader={reading ? "true" : undefined} aria-label={active.document.title}>
           <div className="pg-editor-heading">
-            <div><p className="eyebrow">{project?.title}</p><h2>{active.document.title}</h2></div>
+            <div><p className="eyebrow">{writingContext}</p><h2>{active.document.title}</h2></div>
             <details className="pg-save-state" data-state={desktopDurabilityFor(active)}>
               <summary aria-live={active.error || active.remoteConflict || active.recovery === "failed" || active.recovery === "other-tab"
                 ? "off"
@@ -2355,8 +2379,24 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
                       : active.save === "saved" && active.recovery === "stored" ? "保存済み" : "保存状態を確認中"}
               </summary>
               <div className="pg-save-state-detail">
-                <p>この端末: {active.recovery === "stored" ? "回復用の下書きを保持しています" : active.recovery === "pending" ? "回復用の下書きを記録しています" : active.recovery === "other-tab" ? "別タブに下書きがあります" : "回復用の下書きを確認できません"}</p>
-                <p>サーバー: {active.save === "saved" ? "PostgreSQLへの保存を確認しました" : active.save === "saving" ? "PostgreSQLへの保存を確認しています" : active.save === "failed" ? "PostgreSQLへの保存を確認できません" : active.dirty ? "PostgreSQLへの保存待ちです" : "開いたRevisionを表示しています"}</p>
+                <p>この端末: {active.recovery === "stored"
+                  ? (active.dirty ? "現在の編集をこのブラウザーに記録しました。" : "この原稿に未保存の変更はありません")
+                  : active.recovery === "pending" ? "現在の編集をこのブラウザーに記録しています。"
+                    : active.recovery === "other-tab" ? "別タブに下書きがあります"
+                      : "現在の編集の回復記録を確認できません。画面を開いたままエラーを確認してください。"}</p>
+                <p>サーバー: {active.remoteConflict ? "作品に別の版が保存されています。原稿の比較を確認してください。"
+                  : active.dirty ? "直前に確認した版は作品に保存されています。"
+                    : active.save === "saved" ? "PostgreSQLへの保存を確認しました" : "開いた版を表示しています。"}</p>
+                <p>確認した版の保存日時 <time dateTime={active.revision.createdAt}>{new Date(active.revision.createdAt).toLocaleString()}</time></p>
+                {pendingSaveForDisplay && <p>
+                  {active.save === "failed" ? "今回の保存結果を確認できません。" : "今回の保存結果を確認しています。"}
+                  送信後の入力は今回の保存に含まれません。
+                  {active.save === "failed" && active.dirty && active.recovery === "stored" && !active.remoteConflict &&
+                    "保存を再試行すると同じ操作の結果を確かめます。"}
+                </p>}
+                {active.save === "failed" && !pendingSaveForDisplay && !active.remoteConflict &&
+                  active.recovery !== "failed" && active.recovery !== "other-tab" &&
+                  <p>現在の編集の保存を確認できません。原稿のエラーを確認してください。</p>}
               </div>
             </details>
           </div>
@@ -2615,7 +2655,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     <Shell mode={mode}
       header={<><h1>Database workspace</h1><JobInbox /><ThemeControl mode={theme} error={themeError} onChange={(next) => { setTheme(next); applyThemeMode(next); try { persistThemeMode(next); setThemeError(""); } catch { setThemeError("外観設定をこのブラウザーへ保存できませんでした。"); } }} /><button type="button" onClick={() => void protectTransition().then((allowed) => { if (allowed) onSignOut(); })}>ログアウト</button></>}
       documentTitle={active?.document.title}
-      documentContext={project?.title}
+      documentContext={writingContext}
       library={library} editor={editor} tools={knowledge}
       status={<>
         {loading && <p role="status">PostgreSQLの状態を読み込んでいます。</p>}

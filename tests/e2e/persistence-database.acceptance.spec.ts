@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import type { KnowledgeAliasId, KnowledgeNodeId, ProjectId } from "@codexia/persistence-contracts";
-import { createWritingFixture, expectDeviceDraft, expectServerSaveFailure, expectServerSaved, fillDraft, openManuscriptScene, openProtectionDetails, openRevisionHistory, ownerLogin, readManuscriptMarkdown, readPersistenceDrafts, manuscriptEditor } from "./postgres-fixture";
+import { createWritingFixture, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaveFailure, expectServerSaved, fillDraft, openManuscriptScene, openProtectionDetails, openRevisionHistory, ownerLogin, readManuscriptMarkdown, readPersistenceDrafts, manuscriptEditor } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
@@ -272,7 +272,7 @@ test("a committed delete response for B preserves edited C, its selection, route
     expect.soft(await editor.evaluate(() => window.getSelection()?.toString() ?? "")).toBe(selectionBefore);
     const protection = await openProtectionDetails(page);
     await expect.soft(protection.locator("summary")).toHaveText("要確認");
-    await expect.soft(protection).toContainText("回復用の下書きを確認できません");
+    await expect.soft(protection).toContainText("現在の編集の回復記録を確認できません");
     expect.soft((await storedDocumentMarkdown(page, a.project.id, c.id)).markdown).toBe("C manuscript.");
   } finally {
     heldDelete.release();
@@ -419,7 +419,7 @@ test("input added to B while deletion is pending stays visible when IndexedDB pr
     expect.soft(await readManuscriptMarkdown(page)).toBe(expectedMarkdown);
     const protection = await openProtectionDetails(page);
     await expect.soft(protection.locator("summary")).toHaveText("要確認");
-    await expect.soft(protection).toContainText("回復用の下書きを確認できません");
+    await expect.soft(protection).toContainText("現在の編集の回復記録を確認できません");
     expect.soft((await readProjectDocuments(page, fixture.project.id)).some((document) => document.id === fixture.second.id)).toBe(false);
   } finally {
     heldDelete.release();
@@ -1388,7 +1388,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await expect(editor).toBeVisible();
   await editor.fill(firstDraft);
   await expectServerSaved(page);
-  await expectDeviceDraft(page);
+  await expectNoUnsavedDeviceChanges(page);
 
   await editor.press("Control+A");
   await page.locator(".pg-editor-command-menu > summary").click();

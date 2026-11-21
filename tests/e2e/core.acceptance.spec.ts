@@ -1,6 +1,6 @@
 import { expect, request, test, type Page } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
-import { authToken, expectDeviceDraft, expectServerSaved, ownerLogin, manuscriptEditor as editor, readManuscriptMarkdown, openRevisionHistory } from "./postgres-fixture";
+import { authToken, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaved, ownerLogin, manuscriptEditor as editor, readManuscriptMarkdown, openRevisionHistory } from "./postgres-fixture";
 
 const rootPath = "/api/v1/persistence/projects";
 const appBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
@@ -225,7 +225,9 @@ test("IME composition blocks navigation while coalesced editor state stays curre
 
 test("exact revision acknowledgement removes its draft without reviving deleted recovery on reload", async ({ page }) => {
   const f = await fixture(page); const text = "Acknowledged durable draft.";
-  await editor(page).fill(text); await saved(page, f, text);
+  await replaceEditor(page, text);
+  await expectEditor(page, text);
+  await saved(page, f, text);
   await expect.poll(async () => (await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
   await reopen(page, f); await expectEditor(page, text);
   expect((await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
@@ -430,6 +432,11 @@ test("undoing an autosave draft back to the saved revision removes only that dra
   await replaceEditor(page, savedMarkdown);
   await expectEditor(page, savedMarkdown);
   await expect.poll(async () => (await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
+  await expectServerSaved(page);
+  await expectNoUnsavedDeviceChanges(page);
+  await editor(page).press("Control+A");
+  await page.locator(".pg-editor-command-menu > summary").click();
+  await expect(page.getByRole("button", { name: "選択範囲をText Anchorにする" })).toBeEnabled();
   await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
   await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
@@ -463,6 +470,7 @@ test("undo cleanup cannot remove a higher-generation draft written by another ta
   await replaceEditor(page, savedMarkdown);
   await expectEditor(page, savedMarkdown);
   await expect.poll(async () => (await drafts(page)).find((d) => d.documentId === f.one.document.id)?.markdown).toBe("Newer second-tab draft.");
+  await expect(page.locator(".pg-save-state")).toContainText("別タブに下書きがあります");
   await second.close();
 });
 
@@ -510,11 +518,16 @@ test("writing UI protects multiple document drafts separately from PostgreSQL re
 test("new typing survives an older in-flight PostgreSQL save and exact acknowledgement", async ({ page }) => {
   const f = await fixture(page); const gate = await holdSaves(page, f);
   try {
+    expect((await drafts(page)).filter(draft => draft.documentId === f.one.document.id)).toEqual([]);
+    await expectNoUnsavedDeviceChanges(page);
     await editor(page).fill("First generation awaiting acknowledgement."); await gate.seen;
     await editor(page).fill("Newer generation while save is in flight.");
     await expect.poll(async () => (await drafts(page)).some((d) => d.markdown === "Newer generation while save is in flight.")).toBe(true);
+    await expectDeviceDraft(page);
     gate.release(); await saved(page, f, "Newer generation while save is in flight.");
     await expectEditor(page, "Newer generation while save is in flight.");
+    await expect.poll(async () => (await drafts(page)).filter(draft => draft.documentId === f.one.document.id)).toEqual([]);
+    await expectNoUnsavedDeviceChanges(page);
   } finally { gate.release(); }
 });
 
@@ -920,4 +933,41 @@ test("Issue 42: failed PostgreSQL availability preserves the author session and 
   unavailable = false; await page.getByRole("button", { name: "再試行" }).click();
   await page.getByLabel("作品", { exact: true }).selectOption(f.projectId); await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
   await expectEditor(page, f.one.revision.markdown);
+});
+
+test("publishing lists link states and chapter names independently of the new link selection", async ({ page }) => {
+  test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing contribution is selected by the full profile.");
+  const { projectId } = await fixture(page);
+  const volumeId = randomUUID();
+  const chapterId = randomUUID();
+  const sceneId = randomUUID();
+  const tree = { title: "潮待ち", volumes: [{ id: volumeId, title: "第一巻", chapters: [{
+    id: chapterId, title: "第二章", scenes: [{ id: sceneId, title: "出港" }],
+  }] }] };
+  const shares = [
+    { label: "現行リンク", active: true, expiresAt: "2099-02-01T00:00:00Z" },
+    { label: "期限切れのリンク", active: false, expiresAt: "2000-02-01T00:00:00Z" },
+    { label: "失効したリンク", active: false, expiresAt: "2099-02-01T00:00:00Z", revokedAt: "2000-01-02T00:00:00Z" },
+  ].map((share) => ({ ...share, id: randomUUID(), scope: { kind: "chapter", id: chapterId }, createdAt: "2000-01-01T00:00:00Z" }));
+
+  for (const [action, data] of Object.entries({ "publishing.project.tree": tree, "publishing.shares.list": { shares } })) {
+    await page.route(`**/api/projects/${projectId}/actions/${action}`, async (route) => {
+      const response = await route.fetch();
+      const result = await response.json();
+      await route.fulfill({ response, json: { ...result, data } });
+    });
+  }
+  const menu = page.locator(".st-workspace-panel-menu");
+  await menu.locator("summary").click();
+  await menu.getByRole("button", { name: "読み取り専用共有リンクを表示", exact: true }).click();
+  const panel = page.locator('[data-workspace-panel="module:publishing.share-links"]');
+  await expect(panel.getByRole("combobox", { name: "対象", exact: true })).toHaveValue(chapterId);
+  await panel.getByRole("combobox", { name: "範囲", exact: true }).selectOption("volume");
+  await expect(panel.getByRole("combobox", { name: "対象", exact: true })).toHaveValue(volumeId);
+
+  for (const [label, state] of [["現行リンク", "公開済み"], ["期限切れのリンク", "期限切れ"], ["失効したリンク", "失効済み"]]) {
+    const row = panel.getByRole("listitem").filter({ has: page.getByText(label, { exact: true }) });
+    await expect(row).toContainText("第一巻 / 第二章");
+    await expect(row.getByText(state, { exact: true })).toBeVisible();
+  }
 });

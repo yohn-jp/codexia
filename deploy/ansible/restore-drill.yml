@@ -47,7 +47,7 @@
   ansible.builtin.command:
     argv:
       - bash
-      - "{{ repo_root }}/deploy/updater/standalone-backup.sh"
+      - "{{ repo_root }}/deploy/backup/backup.sh"
       - drill
       - "{{ codexia_backup_directory }}"
       - "{{ codexia_recovery_identity_file }}"

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict';
+import { inspectHtml } from './html-document.mjs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,18 +50,12 @@ for (const entry of ['/', '/desktop/', '/mobile/']) {
   const htmlResponse = await get(entry);
   assert.match(htmlResponse.headers.get('content-type') ?? '', /^text\/html(?:;|$)/u);
   const html = await htmlResponse.text();
-  assert.match(html, /<title>Codexia<\/title>/u);
-  const nonce = html.match(/<meta name="codexia-style-nonce" content="([^"]+)"/u)?.[1];
+  const document = inspectHtml(html);
+  assert.equal(document.title, 'Codexia');
+  const nonce = document.nonce;
   assert.ok(nonce && nonce !== '__CODEXIA_STYLE_NONCE__', `${entry} has a request-specific style nonce`);
   assert.ok(htmlResponse.headers.get('content-security-policy')?.includes(`'nonce-${nonce}'`));
-  const entryAssets = [];
-  for (const match of html.matchAll(/<(?:script|link)\b[^>]*>/gu)) {
-    const tag = match[0];
-    const src = tag.match(/\bsrc="([^"]+)"/u)?.[1];
-    const href = tag.match(/\bhref="([^"]+)"/u)?.[1];
-    if (src) entryAssets.push(src);
-    if (href && /\brel="stylesheet"/u.test(tag)) entryAssets.push(href);
-  }
+  const entryAssets = [...document.scripts, ...document.stylesheets];
   assert.ok(entryAssets.some((asset) => /\.js(?:\?|$)/u.test(asset)), `${entry} references JavaScript`);
   assert.ok(entryAssets.some((asset) => /\.css(?:\?|$)/u.test(asset)), `${entry} references CSS`);
   if (entry !== '/') assert.ok(entryAssets.every((asset) => asset.startsWith(entry)), `${entry} assets are isolated`);

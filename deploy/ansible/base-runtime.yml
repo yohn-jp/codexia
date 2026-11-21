@@ -26,14 +26,6 @@
       - "'Image=docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536' in (lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/codexia-db.container', rstrip=false) | split('\n'))"
       - "'Image=docker.io/cloudflare/cloudflared@sha256:b94b96edf2c9c4360f8879c8580cfaa99077f19c849ec595ca2f711b27d4f344' in (lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/codexia-tunnel.container', rstrip=false) | split('\n'))"
     fail_msg: A pinned base image input differs from the reviewed repository design; no runtime resources will be changed.
-- name: Refuse base convergence after the updater controller is initialized
-  ansible.builtin.stat:
-    path: "{{ state_dir }}/controller.json"
-  register: base_controller
-- name: Require the legacy updater state to be uninitialized
-  ansible.builtin.assert:
-    that: not base_controller.stat.exists
-    fail_msg: Base runtime convergence is limited to the pre-initialization legacy stage.
 - name: Require actual rootless Podman
   ansible.builtin.command:
     argv: [podman, info, --format, "{% raw %}{{.Host.Security.Rootless}}{% endraw %}"]
@@ -205,25 +197,6 @@
   when: >-
     base_runtime_containers.results[0].rc == 1 and
     (base_runtime_pgdata_before is skipped or (base_runtime_pgdata_before.stdout | from_json).state == 'empty')
-- name: Require the fixed updater source destination
-  ansible.builtin.assert:
-    that: source_dir == '/opt/codexia-updater'
-    fail_msg: Updater source must use the canonical host directory.
-- name: Inspect the updater source directory without following links
-  become: true
-  become_user: root
-  ansible.builtin.stat:
-    path: "{{ source_dir }}"
-    follow: false
-  register: base_updater_source
-- name: Reject an existing updater source directory with unsafe ownership or mode
-  ansible.builtin.assert:
-    that:
-      - not base_updater_source.stat.exists or (base_updater_source.stat.isdir | default(false))
-      - not base_updater_source.stat.exists or not (base_updater_source.stat.islnk | default(false))
-      - not base_updater_source.stat.exists or base_updater_source.stat.uid == codexia_service_uid
-      - not base_updater_source.stat.exists or base_updater_source.stat.mode == '0750'
-    fail_msg: Existing updater source directory must be a real service-owned directory with mode 0750; it was not modified.
 - name: Inspect the PostgreSQL init-script directory without following links
   become: true
   become_user: root
@@ -262,16 +235,6 @@
       - not base_runtime_existing_init_script.stat.exists or ((base_runtime_existing_init_script.stat.isreg | default(false)) and not (base_runtime_existing_init_script.stat.islnk | default(false)))
       - not base_runtime_existing_init_script.stat.exists or base_runtime_existing_init_script.stat.checksum == (lookup('ansible.builtin.file', repo_root + '/deploy/postgres/010-create-app-role.sh', rstrip=false) | hash('sha1'))
     fail_msg: The PostgreSQL initializer must be a regular file, not a symlink or special file.
-- name: Provision the missing updater source directory through the bootstrap identity
-  become: true
-  become_user: root
-  ansible.builtin.file:
-    path: "{{ source_dir }}"
-    state: directory
-    owner: "{{ codexia_service_user }}"
-    group: "{{ base_runtime_service_identity.stdout.split(':')[3] }}"
-    mode: '0750'
-  when: not base_updater_source.stat.exists
 - name: Ensure the PostgreSQL config parent is traversable by the rootless service account
   become: true
   become_user: root
@@ -655,8 +618,8 @@
   ansible.builtin.slurp:
     path: "{{ quadlet_dir }}/codexia-tunnel.container"
   register: base_runtime_tunnel_content
-- name: Verify the pinned Tunnel Quadlet exactly matches the legacy-stage source
+- name: Verify the pinned Tunnel Quadlet exactly matches the repository source
   ansible.builtin.assert:
     that:
       - base_runtime_tunnel_content.content == (lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/codexia-tunnel.container', rstrip=false) | b64encode)
-    fail_msg: Tunnel Quadlet differs from the reviewed legacy-stage source; it was not overwritten.
+    fail_msg: Tunnel Quadlet differs from the reviewed source; it was not overwritten.

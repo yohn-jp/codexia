@@ -7,13 +7,13 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const backupProgram = path.join(root, 'deploy/updater/standalone-backup.sh');
+const backupProgram = path.join(root, 'deploy/backup/backup.sh');
 const shellQuote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
 
 async function createFixture() {
   const directory = await mkdtemp(path.join(tmpdir(), 'codexia-push-backup-'));
   const home = path.join(directory, 'home');
-  const stateDir = path.join(home, '.local/state/codexia-updater');
+  const stateDir = path.join(home, '.local/state/codexia-deploy');
   const backupDestination = path.join(directory, 'backup');
   const bin = path.join(directory, 'bin');
   await Promise.all([mkdir(stateDir, { recursive: true }), mkdir(backupDestination), mkdir(bin)]);
@@ -25,7 +25,7 @@ async function createFixture() {
     getent: '#!/bin/sh\nprintf "192.0.2.55 STREAM backup.example 192.0.2.55\\n"\n',
     ip: '#!/bin/sh\nprintf "2: lo inet 127.0.0.1/8 scope host lo\\n"\n',
     podman: '#!/bin/sh\nexit 1\n',
-    systemctl: '#!/usr/bin/env bash\ncase "$*" in\n  *codexia-api.service*) unit=codexia-api.service;;\n  *codexia-api-proxy.service*) unit=codexia-api-proxy.service;;\n  *codexia-tunnel.service*) unit=codexia-tunnel.service;;\n  *codexia-updater-boot.service*) unit=codexia-updater-boot.service;;\n  *codexia-updater.service*) unit=codexia-updater.service;;\n  *codexia-updater.timer*) unit=codexia-updater.timer;;\n  *) exit 4;;\nesac\ncase ",${CODEXIA_TEST_ACTIVE_UNITS:-}," in *",$unit,"*) exit 0;; esac\nexit 3\n',
+    systemctl: '#!/usr/bin/env bash\ncase "$*" in\n  *codexia-api.service*) unit=codexia-api.service;;\n  *codexia-tunnel.service*) unit=codexia-tunnel.service;;\n  *) exit 4;;\nesac\ncase ",${CODEXIA_TEST_ACTIVE_UNITS:-}," in *",$unit,"*) exit 0;; esac\nexit 3\n',
   };
   for (const [name, contents] of Object.entries(commands)) {
     const commandPath = path.join(bin, name);
@@ -35,16 +35,13 @@ async function createFixture() {
   return { directory, home, stateDir, backupDestination, bin, lockFile };
 }
 
-function invokeBackup(fixture, { pushMode = true, activeUnits = '' } = {}) {
+function invokeBackup(fixture, { activeUnits = '', approved = true } = {}) {
   const args = [
     backupProgram,
     'backup-locked',
     fixture.backupDestination,
     'age1pushfixture',
-    '--approved',
-    '--lock-file', fixture.lockFile,
-    '--lock-fd', '9',
-    ...(pushMode ? ['--push-deployment'] : []),
+    ...(approved ? ['--approved', '--lock-file', fixture.lockFile, '--lock-fd', '9'] : []),
   ].map(shellQuote).join(' ');
   const command = `exec 9>${shellQuote(fixture.lockFile)}; flock --exclusive --nonblock 9; exec ${args} 9>&9`;
   return spawnSync('bash', ['-c', command], {
@@ -59,7 +56,7 @@ function invokeBackup(fixture, { pushMode = true, activeUnits = '' } = {}) {
   });
 }
 
-test('push backup accepts a missing legacy route only after every app writer and updater unit is inactive', async () => {
+test('push backup requires a quiesced API and Tunnel', async () => {
   const fixture = await createFixture();
   try {
     const inactive = invokeBackup(fixture);
@@ -69,11 +66,7 @@ test('push backup accepts a missing legacy route only after every app writer and
 
     for (const unit of [
       'codexia-api.service',
-      'codexia-api-proxy.service',
       'codexia-tunnel.service',
-      'codexia-updater-boot.service',
-      'codexia-updater.service',
-      'codexia-updater.timer',
     ]) {
       const active = invokeBackup(fixture, { activeUnits: unit });
       assert.notEqual(active.status, 0);
@@ -85,13 +78,12 @@ test('push backup accepts a missing legacy route only after every app writer and
   }
 });
 
-test('legacy backup still requires its blocked route marker', async () => {
+test('backup rejects calls without explicit host-lock approval', async () => {
   const fixture = await createFixture();
   try {
-    const legacy = invokeBackup(fixture, { pushMode: false });
-    assert.notEqual(legacy.status, 0);
-    assert.match(`${legacy.stdout}\n${legacy.stderr}`, /Block the proxy before backup/u,
-      `backup exit ${legacy.status}: ${legacy.stdout}\n${legacy.stderr}`);
+    const rejected = invokeBackup(fixture, { approved: false });
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /explicit approval/u);
   } finally {
     await rm(fixture.directory, { recursive: true, force: true });
   }
