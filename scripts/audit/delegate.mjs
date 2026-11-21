@@ -167,7 +167,7 @@ function oneBranch({ root, site, bin, base, head, mainFiles, headFiles }) {
     if (!allowed.has(entry.path)) { skipped.push({ path: entry.path, status: entry.status, reason: 'not-in-verified-head-export' }); continue; }
     const oldPath = entry.status === 'added' ? null : (renames.get(entry.path) ?? entry.path);
     const result = recordFile(root, entry, head, mergeBase, headFiles, mainFiles, perFileRules.get(entry.path), oldPath);
-    if (!result.source) { skipped.push({ path: entry.path, status: entry.status, reason: result.reason }); continue; }
+    if ('reason' in result) { skipped.push({ path: entry.path, status: entry.status, reason: result.reason }); continue; }
     files.push({ path: entry.path, status: entry.status, insertions: entry.insertions, deletions: entry.deletions,
       rule: perFileRules.get(entry.path), ...result });
   }
