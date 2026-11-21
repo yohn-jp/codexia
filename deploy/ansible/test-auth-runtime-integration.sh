@@ -85,7 +85,7 @@ all:
         codexia_oidc_client_secret_file: "$tmp/oidc-secret"
         codexia_oauth_introspection_client_secret_file: "$tmp/introspection-secret"
         codexia_public_origin: https://codexia.example.invalid
-        codexia_oidc_issuer: https://codexia.example.invalid/api/auth
+        codexia_oidc_issuer: https://idp.example.invalid/oidc
         codexia_oidc_client_id: codexia-web
         codexia_oauth_introspection_client_id: codexia-resource-server
         codexia_oauth_owner_subject: fixture-provider|stable-owner-subject
