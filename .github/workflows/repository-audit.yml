@@ -19,6 +19,8 @@ jobs:
   pack:
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    env:
+      OCR_NO_UPDATE: '1'
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
@@ -34,8 +36,12 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/audit-tool" --ignore-scripts --no-audit --no-fund repomix@1.19.0 playwright-core@1.64.1
           echo "CODEXIA_AUDIT_REPOMIX_BIN=$RUNNER_TEMP/audit-tool/node_modules/.bin/repomix" >> "$GITHUB_ENV"
           echo "CODEXIA_AUDIT_TOOL_DIR=$RUNNER_TEMP/audit-tool" >> "$GITHUB_ENV"
-      - name: Test audit exporter and browser downloads
-        run: node --test scripts/audit/export.test.mjs
+      - name: Install pinned OCR delegation CLI
+        run: |
+          npm install --prefix "$RUNNER_TEMP/audit-ocr" --ignore-scripts --no-audit --no-fund @alibaba-group/open-code-review@1.13.13
+          echo "CODEXIA_AUDIT_OCR_BIN=$RUNNER_TEMP/audit-ocr/node_modules/.bin/ocr" >> "$GITHUB_ENV"
+      - name: Test audit exporter, delegation and browser downloads
+        run: node --test scripts/audit/export.test.mjs scripts/audit/delegate.test.mjs scripts/audit/packet-format.test.mjs
       - name: Restore previous verified HEAD exports
         if: github.event_name != 'pull_request'
         uses: actions/cache/restore@v6.1.0
@@ -47,6 +53,15 @@ jobs:
       - name: Pack every remote branch HEAD with the same policy
         run: |
           node scripts/audit/export.mjs "$RUNNER_TEMP/audit-site" "$RUNNER_TEMP/audit-cache" "$CODEXIA_AUDIT_REPOMIX_BIN"
+      - name: Generate deterministic per-file OCR Delegate inputs
+        run: |
+          node scripts/audit/delegate.mjs "$RUNNER_TEMP/audit-site" "$CODEXIA_AUDIT_OCR_BIN"
+      - name: Require current PR's review materials
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          REVIEW_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          node -e 'const m=require(process.argv[1]); const r=m.reviews?.[process.env.REVIEW_SHA]; if(!r || !["ready","partial","no-diff"].includes(r.status) || (r.selected > 0 && r.published === 0)) throw Error("Current PR has no usable OCR-selected source material");' "$RUNNER_TEMP/audit-site/manifest.json"
       - name: Require usable main snapshot in PR preview
         if: github.event_name == 'pull_request'
         run: node -e 'const m=require(process.argv[1]); const main=m.branches.find(x=>x.branch==="main"); if(!main || m.snapshots[main.sha].status==="blocked") throw new Error("Main audit snapshot is unavailable");' "$RUNNER_TEMP/audit-site/manifest.json"
