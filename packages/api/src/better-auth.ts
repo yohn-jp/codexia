@@ -26,6 +26,7 @@ export interface BetterAuthRuntimeConfig {
   readonly oauthIntrospectionClientSecret: string;
   readonly apiAudience?: string;
   readonly ownerClientIds: readonly string[];
+  readonly mcpClientIds?: readonly string[];
   readonly allowInsecureLoopbackForTests?: boolean;
 }
 
@@ -36,6 +37,31 @@ export interface OAuthConsentContext {
 
 const SUPPORTED_OAUTH_SCOPES = ["openid", "email", "profile", "offline_access", CODEXIA_OWNER_SCOPE, ...CODEXIA_MCP_SCOPES] as const;
 const CONFIDENTIAL_TOKEN_AUTH_METHODS = ["client_secret_basic", "client_secret_post", "private_key_jwt"] as const;
+
+/**
+ * Better Auth 1.7.x only advertises public clients when dynamic registration or
+ * client discovery is enabled. Codexia intentionally provisions clients through
+ * the authenticated admin API instead, so keep public registration closed and
+ * supplement the metadata with the public method the token endpoint accepts.
+ */
+export async function advertisePublicClientTokenAuth(metadata: Response): Promise<Response> {
+  if (!metadata.ok) return metadata;
+  const body: unknown = await metadata.json();
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new Error("Better Auth returned invalid authorization-server metadata");
+  }
+  const record = body as Record<string, unknown>;
+  const configured = Array.isArray(record.token_endpoint_auth_methods_supported)
+    ? record.token_endpoint_auth_methods_supported.filter((value): value is string => typeof value === "string")
+    : [];
+  const headers = new Headers(metadata.headers);
+  headers.delete("content-length");
+  headers.set("content-type", "application/json; charset=utf-8");
+  return new Response(JSON.stringify({
+    ...record,
+    token_endpoint_auth_methods_supported: [...new Set(["none", ...configured])],
+  }), { status: metadata.status, statusText: metadata.statusText, headers });
+}
 
 function assertHttpsUrl(value: string, name: string, allowInsecureLoopbackForTests = false): URL {
   let parsed: URL;
@@ -75,6 +101,10 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
       config.oauthIntrospectionClientSecret.length < 16 || config.ownerClientIds.length === 0 ||
       config.ownerClientIds.some((id) => !id.trim())) {
     throw new Error("Better Auth requires PostgreSQL, OIDC client credentials, a 32-character auth secret, a confidential introspection client, and owner client IDs");
+  }
+  const mcpClientIds = [...new Set((config.mcpClientIds ?? []).map((id) => id.trim()).filter(Boolean))];
+  if (mcpClientIds.some((id) => config.ownerClientIds.includes(id))) {
+    throw new Error("Owner and limited MCP OAuth client allowlists must be disjoint");
   }
 
   const pool = new Pool({
@@ -156,6 +186,10 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
     isOwnerClient(clientId: string): boolean {
       return config.ownerClientIds.includes(clientId);
     },
+    mcpClientIds,
+    isMcpClient(clientId: string): boolean {
+      return mcpClientIds.includes(clientId);
+    },
     async verifyActiveAccessToken(token: string): Promise<boolean> {
       try {
         await resourceClient.verifyBearerToken(token, {
@@ -166,7 +200,6 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
             clientId: config.oauthIntrospectionClientId,
             clientSecret: config.oauthIntrospectionClientSecret,
           },
-          requiredScopes: [CODEXIA_OWNER_SCOPE],
         });
         return true;
       } catch (error) {

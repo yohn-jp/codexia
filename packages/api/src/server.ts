@@ -14,7 +14,7 @@ import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { fromNodeHeaders } from "better-auth/node";
-import { CODEXIA_OWNER_SCOPE, createBetterAuthRuntime } from "./better-auth.js";
+import { advertisePublicClientTokenAuth, CODEXIA_OWNER_SCOPE, createBetterAuthRuntime } from "./better-auth.js";
 import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ReorderHierarchyInput } from "@codexia/core";
 import type { Persistence, ProjectPageCursor } from "@codexia/persistence-contracts";
@@ -1583,14 +1583,14 @@ export function createServer(options: ApiServerOptions): Server {
 
     if (options.betterAuth && method === "GET" && routePath === "/.well-known/oauth-authorization-server/api/auth") {
       const metadataRequest = new Request(`${requestProtocol(request, trustProxy)}//${request.headers.host ?? "localhost"}${request.url ?? "/"}`, { headers: fromNodeHeaders(request.headers) });
-      const metadata = await options.betterAuth.authorizationServerMetadata(metadataRequest);
+      const metadata = await advertisePublicClientTokenAuth(await options.betterAuth.authorizationServerMetadata(metadataRequest));
       response.writeHead(metadata.status, Object.fromEntries(metadata.headers.entries()));
       response.end(Buffer.from(await metadata.arrayBuffer()));
       return;
     }
     if (options.betterAuth && method === "GET" && routePath === "/.well-known/openid-configuration/api/auth") {
       const metadataRequest = new Request(`${requestProtocol(request, trustProxy)}//${request.headers.host ?? "localhost"}${request.url ?? "/"}`, { headers: fromNodeHeaders(request.headers) });
-      const metadata = await options.betterAuth.openIdConfigMetadata(metadataRequest);
+      const metadata = await advertisePublicClientTokenAuth(await options.betterAuth.openIdConfigMetadata(metadataRequest));
       response.writeHead(metadata.status, Object.fromEntries(metadata.headers.entries()));
       response.end(Buffer.from(await metadata.arrayBuffer()));
       return;

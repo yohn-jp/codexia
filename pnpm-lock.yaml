@@ -10,6 +10,11 @@ overrides:
 importers:
 
   .:
+    configDependencies: {}
+    packageManagerDependencies:
+      pnpm:
+        specifier: 12.21.0
+        version: 12.21.0
     devDependencies:
       '@codexia/api':
         specifier: workspace:*
