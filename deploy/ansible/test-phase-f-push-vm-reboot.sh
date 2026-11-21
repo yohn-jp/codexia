@@ -228,7 +228,15 @@ if ! /usr/bin/systemctl --user start phase-f-vm-reboot-postgres-volume.service; 
 fi
 /usr/bin/systemctl --user start phase-f-vm-reboot-db.service
 for _ in {1..120}; do /usr/bin/podman exec phase-f-vm-reboot-db pg_isready -U codexia_admin -d codexia >/dev/null 2>&1 && break; sleep 2; done
-/usr/bin/podman exec phase-f-vm-reboot-db pg_isready -U codexia_admin -d codexia >/dev/null
+if ! /usr/bin/podman exec phase-f-vm-reboot-db pg_isready -U codexia_admin -d codexia >/dev/null 2>&1; then
+  printf '%s\n' 'Sanitized diagnostics for the fixture PostgreSQL readiness failure:' >&2
+  {
+    /usr/bin/systemctl --user show phase-f-vm-reboot-db.service --property=ActiveState,SubState,Result,ExecMainStatus --no-pager 2>&1 || true
+    /usr/bin/journalctl --user --boot --no-pager --lines=60 --unit=phase-f-vm-reboot-db.service 2>&1 || true
+    /usr/bin/podman inspect --format 'container={{.State.Status}} health={{.State.Health.Status}} error={{.State.Error}}' phase-f-vm-reboot-db 2>&1 || true
+  } | sed -E 's/[A-Fa-f0-9]{64}/[redacted-digest]/g' >&2
+  exit 1
+fi
 /usr/bin/podman exec -i phase-f-vm-reboot-db psql -v ON_ERROR_STOP=1 -U codexia_admin -d codexia <<'SQL'
 CREATE TABLE phase_f_reboot_marker (id integer PRIMARY KEY, value text NOT NULL);
 INSERT INTO phase_f_reboot_marker (id, value) VALUES (1, 'persisted-before-real-guest-reboot');

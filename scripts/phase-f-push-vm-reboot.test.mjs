@@ -33,6 +33,8 @@ test('Phase F VM fixture requires a real guest reboot and durable PostgreSQL evi
   assert.match(fixture, /-cpu max/u);
   assert.match(fixture, /qemuAcceleration: 'tcg-threaded'/u);
   assert.match(fixture, /journalctl --user --boot --no-pager --lines=40 --unit=phase-f-vm-reboot-postgres-volume\.service/u);
+  assert.match(fixture, /journalctl --user --boot --no-pager --lines=60 --unit=phase-f-vm-reboot-db\.service/u);
+  assert.match(fixture, /container=\{\{\.State\.Status\}\} health=\{\{\.State\.Health\.Status\}\}/u);
   assert.match(fixture, /redacted-digest/u);
   assert.match(fixture, /release-20261108/u);
   assert.match(fixture, /7b90593f5532b49b7e3fe3d2743f0d1f0d822e5b07cebcd8e00c0df8069ecab9/u);
