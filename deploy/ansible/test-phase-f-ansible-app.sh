@@ -567,6 +567,17 @@ assert.deepEqual(observed.writers[0], {
 assert.equal(observed.route, state.journal.active.slot);
 NODE
 }
+recovery_diagnostics() {
+  printf '%s\n' '=== User-manager recovery diagnostics ===' >&2
+  user_systemctl --failed --no-legend --no-pager >&2 || true
+  for unit in codexia-db.service codexia-api-proxy.service codexia-slot-blue.service codexia-updater-boot.service; do
+    user_systemctl show "$unit" --property=LoadState,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus >&2 || true
+    user_systemctl status "$unit" --no-pager >&2 || true
+  done
+  as_service /usr/bin/journalctl --user -u codexia-db.service -n 80 --no-pager >&2 || true
+  rootless ps --all --no-trunc >&2 || true
+  rootless inspect --format '{{json .State}}' codexia-db >&2 || true
+}
 
 printf '%s\n' '=== Ansible secrets and base stages: clean resource set on the same host identity ==='
 apply_runner secrets "$tmp/secrets-first.log"
@@ -714,7 +725,11 @@ done
 [[ "$manager_pid_after" =~ ^[1-9][0-9]*$ && "$manager_pid_after" != "$manager_pid_before" ]] || fail 'The disposable rootless user manager did not restart.'
 [[ "$(user_systemctl show --property=Result --value codexia-updater-boot.service)" == success ]] || fail 'Boot recovery did not complete successfully after the user manager restart.'
 for unit in codexia-db.service codexia-api-proxy.service codexia-slot-blue.service codexia-updater.timer; do
-  [[ "$(user_systemctl is-active "$unit")" == active ]] || fail "Committed application unit did not recover after the user manager restart: $unit"
+  if [[ "$(user_systemctl is-active "$unit")" != active ]]; then
+    printf 'Committed application unit did not recover after the user manager restart: %s\n' "$unit" >&2
+    recovery_diagnostics
+    fail 'Rootless user-manager recovery did not restore the committed application units.'
+  fi
 done
 database_identity_after_restart=$(database_snapshot)
 [[ "$(sed -n '2,3p' <<<"$database_identity_after_restart")" == "$(sed -n '2,3p' <<<"$database_identity")" ]] || fail 'User manager recovery changed the PostgreSQL volume or cluster identity.'
