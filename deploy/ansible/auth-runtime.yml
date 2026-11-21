@@ -1,0 +1,243 @@
+---
+- name: Require explicit Better Auth runtime provisioning on the codexia service identity
+  ansible.builtin.assert:
+    that:
+      - codexia_auth_runtime_approved | default(false) | bool
+      - not ansible_check_mode
+      - codexia_service_user is string and codexia_service_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+      - codexia_service_uid is integer and codexia_service_uid > 0
+      - codexia_service_home == '/home/' + codexia_service_user
+      - codexia_auth_database_url_file is string and codexia_auth_database_url_file is match('^/[^\r\n]+$')
+      - codexia_auth_secret_file is string and codexia_auth_secret_file is match('^/[^\r\n]+$')
+      - codexia_oidc_client_secret_file is string and codexia_oidc_client_secret_file is match('^/[^\r\n]+$')
+      - codexia_oauth_introspection_client_secret_file is string and codexia_oauth_introspection_client_secret_file is match('^/[^\r\n]+$')
+      - codexia_public_origin is string and codexia_public_origin is match('^https://[a-zA-Z0-9.-]+(:[0-9]+)?$')
+      - codexia_oidc_issuer == codexia_public_origin + '/api/auth'
+      - codexia_oidc_client_id is string and codexia_oidc_client_id is match('^[a-zA-Z0-9._:/|+-]+$')
+      - codexia_oauth_introspection_client_id is string and codexia_oauth_introspection_client_id is match('^[a-zA-Z0-9._:/|+-]+$')
+      - codexia_oauth_owner_subject is string and codexia_oauth_owner_subject is match('^[a-zA-Z0-9._@:/|+-]+$')
+      - codexia_oauth_owner_client_ids is string and codexia_oauth_owner_client_ids is match('^[a-zA-Z0-9._:/|+-]+(,[a-zA-Z0-9._:/|+-]+)*$')
+      - codexia_api_audience is not defined or codexia_api_audience == codexia_public_origin + '/api'
+    fail_msg: Better Auth provisioning requires explicit approval, the rootless Codexia account, protected secret files and validated public configuration.
+
+- name: Verify the declared rootless Codexia service identity
+  ansible.builtin.command:
+    argv: [getent, passwd, "{{ codexia_service_user }}"]
+  register: codexia_auth_service_identity
+  changed_when: false
+  failed_when: >-
+    codexia_auth_service_identity.rc != 0 or
+    codexia_auth_service_identity.stdout.split(':') | length != 7 or
+    codexia_auth_service_identity.stdout.split(':')[2] | int != codexia_service_uid or
+    codexia_auth_service_identity.stdout.split(':')[5] != codexia_service_home
+
+- name: Require rootless Podman for protected auth resources
+  ansible.builtin.command:
+    argv: [podman, info, --format, "{% raw %}{{.Host.Security.Rootless}}{% endraw %}"]
+  register: codexia_auth_rootless
+  changed_when: false
+  failed_when: codexia_auth_rootless.rc != 0 or codexia_auth_rootless.stdout != 'true'
+
+- name: Verify the current database image, storage, network and admin secret identity
+  ansible.builtin.include_tasks: verify-base-db-container.yml
+
+- name: Read protected Better Auth inputs into no-log task memory
+  ansible.builtin.set_fact:
+    codexia_auth_secret_sources:
+      codexia-auth-database-url: "{{ codexia_auth_database_url_file }}"
+      codexia-auth-secret: "{{ codexia_auth_secret_file }}"
+      codexia-oidc-client-secret: "{{ codexia_oidc_client_secret_file }}"
+      codexia-oauth-introspection-client-secret: "{{ codexia_oauth_introspection_client_secret_file }}"
+    codexia_auth_database_url: "{{ lookup('ansible.builtin.file', codexia_auth_database_url_file, rstrip=false) | string }}"
+    codexia_auth_secret_value: "{{ lookup('ansible.builtin.file', codexia_auth_secret_file, rstrip=false) | string }}"
+    codexia_oidc_client_secret_value: "{{ lookup('ansible.builtin.file', codexia_oidc_client_secret_file, rstrip=false) | string }}"
+    codexia_oauth_introspection_client_secret_value: "{{ lookup('ansible.builtin.file', codexia_oauth_introspection_client_secret_file, rstrip=false) | string }}"
+  no_log: true
+
+- name: Parse the PostgreSQL URL without placing its credentials in arguments
+  ansible.builtin.set_fact:
+    codexia_auth_database_parts: "{{ codexia_auth_database_url | ansible.builtin.urlsplit }}"
+    codexia_auth_database_password_b64: "{{ (codexia_auth_database_url | ansible.builtin.urlsplit('password') | ansible.builtin.urldecode) | b64encode }}"
+  no_log: true
+
+- name: Require the dedicated auth connection and complete secret values
+  ansible.builtin.assert:
+    that:
+      - codexia_auth_database_url is match('^[!-~]+$')
+      - codexia_auth_database_parts.scheme in ['postgres', 'postgresql']
+      - codexia_auth_database_parts.username == 'codexia_auth_runtime'
+      - codexia_auth_database_parts.password is string and codexia_auth_database_parts.password | length > 0
+      - codexia_auth_database_parts.hostname == 'codexia-db'
+      - codexia_auth_database_parts.port | int == 5432
+      - codexia_auth_database_parts.path == '/codexia'
+      - codexia_auth_database_parts.query == ''
+      - codexia_auth_database_parts.fragment == ''
+      - codexia_auth_secret_value | length >= 32 and codexia_auth_secret_value is match('^[!-~]+$')
+      - codexia_oidc_client_secret_value | length >= 16 and codexia_oidc_client_secret_value is match('^[!-~]+$')
+      - codexia_oauth_introspection_client_secret_value | length >= 16 and codexia_oauth_introspection_client_secret_value is match('^[!-~]+$')
+  fail_msg: The Better Auth URL must target codexia_auth_runtime on the existing codexia database; secret inputs must be nonempty printable values.
+  no_log: true
+
+- name: Inspect protected auth secret files on the control node
+  ansible.builtin.stat:
+    path: "{{ item.value }}"
+    follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  loop: "{{ codexia_auth_secret_sources | dict2items }}"
+  register: codexia_auth_input_files
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Require regular private auth secret files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg | default(false)
+      - not (item.stat.islnk | default(false))
+      - item.stat.mode in ['0400', '0600']
+    fail_msg: Better Auth secret inputs must be regular, non-symlink files with mode 0400 or 0600.
+  loop: "{{ codexia_auth_input_files.results }}"
+  no_log: true
+
+- name: Observe the control-node identity that owns protected auth inputs
+  ansible.builtin.command:
+    argv: [id, -u]
+  register: codexia_auth_control_uid
+  changed_when: false
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Require protected auth inputs to belong to the invoking control identity
+  ansible.builtin.assert:
+    that: item.stat.uid == codexia_auth_control_uid.stdout | int
+    fail_msg: Better Auth secret inputs must be owned by the control-node identity that invokes this stage.
+  loop: "{{ codexia_auth_input_files.results }}"
+  no_log: true
+
+- name: Create protected auth-runtime directories and shared deployment lock path
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ codexia_service_user }}"
+    group: "{{ codexia_service_group | default(codexia_service_user) }}"
+    mode: '0700'
+  loop:
+    - {path: "{{ home }}/.local/bin"}
+    - {path: "{{ home }}/.local/state/codexia-deploy"}
+    - {path: "{{ home }}/.config/codexia-auth"}
+
+- name: Install the locked auth database bootstrap helper
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/ansible/provision-auth-database.sh"
+    dest: "{{ home }}/.local/bin/codexia-auth-runtime-bootstrap"
+    owner: "{{ codexia_service_user }}"
+    group: "{{ codexia_service_group | default(codexia_service_user) }}"
+    mode: '0700'
+
+- name: Inspect existing auth role and schema under the shared deployment lock
+  ansible.builtin.command:
+    argv: ["{{ home }}/.local/bin/codexia-auth-runtime-bootstrap", inspect, "{{ home }}/.local/state/codexia-deploy/host.lock"]
+  register: codexia_auth_database_state
+  changed_when: false
+  no_log: true
+
+- name: Parse the nonsecret database bootstrap state
+  ansible.builtin.set_fact:
+    codexia_auth_database_state_value: "{{ codexia_auth_database_state.stdout | from_json }}"
+
+- name: Refuse to adopt an existing auth schema with an unknown owner or missing login role
+  ansible.builtin.assert:
+    that:
+      - not codexia_auth_database_state_value.schemaExists or codexia_auth_database_state_value.schemaOwner == 'codexia_auth_runtime'
+      - not codexia_auth_database_state_value.schemaExists or codexia_auth_database_state_value.roleExists
+    fail_msg: Existing codexia_auth schema ownership is not the declared runtime role; stop for explicit recovery.
+
+- name: Observe existing auth secret identities
+  ansible.builtin.command:
+    argv: [podman, secret, exists, "{{ item.key }}"]
+  loop: "{{ codexia_auth_secret_sources | dict2items }}"
+  register: codexia_auth_secret_states
+  changed_when: false
+  failed_when: codexia_auth_secret_states.rc not in [0, 1]
+
+- name: Require all secrets for an existing auth schema and safe recovery of initial partial creation
+  ansible.builtin.assert:
+    that:
+      - not codexia_auth_database_state_value.schemaExists or (codexia_auth_secret_states.results | selectattr('rc', 'equalto', 1) | list | length == 0)
+    fail_msg: Missing secrets for an existing auth schema require external recovery; initial partial secret creation can be retried only before schema creation.
+
+- name: Inspect existing auth secret values without disclosing them
+  ansible.builtin.command:
+    argv: [podman, secret, inspect, --showsecret, "{{ item.item.key }}"]
+  loop: "{{ codexia_auth_secret_states.results | selectattr('rc', 'equalto', 0) | list }}"
+  register: codexia_auth_existing_secrets
+  changed_when: false
+  no_log: true
+
+- name: Refuse to rotate or replace an existing auth secret
+  ansible.builtin.assert:
+    that:
+      - (item.stdout | from_json | length) == 1
+      - (item.stdout | from_json | first).Spec.Name == item.item.item.key
+      - (item.stdout | from_json | first).SecretData == (lookup('ansible.builtin.file', codexia_auth_secret_sources[item.item.item.key], rstrip=false) | string)
+    fail_msg: An existing Better Auth Podman secret differs from its protected input; implicit rotation is forbidden.
+  loop: "{{ codexia_auth_existing_secrets.results }}"
+  no_log: true
+
+- name: Verify the existing auth role password before secret creation or database changes
+  ansible.builtin.command:
+    argv: ["{{ home }}/.local/bin/codexia-auth-runtime-bootstrap", verify, "{{ home }}/.local/state/codexia-deploy/host.lock"]
+    stdin: "{{ codexia_auth_database_password_b64 }}"
+    stdin_add_newline: true
+    expand_argument_vars: false
+  register: codexia_auth_role_verification
+  changed_when: false
+  when: codexia_auth_database_state_value.roleExists
+  no_log: true
+
+- name: Verify existing auth role privilege boundaries before secret creation
+  ansible.builtin.command:
+    argv: ["{{ home }}/.local/bin/codexia-auth-runtime-bootstrap", verify-permissions, "{{ home }}/.local/state/codexia-deploy/host.lock"]
+    expand_argument_vars: false
+  register: codexia_auth_role_permission_verification
+  changed_when: false
+  when: codexia_auth_database_state_value.roleExists
+  no_log: true
+
+- name: Create only missing auth Podman secrets after validating existing database ownership
+  ansible.builtin.command:
+    argv: [podman, secret, create, "{{ item.item.key }}", '-']
+    stdin: "{{ lookup('ansible.builtin.file', codexia_auth_secret_sources[item.item.key], rstrip=false) | string }}"
+    stdin_add_newline: false
+    expand_argument_vars: false
+  loop: "{{ codexia_auth_secret_states.results | selectattr('rc', 'equalto', 1) | list }}"
+  register: codexia_auth_secret_creation
+  changed_when: true
+  no_log: true
+
+- name: Create or verify the least-privilege auth role and schema under the shared deployment lock
+  ansible.builtin.command:
+    argv: ["{{ home }}/.local/bin/codexia-auth-runtime-bootstrap", converge, "{{ home }}/.local/state/codexia-deploy/host.lock"]
+    stdin: "{{ codexia_auth_database_password_b64 }}"
+    stdin_add_newline: true
+    expand_argument_vars: false
+  register: codexia_auth_database_convergence
+  changed_when: not codexia_auth_database_state_value.roleExists or not codexia_auth_database_state_value.schemaExists
+  no_log: true
+
+- name: Write only nonsecret Better Auth runtime settings for the opt-in Quadlet
+  ansible.builtin.template:
+    src: "{{ repo_root }}/deploy/ansible/auth-runtime.env.j2"
+    dest: "{{ home }}/.config/codexia-auth/runtime.env"
+    owner: "{{ codexia_service_user }}"
+    group: "{{ codexia_service_group | default(codexia_service_user) }}"
+    mode: '0600'
+
+- name: Report staged auth role, schema and environment without enabling runtime
+  ansible.builtin.debug:
+    msg: Better Auth role and owned schema are verified; secret identities are provisioned without rotation; nonsecret runtime settings are staged. No service was restarted and no migration was run.
