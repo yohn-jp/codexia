@@ -22,6 +22,7 @@ jobs:
     timeout-minutes: 20
     outputs:
       certified-full-image: ${{ steps.verify.outputs.full-image }}
+      certified-full-api-epoch: ${{ steps.verify.outputs.full-api-epoch }}
       producer-sha: ${{ steps.verify.outputs.producer-sha }}
       deployment-certificate: ${{ steps.verify.outputs.full-certificate }}
     permissions:
@@ -60,8 +61,7 @@ jobs:
       github.event.workflow_run.head_repository.full_name == github.repository &&
       needs.verify-handoff.result == 'success' &&
       needs.verify-handoff.outputs.certified-full-image != '' &&
-      needs.verify-handoff.outputs.deployment-certificate != '' &&
-      vars.CODEXIA_PUSH_DEPLOYMENT_ENABLED == 'true'
+      needs.verify-handoff.outputs.deployment-certificate != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     environment:
@@ -73,15 +73,34 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - name: Check protected backend push-deployment enablement
+        id: deployment-gate
+        shell: bash
+        env:
+          CODEXIA_PUSH_DEPLOYMENT_ENABLED: ${{ vars.CODEXIA_PUSH_DEPLOYMENT_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [[ "${CODEXIA_PUSH_DEPLOYMENT_ENABLED:-}" == 'true' ]]; then
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+            echo 'Protected backend push deployment is enabled.'
+          else
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+            message='Protected backend push deployment safely skipped: codexia-production variable CODEXIA_PUSH_DEPLOYMENT_ENABLED is not set to true.'
+            echo "$message"
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Check out the exact certified main source
+        if: steps.deployment-gate.outputs.enabled == 'true'
         uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
       - uses: actions/setup-node@v7.1.0
+        if: steps.deployment-gate.outputs.enabled == 'true'
         with:
           node-version: '24.22.3'
       - name: Connect to the Tailnet using GitHub OIDC
+        if: steps.deployment-gate.outputs.enabled == 'true'
         uses: tailscale/github-action@v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
@@ -89,6 +108,7 @@ jobs:
           tags: tag:ci
           ping: 100.100.1.68
       - name: Prepare pinned SSH identity
+        if: steps.deployment-gate.outputs.enabled == 'true'
         shell: bash
         env:
           CODEXIA_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}
@@ -107,21 +127,25 @@ jobs:
           ssh-keygen -F 100.100.1.68 -f "$known_hosts" >/dev/null
           ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             -o "UserKnownHostsFile=$known_hosts" codexia@100.100.1.68 true
-      - name: Verify live application identities and Access boundary for release admission
+      - name: Verify deployed frontend epoch and Access boundary for certified backend recovery
+        if: steps.deployment-gate.outputs.enabled == 'true'
         id: live-ui
         shell: bash
         env:
           CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
           CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
           CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
-        run: node scripts/verify-frontend-compatibility.mjs preflight
+          CODEXIA_EXPECTED_BACKEND_API_EPOCH: ${{ needs.verify-handoff.outputs.certified-full-api-epoch }}
+        run: node scripts/verify-frontend-compatibility.mjs backend-preflight
       - name: Install the pinned Ansible control environment
+        if: steps.deployment-gate.outputs.enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail
           python3 -m venv "$RUNNER_TEMP/codexia-ansible"
           "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
       - name: Converge certified backend digest
+        if: steps.deployment-gate.outputs.enabled == 'true'
         shell: bash
         env:
           CODEXIA_CERTIFIED_FULL_IMAGE: ${{ needs.verify-handoff.outputs.certified-full-image }}

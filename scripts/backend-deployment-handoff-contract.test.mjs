@@ -21,6 +21,7 @@ test('handoff consumer verifies successful same-repository main publication befo
   assert.equal(job.permissions['id-token'], undefined);
   assert.deepEqual(job.permissions, { contents: 'read', actions: 'read', packages: 'read' });
   assert.equal(job.outputs['certified-full-image'], '${{ steps.verify.outputs.full-image }}');
+  assert.equal(job.outputs['certified-full-api-epoch'], '${{ steps.verify.outputs.full-api-epoch }}');
   assert.equal(job.outputs['producer-sha'], '${{ steps.verify.outputs.producer-sha }}');
   assert.equal(job.outputs['deployment-certificate'], '${{ steps.verify.outputs.full-certificate }}');
   assert.equal(handoff.jobs['verify-handoff'].steps[0].with.ref, '${{ github.event.workflow_run.head_sha }}');
@@ -38,7 +39,17 @@ test('handoff consumer verifies successful same-repository main publication befo
   assert.equal(deploy.concurrency.group, 'codexia-production');
   assert.equal(deploy.concurrency['cancel-in-progress'], false);
   assert.match(deploy.if, /needs\.verify-handoff\.result == 'success'/u);
-  assert.match(deploy.if, /vars\.CODEXIA_PUSH_DEPLOYMENT_ENABLED == 'true'/u);
+  assert.doesNotMatch(deploy.if, /CODEXIA_PUSH_DEPLOYMENT_ENABLED/u,
+    'Environment-scoped variables must not be evaluated before Environment attachment');
+  const deploymentGate = deploy.steps.find(step => step.id === 'deployment-gate');
+  assert.ok(deploymentGate, 'the Environment-scoped deployment gate must run inside the protected job');
+  assert.equal(deploymentGate.env.CODEXIA_PUSH_DEPLOYMENT_ENABLED, '${{ vars.CODEXIA_PUSH_DEPLOYMENT_ENABLED }}');
+  assert.match(deploymentGate.run, /enabled=true/u);
+  assert.match(deploymentGate.run, /safely skipped/u);
+  assert.match(deploymentGate.run, /GITHUB_STEP_SUMMARY/u);
+  assert.ok(deploy.steps.slice(deploy.steps.indexOf(deploymentGate) + 1).every(step =>
+    step.if === "steps.deployment-gate.outputs.enabled == 'true'"),
+  'OIDC, SSH and Ansible steps must all stop when deployment is disabled');
 });
 
 test('backend release emits certificate files only after exact-source publish and component release recording', () => {

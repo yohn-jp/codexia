@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import * as verifier from './verify-frontend-compatibility.mjs';
 import { assertBackendCompatibility, probeLiveDeployment, verifyFrontendCompatibility, frontendPreflightOutputs } from './verify-frontend-compatibility.mjs';
 
 const frontend = { format: 'codexia-frontend-identity/v1', version: '0.1.2', sourceSha: 'a'.repeat(40), profile: 'full', apiEpoch: 1 };
@@ -24,6 +25,34 @@ test('preflight checks two identities and both anonymous and out-of-scope denial
   } });
   assert.deepEqual(observed, { backend, deployed: frontend });
   assert.deepEqual(calls, [['/api/version', true], ['/desktop/update-identity.json', true], ['/api/version', false], ['/desktop/update-identity.json', false], ['/', true], ['/api/ready', true]]);
+});
+test('backend recovery checks the authenticated deployed frontend and Access boundary without requiring live backend identity', async () => {
+  assert.equal(typeof verifier.probeLiveFrontendForBackendDeployment, 'function');
+  const calls = [];
+  const deployed = await verifier.probeLiveFrontendForBackendDeployment({ env, checkBoundary: true, fetchImpl: async (url, options) => {
+    const authenticated = Boolean(options.headers['CF-Access-Client-Id']);
+    calls.push([url.pathname, authenticated]);
+    if (url.pathname === '/api/version' && authenticated) throw new Error('backend identity must not gate backend recovery');
+    return normal(url, options);
+  } });
+  assert.deepEqual(deployed, frontend);
+  assert.deepEqual(calls, [['/desktop/update-identity.json', true], ['/api/version', false],
+    ['/desktop/update-identity.json', false], ['/', true], ['/api/ready', true]]);
+});
+test('backend recovery requires the deployed full frontend epoch to match the certified candidate epoch', () => {
+  assert.equal(typeof verifier.assertCertifiedBackendFrontendCompatibility, 'function');
+  assert.equal(verifier.assertCertifiedBackendFrontendCompatibility(frontend, 1), frontend);
+  assert.throws(() => verifier.assertCertifiedBackendFrontendCompatibility(frontend, 2), /API epochs are incompatible/u);
+  assert.throws(() => verifier.assertCertifiedBackendFrontendCompatibility(frontend, undefined), /Certified backend API epoch is invalid/u);
+  assert.throws(() => verifier.assertCertifiedBackendFrontendCompatibility({ ...frontend, apiEpoch: undefined }, 1), /Frontend API epoch is invalid/u);
+});
+test('backend recovery reads only a positive safe integer epoch from the verified certificate output', () => {
+  assert.equal(typeof verifier.readCertifiedBackendApiEpoch, 'function');
+  assert.equal(verifier.readCertifiedBackendApiEpoch({ CODEXIA_EXPECTED_BACKEND_API_EPOCH: '1' }), 1);
+  for (const value of [undefined, '', '0', '-1', '1.0', '2x', '9007199254740992']) {
+    assert.throws(() => verifier.readCertifiedBackendApiEpoch({ CODEXIA_EXPECTED_BACKEND_API_EPOCH: value }),
+      /Certified backend API epoch is missing or invalid/u);
+  }
 });
 test('preflight reports both independent failures, status and ray without disclosing response or credentials', async () => {
   await assert.rejects(probeLiveDeployment({ env, fetchImpl: async url => response({ secret: env.CODEXIA_ACCESS_CLIENT_SECRET }, url.pathname === '/api/version' ? 403 : 404) }), error => {
