@@ -163,3 +163,37 @@ test("persistence project page uses the bounded keyset reader and encodes contin
     [2, { updatedAt: projects[0]!.updatedAt, id: projects[0]!.id }],
   ]);
 });
+
+test("mention confirmation observes an overlapping edit that holds the project lock", async () => {
+  const projectId = randomUUID() as ProjectId;
+  const documentId = randomUUID();
+  const anchorId = randomUUID();
+  let anchorStatus = "confirmed";
+  let linkStatus = "proposed";
+  // A pending manuscript edit commits as soon as the confirming writer can
+  // acquire the project lock. Reads before that point see the old revision.
+  function acquireProjectLock() { anchorStatus = "needs_review"; }
+  const persistence = {
+    async transaction<T>(work: (tx: unknown) => Promise<T>) {
+      return work({
+        async assertProjectVersion(project: ProjectId) {
+          assert.equal(project, projectId);
+          acquireProjectLock();
+        },
+        async getEvidenceAnchor() { return { documentId, fromUtf16: 0, toUtf16: 3, status: anchorStatus }; },
+        async saveMentionLink(command: { status: string }) {
+          acquireProjectLock();
+          linkStatus = command.status;
+          return { status: linkStatus };
+        },
+      });
+    },
+  } as unknown as Persistence;
+  const result = await handlePersistenceRoute({
+    persistence, method: "POST", url: `/api/v1/persistence/projects/${projectId}/documents/${documentId}/anchors/${anchorId}/mentions`,
+    body: { nodeId: randomUUID(), status: "confirmed" }, requestHeaders: {}, async requireAuthor() { return "author"; },
+  });
+  assert.equal(result?.status, 409);
+  assert.equal((result.body as { code: string }).code, "ANCHOR_REQUIRES_AUTHOR_CONFIRMATION");
+  assert.equal(linkStatus, "proposed");
+});
