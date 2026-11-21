@@ -2,8 +2,9 @@
 
 This workflow compares alternatives **without modifying the canonical Ansible
 runtime, deployment path, inventory, credentials, or any production VM**. Trigger
-`Ansible performance A/B (experimental)` by changing this harness in a PR or
-through `workflow_dispatch`. It runs only on GitHub-hosted Ubuntu 26.04
+`Ansible performance A/B (experimental)` manually through `workflow_dispatch`.
+It is deliberately not part of normal PR checks: running both full rootless
+contracts sequentially would otherwise negate the canonical CI speedup. It runs only on GitHub-hosted Ubuntu 26.04
 disposable runners. Dependencies are pinned to the repository's
 `ansible-core==2.21.6` and experimental `mitogen==0.3.55`. Mitogen is not
 introduced into `deploy/ansible/requirements.txt`. The actual GitHub-hosted
