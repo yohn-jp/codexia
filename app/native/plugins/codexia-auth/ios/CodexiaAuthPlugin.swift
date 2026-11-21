@@ -287,7 +287,7 @@ public final class CodexiaAuthPlugin: CAPPlugin, CAPBridgedPlugin {
             completion(cached, nil)
             return
         }
-        OIDAuthorizationService.discoverServiceConfiguration(forIssuer: config.issuerURL) { [weak self] service, error in
+        OIDAuthorizationService.discoverConfiguration(forIssuer: config.issuerURL) { [weak self] service, error in
             guard let self else { return }
             guard let service, self.validate(service: service, for: config) else {
                 completion(nil, error ?? NativeOAuthError.invalidMetadata)
