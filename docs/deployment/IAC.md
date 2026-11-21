@@ -99,6 +99,17 @@ The `base` stage validates all existing Quadlet sources, volume/network identiti
 
 ## Converge
 
+The encrypted backup helper also exposes a push-maintenance adapter for use by a separately reviewed transaction that owns a durable host lock. After that transaction has blocked admission and stopped every writer, it can pass the open lock file descriptor directly to the helper:
+
+```sh
+exec 9<> /run/user/1000/codexia-maintenance/host.lock
+flock --exclusive --nonblock 9
+deploy/updater/standalone-backup.sh backup-locked /private/off-vm-mount "$CODEXIA_BACKUP_RECIPIENT" \
+  --approved --lock-file /run/user/1000/codexia-maintenance/host.lock --lock-fd 9
+```
+
+The caller must create and exclusively hold the existing lock before invoking the command, keep the descriptor open through backup completion, and restore the prior service/route state through its own durable recovery transaction. The helper rejects an absent or symbolic-link lock file, a descriptor for a different inode, an unheld descriptor, a local backup destination, and a missing explicit approval. This interface shares the existing encrypted artifact and fingerprint implementation; it does not stop writers, fence traffic, recover interrupted deployment, or replace the current updater-backed Ansible backup stage. Keep the backup and isolated restore evidence bound to the deployment before any push rollout that can change persistent data.
+
 From the repository root, run the following with a private inventory and an encrypted extra-vars file:
 
 ```sh

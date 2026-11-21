@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { assertPushDeploymentAdmission } from './push-deployment-admission.mjs';
+import { assertPushDeploymentAdmission, validatePushDeploymentCertificate } from './push-deployment-admission.mjs';
 
 const sha = char => char.repeat(40);
 const digest = char => `sha256:${char.repeat(64)}`;
@@ -15,7 +15,10 @@ const certificate = (extra = {}) => ({
   verifiedMainSha: sha('b'),
   verifiedMainTree: sha('c'),
   verifyRun: { event: 'push', branch: 'main', conclusion: 'success', repository: 'yohn-jp/codexia', headSha: sha('b'), id: 100, attempt: 1 },
-  producer: { sourceSha: sha('d'), sourceTree: sha('c'), runId: 101, attempt: 1, artifactId: 102, artifactDigest: digest('e') },
+  producer: { event: 'workflow_run', sourceSha: sha('d'), sourceTree: sha('c'), runId: 101, attempt: 1,
+    artifactId: 102, artifactDigest: digest('e'), receipt: { format: 'codexia-backend-build/v1', event: 'workflow_run',
+      sourceSha: sha('d'), sourceTree: sha('c'), workflowRunId: 101, workflowRunNumber: 4, version: '0.1.2',
+      artifacts: { full: { id: 102, digest: digest('e'), producerAttempt: 1, archiveSha256: 'e'.repeat(64) } } } },
   image: `ghcr.io/yohn-jp/codexia-backend@${digest('f')}`,
   identity: identity(sha('d')),
   ...extra,
@@ -27,6 +30,16 @@ test('admits a certified immutable image only when its tree and identity match e
   });
   assert.equal(admitted.image, `ghcr.io/yohn-jp/codexia-backend@${digest('f')}`);
   assert.equal(admitted.identity.sourceSha, sha('d'));
+});
+
+test('validates a reusable certificate against its complete producer receipt before runtime compatibility checks', () => {
+  const admitted = validatePushDeploymentCertificate(certificate(), sha('b'));
+  assert.equal(admitted.identity.profile, 'full');
+  assert.equal(admitted.producer.receipt.artifacts.full.id, 102);
+  assert.throws(() => validatePushDeploymentCertificate(certificate({
+    producer: { ...certificate().producer, receipt: { ...certificate().producer.receipt,
+      artifacts: { full: { ...certificate().producer.receipt.artifacts.full, id: 999 } } } },
+  }), sha('b')), /receipt/);
 });
 
 test('rejects a certificate for a different main revision or a non-successful/non-main verification', () => {
