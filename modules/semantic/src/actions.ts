@@ -250,6 +250,9 @@ async function applyRerank(
     };
   } catch (error) {
     if (signal.aborted) throw error;
+    if (process.env.CODEXIA_MODEL_ACCEPTANCE_DIAGNOSTICS === "1") {
+      console.error("[model-acceptance] BGE rerank:", error instanceof Error ? error.stack ?? error.message : String(error));
+    }
     return { hits: [...pool.map((hit) => ({ ...hit, scores: { ...hit.scores, rerank: 0 } })), ...rest], warning: "semantic_reranker_unavailable" };
   }
 }
