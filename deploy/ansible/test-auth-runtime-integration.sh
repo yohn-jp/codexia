@@ -98,7 +98,11 @@ if apply_stage > "$tmp/approval-denied.log" 2>&1; then
   echo 'Auth runtime stage ignored its explicit approval gate' >&2
   exit 1
 fi
-grep -q 'Better Auth provisioning requires explicit approval' "$tmp/approval-denied.log"
+if ! grep -q 'Better Auth provisioning requires explicit approval' "$tmp/approval-denied.log"; then
+  printf 'False-approval run did not report the expected guard; captured Ansible output follows:\n' >&2
+  cat "$tmp/approval-denied.log" >&2
+  exit 1
+fi
 for name in "${secret_names[@]}"; do
   rc=0; podman secret exists "$name" || rc=$?
   test "$rc" = 1
