@@ -55,7 +55,7 @@ env:
   CODEXIA_SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}
   CODEXIA_VERIFY_RUN_ID: ${{ github.event.workflow_run.id || '' }}
 concurrency:
-  group: codexia-frontend-${{ github.event.pull_request.number || github.ref }}
+  group: codexia-frontend-source-${{ github.event.pull_request.number || github.event.workflow_run.head_sha || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   source:
@@ -64,7 +64,6 @@ jobs:
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.head_sha == github.sha &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.repository.full_name == github.repository &&
       github.event.workflow_run.head_repository.full_name == github.repository
@@ -80,7 +79,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 2
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v7.1.0
         with:
@@ -227,6 +226,9 @@ jobs:
       needs.source.outputs.affected == 'true' && needs.preflight.result == 'success' && needs.build.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    concurrency:
+      group: codexia-frontend-${{ github.ref }}
+      cancel-in-progress: false
     environment: codexia-production
     permissions:
       contents: write
@@ -241,9 +243,16 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.3'
+      - name: Recheck component source after acquiring the deployment slot
+        id: freshness
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-source-gate.mjs frontend
       - name: Install pinned Wrangler
+        if: steps.freshness.outputs.affected == 'true'
         run: npm ci --prefix edge/frontend
       - name: Verify exact frontend artifact provenance
+        if: steps.freshness.outputs.affected == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_VERIFY_RUN_ID: ${{ needs.build.outputs.producer-verify-run-id || needs.source.outputs.verify-run-id }}
@@ -268,6 +277,7 @@ jobs:
         run: node scripts/verify-frontend-artifact.mjs
       - name: Verify live backend API compatibility before switching UI
         id: compatibility
+        if: steps.freshness.outputs.affected == 'true'
         env:
           CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
           CODEXIA_FRONTEND_PRODUCER_SHA: ${{ needs.build.outputs.producer-sha }}
