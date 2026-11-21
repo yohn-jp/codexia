@@ -313,7 +313,7 @@ import http from 'node:http';
 import { readFileSync } from 'node:fs';
 const version={name:'codexia',version:'0.1.0',profile:process.env.CODEXIA_PROFILE,hosted:false,apiEpoch:1,browserAuth:'token'};
 const authToken=readFileSync(process.env.CODEXIA_AUTH_TOKEN_FILE,'utf8').trim();
-http.createServer((request,response)=>{
+const server=http.createServer((request,response)=>{
   const route=new URL(request.url,'http://localhost').pathname;
   if(route==='/health/ready'){response.writeHead(200,{'Content-Type':'text/plain'});response.end('ready');return;}
   if(route==='/api/version'){response.writeHead(200,{'Content-Type':'application/json'});response.end(JSON.stringify(version));return;}
@@ -322,7 +322,10 @@ http.createServer((request,response)=>{
     response.writeHead(200,{'Content-Type':'application/json'});response.end(JSON.stringify({available:true,provider:'postgres'}));return;
   }
   response.writeHead(404);response.end();
-}).listen(Number(process.env.PORT||3000),process.env.HOST||'0.0.0.0');
+});
+// The synthetic Node process is PID 1; acknowledge TERM instead of exhausting Podman's stop timeout.
+process.once('SIGTERM',()=>server.close());
+server.listen(Number(process.env.PORT||3000),process.env.HOST||'0.0.0.0');
 EOF
 cat > "$WORK_DIR/image/Containerfile" <<'EOF'
 FROM docker.io/library/node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54

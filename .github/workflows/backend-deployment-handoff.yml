@@ -1,4 +1,4 @@
-name: Verify Backend Deployment Handoff
+name: Codexia Backend Deployment
 on:
   workflow_run:
     workflows: [Codexia Backend Image]
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   verify-handoff:
-    name: Verify certified backend handoff without deployment
+    name: Verify certified backend handoff (read-only)
     if: >-
       github.event.workflow_run.event == 'workflow_run' &&
       github.event.workflow_run.head_branch == 'main' &&
@@ -20,6 +20,10 @@ jobs:
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      certified-full-image: ${{ steps.verify.outputs.full-image }}
+      producer-sha: ${{ steps.verify.outputs.producer-sha }}
+      deployment-certificate: ${{ steps.verify.outputs.full-certificate }}
     permissions:
       contents: read
       actions: read
@@ -39,6 +43,126 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - name: Verify main workflow, receipt, artifact digest and OCI identities
+        id: verify
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/verify-backend-push-handoff.mjs
+
+  deploy-production:
+    name: Deploy certified Full backend to production
+    needs: [verify-handoff]
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'workflow_run' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.repository.full_name == github.repository &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      needs.verify-handoff.result == 'success' &&
+      needs.verify-handoff.outputs.certified-full-image != '' &&
+      needs.verify-handoff.outputs.deployment-certificate != '' &&
+      vars.CODEXIA_PUSH_DEPLOYMENT_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    environment:
+      name: codexia-production
+    concurrency:
+      group: codexia-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the exact certified main source
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Connect to the Tailnet using GitHub OIDC
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: api.tailscale.com/Ts4P9VFjmJ11CNTRL-khX5P9DgL421CNTRL
+          tags: tag:ci
+          ping: 100.100.1.68
+      - name: Prepare pinned SSH identity
+        shell: bash
+        env:
+          CODEXIA_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}
+          CODEXIA_DEPLOY_SSH_KNOWN_HOSTS: ${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$CODEXIA_DEPLOY_SSH_PRIVATE_KEY" || { echo 'Protected deployment SSH key is missing' >&2; exit 1; }
+          test -n "$CODEXIA_DEPLOY_SSH_KNOWN_HOSTS" || { echo 'Pinned deployment host key is missing' >&2; exit 1; }
+          install -m 0700 -d "$RUNNER_TEMP/codexia-ssh"
+          key="$RUNNER_TEMP/codexia-ssh/id_ed25519"
+          known_hosts="$RUNNER_TEMP/codexia-ssh/known_hosts"
+          (umask 077; printf '%s\n' "$CODEXIA_DEPLOY_SSH_PRIVATE_KEY" > "$key")
+          printf '%s\n' "$CODEXIA_DEPLOY_SSH_KNOWN_HOSTS" > "$known_hosts"
+          chmod 0600 "$key" "$known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+          ssh-keygen -F 100.100.1.68 -f "$known_hosts" >/dev/null
+          ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$known_hosts" codexia@100.100.1.68 true
+      - name: Verify live application identities and Access boundary for release admission
+        id: live-ui
+        shell: bash
+        env:
+          CODEXIA_PUBLIC_ORIGIN: ${{ vars.CODEXIA_PUBLIC_ORIGIN }}
+          CODEXIA_ACCESS_CLIENT_ID: ${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}
+          CODEXIA_ACCESS_CLIENT_SECRET: ${{ secrets.CODEXIA_ACCESS_CLIENT_SECRET }}
+        run: node scripts/verify-frontend-compatibility.mjs preflight
+      - name: Install the pinned Ansible control environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/codexia-ansible"
+          "$RUNNER_TEMP/codexia-ansible/bin/pip" install -r deploy/ansible/requirements.txt
+      - name: Converge certified backend digest
+        shell: bash
+        env:
+          CODEXIA_CERTIFIED_FULL_IMAGE: ${{ needs.verify-handoff.outputs.certified-full-image }}
+          CODEXIA_DEPLOYMENT_CERTIFICATE_B64: ${{ needs.verify-handoff.outputs.deployment-certificate }}
+          CODEXIA_VERIFIED_MAIN_SHA: ${{ github.event.workflow_run.head_sha }}
+          CODEXIA_SOURCE_SHA: ${{ needs.verify-handoff.outputs.producer-sha }}
+          CODEXIA_PROFILE: full
+          CODEXIA_DEPLOYED_UI_EPOCH: ${{ steps.live-ui.outputs.frontendApiEpoch }}
+          CODEXIA_BACKUP_DESTINATION: ${{ vars.CODEXIA_BACKUP_DESTINATION }}
+          CODEXIA_BACKUP_AGE_RECIPIENT: ${{ vars.CODEXIA_BACKUP_AGE_RECIPIENT }}
+        run: |
+          set -euo pipefail
+          [[ "$CODEXIA_CERTIFIED_FULL_IMAGE" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]]
+          test -n "$CODEXIA_DEPLOYMENT_CERTIFICATE_B64"
+          [[ "$CODEXIA_VERIFIED_MAIN_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$CODEXIA_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$CODEXIA_DEPLOYED_UI_EPOCH" =~ ^[1-9][0-9]*$ ]]
+          test -n "$CODEXIA_BACKUP_DESTINATION"
+          [[ "$CODEXIA_BACKUP_AGE_RECIPIENT" =~ ^age1[0-9a-z]+$ ]]
+          key="$RUNNER_TEMP/codexia-ssh/id_ed25519"
+          known_hosts="$RUNNER_TEMP/codexia-ssh/known_hosts"
+          certificate="$RUNNER_TEMP/codexia-deployment-certificate.json"
+          (umask 077; printf '%s' "$CODEXIA_DEPLOYMENT_CERTIFICATE_B64" | base64 --decode > "$certificate")
+          chmod 0600 "$certificate"
+          export CODEXIA_DEPLOYMENT_CERTIFICATE_FILE="$certificate"
+          cat > "$RUNNER_TEMP/codexia-inventory.yml" <<EOF
+          all:
+            hosts:
+              codexia:
+                ansible_host: 100.100.1.68
+                ansible_user: codexia
+                ansible_ssh_private_key_file: $key
+                ansible_ssh_common_args: >-
+                  -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+                  -o UserKnownHostsFile=$known_hosts
+                codexia_stage: deploy
+                codexia_service_user: codexia
+                codexia_service_home: /home/codexia
+          EOF
+          node -e 'process.stdout.write(JSON.stringify({codexia_image:process.env.CODEXIA_CERTIFIED_FULL_IMAGE,codexia_source_sha:process.env.CODEXIA_SOURCE_SHA,codexia_profile:process.env.CODEXIA_PROFILE,codexia_verified_main_sha:process.env.CODEXIA_VERIFIED_MAIN_SHA,codexia_deployed_ui_epoch:Number(process.env.CODEXIA_DEPLOYED_UI_EPOCH),codexia_deployment_certificate_file:process.env.CODEXIA_DEPLOYMENT_CERTIFICATE_FILE,codexia_backup_destination:process.env.CODEXIA_BACKUP_DESTINATION,codexia_backup_recipient:process.env.CODEXIA_BACKUP_AGE_RECIPIENT}))' > "$RUNNER_TEMP/codexia-deploy-vars.json"
+          PATH="$RUNNER_TEMP/codexia-ansible/bin:$PATH" ansible-playbook \
+            -i "$RUNNER_TEMP/codexia-inventory.yml" deploy/ansible/site.yml \
+            --extra-vars "@$RUNNER_TEMP/codexia-deploy-vars.json"
+          echo "Applied certified Full backend digest $CODEXIA_CERTIFIED_FULL_IMAGE from $CODEXIA_SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"

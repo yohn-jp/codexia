@@ -1,4 +1,8 @@
 import { validateBackendIdentity } from './backend-update-identity.mjs';
+import { isDeepStrictEqual } from 'node:util';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const sha = /^[a-f0-9]{40}$/u;
 const digest = /^sha256:[a-f0-9]{64}$/u;
@@ -95,12 +99,45 @@ export function assertPushDeploymentAdmission(certificate, installedValue, { exp
   if (candidate.migrationFingerprint !== installed.migrationFingerprint) {
     throw new Error('Manual database migration required');
   }
-  if (candidate.sourceSha === installed.sourceSha || candidateImage === installedValue.image) {
+  if (candidateImage === installedValue.image) {
+    if (!isDeepStrictEqual(candidate, installed)) {
+      throw new Error('Installed image digest does not have the certified candidate identity');
+    }
+    return Object.freeze({ image: candidateImage, identity: Object.freeze({ ...candidate }), unchanged: true,
+      verifiedMainSha, verifyRunId: verifyRun.id, verifyAttempt: verifyRun.attempt,
+      producerRunId: producer.runId, producerAttempt: producer.attempt, artifactId: producer.artifactId,
+      artifactDigest: producer.artifactDigest });
+  }
+  if (candidate.sourceSha === installed.sourceSha) {
     throw new Error('Push deployment candidate must differ from the installed release');
   }
 
   return Object.freeze({ image: candidateImage, identity: Object.freeze({ ...candidate }),
-    verifiedMainSha, verifyRunId: verifyRun.id, verifyAttempt: verifyRun.attempt,
+    unchanged: false, verifiedMainSha, verifyRunId: verifyRun.id, verifyAttempt: verifyRun.attempt,
     producerRunId: producer.runId, producerAttempt: producer.attempt, artifactId: producer.artifactId,
     artifactDigest: producer.artifactDigest });
+}
+
+function runCli() {
+  const [mode, certificatePath, installedBase64, expectedMainSha, uiEpochValue] = process.argv.slice(2);
+  if (mode !== '--admit' || !certificatePath || !installedBase64 || !expectedMainSha || !uiEpochValue ||
+      !path.isAbsolute(certificatePath) || !/^[1-9][0-9]*$/u.test(uiEpochValue)) {
+    throw new Error('Usage: push-deployment-admission.mjs --admit /absolute/certificate.json <installed-json-base64> <main-sha> <ui-epoch>');
+  }
+  const certificate = JSON.parse(readFileSync(certificatePath, 'utf8'));
+  const installed = JSON.parse(Buffer.from(installedBase64, 'base64').toString('utf8'));
+  const admitted = assertPushDeploymentAdmission(certificate, installed, {
+    expectedMainSha,
+    deployedUiEpoch: Number(uiEpochValue),
+  });
+  console.log(`Admitted certified image ${admitted.image} for verified main ${admitted.verifiedMainSha}.`);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    runCli();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : 'Push deployment admission failed');
+    process.exitCode = 1;
+  }
 }

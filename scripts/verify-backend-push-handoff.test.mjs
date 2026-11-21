@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   assertTrustedBackendPublicationRun,
+  createHandoffDeploymentOutputs,
   selectPushDeploymentCertificateArtifact,
   validatePushDeploymentCertificatePair,
 } from './verify-backend-push-handoff.mjs';
@@ -54,4 +55,21 @@ test('requires both independently certified profiles from the same verified prod
   assert.throws(() => validatePushDeploymentCertificatePair([cert('core'), cert('core')], mainSha), /one certificate/);
   assert.throws(() => validatePushDeploymentCertificatePair([cert('core'), { ...cert('full'), verifiedMainSha: sha('9') }], mainSha));
   assert.throws(() => validatePushDeploymentCertificatePair([cert('core'), { ...cert('full'), producer: { ...cert('full').producer, attempt: 2 } }], mainSha));
+});
+
+test('exposes only a validated Full digest and certificate as bounded job outputs', () => {
+  const [, full] = validatePushDeploymentCertificatePair([cert('core'), cert('full')], mainSha);
+  const outputs = createHandoffDeploymentOutputs({
+    fullImage: full.image,
+    producerSha: full.producer.sourceSha,
+    fullCertificate: full,
+  });
+  assert.equal(outputs.fullImage, full.image);
+  assert.equal(outputs.producerSha, sourceSha);
+  assert.deepEqual(JSON.parse(Buffer.from(outputs.fullCertificate, 'base64').toString('utf8')), full);
+  assert.throws(() => createHandoffDeploymentOutputs({
+    fullImage: `ghcr.io/yohn-jp/codexia-backend@${digest('1')}`,
+    producerSha: full.producer.sourceSha,
+    fullCertificate: full,
+  }));
 });
