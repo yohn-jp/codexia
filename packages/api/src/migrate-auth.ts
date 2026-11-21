@@ -1,5 +1,6 @@
 import { readCodexiaEnvironment } from "./environment.js";
 import { CODEXIA_AUTH_SCHEMA, createBetterAuthRuntime, type BetterAuthRuntimeConfig } from "./better-auth.js";
+import { migrateJwtAccessTokenRevocationSchema } from "./jwt-access-token-revocation.js";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -52,6 +53,7 @@ export async function migrateBetterAuth(): Promise<void> {
       throw new Error(`Auth migration requires role ${CODEXIA_AUTH_RUNTIME_ROLE} to own ${CODEXIA_AUTH_SCHEMA} and use it as current_schema()`);
     }
     await (await runtime.auth.$context).runMigrations();
+    await migrateJwtAccessTokenRevocationSchema(runtime.pool);
     process.stdout.write(`Better Auth PostgreSQL migrations completed for schema ${CODEXIA_AUTH_SCHEMA}.\n`);
   } finally {
     await runtime.pool.end();
