@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as releaseRecord from './component-release-record.mjs';
+import { readComponentVersion } from './component-release-version.mjs';
 
 test('frontend release metadata separates the merge source from immutable promoted asset identity',()=>{
   assert.equal(typeof releaseRecord.buildComponentReleaseRecord,'function','frontend release record builder is missing');
@@ -31,4 +32,58 @@ test('main-built frontend release keeps legacy metadata and lowercase release ti
   assert.equal(release.title,'frontend v0.1.77');
   assert.deepEqual(release.metadata,metadata);
   assert.equal(release.body,'Certified component release.\n\n```json\n'+JSON.stringify(metadata,null,2)+'\n```');
+});
+
+test('backend promotion records main authority separately from both immutable image producers',()=>{
+  const mainSha='1'.repeat(40),producerSha='2'.repeat(40),tree='3'.repeat(40),base='4'.repeat(40);
+  const version=readComponentVersion('backend','450');
+  const compatibility={apiEpoch:1,persistenceFormat:1};
+  const image=char=>'ghcr.io/yohn-jp/codexia-backend@sha256:'+char.repeat(64);
+  const identity=profile=>({format:'codexia-backend-identity/v1',version,sourceSha:producerSha,profile,platform:'linux/amd64',
+    migrationFingerprint:'sha256:'+'5'.repeat(64),apiEpoch:1,persistenceFormat:1});
+  const receipt={format:'codexia-backend-promotion/v1',event:'pull_request',sourceSha:producerSha,version,workflowRunId:600,
+    workflowRunNumber:450,workflowAttempt:2,workflowId:72,prNumber:23,verifyRunId:610,proofRunId:611,verifyAttempt:1,
+    planDigest:'6'.repeat(64),sourceTree:tree,mergeBaseSha:base,mainSha,
+    artifacts:{core:{id:701,digest:'sha256:'+'7'.repeat(64),producerAttempt:2,archiveSha256:'8'.repeat(64),identity:identity('core')},
+      full:{id:702,digest:'sha256:'+'9'.repeat(64),producerAttempt:2,archiveSha256:'a'.repeat(64),identity:identity('full')}}};
+  const release=releaseRecord.buildComponentReleaseRecord('backend',mainSha,null,{core:image('b'),full:image('c'),compatibility,event:'pull_request',receipt,mainTree:tree});
+  assert.equal(release.targetSha,mainSha);
+  assert.equal(release.tag,'backend-v'+version);
+  assert.equal(release.metadata.sourceSha,mainSha);
+  assert.deepEqual(release.metadata.images,{core:image('b'),full:image('c')});
+  assert.deepEqual(release.metadata.producer,{event:'pull_request',sourceSha:producerSha,version,workflowRunId:600,workflowRunNumber:450,
+    workflowAttempt:2,workflowId:72,prNumber:23,verifyRunId:610,proofRunId:611,verifyAttempt:1,planDigest:'6'.repeat(64),sourceTree:tree,
+    mergeBaseSha:base,artifacts:{core:{id:701,digest:'sha256:'+'7'.repeat(64),producerAttempt:2,archiveSha256:'8'.repeat(64)},
+      full:{id:702,digest:'sha256:'+'9'.repeat(64),producerAttempt:2,archiveSha256:'a'.repeat(64)}}});
+  assert.throws(()=>releaseRecord.buildComponentReleaseRecord('backend',mainSha,null,{core:image('b'),full:image('c'),compatibility,event:'pull_request',
+    receipt:{...receipt,sourceTree:'f'.repeat(40)},mainTree:tree}),/tree differs/);
+});
+
+test('main-built backend release keeps legacy metadata and version binding',()=>{
+  const sourceSha='a'.repeat(40),compatibility={apiEpoch:1,persistenceFormat:1};
+  const version=readComponentVersion('backend');
+  const image=char=>'ghcr.io/yohn-jp/codexia-backend@sha256:'+char.repeat(64);
+  const release=releaseRecord.buildComponentReleaseRecord('backend',sourceSha,null,{core:image('b'),full:image('c'),compatibility});
+  assert.equal(release.tag,'backend-v'+version);
+  assert.equal(release.targetSha,sourceSha);
+  assert.deepEqual(release.metadata,{component:'backend',version,sourceSha,providedApiEpoch:1,persistenceFormat:1,images:{core:image('b'),full:image('c')}});
+});
+
+test('main fallback release records the exact build artifacts separately from main authority',()=>{
+  const sourceSha='b'.repeat(40),tree='c'.repeat(40),compatibility={apiEpoch:1,persistenceFormat:1};
+  const version=readComponentVersion('backend','451'),image=char=>'ghcr.io/yohn-jp/codexia-backend@sha256:'+char.repeat(64);
+  const receipt={format:'codexia-backend-build/v1',event:'push',sourceSha,version,workflowRunId:700,workflowRunNumber:451,sourceTree:tree,
+    artifacts:{core:{id:701,digest:'sha256:'+'1'.repeat(64),producerAttempt:2,archiveSha256:'2'.repeat(64)},
+      full:{id:702,digest:'sha256:'+'3'.repeat(64),producerAttempt:2,archiveSha256:'4'.repeat(64)}}};
+  const record=releaseRecord.buildComponentReleaseRecord('backend',sourceSha,null,{core:image('5'),full:image('6'),compatibility,event:'push',receipt,mainTree:tree});
+  assert.equal(record.targetSha,sourceSha);
+  assert.equal(record.metadata.sourceSha,sourceSha);
+  assert.equal(record.metadata.version,version);
+  assert.deepEqual(record.metadata.producer,{event:'push',sourceSha,version,workflowRunId:700,workflowRunNumber:451,sourceTree:tree,
+    artifacts:{core:{id:701,digest:'sha256:'+'1'.repeat(64),producerAttempt:2,archiveSha256:'2'.repeat(64)},
+      full:{id:702,digest:'sha256:'+'3'.repeat(64),producerAttempt:2,archiveSha256:'4'.repeat(64)}}});
+  const completion=releaseRecord.buildComponentReleaseRecord('backend',sourceSha,null,{core:image('5'),full:image('6'),compatibility,event:'workflow_run',receipt:{...receipt,event:'workflow_run'},mainTree:tree});
+  assert.equal(completion.metadata.producer.event,'workflow_run');
+  assert.throws(()=>releaseRecord.buildComponentReleaseRecord('backend',sourceSha,null,{core:image('5'),full:image('6'),compatibility,
+    event:'push',receipt:{...receipt,artifacts:{...receipt.artifacts,core:{...receipt.artifacts.core,id:702}}},mainTree:tree}),/distinct/);
 });
