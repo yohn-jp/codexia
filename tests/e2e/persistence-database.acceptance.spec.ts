@@ -479,8 +479,9 @@ for (const { mode, width, forceAppendFallback = false } of [
       expect(saveBody.changes).toHaveLength(1);
       const caretPosition = saveBody.changes[0]!.fromUtf16 + appended.length;
       const nextEdit = editedMarkdown.slice(0, caretPosition) + "……" + editedMarkdown.slice(caretPosition);
+      const displayMenu = page.locator(".pg-editor-display-menu");
+      if (!await displayMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await displayMenu.locator("summary").click();
       const symbolMenu = page.locator(".pg-editor-symbol-menu");
-      if (!await symbolMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await symbolMenu.locator("summary").click();
       const symbolResponse = waitForDocumentSaveResponse(page, project.id, scene.id, nextEdit);
       await symbolMenu.getByRole("button", { name: "三点リーダーを挿入" }).click();
       expect((await symbolResponse).ok()).toBe(true);
