@@ -174,6 +174,9 @@ export const ManuscriptInput = forwardRef<ManuscriptInputHandle, ManuscriptInput
         userEvent: "input.type",
       });
       view.focus();
+      view.dispatch({ selection: { anchor: plan.cursor }, scrollIntoView: true });
+      const cursorDomPosition = view.domAtPos(plan.cursor);
+      view.contentDOM.ownerDocument.getSelection()?.collapse(cursorDomPosition.node, cursorDomPosition.offset);
     },
     restorePosition,
     getScrollTop() {

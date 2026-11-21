@@ -684,6 +684,22 @@ if printf '%s\n' "$preflight_password" | podman exec -i codexia-db sh -ec 'IFS= 
   exit 1
 fi
 
+# A previously rotated immutable secret may retain its final LF while the
+# inventory and PostgreSQL password use the 64 hex chars without it.
+podman secret rm codexia-postgres-preflight-password >/dev/null
+printf '%s\n' "$preflight_password" | podman secret create codexia-postgres-preflight-password - >/dev/null
+test "$(podman secret inspect --showsecret codexia-postgres-preflight-password | jq -r '.[0].SecretData | length')" -eq 65
+apply_preflight -e preflight_verify_only=true > "$tmp/preflight-verify-lf-secret.log" || { cat "$tmp/preflight-verify-lf-secret.log"; exit 1; }
+grep -q 'changed=0' "$tmp/preflight-verify-lf-secret.log"
+podman secret rm codexia-postgres-preflight-password >/dev/null
+printf '%s\n\n' "$preflight_password" | podman secret create codexia-postgres-preflight-password - >/dev/null
+if apply_preflight -e preflight_verify_only=true > "$tmp/preflight-verify-two-lfs.log"; then
+  echo 'Preflight verification accepted a secret with two trailing line feeds' >&2
+  exit 1
+fi
+podman secret rm codexia-postgres-preflight-password >/dev/null
+printf '%s' "$preflight_password" | podman secret create codexia-postgres-preflight-password - >/dev/null
+
 # A role privilege mismatch must fail verification without silently repairing it.
 podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c 'ALTER ROLE codexia WITH SUPERUSER' >/dev/null
 if apply_base > "$tmp/role-mismatch.log" 2>&1; then

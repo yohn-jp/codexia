@@ -310,6 +310,20 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const saveDocumentRef = useRef<() => Promise<void>>(async () => undefined);
   const scratchGuardRef = useRef<(() => Promise<void>) | null>(null);
   const editorRef = useRef<ManuscriptInputHandle>(null);
+  const [editorPortalContainer] = useState<HTMLElement | null>(() => {
+    if (typeof document === "undefined") return null;
+    const container = document.createElement("div");
+    container.className = "pg-preserved-editor-container";
+    container.hidden = true;
+    container.inert = true;
+    container.setAttribute("aria-hidden", "true");
+    return container;
+  });
+  const editorPortalParkingRef = useRef<HTMLDivElement>(null);
+  const attachEditorPortalParking = useCallback((parking: HTMLDivElement | null) => {
+    editorPortalParkingRef.current = parking;
+    if (parking && editorPortalContainer) parking.append(editorPortalContainer);
+  }, [editorPortalContainer]);
   const transitionErrorRef = useRef("");
   const clientIdRef = useRef("");
   const openSequenceRef = useRef(0);
@@ -347,6 +361,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const [newDocumentParent, setNewDocumentParent] = useState("");
   const [knowledgeName, setKnowledgeName] = useState("");
   const [knowledgeType, setKnowledgeType] = useState("person");
+  const [knowledgeCreateError, setKnowledgeCreateError] = useState<{ projectId: string; message: string } | null>(null);
   const [revisions, setRevisions] = useState<DocumentRevision[]>([]);
   const [showRevisions, setShowRevisions] = useState(false);
   const [revisionCursor, setRevisionCursor] = useState<string | null>(null);
@@ -1647,6 +1662,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   async function createKnowledge(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (!project || !knowledgeName.trim()) return;
+    setKnowledgeCreateError(null);
     const id = crypto.randomUUID() as KnowledgeNodeId;
     try {
       const result = await api.savePersistenceNode(project.id, id, {
@@ -1662,7 +1678,11 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       setKnowledgeName("");
       setNotice("Knowledge候補を保存しました。内容を確認してから確定してください。");
     } catch (error) {
-      setPageError(error instanceof Error ? error.message : "Knowledgeを保存できませんでした。");
+      if (projectIdRef.current === project.id) {
+        const message = error instanceof Error ? error.message : "Knowledgeを保存できませんでした。";
+        if (mode === "mobile") setPageError(message);
+        else setKnowledgeCreateError({ projectId: project.id, message });
+      }
     }
   }
 
@@ -2348,6 +2368,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             {nodes.map((node) => <option key={node.id} value={node.id}>{node.name} · {node.status === "confirmed" ? "確定" : node.status === "proposed" ? "候補" : "退役"}</option>)}
           </select>
         </details>
+          {knowledgeCreateError?.projectId === projectId && <p className="pg-alert" role="alert">{knowledgeCreateError.message}</p>}
           <search aria-label="Knowledgeを検索・絞り込み">
             <form onSubmit={(event) => event.preventDefault()}>
               <label htmlFor="pg-knowledge-search">名前または別名で検索</label>
@@ -2436,7 +2457,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       </aside>);
   const panels: WorkspacePanel[] = [
     { id: "outline", title: "作品と構成", render: () => library },
-    { id: "editor", title: "原稿", render: () => editor },
+    { id: "editor", title: "原稿", preserveContainer: editorPortalContainer ?? undefined, preserveParkingRef: editorPortalParkingRef, render: () => editor },
     { id: "inspector", title: "知識と根拠", render: () => knowledge },
   ];
   const readCurrentEditor = (): BrowserEditorDocument | null => {
@@ -2455,6 +2476,8 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   panels.push({ id: "review", title: "提案レビュー", render: () => <>{moduleError && <p role="alert">{moduleError}</p>}<NativeChangeSetReview key={projectId} projectId={projectId} onApplied={refreshAfterNativeApply} onOpenSource={(anchor, quote) => openNodeEvidence({ anchor, quote })} />{journal && <ProposalReview projectId={projectId} authorScope={authorScope} journal={journal} proposals={proposals} onChange={() => { void refreshModules(); }} onStatus={(message) => setNotice(message)} />}</> }, ...modulePanels);
   const Shell = mode === "mobile" ? MobileShell : DesktopShell;
   return <div className={`pg-workspace pg-shell pg-${mode}`}>
+    <div className="pg-preserved-editor-parking" hidden inert aria-hidden="true" ref={attachEditorPortalParking} />
+    {editorPortalContainer ? createPortal(editor, editorPortalContainer) : null}
     {active && createPortal(
       <article className="print-view pg-print-document" style={typographyStyle}>
         <h1>{active.document.title}</h1>

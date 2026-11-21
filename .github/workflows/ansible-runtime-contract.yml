@@ -259,6 +259,7 @@ jobs:
             XDG_RUNTIME_DIR="/run/user/$fixture_uid" \
             DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" \
             CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE=yes \
+            ANSIBLE_PLAYBOOK="$ANSIBLE_PLAYBOOK" \
             CODEXIA_RUNTIME_ACCEPTANCE_SOURCE_SHA="$CODEXIA_RUNTIME_ACCEPTANCE_SOURCE_SHA" \
             PATH="$PATH" \
             bash "$fixture_repo/deploy/updater/test-runtime-contract-integration.sh"

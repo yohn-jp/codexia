@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # Pinned, reviewable runtime base-image updates for Playwright CI.
+  - package-ecosystem: docker
+    directory: /.github/docker
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 2

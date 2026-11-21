@@ -614,7 +614,9 @@ export class CoreStore implements MutationCoordinator {
     for (const [path, file] of Object.entries(manifest.files)) {
       if (file.documentId && file.metadata) paths.set(path, file.documentId);
     }
-    const logicalIds = new Set(this.snapshotIndex(manifest).logicalDocumentIds);
+    const snapshotIndex = this.snapshotIndex(manifest);
+    const logicalIds = new Set(snapshotIndex.logicalDocumentIds);
+    const logicalDocuments = new Map(documents.map((document) => [this.logicalId(snapshotIndex, document), document]));
     const manuscriptCreates = new Set<string>();
 
     for (const write of ordered) {
@@ -645,6 +647,22 @@ export class CoreStore implements MutationCoordinator {
       if (metadataWrites.includes(write)) {
         const existingId = paths.get(write.path);
         const existing = existingId ? documents.find((document) => document.id === existingId) : undefined;
+        const volume = /^plot\/volumes\/([^/]+)\/volume\.yaml$/.exec(write.path);
+        const chapter = /^plot\/volumes\/([^/]+)\/chapters\/([^/]+)\/chapter\.yaml$/.exec(write.path);
+        const scene = /^plot\/volumes\/([^/]+)\/chapters\/([^/]+)\/scenes\/([^/]+).yaml$/.exec(write.path);
+        if (!volume && !chapter && !scene) fail(422, "invalid_hierarchy_metadata", "Unknown hierarchy metadata path");
+        const volumeId = chapter?.[1] ?? scene?.[1];
+        const chapterId = scene?.[2];
+        const documentAtPath = (path: string) => {
+          const documentId = paths.get(path);
+          return documentId ? documents.find((document) => document.id === documentId) : undefined;
+        };
+        const volumeDocument = volumeId
+          ? logicalDocuments.get(volumeId) ?? documentAtPath(`plot/volumes/${volumeId}/volume.yaml`)
+          : undefined;
+        const chapterDocument = chapterId
+          ? logicalDocuments.get(chapterId) ?? documentAtPath(`plot/volumes/${scene![1]}/chapters/${chapterId}/chapter.yaml`)
+          : undefined;
         if (write.content === null) {
           if (existing) {
             await tx.deleteDocument({ projectId, documentId: existing.id, expectedVersion: existing.version });
@@ -656,21 +674,12 @@ export class CoreStore implements MutationCoordinator {
         if (!data || typeof data !== "object" || Array.isArray(data) || !isJsonValue(data)) {
           fail(422, "invalid_hierarchy_metadata", "Hierarchy metadata must be an object");
         }
-        const volume = /^plot\/volumes\/([^/]+)\/volume.yaml$/.exec(write.path);
-        const chapter = /^plot\/volumes\/([^/]+)\/chapters\/([^/]+)\/chapter.yaml$/.exec(write.path);
-        const scene = /^plot\/volumes\/([^/]+)\/chapters\/([^/]+)\/scenes\/([^/]+).yaml$/.exec(write.path);
-        if (!volume && !chapter && !scene) {
-          fail(422, "invalid_hierarchy_metadata", "Unknown hierarchy metadata path");
-        }
-
         const kind = volume ? "volume" : chapter ? "chapter" : "scene";
-        const parentPath = chapter
-          ? `plot/volumes/${chapter[1]}/volume.yaml`
-          : scene
-            ? `plot/volumes/${scene[1]}/chapters/${scene[2]}/chapter.yaml`
-            : null;
-        const parentId = parentPath ? paths.get(parentPath) : null;
-        if (!existing && parentPath && !parentId) fail(422, "missing_hierarchy_parent", "Hierarchy parent is missing");
+        if (!existing && volumeId && volumeDocument?.kind !== "volume") fail(422, "missing_hierarchy_parent", "Hierarchy parent is missing");
+        if (!existing && chapterId && (chapterDocument?.kind !== "chapter" || chapterDocument.parentId !== volumeDocument?.id)) {
+          fail(409, "hierarchy_parent_changed", "The requested chapter no longer belongs to the requested volume");
+        }
+        const parentId = chapter ? volumeDocument?.id ?? null : scene ? chapterDocument?.id ?? null : null;
 
         const title = typeof data.title === "string"
           ? data.title
@@ -724,6 +733,7 @@ export class CoreStore implements MutationCoordinator {
             idempotencyKey: `${operation.id}:${operation.generation}:${id}`,
           })).document;
           logicalIds.add(logicalId);
+          logicalDocuments.set(logicalId, document);
           if (manuscriptPath) manuscriptCreates.add(manuscriptPath);
           documents.push(document);
         }
@@ -899,6 +909,15 @@ export class CoreStore implements MutationCoordinator {
   }
   async buildDeleteHierarchyOperation(projectId:string,input:HierarchyTarget,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
     const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),target=this.findDocument(manifest,input.id,index);if(target.kind!==input.kind)fail(422,"invalid_hierarchy_target","Hierarchy kind mismatch");
+    if(input.kind==="chapter"){
+      const volume=this.findDocument(manifest,input.volumeId,index);
+      if(volume.kind!=="volume"||target.parentId!==volume.id)fail(409,"hierarchy_parent_changed","The chapter no longer belongs to the requested volume");
+    }
+    if(input.kind==="scene"){
+      const volume=this.findDocument(manifest,input.volumeId,index),chapter=this.findDocument(manifest,input.chapterId,index);
+      if(volume.kind!=="volume"||chapter.kind!=="chapter"||chapter.parentId!==volume.id||target.parentId!==chapter.id)
+        fail(409,"hierarchy_parent_changed","The scene no longer belongs to the requested chapter and volume");
+    }
     const selected=new Set<string>([target.id]),pending=[target.id];for(let cursor=0;cursor<pending.length;cursor++)for(const document of index.documentsByParentId.get(pending[cursor]!)??[])if(!selected.has(document.id)){selected.add(document.id);pending.push(document.id);}
     const entries=Object.entries(manifest.files).filter(([,file])=>file.documentId&&selected.has(file.documentId));
     if (!pinned) {
@@ -908,7 +927,20 @@ export class CoreStore implements MutationCoordinator {
       entries.sort(([,left],[,right]) => order.get(left.documentId as DocumentId)! - order.get(right.documentId as DocumentId)! ||
         Number(Boolean(right.metadata)) - Number(Boolean(left.metadata)));
     }
-    const writes=entries.map(([path,file])=>({path,revision:file.revision,content:null}));return this.buildOperation(projectId,writes,"structure",`Delete ${input.kind} ${input.id}`,manifest.snapshot);
+    const writes=entries.map(([path,file])=>({path,revision:file.revision,content:null}));
+    const built=await this.buildOperation(projectId,writes,"structure",`Delete ${input.kind} ${input.id}`,manifest.snapshot);
+    const readDocumentSets=new Map<string,{kind:HierarchyKind;parentId:string|null;documentIds:string[]}>();
+    const addSet=(parentId:string|null,kind:HierarchyKind)=>{
+      const documentIds=(index.documentsByParentId.get(parentId)??[]).filter(document=>document.kind===kind).map(document=>document.id).sort();
+      readDocumentSets.set(`${parentId??"root"}\0${kind}`,{kind,parentId,documentIds});
+    };
+    for(const document of index.documentsById.values())if(selected.has(document.id)){
+      if(document.kind==="volume"||document.kind==="chapter"||document.kind==="scene")addSet(document.parentId,document.kind);
+      if(document.kind==="volume")addSet(document.id,"chapter");
+      if(document.kind==="chapter")addSet(document.id,"scene");
+    }
+    built.operation.readDocumentSets=[...readDocumentSets.values()];
+    return built;
   }
   async buildReorderHierarchyOperation(projectId:string,input:ReorderHierarchyInput,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
     const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest);let parent:Document|undefined;if(input.kind==="chapter")parent=this.findDocument(manifest,input.volumeId,index);if(input.kind==="scene")parent=this.findDocument(manifest,input.chapterId,index);
