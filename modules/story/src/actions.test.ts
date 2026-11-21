@@ -1283,6 +1283,93 @@ test("temporal context respects explicit world days, competing facts, reader sco
   assert.equal((await actionById("story.context.package").invoke({sceneId:"sc-2", scope:"character", characterId:"missing"}, context)).ok, false);
 });
 
+test("direct-root scenes receive Story positions and keep their saved author context", async () => {
+  const scenePath = "plot/volumes/root/chapters/root/scenes/root-scene.yaml";
+  const manuscriptPath = "manuscript/root/root-scene.md";
+  const files = new Map([
+    ["bible/characters/char-uma/profile.yaml", yaml({ id: "char-uma", name: "Uma", type: "character" })],
+    [scenePath, yaml({ id: "root-scene", title: "First root scene", type: "scene", order: "0001", manuscript: manuscriptPath })],
+    [manuscriptPath, "Saved root scene body.\n"],
+  ]);
+  const reader = makeReader(files, "repo-root-scenes");
+  const context = makeActionContext(reader);
+
+  const temporal = await invoke<{ narrativeOrder: number; worldTime: unknown; source: { path: string; revision: string | null } }>(
+    "story.world-state.temporal", { sceneId: "root-scene" }, context,
+  );
+  assert.deepEqual(temporal.snapshot, reader.snapshot);
+  assert.equal(temporal.data.narrativeOrder, 1);
+  assert.equal(temporal.data.worldTime, null);
+  assert.deepEqual(temporal.data.source, { sceneId: "root-scene", path: scenePath, revision: revision(files.get(scenePath)!) });
+
+  const author = await invoke<{ parts: Array<{ kind: string; value: { path?: string; revision?: string; text?: string } }> }>(
+    "story.context.package", { sceneId: "root-scene", scope: "author", budget: 200_000 }, context,
+  );
+  const manuscript = author.data.parts.find((part) => part.kind === "manuscript");
+  assert.deepEqual(manuscript?.value, {
+    path: manuscriptPath,
+    revision: revision(files.get(manuscriptPath)!),
+    text: "Saved root scene body.\n",
+  });
+});
+
+test("direct-root positions interleave with volume scenes without widening reader or character context", async () => {
+  const rootScenePath = (id: string) => `plot/volumes/root/chapters/root/scenes/${id}.yaml`;
+  const scene = (id: string, order: string, state_events: unknown[] = [], manuscript?: string) => yaml({
+    id, title: id, type: "scene", order, state_events, ...(manuscript ? { manuscript } : {}),
+  });
+  const readerDisclosure = (sceneId: string, eventId: string, value: string) => ({
+    sceneId, eventId, kind: "knowledge", subject: "char-uma", object: value,
+    payload: { layer: "reader-knowledge" }, status: "confirmed",
+  });
+  const characterBelief = (sceneId: string, eventId: string, subject: string) => ({
+    sceneId, eventId, kind: "attribute", subject, object: "secret-id",
+    payload: { layer: "character-belief", predicate: "knows" }, status: "confirmed",
+  });
+  const manuscriptPath = "manuscript/root/target.md";
+  const files = new Map([
+    ["bible/characters/char-uma/profile.yaml", yaml({ id: "char-uma", name: "Uma", type: "character" })],
+    ["bible/characters/char-other/profile.yaml", yaml({ id: "char-other", name: "Other", type: "character" })],
+    [rootScenePath("root-first"), scene("root-first", "0001", [readerDisclosure("root-first", "reader-root", "root-secret")])],
+    ["plot/volumes/vol-main/volume.yaml", yaml({ id: "vol-main", title: "Main", type: "volume", order: "0002" })],
+    ["plot/volumes/vol-main/chapters/ch-main/chapter.yaml", yaml({ id: "ch-main", title: "Chapter", type: "chapter", volume: "vol-main", order: "0001" })],
+    ["plot/volumes/vol-main/chapters/ch-main/scenes/nested.yaml", yaml({
+      id: "nested-scene", title: "Nested scene", type: "scene", volume: "vol-main", chapter: "ch-main", order: "0001",
+      state_events: [readerDisclosure("nested-scene", "reader-nested", "nested-secret")],
+    })],
+    [rootScenePath("root-target"), scene("root-target", "0003", [
+      characterBelief("root-target", "belief-uma", "char-uma"),
+      characterBelief("root-target", "belief-other", "char-other"),
+    ], manuscriptPath)],
+    [rootScenePath("root-later"), scene("root-later", "0004", [readerDisclosure("root-later", "reader-later", "future-secret")])],
+    [manuscriptPath, "Fixed mixed-hierarchy body.\n"],
+  ]);
+  const reader = makeReader(files, "repo-mixed-root-scenes");
+  const context = makeActionContext(reader);
+
+  const temporal = await invoke<{ narrativeOrder: number; worldTime: unknown; source: { revision: string | null }; disclosed: Array<{ eventId?: string }> }>(
+    "story.world-state.temporal", { sceneId: "root-target" }, context,
+  );
+  assert.equal(temporal.data.narrativeOrder, 3, "root sibling order must interleave with volume/chapter scenes");
+  assert.equal(temporal.data.worldTime, null);
+  assert.deepEqual(temporal.data.disclosed.map((fact) => fact.eventId), ["reader-root", "reader-nested"]);
+  assert.equal(temporal.data.source.revision, revision(files.get(rootScenePath("root-target"))!));
+
+  const readerView = await invoke<{ parts: Array<{ kind: string; value: { eventId?: string } }> }>(
+    "story.context.package", { sceneId: "root-target", scope: "reader", budget: 200_000 }, context,
+  );
+  assert.deepEqual(readerView.data.parts.map((part) => [part.kind, part.value.eventId]), [
+    ["reader-disclosure", "reader-root"], ["reader-disclosure", "reader-nested"],
+  ]);
+  assert.doesNotMatch(JSON.stringify(readerView.data), /future-secret|Fixed mixed-hierarchy body|secret-id/);
+
+  const characterView = await invoke<{ parts: Array<{ kind: string; value: { eventId?: string } }> }>(
+    "story.context.package", { sceneId: "root-target", scope: "character", characterId: "char-uma", budget: 200_000 }, context,
+  );
+  assert.deepEqual(characterView.data.parts.map((part) => [part.kind, part.value.eventId]), [["character-belief", "belief-uma"]]);
+  assert.doesNotMatch(JSON.stringify(characterView.data), /belief-other|reader-root|reader-nested|Fixed mixed-hierarchy body/);
+});
+
 test("world time metadata changes remain proposals and invalid ranges fail", async () => {
   const reader = makeReader(fixtureFiles());
   const proposals: Array<{ id: string; operations: ChangeOperation[] }> = [];
