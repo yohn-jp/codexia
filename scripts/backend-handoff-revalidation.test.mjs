@@ -15,6 +15,7 @@ const workflow = parse(await readFile(new URL('../.github/workflows/backend-hand
 const sha = char => char.repeat(40);
 const run = () => ({
   id: 44878012473,
+  run_number: 773,
   run_attempt: 1,
   path: '.github/workflows/backend-release.yml',
   event: 'workflow_run',
@@ -44,6 +45,7 @@ test('manual selection queries the authenticated API and accepts only the exact 
   assert.equal(requested.url, 'https://api.github.com/repos/yohn-jp/codexia/actions/runs/44878012473');
   assert.equal(requested.options.headers.Authorization, 'Bearer opaque-test-token');
   assert.equal(publisher.id, 44878012473);
+  assert.equal(publisher.run_number, 773);
   assert.equal(publisher.head_sha, sha('a'));
   assert.equal('actor' in publisher, false, 'The local event contains only verifier-required run fields');
 
@@ -86,6 +88,7 @@ test('manual context is built from the authenticated API run and exact checked-o
   assert.equal(context.env.GITHUB_EVENT_NAME, 'workflow_run');
   assert.equal(context.payload.workflow_run.head_sha, checkedOutSha);
   assert.equal(context.payload.workflow_run.id, 44878012473);
+  assert.equal(context.payload.workflow_run.run_number, 773);
   assert.equal(context.payload.workflow_run.path, '.github/workflows/backend-release.yml');
   assert.equal('GITHUB_EVENT_PATH' in context.env, false);
   await assert.rejects(prepareManualVerifierContext({ env: { ...envForWrapper, GITHUB_EVENT_NAME: 'push' }, fetchImpl: async () => ({ ok: true, json: async () => run() }) }));

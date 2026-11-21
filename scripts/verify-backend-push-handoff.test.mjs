@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   assertTrustedBackendPublicationRun,
+  createBackendReleaseVerificationEnvironment,
   createHandoffDeploymentOutputs,
   selectPushDeploymentCertificateArtifact,
   validatePushDeploymentCertificatePair,
@@ -10,7 +11,7 @@ import {
 const sha = char => char.repeat(40);
 const digest = char => `sha256:${char.repeat(64)}`;
 const mainSha = sha('a'), mainTree = sha('b'), sourceSha = sha('c');
-const buildRun = () => ({ id: 100, run_attempt: 2, path: '.github/workflows/backend-release.yml', event: 'workflow_run',
+const buildRun = () => ({ id: 100, run_number: 773, run_attempt: 2, path: '.github/workflows/backend-release.yml', event: 'workflow_run',
   head_branch: 'main', head_sha: mainSha, status: 'completed', conclusion: 'success',
   repository: { full_name: 'yohn-jp/codexia' }, head_repository: { full_name: 'yohn-jp/codexia' } });
 const receipt = () => ({ format: 'codexia-backend-build/v1', event: 'workflow_run', sourceSha, version: '0.1.3',
@@ -30,12 +31,38 @@ const artifact = (run = buildRun()) => ({ id: 303, name: `codexia-backend-deploy
   workflow_run: { id: run.id, head_sha: run.head_sha } });
 
 test('accepts only the completed successful main backend publisher run with exact repository and source', () => {
-  assert.equal(assertTrustedBackendPublicationRun(buildRun(), { id: 100, attempt: 2, headSha: mainSha }).id, 100);
+  assert.equal(assertTrustedBackendPublicationRun(buildRun(), { id: 100, runNumber: 773, attempt: 2, headSha: mainSha }).id, 100);
   for (const patch of [
     { path: '.github/workflows/other.yml' }, { event: 'pull_request' }, { head_branch: 'feature' },
     { status: 'in_progress' }, { conclusion: 'failure' }, { repository: { full_name: 'fork/codexia' } },
     { head_repository: { full_name: 'fork/codexia' } }, { head_sha: sha('9') }, { run_attempt: 1 },
-  ]) assert.throws(() => assertTrustedBackendPublicationRun({ ...buildRun(), ...patch }, { id: 100, attempt: 2, headSha: mainSha }));
+  ]) assert.throws(() => assertTrustedBackendPublicationRun({ ...buildRun(), ...patch }, { id: 100, runNumber: 773, attempt: 2, headSha: mainSha }));
+});
+
+test('passes the trusted publisher run number to immutable release receipt verification', () => {
+  const releaseEnv = createBackendReleaseVerificationEnvironment({
+    env: { GITHUB_RUN_ID: 'handoff-id', GITHUB_RUN_NUMBER: '41' },
+    run: { ...buildRun(), run_number: 773 },
+    token: 'test-token',
+    backendWorkflowEvent: 'workflow_run',
+    mainSha,
+    receiptPath: '/tmp/codexia-backend-build.json',
+    promoted: false,
+  });
+  assert.equal(releaseEnv.GITHUB_RUN_ID, '100');
+  assert.equal(releaseEnv.GITHUB_RUN_NUMBER, '773');
+  assert.equal(releaseEnv.CODEXIA_BACKEND_ARTIFACT_MANIFEST, '/tmp/codexia-backend-build.json');
+  assert.equal(releaseEnv.CODEXIA_BACKEND_PROMOTION_DIR, undefined);
+  const promotedEnv = createBackendReleaseVerificationEnvironment({
+    env: {}, run: buildRun(), token: 'test-token', backendWorkflowEvent: 'workflow_run', mainSha,
+    receiptPath: '/tmp/codexia-backend-build.json', promotionDirectory: '/tmp/promotion', promoted: true,
+  });
+  assert.equal(promotedEnv.CODEXIA_BACKEND_PROMOTION_DIR, '/tmp/promotion');
+  assert.equal(promotedEnv.CODEXIA_BACKEND_ARTIFACT_MANIFEST, undefined);
+  assert.throws(() => createBackendReleaseVerificationEnvironment({
+    env: {}, run: { ...buildRun(), run_number: 0 }, token: 'test-token', backendWorkflowEvent: 'workflow_run', mainSha,
+    receiptPath: '/tmp/codexia-backend-build.json', promoted: false,
+  }), /run identity/);
 });
 
 test('selects the single unexpired digest-bound certificate artifact for the exact publisher run attempt', () => {
