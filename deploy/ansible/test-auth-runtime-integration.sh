@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 trap 'status=$?; printf "Auth runtime fixture failed (status %s)\n" "$status" >&2; exit "$status"' ERR
 test "${GITHUB_ACTIONS:-}" = true
-test "${CODEXIA_DISPOSABLE_HOST:-}" = phase-b-integration
+test "${CODEXIA_DISPOSABLE_HOST:-}" = base-integration
 service_user=${CODEXIA_SERVICE_USER:?missing rootless fixture identity}
 service_uid=$(id -u "$service_user")
 service_group=$(id -gn "$service_user")

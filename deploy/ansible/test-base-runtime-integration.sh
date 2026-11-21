@@ -611,7 +611,7 @@ grep -q 'changed=0' "$tmp/schema-adoption.log"
 
 podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/app-password)"; psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia -d codexia -c "CREATE TABLE public.phase_b_adoption_probe(id integer PRIMARY KEY, value text NOT NULL); INSERT INTO public.phase_b_adoption_probe VALUES (1, '\''preserved-data'\'');"' >/dev/null
 
-CODEXIA_SERVICE_USER="$service_user" ANSIBLE_PLAYBOOK="${ANSIBLE_PLAYBOOK:-ansible-playbook}" GITHUB_ACTIONS=true CODEXIA_DISPOSABLE_HOST=phase-b-integration bash "$repo_root/deploy/ansible/test-auth-runtime-integration.sh"
+CODEXIA_SERVICE_USER="$service_user" ANSIBLE_PLAYBOOK="${ANSIBLE_PLAYBOOK:-ansible-playbook}" GITHUB_ACTIONS=true CODEXIA_DISPOSABLE_HOST=base-integration bash "$repo_root/deploy/ansible/test-auth-runtime-integration.sh"
 
 # A role privilege mismatch must fail verification without silently repairing it.
 podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c 'ALTER ROLE codexia WITH SUPERUSER' >/dev/null
