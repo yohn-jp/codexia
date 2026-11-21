@@ -28,7 +28,6 @@ const nodeUserNamespace = "--userns=keep-id:uid=1000,gid=1000";
 async function run(command, args, options = {}) {
   const result = await execFile(command, args, {
     cwd: options.cwd ?? root,
-    env: options.env ?? process.env,
     encoding: "utf8",
     maxBuffer: options.maxBuffer ?? 8 * 1024 * 1024,
     timeout: options.timeout ?? 120_000,
@@ -148,8 +147,14 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
     CODEXIA_OCI_IMAGE: image,
     CODEXIA_OCI_PORT: String(port),
   };
-  const verifyOutput = await run("bash", ["scripts/verify-oci.sh"], { env: verifyEnvironment, timeout: 600_000 });
-  const verificationLines = verifyOutput.split("\n").filter((line) =>
+  const { stdout: verifyOutput } = await execFile("bash", ["scripts/verify-oci.sh"], {
+    cwd: root,
+    env: verifyEnvironment,
+    encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
+    timeout: 600_000,
+  });
+  const verificationLines = verifyOutput.trim().split("\n").filter((line) =>
     line.startsWith("OCI startup checks passed:") ||
     line.startsWith("Image ID:") ||
     line.startsWith("Startup cgroup measurement:") ||
