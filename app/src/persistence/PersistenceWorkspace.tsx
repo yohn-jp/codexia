@@ -2455,7 +2455,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           </div>
           {active.error && <p className="pg-alert" role="alert">{active.error}</p>}
           {evidenceLoadIssue && evidenceLoadIssue.projectId === active.document.projectId && evidenceLoadIssue.documentId === active.document.id && <div className="pg-alert" role="alert">
-            <p>このRevisionの根拠を取得できませんでした。根拠が未登録とは判断していません。{evidenceLoadIssue.message}</p>
+            <p>このRevisionの根拠を取得できませんでした。登録状況は未確認です。{evidenceLoadIssue.message}</p>
             <button type="button" disabled={evidenceLoadIssue.retrying || sessionBlocked} onClick={() => void retryEvidence()}>{evidenceLoadIssue.retrying ? "根拠を再読み込みしています…" : "根拠を再試行"}</button>
           </div>}
           <div className="pg-editor-actions" role="group" aria-label="原稿の操作">

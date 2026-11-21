@@ -140,7 +140,7 @@ export function PersistenceScratch({ projectId, documentId, authorScope, journal
     <button type="button" disabled={loading || saving} onClick={() => void protect().catch(() => {})}>続ける</button>
     {draft.pendingNoteRequest && !pendingMatchesCurrent && <p role="status">前回送信した内容の保存結果が未確認です。照合では現在のスクラッチを保持します。</p>}
     <button type="button" disabled={!canCreateNote || loading || saving || (!draft.text && !draft.images.length && !draft.pendingNoteRequest)} onClick={() => void saveNote()}>
-      {draft.pendingNoteRequest ? pendingMatchesCurrent ? "保存結果を再試行" : "前のノート保存を照合" : "ノートとしてPostgreSQLへ保存"}
+      {draft.pendingNoteRequest ? pendingMatchesCurrent ? "ノート保存を再試行" : "前のノート保存を照合" : "ノートとしてPostgreSQLへ保存"}
     </button>
     {attachmentError && <p role="alert">{attachmentError}</p>}
     {error && <p role="alert">{error}</p>}
