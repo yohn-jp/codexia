@@ -108,16 +108,19 @@ export function searchDocuments(
   const query = normalizeSearchText(rawQuery.trim());
   const tokens = lexicalTokens(rawQuery);
   const hints = queryHints.map(normalizeSearchText).filter((hint) => hint.length > 1);
-  const hits: SearchHit[] = [];
+  const matches: Array<{ document: SearchDocument; score: number }> = [];
   for (const document of documents) {
     if (scope && document.path !== scope && !document.path.startsWith(`${scope}/`)) continue;
     let score = documentScore(document, query, tokens, mode);
     if (mode === "fulltext" && hints.length && hints.every((hint) => document.normalizedContent.includes(hint))) score = Math.max(score, 45 + hints.length);
     if (!score) continue;
-    hits.push({ kind: "document", path: document.path, title: titleFor(document.path), revision: document.revision,
-      score, snippet: snippet(document.content, document.normalizedContent, query, tokens) });
+    matches.push({ document, score });
   }
-  return hits.sort((left, right) => right.score - left.score || left.path.localeCompare(right.path)).slice(0, limit);
+  matches.sort((left, right) => right.score - left.score || left.document.path.localeCompare(right.document.path));
+  return matches.slice(0, limit).map(({ document, score }) => ({
+    kind: "document", path: document.path, title: titleFor(document.path), revision: document.revision,
+    score, snippet: snippet(document.content, document.normalizedContent, query, tokens),
+  }));
 }
 
 export function searchTerms(

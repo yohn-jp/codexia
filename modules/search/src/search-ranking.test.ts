@@ -18,6 +18,24 @@ test("lexical search ranks exact names and full text, applies scope and result b
   assert.equal(searchDocuments(documents, "harbor", "exact", 10).some(({ path }) => path === "bible/locations/harbor.yaml"), true);
 });
 
+test("lexical search materializes snippets only for the highest ranked documents", () => {
+  const reads: string[] = [];
+  const documents = ["z", "a", "harbor"].map((name) => {
+    const path = `manuscript/${name}.md`;
+    const content = `Ships in the harbor: ${name}.`;
+    return {
+      ...createSearchDocument(path, name, content),
+      get content() { reads.push(path); return content; },
+    };
+  });
+  const hits = searchDocuments(documents, "harbor", "fulltext", 2);
+  assert.deepEqual(hits.map(({ path, snippet }) => [path, snippet]), [
+    ["manuscript/harbor.md", "Ships in the harbor: harbor."],
+    ["manuscript/a.md", "Ships in the harbor: a."],
+  ]);
+  assert.deepEqual(reads, ["manuscript/harbor.md", "manuscript/a.md"]);
+});
+
 test("Japanese full-text tokens retain useful character pairs and optional word hints", () => {
   assert.deepEqual(lexicalTokens("青い駅前"), ["青い", "い駅", "駅前"]);
   const document = createSearchDocument("manuscript/vol-1/ch-1/a.md", "d".repeat(64), "青い駅前で待つ");
