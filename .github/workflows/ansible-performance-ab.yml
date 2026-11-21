@@ -146,16 +146,22 @@ jobs:
           mkdir -p "$out"
           venv="$RUNNER_TEMP/codexia-ansible-ab-venv"
           plugin_path=$("$venv/bin/python" -c 'import ansible_mitogen, os; print(os.path.join(os.path.dirname(ansible_mitogen.__file__), "plugins", "strategy"))')
-          export ANSIBLE_PLAYBOOK="$venv/bin/ansible-playbook"
+          export ANSIBLE_REAL_PLAYBOOK="$venv/bin/ansible-playbook"
+          cp scripts/ansible-ab/time-playbook.sh "$out/ansible-playbook-wrapper"
+          chmod 0700 "$out/ansible-playbook-wrapper"
+          export ANSIBLE_PLAYBOOK="$out/ansible-playbook-wrapper"
           export ANSIBLE_STRATEGY_PLUGINS="$plugin_path"
           export CODEXIA_DISPOSABLE_HOST=base-integration
           fixture_uid=$(id -u "$CODEXIA_SERVICE_USER")
           export XDG_RUNTIME_DIR="/run/user/$fixture_uid"
           export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
-          printf 'arm,seconds,secrets,runtime\n' > "$out/contract.csv"
+          printf 'arm,seconds,secrets,runtime,invocations,playbook_ms\n' > "$out/contract.csv"
           run_contract() {
             arm=$1
             export ANSIBLE_STRATEGY="$arm"
+            export ANSIBLE_AB_ARM="$arm"
+            export ANSIBLE_AB_METRIC_FILE="$out/$arm-invocations.csv"
+            printf 'arm,duration_ms,exit_code\n' > "$ANSIBLE_AB_METRIC_FILE"
             start=$SECONDS
             secret_status=fail
             runtime_status=not_run
@@ -168,9 +174,11 @@ jobs:
               fi
             fi
             seconds=$((SECONDS - start))
-            printf '%s,%s,%s,%s\n' "$arm" "$seconds" "$secret_status" "$runtime_status" >> "$out/contract.csv"
-            printf 'ANSIBLE_CONTRACT_AB strategy=%s seconds=%s secrets=%s runtime=%s\n' \
-              "$arm" "$seconds" "$secret_status" "$runtime_status"
+            calls=$(awk 'END { print NR - 1 }' "$ANSIBLE_AB_METRIC_FILE")
+            playbook_ms=$(awk -F, 'NR > 1 { total += $2 } END { printf "%.0f", total }' "$ANSIBLE_AB_METRIC_FILE")
+            printf '%s,%s,%s,%s,%s,%s\n' "$arm" "$seconds" "$secret_status" "$runtime_status" "$calls" "$playbook_ms" >> "$out/contract.csv"
+            printf 'ANSIBLE_CONTRACT_AB strategy=%s seconds=%s secrets=%s runtime=%s calls=%s playbook_ms=%s\n' \
+              "$arm" "$seconds" "$secret_status" "$runtime_status" "$calls" "$playbook_ms"
             test "$secret_status" = pass && test "$runtime_status" = pass
           }
           # A failed baseline is fatal. Mitogen incompatibility is recorded, not
@@ -184,10 +192,10 @@ jobs:
             echo ''
             echo 'The upstream scripts are unchanged. This checks contract compatibility; it is not an SSH benchmark.'
             echo ''
-            echo '| Strategy | Total seconds | Secrets | Runtime |'
-            echo '| --- | ---: | --- | --- |'
-            tail -n +2 "$out/contract.csv" | while IFS=, read -r arm seconds secrets runtime; do
-              echo "| $arm | $seconds | $secrets | $runtime |"
+            echo '| Strategy | Total seconds | Playbook calls | Playbook ms | Secrets | Runtime |'
+            echo '| --- | ---: | ---: | ---: | --- | --- |'
+            tail -n +2 "$out/contract.csv" | while IFS=, read -r arm seconds secrets runtime calls playbook_ms; do
+              echo "| $arm | $seconds | $calls | $playbook_ms | $secrets | $runtime |"
             done
             echo ''
             echo 'A candidate with any failed contract is not eligible for adoption.'
