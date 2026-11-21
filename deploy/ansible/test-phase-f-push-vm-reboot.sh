@@ -213,7 +213,14 @@ TimeoutStartSec=120
 WantedBy=default.target
 QUADLET
 /usr/bin/systemctl --user daemon-reload
-/usr/bin/systemctl --user start phase-f-vm-reboot-postgres-volume.service
+if ! /usr/bin/systemctl --user start phase-f-vm-reboot-postgres-volume.service; then
+  printf '%s\n' 'Sanitized diagnostics for the fixture PostgreSQL volume unit:' >&2
+  {
+    /usr/bin/systemctl --user show phase-f-vm-reboot-postgres-volume.service --property=ActiveState,SubState,Result,ExecMainStatus --no-pager 2>&1 || true
+    /usr/bin/journalctl --user --boot --no-pager --lines=40 --unit=phase-f-vm-reboot-postgres-volume.service 2>&1 || true
+  } | sed -E 's/[A-Fa-f0-9]{64}/[redacted-digest]/g' >&2
+  exit 1
+fi
 /usr/bin/systemctl --user start phase-f-vm-reboot-db.service
 for _ in {1..120}; do /usr/bin/podman exec phase-f-vm-reboot-db pg_isready -U codexia_admin -d codexia >/dev/null 2>&1 && break; sleep 2; done
 /usr/bin/podman exec phase-f-vm-reboot-db pg_isready -U codexia_admin -d codexia >/dev/null
