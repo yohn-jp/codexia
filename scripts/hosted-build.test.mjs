@@ -1,16 +1,41 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { MODULE_PERSISTENCE_FORMATS, resolveBuildCatalogSelection } from '../packages/module-runtime/dist/index.js';
-import { assertCleanRevisionSnapshot, browserArtifactRecords, browserManifestEntryFiles, calculateBuildDigests, canonicalJson, catalogFor, persistenceForModules, resourceDeclarationFor } from './hosted-build.mjs';
-import { assertSigstoreBundleMatches, assertSupportedCosignVersion, createSlsaStatement } from './hosted-attestation.mjs';
+import { assertCleanRevisionSnapshot, browserArtifactRecords, browserManifestEntryFiles, calculateBuildDigests, canonicalJson, catalogFor, persistenceForModules, resourceDeclarationFor, validateHostedArtifactDirectory } from './hosted-build.mjs';
+import { assertSigstoreBundleMatches, assertSupportedCosignVersion, createSlsaStatement, pinnedCosignBinary } from './hosted-attestation.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const moduleIds = ['story', 'diagnostics', 'nlp', 'semantic', 'speaker', 'assistant', 'publishing', 'mcp', 'search'];
+
+test('hosted artifact staging accepts only isolated random paths under /tmp', () => {
+  assert.equal(validateHostedArtifactDirectory(`/tmp/codexia-hosted-artifact-${'a'.repeat(32)}`), `/tmp/codexia-hosted-artifact-${'a'.repeat(32)}`);
+  assert.throws(() => validateHostedArtifactDirectory('/tmp/codexia-hosted-artifact-fixed'), /Invalid hosted artifact/u);
+  assert.throws(() => validateHostedArtifactDirectory('/tmp/escape'), /Invalid hosted artifact/u);
+});
+
+test('pinned cosign executes a private byte snapshot after digest and version validation', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'codexia-pinned-cosign-'));
+  let staged;
+  try {
+    const original = path.join(directory, 'cosign');
+    const bytes = Buffer.from('#!/bin/sh\nprintf "GitVersion: v2.6.5\\n"\n');
+    await writeFile(original, bytes, { mode: 0o700 });
+    const pinned = await pinnedCosignBinary(original, 'v2.6.5', `sha256:${createHash('sha256').update(bytes).digest('hex')}`);
+    staged = pinned;
+    assert.notEqual(pinned.binary, original);
+    await writeFile(original, '#!/bin/sh\nexit 93\n', { mode: 0o700 });
+    assert.equal(execFileSync(pinned.binary, ['version'], { encoding: 'utf8' }).trim(), 'GitVersion: v2.6.5');
+  } finally {
+    if (staged) await staged.cleanup();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test('hosted source inventory excludes developer performance symlinks without disabling source validation', async () => {
   // scripts/performance/podman is a tracked development-only symlink.
