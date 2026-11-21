@@ -407,8 +407,8 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const canCreateDocument = outlineReadyProject === projectId && !!projectId && documents.length < 999;
   const documentOutline = useMemo(() => buildDocumentOutline(documents), [documents]);
   const filteredDocumentOutline = useMemo(() => filterDocumentOutline(documentOutline, outlineQuery), [documentOutline, outlineQuery]);
-  const zoomNode = outlineZoomRoot ? findOutlineNode(documentOutline, outlineZoomRoot) : null;
-  const zoomResults = zoomNode ? filterDocumentOutline([zoomNode], outlineQuery) : [];
+  const zoomNode = useMemo(() => outlineZoomRoot ? findOutlineNode(documentOutline, outlineZoomRoot) : null, [documentOutline, outlineZoomRoot]);
+  const zoomResults = useMemo(() => zoomNode ? filterDocumentOutline([zoomNode], outlineQuery) : [], [zoomNode, outlineQuery]);
   const visibleDocumentOutline = zoomNode ? zoomResults : filteredDocumentOutline;
   const outlineFocusId = findOutlineNode(visibleDocumentOutline, outlineFocusedId)?.id
     ?? findOutlineNode(visibleDocumentOutline, documentId)?.id
