@@ -1,4 +1,5 @@
 import { collect } from './collection.mjs';
+import { comparableHistory } from './analysis.mjs';
 
 const REPOSITORY = 'yohn-jp/codexia';
 const API = 'https://api.github.com/repos/' + REPOSITORY + '/';
@@ -138,8 +139,7 @@ function renderTimeline(pr) {
 }
 function renderHistory(pr) {
   const target = el('history'); clear(target);
-  const sample = all.filter(item => item.complete && item.elapsedSeconds != null &&
-    item.runs.every(run => run.timing.comparable));
+  const sample = comparableHistory(all);
   el('history-stat').textContent = '比較可能な初回完了 ' + sample.length + '件 / p50 ' +
     duration(quantile(sample.map(item => item.elapsedSeconds), .5)) +
     ' / p90 ' + duration(quantile(sample.map(item => item.elapsedSeconds), .9));
@@ -148,9 +148,18 @@ function renderHistory(pr) {
   for (const item of all) {
     const button = node('button', 'history-button' + (item === pr ? ' selected' : ''));
     button.type = 'button';
-    button.setAttribute('aria-label', 'PR #' + item.number + ' ' + item.sha.slice(0, 8) + 'を表示');
+    const status = item.sampleTruncated ? '切り詰められた観測。比較対象外'
+      : item.verifyId == null ? 'Verifyを含まない観測。比較対象外'
+        : item.complete ? '完了観測' : '未完了観測。比較対象外';
+    button.setAttribute('aria-label', 'PR #' + item.number + ' ' + item.sha.slice(0, 8) + ' ' + status + 'を表示');
     button.setAttribute('aria-pressed', item === pr ? 'true' : 'false');
-    button.append(node('span', '', '#' + item.number + ' · ' + item.sha.slice(0, 5)));
+    const label = node('span', 'history-label');
+    label.append(node('span', '', '#' + item.number + ' · ' + item.sha.slice(0, 5)));
+    if (item.sampleTruncated || item.verifyId == null || !item.complete) {
+      label.append(node('small', item.sampleTruncated ? 'history-truncated' : 'history-incomplete',
+        item.sampleTruncated ? 'TRUNCATED' : item.verifyId == null ? 'NO VERIFY' : 'INCOMPLETE'));
+    }
+    button.append(label);
     const track = node('span', 'history-track');
     const fill = node('span', 'history-fill');
     fill.style.width = item.elapsedSeconds === null ? '0%' : Math.max(1, item.elapsedSeconds / max * 100) + '%';
@@ -198,7 +207,8 @@ async function main() {
     }
     select.disabled = !all.length;
     if (!all.length) {
-      el('status').textContent = coverage.note ?? 'このサンプル範囲にPRデータがありません。';
+      el('status').textContent = (coverage.note ?? 'このサンプル範囲にPRデータがありません。') +
+        ' Unresolved runs: ' + (coverage.unresolvedRunCount ?? 0) + '.';
       for (const id of ['timeline','history','steps']) el(id).replaceChildren(node('p','empty','データなし'));
       return;
     }
@@ -208,6 +218,8 @@ async function main() {
     el('status').textContent = 'Collected ' + formatTime(result.observedAt) + ' · ' +
       (coverage.selectedRuns ?? 0) + ' workflows / ' + all.length + ' PR revisions' +
       (coverage.historyTruncated ? ' · HISTORY TRUNCATED' : '') +
+      ((coverage.unresolvedRunCount ?? 0) > 0
+        ? ' · ' + coverage.unresolvedRunCount + ' runs excluded: PR/source mapping unresolved' : '') +
       ' · 選択されたWorkflowの観測値であり、全Required Checksの完全証明ではありません。';
     render();
   } catch (error) {

@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { blockingChain, nameMatches, observeRun, readVerifyGraph, summarizePR } from './analysis.mjs';
+import { blockingChain, comparableHistory, nameMatches, observeRun, readVerifyGraph, summarizePR } from './analysis.mjs';
 import { collect, identity, selectRuns } from './collect.mjs';
 
 const at = offset => new Date(Date.UTC(2026,10,21,10,0,0) + offset * 1000).toISOString();
@@ -91,18 +91,68 @@ test('PR history does not manufacture a metric for incomplete runs', () => {
   assert.equal(summarizePR(9,'a'.repeat(40),[{...a,status:'in_progress'}]).elapsedSeconds,null);
 });
 
-test('collector keeps latest run per workflow and exact PR revision', () => {
+test('collector groups each PR run by the source SHA that actually executed', () => {
   const sha1='a'.repeat(40),sha2='b'.repeat(40);
-  const metadata=(id,sha,workflow_id=7)=>({
-    id,name:'Verify Codexia',workflow_id,created_at:at(id),run_attempt:1,
-    pull_requests:[{number:42,head:{sha}}],
+  const metadata=(id,sourceSha,workflow_id,name,createdAt)=>({
+    id,name,workflow_id,created_at:at(createdAt),run_attempt:1,head_sha:sourceSha,
+    pull_requests:[{number:42,head:{sha:sha2}}],
   });
-  assert.deepEqual(identity(metadata(1,sha1)),{number:42,sha:sha1});
-  assert.equal(identity({...metadata(1,sha1),pull_requests:[]}),null);
-  const selected=selectRuns([metadata(1,sha1),metadata(2,sha1),metadata(3,sha2)]);
-  assert.equal(selected.length,2);
-  assert.equal(selected[0].sha,sha2);
-  assert.deepEqual(selected[1].runs.map(x=>x.id),[2]);
+  assert.deepEqual(identity(metadata(1,sha1,7,'Verify Codexia',1)),{number:42,sha:sha1});
+  assert.equal(identity({...metadata(1,sha1,7,'Verify Codexia',1),pull_requests:[]}),null);
+  assert.equal(identity({...metadata(1,sha1,7,'Verify Codexia',1),pull_requests:[
+    {number:42,head:{sha:sha2}},{number:43,head:{sha:sha2}},
+  ]}),null);
+  assert.equal(identity({...metadata(1,sha1,7,'Verify Codexia',1),head_sha:'unknown'}),null);
+  const selected=selectRuns([
+    metadata(1,sha1,8,'Build',1),metadata(2,sha1,8,'Build',2),
+    metadata(3,sha1,7,'Verify Codexia',3),metadata(4,sha2,7,'Verify Codexia',4),
+  ]);
+  assert.deepEqual(selected.map(group=>({sha:group.sha,ids:group.runs.map(x=>x.id)})),[
+    {sha:sha2,ids:[4]},
+    {sha:sha1,ids:[3,2]},
+  ]);
+});
+
+test('19 plus 2 run cap retains Verify and excludes the truncated revision from comparison', async () => {
+  const firstSha='a'.repeat(40),secondSha='b'.repeat(40),mutablePRHead='c'.repeat(40);
+  const metadata=(id,number,sha,workflow_id,name,createdAt)=>({
+    id,workflow_id,name,created_at:at(createdAt),run_attempt:1,head_sha:sha,
+    pull_requests:[{number,head:{sha:mutablePRHead}}],
+  });
+  const firstPR=Array.from({length:19},(_,index)=>metadata(
+    index+1,50,firstSha,index+1,index===0?'Verify Codexia':'First PR workflow '+index,40-index));
+  const secondPR=[
+    metadata(20,51,secondSha,20,'Second PR non-Verify',20),
+    metadata(21,51,secondSha,21,'Verify Codexia',19),
+  ];
+  const groups=selectRuns([...firstPR,...secondPR]);
+  assert.deepEqual(groups.map(group=>({number:group.number,sha:group.sha,count:group.runs.length,
+    truncated:group.sampleTruncated,hasVerify:group.runs.some(item=>item.name==='Verify Codexia')})),[
+    {number:50,sha:firstSha,count:19,truncated:false,hasVerify:true},
+    {number:51,sha:secondSha,count:1,truncated:true,hasVerify:true},
+  ]);
+  const summaries=groups.map(group=>summarizePR(group.number,group.sha,group.runs.map(item=>({
+    id:item.id,name:item.name,status:'completed',createdAt:item.created_at,completedAt:at(60),
+    timing:{runnerSeconds:10,comparable:true},
+  })),{sampleTruncated:group.sampleTruncated}));
+  assert.deepEqual(summaries.map(item=>({number:item.number,sha:item.sha,complete:item.complete,
+    truncated:item.sampleTruncated,elapsedSeconds:item.elapsedSeconds})),[
+    {number:50,sha:firstSha,complete:true,truncated:false,elapsedSeconds:38},
+    {number:51,sha:secondSha,complete:false,truncated:true,elapsedSeconds:null},
+  ]);
+  assert.deepEqual(comparableHistory(summaries).map(item=>({number:item.number,sha:item.sha})),[
+    {number:50,sha:firstSha},
+  ]);
+});
+
+test('a completed group without Verify cannot become a comparison sample', () => {
+  const summary=summarizePR(52,'d'.repeat(40),[{
+    id:22,name:'Build only',status:'completed',createdAt:at(1),completedAt:at(20),
+    timing:{runnerSeconds:10,comparable:true},
+  }]);
+  assert.equal(summary.complete,false);
+  assert.equal(summary.elapsedSeconds,null);
+  assert.deepEqual(comparableHistory([summary]),[]);
 });
 
 test('collector uses bounded REST inventory with a real attempt and jobs', async () => {
@@ -118,6 +168,23 @@ test('collector uses bounded REST inventory with a real attempt and jobs', async
   assert.equal(observed.prs[0].runs[0].chain.verified,true);
   assert.equal(observed.coverage.scannedRuns,1);
   assert.ok(asked.some(x=>x.includes('/attempts/1/jobs')));
+});
+
+test('collector reports runs whose PR association cannot be resolved', async () => {
+  const known={...run(),workflow_id:7,pull_requests:[{number:42,head:{sha:'b'.repeat(40)}}]};
+  const unresolved={...run({id:2}),workflow_id:8,pull_requests:[
+    {number:42,head:{sha:'b'.repeat(40)}},{number:43,head:{sha:'b'.repeat(40)}},
+  ]};
+  const observed=await collect(async path=>{
+    if(path.startsWith('actions/runs?'))return {workflow_runs:[known,unresolved]};
+    if(path.startsWith('actions/runs/1/attempts/1/jobs?'))return {jobs};
+    throw new Error('Unexpected request: '+path);
+  },graph);
+  assert.equal(observed.coverage.unresolvedRunCount,1);
+  assert.equal(observed.coverage.selectedRuns,1);
+  assert.deepEqual(observed.prs.map(item=>({number:item.number,sha:item.sha})),[
+    {number:42,sha:'a'.repeat(40)},
+  ]);
 });
 
 test('static shell displays live telemetry and no invented metrics', () => {

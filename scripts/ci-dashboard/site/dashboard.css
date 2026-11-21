@@ -84,6 +84,10 @@ td.phase{font-size:10px;color:#a7c9ba}
 .history-track{height:8px;background:#2a353a;border-radius:2px;overflow:hidden}
 .history-fill{display:block;height:100%;background:#8ab9a8;min-width:1px}
 .history-button.selected .history-fill{background:#b9ecd3}
+.history-label{display:block;min-width:0;overflow-wrap:anywhere}
+.history-label small{display:block;margin-top:3px;font-size:8px;letter-spacing:.06em;font-weight:750}
+.history-truncated{color:var(--orange)}
+.history-incomplete{color:#9eacb4}
 .history-number{text-align:right;font-variant-numeric:tabular-nums}
 .empty{font-size:12px;color:#93a5ac;line-height:1.7;padding:22px 4px}
 footer{font-size:10px;letter-spacing:.06em;color:#73868c;border-top:1px solid var(--line);padding-top:25px;margin-top:40px}
