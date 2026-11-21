@@ -27,6 +27,8 @@ on:
       - scripts/verify-frontend-artifact*.mjs
       - scripts/frontend-promotion-contract.test.mjs
       - scripts/frontend-promotion-handoff.test.mjs
+      - scripts/frontend-oauth-config.mjs
+      - scripts/frontend-oauth-config.test.mjs
       - scripts/component-release-record*.mjs
       - scripts/reuse-pr-verification*.mjs
       - scripts/verify-frontend-compatibility*.mjs
@@ -166,6 +168,12 @@ jobs:
           CODEXIA_LIVE_FRONTEND_SOURCE_SHA: ${{ needs.preflight.outputs.frontend-source-sha }}
           CODEXIA_LIVE_FRONTEND_PROFILE: ${{ needs.preflight.outputs.frontend-profile }}
           CODEXIA_LIVE_FRONTEND_API_EPOCH: ${{ needs.preflight.outputs.frontend-api-epoch }}
+          VITE_CODEXIA_OAUTH_ISSUER: ${{ vars.VITE_CODEXIA_OAUTH_ISSUER }}
+          VITE_CODEXIA_OAUTH_CLIENT_ID: ${{ vars.VITE_CODEXIA_OAUTH_CLIENT_ID }}
+          VITE_CODEXIA_API_AUDIENCE: ${{ vars.VITE_CODEXIA_API_AUDIENCE }}
+          VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI }}
+          VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI }}
+          VITE_CODEXIA_OAUTH_SCOPES: ${{ vars.VITE_CODEXIA_OAUTH_SCOPES }}
         run: node scripts/verify-frontend-artifact.mjs select-promotion
       - name: Prepare locked pnpm toolchain
         if: github.event_name == 'pull_request' || steps.promotion.outputs.promoted != 'true'
@@ -179,6 +187,12 @@ jobs:
         if: github.event_name == 'pull_request' || steps.promotion.outputs.promoted != 'true'
         env:
           CODEXIA_PROFILE: full
+          VITE_CODEXIA_OAUTH_ISSUER: ${{ vars.VITE_CODEXIA_OAUTH_ISSUER }}
+          VITE_CODEXIA_OAUTH_CLIENT_ID: ${{ vars.VITE_CODEXIA_OAUTH_CLIENT_ID }}
+          VITE_CODEXIA_API_AUDIENCE: ${{ vars.VITE_CODEXIA_API_AUDIENCE }}
+          VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI }}
+          VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI }}
+          VITE_CODEXIA_OAUTH_SCOPES: ${{ vars.VITE_CODEXIA_OAUTH_SCOPES }}
         run: pnpm run build:frontend
       # Shared route/Worker checks are owned by Verify's unit-root task.
       # The exact main-source certification gate requires that proof before deploy.
@@ -193,7 +207,17 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
       - name: Exercise actual static asset server and browser entrypoints
         if: github.event_name == 'pull_request' || steps.promotion.outputs.promoted != 'true'
+        env:
+          VITE_CODEXIA_OAUTH_ISSUER: ${{ vars.VITE_CODEXIA_OAUTH_ISSUER }}
+          VITE_CODEXIA_OAUTH_CLIENT_ID: ${{ vars.VITE_CODEXIA_OAUTH_CLIENT_ID }}
+          VITE_CODEXIA_API_AUDIENCE: ${{ vars.VITE_CODEXIA_API_AUDIENCE }}
+          VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI }}
+          VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI }}
+          VITE_CODEXIA_OAUTH_SCOPES: ${{ vars.VITE_CODEXIA_OAUTH_SCOPES }}
         run: node edge/frontend/test/static-smoke.mjs
+      - name: Exercise OAuth authorization from static browser shells
+        if: github.event_name == 'pull_request' || steps.promotion.outputs.promoted != 'true'
+        run: node edge/frontend/test/oauth-static-smoke.mjs
       - name: Identify immutable frontend artifact for this producer attempt
         id: producer
         if: github.event_name == 'pull_request' || (github.event_name == 'workflow_run' && steps.promotion.outputs.promoted != 'true')
@@ -278,6 +302,12 @@ jobs:
           CODEXIA_FRONTEND_PR_VERIFY_RUN_ID: ${{ needs.build.outputs.producer-proof-run-id }}
           CODEXIA_FRONTEND_VERIFY_ATTEMPT: ${{ needs.build.outputs.producer-verify-attempt }}
           CODEXIA_FRONTEND_VERIFY_PLAN_DIGEST: ${{ needs.build.outputs.producer-plan-digest }}
+          VITE_CODEXIA_OAUTH_ISSUER: ${{ vars.VITE_CODEXIA_OAUTH_ISSUER }}
+          VITE_CODEXIA_OAUTH_CLIENT_ID: ${{ vars.VITE_CODEXIA_OAUTH_CLIENT_ID }}
+          VITE_CODEXIA_API_AUDIENCE: ${{ vars.VITE_CODEXIA_API_AUDIENCE }}
+          VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI }}
+          VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI: ${{ vars.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI }}
+          VITE_CODEXIA_OAUTH_SCOPES: ${{ vars.VITE_CODEXIA_OAUTH_SCOPES }}
         run: node scripts/verify-frontend-artifact.mjs
       - name: Verify live backend API compatibility before switching UI
         id: compatibility

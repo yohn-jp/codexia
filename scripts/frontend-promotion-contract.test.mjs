@@ -68,3 +68,29 @@ test('frontend deploy rechecks producer artifact, exact main source and deployed
   assert.equal(verifyArtifact.env.CODEXIA_FRONTEND_SOURCE_VERIFY_RUN_ID,'${{ needs.build.outputs.producer-verify-run-id }}');
   assert.equal(verifyArtifact.env.CODEXIA_FRONTEND_CERTIFIED_VERIFY_RUN_ID,'${{ needs.source.outputs.verify-run-id }}');
 });
+
+test('the same public Web OAuth settings govern promotion, fallback builds, and deployed artifact checks',()=>{
+  const keys=[
+    'VITE_CODEXIA_OAUTH_ISSUER',
+    'VITE_CODEXIA_OAUTH_CLIENT_ID',
+    'VITE_CODEXIA_API_AUDIENCE',
+    'VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI',
+    'VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI',
+    'VITE_CODEXIA_OAUTH_SCOPES',
+  ];
+  const expected=Object.fromEntries(keys.map(key=>[key,'${{ vars.'+key+' }}']));
+  const build=workflow.jobs.build;
+  const promotion=build.steps.find(step=>step.id==='promotion');
+  const fallback=build.steps.find(step=>step.run?.includes('pnpm run build:frontend'));
+  const deployVerify=workflow.jobs.deploy.steps.find(step=>step.run?.includes('verify-frontend-artifact.mjs'));
+  const staticConfig=build.steps.find(step=>step.run?.includes('static-smoke.mjs'));
+  const staticAcceptance=build.steps.find(step=>step.run?.includes('oauth-static-smoke.mjs'));
+  const releasePaths=workflow.on.pull_request.paths;
+  assert.deepEqual(promotion.env,Object.assign({},promotion.env,expected));
+  assert.deepEqual(fallback.env,Object.assign({},fallback.env,expected));
+  assert.deepEqual(deployVerify.env,Object.assign({},deployVerify.env,expected));
+  assert.deepEqual(staticConfig.env,Object.assign({},staticConfig.env,expected));
+  assert.ok(staticAcceptance);
+  assert.match(staticAcceptance.if,/promoted != 'true'/u);
+  for(const path of ['scripts/frontend-oauth-config.mjs','scripts/frontend-oauth-config.test.mjs']) assert.ok(releasePaths.includes(path),path);
+});

@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {setTimeout as delay} from 'node:timers/promises';
 import {chromium} from '@playwright/test';
+import {assertFrontendOAuthConfigIdentity} from '../../../scripts/frontend-oauth-config.mjs';
 import {inspectHtml} from '../../../scripts/html-document.mjs';
+const identity=JSON.parse(await readFile('app/dist/desktop/update-identity.json','utf8'));
+assertFrontendOAuthConfigIdentity(identity,process.env);
 const port=18765;
 const base='http://127.0.0.1:'+port;
 const child=spawn('edge/frontend/node_modules/.bin/wrangler',['dev','--config','edge/frontend/wrangler.jsonc','--local','--ip','127.0.0.1','--port',String(port)],{stdio:'inherit'});
@@ -16,7 +20,8 @@ try {
   // Exercise real browser module loading under the deployed static CSP.
   // No API proxy or credentials: the isolated static server must render
   // the explicit API-unavailable state instead of hanging at the loader.
-  const browser=await chromium.launch({headless:true});
+  const systemChromium=process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+  const browser=await chromium.launch({headless:true,...(systemChromium?{executablePath:systemChromium,args:['--no-sandbox']}: {})});
   try {
     for(const [path,heading] of [['/?utm_source=smoke','執筆画面を選ぶ'],['/desktop','PostgreSQLへ接続できません'],['/mobile/settings/','PostgreSQLへ接続できません']]){
       const page=await browser.newPage();

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { readComponentVersion } from './component-release-version.mjs';
 import { selectLatestJobArtifact } from './ci-artifact-selection.mjs';
 import { downloadArtifact, extractArtifactFiles, extractJsonEntry, MAX_ASSET_ARCHIVE, MAX_ASSET_BYTES } from './download-ci-artifacts.mjs';
+import { assertFrontendOAuthConfigIdentity } from './frontend-oauth-config.mjs';
 import { assertVerificationJobs, collectGitHubPages, verifiedSourceRun } from './release-policy.mjs';
 import { assertFrontendIdentity, compareFrontendVersions } from './verify-frontend-compatibility.mjs';
 import { verifyReusableMainProof } from './reuse-pr-verification.mjs';
@@ -338,6 +339,7 @@ export async function resolveFrontendPromotion({env=process.env,fetchImpl=fetch}
     const files=await extractArtifactFiles(archive,scratch,{maxArchive:MAX_ASSET_ARCHIVE,maxUncompressed:MAX_ASSET_BYTES});
     for(const required of ['index.html','desktop/index.html','desktop/update-identity.json','mobile/index.html']) assert.ok(files.includes(required),'Promoted frontend artifact is missing '+required);
     const identity=assertFrontendIdentity(JSON.parse(await readFile(path.join(scratch,'desktop/update-identity.json'),'utf8')));
+    assertFrontendOAuthConfigIdentity(identity,env);
     const apiEpoch=JSON.parse(readFileSync(new URL('../deploy/frontend-compatibility.json',import.meta.url),'utf8')).apiEpoch;
     assert.equal(identity.sourceSha,proof.headSha,'Promoted frontend artifact source mismatch');
     assert.equal(identity.version,readComponentVersion('frontend',String(producerRun.run_number)),'Promoted frontend artifact version mismatch');
@@ -484,6 +486,7 @@ export async function verifyFrontendArtifact({ env = process.env, fetchImpl = fe
   });
 
   const identity = assertFrontendIdentity(JSON.parse(readFileSync(new URL('../app/dist/desktop/update-identity.json', import.meta.url), 'utf8')));
+  assertFrontendOAuthConfigIdentity(identity,env);
   const apiEpoch = JSON.parse(readFileSync(new URL('../deploy/frontend-compatibility.json', import.meta.url), 'utf8')).apiEpoch;
   assert.equal(identity.version, expected.version, 'Frontend artifact version does not match its producer receipt');
   assert.equal(identity.sourceSha, expected.sourceSha, 'Frontend artifact source SHA mismatch');
