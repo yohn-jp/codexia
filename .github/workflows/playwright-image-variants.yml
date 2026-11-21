@@ -44,8 +44,6 @@ jobs:
             docker pull mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
             docker tag mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579 "$image:pw-1.65.1"
             docker push "$image:pw-1.65.1"
-            digest="$(docker buildx imagetools inspect "$image:pw-1.65.1" --format '{{json .Manifest}}' | jq -r '.digest // empty')"
-            # Docker manifest inspection may not expose the top-level digest; resolve via registry API.
             digest="$(docker buildx imagetools inspect "$image:pw-1.65.1" | sed -n 's/^Digest:[[:space:]]*//p' | head -1)"
           else
             metadata="$RUNNER_TEMP/$BROWSER.json"
@@ -57,6 +55,10 @@ jobs:
           fi
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
           docker buildx imagetools inspect "$image@$digest" > "$RUNNER_TEMP/inspect.txt"
+          docker pull "$image@$digest"
+          bytes="$(docker image inspect "$image@$digest" --format '{{.Size}}')"
+          mib="$(awk -v n="$bytes" 'BEGIN { printf "%.1f", n / 1048576 }')"
+          echo "Uncompressed image size: $mib MiB" >> "$GITHUB_STEP_SUMMARY"
           {
             echo "### $VARIANT / $BROWSER"
             echo "\`$image@$digest\`"
