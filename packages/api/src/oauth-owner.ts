@@ -9,6 +9,8 @@ export interface OAuthOwnerOptions {
   readonly jwksUrl: string;
   readonly ownerSubject: string;
   readonly requiredScopes: readonly string[];
+  readonly allowedClientIds?: readonly string[];
+  readonly verifyActiveToken?: (token: string) => Promise<boolean>;
   readonly fetch?: typeof fetch;
 }
 
@@ -64,11 +66,11 @@ export function createOAuthOwnerAuthenticator(options: OAuthOwnerOptions): (toke
         algorithms: [...ALLOWED_ALGORITHMS],
         typ: "at+jwt",
         clockTolerance: 5,
-        requiredClaims: ["iss", "sub", "aud", "exp", "iat", "jti", "client_id"],
+        requiredClaims: ["iss", "sub", "aud", "exp", "iat", "jti", "client_id", "azp"],
       });
       if (protectedHeader.typ !== "at+jwt" || typeof payload.sub !== "string" || !payload.sub ||
           typeof payload.iat !== "number" || payload.iat > Math.floor(Date.now() / 1000) + 5 ||
-          typeof payload.client_id !== "string" || !payload.client_id ||
+          typeof payload.client_id !== "string" || !payload.client_id || payload.azp !== payload.client_id ||
           typeof payload.jti !== "string" || !payload.jti) {
         throw new Error("invalid access token profile");
       }
@@ -78,6 +80,12 @@ export function createOAuthOwnerAuthenticator(options: OAuthOwnerOptions): (toke
       }
       if (payload.sub !== options.ownerSubject) {
         throw new OAuthAuthenticationError(403, "OAUTH_OWNER_REQUIRED", "Authenticated identity is not configured as the standalone owner");
+      }
+      if (options.allowedClientIds && !options.allowedClientIds.includes(payload.client_id)) {
+        throw new OAuthAuthenticationError(403, "OAUTH_CLIENT_NOT_ALLOWED", "OAuth client is not configured for owner access");
+      }
+      if (options.verifyActiveToken && !await options.verifyActiveToken(token)) {
+        throw new OAuthAuthenticationError(401, "OAUTH_TOKEN_INACTIVE", "OAuth access token is inactive or its login session was revoked");
       }
       return { issuer: options.issuer, subject: payload.sub, scopes };
     } catch (error) {

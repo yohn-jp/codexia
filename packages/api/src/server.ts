@@ -13,6 +13,8 @@ import { lstat, readFile, realpath } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import { fromNodeHeaders } from "better-auth/node";
+import { CODEXIA_OWNER_SCOPE, createBetterAuthRuntime } from "./better-auth.js";
 import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ReorderHierarchyInput } from "@codexia/core";
 import type { Persistence, ProjectPageCursor } from "@codexia/persistence-contracts";
@@ -136,6 +138,8 @@ export interface ApiServerOptions {
   cloudflareAccess?: CloudflareAccessOptions;
   /** Optional standalone API-audience OAuth access tokens for the configured owner. */
   oauthOwner?: OAuthOwnerOptions;
+  /** Better Auth is the standalone OIDC and OAuth provider when configured. */
+  betterAuth?: ReturnType<typeof createBetterAuthRuntime>;
   /** Exact HTTPS browser origins allowed to call the API cross-origin with bearer tokens. */
   corsAllowedOrigins?: readonly string[];
   /** Defaults to `<cwd>/app/dist`. */
@@ -609,6 +613,7 @@ export function createServer(options: ApiServerOptions): Server {
     throw new Error("Cloudflare Access browser authentication requires standalone mode and the trusted HTTPS proxy");
   }
   if (options.oauthOwner && hosted) throw new Error("Standalone OAuth owner authentication is not available in Hosted mode");
+  if (options.betterAuth && hosted) throw new Error("Standalone Better Auth is not available in Hosted mode");
   const authenticateOAuthOwner = options.oauthOwner ? createOAuthOwnerAuthenticator(options.oauthOwner) : undefined;
   if (options.corsAllowedOrigins && hosted) throw new Error("Standalone browser CORS configuration is not available in Hosted mode");
   const corsAllowedOrigins = normalizeCorsOrigins(options.corsAllowedOrigins);
@@ -688,6 +693,7 @@ export function createServer(options: ApiServerOptions): Server {
     throw new Error("The full profile requires trusted runtime manifests and lazy loaders");
   }
   const app: FastifyInstance = Fastify({ logger: false, trustProxy });
+  app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_request, body, done) => done(null, body));
   let unsubscribeJobLifecycle = (): void => undefined;
   let shuttingDown = false;
   let activeRequests = 0;
@@ -1573,6 +1579,63 @@ export function createServer(options: ApiServerOptions): Server {
         return;
       }
       response.setHeader("Access-Control-Allow-Origin", originHeader);
+    }
+
+    if (options.betterAuth && method === "GET" && routePath === "/.well-known/oauth-authorization-server/api/auth") {
+      const metadataRequest = new Request(`${requestProtocol(request, trustProxy)}//${request.headers.host ?? "localhost"}${request.url ?? "/"}`, { headers: fromNodeHeaders(request.headers) });
+      const metadata = await options.betterAuth.authorizationServerMetadata(metadataRequest);
+      response.writeHead(metadata.status, Object.fromEntries(metadata.headers.entries()));
+      response.end(Buffer.from(await metadata.arrayBuffer()));
+      return;
+    }
+    if (options.betterAuth && method === "GET" && routePath === "/.well-known/openid-configuration/api/auth") {
+      const metadataRequest = new Request(`${requestProtocol(request, trustProxy)}//${request.headers.host ?? "localhost"}${request.url ?? "/"}`, { headers: fromNodeHeaders(request.headers) });
+      const metadata = await options.betterAuth.openIdConfigMetadata(metadataRequest);
+      response.writeHead(metadata.status, Object.fromEntries(metadata.headers.entries()));
+      response.end(Buffer.from(await metadata.arrayBuffer()));
+      return;
+    }
+    if (options.betterAuth && routePath === "/api/auth/oauth2/consent-context" && method === "POST") {
+      if (!sameOrigin(request, trustProxy)) { fail(response, 403, "CROSS_ORIGIN_REQUEST", "OAuth consent context requires a same-origin request"); return; }
+      let body: unknown;
+      try { body = await readJson(request, parsedBody); }
+      catch { fail(response, 400, "OAUTH_CONSENT_CONTEXT_INVALID", "OAuth consent context request is invalid"); return; }
+      if (!isRecord(body) || !hasOnlyKeys(body, new Set(["oauth_query"])) || typeof body.oauth_query !== "string" || !body.oauth_query) {
+        fail(response, 400, "OAUTH_CONSENT_CONTEXT_INVALID", "OAuth consent context request is invalid"); return;
+      }
+      try {
+        const context = await options.betterAuth.getConsentContext(fromNodeHeaders(request.headers), body.oauth_query);
+        sendJson(response, 200, context);
+      } catch {
+        fail(response, request.headers.cookie ? 403 : 401, "OAUTH_CONSENT_CONTEXT_DENIED", "OAuth consent context could not be verified");
+      }
+      return;
+    }
+    if (options.betterAuth && routePath === "/api/auth/token") {
+      fail(response, 404, "JWT_SESSION_TOKEN_DISABLED", "Generic session JWTs are not accepted as API access tokens");
+      return;
+    }
+    if (options.betterAuth && routePath.startsWith("/api/auth/")) {
+      const host = request.headers.host ?? "localhost";
+      const authUrl = `${requestProtocol(request, trustProxy)}//${host}${request.url ?? "/"}`;
+      const headers = fromNodeHeaders(request.headers);
+      headers.delete("connection");
+      headers.delete("content-length");
+      headers.delete("host");
+      headers.delete("transfer-encoding");
+      const authMethod = request.method ?? "GET";
+      let body: BodyInit | undefined;
+      if (authMethod !== "GET" && authMethod !== "HEAD" && parsedBody !== undefined) {
+        body = typeof parsedBody === "string" ? parsedBody : JSON.stringify(parsedBody);
+      }
+      const authRequest = new Request(authUrl, { method: authMethod, headers, ...(body !== undefined ? { body } : {}) });
+      const authResponse = await options.betterAuth.handler(authRequest);
+      const responseHeaders: Record<string, string | string[]> = Object.fromEntries(authResponse.headers.entries());
+      const cookies = authResponse.headers.getSetCookie();
+      if (cookies.length) responseHeaders["set-cookie"] = cookies;
+      response.writeHead(authResponse.status, responseHeaders);
+      response.end(Buffer.from(await authResponse.arrayBuffer()));
+      return;
     }
 
     if (hosted && (originalPath === "/.well-known/oauth-protected-resource" ||
@@ -2476,13 +2539,60 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     ownerSubject: readCodexiaEnvironment("OAUTH_OWNER_SUBJECT"),
   };
   const oauthConfigured = Object.values(oauthValues).some((value) => value !== undefined);
-  if (oauthConfigured && Object.values(oauthValues).some((value) => !value)) {
-    throw new Error("OAuth owner mode requires OAUTH_ISSUER, OAUTH_AUDIENCE, OAUTH_JWKS_URL, and OAUTH_OWNER_SUBJECT");
+  const betterAuthValues = {
+    databaseUrl: readCodexiaEnvironment("AUTH_DATABASE_URL"),
+    publicOrigin: readCodexiaEnvironment("PUBLIC_ORIGIN"),
+    oidcIssuer: readCodexiaEnvironment("OIDC_ISSUER"),
+    oidcClientId: readCodexiaEnvironment("OIDC_CLIENT_ID"),
+    oidcClientSecret: readCodexiaEnvironment("OIDC_CLIENT_SECRET"),
+    authSecret: readCodexiaEnvironment("AUTH_SECRET"),
+    introspectionClientId: readCodexiaEnvironment("OAUTH_INTROSPECTION_CLIENT_ID"),
+    introspectionClientSecret: readCodexiaEnvironment("OAUTH_INTROSPECTION_CLIENT_SECRET"),
+    ownerSubject: readCodexiaEnvironment("OAUTH_OWNER_SUBJECT"),
+    ownerClientIds: readCodexiaEnvironment("OAUTH_OWNER_CLIENT_IDS"),
+    apiAudience: readCodexiaEnvironment("API_AUDIENCE"),
+  };
+  const betterAuthConfigured = [
+    betterAuthValues.databaseUrl, betterAuthValues.publicOrigin, betterAuthValues.oidcIssuer,
+    betterAuthValues.oidcClientId, betterAuthValues.oidcClientSecret, betterAuthValues.authSecret,
+    betterAuthValues.introspectionClientId, betterAuthValues.introspectionClientSecret,
+    betterAuthValues.ownerClientIds, betterAuthValues.apiAudience,
+  ].some((value) => value !== undefined);
+  const requiredBetterAuthValues = [
+    betterAuthValues.databaseUrl, betterAuthValues.publicOrigin, betterAuthValues.oidcIssuer,
+    betterAuthValues.oidcClientId, betterAuthValues.oidcClientSecret, betterAuthValues.authSecret,
+    betterAuthValues.introspectionClientId, betterAuthValues.introspectionClientSecret,
+    betterAuthValues.ownerSubject, betterAuthValues.ownerClientIds,
+  ];
+  if (betterAuthConfigured && requiredBetterAuthValues.some((value) => !value)) {
+    throw new Error("Better Auth mode requires AUTH_DATABASE_URL, PUBLIC_ORIGIN, OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, AUTH_SECRET, OAUTH_INTROSPECTION_CLIENT_ID, OAUTH_INTROSPECTION_CLIENT_SECRET, OAUTH_OWNER_SUBJECT, and OAUTH_OWNER_CLIENT_IDS");
   }
-  const oauthOwner: OAuthOwnerOptions | undefined = oauthConfigured ? {
-    issuer: oauthValues.issuer!, audience: oauthValues.audience!, jwksUrl: oauthValues.jwksUrl!,
-    ownerSubject: oauthValues.ownerSubject!,
-    requiredScopes: (readCodexiaEnvironment("OAUTH_REQUIRED_SCOPES") ?? "codexia:api").split(/\s+/u).filter(Boolean),
+  const betterAuth = betterAuthConfigured ? createBetterAuthRuntime({
+    databaseUrl: betterAuthValues.databaseUrl!,
+    publicOrigin: betterAuthValues.publicOrigin!,
+    oidcIssuer: betterAuthValues.oidcIssuer!,
+    oidcClientId: betterAuthValues.oidcClientId!,
+    oidcClientSecret: betterAuthValues.oidcClientSecret!,
+    authSecret: betterAuthValues.authSecret!,
+    oauthIntrospectionClientId: betterAuthValues.introspectionClientId!,
+    oauthIntrospectionClientSecret: betterAuthValues.introspectionClientSecret!,
+    ...(betterAuthValues.apiAudience ? { apiAudience: betterAuthValues.apiAudience } : {}),
+    ownerClientIds: betterAuthValues.ownerClientIds!.split(",").map((value) => value.trim()).filter(Boolean),
+  }) : undefined;
+  if (!betterAuth && oauthConfigured && Object.values(oauthValues).some((value) => !value)) {
+    throw new Error("Legacy OAuth owner mode requires OAUTH_ISSUER, OAUTH_AUDIENCE, OAUTH_JWKS_URL, and OAUTH_OWNER_SUBJECT");
+  }
+  const configuredIssuer = betterAuth?.issuer ?? oauthValues.issuer;
+  const configuredAudience = betterAuth?.audience ?? oauthValues.audience;
+  const configuredJwksUrl = betterAuth ? `${betterAuth.issuer}/jwks` : oauthValues.jwksUrl;
+  const oauthOwner: OAuthOwnerOptions | undefined = betterAuth || oauthConfigured ? {
+    issuer: configuredIssuer!, audience: configuredAudience!, jwksUrl: configuredJwksUrl!,
+    ownerSubject: betterAuthValues.ownerSubject ?? oauthValues.ownerSubject!,
+    requiredScopes: (readCodexiaEnvironment("OAUTH_REQUIRED_SCOPES") ?? CODEXIA_OWNER_SCOPE).split(/\s+/u).filter(Boolean),
+    ...(betterAuth ? {
+      allowedClientIds: betterAuthValues.ownerClientIds!.split(",").map((value) => value.trim()).filter(Boolean),
+      verifyActiveToken: betterAuth.verifyActiveAccessToken,
+    } : {}),
   } : undefined;
   const corsAllowedOrigins: string[] | undefined = corsOriginsValue === undefined ? undefined :
     corsOriginsValue.split(",").map((origin) => origin.trim()).filter(Boolean);
@@ -2506,6 +2616,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
         ownerEmail: readCodexiaEnvironment("ACCESS_OWNER_EMAIL") ?? "",
       } } : {}),
       ...(oauthOwner ? { oauthOwner } : {}),
+      ...(betterAuth ? { betterAuth } : {}),
       ...(corsAllowedOrigins ? { corsAllowedOrigins } : {}),
       trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
       runtimeOptions,

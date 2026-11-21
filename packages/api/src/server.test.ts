@@ -2303,7 +2303,7 @@ describe("Codexia HTTP boundary", () => {
     const token = (overrides: Record<string, unknown> = {}, typ = "at+jwt", kid = jwk.kid) => {
       const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
       const unsigned = encode({ alg: "RS256", typ, kid }) + "." + encode({
-        iss: issuer, sub: "owner-subject", aud: audience, client_id: "codexia-web",
+        iss: issuer, sub: "owner-subject", aud: audience, client_id: "codexia-web", azp: "codexia-web",
         scope: "codexia:api", iat: now, exp: now + 300, jti: randomUUID(), ...overrides,
       });
       return unsigned + "." + signJwt("RSA-SHA256", Buffer.from(unsigned), key.privateKey).toString("base64url");
