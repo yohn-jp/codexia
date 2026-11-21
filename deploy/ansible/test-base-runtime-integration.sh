@@ -409,24 +409,29 @@ cat > "$mock_bin/podman" <<'MOCK_PODMAN'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" == inspect && "${2:-}" == --format && "${4:-}" == codexia-db ]]; then
-  case "$3" in
-    '{{.Config.Image}}') printf '%s\n' 'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536' ;;
-    '{{json .Mounts}}') printf '%s\n' '[{"Type":"volume","Name":"codexia-postgres","Destination":"/var/lib/postgresql/data","RW":true},{"Type":"bind","Name":"","Source":"/etc/codexia/postgres/010-create-app-role.sh","Destination":"/docker-entrypoint-initdb.d/010-create-app-role.sh","RW":false}]' ;;
-    '{{json .NetworkSettings.Networks}}') printf '%s\n' '{"codexia-data":{}}' ;;
-    '{{json .HostConfig.PortBindings}}') printf '%s\n' 'null' ;;
-    '{{json .Config.Env}}') printf '%s\n' '["PGDATA=/var/lib/postgresql/data/pgdata","POSTGRES_DB=codexia","POSTGRES_USER=codexia_admin","POSTGRES_PASSWORD_FILE=/run/secrets/admin-password"]' ;;
-    '{{json .Config.Secrets}}')
-      admin_id=current-admin-secret-id
-      app_id=current-app-secret-id
-      case "${CODEXIA_TEST_STALE_DB_SECRET:-}" in
-        admin) admin_id=stale-admin-secret-id ;;
-        app) app_id=stale-app-secret-id ;;
-        *) exit 2 ;;
-      esac
-      printf '[{"Name":"codexia-postgres-admin-password","ID":"%s"},{"Name":"codexia-postgres-app-password","ID":"%s"}]\n' "$admin_id" "$app_id"
-      ;;
+  admin_id=current-admin-secret-id
+  app_id=current-app-secret-id
+  case "${CODEXIA_TEST_STALE_DB_SECRET:-}" in
+    admin) admin_id=stale-admin-secret-id ;;
+    app) app_id=stale-app-secret-id ;;
     *) exit 2 ;;
   esac
+  cat <<JSON
+{
+  "image": "docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536",
+  "mounts": [
+    {"Type":"volume","Name":"codexia-postgres","Destination":"/var/lib/postgresql/data","RW":true},
+    {"Type":"bind","Source":"/etc/codexia/postgres/010-create-app-role.sh","Destination":"/docker-entrypoint-initdb.d/010-create-app-role.sh","RW":false}
+  ],
+  "networks": {"codexia-data":{}},
+  "ports": null,
+  "environment": ["PGDATA=/var/lib/postgresql/data/pgdata","POSTGRES_DB=codexia","POSTGRES_USER=codexia_admin","POSTGRES_PASSWORD_FILE=/run/secrets/admin-password"],
+  "secrets": [
+    {"Name":"codexia-postgres-admin-password","ID":"$admin_id"},
+    {"Name":"codexia-postgres-app-password","ID":"$app_id"}
+  ]
+}
+JSON
 elif [[ "${1:-}" == secret && "${2:-}" == inspect && "${3:-}" == --format ]]; then
   case "${5:-}" in
     codexia-postgres-admin-password) printf '%s\n' current-admin-secret-id ;;
@@ -610,6 +615,8 @@ apply_base > "$tmp/schema-adoption.log" || { cat "$tmp/schema-adoption.log"; exi
 grep -q 'changed=0' "$tmp/schema-adoption.log"
 
 podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/app-password)"; psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia -d codexia -c "CREATE TABLE public.phase_b_adoption_probe(id integer PRIMARY KEY, value text NOT NULL); INSERT INTO public.phase_b_adoption_probe VALUES (1, '\''preserved-data'\'');"' >/dev/null
+
+CODEXIA_SERVICE_USER="$service_user" ANSIBLE_PLAYBOOK="${ANSIBLE_PLAYBOOK:-ansible-playbook}" GITHUB_ACTIONS=true CODEXIA_DISPOSABLE_HOST=base-integration bash "$repo_root/deploy/ansible/test-auth-runtime-integration.sh"
 
 # A role privilege mismatch must fail verification without silently repairing it.
 podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c 'ALTER ROLE codexia WITH SUPERUSER' >/dev/null

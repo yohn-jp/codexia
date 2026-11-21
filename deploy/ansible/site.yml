@@ -21,7 +21,7 @@
     - name: Reject unsupported or obsolete deployment operations
       ansible.builtin.assert:
         that:
-          - codexia_stage in ['inspect', 'host', 'secrets', 'base', 'deploy', 'restore-drill']
+          - codexia_stage in ['inspect', 'host', 'secrets', 'base', 'auth-runtime', 'deploy', 'restore-drill']
         fail_msg: Select inspect, host, secrets, base, deploy or restore-drill; obsolete pull-updater operations are not supported.
 
     - name: Require local execution for a restore drill
@@ -42,6 +42,20 @@
 
     - name: Gather target host facts
       ansible.builtin.setup:
+        gather_subset: "{{ ['!all', '!min', 'user'] if codexia_stage in ['secrets', 'base', 'auth-runtime'] else ['all'] }}"
+
+    - name: Provision Better Auth runtime role, schema, and protected secrets only when explicitly opted in
+      ansible.builtin.include_tasks:
+        file: auth-runtime.yml
+        apply:
+          become: "{{ ansible_facts.user_id != codexia_service_user }}"
+          become_user: "{{ codexia_service_user }}"
+          environment: "{{ service_runtime_env }}"
+      when: codexia_stage == 'auth-runtime'
+
+    - name: End auth runtime provisioning before deployment and other host operations
+      ansible.builtin.meta: end_host
+      when: codexia_stage == 'auth-runtime'
 
     - name: Inspect the current host without mutation
       ansible.builtin.include_tasks: inspect.yml

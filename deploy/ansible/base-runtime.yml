@@ -153,6 +153,9 @@
   ansible.builtin.stat:
     path: "{{ quadlet_dir }}/{{ item }}"
     follow: false
+    checksum_algorithm: sha256
+    get_mime: false
+    get_attributes: false
   loop:
     - codexia.network
     - codexia-data.network
@@ -179,17 +182,13 @@
     - {name: codexia-db, index: 5, result_index: 0}
     - {name: codexia-tunnel, index: 6, result_index: 1}
   when: base_runtime_containers.results[item.result_index].rc == 0
-- name: Read all existing base Quadlets before creating any host files or resources
-  ansible.builtin.slurp:
-    path: "{{ item.stat.path }}"
-  loop: "{{ base_runtime_existing_quadlets.results | selectattr('stat.exists', 'equalto', true) | list }}"
-  register: base_runtime_existing_quadlet_contents
 - name: Reject any existing base Quadlet drift before mutation
   ansible.builtin.assert:
     that:
-      - item.content == (lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/' + item.item.item, rstrip=false) | b64encode)
+      - item.stat.checksum is defined
+      - item.stat.checksum == (lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/' + item.item, rstrip=false) | hash('sha256'))
     fail_msg: Existing Codexia Quadlet differs from the reviewed source; no runtime resources were changed.
-  loop: "{{ base_runtime_existing_quadlet_contents.results }}"
+  loop: "{{ base_runtime_existing_quadlets.results | selectattr('stat.exists', 'equalto', true) | list }}"
 - name: Require explicit approval before PostgreSQL would initialize an empty data volume
   ansible.builtin.assert:
     that: codexia_database_initialization_approved | default(false) | bool

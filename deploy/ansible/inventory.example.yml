@@ -6,7 +6,7 @@ all:
           ansible_host: codexia.example.invalid
           ansible_user: codexia
       vars:
-        # Supported stages: inspect, host, secrets, base, deploy, restore-drill.
+        # Supported stages: inspect, host, secrets, base, auth-runtime, deploy, restore-drill.
         codexia_stage: inspect
         codexia_service_user: codexia
         codexia_service_group: codexia
@@ -18,6 +18,21 @@ all:
         codexia_secrets_approved: false
         codexia_base_approved: false
         codexia_database_initialization_approved: false
+        # Better Auth provisioning creates only the runtime role/schema and
+        # rootless secrets; migrations and service activation are separate.
+        codexia_auth_runtime_approved: false
+        codexia_auth_database_url_file: /private/codexia-auth-database-url
+        codexia_auth_secret_file: /private/codexia-auth-secret
+        codexia_oidc_client_secret_file: /private/codexia-oidc-client-secret
+        codexia_oauth_introspection_client_secret_file: /private/codexia-oauth-introspection-client-secret
+        codexia_public_origin: https://codexia.example.invalid
+        codexia_oidc_issuer: https://idp.example.invalid/oidc
+        codexia_oidc_client_id: codexia-web
+        codexia_oauth_introspection_client_id: codexia-resource-server
+        codexia_oauth_owner_subject: owner-subject-from-provider
+        codexia_oauth_owner_client_ids: codexia-web,codexia-ios
+        # Optional: match the API resource URI registered with the provider.
+        # codexia_api_audience: https://codexia.example.invalid/api
         # Required only for explicitly approved base-secret convergence.
         codexia_auth_token_file: /private/api-auth-token
         codexia_tunnel_token_file: /private/tunnel-token

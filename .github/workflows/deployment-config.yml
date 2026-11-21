@@ -1,7 +1,7 @@
 name: Verify Deployment Configuration
 on:
   pull_request:
-    branches: [main]
+    branches: [main, remove/legacy-pull-updater]
     paths:
       - deploy/ansible/**
       - deploy/backup/**
