@@ -600,6 +600,12 @@ function canonical(value: unknown): unknown {
 function contentRevision(value: unknown): string {
   return `\"sha256-${createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex")}\"`;
 }
+function scenarioSaveIdentity(projectId: string, operationId: string): { scenarioId: string; proposalId: string } {
+  const trimmedOperationId = operationId.trim();
+  const normalizedOperationId = trimmedOperationId.startsWith("story-") ? trimmedOperationId : `story-${trimmedOperationId}`;
+  const digest = createHash("sha256").update(JSON.stringify([projectId, normalizedOperationId])).digest("hex");
+  return { scenarioId: `scenario-${digest}`, proposalId: `story-scenario-save-${digest}` };
+}
 async function storyEntityScopes(reader: ModuleActionContext["reader"]) {
   return Promise.all(["bible", "plot"].map(async (prefix) => ({
     prefix,
@@ -1018,16 +1024,16 @@ function compareScenario(story: LoadedStorySnapshot, input: ObjectValue) {
       return { baseline, alternatives, sourceFingerprint: narrativeSourceFingerprint(story), adoption: "author-approved-state-proposal-required" };
 
 }
-type SavedScenario = { id: string; label: string; sceneId: string; alternatives: unknown[]; sourceFingerprint: string; savedAt: string };
+type SavedScenario = { id: string; label: string; sceneId: string; alternatives: unknown[]; sourceFingerprint: string; savedAt?: string };
 async function readModuleRows<T>(context:ModuleActionContext,path:string):Promise<{rows:T[];revision:string|null}> {
   const file=await readTextFile(context.reader,path);
   const parsed=file.content.trim()?JSON.parse(file.content):[];
   if(!Array.isArray(parsed))throw new TypeError("Invalid Story module records");
   return {rows:parsed as T[],revision:file.revision};
 }
-async function writeModuleRows(context:ModuleActionContext,path:string,revision:string|null,rows:unknown[],message:string,operationId?:string,reads:FileRevision[]=[]){
+async function writeModuleRows(context:ModuleActionContext,path:string,revision:string|null,rows:unknown[],message:string,operationId?:string,reads:FileRevision[]=[],proposalId?:string){
   const operation=buildOperation({reader:context.reader,reads:[{path,revision},...reads],writes:[{path,revision,content:stableJson(rows)}],message,effect:"metadata",operationId});
-  await context.propose([operation]);
+  await context.propose([operation],undefined,proposalId);
 }
 async function reviewFindings(context:ModuleActionContext,story:LoadedStorySnapshot,sceneId?:string){
   const findings=await narrativeFindings(story,sceneId);
@@ -1442,12 +1448,14 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
       const comparison=compareScenario(story,input);
       if(input.sourceFingerprint!==comparison.sourceFingerprint)throw Object.assign(new Error("Story changed; compare alternatives again"),{code:"stale_source"});
       const {rows,revision}=await readModuleRows<SavedScenario>(context,SCENARIO_PATH);
-      const id=typeof input.id==="string"?input.id:randomUUID();
+      const operationId=requestedOperationId(input);
+      const identity=operationId?scenarioSaveIdentity(context.reader.snapshot.projectId,operationId):undefined;
+      const id=typeof input.id==="string"?input.id:identity?.scenarioId??randomUUID();
       if(!SAFE_ID.test(id))throw new TypeError("Invalid scenario id");
       const label=stringValue(input.label,"label").trim();
       if(!label||label.length>256)throw new TypeError("Invalid scenario label");
-      const saved:SavedScenario={id,label,sceneId:stringValue(input.sceneId,"sceneId"),alternatives:input.alternatives as unknown[],sourceFingerprint:comparison.sourceFingerprint,savedAt:new Date().toISOString()};
-      await writeModuleRows(context,SCENARIO_PATH,revision,[...rows.filter(row=>row.id!==id),saved],"Save hypothetical scenario "+label,requestedOperationId(input));
+      const saved:SavedScenario={id,label,sceneId:stringValue(input.sceneId,"sceneId"),alternatives:input.alternatives as unknown[],sourceFingerprint:comparison.sourceFingerprint};
+      await writeModuleRows(context,SCENARIO_PATH,revision,[...rows.filter(row=>row.id!==id),saved],"Save hypothetical scenario "+label,operationId,[],identity?.proposalId);
       return saved;
     }),
     action("story.scenario.adopt",propose,fieldSchema(["id","alternativeIndex","sourceFingerprint"],["id","sourceFingerprint"]),async(input,context)=>{
