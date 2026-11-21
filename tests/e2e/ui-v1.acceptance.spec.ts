@@ -963,15 +963,10 @@ test("save details keep the confirmed work version separate from later device in
   });
 
   try {
-    await editor(page).click();
-    await editor(page).press("Control+End");
-    await editor(page).press("Enter");
-    await page.keyboard.insertText(firstAddition.slice(1));
+    await editor(page).fill(initial + firstAddition);
     await expectMarkdown(page, initial + firstAddition);
     await expect.poll(() => requests).toBe(1);
-    await editor(page).press("Control+End");
-    await editor(page).press("Enter");
-    await page.keyboard.insertText(secondAddition.slice(1));
+    await editor(page).fill(initial + firstAddition + secondAddition);
     await expectMarkdown(page, initial + firstAddition + secondAddition);
     await expect.poll(async () => (await readPersistenceDrafts(page))
       .find((draft) => draft.documentId === scene.id)?.markdown).toBe(initial + firstAddition + secondAddition);
