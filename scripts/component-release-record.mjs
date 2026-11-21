@@ -16,7 +16,7 @@ export function buildComponentReleaseRecord(component,sourceSha,identity,produce
     assertFrontendIdentity(identity);
     assert.equal(identity.profile,'full','Released frontend must be the Full profile');
     assert.ok(producer&&typeof producer==='object'&&!Array.isArray(producer),'Frontend producer receipt is missing');
-    assert.ok(['push','pull_request'].includes(producer.event),'Unsupported frontend producer event');
+    assert.ok(['push','workflow_run','pull_request'].includes(producer.event),'Unsupported frontend producer event');
     assert.match(producer.sourceSha??'',sha,'Frontend producer source SHA is invalid');
     assert.equal(identity.sourceSha,producer.sourceSha,'Frontend producer source does not match embedded asset identity');
     assert.equal(identity.version,producer.version,'Frontend producer version does not match embedded asset identity');
@@ -89,11 +89,11 @@ export function buildComponentReleaseRecord(component,sourceSha,identity,produce
         mergeBaseSha:receipt.mergeBaseSha,artifacts:Object.fromEntries(['core','full'].map(profile=>{
           const artifact=receipt.artifacts[profile];return [profile,{id:artifact.id,digest:artifact.digest,producerAttempt:artifact.producerAttempt,archiveSha256:artifact.archiveSha256}];
         }))};
-    }else if(producer.event==='push'&&producer.receipt){
+    }else if(['push','workflow_run'].includes(producer.event)&&producer.receipt){
       const receipt=producer.receipt;
       assert.ok(receipt&&typeof receipt==='object'&&!Array.isArray(receipt),'Backend build receipt is missing');
       assert.equal(receipt.format,'codexia-backend-build/v1');
-      assert.equal(receipt.event,'push');
+      assert.equal(receipt.event,producer.event);
       assert.equal(receipt.sourceSha,sourceSha,'Backend build source differs from main release authority');
       assert.equal(receipt.version,readComponentVersion('backend',String(receipt.workflowRunNumber)),'Backend build version differs from its workflow run number');
       assert.equal(receipt.sourceTree,producer.mainTree,'Backend build tree differs from exact main tree');
@@ -110,7 +110,7 @@ export function buildComponentReleaseRecord(component,sourceSha,identity,produce
       assert.notEqual(receipt.artifacts.core.id,receipt.artifacts.full.id,'Backend Core and Full artifacts must be distinct');
       assert.notEqual(receipt.artifacts.core.digest,receipt.artifacts.full.digest,'Backend Core and Full artifact digests must be distinct');
       version=receipt.version;
-      metadata.producer={event:'push',sourceSha:receipt.sourceSha,version:receipt.version,workflowRunId:receipt.workflowRunId,
+      metadata.producer={event:producer.event,sourceSha:receipt.sourceSha,version:receipt.version,workflowRunId:receipt.workflowRunId,
         workflowRunNumber:receipt.workflowRunNumber,sourceTree:receipt.sourceTree,artifacts:Object.fromEntries(['core','full'].map(profile=>{
           const artifact=receipt.artifacts[profile];return [profile,{id:artifact.id,digest:artifact.digest,producerAttempt:artifact.producerAttempt,archiveSha256:artifact.archiveSha256}];
         }))};
