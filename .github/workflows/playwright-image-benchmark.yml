@@ -1,6 +1,10 @@
-name: Compare Playwright image registry and OS variants (manual)
+name: Compare Playwright image registry and OS variants
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/playwright-image-benchmark.yml
   workflow_dispatch:
     inputs:
       mirror_digest:
@@ -44,11 +48,11 @@ jobs:
       - name: Require valid digests and matching Playwright version
         shell: bash
         env:
-          CHROMIUM_DIGEST: ${{ inputs.chromium_digest }}
-          WEBKIT_DIGEST: ${{ inputs.webkit_digest }}
-          MIRROR_DIGEST: ${{ inputs.mirror_digest }}
-          UBUNTU_CHROMIUM_DIGEST: ${{ inputs.ubuntu_chromium_digest }}
-          UBUNTU_WEBKIT_DIGEST: ${{ inputs.ubuntu_webkit_digest }}
+          CHROMIUM_DIGEST: ${{ (inputs.chromium_digest || 'sha256:5d3b49c8fdc8d3982d810dd884ba6c902d8419f3bff477d86f23edb420fb7c50') }}
+          WEBKIT_DIGEST: ${{ (inputs.webkit_digest || 'sha256:4e8ffa23fb1636bf3d98a2b84216e0b768ae55634d95a8b369696f697b60f15b') }}
+          MIRROR_DIGEST: ${{ (inputs.mirror_digest || 'sha256:09bbfa8d79c3db51a51c8d77f4e7dd725068d60f2b2aa2a47a300e24a2f850d5') }}
+          UBUNTU_CHROMIUM_DIGEST: ${{ (inputs.ubuntu_chromium_digest || 'sha256:893b8b5c8275d4a58da814521d961db70c0417d0ab716be3bfc004e4943c58b6') }}
+          UBUNTU_WEBKIT_DIGEST: ${{ (inputs.ubuntu_webkit_digest || 'sha256:bc6fd8952f5b82671a46a0f2dc02c70820edc83b7eb74e2f81a99863e59b97b4') }}
         run: |
           set -euo pipefail
           for digest in "$CHROMIUM_DIGEST" "$WEBKIT_DIGEST" "$MIRROR_DIGEST" "$UBUNTU_CHROMIUM_DIGEST" "$UBUNTU_WEBKIT_DIGEST"; do
@@ -70,7 +74,7 @@ jobs:
         browser: [chromium, webkit]
     container:
       image: mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
-      options: --ipc=host
+      options: --init --ipc=host
     services:
       postgres:
         image: postgres:17
@@ -118,11 +122,11 @@ jobs:
       matrix:
         browser: [chromium, webkit]
     container:
-      image: ${{ format('ghcr.io/{0}/playwright-{1}@{2}', github.repository, matrix.browser, matrix.browser == 'chromium' && inputs.chromium_digest || inputs.webkit_digest) }}
+      image: ${{ format('ghcr.io/{0}/playwright-{1}@{2}', github.repository, matrix.browser, matrix.browser == 'chromium' && (inputs.chromium_digest || 'sha256:5d3b49c8fdc8d3982d810dd884ba6c902d8419f3bff477d86f23edb420fb7c50') || (inputs.webkit_digest || 'sha256:4e8ffa23fb1636bf3d98a2b84216e0b768ae55634d95a8b369696f697b60f15b')) }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-      options: --ipc=host
+      options: --init --ipc=host
     services:
       postgres:
         image: postgres:17
@@ -170,11 +174,11 @@ jobs:
       matrix:
         browser: [chromium, webkit]
     container:
-      image: ${{ format('ghcr.io/{0}/playwright-mirror-all@{1}', github.repository, inputs.mirror_digest) }}
+      image: ${{ format('ghcr.io/{0}/playwright-mirror-all@{1}', github.repository, (inputs.mirror_digest || 'sha256:09bbfa8d79c3db51a51c8d77f4e7dd725068d60f2b2aa2a47a300e24a2f850d5')) }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-      options: --ipc=host
+      options: --init --ipc=host
     services:
       postgres:
         image: postgres:17
@@ -222,11 +226,11 @@ jobs:
       matrix:
         browser: [chromium, webkit]
     container:
-      image: ${{ format('ghcr.io/{0}/playwright-ubuntu-{1}@{2}', github.repository, matrix.browser, matrix.browser == 'chromium' && inputs.ubuntu_chromium_digest || inputs.ubuntu_webkit_digest) }}
+      image: ${{ format('ghcr.io/{0}/playwright-ubuntu-{1}@{2}', github.repository, matrix.browser, matrix.browser == 'chromium' && (inputs.ubuntu_chromium_digest || 'sha256:893b8b5c8275d4a58da814521d961db70c0417d0ab716be3bfc004e4943c58b6') || (inputs.ubuntu_webkit_digest || 'sha256:bc6fd8952f5b82671a46a0f2dc02c70820edc83b7eb74e2f81a99863e59b97b4')) }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-      options: --ipc=host
+      options: --init --ipc=host
     services:
       postgres:
         image: postgres:17

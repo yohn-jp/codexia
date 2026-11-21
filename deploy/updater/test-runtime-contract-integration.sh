@@ -41,6 +41,7 @@ declare -a OWNED_UNITS=()
 
 cleanup() {
   local status=$?
+  local schema_base_id='' schema_target_id='' owned_runtime_image schema_image_data schema_backup blue_source blue_temp restore_schema_blue
   trap - EXIT INT TERM
   set +e
   if (( CLEANUP_ARMED )); then
@@ -49,11 +50,45 @@ cleanup() {
     systemctl --user revert --runtime codexia-slot-blue.service codexia-slot-green.service >/dev/null 2>&1 || true
     systemctl --user daemon-reload >/dev/null 2>&1 || true
     for unit in "${OWNED_UNITS[@]}"; do systemctl --user stop "$unit" >/dev/null 2>&1 || true; done
+    schema_image_data="$WORK_DIR/schema-proof-$NONCE/images.json"
+    schema_backup="$WORK_DIR/schema-proof-$NONCE/recovery/original-blue.container"
+    blue_source="$QUADLET_DIR/codexia-slot-blue.container"
+    restore_schema_blue=no
+    if [[ -f "$schema_image_data" && ! -L "$schema_image_data" && "$(stat -c '%u' "$schema_image_data" 2>/dev/null || true)" == "$UID_VALUE" ]]; then
+      read -r schema_base_id schema_target_id < <(node -e 'const x=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); if(x.nonce!==process.argv[2])process.exit(2); process.stdout.write(`${x.baseId} ${x.targetId}`)' "$schema_image_data" "$NONCE" 2>/dev/null || true)
+    fi
+    if [[ -f "$schema_backup" && ! -L "$schema_backup" && "$(stat -c '%u:%a' "$schema_backup" 2>/dev/null || true)" == "$UID_VALUE:600" \
+      && -f "$schema_image_data" && "$(stat -c '%u' "$schema_image_data" 2>/dev/null || true)" == "$UID_VALUE" \
+      && -n "$schema_base_id" && -n "$schema_target_id" ]]; then
+      if grep -Fq "Image=$IMAGE_ID" "$schema_backup" && grep -Fq 'ContainerName=codexia-slot-blue' "$schema_backup"; then
+        if [[ ! -e "$blue_source" && ! -L "$blue_source" ]]; then
+          restore_schema_blue=yes
+        elif [[ -f "$blue_source" && ! -L "$blue_source" && "$(stat -c '%u' "$blue_source" 2>/dev/null || true)" == "$UID_VALUE" ]] \
+          && grep -Fxq "Label=codexia.runtime-contract-test=$NONCE" "$blue_source" \
+          && { grep -Fxq "Image=$schema_base_id" "$blue_source" || grep -Fxq "Image=$schema_target_id" "$blue_source"; }; then
+          restore_schema_blue=yes
+        fi
+      fi
+    fi
+    if [[ "$restore_schema_blue" == yes ]]; then
+      blue_temp="$blue_source.restore.$NONCE"
+      if [[ ! -e "$blue_temp" && ! -L "$blue_temp" ]]; then
+        install -o "$UID_VALUE" -g "$UID_VALUE" -m 0600 "$schema_backup" "$blue_temp" && mv -- "$blue_temp" "$blue_source"
+        systemctl --user daemon-reload >/dev/null 2>&1 || true
+      fi
+    fi
     for container in codexia-slot-blue codexia-slot-green codexia-api-proxy "$PROXY_FIXTURE_CONTAINER"; do
       if podman container exists "$container" >/dev/null 2>&1; then
         actual="$(normalize_image_id "$(podman inspect --type container --format '{{.Image}}' "$container" 2>/dev/null || true)")"
         label="$(podman inspect --type container --format '{{ index .Config.Labels "codexia.runtime-contract-test" }}' "$container" 2>/dev/null || true)"
-        if [[ -n "$IMAGE_ID" && "$actual" == "$IMAGE_ID" && "$label" == "$NONCE" ]]; then podman rm --force "$container" >/dev/null 2>&1 || true; fi
+        owned_runtime_image=no
+        [[ -n "$IMAGE_ID" && "$actual" == "$IMAGE_ID" ]] && owned_runtime_image=yes
+        schema_image_data="$WORK_DIR/schema-proof-$NONCE/images.json"
+        if [[ -f "$schema_image_data" && ! -L "$schema_image_data" && "$(stat -c '%u' "$schema_image_data" 2>/dev/null || true)" == "$UID_VALUE" ]]; then
+          read -r schema_base_id schema_target_id < <(node -e 'const x=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); if(x.nonce!==process.argv[2])process.exit(2); process.stdout.write(`${x.baseId} ${x.targetId}`)' "$schema_image_data" "$NONCE" 2>/dev/null || true)
+          if [[ "$actual" == "$schema_base_id" || "$actual" == "$schema_target_id" ]]; then owned_runtime_image=yes; fi
+        fi
+        if [[ "$owned_runtime_image" == yes && "$label" == "$NONCE" ]]; then podman rm --force "$container" >/dev/null 2>&1 || true; fi
       fi
     done
     if podman container exists codexia-db >/dev/null 2>&1; then
@@ -76,6 +111,12 @@ cleanup() {
     done
     for secret in "${OWNED_SECRETS[@]}"; do podman secret rm "$secret" >/dev/null 2>&1 || true; done
     [[ -z "$IMAGE_TAG" ]] || podman image rm "$IMAGE_TAG" >/dev/null 2>&1 || true
+    for image_tag in "localhost/codexia-schema-base:$NONCE" "localhost/codexia-schema-target:$NONCE"; do
+      if podman image exists "$image_tag" >/dev/null 2>&1; then
+        label="$(podman image inspect --format '{{ index .Labels "codexia.runtime-contract-test" }}' "$image_tag" 2>/dev/null || true)"
+        [[ -n "$NONCE" && "$label" == "$NONCE" ]] && podman image rm "$image_tag" >/dev/null 2>&1 || true
+      fi
+    done
     for file in "${OWNED_FILES[@]}"; do
       [[ -f "$file" && ! -L "$file" ]] || continue
       case "$(basename -- "$file")" in
@@ -674,6 +715,15 @@ remove_effective_override_text() {
   (( ${#candidates[@]} == 1 )) || die 'could not identify the unique newly created systemd CPUQuota override file'
   sed -i -E '/^(CPUQuota|CPUQuotaPerSecUSec)=/d' -- "${candidates[0]}"
 }
+
+systemctl --user start codexia-db.service
+wait_for_unit codexia-db.service active
+node "$SCRIPT_DIR/test-schema-maintenance-postgres-integration.mjs" "$REPO_ROOT" "$WORK_DIR" "$NONCE" "${CODEXIA_RUNTIME_ACCEPTANCE_SOURCE_SHA:?Checked-out source revision is required}"
+schema_recovery_root="$WORK_DIR/schema-proof-$NONCE/recovery"
+mkdir -m 0700 -- "$schema_recovery_root"
+cp -- "$QUADLET_DIR/codexia-slot-blue.container" "$schema_recovery_root/original-blue.container"
+chmod 0600 "$schema_recovery_root/original-blue.container"
+node "$SCRIPT_DIR/test-schema-maintenance-recovery-integration.mjs" "$REPO_ROOT" "$WORK_DIR" "$NONCE"
 
 systemctl --user start codexia-slot-blue.service
 wait_for_unit codexia-slot-blue.service active

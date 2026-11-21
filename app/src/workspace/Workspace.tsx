@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from "react";
 import { Panel, PanelGroup, PanelResizeHandle, setNonce } from "react-resizable-panels";
 import type { UiMode, WorkspacePanel, WorkspacePanelRequest } from "../application/contracts";
 import {
@@ -76,8 +76,33 @@ function domId(prefix: string, panelId: string): string {
   return `${prefix}-${Array.from(panelId).map((char) => /[A-Za-z0-9_-]/.test(char) ? char : `-${char.codePointAt(0)?.toString(16)}-`).join("")}`;
 }
 
+function moveContainer(target: HTMLElement, container: HTMLElement): void {
+  const moveBeforeTarget = target as HTMLElement & { moveBefore?: (node: Node, child: Node | null) => void };
+  if (target.isConnected && container.isConnected && typeof moveBeforeTarget.moveBefore === "function") moveBeforeTarget.moveBefore(container, null);
+  else target.append(container);
+}
+
+function PreservedPanelSlot({ container, parkingRef }: { container: HTMLElement; parkingRef?: RefObject<HTMLDivElement | null> }): ReactNode {
+  const hostRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!hostRef.current) return;
+    container.hidden = false;
+    container.inert = false;
+    container.removeAttribute("aria-hidden");
+    moveContainer(hostRef.current, container);
+    return () => {
+      container.hidden = true;
+      container.inert = true;
+      container.setAttribute("aria-hidden", "true");
+      if (parkingRef?.current) moveContainer(parkingRef.current, container);
+    };
+  }, [container, parkingRef]);
+  return <div className="st-workspace-preserved-panel-slot" ref={hostRef} />;
+}
+
 function PanelContent({ panel }: { panel?: WorkspacePanel }): ReactNode {
   if (!panel) return <p className="st-workspace-unavailable">このパネルは現在利用できません。パネル一覧から閉じるか、機能を再度有効にしてください。</p>;
+  if (panel.preserveContainer) return <PreservedPanelSlot container={panel.preserveContainer} parkingRef={panel.preserveParkingRef} />;
   return <>{panel.render()}</>;
 }
 

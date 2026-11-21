@@ -290,6 +290,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const refreshKnowledgeBrowse = useCallback(() => setKnowledgeListRetryEpoch((current) => current + 1), []);
   const [nodeId, setNodeId] = useState("");
   const [selectedKnowledgeNode, setSelectedKnowledgeNode] = useState<KnowledgeNode | null>(null);
+  const [knowledgeSelectionError, setKnowledgeSelectionError] = useState<{ projectId: string; nodeId: string; message: string } | null>(null);
   const [nodeEvidence, setNodeEvidence] = useState<{ projectId: string; nodeId: string; evidence: PersistenceAnchorView[] } | null>(null);
   const [nodeEvidenceError, setNodeEvidenceError] = useState("");
   const [evidenceJump, setEvidenceJump] = useState<EvidenceJump>();
@@ -309,6 +310,20 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const saveDocumentRef = useRef<() => Promise<void>>(async () => undefined);
   const scratchGuardRef = useRef<(() => Promise<void>) | null>(null);
   const editorRef = useRef<ManuscriptInputHandle>(null);
+  const [editorPortalContainer] = useState<HTMLElement | null>(() => {
+    if (typeof document === "undefined") return null;
+    const container = document.createElement("div");
+    container.className = "pg-preserved-editor-container";
+    container.hidden = true;
+    container.inert = true;
+    container.setAttribute("aria-hidden", "true");
+    return container;
+  });
+  const editorPortalParkingRef = useRef<HTMLDivElement>(null);
+  const attachEditorPortalParking = useCallback((parking: HTMLDivElement | null) => {
+    editorPortalParkingRef.current = parking;
+    if (parking && editorPortalContainer) parking.append(editorPortalContainer);
+  }, [editorPortalContainer]);
   const transitionErrorRef = useRef("");
   const clientIdRef = useRef("");
   const openSequenceRef = useRef(0);
@@ -431,6 +446,8 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   }, [documents, documentId, projectId]);
   const selectedNode = nodes.find((candidate) => candidate.id === nodeId && candidate.projectId === projectId)
     ?? (selectedKnowledgeNode?.id === nodeId && selectedKnowledgeNode.projectId === projectId ? selectedKnowledgeNode : null);
+  const selectedNodeError = knowledgeSelectionError?.projectId === projectId && knowledgeSelectionError.nodeId === nodeId
+    ? knowledgeSelectionError.message : "";
   const visibleKnowledgeNodes = knowledgeLegacyMode ? nodes.filter((node) =>
     node.name.toLocaleLowerCase().includes(knowledgeQuery.trim().toLocaleLowerCase()) &&
     (!knowledgeTypeFilter || node.type === knowledgeTypeFilter) &&
@@ -675,6 +692,22 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       if (sequence === knowledgeBrowseSequenceRef.current && projectIdRef.current === selectedProjectId && !sessionBlockedRef.current) setKnowledgeListError(error instanceof Error ? error.message : "Knowledge一覧を読み込めませんでした。");
     } finally { if (sequence === knowledgeBrowseSequenceRef.current && projectIdRef.current === selectedProjectId && !sessionBlockedRef.current) setKnowledgePageLoading(false); }
   }, [projectId, knowledgeNextCursor, knowledgePageLoading, knowledgeQuery, knowledgeTypeFilter, knowledgeStatusFilter]);
+
+  useEffect(() => {
+    setKnowledgeSelectionError(null);
+    if (sessionBlocked || !projectId || !nodeId || selectedNode) return;
+    // A canonical evidence link can point outside the current browse page.
+    const controller = new AbortController();
+    const isCurrent = () => !controller.signal.aborted && !sessionBlockedRef.current && projectIdRef.current === projectId;
+    void api.persistenceNode(projectId, nodeId, controller.signal).then(({ node }) => {
+      if (!isCurrent()) return;
+      if (node.projectId !== projectId || node.id !== nodeId) throw new Error("Knowledgeの識別情報が一致しません。");
+      setSelectedKnowledgeNode(node);
+    }).catch((error: unknown) => {
+      if (isCurrent()) setKnowledgeSelectionError({ projectId, nodeId, message: error instanceof Error ? error.message : "Knowledge詳細を読み込めませんでした。" });
+    });
+    return () => controller.abort();
+  }, [projectId, nodeId, selectedNode?.id, sessionBlocked]);
 
   useEffect(() => {
     if (sessionBlocked) return;
@@ -2377,6 +2410,9 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             <p>Knowledge一覧を読み込めませんでした。{knowledgeListError}</p>
             <button type="button" onClick={() => setKnowledgeListRetryEpoch((value) => value + 1)} disabled={knowledgeListLoading}>再試行</button>
           </div>}
+          {nodeId && !selectedNode && (selectedNodeError
+            ? <p className="pg-alert" role="alert">{selectedNodeError}</p>
+            : <p role="status">Knowledge詳細を読み込んでいます。</p>)}
           {selectedNode && <KnowledgeContextInspector key={selectedNode.id} node={selectedNode} nodes={nodes} documentId={active?.document.id} revisionId={active?.revision.id} clean={Boolean(active&&!active.dirty&&!active.remoteConflict&&active.save==="saved")} selectedEvidenceId={selectedEvidenceId??""} evidenceLoadKey={(active?.evidenceLoadKey??0)+nativeReviewEpoch} onOpenEvidence={(item)=>void openNodeEvidence(item)} onDataChanged={refreshKnowledgeBrowse} onNodeUpdate={(updated)=>{setSelectedKnowledgeNode(updated);refreshKnowledgeBrowse();}} onMerge={(target,source)=>{setSelectedKnowledgeNode(target);setNodeId(target.id);refreshKnowledgeBrowse();setNotice("Knowledgeを統合しました。")}} />}
           {selectedNode && <section aria-label="Knowledgeの根拠">
             <h3>{selectedNode.name}の根拠</h3>
@@ -2421,7 +2457,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       </aside>);
   const panels: WorkspacePanel[] = [
     { id: "outline", title: "作品と構成", render: () => library },
-    { id: "editor", title: "原稿", render: () => editor },
+    { id: "editor", title: "原稿", preserveContainer: editorPortalContainer ?? undefined, preserveParkingRef: editorPortalParkingRef, render: () => editor },
     { id: "inspector", title: "知識と根拠", render: () => knowledge },
   ];
   const readCurrentEditor = (): BrowserEditorDocument | null => {
@@ -2440,6 +2476,8 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   panels.push({ id: "review", title: "提案レビュー", render: () => <>{moduleError && <p role="alert">{moduleError}</p>}<NativeChangeSetReview key={projectId} projectId={projectId} onApplied={refreshAfterNativeApply} onOpenSource={(anchor, quote) => openNodeEvidence({ anchor, quote })} />{journal && <ProposalReview projectId={projectId} authorScope={authorScope} journal={journal} proposals={proposals} onChange={() => { void refreshModules(); }} onStatus={(message) => setNotice(message)} />}</> }, ...modulePanels);
   const Shell = mode === "mobile" ? MobileShell : DesktopShell;
   return <div className={`pg-workspace pg-shell pg-${mode}`}>
+    <div className="pg-preserved-editor-parking" hidden inert aria-hidden="true" ref={attachEditorPortalParking} />
+    {editorPortalContainer ? createPortal(editor, editorPortalContainer) : null}
     {active && createPortal(
       <article className="print-view pg-print-document" style={typographyStyle}>
         <h1>{active.document.title}</h1>
