@@ -99,8 +99,8 @@ if apply_stage > "$tmp/approval-denied.log" 2>&1; then
   exit 1
 fi
 if ! grep -q 'Better Auth provisioning requires explicit approval' "$tmp/approval-denied.log"; then
-  printf 'False-approval run did not report the expected guard; captured Ansible output follows:\n' >&2
-  cat "$tmp/approval-denied.log" >&2
+  printf 'False-approval run did not report the expected guard; task names observed:\n' >&2
+  grep -E '^TASK \[' "$tmp/approval-denied.log" >&2 || true
   exit 1
 fi
 for name in "${secret_names[@]}"; do
