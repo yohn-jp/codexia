@@ -16,6 +16,13 @@ async function editorMarkdown(page: Page): Promise<string> {
 async function expectEditor(page: Page, markdown: string): Promise<void> {
   await expect.poll(() => editorMarkdown(page)).toBe(markdown.replace(/\n+$/u, ""));
 }
+async function pauseAutosaveClock(page: Page): Promise<void> {
+  const startTime = Date.now();
+  await page.clock.install({ time: startTime });
+  // The browser clock runs between install and pause, including on a busy CI worker.
+  await page.clock.pauseAt(startTime + 60_000);
+}
+
 async function replaceEditor(page: Page, markdown: string): Promise<void> {
   await editor(page).click();
   await editor(page).press("ControlOrMeta+a");
@@ -406,8 +413,7 @@ test("a newer draft stays protected when a replayed save is already superseded r
 
 test("undoing an autosave draft back to the saved revision removes only that draft and never sends it", async ({ page }) => {
   const f = await fixture(page);
-  await page.clock.install();
-  await page.clock.pauseAt(new Date());
+  await pauseAutosaveClock(page);
   const savedMarkdown = f.one.revision.markdown;
   const patchBodies: string[] = [];
   await page.route(`**${documentPath(f)}`, async (route) => {
@@ -438,15 +444,14 @@ test("undoing an autosave draft back to the saved revision removes only that dra
 
 test("undo cleanup cannot remove a higher-generation draft written by another tab", async ({ page, context }) => {
   const f = await fixture(page);
-  await page.clock.install();
-  await page.clock.pauseAt(new Date());
+  await pauseAutosaveClock(page);
   const savedMarkdown = f.one.revision.markdown;
   await replaceEditor(page, "First tab temporary draft.");
   await expect.poll(async () => (await drafts(page)).find((d) => d.documentId === f.one.document.id)?.markdown).toBe("First tab temporary draft.");
 
+  // The Playwright clock belongs to the browser context, so the second
+  // tab inherits it without advancing the first tab's pending autosave.
   const second = await context.newPage();
-  await second.clock.install();
-  await second.clock.pauseAt(new Date());
   await second.goto(page.url());
   await expectEditor(second, "First tab temporary draft.");
   await replaceEditor(second, "Newer second-tab draft.");
