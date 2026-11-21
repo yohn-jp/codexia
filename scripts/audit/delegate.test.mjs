@@ -83,6 +83,8 @@ test('one Gemini Markdown covers all verified files and redacts unverified delet
     const compact = readFileSync(join(dir, 'gemini-diff.md'), 'utf8');
     assert.match(compact, /Diff-only packet/);
     assert.doesNotMatch(compact, /# Full file at head/);
+    assert.match(compact, /Review this file and relevant cross-file behavior/);
+    assert.match(compact, /END_OF_PACKET/);
     assert.ok(!existsSync(join(dir, 'files')));
     assert.match(text, /removed line withheld/);
     assert.doesNotMatch(text, /export const value = 1;/);
@@ -106,5 +108,32 @@ test('bad schema blocks only that branch without publishing a partial review', (
     const result = buildDelegation(f);
     assert.equal(result.reviews[f.feature].status, 'blocked');
     assert.equal(existsSync(join(f.site, 'reviews', f.feature)), false);
+  } finally { rmSync(f.base, { recursive: true, force: true }); }
+});
+
+test('compact packet preserves fenced diff containing a source heading collision', () => {
+  const f = fixture();
+  try {
+    const target = join(f.root, 'src/alpha.ts');
+    git(f.root, 'checkout', '-q', 'feature');
+    writeFileSync(target, 'export const value = 2;\n# Full file at head\n');
+    git(f.root, 'add', 'src/alpha.ts'); git(f.root, 'commit', '-qm', 'add heading collision');
+    const head = git(f.root, 'rev-parse', 'HEAD');
+    const folder = join(f.site, 'snapshots', head);
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'repomix.json'), JSON.stringify({ audit: { sourceSha: head }, files: { 'src/alpha.ts': 'export const value = 2;\n# Full file at head' } }));
+    writeFileSync(join(folder, 'manifest.json'), JSON.stringify({ sourceSha: head, files: [{ path: 'src/alpha.ts' }] }));
+    const manifest = JSON.parse(readFileSync(join(f.site, 'manifest.json'), 'utf8'));
+    manifest.branches[0].sha = head;
+    manifest.snapshots[head] = { status: 'ready', outputs: [{ name: 'repomix.json', bytes: 1 }] };
+    writeFileSync(join(f.site, 'manifest.json'), JSON.stringify(manifest));
+    const result = buildDelegation(f);
+    assert.equal(result.reviews[head].published, 1);
+    const compact = readFileSync(join(f.site, 'reviews', head, 'gemini-diff.md'), 'utf8');
+    assert.match(compact, /\\+# Full file at head/);
+    assert.match(compact, /Review this file and relevant cross-file behavior/);
+    assert.match(compact, /END_OF_PACKET/);
+    const markers = compact.match(/^\\x60{3,}$/gmu) ?? [];
+    assert.equal(markers.length % 2, 0, 'All fenced blocks must close');
   } finally { rmSync(f.base, { recursive: true, force: true }); }
 });
