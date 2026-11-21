@@ -41,6 +41,14 @@ export async function createModule(context: ModuleContext): Promise<ModuleDefini
 
 export { createMcpHttpContribution } from "./http.js";
 export { registerMcpTools } from "./tools.js";
+export {
+  MCP_OAUTH_SCOPES,
+  buildMcpProtectedResourceMetadata,
+  createMcpProtectedResourceMetadataResponse,
+  protectedResourceMetadataUrl,
+  type McpProtectedResourceMetadata,
+  type McpProtectedResourceOptions,
+} from "@codexia/contracts";
 export { ApiClient, McpApiError, actionClientFromContext } from "./api-client.js";
 export {
   createMcpWritingContext,
