@@ -583,6 +583,47 @@ test("a share activates only after its PostgreSQL apply and revocation is checke
   assert.equal((await publicBase.handle(new Request(expiredUrl), publicContext(expiredReader))).status, 404);
 });
 
+test("project-wide public shares include root scenes in their catalogue and scene route", async () => {
+  const files = fixtureFiles();
+  files.set("plot/volumes/root/volume.yaml", "kind: volume\nid: root\ntitle: Root\n");
+  files.set("plot/volumes/root/chapters/root/chapter.yaml", "kind: chapter\nid: root-chapter\ntitle: Root\nvolume: root\n");
+  files.set("plot/volumes/root/chapters/root/scenes/root-scene.yaml", "kind: scene\nid: root-scene\ntitle: 作品直下のシーン\nmanuscript: manuscript/root-scene.md\n");
+  files.set("manuscript/root-scene.md", "作品直下の本文。\n");
+  const token = "share_" + "r".repeat(43);
+  const rootSceneToken = "share_" + "s".repeat(43);
+  files.set(SHARE_GRANTS_PATH, [
+    { version: 1, grantVersion: 1, revocationVersion: 0, id: "project-share",
+      tokenHash: hashShareToken(token), scope: "", label: "Project preview",
+      createdAt: "2026-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z" },
+    { version: 1, grantVersion: 1, revocationVersion: 0, id: "root-scene-share",
+      tokenHash: hashShareToken(rootSceneToken), scope: { kind: "scene", id: "root-scene" }, label: "Root scene preview",
+      createdAt: "2026-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z" },
+  ].map((grant) => JSON.stringify(grant)).join("\n") + "\n");
+  const reader = new MemoryReader(files);
+  const [publicBase, publicScene] = createPublishingHttpContributions();
+  const context = actionContext(reader, []);
+  const url = `https://codexia.invalid/share/${token}`;
+
+  const catalogueResponse = await publicBase!.handle(new Request(url), context);
+  assert.equal(catalogueResponse.status, 200);
+  const catalogue = await catalogueResponse.json() as {
+    sceneCount: number;
+    rootScenes: Array<{ id: string; title: string }>;
+  };
+  assert.equal(catalogue.sceneCount, 3);
+  assert.deepEqual(catalogue.rootScenes, [{ id: "root-scene", title: "作品直下のシーン" }]);
+
+  const sceneResponse = await publicScene!.handle(new Request(`${url}/scenes/root-scene`), context);
+  assert.equal(sceneResponse.status, 200);
+  assert.equal((await sceneResponse.json() as { body: string }).body, "作品直下の本文。\n");
+
+  const rootSceneCatalogue = await publicBase!.handle(new Request(`https://codexia.invalid/share/${rootSceneToken}`), context);
+  assert.equal(rootSceneCatalogue.status, 200);
+  const scopedCatalogue = await rootSceneCatalogue.json() as { sceneCount: number; rootScenes: Array<{ id: string }> };
+  assert.equal(scopedCatalogue.sceneCount, 1);
+  assert.deepEqual(scopedCatalogue.rootScenes, [{ id: "root-scene", title: "作品直下のシーン" }]);
+});
+
 test("publishing migration hook validates the exact-byte episode map and selected hashed share records without duplicate writes", async () => {
   const map = "episodes:\n  - id: ep-old\n    number: 3\n    title: 古い話\n    publishedAt: 2024-02-03\n    scope: chapter\n    scopeId: ch-1\n    legacyNote: keep-me\n";
   const workspace = JSON.stringify([
