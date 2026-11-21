@@ -7,6 +7,33 @@ const sha=/^[a-f0-9]{40}$/u;
 const digest=/^[a-f0-9]{64}$/u;
 const positive=value=>Number.isSafeInteger(value)&&value>0;
 
+export function assertBackendPublication(publication) {
+  assert.ok(publication && typeof publication === 'object' && !Array.isArray(publication), 'Backend publication proof is missing');
+  assert.deepEqual(Object.keys(publication).sort(), ['event', 'verifyRunId', 'workflowHeadSha', 'workflowRunId']);
+  assert.equal(publication.event, 'workflow_run');
+  assert.match(publication.workflowHeadSha ?? '', sha, 'Backend publication workflow SHA is invalid');
+  assert.ok(positive(publication.workflowRunId) && positive(publication.verifyRunId), 'Backend publication run identity is invalid');
+  return publication;
+}
+
+export function backendPublicationFromEnvironment(env, sourceSha) {
+  if (env.GITHUB_EVENT_NAME !== 'workflow_run' || env.GITHUB_SHA === sourceSha) return undefined;
+  return assertBackendPublication({
+    event: 'workflow_run',
+    workflowHeadSha: env.GITHUB_SHA,
+    workflowRunId: Number(env.GITHUB_RUN_ID),
+    verifyRunId: Number(env.CODEXIA_VERIFY_RUN_ID),
+  });
+}
+
+export function publicationInWorkflowWindow(release, run) {
+  const published = Date.parse(release?.published_at);
+  const started = Date.parse(run?.created_at);
+  const finished = Date.parse(run?.updated_at);
+  return Number.isFinite(published) && Number.isFinite(started) && Number.isFinite(finished) &&
+    started <= published && published <= finished;
+}
+
 /** Build immutable component-release metadata while keeping tested bytes and reviewed main source distinct. */
 export function buildComponentReleaseRecord(component,sourceSha,identity,producer,mainTree){
   assert.ok(['frontend','backend'].includes(component),'Unknown component');
@@ -115,6 +142,15 @@ export function buildComponentReleaseRecord(component,sourceSha,identity,produce
           const artifact=receipt.artifacts[profile];return [profile,{id:artifact.id,digest:artifact.digest,producerAttempt:artifact.producerAttempt,archiveSha256:artifact.archiveSha256}];
         }))};
     }
+  }
+  if (component === 'backend' && producer.publication !== undefined) {
+    assert.ok(['workflow_run', 'pull_request'].includes(producer.event), 'Historical backend release requires verified completion');
+    metadata.publication = assertBackendPublication(producer.publication);
+    assert.notEqual(metadata.publication.workflowHeadSha, sourceSha, 'Historical source has no distinct workflow HEAD');
+    if (producer.event === 'workflow_run') assert.equal(metadata.producer.workflowRunId, metadata.publication.workflowRunId,
+      'Backend build receipt belongs to another publication workflow');
+    if (producer.event === 'pull_request') assert.equal(metadata.producer.verifyRunId, metadata.publication.verifyRunId,
+      'Backend promotion receipt belongs to another Verify run');
   }
   metadata.version=version;
   const tag=component+'-v'+version;

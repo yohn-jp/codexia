@@ -20,6 +20,18 @@ test('frontend artifact binds its ID and digest to the producer run and exact bu
   assert.doesNotThrow(()=>assertFrontendArtifactEvidence(result.run,result.artifact,result.jobs,result.expected));
 });
 
+test('Verify completion can build an exact source behind the workflow engine head',()=>{
+  const result=evidence();
+  const workflowSha='c'.repeat(40);
+  const run={...result.run,event:'workflow_run',head_sha:workflowSha};
+  const artifact={...result.artifact,workflow_run:{...result.artifact.workflow_run,head_sha:workflowSha}};
+  const jobs=result.jobs.map(job=>({...job,head_sha:workflowSha}));
+  const expected={...result.expected,event:'workflow_run',workflowSha};
+  assert.doesNotThrow(()=>assertFrontendArtifactEvidence(run,artifact,jobs,expected));
+  assert.throws(()=>assertFrontendArtifactEvidence(run,artifact,jobs,{...expected,workflowSha:'d'.repeat(40)}));
+  assert.throws(()=>assertFrontendArtifactEvidence(run,artifact,jobs,{...expected,sourceSha:workflowSha}));
+});
+
 test('frontend promotion accepts a full-plan merged-tree PR producer only from its current successful UI attempt',()=>{
   assert.equal(typeof assertFrontendPromotionArtifactEvidence,'function','promotion evidence verifier is missing');
   const producerSha='c'.repeat(40), tree='d'.repeat(40), mergeSha='e'.repeat(40);
