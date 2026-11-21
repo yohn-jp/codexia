@@ -1,3 +1,9 @@
+import { collect } from './collection.mjs';
+
+const REPOSITORY = 'yohn-jp/codexia';
+const API = 'https://api.github.com/repos/' + REPOSITORY + '/';
+const WORKFLOW_SOURCE = './verify.yml';
+
 const el = id => document.getElementById(id);
 const date = input => { const d = Date.parse(input ?? ''); return Number.isFinite(d) ? d : null; };
 const duration = sec => sec == null || !Number.isFinite(sec) ? '—'
@@ -27,6 +33,16 @@ function quantile(numbers, p) {
   return sorted[Math.ceil(p * sorted.length) - 1];
 }
 let all = [], selected = null, coverage = {};
+
+async function request(endpoint) {
+  const response = await fetch(API + endpoint, {
+    headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
+    signal: AbortSignal.timeout(20_000),
+    redirect: 'error',
+  });
+  if (!response.ok) throw new Error('GitHub Actions metadata unavailable (HTTP ' + response.status + ')');
+  return response.json();
+}
 
 function contextRow(label, value) {
   const row = node('div', 'context-row');
@@ -166,12 +182,13 @@ function render() {
 }
 async function main() {
   try {
-    const response = await fetch('./data.json', { cache: 'no-store' });
-    if (!response.ok) throw new Error('HTTP ' + response.status);
-    const result = await response.json();
-    if (result.schema !== 'codexia-ci-dashboard/v1' || !Array.isArray(result.prs)) {
-      throw new Error('不正なデータ形式');
-    }
+    const workflowResponse = await fetch(WORKFLOW_SOURCE, {
+      signal: AbortSignal.timeout(20_000),
+      redirect: 'error',
+    });
+    if (!workflowResponse.ok) throw new Error('Verify workflow source unavailable (HTTP ' + workflowResponse.status + ')');
+    const result = await collect(request, await workflowResponse.text());
+    if (result.schema !== 'codexia-ci-dashboard/v1' || !Array.isArray(result.prs)) throw new Error('不正なデータ形式');
     all = result.prs;
     coverage = { ...result.coverage, observedAt: result.observedAt };
     const select = el('pr'); clear(select);
@@ -181,8 +198,7 @@ async function main() {
     }
     select.disabled = !all.length;
     if (!all.length) {
-      el('status').textContent = result.error ? '収集失敗: ' + result.error
-        : coverage.note ?? 'このサンプル範囲にPRデータがありません。';
+      el('status').textContent = coverage.note ?? 'このサンプル範囲にPRデータがありません。';
       for (const id of ['timeline','history','steps']) el(id).replaceChildren(node('p','empty','データなし'));
       return;
     }

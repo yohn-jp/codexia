@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { appendFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -25,12 +24,13 @@ export async function resolveManualPublisherRun({ env, checkoutSha, fetchImpl = 
   assert.match(env.GITHUB_SHA ?? '', sha, 'Main workflow SHA is invalid');
   assert.equal(checkoutSha, env.GITHUB_SHA, 'Trusted verifier checkout differs from the dispatch source');
   assert.match(env.CODEXIA_PUBLISHER_RUN_ID ?? '', /^[1-9][0-9]*$/u, 'A positive backend publisher run ID is required');
+  assert.match(env.CODEXIA_PUBLISHER_SHA ?? '', sha, 'A backend publisher source SHA is required');
   const id = Number(env.CODEXIA_PUBLISHER_RUN_ID);
   assert.ok(Number.isSafeInteger(id) && id > 0, 'Backend publisher run ID is outside the supported range');
   const token = env.GH_TOKEN || env.GITHUB_TOKEN;
   assert.ok(typeof token === 'string' && token.length > 0, 'Actions read token is required');
   const run = await readPublisherRun(id, token, fetchImpl);
-  assertTrustedBackendPublicationRun(run, { id, attempt: run.run_attempt, headSha: run.head_sha });
+  assertTrustedBackendPublicationRun(run, { id, attempt: run.run_attempt, headSha: env.CODEXIA_PUBLISHER_SHA });
   return {
     id: run.id,
     run_attempt: run.run_attempt,
@@ -45,17 +45,10 @@ export async function resolveManualPublisherRun({ env, checkoutSha, fetchImpl = 
   };
 }
 
-export async function writePublisherSourceOutput(run, outputPath) {
-  assert.match(outputPath ?? '', /^\//u, 'Workflow output path must be absolute');
-  assert.match(run?.head_sha ?? '', sha, 'Verified publisher source SHA is invalid');
-  await appendFile(outputPath, `publisher_source_sha=${run.head_sha}\n`);
-}
-
 async function main() {
   const env = process.env;
   const checkoutSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const run = await resolveManualPublisherRun({ env, checkoutSha });
-  await writePublisherSourceOutput(run, env.GITHUB_OUTPUT);
   console.log(`Selected successful main backend publisher run ${run.id}, attempt ${run.run_attempt}, source ${run.head_sha}`);
 }
 

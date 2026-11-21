@@ -5,20 +5,20 @@ Status: **implemented as read-only observability; the first live Actions collect
 ## Deployment and ownership
 
 - Single publishing authority: [Repository Audit Pages](../../.github/workflows/repository-audit.yml). The CI dashboard is bundled at **/ci/** inside its existing Pages artifact. No second Pages publisher or competing root site.
-- Triggers are unchanged: main push or manual workflow dispatch, plus the existing audit PR preview. **No schedule and no workflow_run trigger.** PR previews intentionally contain an empty, explicitly labeled dataset.
+- Triggers are unchanged: main push or manual workflow dispatch, plus the existing audit PR preview. **No schedule and no workflow_run trigger.** The static bundle contains no captured run data.
 - Existing Pages upload/deploy actions and the **github-pages** environment are reused. Pages Source must be GitHub Actions.
-- Read-only **actions: read** permission is added to the existing packaging job. No logs, artifacts, DB access, tokens in published JSON or untrusted PR code execution.
+- The packaging workflow needs only **contents: read**. The browser requests public Actions metadata directly from GitHub's unauthenticated API; no token or private data is published, and no PR code executes in the workflow.
 - Published URL: the repository's configured Pages base plus **/ci/** (typically https://yohn-jp.github.io/codexia/ci/ unless a custom domain is configured).
-- Data is refreshed during each eligible main Pages publish, **not** on every PR completion. To manually refresh without a main push, dispatch Repository Audit Pages on main. This avoids rerunning the heavy branch audit for each PR.
+- Data is fetched when a visitor opens **/ci/**, so it reflects current public run metadata without publishing a generated data file. The browser bounds the request to two run-inventory pages and 20 selected workflows; each workflow's job history is capped at two pages.
 
 ## Source and sampling
 
 Collector: [collect.mjs](../../scripts/ci-dashboard/collect.mjs); analyzer: [analysis.mjs](../../scripts/ci-dashboard/analysis.mjs); [static client](../../scripts/ci-dashboard/site/).
 
-1. Query up to four recent pages of repository pull_request Actions runs (up to 400 records). Include only GitHub-provided PR number and exact PR head SHA.
-2. Group by PR number and head SHA. Keep the latest run per workflow ID, and only groups containing an observed Verify Codexia. Bound output to 24 PR revisions and 90 workflow runs. Mark truncated history.
-3. Fetch attempt-scoped job inventories and recorded step timestamps. Fail the collector on incomplete job pagination; never infer skipped or cancelled work as successful validation.
-4. Only public run/job/step metadata is serialized. No downloaded logs, tokens, artifacts or executable PR code.
+1. The browser queries up to two recent pages of repository pull_request Actions runs (up to 200 records). Include only GitHub-provided PR number and exact PR head SHA.
+2. Group by PR number and head SHA. Keep the latest run per workflow ID, and only groups containing an observed Verify Codexia. Bound the display to 20 PR revisions and 20 workflow runs to stay within GitHub's unauthenticated API rate limit. Mark truncated history.
+3. Fetch attempt-scoped job inventories and recorded step timestamps. Fail the view on incomplete job pagination; never infer skipped or cancelled work as successful validation.
+4. Only public run/job/step metadata is held in the browser for display. No downloaded logs, tokens, artifacts or executable PR code.
 
 ## Metrics and limitations
 
@@ -58,11 +58,11 @@ With repository Node/pnpm dependencies installed:
 node --test scripts/ci-dashboard/*.test.mjs scripts/ci-impact.test.mjs
 ~~~
 
-An empty static preview requires no GitHub credentials:
+The static preview bundle requires no GitHub credentials:
 
 ~~~sh
 mkdir -p /tmp/codexia-audit-site
 node scripts/ci-dashboard/collect.mjs /tmp/codexia-audit-site --preview
 ~~~
 
-If GitHub's read-only telemetry API fails during main publishing, the collector writes a visible unavailable state to /ci/data.json rather than erasing the separate audit portal. Inspect the packaging job logs and summary; do not interpret a green Pages deployment as successful data collection. The browser client renders job names as text and permits only constrained GitHub run URLs.
+If GitHub's public telemetry API is unavailable or rate-limited, the page displays an unavailable state without affecting the separate audit portal. The browser client renders job names as text and permits only constrained GitHub run URLs.

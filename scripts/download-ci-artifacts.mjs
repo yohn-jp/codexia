@@ -1,12 +1,9 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { inflateRawSync } from 'node:zlib';
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { lstat, mkdir, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const MAX_ARCHIVE = 16 * 1024 * 1024;
 const MAX_JSON = 4 * 1024 * 1024;
@@ -209,10 +206,9 @@ export async function extractArtifactFiles(bytes, destination, {maxArchive = MAX
 // Profile artifacts run inside the immutable Playwright image, which has no unzip.
 // Parse the bounded single requested entry using the central directory. Never
 // materialize an archive pathname or execute an archive-supplied command.
-export function extractProfileJson(bytes, filename = 'profile-build.json') {
-  assert.ok(Buffer.isBuffer(bytes) && bytes.length >= 22, 'Invalid ZIP archive');
-  assert.equal(filename, 'profile-build.json');
-  const maxJson = 128 * 1024 * 1024;
+function extractBoundedJson(bytes, filename, maxJson) {
+  const maxArchive = maxJson > MAX_JSON ? MAX_ASSET_ARCHIVE : MAX_ARCHIVE;
+  assert.ok(Buffer.isBuffer(bytes) && bytes.length >= 22 && bytes.length <= maxArchive, 'Invalid or oversized ZIP archive');
   let end = -1;
   for (let at = bytes.length - 22; at >= Math.max(0, bytes.length - 22 - 0xffff); at--) {
     if (bytes.readUInt32LE(at) === 0x06054b50 && at + 22 + bytes.readUInt16LE(at + 20) === bytes.length) { end = at; break; }
@@ -261,42 +257,12 @@ export function extractProfileJson(bytes, filename = 'profile-build.json') {
   return json;
 }
 
+export function extractProfileJson(bytes, filename = 'profile-build.json') {
+  assert.equal(filename, 'profile-build.json');
+  return extractBoundedJson(bytes, filename, 128 * 1024 * 1024);
+}
+
 export async function extractJsonEntry(bytes, filename) {
   assert.ok(['ci-plan.json', 'report.json', 'profile-build.json', 'native-report.json'].includes(filename), 'Invalid evidence filename');
-  if (filename === 'profile-build.json') return extractProfileJson(bytes, filename);
-  const temporary = await mkdtemp(path.join(tmpdir(), 'codexia-ci-artifact-'));
-  try {
-    const zip = path.join(temporary, 'artifact.zip');
-    await writeFile(zip, bytes, { mode: 0o600 });
-    const entries = execFileSync('unzip', ['-Z1', zip], { encoding: 'utf8', maxBuffer: MAX_JSON, timeout: 10_000 }).split(/\r?\n/u);
-    assert.equal(entries.filter(entry => entry === filename).length, 1, 'Missing or duplicate required JSON entry');
-    // Do not extract arbitrary archive paths onto the runner filesystem.
-    const json = execFileSync('unzip', ['-p', zip, filename], { maxBuffer: MAX_JSON, timeout: 10_000 });
-    JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(json));
-    return json;
-  } finally {
-    await rm(temporary, { recursive: true, force: true });
-  }
+  return extractBoundedJson(bytes, filename, filename === 'profile-build.json' ? 128 * 1024 * 1024 : MAX_JSON);
 }
-
-async function main() {
-  const { GH_TOKEN, GITHUB_REPOSITORY, GITHUB_RUN_ID, CODEXIA_EXPECTED_SHA, CODEXIA_CI_INVENTORY_PATH, CODEXIA_CI_ARTIFACT_IDS, CODEXIA_CI_ARTIFACT_DIR, CODEXIA_CI_ARTIFACT_KIND } = process.env;
-  assert.match(GITHUB_RUN_ID ?? '', /^\d+$/u);
-  assert.match(CODEXIA_EXPECTED_SHA ?? '', /^[a-f0-9]{40}$/u);
-  assert.ok(CODEXIA_CI_INVENTORY_PATH && CODEXIA_CI_ARTIFACT_DIR, 'Inventory and output directory required');
-  assert.match(CODEXIA_CI_ARTIFACT_IDS ?? '', /^\d+(?:,\d+)*$/u, 'Selected artifact IDs required');
-  const inventory = JSON.parse(await readFile(CODEXIA_CI_INVENTORY_PATH, 'utf8'));
-  const kind = CODEXIA_CI_ARTIFACT_KIND;
-  const selected = selectedArtifacts(inventory, CODEXIA_CI_ARTIFACT_IDS.split(',').map(Number), { runId: GITHUB_RUN_ID, sourceSha: CODEXIA_EXPECTED_SHA }, kind);
-  for (const artifact of selected) {
-    const bytes = await downloadArtifact(artifact, GITHUB_REPOSITORY, GH_TOKEN);
-    const filename = kind === 'plan' ? 'ci-plan.json' : 'report.json';
-    const directory = kind === 'plan' ? CODEXIA_CI_ARTIFACT_DIR : path.join(CODEXIA_CI_ARTIFACT_DIR, artifact.name);
-    const json = await extractJsonEntry(bytes, filename);
-    await mkdir(directory, { recursive: true });
-    await writeFile(path.join(directory, filename), json, { flag: 'wx', mode: 0o600 });
-    console.log(`Downloaded and verified artifact ${artifact.id} (${artifact.name})`);
-  }
-}
-
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

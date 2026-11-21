@@ -8,6 +8,14 @@ import { backendPublicationFromEnvironment, buildComponentReleaseRecord } from '
 
 const repository='yohn-jp/codexia';
 const digest=/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u;
+const semver=/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
+
+export function componentReleaseTagFromEnvironment(component,env=process.env){
+  assert.ok(['frontend','backend'].includes(component),'Unknown component');
+  const version=component==='frontend'?env.CODEXIA_FRONTEND_PRODUCER_VERSION:env.CODEXIA_BACKEND_PRODUCER_VERSION;
+  assert.match(version??'',semver,'Trusted component producer version is invalid');
+  return component+'-v'+version;
+}
 
 export function frontendProducerFromEnvironment(env=process.env,identity){
   const producer={event:env.CODEXIA_FRONTEND_PRODUCER_EVENT,sourceSha:env.CODEXIA_FRONTEND_PRODUCER_SHA,
@@ -58,7 +66,9 @@ async function main(){
   assert.equal(env.GITHUB_REF,'refs/heads/main');
   assert.ok(['push','workflow_run'].includes(env.GITHUB_EVENT_NAME),'Component release requires main or verified completion');
   const token=env.GH_TOKEN;assert.ok(token);
+  const expectedTag=componentReleaseTagFromEnvironment(process.argv[2],env);
   const release=componentReleaseRecordFromEnvironment(env);
+  assert.equal(release.tag,expectedTag,'Component release metadata differs from the trusted producer version');
   async function api(resource,method='GET',data){
     const response=await fetch('https://api.github.com/repos/'+repository+'/'+resource,{
       method,headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'},
@@ -68,14 +78,14 @@ async function main(){
     if(!response.ok)throw Error('Component release API request failed: HTTP '+response.status);
     return response.json();
   }
-  const resource='git/ref/tags/'+release.tag;
+  const resource='git/ref/tags/'+expectedTag;
   let ref=await api(resource);
   if(!ref){
-    await api('git/refs','POST',{ref:'refs/tags/'+release.tag,sha:release.targetSha});
+    await api('git/refs','POST',{ref:'refs/tags/'+expectedTag,sha:release.targetSha});
     ref=await api(resource);
   }
   assert.equal(ref?.object?.type,'commit');assert.equal(ref.object.sha,release.targetSha,'Component version already belongs to a different source');
-  const existing=await api('releases/tags/'+release.tag);
+  const existing=await api('releases/tags/'+expectedTag);
   if(existing){
     assert.equal(existing.tag_name,release.tag);assert.equal(existing.body,release.body,'Existing component release binds different metadata');
     assert.equal(existing.draft,false);

@@ -60,6 +60,22 @@ async function request(url, options) {
   return fetch(`http://127.0.0.1:${port}${url}`, { ...options, signal: AbortSignal.timeout(2_000) });
 }
 
+function hashedEntryRouteFromHtml(html, ui = '') {
+  const origin = `http://127.0.0.1:${port}`;
+  const directory = ui ? `/${ui}/assets/` : '/assets/';
+  const entryPattern = ui
+    ? new RegExp(`^/${ui}/assets/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8}\\.js$`, 'u')
+    : /^\/assets\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8}\.js$/u;
+  const candidates = [...html.matchAll(/\b(?:src|href)=["']([^"']+)["']/gu)].map(match => match[1]);
+  for (const value of candidates) {
+    let url;
+    try { url = new URL(value, origin + (ui ? `/${ui}/` : '/')); } catch { continue; }
+    if (url.origin !== origin || !url.pathname.startsWith(directory) || !entryPattern.test(url.pathname)) continue;
+    return url.pathname;
+  }
+  throw new Error(`${ui || 'launcher'} HTML has no same-origin content-hashed entry route`);
+}
+
 try {
   execFileSync(path.join(postgresBin, 'initdb'), ['-D', databaseDirectory, '--no-locale', '--encoding=UTF8', '--auth=trust'], { stdio: 'pipe', timeout: 30_000 });
   execFileSync(path.join(postgresBin, 'pg_ctl'), ['-D', databaseDirectory, '-l', path.join(dataDirectory, 'postgres.log'), '-w', '-t', '30', '-o', `-h 127.0.0.1 -k ${dataDirectory} -p 34118`, 'start'], { stdio: 'pipe', timeout: 35_000 });
@@ -109,6 +125,8 @@ try {
   }
   const html = await indexResponse.text();
   if (!html.includes(launcherFiles.entryFile)) throw new Error('Runtime browser index does not reference the manifest application bundle');
+  const launcherRoute = hashedEntryRouteFromHtml(html);
+  if (launcherRoute !== `/${launcherFiles.entryFile}`) throw new Error('Runtime browser entry route differs from its Vite manifest');
   const bundleResponse = await request('/main.js');
   if (!bundleResponse.ok || Number(bundleResponse.headers.get('content-length') ?? '0') < 1) {
     throw new Error(`Runtime browser bundle route returned ${bundleResponse.status}`);
@@ -117,7 +135,7 @@ try {
   if (!bundle.equals(launcherBytes) || bundleResponse.headers.get('cache-control') !== 'no-store') {
     throw new Error('Runtime fixed browser bundle alias does not serve the fresh packaged browser entry');
   }
-  const hashedBundleResponse = await request(`/${launcherFiles.entryFile}`);
+  const hashedBundleResponse = await request(launcherRoute);
   if (!hashedBundleResponse.ok || hashedBundleResponse.headers.get('cache-control') !== 'public, max-age=31536000, immutable' ||
       !Buffer.from(await hashedBundleResponse.arrayBuffer()).equals(launcherBytes)) {
     throw new Error('Runtime content-hashed browser entry is not immutable or differs from packaged bytes');
@@ -131,7 +149,10 @@ try {
   }
   for (const ui of ['desktop', 'mobile']) {
     const page = await request(`/${ui}/`);
-    if (!page.ok || !(await page.text()).includes(`/${ui}/${browserFiles.get(ui).entryFile}`)) throw new Error(`${ui} entry is unavailable`);
+    const pageHtml = await page.text();
+    if (!page.ok || !pageHtml.includes(`/${ui}/${browserFiles.get(ui).entryFile}`)) throw new Error(`${ui} entry is unavailable`);
+    const uiEntryRoute = hashedEntryRouteFromHtml(pageHtml, ui);
+    if (uiEntryRoute !== `/${ui}/${browserFiles.get(ui).entryFile}`) throw new Error(`${ui} entry route differs from its Vite manifest`);
     const response = await request(`/${ui}/main.js`);
     const bytes = Buffer.from(await response.arrayBuffer());
     const uiFiles = browserFiles.get(ui);
@@ -139,7 +160,7 @@ try {
     if (!response.ok || response.headers.get('cache-control') !== 'no-store' || !bytes.equals(expectedBytes)) {
       throw new Error(`${ui} fixed browser bundle alias differs from packaged bytes`);
     }
-    const directResponse = await request(`/${ui}/${uiFiles.entryFile}`);
+    const directResponse = await request(uiEntryRoute);
     if (!directResponse.ok || directResponse.headers.get('cache-control') !== 'public, max-age=31536000, immutable' ||
         !Buffer.from(await directResponse.arrayBuffer()).equals(expectedBytes)) {
       throw new Error(`${ui} content-hashed browser entry is not immutable or differs from packaged bytes`);

@@ -47,6 +47,16 @@ async function pages(resource,key,token){
   const separator=resource.includes('?')?'&':'?';
   return collectGitHubPages((page,perPage)=>request(resource+separator+'per_page='+perPage+'&page='+page,token),key);
 }
+async function listBackendReleases(token){
+  const releases=[];
+  for(let page=1;page<=20;page++){
+    const response=await request('releases?per_page=100&page='+page,token);
+    assert.ok(Array.isArray(response),'GitHub release inventory is invalid');
+    releases.push(...response);
+    if(response.length<100)return releases;
+  }
+  throw new Error('Backend release inventory exceeds the supported bound');
+}
 export function successfulPublicationJobs(jobs,promoted,hasPromotion=promoted){
   if(!Array.isArray(jobs))return false;
   const exactJob=(name,conclusion)=>{
@@ -76,8 +86,14 @@ export async function verifyExistingBackendRelease({env=process.env,args=process
   assert.ok(['push','workflow_run'].includes(publicationEvent),'Invalid main publication event');
   const token=env.GH_TOKEN;assert.ok(typeof token==='string'&&token.length>0,'GitHub Actions read token required');
   const compatibility=JSON.parse(await readFile(new URL('../deploy/update-compatibility.json',import.meta.url),'utf8'));
-  const release=await request('releases/tags/backend-v'+version,token);
-  const tagRef=await request('git/ref/tags/backend-v'+version,token);
+  const tag='backend-v'+version;
+  const releaseMatches=(await listBackendReleases(token)).filter(item=>item?.tag_name===tag);
+  assert.equal(releaseMatches.length,1,'Expected one exact backend release record');
+  const release=releaseMatches[0];
+  const refMatches=(await request('git/matching-refs/tags/backend-v',token))
+    .filter(item=>item?.ref==='refs/tags/'+tag);
+  assert.equal(refMatches.length,1,'Expected one exact backend release tag');
+  const tagRef=refMatches[0];
   let receipt=null,mainTree=null;
   if(event==='pull_request'){
     const directory=env.CODEXIA_BACKEND_PROMOTION_DIR;

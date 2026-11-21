@@ -52,10 +52,11 @@ export function selectReleaseSource(component, source, main, git, before) {
   return { affected: true };
 }
 
-async function readVerifiedPushBase(run, repository, token) {
+async function readVerifiedPushBase(run, runId, repository, token) {
   assert.ok(token, 'Release requires Actions read permission');
+  assert.ok(Number.isSafeInteger(runId) && runId > 0, 'Invalid trusted Verify run ID');
   const request = async endpoint => {
-    const response = await fetch('https://api.github.com/repos/' + repository + '/actions/runs/' + run.id + '/' + endpoint, {
+    const response = await fetch('https://api.github.com/repos/' + repository + '/actions/runs/' + runId + '/' + endpoint, {
       headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json' },
       redirect: 'error', signal: AbortSignal.timeout(15_000),
     });
@@ -66,7 +67,7 @@ async function readVerifiedPushBase(run, repository, token) {
     collectGitHubPages((page, count) => request(`jobs?filter=latest&page=${page}&per_page=${count}`), 'jobs'),
     collectGitHubPages((page, count) => request(`artifacts?page=${page}&per_page=${count}`), 'artifacts'),
   ]);
-  const planArtifact = selectLatestPlanArtifact(artifacts, jobs, { runId: run.id, sourceSha: run.head_sha });
+  const planArtifact = selectLatestPlanArtifact(artifacts, jobs, { runId, sourceSha: run.head_sha });
   const data = await extractJsonEntry(await downloadArtifact(planArtifact, repository, token), 'ci-plan.json');
   const plan = validateVerificationPlan(JSON.parse(data));
   assert.equal(plan.event, 'push');
@@ -81,9 +82,10 @@ const main = async () => {
   const git = (...args) => execFileSync('git', args, { cwd:root, encoding:'utf8', timeout:60_000 });
   const checkoutSha = git('rev-parse','HEAD').trim();
   const run = verifiedReleaseEvent(JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH,'utf8')),process.env,checkoutSha);
+  const runId = Number(process.env.CODEXIA_VERIFY_RUN_ID);
   git('fetch', '--no-tags', 'origin', 'refs/heads/main');
   const remoteMain = git('rev-parse', 'FETCH_HEAD').trim();
-  let before = await readVerifiedPushBase(run, process.env.GITHUB_REPOSITORY, process.env.GH_TOKEN).catch(() => null);
+  let before = await readVerifiedPushBase(run, runId, process.env.GITHUB_REPOSITORY, process.env.GH_TOKEN).catch(() => null);
   if (before !== null) {
     try { git('cat-file', '-e', before + '^{commit}'); } catch { before = null; }
   }
@@ -95,9 +97,9 @@ const main = async () => {
     });
   }
   const output = 'affected=' + String(affected) + '\nsource-sha=' + checkoutSha +
-    '\nverify-run-id=' + run.id + '\n';
+    '\nverify-run-id=' + runId + '\n';
   appendFileSync(process.env.GITHUB_OUTPUT,output);
-  console.log(JSON.stringify({component,affected,sourceSha:checkoutSha,verifyRunId:run.id,pushBase:before,
+  console.log(JSON.stringify({component,affected,sourceSha:checkoutSha,verifyRunId:runId,pushBase:before,
     ...(successor ? {skipped:'superseded by a newer component change',successor} : {})}));
 };
 if(process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)){

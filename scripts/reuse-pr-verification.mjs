@@ -2,7 +2,7 @@
 // Read-only certification of a merged PR's source tree; never promote PR bytes here.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { appendFile, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateVerificationPlan, planDigest } from './ci-impact.mjs';
@@ -320,9 +320,9 @@ async function main() {
   };
   if (command === 'plan' || command === 'dedicated') {
     try {
-      const receipt = await resolve();
-      await appendFile(process.env.GITHUB_OUTPUT, 'eligible=true\nreceipt=' + JSON.stringify(receipt) + '\n');
-      const message = 'Eligible merged PR proof: PR #' + receipt.prNumber + ', run ' + receipt.runId;
+      await resolve();
+      await appendFile(process.env.GITHUB_OUTPUT, 'eligible=true\n');
+      const message = 'Eligible merged PR proof revalidated for exact main source ' + sourceSha;
       console.log(message);
       if (command === 'dedicated' && process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY,
         message + '; independent verification reused for exact main source ' + sourceSha + '.\n');
@@ -334,11 +334,8 @@ async function main() {
     return;
   }
   assertCompactNeeds(JSON.parse(process.env.CODEXIA_REQUIRED_RESULTS ?? 'null'));
-  const receipt = await resolve();
-  assert.deepEqual(receipt, JSON.parse(process.env.CODEXIA_REUSE_RECEIPT ?? 'null'), 'PR proof changed after planning');
-  await writeFile(process.env.CODEXIA_REUSE_PROOF_PATH, JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600 });
-  const message = 'Certified exact main source ' + sourceSha + ' from merged PR #' + receipt.prNumber +
-    ' (' + receipt.mode + ' proof, run ' + receipt.runId + '). No release artifact promoted.';
+  await resolve();
+  const message = 'Certified exact main source ' + sourceSha + ' from a freshly revalidated merged PR proof. No release artifact promoted.';
   console.log(message);
   if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, message + '\n');
 }
