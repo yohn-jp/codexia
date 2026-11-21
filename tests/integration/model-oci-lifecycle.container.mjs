@@ -775,7 +775,7 @@ async function runLifecycle() {
     assert.equal(replacement.modelVersion, MODEL_IDS.embedding.revision);
     assert.equal(replacement.reranker?.id, MODEL_IDS.reranker.id);
     assert.equal(replacement.reranker?.version, MODEL_IDS.reranker.revision);
-    assert.equal(replacement.rerankWarning, undefined, "the pinned BGE ONNX CPU reranker must return a real result");
+    assert.equal(replacement.rerankWarning, undefined, `the pinned BGE ONNX CPU reranker must return a real result: ${replacement.rerankDiagnostic ?? "no diagnostic"}`);
     assert.ok(replacement.results?.length > 0);
     outcome.phases.push(await sampler.mark());
     outcome.assertions.replacementSearch = {
