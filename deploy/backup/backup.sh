@@ -10,11 +10,11 @@ lock_file="$STATE_DIR/host.lock"
 operation="${1:-}"
 verify_lock_descriptor(){
   local lock_file="$1" lock_fd="$2" fd_identity lock_identity
-  [[ "$lock_file" == /* && -f "$lock_file" && ! -L "$lock_file" ]] || die 'Maintenance lock must be an existing absolute regular file'
-  [[ "$lock_fd" =~ ^[0-9]+$ && "$lock_fd" -ge 3 && -e "/proc/self/fd/$lock_fd" ]] || die 'Maintenance lock descriptor was not inherited'
+  [[ "$lock_file" == /* && -f "$lock_file" && ! -L "$lock_file" ]] || die 'Deployment lock must be an existing absolute regular file'
+  [[ "$lock_fd" =~ ^[0-9]+$ && "$lock_fd" -ge 3 && -e "/proc/self/fd/$lock_fd" ]] || die 'Deployment lock descriptor was not inherited'
   fd_identity="$(stat -Lc '%d:%i' -- "/proc/self/fd/$lock_fd" 2>/dev/null || true)"
   lock_identity="$(stat -Lc '%d:%i' -- "$lock_file" 2>/dev/null || true)"
-  [[ -n "$fd_identity" && "$fd_identity" == "$lock_identity" ]] || die 'Inherited descriptor does not identify the declared maintenance lock'
+  [[ -n "$fd_identity" && "$fd_identity" == "$lock_identity" ]] || die 'Inherited descriptor does not identify the declared deployment lock'
   flock --exclusive --nonblock "$lock_fd" || die 'Inherited descriptor does not own the maintenance lock'
 }
 remote_directory(){
@@ -268,7 +268,7 @@ case "${1:-}" in
       sleep 1
     done
     podman exec "$db" psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d codexia -c 'SELECT 1' >/dev/null || die 'Isolated DB not ready on final loopback listener'
-    podman exec "$db" psql -X -v ON_ERROR_STOP=1 -U postgres -d codexia -c 'CREATE ROLE codexia; CREATE ROLE codexia_admin; CREATE ROLE codexia_preflight;' >/dev/null
+    podman exec "$db" psql -X -v ON_ERROR_STOP=1 -U postgres -d codexia -c 'CREATE ROLE codexia; CREATE ROLE codexia_admin;' >/dev/null
     age -d -i "$3" "$dir/database.dump.age" |
       podman exec -i "$db" pg_restore --exit-on-error --no-owner --no-privileges -U postgres -d codexia
     age -d -i "$3" "$dir/history.tar.age" | podman volume import "$history" -
