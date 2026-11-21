@@ -691,7 +691,8 @@ test("desktop workspace presets, arbitrary docking, panel visibility and layout 
   const draftPrefix = "Workspace changes preserve ";
   const draftSuffix = "the caret across panel state updates.";
   const editor = page.locator(".cm-content");
-  await editor.fill(draftPrefix);
+  await replaceEditor(page, draftPrefix);
+  await expect(editor).toHaveText(draftPrefix);
   await editor.pressSequentially(draftSuffix);
   const draft = draftPrefix + draftSuffix;
   await expect(editor).toHaveText(draft);
