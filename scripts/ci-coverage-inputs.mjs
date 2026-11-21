@@ -37,7 +37,7 @@ export async function captureCoverageInputClosure({ root, runtime, invocation, w
     .filter(entry => entry.isDirectory()).map(entry => `packages/${entry.name}/package.json`);
   const moduleManifests = (await readdir(path.join(root, 'modules'), { withFileTypes: true }))
     .filter(entry => entry.isDirectory()).map(entry => `modules/${entry.name}/package.json`);
-  const manifestPaths = ['package.json', ...packageManifests, ...moduleManifests, 'app/package.json'];
+  const manifestPaths = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', ...packageManifests, ...moduleManifests, 'app/package.json'];
   const testDirectories = ['scripts', 'app', ...manifestPaths.filter(file => file.startsWith('packages/') || file.startsWith('modules/')).map(file => path.dirname(file))];
   const tests = (await Promise.all(testDirectories.map(directory => walkTestFiles(root, path.join(root, directory)))))
     .flat().sort(([a], [b]) => a.localeCompare(b));
@@ -57,13 +57,23 @@ export async function captureCoverageInputClosure({ root, runtime, invocation, w
     dependencies: digest(await fileDigests(manifestPaths)),
     environment: digest({ cwd: root, platform: runtime.platform, arch: runtime.arch }),
     toolchain: digest({ nodeVersion: runtime.nodeVersion, execPath: runtime.execPath, imageOS: runtime.imageOS ?? null, imageVersion: runtime.imageVersion ?? null }),
-    recipe: digest({ invocation, workflowJob, mode: 'full-plan-static-coverage' }),
+    recipe: digest({ invocation, workflowJob, mode: 'static-coverage' }),
     producers: digest({ prerequisites: [], workspaceDirectories: workspaceDirectories.sort() }),
   };
   return closure;
 }
 
-export function coverageInputProof({ closure, sourceSha, planDigest, workflowRunId, workflowAttempt, workflowJob }) {
-  return { format: 'codexia-ci-task-input-proof/v1', task: 'coverage', mode: 'full-plan-static', status: 'passed',
-    sourceSha, planDigest, workflowRunId, workflowAttempt, workflowJob, inputClosure: closure };
+export function coverageInputProof({ closure, sourceSha, planDigest, workflowRunId, workflowAttempt, workflowJob, runtime, reusedFrom }) {
+  const proof = { format: 'codexia-ci-task-input-proof/v2', task: 'coverage', mode: 'static-coverage', status: 'passed',
+    sourceSha, planDigest, workflowRunId, workflowAttempt, workflowJob, runtime, inputClosure: closure };
+  return reusedFrom ? { ...proof, reusedFrom } : proof;
+}
+
+export function coverageInvocation(executable) {
+  return { executable, arguments: ['scripts/ci-workspace.mjs', 'coverage'], environmentKeys: [] };
+}
+
+export function coverageRuntime(env = process.env) {
+  return { platform: process.platform, arch: process.arch, nodeVersion: process.version,
+    execPath: process.execPath, cwd: process.cwd(), imageOS: env.ImageOS ?? null, imageVersion: env.ImageVersion ?? null };
 }

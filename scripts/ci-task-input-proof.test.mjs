@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assertCompleteTaskInputProofSet, assertTaskProducerInventory, sanitizeProducerArguments, selectEquivalentTaskProofs } from './ci-task-input-proof.mjs';
-import { createVerificationPlan, planDigest as createPlanDigest } from './ci-impact.mjs';
+import { assertCompleteTaskInputProofSet, assertTaskProducerInventory, assertTrustedCertifiedSourceTaskInputProof, assertTrustedTaskInputProof, sanitizeProducerArguments, selectEquivalentTaskProofs } from './ci-task-input-proof.mjs';
+import { createVerificationPlan, planDigest as createPlanDigest, validateVerificationPlan } from './ci-impact.mjs';
 import { VERIFICATION_GROUPS } from './ci-contract.mjs';
 
 const sourceSha = 'a'.repeat(40);
@@ -10,13 +10,17 @@ const dimensions = ['source', 'tests', 'dependencies', 'environment', 'toolchain
 
 function proof(task, overrides = {}) {
   return {
+    format: 'codexia-ci-task-input-proof/v2',
     task,
+    mode: 'static-coverage',
     status: 'passed',
     sourceSha,
     planDigest,
     workflowRunId: 42,
     workflowAttempt: 1,
-    jobId: 84,
+    workflowJob: 'types-tests',
+    runtime: { platform: 'linux', arch: 'x64', nodeVersion: 'v24.22.3', execPath: '/opt/node/bin/node',
+      cwd: '/home/runner/work/codexia/codexia', imageOS: 'ubuntu24', imageVersion: '20261115.1' },
     inputClosure: Object.fromEntries(dimensions.map(name => [name, name.charCodeAt(0).toString(16).padStart(64, '0')])),
     ...overrides,
   };
@@ -72,6 +76,71 @@ test('task proof selection fails closed on missing, duplicate, stale, or changed
   }), ['unit-contracts']);
 });
 
+test('task proof trust requires an exact successful main run, matching job attempt, and immutable artifact', () => {
+  const identity = { sourceSha, planDigest, workflowRunId: 42, workflowAttempt: 2 };
+  const inputProof = proof('coverage', { workflowAttempt: 2 });
+  const run = { id: 42, workflow_id: 7, event: 'push', head_branch: 'main', head_sha: sourceSha,
+    run_attempt: 2, status: 'completed', conclusion: 'success', repository: { id: 9 } };
+  const job = { id: 84, run_id: 42, run_attempt: 2, head_sha: sourceSha, name: 'types-tests',
+    status: 'completed', conclusion: 'success' };
+  const artifact = { id: 91, name: 'ci-evidence-types-tests', digest: `sha256:${'c'.repeat(64)}`, expired: false,
+    workflow_run: { id: 42, head_sha: sourceSha } };
+  assert.doesNotThrow(() => assertTrustedTaskInputProof({ inputProof, identity, run, job, artifact,
+    expected: { repositoryId: 9, workflowId: 7, jobName: 'types-tests', artifactName: 'ci-evidence-types-tests', artifactId: 91, artifactDigest: artifact.digest } }));
+  assert.throws(() => assertTrustedTaskInputProof({ inputProof, identity, run: { ...run, conclusion: 'failure' }, job, artifact,
+    expected: { repositoryId: 9, workflowId: 7, jobName: 'types-tests', artifactName: 'ci-evidence-types-tests', artifactId: 91, artifactDigest: artifact.digest } }), /main run did not succeed/);
+  assert.throws(() => assertTrustedTaskInputProof({ inputProof, identity, run, job: { ...job, run_attempt: 1 }, artifact,
+    expected: { repositoryId: 9, workflowId: 7, jobName: 'types-tests', artifactName: 'ci-evidence-types-tests', artifactId: 91, artifactDigest: artifact.digest } }), /job attempt mismatch/);
+  assert.throws(() => assertTrustedTaskInputProof({ inputProof, identity, run, job, artifact: { ...artifact, expired: true },
+    expected: { repositoryId: 9, workflowId: 7, jobName: 'types-tests', artifactName: 'ci-evidence-types-tests', artifactId: 91, artifactDigest: artifact.digest } }), /artifact is expired/);
+});
+
+test('task proof reuse metadata is limited to a complete coverage receipt and stays outside the plan digest', () => {
+  const plan = createVerificationPlan({ files: ['docs/README.md'], event: 'pull_request', sha: sourceSha, base: 'd'.repeat(40) });
+  const receipt = { task: 'coverage', sourceSha: plan.base, proofSourceSha: plan.base, planDigest: 'e'.repeat(64), workflowRunId: 42,
+    workflowAttempt: 1, workflowId: 7, repositoryId: 9, jobId: 84, workflowJob: 'types-tests',
+    artifactId: 91, artifactName: 'ci-evidence-types-tests', artifactDigest: `sha256:${'c'.repeat(64)}`,
+    inputClosure: proof('coverage').inputClosure, runtime: proof('coverage').runtime,
+    certification: { sourceSha: plan.base, workflowRunId: 42, workflowAttempt: 1, workflowId: 7, repositoryId: 9,
+      jobId: 85, step: 'Certify every required exact-source matrix element' } };
+  const reusedPlan = { ...plan, taskInputReuse: { format: 'codexia-ci-task-input-reuse/v1', coverage: receipt } };
+  assert.doesNotThrow(() => validateVerificationPlan(reusedPlan));
+  assert.equal(createPlanDigest(reusedPlan), createPlanDigest(plan));
+  assert.throws(() => validateVerificationPlan({ ...reusedPlan, taskInputReuse: {
+    ...reusedPlan.taskInputReuse, coverage: { ...receipt, artifactDigest: 'invalid' },
+  } }), /artifact digest/);
+  assert.throws(() => validateVerificationPlan({ ...reusedPlan, taskInputReuse: {
+    ...reusedPlan.taskInputReuse, unsupported: receipt,
+  } }), /Unsupported task/);
+});
+
+test('a PR task proof is trusted only through a successful exact-main certification', () => {
+  const identity = { sourceSha: 'f'.repeat(40), planDigest, workflowRunId: 52, workflowAttempt: 1 };
+  const inputProof = proof('coverage', { sourceSha: identity.sourceSha, workflowRunId: 52, workflowAttempt: 1 });
+  const sourceRun = { id: 52, workflow_id: 7, path: '.github/workflows/verify.yml', repository: { id: 9 },
+    head_repository: { id: 9 }, head_sha: identity.sourceSha, event: 'pull_request', run_attempt: 1,
+    status: 'completed', conclusion: 'success' };
+  const job = { id: 84, run_id: 52, run_attempt: 1, head_sha: identity.sourceSha, name: 'types-tests',
+    status: 'completed', conclusion: 'success' };
+  const artifact = { id: 91, name: 'ci-evidence-types-tests', digest: `sha256:${'c'.repeat(64)}`, expired: false,
+    workflow_run: { id: 52, head_sha: identity.sourceSha } };
+  const mainRun = { id: 53, workflow_id: 7, repository: { id: 9 }, head_sha: sourceSha, event: 'push',
+    head_branch: 'main', run_attempt: 3, status: 'completed', conclusion: 'success' };
+  const certificationJob = { id: 85, run_id: 53, run_attempt: 3, head_sha: sourceSha, name: 'certification',
+    status: 'completed', conclusion: 'success' };
+  const certificationStep = { name: 'Certify reused merged PR proof', conclusion: 'success' };
+  const certification = { sourceSha, workflowRunId: 53, workflowAttempt: 3, workflowId: 7, repositoryId: 9,
+    jobId: 85, step: certificationStep.name };
+  const expected = { repositoryId: 9, workflowId: 7, jobName: 'types-tests', jobId: 84,
+    artifactId: 91, artifactName: 'ci-evidence-types-tests', artifactDigest: artifact.digest };
+  assert.doesNotThrow(() => assertTrustedCertifiedSourceTaskInputProof({ inputProof, identity, sourceRun, job,
+    artifact, mainRun, certificationJob, certificationStep, certification, expected }));
+  assert.throws(() => assertTrustedCertifiedSourceTaskInputProof({ inputProof, identity, sourceRun, job,
+    artifact, mainRun: { ...mainRun, conclusion: 'failure' }, certificationJob, certificationStep, certification, expected }), /Main task certification run did not succeed/);
+  assert.throws(() => assertTrustedCertifiedSourceTaskInputProof({ inputProof, identity, sourceRun, job,
+    artifact, mainRun, certificationJob, certificationStep: { ...certificationStep, conclusion: 'failure' }, certification, expected }), /Main task proof was not certified/);
+});
+
 test('report-only producer inventory binds exact source, run, job, and selected task invocation inventory', () => {
   const plan = createVerificationPlan({ files: null, event: 'push', sha: sourceSha });
   const tasks = VERIFICATION_GROUPS['unit-core'].filter(task => plan.tasks.includes(task));
@@ -112,8 +181,10 @@ test('report-only coverage input closure is accepted only for the full-plan stat
     workflowRunId: 701, workflowAttempt: 1, workflowJob: 'types-tests',
     workflowRef: 'yohn-jp/codexia/.github/workflows/verify.yml@refs/heads/main', workflowSha: sourceSha,
   };
+  const runtime = { platform: 'linux', arch: 'x64', nodeVersion: 'v24.22.3', execPath: '/opt/node/bin/node',
+    cwd: '/home/runner/work/codexia/codexia', imageOS: 'ubuntu24', imageVersion: '20261115.1' };
   const inputProof = {
-    format: 'codexia-ci-task-input-proof/v1', task: 'coverage', mode: 'full-plan-static', status: 'passed',
+    format: 'codexia-ci-task-input-proof/v2', task: 'coverage', mode: 'static-coverage', status: 'passed', runtime,
     sourceSha, planDigest: digest, workflowRunId: 701, workflowAttempt: 1, workflowJob: 'types-tests',
     inputClosure: Object.fromEntries(dimensions.map(name => [name, name.charCodeAt(0).toString(16).padStart(64, '0')])),
   };
@@ -131,6 +202,9 @@ test('report-only coverage input closure is accepted only for the full-plan stat
     taskInvocations: report.results.map(({ task, status, invocations, inputProof }) => ({ task, status, invocations, ...(inputProof ? { inputProof } : {}) })),
   };
   assert.doesNotThrow(() => assertTaskProducerInventory({ plan, report, inventory }));
+  const missingRuntime = structuredClone(inventory);
+  delete missingRuntime.taskInvocations.find(item => item.task === 'coverage').inputProof.runtime;
+  assert.throws(() => assertTaskProducerInventory({ plan, report, inventory: missingRuntime }), /runtime/);
   const stale = structuredClone(inventory);
   stale.taskInvocations.find(item => item.task === 'coverage').inputProof.workflowJob = 'unit-core';
   assert.throws(() => assertTaskProducerInventory({ plan, report, inventory: stale }), /input proof mismatch/);

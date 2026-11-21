@@ -9,6 +9,7 @@ import { assertPlanEvidence } from './ci-evidence.mjs';
 import { assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
 import { assertNativeArtifactEvidence } from './ci-native-producer.mjs';
 import { resolveProducerJobAttempts } from './ci-artifact-selection.mjs';
+import { assertReusedCoverageProof } from './ci-task-proof-reuse.mjs';
 
 const { GH_TOKEN, GITHUB_REPOSITORY, GITHUB_RUN_ID, CODEXIA_EXPECTED_SHA, CODEXIA_REQUIRED_RESULTS } = process.env;
 assert.match(GITHUB_REPOSITORY ?? '', /^[\w.-]+\/[\w.-]+$/);
@@ -48,6 +49,12 @@ if (evidenceEntries.length === 1 && evidenceEntries[0].name === 'report.json' &&
   }
 }
 assertPlanEvidence(plan, jobs, reports);
+const reusedCoverageReports = reports.filter(report => report.results?.some(result => result.inputProof?.reusedFrom));
+assert.ok(reusedCoverageReports.length <= 1, 'Duplicate task proof consumption reports');
+if (reusedCoverageReports.length === 1) {
+  await assertReusedCoverageProof({ plan, report: reusedCoverageReports[0], current: run,
+    repository: GITHUB_REPOSITORY, token: GH_TOKEN, request: async (url, options) => fetch(url, options) });
+}
 const artifacts = await collectGitHubPages(page => request(`actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100&page=${page}`), 'artifacts');
 const producerJobs = await resolveProducerJobAttempts(jobs, run, request, ['build-core','build-full','hosted-native-catalog']);
 assertProfileArtifactEvidence(plan, producerJobs, reports, artifacts, GITHUB_RUN_ID);
