@@ -217,6 +217,7 @@ test('backup and recovery-only changes retain root and exact-head dedicated inte
     'deploy/updater/test-standalone-backup-startup-fence.sh',
     'deploy/updater/test-standalone-backup.sh',
     'scripts/standalone-backup-controller.test.mjs',
+    'scripts/push-deployment-backup.test.mjs',
     '.github/workflows/standalone-backup.yml',
   ];
   for (const file of paths) {
@@ -230,6 +231,7 @@ test('backup and recovery-only changes retain root and exact-head dedicated inte
   assert.equal(steps.find(s => s.uses?.startsWith('actions/checkout')).with.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
   assert.ok(steps.some(s => s.run?.includes('bash deploy/ansible/test-lifecycle-contract.sh')));
   assert.ok(steps.some(s => s.run?.includes('bash deploy/updater/test-standalone-backup.sh')));
+  assert.ok(steps.some(s => s.run?.includes('scripts/push-deployment-backup.test.mjs')));
   assert.deepEqual((await plan([...paths, 'pnpm-lock.yaml'])).tasks, VERIFICATION_TASKS);
   assert.deepEqual((await plan(paths, 'push')).tasks, VERIFICATION_TASKS);
   assert.deepEqual((await plan(null)).tasks, VERIFICATION_TASKS);

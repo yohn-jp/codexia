@@ -106,3 +106,12 @@ test('the production Quadlet binds an immutable image and disables startup schem
   assert.match(quadlet, /^Environment=CODEXIA_PROFILE=CODEXIA_BACKEND_PROFILE$/mu);
   assert.match(quadlet, /^Environment=CODEXIA_DATABASE_MIGRATE_ON_START=0$/mu);
 });
+
+test('push rollout admits backups by verified writer shutdown instead of a legacy proxy route marker', () => {
+  const deployment = readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8');
+  const backup = readFileSync(new URL('../deploy/updater/standalone-backup.sh', import.meta.url), 'utf8');
+  assert.match(deployment, /backup-locked[\s\S]*--push-deployment/u);
+  assert.match(backup, /--push-deployment/u);
+  assert.match(backup, /Push deployment requires inactive systemd unit/u);
+  assert.match(backup, /codexia-updater-boot\.service[\s\S]*codexia-updater\.service[\s\S]*codexia-updater\.timer/u);
+});

@@ -157,6 +157,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/updater/test-standalone-backup-startup-fence.sh',
   'deploy/updater/test-standalone-backup.sh',
   'scripts/standalone-backup-controller.test.mjs',
+  'scripts/push-deployment-backup.test.mjs',
   '.github/workflows/standalone-backup.yml',
   'docs/deployment/IAC.md',
   'docs/deployment/README.md',

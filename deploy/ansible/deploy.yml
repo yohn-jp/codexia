@@ -403,7 +403,7 @@
     systemctl --user stop codexia-api.service >/dev/null 2>&1 || true
     if [[ -n "$current_image" ]]; then
       if ! "$backup_program" backup-locked "$backup_destination" "$backup_recipient" \
-        --approved --lock-file "$lock_file" --lock-fd 9; then
+        --approved --lock-file "$lock_file" --lock-fd 9 --push-deployment; then
         restore_previous || echo 'Previous API recovery failed after backup failure' >&2
         echo 'Encrypted off-VM backup failed; candidate was not applied' >&2
         exit 1
