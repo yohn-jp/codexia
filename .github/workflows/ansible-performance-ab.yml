@@ -221,7 +221,10 @@ jobs:
               sudo rm -f "/run/systemd/system/user@$fixture_uid.service.d/10-codexia-ci-xdg.conf"
               sudo rmdir "/run/systemd/system/user@$fixture_uid.service.d" 2>/dev/null || true
               sudo systemctl daemon-reload
-              sudo userdel --remove "$fixture_user" || true
+              # A cancelled test may leave child processes of the fixture user.
+              sudo loginctl kill-user "$fixture_user" 2>/dev/null || true
+              sudo pkill -KILL -u "$fixture_user" 2>/dev/null || true
+              sudo userdel --remove "$fixture_user"
             fi
             rm -f "$RUNNER_TEMP/codexia-ab-rootless-owned"
           fi
