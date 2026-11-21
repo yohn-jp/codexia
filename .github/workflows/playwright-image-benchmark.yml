@@ -1,8 +1,20 @@
-name: Compare MCR vs minimal GHCR Playwright images (manual)
+name: Compare Playwright image registry and OS variants (manual)
 
 on:
   workflow_dispatch:
     inputs:
+      mirror_digest:
+        description: 'MCR mirror digest from variants build'
+        required: true
+        type: string
+      ubuntu_chromium_digest:
+        description: 'Ubuntu Chromium digest from variants build'
+        required: true
+        type: string
+      ubuntu_webkit_digest:
+        description: 'Ubuntu WebKit digest from variants build'
+        required: true
+        type: string
       chromium_digest:
         description: 'Chromium sha256:... digest from the minimal-image build summary'
         required: true
@@ -34,9 +46,12 @@ jobs:
         env:
           CHROMIUM_DIGEST: ${{ inputs.chromium_digest }}
           WEBKIT_DIGEST: ${{ inputs.webkit_digest }}
+          MIRROR_DIGEST: ${{ inputs.mirror_digest }}
+          UBUNTU_CHROMIUM_DIGEST: ${{ inputs.ubuntu_chromium_digest }}
+          UBUNTU_WEBKIT_DIGEST: ${{ inputs.ubuntu_webkit_digest }}
         run: |
           set -euo pipefail
-          for digest in "$CHROMIUM_DIGEST" "$WEBKIT_DIGEST"; do
+          for digest in "$CHROMIUM_DIGEST" "$WEBKIT_DIGEST" "$MIRROR_DIGEST" "$UBUNTU_CHROMIUM_DIGEST" "$UBUNTU_WEBKIT_DIGEST"; do
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'Expected a sha256 manifest digest' >&2; exit 1; }
           done
           test "$(node -p "require('./package.json').devDependencies['@playwright/test']")" = '1.65.1' || {
@@ -142,10 +157,114 @@ jobs:
       - name: Run real browser acceptance
         run: pnpm exec playwright test --config tests/e2e/playwright.config.ts tests/e2e/ui-v1.acceptance.spec.ts --project=${{ matrix.browser }}
 
+  mirror:
+    name: GHCR mirror / ${{ matrix.browser }}
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    container:
+      image: ${{ format('ghcr.io/{0}/playwright-mirror-all@{1}', github.repository, inputs.mirror_digest) }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --ipc=host
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: codexia_test
+          POSTGRES_USER: codexia
+          POSTGRES_PASSWORD: codexia
+        options: >-
+          --health-cmd "pg_isready -U codexia -d codexia_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI: 'true'
+      CODEXIA_PROFILE: core
+      CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@postgres:5432/codexia_test
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Install locked dependencies
+        run: |
+          corepack enable
+          corepack pnpm@12.21.0 --version
+          pnpm install --frozen-lockfile
+      - name: Build matching Core application
+        run: pnpm build
+      - name: Run real browser acceptance
+        run: pnpm exec playwright test --config tests/e2e/playwright.config.ts tests/e2e/ui-v1.acceptance.spec.ts --project=${{ matrix.browser }}
+
+  ubuntu:
+    name: GHCR Ubuntu / ${{ matrix.browser }}
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    container:
+      image: ${{ format('ghcr.io/{0}/playwright-ubuntu-{1}@{2}', github.repository, matrix.browser, matrix.browser == 'chromium' && inputs.ubuntu_chromium_digest || inputs.ubuntu_webkit_digest) }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --ipc=host
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: codexia_test
+          POSTGRES_USER: codexia
+          POSTGRES_PASSWORD: codexia
+        options: >-
+          --health-cmd "pg_isready -U codexia -d codexia_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI: 'true'
+      CODEXIA_PROFILE: core
+      CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@postgres:5432/codexia_test
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Install locked dependencies
+        run: |
+          corepack enable
+          corepack pnpm@12.21.0 --version
+          pnpm install --frozen-lockfile
+      - name: Build matching Core application
+        run: pnpm build
+      - name: Run real browser acceptance
+        run: pnpm exec playwright test --config tests/e2e/playwright.config.ts tests/e2e/ui-v1.acceptance.spec.ts --project=${{ matrix.browser }}
+
   summary:
     name: Pull, initialization and full-job comparison
     if: always() && needs.validate.result == 'success'
-    needs: [validate, official, minimal]
+    needs: [validate, official, minimal, mirror, ubuntu]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
