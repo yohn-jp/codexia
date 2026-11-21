@@ -1,6 +1,17 @@
 name: Phase F push-host fixture
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/phase-f-push-host.yml
+      - deploy/ansible/test-host-integration.sh
+      - deploy/ansible/test-phase-f-push-host.sh
+      - deploy/ansible/host.yml
+      - deploy/ansible/host-validate.yml
+      - deploy/ansible/site.yml
+      - deploy/ansible/requirements.txt
+      - docs/deployment/PHASE-F-PUSH-HOST-CI.md
+      - scripts/phase-f-push-host.test.mjs
 permissions:
   contents: read
 concurrency:
