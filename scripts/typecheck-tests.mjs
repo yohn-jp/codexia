@@ -133,7 +133,7 @@ async function checkScope(scopeId) {
       results.push(await checkDirectory(
         { id: scopeId, testFiles },
         workspace.path,
-        { include: ['src/**/*.ts', 'src/**/*.tsx'], testFiles },
+        { include: ['src/**/*.ts', 'src/**/*.tsx', 'test/**/*.ts', 'test/**/*.tsx'], testFiles },
       ));
     }
   }
