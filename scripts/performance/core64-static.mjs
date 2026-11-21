@@ -9,6 +9,7 @@ import { join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { distribution, io, save } from './common.mjs';
 import { git } from './dataset.mjs';
+import { inspectHtml } from '../html-document.mjs';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const requestCount = 1000;
@@ -125,9 +126,7 @@ function metricDelta(before, after) {
 }
 
 function scriptEntry(html) {
-  const entry = [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+\.js(?:\?[^"']*)?)["'][^>]*>/giu)]
-    .map((match) => match[1])
-    .find(Boolean);
+  const entry = inspectHtml(html).scripts.find((src) => /\.js(?:\?|$)/iu.test(src));
   if (!entry) throw new Error('Built index.html has no JavaScript entry script');
   const url = new URL(entry, 'http://codexia.invalid/');
   if (url.origin !== 'http://codexia.invalid' || !url.pathname.startsWith('/')) {
@@ -158,16 +157,15 @@ async function inspectUiArtifacts(staticDir, profile, sourceSha) {
     if (!entry || typeof entry.file !== 'string') throw new Error(`${ui} manifest has no index.html entry`);
     const html = await readFile(join(uiRoot, 'index.html'), 'utf8');
     const uiBase = ui === 'launcher' ? 'http://codexia.invalid/' : `http://codexia.invalid/${ui}/`;
-    const htmlCssFiles = [...html.matchAll(/<link\b[^>]*>/giu)].flatMap(([tag]) => {
-      const rel = /\brel=["']([^"']+)["']/iu.exec(tag)?.[1];
-      const href = /\bhref=["']([^"']+\.css(?:\?[^"']*)?)["']/iu.exec(tag)?.[1];
-      if (!rel?.split(/\s+/u).includes('stylesheet') || !href) return [];
-      const url = new URL(href, uiBase);
-      if (url.origin !== 'http://codexia.invalid') throw new Error(`${ui} stylesheet must be same-origin`);
-      let path = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
-      if (ui !== 'launcher' && path.startsWith(`${ui}/`)) path = path.slice(ui.length + 1);
-      return [path];
-    });
+    const htmlCssFiles = inspectHtml(html).stylesheets
+      .filter((href) => /\.css(?:\?|$)/iu.test(href))
+      .map((href) => {
+        const url = new URL(href, uiBase);
+        if (url.origin !== 'http://codexia.invalid') throw new Error(ui + ' stylesheet must be same-origin');
+        let path = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
+        if (ui !== 'launcher' && path.startsWith(ui + '/')) path = path.slice(ui.length + 1);
+        return path;
+      });
     const emittedCssFiles = [...new Set([...(Array.isArray(entry.css) ? entry.css : []), ...htmlCssFiles])];
     const files = await Promise.all([
       fileIdentity(uiRoot, 'index.html'),

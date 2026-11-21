@@ -565,6 +565,7 @@ export interface PersistenceReader {
   listEvidenceDocumentIds(projectId: ProjectId, limit?: number): Promise<readonly DocumentId[]>;
   listDocumentEvidence(projectId: ProjectId, documentId: DocumentId, revisionId?: RevisionId, limit?: number): Promise<readonly EvidenceAnchor[]>;
   listEvidenceHistory(projectId: ProjectId, evidenceId: EvidenceId, limit?: number): Promise<readonly EvidenceAnchorHistory[]>;
+  getMentionLink(projectId: ProjectId, evidenceId: EvidenceId, nodeId: KnowledgeNodeId): Promise<MentionLink | undefined>;
   listMentionLinks(projectId: ProjectId, evidenceId: EvidenceId, limit?: number): Promise<readonly MentionLink[]>;
   listNodeMentions(projectId: ProjectId, nodeId: KnowledgeNodeId, limit?: number): Promise<readonly MentionLink[]>;
   getAssertion(projectId: ProjectId, assertionId: AssertionId): Promise<Assertion | undefined>;

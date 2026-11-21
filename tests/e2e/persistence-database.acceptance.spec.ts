@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import type { KnowledgeAliasId, KnowledgeNodeId, ProjectId } from "@codexia/persistence-contracts";
-import { createWritingFixture, expectDeviceDraft, expectServerSaveFailure, expectServerSaved, fillDraft, openManuscriptScene, openProtectionDetails, openRevisionHistory, ownerLogin, readManuscriptMarkdown, readPersistenceDrafts, manuscriptEditor } from "./postgres-fixture";
+import { createWritingFixture, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaveFailure, expectServerSaved, fillDraft, openManuscriptScene, openProtectionDetails, openRevisionHistory, ownerLogin, readManuscriptMarkdown, readPersistenceDrafts, manuscriptEditor } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
@@ -1388,7 +1388,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await expect(editor).toBeVisible();
   await editor.fill(firstDraft);
   await expectServerSaved(page);
-  await expectDeviceDraft(page);
+  await expectNoUnsavedDeviceChanges(page);
 
   await editor.press("Control+A");
   await page.locator(".pg-editor-command-menu > summary").click();

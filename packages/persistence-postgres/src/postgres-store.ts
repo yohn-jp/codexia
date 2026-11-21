@@ -911,6 +911,14 @@ class PostgresTransaction implements PersistenceTransaction {
     }));
   }
 
+  async getMentionLink(projectId: ProjectId, evidenceId: EvidenceId, nodeId: KnowledgeNodeId): Promise<MentionLink | undefined> {
+    const result = await this.query(
+      "SELECT * FROM mention_link WHERE project_id = $1 AND evidence_id = $2 AND node_id = $3",
+      [projectId, evidenceId, nodeId],
+    );
+    return result.rows[0] ? mapMentionLink(result.rows[0]) : undefined;
+  }
+
   async listMentionLinks(projectId: ProjectId, evidenceId: EvidenceId, limit = 500): Promise<readonly MentionLink[]> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw validationError("Evidence mention page size must be between 1 and 1000");
     const result = await this.query(

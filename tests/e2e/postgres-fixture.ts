@@ -15,6 +15,10 @@ export async function expectDeviceDraft(page: Page): Promise<void> {
   const details = await openProtectionDetails(page);
   await expect(details).toContainText("この端末: 回復用の下書きを保持しています");
 }
+export async function expectNoUnsavedDeviceChanges(page: Page): Promise<void> {
+  const details = await openProtectionDetails(page);
+  await expect(details).toContainText("この端末: この原稿に未保存の変更はありません");
+}
 export async function expectServerSaved(page: Page): Promise<void> {
   await expect(page.locator(".pg-save-state summary")).toHaveText("保存済み", { timeout: 15_000 });
 }

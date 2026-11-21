@@ -986,7 +986,21 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     if (!journal || !active || active.generation < 1) return;
     if (!active.dirty) {
       let cancelled = false;
-      void persistDraft(active).catch((error: unknown) => {
+      void persistDraft(active).then(async () => {
+        if (cancelled || active.recovery !== "pending" || active.save !== "idle" || active.remoteConflict) return;
+        const { projectId, id } = active.document;
+        const remaining = await journal.getPersistenceDraft(projectId, id, authorScope);
+        const latest = activeRef.current;
+        if (cancelled || !latest || sessionBlockedRef.current || latest.document.projectId !== projectId || latest.document.id !== id ||
+            latest.generation !== active.generation || latest.dirty || latest.recovery !== "pending" || latest.save !== "idle" ||
+            latest.remoteConflict || latest.baseRevisionId !== latest.revision.id || latest.markdown !== latest.revision.markdown ||
+            pendingSaveRef.current.has(JSON.stringify([projectId, id]))) return;
+        if (remaining) {
+          publishEditor({ ...latest, recovery: "other-tab", save: "failed", error: "別タブの回復用の下書きを保持しています。" });
+        } else {
+          publishEditor({ ...latest, recovery: "stored", save: "saved" });
+        }
+      }).catch((error: unknown) => {
         if (!cancelled) setJournalError(error instanceof Error ? error.message : "回復Journalの古い下書きを解除できませんでした。");
       });
       return () => { cancelled = true; };
@@ -1018,7 +1032,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       if (timer !== undefined) window.clearTimeout(timer);
     };
     // Save only after this exact editor generation has been written to IndexedDB.
-  }, [active?.document.id, active?.generation, active?.baseRevisionId, active?.markdown, journal, persistDraft, publishEditor, sessionBlocked]);
+  }, [active?.document.id, active?.generation, active?.baseRevisionId, active?.markdown, authorScope, journal, persistDraft, publishEditor, sessionBlocked]);
 
   const saveDocument = useCallback(async (): Promise<void> => {
     const currentJournal = journalRef.current;
@@ -2355,7 +2369,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
                       : active.save === "saved" && active.recovery === "stored" ? "保存済み" : "保存状態を確認中"}
               </summary>
               <div className="pg-save-state-detail">
-                <p>この端末: {active.recovery === "stored" ? "回復用の下書きを保持しています" : active.recovery === "pending" ? "回復用の下書きを記録しています" : active.recovery === "other-tab" ? "別タブに下書きがあります" : "回復用の下書きを確認できません"}</p>
+                <p>この端末: {active.recovery === "stored" ? (active.dirty ? "回復用の下書きを保持しています" : "この原稿に未保存の変更はありません") : active.recovery === "pending" ? "回復記録を更新しています" : active.recovery === "other-tab" ? "別タブに下書きがあります" : "回復用の下書きを確認できません"}</p>
                 <p>サーバー: {active.save === "saved" ? "PostgreSQLへの保存を確認しました" : active.save === "saving" ? "PostgreSQLへの保存を確認しています" : active.save === "failed" ? "PostgreSQLへの保存を確認できません" : active.dirty ? "PostgreSQLへの保存待ちです" : "開いたRevisionを表示しています"}</p>
               </div>
             </details>
