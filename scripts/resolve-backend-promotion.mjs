@@ -13,6 +13,7 @@ import { collectGitHubPages } from './release-policy.mjs';
 import { verifyFrontendMainPromotionProof } from './verify-frontend-artifact.mjs';
 import { compareFrontendVersions } from './verify-frontend-compatibility.mjs';
 import { expectedBackendMigrationFingerprint, inspectBackendImageWithoutExecution as inspectDockerImage } from './backend-image-inspection.mjs';
+import { validateBackendIdentity } from './backend-update-identity.mjs';
 
 const REPOSITORY = 'yohn-jp/codexia';
 const IMAGE_FILE = 'codexia-backend-image.tar.gz';
@@ -24,6 +25,10 @@ function positive(value, label) {
   const number = Number(value);
   assert.ok(Number.isSafeInteger(number) && number > 0, label + ' is invalid');
   return number;
+}
+
+export function backendPromotionReceiptIdentity(identity) {
+  return { ...validateBackendIdentity(identity) };
 }
 
 export function selectBackendPromotionRun(runs, proof, repositoryId, workflowId) {
@@ -148,8 +153,7 @@ async function resolve({env=process.env,fetchImpl=fetch}={}) {
       await rename(archive,handoffArchive);
       receipt.artifacts[item.profile]={id:item.artifact.id,digest:item.artifact.digest,producerAttempt:item.producerAttempt,
         archiveSha256:createHash('sha256').update(await readFile(handoffArchive)).digest('hex'),
-        identity:{version:identity.version,sourceSha:identity.sourceSha,profile:identity.profile,platform:identity.platform,
-          migrationFingerprint:identity.migrationFingerprint,apiEpoch:identity.apiEpoch,persistenceFormat:identity.persistenceFormat}};
+        identity:backendPromotionReceiptIdentity(identity)};
     }
     await writeFile(path.join(outputDir,RECORD),JSON.stringify(receipt,null,2)+'\n',{mode:0o600});
     return {promoted:true,receipt,reason:'Promoted tested Core and Full backend images from PR #'+proof.prNumber};
