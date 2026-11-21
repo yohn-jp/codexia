@@ -88,7 +88,7 @@ export function DocumentOutlineTree({
       });
     },
     onPrimaryAction: (item) => {
-      if (item.getId() !== ROOT_ID && !busy) onSelect(item.getId());
+      if (item.getId() !== ROOT_ID) onSelect(item.getId());
     },
     onRename: (item, title) => {
       const normalized = title.trim();
