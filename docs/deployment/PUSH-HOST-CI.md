@@ -7,3 +7,5 @@ The fixture executes the canonical `host` stage twice under a dedicated bootstra
 This is **not** acceptance of production deployment, backup restoration, application health, or reboot recovery. Reboot is explicitly `NOT_CHECKED`. The production deployment workflow and the backup/restore acceptance are separate proof boundaries.
 
 No polling, signed update channel or alternate deployment controller is present.
+
+The fixture runs the canonical host stage through `CODEXIA_HOST_CONVERGENCE`, with an isolated bootstrap identity.

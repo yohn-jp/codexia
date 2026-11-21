@@ -52,11 +52,21 @@
       when: codexia_stage == 'host'
 
     - name: Install only explicitly authorized base credentials
-      ansible.builtin.include_tasks: base-secrets.yml
+      ansible.builtin.include_tasks:
+        file: base-secrets.yml
+        apply:
+          become: true
+          become_user: "{{ codexia_service_user }}"
+          environment: "{{ service_runtime_env }}"
       when: codexia_stage == 'secrets'
 
     - name: Converge canonical database, networks, volumes and Tunnel Quadlets
-      ansible.builtin.include_tasks: base-runtime.yml
+      ansible.builtin.include_tasks:
+        file: base-runtime.yml
+        apply:
+          become: true
+          become_user: "{{ codexia_service_user }}"
+          environment: "{{ service_runtime_env }}"
       when: codexia_stage == 'base'
 
     - name: Require a certified immutable release for the push deployment
