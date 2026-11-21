@@ -393,18 +393,18 @@ jobs:
           path: ${{ runner.temp }}/ci-evidence/browser-${{ matrix.group }}
           if-no-files-found: error
           retention-days: 7
-    # Chromium-only lanes use the Git-capable immutable Ubuntu image;
-    # WebKit lanes still include Chromium UI/auth tasks and need both browsers.
+    # Each lane carries only its own browser project. Keep both runtime
+    # identities immutable and authenticate GHCR with read-only permissions.
     container:
-      image: ${{ endsWith(matrix.group, '-webkit') && 'mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579' || format('ghcr.io/{0}/playwright-ubuntu-chromium@sha256:d11b4fa1128d937fcda9dd0106d138b65c3e72cbad07d4801547aa66fc1c4725', github.repository) }}
+      image: ${{ format('ghcr.io/{0}/playwright-ubuntu-{1}@{2}', github.repository, endsWith(matrix.group, '-webkit') && 'webkit' || 'chromium', endsWith(matrix.group, '-webkit') && 'sha256:17c30d6e4ce83c9127cd99e417a2c23a30e2b627ecbc95f04737c33d74b640e2' || 'sha256:d11b4fa1128d937fcda9dd0106d138b65c3e72cbad07d4801547aa66fc1c4725') }}
       credentials:
-        username: ${{ endsWith(matrix.group, '-webkit') && '' || github.actor }}
-        password: ${{ endsWith(matrix.group, '-webkit') && '' || secrets.GITHUB_TOKEN }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
       options: --init --ipc=host
     env:
       CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       CODEXIA_CI_BROWSER_GROUP: ${{ matrix.group }}
-      CODEXIA_PLAYWRIGHT_IMAGE_DIGEST: ${{ endsWith(matrix.group, '-webkit') && 'sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579' || 'sha256:d11b4fa1128d937fcda9dd0106d138b65c3e72cbad07d4801547aa66fc1c4725' }}
+      CODEXIA_PLAYWRIGHT_IMAGE_DIGEST: ${{ endsWith(matrix.group, '-webkit') && 'sha256:17c30d6e4ce83c9127cd99e417a2c23a30e2b627ecbc95f04737c33d74b640e2' || 'sha256:d11b4fa1128d937fcda9dd0106d138b65c3e72cbad07d4801547aa66fc1c4725' }}
       CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@postgres:5432/codexia_test
   hosted_catalog:
     name: hosted-native-catalog
