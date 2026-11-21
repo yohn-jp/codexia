@@ -6,6 +6,8 @@ import type { ChangeOperation, ChangeProposal, ModuleContext, SnapshotId } from 
 import { ModuleRuntime } from "@codexia/module-runtime";
 import { createModule as createNlpModule } from "@codexia/module-nlp";
 import { createModule as createDiagnosticsModule } from "./index.js";
+import { evaluateLintRules } from "./linter/rulesEvaluator.js";
+import { detectRhythmWarnings } from "./textAnalysis.js";
 
 const snapshot: SnapshotId = {
   projectId: "p06-production",
@@ -395,6 +397,17 @@ test("public actions read namespaced dictionaries/settings and lint changes rema
   } finally {
     await runtime.shutdown();
   }
+});
+
+test("rhythm and lint compare full supplementary characters at sentence endings", () => {
+  const repeated = "地名は𠮷。人名は𠮷。屋号は𠮷。";
+  assert.deepEqual(detectRhythmWarnings(repeated), [{ ending: "𠮷", count: 3, startSentenceIndex: 1 }]);
+  const rule = { id: "endings", kind: "ending_repetition" as const, maxRepeat: 3 };
+  const warnings = evaluateLintRules(repeated, [rule]);
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.length, repeated.length);
+  // These three different characters share the same low surrogate.
+  assert.deepEqual(evaluateLintRules("語尾は𠀀。語尾は𠐀。語尾は𠠀。", [rule]), []);
 });
 
 test("configured global line-spacing rules fix every line flagged by diagnostics", async () => {
