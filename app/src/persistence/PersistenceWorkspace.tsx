@@ -2512,6 +2512,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
                   : active.save === "saving" ? "サーバーへの保存を確認中"
                     : active.dirty ? active.recovery === "pending" ? "この端末へ記録中" : "この端末に下書きがあります"
                       : active.save === "saved" && active.recovery === "stored" ? "保存済み" : "保存状態を確認中"}
+                {evidencePendingForActive && <span role="status" className="pg-evidence-pending"> · 根拠を確認中</span>}
               </summary>
               <div className="pg-save-state-detail">
                 <p>この端末: {active.recovery === "stored"
@@ -2540,7 +2541,6 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             <p>このRevisionの根拠を取得できませんでした。登録状況は未確認です。{evidenceLoadIssue.message}</p>
             <button type="button" disabled={evidenceLoadIssue.retrying || sessionBlocked} onClick={() => void retryEvidence()}>{evidenceLoadIssue.retrying ? "根拠を再読み込みしています…" : "根拠を再試行"}</button>
           </div>}
-          {evidencePendingForActive && <p role="status">この原稿の根拠を確認しています。</p>}
           <div className="pg-editor-actions" role="group" aria-label="原稿の操作">
             <button type="button" onClick={() => void saveDocument()} disabled={!active.dirty || active.recovery !== "stored" || Boolean(active.remoteConflict) || active.save === "saving"}>
               {active.save === "failed" ? "PostgreSQLへ再試行" : "今すぐ保存"}

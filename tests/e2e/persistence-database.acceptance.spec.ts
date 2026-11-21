@@ -99,13 +99,13 @@ test("the manuscript opens and remains editable while its anchor read is pending
       await anchorRequestStarted;
       await expect(manuscriptEditor(page)).toBeVisible();
       await expect(manuscriptEditor(page)).toContainText("Readable while anchors are pending.");
-      await expect(page.locator(".pg-editor-column").getByRole("status").filter({ hasText: "根拠を確認しています" })).toBeVisible();
+      await expect(page.locator(".pg-editor-column").getByRole("status").filter({ hasText: "根拠を確認中" })).toBeVisible();
       const commands = page.locator(".pg-editor-command-menu");
       if (!await commands.evaluate((element) => (element as HTMLDetailsElement).open)) await commands.locator("summary").click();
       await expect(commands.getByRole("button", { name: "選択範囲をText Anchorにする" })).toBeDisabled();
       await fillDraft(page, "Typed while anchors are pending.");
       releaseAnchors();
-      await expect(page.locator(".pg-editor-column").getByRole("status").filter({ hasText: "根拠を確認しています" })).toHaveCount(0);
+      await expect(page.locator(".pg-editor-column").getByRole("status").filter({ hasText: "根拠を確認中" })).toHaveCount(0);
       await expect(manuscriptEditor(page)).toHaveText("Typed while anchors are pending.");
     } finally {
       releaseAnchors();

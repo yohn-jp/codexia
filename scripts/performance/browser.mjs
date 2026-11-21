@@ -119,9 +119,14 @@ try {
   const base = `http://127.0.0.1:${ready.port}`;
   cdp = await context.newCDPSession(page);
   await cdp.send('Network.enable');
-  report.network = { encodedTransferBytes: 0, completed: 0, failed: 0 };
+  report.network = { encodedTransferBytes: 0, completed: 0, failed: 0, cancelled: 0 };
   cdp.on('Network.loadingFinished', event => { report.network.encodedTransferBytes += event.encodedDataLength; report.network.completed++; });
-  cdp.on('Network.loadingFailed', () => report.network.failed++);
+  cdp.on('Network.loadingFailed', event => {
+    // Replacing the selected manuscript intentionally cancels its superseded Evidence fetch.
+    // Record these browser-initiated aborts without treating them as transport failures.
+    if (event.canceled && event.errorText === 'net::ERR_ABORTED') report.network.cancelled++;
+    else report.network.failed++;
+  });
   await cdp.send('Performance.enable');
   await cdp.send('Profiler.enable');
   await cdp.send('Profiler.start');
