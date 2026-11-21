@@ -104,7 +104,7 @@ async function readFile(root: string | undefined, relativePath: string): Promise
 async function openCheckedRegularFile(root: string, filePath: string): Promise<Awaited<ReturnType<typeof fs.open>> | null> {
   const noFollow = fsConstants.O_NOFOLLOW ?? 0;
   const nonBlocking = fsConstants.O_NONBLOCK ?? 0;
-  const handle = await fs.open(filePath, fsConstants.O_RDONLY | noFollow | nonBlocking);
+  const handle = await fs.open(filePath, fsConstants.O_RDONLY | noFollow | nonBlocking, 0o600);
   try {
     const opened = await handle.stat();
     if (!opened.isFile()) {
