@@ -158,6 +158,14 @@ export interface PersistenceNodeRead {
   relations: KnowledgeRelation[];
 }
 
+export interface PersistenceKnowledgePage {
+  nodes: KnowledgeNode[];
+  nextCursor: string | null;
+  projectVersion: number;
+}
+
+export type PersistenceKnowledgeResult = PersistenceKnowledgePage | { nodes: KnowledgeNode[] };
+
 export interface PersistenceAssertionRead {
   assertion: Assertion;
   evidence: AssertionEvidence[];
@@ -545,6 +553,11 @@ export const api = {
   },
   persistenceNodes: (projectId: string, limit = 200, signal?: AbortSignal) => request(dto.persistenceNodes,
     persistencePath(projectId, `nodes?${new URLSearchParams({ limit: String(limit) })}`), { ...(signal ? { signal } : {}) }),
+  persistenceKnowledgePage: (projectId: string, filters: { q: string; type: string; status: string; cursor?: string }, signal?: AbortSignal): Promise<PersistenceKnowledgeResult> => {
+    const query = new URLSearchParams({ limit: "50", q: filters.q, type: filters.type, status: filters.status });
+    if (filters.cursor) query.set("cursor", filters.cursor);
+    return request(dto.persistenceNodes, persistencePath(projectId, `nodes?${query}`), { ...(signal ? { signal } : {}) });
+  },
   updatePersistenceDocument: (projectId: string, documentId: string, command: { expectedVersion: number; title?: string; parentId?: string | null; orderKey?: string }) => request(dto.persistenceDocumentEnvelope, persistencePath(projectId, `documents/${encodeURIComponent(documentId)}/metadata`), { method: "PATCH", body: JSON.stringify(command) }),
   deletePersistenceDocument: (projectId: string, documentId: string, expectedVersion: number) => request(dto.persistenceDocumentEnvelope, persistencePath(projectId, `documents/${encodeURIComponent(documentId)}`), { method: "DELETE", body: JSON.stringify({ expectedVersion }) }),
   createPersistenceDocument: (

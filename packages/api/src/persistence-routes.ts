@@ -95,6 +95,22 @@ function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
+type KnowledgeCursor = { projectId: string; version: number; query: string; type: string; status: string; name: string; id: string };
+function parseKnowledgeCursor(value: string | null): KnowledgeCursor | undefined {
+  if (value === null) return undefined;
+  try {
+    if (value.length > 4096) throw new Error();
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<KnowledgeCursor>;
+    if (typeof parsed.projectId !== "string" || !Number.isSafeInteger(parsed.version) || (parsed.version as number) < 1 ||
+      typeof parsed.query !== "string" || typeof parsed.type !== "string" || typeof parsed.status !== "string" ||
+      typeof parsed.name !== "string" || typeof parsed.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(parsed.id)) throw new Error();
+    return parsed as KnowledgeCursor;
+  } catch { return failure(400, "INVALID_CURSOR", "Knowledge cursor is invalid"); }
+}
+function knowledgeCursor(cursor: KnowledgeCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
 function errorResponse(error: unknown): PersistenceRouteResponse {
   if (error instanceof WorkArchiveError) return { status: error.status, body: { error: error.message, code: error.code } };
   if (error instanceof NativeKnowledgeServiceError) return { status: error.code === "snapshot_unavailable" ? 409 : 400, body: { error: error.message, code: error.code.toUpperCase() } };
@@ -286,9 +302,44 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
     }
 
     if (suffix === "nodes" && input.method === "GET") {
+      const query = url.searchParams.get("q") ?? "";
+      const type = url.searchParams.get("type") ?? "";
+      const status = url.searchParams.get("status") ?? "";
+      const suppliedCursor = parseKnowledgeCursor(url.searchParams.get("cursor"));
+      const browsing = url.searchParams.has("q") || url.searchParams.has("type") || url.searchParams.has("status") || suppliedCursor !== undefined;
+      if (!browsing) {
       const limit = requestLimit(url.searchParams.get("limit"), 100, 500);
       const nodes = await listNativeKnowledgeNodes(persistence, projectId, limit, selectedProjectVersion());
       return { status: 200, body: { nodes } };
+      }
+      if (query.length > 128 || type.length > 64 || /[\u0000-\u001f\u007f]/u.test(type) ||
+        (status && !["proposed", "confirmed", "retired"].includes(status))) failure(400, "INVALID_QUERY", "Knowledge filters are invalid");
+      const limit = requestLimit(url.searchParams.get("limit"), 50, 100);
+      if (suppliedCursor && (suppliedCursor.projectId !== projectId || suppliedCursor.query !== query || suppliedCursor.type !== type || suppliedCursor.status !== status)) {
+        failure(400, "INVALID_CURSOR", "Knowledge cursor does not match these filters");
+      }
+      const requestedVersion = selectedProjectVersion();
+      if (suppliedCursor && requestedVersion !== undefined && suppliedCursor.version !== requestedVersion) {
+        failure(400, "INVALID_CURSOR", "Knowledge cursor does not match the selected project version");
+      }
+      const version = suppliedCursor?.version ?? requestedVersion;
+      const page = await nativeRead(async reader => {
+        const project = await reader.getProject(projectId);
+        if (!project) throw new NativeKnowledgeServiceError("snapshot_unavailable", "The selected native Knowledge snapshot is unavailable");
+        if (version !== undefined && project.version !== version) throw new NativeKnowledgeServiceError("snapshot_unavailable", "Knowledge changed; restart the search");
+        if (!reader.searchKnowledgeNodes) throw new NativeKnowledgeServiceError("invalid_input", "Knowledge browse is unavailable");
+        const nodes = await reader.searchKnowledgeNodes(projectId, {
+          query, type: type || undefined, status: status ? status as "proposed" | "confirmed" | "retired" : undefined,
+          after: suppliedCursor ? { name: suppliedCursor.name, id: suppliedCursor.id as import("@codexia/persistence-contracts").KnowledgeNodeId } : undefined,
+          limit: limit + 1,
+        });
+        return { version: project.version, nodes };
+      });
+      const hasMore = page.nodes.length > limit;
+      const nodes = page.nodes.slice(0, limit);
+      const last = nodes.at(-1);
+      const nextCursor = hasMore && last ? knowledgeCursor({ projectId, version: page.version, query, type, status, name: last.name, id: last.id }) : null;
+      return { status: 200, body: { nodes, nextCursor, projectVersion: page.version } };
     }
 
     const documentPath = suffix.match(/^documents\/([^/]+)(?:\/(.*))?$/u);
