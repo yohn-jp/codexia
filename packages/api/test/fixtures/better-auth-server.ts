@@ -213,6 +213,9 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     await (await runtime.auth.$context).runMigrations();
 
     const makeApi = (withOwner: boolean): Server => createServer({
+      // OAuth fixture does not provision Full runtime manifests; browser coverage
+      // exercises the same authentication contract in both build profiles.
+      profile: "core",
       store: coreStoreForAuthFixture(),
       persistence: persistenceForAuthFixture(),
       authToken: "codexia-test-api-token-with-32-characters",
