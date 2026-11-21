@@ -118,6 +118,24 @@ export function assertTaskProducerInventory({ plan, report, inventory }) {
     const result = report.results[index];
     assert.equal(recorded.status, result.status, 'Producer task result mismatch');
     assert.deepEqual(recorded.invocations, result.invocations, 'Producer task invocation mismatch');
+    assert.deepEqual(recorded.inputProof, result.inputProof, 'Producer task input proof mismatch');
+    if (recorded.inputProof !== undefined) {
+      const proof = recorded.inputProof;
+      assert.equal(recorded.task, 'coverage', 'Input closure is not supported for this task');
+      assert.equal(result.status, 'passed', 'Input closure requires a passed task');
+      assert.ok(plan.tasks.includes('unit-root'), 'Coverage input closure requires the full-plan static variant');
+      assert.equal(proof.format, 'codexia-ci-task-input-proof/v1', 'Unknown task input proof format');
+      assert.equal(proof.mode, 'full-plan-static', 'Unsupported task input proof mode');
+      assert.equal(proof.status, 'passed', 'Task input proof did not pass');
+      assert.equal(proof.sourceSha, plan.sha, 'Task input proof source mismatch');
+      assert.equal(proof.planDigest, planDigest(plan), 'Task input proof plan mismatch');
+      assert.equal(proof.workflowRunId, report.workflowRunId, 'Task input proof run mismatch');
+      assert.equal(proof.workflowAttempt, report.workflowAttempt, 'Task input proof attempt mismatch');
+      assert.equal(proof.workflowJob, report.workflowJob, 'Task input proof job mismatch');
+      assert.ok(proof.inputClosure && typeof proof.inputClosure === 'object', 'Missing task input closure');
+      assert.deepEqual(Object.keys(proof.inputClosure).sort(), [...TASK_INPUT_DIMENSIONS].sort(), 'Incomplete task input closure');
+      for (const dimension of TASK_INPUT_DIMENSIONS) assert.match(proof.inputClosure[dimension], sha256Pattern, `Invalid ${dimension} input closure digest`);
+    }
     assertInvocationList(recorded.invocations, recorded.task, { required: result.status === 'passed' });
   }
   assertInvocationList(inventory.groupInvocations, 'group');

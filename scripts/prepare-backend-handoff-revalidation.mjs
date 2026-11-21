@@ -1,0 +1,67 @@
+#!/usr/bin/env node
+import assert from 'node:assert/strict';
+import { appendFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+import { assertTrustedBackendPublicationRun } from './verify-backend-push-handoff.mjs';
+
+const repository = 'yohn-jp/codexia';
+const sha = /^[a-f0-9]{40}$/u;
+
+async function readPublisherRun(id, token, fetchImpl = fetch) {
+  const response = await fetchImpl(`https://api.github.com/repos/${repository}/actions/runs/${id}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
+    redirect: 'error', signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) throw new Error('Requested backend publisher run could not be verified (HTTP ' + response.status + ')');
+  return response.json();
+}
+
+export async function resolveManualPublisherRun({ env, checkoutSha, fetchImpl = fetch }) {
+  assert.equal(env.GITHUB_EVENT_NAME, 'workflow_dispatch', 'Manual certificate revalidation requires workflow_dispatch');
+  assert.equal(env.GITHUB_REPOSITORY, repository, 'Repository mismatch');
+  assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Manual certificate revalidation must run from main');
+  assert.match(env.GITHUB_SHA ?? '', sha, 'Main workflow SHA is invalid');
+  assert.equal(checkoutSha, env.GITHUB_SHA, 'Trusted verifier checkout differs from the dispatch source');
+  assert.match(env.CODEXIA_PUBLISHER_RUN_ID ?? '', /^[1-9][0-9]*$/u, 'A positive backend publisher run ID is required');
+  const id = Number(env.CODEXIA_PUBLISHER_RUN_ID);
+  assert.ok(Number.isSafeInteger(id) && id > 0, 'Backend publisher run ID is outside the supported range');
+  const token = env.GH_TOKEN || env.GITHUB_TOKEN;
+  assert.ok(typeof token === 'string' && token.length > 0, 'Actions read token is required');
+  const run = await readPublisherRun(id, token, fetchImpl);
+  assertTrustedBackendPublicationRun(run, { id, attempt: run.run_attempt, headSha: run.head_sha });
+  return {
+    id: run.id,
+    run_attempt: run.run_attempt,
+    path: run.path,
+    event: run.event,
+    head_branch: run.head_branch,
+    head_sha: run.head_sha,
+    status: run.status,
+    conclusion: run.conclusion,
+    repository: { full_name: run.repository.full_name },
+    head_repository: { full_name: run.head_repository.full_name },
+  };
+}
+
+export async function writePublisherSourceOutput(run, outputPath) {
+  assert.match(outputPath ?? '', /^\//u, 'Workflow output path must be absolute');
+  assert.match(run?.head_sha ?? '', sha, 'Verified publisher source SHA is invalid');
+  await appendFile(outputPath, `publisher_source_sha=${run.head_sha}\n`);
+}
+
+async function main() {
+  const env = process.env;
+  const checkoutSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const run = await resolveManualPublisherRun({ env, checkoutSha });
+  await writePublisherSourceOutput(run, env.GITHUB_OUTPUT);
+  console.log(`Selected successful main backend publisher run ${run.id}, attempt ${run.run_attempt}, source ${run.head_sha}`);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch(error => {
+    console.error(error instanceof Error ? error.message : 'Manual backend publisher resolution failed');
+    process.exitCode = 1;
+  });
+}

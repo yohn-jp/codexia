@@ -562,6 +562,129 @@ test("a Knowledge save error stays with the visible form across Desktop layouts 
   await submit();
 });
 
+test("Knowledge candidate retries reconcile uncertain creates without blocking deliberate same-name candidates", async ({ page }) => {
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  const fixture = await createWritingFixture(page, "desktop", `Knowledge create retry ${crypto.randomUUID()}`);
+  const persistence = createPostgresPersistence(databaseUrl!);
+  const projectId = fixture.project.id as ProjectId;
+  const readNodes = () => persistence.read(reader => reader.listKnowledgeNodes(projectId, 100));
+  const existingIds = new Set((await readNodes()).map(node => node.id));
+  const lostName = `応答だけ喪失 ${crypto.randomUUID()}`;
+  const preCommitName = `確定前失敗 ${crypto.randomUUID()}`;
+  const normalName = `正常作成 ${crypto.randomUUID()}`;
+  const duplicateName = `同名別候補 ${crypto.randomUUID()}`;
+  let loseResponseFor: string | null = null;
+  let failBeforeCommitFor: string | null = null;
+  let blockReconciliationFor: string | null = null;
+  let lostId: string | null = null;
+  let preCommitId: string | null = null;
+  const lostReconciliationIds: string[] = [];
+  const lostPutIds: string[] = [];
+  const nodeRoute = new RegExp(`/api/v1/persistence/projects/${fixture.project.id}/nodes/[^/?]+$`);
+  const interceptNodeSave = async (route: import("@playwright/test").Route) => {
+    const request = route.request();
+    const nodeId = new URL(request.url()).pathname.split("/").at(-1)!;
+    if (request.method() === "GET" && nodeId === lostId) lostReconciliationIds.push(nodeId);
+    if (request.method() === "GET" && blockReconciliationFor === nodeId) {
+      blockReconciliationFor = null;
+      await route.fulfill({ status: 503, json: { error: "temporary reconciliation failure" } });
+      return;
+    }
+    if (request.method() !== "PUT") {
+      await route.continue();
+      return;
+    }
+    const body = request.postDataJSON() as { name: string };
+    if (body.name === lostName) lostPutIds.push(nodeId);
+    if (body.name === failBeforeCommitFor) {
+      failBeforeCommitFor = null;
+      preCommitId = nodeId;
+      await route.fulfill({ status: 503, json: { error: "temporary save failure" } });
+      return;
+    }
+    if (body.name === loseResponseFor) {
+      loseResponseFor = null;
+      lostId = nodeId;
+      const response = await route.fetch();
+      expect(response.status()).toBe(200);
+      blockReconciliationFor = nodeId;
+      await route.abort();
+      return;
+    }
+    await route.continue();
+  };
+
+  try {
+    await page.route(nodeRoute, interceptNodeSave);
+    await openResearchInspector(page);
+    const name = page.getByLabel("Knowledge候補を追加");
+    if (!await name.isVisible()) await page.locator(".pg-knowledge-tools > summary").click();
+    const submit = page.locator(".pg-knowledge-tools form button[type=submit]");
+    const save = async (value: string) => {
+      await name.fill(value);
+      await submit.click();
+    };
+
+    await save(normalName);
+    await expect(page.locator(".pg-notice")).toContainText("Knowledge候補を保存しました");
+    await expect(name).toHaveValue("");
+    let nodes = await readNodes();
+    expect(nodes).toHaveLength(existingIds.size + 1);
+    expect(nodes.filter(node => node.name === normalName)).toMatchObject([{ type: "person", status: "proposed", attributes: {} }]);
+
+    loseResponseFor = lostName;
+    await save(lostName);
+    await expect(page.getByRole("alert")).toContainText("結果を確認できません");
+    await expect(name).toHaveValue(lostName);
+    expect(lostId).toBeTruthy();
+    nodes = await readNodes();
+    expect(nodes).toHaveLength(existingIds.size + 2);
+    expect(nodes.filter(node => node.name === lostName)).toMatchObject([{ id: lostId, type: "person", name: lostName, status: "proposed", attributes: {} }]);
+
+    const lostReadsBeforeRetry = lostReconciliationIds.length;
+    await submit.click();
+    await expect(page.locator(".pg-notice")).toContainText("Knowledge候補を保存しました");
+    await expect(name).toHaveValue("");
+    expect(lostReconciliationIds.length).toBeGreaterThan(lostReadsBeforeRetry);
+    expect(lostReconciliationIds.every(id => id === lostId)).toBe(true);
+    expect(lostPutIds).toEqual([lostId]);
+    nodes = await readNodes();
+    expect(nodes).toHaveLength(existingIds.size + 2);
+    expect(nodes.filter(node => node.name === lostName)).toMatchObject([{ id: lostId, type: "person", name: lostName, status: "proposed", attributes: {} }]);
+
+    failBeforeCommitFor = preCommitName;
+    await save(preCommitName);
+    await expect(page.getByRole("alert")).toContainText("temporary save failure");
+    await expect(name).toHaveValue(preCommitName);
+    expect(preCommitId).toBeTruthy();
+    nodes = await readNodes();
+    expect(nodes).toHaveLength(existingIds.size + 2);
+    expect(nodes.some(node => node.id === preCommitId)).toBe(false);
+
+    await submit.click();
+    await expect(page.locator(".pg-notice")).toContainText("Knowledge候補を保存しました");
+    await expect(name).toHaveValue("");
+    nodes = await readNodes();
+    expect(nodes).toHaveLength(existingIds.size + 3);
+    expect(nodes.filter(node => node.name === preCommitName)).toMatchObject([{ id: preCommitId, type: "person", name: preCommitName, status: "proposed", attributes: {} }]);
+
+    await save(duplicateName);
+    await expect(page.locator(".pg-notice")).toContainText("Knowledge候補を保存しました");
+    await expect(name).toHaveValue("");
+    await save(duplicateName);
+    await expect(page.locator(".pg-notice")).toContainText("Knowledge候補を保存しました");
+    await expect(name).toHaveValue("");
+    nodes = await readNodes();
+    const sameNameNodes = nodes.filter(node => node.name === duplicateName);
+    expect(sameNameNodes).toHaveLength(2);
+    expect(new Set(sameNameNodes.map(node => node.id)).size).toBe(2);
+    expect(nodes).toHaveLength(existingIds.size + 5);
+  } finally {
+    await page.unroute(nodeRoute, interceptNodeSave);
+    await persistence.close();
+  }
+});
+
 test("PostgreSQL project pages expose records beyond 200 and deep links retain the requested identity", async ({ page }) => {
   test.setTimeout(120_000);
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();

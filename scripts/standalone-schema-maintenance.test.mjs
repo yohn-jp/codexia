@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { generateKeyPairSync } from 'node:crypto';
 import { initialControllerState } from './standalone-update-controller.mjs';
-import { recoverSchemaMaintenance, validateSchemaMaintenanceIntent } from './standalone-schema-maintenance.mjs';
+import { recoverSchemaMaintenance, runSchemaMaintenance, validateSchemaMaintenanceIntent } from './standalone-schema-maintenance.mjs';
 import { signUpdateChannel, verifyUpdateChannel } from './update-channel.mjs';
 
 const old = { format:'codexia-update-release/v1', channel:'stable', state:'published', version:'0.1.0', sourceSha:'a'.repeat(40), image:'ghcr.io/yohn-jp/codexia-backend@sha256:'+'a'.repeat(64), platform:'linux/amd64', profile:'core', migrationFingerprint:'sha256:'+'c'.repeat(64), persistenceFormat:1, apiEpoch:1 };
@@ -48,10 +48,14 @@ function fixture(fingerprint, { targetPersisted = false, writers } = {}) {
       async probe(slot, release) { trace.push('probe:'+release.image+':'+route); },
     },
     async uiEpoch(release) { trace.push('epoch:'+release.image); assert.equal(release.apiEpoch, 1); },
-    async save(value) { saved = structuredClone(value); return saved; },
+    async save(value) { trace.push('controller.save'); saved = structuredClone(value); return saved; },
     async assertServing() {},
   };
-  const markerStore = { async load() { return marker; }, async clear() { trace.push('clear'); } };
+  const markerStore = {
+    async load() { return marker; },
+    async save() { trace.push('markerStore.save'); throw new Error('markerStore.save reached before incompatible guard'); },
+    async clear() { trace.push('clear'); },
+  };
   return { controller, state, marker, markerStore, trace, saved: () => saved };
 }
 
@@ -85,4 +89,22 @@ test('ambiguous schema marker remains blocked', async () => {
   await assert.rejects(recoverSchemaMaintenance({ ...fixtureValue, stateFile:'/state.json', routeFile:'/route' }), /cannot classify/);
   assert.deepEqual(fixtureValue.trace.slice(0, 2), ['route:blocked', 'stop-timer']);
   assert.ok(!fixtureValue.trace.some(item => item.startsWith('start:')));
+});
+
+test('incompatible API epoch or persistence format is rejected before backup evidence or host mutation', async t => {
+  for (const field of ['apiEpoch', 'persistenceFormat']) {
+    await t.test(field, async () => {
+      const fixtureValue = fixture(old.migrationFingerprint);
+      const incompatible = { ...next, [field]: next[field] + 1 };
+      await assert.rejects(runSchemaMaintenance({
+        controller: fixtureValue.controller,
+        state: fixtureValue.state,
+        target: incompatible,
+        markerStore: fixtureValue.markerStore,
+        stateFile: '/state.json',
+        routeFile: '/route',
+      }), new RegExp(`Same-epoch schema target changed ${field}`));
+      assert.deepEqual(fixtureValue.trace, [], 'Incompatible maintenance must fail before channel, backup, lock-state or host operations');
+    });
+  }
 });

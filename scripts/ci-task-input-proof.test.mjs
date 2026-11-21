@@ -104,6 +104,43 @@ test('report-only producer inventory binds exact source, run, job, and selected 
   assert.throws(() => assertTaskProducerInventory({ plan, report: unbound, inventory }), /invocation/);
 });
 
+test('report-only coverage input closure is accepted only for the full-plan static task and exact workflow identity', () => {
+  const plan = createVerificationPlan({ files: null, event: 'push', sha: sourceSha });
+  const tasks = VERIFICATION_GROUPS['types-tests'].filter(task => plan.tasks.includes(task));
+  const digest = createPlanDigest(plan);
+  const workflowIdentity = {
+    workflowRunId: 701, workflowAttempt: 1, workflowJob: 'types-tests',
+    workflowRef: 'yohn-jp/codexia/.github/workflows/verify.yml@refs/heads/main', workflowSha: sourceSha,
+  };
+  const inputProof = {
+    format: 'codexia-ci-task-input-proof/v1', task: 'coverage', mode: 'full-plan-static', status: 'passed',
+    sourceSha, planDigest: digest, workflowRunId: 701, workflowAttempt: 1, workflowJob: 'types-tests',
+    inputClosure: Object.fromEntries(dimensions.map(name => [name, name.charCodeAt(0).toString(16).padStart(64, '0')])),
+  };
+  const report = {
+    group: 'types-tests', sha: sourceSha, planDigest: digest, ...workflowIdentity,
+    results: tasks.map(task => ({ task, status: 'passed', seconds: 1,
+      invocations: [{ executable: 'node', arguments: ['scripts/ci-workspace.mjs', task === 'coverage' ? 'coverage' : 'test-types'], environmentKeys: [] }],
+      ...(task === 'coverage' ? { inputProof } : {}),
+    })),
+  };
+  const inventory = {
+    format: 'codexia-ci-task-producer-inventory/v1', group: 'types-tests', sourceSha, planDigest: digest, ...workflowIdentity,
+    runner: { os: 'Linux', arch: 'X64', imageOS: 'ubuntu24', imageVersion: '20261115.1', nodeVersion: 'v24.22.3' },
+    selectedTasks: tasks, groupInvocations: [],
+    taskInvocations: report.results.map(({ task, status, invocations, inputProof }) => ({ task, status, invocations, ...(inputProof ? { inputProof } : {}) })),
+  };
+  assert.doesNotThrow(() => assertTaskProducerInventory({ plan, report, inventory }));
+  const stale = structuredClone(inventory);
+  stale.taskInvocations.find(item => item.task === 'coverage').inputProof.workflowJob = 'unit-core';
+  assert.throws(() => assertTaskProducerInventory({ plan, report, inventory: stale }), /input proof mismatch/);
+  const unsupported = structuredClone(report);
+  unsupported.results.find(item => item.task === 'coverage').inputProof.mode = 'supplemental-tests';
+  const unsupportedInventory = structuredClone(inventory);
+  unsupportedInventory.taskInvocations.find(item => item.task === 'coverage').inputProof.mode = 'supplemental-tests';
+  assert.throws(() => assertTaskProducerInventory({ plan, report: unsupported, inventory: unsupportedInventory }), /Unsupported task input proof mode/);
+});
+
 test('producer command inventory redacts secret-like argument values', () => {
   const safe = sanitizeProducerArguments(['--token', 'secret-token-value', '--password=secret', 'scripts/test.mjs']);
   assert.deepEqual(safe, ['--token', '[redacted]', '--password=[redacted]', 'scripts/test.mjs']);

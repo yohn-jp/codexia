@@ -68,6 +68,14 @@ interface ContinueRequest {
   position: ContinuePosition;
 }
 
+interface KnowledgeCreateIntent {
+  projectId: string;
+  id: KnowledgeNodeId;
+  type: string;
+  name: string;
+  needsReconciliation: boolean;
+}
+
 interface OutlineDocument extends PersistenceDocument {
   children: OutlineDocument[];
   misplaced?: boolean;
@@ -366,6 +374,9 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const [knowledgeName, setKnowledgeName] = useState("");
   const [knowledgeType, setKnowledgeType] = useState("person");
   const [knowledgeCreateError, setKnowledgeCreateError] = useState<{ projectId: string; message: string } | null>(null);
+  const knowledgeCreateIntentRef = useRef<KnowledgeCreateIntent | null>(null);
+  const [knowledgeCreatePending, setKnowledgeCreatePending] = useState(false);
+  const [knowledgeCreateUncertain, setKnowledgeCreateUncertain] = useState<{ projectId: string; nodeId: KnowledgeNodeId } | null>(null);
   const [revisions, setRevisions] = useState<DocumentRevision[]>([]);
   const [showRevisions, setShowRevisions] = useState(false);
   const [revisionCursor, setRevisionCursor] = useState<string | null>(null);
@@ -1723,26 +1734,80 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     event.preventDefault();
     if (!project || !knowledgeName.trim()) return;
     setKnowledgeCreateError(null);
-    const id = crypto.randomUUID() as KnowledgeNodeId;
+    const name = knowledgeName.trim();
+    const currentIntent = knowledgeCreateIntentRef.current;
+    const intent = currentIntent && currentIntent.projectId === project.id && currentIntent.type === knowledgeType && currentIntent.name === name
+      ? currentIntent
+      : { projectId: project.id, id: crypto.randomUUID() as KnowledgeNodeId, type: knowledgeType, name, needsReconciliation: false };
+    knowledgeCreateIntentRef.current = intent;
+    setKnowledgeCreatePending(true);
+    const complete = (node: KnowledgeNode): void => {
+      if (projectIdRef.current !== intent.projectId) return;
+      knowledgeCreateIntentRef.current = null;
+      setKnowledgeCreateUncertain(null);
+      refreshKnowledgeBrowse();
+      setNodeId(node.id);
+      setSelectedKnowledgeNode(node);
+      setKnowledgeName("");
+      setNotice("Knowledge候補を保存しました。内容を確認してから確定してください。");
+    };
+    const matchesIntent = (node: KnowledgeNode): boolean => node.projectId === intent.projectId && node.id === intent.id &&
+      node.type === intent.type && node.name === intent.name && node.status === "proposed" && Object.keys(node.attributes).length === 0;
+    const reportCreateError = (message: string): void => {
+      if (projectIdRef.current !== intent.projectId) return;
+      if (mode === "mobile") setPageError(message);
+      else setKnowledgeCreateError({ projectId: intent.projectId, message });
+    };
     try {
-      const result = await api.savePersistenceNode(project.id, id, {
-        type: knowledgeType,
-        name: knowledgeName.trim(),
+      if (intent.needsReconciliation) {
+        let existing: KnowledgeNode | null = null;
+        try {
+          ({ node: existing } = await api.persistenceNode(intent.projectId, intent.id));
+        } catch (error) {
+          if (!(error instanceof ApiError) || error.status !== 404) {
+            setKnowledgeCreateUncertain({ projectId: intent.projectId, nodeId: intent.id });
+            reportCreateError("保存結果を確認できません。入力を保ったまま、同じ候補の保存結果を再確認してください。");
+            return;
+          }
+        }
+        if (existing) {
+          if (matchesIntent(existing)) complete(existing);
+          else {
+            setKnowledgeCreateUncertain({ projectId: intent.projectId, nodeId: intent.id });
+            reportCreateError("保存結果が入力内容と一致しません。候補を変更せず、保存結果を再確認してください。");
+          }
+          return;
+        }
+        intent.needsReconciliation = false;
+        setKnowledgeCreateUncertain(null);
+      }
+      const result = await api.savePersistenceNode(intent.projectId, intent.id, {
+        type: intent.type,
+        name: intent.name,
         attributes: {},
         status: "proposed",
         expectedVersion: null,
       });
-      refreshKnowledgeBrowse();
-      setNodeId(result.node.id);
-      setSelectedKnowledgeNode(result.node);
-      setKnowledgeName("");
-      setNotice("Knowledge候補を保存しました。内容を確認してから確定してください。");
+      complete(result.node);
     } catch (error) {
-      if (projectIdRef.current === project.id) {
-        const message = error instanceof Error ? error.message : "Knowledgeを保存できませんでした。";
-        if (mode === "mobile") setPageError(message);
-        else setKnowledgeCreateError({ projectId: project.id, message });
+      intent.needsReconciliation = true;
+      setKnowledgeCreateUncertain({ projectId: intent.projectId, nodeId: intent.id });
+      const saveMessage = error instanceof Error ? error.message : "Knowledgeを保存できませんでした。";
+      try {
+        const { node } = await api.persistenceNode(intent.projectId, intent.id);
+        if (matchesIntent(node)) complete(node);
+        else reportCreateError("保存結果が入力内容と一致しません。候補を変更せず、保存結果を再確認してください。");
+      } catch (readError) {
+        if (readError instanceof ApiError && readError.status === 404) {
+          intent.needsReconciliation = false;
+          setKnowledgeCreateUncertain(null);
+          reportCreateError(saveMessage);
+        } else {
+          reportCreateError("保存結果を確認できません。入力を保ったまま、同じ候補の保存結果を再確認してください。");
+        }
       }
+    } finally {
+      setKnowledgeCreatePending(false);
     }
   }
 
@@ -2410,12 +2475,12 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           <summary>知識候補を追加・根拠に指定</summary>
           <form onSubmit={(event) => void createKnowledge(event)}>
             <label htmlFor="pg-knowledge-name">Knowledge候補を追加</label>
-            <input id="pg-knowledge-name" value={knowledgeName} onChange={(event) => setKnowledgeName(event.target.value)} maxLength={512} required placeholder="人物・場所・用語" />
+            <input id="pg-knowledge-name" value={knowledgeName} onChange={(event) => setKnowledgeName(event.target.value)} maxLength={512} required disabled={knowledgeCreatePending || knowledgeCreateUncertain?.projectId === projectId} placeholder="人物・場所・用語" />
             <label htmlFor="pg-knowledge-type">種類</label>
-            <select id="pg-knowledge-type" value={knowledgeType} onChange={(event) => setKnowledgeType(event.target.value)}>
+            <select id="pg-knowledge-type" value={knowledgeType} onChange={(event) => setKnowledgeType(event.target.value)} disabled={knowledgeCreatePending || knowledgeCreateUncertain?.projectId === projectId}>
               <option value="person">人物</option><option value="place">場所</option><option value="event">出来事</option><option value="setting">設定</option><option value="term">用語</option>
             </select>
-            <button type="submit" disabled={!project || !knowledgeName.trim()}>候補を保存</button>
+            <button type="submit" disabled={!project || !knowledgeName.trim() || knowledgeCreatePending}>{knowledgeCreatePending ? "保存中…" : knowledgeCreateUncertain?.projectId === projectId ? "保存結果を再確認" : "候補を保存"}</button>
           </form>
           <label htmlFor="pg-knowledge-target">Text AnchorのKnowledge先</label>
           <select id="pg-knowledge-target" value={nodeId} onChange={(event) => {

@@ -10,6 +10,7 @@ import { assertNativeReceipt } from './ci-native-producer.mjs';
 import { runBounded } from './ci-parallel.mjs';
 import { withBrowserFixture } from './ci-browser-fixture.mjs';
 import { assertTaskProducerInventory, sanitizeProducerArguments } from './ci-task-input-proof.mjs';
+import { captureCoverageInputClosure, coverageInputProof } from './ci-coverage-inputs.mjs';
 
 const group = process.argv[2];
 const plan = validateVerificationPlan(JSON.parse(readFileSync(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json', 'utf8')));
@@ -119,7 +120,19 @@ async function executeTaskInContext(task, index, scope) {
       } else throw new Error(`No runner for ${task}`);
     } catch (caught) { error = String(caught); }
   }
-  const result = { task, status: blocked ? 'blocked' : error ? 'failed' : 'passed', seconds: (Date.now() - started) / 1000, invocations: scope.invocations, ...(error ? { error } : {}) };
+  let inputProof;
+  if (task === 'coverage' && !blocked && !error && plan.tasks.includes('unit-root') && process.env.GITHUB_RUN_ID !== undefined) {
+    const workflowRunId = Number(process.env.GITHUB_RUN_ID);
+    const workflowAttempt = Number(process.env.GITHUB_RUN_ATTEMPT);
+    const workflowJob = process.env.GITHUB_JOB;
+    const closure = await captureCoverageInputClosure({
+      root: process.cwd(), runtime: { platform: process.platform, arch: process.arch, nodeVersion: process.version, execPath: process.execPath,
+        imageOS: process.env.ImageOS ?? null, imageVersion: process.env.ImageVersion ?? null },
+      invocation: scope.invocations[0], workflowJob,
+    });
+    inputProof = coverageInputProof({ closure, sourceSha: sha, planDigest: planDigest(plan), workflowRunId, workflowAttempt, workflowJob });
+  }
+  const result = { task, status: blocked ? 'blocked' : error ? 'failed' : 'passed', seconds: (Date.now() - started) / 1000, invocations: scope.invocations, ...(inputProof ? { inputProof } : {}), ...(error ? { error } : {}) };
   completed.set(task, result);
   console.log(JSON.stringify(result));
   return result;
@@ -166,7 +179,7 @@ if (process.env.GITHUB_RUN_ID !== undefined) {
       },
       selectedTasks: tasks,
       groupInvocations,
-      taskInvocations: results.map(({ task, status, invocations }) => ({ task, status, invocations })),
+      taskInvocations: results.map(({ task, status, invocations, inputProof }) => ({ task, status, invocations, ...(inputProof ? { inputProof } : {}) })),
     },
   });
 }
