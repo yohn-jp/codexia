@@ -1,5 +1,4 @@
 import { readFile, writeFile } from "node:fs/promises";
-import plist from "plist";
 import { CALLBACK_SCHEME } from "../plugins/codexia-auth/src/constants.mjs";
 
 export function configureCallbackScheme(info) {
@@ -17,6 +16,7 @@ export function configureCallbackScheme(info) {
 
 const plistPath = process.argv[2];
 if (plistPath) {
+  const { default: plist } = await import("plist");
   const info = plist.parse(await readFile(plistPath, "utf8"));
   await writeFile(plistPath, plist.build(configureCallbackScheme(info)), "utf8");
 } else if (process.argv[1]?.endsWith("configure-oauth-callback.mjs")) {
