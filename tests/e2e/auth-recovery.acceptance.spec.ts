@@ -266,11 +266,16 @@ test("an interrupted initial project bootstrap resumes after persisted pageshow"
     let requests = 0;
     let release!: () => void;
     let started!: () => void;
+    let retryStarted!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
     const pending = new Promise<void>((resolve) => { started = resolve; });
+    const retried = new Promise<void>((resolve) => { retryStarted = resolve; });
     await resumed.route("**/api/v1/persistence/projects*", async (route) => {
       requests += 1;
-      if (requests > 1) return route.continue();
+      if (requests > 1) {
+        retryStarted();
+        return route.continue();
+      }
       const response = await route.fetch();
       expect(response.ok()).toBe(true);
       started();
@@ -283,6 +288,7 @@ test("an interrupted initial project bootstrap resumes after persisted pageshow"
     await resumed.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
     await resumed.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
     release();
+    await retried;
     await expect(resumed.getByLabel("作品", { exact: true })).toBeVisible({ timeout: 15_000 });
     expect(requests).toBeGreaterThanOrEqual(2);
     await expect(resumed.getByRole("alert")).toHaveCount(0);
