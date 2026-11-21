@@ -169,9 +169,10 @@ export function createPublishingActions(): ModuleAction[] {
   }));
 
   actions.push(defineAction(valueSchema((value) => object(value)), "publishing.project.tree", "read", async (_input, context) => {
-    const project = await readPublishingProjectFromCore(context);
+    const project = await readPublishingProjectFromCore(context, { includeManuscripts: false });
     return {
       title: project.title,
+      rootSceneCount: project.rootScenes?.length ?? 0,
       volumes: project.volumes.map((volume) => ({
         id: volume.id,
         title: volume.title,

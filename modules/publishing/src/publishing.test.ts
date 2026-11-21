@@ -249,6 +249,26 @@ test("the canonical full plaintext export includes project root scenes once in s
   assert.match(await rootOnlyZip.file("OEBPS/scene-only.xhtml")!.async("string"), /ONLY ROOT BODY/u);
 });
 
+test("the publishing tree lists chapter scenes and counts root scenes without reading manuscript bodies", async () => {
+  const files = fixtureFiles();
+  files.set("plot/volumes/root/chapters/root/scenes/root.yaml", "kind: scene\nid: root\nmanuscript: documents/root.md\n");
+  files.set("documents/root.md", "Root manuscript body");
+  const reader = new MemoryReader(files);
+  const bodyReads: string[] = [];
+  const read = reader.read.bind(reader);
+  reader.read = (path, encoding) => {
+    if (path.endsWith(".md")) bodyReads.push(path);
+    return read(path, encoding);
+  };
+  const tree = await invokeAction(await createPublishing(), "publishing.project.tree", {}, actionContext(reader, []));
+  assert.deepEqual(bodyReads, []);
+  assert.deepEqual(tree, {
+    title: project.title, rootSceneCount: 1, volumes: [{ id: "vol-1", title: "第一巻", chapters: [{
+      id: "ch-1", title: "はじまり", scenes: [{ id: "sc-1", title: "夜の駅" }, { id: "sc-2", title: "朝の港" }],
+    }] }],
+  });
+});
+
 test("public share projection excludes author notes in pinned snapshots through immutable reader metadata", async () => {
   const files = fixtureFiles();
   const canonicalKinds = new Map([

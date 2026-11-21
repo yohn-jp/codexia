@@ -5,7 +5,7 @@ import type { BrowserModuleContext, BrowserModuleDefinition } from "@codexia/con
 interface SceneItem { id: string; title: string }
 interface ChapterItem { id: string; title: string; scenes: SceneItem[] }
 interface VolumeItem { id: string; title: string; chapters: ChapterItem[] }
-interface ProjectTree { title: string; volumes: VolumeItem[] }
+interface ProjectTree { title: string; volumes: VolumeItem[]; rootSceneCount?: number }
 interface Episode extends Record<string, unknown> {
   id: string;
   number: number;
@@ -77,7 +77,7 @@ async function invoke(context: BrowserModuleContext, actionId: string, input: un
 
 function scopeCount(tree: ProjectTree | null, scope: "all" | "volume" | "chapter", id?: string): number {
   if (!tree) return 0;
-  if (scope === "all") return tree.volumes.reduce((sum, volume) => sum + volume.chapters.reduce((n, chapter) => n + chapter.scenes.length, 0), 0);
+  if (scope === "all") return tree.volumes.reduce((sum, volume) => sum + volume.chapters.reduce((n, chapter) => n + chapter.scenes.length, 0), tree.rootSceneCount ?? 0);
   if (scope === "volume") return tree.volumes.find((item) => item.id === id)?.chapters.reduce((n, chapter) => n + chapter.scenes.length, 0) ?? 0;
   return tree.volumes.flatMap((volume) => volume.chapters).find((item) => item.id === id)?.scenes.length ?? 0;
 }

@@ -1,5 +1,6 @@
 import { expect, request, test, type Page } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
+import { text as readStreamText } from "node:stream/consumers";
 import { authToken, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaved, ownerLogin, manuscriptEditor as editor, readManuscriptMarkdown, openRevisionHistory } from "./postgres-fixture";
 
 const rootPath = "/api/v1/persistence/projects";
@@ -1025,6 +1026,26 @@ test("Issue 42: failed PostgreSQL availability preserves the author session and 
   unavailable = false; await page.getByRole("button", { name: "再試行" }).click();
   await page.getByLabel("作品", { exact: true }).selectOption(f.projectId); await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene One/ }).click();
   await expectEditor(page, f.one.revision.markdown);
+});
+
+test("a project containing only root scenes can export its full text from the publishing panel", async ({ page }) => {
+  test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing contribution is selected by the full profile.");
+  const { one, two } = await fixture(page);
+  const menu = page.locator(".st-workspace-panel-menu");
+  await menu.locator("summary").click();
+  await menu.getByRole("button", { name: "プレーンテキスト書き出しを表示", exact: true }).click();
+  const panel = page.locator('[data-workspace-panel="module:publishing.export.plaintext"]');
+  const download = panel.getByRole("button", { name: "テキストをダウンロード" });
+  await expect(download).toBeEnabled();
+  await panel.getByRole("radio", { name: "章", exact: true }).check();
+  await expect(download).toBeDisabled();
+  await panel.getByRole("radio", { name: "全文", exact: true }).check();
+  page.once("dialog", (dialog) => dialog.accept());
+  const downloaded = page.waitForEvent("download");
+  await download.click();
+  const stream = await (await downloaded).createReadStream();
+  const text = await readStreamText(stream);
+  for (const scene of [one, two]) expect(text).toContain(scene.revision.markdown.trim());
 });
 
 test("publishing lists link states and chapter names independently of the new link selection", async ({ page }) => {

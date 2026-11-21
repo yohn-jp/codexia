@@ -168,7 +168,10 @@ function sameSnapshot(left: unknown, right: SnapshotId): boolean {
   return snapshot?.projectId === right.projectId && snapshot.projectVersion === right.projectVersion;
 }
 
-export async function readPublishingProjectFromCore(context: ModuleActionContext): Promise<PublishingProject> {
+export async function readPublishingProjectFromCore(
+  context: ModuleActionContext,
+  { includeManuscripts = true }: { includeManuscripts?: boolean } = {},
+): Promise<PublishingProject> {
   const { reader } = context;
   const coreResult = await context.invoke("core.tree", {}, context.signal);
   if (!coreResult.ok) throw new Error("Core hierarchy read failed: " + coreResult.error.message);
@@ -209,7 +212,7 @@ export async function readPublishingProjectFromCore(context: ModuleActionContext
     const id = nodeId(sceneData, basename);
     if (sceneMetadata.has(id)) throw new Error("Duplicate scene identity in publishing snapshot: " + id);
     const bodyPath = manuscriptPath(sceneFile, sceneData, id);
-    const manuscript = await reader.read(bodyPath);
+    const manuscript = includeManuscripts ? await reader.read(bodyPath) : null;
     const order = nodeOrder(sceneData);
     sceneMetadata.set(id, {
       title: nodeTitle(sceneData, id),
