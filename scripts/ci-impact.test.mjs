@@ -181,6 +181,7 @@ test('operational proof remains owned by one exact-head root task and matching i
   }
   assert.ok(OPERATIONAL_ROOT_PATHS.includes('docs/deployment/README.md'));
   assert.ok(OPERATIONAL_ROOT_PATHS.includes('docs/deployment/PHASE-F-DISPOSABLE-CI.md'));
+  assert.ok(OPERATIONAL_ROOT_PATHS.includes('.github/workflows/tailscale-connectivity.yml'));
   const runtime = readWorkflow('ansible-runtime-contract.yml');
   for (const event of ['pull_request', 'push']) {
     assert.ok(runtime.on[event].paths.includes('deploy/updater/test-standalone-maintenance-preload.mjs'));

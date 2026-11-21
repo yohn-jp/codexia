@@ -138,6 +138,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'scripts/verify-backend-push-handoff.test.mjs',
   'scripts/backend-deployment-handoff-contract.test.mjs',
   '.github/workflows/backend-deployment-handoff.yml',
+  '.github/workflows/tailscale-connectivity.yml',
   'scripts/push-deployment-recovery.test.mjs',
   'deploy/ansible/push-deployment-recover.sh',
   'scripts/verify-frontend-compatibility.mjs',

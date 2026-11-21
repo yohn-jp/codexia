@@ -7,6 +7,7 @@ const require = createRequire(new URL('../packages/core/package.json', import.me
 const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../.github/workflows/backend-release.yml', import.meta.url), 'utf8'));
 const handoff = parse(readFileSync(new URL('../.github/workflows/backend-deployment-handoff.yml', import.meta.url), 'utf8'));
+const tailscale = parse(readFileSync(new URL('../.github/workflows/tailscale-connectivity.yml', import.meta.url), 'utf8'));
 const site = parse(readFileSync(new URL('../deploy/ansible/site.yml', import.meta.url), 'utf8'))[0];
 
 test('pull request backend validation cannot obtain production credentials or deploy', () => {
@@ -114,4 +115,18 @@ test('push rollout admits backups by verified writer shutdown instead of a legac
   assert.match(backup, /--push-deployment/u);
   assert.match(backup, /Push deployment requires inactive systemd unit/u);
   assert.match(backup, /codexia-updater-boot\.service[\s\S]*codexia-updater\.service[\s\S]*codexia-updater\.timer/u);
+});
+
+test('manual Tailnet diagnostic verifies pinned SSH as codexia without joining PR validation or deployment', () => {
+  assert.deepEqual(Object.keys(tailscale.on), ['workflow_dispatch']);
+  const job = tailscale.jobs.connectivity;
+  assert.equal(job.environment, 'codexia-production');
+  const ssh = job.steps.find(step => step.name === 'Verify pinned public-key SSH as codexia');
+  assert.ok(ssh, 'the manual Tailnet diagnostic must authenticate SSH, not only test TCP/22');
+  assert.equal(ssh.env.CODEXIA_DEPLOY_SSH_PRIVATE_KEY, '${{ secrets.CODEXIA_DEPLOY_SSH_PRIVATE_KEY }}');
+  assert.equal(ssh.env.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS, '${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}');
+  assert.match(ssh.run, /StrictHostKeyChecking=yes/u);
+  assert.match(ssh.run, /ssh-keygen -F 100\.100\.1\.68/u);
+  assert.match(ssh.run, /codexia@100\.100\.1\.68/u);
+  assert.doesNotMatch(ssh.run, /ansible-playbook|podman (?:pull|run|rm)|CODEXIA_PUSH_DEPLOYMENT_ENABLED/u);
 });
