@@ -578,7 +578,7 @@ async function browserUiArtifactRecords(distDirectory, browserIds, ui) {
   // MobileShell is a shared import of the PostgreSQL workspace; its Ionic
   // runtime chunks may be emitted in either authoring entry.
   const isIonicRuntime = (source) => source.startsWith(ionicPrefix) && /^p-[A-Za-z0-9_-]+\.js$/u.test(source.slice(ionicPrefix.length));
-  const actualDynamicSources = [...new Set(applicationEntry.dynamicImports ?? [])].filter((source) => !isIonicRuntime(source)).sort();
+  const actualDynamicSources = [...new Set(applicationEntry.dynamicImports ?? [])].filter((source) => source !== 'index.html' && !isIonicRuntime(source)).sort();
   if (canonicalJson(actualDynamicSources) !== canonicalJson(expectedDynamicSources)) {
     throw new Error('Vite application entry imports a different browser module closure');
   }
@@ -631,7 +631,12 @@ async function browserUiArtifactRecords(distDirectory, browserIds, ui) {
     if (workers.length !== 1) throw new Error('Vite authoring output must include exactly one revision comparison worker');
     const [worker] = workers;
     const code = await readFile(path.join(distDirectory, entryFile), 'utf8');
-    if (!code.includes(JSON.stringify(`/${ui}/${worker}`))) {
+    // Vite 6/Rollup emits quoted URL literals while Vite 8/Rolldown
+    // emits template literals with an explicit empty-template import.meta.url base.
+    // Require an actual Worker URL reference rather than a stray path string.
+    const workerUrl = `/${ui}/${worker}`;
+    const workerReference = /new\s+Worker\(\s*new\s+URL\(\s*(?:"([^"]+)"|\x27([^\x27]+)\x27|`([^`]+)`)\s*,\s*(?:``\s*\+\s*)?import\.meta\.url\s*\)/gu;
+    if (![...code.matchAll(workerReference)].some(([, quoted, single, template]) => (quoted ?? single ?? template) === workerUrl)) {
       throw new Error('Vite authoring entry does not reference its revision comparison worker');
     }
     if (!manifestFiles.includes(worker)) manifestFiles.push(worker);
