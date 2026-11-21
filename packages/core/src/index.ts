@@ -612,9 +612,11 @@ export class CoreStore implements MutationCoordinator {
       if (state.state === "applied") return;
 
       state.approvedOperationIds = [...new Set([...state.approvedOperationIds, ...approval.operationIds])];
-      const approvers = { ...state.approvedByOperationId };
-      for (const id of approval.operationIds) approvers[id] ??= approval.authorScope;
-      state.approvedByOperationId = approvers;
+      const approvers = new Map(Object.entries(state.approvedByOperationId ?? {}));
+      for (const id of approval.operationIds) {
+        if (!approvers.has(id)) approvers.set(id, approval.authorScope);
+      }
+      state.approvedByOperationId = Object.fromEntries(approvers);
       state.state = state.approvedOperationIds.length === state.proposal.operations.length
         ? "approved"
         : "partially_approved";

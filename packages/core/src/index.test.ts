@@ -628,6 +628,18 @@ test("re-approving an already applied proposal does not regress its durable stat
   assert.equal(after?.approvedByOperationId?.[op.id], "owner");
 });
 
+test("approval bookkeeping handles allowed operation IDs that inherit object properties", async () => {
+  const p = await project();
+  const snapshot = (await core.reader(p.id)).snapshot;
+  const op = { ...operation(snapshot, "bible/inherited-key.yaml", "preserved"), id: "constructor" };
+  const proposal: ChangeProposal = { id: randomUUID(), snapshot, operations: [op], source: "author" };
+  await core.propose(p.id, proposal);
+  await core.approve(p.id, { proposalId: proposal.id, operationIds: [op.id], authorScope: "owner" });
+  const after = await core.getProposal(p.id, proposal.id);
+  assert.equal(Object.hasOwn(after?.approvedByOperationId ?? {}, "constructor"), true);
+  assert.equal(after?.approvedByOperationId?.constructor, "owner");
+});
+
 test("duplicate approved proposals share one manuscript application and settle on replay", async () => {
   const p = await hierarchy();
   const reader = await core.reader(p.id);
