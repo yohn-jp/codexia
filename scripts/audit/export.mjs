@@ -210,8 +210,10 @@ export function renderIndex(manifest) {
     }
     const review = manifest.reviews?.[branch.sha];
     if (review && (review.status === 'ready' || review.status === 'partial')) {
-      links += '<div class="actions review-parts"><a href="reviews/' + branch.sha + '/index.html">' +
-        'OCR Delegate · ' + review.published + ' file(s)' + (review.status === 'partial' ? ' (partial)' : '') + '</a></div>';
+      links += '<div class="actions review-parts">' +
+        downloadLink('reviews/' + branch.sha + '/', 'gemini-review.md', 'codexia-' + branch.sha + '-review.md',
+          'Gemini review · 1 Markdown (' + review.published + ' source files)' + (review.status === 'partial' ? ' · partial' : ''), 'primary') +
+        '<a href="reviews/' + branch.sha + '/index.html">Review coverage</a></div>';
     } else if (review?.status === 'blocked') {
       links += '<div>OCR review inputs unavailable</div>';
     }
