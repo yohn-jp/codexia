@@ -40,8 +40,11 @@ const directory = process.env.CODEXIA_CI_EVIDENCE_DIR;
 assert.ok(directory, 'Execution evidence directory is required');
 const reports = [];
 const evidenceEntries = await readdir(directory, { withFileTypes: true });
-if (evidenceEntries.length === 1 && evidenceEntries[0].name === 'report.json' && evidenceEntries[0].isFile()) {
-  reports.push(JSON.parse(await readFile(path.join(directory, 'report.json'), 'utf8')));
+const rootReports = evidenceEntries.filter(entry => entry.name === 'report.json' && entry.isFile());
+if (rootReports.length === 1) {
+  assert.ok(evidenceEntries.every(entry => entry.isFile() && ['report.json', 'workspace-preparation.json'].includes(entry.name)),
+    'Unexpected root execution evidence entry');
+  reports.push(JSON.parse(await readFile(path.join(directory, rootReports[0].name), 'utf8')));
 } else {
   for (const entry of evidenceEntries) {
     if (!entry.isDirectory()) throw new Error('Unexpected execution evidence entry');

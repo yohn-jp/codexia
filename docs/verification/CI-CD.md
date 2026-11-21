@@ -9,7 +9,7 @@ This is the normative execution and release architecture. [Test architecture](TE
 | Task inventory, groups, producer dependency and required job names | [ci-contract.mjs](../../scripts/ci-contract.mjs) |
 | Impact selection, plan validation and digest | [ci-impact.mjs](../../scripts/ci-impact.mjs) |
 | Per-task input-closure proof validation | [ci-task-input-proof.mjs](../../scripts/ci-task-input-proof.mjs) |
-| Report-only task producer invocation and coverage input inventory | [ci-group.mjs](../../scripts/ci-group.mjs), [ci-task-input-proof.mjs](../../scripts/ci-task-input-proof.mjs), [ci-coverage-inputs.mjs](../../scripts/ci-coverage-inputs.mjs) |
+| Task producer invocation, input-proof generation, and coverage input inventory | [ci-group.mjs](../../scripts/ci-group.mjs), [ci-task-input-proof.mjs](../../scripts/ci-task-input-proof.mjs), [ci-coverage-inputs.mjs](../../scripts/ci-coverage-inputs.mjs) |
 | Workspace prerequisites and execution | [ci-workspace.mjs](../../scripts/ci-workspace.mjs), [ci-group.mjs](../../scripts/ci-group.mjs) |
 | Verification DAG | [verify.yml](../../.github/workflows/verify.yml) |
 | Same-run artifact retrieval and final certification | [verify.yml](../../.github/workflows/verify.yml) uses pinned `actions/download-artifact@v8.0.2` by selector-validated immutable artifact ID and fails on digest mismatch; [certify-ci.mjs](../../scripts/certify-ci.mjs) validates the downloaded evidence. Cross-run API retrieval still uses [download-ci-artifacts.mjs](../../scripts/download-ci-artifacts.mjs). |
