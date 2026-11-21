@@ -179,6 +179,48 @@ test("Knowledge browse searches literal aliases and pages the same project on De
   await expect(page.getByRole("status").filter({ hasText: "100件取得済み" })).toBeVisible();
 });
 
+test("a Knowledge save error stays with the visible form across Desktop layouts and Mobile", async ({ page }) => {
+  const { project, scene } = await createWritingFixture(page);
+  const error = "Knowledge candidate temporarily unavailable";
+  const origin = new URL(page.url()).origin;
+  await page.route(url => url.pathname.startsWith(`/api/v1/persistence/projects/${project.id}/nodes/`), async route => {
+    if (route.request().method() === "PUT") await route.fulfill({ status: 503, json: { error } });
+    else await route.continue();
+  });
+  const alert = page.getByRole("alert").filter({ hasText: error });
+  const submit = async () => {
+    const name = page.getByLabel("Knowledge候補を追加");
+    if (!await name.isVisible()) await page.locator(".pg-knowledge-tools > summary").click();
+    await expect(name).toBeVisible();
+    await name.fill("入力を保持する候補");
+    await page.getByRole("button", { name: "候補を保存", exact: true }).click();
+    await expect(alert).toHaveCount(1);
+    await expect(alert).toBeVisible();
+    await expect(page.getByLabel("Knowledge候補を追加")).toHaveValue("入力を保持する候補");
+  };
+
+  await openResearchInspector(page);
+  const panelMenu = page.locator(".st-workspace-panel-menu > summary");
+  await panelMenu.click();
+  await page.getByRole("button", { name: "原稿を隠す", exact: true }).click();
+  await expect(page.locator('[data-workspace-panel="editor"]')).toHaveCount(0);
+  await panelMenu.click();
+  await submit();
+  await panelMenu.click();
+  await page.getByRole("button", { name: "原稿を表示", exact: true }).click();
+  await expect(page.locator('[data-workspace-panel="editor"]')).toBeVisible();
+  await panelMenu.click();
+  await expect(alert).toHaveCount(0);
+  await page.getByRole("tab", { name: "知識と根拠", exact: true }).click();
+  await expect(alert).toBeVisible();
+  await submit();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(new URL(`/mobile/projects/${project.id}/scenes/${scene.id}?view=writing`, origin).toString());
+  await page.getByRole("navigation", { name: "モバイル画面" }).getByRole("button", { name: "知識", exact: true }).click();
+  await submit();
+});
+
 test("PostgreSQL project pages expose records beyond 200 and deep links retain the requested identity", async ({ page }) => {
   test.setTimeout(120_000);
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
