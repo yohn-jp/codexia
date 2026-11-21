@@ -1,0 +1,71 @@
+name: Browser ARM64 vs x64 benchmark
+on:
+  pull_request:
+    paths:
+      - .github/workflows/browser-arm64-benchmark.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: browser-arm64-benchmark-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  browser:
+    name: ${{ matrix.arch }} / ${{ matrix.browser }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+            browser: chromium
+          - arch: x64
+            runner: ubuntu-24.04
+            browser: webkit
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            browser: chromium
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            browser: webkit
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: codexia_test
+          POSTGRES_USER: codexia
+          POSTGRES_PASSWORD: codexia
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U codexia -d codexia_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI: 'true'
+      CODEXIA_PROFILE: core
+      CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@postgres:5432/codexia_test
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Map disposable Postgres service
+        run: echo '127.0.0.1 postgres' | sudo tee -a /etc/hosts
+      - name: Install locked dependencies
+        run: |
+          corepack enable
+          corepack pnpm@12.21.0 --version
+          pnpm install --frozen-lockfile
+      - name: Install matching browser and dependencies
+        run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+      - name: Build matching Core application
+        run: pnpm build
+      - name: Execute real browser acceptance
+        run: pnpm exec playwright test --config tests/e2e/playwright.config.ts tests/e2e/ui-v1.acceptance.spec.ts --project=${{ matrix.browser }}
