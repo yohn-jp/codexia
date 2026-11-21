@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import type { KnowledgeAliasId, KnowledgeNodeId, ProjectId } from "@codexia/persistence-contracts";
-import { createWritingFixture, expectDeviceDraft, expectServerSaveFailure, expectServerSaved, openRevisionHistory, ownerLogin, manuscriptEditor } from "./postgres-fixture";
+import { createWritingFixture, expectDeviceDraft, expectServerSaveFailure, expectServerSaved, openManuscriptScene, openProtectionDetails, openRevisionHistory, ownerLogin, readManuscriptMarkdown, readPersistenceDrafts, manuscriptEditor } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
@@ -177,6 +177,212 @@ test("Knowledge browse searches literal aliases and pages the same project on De
   await expect(page.locator(".pg-knowledge-list li")).toHaveCount(50);
   await page.getByRole("button", { name: "続きのKnowledgeを読み込む" }).click();
   await expect(page.getByRole("status").filter({ hasText: "100件取得済み" })).toBeVisible();
+});
+
+test("a committed delete response for B preserves edited C, its selection, route, and recovery status", async ({ page }) => {
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  const a = await createWritingFixture(page, "desktop", `Delete response A ${crypto.randomUUID()}`, "A manuscript.");
+  const c = await createAdditionalScene(page, a.project.id, "Scene C", "c", "C manuscript.");
+  await page.reload();
+  await openManuscriptScene(page, c);
+  await openManuscriptScene(page, a.second);
+
+  const heldDelete = await holdNextDocumentDelete(page, a.project.id, a.second.id);
+  try {
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByText("選択文書の構成を変更", { exact: true }).click();
+    await page.getByRole("button", { name: "文書を削除" }).click();
+    expect(await heldDelete.committed).toBe(200);
+
+    const committedDocuments = await readProjectDocuments(page, a.project.id);
+    expect(committedDocuments.some((document) => document.id === a.second.id)).toBe(false);
+
+    await openManuscriptScene(page, c);
+    await failPersistenceDraftWrites(page);
+    const editor = manuscriptEditor(page);
+    const added = "追加入力C";
+    await editor.focus();
+    await editor.press("Control+End");
+    await editor.pressSequentially(added);
+    await expect(page.locator(".pg-editor").getByRole("alert")).toContainText(/Browser storage is full|quota|容量|回復|journal/i);
+    const expectedMarkdown = `C manuscript.${added}`;
+    await expect(editor).toContainText(added);
+    expect(await readManuscriptMarkdown(page)).toBe(expectedMarkdown);
+    await editor.press("Shift+ArrowLeft");
+    const selectionBefore = await editor.evaluate(() => window.getSelection()?.toString() ?? "");
+    expect(selectionBefore).toBe("C");
+    const routeBefore = new URL(page.url()).pathname;
+    expect(routeBefore).toContain(`/projects/${a.project.id}/scenes/${c.id}`);
+    await expect(page.locator(`.pg-outline-item[data-document-id="${c.id}"] > .pg-outline-row > .pg-outline-document`)).toHaveAttribute("aria-current", "page");
+
+    heldDelete.release();
+
+    await expect(page.getByRole("heading", { name: c.title, exact: true })).toBeVisible();
+    await expect(page.locator(`.pg-outline-item[data-document-id="${a.second.id}"]`)).toHaveCount(0);
+    await expect.soft(page.locator(`.pg-outline-item[data-document-id="${c.id}"] > .pg-outline-row > .pg-outline-document`)).toHaveAttribute("aria-current", "page");
+    expect.soft(new URL(page.url()).pathname).toBe(routeBefore);
+    expect.soft(await readManuscriptMarkdown(page)).toBe(expectedMarkdown);
+    expect.soft(await editor.evaluate(() => window.getSelection()?.toString() ?? "")).toBe(selectionBefore);
+    const protection = await openProtectionDetails(page);
+    await expect.soft(protection.locator("summary")).toHaveText("要確認");
+    await expect.soft(protection).toContainText("回復用の下書きを確認できません");
+    expect.soft((await storedDocumentMarkdown(page, a.project.id, c.id)).markdown).toBe("C manuscript.");
+  } finally {
+    heldDelete.release();
+    await heldDelete.remove();
+  }
+});
+
+test("deleting the still-selected document safely selects the first remaining scene", async ({ page }) => {
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  const a = await createWritingFixture(page, "desktop", `Delete transition A ${crypto.randomUUID()}`, "A manuscript.");
+  await openManuscriptScene(page, a.second);
+  const heldDelete = await holdNextDocumentDelete(page, a.project.id, a.second.id);
+  try {
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByText("選択文書の構成を変更", { exact: true }).click();
+    await page.getByRole("button", { name: "文書を削除" }).click();
+    expect(await heldDelete.committed).toBe(200);
+    heldDelete.release();
+
+    await expect(page.getByRole("heading", { name: a.scene.title, exact: true })).toBeVisible();
+    await expect(page.locator(`.pg-outline-item[data-document-id="${a.scene.id}"] > .pg-outline-row > .pg-outline-document`)).toHaveAttribute("aria-current", "page");
+    await expect(page.locator(`.pg-outline-item[data-document-id="${a.second.id}"]`)).toHaveCount(0);
+    expect(new URL(page.url()).pathname).toContain(`/projects/${a.project.id}/scenes/${a.scene.id}`);
+    expect(await readManuscriptMarkdown(page)).toBe("A manuscript.");
+    expect((await readProjectDocuments(page, a.project.id)).some((document) => document.id === a.second.id)).toBe(false);
+  } finally {
+    heldDelete.release();
+    await heldDelete.remove();
+  }
+});
+
+test("input added to B while deletion is pending stays visible when IndexedDB protection fails", async ({ page }) => {
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  const fixture = await createWritingFixture(page, "desktop", `Delete pending input ${crypto.randomUUID()}`, "A manuscript.");
+  await openManuscriptScene(page, fixture.second);
+  const heldDelete = await holdNextDocumentDelete(page, fixture.project.id, fixture.second.id);
+  try {
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByText("選択文書の構成を変更", { exact: true }).click();
+    await page.getByRole("button", { name: "文書を削除" }).click();
+    expect(await heldDelete.committed).toBe(200);
+
+    await failPersistenceDraftWrites(page);
+    const editor = manuscriptEditor(page);
+    await editor.focus();
+    await editor.press("Control+End");
+    await editor.pressSequentially("追加入力B");
+    await expect(page.locator(".pg-editor").getByRole("alert")).toContainText(/Browser storage is full|quota|容量|回復|journal/i);
+    const expectedMarkdown = "最初の本文。\n次の文章です。追加入力B";
+    expect(await readManuscriptMarkdown(page)).toBe(expectedMarkdown);
+
+    heldDelete.release();
+
+    await expect(page.getByRole("heading", { name: fixture.second.title, exact: true })).toBeVisible();
+    expect.soft(new URL(page.url()).pathname).toContain(`/projects/${fixture.project.id}/scenes/${fixture.second.id}`);
+    expect.soft(await readManuscriptMarkdown(page)).toBe(expectedMarkdown);
+    const protection = await openProtectionDetails(page);
+    await expect.soft(protection.locator("summary")).toHaveText("要確認");
+    await expect.soft(protection).toContainText("回復用の下書きを確認できません");
+    expect.soft((await readProjectDocuments(page, fixture.project.id)).some((document) => document.id === fixture.second.id)).toBe(false);
+  } finally {
+    heldDelete.release();
+    await heldDelete.remove();
+  }
+});
+
+test("input added to B while deletion is pending is protected before the safe transition", async ({ page }) => {
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  const fixture = await createWritingFixture(page, "desktop", `Delete protected pending input ${crypto.randomUUID()}`, "A manuscript.");
+  await openManuscriptScene(page, fixture.second);
+  const heldDelete = await holdNextDocumentDelete(page, fixture.project.id, fixture.second.id);
+  try {
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByText("選択文書の構成を変更", { exact: true }).click();
+    await page.getByRole("button", { name: "文書を削除" }).click();
+    expect(await heldDelete.committed).toBe(200);
+
+    const editor = manuscriptEditor(page);
+    await editor.focus();
+    await editor.press("Control+End");
+    await editor.pressSequentially("追加入力B");
+    const expectedMarkdown = "最初の本文。\n次の文章です。追加入力B";
+    await expect(editor).toContainText("追加入力B");
+    await expectDeviceDraft(page);
+    expect((await readPersistenceDrafts(page)).some((draft) => draft.documentId === fixture.second.id && draft.markdown === expectedMarkdown)).toBe(true);
+
+    heldDelete.release();
+
+    await expect(page.getByRole("heading", { name: fixture.scene.title, exact: true })).toBeVisible();
+    await expect(page.locator(`.pg-outline-item[data-document-id="${fixture.second.id}"]`)).toHaveCount(0);
+    await expect(page.locator(`.pg-outline-item[data-document-id="${fixture.scene.id}"] > .pg-outline-row > .pg-outline-document`)).toHaveAttribute("aria-current", "page");
+    expect(new URL(page.url()).pathname).toContain(`/projects/${fixture.project.id}/scenes/${fixture.scene.id}`);
+    expect(await readManuscriptMarkdown(page)).toBe("A manuscript.");
+    expect((await readPersistenceDrafts(page)).some((draft) => draft.documentId === fixture.second.id && draft.markdown === expectedMarkdown)).toBe(true);
+    expect((await readProjectDocuments(page, fixture.project.id)).some((document) => document.id === fixture.second.id)).toBe(false);
+  } finally {
+    heldDelete.release();
+    await heldDelete.remove();
+  }
+});
+
+test("a failed outline refresh after committed deletion keeps the selected editor and route", async ({ page }) => {
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  const fixture = await createWritingFixture(page, "desktop", `Delete outline failure ${crypto.randomUUID()}`, "A manuscript.");
+  await openManuscriptScene(page, fixture.second);
+  const heldDelete = await holdNextDocumentDelete(page, fixture.project.id, fixture.second.id);
+  const outlinePath = `/api/v1/persistence/projects/${fixture.project.id}/documents`;
+  const isOutlineRoute = (url: URL): boolean => url.pathname === outlinePath;
+  const failOutlineRefresh = async (route: import("@playwright/test").Route): Promise<void> => {
+    const url = new URL(route.request().url());
+    if (route.request().method() === "GET" && url.searchParams.get("limit") === "1000") {
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "temporary outline failure" }) });
+    } else await route.continue();
+  };
+  try {
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByText("選択文書の構成を変更", { exact: true }).click();
+    await page.getByRole("button", { name: "文書を削除" }).click();
+    expect(await heldDelete.committed).toBe(200);
+    await page.route(isOutlineRoute, failOutlineRefresh);
+    heldDelete.release();
+
+    await expect(page.locator(".pg-alert").filter({ hasText: "目次を再取得できませんでした" })).toBeVisible();
+    await expect.soft(page.getByRole("heading", { name: fixture.second.title, exact: true })).toBeVisible();
+    expect.soft(new URL(page.url()).pathname).toContain(`/projects/${fixture.project.id}/scenes/${fixture.second.id}`);
+    const editorCount = await manuscriptEditor(page).count();
+    expect.soft(editorCount).toBe(1);
+    if (editorCount === 1) expect.soft(await readManuscriptMarkdown(page)).toBe("最初の本文。\n次の文章です。");
+    expect.soft((await readProjectDocuments(page, fixture.project.id)).some((document) => document.id === fixture.second.id)).toBe(false);
+  } finally {
+    heldDelete.release();
+    await heldDelete.remove();
+    try { await page.unroute(isOutlineRoute, failOutlineRefresh); } catch { /* Browser teardown already removed the route. */ }
+  }
+});
+
+test("an unknown delete response after PostgreSQL commit does not clear the selected manuscript", async ({ page }) => {
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  const fixture = await createWritingFixture(page, "desktop", `Delete response unknown ${crypto.randomUUID()}`, "A manuscript.");
+  await openManuscriptScene(page, fixture.second);
+  const heldDelete = await holdNextDocumentDelete(page, fixture.project.id, fixture.second.id);
+  try {
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByText("選択文書の構成を変更", { exact: true }).click();
+    await page.getByRole("button", { name: "文書を削除" }).click();
+    expect(await heldDelete.committed).toBe(200);
+    heldDelete.abort();
+
+    await expect(page.getByRole("alert").filter({ hasText: "Failed to fetch" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: fixture.second.title, exact: true })).toBeVisible();
+    expect(new URL(page.url()).pathname).toContain(`/projects/${fixture.project.id}/scenes/${fixture.second.id}`);
+    expect(await readManuscriptMarkdown(page)).toBe("最初の本文。\n次の文章です。");
+    expect((await readProjectDocuments(page, fixture.project.id)).some((document) => document.id === fixture.second.id)).toBe(false);
+  } finally {
+    heldDelete.release();
+    await heldDelete.remove();
+  }
 });
 
 test("a Knowledge save error stays with the visible form across Desktop layouts and Mobile", async ({ page }) => {
@@ -370,6 +576,74 @@ async function holdNextDocumentSave(page: Page, projectId: string, documentId: s
       if (!page.isClosed()) {
         try { await page.unroute(url, handler); } catch { /* Browser teardown already removed the route. */ }
       }
+    },
+  };
+}
+
+async function createAdditionalScene(page: Page, projectId: string, title: string, orderKey: string, markdown: string): Promise<{ id: string; title: string }> {
+  const response = await page.request.post(new URL(`/api/v1/persistence/projects/${projectId}/documents`, page.url()).toString(), {
+    headers: { Origin: new URL(page.url()).origin, "Idempotency-Key": crypto.randomUUID() },
+    data: { kind: "scene", title, orderKey, markdown },
+  });
+  expect(response.status(), await response.text()).toBe(201);
+  return (await response.json() as { document: { id: string; title: string } }).document;
+}
+
+async function readProjectDocuments(page: Page, projectId: string): Promise<Array<{ id: string; title: string }>> {
+  const response = await page.request.get(new URL(`/api/v1/persistence/projects/${projectId}/documents`, page.url()).toString());
+  expect(response.ok(), await response.text()).toBe(true);
+  return (await response.json() as { documents: Array<{ id: string; title: string }> }).documents;
+}
+
+async function failPersistenceDraftWrites(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, value: unknown, key?: IDBValidKey) {
+      if (this.name === "persistenceDrafts") throw new DOMException("Acceptance quota failure", "QuotaExceededError");
+      return key === undefined ? put.call(this, value) : put.call(this, value, key);
+    };
+  });
+}
+
+async function holdNextDocumentDelete(page: Page, projectId: string, documentId: string): Promise<{
+  committed: Promise<number>;
+  release(): void;
+  abort(): void;
+  remove(): Promise<void>;
+}> {
+  let openGate!: () => void;
+  let resolveCommitted!: (status: number) => void;
+  let rejectCommitted!: (error: unknown) => void;
+  let released = false;
+  let abortResponse = false;
+  const gate = new Promise<void>((resolve) => { openGate = resolve; });
+  const committed = new Promise<number>((resolve, reject) => { resolveCommitted = resolve; rejectCommitted = reject; });
+  const url = new URL(`/api/v1/persistence/projects/${projectId}/documents/${documentId}`, page.url()).toString();
+  const handler = async (route: import("@playwright/test").Route): Promise<void> => {
+    if (route.request().method() !== "DELETE") { await route.continue(); return; }
+    try {
+      const response = await route.fetch();
+      resolveCommitted(response.status());
+      await gate;
+      if (abortResponse) await route.abort("failed");
+      else await route.fulfill({ response });
+    } catch (error) {
+      rejectCommitted(error);
+      throw error;
+    }
+  };
+  await page.route(url, handler);
+  const release = (): void => {
+    if (released) return;
+    released = true;
+    openGate();
+  };
+  return {
+    committed,
+    release,
+    abort() { abortResponse = true; release(); },
+    async remove() {
+      try { await page.unroute(url, handler); } catch { /* Browser teardown already removed the route. */ }
     },
   };
 }

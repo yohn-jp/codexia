@@ -1576,42 +1576,61 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   async function editStructure(update: { title?: string; parentId?: string | null; orderKey?: string }, remove = false): Promise<void> {
     const current = activeRef.current;
     if (!current || current.document.projectId !== projectId || !await protectTransition() || projectIdRef.current !== projectId) return;
+    const targetProjectId = current.document.projectId;
+    const targetDocumentId = current.document.id;
+    const requestEditor = activeRef.current;
+    const requestGeneration = requestEditor?.document.projectId === targetProjectId && requestEditor.document.id === targetDocumentId
+      ? requestEditor.generation
+      : current.generation;
     let committed = false;
     try {
-      if (remove) await api.deletePersistenceDocument(projectId, current.document.id, current.document.version);
-      else await api.updatePersistenceDocument(projectId, current.document.id, { ...update, expectedVersion: current.document.version });
+      if (remove) await api.deletePersistenceDocument(targetProjectId, targetDocumentId, current.document.version);
+      else await api.updatePersistenceDocument(targetProjectId, targetDocumentId, { ...update, expectedVersion: current.document.version });
       committed = true;
-      if (projectIdRef.current !== projectId) return;
-      const result = await api.persistenceDocuments(projectId);
-      if (projectIdRef.current !== projectId) return;
+      if (projectIdRef.current !== targetProjectId) return;
+      const result = await api.persistenceDocuments(targetProjectId);
+      if (projectIdRef.current !== targetProjectId) return;
       setDocuments(result.documents);
-      setOutlineReadyProject(projectId);
+      setOutlineReadyProject(targetProjectId);
       setOutlineError("");
       if (remove) {
-        openSequenceRef.current++;
-        publishEditor(null);
-        const nextDocumentId = result.documents[0]?.id ?? "";
-        selectionRef.current = { projectId, documentId: nextDocumentId };
-        persistSelectionSafely(authorScope, selectionRef.current);
-        updateRouteSelection(nextDocumentId ? selectionRef.current : { projectId, documentId: "" }, true);
-        setDocumentId(nextDocumentId);
+        const targetStillSelected = (): boolean => {
+          const selection = selectionRef.current;
+          const activeDocument = activeRef.current?.document;
+          return projectIdRef.current === targetProjectId && selection?.projectId === targetProjectId &&
+            selection.documentId === targetDocumentId && activeDocument?.projectId === targetProjectId &&
+            activeDocument.id === targetDocumentId;
+        };
+        let mayTransition = targetStillSelected();
+        const latest = activeRef.current;
+        if (mayTransition && latest && latest.generation !== requestGeneration) {
+          if (!await protectTransition()) {
+            setOutlineError("文書は削除済みですが、現在の入力を回復Journalへ保護できないため別の文書へ移動していません。");
+            mayTransition = false;
+          } else if (projectIdRef.current !== targetProjectId) return;
+          else mayTransition = targetStillSelected();
+        }
+        if (mayTransition) {
+          openSequenceRef.current++;
+          publishEditor(null);
+          const nextDocumentId = result.documents[0]?.id ?? "";
+          selectionRef.current = { projectId: targetProjectId, documentId: nextDocumentId };
+          persistSelectionSafely(authorScope, selectionRef.current);
+          updateRouteSelection(nextDocumentId ? selectionRef.current : { projectId: targetProjectId, documentId: "" }, true);
+          setDocumentId(nextDocumentId);
+        }
+      } else {
+        const document = result.documents.find((item) => item.id === targetDocumentId);
+        const latest = activeRef.current;
+        if (document && latest?.document.id === targetDocumentId) publishEditor({ ...latest, document });
       }
-      else { const document = result.documents.find((item) => item.id === current.document.id); const latest = activeRef.current; if (document && latest?.document.id === current.document.id) publishEditor({ ...latest, document }); }
       await refreshModules();
     } catch (error) {
-      if (projectIdRef.current !== projectId) return;
+      if (projectIdRef.current !== targetProjectId) return;
       const message = error instanceof Error ? error.message : "構成を更新できませんでした。";
       if (committed) {
         setOutlineReadyProject("");
-        setOutlineError("構成は変更済みですが、目次を再取得できませんでした。" + message);
-        if (remove && activeRef.current?.document.id === current.document.id) {
-          openSequenceRef.current++;
-          publishEditor(null);
-          selectionRef.current = {projectId, documentId:""};
-          persistSelectionSafely(authorScope, selectionRef.current);
-          updateRouteSelection(selectionRef.current, true);
-          setDocumentId("");
-        }
+        setOutlineError((remove ? "文書は削除済みですが、目次を再取得できませんでした。" : "構成は変更済みですが、目次を再取得できませんでした。") + message);
       } else setPageError(message);
     }
   }
