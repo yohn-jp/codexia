@@ -6,6 +6,19 @@ test "$GITHUB_ACTIONS" = true
 test -x "$ANSIBLE_REAL_PLAYBOOK"
 test -n "$ANSIBLE_AB_METRIC_FILE"
 test -n "$ANSIBLE_AB_ARM"
+if [[ "$ANSIBLE_AB_ARM" == mitogen_linear && "$CODEXIA_SERVICE_USER" == codexia-ab-rootless ]]; then
+  # The canonical rootless tests generate a few small, runner-private playbooks
+  # under /tmp. Mitogen requires cwd traversal after become_user. Grant only
+  # execute on these owned directories, not read or write privileges.
+  for arg in "$@"; do
+    if [[ "$arg" == /tmp/codexia-base-runtime.*/*.yml ]]; then
+      dir=${arg%/*}
+      if [[ -d "$dir" && -O "$dir" ]]; then
+        sudo setfacl -m "u:$CODEXIA_SERVICE_USER:--x" "$dir"
+      fi
+    fi
+  done
+fi
 start=$(date +%s%N)
 "$ANSIBLE_REAL_PLAYBOOK" "$@"
 status=$?

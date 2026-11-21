@@ -7,13 +7,16 @@ package installation, fixture construction, and artifact upload.
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
 import re
+import shutil
 import statistics
 import subprocess
 import sys
 import time
+import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -77,11 +80,15 @@ def run_benchmark(args: argparse.Namespace) -> int:
     root = Path(args.fixture).resolve()
     known_hosts = root / "known_hosts"
     plugin_path = Path(args.mitogen_strategy_path).resolve()
-    control_path = root / "control-%C"
+    # OpenSSH appends a random suffix to ControlPath. Keep the private socket
+    # directory short enough for its UNIX-domain path-length limit.
+    multiplex_dir = Path(tempfile.mkdtemp(prefix="ca-ab-", dir="/tmp"))
+    atexit.register(shutil.rmtree, multiplex_dir)
+    control_path = multiplex_dir / "%C"
     inventory = root / "inventory.yml"
     if not known_hosts.is_file() or not inventory.is_file() or not (plugin_path / "mitogen_linear.py").is_file():
         raise ValueError("Pinned host key, SSH inventory or Mitogen plugin is missing")
-    if len(str(control_path)) >= 90:
+    if len(str(control_path)) >= 70:
         raise ValueError("SSH ControlPath may exceed UNIX socket length")
     if args.repetitions not in range(1, 6):
         raise ValueError("Repetitions must be between 1 and 5")
