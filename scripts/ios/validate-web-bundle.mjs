@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,8 @@ export async function validateWebBundle(directory) {
     }
     const file = path.resolve(root, reference.split(/[?#]/u, 1)[0]);
     if (file !== root && !file.startsWith(`${root}${path.sep}`)) throw new Error(`Native asset path escapes web bundle: ${reference}`);
-    await access(file);
+    const asset = await stat(file);
+    if (!asset.isFile()) throw new Error(`Native asset is not a file: ${reference}`);
   }
   return { references: references.length };
 }
