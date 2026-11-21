@@ -8,6 +8,15 @@ die(){ printf '%s\n' "$*" >&2; exit 1; }
 for cmd in podman age sha256sum flock findmnt sync stat getent ip; do command -v "$cmd" >/dev/null || die "Missing dependency: $cmd"; done
 lock_file="$STATE_DIR/host.lock"
 operation="${1:-}"
+verify_lock_descriptor(){
+  local lock_file="$1" lock_fd="$2" fd_identity lock_identity
+  [[ "$lock_file" == /* && -f "$lock_file" && ! -L "$lock_file" ]] || die 'Maintenance lock must be an existing absolute regular file'
+  [[ "$lock_fd" =~ ^[0-9]+$ && "$lock_fd" -ge 3 && -e "/proc/self/fd/$lock_fd" ]] || die 'Maintenance lock descriptor was not inherited'
+  fd_identity="$(stat -Lc '%d:%i' -- "/proc/self/fd/$lock_fd" 2>/dev/null || true)"
+  lock_identity="$(stat -Lc '%d:%i' -- "$lock_file" 2>/dev/null || true)"
+  [[ -n "$fd_identity" && "$fd_identity" == "$lock_identity" ]] || die 'Inherited descriptor does not identify the declared maintenance lock'
+  flock --exclusive --nonblock "$lock_fd" || die 'Inherited descriptor does not own the maintenance lock'
+}
 remote_directory(){
   [[ "$1" == /* && -d "$1" && ! -L "$1" ]] || die 'Use an existing absolute off-VM mount directory'
   local fstype mount_source remote_host local_addresses remote_addresses address
@@ -58,14 +67,19 @@ validate_artifact(){
 }
 case "$operation" in
   backup-locked)
-    mkdir -p "$STATE_DIR"
-    [[ "${CODEXIA_UPDATER_LOCK_HELD:-}" == 1 && "${CODEXIA_UPDATER_LOCK_DIRECTORY:-}" == "$STATE_DIR" ]] || die 'Internal backup requires the canonical controller lock'
-    lock_fd="${CODEXIA_UPDATER_LOCK_FD:-}"
-    [[ "$lock_fd" =~ ^[0-9]+$ && -e "/proc/self/fd/$lock_fd" ]] || die 'Controller lock descriptor was not inherited from the updater'
-    fd_identity="$(stat -Lc '%d:%i' -- "/proc/self/fd/$lock_fd" 2>/dev/null || true)"
-    lock_identity="$(stat -Lc '%d:%i' -- "$lock_file" 2>/dev/null || true)"
-    [[ -n "$fd_identity" && "$fd_identity" == "$lock_identity" ]] || die 'Inherited descriptor does not identify the canonical controller lock'
-    flock --exclusive --nonblock "$lock_fd" || die 'Inherited descriptor does not hold the updater lock'
+    if [[ $# -gt 3 ]]; then
+      [[ $# == 8 && "${4:-}" == --approved && "${5:-}" == --lock-file && -n "${6:-}" && "${7:-}" == --lock-fd && -n "${8:-}" ]] || die 'Push backup requires explicit approval and an inherited maintenance lock descriptor'
+      verify_lock_descriptor "$6" "$8"
+    else
+      mkdir -p "$STATE_DIR"
+      [[ "${CODEXIA_UPDATER_LOCK_HELD:-}" == 1 && "${CODEXIA_UPDATER_LOCK_DIRECTORY:-}" == "$STATE_DIR" ]] || die 'Internal backup requires the canonical controller lock'
+      lock_fd="${CODEXIA_UPDATER_LOCK_FD:-}"
+      [[ "$lock_fd" =~ ^[0-9]+$ && -e "/proc/self/fd/$lock_fd" ]] || die 'Controller lock descriptor was not inherited from the updater'
+      fd_identity="$(stat -Lc '%d:%i' -- "/proc/self/fd/$lock_fd" 2>/dev/null || true)"
+      lock_identity="$(stat -Lc '%d:%i' -- "$lock_file" 2>/dev/null || true)"
+      [[ -n "$fd_identity" && "$fd_identity" == "$lock_identity" ]] || die 'Inherited descriptor does not identify the canonical controller lock'
+      flock --exclusive --nonblock "$lock_fd" || die 'Inherited descriptor does not hold the updater lock'
+    fi
     ;;
   drill)
     mkdir -p "$STATE_DIR"
@@ -161,9 +175,10 @@ assert_restore_resource_absent(){
 }
 case "${1:-}" in
   backup-locked)
-    [[ $# == 3 ]] || die 'Usage: backup-locked /remote/mount age1-recipient'
+    [[ $# == 3 || $# == 8 ]] || die 'Usage: backup-locked /remote/mount age1-recipient [--approved --lock-file /absolute/lock --lock-fd fd]'
     remote_directory "$2"
     [[ "$3" =~ ^age1[0-9a-z]+$ ]] || die 'Provide an age public recipient, not a private key'
+    if [[ $# == 8 ]]; then [[ "${4:-}" == --approved ]] || die 'Push backup requires explicit approval'; fi
     backup_artifact "$2" "$3"
     ;;
   drill)

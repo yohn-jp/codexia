@@ -20,6 +20,7 @@ state_dir="$state_home/codexia-updater"
 remote="$tmp/remote"
 shim="$tmp/bin"
 mkdir -p "$state_dir" "$remote" "$shim"
+mkfifo "$tmp/hold-open"
 printf 'blocked\n' > "$state_dir/route"
 printf '#!/bin/sh\nexit 1\n' > "$shim/podman"
 printf '#!/bin/sh\nexit 1\n' > "$shim/age"
@@ -95,7 +96,8 @@ done
   exec 9> "$state_dir/host.lock"
   flock --exclusive --nonblock 9
   touch "$tmp/other-process-holds-lock"
-  sleep 120
+  exec 8<> "$tmp/hold-open"
+  IFS= read -r <&8
 ) &
 holder_pid=$!
 for attempt in $(seq 1 50); do
@@ -113,16 +115,80 @@ if ! grep -q 'Controller lock descriptor was not inherited from the updater' "$t
   cat "$tmp/direct.log" >&2
   exit 1
 fi
+
+# A push deployment can use the same backup helper under its own durable host
+# lock. The generic interface still requires approval and an inherited FD for
+# the exact lock file; a sibling process lock is not accepted as ownership.
+push_lock="$tmp/push-maintenance.lock"
+touch "$push_lock"
+if bash "$backup_script" backup-locked "$remote" age1fixture --approved --lock-file "$push_lock" --lock-fd 9 9>&- > "$tmp/push-no-fd.log" 2>&1; then
+  echo 'Push backup accepted a missing inherited lock descriptor' >&2
+  exit 1
+fi
+grep -q 'Maintenance lock descriptor was not inherited' "$tmp/push-no-fd.log"
+if bash "$backup_script" backup-locked "$remote" age1fixture --lock-file "$push_lock" --lock-fd 9 > "$tmp/push-no-approval.log" 2>&1; then
+  echo 'Push backup accepted missing explicit approval' >&2
+  exit 1
+fi
+other_lock="$tmp/other-maintenance.lock"
+touch "$other_lock"
+if (
+  exec 9> "$other_lock"
+  flock --exclusive --nonblock 9
+  bash "$backup_script" backup-locked "$remote" age1fixture --approved --lock-file "$push_lock" --lock-fd 9
+) > "$tmp/push-wrong-inode.log" 2>&1; then
+  echo 'Push backup accepted a descriptor for a different lock file' >&2
+  exit 1
+fi
+grep -q 'Inherited descriptor does not identify the declared maintenance lock' "$tmp/push-wrong-inode.log"
+
+(
+  exec 9> "$push_lock"
+  flock --exclusive --nonblock 9
+  touch "$tmp/push-lock-is-held"
+  exec 8<> "$tmp/hold-open"
+  IFS= read -r <&8
+) &
+holder_pid=$!
+for attempt in $(seq 1 50); do
+  [[ -f "$tmp/push-lock-is-held" ]] && break
+  sleep 0.1
+done
+test -f "$tmp/push-lock-is-held"
+if (
+  exec 9> "$push_lock"
+  bash "$backup_script" backup-locked "$remote" age1fixture --approved --lock-file "$push_lock" --lock-fd 9
+) > "$tmp/push-other-holder.log" 2>&1; then
+  echo 'Push backup accepted a lock held by another process' >&2
+  exit 1
+fi
+grep -q 'Inherited descriptor does not own the maintenance lock' "$tmp/push-other-holder.log"
 kill "$holder_pid"
 wait "$holder_pid" 2>/dev/null || true
 holder_pid=
 
+# A real lock owner reaches the guarded backup preflight. This fixture stops
+# at Podman because it only proves the descriptor contract, not backup data.
+(
+  exec 9> "$push_lock"
+  flock --exclusive --nonblock 9
+  if bash "$backup_script" backup-locked "$remote" age1fixture --approved --lock-file "$push_lock" --lock-fd 9 > "$tmp/push-valid-lock.log" 2>&1; then
+    echo 'Push backup unexpectedly reached a successful artifact in the lock-only fixture' >&2
+    exit 1
+  fi
+)
+grep -q 'History volume absent' "$tmp/push-valid-lock.log"
+
 # The controller adapter's child launch passes descriptor 9 through Node to
 # the shell helper. Fake Podman stops the test after this handoff is accepted.
+node_state_home="$tmp/node-state"
+mkdir -p "$node_state_home/codexia-updater"
+printf 'blocked\n' > "$node_state_home/codexia-updater/route"
 (
-  exec 9> "$state_dir/host.lock"
+  export XDG_STATE_HOME="$node_state_home"
+  exec 9> "$node_state_home/codexia-updater/host.lock"
   flock --exclusive --nonblock 9
-  CODEXIA_UPDATER_LOCK_DIRECTORY="$state_dir" CODEXIA_UPDATER_LOCK_FD=9 \
+  CODEXIA_UPDATER_LOCK_DIRECTORY="$node_state_home/codexia-updater" CODEXIA_UPDATER_LOCK_FD=9 \
     node --input-type=module -e '
       import assert from "node:assert/strict";
       import { PodmanStandaloneHost } from "./deploy/updater/standalone-host.mjs";
