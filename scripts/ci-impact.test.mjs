@@ -215,7 +215,10 @@ test('push backup changes retain root and independent exact-head verification', 
   for (const file of source) {
     assert.deepEqual((await plan([file])).tasks, ['unit-root', 'coverage'], file);
     assert.equal((await plan([file])).full_model_oci, false, file);
-    for (const event of ['pull_request', 'push']) assert.ok(backup.on[event].paths.includes(file), file);
+    for (const event of ['pull_request', 'push']) {
+      const paths = backup.on[event].paths;
+      assert.ok(paths.some(p => p === file || (p.endsWith('/**') && file.startsWith(p.slice(0, -2)))), file);
+    }
   }
   const steps = backup.jobs['backup-contract'].steps;
   assert.equal(steps.find(s => s.uses?.startsWith('actions/checkout')).with.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
