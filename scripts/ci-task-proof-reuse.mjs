@@ -13,6 +13,7 @@ import { assertTrustedCertifiedSourceTaskInputProof } from './ci-task-input-proo
 
 const VERIFY_PATH = '.github/workflows/verify.yml';
 const COVERAGE_JOB = 'types-tests';
+const COVERAGE_WORKFLOW_JOB = 'types';
 const COVERAGE_ARTIFACT = 'ci-evidence-types-tests';
 const CERTIFICATION_STEP = 'Certify every required exact-source matrix element';
 const COMPACT_CERTIFICATION_STEP = 'Certify reused merged PR proof';
@@ -105,12 +106,12 @@ async function resolveCompactMainCoverageProof({ plan, run, jobs, current, repos
     sourceRun, job: sourceJob, artifact, mainRun: run, certificationJob: certJob,
     certificationStep: certSteps[0], certification: mainCertification,
     expected: { repositoryId: current.repository.id, workflowId: current.workflow_id, jobId: sourceJob.id,
-      jobName: COVERAGE_JOB, artifactId: artifact.id, artifactName: COVERAGE_ARTIFACT, artifactDigest: artifact.digest },
+      jobName: COVERAGE_JOB, workflowJob: COVERAGE_WORKFLOW_JOB, artifactId: artifact.id, artifactName: COVERAGE_ARTIFACT, artifactDigest: artifact.digest },
   });
   return { task: 'coverage', sourceSha: plan.base, proofSourceSha: mainProof.headSha,
     planDigest: proof.planDigest, workflowRunId: sourceRun.id, workflowAttempt: sourceRun.run_attempt,
     workflowId: sourceRun.workflow_id, repositoryId: sourceRun.repository.id, jobId: sourceJob.id,
-    workflowJob: sourceJob.name, artifactId: artifact.id, artifactName: artifact.name, artifactDigest: artifact.digest,
+    workflowJob: proof.workflowJob, artifactId: artifact.id, artifactName: artifact.name, artifactDigest: artifact.digest,
     inputClosure: proof.inputClosure, runtime: proof.runtime, certification: mainCertification };
 }
 
@@ -194,13 +195,13 @@ export async function resolveExactMainCoverageProof({ plan: planValue, current, 
   assertTrustedTaskInputProof({ inputProof: proof,
     identity: { sourceSha: plan.base, planDigest: planDigest(mainPlan), workflowRunId: run.id, workflowAttempt: run.run_attempt },
     run, job: coverageJob, artifact,
-    expected: { repositoryId: current.repository.id, workflowId: current.workflow_id, jobName: COVERAGE_JOB,
+    expected: { repositoryId: current.repository.id, workflowId: current.workflow_id, jobName: COVERAGE_JOB, workflowJob: COVERAGE_WORKFLOW_JOB,
       artifactName: COVERAGE_ARTIFACT, artifactId: artifact.id, artifactDigest: artifact.digest },
   });
   return {
     task: 'coverage', sourceSha: plan.base, proofSourceSha: plan.base, planDigest: proof.planDigest, workflowRunId: run.id,
     workflowAttempt: run.run_attempt, workflowId: run.workflow_id, repositoryId: run.repository.id,
-    jobId: coverageJob.id, workflowJob: coverageJob.name,
+    jobId: coverageJob.id, workflowJob: proof.workflowJob,
     artifactId: artifact.id, artifactName: artifact.name, artifactDigest: artifact.digest,
     inputClosure: proof.inputClosure, runtime: proof.runtime,
     certification: { workflowRunId: run.id, workflowAttempt: run.run_attempt, workflowId: run.workflow_id,
@@ -230,7 +231,7 @@ export async function assertReusedCoverageProof({ plan: planValue, report, curre
   assert.equal(runtime.imageOS, report.producerInventory.runner.imageOS, 'Candidate proof runner image mismatch');
   assert.equal(runtime.imageVersion, report.producerInventory.runner.imageVersion, 'Candidate proof runner image version mismatch');
   const candidateClosure = await captureCoverageInputClosure({ root: process.cwd(), runtime,
-    invocation: coverageInvocation(runtime.execPath), workflowJob: COVERAGE_JOB });
+    invocation: coverageInvocation(runtime.execPath), workflowJob: COVERAGE_WORKFLOW_JOB });
   assert.deepEqual(candidateProof.inputClosure, candidateClosure, 'Candidate task input closure is not reproducible');
 
   const baselineProof = { ...trusted, sourceSha: trusted.proofSourceSha,
