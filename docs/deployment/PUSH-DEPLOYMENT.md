@@ -1,6 +1,6 @@
 # Push deployment
 
-The backend release workflow publishes the Core image by immutable OCI digest, then exposes that exact digest to its production deployment job. The deployment job connects to the `yohnark.github` tailnet using GitHub OIDC, checks the pinned SSH host key for `100.100.1.68`, and runs Ansible as `codexia`. Cloudflare Tunnel remains the application ingress; it is not used for VM management.
+The backend release workflow publishes the Full image by immutable OCI digest and creates a provenance certificate bound to successful exact-main verification, the producer artifact and the inspected image identity. The production job checks the live UI/API epoch and Access boundary, connects to the `yohnark.github` tailnet using GitHub OIDC, checks the pinned SSH host key for `100.100.1.68`, and runs Ansible as `codexia`. Cloudflare Tunnel remains the application ingress; it is not used for VM management.
 
 The deployment job is gated by the `CODEXIA_PUSH_DEPLOYMENT_ENABLED` variable in the `codexia-production` GitHub Environment. Keep the value unset or set it to `false` until the new service identity, data, secrets, backup destination and rollback path have passed target-host acceptance. The existing signed pull channel remains available during this transition. Retire its publisher and VM polling units only after the push path serves the accepted production state.
 
@@ -11,6 +11,9 @@ Configure these names in the `codexia-production` GitHub Environment. Never put 
 | Name | GitHub type | Purpose |
 | --- | --- | --- |
 | `TS_OAUTH_CLIENT_ID` | Secret | Existing Tailscale GitHub OIDC client. |
+| `CODEXIA_PUBLIC_ORIGIN` | Variable | HTTPS origin used by the production job to check the deployed UI/API epoch and Access boundary. |
+| `CODEXIA_ACCESS_CLIENT_ID` | Secret | Existing Cloudflare Access service-token ID used by the read-only live compatibility preflight. |
+| `CODEXIA_ACCESS_CLIENT_SECRET` | Secret | Existing Cloudflare Access service-token secret used by the read-only live compatibility preflight. |
 | `CODEXIA_DEPLOY_SSH_PRIVATE_KEY` | Secret | Dedicated Ed25519 key used only by the production deployment job. Install its public key for the `codexia` account on the VM through the approved host channel. |
 | `CODEXIA_DEPLOY_SSH_KNOWN_HOSTS` | Variable | Independently verified `known_hosts` line for `100.100.1.68`; the runner rejects an unpinned host. |
 | `CODEXIA_BACKUP_DESTINATION` | Variable | Existing absolute mount directory on the VM for encrypted off-VM backups. |
@@ -21,9 +24,9 @@ The private age identity used for restore verification stays on a separate recov
 
 ## Deployment contract
 
-The production job runs only for a successful main `Verify Codexia` run whose corresponding backend publication produced a certified digest. It consumes `needs.publish.outputs.certified-image` and its producer SHA; it does not resolve a tag or build a second image. The pull request validation job has no production Environment and cannot mint a Tailscale OIDC identity.
+The production job runs only for a successful main `Verify Codexia` run whose corresponding backend publication produced a certified Full digest and deployment certificate. It consumes `needs.publish.outputs.certified-full-image`, its producer SHA and certificate; it does not resolve a tag or build a second image. The pull request validation job has no production Environment and cannot mint a Tailscale OIDC identity.
 
-The Ansible `deploy` stage requires a running, healthy Core API under the `codexia` rootless account. It pulls the digest, verifies the embedded backend identity and requires the candidate's migration fingerprint, API epoch and persistence format to equal the running image. Its Quadlet disables startup schema migration. A database change requires a separately reviewed database maintenance and backup operation; replacing a container does not restore or roll back PostgreSQL.
+The Ansible `deploy` stage requires a running, healthy Full API under the `codexia` rootless account. It verifies that the certificate identity matches the exact image digest and requires the candidate's migration fingerprint, API epoch and persistence format to equal the running image and deployed UI. Its Quadlet disables startup schema migration. A database change requires a separately reviewed database maintenance and backup operation; replacing a container does not restore or roll back PostgreSQL.
 
 Before stopping the API, Ansible verifies that the configured backup directory is an existing remote filesystem. It then holds the host lock while it stops the application Tunnel and API, creates and validates an encrypted database/history backup, installs the digest-specific Quadlet, starts the candidate, and waits for the readiness health check. If startup or readiness fails, it restores the previous Quadlet and checks that the previous API becomes healthy before returning failure. A durable transaction record also lets the next invocation recover the previous release if the runner or SSH connection disappears mid-deploy. Recovery leaves its record in place if it cannot verify the prior service. A repeated application of the running digest verifies service health and performs no image switch.
 

@@ -30,7 +30,8 @@ test('backend publication requires a still-eligible component source before regi
   assert.equal(steps[publication].if, "steps.freshness.outputs.affected == 'true'");
   const deploy = workflow.jobs['deploy-production'];
   assert.deepEqual(deploy.needs, ['source', 'publish']);
-  assert.match(deploy.if, /needs\.publish\.outputs\.certified-image != ''/u);
+  assert.match(deploy.if, /needs\.publish\.outputs\.certified-full-image != ''/u);
+  assert.match(deploy.if, /needs\.publish\.outputs\.deployment-certificate != ''/u);
   assert.match(deploy.if, /vars\.CODEXIA_PUSH_DEPLOYMENT_ENABLED == 'true'/u);
   assert.ok(workflow.jobs['stable-channel'], 'the pull channel remains available until push cutover acceptance');
 });

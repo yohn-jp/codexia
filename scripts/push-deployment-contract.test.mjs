@@ -20,7 +20,7 @@ test('pull request backend validation cannot obtain production credentials or de
   }
 });
 
-test('production deployment consumes only the certified Core digest after main publication', () => {
+test('production deployment consumes the certified Full digest and provenance certificate after main publication', () => {
   const deploy = workflow.jobs['deploy-production'];
   assert.ok(deploy, 'certified production deployment job is required');
   assert.deepEqual(deploy.needs, ['source', 'publish']);
@@ -28,7 +28,8 @@ test('production deployment consumes only the certified Core digest after main p
   assert.match(deploy.if, /github\.event\.workflow_run\.event == 'push'/u);
   assert.match(deploy.if, /github\.event\.workflow_run\.head_branch == 'main'/u);
   assert.match(deploy.if, /needs\.publish\.result == 'success'/u);
-  assert.match(deploy.if, /needs\.publish\.outputs\.certified-image != ''/u);
+  assert.match(deploy.if, /needs\.publish\.outputs\.certified-full-image != ''/u);
+  assert.match(deploy.if, /needs\.publish\.outputs\.deployment-certificate != ''/u);
   assert.match(deploy.if, /vars\.CODEXIA_PUSH_DEPLOYMENT_ENABLED == 'true'/u);
   assert.equal(deploy.environment.name, 'codexia-production');
   assert.equal(deploy.concurrency.group, 'codexia-production');
@@ -45,10 +46,17 @@ test('production deployment consumes only the certified Core digest after main p
   assert.equal(ssh.env.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS, '${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}');
   assert.match(ssh.run, /StrictHostKeyChecking=yes/u);
 
+  const liveUi = deploy.steps.find(step => step.name === 'Verify live application identities and Access boundary for release admission');
+  assert.ok(liveUi, 'the job must admit the current frontend epoch before deployment');
+  assert.equal(liveUi.env.CODEXIA_ACCESS_CLIENT_ID, '${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}');
+  const certificate = workflow.jobs.publish.steps.find(step => step.name === 'Create provenance-bound Full push deployment certificate');
+  assert.ok(certificate, 'the publisher must bind the exact successful main verification and image artifact');
+  assert.equal(certificate.env.CODEXIA_CERTIFIED_FULL_IMAGE, '${{ steps.push-image.outputs.full-image }}');
   const ansible = deploy.steps.find(step => step.name === 'Converge certified backend digest');
   assert.ok(ansible, 'production deployment must apply the digest through Ansible');
-  assert.equal(ansible.env.CODEXIA_CERTIFIED_IMAGE, '${{ needs.publish.outputs.certified-image }}');
-  assert.equal(ansible.env.CODEXIA_PROFILE, 'core');
+  assert.equal(ansible.env.CODEXIA_CERTIFIED_FULL_IMAGE, '${{ needs.publish.outputs.certified-full-image }}');
+  assert.equal(ansible.env.CODEXIA_PROFILE, 'full');
+  assert.equal(ansible.env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64, '${{ needs.publish.outputs.deployment-certificate }}');
   assert.match(ansible.run, /codexia_stage: deploy/u);
   assert.match(ansible.run, /codexia_image:/u);
 });
@@ -64,6 +72,9 @@ test('Ansible routes the push stage through the codexia runtime and host lock', 
   assert.equal(stop.when, "codexia_stage == 'deploy'");
 
   const deployment = parse(readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8'));
+  assert.ok(deployment.some(task => task.name === 'Admit the published candidate against installed API and deployed UI identities'));
+  const candidateIdentity = deployment.find(task => task.name === 'Require candidate image source, profile and database compatibility identity');
+  assert.ok(candidateIdentity['ansible.builtin.assert'].that.includes('codexia_candidate_identity == codexia_deployment_certificate.identity'));
   const activeUnit = deployment.find(task => task.name === 'Require the existing API unit before an image-only update');
   assert.ok(activeUnit, 'image-only updates must retain a concrete prior unit for rollback');
   assert.equal(activeUnit.when, 'codexia_current_container_exists.rc == 0');
