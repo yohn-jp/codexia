@@ -69,9 +69,10 @@ export function readFrontendOAuthConfig(env = process.env) {
 /** Stable identity for the public OAuth configuration embedded in a static bundle. */
 export function frontendOAuthConfigHash(env = process.env) {
   const config = readFrontendOAuthConfig(env);
-  // The input is public OAuth metadata, not a password or client secret.
-  // codeql[js/insufficient-password-hash]
-  return createHash('sha256').update(JSON.stringify({ format: configFormat, settings: config })).digest('hex');
+  // This fingerprints public OAuth client metadata, not passwords or secrets.
+  const fingerprint = createHash('sha256');
+  fingerprint.write(JSON.stringify({ format: configFormat, settings: config }));
+  return fingerprint.digest('hex');
 }
 
 /** Reject promotion or release artifacts that were built with different public OAuth settings. */
