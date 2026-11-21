@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +18,19 @@ import {
 } from "../dist/index.js";
 
 const hash = (value) => createHash("sha256").update(value).digest("hex");
+
+async function readSnapshotFile(filePath, expected) {
+  const handle = await fs.open(filePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  try {
+    const opened = await handle.stat({ bigint: true });
+    assert.equal(opened.isFile(), true);
+    assert.equal(opened.dev, expected.dev);
+    assert.equal(opened.ino, expected.ino);
+    return await handle.readFile();
+  } finally {
+    await handle.close();
+  }
+}
 
 function git(cwd, ...args) {
   return execFileSync("git", ["-C", cwd, ...args], {
@@ -54,7 +68,7 @@ async function treeState(root) {
       } else if (child.isSymbolicLink()) {
         state.push({ ...entry, link: await fs.readlink(absolute) });
       } else if (child.isFile()) {
-        state.push({ ...entry, hash: hash(await fs.readFile(absolute)) });
+        state.push({ ...entry, hash: hash(await readSnapshotFile(absolute, info)) });
       } else state.push(entry);
     }
   };

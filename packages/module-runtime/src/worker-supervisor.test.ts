@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, rm } from "node:fs/promises";
+import { readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -436,20 +436,30 @@ test("a timed-out unready service keeps its process slot until its resistant chi
       (error: unknown) => error,
     );
     pid = await waitForPid(supervisor);
-    const initialized = join(tmpdir(), `codexia-unready-worker-${pid}`);
+    const markerPrefix = `codexia-unready-worker-${pid}-`;
+    let initialized: string | undefined;
     const readinessDeadline = startedAt + 800;
     let ready = false;
     try {
       while (Date.now() < readinessDeadline) {
-        try {
-          const marker = /^initialized:(\d+):(\d+)$/u.exec(await readFile(initialized, "utf8"));
-          if (Number(marker?.[1]) === pid && Number(marker?.[2]) >= startedAt) { ready = true; break; }
-        } catch { /* The worker may not have installed its SIGTERM handler yet. */ }
+        const candidates = (await readdir(tmpdir())).filter((name) => name.startsWith(markerPrefix));
+        for (const candidate of candidates) {
+          const candidatePath = join(tmpdir(), candidate);
+          try {
+            const marker = /^initialized:(\d+):(\d+)$/u.exec(await readFile(candidatePath, "utf8"));
+            if (Number(marker?.[1]) === pid && Number(marker?.[2]) >= startedAt) {
+              initialized = candidatePath;
+              ready = true;
+              break;
+            }
+          } catch { /* The worker may not have installed its SIGTERM handler yet. */ }
+        }
+        if (ready) break;
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
       assert.ok(ready, "the child must report that its SIGTERM handler is installed before the startup timeout");
     } finally {
-      await rm(initialized, { force: true });
+      if (initialized) await rm(initialized, { force: true });
     }
     await new Promise((resolve) => setTimeout(resolve, Math.max(0, 1025 - (Date.now() - startedAt))));
     assert.doesNotThrow(() => process.kill(pid!, 0), "the startup timeout should still be draining the SIGTERM-resistant process");
