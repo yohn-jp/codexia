@@ -369,25 +369,27 @@ SQL
 )
 legacy_history_hash=$(age -d -i "$tmp/age-identity" "$artifact/manifest.age" | sed -n '3p')
 [[ "$legacy_db_hash" =~ ^[0-9a-f]{64}$ && "$legacy_history_hash" =~ ^[0-9a-f]{64}$ ]]
-mkdir "$tmp/legacy-v1"
-cp "$artifact/database.dump.age" "$tmp/legacy-v1/database.dump.age"
-cp "$artifact/history.tar.age" "$tmp/legacy-v1/history.tar.age"
+legacy_v1_artifact="$remote/legacy-v1"
+mkdir "$legacy_v1_artifact"
+cp "$artifact/database.dump.age" "$legacy_v1_artifact/database.dump.age"
+cp "$artifact/history.tar.age" "$legacy_v1_artifact/history.tar.age"
 printf 'codexia-backup/v1\n%s\n%s\n' "$legacy_db_hash" "$legacy_history_hash" |
-  age -r "$recipient" -o "$tmp/legacy-v1/manifest.age"
-(cd "$tmp/legacy-v1" && sha256sum database.dump.age history.tar.age manifest.age > SHA256SUMS)
-bash "$backup_script" drill "$tmp/legacy-v1" "$tmp/age-identity" --approved > "$tmp/legacy-v1.log"
+  age -r "$recipient" -o "$legacy_v1_artifact/manifest.age"
+(cd "$legacy_v1_artifact" && sha256sum database.dump.age history.tar.age manifest.age > SHA256SUMS)
+bash "$backup_script" drill "$legacy_v1_artifact" "$tmp/age-identity" --approved > "$tmp/legacy-v1.log"
 grep -q 'Isolated restore verified: database and history fingerprints match' "$tmp/legacy-v1.log"
 assert_no_drill_resources
 
-# A validly re-encrypted public-only dump must not pass restore verification
+# A validly re-encrypted dump without codexia_auth must not pass verification
 # when the source backup also contained Better Auth schema state.
-mkdir "$tmp/auth-schema-omitted"
+auth_schema_omitted_artifact="$remote/auth-schema-omitted"
+mkdir "$auth_schema_omitted_artifact"
 podman exec codexia-db sh -ec 'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec pg_dump -U codexia_admin -d codexia -Fc --exclude-schema=codexia_auth' |
-  age -r "$recipient" -o "$tmp/auth-schema-omitted/database.dump.age"
-cp "$artifact/history.tar.age" "$tmp/auth-schema-omitted/history.tar.age"
-cp "$artifact/manifest.age" "$tmp/auth-schema-omitted/manifest.age"
-(cd "$tmp/auth-schema-omitted" && sha256sum database.dump.age history.tar.age manifest.age > SHA256SUMS)
-if bash "$backup_script" drill "$tmp/auth-schema-omitted" "$tmp/age-identity" --approved > "$tmp/auth-schema-omitted.log" 2>&1; then
+  age -r "$recipient" -o "$auth_schema_omitted_artifact/database.dump.age"
+cp "$artifact/history.tar.age" "$auth_schema_omitted_artifact/history.tar.age"
+cp "$artifact/manifest.age" "$auth_schema_omitted_artifact/manifest.age"
+(cd "$auth_schema_omitted_artifact" && sha256sum database.dump.age history.tar.age manifest.age > SHA256SUMS)
+if bash "$backup_script" drill "$auth_schema_omitted_artifact" "$tmp/age-identity" --approved > "$tmp/auth-schema-omitted.log" 2>&1; then
   echo 'Restore drill accepted a backup with omitted codexia_auth state' >&2
   exit 1
 fi
