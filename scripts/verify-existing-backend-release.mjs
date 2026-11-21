@@ -93,7 +93,7 @@ export async function verifyExistingBackendRelease({env=process.env,args=process
   else assert.equal(producerSha,mainSha,'Main producer SHA mismatch');
   const created=Date.parse(release.created_at);
   assert.ok(Number.isFinite(created),'Existing backend release creation time is invalid');
-  const runs=await pages('actions/workflows/backend-release.yml/runs?head_sha='+mainSha+'&branch=main&event='+publicationEvent','workflow_runs',token);
+  const runs=await pages('actions/workflows/backend-release.yml/runs?head_sha='+mainSha+'&branch=main&event='+publicationEvent,'workflow_runs',token);
   for(const run of runs){
     if(run?.path!=='.github/workflows/backend-release.yml'||run.event!==publicationEvent||run.head_branch!=='main'||run.head_sha!==mainSha||
       run.status!=='completed'||run.conclusion!=='success'||!Number.isFinite(Date.parse(run.created_at))||!Number.isFinite(Date.parse(run.updated_at))||
