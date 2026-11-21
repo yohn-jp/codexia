@@ -815,6 +815,22 @@ test("outline supports guarded keyboard navigation, search, zoom and mobile sizi
   await expect(page.locator(".pg-outline-document").first()).toBeVisible();
 });
 
+test("Headless Tree reparent drag moves an unselected document through the canonical API", async ({ page }) => {
+  expect(databaseUrl).toBeTruthy();
+  const { project, scene, second } = await createWritingFixture(page, "desktop", `Headless DnD ${crypto.randomUUID()}`);
+  const outline = page.locator('[data-workspace-panel="outline"]');
+  const source = outline.locator(`.pg-outline-item[data-document-id="${second.id}"] > .pg-outline-row > .pg-outline-drag`);
+  const target = outline.locator(`.pg-outline-item[data-document-id="${scene.id}"] > .pg-outline-row > .pg-outline-document`);
+  await expect(source).toBeVisible();
+  await source.dragTo(target);
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${second.id}`);
+    return response.ok() ? ((await response.json()) as { document: { parentId: string | null } }).document.parentId : null;
+  }).toBe(scene.id);
+  await expect(outline.locator(`.pg-outline-item[data-document-id="${scene.id}"] .pg-outline-item[data-document-id="${second.id}"]`)).toBeVisible();
+  await expect(target).toHaveAttribute("aria-current", "page");
+});
+
 test("Headless Tree renames an unselected document without replacing the active manuscript", async ({ page }) => {
   expect(databaseUrl).toBeTruthy();
   const { project, scene, second } = await createWritingFixture(page, "desktop", `Headless rename ${crypto.randomUUID()}`);
