@@ -418,7 +418,7 @@ for (const { mode, width, forceAppendFallback = false } of [
       expect(initialRevision.markdown).toBe(original);
       await editor.click();
       await editor.pressSequentially(appended);
-      await expect(page.getByText("IndexedDB回復Journalに保存済み", { exact: true })).toBeVisible();
+      await expectDeviceDraft(page);
       await heldSave.requestReached;
       const saveBody = await heldSave.requestBody as { changes: Array<{ fromUtf16: number; toUtf16: number; insert: string }>; resultingSha256: string };
       expect(saveBody.changes.map((change) => change.insert).join("")).toBe(appended);
