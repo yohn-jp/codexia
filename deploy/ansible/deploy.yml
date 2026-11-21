@@ -46,14 +46,13 @@
     group: "{{ codexia_service_group | default('codexia') }}"
     mode: "{{ item.mode }}"
   loop:
-    # Share the existing updater lock until the accepted cutover retires that writer.
-    - {path: "{{ home }}/.local/state/codexia-updater", mode: '0700'}
+    - {path: "{{ home }}/.local/state/codexia-deploy", mode: '0700'}
     - {path: "{{ home }}/.local/bin", mode: '0700'}
     - {path: "{{ quadlet_dir }}", mode: '0750'}
 
 - name: Install the encrypted backup helper for the rootless deployment identity
   ansible.builtin.copy:
-    src: "{{ repo_root }}/deploy/updater/standalone-backup.sh"
+    src: "{{ repo_root }}/deploy/backup/backup.sh"
     dest: "{{ home }}/.local/bin/codexia-backup"
     owner: codexia
     group: "{{ codexia_service_group | default('codexia') }}"
@@ -71,7 +70,7 @@
   ansible.builtin.command:
     argv: ["{{ home }}/.local/bin/codexia-deploy-recover"]
   environment:
-    CODEXIA_PUSH_STATE_DIR: "{{ home }}/.local/state/codexia-updater"
+    CODEXIA_PUSH_STATE_DIR: "{{ home }}/.local/state/codexia-deploy"
     CODEXIA_PUSH_QUADLET_DIR: "{{ quadlet_dir }}"
   register: codexia_deploy_recovery
   changed_when: "'RECOVERED_PREVIOUS_RELEASE' in codexia_deploy_recovery.stdout or 'CLEANED_COMMITTED_TRANSACTION' in codexia_deploy_recovery.stdout"
@@ -83,8 +82,7 @@
       - validate-destination
       - "{{ codexia_backup_destination }}"
   environment:
-    CODEXIA_PUSH_BACKUP_MODE: '1'
-    CODEXIA_PUSH_STATE_DIR: "{{ home }}/.local/state/codexia-updater"
+    CODEXIA_PUSH_STATE_DIR: "{{ home }}/.local/state/codexia-deploy"
     HOME: "{{ home }}"
     XDG_STATE_HOME: "{{ home }}/.local/state"
   register: codexia_backup_destination_check
@@ -128,11 +126,11 @@
           - podman
           - cp
           - "{{ codexia_candidate_container.stdout }}:/app/update-identity.json"
-          - "{{ home }}/.local/state/codexia-updater/candidate-identity.json"
+          - "{{ home }}/.local/state/codexia-deploy/candidate-identity.json"
       changed_when: false
     - name: Read candidate backend identity metadata
       ansible.builtin.slurp:
-        src: "{{ home }}/.local/state/codexia-updater/candidate-identity.json"
+        src: "{{ home }}/.local/state/codexia-deploy/candidate-identity.json"
       register: codexia_candidate_identity_file
   always:
     - name: Remove the stopped metadata container
@@ -283,7 +281,7 @@
 - name: Render a digest-specific candidate Quadlet outside the active unit path
   ansible.builtin.copy:
     content: "{{ lookup('ansible.builtin.file', repo_root + '/deploy/quadlet/codexia-api.container') | replace('CODEXIA_BACKEND_IMAGE', codexia_image) | replace('CODEXIA_BACKEND_PROFILE', codexia_profile) }}"
-    dest: "{{ home }}/.local/state/codexia-updater/candidate-{{ codexia_image.split('sha256:')[-1] }}.container"
+    dest: "{{ home }}/.local/state/codexia-deploy/candidate-{{ codexia_image.split('sha256:')[-1] }}.container"
     owner: codexia
     group: "{{ codexia_service_group | default('codexia') }}"
     mode: '0600'
@@ -291,13 +289,13 @@
 - name: Apply or recover the API Quadlet under the host lock
   ansible.builtin.shell: |
     set -Eeuo pipefail
-    state_dir={{ (home + '/.local/state/codexia-updater') | quote }}
+    state_dir={{ (home + '/.local/state/codexia-deploy') | quote }}
     unit_dir={{ quadlet_dir | quote }}
     active_unit="$unit_dir/codexia-api.container"
     wants_dir="$unit_dir/default.target.wants"
     api_wants_link="$wants_dir/codexia-api.service"
     tunnel_wants_link="$wants_dir/codexia-tunnel.service"
-    candidate_unit={{ (home + '/.local/state/codexia-updater/candidate-' + codexia_image.split('sha256:')[-1] + '.container') | quote }}
+    candidate_unit={{ (home + '/.local/state/codexia-deploy/candidate-' + codexia_image.split('sha256:')[-1] + '.container') | quote }}
     backup_program={{ (home + '/.local/bin/codexia-backup') | quote }}
     backup_destination={{ codexia_backup_destination | quote }}
     backup_recipient={{ codexia_backup_recipient | quote }}
@@ -403,7 +401,7 @@
     systemctl --user stop codexia-api.service >/dev/null 2>&1 || true
     if [[ -n "$current_image" ]]; then
       if ! "$backup_program" backup-locked "$backup_destination" "$backup_recipient" \
-        --approved --lock-file "$lock_file" --lock-fd 9 --push-deployment; then
+        --approved --lock-file "$lock_file" --lock-fd 9; then
         restore_previous || echo 'Previous API recovery failed after backup failure' >&2
         echo 'Encrypted off-VM backup failed; candidate was not applied' >&2
         exit 1
