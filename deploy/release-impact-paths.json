@@ -27,7 +27,7 @@
     "scripts/component-release-record*.mjs",
     "scripts/reuse-pr-verification*.mjs",
     "scripts/verify-frontend-compatibility*.mjs",
-    "scripts/update-release-policy.mjs",
+    "scripts/identity-probe-client.mjs",
     "scripts/build-frontend.mjs",
     "scripts/profile-build.mjs",
     "scripts/profile-package.mjs",
