@@ -2105,7 +2105,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           </>}
         </section>}
         {project && !selectedDocument && !active && !outlineError && <section className="pg-empty"><h2>{project.title}</h2><p>編集を始める文書を作成してください。</p><button type="button" onClick={() => openCreation("document")}>最初の文書を作成</button></section>}
-        {active && <section className="pg-editor" aria-label={active.document.title}>
+        {active && <section className="pg-editor" data-reader={reading ? "true" : undefined} aria-label={active.document.title}>
           <div className="pg-editor-heading">
             <div><p className="eyebrow">{project?.title}</p><h2>{active.document.title}</h2></div>
             <details className="pg-save-state" data-state={desktopDurabilityFor(active)}>

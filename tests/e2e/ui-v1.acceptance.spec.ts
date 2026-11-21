@@ -656,6 +656,10 @@ test("Mobile reader keeps first-to-last Japanese paragraphs visible at supported
       await expect.poll(() => visibleReaderParagraphs(page)).toContainEqual(expect.stringContaining("第1段落"));
 
       const pager = page.locator(".reading-pager");
+      const pagerBounds = await pager.boundingBox();
+      expect(pagerBounds).not.toBeNull();
+      expect(pagerBounds!.x).toBeGreaterThanOrEqual(0);
+      expect(pagerBounds!.x + pagerBounds!.width).toBeLessThanOrEqual(width);
       const beforePage = await pager.getAttribute("data-page-index");
       const beforeClass = await pager.getAttribute("class");
       const box = await pager.boundingBox();

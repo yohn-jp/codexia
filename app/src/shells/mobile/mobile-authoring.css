@@ -243,6 +243,13 @@
   background: transparent;
   box-shadow: none;
 }
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor[data-reader="true"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor[data-reader="true"] > .scene-reading {
+  min-inline-size: 0;
+  width: 100%;
+}
 .mobile-shell .mobile-shell-workspace-view[data-active-view="writing"] .pg-editor-heading {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
