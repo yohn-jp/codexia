@@ -100,7 +100,7 @@ async function assertBackendVersionTagFree(version,token,fetchImpl){
 }
 
 export async function inspectBackendImageWithoutExecution(archivePath, profile, sourceSha, version, migrationFingerprint, compatibility, destination) {
-  execFileSync('bash',['-o','pipefail','-c','gzip -dc -- "$1" | docker load','backend-image-load',archivePath],{stdio:'inherit'});
+  execFileSync('docker',['load','--input',archivePath],{stdio:'inherit'});
   return inspectDockerImage(IMAGE,{sourceSha,version,profile,migrationFingerprint,compatibility},{tempRoot:destination});
 }
 
