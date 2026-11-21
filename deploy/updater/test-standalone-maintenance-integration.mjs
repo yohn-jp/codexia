@@ -578,6 +578,11 @@ function runAppPasswordQuery(sql) {
   { input: sql, stdio: ['pipe', 'pipe', 'pipe'] });
 }
 
+function rotationBackupArtifactDirectory(stateDir) {
+  const timestamp = new Date().toISOString().replace(/[-:]/gu, '').replace(/\.\d{3}Z$/u, 'Z');
+  return path.join(path.dirname(stateDir), `codexia-${timestamp}-${randomUUID()}`);
+}
+
 async function createPasswordRotationCandidate({ stateDir, config, userUnitDir, password }) {
   const candidateRoot = path.join(path.dirname(config.publicKeyFile), 'maintenance', 'candidates', randomBytes(16).toString('hex'));
   await mkdir(candidateRoot, { recursive: true, mode: 0o700 });
@@ -591,8 +596,7 @@ async function createPasswordRotationCandidate({ stateDir, config, userUnitDir, 
   const backupDigest = BACKUP_DIGEST_FIXTURE;
   const state = await loadControllerState(config.stateFile);
   const databaseId = await new PodmanStandaloneHost(config).passwordRotationDatabaseId();
-  const artifactName = `codexia-${new Date().toISOString().replace(/[-:]/gu, '').replace(/\.\d{3}Z$/u, 'Z')}-${randomUUID()}`;
-  const artifactDirectory = path.join(path.dirname(stateDir), artifactName);
+  const artifactDirectory = rotationBackupArtifactDirectory(stateDir);
   await mkdir(artifactDirectory, { mode: 0o700 });
   const proof = {
     format: 'codexia-controller-backup-proof/v1', artifactDirectory, checksumManifestSha256: backupDigest,
@@ -625,7 +629,7 @@ async function createPreflightPasswordRotationCandidate({stateDir,config,userUni
   const state=await loadControllerState(config.stateFile);
   const databaseId=await new PodmanStandaloneHost(config).passwordRotationDatabaseId();
   const checksum=BACKUP_DIGEST_FIXTURE;
-  const artifactDirectory=path.join(path.dirname(stateDir),`codexia-preflight-${randomUUID()}`);
+  const artifactDirectory=rotationBackupArtifactDirectory(stateDir);
   await mkdir(artifactDirectory,{mode:0o700});
   await atomicWrite(path.join(stateDir,'controller-backup-proof.json'),JSON.stringify({
     format:'codexia-controller-backup-proof/v1',artifactDirectory,checksumManifestSha256:checksum,
