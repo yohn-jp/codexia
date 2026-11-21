@@ -8,7 +8,6 @@ import {assertApiAuthTokenSecretIdentity,assertProxyRuntimeObservation,PodmanSta
 import {mkdir,mkdtemp,rm,writeFile,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import { rotationCredentialDigest } from './rotation-credential-digest.mjs';
 
 test('preflight password rotation accepts only a protected 64-hex credential',()=>{
   assert.equal(typeof maintenance.validatePostgresPreflightPassword,'function');
@@ -56,8 +55,7 @@ test('preflight password recovery snapshot binds the prior credential and contro
   const digest=value=>createHash('sha256').update(value).digest('hex');
   const snapshot={operationId:'12345678-1234-4234-8234-123456789abc',databaseId:'123456789:42',
     adminSecretId:'admin-id-123',appSecretId:'app-id-123',originalSecretId:'preflight-id-123',
-    previousDigest:rotationCredentialDigest(previous,'12345678-1234-4234-8234-123456789abc'),
-    replacementDigest:rotationCredentialDigest(replacement,'12345678-1234-4234-8234-123456789abc'),sourceDigest:'a'.repeat(64),
+    previousDigest:digest(previous),replacementDigest:digest(replacement),sourceDigest:'a'.repeat(64),
     fragmentDigest:'b'.repeat(64),runtimeDigest:'c'.repeat(64),resources:{volumes:{},networks:{}},
     databaseQuadlet:'[Container]\nImage=docker.io/library/postgres:17-bookworm@sha256:'+'d'.repeat(64)+'\n'};
   const marker=await maintenance.savePreflightPasswordRotationSnapshot({config,state,snapshot,previousPassword:previous,
@@ -197,8 +195,7 @@ test('Tunnel token recovery snapshot binds prior token, service identity and com
   const {createHash}=await import('node:crypto');
   const digest=value=>createHash('sha256').update(value).digest('hex');
   const snapshot={operationId:'12345678-1234-4234-8234-123456789abc',originalSecretId:'secret-id-123',
-    previousDigest:rotationCredentialDigest(previous,'12345678-1234-4234-8234-123456789abc'),
-    replacementDigest:rotationCredentialDigest(replacement,'12345678-1234-4234-8234-123456789abc'),sourceDigest:'a'.repeat(64),fragmentDigest:'b'.repeat(64),
+    previousDigest:digest(previous),replacementDigest:digest(replacement),sourceDigest:'a'.repeat(64),fragmentDigest:'b'.repeat(64),
     imageId:'c'.repeat(64),runtimeDigest:'d'.repeat(64)};
   const marker=await saveTunnelTokenSnapshot({config,state,snapshot,previousToken:previous,timer:{active:'inactive',enabled:'disabled'},routeContent:'blue\n'});
   const loaded=await loadTunnelTokenSnapshot({config,state,marker});
@@ -218,8 +215,8 @@ test('API token rotation snapshots bind both tokens to the exact controller and 
   const replacementToken='new-standalone-auth-token-0123456789';
   const snapshot={operationId:randomUUID(),originalSecretId:'secret-id-previous',previousDigest:'a'.repeat(64),replacementDigest:'b'.repeat(64)};
   const {createHash}=await import('node:crypto');
-  snapshot.previousDigest=rotationCredentialDigest(previousToken,snapshot.operationId);
-  snapshot.replacementDigest=rotationCredentialDigest(replacementToken,snapshot.operationId);
+  snapshot.previousDigest=createHash('sha256').update(previousToken).digest('hex');
+  snapshot.replacementDigest=createHash('sha256').update(replacementToken).digest('hex');
   try{
     const marker=await saveApiAuthTokenSnapshot({config,state,snapshot,previousToken,replacementToken,timer:{active:'inactive',enabled:'disabled'}});
     assert.ok(!JSON.stringify(marker).includes(previousToken));
@@ -240,8 +237,8 @@ test('API token recovery accepts the untouched original secret only for rolled-b
   const replacementToken='new-standalone-auth-token-0123456789';
   const {createHash}=await import('node:crypto');
   const snapshot={operationId,originalSecretId:'secret-id-original',
-    previousDigest:rotationCredentialDigest(previousToken,operationId),
-    replacementDigest:rotationCredentialDigest(replacementToken,operationId)};
+    previousDigest:createHash('sha256').update(previousToken).digest('hex'),
+    replacementDigest:createHash('sha256').update(replacementToken).digest('hex')};
   const original={id:snapshot.originalSecretId,owner:undefined,token:previousToken};
   const ownedPrevious={id:'secret-id-restored',owner:operationId,token:previousToken};
   const ownedReplacement={id:'secret-id-replacement',owner:operationId,token:replacementToken};
@@ -608,7 +605,7 @@ test('private rollback snapshots survive process death and cannot trust a change
   const password='f'.repeat(64),operationId=randomUUID();
   const config={...current,stateFile:path.join(root,'state','controller.json'),publicKeyFile:path.join(root,'private','channel.pem')};
   const state={installed:release,journal:{phase:'committed',active:{slot:'blue',image:release.image}},paused:true,lastError:null};
-  const snapshot={operationId,databaseId:'123:42',databaseQuadlet:'exact\n',previousDigest:rotationCredentialDigest(password,operationId)};
+  const snapshot={operationId,databaseId:'123:42',databaseQuadlet:'exact\n',previousDigest:createHash('sha256').update(password).digest('hex')};
   try{
     const marker=await savePasswordRotationSnapshot({config,state,snapshot,previousPassword:password,timer:{active:'inactive',enabled:'disabled'}});
     assert.ok(!JSON.stringify(marker).includes(password));
@@ -654,8 +651,7 @@ test('boot retains the durable rotation marker, paused journal and stopped timer
   const full={...release,format:'codexia-update-release/v1',channel:'stable',state:'published',version:'1.2.3',sourceSha:'c'.repeat(40),
     platform:'linux/amd64',migrationFingerprint:'sha256:'+'a'.repeat(64),persistenceFormat:1,apiEpoch:1};
   const state=initialControllerState(full,'blue',null),password='a'.repeat(64);
-  const operationId=randomUUID();
-  const snapshot={databaseId:'123:42',databaseQuadlet:'reviewed',operationId,previousDigest:rotationCredentialDigest(password,operationId)};
+  const snapshot={databaseId:'123:42',databaseQuadlet:'reviewed',operationId:randomUUID(),previousDigest:createHash('sha256').update(password).digest('hex')};
   try{
     process.env.PATH=root+path.delimiter+oldPath;process.env.CODEXIA_UPDATER_LOCK_DIRECTORY=stateDir;
     await writeFile(path.join(root,'systemctl'),'#!/bin/sh\ncase "$2" in\nstop) echo stopped > "$(dirname "$0")/timer" ;;\nis-enabled) echo disabled; exit 1 ;;\nis-active) echo inactive; exit 3 ;;\n*) exit 99 ;;\nesac\n',{mode:0o700});
