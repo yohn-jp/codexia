@@ -16,6 +16,7 @@ export const TEST_TYPECHECK_SCOPES = ['app-e2e', 'packages', 'modules'];
 export const PROFILES = ['core', 'full'];
 export const BROWSER_SHARDS = [
   { id: 'auth-recovery', project: 'chromium', file: 'auth-recovery.acceptance.spec.ts' },
+  { id: 'draft-recovery', project: 'chromium', file: 'draft-recovery.acceptance.spec.ts' },
   ...['core', 'job-inbox', 'modular-workspace', 'native-review', 'persistence-database', 'recent-activity', 'redesign-visual', 'review-contributions', 'ui-v1'].map(id => ({ id, project: 'chromium', file: `${id}.acceptance.spec.ts` })),
   { id: 'webkit', project: 'webkit', file: 'ui-v1.acceptance.spec.ts' },
 ];
@@ -48,7 +49,7 @@ export const VERIFICATION_GROUPS = {
     // Run the performance-sensitive visual shard only after the shorter
     // reference tasks, avoiding an exclusive tail on the critical writing lane.
     [`browser-${profile}-reference`, ['recent-activity', 'modular-workspace', 'review-contributions', 'job-inbox', 'redesign-visual'].map(id => `browser-${profile}-${id}`)],
-    [`browser-${profile}-webkit`, ['auth-recovery', 'ui-v1', 'webkit'].map(id => `browser-${profile}-${id}`)],
+    [`browser-${profile}-webkit`, ['auth-recovery', 'draft-recovery', 'ui-v1', 'webkit'].map(id => `browser-${profile}-${id}`)],
   ])),
   ...Object.fromEntries(NATIVE_SELECTIONS.map(id => [`hosted-native-${id}`, [`hosted-native-${id}`]])),
 };

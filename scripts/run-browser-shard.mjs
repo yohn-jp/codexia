@@ -60,6 +60,15 @@ async function main() {
     CODEXIA_E2E_TEST_FILE: shard.file,
     CODEXIA_E2E_COVERAGE_FILE: coverageFile,
   };
+  if (shard.id === "draft-recovery") {
+    env.VITE_CODEXIA_OAUTH_AUTHORIZATION_ENDPOINT = "http://127.0.0.1:4174/oauth2/authorize";
+    env.VITE_CODEXIA_OAUTH_TOKEN_ENDPOINT = "http://127.0.0.1:4174/oauth2/token";
+    env.VITE_CODEXIA_OAUTH_CLIENT_ID = "codexia-draft-recovery-fixture";
+    env.VITE_CODEXIA_API_AUDIENCE = "https://api.example.test";
+    env.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI = "http://127.0.0.1:4173/desktop";
+    env.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI = "http://127.0.0.1:4173/mobile";
+    env.VITE_CODEXIA_OAUTH_SCOPES = "openid codexia:api";
+  }
   if (!prebuilt) {
     const buildStatus = run("pnpm", ["build"], env);
     if (buildStatus !== 0) return buildStatus;

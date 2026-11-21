@@ -109,8 +109,14 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
     if (!oauthConfig || busy) return;
     setBusy(true);
     setMessage("");
-    try { await beginOAuthAuthorization(oauthConfig); }
-    catch (error) {
+    try {
+      if (workspaceScopeRef.current !== null && (!protectionRef.current || !await protectionRef.current())) {
+        setMessage("入力を保護できないためOAuth認証への移動を停止しました。接続と保存状態を確認してください。");
+        setBusy(false);
+        return;
+      }
+      await beginOAuthAuthorization(oauthConfig);
+    } catch (error) {
       setMessage(error instanceof Error ? error.message : "OAuth sign-in could not be started.");
       setBusy(false);
     }
@@ -144,6 +150,10 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
     setSessionBlocked(true);
     setMessage("");
     try {
+      if (workspaceScopeRef.current !== null && (!protectionRef.current || !await protectionRef.current())) {
+        setMessage("入力を保護できないためログアウトを停止しました。接続と保存状態を確認してください。");
+        return;
+      }
       await api.logout();
       workspaceScopeRef.current = null;
       setSessionBlocked(false);
