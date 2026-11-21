@@ -41,9 +41,22 @@ test('backend evidence fails closed on duplicate, wrong run, SHA, digest, expire
   }
   assert.throws(()=>selectBackendArtifacts(run,[...artifacts,{...artifacts[2],id:99}],jobs,expected),/one fresh/);
   assert.throws(()=>selectBackendArtifacts({...run,event:'pull_request'},artifacts,jobs,expected),/event mismatch/);
-  assert.deepEqual(selectBackendArtifacts({...run,event:'workflow_run'},artifacts,jobs,{...expected,event:'workflow_run'}).map(item=>item.profile),['core','full']);
   assert.throws(()=>selectBackendArtifacts({...run,run_attempt:2},artifacts,jobs,expected),/attempt mismatch/);
   assert.throws(()=>selectBackendArtifacts(run,artifacts,[jobs[0],{...jobs[1],conclusion:'failure'}],expected),/did not succeed/);
   assert.throws(()=>selectBackendArtifacts(run,artifacts,[...jobs,jobs[1]],expected),/exactly one latest/);
   assert.throws(()=>selectBackendArtifacts(run,artifacts.map(item=>item.id===12?{...item,name:item.name.replace('attempt-3','attempt-4')}:item),jobs,expected),/newer than current/);
+});
+
+test('backend source artifact is distinct from the Verify completion workflow engine head',()=>{
+  const {jobs,artifacts}=fixture();
+  const workflowSha='c'.repeat(40);
+  const completion={...run,event:'workflow_run',head_sha:workflowSha};
+  const workflowJobs=jobs.map(job=>({...job,head_sha:workflowSha}));
+  const workflowArtifacts=artifacts.map(artifact=>({...artifact,workflow_run:{...artifact.workflow_run,head_sha:workflowSha}}));
+  const proof={...expected,event:'workflow_run',workflowSha};
+  const selected=selectBackendArtifacts(completion,workflowArtifacts,workflowJobs,proof);
+  assert.deepEqual(selected.map(item=>item.profile),['core','full']);
+  assert.doesNotThrow(()=>assertBackendProducerAttempt(selected[1],[workflowJobs[1]],proof));
+  assert.throws(()=>selectBackendArtifacts(completion,workflowArtifacts,workflowJobs,{...proof,workflowSha:sha}));
+  assert.throws(()=>selectBackendArtifacts(completion,workflowArtifacts,workflowJobs,{...proof,sourceSha:workflowSha}));
 });

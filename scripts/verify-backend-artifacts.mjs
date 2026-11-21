@@ -26,13 +26,15 @@ export function selectBackendArtifacts(run, artifacts, jobs, expected) {
   assert.match(expected.sourceSha, /^[a-f0-9]{40}$/u);
   const runId = positiveInteger(expected.runId, 'Backend producer run ID');
   const currentAttempt = positiveInteger(expected.currentAttempt, 'Backend workflow attempt');
+  const workflowSha = expected.event === 'workflow_run' ? expected.workflowSha : expected.sourceSha;
+  assert.match(workflowSha ?? '', /^[a-f0-9]{40}$/u, 'Backend producer workflow SHA is invalid');
   assert.equal(run.id, runId, 'Backend workflow run mismatch');
   assert.equal(run.run_attempt, currentAttempt, 'Backend workflow attempt mismatch');
   assert.equal(run.event, expected.event || 'push', 'Backend producer event mismatch');
   assert.equal(run.head_branch, 'main', 'Backend producer branch must be main');
-  assert.equal(run.head_sha, expected.sourceSha, 'Backend producer source mismatch');
+  assert.equal(run.head_sha, workflowSha, 'Backend producer workflow SHA mismatch');
   assert.ok(Array.isArray(artifacts) && Array.isArray(jobs), 'Invalid backend artifact inventory');
-  const identity = { runId, sourceSha: expected.sourceSha };
+  const identity = { runId, sourceSha: workflowSha };
   const selected = PROFILES.map(profile => {
     const jobName = 'Build and test backend OCI image (' + profile + ')';
     const producers = jobs.filter(job => job?.name === jobName);
@@ -66,8 +68,9 @@ export function assertBackendProducerAttempt(selected, jobs, expected) {
   const producers = jobs.filter(job => job?.name === selected.jobName);
   assert.equal(producers.length, 1, 'Expected one backend job in declared producer attempt');
   assert.equal(producers[0].run_attempt, selected.producerAttempt, 'Backend producer attempt mismatch');
+  const workflowSha = expected.event === 'workflow_run' ? expected.workflowSha : expected.sourceSha;
   assert.equal(selectLatestJobArtifact(selected.artifact.name, selected.jobName, [selected.artifact], jobs,
-    { runId: expected.runId, sourceSha: expected.sourceSha }).id, selected.artifact.id,
+    { runId: expected.runId, sourceSha: workflowSha }).id, selected.artifact.id,
     'Backend artifact does not belong to its declared producer attempt');
 }
 
@@ -85,7 +88,8 @@ export async function verifyBackendArtifacts({env=process.env,fetchImpl=fetch}={
   assert.ok(['push','workflow_run'].includes(env.GITHUB_EVENT_NAME), 'Backend publication requires main or verified completion');
   assert.equal(env.GITHUB_REF, 'refs/heads/main');
   const expected = {runId:positiveInteger(env.GITHUB_RUN_ID,'Backend workflow run ID'),
-    currentAttempt:positiveInteger(env.GITHUB_RUN_ATTEMPT,'Backend workflow attempt'),sourceSha:env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA,event:env.GITHUB_EVENT_NAME};
+    currentAttempt:positiveInteger(env.GITHUB_RUN_ATTEMPT,'Backend workflow attempt'),sourceSha:env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA,
+    event:env.GITHUB_EVENT_NAME,workflowSha:env.GITHUB_SHA};
   assert.match(expected.sourceSha, /^[a-f0-9]{40}$/u);
   assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),expected.sourceSha,'Backend publish checkout source mismatch');
   const token = env.GH_TOKEN;
