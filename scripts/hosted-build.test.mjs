@@ -57,9 +57,11 @@ async function pnpmIdentityFixture(identities, { escapingTarget } = {}) {
   await mkdir(path.dirname(linkPath), { recursive: true });
   await symlink(packageDirectory, linkPath, 'dir');
   await mkdir(nodeModulesDirectory, { recursive: true });
-  await writeFile(path.join(nodeModulesDirectory, '.modules.yaml'), JSON.stringify({
-    hoistedDependencies: Object.fromEntries(identities.map((identity) => [identity, { '@scope/pkg': 'private' }])),
-  }));
+  const modulesYaml = [
+    'hoistedDependencies:',
+    ...identities.flatMap((identity) => [`  ${JSON.stringify(identity)}:`, '    "@scope/pkg": private']),
+  ].join('\n');
+  await writeFile(path.join(nodeModulesDirectory, '.modules.yaml'), `${modulesYaml}\n`);
   return {
     directory,
     nodeModulesDirectory,
