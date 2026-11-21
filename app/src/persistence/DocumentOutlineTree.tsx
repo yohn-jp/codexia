@@ -146,6 +146,15 @@ export function DocumentOutlineTree({
               aria-selected={id === selectedId}
               aria-label={`${node.title} ${node.misplaced ? `未配置 · ${kindLabel(node.kind)}` : kindLabel(node.kind)}`}
               onFocus={() => item.setFocused()}
+              onKeyDownCapture={(event) => {
+                // WAI-ARIA tree: ArrowRight on a leaf is a no-op. Headless Tree's
+                // default shortcut advances to the next item; Codexia's existing
+                // editor-outline contract must not unexpectedly move focus.
+                if (!hasChildren && event.key === "ArrowRight") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }
+              }}
               onClick={() => { item.setFocused(); item.primaryAction(); }}>
               <span>{node.title}</span>
               <small>{node.misplaced ? `未配置 · ${kindLabel(node.kind)}` : kindLabel(node.kind)}</small>
