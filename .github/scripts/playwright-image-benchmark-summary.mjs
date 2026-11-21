@@ -1,9 +1,11 @@
-import { appendFileSync } from 'node:fs';
+import { constants, fstatSync, openSync, writeFileSync, closeSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 
 const { GITHUB_API_URL = 'https://api.github.com', GITHUB_REPOSITORY, GITHUB_RUN_ID, GH_TOKEN, GITHUB_STEP_SUMMARY } = process.env;
 if (!GITHUB_REPOSITORY || !GITHUB_RUN_ID || !GH_TOKEN || !GITHUB_STEP_SUMMARY) {
   throw new Error('Missing GitHub Actions API environment');
 }
+if (!isAbsolute(GITHUB_STEP_SUMMARY)) throw new Error('GITHUB_STEP_SUMMARY must be an absolute runner-provided path');
 
 const auth = {
   Authorization: `Bearer ${GH_TOKEN}`,
@@ -21,6 +23,13 @@ const elapsed = (a, b) => {
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
 };
 const format = (n) => n === null ? 'unavailable' : `${n.toFixed(1)}s`;
+const logDiagnostic = (error) => {
+  if (error?.code === 'BENCHMARK_LOG_HTTP') return 'job-log-response-unavailable';
+  if (error?.code === 'BENCHMARK_LOG_REDIRECT') return 'job-log-redirect-invalid';
+  if (error?.code === 'BENCHMARK_SIGNED_LOG_HTTP') return 'signed-log-response-unavailable';
+  return 'job-log-request-failed';
+};
+const logFailure = (code) => Object.assign(new Error(), { code });
 
 async function listRunJobs() {
   const jobs = [];
@@ -37,13 +46,13 @@ async function jobLog(jobId) {
   const response = await fetch(url, { headers: auth, redirect: 'manual' });
   if (response.status === 200) return response.text();
   if (![301, 302, 303, 307, 308].includes(response.status)) {
-    throw new Error(`Job ${jobId}: logs unavailable (HTTP ${response.status})`);
+    throw logFailure('BENCHMARK_LOG_HTTP');
   }
   const location = response.headers.get('location');
-  if (!location || !location.startsWith('https://')) throw new Error(`Job ${jobId}: invalid log redirect`);
+  if (!location || !location.startsWith('https://')) throw logFailure('BENCHMARK_LOG_REDIRECT');
   // Signed log URLs are anonymous; never forward the GitHub API credential.
   const redirected = await fetch(location, { redirect: 'error' });
-  if (!redirected.ok) throw new Error(`Job ${jobId}: signed log download HTTP ${redirected.status}`);
+  if (!redirected.ok) throw logFailure('BENCHMARK_SIGNED_LOG_HTTP');
   return redirected.text();
 }
 
@@ -73,8 +82,10 @@ for (const job of selected) {
   let pull = null;
   let error = '';
   try { pull = pullDuration(await jobLog(job.id), source, browser); }
-  catch (cause) { error = String(cause.message); }
-  result.push({ source, browser, conclusion: job.conclusion, pull, init: elapsed(init?.started_at, init?.completed_at), test: elapsed(test?.started_at, test?.completed_at), total: elapsed(job.started_at, job.completed_at), error });
+  catch (cause) { error = logDiagnostic(cause); }
+  const conclusion = ['success', 'failure', 'cancelled', 'skipped', 'timed_out', 'action_required', 'neutral', 'stale'].includes(job.conclusion)
+    ? job.conclusion : 'unknown';
+  result.push({ source, browser, conclusion, pull, init: elapsed(init?.started_at, init?.completed_at), test: elapsed(test?.started_at, test?.completed_at), total: elapsed(job.started_at, job.completed_at), error });
 }
 
 const expected = ['chromium', 'webkit'].flatMap(browser => ['MCR official', 'GHCR mirror', 'GHCR minimal', 'GHCR Ubuntu'].map(source => ({ browser, source })));
@@ -98,7 +109,13 @@ for (const {browser, source} of expected) {
   if (r.error) problems.push(`${source}/${browser}: ${r.error}`);
 }
 lines.push('', 'Pull is measured from the Docker pull command to its completion in the job log; initialization and job elapsed come from the Actions jobs API. Execute multiple manual runs before judging runner variance.');
-for (const problem of problems) lines.push(`- ${problem}`);
-appendFileSync(GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
+for (const problem of problems) lines.push(`- ${problem.replace(/[|\r\n]/gu, ' ')}`);
+const summary = lines.join('\n') + '\n';
+const summaryFd = openSync(GITHUB_STEP_SUMMARY,
+  constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0), 0o600);
+try {
+  if (!fstatSync(summaryFd).isFile()) throw new Error('GITHUB_STEP_SUMMARY must reference an open regular runner summary file');
+  writeFileSync(summaryFd, summary);
+} finally { closeSync(summaryFd); }
 
 if (problems.length) throw new Error(`Benchmark incomplete: ${problems.join('; ')}`);

@@ -12,6 +12,7 @@ on:
       - '!modules/story/src/browser.tsx'
       - profiles/**
       - scripts/profile-build.mjs
+      - scripts/read-regular-file.mjs
       - scripts/profile-package.mjs
       - scripts/runtime-package-closure.mjs
       - scripts/verify-backend-image.sh

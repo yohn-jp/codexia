@@ -120,6 +120,15 @@ test("disjoint operations approved together can apply in sequence",async()=>{con
 test("binary module artifacts preserve exact bytes and metadata-backed revisions",async()=>{const p=await project(),reader=await core.reader(p.id),op=operation(reader.snapshot,"assets/image.bin",Buffer.from([0,255,128,32]).toString("base64"));op.writes[0]!.encoding="base64";await accept(p.id,op);const next=await core.reader(p.id);assert.equal((await next.read("assets/image.bin","base64"))?.content,op.writes[0]!.content);assert.deepEqual(await next.listRevisions!("assets"),[{path:"assets/image.bin",revision:(await next.read("assets/image.bin"))!.revision}]);});
 test("search and writing statistics share immutable Unicode-aware scene data",async()=>{const p=await hierarchy(),reader=await core.reader(p.id),search=await core.searchSnapshot(p.id,"😀",20,reader.snapshot),stats=await core.writingStatsSnapshot(p.id,reader.snapshot);assert.equal(search.results[0]?.offset,5);assert.equal(stats.stats.totalCharCount,5);assert.deepEqual(stats.snapshot,search.snapshot);});
 test("reorder and recursive deletion mutate hierarchy while keeping revision history",async()=>{const p=await hierarchy();const second=await core.buildCreateHierarchyOperation(p.id,{kind:"scene",id:"s2",title:"Second",volumeId:"v1",chapterId:"c1",manuscriptBody:"Second"});await accept(p.id,second.operation);const reorder=await core.buildReorderHierarchyOperation(p.id,{kind:"scene",volumeId:"v1",chapterId:"c1",orderedIds:["s2","s1"]});await accept(p.id,reorder.operation);assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters[0]?.scenes.map(x=>x.id),["s2","s1"]);const docs=await persistence.read(r=>r.listDocuments(p.id));const scene=docs.find(d=>d.title==="Scene")!;const removal=await core.buildDeleteHierarchyOperation(p.id,{kind:"volume",id:"v1"});await accept(p.id,removal.operation);assert.equal((await core.tree(p.id)).volumes.length,0);assert.equal((await persistence.read(r=>r.getRevision(p.id,scene.id,scene.headRevisionId!)))?.markdown,"Text 😀\n");});
+test("scene reorder rejects a chapter that belongs to a different volume", async () => {
+  const p = await hierarchy();
+  const otherVolume = await core.buildCreateHierarchyOperation(p.id, { kind: "volume", id: "v2", title: "Other volume" });
+  await accept(p.id, otherVolume.operation);
+  await assert.rejects(core.buildReorderHierarchyOperation(p.id, {
+    kind: "scene", volumeId: "v2", chapterId: "c1", orderedIds: ["s1"],
+  }), (error: unknown) => error instanceof CoreError && error.code === "invalid_hierarchy_parent");
+  assert.deepEqual((await core.tree(p.id)).volumes[0]?.chapters[0]?.scenes.map(scene => scene.id), ["s1"]);
+});
 test("PostgreSQL append keys preserve creation order across digit boundaries and reordered siblings", async () => {
   const p = await project();
   const create = async (input: Parameters<typeof core.buildCreateHierarchyOperation>[1]) => {
@@ -617,6 +626,18 @@ test("re-approving an already applied proposal does not regress its durable stat
   assert.equal(after?.state, "applied");
   assert.deepEqual(after?.applications, [receipt]);
   assert.equal(after?.approvedByOperationId?.[op.id], "owner");
+});
+
+test("approval bookkeeping handles allowed operation IDs that inherit object properties", async () => {
+  const p = await project();
+  const snapshot = (await core.reader(p.id)).snapshot;
+  const op = { ...operation(snapshot, "bible/inherited-key.yaml", "preserved"), id: "constructor" };
+  const proposal: ChangeProposal = { id: randomUUID(), snapshot, operations: [op], source: "author" };
+  await core.propose(p.id, proposal);
+  await core.approve(p.id, { proposalId: proposal.id, operationIds: [op.id], authorScope: "owner" });
+  const after = await core.getProposal(p.id, proposal.id);
+  assert.equal(Object.hasOwn(after?.approvedByOperationId ?? {}, "constructor"), true);
+  assert.equal(after?.approvedByOperationId?.constructor, "owner");
 });
 
 test("duplicate approved proposals share one manuscript application and settle on replay", async () => {

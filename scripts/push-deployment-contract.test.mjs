@@ -95,8 +95,11 @@ test('Ansible routes the push stage through the codexia runtime and host lock', 
   assert.match(transaction['ansible.builtin.shell'], /default\.target\.wants/u, 'the API must recover after a VM reboot');
   assert.match(transaction['ansible.builtin.shell'], /backup-locked[\s\S]*--approved[\s\S]*--lock-file[\s\S]*--lock-fd/u, 'updates must commit an encrypted off-VM backup under the same lock');
   assert.match(transaction['ansible.builtin.shell'], /restore_previous/u, 'failed candidate activation must restore the prior release');
+  assert.match(transaction['ansible.builtin.shell'], /stop codexia-api\.service[\s\S]*running_image[\s\S]*candidate_image/u, 'candidate acceptance must follow successful shutdown and match the certified running digest');
+  assert.match(transaction['ansible.builtin.shell'], /restored_image[\s\S]*rollback_image/u, 'rollback health must be bound to the prior digest snapshot');
   assert.match(transaction['ansible.builtin.shell'], /deploy-transaction\.json/u, 'a durable transaction intent must make interrupted deployments recoverable');
   assert.match(transaction['ansible.builtin.shell'], /current_image.*candidate_image/su, 'same-digest application must be idempotent');
+  assert.match(transaction['ansible.builtin.shell'], /Candidate API readiness failed; deployment transaction remains pending if rollback is unverified/u);
 });
 
 test('the production Quadlet binds an immutable image and disables startup schema mutation', () => {
@@ -161,7 +164,7 @@ test('push activation keeps one canonical API writer and exposes Tunnel only aft
   const restoreStartTunnel = shell.indexOf('systemctl --user start codexia-tunnel.service', restoreHealth);
   assert.ok(restore !== -1 && restoreStartApi > restore && restoreHealth > restoreStartApi && restoreStartTunnel > restoreHealth,
     'rollback must restore and health-check the previous API before restoring Tunnel ingress');
-  assert.match(shell, /Candidate API readiness failed; previous Quadlet was restored/u);
+  assert.match(shell, /Candidate API readiness failed; deployment transaction remains pending if rollback is unverified/u);
 });
 
 test('main-only manual Tailnet diagnostic verifies pinned SSH as codexia without joining PR validation or deployment', () => {

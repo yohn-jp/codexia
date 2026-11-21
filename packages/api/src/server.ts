@@ -3,7 +3,9 @@ import { scheduleAtDeadline } from "./deadline-timer.js";
 import { authorizationFailure } from "./authorization-error.js";
 import { readCodexiaEnvironment } from "./environment.js";
 import { createCloudflareAccessVerifier, type CloudflareAccessOptions } from "./cloudflare-access.js";
-import { createOAuthOwnerAuthenticator, OAuthAuthenticationError, type OAuthOwnerOptions } from "./oauth-owner.js";
+import { CODEXIA_OWNER_SCOPE, createOAuthOwnerAuthenticator, OAuthAuthenticationError, type OAuthOwnerOptions } from "./oauth-owner.js";
+import { createOAuthMcpAuthenticator, OAUTH_MCP_SCOPE_BY_EFFECT, OAUTH_MCP_SCOPES, parseOAuthMcpProjectAssignments, type OAuthMcpOptions, type OAuthMcpPrincipal } from "./oauth-mcp.js";
+import { createMcpProtectedResourceMetadataResponse, protectedResourceMetadataUrl } from "@codexia/contracts";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable, Transform } from "node:stream";
@@ -13,6 +15,7 @@ import { lstat, readFile, realpath } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import type { createBetterAuthRuntime } from "./better-auth.js";
 import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ReorderHierarchyInput } from "@codexia/core";
 import type { Persistence, ProjectPageCursor } from "@codexia/persistence-contracts";
@@ -136,6 +139,10 @@ export interface ApiServerOptions {
   cloudflareAccess?: CloudflareAccessOptions;
   /** Optional standalone API-audience OAuth access tokens for the configured owner. */
   oauthOwner?: OAuthOwnerOptions;
+  /** Explicitly registered standalone MCP OAuth clients, always separate from owner admission. */
+  oauthMcp?: OAuthMcpOptions;
+  /** Better Auth is the standalone OIDC and OAuth provider when configured. */
+  betterAuth?: ReturnType<typeof createBetterAuthRuntime>;
   /** Exact HTTPS browser origins allowed to call the API cross-origin with bearer tokens. */
   corsAllowedOrigins?: readonly string[];
   /** Defaults to `<cwd>/app/dist`. */
@@ -181,6 +188,14 @@ interface HttpFailure {
 
 function httpFailure(status: number, code: string, message: string): HttpFailure {
   return { status, code, message };
+}
+
+function mcpChallenge(metadataUrl: string, requiredScope?: string): string {
+  return `Bearer ${[
+    ...(requiredScope ? ['error="insufficient_scope"'] : []),
+    `resource_metadata="${metadataUrl}"`,
+    `scope="${requiredScope ?? OAUTH_MCP_SCOPES.join(" ")}"`,
+  ].join(", ")}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -439,6 +454,8 @@ async function serveStatic(
   const publicReaderPath = isPublicReaderPath(path);
   const files: Record<string, { filename: string; contentType: string }> = {
     "/": { filename: "index.html", contentType: "text/html; charset=utf-8" },
+    "/oauth/login": { filename: "index.html", contentType: "text/html; charset=utf-8" },
+    "/oauth/consent": { filename: "index.html", contentType: "text/html; charset=utf-8" },
     "/main.js": { filename: "main.js", contentType: "text/javascript; charset=utf-8" },
     "/api.js": { filename: "api.js", contentType: "text/javascript; charset=utf-8" },
     "/drafts.js": { filename: "drafts.js", contentType: "text/javascript; charset=utf-8" },
@@ -609,7 +626,16 @@ export function createServer(options: ApiServerOptions): Server {
     throw new Error("Cloudflare Access browser authentication requires standalone mode and the trusted HTTPS proxy");
   }
   if (options.oauthOwner && hosted) throw new Error("Standalone OAuth owner authentication is not available in Hosted mode");
+  if (options.oauthMcp && hosted) throw new Error("Standalone MCP OAuth authentication is not available in Hosted mode");
+  if (options.betterAuth && hosted) throw new Error("Standalone Better Auth is not available in Hosted mode");
   const authenticateOAuthOwner = options.oauthOwner ? createOAuthOwnerAuthenticator(options.oauthOwner) : undefined;
+  const authenticateOAuthMcp = options.oauthMcp ? createOAuthMcpAuthenticator(options.oauthMcp) : undefined;
+  const oauthResource = options.oauthMcp?.audience;
+  const oauthAuthorizationServer = options.oauthMcp?.issuer;
+  const oauthMcpMetadataUrl = oauthResource ? protectedResourceMetadataUrl(oauthResource) : undefined;
+  const oauthMcpMetadataResponse = oauthResource && oauthAuthorizationServer
+    ? createMcpProtectedResourceMetadataResponse({ resource: oauthResource, authorizationServer: oauthAuthorizationServer })
+    : undefined;
   if (options.corsAllowedOrigins && hosted) throw new Error("Standalone browser CORS configuration is not available in Hosted mode");
   const corsAllowedOrigins = normalizeCorsOrigins(options.corsAllowedOrigins);
   const cloudflareAccess = options.cloudflareAccess ? createCloudflareAccessVerifier(options.cloudflareAccess) : undefined;
@@ -650,19 +676,25 @@ export function createServer(options: ApiServerOptions): Server {
   let runtimeActivityVersion = 0;
   let lastMeaningfulActivityAt: string | null = null;
   const recordRuntimeActivity = (): void => { runtimeActivityVersion += 1; };
-  const listProjects = async (): Promise<Project[]> => {
-    if (!hosted) return options.store.listProjects();
+  const listProjects = async (allowedProjectIds?: readonly string[]): Promise<Project[]> => {
+    if (!hosted) {
+      const projects = await options.store.listProjects();
+      return allowedProjectIds ? projects.filter((project) => allowedProjectIds.includes(project.id)) : projects;
+    }
     const assigned = await options.persistence.read((reader) => reader.getProject(hosted.projectId as import("@codexia/persistence-contracts").ProjectId));
     if (!assigned || assigned.id !== hosted.projectId) throw httpFailure(503, "HOSTED_PROJECT_BINDING_INVALID", "Assigned PostgreSQL project is unavailable");
-    return [assigned];
+    return !allowedProjectIds || allowedProjectIds.includes(assigned.id) ? [assigned] : [];
   };
-  const assertAssignedProject = (projectId: string): void => {
+  const assertAssignedProject = (projectId: string, allowedProjectIds?: readonly string[]): void => {
     if (hosted && projectId !== hosted.projectId) {
       throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
     }
+    if (allowedProjectIds && !allowedProjectIds.includes(projectId)) {
+      throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
+    }
   };
-  const findAuthorizedProject = async (projectId: string): Promise<Project | undefined> => {
-    assertAssignedProject(projectId);
+  const findAuthorizedProject = async (projectId: string, allowedProjectIds?: readonly string[]): Promise<Project | undefined> => {
+    assertAssignedProject(projectId, allowedProjectIds);
     if (hosted) return (await listProjects())[0];
     const project = await options.persistence.read(reader => reader.getProject(projectId as import("@codexia/persistence-contracts").ProjectId));
     return project?.id === projectId ? project : undefined;
@@ -688,6 +720,7 @@ export function createServer(options: ApiServerOptions): Server {
     throw new Error("The full profile requires trusted runtime manifests and lazy loaders");
   }
   const app: FastifyInstance = Fastify({ logger: false, trustProxy });
+  app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_request, body, done) => done(null, body));
   let unsubscribeJobLifecycle = (): void => undefined;
   let shuttingDown = false;
   let activeRequests = 0;
@@ -787,7 +820,7 @@ export function createServer(options: ApiServerOptions): Server {
     if (!coreStore.writingStatsSnapshot) throw httpFailure(503, "WRITING_STATS_UNAVAILABLE", "Snapshot writing statistics are not available in this Core version");
     return coreStore.writingStatsSnapshot(projectId, selected.pinned);
   };
-  const buildCoreActions = (projectId: string, source: ChangeProposal["source"], actorId: string, authorizeProposal?: () => Promise<void>): Array<{ module: "core"; action: ModuleAction }> => {
+  const buildCoreActions = (projectId: string, source: ChangeProposal["source"], actorId: string, authorizeProposal?: () => Promise<void>, allowedProjectIds?: readonly string[]): Array<{ module: "core"; action: ModuleAction }> => {
     const jsonSchema: ValueSchema = {
       parse(value: unknown): unknown {
         let encoded: string;
@@ -1026,7 +1059,7 @@ export function createServer(options: ApiServerOptions): Server {
         const result = await coreStore.writingStatsSnapshot(projectId, context.reader.snapshot);
         return result.stats;
       }) },
-      { module: "core", action: make("core.projects.list", emptyInput, async () => ({ projects: await listProjects() })) },
+      { module: "core", action: make("core.projects.list", emptyInput, async () => ({ projects: await listProjects(allowedProjectIds) })) },
       ...createNativeKnowledgeActions({
         persistence: options.persistence!,
         projectId: projectId as import("@codexia/persistence-contracts").ProjectId,
@@ -1043,9 +1076,9 @@ export function createServer(options: ApiServerOptions): Server {
       if (status.availability === "enabled-idle" || status.availability === "active") await runtime.activate(status.id);
     }
   };
-  const listActionDescriptors = async (projectId: string, signal: AbortSignal, source: ChangeProposal["source"] = "author"): Promise<ActionDescriptor[]> => {
+  const listActionDescriptors = async (projectId: string, signal: AbortSignal, source: ChangeProposal["source"] = "author", allowedEffects?: readonly ActionDescriptor["effect"][], allowedProjectIds?: readonly string[]): Promise<ActionDescriptor[]> => {
     const reader = await freshReader(projectId);
-    return runtime.listActions(actionHost(projectId, reader, signal, source));
+    return runtime.listActions(actionHost(projectId, reader, signal, source, "owner", undefined, undefined, "owner", allowedEffects, allowedProjectIds));
   };
   const proposeAs = async (
     projectId: string,
@@ -1073,19 +1106,22 @@ export function createServer(options: ApiServerOptions): Server {
     onDomainJobStarted?: (jobId: string) => void,
     authorizeProposal?: () => Promise<void>,
     actorId = "owner",
+    allowedEffects?: readonly ActionDescriptor["effect"][],
+    allowedProjectIds?: readonly string[],
   ): ApiActionHost => {
     const host: ApiActionHost = {
       projectId,
       reader,
       signal,
       caller: access === "public" || source === "mcp" ? "external-agent" : "author",
+      ...(allowedEffects ? { allowedEffects } : {}),
       actions: access === "public" ? [] : buildCoreActions(projectId, source, actorId, async () => {
         if (authorizeProposal) { await authorizeProposal(); return; }
         throw httpFailure(403, hosted ? "WRITE_PERMISSION_REQUIRED" : "AUTHOR_SESSION_REQUIRED", "Current authenticated write permission is required to propose native changes");
-      }),
+      }, allowedProjectIds),
       propose: async (operations: ChangeOperation[], evidence?: ProposalEvidence[], proposalId?: string, proposalSignal?: AbortSignal) => {
         if (access === "public") throw httpFailure(403, "PUBLIC_PROPOSAL_DENIED", "Public module requests cannot propose changes");
-        if (hosted) {
+        if (hosted || (source === "mcp" && authorizeProposal)) {
           if (!authorizeProposal) throw httpFailure(403, "WRITE_PERMISSION_REQUIRED", "Current project write permission is required to propose changes");
           await authorizeProposal();
         }
@@ -1170,8 +1206,8 @@ export function createServer(options: ApiServerOptions): Server {
         return result;
       };
       host.linkedReader = async (linkedProjectId: string) => {
-        assertAssignedProject(linkedProjectId);
-        if (!(await findAuthorizedProject(linkedProjectId))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Linked project was not found");
+        assertAssignedProject(linkedProjectId, allowedProjectIds);
+        if (!(await findAuthorizedProject(linkedProjectId, allowedProjectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Linked project was not found");
         return freshReader(linkedProjectId);
       };
     }
@@ -1575,6 +1611,68 @@ export function createServer(options: ApiServerOptions): Server {
       response.setHeader("Access-Control-Allow-Origin", originHeader);
     }
 
+    if (oauthMcpMetadataUrl && oauthMcpMetadataResponse && method === "GET" && routePath === new URL(oauthMcpMetadataUrl).pathname) {
+      response.writeHead(oauthMcpMetadataResponse.status, Object.fromEntries(oauthMcpMetadataResponse.headers.entries()));
+      response.end(Buffer.from(await oauthMcpMetadataResponse.arrayBuffer()));
+      return;
+    }
+    if (options.betterAuth && method === "GET" && routePath === "/.well-known/oauth-authorization-server/api/auth") {
+      const metadataRequest = new Request(`${requestProtocol(request, trustProxy)}//${request.headers.host ?? "localhost"}${request.url ?? "/"}`, { headers: options.betterAuth.toHeaders(request.headers) });
+      const metadata = await options.betterAuth.advertisePublicClientTokenAuth(await options.betterAuth.authorizationServerMetadata(metadataRequest));
+      response.writeHead(metadata.status, Object.fromEntries(metadata.headers.entries()));
+      response.end(Buffer.from(await metadata.arrayBuffer()));
+      return;
+    }
+    if (options.betterAuth && method === "GET" && routePath === "/.well-known/openid-configuration/api/auth") {
+      const metadataRequest = new Request(`${requestProtocol(request, trustProxy)}//${request.headers.host ?? "localhost"}${request.url ?? "/"}`, { headers: options.betterAuth.toHeaders(request.headers) });
+      const metadata = await options.betterAuth.advertisePublicClientTokenAuth(await options.betterAuth.openIdConfigMetadata(metadataRequest));
+      response.writeHead(metadata.status, Object.fromEntries(metadata.headers.entries()));
+      response.end(Buffer.from(await metadata.arrayBuffer()));
+      return;
+    }
+    if (options.betterAuth && routePath === "/api/auth/oauth2/consent-context" && method === "POST") {
+      if (!sameOrigin(request, trustProxy)) { fail(response, 403, "CROSS_ORIGIN_REQUEST", "OAuth consent context requires a same-origin request"); return; }
+      let body: unknown;
+      try { body = await readJson(request, parsedBody); }
+      catch { fail(response, 400, "OAUTH_CONSENT_CONTEXT_INVALID", "OAuth consent context request is invalid"); return; }
+      if (!isRecord(body) || !hasOnlyKeys(body, new Set(["oauth_query"])) || typeof body.oauth_query !== "string" || !body.oauth_query) {
+        fail(response, 400, "OAUTH_CONSENT_CONTEXT_INVALID", "OAuth consent context request is invalid"); return;
+      }
+      try {
+        const context = await options.betterAuth.getConsentContext(options.betterAuth.toHeaders(request.headers), body.oauth_query);
+        sendJson(response, 200, context);
+      } catch {
+        fail(response, request.headers.cookie ? 403 : 401, "OAUTH_CONSENT_CONTEXT_DENIED", "OAuth consent context could not be verified");
+      }
+      return;
+    }
+    if (options.betterAuth && routePath === "/api/auth/token") {
+      fail(response, 404, "JWT_SESSION_TOKEN_DISABLED", "Generic session JWTs are not accepted as API access tokens");
+      return;
+    }
+    if (options.betterAuth && routePath.startsWith("/api/auth/")) {
+      const host = request.headers.host ?? "localhost";
+      const authUrl = `${requestProtocol(request, trustProxy)}//${host}${request.url ?? "/"}`;
+      const headers = options.betterAuth.toHeaders(request.headers);
+      headers.delete("connection");
+      headers.delete("content-length");
+      headers.delete("host");
+      headers.delete("transfer-encoding");
+      const authMethod = request.method ?? "GET";
+      let body: BodyInit | undefined;
+      if (authMethod !== "GET" && authMethod !== "HEAD" && parsedBody !== undefined) {
+        body = typeof parsedBody === "string" ? parsedBody : JSON.stringify(parsedBody);
+      }
+      const authRequest = new Request(authUrl, { method: authMethod, headers, ...(body !== undefined ? { body } : {}) });
+      const authResponse = await options.betterAuth.handler(authRequest);
+      const responseHeaders: Record<string, string | string[]> = Object.fromEntries(authResponse.headers.entries());
+      const cookies = authResponse.headers.getSetCookie();
+      if (cookies.length) responseHeaders["set-cookie"] = cookies;
+      response.writeHead(authResponse.status, responseHeaders);
+      response.end(Buffer.from(await authResponse.arrayBuffer()));
+      return;
+    }
+
     if (hosted && (originalPath === "/.well-known/oauth-protected-resource" ||
         originalPath === "/.well-known/oauth-protected-resource/mcp") && method === "GET") {
       sendJson(response, 200, {
@@ -1684,13 +1782,44 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
     let oauthPrincipal: Awaited<ReturnType<NonNullable<typeof authenticateOAuthOwner>>> | undefined;
+    let oauthMcpPrincipal: OAuthMcpPrincipal | undefined;
     const isLegacyBearer = Boolean(bearer && constantTimeEqual(bearer, options.authToken ?? ""));
     if (bearer && authenticateOAuthOwner && !isLegacyBearer) {
       try { oauthPrincipal = await authenticateOAuthOwner(bearer); }
       catch (error) {
+        if (authenticateOAuthMcp && error instanceof OAuthAuthenticationError && error.code === "OAUTH_SCOPE_REQUIRED") {
+          try { oauthMcpPrincipal = await authenticateOAuthMcp(bearer); }
+          catch (mcpError) {
+            const failure = mcpError instanceof OAuthAuthenticationError
+              ? mcpError
+              : new OAuthAuthenticationError(401, "OAUTH_TOKEN_INVALID", "OAuth access token is invalid or unverifiable");
+            if (failure.status === 401 && routePath.endsWith("/modules/mcp/streamable") && oauthMcpMetadataUrl) {
+              response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl));
+            }
+            fail(response, failure.status, failure.code, failure.message);
+            return;
+          }
+        } else {
+          const failure = error instanceof OAuthAuthenticationError
+            ? error
+            : new OAuthAuthenticationError(401, "OAUTH_TOKEN_INVALID", "OAuth access token is invalid or unverifiable");
+          if (failure.status === 401 && routePath.endsWith("/modules/mcp/streamable") && oauthMcpMetadataUrl) {
+            response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl));
+          }
+          fail(response, failure.status, failure.code, failure.message);
+          return;
+        }
+      }
+    }
+    if (bearer && authenticateOAuthMcp && !authenticateOAuthOwner && !isLegacyBearer) {
+      try { oauthMcpPrincipal = await authenticateOAuthMcp(bearer); }
+      catch (error) {
         const failure = error instanceof OAuthAuthenticationError
           ? error
           : new OAuthAuthenticationError(401, "OAUTH_TOKEN_INVALID", "OAuth access token is invalid or unverifiable");
+        if (failure.status === 401 && routePath.endsWith("/modules/mcp/streamable") && oauthMcpMetadataUrl) {
+          response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl));
+        }
         fail(response, failure.status, failure.code, failure.message);
         return;
       }
@@ -1725,13 +1854,29 @@ export function createServer(options: ApiServerOptions): Server {
       ? accessExpiresAt !== undefined : Boolean(session && session.expiresAt > Date.now());
     if (sessionId && !isCookie) sessions.delete(sessionId);
     const isOAuthAuthor = Boolean(oauthPrincipal);
-    const isBearer = hosted ? Boolean(bearer && hostedPrincipal) : !isCookie && isLegacyBearer;
+    const isBearer = hosted ? Boolean(bearer && hostedPrincipal) : !isCookie && (isLegacyBearer || Boolean(oauthMcpPrincipal));
     const isAuthor = isCookie || isOAuthAuthor;
     const hasAuth = hosted ? Boolean(hostedPrincipal) : isAuthor || isBearer;
+    const mcpAllowedEffects: readonly ActionDescriptor["effect"][] | undefined = oauthMcpPrincipal
+      ? (["read", "compute", "propose"] as const).filter((effect) =>
+        oauthMcpPrincipal!.scopes.includes(OAUTH_MCP_SCOPE_BY_EFFECT[effect]))
+      : undefined;
+    const requireMcpEffect = (effect: ActionDescriptor["effect"]): void => {
+      if (!oauthMcpPrincipal) return;
+      const requiredScope = OAUTH_MCP_SCOPE_BY_EFFECT[effect];
+      if (oauthMcpPrincipal.scopes.includes(requiredScope)) return;
+      if (oauthMcpMetadataUrl) response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl, requiredScope));
+      throw httpFailure(403, "OAUTH_MCP_SCOPE_REQUIRED", `Access token does not grant ${requiredScope}`);
+    };
+    const mcpStreamableRoute = routePath.endsWith("/modules/mcp/streamable");
+    if (oauthMcpPrincipal && routePath.startsWith("/api/") && isRead && !publicRead && !mcpStreamableRoute) {
+      requireMcpEffect("read");
+    }
     if (routePath.startsWith("/api/") && !publicRead && !publicModuleRoute && !hasAuth) {
-      response.setHeader("WWW-Authenticate",
-        hosted && routePath.endsWith("/modules/mcp/streamable")
-          ? `Bearer resource_metadata="${assignment!.grantPolicy.audience}/.well-known/oauth-protected-resource", scope="read"`
+      response.setHeader("WWW-Authenticate", hosted && mcpStreamableRoute
+        ? `Bearer resource_metadata="${assignment!.grantPolicy.audience}/.well-known/oauth-protected-resource", scope="read"`
+        : !hosted && mcpStreamableRoute && oauthMcpMetadataUrl
+          ? mcpChallenge(oauthMcpMetadataUrl)
           : 'Bearer realm="codexia", Cookie realm="codexia"');
       fail(response, 401, "UNAUTHORIZED", "Authentication required");
       return;
@@ -1776,6 +1921,7 @@ export function createServer(options: ApiServerOptions): Server {
     };
     const authorizeActionProposal = async (): Promise<void> => {
       if (hosted) { await requireWritePermission(); return; }
+      requireMcpEffect("propose");
       if (!isAuthor && !isBearer) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author or bearer identity is required to propose changes");
     };
     if (shuttingDown && routePath.startsWith("/api/") && !isRead) {
@@ -1794,6 +1940,10 @@ export function createServer(options: ApiServerOptions): Server {
     }
 
     const signal = abortSignalFor(request, response);
+    if (oauthMcpPrincipal && routePath.startsWith("/api/v1/persistence/")) {
+      fail(response, 403, "OAUTH_MCP_PERSISTENCE_DENIED", "Standalone MCP clients cannot use the direct persistence API");
+      return;
+    }
     const persistenceResponse = await handlePersistenceRoute({
       persistence: options.persistence,
       ...(hosted ? { assignedProjectId: hosted.projectId } : {}),
@@ -1843,6 +1993,7 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
     if (routePath === "/api/projects/events" && method === "GET") {
+      if (oauthMcpPrincipal) throw httpFailure(403, "OAUTH_MCP_PROJECT_EVENTS_DENIED", "Standalone MCP clients cannot subscribe to the owner-wide project event stream");
       if (projectEventStreams.full) throw httpFailure(503, "PROJECT_EVENT_STREAM_LIMIT", "Too many project event streams are open");
       projectEventStreams.open(response, "no-store", undefined, accessExpiresAt);
       return;
@@ -1902,11 +2053,23 @@ export function createServer(options: ApiServerOptions): Server {
     if (routePath === "/api/projects" && method === "GET") {
       const pageRequested = query.get("page") === "1" || query.has("cursor");
       if (query.has("page") && query.get("page") !== "1") throw httpFailure(400, "INVALID_QUERY", "page must be 1 when requesting project pagination");
-      if (!pageRequested) { sendJson(response, 200, await listProjects()); return; }
+      if (!pageRequested) { sendJson(response, 200, await listProjects(oauthMcpPrincipal?.projectIds)); return; }
       const limit = boundedInt(query.get("limit"), 200, 1, 200);
       let cursor: ProjectPageCursor | undefined;
       try { cursor = decodeProjectPageCursor(query.get("cursor")); }
       catch { throw httpFailure(400, "INVALID_CURSOR", "Project cursor is invalid"); }
+      if (oauthMcpPrincipal) {
+        const available = await listProjects(oauthMcpPrincipal.projectIds);
+        const afterCursor = cursor
+          ? available.filter((project) => project.updatedAt < cursor!.updatedAt ||
+            (project.updatedAt === cursor!.updatedAt && project.id > cursor!.id))
+          : available;
+        const projects = afterCursor.slice(0, limit);
+        const last = projects.at(-1);
+        const nextCursor = afterCursor.length > limit && last ? { updatedAt: last.updatedAt, id: last.id } : null;
+        sendJson(response, 200, { projects, nextCursor });
+        return;
+      }
       if (hosted) {
         sendJson(response, 200, { projects: await listProjects(), nextCursor: null });
         return;
@@ -1925,7 +2088,9 @@ export function createServer(options: ApiServerOptions): Server {
     }
     if (routePath === "/api/review-queue" && method === "GET") {
       if (!coreStore.reviewQueue) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
-      const projectIds = hosted ? (await listProjects()).map(project => project.id) : null;
+      const projectIds = oauthMcpPrincipal
+        ? [...oauthMcpPrincipal.projectIds]
+        : hosted ? (await listProjects()).map(project => project.id) : null;
       sendJson(response, 200, await coreStore.reviewQueue(projectIds));
       return;
     }
@@ -1933,7 +2098,10 @@ export function createServer(options: ApiServerOptions): Server {
     const projectRoot = routePath.match(/^\/api\/projects\/([^/]+)(?:\/(.*))?$/u);
     if (projectRoot) {
       const projectId = projectPathId(projectRoot[1]!);
-      assertAssignedProject(projectId);
+      assertAssignedProject(projectId, oauthMcpPrincipal?.projectIds);
+      if (oauthMcpPrincipal && !(await findAuthorizedProject(projectId, oauthMcpPrincipal.projectIds))) {
+        throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
+      }
       const suffix = projectRoot[2] ?? "";
       if (suffix === "recent-activity" && (method === "GET" || method === "PUT")) {
         if (!hosted && !isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Recent activity requires an owner identity"); return; }
@@ -1962,7 +2130,7 @@ export function createServer(options: ApiServerOptions): Server {
         }
       }
       if (suffix === "" && method === "GET") {
-        const project = await findAuthorizedProject(projectId);
+        const project = await findAuthorizedProject(projectId, oauthMcpPrincipal?.projectIds);
         if (!project) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project not found");
         const observation = await options.store.observe(projectId);
         sendJson(response, 200, { project, observation });
@@ -2012,6 +2180,7 @@ export function createServer(options: ApiServerOptions): Server {
       if (suffix === "status" && method === "GET") { sendJson(response, 200, await options.store.status(projectId)); return; }
       if (suffix === "observation" && method === "GET") { sendJson(response, 200, await options.store.observe(projectId)); return; }
       if (suffix === "proposals" && method === "POST") {
+        requireMcpEffect("propose");
         if (hosted) await requireWritePermission();
         const body = await readJson(request, parsedBody);
         if (!isRecord(body) || !isRecord(body.snapshot) || !Array.isArray(body.operations) || !body.operations.length) throw httpFailure(400, "INVALID_PROPOSAL", "A proposal snapshot and at least one operation are required");
@@ -2064,7 +2233,7 @@ export function createServer(options: ApiServerOptions): Server {
         sendJson(response, 201, await options.store.apply(projectId, body as ChangeOperation)); return;
       }
       if (suffix === "actions" && method === "GET") {
-        sendJson(response, 200, { actions: await listActionDescriptors(projectId, signal, isBearer ? "mcp" : "author") }); return;
+        sendJson(response, 200, { actions: await listActionDescriptors(projectId, signal, isBearer ? "mcp" : "author", mcpAllowedEffects, oauthMcpPrincipal?.projectIds) }); return;
       }
       const actionMatch = suffix.match(/^actions\/([^/]+)$/u);
       if (actionMatch && method === "POST") {
@@ -2074,10 +2243,16 @@ export function createServer(options: ApiServerOptions): Server {
         if (isBearer && actionId.startsWith("assistant.")) {
           throw httpFailure(403, "external_agent_assistant_denied", "External agents cannot invoke Assistant");
         }
-        const descriptors = await listActionDescriptors(projectId, signal, isBearer || actionMatch[1]!.startsWith("mcp.") ? "mcp" : "author");
-        const descriptor = descriptors.find((item) => item.id === actionId);
+        const descriptors = await listActionDescriptors(projectId, signal, isBearer || actionMatch[1]!.startsWith("mcp.") ? "mcp" : "author", mcpAllowedEffects, oauthMcpPrincipal?.projectIds);
+        let descriptor = descriptors.find((item) => item.id === actionId);
+        if (!descriptor && oauthMcpPrincipal) {
+          const completeDescriptors = await listActionDescriptors(projectId, signal, "mcp", undefined, oauthMcpPrincipal.projectIds);
+          const requestedDescriptor = completeDescriptors.find((item) => item.id === actionId);
+          if (requestedDescriptor) requireMcpEffect(requestedDescriptor.effect);
+        }
         if (!descriptor) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
         if (isBearer && !["read", "compute", "propose"].includes(descriptor.effect)) throw httpFailure(403, "BEARER_EFFECT_DENIED", "Bearer credentials may only invoke read, compute, and propose actions");
+        requireMcpEffect(descriptor.effect);
         if (hosted && descriptor.effect !== "read") await requireWritePermission();
         let boundSnapshot: SnapshotId | undefined;
         if (body.snapshot !== undefined) {
@@ -2112,7 +2287,7 @@ export function createServer(options: ApiServerOptions): Server {
           domainJobId = id;
           signal.removeEventListener("abort", abortBeforeAcceptance);
           resolveDomainJobStart(id);
-        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner");
+        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, oauthMcpPrincipal?.projectIds);
         if (descriptor.module === "core") {
           const coreAction = host.actions?.find(({ action }) => action.id === descriptor.id)?.action;
           if (!coreAction) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
@@ -2201,12 +2376,16 @@ export function createServer(options: ApiServerOptions): Server {
       const moduleRoute = suffix.match(/^modules\/([^/]+)(?:\/(.*))?$/u);
       if (moduleRoute) {
         const moduleId = parseProjectId(moduleRoute[1]!);
+        if (oauthMcpPrincipal && moduleId !== "mcp") {
+          throw httpFailure(403, "OAUTH_MCP_MODULE_DENIED", "Standalone MCP clients may only use the MCP transport route");
+        }
         if (moduleId === "assistant" && isBearer) {
           throw httpFailure(403, "external_agent_assistant_denied", "External agents cannot invoke Assistant");
         }
         const contribution = await contributionFor(moduleId, moduleRoute[2] ?? "", method);
         if (!contribution || contribution.access !== "owner") throw httpFailure(404, "MODULE_ROUTE_UNAVAILABLE", "Module route is unavailable");
         if (isBearer && !["read", "compute", "propose"].includes(contribution.effect)) throw httpFailure(403, "BEARER_EFFECT_DENIED", "Bearer credentials may only use read, compute, and propose module routes");
+        if (oauthMcpPrincipal && moduleId === "mcp" && !mcpStreamableRoute) requireMcpEffect(contribution.effect);
         // The MCP transport advertises "propose" because some tools create
         // proposals, but initialization and read-only tools require read only.
         // Actual proposal writes are gated by actionHost.authorizeProposal.
@@ -2216,7 +2395,7 @@ export function createServer(options: ApiServerOptions): Server {
         if (contribution.effect === "read" && method !== "GET" && method !== "HEAD") throw httpFailure(405, "MODULE_HTTP_METHOD_DENIED", "Read-only module routes must use GET or HEAD");
         const reader = await freshReader(projectId);
         let domainJobId: string | undefined;
-        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner");
+        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, oauthMcpPrincipal?.projectIds);
         const webRequest = makeWebRequest(request, parsedBody, signal, moduleRoute[2] ?? "");
         const moduleResponse = await runtime.invokeHttp(moduleId, contribution.id, webRequest, host);
         if (domainJobId) response.setHeader("X-Codexia-Job-Id", domainJobId);
@@ -2253,7 +2432,8 @@ export function createServer(options: ApiServerOptions): Server {
     if (routePath === "/api/search" && method === "GET") {
       const projectId = query.get("projectId");
       if (!projectId) throw httpFailure(400, "PROJECT_REQUIRED", "projectId is required");
-      assertAssignedProject(projectId);
+      assertAssignedProject(projectId, oauthMcpPrincipal?.projectIds);
+      if (oauthMcpPrincipal && !(await findAuthorizedProject(projectId, oauthMcpPrincipal.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
       const term = query.get("q") ?? "";
       if (!term.trim() || term.length > 512) throw httpFailure(400, "INVALID_QUERY", "A search query from 1 to 512 characters is required");
       const limit = boundedInt(query.get("limit"), 20, 1, 100);
@@ -2263,14 +2443,16 @@ export function createServer(options: ApiServerOptions): Server {
     if (routePath === "/api/writing-stats" && method === "GET") {
       const projectId = query.get("projectId");
       if (!projectId) throw httpFailure(400, "PROJECT_REQUIRED", "projectId is required");
-      assertAssignedProject(projectId);
+      assertAssignedProject(projectId, oauthMcpPrincipal?.projectIds);
+      if (oauthMcpPrincipal && !(await findAuthorizedProject(projectId, oauthMcpPrincipal.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
       sendJson(response, 200, await writingStatsSnapshot(projectId, optionalSnapshot(query, projectId)));
       return;
     }
     if (routePath === "/api/scratch" && method === "POST") {
       const projectId = query.get("projectId");
       if (!projectId) throw httpFailure(400, "PROJECT_REQUIRED", "projectId is required");
-      assertAssignedProject(projectId);
+      assertAssignedProject(projectId, oauthMcpPrincipal?.projectIds);
+      if (oauthMcpPrincipal && !(await findAuthorizedProject(projectId, oauthMcpPrincipal.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
       const author = await requireAuthorSession();
       await createScratch(projectId, await readJson(request, parsedBody), hosted ? `hosted:${author!.userId}` : "owner", response);
       return;
@@ -2279,9 +2461,9 @@ export function createServer(options: ApiServerOptions): Server {
       const publicMatch = routePath.match(/^\/api\/public\/projects\/([^/]+)\/modules\/([^/]+)(?:\/(.*))?$/u);
       if (!publicMatch) throw httpFailure(404, "NOT_FOUND", "Public module route not found");
       const projectId = parseProjectId(publicMatch[1]!);
-      assertAssignedProject(projectId);
+      assertAssignedProject(projectId, oauthMcpPrincipal?.projectIds);
       const moduleId = parseProjectId(publicMatch[2]!);
-      if (!(await findAuthorizedProject(projectId))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Public project was not found");
+      if (!(await findAuthorizedProject(projectId, oauthMcpPrincipal?.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Public project was not found");
       const contribution = await contributionFor(moduleId, publicMatch[3] ?? "", method);
       if (!contribution || contribution.access !== "public" || contribution.effect !== "read") throw httpFailure(404, "MODULE_ROUTE_UNAVAILABLE", "Public module route is unavailable");
       if (!isRead) throw httpFailure(405, "PUBLIC_MODULE_READ_ONLY", "Public module routes are read-only");
@@ -2476,13 +2658,79 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     ownerSubject: readCodexiaEnvironment("OAUTH_OWNER_SUBJECT"),
   };
   const oauthConfigured = Object.values(oauthValues).some((value) => value !== undefined);
-  if (oauthConfigured && Object.values(oauthValues).some((value) => !value)) {
-    throw new Error("OAuth owner mode requires OAUTH_ISSUER, OAUTH_AUDIENCE, OAUTH_JWKS_URL, and OAUTH_OWNER_SUBJECT");
+  const betterAuthValues = {
+    databaseUrl: readCodexiaEnvironment("AUTH_DATABASE_URL"),
+    publicOrigin: readCodexiaEnvironment("PUBLIC_ORIGIN"),
+    oidcIssuer: readCodexiaEnvironment("OIDC_ISSUER"),
+    oidcClientId: readCodexiaEnvironment("OIDC_CLIENT_ID"),
+    oidcClientSecret: readCodexiaEnvironment("OIDC_CLIENT_SECRET"),
+    authSecret: readCodexiaEnvironment("AUTH_SECRET"),
+    introspectionClientId: readCodexiaEnvironment("OAUTH_INTROSPECTION_CLIENT_ID"),
+    introspectionClientSecret: readCodexiaEnvironment("OAUTH_INTROSPECTION_CLIENT_SECRET"),
+    ownerSubject: readCodexiaEnvironment("OAUTH_OWNER_SUBJECT"),
+    ownerClientIds: readCodexiaEnvironment("OAUTH_OWNER_CLIENT_IDS"),
+    mcpClientIds: readCodexiaEnvironment("OAUTH_MCP_CLIENT_IDS"),
+    mcpProjectAssignments: readCodexiaEnvironment("OAUTH_MCP_PROJECT_ASSIGNMENTS"),
+    apiAudience: readCodexiaEnvironment("API_AUDIENCE"),
+  };
+  const betterAuthConfigured = [
+    betterAuthValues.databaseUrl, betterAuthValues.publicOrigin, betterAuthValues.oidcIssuer,
+    betterAuthValues.oidcClientId, betterAuthValues.oidcClientSecret, betterAuthValues.authSecret,
+    betterAuthValues.introspectionClientId, betterAuthValues.introspectionClientSecret,
+    betterAuthValues.ownerClientIds, betterAuthValues.mcpClientIds, betterAuthValues.mcpProjectAssignments, betterAuthValues.apiAudience,
+  ].some((value) => value !== undefined);
+  const requiredBetterAuthValues = [
+    betterAuthValues.databaseUrl, betterAuthValues.publicOrigin, betterAuthValues.oidcIssuer,
+    betterAuthValues.oidcClientId, betterAuthValues.oidcClientSecret, betterAuthValues.authSecret,
+    betterAuthValues.introspectionClientId, betterAuthValues.introspectionClientSecret,
+    betterAuthValues.ownerSubject, betterAuthValues.ownerClientIds,
+  ];
+  if (betterAuthConfigured && requiredBetterAuthValues.some((value) => !value)) {
+    throw new Error("Better Auth mode requires AUTH_DATABASE_URL, PUBLIC_ORIGIN, OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, AUTH_SECRET, OAUTH_INTROSPECTION_CLIENT_ID, OAUTH_INTROSPECTION_CLIENT_SECRET, OAUTH_OWNER_SUBJECT, and OAUTH_OWNER_CLIENT_IDS");
   }
-  const oauthOwner: OAuthOwnerOptions | undefined = oauthConfigured ? {
-    issuer: oauthValues.issuer!, audience: oauthValues.audience!, jwksUrl: oauthValues.jwksUrl!,
-    ownerSubject: oauthValues.ownerSubject!,
-    requiredScopes: (readCodexiaEnvironment("OAUTH_REQUIRED_SCOPES") ?? "codexia:api").split(/\s+/u).filter(Boolean),
+  const mcpClientIds = (betterAuthValues.mcpClientIds ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+  const mcpProjectAssignments = parseOAuthMcpProjectAssignments(betterAuthValues.mcpProjectAssignments, mcpClientIds);
+  let betterAuth: ReturnType<typeof createBetterAuthRuntime> | undefined;
+  if (betterAuthConfigured) {
+    const { createBetterAuthRuntime } = await import("./better-auth.js");
+    betterAuth = createBetterAuthRuntime({
+      databaseUrl: betterAuthValues.databaseUrl!,
+      publicOrigin: betterAuthValues.publicOrigin!,
+      oidcIssuer: betterAuthValues.oidcIssuer!,
+      oidcClientId: betterAuthValues.oidcClientId!,
+      oidcClientSecret: betterAuthValues.oidcClientSecret!,
+      authSecret: betterAuthValues.authSecret!,
+      oauthIntrospectionClientId: betterAuthValues.introspectionClientId!,
+      oauthIntrospectionClientSecret: betterAuthValues.introspectionClientSecret!,
+      ...(betterAuthValues.apiAudience ? { apiAudience: betterAuthValues.apiAudience } : {}),
+      ownerClientIds: betterAuthValues.ownerClientIds!.split(",").map((value) => value.trim()).filter(Boolean),
+      mcpClientIds,
+    });
+  }
+  if (!betterAuth && oauthConfigured && Object.values(oauthValues).some((value) => !value)) {
+    throw new Error("Legacy OAuth owner mode requires OAUTH_ISSUER, OAUTH_AUDIENCE, OAUTH_JWKS_URL, and OAUTH_OWNER_SUBJECT");
+  }
+  const configuredIssuer = betterAuth?.issuer ?? oauthValues.issuer;
+  const configuredAudience = betterAuth?.audience ?? oauthValues.audience;
+  const configuredJwksUrl = betterAuth ? `${betterAuth.issuer}/jwks` : oauthValues.jwksUrl;
+  const oauthOwner: OAuthOwnerOptions | undefined = betterAuth || oauthConfigured ? {
+    issuer: configuredIssuer!, audience: configuredAudience!, jwksUrl: configuredJwksUrl!,
+    ownerSubject: betterAuthValues.ownerSubject ?? oauthValues.ownerSubject!,
+    requiredScopes: (readCodexiaEnvironment("OAUTH_REQUIRED_SCOPES") ?? CODEXIA_OWNER_SCOPE).split(/\s+/u).filter(Boolean),
+    ...(betterAuth ? {
+      allowedClientIds: betterAuthValues.ownerClientIds!.split(",").map((value) => value.trim()).filter(Boolean),
+      verifyActiveToken: betterAuth.verifyActiveAccessToken,
+    } : {}),
+  } : undefined;
+  const oauthMcp: OAuthMcpOptions | undefined = betterAuth && betterAuth.mcpClientIds.length > 0 ? {
+    issuer: betterAuth.issuer,
+    audience: betterAuth.audience,
+    jwksUrl: `${betterAuth.issuer}/jwks`,
+    verifyActiveToken: betterAuth.verifyActiveAccessToken,
+    allowedClientIds: betterAuth.mcpClientIds,
+    projectIdsByClient: mcpProjectAssignments,
+    ownerClientIds: betterAuthValues.ownerClientIds!.split(",").map((value) => value.trim()).filter(Boolean),
+    ownerSubject: betterAuthValues.ownerSubject!,
   } : undefined;
   const corsAllowedOrigins: string[] | undefined = corsOriginsValue === undefined ? undefined :
     corsOriginsValue.split(",").map((origin) => origin.trim()).filter(Boolean);
@@ -2493,6 +2741,19 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory);
   const persistenceOptions = await postgresPersistenceOptions();
   try {
+    if (Object.keys(mcpProjectAssignments).length > 0) {
+      const missingMcpProjects = await persistenceOptions.persistence!.read(async (reader) => {
+        const missing: string[] = [];
+        for (const projectIds of Object.values(mcpProjectAssignments)) {
+          for (const projectId of projectIds) {
+            const project = await reader.getProject(projectId as import("@codexia/persistence-contracts").ProjectId);
+            if (project?.id !== projectId) missing.push(projectId);
+          }
+        }
+        return missing;
+      });
+      if (missingMcpProjects.length) throw new Error("CODEXIA_OAUTH_MCP_PROJECT_ASSIGNMENTS contains a project that does not exist");
+    }
     const store = new CoreStore({ persistence: persistenceOptions.persistence! });
     await store.prepareSnapshotReuse(undefined, await persistenceOptions.persistence.snapshotStartupMode());
     return await startServer({
@@ -2506,6 +2767,8 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
         ownerEmail: readCodexiaEnvironment("ACCESS_OWNER_EMAIL") ?? "",
       } } : {}),
       ...(oauthOwner ? { oauthOwner } : {}),
+      ...(oauthMcp ? { oauthMcp } : {}),
+      ...(betterAuth ? { betterAuth } : {}),
       ...(corsAllowedOrigins ? { corsAllowedOrigins } : {}),
       trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
       runtimeOptions,

@@ -697,7 +697,7 @@ class PostgresTransaction implements PersistenceTransaction {
     if (!Number.isInteger(search.limit) || search.limit < 1 || search.limit > 101) throw validationError("Knowledge search page size must be between 1 and 101");
     const result = await this.query(
       `SELECT n.* FROM knowledge_node n
-       WHERE n.project_id = $1 AND n.deleted_at IS NULL
+       WHERE n.project_id = $1 AND (n.deleted_at IS NULL OR $4::text = 'retired')
          AND ($2::text IS NULL OR lower(n.name) LIKE '%' || replace(replace(replace(lower($2), '!', '!!'), '%', '!%'), '_', '!_') || '%' ESCAPE '!'
            OR EXISTS (SELECT 1 FROM knowledge_alias a WHERE a.project_id = n.project_id AND a.node_id = n.id
              AND a.status IN ('proposed','confirmed','ambiguous')

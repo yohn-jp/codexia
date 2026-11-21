@@ -9,6 +9,7 @@ import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { productionClosure } from './runtime-package-closure.mjs';
+import { readRegularFile } from './read-regular-file.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const moduleIds = ['story', 'diagnostics', 'nlp', 'semantic', 'speaker', 'assistant', 'publishing', 'mcp', 'search'];
@@ -49,6 +50,7 @@ const recipeFiles = [
   'package.json',
   'pnpm-workspace.yaml',
   'scripts/profile-build.mjs',
+  'scripts/read-regular-file.mjs',
   'scripts/profile-package.mjs',
   'scripts/hosted-build.mjs',
   'scripts/composition-persistence.mjs',
@@ -70,6 +72,13 @@ export function canonicalJson(value) {
   return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
 }
 
+export function validateHostedArtifactDirectory(directory) {
+  if (typeof directory !== 'string' || !/^\/tmp\/codexia-hosted-artifact-[a-f0-9]{32}(?:[a-f0-9]{32})?$/u.test(directory)) {
+    throw new Error('Invalid hosted artifact staging directory');
+  }
+  return directory;
+}
+
 function sha256(value) {
   return `sha256:${createHash('sha256').update(value).digest('hex')}`;
 }
@@ -77,6 +86,51 @@ function sha256(value) {
 function isWithin(rootDirectory, candidate) {
   const relative = path.relative(rootDirectory, candidate);
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+/** Resolve pnpm's hashed virtual-store directory through its installed linker metadata. */
+export async function installedPnpmLockIdentity({ nodeModulesDirectory, packageName, packageVersion, packageDirectory, lock }) {
+  const pnpmStore = path.join(nodeModulesDirectory, '.pnpm');
+  const modulesPath = path.join(nodeModulesDirectory, '.modules.yaml');
+  let metadata;
+  try {
+    const yamlUrl = pathToFileURL(path.join(root, 'node_modules/.pnpm/node_modules/yaml/dist/index.js'));
+    const yaml = await import(yamlUrl.href);
+    metadata = yaml.parse(await readFile(modulesPath, 'utf8'));
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw new Error(`Cannot read installed pnpm module metadata: ${modulesPath}`);
+  }
+  if (!metadata || typeof metadata !== 'object' || !metadata.hoistedDependencies ||
+      typeof metadata.hoistedDependencies !== 'object' || Array.isArray(metadata.hoistedDependencies)) return null;
+
+  const storeRoot = await realpath(pnpmStore);
+  const packageRoot = await realpath(packageDirectory);
+  if (!isWithin(storeRoot, packageRoot)) {
+    throw new Error(`Installed runtime package escapes the pnpm virtual store: ${packageName}@${packageVersion}`);
+  }
+
+  const base = `${packageName}@${packageVersion}`;
+  const matches = new Set();
+  for (const [identity, hoisted] of Object.entries(metadata.hoistedDependencies)) {
+    if ((identity !== base && !identity.startsWith(`${base}(`)) || !Object.hasOwn(lock.snapshots, identity)) continue;
+    if (!hoisted || typeof hoisted !== 'object' || Array.isArray(hoisted) || !Object.hasOwn(hoisted, packageName)) continue;
+    const linkPath = path.join(pnpmStore, 'node_modules', packageName);
+    const link = await lstat(linkPath).catch((error) => error?.code === 'ENOENT' ? undefined : Promise.reject(error));
+    if (!link) continue;
+    if (!link.isSymbolicLink()) {
+      throw new Error(`Installed pnpm linker path is not a symlink: ${packageName}`);
+    }
+    const linkedPackage = await realpath(linkPath);
+    if (!isWithin(storeRoot, linkedPackage)) {
+      throw new Error(`Installed pnpm linker path escapes the virtual store: ${packageName}`);
+    }
+    if (linkedPackage === packageRoot) matches.add(identity);
+  }
+  if (matches.size > 1) {
+    throw new Error(`Installed pnpm package has ambiguous lock snapshot metadata: ${base}`);
+  }
+  return matches.size === 1 ? [...matches][0] : null;
 }
 
 async function walkFiles(directory, relativeDirectory, output) {
@@ -126,13 +180,13 @@ async function sourceInventory() {
 async function inventoryDigest(files) {
   const entries = await Promise.all(files.map(async ({ absolute, relative }) => ({
     path: relative,
-    sha256: createHash('sha256').update(await readFile(absolute)).digest('hex'),
+    sha256: createHash('sha256').update(await readRegularFile(absolute, { encoding: null })).digest('hex'),
   })));
   return sha256(Buffer.from(canonicalJson(entries), 'utf8'));
 }
 
 async function fileDigest(relative) {
-  return sha256(await readFile(path.join(root, relative)));
+  return sha256(await readRegularFile(path.join(root, relative), { encoding: null }));
 }
 
 export async function calculateBuildDigests() {
@@ -140,9 +194,7 @@ export async function calculateBuildDigests() {
   const recipeEntries = await Promise.all(recipeFiles.map(async (relative) => {
     const absolute = path.join(root, relative);
     try {
-      const info = await lstat(absolute);
-      if (!info.isFile() || info.isSymbolicLink()) throw new Error(`Invalid recipe input: ${relative}`);
-      return { path: relative, sha256: createHash('sha256').update(await readFile(absolute)).digest('hex') };
+      return { path: relative, sha256: createHash('sha256').update(await readRegularFile(absolute, { encoding: null })).digest('hex') };
     } catch (error) {
       if (relative !== 'Dockerfile' || error?.code !== 'ENOENT') throw error;
       const bakedDockerfileDigest = process.env.CODEXIA_DOCKERFILE_SHA256;
@@ -163,7 +215,7 @@ async function packageArtifactDigest(packageDirectory) {
   entries.sort((left, right) => left.relative < right.relative ? -1 : left.relative > right.relative ? 1 : 0);
   const inventory = await Promise.all(entries.map(async ({ absolute, relative }) => [
     relative,
-    createHash('sha256').update(await readFile(absolute)).digest('hex'),
+    createHash('sha256').update(await readRegularFile(absolute, { encoding: null })).digest('hex'),
   ]));
   return sha256(Buffer.from(JSON.stringify(inventory), 'utf8'));
 }
@@ -507,7 +559,16 @@ export async function runtimePackageRecords(deployedDirectory, serverIds) {
         .split('_').map((peer) => `(${peer.replaceAll('+', '/')})`).join('');
       lockIdentity = `${base}${peerSuffix}`;
       if (!Object.hasOwn(lock.snapshots, lockIdentity)) {
-        throw new Error(`Installed pnpm snapshot is missing from the source lockfile: ${lockIdentity}`);
+        lockIdentity = await installedPnpmLockIdentity({
+          nodeModulesDirectory: nodeModules,
+          packageName: item.name,
+          packageVersion: item.version,
+          packageDirectory: item.directory,
+          lock,
+        });
+        if (!lockIdentity) {
+          throw new Error(`Installed pnpm snapshot is missing from the source lockfile: ${base}`);
+        }
       }
       const packageCandidates = Object.entries(lock.packages)
         .filter(([key]) => key === base || key.startsWith(`${base}(`));
@@ -630,7 +691,7 @@ async function browserUiArtifactRecords(distDirectory, browserIds, ui) {
     const workers = actualFiles.filter((file) => /^assets\/revision-difference-worker-[A-Za-z0-9_-]{8}\.js$/u.test(file));
     if (workers.length !== 1) throw new Error('Vite authoring output must include exactly one revision comparison worker');
     const [worker] = workers;
-    const code = await readFile(path.join(distDirectory, entryFile), 'utf8');
+    const code = await readRegularFile(path.join(distDirectory, entryFile));
     // Vite 6/Rollup emits quoted URL literals while Vite 8/Rolldown
     // emits template literals with an explicit empty-template import.meta.url base.
     // Require an actual Worker URL reference rather than a stray path string.
@@ -649,9 +710,7 @@ async function browserUiArtifactRecords(distDirectory, browserIds, ui) {
   for (const relative of manifestFiles) {
     const absolute = path.resolve(distDirectory, relative);
     if (!isWithin(distDirectory, absolute)) throw new Error(`Vite manifest path escapes browser output: ${relative}`);
-    const info = await lstat(absolute);
-    if (!info.isFile() || info.isSymbolicLink()) throw new Error(`Vite browser output is not a regular file: ${relative}`);
-    files.push({ path: `/app/app/dist/${ui ? `${ui}/` : ""}${relative}`, sha256: sha256(await readFile(absolute)) });
+    files.push({ path: `/app/app/dist/${ui ? `${ui}/` : ""}${relative}`, sha256: sha256(await readRegularFile(absolute, { encoding: null })) });
   }
   return { files, entryFile, manifestPath: '/app/app/dist/.vite/manifest.json' };
 }
@@ -754,7 +813,7 @@ async function writeComposition(input, catalog, selection, runtimeDirectory, tru
   return { runtimeMetadata, compositionManifest, report };
 }
 
-async function compose(inputBase64url, sourceRef) {
+async function compose(inputBase64url, sourceRef, artifactDirectory) {
   const input = decodeInput(inputBase64url);
   const repository = validateRepositorySource(sourceRef, input.buildKitDigest);
   const bakedRevision = process.env.CODEXIA_PRODUCER_REVISION;
@@ -775,17 +834,16 @@ async function compose(inputBase64url, sourceRef) {
   if (canonicalJson(expectedResolved) !== canonicalJson(receivedResolved)) {
     throw new Error('BuildInput resolved modules do not match the producer resolver closure');
   }
-  const runtimeDirectory = await makeHostedRuntime(input, selection, trustedModules);
+  const runtimeDirectory = await makeHostedRuntime(input, selection, validateHostedArtifactDirectory(artifactDirectory));
   const { report } = await writeComposition(input, catalog, selection, runtimeDirectory, trustedModules);
   if (!runtimeBaseRef.endsWith(input.runtimeBaseDigest) || report.buildKey !== sha256(Buffer.from(canonicalBuildInput(input), 'utf8'))) {
     throw new Error('Hosted artifact identity binding failed');
   }
 }
 
-async function makeHostedRuntime(input, selection) {
-  const runtimeDirectory = '/tmp/codexia-hosted-artifact';
+async function makeHostedRuntime(input, selection, runtimeDirectory) {
   const appDirectory = path.join(runtimeDirectory, 'app');
-  await rm(runtimeDirectory, { recursive: true, force: true });
+  await mkdir(runtimeDirectory, { recursive: false, mode: 0o700 });
   const result = spawnSync(process.execPath, [
     path.join(root, 'scripts/profile-package.mjs'),
     '--modules-json', JSON.stringify(selection.requestedModules),
@@ -814,11 +872,11 @@ async function main() {
   }
   if (command === 'compose') {
     const opts = parseFlags(rest);
-    if (Object.keys(opts).sort().join(',') !== '--input-base64url,--source') throw new Error('compose requires --input-base64url and --source');
-    await compose(opts['--input-base64url'], opts['--source']);
+    if (Object.keys(opts).sort().join(',') !== '--artifact-directory,--input-base64url,--source') throw new Error('compose requires --input-base64url, --source and --artifact-directory');
+    await compose(opts['--input-base64url'], opts['--source'], opts['--artifact-directory']);
     return;
   }
-  throw new Error('Usage: hosted-build.mjs catalog --producer-revision <sha> --runtime-base-digest <digest> --build-kit-digest <digest> [--out <file>] | compose --input-base64url <input> --source <repo@digest>');
+  throw new Error('Usage: hosted-build.mjs catalog --producer-revision <sha> --runtime-base-digest <digest> --build-kit-digest <digest> [--out <file>] | compose --input-base64url <input> --source <repo@digest> --artifact-directory /tmp/codexia-hosted-artifact-<hex>');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

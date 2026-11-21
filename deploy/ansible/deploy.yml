@@ -350,6 +350,31 @@
       cp --preserve=mode,ownership "$release_state" "$state_dir/rollback-release.json"
       release_present=true
     fi
+    rollback_image=''
+    if [[ "$had_unit" == true ]]; then
+      mapfile -t rollback_images < <(sed -n 's/^Image=//p' "$state_dir/rollback-api.container")
+      [[ ${#rollback_images[@]} == 1 && "${rollback_images[0]}" =~ ^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$ ]] || {
+        echo 'Prior API Quadlet has no unique immutable image identity; deployment stopped before changing services' >&2
+        exit 1
+      }
+      rollback_image="${rollback_images[0]}"
+      if [[ "$release_present" == true ]]; then
+        recorded_image="$(node - "$state_dir/rollback-release.json" <<'NODE'
+    const fs = require('node:fs');
+    const value = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+    process.stdout.write(typeof value.image === 'string' ? value.image : '');
+    NODE
+        )"
+        [[ "$recorded_image" == "$rollback_image" ]] || {
+          echo 'Prior deployment record does not match its Quadlet image; deployment stopped before changing services' >&2
+          exit 1
+        }
+      fi
+      if [[ -n "$current_image" && "$current_image" != "$rollback_image" ]]; then
+        echo 'Running API image does not match its prior Quadlet; deployment stopped before changing services' >&2
+        exit 1
+      fi
+    fi
     if ! node - "$transaction_intent" "$had_unit" "$tunnel_was_active" "$api_link_created" "$tunnel_link_created" "$release_present" <<'NODE'
     const fs = require('node:fs');
     const [target, hadUnit, tunnelWasActive, apiLinkCreated, tunnelLinkCreated, releasePresent] = process.argv.slice(2);
@@ -369,9 +394,9 @@
     fi
     restore_previous(){
       local restore_status=0
-      systemctl --user stop codexia-tunnel.service >/dev/null 2>&1 || true
-      systemctl --user stop codexia-api.service >/dev/null 2>&1 || true
-      if [[ "$had_unit" == true ]]; then
+      if [[ "$tunnel_present" == true ]]; then systemctl --user stop codexia-tunnel.service >/dev/null 2>&1 || restore_status=1; fi
+      systemctl --user stop codexia-api.service >/dev/null 2>&1 || restore_status=1
+      if [[ "$restore_status" == 0 && "$had_unit" == true ]]; then
         install -m 0644 "$state_dir/rollback-api.container" "$active_unit" || restore_status=1
         systemctl --user daemon-reload || restore_status=1
         systemctl --user start codexia-api.service || restore_status=1
@@ -380,25 +405,32 @@
           sleep 2
         done
         podman inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' codexia-api 2>/dev/null | grep -Fxq healthy || restore_status=1
-        if [[ "$tunnel_was_active" == true ]]; then systemctl --user start codexia-tunnel.service || restore_status=1; fi
-      else
+        restored_image="$(podman inspect --format '{{ '{{' }}.ImageName{{ '}}' }}' codexia-api 2>/dev/null)" || restore_status=1
+        [[ "$restored_image" == "$rollback_image" ]] || restore_status=1
+        if [[ "$tunnel_was_active" == true && "$restore_status" == 0 ]]; then systemctl --user start codexia-tunnel.service || restore_status=1; fi
+      elif [[ "$restore_status" == 0 ]]; then
         rm -f -- "$active_unit"
         if [[ "$api_link_created" == true ]]; then rm -f -- "$api_wants_link"; fi
         if [[ "$tunnel_link_created" == true ]]; then rm -f -- "$tunnel_wants_link"; fi
         systemctl --user daemon-reload || restore_status=1
       fi
-      if [[ "$release_present" == true ]]; then
-        install -m 0600 "$state_dir/rollback-release.json" "$release_state" || restore_status=1
-      else
-        rm -f -- "$release_state" || restore_status=1
+      if [[ "$restore_status" == 0 ]]; then
+        if [[ "$release_present" == true ]]; then
+          install -m 0600 "$state_dir/rollback-release.json" "$release_state" || restore_status=1
+        else
+          rm -f -- "$release_state" || restore_status=1
+        fi
       fi
       if [[ "$restore_status" == 0 ]]; then
         rm -f -- "$transaction_intent" "$transaction_intent.tmp" "$state_dir/rollback-api.container" "$state_dir/rollback-release.json" || restore_status=1
       fi
       return "$restore_status"
     }
-    systemctl --user stop codexia-tunnel.service >/dev/null 2>&1 || true
-    systemctl --user stop codexia-api.service >/dev/null 2>&1 || true
+    if { [[ "$tunnel_present" == true ]] && ! systemctl --user stop codexia-tunnel.service >/dev/null 2>&1; } ||
+       { [[ "$had_unit" == true ]] && ! systemctl --user stop codexia-api.service >/dev/null 2>&1; }; then
+      echo 'Could not stop the active API and Tunnel; deployment transaction remains pending for recovery' >&2
+      exit 1
+    fi
     if [[ -n "$current_image" ]]; then
       if ! "$backup_program" backup-locked "$backup_destination" "$backup_recipient" \
         --approved --lock-file "$lock_file" --lock-fd 9; then
@@ -411,7 +443,7 @@
        ! systemctl --user daemon-reload ||
        ! systemctl --user start codexia-api.service; then
       restore_previous || echo 'Previous API recovery failed after candidate start failure' >&2
-      echo 'Candidate API failed to start; previous Quadlet was restored' >&2
+      echo 'Candidate API failed to start; deployment transaction remains pending if rollback is unverified' >&2
       exit 1
     fi
     healthy=false
@@ -421,13 +453,19 @@
     done
     if [[ "$healthy" != true ]]; then
       restore_previous || echo 'Previous API recovery failed after readiness failure' >&2
-      echo 'Candidate API readiness failed; previous Quadlet was restored' >&2
+      echo 'Candidate API readiness failed; deployment transaction remains pending if rollback is unverified' >&2
+      exit 1
+    fi
+    running_image="$(podman inspect --format '{{ '{{' }}.ImageName{{ '}}' }}' codexia-api 2>/dev/null)" || running_image=''
+    if [[ "$running_image" != "$candidate_image" ]]; then
+      restore_previous || echo 'Previous API recovery failed after candidate image mismatch' >&2
+      echo 'Candidate API image identity did not match the certified digest; deployment transaction remains pending if rollback is unverified' >&2
       exit 1
     fi
     if [[ "$tunnel_present" == true ]]; then
       if ! systemctl --user start codexia-tunnel.service; then
         restore_previous || echo 'Previous API recovery failed after Tunnel start failure' >&2
-        echo 'Application Tunnel did not start; previous Quadlet was restored' >&2
+        echo 'Application Tunnel did not start; deployment transaction remains pending if rollback is unverified' >&2
         exit 1
       fi
     fi

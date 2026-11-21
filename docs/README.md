@@ -18,6 +18,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Shared internal ownership and maintainability | [Internal boundaries](architecture/INTERNAL-BOUNDARIES.md) |
 | Storage, snapshots, mutation and authentication | [Core architecture](architecture/CORE.md) |
 | OAuth/OIDC API resource-server authentication, authorization and BOLA prevention | [API authentication and authorization](architecture/API-AUTHN-AUTHZ.md) — accepted target, not deployed behavior |
+| Standalone MCP OAuth resource metadata and operation scopes | [Standalone MCP OAuth](architecture/MCP-OAUTH.md) |
 | Backend read models, snapshot reuse and scalability | [Backend read model](architecture/BACKEND-READ-MODEL.md) — normative target |
 | Panels, foreground reads, search and terminology | [Modular workspace](architecture/MODULAR-WORKSPACE.md) |
 | External AI integration and internal LLM freeze | [MCP-first creative architecture](architecture/MCP-FIRST.md) |
@@ -28,7 +29,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Standalone image checks | [OCI verification](verification/OCI.md) |
 | Hosted builds and runtime configuration | [Hosted deployment](HOSTED-DEPLOYMENT.md) |
 | Edge UI, API service and operations | [Deployment](deployment/README.md) |
-| Native iOS client, unsigned IPA packaging and personal-device acceptance | [iOS client](deployment/IOS-CLIENT.md) — accepted target, not a validated installation |
+| Native iOS client, on-demand unsigned IPA workflow and personal-device acceptance | [iOS client](deployment/IOS-CLIENT.md) — workflow implemented; physical-device acceptance unverified |
 | Declarative standalone VM configuration | [Infrastructure as code](deployment/IAC.md) |
 | Hosted producer signing | [Producer attestation](hosted-producer-attestation.md) |
 | Development and verification commands | [Verification](verification/README.md) |

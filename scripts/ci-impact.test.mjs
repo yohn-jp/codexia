@@ -134,6 +134,17 @@ test('test-only changes select their owner while non-executable documentation se
   assert.deepEqual((await plan(['docs/authoring.md'])).tasks, ['coverage']);
 });
 
+test('OAuth browser acceptance is selected in both profile browser lanes', async () => {
+  const selected = await plan(['tests/e2e/oauth-web.acceptance.spec.ts']);
+  assert.ok(selected.tasks.includes('test-types-app-e2e'));
+  for (const profile of ['core', 'full']) {
+    assert.ok(selected.tasks.includes(`build-${profile}`));
+    assert.ok(selected.tasks.includes(`browser-${profile}-oauth-web`));
+    assert.ok(selected.groups.includes(`browser-${profile}-webkit`));
+  }
+  assert.ok(!selected.tasks.includes('unit-api'));
+});
+
 test('every selected task has one execution group and every exclusion has a reason', async () => {
   const { VERIFICATION_GROUPS, VERIFICATION_TASKS } = await import('./ci-contract.mjs');
   const mapped = Object.values(VERIFICATION_GROUPS).flat();
@@ -191,6 +202,44 @@ test('operational proof remains owned by one exact-head root task and matching i
   assert.ok(Object.hasOwn(audit.on,'pull_request'));
 });
 
+test('iOS packaging workflow changes retain root proof and its shared inputs stay fully verified', async () => {
+  const { OPERATIONAL_ROOT_PATHS } = await import('./ci-impact.mjs');
+  const workflowPath = '.github/workflows/ios-unsigned-ipa.yml';
+  const workflow = parse(readFileSync(new URL('../' + workflowPath, import.meta.url), 'utf8'));
+  assert.ok(OPERATIONAL_ROOT_PATHS.includes(workflowPath));
+  assert.deepEqual(Object.keys(workflow.on).sort(), ['pull_request', 'workflow_dispatch']);
+  for (const input of ['app/native/**', 'scripts/html-document.mjs', 'scripts/ios/**', 'scripts/read-regular-file.mjs']) {
+    assert.ok(workflow.on.pull_request.paths.includes(input), input);
+  }
+  assert.equal(workflow.jobs.build['runs-on'], 'xcode-27');
+  assert.ok(workflow.jobs.build.steps.some(step => step.run?.includes('scripts/ios/validate-web-bundle.mjs')));
+  assert.ok(workflow.jobs.build.steps.some(step => step.run?.includes('scripts/ios/package-unsigned-ipa.mjs')));
+
+  const workflowOnly = await plan([workflowPath]);
+  assert.deepEqual(workflowOnly.tasks, ['unit-root', 'coverage']);
+  assert.equal(workflowOnly.full_model_oci, false);
+
+  const sharedImplementationPaths = [
+    'scripts/ios/validate-web-bundle.mjs',
+    'scripts/ios/package-unsigned-ipa.mjs',
+    'app/native/capacitor.config.ts',
+    'app/src/oauth.ts',
+    'pnpm-lock.yaml',
+  ];
+  for (const sharedPath of sharedImplementationPaths) {
+    const withWorkflow = await plan([workflowPath, sharedPath]);
+    const implementationOnly = await plan([sharedPath]);
+    for (const task of implementationOnly.tasks) assert.ok(withWorkflow.tasks.includes(task), `${sharedPath}: lost ${task}`);
+    assert.equal(withWorkflow.mode, implementationOnly.mode, sharedPath);
+    assert.equal(withWorkflow.full_model_oci, implementationOnly.full_model_oci, sharedPath);
+  }
+
+  const unknownMixed = await plan([workflowPath, 'scripts/new-ios-input.mjs']);
+  const unknownOnly = await plan(['scripts/new-ios-input.mjs']);
+  assert.deepEqual(unknownMixed.tasks, unknownOnly.tasks);
+  assert.equal(unknownMixed.mode, 'full');
+});
+
 test('root and coverage-only plans have a single owner for contract test execution', async () => {
   const runner = readFileSync(new URL('./ci-group.mjs', import.meta.url),'utf8');
   const root = JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8'));
@@ -226,4 +275,22 @@ test('push backup changes retain root and independent exact-head verification', 
   assert.ok(steps.some(s => s.run?.includes('scripts/push-deployment-backup.test.mjs')));
   assert.deepEqual((await plan([...source, 'pnpm-lock.yaml'])).tasks, VERIFICATION_TASKS);
   assert.deepEqual((await plan(source, 'push')).tasks, VERIFICATION_TASKS);
+});
+
+test('iOS packaging and CI dashboard changes remain root-scoped, mixed source remains fully covered', async () => {
+  const { VERIFICATION_TASKS } = await import('./ci-contract.mjs');
+  for (const file of [
+    '.github/workflows/ios-unsigned-ipa.yml',
+    'scripts/ios/package-unsigned-ipa.mjs',
+    'app/native/package.json',
+    'scripts/ci-dashboard/analysis.mjs',
+    'scripts/ci-dashboard/site/dashboard.js',
+  ]) {
+    assert.deepEqual((await plan([file])).tasks, ['unit-root', 'coverage'], file);
+    assert.equal((await plan([file])).full_model_oci, false);
+  }
+  const changed = await plan(['.github/workflows/ios-unsigned-ipa.yml', 'app/src/main.tsx']);
+  assert.ok(changed.tasks.includes('build-full') && changed.tasks.includes('browser-full-webkit'));
+  assert.deepEqual((await plan(['scripts/ci-dashboard/analysis.mjs', 'unknown/unreviewed.txt'])).tasks, VERIFICATION_TASKS);
+  assert.deepEqual((await plan(['.github/workflows/ios-unsigned-ipa.yml'], 'push')).tasks, VERIFICATION_TASKS);
 });

@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 
 import { createHash, randomUUID } from 'node:crypto';
-import { access, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { constants as fsConstants } from 'node:fs';
+import { chmod, link, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { assertCleanRevision, assertCleanRevisionSnapshot, calculateBuildDigests, canonicalJson, trustedModuleData } from './hosted-build.mjs';
+import { readRegularFile } from './read-regular-file.mjs';
+import { writeFileExclusive } from './hosted-output.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const inTotoStatementV1 = 'https://in-toto.io/Statement/v1';
@@ -51,7 +53,7 @@ function assertExternalOutput(filename, label) {
 }
 
 async function readCanonicalJson(filename, label) {
-  const bytes = await readFile(filename);
+  const bytes = await readRegularFile(filename, { encoding: null });
   let text;
   let value;
   try {
@@ -228,13 +230,11 @@ async function readAndValidateInputs(args) {
 
 async function writeStatement(args) {
   const output = assertExternalOutput(args['--statement-out'], 'Statement');
-  try { await access(output); fail('Statement output already exists; choose a new external path'); }
-  catch (error) { if (error?.code !== 'ENOENT') throw error; }
-  const { statement } = await readAndValidateInputs(args);
+  const { statement, catalogBytes } = await readAndValidateInputs(args);
   const bytes = Buffer.from(canonicalJson(statement), 'utf8');
   await mkdir(path.dirname(output), { recursive: true });
-  await writeFile(output, bytes, { mode: 0o600 });
-  return { output, bytes };
+  await writeFileExclusive(output, bytes);
+  return { output, bytes, catalogBytes };
 }
 
 export function parseCosignVersion(version) {
@@ -273,13 +273,20 @@ export async function pinnedCosignBinary(binary, expectedVersion, expectedDigest
     fail('--cosign-bin must be an absolute path and --cosign-sha256 must pin its SHA-256 digest');
   }
   const resolved = await realpath(binary);
-  const metadata = await stat(resolved);
-  if (!metadata.isFile()) fail('configured cosign binary is not a regular file');
-  await access(resolved, fsConstants.X_OK);
-  const binaryDigest = sha256(await readFile(resolved));
+  const binaryBytes = await readRegularFile(resolved, { encoding: null, message: 'configured cosign binary is not a regular file' });
+  const binaryDigest = sha256(binaryBytes);
   if (binaryDigest !== expectedDigest) fail('configured cosign binary does not match --cosign-sha256');
-  exactCosignVersion(resolved, expectedVersion);
-  return resolved;
+  const privateDirectory = await mkdtemp(path.join(tmpdir(), 'codexia-cosign-'));
+  const stagedBinary = path.join(privateDirectory, 'cosign');
+  try {
+    await writeFileExclusive(stagedBinary, binaryBytes, 0o700);
+    await chmod(stagedBinary, 0o700);
+    exactCosignVersion(stagedBinary, expectedVersion);
+    return { binary: stagedBinary, cleanup: () => rm(privateDirectory, { recursive: true, force: true }) };
+  } catch (error) {
+    await rm(privateDirectory, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 function runCosign(binary, args, label) {
@@ -297,7 +304,7 @@ function validatePublishUrl(value) {
   return url;
 }
 
-async function publishBundle(url, bytes, tokenEnvironmentVariable) {
+export async function publishBundle(url, bytes, tokenEnvironmentVariable) {
   const target = validatePublishUrl(url);
   const tokenName = tokenEnvironmentVariable;
   if (tokenName !== undefined && !/^[A-Z_][A-Z0-9_]*$/u.test(tokenName)) fail('--registry-token-env must be an environment variable name');
@@ -334,43 +341,47 @@ async function attest(args) {
   const statementPath = assertExternalOutput(args['--statement-out'], 'Statement');
   const bundlePath = assertExternalOutput(args['--bundle-out'], 'Sigstore bundle');
   if (statementPath === bundlePath) fail('Statement and Sigstore bundle outputs must use different paths');
-  try { await access(bundlePath); fail('Sigstore bundle output already exists; choose a new external path'); }
-  catch (error) { if (error?.code !== 'ENOENT') throw error; }
   if (!args['--certificate-identity'].trim()) fail('--certificate-identity must be an exact allowed SAN');
   let issuer;
   try { issuer = new URL(args['--certificate-oidc-issuer']); } catch { fail('--certificate-oidc-issuer must be an HTTPS issuer URL'); }
   if (issuer.protocol !== 'https:' || issuer.username !== '' || issuer.password !== '') fail('--certificate-oidc-issuer must be an HTTPS issuer URL');
-  const { output: writtenStatement, bytes: statementBytes } = await writeStatement({ ...args, '--statement-out': statementPath });
-  const cosign = await pinnedCosignBinary(args['--cosign-bin'], args['--cosign-version'], args['--cosign-sha256']);
-  const temporaryBundle = `${bundlePath}.${process.pid}.pending`;
-  await rm(temporaryBundle, { force: true });
+  const { output: writtenStatement, bytes: statementBytes, catalogBytes } = await writeStatement({ ...args, '--statement-out': statementPath });
+  await mkdir(path.dirname(bundlePath), { recursive: true });
+  const bundleStage = await mkdtemp(path.join(path.dirname(bundlePath), '.codexia-bundle-'));
+  const temporaryBundle = path.join(bundleStage, 'bundle.json');
+  const catalogSnapshot = path.join(bundleStage, 'catalog.json');
+  const statementSnapshot = path.join(bundleStage, 'statement.json');
+  let cosign;
   try {
-    runCosign(cosign, [
-      'attest-blob', '--yes', '--tlog-upload=true', '--new-bundle-format=true', '--statement', writtenStatement,
-      '--bundle', temporaryBundle, args['--catalog'],
+    cosign = await pinnedCosignBinary(args['--cosign-bin'], args['--cosign-version'], args['--cosign-sha256']);
+    await writeFileExclusive(catalogSnapshot, catalogBytes);
+    await writeFileExclusive(statementSnapshot, statementBytes);
+    runCosign(cosign.binary, [
+      'attest-blob', '--yes', '--tlog-upload=true', '--new-bundle-format=true', '--statement', statementSnapshot,
+      '--bundle', temporaryBundle, catalogSnapshot,
     ], 'Sigstore signing');
-    const bundleBytes = await readFile(temporaryBundle);
+    const bundleBytes = await readRegularFile(temporaryBundle, { encoding: null });
     let bundleValue;
     try { bundleValue = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bundleBytes)); }
     catch { fail('cosign did not emit a valid Sigstore bundle JSON document'); }
     assertSigstoreBundleMatches(bundleValue, statementBytes);
-    runCosign(cosign, [
+    runCosign(cosign.binary, [
       'verify-blob-attestation', '--new-bundle-format=true', '--bundle', temporaryBundle,
       '--type', slsaProvenanceV1,
       '--certificate-identity', args['--certificate-identity'],
       '--certificate-oidc-issuer', args['--certificate-oidc-issuer'],
-      args['--catalog'],
+      catalogSnapshot,
     ], 'Sigstore bundle verification');
-    await mkdir(path.dirname(bundlePath), { recursive: true });
-    await rename(temporaryBundle, bundlePath);
+    await link(temporaryBundle, bundlePath);
+    await rm(temporaryBundle);
     const result = { statement: writtenStatement, bundle: bundlePath, bundleDigest: sha256(bundleBytes) };
     if (args['--publish-url']) {
       result.signatureRef = await publishBundle(args['--publish-url'], bundleBytes, args['--registry-token-env']);
     }
     process.stdout.write(`${JSON.stringify(result)}\n`);
-  } catch (error) {
-    await rm(temporaryBundle, { force: true });
-    throw error;
+  } finally {
+    await rm(bundleStage, { recursive: true, force: true });
+    await cosign?.cleanup();
   }
 }
 

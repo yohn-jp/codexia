@@ -23,12 +23,14 @@ test('backend promotion resolver and publisher checkouts include full merge hist
 });
 
 test('backend publication requires a still-eligible component source before registry writes', () => {
+  assert.equal(workflow.env.CODEXIA_SOURCE_SHA, '${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}');
   const steps = workflow.jobs.publish.steps;
   const gate = steps.findIndex(step => step.id === 'freshness');
   const publication = steps.findIndex(step => step.id === 'push-image');
   assert.ok(gate >= 0 && gate < publication);
   assert.match(steps[gate].run, /release-source-gate\.mjs backend/u);
   assert.equal(steps[publication].if, "steps.freshness.outputs.affected == 'true'");
+  assert.ok(steps[publication].run.includes('scripts/backend-registry-tag.mjs'), 'Registry checks must use the verified source context');
   const deploy = handoff.jobs['deploy-production'];
   assert.deepEqual(deploy.needs, ['verify-handoff']);
   assert.match(deploy.if, /needs\.verify-handoff\.outputs\.certified-full-image != ''/u);

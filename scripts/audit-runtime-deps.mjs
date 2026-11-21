@@ -4,6 +4,7 @@ import { lstat, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { productionClosure } from './runtime-package-closure.mjs';
+import { readRegularFile } from './read-regular-file.mjs';
 
 const deniedCorePackage = /(?:^|[/.+@_-])(?:onnx(?:runtime(?:-(?:node|web))?)?|transformers?|tokenizers?|gpt-tokenizer|tiktoken|sentencepiece|fastembed|embedding|reranker|nlp|wink-nlp|natural|compromise|speaker(?:-attribution)?|diarization|pyannote|speechbrain|whisper|openai|anthropic|langchain|ollama)(?:$|[/.+@_-])/i;
 const deniedBuildPackage = /(?:^|[/.+@_-])(?:typescript|tsx|@types|playwright|vitest|jest|eslint|prettier|turbo|vite|esbuild)(?:$|[/.+@_-])/i;
@@ -63,9 +64,12 @@ for (const entry of await readdir(virtualStore, { withFileTypes: true })) {
   const virtualNodeModules = path.join(virtualStore, entry.name, 'node_modules');
   for (const packageDir of await packageDirsIn(virtualNodeModules)) {
     const manifestPath = path.join(packageDir, 'package.json');
-    const manifestStat = await lstat(manifestPath).catch(() => undefined);
-    if (!manifestStat?.isFile()) continue;
-    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    const manifestText = await readRegularFile(manifestPath).catch((error) => {
+      if (error?.code === 'ENOENT' || error?.code === 'ERR_NOT_REGULAR_FILE') return undefined;
+      throw error;
+    });
+    if (manifestText === undefined) continue;
+    const manifest = JSON.parse(manifestText);
     if (!manifest.name || !manifest.version) continue;
     installed.set(`${manifest.name}@${manifest.version}`, manifest.name);
   }

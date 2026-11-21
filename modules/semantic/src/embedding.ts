@@ -153,6 +153,7 @@ function createCapability(context: ModuleContext): Promise<SemanticEmbeddingCapa
         const data = await request<Omit<SemanticNearestResult, "snapshot" | "model" | "modelVersion" | "dimensions">>(worker, snapshot, "semantic.nearest", {
           ...common, key: snapshotKey(snapshot), query, limit,
           excludeSceneIds: options.excludeSceneIds ?? [],
+          ...(options.scope ? { scope: options.scope } : {}),
         }, signal);
         return { snapshot, model: EMBEDDING_MODEL_ID, modelVersion: EMBEDDING_MODEL_VERSION, dimensions: EMBEDDING_DIMENSIONS, ...data };
       },

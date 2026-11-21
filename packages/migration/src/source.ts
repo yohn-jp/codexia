@@ -1,6 +1,8 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs/promises";
+import { constants as fsConstants, createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
 import path from "node:path";
 import os from "node:os";
 import { DatabaseSync } from "node:sqlite";
@@ -92,11 +94,65 @@ async function listFiles(root: string | undefined, prefix: string): Promise<stri
 }
 
 async function readFile(root: string | undefined, relativePath: string): Promise<Buffer | null> {
+  if (!root) return null;
   const filePath = await checkedPath(root, relativePath);
   if (!filePath) return null;
-  const info = await fs.lstat(filePath);
-  if (!info.isFile()) return null;
-  return fs.readFile(filePath);
+  return readCheckedRegularFile(root, filePath);
+}
+
+/** Open and validate the same file handle that the caller consumes. */
+async function openCheckedRegularFile(root: string, filePath: string): Promise<Awaited<ReturnType<typeof fs.open>> | null> {
+  const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+  const nonBlocking = fsConstants.O_NONBLOCK ?? 0;
+  const handle = await fs.open(filePath, fsConstants.O_RDONLY | noFollow | nonBlocking, 0o600);
+  try {
+    const opened = await handle.stat();
+    if (!opened.isFile()) {
+      await handle.close();
+      return null;
+    }
+    const rootInfo = await fs.lstat(root);
+    if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error("Legacy root must be a real directory");
+    const realRoot = await fs.realpath(root);
+    const resolvedRoot = await fs.stat(realRoot);
+    if (rootInfo.dev !== resolvedRoot.dev || rootInfo.ino !== resolvedRoot.ino) {
+      throw new Error("Legacy root changed while it was being read");
+    }
+    const realFile = await fs.realpath(filePath);
+    const relative = path.relative(realRoot, realFile);
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw new Error(`Legacy source escaped its root: ${filePath}`);
+    }
+    const resolved = await fs.stat(realFile);
+    if (opened.dev !== resolved.dev || opened.ino !== resolved.ino) {
+      throw new Error(`Legacy source changed while it was being read: ${filePath}`);
+    }
+    return handle;
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+}
+
+async function readCheckedRegularFile(root: string, filePath: string): Promise<Buffer | null> {
+  const handle = await openCheckedRegularFile(root, filePath);
+  if (!handle) return null;
+  try {
+    return await handle.readFile();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function copyCheckedRegularFile(root: string, filePath: string, destination: string): Promise<boolean> {
+  const handle = await openCheckedRegularFile(root, filePath);
+  if (!handle) return false;
+  try {
+    await pipeline(handle.createReadStream({ autoClose: false }), createWriteStream(destination, { flags: "wx", mode: 0o600 }));
+    return true;
+  } finally {
+    await handle.close();
+  }
 }
 
 function quoteIdentifier(value: string): string {
@@ -117,15 +173,18 @@ async function openReadonlyDatabase(root: string, relativePath: string): Promise
 } | null> {
   const filePath = await checkedPath(root, relativePath);
   if (!filePath) return null;
-  const info = await fs.lstat(filePath);
-  if (!info.isFile()) return null;
   const tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "codexia-migration-sqlite-"));
   const copyPath = path.join(tempDirectory, path.basename(relativePath));
   try {
-    await fs.copyFile(filePath, copyPath);
+    if (!await copyCheckedRegularFile(root, filePath, copyPath)) {
+      await fs.rm(tempDirectory, { recursive: true, force: true });
+      return null;
+    }
     for (const suffix of ["-wal", "-shm"]) {
-      const sidecar = await checkedPath(root, relativePath + suffix);
-      if (sidecar) await fs.copyFile(sidecar, copyPath + suffix);
+      const sidecarPath = await checkedPath(root, relativePath + suffix);
+      if (sidecarPath) {
+        await copyCheckedRegularFile(root, sidecarPath, copyPath + suffix);
+      }
     }
     const db = new DatabaseSync(copyPath, { readOnly: true });
     return {
@@ -319,9 +378,9 @@ async function readGitPendingFiles(
       result.push({ path: relativePath, bytes: null });
       continue;
     }
-    const info = await fs.lstat(source);
-    if (!info.isFile()) throw new Error(`Git pending path is not a regular file: ${relativePath}`);
-    result.push({ path: relativePath, bytes: await fs.readFile(source) });
+    const bytes = await readCheckedRegularFile(root, source);
+    if (!bytes) throw new Error(`Git pending path is not a regular file: ${relativePath}`);
+    result.push({ path: relativePath, bytes });
   }
   return result;
 }

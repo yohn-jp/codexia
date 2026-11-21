@@ -130,7 +130,7 @@ export function createSearchActions(moduleContext: ModuleContext, indexes: Snaps
       catch { warnings.push("knowledge_terminology_unavailable"); }
       let semanticResults: unknown[] = [];
       if (input.includeSemantic) {
-        const result = await context.invoke("semantic.search", { query: input.query, mode: "scene", limit: input.limit }, context.signal);
+        const result = await context.invoke("semantic.search", { query: input.query, mode: "scene", limit: input.limit, ...(input.scope ? { scope: input.scope } : {}) }, context.signal);
         if (result.ok) semanticResults = Array.isArray((result.data as { results?: unknown[] }).results) ? (result.data as { results: unknown[] }).results : [];
         else warnings.push(`semantic_unavailable:${result.error.code}`);
       }
