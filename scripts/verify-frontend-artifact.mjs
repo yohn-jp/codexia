@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readComponentVersion } from './component-release-version.mjs';
 import { selectLatestJobArtifact } from './ci-artifact-selection.mjs';
-import { downloadArtifact, extractArtifactFiles, MAX_ASSET_ARCHIVE, MAX_ASSET_BYTES } from './download-ci-artifacts.mjs';
+import { downloadArtifact, extractArtifactFiles, extractJsonEntry, MAX_ASSET_ARCHIVE, MAX_ASSET_BYTES } from './download-ci-artifacts.mjs';
 import { assertVerificationJobs, collectGitHubPages, verifiedSourceRun } from './release-policy.mjs';
 import { assertFrontendIdentity, compareFrontendVersions } from './verify-frontend-compatibility.mjs';
 import { verifyReusableMainProof } from './reuse-pr-verification.mjs';
@@ -17,6 +17,11 @@ const repository = 'yohn-jp/codexia';
 const shaPattern = /^[a-f0-9]{40}$/u;
 const digestPattern = /^[a-f0-9]{64}$/u;
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
+
+export async function readFrontendPromotionProofArtifact(artifact, filename, token, fetchImpl = fetch) {
+  const archive = await downloadArtifact(artifact, repository, token, fetchImpl);
+  return JSON.parse(await extractJsonEntry(archive, filename));
+}
 
 function positiveInteger(value, label) {
   const number = Number(value);
@@ -277,7 +282,7 @@ export async function verifyFrontendMainPromotionProof({env=process.env,fetchImp
   }
   const proof=await verifyReusableMainProof({sourceSha:env.GITHUB_SHA,before:payload.before,repository:env.GITHUB_REPOSITORY,currentRun,request,
     git:args=>execFileSync('git',args,{encoding:'utf8',maxBuffer:16*1024*1024,timeout:15000}),
-    readArtifact:async(artifact,filename)=>JSON.parse(await extractJsonEntry(await downloadArtifact(artifact,repository,token,fetchImpl),filename))});
+    readArtifact:(artifact,filename)=>readFrontendPromotionProofArtifact(artifact,filename,token,fetchImpl)});
   return {...proof,sourceVerifyRunId:verifyRunId};
 }
 
