@@ -32,7 +32,7 @@ function mainEvidence({ latestConclusion = 'success' } = {}) {
     const inputProof = group === 'types-tests' ? {
       format: 'codexia-ci-task-input-proof/v2', task: 'coverage', mode: 'static-coverage', status: 'passed',
       sourceSha, planDigest: digest, workflowRunId: run.id, workflowAttempt: run.run_attempt,
-      workflowJob: 'types-tests', runtime,
+      workflowJob: 'types', runtime,
       inputClosure: Object.fromEntries(dimensions.map(name => [name, name.charCodeAt(0).toString(16).padStart(64, '0')])),
     } : null;
     const results = tasks.map(task => ({ task, status: 'passed', seconds: 1,
@@ -40,12 +40,12 @@ function mainEvidence({ latestConclusion = 'success' } = {}) {
       ...(task === 'coverage' ? { inputProof } : {}),
     }));
     const report = { group, sha: sourceSha, planDigest: digest, workflowRunId: run.id,
-      workflowAttempt: run.run_attempt, workflowJob: group, workflowRef: 'yohn-jp/codexia/.github/workflows/verify.yml@refs/heads/main',
+      workflowAttempt: run.run_attempt, workflowJob: group === 'types-tests' ? 'types' : group, workflowRef: 'yohn-jp/codexia/.github/workflows/verify.yml@refs/heads/main',
       workflowSha: sourceSha, results };
     if (group === 'types-tests') {
       report.producerInventory = {
         format: 'codexia-ci-task-producer-inventory/v1', group, sourceSha, planDigest: digest,
-        workflowRunId: run.id, workflowAttempt: run.run_attempt, workflowJob: group,
+        workflowRunId: run.id, workflowAttempt: run.run_attempt, workflowJob: report.workflowJob,
         workflowRef: report.workflowRef, workflowSha: sourceSha,
         runner: { os: 'Linux', arch: 'X64', imageOS: 'ubuntu24', imageVersion: '20261115.1', nodeVersion: 'v24.22.3' },
         selectedTasks: tasks, groupInvocations: [],
