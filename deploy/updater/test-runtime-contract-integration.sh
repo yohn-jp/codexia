@@ -804,11 +804,11 @@ run_node_check blue "$IMAGE_ID"
 write_and_check_markers codexia-slot-blue verify
 
 OWNED_FILES+=("$QUADLET_DIR/codexia-api-proxy.container")
+printf '{"phase":"rootless-runtime-timing","name":"maintenance-rotations","event":"start"}\n'
+runtime_phase_started=$SECONDS
 CODEXIA_RUNTIME_MAINTENANCE_REPO_ROOT="$REPO_ROOT" \
 CODEXIA_RUNTIME_MAINTENANCE_IMAGE="$IMAGE_ID" \
 CODEXIA_RUNTIME_MAINTENANCE_NONCE="$NONCE" \
-printf '{"phase":"rootless-runtime-timing","name":"maintenance-rotations","event":"start"}\n'
-runtime_phase_started=$SECONDS
   node "$SCRIPT_DIR/test-standalone-maintenance-integration.mjs" --run "$REPO_ROOT" "$QUADLET_DIR" "$USER_UNIT_DIR" "$WORK_DIR"
 printf '{"phase":"rootless-runtime-timing","name":"maintenance-rotations","event":"end","result":"passed","seconds":%s}\n' "$((SECONDS - runtime_phase_started))"
 
