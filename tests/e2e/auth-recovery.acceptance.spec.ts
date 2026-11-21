@@ -194,8 +194,8 @@ test("recovery-session failure cannot discard an unjournaled manuscript through 
   await expect(page.getByRole("heading", { name: "認証・接続を再確認してください" })).toBeVisible();
   await page.getByRole("button", { name: "ログアウトを再試行" }).click();
   await expect(page.getByRole("alert")).toContainText("入力を保護できないためログアウトを停止しました");
-  expect(logoutRequests).toBe(0, "no logout request can precede durable draft protection");
-  expect(saveRequests).toBe(0, "no document patch may have protected the input in PostgreSQL");
+  expect(logoutRequests, "no logout request can precede durable draft protection").toBe(0);
+  expect(saveRequests, "no document patch may have protected the input in PostgreSQL").toBe(0);
   const server = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}`);
   expect(server.ok()).toBe(true);
   expect((await server.json() as { revision: { markdown: string } }).revision.markdown).not.toContain(currentInput);
@@ -203,7 +203,7 @@ test("recovery-session failure cannot discard an unjournaled manuscript through 
   await page.evaluate(() => { (window as Window & { __recoveryJournalWritesDenied?: boolean }).__recoveryJournalWritesDenied = false; });
   await page.getByRole("button", { name: "ログアウトを再試行" }).click();
   await expect(page.getByRole("heading", { name: "作品を開く" })).toBeVisible();
-  expect(logoutRequests).toBe(1, "only the protected retry is allowed to send logout");
+  expect(logoutRequests, "only the protected retry is allowed to send logout").toBe(1);
   expect((await readPersistenceDrafts(page)).some(draft => draft.documentId === scene.id && draft.markdown === currentInput)).toBe(true);
 });
 
