@@ -244,9 +244,47 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
     await tx.saveKnowledgeNode({ projectId, id: sourceId, type: "person", name: "MCP source", attributes: { sourceFact: "kept" }, status: "confirmed", expectedVersion: null });
     await tx.saveKnowledgeNode({ projectId, id: targetId, type: "person", name: "MCP target", attributes: { targetFact: "kept" }, status: "confirmed", expectedVersion: null });
   });
-  const projectVersion = (await persistence.read(reader => reader.getProject(projectId))).version;
+  let projectVersion = (await persistence.read(reader => reader.getProject(projectId))).version;
   stdio = await startStdioClient(host, projectId);
   http = await startHttpClient(host, projectId);
+
+  const hierarchy = {
+    volumeId: randomUUID(),
+    chapterId: randomUUID(),
+    sceneId: randomUUID(),
+    noteId: randomUUID(),
+  };
+  await persistence.transaction(async (tx) => {
+    await tx.createDocument({
+      projectId, documentId: hierarchy.volumeId, kind: "volume", title: "Volume",
+      orderKey: "0001", markdown: "", authorId: "mcp-acceptance-owner", idempotencyKey: randomUUID(),
+    });
+    await tx.createDocument({
+      projectId, documentId: hierarchy.chapterId, parentId: hierarchy.volumeId, kind: "chapter",
+      title: "Chapter", orderKey: "0001", markdown: "", authorId: "mcp-acceptance-owner", idempotencyKey: randomUUID(),
+    });
+    await tx.createDocument({
+      projectId, documentId: hierarchy.sceneId, parentId: hierarchy.chapterId, kind: "scene",
+      title: "Native scene", orderKey: "0001", markdown: "Scene body.", authorId: "mcp-acceptance-owner", idempotencyKey: randomUUID(),
+    });
+    await tx.createDocument({
+      projectId, documentId: hierarchy.noteId, parentId: hierarchy.chapterId, kind: "note",
+      title: "Author note", orderKey: "0002", markdown: "Private author note.", authorId: "mcp-acceptance-owner", idempotencyKey: randomUUID(),
+    });
+  });
+  projectVersion = (await persistence.read(reader => reader.getProject(projectId))).version;
+
+  const actionSceneList = success(await http.client.callTool({
+    name: "invoke_action",
+    arguments: { project_id: projectId, action_id: "story.entities.list", input: { type: "scene" } },
+  }), "Story scene list action through MCP");
+  assert.deepEqual(new Set(actionSceneList.data.map((entity) => entity.id)), new Set([hierarchy.sceneId]));
+  const legacySceneList = success(await stdio.client.callTool({
+    name: "list_entities",
+    arguments: { project_id: projectId, type: "scene" },
+  }), "legacy list_entities scene filter through MCP");
+  assert.deepEqual(new Set(legacySceneList.data.map((entity) => entity.id)), new Set([hierarchy.sceneId]));
+  assert.equal(legacySceneList.snapshot.projectVersion, actionSceneList.snapshot.projectVersion);
 
   // Exercise project discovery through the real PostgreSQL-backed MCP client
   // beyond the former single-page boundary.

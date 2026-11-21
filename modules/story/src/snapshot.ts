@@ -37,6 +37,7 @@ export interface StoryFile {
   path: string;
   content: string;
   revision: string;
+  documentKind?: string;
 }
 
 export interface LoadedStorySnapshot extends StoryGraphInput {
@@ -191,7 +192,12 @@ async function readFiles(reader: SnapshotReader, includeManuscripts: boolean): P
     const batch = paths.slice(offset, offset + batchSize);
     const values = await Promise.all(batch.map(async (filePath) => [filePath, await reader.read(filePath)] as const));
     for (const [filePath, value] of values) {
-      if (value) files.set(filePath, { path: filePath, content: value.content, revision: value.revision });
+      if (value) files.set(filePath, {
+        path: filePath,
+        content: value.content,
+        revision: value.revision,
+        ...(value.documentKind ? { documentKind: value.documentKind } : {}),
+      });
     }
   }
   return files;
