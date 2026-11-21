@@ -5,6 +5,7 @@ on:
     paths:
       - .github/workflows/ios-unsigned-ipa.yml
       - app/native/**
+      - scripts/ios/**
       - app/src/entries/mobile-native.tsx
       - app/src/oauth.ts
       - app/src/persistence/PersistenceEntry.tsx
