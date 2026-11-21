@@ -2432,7 +2432,10 @@ describe("Codexia HTTP boundary", () => {
       body: JSON.stringify({ title: "Denied project" }),
     });
     assert.equal(noScope.status, 403);
+    const signature = valid.split(".")[2]!;
+    const badSignature = valid.slice(0, valid.lastIndexOf(".") + 1) + (signature[0] === "A" ? "B" : "A") + signature.slice(1);
     const invalidTokens = [
+      badSignature,
       token({ iss: "https://wrong.example.test/" }), token({ aud: "https://other-api.example" }),
       token({ exp: now - 30 }), token({}, "JWT"),
     ];
