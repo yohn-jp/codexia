@@ -14,9 +14,17 @@ case "$proof_mode" in
   actions-fixture) test "${GITHUB_ACTIONS:-}" = true ;;
   *) echo "Unknown host proof mode" >&2; exit 1 ;;
 esac
-user=codexia-ci-host
-uid=22001
-home="/home/$user"
+user=${CODEXIA_HOST_FIXTURE_USER:-codexia-ci-host}
+uid=${CODEXIA_HOST_FIXTURE_UID:-22001}
+group=${CODEXIA_HOST_FIXTURE_GROUP:-$user}
+gid=${CODEXIA_HOST_FIXTURE_GID:-$uid}
+home=${CODEXIA_HOST_FIXTURE_HOME:-/home/$user}
+[[ "$user" =~ ^[a-z_][a-z0-9_-]{0,31}$ && "$group" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || {
+  echo 'Invalid fixture service identity name' >&2; exit 1;
+}
+[[ "$uid" =~ ^[1-9][0-9]{2,8}$ && "$gid" =~ ^[1-9][0-9]{2,8}$ && "$home" == "/home/$user" ]] || {
+  echo 'Invalid fixture service identity numeric ID or home' >&2; exit 1;
+}
 manager_dropin_dir="/run/systemd/system/user@$uid.service.d"
 manager_dropin="$manager_dropin_dir/10-codexia-ci-xdg.conf"
 generator_dir=/run/systemd/user-generators
@@ -47,12 +55,21 @@ all:
         codexia_host_approved: true
         codexia_create_service_account: true
         codexia_service_user: $user
-        codexia_service_group: $user
+        codexia_service_group: $group
         codexia_service_uid: $uid
-        codexia_service_gid: $uid
+        codexia_service_gid: $gid
         codexia_service_home: $home
 YAML
-apply() { env -u XDG_CONFIG_HOME "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i "$tmp/inventory.yml" deploy/ansible/site.yml; }
+apply() {
+  if [[ -n "${CODEXIA_HOST_CONVERGENCE:-}" ]]; then
+    # Stable fixture seam: a future canonical push entrypoint may accept the
+    # same private inventory and lifecycle name without changing host setup.
+    [[ -x "$CODEXIA_HOST_CONVERGENCE" ]] || { echo 'Configured host convergence callable is not executable' >&2; return 1; }
+    "$CODEXIA_HOST_CONVERGENCE" "$tmp/inventory.yml" host
+  else
+    env -u XDG_CONFIG_HOME "${ANSIBLE_PLAYBOOK:-ansible-playbook}" -i "$tmp/inventory.yml" deploy/ansible/site.yml
+  fi
+}
 rootless() (
   # The runner checkout is intentionally inaccessible to the fixture account.
   cd /
@@ -66,7 +83,7 @@ cleanup() {
   trap - EXIT
   set +e
   if [[ "$host_identity_expected" == true ]] && getent passwd "$user" >/dev/null 2>&1 && \
-      [[ "$(id -u "$user" 2>/dev/null)" == "$uid" && "$(getent passwd "$user" | cut -d: -f6)" == "$home" ]]; then
+      [[ "$(id -u "$user" 2>/dev/null)" == "$uid" && "$(id -g "$user" 2>/dev/null)" == "$gid" && "$(getent passwd "$user" | cut -d: -f6)" == "$home" ]]; then
     rootless systemctl --user stop codexia-fixture-network.service >/dev/null 2>&1 || true
     if [[ "$fixture_quadlet_installed" == true ]]; then
       rootless /usr/bin/podman network rm codexia-fixture >"$tmp/network-rm.log" 2>&1 || true
@@ -134,7 +151,7 @@ grep -Eq 'changed=[1-9][0-9]*' "$tmp/first.log"
 apply | tee "$tmp/second.log"
 grep -q 'changed=0' "$tmp/second.log"
 test "$(id -u "$user")" = "$uid"
-test "$(id -g "$user")" = "$uid"
+test "$(id -g "$user")" = "$gid"
 test "$(loginctl show-user "$user" --property=Linger --value)" = yes
 # Check the actual inherited paths; an unset/empty XDG_CONFIG_HOME means
 # the standard HOME/.config default, not a missing configuration.
