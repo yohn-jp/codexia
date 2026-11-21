@@ -19,7 +19,6 @@ service_home=/home/codexia
 bootstrap_user=codexia-bootstrap
 image_url=https://cloud-images.ubuntu.com/releases/resolute/release-20261108/ubuntu-26.04-server-cloudimg-amd64.img
 image_sha256=7b90593f5532b49b7e3fe3d2743f0d1f0d822e5b07cebcd8e00c0df8069ecab9
-postgres_image=docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536
 vm_port=2222
 phase=capability-check
 failure_code=FIXTURE_ASSERTION_FAILED
@@ -47,9 +46,17 @@ cleanup() {
   if [[ -n "$qemu_pid" ]] && kill -0 "$qemu_pid" >/dev/null 2>&1; then
     kill -TERM "$qemu_pid" >/dev/null 2>&1 || cleanup_status=1
     for _ in {1..20}; do kill -0 "$qemu_pid" >/dev/null 2>&1 || break; sleep 1; done
-    if kill -0 "$qemu_pid" >/dev/null 2>&1; then kill -KILL "$qemu_pid" >/dev/null 2>&1 || cleanup_status=1; fi
+    if kill -0 "$qemu_pid" >/dev/null 2>&1; then
+      kill -KILL "$qemu_pid" >/dev/null 2>&1 || cleanup_status=1
+      for _ in {1..5}; do kill -0 "$qemu_pid" >/dev/null 2>&1 || break; sleep 1; done
+      kill -0 "$qemu_pid" >/dev/null 2>&1 && cleanup_status=1
+    fi
+  fi
+  if [[ -n "${tmp:-}" && "$tmp" == "$RUNNER_TEMP"/codexia-phase-f-vm-reboot.* && -d "$tmp" && ! -L "$tmp" ]]; then
+    rm -rf -- "$tmp" || cleanup_status=1
   fi
   if (( status == 0 && cleanup_status != 0 )); then status=$cleanup_status; fi
+  if (( cleanup_status != 0 )); then failure_code=CLEANUP_FAILED; fi
   if (( status == 0 )); then outcome=PASS; elif [[ "$failure_code" == KVM_CAPABILITY_UNAVAILABLE ]]; then outcome=CAPABILITY_UNAVAILABLE; else outcome=FAIL; fi
   if [[ -n "${evidence_dir:-}" && -d "$evidence_dir" ]]; then
     node --input-type=module - "$evidence_dir/vm-reboot-result.json" "$outcome" "$status" "$phase" "$failure_code" \
@@ -75,7 +82,6 @@ await writeFile(file, JSON.stringify(result, null, 2) + '\n', { mode: 0o644, fla
 NODE
     if (( $? != 0 )); then cleanup_status=1; status=1; fi
   else cleanup_status=1; status=1; fi
-  if [[ -n "${tmp:-}" && "$tmp" == "$RUNNER_TEMP"/codexia-phase-f-vm-reboot.* && -d "$tmp" && ! -L "$tmp" ]]; then rm -rf -- "$tmp" || cleanup_status=1; fi
   if (( status == 0 && cleanup_status != 0 )); then status=$cleanup_status; fi
   printf 'Phase F VM reboot fixture exited with status=%s cleanup=%s outcome=%s phase=%s.\n' "$status" "$cleanup_status" "$outcome" "$phase" >&2
   exit "$status"
@@ -161,6 +167,7 @@ install -d -o codexia -g codexia -m 0700 /home/codexia/.local/state/phase-f-vm-r
 install -d -o codexia -g codexia -m 0700 /home/codexia/.config/containers/systemd
 secret_file=/home/codexia/.local/state/phase-f-vm-reboot/postgres-password
 sudo -u codexia bash -c 'umask 077; openssl rand -hex 32 > "$1"' _ "$secret_file"
+cd /
 sudo -H -u codexia env HOME=/home/codexia XDG_CONFIG_HOME=/home/codexia/.config XDG_DATA_HOME=/home/codexia/.local/share XDG_STATE_HOME=/home/codexia/.local/state XDG_RUNTIME_DIR=/run/user/22001 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/22001/bus /usr/bin/podman secret create phase-f-vm-reboot-postgres-password "$secret_file" >/dev/null
 sudo -H -u codexia env HOME=/home/codexia XDG_CONFIG_HOME=/home/codexia/.config XDG_DATA_HOME=/home/codexia/.local/share XDG_STATE_HOME=/home/codexia/.local/state XDG_RUNTIME_DIR=/run/user/22001 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/22001/bus bash -s <<'SERVICE'
 set -Eeuo pipefail
@@ -215,6 +222,7 @@ GUEST
 read_guest_state() {
   guest_sudo <<'GUEST'
 set -Eeuo pipefail
+cd /
 sudo -H -u codexia env HOME=/home/codexia XDG_CONFIG_HOME=/home/codexia/.config XDG_DATA_HOME=/home/codexia/.local/share XDG_STATE_HOME=/home/codexia/.local/state XDG_RUNTIME_DIR=/run/user/22001 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/22001/bus bash -s <<'SERVICE'
 set -Eeuo pipefail
 cd "$HOME"
