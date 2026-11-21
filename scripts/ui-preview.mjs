@@ -71,7 +71,7 @@ async function run(command, args, { env = process.env, inherit = false } = {}) {
 async function engineFor(preference) {
   const candidates = preference === 'auto' ? ['docker', 'podman'] : [preference];
   for (const command of candidates) {
-    try { await run(command, ['info', '--format', '{{.ServerVersion}}']); return command; }
+    try { await run(command, ['info']); return command; }
     catch { /* Try the next installed, running engine. */ }
   }
   throw new Error('Start Docker Desktop or Podman first. UI preview needs an isolated disposable PostgreSQL 17 container.');
@@ -189,6 +189,7 @@ async function captureScreenshots(baseURL, token, title) {
           copy.querySelector('head')?.prepend(base);
           return '<!doctype html>\n' + copy.outerHTML;
         });
+        if (html.includes(token)) throw new Error(`${mode} visual snapshot unexpectedly contains an auth token`);
         await writeFile(path.join(artifactDir, 'snapshots', `${mode}.html`), html);
         htmlByMode[mode] = html;
       } finally { await context.close(); }
@@ -263,7 +264,8 @@ async function main() {
     const databasePort = parsePublishedPort(await run(engine, ['port', container, '5432/tcp']));
     const connectionString = `postgres://codexia:${password}@127.0.0.1:${databasePort}/codexia_preview`;
     await waitForDatabase(connectionString);
-    const env = { ...process.env,
+    // Do not inherit an operator's production Codexia configuration into the disposable E2E server.
+    const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('CODEXIA_') && !key.startsWith('SCRIPTORIUM_'))),
       CODEXIA_PROFILE: options.profile,
       CODEXIA_E2E_DATABASE_URL: connectionString,
       CODEXIA_E2E_STATE_DIR: stateDir,
@@ -274,7 +276,6 @@ async function main() {
       CODEXIA_E2E_TEMP_STATE_DIR: '0',
       CODEXIA_HOSTED_MODE: '0',
     };
-    for (const key of ['CODEXIA_E2E_COMPAT_FRONTEND_DIR', 'CODEXIA_DATABASE_URL', 'CODEXIA_BROWSER_AUTH', 'SCRIPTORIUM_BROWSER_AUTH']) delete env[key];
     serverChild = spawn(process.execPath, ['--import', 'tsx/esm', 'tests/e2e/test-server.ts'], { cwd: root, env, stdio: 'inherit', windowsHide: true });
     const baseURL = await waitForApi(options.port, serverChild);
     console.log(`\nCodexia preview: ${baseURL}/desktop/ and ${baseURL}/mobile/`);
