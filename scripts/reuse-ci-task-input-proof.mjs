@@ -31,7 +31,8 @@ async function main() {
     const current = await currentResponse.json();
     coverage = await resolveExactMainCoverageProof({ plan, current, repository: GITHUB_REPOSITORY, token: GH_TOKEN });
   } catch (error) {
-    console.log(`Exact-base task proof unavailable; full selected verification remains enabled (${String(error)}).`);
+    const detail = error instanceof Error ? error.stack ?? error.message : String(error);
+    console.log(`Exact-base task proof unavailable; full selected verification remains enabled (${detail.replace(/[\r\n]+/gu, ' | ')}).`);
     return;
   }
   const updated = { ...plan, taskInputReuse: { format: 'codexia-ci-task-input-reuse/v1', coverage } };
