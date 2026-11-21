@@ -66,14 +66,12 @@ test('production deployment consumes the verified Full digest and provenance cer
 });
 
 test('Ansible routes the push stage through the codexia runtime and host lock', () => {
-  const route = site.tasks.find(task => task.name === 'Deploy certified backend under host lock');
+  const route = site.tasks.find(task => task.name === 'Deploy the certified image under a serialized host lock');
   assert.ok(route, 'site.yml must route the push deployment stage');
   assert.equal(route['ansible.builtin.include_tasks'].file, 'deploy.yml');
   assert.equal(route.when, "codexia_stage == 'deploy'");
 
-  const stop = site.tasks.find(task => task.name === 'End push deployment before updater lifecycle stages');
-  assert.equal(stop['ansible.builtin.meta'], 'end_host');
-  assert.equal(stop.when, "codexia_stage == 'deploy'");
+  assert.ok(site.tasks.every(task => !JSON.stringify(task).includes('codexia-updater')));
 
   const deployment = parse(readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8'));
   assert.ok(deployment.some(task => task.name === 'Admit the published candidate against installed API and deployed UI identities'));
@@ -108,13 +106,12 @@ test('the production Quadlet binds an immutable image and disables startup schem
   assert.match(quadlet, /^Environment=CODEXIA_DATABASE_MIGRATE_ON_START=0$/mu);
 });
 
-test('push rollout admits backups by verified writer shutdown instead of a legacy proxy route marker', () => {
+test('push rollout admits backups only after canonical API and Tunnel shutdown', () => {
   const deployment = readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8');
-  const backup = readFileSync(new URL('../deploy/updater/standalone-backup.sh', import.meta.url), 'utf8');
-  assert.match(deployment, /backup-locked[\s\S]*--push-deployment/u);
-  assert.match(backup, /--push-deployment/u);
+  const backup = readFileSync(new URL('../deploy/backup/backup.sh', import.meta.url), 'utf8');
+  assert.match(deployment, /backup-locked[\s\S]*--approved[\s\S]*--lock-file/u);
   assert.match(backup, /Push deployment requires inactive systemd unit/u);
-  assert.match(backup, /codexia-updater-boot\.service[\s\S]*codexia-updater\.service[\s\S]*codexia-updater\.timer/u);
+  assert.doesNotMatch(backup, /codexia-updater|--push-deployment/u);
 });
 
 test('main-only manual Tailnet diagnostic verifies pinned SSH as codexia without joining PR validation or deployment', () => {
