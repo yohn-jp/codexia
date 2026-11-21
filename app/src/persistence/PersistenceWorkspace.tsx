@@ -259,6 +259,10 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const [proposals, setProposals] = useState<JournalProposal[]>([]);
   const [moduleError, setModuleError] = useState("");
   const [projects, setProjects] = useState<PersistenceProject[]>([]);
+  const [explicitRouteDocumentId, setExplicitRouteDocumentId] = useState(() => {
+    const route = parseApplicationLocation(window.location.href);
+    return route?.mode === mode ? route.resource?.sceneId ?? "" : "";
+  });
   const [projectId, setProjectId] = useState(() => selectionRef.current?.projectId ?? "");
   const [projectPageReady, setProjectPageReady] = useState(false);
   const [projectPageLoading, setProjectPageLoading] = useState(false);
@@ -375,6 +379,10 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const resume = useRecentActivityResume({ binding: projectId ? { projectId, authorScope, projectScopeKey: projectId } : null, enabled: Boolean(projectId) });
   const project = projects.find((candidate) => candidate.id === projectId) ?? null;
   const selectedDocument = documents.find((candidate) => candidate.id === documentId) ?? null;
+  const explicitRouteDocumentUnavailable = Boolean(explicitRouteDocumentId && outlineReadyProject === projectId &&
+    selectionRef.current?.projectId === projectId && selectionRef.current.documentId === explicitRouteDocumentId &&
+    !documents.some((candidate) => candidate.id === explicitRouteDocumentId));
+  const missingExplicitRouteDocument = Boolean(project && explicitRouteDocumentUnavailable);
   const canCreateDocument = outlineReadyProject === projectId && !!projectId && documents.length < 999;
   const documentOutline = useMemo(() => buildDocumentOutline(documents), [documents]);
   const filteredDocumentOutline = useMemo(() => filterDocumentOutline(documentOutline, outlineQuery), [documentOutline, outlineQuery]);
@@ -602,8 +610,11 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       if (controller.signal.aborted || sessionBlockedRef.current || projectIdRef.current !== projectId) return;
       setDocuments(documentResult.documents);
       setOutlineReadyProject(projectId);
-      setDocumentId((current) => current && documentResult.documents.some((item) => item.id === current)
-        ? current : documentResult.documents.find((item) => projectId === selectionRef.current?.projectId && item.id === selectionRef.current.documentId)?.id ?? documentResult.documents[0]?.id ?? "");
+      setDocumentId((current) => {
+        if (current && documentResult.documents.some((item) => item.id === current)) return current;
+        if (explicitRouteDocumentId && projectId === selectionRef.current?.projectId && explicitRouteDocumentId === selectionRef.current.documentId) return explicitRouteDocumentId;
+        return documentResult.documents.find((item) => projectId === selectionRef.current?.projectId && item.id === selectionRef.current.documentId)?.id ?? documentResult.documents[0]?.id ?? "";
+      });
     }).catch((error: unknown) => {
       if (!controller.signal.aborted && projectIdRef.current === projectId) {
         setOutlineError(error instanceof Error ? error.message : "作品の内容を読み込めませんでした。");
@@ -612,7 +623,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       if (!controller.signal.aborted) setLoading(false);
     });
     return () => controller.abort();
-  }, [projectId, publishEditor, resumeEpoch, sessionBlocked]);
+  }, [explicitRouteDocumentId, projectId, publishEditor, resumeEpoch, sessionBlocked]);
 
   useEffect(() => {
     if (sessionBlocked) return;
@@ -949,7 +960,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   }, [documentId, openDocument, persistDraft, projectId, projects, publishEditor]);
 
   useEffect(() => {
-    if (sessionBlocked || !journal || !projectId || !documentId) return;
+    if (sessionBlocked || !journal || !projectId || !documentId || explicitRouteDocumentUnavailable) return;
     const controller = new AbortController();
     const current = activeRef.current;
     if (current?.document.id === documentId && current.document.projectId === projectId) {
@@ -958,7 +969,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       void openDocument(documentId);
     }
     return () => controller.abort();
-  }, [documentId, journal, openDocument, projectId, revalidateActiveDocument, resumeEpoch, sessionBlocked]);
+  }, [documentId, explicitRouteDocumentUnavailable, journal, openDocument, projectId, revalidateActiveDocument, resumeEpoch, sessionBlocked]);
 
   useEffect(() => {
     if (!journal || !active || active.generation < 1) return;
@@ -1590,6 +1601,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           return;
         }
         selectionRef.current = target;
+        setExplicitRouteDocumentId(nextDocumentId);
         if (target) persistSelectionSafely(authorScope, target);
         openSequenceRef.current += 1;
         publishEditor(null);
@@ -2262,7 +2274,8 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             <button type="button" onClick={() => openCreation("project")}>最初の作品を作成</button>
           </>}
         </section>}
-        {project && !selectedDocument && !active && !outlineError && <section className="pg-empty"><h2>{project.title}</h2><p>編集を始める文書を作成してください。</p><button type="button" onClick={() => openCreation("document")}>最初の文書を作成</button></section>}
+        {missingExplicitRouteDocument && <section className="pg-empty" role="status"><h2>指定された文書が見つかりません</h2><p>この作品に指定された文書はありません。目次から開く文書を選択してください。</p></section>}
+        {project && !missingExplicitRouteDocument && !selectedDocument && !active && !outlineError && <section className="pg-empty"><h2>{project.title}</h2><p>編集を始める文書を作成してください。</p><button type="button" onClick={() => openCreation("document")}>最初の文書を作成</button></section>}
         {active && <section className="pg-editor" data-reader={reading ? "true" : undefined} aria-label={active.document.title}>
           <div className="pg-editor-heading">
             <div><p className="eyebrow">{project?.title}</p><h2>{active.document.title}</h2></div>
