@@ -86,4 +86,3 @@ export async function computeSafetyTaskInputFingerprint({root=path.resolve(path.
     pnpm:version('pnpm',['--version']),typescript:version(process.execPath,[compiler,'--version'])};
   return assertTaskInputFingerprint(buildTaskInputFingerprint({files,environment}));
 }
-
