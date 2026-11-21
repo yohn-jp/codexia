@@ -10,6 +10,7 @@ const coverageFile = process.env.CODEXIA_E2E_COVERAGE_FILE;
 const configuredBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL;
 const baseURL = configuredBaseURL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
 const externalServer = Boolean(configuredBaseURL);
+const selfHostedAuthFixture = selectedTestFile === "oauth-web.acceptance.spec.ts";
 const isTemporaryStateDir = !process.env.CODEXIA_E2E_STATE_DIR && !externalServer;
 const stateDir = process.env.CODEXIA_E2E_STATE_DIR
   ?? (externalServer ? tmpdir() : mkdtempSync(join(tmpdir(), "codexia-e2e-")));
@@ -73,7 +74,7 @@ export default defineConfig({
       },
     },
   ],
-  webServer: externalServer
+  webServer: externalServer || selfHostedAuthFixture
     ? undefined
     : {
         command: "node --import tsx/esm tests/e2e/test-server.ts",

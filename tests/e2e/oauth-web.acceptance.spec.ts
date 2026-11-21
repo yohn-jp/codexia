@@ -2,15 +2,14 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { test } from "node:test";
+import { test } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
-import { chromium } from "@playwright/test";
 import { startBetterAuthFixture } from "../../packages/api/test/fixtures/better-auth-server.js";
 
 const appRoot = resolve("app");
 const appAssets = resolve(appRoot, "dist");
-const fixtureDatabaseUrl = process.env.CODEXIA_TEST_DATABASE_URL;
+const fixtureDatabaseUrl = process.env.CODEXIA_TEST_DATABASE_URL ?? process.env.CODEXIA_E2E_DATABASE_URL;
 mkdirSync(appAssets, { recursive: true });
 
 interface SeenRequest {
@@ -22,23 +21,25 @@ interface SeenRequest {
   body: string | null;
 }
 
-test("signed-out Web OAuth preserves the signed request through consent, PKCE, and protected owner API lists", async () => {
+test("signed-out Web OAuth preserves the signed request through consent, PKCE, and protected owner API lists", async ({ browser }) => {
   assert.ok(fixtureDatabaseUrl, "Set CODEXIA_TEST_DATABASE_URL to a disposable local PostgreSQL database");
   const database = new URL(fixtureDatabaseUrl);
-  assert.ok(["127.0.0.1", "localhost", "[::1]"].includes(database.hostname), "OAuth fixture database must be local");
+  const databaseName = decodeURIComponent(database.pathname.slice(1));
+  const ciFixtureDatabase = process.env.CI === "true" && database.hostname === "postgres" && /^codexia_ci_[a-f0-9]{32}$/u.test(databaseName);
+  assert.ok(["127.0.0.1", "localhost", "[::1]"].includes(database.hostname) || ciFixtureDatabase, "OAuth fixture database must be local or the uniquely named disposable CI database");
 
     // Auth clients, OAuth sessions, token records and JWT checks use PostgreSQL. The fixture's CoreStore,
     // persistence object, and job history are in-memory/test doubles; this proves protected list admission,
     // not PostgreSQL manuscript row persistence.
     const fixture = await startBetterAuthFixture({ databaseUrl: fixtureDatabaseUrl, staticDirectory: appAssets });
-  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  let context: Awaited<ReturnType<typeof browser.newContext>> | undefined;
   try {
     const build = spawnSync("pnpm", ["--filter", "@codexia/app", "build"], {
       cwd: resolve("."),
       encoding: "utf8",
       env: {
         ...process.env,
-        CODEXIA_PROFILE: "core",
+        CODEXIA_PROFILE: process.env.CODEXIA_PROFILE ?? "core",
         VITE_CODEXIA_OAUTH_ISSUER: fixture.issuer,
         VITE_CODEXIA_OAUTH_CLIENT_ID: fixture.webClientId,
         VITE_CODEXIA_API_AUDIENCE: fixture.audience,
@@ -64,8 +65,7 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     assert.ok((discovery.token_endpoint_auth_methods_supported as unknown[]).includes("none"));
     assert.equal(discovery.authorization_endpoint, `${fixture.issuer}/oauth2/authorize`);
 
-    browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
-    const context = await browser.newContext();
+    context = await browser.newContext();
     const seen: SeenRequest[] = [];
     const responseStatuses = new Map<string, number[]>();
     const applyResponseStatuses = () => {
@@ -78,14 +78,14 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
       }
     };
     const responseTasks: Promise<void>[] = [];
-    let tokenResponse: Record<string, unknown> | null = null;
+    const tokenResponses: Record<string, unknown>[] = [];
     let upstreamCallbackLocation: string | null = null;
-    let webCallbackUrl: URL | null = null;
+    const webCallbackUrls: URL[] = [];
     const page = await context.newPage();
     page.on("framenavigated", (frame) => {
       if (frame !== page.mainFrame()) return;
       const url = new URL(frame.url());
-      if (url.pathname === "/desktop" && url.searchParams.has("code") && url.searchParams.has("iss")) webCallbackUrl = url;
+      if (url.pathname === "/desktop" && url.searchParams.has("code") && url.searchParams.has("iss")) webCallbackUrls.push(url);
     });
     page.on("request", (request) => {
       const url = new URL(request.url());
@@ -107,7 +107,7 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
         responseTasks.push((async () => { upstreamCallbackLocation = await response.headerValue("location"); })());
       }
       if (new URL(response.url()).pathname !== "/api/auth/oauth2/token" || !response.ok()) return;
-      responseTasks.push((async () => { tokenResponse = await response.json() as Record<string, unknown>; })());
+      responseTasks.push((async () => { tokenResponses.push(await response.json() as Record<string, unknown>); })());
     });
     await page.goto(`${fixture.apiOrigin}/desktop`);
     await page.getByRole("button", { name: "OAuthでサインイン" }).click();
@@ -143,11 +143,13 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     await page.waitForResponse((response) => new URL(response.url()).pathname === "/api/session" && response.status() === 200);
     await page.waitForResponse((response) => new URL(response.url()).pathname === "/api/jobs" && response.request().method() === "GET" && response.status() === 200);
     applyResponseStatuses();
-    assert.ok(webCallbackUrl, "the authorization response must return to the registered app callback");
-    const callbackUrl = webCallbackUrl!;
+    const callbackUrl = webCallbackUrls.at(-1);
+    assert.ok(callbackUrl, "the authorization response must return to the registered app callback");
 
     const tokenRequest = seen.find((request) => request.pathname === `${new URL(fixture.issuer).pathname}/oauth2/token`);
     assert.ok(tokenRequest?.body, "browser must exchange the authorization code");
+    const tokenResponse = tokenResponses.at(-1);
+    assert.ok(tokenResponse && typeof tokenResponse.access_token === "string", "the token endpoint must issue an API access token");
     const tokenForm = new URLSearchParams(tokenRequest.body);
     const authorizeRequest = seen.find((request) => request.pathname.endsWith("/oauth2/authorize") && request.method === "GET");
     assert.ok(authorizeRequest, "authorization code flow must start with a browser navigation");
@@ -169,16 +171,15 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     assert.ok(ownerList, `the owner token must reach the protected job list route; observed ${JSON.stringify(seen.map(({ pathname, method, status }) => ({ pathname, method, status })))}`);
     const sessionCookieNames = apiSession.headers.cookie?.split(";").map((part) => part.split("=", 1)[0].trim()) ?? [];
     assert.ok(apiSession.headers.authorization?.startsWith("Bearer "), `the owner API session request must send a bearer access token (headers=${Object.keys(apiSession.headers).join(",")}; cookies=${sessionCookieNames.join(",")})`);
-    assert.ok(apiSession.headers.authorization === `Bearer ${String(tokenResponse?.access_token ?? "")}`, "the API session must use the OAuth access token, not the ID token");
+    assert.ok(apiSession.headers.authorization === `Bearer ${String(tokenResponse.access_token)}`, "the API session must use the OAuth access token, not the ID token");
     assert.equal(Boolean(apiSession.headers.cookie), false, "ordinary bearer API calls must omit the Better Auth session cookie");
     assert.ok(ownerList.headers.authorization?.startsWith("Bearer "), "the owner list request must send a bearer access token");
-    assert.ok(ownerList.headers.authorization === `Bearer ${String(tokenResponse?.access_token ?? "")}`, "the protected owner list must use the OAuth access token");
+    assert.ok(ownerList.headers.authorization === `Bearer ${String(tokenResponse.access_token)}`, "the protected owner list must use the OAuth access token");
     assert.equal(Boolean(ownerList.headers.cookie), false, "protected data list calls must omit the Better Auth session cookie");
     assert.equal(Boolean(tokenRequest.headers.cookie), false, "public-client token exchange must omit ambient cookies");
-    if (typeof tokenResponse?.id_token === "string") assert.ok(apiSession.headers.authorization !== `Bearer ${tokenResponse.id_token}`, "the API must never receive the upstream ID token");
-    assert.equal(typeof tokenResponse?.access_token, "string");
+    if (typeof tokenResponse.id_token === "string") assert.ok(apiSession.headers.authorization !== `Bearer ${tokenResponse.id_token}`, "the API must never receive the upstream ID token");
   } finally {
-    if (browser) await browser.close();
+    if (context) await context.close();
     await fixture.close();
   }
 });
