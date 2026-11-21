@@ -815,6 +815,29 @@ test("outline supports guarded keyboard navigation, search, zoom and mobile sizi
   await expect(page.locator(".pg-outline-document").first()).toBeVisible();
 });
 
+test("Headless Tree renames an unselected document without replacing the active manuscript", async ({ page }) => {
+  expect(databaseUrl).toBeTruthy();
+  const { project, scene, second } = await createWritingFixture(page, "desktop", `Headless rename ${crypto.randomUUID()}`);
+  const outline = page.locator('[data-workspace-panel="outline"]');
+  await expect(outline.getByRole("tree", { name: "作品の構成" })).toBeVisible();
+  const row = outline.locator(`.pg-outline-item[data-document-id="${second.id}"] > .pg-outline-row`);
+  const item = row.getByRole("treeitem", { name: new RegExp(second.title, "u") });
+  await item.focus();
+  await item.press("F2");
+  const editor = row.getByRole("textbox", { name: `${second.title}の名前を変更` });
+  await expect(editor).toBeVisible();
+  const title = "アウトライン名称変更";
+  await editor.fill(title);
+  await editor.press("Enter");
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${second.id}`);
+    return response.ok() ? ((await response.json()) as { document: { title: string } }).document.title : "";
+  }).toBe(title);
+  await expect(row.getByRole("treeitem", { name: new RegExp(title, "u") })).toBeVisible();
+  await expect(page.getByRole("heading", { name: scene.title, exact: true })).toBeVisible();
+  await expect(outline.locator(`.pg-outline-item[data-document-id="${scene.id}"] .pg-outline-document`)).toHaveAttribute("aria-current", "page");
+});
+
 async function moveEditorIntoDesktopStack(page: Page): Promise<void> {
   await page.getByRole("toolbar", { name: "ワークスペース配置" }).getByRole("button", { name: "調査", exact: true }).click();
   const menu = page.locator(".st-workspace-move-menu");
