@@ -899,13 +899,7 @@ try {
   else if (mode === "replacement-probe") await replacementProbe();
   else throw new Error("unknown P13 container mode");
 } catch (error) {
-  const failure = {
-    name: error instanceof Error ? error.name : "Error",
-    code: error && typeof error === "object" && "code" in error ? error.code : undefined,
-    message: error instanceof Error ? error.message : String(error),
-    stack: error instanceof Error ? error.stack : undefined,
-  };
-  await writeFile(OUTPUT_DIRECTORY + "/failure.json", JSON.stringify(failure, null, 2) + "\\n", { mode: 0o600 }).catch(() => {});
-  console.error("P13 OCI acceptance failed: " + failure.message);
+  await writeFile(OUTPUT_DIRECTORY + "/failure.json", JSON.stringify({ status: "failed" }) + "\\n", { mode: 0o600 }).catch(() => {});
+  console.error("P13 OCI acceptance failed: " + (error instanceof Error ? error.message : String(error)));
   process.exitCode = 1;
 }

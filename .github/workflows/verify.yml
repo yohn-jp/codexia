@@ -23,7 +23,6 @@ jobs:
       pull-requests: read
     outputs:
       reuse: ${{ steps.reuse.outputs.eligible }}
-      reuse_receipt: ${{ steps.reuse.outputs.receipt }}
       plan: ${{ steps.select.outputs.plan }}
       unit: ${{ steps.select.outputs.unit }}
       types: ${{ steps.select.outputs.types }}
@@ -583,14 +582,11 @@ jobs:
         run: node scripts/select-ci-plan.mjs
       - name: Download selected plan by exact artifact ID
         if: needs.plan.outputs.reuse != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          CODEXIA_CI_INVENTORY_PATH: ${{ steps.select-plan.outputs.inventory-path }}
-          CODEXIA_CI_ARTIFACT_IDS: ${{ steps.select-plan.outputs.artifact-id }}
-          CODEXIA_CI_ARTIFACT_DIR: ${{ runner.temp }}/ci-plan
-          CODEXIA_CI_ARTIFACT_KIND: plan
-        run: node scripts/download-ci-artifacts.mjs
+        uses: actions/download-artifact@v8.0.2
+        with:
+          artifact-ids: ${{ steps.select-plan.outputs.artifact-id }}
+          path: ${{ runner.temp }}/ci-plan
+          merge-multiple: true
       - name: Select latest exact-run execution evidence
         if: needs.plan.outputs.reuse != 'true'
         id: select-evidence
@@ -602,14 +598,10 @@ jobs:
         run: node scripts/select-ci-evidence.mjs
       - name: Download selected execution evidence by exact artifact ID
         if: needs.plan.outputs.reuse != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          CODEXIA_CI_INVENTORY_PATH: ${{ steps.select-plan.outputs.inventory-path }}
-          CODEXIA_CI_ARTIFACT_IDS: ${{ steps.select-evidence.outputs.artifact-ids }}
-          CODEXIA_CI_ARTIFACT_DIR: ${{ runner.temp }}/ci-evidence
-          CODEXIA_CI_ARTIFACT_KIND: evidence
-        run: node scripts/download-ci-artifacts.mjs
+        uses: actions/download-artifact@v8.0.2
+        with:
+          artifact-ids: ${{ steps.select-evidence.outputs.artifact-ids }}
+          path: ${{ runner.temp }}/ci-evidence
       - name: Certify every required exact-source matrix element
         if: needs.plan.outputs.reuse != 'true'
         env:
@@ -624,24 +616,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_REQUIRED_RESULTS: ${{ toJSON(needs) }}
-          CODEXIA_REUSE_RECEIPT: ${{ needs.plan.outputs.reuse_receipt }}
-          CODEXIA_REUSE_PROOF_PATH: ${{ runner.temp }}/ci-reuse-proof.json
         run: node scripts/reuse-pr-verification.mjs certify
-      - uses: actions/upload-artifact@v7.0.2
-        if: needs.plan.outputs.reuse == 'true'
-        with:
-          name: ci-reuse-proof
-          path: ${{ runner.temp }}/ci-reuse-proof.json
-          if-no-files-found: error
-          retention-days: 14
-      - name: Record measured workflow timings
+      - name: Record measured workflow timings in the job log
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/measure-ci.mjs --out "${{ runner.temp }}/ci-metrics.json"
-      - uses: actions/upload-artifact@v7.0.2
-        if: always()
-        with:
-          name: ci-metrics
-          path: ${{ runner.temp }}/ci-metrics.json
-          retention-days: 14
+        run: node scripts/measure-ci.mjs

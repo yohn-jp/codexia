@@ -81,30 +81,27 @@ test('browser groups depend on profile producers; independent groups cannot canc
   assert.equal(gate.if, '${{ always() && !cancelled() }}');
   assert.deepEqual(gate.needs.toSorted(), ['plan', 'unit', 'types', 'build', 'oci', 'browser', 'hosted_catalog', 'hosted'].toSorted());
   const planSelector = gate.steps.find(step => step.id === 'select-plan');
-  const planDownload = gate.steps.find(step => step.run?.includes('node scripts/download-ci-artifacts.mjs') && step.env?.CODEXIA_CI_ARTIFACT_KIND === 'plan');
+  const planDownload = gate.steps.find(step => step.uses === 'actions/download-artifact@v8.0.2' && step.with?.path === '${{ runner.temp }}/ci-plan');
   const evidenceSelector = gate.steps.find(step => step.id === 'select-evidence');
-  const evidenceDownload = gate.steps.find(step => step.run?.includes('node scripts/download-ci-artifacts.mjs') && step.env?.CODEXIA_CI_ARTIFACT_KIND === 'evidence');
+  const evidenceDownload = gate.steps.find(step => step.uses === 'actions/download-artifact@v8.0.2' && step.with?.path === '${{ runner.temp }}/ci-evidence');
   assert.ok(planSelector);
   assert.ok(planDownload);
   assert.match(planSelector.run, /node scripts\/select-ci-plan\.mjs/);
   assert.equal(planSelector.env.GITHUB_RUN_ID, '${{ github.run_id }}');
   assert.equal(planSelector.env.CODEXIA_EXPECTED_SHA, '${{ github.event.pull_request.head.sha || github.sha }}');
-  assert.equal(planDownload.env.CODEXIA_CI_ARTIFACT_IDS, '${{ steps.select-plan.outputs.artifact-id }}');
-  assert.equal(planDownload.env.CODEXIA_CI_INVENTORY_PATH, '${{ steps.select-plan.outputs.inventory-path }}');
-  assert.equal(planDownload.env.CODEXIA_EXPECTED_SHA, '${{ github.event.pull_request.head.sha || github.sha }}');
+  assert.equal(planDownload.with['artifact-ids'], '${{ steps.select-plan.outputs.artifact-id }}');
+  assert.equal(planDownload.with['merge-multiple'], true);
   assert.ok(evidenceSelector);
   assert.match(evidenceSelector.run, /node scripts\/select-ci-evidence\.mjs/);
   assert.equal(evidenceSelector.env.GITHUB_RUN_ID, '${{ github.run_id }}');
   assert.equal(evidenceSelector.env.CODEXIA_CI_INVENTORY_PATH, '${{ steps.select-plan.outputs.inventory-path }}');
   assert.equal(evidenceSelector.env.CODEXIA_EXPECTED_SHA, '${{ github.event.pull_request.head.sha || github.sha }}');
   assert.ok(evidenceDownload);
-  assert.equal(evidenceDownload.env.CODEXIA_CI_ARTIFACT_IDS, '${{ steps.select-evidence.outputs.artifact-ids }}');
-  assert.equal(evidenceDownload.env.CODEXIA_CI_INVENTORY_PATH, '${{ steps.select-plan.outputs.inventory-path }}');
-  assert.equal(evidenceDownload.env.CODEXIA_EXPECTED_SHA, '${{ github.event.pull_request.head.sha || github.sha }}');
+  assert.equal(evidenceDownload.with['artifact-ids'], '${{ steps.select-evidence.outputs.artifact-ids }}');
   assert.ok(gate.steps.indexOf(planSelector) < gate.steps.indexOf(planDownload));
   assert.ok(gate.steps.indexOf(planDownload) < gate.steps.indexOf(evidenceSelector));
   assert.ok(gate.steps.indexOf(evidenceSelector) < gate.steps.indexOf(evidenceDownload));
-  assert.doesNotMatch(evidenceDownload.run, /actions\/download-artifact/);
+  assert.equal(evidenceDownload.uses, 'actions/download-artifact@v8.0.2');
 });
 test('browser groups retain immutable runtime and restore the exact producer before running selected shards', () => {
   const browser = workflow.jobs.browser;
@@ -256,9 +253,9 @@ test('compact main proof is resolved only on main push, skips all heavy families
   const reused = gate.steps.find(step => step.name === REUSED_MAIN_CERT_STEP);
   assert.equal(reused.if, "needs.plan.outputs.reuse == 'true'");
   assert.equal(reused.run, 'node scripts/reuse-pr-verification.mjs certify');
-  assert.match(reused.env.CODEXIA_REUSE_RECEIPT, /needs\.plan\.outputs\.reuse_receipt/);
+  assert.equal(reused.env.CODEXIA_REUSE_RECEIPT, undefined);
   assert.equal(gate.steps.find(step => step.name === 'Certify every required exact-source matrix element').if, "needs.plan.outputs.reuse != 'true'");
-  assert.ok(gate.steps.some(step => step.with?.name === 'ci-reuse-proof' && step.if === "needs.plan.outputs.reuse == 'true'"));
+  assert.equal(gate.steps.some(step => step.with?.name === 'ci-reuse-proof'), false);
 });
 
 

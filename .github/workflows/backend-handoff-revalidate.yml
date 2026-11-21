@@ -14,6 +14,10 @@ on:
         description: Successful main Codexia Backend Image run ID to revalidate
         required: true
         type: string
+      publisher_sha:
+        description: Exact 40-character source SHA reported by that publisher run
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -73,11 +77,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_PUBLISHER_RUN_ID: ${{ inputs.publisher_run_id }}
+          CODEXIA_PUBLISHER_SHA: ${{ inputs.publisher_sha }}
         run: node scripts/prepare-backend-handoff-revalidation.mjs
       - name: Check out exact publisher source for source binding
         uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ steps.publisher.outputs.publisher_source_sha }}
+          ref: ${{ inputs.publisher_sha }}
           path: publisher-source
           persist-credentials: false
           fetch-depth: 1
@@ -90,6 +95,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CODEXIA_PUBLISHER_RUN_ID: ${{ inputs.publisher_run_id }}
+          CODEXIA_PUBLISHER_SHA: ${{ inputs.publisher_sha }}
           CODEXIA_MANUAL_REVALIDATION: 'true'
         working-directory: publisher-source
         run: node "$GITHUB_WORKSPACE/scripts/run-manual-backend-handoff-revalidation.mjs"

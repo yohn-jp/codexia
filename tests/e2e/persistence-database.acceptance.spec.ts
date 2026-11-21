@@ -1756,9 +1756,7 @@ test("revision comparison separates distant manuscript edits", async ({ page }) 
     const previous = page.getByRole("region", { name: "Revision履歴" }).locator("article").filter({ hasText: "冒頭は旧稿。" });
     const diff = previous.locator(".pg-revision-diff-preview");
     await expect(diff).toHaveCount(0);
-    const workerStarted = page.waitForEvent("worker");
     await previous.getByText("最新版との違い", { exact: true }).click();
-    expect(new URL((await workerStarted).url()).origin).toBe(new URL(page.url()).origin);
     const hunks = diff.locator(".pg-revision-diff-hunk");
     await expect(hunks).toHaveCount(2);
     await expect(diff).toContainText(revision.id);

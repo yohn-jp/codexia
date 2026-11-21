@@ -52,7 +52,7 @@ test('extracts only one requested JSON entry and rejects missing or malformed JS
   execFileSync('zip', ['-q', 'artifact.zip', 'report.json', 'extra.txt'], { cwd: dir });
   const zip = await readFile(path.join(dir, 'artifact.zip'));
   assert.equal((await extractJsonEntry(zip, 'report.json')).toString(), '{"group":"browser-full-webkit"}');
-  await assert.rejects(extractJsonEntry(zip, 'ci-plan.json'), /Missing or duplicate/);
+  await assert.rejects(extractJsonEntry(zip, 'ci-plan.json'), /Missing required JSON entry/);
   await writeFile(path.join(dir, 'report.json'), 'not JSON');
   execFileSync('zip', ['-q', 'invalid.zip', 'report.json'], { cwd: dir });
   await assert.rejects(extractJsonEntry(await readFile(path.join(dir, 'invalid.zip')), 'report.json'), SyntaxError);

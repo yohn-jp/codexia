@@ -1,13 +1,19 @@
 #!/usr/bin/env node
 // Read-only observed timings. Unseparated legacy phases remain NOT_CHECKED.
-import { writeFile, appendFile } from 'node:fs/promises';
 import { collectGitHubPages } from './release-policy.mjs';
 import { seconds, summarizeCiTiming } from './ci-timing.mjs';
 const args = process.argv.slice(2);
-const option = name => args.includes(name) ? args[args.indexOf(name) + 1] : undefined;
+const options = new Map();
+for (let index = 0; index < args.length; index += 2) {
+  const name = args[index];
+  if (!['--run', '--attempt'].includes(name) || !args[index + 1] || options.has(name)) {
+    throw new Error('Usage: measure-ci.mjs [--run <id>] [--attempt <number>]');
+  }
+  options.set(name, args[index + 1]);
+}
 const repository = process.env.GITHUB_REPOSITORY;
-const runId = option('--run') ?? process.env.GITHUB_RUN_ID;
-const attempt = option('--attempt');
+const runId = options.get('--run') ?? process.env.GITHUB_RUN_ID;
+const attempt = options.get('--attempt');
 if (args.includes('--attempt') && !/^[1-9]\d*$/.test(attempt ?? '')) throw new Error('Attempt must be a positive integer');
 if (!/^[\w.-]+\/[\w.-]+$/.test(repository ?? '') || !/^\d+$/.test(runId ?? '') || !process.env.GH_TOKEN) throw new Error('Repository, run and read token required');
 const request = async endpoint => {
@@ -43,7 +49,4 @@ const report = { runId, createdAt: run.created_at, url: run.html_url, sha: run.h
   warmColdClassification: 'Use per-job cache results; a rerun is not automatically warm.',
   phaseMeasurementNote: 'Empty phase arrays mean not separately instrumented, not zero. Legacy source/browser steps combine phases; OCI combines image build and runtime checks; native verification includes Docker builds and compose. Download-related steps include other work and are not download-only stopwatch measurements.',
   jobs: observations };
-const output = option('--out');
-if (output) await writeFile(output, JSON.stringify(report, null, 2) + '\n');
 console.log(JSON.stringify(report, null, 2));
-if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, `Timing evidence: run ${runId}, certification predecessor ${timing.criticalPath ?? 'NOT_CHECKED'}. Final wall-clock is measured after workflow completion.\n`);

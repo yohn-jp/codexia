@@ -685,26 +685,8 @@ async function browserUiArtifactRecords(distDirectory, browserIds, ui) {
   }
   await walk(distDirectory);
   actualFiles.sort();
-  if (ui) {
-    // Vite emits this separately bundled Worker without a manifest entry.
-    // Admit only the known hashed file explicitly referenced by the UI entry.
-    const workers = actualFiles.filter((file) => /^assets\/revision-difference-worker-[A-Za-z0-9_-]{8}\.js$/u.test(file));
-    if (workers.length !== 1) throw new Error('Vite authoring output must include exactly one revision comparison worker');
-    const [worker] = workers;
-    const code = await readRegularFile(path.join(distDirectory, entryFile));
-    // Vite 6/Rollup emits quoted URL literals while Vite 8/Rolldown
-    // emits template literals with an explicit empty-template import.meta.url base.
-    // Require an actual Worker URL reference rather than a stray path string.
-    const workerUrl = `/${ui}/${worker}`;
-    const workerReference = /new\s+Worker\(\s*new\s+URL\(\s*(?:"([^"]+)"|\x27([^\x27]+)\x27|`([^`]+)`)\s*,\s*(?:``\s*\+\s*)?import\.meta\.url\s*\)/gu;
-    if (![...code.matchAll(workerReference)].some(([, quoted, single, template]) => (quoted ?? single ?? template) === workerUrl)) {
-      throw new Error('Vite authoring entry does not reference its revision comparison worker');
-    }
-    if (!manifestFiles.includes(worker)) manifestFiles.push(worker);
-    manifestFiles.sort();
-  }
   if (canonicalJson(actualFiles) !== canonicalJson(manifestFiles)) {
-    throw new Error('Vite output contains JavaScript or CSS files outside its manifest and revision comparison worker');
+    throw new Error('Vite output contains JavaScript or CSS files outside its manifest');
   }
   const files = [];
   for (const relative of manifestFiles) {

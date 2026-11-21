@@ -3,14 +3,17 @@ on:
   pull_request:
     paths:
       - 'scripts/audit/**'
+      - 'scripts/ci-dashboard/**'
+      - 'scripts/ci-timing.mjs'
+      - 'scripts/ci-contract.mjs'
       - '.github/workflows/repository-audit.yml'
+      - 'docs/verification/CI-DASHBOARD.md'
   push:
     branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: read
 
 concurrency:
   group: repository-audit-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'pages' }}
@@ -58,8 +61,6 @@ jobs:
         run: |
           node scripts/audit/delegate.mjs "$RUNNER_TEMP/audit-site" "$CODEXIA_AUDIT_OCR_BIN"
       - name: Bundle CI dashboard in the existing Pages artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             node scripts/ci-dashboard/collect.mjs "$RUNNER_TEMP/audit-site" --preview

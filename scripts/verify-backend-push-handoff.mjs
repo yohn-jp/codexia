@@ -204,12 +204,19 @@ export async function verifyBackendPushHandoff(options = {}) {
   assert.ok(positive(triggered?.id) && positive(triggered?.run_attempt) && positive(triggered?.run_number),
     'Backend publication run identity is invalid');
   assert.match(triggered?.head_sha ?? '', sha, 'Backend publication main SHA is invalid');
+  assert.match(env.CODEXIA_PUBLISHER_RUN_ID ?? '', /^[1-9][0-9]*$/u, 'Trusted publisher run ID is required');
+  const publisherRunId = Number(env.CODEXIA_PUBLISHER_RUN_ID);
+  assert.ok(positive(publisherRunId), 'Trusted publisher run ID is invalid');
+  assert.equal(triggered.id, publisherRunId, 'Publisher run ID differs from the workflow event input');
   assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), triggered.head_sha,
     'Handoff checkout differs from backend publication SHA');
   const token = env.GH_TOKEN || env.GITHUB_TOKEN;
   assert.ok(typeof token === 'string' && token.length > 0, 'Actions read token is required');
-  const run = assertTrustedBackendPublicationRun(await githubJson(`actions/runs/${triggered.id}`, token, fetchImpl), {
-    id: triggered.id, attempt: triggered.run_attempt, runNumber: triggered.run_number, headSha: triggered.head_sha,
+  const run = assertTrustedBackendPublicationRun(await githubJson(`actions/runs/${publisherRunId}`, token, fetchImpl), {
+    id: publisherRunId,
+    attempt: triggered.run_attempt,
+    runNumber: triggered.run_number,
+    headSha: triggered.head_sha,
   });
   const result = await verifyArtifactAndRelease({ env, payload, run, token, fetchImpl });
   if (result.skipped) {
@@ -225,7 +232,7 @@ export async function verifyBackendPushHandoff(options = {}) {
   }
   if (env.GITHUB_STEP_SUMMARY) {
     await writeFile(env.GITHUB_STEP_SUMMARY,
-      `## Certified backend handoff\n\n- Backend publication run: ${result.publisherRunId}\n- Verify run: ${result.verifyRunId}\n- Core: \`${result.coreImage}\`\n- Full: \`${result.fullImage}\`\n\nNo VM or production resource was changed.\n`);
+      '## Certified backend handoff\n\nThe backend publication, Verify provenance, immutable image digests, and deployment certificates were validated.\n\nNo VM or production resource was changed.\n');
   }
   console.log(`Verified backend deployment handoff from publication run ${result.publisherRunId}`);
   return result;

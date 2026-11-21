@@ -47,6 +47,7 @@ jobs:
         id: verify
         env:
           GH_TOKEN: ${{ github.token }}
+          CODEXIA_PUBLISHER_RUN_ID: ${{ github.event.workflow_run.id }}
         run: node scripts/verify-backend-push-handoff.mjs
 
   deploy-production:

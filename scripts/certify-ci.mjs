@@ -38,9 +38,14 @@ const jobs = await collectGitHubPages(page => request(`actions/runs/${GITHUB_RUN
 const directory = process.env.CODEXIA_CI_EVIDENCE_DIR;
 assert.ok(directory, 'Execution evidence directory is required');
 const reports = [];
-for (const entry of await readdir(directory, { withFileTypes: true })) {
-  if (!entry.isDirectory()) throw new Error('Unexpected execution evidence entry');
-  reports.push(JSON.parse(await readFile(path.join(directory, entry.name, 'report.json'), 'utf8')));
+const evidenceEntries = await readdir(directory, { withFileTypes: true });
+if (evidenceEntries.length === 1 && evidenceEntries[0].name === 'report.json' && evidenceEntries[0].isFile()) {
+  reports.push(JSON.parse(await readFile(path.join(directory, 'report.json'), 'utf8')));
+} else {
+  for (const entry of evidenceEntries) {
+    if (!entry.isDirectory()) throw new Error('Unexpected execution evidence entry');
+    reports.push(JSON.parse(await readFile(path.join(directory, entry.name, 'report.json'), 'utf8')));
+  }
 }
 assertPlanEvidence(plan, jobs, reports);
 const artifacts = await collectGitHubPages(page => request(`actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100&page=${page}`), 'artifacts');
