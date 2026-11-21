@@ -4,6 +4,7 @@ set -euo pipefail
 umask 077
 readonly PG_IMAGE='docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536'
 readonly STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/codexia-updater"
+push_deployment_mode=false
 die(){ printf '%s\n' "$*" >&2; exit 1; }
 for cmd in podman age sha256sum flock findmnt sync stat getent ip; do command -v "$cmd" >/dev/null || die "Missing dependency: $cmd"; done
 lock_file="$STATE_DIR/host.lock"
@@ -68,7 +69,11 @@ validate_artifact(){
 case "$operation" in
   backup-locked)
     if [[ $# -gt 3 ]]; then
-      [[ $# == 8 && "${4:-}" == --approved && "${5:-}" == --lock-file && -n "${6:-}" && "${7:-}" == --lock-fd && -n "${8:-}" ]] || die 'Push backup requires explicit approval and an inherited maintenance lock descriptor'
+      [[ ( $# == 8 || $# == 9 ) && "${4:-}" == --approved && "${5:-}" == --lock-file && -n "${6:-}" && "${7:-}" == --lock-fd && -n "${8:-}" ]] || die 'Push backup requires explicit approval and an inherited maintenance lock descriptor'
+      if [[ $# == 9 ]]; then
+        [[ "${9:-}" == --push-deployment ]] || die 'Invalid push backup mode'
+        push_deployment_mode=true
+      fi
       verify_lock_descriptor "$6" "$8"
     else
       mkdir -p "$STATE_DIR"
@@ -131,7 +136,23 @@ history_fingerprint(){
     -v "$volume:/history:ro" "$PG_IMAGE" -euo pipefail -c 'cd /history; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum' | sha256sum | cut -d' ' -f1
 }
 require_quiesced(){
-  [[ "$(cat "$STATE_DIR/route")" == blocked ]] || die 'Block the proxy before backup'
+  if [[ "$push_deployment_mode" == true ]]; then
+    for unit in codexia-api.service codexia-api-proxy.service codexia-tunnel.service codexia-updater-boot.service codexia-updater.service codexia-updater.timer; do
+      local unit_status=0
+      systemctl --user is-active --quiet "$unit" || unit_status=$?
+      case "$unit_status" in
+        0) die "Push deployment requires inactive systemd unit: $unit";;
+        3|4) ;;
+        *) die "Cannot verify push deployment unit state: $unit";;
+      esac
+    done
+    if [[ -e "$STATE_DIR/route" || -L "$STATE_DIR/route" ]]; then
+      [[ -f "$STATE_DIR/route" && ! -L "$STATE_DIR/route" && "$(cat "$STATE_DIR/route")" == blocked ]] ||
+        die 'Push backup refuses an unsafe legacy route marker'
+    fi
+  else
+    [[ "$(cat "$STATE_DIR/route")" == blocked ]] || die 'Block the proxy before backup'
+  fi
   for container in codexia-api codexia-slot-blue codexia-slot-green codexia-preflight-blue codexia-preflight-green; do
     local status=0
     podman container exists "$container" || status=$?
@@ -177,10 +198,10 @@ assert_restore_resource_absent(){
 }
 case "${1:-}" in
   backup-locked)
-    [[ $# == 3 || $# == 8 ]] || die 'Usage: backup-locked /remote/mount age1-recipient [--approved --lock-file /absolute/lock --lock-fd fd]'
+    [[ $# == 3 || $# == 8 || $# == 9 ]] || die 'Usage: backup-locked /remote/mount age1-recipient [--approved --lock-file /absolute/lock --lock-fd fd [--push-deployment]]'
     remote_directory "$2"
     [[ "$3" =~ ^age1[0-9a-z]+$ ]] || die 'Provide an age public recipient, not a private key'
-    if [[ $# == 8 ]]; then [[ "${4:-}" == --approved ]] || die 'Push backup requires explicit approval'; fi
+    if [[ $# -ge 8 ]]; then [[ "${4:-}" == --approved ]] || die 'Push backup requires explicit approval'; fi
     backup_artifact "$2" "$3"
     ;;
   drill)

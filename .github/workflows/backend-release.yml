@@ -295,9 +295,11 @@ jobs:
             PRODUCER_EVENT=workflow_run
             PRODUCER_SHA="$MAIN_SHA"
           fi
-          echo "producer-sha=$PRODUCER_SHA" >> "$GITHUB_OUTPUT"
-          echo "producer-version=$PRODUCER_VERSION" >> "$GITHUB_OUTPUT"
-          echo "producer-event=$PRODUCER_EVENT" >> "$GITHUB_OUTPUT"
+          {
+            echo "producer-sha=$PRODUCER_SHA"
+            echo "producer-version=$PRODUCER_VERSION"
+            echo "producer-event=$PRODUCER_EVENT"
+          } >> "$GITHUB_OUTPUT"
           export CODEXIA_RELEASE_VERSION="$PRODUCER_VERSION"
           for profile in core full; do
             if [[ "$PROMOTED" == true ]]; then
@@ -366,7 +368,6 @@ jobs:
           path: ${{ runner.temp }}/backend-deployment-certificates
           if-no-files-found: error
           retention-days: 7
-
   stable-channel:
     name: Advertise certified stable backend
     needs: publish
