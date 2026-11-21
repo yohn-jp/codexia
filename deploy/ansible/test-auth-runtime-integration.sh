@@ -193,7 +193,7 @@ if apply_stage > "$tmp/auth-drift.log" 2>&1; then
   echo 'Auth runtime stage accepted secret rotation without an explicit path' >&2
   exit 1
 fi
-grep -q 'existing Better Auth Podman secret differs' "$tmp/auth-drift.log"
+grep -q 'Refuse to rotate or replace an existing auth secret' "$tmp/auth-drift.log"
 if grep -Eq 'fixture-introspection-client-secret-drift' "$tmp/auth-drift.log"; then
   echo 'Secret input leaked into Ansible failure output' >&2
   exit 1
