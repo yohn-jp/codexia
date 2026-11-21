@@ -9,8 +9,8 @@ import { assertProfileReceipt } from './ci-profile-artifact.mjs';
 import { assertNativeReceipt } from './ci-native-producer.mjs';
 import { runBounded } from './ci-parallel.mjs';
 import { withBrowserFixture } from './ci-browser-fixture.mjs';
-import { assertTaskProducerInventory, sanitizeProducerArguments } from './ci-task-input-proof.mjs';
-import { captureCoverageInputClosure, coverageInputProof } from './ci-coverage-inputs.mjs';
+import { assertTaskProducerInventory, sanitizeProducerArguments, selectEquivalentTaskProofs } from './ci-task-input-proof.mjs';
+import { captureCoverageInputClosure, coverageInputProof, coverageInvocation, coverageRuntime } from './ci-coverage-inputs.mjs';
 
 const group = process.argv[2];
 const plan = validateVerificationPlan(JSON.parse(readFileSync(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json', 'utf8')));
@@ -83,6 +83,7 @@ async function executeTaskInContext(task, index, scope) {
   let error = preparationError || (task !== 'coverage' && (groupPreparationError || groupPreparation.get(task)?.error)) || undefined;
   let blocked = Boolean(error || (task === 'audit-core' && completed.get('build-core')?.status !== 'passed' && tasks.includes('build-core')));
   if (blocked && !error) error = 'Core build prerequisite failed';
+  let inputProof;
   if (!blocked) {
     try {
       if (task.startsWith('unit-')) await node('scripts/ci-workspace.mjs', 'unit', task.slice(5));
@@ -114,23 +115,44 @@ async function executeTaskInContext(task, index, scope) {
           { CODEXIA_NATIVE_REPORT_PATH: path.join(reportDirectory, 'native-report.json'),
             ...(nativeArtifact ? {CODEXIA_NATIVE_PRODUCER_REPORT:process.env.CODEXIA_CI_NATIVE_PRODUCER_REPORT} : {}) });
       } else if (task === 'coverage') {
-        await node('scripts/ci-workspace.mjs', 'coverage');
-        // The root test script already covers these contracts. Retain them for coverage-only plans.
+        const runtime = coverageRuntime();
+        const workflowRunId = Number(process.env.GITHUB_RUN_ID);
+        const workflowAttempt = Number(process.env.GITHUB_RUN_ATTEMPT);
+        const workflowJob = process.env.GITHUB_JOB;
+        const closure = await captureCoverageInputClosure({ root: process.cwd(), runtime,
+          invocation: coverageInvocation(runtime.execPath), workflowJob });
+        const proofArgs = { closure, sourceSha: sha, planDigest: planDigest(plan), workflowRunId, workflowAttempt, workflowJob, runtime };
+        const candidateProof = coverageInputProof(proofArgs);
+        const reuse = plan.taskInputReuse?.coverage;
+        let reusable = false;
+        if (reuse && plan.base === reuse.sourceSha && process.env.GITHUB_RUN_ID && process.env.GITHUB_RUN_ATTEMPT) {
+          const baselineProof = { ...reuse, sourceSha: reuse.proofSourceSha, format: 'codexia-ci-task-input-proof/v2', mode: 'static-coverage', status: 'passed' };
+          reusable = selectEquivalentTaskProofs({ tasks: ['coverage'], baseline: [baselineProof], candidate: [candidateProof],
+            baselineIdentity: { sourceSha: reuse.proofSourceSha, planDigest: reuse.planDigest,
+              workflowRunId: reuse.workflowRunId, workflowAttempt: reuse.workflowAttempt },
+            candidateIdentity: { sourceSha: sha, planDigest: planDigest(plan), workflowRunId, workflowAttempt },
+          }).includes('coverage');
+        }
+        if (reusable) {
+          inputProof = coverageInputProof({ ...proofArgs, reusedFrom: reuse });
+          console.log('Reused exact-base static coverage proof; supplemental CI contract tests remain selected when required.');
+        } else {
+          await node('scripts/ci-workspace.mjs', 'coverage');
+        }
+        // These supplemental contract tests remain mandatory for affected plans even when the
+        // static coverage check itself is safely reused.
         if (!plan.tasks.includes('unit-root')) await node('--test', 'scripts/ci-contract.test.mjs', 'scripts/ci-impact.test.mjs', 'scripts/ci-profile-artifact.test.mjs', 'scripts/ci-native-producer.test.mjs', 'scripts/ci-parallel.test.mjs', 'scripts/ci-task-input-proof.test.mjs', 'scripts/reuse-pr-verification.test.mjs');
       } else throw new Error(`No runner for ${task}`);
     } catch (caught) { error = String(caught); }
   }
-  let inputProof;
-  if (task === 'coverage' && !blocked && !error && plan.tasks.includes('unit-root') && process.env.GITHUB_RUN_ID !== undefined) {
+  if (task === 'coverage' && !blocked && !error && process.env.GITHUB_RUN_ID !== undefined && !inputProof) {
     const workflowRunId = Number(process.env.GITHUB_RUN_ID);
     const workflowAttempt = Number(process.env.GITHUB_RUN_ATTEMPT);
     const workflowJob = process.env.GITHUB_JOB;
-    const closure = await captureCoverageInputClosure({
-      root: process.cwd(), runtime: { platform: process.platform, arch: process.arch, nodeVersion: process.version, execPath: process.execPath,
-        imageOS: process.env.ImageOS ?? null, imageVersion: process.env.ImageVersion ?? null },
-      invocation: scope.invocations[0], workflowJob,
-    });
-    inputProof = coverageInputProof({ closure, sourceSha: sha, planDigest: planDigest(plan), workflowRunId, workflowAttempt, workflowJob });
+    const runtime = coverageRuntime();
+    const closure = await captureCoverageInputClosure({ root: process.cwd(), runtime,
+      invocation: coverageInvocation(runtime.execPath), workflowJob });
+    inputProof = coverageInputProof({ closure, sourceSha: sha, planDigest: planDigest(plan), workflowRunId, workflowAttempt, workflowJob, runtime });
   }
   const result = { task, status: blocked ? 'blocked' : error ? 'failed' : 'passed', seconds: (Date.now() - started) / 1000, invocations: scope.invocations, ...(inputProof ? { inputProof } : {}), ...(error ? { error } : {}) };
   completed.set(task, result);
