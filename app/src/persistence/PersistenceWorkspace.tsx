@@ -1753,6 +1753,11 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     };
     const matchesIntent = (node: KnowledgeNode): boolean => node.projectId === intent.projectId && node.id === intent.id &&
       node.type === intent.type && node.name === intent.name && node.status === "proposed" && Object.keys(node.attributes).length === 0;
+    const reportCreateError = (message: string): void => {
+      if (projectIdRef.current !== intent.projectId) return;
+      if (mode === "mobile") setPageError(message);
+      else setKnowledgeCreateError({ projectId: intent.projectId, message });
+    };
     try {
       if (intent.needsReconciliation) {
         let existing: KnowledgeNode | null = null;
@@ -1761,7 +1766,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         } catch (error) {
           if (!(error instanceof ApiError) || error.status !== 404) {
             setKnowledgeCreateUncertain({ projectId: intent.projectId, nodeId: intent.id });
-            setKnowledgeCreateError({ projectId: intent.projectId, message: "保存結果を確認できません。入力を保ったまま、同じ候補の保存結果を再確認してください。" });
+            reportCreateError("保存結果を確認できません。入力を保ったまま、同じ候補の保存結果を再確認してください。");
             return;
           }
         }
@@ -1769,7 +1774,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           if (matchesIntent(existing)) complete(existing);
           else {
             setKnowledgeCreateUncertain({ projectId: intent.projectId, nodeId: intent.id });
-            setKnowledgeCreateError({ projectId: intent.projectId, message: "保存結果が入力内容と一致しません。候補を変更せず、保存結果を再確認してください。" });
+            reportCreateError("保存結果が入力内容と一致しません。候補を変更せず、保存結果を再確認してください。");
           }
           return;
         }
@@ -1791,16 +1796,14 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       try {
         const { node } = await api.persistenceNode(intent.projectId, intent.id);
         if (matchesIntent(node)) complete(node);
-        else if (projectIdRef.current === intent.projectId) {
-          setKnowledgeCreateError({ projectId: intent.projectId, message: "保存結果が入力内容と一致しません。候補を変更せず、保存結果を再確認してください。" });
-        }
+        else reportCreateError("保存結果が入力内容と一致しません。候補を変更せず、保存結果を再確認してください。");
       } catch (readError) {
         if (readError instanceof ApiError && readError.status === 404) {
           intent.needsReconciliation = false;
           setKnowledgeCreateUncertain(null);
-          if (projectIdRef.current === intent.projectId) setKnowledgeCreateError({ projectId: intent.projectId, message: saveMessage });
-        } else if (projectIdRef.current === intent.projectId) {
-          setKnowledgeCreateError({ projectId: intent.projectId, message: "保存結果を確認できません。入力を保ったまま、同じ候補の保存結果を再確認してください。" });
+          reportCreateError(saveMessage);
+        } else {
+          reportCreateError("保存結果を確認できません。入力を保ったまま、同じ候補の保存結果を再確認してください。");
         }
       }
     } finally {
