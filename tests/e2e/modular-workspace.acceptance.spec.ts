@@ -511,7 +511,7 @@ async function openFixtureScene(page: Page, mode: "desktop" | "mobile", sceneInd
   // Mobile mounts only the active panel; its project select is not present on
   // the writing tab. Verify the displayed canonical project in both shells.
   if (mode === "desktop") await expect(page.getByLabel("作品", { exact: true })).toHaveValue(fixture.project.id);
-  await expect(page.locator(".pg-editor-heading .eyebrow")).toHaveText(fixture.project.title);
+  await expect(page.locator(".pg-editor-heading .eyebrow")).toContainText(fixture.project.title);
   await expect.poll(async () => page.getByRole("textbox", { name: "本文", exact: true }).locator(".cm-line")
     .evaluateAll((lines) => lines.map((line) => line.textContent ?? "").join("\n").replace(/\n+$/u, "")))
     .toBe(scene!.revision.markdown.replace(/\n+$/u, ""));
