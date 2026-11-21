@@ -12,6 +12,7 @@ jobs:
     name: Verify Tailnet SSH reachability
     runs-on: ubuntu-latest
     timeout-minutes: 8
+    if: github.ref == 'refs/heads/main'
     environment: codexia-production
 
     steps:

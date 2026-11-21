@@ -117,9 +117,10 @@ test('push rollout admits backups by verified writer shutdown instead of a legac
   assert.match(backup, /codexia-updater-boot\.service[\s\S]*codexia-updater\.service[\s\S]*codexia-updater\.timer/u);
 });
 
-test('manual Tailnet diagnostic verifies pinned SSH as codexia without joining PR validation or deployment', () => {
+test('main-only manual Tailnet diagnostic verifies pinned SSH as codexia without joining PR validation or deployment', () => {
   assert.deepEqual(Object.keys(tailscale.on), ['workflow_dispatch']);
   const job = tailscale.jobs.connectivity;
+  assert.equal(job.if, "github.ref == 'refs/heads/main'", 'PR refs must not receive the deployment SSH secret');
   assert.equal(job.environment, 'codexia-production');
   const ssh = job.steps.find(step => step.name === 'Verify pinned public-key SSH as codexia');
   assert.ok(ssh, 'the manual Tailnet diagnostic must authenticate SSH, not only test TCP/22');
