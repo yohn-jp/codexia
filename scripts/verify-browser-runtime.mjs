@@ -27,9 +27,7 @@ const requiredProjects = new Set(groupTasks.map(task => {
   return project;
 }));
 assert.ok(requiredProjects.has("chromium"), "Every browser group must validate Chromium");
-const mcrDigest = "sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579";
-const chromiumDigest = "sha256:893b8b5c8275d4a58da814521d961db70c0417d0ab716be3bfc004e4943c58b6";
-const expectedImageDigest = requiredProjects.has("webkit") ? mcrDigest : chromiumDigest;
+const expectedImageDigest = "sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579";
 assert.equal(process.platform, "linux", "Browser verification requires the Linux Noble container");
 assert.equal(process.arch, "x64", "The pinned Playwright image digest is the Linux amd64 image");
 assert.equal(process.versions.node, "24.22.3", "The browser runner must use pinned Node 24.22.3");
