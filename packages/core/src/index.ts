@@ -927,7 +927,18 @@ export class CoreStore implements MutationCoordinator {
       return recordApplication(receipt);
     });
   }
-  private async buildOperation(projectId:string,writes:FileChange[],effect:ChangeOperation["effect"],message:string,pinned?:SnapshotId):Promise<BuiltChangeOperation> {const reader=await this.reader(projectId,pinned);return {snapshot:reader.snapshot,operation:{id:randomUUID(),generation:0,projectId,baseProjectVersion:reader.snapshot.projectVersion,effect,reads:writes.map(({path,revision})=>({path,revision})),writes,message}};}
+  private buildOperation(
+    snapshot: SnapshotId, writes: FileChange[], effect: ChangeOperation["effect"], message: string,
+  ): BuiltChangeOperation {
+    return {
+      snapshot: { ...snapshot },
+      operation: {
+        id: randomUUID(), generation: 0, projectId: snapshot.projectId,
+        baseProjectVersion: snapshot.projectVersion, effect,
+        reads: writes.map(({ path, revision }) => ({ path, revision })), writes, message,
+      },
+    };
+  }
   async buildCreateHierarchyOperation(projectId:string,input:CreateHierarchyInput,pinned?:SnapshotId,allowReservedPathReplay=false):Promise<BuiltChangeOperation>{
     if(!input||!["volume","chapter","scene"].includes(input.kind)||typeof input.id!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(input.id)||!input.title?.trim())fail(400,"invalid_hierarchy_operation","A path-safe identity and title are required");
     const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest);if(index.logicalDocumentIds.has(input.id))fail(409,"hierarchy_id_exists","The hierarchy identity already exists");
@@ -944,7 +955,7 @@ export class CoreStore implements MutationCoordinator {
     }
     const siblings=(index.documentsByParentId.get(parentId)??[]).filter((document)=>document.kind===input.kind);
     writes.unshift({path,revision:null,content:YAML.stringify({id:input.id,title:input.title,order:nextOrderKey(siblings.map((document)=>document.orderKey))})});
-    return this.buildOperation(projectId,writes,"structure",`Create ${input.kind} ${input.id}`,manifest.snapshot);
+    return this.buildOperation(manifest.snapshot,writes,"structure",`Create ${input.kind} ${input.id}`);
   }
   async buildDeleteHierarchyOperation(projectId:string,input:HierarchyTarget,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
     const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),target=this.findDocument(manifest,input.id,index);if(target.kind!==input.kind)fail(422,"invalid_hierarchy_target","Hierarchy kind mismatch");
@@ -967,11 +978,14 @@ export class CoreStore implements MutationCoordinator {
         Number(Boolean(right.metadata)) - Number(Boolean(left.metadata)));
     }
     const writes=entries.map(([path,file])=>({path,revision:file.revision,content:null}));
-    const built=await this.buildOperation(projectId,writes,"structure",`Delete ${input.kind} ${input.id}`,manifest.snapshot);
+    const built=this.buildOperation(manifest.snapshot,writes,"structure",`Delete ${input.kind} ${input.id}`);
     const readDocumentSets=new Map<string,{kind:HierarchyKind;parentId:string|null;documentIds:string[]}>();
     const addSet=(parentId:string|null,kind:HierarchyKind)=>{
-      const documentIds=(index.documentsByParentId.get(parentId)??[]).filter(document=>document.kind===kind).map(document=>document.id).sort();
-      readDocumentSets.set(`${parentId??"root"}\0${kind}`,{kind,parentId,documentIds});
+      const key = `${parentId ?? "root"}\0${kind}`;
+      if (readDocumentSets.has(key)) return;
+      const documentIds = (index.documentsByParentId.get(parentId) ?? [])
+        .filter(document => document.kind === kind).map(document => document.id).sort();
+      readDocumentSets.set(key, { kind, parentId, documentIds });
     };
     for(const document of index.documentsById.values())if(selected.has(document.id)){
       if(document.kind==="volume"||document.kind==="chapter"||document.kind==="scene")addSet(document.parentId,document.kind);
@@ -989,7 +1003,7 @@ export class CoreStore implements MutationCoordinator {
     }
     const siblings=(index.documentsByParentId.get(parent?.id??null)??[]).filter((document)=>document.kind===input.kind);const expected=siblings.map((document)=>this.logicalId(index,document)).sort();if(JSON.stringify([...input.orderedIds].sort())!==JSON.stringify(expected))fail(422,"invalid_hierarchy_order","Reorder must include every sibling exactly once");
     const writes=input.orderedIds.map((id,order)=>{const document=this.findDocument(manifest,id,index),path=index.pathsByDocumentId.get(document.id)?.metadataPath,entry=path ? manifest.files[path] : undefined;if(!path||!entry)fail(409,"snapshot_unavailable","Document metadata is missing from the project snapshot");return {path,revision:entry.revision,content:YAML.stringify({...YAML.parse(entry.content),order:String(order).padStart(10,"0")})};});
-    const built=await this.buildOperation(projectId,writes,"structure","Reorder hierarchy",manifest.snapshot);
+    const built=this.buildOperation(manifest.snapshot,writes,"structure","Reorder hierarchy");
     built.operation.readDocumentSets=[{
       kind: input.kind,
       parentId: parent?.id ?? null,
@@ -999,7 +1013,7 @@ export class CoreStore implements MutationCoordinator {
   }
   async buildRestoreOperation(projectId:string,input:{sceneId:string;snapshotId:string}|string,revisionId?:string,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
     const sceneId=typeof input==="string"?input:input.sceneId,sourceId=typeof input==="string"?revisionId:input.snapshotId;const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId,index);
-    const revision=document.headRevisionId ? await this.persistence.read((reader)=>reader.getRevision(pid(projectId),document.id,sourceId as RevisionId,document.headRevisionId!)) : undefined;if(!revision)fail(404,"revision_not_found","Revision not found");const path=index.pathsByDocumentId.get(document.id)?.bodyPath,file=path ? manifest.files[path] : undefined;if(!path||!file)fail(409,"snapshot_unavailable","Document body is missing from the project snapshot");return this.buildOperation(projectId,[{path,revision:file.revision,content:revision.markdown}],"manuscript","Restore manuscript revision",manifest.snapshot);
+    const revision=document.headRevisionId ? await this.persistence.read((reader)=>reader.getRevision(pid(projectId),document.id,sourceId as RevisionId,document.headRevisionId!)) : undefined;if(!revision)fail(404,"revision_not_found","Revision not found");const path=index.pathsByDocumentId.get(document.id)?.bodyPath,file=path ? manifest.files[path] : undefined;if(!path||!file)fail(409,"snapshot_unavailable","Document body is missing from the project snapshot");return this.buildOperation(manifest.snapshot,[{path,revision:file.revision,content:revision.markdown}],"manuscript","Restore manuscript revision");
   }
   async listManuscriptSnapshots(projectId:string,manuscriptId:string,sceneId?:string,pinned?:SnapshotId):Promise<{snapshot:SnapshotId;snapshots:ManuscriptSnapshotMeta[]}>{
     const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),document=this.findDocument(manifest,sceneId??manuscriptId,index),page=document.headRevisionId ? await this.persistence.read((reader)=>reader.listRevisions(pid(projectId),document.id,100,undefined,document.headRevisionId!)) : {revisions:[]};return {snapshot:manifest.snapshot,snapshots:page.revisions.map((revision)=>({id:revision.id,sceneId:this.logicalId(index,document),manuscriptId,createdAt:Date.parse(revision.createdAt),charCount:Array.from(body(revision.markdown)).length,source:"postgres"}))};
