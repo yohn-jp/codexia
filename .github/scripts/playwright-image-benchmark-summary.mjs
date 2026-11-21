@@ -104,7 +104,8 @@ for (const {browser, source} of expected) {
 lines.push('', 'Pull is measured from the Docker pull command to its completion in the job log; initialization and job elapsed come from the Actions jobs API. Execute multiple manual runs before judging runner variance.');
 for (const problem of problems) lines.push(`- ${problem.replace(/[|\r\n]/gu, ' ')}`);
 const summary = lines.join('\n') + '\n';
-const summaryFd = openSync(GITHUB_STEP_SUMMARY, constants.O_WRONLY | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0));
+const summaryFd = openSync(GITHUB_STEP_SUMMARY,
+  constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0), 0o600);
 try {
   if (!fstatSync(summaryFd).isFile()) throw new Error('GITHUB_STEP_SUMMARY must reference an open regular runner summary file');
   writeFileSync(summaryFd, summary);

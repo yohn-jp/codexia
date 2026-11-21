@@ -18,7 +18,9 @@ test('verified artifact reads use a regular file descriptor and reject symlink p
   try {
     const file = join(root, 'artifact.js'), link = join(root, 'artifact-link.js');
     await writeFile(file, 'verified artifact');
-    assert.equal((await readRegularFile(file)).toString(), 'verified artifact');
+    const bytes = await readRegularFile(file);
+    assert.ok(Buffer.isBuffer(bytes));
+    assert.equal(bytes.toString(), 'verified artifact');
     await symlink(file, link);
     await assert.rejects(readRegularFile(link));
   } finally { await rm(root, { recursive: true, force: true }); }

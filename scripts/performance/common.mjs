@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import { constants } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { link, mkdtemp, open, readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import { readFile, rename, rm } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
+import { readRegularFile as readRegularFileDescriptor } from '../read-regular-file.mjs';
 
 export function distribution(values) {
   if (!values.length) return { n: 0, p50: null, p95: null, p99: null };
@@ -40,15 +40,8 @@ export async function hashTree(root) {
   return { root: relative(process.cwd(), absolute) || '.', files: files.length, sha256: digest.digest('hex') };
 }
 /** Read the bytes through the descriptor that was checked, never by reopening a checked path. */
-export async function readRegularFile(file) {
-  const handle = await open(file, constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0));
-  try {
-    const stat = await handle.stat();
-    if (!stat.isFile()) throw new Error(`Expected a regular file: ${file}`);
-    return await handle.readFile();
-  } finally {
-    await handle.close();
-  }
+export function readRegularFile(file) {
+  return readRegularFileDescriptor(file, { encoding: null });
 }
 export function sourceIdentity() {
   const git = (...args) => execFileSync('git', args, { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
@@ -89,8 +82,6 @@ export async function save(file, data) {
     try { await handle.writeFile(JSON.stringify(data, null, 2) + '\n'); }
     finally { await handle.close(); }
     await rename(temporary, destination);
-  } catch (error) {
-    throw error;
   } finally { await rm(temporaryDirectory, { recursive: true, force: true }); }
 }
 
@@ -107,7 +98,5 @@ export async function writeNewJsonResult(file, data) {
     // link() provides an atomic no-replace claim even when another process races
     // to create the requested output path.
     await link(temporary, destination);
-  } catch (error) {
-    throw error;
   } finally { await rm(temporaryDirectory, { recursive: true, force: true }); }
 }
