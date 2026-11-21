@@ -4,7 +4,7 @@ import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { signUpdateChannel } from '../../scripts/update-channel.mjs';
 import { initialControllerState, atomicWrite, loadControllerState } from '../../scripts/standalone-update-controller.mjs';
 import { runSchemaMaintenance, recoverSchemaMaintenance } from '../../scripts/standalone-schema-maintenance.mjs';
