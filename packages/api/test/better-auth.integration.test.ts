@@ -147,7 +147,10 @@ test("Better Auth signed-out OIDC login reaches the Fastify OAuth route and admi
     assert.deepEqual(context.data.requestedScopes, ["openid", "codexia:api", "offline_access"]);
     assert.equal(context.data.client.name, "Codexia Fixture Web");
 
-    const consent = await client.$fetch("/oauth2/consent", { method: "POST", body: { accept: true } });
+    const consent = await client.$fetch("/oauth2/consent", { method: "POST", body: { accept: true } }) as {
+      data?: { url: string };
+      error?: unknown;
+    };
     assert.ok(consent.data?.url, `OAuth consent failed: ${JSON.stringify(consent.error)}`);
     const redirect = new URL(consent.data.url, origin);
     const code = redirect.searchParams.get("code");
