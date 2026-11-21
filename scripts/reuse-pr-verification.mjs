@@ -228,22 +228,12 @@ export const DEDICATED_PROOFS = Object.freeze({
   },
   '.github/workflows/ansible-base-secrets.yml': {
     job: 'Verify rootless Podman, PostgreSQL, and Tunnel Quadlets',
-    steps: ['Prepare disposable runtime', 'Check PostgreSQL layout and Tunnel dependency',
+    steps: ['Prepare disposable runtime', 'Check PostgreSQL volume layout',
       'Exercise rootless convergence through a separate bootstrap account', 'Remove the disposable fixture user even after test failure'],
   },
-  '.github/workflows/ansible-runtime-contract.yml': {
-    job: 'Verify real rootless runtime contract on Ubuntu VM',
-    steps: ['Install isolated host test dependencies', 'Prepare an isolated rootless systemd identity',
-      'Check runtime schema, maintenance guards and Ansible validation',
-      'Exercise generated Core and Full Quadlets on disposable rootless Podman',
-      'Remove the disposable VM marker and user manager'],
-  },
-  '.github/workflows/standalone-backup.yml': {
-    job: 'Verify encrypted backup and isolated PostgreSQL restore',
-    steps: ['Install the pinned Ansible runner', 'Verify pause, resume and rollback Ansible contracts',
-      'Prepare a fresh rootless Podman fixture account',
-      'Verify controller fence, encrypted artifact integrity and isolated restore',
-      'Remove the disposable backup test user'],
+  '.github/workflows/push-backup.yml': {
+    job: 'Verify push backup locks, writer quiescence and interrupted deployment recovery',
+    steps: ['Check backup and recovery shell syntax', 'Verify push backup lock and recovery contract'],
   },
   '.github/workflows/deployment-config.yml': {
     job: 'Verify Ansible and Terraform configuration',
@@ -262,7 +252,7 @@ function assertInfrastructureSelection(job, files) {
   // existing deployment-config workflow. Require positive evidence for each.
   const ansible = files.some(file => /^(deploy\/(?:ansible|updater|quadlet|postgres)\/|\.github\/workflows\/deployment-config\.yml$)/u.test(file));
   const terraform = files.some(file => /^(deploy\/cloudflare\/|\.github\/workflows\/deployment-config\.yml$)/u.test(file));
-  if (ansible || !terraform) assertSuccessfulStep(job, 'Check standalone Ansible configuration');
+  if (ansible || !terraform) assertSuccessfulStep(job, 'Check Ansible configuration');
   if (terraform || !ansible) {
     assertSuccessfulStep(job, 'Check all Terraform files');
     assertSuccessfulStep(job, 'Validate Cloudflare Terraform');

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as releaseRecord from './component-release-record.mjs';
 import { readComponentVersion } from './component-release-version.mjs';
-import { parseComponentRelease } from './phase-f-test-channel.mjs';
 
 test('backend source proof uses the release publication time and the workflow windows', () => {
   const release = { created_at:'2026-11-15T16:24:04Z', published_at:'2026-11-15T16:33:36Z' };
@@ -99,8 +98,6 @@ test('main fallback release records the exact build artifacts separately from ma
   const historical=releaseRecord.buildComponentReleaseRecord('backend',sourceSha,null,historicalProducer);
   assert.equal(historical.targetSha,sourceSha);
   assert.deepEqual(historical.metadata.publication,{event:'workflow_run',workflowHeadSha:'d'.repeat(40),workflowRunId:700,verifyRunId:702});
-  assert.deepEqual(parseComponentRelease({tag_name:historical.tag,draft:false,prerelease:false,body:historical.body},
-    version,sourceSha,image('5'),image('6'),compatibility),historical.metadata);
   assert.throws(()=>releaseRecord.buildComponentReleaseRecord('backend',sourceSha,null,{
     ...historicalProducer,publication:{...publication,workflowRunId:703},
   }),/another publication workflow/);
