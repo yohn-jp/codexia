@@ -1,4 +1,4 @@
-import type { ComponentType, ReactNode } from "react";
+import type { ComponentType, ReactNode, RefObject } from "react";
 
 export type UiMode = "desktop" | "mobile";
 
@@ -6,6 +6,9 @@ export type UiMode = "desktop" | "mobile";
 export interface WorkspacePanel {
   id: string;
   title: string;
+  /** Reparent this stable portal container into the panel's active slot. */
+  preserveContainer?: HTMLElement;
+  preserveParkingRef?: RefObject<HTMLDivElement | null>;
   render(): ReactNode;
 }
 
