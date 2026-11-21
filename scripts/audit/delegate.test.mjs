@@ -8,7 +8,7 @@ import { join, dirname } from 'node:path';
 import { buildDelegation } from './delegate.mjs';
 
 const git = (repo, ...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
-function fixture() {
+function fixture(featureContent = 'export const value = 2;\n') {
   const base = mkdtempSync(join(tmpdir(), 'delegate-test-'));
   const root = join(base, 'repo');
   mkdirSync(root);
@@ -22,7 +22,7 @@ function fixture() {
   git(root, 'add', '.'); git(root, 'commit', '-qm', 'base');
   const ancestor = git(root, 'rev-parse', 'HEAD');
   git(root, 'checkout', '-qb', 'feature');
-  write('src/alpha.ts', 'export const value = 2;\n');
+  write('src/alpha.ts', featureContent);
   write('.env', 'PRIVATE=do-not-leak\n');
   git(root, 'add', '.'); git(root, 'commit', '-qm', 'feature');
   const feature = git(root, 'rev-parse', 'HEAD');
@@ -48,7 +48,7 @@ if(a[1]==='preview'){
 } else process.exit(1);
 `);
   chmodSync(bin, 0o755);
-  for (const [sha, value] of [[main, 'export const value = 3;\n'], [feature, 'export const value = 2;\n']]) {
+  for (const [sha, value] of [[main, 'export const value = 3;\n'], [feature, featureContent]]) {
     const folder = join(site, 'snapshots', sha);
     mkdirSync(folder, { recursive: true });
     writeFileSync(join(folder, 'repomix.json'), JSON.stringify({ audit: { sourceSha: sha }, files: { 'src/alpha.ts': value.replace(/\n$/u, '') } }));
@@ -98,6 +98,25 @@ test('one Gemini Markdown covers all verified files and redacts unverified delet
       const content = readFileSync(join(dir, output.name));
       assert.equal(output.bytes, content.length);
       assert.equal(output.sha256, createHash('sha256').update(content).digest('hex'));
+    }
+  } finally { rmSync(f.base, { recursive: true, force: true }); }
+});
+
+test('a verified zero-byte source is included with its deletion diff in both packets', () => {
+  const f = fixture('');
+  try {
+    const result = buildDelegation(f);
+    const dir = join(f.site, 'reviews', f.feature);
+    assert.equal(result.reviews[f.feature].published, 1);
+    const summary = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+    assert.deepEqual(summary.files.map(file => file.path), ['src/alpha.ts']);
+    assert.deepEqual(summary.skipped.map(file => file.path), ['.env']);
+    const emptyHash = createHash('sha256').update('').digest('hex');
+    for (const name of ['gemini-review.md', 'gemini-diff.md']) {
+      const packet = readFileSync(join(dir, name), 'utf8');
+      assert.ok(packet.includes(emptyHash));
+      assert.match(packet, /@@ -1 \+0,0 @@/u);
+      assert.match(packet, /END_OF_PACKET [a-f0-9]+ INCLUDED=1/u);
     }
   } finally { rmSync(f.base, { recursive: true, force: true }); }
 });
