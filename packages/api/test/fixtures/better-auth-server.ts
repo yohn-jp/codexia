@@ -29,14 +29,15 @@ export interface BetterAuthFixture {
 export function assertDisposableAuthFixtureDatabaseUrl(connectionString: string): void {
   let url: URL;
   try { url = new URL(connectionString); }
-  catch { throw new Error("Better Auth fixture requires a PostgreSQL URL for a disposable loopback test database"); }
+  catch { throw new Error("Better Auth fixture requires a PostgreSQL URL for an explicitly disposable database"); }
   const hostname = url.hostname.replace(/^\[|\]$/gu, "");
   const databaseName = decodeURIComponent(url.pathname.slice(1));
   const isolatedCiDatabase = process.env.CI === "true" && hostname === "postgres" && /^codexia_ci_[a-f0-9]{32}$/u.test(databaseName);
+  const explicitlyOptedLoopbackDatabase = process.env.CODEXIA_AUTH_TEST_DISPOSABLE === "1" && hostname === "127.0.0.1" &&
+    new Set(["codexia_auth_test", "codexia_web_oauth_test"]).has(databaseName);
   if (!new Set(["postgres:", "postgresql:"]).has(url.protocol) ||
-      (!new Set(["localhost", "127.0.0.1", "::1"]).has(hostname) && !isolatedCiDatabase) ||
-      (!/^codexia_[a-z0-9_]*(?:test|fixture)[a-z0-9_]*$/iu.test(databaseName) && !isolatedCiDatabase) || url.search || url.hash) {
-    throw new Error("Better Auth fixture requires a query-free PostgreSQL URL for a disposable loopback codexia_*test or codexia_*fixture database");
+      (!explicitlyOptedLoopbackDatabase && !isolatedCiDatabase) || url.search || url.hash) {
+    throw new Error("Better Auth fixture requires either an opted-in dedicated loopback auth-test database or the uniquely named disposable CI database");
   }
 }
 

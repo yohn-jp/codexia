@@ -7,12 +7,40 @@ import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import type { DocumentId, ProjectId } from "@codexia/persistence-contracts";
-import { startBetterAuthFixture } from "../../packages/api/test/fixtures/better-auth-server.js";
+import { assertDisposableAuthFixtureDatabaseUrl, startBetterAuthFixture } from "../../packages/api/test/fixtures/better-auth-server.js";
 
 const appRoot = resolve("app");
 const appAssets = resolve(appRoot, "dist");
-const fixtureDatabaseUrl = process.env.CODEXIA_TEST_DATABASE_URL ?? process.env.CODEXIA_E2E_DATABASE_URL;
+const fixtureDatabaseUrl = process.env.CODEXIA_WEB_OAUTH_TEST_DATABASE_URL ?? process.env.CODEXIA_E2E_DATABASE_URL;
 mkdirSync(appAssets, { recursive: true });
+
+test("Better Auth browser fixtures accept only explicit local or uniquely named CI databases", () => {
+  const previousOptIn = process.env.CODEXIA_AUTH_TEST_DISPOSABLE;
+  const previousCi = process.env.CI;
+  try {
+    delete process.env.CODEXIA_AUTH_TEST_DISPOSABLE;
+    process.env.CI = "false";
+    assert.throws(() => assertDisposableAuthFixtureDatabaseUrl("postgres://codexia:codexia@127.0.0.1:5432/codexia_web_oauth_test"));
+
+    process.env.CODEXIA_AUTH_TEST_DISPOSABLE = "1";
+    assert.doesNotThrow(() => assertDisposableAuthFixtureDatabaseUrl("postgres://codexia:codexia@127.0.0.1:5432/codexia_web_oauth_test"));
+    assert.throws(() => assertDisposableAuthFixtureDatabaseUrl("postgres://codexia:codexia@127.0.0.1:5432/codexia_dev"));
+    assert.throws(() => assertDisposableAuthFixtureDatabaseUrl("postgres://codexia:codexia@db.example.test/codexia_web_oauth_test"));
+    assert.throws(() => assertDisposableAuthFixtureDatabaseUrl("postgres://codexia:codexia@127.0.0.1:5432/codexia_web_oauth_test?sslmode=require"));
+    assert.throws(() => assertDisposableAuthFixtureDatabaseUrl("postgres://codexia:codexia@127.0.0.1:5432/codexia_web_oauth_test#fragment"));
+
+    delete process.env.CODEXIA_AUTH_TEST_DISPOSABLE;
+    process.env.CI = "true";
+    assert.doesNotThrow(() => assertDisposableAuthFixtureDatabaseUrl("postgres://codexia:codexia@postgres:5432/codexia_ci_0123456789abcdef0123456789abcdef"));
+    assert.throws(() => assertDisposableAuthFixtureDatabaseUrl("postgres://codexia:codexia@postgres:5432/codexia_ci_0123456789abcdef0123456789abcdef?sslmode=require"));
+    assert.throws(() => assertDisposableAuthFixtureDatabaseUrl("postgres://codexia:codexia@postgres:5432/codexia_test"));
+  } finally {
+    if (previousOptIn === undefined) delete process.env.CODEXIA_AUTH_TEST_DISPOSABLE;
+    else process.env.CODEXIA_AUTH_TEST_DISPOSABLE = previousOptIn;
+    if (previousCi === undefined) delete process.env.CI;
+    else process.env.CI = previousCi;
+  }
+});
 
 interface SeenRequest {
   pathname: string;
@@ -24,11 +52,13 @@ interface SeenRequest {
 }
 
 test("signed-out Web OAuth preserves the signed request through consent, PKCE, and protected owner API lists", async ({ browser }) => {
-  assert.ok(fixtureDatabaseUrl, "Set CODEXIA_TEST_DATABASE_URL to a disposable local PostgreSQL database");
+  assert.ok(fixtureDatabaseUrl, "Set CODEXIA_WEB_OAUTH_TEST_DATABASE_URL to the dedicated disposable local PostgreSQL database");
   const database = new URL(fixtureDatabaseUrl);
   const databaseName = decodeURIComponent(database.pathname.slice(1));
   const ciFixtureDatabase = process.env.CI === "true" && database.hostname === "postgres" && /^codexia_ci_[a-f0-9]{32}$/u.test(databaseName);
-  assert.ok(["127.0.0.1", "localhost", "[::1]"].includes(database.hostname) || ciFixtureDatabase, "OAuth fixture database must be local or the uniquely named disposable CI database");
+  const optedLocalFixtureDatabase = process.env.CODEXIA_AUTH_TEST_DISPOSABLE === "1" && database.hostname === "127.0.0.1" && databaseName === "codexia_web_oauth_test";
+  assert.ok(optedLocalFixtureDatabase || ciFixtureDatabase, "OAuth fixture database must be the opted-in dedicated loopback database or uniquely named disposable CI database");
+  assert.ok(!database.search && !database.hash, "OAuth fixture database URL must not include query parameters or a fragment");
 
     // Auth clients, OAuth sessions, token records, JWT checks and manuscript CoreStore/persistence use PostgreSQL.
     // The job-history list is a separate in-memory test double.
@@ -140,9 +170,11 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     await Promise.all(responseTasks);
     applyResponseStatuses();
     assert.ok(seen.some((request) => request.pathname === "/api/auth/oauth2/consent-context" && request.status === 200), `the server must verify the signed prompt before consent display; observed ${JSON.stringify(seen.map(({ pathname, method, status }) => ({ pathname, method, status })))}`);
+    const projectListResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/v1/persistence/projects" && response.request().method() === "GET" && response.status() === 200);
     await page.getByRole("button", { name: "許可して続ける" }).click();
     await page.waitForResponse((response) => new URL(response.url()).pathname === "/api/session" && response.status() === 200);
     await page.waitForResponse((response) => new URL(response.url()).pathname === "/api/jobs" && response.request().method() === "GET" && response.status() === 200);
+    await projectListResponse;
     applyResponseStatuses();
     const callbackUrl = webCallbackUrls.at(-1);
     assert.ok(callbackUrl, "the authorization response must return to the registered app callback");
@@ -181,7 +213,7 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     if (typeof tokenResponse.id_token === "string") assert.ok(apiSession.headers.authorization !== `Bearer ${tokenResponse.id_token}`, "the API must never receive the upstream ID token");
 
     const projectList = seen.find((request) => request.pathname === "/api/v1/persistence/projects" && request.method === "GET" && request.status === 200);
-    assert.ok(projectList, "the owner bearer token must read the PostgreSQL-backed project list");
+    assert.ok(projectList, `the owner bearer token must read the PostgreSQL-backed project list; observed ${JSON.stringify(seen.map(({ pathname, method, status }) => ({ pathname, method, status })))}`);
     assert.ok(projectList.headers.authorization === `Bearer ${String(tokenResponse.access_token)}`, "the project list must use the OAuth access token");
     assert.equal(Boolean(projectList.headers.cookie), false, "the project list must omit the Better Auth session cookie");
 
