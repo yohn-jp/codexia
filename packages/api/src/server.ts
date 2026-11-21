@@ -3,7 +3,7 @@ import { scheduleAtDeadline } from "./deadline-timer.js";
 import { authorizationFailure } from "./authorization-error.js";
 import { readCodexiaEnvironment } from "./environment.js";
 import { createCloudflareAccessVerifier, type CloudflareAccessOptions } from "./cloudflare-access.js";
-import { createOAuthOwnerAuthenticator, OAuthAuthenticationError, type OAuthOwnerOptions } from "./oauth-owner.js";
+import { CODEXIA_OWNER_SCOPE, createOAuthOwnerAuthenticator, OAuthAuthenticationError, type OAuthOwnerOptions } from "./oauth-owner.js";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable, Transform } from "node:stream";
@@ -13,8 +13,7 @@ import { lstat, readFile, realpath } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
-import { fromNodeHeaders } from "better-auth/node";
-import { advertisePublicClientTokenAuth, CODEXIA_OWNER_SCOPE, createBetterAuthRuntime } from "./better-auth.js";
+import type { createBetterAuthRuntime } from "./better-auth.js";
 import { CONTRACT_VERSION, MODEL_USAGE_CAPABILITY, assertProjectPath, snapshotKey, type ActionDescriptor, type ActionResult, type ChangeOperation, type ChangeProposal, type HttpContribution, type ModelUsageStore, type ModuleAction, type ModuleActionContext, type ModuleId, type ModuleStatus, type ProposalEvidence, type RecentActivityInput, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import type { CoreStore, CreateHierarchyInput, HierarchyTarget, Project, ReorderHierarchyInput } from "@codexia/core";
 import type { Persistence, ProjectPageCursor } from "@codexia/persistence-contracts";
@@ -1584,15 +1583,15 @@ export function createServer(options: ApiServerOptions): Server {
     }
 
     if (options.betterAuth && method === "GET" && routePath === "/.well-known/oauth-authorization-server/api/auth") {
-      const metadataRequest = new Request(`${requestProtocol(request, trustProxy)}//${request.headers.host ?? "localhost"}${request.url ?? "/"}`, { headers: fromNodeHeaders(request.headers) });
-      const metadata = await advertisePublicClientTokenAuth(await options.betterAuth.authorizationServerMetadata(metadataRequest));
+      const metadataRequest = new Request(`${requestProtocol(request, trustProxy)}//${request.headers.host ?? "localhost"}${request.url ?? "/"}`, { headers: options.betterAuth.toHeaders(request.headers) });
+      const metadata = await options.betterAuth.advertisePublicClientTokenAuth(await options.betterAuth.authorizationServerMetadata(metadataRequest));
       response.writeHead(metadata.status, Object.fromEntries(metadata.headers.entries()));
       response.end(Buffer.from(await metadata.arrayBuffer()));
       return;
     }
     if (options.betterAuth && method === "GET" && routePath === "/.well-known/openid-configuration/api/auth") {
-      const metadataRequest = new Request(`${requestProtocol(request, trustProxy)}//${request.headers.host ?? "localhost"}${request.url ?? "/"}`, { headers: fromNodeHeaders(request.headers) });
-      const metadata = await advertisePublicClientTokenAuth(await options.betterAuth.openIdConfigMetadata(metadataRequest));
+      const metadataRequest = new Request(`${requestProtocol(request, trustProxy)}//${request.headers.host ?? "localhost"}${request.url ?? "/"}`, { headers: options.betterAuth.toHeaders(request.headers) });
+      const metadata = await options.betterAuth.advertisePublicClientTokenAuth(await options.betterAuth.openIdConfigMetadata(metadataRequest));
       response.writeHead(metadata.status, Object.fromEntries(metadata.headers.entries()));
       response.end(Buffer.from(await metadata.arrayBuffer()));
       return;
@@ -1606,7 +1605,7 @@ export function createServer(options: ApiServerOptions): Server {
         fail(response, 400, "OAUTH_CONSENT_CONTEXT_INVALID", "OAuth consent context request is invalid"); return;
       }
       try {
-        const context = await options.betterAuth.getConsentContext(fromNodeHeaders(request.headers), body.oauth_query);
+        const context = await options.betterAuth.getConsentContext(options.betterAuth.toHeaders(request.headers), body.oauth_query);
         sendJson(response, 200, context);
       } catch {
         fail(response, request.headers.cookie ? 403 : 401, "OAUTH_CONSENT_CONTEXT_DENIED", "OAuth consent context could not be verified");
@@ -1620,7 +1619,7 @@ export function createServer(options: ApiServerOptions): Server {
     if (options.betterAuth && routePath.startsWith("/api/auth/")) {
       const host = request.headers.host ?? "localhost";
       const authUrl = `${requestProtocol(request, trustProxy)}//${host}${request.url ?? "/"}`;
-      const headers = fromNodeHeaders(request.headers);
+      const headers = options.betterAuth.toHeaders(request.headers);
       headers.delete("connection");
       headers.delete("content-length");
       headers.delete("host");
@@ -2570,19 +2569,23 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   if (betterAuthConfigured && requiredBetterAuthValues.some((value) => !value)) {
     throw new Error("Better Auth mode requires AUTH_DATABASE_URL, PUBLIC_ORIGIN, OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, AUTH_SECRET, OAUTH_INTROSPECTION_CLIENT_ID, OAUTH_INTROSPECTION_CLIENT_SECRET, OAUTH_OWNER_SUBJECT, and OAUTH_OWNER_CLIENT_IDS");
   }
-  const betterAuth = betterAuthConfigured ? createBetterAuthRuntime({
-    databaseUrl: betterAuthValues.databaseUrl!,
-    publicOrigin: betterAuthValues.publicOrigin!,
-    oidcIssuer: betterAuthValues.oidcIssuer!,
-    oidcClientId: betterAuthValues.oidcClientId!,
-    oidcClientSecret: betterAuthValues.oidcClientSecret!,
-    authSecret: betterAuthValues.authSecret!,
-    oauthIntrospectionClientId: betterAuthValues.introspectionClientId!,
-    oauthIntrospectionClientSecret: betterAuthValues.introspectionClientSecret!,
-    ...(betterAuthValues.apiAudience ? { apiAudience: betterAuthValues.apiAudience } : {}),
-    ownerClientIds: betterAuthValues.ownerClientIds!.split(",").map((value) => value.trim()).filter(Boolean),
-    mcpClientIds: (betterAuthValues.mcpClientIds ?? "").split(",").map((value) => value.trim()).filter(Boolean),
-  }) : undefined;
+  let betterAuth: ReturnType<typeof createBetterAuthRuntime> | undefined;
+  if (betterAuthConfigured) {
+    const { createBetterAuthRuntime } = await import("./better-auth.js");
+    betterAuth = createBetterAuthRuntime({
+      databaseUrl: betterAuthValues.databaseUrl!,
+      publicOrigin: betterAuthValues.publicOrigin!,
+      oidcIssuer: betterAuthValues.oidcIssuer!,
+      oidcClientId: betterAuthValues.oidcClientId!,
+      oidcClientSecret: betterAuthValues.oidcClientSecret!,
+      authSecret: betterAuthValues.authSecret!,
+      oauthIntrospectionClientId: betterAuthValues.introspectionClientId!,
+      oauthIntrospectionClientSecret: betterAuthValues.introspectionClientSecret!,
+      ...(betterAuthValues.apiAudience ? { apiAudience: betterAuthValues.apiAudience } : {}),
+      ownerClientIds: betterAuthValues.ownerClientIds!.split(",").map((value) => value.trim()).filter(Boolean),
+      mcpClientIds: (betterAuthValues.mcpClientIds ?? "").split(",").map((value) => value.trim()).filter(Boolean),
+    });
+  }
   if (!betterAuth && oauthConfigured && Object.values(oauthValues).some((value) => !value)) {
     throw new Error("Legacy OAuth owner mode requires OAUTH_ISSUER, OAUTH_AUDIENCE, OAUTH_JWKS_URL, and OAUTH_OWNER_SUBJECT");
   }

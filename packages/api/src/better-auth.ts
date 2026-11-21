@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { Pool } from "pg";
 import { betterAuth } from "better-auth";
+import { fromNodeHeaders } from "better-auth/node";
 import { genericOAuth, jwt } from "better-auth/plugins";
 import {
   oauthProvider,
@@ -9,9 +10,10 @@ import {
   verifyOAuthQueryParams,
 } from "@better-auth/oauth-provider";
 import { oauthProviderResourceClient } from "@better-auth/oauth-provider/resource-client";
+import { CODEXIA_OWNER_SCOPE } from "./oauth-owner.js";
+export { CODEXIA_OWNER_SCOPE };
 
 export const CODEXIA_AUTH_SCHEMA = "codexia_auth";
-export const CODEXIA_OWNER_SCOPE = "codexia:api";
 export const CODEXIA_MCP_SCOPES = ["mcp:read", "mcp:compute", "mcp:propose"] as const;
 export const OIDC_PROVIDER_ID = "workspace-oidc";
 
@@ -89,6 +91,12 @@ function signedQueryParam(params: URLSearchParams, name: string): string {
 }
 
 export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
+  let databaseUrl: URL;
+  try { databaseUrl = new URL(config.databaseUrl); }
+  catch { throw new Error("CODEXIA_AUTH_DATABASE_URL must be an absolute PostgreSQL URL without query or fragment"); }
+  if (!new Set(["postgres:", "postgresql:"]).has(databaseUrl.protocol) || !databaseUrl.hostname || databaseUrl.search || databaseUrl.hash) {
+    throw new Error("CODEXIA_AUTH_DATABASE_URL must be an absolute PostgreSQL URL without query or fragment");
+  }
   const publicOrigin = assertHttpsUrl(config.publicOrigin, "CODEXIA_PUBLIC_ORIGIN", config.allowInsecureLoopbackForTests);
   if (publicOrigin.pathname !== "/") throw new Error("CODEXIA_PUBLIC_ORIGIN must be an origin without a path");
   const issuer = new URL("/api/auth", publicOrigin).toString();
@@ -160,6 +168,8 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig) {
     pool,
     issuer,
     audience,
+    toHeaders: fromNodeHeaders,
+    advertisePublicClientTokenAuth,
     handler: auth.handler,
     authorizationServerMetadata: oauthProviderAuthServerMetadata(auth),
     openIdConfigMetadata: oauthProviderOpenIdConfigMetadata(auth),

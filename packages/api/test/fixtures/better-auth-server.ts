@@ -24,6 +24,19 @@ export interface BetterAuthFixture {
   close(): Promise<void>;
 }
 
+export function assertDisposableAuthFixtureDatabaseUrl(connectionString: string): void {
+  let url: URL;
+  try { url = new URL(connectionString); }
+  catch { throw new Error("Better Auth fixture requires a PostgreSQL URL for a disposable loopback test database"); }
+  const hostname = url.hostname.replace(/^\[|\]$/gu, "");
+  const databaseName = decodeURIComponent(url.pathname.slice(1));
+  if (!new Set(["postgres:", "postgresql:"]).has(url.protocol) ||
+      !new Set(["localhost", "127.0.0.1", "::1"]).has(hostname) ||
+      !/^codexia_[a-z0-9_]*(?:test|fixture)[a-z0-9_]*$/iu.test(databaseName) || url.search || url.hash) {
+    throw new Error("Better Auth fixture requires a query-free PostgreSQL URL for a disposable loopback codexia_*test or codexia_*fixture database");
+  }
+}
+
 interface IdpCodeState {
   readonly nonce: string;
   readonly challenge: string;
@@ -93,7 +106,7 @@ function persistenceForAuthFixture(): ApiServerOptions["persistence"] {
 }
 
 export async function startBetterAuthFixture(options: BetterAuthFixtureOptions): Promise<BetterAuthFixture> {
-  if (!options.databaseUrl.trim()) throw new Error("Better Auth fixture requires an explicit disposable PostgreSQL URL");
+  assertDisposableAuthFixtureDatabaseUrl(options.databaseUrl);
   const previousNodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = "test";
   const idpKeyPair = await generateKeyPair("RS256");

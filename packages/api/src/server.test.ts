@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, it } from "node:test";
+import { fromNodeHeaders } from "better-auth/node";
 import { MODEL_USAGE_CAPABILITY, type ActionResult, type ChangeOperation, type ChangeProposal, type JobRequest, type ModelUsageEvent, type ModelUsageStore, type ModuleAction, type ModuleContext, type ModuleDefinition, type ModuleManifest, type ProposalStatus, type SnapshotId, type ValueSchema } from "@codexia/contracts";
 import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import type { Persistence, PersistenceReader } from "@codexia/persistence-contracts";
@@ -648,6 +649,8 @@ describe("Codexia HTTP boundary", () => {
       },
       authorizationServerMetadata: async () => metadata.clone(),
       openIdConfigMetadata: async () => metadata.clone(),
+      toHeaders: fromNodeHeaders,
+      advertisePublicClientTokenAuth,
     } as unknown as NonNullable<ApiServerOptions["betterAuth"]>;
     const api = await startCustomApi(makeStore(), staticDir, { betterAuth: fake });
     t.after(api.close);
