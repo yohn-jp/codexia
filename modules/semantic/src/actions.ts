@@ -10,7 +10,7 @@ import type {
   SnapshotId,
   ValueSchema,
 } from "@codexia/contracts";
-import { snapshotScopeRevision } from "@codexia/contracts";
+import { assertProjectPath, snapshotScopeRevision } from "@codexia/contracts";
 import {
   NLP_TOKENIZER_CAPABILITY,
   isAdjective,
@@ -68,18 +68,22 @@ const outputSchema: ValueSchema = { parse: parseObjectOutput };
 function action(id: string, effect: ModuleAction["effect"], parse: (value: unknown) => unknown, invoke: ModuleAction["invoke"]): ModuleAction {
   return { id, effect, inputSchema: { parse }, outputSchema, invoke };
 }
-function parseSearch(value: unknown): { query: string; mode: SemanticSearchMode; limit: number; rerank?: boolean; taskId?: string } {
+function parseSearch(value: unknown): { query: string; mode: SemanticSearchMode; limit: number; scope?: string; rerank?: boolean; taskId?: string } {
   const input = record(value);
   if (typeof input.query !== "string" || input.query.length > MAX_QUERY_LENGTH) throw new TypeError(`query must be at most ${MAX_QUERY_LENGTH} characters`);
   const mode = input.mode ?? "scene";
   if (mode !== "scene" && mode !== "sentence" && mode !== "expression") throw new TypeError("mode must be scene, sentence, or expression");
   const limit = input.limit ?? 20;
   if (!Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > 100) throw new TypeError("limit must be between 1 and 100");
+  if (input.scope !== undefined && typeof input.scope !== "string") throw new TypeError("scope must be a repository path");
+  const scope = typeof input.scope === "string" ? input.scope.trim() : "";
+  if (scope) assertProjectPath(scope);
   if (input.rerank !== undefined && typeof input.rerank !== "boolean") throw new TypeError("rerank must be a boolean");
   return {
     query: input.query,
     mode,
     limit: limit as number,
+    ...(scope ? { scope } : {}),
     ...(typeof input.rerank === "boolean" ? { rerank: input.rerank } : {}),
     ...(input.taskId === undefined ? {} : { taskId: safeTaskId(input.taskId) }),
   };
@@ -172,6 +176,9 @@ function getKnownTerms(entities: readonly { name?: string; aliases?: string[] }[
     for (const alias of entity.aliases ?? []) if (alias) terms.add(alias);
   }
   return terms;
+}
+function inSearchScope(filePath: string | undefined, scope: string): boolean {
+  return filePath === scope || filePath?.startsWith(`${scope}/`) === true;
 }
 function buildSentenceHits(lexical: LexicalHit[], passages: readonly SemanticPassageHit[], limit: number): SemanticSearchHit[] {
   const ftsByEntity = new Map<string, { rank: number; hit: LexicalHit }>();
@@ -355,8 +362,9 @@ export function createSemanticActions(moduleContext: ModuleContext): ModuleActio
       const task = tasks.begin(context, taskId, "reading_snapshot");
       try {
         if (!input.query.trim()) return { ok: true, snapshot: context.reader.snapshot, data: { query: input.query, mode: input.mode, results: [], taskId } } as ActionResult;
-        const entities = await readCanonicalSnapshotEntities(context.reader, task.signal);
-        const knownTerms = getKnownTerms(entities);
+        const allEntities = await readCanonicalSnapshotEntities(context.reader, task.signal);
+        const entities = input.scope ? allEntities.filter((entity) => inSearchScope(entity.filePath, input.scope!)) : allEntities;
+        const knownTerms = getKnownTerms(allEntities);
         const lexical = searchSnapshotLexically(entities, input.query, Math.max(input.limit * 2, input.limit), knownTerms);
         let nearest: SemanticPassageHit[] = [];
         let vectorUnavailable = false;
@@ -365,8 +373,9 @@ export function createSemanticActions(moduleContext: ModuleContext): ModuleActio
           try {
             const result = await withCapability(moduleContext, (embedding) => embedding.nearest(input.query, context.reader.snapshot, {
               limit: Math.min(100, Math.max(input.limit * 3, 30)),
+              ...(input.scope ? { scope: input.scope } : {}),
             }, task.signal));
-            nearest = result.hits;
+            nearest = input.scope ? result.hits.filter((hit) => inSearchScope(hit.filePath, input.scope!)) : result.hits;
           } catch (error) {
             if (task.signal.aborted) throw error;
             vectorUnavailable = true;

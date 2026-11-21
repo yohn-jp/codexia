@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { JobRequest, SnapshotId } from "@codexia/contracts";
+import { assertProjectPath, type JobRequest, type SnapshotId } from "@codexia/contracts";
 import { installWorkerHandler } from "@codexia/module-runtime";
 import {
   EMBEDDING_DIMENSIONS,
@@ -350,9 +350,12 @@ function cosineSimilarityDense(a: readonly number[], b: readonly number[]): numb
 async function nearest(request: JobRequest, input: Record<string, unknown>, signal: AbortSignal): Promise<{ hits: SemanticPassageHit[] }> {
   if (typeof input.cacheDirectory !== "string" || typeof input.key !== "string" || typeof input.query !== "string" ||
       !Number.isSafeInteger(input.limit) || (input.limit as number) < 1 || (input.limit as number) > 100 ||
-      !Array.isArray(input.excludeSceneIds) || input.excludeSceneIds.some((id) => typeof id !== "string")) {
+      !Array.isArray(input.excludeSceneIds) || input.excludeSceneIds.some((id) => typeof id !== "string") ||
+      (input.scope !== undefined && typeof input.scope !== "string")) {
     throw errorWithCode("invalid_semantic_query", "Nearest search request is invalid");
   }
+  const scope = typeof input.scope === "string" ? input.scope : undefined;
+  if (scope !== undefined) assertProjectPath(scope);
   if (!input.query.trim()) return { hits: [] };
   const cacheFile = cacheFileFor(input.cacheDirectory, request.snapshot.projectId);
   const store = await loadStore(cacheFile);
@@ -364,6 +367,7 @@ async function nearest(request: JobRequest, input: Record<string, unknown>, sign
   const hits: SemanticPassageHit[] = [];
   for (const passage of membership.passages) {
     if (signal.aborted) throw errorWithCode("job_cancelled", "Semantic nearest-neighbor query was cancelled");
+    if (scope !== undefined && (!passage.reference.filePath || (passage.reference.filePath !== scope && !passage.reference.filePath.startsWith(`${scope}/`)))) continue;
     const item = store.passages[passage.reference.key];
     if (!item || item.entityId !== passage.entityId || item.sceneId !== passage.sceneId || item.sentenceIndex !== passage.sentenceIndex ||
         item.textHash !== fnv1aHash(passage.text) || item.modelId !== EMBEDDING_MODEL_ID || item.modelVersion !== EMBEDDING_MODEL_VERSION || item.dimensions !== EMBEDDING_DIMENSIONS) {

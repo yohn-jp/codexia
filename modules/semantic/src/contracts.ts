@@ -83,7 +83,7 @@ export interface SemanticEmbeddingCapability {
   nearest(
     query: string,
     snapshot: SnapshotId,
-    options: { limit?: number; excludeSceneIds?: readonly string[] },
+    options: { limit?: number; excludeSceneIds?: readonly string[]; scope?: string },
     signal: AbortSignal,
   ): Promise<SemanticNearestResult>;
   status(snapshot: SnapshotId, signal: AbortSignal): Promise<SemanticIndexStatus>;
