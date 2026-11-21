@@ -553,8 +553,16 @@ function passwordRotationPsql(role,input){
 function preflightPasswordPsql(password){
   const input=validatePostgresAppPassword(password).replace(/\n$/u,'')+
     '\nSELECT current_user || chr(58) || current_setting(\'transaction_read_only\');\n';
-  const command='IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -w -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia_preflight -d codexia';
-  return runWithSensitiveInput('podman',['exec','-i','codexia-db','sh','-ec',command],input);
+  const database=inspect('codexia-db');
+  assert.equal(database?.State.Running,true,'Canonical PostgreSQL is not running');
+  const image=imageId(database.Image);
+  assert.match(image,/^[a-f0-9]{64}$/u,'Canonical PostgreSQL client image is unobservable');
+  const command='IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -w -qAt -v ON_ERROR_STOP=1 -h codexia-db -U codexia_preflight -d codexia';
+  // The DB container trusts its own loopback. A separate client on the
+  // private writer network reaches the password-authenticated pg_hba rule.
+  return runWithSensitiveInput('podman',['run','--rm','-i','--pull=never','--network','codexia-data',
+    '--read-only','--cap-drop','all','--security-opt','no-new-privileges','--user','postgres',
+    '--entrypoint','sh',image,'-ec',command],input,{timeout:30000});
 }
 function exists(container){
   const result=spawnSync('podman',['container','exists',container],{timeout:15000,stdio:'ignore'});
