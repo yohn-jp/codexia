@@ -15,6 +15,11 @@ function run(command, args, options = {}) {
   catch (error) { throw new Error(`${command} ${args.join(' ')} failed (${error.status ?? 'unknown'}): ${error.stderr ?? error.stdout ?? error.message}`); }
 }
 
+function canonicalLocalImageId(value) {
+  assert.match(value ?? '', /^(?:sha256:)?[a-f0-9]{64}$/u, 'Podman did not return a canonical local image ID');
+  return value.startsWith('sha256:') ? value : `sha256:${value}`;
+}
+
 function release(identity, image) {
   return { format: 'codexia-update-release/v1', channel: 'stable', state: 'published',
     version: identity.version, sourceSha: identity.sourceSha, image, platform: identity.platform,
@@ -82,7 +87,7 @@ async function adapters(fixture) {
     '--security-opt', 'no-new-privileges', '--entrypoint', 'cat', imageId, '/app/update-identity.json']));
   host.pullAndVerify = async item => {
     const id = idFor(item);
-    assert.equal(run('podman', ['image', 'inspect', '--format', '{{.Id}}', id]), id);
+    assert.equal(canonicalLocalImageId(run('podman', ['image', 'inspect', '--format', '{{.Id}}', id])), id);
     const identity = readIdentity(id);
     for (const key of ['version', 'sourceSha', 'platform', 'profile', 'migrationFingerprint', 'persistenceFormat', 'apiEpoch']) {
       assert.equal(identity[key], item[key], `Fixture OCI embedded ${key} differs from the release record`);
@@ -99,8 +104,8 @@ async function adapters(fixture) {
   host.observe = async () => {
     const result = await original.observe();
     return { ...result, writers: result.writers.map(writer => ({ ...writer,
-      image: writer.image === fixture.images.baseId ? fixture.baseRelease.image :
-        writer.image === fixture.images.targetId ? fixture.targetRelease.image : writer.image })) };
+      image: canonicalLocalImageId(writer.image) === fixture.images.baseId ? fixture.baseRelease.image :
+        canonicalLocalImageId(writer.image) === fixture.images.targetId ? fixture.targetRelease.image : writer.image })) };
   };
   host.applyAdditiveSchema = async (item, priorFingerprint, targetFingerprint) =>
     original.applyAdditiveSchema({ ...item, image: idFor(item) }, priorFingerprint, targetFingerprint);
@@ -162,7 +167,7 @@ async function adapters(fixture) {
     assert.equal(found.status, 0, `Unable to observe preflight container: ${found.stderr}`);
     const [container] = JSON.parse(found.stdout);
     assert.equal(container.Config?.Labels?.['io.codexia.initial-activation'], owner.operationId);
-    assert.equal(container.ImageName ?? container.Config?.Image, idFor(owner.release));
+    assert.equal(canonicalLocalImageId(container.ImageName ?? container.Config?.Image), idFor(owner.release));
     run('podman', ['rm', '--force', container.Id]);
   };
   // The private proxy uses the real route file and container network. This adapter
@@ -172,7 +177,7 @@ async function adapters(fixture) {
     const [container] = JSON.parse(run('podman', ['inspect', '--type', 'container', 'codexia-api-proxy']));
     assert.equal(container.State?.Running, true);
     assert.equal(container.Config?.Labels?.['codexia.runtime-contract-test'], fixture.nonce);
-    assert.equal(container.Image, fixture.images.baseId.replace(/^sha256:/u, ''));
+    assert.equal(canonicalLocalImageId(container.Image), fixture.images.baseId);
   };
   let state;
   try { state = await loadControllerState(stateFile); }
@@ -374,7 +379,7 @@ async function main(fixture) {
       const exists = spawnSync('podman', ['container', 'exists', name], { stdio: 'ignore' });
       if (exists.status !== 0) continue;
       const [container] = JSON.parse(run('podman', ['inspect', '--type', 'container', name]));
-      const id = typeof container.Image === 'string' && container.Image.startsWith('sha256:') ? container.Image : `sha256:${container.Image}`;
+      const id = canonicalLocalImageId(container.Image);
       if (container.Config?.Labels?.['codexia.runtime-contract-test'] === fixture.nonce &&
           [fixture.images.baseId, fixture.images.targetId].includes(id)) run('podman', ['rm', '--force', container.Id]);
     }

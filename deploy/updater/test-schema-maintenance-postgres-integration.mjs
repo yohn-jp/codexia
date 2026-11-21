@@ -15,9 +15,12 @@ function run(command, args, options = {}) {
 }
 
 function imageId(image) {
-  const value = run('podman', ['image', 'inspect', '--format', '{{.Id}}', image]);
-  assert.match(value, /^sha256:[a-f0-9]{64}$/u);
-  return value;
+  return canonicalImageId(run('podman', ['image', 'inspect', '--format', '{{.Id}}', image]));
+}
+
+function canonicalImageId(value) {
+  assert.match(value, /^(?:sha256:)?[a-f0-9]{64}$/u);
+  return value.startsWith('sha256:') ? value : `sha256:${value}`;
 }
 
 async function embeddedIdentity(image) {
