@@ -65,6 +65,7 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
     'install_fixture_manager_xdg',
     'phase_f_xdg_generator_path',
     'manager XDG environment verified after systemd environment generation',
+    'tar -C "$repo_root" -cf - deploy scripts packages/persistence-postgres/migrations',
     'codexia_stage=$stage',
     'apply_runner secrets',
     'apply_runner base',

@@ -208,7 +208,7 @@ phase_dir_owned=true
 [[ ! -e "$source_root" && ! -L "$source_root" ]] || fail 'Temporary Ansible source path already exists.'
 sudo install -d -o root -g root -m 0755 "$source_root"
 source_owned=true
-tar -C "$repo_root" -cf - deploy scripts | sudo tar -C "$source_root" -xf -
+tar -C "$repo_root" -cf - deploy scripts packages/persistence-postgres/migrations | sudo tar -C "$source_root" -xf -
 sudo chmod -R a+rX "$source_root"
 
 printf '%s\n' '=== Generate ephemeral signed channel from certified Core release records as the fixture user ==='
