@@ -42,6 +42,7 @@
 
     - name: Gather target host facts
       ansible.builtin.setup:
+        gather_subset: "{{ ['!all', '!min', 'user'] if codexia_stage in ['secrets', 'base', 'auth-runtime'] else ['all'] }}"
 
     - name: Provision Better Auth runtime role, schema, and protected secrets only when explicitly opted in
       ansible.builtin.include_tasks:
