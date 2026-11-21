@@ -38,7 +38,7 @@ jobs:
           echo "CODEXIA_AUDIT_TOOL_DIR=$RUNNER_TEMP/audit-tool" >> "$GITHUB_ENV"
       - name: Install pinned OCR delegation CLI
         run: |
-          npm install --prefix "$RUNNER_TEMP/audit-ocr" --no-audit --no-fund @alibaba-group/open-code-review@1.13.13
+          npm install --prefix "$RUNNER_TEMP/audit-ocr" --ignore-scripts --no-audit --no-fund @alibaba-group/open-code-review@1.13.13
           echo "CODEXIA_AUDIT_OCR_BIN=$RUNNER_TEMP/audit-ocr/node_modules/.bin/ocr" >> "$GITHUB_ENV"
       - name: Test audit exporter, delegation and browser downloads
         run: node --test scripts/audit/export.test.mjs scripts/audit/delegate.test.mjs
