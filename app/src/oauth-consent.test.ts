@@ -43,3 +43,19 @@ test("consent continuation allows only the current Web origin", () => {
   assert.throws(() => sameOriginOAuthContinuation("https://attacker.example.test/", "https://codexia.example.test"), /一致/u);
   assert.throws(() => sameOriginOAuthContinuation("//attacker.example.test/", "https://codexia.example.test"), /一致/u);
 });
+
+test("native consent continuation accepts only the app's exact registered deep link", () => {
+  const origin = "https://codexia.example.test";
+  const native = "jp.yohn.codexia:/oauth2redirect?code=one&state=two&iss=https%3A%2F%2Fcodexia.example.test%2Fapi%2Fauth";
+  assert.equal(sameOriginOAuthContinuation(native, origin), native);
+  for (const rejected of [
+    "jp.yohn.codexia:/oauth2redirect/other?code=one",
+    "jp.yohn.codexia://attacker.test/oauth2redirect?code=one",
+    "jp.yohn.codexia:/oauth2redirect#fragment",
+    "another.app:/oauth2redirect?code=one",
+    "javascript:alert(1)",
+    "https://attacker.test/oauth2redirect?code=one",
+  ]) {
+    assert.throws(() => sameOriginOAuthContinuation(rejected, origin), /一致/u, rejected);
+  }
+});

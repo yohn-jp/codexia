@@ -55,8 +55,12 @@ export async function submitOAuthConsent(accept: boolean): Promise<OAuthConsentC
 export function sameOriginOAuthContinuation(value: string, pageOrigin: string): string {
   const page = new URL(pageOrigin);
   const target = new URL(value, page.origin);
-  if (target.origin !== page.origin || target.username || target.password || target.hash) {
-    throw new Error("認可の継続先がWebアプリと一致しません。");
+  // The signed Better Auth continuation may be the native public client's
+  // registered deep link. Never accept arbitrary external origins or schemes.
+  const nativeCallback = target.protocol === "jp.yohn.codexia:" &&
+    !target.host && target.pathname === "/oauth2redirect";
+  if ((!nativeCallback && target.origin !== page.origin) || target.username || target.password || target.hash) {
+    throw new Error("認可の継続先が登録済みWebまたはiOSのコールバックと一致しません。");
   }
   return target.toString();
 }
