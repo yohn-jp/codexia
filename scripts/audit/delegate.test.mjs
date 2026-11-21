@@ -49,7 +49,7 @@ if(a[1]==='preview'){
   for (const [sha, value] of [[main, 'export const value = 3;\n'], [feature, 'export const value = 2;\n']]) {
     const folder = join(site, 'snapshots', sha);
     mkdirSync(folder, { recursive: true });
-    writeFileSync(join(folder, 'repomix.json'), JSON.stringify({ audit: { sourceSha: sha }, files: { 'src/alpha.ts': value } }));
+    writeFileSync(join(folder, 'repomix.json'), JSON.stringify({ audit: { sourceSha: sha }, files: { 'src/alpha.ts': value.replace(/\n$/u, '') } }));
     writeFileSync(join(folder, 'manifest.json'), JSON.stringify({ sourceSha: sha, files: [{ path: 'src/alpha.ts' }] }));
   }
   writeFileSync(join(site, 'manifest.json'), JSON.stringify({ branches: [{ branch: 'feature', sha: feature }, { branch: 'main', sha: main }],
