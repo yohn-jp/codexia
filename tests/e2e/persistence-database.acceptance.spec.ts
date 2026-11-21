@@ -810,3 +810,60 @@ test("a 501-document PostgreSQL work opens its final scene through the canonical
   await expect(outline.locator(".pg-outline-item")).toHaveCount(502);
   await expect(page.getByRole("heading",{name:"Large scene 502",exact:true})).toBeVisible();
 });
+
+test("an evidence link opens Knowledge outside the current filter and ignores a late selection", async ({ page }) => {
+  const { project, scene } = await createWritingFixture(page);
+  const origin = new URL(page.url()).origin;
+  const headers = { Origin: origin };
+  const path = `/api/v1/persistence/projects/${project.id}`;
+  const hidden = crypto.randomUUID();
+  const visible = crypto.randomUUID();
+  for (const [id, name] of [[hidden, "絞り込み外の知識"], [visible, "一覧に表示する知識"]] as const) {
+    const response = await page.request.put(`${path}/nodes/${id}`, { headers, data: {
+      type: "person", name, attributes: {}, status: "confirmed", expectedVersion: null,
+    } });
+    expect(response.ok()).toBe(true);
+  }
+  const anchorId = crypto.randomUUID();
+  const anchorPath = `${path}/documents/${scene.id}/anchors`;
+  const anchor = await page.request.post(anchorPath, { headers, data: {
+    id: anchorId, revisionId: scene.headRevisionId, fromUtf16: 0, toUtf16: 7, status: "confirmed",
+  } });
+  expect(anchor.ok()).toBe(true);
+  const mention = await page.request.post(`${anchorPath}/${anchorId}/mentions`, { headers, data: { nodeId: hidden, status: "confirmed" } });
+  expect(mention.ok()).toBe(true);
+  await page.reload();
+  await openResearchInspector(page);
+  await page.getByLabel("名前または別名で検索").fill("一覧に表示する知識");
+  const results = page.locator(".pg-knowledge-list li");
+  await expect(results).toHaveCount(1);
+  await expect(results).toContainText("一覧に表示する知識");
+  const evidenceLink = page.getByRole("button", { name: "Knowledgeの根拠を表示", exact: true });
+  const detail = page.getByRole("region", { name: "Knowledge詳細" });
+
+  const detailPath = (url: URL) => url.pathname === `${path}/nodes/${hidden}`;
+  const requestedDetail = page.waitForRequest(request => detailPath(new URL(request.url())));
+  await evidenceLink.click();
+  await requestedDetail;
+  await expect(detail.getByRole("heading", { name: "絞り込み外の知識" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Knowledgeの根拠" })).toContainText("最初の本文。");
+  await results.getByRole("button", { name: /一覧に表示する知識/ }).click();
+
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route(detailPath, async route => {
+    const response = await route.fetch();
+    await gate;
+    await route.fulfill({ response }).catch(() => undefined);
+  });
+  const lateRequest = page.waitForRequest(request => detailPath(new URL(request.url())));
+  try {
+    await evidenceLink.click();
+    await lateRequest;
+    await results.getByRole("button", { name: /一覧に表示する知識/ }).click();
+    await expect(detail.getByRole("heading", { name: "一覧に表示する知識" })).toBeVisible();
+  } finally { release(); }
+  await page.unrouteAll({ behavior: "wait" });
+  await expect(detail.getByRole("heading", { name: "一覧に表示する知識" })).toBeVisible();
+  await expect(detail.getByRole("heading", { name: "絞り込み外の知識" })).toHaveCount(0);
+});

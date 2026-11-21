@@ -19,8 +19,12 @@ repo_root=$(pwd)
 backup_script="$repo_root/deploy/updater/standalone-backup.sh"
 live_db_image=$(sed -n 's/^Image=//p' "$repo_root/deploy/quadlet/codexia-db.container")
 backup_db_image=$(sed -n "s/^readonly PG_IMAGE='\(.*\)'$/\1/p" "$backup_script")
+backend_node_image=$(sed -n 's/^ARG NODE_IMAGE=//p' "$repo_root/Dockerfile.backend")
+backend_history_module="$repo_root/packages/api/dist/job-history-store.js"
 test -n "$live_db_image"
 test "$backup_db_image" = "$live_db_image"
+test -n "$backend_node_image"
+test -f "$backend_history_module"
 
 for container in codexia-db codexia-api codexia-slot-blue codexia-slot-green codexia-preflight-blue codexia-preflight-green; do
   status=0
@@ -124,6 +128,11 @@ podman volume create codexia-backup-test-db >/dev/null
 database_created=true
 podman volume create codexia-history >/dev/null
 history_created=true
+# Match the backend image's COPY-UP ownership for the empty named volume:
+# Dockerfile.backend defines /history as node:node (UID/GID 1000).
+podman run --rm --network none --read-only --cap-drop all --cap-add chown --security-opt no-new-privileges \
+  --user 0:0 --entrypoint /bin/bash --volume codexia-history:/history \
+  "$backend_node_image" -e -c 'chmod 0700 /history && chown 1000:1000 /history'
 printf 'fixture-only-admin-password' > "$tmp/admin-password"
 chmod 0644 "$tmp/admin-password"
 container_created=true
@@ -140,9 +149,25 @@ done
 podman exec codexia-db psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia_admin -d codexia -c 'SELECT 1' >/dev/null
 podman exec codexia-db psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia \
   -c "CREATE TABLE public.backup_probe(id integer PRIMARY KEY, value text NOT NULL); INSERT INTO public.backup_probe VALUES (1, 'encrypted-fixture-row');" >/dev/null
-podman run --rm --network none --entrypoint /bin/sh \
-  --volume codexia-history:/history "$live_db_image" -ec \
-  'mkdir -p /history/fixture && printf "encrypted fixture history\\n" > /history/fixture/history.txt'
+write_backend_history() {
+  local job_id="$1"
+  podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+    --user 1000:1000 --entrypoint node \
+    --volume codexia-history:/history \
+    --volume "$backend_history_module:/fixture/job-history-store.js:ro" \
+    "$backend_node_image" --input-type=module -e \
+    'import { pathToFileURL } from "node:url"; const { JobHistoryStore } = await import(pathToFileURL("/fixture/job-history-store.js")); await new JobHistoryStore("/history").beginDomainJob({ id: process.argv[1], type: "fixture", projectId: "backup-fixture" });' \
+    "$job_id" >/dev/null
+}
+write_backend_history backend-history-one
+backend_history_fingerprint=$(podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1000:1000 --entrypoint /bin/bash -v codexia-history:/history:ro "$backup_db_image" -euo pipefail -c \
+  'cd /history; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum' | sha256sum | cut -d' ' -f1)
+write_backend_history backend-history-two
+changed_history_fingerprint=$(podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1000:1000 --entrypoint /bin/bash -v codexia-history:/history:ro "$backup_db_image" -euo pipefail -c \
+  'cd /history; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum' | sha256sum | cut -d' ' -f1)
+test "$backend_history_fingerprint" != "$changed_history_fingerprint"
 
 # Fencing and lock failures happen before any artifact is published.
 if CODEXIA_UPDATER_LOCK_DIRECTORY="$state_dir" node "$repo_root/deploy/updater/standalone-updater.mjs" backup "$tmp/config.json" "$remote" "$recipient" > "$tmp/unapproved.log" 2>&1; then
@@ -175,6 +200,68 @@ fi
 grep -q 'Writer/preflight still running: codexia-api' "$tmp/live-writer.log"
 podman rm -f codexia-api >/dev/null
 api_fixture_created=false
+
+# Backend files are private to UID 1000. A differently owned private child
+# must make backup fail closed instead of publishing a fingerprint with an
+# omitted subtree.
+podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1000:1000 --entrypoint node --volume codexia-history:/history \
+  "$backend_node_image" --input-type=module -e \
+  'import { chmod } from "node:fs/promises"; await chmod("/history", 0o711); await chmod("/history/jobs", 0o713);'
+podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1001:1001 --entrypoint node --volume codexia-history:/history \
+  "$backend_node_image" --input-type=module -e \
+  'import { mkdir } from "node:fs/promises"; await mkdir("/history/jobs/private-child", { mode: 0o700 });'
+podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1000:1000 --entrypoint node --volume codexia-history:/history \
+  "$backend_node_image" --input-type=module -e \
+  'import { chmod } from "node:fs/promises"; await chmod("/history", 0o700); await chmod("/history/jobs", 0o700);'
+if run_locked_backup "$remote" "$recipient" > "$tmp/unreadable-history.log" 2>&1; then
+  echo 'Backup accepted history with an unenumerable private child' >&2
+  exit 1
+fi
+grep -Eqi 'permission denied|operation not permitted' "$tmp/unreadable-history.log"
+podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1000:1000 --entrypoint node --volume codexia-history:/history \
+  "$backend_node_image" --input-type=module -e \
+  'import { chmod } from "node:fs/promises"; await chmod("/history", 0o711); await chmod("/history/jobs", 0o713);'
+podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1001:1001 --entrypoint node --volume codexia-history:/history \
+  "$backend_node_image" --input-type=module -e \
+  'import { rm } from "node:fs/promises"; await rm("/history/jobs/private-child", { recursive: true });'
+podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1000:1000 --entrypoint node --volume codexia-history:/history \
+  "$backend_node_image" --input-type=module -e \
+  'import { chmod } from "node:fs/promises"; await chmod("/history", 0o700); await chmod("/history/jobs", 0o700);'
+podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1000:1000 --entrypoint node --volume codexia-history:/history \
+  "$backend_node_image" --input-type=module -e \
+  'import { chmod } from "node:fs/promises"; await chmod("/history", 0o711); await chmod("/history/jobs", 0o713);'
+podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1001:1001 --entrypoint node --volume codexia-history:/history \
+  "$backend_node_image" --input-type=module -e \
+  'import { chmod, mkdir, writeFile } from "node:fs/promises"; await mkdir("/history/jobs/private-files", { mode: 0o700 }); await writeFile("/history/jobs/private-files/unreadable.txt", "private", { mode: 0o600 }); await chmod("/history/jobs/private-files", 0o715);'
+podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1000:1000 --entrypoint node --volume codexia-history:/history \
+  "$backend_node_image" --input-type=module -e \
+  'import { chmod } from "node:fs/promises"; await chmod("/history/jobs", 0o700);'
+if run_locked_backup "$remote" "$recipient" > "$tmp/unreadable-file.log" 2>&1; then
+  echo 'Backup accepted a private history file it could not read' >&2
+  exit 1
+fi
+grep -Eqi 'permission denied|operation not permitted' "$tmp/unreadable-file.log"
+podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1000:1000 --entrypoint node --volume codexia-history:/history \
+  "$backend_node_image" --input-type=module -e \
+  'import { chmod } from "node:fs/promises"; await chmod("/history/jobs", 0o713);'
+podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1001:1001 --entrypoint node --volume codexia-history:/history \
+  "$backend_node_image" --input-type=module -e \
+  'import { rm } from "node:fs/promises"; await rm("/history/jobs/private-files", { recursive: true });'
+podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1000:1000 --entrypoint node --volume codexia-history:/history \
+  "$backend_node_image" --input-type=module -e \
+  'import { chmod } from "node:fs/promises"; await chmod("/history", 0o700); await chmod("/history/jobs", 0o700);'
 
 (
   exec 9> "$state_dir/host.lock"

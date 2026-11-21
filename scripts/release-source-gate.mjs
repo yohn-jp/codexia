@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // A completed, exact-source Verify main run authorizes one component release.
-// Evaluate only after Verify completes. A later change to the same component supersedes an older source.
+// Evaluate only after Verify completes. Only a net change to the same component supersedes a source.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -36,8 +36,7 @@ export function selectReleaseSource(component, source, main, git, before) {
   assert.match(source, /^[a-f0-9]{40}$/u);
   assert.match(main, /^[a-f0-9]{40}$/u);
   const history = git('rev-list', '--first-parent', main).trim().split('\n');
-  const index = history.indexOf(source);
-  assert.ok(index >= 0, 'Verified source is outside the first-parent history of main');
+  assert.ok(history.includes(source), 'Verified source is outside the first-parent history of main');
   const changed = (revision, base) => {
     const output = base === undefined
       ? git('diff-tree', '--root', '--diff-merges=first-parent', '--no-commit-id',
@@ -48,8 +47,9 @@ export function selectReleaseSource(component, source, main, git, before) {
   };
   // An unknown push boundary cannot prove that the component was unaffected.
   if (before !== null && !changed(source, before)) return { affected: false };
-  const successor = history.slice(0, index).find(revision => changed(revision));
-  return successor ? { affected: false, successor } : { affected: true };
+  // A change and revert in a later push can leave both component trees equivalent.
+  if (source !== main && changed(main, source)) return { affected: false, successor: main };
+  return { affected: true };
 }
 
 async function readVerifiedPushBase(run, repository, token) {

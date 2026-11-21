@@ -58,7 +58,7 @@ test('only a newer change to the same component supersedes an affected source', 
     git('commit', '-m', file);
     return git('rev-parse', 'HEAD').trim();
   };
-  commit('README.md', 'initial');
+  const initial = commit('README.md', 'initial');
   const frontend = commit('app/src/source.ts', 'initial frontend');
   const backend = commit('deploy/backend/config.json', 'backend only');
   const unrelated = commit('docs/notes.md', 'documentation');
@@ -73,8 +73,14 @@ test('only a newer change to the same component supersedes an affected source', 
 
   const updated = commit('app/src/source.ts', 'new frontend');
   const reverted = commit('app/src/source.ts', 'initial frontend');
-  assert.equal(selectReleaseSource('frontend', frontend, reverted, git).affected, false);
+  assert.equal(selectReleaseSource('frontend', frontend, reverted, git, initial).affected, true,
+    'A later push with no net frontend delta leaves the earlier affected push eligible');
+  assert.equal(selectReleaseSource('frontend', reverted, reverted, git, unrelated).affected, false,
+    'The later change and revert arrived in a single push with no frontend impact');
+  assert.equal(selectReleaseSource('frontend', frontend, updated, git).affected, false);
   assert.equal(selectReleaseSource('frontend', updated, reverted, git).affected, false);
+  assert.equal(selectReleaseSource('frontend', reverted, reverted, git, updated).affected, true,
+    'A revert pushed separately is itself affected and may release');
   assert.equal(selectReleaseSource('backend', backend, reverted, git).affected, true);
 
   git('checkout', '-b', 'fixture', frontend);

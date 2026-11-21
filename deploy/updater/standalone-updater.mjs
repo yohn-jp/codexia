@@ -8,9 +8,10 @@ import { PodmanStandaloneHost } from './standalone-host.mjs';
 import { verifyUpdateChannel } from '../../scripts/update-channel.mjs';
 import { validateUpdateRelease } from '../../scripts/update-release-policy.mjs';
 import { assertMaintenanceSnapshotVerifier, maintainStandaloneUpdater, recoverInterruptedMaintenance } from './standalone-maintenance.mjs';
+import { recoverSchemaMaintenance, runSchemaMaintenance, validateSchemaMaintenanceIntent } from '../../scripts/standalone-schema-maintenance.mjs';
 
 const [command,configPath,...arguments_]=process.argv.slice(2);
-if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|verify-bootstrap|verify-cutover-backup|verify-maintenance-backup|cutover|bootstrap-cutover|recover-cutover|initialize-schema|init-fresh|init|recover-initial|boot|tick|status|verify|verify-resume|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback> /absolute/config.json [arguments]');
+if(!command||!configPath||!path.isAbsolute(configPath))throw Error('Usage: codexia-updater <verify-legacy|verify-bootstrap|verify-cutover-backup|verify-maintenance-backup|cutover|bootstrap-cutover|recover-cutover|initialize-schema|init-fresh|init|recover-initial|boot|tick|status|verify|verify-resume|pause|resume|maintain|backup|rollback|acceptance-update|acceptance-rollback|schema-maintenance> /absolute/config.json [arguments]');
 let config=JSON.parse(await readFile(configPath,'utf8'));
 assert.equal(config.format,'codexia-standalone-updater/v1');
 assert.ok(path.isAbsolute(config.stateFile)&&path.isAbsolute(config.publicKeyFile));
@@ -46,9 +47,23 @@ async function readPrivateProof(filename,limit=65536){
   return JSON.parse(await readFile(filename,'utf8'));
 }
 const maintenanceMarker=path.join(path.dirname(config.stateFile),'maintenance','in-progress.json');
+const schemaMarkerStore={
+  save:value=>atomicWrite(maintenanceMarker,JSON.stringify(validateSchemaMaintenanceIntent(value))+'\n'),
+  load:async()=>validateSchemaMaintenanceIntent(JSON.parse(await readFile(maintenanceMarker,'utf8'))),
+  clear:()=>clearBackupIntent(maintenanceMarker),
+};
+async function readSchemaMarkerIfPresent(){
+  let metadata;
+  try{metadata=await lstat(maintenanceMarker);}catch(error){if(error.code==='ENOENT')return null;throw error;}
+  assert.ok(metadata.isFile()&&!metadata.isSymbolicLink()&&(metadata.mode&0o777)===0o600,'Maintenance marker must be a private regular file');
+  if(typeof process.getuid==='function')assert.equal(metadata.uid,process.getuid(),'Maintenance marker owner differs from the service user');
+  const value=JSON.parse(await readFile(maintenanceMarker,'utf8'));
+  return value?.format==='codexia-schema-maintenance/v1'?validateSchemaMaintenanceIntent(value):null;
+}
 const pendingCutover=await store.loadCutover();
 if(pendingCutover)assert.ok(['boot','recover-cutover'].includes(command),'Interrupted legacy cutover must recover before other operations');
 const pendingMaintenance=await lstat(maintenanceMarker).then(()=>true,error=>{if(error.code==='ENOENT')return false;if(command==='boot'||command==='maintain')return true;throw error;});
+const pendingSchemaMarker=pendingMaintenance?await readSchemaMarkerIfPresent():null;
 if(pendingMaintenance){
   assert.equal(pendingCutover,null,'Simultaneous cutover and maintenance intents require operator repair');
   assert.equal(await store.loadBackupIntent(),null,'Simultaneous backup and maintenance intents require operator repair');
@@ -59,7 +74,13 @@ if(pendingMaintenance){
     await assertMaintenanceSnapshotVerifier({config,configPath,entry:fileURLToPath(import.meta.url)});
   }else assert.ok(command==='boot'||command==='maintain','Pending runtime maintenance requires recovery before other operations');
 }
+if(command==='schema-maintenance')assert.equal(pendingMaintenance,false,'An existing maintenance marker must be recovered before starting schema maintenance');
 if(command==='boot'){
+  if(pendingSchemaMarker){
+    const host=new PodmanStandaloneHost(config);
+    const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
+    await recoverSchemaMaintenance({controller,state:await store.loadState(),markerStore:schemaMarkerStore,stateFile:config.stateFile,routeFile:config.routeFile});
+  }
   const recovered=await recoverInterruptedMaintenance({config,store,publicKey});
   if(recovered)config=JSON.parse(await readFile(configPath,'utf8'));
 }
@@ -98,6 +119,18 @@ if(command==='recover-cutover'||(command==='boot'&&pendingCutover)){
   const state=await controller.bootstrapCutover(legacy,candidate,config.initialSlot??'blue',source,restore);
   console.log(JSON.stringify({format:'codexia-legacy-cutover/v2',activated:true,slot:state.journal.active.slot,
     legacyImage:legacy.image,candidateImage:state.installed.image}));
+  process.exit(0);
+}else if(command==='schema-maintenance'){
+  assert.equal(arguments_.length,3,'Provide exact signed target release, isolated restore receipt and --approved');
+  const [targetFile,receiptFile,approval]=arguments_;
+  assert.ok(path.isAbsolute(targetFile)&&path.isAbsolute(receiptFile)&&approval==='--approved','Schema maintenance requires explicit approval and absolute evidence paths');
+  const state=await store.loadState();
+  assert.ok(state&&!state.initialActivationPending,'Schema maintenance requires an initialized controller');
+  const target=validateUpdateRelease(JSON.parse(await readFile(targetFile,'utf8')));
+  const source=await readPrivateProof(controllerBackupProofFile);
+  const restore=await readPrivateProof(receiptFile);
+  const result=await runSchemaMaintenance({controller,state,target,source,restore,markerStore:schemaMarkerStore,stateFile:config.stateFile,routeFile:config.routeFile});
+  console.log(JSON.stringify({format:'codexia-schema-maintenance/v1',committed:true,image:result.installed.image,journalGeneration:result.journal.generation}));
   process.exit(0);
 }else if(command==='backup'){
   if(arguments_.at(-1)!=='--approved')throw new Error('Backup requires the explicit --approved maintenance attestation');
