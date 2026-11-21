@@ -61,6 +61,7 @@ test("PostgreSQL semantic search and index passages include native scenes but ex
     .find((document) => document.kind === "chapter")!;
   const nativeDocumentId = randomUUID() as DocumentId;
   const noteDocumentId = randomUUID() as DocumentId;
+  const nativeSceneMarkdown = "---\nInterlude\n---\nQuartz native passage is searchable too.";
   await persistence!.transaction(async (transaction) => {
     await transaction.createDocument({
       projectId: project.id,
@@ -69,7 +70,7 @@ test("PostgreSQL semantic search and index passages include native scenes but ex
       parentId: chapter.id,
       title: "Native scene",
       orderKey: "0002",
-      markdown: "Quartz native passage is searchable too.",
+      markdown: nativeSceneMarkdown,
       authorId: "owner",
       idempotencyKey: randomUUID(),
     });
@@ -94,6 +95,8 @@ test("PostgreSQL semantic search and index passages include native scenes but ex
   const nativeEntityId = "doc-" + nativeDocumentId;
   const notePath = "documents/" + noteDocumentId + ".md";
   const nativePath = "documents/" + nativeDocumentId + ".md";
+  assert.equal(canonicalEntities.find((entity) => entity.id === nativeEntityId)?.body, nativeSceneMarkdown,
+    "native Markdown that resembles a YAML front matter block must remain intact as scene body text");
   let indexedSnapshot: SnapshotId | undefined;
   let indexedPassages: readonly SemanticPassage[] = [];
 
@@ -161,10 +164,10 @@ test("PostgreSQL semantic search and index passages include native scenes but ex
   assert.deepEqual(search.snapshot, reader.snapshot);
   assert.deepEqual(index.snapshot, reader.snapshot);
   assert.deepEqual(indexedSnapshot, reader.snapshot);
-  const indexedIds = indexedPassages.map((passage) => passage.entityId).sort();
+  const indexedIds = [...new Set(indexedPassages.map((passage) => passage.entityId))].sort();
   assert.deepEqual(indexedIds, [legacyEntityId, nativeEntityId].sort());
   assert.equal(new Set(indexedIds).size, 2, "legacy and native scene IDs must not collide");
-  const nativePassage = indexedPassages.find((passage) => passage.filePath === nativePath);
+  const nativePassage = indexedPassages.find((passage) => passage.filePath === nativePath && /Quartz native passage/.test(passage.text));
   assert.ok(nativePassage && /Quartz native passage/.test(nativePassage.text));
   assert.equal(nativePassage.type, "scene");
   assert.equal(indexedPassages.some((passage) => passage.filePath === notePath || /private note/.test(passage.text)), false);

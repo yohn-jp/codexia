@@ -75,9 +75,9 @@ export async function readCanonicalSnapshotEntities(
     let body: string | undefined;
     if (isMarkdown) {
       const parsed = frontMatter(file.content);
-      if (!parsed) continue;
-      raw = parsed.raw;
-      body = parsed.body;
+      if (!parsed && !isNativeSceneBody) continue;
+      raw = parsed?.raw ?? {};
+      body = parsed?.body ?? file.content.trim();
     } else {
       let parsed: unknown;
       try { parsed = YAML.parse(file.content); } catch { continue; }
