@@ -152,6 +152,8 @@ trap cleanup EXIT
 
 [[ "$(id -u "$service_user" 2>/dev/null || true)" == "$service_uid" ]] || fail 'Expected Ansible-created disposable service identity is absent.'
 [[ "$(getent passwd "$service_user" | cut -d: -f6)" == "$service_home" ]] || fail 'Disposable service home differs from fixture contract.'
+service_ansible_version=$(as_service "$ansible_playbook" --version)
+[[ "$service_ansible_version" == 'ansible [core 2.21.6]'* ]] || fail 'Fixture service user cannot execute the pinned Ansible control environment.'
 as_service /usr/bin/test ! -L "$service_home/.local" || fail 'Service local data parent is a symlink; refusing fixture setup.'
 as_service /usr/bin/test ! -e "$phase_dir" || fail 'Application fixture state already exists; refusing adoption.'
 as_service /usr/bin/test ! -L "$phase_dir" || fail 'Application fixture state is a symlink; refusing adoption.'

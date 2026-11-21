@@ -25,6 +25,8 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
   assert.match(workflow, /cancel-in-progress: true/u);
   assert.match(workflow, /test-phase-f-ansible-continuity\.sh/u);
   assert.match(workflow, /bash -n deploy\/ansible\/test-phase-f-ansible-app\.sh/u);
+  assert.match(workflow, /sudo python3 -m venv \/opt\/codexia-ansible/u);
+  assert.match(workflow, /ANSIBLE_PLAYBOOK: \/opt\/codexia-ansible\/bin\/ansible-playbook/u);
   const appRepoRoot = appContinuity.indexOf('repo_root=$(cd');
   const appAccessibleCwd = appContinuity.indexOf('\ncd /tmp\n');
   const appChannelGeneration = appContinuity.indexOf('sudo -H -u "$service_user" env', appAccessibleCwd);
@@ -66,6 +68,7 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
     'phase_f_xdg_generator_path',
     'manager XDG environment verified after systemd environment generation',
     'tar -C "$repo_root" -cf - deploy scripts packages/persistence-postgres/migrations',
+    'service_ansible_version=$(as_service "$ansible_playbook" --version)',
     'codexia_stage=$stage',
     'apply_runner secrets',
     'apply_runner base',
