@@ -395,7 +395,12 @@
     restore_previous(){
       local restore_status=0
       if [[ "$tunnel_present" == true ]]; then systemctl --user stop codexia-tunnel.service >/dev/null 2>&1 || restore_status=1; fi
-      systemctl --user stop codexia-api.service >/dev/null 2>&1 || restore_status=1
+      # Before first activation there may be no generated API service to stop.
+      # Do not turn a failed pristine-schema check into an unrecoverable pending
+      # transaction merely because systemctl cannot find that absent unit.
+      if [[ "$had_unit" == true || -e "$active_unit" || -L "$active_unit" ]]; then
+        systemctl --user stop codexia-api.service >/dev/null 2>&1 || restore_status=1
+      fi
       if [[ "$restore_status" == 0 && "$had_unit" == true ]]; then
         install -m 0644 "$state_dir/rollback-api.container" "$active_unit" || restore_status=1
         systemctl --user daemon-reload || restore_status=1
