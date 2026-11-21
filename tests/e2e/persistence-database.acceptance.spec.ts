@@ -104,6 +104,14 @@ test("Knowledge browse searches literal aliases and pages the same project on De
   await search.fill("Browse 0000");
   await expect(targetSelect).toHaveValue(targetNodeId);
   await expect(targetSelect.locator(`option[value="${targetNodeId}"]`)).toContainText("選択中");
+  await search.fill("");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(50);
+  const textAnchorTarget = page.locator("#pg-knowledge-target");
+  await textAnchorTarget.selectOption(ids[2]!);
+  await search.fill("Browse 0000");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(1);
+  await expect(textAnchorTarget).toHaveValue(ids[2]!);
+  await expect(textAnchorTarget.locator(`option[value="${ids[2]}"]`)).toContainText("選択中");
 
   // An older same-epoch server ignores q/type/status and returns its legacy
   // `{nodes}` contract. The new UI must accept the payload without claiming
@@ -135,6 +143,28 @@ test("Knowledge browse searches literal aliases and pages the same project on De
   await search.fill("");
   await expect(page.locator(".pg-knowledge-list li")).toHaveCount(50);
   await expect(page.getByLabel("種類で絞り込み").locator("option[value='my_custom_type']")).toBeAttached();
+
+  // A mutation from a later page must restart the active filtered browse from
+  // page one without injecting the now nonmatching node into the result set.
+  const statusFilter = page.getByLabel("状態で絞り込み");
+  await statusFilter.selectOption("proposed");
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(50);
+  for (const expectedCount of [100, 150]) {
+    await page.getByRole("button", { name: "続きのKnowledgeを読み込む" }).click();
+    await expect(page.locator(".pg-knowledge-list li")).toHaveCount(expectedCount);
+  }
+  const mutationTarget = page.locator(".pg-knowledge-list li").filter({ hasText: "Browse 0200" });
+  await expect(mutationTarget).toHaveCount(1);
+  await mutationTarget.getByRole("button").first().click();
+  const anchorTarget = page.locator("#pg-knowledge-target");
+  const selectedId = await anchorTarget.inputValue();
+  expect(selectedId).toBeTruthy();
+  await mutationTarget.getByRole("button", { name: "内容を確認して確定" }).click();
+  await expect(page.locator(".pg-knowledge-list li")).toHaveCount(50);
+  await expect(mutationTarget).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "続きのKnowledgeを読み込む" })).toBeVisible();
+  await expect(anchorTarget).toHaveValue(selectedId);
+  await expect(anchorTarget.locator(`option[value="${selectedId}"]`)).toContainText("選択中");
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(new URL(`/mobile/projects/${fixture.project.id}/scenes/${fixture.scene.id}?view=writing`, base).toString());

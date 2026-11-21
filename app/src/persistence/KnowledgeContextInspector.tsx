@@ -55,6 +55,7 @@ export function KnowledgeContextInspector({
   selectedEvidenceId,
   evidenceLoadKey,
   onOpenEvidence,
+  onDataChanged,
   onMerge,
   onNodeUpdate,
 }: {
@@ -66,6 +67,7 @@ export function KnowledgeContextInspector({
   selectedEvidenceId: string;
   evidenceLoadKey: number;
   onOpenEvidence: (item: PersistenceAnchorView) => void;
+  onDataChanged: () => void;
   onMerge: (target: KnowledgeNode, source: KnowledgeNode) => void;
   onNodeUpdate: (node: KnowledgeNode) => void;
 }) {
@@ -130,12 +132,13 @@ export function KnowledgeContextInspector({
     return () => abort.abort();
   }, [projectId]);
 
-  const mutate = async (action: () => Promise<unknown>): Promise<void> => {
+  const mutate = async (action: () => Promise<unknown>, refreshBrowse = false): Promise<void> => {
     if (busy) return;
     setBusy(true);
     setError("");
     try {
       await action();
+      if (refreshBrowse) onDataChanged();
       setReload((current) => current + 1);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "保存できませんでした。");
@@ -151,7 +154,7 @@ export function KnowledgeContextInspector({
       normalized: alias.normalized,
       scope: alias.scope,
       status,
-    }));
+    }), true);
 
   const relationSave = (relation: KnowledgeRelation, status: KnowledgeRelation["status"]): Promise<void> =>
     mutate(() => api.savePersistenceRelation(projectId, relation.sourceId, {
@@ -162,7 +165,7 @@ export function KnowledgeContextInspector({
       validity: relation.validity,
       status,
       expectedVersion: relation.version,
-    }));
+    }), true);
 
   const assertionSave = (assertion: Assertion, status: Assertion["status"]): Promise<void> =>
     mutate(() => api.savePersistenceAssertion(projectId, assertion.id, {
@@ -173,7 +176,7 @@ export function KnowledgeContextInspector({
       confidence: assertion.confidence,
       status,
       expectedVersion: assertion.version,
-    }));
+    }), true);
 
   const current = anchors.find((item) =>
     item.anchor.id === selectedEvidenceId &&
@@ -266,7 +269,7 @@ export function KnowledgeContextInspector({
                 status: "proposed",
               });
               setSurface("");
-            });
+            }, true);
           }}>
             <label className="kci__field">別名候補
               <input value={surface} onChange={(event) => setSurface(event.target.value)} maxLength={512} required />
@@ -304,7 +307,7 @@ export function KnowledgeContextInspector({
               setRelationType("");
               setTarget("");
               setTargetNode(null);
-            });
+            }, true);
           }}>
             <p className="kci__form-title">関係候補を登録</p>
             <label className="kci__field">関係の種類
@@ -387,7 +390,7 @@ export function KnowledgeContextInspector({
                 expectedAnchorVersion: current.anchor.version,
               });
               setStatement("");
-            });
+            }, true);
           }}>
             <label className="kci__field">命題
               <textarea value={statement} onChange={(event) => setStatement(event.target.value)} maxLength={4000} required />
