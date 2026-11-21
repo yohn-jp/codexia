@@ -222,7 +222,13 @@ function timestamp(value: unknown, field: string): string {
   }
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime())) invalidEvent(`Model usage ${field} must be a valid timestamp`);
-  return parsed.toISOString();
+  const calendarDate = new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
+  if (calendarDate.toISOString().slice(0, 10) !== value.slice(0, 10)) {
+    invalidEvent(`Model usage ${field} must be a valid timestamp`);
+  }
+  const normalized = parsed.toISOString();
+  if (!/^\d{4}-/u.test(normalized)) invalidEvent(`Model usage ${field} is outside the supported timestamp range`);
+  return normalized;
 }
 
 function boundedText(value: unknown, min: number, max: number, pattern: RegExp, field: string): string {
