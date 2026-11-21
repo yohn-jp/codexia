@@ -18,6 +18,7 @@ function fixture() {
   const write = (path, value) => { const dest = join(root, path); mkdirSync(dirname(dest), { recursive: true }); writeFileSync(dest, value); };
   write('src/alpha.ts', 'export const value = 1;\n');
   write('.env', 'PRIVATE=initial-secret\n');
+  write('scripts/audit/delegate.rules.json', JSON.stringify({ rules: [{ path: '**/*', rule: 'Review changed behavior', merge_system_rule: true }] }));
   git(root, 'add', '.'); git(root, 'commit', '-qm', 'base');
   const ancestor = git(root, 'rev-parse', 'HEAD');
   git(root, 'checkout', '-qb', 'feature');
@@ -77,13 +78,13 @@ test('one Gemini Markdown covers all verified files and redacts unverified delet
     assert.match(text, /Check regressions/);
     assert.match(text, /PACKET_ID/);
     assert.match(text, /END_OF_PACKET/);
-    assert.match(text, /INCLUDED: 1/);
+    assert.match(text, /INCLUDED:\*\* 1/);
     assert.match(text, /not-in-verified-head-export/);
     assert.match(text, /HEAD_SHA:/);
     const compact = readFileSync(join(dir, 'gemini-diff.md'), 'utf8');
-    assert.match(compact, /Diff-only packet/);
-    assert.doesNotMatch(compact, /# Full file at head/);
-    assert.match(compact, /Review this file and relevant cross-file behavior/);
+    assert.match(compact, /Limited context/);
+    assert.doesNotMatch(compact, /#### Complete source at HEAD/);
+    assert.match(compact, /Required review output/);
     assert.match(compact, /END_OF_PACKET/);
     assert.ok(!existsSync(join(dir, 'files')));
     assert.match(text, /removed line withheld/);
@@ -131,9 +132,55 @@ test('compact packet preserves fenced diff containing a source heading collision
     assert.equal(result.reviews[head].published, 1);
     const compact = readFileSync(join(f.site, 'reviews', head, 'gemini-diff.md'), 'utf8');
     assert.ok(compact.includes('+# Full file at head'));
-    assert.match(compact, /Review this file and relevant cross-file behavior/);
+    assert.match(compact, /Required review output/);
     assert.match(compact, /END_OF_PACKET/);
     const markers = compact.match(/^`{3,}$/gmu) ?? [];
     assert.equal(markers.length % 2, 0, 'All fenced blocks must close');
+  } finally { rmSync(f.base, { recursive: true, force: true }); }
+});
+
+
+test('renamed files preserve provenance but never publish unverified historical deletion', () => {
+  const f = fixture();
+  try {
+    git(f.root, 'checkout', '-q', 'feature');
+    git(f.root, 'mv', 'src/alpha.ts', 'src/beta.ts');
+    writeFileSync(join(f.root, 'src/beta.ts'), 'export const value = 1;\n');
+    git(f.root, 'add', '.'); git(f.root, 'commit', '-qm', 'rename without source modification');
+    const head = git(f.root, 'rev-parse', 'HEAD');
+    const folder = join(f.site, 'snapshots', head);
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'repomix.json'), JSON.stringify({ audit: { sourceSha: head }, files: { 'src/beta.ts': 'export const value = 1;' } }));
+    writeFileSync(join(folder, 'manifest.json'), JSON.stringify({ sourceSha: head, files: [{ path: 'src/beta.ts' }] }));
+    const m = JSON.parse(readFileSync(join(f.site, 'manifest.json'), 'utf8'));
+    m.branches[0].sha = head;
+    m.snapshots[head] = { status: 'ready', outputs: [{ name: 'repomix.json', bytes: 1 }] };
+    writeFileSync(join(f.site, 'manifest.json'), JSON.stringify(m));
+    let fake = readFileSync(f.bin, 'utf8');
+    fake = fake.replaceAll("path:'src/alpha.ts'", "path:'src/beta.ts'").replace("status:'modified'", "status:'renamed'");
+    writeFileSync(f.bin, fake);
+    const result = buildDelegation(f);
+    assert.equal(result.reviews[head].published, 1);
+    const detail = JSON.parse(readFileSync(join(f.site, 'reviews', head, 'manifest.json'), 'utf8'));
+    assert.equal(detail.files[0].previousPath, 'src/alpha.ts');
+    const compact = readFileSync(join(f.site, 'reviews', head, 'gemini-diff.md'), 'utf8');
+    assert.match(compact, /Previous path.*src\/alpha\.ts/u);
+    assert.match(compact, /removed line withheld/u);
+    assert.doesNotMatch(compact, /^-export const value = 1;/mu);
+  } finally { rmSync(f.base, { recursive: true, force: true }); }
+});
+
+test('real OCR CLI resolves preview and rules into a verified packet', { skip: !process.env.CODEXIA_AUDIT_OCR_BIN }, () => {
+  const f = fixture();
+  try {
+    const result = buildDelegation({ ...f, bin: process.env.CODEXIA_AUDIT_OCR_BIN });
+    assert.equal(result.reviews[f.feature].status, 'ready');
+    assert.equal(result.reviews[f.feature].selected, 1);
+    assert.equal(result.reviews[f.feature].published, 1);
+    const output = readFileSync(join(f.site, 'reviews', f.feature, 'gemini-review.md'), 'utf8');
+    assert.match(output, /OCR_VERSION/u);
+    assert.match(output, /src\/alpha\.ts/u);
+    assert.match(output, /END_OF_PACKET/u);
+    assert.doesNotMatch(output, /do-not-leak/u);
   } finally { rmSync(f.base, { recursive: true, force: true }); }
 });
