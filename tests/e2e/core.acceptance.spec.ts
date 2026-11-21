@@ -225,7 +225,9 @@ test("IME composition blocks navigation while coalesced editor state stays curre
 
 test("exact revision acknowledgement removes its draft without reviving deleted recovery on reload", async ({ page }) => {
   const f = await fixture(page); const text = "Acknowledged durable draft.";
-  await editor(page).fill(text); await saved(page, f, text);
+  await replaceEditor(page, text);
+  await expectEditor(page, text);
+  await saved(page, f, text);
   await expect.poll(async () => (await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
   await reopen(page, f); await expectEditor(page, text);
   expect((await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
