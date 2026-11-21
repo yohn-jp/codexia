@@ -32,6 +32,7 @@ Codexia is a PostgreSQL-backed writing workspace with a minimal Core and optiona
 | Native iOS client, on-demand unsigned IPA workflow and personal-device acceptance | [iOS client](deployment/IOS-CLIENT.md) — workflow implemented; physical-device acceptance unverified |
 | Declarative standalone VM configuration | [Infrastructure as code](deployment/IAC.md) |
 | Hosted producer signing | [Producer attestation](hosted-producer-attestation.md) |
+| UI visual preview and Impeccable Detector | [UI preview and scanning](verification/UI-PREVIEW.md) — disposable local PostgreSQL, API and authenticated visual baselines |
 | Development and verification commands | [Verification](verification/README.md) |
 | Test design and proof placement | [Test architecture](verification/TEST-ARCHITECTURE-OPTIMIZATION.md) — normative target |
 | CI graph, artifact trust, certification and delivery gates | [CI/CD architecture](verification/CI-CD.md) — normative target |

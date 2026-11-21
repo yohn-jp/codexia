@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit -p tsconfig.json && vite build && CODEXIA_UI=desktop vite build && CODEXIA_UI=mobile vite build",
+    "build": "tsc --noEmit -p tsconfig.json && node scripts/build-views.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test 'src/**/*.test.{ts,tsx}' 'native/plugins/codexia-auth/src/*.test.mjs' 'native/scripts/*.test.mjs'"
   },
