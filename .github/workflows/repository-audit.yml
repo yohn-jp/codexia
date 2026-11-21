@@ -41,7 +41,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/audit-ocr" --ignore-scripts --no-audit --no-fund @alibaba-group/open-code-review@1.13.13
           echo "CODEXIA_AUDIT_OCR_BIN=$RUNNER_TEMP/audit-ocr/node_modules/.bin/ocr" >> "$GITHUB_ENV"
       - name: Test audit exporter, delegation and browser downloads
-        run: node --test scripts/audit/export.test.mjs scripts/audit/delegate.test.mjs
+        run: node --test scripts/audit/export.test.mjs scripts/audit/delegate.test.mjs scripts/audit/packet-format.test.mjs
       - name: Restore previous verified HEAD exports
         if: github.event_name != 'pull_request'
         uses: actions/cache/restore@v6.1.0
