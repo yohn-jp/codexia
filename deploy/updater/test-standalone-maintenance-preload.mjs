@@ -9,8 +9,11 @@ const fixtureSourceRoot = '/opt/codexia-updater';
 const updaterEntry = path.join(fixtureSourceRoot, 'deploy/updater/standalone-updater.mjs');
 const bootRecoveryEnabled = process.env.CODEXIA_RUNTIME_MAINTENANCE_BOOT_RECOVERY === 'yes';
 const appPasswordRotationEnabled = process.env.CODEXIA_RUNTIME_MAINTENANCE_APP_PASSWORD_ROTATION === 'yes';
+const preflightPasswordRotationEnabled = process.env.CODEXIA_RUNTIME_MAINTENANCE_PREFLIGHT_PASSWORD_ROTATION === 'yes';
 const apiAuthTokenRotationEnabled = process.env.CODEXIA_RUNTIME_MAINTENANCE_AUTH_TOKEN_ROTATION === 'yes';
 const tunnelTokenRotationEnabled = process.env.CODEXIA_RUNTIME_MAINTENANCE_TUNNEL_ROTATION === 'yes';
+const killAfterPreflightSql = process.env.CODEXIA_RUNTIME_MAINTENANCE_KILL_AFTER_PREFLIGHT_SQL === 'yes';
+const killAfterPreflightSecret = process.env.CODEXIA_RUNTIME_MAINTENANCE_KILL_AFTER_PREFLIGHT_SECRET === 'yes';
 const apiAuthTokenCompletionInterruptionEnabled = process.env.CODEXIA_RUNTIME_MAINTENANCE_KILL_AT === 'after-api-auth-completion-marker';
 
 export function installApiAuthTokenCompletionInterruption(markerPath) {
@@ -53,11 +56,12 @@ export function oldSourceVerifierEntry(argv, env) {
 let adapterEntry = null;
 if (bootRecoveryEnabled && path.resolve(process.argv[1] ?? '') === updaterEntry && process.argv[2] === 'boot') {
   adapterEntry = updaterEntry;
-} else if ((appPasswordRotationEnabled || apiAuthTokenRotationEnabled || tunnelTokenRotationEnabled) && path.resolve(process.argv[1] ?? '') === updaterEntry && process.argv[2] === 'maintain') {
+} else if ((appPasswordRotationEnabled || preflightPasswordRotationEnabled || apiAuthTokenRotationEnabled || tunnelTokenRotationEnabled) && path.resolve(process.argv[1] ?? '') === updaterEntry && process.argv[2] === 'maintain') {
   const manifestPath = path.resolve(process.argv[4] ?? '');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   const privateCandidates = path.join(os.homedir(), '.config', 'codexia-updater', 'maintenance', 'candidates');
   if (appPasswordRotationEnabled) assert.ok(manifest.rotatePostgresAppPassword === true, 'Rotation adapter requires the explicit app-password request');
+  if (preflightPasswordRotationEnabled) assert.ok(manifest.rotatePostgresPreflightPassword === true, 'Rotation adapter requires the explicit preflight-password request');
   if (apiAuthTokenRotationEnabled) assert.ok(manifest.rotateApiAuthToken === true, 'Rotation adapter requires the explicit API token request');
   if (tunnelTokenRotationEnabled) assert.ok(manifest.rotateTunnelToken === true, 'Rotation adapter requires the explicit Tunnel token request');
   assert.equal(path.dirname(manifestPath), manifest.candidateRoot, 'Rotation manifest differs from its private candidate directory');
@@ -81,6 +85,26 @@ if (adapterEntry) {
   const testModule = await import(new URL('./test-standalone-maintenance-integration.mjs', import.meta.url));
   assert.equal(typeof testModule.installTestAdapters, 'function', 'Disposable runtime adapter is unavailable');
   testModule.installTestAdapters(hostModule.PodmanStandaloneHost);
+}
+
+if (preflightPasswordRotationEnabled && killAfterPreflightSql &&
+    path.resolve(process.argv[1] ?? '') === updaterEntry && process.argv[2] === 'maintain') {
+  const hostModule = await import(pathToFileURL(path.join(path.dirname(updaterEntry), 'standalone-host.mjs')).href);
+  const originalChange = hostModule.PodmanStandaloneHost.prototype.changePostgresPreflightPassword;
+  hostModule.PodmanStandaloneHost.prototype.changePostgresPreflightPassword = async function changeThenInterrupt(password) {
+    await Reflect.apply(originalChange, this, [password]);
+    process.kill(process.pid, 'SIGKILL');
+  };
+}
+
+if (preflightPasswordRotationEnabled && killAfterPreflightSecret &&
+    path.resolve(process.argv[1] ?? '') === updaterEntry && process.argv[2] === 'maintain') {
+  const hostModule = await import(pathToFileURL(path.join(path.dirname(updaterEntry), 'standalone-host.mjs')).href);
+  const originalReplace = hostModule.PodmanStandaloneHost.prototype.replacePostgresPreflightSecret;
+  hostModule.PodmanStandaloneHost.prototype.replacePostgresPreflightSecret = async function replaceThenInterrupt(password,snapshot) {
+    await Reflect.apply(originalReplace, this, [password,snapshot]);
+    process.kill(process.pid, 'SIGKILL');
+  };
 }
 
 if (apiAuthTokenRotationEnabled && apiAuthTokenCompletionInterruptionEnabled &&
