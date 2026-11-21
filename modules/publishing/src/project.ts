@@ -266,6 +266,7 @@ export async function readPublishingProject(reader: SnapshotReader): Promise<Pub
   const files = await reader.list("plot/volumes");
   const volumes: PublishingVolume[] = [];
   const rootScenes: PublishingScene[] = [];
+  const seenSceneIds = new Set<string>();
   const volumesById = new Map<string, PublishingVolume>();
   const chaptersById = new Map<string, PublishingChapter>();
   const chapterVolumeIds = new Map<PublishingChapter, string>();
@@ -311,6 +312,8 @@ export async function readPublishingProject(reader: SnapshotReader): Promise<Pub
     if (!match) continue;
     const basename = match[3]!;
     const id = nodeId(sceneData, basename);
+    if (seenSceneIds.has(id)) throw new Error("Duplicate scene identity in public publishing snapshot: " + id);
+    seenSceneIds.add(id);
     if (!Object.hasOwn(sceneData, "volume") && !Object.hasOwn(sceneData, "chapter")) {
       const bodyPath = manuscriptPath(sceneFile, sceneData, id);
       const manuscript = await reader.read(bodyPath);
