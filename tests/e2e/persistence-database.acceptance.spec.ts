@@ -486,6 +486,8 @@ for (const { mode, width, forceAppendFallback = false } of [
       await symbolMenu.getByRole("button", { name: "三点リーダーを挿入" }).click();
       expect((await symbolResponse).ok()).toBe(true);
       await expect.poll(async () => (await storedDocumentMarkdown(page, project.id, scene.id)).markdown).toBe(nextEdit);
+      await displayMenu.locator("summary").click();
+      await editor.focus();
       await expect(editor).toBeFocused();
       const typedEdit = nextEdit.slice(0, caretPosition + "……".length) + "y" + nextEdit.slice(caretPosition + "……".length);
       const typingResponse = page.waitForResponse((response) => response.request().method() === "PATCH" && new URL(response.url()).pathname === `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`, { timeout: 15_000 });
