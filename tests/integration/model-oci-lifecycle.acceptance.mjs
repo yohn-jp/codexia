@@ -8,13 +8,14 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
+import { validateImageReference, validateModelCachePath, validateOciEngine } from "./model-oci-lifecycle-arguments.mjs";
 
 const execFile = promisify(execFileCallback);
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const helperDirectory = dirname(fileURLToPath(import.meta.url));
 const helperFilename = join(helperDirectory, "model-oci-lifecycle.container.mjs");
 const defaultModelCache = "/tmp/codexia-model-runtime-edc033c/home/.arcadia/models";
-const modelCache = resolve(process.env.CODEXIA_P13_MODEL_CACHE ?? defaultModelCache);
+const modelCache = validateModelCachePath(process.env.CODEXIA_P13_MODEL_CACHE, defaultModelCache);
 const modelRefs = {
   embedding: { id: "Xenova/multilingual-e5-small", revision: "761b726dd34fb83930e26aab4e9ac3899aa1fa78" },
   reranker: { id: "mogolloni/bge-reranker-v2-m3-onnx", revision: "e5023553f6c47f09057da7a19cdd79ef850a4985" },
@@ -134,10 +135,11 @@ async function waitForReplacementReady(podman, name) {
 }
 
 test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives replacement", { timeout: 2_700_000 }, async () => {
-  const podman = process.env.OCI_ENGINE ?? "podman";
+  const podman = validateOciEngine(process.env.OCI_ENGINE);
+  const configuredImage = process.env.CODEXIA_P13_IMAGE;
   const commit = await git(root, "rev-parse", "HEAD");
   const tree = await git(root, "rev-parse", "HEAD^{tree}");
-  const image = process.env.CODEXIA_P13_IMAGE ?? "localhost/codexia:p13-full-" + commit.slice(0, 7);
+  const image = validateImageReference(configuredImage, "localhost/codexia:p13-full-" + commit.slice(0, 7));
   const port = await choosePort();
   const verifyEnvironment = {
     ...safeBuildEnvironment(),
