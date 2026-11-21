@@ -81,6 +81,8 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     let tokenResponse: Record<string, unknown> | null = null;
     let upstreamCallbackLocation: string | null = null;
     let webCallbackUrl: URL | null = null;
+    const webCallbackSnapshot = (): URL | null => webCallbackUrl;
+    const tokenResponseSnapshot = (): Record<string, unknown> | null => tokenResponse;
     const page = await context.newPage();
     page.on("framenavigated", (frame) => {
       if (frame !== page.mainFrame()) return;
@@ -143,8 +145,8 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     await page.waitForResponse((response) => new URL(response.url()).pathname === "/api/session" && response.status() === 200);
     await page.waitForResponse((response) => new URL(response.url()).pathname === "/api/jobs" && response.request().method() === "GET" && response.status() === 200);
     applyResponseStatuses();
-    assert.ok(webCallbackUrl, "the authorization response must return to the registered app callback");
-    const callbackUrl = webCallbackUrl!;
+    const callbackUrl = webCallbackSnapshot();
+    assert.ok(callbackUrl, "the authorization response must return to the registered app callback");
 
     const tokenRequest = seen.find((request) => request.pathname === `${new URL(fixture.issuer).pathname}/oauth2/token`);
     assert.ok(tokenRequest?.body, "browser must exchange the authorization code");
@@ -169,14 +171,15 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     assert.ok(ownerList, `the owner token must reach the protected job list route; observed ${JSON.stringify(seen.map(({ pathname, method, status }) => ({ pathname, method, status })))}`);
     const sessionCookieNames = apiSession.headers.cookie?.split(";").map((part) => part.split("=", 1)[0].trim()) ?? [];
     assert.ok(apiSession.headers.authorization?.startsWith("Bearer "), `the owner API session request must send a bearer access token (headers=${Object.keys(apiSession.headers).join(",")}; cookies=${sessionCookieNames.join(",")})`);
-    assert.ok(apiSession.headers.authorization === `Bearer ${String(tokenResponse?.access_token ?? "")}`, "the API session must use the OAuth access token, not the ID token");
+    const issuedTokens = tokenResponseSnapshot();
+    assert.ok(apiSession.headers.authorization === `Bearer ${String(issuedTokens?.access_token ?? "")}`, "the API session must use the OAuth access token, not the ID token");
     assert.equal(Boolean(apiSession.headers.cookie), false, "ordinary bearer API calls must omit the Better Auth session cookie");
     assert.ok(ownerList.headers.authorization?.startsWith("Bearer "), "the owner list request must send a bearer access token");
-    assert.ok(ownerList.headers.authorization === `Bearer ${String(tokenResponse?.access_token ?? "")}`, "the protected owner list must use the OAuth access token");
+    assert.ok(ownerList.headers.authorization === `Bearer ${String(issuedTokens?.access_token ?? "")}`, "the protected owner list must use the OAuth access token");
     assert.equal(Boolean(ownerList.headers.cookie), false, "protected data list calls must omit the Better Auth session cookie");
     assert.equal(Boolean(tokenRequest.headers.cookie), false, "public-client token exchange must omit ambient cookies");
-    if (typeof tokenResponse?.id_token === "string") assert.ok(apiSession.headers.authorization !== `Bearer ${tokenResponse.id_token}`, "the API must never receive the upstream ID token");
-    assert.equal(typeof tokenResponse?.access_token, "string");
+    if (typeof issuedTokens?.id_token === "string") assert.ok(apiSession.headers.authorization !== `Bearer ${issuedTokens.id_token}`, "the API must never receive the upstream ID token");
+    assert.equal(typeof issuedTokens?.access_token, "string");
   } finally {
     if (browser) await browser.close();
     await fixture.close();
