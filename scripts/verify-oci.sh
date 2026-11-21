@@ -25,6 +25,16 @@ command -v od >/dev/null 2>&1 || {
   exit 2
 }
 
+# OCI verification runs on fresh runners without a workspace install.
+# Bootstrap only the locked root parser dependency when it is not already present.
+if ! node --input-type=module -e "await import('parse5')" >/dev/null 2>&1; then
+  command -v corepack >/dev/null 2>&1 || {
+    echo 'Corepack is needed to install the pinned verification parser; run pnpm install --frozen-lockfile.' >&2
+    exit 2
+  }
+  corepack pnpm@12.21.0 install --filter . --frozen-lockfile --ignore-scripts
+fi
+
 image="${CODEXIA_OCI_IMAGE:-codexia:verification}"
 port="${CODEXIA_OCI_PORT:-3040}"
 profile="${CODEXIA_PROFILE:-core}"
