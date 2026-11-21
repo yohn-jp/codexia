@@ -256,7 +256,7 @@ test("full profile renders Story and Speaker review queues and turns both author
 
     await page.getByRole("tablist", { name: "パネル" }).getByRole("tab", { name: "作品と構成", exact: true }).click();
     await page.locator(".pg-document-list")
-      .getByRole("button", { name: /Review Scene/u }).click();
+      .getByRole("treeitem", { name: /Review Scene/u }).click();
     await expect(page.getByRole("heading", { name: "Review Scene" })).toBeVisible();
     await expect(page).toHaveURL(new RegExp("/desktop/projects/" + encodeURIComponent(project.id) + "/scenes/[0-9a-f-]+"));
     const selectedSceneId = new URL(page.url()).pathname.split("/scenes/")[1];
