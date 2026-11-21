@@ -38,6 +38,7 @@ function countSnapshotReads(base: Persistence, afterSnapshotMiss: () => Promise<
     getDocumentHeadRevisions: 0,
     listModuleRecords: 0,
     snapshotMisses: 0,
+    manifestReads: 0,
   };
   const instrumented = new Proxy(base, {
     get(target, property, receiver) {
@@ -49,6 +50,9 @@ function countSnapshotReads(base: Persistence, afterSnapshotMiss: () => Promise<
               if (typeof method !== "function") return method;
               if (readerProperty === "getModuleRecord") {
                 return async (...args: Parameters<PersistenceReader["getModuleRecord"]>) => {
+                  if (args[1] === "core.authority.snapshots" && args[2].startsWith("snapshot:")) {
+                    counts.manifestReads = (counts.manifestReads ?? 0) + 1;
+                  }
                   const record = await readerTarget.getModuleRecord(...args);
                   if (args[1] === "core.authority.snapshots" && !record) {
                     counts.snapshotMisses = (counts.snapshotMisses ?? 0) + 1;
@@ -127,6 +131,42 @@ test("current reads reuse the durable snapshot, concurrent cold builders agree, 
     assert.deepEqual(await restartedStore.readTreeSnapshot(project.id), current);
   } finally {
     await restartedPersistence.close();
+  }
+});
+
+test("hierarchy and restore builders read each resolved manifest only once", async () => {
+  const project = await createProject();
+  const { document } = await persistence.transaction(tx => tx.createDocument({
+    projectId: project.id, kind: "scene", parentId: null, title: "Scene", orderKey: "1",
+    markdown: "本文", authorId: "author", idempotencyKey: randomUUID(),
+  }));
+  const volume = await persistence.transaction(tx => tx.createDocument({
+    projectId: project.id, kind: "volume", parentId: null, title: "Volume", orderKey: "1",
+    markdown: "", authorId: "author", idempotencyKey: randomUUID(),
+  }));
+  const pinned = (await core.reader(project.id)).snapshot;
+  await persistence.transaction(tx => tx.updateProject({
+    projectId: project.id, expectedVersion: pinned.projectVersion, title: "Later version",
+  }));
+  const current = (await core.reader(project.id)).snapshot;
+  const tracked = countSnapshotReads(persistence, async () => {});
+  const store = new CoreStore({ persistence: tracked.persistence });
+
+  for (const snapshot of [undefined, pinned]) {
+    const expected = snapshot ?? current;
+    for (const build of [
+      () => store.buildCreateHierarchyOperation(project.id, { kind: "volume", id: "v", title: "新巻" }, snapshot),
+      () => store.buildDeleteHierarchyOperation(project.id, { kind: "volume", id: volume.document.id }, snapshot),
+      () => store.buildReorderHierarchyOperation(project.id, { kind: "volume", orderedIds: [volume.document.id] }, snapshot),
+      () => store.buildRestoreOperation(project.id, document.id, document.headRevisionId!, snapshot),
+    ]) {
+      const before = tracked.counts.manifestReads!;
+      const built = await build();
+      assert.deepEqual(built.snapshot, expected);
+      assert.equal(built.operation.projectId, expected.projectId);
+      assert.equal(built.operation.baseProjectVersion, expected.projectVersion);
+      assert.equal(tracked.counts.manifestReads! - before, 1);
+    }
   }
 });
 
