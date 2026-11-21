@@ -565,9 +565,16 @@ function ShareReaderView({ projectId, token }: { projectId: string; token: strin
     finally { setBusy(false); }
   }
   const tree = (metadata?.tree as Array<{ volume: { title: string }; chapters: Array<{ chapter: { title: string }; scenes: SceneItem[] }> }> | undefined) ?? [];
+  const rootScenes = (metadata?.rootScenes as SceneItem[] | undefined) ?? [];
   return <main style={{ maxWidth: 760, margin: "2rem auto", padding: "0 1rem", lineHeight: 1.8 }}>
     <h1>{String(metadata?.label ?? "共有された原稿")}</h1>
     <p>読み取り専用の共有です。期限: {metadata?.expiresAt ? new Date(String(metadata.expiresAt)).toLocaleString("ja-JP") : ""}</p>
+    {rootScenes.length > 0 && <section aria-label="作品直下のシーン">
+      <h2>作品直下</h2>
+      <ul>{rootScenes.map((item) => <li key={item.id}>
+        <button type="button" style={buttonStyle()} disabled={busy} onClick={() => void openScene(item.id)}>{item.title}</button>
+      </li>)}</ul>
+    </section>}
     {tree.map((volume) => <section key={volume.volume.title}>
       <h2>{volume.volume.title}</h2>
       {volume.chapters.map((chapter) => <div key={chapter.chapter.title}>

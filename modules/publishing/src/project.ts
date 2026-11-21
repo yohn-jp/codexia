@@ -265,6 +265,8 @@ export async function readPublishingProject(reader: SnapshotReader): Promise<Pub
     : undefined;
   const files = await reader.list("plot/volumes");
   const volumes: PublishingVolume[] = [];
+  const rootScenes: PublishingScene[] = [];
+  const seenSceneIds = new Set<string>();
   const volumesById = new Map<string, PublishingVolume>();
   const chaptersById = new Map<string, PublishingChapter>();
   const chapterVolumeIds = new Map<PublishingChapter, string>();
@@ -310,6 +312,23 @@ export async function readPublishingProject(reader: SnapshotReader): Promise<Pub
     if (!match) continue;
     const basename = match[3]!;
     const id = nodeId(sceneData, basename);
+    if (seenSceneIds.has(id)) throw new Error("Duplicate scene identity in public publishing snapshot: " + id);
+    seenSceneIds.add(id);
+    if (!Object.hasOwn(sceneData, "volume") && !Object.hasOwn(sceneData, "chapter")) {
+      const bodyPath = manuscriptPath(sceneFile, sceneData, id);
+      const manuscript = await reader.read(bodyPath);
+      const order = nodeOrder(sceneData);
+      rootScenes.push({
+        id,
+        title: nodeTitle(sceneData, id),
+        body: manuscript ? manuscriptBody(manuscript.content, bodyPath) : "",
+        path: bodyPath,
+        volumeId: "",
+        chapterId: "",
+        ...(order === undefined ? {} : { order }),
+      });
+      continue;
+    }
     const chapter = typeof sceneData.chapter === "string" ? chaptersById.get(sceneData.chapter) : undefined;
     if (!chapter) continue;
     const bodyPath = manuscriptPath(sceneFile, sceneData, id);
@@ -330,7 +349,7 @@ export async function readPublishingProject(reader: SnapshotReader): Promise<Pub
     volume.chapters.sort(compareOrdered);
     for (const chapter of volume.chapters) chapter.scenes.sort(compareOrdered);
   }
-  return { title, ...(subtitle ? { subtitle } : {}), volumes: volumes.sort(compareOrdered) };
+  return { title, ...(subtitle ? { subtitle } : {}), volumes: volumes.sort(compareOrdered), rootScenes: rootScenes.sort(compareOrdered) };
 }
 
 export function collectPublishingScenes(
@@ -374,11 +393,14 @@ export function resolveShareScope(project: PublishingProject, scope: ShareScope)
     throw new Error("Chapter not found: " + scope.id);
   }
   if (scope.kind === "scene") {
-    const scene = project.volumes.flatMap((volume) => volume.chapters.flatMap((chapter) => chapter.scenes))
+    const scene = [...(project.rootScenes ?? []), ...project.volumes.flatMap((volume) => volume.chapters.flatMap((chapter) => chapter.scenes))]
       .find((item) => item.id === scope.id);
     if (!scene) throw new Error("Scene not found: " + scope.id);
     return [scene];
   }
-  if (scope.kind === "project") return project.volumes.flatMap((volume) => volume.chapters.flatMap((chapter) => chapter.scenes));
+  if (scope.kind === "project") return [
+    ...(project.rootScenes ?? []),
+    ...project.volumes.flatMap((volume) => volume.chapters.flatMap((chapter) => chapter.scenes)),
+  ];
   throw new Error("Invalid share scope");
 }
