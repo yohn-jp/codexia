@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { lstat, readFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { lstat, open } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -9,9 +10,7 @@ import { inspectHtml } from "../html-document.mjs";
 export async function validateWebBundle(directory) {
   const root = path.resolve(directory);
   const indexFile = path.join(root, "index.html");
-  const indexInfo = await lstat(indexFile);
-  if (indexInfo.isSymbolicLink() || !indexInfo.isFile()) throw new Error("Native index.html must be a regular file");
-  const html = await readFile(indexFile, "utf8");
+  const html = await readRegularFile(indexFile, "Native index.html must be a regular file");
   if (!/<!doctype html>/iu.test(html)) throw new Error("Native web bundle is missing its HTML document type");
   if (/https?:\/\//iu.test(html) || /server\.url/iu.test(html)) throw new Error("Native web bundle must not load a remote server URL");
   const references = inspectHtml(html).references;
@@ -37,6 +36,20 @@ export async function validateWebBundle(directory) {
     }
   }
   return { references: references.length };
+}
+
+async function readRegularFile(file, message) {
+  let handle;
+  try {
+    handle = await open(file, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+    if (!(await handle.stat()).isFile()) throw new Error(message);
+    return await handle.readFile("utf8");
+  } catch (error) {
+    if (error?.code === "ELOOP" || error?.code === "EMLINK") throw new Error(message);
+    throw error;
+  } finally {
+    await handle?.close();
+  }
 }
 
 async function main() {
