@@ -505,6 +505,34 @@ test("a failed Knowledge list does not block the initial document and can be ret
   await expect(manuscript).toContainText(draft);
 });
 
+test("same-named scenes show their chapter in the desktop and mobile writing headers", async ({ page }) => {
+  const { project } = await createWritingFixture(page);
+  const origin = new URL(page.url()).origin;
+  const add = async (data: { kind: "chapter" | "scene"; title: string; orderKey: string; parentId?: string }) => {
+    const response = await page.request.post(`/api/v1/persistence/projects/${project.id}/documents`, {
+      headers: { Origin: origin, "Idempotency-Key": randomUUID() },
+      data: { ...data, markdown: "" },
+    });
+    expect(response.status(), await response.text()).toBe(201);
+    return (await response.json() as { document: { id: string } }).document;
+  };
+  const first = await add({ kind: "chapter", title: "第一章", orderKey: "c" });
+  const third = await add({ kind: "chapter", title: "第三章", orderKey: "d" });
+  const source = await add({ kind: "scene", title: "帰港", orderKey: "a", parentId: first.id });
+  const writing = await add({ kind: "scene", title: "帰港", orderKey: "a", parentId: third.id });
+
+  for (const mode of ["desktop", "mobile"] as const) {
+    await page.setViewportSize({ width: mode === "desktop" ? 1280 : 390, height: 844 });
+    const context = page.locator(mode === "desktop" ? ".pg-editor-heading .eyebrow" : ".mobile-shell-context");
+    for (const [document, chapter] of [[writing, "第三章"], [source, "第一章"]] as const) {
+      await page.goto(`${origin}/${mode}/projects/${project.id}/scenes/${document.id}${mode === "mobile" ? "?view=writing" : ""}`);
+      await expect(editor(page)).toBeVisible();
+      await expect(context).toBeVisible();
+      await expect(context).toHaveText(`${chapter} / ${project.title}`);
+    }
+  }
+});
+
 test("mobile reference sheet has a named dialog and excludes the background from assistive technology", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await createWritingFixture(page, "mobile");
