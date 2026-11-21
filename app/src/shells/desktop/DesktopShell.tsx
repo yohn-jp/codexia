@@ -20,7 +20,7 @@ function describeFailure(reason: unknown): string {
 
 /** Desktop manuscript surface; panels and commands remain owned by the shared workspace. */
 export function DesktopShell({
-  header, desktopActions, desktopDurability, desktopDurabilityDetail, desktopDurabilityLabel, documentTitle, documentContext, library, editor, tools, status, renderStatus,
+  header, desktopActions, documentTitle, documentContext, library, editor, tools, status, renderStatus,
   onSwitchMode, workspaceScope, panels, beforeLayoutChange, requestedPanel,
 }: ApplicationShellProps) {
   const [switching, setSwitching] = useState(false);
@@ -61,14 +61,6 @@ export function DesktopShell({
             </div>
           </div>
           <div className="st-studio-masthead-actions">
-            {desktopDurability ? <span className={`st-studio-durability is-${desktopDurability}`}
-              aria-label="原稿のPostgreSQL保存状態" data-state={desktopDurability} title={desktopDurabilityDetail}>
-              {desktopDurabilityLabel ?? ({
-                draft: "PostgreSQL未保存",
-                saving: "PostgreSQLへ保存中",
-                uncertain: "保存状態を要確認",
-                saved: "PostgreSQL保存済み",
-              }[desktopDurability])}</span> : null}
             {desktopActions}
             <div className="st-studio-header-slot">{header}</div>
             <button type="button" className="st-studio-mobile-link" onClick={() => void switchToMobile()} disabled={switching}>
