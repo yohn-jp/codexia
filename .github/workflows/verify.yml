@@ -47,6 +47,14 @@ jobs:
           CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
         run: node scripts/ci-impact.mjs
+      - name: Resolve exact-base task input proof
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          CODEXIA_CI_PLAN_PATH: ${{ runner.temp }}/ci-plan/ci-plan.json
+        run: node scripts/reuse-ci-task-input-proof.mjs plan
       - name: Resolve reusable merged PR source proof
         id: reuse
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

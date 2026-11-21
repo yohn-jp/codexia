@@ -86,12 +86,14 @@ async function readPublicShare(request: Request, context: ModuleActionContext): 
     });
   }
 
+  const rootSceneIds = new Set((project.rootScenes ?? []).map((scene) => scene.id));
   return json({
     snapshot: { projectId: context.reader.snapshot.projectId, projectVersion: context.reader.snapshot.projectVersion },
     label: grant.label,
     scope,
     expiresAt: grant.expiresAt,
     sceneCount: scopedScenes.length,
+    rootScenes: scopedScenes.filter((scene) => rootSceneIds.has(scene.id)).map(publicScene),
     tree: safeTree(project, scopedScenes),
   });
 }

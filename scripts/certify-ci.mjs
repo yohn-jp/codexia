@@ -9,6 +9,7 @@ import { assertPlanEvidence } from './ci-evidence.mjs';
 import { assertProfileArtifactEvidence } from './ci-profile-artifact.mjs';
 import { assertNativeArtifactEvidence } from './ci-native-producer.mjs';
 import { resolveProducerJobAttempts } from './ci-artifact-selection.mjs';
+import { assertReusedCoverageProof } from './ci-task-proof-reuse.mjs';
 
 const { GH_TOKEN, GITHUB_REPOSITORY, GITHUB_RUN_ID, CODEXIA_EXPECTED_SHA, CODEXIA_REQUIRED_RESULTS } = process.env;
 assert.match(GITHUB_REPOSITORY ?? '', /^[\w.-]+\/[\w.-]+$/);
@@ -39,8 +40,11 @@ const directory = process.env.CODEXIA_CI_EVIDENCE_DIR;
 assert.ok(directory, 'Execution evidence directory is required');
 const reports = [];
 const evidenceEntries = await readdir(directory, { withFileTypes: true });
-if (evidenceEntries.length === 1 && evidenceEntries[0].name === 'report.json' && evidenceEntries[0].isFile()) {
-  reports.push(JSON.parse(await readFile(path.join(directory, 'report.json'), 'utf8')));
+const rootReports = evidenceEntries.filter(entry => entry.name === 'report.json' && entry.isFile());
+if (rootReports.length === 1) {
+  assert.ok(evidenceEntries.every(entry => entry.isFile() && ['report.json', 'workspace-preparation.json'].includes(entry.name)),
+    'Unexpected root execution evidence entry');
+  reports.push(JSON.parse(await readFile(path.join(directory, rootReports[0].name), 'utf8')));
 } else {
   for (const entry of evidenceEntries) {
     if (!entry.isDirectory()) throw new Error('Unexpected execution evidence entry');
@@ -48,6 +52,12 @@ if (evidenceEntries.length === 1 && evidenceEntries[0].name === 'report.json' &&
   }
 }
 assertPlanEvidence(plan, jobs, reports);
+const reusedCoverageReports = reports.filter(report => report.results?.some(result => result.inputProof?.reusedFrom));
+assert.ok(reusedCoverageReports.length <= 1, 'Duplicate task proof consumption reports');
+if (reusedCoverageReports.length === 1) {
+  await assertReusedCoverageProof({ plan, report: reusedCoverageReports[0], current: run,
+    repository: GITHUB_REPOSITORY, token: GH_TOKEN, request: async (url, options) => fetch(url, options) });
+}
 const artifacts = await collectGitHubPages(page => request(`actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100&page=${page}`), 'artifacts');
 const producerJobs = await resolveProducerJobAttempts(jobs, run, request, ['build-core','build-full','hosted-native-catalog']);
 assertProfileArtifactEvidence(plan, producerJobs, reports, artifacts, GITHUB_RUN_ID);

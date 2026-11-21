@@ -206,11 +206,53 @@ export function createVerificationPlan({ files, event, sha, base = null }) {
 }
 
 export function validateVerificationPlan(plan) {
-  if (!plan || JSON.stringify(plan) !== JSON.stringify(createVerificationPlan(plan))) throw new Error('Verification plan does not match canonical impact rules');
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw new Error('Verification plan is invalid');
+  const { taskInputReuse, ...canonical } = plan;
+  if (JSON.stringify(canonical) !== JSON.stringify(createVerificationPlan(canonical))) throw new Error('Verification plan does not match canonical impact rules');
+  if (taskInputReuse !== undefined) assertTaskInputReuse(plan, taskInputReuse);
   return plan;
 }
 
-export function planDigest(plan) { return createHash('sha256').update(JSON.stringify(validateVerificationPlan(plan))).digest('hex'); }
+const INPUT_PROOF_DIMENSIONS = ['source', 'tests', 'dependencies', 'environment', 'toolchain', 'recipe', 'producers'];
+function assertTaskInputReuse(plan, reuse) {
+  if (!reuse || typeof reuse !== 'object' || Array.isArray(reuse)) throw new Error('Invalid task input reuse metadata');
+  if (reuse.format !== 'codexia-ci-task-input-reuse/v1') throw new Error('Unknown task input reuse format');
+  if (Object.keys(reuse).some(key => !['format', 'coverage'].includes(key))) throw new Error('Unsupported task input proof task');
+  if (plan.event !== 'pull_request' || !plan.tasks.includes('coverage')) throw new Error('Task input proof reuse is outside the supported PR task');
+  const proof = reuse.coverage;
+  if (!proof || typeof proof !== 'object' || Array.isArray(proof) || proof.task !== 'coverage' || proof.sourceSha !== plan.base) {
+    throw new Error('Invalid exact-base coverage proof identity');
+  }
+  for (const key of ['sourceSha']) if (!/^[a-f0-9]{40}$/u.test(proof[key] ?? '')) throw new Error(`Invalid task proof ${key}`);
+  if (!/^[a-f0-9]{40}$/u.test(proof.proofSourceSha ?? '')) throw new Error('Invalid task proof producer source');
+  for (const key of ['planDigest']) if (!/^[a-f0-9]{64}$/u.test(proof[key] ?? '')) throw new Error(`Invalid task proof ${key}`);
+  for (const key of ['workflowRunId', 'workflowAttempt', 'workflowId', 'repositoryId', 'jobId', 'artifactId']) {
+    if (!Number.isSafeInteger(proof[key]) || proof[key] < 1) throw new Error(`Invalid task proof ${key}`);
+  }
+  if (proof.workflowJob !== 'types' || proof.artifactName !== 'ci-evidence-types-tests') throw new Error('Invalid task proof producer identity');
+  if (!/^sha256:[a-f0-9]{64}$/u.test(proof.artifactDigest ?? '')) throw new Error('Invalid task proof artifact digest');
+  if (!proof.inputClosure || typeof proof.inputClosure !== 'object' || Array.isArray(proof.inputClosure) ||
+      JSON.stringify(Object.keys(proof.inputClosure).sort()) !== JSON.stringify([...INPUT_PROOF_DIMENSIONS].sort()) ||
+      Object.values(proof.inputClosure).some(value => !/^[a-f0-9]{64}$/u.test(value))) throw new Error('Incomplete task proof input closure');
+  const runtime = proof.runtime;
+  if (!runtime || typeof runtime !== 'object' || Array.isArray(runtime)) throw new Error('Missing task proof runtime');
+  for (const key of ['platform', 'arch', 'nodeVersion', 'execPath', 'cwd']) if (typeof runtime[key] !== 'string' || !runtime[key]) throw new Error(`Invalid task proof runtime ${key}`);
+  if (!/^(?:\/|[A-Za-z]:\\)/u.test(runtime.execPath) || !/^(?:\/|[A-Za-z]:\\)/u.test(runtime.cwd)) throw new Error('Task proof runtime paths must be absolute');
+  for (const key of ['imageOS', 'imageVersion']) if (runtime[key] !== null && typeof runtime[key] !== 'string') throw new Error(`Invalid task proof runtime ${key}`);
+  const certification = proof.certification;
+  if (!certification || typeof certification !== 'object' || certification.sourceSha !== plan.base ||
+      !['Certify every required exact-source matrix element', 'Certify reused merged PR proof'].includes(certification.step)) {
+    throw new Error('Invalid main task proof certification');
+  }
+  for (const key of ['workflowRunId', 'workflowAttempt', 'workflowId', 'repositoryId', 'jobId']) {
+    if (!Number.isSafeInteger(certification[key]) || certification[key] < 1) throw new Error(`Invalid main task proof certification ${key}`);
+  }
+}
+
+export function planDigest(plan) {
+  const { taskInputReuse: _taskInputReuse, ...canonical } = validateVerificationPlan(plan);
+  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+}
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const sha = process.env.CODEXIA_EXPECTED_SHA ?? execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
