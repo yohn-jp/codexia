@@ -183,7 +183,7 @@ test("revision history keeps immutable content through a foreground refresh", as
 test("same-origin stale tabs cannot replace an equal-generation journal draft", async ({ page, context }) => {
   const f = await fixture(page); const gate = await holdSaves(page, f);
   const second = await context.newPage(); await second.goto(page.url());
-  await second.getByLabel("作品", { exact: true }).selectOption(f.projectId); await second.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
+  await second.getByLabel("作品", { exact: true }).selectOption(f.projectId); await second.locator(".pg-document-list").getByRole("treeitem", { name: /Scene One/ }).click();
   try {
     await editor(page).fill("First tab protected draft.");
     await expect.poll(async () => (await drafts(page)).some((d) => d.markdown === "First tab protected draft.")).toBe(true);
@@ -202,7 +202,7 @@ test("IME composition blocks navigation while coalesced editor state stays curre
   });
   const text = "Printed from the newest editor input."; await replaceEditor(page, text);
   await editor(page).evaluate((element) => element.dispatchEvent(new CompositionEvent("compositionstart", { data: "にほんご", bubbles: true })));
-  await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
   await expect(page.getByRole("heading", { name: "Scene One", exact: true })).toBeVisible();
   const editorAlert = page.locator(".pg-editor-column").getByRole("alert");
   await expect(editorAlert).toContainText("日本語入力の変換が完了していません");
@@ -437,9 +437,9 @@ test("undoing an autosave draft back to the saved revision removes only that dra
   await editor(page).press("Control+A");
   await page.locator(".pg-editor-command-menu > summary").click();
   await expect(page.getByRole("button", { name: "選択範囲をText Anchorにする" })).toBeEnabled();
-  await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
-  await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene One/ }).click();
   await expectEditor(page, savedMarkdown);
   await expect.poll(async () => (await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
   await page.clock.fastForward(1_100);
@@ -499,7 +499,7 @@ test("writing UI protects multiple document drafts separately from PostgreSQL re
     // PostgreSQL save before switching documents.
     await expect.poll(async () => (await drafts(page)).some((d) => d.documentId === f.one.document.id && d.markdown === "Scene One protected draft.")).toBe(true);
     await gate.seen;
-    await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+    await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
     // The guarded selection is asynchronous: do not type until Scene Two owns
     // the mounted editor, otherwise the test edits Scene One again.
     await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
@@ -510,7 +510,7 @@ test("writing UI protects multiple document drafts separately from PostgreSQL re
       return records.find((entry) => entry.documentId === f.one.document.id)?.markdown
         ?? `Missing Scene One draft (present: ${records.map((entry) => entry.documentId).join(", ")})`;
     }).toBe("Scene One protected draft.");
-    await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
+    await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene One/ }).click();
     await expectEditor(page, "Scene One protected draft.");
   } finally { gate.release(); }
 });
@@ -693,7 +693,7 @@ async function delayImages(page: Page): Promise<void> {
 test("a pending scratch image read is flushed to its captured document before navigation", async ({ page }) => {
   await delayImages(page); const f = await fixture(page); await scratch(page);
   await memo(page).fill("Attachment belongs to Scene One."); await image(page).setInputFiles(png);
-  await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
   await expect.poll(async () => (await scratchRecords(page)).some((r) => r.key.includes(f.one.document.id) && r.text.includes("Attachment belongs to Scene One.") && r.text.includes("data:image/png;base64"))).toBe(true);
   expect((await scratchRecords(page)).some((r) => r.key.includes(f.two.document.id) && r.text.includes("Attachment belongs to Scene One."))).toBe(false);
@@ -800,9 +800,9 @@ test("scratch still protects text and accepts a new image after an oversized att
   await image(page).setInputFiles({ name: "too-large.png", mimeType: "image/png", buffer: Buffer.alloc(3 * 1024 * 1024 + 1) });
   await expect(page.locator(".scratch-panel").getByRole("alert")).toContainText("3MB以下");
   await memo(page).fill("Scratch remains usable after a rejected attachment.");
-  await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
-  await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene One/ }).click();
   await expect(page.getByRole("heading", { name: "Scene One", exact: true })).toBeVisible();
   await scratch(page);
   await expect(memo(page)).toHaveValue("Scratch remains usable after a rejected attachment.");
@@ -868,7 +868,7 @@ test("navigation does not replace a scratch record while it is loading or unread
   await expectEditor(page, f.one.revision.markdown);
   await scratch(page);
   await expect(memo(page)).toBeDisabled();
-  await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
   expect(await record()).toMatchObject(original!);
   await page.evaluate(() => sessionStorage.removeItem("hold-scratch-read"));
@@ -878,7 +878,7 @@ test("navigation does not replace a scratch record while it is loading or unread
   await expectEditor(page, f.one.revision.markdown);
   await scratch(page);
   await expect(page.locator(".scratch-panel").getByRole("alert")).toBeVisible();
-  await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
   expect(await record()).toMatchObject(unreadable);
 });
@@ -959,7 +959,7 @@ test("scratch text and image input survive while navigation waits for protection
   await memo(page).fill("Scratch write held during navigation.");
   await page.waitForFunction(() => (window as Window & { __scratchProtectionGate?: { started: boolean } }).__scratchProtectionGate?.started === true);
 
-  const sceneTwo = page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ });
+  const sceneTwo = page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ });
   await sceneTwo.click();
   await expect(page.getByRole("heading", { name: "Scene One", exact: true })).toBeVisible();
   await memo(page).fill("Latest scratch input during protection.");
@@ -985,12 +985,12 @@ test("late document activation cannot replace explicit scene navigation", async 
   const f = await fixture(page); let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; }); let observed!: () => void; const seen = new Promise<void>((resolve) => { observed = resolve; });
   await page.route(`**${documentPath(f)}`, async (route) => { if (route.request().method() !== "GET") return route.continue(); const response = await route.fetch(); observed(); await gate; await route.fulfill({ response }); });
   try {
-    await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+    await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
     await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
-    const sceneOne = page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ });
+    const sceneOne = page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene One/ });
     await sceneOne.click(); await seen;
     await expect(sceneOne).toHaveAttribute("aria-current", "page");
-    await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+    await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
     await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible(); release();
     await expectEditor(page, f.two.revision.markdown);
   } finally { release(); }
@@ -1000,7 +1000,7 @@ test("Issue 42: an updated PostgreSQL revision cannot supersede explicit navigat
   const f = await fixture(page); const gate = await holdSaves(page, f);
   try {
     await editor(page).fill("Pending Scene One draft before explicit navigation."); await gate.seen; await replace(page, f, "External PostgreSQL version.");
-    await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+    await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
     await expectEditor(page, f.two.revision.markdown); gate.release();
     await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
     await expect.poll(async () => (await drafts(page)).some((d) => d.documentId === f.one.document.id && d.markdown === "Pending Scene One draft before explicit navigation.")).toBe(true);
@@ -1009,7 +1009,7 @@ test("Issue 42: an updated PostgreSQL revision cannot supersede explicit navigat
 
 test("Issue 42: an unchanged PostgreSQL observation leaves explicit scene selection alone", async ({ page }) => {
   const f = await fixture(page);
-  await page.locator(".pg-document-list").getByRole("button", { name: /Scene Two/ }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene Two/ }).click();
   for (const name of ["online", "focus", "visibilitychange"]) await page.evaluate((event) => window.dispatchEvent(new Event(event)), name);
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
   await expectEditor(page, f.two.revision.markdown);
@@ -1023,7 +1023,7 @@ test("Issue 42: failed PostgreSQL availability preserves the author session and 
   await page.reload(); await expect(page.getByRole("heading", { name: "PostgreSQLへ接続できません" })).toBeVisible();
   expect((await page.request.get("/api/session")).status()).toBe(200); expect(reauthCalls).toBe(0);
   unavailable = false; await page.getByRole("button", { name: "再試行" }).click();
-  await page.getByLabel("作品", { exact: true }).selectOption(f.projectId); await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/ }).click();
+  await page.getByLabel("作品", { exact: true }).selectOption(f.projectId); await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene One/ }).click();
   await expectEditor(page, f.one.revision.markdown);
 });
 
