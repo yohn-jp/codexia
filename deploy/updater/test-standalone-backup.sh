@@ -224,11 +224,19 @@ grep -Eqi 'permission denied|operation not permitted' "$tmp/unreadable-history.l
 podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
   --user 1000:1000 --entrypoint node --volume codexia-history:/history \
   "$backend_node_image" --input-type=module -e \
+  'import { chmod } from "node:fs/promises"; await chmod("/history", 0o711); await chmod("/history/jobs", 0o713);'
+podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1001:1001 --entrypoint node --volume codexia-history:/history \
+  "$backend_node_image" --input-type=module -e \
   'import { rm } from "node:fs/promises"; await rm("/history/jobs/private-child", { recursive: true });'
 podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
   --user 1000:1000 --entrypoint node --volume codexia-history:/history \
   "$backend_node_image" --input-type=module -e \
-  'import { chmod } from "node:fs/promises"; await chmod("/history/jobs", 0o713);'
+  'import { chmod } from "node:fs/promises"; await chmod("/history", 0o700); await chmod("/history/jobs", 0o700);'
+podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1000:1000 --entrypoint node --volume codexia-history:/history \
+  "$backend_node_image" --input-type=module -e \
+  'import { chmod } from "node:fs/promises"; await chmod("/history", 0o711); await chmod("/history/jobs", 0o713);'
 podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
   --user 1001:1001 --entrypoint node --volume codexia-history:/history \
   "$backend_node_image" --input-type=module -e \
@@ -245,7 +253,15 @@ grep -Eqi 'permission denied|operation not permitted' "$tmp/unreadable-file.log"
 podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
   --user 1000:1000 --entrypoint node --volume codexia-history:/history \
   "$backend_node_image" --input-type=module -e \
+  'import { chmod } from "node:fs/promises"; await chmod("/history/jobs", 0o713);'
+podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1001:1001 --entrypoint node --volume codexia-history:/history \
+  "$backend_node_image" --input-type=module -e \
   'import { rm } from "node:fs/promises"; await rm("/history/jobs/private-files", { recursive: true });'
+podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges \
+  --user 1000:1000 --entrypoint node --volume codexia-history:/history \
+  "$backend_node_image" --input-type=module -e \
+  'import { chmod } from "node:fs/promises"; await chmod("/history", 0o700); await chmod("/history/jobs", 0o700);'
 
 (
   exec 9> "$state_dir/host.lock"
