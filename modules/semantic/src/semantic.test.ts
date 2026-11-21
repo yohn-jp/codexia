@@ -96,6 +96,39 @@ test("semantic search caps vector overfetch at the provider's 100-hit contract",
   assert.deepEqual(requestedLimits, [100, 100]);
 });
 
+test("expression search orders indexed passages without scanning the manuscript", async (t) => {
+  const reader = makeSemanticReader(snapshot, new Map([["manuscript/a.md", "波が走る。"]]));
+  const list = t.mock.method(reader, "list");
+  const read = t.mock.method(reader, "read");
+  const hits = ["波", "走る"].map((text, i) => ({
+    entityId: "sea", sceneId: "sea", sentenceIndex: i, text, score: 1 - i / 2, filePath: "manuscript/a.md",
+  }));
+  const moduleContext = {
+    async acquireCapability(id: string) {
+      if (id === "nlp.tokenizer") return {
+        value: { async analyze(text: string) { return { tokens: [{ pos: text === "走る" ? "動詞" : "名詞" }] }; } },
+        async release() {},
+      };
+      assert.equal(id, "semantic.embedding");
+      return {
+        value: { async nearest(_query: string, indexSnapshot: SnapshotId) {
+          assert.deepEqual(indexSnapshot, snapshot);
+          return { hits };
+        } },
+        async release() {},
+      };
+    },
+  } as unknown as ModuleContext;
+  const search = createSemanticActions(moduleContext).find((item) => item.id === "semantic.expressions.search")!;
+  const context = { reader, signal: new AbortController().signal } as unknown as ModuleActionContext;
+  const result = await search.invoke(search.inputSchema.parse({ query: "波", limit: 2 }), context);
+  assert.ok(result.ok);
+  const { results } = result.data as { results: Array<{ text: string; sentenceIndex: number }> };
+  assert.deepEqual(results.map(({ text, sentenceIndex }) => [text, sentenceIndex]), [["走る", 1], ["波", 0]]);
+  assert.equal(list.mock.callCount(), 0);
+  assert.equal(read.mock.calls.some(({ arguments: [path] }) => path === "manuscript/a.md"), false);
+});
+
 test("semantic search scopes lexical and vector results to files and path segments", async () => {
   const receivedScopes: Array<string | undefined> = [];
   const embedding: SemanticEmbeddingCapability = {
