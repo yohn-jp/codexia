@@ -83,10 +83,17 @@ test("lexical search does not activate optional NLP or Semantic providers unless
   assert.equal(capabilityRequests, 1);
   assert.equal(semanticRequests, 0);
 
-  const semantic = await query.invoke(query.inputSchema.parse({ query: "moonlit harbor", includeSemantic: true }), context);
+  let semanticScope: unknown;
+  const originalInvoke = context.invoke;
+  context.invoke = async (id, input, signal) => {
+    if (id === "semantic.search") semanticScope = (input as { scope?: unknown }).scope;
+    return originalInvoke(id, input, signal);
+  };
+  const semantic = await query.invoke(query.inputSchema.parse({ query: "moonlit harbor", scope: "manuscript/vol-main", includeSemantic: true }), context);
   assert.equal(semantic.ok, true);
   if (semantic.ok) assert.deepEqual((semantic.data as { warnings: string[] }).warnings, ["semantic_unavailable:missing_action"]);
   assert.equal(semanticRequests, 1);
+  assert.equal(semanticScope, "manuscript/vol-main");
   await module.dispose();
 });
 

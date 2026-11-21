@@ -4,6 +4,7 @@ import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/pro
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { readRegularFile } from './read-regular-file.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const modulePackagePrefix = '@codexia/module-';
@@ -244,7 +245,7 @@ async function scanDirectory(directory, rootDirectory, selectedNames, ignored, v
       continue;
     }
     if (!targetStats?.isFile() || !/\.(?:c?js|mjs|jsx)$/.test(entry.name)) continue;
-    const source = await readFile(filePath, 'utf8');
+    const source = await readRegularFile(target, { message: `Expected a regular source file: ${target}` });
     sourceSpecifier.lastIndex = 0;
     for (const match of source.matchAll(sourceSpecifier)) {
       const specifier = match[1];

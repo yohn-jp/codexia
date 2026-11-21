@@ -153,6 +153,7 @@ async function createBundle(outputDirectory, producerRevision, sourceTreeClean) 
       'packages/module-runtime/src/runtime-error.ts',
       'packages/contracts/src/index.ts',
       'scripts/hosted-build.mjs',
+      'scripts/read-regular-file.mjs',
       'scripts/build-catalog-bundle.mjs',
       'scripts/composition-persistence.mjs',
       'packages/module-runtime/src/persistence-formats.ts',

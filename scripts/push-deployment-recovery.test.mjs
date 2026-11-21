@@ -16,10 +16,12 @@ function fixture({ phase = 'pending', health = 'healthy' } = {}) {
   mkdirSync(stateDir, { recursive: true });
   mkdirSync(path.join(quadletDir, 'default.target.wants'), { recursive: true });
   mkdirSync(mockBin);
-  writeFileSync(path.join(quadletDir, 'codexia-api.container'), 'candidate unit\n');
-  writeFileSync(path.join(stateDir, 'rollback-api.container'), 'previous unit\n');
-  writeFileSync(path.join(stateDir, 'deployed-release.json'), '{"image":"candidate"}\n');
-  writeFileSync(path.join(stateDir, 'rollback-release.json'), '{"image":"previous"}\n');
+  const previousImage = `ghcr.io/yohn-jp/codexia-backend@sha256:${'a'.repeat(64)}`;
+  const candidateImage = `ghcr.io/yohn-jp/codexia-backend@sha256:${'b'.repeat(64)}`;
+  writeFileSync(path.join(quadletDir, 'codexia-api.container'), `Image=${candidateImage}\n`);
+  writeFileSync(path.join(stateDir, 'rollback-api.container'), `Image=${previousImage}\n`);
+  writeFileSync(path.join(stateDir, 'deployed-release.json'), JSON.stringify({ image: candidateImage }) + '\n');
+  writeFileSync(path.join(stateDir, 'rollback-release.json'), JSON.stringify({ image: previousImage }) + '\n');
   writeFileSync(path.join(stateDir, 'deploy-transaction.json'), JSON.stringify({
     format: 'codexia-deploy-transaction/v1',
     phase,
@@ -29,8 +31,8 @@ function fixture({ phase = 'pending', health = 'healthy' } = {}) {
     tunnelLinkCreated: false,
     releasePresent: true,
   }));
-  writeFileSync(path.join(mockBin, 'systemctl'), '#!/bin/sh\nprintf "systemctl %s\\n" "$*" >> "$CODEXIA_TEST_LOG"\nexit 0\n');
-  writeFileSync(path.join(mockBin, 'podman'), '#!/bin/sh\nprintf "podman %s\\n" "$*" >> "$CODEXIA_TEST_LOG"\nprintf "%s\\n" "$CODEXIA_TEST_HEALTH"\n');
+  writeFileSync(path.join(mockBin, 'systemctl'), '#!/bin/sh\nprintf "systemctl %s\\n" "$*" >> "$CODEXIA_TEST_LOG"\ncase "$*" in "--user show --property=LoadState --value codexia-api.service") [ "${CODEXIA_TEST_SHOW_FAIL:-false}" = false ] || exit 1; printf "%s\\n" "${CODEXIA_TEST_API_LOAD_STATE:-loaded}"; exit 0 ;; "--user show --property=LoadState --value codexia-tunnel.service") [ "${CODEXIA_TEST_SHOW_FAIL:-false}" = false ] || exit 1; printf "%s\\n" "${CODEXIA_TEST_TUNNEL_LOAD_STATE:-loaded}"; exit 0 ;; "--user is-active --quiet "*) exit 3 ;; esac\nif [ "$*" = "--user stop codexia-api.service" ] && [ "${CODEXIA_TEST_STOP_FAIL:-false}" = true ]; then exit 1; fi\nexit 0\n');
+  writeFileSync(path.join(mockBin, 'podman'), '#!/bin/sh\nprintf "podman %s\\n" "$*" >> "$CODEXIA_TEST_LOG"\ncase "$*" in "container exists codexia-api") [ "${CODEXIA_TEST_API_CONTAINER:-present}" = present ] ;; *State.Running*) printf "%s\\n" "${CODEXIA_TEST_API_RUNNING:-false}" ;; *ImageName*) printf "%s\\n" "$CODEXIA_TEST_RUNNING_IMAGE" ;; *) printf "%s\\n" "$CODEXIA_TEST_HEALTH" ;; esac\n');
   writeFileSync(path.join(mockBin, 'sleep'), '#!/bin/sh\nexit 0\n');
   chmodSync(path.join(mockBin, 'systemctl'), 0o755);
   chmodSync(path.join(mockBin, 'podman'), 0o755);
@@ -47,6 +49,13 @@ function fixture({ phase = 'pending', health = 'healthy' } = {}) {
       CODEXIA_PUSH_QUADLET_DIR: quadletDir,
       CODEXIA_TEST_LOG: logFile,
       CODEXIA_TEST_HEALTH: health,
+      CODEXIA_TEST_RUNNING_IMAGE: previousImage,
+      CODEXIA_TEST_API_LOAD_STATE: 'loaded',
+      CODEXIA_TEST_TUNNEL_LOAD_STATE: 'loaded',
+      CODEXIA_TEST_API_CONTAINER: 'present',
+      CODEXIA_TEST_API_RUNNING: 'false',
+      CODEXIA_TEST_PREVIOUS_IMAGE: previousImage,
+      CODEXIA_TEST_CANDIDATE_IMAGE: candidateImage,
       PATH: `${mockBin}:${process.env.PATH}`,
     },
   };
@@ -62,8 +71,8 @@ test('interrupted deployment restores the exact previous unit and release before
     const result = runRecovery(target);
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /RECOVERED_PREVIOUS_RELEASE/u);
-    assert.equal(readFileSync(path.join(target.quadletDir, 'codexia-api.container'), 'utf8'), 'previous unit\n');
-    assert.equal(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8'), '{"image":"previous"}\n');
+    assert.equal(readFileSync(path.join(target.quadletDir, 'codexia-api.container'), 'utf8'), `Image=${target.env.CODEXIA_TEST_PREVIOUS_IMAGE}\n`);
+    assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), { image: target.env.CODEXIA_TEST_PREVIOUS_IMAGE });
     assert.equal(existsSync(path.join(target.stateDir, 'deploy-transaction.json')), false, 'pending intent must be removed only after recovery');
     const calls = readFileSync(target.logFile, 'utf8');
     assert.match(calls, /systemctl --user stop codexia-tunnel\.service/u);
@@ -82,8 +91,110 @@ test('unhealthy prior release keeps the durable recovery record for another atte
     assert.equal(result.status, 1);
     assert.match(result.stderr, /Prior API did not recover/u);
     assert.ok(readFileSync(path.join(target.stateDir, 'deploy-transaction.json'), 'utf8'));
-    assert.equal(readFileSync(path.join(target.stateDir, 'rollback-api.container'), 'utf8'), 'previous unit\n');
-    assert.equal(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8'), '{"image":"candidate"}\n');
+    assert.equal(readFileSync(path.join(target.stateDir, 'rollback-api.container'), 'utf8'), `Image=${target.env.CODEXIA_TEST_PREVIOUS_IMAGE}\n`);
+    assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), { image: target.env.CODEXIA_TEST_CANDIDATE_IMAGE });
+  } finally {
+    rmSync(target.root, { recursive: true, force: true });
+  }
+});
+
+test('failed API stop keeps the interrupted transaction and does not claim recovery', () => {
+  const target = fixture();
+  target.env.CODEXIA_TEST_STOP_FAIL = 'true';
+  try {
+    const result = runRecovery(target);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Could not stop and verify the active API/u);
+    assert.ok(existsSync(path.join(target.stateDir, 'deploy-transaction.json')));
+    assert.equal(readFileSync(path.join(target.quadletDir, 'codexia-api.container'), 'utf8').includes(target.env.CODEXIA_TEST_CANDIDATE_IMAGE), true);
+    assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), { image: target.env.CODEXIA_TEST_CANDIDATE_IMAGE });
+    assert.doesNotMatch(readFileSync(target.logFile, 'utf8'), /start codexia-tunnel\.service/u);
+  } finally {
+    rmSync(target.root, { recursive: true, force: true });
+  }
+});
+
+test('recovery before first API unit installation does not require a nonexistent service stop', () => {
+  const target = fixture();
+  const intentPath = path.join(target.stateDir, 'deploy-transaction.json');
+  const intent = JSON.parse(readFileSync(intentPath, 'utf8'));
+  writeFileSync(intentPath, JSON.stringify({ ...intent, hadUnit: false, tunnelWasActive: false, releasePresent: false }));
+  rmSync(path.join(target.stateDir, 'rollback-api.container'));
+  rmSync(path.join(target.stateDir, 'rollback-release.json'));
+  target.env.CODEXIA_TEST_API_LOAD_STATE = 'not-found';
+  target.env.CODEXIA_TEST_TUNNEL_LOAD_STATE = 'not-found';
+  target.env.CODEXIA_TEST_API_CONTAINER = 'absent';
+  try {
+    const result = runRecovery(target);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /RECOVERED_PREVIOUS_RELEASE/u);
+    assert.equal(existsSync(intentPath), false);
+    assert.equal(existsSync(path.join(target.quadletDir, 'codexia-api.container')), false);
+    assert.doesNotMatch(readFileSync(target.logFile, 'utf8'), /stop codexia-api\.service/u);
+  } finally {
+    rmSync(target.root, { recursive: true, force: true });
+  }
+});
+
+test('missing API unit with a running container keeps recovery intent and does not remove its Quadlet', () => {
+  const target = fixture();
+  const intentPath = path.join(target.stateDir, 'deploy-transaction.json');
+  const intent = JSON.parse(readFileSync(intentPath, 'utf8'));
+  writeFileSync(intentPath, JSON.stringify({ ...intent, hadUnit: false, tunnelWasActive: false, releasePresent: false }));
+  rmSync(path.join(target.stateDir, 'rollback-api.container'));
+  rmSync(path.join(target.stateDir, 'rollback-release.json'));
+  target.env.CODEXIA_TEST_API_LOAD_STATE = 'not-found';
+  target.env.CODEXIA_TEST_TUNNEL_LOAD_STATE = 'not-found';
+  target.env.CODEXIA_TEST_API_RUNNING = 'true';
+  try {
+    const result = runRecovery(target);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /API container may still be running/u);
+    assert.ok(existsSync(intentPath));
+    assert.equal(existsSync(path.join(target.quadletDir, 'codexia-api.container')), true);
+  } finally {
+    rmSync(target.root, { recursive: true, force: true });
+  }
+});
+
+test('systemd load-state lookup failure keeps recovery intent', () => {
+  const target = fixture();
+  target.env.CODEXIA_TEST_SHOW_FAIL = 'true';
+  try {
+    const result = runRecovery(target);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Could not stop and verify the application Tunnel/u);
+    assert.ok(existsSync(path.join(target.stateDir, 'deploy-transaction.json')));
+  } finally {
+    rmSync(target.root, { recursive: true, force: true });
+  }
+});
+
+test('healthy candidate image cannot satisfy prior release recovery', () => {
+  const target = fixture();
+  target.env.CODEXIA_TEST_RUNNING_IMAGE = target.env.CODEXIA_TEST_CANDIDATE_IMAGE;
+  try {
+    const result = runRecovery(target);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /does not match the recorded prior release/u);
+    assert.ok(existsSync(path.join(target.stateDir, 'deploy-transaction.json')));
+    assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), { image: target.env.CODEXIA_TEST_CANDIDATE_IMAGE });
+    assert.doesNotMatch(readFileSync(target.logFile, 'utf8'), /start codexia-tunnel\.service/u);
+  } finally {
+    rmSync(target.root, { recursive: true, force: true });
+  }
+});
+
+test('recovery refuses a release record that disagrees with its prior Quadlet', () => {
+  const target = fixture();
+  writeFileSync(path.join(target.stateDir, 'rollback-release.json'), JSON.stringify({ image: target.env.CODEXIA_TEST_CANDIDATE_IMAGE }) + '\n');
+  try {
+    const result = runRecovery(target);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Invalid deployment transaction or prior release snapshot/u);
+    assert.ok(existsSync(path.join(target.stateDir, 'deploy-transaction.json')));
+    assert.equal(readFileSync(path.join(target.quadletDir, 'codexia-api.container'), 'utf8'), `Image=${target.env.CODEXIA_TEST_CANDIDATE_IMAGE}\n`);
+    assert.equal(existsSync(target.logFile), false, 'recovery must validate snapshots before changing services');
   } finally {
     rmSync(target.root, { recursive: true, force: true });
   }
@@ -95,8 +206,8 @@ test('committed transaction only cleans snapshots and does not switch a healthy 
     const result = runRecovery(target);
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /CLEANED_COMMITTED_TRANSACTION/u);
-    assert.equal(readFileSync(path.join(target.quadletDir, 'codexia-api.container'), 'utf8'), 'candidate unit\n');
-    assert.equal(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8'), '{"image":"candidate"}\n');
+    assert.equal(readFileSync(path.join(target.quadletDir, 'codexia-api.container'), 'utf8'), `Image=${target.env.CODEXIA_TEST_CANDIDATE_IMAGE}\n`);
+    assert.deepEqual(JSON.parse(readFileSync(path.join(target.stateDir, 'deployed-release.json'), 'utf8')), { image: target.env.CODEXIA_TEST_CANDIDATE_IMAGE });
     assert.equal(existsSync(target.logFile), false, 'a committed intent is cleanup only and must not touch systemd');
   } finally {
     rmSync(target.root, { recursive: true, force: true });

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
+import { constants as fsConstants, type BigIntStats } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { test } from "node:test";
@@ -16,6 +17,19 @@ type TargetFiles = Map<string, { content: string; revision: string }>;
 
 function digest(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+async function readSnapshotFile(filePath: string, expected: BigIntStats): Promise<Buffer> {
+  const handle = await fs.open(filePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  try {
+    const opened = await handle.stat({ bigint: true });
+    assert.equal(opened.isFile(), true);
+    assert.equal(opened.dev, expected.dev);
+    assert.equal(opened.ino, expected.ino);
+    return await handle.readFile();
+  } finally {
+    await handle.close();
+  }
 }
 
 test("an exact legacy import compares binary and UTF-8 content in the target encoding", async () => {
@@ -252,7 +266,7 @@ async function sourceTreeState(root: string): Promise<Array<{ path: string; type
       } else if (child.isSymbolicLink()) {
         result.push({ ...item, link: await fs.readlink(absolute) });
       } else if (child.isFile()) {
-        result.push({ ...item, hash: digest(await fs.readFile(absolute)) });
+        result.push({ ...item, hash: digest(await readSnapshotFile(absolute, info)) });
       } else result.push(item);
     }
   };

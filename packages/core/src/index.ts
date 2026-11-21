@@ -612,9 +612,11 @@ export class CoreStore implements MutationCoordinator {
       if (state.state === "applied") return;
 
       state.approvedOperationIds = [...new Set([...state.approvedOperationIds, ...approval.operationIds])];
-      const approvers = { ...state.approvedByOperationId };
-      for (const id of approval.operationIds) approvers[id] ??= approval.authorScope;
-      state.approvedByOperationId = approvers;
+      const approvers = new Map(Object.entries(state.approvedByOperationId ?? {}));
+      for (const id of approval.operationIds) {
+        if (!approvers.has(id)) approvers.set(id, approval.authorScope);
+      }
+      state.approvedByOperationId = Object.fromEntries(approvers);
       state.state = state.approvedOperationIds.length === state.proposal.operations.length
         ? "approved"
         : "partially_approved";
@@ -980,7 +982,11 @@ export class CoreStore implements MutationCoordinator {
     return built;
   }
   async buildReorderHierarchyOperation(projectId:string,input:ReorderHierarchyInput,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
-    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest);let parent:Document|undefined;if(input.kind==="chapter")parent=this.findDocument(manifest,input.volumeId,index);if(input.kind==="scene")parent=this.findDocument(manifest,input.chapterId,index);
+    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest);let parent:Document|undefined;if(input.kind==="chapter")parent=this.findDocument(manifest,input.volumeId,index);if(input.kind==="scene"){
+      const volume=this.findDocument(manifest,input.volumeId,index);
+      parent=this.findDocument(manifest,input.chapterId,index);
+      if(volume.kind!=="volume"||parent.kind!=="chapter"||parent.parentId!==volume.id)fail(422,"invalid_hierarchy_parent","The selected chapter does not belong to the selected volume");
+    }
     const siblings=(index.documentsByParentId.get(parent?.id??null)??[]).filter((document)=>document.kind===input.kind);const expected=siblings.map((document)=>this.logicalId(index,document)).sort();if(JSON.stringify([...input.orderedIds].sort())!==JSON.stringify(expected))fail(422,"invalid_hierarchy_order","Reorder must include every sibling exactly once");
     const writes=input.orderedIds.map((id,order)=>{const document=this.findDocument(manifest,id,index),path=index.pathsByDocumentId.get(document.id)?.metadataPath,entry=path ? manifest.files[path] : undefined;if(!path||!entry)fail(409,"snapshot_unavailable","Document metadata is missing from the project snapshot");return {path,revision:entry.revision,content:YAML.stringify({...YAML.parse(entry.content),order:String(order).padStart(10,"0")})};});
     const built=await this.buildOperation(projectId,writes,"structure","Reorder hierarchy",manifest.snapshot);

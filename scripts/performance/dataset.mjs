@@ -71,9 +71,9 @@ export async function generate(root, scenario) {
   const spec = scenarios[scenario];
   if (!spec) throw new Error(`Unknown dataset: ${scenario}`);
   // Exclusive directory creation prevents overwriting an existing fixture or result set.
-  await mkdir(root);
+  await mkdir(root, { mode: 0o700 });
   const seed = join(root, 'seed');
-  await mkdir(seed);
+  await mkdir(seed, { mode: 0o700 });
   const sceneCount = spec.documentCount - spec.volumes - spec.chapters;
   const scenes = [];
   let documentBytes = 0;
@@ -82,7 +82,7 @@ export async function generate(root, scenario) {
     const name = `scene-${String(index).padStart(4, '0')}.md`;
     const markdown = sceneBody(index, bytes);
     if (Buffer.byteLength(markdown) !== bytes) throw new Error(`Scene ${index} byte count changed during generation`);
-    await writeFile(join(seed, name), markdown);
+    await writeFile(join(seed, name), markdown, { flag: 'wx', mode: 0o600 });
     documentBytes += bytes;
     scenes.push({ index, name, title: `Scene ${String(index).padStart(4, '0')}`, bodyBytes: bytes,
       historyRevisions: index === 1 ? spec.historyRevisions : 0 });
@@ -91,7 +91,7 @@ export async function generate(root, scenario) {
     chapterCount: spec.chapters, sceneCount, defaultBodyBytes: spec.defaultBodyBytes,
     historyTarget: { sceneIndex: 1, additionalRevisions: spec.historyRevisions },
     knowledge: spec.knowledge ?? { nodes: 0, aliasesPerNode: 0, evidencePerNode: 0, assertionsPerNode: 0 }, scenes };
-  await writeFile(join(seed, 'fixture-plan.json'), `${JSON.stringify(plan, null, 2)}\n`);
+  await writeFile(join(seed, 'fixture-plan.json'), `${JSON.stringify(plan, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
   const seedFiles = [...scenes.map(scene => scene.name), 'fixture-plan.json'].sort();
   git(seed, 'init', '--initial-branch=main');
   git(seed, 'add', '.');
@@ -105,7 +105,7 @@ export async function generate(root, scenario) {
   const manifest = { ...plan, fixtureId, fixtureSha256: fixtureId,
     transport: { kind: 'synthetic-git', commit, trackedFiles: actualFiles.length, bytes: transportBytes },
     documentBodyBytes: documentBytes, generatedBy: 'scripts/performance/dataset.mjs' };
-  await writeFile(join(root, 'dataset.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  await writeFile(join(root, 'dataset.json'), `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
   return manifest;
 }
 

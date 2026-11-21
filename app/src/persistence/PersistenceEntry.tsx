@@ -162,10 +162,10 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
   async function completeNativeLogout(): Promise<void> {
     if (!nativeAuth || busy) return;
     setBusy(true);
-    setSessionBlocked(true);
     setMessage("");
     try {
       if (!await protectBeforeAuthTransition("ログアウト")) return;
+      setSessionBlocked(true);
       await nativeAuth.signOut();
       workspaceScopeRef.current = null;
       setSessionBlocked(false);
@@ -180,10 +180,10 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
   async function completeWebOAuthLogout(): Promise<void> {
     if (busy) return;
     setBusy(true);
-    setSessionBlocked(true);
     setMessage("");
     try {
       if (!await protectBeforeAuthTransition("ログアウト")) return;
+      setSessionBlocked(true);
       setOAuthAccessToken(null);
       const result = await authClient.signOut();
       if (result.error) throw new Error("サーバー側セッションの終了を確認できませんでした。");
@@ -215,10 +215,10 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
   async function completeLogout(): Promise<void> {
     if (busy) return;
     setBusy(true);
-    setSessionBlocked(true);
     setMessage("");
     try {
       if (!await protectBeforeAuthTransition("ログアウト")) return;
+      setSessionBlocked(true);
       await api.logout();
       workspaceScopeRef.current = null;
       setSessionBlocked(false);

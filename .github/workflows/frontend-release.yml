@@ -33,6 +33,7 @@ on:
       - scripts/identity-probe-client.mjs
       - scripts/build-frontend.mjs
       - scripts/profile-build.mjs
+      - scripts/read-regular-file.mjs
       - scripts/profile-package.mjs
       - package.json
       - pnpm-lock.yaml

@@ -1,10 +1,10 @@
-import { randomUUID } from 'node:crypto';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readdir } from 'node:fs/promises';
+import { link, mkdtemp, open, readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
-import { readFile, writeFile, rename, rm } from 'node:fs/promises';
+import { readFile, rename, rm } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
+import { readRegularFile as readRegularFileDescriptor } from '../read-regular-file.mjs';
 
 export function distribution(values) {
   if (!values.length) return { n: 0, p50: null, p95: null, p99: null };
@@ -39,6 +39,10 @@ export async function hashTree(root) {
   }
   return { root: relative(process.cwd(), absolute) || '.', files: files.length, sha256: digest.digest('hex') };
 }
+/** Read the bytes through the descriptor that was checked, never by reopening a checked path. */
+export function readRegularFile(file) {
+  return readRegularFileDescriptor(file, { encoding: null });
+}
 export function sourceIdentity() {
   const git = (...args) => execFileSync('git', args, { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
   const status = git('status', '--porcelain=v1', '--untracked-files=all');
@@ -69,12 +73,30 @@ export async function measure(name, action, counters = () => ({})) {
     counters: Object.fromEntries(Object.keys(after).map(k => [k, after[k] - (before[k] ?? 0)])) } };
 }
 export async function save(file, data) {
-  const temporary = `${file}.${randomUUID()}.tmp`;
+  if (typeof file !== 'string' || !file.trim()) throw new TypeError('Result path must be a non-empty string');
+  const destination = resolve(file);
+  const temporaryDirectory = await mkdtemp(`${destination}.tmp-`);
+  const temporary = join(temporaryDirectory, 'result.json');
   try {
-    await writeFile(temporary, JSON.stringify(data, null, 2) + '\n');
-    await rename(temporary, file);
-  } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
-  }
+    const handle = await open(temporary, 'wx', 0o600);
+    try { await handle.writeFile(JSON.stringify(data, null, 2) + '\n'); }
+    finally { await handle.close(); }
+    await rename(temporary, destination);
+  } finally { await rm(temporaryDirectory, { recursive: true, force: true }); }
+}
+
+/** Create an explicitly requested result file without following or overwriting an existing path. */
+export async function writeNewJsonResult(file, data) {
+  if (typeof file !== 'string' || !file.trim()) throw new TypeError('Result path must be a non-empty string');
+  const destination = resolve(file);
+  const temporaryDirectory = await mkdtemp(`${destination}.tmp-`);
+  const temporary = join(temporaryDirectory, 'result.json');
+  try {
+    const handle = await open(temporary, 'wx', 0o600);
+    try { await handle.writeFile(JSON.stringify(data, null, 2) + '\n'); }
+    finally { await handle.close(); }
+    // link() provides an atomic no-replace claim even when another process races
+    // to create the requested output path.
+    await link(temporary, destination);
+  } finally { await rm(temporaryDirectory, { recursive: true, force: true }); }
 }

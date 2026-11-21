@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -125,8 +126,12 @@ func build(ctx context.Context, gateway client.Client) (*client.Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("apply immutable Build Kit image configuration: %w", err)
 	}
+	artifactKey := sha256.Sum256([]byte(encodedInput))
+	// This output path is deterministic for BuildKit cache reuse and lives in
+	// this LLB command's isolated root filesystem, never the host /tmp.
+	artifactDirectory := fmt.Sprintf("/tmp/codexia-hosted-artifact-%x", artifactKey)
 	buildOutput := buildState.Dir("/opt/codexia").With(llb.Network(pb.NetMode_NONE)).Run(
-		llb.Args([]string{"/usr/local/bin/node", "/opt/codexia/scripts/hosted-build.mjs", "compose", "--input-base64url", encodedInput, "--source", frontendRef}),
+		llb.Args([]string{"/usr/local/bin/node", "/opt/codexia/scripts/hosted-build.mjs", "compose", "--input-base64url", encodedInput, "--source", frontendRef, "--artifact-directory", artifactDirectory}),
 	).Root()
 
 	runtimeRef := frontendRepository + "@" + input.RuntimeBaseDigest
@@ -155,8 +160,8 @@ func build(ctx context.Context, gateway client.Client) (*client.Result, error) {
 		AddEnv("HOME", "/data")
 	owner := llb.WithUIDGID(1000, 1000).(llb.ChownOpt)
 	copyInfo := &llb.CopyInfo{CopyDirContentsOnly: true, CreateDestPath: true, FollowSymlinks: true, ChownOpt: &owner}
-	runtime = runtime.File(llb.Copy(buildOutput, "/tmp/codexia-hosted-artifact/app", "/app", copyInfo))
-	runtime = runtime.File(llb.Copy(buildOutput, "/tmp/codexia-hosted-artifact/usr/share/codexia", "/usr/share/codexia", copyInfo))
+	runtime = runtime.File(llb.Copy(buildOutput, artifactDirectory+"/app", "/app", copyInfo))
+	runtime = runtime.File(llb.Copy(buildOutput, artifactDirectory+"/usr/share/codexia", "/usr/share/codexia", copyInfo))
 
 	definition, err := runtime.Marshal(ctx, llb.Platform(platform), llb.WithCaps(gateway.BuildOpts().Caps))
 	if err != nil {

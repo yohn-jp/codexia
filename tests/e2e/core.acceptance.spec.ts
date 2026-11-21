@@ -699,6 +699,98 @@ test("a pending scratch image read is flushed to its captured document before na
   expect((await scratchRecords(page)).some((r) => r.key.includes(f.two.document.id) && r.text.includes("Attachment belongs to Scene One."))).toBe(false);
 });
 
+test("saving a scratch note replays the same request after its committed response is lost", async ({ page }) => {
+  const f = await fixture(page);
+  await scratch(page);
+  await memo(page).fill("Scratch text survives an ambiguous note save.");
+  await image(page).setInputFiles(png);
+  await expect.poll(async () => (await scratchRecords(page)).find((record) => record.key.includes(f.one.document.id))?.text).toContain(png.name);
+
+  let attempts = 0;
+  const requests: Array<{ key: string | undefined; body: unknown }> = [];
+  await page.route(`**${documentPath(f).slice(0, documentPath(f).lastIndexOf("/"))}`, async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    attempts += 1;
+    requests.push({ key: route.request().headers()["idempotency-key"], body: route.request().postDataJSON() });
+    if (attempts === 1) {
+      const response = await route.fetch();
+      expect(response.status()).toBe(201);
+      await route.abort("failed");
+      return;
+    }
+    await route.continue();
+  });
+
+  const save = page.locator(".scratch-panel").getByRole("button", { name: "ノートとしてPostgreSQLへ保存" });
+  await save.click();
+  await expect(page.locator(".scratch-panel").getByRole("alert")).toBeVisible();
+  await expect(memo(page)).toHaveValue("Scratch text survives an ambiguous note save.");
+  await expect(page.locator(".scratch-panel").getByRole("img", { name: png.name })).toBeVisible();
+  await memo(page).fill("A newer scratch draft stays separate from the pending note.");
+  await page.locator(".scratch-panel").getByRole("button", { name: "前のノート保存を照合", exact: true }).click();
+  await expect(page.locator(".scratch-panel").getByRole("alert")).toHaveCount(0);
+  expect(attempts).toBe(2);
+  expect(requests[1]).toEqual(requests[0]);
+  await expect(memo(page)).toHaveValue("A newer scratch draft stays separate from the pending note.");
+
+  await save.click();
+  await expect.poll(() => attempts).toBe(3);
+  await expect(page.locator(".scratch-panel").getByRole("alert")).toHaveCount(0);
+  expect(requests[2]?.key).not.toBe(requests[0]?.key);
+  expect((requests[2]?.body as { markdown: string }).markdown).toContain("A newer scratch draft stays separate from the pending note.");
+
+  const documents = await page.request.get(`${documentPath(f).slice(0, documentPath(f).lastIndexOf("/"))}?limit=1000&parentId=${f.one.document.id}`);
+  expect(documents.ok()).toBe(true);
+  const children = await documents.json() as { documents: Array<{ id: string; kind: string; title: string }> };
+  const notes = children.documents.filter((document) => document.kind === "note" && document.title === "スクラッチ");
+  expect(notes).toHaveLength(2);
+  const noteBodies = await Promise.all(notes.map(async (item) => {
+    const note = await page.request.get(`${documentPath(f).slice(0, documentPath(f).lastIndexOf("/"))}/${item.id}`);
+    expect(note.ok()).toBe(true);
+    const noteRead = await note.json() as { revision: { markdown: string } };
+    return noteRead.revision.markdown;
+  }));
+  expect(noteBodies.some((markdown) => markdown.includes("Scratch text survives an ambiguous note save.") && markdown.includes("data:image/png;base64"))).toBe(true);
+  expect(noteBodies.some((markdown) => markdown.includes("A newer scratch draft stays separate from the pending note."))).toBe(true);
+});
+
+test("a pending scratch note remains reconcilable after its editable draft is cleared", async ({ page }) => {
+  const f = await fixture(page);
+  await scratch(page);
+  await memo(page).fill("The pending note payload remains durable after editing the scratch.");
+  let attempts = 0;
+  const requests: Array<{ key: string | undefined; body: unknown }> = [];
+  const collectionPath = documentPath(f).slice(0, documentPath(f).lastIndexOf("/"));
+  await page.route(`**${collectionPath}`, async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    attempts += 1;
+    requests.push({ key: route.request().headers()["idempotency-key"], body: route.request().postDataJSON() });
+    if (attempts === 1) {
+      const response = await route.fetch();
+      expect(response.status()).toBe(201);
+      await route.abort("failed");
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.locator(".scratch-panel").getByRole("button", { name: "ノートとしてPostgreSQLへ保存" }).click();
+  await expect(page.locator(".scratch-panel").getByRole("alert")).toBeVisible();
+  await memo(page).fill("");
+  const reconcile = page.locator(".scratch-panel").getByRole("button", { name: "前のノート保存を照合", exact: true });
+  await expect(reconcile).toBeEnabled();
+  await expect(page.locator(".scratch-panel").getByRole("status")).toContainText("現在のスクラッチを保持します");
+  await reconcile.click();
+  await expect.poll(() => attempts).toBe(2);
+  await expect(page.locator(".scratch-panel").getByRole("alert")).toHaveCount(0);
+  expect(requests[1]).toEqual(requests[0]);
+  await expect(memo(page)).toHaveValue("");
+
+  const documents = await page.request.get(`${collectionPath}?limit=1000&parentId=${f.one.document.id}`);
+  const children = await documents.json() as { documents: Array<{ kind: string; title: string }> };
+  expect(children.documents.filter((document) => document.kind === "note" && document.title === "スクラッチ")).toHaveLength(1);
+});
+
 test("scratch still protects text and accepts a new image after an oversized attachment", async ({ page }) => {
   const f = await fixture(page);
   await scratch(page);

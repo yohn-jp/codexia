@@ -8,13 +8,14 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
+import { isRealDirectory, validateImageReference, validateModelCachePath, validateOciEngine } from "./model-oci-lifecycle-arguments.mjs";
 
 const execFile = promisify(execFileCallback);
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const helperDirectory = dirname(fileURLToPath(import.meta.url));
 const helperFilename = join(helperDirectory, "model-oci-lifecycle.container.mjs");
 const defaultModelCache = "/tmp/codexia-model-runtime-edc033c/home/.arcadia/models";
-const modelCache = resolve(process.env.CODEXIA_P13_MODEL_CACHE ?? defaultModelCache);
+const modelCache = validateModelCachePath(process.env.CODEXIA_P13_MODEL_CACHE, defaultModelCache);
 const modelRefs = {
   embedding: { id: "Xenova/multilingual-e5-small", revision: "761b726dd34fb83930e26aab4e9ac3899aa1fa78" },
   reranker: { id: "mogolloni/bge-reranker-v2-m3-onnx", revision: "e5023553f6c47f09057da7a19cdd79ef850a4985" },
@@ -27,7 +28,6 @@ const nodeUserNamespace = "--userns=keep-id:uid=1000,gid=1000";
 async function run(command, args, options = {}) {
   const result = await execFile(command, args, {
     cwd: options.cwd ?? root,
-    env: options.env ?? process.env,
     encoding: "utf8",
     maxBuffer: options.maxBuffer ?? 8 * 1024 * 1024,
     timeout: options.timeout ?? 120_000,
@@ -134,10 +134,11 @@ async function waitForReplacementReady(podman, name) {
 }
 
 test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives replacement", { timeout: 2_700_000 }, async () => {
-  const podman = process.env.OCI_ENGINE ?? "podman";
+  const podman = validateOciEngine(process.env.OCI_ENGINE);
+  const configuredImage = process.env.CODEXIA_P13_IMAGE;
   const commit = await git(root, "rev-parse", "HEAD");
   const tree = await git(root, "rev-parse", "HEAD^{tree}");
-  const image = process.env.CODEXIA_P13_IMAGE ?? "localhost/codexia:p13-full-" + commit.slice(0, 7);
+  const image = validateImageReference(configuredImage, "localhost/codexia:p13-full-" + commit.slice(0, 7));
   const port = await choosePort();
   const verifyEnvironment = {
     ...safeBuildEnvironment(),
@@ -146,8 +147,14 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
     CODEXIA_OCI_IMAGE: image,
     CODEXIA_OCI_PORT: String(port),
   };
-  const verifyOutput = await run("bash", ["scripts/verify-oci.sh"], { env: verifyEnvironment, timeout: 600_000 });
-  const verificationLines = verifyOutput.split("\n").filter((line) =>
+  const { stdout: verifyOutput } = await execFile("bash", ["scripts/verify-oci.sh"], {
+    cwd: root,
+    env: verifyEnvironment,
+    encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
+    timeout: 600_000,
+  });
+  const verificationLines = verifyOutput.trim().split("\n").filter((line) =>
     line.startsWith("OCI startup checks passed:") ||
     line.startsWith("Image ID:") ||
     line.startsWith("Startup cgroup measurement:") ||
@@ -164,11 +171,10 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
   assert.match(imageDigest, /^sha256:[a-f0-9]{64}$/u);
   assert.equal(platform, "linux/amd64");
 
-  const modelCacheStat = await run("stat", ["-c", "%F", modelCache]);
-  assert.equal(modelCacheStat, "directory");
+  assert.equal(await isRealDirectory(modelCache), true, "model cache must be a real directory");
   for (const model of Object.values(modelRefs)) {
     const modelDir = join(modelCache, model.id, model.revision, "onnx");
-    assert.equal(await run("stat", ["-c", "%F", modelDir]), "directory");
+    assert.equal(await isRealDirectory(modelDir), true, "pinned model cache entry must be a real directory: " + model.id);
   }
 
   const temporaryRoot = await mkdtemp(join(tmpdir(), "codexia-p13-full-oci-"));

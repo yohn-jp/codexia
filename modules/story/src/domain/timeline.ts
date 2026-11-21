@@ -139,8 +139,11 @@ const FIXED_LEXICON: LexiconEntry[] = (
   ] satisfies LexiconEntry[]
 ).sort((a, b) => b.surface.length - a.surface.length);
 
-const N_DAYS_LATER_RE = /([一二三四五六七八九十百零〇\d]+)日後/g;
-const N_DAYS_BEFORE_RE = /([一二三四五六七八九十百零〇\d]+)日前/g;
+const RELATIVE_NUMBER_CHARS = new Set([..."一二三四五六七八九十百零〇", ..."0123456789"]);
+
+function isRelativeNumberCharacter(character: string | undefined): boolean {
+  return character !== undefined && RELATIVE_NUMBER_CHARS.has(character);
+}
 
 function tokenPosDetail1(token: StoryToken): string {
   return token.posDetail?.[0] ?? "";
@@ -218,29 +221,25 @@ function extractTimeExpressionsData(text: string, tokenizer?: StoryTokenizer): T
     }
   }
 
-  for (const match of text.matchAll(N_DAYS_LATER_RE)) {
-    const days = parseJapaneseNumber(match[1]!);
-    if (days == null) continue;
-    const start = match.index ?? 0;
-    pushUnique(out, {
-      surface: match[0],
-      start,
-      end: start + match[0].length,
-      deltaDays: days,
-      kind: "relative-forward",
-    });
-  }
-  for (const match of text.matchAll(N_DAYS_BEFORE_RE)) {
-    const days = parseJapaneseNumber(match[1]!);
-    if (days == null) continue;
-    const start = match.index ?? 0;
-    pushUnique(out, {
-      surface: match[0],
-      start,
-      end: start + match[0].length,
-      deltaDays: -days,
-      kind: "relative-backward",
-    });
+  for (let start = 0; start < text.length;) {
+    if (!isRelativeNumberCharacter(text[start])) { start++; continue; }
+    let numberEnd = start + 1;
+    while (isRelativeNumberCharacter(text[numberEnd])) numberEnd++;
+    const suffix = text.slice(numberEnd, numberEnd + 2);
+    if (suffix === "日後" || suffix === "日前") {
+      const days = parseJapaneseNumber(text.slice(start, numberEnd));
+      if (days != null) {
+        const surface = text.slice(start, numberEnd + 2);
+        pushUnique(out, {
+          surface,
+          start,
+          end: numberEnd + 2,
+          deltaDays: suffix === "日後" ? days : -days,
+          kind: suffix === "日後" ? "relative-forward" : "relative-backward",
+        });
+      }
+    }
+    start = numberEnd;
   }
 
   if (tokenizer) {
@@ -355,10 +354,52 @@ export function estimateSceneTimeline(input: {
   return snapshotResult(input.snapshot, estimateSceneTimelineData(input.scenes, input.tokenizer));
 }
 
-const ABSOLUTE_DATE_RE = /(?:\d{1,4}|[一二三四五六七八九十百]+)年(?:\d{1,2}|[一二三四五六七八九十]+)月(?:\d{1,2}|[一二三四五六七八九十]+)日/;
+const YEAR_NUMBER_CHARS = new Set([..."一二三四五六七八九十百", ..."0123456789"]);
+const DATE_NUMBER_CHARS = new Set([..."一二三四五六七八九十", ..."0123456789"]);
+
+function isAsciiDigitsOnly(value: string): boolean {
+  if (!value) return false;
+  for (let index = 0; index < value.length; index++) {
+    const digit = value.charCodeAt(index);
+    if (digit < 48 || digit > 57) return false;
+  }
+  return true;
+}
+
+function numberTokenBefore(text: string, end: number, allowed: ReadonlySet<string>, maxDigits: number): string | null {
+  let start = end;
+  while (start > 0 && allowed.has(text[start - 1]!)) start--;
+  if (start === end) return null;
+  const token = text.slice(start, end);
+  if (isAsciiDigitsOnly(token)) return token.length <= maxDigits ? token : null;
+  return token.split("").every((character) => allowed.has(character) && (character < "0" || character > "9")) ? token : null;
+}
+
+function numberTokenAt(text: string, start: number, allowed: ReadonlySet<string>, maxDigits: number): number | null {
+  let end = start;
+  while (end < text.length && allowed.has(text[end]!)) end++;
+  if (end === start) return null;
+  const token = text.slice(start, end);
+  if (isAsciiDigitsOnly(token)) return token.length <= maxDigits ? end : null;
+  if (token.split("").some((character) => !allowed.has(character) || (character >= "0" && character <= "9"))) return null;
+  return end;
+}
 
 export function hasAbsoluteDateMention(text: string): boolean {
-  return text.length > 0 && ABSOLUTE_DATE_RE.test(text);
+  let yearMarker = text.indexOf("年");
+  while (yearMarker >= 0) {
+    const year = numberTokenBefore(text, yearMarker, YEAR_NUMBER_CHARS, 4);
+    if (year) {
+      const monthStart = yearMarker + 1;
+      const monthEnd = numberTokenAt(text, monthStart, DATE_NUMBER_CHARS, 2);
+      if (monthEnd !== null && text[monthEnd] === "月") {
+        const dayEnd = numberTokenAt(text, monthEnd + 1, DATE_NUMBER_CHARS, 2);
+        if (dayEnd !== null && text[dayEnd] === "日") return true;
+      }
+    }
+    yearMarker = text.indexOf("年", yearMarker + 1);
+  }
+  return false;
 }
 
 function deriveTimelineConfidenceData(

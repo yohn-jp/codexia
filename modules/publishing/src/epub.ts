@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import JSZip from "jszip";
 import type { SnapshotReader } from "@codexia/contracts";
-import type { PublishingProject, PublishingScope } from "./project.js";
+import type { PublishingProject, PublishingScene, PublishingScope } from "./project.js";
 
 /** Aozora / カクヨム系: `|漢字《かんじ》` または全角 `｜`（plaintextExport と同型）。 */
 const RUBY_RE = /[|｜]([^《|\n｜]+?)《([^》]+)》/g;
@@ -178,7 +178,7 @@ export function manuscriptMarkupToHtml(text: string): string {
 
 /** 段落分割: 空行で区切る。行内は `<br/>`。 */
 export function manuscriptBodyToXhtml(body: string): string {
-  const trimmed = body.replace(/\s+$/u, "");
+  const trimmed = body.trimEnd();
   if (!trimmed) return "";
   const paragraphs = trimmed.split(/\n{2,}/);
   return paragraphs
@@ -224,9 +224,8 @@ function collectChapterTree(
   id?: string,
 ): { chapters: EpubChapterNav[]; label: string } {
   const usedKeys = new Set<string>();
-  const toDocs = (chapter: PublishingProject["volumes"][number]["chapters"][number]): EpubChapterNav => {
-    const scenes = chapter.scenes.flatMap((scene) => {
-      const body = scene.body.replace(/\s+$/u, "");
+  const toSceneDocs = (source: readonly PublishingScene[]): EpubSceneDoc[] => source.flatMap((scene) => {
+      const body = scene.body.trimEnd();
       if (!body) return [];
       // Keep Core IDs verbatim. Reserve a separate namespace for legacy IDs
       // and collisions on case-insensitive EPUB readers.
@@ -242,12 +241,21 @@ function collectChapterTree(
         bodyHtml: manuscriptBodyToXhtml(body),
       }];
     });
+  const toDocs = (chapter: PublishingProject["volumes"][number]["chapters"][number]): EpubChapterNav => {
+    const scenes = toSceneDocs(chapter.scenes);
     return { id: chapter.id, title: chapter.title, scenes };
   };
 
   if (scope === "all") {
+    const rootScenes = toSceneDocs(project.rootScenes ?? []);
+    const chapterIds = new Set(project.volumes.flatMap((volume) => volume.chapters.map((chapter) => chapter.id)));
+    let rootSectionId = "project-root";
+    while (chapterIds.has(rootSectionId)) rootSectionId += "-";
     return {
-      chapters: project.volumes.flatMap((volume) => volume.chapters.map(toDocs)).filter((chapter) => chapter.scenes.length > 0),
+      chapters: [
+        ...(rootScenes.length ? [{ id: rootSectionId, title: "作品直下", scenes: rootScenes }] : []),
+        ...project.volumes.flatMap((volume) => volume.chapters.map(toDocs)).filter((chapter) => chapter.scenes.length > 0),
+      ],
       label: "all",
     };
   }

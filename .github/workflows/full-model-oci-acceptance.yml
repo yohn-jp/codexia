@@ -18,10 +18,13 @@ on:
       - scripts/ci-workspace.mjs
       - scripts/ci-parallel.mjs
       - scripts/profile-build.mjs
+      - scripts/read-regular-file.mjs
       - scripts/profile-package.mjs
       - scripts/verify-oci.sh
       - scripts/verify-oci-http.mjs
       - tests/integration/model-oci-lifecycle.acceptance.mjs
+      - tests/integration/model-oci-lifecycle-arguments.mjs
+      - tests/integration/model-oci-lifecycle-arguments.test.mjs
       - tests/integration/model-oci-lifecycle.container.mjs
       - tests/integration/model-postgres-fixture.mjs
   workflow_dispatch:
@@ -170,6 +173,9 @@ jobs:
         with:
           path: ${{ runner.temp }}/codexia-p13-model-cache
           key: p13-full-models-ubuntu-26.04-manifest-${{ steps.model-manifest.outputs.digest }}
+      - name: Test OCI lifecycle harness input validation
+        if: steps.reuse.outputs.eligible != 'true'
+        run: node --test tests/integration/model-oci-lifecycle-arguments.test.mjs
       - name: Run the real Full model OCI lifecycle acceptance
         if: steps.reuse.outputs.eligible != 'true'
         timeout-minutes: 60

@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, readdir, writeFile, symlink, lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { distribution } from './common.mjs';
+import { distribution, readRegularFile, save, writeNewJsonResult } from './common.mjs';
 import { generate, git, verifyFixture } from './dataset.mjs';
 import { runWorker } from './run.mjs';
 
@@ -12,6 +12,36 @@ test('nearest-rank quantiles retain missing observations and sample count', () =
   assert.deepEqual(distribution([]), { n: 0, p50: null, p95: null, p99: null });
   const result = distribution(Array.from({ length: 100 }, (_, i) => 100 - i));
   assert.deepEqual(result, { n: 100, p50: 50, p95: 95, p99: 99, max: 100 });
+});
+test('verified artifact reads use a regular file descriptor and reject symlink paths', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'performance-artifact-read-'));
+  try {
+    const file = join(root, 'artifact.js'), link = join(root, 'artifact-link.js');
+    await writeFile(file, 'verified artifact');
+    const bytes = await readRegularFile(file);
+    assert.ok(Buffer.isBuffer(bytes));
+    assert.equal(bytes.toString(), 'verified artifact');
+    await symlink(file, link);
+    await assert.rejects(readRegularFile(link));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+test('result writers claim new files exclusively and save uses private collision-safe temporary files', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'performance-safe-output-'));
+  try {
+    const result = join(root, 'result.json');
+    await writeNewJsonResult(result, { status: 'complete' });
+    assert.deepEqual(JSON.parse((await readRegularFile(result)).toString('utf8')), { status: 'complete' });
+    assert.equal((await lstat(result)).mode & 0o777, 0o600);
+    await assert.rejects(writeNewJsonResult(result, { status: 'overwritten' }), { code: 'EEXIST' });
+    assert.deepEqual(JSON.parse((await readRegularFile(result)).toString('utf8')), { status: 'complete' });
+
+    const updated = join(root, 'progress.json');
+    await save(updated, { status: 'running' });
+    assert.equal((await lstat(updated)).mode & 0o777, 0o600);
+    await save(updated, { status: 'complete' });
+    assert.deepEqual(JSON.parse((await readRegularFile(updated)).toString('utf8')), { status: 'complete' });
+    assert.deepEqual((await readdir(root)).sort(), ['progress.json', 'result.json']);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 test('summaries exclude failed and timed-out workload latency while preserving completed observations and rejections', async () => {
   const { summarizeCore } = await import('./summarize.mjs');
@@ -29,8 +59,14 @@ test('summaries exclude failed and timed-out workload latency while preserving c
 test('synthetic fixture has exact tracked count, document sizes and reproducible Git identity', async () => {
   const root = await mkdtemp(join(tmpdir(), 'wave0-test-'));
   try {
-    const a = await generate(join(root, 'a'), 'small'), b = await generate(join(root, 'b'), 'small');
+    const previousUmask = process.umask(0);
+    let a, b;
+    try { a = await generate(join(root, 'a'), 'small'); b = await generate(join(root, 'b'), 'small'); }
+    finally { process.umask(previousUmask); }
     assert.equal(a.documentCount, 8); assert.equal(a.transport.commit, b.transport.commit);
+    assert.equal((await lstat(join(root, 'a'))).mode & 0o777, 0o700);
+    assert.equal((await lstat(join(root, 'a/seed'))).mode & 0o777, 0o700);
+    assert.equal((await lstat(join(root, 'a/seed', a.scenes[0].name))).mode & 0o777, 0o600);
     assert.equal(a.fixtureId, b.fixtureId); assert.equal(a.fixtureSha256, b.fixtureSha256);
     assert.equal(a.sceneCount, 6); assert.deepEqual(a.scenes.slice(0, 3).map(scene => scene.bodyBytes), [1024, 102400, 1048576]);
     for (const scene of a.scenes) assert.equal(Buffer.byteLength(await readFile(join(root, 'a/seed', scene.name))), scene.bodyBytes);

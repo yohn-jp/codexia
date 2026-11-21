@@ -43,6 +43,15 @@ test("source sentence rows preserve embeddable types, body/description/notes ord
   ]);
 });
 
+test("legacy note list parsing retains numbered steps and definition entries", () => {
+  const documents = buildSearchDocuments([{
+    id: "note-owner", type: "character", filePath: "bible/characters/a.yaml", name: "A", aliases: [],
+    raw: { notes: { lead: [], sections: [{ heading: "Notes", body: [{ text: "  1. First step\n* Term: Description" }], children: [] }] } },
+  }]);
+  const notes = documents.find((item) => item.field === "notes");
+  assert.equal(notes?.content, "First step\nTerm\nDescription");
+});
+
 test("snapshot lexical projection supplies source field weighting and classic RRF ranks", () => {
   const entities: CanonicalSnapshotEntity[] = [
     { id: "scene-direct", type: "scene", filePath: "plot/a.yaml", name: "Blue harbor", aliases: [], raw: {}, body: "The blue harbor glows." },
@@ -85,6 +94,42 @@ test("semantic search caps vector overfetch at the provider's 100-hit contract",
     assert.equal(result.ok, true);
   }
   assert.deepEqual(requestedLimits, [100, 100]);
+});
+
+test("semantic search scopes lexical and vector results to files and path segments", async () => {
+  const receivedScopes: Array<string | undefined> = [];
+  const embedding: SemanticEmbeddingCapability = {
+    model: { id: EMBEDDING_MODEL_ID, version: EMBEDDING_MODEL_VERSION, dimensions: EMBEDDING_DIMENSIONS },
+    async index(): Promise<never> { throw new Error("unused"); },
+    async nearest(_query, readerSnapshot, options) {
+      receivedScopes.push(options.scope);
+      const hits = [
+        { entityId: "outside", sceneId: "outside", sentenceIndex: 0, text: "harbor", score: 1, filePath: "plot/volumes/chapter-1-extra/scenes/outside.yaml" },
+        { entityId: "inside", sceneId: "inside", sentenceIndex: 0, text: "harbor", score: 0.5, filePath: "plot/volumes/chapter-1/scenes/inside.yaml" },
+      ];
+      return { snapshot: readerSnapshot, model: EMBEDDING_MODEL_ID, modelVersion: EMBEDDING_MODEL_VERSION, dimensions: EMBEDDING_DIMENSIONS, hits };
+    },
+    async status(): Promise<never> { throw new Error("unused"); },
+    async contradictionPairs(): Promise<never> { throw new Error("unused"); },
+    async embed(): Promise<never> { throw new Error("unused"); },
+    async rerank(): Promise<never> { throw new Error("unused"); },
+  };
+  const moduleContext = { async acquireCapability() { return { value: embedding, async release() {} }; } } as unknown as ModuleContext;
+  const search = createSemanticActions(moduleContext).find((action) => action.id === "semantic.search")!;
+  const reader = makeSemanticReader(snapshot, new Map([
+    ["plot/volumes/chapter-1/scenes/inside.yaml", "id: inside\ntype: scene\nname: Harbor\ndescription: harbor\n"],
+    ["plot/volumes/chapter-1-extra/scenes/outside.yaml", "id: outside\ntype: scene\nname: Harbor\ndescription: harbor\n"],
+  ]));
+  const context = { reader, signal: new AbortController().signal } as unknown as ModuleActionContext;
+  for (const scope of ["plot/volumes/chapter-1", "plot/volumes/chapter-1/scenes/inside.yaml"]) {
+    const result = await search.invoke({ query: "harbor", mode: "scene", limit: 1, scope }, context);
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      const results = (result.data as { results: Array<{ filePath?: string }> }).results;
+      assert.ok(results.every((hit) => hit.filePath === "plot/volumes/chapter-1/scenes/inside.yaml"));
+    }
+  }
+  assert.deepEqual(receivedScopes, ["plot/volumes/chapter-1", "plot/volumes/chapter-1/scenes/inside.yaml"]);
 });
 
 test("term expansion uses NLP rules and preserves the source short-token LIKE behavior", () => {

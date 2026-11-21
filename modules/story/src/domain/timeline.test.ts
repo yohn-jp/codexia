@@ -5,6 +5,7 @@ import {
   deriveTimelineConfidence,
   estimateSceneTimeline,
   extractTimeExpressions,
+  hasAbsoluteDateMention,
   parseJapaneseNumber,
   type StoryTokenizer,
 } from "./timeline.js";
@@ -35,6 +36,18 @@ test("Japanese number and time extraction retain source surfaces and offsets", (
     ],
   );
   assert.equal(result.data[1]?.timeOfDay, "morning");
+});
+
+test("relative-day and absolute-date scanning preserves matches and rejects overlong date fields", () => {
+  const text = "三日後、十日前。王国暦12年3月5日。";
+  const result = extractTimeExpressions({ snapshot, text });
+  assert.deepEqual(result.data.map((item) => [item.surface, item.start, item.end, item.deltaDays]), [
+    ["三日後", 0, 3, 3],
+    ["十日前", 4, 7, -10],
+  ]);
+  assert.equal(hasAbsoluteDateMention(text), true);
+  assert.equal(hasAbsoluteDateMention("12345年3月5日"), false);
+  assert.equal(hasAbsoluteDateMention("2025年12月31日"), true);
 });
 
 test("tokenizer recovers split relative expressions while preserving source spans", () => {

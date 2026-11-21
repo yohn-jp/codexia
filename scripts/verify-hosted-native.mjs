@@ -2,8 +2,8 @@
 // Disposable native Producer contract check. Never pushes images or accesses production.
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash, randomBytes } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +11,7 @@ import { trustedModuleData } from './hosted-build.mjs';
 import { resolveBuildCatalogSelection } from '../packages/module-runtime/dist/index.js';
 import { createHostedNativeReport, hostedNativeComposeCases, parseHostedNativeSelection } from './hosted-native-selection.mjs';
 import { assertNativeProducerReport } from './ci-native-producer.mjs';
+import { writeFileExclusive } from './hosted-output.mjs';
 
 const selection = parseHostedNativeSelection(process.argv.slice(2));
 assert.equal(process.env.CI, 'true', 'This native contract check owns a disposable CI runner only');
@@ -20,7 +21,7 @@ const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'u
 assert.match(sha, /^[a-f0-9]{40}$/u);
 assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }), '');
 const output = await mkdtemp(path.join(tmpdir(), 'codexia-hosted-verification-'));
-const artifact = '/tmp/codexia-hosted-artifact';
+const artifacts = new Set();
 const hash = bytes => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 const dockerfileHash = createHash('sha256').update(await readFile(path.join(root, 'Dockerfile'))).digest('hex');
 
@@ -111,8 +112,10 @@ try {
       platform: 'linux/amd64', options: {},
     };
     const encoded = Buffer.from(JSON.stringify(input)).toString('base64url');
+    const artifact = path.join('/tmp', `codexia-hosted-artifact-${randomBytes(16).toString('hex')}`);
+    artifacts.add(artifact);
     run(process.execPath, ['scripts/hosted-build.mjs', 'compose', '--input-base64url', encoded,
-      '--source', `ghcr.io/yohn-jp/codexia/verification@${buildKitDigest}`],
+      '--source', `ghcr.io/yohn-jp/codexia/verification@${buildKitDigest}`, '--artifact-directory', artifact],
       { env: { ...process.env, CODEXIA_PRODUCER_REVISION: sha } });
     const metadataDir = path.join(artifact, 'usr/share/codexia');
     const report = JSON.parse(await readFile(path.join(metadataDir, 'build-artifact-report.json'), 'utf8'));
@@ -150,12 +153,13 @@ try {
     },
     compositions: compositionResults,
   });
-  const reportPath = path.resolve(process.env.CODEXIA_NATIVE_REPORT_PATH ?? path.join(tmpdir(), `codexia-hosted-native-${sha}-${selection}.json`));
+  const reportDirectory = process.env.CODEXIA_NATIVE_REPORT_PATH ? null : await mkdtemp(path.join(tmpdir(), 'codexia-hosted-native-report-'));
+  const reportPath = path.resolve(process.env.CODEXIA_NATIVE_REPORT_PATH ?? path.join(reportDirectory, 'report.json'));
   await mkdir(path.dirname(reportPath), { recursive: true });
-  await writeFile(reportPath, `${JSON.stringify(result, null, 2)}\n`);
+  await writeFileExclusive(reportPath, `${JSON.stringify(result, null, 2)}\n`);
   console.log(JSON.stringify({ ...result, reportPath }));
 } finally {
   await rm(output, { recursive: true, force: true });
-  // This directory is the native Producer's fixed output, on this disposable runner only.
-  if (process.env.CI === 'true') await rm(artifact, { recursive: true, force: true });
+  // Remove only the random artifact roots created by this disposable verifier run.
+  if (process.env.CI === 'true') await Promise.all([...artifacts].map(artifact => rm(artifact, { recursive: true, force: true })));
 }

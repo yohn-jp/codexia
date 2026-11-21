@@ -29,19 +29,41 @@ flock --exclusive --nonblock 9 || {
   exit 1
 }
 
-recovery="$(node - "$intent" <<'NODE'
+if ! recovery="$(node - "$intent" "$state_dir/rollback-release.json" "$state_dir/rollback-api.container" <<'NODE'
 const fs = require('node:fs');
 const value = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 if (value.format !== 'codexia-deploy-transaction/v1' || !['pending', 'committed'].includes(value.phase) ||
     typeof value.hadUnit !== 'boolean' || typeof value.tunnelWasActive !== 'boolean' ||
     typeof value.apiLinkCreated !== 'boolean' || typeof value.tunnelLinkCreated !== 'boolean' ||
     typeof value.releasePresent !== 'boolean') process.exit(2);
+let previousImage = '';
+if (value.phase === 'pending' && value.hadUnit) {
+  const unitInfo = fs.lstatSync(process.argv[4]);
+  if (!unitInfo.isFile() || unitInfo.isSymbolicLink()) process.exit(2);
+  const unit = fs.readFileSync(process.argv[4], 'utf8');
+  const unitMatch = unit.match(/^Image=(\S+)$/m);
+  const unitImage = unitMatch?.[1] ?? '';
+  if (!/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/.test(unitImage)) process.exit(2);
+  if (value.releasePresent) {
+    const info = fs.lstatSync(process.argv[3]);
+    if (!info.isFile() || info.isSymbolicLink()) process.exit(2);
+    const release = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+    previousImage = release.image;
+  } else {
+    previousImage = unitImage;
+  }
+  if (previousImage !== unitImage || !/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/.test(previousImage)) process.exit(2);
+}
 process.stdout.write([value.format, value.phase, value.hadUnit, value.tunnelWasActive,
-  value.apiLinkCreated, value.tunnelLinkCreated, value.releasePresent].join('\n'));
+  value.apiLinkCreated, value.tunnelLinkCreated, value.releasePresent, previousImage || '-'].join('\n'));
 NODE
 )"
+then
+  echo 'Invalid deployment transaction or prior release snapshot' >&2
+  exit 1
+fi
 mapfile -t recovery_fields <<< "$recovery"
-[[ "${recovery_fields[0]:-}" == codexia-deploy-transaction/v1 && ${#recovery_fields[@]} == 7 ]] || {
+[[ "${recovery_fields[0]:-}" == codexia-deploy-transaction/v1 && ${#recovery_fields[@]} == 8 ]] || {
   echo 'Invalid deployment transaction intent' >&2
   exit 1
 }
@@ -57,8 +79,76 @@ tunnel_was_active="${recovery_fields[3]}"
 api_link_created="${recovery_fields[4]}"
 tunnel_link_created="${recovery_fields[5]}"
 release_present="${recovery_fields[6]}"
-systemctl --user stop codexia-tunnel.service >/dev/null 2>&1 || true
-systemctl --user stop codexia-api.service >/dev/null 2>&1 || true
+previous_image="${recovery_fields[7]}"
+[[ "$previous_image" == '-' ]] && previous_image=''
+stop_loaded_unit(){
+  local unit="$1" load_state active_status
+  load_state="$(systemctl --user show --property=LoadState --value "$unit")" || {
+    echo "Could not inspect systemd load state for $unit" >&2
+    return 1
+  }
+  case "$load_state" in
+    loaded)
+      systemctl --user stop "$unit" >/dev/null 2>&1 || {
+        echo "Could not stop $unit" >&2
+        return 1
+      }
+      if systemctl --user is-active --quiet "$unit"; then
+        echo "$unit remains active after stop" >&2
+        return 1
+      else
+        active_status=$?
+      fi
+      [[ "$active_status" == 3 ]] || {
+        echo "Could not verify that $unit is inactive" >&2
+        return 1
+      }
+      ;;
+    not-found)
+      return 2
+      ;;
+    *)
+      echo "Unexpected systemd load state for $unit: $load_state" >&2
+      return 1
+      ;;
+  esac
+}
+api_load_status=0
+stop_loaded_unit codexia-tunnel.service || api_load_status=$?
+[[ "$api_load_status" == 0 || "$api_load_status" == 2 ]] || {
+  echo 'Could not stop and verify the application Tunnel; recovery intent retained' >&2
+  exit 1
+}
+api_load_status=0
+stop_loaded_unit codexia-api.service || api_load_status=$?
+if [[ "$api_load_status" == 2 ]]; then
+  [[ "$had_unit" == false ]] || {
+    echo 'Prior API service is missing from systemd; recovery intent retained' >&2
+    exit 1
+  }
+  container_status=0
+  podman container exists codexia-api >/dev/null 2>&1 || container_status=$?
+  case "$container_status" in
+    1) ;;
+    0)
+      running="$(podman inspect --format '{{.State.Running}}' codexia-api 2>/dev/null)" || {
+        echo 'Could not inspect the API container while its systemd unit is absent; recovery intent retained' >&2
+        exit 1
+      }
+      [[ "$running" == false ]] || {
+        echo 'API container may still be running without a loaded systemd unit; recovery intent retained' >&2
+        exit 1
+      }
+      ;;
+    *)
+      echo 'Could not inspect API container state while its systemd unit is absent; recovery intent retained' >&2
+      exit 1
+      ;;
+  esac
+elif [[ "$api_load_status" != 0 ]]; then
+  echo 'Could not stop and verify the active API; recovery intent retained' >&2
+  exit 1
+fi
 
 if [[ "$had_unit" == true ]]; then
   [[ -f "$state_dir/rollback-api.container" && ! -L "$state_dir/rollback-api.container" ]] || {
@@ -78,6 +168,14 @@ if [[ "$had_unit" == true ]]; then
   done
   [[ "$healthy" == true ]] || {
     echo 'Prior API did not recover from interrupted deployment' >&2
+    exit 1
+  }
+  running_image="$(podman inspect --format '{{.ImageName}}' codexia-api 2>/dev/null)" || {
+    echo 'Could not verify the recovered API image; recovery intent retained' >&2
+    exit 1
+  }
+  [[ "$running_image" == "$previous_image" ]] || {
+    echo 'Recovered API image does not match the recorded prior release; recovery intent retained' >&2
     exit 1
   }
 else
@@ -109,7 +207,7 @@ else
   rm -f -- "$release_state"
 fi
 
-if [[ "$tunnel_was_active" == true ]]; then
+if [[ "$tunnel_was_active" == true && "$had_unit" == true ]]; then
   systemctl --user start codexia-tunnel.service
 fi
 

@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 
-import { access, readFile } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { inspectHtml } from "../html-document.mjs";
+import { readRegularFile } from "../read-regular-file.mjs";
 
 export async function validateWebBundle(directory) {
   const root = path.resolve(directory);
-  const html = await readFile(path.join(root, "index.html"), "utf8");
+  const indexFile = path.join(root, "index.html");
+  const html = await readRegularFile(indexFile, { message: "Native index.html must be a regular file" });
   if (!/<!doctype html>/iu.test(html)) throw new Error("Native web bundle is missing its HTML document type");
   if (/https?:\/\//iu.test(html) || /server\.url/iu.test(html)) throw new Error("Native web bundle must not load a remote server URL");
   const references = inspectHtml(html).references;
@@ -19,7 +21,19 @@ export async function validateWebBundle(directory) {
     }
     const file = path.resolve(root, reference.split(/[?#]/u, 1)[0]);
     if (file !== root && !file.startsWith(`${root}${path.sep}`)) throw new Error(`Native asset path escapes web bundle: ${reference}`);
-    await access(file);
+    const relative = path.relative(root, file);
+    let cursor = root;
+    const parts = relative.split(path.sep).filter(Boolean);
+    if (parts.length === 0) throw new Error(`Native asset is not a file: ${reference}`);
+    for (const [index, part] of parts.entries()) {
+      cursor = path.join(cursor, part);
+      const entry = await lstat(cursor);
+      if (entry.isSymbolicLink()) throw new Error(`Native asset path contains a symbolic link: ${reference}`);
+      const final = index === parts.length - 1;
+      if (final ? !entry.isFile() : !entry.isDirectory()) {
+        throw new Error(final ? `Native asset is not a file: ${reference}` : `Native asset path is not a directory: ${reference}`);
+      }
+    }
   }
   return { references: references.length };
 }
