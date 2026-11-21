@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { assertProjectPath, type JobRequest, type SnapshotId } from "@codexia/contracts";
+import { assertProjectPath, snapshotKey, type JobRequest, type SnapshotId } from "@codexia/contracts";
 import { installWorkerHandler } from "@codexia/module-runtime";
 import {
   EMBEDDING_DIMENSIONS,
@@ -114,8 +114,8 @@ function stableKey(entityId: string, sentenceIndex: number): string {
   return `${entityId}\0${sentenceIndex}`;
 }
 
-function vectorKey(passage: Pick<SemanticPassage, "entityId" | "sentenceIndex" | "text">, textHash = fnv1aHash(passage.text)): string {
-  return `${stableKey(passage.entityId, passage.sentenceIndex)}\0${textHash}`;
+function vectorKey(entityId: string, sentenceIndex: number, textHash: string): string {
+  return `${stableKey(entityId, sentenceIndex)}\0${textHash}`;
 }
 
 function safePathPart(value: string): string {
@@ -132,7 +132,79 @@ function emptyStore(): IndexStore {
   return { format: INDEX_FORMAT, model: EMBEDDING_MODEL_ID, modelVersion: EMBEDDING_MODEL_VERSION, dimensions: EMBEDDING_DIMENSIONS, snapshots: {}, passages: {} };
 }
 
-async function loadStore(cacheFile: string): Promise<IndexStore> {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function validSnapshotId(value: unknown, projectId: string): value is SnapshotId {
+  return isRecord(value) && value.projectId === projectId &&
+    isNonNegativeSafeInteger(value.projectVersion);
+}
+
+function validSnapshotPassage(value: unknown): value is SnapshotMembership["passages"][number] {
+  if (!isRecord(value)) return false;
+  const { entityId, sentenceIndex, text } = value;
+  if (typeof entityId !== "string" || !entityId || value.sceneId !== entityId || !isNonNegativeSafeInteger(sentenceIndex) ||
+      typeof text !== "string" || !text.trim() || text.length > MAX_PASSAGE_LENGTH || !isRecord(value.reference)) {
+    return false;
+  }
+  const reference = value.reference;
+  if (typeof reference.key !== "string" || reference.key !== vectorKey(entityId, sentenceIndex, fnv1aHash(text)) ||
+      (reference.type !== undefined && typeof reference.type !== "string") ||
+      (reference.name !== undefined && typeof reference.name !== "string") ||
+      (reference.filePath !== undefined && typeof reference.filePath !== "string")) return false;
+  return true;
+}
+
+function validCachedPassage(value: unknown, key: string): value is CachedPassage {
+  if (!isRecord(value)) return false;
+  const { entityId, sentenceIndex, textHash } = value;
+  if (typeof entityId !== "string" || !entityId || value.sceneId !== entityId || !isNonNegativeSafeInteger(sentenceIndex) ||
+      typeof textHash !== "string" || !/^[a-f0-9]{8}$/u.test(textHash) ||
+      value.modelId !== EMBEDDING_MODEL_ID || value.modelVersion !== EMBEDDING_MODEL_VERSION ||
+      value.dimensions !== EMBEDDING_DIMENSIONS || !Array.isArray(value.embedding) ||
+      value.embedding.length !== EMBEDDING_DIMENSIONS || value.embedding.some((component) => typeof component !== "number" || !Number.isFinite(component))) {
+    return false;
+  }
+  return vectorKey(entityId, sentenceIndex, textHash) === key;
+}
+
+function validIndexStore(value: unknown, projectId: string): value is IndexStore {
+  if (!isRecord(value) || value.format !== INDEX_FORMAT || value.model !== EMBEDDING_MODEL_ID ||
+      value.modelVersion !== EMBEDDING_MODEL_VERSION || value.dimensions !== EMBEDDING_DIMENSIONS ||
+      !isRecord(value.snapshots) || !isRecord(value.passages)) return false;
+
+  const referencedKeys = new Set<string>();
+  for (const [key, rawMembership] of Object.entries(value.snapshots)) {
+    if (!isRecord(rawMembership) || !validSnapshotId(rawMembership.snapshot, projectId) ||
+        key !== snapshotKey(rawMembership.snapshot) ||
+        !Array.isArray(rawMembership.passages) || typeof rawMembership.updatedAt !== "string" ||
+        !Number.isFinite(Date.parse(rawMembership.updatedAt)) || new Date(rawMembership.updatedAt).toISOString() !== rawMembership.updatedAt) {
+      return false;
+    }
+    const locations = new Set<string>();
+    for (const rawPassage of rawMembership.passages) {
+      if (!validSnapshotPassage(rawPassage)) return false;
+      const location = stableKey(rawPassage.entityId, rawPassage.sentenceIndex);
+      if (locations.has(location)) return false;
+      locations.add(location);
+      referencedKeys.add(rawPassage.reference.key);
+    }
+  }
+
+  const passageKeys = Object.keys(value.passages);
+  if (passageKeys.length !== referencedKeys.size || passageKeys.some((key) => !referencedKeys.has(key))) return false;
+  for (const [key, rawPassage] of Object.entries(value.passages)) {
+    if (!validCachedPassage(rawPassage, key)) return false;
+  }
+  return true;
+}
+
+async function loadStore(cacheFile: string, projectId: string): Promise<IndexStore> {
   const cached = storeCache.get(cacheFile);
   if (cached) {
     try { await access(cacheFile); return structuredClone(cached); }
@@ -140,15 +212,8 @@ async function loadStore(cacheFile: string): Promise<IndexStore> {
   }
   try {
     const parsed = JSON.parse(await readFile(cacheFile, "utf8")) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return emptyStore();
-    const candidate = parsed as Partial<IndexStore>;
-    if (candidate.format !== INDEX_FORMAT || candidate.model !== EMBEDDING_MODEL_ID || candidate.modelVersion !== EMBEDDING_MODEL_VERSION ||
-        candidate.dimensions !== EMBEDDING_DIMENSIONS || !candidate.snapshots || typeof candidate.snapshots !== "object" ||
-        !candidate.passages || typeof candidate.passages !== "object") return emptyStore();
-    const store: IndexStore = {
-      format: INDEX_FORMAT, model: EMBEDDING_MODEL_ID, modelVersion: EMBEDDING_MODEL_VERSION,
-      dimensions: EMBEDDING_DIMENSIONS, snapshots: candidate.snapshots, passages: candidate.passages,
-    };
+    if (!validIndexStore(parsed, projectId)) return emptyStore();
+    const store = parsed;
     storeCache.set(cacheFile, store);
     return structuredClone(store);
   } catch {
@@ -238,7 +303,7 @@ async function beginIndex(request: JobRequest, input: Record<string, unknown>): 
     throw errorWithCode("invalid_semantic_index_request", "Index begin request is invalid");
   }
   const cacheFile = cacheFileFor(input.cacheDirectory, request.snapshot.projectId);
-  const store = await loadStore(cacheFile);
+  const store = await loadStore(cacheFile, request.snapshot.projectId);
   const build: IndexBuild = {
     store,
     snapshotKey: input.key,
@@ -267,7 +332,7 @@ async function indexBatch(input: Record<string, unknown>, signal: AbortSignal): 
     if (build.liveLocations.has(location)) throw errorWithCode("duplicate_semantic_passage", `Duplicate passage key: ${passage.entityId}:${passage.sentenceIndex}`);
     build.liveLocations.add(location);
     const textHash = fnv1aHash(passage.text);
-    const key = vectorKey(passage, textHash);
+    const key = vectorKey(passage.entityId, passage.sentenceIndex, textHash);
     build.snapshotPassages.set(location, {
       entityId: passage.entityId,
       sceneId: passage.sceneId,
@@ -358,7 +423,7 @@ async function nearest(request: JobRequest, input: Record<string, unknown>, sign
   if (scope !== undefined) assertProjectPath(scope);
   if (!input.query.trim()) return { hits: [] };
   const cacheFile = cacheFileFor(input.cacheDirectory, request.snapshot.projectId);
-  const store = await loadStore(cacheFile);
+  const store = await loadStore(cacheFile, request.snapshot.projectId);
   const membership = store.snapshots[input.key];
   if (!membership) throw errorWithCode("semantic_index_missing", "No semantic passage index exists for this snapshot; rebuild the index first");
   const vectors = await embedPassages([input.query], input.cacheDirectory, signal);
@@ -394,7 +459,7 @@ async function contradictionPairs(request: JobRequest, input: Record<string, unk
       typeof input.minimum !== "number" || typeof input.maximum !== "number" || input.minimum > input.maximum) {
     throw errorWithCode("invalid_contradiction_pair_request", "Contradiction pair request is invalid");
   }
-  const store = await loadStore(cacheFileFor(input.cacheDirectory, request.snapshot.projectId));
+  const store = await loadStore(cacheFileFor(input.cacheDirectory, request.snapshot.projectId), request.snapshot.projectId);
   const membership = store.snapshots[input.key];
   if (!membership) throw errorWithCode("semantic_index_missing", "No semantic passage index exists for this snapshot");
   const memberByLocation = new Map(membership.passages.map((passage) => [stableKey(passage.entityId, passage.sentenceIndex), passage]));
@@ -510,7 +575,7 @@ async function rerank(query: string, texts: unknown, cacheDirectory: string, sig
 async function status(input: Record<string, unknown>, request: JobRequest): Promise<unknown> {
   if (typeof input.cacheDirectory !== "string") throw errorWithCode("invalid_semantic_status_request", "Status request has no cache directory");
   const cacheFile = cacheFileFor(input.cacheDirectory, request.snapshot.projectId);
-  const store = await loadStore(cacheFile);
+  const store = await loadStore(cacheFile, request.snapshot.projectId);
   if (typeof input.key !== "string") throw errorWithCode("invalid_semantic_status_request", "Status request has no snapshot key");
   const key = input.key;
   const membership = store.snapshots[key];

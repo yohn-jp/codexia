@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { assertChangeOperation, snapshotScopeRevision } from "@codexia/contracts";
 import type { ChangeOperation, ModuleActionContext, ModuleContext, ModuleManifest, SnapshotId } from "@codexia/contracts";
 import type { CandidateTerm, CanonicalSnapshotEntity } from "@codexia/module-nlp";
-import { ModuleRuntime } from "@codexia/module-runtime";
+import { ModuleRuntime, WorkerSupervisor } from "@codexia/module-runtime";
 import type { StoryEntity } from "@codexia/module-story";
 import {
   EMBEDDING_DIMENSIONS,
@@ -130,6 +130,99 @@ test("semantic search scopes lexical and vector results to files and path segmen
     }
   }
   assert.deepEqual(receivedScopes, ["plot/volumes/chapter-1", "plot/volumes/chapter-1/scenes/inside.yaml"]);
+});
+
+test("malformed persisted semantic cache is treated as unavailable", async () => {
+  const workerEntry = fileURLToPath(new URL("../dist/worker.js", import.meta.url));
+  const modelId = EMBEDDING_MODEL_ID;
+  const modelVersion = EMBEDDING_MODEL_VERSION;
+  const supervisor = new WorkerSupervisor({ maxJobDurationMs: 5_000 });
+  const cacheDirectory = await mkdtemp(path.join(os.tmpdir(), "codexia-semantic-corrupt-cache-"));
+  try {
+    const malformedMemberships = [
+      () => ({ passages: {}, updatedAt: "2026-11-21T00:00:00.000Z" }),
+      (projectId: string) => ({
+        snapshot: { projectId, projectVersion: 11 },
+        passages: [{
+          entityId: "scene-1", sceneId: "scene-1", sentenceIndex: 0, text: "A scene.",
+          reference: { key: "not-a-real-passage-key" },
+        }],
+        updatedAt: "2026-11-21T00:00:00.000Z",
+      }),
+    ];
+
+    for (const [index, makeMembership] of malformedMemberships.entries()) {
+      const projectId = `semantic-corrupt-cache-${index}`;
+      const membership = makeMembership(projectId);
+      const key = JSON.stringify([projectId, 11]);
+      const cacheFile = path.join(
+        cacheDirectory, "semantic", "indexes",
+        `${createHash("sha256").update(projectId).digest("hex")}-${createHash("sha256").update(`${modelId}@${modelVersion}`).digest("hex").slice(0, 24)}.json`,
+      );
+      await mkdir(path.dirname(cacheFile), { recursive: true });
+      await writeFile(cacheFile, JSON.stringify({
+        format: 2, model: modelId, modelVersion, dimensions: EMBEDDING_DIMENSIONS,
+        snapshots: { [key]: membership }, passages: {},
+      }));
+
+      const status = await supervisor.run({
+        id: `semantic-corrupt-status-${index}`,
+        module: "semantic",
+        task: "semantic.status",
+        snapshot: { projectId, projectVersion: 11 },
+        model: modelId,
+        modelVersion,
+        moduleVersion: "0.1.0",
+        deadline: Date.now() + 5_000,
+        input: { cacheDirectory, key },
+      }, workerEntry);
+      assert.equal(status.ok, true);
+      if (status.ok) assert.equal((status.result.output as { indexAvailable: boolean }).indexAvailable, false);
+    }
+  } finally {
+    await supervisor.shutdown();
+    await rm(cacheDirectory, { recursive: true, force: true });
+  }
+});
+
+test("a worker-written empty semantic index remains available after worker restart", async () => {
+  const workerEntry = fileURLToPath(new URL("../dist/worker.js", import.meta.url));
+  const supervisor = new WorkerSupervisor({ maxJobDurationMs: 5_000 });
+  const cacheDirectory = await mkdtemp(path.join(os.tmpdir(), "codexia-semantic-valid-cache-"));
+  const projectId = "semantic-valid-empty-cache";
+  const snapshot = { projectId, projectVersion: 11 };
+  const key = JSON.stringify([projectId, snapshot.projectVersion]);
+  const signal = new AbortController().signal;
+  const request = (id: string, task: string, input: Record<string, unknown>) => ({
+    id, module: "semantic" as const, task, snapshot,
+    model: EMBEDDING_MODEL_ID, modelVersion: EMBEDDING_MODEL_VERSION,
+    moduleVersion: "0.1.0", deadline: Date.now() + 5_000, input,
+  });
+  let service: Awaited<ReturnType<typeof supervisor.createService>> | undefined;
+  try {
+    service = await supervisor.createService("semantic", "0.1.0", workerEntry);
+    const begin = await service.request(request("semantic-empty-begin", "semantic.index.begin", {
+      cacheDirectory, indexId: "semantic-empty-build", key, total: 0,
+    }), signal);
+    assert.equal(begin.ok, true);
+    const commit = await service.request(request("semantic-empty-commit", "semantic.index.commit", {
+      indexId: "semantic-empty-build",
+    }), signal);
+    assert.equal(commit.ok, true);
+    await service.dispose();
+    service = await supervisor.createService("semantic", "0.1.0", workerEntry);
+
+    const status = await service.request(request("semantic-empty-status", "semantic.status", { cacheDirectory, key }), signal);
+    assert.equal(status.ok, true);
+    if (status.ok) {
+      assert.equal((status.result.output as { indexAvailable: boolean; passageCount: number }).indexAvailable, true);
+      assert.equal((status.result.output as { passageCount: number }).passageCount, 0);
+    }
+  } finally {
+    await service?.dispose();
+    await supervisor.shutdown();
+    await rm(cacheDirectory, { recursive: true, force: true });
+  }
 });
 
 test("term expansion uses NLP rules and preserves the source short-token LIKE behavior", () => {
