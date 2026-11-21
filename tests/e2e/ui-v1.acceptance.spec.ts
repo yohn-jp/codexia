@@ -139,7 +139,7 @@ test("legacy draft composition cannot write old scene text into a newly selected
   await editor(page).dispatchEvent("compositionstart", { data: "にほんご" });
   await page.getByRole("button", { name: "この文書へ取り込む" }).click();
   await editor(page).dispatchEvent("compositionend", { data: "日本語" });
-  await page.locator(".pg-document-list").getByRole("button", { name: new RegExp(second.title) }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: new RegExp(second.title) }).click();
   await expect(editor(page)).toContainText("最初の本文。"); expect(await sourceExists(page)).toBe(true);
 });
 
