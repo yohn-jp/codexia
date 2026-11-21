@@ -291,6 +291,33 @@ test("publishing keeps Core's string order-key sequence in volume, chapter, text
   assert.ok(zuluSpine >= 0 && zuluSpine < alphaSceneSpine && alphaSceneSpine < alphaVolumeSpine);
 });
 
+test("EPUB keeps distinct scene bodies reachable from the table of contents and spine", async () => {
+  const longPrefix = "x".repeat(80);
+  const ids = ["a__b", "a_b", "1", "id-1", longPrefix + "a", longPrefix + "b"];
+  const book = structuredClone(project);
+  const chapter = book.volumes[0]!.chapters[0]!;
+  const template = chapter.scenes[0]!;
+  chapter.scenes = ids.map((id) => ({ ...template, id, title: id, body: "本文 " + id }));
+  const { buffer } = await buildEpubExport(book, { scope: "all" }, new MemoryReader(new Map()));
+  const zip = await JSZip.loadAsync(buffer);
+  assert.equal(zip.file(/^OEBPS\/scene-.*\.xhtml$/u).length, ids.length);
+  const nav = await zip.file("OEBPS/nav.xhtml")!.async("string");
+  const opf = await zip.file("OEBPS/content.opf")!.async("string");
+  let previousNav = -1;
+  let previousSpine = -1;
+  for (const id of ids) {
+    const href = `scene-${id}.xhtml`;
+    const body = await zip.file("OEBPS/" + href)!.async("string");
+    assert.ok(body.includes(`<p>本文 ${id}</p>`));
+    assert.ok(opf.includes(`<item id="item-${id}" href="${href}"`));
+    const link = nav.indexOf(`<a href="${href}">${id}</a>`);
+    const spine = opf.indexOf(`<itemref idref="item-${id}"/>`);
+    assert.ok(link > previousNav && spine > previousSpine);
+    previousNav = link;
+    previousSpine = spine;
+  }
+});
+
 test("real EPUB ZIP contains EPUB3 manifest, Japanese XHTML, appendix, and binary cover bytes", async () => {
   const cover = Buffer.from([0xff, 0xd8, 0x00, 0x81, 0xfe, 0x00, 0xd9]);
   const files = fixtureFiles();
