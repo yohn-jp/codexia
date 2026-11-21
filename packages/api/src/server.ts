@@ -4,7 +4,7 @@ import { authorizationFailure } from "./authorization-error.js";
 import { readCodexiaEnvironment } from "./environment.js";
 import { createCloudflareAccessVerifier, type CloudflareAccessOptions } from "./cloudflare-access.js";
 import { createOAuthOwnerAuthenticator, OAuthAuthenticationError, type OAuthOwnerOptions } from "./oauth-owner.js";
-import { createOAuthMcpAuthenticator, OAUTH_MCP_SCOPE_BY_EFFECT, OAUTH_MCP_SCOPES, type OAuthMcpOptions, type OAuthMcpPrincipal } from "./oauth-mcp.js";
+import { createOAuthMcpAuthenticator, OAUTH_MCP_SCOPE_BY_EFFECT, OAUTH_MCP_SCOPES, parseOAuthMcpProjectAssignments, type OAuthMcpOptions, type OAuthMcpPrincipal } from "./oauth-mcp.js";
 import { createMcpProtectedResourceMetadataResponse, protectedResourceMetadataUrl } from "@codexia/contracts";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -675,19 +675,25 @@ export function createServer(options: ApiServerOptions): Server {
   let runtimeActivityVersion = 0;
   let lastMeaningfulActivityAt: string | null = null;
   const recordRuntimeActivity = (): void => { runtimeActivityVersion += 1; };
-  const listProjects = async (): Promise<Project[]> => {
-    if (!hosted) return options.store.listProjects();
+  const listProjects = async (allowedProjectIds?: readonly string[]): Promise<Project[]> => {
+    if (!hosted) {
+      const projects = await options.store.listProjects();
+      return allowedProjectIds ? projects.filter((project) => allowedProjectIds.includes(project.id)) : projects;
+    }
     const assigned = await options.persistence.read((reader) => reader.getProject(hosted.projectId as import("@codexia/persistence-contracts").ProjectId));
     if (!assigned || assigned.id !== hosted.projectId) throw httpFailure(503, "HOSTED_PROJECT_BINDING_INVALID", "Assigned PostgreSQL project is unavailable");
-    return [assigned];
+    return !allowedProjectIds || allowedProjectIds.includes(assigned.id) ? [assigned] : [];
   };
-  const assertAssignedProject = (projectId: string): void => {
+  const assertAssignedProject = (projectId: string, allowedProjectIds?: readonly string[]): void => {
     if (hosted && projectId !== hosted.projectId) {
       throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
     }
+    if (allowedProjectIds && !allowedProjectIds.includes(projectId)) {
+      throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
+    }
   };
-  const findAuthorizedProject = async (projectId: string): Promise<Project | undefined> => {
-    assertAssignedProject(projectId);
+  const findAuthorizedProject = async (projectId: string, allowedProjectIds?: readonly string[]): Promise<Project | undefined> => {
+    assertAssignedProject(projectId, allowedProjectIds);
     if (hosted) return (await listProjects())[0];
     const project = await options.persistence.read(reader => reader.getProject(projectId as import("@codexia/persistence-contracts").ProjectId));
     return project?.id === projectId ? project : undefined;
@@ -813,7 +819,7 @@ export function createServer(options: ApiServerOptions): Server {
     if (!coreStore.writingStatsSnapshot) throw httpFailure(503, "WRITING_STATS_UNAVAILABLE", "Snapshot writing statistics are not available in this Core version");
     return coreStore.writingStatsSnapshot(projectId, selected.pinned);
   };
-  const buildCoreActions = (projectId: string, source: ChangeProposal["source"], actorId: string, authorizeProposal?: () => Promise<void>): Array<{ module: "core"; action: ModuleAction }> => {
+  const buildCoreActions = (projectId: string, source: ChangeProposal["source"], actorId: string, authorizeProposal?: () => Promise<void>, allowedProjectIds?: readonly string[]): Array<{ module: "core"; action: ModuleAction }> => {
     const jsonSchema: ValueSchema = {
       parse(value: unknown): unknown {
         let encoded: string;
@@ -1052,7 +1058,7 @@ export function createServer(options: ApiServerOptions): Server {
         const result = await coreStore.writingStatsSnapshot(projectId, context.reader.snapshot);
         return result.stats;
       }) },
-      { module: "core", action: make("core.projects.list", emptyInput, async () => ({ projects: await listProjects() })) },
+      { module: "core", action: make("core.projects.list", emptyInput, async () => ({ projects: await listProjects(allowedProjectIds) })) },
       ...createNativeKnowledgeActions({
         persistence: options.persistence!,
         projectId: projectId as import("@codexia/persistence-contracts").ProjectId,
@@ -1069,9 +1075,9 @@ export function createServer(options: ApiServerOptions): Server {
       if (status.availability === "enabled-idle" || status.availability === "active") await runtime.activate(status.id);
     }
   };
-  const listActionDescriptors = async (projectId: string, signal: AbortSignal, source: ChangeProposal["source"] = "author", allowedEffects?: readonly ActionDescriptor["effect"][]): Promise<ActionDescriptor[]> => {
+  const listActionDescriptors = async (projectId: string, signal: AbortSignal, source: ChangeProposal["source"] = "author", allowedEffects?: readonly ActionDescriptor["effect"][], allowedProjectIds?: readonly string[]): Promise<ActionDescriptor[]> => {
     const reader = await freshReader(projectId);
-    return runtime.listActions(actionHost(projectId, reader, signal, source, "owner", undefined, undefined, "owner", allowedEffects));
+    return runtime.listActions(actionHost(projectId, reader, signal, source, "owner", undefined, undefined, "owner", allowedEffects, allowedProjectIds));
   };
   const proposeAs = async (
     projectId: string,
@@ -1100,6 +1106,7 @@ export function createServer(options: ApiServerOptions): Server {
     authorizeProposal?: () => Promise<void>,
     actorId = "owner",
     allowedEffects?: readonly ActionDescriptor["effect"][],
+    allowedProjectIds?: readonly string[],
   ): ApiActionHost => {
     const host: ApiActionHost = {
       projectId,
@@ -1110,7 +1117,7 @@ export function createServer(options: ApiServerOptions): Server {
       actions: access === "public" ? [] : buildCoreActions(projectId, source, actorId, async () => {
         if (authorizeProposal) { await authorizeProposal(); return; }
         throw httpFailure(403, hosted ? "WRITE_PERMISSION_REQUIRED" : "AUTHOR_SESSION_REQUIRED", "Current authenticated write permission is required to propose native changes");
-      }),
+      }, allowedProjectIds),
       propose: async (operations: ChangeOperation[], evidence?: ProposalEvidence[], proposalId?: string, proposalSignal?: AbortSignal) => {
         if (access === "public") throw httpFailure(403, "PUBLIC_PROPOSAL_DENIED", "Public module requests cannot propose changes");
         if (hosted || (source === "mcp" && authorizeProposal)) {
@@ -1198,8 +1205,8 @@ export function createServer(options: ApiServerOptions): Server {
         return result;
       };
       host.linkedReader = async (linkedProjectId: string) => {
-        assertAssignedProject(linkedProjectId);
-        if (!(await findAuthorizedProject(linkedProjectId))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Linked project was not found");
+        assertAssignedProject(linkedProjectId, allowedProjectIds);
+        if (!(await findAuthorizedProject(linkedProjectId, allowedProjectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Linked project was not found");
         return freshReader(linkedProjectId);
       };
     }
@@ -1981,6 +1988,7 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
     if (routePath === "/api/projects/events" && method === "GET") {
+      if (oauthMcpPrincipal) throw httpFailure(403, "OAUTH_MCP_PROJECT_EVENTS_DENIED", "Standalone MCP clients cannot subscribe to the owner-wide project event stream");
       if (projectEventStreams.full) throw httpFailure(503, "PROJECT_EVENT_STREAM_LIMIT", "Too many project event streams are open");
       projectEventStreams.open(response, "no-store", undefined, accessExpiresAt);
       return;
@@ -2040,11 +2048,23 @@ export function createServer(options: ApiServerOptions): Server {
     if (routePath === "/api/projects" && method === "GET") {
       const pageRequested = query.get("page") === "1" || query.has("cursor");
       if (query.has("page") && query.get("page") !== "1") throw httpFailure(400, "INVALID_QUERY", "page must be 1 when requesting project pagination");
-      if (!pageRequested) { sendJson(response, 200, await listProjects()); return; }
+      if (!pageRequested) { sendJson(response, 200, await listProjects(oauthMcpPrincipal?.projectIds)); return; }
       const limit = boundedInt(query.get("limit"), 200, 1, 200);
       let cursor: ProjectPageCursor | undefined;
       try { cursor = decodeProjectPageCursor(query.get("cursor")); }
       catch { throw httpFailure(400, "INVALID_CURSOR", "Project cursor is invalid"); }
+      if (oauthMcpPrincipal) {
+        const available = await listProjects(oauthMcpPrincipal.projectIds);
+        const afterCursor = cursor
+          ? available.filter((project) => project.updatedAt < cursor!.updatedAt ||
+            (project.updatedAt === cursor!.updatedAt && project.id > cursor!.id))
+          : available;
+        const projects = afterCursor.slice(0, limit);
+        const last = projects.at(-1);
+        const nextCursor = afterCursor.length > limit && last ? { updatedAt: last.updatedAt, id: last.id } : null;
+        sendJson(response, 200, { projects, nextCursor });
+        return;
+      }
       if (hosted) {
         sendJson(response, 200, { projects: await listProjects(), nextCursor: null });
         return;
@@ -2063,7 +2083,9 @@ export function createServer(options: ApiServerOptions): Server {
     }
     if (routePath === "/api/review-queue" && method === "GET") {
       if (!coreStore.reviewQueue) throw httpFailure(503, "PROPOSAL_STATUS_UNAVAILABLE", "Proposal review is not available in this Core version");
-      const projectIds = hosted ? (await listProjects()).map(project => project.id) : null;
+      const projectIds = oauthMcpPrincipal
+        ? [...oauthMcpPrincipal.projectIds]
+        : hosted ? (await listProjects()).map(project => project.id) : null;
       sendJson(response, 200, await coreStore.reviewQueue(projectIds));
       return;
     }
@@ -2071,7 +2093,10 @@ export function createServer(options: ApiServerOptions): Server {
     const projectRoot = routePath.match(/^\/api\/projects\/([^/]+)(?:\/(.*))?$/u);
     if (projectRoot) {
       const projectId = projectPathId(projectRoot[1]!);
-      assertAssignedProject(projectId);
+      assertAssignedProject(projectId, oauthMcpPrincipal?.projectIds);
+      if (oauthMcpPrincipal && !(await findAuthorizedProject(projectId, oauthMcpPrincipal.projectIds))) {
+        throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
+      }
       const suffix = projectRoot[2] ?? "";
       if (suffix === "recent-activity" && (method === "GET" || method === "PUT")) {
         if (!hosted && !isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Recent activity requires an owner identity"); return; }
@@ -2100,7 +2125,7 @@ export function createServer(options: ApiServerOptions): Server {
         }
       }
       if (suffix === "" && method === "GET") {
-        const project = await findAuthorizedProject(projectId);
+        const project = await findAuthorizedProject(projectId, oauthMcpPrincipal?.projectIds);
         if (!project) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project not found");
         const observation = await options.store.observe(projectId);
         sendJson(response, 200, { project, observation });
@@ -2203,7 +2228,7 @@ export function createServer(options: ApiServerOptions): Server {
         sendJson(response, 201, await options.store.apply(projectId, body as ChangeOperation)); return;
       }
       if (suffix === "actions" && method === "GET") {
-        sendJson(response, 200, { actions: await listActionDescriptors(projectId, signal, isBearer ? "mcp" : "author", mcpAllowedEffects) }); return;
+        sendJson(response, 200, { actions: await listActionDescriptors(projectId, signal, isBearer ? "mcp" : "author", mcpAllowedEffects, oauthMcpPrincipal?.projectIds) }); return;
       }
       const actionMatch = suffix.match(/^actions\/([^/]+)$/u);
       if (actionMatch && method === "POST") {
@@ -2213,10 +2238,10 @@ export function createServer(options: ApiServerOptions): Server {
         if (isBearer && actionId.startsWith("assistant.")) {
           throw httpFailure(403, "external_agent_assistant_denied", "External agents cannot invoke Assistant");
         }
-        const descriptors = await listActionDescriptors(projectId, signal, isBearer || actionMatch[1]!.startsWith("mcp.") ? "mcp" : "author", mcpAllowedEffects);
+        const descriptors = await listActionDescriptors(projectId, signal, isBearer || actionMatch[1]!.startsWith("mcp.") ? "mcp" : "author", mcpAllowedEffects, oauthMcpPrincipal?.projectIds);
         let descriptor = descriptors.find((item) => item.id === actionId);
         if (!descriptor && oauthMcpPrincipal) {
-          const completeDescriptors = await listActionDescriptors(projectId, signal, "mcp");
+          const completeDescriptors = await listActionDescriptors(projectId, signal, "mcp", undefined, oauthMcpPrincipal.projectIds);
           const requestedDescriptor = completeDescriptors.find((item) => item.id === actionId);
           if (requestedDescriptor) requireMcpEffect(requestedDescriptor.effect);
         }
@@ -2257,7 +2282,7 @@ export function createServer(options: ApiServerOptions): Server {
           domainJobId = id;
           signal.removeEventListener("abort", abortBeforeAcceptance);
           resolveDomainJobStart(id);
-        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects);
+        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, oauthMcpPrincipal?.projectIds);
         if (descriptor.module === "core") {
           const coreAction = host.actions?.find(({ action }) => action.id === descriptor.id)?.action;
           if (!coreAction) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
@@ -2365,7 +2390,7 @@ export function createServer(options: ApiServerOptions): Server {
         if (contribution.effect === "read" && method !== "GET" && method !== "HEAD") throw httpFailure(405, "MODULE_HTTP_METHOD_DENIED", "Read-only module routes must use GET or HEAD");
         const reader = await freshReader(projectId);
         let domainJobId: string | undefined;
-        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects);
+        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects, oauthMcpPrincipal?.projectIds);
         const webRequest = makeWebRequest(request, parsedBody, signal, moduleRoute[2] ?? "");
         const moduleResponse = await runtime.invokeHttp(moduleId, contribution.id, webRequest, host);
         if (domainJobId) response.setHeader("X-Codexia-Job-Id", domainJobId);
@@ -2402,7 +2427,8 @@ export function createServer(options: ApiServerOptions): Server {
     if (routePath === "/api/search" && method === "GET") {
       const projectId = query.get("projectId");
       if (!projectId) throw httpFailure(400, "PROJECT_REQUIRED", "projectId is required");
-      assertAssignedProject(projectId);
+      assertAssignedProject(projectId, oauthMcpPrincipal?.projectIds);
+      if (oauthMcpPrincipal && !(await findAuthorizedProject(projectId, oauthMcpPrincipal.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
       const term = query.get("q") ?? "";
       if (!term.trim() || term.length > 512) throw httpFailure(400, "INVALID_QUERY", "A search query from 1 to 512 characters is required");
       const limit = boundedInt(query.get("limit"), 20, 1, 100);
@@ -2412,14 +2438,16 @@ export function createServer(options: ApiServerOptions): Server {
     if (routePath === "/api/writing-stats" && method === "GET") {
       const projectId = query.get("projectId");
       if (!projectId) throw httpFailure(400, "PROJECT_REQUIRED", "projectId is required");
-      assertAssignedProject(projectId);
+      assertAssignedProject(projectId, oauthMcpPrincipal?.projectIds);
+      if (oauthMcpPrincipal && !(await findAuthorizedProject(projectId, oauthMcpPrincipal.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
       sendJson(response, 200, await writingStatsSnapshot(projectId, optionalSnapshot(query, projectId)));
       return;
     }
     if (routePath === "/api/scratch" && method === "POST") {
       const projectId = query.get("projectId");
       if (!projectId) throw httpFailure(400, "PROJECT_REQUIRED", "projectId is required");
-      assertAssignedProject(projectId);
+      assertAssignedProject(projectId, oauthMcpPrincipal?.projectIds);
+      if (oauthMcpPrincipal && !(await findAuthorizedProject(projectId, oauthMcpPrincipal.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Project was not found");
       const author = await requireAuthorSession();
       await createScratch(projectId, await readJson(request, parsedBody), hosted ? `hosted:${author!.userId}` : "owner", response);
       return;
@@ -2428,9 +2456,9 @@ export function createServer(options: ApiServerOptions): Server {
       const publicMatch = routePath.match(/^\/api\/public\/projects\/([^/]+)\/modules\/([^/]+)(?:\/(.*))?$/u);
       if (!publicMatch) throw httpFailure(404, "NOT_FOUND", "Public module route not found");
       const projectId = parseProjectId(publicMatch[1]!);
-      assertAssignedProject(projectId);
+      assertAssignedProject(projectId, oauthMcpPrincipal?.projectIds);
       const moduleId = parseProjectId(publicMatch[2]!);
-      if (!(await findAuthorizedProject(projectId))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Public project was not found");
+      if (!(await findAuthorizedProject(projectId, oauthMcpPrincipal?.projectIds))) throw httpFailure(404, "PROJECT_NOT_FOUND", "Public project was not found");
       const contribution = await contributionFor(moduleId, publicMatch[3] ?? "", method);
       if (!contribution || contribution.access !== "public" || contribution.effect !== "read") throw httpFailure(404, "MODULE_ROUTE_UNAVAILABLE", "Public module route is unavailable");
       if (!isRead) throw httpFailure(405, "PUBLIC_MODULE_READ_ONLY", "Public module routes are read-only");
@@ -2637,13 +2665,14 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     ownerSubject: readCodexiaEnvironment("OAUTH_OWNER_SUBJECT"),
     ownerClientIds: readCodexiaEnvironment("OAUTH_OWNER_CLIENT_IDS"),
     mcpClientIds: readCodexiaEnvironment("OAUTH_MCP_CLIENT_IDS"),
+    mcpProjectAssignments: readCodexiaEnvironment("OAUTH_MCP_PROJECT_ASSIGNMENTS"),
     apiAudience: readCodexiaEnvironment("API_AUDIENCE"),
   };
   const betterAuthConfigured = [
     betterAuthValues.databaseUrl, betterAuthValues.publicOrigin, betterAuthValues.oidcIssuer,
     betterAuthValues.oidcClientId, betterAuthValues.oidcClientSecret, betterAuthValues.authSecret,
     betterAuthValues.introspectionClientId, betterAuthValues.introspectionClientSecret,
-    betterAuthValues.ownerClientIds, betterAuthValues.mcpClientIds, betterAuthValues.apiAudience,
+    betterAuthValues.ownerClientIds, betterAuthValues.mcpClientIds, betterAuthValues.mcpProjectAssignments, betterAuthValues.apiAudience,
   ].some((value) => value !== undefined);
   const requiredBetterAuthValues = [
     betterAuthValues.databaseUrl, betterAuthValues.publicOrigin, betterAuthValues.oidcIssuer,
@@ -2654,6 +2683,8 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   if (betterAuthConfigured && requiredBetterAuthValues.some((value) => !value)) {
     throw new Error("Better Auth mode requires AUTH_DATABASE_URL, PUBLIC_ORIGIN, OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, AUTH_SECRET, OAUTH_INTROSPECTION_CLIENT_ID, OAUTH_INTROSPECTION_CLIENT_SECRET, OAUTH_OWNER_SUBJECT, and OAUTH_OWNER_CLIENT_IDS");
   }
+  const mcpClientIds = (betterAuthValues.mcpClientIds ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+  const mcpProjectAssignments = parseOAuthMcpProjectAssignments(betterAuthValues.mcpProjectAssignments, mcpClientIds);
   const betterAuth = betterAuthConfigured ? createBetterAuthRuntime({
     databaseUrl: betterAuthValues.databaseUrl!,
     publicOrigin: betterAuthValues.publicOrigin!,
@@ -2665,7 +2696,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     oauthIntrospectionClientSecret: betterAuthValues.introspectionClientSecret!,
     ...(betterAuthValues.apiAudience ? { apiAudience: betterAuthValues.apiAudience } : {}),
     ownerClientIds: betterAuthValues.ownerClientIds!.split(",").map((value) => value.trim()).filter(Boolean),
-    mcpClientIds: (betterAuthValues.mcpClientIds ?? "").split(",").map((value) => value.trim()).filter(Boolean),
+    mcpClientIds,
   }) : undefined;
   if (!betterAuth && oauthConfigured && Object.values(oauthValues).some((value) => !value)) {
     throw new Error("Legacy OAuth owner mode requires OAUTH_ISSUER, OAUTH_AUDIENCE, OAUTH_JWKS_URL, and OAUTH_OWNER_SUBJECT");
@@ -2688,6 +2719,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     jwksUrl: `${betterAuth.issuer}/jwks`,
     verifyActiveToken: betterAuth.verifyActiveAccessToken,
     allowedClientIds: betterAuth.mcpClientIds,
+    projectIdsByClient: mcpProjectAssignments,
     ownerClientIds: betterAuthValues.ownerClientIds!.split(",").map((value) => value.trim()).filter(Boolean),
     ownerSubject: betterAuthValues.ownerSubject!,
   } : undefined;
@@ -2700,6 +2732,17 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory);
   const persistenceOptions = await postgresPersistenceOptions();
   try {
+    const missingMcpProjects = await persistenceOptions.persistence!.read(async (reader) => {
+      const missing: string[] = [];
+      for (const projectIds of Object.values(mcpProjectAssignments)) {
+        for (const projectId of projectIds) {
+          const project = await reader.getProject(projectId as import("@codexia/persistence-contracts").ProjectId);
+          if (project?.id !== projectId) missing.push(projectId);
+        }
+      }
+      return missing;
+    });
+    if (missingMcpProjects.length) throw new Error("CODEXIA_OAUTH_MCP_PROJECT_ASSIGNMENTS contains a project that does not exist");
     const store = new CoreStore({ persistence: persistenceOptions.persistence! });
     await store.prepareSnapshotReuse(undefined, await persistenceOptions.persistence.snapshotStartupMode());
     return await startServer({

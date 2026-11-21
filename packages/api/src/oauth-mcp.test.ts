@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync, randomUUID, sign as signJwt } from "node:crypto";
 import { test } from "node:test";
-import { createOAuthMcpAuthenticator, OAUTH_MCP_SCOPES } from "./oauth-mcp.js";
+import { createOAuthMcpAuthenticator, OAUTH_MCP_SCOPES, parseOAuthMcpProjectAssignments } from "./oauth-mcp.js";
 
 const issuer = "https://api.codexia.example/api/auth";
 const audience = "https://api.codexia.example/api";
@@ -32,12 +32,14 @@ function token(overrides: Record<string, unknown> = {}, typ = "at+jwt"): string 
 
 function authenticator(options: { active?: boolean; allowedClientIds?: readonly string[]; online?: () => Promise<boolean> } = {}) {
   let activeChecks = 0;
+  const allowedClientIds = options.allowedClientIds ?? ["codexia-mcp-client"];
   const verify = createOAuthMcpAuthenticator({
     issuer,
     audience,
     jwksUrl: "https://api.codexia.example/api/auth/jwks",
-    allowedClientIds: options.allowedClientIds ?? ["codexia-mcp-client"],
+    allowedClientIds,
     ownerClientIds: ["codexia-web", "codexia-ios"],
+    projectIdsByClient: Object.fromEntries(allowedClientIds.map((clientId) => [clientId, ["project-1"]])),
     ownerSubject: "internal-user-17",
     verifyActiveToken: async () => {
       activeChecks += 1;
@@ -59,6 +61,7 @@ test("verified registered MCP access token becomes a limited principal with only
     issuer,
     userId: "internal-user-17",
     clientId: "codexia-mcp-client",
+    projectIds: ["project-1"],
     scopes: [...OAUTH_MCP_SCOPES],
   });
   assert.equal(instance.activeChecks(), 1);
@@ -72,6 +75,32 @@ test("MCP admission requires a configured MCP client and rejects owner clients",
     return true;
   });
   assert.throws(() => authenticator({ allowedClientIds: ["codexia-web"] }), /allowlists must be disjoint/u);
+});
+
+test("MCP project assignments are required, exact, and reject malformed or duplicate mappings", () => {
+  assert.throws(() => parseOAuthMcpProjectAssignments(undefined, ["codexia-mcp-client"]), /is required/u);
+  assert.deepEqual(parseOAuthMcpProjectAssignments('{"codexia-mcp-client":["project-1"]}', ["codexia-mcp-client"]), {
+    "codexia-mcp-client": ["project-1"],
+  });
+  for (const [raw, message] of [
+    ['{"codexia-mcp-client":["project-1"],"codexia-mcp-client":["project-2"]}', /duplicate/u],
+    ['{"another-client":["project-1"]}', /every configured/u],
+    ['{"codexia-mcp-client":[]}', /non-empty/u],
+    ['{"codexia-mcp-client":["project-1","project-1"]}', /unique/u],
+    ['["project-1"]', /JSON object/u],
+  ] as const) {
+    assert.throws(() => parseOAuthMcpProjectAssignments(raw, ["codexia-mcp-client"]), message);
+  }
+  assert.throws(() => createOAuthMcpAuthenticator({
+    issuer,
+    audience,
+    jwksUrl: "https://api.codexia.example/api/auth/jwks",
+    allowedClientIds: ["codexia-mcp-client"],
+    ownerClientIds: ["codexia-web"],
+    projectIdsByClient: {},
+    ownerSubject: "internal-user-17",
+    verifyActiveToken: async () => true,
+  }), /Every allowed OAuth MCP client/u);
 });
 
 test("MCP principal stays bound to the explicitly configured internal user", async () => {

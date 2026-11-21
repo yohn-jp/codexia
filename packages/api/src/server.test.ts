@@ -301,16 +301,21 @@ function actionBoundaryRuntime(cacheDirectory: string): ModuleRuntime {
     }, {
       id: "compute", path: "compute", methods: ["POST"], access: "owner", effect: "compute",
       async handle(request, context) {
-        const input = await request.json() as { operation?: ChangeOperation };
+        const input = await request.json() as { operation?: ChangeOperation; linkedProjectId?: string };
         const document = await context.reader.read("manuscript/ms-one/scene-one.md");
         const nested = await context.invoke("nlp.analyze", {});
+        let linkedProjectError: string | null = null;
+        if (input.linkedProjectId) {
+          try { await context.linkedReader(input.linkedProjectId); }
+          catch (error) { linkedProjectError = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "unknown"; }
+        }
         let proposalCode: string | null = null;
         try {
           await context.propose([input.operation as ChangeOperation]);
         } catch (error) {
           proposalCode = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "unknown";
         }
-        return Response.json({ document: document?.content ?? null, nested, proposalCode });
+        return Response.json({ document: document?.content ?? null, nested, proposalCode, linkedProjectError });
       },
     }],
     async dispose() {},
@@ -2525,6 +2530,7 @@ describe("Codexia HTTP boundary", () => {
       ownerSubject: "owner-subject",
       ownerClientIds: ["codexia-web", "codexia-ios"],
       allowedClientIds: ["codexia-mcp-client"],
+      projectIdsByClient: { "codexia-mcp-client": ["project-1"] },
       verifyActiveToken: async () => { onlineChecks += 1; return true; },
       fetch: async (input: string | URL | Request) => {
         assert.equal(String(input), `${issuer}/jwks`);
@@ -2532,6 +2538,9 @@ describe("Codexia HTTP boundary", () => {
       },
     } satisfies Parameters<typeof createOAuthMcpAuthenticator>[0];
     const storeFixture = makeSnapshotStore();
+    const assignedProject = { id: "project-1", title: "Assigned MCP project", version: 1 };
+    const unassignedProject = { id: "project-2", title: "Other disposable project", version: 1 };
+    Object.assign(storeFixture.store, { listProjects: async () => [assignedProject, unassignedProject] });
     const api = await startCustomApi(storeFixture.store, staticDir, {
       usageDirectory: staticDir,
       runtime: actionBoundaryRuntime(staticDir),
@@ -2555,6 +2564,28 @@ describe("Codexia HTTP boundary", () => {
     const readToken = makeToken("openid mcp:read");
     const computeToken = makeToken("openid mcp:compute");
     const proposeToken = makeToken("openid mcp:propose");
+
+    const projects = await send("/api/projects", readToken);
+    assert.equal(projects.status, 200);
+    assert.deepEqual((await projects.json() as Array<{ id: string }>).map(({ id }) => id), ["project-1"],
+      "MCP project enumeration returns only this client's configured resource assignment");
+    const pagedProjects = await send("/api/projects?page=1", readToken);
+    assert.equal(pagedProjects.status, 200);
+    assert.deepEqual((await pagedProjects.json() as { projects: Array<{ id: string }> }).projects.map(({ id }) => id), ["project-1"],
+      "paged MCP project enumeration cannot reveal other owner projects");
+    const nestedProjectList = await send("/api/projects/project-1/actions/core.projects.list", readToken, {
+      method: "POST", body: JSON.stringify({ input: {} }),
+    });
+    assert.equal(nestedProjectList.status, 200);
+    const nestedProjectListResult = await nestedProjectList.json() as ActionResult;
+    assert.equal(nestedProjectListResult.ok, true);
+    if (nestedProjectListResult.ok) {
+      assert.deepEqual((nestedProjectListResult.data as { projects: Array<{ id: string }> }).projects.map(({ id }) => id), ["project-1"],
+        "nested core project enumeration observes the same client assignment");
+    }
+    const unassignedProjectRead = await send("/api/projects/project-2/snapshot", readToken);
+    assert.equal(unassignedProjectRead.status, 404);
+    assert.equal((await unassignedProjectRead.json() as { code: string }).code, "PROJECT_NOT_FOUND");
 
     const metadataChallenge = await fetch(`${api.base}/api/projects/project-1/modules/mcp/streamable`);
     assert.equal(metadataChallenge.status, 401);
@@ -2593,11 +2624,14 @@ describe("Codexia HTTP boundary", () => {
       "compute scope cannot transitively invoke a proposal effect");
 
     const computeModuleRoute = await send("/api/projects/project-1/modules/mcp/compute", computeToken, {
-      method: "POST", body: JSON.stringify({ operation }),
+      method: "POST", body: JSON.stringify({ operation, linkedProjectId: "project-2" }),
     });
     assert.equal(computeModuleRoute.status, 200, "the limited principal can reach an admitted MCP compute route");
-    assert.equal((await computeModuleRoute.json() as { proposalCode: string }).proposalCode, "action_effect_denied",
+    const computeModuleResult = await computeModuleRoute.json() as { proposalCode: string; linkedProjectError: string | null };
+    assert.equal(computeModuleResult.proposalCode, "action_effect_denied",
       "compute scope cannot use a mixed module host to propose changes");
+    assert.equal(computeModuleResult.linkedProjectError, "PROJECT_NOT_FOUND",
+      "nested linked readers remain bound to this MCP client's parent project assignment");
     const readCannotUseComputeModuleRoute = await send("/api/projects/project-1/modules/mcp/compute", readToken, {
       method: "POST", body: JSON.stringify({ operation }),
     });
