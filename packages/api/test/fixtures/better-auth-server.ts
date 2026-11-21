@@ -46,10 +46,12 @@ export function assertDisposableAuthFixtureDatabaseUrl(connectionString: string)
   const hostname = url.hostname.replace(/^\[|\]$/gu, "");
   const databaseName = decodeURIComponent(url.pathname.slice(1));
   const isolatedCiDatabase = process.env.CI === "true" && hostname === "postgres" && /^codexia_ci_[a-f0-9]{32}$/u.test(databaseName);
+  const explicitlyOptedLoopbackDatabase = process.env.CODEXIA_AUTH_TEST_DISPOSABLE === "1" &&
+    new Set(["localhost", "127.0.0.1", "::1"]).has(hostname) &&
+    new Set(["codexia_auth_test", "codexia_web_oauth_test"]).has(databaseName);
   if (!new Set(["postgres:", "postgresql:"]).has(url.protocol) ||
-      (!new Set(["localhost", "127.0.0.1", "::1"]).has(hostname) && !isolatedCiDatabase) ||
-      (!/^codexia_[a-z0-9_]*(?:test|fixture)[a-z0-9_]*$/iu.test(databaseName) && !isolatedCiDatabase) || url.search || url.hash) {
-    throw new Error("Better Auth fixture requires a query-free PostgreSQL URL for a disposable loopback codexia_*test or codexia_*fixture database");
+      (!explicitlyOptedLoopbackDatabase && !isolatedCiDatabase) || url.search || url.hash) {
+    throw new Error("Better Auth fixture requires an explicitly opted-in disposable loopback auth database or uniquely named disposable CI database");
   }
 }
 

@@ -11,7 +11,7 @@ import type { DocumentId, ProjectId } from "@codexia/persistence-contracts";
 import { startBetterAuthFixture } from "../../packages/api/test/fixtures/better-auth-server.js";
 
 const appAssets = mkdtempSync(join(tmpdir(), "codexia-oauth-web-assets-"));
-const fixtureDatabaseUrl = process.env.CODEXIA_TEST_DATABASE_URL ?? process.env.CODEXIA_E2E_DATABASE_URL;
+const fixtureDatabaseUrl = process.env.CODEXIA_WEB_OAUTH_TEST_DATABASE_URL ?? process.env.CODEXIA_E2E_DATABASE_URL;
 test.afterAll(() => rmSync(appAssets, { recursive: true, force: true }));
 
 interface SeenRequest {
@@ -24,15 +24,18 @@ interface SeenRequest {
 }
 
 test("signed-out Web OAuth preserves the signed request through consent, PKCE, and protected owner API lists", async ({ browser }) => {
-  assert.ok(fixtureDatabaseUrl, "Set CODEXIA_TEST_DATABASE_URL to a disposable local PostgreSQL database");
+  assert.ok(fixtureDatabaseUrl, "Set CODEXIA_WEB_OAUTH_TEST_DATABASE_URL or the isolated CI database for Web OAuth acceptance");
   const database = new URL(fixtureDatabaseUrl);
   const databaseName = decodeURIComponent(database.pathname.slice(1));
   const ciFixtureDatabase = process.env.CI === "true" && database.hostname === "postgres" && /^codexia_ci_[a-f0-9]{32}$/u.test(databaseName);
-  assert.ok(["127.0.0.1", "localhost", "[::1]"].includes(database.hostname) || ciFixtureDatabase, "OAuth fixture database must be local or the uniquely named disposable CI database");
+  const optedLocalFixtureDatabase = process.env.CODEXIA_AUTH_TEST_DISPOSABLE === "1" &&
+    ["127.0.0.1", "localhost", "[::1]"].includes(database.hostname) &&
+    databaseName === "codexia_web_oauth_test";
+  assert.ok(optedLocalFixtureDatabase || ciFixtureDatabase, "OAuth fixture database must be explicitly opted-in or uniquely disposable in CI");
+  assert.ok(!database.search && !database.hash, "OAuth fixture URL must not include query parameters or fragments");
 
-    // Auth clients, OAuth sessions, token records and JWT checks use PostgreSQL. The fixture's CoreStore,
-    // persistence object, and job history are in-memory/test doubles; this proves protected list admission,
-    // not PostgreSQL manuscript row persistence.
+    // Auth clients, sessions, token records, and canonical manuscript revisions
+    // use PostgreSQL. Only the unrelated job history is an in-memory test double.
     const fixture = await startBetterAuthFixture({ databaseUrl: fixtureDatabaseUrl, staticDirectory: appAssets, usePostgresPersistence: true });
   let context: Awaited<ReturnType<typeof browser.newContext>> | undefined;
   try {
