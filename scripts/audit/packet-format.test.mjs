@@ -78,6 +78,7 @@ test('content changes alter packet ID; special source fences and line counting r
   assert.ok(fence.startsWith('````javascript\n'));
   assert.ok(fence.endsWith('\n````'));
   assert.equal(numberedSource('a\n\nb\n'), '0001 | a\n0002 | \n0003 | b');
+  assert.equal(numberedSource(''), '');
 });
 
 test('partial coverage and OCR exclusions cannot be presented as complete', () => {
@@ -89,4 +90,11 @@ test('partial coverage and OCR exclusions cannot be presented as complete', () =
   assert.match(content, /src\/b\.ts.*not-in-verified-head-export/u);
   assert.match(content, /private\/data\.md.*security/u);
   assert.match(content, /Do not describe omitted or OCR-excluded paths as reviewed/u);
+});
+
+test('large markdown with many separate backtick runs does not exhaust call stack', () => {
+  const raw = ('`backtick`\n').repeat(120000);
+  const result = codeFence(raw, 'markdown');
+  assert.ok(result.startsWith('```markdown\n'));
+  assert.ok(result.endsWith('\n```'));
 });
