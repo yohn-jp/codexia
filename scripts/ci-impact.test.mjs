@@ -8,6 +8,17 @@ import { componentReleaseAffected } from './release-impact.mjs';
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
 
+function matchesWorkflowPaths(patterns, files) {
+  return files.some(file => {
+    let included = false;
+    for (const pattern of patterns) {
+      const exclude = pattern.startsWith('!');
+      if (matchesGlob(file, exclude ? pattern.slice(1) : pattern)) included = !exclude;
+    }
+    return included;
+  });
+}
+
 test('full verification uses twenty jobs including planning and certification', () => {
   assert.equal(REQUIRED_VERIFICATION_JOBS.length, 20);
 });
@@ -38,14 +49,7 @@ test('PR paths and completed-Verify release impact retain component build inputs
     for (const [label, files, expected] of changes) {
       const triggered = releases.map((release, i) => event === 'workflow_run'
         ? componentReleaseAffected(['frontend', 'backend'][i], files)
-        : files.some(file => {
-          let included = false;
-          for (const pattern of release.on.pull_request.paths) {
-            const exclude = pattern.startsWith('!');
-            if (matchesGlob(file, exclude ? pattern.slice(1) : pattern)) included = !exclude;
-          }
-          return included;
-        }));
+        : matchesWorkflowPaths(release.on.pull_request.paths, files));
       assert.deepEqual(triggered, expected, `${event}: ${label}`);
     }
   }
@@ -66,10 +70,12 @@ test('Full-model OCI impact matches the standalone push paths and the Verify cal
   assert.equal(Object.hasOwn(standalone.on, 'pull_request'), false);
   assert.deepEqual(pushPaths, FULL_MODEL_OCI_PATHS.filter(file => file !== '.github/workflows/verify.yml'));
 
-  for (const pattern of FULL_MODEL_OCI_PATHS) {
+  for (const expression of FULL_MODEL_OCI_PATHS) {
+    const excluded = expression.startsWith('!');
+    const pattern = excluded ? expression.slice(1) : expression;
     const changedPath = pattern.endsWith('/**') ? `${pattern.slice(0, -3)}/ci-impact-sentinel.mjs` : pattern;
-    assert.equal(matchesFullModelOciPath(changedPath), true, `Expected impact for ${changedPath}`);
-    assert.equal((await plan([changedPath])).full_model_oci, true, `Expected plan impact for ${changedPath}`);
+    assert.equal(matchesFullModelOciPath(changedPath), !excluded, changedPath);
+    assert.equal((await plan([changedPath])).full_model_oci, !excluded, changedPath);
   }
   for (const changedPath of [
     '.github/workflows/other.yml',
@@ -79,6 +85,19 @@ test('Full-model OCI impact matches the standalone push paths and the Verify cal
   ]) {
     assert.equal(matchesFullModelOciPath(changedPath), false, `Unexpected impact for ${changedPath}`);
     assert.equal((await plan([changedPath])).full_model_oci, false, `Unexpected plan impact for ${changedPath}`);
+  }
+  const nativeConfig = 'app/native/capacitor.config.ts';
+  const bridgeDeclaration = 'app/native/plugins/codexia-auth/src/index.d.mts';
+  for (const [files, expected] of [
+    [[nativeConfig, 'app/native/scripts/configure-oauth-callback.mjs'], false],
+    [['app/native/plugins/codexia-auth/ios/CodexiaAuthPlugin.swift'], false],
+    [[bridgeDeclaration], true],
+    [[nativeConfig, bridgeDeclaration], true],
+    [[nativeConfig, 'app/src/entries/mobile.tsx'], true],
+    [['app/native/new-build-input.ts'], true],
+  ]) {
+    assert.equal(matchesWorkflowPaths(pushPaths, files), expected, `main push: ${files.join(', ')}`);
+    assert.equal((await plan(files)).full_model_oci, expected, `PR: ${files.join(', ')}`);
   }
   assert.equal((await plan(null)).full_model_oci, false);
   assert.equal((await plan(['profiles/full/config.json'], 'push')).full_model_oci, false);

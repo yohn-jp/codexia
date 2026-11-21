@@ -12,6 +12,14 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
   'Dockerfile',
   'Dockerfile.backend',
   'app/**',
+  // Exclude native packaging only. The web build typechecks the shared bridge declarations.
+  '!app/native/README.md',
+  '!app/native/capacitor.config.ts',
+  '!app/native/package.json',
+  '!app/native/package-lock.json',
+  '!app/native/scripts/**',
+  '!app/native/plugins/codexia-auth/Package.swift',
+  '!app/native/plugins/codexia-auth/ios/**',
   'modules/**',
   'package.json',
   'packages/**',
@@ -35,9 +43,16 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
 
 /** @param {string} file */
 export function matchesFullModelOciPath(file) {
-  // The standalone Capacitor shell is never part of the backend Full-model OCI input graph.
-  return typeof file === 'string' && !file.startsWith('app/native/') && FULL_MODEL_OCI_PATHS.some(pattern =>
-    pattern.endsWith('/**') ? file.startsWith(pattern.slice(0, -2)) : file === pattern);
+  if (typeof file !== 'string') return false;
+  let included = false;
+  for (const expression of FULL_MODEL_OCI_PATHS) {
+    const exclude = expression.startsWith('!');
+    const pattern = exclude ? expression.slice(1) : expression;
+    if (pattern.endsWith('/**') ? file.startsWith(pattern.slice(0, -2)) : file === pattern) {
+      included = !exclude;
+    }
+  }
+  return included;
 }
 
 // Reviewed independent inputs: root unit owns script/route/Worker proof;
