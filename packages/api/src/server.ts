@@ -3,6 +3,7 @@ import { scheduleAtDeadline } from "./deadline-timer.js";
 import { authorizationFailure } from "./authorization-error.js";
 import { readCodexiaEnvironment } from "./environment.js";
 import { createCloudflareAccessVerifier, type CloudflareAccessOptions } from "./cloudflare-access.js";
+import { createOAuthOwnerAuthenticator, OAuthAuthenticationError, type OAuthOwnerOptions } from "./oauth-owner.js";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable, Transform } from "node:stream";
@@ -133,6 +134,10 @@ export interface ApiServerOptions {
   authToken?: string;
   /** Opt-in dedicated standalone owner SSO. Never used in hosted mode. */
   cloudflareAccess?: CloudflareAccessOptions;
+  /** Optional standalone API-audience OAuth access tokens for the configured owner. */
+  oauthOwner?: OAuthOwnerOptions;
+  /** Exact HTTPS browser origins allowed to call the API cross-origin with bearer tokens. */
+  corsAllowedOrigins?: readonly string[];
   /** Defaults to `<cwd>/app/dist`. */
   staticDir?: string;
   /** Trust X-Forwarded-Proto when TLS terminates at a reverse proxy. */
@@ -240,6 +245,35 @@ function sameOrigin(request: IncomingMessage, trustProxy: boolean): boolean {
   } catch {
     return false;
   }
+}
+
+const CORS_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
+const CORS_HEADERS = new Map([
+  ["authorization", "Authorization"], ["content-type", "Content-Type"],
+  ["idempotency-key", "Idempotency-Key"], ["x-client-id", "X-Client-Id"],
+  ["x-codexia-recent-activity-order", "X-Codexia-Recent-Activity-Order"], ["prefer", "Prefer"],
+]);
+
+function normalizeCorsOrigins(origins: readonly string[] | undefined): ReadonlySet<string> {
+  const normalized = new Set<string>();
+  for (const origin of origins ?? []) {
+    let parsed: URL;
+    try { parsed = new URL(origin); }
+    catch { throw new Error("CORS origins must be exact normalized HTTPS origins"); }
+    if (parsed.protocol !== "https:" || parsed.origin !== origin || parsed.username || parsed.password ||
+        parsed.pathname !== "/" || parsed.search || parsed.hash || normalized.has(origin)) {
+      throw new Error("CORS origins must be unique exact normalized HTTPS origins");
+    }
+    normalized.add(origin);
+  }
+  return normalized;
+}
+
+function vary(response: ServerResponse, value: string): void {
+  const current = response.getHeader("Vary");
+  const values = new Set((Array.isArray(current) ? current.join(",") : String(current ?? "")).split(",").map((item) => item.trim()).filter(Boolean));
+  values.add(value);
+  response.setHeader("Vary", [...values].join(", "));
 }
 
 function sameHostedOrigin(request: IncomingMessage, trustProxy: boolean, audience: string): boolean {
@@ -574,6 +608,10 @@ export function createServer(options: ApiServerOptions): Server {
   if (options.cloudflareAccess && (hosted || !options.trustProxy)) {
     throw new Error("Cloudflare Access browser authentication requires standalone mode and the trusted HTTPS proxy");
   }
+  if (options.oauthOwner && hosted) throw new Error("Standalone OAuth owner authentication is not available in Hosted mode");
+  const authenticateOAuthOwner = options.oauthOwner ? createOAuthOwnerAuthenticator(options.oauthOwner) : undefined;
+  if (options.corsAllowedOrigins && hosted) throw new Error("Standalone browser CORS configuration is not available in Hosted mode");
+  const corsAllowedOrigins = normalizeCorsOrigins(options.corsAllowedOrigins);
   const cloudflareAccess = options.cloudflareAccess ? createCloudflareAccessVerifier(options.cloudflareAccess) : undefined;
   const assignment = hosted?.assignment;
   if (assignment && parseRuntimeAssignment(assignment).instanceId !== assignment.instanceId) {
@@ -1520,6 +1558,22 @@ export function createServer(options: ApiServerOptions): Server {
     const isRead = method === "GET" || method === "HEAD";
     const publicRead = isRead && ["/api/health", "/api/ready", "/api/version", "/health/live", "/health/ready", "/health/startup"].includes(routePath);
     const publicModuleRoute = !hosted && routePath.startsWith("/api/public/projects/") && routePath.includes("/modules/");
+    const originHeader = request.headers.origin;
+    const crossOrigin = originHeader !== undefined && !sameOrigin(request, trustProxy);
+    if (routePath.startsWith("/api/") && crossOrigin) {
+      vary(response, "Origin");
+      vary(response, "Access-Control-Request-Method");
+      vary(response, "Access-Control-Request-Headers");
+      if (typeof originHeader !== "string" || !corsAllowedOrigins.has(originHeader)) {
+        fail(response, 403, "CORS_ORIGIN_DENIED", "Cross-origin API access is not configured for this origin");
+        return;
+      }
+      if (request.headers.cookie !== undefined) {
+        fail(response, 403, "CORS_COOKIE_DENIED", "Cross-origin API access requires bearer credentials without cookies");
+        return;
+      }
+      response.setHeader("Access-Control-Allow-Origin", originHeader);
+    }
 
     if (hosted && (originalPath === "/.well-known/oauth-protected-resource" ||
         originalPath === "/.well-known/oauth-protected-resource/mcp") && method === "GET") {
@@ -1554,6 +1608,25 @@ export function createServer(options: ApiServerOptions): Server {
     if (hosted && routePath === RUNTIME_RESUME_PATH && method === "POST") { await platformResume(request, response, parsedBody); return; }
 
     if (method === "OPTIONS") {
+      if (routePath.startsWith("/api/") && crossOrigin) {
+        const requestedMethod = request.headers["access-control-request-method"];
+        if (typeof requestedMethod !== "string" || !CORS_METHODS.has(requestedMethod.toUpperCase())) {
+          fail(response, 403, "CORS_METHOD_DENIED", "Cross-origin API method is not allowed");
+          return;
+        }
+        const rawHeaders = request.headers["access-control-request-headers"];
+        const requestedHeaders = typeof rawHeaders === "string" && rawHeaders.trim()
+          ? rawHeaders.split(",").map((header) => header.trim().toLowerCase())
+          : [];
+        if (requestedHeaders.some((header) => !header || !CORS_HEADERS.has(header))) {
+          fail(response, 403, "CORS_HEADER_DENIED", "Cross-origin API request headers are not allowed");
+          return;
+        }
+        response.setHeader("Access-Control-Allow-Methods", requestedMethod.toUpperCase());
+        if (requestedHeaders.length) {
+          response.setHeader("Access-Control-Allow-Headers", [...new Set(requestedHeaders)].map((header) => CORS_HEADERS.get(header)!).join(", "));
+        }
+      }
       response.writeHead(204, { Allow: "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS" });
       response.end();
       return;
@@ -1606,6 +1679,22 @@ export function createServer(options: ApiServerOptions): Server {
     const bearer = typeof authHeader === "string" && authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
     if (hosted && accessCookies.length > 1) { fail(response, 401, "UNAUTHORIZED", "Hosted access cookie is ambiguous"); return; }
     if (hosted && accessToken && bearer) { fail(response, 400, "AMBIGUOUS_CREDENTIALS", "Send either a hosted browser grant or a bearer grant"); return; }
+    if (!hosted && routePath.startsWith("/api/") && !publicRead && !publicModuleRoute && sessionId && bearer) {
+      fail(response, 400, "AMBIGUOUS_CREDENTIALS", "Send either an owner session cookie or a bearer credential");
+      return;
+    }
+    let oauthPrincipal: Awaited<ReturnType<NonNullable<typeof authenticateOAuthOwner>>> | undefined;
+    const isLegacyBearer = Boolean(bearer && constantTimeEqual(bearer, options.authToken ?? ""));
+    if (bearer && authenticateOAuthOwner && !isLegacyBearer) {
+      try { oauthPrincipal = await authenticateOAuthOwner(bearer); }
+      catch (error) {
+        const failure = error instanceof OAuthAuthenticationError
+          ? error
+          : new OAuthAuthenticationError(401, "OAUTH_TOKEN_INVALID", "OAuth access token is invalid or unverifiable");
+        fail(response, failure.status, failure.code, failure.message);
+        return;
+      }
+    }
     let hostedPrincipal: HostedPrincipal | undefined;
     const presentedHostedToken = hosted ? accessToken ?? (bearer || undefined) : undefined;
     if (hosted && presentedHostedToken) {
@@ -1635,8 +1724,10 @@ export function createServer(options: ApiServerOptions): Server {
     const isCookie = hosted ? Boolean(accessToken && hostedPrincipal) : cloudflareAccess
       ? accessExpiresAt !== undefined : Boolean(session && session.expiresAt > Date.now());
     if (sessionId && !isCookie) sessions.delete(sessionId);
-    const isBearer = hosted ? Boolean(bearer && hostedPrincipal) : !isCookie && bearer.length > 0 && constantTimeEqual(bearer, options.authToken!);
-    const hasAuth = hosted ? Boolean(hostedPrincipal) : isCookie || isBearer;
+    const isOAuthAuthor = Boolean(oauthPrincipal);
+    const isBearer = hosted ? Boolean(bearer && hostedPrincipal) : !isCookie && isLegacyBearer;
+    const isAuthor = isCookie || isOAuthAuthor;
+    const hasAuth = hosted ? Boolean(hostedPrincipal) : isAuthor || isBearer;
     if (routePath.startsWith("/api/") && !publicRead && !publicModuleRoute && !hasAuth) {
       response.setHeader("WWW-Authenticate",
         hosted && routePath.endsWith("/modules/mcp/streamable")
@@ -1676,16 +1767,16 @@ export function createServer(options: ApiServerOptions): Server {
           throw httpFailure(failure.status, failure.code, failure.message);
         }
       }
-      if (!isCookie) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An owner session is required");
+      if (!isAuthor) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An owner identity is required");
       return undefined;
     };
     const requireAuthorSession = async (): Promise<HostedPrincipal | undefined> => {
-      if (!isCookie) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author browser session is required");
+      if (!isAuthor) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author identity is required");
       return requireWritePermission();
     };
     const authorizeActionProposal = async (): Promise<void> => {
       if (hosted) { await requireWritePermission(); return; }
-      if (!isCookie && !isBearer) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author or bearer identity is required to propose changes");
+      if (!isAuthor && !isBearer) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author or bearer identity is required to propose changes");
     };
     if (shuttingDown && routePath.startsWith("/api/") && !isRead) {
       fail(response, 503, "SHUTTING_DOWN", "The server is draining and is not accepting new mutations");
@@ -1738,7 +1829,7 @@ export function createServer(options: ApiServerOptions): Server {
     if (routePath === "/api/session" && method === "GET") {
       sendJson(response, 200, {
         authenticated: true,
-        authorScope: hosted ? `hosted:${hostedPrincipal!.userId}` : isCookie ? "owner" : "",
+        authorScope: hosted ? `hosted:${hostedPrincipal!.userId}` : isAuthor ? "owner" : "",
         ...(hosted ? { permissions: [...hostedPrincipal!.permissions] } : {}),
       });
       return;
@@ -1757,20 +1848,20 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
     if (routePath === "/api/jobs/events" && method === "GET") {
-      if (!isCookie) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job events require an owner session"); return; }
+      if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job events require an owner identity"); return; }
       if (jobEventStreams.full) throw httpFailure(503, "JOB_EVENT_STREAM_LIMIT", "Too many job event streams are open");
       jobEventStreams.open(response, "no-cache", ": ok\n\n", accessExpiresAt);
       return;
     }
     if (routePath === "/api/jobs" && method === "GET") {
-      if (!isCookie) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job history requires an owner session"); return; }
+      if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job history requires an owner identity"); return; }
       try { sendJson(response, 200, await jobHistory.listJobs(hosted?.projectId)); }
       catch { throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "Job history is temporarily unavailable"); }
       return;
     }
     const jobMatch = routePath.match(/^\/api\/jobs\/([^/]+)$/u);
     if (jobMatch && method === "GET") {
-      if (!isCookie) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job history requires an owner session"); return; }
+      if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Job history requires an owner identity"); return; }
       const jobId = parseProjectId(jobMatch[1]!);
       try {
         const job = await jobHistory.getJob(jobId, hosted?.projectId);
@@ -1783,7 +1874,7 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
     if (routePath === "/api/inbox" && method === "GET") {
-      if (!isCookie) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Inbox requires an owner session"); return; }
+      if (!isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Inbox requires an owner identity"); return; }
       try { sendJson(response, 200, await jobHistory.listInbox({ unreadOnly: query.get("unread") === "1", ...(hosted ? { projectId: hosted.projectId } : {}) })); }
       catch { throw httpFailure(503, "JOB_HISTORY_UNAVAILABLE", "Inbox is temporarily unavailable"); }
       return;
@@ -1845,7 +1936,7 @@ export function createServer(options: ApiServerOptions): Server {
       assertAssignedProject(projectId);
       const suffix = projectRoot[2] ?? "";
       if (suffix === "recent-activity" && (method === "GET" || method === "PUT")) {
-        if (!hosted && !isCookie) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Recent activity requires an owner session"); return; }
+        if (!hosted && !isAuthor) { fail(response, 403, "AUTHOR_SESSION_REQUIRED", "Recent activity requires an owner identity"); return; }
         if (method === "PUT") await requireWritePermission();
         const activityAuthorScope = hosted ? `hosted:${hostedPrincipal!.userId}` : "owner";
 
@@ -2001,7 +2092,7 @@ export function createServer(options: ApiServerOptions): Server {
           ? isBearer ? "mcp" : "author"
           : isBearer || descriptor.module === "mcp" ? "mcp" : "module";
         const prefer = request.headers.prefer;
-        const respondAsyncRequested = isCookie && (Array.isArray(prefer) ? prefer : [prefer ?? ""])
+        const respondAsyncRequested = isAuthor && (Array.isArray(prefer) ? prefer : [prefer ?? ""])
           .flatMap((value) => value.split(","))
           .some((value) => value.trim().toLowerCase() === "respond-async");
         const jobController = respondAsyncRequested && descriptor.module !== "core" ? new AbortController() : undefined;
@@ -2331,6 +2422,8 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     throw new Error("CODEXIA_HOSTED_MODE must be 1 or 0");
   }
   const hostedMode = hostedModeValue === "1";
+  const corsOriginsValue = readCodexiaEnvironment("CORS_ALLOWED_ORIGINS");
+  if (hostedMode && corsOriginsValue !== undefined) throw new Error("CORS origin allowlists are supported only in standalone mode");
   const browserAuth = readCodexiaEnvironment("BROWSER_AUTH") ?? "token";
   if (browserAuth !== "token" && browserAuth !== "cloudflare-access") throw new Error("Invalid CODEXIA_BROWSER_AUTH");
   if (hostedMode && browserAuth !== "token") throw new Error("Cloudflare Access browser authentication is standalone only");
@@ -2376,6 +2469,26 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
   }
   const authToken = readCodexiaEnvironment("AUTH_TOKEN")?.trim();
   if (!authToken || authToken.length < 32) throw new Error("CODEXIA_AUTH_TOKEN is required and must contain at least 32 characters");
+  const oauthValues = {
+    issuer: readCodexiaEnvironment("OAUTH_ISSUER"),
+    audience: readCodexiaEnvironment("OAUTH_AUDIENCE"),
+    jwksUrl: readCodexiaEnvironment("OAUTH_JWKS_URL"),
+    ownerSubject: readCodexiaEnvironment("OAUTH_OWNER_SUBJECT"),
+  };
+  const oauthConfigured = Object.values(oauthValues).some((value) => value !== undefined);
+  if (oauthConfigured && Object.values(oauthValues).some((value) => !value)) {
+    throw new Error("OAuth owner mode requires OAUTH_ISSUER, OAUTH_AUDIENCE, OAUTH_JWKS_URL, and OAUTH_OWNER_SUBJECT");
+  }
+  const oauthOwner: OAuthOwnerOptions | undefined = oauthConfigured ? {
+    issuer: oauthValues.issuer!, audience: oauthValues.audience!, jwksUrl: oauthValues.jwksUrl!,
+    ownerSubject: oauthValues.ownerSubject!,
+    requiredScopes: (readCodexiaEnvironment("OAUTH_REQUIRED_SCOPES") ?? "codexia:api").split(/\s+/u).filter(Boolean),
+  } : undefined;
+  const corsAllowedOrigins: string[] | undefined = corsOriginsValue === undefined ? undefined :
+    corsOriginsValue.split(",").map((origin) => origin.trim()).filter(Boolean);
+  if (corsOriginsValue !== undefined && corsAllowedOrigins?.length === 0) {
+    throw new Error("CODEXIA_CORS_ALLOWED_ORIGINS must contain at least one exact HTTPS origin");
+  }
   const profile = readCodexiaEnvironment("PROFILE") ?? process.env.CODEXIA_BUILD_PROFILE ?? "core";
   const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory);
   const persistenceOptions = await postgresPersistenceOptions();
@@ -2392,6 +2505,8 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
         origin: readCodexiaEnvironment("ACCESS_ORIGIN") ?? "",
         ownerEmail: readCodexiaEnvironment("ACCESS_OWNER_EMAIL") ?? "",
       } } : {}),
+      ...(oauthOwner ? { oauthOwner } : {}),
+      ...(corsAllowedOrigins ? { corsAllowedOrigins } : {}),
       trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
       runtimeOptions,
       usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),
