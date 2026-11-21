@@ -142,7 +142,10 @@ test("Better Auth signed-out OIDC login reaches the Fastify OAuth route and admi
     assert.equal(resumedUrl.search, loginPage.search, "the opaque signed authorization query must survive the provider round-trip");
 
     (globalThis as unknown as { window: { location: { search: string } } }).window.location.search = resumedUrl.search;
-    const context = await client.$fetch("/oauth2/consent-context", { method: "POST", body: {} });
+    const context = await client.$fetch("/oauth2/consent-context", { method: "POST", body: {} }) as {
+      data?: { requestedScopes: string[]; client: { name: string } };
+      error?: unknown;
+    };
     assert.ok(context.data, `Fastify consent context failed: ${JSON.stringify(context.error)}`);
     assert.deepEqual(context.data.requestedScopes, ["openid", "codexia:api", "offline_access"]);
     assert.equal(context.data.client.name, "Codexia Fixture Web");
