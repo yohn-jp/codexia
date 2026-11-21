@@ -25,6 +25,9 @@ export function assertFrontendIdentity(identity) {
   assert.ok(typeof identity.sourceSha === 'string' && shaPattern.test(identity.sourceSha), 'Frontend source SHA is invalid');
   assert.ok(['core', 'full'].includes(identity.profile), 'Frontend profile is invalid');
   assert.ok(Number.isSafeInteger(identity.apiEpoch) && identity.apiEpoch > 0, 'Frontend API epoch is invalid');
+  if (identity.oauthConfigSha256 !== undefined) {
+    assert.ok(typeof identity.oauthConfigSha256 === 'string' && /^[a-f0-9]{64}$/u.test(identity.oauthConfigSha256), 'Frontend OAuth configuration identity is invalid');
+  }
   return identity;
 }
 
@@ -65,6 +68,7 @@ export function assertFrontendReleaseAdmission(deployed, candidate) {
     assert.equal(candidate.sourceSha, deployed.sourceSha, `Frontend version ${candidate.version} is immutable and belongs to a different source`);
     assert.equal(candidate.profile, deployed.profile, `Frontend version ${candidate.version} is immutable and has a different profile`);
     assert.equal(candidate.apiEpoch, deployed.apiEpoch, `Frontend version ${candidate.version} is immutable and has a different API epoch`);
+    assert.equal(candidate.oauthConfigSha256, deployed.oauthConfigSha256, `Frontend version ${candidate.version} is immutable and has different OAuth settings`);
     return false;
   }
   return true;
