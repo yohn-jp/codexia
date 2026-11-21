@@ -1,6 +1,8 @@
 # Ubuntu 24.04 runtime matching the official Playwright image's OS family.
-FROM node:24.22.3-bookworm-slim AS node
-FROM ubuntu:24.04
+# Base digests are the exact versions used by the passing image build. Review
+# base updates with the browser smoke test before selecting a new runtime digest.
+FROM node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS node
+FROM ubuntu:24.04@sha256:9c7f200c07e3d4a03e7249d2c16bf66a51120fb876aa2242cf31451412543289
 COPY --from=node /usr/local/ /usr/local/
 ENV PATH=/usr/local/bin:$PATH
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
