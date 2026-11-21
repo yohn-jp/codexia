@@ -354,10 +354,19 @@ test("concurrent tabs serialize a rotated hosted grant through the browser lock"
   await secondPage.close();
 });
 
-test("an interrupted initial project bootstrap resumes after persisted pageshow", async ({ page }) => {
-  await ownerLogin(page);
+test("an interrupted initial project bootstrap resumes after persisted pageshow", async ({ browser }) => {
+  const baseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
   for (const abort of [false, true]) {
-    const resumed = await page.context().newPage();
+    // Keep each resume case independent: an already-open authenticated tab can
+    // persist a selected project into shared localStorage and bypass the list
+    // bootstrap this test is specifically pausing.
+    const context = await browser.newContext();
+    const login = await context.request.post(new URL("/api/login", baseURL).toString(), {
+      headers: { Origin: new URL(baseURL).origin },
+      data: { token: authToken },
+    });
+    expect(login.ok()).toBe(true);
+    const resumed = await context.newPage();
     let requests = 0;
     let release!: () => void;
     let started!: () => void;
@@ -378,7 +387,7 @@ test("an interrupted initial project bootstrap resumes after persisted pageshow"
       if (abort) await route.abort("failed").catch(() => undefined);
       else await route.fulfill({ response }).catch(() => undefined);
     });
-    await resumed.goto("/desktop/");
+    await resumed.goto(new URL("/desktop/", baseURL).toString());
     await pending;
     await resumed.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
     await resumed.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
@@ -387,7 +396,7 @@ test("an interrupted initial project bootstrap resumes after persisted pageshow"
     await expect(resumed.getByLabel("作品", { exact: true })).toBeVisible({ timeout: 15_000 });
     expect(requests).toBeGreaterThanOrEqual(2);
     await expect(resumed.getByRole("alert")).toHaveCount(0);
-    await resumed.close();
+    await context.close();
   }
 });
 
