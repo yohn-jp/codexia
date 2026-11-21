@@ -43,6 +43,15 @@ test("source sentence rows preserve embeddable types, body/description/notes ord
   ]);
 });
 
+test("legacy note list parsing retains numbered steps and definition entries", () => {
+  const documents = buildSearchDocuments([{
+    id: "note-owner", type: "character", filePath: "bible/characters/a.yaml", name: "A", aliases: [],
+    raw: { notes: { lead: [], sections: [{ heading: "Notes", body: [{ text: "  1. First step\n* Term: Description" }], children: [] }] } },
+  }]);
+  const notes = documents.find((item) => item.field === "notes");
+  assert.equal(notes?.content, "First step\nTerm\nDescription");
+});
+
 test("snapshot lexical projection supplies source field weighting and classic RRF ranks", () => {
   const entities: CanonicalSnapshotEntity[] = [
     { id: "scene-direct", type: "scene", filePath: "plot/a.yaml", name: "Blue harbor", aliases: [], raw: {}, body: "The blue harbor glows." },

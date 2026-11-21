@@ -76,19 +76,28 @@ function parseLegacyNotesBody(value: string): NoteBlock[] {
     const flushProse = () => { if (prose.length) blocks.push({ type: "paragraph", text: prose.join("\n") }); prose = []; };
     const flushList = () => { if (listType && listItems.length) blocks.push({ type: listType, items: listItems }); listType = null; listItems = []; };
     for (const line of chunk) {
-      const step = /^\s*\d+[.、．)]\s+(.+)$/.exec(line);
-      const definition = step ? null : /^\s*[*・-]\s+(.+)$/.exec(line);
+      const leadingTrimmed = line.trimStart();
+      let markerEnd = 0;
+      while (markerEnd < leadingTrimmed.length && leadingTrimmed.charCodeAt(markerEnd) >= 48 && leadingTrimmed.charCodeAt(markerEnd) <= 57) markerEnd++;
+      const stepPunctuation = leadingTrimmed[markerEnd];
+      const isStepMarker = markerEnd > 0 && stepPunctuation !== undefined && ".、．)".includes(stepPunctuation);
+      if (isStepMarker) markerEnd++;
+      else if (leadingTrimmed[0] !== undefined && "*・-".includes(leadingTrimmed[0])) markerEnd = 1;
+      else markerEnd = 0;
+      const remainder = markerEnd > 0 ? leadingTrimmed.slice(markerEnd) : "";
+      const entry = remainder.trimStart();
+      const hasSeparator = remainder.length > entry.length;
+      const isListEntry = markerEnd > 0 && hasSeparator && entry.length > 0;
+      const step = isListEntry && isStepMarker;
+      const definition = isListEntry && !isStepMarker;
       const nextType = step ? "steps" : definition ? "definitions" : null;
       if (!nextType) { flushList(); prose.push(line); continue; }
       flushProse();
       if (listType !== nextType) { flushList(); listType = nextType; }
-      const match = step ?? definition;
-      if (match) {
-        const entry = match[1]!;
-        const colon = entry.search(/[：:]/);
-        const term = colon < 0 ? "" : entry.slice(0, colon).trim().replace(/^\*\*(.*)\*\*$/, "$1").trim();
-        listItems.push({ term, description: colon < 0 ? entry.trim() : entry.slice(colon + 1).trim() });
-      }
+      const colon = entry.search(/[：:]/);
+      let term = colon < 0 ? "" : entry.slice(0, colon).trim();
+      if (term.startsWith("**") && term.endsWith("**")) term = term.slice(2, -2).trim();
+      listItems.push({ term, description: colon < 0 ? entry.trim() : entry.slice(colon + 1).trim() });
     }
     flushProse(); flushList(); chunk = [];
   };

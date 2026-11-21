@@ -19,7 +19,7 @@ export function collectScenesForVerticalPrint(
 export function composeVerticalPrintText(sections: VerticalPrintSection[]): string {
   const parts: string[] = [];
   for (const section of sections) {
-    const body = section.body.replace(/\s+$/u, "");
+    const body = section.body.trimEnd();
     if (!body) continue;
     parts.push(section.title + "\n\n" + body);
   }

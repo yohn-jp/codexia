@@ -178,7 +178,7 @@ export function manuscriptMarkupToHtml(text: string): string {
 
 /** 段落分割: 空行で区切る。行内は `<br/>`。 */
 export function manuscriptBodyToXhtml(body: string): string {
-  const trimmed = body.replace(/\s+$/u, "");
+  const trimmed = body.trimEnd();
   if (!trimmed) return "";
   const paragraphs = trimmed.split(/\n{2,}/);
   return paragraphs
@@ -225,7 +225,7 @@ function collectChapterTree(
 ): { chapters: EpubChapterNav[]; label: string } {
   const usedKeys = new Set<string>();
   const toSceneDocs = (source: readonly PublishingScene[]): EpubSceneDoc[] => source.flatMap((scene) => {
-      const body = scene.body.replace(/\s+$/u, "");
+      const body = scene.body.trimEnd();
       if (!body) return [];
       // Keep Core IDs verbatim. Reserve a separate namespace for legacy IDs
       // and collisions on case-insensitive EPUB readers.

@@ -89,7 +89,7 @@ export function buildPlaintextExport(project: PublishingProject, options: Plaint
   const scenes = collectPublishingScenes(project, scope, id);
   const parts: string[] = [];
   for (const scene of scenes) {
-    const body = applyMarkupMode(scene.body, stripMarkup, dialect).replace(/\s+$/u, "");
+    const body = applyMarkupMode(scene.body, stripMarkup, dialect).trimEnd();
     if (!body) continue;
     parts.push("# " + scene.title + "\n\n" + body);
   }
