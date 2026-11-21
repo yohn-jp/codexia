@@ -64,7 +64,7 @@ export class EpubExportError extends Error {
 }
 
 interface EpubSceneDoc {
-  id: string;
+  itemId: string;
   href: string;
   title: string;
   bodyHtml: string;
@@ -97,7 +97,7 @@ function escapeXml(text: string): string {
 /**
  * 任意の文字列を XML `id`/`idref` 属性値として安全な NCName 形状にサニタイズする。
  *
- * シーン/エンティティ ID を OPF・XHTML の `id` 属性に埋め込む際、ID 生成元が
+ * 図鑑付録のエンティティ ID を XHTML の `id` 属性に埋め込む際、ID 生成元が
  * 将来変わっても不正な XML（数字始まり・コロン含み等の無効な `id` 属性）を
  * 生成しないための防御。EPUB パッケージング全体のライブラリ移行までの
  * 暫定措置（issue #305）。
@@ -223,13 +223,21 @@ function collectChapterTree(
   scope: EpubExportScope,
   id?: string,
 ): { chapters: EpubChapterNav[]; label: string } {
+  const usedKeys = new Set<string>();
   const toDocs = (chapter: PublishingProject["volumes"][number]["chapters"][number]): EpubChapterNav => {
     const scenes = chapter.scenes.flatMap((scene) => {
       const body = scene.body.replace(/\s+$/u, "");
       if (!body) return [];
+      // Keep Core IDs verbatim. Reserve a separate namespace for legacy IDs
+      // and collisions on case-insensitive EPUB readers.
+      const foldedId = scene.id.toLowerCase();
+      const key = /^[A-Za-z0-9_-]{1,128}$/u.test(scene.id) && !usedKeys.has(foldedId)
+        ? scene.id
+        : `.${usedKeys.size + 1}`;
+      usedKeys.add(key.toLowerCase());
       return [{
-        id: scene.id,
-        href: "scene-" + safeFilenamePart(scene.id) + ".xhtml",
+        itemId: "item-" + key,
+        href: "scene-" + key + ".xhtml",
         title: scene.title,
         bodyHtml: manuscriptBodyToXhtml(body),
       }];
@@ -359,19 +367,17 @@ function buildPackageOpf(
   cover: EpubCoverImage | null,
   includeBibleAppendix: boolean,
 ): string {
-  const sceneItemId = (s: EpubSceneDoc) => `item-${sanitizeNCName(s.id)}`;
-
   const manifestScenes = chapters
     .flatMap((ch) => ch.scenes)
     .map(
       (s) =>
-        `    <item id="${escapeXml(sceneItemId(s))}" href="${s.href}" media-type="application/xhtml+xml"/>`,
+        `    <item id="${s.itemId}" href="${s.href}" media-type="application/xhtml+xml"/>`,
     )
     .join("\n");
 
   const spineScenes = chapters
     .flatMap((ch) => ch.scenes)
-    .map((s) => `    <itemref idref="${escapeXml(sceneItemId(s))}"/>`)
+    .map((s) => `    <itemref idref="${s.itemId}"/>`)
     .join("\n");
 
   const colophonManifest = includeColophon
