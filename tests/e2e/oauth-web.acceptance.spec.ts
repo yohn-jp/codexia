@@ -139,9 +139,12 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     await Promise.all(responseTasks);
     applyResponseStatuses();
     assert.ok(seen.some((request) => request.pathname === "/api/auth/oauth2/consent-context" && request.status === 200), `the server must verify the signed prompt before consent display; observed ${JSON.stringify(seen.map(({ pathname, method, status }) => ({ pathname, method, status })))}`);
+    // Register both response observers before triggering the OAuth callback.
+    // Session and jobs can complete before sequential waitForResponse calls attach.
+    const sessionResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/session" && response.status() === 200);
+    const jobsResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/jobs" && response.request().method() === "GET" && response.status() === 200);
     await page.getByRole("button", { name: "許可して続ける" }).click();
-    await page.waitForResponse((response) => new URL(response.url()).pathname === "/api/session" && response.status() === 200);
-    await page.waitForResponse((response) => new URL(response.url()).pathname === "/api/jobs" && response.request().method() === "GET" && response.status() === 200);
+    await Promise.all([sessionResponse, jobsResponse]);
     applyResponseStatuses();
     const callbackUrl = webCallbackUrls.at(-1);
     assert.ok(callbackUrl, "the authorization response must return to the registered app callback");
