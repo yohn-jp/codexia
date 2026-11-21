@@ -58,6 +58,10 @@ public final class CodexiaAuthPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func signIn(_ call: CAPPluginCall) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in self?.signIn(call) }
+            return
+        }
         guard let config = NativeAuthConfig(call: call), let presenter = bridge?.viewController else {
             call.reject("Native OAuth configuration is invalid or unavailable")
             return
@@ -91,31 +95,37 @@ public final class CodexiaAuthPlugin: CAPPlugin, CAPBridgedPlugin {
                 additionalParameters: ["resource": config.apiAudience]
             )
             self.currentAuthorizationFlow = OIDAuthState.authState(byPresenting: request, presenting: presenter) { [weak self] state, authError in
-                guard let self else { return }
-                self.currentAuthorizationFlow = nil
-                guard generation == self.sessionGeneration else {
-                    call.reject("Sign-in was cancelled", "reauthenticationRequired")
-                    return
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.currentAuthorizationFlow = nil
+                    guard generation == self.sessionGeneration else {
+                        call.reject("Sign-in was cancelled", "reauthenticationRequired")
+                        return
+                    }
+                    guard let state, let response = state.lastTokenResponse,
+                          let bearer = self.validBearer(from: response),
+                          let refreshToken = response.refreshToken,
+                          let expiry = response.accessTokenExpirationDate, expiry > Date() else {
+                        call.reject(authError?.localizedDescription ?? "The provider did not issue an API access token and refresh token")
+                        return
+                    }
+                    guard self.saveRefreshToken(refreshToken, for: config) else {
+                        call.reject("Could not store the refresh token in Keychain")
+                        return
+                    }
+                    self.accessToken = bearer
+                    self.accessTokenExpiresAt = expiry
+                    call.resolve(["accessToken": bearer])
                 }
-                guard let state, let response = state.lastTokenResponse,
-                      let bearer = self.validBearer(from: response),
-                      let refreshToken = response.refreshToken,
-                      let expiry = response.accessTokenExpirationDate, expiry > Date() else {
-                    call.reject(authError?.localizedDescription ?? "The provider did not issue an API access token and refresh token")
-                    return
-                }
-                guard self.saveRefreshToken(refreshToken, for: config) else {
-                    call.reject("Could not store the refresh token in Keychain")
-                    return
-                }
-                self.accessToken = bearer
-                self.accessTokenExpiresAt = expiry
-                call.resolve(["accessToken": bearer])
             }
         }
     }
 
     @objc func accessToken(_ call: CAPPluginCall) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in self?.accessToken(call) }
+            return
+        }
         guard let config = NativeAuthConfig(call: call) else {
             call.reject("Native OAuth configuration is invalid")
             return
@@ -139,6 +149,10 @@ public final class CodexiaAuthPlugin: CAPPlugin, CAPBridgedPlugin {
         accessRequestInProgress = true
         accessRequestKey = config.keychainAccount
         accessRequestWaiters = [call]
+        guard let refreshToken = loadRefreshToken(for: config) else {
+            finishAccessRequest(error: "Sign-in is required", code: "reauthenticationRequired")
+            return
+        }
         let generation = sessionGeneration
         loadServiceConfiguration(for: config) { [weak self] service, error in
             guard let self else { return }
@@ -150,15 +164,15 @@ public final class CodexiaAuthPlugin: CAPPlugin, CAPBridgedPlugin {
                 self.finishAccessRequest(error: error?.localizedDescription ?? "OAuth provider metadata is unavailable")
                 return
             }
-            guard let refreshToken = self.loadRefreshToken(for: config) else {
-                self.finishAccessRequest(error: "Sign-in is required", code: "reauthenticationRequired")
-                return
-            }
             self.refresh(config: config, service: service, refreshToken: refreshToken, generation: generation)
         }
     }
 
     @objc func signOut(_ call: CAPPluginCall) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in self?.signOut(call) }
+            return
+        }
         guard let config = NativeAuthConfig(call: call) else {
             call.reject("Native OAuth configuration is invalid")
             return
@@ -190,6 +204,20 @@ public final class CodexiaAuthPlugin: CAPPlugin, CAPBridgedPlugin {
         revoke(refreshToken, config: config, call: call)
     }
 
+    private func approvedApiPath(_ url: URL, rawURL: String) -> Bool {
+        guard let encodedPath = URLComponents(string: rawURL)?.percentEncodedPath else { return false }
+        let lower = encodedPath.lowercased()
+        // Reject direct and encoded traversal, including repeated proxy decoding.
+        guard !lower.contains("%2e"), !lower.contains("%2f"),
+              !lower.contains("%5c"), !lower.contains("%25"),
+              !lower.contains("\\"),
+              !encodedPath.split(separator: "/").contains(where: { $0 == "." || $0 == ".." }) else {
+            return false
+        }
+        let normalized = url.standardized.path
+        return url.path == normalized && normalized.hasPrefix("/api/") && !normalized.hasPrefix("/api/auth/")
+    }
+
     @objc func apiRequest(_ call: CAPPluginCall) {
         guard let apiOriginValue = call.getString("apiOrigin"),
               let apiOrigin = URL(string: apiOriginValue), apiOrigin.scheme == "https",
@@ -198,8 +226,7 @@ public final class CodexiaAuthPlugin: CAPPlugin, CAPBridgedPlugin {
               let urlString = call.getString("url"),
               let url = URL(string: urlString),
               sameHttpsOrigin(url, apiOrigin),
-              url.path.hasPrefix("/api/"),
-              !url.path.hasPrefix("/api/auth/"),
+              approvedApiPath(url, rawURL: urlString),
               url.user == nil, url.password == nil, url.fragment == nil,
               let methodValue = call.getString("method") else {
             call.reject("Native API request URL is not allowed", "nativeApiRequestDenied")
@@ -288,13 +315,15 @@ public final class CodexiaAuthPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         OIDAuthorizationService.discoverConfiguration(forIssuer: config.issuerURL) { [weak self] service, error in
-            guard let self else { return }
-            guard let service, self.validate(service: service, for: config) else {
-                completion(nil, error ?? NativeOAuthError.invalidMetadata)
-                return
-            }
-            self.serviceConfigurations[config.issuer] = service
-            completion(service, nil)
+                DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                guard let service, self.validate(service: service, for: config) else {
+                    completion(nil, error ?? NativeOAuthError.invalidMetadata)
+                    return
+                }
+                self.serviceConfigurations[config.issuer] = service
+                completion(service, nil)
+                }
         }
     }
 
@@ -336,28 +365,30 @@ public final class CodexiaAuthPlugin: CAPPlugin, CAPBridgedPlugin {
             additionalParameters: ["resource": config.apiAudience]
         )
         OIDAuthorizationService.perform(request) { [weak self] response, error in
-            guard let self else { return }
-            guard generation == self.sessionGeneration else {
-                self.finishAccessRequest(error: "Sign-in is required", code: "reauthenticationRequired")
-                return
-            }
-            guard let response, let bearer = self.validBearer(from: response),
-                  let expiry = response.accessTokenExpirationDate, expiry > Date() else {
-                if self.isInvalidRefreshToken(error) {
-                    self.deleteRefreshToken(for: config)
+                DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                guard generation == self.sessionGeneration else {
                     self.finishAccessRequest(error: "Sign-in is required", code: "reauthenticationRequired")
-                } else {
-                    self.finishAccessRequest(error: error?.localizedDescription ?? "Could not refresh the API access token")
+                    return
                 }
-                return
-            }
-            if let rotated = response.refreshToken, !self.saveRefreshToken(rotated, for: config) {
-                self.finishAccessRequest(error: "Could not rotate the refresh token in Keychain")
-                return
-            }
-            self.accessToken = bearer
-            self.accessTokenExpiresAt = expiry
-            self.finishAccessRequest(accessToken: bearer)
+                guard let response, let bearer = self.validBearer(from: response),
+                      let expiry = response.accessTokenExpirationDate, expiry > Date() else {
+                    if self.isInvalidRefreshToken(error) {
+                        self.deleteRefreshToken(for: config)
+                        self.finishAccessRequest(error: "Sign-in is required", code: "reauthenticationRequired")
+                    } else {
+                        self.finishAccessRequest(error: error?.localizedDescription ?? "Could not refresh the API access token")
+                    }
+                    return
+                }
+                if let rotated = response.refreshToken, !self.saveRefreshToken(rotated, for: config) {
+                    self.finishAccessRequest(error: "Could not rotate the refresh token in Keychain")
+                    return
+                }
+                self.accessToken = bearer
+                self.accessTokenExpiresAt = expiry
+                self.finishAccessRequest(accessToken: bearer)
+                }
         }
     }
 

@@ -16,7 +16,12 @@ export function createNativeAuth(config, { apiRequest, nativePlugin } = {}) {
     },
     async accessTokenFor(requestUrl) {
       validateApiRequestUrl(requestUrl, apiOrigin);
-      return accessTokenValue(await (await getPlugin()).accessToken(config), "API access");
+      try {
+        return accessTokenValue(await (await getPlugin()).accessToken(config), "API access");
+      } catch (error) {
+        if (error && typeof error === "object" && error.code === "reauthenticationRequired") return null;
+        throw error;
+      }
     },
     fetchRequest,
     async signOut() {
@@ -79,7 +84,10 @@ function getNativeAuthPlugin() {
 
 function validateApiRequestUrl(requestUrl, apiOrigin) {
   const target = new URL(requestUrl);
-  if (target.protocol !== "https:" || target.username || target.password || target.origin !== apiOrigin.origin || !target.pathname.startsWith("/api/")) {
+  const rawPath = requestUrl.split(/[?#]/u, 1)[0];
+  if (target.protocol !== "https:" || target.username || target.password || target.origin !== apiOrigin.origin ||
+      !target.pathname.startsWith("/api/") || target.pathname === "/api/auth" || target.pathname.startsWith("/api/auth/") ||
+      /%(?:2e|2f|5c|25)/iu.test(rawPath) || /(?:^|\/)\.{1,2}(?:\/|$)/u.test(rawPath) || rawPath.includes("\\")) {
     throw new Error("Refusing to send an API access token to an unconfigured origin.");
   }
   return target;

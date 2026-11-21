@@ -20,6 +20,41 @@ test("native token bridge refuses unconfigured, insecure, and non-API request UR
   }
 });
 
+test("native bridge treats only the sign-in-required signal as an anonymous API request", async () => {
+  const requests = [];
+  const plugin = {
+    accessToken: async () => { const error = new Error("Sign-in is required"); error.code = "reauthenticationRequired"; throw error; },
+    apiRequest: async (request) => { requests.push(request); return { status: 401, headers: {}, body: "Unauthorized" }; },
+  };
+  const auth = createNativeAuth(config, { nativePlugin: plugin });
+  assert.equal(await auth.accessTokenFor("https://api.example.test/api/version"), null);
+  const response = await auth.fetchRequest("https://api.example.test/api/session", { credentials: "omit" });
+  assert.equal(response.status, 401);
+  assert.equal(requests.length, 1);
+  const outage = createNativeAuth(config, { nativePlugin: { accessToken: async () => { throw new Error("OIDC metadata unavailable"); } } });
+  await assert.rejects(outage.accessTokenFor("https://api.example.test/api/version"), /metadata unavailable/u);
+});
+
+test("native API bridge denies traversal and auth endpoint bypasses before native dispatch", async () => {
+  let dispatched = 0;
+  const auth = createNativeAuth(config, {
+    apiRequest: async () => { dispatched += 1; return { status: 200, headers: {}, body: "" }; },
+  });
+  for (const url of [
+    "https://api.example.test/api/auth/oauth2/revoke",
+    "https://api.example.test/api/auth",
+    "https://api.example.test/api/v1/../../api/auth/oauth2/revoke",
+    "https://api.example.test/api/v1/%2e%2e/%2e%2e/api/auth/oauth2/revoke",
+    "https://api.example.test/api/v1/%2f..%2fapi%2fauth/token",
+    "https://api.example.test/api/v1/%252e%252e/auth",
+    "https://api.example.test/api/v1/../documents",
+    "https://api.example.test/api/v1/..\\\\documents",
+  ]) {
+    await assert.rejects(auth.fetchRequest(url, { credentials: "omit" }), /Refusing to send/, url);
+  }
+  assert.equal(dispatched, 0);
+});
+
 test("native public-client configuration cannot replace the registered callback", () => {
   assert.throws(() => createNativeAuth({ ...config, redirectUri: "https://attacker.example.test/callback" }), /configuration is invalid/);
 });

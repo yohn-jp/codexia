@@ -1,6 +1,17 @@
 import { useEffect, useState } from "react";
 import { canApproveOAuthConsent, loadOAuthConsentContext, sameOriginOAuthContinuation, submitOAuthConsent, type OAuthConsentContext } from "./oauth-consent";
 
+const scopeDescriptions: Readonly<Record<string, string>> = {
+  openid: "Codexiaアカウントでサインインします。",
+  email: "アカウントのメールアドレスを確認します。",
+  profile: "アカウントのプロフィールを確認します。",
+  offline_access: "再認証なしでの更新を許可します。更新トークンはクライアントの保護領域に保存されます。",
+  "codexia:api": "作品データへのアクセスを要求します。各操作はサーバー側の作者権限と対象データの認可に従います。",
+  "mcp:read": "割り当てられた作品の参照だけを許可します。",
+  "mcp:compute": "割り当てられた作品に対する解析・計算を許可します。",
+  "mcp:propose": "割り当てられた作品に対する変更提案を許可します。承認・適用は許可しません。",
+};
+
 export function OAuthConsentPage() {
   const [context, setContext] = useState<OAuthConsentContext | null>(null);
   const [message, setMessage] = useState("");
@@ -40,8 +51,7 @@ export function OAuthConsentPage() {
       {loading ? <p role="status">認可内容を確認しています。</p> : context?.clientName && approvable ? <>
         <p><strong>{context.clientName}</strong> がCodexia APIへのアクセスを求めています。</p>
         <ul>
-          <li>openid — Codexiaアカウントでサインインします。</li>
-          <li>codexia:api — Codexiaの作品データを利用します。各操作はCodexia側の作者権限と対象データの認可に従います。</li>
+          {context.requestedScopes.map((scope) => <li key={scope}>{scope} — {scopeDescriptions[scope]}</li>)}
         </ul>
       </> : <p role="alert">登録済みクライアントまたは対応する権限を確認できません。許可は実行できません。</p>}
       {message && <p role="alert">{message}</p>}

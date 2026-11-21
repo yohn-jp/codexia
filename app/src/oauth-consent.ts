@@ -26,9 +26,16 @@ export function parseOAuthConsentContext(value: unknown): OAuthConsentContext {
   return { clientName: clientName || null, requestedScopes: requestedScopes as string[] };
 }
 
+const IDENTITY_SCOPES = new Set(["openid", "email", "profile", "offline_access"]);
+const MCP_SCOPES = new Set(["mcp:read", "mcp:compute", "mcp:propose"]);
+
 export function canApproveOAuthConsent(context: OAuthConsentContext): boolean {
-  return Boolean(context.clientName && context.requestedScopes.includes("openid") && context.requestedScopes.includes("codexia:api") &&
-    context.requestedScopes.every((scope) => scope === "openid" || scope === "codexia:api"));
+  if (!context.clientName || !context.requestedScopes.includes("openid")) return false;
+  const owner = context.requestedScopes.includes("codexia:api");
+  const mcp = context.requestedScopes.some((scope) => MCP_SCOPES.has(scope));
+  if (owner === mcp) return false;
+  return context.requestedScopes.every((scope) => IDENTITY_SCOPES.has(scope) ||
+    (owner ? scope === "codexia:api" : MCP_SCOPES.has(scope)));
 }
 
 export async function loadOAuthConsentContext(): Promise<OAuthConsentContext> {
