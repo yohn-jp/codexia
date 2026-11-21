@@ -5,6 +5,14 @@ export const MAX_JOB_OUTPUT_BYTES = 8 * 1024 * 1024;
 export const MAX_PROPOSAL_EVIDENCE_BYTES = 1024 * 1024;
 export const BUILTIN_MODULE_IDS = Object.freeze(["story", "diagnostics", "nlp", "semantic", "speaker", "assistant", "publishing", "mcp", "search"] as const);
 export type ModuleId = (typeof BUILTIN_MODULE_IDS)[number];
+export {
+  MCP_OAUTH_SCOPES,
+  buildMcpProtectedResourceMetadata,
+  createMcpProtectedResourceMetadataResponse,
+  protectedResourceMetadataUrl,
+  type McpProtectedResourceMetadata,
+  type McpProtectedResourceOptions,
+} from "./oauth-metadata.js";
 /** PostgreSQL project revision; never a Git object identity. */
 export interface SnapshotId {
   projectId: string;

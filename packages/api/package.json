@@ -21,20 +21,28 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm run build && node --test dist/*.test.js",
-    "start": "node dist/server.js"
+    "test": "pnpm run build && node --test dist/*.test.js && node --import tsx --test test/better-auth.integration.test.ts",
+    "start": "node dist/server.js",
+    "migrate:auth": "node dist/migrate-auth.js",
+    "prune:auth-revocations": "node dist/prune-auth-revocations.js"
   },
   "dependencies": {
-    "@codexia/core": "workspace:*",
+    "@better-auth/oauth-provider": "1.7.26",
     "@codexia/contracts": "workspace:*",
+    "@codexia/core": "workspace:*",
+    "@codexia/module-runtime": "workspace:*",
     "@codexia/persistence-contracts": "workspace:*",
     "@codexia/persistence-postgres": "workspace:*",
-    "@codexia/module-runtime": "workspace:*",
+    "better-auth": "1.7.26",
     "fastify": "^5.12.8",
     "jose": "6.2.17",
+    "pg": "8.16.3",
     "zod": "4.6.7"
   },
   "files": [
     "dist"
-  ]
+  ],
+  "devDependencies": {
+    "@types/pg": "8.15.6"
+  }
 }

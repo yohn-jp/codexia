@@ -1,5 +1,6 @@
 import { createRemoteJWKSet, customFetch, errors, jwtVerify, type JWTPayload } from "jose";
 
+export const CODEXIA_OWNER_SCOPE = "codexia:api";
 const ALLOWED_ALGORITHMS = ["ES256", "RS256"] as const;
 const JWKS_TIMEOUT_MS = 3_000;
 
@@ -9,6 +10,10 @@ export interface OAuthOwnerOptions {
   readonly jwksUrl: string;
   readonly ownerSubject: string;
   readonly requiredScopes: readonly string[];
+  readonly allowedClientIds?: readonly string[];
+  readonly verifyActiveToken?: (token: string) => Promise<boolean>;
+  /** Permits plain HTTP loopback only in test processes for synthetic IdP fixtures. */
+  readonly allowInsecureLoopbackForTests?: boolean;
   readonly fetch?: typeof fetch;
 }
 
@@ -25,11 +30,13 @@ export class OAuthAuthenticationError extends Error {
   }
 }
 
-function assertHttpsEndpoint(value: string, label: string): URL {
+function assertHttpsEndpoint(value: string, label: string, allowInsecureLoopbackForTests = false): URL {
   let url: URL;
   try { url = new URL(value); }
   catch { throw new Error(`${label} must be an absolute HTTPS URL`); }
-  if (url.protocol !== "https:" || url.username || url.password || url.hash) {
+  const testLoopback = allowInsecureLoopbackForTests && process.env.NODE_ENV === "test" && url.protocol === "http:" &&
+    ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if ((!testLoopback && url.protocol !== "https:") || url.username || url.password || url.hash) {
     throw new Error(`${label} must be an absolute HTTPS URL without credentials or a fragment`);
   }
   return url;
@@ -43,8 +50,8 @@ function tokenScopes(payload: JWTPayload): string[] {
 }
 
 export function createOAuthOwnerAuthenticator(options: OAuthOwnerOptions): (token: string) => Promise<OAuthPrincipal> {
-  assertHttpsEndpoint(options.issuer, "OAuth issuer");
-  assertHttpsEndpoint(options.jwksUrl, "OAuth JWKS URL");
+  assertHttpsEndpoint(options.issuer, "OAuth issuer", options.allowInsecureLoopbackForTests);
+  assertHttpsEndpoint(options.jwksUrl, "OAuth JWKS URL", options.allowInsecureLoopbackForTests);
   if (!options.audience.trim() || options.audience !== options.audience.trim() ||
       !options.ownerSubject.trim() || !options.requiredScopes.length ||
       options.requiredScopes.some((scope) => !/^[A-Za-z0-9:._/-]{1,128}$/u.test(scope))) {
@@ -64,11 +71,11 @@ export function createOAuthOwnerAuthenticator(options: OAuthOwnerOptions): (toke
         algorithms: [...ALLOWED_ALGORITHMS],
         typ: "at+jwt",
         clockTolerance: 5,
-        requiredClaims: ["iss", "sub", "aud", "exp", "iat", "jti", "client_id"],
+        requiredClaims: ["iss", "sub", "aud", "exp", "iat", "jti", "client_id", "azp"],
       });
       if (protectedHeader.typ !== "at+jwt" || typeof payload.sub !== "string" || !payload.sub ||
           typeof payload.iat !== "number" || payload.iat > Math.floor(Date.now() / 1000) + 5 ||
-          typeof payload.client_id !== "string" || !payload.client_id ||
+          typeof payload.client_id !== "string" || !payload.client_id || payload.azp !== payload.client_id ||
           typeof payload.jti !== "string" || !payload.jti) {
         throw new Error("invalid access token profile");
       }
@@ -78,6 +85,12 @@ export function createOAuthOwnerAuthenticator(options: OAuthOwnerOptions): (toke
       }
       if (payload.sub !== options.ownerSubject) {
         throw new OAuthAuthenticationError(403, "OAUTH_OWNER_REQUIRED", "Authenticated identity is not configured as the standalone owner");
+      }
+      if (options.allowedClientIds && !options.allowedClientIds.includes(payload.client_id)) {
+        throw new OAuthAuthenticationError(403, "OAUTH_CLIENT_NOT_ALLOWED", "OAuth client is not configured for owner access");
+      }
+      if (options.verifyActiveToken && !await options.verifyActiveToken(token)) {
+        throw new OAuthAuthenticationError(401, "OAUTH_TOKEN_INACTIVE", "OAuth access token is inactive or its login session was revoked");
       }
       return { issuer: options.issuer, subject: payload.sub, scopes };
     } catch (error) {

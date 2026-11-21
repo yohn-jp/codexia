@@ -3,8 +3,7 @@
  * transaction needed to survive the provider redirect is kept in tab storage.
  */
 export interface OAuthWebConfig {
-  authorizationEndpoint: string;
-  tokenEndpoint: string;
+  issuer: string;
   clientId: string;
   apiAudience: string;
   redirectUri: string;
@@ -14,8 +13,7 @@ export interface OAuthWebConfig {
 export type WebShell = "desktop" | "mobile";
 
 type ViteOAuthEnvironment = {
-  VITE_CODEXIA_OAUTH_AUTHORIZATION_ENDPOINT?: string;
-  VITE_CODEXIA_OAUTH_TOKEN_ENDPOINT?: string;
+  VITE_CODEXIA_OAUTH_ISSUER?: string;
   VITE_CODEXIA_OAUTH_CLIENT_ID?: string;
   VITE_CODEXIA_API_AUDIENCE?: string;
   VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI?: string;
@@ -27,14 +25,13 @@ type ViteOAuthEnvironment = {
 export function webOAuthConfig(shell: WebShell): OAuthWebConfig | null {
   const env = (import.meta as ImportMeta & { env?: ViteOAuthEnvironment }).env;
   if (!env) return null;
-  const values = [env.VITE_CODEXIA_OAUTH_AUTHORIZATION_ENDPOINT, env.VITE_CODEXIA_OAUTH_TOKEN_ENDPOINT,
+  const values = [env.VITE_CODEXIA_OAUTH_ISSUER,
     env.VITE_CODEXIA_OAUTH_CLIENT_ID, env.VITE_CODEXIA_API_AUDIENCE,
     shell === "desktop" ? env.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI : env.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI];
   if (values.every((value) => !value)) return null;
   if (values.some((value) => !value?.trim())) throw new Error("OAuth Web configuration is incomplete.");
   return {
-    authorizationEndpoint: env.VITE_CODEXIA_OAUTH_AUTHORIZATION_ENDPOINT!,
-    tokenEndpoint: env.VITE_CODEXIA_OAUTH_TOKEN_ENDPOINT!,
+    issuer: env.VITE_CODEXIA_OAUTH_ISSUER!,
     clientId: env.VITE_CODEXIA_OAUTH_CLIENT_ID!,
     apiAudience: env.VITE_CODEXIA_API_AUDIENCE!,
     redirectUri: shell === "desktop" ? env.VITE_CODEXIA_OAUTH_DESKTOP_REDIRECT_URI! : env.VITE_CODEXIA_OAUTH_MOBILE_REDIRECT_URI!,
@@ -70,8 +67,7 @@ async function challengeFor(verifier: string): Promise<string> {
 }
 
 function validateConfig(config: OAuthWebConfig): void {
-  trustedHttpsUrl(config.authorizationEndpoint, "Authorization endpoint");
-  trustedHttpsUrl(config.tokenEndpoint, "Token endpoint");
+  trustedHttpsUrl(config.issuer, "OAuth issuer");
   const redirect = trustedHttpsUrl(config.redirectUri, "Redirect URI");
   if (typeof window !== "undefined" && redirect.origin !== window.location.origin) {
     throw new Error("OAuth redirect URI must use this Web application's exact origin.");
@@ -81,19 +77,75 @@ function validateConfig(config: OAuthWebConfig): void {
   if (!config.scopes.length || config.scopes.some((scope) => !scope.trim())) throw new Error("At least one OAuth scope is required.");
 }
 
+interface OAuthAuthorizationServerMetadata {
+  issuer: string;
+  authorization_endpoint: string;
+  token_endpoint: string;
+  response_types_supported: string[];
+  grant_types_supported: string[];
+  token_endpoint_auth_methods_supported: string[];
+  code_challenge_methods_supported: string[];
+  authorization_response_iss_parameter_supported: boolean;
+  scopes_supported?: string[];
+}
+
+function metadataEndpoint(issuerValue: string): URL {
+  const issuer = trustedHttpsUrl(issuerValue, "OAuth issuer");
+  if (issuer.search || issuer.pathname.endsWith("/")) throw new Error("OAuth issuer must be a canonical origin and path.");
+  return new URL(`/.well-known/oauth-authorization-server${issuer.pathname}`, issuer.origin);
+}
+
+async function discoverAuthorizationServer(
+  config: OAuthWebConfig,
+  fetcher: typeof fetch,
+): Promise<OAuthAuthorizationServerMetadata> {
+  const issuer = trustedHttpsUrl(config.issuer, "OAuth issuer");
+  const expectedOrigin = typeof window !== "undefined" ? window.location.origin : issuer.origin;
+  if (issuer.origin !== expectedOrigin) throw new Error("OAuth login must use the Web application's exact origin.");
+  const response = await fetcher(metadataEndpoint(config.issuer), {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    credentials: "omit",
+    cache: "no-store",
+    redirect: "error",
+  });
+  if (!response.ok) throw new Error("OAuth authorization-server metadata is unavailable.");
+  const value: unknown = await response.json().catch(() => null);
+  if (!value || typeof value !== "object") throw new Error("OAuth authorization-server metadata is invalid.");
+  const metadata = value as Partial<OAuthAuthorizationServerMetadata>;
+  if (metadata.issuer !== config.issuer ||
+      !Array.isArray(metadata.response_types_supported) || !metadata.response_types_supported.includes("code") ||
+      !Array.isArray(metadata.grant_types_supported) || !metadata.grant_types_supported.includes("authorization_code") ||
+      !Array.isArray(metadata.token_endpoint_auth_methods_supported) || !metadata.token_endpoint_auth_methods_supported.includes("none") ||
+      !Array.isArray(metadata.code_challenge_methods_supported) || !metadata.code_challenge_methods_supported.includes("S256") ||
+      metadata.authorization_response_iss_parameter_supported !== true ||
+      (metadata.scopes_supported && config.scopes.some((scope) => !metadata.scopes_supported!.includes(scope)))) {
+    throw new Error("OAuth authorization-server metadata does not meet the public-client security requirements.");
+  }
+  const authorizationEndpoint = trustedHttpsUrl(metadata.authorization_endpoint ?? "", "Authorization endpoint");
+  const tokenEndpoint = trustedHttpsUrl(metadata.token_endpoint ?? "", "Token endpoint");
+  const endpointPrefix = issuer.pathname.endsWith("/") ? issuer.pathname : `${issuer.pathname}/`;
+  if (authorizationEndpoint.origin !== expectedOrigin || tokenEndpoint.origin !== expectedOrigin ||
+      !authorizationEndpoint.pathname.startsWith(endpointPrefix) || !tokenEndpoint.pathname.startsWith(endpointPrefix)) {
+    throw new Error("OAuth endpoints must remain within the configured same-origin issuer.");
+  }
+  return metadata as OAuthAuthorizationServerMetadata;
+}
+
 function oneSearchParam(url: URL, name: string): string | null {
   const values = url.searchParams.getAll(name);
   if (values.length > 1) throw new Error(`OAuth callback contains an ambiguous ${name} value.`);
   return values[0] ?? null;
 }
 
-export async function beginOAuthAuthorization(config: OAuthWebConfig): Promise<void> {
+export async function beginOAuthAuthorization(config: OAuthWebConfig, fetcher: typeof fetch = fetch): Promise<void> {
   validateConfig(config);
+  const metadata = await discoverAuthorizationServer(config, fetcher);
   const state = randomBase64Url();
   const verifier = randomBase64Url(48);
   const transaction: OAuthTransaction = { state, verifier, createdAt: Date.now() };
   sessionStorage.setItem(TRANSACTION_KEY, JSON.stringify(transaction));
-  const authorizationUrl = trustedHttpsUrl(config.authorizationEndpoint, "Authorization endpoint");
+  const authorizationUrl = trustedHttpsUrl(metadata.authorization_endpoint, "Authorization endpoint");
   authorizationUrl.searchParams.set("response_type", "code");
   authorizationUrl.searchParams.set("client_id", config.clientId);
   authorizationUrl.searchParams.set("redirect_uri", config.redirectUri);
@@ -133,7 +185,9 @@ export async function completeOAuthAuthorization(
   if (providerError) throw new Error("The identity provider did not complete sign-in.");
   if (!code) throw new Error("The identity provider did not return an authorization code.");
 
-  const tokenEndpoint = trustedHttpsUrl(config.tokenEndpoint, "Token endpoint");
+  const metadata = await discoverAuthorizationServer(config, fetcher);
+  if (oneSearchParam(callback, "iss") !== config.issuer) throw new Error("OAuth issuer validation failed. Start sign-in again.");
+  const tokenEndpoint = trustedHttpsUrl(metadata.token_endpoint, "Token endpoint");
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     client_id: config.clientId,

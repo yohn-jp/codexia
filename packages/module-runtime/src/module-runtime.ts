@@ -38,6 +38,8 @@ export interface ActionHostContext {
   access?: "owner" | "public";
   /** Host-derived principal class; MCP transport is external even when it carries an owner session. */
   caller?: "author" | "external-agent";
+  /** Optional host capability ceiling for nested action discovery and invocation. */
+  allowedEffects?: readonly ActionDescriptor["effect"][];
   /** Host-owned durable tracking around a declared module action. `execute` is safe to call once. */
   trackDomainJob?(
     descriptor: ActionDescriptor & { job: NonNullable<ActionDescriptor["job"]> },
@@ -439,12 +441,15 @@ export class ModuleRuntime {
       invalidAction(entry.action);
       actions.push({ id: actionIdFor("core", entry.action), module: "core", effect: entry.action.effect });
     }
+    const filtered = host?.allowedEffects
+      ? actions.filter((action) => host.allowedEffects!.includes(action.effect))
+      : actions;
     const ids = new Set<string>();
-    for (const action of actions) {
+    for (const action of filtered) {
       if (ids.has(action.id)) throw new ModuleRuntimeError("duplicate_action_id", `Action ${action.id} is registered more than once`);
       ids.add(action.id);
     }
-    return actions;
+    return filtered;
   }
 
   async invokeAction(id: string, actionId: string, input: unknown, host: ActionHostContext): Promise<ActionResult> {
@@ -577,6 +582,9 @@ export class ModuleRuntime {
       if (!definition) throw new ModuleRuntimeError("module_disabled", `Module ${manifest.id} is not active`);
       const action = definition.actions.find((candidate) => candidate.id === requestedActionId || actionIdFor(manifest.id, candidate) === requestedActionId);
       if (!action) throw new ModuleRuntimeError("action_not_found", `Action ${manifest.id}.${requestedActionId} is unavailable`);
+      if (host.allowedEffects && !host.allowedEffects.includes(action.effect)) {
+        throw new ModuleRuntimeError("action_effect_denied", `Action ${manifest.id}.${requestedActionId} exceeds the host's allowed effect scope`);
+      }
       const policy = inheritedEffect ?? action.effect;
       if (!this.effectAllowed(policy, action.effect)) throw new ModuleRuntimeError("action_effect_denied", `Action ${actionIdFor(manifest.id, action)} exceeds its caller's effect`);
       const parsed = action.inputSchema.parse(input);
@@ -664,6 +672,9 @@ export class ModuleRuntime {
       const action = registrations.find((entry) => actionIdFor("core", entry.action) === requestedActionId)?.action;
       if (!action) throw new ModuleRuntimeError("action_not_found", `Core action ${requestedActionId} is unavailable`);
       invalidAction(action);
+      if (host.allowedEffects && !host.allowedEffects.includes(action.effect)) {
+        throw new ModuleRuntimeError("action_effect_denied", `Core action ${requestedActionId} exceeds the host's allowed effect scope`);
+      }
       const policy = inheritedEffect ?? action.effect;
       if (!this.effectAllowed(policy, action.effect)) throw new ModuleRuntimeError("action_effect_denied", `Core action ${requestedActionId} exceeds its caller's effect`);
       const parsed = action.inputSchema.parse(input);
@@ -752,6 +763,7 @@ export class ModuleRuntime {
       propose: async (operations, evidence, proposalId, callSignal) => {
         const proposalSignal = callSignal ? AbortSignal.any([signal, callSignal]) : signal;
         if (proposalSignal.aborted) throw new ModuleRuntimeError("action_cancelled", "Action was cancelled");
+        if (host.allowedEffects && !host.allowedEffects.includes("propose")) throw new ModuleRuntimeError("action_effect_denied", "The host's allowed effect scope does not include proposals");
         if (effect !== "propose" || inheritedEffect !== "propose") throw new ModuleRuntimeError("action_effect_denied", `Action ${moduleId} is not allowed to propose changes`);
         for (const operation of operations) this.assertOperationSnapshot(operation, host.reader.snapshot);
         const proposal = await host.propose(operations, evidence, proposalId, proposalSignal);

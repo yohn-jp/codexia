@@ -262,7 +262,7 @@ export function JobInbox({ canWrite = true }: { canWrite?: boolean }) {
         }
       } catch (reason) {
         if (cancelled || controller.signal.aborted) return;
-        if (reason instanceof ApiError && (reason.status === 401 || reason.status === 403)) {
+        if (reason instanceof ApiError && (reason.status === 401 || reason.status === 403 || reason.code === "NATIVE_STREAM_UNSUPPORTED")) {
           setStreamState("unavailable");
           setStreamError(reason.message);
           return;

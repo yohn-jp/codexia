@@ -9,10 +9,10 @@ const require = createRequire(new URL('../packages/core/package.json', import.me
 const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8'));
 const fullModelWorkflow = parse(readFileSync(new URL('../.github/workflows/full-model-oci-acceptance.yml', import.meta.url), 'utf8'));
-test('the certified twenty-job inventory retains all fifty-nine obligations beside one supplemental model call', () => {
+test('the certified twenty-job inventory retains all sixty-one obligations beside one supplemental model call', () => {
   assert.equal(REQUIRED_VERIFICATION_JOBS.length, 20);
   assert.equal(VERIFICATION_LEAF_JOBS.length, 19);
-  assert.equal(VERIFICATION_TASKS.length, 59);
+  assert.equal(VERIFICATION_TASKS.length, 61);
   assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'unit', 'types', 'build', 'oci', 'browser', 'hosted_catalog', 'hosted', 'certification']);
   const tasks = Object.values(VERIFICATION_GROUPS).flat();
   assert.equal(new Set(tasks).size, tasks.length);
@@ -32,6 +32,14 @@ test('the certified twenty-job inventory retains all fifty-nine obligations besi
   assert.equal(workflow.jobs.certification.needs.includes('full_model_oci'), false);
   assert.equal(Object.hasOwn(fullModelWorkflow.on, 'workflow_call'), true);
   assert.equal(Object.hasOwn(fullModelWorkflow.on, 'pull_request'), false);
+  const apiUnitJob = workflow.jobs.unit;
+  assert.equal(apiUnitJob.env.CODEXIA_AUTH_TEST_DATABASE_URL,
+    'postgres://codexia:codexia@127.0.0.1:5432/codexia_auth_test');
+  assert.equal(apiUnitJob.env.CODEXIA_AUTH_TEST_DISPOSABLE, '1');
+  const authDatabase = apiUnitJob.steps.find(step => step.name === 'Create isolated Better Auth persistence database');
+  assert.equal(authDatabase.if, "matrix.group == 'core'");
+  assert.equal(authDatabase.env.POSTGRES_CONTAINER, '${{ job.services.postgres.id }}');
+  assert.match(authDatabase.run, /createdb -U codexia codexia_auth_test/u);
   const modelJobConfig = fullModelWorkflow.jobs['full-model-oci'];
   assert.ok(!Object.values(modelJobConfig.env).some(value => String(value).includes('${{ runner.')));
   for (const stepName of [
@@ -221,7 +229,7 @@ test('balanced browser lanes retain all independent spec and browser combination
   for(const profile of PROFILES){
     assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-writing'],['core','native-review','persistence-database'].map(id=>'browser-'+profile+'-'+id));
     assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-reference'],['recent-activity','modular-workspace','review-contributions','job-inbox','redesign-visual'].map(id=>'browser-'+profile+'-'+id));
-    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-webkit'],['auth-recovery','ui-v1','webkit'].map(id=>'browser-'+profile+'-'+id));
+    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-webkit'],['auth-recovery','oauth-web','ui-v1','webkit'].map(id=>'browser-'+profile+'-'+id));
     const writing = VERIFICATION_GROUPS['browser-'+profile+'-writing'];
     const reference = VERIFICATION_GROUPS['browser-'+profile+'-reference'];
     const webkit = VERIFICATION_GROUPS['browser-'+profile+'-webkit'];
