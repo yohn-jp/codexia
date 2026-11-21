@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { oauthProviderClient } from "@better-auth/oauth-provider/client";
-import { continueOAuthLogin, hasSignedOAuthPrompt } from "./oauth-login.js";
+import { continueOAuthLogin, hasSignedOAuthPrompt, oauthConsentContinuationURL, oauthLoginCallbackURL } from "./oauth-login.js";
 
 test("OAuth login requires one opaque signed authorization request", () => {
   const prompt = new URLSearchParams({
@@ -18,18 +18,25 @@ test("OAuth login requires one opaque signed authorization request", () => {
   assert.equal(hasSignedOAuthPrompt("%invalid"), false);
 });
 
-test("upstream sign-in uses the provider-neutral ID and fixed same-origin return route", async () => {
+test("upstream sign-in preserves the signed prompt on the fixed same-origin return route", async () => {
   let request: { provider: string; callbackURL: string } | undefined;
+  const search = "?client_id=web&redirect_uri=%2Fdesktop&state=s&exp=1790000000&sig=opaque&ba_param=client_id&ba_param=redirect_uri&ba_param=state&ba_param=exp";
   await continueOAuthLogin({
     signIn: { social: async (input) => { request = input; return {}; } },
-  });
-  assert.deepEqual(request, { provider: "workspace-oidc", callbackURL: "/oauth/login" });
+  }, search);
+  assert.deepEqual(request, { provider: "workspace-oidc", callbackURL: `/oauth/login${search}` });
+  assert.equal(oauthLoginCallbackURL(search), `/oauth/login${search}`);
+  assert.equal(oauthConsentContinuationURL(search), `/oauth/consent${search}`);
+  assert.equal(new URL(oauthLoginCallbackURL(`${search}&callbackURL=https://attacker.example`), "https://codexia.example.test").pathname, "/oauth/login");
+  assert.equal(new URL(oauthConsentContinuationURL(`${search}&callbackURL=https://attacker.example`), "https://codexia.example.test").pathname, "/oauth/consent");
+  assert.throws(() => oauthLoginCallbackURL("?client_id=web&state=s"), /invalid/u);
+  assert.throws(() => oauthConsentContinuationURL("?client_id=web&state=s"), /invalid/u);
 });
 
 test("upstream sign-in errors are surfaced without exposing provider details", async () => {
   await assert.rejects(continueOAuthLogin({
     signIn: { social: async () => ({ error: { message: "private provider response" } }) },
-  }), /Sign-in could not be started/u);
+  }, "?sig=s&exp=1&client_id=c&redirect_uri=%2F&state=s"), /Sign-in could not be started/u);
 });
 
 test("official Better Auth client forwards only the signed authorization query", async () => {
