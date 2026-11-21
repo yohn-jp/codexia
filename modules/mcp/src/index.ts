@@ -48,7 +48,7 @@ export {
   protectedResourceMetadataUrl,
   type McpProtectedResourceMetadata,
   type McpProtectedResourceOptions,
-} from "./oauth-metadata.js";
+} from "@codexia/contracts";
 export { ApiClient, McpApiError, actionClientFromContext } from "./api-client.js";
 export {
   createMcpWritingContext,

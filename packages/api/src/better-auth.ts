@@ -9,10 +9,11 @@ import {
   verifyOAuthQueryParams,
 } from "@better-auth/oauth-provider";
 import { oauthProviderResourceClient } from "@better-auth/oauth-provider/resource-client";
+import { MCP_OAUTH_SCOPES } from "@codexia/contracts";
 
 export const CODEXIA_AUTH_SCHEMA = "codexia_auth";
 export const CODEXIA_OWNER_SCOPE = "codexia:api";
-export const CODEXIA_MCP_SCOPES = ["mcp:read", "mcp:compute", "mcp:propose"] as const;
+export const CODEXIA_MCP_SCOPES = MCP_OAUTH_SCOPES;
 export const OIDC_PROVIDER_ID = "workspace-oidc";
 
 export interface BetterAuthRuntimeConfig {

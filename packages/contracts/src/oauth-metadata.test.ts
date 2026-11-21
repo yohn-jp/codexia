@@ -5,7 +5,7 @@ import {
   buildMcpProtectedResourceMetadata,
   createMcpProtectedResourceMetadataResponse,
   protectedResourceMetadataUrl,
-} from "./oauth-metadata.js";
+} from "./index.js";
 
 test("standalone MCP protected-resource metadata advertises only bounded MCP scopes", () => {
   const resource = "https://api.codexia.example/api";

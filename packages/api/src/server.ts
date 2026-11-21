@@ -4,6 +4,8 @@ import { authorizationFailure } from "./authorization-error.js";
 import { readCodexiaEnvironment } from "./environment.js";
 import { createCloudflareAccessVerifier, type CloudflareAccessOptions } from "./cloudflare-access.js";
 import { createOAuthOwnerAuthenticator, OAuthAuthenticationError, type OAuthOwnerOptions } from "./oauth-owner.js";
+import { createOAuthMcpAuthenticator, OAUTH_MCP_SCOPE_BY_EFFECT, OAUTH_MCP_SCOPES, type OAuthMcpOptions, type OAuthMcpPrincipal } from "./oauth-mcp.js";
+import { createMcpProtectedResourceMetadataResponse, protectedResourceMetadataUrl } from "@codexia/contracts";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable, Transform } from "node:stream";
@@ -138,6 +140,8 @@ export interface ApiServerOptions {
   cloudflareAccess?: CloudflareAccessOptions;
   /** Optional standalone API-audience OAuth access tokens for the configured owner. */
   oauthOwner?: OAuthOwnerOptions;
+  /** Explicitly registered standalone MCP OAuth clients, always separate from owner admission. */
+  oauthMcp?: OAuthMcpOptions;
   /** Better Auth is the standalone OIDC and OAuth provider when configured. */
   betterAuth?: ReturnType<typeof createBetterAuthRuntime>;
   /** Exact HTTPS browser origins allowed to call the API cross-origin with bearer tokens. */
@@ -185,6 +189,14 @@ interface HttpFailure {
 
 function httpFailure(status: number, code: string, message: string): HttpFailure {
   return { status, code, message };
+}
+
+function mcpChallenge(metadataUrl: string, requiredScope?: string): string {
+  return `Bearer ${[
+    ...(requiredScope ? ['error="insufficient_scope"'] : []),
+    `resource_metadata="${metadataUrl}"`,
+    `scope="${requiredScope ?? OAUTH_MCP_SCOPES.join(" ")}"`,
+  ].join(", ")}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -613,8 +625,16 @@ export function createServer(options: ApiServerOptions): Server {
     throw new Error("Cloudflare Access browser authentication requires standalone mode and the trusted HTTPS proxy");
   }
   if (options.oauthOwner && hosted) throw new Error("Standalone OAuth owner authentication is not available in Hosted mode");
+  if (options.oauthMcp && hosted) throw new Error("Standalone MCP OAuth authentication is not available in Hosted mode");
   if (options.betterAuth && hosted) throw new Error("Standalone Better Auth is not available in Hosted mode");
   const authenticateOAuthOwner = options.oauthOwner ? createOAuthOwnerAuthenticator(options.oauthOwner) : undefined;
+  const authenticateOAuthMcp = options.oauthMcp ? createOAuthMcpAuthenticator(options.oauthMcp) : undefined;
+  const oauthResource = options.oauthMcp?.audience ?? options.betterAuth?.audience;
+  const oauthAuthorizationServer = options.oauthMcp?.issuer ?? options.betterAuth?.issuer;
+  const oauthMcpMetadataUrl = oauthResource ? protectedResourceMetadataUrl(oauthResource) : undefined;
+  const oauthMcpMetadataResponse = oauthResource && oauthAuthorizationServer
+    ? createMcpProtectedResourceMetadataResponse({ resource: oauthResource, authorizationServer: oauthAuthorizationServer })
+    : undefined;
   if (options.corsAllowedOrigins && hosted) throw new Error("Standalone browser CORS configuration is not available in Hosted mode");
   const corsAllowedOrigins = normalizeCorsOrigins(options.corsAllowedOrigins);
   const cloudflareAccess = options.cloudflareAccess ? createCloudflareAccessVerifier(options.cloudflareAccess) : undefined;
@@ -1049,9 +1069,9 @@ export function createServer(options: ApiServerOptions): Server {
       if (status.availability === "enabled-idle" || status.availability === "active") await runtime.activate(status.id);
     }
   };
-  const listActionDescriptors = async (projectId: string, signal: AbortSignal, source: ChangeProposal["source"] = "author"): Promise<ActionDescriptor[]> => {
+  const listActionDescriptors = async (projectId: string, signal: AbortSignal, source: ChangeProposal["source"] = "author", allowedEffects?: readonly ActionDescriptor["effect"][]): Promise<ActionDescriptor[]> => {
     const reader = await freshReader(projectId);
-    return runtime.listActions(actionHost(projectId, reader, signal, source));
+    return runtime.listActions(actionHost(projectId, reader, signal, source, "owner", undefined, undefined, "owner", allowedEffects));
   };
   const proposeAs = async (
     projectId: string,
@@ -1079,19 +1099,21 @@ export function createServer(options: ApiServerOptions): Server {
     onDomainJobStarted?: (jobId: string) => void,
     authorizeProposal?: () => Promise<void>,
     actorId = "owner",
+    allowedEffects?: readonly ActionDescriptor["effect"][],
   ): ApiActionHost => {
     const host: ApiActionHost = {
       projectId,
       reader,
       signal,
       caller: access === "public" || source === "mcp" ? "external-agent" : "author",
+      ...(allowedEffects ? { allowedEffects } : {}),
       actions: access === "public" ? [] : buildCoreActions(projectId, source, actorId, async () => {
         if (authorizeProposal) { await authorizeProposal(); return; }
         throw httpFailure(403, hosted ? "WRITE_PERMISSION_REQUIRED" : "AUTHOR_SESSION_REQUIRED", "Current authenticated write permission is required to propose native changes");
       }),
       propose: async (operations: ChangeOperation[], evidence?: ProposalEvidence[], proposalId?: string, proposalSignal?: AbortSignal) => {
         if (access === "public") throw httpFailure(403, "PUBLIC_PROPOSAL_DENIED", "Public module requests cannot propose changes");
-        if (hosted) {
+        if (hosted || (source === "mcp" && authorizeProposal)) {
           if (!authorizeProposal) throw httpFailure(403, "WRITE_PERMISSION_REQUIRED", "Current project write permission is required to propose changes");
           await authorizeProposal();
         }
@@ -1581,6 +1603,11 @@ export function createServer(options: ApiServerOptions): Server {
       response.setHeader("Access-Control-Allow-Origin", originHeader);
     }
 
+    if (oauthMcpMetadataUrl && oauthMcpMetadataResponse && method === "GET" && routePath === new URL(oauthMcpMetadataUrl).pathname) {
+      response.writeHead(oauthMcpMetadataResponse.status, Object.fromEntries(oauthMcpMetadataResponse.headers.entries()));
+      response.end(Buffer.from(await oauthMcpMetadataResponse.arrayBuffer()));
+      return;
+    }
     if (options.betterAuth && method === "GET" && routePath === "/.well-known/oauth-authorization-server/api/auth") {
       const metadataRequest = new Request(`${requestProtocol(request, trustProxy)}//${request.headers.host ?? "localhost"}${request.url ?? "/"}`, { headers: fromNodeHeaders(request.headers) });
       const metadata = await advertisePublicClientTokenAuth(await options.betterAuth.authorizationServerMetadata(metadataRequest));
@@ -1747,13 +1774,44 @@ export function createServer(options: ApiServerOptions): Server {
       return;
     }
     let oauthPrincipal: Awaited<ReturnType<NonNullable<typeof authenticateOAuthOwner>>> | undefined;
+    let oauthMcpPrincipal: OAuthMcpPrincipal | undefined;
     const isLegacyBearer = Boolean(bearer && constantTimeEqual(bearer, options.authToken ?? ""));
     if (bearer && authenticateOAuthOwner && !isLegacyBearer) {
       try { oauthPrincipal = await authenticateOAuthOwner(bearer); }
       catch (error) {
+        if (authenticateOAuthMcp && error instanceof OAuthAuthenticationError && error.code === "OAUTH_SCOPE_REQUIRED") {
+          try { oauthMcpPrincipal = await authenticateOAuthMcp(bearer); }
+          catch (mcpError) {
+            const failure = mcpError instanceof OAuthAuthenticationError
+              ? mcpError
+              : new OAuthAuthenticationError(401, "OAUTH_TOKEN_INVALID", "OAuth access token is invalid or unverifiable");
+            if (failure.status === 401 && routePath.endsWith("/modules/mcp/streamable") && oauthMcpMetadataUrl) {
+              response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl));
+            }
+            fail(response, failure.status, failure.code, failure.message);
+            return;
+          }
+        } else {
+          const failure = error instanceof OAuthAuthenticationError
+            ? error
+            : new OAuthAuthenticationError(401, "OAUTH_TOKEN_INVALID", "OAuth access token is invalid or unverifiable");
+          if (failure.status === 401 && routePath.endsWith("/modules/mcp/streamable") && oauthMcpMetadataUrl) {
+            response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl));
+          }
+          fail(response, failure.status, failure.code, failure.message);
+          return;
+        }
+      }
+    }
+    if (bearer && authenticateOAuthMcp && !authenticateOAuthOwner && !isLegacyBearer) {
+      try { oauthMcpPrincipal = await authenticateOAuthMcp(bearer); }
+      catch (error) {
         const failure = error instanceof OAuthAuthenticationError
           ? error
           : new OAuthAuthenticationError(401, "OAUTH_TOKEN_INVALID", "OAuth access token is invalid or unverifiable");
+        if (failure.status === 401 && routePath.endsWith("/modules/mcp/streamable") && oauthMcpMetadataUrl) {
+          response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl));
+        }
         fail(response, failure.status, failure.code, failure.message);
         return;
       }
@@ -1788,13 +1846,29 @@ export function createServer(options: ApiServerOptions): Server {
       ? accessExpiresAt !== undefined : Boolean(session && session.expiresAt > Date.now());
     if (sessionId && !isCookie) sessions.delete(sessionId);
     const isOAuthAuthor = Boolean(oauthPrincipal);
-    const isBearer = hosted ? Boolean(bearer && hostedPrincipal) : !isCookie && isLegacyBearer;
+    const isBearer = hosted ? Boolean(bearer && hostedPrincipal) : !isCookie && (isLegacyBearer || Boolean(oauthMcpPrincipal));
     const isAuthor = isCookie || isOAuthAuthor;
     const hasAuth = hosted ? Boolean(hostedPrincipal) : isAuthor || isBearer;
+    const mcpAllowedEffects: readonly ActionDescriptor["effect"][] | undefined = oauthMcpPrincipal
+      ? (["read", "compute", "propose"] as const).filter((effect) =>
+        oauthMcpPrincipal!.scopes.includes(OAUTH_MCP_SCOPE_BY_EFFECT[effect]))
+      : undefined;
+    const requireMcpEffect = (effect: ActionDescriptor["effect"]): void => {
+      if (!oauthMcpPrincipal) return;
+      const requiredScope = OAUTH_MCP_SCOPE_BY_EFFECT[effect];
+      if (oauthMcpPrincipal.scopes.includes(requiredScope)) return;
+      if (oauthMcpMetadataUrl) response.setHeader("WWW-Authenticate", mcpChallenge(oauthMcpMetadataUrl, requiredScope));
+      throw httpFailure(403, "OAUTH_MCP_SCOPE_REQUIRED", `Access token does not grant ${requiredScope}`);
+    };
+    const mcpStreamableRoute = routePath.endsWith("/modules/mcp/streamable");
+    if (oauthMcpPrincipal && routePath.startsWith("/api/") && isRead && !publicRead && !mcpStreamableRoute) {
+      requireMcpEffect("read");
+    }
     if (routePath.startsWith("/api/") && !publicRead && !publicModuleRoute && !hasAuth) {
-      response.setHeader("WWW-Authenticate",
-        hosted && routePath.endsWith("/modules/mcp/streamable")
-          ? `Bearer resource_metadata="${assignment!.grantPolicy.audience}/.well-known/oauth-protected-resource", scope="read"`
+      response.setHeader("WWW-Authenticate", hosted && mcpStreamableRoute
+        ? `Bearer resource_metadata="${assignment!.grantPolicy.audience}/.well-known/oauth-protected-resource", scope="read"`
+        : !hosted && mcpStreamableRoute && oauthMcpMetadataUrl
+          ? mcpChallenge(oauthMcpMetadataUrl)
           : 'Bearer realm="codexia", Cookie realm="codexia"');
       fail(response, 401, "UNAUTHORIZED", "Authentication required");
       return;
@@ -1839,6 +1913,7 @@ export function createServer(options: ApiServerOptions): Server {
     };
     const authorizeActionProposal = async (): Promise<void> => {
       if (hosted) { await requireWritePermission(); return; }
+      requireMcpEffect("propose");
       if (!isAuthor && !isBearer) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author or bearer identity is required to propose changes");
     };
     if (shuttingDown && routePath.startsWith("/api/") && !isRead) {
@@ -2075,6 +2150,7 @@ export function createServer(options: ApiServerOptions): Server {
       if (suffix === "status" && method === "GET") { sendJson(response, 200, await options.store.status(projectId)); return; }
       if (suffix === "observation" && method === "GET") { sendJson(response, 200, await options.store.observe(projectId)); return; }
       if (suffix === "proposals" && method === "POST") {
+        requireMcpEffect("propose");
         if (hosted) await requireWritePermission();
         const body = await readJson(request, parsedBody);
         if (!isRecord(body) || !isRecord(body.snapshot) || !Array.isArray(body.operations) || !body.operations.length) throw httpFailure(400, "INVALID_PROPOSAL", "A proposal snapshot and at least one operation are required");
@@ -2127,7 +2203,7 @@ export function createServer(options: ApiServerOptions): Server {
         sendJson(response, 201, await options.store.apply(projectId, body as ChangeOperation)); return;
       }
       if (suffix === "actions" && method === "GET") {
-        sendJson(response, 200, { actions: await listActionDescriptors(projectId, signal, isBearer ? "mcp" : "author") }); return;
+        sendJson(response, 200, { actions: await listActionDescriptors(projectId, signal, isBearer ? "mcp" : "author", mcpAllowedEffects) }); return;
       }
       const actionMatch = suffix.match(/^actions\/([^/]+)$/u);
       if (actionMatch && method === "POST") {
@@ -2137,10 +2213,16 @@ export function createServer(options: ApiServerOptions): Server {
         if (isBearer && actionId.startsWith("assistant.")) {
           throw httpFailure(403, "external_agent_assistant_denied", "External agents cannot invoke Assistant");
         }
-        const descriptors = await listActionDescriptors(projectId, signal, isBearer || actionMatch[1]!.startsWith("mcp.") ? "mcp" : "author");
-        const descriptor = descriptors.find((item) => item.id === actionId);
+        const descriptors = await listActionDescriptors(projectId, signal, isBearer || actionMatch[1]!.startsWith("mcp.") ? "mcp" : "author", mcpAllowedEffects);
+        let descriptor = descriptors.find((item) => item.id === actionId);
+        if (!descriptor && oauthMcpPrincipal) {
+          const completeDescriptors = await listActionDescriptors(projectId, signal, "mcp");
+          const requestedDescriptor = completeDescriptors.find((item) => item.id === actionId);
+          if (requestedDescriptor) requireMcpEffect(requestedDescriptor.effect);
+        }
         if (!descriptor) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
         if (isBearer && !["read", "compute", "propose"].includes(descriptor.effect)) throw httpFailure(403, "BEARER_EFFECT_DENIED", "Bearer credentials may only invoke read, compute, and propose actions");
+        requireMcpEffect(descriptor.effect);
         if (hosted && descriptor.effect !== "read") await requireWritePermission();
         let boundSnapshot: SnapshotId | undefined;
         if (body.snapshot !== undefined) {
@@ -2175,7 +2257,7 @@ export function createServer(options: ApiServerOptions): Server {
           domainJobId = id;
           signal.removeEventListener("abort", abortBeforeAcceptance);
           resolveDomainJobStart(id);
-        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner");
+        }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects);
         if (descriptor.module === "core") {
           const coreAction = host.actions?.find(({ action }) => action.id === descriptor.id)?.action;
           if (!coreAction) throw httpFailure(404, "ACTION_NOT_FOUND", `Action ${actionId} is unavailable`);
@@ -2264,12 +2346,16 @@ export function createServer(options: ApiServerOptions): Server {
       const moduleRoute = suffix.match(/^modules\/([^/]+)(?:\/(.*))?$/u);
       if (moduleRoute) {
         const moduleId = parseProjectId(moduleRoute[1]!);
+        if (oauthMcpPrincipal && moduleId !== "mcp") {
+          throw httpFailure(403, "OAUTH_MCP_MODULE_DENIED", "Standalone MCP clients may only use the MCP transport route");
+        }
         if (moduleId === "assistant" && isBearer) {
           throw httpFailure(403, "external_agent_assistant_denied", "External agents cannot invoke Assistant");
         }
         const contribution = await contributionFor(moduleId, moduleRoute[2] ?? "", method);
         if (!contribution || contribution.access !== "owner") throw httpFailure(404, "MODULE_ROUTE_UNAVAILABLE", "Module route is unavailable");
         if (isBearer && !["read", "compute", "propose"].includes(contribution.effect)) throw httpFailure(403, "BEARER_EFFECT_DENIED", "Bearer credentials may only use read, compute, and propose module routes");
+        if (oauthMcpPrincipal && moduleId === "mcp" && !mcpStreamableRoute) requireMcpEffect(contribution.effect);
         // The MCP transport advertises "propose" because some tools create
         // proposals, but initialization and read-only tools require read only.
         // Actual proposal writes are gated by actionHost.authorizeProposal.
@@ -2279,7 +2365,7 @@ export function createServer(options: ApiServerOptions): Server {
         if (contribution.effect === "read" && method !== "GET" && method !== "HEAD") throw httpFailure(405, "MODULE_HTTP_METHOD_DENIED", "Read-only module routes must use GET or HEAD");
         const reader = await freshReader(projectId);
         let domainJobId: string | undefined;
-        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner");
+        const host = actionHost(projectId, reader, signal, isBearer || moduleId === "mcp" ? "mcp" : "module", "owner", (id) => { domainJobId = id; }, authorizeActionProposal, hostedPrincipal?.userId ?? "owner", mcpAllowedEffects);
         const webRequest = makeWebRequest(request, parsedBody, signal, moduleRoute[2] ?? "");
         const moduleResponse = await runtime.invokeHttp(moduleId, contribution.id, webRequest, host);
         if (domainJobId) response.setHeader("X-Codexia-Job-Id", domainJobId);
@@ -2596,6 +2682,15 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
       verifyActiveToken: betterAuth.verifyActiveAccessToken,
     } : {}),
   } : undefined;
+  const oauthMcp: OAuthMcpOptions | undefined = betterAuth && betterAuth.mcpClientIds.length > 0 ? {
+    issuer: betterAuth.issuer,
+    audience: betterAuth.audience,
+    jwksUrl: `${betterAuth.issuer}/jwks`,
+    verifyActiveToken: betterAuth.verifyActiveAccessToken,
+    allowedClientIds: betterAuth.mcpClientIds,
+    ownerClientIds: betterAuthValues.ownerClientIds!.split(",").map((value) => value.trim()).filter(Boolean),
+    ownerSubject: betterAuthValues.ownerSubject!,
+  } : undefined;
   const corsAllowedOrigins: string[] | undefined = corsOriginsValue === undefined ? undefined :
     corsOriginsValue.split(",").map((origin) => origin.trim()).filter(Boolean);
   if (corsOriginsValue !== undefined && corsAllowedOrigins?.length === 0) {
@@ -2618,6 +2713,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
         ownerEmail: readCodexiaEnvironment("ACCESS_OWNER_EMAIL") ?? "",
       } } : {}),
       ...(oauthOwner ? { oauthOwner } : {}),
+      ...(oauthMcp ? { oauthMcp } : {}),
       ...(betterAuth ? { betterAuth } : {}),
       ...(corsAllowedOrigins ? { corsAllowedOrigins } : {}),
       trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",

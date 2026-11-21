@@ -1510,3 +1510,56 @@ test("composition contributions validate kind and host contexts independently of
     await runtime.shutdown();
   }
 });
+
+test("host action-effect ceilings filter discovery and independently deny nested MCP invocations and proposals", async (t) => {
+  const metadata = manifest("story");
+  const schema: ValueSchema = { parse: (value) => value };
+  let computeExecutions = 0;
+  let proposalExecutions = 0;
+  const runtime = new ModuleRuntime({
+    manifests: [metadata], enabled: ["story"], cacheDirectory: "/tmp/codexia-runtime-test",
+    loaders: { story: async () => ({
+      manifest: metadata,
+      actions: [{
+        id: "read", effect: "read", inputSchema: schema, outputSchema: schema,
+        async invoke(_input, context) { return { ok: true, snapshot: context.reader.snapshot, data: "read" }; },
+      }, {
+        id: "compute", effect: "compute", inputSchema: schema, outputSchema: schema,
+        async invoke(_input, context) { computeExecutions += 1; return { ok: true, snapshot: context.reader.snapshot, data: "computed" }; },
+      }],
+      ui: [],
+      http: [{ id: "stream", path: "stream", methods: ["POST"], access: "owner", effect: "propose", async handle(_request, context) {
+        const actions = await context.listActions();
+        const nested = await context.invoke("story.compute", {});
+        let proposalError: string | undefined;
+        try { await context.propose([proposalOperation()]); }
+        catch (error) { proposalError = error instanceof ModuleRuntimeError ? error.code : "unknown"; }
+        return Response.json({ actions, nested, proposalError });
+      } }],
+      async dispose() {},
+    }) },
+  });
+  const host: ActionHostContext = {
+    projectId: snapshot.projectId,
+    reader: { snapshot, async read() { return null; }, async list() { return []; } },
+    signal: new AbortController().signal,
+    access: "owner",
+    caller: "external-agent",
+    allowedEffects: ["read"],
+    async propose() { proposalExecutions += 1; throw new Error("proposal port must not be reached"); },
+  };
+  t.after(() => runtime.shutdown());
+
+  const response = await runtime.invokeHttp("story", "stream", new Request("https://api.example.test/stream", { method: "POST" }), host);
+  const payload = await response.json() as {
+    actions: ActionDescriptor[];
+    nested: ActionResult;
+    proposalError: string;
+  };
+  assert.deepEqual(payload.actions.map((action) => action.id), ["story.read"]);
+  assert.equal(payload.nested.ok, false);
+  if (!payload.nested.ok) assert.equal(payload.nested.error.code, "action_effect_denied");
+  assert.equal(payload.proposalError, "action_effect_denied");
+  assert.equal(computeExecutions, 0);
+  assert.equal(proposalExecutions, 0);
+});
