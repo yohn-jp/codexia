@@ -1,0 +1,106 @@
+name: Revalidate Backend Deployment Certificate
+on:
+  pull_request:
+    paths:
+      - .github/workflows/backend-handoff-revalidate.yml
+      - scripts/prepare-backend-handoff-revalidation.mjs
+      - scripts/backend-handoff-revalidation.test.mjs
+      - docs/deployment/BACKEND-HANDOFF-REVALIDATION.md
+      - scripts/verify-backend-push-handoff.mjs
+  workflow_dispatch:
+    inputs:
+      publisher_run_id:
+        description: Successful main Codexia Backend Image run ID to revalidate
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: backend-handoff-revalidation-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  contract:
+    if: github.event_name == 'pull_request'
+    name: Verify manual certificate revalidation contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Prepare frozen Node toolchain
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm@12.21.0 --version
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test exact-run selection and read-only workflow contract
+        run: node --test scripts/backend-handoff-revalidation.test.mjs
+
+  revalidate:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    name: Revalidate one published certificate without deployment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Prepare frozen Node toolchain
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm@12.21.0 --version
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Resolve exact successful publisher run from GitHub API
+        id: publisher
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEXIA_PUBLISHER_RUN_ID: ${{ inputs.publisher_run_id }}
+        run: node scripts/prepare-backend-handoff-revalidation.mjs
+      - name: Check out exact publisher source for source binding
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ steps.publisher.outputs.publisher_source_sha }}
+          path: publisher-source
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: docker/login-action@v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Verify exact certificate, producer receipt and immutable images
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: yohn-jp/codexia
+          GITHUB_REF: refs/heads/main
+          GITHUB_EVENT_NAME: workflow_run
+          GITHUB_EVENT_PATH: ${{ steps.publisher.outputs.publisher_event_path }}
+        working-directory: publisher-source
+        run: node "$GITHUB_WORKSPACE/scripts/verify-backend-push-handoff.mjs"
+      - name: Record the target evidence boundary
+        if: success()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          ## Read-only certificate revalidation
+
+          - Backend provenance and immutable OCI identity: verified by the preceding step.
+          - Target-specific backup, isolated restore, host access, rollback, reboot, and readiness: **NOT_ESTABLISHED**.
+          - No deployment target or production resource was contacted or changed.
+          SUMMARY
