@@ -62,12 +62,16 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
     'notChecked',
   ]) assert.ok(continuity.includes(marker), 'Missing same-host Ansible continuity proof: ' + marker);
   for (const marker of [
+    'install_fixture_manager_xdg',
+    'phase_f_xdg_generator_path',
+    'manager XDG environment verified after systemd environment generation',
     'codexia_stage=$stage',
     'apply_runner secrets',
     'apply_runner base',
     'apply_service prepare',
     'apply_service initialize-schema',
     'apply_service initialize-fresh',
+    "fetch(origin + '/api/v1/persistence/projects'",
     'migration_ledger',
     'pg_control_system()',
     'codexia-api-proxy',
@@ -76,6 +80,8 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
     'notChecked',
     'app-convergence-results.json',
   ]) assert.ok(appContinuity.includes(marker), 'Missing fresh application continuity proof: ' + marker);
+  assert.doesNotMatch(appContinuity, /origin \+ '\/api\/projects'/u,
+    'Application continuity must verify writes through the PostgreSQL persistence API');
   assert.match(continuity, /test-phase-f-ansible-app\.sh/u);
 });
 

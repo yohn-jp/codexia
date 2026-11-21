@@ -27,6 +27,10 @@ evidence_dir=$RUNNER_TEMP/codexia-phase-f-evidence
 runtime_owned=false
 source_owned=false
 phase_dir_owned=false
+phase_f_xdg_generator_dir=/run/systemd/user-environment-generators
+phase_f_xdg_generator_path="$phase_f_xdg_generator_dir/99-codexia-phase-f-xdg-$service_uid-$$"
+phase_f_xdg_generator_installed=false
+phase_f_xdg_generator_dir_created=false
 mkdir -p "$evidence_dir"
 
 as_service() {
@@ -95,6 +99,15 @@ cleanup() {
         rc=0; rootless secret exists "$resource" >/dev/null 2>&1 || rc=$?
         [[ "$rc" == 1 ]] || cleanup_status=1
       done
+      if [[ "$phase_f_xdg_generator_installed" == true ]]; then
+        sudo rm -f -- "$phase_f_xdg_generator_path" || cleanup_status=1
+        phase_f_xdg_generator_installed=false
+        user_systemctl daemon-reload >/dev/null 2>&1 || cleanup_status=1
+      fi
+      if [[ "$phase_f_xdg_generator_dir_created" == true ]]; then
+        sudo rmdir -- "$phase_f_xdg_generator_dir" 2>/dev/null || cleanup_status=1
+        phase_f_xdg_generator_dir_created=false
+      fi
       as_service rm -rf -- "$service_home/.config/codexia-updater" "$service_home/.local/state/codexia-updater" || cleanup_status=1
       if sudo test -d /opt/codexia-updater && ! sudo test -L /opt/codexia-updater; then
         if [[ "$(sudo stat -c '%u:%a' /opt/codexia-updater 2>/dev/null)" == "$service_uid:750" ]]; then
@@ -293,6 +306,30 @@ apply_service() {
     -e "codexia_stage=$stage" -e "@$phase_dir/stage-vars.json" > "$log" 2>&1 || status=$?
   if (( status != 0 )); then cat "$log" >&2; return "$status"; fi
 }
+install_fixture_manager_xdg() {
+  # systemd reruns user environment generators during daemon-reload. Keep the
+  # correction scoped to this disposable service UID and remove it at cleanup.
+  if [[ ! -d "$phase_f_xdg_generator_dir" ]]; then
+    sudo install -d -m 0755 "$phase_f_xdg_generator_dir"
+    phase_f_xdg_generator_dir_created=true
+  fi
+  [[ ! -e "$phase_f_xdg_generator_path" && ! -L "$phase_f_xdg_generator_path" ]] ||
+    fail "Refusing to replace an existing user environment generator: $phase_f_xdg_generator_path"
+  sudo install -m 0755 /dev/null "$phase_f_xdg_generator_path"
+  phase_f_xdg_generator_installed=true
+  sudo tee "$phase_f_xdg_generator_path" >/dev/null <<EOF
+#!/bin/sh
+if [ "\$(id -u)" = "$service_uid" ]; then
+  printf '%s\\n' 'XDG_CONFIG_HOME=$service_home/.config' 'XDG_RUNTIME_DIR=/run/user/$service_uid'
+fi
+EOF
+  user_systemctl daemon-reload
+  local manager_environment
+  manager_environment=$(user_systemctl show-environment)
+  grep -Fxq "XDG_CONFIG_HOME=$service_home/.config" <<<"$manager_environment" || fail 'Fixture user manager has the wrong XDG_CONFIG_HOME after generator reload.'
+  grep -Fxq "XDG_RUNTIME_DIR=/run/user/$service_uid" <<<"$manager_environment" || fail 'Fixture user manager has the wrong XDG_RUNTIME_DIR after generator reload.'
+  printf '%s\\n' 'Phase F fixture manager XDG environment verified after systemd environment generation.'
+}
 require_no_change() {
   local log=$1
   grep -Eq 'changed=0' "$log" || { printf 'Expected no-change Ansible repeat: %s\n' "$log" >&2; cat "$log" >&2; return 1; }
@@ -331,9 +368,10 @@ const login = await fetch(origin + '/api/login', { method: 'POST', headers: { Or
 if (!login.ok) throw new Error('Disposable app login failed');
 const cookie = login.headers.get('set-cookie')?.split(';', 1)[0];
 if (!cookie) throw new Error('Disposable app session cookie unavailable');
-const response = await fetch(origin + '/api/projects', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ title: 'Phase F Ansible application continuity' }) });
-if (!response.ok) throw new Error('Disposable project creation failed: ' + response.status);
-const project = await response.json();
+const response = await fetch(origin + '/api/v1/persistence/projects', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ title: 'Phase F Ansible application continuity' }) });
+if (response.status !== 201) throw new Error('Disposable project creation failed: ' + response.status);
+const created = await response.json();
+const project = created.project;
 if (typeof project.id !== 'string' || !project.id) throw new Error('Disposable project identity unavailable');
 process.stdout.write(project.id);
 NODE
@@ -347,9 +385,10 @@ const login = await fetch(origin + '/api/login', { method: 'POST', headers: { Or
 assert.equal(login.ok, true);
 const cookie = login.headers.get('set-cookie')?.split(';', 1)[0];
 assert.ok(cookie);
-const response = await fetch(origin + '/api/projects', { headers: { Origin: origin, Cookie: cookie } });
+const response = await fetch(origin + '/api/v1/persistence/projects', { headers: { Origin: origin, Cookie: cookie } });
 assert.equal(response.ok, true);
 const projects = await response.json();
+assert.ok(Array.isArray(projects));
 assert.ok(projects.some(project => project.id === process.argv[2] && project.title === 'Phase F Ansible application continuity'));
 NODE
   fi
@@ -360,6 +399,7 @@ apply_runner secrets "$tmp/secrets-first.log"
 grep -Eq 'changed=[1-9]' "$tmp/secrets-first.log"
 apply_runner secrets "$tmp/secrets-repeat.log"
 require_no_change "$tmp/secrets-repeat.log"
+install_fixture_manager_xdg
 apply_runner base "$tmp/base-first.log"
 grep -Eq 'changed=[1-9]' "$tmp/base-first.log"
 rootless exec codexia-db pg_isready -U codexia -d codexia >/dev/null
