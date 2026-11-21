@@ -8,7 +8,7 @@ import { selectEquivalentTaskProofs } from './ci-task-input-proof.mjs';
 
 const identity = { sourceSha: 'a'.repeat(40), planDigest: 'b'.repeat(64), workflowRunId: 42, workflowAttempt: 1 };
 function taskProof(inputClosure) {
-  return { task: 'coverage', status: 'passed', ...identity, workflowJob: 'types-tests', inputClosure };
+  return { task: 'coverage', status: 'passed', ...identity, workflowJob: 'types', inputClosure };
 }
 
 test('coverage closure changes when a declared test input changes and is stable otherwise', async t => {

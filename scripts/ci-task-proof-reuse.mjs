@@ -195,7 +195,8 @@ export async function resolveExactMainCoverageProof({ plan: planValue, current, 
   assertTrustedTaskInputProof({ inputProof: proof,
     identity: { sourceSha: plan.base, planDigest: planDigest(mainPlan), workflowRunId: run.id, workflowAttempt: run.run_attempt },
     run, job: coverageJob, artifact,
-    expected: { repositoryId: current.repository.id, workflowId: current.workflow_id, jobName: COVERAGE_JOB, workflowJob: COVERAGE_WORKFLOW_JOB,
+    expected: { repositoryId: current.repository.id, workflowId: current.workflow_id, jobName: COVERAGE_JOB,
+      workflowJob: COVERAGE_WORKFLOW_JOB,
       artifactName: COVERAGE_ARTIFACT, artifactId: artifact.id, artifactDigest: artifact.digest },
   });
   return {
