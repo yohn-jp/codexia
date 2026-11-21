@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { createLocalJWKSet, exportJWK, generateKeyPair, jwtVerify, SignJWT } from "jose";
 import { Pool } from "pg";
 import { createBetterAuthRuntime } from "./better-auth.js";
+import { migrateJwtAccessTokenRevocationSchema } from "./jwt-access-token-revocation.js";
 
 const databaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
 const disposableDatabaseOptIn = process.env.CODEXIA_AUTH_TEST_DISPOSABLE === "1";
@@ -209,6 +210,7 @@ test("Better Auth PostgreSQL restart preserves JWKS signing key, session and ref
     firstRuntime = createBetterAuthRuntime(config);
     const firstContext = await firstRuntime.auth.$context;
     await firstContext.runMigrations();
+    await migrateJwtAccessTokenRevocationSchema(firstRuntime.pool);
 
     const authBase = `${publicOrigin}/api/auth`;
     const cookies = cookieJar();
