@@ -6,7 +6,7 @@ import process from 'node:process';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readComponentVersion } from './component-release-version.mjs';
-import { frontendOAuthConfigHash, readFrontendOAuthConfig } from './frontend-oauth-config.mjs';
+import { frontendOAuthConfigIdentity, readFrontendOAuthConfig } from './frontend-oauth-config.mjs';
 import { createBuildCommands } from './profile-package.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,7 +19,7 @@ function run(command, args, env = process.env) {
 
 async function main() {
   const oauthConfig = readFrontendOAuthConfig();
-  const oauthConfigSha256 = frontendOAuthConfigHash();
+  const oauthConfigIdentity = frontendOAuthConfigIdentity();
   if (oauthConfig) process.env.VITE_CODEXIA_OAUTH_SCOPES = oauthConfig.scopes.join(' ');
   const profileName = process.env.CODEXIA_PROFILE ?? 'core';
   const profile = JSON.parse(await readFile(path.join(root, 'profiles', `${profileName}.json`), 'utf8'));
@@ -34,7 +34,7 @@ async function main() {
   for (const name of ['_headers', '_redirects']) {
     await copyFile(path.join(root, 'edge/frontend/static', name), path.join(root, 'app/dist', name));
   }
-  await writeFile(path.join(root, 'app/dist/desktop/update-identity.json'), JSON.stringify({ format: 'codexia-frontend-identity/v1', version, sourceSha, profile: profileName, apiEpoch, oauthConfigSha256 }) + '\n');
+  await writeFile(path.join(root, 'app/dist/desktop/update-identity.json'), JSON.stringify({ format: 'codexia-frontend-identity/v1', version, sourceSha, profile: profileName, apiEpoch, oauthConfigIdentity }) + '\n');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
