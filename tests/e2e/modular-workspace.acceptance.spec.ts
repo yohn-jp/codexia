@@ -1073,7 +1073,7 @@ test("full profile exposes optional lexical search and terminology without chang
   await expect(page.getByRole("heading", { name: "Scene Two" })).toBeVisible();
 
   await page.getByRole("tablist", { name: "パネル" }).getByRole("tab", { name: "作品と構成", exact: true }).click();
-  await page.locator(".pg-document-list").getByRole("button", { name: /Scene One/u }).click();
+  await page.locator(".pg-document-list").getByRole("treeitem", { name: /Scene One/u }).click();
   await expect(page.getByRole("heading", { name: "Scene One" })).toBeVisible();
   await page.getByRole("button", { name: "読む", exact: true }).click();
   const termLink = page.getByRole("button", { name: "Beacon Quay、用語を開く", exact: true });
@@ -1249,7 +1249,7 @@ test("mobile reference sheet scene selection uses the existing guarded navigatio
   const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
   await expect(sheet).toBeVisible();
   await sheet.locator('[data-mobile-reference-panel="outline"] .pg-document-list')
-    .getByRole("button", { name: /Scene Two/u }).click();
+    .getByRole("treeitem", { name: /Scene Two/u }).click();
 
   await expect(sheet).not.toBeVisible();
   await expect(page.getByRole("heading", { name: "Scene Two" })).toBeVisible();
