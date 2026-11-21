@@ -312,7 +312,6 @@ jobs:
     permissions:
       contents: read
       actions: read
-      packages: read
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     services:
@@ -393,20 +392,15 @@ jobs:
           path: ${{ runner.temp }}/ci-evidence/browser-${{ matrix.group }}
           if-no-files-found: error
           retention-days: 7
-    # Writing/reference lanes run Chromium only; the WebKit lane also owns
-    # Chromium auth/UI specs and must retain both browsers.
+    # The GHCR Chromium-only runtime is promoted after its complete CI job
+    # prerequisites (including git) pass; keep the certified image meanwhile.
     container:
-      image: ${{ endsWith(matrix.group, '-webkit') && 'mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579' || format('ghcr.io/{0}/playwright-ubuntu-chromium@sha256:893b8b5c8275d4a58da814521d961db70c0417d0ab716be3bfc004e4943c58b6', github.repository) }}
-      # GHCR package auth is required only for the Chromium image; do not send
-      # GITHUB_TOKEN credentials to the external MCR registry.
-      credentials:
-        username: ${{ endsWith(matrix.group, '-webkit') && '' || github.actor }}
-        password: ${{ endsWith(matrix.group, '-webkit') && '' || secrets.GITHUB_TOKEN }}
+      image: mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
       options: --init --ipc=host
     env:
       CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       CODEXIA_CI_BROWSER_GROUP: ${{ matrix.group }}
-      CODEXIA_PLAYWRIGHT_IMAGE_DIGEST: ${{ endsWith(matrix.group, '-webkit') && 'sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579' || 'sha256:893b8b5c8275d4a58da814521d961db70c0417d0ab716be3bfc004e4943c58b6' }}
+      CODEXIA_PLAYWRIGHT_IMAGE_DIGEST: sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
       CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@postgres:5432/codexia_test
   hosted_catalog:
     name: hosted-native-catalog
