@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import type { KnowledgeAliasId, KnowledgeNodeId, ProjectId } from "@codexia/persistence-contracts";
-import { createWritingFixture, openRevisionHistory, ownerLogin, manuscriptEditor } from "./postgres-fixture";
+import { createWritingFixture, expectDeviceDraft, expectServerSaveFailure, expectServerSaved, openRevisionHistory, ownerLogin, manuscriptEditor } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
@@ -233,7 +233,10 @@ test("PostgreSQL project pages expose records beyond 200 and deep links retain t
 
   const missingId = crypto.randomUUID();
   await page.goto(new URL(`/desktop/projects/${missingId}`, origin).toString());
-  await expect(page.getByRole("main").getByRole("alert")).toContainText(missingId);
+  const editorAlert = page.locator(".pg-editor-column").getByRole("alert");
+  await expect(editorAlert).toContainText(missingId);
+  await expect(editorAlert).toHaveCount(1);
+  await expect(page.getByRole("alert")).toHaveCount(1);
   await expect(page.getByLabel("作品", { exact: true })).toHaveValue(missingId);
   expect(pageRequests, "an unavailable direct link must not silently fall back to library enumeration").toBe(2);
 
@@ -283,7 +286,246 @@ test("outline supports guarded keyboard navigation, search, zoom and mobile sizi
   await expect(page.locator(".pg-outline-document").first()).toBeVisible();
 });
 
+async function moveEditorIntoDesktopStack(page: Page): Promise<void> {
+  await page.getByRole("toolbar", { name: "ワークスペース配置" }).getByRole("button", { name: "調査", exact: true }).click();
+  const menu = page.locator(".st-workspace-move-menu");
+  if (!await menu.evaluate((element) => (element as HTMLDetailsElement).open)) await menu.locator("summary").click();
+  const controls = menu.locator(".st-workspace-move-controls");
+  await controls.locator("select").nth(0).selectOption("editor");
+  await controls.locator("select").nth(1).selectOption("outline");
+  await controls.locator("select").nth(2).selectOption("tab");
+  await controls.getByRole("button", { name: "パネルを移動" }).click();
+  await expect(page.getByRole("tablist", { name: "パネル" }).getByRole("tab", { name: "原稿", exact: true })).toBeVisible();
+}
+
+async function holdNextDocumentSave(page: Page, projectId: string, documentId: string) {
+  let release!: () => void;
+  let reached!: () => void;
+  let captureBody!: (body: unknown) => void;
+  let closing = false;
+  let requestBodySettled = false;
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  const requestReached = new Promise<void>((resolve) => { reached = resolve; });
+  const requestBody = new Promise<unknown>((resolve) => { captureBody = resolve; });
+  const url = new URL(`/api/v1/persistence/projects/${projectId}/documents/${documentId}`, page.url()).toString();
+  const handler = async (route: import("@playwright/test").Route): Promise<void> => {
+    if (route.request().method() !== "PATCH") { await route.continue(); return; }
+    const body = route.request().postDataJSON();
+    if (requestBodySettled) { await route.continue(); return; }
+    requestBodySettled = true;
+    reached();
+    captureBody(body);
+    await released;
+    if (!closing) await route.continue();
+  };
+  await page.route(url, handler);
+  return {
+    requestReached,
+    requestBody,
+    release,
+    async remove() {
+      closing = true;
+      if (!page.isClosed()) {
+        try { await page.unroute(url, handler); } catch { /* Browser teardown already removed the route. */ }
+      }
+    },
+  };
+}
+
+function applyEditorChanges(base: string, changes: Array<{ fromUtf16: number; toUtf16: number; insert: string }>): string {
+  return [...changes]
+    .sort((left, right) => right.fromUtf16 - left.fromUtf16)
+    .reduce((text, change) => text.slice(0, change.fromUtf16) + change.insert + text.slice(change.toUtf16), base);
+}
+
+function waitForDocumentSaveResponse(page: Page, projectId: string, documentId: string, markdown: string) {
+  const expectedHash = createHash("sha256").update(markdown).digest("hex");
+  const expectedPath = `/api/v1/persistence/projects/${projectId}/documents/${documentId}`;
+  return page.waitForResponse((response) => {
+    const request = response.request();
+    if (request.method() !== "PATCH" || new URL(request.url()).pathname !== expectedPath) return false;
+    return (request.postDataJSON() as { resultingSha256?: string } | null)?.resultingSha256 === expectedHash;
+  }, { timeout: 15_000 });
+}
+
+async function storedDocumentMarkdown(page: Page, projectId: string, documentId: string): Promise<{ markdown: string; revisionId: string }> {
+  const response = await page.request.get(new URL(`/api/v1/persistence/projects/${projectId}/documents/${documentId}`, page.url()).toString());
+  expect(response.ok(), await response.text()).toBe(true);
+  const result = await response.json() as { revision: { id: string; markdown: string } };
+  return { markdown: result.revision.markdown, revisionId: result.revision.id };
+}
+
+async function installMoveBeforeProbe(page: Page, forceAppendFallback: boolean): Promise<boolean> {
+  const supported = await page.evaluate(() => typeof (HTMLElement.prototype as HTMLElement & { moveBefore?: unknown }).moveBefore === "function");
+  await page.addInitScript((forceFallback) => {
+    const prototype = HTMLElement.prototype as HTMLElement & { moveBefore?: (this: HTMLElement, node: Node, child: Node | null) => void };
+    const nativeMoveBefore = prototype.moveBefore;
+    const probeWindow = window as Window & { __codexiaMoveBeforeCount?: number };
+    probeWindow.__codexiaMoveBeforeCount = 0;
+    if (forceFallback || typeof nativeMoveBefore !== "function") {
+      Object.defineProperty(prototype, "moveBefore", { configurable: true, value: undefined });
+      return;
+    }
+    Object.defineProperty(prototype, "moveBefore", {
+      configurable: true,
+      value(this: HTMLElement, node: Node, child: Node | null) {
+        probeWindow.__codexiaMoveBeforeCount = (probeWindow.__codexiaMoveBeforeCount ?? 0) + 1;
+        return nativeMoveBefore.call(this, node, child);
+      },
+    });
+  }, forceAppendFallback);
+  return supported && !forceAppendFallback;
+}
+
+for (const { mode, width, forceAppendFallback = false } of [
+  { mode: "mobile", width: 390 },
+  { mode: "mobile", width: 320 },
+  { mode: "desktop", width: 1280 },
+  { mode: "mobile", width: 390, forceAppendFallback: true },
+  { mode: "desktop", width: 1280, forceAppendFallback: true },
+] as const) {
+  test(`CodeMirror undo, redo, selection, and scroll survive a guarded ${mode} ${width}px panel switch during save (${forceAppendFallback ? "append fallback" : "moveBefore when supported"})`, async ({ page }) => {
+    expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+    const usesMoveBefore = await installMoveBeforeProbe(page, forceAppendFallback);
+    await page.setViewportSize({ width, height: mode === "mobile" ? 844 : 900 });
+    const original = Array.from({ length: 72 }, (_, index) => `第${index + 1}行。作者が同じ文章を読み戻せます。`).join("\n");
+    const { project, scene } = await createWritingFixture(page, mode, `Editor lifetime ${crypto.randomUUID()}`, original);
+    if (mode === "desktop") await moveEditorIntoDesktopStack(page);
+
+    const editor = manuscriptEditor(page);
+    const appended = "X";
+    const heldSave = await holdNextDocumentSave(page, project.id, scene.id);
+    const changePanel = async (showEditor: boolean): Promise<void> => {
+      if (mode === "mobile") {
+        const nav = page.getByRole("navigation", { name: "モバイル画面" });
+        await nav.getByRole("button", { name: showEditor ? /書く/u : /知識/u }).click();
+        if (!showEditor) await expect(editor).toHaveCount(0);
+        else await expect(editor).toBeVisible();
+      } else {
+        const tabs = page.getByRole("tablist", { name: "パネル" });
+        const tab = tabs.getByRole("tab", { name: showEditor ? "原稿" : "知識と根拠", exact: true });
+        await tab.click();
+        if (!showEditor) await expect(editor).toHaveCount(0);
+        else await expect(editor).toBeVisible();
+      }
+    };
+    await changePanel(true);
+    const retainedContent = await page.locator(".cm-content").elementHandle();
+    expect(retainedContent).not.toBeNull();
+
+    try {
+      const initialRevision = await storedDocumentMarkdown(page, project.id, scene.id);
+      expect(initialRevision.markdown).toBe(original);
+      await editor.click();
+      await editor.pressSequentially(appended);
+      await expectDeviceDraft(page);
+      await heldSave.requestReached;
+      const saveBody = await heldSave.requestBody as { changes: Array<{ fromUtf16: number; toUtf16: number; insert: string }>; resultingSha256: string };
+      expect(saveBody.changes.map((change) => change.insert).join("")).toBe(appended);
+      const editedMarkdown = applyEditorChanges(original, saveBody.changes);
+      expect(createHash("sha256").update(editedMarkdown).digest("hex")).toBe(saveBody.resultingSha256);
+      expect(editedMarkdown).not.toBe(original);
+
+      const scroller = page.locator(".cm-scroller");
+      const scrollTop = await scroller.evaluate((element) => {
+        element.scrollTop = Math.min(300, element.scrollHeight - element.clientHeight);
+        return element.scrollTop;
+      });
+      const switchingAway = changePanel(false);
+      heldSave.release();
+      await switchingAway;
+      expect(await retainedContent!.evaluate((element) => {
+        const container = element.closest<HTMLElement>(".pg-preserved-editor-container");
+        return { connected: element.isConnected, parked: container?.parentElement?.classList.contains("pg-preserved-editor-parking"), parkingHidden: container?.parentElement instanceof HTMLElement ? container.parentElement.hidden : false, hidden: container?.hidden, inert: container?.inert, ariaHidden: container?.getAttribute("aria-hidden") };
+      })).toEqual({ connected: true, parked: true, parkingHidden: true, hidden: true, inert: true, ariaHidden: "true" });
+      await expect.poll(async () => (await storedDocumentMarkdown(page, project.id, scene.id)).markdown).toBe(editedMarkdown);
+      const firstSaved = await storedDocumentMarkdown(page, project.id, scene.id);
+      expect(firstSaved.revisionId).not.toBe(initialRevision.revisionId);
+
+      await changePanel(true);
+      await expect.poll(() => retainedContent!.evaluate((element) => element.isConnected)).toBe(true);
+      expect(await page.locator(".cm-content").evaluate((element, previous) => element === previous, retainedContent)).toBe(true);
+      expect(await retainedContent!.evaluate((element) => {
+        const container = element.closest<HTMLElement>(".pg-preserved-editor-container");
+        return { hidden: container?.hidden, inert: container?.inert, ariaHidden: container?.getAttribute("aria-hidden") };
+      })).toEqual({ hidden: false, inert: false, ariaHidden: null });
+      const moveBeforeCalls = await page.evaluate(() => (window as Window & { __codexiaMoveBeforeCount?: number }).__codexiaMoveBeforeCount ?? 0);
+      if (usesMoveBefore) expect(moveBeforeCalls).toBeGreaterThan(0);
+      else expect(moveBeforeCalls).toBe(0);
+      await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBe(scrollTop);
+      const undoResponse = waitForDocumentSaveResponse(page, project.id, scene.id, original);
+      await editor.press("Control+z");
+      await expect(editor).toBeFocused();
+      const focusContext = await editor.evaluate((element) => ({
+        active: document.activeElement === element,
+        inert: Boolean(element.closest("[inert]")),
+        ariaHidden: Boolean(element.closest('[aria-hidden="true"]')),
+        modalCount: document.querySelectorAll('[role="dialog"][aria-modal="true"]').length,
+      }));
+      expect(focusContext).toEqual({ active: true, inert: false, ariaHidden: false, modalCount: 0 });
+      expect((await undoResponse).ok()).toBe(true);
+      await expect.poll(async () => (await storedDocumentMarkdown(page, project.id, scene.id)).markdown).toBe(original);
+      const undone = await storedDocumentMarkdown(page, project.id, scene.id);
+      expect(undone.revisionId).not.toBe(firstSaved.revisionId);
+
+      await changePanel(false);
+      await changePanel(true);
+      const redoResponse = waitForDocumentSaveResponse(page, project.id, scene.id, editedMarkdown);
+      await editor.press("Control+Shift+z");
+      expect((await redoResponse).ok()).toBe(true);
+      await expect.poll(async () => (await storedDocumentMarkdown(page, project.id, scene.id)).markdown).toBe(editedMarkdown);
+      const redone = await storedDocumentMarkdown(page, project.id, scene.id);
+      expect(redone.revisionId).not.toBe(undone.revisionId);
+      expect(saveBody.changes).toHaveLength(1);
+      const caretPosition = saveBody.changes[0]!.fromUtf16 + appended.length;
+      const nextEdit = editedMarkdown.slice(0, caretPosition) + "……" + editedMarkdown.slice(caretPosition);
+      const displayMenu = page.locator(".pg-editor-display-menu");
+      if (!await displayMenu.evaluate((element) => (element as HTMLDetailsElement).open)) await displayMenu.locator("summary").click();
+      const symbolMenu = page.locator(".pg-editor-symbol-menu");
+      const symbolResponse = waitForDocumentSaveResponse(page, project.id, scene.id, nextEdit);
+      await symbolMenu.getByRole("button", { name: "三点リーダーを挿入" }).click();
+      expect((await symbolResponse).ok()).toBe(true);
+      await expect.poll(async () => (await storedDocumentMarkdown(page, project.id, scene.id)).markdown).toBe(nextEdit);
+      await expect(editor).toBeFocused();
+      const typedEdit = nextEdit.slice(0, caretPosition + "……".length) + "y" + nextEdit.slice(caretPosition + "……".length);
+      const typingResponse = page.waitForResponse((response) => response.request().method() === "PATCH" && new URL(response.url()).pathname === `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`, { timeout: 15_000 });
+      await page.keyboard.press("y");
+      const typedSave = await typingResponse;
+      expect(typedSave.ok()).toBe(true);
+      expect((typedSave.request().postDataJSON() as { resultingSha256: string }).resultingSha256).toBe(createHash("sha256").update(typedEdit).digest("hex"));
+      await expect.poll(async () => (await storedDocumentMarkdown(page, project.id, scene.id)).markdown).toBe(typedEdit);
+      await displayMenu.locator("summary").click();
+
+      await openRevisionHistory(page);
+      const revisionsResponse = await page.request.get(new URL(`/api/v1/persistence/projects/${project.id}/documents/${scene.id}/revisions?limit=50`, page.url()).toString());
+      expect(revisionsResponse.ok(), await revisionsResponse.text()).toBe(true);
+      const revisions = (await revisionsResponse.json() as { revisions: Array<{ id: string }> }).revisions;
+      const originalRevisionIndex = revisions.findIndex((revision) => revision.id === initialRevision.revisionId);
+      expect(originalRevisionIndex).toBeGreaterThanOrEqual(0);
+      const originalRevision = page.locator(".pg-revisions article").nth(originalRevisionIndex);
+      await originalRevision.getByRole("button", { name: "このRevisionを新しいRevisionとして復元" }).click();
+      await expect(page.locator(".pg-notice")).toContainText("新しいPostgreSQL Revisionとして復元しました");
+      const restoredRevision = await storedDocumentMarkdown(page, project.id, scene.id);
+      expect(restoredRevision.markdown).toBe(original);
+      await changePanel(false);
+      await changePanel(true);
+      await editor.focus();
+      await editor.press("Control+z");
+      await expect.poll(async () => (await storedDocumentMarkdown(page, project.id, scene.id)).revisionId).toBe(restoredRevision.revisionId);
+    } finally {
+      await heldSave.remove();
+      heldSave.release();
+    }
+  });
+}
+
+
 async function openResearchInspector(page: import("@playwright/test").Page) {
+  // A visible contenteditable can precede the CodeMirror EditorView being
+  // connected after reload. Focusing and observing CodeMirror's focus class
+  // proves the editor is ready before its navigation guard runs.
+  await manuscriptEditor(page).focus();
+  await expect(page.locator(".cm-editor")).toHaveClass(/cm-focused/u);
   const toolbar = page.getByRole("toolbar", { name: "ワークスペース配置" });
   await toolbar.getByRole("button", { name: "調査", exact: true }).click();
   await expect(page.locator('[data-workspace-panel="inspector"]')).toBeVisible();
@@ -356,7 +598,10 @@ test("replays ambiguous project and document creates with retained client intent
   await outline.locator(".pg-library-create > summary").click();
   await outline.getByLabel("作品名").fill(projectTitle);
   await outline.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
-  await expect(page.getByRole("main", { name: "PostgreSQL原稿編集" }).getByText("synthetic gateway timeout", { exact: true })).toBeVisible();
+  const editorAlert = page.getByRole("main", { name: "PostgreSQL原稿編集" }).getByRole("alert");
+  await expect(editorAlert).toHaveText("synthetic gateway timeout");
+  await expect(editorAlert).toHaveCount(1);
+  await expect(page.getByRole("alert")).toHaveCount(1);
   expect(projectReadMissed).toBe(true);
   await expect(outline.getByLabel("作品名")).toHaveValue(projectTitle);
   await outline.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
@@ -387,7 +632,8 @@ test("replays ambiguous project and document creates with retained client intent
   await createDocument.locator("summary").click();
   await createDocument.getByLabel("文書名").fill(documentTitle);
   await createDocument.getByRole("button", { name: "作成", exact: true }).click();
-  await expect(page.getByRole("main", { name: "PostgreSQL原稿編集" }).getByText("synthetic gateway timeout", { exact: true })).toBeVisible();
+  await expect(editorAlert).toHaveText("synthetic gateway timeout");
+  await expect(editorAlert).toHaveCount(1);
   expect(documentReadMissed).toBe(true);
   await expect(createDocument.getByLabel("文書名")).toHaveValue(documentTitle);
   await createDocument.getByRole("button", { name: "作成", exact: true }).click();
@@ -465,7 +711,7 @@ for (const shell of ["desktop", "mobile"] as const) {
     await editor.click();
     await page.keyboard.insertText("はじめの本文。");
     await expect(editor).toHaveText("はじめの本文。");
-    await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+    await expectServerSaved(page);
   });
 }
 
@@ -514,8 +760,8 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   const editor = page.getByRole("textbox", { name: "本文", exact: true });
   await expect(editor).toBeVisible();
   await editor.fill(firstDraft);
-  await expect(page.getByText("PostgreSQLへ保存済み")).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText("IndexedDB回復Journalに保存済み")).toBeVisible();
+  await expectServerSaved(page);
+  await expectDeviceDraft(page);
 
   await editor.press("Control+A");
   await page.locator(".pg-editor-command-menu > summary").click();
@@ -592,13 +838,13 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   const winningDraft = "PostgreSQL側の先行Revision";
   const recoveredDraft = "別タブの回復Draft";
   await editor.fill(winningDraft);
-  await expect(page.getByText("PostgreSQLへ保存済み")).toBeVisible({ timeout: 15_000 });
+  await expectServerSaved(page);
   await otherEditor.fill(recoveredDraft);
   await expect(otherPage.getByRole("heading", { name: "Revision競合" })).toBeVisible({ timeout: 15_000 });
   await expect(otherPage.locator(".pg-conflict")).toContainText(winningDraft);
   await expect(otherPage.locator(".pg-conflict")).toContainText(recoveredDraft);
   await otherPage.getByRole("button", { name: "比較後、この回復Draftを最新版へ適用" }).click();
-  await expect(otherPage.getByText("PostgreSQLへ保存済み")).toBeVisible({ timeout: 15_000 });
+  await expectServerSaved(otherPage);
   await expect(otherEditor).toContainText(recoveredDraft);
 
   await otherPage.route("**/api/v1/persistence/projects/*/documents/*", async (route) => {
@@ -607,8 +853,8 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   });
   const interruptedDraft = "再読み込み後に復旧するDraft";
   await otherEditor.fill(interruptedDraft);
-  await expect(otherPage.getByText("IndexedDB回復Journalに保存済み")).toBeVisible();
-  await expect(otherPage.getByText("PostgreSQL保存を確認できません")).toBeVisible({ timeout: 15_000 });
+  await expectDeviceDraft(otherPage);
+  await expectServerSaveFailure(otherPage);
   await otherPage.unroute("**/api/v1/persistence/projects/*/documents/*");
   await otherPage.reload();
   await expect(otherPage.getByRole("heading", { name: "Database workspace" })).toBeVisible();
@@ -617,7 +863,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await otherPage.locator(".pg-document-list").getByRole("button", { name: new RegExp(documentTitle, "u") }).click();
   const recoveredEditor = otherPage.getByRole("textbox", { name: "本文", exact: true });
   await expect(recoveredEditor).toContainText(interruptedDraft);
-  await expect(otherPage.getByText("PostgreSQLへ保存済み")).toBeVisible({ timeout: 15_000 });
+  await expectServerSaved(otherPage);
   await otherPage.close();
   expect(contentSecurityPolicyViolations).toEqual([]);
 });
@@ -797,4 +1043,61 @@ test("a 501-document PostgreSQL work opens its final scene through the canonical
   await create.getByRole("button",{name:"作成",exact:true}).click();
   await expect(outline.locator(".pg-outline-item")).toHaveCount(502);
   await expect(page.getByRole("heading",{name:"Large scene 502",exact:true})).toBeVisible();
+});
+
+test("an evidence link opens Knowledge outside the current filter and ignores a late selection", async ({ page }) => {
+  const { project, scene } = await createWritingFixture(page);
+  const origin = new URL(page.url()).origin;
+  const headers = { Origin: origin };
+  const path = `/api/v1/persistence/projects/${project.id}`;
+  const hidden = crypto.randomUUID();
+  const visible = crypto.randomUUID();
+  for (const [id, name] of [[hidden, "絞り込み外の知識"], [visible, "一覧に表示する知識"]] as const) {
+    const response = await page.request.put(`${path}/nodes/${id}`, { headers, data: {
+      type: "person", name, attributes: {}, status: "confirmed", expectedVersion: null,
+    } });
+    expect(response.ok()).toBe(true);
+  }
+  const anchorId = crypto.randomUUID();
+  const anchorPath = `${path}/documents/${scene.id}/anchors`;
+  const anchor = await page.request.post(anchorPath, { headers, data: {
+    id: anchorId, revisionId: scene.headRevisionId, fromUtf16: 0, toUtf16: 7, status: "confirmed",
+  } });
+  expect(anchor.ok()).toBe(true);
+  const mention = await page.request.post(`${anchorPath}/${anchorId}/mentions`, { headers, data: { nodeId: hidden, status: "confirmed" } });
+  expect(mention.ok()).toBe(true);
+  await page.reload();
+  await openResearchInspector(page);
+  await page.getByLabel("名前または別名で検索").fill("一覧に表示する知識");
+  const results = page.locator(".pg-knowledge-list li");
+  await expect(results).toHaveCount(1);
+  await expect(results).toContainText("一覧に表示する知識");
+  const evidenceLink = page.getByRole("button", { name: "Knowledgeの根拠を表示", exact: true });
+  const detail = page.getByRole("region", { name: "Knowledge詳細" });
+
+  const detailPath = (url: URL) => url.pathname === `${path}/nodes/${hidden}`;
+  const requestedDetail = page.waitForRequest(request => detailPath(new URL(request.url())));
+  await evidenceLink.click();
+  await requestedDetail;
+  await expect(detail.getByRole("heading", { name: "絞り込み外の知識" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Knowledgeの根拠" })).toContainText("最初の本文。");
+  await results.getByRole("button", { name: /一覧に表示する知識/ }).click();
+
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route(detailPath, async route => {
+    const response = await route.fetch();
+    await gate;
+    await route.fulfill({ response }).catch(() => undefined);
+  });
+  const lateRequest = page.waitForRequest(request => detailPath(new URL(request.url())));
+  try {
+    await evidenceLink.click();
+    await lateRequest;
+    await results.getByRole("button", { name: /一覧に表示する知識/ }).click();
+    await expect(detail.getByRole("heading", { name: "一覧に表示する知識" })).toBeVisible();
+  } finally { release(); }
+  await page.unrouteAll({ behavior: "wait" });
+  await expect(detail.getByRole("heading", { name: "一覧に表示する知識" })).toBeVisible();
+  await expect(detail.getByRole("heading", { name: "絞り込み外の知識" })).toHaveCount(0);
 });

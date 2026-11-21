@@ -100,8 +100,25 @@ test('browser groups depend on profile producers; independent groups cannot canc
 });
 test('browser groups retain immutable runtime and restore the exact producer before running selected shards', () => {
   const browser = workflow.jobs.browser;
-  assert.match(browser.container.image, /^mcr\.microsoft\.com\/playwright@sha256:[a-f0-9]{64}$/);
-  assert.equal(browser.container.options, '--ipc=host');
+  assert.equal(browser.container.image, 'mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579');
+  assert.equal(browser.container.options, '--init --ipc=host');
+  assert.equal(browser.container.credentials, undefined);
+  assert.equal(browser.permissions.packages, undefined);
+  assert.equal(browser.env.CODEXIA_CI_BROWSER_GROUP, '${{ matrix.group }}');
+  assert.equal(browser.env.CODEXIA_PLAYWRIGHT_IMAGE_DIGEST, 'sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579');
+  const runtime = readFileSync(new URL('./verify-browser-runtime.mjs', import.meta.url), 'utf8');
+  assert.match(runtime, /VERIFICATION_GROUPS/);
+  assert.match(runtime, /requiredProjects/);
+  for (const profile of PROFILES) {
+    for (const lane of ['writing', 'reference']) {
+      const tasks = VERIFICATION_GROUPS[`browser-${profile}-${lane}`];
+      assert.ok(tasks.length > 0);
+      assert.ok(tasks.every(task => BROWSER_SHARDS.some(shard => task === `browser-${profile}-${shard.id}` && shard.project === 'chromium')));
+    }
+    const mixed = VERIFICATION_GROUPS[`browser-${profile}-webkit`];
+    assert.ok(mixed.includes(`browser-${profile}-webkit`));
+    assert.ok(mixed.includes(`browser-${profile}-ui-v1`));
+  }
   const diagnostics = browser.steps.find(step => step.uses === 'actions/upload-artifact@v7.0.2' && step.with.name.startsWith('playwright-failure-'));
   assert.ok(diagnostics);
   assert.equal(diagnostics.if, 'always()');

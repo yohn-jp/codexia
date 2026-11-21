@@ -12,6 +12,8 @@ on:
       - deploy/updater/test-runtime-contract-integration.sh
       - deploy/updater/test-standalone-maintenance-integration.mjs
       - deploy/updater/test-standalone-maintenance-preload.mjs
+      - deploy/updater/test-schema-maintenance-postgres-integration.mjs
+      - deploy/updater/test-schema-maintenance-recovery-integration.mjs
       - deploy/ansible/prepare.yml
       - deploy/ansible/initialize-schema.yml
       - deploy/ansible/initialize-fresh.yml
@@ -20,6 +22,10 @@ on:
       - deploy/ansible/rotate-probe-credentials.yml
       - deploy/ansible/rotate-api-auth-token.yml
       - deploy/ansible/rotate-tunnel-token.yml
+      - deploy/ansible/rotate-preflight-password.yml
+      - deploy/ansible/validate-preflight-password-rotation-inputs.yml
+      - deploy/ansible/test-preflight-password-rotation-gate.yml
+      - deploy/ansible/test-preflight-password-rotation-inputs.yml
       - deploy/ansible/validate-tunnel-token-rotation-inputs.yml
       - deploy/ansible/test-tunnel-token-rotation-gate.yml
       - deploy/ansible/test-tunnel-token-rotation-inputs.yml
@@ -38,6 +44,7 @@ on:
       - scripts/standalone-host.test.mjs
       - scripts/standalone-maintenance.test.mjs
       - scripts/standalone-update-controller.mjs
+      - scripts/standalone-schema-maintenance.mjs
       - .github/workflows/ansible-runtime-contract.yml
   push:
     branches: [main]
@@ -51,8 +58,14 @@ on:
       - deploy/updater/test-runtime-contract-integration.sh
       - deploy/updater/test-standalone-maintenance-integration.mjs
       - deploy/updater/test-standalone-maintenance-preload.mjs
+      - deploy/updater/test-schema-maintenance-postgres-integration.mjs
+      - deploy/updater/test-schema-maintenance-recovery-integration.mjs
       - deploy/ansible/rotate-api-auth-token.yml
       - deploy/ansible/rotate-tunnel-token.yml
+      - deploy/ansible/rotate-preflight-password.yml
+      - deploy/ansible/validate-preflight-password-rotation-inputs.yml
+      - deploy/ansible/test-preflight-password-rotation-gate.yml
+      - deploy/ansible/test-preflight-password-rotation-inputs.yml
       - deploy/ansible/validate-tunnel-token-rotation-inputs.yml
       - deploy/ansible/test-tunnel-token-rotation-gate.yml
       - deploy/ansible/test-tunnel-token-rotation-inputs.yml
@@ -79,6 +92,7 @@ on:
       - scripts/standalone-host.test.mjs
       - scripts/standalone-maintenance.test.mjs
       - scripts/standalone-update-controller.mjs
+      - scripts/standalone-schema-maintenance.mjs
       - .github/workflows/ansible-runtime-contract.yml
 permissions:
   contents: read
@@ -89,7 +103,7 @@ jobs:
   runtime-contract:
     name: Verify real rootless runtime contract on Ubuntu VM
     runs-on: ubuntu-26.04
-    timeout-minutes: 35
+    timeout-minutes: 50
     permissions:
       contents: read
       actions: read
@@ -226,10 +240,13 @@ jobs:
           ANSIBLE_PLAYBOOK=/opt/codexia-ansible/bin/ansible-playbook bash deploy/ansible/test-verify-timer.sh
           bash -n deploy/updater/test-runtime-contract-integration.sh
           node --check deploy/updater/test-standalone-maintenance-integration.mjs
+          node --check deploy/updater/test-schema-maintenance-postgres-integration.mjs
+          node --check deploy/updater/test-schema-maintenance-recovery-integration.mjs
       - name: Exercise generated Core and Full Quadlets on disposable rootless Podman
         if: steps.reuse.outputs.eligible != 'true'
         env:
           CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE: 'yes'
+          CODEXIA_RUNTIME_ACCEPTANCE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           ANSIBLE_PLAYBOOK: /opt/codexia-ansible/bin/ansible-playbook
         run: |
           fixture_user=codexia-runtime-contract-test
@@ -242,6 +259,7 @@ jobs:
             XDG_RUNTIME_DIR="/run/user/$fixture_uid" \
             DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$fixture_uid/bus" \
             CODEXIA_RUNTIME_ACCEPTANCE_DISPOSABLE=yes \
+            CODEXIA_RUNTIME_ACCEPTANCE_SOURCE_SHA="$CODEXIA_RUNTIME_ACCEPTANCE_SOURCE_SHA" \
             PATH="$PATH" \
             bash "$fixture_repo/deploy/updater/test-runtime-contract-integration.sh"
       - name: Remove the disposable VM marker and user manager

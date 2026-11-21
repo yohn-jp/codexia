@@ -15,6 +15,7 @@ const channelUrl='https://api.github.com/repos/yohn-jp/codexia/contents/stable-c
 const modelCacheRoot='/var/cache/codexia/models';
 const fingerprintCode='import { packagedMigrationFingerprint } from "@codexia/api"; console.log(await packagedMigrationFingerprint());';
 const initializeSchemaCode=`import {readFileSync} from 'node:fs'; import {inspectFreshPostgresSchema,initializeFreshPostgresSchema,verifyPostgresSchema} from '@codexia/api'; const password=readFileSync('/run/secrets/app-password','utf8').replace(/\\n+$/u,''); if(!/^[a-fA-F0-9]+$/u.test(password))throw Error('Invalid database secret'); const url='postgres://codexia:'+password+'@codexia-db:5432/codexia'; if(process.argv[1]==='inspect'){console.log(JSON.stringify(await inspectFreshPostgresSchema(url)));}else{const applied=await initializeFreshPostgresSchema(url); console.log(JSON.stringify({applied,fingerprint:await verifyPostgresSchema(url)}));}`;
+const additiveSchemaCode=`import {readFileSync} from 'node:fs'; import {migratePostgresAdditiveSchema,verifyPostgresSchema} from '@codexia/api'; const password=readFileSync('/run/secrets/app-password','utf8').replace(/\\n+$/u,''); if(!/^[a-fA-F0-9]+$/u.test(password))throw Error('Invalid database secret'); const url='postgres://codexia:'+password+'@codexia-db:5432/codexia'; const applied=await migratePostgresAdditiveSchema(url,process.argv[1],process.argv[2]); console.log(JSON.stringify({applied,fingerprint:await verifyPostgresSchema(url)}));`;
 const readyCode=`const health=await fetch("http://127.0.0.1:3000/health/ready",{signal:AbortSignal.timeout(5000)});if(!health.ok)process.exit(1);const version=await fetch("http://127.0.0.1:3000/api/version",{signal:AbortSignal.timeout(5000)});if(!version.ok)process.exit(1);console.log(JSON.stringify(await version.json()));`;
 const proxyProbeCode=`const r=await fetch("http://127.0.0.1:3000/api/version",{signal:AbortSignal.timeout(5000)});if(!r.ok)process.exit(1);console.log(JSON.stringify({slot:r.headers.get("x-codexia-upstream-slot"),version:await r.json()}));`;
 const authProbeCode=`import {readFileSync} from "node:fs";const token=readFileSync("/run/secrets/codexia-auth-token","utf8").trim();const r=await fetch("http://codexia-api-proxy:3000/api/v1/persistence/status",{headers:{Authorization:"Bearer "+token},signal:AbortSignal.timeout(5000)});if(!r.ok)process.exit(1);const body=await r.json();if(body.available!==true)process.exit(1);`;
@@ -373,8 +374,14 @@ export function postgresAppPasswordChangeInput(content){
   const password=validatePostgresAppPassword(content).replace(/\n$/u,'');
   return '\\password codexia\n'+password+'\n'+password+'\n';
 }
+export function postgresPreflightPasswordChangeInput(content){
+  const password=validatePostgresAppPassword(content).replace(/\n$/u,'');
+  return '\\password codexia_preflight\n'+password+'\n'+password+'\n';
+}
 const appSecret='codexia-postgres-app-password';
 const rotationLabel='io.codexia.app-password-rotation';
+const preflightSecret='codexia-postgres-preflight-password';
+const preflightRotationLabel='io.codexia.preflight-password-rotation';
 const authTokenSecret='codexia-auth-token';
 const authTokenRotationLabel='io.codexia.auth-token-rotation';
 const tunnelTokenSecret='codexia-tunnel-token';
@@ -402,15 +409,23 @@ function assertKnownTunnelTokenSecret(secret,snapshot){
     (secret.owner===snapshot.operationId&&[snapshot.previousDigest,snapshot.replacementDigest].includes(digest)),
     'Unrecognized canonical Tunnel secret prevents recovery');
 }
-function readRotationSecret(secretName){
+function readRotationSecret(secretName,ownerLabel=rotationLabel){
   const result=spawnSync('podman',['secret','exists',secretName],{stdio:'ignore',timeout:15000});
   if(result.status===1)return null;
   assert.equal(result.status,0,'Podman secret existence is unobservable');
   try{
     const [secret]=JSON.parse(runWithSensitiveInput('podman',['secret','inspect','--showsecret',secretName],''));
     assert.ok(secret.Spec.Name===secretName&&typeof secret.ID==='string'&&secret.ID);
-    return {id:secret.ID,owner:secret.Spec.Labels?.[rotationLabel],password:validatePostgresAppPassword(secret.SecretData)};
+    return {id:secret.ID,owner:secret.Spec.Labels?.[ownerLabel],password:validatePostgresAppPassword(secret.SecretData)};
   }catch{throw Error('Canonical PostgreSQL secret is unobservable');}
+}
+function readPreflightPasswordSecret(){return readRotationSecret(preflightSecret,preflightRotationLabel);}
+function assertKnownPreflightPasswordSecret(secret,snapshot){
+  if(!secret)return;
+  const digest=sha256(secret.password);
+  assert.ok((secret.id===snapshot.originalSecretId&&digest===snapshot.previousDigest)||
+    (secret.owner===snapshot.operationId&&[snapshot.previousDigest,snapshot.replacementDigest].includes(digest)),
+    'Unrecognized preflight password secret prevents recovery');
 }
 export function validateStandaloneAuthToken(content){
   assert.ok(typeof content==='string'&&Buffer.byteLength(content)<=8192&&/^[!-~]{32,8192}(?:\n)?$/u.test(content),
@@ -453,7 +468,7 @@ function assertKnownRotationSecret(secret,snapshot){
     'Unrecognized canonical app secret prevents recovery');
 }
 async function prepareRotationSecretInput(config,snapshot,password,inputName='postgres-app-password-input'){
-  assert.ok(['postgres-app-password-input','api-auth-token-input','tunnel-token-input'].includes(inputName),'Unsupported maintenance secret input');
+  assert.ok(['postgres-app-password-input','postgres-preflight-password-input','api-auth-token-input','tunnel-token-input'].includes(inputName),'Unsupported maintenance secret input');
   assert.match(snapshot.operationId,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u,
     'Rotation secret input operation identity is invalid');
   const root=path.join(path.dirname(config.publicKeyFile),'maintenance-snapshots',snapshot.operationId);
@@ -535,6 +550,20 @@ function passwordRotationPsql(role,input){
   const credential=admin?'admin-password':'app-password';
   const command='export PGPASSWORD="$(cat /run/secrets/'+credential+')"; exec psql -X -w -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U '+role+' -d codexia';
   return runWithSensitiveInput('podman',['exec','-i','codexia-db','sh','-ec',command],input);
+}
+function preflightPasswordPsql(password){
+  const input=validatePostgresAppPassword(password).replace(/\n$/u,'')+
+    '\nSELECT current_user || chr(58) || current_setting(\'transaction_read_only\');\n';
+  const database=inspect('codexia-db');
+  assert.equal(database?.State.Running,true,'Canonical PostgreSQL is not running');
+  const image=imageId(database.Image);
+  assert.match(image,/^[a-f0-9]{64}$/u,'Canonical PostgreSQL client image is unobservable');
+  const command='IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -w -qAt -v ON_ERROR_STOP=1 -h codexia-db -U codexia_preflight -d codexia';
+  // The DB container trusts its own loopback. A separate client on the
+  // private writer network reaches the password-authenticated pg_hba rule.
+  return runWithSensitiveInput('podman',['run','--rm','-i','--pull=never','--network','codexia-data',
+    '--read-only','--cap-drop','all','--security-opt','no-new-privileges','--user','postgres',
+    '--entrypoint','sh',image,'-ec',command],input,{timeout:30000});
 }
 function exists(container){
   const result=spawnSync('podman',['container','exists',container],{timeout:15000,stdio:'ignore'});
@@ -1725,13 +1754,92 @@ export class PodmanStandaloneHost{
     await this.verifyPostgresAppPassword(original.password);
     return {snapshot,previousPassword:original.password};
   }
+  async capturePreflightPasswordRotation(reviewed,replacement,operationId){
+    const fragmentDigest=await this.passwordRotationUnit(reviewed);
+    const original=readPreflightPasswordSecret();
+    const admin=readRotationSecret('codexia-postgres-admin-password');
+    const app=readRotationSecret(appSecret);
+    assert.ok(original&&admin&&app,'Database secret identity cannot be proven');
+    assert.ok([original,admin,app].every(secret=>secret.password.trimEnd()!==replacement.trimEnd()),
+      'Replacement must be independent of existing database credentials');
+    const databaseId=await this.passwordRotationDatabaseId();
+    const resources=await this.rotationResources(databaseId);
+    const snapshot={databaseQuadlet:reviewed,fragmentDigest,operationId,databaseId,resources,adminSecretId:admin.id,
+      appSecretId:app.id,originalSecretId:original.id,previousDigest:sha256(original.password),replacementDigest:sha256(replacement),
+      sourceDigest:sha256(reviewed)};
+    snapshot.runtimeDigest=await this.rotationDatabaseRuntime(snapshot,preflightSecret);
+    assert.ok(snapshot.runtimeDigest,'Rotation requires the canonical running database');
+    await this.verifyPostgresPreflightPassword(original.password);
+    return {snapshot,previousPassword:original.password};
+  }
+  async assertPreflightPasswordRotationSources(snapshot,{databaseRunning=true}={}){
+    assert.equal(await this.passwordRotationUnit(snapshot.databaseQuadlet),snapshot.fragmentDigest,'Database generated unit changed');
+    assert.deepEqual(await this.rotationResources(snapshot.databaseId),snapshot.resources,'Database resources changed');
+    assert.equal(readRotationSecret('codexia-postgres-admin-password')?.id,snapshot.adminSecretId,
+      'Database administrator credential identity changed');
+    assert.equal(readRotationSecret(appSecret)?.id,snapshot.appSecretId,'Database application credential identity changed');
+    assertKnownPreflightPasswordSecret(readPreflightPasswordSecret(),snapshot);
+    if(databaseRunning){
+      const runtime=await this.rotationDatabaseRuntime(snapshot,preflightSecret);
+      assert.equal(runtime,snapshot.runtimeDigest,'Database runtime ownership changed');
+      assert.equal(await this.passwordRotationDatabaseId(),snapshot.databaseId,'Database identity changed');
+    }
+  }
+  async changePostgresPreflightPassword(password){
+    passwordRotationPsql('codexia_admin',postgresPreflightPasswordChangeInput(password));
+  }
+  async verifyPostgresPreflightPassword(password,{secretRequired=true}={}){
+    const target=validatePostgresAppPassword(password);
+    if(secretRequired)assert.equal(readPreflightPasswordSecret()?.password,target,'Canonical preflight secret bytes changed');
+    assert.equal(preflightPasswordPsql(target).trim(),'codexia_preflight:on','Preflight database authentication is not read-only');
+  }
+  async verifyPostgresPreflightPasswordDigest(snapshot,expectedDigest){
+    const secret=readPreflightPasswordSecret();
+    assertKnownPreflightPasswordSecret(secret,snapshot);
+    assert.ok(secret&&sha256(secret.password)===expectedDigest,'Canonical preflight secret differs from the expected recovery state');
+    await this.verifyPostgresPreflightPassword(secret.password);
+  }
+  async replacePostgresPreflightSecret(password,snapshot){
+    const target=validatePostgresAppPassword(password);
+    const existing=readPreflightPasswordSecret();
+    assertKnownPreflightPasswordSecret(existing,snapshot);
+    if(existing?.password!==target){
+      if(existing)run('podman',['secret','rm',existing.id]);
+      const inputFile=await prepareRotationSecretInput(this.config,snapshot,target,'postgres-preflight-password-input');
+      try{run('podman',['secret','create','--label',preflightRotationLabel+'='+snapshot.operationId,preflightSecret,inputFile]);}
+      finally{await removeRotationSecretInput(inputFile);}
+    }
+    const after=readPreflightPasswordSecret();
+    assertKnownPreflightPasswordSecret(after,snapshot);
+    assert.ok(after?.password===target,'Canonical preflight secret replacement is unverified');
+  }
+  async preflightPasswordRotationDatabase(snapshot){
+    const observed=await this.rotationDatabaseRuntime(snapshot,preflightSecret);
+    if(observed===null)return false;
+    assert.equal(observed,snapshot.runtimeDigest,'Database runtime ownership changed');
+    return true;
+  }
+  async ensurePreflightPasswordRotationDatabase(snapshot){
+    await this.assertPreflightPasswordRotationSources(snapshot,{databaseRunning:false});
+    if(!await this.preflightPasswordRotationDatabase(snapshot)){
+      run('systemctl',['--user','start',databaseUnit]);
+      assert.ok(await this.preflightPasswordRotationDatabase(snapshot),'Database startup unverified during preflight rotation recovery');
+    }
+    const deadline=Date.now()+90000;
+    let databaseId;
+    while(databaseId===undefined){
+      try{databaseId=await this.passwordRotationDatabaseId();}
+      catch(error){if(Date.now()>=deadline)throw error;await delay(500);}
+    }
+    assert.equal(databaseId,snapshot.databaseId,'Preflight rotation database identity changed');
+  }
   async assertPasswordRotationSources(snapshot){
     assert.equal(await this.passwordRotationUnit(snapshot.databaseQuadlet),snapshot.fragmentDigest,'Database generated unit changed');
     assert.deepEqual(await this.rotationResources(snapshot.databaseId),snapshot.resources,'Database resources changed');
     assert.equal(readRotationSecret('codexia-postgres-admin-password')?.id,snapshot.adminSecretId,'Database administrator credential identity changed');
     assertKnownRotationSecret(readRotationSecret(appSecret),snapshot);
   }
-  async rotationDatabaseRuntime(snapshot){
+  async rotationDatabaseRuntime(snapshot,rotatingSecret=appSecret){
     const db=inspect('codexia-db');
     const properties=systemdProperties(run('systemctl',['--user','show','--property=ActiveState,SubState',databaseUnit]));
     if(!db){
@@ -1746,9 +1854,12 @@ export class PodmanStandaloneHost{
     const secrets=await this.quadletSecretIdentities(snapshot.databaseQuadlet);
     const projection=containerRuntimeFingerprintProjection(db,secrets);
     projection.Networks=normalizePostgresRotationNetworks(projection.Networks,db.Id,db.Config.Hostname);
-    const mount=projection.SecretMounts.find(secret=>secret.name===appSecret);
-    assert.ok(mount?.type==='mount'&&mount.target==='/run/secrets/app-password','Unexpected PostgreSQL app secret mount');
-    mount.id='rotating';
+    const appMount=projection.SecretMounts.find(secret=>secret.name===appSecret);
+    assert.ok(appMount?.type==='mount'&&appMount.target==='/run/secrets/app-password','Unexpected PostgreSQL app secret mount');
+    assert.ok(rotatingSecret===appSecret||rotatingSecret===preflightSecret,'Unsupported PostgreSQL rotation secret');
+    if(rotatingSecret===appSecret)appMount.id='rotating';
+    else assert.ok(!projection.SecretMounts.some(secret=>secret.name===preflightSecret),
+      'The read-only preflight secret must be isolated from the database container');
     const fingerprint=postgresRotationRuntimeFingerprint(projection);
     if(snapshot.runtimeComponents===undefined)snapshot.runtimeComponents=fingerprint.components;
     else assertPostgresRotationRuntimeFingerprint(snapshot,projection);
@@ -1961,6 +2072,29 @@ export class PodmanStandaloneHost{
     assert.ok(Array.isArray(result.applied)&&result.applied.every(item=>typeof item==='string'),'Invalid migration result');
     return result;
   }
+  async applyAdditiveSchema(release,expectedPriorFingerprint,expectedTargetFingerprint){
+    assert.equal(release.migrationFingerprint,expectedTargetFingerprint,'Additive schema target fingerprint differs from release');
+    const result=JSON.parse(run('podman',['run','--rm','--name','codexia-schema-maintainer','--network','codexia-data',
+      '--read-only','--image-volume=ignore','--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=64m',
+      '--cap-drop','all','--security-opt','no-new-privileges',
+      '--secret','codexia-postgres-app-password,type=mount,target=/run/secrets/app-password',
+      '--entrypoint','node',release.image,'--input-type=module','-e',additiveSchemaCode,
+      expectedPriorFingerprint,expectedTargetFingerprint],{timeout:300000}));
+    assert.ok(Array.isArray(result.applied)&&result.applied.every(item=>typeof item==='string'),'Invalid additive migration result');
+    assert.equal(result.fingerprint,expectedTargetFingerprint,'Additive migration fingerprint mismatch');
+    return result;
+  }
+  async schemaFingerprint(release){
+    assert.equal(release.profile,this.runtime?.profile,'Schema verification release profile differs from runtime contract');
+    const result=run('podman',['run','--rm','--name','codexia-schema-verifier','--network','codexia-data',
+      '--read-only','--image-volume=ignore','--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=64m',
+      '--cap-drop','all','--security-opt','no-new-privileges',
+      '--secret','codexia-postgres-app-password,type=mount,target=/run/secrets/app-password',
+      '--entrypoint','node',release.image,'--input-type=module','-e',
+      "import {readFileSync} from 'node:fs'; import {verifyPostgresSchema} from '@codexia/api'; const password=readFileSync('/run/secrets/app-password','utf8').replace(/\\n+$/u,''); console.log(await verifyPostgresSchema('postgres://codexia:'+password+'@codexia-db:5432/codexia'));"],{timeout:300000});
+    assert.match(result,/^sha256:[a-f0-9]{64}$/u,'Schema fingerprint is unobservable');
+    return result;
+  }
   async assertLegacyRelease(value,{allowUnadvertisedEpoch=false}={}){
     const release=validateUpdateRelease(value);
     const legacy=inspect('codexia-api');
@@ -2042,12 +2176,25 @@ export class PodmanStandaloneHost{
       await delay(1000);
     }
   }
+  async convergePreflightSchemaGrants(){
+    const credential=readRotationSecret('codexia-postgres-preflight-password');
+    assert.ok(credential,'Canonical read-only PostgreSQL preflight secret is missing');
+    const script=await readFile(fileURLToPath(new URL('./provision-preflight-role.sql',import.meta.url)),'utf8');
+    const input='\\set preflight_password '+credential.password.replace(/\n$/u,'')+'\n'+script;
+    runWithSensitiveInput('podman',['exec','-i','codexia-db','sh','-ec',
+      'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia'],input);
+    const login=runWithSensitiveInput('podman',['exec','-i','codexia-db','sh','-ec',
+      'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia_preflight -d codexia -c "SELECT current_user || chr(58) || current_setting(\'transaction_read_only\')"'],
+    credential.password.replace(/\n$/u,'')+'\n');
+    assert.equal(login.trim(),'codexia_preflight:on','Canonical preflight credential is not an effective read-only TCP login');
+  }
   async prepare(slot,release,owner){
     validateUpdateRelease(release);
     if(owner){
       assert.deepEqual(owner.release,release,'Initial preflight release differs from operation owner');
       await this.stopInitialPreflight(slot,owner);
     }else await this.stopPreflight(slot,release.image);
+    await this.convergePreflightSchemaGrants();
     // Only the preflight password is available; the real writer credential and shared volumes are absent.
     const auth=randomBytes(32).toString('hex');
     const runtimeArgs=this.runtime?runtimeContainerArgs(this.runtime):['--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=64m'];

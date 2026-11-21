@@ -114,6 +114,97 @@ export async function runPostgresMigrations(
   }
 }
 
+/**
+ * Apply a reviewed, forward-only additive migration set to an initialized
+ * database.  The caller supplies the authenticated fingerprints for the
+ * installed prefix and the target release; neither is inferred from the
+ * database.  This is deliberately separate from the ordinary application
+ * startup migrator so a controller can establish its maintenance fence
+ * before invoking it.
+ */
+export async function runPostgresAdditiveMigrations(
+  pool: Pool,
+  expectedPriorFingerprint: string,
+  expectedTargetFingerprint: string,
+  migrationDirectory = defaultMigrationDirectory,
+): Promise<readonly string[]> {
+  if (!/^sha256:[a-f0-9]{64}$/u.test(expectedPriorFingerprint) || !/^sha256:[a-f0-9]{64}$/u.test(expectedTargetFingerprint)) {
+    throw new Error("Invalid certified migration fingerprint");
+  }
+  const migrations = await readMigrationSet(migrationDirectory);
+  const targetFingerprint = migrationSetFingerprint(migrations);
+  if (targetFingerprint !== expectedTargetFingerprint) {
+    throw new Error("Packaged migration fingerprint differs from certified target");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('codexia.persistence.migrations'))");
+    const ledger = await client.query<{ relation: string | null }>(
+      "SELECT to_regclass('public.codexia_schema_migrations')::text AS relation",
+    );
+    if (ledger.rows[0]?.relation === null) throw new Error("Additive migration requires an initialized migration ledger");
+    const recorded = await client.query<MigrationIdentity>(
+      "SELECT version, checksum FROM public.codexia_schema_migrations ORDER BY version",
+    );
+    if (recorded.rows.length === 0 || recorded.rows.length > migrations.length) {
+      throw new Error("Migration ledger is not a forward prefix of the certified target");
+    }
+    // A prefix is stricter than set equality: it prevents applying a target
+    // suffix to a database with a skipped, reordered, edited or future row.
+    for (const [index, row] of recorded.rows.entries()) {
+      const expected = migrations[index];
+      if (!expected || row.version !== expected.version || row.checksum.trim() !== expected.checksum) {
+        throw new Error("Migration ledger is not a forward prefix of the certified target");
+      }
+    }
+    const priorFingerprint = migrationSetFingerprint(migrations.slice(0, recorded.rows.length));
+    if (priorFingerprint !== expectedPriorFingerprint) {
+      throw new Error("Current migration ledger differs from certified prior state");
+    }
+    if (priorFingerprint === expectedTargetFingerprint) {
+      await client.query("COMMIT");
+      return [];
+    }
+
+    const applied: string[] = [];
+    for (const migration of migrations.slice(recorded.rows.length)) {
+      await client.query(migration.sql);
+      await client.query(
+        "INSERT INTO public.codexia_schema_migrations(version, checksum) VALUES ($1, $2)",
+        [migration.version, migration.checksum],
+      );
+      applied.push(migration.version);
+    }
+    const final = await client.query<MigrationIdentity>(
+      "SELECT version, checksum FROM public.codexia_schema_migrations ORDER BY version",
+    );
+    assertMigrationSet(migrations, final.rows);
+    await client.query("COMMIT");
+    return applied;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** Apply certified additive migrations from a connection config, closing the temporary pool afterwards. */
+export async function migratePostgresAdditiveSchema(
+  config: PoolConfig | string,
+  expectedPriorFingerprint: string,
+  expectedTargetFingerprint: string,
+): Promise<readonly string[]> {
+  const pool = new Pool(typeof config === "string" ? { connectionString: config } : config);
+  try {
+    return await runPostgresAdditiveMigrations(pool, expectedPriorFingerprint, expectedTargetFingerprint);
+  } finally {
+    await pool.end();
+  }
+}
+
 /** The packaged schema identity can be computed without connecting to PostgreSQL. */
 export async function packagedMigrationFingerprint(): Promise<string> {
   return migrationSetFingerprint(await readMigrationSet(defaultMigrationDirectory));

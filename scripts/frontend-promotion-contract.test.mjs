@@ -9,7 +9,7 @@ const {parse}=require('yaml');
 const workflow=parse(readFileSync(new URL('../.github/workflows/frontend-release.yml',import.meta.url),'utf8'));
 
 test('frontend PR producer remains read-only and main promotion requires exact source proof and live identity',()=>{
-  assert.equal(workflow.concurrency.group, 'codexia-frontend-${{ github.event.pull_request.number || github.ref }}');
+  assert.equal(workflow.concurrency.group, 'codexia-frontend-source-${{ github.event.pull_request.number || github.event.workflow_run.head_sha || github.sha }}');
   const build=workflow.jobs.build;
   assert.deepEqual(build.needs,['source','preflight']);
   assert.equal(build.permissions.contents,'read');
@@ -40,6 +40,14 @@ test('frontend deploy rechecks producer artifact, exact main source and deployed
   assert.equal(admission.outputs['verify-run-id'],'${{ steps.gate.outputs.verify-run-id }}');
   assert.ok(admission.steps.some(step=>step.run?.includes('release-source-gate.mjs frontend')));
   assert.match(admission.if,/workflow_run/u);
+  assert.doesNotMatch(admission.if,/head_sha == github\.sha/u);
+  assert.deepEqual(workflow.jobs.deploy.concurrency, {
+    group: 'codexia-frontend-${{ github.ref }}', 'cancel-in-progress': false,
+  });
+  const freshness=workflow.jobs.deploy.steps.findIndex(step=>step.id==='freshness');
+  const compatibilityIndex=workflow.jobs.deploy.steps.findIndex(step=>step.id==='compatibility');
+  assert.ok(freshness>=0 && compatibilityIndex>freshness);
+  assert.equal(workflow.jobs.deploy.steps[compatibilityIndex].if,"steps.freshness.outputs.affected == 'true'");
   assert.match(admission.if,/conclusion == 'success'/u);
   const deploy=workflow.jobs.deploy;
   assert.match(deploy.if,/workflow_run/u);

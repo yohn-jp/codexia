@@ -392,11 +392,14 @@ jobs:
           path: ${{ runner.temp }}/ci-evidence/browser-${{ matrix.group }}
           if-no-files-found: error
           retention-days: 7
+    # The GHCR Chromium-only runtime is promoted after its complete CI job
+    # prerequisites (including git) pass; keep the certified image meanwhile.
     container:
       image: mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
-      options: --ipc=host
+      options: --init --ipc=host
     env:
       CODEXIA_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      CODEXIA_CI_BROWSER_GROUP: ${{ matrix.group }}
       CODEXIA_PLAYWRIGHT_IMAGE_DIGEST: sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
       CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@postgres:5432/codexia_test
   hosted_catalog:

@@ -200,31 +200,6 @@ function desktopDurabilityFor(active: ActiveDocument | null): DesktopDurability 
   return active.save === "saved" && active.recovery === "stored" ? "saved" : "uncertain";
 }
 
-function desktopDurabilityLabel(active: ActiveDocument | null, pending: PendingSave | undefined, loading: boolean): string | undefined {
-  if (!active) return loading ? "保存状態を要確認・原稿を確認中" : undefined;
-  if (active.remoteConflict) return "保存状態を要確認・競合";
-  if (active.recovery === "failed") return "保存状態を要確認・下書き保護失敗";
-  if (active.recovery === "other-tab") return "保存状態を要確認・別タブの下書き";
-  if (active.save === "failed" || active.error) return "保存状態を要確認";
-  if (active.save === "saving") return pending && (pending.generation !== active.generation || pending.markdown !== active.markdown) ? "PostgreSQLへ保存中・新しい入力あり" : "PostgreSQLへ保存中";
-  if (active.dirty && active.recovery === "pending") return "PostgreSQL未保存・入力を保護中";
-  if (active.dirty) return "PostgreSQL未保存";
-  return active.save === "saved" && active.recovery === "stored" ? "PostgreSQL保存済み" : "保存状態を要確認";
-}
-
-function desktopDurabilityDetail(active: ActiveDocument | null, status: DesktopDurability | undefined): string | undefined {
-  if (!active || !status) return undefined;
-  if (status === "draft") return active.recovery === "pending"
-    ? "新しい本文をIndexedDB回復Journalへ記録中です。PostgreSQLへは未保存です。"
-    : "下書きはIndexedDB回復Journalに保持されています。PostgreSQLへの保存は未完了です。";
-  if (status === "saving") return active.recovery === "pending" ? "送信した本文の保存結果を確認中です。後続入力はブラウザーへ記録中です。" : "本文はIndexedDB回復Journalに保持されています。PostgreSQLへの保存結果を確認中です。";
-  if (status === "saved") return "PostgreSQLへの保存を確認しました。";
-  if (active.remoteConflict) return "PostgreSQLに別のRevisionがあります。ブラウザーDraftを保持し、内容の比較が必要です。";
-  if (active.error) return active.error;
-  if (active.recovery === "pending") return "IndexedDB回復Journalへの記録が完了していません。本文を保持して再試行してください。";
-  return "PostgreSQL保存またはIndexedDB回復Journalの状態を再確認してください。";
-}
-
 const editorAdapter: EditorEvidenceAdapter = createPostgresEditorEvidenceAdapter();
 
 function persistSelectionSafely(authorScope: string, selection: { projectId: string; documentId: string }): void {
@@ -315,6 +290,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const refreshKnowledgeBrowse = useCallback(() => setKnowledgeListRetryEpoch((current) => current + 1), []);
   const [nodeId, setNodeId] = useState("");
   const [selectedKnowledgeNode, setSelectedKnowledgeNode] = useState<KnowledgeNode | null>(null);
+  const [knowledgeSelectionError, setKnowledgeSelectionError] = useState<{ projectId: string; nodeId: string; message: string } | null>(null);
   const [nodeEvidence, setNodeEvidence] = useState<{ projectId: string; nodeId: string; evidence: PersistenceAnchorView[] } | null>(null);
   const [nodeEvidenceError, setNodeEvidenceError] = useState("");
   const [evidenceJump, setEvidenceJump] = useState<EvidenceJump>();
@@ -334,6 +310,20 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const saveDocumentRef = useRef<() => Promise<void>>(async () => undefined);
   const scratchGuardRef = useRef<(() => Promise<void>) | null>(null);
   const editorRef = useRef<ManuscriptInputHandle>(null);
+  const [editorPortalContainer] = useState<HTMLElement | null>(() => {
+    if (typeof document === "undefined") return null;
+    const container = document.createElement("div");
+    container.className = "pg-preserved-editor-container";
+    container.hidden = true;
+    container.inert = true;
+    container.setAttribute("aria-hidden", "true");
+    return container;
+  });
+  const editorPortalParkingRef = useRef<HTMLDivElement>(null);
+  const attachEditorPortalParking = useCallback((parking: HTMLDivElement | null) => {
+    editorPortalParkingRef.current = parking;
+    if (parking && editorPortalContainer) parking.append(editorPortalContainer);
+  }, [editorPortalContainer]);
   const transitionErrorRef = useRef("");
   const clientIdRef = useRef("");
   const openSequenceRef = useRef(0);
@@ -455,6 +445,8 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   }, [documents, documentId, projectId]);
   const selectedNode = nodes.find((candidate) => candidate.id === nodeId && candidate.projectId === projectId)
     ?? (selectedKnowledgeNode?.id === nodeId && selectedKnowledgeNode.projectId === projectId ? selectedKnowledgeNode : null);
+  const selectedNodeError = knowledgeSelectionError?.projectId === projectId && knowledgeSelectionError.nodeId === nodeId
+    ? knowledgeSelectionError.message : "";
   const visibleKnowledgeNodes = knowledgeLegacyMode ? nodes.filter((node) =>
     node.name.toLocaleLowerCase().includes(knowledgeQuery.trim().toLocaleLowerCase()) &&
     (!knowledgeTypeFilter || node.type === knowledgeTypeFilter) &&
@@ -699,6 +691,22 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       if (sequence === knowledgeBrowseSequenceRef.current && projectIdRef.current === selectedProjectId && !sessionBlockedRef.current) setKnowledgeListError(error instanceof Error ? error.message : "Knowledge一覧を読み込めませんでした。");
     } finally { if (sequence === knowledgeBrowseSequenceRef.current && projectIdRef.current === selectedProjectId && !sessionBlockedRef.current) setKnowledgePageLoading(false); }
   }, [projectId, knowledgeNextCursor, knowledgePageLoading, knowledgeQuery, knowledgeTypeFilter, knowledgeStatusFilter]);
+
+  useEffect(() => {
+    setKnowledgeSelectionError(null);
+    if (sessionBlocked || !projectId || !nodeId || selectedNode) return;
+    // A canonical evidence link can point outside the current browse page.
+    const controller = new AbortController();
+    const isCurrent = () => !controller.signal.aborted && !sessionBlockedRef.current && projectIdRef.current === projectId;
+    void api.persistenceNode(projectId, nodeId, controller.signal).then(({ node }) => {
+      if (!isCurrent()) return;
+      if (node.projectId !== projectId || node.id !== nodeId) throw new Error("Knowledgeの識別情報が一致しません。");
+      setSelectedKnowledgeNode(node);
+    }).catch((error: unknown) => {
+      if (isCurrent()) setKnowledgeSelectionError({ projectId, nodeId, message: error instanceof Error ? error.message : "Knowledge詳細を読み込めませんでした。" });
+    });
+    return () => controller.abort();
+  }, [projectId, nodeId, selectedNode?.id, sessionBlocked]);
 
   useEffect(() => {
     if (sessionBlocked) return;
@@ -2187,7 +2195,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         </section>}
       </aside>);
   const editor = (<main className="pg-editor-column" aria-label="PostgreSQL原稿編集">
-        {pageError && <p className="pg-alert" role="alert">{pageError}</p>}
+        {mode === "desktop" && pageError && <p className="pg-alert" role="alert">{pageError}</p>}
         {notice && <p className="pg-notice" role="status">{notice}</p>}
         {journalError && <p className="pg-alert" role="alert">{journalError}</p>}
         {!project && <section className="pg-empty">
@@ -2201,16 +2209,27 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           </>}
         </section>}
         {project && !selectedDocument && !active && !outlineError && <section className="pg-empty"><h2>{project.title}</h2><p>編集を始める文書を作成してください。</p><button type="button" onClick={() => openCreation("document")}>最初の文書を作成</button></section>}
-        {active && <section className="pg-editor" aria-label={active.document.title}>
+        {active && <section className="pg-editor" data-reader={reading ? "true" : undefined} aria-label={active.document.title}>
           <div className="pg-editor-heading">
             <div><p className="eyebrow">{project?.title}</p><h2>{active.document.title}</h2></div>
-            <div className="pg-save-state" aria-live="polite">
-              <span>{active.recovery === "stored" ? "IndexedDB回復Journalに保存済み" : active.recovery === "pending" ? "ブラウザーへ記録中" : active.recovery === "other-tab" ? "別タブの下書きあり" : "回復Journalエラー"}</span>
-              <span>{active.save === "saved" ? "PostgreSQLへ保存済み" : active.save === "saving" ? "PostgreSQLへ保存中" : active.save === "failed" ? "PostgreSQL保存を確認できません" : active.dirty ? "PostgreSQL保存待ち" : "Revisionを開いています"}</span>
-            </div>
+            <details className="pg-save-state" data-state={desktopDurabilityFor(active)}>
+              <summary aria-live={active.error || active.remoteConflict || active.recovery === "failed" || active.recovery === "other-tab"
+                ? "off"
+                : active.save === "saving" || (active.save === "saved" && !active.dirty && active.recovery === "stored") ? "polite" : "off"}>
+                {active.remoteConflict || active.error || active.save === "failed" || active.recovery === "failed" || active.recovery === "other-tab"
+                  ? "要確認"
+                  : active.save === "saving" ? "サーバーへの保存を確認中"
+                    : active.dirty ? active.recovery === "pending" ? "この端末へ記録中" : "この端末に下書きがあります"
+                      : active.save === "saved" && active.recovery === "stored" ? "保存済み" : "保存状態を確認中"}
+              </summary>
+              <div className="pg-save-state-detail">
+                <p>この端末: {active.recovery === "stored" ? "回復用の下書きを保持しています" : active.recovery === "pending" ? "回復用の下書きを記録しています" : active.recovery === "other-tab" ? "別タブに下書きがあります" : "回復用の下書きを確認できません"}</p>
+                <p>サーバー: {active.save === "saved" ? "PostgreSQLへの保存を確認しました" : active.save === "saving" ? "PostgreSQLへの保存を確認しています" : active.save === "failed" ? "PostgreSQLへの保存を確認できません" : active.dirty ? "PostgreSQLへの保存待ちです" : "開いたRevisionを表示しています"}</p>
+              </div>
+            </details>
           </div>
           {active.error && <p className="pg-alert" role="alert">{active.error}</p>}
-          <div className="pg-editor-actions" aria-label="主な原稿操作">
+          <div className="pg-editor-actions" role="group" aria-label="原稿の操作">
             <button type="button" onClick={() => void saveDocument()} disabled={!active.dirty || active.recovery !== "stored" || Boolean(active.remoteConflict) || active.save === "saving"}>
               {active.save === "failed" ? "PostgreSQLへ再試行" : "今すぐ保存"}
             </button>
@@ -2232,20 +2251,15 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
                 <button type="button" onClick={() => void createAnchor()} disabled={active.dirty || Boolean(active.remoteConflict) || active.save !== "saved"}>選択範囲をText Anchorにする</button>
               </div>
             </details>
-          </div>
-          <div className="pg-editor-actions" aria-label="原稿の表示と書式">
             <details className="pg-editor-display-menu">
-              <summary>表示と組版</summary>
+              <summary>表示と書式</summary>
               <div>
                 <label>組版<select aria-label="組版プリセット" defaultValue="" onChange={(event) => { const next = { ...typography, ...typographyPresetValues(event.target.value as TypographyPresetId) }; setTypography(next); storeTypographySettings(next); }}><option value="" disabled>表示設定</option>{Object.entries(TYPOGRAPHY_PRESETS).map(([id, preset]) => <option key={id} value={id}>{preset.label}</option>)}</select></label>
                 <label>文字サイズ<input aria-label="原稿の文字サイズ" type="number" min="14" max="24" value={typography.fontSize} onChange={(event) => { const next = { ...typography, fontSize: Math.max(14, Math.min(24, Number(event.target.value))) }; setTypography(next); storeTypographySettings(next); }} /></label>
                 {reading && <label>組方向<select aria-label="組方向" value={readingDirection} onChange={(event) => setReadingDirection(event.target.value as "horizontal" | "vertical")}><option value="horizontal">横書き</option><option value="vertical">縦書き</option></select></label>}
+                {!reading && <div className="pg-editor-symbol-menu" aria-label="書式記号">{WRITING_SYMBOLS.map((symbol) => <button key={symbol.id} type="button" aria-label={symbol.ariaLabel} onClick={() => editorRef.current?.insert(symbol.id)}>{symbol.label}</button>)}</div>}
               </div>
             </details>
-            {!reading && <details className="pg-editor-symbol-menu">
-              <summary>書式記号</summary>
-              <div>{WRITING_SYMBOLS.map((symbol) => <button key={symbol.id} type="button" aria-label={symbol.ariaLabel} onClick={() => editorRef.current?.insert(symbol.id)}>{symbol.label}</button>)}</div>
-            </details>}
           </div>
           <div hidden={reading}>
           <label id="pg-manuscript-label" htmlFor="manuscript">本文</label>
@@ -2389,6 +2403,9 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             <p>Knowledge一覧を読み込めませんでした。{knowledgeListError}</p>
             <button type="button" onClick={() => setKnowledgeListRetryEpoch((value) => value + 1)} disabled={knowledgeListLoading}>再試行</button>
           </div>}
+          {nodeId && !selectedNode && (selectedNodeError
+            ? <p className="pg-alert" role="alert">{selectedNodeError}</p>
+            : <p role="status">Knowledge詳細を読み込んでいます。</p>)}
           {selectedNode && <KnowledgeContextInspector key={selectedNode.id} node={selectedNode} nodes={nodes} documentId={active?.document.id} revisionId={active?.revision.id} clean={Boolean(active&&!active.dirty&&!active.remoteConflict&&active.save==="saved")} selectedEvidenceId={selectedEvidenceId??""} evidenceLoadKey={(active?.evidenceLoadKey??0)+nativeReviewEpoch} onOpenEvidence={(item)=>void openNodeEvidence(item)} onDataChanged={refreshKnowledgeBrowse} onNodeUpdate={(updated)=>{setSelectedKnowledgeNode(updated);refreshKnowledgeBrowse();}} onMerge={(target,source)=>{setSelectedKnowledgeNode(target);setNodeId(target.id);refreshKnowledgeBrowse();setNotice("Knowledgeを統合しました。")}} />}
           {selectedNode && <section aria-label="Knowledgeの根拠">
             <h3>{selectedNode.name}の根拠</h3>
@@ -2433,7 +2450,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       </aside>);
   const panels: WorkspacePanel[] = [
     { id: "outline", title: "作品と構成", render: () => library },
-    { id: "editor", title: "原稿", render: () => editor },
+    { id: "editor", title: "原稿", preserveContainer: editorPortalContainer ?? undefined, preserveParkingRef: editorPortalParkingRef, render: () => editor },
     { id: "inspector", title: "知識と根拠", render: () => knowledge },
   ];
   const readCurrentEditor = (): BrowserEditorDocument | null => {
@@ -2451,9 +2468,9 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   });
   panels.push({ id: "review", title: "提案レビュー", render: () => <>{moduleError && <p role="alert">{moduleError}</p>}<NativeChangeSetReview key={projectId} projectId={projectId} onApplied={refreshAfterNativeApply} onOpenSource={(anchor, quote) => openNodeEvidence({ anchor, quote })} />{journal && <ProposalReview projectId={projectId} authorScope={authorScope} journal={journal} proposals={proposals} onChange={() => { void refreshModules(); }} onStatus={(message) => setNotice(message)} />}</> }, ...modulePanels);
   const Shell = mode === "mobile" ? MobileShell : DesktopShell;
-  const currentDesktopDurability = desktopDurabilityFor(active) ?? (loading ? "uncertain" : undefined);
-  const currentPending = active ? pendingSaveRef.current.get(JSON.stringify([active.document.projectId, active.document.id])) : undefined;
   return <div className={`pg-workspace pg-shell pg-${mode}`}>
+    <div className="pg-preserved-editor-parking" hidden inert aria-hidden="true" ref={attachEditorPortalParking} />
+    {editorPortalContainer ? createPortal(editor, editorPortalContainer) : null}
     {active && createPortal(
       <article className="print-view pg-print-document" style={typographyStyle}>
         <h1>{active.document.title}</h1>
@@ -2466,11 +2483,11 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       header={<><h1>Database workspace</h1><JobInbox /><ThemeControl mode={theme} error={themeError} onChange={(next) => { setTheme(next); applyThemeMode(next); try { persistThemeMode(next); setThemeError(""); } catch { setThemeError("外観設定をこのブラウザーへ保存できませんでした。"); } }} /><button type="button" onClick={() => void protectTransition().then((allowed) => { if (allowed) onSignOut(); })}>ログアウト</button></>}
       documentTitle={active?.document.title}
       documentContext={project?.title}
-      desktopDurability={currentDesktopDurability}
-      desktopDurabilityLabel={desktopDurabilityLabel(active, currentPending, loading)}
-      desktopDurabilityDetail={desktopDurabilityDetail(active, currentDesktopDurability)}
       library={library} editor={editor} tools={knowledge}
-      status={<>{pageError && <p role="alert">{pageError}</p>}{outlineError && <p role="alert">{outlineError}</p>}{loading && <p role="status">PostgreSQLの状態を読み込んでいます。</p>}</>}
+      status={<>
+        {loading && <p role="status">PostgreSQLの状態を読み込んでいます。</p>}
+        {mode === "mobile" && pageError && <p className="pg-alert" role="alert">{pageError}</p>}
+      </>}
       workspaceScope={`postgres:${authorScope}`}
       panels={panels}
       requestedPanel={requestedPanel}

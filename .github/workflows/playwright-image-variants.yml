@@ -1,0 +1,107 @@
+name: Build and publish controlled Playwright image variants
+on:
+  pull_request:
+    paths:
+      - .github/docker/playwright-ubuntu-minimal.Dockerfile
+      - .github/workflows/playwright-image-variants.yml
+  push:
+    branches: [main]
+    paths:
+      - .github/docker/playwright-ubuntu-minimal.Dockerfile
+      - .github/workflows/playwright-image-variants.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: playwright-image-variants-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  verify-ubuntu:
+    if: github.event_name == 'pull_request'
+    name: Validate Ubuntu CI image / ${{ matrix.browser }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Build and smoke-test browser image without registry credentials
+        shell: bash
+        env:
+          BROWSER: ${{ matrix.browser }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          image="codexia-playwright-test:$BROWSER"
+          docker build --platform linux/amd64 \
+            -f .github/docker/playwright-ubuntu-minimal.Dockerfile \
+            --build-arg PLAYWRIGHT_VERSION=1.65.1 \
+            --build-arg "BROWSER=$BROWSER" \
+            -t "$image" .
+          observed="$(docker run --rm -v "$PWD:/work:ro" -w /work "$image" \
+            git -c safe.directory=/work rev-parse HEAD)"
+          test "$observed" = "$SOURCE_SHA"
+          docker run --rm "$image" sh -ec 'test "$(node --version)" = v24.22.3; corepack pnpm@12.21.0 --version; git --version'
+          docker image inspect --format 'Uncompressed size: {{.Size}} bytes' "$image" >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(github.event_name == 'push' && '[{"variant":"ubuntu","browser":"chromium"},{"variant":"ubuntu","browser":"webkit"}]' || '[{"variant":"mirror","browser":"all"},{"variant":"ubuntu","browser":"chromium"},{"variant":"ubuntu","browser":"webkit"}]') }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v4.4.1
+      - uses: docker/login-action@v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish immutable variant and measure compressed manifest size
+        env:
+          VARIANT: ${{ matrix.variant }}
+          BROWSER: ${{ matrix.browser }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/playwright-$VARIANT-$BROWSER"
+          if [[ "$VARIANT" == mirror ]]; then
+            docker pull mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
+            docker tag mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579 "$image:pw-1.65.1"
+            docker push "$image:pw-1.65.1"
+            digest="$(docker buildx imagetools inspect "$image:pw-1.65.1" | sed -n 's/^Digest:[[:space:]]*//p' | head -1)"
+          else
+            metadata="$RUNNER_TEMP/$BROWSER.json"
+            docker buildx build --platform linux/amd64 \
+              -f .github/docker/playwright-ubuntu-minimal.Dockerfile \
+              --build-arg PLAYWRIGHT_VERSION=1.65.1 --build-arg "BROWSER=$BROWSER" \
+              -t "$image:pw-1.65.1" --metadata-file "$metadata" --push .
+            digest="$(jq -r '."containerimage.digest" // empty' "$metadata")"
+          fi
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+          docker buildx imagetools inspect "$image@$digest" > "$RUNNER_TEMP/inspect.txt"
+          docker pull "$image@$digest"
+          bytes="$(docker image inspect "$image@$digest" --format '{{.Size}}')"
+          mib="$(awk -v n="$bytes" 'BEGIN { printf "%.1f", n / 1048576 }')"
+          echo "Uncompressed image size: $mib MiB" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### $VARIANT / $BROWSER"
+            echo "\`$image@$digest\`"
+            echo 'Source Playwright: 1.65.1; platform linux/amd64'
+          } >> "$GITHUB_STEP_SUMMARY"
