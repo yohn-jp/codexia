@@ -223,6 +223,8 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     }
 
     const makeApi = (withOwner: boolean, withPostgresPersistence = false): Server => createServer({
+      // The isolated OAuth API fixture does not load Full runtime manifests.
+      profile: "core",
       store: withPostgresPersistence ? domainStore! : coreStoreForAuthFixture(),
       persistence: withPostgresPersistence ? domainPersistence! : persistenceForAuthFixture(),
       authToken: "codexia-test-api-token-with-32-characters",
