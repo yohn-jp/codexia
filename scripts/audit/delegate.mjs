@@ -15,6 +15,8 @@ const sha256 = value => createHash('sha256').update(value).digest('hex');
 const json = value => JSON.stringify(value, null, 2) + '\n';
 const git = (root, args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 72 * 1024 * 1024 });
 const cleanPath = path => typeof path === 'string' && exclusion(path, '100644', 0) === null;
+// Repomix JSON drops terminal line breaks; preserve all nonterminal source bytes.
+const matchesPacked = (raw, packed) => raw.replace(/[\r\n]+$/u, '') === packed;
 
 function loadPack(site, sha) {
   assert.match(sha, shaPattern);
@@ -79,13 +81,14 @@ function checkedPreview(preview, base, head, mergeBase) {
 
 function trustedPreimage(root, mergeBase, oldPath, mainFiles) {
   if (!oldPath || !cleanPath(oldPath) || !Object.hasOwn(mainFiles, oldPath)) return false;
-  try { return git(root, ['show', `${mergeBase}:${oldPath}`]) === mainFiles[oldPath]; }
+  try { return matchesPacked(git(root, ['show', `${mergeBase}:${oldPath}`]), mainFiles[oldPath]); }
   catch { return false; }
 }
 
 function fenced(content) {
-  const backtickRuns = content.match(/`+/gu) ?? [];
-  const fence = '`'.repeat(Math.max(3, ...backtickRuns.map(s => s.length + 1)));
+  let width = 3;
+  for (const match of content.matchAll(/`+/gu)) width = Math.max(width, match[0].length + 1);
+  const fence = '`'.repeat(width);
   return fence + '\n' + content.replace(/\n?$/u, '\n') + fence;
 }
 
@@ -94,7 +97,7 @@ function recordFile(root, entry, head, mergeBase, headFiles, mainFiles, rule, ol
   if (!cleanPath(path) || !Object.hasOwn(headFiles, path)) return { reason: 'not-in-verified-head-export' };
   if (oldPath && !cleanPath(oldPath)) return { reason: 'unsafe-rename-source' };
   // The exact source must be the same immutable Git blob accepted by Repomix.
-  if (git(root, ['show', `${head}:${path}`]) !== headFiles[path]) return { reason: 'packed-source-mismatch' };
+  if (!matchesPacked(git(root, ['show', `${head}:${path}`]), headFiles[path])) return { reason: 'packed-source-mismatch' };
   const verifiedOld = trustedPreimage(root, mergeBase, oldPath, mainFiles);
   let patch = git(root, ['--no-pager', 'diff', '--no-ext-diff', '--no-textconv', '--no-color',
     '--no-renames', mergeBase, head, '--', ...[...new Set([oldPath, path].filter(Boolean))].map(x => ':(literal)' + x)]);
@@ -237,6 +240,10 @@ if (process.argv[1] && resolve(process.argv[1]) === self) {
   const [site, bin] = process.argv.slice(2);
   assert.ok(site && bin && process.argv.length === 4, 'Usage: node scripts/audit/delegate.mjs SITE OCR_BIN');
   const result = buildDelegation({ root: resolve('.'), site: resolve(site), bin: resolve(bin) });
-  console.log('OCR delegation: ' + Object.values(result.reviews).filter(x => x.status === 'ready' || x.status === 'partial').length +
-    ' review bundles; ' + Object.values(result.reviews).filter(x => x.status === 'blocked').length + ' blocked.');
+  const reviews = Object.values(result.reviews);
+  console.log('OCR delegation: ' + reviews.filter(x => x.status === 'ready' || x.status === 'partial').length +
+    ' bundles; selected ' + reviews.reduce((sum, x) => sum + (x.selected ?? 0), 0) +
+    ', published ' + reviews.reduce((sum, x) => sum + (x.published ?? 0), 0) +
+    ', omitted ' + reviews.reduce((sum, x) => sum + (x.omitted ?? 0), 0) +
+    ', blocked ' + reviews.filter(x => x.status === 'blocked').length + '.');
 }
