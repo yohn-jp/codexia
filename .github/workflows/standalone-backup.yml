@@ -109,6 +109,12 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: 22
+      - name: Build the backend history writer fixture
+        run: |
+          corepack enable
+          corepack prepare pnpm@12.21.0 --activate
+          pnpm install --frozen-lockfile
+          pnpm --filter '@codexia/api...' build
       - name: Resolve reusable independent PR proof
         id: reuse
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -144,6 +150,8 @@ jobs:
           sudo -u "$fixture_user" install -d -m 0700 "$fixture_repo"
           git -C "$GITHUB_WORKSPACE" archive HEAD | sudo -u "$fixture_user" tar -xf - -C "$fixture_repo"
           printf '%s\n' 'codexia-phase-e-fixture-repo/v1' | sudo -u "$fixture_user" tee "$fixture_repo/.codexia-phase-e-fixture" >/dev/null
+          sudo -u "$fixture_user" install -d -m 0755 "$fixture_repo/packages/api/dist"
+          sudo -u "$fixture_user" install -m 0644 "$GITHUB_WORKSPACE/packages/api/dist/job-history-store.js" "$fixture_repo/packages/api/dist/job-history-store.js"
           test "$(sudo stat -c '%u' "$fixture_repo")" = "$fixture_uid"
           test "$(sudo stat -c '%u' "$fixture_repo/.codexia-phase-e-fixture")" = "$fixture_uid"
           subuid_max=$(awk -F: 'BEGIN { max = 100000 } { end = $2 + $3; if (end > max) max = end } END { print max }' /etc/subuid)
