@@ -220,8 +220,14 @@ test('Hosted Native keeps one verified producer and three independent compositio
 test('balanced browser lanes retain all independent spec and browser combinations',()=>{
   for(const profile of PROFILES){
     assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-writing'],['core','native-review','persistence-database'].map(id=>'browser-'+profile+'-'+id));
-    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-reference'],['modular-workspace','review-contributions','recent-activity','job-inbox','redesign-visual'].map(id=>'browser-'+profile+'-'+id));
-    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-webkit'],['auth-recovery','ui-v1','webkit'].map(id=>'browser-'+profile+'-'+id));
+    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-reference'],['recent-activity','modular-workspace','review-contributions','job-inbox','redesign-visual'].map(id=>'browser-'+profile+'-'+id));
+    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-webkit'],['webkit','ui-v1','auth-recovery'].map(id=>'browser-'+profile+'-'+id));
+    const writing = VERIFICATION_GROUPS['browser-'+profile+'-writing'];
+    const reference = VERIFICATION_GROUPS['browser-'+profile+'-reference'];
+    const webkit = VERIFICATION_GROUPS['browser-'+profile+'-webkit'];
+    assert.equal(reference.at(-1), 'browser-'+profile+'-redesign-visual', 'Exclusive visual measurement must run last');
+    assert.equal(webkit[0], 'browser-'+profile+'-webkit', 'The longest WebKit shard should start in the first wave');
+    assert.equal(new Set([...writing, ...reference, ...webkit]).size, BROWSER_SHARDS.length, 'No browser shard is dropped or duplicated');
     const writing = VERIFICATION_GROUPS['browser-'+profile+'-writing'];
     const reference = VERIFICATION_GROUPS['browser-'+profile+'-reference'];
     const webkit = VERIFICATION_GROUPS['browser-'+profile+'-webkit'];
