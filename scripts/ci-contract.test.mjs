@@ -100,29 +100,12 @@ test('browser groups depend on profile producers; independent groups cannot canc
 });
 test('browser groups retain immutable runtime and restore the exact producer before running selected shards', () => {
   const browser = workflow.jobs.browser;
-  const mcrDigest = 'sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579';
-  const chromiumDigest = 'sha256:893b8b5c8275d4a58da814521d961db70c0417d0ab716be3bfc004e4943c58b6';
-  assert.equal(browser.container.image, [
-    "${{ endsWith(matrix.group, '-webkit') && 'mcr.microsoft.com/playwright@",
-    mcrDigest,
-    "' || format('ghcr.io/{0}/playwright-ubuntu-chromium@",
-    chromiumDigest,
-    "', github.repository) }}",
-  ].join(''));
+  assert.equal(browser.container.image, 'mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579');
   assert.equal(browser.container.options, '--init --ipc=host');
-  assert.deepEqual(browser.container.credentials, {
-    username: "${{ endsWith(matrix.group, '-webkit') && '' || github.actor }}",
-    password: "${{ endsWith(matrix.group, '-webkit') && '' || secrets.GITHUB_TOKEN }}",
-  });
-  assert.equal(browser.permissions.packages, 'read');
+  assert.equal(browser.container.credentials, undefined);
+  assert.equal(browser.permissions.packages, undefined);
   assert.equal(browser.env.CODEXIA_CI_BROWSER_GROUP, '${{ matrix.group }}');
-  assert.equal(browser.env.CODEXIA_PLAYWRIGHT_IMAGE_DIGEST, [
-    "${{ endsWith(matrix.group, '-webkit') && '",
-    mcrDigest,
-    "' || '",
-    chromiumDigest,
-    "' }}",
-  ].join(''));
+  assert.equal(browser.env.CODEXIA_PLAYWRIGHT_IMAGE_DIGEST, 'sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579');
   const runtime = readFileSync(new URL('./verify-browser-runtime.mjs', import.meta.url), 'utf8');
   assert.match(runtime, /VERIFICATION_GROUPS/);
   assert.match(runtime, /requiredProjects/);
