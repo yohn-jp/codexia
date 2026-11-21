@@ -32,14 +32,19 @@
   register: base_runtime_rootless
   changed_when: false
   failed_when: base_runtime_rootless.rc != 0 or base_runtime_rootless.stdout != 'true'
-- name: Require the existing base secret stage identities
+- name: Require all fixed base secret identities in one read-only module invocation
+  # Preserve the original fail-closed presence check for every secret, while
+  # avoiding four separate Ansible task/module round-trips per convergence.
   ansible.builtin.command:
-    argv: [podman, secret, exists, "{{ item }}"]
-  loop:
-    - codexia-auth-token
-    - codexia-tunnel-token
-    - codexia-postgres-admin-password
-    - codexia-postgres-app-password
+    argv:
+      - /bin/sh
+      - -eu
+      - -c
+      - >-
+        for secret in codexia-auth-token codexia-tunnel-token
+        codexia-postgres-admin-password codexia-postgres-app-password; do
+          podman secret exists "$secret";
+        done
   register: base_runtime_secrets
   changed_when: false
   failed_when: base_runtime_secrets.rc != 0

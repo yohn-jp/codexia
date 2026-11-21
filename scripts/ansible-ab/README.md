@@ -6,7 +6,13 @@ runtime, deployment path, inventory, credentials, or any production VM**. Trigge
 through `workflow_dispatch`. It runs only on GitHub-hosted Ubuntu 26.04
 disposable runners. Dependencies are pinned to the repository's
 `ansible-core==2.21.6` and experimental `mitogen==0.3.55`. Mitogen is not
-introduced into `deploy/ansible/requirements.txt`.
+introduced into `deploy/ansible/requirements.txt`. The actual GitHub-hosted
+`Verify Ansible Base Secrets` workflow uses the exact pinned Mitogen strategy,
+SSH pipelining and protected ControlPersist socket location. Base/secrets facts
+were already limited to the user subset in the canonical site play, and the
+four fixed base secret-presence checks are now grouped into one read-only
+module invocation without omitting any individual secret check. The normal
+production Tailscale/SSH/Ansible deployment workflow remains unchanged.
 
 ## Two distinct measurements
 

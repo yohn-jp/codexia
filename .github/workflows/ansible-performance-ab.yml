@@ -5,6 +5,9 @@ on:
     paths:
       - .github/workflows/ansible-performance-ab.yml
       - scripts/ansible-ab/**
+      - deploy/ansible/base-runtime.yml
+      - deploy/ansible/ci-mitogen-playbook.sh
+      - .github/workflows/ansible-base-secrets.yml
   workflow_dispatch:
     inputs:
       repetitions:
