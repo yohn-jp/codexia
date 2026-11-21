@@ -12,6 +12,7 @@ import { buildPlaintextExport, stripManuscriptMarkup, toNarouDialect } from "./p
 import { composeVerticalPrintText } from "./verticalPrint.js";
 import { createPublishingMigrationProducer } from "./migration.js";
 import { hashShareToken, SHARE_GRANTS_PATH, type ShareGrant } from "./grants.js";
+import { createPublishingHttpContributions } from "./http.js";
 import { EPISODES_PATH } from "./episodes.js";
 import { readPublishingProject, readPublishingProjectFromCore, type PublishingProject } from "./project.js";
 
@@ -205,6 +206,34 @@ test("public share projection excludes author notes in pinned snapshots through 
   assert.deepEqual(publishing.volumes[0]?.chapters.map((chapter) => chapter.id), ["ch-1"]);
   assert.deepEqual(publishing.volumes[0]?.chapters[0]?.scenes.map((scene) => scene.id), ["sc-1", "sc-2"]);
   assert.doesNotMatch(JSON.stringify(publishing), /Private Author Note|Private note body/u);
+});
+
+test("public scene and volume shares follow a chapter moved to a later volume", async () => {
+  const files = fixtureFiles();
+  files.set("plot/volumes/vol-z/volume.yaml", "kind: volume\nid: vol-z\ntitle: 移動先\norder: 2\n");
+  const chapterPath = "plot/volumes/vol-1/chapters/ch-1/chapter.yaml";
+  files.set(chapterPath, String(files.get(chapterPath)).replace("volume: vol-1", "volume: vol-z"));
+  const grants: Array<{ scope: ShareGrant["scope"]; revokedAt?: string }> = [
+    { scope: { kind: "scene", id: "sc-1" } },
+    { scope: { kind: "volume", id: "vol-1" } },
+    { scope: { kind: "volume", id: "vol-z" } },
+    { scope: { kind: "scene", id: "sc-1" }, revokedAt: "2026-01-02T00:00:00.000Z" },
+  ];
+  const tokens = grants.map((_, index) => "share_" + String(index).repeat(43));
+  files.set(SHARE_GRANTS_PATH, grants.map((grant, index) => JSON.stringify({
+    version: 1, grantVersion: 2, revocationVersion: grant.revokedAt ? 1 : 0,
+    id: "grant-" + index, tokenHash: hashShareToken(tokens[index]!), label: "fixture",
+    createdAt: "2026-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z", ...grant,
+  })).join("\n") + "\n");
+  const reader = new MemoryReader(files);
+  const route = createPublishingHttpContributions().find(({ id }) => id === "publishing.http.public-share-scene")!;
+  const context = actionContext(reader, []);
+  context.invoke = async () => { throw new Error("Public sharing must use its pinned reader"); };
+  const responses = await Promise.all(tokens.map(token => route.handle(
+    new Request(`https://codexia.invalid/share/${token}/scenes/sc-1`), context,
+  )));
+  assert.deepEqual(responses.map(({ status }) => status), [200, 404, 200, 404]);
+  assert.match((await responses[0]!.json() as { body: string }).body, /星/);
 });
 
 test("publishing keeps Core's string order-key sequence in volume, chapter, text, and EPUB output", async () => {
