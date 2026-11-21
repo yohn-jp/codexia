@@ -1,11 +1,77 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import * as maintenance from '../deploy/updater/standalone-maintenance.mjs';
+import * as host from '../deploy/updater/standalone-host.mjs';
 import {probeCredentialFiles,validateProbeCredential,validatePostgresAppPassword,validateAppPasswordRotationManifest,validatePostgresAppPasswordRotation,assertProbeCredentialAccess,recoverProbeCredentialWriter,assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig,validateStandaloneAuthToken,transitionAuthTokenWriter,validateApiAuthTokenRotationManifest,saveApiAuthTokenSnapshot,loadApiAuthTokenSnapshot,validateTunnelToken,validateTunnelTokenRotationManifest,saveTunnelTokenSnapshot,loadTunnelTokenSnapshot} from '../deploy/updater/standalone-maintenance.mjs';
 import {assertApiAuthTokenSecretIdentity,assertProxyRuntimeObservation,PodmanStandaloneHost} from '../deploy/updater/standalone-host.mjs';
 import {mkdir,mkdtemp,rm,writeFile,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
+
+test('preflight password rotation accepts only a protected 64-hex credential',()=>{
+  assert.equal(typeof maintenance.validatePostgresPreflightPassword,'function');
+  const valid='a'.repeat(64);
+  assert.equal(maintenance.validatePostgresPreflightPassword(valid),valid);
+  assert.equal(maintenance.validatePostgresPreflightPassword(valid+'\n'),valid+'\n');
+  for(const invalid of ['', 'x'.repeat(64), 'a'.repeat(63), valid+'\n\n', 'a'.repeat(8193)])
+    assert.throws(()=>maintenance.validatePostgresPreflightPassword(invalid),/Invalid protected PostgreSQL preflight password/);
+});
+
+test('preflight password rotation manifest binds the fixed private input and restore receipt',()=>{
+  assert.equal(typeof maintenance.validatePreflightPasswordRotationManifest,'function');
+  const root='/home/codexia/.config/codexia-updater/maintenance/candidates/preflight-password';
+  const manifest={format:'codexia-updater-maintenance/v1',candidateRoot:root,
+    configPath:'/home/codexia/.config/codexia-updater/config.json',sourceDir:'/opt/codexia-updater',
+    unitDir:'/home/codexia/.config/systemd/user',rotatePostgresPreflightPassword:true,
+    preflightPasswordFile:root+'/credentials/postgres-preflight-password',
+    restoreReceiptFile:root+'/restore-receipt.json',databaseQuadletFile:root+'/quadlet/codexia-db.container'};
+  assert.deepEqual(maintenance.validatePreflightPasswordRotationManifest(manifest,root+'/manifest.json','/home/codexia'),
+    {preflightPasswordFile:manifest.preflightPasswordFile,restoreReceiptFile:manifest.restoreReceiptFile,
+      databaseQuadletFile:manifest.databaseQuadletFile});
+  for(const patch of [{preflightPasswordFile:'/tmp/pw'},{rotatePostgresPreflightPassword:false},
+    {databaseQuadletFile:'/tmp/codexia-db.container'},{extra:true}])
+    assert.throws(()=>maintenance.validatePreflightPasswordRotationManifest({...manifest,...patch},root+'/manifest.json','/home/codexia'));
+});
+
+test('preflight password change uses psql password prompt input for only the read-only role',()=>{
+  assert.equal(typeof host.postgresPreflightPasswordChangeInput,'function');
+  const password='1234567890abcdef'.repeat(4);
+  assert.equal(host.postgresPreflightPasswordChangeInput(password),
+    '\\password codexia_preflight\n'+password+'\n'+password+'\n');
+  assert.equal(host.postgresPreflightPasswordChangeInput(password+'\n'),
+    '\\password codexia_preflight\n'+password+'\n'+password+'\n');
+});
+
+test('preflight password recovery snapshot binds the prior credential and controller identity',async()=>{
+  assert.equal(typeof maintenance.savePreflightPasswordRotationSnapshot,'function');
+  assert.equal(typeof maintenance.loadPreflightPasswordRotationSnapshot,'function');
+  const root=await mkdtemp(path.join(tmpdir(),'preflight-password-snapshot-'));
+  const config={publicKeyFile:path.join(root,'config','channel-public.pem'),stateFile:path.join(root,'state','controller.json'),routeFile:path.join(root,'state','route')};
+  const state={journal:{phase:'committed',active:{slot:'blue',image:release.image}},installed:release,paused:false,initialActivationPending:false,lastError:null};
+  const previous='1'.repeat(64);
+  const replacement='2'.repeat(64);
+  const {createHash}=await import('node:crypto');
+  const digest=value=>createHash('sha256').update(value).digest('hex');
+  const snapshot={operationId:'12345678-1234-4234-8234-123456789abc',databaseId:'123456789:42',
+    adminSecretId:'admin-id-123',appSecretId:'app-id-123',originalSecretId:'preflight-id-123',
+    previousDigest:digest(previous),replacementDigest:digest(replacement),sourceDigest:'a'.repeat(64),
+    fragmentDigest:'b'.repeat(64),runtimeDigest:'c'.repeat(64),resources:{volumes:{},networks:{}},
+    databaseQuadlet:'[Container]\nImage=docker.io/library/postgres:17-bookworm@sha256:'+'d'.repeat(64)+'\n'};
+  const marker=await maintenance.savePreflightPasswordRotationSnapshot({config,state,snapshot,previousPassword:previous,
+    timer:{active:'inactive',enabled:'disabled'},routeContent:'blue\n'});
+  const loaded=await maintenance.loadPreflightPasswordRotationSnapshot({config,state,marker});
+  assert.equal(loaded.previousPassword,previous);
+  assert.deepEqual(loaded.snapshot,{...snapshot,
+    controllerDigest:digest(JSON.stringify(state)),resourcesDigest:digest(JSON.stringify(snapshot.resources))});
+  assert.deepEqual(loaded.controllerState,state);
+  const failClosedState={...state,paused:true};
+  assert.equal((await maintenance.loadPreflightPasswordRotationSnapshot({config,state:failClosedState,marker})).previousPassword,previous,
+    'Fail-closed pause prevented durable rollback recovery');
+  await assert.rejects(()=>maintenance.loadPreflightPasswordRotationSnapshot({config,state:{...failClosedState,journal:{...state.journal,generation:2}},marker}),
+    /controller changed outside fail-closed pause/);
+  await rm(root,{recursive:true,force:true});
+});
 
 const runtime={
   format:'codexia-runtime/v1',profile:'core',modelCachePath:null,
