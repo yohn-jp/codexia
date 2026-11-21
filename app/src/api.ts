@@ -1,4 +1,5 @@
 import { ApiError } from "./api-error";
+import { apiRequestUrl } from "./oauth";
 export { ApiError } from "./api-error";
 import { responseContracts as dto, readApiResponse, decodeResponse, type ResponseGuard } from "./api-response";
 import type {
@@ -221,6 +222,8 @@ export interface RuntimeVersion {
 }
 
 let hostedMode: boolean | undefined;
+let oauthAccessToken: string | undefined;
+const configuredApiOrigin = (import.meta as ImportMeta & { env?: { VITE_CODEXIA_API_ORIGIN?: string } }).env?.VITE_CODEXIA_API_ORIGIN;
 type HostedRefreshResult = { status: number; ok: boolean; error?: string; code?: string };
 let hostedRefresh: Promise<HostedRefreshResult> | undefined;
 let documentDeparting = false;
@@ -352,8 +355,21 @@ async function fetchHostedRequest(path: string, init: RequestInit): Promise<Resp
   if (init.body !== undefined && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const csrf = csrfToken();
   const method = (init.method ?? "GET").toUpperCase();
-  if (csrf && !["GET", "HEAD", "OPTIONS"].includes(method)) headers.set("X-CSRF-Token", csrf);
-  return fetch(path, { ...init, headers, credentials: "same-origin" });
+  if (csrf && !oauthAccessToken && !["GET", "HEAD", "OPTIONS"].includes(method)) headers.set("X-CSRF-Token", csrf);
+  const apiRequest = path.startsWith("/api/");
+  if (apiRequest && oauthAccessToken) headers.set("Authorization", `Bearer ${oauthAccessToken}`);
+  return fetch(apiRequest ? apiRequestUrl(path, configuredApiOrigin) : path, {
+    ...init,
+    headers,
+    // A bearer request never carries ambient cookies, avoiding dual
+    // cookie/bearer credentials when the API has moved to its own origin.
+    credentials: apiRequest && oauthAccessToken ? "omit" : "same-origin",
+  });
+}
+
+/** Store an API access token only in the current JavaScript runtime. */
+export function setOAuthAccessToken(token: string | null): void {
+  oauthAccessToken = token ?? undefined;
 }
 
 async function fetchHostedResponseForLifecycle(path: string, init: RequestInit, lifecycle: number): Promise<Response> {
