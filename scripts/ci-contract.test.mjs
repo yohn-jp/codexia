@@ -216,11 +216,11 @@ test('Hosted Native keeps one verified producer and three independent compositio
   assert.doesNotMatch(runner,/build:workspace/);
 });
 
-test('balanced browser lanes retain all independent spec and browser combinations',()=>{
+test('balanced browser lanes preserve every spec while isolating WebKit from Chromium',()=>{
   for(const profile of PROFILES){
     assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-writing'],['core','native-review','persistence-database','redesign-visual'].map(id=>'browser-'+profile+'-'+id));
-    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-reference'],['modular-workspace','review-contributions','recent-activity','job-inbox'].map(id=>'browser-'+profile+'-'+id));
-    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-webkit'],['auth-recovery','ui-v1','webkit'].map(id=>'browser-'+profile+'-'+id));
+    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-reference'],['ui-v1','modular-workspace','review-contributions','recent-activity','job-inbox','auth-recovery'].map(id=>'browser-'+profile+'-'+id));
+    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-webkit'],['webkit'].map(id=>'browser-'+profile+'-'+id));
   }
 });
 
