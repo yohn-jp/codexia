@@ -30,9 +30,10 @@ export function assertDisposableAuthFixtureDatabaseUrl(connectionString: string)
   catch { throw new Error("Better Auth fixture requires a PostgreSQL URL for a disposable loopback test database"); }
   const hostname = url.hostname.replace(/^\[|\]$/gu, "");
   const databaseName = decodeURIComponent(url.pathname.slice(1));
+  const isolatedCiDatabase = process.env.CI === "true" && hostname === "postgres" && /^codexia_ci_[a-f0-9]{32}$/u.test(databaseName);
   if (!new Set(["postgres:", "postgresql:"]).has(url.protocol) ||
-      !new Set(["localhost", "127.0.0.1", "::1"]).has(hostname) ||
-      !/^codexia_[a-z0-9_]*(?:test|fixture)[a-z0-9_]*$/iu.test(databaseName) || url.search || url.hash) {
+      (!new Set(["localhost", "127.0.0.1", "::1"]).has(hostname) && !isolatedCiDatabase) ||
+      (!/^codexia_[a-z0-9_]*(?:test|fixture)[a-z0-9_]*$/iu.test(databaseName) && !isolatedCiDatabase) || url.search || url.hash) {
     throw new Error("Better Auth fixture requires a query-free PostgreSQL URL for a disposable loopback codexia_*test or codexia_*fixture database");
   }
 }
