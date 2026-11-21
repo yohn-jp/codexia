@@ -719,8 +719,11 @@ export class CoreStore implements MutationCoordinator {
             expectedVersion: existing.version,
           });
         } else {
-          const archivedPath = await tx.getModuleRecord(projectId, PATHS, id);
-          if (archivedPath) {
+          // Portable imports retain document UUIDs and their path mappings.
+          // A mapping under an imported UUID must reserve the old hierarchy
+          // path even when this project's stable path-derived UUID differs.
+          const archivedPaths = await tx.listModuleRecords(projectId, PATHS);
+          if (archivedPaths.some((record) => record.value.metadataPath === write.path)) {
             fail(409, "hierarchy_path_reserved", "The hierarchy path is reserved by retained document history");
           }
           const logicalId = typeof data.id === "string" ? data.id : id;
@@ -911,8 +914,8 @@ export class CoreStore implements MutationCoordinator {
       if(input.kind==="chapter"){parentId=volume.id;path=`plot/volumes/${input.volumeId}/chapters/${input.id}/chapter.yaml`;}
       else {const chapter=this.findDocument(manifest,input.chapterId);if(chapter.kind!=="chapter"||chapter.parentId!==volume.id)fail(422,"invalid_hierarchy_parent","The chapter must belong to the volume");parentId=chapter.id;path=`plot/volumes/${input.volumeId}/chapters/${input.chapterId}/scenes/${input.id}.yaml`;const manuscript=`manuscript/${input.volumeId}/${input.chapterId}/${input.id}.md`;writes.push({path:manuscript,revision:null,content:input.manuscriptBody??""});}}
     if(await reader.read(path))fail(409,"hierarchy_path_exists","The hierarchy path already exists");
-    const archivedPath = await this.persistence.read((currentReader) =>
-      currentReader.getModuleRecord(pid(projectId), PATHS, stableId(projectId, path)));
+    const archivedPath = await this.persistence.read(async (currentReader) =>
+      (await currentReader.listModuleRecords(pid(projectId), PATHS)).some((record) => record.value.metadataPath === path));
     if (archivedPath && !allowReservedPathReplay) {
       fail(409, "hierarchy_path_reserved", "The hierarchy path is reserved by retained document history");
     }
