@@ -1,5 +1,6 @@
 import { createRemoteJWKSet, customFetch, errors, jwtVerify, type JWTPayload } from "jose";
 
+export const CODEXIA_OWNER_SCOPE = "codexia:api";
 const ALLOWED_ALGORITHMS = ["ES256", "RS256"] as const;
 const JWKS_TIMEOUT_MS = 3_000;
 

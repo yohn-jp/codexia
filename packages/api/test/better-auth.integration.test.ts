@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { request as nodeHttpRequest } from "node:http";
 import { test } from "node:test";
-import { startBetterAuthFixture } from "./fixtures/better-auth-server.js";
+import { assertDisposableAuthFixtureDatabaseUrl, startBetterAuthFixture } from "./fixtures/better-auth-server.js";
 
 async function apiRequest(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const url = new URL(input instanceof Request ? input.url : String(input));
@@ -46,6 +46,9 @@ async function apiRequest(input: RequestInfo | URL, init: RequestInit = {}): Pro
 test("Better Auth signed-out OIDC login reaches the Fastify OAuth route and admits the configured owner", async (t) => {
   const databaseUrl = process.env.CODEXIA_TEST_DATABASE_URL;
   assert.ok(databaseUrl, "CODEXIA_TEST_DATABASE_URL must name a disposable PostgreSQL test database");
+  assert.throws(() => assertDisposableAuthFixtureDatabaseUrl("postgres://test:test@db.example.test/codexia_auth_test"), /loopback/u);
+  assert.throws(() => assertDisposableAuthFixtureDatabaseUrl("postgres://test:test@127.0.0.1/codexia_auth"), /disposable/u);
+  assert.doesNotThrow(() => assertDisposableAuthFixtureDatabaseUrl(databaseUrl));
   const fixture = await startBetterAuthFixture({
     databaseUrl,
     staticDirectory: new URL("../../app/dist", import.meta.url).pathname,
@@ -130,6 +133,8 @@ test("Better Auth signed-out OIDC login reaches the Fastify OAuth route and admi
       disableRedirect: true,
     });
     assert.ok(social.data?.url, `OIDC sign-in failed: ${JSON.stringify(social.error)}`);
+    const upstreamAuthorize = new URL(social.data.url);
+    assert.equal(upstreamAuthorize.searchParams.get("redirect_uri"), `${origin}/api/auth/callback/workspace-oidc`);
     const upstream = await fetch(social.data.url, { redirect: "manual" });
     const callback = upstream.headers.get("location");
     assert.ok(callback, "IdP authorization must return to the configured OIDC callback");
@@ -142,12 +147,18 @@ test("Better Auth signed-out OIDC login reaches the Fastify OAuth route and admi
     assert.equal(resumedUrl.search, loginPage.search, "the opaque signed authorization query must survive the provider round-trip");
 
     (globalThis as unknown as { window: { location: { search: string } } }).window.location.search = resumedUrl.search;
-    const context = await client.$fetch("/oauth2/consent-context", { method: "POST", body: {} });
+    const context = await client.$fetch("/oauth2/consent-context", { method: "POST", body: {} }) as {
+      data?: { requestedScopes: string[]; client: { name: string } };
+      error?: unknown;
+    };
     assert.ok(context.data, `Fastify consent context failed: ${JSON.stringify(context.error)}`);
     assert.deepEqual(context.data.requestedScopes, ["openid", "codexia:api", "offline_access"]);
     assert.equal(context.data.client.name, "Codexia Fixture Web");
 
-    const consent = await client.$fetch("/oauth2/consent", { method: "POST", body: { accept: true } });
+    const consent = await client.$fetch("/oauth2/consent", { method: "POST", body: { accept: true } }) as {
+      data?: { url: string };
+      error?: unknown;
+    };
     assert.ok(consent.data?.url, `OAuth consent failed: ${JSON.stringify(consent.error)}`);
     const redirect = new URL(consent.data.url, origin);
     const code = redirect.searchParams.get("code");
