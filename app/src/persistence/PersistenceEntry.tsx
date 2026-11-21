@@ -109,7 +109,14 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
     if (!oauthConfig || busy) return;
     setBusy(true);
     setMessage("");
-    try { await beginOAuthAuthorization(oauthConfig); }
+    try {
+      if (workspaceScopeRef.current !== null && (!protectionRef.current || !await protectionRef.current())) {
+        setMessage("入力を保護できないためOAuth再認証を停止しました。接続を確認して再試行してください。");
+        setBusy(false);
+        return;
+      }
+      await beginOAuthAuthorization(oauthConfig);
+    }
     catch (error) {
       setMessage(error instanceof Error ? error.message : "OAuth sign-in could not be started.");
       setBusy(false);
