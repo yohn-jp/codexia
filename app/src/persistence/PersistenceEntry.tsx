@@ -117,12 +117,28 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     return () => { mounted = false; inspectSequenceRef.current += 1; window.removeEventListener("pagehide", hide); window.removeEventListener("pageshow", resume); };
   }, [inspect, mode, nativeShell]);
 
+  async function protectBeforeAuthTransition(action: string): Promise<boolean> {
+    if (workspaceScopeRef.current === null) return true;
+    try {
+      if (protectionRef.current && await protectionRef.current()) return true;
+    } catch {
+      // An unavailable local journal must never permit an auth transition.
+    }
+    setMessage(`入力を保護できないため${action}を停止しました。接続と保存状態を確認してください。`);
+    return false;
+  }
+
   async function startOAuthSignIn(): Promise<void> {
     if (!oauthConfig || busy) return;
     setBusy(true);
     setMessage("");
-    try { await beginOAuthAuthorization(oauthConfig); }
-    catch (error) {
+    try {
+      if (!await protectBeforeAuthTransition("OAuth認証への移動")) {
+        setBusy(false);
+        return;
+      }
+      await beginOAuthAuthorization(oauthConfig);
+    } catch (error) {
       setMessage(error instanceof Error ? error.message : "OAuth sign-in could not be started.");
       setBusy(false);
     }
@@ -133,6 +149,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     setBusy(true);
     setMessage("");
     try {
+      if (!await protectBeforeAuthTransition("ネイティブ認証への移動")) return;
       await nativeAuth.signIn();
       await inspect();
     } catch (error) {
@@ -148,6 +165,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     setSessionBlocked(true);
     setMessage("");
     try {
+      if (!await protectBeforeAuthTransition("ログアウト")) return;
       await nativeAuth.signOut();
       workspaceScopeRef.current = null;
       setSessionBlocked(false);
@@ -161,11 +179,12 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
 
   async function completeWebOAuthLogout(): Promise<void> {
     if (busy) return;
-    setOAuthAccessToken(null);
     setBusy(true);
     setSessionBlocked(true);
     setMessage("");
     try {
+      if (!await protectBeforeAuthTransition("ログアウト")) return;
+      setOAuthAccessToken(null);
       const result = await authClient.signOut();
       if (result.error) throw new Error("サーバー側セッションの終了を確認できませんでした。");
       workspaceScopeRef.current = null;
@@ -199,6 +218,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     setSessionBlocked(true);
     setMessage("");
     try {
+      if (!await protectBeforeAuthTransition("ログアウト")) return;
       await api.logout();
       workspaceScopeRef.current = null;
       setSessionBlocked(false);
@@ -209,6 +229,11 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
     } finally {
       setBusy(false);
     }
+  }
+
+  async function completeAccessLogout(): Promise<void> {
+    if (!await protectBeforeAuthTransition("ログアウト")) return;
+    window.location.assign("/cdn-cgi/access/logout");
   }
 
   async function reenterHosted(): Promise<void> {
@@ -224,7 +249,7 @@ export function PersistenceEntry({ mode, nativeAuth }: { mode: "desktop" | "mobi
       <PersistenceWorkspace mode={mode} hosted={hostedMode} authorScope={authorScope} sessionBlocked={sessionBlocked} registerProtection={registerProtection} onSignOut={() => {
         if (nativeShell) { void completeNativeLogout(); return; }
         if (oauthConfig) { void completeWebOAuthLogout(); return; }
-        if (accessMode && !hostedMode) { window.location.assign("/cdn-cgi/access/logout"); return; }
+        if (accessMode && !hostedMode) { void completeAccessLogout(); return; }
         void completeLogout();
       }} />
     </div>
