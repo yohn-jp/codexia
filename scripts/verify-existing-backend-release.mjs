@@ -48,14 +48,21 @@ async function pages(resource,key,token){
   return collectGitHubPages((page,perPage)=>request(resource+separator+'per_page='+perPage+'&page='+page,token),key);
 }
 export function successfulPublicationJobs(jobs,promoted,hasPromotion=promoted){
-  const expectations=[['Publish immutable GHCR image','success'],
-    ['Build and test backend OCI image (core)',promoted?'skipped':'success'],
-    ['Build and test backend OCI image (full)',promoted?'skipped':'success']];
-  if(hasPromotion)expectations.push(['Resolve verified backend promotion','success']);
-  return expectations.every(([name,conclusion])=>{
+  if(!Array.isArray(jobs))return false;
+  const exactJob=(name,conclusion)=>{
     const matches=jobs.filter(job=>job?.name===name);
     return matches.length===1&&matches[0].status==='completed'&&matches[0].conclusion===conclusion;
-  });
+  };
+  const buildPrefix='Build and test backend OCI image';
+  const buildJobs=jobs.filter(job=>typeof job?.name==='string'&&job.name.startsWith(buildPrefix));
+  const aggregateName='Build and test backend OCI image (${{ matrix.profile }})';
+  const perProfileNames=[`${buildPrefix} (core)`,`${buildPrefix} (full)`];
+  const buildPathIsValid=promoted
+    ? (buildJobs.length===1&&buildJobs[0].name===aggregateName&&buildJobs[0].status==='completed'&&buildJobs[0].conclusion==='skipped') ||
+      (buildJobs.length===2&&perProfileNames.every(name=>exactJob(name,'skipped')))
+    : buildJobs.length===2&&perProfileNames.every(name=>exactJob(name,'success'));
+  if(!buildPathIsValid||!exactJob('Publish immutable GHCR image','success'))return false;
+  return !hasPromotion||exactJob('Resolve verified backend promotion','success');
 }
 
 export async function verifyExistingBackendRelease({env=process.env,args=process.argv.slice(2)}={}){
