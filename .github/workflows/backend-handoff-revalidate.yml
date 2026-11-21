@@ -4,6 +4,7 @@ on:
     paths:
       - .github/workflows/backend-handoff-revalidate.yml
       - scripts/prepare-backend-handoff-revalidation.mjs
+      - scripts/run-manual-backend-handoff-revalidation.mjs
       - scripts/backend-handoff-revalidation.test.mjs
       - docs/deployment/BACKEND-HANDOFF-REVALIDATION.md
       - scripts/verify-backend-push-handoff.mjs
@@ -88,12 +89,10 @@ jobs:
       - name: Verify exact certificate, producer receipt and immutable images
         env:
           GH_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: yohn-jp/codexia
-          GITHUB_REF: refs/heads/main
-          GITHUB_EVENT_NAME: workflow_run
-          GITHUB_EVENT_PATH: ${{ steps.publisher.outputs.publisher_event_path }}
+          CODEXIA_PUBLISHER_RUN_ID: ${{ inputs.publisher_run_id }}
+          CODEXIA_MANUAL_REVALIDATION: 'true'
         working-directory: publisher-source
-        run: node "$GITHUB_WORKSPACE/scripts/verify-backend-push-handoff.mjs"
+        run: node "$GITHUB_WORKSPACE/scripts/run-manual-backend-handoff-revalidation.mjs"
       - name: Record the target evidence boundary
         if: success()
         run: |

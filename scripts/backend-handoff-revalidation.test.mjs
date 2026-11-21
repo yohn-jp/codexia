@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, stat, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { createRequire } from 'node:module';
-import { resolveManualPublisherRun, writePublisherRunEvent } from './prepare-backend-handoff-revalidation.mjs';
+import { resolveManualPublisherRun, writePublisherSourceOutput } from './prepare-backend-handoff-revalidation.mjs';
+import { prepareManualVerifierContext } from './run-manual-backend-handoff-revalidation.mjs';
 
 const require = createRequire(new URL('../packages/core/package.json', import.meta.url));
 const { parse } = require('yaml');
@@ -67,26 +70,35 @@ test('manual selection queries the authenticated API and accepts only the exact 
   await assert.rejects(resolveManualPublisherRun({ env: env(), checkoutSha: sha('b'), fetchImpl: async () => ({ ok: false, status: 403 }) }), /HTTP 403/u);
 });
 
-test('prepared event binds the API-verified run in a private runner-temp file', async () => {
+test('manual context is built from the authenticated API run and exact checked-out publisher source', async () => {
+  const repositoryPath = fileURLToPath(new URL('..', import.meta.url));
+  const checkedOutSha = execFileSync('git', ['-C', repositoryPath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const envForWrapper = {
+    ...env(),
+    GITHUB_SHA: checkedOutSha,
+    GITHUB_WORKSPACE: repositoryPath,
+    CODEXIA_MANUAL_REVALIDATION: 'true',
+  };
+  const context = await prepareManualVerifierContext({ env: envForWrapper, fetchImpl: async () => ({
+    ok: true,
+    json: async () => ({ ...run(), head_sha: checkedOutSha }),
+  }) });
+  assert.equal(context.env.GITHUB_EVENT_NAME, 'workflow_run');
+  assert.equal(context.payload.workflow_run.head_sha, checkedOutSha);
+  assert.equal(context.payload.workflow_run.id, 44878012473);
+  assert.equal(context.payload.workflow_run.path, '.github/workflows/backend-release.yml');
+  assert.equal('GITHUB_EVENT_PATH' in context.env, false);
+  await assert.rejects(prepareManualVerifierContext({ env: { ...envForWrapper, GITHUB_EVENT_NAME: 'push' }, fetchImpl: async () => ({ ok: true, json: async () => run() }) }));
+  await assert.rejects(prepareManualVerifierContext({ env: { ...envForWrapper, CODEXIA_MANUAL_REVALIDATION: 'false' }, fetchImpl: async () => ({ ok: true, json: async () => run() }) }));
+  await assert.rejects(prepareManualVerifierContext({ env: envForWrapper, fetchImpl: async () => ({ ok: true, json: async () => run() }) }), /Publisher checkout differs/u);
+});
+
+test('only the authenticated publisher source SHA is passed between workflow steps', async () => {
   const folder = await mkdtemp(path.join(tmpdir(), 'codexia-handoff-revalidation-'));
   try {
     const output = path.join(folder, 'github-output');
-    const eventPath = await writePublisherRunEvent({ ...run(), actor: undefined }, folder, output);
-    const payload = JSON.parse(await readFile(eventPath, 'utf8'));
-    assert.deepEqual(payload.workflow_run, {
-      id: 44878012473,
-      run_attempt: 1,
-      path: '.github/workflows/backend-release.yml',
-      event: 'workflow_run',
-      head_branch: 'main',
-      head_sha: sha('a'),
-      status: 'completed',
-      conclusion: 'success',
-      repository: { full_name: 'yohn-jp/codexia' },
-      head_repository: { full_name: 'yohn-jp/codexia' },
-    });
-    assert.equal((await stat(eventPath)).mode & 0o777, 0o600);
-    assert.match(await readFile(output, 'utf8'), new RegExp(`publisher_source_sha=${sha('a')}`));
+    await writePublisherSourceOutput(run(), output);
+    assert.equal(await readFile(output, 'utf8'), `publisher_source_sha=${sha('a')}\n`);
   } finally {
     await rm(folder, { recursive: true, force: true });
   }
@@ -110,6 +122,9 @@ test('deployment-credential-free workflow revalidates on main and has no target 
   assert.equal(checkoutSource.with.ref, '${{ steps.publisher.outputs.publisher_source_sha }}');
   const verifier = manual.steps.find(step => step.name === 'Verify exact certificate, producer receipt and immutable images');
   assert.equal(verifier['working-directory'], 'publisher-source');
-  assert.equal(verifier.run, 'node "$GITHUB_WORKSPACE/scripts/verify-backend-push-handoff.mjs"');
+  assert.equal(verifier.run, 'node "$GITHUB_WORKSPACE/scripts/run-manual-backend-handoff-revalidation.mjs"');
+  assert.equal(verifier.env.CODEXIA_MANUAL_REVALIDATION, 'true');
+  assert.equal(verifier.env.GITHUB_EVENT_NAME, undefined, 'The runner-owned event name must not be overridden');
+  assert.equal(verifier.env.GITHUB_EVENT_PATH, undefined, 'Caller-supplied workflow payloads are not accepted');
   assert.equal(JSON.stringify(workflow).includes('codexia-production'), false);
 });
