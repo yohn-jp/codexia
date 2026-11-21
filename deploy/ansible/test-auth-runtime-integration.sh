@@ -145,8 +145,8 @@ role_state=$(admin_psql <<'SQL'
 SELECT (r.rolcanlogin AND NOT r.rolsuper AND NOT r.rolcreatedb AND NOT r.rolcreaterole AND NOT r.rolinherit AND NOT r.rolreplication AND NOT r.rolbypassrls)::text || '|' ||
        pg_get_userbyid(n.nspowner) || '|' ||
        has_table_privilege('codexia_auth_runtime','public.phase_b_adoption_probe','SELECT')::text || '|' ||
-       has_table_privilege('codexia_auth_runtime','codexia_schema_migrations','SELECT')::text || '|' ||
-       has_schema_privilege('codexia_auth_runtime','codexia','CREATE')::text
+       has_table_privilege('codexia_auth_runtime','public.codexia_schema_migrations','SELECT')::text || '|' ||
+       has_schema_privilege('codexia_auth_runtime','public','CREATE')::text
 FROM pg_roles r CROSS JOIN pg_namespace n
 WHERE r.rolname='codexia_auth_runtime' AND n.nspname='codexia_auth';
 SQL
@@ -161,21 +161,23 @@ SQL
 )
 test "$runtime_identity" = 'codexia_auth_runtime|codexia_auth'
 if runtime_psql "$tmp/runtime-password" <<'SQL' > "$tmp/denied-core.log" 2>&1
+\set VERBOSITY verbose
 SELECT * FROM public.phase_b_adoption_probe;
 SQL
 then
   echo 'Better Auth runtime role could read an application-owned public table' >&2
   exit 1
 fi
-grep -Eqi 'permission denied|does not exist' "$tmp/denied-core.log"
+grep -Fq '42501:' "$tmp/denied-core.log"
 if runtime_psql "$tmp/runtime-password" <<'SQL' > "$tmp/denied-create-core.log" 2>&1
-CREATE TABLE codexia.auth_runtime_must_not_create (id integer);
+\set VERBOSITY verbose
+CREATE TABLE public.auth_runtime_must_not_create (id integer);
 SQL
 then
   echo 'Better Auth runtime role could create objects in the Core schema' >&2
   exit 1
 fi
-grep -Eqi 'permission denied|does not exist' "$tmp/denied-create-core.log"
+grep -Fq '42501:' "$tmp/denied-create-core.log"
 
 env_output=$(podman run --rm --network codexia-data \
   --secret=codexia-auth-database-url,type=env,target=CODEXIA_AUTH_DATABASE_URL \
@@ -192,8 +194,10 @@ test "$(runtime_psql "$tmp/runtime-password" <<'SQL'
 SELECT value FROM codexia_auth.acceptance_probe WHERE id=1;
 SQL
 )" = durable-auth-fixture
-test "$(stat -c '%a:%U' "$service_home/.config/codexia-auth/runtime.env")" = "600:$service_user"
-if grep -Eq 'Auth%40fixture|fixture-auth-signing-key|fixture-oidc-client-secret|fixture-introspection-client-secret|DATABASE_URL' "$service_home/.config/codexia-auth/runtime.env"; then
+runtime_env="$service_home/.config/codexia-auth/runtime.env"
+test "$(as_service stat -c '%a:%U' "$runtime_env")" = "600:$service_user"
+as_service cat "$runtime_env" > "$tmp/runtime.env"
+if grep -Eq 'Auth%40fixture|fixture-auth-signing-key|fixture-oidc-client-secret|fixture-introspection-client-secret|DATABASE_URL' "$tmp/runtime.env"; then
   echo 'Secret material or database URL appeared in the nonsecret auth environment file' >&2
   exit 1
 fi
