@@ -35,6 +35,8 @@ test('backend publication requires a still-eligible component source before regi
   assert.deepEqual(deploy.needs, ['verify-handoff']);
   assert.match(deploy.if, /needs\.verify-handoff\.outputs\.certified-full-image != ''/u);
   assert.match(deploy.if, /needs\.verify-handoff\.outputs\.deployment-certificate != ''/u);
-  assert.match(deploy.if, /vars\.CODEXIA_PUSH_DEPLOYMENT_ENABLED == 'true'/u);
+  assert.doesNotMatch(deploy.if, /CODEXIA_PUSH_DEPLOYMENT_ENABLED/u);
+  assert.ok(deploy.steps.some(step => step.id === 'deployment-gate'),
+    'environment-scoped deployment enablement must be checked after the production Environment is attached');
   assert.equal(workflow.jobs['stable-channel'], undefined, 'retired pull publication must not exist');
 });
