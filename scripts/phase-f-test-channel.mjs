@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { releaseFromIdentity } from './publish-stable-channel.mjs';
 import { assertVerificationJobs, collectGitHubPages, verifiedSourceRun } from './release-policy.mjs';
-import { assertCompatibleUpdate, validateUpdateRelease } from './update-release-policy.mjs';
+import { assertCompatibleUpdate, assertLegacyBootstrapCandidate, validateUpdateRelease } from './update-release-policy.mjs';
 import { selectUpdateCandidate, signUpdateChannel, verifyUpdateChannel } from './update-channel.mjs';
 import { validateBackendIdentity } from './backend-update-identity.mjs';
 import { assertBackendPublication, publicationInWorkflowWindow } from './component-release-record.mjs';
@@ -142,6 +142,7 @@ export function createSignedTestChannels(releaseValues, { now = Date.now(), fres
   const second = verifyUpdateChannel(secondEnvelope, publicKeyPem, first.checkpoint, now);
   assert.equal(selectUpdateCandidate(second, releases[1], releases[1].apiEpoch).image, releases[2].image);
   let freshSchemaEnvelope = null;
+  let bootstrapEnvelope = null;
   if (freshSchemaRelease) {
     const schemaRelease = validateUpdateRelease(freshSchemaRelease);
     assert.equal(schemaRelease.state, 'published', 'Fresh-schema release must be published');
@@ -151,6 +152,10 @@ export function createSignedTestChannels(releaseValues, { now = Date.now(), fres
     assert.equal(schemaRelease.platform, releases[0].platform, 'Fresh-schema release platform differs from the lifecycle fixture');
     freshSchemaEnvelope = signUpdateChannel(snapshot(1, [schemaRelease]), privateKeyPem, now);
     assert.deepEqual(verifyUpdateChannel(freshSchemaEnvelope, publicKeyPem, null, now).payload.releases, [schemaRelease]);
+    const legacy = releases.at(-1);
+    assertLegacyBootstrapCandidate(legacy, schemaRelease, schemaRelease.apiEpoch);
+    bootstrapEnvelope = signUpdateChannel(snapshot(1, [legacy, schemaRelease]), privateKeyPem, now);
+    assert.deepEqual(verifyUpdateChannel(bootstrapEnvelope, publicKeyPem, null, now).payload.releases, [legacy, schemaRelease]);
   }
   return {
     publicKeyPem,
@@ -158,6 +163,7 @@ export function createSignedTestChannels(releaseValues, { now = Date.now(), fres
     first: { envelope: firstEnvelope, verified: first, candidate: releases[1] },
     second: { envelope: secondEnvelope, verified: second, candidate: releases[2] },
     freshSchema: freshSchemaEnvelope ? { envelope: freshSchemaEnvelope } : null,
+    bootstrap: bootstrapEnvelope ? { envelope: bootstrapEnvelope, legacy: releases.at(-1), candidate: validateUpdateRelease(freshSchemaRelease) } : null,
   };
 }
 
@@ -281,6 +287,7 @@ async function main() {
   await writeFile(path.join(out, 'channel-sequence-2.json'), JSON.stringify(channels.second.envelope) + '\n', { mode: 0o644 });
   if (channels.freshSchema) {
     await writeFile(path.join(out, 'channel-fresh-schema.json'), JSON.stringify(channels.freshSchema.envelope) + '\n', { mode: 0o644 });
+    await writeFile(path.join(out, 'channel-bootstrap.json'), JSON.stringify(channels.bootstrap.envelope) + '\n', { mode: 0o644 });
     await writeFile(path.join(out, 'simulated-frontend-identity-fresh-schema.json'), JSON.stringify({
       format: 'codexia-frontend-identity/v1', version: releases.at(-1).version, sourceSha: releases.at(-1).sourceSha,
       profile: releases.at(-1).profile, apiEpoch: releases.at(-1).apiEpoch,

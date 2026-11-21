@@ -79,6 +79,8 @@ grep -Fq 'Verified rootless Quadlet convergence, fresh PostgreSQL init, no-chang
 printf '%s\n' '=== Clean Ansible application convergence on the same disposable service identity ==='
 bash "$repo_root/deploy/ansible/test-phase-f-ansible-app.sh" | tee "$tmp/app-convergence.log"
 grep -Fq 'PASS: real Ansible base→prepare→schema→fresh activation repeat convergence kept one PostgreSQL identity and project data.' "$tmp/app-convergence.log"
+grep -Fq 'PASS: Ansible bootstrap-preflight verified the serving signed legacy application; injected runtime drift was rejected' "$tmp/app-convergence.log"
+grep -Fq 'PASS: rootless user manager restarted' "$tmp/app-convergence.log"
 
 node --input-type=module - "$evidence_dir/ansible-convergence-results.json" <<'NODE'
 import { writeFile } from 'node:fs/promises';
@@ -99,14 +101,15 @@ const result = {
     host: 'PASS: real Ansible host stage created the rootless identity, then a second apply reported changed=0; generated rootless Quadlet network ran and was cleaned.',
     secrets: 'PASS: real Ansible secrets stage created the synthetic secrets, repeated with changed=0, adopted the disposable PostgreSQL volume, and rejected a missing secret for existing data.',
     baseRuntime: 'PASS: real Ansible base stage converged and repeated with changed=0; disposable database/data adoption, schema/role/secret and Tunnel drift denials succeeded on the same service identity.',
-    application: 'PASS: after the prior base fixture was fully cleaned, a second clean resource set on the same service identity ran Ansible secrets, base, prepare, initialize-schema, initialize-fresh, enable and pause. Secrets, base and prepare repeats reported changed=0; the schema and activation operation tasks reported unchanged. The PostgreSQL container, cluster system identifier, PostgreSQL volume mountpoint and app data volume identities remained unchanged, and an API-created project survived the repeated initialize-fresh stage. Enable used a loopback TLS identity fixture with synthetic Access headers; no public identity was contacted.',
+    application: 'PASS: after the prior base fixture was fully cleaned, a second resource set on the same service identity ran Ansible secrets, base, prepare, initialize-schema, legacy bootstrap-preflight, initialize-fresh, enable, pause and resume. The signed legacy API served an API-created project before controller activation; candidate preflight rejected deliberate runtime drift while leaving the legacy writer active and route blocked. The project survived activation and repeated initialize-fresh. Enable used loopback TLS with synthetic Access headers; no public identity was contacted. The rootless user manager restarted and boot recovery retained the committed writer, data and route; the VM itself was not rebooted.',
   },
-  lifecycleBoundary: 'The signed updater lifecycle follows in the same workflow run on its own isolated fixture identity and state. The application scenario is clean fresh initialization, not adoption of an already-running application.',
+  lifecycleBoundary: 'The signed updater lifecycle follows in the same workflow run on its own isolated fixture identity and state. The application scenario starts an exact signed legacy API on the prepared database, checks Ansible bootstrap-preflight and project continuity, then activates a private controller; it does not perform the externally backup-gated Phase D cutover.',
   notChecked: [
-    'Ansible D cutover and automatic polling beyond the brief synthetic enable/pause exercise',
-    'Adoption of a complete existing application deployment end-to-end',
-    'Real external Access and public identity acceptance',
-    'Target VM reboot, external Access and author UI acceptance, remote restore host, and measured RPO/RTO',
+    'Successful backup-gated Phase D cutover and long-running automatic polling',
+    'Complete serving-host drift reconciliation and Terraform/Cloudflare handoff',
+    'Full target VM reboot; only the rootless user manager was restarted',
+    'Real external backup custody, public Access and identity acceptance',
+    'Human author UI acceptance, remote restore host, and measured RPO/RTO',
   ],
 };
 if (!/^[a-f0-9]{40}$/u.test(result.sourceSha ?? '') || !/^\d+$/u.test(result.workflowRunId ?? '') || !result.runnerName) {

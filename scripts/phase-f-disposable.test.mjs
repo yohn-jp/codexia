@@ -48,7 +48,7 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
   assert.match(runtimeJob, /permissions:\s*\n\s+contents: read\s*\n\s+actions: read\s*\n\s+packages: read/u);
   assert.doesNotMatch(runtimeJob, /(?:contents|actions|packages):\s*write/u);
   assert.doesNotMatch(workflow, /environment:\s*codexia-production|CODEXIA_CHANNEL_SIGNING_KEY|CODEXIA_PRODUCTION_SSH|terraform apply|ansible_host:/u);
-  for (const marker of ['NOT_CHECKED', 'same Ubuntu 26.04 runner', 'complete serving-host drift', 'VM reboot']) {
+  for (const marker of ['NOT_CHECKED', 'same Ubuntu 26.04 runner', 'complete serving-host drift', 'VM-level reboot']) {
     assert.ok(evidenceDoc.includes(marker), 'Missing evidence boundary: ' + marker);
   }
   const continuitySyntax = spawnSync('bash', ['-n', path.join(root, 'deploy/ansible/test-phase-f-ansible-continuity.sh')], { encoding: 'utf8' });
@@ -72,9 +72,10 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
     'phase_f_xdg_generator_path',
     'Phase F fixture manager XDG and updater environment verified after systemd environment generation.',
     'NODE_OPTIONS=--import=$source_root/scripts/phase-f-fetch-loader.mjs',
-    'CODEXIA_PHASE_F_CHANNEL_FILE=$phase_dir/channel-fresh-schema.json',
+    'CODEXIA_PHASE_F_CHANNEL_FILE=$phase_dir/channel-bootstrap.json',
     'CODEXIA_PHASE_F_FRONTEND_URL=$frontend_identity_url',
     'CODEXIA_PHASE_F_FRONTEND_IDENTITY_FILE=$phase_dir/simulated-frontend-identity-fresh-schema.json',
+    'channel-bootstrap.json',
     'SSL_CERT_FILE=$phase_dir/identity-server.crt',
     'NO_PROXY=127.0.0.1,localhost',
     'tar -C "$repo_root" -cf - deploy scripts packages/persistence-postgres/migrations',
@@ -84,9 +85,21 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
     'apply_runner base',
     'apply_service prepare',
     'apply_service initialize-schema',
+    'apply_service bootstrap-preflight',
+    'legacy_project_probe',
+    'release-0.1.254.json',
+    'CODEXIA_PHASE_F_DRIFT=1',
+    'Legacy candidate preflight published a private route before cutover.',
+    'Successful Phase D cutover remains gated on off-VM backup and restore evidence.',
     'apply_service initialize-fresh',
     'apply_service enable',
     'apply_service pause',
+    'apply_service resume',
+    'assert_controller_state true',
+    'assert_controller_state false',
+    'systemctl restart "user@$service_uid.service"',
+    'apply_service initialize "$tmp/restart-recovery.log"',
+    'userManagerRestart',
     "fetch(origin + '/api/v1/persistence/projects'",
     '"$phase_dir/release-0.1.455.json" "$tmp/release-0.1.455.json"',
     'PHASE_F_RELEASE_FILE="$tmp/release-0.1.455.json"',
@@ -220,7 +233,7 @@ test('Phase F channel factory derives signed sequences from certified embedded r
   });
   const freshSchemaRelease = {
     ...records[2], version: '0.1.4', sourceSha: source('d'), image: image('d'),
-    migrationFingerprint: 'sha256:' + 'd'.repeat(64),
+    migrationFingerprint: records[2].migrationFingerprint,
   };
   const channels = createSignedTestChannels(records, {
     now: Date.parse('2026-11-16T12:00:00.000Z'), freshSchemaRelease,
@@ -230,6 +243,10 @@ test('Phase F channel factory derives signed sequences from certified embedded r
   assert.equal(channels.first.candidate.version, '0.1.2');
   assert.equal(channels.second.candidate.version, '0.1.3');
   assert.equal(JSON.parse(Buffer.from(channels.freshSchema.envelope.payload, 'base64').toString('utf8')).releases[0].version, '0.1.4');
+  const bootstrapReleases = JSON.parse(Buffer.from(channels.bootstrap.envelope.payload, 'base64').toString('utf8')).releases;
+  assert.deepEqual(bootstrapReleases.map(release => release.version), ['0.1.3', '0.1.4']);
+  assert.equal(channels.bootstrap.legacy.version, '0.1.3');
+  assert.equal(channels.bootstrap.candidate.version, '0.1.4');
   assert.throws(() => parseComponentRelease(releaseInfo('0.1.2', source('a'), 'b'), '0.1.2', source('b'), image('b'), image('e'), compatibility), /release metadata|source/i);
   assert.throws(() => parseComponentRelease(releaseInfo('0.1.1', source('a'), 'a'), '0.1.1', source('a'), image('a'), image('f'), compatibility), /Full image digest/i);
   assert.throws(() => parseComponentRelease({ ...releaseInfo('0.1.1', source('a'), 'a'), prerelease: true }, '0.1.1', source('a'), image('a'), image('d'), compatibility), /prerelease/i);

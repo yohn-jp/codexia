@@ -62,11 +62,11 @@ cleanup() {
     else
       user_systemctl stop codexia-updater.timer codexia-updater-boot.service codexia-updater.service \
         codexia-preflight-blue.service codexia-preflight-green.service codexia-slot-blue.service \
-        codexia-slot-green.service codexia-api-proxy.service codexia-tunnel.service codexia-db.service \
+        codexia-slot-green.service codexia-api.service codexia-api-proxy.service codexia-tunnel.service codexia-db.service \
         codexia-postgres-volume.service codexia-data-volume.service codexia-history-volume.service >/dev/null 2>&1 || true
       user_systemctl disable codexia-updater-boot.service >/dev/null 2>&1 || true
       user_systemctl disable codexia-updater.timer >/dev/null 2>&1 || true
-      rootless rm -f codexia-preflight-blue codexia-preflight-green codexia-slot-blue codexia-slot-green \
+      rootless rm -f codexia-api codexia-preflight-blue codexia-preflight-green codexia-slot-blue codexia-slot-green \
         codexia-api-proxy codexia-tunnel codexia-db >/dev/null 2>&1 || true
       as_service rm -f \
         "$service_home/.config/containers/systemd/codexia.network" \
@@ -75,6 +75,7 @@ cleanup() {
         "$service_home/.config/containers/systemd/codexia-data.volume" \
         "$service_home/.config/containers/systemd/codexia-history.volume" \
         "$service_home/.config/containers/systemd/codexia-db.container" \
+        "$service_home/.config/containers/systemd/codexia-api.container" \
         "$service_home/.config/containers/systemd/codexia-tunnel.container" \
         "$service_home/.config/containers/systemd/codexia-api-proxy.container" \
         "$service_home/.config/containers/systemd/codexia-slot-blue.container" \
@@ -90,7 +91,7 @@ cleanup() {
       rootless volume rm codexia-postgres codexia-data codexia-history >/dev/null 2>&1 || true
       rootless secret rm codexia-auth-token codexia-tunnel-token codexia-postgres-admin-password \
         codexia-postgres-app-password codexia-postgres-preflight-password >/dev/null 2>&1 || true
-      for resource in codexia-db codexia-tunnel codexia-api-proxy codexia-slot-blue codexia-slot-green codexia-preflight-blue codexia-preflight-green; do
+      for resource in codexia-db codexia-api codexia-tunnel codexia-api-proxy codexia-slot-blue codexia-slot-green codexia-preflight-blue codexia-preflight-green; do
         rc=0; rootless container exists "$resource" >/dev/null 2>&1 || rc=$?
         [[ "$rc" == 1 ]] || cleanup_status=1
       done
@@ -166,7 +167,7 @@ as_service /usr/bin/test ! -e "$phase_dir" || fail 'Application fixture state al
 as_service /usr/bin/test ! -L "$phase_dir" || fail 'Application fixture state is a symlink; refusing adoption.'
 [[ ! -e /opt/codexia-updater && ! -L /opt/codexia-updater ]] || fail 'Updater source already exists; refusing adoption.'
 [[ ! -e /etc/codexia && ! -L /etc/codexia ]] || fail 'Protected PostgreSQL config already exists; refusing adoption.'
-for resource in codexia-db codexia-tunnel codexia-api-proxy codexia-slot-blue codexia-slot-green codexia-preflight-blue codexia-preflight-green; do
+for resource in codexia-db codexia-api codexia-tunnel codexia-api-proxy codexia-slot-blue codexia-slot-green codexia-preflight-blue codexia-preflight-green; do
   rc=0; rootless container exists "$resource" >/dev/null 2>&1 || rc=$?
   [[ "$rc" == 1 ]] || fail "Application fixture container already exists: $resource"
 done
@@ -227,7 +228,7 @@ sudo -H -u "$service_user" env HOME="$service_home" XDG_CONFIG_HOME="$service_ho
   GH_TOKEN="$GH_TOKEN" GITHUB_SHA="$GITHUB_SHA" \
   /usr/bin/node "$source_root/scripts/phase-f-test-channel.mjs" --out "$phase_dir/channel" --schema-release-0.1.455
 
-for file in test-channel-public.pem channel-fresh-schema.json simulated-frontend-identity-fresh-schema.json release-0.1.455.json; do
+for file in test-channel-public.pem channel-fresh-schema.json channel-bootstrap.json simulated-frontend-identity-fresh-schema.json release-0.1.254.json release-0.1.455.json; do
   sudo install -o "$service_user" -g "$service_group" -m 0600 "$phase_dir/channel/$file" "$phase_dir/$file"
 done
 sudo install -o "$(id -u)" -g "$(id -g)" -m 0600 \
@@ -387,7 +388,7 @@ const vars = {
     XDG_RUNTIME_DIR: '/run/user/' + uid,
     XDG_STATE_HOME: '/home/codexia-ci-host/.local/state',
     NODE_OPTIONS: '--import=' + source + '/scripts/phase-f-fetch-loader.mjs',
-    CODEXIA_PHASE_F_CHANNEL_FILE: directory + '/channel-fresh-schema.json',
+    CODEXIA_PHASE_F_CHANNEL_FILE: directory + '/channel-bootstrap.json',
     CODEXIA_PHASE_F_FRONTEND_URL: frontendUrl,
     CODEXIA_PHASE_F_FRONTEND_IDENTITY_FILE: directory + '/simulated-frontend-identity-fresh-schema.json',
     SSL_CERT_FILE: caPath,
@@ -407,9 +408,10 @@ apply_runner() {
 }
 apply_service() {
   local stage=$1 log=$2 status=0
+  shift 2
   as_service env ANSIBLE_LOCAL_TEMP="$phase_dir/ansible-local" "$ansible_playbook" \
     -i "$phase_dir/inventory.yml" "$source_root/deploy/ansible/site.yml" \
-    -e "codexia_stage=$stage" -e "@$phase_dir/stage-vars.json" > "$log" 2>&1 || status=$?
+    -e "codexia_stage=$stage" -e "@$phase_dir/stage-vars.json" "$@" > "$log" 2>&1 || status=$?
   if (( status != 0 )); then cat "$log" >&2; return "$status"; fi
 }
 install_fixture_manager_xdg() {
@@ -430,7 +432,7 @@ if [ "\$(id -u)" = "$service_uid" ]; then
     'XDG_CONFIG_HOME=$service_home/.config' \
     'XDG_RUNTIME_DIR=/run/user/$service_uid' \
     'NODE_OPTIONS=--import=$source_root/scripts/phase-f-fetch-loader.mjs' \
-    'CODEXIA_PHASE_F_CHANNEL_FILE=$phase_dir/channel-fresh-schema.json' \
+    'CODEXIA_PHASE_F_CHANNEL_FILE=$phase_dir/channel-bootstrap.json' \
     'CODEXIA_PHASE_F_FRONTEND_URL=$frontend_identity_url' \
     'CODEXIA_PHASE_F_FRONTEND_IDENTITY_FILE=$phase_dir/simulated-frontend-identity-fresh-schema.json' \
     'SSL_CERT_FILE=$phase_dir/identity-server.crt' \
@@ -444,7 +446,7 @@ EOF
   grep -Fxq "XDG_CONFIG_HOME=$service_home/.config" <<<"$manager_environment" || fail 'Fixture user manager has the wrong XDG_CONFIG_HOME after generator reload.'
   grep -Fxq "XDG_RUNTIME_DIR=/run/user/$service_uid" <<<"$manager_environment" || fail 'Fixture user manager has the wrong XDG_RUNTIME_DIR after generator reload.'
   grep -Fxq "NODE_OPTIONS=--import=$source_root/scripts/phase-f-fetch-loader.mjs" <<<"$manager_environment" || fail 'Fixture user manager is missing the updater metadata fetch loader.'
-  grep -Fxq "CODEXIA_PHASE_F_CHANNEL_FILE=$phase_dir/channel-fresh-schema.json" <<<"$manager_environment" || fail 'Fixture user manager is missing the signed channel fixture.'
+  grep -Fxq "CODEXIA_PHASE_F_CHANNEL_FILE=$phase_dir/channel-bootstrap.json" <<<"$manager_environment" || fail 'Fixture user manager is missing the signed channel fixture.'
   grep -Fxq "CODEXIA_PHASE_F_FRONTEND_URL=$frontend_identity_url" <<<"$manager_environment" || fail 'Fixture user manager is missing the loopback identity URL.'
   grep -Fxq "CODEXIA_PHASE_F_FRONTEND_IDENTITY_FILE=$phase_dir/simulated-frontend-identity-fresh-schema.json" <<<"$manager_environment" || fail 'Fixture user manager is missing the simulated identity document.'
   grep -Fxq "SSL_CERT_FILE=$phase_dir/identity-server.crt" <<<"$manager_environment" || fail 'Fixture user manager is missing the loopback TLS certificate.'
@@ -515,6 +517,41 @@ assert.ok(projects.some(project => project.id === process.argv[2] && project.tit
 NODE
   fi
 }
+legacy_project_probe() {
+  rootless exec -i codexia-api node --input-type=module <<'NODE'
+import { readFileSync } from 'node:fs';
+const origin = 'http://127.0.0.1:3000';
+const token = readFileSync('/run/secrets/codexia-auth-token', 'utf8').trim();
+const login = await fetch(origin + '/api/login', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
+if (!login.ok) throw new Error('Disposable legacy app login failed');
+const cookie = login.headers.get('set-cookie')?.split(';', 1)[0];
+if (!cookie) throw new Error('Disposable legacy app session cookie unavailable');
+const response = await fetch(origin + '/api/v1/persistence/projects', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ title: 'Phase F Ansible application continuity' }) });
+if (response.status !== 201) throw new Error('Disposable legacy project creation failed: ' + response.status);
+const created = await response.json();
+if (typeof created.project?.id !== 'string' || !created.project.id) throw new Error('Disposable legacy project identity unavailable');
+process.stdout.write(created.project.id);
+NODE
+}
+assert_controller_state() {
+  local expected_paused=$1 status_file="$tmp/controller-status.json"
+  as_service sh "$source_root/deploy/updater/codexia-updater" status \
+    "$service_home/.config/codexia-updater/config.json" > "$status_file"
+  /usr/bin/node --input-type=module - "$status_file" "$expected_paused" <<'NODE'
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+const [file, expectedPaused] = process.argv.slice(2);
+const { state, observed } = JSON.parse(readFileSync(file, 'utf8'));
+assert.equal(state.paused, expectedPaused === 'true');
+assert.ok(['idle', 'committed'].includes(state.journal.phase));
+assert.equal(observed.writers.length, 1);
+assert.deepEqual(observed.writers[0], {
+  slot: state.journal.active.slot,
+  image: state.installed.image,
+});
+assert.equal(observed.route, state.journal.active.slot);
+NODE
+}
 
 printf '%s\n' '=== Ansible secrets and base stages: clean resource set on the same host identity ==='
 apply_runner secrets "$tmp/secrets-first.log"
@@ -550,13 +587,70 @@ require_task_ok "$tmp/schema-repeat.log" 'Run fresh-only migration in the verifi
 assert_database_snapshot
 printf '%s\n' 'PASS: repeated initialize-schema applied no migration and retained the database and cluster identities.'
 
+printf '%s\n' '=== Exercise legacy application preflight and reject runtime drift before cutover ==='
+as_service /usr/bin/node --input-type=module - \
+  "$source_root/deploy/updater/standalone-host.mjs" "$phase_dir/release-0.1.254.json" "$phase_dir/legacy-api.container" <<'NODE'
+import { readFile, writeFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+const [hostModule, releaseFile, output] = process.argv.slice(2);
+const { imageConfig } = await import(pathToFileURL(hostModule));
+const release = JSON.parse(await readFile(releaseFile, 'utf8'));
+const runtime = {
+  format: 'codexia-runtime/v1', profile: 'core', modelCachePath: null,
+  tmpfs: { tempSize: '64m', moduleCacheSize: '1g' },
+  resources: { memoryMaxBytes: null, cpuQuotaPercent: null },
+};
+const unit = imageConfig(release, { CODEXIA_BROWSER_AUTH: 'token' }, runtime).replace('ContainerName=PLACEHOLDER', 'ContainerName=codexia-api');
+await writeFile(output, unit, { mode: 0o600, flag: 'wx' });
+NODE
+as_service /usr/bin/install -m 0600 "$phase_dir/legacy-api.container" "$service_home/.config/containers/systemd/codexia-api.container"
+as_service rm -f "$phase_dir/legacy-api.container"
+user_systemctl daemon-reload
+user_systemctl start codexia-api.service
+for _ in $(seq 1 60); do
+  if rootless exec codexia-api node --input-type=module -e 'const response=await fetch("http://127.0.0.1:3000/api/version");if(!response.ok)process.exit(1)' >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+[[ "$(user_systemctl is-active codexia-api.service)" == active ]] || fail 'The seeded legacy application did not remain active.'
+legacy_project_id=$(legacy_project_probe)
+[[ -n "$legacy_project_id" ]] || fail 'API-created legacy project identity is empty.'
+apply_service bootstrap-preflight "$tmp/bootstrap-preflight.log" \
+  -e "codexia_installed_release_file=$phase_dir/release-0.1.254.json" \
+  -e "codexia_bootstrap_candidate_file=$phase_dir/release-0.1.455.json"
+[[ "$(as_service cat "$service_home/.local/state/codexia-updater/route")" == blocked ]] || fail 'Legacy candidate preflight published a private route before cutover.'
+[[ "$(user_systemctl is-active codexia-api.service)" == active ]] || fail 'Successful legacy candidate preflight stopped the existing writer.'
+[[ ! -e "$service_home/.local/state/codexia-updater/controller.json" ]] || fail 'Legacy candidate preflight initialized controller ownership before cutover.'
+rootless exec codexia-api node --input-type=module -e 'const value=await fetch("http://127.0.0.1:3000/api/version").then(response=>response.json());if(value.version!=="0.1.254")process.exit(1)'
+as_service /usr/bin/sed -i '/Environment=CODEXIA_PROFILE=core/a Environment=CODEXIA_PHASE_F_DRIFT=1' \
+  "$service_home/.config/containers/systemd/codexia-api.container"
+user_systemctl daemon-reload
+user_systemctl restart codexia-api.service
+[[ "$(user_systemctl is-active codexia-api.service)" == active ]] || fail 'The drifted disposable legacy writer did not remain active for the denial check.'
+if apply_service bootstrap-preflight "$tmp/bootstrap-drift.log" \
+  -e "codexia_installed_release_file=$phase_dir/release-0.1.254.json" \
+  -e "codexia_bootstrap_candidate_file=$phase_dir/release-0.1.455.json"; then
+  fail 'Legacy candidate preflight accepted runtime drift.'
+fi
+grep -Fq 'Unknown Codexia runtime environment setting: CODEXIA_PHASE_F_DRIFT' "$tmp/bootstrap-drift.log" || fail 'Legacy drift rejection did not identify the unexpected runtime setting.'
+[[ "$(as_service cat "$service_home/.local/state/codexia-updater/route")" == blocked ]] || fail 'Rejected legacy drift changed the private route.'
+[[ "$(user_systemctl is-active codexia-api.service)" == active ]] || fail 'Rejected legacy drift stopped the currently serving writer.'
+[[ ! -e "$service_home/.local/state/codexia-updater/controller.json" ]] || fail 'Rejected legacy drift created controller ownership state.'
+if rootless container exists codexia-slot-blue >/dev/null 2>&1; then fail 'Rejected legacy drift started a new blue writer.'; fi
+printf '%s\n' 'PASS: Ansible bootstrap-preflight verified the serving signed legacy application; injected runtime drift was rejected while the legacy writer stayed active, the route stayed blocked and no slot/controller state was created. Successful Phase D cutover remains gated on off-VM backup and restore evidence.'
+user_systemctl stop codexia-api.service
+if rootless container exists codexia-api >/dev/null 2>&1; then rootless rm -f codexia-api >/dev/null; fi
+as_service rm -f "$service_home/.config/containers/systemd/codexia-api.container"
+user_systemctl daemon-reload
+[[ ! -e "$service_home/.local/state/codexia-updater/controller.json" ]] || fail 'Legacy preflight scenario unexpectedly created controller state.'
+
 printf '%s\n' '=== Real fresh activation and repeat on the same schema and volumes ==='
 apply_service initialize-fresh "$tmp/fresh-first.log"
 assert_database_snapshot
 [[ "$(rootless inspect --format '{{.State.Running}}' codexia-slot-blue)" == true ]] || fail 'Initial private Core writer is not running.'
 [[ "$(rootless inspect --format '{{.State.Running}}' codexia-api-proxy)" == true ]] || fail 'Initial private proxy is not running.'
 [[ "$(as_service cat "$service_home/.local/state/codexia-updater/route")" == blue ]] || fail 'Fresh private activation did not route to the initial slot.'
-project_id=$(project_probe)
+project_id=$legacy_project_id
+project_probe "$project_id"
 [[ -n "$project_id" ]] || fail 'API-created project identity is empty.'
 writer_id=$(rootless inspect --format '{{.Id}}' codexia-slot-blue)
 proxy_id=$(rootless inspect --format '{{.Id}}' codexia-api-proxy)
@@ -582,15 +676,50 @@ grep -Fxq 'ansible-enable:200' "$tmp/identity-requests.log" || fail 'Ansible ena
 apply_service pause "$tmp/pause.log"
 [[ "$(user_systemctl is-active codexia-updater.timer)" == active ]] || fail 'Pause unexpectedly changed the polling timer state.'
 [[ "$(user_systemctl is-enabled codexia-updater.timer)" == enabled ]] || fail 'Pause unexpectedly changed the polling timer enablement.'
+assert_controller_state true
+apply_service resume "$tmp/resume.log"
+[[ "$(user_systemctl is-active codexia-updater.timer)" == active ]] || fail 'Resume unexpectedly changed the polling timer state.'
+[[ "$(user_systemctl is-enabled codexia-updater.timer)" == enabled ]] || fail 'Resume unexpectedly changed the polling timer enablement.'
+assert_controller_state false
+assert_database_snapshot
+project_probe "$project_id"
+
+printf '%s\n' '=== Restart the disposable rootless user manager and verify committed-writer recovery ==='
+manager_pid_before=$(sudo systemctl show --property=MainPID --value "user@$service_uid.service")
+[[ "$manager_pid_before" =~ ^[1-9][0-9]*$ ]] || fail 'The disposable user manager PID is unavailable before restart.'
+sudo systemctl restart "user@$service_uid.service"
+manager_pid_after=''
+for _ in $(seq 1 60); do
+  if as_service /usr/bin/systemctl --user show-environment >/dev/null 2>&1; then
+    manager_pid_after=$(sudo systemctl show --property=MainPID --value "user@$service_uid.service")
+    [[ "$manager_pid_after" =~ ^[1-9][0-9]*$ && "$manager_pid_after" != "$manager_pid_before" ]] && break
+  fi
+  sleep 1
+done
+[[ "$manager_pid_after" =~ ^[1-9][0-9]*$ && "$manager_pid_after" != "$manager_pid_before" ]] || fail 'The disposable rootless user manager did not restart.'
+[[ "$(user_systemctl show --property=Result --value codexia-updater-boot.service)" == success ]] || fail 'Boot recovery did not complete successfully after the user manager restart.'
+for unit in codexia-db.service codexia-api-proxy.service codexia-slot-blue.service codexia-updater.timer; do
+  [[ "$(user_systemctl is-active "$unit")" == active ]] || fail "Committed application unit did not recover after the user manager restart: $unit"
+done
+database_identity_after_restart=$(database_snapshot)
+[[ "$(sed -n '2,3p' <<<"$database_identity_after_restart")" == "$(sed -n '2,3p' <<<"$database_identity")" ]] || fail 'User manager recovery changed the PostgreSQL volume or cluster identity.'
+assert_controller_state false
+project_probe "$project_id"
+apply_service initialize "$tmp/restart-recovery.log"
+assert_controller_state false
+[[ "$(user_systemctl is-active codexia-updater.timer)" == active ]] || fail 'Ansible initialize recovery changed the enabled polling timer.'
+project_probe "$project_id"
+printf 'PASS: rootless user manager restarted (%s→%s); boot recovery retained one committed writer, the private route, PostgreSQL volume/cluster identity and API-created project. The VM itself was not rebooted.\n' \
+  "$manager_pid_before" "$manager_pid_after"
 kill "$identity_server_pid"
 wait "$identity_server_pid" || true
 identity_server_pid=''
-printf '%s\n' 'PASS: Ansible enable and pause used only synthetic loopback TLS/Access fixture credentials; anonymous probe was denied.'
+printf '%s\n' 'PASS: Ansible enable→pause→resume used only synthetic loopback TLS/Access fixture credentials; anonymous probe was denied.'
 printf '%s\n' 'PASS: real Ansible base→prepare→schema→fresh activation repeat convergence kept one PostgreSQL identity and project data.'
 
-/usr/bin/node --input-type=module - "$evidence_dir/app-convergence-results.json" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$RUNNER_NAME" "$service_uid" "$database_identity" "$ledger_after_schema" "$writer_id" "$proxy_id" "$data_identity" "$history_identity" "$project_id" "$proxy_image" <<'NODE'
+/usr/bin/node --input-type=module - "$evidence_dir/app-convergence-results.json" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$RUNNER_NAME" "$service_uid" "$database_identity" "$ledger_after_schema" "$writer_id" "$proxy_id" "$data_identity" "$history_identity" "$project_id" "$proxy_image" "$legacy_project_id" "$manager_pid_before" "$manager_pid_after" <<'NODE'
 import { writeFile } from 'node:fs/promises';
-const [file, sourceSha, workflowRunId, runAttempt, runnerName, serviceUid, databaseIdentity, migrationLedger, writerId, proxyId, dataIdentity, historyIdentity, projectId, image] = process.argv.slice(2);
+const [file, sourceSha, workflowRunId, runAttempt, runnerName, serviceUid, databaseIdentity, migrationLedger, writerId, proxyId, dataIdentity, historyIdentity, projectId, image, legacyProjectId, managerPidBefore, managerPidAfter] = process.argv.slice(2);
 if (!/^[a-f0-9]{40}$/.test(sourceSha) || !/^\d+$/.test(workflowRunId) || !/^\d+$/.test(runAttempt) || !runnerName) {
   throw new Error('Refusing unbound Phase F Ansible application evidence');
 }
@@ -601,20 +730,22 @@ if (!/^[a-f0-9]{64}$/.test(databaseContainerId) || !/^codexia-postgres\|\//.test
 const result = {
   format: 'codexia-phase-f-ansible-app-convergence/v1',
   sourceSha, workflowRunId, runAttempt, runnerName,
-  fixture: { serviceUser: 'codexia-ci-host', serviceUid: Number(serviceUid), lifecycle: 'A clean application resource set was created after prior host/base assertions cleaned their runtime; this is fresh initialization, not adoption of a running app.' },
+  fixture: { serviceUser: 'codexia-ci-host', serviceUid: Number(serviceUid), lifecycle: 'A signed legacy API release served against the initialized database before controller activation; Ansible bootstrap-preflight checked the existing writer and rejected a deliberately drifted runtime without changing its route or ownership.' },
   stages: {
     secrets: 'PASS: real Ansible first apply and no-change repeat with synthetic credentials.',
     base: 'PASS: real Ansible first apply and no-change repeat; same rootless PostgreSQL container, cluster system identifier and named volume persisted into all application stages.',
     prepare: 'PASS: real Ansible prepare and no-change repeat on the same database.',
     initializeSchema: 'PASS: exact signed Core release initialized a fresh schema; the repeated migration task reported unchanged, migration ledger was identical, and database identity was stable.',
-    initializeFresh: 'PASS: exact signed release privately activated with polling/public handoff disabled; repeat activation task reported unchanged and writer, proxy, data/history volumes, route and API-created project ID/content persisted.',
-    enablePause: 'PASS: Ansible enable verified a loopback HTTPS /api/version response and exact synthetic Access headers, enabled polling, then the normal pause stage preserved timer state. An unauthenticated request to that fixture returned 403. No public Cloudflare Access or public identity was contacted.',
+    legacyPreflight: 'PASS: Ansible bootstrap-preflight verified the already-serving signed 0.1.254 legacy application against the signed 0.1.455 candidate while the public route stayed blocked; injected CODEXIA_PHASE_F_DRIFT runtime state was rejected with the legacy writer still active and no controller journal or blue slot created. This exercises the cutover candidate verifier but does not perform the backup-gated cutover transaction.',
+    initializeFresh: `PASS: exact signed release privately activated with polling/public handoff disabled; the project created through the legacy API (${legacyProjectId}) survived activation and repeated initialize-fresh, while the writer, proxy, data/history volumes and route identities persisted.`,
+    enablePauseResume: 'PASS: Ansible enable verified a loopback HTTPS /api/version response and exact synthetic Access headers, enabled polling, and pause→resume changed only the controller pause state while preserving the active/enabled timer and the single committed writer. An unauthenticated request to that fixture returned 403. No public Cloudflare Access or public identity was contacted.',
+    userManagerRestart: `PASS: restarted only the disposable rootless user manager (MainPID ${managerPidBefore}→${managerPidAfter}); its boot recovery unit succeeded, and Ansible initialize verified the committed writer, route, PostgreSQL volume/cluster identity and API-created project after recovery. The VM itself was not rebooted.`,
   },
   identities: { databaseContainerId, postgresVolumeIdentity, clusterSystemIdentifier, migrationLedger, writerId, proxyId, dataIdentity, historyIdentity, projectId, image },
   notChecked: [
-    'Adoption of an already-serving complete application deployment',
-    'Real public enable acceptance and long-running polling, D cutover, Terraform or Cloudflare handoff',
-    'Target-VM reboot, real external Access/public identity and author acceptance, remote restore host and measured RPO/RTO',
+    'Successful Phase D cutover; initialize/bootstrap-cutover require the existing verified off-VM backup proof and isolated restore receipt, which this fixture does not create or replace',
+    'Real public enable acceptance, long-running polling, Terraform or Cloudflare handoff, external Access/public identity and author acceptance',
+    'VM-level reboot, remote restore host, external backup custody and measured RPO/RTO',
   ],
 };
 await writeFile(file, JSON.stringify(result, null, 2) + '\n', { mode: 0o644, flag: 'wx' });
