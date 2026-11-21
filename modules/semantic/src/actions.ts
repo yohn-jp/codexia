@@ -362,10 +362,12 @@ export function createSemanticActions(moduleContext: ModuleContext): ModuleActio
       const task = tasks.begin(context, taskId, "reading_snapshot");
       try {
         if (!input.query.trim()) return { ok: true, snapshot: context.reader.snapshot, data: { query: input.query, mode: input.mode, results: [], taskId } } as ActionResult;
-        const allEntities = await readCanonicalSnapshotEntities(context.reader, task.signal);
-        const entities = input.scope ? allEntities.filter((entity) => inSearchScope(entity.filePath, input.scope!)) : allEntities;
-        const knownTerms = getKnownTerms(allEntities);
-        const lexical = searchSnapshotLexically(entities, input.query, Math.max(input.limit * 2, input.limit), knownTerms);
+        let lexical: LexicalHit[] = [];
+        if (input.mode !== "expression") {
+          const allEntities = await readCanonicalSnapshotEntities(context.reader, task.signal);
+          const entities = input.scope ? allEntities.filter((entity) => inSearchScope(entity.filePath, input.scope!)) : allEntities;
+          lexical = searchSnapshotLexically(entities, input.query, input.limit * 2, getKnownTerms(allEntities));
+        }
         let nearest: SemanticPassageHit[] = [];
         let vectorUnavailable = false;
         if (input.mode === "expression" || input.mode === "sentence" || input.mode === "scene") {
