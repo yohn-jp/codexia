@@ -191,6 +191,41 @@ test('operational proof remains owned by one exact-head root task and matching i
   assert.ok(Object.hasOwn(audit.on,'pull_request'));
 });
 
+test('iOS packaging workflow changes retain root proof and its shared inputs stay fully verified', async () => {
+  const { OPERATIONAL_ROOT_PATHS } = await import('./ci-impact.mjs');
+  const workflowPath = '.github/workflows/ios-unsigned-ipa.yml';
+  const workflow = parse(readFileSync(new URL('../' + workflowPath, import.meta.url), 'utf8'));
+  assert.ok(OPERATIONAL_ROOT_PATHS.includes(workflowPath));
+  assert.deepEqual(Object.keys(workflow.on), ['workflow_dispatch']);
+  assert.equal(workflow.jobs.build['runs-on'], 'macos-15');
+  assert.ok(workflow.jobs.build.steps.some(step => step.run?.includes('scripts/ios/validate-web-bundle.mjs')));
+  assert.ok(workflow.jobs.build.steps.some(step => step.run?.includes('scripts/ios/package-unsigned-ipa.mjs')));
+
+  const workflowOnly = await plan([workflowPath]);
+  assert.deepEqual(workflowOnly.tasks, ['unit-root', 'coverage']);
+  assert.equal(workflowOnly.full_model_oci, false);
+
+  const sharedImplementationPaths = [
+    'scripts/ios/validate-web-bundle.mjs',
+    'scripts/ios/package-unsigned-ipa.mjs',
+    'app/native/capacitor.config.ts',
+    'app/src/oauth.ts',
+    'pnpm-lock.yaml',
+  ];
+  for (const sharedPath of sharedImplementationPaths) {
+    const withWorkflow = await plan([workflowPath, sharedPath]);
+    const implementationOnly = await plan([sharedPath]);
+    for (const task of implementationOnly.tasks) assert.ok(withWorkflow.tasks.includes(task), `${sharedPath}: lost ${task}`);
+    assert.equal(withWorkflow.mode, implementationOnly.mode, sharedPath);
+    assert.equal(withWorkflow.full_model_oci, implementationOnly.full_model_oci, sharedPath);
+  }
+
+  const unknownMixed = await plan([workflowPath, 'scripts/new-ios-input.mjs']);
+  const unknownOnly = await plan(['scripts/new-ios-input.mjs']);
+  assert.deepEqual(unknownMixed.tasks, unknownOnly.tasks);
+  assert.equal(unknownMixed.mode, 'full');
+});
+
 test('root and coverage-only plans have a single owner for contract test execution', async () => {
   const runner = readFileSync(new URL('./ci-group.mjs', import.meta.url),'utf8');
   const root = JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8'));
