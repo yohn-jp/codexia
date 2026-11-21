@@ -7,7 +7,7 @@ test "${GITHUB_ACTIONS:-}" = true
 test "${CODEXIA_SERVICE_USER:-}" = codexia-phase-b-test
 test "${ANSIBLE_STRATEGY:-}" = mitogen_linear
 test -x "${ANSIBLE_REAL_PLAYBOOK:?missing pinned Ansible executable}"
-test -x "${GITHUB_WORKSPACE:?}/deploy/ansible/site.yml" || test -f "${GITHUB_WORKSPACE}/deploy/ansible/site.yml"
+test -f "${GITHUB_WORKSPACE:?}/deploy/ansible/site.yml"
 
 # Some integration tests construct temporary playbooks under private /tmp
 # directories. Local Mitogen become requires pathname traversal of the cwd.
