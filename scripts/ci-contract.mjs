@@ -30,8 +30,9 @@ export const VERIFICATION_TASKS = [
   'coverage',
 ];
 // Execution groups batch work without removing any validation obligation.
-// Browser lanes retain their stable job names; the WebKit lane also runs Chromium UI/auth specs.
-// Group measured longer specs across the three existing lanes, never share mutable fixtures.
+// Browser lanes retain stable job names and each browser has a dedicated image.
+// Keep all Chromium shards on the writing/reference lanes, and run only WebKit
+// in the WebKit lane. Preserve distinct disposable fixtures for each task.
 export const VERIFICATION_GROUPS = {
   'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'migration', 'core', 'api', 'root'].map(id => `unit-${id}`),
   'unit-modules': ['app', ...WORKSPACES.filter(item => item.path.startsWith('modules/')).map(item => item.id)].map(id => `unit-${id}`),
@@ -43,8 +44,10 @@ export const VERIFICATION_GROUPS = {
   'oci-full': ['oci-full'],
   ...Object.fromEntries(PROFILES.flatMap(profile => [
     [`browser-${profile}-writing`, ['core', 'native-review', 'persistence-database', 'redesign-visual'].map(id => `browser-${profile}-${id}`)],
-    [`browser-${profile}-reference`, ['modular-workspace', 'review-contributions', 'recent-activity', 'job-inbox'].map(id => `browser-${profile}-${id}`)],
-    [`browser-${profile}-webkit`, ['auth-recovery', 'ui-v1', 'webkit'].map(id => `browser-${profile}-${id}`)],
+    // Start the long Chromium UI spec alongside the independent reference
+    // scenarios; keep two workers and preserve every canonical obligation.
+    [`browser-${profile}-reference`, ['ui-v1', 'modular-workspace', 'review-contributions', 'recent-activity', 'job-inbox', 'auth-recovery'].map(id => `browser-${profile}-${id}`)],
+    [`browser-${profile}-webkit`, [`browser-${profile}-webkit`]],
   ])),
   ...Object.fromEntries(NATIVE_SELECTIONS.map(id => [`hosted-native-${id}`, [`hosted-native-${id}`]])),
 };
