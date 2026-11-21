@@ -136,6 +136,8 @@ export interface ApiServerOptions {
   cloudflareAccess?: CloudflareAccessOptions;
   /** Optional standalone API-audience OAuth access tokens for the configured owner. */
   oauthOwner?: OAuthOwnerOptions;
+  /** Exact HTTPS browser origins allowed to call the API cross-origin with bearer tokens. */
+  corsAllowedOrigins?: readonly string[];
   /** Defaults to `<cwd>/app/dist`. */
   staticDir?: string;
   /** Trust X-Forwarded-Proto when TLS terminates at a reverse proxy. */
@@ -243,6 +245,35 @@ function sameOrigin(request: IncomingMessage, trustProxy: boolean): boolean {
   } catch {
     return false;
   }
+}
+
+const CORS_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
+const CORS_HEADERS = new Map([
+  ["authorization", "Authorization"], ["content-type", "Content-Type"],
+  ["idempotency-key", "Idempotency-Key"], ["x-client-id", "X-Client-Id"],
+  ["x-codexia-recent-activity-order", "X-Codexia-Recent-Activity-Order"], ["prefer", "Prefer"],
+]);
+
+function normalizeCorsOrigins(origins: readonly string[] | undefined): ReadonlySet<string> {
+  const normalized = new Set<string>();
+  for (const origin of origins ?? []) {
+    let parsed: URL;
+    try { parsed = new URL(origin); }
+    catch { throw new Error("CORS origins must be exact normalized HTTPS origins"); }
+    if (parsed.protocol !== "https:" || parsed.origin !== origin || parsed.username || parsed.password ||
+        parsed.pathname !== "/" || parsed.search || parsed.hash || normalized.has(origin)) {
+      throw new Error("CORS origins must be unique exact normalized HTTPS origins");
+    }
+    normalized.add(origin);
+  }
+  return normalized;
+}
+
+function vary(response: ServerResponse, value: string): void {
+  const current = response.getHeader("Vary");
+  const values = new Set((Array.isArray(current) ? current.join(",") : String(current ?? "")).split(",").map((item) => item.trim()).filter(Boolean));
+  values.add(value);
+  response.setHeader("Vary", [...values].join(", "));
 }
 
 function sameHostedOrigin(request: IncomingMessage, trustProxy: boolean, audience: string): boolean {
@@ -579,6 +610,8 @@ export function createServer(options: ApiServerOptions): Server {
   }
   if (options.oauthOwner && hosted) throw new Error("Standalone OAuth owner authentication is not available in Hosted mode");
   const authenticateOAuthOwner = options.oauthOwner ? createOAuthOwnerAuthenticator(options.oauthOwner) : undefined;
+  if (options.corsAllowedOrigins && hosted) throw new Error("Standalone browser CORS configuration is not available in Hosted mode");
+  const corsAllowedOrigins = normalizeCorsOrigins(options.corsAllowedOrigins);
   const cloudflareAccess = options.cloudflareAccess ? createCloudflareAccessVerifier(options.cloudflareAccess) : undefined;
   const assignment = hosted?.assignment;
   if (assignment && parseRuntimeAssignment(assignment).instanceId !== assignment.instanceId) {
@@ -1525,6 +1558,22 @@ export function createServer(options: ApiServerOptions): Server {
     const isRead = method === "GET" || method === "HEAD";
     const publicRead = isRead && ["/api/health", "/api/ready", "/api/version", "/health/live", "/health/ready", "/health/startup"].includes(routePath);
     const publicModuleRoute = !hosted && routePath.startsWith("/api/public/projects/") && routePath.includes("/modules/");
+    const originHeader = request.headers.origin;
+    const crossOrigin = originHeader !== undefined && !sameOrigin(request, trustProxy);
+    if (routePath.startsWith("/api/") && crossOrigin) {
+      vary(response, "Origin");
+      vary(response, "Access-Control-Request-Method");
+      vary(response, "Access-Control-Request-Headers");
+      if (typeof originHeader !== "string" || !corsAllowedOrigins.has(originHeader)) {
+        fail(response, 403, "CORS_ORIGIN_DENIED", "Cross-origin API access is not configured for this origin");
+        return;
+      }
+      if (request.headers.cookie !== undefined) {
+        fail(response, 403, "CORS_COOKIE_DENIED", "Cross-origin API access requires bearer credentials without cookies");
+        return;
+      }
+      response.setHeader("Access-Control-Allow-Origin", originHeader);
+    }
 
     if (hosted && (originalPath === "/.well-known/oauth-protected-resource" ||
         originalPath === "/.well-known/oauth-protected-resource/mcp") && method === "GET") {
@@ -1559,6 +1608,25 @@ export function createServer(options: ApiServerOptions): Server {
     if (hosted && routePath === RUNTIME_RESUME_PATH && method === "POST") { await platformResume(request, response, parsedBody); return; }
 
     if (method === "OPTIONS") {
+      if (routePath.startsWith("/api/") && crossOrigin) {
+        const requestedMethod = request.headers["access-control-request-method"];
+        if (typeof requestedMethod !== "string" || !CORS_METHODS.has(requestedMethod.toUpperCase())) {
+          fail(response, 403, "CORS_METHOD_DENIED", "Cross-origin API method is not allowed");
+          return;
+        }
+        const rawHeaders = request.headers["access-control-request-headers"];
+        const requestedHeaders = typeof rawHeaders === "string" && rawHeaders.trim()
+          ? rawHeaders.split(",").map((header) => header.trim().toLowerCase())
+          : [];
+        if (requestedHeaders.some((header) => !header || !CORS_HEADERS.has(header))) {
+          fail(response, 403, "CORS_HEADER_DENIED", "Cross-origin API request headers are not allowed");
+          return;
+        }
+        response.setHeader("Access-Control-Allow-Methods", requestedMethod.toUpperCase());
+        if (requestedHeaders.length) {
+          response.setHeader("Access-Control-Allow-Headers", [...new Set(requestedHeaders)].map((header) => CORS_HEADERS.get(header)!).join(", "));
+        }
+      }
       response.writeHead(204, { Allow: "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS" });
       response.end();
       return;
@@ -1708,7 +1776,7 @@ export function createServer(options: ApiServerOptions): Server {
     };
     const authorizeActionProposal = async (): Promise<void> => {
       if (hosted) { await requireWritePermission(); return; }
-      if (!isCookie && !isBearer) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author or bearer identity is required to propose changes");
+      if (!isAuthor && !isBearer) throw httpFailure(403, "AUTHOR_SESSION_REQUIRED", "An authenticated author or bearer identity is required to propose changes");
     };
     if (shuttingDown && routePath.startsWith("/api/") && !isRead) {
       fail(response, 503, "SHUTTING_DOWN", "The server is draining and is not accepting new mutations");
@@ -2354,6 +2422,8 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     throw new Error("CODEXIA_HOSTED_MODE must be 1 or 0");
   }
   const hostedMode = hostedModeValue === "1";
+  const corsOriginsValue = readCodexiaEnvironment("CORS_ALLOWED_ORIGINS");
+  if (hostedMode && corsOriginsValue !== undefined) throw new Error("CORS origin allowlists are supported only in standalone mode");
   const browserAuth = readCodexiaEnvironment("BROWSER_AUTH") ?? "token";
   if (browserAuth !== "token" && browserAuth !== "cloudflare-access") throw new Error("Invalid CODEXIA_BROWSER_AUTH");
   if (hostedMode && browserAuth !== "token") throw new Error("Cloudflare Access browser authentication is standalone only");
@@ -2414,6 +2484,11 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     ownerSubject: oauthValues.ownerSubject!,
     requiredScopes: (readCodexiaEnvironment("OAUTH_REQUIRED_SCOPES") ?? "codexia:api").split(/\s+/u).filter(Boolean),
   } : undefined;
+  const corsAllowedOrigins: string[] | undefined = corsOriginsValue === undefined ? undefined :
+    corsOriginsValue.split(",").map((origin) => origin.trim()).filter(Boolean);
+  if (corsOriginsValue !== undefined && corsAllowedOrigins?.length === 0) {
+    throw new Error("CODEXIA_CORS_ALLOWED_ORIGINS must contain at least one exact HTTPS origin");
+  }
   const profile = readCodexiaEnvironment("PROFILE") ?? process.env.CODEXIA_BUILD_PROFILE ?? "core";
   const runtimeOptions = await loadProfileRuntimeOptions(profile, cacheDirectory);
   const persistenceOptions = await postgresPersistenceOptions();
@@ -2431,6 +2506,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
         ownerEmail: readCodexiaEnvironment("ACCESS_OWNER_EMAIL") ?? "",
       } } : {}),
       ...(oauthOwner ? { oauthOwner } : {}),
+      ...(corsAllowedOrigins ? { corsAllowedOrigins } : {}),
       trustProxy: readCodexiaEnvironment("TRUST_PROXY") === "1",
       runtimeOptions,
       usageDirectory: readCodexiaEnvironment("USAGE_DIR") ?? process.env.CODEXIA_BUILD_USAGE_DIR ?? resolve(dataDirectory, "host-history"),

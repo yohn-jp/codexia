@@ -43,7 +43,7 @@ Keep the auth-token Podman secret for external MCP bearer requests. The origin v
 
 Deploy the compatible static UI and immutable API image, then enable the VM settings and restart only the API. Test Access login without a token prompt, existing draft recovery, same-origin saves, cross-origin rejection, missing/invalid/wrong-owner assertions, bearer-only proposals and denied author mutations, logout, and reauthentication. Check the VM's outbound HTTPS access to the team's public signing-key endpoint. Do not weaken Access, introduce an API proxy, or publish the API port. To roll back, remove the SSO environment settings and restart using the retained previous image if necessary; the default token flow remains available and the author scope is unchanged.
 
-The UI uses relative `/api/...` URLs, so production has no `VITE_API_URL` or API-origin secret. UI and API share one origin and the API does not send `Access-Control-Allow-Origin`; browser CORS is intentionally disabled. External MCP/API clients must use their supported authorization flow and do not receive a CORS exception.
+The current UI uses relative `/api/...` URLs, so production has no `VITE_API_URL` or API-origin secret. UI and API share one origin and no CORS allowlist is configured by default. The OAuth transition supports optional cross-origin Web calls only when an operator configures exact HTTPS origins in `CODEXIA_CORS_ALLOWED_ORIGINS`; those calls are bearer-only, omit browser credentials, and cannot carry cookies. This setting does not change Cloudflare routes or enable a separate API hostname. External MCP/API clients must use their supported authorization flow and do not receive a CORS exception.
 
 ## Build and release ownership
 

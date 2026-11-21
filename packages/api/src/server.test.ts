@@ -428,7 +428,7 @@ function sourceDomainJobRuntime(cacheDirectory: string): {
 async function startCustomApi(
   store: CoreStore,
   staticDir: string,
-  options: Partial<Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence" | "cloudflareAccess" | "oauthOwner">> = {},
+  options: Partial<Pick<ApiServerOptions, "trustProxy" | "runtime" | "runtimeOptions" | "usageDirectory" | "persistence" | "cloudflareAccess" | "oauthOwner" | "corsAllowedOrigins">> = {},
 ) {
   const server = createServer({ store, authToken: ACCESS_TOKEN, staticDir, persistence: admissionPersistence(store), ...options });
   await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
@@ -2296,6 +2296,7 @@ describe("Codexia HTTP boundary", () => {
     tempDirs.push(staticDir);
     const issuer = "https://identity.example.test/";
     const audience = "https://api.codexia.example";
+    const webOrigin = "https://web.codexia.test";
     const key = generateKeyPairSync("rsa", { modulusLength: 2048 });
     const jwk = { ...key.publicKey.export({ format: "jwk" }), kid: "oauth-owner-test-key", alg: "RS256", use: "sig" };
     const now = Math.floor(Date.now() / 1000);
@@ -2310,7 +2311,7 @@ describe("Codexia HTTP boundary", () => {
     const persistence = await nativePersistence(t);
     const store = new CoreStore({ persistence });
     const api = await startCustomApi(store, staticDir, {
-      persistence, usageDirectory: staticDir,
+      persistence, usageDirectory: staticDir, corsAllowedOrigins: [webOrigin],
       oauthOwner: {
         issuer, audience, jwksUrl: "https://identity.example.test/.well-known/jwks.json",
         ownerSubject: "owner-subject", requiredScopes: ["codexia:api"],
@@ -2322,28 +2323,112 @@ describe("Codexia HTTP boundary", () => {
     });
     t.after(api.close);
     const headers = (credential: string) => ({ Authorization: `Bearer ${credential}` });
+    const browserHeaders = (credential: string) => ({ ...headers(credential), Origin: webOrigin });
     const valid = token();
-    const session = await fetch(api.base + "/api/session", { headers: headers(valid) });
+    const preflight = await fetch(api.base + "/api/projects", {
+      method: "OPTIONS", headers: {
+        Origin: webOrigin, "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "authorization, content-type",
+      },
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get("access-control-allow-origin"), webOrigin);
+    assert.equal(preflight.headers.get("access-control-allow-methods"), "POST");
+    assert.deepEqual(preflight.headers.get("access-control-allow-headers"), "Authorization, Content-Type");
+    assert.equal(preflight.headers.has("access-control-allow-credentials"), false);
+    const blockedOriginPreflight = await fetch(api.base + "/api/projects", {
+      method: "OPTIONS", headers: {
+        Origin: "https://unlisted.example.test", "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "authorization, content-type",
+      },
+    });
+    assert.equal(blockedOriginPreflight.status, 403);
+    const blockedCookiePreflight = await fetch(api.base + "/api/projects", {
+      method: "OPTIONS", headers: {
+        Origin: webOrigin, "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "authorization, cookie",
+      },
+    });
+    assert.equal(blockedCookiePreflight.status, 403);
+    const session = await fetch(api.base + "/api/session", { headers: browserHeaders(valid) });
     assert.equal(session.status, 200);
     assert.deepEqual(await session.json(), { authenticated: true, authorScope: "owner" });
+    assert.equal(session.headers.get("access-control-allow-origin"), webOrigin);
 
     const write = await fetch(api.base + "/api/projects", {
-      method: "POST", headers: { ...headers(valid), "Content-Type": "application/json" },
+      method: "POST", headers: { ...browserHeaders(valid), "Content-Type": "application/json" },
       body: JSON.stringify({ title: "OAuth owner project" }),
     });
     assert.equal(write.status, 201, await write.text());
-    const list = await fetch(api.base + "/api/projects", { headers: headers(valid) });
+    assert.equal(write.headers.get("access-control-allow-origin"), webOrigin);
+    const list = await fetch(api.base + "/api/projects", { headers: browserHeaders(valid) });
     assert.equal(list.status, 200);
-    const projects = await list.json() as { title: string }[];
-    assert.ok(projects.some((project) => project.title === "OAuth owner project"));
+    const projects = await list.json() as { id: string; title: string; version: number }[];
+    const project = projects.find((item) => item.title === "OAuth owner project");
+    assert.ok(project);
+
+    const projectId = project.id as import("@codexia/persistence-contracts").ProjectId;
+    const projectVersion = project.version as number;
+    const nodeId = randomUUID() as import("@codexia/persistence-contracts").KnowledgeNodeId;
+    const proposalInput = {
+      projectVersion, idempotencyKey: `oauth-action-${randomUUID()}`,
+      operations: [{ type: "knowledge.node.save", command: {
+        projectId, id: nodeId, type: "person", name: "OAuth owner proposal", attributes: {},
+        status: "confirmed", expectedVersion: null,
+      } }],
+    };
+    const actionPath = `${api.base}/api/projects/${projectId}/actions/core.knowledge.propose`;
+    const actionProposal = await fetch(actionPath, {
+      method: "POST", headers: { ...browserHeaders(valid), "Content-Type": "application/json" },
+      body: JSON.stringify({ input: proposalInput }),
+    });
+    const actionResult = await actionProposal.json() as ActionResult;
+    assert.equal(actionProposal.status, 200, JSON.stringify(actionResult));
+    assert.equal(actionResult.ok, true, JSON.stringify(actionResult));
+    if (!actionResult.ok) throw new Error("OAuth action proposal was denied");
+    const changeSet = (actionResult.data as { changeSet: import("@codexia/persistence-contracts").ChangeSet }).changeSet;
+    assert.equal(changeSet.authorId, "owner");
+    assert.equal(await persistence.read((reader) => reader.getKnowledgeNode(projectId, nodeId)), undefined);
+
+    for (const invalid of [token({ sub: "other-subject" }), token({ scope: "profile" })]) {
+      const denied = await fetch(actionPath, {
+        method: "POST", headers: { ...browserHeaders(invalid), "Content-Type": "application/json" },
+        body: JSON.stringify({ input: { ...proposalInput, idempotencyKey: `denied-${randomUUID()}` } }),
+      });
+      assert.equal(denied.status, 403);
+    }
+
+    const approvePath = `${api.base}/api/v1/persistence/projects/${projectId}/changesets/${changeSet.id}/approve`;
+    const approval = await fetch(approvePath, {
+      method: "POST", headers: { ...browserHeaders(valid), "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedVersion: changeSet.version }),
+    });
+    assert.equal(approval.status, 200, await approval.text());
+    const apply = await fetch(`${api.base}/api/v1/persistence/projects/${projectId}/changesets/${changeSet.id}/apply`, {
+      method: "POST", headers: { ...browserHeaders(valid), "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedVersion: changeSet.version + 1 }),
+    });
+    assert.equal(apply.status, 200, await apply.text());
+    assert.ok(await persistence.read((reader) => reader.getKnowledgeNode(projectId, nodeId)));
+
+    const nonOwnerRoute = await fetch(api.base + "/api/logout", {
+      method: "POST", headers: browserHeaders(valid),
+    });
+    assert.equal(nonOwnerRoute.status, 403, "OAuth author access does not stand in for a browser session logout");
+    const unknownRoute = await fetch(api.base + "/api/non-allowlisted", { headers: browserHeaders(valid) });
+    assert.equal(unknownRoute.status, 404);
+    const unlistedOrigin = await fetch(api.base + "/api/session", {
+      headers: { ...headers(valid), Origin: "https://unlisted.example.test" },
+    });
+    assert.equal(unlistedOrigin.status, 403);
 
     const wrongOwner = await fetch(api.base + "/api/projects", {
-      method: "POST", headers: { ...headers(token({ sub: "other-subject" })), "Content-Type": "application/json" },
+      method: "POST", headers: { ...browserHeaders(token({ sub: "other-subject" })), "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Denied project" }),
     });
     assert.equal(wrongOwner.status, 403);
     const noScope = await fetch(api.base + "/api/projects", {
-      method: "POST", headers: { ...headers(token({ scope: "profile" })), "Content-Type": "application/json" },
+      method: "POST", headers: { ...browserHeaders(token({ scope: "profile" })), "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Denied project" }),
     });
     assert.equal(noScope.status, 403);
@@ -2352,18 +2437,18 @@ describe("Codexia HTTP boundary", () => {
       token({ exp: now - 30 }), token({}, "JWT"),
     ];
     for (const [index, invalid] of invalidTokens.entries()) {
-      assert.equal((await fetch(api.base + "/api/session", { headers: headers(invalid) })).status, 401, `invalid OAuth token case ${index}`);
+      assert.equal((await fetch(api.base + "/api/session", { headers: browserHeaders(invalid) })).status, 401, `invalid OAuth token case ${index}`);
     }
-    assert.equal((await fetch(api.base + "/api/session", { headers: headers(token({}, "at+jwt", "unpublished-key")) })).status, 401, "unknown signing keys fail closed");
+    assert.equal((await fetch(api.base + "/api/session", { headers: browserHeaders(token({}, "at+jwt", "unpublished-key")) })).status, 401, "unknown signing keys fail closed");
     const legacyBearerWrite = await fetch(api.base + "/api/projects", {
       method: "POST", headers: { ...headers(ACCESS_TOKEN), "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Legacy bearer cannot author" }),
     });
     assert.equal(legacyBearerWrite.status, 403);
     const bothCredentials = await fetch(api.base + "/api/projects", {
-      headers: { ...headers(valid), Cookie: "scriptorium_session=present" },
+      headers: { ...browserHeaders(valid), Cookie: "scriptorium_session=present" },
     });
-    assert.equal(bothCredentials.status, 400);
+    assert.equal(bothCredentials.status, 403, "cross-origin cookies are denied by bearer-only CORS");
 
     const unavailableApi = await startCustomApi(store, staticDir, {
       oauthOwner: {
