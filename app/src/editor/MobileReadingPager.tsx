@@ -109,7 +109,10 @@ export function MobileReadingPager({
     if (!commit) return;
     if (gesture.moved) {
       const dx = event.clientX - gesture.x;
-      if (Math.abs(dx) >= 56) turn(dx < 0 ? "next" : "previous");
+      if (Math.abs(dx) >= 56) {
+        const forward = mode === "vertical" ? dx > 0 : dx < 0;
+        turn(forward ? "next" : "previous");
+      }
       return;
     }
     const rect = event.currentTarget.getBoundingClientRect();

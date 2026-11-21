@@ -711,6 +711,14 @@ test("Mobile reader keeps first-to-last Japanese paragraphs visible at supported
             await expect(pager).toHaveAttribute("data-page-index", beforePage!);
             await expect(pager).toHaveAttribute("class", beforeClass!);
           }
+          const centerX = box!.x + box!.width / 2;
+          const forwardX = centerX + (direction === "vertical" ? 70 : -70);
+          for (const [start, end, expectedPage] of [[centerX, forwardX, "1"], [forwardX, centerX, "0"]] as const) {
+            await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: start, y, id: 7 }] });
+            await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: end, y, id: 7 }] });
+            await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+            await expect(pager).toHaveAttribute("data-page-index", expectedPage);
+          }
         } finally {
           await cdp.detach();
         }
@@ -900,7 +908,7 @@ test("keeps the manuscript near its scene title with one concise protection stat
   }
   await expectServerSaved(page);
   const protection = await openProtectionDetails(page);
-  await expect(protection).toContainText("この端末: 回復用の下書きを保持しています");
+  await expect(protection).toContainText("この端末: この原稿に未保存の変更はありません");
   await expect(protection).toContainText("サーバー: PostgreSQLへの保存を確認しました");
   expect(await page.locator(".pg-editor-actions").count()).toBe(1);
 });
@@ -908,7 +916,7 @@ test("keeps the manuscript near its scene title with one concise protection stat
 test("journal writes do not spam live save status while a server receipt remains exact", async ({ page }) => {
   const { scene } = await createWritingFixture(page, "mobile");
   const details = await openProtectionDetails(page);
-  await expect(details).toContainText("この端末: 回復用の下書きを保持しています");
+  await expect(details).toContainText("この端末: この原稿に未保存の変更はありません");
   await expect(details).toContainText("サーバー: PostgreSQLへの保存を確認しました");
   await page.evaluate(() => {
     const summary = document.querySelector(".pg-save-state summary");
