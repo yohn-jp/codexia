@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { signUpdateChannel } from '../../scripts/update-channel.mjs';
+import { rotationCredentialDigest, matchesRotationCredential } from '../../scripts/rotation-credential-digest.mjs';
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -402,7 +403,7 @@ export function installTestAdapters(hostClass = PodmanStandaloneHost) {
     hostClass.prototype.captureTunnelTokenRotation=async function captureSyntheticTunnelRotation(replacement,operationId,state){
       assert.equal(await tunnelActive(),true,'Tunnel rotation requires active synthetic service');
       const current=readTunnelSecret();
-      const digest=value=>createHash('sha256').update(value).digest('hex');
+      const digest=value=>rotationCredentialDigest(value,operationId);
       assert.notEqual(current.token,replacement,'Synthetic Tunnel replacement must differ');
       assert.deepEqual(await this.observe(),{route:state.journal.active.slot,writers:[{slot:state.journal.active.slot,image:state.installed.image}]});
       return {operationId,originalSecretId:current.id,previousDigest:digest(current.token),replacementDigest:digest(replacement),
@@ -412,15 +413,16 @@ export function installTestAdapters(hostClass = PodmanStandaloneHost) {
     };
     hostClass.prototype.assertTunnelTokenRotationSources=async function assertSyntheticTunnelSources(snapshot){
       const current=readTunnelSecret();
-      const digest=createHash('sha256').update(current.token).digest('hex');
-      assert.ok((current.id===snapshot.originalSecretId&&digest===snapshot.previousDigest)||
-        (current.owner===snapshot.operationId&&[snapshot.previousDigest,snapshot.replacementDigest].includes(digest)),
+      const previous=matchesRotationCredential(current.token,snapshot.operationId,snapshot.previousDigest);
+      const replacement=matchesRotationCredential(current.token,snapshot.operationId,snapshot.replacementDigest);
+      assert.ok((current.id===snapshot.originalSecretId&&previous)||
+        (current.owner===snapshot.operationId&&(previous||replacement)),
       'Synthetic Tunnel secret changed outside its rotation');
       return current;
     };
     hostClass.prototype.verifyTunnelTokenRotation=async function verifySyntheticTunnelRotation(snapshot,expectedDigest){
       const current=await this.assertTunnelTokenRotationSources(snapshot);
-      assert.equal(createHash('sha256').update(current.token).digest('hex'),expectedDigest);
+      assert.equal(matchesRotationCredential(current.token,snapshot.operationId,expectedDigest),true);
       assert.equal(await tunnelActive(),true,'Synthetic Tunnel did not return active');
     };
   }
@@ -1103,7 +1105,7 @@ async function exercisePreflightPasswordRotation({repoRoot,config,userUnitDir,wo
     const marker=JSON.parse(await readFile(markerPath,'utf8'));
     assert.equal(marker.format,'codexia-maintenance-postgres-preflight-password/v1');
     assert.equal(marker.phase,'applying');
-    assert.equal(marker.rotation.previousDigest,createHash('sha256').update(replacement).digest('hex'),
+    assert.equal(marker.rotation.previousDigest,rotationCredentialDigest(replacement,marker.operationId),
       'Durable previous-password digest did not match the exact stored 64-character secret');
     assert.equal((await readFile(config.routeFile,'utf8')),'blocked\n','Preflight SQL interruption did not keep the route fenced');
     await database.verifyPostgresPreflightPassword(interruptedPassword,{secretRequired:false});
