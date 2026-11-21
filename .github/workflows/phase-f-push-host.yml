@@ -52,12 +52,12 @@ jobs:
           ANSIBLE_PLAYBOOK: /opt/codexia-ansible/bin/ansible-playbook
         run: bash deploy/ansible/test-phase-f-push-host.sh
       - name: Upload run-bound host bootstrap evidence
-        if: success()
+        if: always()
         uses: actions/upload-artifact@v7.0.2
         with:
           name: phase-f-push-host-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/codexia-phase-f-push-host/host-bootstrap-results.json
-            ${{ runner.temp }}/codexia-phase-f-push-host/host-convergence.log
-          if-no-files-found: error
+            ${{ runner.temp }}/codexia-phase-f-push-host/host-fixture-outcome.json
+            ${{ runner.temp }}/codexia-phase-f-push-host/host-convergence-bounded.log
+          if-no-files-found: warn
           retention-days: 7
