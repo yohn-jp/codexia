@@ -2550,13 +2550,14 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     introspectionClientSecret: readCodexiaEnvironment("OAUTH_INTROSPECTION_CLIENT_SECRET"),
     ownerSubject: readCodexiaEnvironment("OAUTH_OWNER_SUBJECT"),
     ownerClientIds: readCodexiaEnvironment("OAUTH_OWNER_CLIENT_IDS"),
+    mcpClientIds: readCodexiaEnvironment("OAUTH_MCP_CLIENT_IDS"),
     apiAudience: readCodexiaEnvironment("API_AUDIENCE"),
   };
   const betterAuthConfigured = [
     betterAuthValues.databaseUrl, betterAuthValues.publicOrigin, betterAuthValues.oidcIssuer,
     betterAuthValues.oidcClientId, betterAuthValues.oidcClientSecret, betterAuthValues.authSecret,
     betterAuthValues.introspectionClientId, betterAuthValues.introspectionClientSecret,
-    betterAuthValues.ownerClientIds, betterAuthValues.apiAudience,
+    betterAuthValues.ownerClientIds, betterAuthValues.mcpClientIds, betterAuthValues.apiAudience,
   ].some((value) => value !== undefined);
   const requiredBetterAuthValues = [
     betterAuthValues.databaseUrl, betterAuthValues.publicOrigin, betterAuthValues.oidcIssuer,
@@ -2578,6 +2579,7 @@ export async function start(options?: ApiServerOptions): Promise<Server> {
     oauthIntrospectionClientSecret: betterAuthValues.introspectionClientSecret!,
     ...(betterAuthValues.apiAudience ? { apiAudience: betterAuthValues.apiAudience } : {}),
     ownerClientIds: betterAuthValues.ownerClientIds!.split(",").map((value) => value.trim()).filter(Boolean),
+    mcpClientIds: (betterAuthValues.mcpClientIds ?? "").split(",").map((value) => value.trim()).filter(Boolean),
   }) : undefined;
   if (!betterAuth && oauthConfigured && Object.values(oauthValues).some((value) => !value)) {
     throw new Error("Legacy OAuth owner mode requires OAUTH_ISSUER, OAUTH_AUDIENCE, OAUTH_JWKS_URL, and OAUTH_OWNER_SUBJECT");

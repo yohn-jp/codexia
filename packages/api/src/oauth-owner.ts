@@ -11,6 +11,8 @@ export interface OAuthOwnerOptions {
   readonly requiredScopes: readonly string[];
   readonly allowedClientIds?: readonly string[];
   readonly verifyActiveToken?: (token: string) => Promise<boolean>;
+  /** Permits plain HTTP loopback only in test processes for synthetic IdP fixtures. */
+  readonly allowInsecureLoopbackForTests?: boolean;
   readonly fetch?: typeof fetch;
 }
 
@@ -27,11 +29,13 @@ export class OAuthAuthenticationError extends Error {
   }
 }
 
-function assertHttpsEndpoint(value: string, label: string): URL {
+function assertHttpsEndpoint(value: string, label: string, allowInsecureLoopbackForTests = false): URL {
   let url: URL;
   try { url = new URL(value); }
   catch { throw new Error(`${label} must be an absolute HTTPS URL`); }
-  if (url.protocol !== "https:" || url.username || url.password || url.hash) {
+  const testLoopback = allowInsecureLoopbackForTests && process.env.NODE_ENV === "test" && url.protocol === "http:" &&
+    ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if ((!testLoopback && url.protocol !== "https:") || url.username || url.password || url.hash) {
     throw new Error(`${label} must be an absolute HTTPS URL without credentials or a fragment`);
   }
   return url;
@@ -45,8 +49,8 @@ function tokenScopes(payload: JWTPayload): string[] {
 }
 
 export function createOAuthOwnerAuthenticator(options: OAuthOwnerOptions): (token: string) => Promise<OAuthPrincipal> {
-  assertHttpsEndpoint(options.issuer, "OAuth issuer");
-  assertHttpsEndpoint(options.jwksUrl, "OAuth JWKS URL");
+  assertHttpsEndpoint(options.issuer, "OAuth issuer", options.allowInsecureLoopbackForTests);
+  assertHttpsEndpoint(options.jwksUrl, "OAuth JWKS URL", options.allowInsecureLoopbackForTests);
   if (!options.audience.trim() || options.audience !== options.audience.trim() ||
       !options.ownerSubject.trim() || !options.requiredScopes.length ||
       options.requiredScopes.some((scope) => !/^[A-Za-z0-9:._/-]{1,128}$/u.test(scope))) {
