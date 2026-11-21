@@ -1,0 +1,31 @@
+name: Tailscale connectivity
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  connectivity:
+    name: Verify Tailnet SSH reachability
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: production
+
+    steps:
+      - name: Connect to Tailscale using GitHub OIDC
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: api.tailscale.com/Ts4P9VFjmJ11CNTRL-khX5P9DgL421CNTRL
+          tags: tag:ci
+          ping: 100.100.1.68
+
+      - name: Verify TCP/22 reachability (no SSH authentication)
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale status
+          timeout 10 bash -c 'echo > /dev/tcp/100.100.1.68/22'
