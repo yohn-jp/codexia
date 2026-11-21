@@ -42,6 +42,7 @@ test('backend evidence fails closed on duplicate, wrong run, SHA, digest, expire
   }
   assert.throws(()=>selectBackendArtifacts(run,[...artifacts,{...artifacts[2],id:99}],jobs,expected),/one fresh/);
   assert.throws(()=>selectBackendArtifacts({...run,event:'pull_request'},artifacts,jobs,expected),/event mismatch/);
+  assert.deepEqual(selectBackendArtifacts({...run,event:'workflow_run'},artifacts,jobs,{...expected,event:'workflow_run'}).map(item=>item.profile),['core','full']);
   assert.throws(()=>selectBackendArtifacts({...run,run_attempt:2},artifacts,jobs,expected),/attempt mismatch/);
   assert.throws(()=>selectBackendArtifacts(run,artifacts,[jobs[0],{...jobs[1],conclusion:'failure'}],expected),/did not succeed/);
   assert.throws(()=>selectBackendArtifacts(run,artifacts,[...jobs,jobs[1]],expected),/exactly one latest/);
@@ -63,6 +64,11 @@ test('main build receipt binds the exact source tree, artifacts and partial reru
     {profile:'full',id:12,digest:'sha256:'+'e'.repeat(64),producerAttempt:3,archiveSha256:'f'.repeat(64)},
   ]});
   assert.equal(receipt.format,'codexia-backend-build/v1');
+  const completionReceipt=buildBackendBuildReceipt({sourceSha:sha,workflowRunId:123,workflowRunNumber:450,sourceTree:'c'.repeat(40),event:'workflow_run',artifacts:[
+    {profile:'core',id:10,digest,producerAttempt:1,archiveSha256:'d'.repeat(64)},
+    {profile:'full',id:12,digest:'sha256:'+'e'.repeat(64),producerAttempt:3,archiveSha256:'f'.repeat(64)},
+  ]});
+  assert.equal(completionReceipt.event,'workflow_run');
   assert.equal(receipt.version,readComponentVersion('backend','450'));
   assert.equal(receipt.artifacts.core.producerAttempt,1);
   assert.equal(receipt.artifacts.full.producerAttempt,3);

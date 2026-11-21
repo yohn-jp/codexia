@@ -23,7 +23,7 @@ export function frontendProducerFromEnvironment(env=process.env,identity){
 }
 
 export function componentReleaseRecordFromEnvironment(env=process.env){
-  const sha=env.GITHUB_SHA;
+  const sha=env.CODEXIA_SOURCE_SHA || env.GITHUB_SHA;
   assert.match(sha??'',/^[a-f0-9]{40}$/u,'Component release source SHA is invalid');
   const component=process.argv[2];
   assert.ok(['frontend','backend'].includes(component));
@@ -43,7 +43,7 @@ export function componentReleaseRecordFromEnvironment(env=process.env){
     producer.receipt=JSON.parse(readFileSync(path.join(directory,'codexia-backend-promotion.json'),'utf8'));
     producer.mainTree=execFileSync('git',['rev-parse','HEAD^{tree}'],{encoding:'utf8'}).trim();
   }else{
-    assert.equal(producer.event,'push','Backend producer event is invalid');
+    assert.ok(['push','workflow_run'].includes(producer.event),'Backend producer event is invalid');
     const manifest=env.CODEXIA_BACKEND_ARTIFACT_MANIFEST;
     assert.ok(typeof manifest==='string'&&path.isAbsolute(manifest),'Backend build manifest path is invalid');
     producer.receipt=JSON.parse(readFileSync(manifest,'utf8'));
@@ -56,7 +56,7 @@ async function main(){
   const env=process.env;
   assert.equal(env.GITHUB_REPOSITORY,repository);
   assert.equal(env.GITHUB_REF,'refs/heads/main');
-  assert.equal(env.GITHUB_EVENT_NAME,'push');
+  assert.ok(['push','workflow_run'].includes(env.GITHUB_EVENT_NAME),'Component release requires main or verified completion');
   const token=env.GH_TOKEN;assert.ok(token);
   const release=componentReleaseRecordFromEnvironment(env);
   async function api(resource,method='GET',data){

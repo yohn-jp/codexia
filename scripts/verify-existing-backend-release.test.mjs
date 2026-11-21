@@ -41,6 +41,10 @@ test('main fallback digest retry requires the exact build artifact receipt',()=>
   const release={tag_name:record.tag,draft:false,prerelease:false,body:record.body},tagRef={object:{type:'commit',sha:mainSha}};
   const expected={image:core,mainSha,producerSha:mainSha,version,profile:'core',event:'push',receipt,mainTree:tree,compatibility};
   assert.deepEqual(assertExistingBackendReleaseBinding(release,tagRef,expected),record.metadata);
+  const completedReceipt={...receipt,event:'workflow_run'};
+  const completedRecord=buildComponentReleaseRecord('backend',mainSha,null,{core,full,compatibility,event:'workflow_run',receipt:completedReceipt,mainTree:tree});
+  const completedRelease={...release,body:completedRecord.body};
+  assert.deepEqual(assertExistingBackendReleaseBinding(completedRelease,tagRef,{...expected,event:'workflow_run',receipt:completedReceipt}),completedRecord.metadata);
   const changed=structuredClone(receipt);changed.artifacts.core.digest='sha256:'+'7'.repeat(64);
   assert.throws(()=>assertExistingBackendReleaseBinding(release,tagRef,{...expected,receipt:changed}),/exact main build receipt/);
   assert.throws(()=>assertExistingBackendReleaseBinding(release,tagRef,{...expected,mainTree:sha('9')}),/tree differs/);
