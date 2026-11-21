@@ -52,7 +52,7 @@ export function DocumentOutlineTree({
     visit(items);
     return { byId, folders, roots: items.map((item) => item.id) };
   }, [items]);
-  const expandedItems = index.folders.filter((id) => forceExpanded || !collapsedIds.has(id));
+  const expandedItems = useMemo(() => index.folders.filter((id) => forceExpanded || !collapsedIds.has(id)), [index, forceExpanded, collapsedIds]);
 
   const tree = useTree<OutlineTreeDocument>({
     rootItemId: ROOT_ID,
@@ -119,9 +119,9 @@ export function DocumentOutlineTree({
     ],
   });
 
-  // Sync Data Loader has no cache invalidation: rebuild after authoritative
-  // documents change, not immediately after a speculative drag or rename.
-  useEffect(() => { tree.scheduleRebuildTree(); }, [items, tree]);
+  // Reconcile the immutable PostgreSQL projection after a committed refresh.
+  useEffect(() => { tree.rebuildTree(); }, [items, tree]);
+  tree.getItems(); // Populate stable item metadata before requesting ARIA properties.
 
   const renderBranch = (nodeIds: string[]): ReactNode => nodeIds.map((id) => {
     const item = tree.getItemInstance(id);
@@ -143,14 +143,16 @@ export function DocumentOutlineTree({
           : <button {...item.getProps()} type="button"
               className={`pg-outline-document${id === selectedId ? " is-selected" : ""}`}
               aria-current={id === selectedId ? "page" : undefined}
+              aria-label={`${node.title} ${node.misplaced ? `未配置 · ${kindLabel(node.kind)}` : kindLabel(node.kind)}`}
+              onFocus={() => item.setFocused()}
               onClick={() => { item.setFocused(); item.primaryAction(); }}>
               <span>{node.title}</span>
               <small>{node.misplaced ? `未配置 · ${kindLabel(node.kind)}` : kindLabel(node.kind)}</small>
             </button>}
-        {hasChildren && <button type="button" tabIndex={-1} className="pg-outline-zoom"
+        {hasChildren && <button type="button" tabIndex={id === focusedId ? 0 : -1} className="pg-outline-zoom"
           aria-label={`${node.title}を拡大`} onClick={() => onZoom(id)}>拡大</button>}
         <button {...item.getDragHandleProps()} type="button" className="pg-outline-drag"
-          aria-label={`${node.title}を移動`} disabled={busy}>⋮⋮</button>
+          tabIndex={id === focusedId ? 0 : -1} aria-label={`${node.title}を移動`} disabled={busy}>⋮⋮</button>
       </div>
       {hasChildren && expanded &&
         <ul role="group" className="pg-document-children">{renderBranch(node.children.map((child) => child.id))}</ul>}
