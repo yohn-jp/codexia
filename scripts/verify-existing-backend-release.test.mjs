@@ -69,3 +69,19 @@ test('existing digest requires successful prior main publication jobs for its pa
   assert.equal(successfulPublicationJobs(main,false,true),true);
   assert.equal(successfulPublicationJobs(main.map(job=>job.name.includes('(core)')?{...job,conclusion:'failure'}:job),false),false);
 });
+
+test('promoted publication accepts the REST aggregate for a skipped matrix without weakening producer checks',()=>{
+  const promotedAggregate=[
+    {name:'Resolve verified backend promotion',status:'completed',conclusion:'success'},
+    {name:'Build and test backend OCI image (${{ matrix.profile }})',status:'completed',conclusion:'skipped'},
+    {name:'Publish immutable GHCR image',status:'completed',conclusion:'success'},
+  ];
+  assert.equal(successfulPublicationJobs(promotedAggregate,true,true),true);
+  assert.equal(successfulPublicationJobs(promotedAggregate,false,true),false,
+    'the skipped aggregate cannot stand in for main Core and Full build jobs');
+  assert.equal(successfulPublicationJobs(promotedAggregate,true,false),true);
+  assert.equal(successfulPublicationJobs(promotedAggregate.map(job=>job.name.startsWith('Build and test')
+    ? {...job,conclusion:'failure'} : job),true,true),false);
+  assert.equal(successfulPublicationJobs([...promotedAggregate,
+    {...promotedAggregate[1]}],true,true),false,'duplicate aggregate jobs must fail');
+});

@@ -9,7 +9,7 @@ This is the normative execution and release architecture. [Test architecture](TE
 | Task inventory, groups, producer dependency and required job names | [ci-contract.mjs](../../scripts/ci-contract.mjs) |
 | Impact selection, plan validation and digest | [ci-impact.mjs](../../scripts/ci-impact.mjs) |
 | Per-task input-closure proof validation | [ci-task-input-proof.mjs](../../scripts/ci-task-input-proof.mjs) |
-| Report-only task producer invocation inventory | [ci-group.mjs](../../scripts/ci-group.mjs), [ci-task-input-proof.mjs](../../scripts/ci-task-input-proof.mjs) |
+| Report-only task producer invocation and coverage input inventory | [ci-group.mjs](../../scripts/ci-group.mjs), [ci-task-input-proof.mjs](../../scripts/ci-task-input-proof.mjs), [ci-coverage-inputs.mjs](../../scripts/ci-coverage-inputs.mjs) |
 | Workspace prerequisites and execution | [ci-workspace.mjs](../../scripts/ci-workspace.mjs), [ci-group.mjs](../../scripts/ci-group.mjs) |
 | Verification DAG | [verify.yml](../../.github/workflows/verify.yml) |
 | Artifact retrieval and final certification | [download-ci-artifacts.mjs](../../scripts/download-ci-artifacts.mjs), [certify-ci.mjs](../../scripts/certify-ci.mjs) |
@@ -30,6 +30,8 @@ Review base-image digest updates through Dependabot, rebuild with smoke tests, a
 PRs verify the exact source selected by the workflow, using the affected-task plan. Superseded runs of the same PR are cancelled immediately; main/manual runs have independent run identities. Documentation-only PRs retain coverage checks unless a document is an executable assertion input. Explicitly reviewed operational inputs select the root unit and coverage checks, with dedicated infrastructure, audit or static-delivery integration as applicable. Shared foundation/unknown paths or missing diff history select the full inventory. Browser and Hosted consumers pull in their prerequisites. Main pushes and manual verification plan every obligation. Manual runs always execute the full graph. A main push may certify existing complete PR source proof instead of executing the graph only under the merged-tree reuse contract below. A manual or PR success alone is not a main-push release certification.
 
 The certified verification graph groups tasks into at most twenty jobs including plan and certification. The cap is on execution jobs, not test coverage. Keep independent work parallel and fail-fast disabled for independent groups. Within a group retain individual results even after a sibling failure. Prefer reuse of one certified producer over repeated builds. Do not add a second workflow or runner inventory just to bypass the bound. The Full-model OCI workload is a supplemental high-cost reusable job: Verify calls it only for its exact pull-request input paths, while the standalone workflow runs it for matching main pushes or manual dispatch. It stays outside the artifact-evidence certification and release job inventory; a selected failure still fails the overall Verify workflow.
+
+Full-plan `coverage` reports a per-task input closure for its static-only check. The closure binds coverage and orchestration sources, the Verify workflow, workspace manifests and directories, discovered test file paths and contents, runtime/toolchain identity, invocation recipe, and the empty prerequisite set. The receipt is report-only: certification and task reuse do not consume it. Coverage-only or affected plans run supplemental script tests and receive no closure until that variant has its own proof.
 
 ```mermaid
 flowchart TD
