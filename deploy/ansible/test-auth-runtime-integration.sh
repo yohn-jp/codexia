@@ -113,13 +113,30 @@ SELECT (EXISTS (SELECT 1 FROM pg_roles WHERE rolname='codexia_auth_runtime'))::t
 SQL
 )" = 'false|false'
 
+# A malformed upstream issuer must fail before secret creation or database mutation.
+sed -i 's/codexia_auth_runtime_approved: false/codexia_auth_runtime_approved: true/; s#codexia_oidc_issuer: https:#codexia_oidc_issuer: http:#' "$tmp/auth-inventory.yml"
+if apply_stage > "$tmp/issuer-denied.log" 2>&1; then
+  echo 'Auth runtime stage accepted an insecure upstream issuer' >&2
+  exit 1
+fi
+grep -q 'validated public configuration' "$tmp/issuer-denied.log"
+for name in "${secret_names[@]}"; do
+  rc=0; podman secret exists "$name" || rc=$?
+  test "$rc" = 1
+done
+test "$(admin_psql <<'SQL'
+SELECT (EXISTS (SELECT 1 FROM pg_roles WHERE rolname='codexia_auth_runtime'))::text || '|' ||
+       (EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='codexia_auth'))::text;
+SQL
+)" = 'false|false'
+sed -i 's#codexia_oidc_issuer: http:#codexia_oidc_issuer: https:#' "$tmp/auth-inventory.yml"
+
 # Seed a partial exact secret set to exercise retry-safe first convergence.
 for index in 0 1; do
   name=${secret_names[$index]}
   file=("$tmp/database-url" "$tmp/auth-secret" "$tmp/oidc-secret" "$tmp/introspection-secret")
   podman secret create "$name" - < "${file[$index]}" >/dev/null
 done
-sed -i 's/codexia_auth_runtime_approved: false/codexia_auth_runtime_approved: true/' "$tmp/auth-inventory.yml"
 apply_stage > "$tmp/auth-first.log" 2>&1 || { cat "$tmp/auth-first.log"; exit 1; }
 grep -Eq 'changed=[1-9]' "$tmp/auth-first.log"
 
