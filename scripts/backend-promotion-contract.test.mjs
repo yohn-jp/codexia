@@ -20,3 +20,13 @@ test('backend promotion resolver and publisher checkouts include full merge hist
     assert.ok(job.steps.some(step => step.run?.includes(proofScript)), `${jobName} must run its source proof`);
   }
 });
+
+test('backend publication requires a still-eligible component source before registry writes', () => {
+  const steps = workflow.jobs.publish.steps;
+  const gate = steps.findIndex(step => step.id === 'freshness');
+  const publication = steps.findIndex(step => step.id === 'push-image');
+  assert.ok(gate >= 0 && gate < publication);
+  assert.match(steps[gate].run, /release-source-gate\.mjs backend/u);
+  assert.equal(steps[publication].if, "steps.freshness.outputs.affected == 'true'");
+  assert.match(workflow.jobs['stable-channel'].if, /needs\.publish\.outputs\.certified-image != ''/u);
+});

@@ -95,9 +95,7 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
 
 test('Phase F release provenance uses publication time inside the exact successful run window', async () => {
   const channelFactory = await readFile(path.join(root, 'scripts/phase-f-test-channel.mjs'), 'utf8');
-  assert.match(channelFactory, /const releasedAt\s*=\s*releaseApiRecord\.published_at\s*\?/u);
-  assert.doesNotMatch(channelFactory, /releaseApiRecord\.created_at/u);
-  assert.match(channelFactory, /Date\.parse\(run\.created_at\)<=releasedAt&&releasedAt<=Date\.parse\(run\.updated_at\)/u);
+  assert.match(channelFactory, /publicationInWorkflowWindow\(releaseApiRecord, run\)/u);
 });
 
 test('Phase F integration helper is valid shell and exercises the existing locked updater paths', async () => {
