@@ -117,7 +117,7 @@ SQL
 for index in 0 1; do
   name=${secret_names[$index]}
   file=("$tmp/database-url" "$tmp/auth-secret" "$tmp/oidc-secret" "$tmp/introspection-secret")
-  podman secret create "$name" "${file[$index]}" >/dev/null
+  podman secret create "$name" - < "${file[$index]}" >/dev/null
 done
 sed -i 's/codexia_auth_runtime_approved: false/codexia_auth_runtime_approved: true/' "$tmp/auth-inventory.yml"
 apply_stage > "$tmp/auth-first.log" 2>&1 || { cat "$tmp/auth-first.log"; exit 1; }
@@ -189,7 +189,7 @@ if apply_stage > "$tmp/auth-missing-secret.log" 2>&1; then
   exit 1
 fi
 grep -q 'Require all secrets for an existing auth schema' "$tmp/auth-missing-secret.log"
-podman secret create codexia-oidc-client-secret "$tmp/oidc-secret" >/dev/null
+podman secret create codexia-oidc-client-secret - < "$tmp/oidc-secret" >/dev/null
 
 # Existing-schema secret drift must be rejected before database or file changes.
 printf '%s' 'fixture-introspection-client-secret-drift' > "$tmp/introspection-secret"
