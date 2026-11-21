@@ -1646,7 +1646,9 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       setNotice("Knowledge候補を保存しました。内容を確認してから確定してください。");
     } catch (error) {
       if (projectIdRef.current === project.id) {
-        setKnowledgeCreateError({ projectId: project.id, message: error instanceof Error ? error.message : "Knowledgeを保存できませんでした。" });
+        const message = error instanceof Error ? error.message : "Knowledgeを保存できませんでした。";
+        if (mode === "mobile") setPageError(message);
+        else setKnowledgeCreateError({ projectId: project.id, message });
       }
     }
   }
