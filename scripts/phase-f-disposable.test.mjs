@@ -83,6 +83,8 @@ test('Standalone updater acceptance runs only on demand, without duplicating Ful
     'codexia_stage=$stage',
     'apply_runner secrets',
     'apply_runner base',
+    'http_proxy = false',
+    'Podman otherwise copies ambient runner proxy variables',
     'apply_service prepare',
     'apply_service initialize-schema',
     'apply_service bootstrap-preflight',

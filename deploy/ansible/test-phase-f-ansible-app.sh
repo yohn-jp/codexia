@@ -198,6 +198,20 @@ for unit in codexia-updater-boot.service codexia-updater.service codexia-updater
 done
 runtime_owned=true
 
+# Podman otherwise copies ambient runner proxy variables (including NO_PROXY)
+# into every Quadlet container. That makes the signed legacy runtime differ
+# from its declared unit, so keep proxy configuration in the updater process
+# only and leave container identity checks strict.
+containers_config="$service_home/.config/containers/containers.conf"
+as_service /usr/bin/test -d "$service_home/.config/containers" || fail 'Ansible did not create the rootless Podman configuration directory.'
+as_service /usr/bin/test ! -e "$containers_config" || fail 'Rootless Podman configuration already exists; refusing to overwrite it.'
+as_service /usr/bin/test ! -L "$containers_config" || fail 'Rootless Podman configuration is a symlink; refusing to overwrite it.'
+as_service /usr/bin/tee "$containers_config" >/dev/null <<'EOF'
+[engine]
+http_proxy = false
+EOF
+as_service /usr/bin/chmod 0600 "$containers_config"
+
 mkdir -p "$tmp/inputs"
 printf '%s\n' 'fixture-auth-token-0123456789abcdef' > "$tmp/inputs/auth-token"
 printf '%s\n' 'fixture-tunnel-token-for-disposable-phase-f' > "$tmp/inputs/tunnel-token"
