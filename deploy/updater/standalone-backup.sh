@@ -106,7 +106,13 @@ SQL
 }
 history_fingerprint(){
   local volume="$1"
-  podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges --entrypoint /bin/sh     -v "$volume:/history:ro" "$PG_IMAGE" -ec 'cd /history; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum' | sha256sum | cut -d' ' -f1
+  # The API image runs as node (UID/GID 1000) and creates /history/jobs with
+  # mode 0700 and its state file with mode 0600. Fingerprinting must run as
+  # that same least-privilege identity. pipefail ensures find, sort, or
+  # sha256sum failures cannot be hidden by a successful downstream command.
+  set -o pipefail
+  podman run --rm --network none --read-only --cap-drop all --security-opt no-new-privileges --user 1000:1000 --entrypoint /bin/bash \
+    -v "$volume:/history:ro" "$PG_IMAGE" -euo pipefail -c 'cd /history; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum' | sha256sum | cut -d' ' -f1
 }
 require_quiesced(){
   [[ "$(cat "$STATE_DIR/route")" == blocked ]] || die 'Block the proxy before backup'
