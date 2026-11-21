@@ -32,7 +32,8 @@ export const FULL_MODEL_OCI_PATHS = Object.freeze([
 
 /** @param {string} file */
 export function matchesFullModelOciPath(file) {
-  return typeof file === 'string' && FULL_MODEL_OCI_PATHS.some(pattern =>
+  // The standalone Capacitor shell is never part of the backend Full-model OCI input graph.
+  return typeof file === 'string' && !file.startsWith('app/native/') && FULL_MODEL_OCI_PATHS.some(pattern =>
     pattern.endsWith('/**') ? file.startsWith(pattern.slice(0, -2)) : file === pattern);
 }
 
