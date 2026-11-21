@@ -1,6 +1,49 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { api } from "./api.js";
+import { api, setOAuthAccessToken } from "./api.js";
+
+test("OAuth API requests send a bearer token without ambient cookies", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  let requestInit: RequestInit | undefined;
+  Object.defineProperty(globalThis, "document", { configurable: true, value: { cookie: "__Host-praetorium_csrf=csrf-token" } });
+  globalThis.fetch = async (_input, init) => {
+    requestInit = init;
+    return Response.json({ name: "codexia", version: "0.1.0", hosted: false, profile: "core" });
+  };
+  setOAuthAccessToken("short-lived-api-token");
+  try {
+    await api.version();
+    assert.equal(new Headers(requestInit?.headers).get("Authorization"), "Bearer short-lived-api-token");
+    assert.equal(new Headers(requestInit?.headers).has("X-CSRF-Token"), false);
+    assert.equal(requestInit?.credentials, "omit");
+  } finally {
+    setOAuthAccessToken(null);
+    globalThis.fetch = originalFetch;
+    if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
+
+test("OAuth API admission preserves 401, 403, and 503 without refresh or downgrade", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestCount = 0;
+  globalThis.fetch = async (_input, init) => {
+    requestCount += 1;
+    assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer api-token");
+    return Response.json({ error: "Denied", code: "DENIED" }, { status: [401, 403, 503][requestCount - 1] });
+  };
+  setOAuthAccessToken("api-token");
+  try {
+    for (const status of [401, 403, 503]) {
+      await assert.rejects(api.session(), (error: unknown) => error instanceof Error && "status" in error && error.status === status);
+    }
+    assert.equal(requestCount, 3);
+  } finally {
+    setOAuthAccessToken(null);
+    globalThis.fetch = originalFetch;
+  }
+});
 
 test("concurrent expired Hosted requests share the rotating refresh exchange", async () => {
   const originalFetch = globalThis.fetch;
