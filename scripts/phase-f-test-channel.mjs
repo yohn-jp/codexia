@@ -9,7 +9,7 @@ import { assertVerificationJobs, collectGitHubPages, verifiedSourceRun } from '.
 import { assertCompatibleUpdate, validateUpdateRelease } from './update-release-policy.mjs';
 import { selectUpdateCandidate, signUpdateChannel, verifyUpdateChannel } from './update-channel.mjs';
 import { validateBackendIdentity } from './backend-update-identity.mjs';
-import { assertBackendPublication } from './component-release-record.mjs';
+import { assertBackendPublication, publicationInWorkflowWindow } from './component-release-record.mjs';
 
 const REPOSITORY = 'yohn-jp/codexia';
 const compatibility = JSON.parse(await readFile(new URL('../deploy/update-compatibility.json', import.meta.url), 'utf8'));
@@ -180,12 +180,10 @@ async function verifySourceCertification(record, releaseApiRecord, metadata, tok
   const workflowHeadSha = publication?.workflowHeadSha ?? authoritySha;
   const backendRuns = publication ? [await githubJson('actions/runs/' + publication.workflowRunId, token)] :
     await githubPages('actions/workflows/backend-release.yml/runs?head_sha=' + workflowHeadSha + '&branch=main&status=completed', 'workflow_runs', token);
-  const releasedAt=releaseApiRecord.created_at?Date.parse(releaseApiRecord.created_at):NaN;
   const backendRun = backendRuns.find(run => run?.head_sha === workflowHeadSha && run?.head_branch === 'main' &&
     ['push','workflow_run'].includes(run?.event) && run?.status === 'completed' && run?.conclusion === 'success'&&
     (!publication || (run.id === publication.workflowRunId && run.event === publication.event && run.path === '.github/workflows/backend-release.yml')) &&
-    Number.isFinite(releasedAt)&&Number.isFinite(Date.parse(run.created_at))&&Number.isFinite(Date.parse(run.updated_at))&&
-    Date.parse(run.created_at)<=releasedAt&&releasedAt<=Date.parse(run.updated_at)&&
+    publicationInWorkflowWindow(releaseApiRecord, run)&&
     (!['push','workflow_run'].includes(metadata.producer?.event)||(run.event===metadata.producer.event&&run.id===metadata.producer.workflowRunId&&run.run_number===metadata.producer.workflowRunNumber)));
   assert.ok(backendRun, 'Source has no successful main backend release workflow');
   const backendJobs = await githubPages('actions/runs/' + backendRun.id + '/jobs?filter=latest', 'jobs', token);

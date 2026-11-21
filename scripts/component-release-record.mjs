@@ -26,6 +26,14 @@ export function backendPublicationFromEnvironment(env, sourceSha) {
   });
 }
 
+export function publicationInWorkflowWindow(release, run) {
+  const published = Date.parse(release?.published_at);
+  const started = Date.parse(run?.created_at);
+  const finished = Date.parse(run?.updated_at);
+  return Number.isFinite(published) && Number.isFinite(started) && Number.isFinite(finished) &&
+    started <= published && published <= finished;
+}
+
 /** Build immutable component-release metadata while keeping tested bytes and reviewed main source distinct. */
 export function buildComponentReleaseRecord(component,sourceSha,identity,producer,mainTree){
   assert.ok(['frontend','backend'].includes(component),'Unknown component');

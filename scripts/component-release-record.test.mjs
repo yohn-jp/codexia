@@ -4,6 +4,14 @@ import * as releaseRecord from './component-release-record.mjs';
 import { readComponentVersion } from './component-release-version.mjs';
 import { parseComponentRelease } from './phase-f-test-channel.mjs';
 
+test('backend source proof uses the release publication time and the workflow windows', () => {
+  const release = { created_at:'2026-11-15T16:24:04Z', published_at:'2026-11-15T16:33:36Z' };
+  const run = { created_at:'2026-11-15T16:24:07Z', updated_at:'2026-11-15T16:33:40Z' };
+  assert.equal(releaseRecord.publicationInWorkflowWindow(release, run), true);
+  assert.equal(releaseRecord.publicationInWorkflowWindow({ ...release, published_at: null }, run), false);
+  assert.equal(releaseRecord.publicationInWorkflowWindow({ ...release, published_at: '2026-11-15T16:33:41Z' }, run), false);
+});
+
 test('frontend release metadata separates the merge source from immutable promoted asset identity',()=>{
   assert.equal(typeof releaseRecord.buildComponentReleaseRecord,'function','frontend release record builder is missing');
   const mainSha='a'.repeat(40),producerSha='b'.repeat(40),digest='c'.repeat(64),tree='d'.repeat(40);
