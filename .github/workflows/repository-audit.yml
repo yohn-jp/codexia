@@ -19,6 +19,8 @@ jobs:
   pack:
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    env:
+      OCR_NO_UPDATE: '1'
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
@@ -59,7 +61,7 @@ jobs:
         env:
           REVIEW_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          node -e 'const m=require(process.argv[1]); const r=m.reviews?.[process.env.REVIEW_SHA]; if(!r || !["ready","partial","no-diff"].includes(r.status)) throw Error("Current PR OCR materials are missing or blocked");' "$RUNNER_TEMP/audit-site/manifest.json"
+          node -e 'const m=require(process.argv[1]); const r=m.reviews?.[process.env.REVIEW_SHA]; if(!r || !["ready","partial","no-diff"].includes(r.status) || (r.selected > 0 && r.published === 0)) throw Error("Current PR has no usable OCR-selected source material");' "$RUNNER_TEMP/audit-site/manifest.json"
       - name: Require usable main snapshot in PR preview
         if: github.event_name == 'pull_request'
         run: node -e 'const m=require(process.argv[1]); const main=m.branches.find(x=>x.branch==="main"); if(!main || m.snapshots[main.sha].status==="blocked") throw new Error("Main audit snapshot is unavailable");' "$RUNNER_TEMP/audit-site/manifest.json"
