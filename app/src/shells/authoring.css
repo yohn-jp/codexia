@@ -336,7 +336,7 @@
 }
 .st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-editor-column {
   min-block-size: 100%;
-  padding: clamp(18px, 3vw, 46px) clamp(24px, 5vw, 76px) 60px;
+  padding: clamp(4px, 0.4vw, 6px) clamp(24px, 5vw, 76px) 60px;
   background: var(--st-folio);
 }
 .st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-editor {
@@ -349,34 +349,62 @@
   box-shadow: none;
 }
 .st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-editor-heading {
-  align-items: flex-end;
-  gap: 16px;
-  margin-block-end: 16px;
-  padding-block-end: 18px;
+  align-items: center;
+  gap: 12px;
+  margin-block-end: 6px;
+  padding-block-end: 7px;
   border-block-end: 1px solid var(--st-folio-edge);
 }
 .st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-editor-heading h2 {
-  margin-block: 4px 0;
-  font: 500 clamp(1.65rem, 2.4cqi, 2.2rem)/1.45 var(--manuscript-serif, serif);
+  margin-block: 0;
+  font: 500 clamp(1.35rem, 2cqi, 1.65rem)/1.25 var(--manuscript-serif, serif);
   letter-spacing: .015em;
   text-wrap: balance;
 }
 .st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-editor-heading .eyebrow {
-  color: var(--muted);
-  font-size: 11px;
-}
-.st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-save-state {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 4px 12px;
+  margin: 0 0 2px;
   color: var(--muted);
   font-size: 10px;
 }
+.st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-save-state {
+  position: relative;
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+.st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-save-state summary {
+  min-block-size: 32px;
+  display: flex;
+  align-items: center;
+  padding-inline: 8px;
+  border: 1px solid var(--st-folio-edge);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-save-state[data-state="saved"] summary { color: var(--success); }
+.st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-save-state[data-state="uncertain"] summary { color: var(--error-text); }
+.st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-save-state-detail {
+  position: absolute;
+  z-index: 8;
+  inset-inline-end: 0;
+  top: calc(100% + 4px);
+  min-inline-size: 16rem;
+  padding: 8px 12px;
+  border: 1px solid var(--st-folio-edge);
+  border-radius: 4px;
+  background: var(--paper);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 10%);
+}
+.st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-save-state-detail p {
+  margin: 3px 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
 .st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-editor-actions {
   gap: 4px;
-  margin-block: 8px 2px;
-  padding-block: 4px;
+  margin-block: 0 2px;
+  padding-block: 0;
 }
 .st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-editor-actions button {
   min-block-size: 32px;
@@ -390,6 +418,39 @@
 .st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-editor-actions button:hover:not(:disabled) {
   color: var(--ink);
   background: var(--surface-hover);
+}
+.st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-editor-actions > details > summary {
+  min-block-size: 32px;
+  display: flex;
+  align-items: center;
+  padding-inline: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-editor-actions > details[open] > div {
+  position: absolute;
+  z-index: 8;
+  top: 100%;
+  inset-inline-start: 0;
+  min-inline-size: 15rem;
+  padding: 8px;
+  border: 1px solid var(--st-folio-edge);
+  border-radius: 4px;
+  background: var(--paper);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 10%);
+}
+.st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .pg-editor-actions > details { position: relative; }
+.st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] #pg-manuscript-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 .st-studio-shell .st-workspace-panel[data-workspace-panel="editor"] .manuscript-column {
   min-block-size: min(64dvh, 52rem);

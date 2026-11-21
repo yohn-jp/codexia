@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import type { KnowledgeAliasId, KnowledgeNodeId, ProjectId } from "@codexia/persistence-contracts";
-import { createWritingFixture, openRevisionHistory, ownerLogin, manuscriptEditor } from "./postgres-fixture";
+import { createWritingFixture, expectDeviceDraft, expectServerSaveFailure, expectServerSaved, openRevisionHistory, ownerLogin, manuscriptEditor } from "./postgres-fixture";
 
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
@@ -233,7 +233,10 @@ test("PostgreSQL project pages expose records beyond 200 and deep links retain t
 
   const missingId = crypto.randomUUID();
   await page.goto(new URL(`/desktop/projects/${missingId}`, origin).toString());
-  await expect(page.getByRole("main").getByRole("alert")).toContainText(missingId);
+  const editorAlert = page.locator(".pg-editor-column").getByRole("alert");
+  await expect(editorAlert).toContainText(missingId);
+  await expect(editorAlert).toHaveCount(1);
+  await expect(page.getByRole("alert")).toHaveCount(1);
   await expect(page.getByLabel("作品", { exact: true })).toHaveValue(missingId);
   expect(pageRequests, "an unavailable direct link must not silently fall back to library enumeration").toBe(2);
 
@@ -284,6 +287,11 @@ test("outline supports guarded keyboard navigation, search, zoom and mobile sizi
 });
 
 async function openResearchInspector(page: import("@playwright/test").Page) {
+  // A visible contenteditable can precede the CodeMirror EditorView being
+  // connected after reload. Focusing and observing CodeMirror's focus class
+  // proves the editor is ready before its navigation guard runs.
+  await manuscriptEditor(page).focus();
+  await expect(page.locator(".cm-editor")).toHaveClass(/cm-focused/u);
   const toolbar = page.getByRole("toolbar", { name: "ワークスペース配置" });
   await toolbar.getByRole("button", { name: "調査", exact: true }).click();
   await expect(page.locator('[data-workspace-panel="inspector"]')).toBeVisible();
@@ -356,7 +364,10 @@ test("replays ambiguous project and document creates with retained client intent
   await outline.locator(".pg-library-create > summary").click();
   await outline.getByLabel("作品名").fill(projectTitle);
   await outline.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
-  await expect(page.getByRole("main", { name: "PostgreSQL原稿編集" }).getByText("synthetic gateway timeout", { exact: true })).toBeVisible();
+  const editorAlert = page.getByRole("main", { name: "PostgreSQL原稿編集" }).getByRole("alert");
+  await expect(editorAlert).toHaveText("synthetic gateway timeout");
+  await expect(editorAlert).toHaveCount(1);
+  await expect(page.getByRole("alert")).toHaveCount(1);
   expect(projectReadMissed).toBe(true);
   await expect(outline.getByLabel("作品名")).toHaveValue(projectTitle);
   await outline.locator(".pg-library-create").getByRole("button", { name: "作成", exact: true }).click();
@@ -387,7 +398,8 @@ test("replays ambiguous project and document creates with retained client intent
   await createDocument.locator("summary").click();
   await createDocument.getByLabel("文書名").fill(documentTitle);
   await createDocument.getByRole("button", { name: "作成", exact: true }).click();
-  await expect(page.getByRole("main", { name: "PostgreSQL原稿編集" }).getByText("synthetic gateway timeout", { exact: true })).toBeVisible();
+  await expect(editorAlert).toHaveText("synthetic gateway timeout");
+  await expect(editorAlert).toHaveCount(1);
   expect(documentReadMissed).toBe(true);
   await expect(createDocument.getByLabel("文書名")).toHaveValue(documentTitle);
   await createDocument.getByRole("button", { name: "作成", exact: true }).click();
@@ -465,7 +477,7 @@ for (const shell of ["desktop", "mobile"] as const) {
     await editor.click();
     await page.keyboard.insertText("はじめの本文。");
     await expect(editor).toHaveText("はじめの本文。");
-    await expect(page.getByText("PostgreSQLへ保存済み", { exact: true })).toBeVisible();
+    await expectServerSaved(page);
   });
 }
 
@@ -514,8 +526,8 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   const editor = page.getByRole("textbox", { name: "本文", exact: true });
   await expect(editor).toBeVisible();
   await editor.fill(firstDraft);
-  await expect(page.getByText("PostgreSQLへ保存済み")).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText("IndexedDB回復Journalに保存済み")).toBeVisible();
+  await expectServerSaved(page);
+  await expectDeviceDraft(page);
 
   await editor.press("Control+A");
   await page.locator(".pg-editor-command-menu > summary").click();
@@ -592,13 +604,13 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   const winningDraft = "PostgreSQL側の先行Revision";
   const recoveredDraft = "別タブの回復Draft";
   await editor.fill(winningDraft);
-  await expect(page.getByText("PostgreSQLへ保存済み")).toBeVisible({ timeout: 15_000 });
+  await expectServerSaved(page);
   await otherEditor.fill(recoveredDraft);
   await expect(otherPage.getByRole("heading", { name: "Revision競合" })).toBeVisible({ timeout: 15_000 });
   await expect(otherPage.locator(".pg-conflict")).toContainText(winningDraft);
   await expect(otherPage.locator(".pg-conflict")).toContainText(recoveredDraft);
   await otherPage.getByRole("button", { name: "比較後、この回復Draftを最新版へ適用" }).click();
-  await expect(otherPage.getByText("PostgreSQLへ保存済み")).toBeVisible({ timeout: 15_000 });
+  await expectServerSaved(otherPage);
   await expect(otherEditor).toContainText(recoveredDraft);
 
   await otherPage.route("**/api/v1/persistence/projects/*/documents/*", async (route) => {
@@ -607,8 +619,8 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   });
   const interruptedDraft = "再読み込み後に復旧するDraft";
   await otherEditor.fill(interruptedDraft);
-  await expect(otherPage.getByText("IndexedDB回復Journalに保存済み")).toBeVisible();
-  await expect(otherPage.getByText("PostgreSQL保存を確認できません")).toBeVisible({ timeout: 15_000 });
+  await expectDeviceDraft(otherPage);
+  await expectServerSaveFailure(otherPage);
   await otherPage.unroute("**/api/v1/persistence/projects/*/documents/*");
   await otherPage.reload();
   await expect(otherPage.getByRole("heading", { name: "Database workspace" })).toBeVisible();
@@ -617,7 +629,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await otherPage.locator(".pg-document-list").getByRole("button", { name: new RegExp(documentTitle, "u") }).click();
   const recoveredEditor = otherPage.getByRole("textbox", { name: "本文", exact: true });
   await expect(recoveredEditor).toContainText(interruptedDraft);
-  await expect(otherPage.getByText("PostgreSQLへ保存済み")).toBeVisible({ timeout: 15_000 });
+  await expectServerSaved(otherPage);
   await otherPage.close();
   expect(contentSecurityPolicyViolations).toEqual([]);
 });

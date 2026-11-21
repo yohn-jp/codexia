@@ -32,7 +32,7 @@ export function MobileReadingPager({
     const viewport = viewportRef.current;
     const content = contentRef.current;
     if (!viewport || !content) return;
-    const width = viewport.clientWidth;
+    const width = viewport.getBoundingClientRect().width;
     if (width <= 0) return;
     setPageWidth(width);
     if (!isMobile) {
