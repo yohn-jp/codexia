@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run only inside test-base-runtime-integration.sh after its disposable DB is ready.
 set -Eeuo pipefail
-trap 'status=$?; printf "Auth runtime fixture failed (status %s)\n" "$status" >&2; exit "$status"' ERR
+trap 'status=$?; printf "Auth runtime fixture failed at line %s (status %s)\n" "$LINENO" "$status" >&2; exit "$status"' ERR
 test "${GITHUB_ACTIONS:-}" = true
 test "${CODEXIA_DISPOSABLE_HOST:-}" = base-integration
 service_user=${CODEXIA_SERVICE_USER:?missing rootless fixture identity}
