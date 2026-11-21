@@ -68,6 +68,10 @@ test('production deployment consumes the verified Full digest and provenance cer
   assert.equal(ansible.env.CODEXIA_CERTIFIED_FULL_IMAGE, '${{ needs.verify-handoff.outputs.certified-full-image }}');
   assert.equal(ansible.env.CODEXIA_PROFILE, 'full');
   assert.equal(ansible.env.CODEXIA_DEPLOYMENT_CERTIFICATE_B64, '${{ needs.verify-handoff.outputs.deployment-certificate }}');
+  assert.equal(ansible.env.CODEXIA_INITIAL_INSTALL_APPROVED, "${{ vars.CODEXIA_INITIAL_INSTALL_APPROVED || 'false' }}");
+  assert.equal(ansible.env.CODEXIA_DATABASE_INITIALIZATION_APPROVED, "${{ vars.CODEXIA_DATABASE_INITIALIZATION_APPROVED || 'false' }}");
+  assert.match(ansible.run, /codexia_initial_install_approved:process\.env\.CODEXIA_INITIAL_INSTALL_APPROVED==="true"/u);
+  assert.match(ansible.run, /codexia_database_initialization_approved:process\.env\.CODEXIA_DATABASE_INITIALIZATION_APPROVED==="true"/u);
   assert.match(ansible.run, /codexia_stage: deploy/u);
   assert.match(ansible.run, /codexia_image:/u);
 });
@@ -114,6 +118,57 @@ test('the production Quadlet binds an immutable image and disables startup schem
   assert.match(quadlet, /^Image=CODEXIA_BACKEND_IMAGE$/mu);
   assert.match(quadlet, /^Environment=CODEXIA_PROFILE=CODEXIA_BACKEND_PROFILE$/mu);
   assert.match(quadlet, /^Environment=CODEXIA_DATABASE_MIGRATE_ON_START=0$/mu);
+});
+
+test('first activation initializes only a pristine database after backup under both explicit approvals', () => {
+  const deployment = parse(readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8'));
+  const approval = deployment.find(task => task.name === 'Refuse implicit first activation without explicit verified schema approval');
+  assert.deepEqual(approval['ansible.builtin.assert'].that, [
+    'codexia_initial_install_approved | default(false) | bool',
+    'codexia_database_initialization_approved | default(false) | bool',
+  ]);
+  const transaction = deployment.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
+  const shell = transaction['ansible.builtin.shell'];
+  const backup = shell.indexOf('backup-locked');
+  const freshMigration = shell.indexOf('initializeFreshPostgresSchema');
+  const startApi = shell.indexOf('systemctl --user start codexia-api.service', shell.indexOf('install -m 0644 "$candidate_unit" "$active_unit"'));
+  assert.ok(backup >= 0 && freshMigration > backup && startApi > freshMigration,
+    'first schema initialization must follow its backup and precede API activation');
+  assert.doesNotMatch(shell, /if \[\[ -n "\$current_image" \]\]; then[\s\S]*backup-locked/u,
+    'a first activation with an existing database must still make a pre-activation backup');
+  assert.ok(shell.indexOf('stop codexia-api.service') < backup,
+    'backup admission must follow API and Tunnel quiescence');
+  assert.match(shell, /podman run --rm --network codexia-data[\s\S]*--secret=codexia-postgres-app-password[\s\S]*candidate_image/u);
+  assert.match(shell, /initializeFreshPostgresSchema\(connectionString\)/u);
+  assert.match(shell, /if \[\[ "\$had_unit" != true \]\]; then[\s\S]*initializeFreshPostgresSchema/u);
+  assert.doesNotMatch(shell, /DATABASE_MIGRATE_ON_START=1/u,
+    'the one-shot approved initializer must not enable recurring startup migrations');
+  const persistencePackage = JSON.parse(readFileSync(new URL('../packages/persistence-postgres/package.json', import.meta.url), 'utf8'));
+  const persistenceExports = readFileSync(new URL('../packages/persistence-postgres/src/index.ts', import.meta.url), 'utf8');
+  assert.ok(persistencePackage.files.includes('dist') && persistencePackage.files.includes('migrations'),
+    'the candidate image must carry the initializer and its reviewed migrations');
+  assert.match(persistenceExports, /export \{[^}]*initializeFreshPostgresSchema[^}]*\} from "\.\/migrate\.js"/u);
+});
+
+test('failed fresh-schema initialization restores a first activation without stopping an absent API service', () => {
+  const tasks = parse(readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8'));
+  const transaction = tasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
+  const shell = transaction['ansible.builtin.shell'];
+  const restore = shell.slice(shell.indexOf('restore_previous(){'), shell.indexOf('if { [[ "$tunnel_present" == true ]]'));
+  assert.ok(restore.startsWith('restore_previous(){'), 'canonical rollback helper must be present');
+  assert.match(restore, /if \[\[ "\$had_unit" == true \|\| -e "\$active_unit" \|\| -L "\$active_unit" \]\]; then[\s\S]*?systemctl --user stop codexia-api\.service/u,
+    'a missing generated API unit must not make first-install recovery fail');
+  assert.match(restore, /rm -f -- "\$active_unit"/u, 'fresh install rollback must remove the candidate unit');
+  assert.match(restore, /rm -f -- "\$transaction_intent"/u, 'successful rollback must clear durable intent');
+});
+
+test('first activation precedes optional Better Auth namespace creation', () => {
+  const runbook = readFileSync(new URL('../docs/deployment/PUSH-DEPLOYMENT.md', import.meta.url), 'utf8');
+  const firstActivation = runbook.indexOf('Run the first API activation through the protected production workflow');
+  const optionalAuth = runbook.indexOf('Only after successful first activation');
+  assert.ok(firstActivation > 0 && optionalAuth > 0, 'both first activation and optional auth setup must be documented');
+  assert.match(runbook, /Do not run `auth-runtime` before initializing the application schema/u);
+  assert.match(runbook, /creating.*codexia_auth|codexia_auth.*additional database object/ui);
 });
 
 test('push rollout admits backups only after canonical API and Tunnel shutdown', () => {

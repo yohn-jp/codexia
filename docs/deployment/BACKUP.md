@@ -8,4 +8,6 @@ An independent `restore-drill` stage decrypts a **v2** artifact on an isolated r
 
 Use an approved protected Ansible inventory and independently supplied recipient/recovery identity. Only the holder of the external backup encryption private key can perform the restore drill.
 
+The deployment backup is a pre-rollout recovery point for the database and history resources; it does not roll back a schema migration, PostgreSQL role, or Podman secret. Current push deployment admission rejects migration-fingerprint, API-epoch, and persistence-format changes. Those changes remain unsupported until an independently reviewed operation defines its approval, encrypted pre-change backup, migration verification, and tested restore procedure. The isolated restore drill does not satisfy that migration procedure by itself.
+
 [Push deployment procedure](PUSH-DEPLOYMENT.md)

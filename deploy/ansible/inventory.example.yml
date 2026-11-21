@@ -40,4 +40,6 @@ all:
         codexia_postgres_app_password_file: /private/postgres-app-password
         # Protected push-deployment parameters are supplied at execution,
         # not stored as credentials or production values in this inventory.
+        # These approvals let the first deploy initialize only a pristine
+        # application schema after backup; they are not migration bypasses.
         codexia_initial_install_approved: false

@@ -12,6 +12,7 @@ The canonical production tasks are in [Ansible](../../deploy/ansible/README.md) 
 | `host` | Rootless service account and host prerequisites |
 | `secrets` | Initial protected Podman credential convergence |
 | `base` | Networks, persistent volumes, PostgreSQL and Tunnel Quadlets |
+| `auth-runtime` | Explicit Better Auth role, schema, and runtime secret provisioning; no migrations or activation |
 | `deploy` | Certified image admission, encrypted off-VM backup, application health and rollback |
 | `restore-drill` | Isolated encrypted backup restoration and checksum verification |
 
@@ -21,4 +22,6 @@ Runtime state lives only in `~/.local/state/codexia-deploy`, with the host lock,
 
 Require pinned SSH host keys, protected GitHub environment approval, independently held backup encryption keys and a private inventory. Never put credentials or private keys in Git.
 
-See [Push deployment](PUSH-DEPLOYMENT.md), [Backup](BACKUP.md) and [Host bootstrap acceptance](PUSH-HOST-CI.md).
+First activation requires `host`, `secrets`, `base`, then `deploy` with explicit first-install and database-use approvals. On a pristine database, optional `auth-runtime` provisioning must follow the successful first `deploy`: its separate schema would otherwise fail the fresh-schema admission check. See the ordered procedure and the unsupported schema-maintenance boundary in [Push deployment](PUSH-DEPLOYMENT.md).
+
+See [Backup](BACKUP.md) and [Host bootstrap acceptance](PUSH-HOST-CI.md) for their separate evidence boundaries.

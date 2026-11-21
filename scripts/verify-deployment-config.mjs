@@ -11,7 +11,7 @@ const workerConfig = JSON.parse(await read('edge/frontend/wrangler.jsonc'));
 const edgePackage = JSON.parse(await read('edge/frontend/package.json'));
 const edgeLock = JSON.parse(await read('edge/frontend/package-lock.json'));
 const uiRoutes = JSON.parse(await read('deploy/cloudflare/ui-routes.json'));
-const [staticHeaders, staticRedirects, apiSource, apiClient, terraformMain, terraformVariables, apiQuadlet, databaseQuadlet, databaseNetwork, databaseVolume, tunnelQuadlet, backendDockerfile, deploymentDocs] = await Promise.all([
+const [staticHeaders, staticRedirects, apiSource, apiClient, terraformMain, terraformVariables, apiQuadlet, databaseQuadlet, databaseNetwork, databaseVolume, tunnelQuadlet, backendDockerfile, deploymentDocs, pushDeploymentDocs, iacDocs, ansibleDocs, backupDocs] = await Promise.all([
   read('edge/frontend/static/_headers'),
   read('edge/frontend/static/_redirects'),
   read('packages/api/src/server.ts'),
@@ -25,6 +25,10 @@ const [staticHeaders, staticRedirects, apiSource, apiClient, terraformMain, terr
   read('deploy/quadlet/codexia-tunnel.container'),
   read('Dockerfile.backend'),
   read('docs/deployment/README.md'),
+  read('docs/deployment/PUSH-DEPLOYMENT.md'),
+  read('docs/deployment/IAC.md'),
+  read('deploy/ansible/README.md'),
+  read('docs/deployment/BACKUP.md'),
 ]);
 
 assert.equal(workerConfig.name, 'codexia-frontend');
@@ -109,6 +113,17 @@ assert.match(deploymentDocs, /VITE_API_URL/u);
 assert.match(deploymentDocs, /CORS/u);
 assert.match(deploymentDocs, /restore/u);
 assert.match(deploymentDocs, /127\.0\.0\.1:2000\/ready/u);
+const operationsDocs = [deploymentDocs, pushDeploymentDocs, iacDocs, ansibleDocs, backupDocs].join('\n');
+assert.match(operationsDocs, /First activation uses the existing Ansible stages in order/u);
+assert.match(operationsDocs, /codexia_initial_install_approved=true/u);
+assert.match(operationsDocs, /codexia_database_initialization_approved=true/u);
+assert.match(operationsDocs, /CODEXIA_INITIAL_INSTALL_APPROVED=true/u);
+assert.match(operationsDocs, /CODEXIA_DATABASE_INITIALIZATION_APPROVED=true/u);
+assert.match(operationsDocs, /auth-runtime.*optional/u);
+assert.match(operationsDocs, /Schema or persistence changes to a nonempty installation are currently unsupported/u);
+assert.match(operationsDocs, /migration fingerprint, API epoch, and persistence format/u);
+assert.match(deploymentDocs, /CODEXIA_DATABASE_MIGRATE_ON_START=0/u);
+assert.doesNotMatch(deploymentDocs, /CODEXIA_DATABASE_MIGRATE_ON_START=1/u);
 
 
 const identityProbes = JSON.parse(await read('deploy/cloudflare/identity-probes.json'));
