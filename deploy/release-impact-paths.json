@@ -24,6 +24,8 @@
     "scripts/verify-frontend-artifact*.mjs",
     "scripts/frontend-promotion-contract.test.mjs",
     "scripts/frontend-promotion-handoff.test.mjs",
+    "scripts/frontend-oauth-config.mjs",
+    "scripts/frontend-oauth-config.test.mjs",
     "scripts/component-release-record*.mjs",
     "scripts/reuse-pr-verification*.mjs",
     "scripts/verify-frontend-compatibility*.mjs",
