@@ -144,10 +144,19 @@ jobs:
           # Mitogen local runs a module with cwd=playbook directory even under
           # become_user. Allow traversal only, to this disposable test identity.
           # No world-readable temp files, chmod 777, or production changes.
-          for dir in "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/deploy" "$GITHUB_WORKSPACE/deploy/ansible"; do
+          target="$GITHUB_WORKSPACE/deploy/ansible"
+          dir="$target"
+          # Also handle /home/runner and the checkout parent on hardened runners.
+          # x-only ACL grants pathname traversal, not directory listing/write.
+          while [[ "$dir" != /home && "$dir" != / ]]; do
             sudo setfacl -m "u:$fixture_user:--x" "$dir"
+            dir=${dir%/*}
           done
-          sudo -u "$fixture_user" test -x "$GITHUB_WORKSPACE/deploy/ansible"
+          if ! sudo -u "$fixture_user" test -x "$target"; then
+            namei -l "$target"
+            echo 'Mitogen local become fixture cannot traverse the playbook cwd' >&2
+            exit 1
+          fi
       - name: Run unchanged rootless contracts under both Ansible strategies
         env:
           CODEXIA_SERVICE_USER: codexia-ab-rootless
