@@ -48,7 +48,8 @@ async function jobLog(jobId) {
 }
 
 function pullDuration(log, source, browser) {
-  const repository = source === 'MCR official' ? 'mcr.microsoft.com/playwright' : `ghcr.io/${GITHUB_REPOSITORY.toLowerCase()}/playwright-${browser}`;
+  const suffix = source === 'GHCR mirror' ? 'mirror-all' : source === 'GHCR Ubuntu' ? `ubuntu-${browser}` : browser;
+  const repository = source === 'MCR official' ? 'mcr.microsoft.com/playwright' : `ghcr.io/${GITHUB_REPOSITORY.toLowerCase()}/playwright-${suffix}`;
   let startTime;
   let image;
   for (const line of log.split('\n')) {
