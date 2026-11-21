@@ -69,7 +69,7 @@ async function resolveCompactMainCoverageProof({ plan, run, jobs, current, repos
       assert.ok(response.ok, `Merged PR proof lookup failed: HTTP ${response.status}`);
       return response.json();
     },
-    readArtifact: async (artifact, filename) => extractJsonEntry(await downloadArtifact(artifact, repository, token, request), filename),
+    readArtifact: async (artifact, filename) => JSON.parse(await extractJsonEntry(await downloadArtifact(artifact, repository, token, request), filename)),
   });
   const sourceRun = await getJson(githubRequest, `actions/runs/${mainProof.runId}`);
   const sourceJobs = await collectGitHubPages((page, perPage) => getJson(githubRequest,
@@ -162,8 +162,8 @@ export async function resolveExactMainCoverageProof({ plan: planValue, current, 
   assert.equal(run.conclusion, 'success', 'Latest exact-base main run failed');
   const jobs = await collectGitHubPages((page, perPage) => get(
     `actions/runs/${run.id}/jobs?filter=latest&per_page=${perPage}&page=${page}`), 'jobs');
-  const read = readArtifact ?? (async (artifact, filename) => extractJsonEntry(
-    await downloadArtifact(artifact, repository, token, request), filename));
+  const read = readArtifact ?? (async (artifact, filename) => JSON.parse(await extractJsonEntry(
+    await downloadArtifact(artifact, repository, token, request), filename)));
   const certificationJob = exactJob(jobs, 'certification', run);
   if (certificationJob.steps?.some(step => step.name === COMPACT_CERTIFICATION_STEP && step.conclusion === 'success')) {
     return resolveCompactMainCoverageProof({ plan, run, jobs, current, repository, token, request, read });
