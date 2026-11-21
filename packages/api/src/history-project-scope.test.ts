@@ -22,6 +22,25 @@ test("model history partitions PostgreSQL projects and binds cursors to the proj
   await assert.rejects(store.append({ ...event, model: "different" }), { code: "model_usage_event_id_conflict" });
 });
 
+test("model history cursors use the same code-unit ID order as pagination", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "codexia-model-cursor-order-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = new HistoricalModelUsageStore(join(root, "usage"));
+  const base = { projectId: "cursor-project", feature: "assistant", provider: "test", model: "test",
+    startedAt: "2026-01-01T00:00:00.000Z", completedAt: "2026-01-01T00:00:01.000Z", state: "completed" as const };
+  for (const id of ["a", "B", "_", "A", "b"]) await store.append({ ...base, id });
+  const all = (await store.list(base.projectId)).events.map(event => event.id);
+  const paged: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await store.list(base.projectId, { limit: 1, cursor });
+    paged.push(...page.events.map(event => event.id));
+    cursor = page.nextCursor;
+  } while (cursor);
+  assert.deepEqual(paged, all);
+  assert.equal(new Set(paged).size, all.length);
+});
+
 test("job IDs cannot be reused across PostgreSQL projects and results survive restart", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "codexia-job-project-"));
   t.after(() => rm(root, { recursive: true, force: true }));

@@ -109,7 +109,10 @@ export class HistoricalModelUsageStore implements ModelUsageStore {
       if ((!page.from || event.startedAt >= page.from) && (!page.to || event.startedAt <= page.to)) events.push(event);
     }
 
-    events.sort((left, right) => left.startedAt.localeCompare(right.startedAt) || left.id.localeCompare(right.id));
+    // Cursor predicates use JavaScript's relational string order. Keep the
+    // tie-breaker identical; localeCompare can order mixed-case IDs differently.
+    const compareText = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0;
+    events.sort((left, right) => compareText(left.startedAt, right.startedAt) || compareText(left.id, right.id));
     const afterCursor = page.cursor
       ? events.filter((event) => event.startedAt > page.cursor!.startedAt ||
         event.startedAt === page.cursor!.startedAt && event.id > page.cursor!.id)
