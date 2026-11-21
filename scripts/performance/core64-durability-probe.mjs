@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import { fork } from 'node:child_process';
 import { once } from 'node:events';
-import { copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, symlink } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import { distribution, save } from './common.mjs';
+import { distribution, readRegularFile, save } from './common.mjs';
 import { installBrowserProbes } from './browser-probes.mjs';
 
 const [runtimeRootArg, fixtureRootArg, scratchParentArg, outputArg, navigationRepeatsArg = '8'] = process.argv.slice(2);
@@ -127,12 +127,12 @@ for (const artifact of runtimeManifest.files) {
   if (!artifactRelative || artifactRelative.startsWith('..')) {
     throw new Error(`Artifact path escapes the shared runtime root: ${artifact.path}`);
   }
-  const [artifactStat, artifactRealPath] = await Promise.all([lstat(artifactPath), realpath(artifactPath)]);
+  const artifactRealPath = await realpath(artifactPath);
   const realRelative = relative(runtimeRootReal, artifactRealPath);
-  if (!artifactStat.isFile() || !realRelative || realRelative.startsWith('..')) {
+  if (!realRelative || realRelative.startsWith('..')) {
     throw new Error(`Manifest artifact is not a regular file within the shared runtime: ${artifact.path}`);
   }
-  const artifactBytes = await readFile(artifactPath);
+  const artifactBytes = await readRegularFile(artifactPath);
   const artifactSha256 = createHash('sha256').update(artifactBytes).digest('hex');
   if (artifactBytes.length !== artifact.bytes || artifactSha256 !== artifact.sha256) {
     throw new Error(`Shared runtime artifact failed size or SHA-256 verification: ${artifact.path}`);

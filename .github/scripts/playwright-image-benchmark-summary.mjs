@@ -1,9 +1,11 @@
-import { appendFileSync } from 'node:fs';
+import { constants, fstatSync, openSync, writeFileSync, closeSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 
 const { GITHUB_API_URL = 'https://api.github.com', GITHUB_REPOSITORY, GITHUB_RUN_ID, GH_TOKEN, GITHUB_STEP_SUMMARY } = process.env;
 if (!GITHUB_REPOSITORY || !GITHUB_RUN_ID || !GH_TOKEN || !GITHUB_STEP_SUMMARY) {
   throw new Error('Missing GitHub Actions API environment');
 }
+if (!isAbsolute(GITHUB_STEP_SUMMARY)) throw new Error('GITHUB_STEP_SUMMARY must be an absolute runner-provided path');
 
 const auth = {
   Authorization: `Bearer ${GH_TOKEN}`,
@@ -74,7 +76,9 @@ for (const job of selected) {
   let error = '';
   try { pull = pullDuration(await jobLog(job.id), source, browser); }
   catch (cause) { error = String(cause.message); }
-  result.push({ source, browser, conclusion: job.conclusion, pull, init: elapsed(init?.started_at, init?.completed_at), test: elapsed(test?.started_at, test?.completed_at), total: elapsed(job.started_at, job.completed_at), error });
+  const conclusion = ['success', 'failure', 'cancelled', 'skipped', 'timed_out', 'action_required', 'neutral', 'stale'].includes(job.conclusion)
+    ? job.conclusion : 'unknown';
+  result.push({ source, browser, conclusion, pull, init: elapsed(init?.started_at, init?.completed_at), test: elapsed(test?.started_at, test?.completed_at), total: elapsed(job.started_at, job.completed_at), error });
 }
 
 const expected = ['chromium', 'webkit'].flatMap(browser => ['MCR official', 'GHCR mirror', 'GHCR minimal', 'GHCR Ubuntu'].map(source => ({ browser, source })));
@@ -98,7 +102,12 @@ for (const {browser, source} of expected) {
   if (r.error) problems.push(`${source}/${browser}: ${r.error}`);
 }
 lines.push('', 'Pull is measured from the Docker pull command to its completion in the job log; initialization and job elapsed come from the Actions jobs API. Execute multiple manual runs before judging runner variance.');
-for (const problem of problems) lines.push(`- ${problem}`);
-appendFileSync(GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
+for (const problem of problems) lines.push(`- ${problem.replace(/[|\r\n]/gu, ' ')}`);
+const summary = lines.join('\n') + '\n';
+const summaryFd = openSync(GITHUB_STEP_SUMMARY, constants.O_WRONLY | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0));
+try {
+  if (!fstatSync(summaryFd).isFile()) throw new Error('GITHUB_STEP_SUMMARY must reference an open regular runner summary file');
+  writeFileSync(summaryFd, summary);
+} finally { closeSync(summaryFd); }
 
 if (problems.length) throw new Error(`Benchmark incomplete: ${problems.join('; ')}`);

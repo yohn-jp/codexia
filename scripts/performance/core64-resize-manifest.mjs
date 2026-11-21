@@ -1,21 +1,15 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { arch, platform } from 'node:os';
+import { readRegularFile, writeNewJsonResult } from './common.mjs';
 
 const [outputArg] = process.argv.slice(2);
 if (!outputArg) throw new Error('Usage: node scripts/performance/core64-resize-manifest.mjs <new-manifest.json>');
 
 const root = process.cwd();
 const output = resolve(outputArg);
-try {
-  await access(output);
-  throw new Error(`Refusing to overwrite existing runtime manifest: ${output}`);
-} catch (error) {
-  if (error?.code !== 'ENOENT') throw error;
-}
-
 const artifactRoots = [
   'packages/contracts/dist',
   'packages/module-runtime/dist',
@@ -66,7 +60,7 @@ for (const artifactRoot of artifactRoots) {
   const rootFiles = (await filesUnder(absoluteRoot)).sort();
   if (!rootFiles.length) throw new Error(`Core build artifact root is empty: ${artifactRoot}`);
   for (const file of rootFiles) {
-    const bytes = await readFile(file);
+    const bytes = await readRegularFile(file);
     artifacts.push({ path: relative(root, file).split('\\').join('/'), bytes: bytes.length, sha256: sha256(bytes) });
   }
 }
@@ -100,4 +94,4 @@ const manifest = {
   },
 };
 await mkdir(dirname(output), { recursive: true });
-await writeFile(output, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
+await writeNewJsonResult(output, manifest);

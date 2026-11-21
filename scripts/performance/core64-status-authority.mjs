@@ -5,6 +5,7 @@ import { generateKeyPairSync, sign as signJwt } from "node:crypto";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { save } from "./common.mjs";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -291,7 +292,9 @@ try {
     remoteRace: race,
   };
   await fsp.mkdir(path.dirname(path.resolve(outputPath)), { recursive: true });
-  await fsp.writeFile(outputPath, JSON.stringify(result, null, 2) + "\n", { mode: 0o600 });
+  // This CLI path is the caller-selected benchmark result destination. The
+  // shared writer commits it atomically without following a destination symlink.
+  await save(path.resolve(outputPath), result);
   process.stdout.write(JSON.stringify({
     outputPath,
     runtimeRoot,

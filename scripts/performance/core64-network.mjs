@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { fork, spawn } from 'node:child_process';
-import { access, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { once } from 'node:events';
 import { createServer as createTcpServer } from 'node:net';
@@ -8,7 +8,7 @@ import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 import { chromium } from '@playwright/test';
 import { git } from './dataset.mjs';
-import { save } from './common.mjs';
+import { readRegularFile, save } from './common.mjs';
 
 const [datasetArg, runtimeRootArg, runtimeManifestArg, expectedSourceArg, outputArg,
   idleArg = '35000', addedRttArg = '80', streamWindowArg = '35000', phaseArg = 'full'] = process.argv.slice(2);
@@ -102,9 +102,9 @@ for (const entry of runtimeManifest.files) {
   if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel) || listedFiles.has(entry.path)) {
     throw new Error(`Unsafe or duplicate runtime artifact path ${entry.path}`);
   }
-  const stat = await lstat(absolute);
-  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`Runtime artifact is not a regular file: ${entry.path}`);
-  const bytes = await readFile(absolute);
+  let bytes;
+  try { bytes = await readRegularFile(absolute); }
+  catch { throw new Error(`Runtime artifact is not a regular file: ${entry.path}`); }
   if (bytes.length !== entry.bytes || sha256(bytes) !== entry.sha256) {
     throw new Error(`Runtime artifact does not match manifest: ${entry.path}`);
   }
