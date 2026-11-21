@@ -1,5 +1,5 @@
 import { assertChangeOperation, BUILTIN_MODULE_IDS, type ActionResult, type ChangeProposal, type ApplyReceipt, type ModuleStatus, type ProposalStatus, type RecentActivityResponse, type SnapshotId, type UiContribution } from "@codexia/contracts";
-import type { FileDocument, InboxItem, InboxListResponse, PersistenceAnchorView, PersistenceDocumentAnchors, PersistenceDocumentRead, PersistenceNodeRead, PersistenceStatus, PersistenceAssertionEvidenceRead, PersistenceAssertionRead, PublicJob, RuntimeVersion, Scene, SceneRead, Session, SnapshotRead, Tree, TreeRead, PortableWorkArchive, PortableWorkImportResult } from "./api";
+import type { FileDocument, InboxItem, InboxListResponse, PersistenceAnchorView, PersistenceDocumentAnchors, PersistenceDocumentRead, PersistenceNodeRead, PersistenceKnowledgePage, PersistenceStatus, PersistenceAssertionEvidenceRead, PersistenceAssertionRead, PublicJob, RuntimeVersion, Scene, SceneRead, Session, SnapshotRead, Tree, TreeRead, PortableWorkArchive, PortableWorkImportResult } from "./api";
 import { ApiError } from "./api-error";
 import type { Assertion, AssertionEvidence, ChangeSet, ChangeSetApplicationResult, ChangeSetOperation, Document as PersistenceDocument, DocumentRevision as PersistenceRevision, DocumentRevisionPage, DocumentWriteResult, EvidenceAnchor, KnowledgeAlias, KnowledgeNode, KnowledgeRelation, MentionLink, Project as PersistenceProject } from "@codexia/persistence-contracts";
 
@@ -108,13 +108,17 @@ export const responseContracts = {
   portableWorkImport: (v: unknown): v is PortableWorkImportResult => record(v) && persistenceProject(v.project) &&
     bool(v.replayed) && integer(v.unresolvedAnchors) && integer(v.omittedRecords),
   persistenceProjects: array(persistenceProject),
+  persistenceProjectPage: (v: unknown): v is { projects: PersistenceProject[]; nextCursor: string | null } =>
+    record(v) && array(persistenceProject)(v.projects) && (v.nextCursor === null || (text(v.nextCursor) && v.nextCursor.length <= 512)),
   persistenceProject: (v: unknown): v is { project: PersistenceProject } => record(v) && persistenceProject(v.project),
   nativeChangeSets: (v: unknown): v is { changeSets: ChangeSet[] } => record(v) && array(changeSet)(v.changeSets),
   nativeChangeSet: nativeChangeSetRead,
   nativeChangeSetEnvelope: (v: unknown): v is { changeSet: ChangeSet } => record(v) && changeSet(v.changeSet),
   nativeChangeSetApplication: changeSetApplication,
   persistenceDocuments: (v: unknown): v is { documents: PersistenceDocument[] } => record(v) && array(persistenceDocument)(v.documents),
-  persistenceNodes: (v: unknown): v is { nodes: KnowledgeNode[] } => record(v) && array(persistenceKnowledgeNode)(v.nodes),
+  persistenceNodes: (v: unknown): v is { nodes: KnowledgeNode[] } | PersistenceKnowledgePage => record(v) && array(persistenceKnowledgeNode)(v.nodes) &&
+    (v.nextCursor === undefined && v.projectVersion === undefined || nullableText(v.nextCursor) && integer(v.projectVersion)),
+  persistenceKnowledgePage: (v: unknown): v is PersistenceKnowledgePage => record(v) && array(persistenceKnowledgeNode)(v.nodes) && nullableText(v.nextCursor) && integer(v.projectVersion),
   persistenceDocumentEnvelope: (v: unknown): v is { document: PersistenceDocument } => record(v) && persistenceDocument(v.document),
   apply: application,
   persistenceDocument: (v: unknown): v is PersistenceDocumentRead => record(v) && persistenceDocument(v.document) && (v.revision === null || persistenceRevision(v.revision)),

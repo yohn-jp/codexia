@@ -29,6 +29,12 @@ export interface Project {
   updatedAt: string;
 }
 
+/** Stable continuation position for the owner-facing project library. */
+export interface ProjectPageCursor {
+  updatedAt: string;
+  id: ProjectId;
+}
+
 export interface CreateProjectCommand {
   id?: ProjectId;
   title: string;
@@ -117,6 +123,8 @@ export interface CreateDocumentCommand {
   kind: DocumentKind;
   title: string;
   orderKey: string;
+  /** Derive an append key from the active same-parent siblings under the project transaction lock. */
+  appendToEnd?: boolean;
   markdown: string;
   authorId: ActorId;
   idempotencyKey: IdempotencyKey;
@@ -181,6 +189,14 @@ export interface KnowledgeNode {
   deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface KnowledgeNodeSearch {
+  query?: string;
+  type?: string;
+  status?: KnowledgeNodeStatus;
+  after?: { name: string; id: KnowledgeNodeId };
+  limit: number;
 }
 
 export interface SaveKnowledgeNodeCommand {
@@ -516,6 +532,8 @@ export interface PersistenceReader {
   listPortableModuleRecords(projectId: ProjectId): Promise<{ records: readonly ModuleRecord[]; omittedAuthorityModules: readonly string[] }>;
   getProject(projectId: ProjectId): Promise<Project | undefined>;
   listProjects(limit?: number): Promise<readonly Project[]>;
+  /** Recent-project keyset page; `limit` includes the optional lookahead row. */
+  listProjectPage?(limit: number, after?: ProjectPageCursor): Promise<readonly Project[]>;
   /** Bounded, stable project-ID inventory for explicit startup compatibility checks. */
   listProjectIds(limit: number, after?: ProjectId): Promise<readonly ProjectId[]>;
   getDocument(projectId: ProjectId, documentId: DocumentId): Promise<Document | undefined>;
@@ -528,6 +546,8 @@ export interface PersistenceReader {
   listProjectRevisionHistory(projectId: ProjectId, heads: readonly DocumentRevisionKey[], limit: number): Promise<readonly Pick<DocumentRevision, "id" | "documentId" | "createdAt">[]>;
   getKnowledgeNode(projectId: ProjectId, nodeId: KnowledgeNodeId): Promise<KnowledgeNode | undefined>;
   listKnowledgeNodes(projectId: ProjectId, limit?: number): Promise<readonly KnowledgeNode[]>;
+  /** Bounded stable Knowledge browse; aliases are searched only within this project and node. */
+  searchKnowledgeNodes?(projectId: ProjectId, search: KnowledgeNodeSearch): Promise<readonly KnowledgeNode[]>;
   /** Export-only complete canonical scope, including retired nodes. */
   listAllKnowledgeNodes(projectId: ProjectId, limit?: number): Promise<readonly KnowledgeNode[]>;
   /** Export-only project assertion inventory, including unlinked assertions. */

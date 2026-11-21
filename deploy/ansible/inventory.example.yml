@@ -40,6 +40,9 @@ all:
         codexia_secrets_approved: false
         codexia_auth_token_file: /private/api-auth-token
         codexia_tunnel_token_file: /private/tunnel-token
+        # Rotate only after the replacement token is created through the
+        # external Cloudflare secret authority; the stage changes the local secret.
+        codexia_tunnel_token_rotation_approved: false
         codexia_postgres_admin_password_file: /private/postgres-admin-password
         codexia_postgres_app_password_file: /private/postgres-app-password
         # Private control-node files; use Ansible Vault for the secret variable.

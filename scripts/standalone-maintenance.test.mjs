@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
-import {probeCredentialFiles,validateProbeCredential,validatePostgresAppPassword,validateAppPasswordRotationManifest,validatePostgresAppPasswordRotation,assertProbeCredentialAccess,recoverProbeCredentialWriter,assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig,validateStandaloneAuthToken,transitionAuthTokenWriter,validateApiAuthTokenRotationManifest,saveApiAuthTokenSnapshot,loadApiAuthTokenSnapshot} from '../deploy/updater/standalone-maintenance.mjs';
+import {probeCredentialFiles,validateProbeCredential,validatePostgresAppPassword,validateAppPasswordRotationManifest,validatePostgresAppPasswordRotation,assertProbeCredentialAccess,recoverProbeCredentialWriter,assertNoDropInPaths,assertProxyImageStable,timerActivationCommand,validateMaintenanceConfig,validateStandaloneAuthToken,transitionAuthTokenWriter,validateApiAuthTokenRotationManifest,saveApiAuthTokenSnapshot,loadApiAuthTokenSnapshot,validateTunnelToken,validateTunnelTokenRotationManifest,saveTunnelTokenSnapshot,loadTunnelTokenSnapshot} from '../deploy/updater/standalone-maintenance.mjs';
 import {assertApiAuthTokenSecretIdentity,assertProxyRuntimeObservation,PodmanStandaloneHost} from '../deploy/updater/standalone-host.mjs';
 import {mkdir,mkdtemp,rm,writeFile,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -99,6 +99,45 @@ test('API token rotation manifest admits only its fixed private staged input',()
   for(const patch of [{apiAuthTokenFile:'/tmp/token'}, {unitDir:'/tmp/systemd'}, {rotateApiAuthToken:false}, {configPath:'/tmp/config.json'}]) {
     assert.throws(()=>validateApiAuthTokenRotationManifest({...manifest,...patch},args.manifestPath,args.serviceHome));
   }
+});
+
+test('Tunnel token rotation accepts only a protected token and fixed private candidate',()=>{
+  const token='synthetic-tunnel-token-1234567890';
+  assert.equal(validateTunnelToken(token),token);
+  assert.equal(validateTunnelToken(token+'\n'),token+'\n');
+  for(const invalid of ['', 'token with spaces', 'two\nlines', 'bad\r\n', 'x'.repeat(8193)]) {
+    assert.throws(()=>validateTunnelToken(invalid),/Invalid protected Tunnel token/);
+  }
+  const root='/home/codexia/.config/codexia-updater/maintenance/candidates/tunnel-token';
+  const manifest={format:'codexia-updater-maintenance/v1',candidateRoot:root,
+    configPath:'/home/codexia/.config/codexia-updater/config.json',sourceDir:'/opt/codexia-updater',
+    unitDir:'/home/codexia/.config/systemd/user',rotateTunnelToken:true,
+    tunnelTokenFile:root+'/credentials/tunnel-token'};
+  assert.deepEqual(validateTunnelTokenRotationManifest(manifest,root+'/manifest.json','/home/codexia'),
+    {tunnelTokenFile:manifest.tunnelTokenFile});
+  for(const patch of [{tunnelTokenFile:'/tmp/token'}, {unitDir:'/tmp/systemd'}, {rotateTunnelToken:false}, {extra:true}]) {
+    assert.throws(()=>validateTunnelTokenRotationManifest({...manifest,...patch},root+'/manifest.json','/home/codexia'));
+  }
+});
+
+test('Tunnel token recovery snapshot binds prior token, service identity and committed route',async()=>{
+  const root=await mkdtemp(path.join(tmpdir(),'codexia-tunnel-token-snapshot-'));
+  const config={publicKeyFile:path.join(root,'config','channel-public.pem'),stateFile:path.join(root,'state','controller.json'),routeFile:path.join(root,'state','route')};
+  const state={journal:{phase:'committed',active:{slot:'blue',image:release.image}},installed:release,paused:false,initialActivationPending:false,lastError:null};
+  const previous='synthetic-tunnel-token-old';
+  const replacement='synthetic-tunnel-token-new';
+  const {createHash}=await import('node:crypto');
+  const digest=value=>createHash('sha256').update(value).digest('hex');
+  const snapshot={operationId:'12345678-1234-4234-8234-123456789abc',originalSecretId:'secret-id-123',
+    previousDigest:digest(previous),replacementDigest:digest(replacement),sourceDigest:'a'.repeat(64),fragmentDigest:'b'.repeat(64),
+    imageId:'c'.repeat(64),runtimeDigest:'d'.repeat(64)};
+  const marker=await saveTunnelTokenSnapshot({config,state,snapshot,previousToken:previous,timer:{active:'inactive',enabled:'disabled'},routeContent:'blue\n'});
+  const loaded=await loadTunnelTokenSnapshot({config,state,marker});
+  assert.equal(loaded.previousToken,previous);
+  assert.deepEqual(loaded.snapshot,{...snapshot,controllerDigest:digest(JSON.stringify(state))});
+  await assert.rejects(()=>loadTunnelTokenSnapshot({config,state:{...state,paused:true},marker}),/controller snapshot changed/);
+  await assert.rejects(()=>loadTunnelTokenSnapshot({config,state,marker:{...marker,routeContent:'green\n'}}),/committed writer/);
+  await rm(root,{recursive:true,force:true});
 });
 
 test('API token rotation snapshots bind both tokens to the exact controller and survive interruption',async()=>{

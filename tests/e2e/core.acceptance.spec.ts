@@ -16,6 +16,13 @@ async function editorMarkdown(page: Page): Promise<string> {
 async function expectEditor(page: Page, markdown: string): Promise<void> {
   await expect.poll(() => editorMarkdown(page)).toBe(markdown.replace(/\n+$/u, ""));
 }
+async function pauseAutosaveClock(page: Page): Promise<void> {
+  const startTime = Date.now();
+  await page.clock.install({ time: startTime });
+  // The browser clock runs between install and pause, including on a busy CI worker.
+  await page.clock.pauseAt(startTime + 60_000);
+}
+
 async function replaceEditor(page: Page, markdown: string): Promise<void> {
   await editor(page).click();
   await editor(page).press("ControlOrMeta+a");
@@ -406,8 +413,7 @@ test("a newer draft stays protected when a replayed save is already superseded r
 
 test("undoing an autosave draft back to the saved revision removes only that draft and never sends it", async ({ page }) => {
   const f = await fixture(page);
-  await page.clock.install();
-  await page.clock.pauseAt(new Date());
+  await pauseAutosaveClock(page);
   const savedMarkdown = f.one.revision.markdown;
   const patchBodies: string[] = [];
   await page.route(`**${documentPath(f)}`, async (route) => {
@@ -438,15 +444,14 @@ test("undoing an autosave draft back to the saved revision removes only that dra
 
 test("undo cleanup cannot remove a higher-generation draft written by another tab", async ({ page, context }) => {
   const f = await fixture(page);
-  await page.clock.install();
-  await page.clock.pauseAt(new Date());
+  await pauseAutosaveClock(page);
   const savedMarkdown = f.one.revision.markdown;
   await replaceEditor(page, "First tab temporary draft.");
   await expect.poll(async () => (await drafts(page)).find((d) => d.documentId === f.one.document.id)?.markdown).toBe("First tab temporary draft.");
 
+  // The Playwright clock belongs to the browser context, so the second
+  // tab inherits it without advancing the first tab's pending autosave.
   const second = await context.newPage();
-  await second.clock.install();
-  await second.clock.pauseAt(new Date());
   await second.goto(page.url());
   await expectEditor(second, "First tab temporary draft.");
   await replaceEditor(second, "Newer second-tab draft.");
@@ -477,7 +482,8 @@ test("undo during an in-flight save preserves the request and saves the restored
 test("writing UI protects multiple document drafts separately from PostgreSQL revision durability", async ({ page }) => {
   const f = await fixture(page); const gate = await holdSaves(page, f);
   try {
-    await editor(page).fill("Scene One protected draft.");
+    await replaceEditor(page, "Scene One protected draft.");
+    await expectEditor(page, "Scene One protected draft.");
     // Establish the exact durable recovery record and an in-flight, unacknowledged
     // PostgreSQL save before switching documents.
     await expect.poll(async () => (await drafts(page)).some((d) => d.documentId === f.one.document.id && d.markdown === "Scene One protected draft.")).toBe(true);
@@ -486,7 +492,8 @@ test("writing UI protects multiple document drafts separately from PostgreSQL re
     // The guarded selection is asynchronous: do not type until Scene Two owns
     // the mounted editor, otherwise the test edits Scene One again.
     await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
-    await editor(page).fill("Scene Two independent draft.");
+    await replaceEditor(page, "Scene Two independent draft.");
+    await expectEditor(page, "Scene Two independent draft.");
     await expect.poll(async () => {
       const records = await drafts(page);
       return records.find((entry) => entry.documentId === f.one.document.id)?.markdown

@@ -281,8 +281,12 @@ test('browser artifacts bind the selected module closure to every reachable UI e
       'index.html': { file: 'assets/index-AbCd1234.js', isEntry: true, css: ['assets/styles-EfGh5678.css'], dynamicImports: withModule ? [source] : [] },
       ...(withModule ? { [source]: { file: 'assets/story-AbCd1234.js', isDynamicEntry: true, src: source } } : {}),
     };
-    for (const file of ['assets/index-AbCd1234.js', 'assets/styles-EfGh5678.css', ...(withModule ? ['assets/story-AbCd1234.js'] : [])]) {
-      await writeFile(path.join(output, file), '/* fixture */');
+    const worker = 'assets/revision-difference-worker-XyZ00001.js';
+    for (const file of ['assets/index-AbCd1234.js', 'assets/styles-EfGh5678.css', ...(withModule ? ['assets/story-AbCd1234.js'] : []), ...(ui ? [worker] : [])]) {
+      const body = ui && file === 'assets/index-AbCd1234.js'
+        ? `new Worker("${'/' + ui + '/' + worker}");`
+        : '/* fixture */';
+      await writeFile(path.join(output, file), body);
     }
     await writeFile(path.join(output, '.vite/manifest.json'), JSON.stringify(manifest));
     manifests.set(ui, manifest);
@@ -292,7 +296,16 @@ test('browser artifacts bind the selected module closure to every reachable UI e
     await emit('desktop', true);
     await emit('mobile', true);
     const records = await browserArtifactRecords(directory, ['story']);
-    assert.equal(records.files.length, 9);
+    assert.equal(records.files.length, 11);
+    assert.equal(records.files.filter(({ path: name }) => name.includes('revision-difference-worker')).length, 2);
+    const desktopAssets = path.join(directory, 'app/dist/desktop/assets');
+    await writeFile(path.join(desktopAssets, 'index-AbCd1234.js'), '/* missing worker reference */');
+    await assert.rejects(browserArtifactRecords(directory, ['story']), /does not reference its revision comparison worker/);
+    await emit('desktop', true);
+    const unexpectedScript = path.join(desktopAssets, 'unexpected-AbCd1234.js');
+    await writeFile(unexpectedScript, '/* unexpected fixture */');
+    await assert.rejects(browserArtifactRecords(directory, ['story']), /outside its manifest and revision comparison worker/);
+    await rm(unexpectedScript);
     await emit('desktop', false);
     await assert.rejects(browserArtifactRecords(directory, ['story']), /different browser module closure/);
     await emit('desktop', true);

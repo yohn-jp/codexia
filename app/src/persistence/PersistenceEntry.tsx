@@ -30,8 +30,8 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
       const version = await api.version();
       if (sequence !== inspectSequenceRef.current) return;
       versionChecked = true;
-      setAccessMode(version.browserAuth === "cloudflare-access");
       setHostedMode(version.hosted);
+      setAccessMode(version.browserAuth === "cloudflare-access");
       const session = await api.session();
       if (version.browserAuth === "cloudflare-access" && session.authorScope !== "owner") {
         throw new Error("Cloudflare Accessの作者認証を確認できませんでした。");
@@ -125,7 +125,7 @@ export function PersistenceEntry({ mode }: { mode: "desktop" | "mobile" }) {
 
   if (state === "database") return <>
     <div inert={sessionBlocked} hidden={sessionBlocked} style={{ display: sessionBlocked ? "none" : "contents" }}>
-      <PersistenceWorkspace mode={mode} authorScope={authorScope} sessionBlocked={sessionBlocked} registerProtection={registerProtection} onSignOut={() => {
+      <PersistenceWorkspace mode={mode} hosted={hostedMode} authorScope={authorScope} sessionBlocked={sessionBlocked} registerProtection={registerProtection} onSignOut={() => {
         if (accessMode && !hostedMode) { window.location.assign("/cdn-cgi/access/logout"); return; }
         void completeLogout();
       }} />

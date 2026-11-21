@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyUpdateChannel } from '../../scripts/update-channel.mjs';
 import { assertMatchingControllerBackup, validateControllerBackupProof, atomicWrite, clearBackupIntent, loadControllerState, StandaloneController } from '../../scripts/standalone-update-controller.mjs';
-import { PodmanStandaloneHost, ensureDirectoryTreeDurable, validatePostgresAppPassword, validateRuntimeContract, validateStandaloneAuthToken } from './standalone-host.mjs';
+import { PodmanStandaloneHost, ensureDirectoryTreeDurable, validatePostgresAppPassword, validateRuntimeContract, validateStandaloneAuthToken, validateStandaloneTunnelToken } from './standalone-host.mjs';
 export { validatePostgresAppPassword };
 export { validateStandaloneAuthToken };
 
@@ -47,6 +47,7 @@ export function validateProbeCredential(content){
   assert.ok(typeof content==='string'&&Buffer.byteLength(content)<=8192&&/^[!-~]+(?:\n)?$/u.test(content),
     'Invalid protected probe credential');
 }
+export function validateTunnelToken(content){return validateStandaloneTunnelToken(content);}
 export async function assertProbeCredentialAccess(host,state,publicKey){
   try{
     const verified=verifyUpdateChannel(await host.fetchChannel(),publicKey,state.journal.checkpoint);
@@ -100,6 +101,84 @@ export function validateApiAuthTokenRotationManifest(manifest,manifestPath,servi
   assert.equal(path.resolve(manifest.unitDir),path.join(serviceHome,'.config','systemd','user'),'API token maintenance unit path drift');
   assert.equal(path.resolve(manifest.sourceDir),'/opt/codexia-updater','API token maintenance source path drift');
   return {apiAuthTokenFile:manifest.apiAuthTokenFile};
+}
+export function validateTunnelTokenRotationManifest(manifest,manifestPath,serviceHome){
+  const keys=['candidateRoot','configPath','format','rotateTunnelToken','sourceDir','tunnelTokenFile','unitDir'];
+  assert.ok(plainObject(manifest),'Tunnel token maintenance manifest must be an object');
+  assert.deepEqual(Object.keys(manifest).sort(),keys,'Unexpected Tunnel token maintenance manifest fields');
+  assert.equal(manifest.format,'codexia-updater-maintenance/v1');
+  assert.equal(manifest.rotateTunnelToken,true,'Tunnel token rotation must be explicitly selected');
+  for(const key of ['candidateRoot','configPath','sourceDir','unitDir','tunnelTokenFile'])
+    assert.ok(typeof manifest[key]==='string'&&path.isAbsolute(manifest[key])&&!/[\r\n\0]/u.test(manifest[key]),'Tunnel token maintenance paths must be absolute');
+  const candidateRoot=path.resolve(manifest.candidateRoot);
+  assert.equal(path.resolve(manifestPath),path.join(candidateRoot,'manifest.json'),'Tunnel token manifest must be staged with its candidate');
+  assert.equal(path.resolve(manifest.tunnelTokenFile),path.join(candidateRoot,'credentials','tunnel-token'),'Tunnel token candidate escaped its fixed private staging path');
+  assert.ok(typeof serviceHome==='string'&&path.isAbsolute(serviceHome),'Service home must be absolute');
+  assert.equal(path.dirname(candidateRoot),path.join(serviceHome,'.config','codexia-updater','maintenance','candidates'),'Tunnel token candidate must use private updater staging');
+  assert.equal(path.resolve(manifest.configPath),path.join(serviceHome,'.config','codexia-updater','config.json'),'Tunnel token maintenance belongs to another controller');
+  assert.equal(path.resolve(manifest.unitDir),path.join(serviceHome,'.config','systemd','user'),'Tunnel token maintenance unit path drift');
+  assert.equal(path.resolve(manifest.sourceDir),'/opt/codexia-updater','Tunnel token maintenance source path drift');
+  return {tunnelTokenFile:manifest.tunnelTokenFile};
+}
+
+const tunnelTokenRotationFormat='codexia-maintenance-tunnel-token/v1';
+function assertTunnelTokenRotationState(state){
+  assert.ok(['idle','committed'].includes(state.journal.phase)&&!state.initialActivationPending&&state.lastError===null,
+    'Tunnel token rotation requires a stable initialized controller');
+  assert.equal(state.journal.active.image,state.installed.image,'Committed writer image differs from the installed release');
+}
+function validateTunnelTokenRotationMarker(marker,config){
+  assert.ok(plainObject(marker),'Tunnel token recovery marker must be an object');
+  assert.deepEqual(Object.keys(marker).sort(),['configPath','format','operationId','phase','previousTokenFile','routeContent','routeFile','rotation','stateFile','timer'].sort());
+  assert.equal(marker.format,tunnelTokenRotationFormat);
+  assert.ok(['applying','completed','rolled-back'].includes(marker.phase),'Tunnel token rotation marker phase is invalid');
+  timerActivationCommand(marker.timer);
+  assert.equal(marker.configPath,path.join(path.dirname(config.publicKeyFile),'config.json'));
+  assert.equal(marker.stateFile,config.stateFile);
+  assert.equal(marker.routeFile,config.routeFile);
+  assert.ok(['blue\n','green\n'].includes(marker.routeContent),'Tunnel rotation route snapshot is invalid');
+  assert.match(marker.operationId,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u);
+  const root=rotationSnapshotRoot(config,marker.operationId);
+  assert.equal(path.resolve(marker.previousTokenFile),path.join(root,'tunnel-token'));
+  const rotation=marker.rotation;
+  assert.ok(plainObject(rotation),'Tunnel token recovery identity is invalid');
+  assert.deepEqual(Object.keys(rotation).sort(),['controllerDigest','fragmentDigest','imageId','operationId','originalSecretId','previousDigest','replacementDigest','runtimeDigest','sourceDigest'].sort());
+  assert.equal(rotation.operationId,marker.operationId);
+  assert.match(rotation.originalSecretId,/^[A-Za-z0-9_-]{1,128}$/u);
+  for(const key of ['controllerDigest','fragmentDigest','previousDigest','replacementDigest','runtimeDigest','sourceDigest'])assert.match(rotation[key],/^[a-f0-9]{64}$/u);
+  assert.match(rotation.imageId,/^[a-f0-9]{64}$/u);
+  assert.notEqual(rotation.previousDigest,rotation.replacementDigest,'Tunnel token replacement must differ from its rollback credential');
+  return {root,rotation};
+}
+export async function saveTunnelTokenSnapshot({config,state,snapshot,previousToken,timer,routeContent}){
+  assertTunnelTokenRotationState(state);
+  validateTunnelToken(previousToken);
+  const root=rotationSnapshotRoot(config,snapshot.operationId);
+  await ensureDirectoryTreeDurable(root);
+  assert.equal((await lstat(root)).mode&0o777,0o700,'Tunnel token snapshot directory must be private');
+  assert.equal(createHash('sha256').update(previousToken).digest('hex'),snapshot.previousDigest,'Previous Tunnel token differs from captured identity');
+  const previousTokenFile=path.join(root,'tunnel-token');
+  await atomicWrite(previousTokenFile,previousToken);
+  await atomicWrite(path.join(root,'controller.json'),JSON.stringify(state)+'\n');
+  const marker={format:tunnelTokenRotationFormat,phase:'applying',operationId:snapshot.operationId,timer,routeContent,
+    configPath:path.join(path.dirname(config.publicKeyFile),'config.json'),stateFile:config.stateFile,routeFile:config.routeFile,
+    previousTokenFile,rotation:{operationId:snapshot.operationId,originalSecretId:snapshot.originalSecretId,
+      previousDigest:snapshot.previousDigest,replacementDigest:snapshot.replacementDigest,sourceDigest:snapshot.sourceDigest,
+      fragmentDigest:snapshot.fragmentDigest,imageId:snapshot.imageId,runtimeDigest:snapshot.runtimeDigest,
+      controllerDigest:createHash('sha256').update(JSON.stringify(state)).digest('hex')}};
+  validateTunnelTokenRotationMarker(marker,config);
+  return marker;
+}
+export async function loadTunnelTokenSnapshot({config,state,marker}){
+  const {root,rotation}=validateTunnelTokenRotationMarker(marker,config);
+  assert.equal(marker.phase,'applying','Completed Tunnel token rotation no longer needs rollback credentials');
+  assert.deepEqual(JSON.parse(await readBoundedPrivateFile(path.join(root,'controller.json'),1024*1024)),state,'Tunnel token controller snapshot changed');
+  assert.equal(createHash('sha256').update(JSON.stringify(state)).digest('hex'),rotation.controllerDigest,'Tunnel token controller identity changed');
+  assertTunnelTokenRotationState(state);
+  assert.equal(marker.routeContent,`${state.journal.active.slot}\n`,'Tunnel token route differs from the committed writer');
+  const previousToken=validateTunnelToken(await readBoundedPrivateFile(marker.previousTokenFile,8193));
+  assert.equal(createHash('sha256').update(previousToken).digest('hex'),rotation.previousDigest,'Previous Tunnel token snapshot digest drift');
+  return {snapshot:{...rotation},previousToken,root};
 }
 
 const apiTokenRotationFormat='codexia-maintenance-api-auth-token/v1';
@@ -551,7 +630,7 @@ async function readTransaction(markerPath){
   let raw;
   try{raw=await readFile(markerPath,'utf8');}catch(error){if(error.code==='ENOENT')return null;throw error;}
   const marker=JSON.parse(raw);
-  if(marker.format===rotationFormat||marker.format===apiTokenRotationFormat)return marker;
+  if(marker.format===rotationFormat||marker.format===apiTokenRotationFormat||marker.format===tunnelTokenRotationFormat)return marker;
   assert.equal(marker.format,'codexia-maintenance-transaction/v1');
   assert.ok(path.isAbsolute(marker.snapshotRoot)&&path.isAbsolute(marker.configPath)&&path.isAbsolute(marker.sourceDir)&&path.isAbsolute(marker.unitDir));
   assert.ok(Array.isArray(marker.files)&&marker.files.every(item=>typeof item.target==='string'&&typeof item.backup==='string'&&typeof item.exists==='boolean'));
@@ -630,6 +709,11 @@ async function recoverInterrupted(config,store,markerPath,publicKey){
     if(marker.format===apiTokenRotationFormat){
       try{await recoverApiAuthTokenRotation({config,store,publicKey,marker,markerPath});}
       catch(error){throw Error('Interrupted API token rotation recovery is unverified',{cause:error});}
+      return true;
+    }
+    if(marker.format===tunnelTokenRotationFormat){
+      try{await recoverTunnelTokenRotation({config,store,publicKey,marker,markerPath});}
+      catch(error){throw Error('Interrupted Tunnel token rotation recovery is unverified',{cause:error});}
       return true;
     }
     assert.equal(marker.stateFile,config.stateFile,'Interrupted maintenance belongs to a different controller');
@@ -747,6 +831,152 @@ async function recoverPasswordRotation({config,store,publicKey,marker,markerPath
   const host=new PodmanStandaloneHost(config);
   const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
   await finishRotation({config,host,controller,state,marker,markerPath,snapshot,password,recovering:true});
+}
+
+async function restoreTunnelTokenRotation({config,store,publicKey,marker,markerPath,state,snapshot,previousToken}){
+  await assertRotationControlUnits(config);
+  await stopTimerPolling();
+  const host=new PodmanStandaloneHost(config);
+  const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
+  await host.assertRuntimeSources();
+  await host.assertInitialLegacyAbsent();
+  await host.assertNoPreflight();
+  await host.verifyWriterUnits(state);
+  await host.assertCommittedWriterUnitSource(state.journal.active.slot);
+  const observedRoute=(await readFile(config.routeFile,'utf8'));
+  assert.ok(observedRoute===marker.routeContent||observedRoute==='blocked\n','Tunnel recovery route differs from its recorded state');
+  await host.installTunnelRotationStartupFence();
+  const secret=await host.assertTunnelTokenRotationSources(snapshot);
+  const active=await host.tunnelRotationServiceActive();
+  if(secret){
+    const digest=createHash('sha256').update(secret.token).digest('hex');
+    assert.ok(digest===snapshot.previousDigest||digest===snapshot.replacementDigest,'Tunnel recovery found an unrecognized token');
+    if(active)await host.verifyTunnelTokenRotation(snapshot,digest);
+  }else assert.equal(active,false,'Tunnel service is active while its canonical token secret is missing');
+  if(active)await host.stopTunnel();
+  await host.assertTunnelStoppedForRotation(snapshot);
+  await host.replaceTunnelToken(previousToken,snapshot);
+  await host.assertTunnelStoppedForRotation(snapshot);
+  await host.startTunnelForRotation(snapshot);
+  await host.verifyTunnelTokenRotation(snapshot,snapshot.previousDigest);
+  await host.route(marker.routeContent.trim());
+  await controller.assertServing(state,state.journal.active.slot,state.installed);
+  assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed during Tunnel token recovery');
+  assert.equal((await readFile(config.routeFile,'utf8')),marker.routeContent,'Tunnel recovery did not restore the recorded route');
+  marker.phase='rolled-back';
+  await atomicWrite(markerPath,JSON.stringify(marker)+'\n');
+  await restoreTimerPolling(marker.timer);
+  await rm(rotationSnapshotRoot(config,marker.operationId),{recursive:true,force:true}).catch(()=>{});
+  await host.removeTunnelRotationStartupFence();
+  await clearBackupIntent(markerPath);
+}
+async function recoverTunnelTokenRotation({config,store,publicKey,marker,markerPath}){
+  const state=await loadControllerState(config.stateFile);
+  if(marker.phase==='completed'){
+    await finalizeTunnelTokenRotation({config,store,publicKey,marker,markerPath,state,expectedDigest:marker.rotation.replacementDigest});
+    return;
+  }
+  if(marker.phase==='rolled-back'){
+    await finalizeTunnelTokenRotation({config,store,publicKey,marker,markerPath,state,expectedDigest:marker.rotation.previousDigest});
+    return;
+  }
+  const {snapshot,previousToken}=await loadTunnelTokenSnapshot({config,state,marker});
+  await restoreTunnelTokenRotation({config,store,publicKey,marker,markerPath,state,snapshot,previousToken});
+}
+async function finalizeTunnelTokenRotation({config,store,publicKey,marker,markerPath,state,expectedDigest}){
+  const {root,rotation}=validateTunnelTokenRotationMarker(marker,config);
+  assertTunnelTokenRotationState(state);
+  assert.equal(createHash('sha256').update(JSON.stringify(state)).digest('hex'),rotation.controllerDigest,'Tunnel completion controller identity changed');
+  await assertRotationControlUnits(config);
+  await stopTimerPolling();
+  const host=new PodmanStandaloneHost(config);
+  const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
+  await host.assertRuntimeSources();
+  await host.assertInitialLegacyAbsent();
+  await host.assertNoPreflight();
+  await host.verifyWriterUnits(state);
+  await host.assertCommittedWriterUnitSource(state.journal.active.slot);
+  const route=await readFile(config.routeFile,'utf8');
+  assert.ok(route===marker.routeContent||route==='blocked\n','Tunnel completion route differs from its snapshot');
+  await host.installTunnelRotationStartupFence();
+  const secret=await host.assertTunnelTokenRotationSources(rotation);
+  assert.ok(secret&&createHash('sha256').update(secret.token).digest('hex')===expectedDigest,
+    'Tunnel token does not match its durable terminal marker');
+  if(await host.tunnelRotationServiceActive())await host.verifyTunnelTokenRotation(rotation,expectedDigest);
+  else{
+    await host.assertTunnelStoppedForRotation(rotation);
+    await host.startTunnelForRotation(rotation);
+    await host.verifyTunnelTokenRotation(rotation,expectedDigest);
+  }
+  await host.route(marker.routeContent.trim());
+  await controller.assertServing(state,state.journal.active.slot,state.installed);
+  assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed during Tunnel completion recovery');
+  assert.equal(await readFile(config.routeFile,'utf8'),marker.routeContent,'Tunnel completion recovery did not restore the recorded route');
+  await rm(root,{recursive:true,force:true}).catch(()=>{});
+  await restoreTimerPolling(marker.timer);
+  await host.removeTunnelRotationStartupFence();
+  await clearBackupIntent(markerPath);
+}
+async function rotateTunnelToken({config,manifest,manifestPath,serviceHome,state,publicKey,store,markerPath}){
+  assertTunnelTokenRotationState(state);
+  const {tunnelTokenFile}=validateTunnelTokenRotationManifest(manifest,manifestPath,serviceHome);
+  assert.equal(path.dirname(config.publicKeyFile),path.dirname(manifest.configPath),'Tunnel token candidate belongs to another controller');
+  const root=path.resolve(manifest.candidateRoot);
+  assert.equal(await realpath(root),root,'Tunnel token staging root must not traverse a symlink');
+  assert.equal((await lstat(root)).mode&0o777,0o700,'Tunnel token staging root must be private');
+  await readBoundedPrivateFile(manifestPath,65536);
+  const replacement=validateTunnelToken(await readBoundedPrivateFile(tunnelTokenFile,8193));
+  assert.equal(fileURLToPath(import.meta.url),path.join(manifest.sourceDir,'deploy/updater/standalone-maintenance.mjs'),
+    'Install the reviewed updater before rotating the Tunnel token');
+  const host=new PodmanStandaloneHost(config);
+  assert.ok(host.runtime,'Tunnel token rotation requires a typed runtime');
+  const controller=new StandaloneController({host,store,publicKey,observeMilliseconds:config.observeMilliseconds??300000});
+  await controller.assertNoBackupIntent();
+  await assertRotationControlUnits(config);
+  await host.assertRuntimeSources();
+  await host.assertInitialLegacyAbsent();
+  await host.assertNoPreflight();
+  await host.verifyWriterUnits(state);
+  await host.assertCommittedWriterUnitSource(state.journal.active.slot);
+  await controller.assertServing(state,state.journal.active.slot,state.installed);
+  const snapshot=await host.captureTunnelTokenRotation(replacement,randomUUID(),state);
+  assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed before Tunnel token admission');
+  const initialRoute=await readFile(config.routeFile,'utf8');
+  assert.equal(initialRoute,`${state.journal.active.slot}\n`,'Tunnel token rotation requires the exact committed route');
+  const initialTimer=timerState();
+  assert.equal(updaterServiceState(),'inactive','Updater poll service must be idle before Tunnel token rotation');
+  const marker=await saveTunnelTokenSnapshot({config,state,snapshot,previousToken:(await host.assertTunnelTokenRotationSources(snapshot)).token,
+    timer:initialTimer,routeContent:initialRoute});
+  await atomicWrite(markerPath,JSON.stringify(marker)+'\n');
+  try{
+    await stopTimerPolling();
+    await host.installTunnelRotationStartupFence();
+    await host.assertTunnelTokenRotationSources(snapshot);
+    await host.stopTunnel();
+    await host.assertTunnelStoppedForRotation(snapshot);
+    await host.replaceTunnelToken(replacement,snapshot);
+    await host.startTunnelForRotation(snapshot);
+    await host.verifyTunnelTokenRotation(snapshot,snapshot.replacementDigest);
+    await controller.assertServing(state,state.journal.active.slot,state.installed);
+    assert.deepEqual(await loadControllerState(config.stateFile),state,'Controller changed during Tunnel token rotation');
+    assert.equal(await readFile(config.routeFile,'utf8'),initialRoute,'Tunnel token rotation changed the committed route');
+    marker.phase='completed';
+    await atomicWrite(markerPath,JSON.stringify(marker)+'\n');
+    await rm(rotationSnapshotRoot(config,marker.operationId),{recursive:true,force:true}).catch(()=>{});
+    await restoreTimerPolling(initialTimer);
+    await host.removeTunnelRotationStartupFence();
+    await clearBackupIntent(markerPath);
+    return {format:'codexia-updater-maintenance/v1',tunnelTokenRotated:true};
+  }catch(rotationError){
+    const durableMarker=await readTransaction(markerPath).catch(()=>null);
+    if(marker.phase==='completed'&&durableMarker===null)
+      throw Error('Tunnel token rotation committed but its startup fence cleanup failed',{cause:rotationError});
+    try{await recoverInterrupted(config,store,markerPath,publicKey);}
+    catch(recoveryError){throw new AggregateError([rotationError,recoveryError],'Tunnel token rotation rollback could not be verified; recovery remains blocked');}
+    if(durableMarker?.format===tunnelTokenRotationFormat&&durableMarker.phase==='completed')
+      return {format:'codexia-updater-maintenance/v1',tunnelTokenRotated:true,recoveredCompletion:true};
+    throw Error('Tunnel token rotation failed; the prior token and Tunnel service were restored',{cause:rotationError});
+  }
 }
 
 async function finishApiAuthTokenRotation({config,state,host,controller,marker,markerPath,snapshot,previousToken,replacementToken,recovering}){
@@ -941,6 +1171,9 @@ export async function maintainStandaloneUpdater({config,manifestPath,publicKey,s
   const serviceHome=path.resolve(config.quadletDirectory,'../../..');
   if(manifest.rotatePostgresAppPassword===true){
     return rotatePostgresAppPassword({config,manifest,manifestPath,serviceHome,state,publicKey,store,markerPath});
+  }
+  if(manifest.rotateTunnelToken===true){
+    return rotateTunnelToken({config,manifest,manifestPath,serviceHome,state,publicKey,store,markerPath});
   }
   if(manifest.rotateApiAuthToken===true){
     return rotateApiAuthToken({config,manifest,manifestPath,serviceHome,state,publicKey,store,markerPath});
