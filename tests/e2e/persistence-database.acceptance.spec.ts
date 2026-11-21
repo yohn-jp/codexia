@@ -233,6 +233,94 @@ test("a committed delete response for B preserves edited C, its selection, route
   }
 });
 
+test("a delayed import keeps unprotected intervening input available and lists the committed work", async ({ page }) => {
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  const fixture = await createWritingFixture(page, "desktop", `Import quota ${crypto.randomUUID()}`, "Source manuscript.");
+  const archiveResponse = await page.request.get(`/api/v1/persistence/projects/${fixture.project.id}/archive`);
+  expect(archiveResponse.ok(), await archiveResponse.text()).toBe(true);
+  const archive = await archiveResponse.json();
+  const heldImport = await holdNextWorkImport(page);
+  try {
+    await page.locator("details").filter({ has: page.locator("summary", { hasText: "作品のエクスポート・インポート" }) })
+      .locator('input[type="file"]').setInputFiles({ name: "portable-work.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(archive)) });
+    expect(await heldImport.committed).toBe(201);
+
+    await setPersistenceDraftWritesFailing(page, true);
+    const editor = manuscriptEditor(page);
+    await editor.focus();
+    await editor.press("Control+End");
+    await editor.pressSequentially("追加入力");
+    const expectedMarkdown = "Source manuscript.追加入力";
+    await expect(editor).toContainText("追加入力");
+    await expect(page.locator(".pg-editor").getByRole("alert")).toContainText(/Browser storage is full|quota|容量|回復|journal/i);
+    heldImport.release();
+
+    await expect(page.getByRole("heading", { name: fixture.scene.title, exact: true })).toBeVisible();
+    await expect(editor).toHaveText(expectedMarkdown);
+    expect(new URL(page.url()).pathname).toContain(`/projects/${fixture.project.id}/scenes/${fixture.scene.id}`);
+    const transfer = page.locator("details").filter({ has: page.locator("summary", { hasText: "作品のエクスポート・インポート" }) });
+    await transfer.locator("summary").click();
+    await expect(transfer.getByRole("status").filter({ hasText: "元の原稿を保持しました" })).toBeVisible();
+
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await editor.press("Control+A");
+    await editor.press("Control+C");
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(expectedMarkdown);
+
+    await setPersistenceDraftWritesFailing(page, false);
+    await editor.press("End");
+    await editor.press("!");
+    await editor.press("Backspace");
+    await expectDeviceDraft(page);
+    await page.getByRole("button", { name: /今すぐ保存|PostgreSQLへ再試行/ }).click();
+    await expectServerSaved(page);
+    expect((await storedDocumentMarkdown(page, fixture.project.id, fixture.scene.id)).markdown).toBe(expectedMarkdown);
+
+    const projects = await page.request.get("/api/v1/persistence/projects?limit=100");
+    expect(projects.ok()).toBe(true);
+    const importedId = heldImport.projectId;
+    expect(importedId).toBeTruthy();
+    const listedProjects = await projects.json() as Array<{ id: string }>;
+    expect(listedProjects.some((item) => item.id === importedId)).toBe(true);
+    await page.getByLabel("作品", { exact: true }).selectOption(importedId);
+    const importedDocuments = await readProjectDocuments(page, importedId);
+    await openManuscriptScene(page, importedDocuments.find((item) => item.title === fixture.scene.title)!);
+  } finally {
+    heldImport.release();
+    await heldImport.remove();
+  }
+});
+
+test("a delayed import protects intervening input before the normal transition", async ({ page }) => {
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  const fixture = await createWritingFixture(page, "desktop", `Import protected ${crypto.randomUUID()}`, "Source manuscript.");
+  const archiveResponse = await page.request.get(`/api/v1/persistence/projects/${fixture.project.id}/archive`);
+  expect(archiveResponse.ok(), await archiveResponse.text()).toBe(true);
+  const archive = await archiveResponse.json();
+  const heldImport = await holdNextWorkImport(page);
+  try {
+    await page.locator("details").filter({ has: page.locator("summary", { hasText: "作品のエクスポート・インポート" }) })
+      .locator('input[type="file"]').setInputFiles({ name: "portable-work.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(archive)) });
+    expect(await heldImport.committed).toBe(201);
+    const expectedMarkdown = "Source manuscript.保護される追加入力";
+    const editor = manuscriptEditor(page);
+    await editor.focus();
+    await editor.press("Control+End");
+    await editor.pressSequentially("保護される追加入力");
+    await expectDeviceDraft(page);
+    expect((await readPersistenceDrafts(page)).some((draft) => draft.documentId === fixture.scene.id && draft.markdown === expectedMarkdown)).toBe(true);
+    heldImport.release();
+    const transfer = page.locator("details").filter({ has: page.locator("summary", { hasText: "作品のエクスポート・インポート" }) });
+    await transfer.locator("summary").click();
+    await expect(transfer.getByRole("status").filter({ hasText: "新しい作品としてJSONを取り込みました。" })).toBeVisible();
+    expect(new URL(page.url()).pathname).not.toContain(`/projects/${fixture.project.id}/`);
+    expect((await readPersistenceDrafts(page)).some((draft) => draft.documentId === fixture.scene.id && draft.markdown === expectedMarkdown)).toBe(true);
+  } finally {
+    heldImport.release();
+    await heldImport.remove();
+  }
+});
+
 test("deleting the still-selected document safely selects the first remaining scene", async ({ page }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const a = await createWritingFixture(page, "desktop", `Delete transition A ${crypto.randomUUID()}`, "A manuscript.");
@@ -603,6 +691,59 @@ async function failPersistenceDraftWrites(page: Page): Promise<void> {
       return key === undefined ? put.call(this, value) : put.call(this, value, key);
     };
   });
+}
+
+async function setPersistenceDraftWritesFailing(page: Page, fail: boolean): Promise<void> {
+  await page.evaluate((shouldFail) => {
+    const state = window as Window & { __acceptanceDraftPut?: typeof IDBObjectStore.prototype.put; __acceptanceDraftFail?: boolean };
+    if (!state.__acceptanceDraftPut) {
+      state.__acceptanceDraftPut = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function (this: IDBObjectStore, value: unknown, key?: IDBValidKey) {
+        const current = window as Window & { __acceptanceDraftPut?: typeof IDBObjectStore.prototype.put; __acceptanceDraftFail?: boolean };
+        if (this.name === "persistenceDrafts" && current.__acceptanceDraftFail) throw new DOMException("Acceptance quota failure", "QuotaExceededError");
+        const put = current.__acceptanceDraftPut!;
+        return key === undefined ? put.call(this, value) : put.call(this, value, key);
+      };
+    }
+    state.__acceptanceDraftFail = shouldFail;
+  }, fail);
+}
+
+async function holdNextWorkImport(page: Page): Promise<{
+  committed: Promise<number>;
+  projectId: string;
+  release(): void;
+  remove(): Promise<void>;
+}> {
+  let openGate!: () => void;
+  let resolveCommitted!: (status: number) => void;
+  let rejectCommitted!: (error: unknown) => void;
+  let projectId = "";
+  let released = false;
+  const gate = new Promise<void>((resolve) => { openGate = resolve; });
+  const committed = new Promise<number>((resolve, reject) => { resolveCommitted = resolve; rejectCommitted = reject; });
+  const url = new URL("/api/v1/persistence/import", page.url()).toString();
+  const handler = async (route: import("@playwright/test").Route): Promise<void> => {
+    if (route.request().method() !== "POST") { await route.continue(); return; }
+    try {
+      const response = await route.fetch();
+      const body = await response.json() as { project?: { id?: string } };
+      projectId = body.project?.id ?? "";
+      resolveCommitted(response.status());
+      await gate;
+      await route.fulfill({ response });
+    } catch (error) {
+      rejectCommitted(error);
+      throw error;
+    }
+  };
+  await page.route(url, handler);
+  return {
+    committed,
+    get projectId() { return projectId; },
+    release() { if (released) return; released = true; openGate(); },
+    async remove() { try { await page.unroute(url, handler); } catch { /* Browser teardown already removed the route. */ } },
+  };
 }
 
 async function holdNextDocumentDelete(page: Page, projectId: string, documentId: string): Promise<{
