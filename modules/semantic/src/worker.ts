@@ -451,6 +451,9 @@ async function getReranker(cacheDirectory: string): Promise<ScorePipeline> {
         tokenizerPromise = Promise.resolve(tokenizer as unknown as (text: string[], options: unknown) => unknown);
         return async (input) => await model(input as never) as unknown as { logits: { data: ArrayLike<number> } };
       } catch (error) {
+        if (process.env.CODEXIA_MODEL_ACCEPTANCE_DIAGNOSTICS === "1") {
+          console.error("[model-acceptance] BGE model load:", error instanceof Error ? error.stack ?? error.message : String(error));
+        }
         rerankerPromise = null;
         throw errorWithCode("semantic_reranker_unavailable", `Could not load ${RERANKER_MODEL_ID}@${RERANKER_MODEL_VERSION}: ${error instanceof Error ? error.message : String(error)}`, error);
       }
