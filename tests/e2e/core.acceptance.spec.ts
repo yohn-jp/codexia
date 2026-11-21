@@ -982,6 +982,42 @@ test("public publishing route mounts its source reader without an owner session"
   expect(publicReadRequests).toEqual([`/api/public/projects/${projectId}/modules/publishing/share/e2e-invalid-token`]);
 });
 
+test("a root-only public share renders selectable scenes without an owner session", async ({ page }) => {
+  test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing browser module is selected by the full profile.");
+  const projectId = randomUUID();
+  const token = "share_" + "r".repeat(43);
+  const base = `/api/public/projects/${projectId}/modules/publishing/share/${token}`;
+  const requests: string[] = [];
+  const ownerSessionRequests: string[] = [];
+  page.on("request", (request) => {
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === "/api/session") ownerSessionRequests.push(pathname);
+  });
+  await page.route(`**${base}**`, async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    requests.push(pathname);
+    if (pathname === base) {
+      await route.fulfill({ status: 200, json: {
+        label: "Root scene preview", expiresAt: "2030-01-01T00:00:00Z",
+        sceneCount: 1, rootScenes: [{ id: "root-scene", title: "作品直下のシーン" }], tree: [],
+      } });
+    } else if (pathname === `${base}/scenes/root-scene`) {
+      await route.fulfill({ status: 200, json: {
+        id: "root-scene", title: "作品直下のシーン", body: "作品直下の本文を表示します。",
+      } });
+    } else {
+      await route.fulfill({ status: 404, json: { error: "Share link is unavailable" } });
+    }
+  });
+  await page.goto(`/r/publishing/${projectId}/${token}`);
+  await expect(page.getByRole("heading", { name: "Root scene preview" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "作品直下のシーン" })).toBeVisible();
+  await page.getByRole("button", { name: "作品直下のシーン" }).click();
+  await expect(page.getByText("作品直下の本文を表示します。")).toBeVisible();
+  expect(requests).toEqual([base, `${base}/scenes/root-scene`]);
+  expect(ownerSessionRequests).toEqual([]);
+});
+
 test("late document activation cannot replace explicit scene navigation", async ({ page }) => {
   const f = await fixture(page); let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; }); let observed!: () => void; const seen = new Promise<void>((resolve) => { observed = resolve; });
   await page.route(`**${documentPath(f)}`, async (route) => { if (route.request().method() !== "GET") return route.continue(); const response = await route.fetch(); observed(); await gate; await route.fulfill({ response }); });
