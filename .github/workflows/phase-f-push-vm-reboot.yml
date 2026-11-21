@@ -1,0 +1,63 @@
+name: Phase F push VM reboot fixture
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/phase-f-push-vm-reboot.yml
+      - deploy/ansible/test-phase-f-push-vm-reboot.sh
+      - deploy/ansible/host.yml
+      - deploy/ansible/host-validate.yml
+      - deploy/ansible/site.yml
+      - deploy/ansible/requirements.txt
+      - docs/deployment/PHASE-F-PUSH-VM-REBOOT-CI.md
+      - scripts/phase-f-push-vm-reboot.test.mjs
+permissions:
+  contents: read
+concurrency:
+  group: phase-f-push-vm-reboot-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  qemu-guest-reboot:
+    name: Reboot an isolated Ubuntu guest and verify PostgreSQL continuity
+    runs-on: ubuntu-26.04
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact source without persistent credentials
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.3'
+      - name: Check the actual-reboot fixture contract
+        run: |
+          set -euo pipefail
+          bash -n deploy/ansible/test-phase-f-push-vm-reboot.sh
+          node --test scripts/phase-f-push-vm-reboot.test.mjs
+      - name: Install QEMU/KVM and cloud-image tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends cloud-image-utils qemu-system-x86 qemu-utils
+      - name: Install the pinned Ansible control environment
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends python3-venv
+          sudo python3 -m venv /opt/codexia-ansible
+          sudo /opt/codexia-ansible/bin/pip install -r deploy/ansible/requirements.txt
+      - name: Boot and reboot the isolated Codexia fixture VM
+        env:
+          CODEXIA_DISPOSABLE_HOST: phase-f-push-vm-reboot
+          ANSIBLE_PLAYBOOK: /opt/codexia-ansible/bin/ansible-playbook
+        run: bash deploy/ansible/test-phase-f-push-vm-reboot.sh
+      - name: Upload run-bound reboot evidence without guest credentials
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: phase-f-push-vm-reboot-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codexia-phase-f-vm-reboot-evidence/vm-reboot-result.json
+          if-no-files-found: warn
+          retention-days: 7
