@@ -154,7 +154,7 @@ test('failed fresh-schema initialization restores a first activation without sto
   const tasks = parse(readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8'));
   const transaction = tasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
   const shell = transaction['ansible.builtin.shell'];
-  const restore = shell.slice(shell.indexOf('restore_previous(){'), shell.indexOf('    if { [[ "$tunnel_present" == true ]]'));
+  const restore = shell.slice(shell.indexOf('restore_previous(){'), shell.indexOf('if { [[ "$tunnel_present" == true ]]'));
   assert.ok(restore.startsWith('restore_previous(){'), 'canonical rollback helper must be present');
   assert.match(restore, /if \[\[ "\$had_unit" == true \|\| -e "\$active_unit" \|\| -L "\$active_unit" \]\]; then[\s\S]*?systemctl --user stop codexia-api\.service/u,
     'a missing generated API unit must not make first-install recovery fail');
