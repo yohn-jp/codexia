@@ -58,16 +58,18 @@ test("an anchor read failure leaves the confirmed manuscript readable and can be
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   for (const mode of ["desktop", "mobile"] as const) {
     const fixture = await createWritingFixture(page, mode, `Anchor read recovery ${mode} ${crypto.randomUUID()}`, "Readable manuscript while evidence is unavailable.");
+    const writingUrl = page.url();
+    const anchorUrl = new URL(`/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.id}/anchors*`, writingUrl).toString();
+    // The fixture renders its editor before its own anchor request completes.
+    await page.goto("about:blank");
     let anchorReads = 0;
-    const anchorUrl = new URL(`/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.id}/anchors*`, page.url()).toString();
     await page.route(anchorUrl, async (route) => {
       anchorReads += 1;
       if (anchorReads === 1) return route.fulfill({ status: 503, json: { error: "Evidence temporarily unavailable" } });
       return route.continue();
     });
 
-    const query = mode === "mobile" ? "?view=writing" : "";
-    await page.goto(new URL(`/${mode}/projects/${fixture.project.id}/scenes/${fixture.scene.id}${query}`, page.url()).toString());
+    await page.goto(writingUrl);
     await expect(manuscriptEditor(page)).toContainText("Readable manuscript while evidence is unavailable.");
     await expect(page.getByRole("alert")).toContainText("根拠");
     await page.getByRole("button", { name: "根拠を再試行", exact: true }).click();
