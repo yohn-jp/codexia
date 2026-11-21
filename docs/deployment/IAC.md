@@ -22,6 +22,6 @@ Runtime state lives only in `~/.local/state/codexia-deploy`, with the host lock,
 
 Require pinned SSH host keys, protected GitHub environment approval, independently held backup encryption keys and a private inventory. Never put credentials or private keys in Git.
 
-First activation requires `host`, `secrets`, and `base`, followed by optional, separately approved `auth-runtime` provisioning and a `deploy` invocation with explicit first-install and database-use approvals. See the ordered procedure and the unsupported schema-maintenance boundary in [Push deployment](PUSH-DEPLOYMENT.md).
+First activation requires `host`, `secrets`, `base`, then `deploy` with explicit first-install and database-use approvals. On a pristine database, optional `auth-runtime` provisioning must follow the successful first `deploy`: its separate schema would otherwise fail the fresh-schema admission check. See the ordered procedure and the unsupported schema-maintenance boundary in [Push deployment](PUSH-DEPLOYMENT.md).
 
 See [Backup](BACKUP.md) and [Host bootstrap acceptance](PUSH-HOST-CI.md) for their separate evidence boundaries.
