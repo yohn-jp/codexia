@@ -718,12 +718,18 @@ remove_effective_override_text() {
 
 systemctl --user start codexia-db.service
 wait_for_unit codexia-db.service active
+printf '{"phase":"rootless-runtime-timing","name":"schema-postgres","event":"start"}\n'
+runtime_phase_started=$SECONDS
 node "$SCRIPT_DIR/test-schema-maintenance-postgres-integration.mjs" "$REPO_ROOT" "$WORK_DIR" "$NONCE" "${CODEXIA_RUNTIME_ACCEPTANCE_SOURCE_SHA:?Checked-out source revision is required}"
+printf '{"phase":"rootless-runtime-timing","name":"schema-postgres","event":"end","result":"passed","seconds":%s}\n' "$((SECONDS - runtime_phase_started))"
 schema_recovery_root="$WORK_DIR/schema-proof-$NONCE/recovery"
 mkdir -m 0700 -- "$schema_recovery_root"
 cp -- "$QUADLET_DIR/codexia-slot-blue.container" "$schema_recovery_root/original-blue.container"
 chmod 0600 "$schema_recovery_root/original-blue.container"
+printf '{"phase":"rootless-runtime-timing","name":"schema-recovery","event":"start"}\n'
+runtime_phase_started=$SECONDS
 node "$SCRIPT_DIR/test-schema-maintenance-recovery-integration.mjs" "$REPO_ROOT" "$WORK_DIR" "$NONCE"
+printf '{"phase":"rootless-runtime-timing","name":"schema-recovery","event":"end","result":"passed","seconds":%s}\n' "$((SECONDS - runtime_phase_started))"
 
 systemctl --user start codexia-slot-blue.service
 wait_for_unit codexia-slot-blue.service active
@@ -801,6 +807,9 @@ OWNED_FILES+=("$QUADLET_DIR/codexia-api-proxy.container")
 CODEXIA_RUNTIME_MAINTENANCE_REPO_ROOT="$REPO_ROOT" \
 CODEXIA_RUNTIME_MAINTENANCE_IMAGE="$IMAGE_ID" \
 CODEXIA_RUNTIME_MAINTENANCE_NONCE="$NONCE" \
+printf '{"phase":"rootless-runtime-timing","name":"maintenance-rotations","event":"start"}\n'
+runtime_phase_started=$SECONDS
   node "$SCRIPT_DIR/test-standalone-maintenance-integration.mjs" --run "$REPO_ROOT" "$QUADLET_DIR" "$USER_UNIT_DIR" "$WORK_DIR"
+printf '{"phase":"rootless-runtime-timing","name":"maintenance-rotations","event":"end","result":"passed","seconds":%s}\n' "$((SECONDS - runtime_phase_started))"
 
 printf 'PASS: pinned synthetic Core/Full Quadlets, rootless Podman/systemd, effective resource limits, read-only models, blue/green persistence, fail-closed locked boot recovery after process kill, real timer verification, PostgreSQL app-password authentication and immutable secret rotation, standalone API-token old/new authentication and immutable secret rotation, rollback and completed-marker crash recovery through the systemd boot unit, preserved database identity/data, and post-update restart\n'
