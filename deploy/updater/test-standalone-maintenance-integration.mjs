@@ -54,6 +54,21 @@ function run(binary, args, options = {}) {
   }
 }
 
+// Read-only phase stopwatch. Emits no arguments, paths, secrets, or tokens.
+async function timeMaintenancePhase(name, action) {
+  const start = process.hrtime.bigint();
+  process.stdout.write(JSON.stringify({ phase: 'rootless-maintenance-timing', name, event: 'start' }) + '\n');
+  let result = 'failed';
+  try {
+    const value = await action();
+    result = 'passed';
+    return value;
+  } finally {
+    const seconds = Number(process.hrtime.bigint() - start) / 1e9;
+    process.stdout.write(JSON.stringify({ phase: 'rootless-maintenance-timing', name, event: 'end', result, seconds: Math.round(seconds * 1000) / 1000 }) + '\n');
+  }
+}
+
 function systemdState(unit) {
   return run('systemctl', ['--user', 'show', '--property=ActiveState', '--value', unit]);
 }
@@ -1474,7 +1489,7 @@ async function main() {
     if (result.status !== 0) throw new Error(`Locked maintenance child failed (${result.status}):\n${result.stdout}\n${result.stderr}`);
   };
 
-  runLockedMaintenance(true);
+  await timeMaintenancePhase('runtime-replacement-rollback', () => runLockedMaintenance(true));
   await assertTimerState('active', 'enabled');
   assert.equal(await readFile(configPath, 'utf8'), originalConfig, 'Failed maintenance did not restore the prior runtime configuration');
   assert.equal(await readFile(path.join(SOURCE_ROOT, 'deploy/updater/standalone-updater.mjs'), 'utf8'), originalShim, 'Failed maintenance did not restore the old source entrypoint');
@@ -1487,7 +1502,7 @@ async function main() {
   run('podman', ['exec', CONTAINER, 'node', '--input-type=module', '-e',
     'import {readFileSync} from "node:fs";const nl=String.fromCharCode(10);for(const [p,v] of [["/data/runtime-contract-marker","data-marker-v1"+nl],["/history/runtime-contract-marker","history-marker-v1"+nl]])if(readFileSync(p,"utf8")!==v)throw new Error(p)']);
 
-  runLockedMaintenance(false);
+  await timeMaintenancePhase('runtime-replacement-success', () => runLockedMaintenance(false));
   await assertTimerState('active', 'enabled');
   const appliedConfig = JSON.parse(await readFile(configPath, 'utf8'));
   assert.deepEqual(appliedConfig.runtime, newRuntime, 'Successful maintenance did not retain its typed runtime change');
@@ -1513,14 +1528,14 @@ async function main() {
     repoRoot, stateDir, configPath, sourceDir: SOURCE_ROOT, unitDir: userUnitDir,
     quadletDir, candidateConfig: { ...appliedConfig, runtime: interruptedRuntime }, nonce: nonce + '-boot-recovery',
   });
-  await runInterruptedBootRecovery({
+  await timeMaintenancePhase('boot-recovery-after-write', () => runInterruptedBootRecovery({
     repoRoot, workDir, stateDir, configPath, candidate: interruptedCandidate, environment,
     expectedState: appliedState, expectedRuntime: appliedConfig.runtime, interruption: 'after-write',
-  });
-  await runInterruptedBootRecovery({
+  }));
+  await timeMaintenancePhase('boot-recovery-after-writer-drain', () => runInterruptedBootRecovery({
     repoRoot, workDir, stateDir, configPath, candidate: interruptedCandidate, environment,
     expectedState: appliedState, expectedRuntime: appliedConfig.runtime, interruption: 'after-writer-drain',
-  });
+  }));
 
   // Credential-only transaction on the installed runtime: old/new endpoint
   // admission is synthetic, but the existing production transaction/recovery
@@ -1566,10 +1581,10 @@ async function main() {
   const runCredentialMaintenance=(outcome,failure)=>spawnSync('flock',['--exclusive','--nonblock','--no-fork',lockFile,
     process.execPath,testEntry,'--maintain',credentialManifest,outcome],{encoding:'utf8',timeout:240000,
     env:{...credentialEnvironment,...(failure?{CODEXIA_RUNTIME_MAINTENANCE_PROBE_FAILURE:failure}:{})}});
-  const failedCredentials=runCredentialMaintenance('expect-failure','after-write');
+  const failedCredentials=await timeMaintenancePhase('credential-rollback', () => runCredentialMaintenance('expect-failure','after-write'));
   assert.equal(failedCredentials.status,0,'Credential failure did not restore the old values: '+failedCredentials.stderr);
   await checkCredentials(false);
-  const crashedCredentials=runCredentialMaintenance('expect-interruption','crash');
+  const crashedCredentials=await timeMaintenancePhase('credential-interruption', () => runCredentialMaintenance('expect-interruption','crash'));
   assert.equal(crashedCredentials.signal,'SIGKILL','Credential interruption was not injected after writing the new values');
   assert.ok((await lstat(path.join(stateDir,'maintenance','in-progress.json'))).isFile());
   assert.equal(await readFile(githubTokenFile,'utf8'),'fixture-new-github\n');
@@ -1597,7 +1612,7 @@ async function main() {
 
   // Reproduce the state after a VM/user-manager restart: the maintenance
   // process was killed after the writes and the old slot no longer exists.
-  const rebootCredentials=runCredentialMaintenance('expect-interruption','crash');
+  const rebootCredentials=await timeMaintenancePhase('credential-interruption-absent-writer', () => runCredentialMaintenance('expect-interruption','crash'));
   assert.equal(rebootCredentials.signal,'SIGKILL');
   assert.equal(await readFile(githubTokenFile,'utf8'),'fixture-new-github\n');
   await new PodmanStandaloneHost(credentialConfig).stopWriter('blue');
@@ -1628,22 +1643,22 @@ async function main() {
   assert.notEqual(restartedWriter,writerBefore,'Stopped writer was not recreated');
   writerBefore=restartedWriter;
   await checkCredentials(false);
-  const successfulCredentials=runCredentialMaintenance('expect-success');
+  const successfulCredentials=await timeMaintenancePhase('credential-success', () => runCredentialMaintenance('expect-success'));
   assert.equal(successfulCredentials.status,0,'Credential transaction failed: '+successfulCredentials.stderr);
   await checkCredentials(true);
   await rm(credentialRoot,{recursive:true,force:true});
   await rm(probeKeyFile);
 
-  await exercisePreflightPasswordRotation({repoRoot,config:appliedConfig,userUnitDir,workDir,expectedImage,environment,
-    originalProxyText:proxyText,proxyQuadlet,nonce});
-  await exercisePostgresPasswordRotation({
+  await timeMaintenancePhase('preflight-password-rotation', () => exercisePreflightPasswordRotation({repoRoot,config:appliedConfig,userUnitDir,workDir,expectedImage,environment,
+    originalProxyText:proxyText,proxyQuadlet,nonce}));
+  await timeMaintenancePhase('postgres-password-rotation', () => exercisePostgresPasswordRotation({
     repoRoot, config: appliedConfig, userUnitDir, workDir, nonce, expectedImage,
     originalProxyText: proxyText, proxyQuadlet, environment,
-  });
-  await exerciseApiAuthTokenRotation({repoRoot,config:appliedConfig,workDir,expectedImage,environment,
-    originalProxyText:proxyText,proxyQuadlet,nonce});
-  await exerciseTunnelTokenRotation({repoRoot,config:appliedConfig,userUnitDir,workDir,expectedImage,environment,nonce,
-    originalProxyText:proxyText,proxyQuadlet});
+  }));
+  await timeMaintenancePhase('api-auth-token-rotation', () => exerciseApiAuthTokenRotation({repoRoot,config:appliedConfig,workDir,expectedImage,environment,
+    originalProxyText:proxyText,proxyQuadlet,nonce}));
+  await timeMaintenancePhase('tunnel-token-rotation', () => exerciseTunnelTokenRotation({repoRoot,config:appliedConfig,userUnitDir,workDir,expectedImage,environment,nonce,
+    originalProxyText:proxyText,proxyQuadlet}));
 
   run('systemctl', ['--user', 'disable', '--now', 'codexia-updater.timer']);
   await assertTimerState('inactive', 'disabled');
