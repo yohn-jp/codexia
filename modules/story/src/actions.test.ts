@@ -141,6 +141,42 @@ async function invoke<T>(id: string, input: unknown, context: ModuleActionContex
   return result as Extract<ActionResult<T>, { ok: true }>;
 }
 
+test("scenario save reuses proposal and operation identities for the same operation ID", async () => {
+  const reader = makeReader(fixtureFiles());
+  const proposals: Array<{ id: string; operations: ChangeOperation[] }> = [];
+  const context = makeActionContext(reader, { proposals });
+  const alternatives = [{ label: "A", events: [] }, { label: "B", events: [] }];
+  const comparison = await invoke<{ sourceFingerprint: string }>("story.scenario.compare", {
+    sceneId: "sc-1", alternatives,
+  }, context);
+  const input = {
+    sceneId: "sc-1", label: "Replay", alternatives,
+    sourceFingerprint: comparison.data.sourceFingerprint,
+    operation_id: "scenario-save-replay-1",
+  };
+
+  const first = await invoke<{ id: string }>("story.scenario.save", input, context);
+  const replay = await invoke<{ id: string }>("story.scenario.save", {
+    ...input,
+    operation_id: `story-${input.operation_id}`,
+  }, context);
+
+  assert.equal(first.data.id, replay.data.id);
+  assert.equal(proposals.length, 2, "the test host records both calls before Core deduplicates them");
+  assert.equal(proposals[0]!.id, proposals[1]!.id, "a replay must use the same Core proposal ID");
+  assert.deepEqual(proposals[0]!.operations, proposals[1]!.operations, "a replay must submit the same operation payload");
+  assert.equal(proposals[0]!.operations[0]!.id, proposals[1]!.operations[0]!.id);
+
+  const changed = await invoke<{ id: string }>("story.scenario.save", { ...input, label: "Changed" }, context);
+  assert.equal(changed.data.id, first.data.id, "one operation ID must retain its scenario identity");
+  assert.equal(proposals[2]!.id, proposals[0]!.id, "one operation ID must retain its proposal identity");
+  assert.notDeepEqual(proposals[2]!.operations, proposals[0]!.operations, "changed content must remain distinguishable for Core conflict detection");
+
+  const independent = await invoke<{ id: string }>("story.scenario.save", { ...input, operation_id: "scenario-save-replay-2" }, context);
+  assert.notEqual(independent.data.id, first.data.id, "different operations must not share a scenario identity");
+  assert.notEqual(proposals[3]!.id, proposals[0]!.id, "different operations must have independent Core proposals");
+});
+
 test("entity reads expose source revision and preserve nested notes and character voice", async () => {
   const reader = makeReader(fixtureFiles());
   const context = makeActionContext(reader);

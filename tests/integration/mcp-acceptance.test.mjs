@@ -286,6 +286,60 @@ test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, re
   assert.deepEqual(new Set(legacySceneList.data.map((entity) => entity.id)), new Set([hierarchy.sceneId]));
   assert.equal(legacySceneList.snapshot.projectVersion, actionSceneList.snapshot.projectVersion);
 
+  const scenarioAlternatives = [{ label: "A", events: [] }, { label: "B", events: [] }];
+  const scenarioComparison = success(await http.client.callTool({
+    name: "invoke_action",
+    arguments: { project_id: projectId, action_id: "story.scenario.compare", input: { sceneId: hierarchy.sceneId, alternatives: scenarioAlternatives } },
+  }), "Scenario comparison through Streamable HTTP MCP");
+  const invokeScenarioSave = (operationId, label = "MCP replay scenario") => http.client.callTool({
+    name: "invoke_action",
+    arguments: {
+      project_id: projectId,
+      action_id: "story.scenario.save",
+      input: {
+        id: "mcp-scenario-replay",
+        sceneId: hierarchy.sceneId,
+        label,
+        alternatives: scenarioAlternatives,
+        sourceFingerprint: scenarioComparison.data.sourceFingerprint,
+        operation_id: operationId,
+      },
+    },
+  });
+  const sequentialFirst = success(await invokeScenarioSave("mcp-scenario-sequential"), "first Scenario save through MCP");
+  const sequentialReplay = success(await invokeScenarioSave("mcp-scenario-sequential"), "sequential Scenario replay through MCP");
+  const sequentialProposalId = sequentialFirst.proposals?.[0]?.id;
+  assert.ok(sequentialProposalId, "first Scenario save must return its Core proposal ID");
+  assert.equal(sequentialReplay.proposals?.[0]?.id, sequentialProposalId, "sequential replay must return the same Core proposal ID");
+
+  const changedReplay = await invokeScenarioSave("mcp-scenario-sequential", "Changed payload");
+  assert.equal(errorCode(changedReplay, "changed Scenario payload under the same operation ID"), "proposal_identity_conflict");
+
+  const independent = success(await invokeScenarioSave("mcp-scenario-independent"), "independent Scenario operation through MCP");
+  const independentProposalId = independent.proposals?.[0]?.id;
+  assert.ok(independentProposalId);
+  assert.notEqual(independentProposalId, sequentialProposalId, "a distinct operation ID must get its own proposal");
+
+  const concurrentResults = await Promise.all([
+    invokeScenarioSave("mcp-scenario-concurrent"),
+    invokeScenarioSave("mcp-scenario-concurrent"),
+  ]);
+  const concurrentProposals = concurrentResults.map((result, index) =>
+    success(result, `concurrent Scenario save ${index + 1} through MCP`).proposals?.[0]?.id);
+  assert.ok(concurrentProposals[0]);
+  assert.equal(concurrentProposals[1], concurrentProposals[0], "concurrent replay must return the same Core proposal ID");
+
+  const savedScenarioProposals = (await host.store.listProposals(projectId)).filter((status) =>
+    [sequentialProposalId, independentProposalId, concurrentProposals[0]].includes(status.proposal.id));
+  assert.equal(savedScenarioProposals.length, 3, "one distinct Core proposal must persist for each operation ID");
+  for (const proposalId of [sequentialProposalId, independentProposalId, concurrentProposals[0]]) {
+    const matching = savedScenarioProposals.filter((status) => status.proposal.id === proposalId);
+    assert.equal(matching.length, 1, "replays must not duplicate persisted proposal rows");
+    assert.equal(matching[0].state, "proposed", "Scenario saves remain pending author review");
+    assert.deepEqual(matching[0].approvedOperationIds, [], "MCP does not approve a Scenario proposal");
+    assert.deepEqual(matching[0].appliedOperationIds, [], "MCP does not apply a Scenario proposal");
+  }
+
   // Exercise project discovery through the real PostgreSQL-backed MCP client
   // beyond the former single-page boundary.
   const paginationRows = Array.from({ length: 205 }, (_, index) => ({ id: randomUUID(), title: `MCP pagination ${index}` }));
