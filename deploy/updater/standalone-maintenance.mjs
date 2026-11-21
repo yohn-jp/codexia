@@ -1340,7 +1340,7 @@ async function rotatePostgresPreflightPassword({config,manifest,manifestPath,ser
   assert.equal(await realpath(root),root,'Preflight-password candidate must not traverse a symlink');
   assert.equal((await lstat(root)).mode&0o777,0o700,'Preflight-password candidate must be private');
   await readBoundedPrivateFile(manifestPath,65536);
-  const password=validatePostgresPreflightPassword(await readBoundedPrivateFile(preflightPasswordFile,65));
+  const password=validatePostgresPreflightPassword(await readBoundedPrivateFile(preflightPasswordFile,65)).replace(/\n$/u,'');
   const reviewed=await readBoundedPrivateFile(databaseQuadletFile,65536);
   assert.equal(fileURLToPath(import.meta.url),path.join(manifest.sourceDir,'deploy/updater/standalone-maintenance.mjs'),
     'Install the reviewed updater before rotating the preflight password');
