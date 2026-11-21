@@ -33,6 +33,7 @@ export interface PublishingProject {
   title: string;
   subtitle?: string;
   volumes: PublishingVolume[];
+  rootScenes?: PublishingScene[];
 }
 
 export interface ShareScope {
@@ -200,7 +201,7 @@ export async function readPublishingProjectFromCore(context: ModuleActionContext
     }
   }
 
-  const sceneMetadata = new Map<string, { title: string; body: string; path: string; order?: PublishingOrder }>();
+  const sceneMetadata = new Map<string, { title: string; body: string; path: string; rootScene: boolean; order?: PublishingOrder }>();
   for (const sceneFile of files.filter((path) => /\/scenes\/[^/]+\.yaml$/u.test(path))) {
     const sceneData = await readYaml(reader, sceneFile);
     if (!sceneData) continue;
@@ -214,6 +215,7 @@ export async function readPublishingProjectFromCore(context: ModuleActionContext
       title: nodeTitle(sceneData, id),
       body: manuscript ? manuscriptBody(manuscript.content, bodyPath) : "",
       path: bodyPath,
+      rootScene: sceneData.kind === "scene" && !sceneData.volume && !sceneData.chapter,
       ...(order === undefined ? {} : { order }),
     });
   }
@@ -244,7 +246,11 @@ export async function readPublishingProjectFromCore(context: ModuleActionContext
       }),
     })),
   }));
-  return { title: hierarchy.title, ...(subtitle ? { subtitle } : {}), volumes };
+  const rootScenes = [...sceneMetadata.entries()]
+    .filter(([id, scene]) => !seenSceneIds.has(id) && scene.rootScene)
+    .map(([id, scene]) => ({ id, title: scene.title, body: scene.body, path: scene.path, volumeId: "", chapterId: "", ...(scene.order === undefined ? {} : { order: scene.order }) }))
+    .sort(compareOrdered);
+  return { title: hierarchy.title, ...(subtitle ? { subtitle } : {}), volumes, rootScenes };
 }
 
 /** Read a public snapshot projection without composing actions or crossing its authorization boundary. */
@@ -329,7 +335,10 @@ export function collectPublishingScenes(
   scope: PublishingScope,
   id?: string,
 ): PublishingScene[] {
-  if (scope === "all") return project.volumes.flatMap((volume) => volume.chapters.flatMap((chapter) => chapter.scenes));
+  if (scope === "all") return [
+    ...(project.rootScenes ?? []),
+    ...project.volumes.flatMap((volume) => volume.chapters.flatMap((chapter) => chapter.scenes)),
+  ];
   if (!id?.trim()) throw new Error("A volume or chapter ID is required for this export scope");
   const pickedId = id.trim();
   if (scope === "volume") {
@@ -367,8 +376,6 @@ export function resolveShareScope(project: PublishingProject, scope: ShareScope)
     if (!scene) throw new Error("Scene not found: " + scope.id);
     return [scene];
   }
-  if (scope.kind === "project") {
-    return project.volumes.flatMap((volume) => volume.chapters.flatMap((chapter) => chapter.scenes));
-  }
+  if (scope.kind === "project") return project.volumes.flatMap((volume) => volume.chapters.flatMap((chapter) => chapter.scenes));
   throw new Error("Invalid share scope");
 }

@@ -185,6 +185,67 @@ test("publishing follows Core hierarchy after a scene moves while retaining its 
   assert.equal(opf.match(/idref="item-sc-moving"/gu)?.length, 1);
 });
 
+test("the canonical full plaintext export includes project root scenes once in stored order", async () => {
+  const files = new Map(fixtureFiles());
+  files.set("plot/volumes/root/chapters/root/scenes/root-b.yaml", "kind: scene\nid: root-b\ntitle: Root B\norder: 2\nmanuscript: documents/root-b.md\n");
+  files.set("documents/root-b.md", "ROOT BODY B\n");
+  files.set("plot/volumes/imported/chapters/legacy/scenes/root-c.yaml", "kind: scene\nid: root-c\ntitle: Root C\norder: 3\nmanuscript: documents/root-c.md\n");
+  files.set("documents/root-c.md", "ROOT BODY C\n");
+  files.set("plot/volumes/root/chapters/root/scenes/root-a.yaml", "kind: scene\nid: root-a\ntitle: Root A\norder: 1\nmanuscript: documents/root-a.md\n");
+  files.set("documents/root-a.md", "ROOT BODY A\n");
+  const notePath = "plot/volumes/root/chapters/root/scenes/private-note.yaml";
+  files.set(notePath, "kind: scene\nid: private-note\ntitle: Private note\nmanuscript: documents/private-note.md\n");
+  files.set("documents/private-note.md", "PRIVATE NOTE BODY\n");
+  const reader = new MemoryReader(files, makeSnapshot(), new Map([[notePath, "note"]]));
+  const publishing = await createPublishing();
+  const mixed = await invokeAction(publishing, "publishing.export.plaintext", { scope: "all" }, contextWithCoreTree(reader, {
+    title: project.title,
+    volumes: [{ id: "vol-1", title: "第一巻", chapters: [{ id: "ch-1", title: "はじまり", scenes: [{ id: "sc-1", title: "夜の駅" }, { id: "sc-2", title: "朝の港" }] }] }],
+  }));
+  const mixedText = Buffer.from(String(mixed.contentBase64), "base64").toString("utf8");
+  assert.ok(mixedText.indexOf("ROOT BODY A") < mixedText.indexOf("ROOT BODY B"));
+  for (const body of ["ROOT BODY A", "ROOT BODY B", "ROOT BODY C", "|星《ほし》の駅", "海から朝日が昇った。"] ) {
+    assert.equal(mixedText.split(body).length - 1, 1);
+  }
+  assert.doesNotMatch(mixedText, /PRIVATE NOTE BODY|Private note/u);
+
+  const mixedEpub = await invokeAction(publishing, "publishing.export.epub", { scope: "all" }, contextWithCoreTree(reader, {
+    title: project.title,
+    volumes: [{ id: "vol-1", title: "第一巻", chapters: [{ id: "ch-1", title: "はじまり", scenes: [{ id: "sc-1", title: "夜の駅" }, { id: "sc-2", title: "朝の港" }] }] }],
+  }));
+  const mixedZip = await JSZip.loadAsync(Buffer.from(String(mixedEpub.contentBase64), "base64"));
+  const rootXhtml = await mixedZip.file("OEBPS/scene-root-a.xhtml")!.async("string");
+  const opf = await mixedZip.file("OEBPS/content.opf")!.async("string");
+  assert.match(rootXhtml, /ROOT BODY A/u);
+  assert.match(opf, /idref="item-root-a"/u);
+  assert.match(opf, /idref="item-root-b"/u);
+  assert.match(opf, /idref="item-root-c"/u);
+  const nav = await mixedZip.file("OEBPS/nav.xhtml")!.async("string");
+  assert.ok(nav.indexOf("scene-root-a.xhtml") < nav.indexOf("scene-root-b.xhtml"));
+  assert.ok(nav.indexOf("scene-root-b.xhtml") < nav.indexOf("scene-root-c.xhtml"));
+  assert.equal(mixedZip.file("OEBPS/scene-private-note.xhtml"), null);
+  for (const filename of ["scene-root-a.xhtml", "scene-root-b.xhtml", "scene-root-c.xhtml"]) {
+    assert.equal(await mixedZip.file(`OEBPS/${filename}`)!.async("string").then((xhtml) => xhtml.match(/ROOT BODY [A-C]/gu)?.length), 1);
+  }
+  const chapterEpub = await invokeAction(publishing, "publishing.export.epub", { scope: "chapter", id: "ch-1" }, contextWithCoreTree(reader, {
+    title: project.title,
+    volumes: [{ id: "vol-1", title: "第一巻", chapters: [{ id: "ch-1", title: "はじまり", scenes: [{ id: "sc-1", title: "夜の駅" }, { id: "sc-2", title: "朝の港" }] }] }],
+  }));
+  const chapterZip = await JSZip.loadAsync(Buffer.from(String(chapterEpub.contentBase64), "base64"));
+  assert.equal(chapterZip.file("OEBPS/scene-root-a.xhtml"), null, "chapter scope must omit project root scenes");
+
+  const rootOnlyReader = new MemoryReader(new Map([
+    ["meta/project.yaml", "title: Root only\n"],
+    ["plot/volumes/root/chapters/root/scenes/only.yaml", "kind: scene\nid: only\ntitle: Only scene\norder: 1\nmanuscript: documents/only.md\n"],
+    ["documents/only.md", "ONLY ROOT BODY\n"],
+  ]));
+  const rootOnly = await invokeAction(publishing, "publishing.export.plaintext", { scope: "all" }, contextWithCoreTree(rootOnlyReader, { title: "Root only", volumes: [] }));
+  assert.equal(Buffer.from(String(rootOnly.contentBase64), "base64").toString("utf8").match(/ONLY ROOT BODY/gu)?.length, 1);
+  const rootOnlyEpub = await invokeAction(publishing, "publishing.export.epub", { scope: "all" }, contextWithCoreTree(rootOnlyReader, { title: "Root only", volumes: [] }));
+  const rootOnlyZip = await JSZip.loadAsync(Buffer.from(String(rootOnlyEpub.contentBase64), "base64"));
+  assert.match(await rootOnlyZip.file("OEBPS/scene-only.xhtml")!.async("string"), /ONLY ROOT BODY/u);
+});
+
 test("public share projection excludes author notes in pinned snapshots through immutable reader metadata", async () => {
   const files = fixtureFiles();
   const canonicalKinds = new Map([
