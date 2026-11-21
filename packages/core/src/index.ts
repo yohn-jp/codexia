@@ -532,6 +532,17 @@ export class CoreStore implements MutationCoordinator {
         return existing.status.proposal;
       }
 
+      // Serialize the identity check with proposal registration so concurrent first submissions
+      // can observe and replay the winner after waiting for this project's mutation lock.
+      await transaction.assertProjectVersion(pid(projectId));
+      const registered = await this.proposalStatus(transaction, projectId, proposal.id);
+      if (registered) {
+        if (proposalDigest(registered.status.proposal) !== proposalDigest(proposal)) {
+          fail(409, "proposal_identity_conflict", "Proposal identity has a different payload");
+        }
+        return registered.status.proposal;
+      }
+
       await transaction.assertProjectVersion(pid(projectId), proposal.snapshot.projectVersion);
       const manifest = await this.currentManifest(transaction, projectId);
       const reader = makeReader(manifest);
@@ -891,7 +902,7 @@ export class CoreStore implements MutationCoordinator {
     });
   }
   private async buildOperation(projectId:string,writes:FileChange[],effect:ChangeOperation["effect"],message:string,pinned?:SnapshotId):Promise<BuiltChangeOperation> {const reader=await this.reader(projectId,pinned);return {snapshot:reader.snapshot,operation:{id:randomUUID(),generation:0,projectId,baseProjectVersion:reader.snapshot.projectVersion,effect,reads:writes.map(({path,revision})=>({path,revision})),writes,message}};}
-  async buildCreateHierarchyOperation(projectId:string,input:CreateHierarchyInput,pinned?:SnapshotId):Promise<BuiltChangeOperation>{
+  async buildCreateHierarchyOperation(projectId:string,input:CreateHierarchyInput,pinned?:SnapshotId,allowReservedPathReplay=false):Promise<BuiltChangeOperation>{
     if(!input||!["volume","chapter","scene"].includes(input.kind)||typeof input.id!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(input.id)||!input.title?.trim())fail(400,"invalid_hierarchy_operation","A path-safe identity and title are required");
     const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest);if(index.logicalDocumentIds.has(input.id))fail(409,"hierarchy_id_exists","The hierarchy identity already exists");
     const reader=makeReader(manifest),writes:FileChange[]=[];let path:string,parentId:DocumentId|null=null;
@@ -902,7 +913,9 @@ export class CoreStore implements MutationCoordinator {
     if(await reader.read(path))fail(409,"hierarchy_path_exists","The hierarchy path already exists");
     const archivedPath = await this.persistence.read((currentReader) =>
       currentReader.getModuleRecord(pid(projectId), PATHS, stableId(projectId, path)));
-    if (archivedPath) fail(409, "hierarchy_path_reserved", "The hierarchy path is reserved by retained document history");
+    if (archivedPath && !allowReservedPathReplay) {
+      fail(409, "hierarchy_path_reserved", "The hierarchy path is reserved by retained document history");
+    }
     const siblings=(index.documentsByParentId.get(parentId)??[]).filter((document)=>document.kind===input.kind);
     writes.unshift({path,revision:null,content:YAML.stringify({id:input.id,title:input.title,order:nextOrderKey(siblings.map((document)=>document.orderKey))})});
     return this.buildOperation(projectId,writes,"structure",`Create ${input.kind} ${input.id}`,manifest.snapshot);
