@@ -162,8 +162,8 @@ jobs:
           sudo -u "$fixture_user" install -d -m 0700 "$fixture_repo"
           git -C "$GITHUB_WORKSPACE" archive HEAD | sudo -u "$fixture_user" tar -xf - -C "$fixture_repo"
           printf '%s\n' 'codexia-phase-e-fixture-repo/v1' | sudo -u "$fixture_user" tee "$fixture_repo/.codexia-phase-e-fixture" >/dev/null
-          sudo -u "$fixture_user" install -d -m 0755 "$fixture_repo/packages/api/dist"
-          sudo -u "$fixture_user" install -m 0644 "$GITHUB_WORKSPACE/packages/api/dist/job-history-store.js" "$fixture_repo/packages/api/dist/job-history-store.js"
+          sudo install -d -o "$fixture_user" -g "$fixture_user" -m 0755 "$fixture_repo/packages/api/dist"
+          sudo install -o "$fixture_user" -g "$fixture_user" -m 0644 "$GITHUB_WORKSPACE/packages/api/dist/job-history-store.js" "$fixture_repo/packages/api/dist/job-history-store.js"
           test "$(sudo stat -c '%u' "$fixture_repo")" = "$fixture_uid"
           test "$(sudo stat -c '%u' "$fixture_repo/.codexia-phase-e-fixture")" = "$fixture_uid"
           subuid_max=$(awk -F: 'BEGIN { max = 100000 } { end = $2 + $3; if (end > max) max = end } END { print max }' /etc/subuid)
