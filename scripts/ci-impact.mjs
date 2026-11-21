@@ -45,6 +45,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/ansible/base-secrets.yml',
   'deploy/ansible/bootstrap-preflight.yml',
   'deploy/ansible/check_postgres_volume.py',
+  'deploy/ansible/deploy.yml',
   'deploy/ansible/enable.yml',
   'deploy/ansible/host-contract.py',
   'deploy/ansible/host-validate.yml',
@@ -128,6 +129,9 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   '.github/workflows/deployment-config.yml',
   '.github/workflows/repository-audit.yml',
   'scripts/verify-deployment-config.mjs',
+  'scripts/push-deployment-contract.test.mjs',
+  'scripts/push-deployment-recovery.test.mjs',
+  'deploy/ansible/push-deployment-recover.sh',
   'scripts/verify-frontend-compatibility.mjs',
   'scripts/verify-frontend-compatibility.test.mjs',
   'scripts/standalone-host.test.mjs',
@@ -146,7 +150,9 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/updater/test-standalone-backup.sh',
   'scripts/standalone-backup-controller.test.mjs',
   '.github/workflows/standalone-backup.yml',
+  'docs/deployment/IAC.md',
   'docs/deployment/README.md',
+  'docs/deployment/PUSH-DEPLOYMENT.md',
   'docs/deployment/PHASE-F-DISPOSABLE-CI.md',
 ]);
 const operationalRootPaths = new Set(OPERATIONAL_ROOT_PATHS);

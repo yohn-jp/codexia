@@ -74,6 +74,29 @@
     - name: End host convergence before any application task
       ansible.builtin.meta: end_host
       when: codexia_stage == 'host'
+    - name: Validate the certified push deployment before application mutation
+      ansible.builtin.assert:
+        that:
+          - codexia_stage == 'deploy'
+          - ansible_facts.user_id == 'codexia'
+          - codexia_service_user == 'codexia'
+          - codexia_image is match('^ghcr\.io/yohn-jp/codexia-backend@sha256:[a-f0-9]{64}$')
+          - codexia_source_sha is match('^[a-f0-9]{40}$')
+          - codexia_profile == 'core'
+          - codexia_backup_destination is string and codexia_backup_destination is match('^/[^\r\n]+$')
+          - codexia_backup_recipient is string and codexia_backup_recipient is match('^age1[0-9a-z]+$')
+          - not ansible_check_mode
+        fail_msg: Push deployment requires the codexia SSH identity, certified immutable Core digest, and protected off-VM backup inputs.
+      when: codexia_stage == 'deploy'
+    - name: Deploy certified backend under host lock
+      ansible.builtin.include_tasks:
+        file: deploy.yml
+        apply:
+          environment: "{{ service_runtime_env }}"
+      when: codexia_stage == 'deploy'
+    - name: End push deployment before updater lifecycle stages
+      ansible.builtin.meta: end_host
+      when: codexia_stage == 'deploy'
     - name: Require explicit standalone deployment inputs
       ansible.builtin.assert:
         that:
