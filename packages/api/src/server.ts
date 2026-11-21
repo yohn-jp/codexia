@@ -1939,6 +1939,10 @@ export function createServer(options: ApiServerOptions): Server {
     }
 
     const signal = abortSignalFor(request, response);
+    if (oauthMcpPrincipal && routePath.startsWith("/api/v1/persistence/")) {
+      fail(response, 403, "OAUTH_MCP_PERSISTENCE_DENIED", "Standalone MCP clients cannot use the direct persistence API");
+      return;
+    }
     const persistenceResponse = await handlePersistenceRoute({
       persistence: options.persistence,
       ...(hosted ? { assignedProjectId: hosted.projectId } : {}),

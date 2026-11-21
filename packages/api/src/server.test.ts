@@ -2586,6 +2586,16 @@ describe("Codexia HTTP boundary", () => {
     const unassignedProjectRead = await send("/api/projects/project-2/snapshot", readToken);
     assert.equal(unassignedProjectRead.status, 404);
     assert.equal((await unassignedProjectRead.json() as { code: string }).code, "PROJECT_NOT_FOUND");
+    for (const path of [
+      "/api/v1/persistence/projects",
+      "/api/v1/persistence/projects?page=1",
+      "/api/v1/persistence/projects/project-1/archive",
+      "/api/v1/persistence/projects/project-2/archive",
+    ]) {
+      const directPersistence = await send(path, readToken);
+      assert.equal(directPersistence.status, 403, `MCP direct persistence route ${path} is closed`);
+      assert.equal((await directPersistence.json() as { code: string }).code, "OAUTH_MCP_PERSISTENCE_DENIED");
+    }
 
     const metadataChallenge = await fetch(`${api.base}/api/projects/project-1/modules/mcp/streamable`);
     assert.equal(metadataChallenge.status, 401);
