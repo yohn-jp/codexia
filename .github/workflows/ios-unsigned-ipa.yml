@@ -41,6 +41,9 @@ jobs:
           corepack pnpm@12.21.0 --version
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
+      - name: Install isolated Capacitor toolchain
+        working-directory: app/native
+        run: npm ci
       - name: Build the selected browser profile and native Mobile bundle
         env:
           CODEXIA_PROFILE: ${{ inputs.profile }}
@@ -53,14 +56,13 @@ jobs:
         run: |
           node --test scripts/ios/*.test.mjs
           node scripts/ios/validate-web-bundle.mjs app/dist/ios-web
-      - name: Install isolated Capacitor toolchain
-        working-directory: app/native
-        run: npm ci
       - name: Generate bundled iOS project
         working-directory: app/native
         run: |
           npx cap add ios
           npx cap sync ios
+          node scripts/configure-oauth-callback.mjs ios/App/App/Info.plist
+          npm test
       - name: Build without Apple signing credentials
         working-directory: app/native
         run: >-
