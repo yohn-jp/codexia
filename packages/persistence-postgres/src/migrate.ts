@@ -191,6 +191,20 @@ export async function runPostgresAdditiveMigrations(
   }
 }
 
+/** Apply certified additive migrations from a connection config, closing the temporary pool afterwards. */
+export async function migratePostgresAdditiveSchema(
+  config: PoolConfig | string,
+  expectedPriorFingerprint: string,
+  expectedTargetFingerprint: string,
+): Promise<readonly string[]> {
+  const pool = new Pool(typeof config === "string" ? { connectionString: config } : config);
+  try {
+    return await runPostgresAdditiveMigrations(pool, expectedPriorFingerprint, expectedTargetFingerprint);
+  } finally {
+    await pool.end();
+  }
+}
+
 /** The packaged schema identity can be computed without connecting to PostgreSQL. */
 export async function packagedMigrationFingerprint(): Promise<string> {
   return migrationSetFingerprint(await readMigrationSet(defaultMigrationDirectory));
