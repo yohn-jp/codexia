@@ -30,7 +30,7 @@ import { TermAwareRubyText } from "../editor/TermAwareRubyText";
 import { WRITING_SYMBOLS } from "../editor/writingSymbols";
 import { loadTypographySettings, storeTypographySettings, TYPOGRAPHY_PRESETS, typographyPresetValues, type TypographyPresetId } from "../editor/typography";
 import { ManuscriptInput, type ManuscriptInputHandle, type ManuscriptPosition, type EvidenceRangeRequest } from "../editor/ManuscriptInput";
-import { applyTextChanges, composeTextChanges, initializeDocumentEvidence, markEvidenceNeedsReview, type DocumentEvidenceState, type EditorEvidenceAdapter, type TextChange } from "../editor/evidence";
+import { applyTextChanges, composeTextChanges, emptyDocumentEvidence, initializeDocumentEvidence, markEvidenceNeedsReview, type DocumentEvidenceState, type EditorEvidenceAdapter, type TextChange } from "../editor/evidence";
 import { BrowserJournal, type PersistenceDraftTextChanges } from "../storage/journal";
 import { createPostgresEditorEvidenceAdapter } from "../editor/postgresEvidenceAdapter";
 import { NativeChangeSetReview } from "./NativeChangeSetReview";
@@ -74,6 +74,14 @@ interface KnowledgeCreateIntent {
   type: string;
   name: string;
   needsReconciliation: boolean;
+}
+
+interface EvidenceLoadIssue {
+  projectId: string;
+  documentId: string;
+  revisionId: string;
+  message: string;
+  retrying: boolean;
 }
 
 interface OutlineDocument extends PersistenceDocument {
@@ -384,6 +392,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const [revisionPageError, setRevisionPageError] = useState("");
   const revisionPageSequenceRef = useRef(0);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
+  const [evidenceLoadIssue, setEvidenceLoadIssue] = useState<EvidenceLoadIssue | null>(null);
   const [requestedPanel, setRequestedPanel] = useState<WorkspacePanelRequest>();
   const [creationIntent, setCreationIntent] = useState<"project" | "document">();
 
@@ -814,6 +823,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     setLoading(true);
     setPageError("");
     setNotice("");
+    setEvidenceLoadIssue(null);
     publishEditor(null);
     try {
       const [read, draft] = await Promise.all([
@@ -822,13 +832,20 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       ]);
       if (!read.revision) throw new Error("この文書にRevisionがありません。");
       const revision = read.revision;
-      const snapshot = await editorAdapter.read({
-        projectId: currentProject.id,
-        documentId: nextDocumentId,
-        revisionId: revision.id,
-        markdown: revision.markdown,
-      }, new AbortController().signal);
-      const evidence = initializeDocumentEvidence(revision.markdown, revision.id, snapshot);
+      let evidence: DocumentEvidenceState;
+      let evidenceLoadFailure: string | null = null;
+      try {
+        const snapshot = await editorAdapter.read({
+          projectId: currentProject.id,
+          documentId: nextDocumentId,
+          revisionId: revision.id,
+          markdown: revision.markdown,
+        }, new AbortController().signal);
+        evidence = initializeDocumentEvidence(revision.markdown, revision.id, snapshot);
+      } catch (error) {
+        evidence = { ...emptyDocumentEvidence(revision.markdown, revision.id), positionsTrusted: false };
+        evidenceLoadFailure = error instanceof Error ? error.message : "根拠を読み込めませんでした。";
+      }
       if (sessionBlockedRef.current || openSequence !== openSequenceRef.current) return;
       selectionRef.current = { projectId: currentProject.id, documentId: nextDocumentId };
       persistSelectionSafely(authorScope, selectionRef.current);
@@ -868,6 +885,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         evidence,
         evidenceLoadKey: 1,
       });
+      if (evidenceLoadFailure) setEvidenceLoadIssue({ projectId: currentProject.id, documentId: nextDocumentId, revisionId: revision.id, message: evidenceLoadFailure, retrying: false });
       if (draft && staleDraft && !recoverablePending) setNotice("ブラウザーに保存された下書きのbase Revisionが変わっています。比較してから、どちらを使うか選んでください。");
       if (recoverablePending) setNotice("応答が失われた可能性のある保存操作を照合しています。");
       const requested = continueRequestRef.current;
@@ -1724,6 +1742,41 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     }
   }
 
+  async function retryEvidence(): Promise<void> {
+    const issue = evidenceLoadIssue;
+    const value = activeRef.current;
+    if (!issue || !value || issue.retrying || sessionBlockedRef.current ||
+        value.document.projectId !== issue.projectId || value.document.id !== issue.documentId) return;
+    const navigationSequence = openSequenceRef.current;
+    const requestedRevisionId = value.revision.id;
+    setEvidenceLoadIssue({ ...issue, revisionId: requestedRevisionId, retrying: true });
+    try {
+      const snapshot = await editorAdapter.read({
+        projectId: issue.projectId,
+        documentId: issue.documentId,
+        revisionId: requestedRevisionId,
+        markdown: value.revision.markdown,
+      }, new AbortController().signal);
+      const latest = activeRef.current;
+      if (navigationSequence !== openSequenceRef.current || latest?.document.projectId !== issue.projectId || latest.document.id !== issue.documentId) return;
+      if (latest.revision.id !== requestedRevisionId) {
+        setEvidenceLoadIssue({ ...issue, revisionId: latest.revision.id, retrying: false, message: "原稿のRevisionが更新されました。現在のRevisionの根拠を再取得してください。" });
+        return;
+      }
+      if (sessionBlockedRef.current) {
+        setEvidenceLoadIssue({ ...issue, revisionId: latest.revision.id, retrying: false });
+        return;
+      }
+      const evidence = initializeDocumentEvidence(latest.revision.markdown, latest.revision.id, snapshot);
+      publishEditor({ ...latest, evidence: latest.dirty || latest.remoteConflict ? markEvidenceNeedsReview(evidence) : evidence, evidenceLoadKey: latest.evidenceLoadKey + 1 });
+      setEvidenceLoadIssue(null);
+    } catch (error) {
+      const latest = activeRef.current;
+      if (navigationSequence !== openSequenceRef.current || latest?.document.projectId !== issue.projectId || latest.document.id !== issue.documentId) return;
+      setEvidenceLoadIssue({ ...issue, revisionId: latest.revision.id, retrying: false, message: error instanceof Error ? error.message : "根拠を読み込めませんでした。" });
+    }
+  }
+
   async function createAnchor(): Promise<void> {
     const current = activeRef.current;
     const editorSelection = editorRef.current?.getSelection();
@@ -2401,6 +2454,10 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             </details>
           </div>
           {active.error && <p className="pg-alert" role="alert">{active.error}</p>}
+          {evidenceLoadIssue && evidenceLoadIssue.projectId === active.document.projectId && evidenceLoadIssue.documentId === active.document.id && <div className="pg-alert" role="alert">
+            <p>このRevisionの根拠を取得できませんでした。根拠が未登録とは判断していません。{evidenceLoadIssue.message}</p>
+            <button type="button" disabled={evidenceLoadIssue.retrying || sessionBlocked} onClick={() => void retryEvidence()}>{evidenceLoadIssue.retrying ? "根拠を再読み込みしています…" : "根拠を再試行"}</button>
+          </div>}
           <div className="pg-editor-actions" role="group" aria-label="原稿の操作">
             <button type="button" onClick={() => void saveDocument()} disabled={!active.dirty || active.recovery !== "stored" || Boolean(active.remoteConflict) || active.save === "saving"}>
               {active.save === "failed" ? "PostgreSQLへ再試行" : "今すぐ保存"}
@@ -2420,7 +2477,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
                   }
                 }}>印刷</button>
                 <button type="button" onClick={() => void loadRevisions()} disabled={active.dirty || Boolean(active.remoteConflict)}>Revision履歴</button>
-                <button type="button" onClick={() => void createAnchor()} disabled={active.dirty || Boolean(active.remoteConflict) || active.save !== "saved"}>選択範囲をText Anchorにする</button>
+                <button type="button" onClick={() => void createAnchor()} disabled={active.dirty || Boolean(active.remoteConflict) || active.save !== "saved" || Boolean(evidenceLoadIssue && evidenceLoadIssue.projectId === active.document.projectId && evidenceLoadIssue.documentId === active.document.id)}>選択範囲をText Anchorにする</button>
               </div>
             </details>
             <details className="pg-editor-display-menu">
