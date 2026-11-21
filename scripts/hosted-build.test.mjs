@@ -413,22 +413,16 @@ test('browser artifacts bind the selected module closure to every reachable UI e
     const output = path.join(directory, 'app/dist', ui);
     await mkdir(path.join(output, '.vite'), { recursive: true });
     await mkdir(path.join(output, 'assets'), { recursive: true });
-    const worker = 'assets/revision-difference-worker-XyZ00001.js';
     const manifest = {
       'index.html': { file: 'assets/index-AbCd1234.js', isEntry: true, css: ['assets/styles-EfGh5678.css'],
         dynamicImports: [...(modern && ui ? ['index.html'] : []), ...(withModule ? [source] : [])],
-        ...(modern && ui ? { imports: ['_shared.js'], assets: [worker] } : {}),
+        ...(modern && ui ? { imports: ['_shared.js'] } : {}),
       },
       ...(modern && ui ? { '_shared.js': { file: 'assets/shared-AbCd1234.js' } } : {}),
       ...(withModule ? { [source]: { file: 'assets/story-AbCd1234.js', isDynamicEntry: true, src: source } } : {}),
     };
-    for (const file of ['assets/index-AbCd1234.js', 'assets/styles-EfGh5678.css', ...(withModule ? ['assets/story-AbCd1234.js'] : []), ...(modern && ui ? ['assets/shared-AbCd1234.js'] : []), ...(ui ? [worker] : [])]) {
-      const body = ui && file === 'assets/index-AbCd1234.js'
-        ? modern
-          ? `new Worker(new URL(\`/${ui}/${worker}\`,\`\`+import.meta.url),{type:\`module\`});`
-          : `new Worker(new URL("/${ui}/${worker}",import.meta.url),{type:"module"});`
-        : '/* fixture */';
-      await writeFile(path.join(output, file), body);
+    for (const file of ['assets/index-AbCd1234.js', 'assets/styles-EfGh5678.css', ...(withModule ? ['assets/story-AbCd1234.js'] : []), ...(modern && ui ? ['assets/shared-AbCd1234.js'] : [])]) {
+      await writeFile(path.join(output, file), '/* fixture */');
     }
     await writeFile(path.join(output, '.vite/manifest.json'), JSON.stringify(manifest));
     manifests.set(ui, manifest);
@@ -438,15 +432,12 @@ test('browser artifacts bind the selected module closure to every reachable UI e
     await emit('desktop', true);
     await emit('mobile', true);
     const records = await browserArtifactRecords(directory, ['story']);
-    assert.equal(records.files.length, 11);
-    assert.equal(records.files.filter(({ path: name }) => name.includes('revision-difference-worker')).length, 2);
+    assert.equal(records.files.length, 9);
+    assert.equal(records.files.some(({ path: name }) => name.includes('revision-difference-worker')), false);
     const desktopAssets = path.join(directory, 'app/dist/desktop/assets');
-    await writeFile(path.join(desktopAssets, 'index-AbCd1234.js'), '/* missing worker reference */');
-    await assert.rejects(browserArtifactRecords(directory, ['story']), /does not reference its revision comparison worker/);
-    await emit('desktop', true);
     const unexpectedScript = path.join(desktopAssets, 'unexpected-AbCd1234.js');
     await writeFile(unexpectedScript, '/* unexpected fixture */');
-    await assert.rejects(browserArtifactRecords(directory, ['story']), /outside its manifest and revision comparison worker/);
+    await assert.rejects(browserArtifactRecords(directory, ['story']), /outside its manifest/);
     await rm(unexpectedScript);
     await emit('desktop', false);
     await assert.rejects(browserArtifactRecords(directory, ['story']), /different browser module closure/);
@@ -459,15 +450,14 @@ test('browser artifacts bind the selected module closure to every reachable UI e
     await writeFile(path.join(directory, 'app/dist/.vite/manifest.json'), JSON.stringify(launcher));
     await assert.rejects(browserArtifactRecords(directory, ['story']), /different browser module closure/);
     // Vite 8/Rolldown may refer back to its own index.html entry and list a
-    // shared chunk and the authoring Worker as assets. Both remain closed over
-    // the expected app entry and selected browser modules.
+    // shared chunk as an asset. It remains closed over the expected app entry
+    // and selected browser modules.
     await emit('', true, true);
     await emit('desktop', true, true);
     await emit('mobile', true, true);
     const modernRecords = await browserArtifactRecords(directory, ['story']);
-    assert.equal(modernRecords.files.filter(({ path: name }) => name.includes('revision-difference-worker')).length, 2);
-    await writeFile(path.join(directory, 'app/dist/mobile/assets/index-AbCd1234.js'), '/* missing Worker URL */');
-    await assert.rejects(browserArtifactRecords(directory, ['story']), /does not reference its revision comparison worker/);
+    assert.equal(modernRecords.files.length, 11);
+    assert.equal(modernRecords.files.some(({ path: name }) => name.includes('revision-difference-worker')), false);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
