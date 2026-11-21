@@ -16,7 +16,7 @@ import { KnowledgeContextInspector } from "./KnowledgeContextInspector";
 import { readWorkspaceSelectionForLocation, workspaceSelectionPath, writeWorkspaceSelection } from "./selection";
 import { PersistenceLegacyDraftImport } from "./PersistenceLegacyDraftImport";
 import { parseApplicationLocation, switchApplicationPath } from "../application/navigation";
-import { PersistenceScratch } from "./PersistenceScratch";
+import { PersistenceScratch, type ScratchGuard } from "./PersistenceScratch";
 import { protectEditorTransition } from "./transition";
 import { ApiError } from "../api-error";
 import { DesktopShell } from "../shells/desktop/DesktopShell";
@@ -335,7 +335,8 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const saveControllerRef = useRef<AbortController | null>(null);
   useEffect(() => () => { saveControllerRef.current?.abort(); }, []);
   const saveDocumentRef = useRef<() => Promise<void>>(async () => undefined);
-  const scratchGuardRef = useRef<(() => Promise<void>) | null>(null);
+  const scratchGuardRef = useRef<ScratchGuard | null>(null);
+  const registerScratchGuard = useCallback((guard: ScratchGuard | null) => { scratchGuardRef.current = guard; }, []);
   const editorRef = useRef<ManuscriptInputHandle>(null);
   const [editorPortalContainer] = useState<HTMLElement | null>(() => {
     if (typeof document === "undefined") return null;
@@ -540,6 +541,13 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     };
     const beforeUnload = (event: BeforeUnloadEvent) => {
       const current = activeRef.current;
+      const unprotectedScratch = scratchGuardRef.current?.hasUnprotectedInput() ?? false;
+      if (!current && !unprotectedScratch) return;
+      if (unprotectedScratch) {
+        event.preventDefault();
+        event.returnValue = "";
+        return;
+      }
       if (!current) return;
       const key = JSON.stringify([current.document.projectId, current.document.id]);
       const owned = ownedDraftsRef.current.get(key);
@@ -1568,7 +1576,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       // must remain denied even if the browser finishes composing meanwhile.
       editorRef.current?.readForNavigation();
       resume.flush();
-      await scratchGuardRef.current?.();
+      await scratchGuardRef.current?.protect();
       await protectEditorTransition(() => activeRef.current, () => {
         const markdown = editorRef.current?.readForNavigation();
         const current = activeRef.current;
@@ -2607,7 +2615,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           {reading && <section aria-label="原稿の閲覧" className={`scene-reading scene-reading-${readingDirection}`} style={typographyStyle}><MobileReadingPager mode={readingDirection} pageIndex={readingPage} onPageIndexChange={(page) => { setReadingPage(page); resume.onReadingPage(active.document.id, page); }}><TermAwareRubyText text={active.markdown} resolveTerms={resolveTerms} onTermNavigate={handleTermNavigate} /></MobileReadingPager></section>}
           <p className="pg-editor-hint">{active.markdown.length}字 · UTF-16差分をRevisionへ保存します。本文を送る前にIndexedDBの回復Journalへ記録します。</p>
 
-          {journal && <PersistenceScratch key={`${active.document.projectId}:${active.document.id}`} projectId={active.document.projectId} documentId={active.document.id} authorScope={authorScope} journal={journal} canCreateNote={canCreateDocument} registerGuard={(guard) => { scratchGuardRef.current = guard; }} onSaved={async () => {
+          {journal && <PersistenceScratch key={`${active.document.projectId}:${active.document.id}`} projectId={active.document.projectId} documentId={active.document.id} authorScope={authorScope} journal={journal} canCreateNote={canCreateDocument} registerGuard={registerScratchGuard} onSaved={async () => {
             if (projectIdRef.current !== projectId) return;
             setNotice("スクラッチを独立したノートとしてPostgreSQLへ保存しました。");
             try {
