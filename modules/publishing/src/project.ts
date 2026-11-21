@@ -215,7 +215,7 @@ export async function readPublishingProjectFromCore(context: ModuleActionContext
       title: nodeTitle(sceneData, id),
       body: manuscript ? manuscriptBody(manuscript.content, bodyPath) : "",
       path: bodyPath,
-      rootScene: sceneData.kind === "scene" && !sceneData.volume && !sceneData.chapter,
+      rootScene: sceneData.kind === "scene" && !Object.hasOwn(sceneData, "volume") && !Object.hasOwn(sceneData, "chapter"),
       ...(order === undefined ? {} : { order }),
     });
   }

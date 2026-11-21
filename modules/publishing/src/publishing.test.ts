@@ -196,7 +196,10 @@ test("the canonical full plaintext export includes project root scenes once in s
   const notePath = "plot/volumes/root/chapters/root/scenes/private-note.yaml";
   files.set(notePath, "kind: scene\nid: private-note\ntitle: Private note\nmanuscript: documents/private-note.md\n");
   files.set("documents/private-note.md", "PRIVATE NOTE BODY\n");
-  const reader = new MemoryReader(files, makeSnapshot(), new Map([[notePath, "note"]]));
+  const invalidParentPath = "plot/volumes/root/chapters/root/scenes/invalid-parent.yaml";
+  files.set(invalidParentPath, "kind: scene\nid: invalid-parent\ntitle: Invalid parent\nvolume: ''\nchapter: ''\nmanuscript: documents/invalid-parent.md\n");
+  files.set("documents/invalid-parent.md", "INVALID LINK BODY\n");
+  const reader = new MemoryReader(files, makeSnapshot(), new Map([[notePath, "note"], [invalidParentPath, "scene"]]));
   const publishing = await createPublishing();
   const mixed = await invokeAction(publishing, "publishing.export.plaintext", { scope: "all" }, contextWithCoreTree(reader, {
     title: project.title,
@@ -207,7 +210,7 @@ test("the canonical full plaintext export includes project root scenes once in s
   for (const body of ["ROOT BODY A", "ROOT BODY B", "ROOT BODY C", "|星《ほし》の駅", "海から朝日が昇った。"] ) {
     assert.equal(mixedText.split(body).length - 1, 1);
   }
-  assert.doesNotMatch(mixedText, /PRIVATE NOTE BODY|Private note/u);
+  assert.doesNotMatch(mixedText, /PRIVATE NOTE BODY|Private note|INVALID LINK BODY|Invalid parent/u);
 
   const mixedEpub = await invokeAction(publishing, "publishing.export.epub", { scope: "all" }, contextWithCoreTree(reader, {
     title: project.title,
