@@ -265,3 +265,22 @@ test('independent main verification reuses exact PR proof without disabling PR o
   }
   assert.deepEqual(workflow.jobs.full_model_oci.permissions, { contents: 'read', actions: 'read', 'pull-requests': 'read' });
 });
+
+test('release workflow_run dispatch is main-only while PR artifact builds and main provenance gates remain intact', () => {
+  for (const filename of ['backend-release.yml', 'frontend-release.yml']) {
+    const definition = parse(readFileSync(new URL('../.github/workflows/' + filename, import.meta.url), 'utf8'));
+    assert.deepEqual(definition.on.workflow_run.workflows, ['Verify Codexia']);
+    assert.deepEqual(definition.on.workflow_run.types, ['completed']);
+    assert.deepEqual(definition.on.workflow_run.branches, ['main']);
+    assert.deepEqual(definition.on.pull_request.branches, ['main'], 'PR validation must remain enabled');
+    const admission = definition.jobs.source;
+    for (const required of [
+      "github.event_name == 'workflow_run'",
+      "github.event.workflow_run.event == 'push'",
+      "github.event.workflow_run.head_branch == 'main'",
+      "github.event.workflow_run.conclusion == 'success'",
+      "github.event.workflow_run.repository.full_name == github.repository",
+      "github.event.workflow_run.head_repository.full_name == github.repository",
+    ]) assert.ok(admission.if.includes(required), `${filename} must retain source authorization: ${required}`);
+  }
+});
