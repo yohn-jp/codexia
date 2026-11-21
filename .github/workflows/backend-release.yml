@@ -245,7 +245,7 @@ jobs:
           CODEXIA_BACKEND_ARTIFACT_DIR: ${{ runner.temp }}/backend-images
           CODEXIA_BACKEND_ARTIFACT_MANIFEST: ${{ runner.temp }}/backend-images/codexia-backend-build.json
         run: node scripts/verify-backend-artifacts.mjs
-      - uses: actions/download-artifact@v7.0.0
+      - uses: actions/download-artifact@v8.0.2
         if: ${{ steps.freshness.outputs.affected == 'true' && needs.promotion.result == 'success' && needs.promotion.outputs.promoted == 'true' }}
         with:
           name: codexia-backend-promotion-${{ github.event.workflow_run.head_sha }}-attempt-${{ github.run_attempt }}
