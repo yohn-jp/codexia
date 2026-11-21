@@ -150,6 +150,27 @@ test('first activation initializes only a pristine database after backup under b
   assert.match(persistenceExports, /export \{[^}]*initializeFreshPostgresSchema[^}]*\} from "\.\/migrate\.js"/u);
 });
 
+test('failed fresh-schema initialization restores a first activation without stopping an absent API service', () => {
+  const tasks = parse(readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8'));
+  const transaction = tasks.find(task => task.name === 'Apply or recover the API Quadlet under the host lock');
+  const shell = transaction['ansible.builtin.shell'];
+  const restore = shell.slice(shell.indexOf('restore_previous(){'), shell.indexOf('    if { [[ "$tunnel_present" == true ]]'));
+  assert.ok(restore.startsWith('restore_previous(){'), 'canonical rollback helper must be present');
+  assert.match(restore, /if \[\[ "\$had_unit" == true \\|\\| -e "\$active_unit" \\|\\| -L "\$active_unit" \]\]; then[\s\S]*?systemctl --user stop codexia-api\.service/u,
+    'a missing generated API unit must not make first-install recovery fail');
+  assert.match(restore, /rm -f -- "\$active_unit"/u, 'fresh install rollback must remove the candidate unit');
+  assert.match(restore, /rm -f -- "\$transaction_intent"/u, 'successful rollback must clear durable intent');
+});
+
+test('first activation precedes optional Better Auth namespace creation', () => {
+  const runbook = readFileSync(new URL('../docs/deployment/PUSH-DEPLOYMENT.md', import.meta.url), 'utf8');
+  const firstActivation = runbook.indexOf('Run the first API activation through the protected production workflow');
+  const optionalAuth = runbook.indexOf('Only after successful first activation');
+  assert.ok(firstActivation > 0 && optionalAuth > 0, 'both first activation and optional auth setup must be documented');
+  assert.match(runbook, /Do not run `auth-runtime` before initializing the application schema/u);
+  assert.match(runbook, /creating.*codexia_auth|codexia_auth.*additional database object/ui);
+});
+
 test('push rollout admits backups only after canonical API and Tunnel shutdown', () => {
   const deployment = readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8');
   const backup = readFileSync(new URL('../deploy/backup/backup.sh', import.meta.url), 'utf8');
