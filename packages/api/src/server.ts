@@ -443,6 +443,8 @@ async function serveStatic(
   const publicReaderPath = isPublicReaderPath(path);
   const files: Record<string, { filename: string; contentType: string }> = {
     "/": { filename: "index.html", contentType: "text/html; charset=utf-8" },
+    "/oauth/login": { filename: "index.html", contentType: "text/html; charset=utf-8" },
+    "/oauth/consent": { filename: "index.html", contentType: "text/html; charset=utf-8" },
     "/main.js": { filename: "main.js", contentType: "text/javascript; charset=utf-8" },
     "/api.js": { filename: "api.js", contentType: "text/javascript; charset=utf-8" },
     "/drafts.js": { filename: "drafts.js", contentType: "text/javascript; charset=utf-8" },

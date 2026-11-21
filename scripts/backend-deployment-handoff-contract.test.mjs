@@ -8,7 +8,7 @@ const { parse } = require('yaml');
 const handoff = parse(readFileSync(new URL('../.github/workflows/backend-deployment-handoff.yml', import.meta.url), 'utf8'));
 const backend = parse(readFileSync(new URL('../.github/workflows/backend-release.yml', import.meta.url), 'utf8'));
 
-test('read-only handoff consumer only follows successful same-repository main backend publication', () => {
+test('handoff consumer verifies successful same-repository main publication before exposing deployment inputs', () => {
   assert.deepEqual(handoff.on.workflow_run.workflows, ['Codexia Backend Image']);
   assert.deepEqual(handoff.on.workflow_run.types, ['completed']);
   assert.deepEqual(handoff.on.workflow_run.branches, ['main']);
@@ -20,10 +20,25 @@ test('read-only handoff consumer only follows successful same-repository main ba
   assert.equal(job.environment, undefined);
   assert.equal(job.permissions['id-token'], undefined);
   assert.deepEqual(job.permissions, { contents: 'read', actions: 'read', packages: 'read' });
+  assert.equal(job.outputs['certified-full-image'], '${{ steps.verify.outputs.full-image }}');
+  assert.equal(job.outputs['producer-sha'], '${{ steps.verify.outputs.producer-sha }}');
+  assert.equal(job.outputs['deployment-certificate'], '${{ steps.verify.outputs.full-certificate }}');
   assert.equal(handoff.jobs['verify-handoff'].steps[0].with.ref, '${{ github.event.workflow_run.head_sha }}');
   assert.equal(handoff.jobs['verify-handoff'].steps[0].with['persist-credentials'], false);
-  assert.ok(job.steps.some(step => step.run === 'node scripts/verify-backend-push-handoff.mjs'));
-  assert.ok(!JSON.stringify(handoff).includes('codexia-production'));
+  const verifyStep = job.steps.find(step => step.run === 'node scripts/verify-backend-push-handoff.mjs');
+  assert.ok(verifyStep);
+  assert.equal(verifyStep.id, 'verify');
+  for (const step of job.steps) {
+    for (const value of Object.values(step.env ?? {})) assert.doesNotMatch(String(value), /secrets\./u);
+  }
+  const deploy = handoff.jobs['deploy-production'];
+  assert.deepEqual(deploy.needs, ['verify-handoff']);
+  assert.equal(deploy.environment.name, 'codexia-production');
+  assert.equal(deploy.permissions['id-token'], 'write');
+  assert.equal(deploy.concurrency.group, 'codexia-production');
+  assert.equal(deploy.concurrency['cancel-in-progress'], false);
+  assert.match(deploy.if, /needs\.verify-handoff\.result == 'success'/u);
+  assert.match(deploy.if, /vars\.CODEXIA_PUSH_DEPLOYMENT_ENABLED == 'true'/u);
 });
 
 test('backend release emits certificate files only after exact-source publish and component release recording', () => {

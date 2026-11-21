@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +15,7 @@ const REPOSITORY = 'yohn-jp/codexia';
 const WORKFLOW_PATH = '.github/workflows/backend-release.yml';
 const VERIFY_PATH = '.github/workflows/verify.yml';
 const CERTIFICATE_FILE_LIMIT = 2 * 1024 * 1024;
+const JOB_OUTPUT_LIMIT = 512 * 1024;
 const ARTIFACT_MAX_BYTES = 4 * 1024 * 1024;
 const sha = /^[a-f0-9]{40}$/u;
 const positive = value => Number.isSafeInteger(value) && value > 0;
@@ -69,6 +70,18 @@ export function validatePushDeploymentCertificatePair(values, expectedMainSha) {
     assert.equal(core.identity[key], full.identity[key], 'Core and Full identities differ: ' + key);
   }
   return [core, full];
+}
+
+export function createHandoffDeploymentOutputs({ fullImage, producerSha, fullCertificate }) {
+  const certificate = validatePushDeploymentCertificate(fullCertificate, fullCertificate?.verifiedMainSha);
+  assert.match(fullImage ?? '', /^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/u);
+  assert.match(producerSha ?? '', sha);
+  assert.equal(certificate.identity.profile, 'full');
+  assert.equal(certificate.image, fullImage);
+  assert.equal(certificate.producer.sourceSha, producerSha);
+  const encodedCertificate = Buffer.from(JSON.stringify(certificate)).toString('base64');
+  assert.ok(encodedCertificate.length <= JOB_OUTPUT_LIMIT, 'Verified Full deployment certificate exceeds the job output limit');
+  return Object.freeze({ fullImage, producerSha, fullCertificate: encodedCertificate });
 }
 
 async function githubJson(resource, token, fetchImpl = fetch) {
@@ -159,7 +172,8 @@ async function verifyArtifactAndRelease({ env, payload, run, token, fetchImpl = 
       }, { tempRoot: env.RUNNER_TEMP || undefined });
       assert.deepEqual(observed, certificate.identity, 'Published OCI image differs from its handoff certificate');
     }
-    return { publisherRunId: run.id, verifyRunId: core.verifyRun.id, coreImage: core.image, fullImage: full.image };
+    return { publisherRunId: run.id, verifyRunId: core.verifyRun.id, coreImage: core.image, fullImage: full.image,
+      producerSha: full.producer.sourceSha, fullCertificate: full };
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
@@ -194,6 +208,11 @@ export async function verifyBackendPushHandoff(options = {}) {
       `No backend release was selected for main revision ${triggered.head_sha}; no deployment handoff was emitted.\n`);
     console.log(`No backend release selected in publication run ${result.publisherRunId}; handoff not applicable`);
     return result;
+  }
+  if (env.GITHUB_OUTPUT) {
+    const outputs = createHandoffDeploymentOutputs(result);
+    await appendFile(env.GITHUB_OUTPUT,
+      `full-image=${outputs.fullImage}\nproducer-sha=${outputs.producerSha}\nfull-certificate=${outputs.fullCertificate}\n`);
   }
   if (env.GITHUB_STEP_SUMMARY) {
     await writeFile(env.GITHUB_STEP_SUMMARY,

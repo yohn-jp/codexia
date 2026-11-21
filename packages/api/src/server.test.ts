@@ -1340,6 +1340,12 @@ describe("Codexia HTTP boundary", () => {
     assert.ok(shell.headers.get("content-security-policy")?.includes(`style-src 'self' 'nonce-${nonce}'`));
     assert.ok(shell.headers.get("content-security-policy")?.includes("style-src-attr 'unsafe-inline'"));
     assert.ok(!shell.headers.get("content-security-policy")?.includes("script-src 'unsafe-inline'"));
+    for (const path of ["/oauth/login?oauth_query=opaque", "/oauth/consent?oauth_query=opaque"]) {
+      const oauthShell = await fetch(`${apiServer.base}${path}`);
+      assert.equal(oauthShell.status, 200, `${path} must return the same-origin OAuth client shell`);
+      assert.match(oauthShell.headers.get("content-type") ?? "", /text\/html/u);
+      assert.match(await oauthShell.text(), /Codexia/u);
+    }
     const nextShell = await fetch(`${apiServer.base}/`);
     assert.notEqual(nextShell.headers.get("content-security-policy"), shell.headers.get("content-security-policy"));
     const publicProjectId = randomUUID();

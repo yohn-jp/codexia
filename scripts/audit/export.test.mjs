@@ -144,11 +144,12 @@ test('browser downloads full, manifest and scoped part bytes without navigating 
   const full = '{"files":{"app/src/a.ts":"source"}}';
   const part = '{"entries":[{"path":"app/src/a.ts","offset":0,"content":"source"}]}';
   const snapshotManifest = '{"files":[{"path":"app/src/a.ts"}]}';
-  const html = renderIndex({ observedAt: 'now', branches: [{ branch: 'main', sha }], snapshots: {
+  const geminiMarkdown = '# OCR review input\nPACKET_ID: 123\nEND_OF_PACKET 123\n';
+  const html = renderIndex({ observedAt: 'now', branches: [{ branch: 'main', sha }], reviews: { [sha]: { status: 'ready', published: 2 } }, snapshots: {
     [sha]: { status: 'ready', fileCount: 1, outputs: [{ name: 'repomix.json', bytes: Buffer.byteLength(full) }, { name: 'part-0001.json', bytes: Buffer.byteLength(part), scope: '02-frontend' }] },
   } });
   const base = '/snapshots/' + sha + '/';
-  const files = new Map([[base + 'repomix.json', full], [base + 'part-0001.json', part], [base + 'manifest.json', snapshotManifest], ['/manifest.json', '{"branches":[]}']]);
+  const files = new Map([[base + 'repomix.json', full], [base + 'part-0001.json', part], [base + 'manifest.json', snapshotManifest], ['/manifest.json', '{"branches":[]}'], ['/reviews/' + sha + '/gemini-review.md', geminiMarkdown]]);
   const server = createServer((req, res) => {
     if (req.url === '/') { res.setHeader('Content-Type', 'text/html'); res.end(html); return; }
     if (!files.has(req.url)) { res.statusCode = 404; res.end(); return; }
@@ -170,6 +171,7 @@ test('browser downloads full, manifest and scoped part bytes without navigating 
       assert.equal(page.url(), url);
     };
     await verify('Download full JSON', 'codexia-' + sha + '-repomix.json', full);
+    await verify('Gemini review', 'codexia-' + sha + '-review.md', geminiMarkdown);
     await verify('Download manifest', 'codexia-' + sha + '-manifest.json', snapshotManifest);
     await verify('frontend ·', 'codexia-' + sha + '-part-0001.json', part);
     await verify('Download branch index', 'codexia-branches.json', '{"branches":[]}');

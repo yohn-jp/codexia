@@ -1,0 +1,9 @@
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Review only reachable defects or regressions introduced by this change. Trace the exact call path and associated tests, respect the repository's architecture and authorization boundaries, and report the observed failure, violated contract, root cause and minimal correction. Do not invent requirements or conflate a review input with a completed review.",
+      "merge_system_rule": true
+    }
+  ]
+}
