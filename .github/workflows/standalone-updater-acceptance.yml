@@ -19,7 +19,7 @@ jobs:
       packages: read
     steps:
       - name: Check out exact source without persistent credentials
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Set up Node.js

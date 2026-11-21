@@ -79,7 +79,7 @@ jobs:
       affected: ${{ steps.gate.outputs.affected }}
       verify-run-id: ${{ steps.gate.outputs.verify-run-id }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
@@ -105,7 +105,7 @@ jobs:
       frontend-profile: ${{ steps.probe.outputs.frontendProfile }}
       frontend-api-epoch: ${{ steps.probe.outputs.frontendApiEpoch }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
@@ -147,7 +147,7 @@ jobs:
       producer-plan-digest: ${{ steps.promotion.outputs.producerPlanDigest }}
       producer-verify-attempt: ${{ steps.promotion.outputs.producerVerifyAttempt }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: ${{ github.event_name == 'workflow_run' && '0' || '1' }}
@@ -238,7 +238,7 @@ jobs:
       actions: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0

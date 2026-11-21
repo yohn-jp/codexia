@@ -28,7 +28,7 @@ jobs:
       matrix:
         browser: [chromium, webkit]
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
@@ -63,7 +63,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(github.event_name == 'push' && '[{"variant":"ubuntu","browser":"chromium"},{"variant":"ubuntu","browser":"webkit"}]' || '[{"variant":"mirror","browser":"all"},{"variant":"ubuntu","browser":"chromium"},{"variant":"ubuntu","browser":"webkit"}]') }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false

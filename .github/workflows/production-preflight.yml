@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 5
     environment: codexia-production
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false

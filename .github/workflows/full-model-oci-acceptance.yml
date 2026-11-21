@@ -45,7 +45,7 @@ jobs:
       HF_HUB_DOWNLOAD_TIMEOUT: '120'
     steps:
       - name: Check out the exact source without persistent credentials
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: ${{ github.event_name == 'push' && '0' || '1' }}
