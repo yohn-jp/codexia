@@ -51,17 +51,50 @@ function fixtureFiles(extra: Record<string, string> = {}): Map<string, string> {
   }));
 }
 
-function makeReader(files: Map<string, string>, repositoryId = "repo-work"): SnapshotReader {
+function makeReader(files: Map<string, string>, repositoryId = "repo-work", documentKinds: Record<string, string> = {}): SnapshotReader {
   const snapshot: SnapshotId = { projectId: repository(repositoryId), projectVersion: 11 };
   return {
     snapshot,
     async read(path) {
       const content = files.get(path);
-      return content === undefined ? null : { content, revision: revision(content) };
+      return content === undefined ? null : {
+        content,
+        revision: revision(content),
+        ...(documentKinds[path] ? { documentKind: documentKinds[path] } : {}),
+      };
     },
     async list(prefix) { return [...files.keys()].filter((path) => path === prefix || path.startsWith(`${prefix}/`)).sort(); },
   };
 }
+
+test("scene lists exclude native notes while retaining native and mapped scenes", async () => {
+  const nativeSceneId = "11111111-1111-4111-8111-111111111111";
+  const nativeNoteId = "22222222-2222-4222-8222-222222222222";
+  const scenePath = `plot/volumes/vol-main/chapters/ch-main-1/scenes/${nativeSceneId}.yaml`;
+  const notePath = `plot/volumes/vol-main/chapters/ch-main-1/scenes/${nativeNoteId}.yaml`;
+  const files = fixtureFiles({
+    [scenePath]: yaml({ id: nativeSceneId, title: "Native scene", chapter: "ch-main-1", order: "0003" }),
+    [notePath]: yaml({ id: nativeNoteId, title: "Author note", chapter: "ch-main-1", order: "0004" }),
+    [`documents/${nativeSceneId}.md`]: "Native scene body.",
+    [`documents/${nativeNoteId}.md`]: "Private note body.",
+  });
+  const reader = makeReader(files, "repo-story-note-filter", {
+    [scenePath]: "scene",
+    [notePath]: "note",
+  });
+  const context = makeActionContext(reader);
+
+  const scenes = (await invoke<Array<{ id: string }>>("story.entities.list", { type: "scene" }, context)).data;
+  assert.deepEqual(new Set(scenes.map((entity) => entity.id)), new Set(["sc-1", "sc-2", nativeSceneId]));
+
+  const allEntities = (await invoke<Array<{ id: string }>>("story.entities.list", {}, context)).data;
+  assert.ok(allEntities.some((entity) => entity.id === nativeNoteId));
+  assert.ok(allEntities.some((entity) => entity.id === "sc-1"));
+
+  const snapshot = await readStorySnapshot(reader);
+  assert.equal(snapshot.files.get(notePath)?.documentKind, "note");
+  assert.equal(snapshot.files.get(scenePath)?.documentKind, "scene");
+});
 
 function makeModuleContext(): ModuleContext {
   return {

@@ -783,7 +783,7 @@ export class CoreStore implements MutationCoordinator {
           projectId,
           documentId: document.id,
           baseRevisionId: revision.id,
-          changes: write.textChanges ?? [{ fromUtf16: 0, toUtf16: revision.markdown.length, insert: write.content }],
+          changes: write.textChanges ?? (write.content === revision.markdown ? [] : [{ fromUtf16: 0, toUtf16: revision.markdown.length, insert: write.content }]),
           resultingSha256: hash(write.content),
           authorId,
           clientId: "core",

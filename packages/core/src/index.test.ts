@@ -392,6 +392,57 @@ test("legacy approved reorders apply only while their exact base version is curr
     before.map(document => [document.id, document.parentId, document.orderKey]));
 });
 test("manuscript history restores by appending an immutable revision",async()=>{const p=await hierarchy(),reader=await core.reader(p.id),path="manuscript/v1/c1/s1.md",old=await reader.read(path);const history=await core.listManuscriptSnapshots(p.id,"s1");await accept(p.id,operation(reader.snapshot,path,"New",old!.revision));const restore=await core.buildRestoreOperation(p.id,{sceneId:"s1",snapshotId:history.snapshots[0]!.id});await accept(p.id,restore.operation);assert.equal((await core.readScene(p.id,"s1")).text,"Text 😀\n");assert.equal((await core.listManuscriptSnapshots(p.id,"s1")).snapshots.length,3);});
+test("Core restore preserves confirmed evidence for identical text and reviews changed quotes", async () => {
+  const makeAnchoredProject = async (markdown: string) => {
+    const p = await project();
+    const volume = (await persistence.transaction(tx => tx.createDocument({ projectId:p.id, kind:"volume", title:"Volume", orderKey:"0001", markdown:"", authorId:"author", idempotencyKey:randomUUID() }))).document;
+    const chapter = (await persistence.transaction(tx => tx.createDocument({ projectId:p.id, kind:"chapter", parentId:volume.id, title:"Chapter", orderKey:"0001", markdown:"", authorId:"author", idempotencyKey:randomUUID() }))).document;
+    const scene = (await persistence.transaction(tx => tx.createDocument({ projectId:p.id, kind:"scene", parentId:chapter.id, title:"Scene", orderKey:"0001", markdown, authorId:"author", idempotencyKey:randomUUID() }))).document;
+    return { p, scene };
+  };
+  const attachConfirmedEvidence = async (p: {id:string}, scene: {id: string}, revisionId: string, fromUtf16: number, toUtf16: number, quote: string) => {
+    const nodeId = randomUUID() as import("@codexia/persistence-contracts").KnowledgeNodeId;
+    const evidenceId = randomUUID() as import("@codexia/persistence-contracts").EvidenceId;
+    await persistence.transaction(async tx => {
+      await tx.saveKnowledgeNode({ projectId:p.id as import("@codexia/persistence-contracts").ProjectId, id:nodeId, type:"character", name:"Entity", attributes:{}, status:"confirmed", expectedVersion:null });
+      await tx.saveEvidenceAnchor({ projectId:p.id as import("@codexia/persistence-contracts").ProjectId, id:evidenceId, documentId:scene.id as import("@codexia/persistence-contracts").DocumentId, revisionId:revisionId as import("@codexia/persistence-contracts").RevisionId, fromUtf16, toUtf16, quoteSha256:createHash("sha256").update(quote).digest("hex"), status:"confirmed", expectedVersion:null });
+      await tx.saveMentionLink({ projectId:p.id as import("@codexia/persistence-contracts").ProjectId, evidenceId, nodeId, status:"confirmed", source:"author", confidence:1, extractorVersion:null });
+    });
+    return evidenceId;
+  };
+
+  const same = await makeAnchoredProject("ABCDEF");
+  const sameHead = same.scene.headRevisionId!;
+  const sameEvidence = await attachConfirmedEvidence(same.p, same.scene, sameHead, 1, 3, "BC");
+  const duplicate = await persistence.transaction(tx => tx.saveDocument({ projectId:same.p.id as import("@codexia/persistence-contracts").ProjectId, documentId:same.scene.id, baseRevisionId:sameHead, changes:[], resultingSha256:createHash("sha256").update("ABCDEF").digest("hex"), authorId:"author", clientId:"test", idempotencyKey:randomUUID() }));
+  const originalSame = await core.buildRestoreOperation(same.p.id, { sceneId:same.scene.id, snapshotId:sameHead });
+  assert.equal(originalSame.operation.writes[0]?.textChanges, undefined);
+  await accept(same.p.id, originalSame.operation, originalSame.snapshot);
+  const sameState = await persistence.read(async reader => {
+    const head = await reader.getDocument(same.p.id as import("@codexia/persistence-contracts").ProjectId, same.scene.id);
+    const revision = head?.headRevisionId ? await reader.getRevision(same.p.id as import("@codexia/persistence-contracts").ProjectId, same.scene.id, head.headRevisionId) : null;
+    return { anchor:await reader.getEvidenceAnchor(same.p.id as import("@codexia/persistence-contracts").ProjectId, sameEvidence), links:await reader.listMentionLinks(same.p.id as import("@codexia/persistence-contracts").ProjectId, sameEvidence), head, revision };
+  });
+  assert.notEqual(sameState.head?.headRevisionId, duplicate.revision.id);
+  assert.equal(sameState.revision?.parentRevisionId, duplicate.revision.id);
+  assert.equal(sameState.revision?.markdown, "ABCDEF");
+  assert.equal(sameState.anchor?.revisionId, sameState.head?.headRevisionId);
+  assert.equal(sameState.anchor?.fromUtf16, 1);
+  assert.equal(sameState.anchor?.toUtf16, 3);
+  assert.equal(sameState.anchor?.quoteSha256, createHash("sha256").update("BC").digest("hex"));
+  assert.equal(sameState.anchor?.status, "confirmed");
+  assert.equal(sameState.links[0]?.status, "confirmed");
+
+  const changed = await makeAnchoredProject("ABXDEF");
+  const sourceRevisionId = changed.scene.headRevisionId!;
+  const changedSave = await persistence.transaction(tx => tx.saveDocument({ projectId:changed.p.id as import("@codexia/persistence-contracts").ProjectId, documentId:changed.scene.id, baseRevisionId:sourceRevisionId, changes:[{fromUtf16:2,toUtf16:3,insert:"C"}], resultingSha256:createHash("sha256").update("ABCDEF").digest("hex"), authorId:"author", clientId:"test", idempotencyKey:randomUUID() }));
+  const changedEvidence = await attachConfirmedEvidence(changed.p, changed.scene, changedSave.revision.id, 1, 3, "BC");
+  const changedRestore = await core.buildRestoreOperation(changed.p.id, { sceneId:changed.scene.id, snapshotId:sourceRevisionId });
+  await accept(changed.p.id, changedRestore.operation, changedRestore.snapshot);
+  const changedState = await persistence.read(async reader => ({ anchor:await reader.getEvidenceAnchor(changed.p.id as import("@codexia/persistence-contracts").ProjectId, changedEvidence), links:await reader.listMentionLinks(changed.p.id as import("@codexia/persistence-contracts").ProjectId, changedEvidence) }));
+  assert.equal(changedState.anchor?.status, "needs_review");
+  assert.equal(changedState.links[0]?.status, "proposed");
+});
 test("unsafe paths and unbound manuscript artifacts cannot bypass canonical documents",async()=>{const p=await project(),reader=await core.reader(p.id);await assert.rejects(reader.read("../secret"));await assert.rejects(accept(p.id,operation(reader.snapshot,"manuscript/unbound.md","illegal")),/canonical document/);assert.equal(await (await core.reader(p.id)).read("manuscript/unbound.md"),null);});
 test("independent approved proposals survive unrelated project changes", async () => {
   const projectRecord = await project();
