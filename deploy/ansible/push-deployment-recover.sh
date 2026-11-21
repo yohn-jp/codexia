@@ -29,19 +29,41 @@ flock --exclusive --nonblock 9 || {
   exit 1
 }
 
-recovery="$(node - "$intent" <<'NODE'
+if ! recovery="$(node - "$intent" "$state_dir/rollback-release.json" "$state_dir/rollback-api.container" <<'NODE'
 const fs = require('node:fs');
 const value = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 if (value.format !== 'codexia-deploy-transaction/v1' || !['pending', 'committed'].includes(value.phase) ||
     typeof value.hadUnit !== 'boolean' || typeof value.tunnelWasActive !== 'boolean' ||
     typeof value.apiLinkCreated !== 'boolean' || typeof value.tunnelLinkCreated !== 'boolean' ||
     typeof value.releasePresent !== 'boolean') process.exit(2);
+let previousImage = '';
+if (value.phase === 'pending' && value.hadUnit) {
+  const unitInfo = fs.lstatSync(process.argv[4]);
+  if (!unitInfo.isFile() || unitInfo.isSymbolicLink()) process.exit(2);
+  const unit = fs.readFileSync(process.argv[4], 'utf8');
+  const unitMatch = unit.match(/^Image=(\S+)$/m);
+  const unitImage = unitMatch?.[1] ?? '';
+  if (!/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/.test(unitImage)) process.exit(2);
+  if (value.releasePresent) {
+    const info = fs.lstatSync(process.argv[3]);
+    if (!info.isFile() || info.isSymbolicLink()) process.exit(2);
+    const release = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+    previousImage = release.image;
+  } else {
+    previousImage = unitImage;
+  }
+  if (previousImage !== unitImage || !/^ghcr\.io\/yohn-jp\/codexia-backend@sha256:[a-f0-9]{64}$/.test(previousImage)) process.exit(2);
+}
 process.stdout.write([value.format, value.phase, value.hadUnit, value.tunnelWasActive,
-  value.apiLinkCreated, value.tunnelLinkCreated, value.releasePresent].join('\n'));
+  value.apiLinkCreated, value.tunnelLinkCreated, value.releasePresent, previousImage || '-'].join('\n'));
 NODE
 )"
+then
+  echo 'Invalid deployment transaction or prior release snapshot' >&2
+  exit 1
+fi
 mapfile -t recovery_fields <<< "$recovery"
-[[ "${recovery_fields[0]:-}" == codexia-deploy-transaction/v1 && ${#recovery_fields[@]} == 7 ]] || {
+[[ "${recovery_fields[0]:-}" == codexia-deploy-transaction/v1 && ${#recovery_fields[@]} == 8 ]] || {
   echo 'Invalid deployment transaction intent' >&2
   exit 1
 }
@@ -57,8 +79,18 @@ tunnel_was_active="${recovery_fields[3]}"
 api_link_created="${recovery_fields[4]}"
 tunnel_link_created="${recovery_fields[5]}"
 release_present="${recovery_fields[6]}"
-systemctl --user stop codexia-tunnel.service >/dev/null 2>&1 || true
-systemctl --user stop codexia-api.service >/dev/null 2>&1 || true
+previous_image="${recovery_fields[7]}"
+[[ "$previous_image" == '-' ]] && previous_image=''
+if systemctl --user cat codexia-tunnel.service >/dev/null 2>&1 &&
+   ! systemctl --user stop codexia-tunnel.service >/dev/null 2>&1; then
+  echo 'Could not stop the active Tunnel during interrupted deployment recovery; recovery intent retained' >&2
+  exit 1
+fi
+if [[ "$had_unit" == true || -e "$active_unit" || -L "$active_unit" ]] &&
+   ! systemctl --user stop codexia-api.service >/dev/null 2>&1; then
+  echo 'Could not stop the active API during interrupted deployment recovery; recovery intent retained' >&2
+  exit 1
+fi
 
 if [[ "$had_unit" == true ]]; then
   [[ -f "$state_dir/rollback-api.container" && ! -L "$state_dir/rollback-api.container" ]] || {
@@ -78,6 +110,14 @@ if [[ "$had_unit" == true ]]; then
   done
   [[ "$healthy" == true ]] || {
     echo 'Prior API did not recover from interrupted deployment' >&2
+    exit 1
+  }
+  running_image="$(podman inspect --format '{{.ImageName}}' codexia-api 2>/dev/null)" || {
+    echo 'Could not verify the recovered API image; recovery intent retained' >&2
+    exit 1
+  }
+  [[ "$running_image" == "$previous_image" ]] || {
+    echo 'Recovered API image does not match the recorded prior release; recovery intent retained' >&2
     exit 1
   }
 else
@@ -109,7 +149,7 @@ else
   rm -f -- "$release_state"
 fi
 
-if [[ "$tunnel_was_active" == true ]]; then
+if [[ "$tunnel_was_active" == true && "$had_unit" == true ]]; then
   systemctl --user start codexia-tunnel.service
 fi
 
