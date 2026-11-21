@@ -7,6 +7,7 @@ on:
       - deploy/ansible/test-phase-f-push-vm-reboot.sh
       - deploy/ansible/host.yml
       - deploy/ansible/host-validate.yml
+      - deploy/ansible/host-contract.py
       - deploy/ansible/site.yml
       - deploy/ansible/requirements.txt
       - docs/deployment/PHASE-F-PUSH-VM-REBOOT-CI.md

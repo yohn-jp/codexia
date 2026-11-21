@@ -117,7 +117,7 @@ cloud-localds "$seed" "$tmp/user-data" "$tmp/meta-data"
 phase=qemu-guest-boot
 # TCG provides a genuine guest kernel and reboot path without nested KVM support.
 # Keep this on a dedicated runner; do not substitute a host service restart.
-qemu-system-x86_64 -machine type=q35,accel=tcg,thread=multi -cpu max -smp 2 -m 4096 \
+qemu-system-x86_64 -machine type=q35 -accel tcg,thread=multi -cpu max -smp 2 -m 4096 \
   -drive "file=$overlay,if=virtio,format=qcow2" -drive "file=$seed,media=cdrom,readonly=on" \
   -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:$vm_port-:22" -device virtio-net-pci,netdev=net0 \
   -display none -serial "file:$serial_log" -monitor none -daemonize -pidfile "$qemu_pidfile"

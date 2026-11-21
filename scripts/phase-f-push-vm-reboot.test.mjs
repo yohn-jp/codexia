@@ -18,10 +18,11 @@ test('Phase F VM fixture requires a real guest reboot and durable PostgreSQL evi
   assert.doesNotMatch(workflow, /(?:contents|actions|packages):\s*write|codexia-production|CODEXIA_.*(?:TOKEN|KEY|SECRET)|tailscale|standalone-updater/u);
   assert.match(workflow, /cloud-image-utils qemu-system-x86 qemu-utils/u);
   assert.match(workflow, /phase-f-push-vm-reboot\.sh/u);
+  assert.match(workflow, /deploy\/ansible\/host-contract\.py/u);
   assert.match(workflow, /if: always\(\)/u);
   assert.match(workflow, /if-no-files-found: warn/u);
 
-  assert.match(fixture, /accel=tcg,thread=multi/u);
+  assert.match(fixture, /-machine type=q35 -accel tcg,thread=multi/u);
   assert.match(fixture, /-cpu max/u);
   assert.match(fixture, /qemuAcceleration: 'tcg-threaded'/u);
   assert.match(fixture, /release-20261108/u);
