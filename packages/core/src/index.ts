@@ -479,10 +479,31 @@ export class CoreStore implements MutationCoordinator {
     }}
     return {snapshot:manifest.snapshot,results:results.sort((a,b)=>b.score-a.score).slice(0,Math.min(limit,100))};
   }
-  async writingStatsSnapshot(projectId:string,pinned?:SnapshotId):Promise<{snapshot:SnapshotId;stats:WritingStats}> {
-    const manifest=await this.manifest(projectId,pinned),index=this.snapshotIndex(manifest),tree=this.treeFor(manifest,index),sceneById:Record<string,SceneWritingStats>={}; let totalCharCount=0;
-    const volumes=tree.volumes.map((volume)=>{const chapters=volume.chapters.map((chapter)=>{const scenes=chapter.scenes.map((scene)=>{const document=this.findDocument(manifest,scene.id,index); const charCount=index.sceneCharacterCountsByDocumentId.get(document.id) ?? 0; const stat={sceneId:scene.id,charCount,pages400:Math.ceil(charCount/400)}; sceneById[scene.id]=stat;return stat;});const charCount=scenes.reduce((sum,s)=>sum+s.charCount,0);return {chapterId:chapter.id,charCount,pages400:Math.ceil(charCount/400),scenes};});const charCount=chapters.reduce((sum,c)=>sum+c.charCount,0);totalCharCount+=charCount;return {volumeId:volume.id,charCount,pages400:Math.ceil(charCount/400),chapters};});
-    return {snapshot:manifest.snapshot,stats:{totalCharCount,totalPages400:Math.ceil(totalCharCount/400),volumes,sceneById}};
+  async writingStatsSnapshot(projectId: string, pinned?: SnapshotId): Promise<{ snapshot: SnapshotId; stats: WritingStats }> {
+    const manifest = await this.manifest(projectId, pinned);
+    const index = this.snapshotIndex(manifest);
+    const sceneStats = new Map<string, SceneWritingStats>();
+    let totalCharCount = 0;
+    for (const document of manifest.documents) {
+      if (document.kind !== "scene") continue;
+      const sceneId = this.logicalId(index, document);
+      const source = this.findDocument(manifest, sceneId, index);
+      const charCount = index.sceneCharacterCountsByDocumentId.get(source.id) ?? 0;
+      sceneStats.set(sceneId, { sceneId, charCount, pages400: Math.ceil(charCount / 400) });
+      totalCharCount += charCount;
+    }
+    const volumes = this.treeFor(manifest, index).volumes.map(volume => {
+      const chapters = volume.chapters.map(chapter => {
+        const scenes = chapter.scenes.map(scene => sceneStats.get(scene.id)!);
+        const charCount = scenes.reduce((sum, scene) => sum + scene.charCount, 0);
+        return { chapterId: chapter.id, charCount, pages400: Math.ceil(charCount / 400), scenes };
+      });
+      const charCount = chapters.reduce((sum, chapter) => sum + chapter.charCount, 0);
+      return { volumeId: volume.id, charCount, pages400: Math.ceil(charCount / 400), chapters };
+    });
+    return { snapshot: manifest.snapshot, stats: {
+      totalCharCount, totalPages400: Math.ceil(totalCharCount / 400), volumes, sceneById: Object.fromEntries(sceneStats),
+    } };
   }
   private async proposalStatus(reader:PersistenceReader,projectId:string,proposalId:string):Promise<{recordVersion:number;status:ProposalStatus}|null> {
     const record=await reader.getModuleRecord(pid(projectId),AUTHORITY,`proposal:${proposalId}`); return record ? {recordVersion:record.version,status:record.value as unknown as ProposalStatus}:null;

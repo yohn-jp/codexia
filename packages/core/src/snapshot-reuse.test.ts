@@ -372,6 +372,38 @@ test("startup certifies equivalent legacy snapshots and transitions only incompa
   assert.equal((await restarted.observe(lazyCompatible.project.id)).snapshot.projectVersion,lazyCompatible.project.version);
 });
 
+test("writing statistics include root scenes once without changing chapter and volume subtotals", async () => {
+  const project = await createProject();
+  const { root, empty, nested, chapter, volume } = await persistence.transaction(async tx => {
+    const create = async (kind: string, title: string, markdown: string, parentId: DocumentId | null = null) =>
+      (await tx.createDocument({ projectId: project.id, kind, title, markdown, parentId, orderKey: "01",
+        authorId: "synthetic-author", idempotencyKey: randomUUID() })).document;
+    const root = await create("scene", "直下", "𠮷".repeat(400) + "\n");
+    const empty = await create("scene", "空", "");
+    const volume = await create("volume", "巻", "巻のメモ");
+    const chapter = await create("chapter", "章", "章のメモ", volume.id);
+    const nested = await create("scene", "階層下", " 夜 ", chapter.id);
+    await create("note", "ノート", "統計対象外");
+    return { root, empty, nested, chapter, volume };
+  });
+  const pinned = (await core.reader(project.id)).snapshot;
+  const result = await core.writingStatsSnapshot(project.id, pinned);
+  const nestedStats = { sceneId: nested.id, charCount: 1, pages400: 1 };
+  assert.deepEqual(result.snapshot, pinned);
+  assert.deepEqual(result.stats, {
+    totalCharCount: 401,
+    totalPages400: 2,
+    sceneById: {
+      [root.id]: { sceneId: root.id, charCount: 400, pages400: 1 },
+      [empty.id]: { sceneId: empty.id, charCount: 0, pages400: 0 },
+      [nested.id]: nestedStats,
+    },
+    volumes: [{ volumeId: volume.id, charCount: 1, pages400: 1, chapters: [
+      { chapterId: chapter.id, charCount: 1, pages400: 1, scenes: [nestedStats] },
+    ] }],
+  });
+});
+
 test("writing statistics preserve a non-scene first-match logical identity collision", async () => {
   const project = await createProject();
   await persistence.transaction(async tx => {
