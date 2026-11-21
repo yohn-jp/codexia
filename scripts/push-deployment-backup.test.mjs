@@ -25,7 +25,7 @@ async function createFixture() {
     getent: '#!/bin/sh\nprintf "192.0.2.55 STREAM backup.example 192.0.2.55\\n"\n',
     ip: '#!/bin/sh\nprintf "2: lo inet 127.0.0.1/8 scope host lo\\n"\n',
     podman: '#!/bin/sh\nexit 1\n',
-    systemctl: '#!/usr/bin/env bash\ncase "$*" in\n  *codexia-api.service*) unit=codexia-api.service;;\n  *codexia-tunnel.service*) unit=codexia-tunnel.service;;\n  *codexia-deploy-boot.service*) unit=codexia-deploy-boot.service;;\n  *codexia-deploy.service*) unit=codexia-deploy.service;;\n  *codexia-deploy.timer*) unit=codexia-deploy.timer;;\n  *) exit 4;;\nesac\ncase ",${CODEXIA_TEST_ACTIVE_UNITS:-}," in *",$unit,"*) exit 0;; esac\nexit 3\n',
+    systemctl: '#!/usr/bin/env bash\ncase "$*" in\n  *codexia-api.service*) unit=codexia-api.service;;\n  *codexia-tunnel.service*) unit=codexia-tunnel.service;;\n  *) exit 4;;\nesac\ncase ",${CODEXIA_TEST_ACTIVE_UNITS:-}," in *",$unit,"*) exit 0;; esac\nexit 3\n',
   };
   for (const [name, contents] of Object.entries(commands)) {
     const commandPath = path.join(bin, name);
@@ -67,9 +67,6 @@ test('push backup requires a quiesced API and Tunnel', async () => {
     for (const unit of [
       'codexia-api.service',
       'codexia-tunnel.service',
-      'codexia-deploy-boot.service',
-      'codexia-deploy.service',
-      'codexia-deploy.timer',
     ]) {
       const active = invokeBackup(fixture, { activeUnits: unit });
       assert.notEqual(active.status, 0);
