@@ -1129,7 +1129,12 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
     }),
     action("story.entities.list", read, fieldSchema([], ["type", "tag"]), async (input, context) => {
       const story = await readStorySnapshot(context.reader);
-      return [...story.entities.values()].filter((entity) => (!input.type || entity.type === input.type) && (!input.tag || entity.tags?.includes(String(input.tag)))).sort((a, b) => (a.name ?? a.id).localeCompare(b.name ?? b.id, "ja")).map((entity) => entityWithRevision(entity, story));
+      return [...story.entities.values()].filter((entity) =>
+        (!input.type || entity.type === input.type) &&
+        (input.type !== "scene" || story.files.get(entity.filePath)?.documentKind !== "note") &&
+        (!input.tag || entity.tags?.includes(String(input.tag))))
+        .sort((a, b) => (a.name ?? a.id).localeCompare(b.name ?? b.id, "ja"))
+        .map((entity) => entityWithRevision(entity, story));
     }),
     action("story.entities.collection-revision", read, objectSchema, async (_input, context) => {
       const story = await readStorySnapshot(context.reader);
