@@ -82,6 +82,7 @@ export function assertTrustedTaskInputProof({ inputProof, identity, run, job, ar
   assert.ok(Number.isSafeInteger(expected.repositoryId) && expected.repositoryId > 0, 'Invalid expected repository');
   assert.ok(Number.isSafeInteger(expected.workflowId) && expected.workflowId > 0, 'Invalid expected workflow');
   assert.ok(typeof expected.jobName === 'string' && expected.jobName.length > 0, 'Invalid expected task job');
+  assert.ok(typeof expected.workflowJob === 'string' && /^[a-z0-9_-]+$/iu.test(expected.workflowJob), 'Invalid expected workflow job ID');
   assert.ok(typeof expected.artifactName === 'string' && expected.artifactName.length > 0, 'Invalid expected proof artifact');
 
   assert.equal(run?.id, identity.workflowRunId, 'Task proof run ID mismatch');
@@ -99,7 +100,7 @@ export function assertTrustedTaskInputProof({ inputProof, identity, run, job, ar
   assert.equal(job.run_attempt, identity.workflowAttempt, 'Task proof job attempt mismatch');
   assert.equal(job.head_sha, identity.sourceSha, 'Task proof job source mismatch');
   assert.equal(job.name, expected.jobName, 'Task proof job name mismatch');
-  assert.equal(inputProof.workflowJob, expected.jobName, 'Task proof job identity mismatch');
+  assert.equal(inputProof.workflowJob, expected.workflowJob, 'Task proof workflow job ID mismatch');
   assert.equal(inputProof.format, 'codexia-ci-task-input-proof/v2', 'Unknown task input proof format');
   assert.equal(inputProof.task, 'coverage', 'Unsupported reusable task input proof');
   assert.equal(inputProof.mode, 'static-coverage', 'Unsupported reusable task input proof mode');
@@ -127,7 +128,7 @@ export function assertTrustedCertifiedSourceTaskInputProof({ inputProof, identit
   assert.equal(inputProof.task, 'coverage', 'Unsupported certified task input proof');
   assert.equal(inputProof.mode, 'static-coverage', 'Unsupported certified task input proof mode');
   assert.equal(inputProof.status, 'passed', 'Certified source task proof did not pass');
-  assert.equal(inputProof.workflowJob, expected.jobName, 'Certified source proof job identity mismatch');
+  assert.equal(inputProof.workflowJob, expected.workflowJob, 'Certified source proof workflow job ID mismatch');
 
   assert.equal(sourceRun?.id, identity.workflowRunId, 'Certified source proof run mismatch');
   assert.equal(sourceRun.workflow_id, expected.workflowId, 'Certified source proof workflow mismatch');
