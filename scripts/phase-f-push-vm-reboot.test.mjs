@@ -21,8 +21,9 @@ test('Phase F VM fixture requires a real guest reboot and durable PostgreSQL evi
   assert.match(workflow, /if: always\(\)/u);
   assert.match(workflow, /if-no-files-found: warn/u);
 
-  assert.match(fixture, /\/dev\/kvm/u);
-  assert.match(fixture, /KVM_CAPABILITY_UNAVAILABLE/u);
+  assert.match(fixture, /accel=tcg,thread=multi/u);
+  assert.match(fixture, /-cpu max/u);
+  assert.match(fixture, /qemuAcceleration: 'tcg-threaded'/u);
   assert.match(fixture, /release-20261108/u);
   assert.match(fixture, /7b90593f5532b49b7e3fe3d2743f0d1f0d822e5b07cebcd8e00c0df8069ecab9/u);
   assert.match(fixture, /Image=docker\.io\/library\/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536/u);
@@ -37,7 +38,7 @@ test('Phase F VM fixture requires a real guest reboot and durable PostgreSQL evi
   assert.match(fixture, /marker.*persisted-before-real-guest-reboot/u);
   assert.match(fixture, /outcome === 'PASS'.*bootBefore === bootAfter/u);
   assert.doesNotMatch(fixture, /CODEXIA_PUSH_DEPLOYMENT_ENABLED|100\.100\.1\.68|codexia-production|api\.github\.com\/repos\/yohn-jp/u);
-  for (const marker of ['CAPABILITY_UNAVAILABLE', 'changed boot ID', 'NOT_CHECKED', 'rollback', 'production acceptance']) {
+  for (const marker of ['TCG', 'changed boot ID', 'NOT_CHECKED', 'rollback', 'production acceptance']) {
     assert.ok(doc.toLowerCase().includes(marker.toLowerCase()), `Missing VM reboot evidence boundary: ${marker}`);
   }
 });

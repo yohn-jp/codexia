@@ -57,7 +57,7 @@ cleanup() {
   fi
   if (( status == 0 && cleanup_status != 0 )); then status=$cleanup_status; fi
   if (( cleanup_status != 0 )); then failure_code=CLEANUP_FAILED; fi
-  if (( status == 0 )); then outcome=PASS; elif [[ "$failure_code" == KVM_CAPABILITY_UNAVAILABLE ]]; then outcome=CAPABILITY_UNAVAILABLE; else outcome=FAIL; fi
+  if (( status == 0 )); then outcome=PASS; else outcome=FAIL; fi
   if [[ -n "${evidence_dir:-}" && -d "$evidence_dir" ]]; then
     node --input-type=module - "$evidence_dir/vm-reboot-result.json" "$outcome" "$status" "$phase" "$failure_code" \
       "$identity_before" "$volume_before" "$image_id_before" "$boot_id_before" "$identity_after" "$volume_after" "$image_id_after" "$boot_id_after" <<'NODE'
@@ -68,6 +68,7 @@ const result = {
   workflowRunId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT,
   runnerName: process.env.RUNNER_NAME, outcome, exitStatus: Number(exitStatus), lastPhase, failureCode,
   guest: { image: 'Ubuntu 26.04 amd64 cloud image release-20261108', imageSha256: '7b90593f5532b49b7e3fe3d2743f0d1f0d822e5b07cebcd8e00c0df8069ecab9',
+    qemuAcceleration: 'tcg-threaded',
     serviceUser: 'codexia', serviceUid: 22001, serviceGroup: 'codexia', serviceGid: 22001, serviceHome: '/home/codexia',
     rebootObserved: outcome === 'PASS' && bootBefore !== bootAfter, bootIdBefore: bootBefore || null, bootIdAfter: bootAfter || null },
   persistence: { postgresSystemIdentifierBefore: idBefore || null, postgresSystemIdentifierAfter: idAfter || null,
@@ -87,11 +88,6 @@ NODE
   exit "$status"
 }
 trap cleanup EXIT
-
-if [[ ! -c /dev/kvm || ! -r /dev/kvm || ! -w /dev/kvm ]]; then
-  failure_code=KVM_CAPABILITY_UNAVAILABLE
-  fail 'CAPABILITY_UNAVAILABLE: hosted runner lacks readable/writable /dev/kvm; no reboot substitute will be reported.'
-fi
 
 phase=download-pinned-guest-image
 curl --fail --location --silent --show-error "$image_url" --output "$image"
@@ -119,7 +115,9 @@ EOF
 cloud-localds "$seed" "$tmp/user-data" "$tmp/meta-data"
 
 phase=qemu-guest-boot
-qemu-system-x86_64 -machine type=q35,accel=kvm -cpu host -smp 2 -m 4096 \
+# TCG provides a genuine guest kernel and reboot path without nested KVM support.
+# Keep this on a dedicated runner; do not substitute a host service restart.
+qemu-system-x86_64 -machine type=q35,accel=tcg,thread=multi -cpu max -smp 2 -m 4096 \
   -drive "file=$overlay,if=virtio,format=qcow2" -drive "file=$seed,media=cdrom,readonly=on" \
   -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:$vm_port-:22" -device virtio-net-pci,netdev=net0 \
   -display none -serial "file:$serial_log" -monitor none -daemonize -pidfile "$qemu_pidfile"
