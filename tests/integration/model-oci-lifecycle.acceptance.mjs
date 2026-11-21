@@ -8,7 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
-import { validateImageReference, validateModelCachePath, validateOciEngine } from "./model-oci-lifecycle-arguments.mjs";
+import { isRealDirectory, validateImageReference, validateModelCachePath, validateOciEngine } from "./model-oci-lifecycle-arguments.mjs";
 
 const execFile = promisify(execFileCallback);
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -166,11 +166,10 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
   assert.match(imageDigest, /^sha256:[a-f0-9]{64}$/u);
   assert.equal(platform, "linux/amd64");
 
-  const modelCacheStat = await run("stat", ["-c", "%F", modelCache]);
-  assert.equal(modelCacheStat, "directory");
+  assert.equal(await isRealDirectory(modelCache), true, "model cache must be a real directory");
   for (const model of Object.values(modelRefs)) {
     const modelDir = join(modelCache, model.id, model.revision, "onnx");
-    assert.equal(await run("stat", ["-c", "%F", modelDir]), "directory");
+    assert.equal(await isRealDirectory(modelDir), true, "pinned model cache entry must be a real directory: " + model.id);
   }
 
   const temporaryRoot = await mkdtemp(join(tmpdir(), "codexia-p13-full-oci-"));

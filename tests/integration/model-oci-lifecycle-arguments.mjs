@@ -1,10 +1,12 @@
-import { isAbsolute, resolve } from "node:path";
+import { lstat } from "node:fs/promises";
+import { basename, isAbsolute, resolve } from "node:path";
 
 export function validateOciEngine(value) {
-  if (value !== undefined && value !== "podman") {
-    throw new Error("This model lifecycle acceptance requires Podman on PATH; set OCI_ENGINE=podman");
+  const engine = value ?? "podman";
+  if (basename(engine) !== "podman" || /[\0\r\n]/u.test(engine)) {
+    throw new Error("OCI_ENGINE must name an installed Podman executable");
   }
-  return "podman";
+  return engine;
 }
 
 export function validateModelCachePath(value, fallback) {
@@ -22,4 +24,8 @@ export function validateImageReference(value, fallback) {
     throw new Error("CODEXIA_P13_IMAGE must be a local OCI image reference");
   }
   return image;
+}
+
+export async function isRealDirectory(path) {
+  return (await lstat(path)).isDirectory();
 }
