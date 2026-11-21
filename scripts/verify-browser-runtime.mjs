@@ -6,19 +6,35 @@ import { promisify } from "node:util";
 import { resolve } from "node:path";
 import { chromium, webkit } from "@playwright/test";
 import { fileURLToPath } from "node:url";
+import { BROWSER_SHARDS, VERIFICATION_GROUPS } from "./ci-contract.mjs";
 
 const execFileAsync = promisify(execFile);
 const root = fileURLToPath(new URL("../", import.meta.url));
 process.chdir(root);
 
+// Derive browser requirements from the canonical CI task inventory.
+// The WebKit group also contains Chromium UI/auth tasks.
+const browserGroup = process.env.CODEXIA_CI_BROWSER_GROUP;
+const groupTasks = VERIFICATION_GROUPS[`browser-${browserGroup}`];
+assert.ok(Array.isArray(groupTasks) && groupTasks.length > 0, "Unknown CI browser group");
+const profile = browserGroup.split("-")[0];
+const taskPrefix = `browser-${profile}-`;
+const projectByShard = new Map(BROWSER_SHARDS.map(shard => [shard.id, shard.project]));
+const requiredProjects = new Set(groupTasks.map(task => {
+  assert.ok(task.startsWith(taskPrefix), "Browser group contains a foreign profile task");
+  const project = projectByShard.get(task.slice(taskPrefix.length));
+  assert.ok(project === "chromium" || project === "webkit", `Unknown browser project: ${task}`);
+  return project;
+}));
+assert.ok(requiredProjects.has("chromium"), "Every browser group must validate Chromium");
 const expectedImageDigest = "sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579";
 assert.equal(process.platform, "linux", "Browser verification requires the Linux Noble container");
 assert.equal(process.arch, "x64", "The pinned Playwright image digest is the Linux amd64 image");
-assert.equal(process.versions.node.split(".")[0], "24", "The browser runner must use Node 24");
+assert.equal(process.versions.node, "24.22.3", "The browser runner must use pinned Node 24.22.3");
 assert.equal(
   process.env.CODEXIA_PLAYWRIGHT_IMAGE_DIGEST,
   expectedImageDigest,
-  "The browser job must declare the pinned Playwright 1.65.1 Noble image digest",
+  "The browser job must declare the image digest matching its canonical browser group",
 );
 
 const operatingSystem = await readFile("/etc/os-release", "utf8");
@@ -44,13 +60,14 @@ async function verifyBrowser(name, browserType) {
   }
 }
 
-const chromiumVersion = await verifyBrowser("Chromium", chromium);
-const webkitVersion = await verifyBrowser("WebKit", webkit);
+const browsers = { chromium: await verifyBrowser("Chromium", chromium) };
+if (requiredProjects.has("webkit")) browsers.webkit = await verifyBrowser("WebKit", webkit);
 process.stdout.write(`PLAYWRIGHT_RUNTIME PASS ${JSON.stringify({
   os: "ubuntu-noble",
   imageDigest: expectedImageDigest,
+  group: browserGroup,
   node: process.version,
   pnpm: pnpmVersion,
   playwright: playwrightPackage.version,
-  browsers: { chromium: chromiumVersion, webkit: webkitVersion },
+  browsers,
 })}\n`);
