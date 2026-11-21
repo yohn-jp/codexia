@@ -249,6 +249,7 @@ jobs:
           CODEXIA_RUNTIME_ACCEPTANCE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           ANSIBLE_PLAYBOOK: /opt/codexia-ansible/bin/ansible-playbook
         run: |
+          set -euo pipefail
           fixture_user=codexia-runtime-contract-test
           fixture_uid=$(id -u "$fixture_user")
           fixture_home=$(getent passwd "$fixture_user" | cut -d: -f6)
@@ -262,7 +263,13 @@ jobs:
             ANSIBLE_PLAYBOOK="$ANSIBLE_PLAYBOOK" \
             CODEXIA_RUNTIME_ACCEPTANCE_SOURCE_SHA="$CODEXIA_RUNTIME_ACCEPTANCE_SOURCE_SHA" \
             PATH="$PATH" \
-            bash "$fixture_repo/deploy/updater/test-runtime-contract-integration.sh"
+            bash "$fixture_repo/deploy/updater/test-runtime-contract-integration.sh" 2>&1 |
+            awk -v evidence="$RUNNER_TEMP/codexia-runtime-phases.ndjson" '
+              { print; fflush() }
+              /^\{"phase":"rootless-runtime-timing"/ || /^\{"phase":"rootless-maintenance-timing"/ {
+                print >> evidence
+                fflush(evidence)
+              }'
       - name: Remove the disposable VM marker and user manager
         if: always() && steps.reuse.outputs.eligible != 'true'
         run: |
@@ -420,3 +427,13 @@ jobs:
             rm -f "$RUNNER_TEMP/codexia-runtime-contract.user-created"
           fi
           exit "$cleanup_failed"
+      # Only fixed phase IDs and durations are persisted; full console output,
+      # runtime arguments, environment and secrets are never archived.
+      - name: Publish rootless runtime timing evidence
+        if: always() && steps.reuse.outputs.eligible != 'true'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: rootless-runtime-timings
+          path: ${{ runner.temp }}/codexia-runtime-phases.ndjson
+          if-no-files-found: ignore
+          retention-days: 7
