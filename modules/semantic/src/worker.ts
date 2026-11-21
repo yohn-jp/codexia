@@ -440,6 +440,8 @@ async function getReranker(cacheDirectory: string): Promise<ScorePipeline> {
         const transformers = await import("@huggingface/transformers");
         transformers.env.cacheDir = path.join(path.resolve(cacheDirectory), "semantic", "models");
         transformers.env.allowLocalModels = true;
+        // Acceptance is isolated from the network: surface exact missing model artifacts.
+        if (process.env.CODEXIA_MODEL_ACCEPTANCE_DIAGNOSTICS === "1") transformers.env.allowRemoteModels = false;
         const [tokenizer, model] = await Promise.all([
           transformers.AutoTokenizer.from_pretrained(RERANKER_MODEL_ID, { revision: RERANKER_MODEL_VERSION }),
           transformers.AutoModelForSequenceClassification.from_pretrained(RERANKER_MODEL_ID, {
