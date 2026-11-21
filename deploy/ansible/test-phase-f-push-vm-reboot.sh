@@ -8,7 +8,7 @@ fail() { printf '%s\n' "$*" >&2; exit 1; }
 [[ -n "${RUNNER_TEMP:-}" && -d "$RUNNER_TEMP" && "${GITHUB_SHA:-}" =~ ^[a-f0-9]{40}$ && "${GITHUB_RUN_ID:-}" =~ ^[0-9]+$ ]] || fail 'GitHub run evidence environment is incomplete.'
 ansible_playbook=${ANSIBLE_PLAYBOOK:-}
 [[ -x "$ansible_playbook" ]] || fail 'The isolated Ansible control environment is unavailable.'
-for tool in curl cloud-localds qemu-img qemu-system-x86_64 ssh ssh-keygen ssh-keyscan timeout; do command -v "$tool" >/dev/null 2>&1 || fail "Required VM tool is unavailable: $tool"; done
+for tool in curl cloud-localds qemu-img qemu-system-x86_64 ssh scp ssh-keygen ssh-keyscan timeout; do command -v "$tool" >/dev/null 2>&1 || fail "Required VM tool is unavailable: $tool"; done
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 service_user=codexia
@@ -37,6 +37,7 @@ seed="$tmp/seed.iso"
 serial_log="$tmp/guest-serial.log"
 qemu_pidfile="$tmp/qemu.pid"
 ssh_opts=(-p "$vm_port" -i "$private_key" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o UserKnownHostsFile="$known_hosts" -o StrictHostKeyChecking=yes)
+scp_opts=(-P "$vm_port" -i "$private_key" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o UserKnownHostsFile="$known_hosts" -o StrictHostKeyChecking=yes)
 remote="$bootstrap_user@127.0.0.1"
 guest_sudo() { ssh "${ssh_opts[@]}" "$remote" 'sudo -n bash -s'; }
 cleanup() {
@@ -245,11 +246,10 @@ SQL
 SERVICE
 GUEST
 
-read_guest_state() {
-  guest_sudo <<'GUEST'
-set -Eeuo pipefail
-cd /
-sudo -H -u codexia env HOME=/home/codexia XDG_CONFIG_HOME=/home/codexia/.config XDG_DATA_HOME=/home/codexia/.local/share XDG_STATE_HOME=/home/codexia/.local/state XDG_RUNTIME_DIR=/run/user/22001 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/22001/bus bash -s <<'SERVICE'
+state_script="$tmp/read-guest-state.sh"
+state_script_guest_tmp="/tmp/phase-f-vm-reboot-state-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
+state_script_guest=/home/codexia/.local/state/phase-f-vm-reboot/read-guest-state.sh
+cat > "$state_script" <<'SERVICE'
 set -Eeuo pipefail
 cd "$HOME"
 podman exec phase-f-vm-reboot-db pg_isready -U codexia_admin -d codexia >/dev/null
@@ -263,7 +263,12 @@ running=$(podman ps --filter name=phase-f-vm-reboot-db --format '{{.Names}}')
 [[ "$running" == phase-f-vm-reboot-db ]]
 printf 'boot_id=%s\ncluster_id=%s\nmarker=%s\nvolume=%s\nimage_id=%s\n' "$(cat /proc/sys/kernel/random/boot_id)" "$cluster" "$marker" "$volume" "$image_id"
 SERVICE
-GUEST
+chmod 0600 "$state_script"
+scp "${scp_opts[@]}" "$state_script" "$remote:$state_script_guest_tmp" >/dev/null
+ssh "${ssh_opts[@]}" "$remote" "sudo -n install -o codexia -g codexia -m 0600 $state_script_guest_tmp $state_script_guest && sudo -n rm -f $state_script_guest_tmp"
+
+read_guest_state() {
+  ssh "${ssh_opts[@]}" "$remote" "sudo -n -H -u codexia env HOME=/home/codexia XDG_CONFIG_HOME=/home/codexia/.config XDG_DATA_HOME=/home/codexia/.local/share XDG_STATE_HOME=/home/codexia/.local/state XDG_RUNTIME_DIR=/run/user/22001 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/22001/bus /usr/bin/bash $state_script_guest"
 }
 
 phase=record-pre-reboot-identities
