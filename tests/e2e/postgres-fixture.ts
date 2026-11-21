@@ -13,7 +13,7 @@ export async function openProtectionDetails(page: Page): Promise<Locator> {
 }
 export async function expectDeviceDraft(page: Page): Promise<void> {
   const details = await openProtectionDetails(page);
-  await expect(details).toContainText("この端末: 回復用の下書きを保持しています");
+  await expect(details).toContainText("この端末: 現在の編集をこのブラウザーに記録しました");
 }
 export async function expectNoUnsavedDeviceChanges(page: Page): Promise<void> {
   const details = await openProtectionDetails(page);

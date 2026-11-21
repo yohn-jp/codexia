@@ -943,3 +943,51 @@ test("journal writes do not spam live save status while a server receipt remains
   await expect(details).toContainText("サーバー: PostgreSQLへの保存を確認しました");
   await expect(details.locator("summary")).toHaveText("保存済み");
 });
+
+test("save details keep the confirmed work version separate from later device input", async ({ page }) => {
+  const initial = "A。作品に保存した文。";
+  const firstAddition = "\nB。先に送信した文。";
+  const secondAddition = "\nC。その後に入力した文。";
+  const { project, scene } = await createWritingFixture(page, "mobile", undefined, initial);
+  const details = await openProtectionDetails(page);
+  const path = `/api/v1/persistence/projects/${project.id}/documents/${scene.id}`;
+  let releaseFirst!: () => void;
+  let releaseSecond!: () => void;
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve; });
+  let requests = 0;
+  await page.route((url) => url.pathname === path, async (route) => {
+    if (route.request().method() !== "PATCH") return route.continue();
+    await (++requests === 1 ? firstGate : secondGate);
+    await route.continue();
+  });
+
+  try {
+    await editor(page).click();
+    await editor(page).press("Control+End");
+    await page.keyboard.insertText(firstAddition);
+    await expectMarkdown(page, initial + firstAddition);
+    await expect.poll(() => requests).toBe(1);
+    await editor(page).press("Control+End");
+    await page.keyboard.insertText(secondAddition);
+    await expectMarkdown(page, initial + firstAddition + secondAddition);
+    await expect.poll(async () => (await readPersistenceDrafts(page))
+      .find((draft) => draft.documentId === scene.id)?.markdown).toBe(initial + firstAddition + secondAddition);
+
+    await expect(details).toContainText("現在の編集をこのブラウザーに記録しました");
+    await expect(details).toContainText("送信後の入力は今回の保存に含まれません");
+    await expect.poll(() => persistedMarkdown(page, project.id, scene.id)).toBe(initial);
+
+    releaseFirst();
+    await expect.poll(() => persistedMarkdown(page, project.id, scene.id)).toBe(initial + firstAddition);
+    await expect(details).toContainText("直前に確認した版は作品に保存されています");
+    await expect(details.locator("summary")).not.toHaveText("保存済み");
+
+    releaseSecond();
+    await expect.poll(() => persistedMarkdown(page, project.id, scene.id)).toBe(initial + firstAddition + secondAddition);
+    await expect(details.locator("summary")).toHaveText("保存済み");
+  } finally {
+    releaseFirst();
+    releaseSecond();
+  }
+});

@@ -2339,6 +2339,9 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
           </details>}
         </section>}
       </aside>);
+  const pendingSaveForDisplay = active
+    ? pendingSaveRef.current.get(JSON.stringify([active.document.projectId, active.document.id]))
+    : undefined;
   const editor = (<main className="pg-editor-column" aria-label="PostgreSQL原稿編集">
         {mode === "desktop" && pageError && <p className="pg-alert" role="alert">{pageError}</p>}
         {notice && <p className="pg-notice" role="status">{notice}</p>}
@@ -2369,8 +2372,24 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
                       : active.save === "saved" && active.recovery === "stored" ? "保存済み" : "保存状態を確認中"}
               </summary>
               <div className="pg-save-state-detail">
-                <p>この端末: {active.recovery === "stored" ? (active.dirty ? "回復用の下書きを保持しています" : "この原稿に未保存の変更はありません") : active.recovery === "pending" ? "回復記録を更新しています" : active.recovery === "other-tab" ? "別タブに下書きがあります" : "回復用の下書きを確認できません"}</p>
-                <p>サーバー: {active.save === "saved" ? "PostgreSQLへの保存を確認しました" : active.save === "saving" ? "PostgreSQLへの保存を確認しています" : active.save === "failed" ? "PostgreSQLへの保存を確認できません" : active.dirty ? "PostgreSQLへの保存待ちです" : "開いたRevisionを表示しています"}</p>
+                <p>この端末: {active.recovery === "stored"
+                  ? (active.dirty ? "現在の編集をこのブラウザーに記録しました。" : "この原稿に未保存の変更はありません")
+                  : active.recovery === "pending" ? "現在の編集をこのブラウザーに記録しています。"
+                    : active.recovery === "other-tab" ? "別タブに下書きがあります"
+                      : "現在の編集の回復記録を確認できません。画面を開いたままエラーを確認してください。"}</p>
+                <p>サーバー: {active.remoteConflict ? "作品に別の版が保存されています。原稿の比較を確認してください。"
+                  : active.dirty ? "直前に確認した版は作品に保存されています。"
+                    : active.save === "saved" ? "PostgreSQLへの保存を確認しました" : "開いた版を表示しています。"}</p>
+                <p>確認した版の保存日時 <time dateTime={active.revision.createdAt}>{new Date(active.revision.createdAt).toLocaleString()}</time></p>
+                {pendingSaveForDisplay && <p>
+                  {active.save === "failed" ? "今回の保存結果を確認できません。" : "今回の保存結果を確認しています。"}
+                  送信後の入力は今回の保存に含まれません。
+                  {active.save === "failed" && active.dirty && active.recovery === "stored" && !active.remoteConflict &&
+                    "保存を再試行すると同じ操作の結果を確かめます。"}
+                </p>}
+                {active.save === "failed" && !pendingSaveForDisplay && !active.remoteConflict &&
+                  active.recovery !== "failed" && active.recovery !== "other-tab" &&
+                  <p>現在の編集の保存を確認できません。原稿のエラーを確認してください。</p>}
               </div>
             </details>
           </div>
