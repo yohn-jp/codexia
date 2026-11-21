@@ -5,13 +5,15 @@ import { createBetterAuthRuntime, CODEXIA_OWNER_SCOPE } from "../../src/better-a
 import { migrateJwtAccessTokenRevocationSchema, pruneExpiredJwtAccessTokenRevocations } from "../../src/jwt-access-token-revocation.js";
 import { generateKeyPair, SignJWT, exportJWK } from "jose";
 import { Pool } from "pg";
-import type { CoreStore } from "@codexia/core";
+import { CoreStore } from "@codexia/core";
+import { createPostgresPersistence, migratePostgresDatabase } from "@codexia/persistence-postgres";
 import type { ApiServerOptions } from "../../src/server.js";
 
 export interface BetterAuthFixtureOptions {
   readonly databaseUrl: string;
   readonly staticDirectory?: string;
   readonly apiPort?: number;
+  readonly usePostgresPersistence?: boolean;
 }
 
 export interface BetterAuthFixture {
@@ -135,6 +137,8 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
   let idpServer: Server | undefined;
   let runtime: ReturnType<typeof createBetterAuthRuntime> | undefined;
   let bootstrapPool: Pool | undefined;
+  let domainPersistence: ApiServerOptions["persistence"] | undefined;
+  let domainStore: CoreStore | undefined;
   try {
     idpServer = createHttpServer(async (request, response) => {
       const url = new URL(request.url ?? "/", idpIssuer);
@@ -226,12 +230,18 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     await (await runtime.auth.$context).runMigrations();
     await migrateJwtAccessTokenRevocationSchema(runtime.pool);
 
-    const makeApi = (withOwner: boolean): Server => createServer({
+    if (options.usePostgresPersistence) {
+      await migratePostgresDatabase(options.databaseUrl);
+      domainPersistence = createPostgresPersistence(options.databaseUrl);
+      domainStore = new CoreStore({ persistence: domainPersistence });
+    }
+
+    const makeApi = (withOwner: boolean, withPostgresPersistence = false): Server => createServer({
       // OAuth fixture does not provision Full runtime manifests; browser coverage
       // exercises the same authentication contract in both build profiles.
       profile: "core",
-      store: coreStoreForAuthFixture(),
-      persistence: persistenceForAuthFixture(),
+      store: withPostgresPersistence ? domainStore! : coreStoreForAuthFixture(),
+      persistence: withPostgresPersistence ? domainPersistence! : persistenceForAuthFixture(),
       authToken: "codexia-test-api-token-with-32-characters",
       staticDir: options.staticDirectory ?? process.cwd(),
       usageDirectory: process.cwd(),
@@ -320,7 +330,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
 
     await close(bootstrapServer);
     bootstrapServer = undefined;
-    apiServer = makeApi(true);
+    apiServer = makeApi(true, Boolean(options.usePostgresPersistence));
     await listen(apiServer, apiPort);
 
     return {
@@ -364,6 +374,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
         if (bootstrapServer) await close(bootstrapServer);
         if (idpServer) await close(idpServer);
         if (runtime) await runtime.pool.end();
+        if (domainPersistence) await domainPersistence.close();
         if (bootstrapPool) await bootstrapPool.end();
         process.env.NODE_ENV = previousNodeEnv;
       },
@@ -373,6 +384,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     if (bootstrapServer) await close(bootstrapServer).catch(() => undefined);
     if (idpServer) await close(idpServer).catch(() => undefined);
     if (runtime) await runtime.pool.end().catch(() => undefined);
+    if (domainPersistence) await domainPersistence.close().catch(() => undefined);
     if (bootstrapPool) await bootstrapPool.end().catch(() => undefined);
     process.env.NODE_ENV = previousNodeEnv;
     throw error;
