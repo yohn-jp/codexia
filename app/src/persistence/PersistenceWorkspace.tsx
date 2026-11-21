@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type CSSProperties } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { nextOrderKey, snapshotKey } from "@codexia/contracts";
@@ -35,6 +35,7 @@ import { BrowserJournal, type PersistenceDraftTextChanges } from "../storage/jou
 import { createPostgresEditorEvidenceAdapter } from "../editor/postgresEvidenceAdapter";
 import { NativeChangeSetReview } from "./NativeChangeSetReview";
 import { RevisionDifference } from "./RevisionDifference";
+import { DocumentOutlineTree } from "./DocumentOutlineTree";
 
 interface EvidenceJump extends EvidenceRangeRequest {
   projectId: string;
@@ -288,11 +289,11 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
   const [documents, setDocuments] = useState<PersistenceDocument[]>([]);
+  const structureMutationRef = useRef(false);
   const [collapsedDocumentIds, setCollapsedDocumentIds] = useState<Set<string>>(() => new Set());
   const [outlineQuery, setOutlineQuery] = useState("");
   const [outlineZoomRoot, setOutlineZoomRoot] = useState<string | null>(null);
   const [outlineFocusedId, setOutlineFocusedId] = useState("");
-  const outlineTypeaheadRef = useRef({ value: "", at: 0 });
   const [documentId, setDocumentId] = useState("");
   const lastOutlineSelectionRef = useRef("");
   const [nodes, setNodes] = useState<KnowledgeNode[]>([]);
@@ -406,8 +407,8 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const canCreateDocument = outlineReadyProject === projectId && !!projectId && documents.length < 999;
   const documentOutline = useMemo(() => buildDocumentOutline(documents), [documents]);
   const filteredDocumentOutline = useMemo(() => filterDocumentOutline(documentOutline, outlineQuery), [documentOutline, outlineQuery]);
-  const zoomNode = outlineZoomRoot ? findOutlineNode(documentOutline, outlineZoomRoot) : null;
-  const zoomResults = zoomNode ? filterDocumentOutline([zoomNode], outlineQuery) : [];
+  const zoomNode = useMemo(() => outlineZoomRoot ? findOutlineNode(documentOutline, outlineZoomRoot) : null, [documentOutline, outlineZoomRoot]);
+  const zoomResults = useMemo(() => zoomNode ? filterDocumentOutline([zoomNode], outlineQuery) : [], [zoomNode, outlineQuery]);
   const visibleDocumentOutline = zoomNode ? zoomResults : filteredDocumentOutline;
   const outlineFocusId = findOutlineNode(visibleDocumentOutline, outlineFocusedId)?.id
     ?? findOutlineNode(visibleDocumentOutline, documentId)?.id
@@ -1664,65 +1665,78 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     return () => window.removeEventListener("popstate", onPopState);
   }, [authorScope, documentId, mode, projectId, protectTransition, publishEditor, updateRouteSelection]);
 
-  async function editStructure(update: { title?: string; parentId?: string | null; orderKey?: string }, remove = false): Promise<void> {
-    const current = activeRef.current;
-    if (!current || current.document.projectId !== projectId || !await protectTransition() || projectIdRef.current !== projectId) return;
-    const targetProjectId = current.document.projectId;
-    const targetDocumentId = current.document.id;
-    const requestEditor = activeRef.current;
-    const requestGeneration = requestEditor?.document.projectId === targetProjectId && requestEditor.document.id === targetDocumentId
-      ? requestEditor.generation
-      : current.generation;
-    let committed = false;
+  async function editStructure(
+    update: { title?: string; parentId?: string | null; orderKey?: string },
+    remove = false,
+    requestedDocumentId?: string,
+  ): Promise<void> {
+    const selectedDocument = activeRef.current?.document;
+    const targetDocumentId = requestedDocumentId ?? selectedDocument?.id;
+    const target = selectedDocument && selectedDocument.id === targetDocumentId && selectedDocument.projectId === projectId
+      ? selectedDocument
+      : documents.find((document) => document.id === targetDocumentId && document.projectId === projectId);
+    if (!target || projectIdRef.current !== projectId || structureMutationRef.current) return;
+    structureMutationRef.current = true;
     try {
-      if (remove) await api.deletePersistenceDocument(targetProjectId, targetDocumentId, current.document.version);
-      else await api.updatePersistenceDocument(targetProjectId, targetDocumentId, { ...update, expectedVersion: current.document.version });
-      committed = true;
-      if (projectIdRef.current !== targetProjectId) return;
-      const result = await api.persistenceDocuments(targetProjectId);
-      if (projectIdRef.current !== targetProjectId) return;
-      setDocuments(result.documents);
-      setOutlineReadyProject(targetProjectId);
+      if (!await protectTransition() || projectIdRef.current !== projectId) return;
+      const targetProjectId = target.projectId;
+      const requestEditor = activeRef.current;
+      const requestGeneration = requestEditor?.document.projectId === targetProjectId && requestEditor.document.id === target.id
+        ? requestEditor.generation : -1;
+      let committed = false;
       setOutlineError("");
-      if (remove) {
-        const targetStillSelected = (): boolean => {
-          const selection = selectionRef.current;
-          const activeDocument = activeRef.current?.document;
-          return projectIdRef.current === targetProjectId && selection?.projectId === targetProjectId &&
-            selection.documentId === targetDocumentId && activeDocument?.projectId === targetProjectId &&
-            activeDocument.id === targetDocumentId;
-        };
-        let mayTransition = targetStillSelected();
-        const latest = activeRef.current;
-        if (mayTransition && latest && latest.generation !== requestGeneration) {
-          if (!await protectTransition()) {
-            setOutlineError("文書は削除済みですが、現在の入力を回復Journalへ保護できないため別の文書へ移動していません。");
-            mayTransition = false;
-          } else if (projectIdRef.current !== targetProjectId) return;
-          else mayTransition = targetStillSelected();
+      try {
+        if (remove) await api.deletePersistenceDocument(targetProjectId, target.id, target.version);
+        else await api.updatePersistenceDocument(targetProjectId, target.id, { ...update, expectedVersion: target.version });
+        committed = true;
+        if (projectIdRef.current !== targetProjectId) return;
+        const result = await api.persistenceDocuments(targetProjectId);
+        if (projectIdRef.current !== targetProjectId) return;
+        setDocuments(result.documents);
+        setOutlineReadyProject(targetProjectId);
+        setOutlineError("");
+        if (remove) {
+          const targetStillSelected = (): boolean => {
+            const selection = selectionRef.current;
+            const activeDocument = activeRef.current?.document;
+            return projectIdRef.current === targetProjectId && selection?.projectId === targetProjectId &&
+              selection.documentId === target.id && activeDocument?.projectId === targetProjectId &&
+              activeDocument.id === target.id;
+          };
+          let mayTransition = targetStillSelected();
+          const latest = activeRef.current;
+          if (mayTransition && latest && latest.generation !== requestGeneration) {
+            if (!await protectTransition()) {
+              setOutlineError("文書は削除済みですが、現在の入力を回復Journalへ保護できないため別の文書へ移動していません。");
+              mayTransition = false;
+            } else if (projectIdRef.current !== targetProjectId) return;
+            else mayTransition = targetStillSelected();
+          }
+          if (mayTransition) {
+            openSequenceRef.current++;
+            publishEditor(null);
+            const nextDocumentId = result.documents[0]?.id ?? "";
+            selectionRef.current = { projectId: targetProjectId, documentId: nextDocumentId };
+            persistSelectionSafely(authorScope, selectionRef.current);
+            updateRouteSelection(nextDocumentId ? selectionRef.current : { projectId: targetProjectId, documentId: "" }, true);
+            setDocumentId(nextDocumentId);
+          }
+        } else {
+          const document = result.documents.find((item) => item.id === target.id);
+          const latest = activeRef.current;
+          if (document && latest?.document.id === target.id) publishEditor({ ...latest, document });
         }
-        if (mayTransition) {
-          openSequenceRef.current++;
-          publishEditor(null);
-          const nextDocumentId = result.documents[0]?.id ?? "";
-          selectionRef.current = { projectId: targetProjectId, documentId: nextDocumentId };
-          persistSelectionSafely(authorScope, selectionRef.current);
-          updateRouteSelection(nextDocumentId ? selectionRef.current : { projectId: targetProjectId, documentId: "" }, true);
-          setDocumentId(nextDocumentId);
-        }
-      } else {
-        const document = result.documents.find((item) => item.id === targetDocumentId);
-        const latest = activeRef.current;
-        if (document && latest?.document.id === targetDocumentId) publishEditor({ ...latest, document });
+        await refreshModules();
+      } catch (error) {
+        if (projectIdRef.current !== targetProjectId) return;
+        const message = error instanceof Error ? error.message : "構成を更新できませんでした。";
+        if (committed) {
+          setOutlineReadyProject("");
+          setOutlineError((remove ? "文書は削除済みですが、目次を再取得できませんでした。" : "構成は変更済みですが、目次を再取得できませんでした。") + message);
+        } else setPageError(message);
       }
-      await refreshModules();
-    } catch (error) {
-      if (projectIdRef.current !== targetProjectId) return;
-      const message = error instanceof Error ? error.message : "構成を更新できませんでした。";
-      if (committed) {
-        setOutlineReadyProject("");
-        setOutlineError((remove ? "文書は削除済みですが、目次を再取得できませんでした。" : "構成は変更済みですが、目次を再取得できませんでした。") + message);
-      } else setPageError(message);
+    } finally {
+      structureMutationRef.current = false;
     }
   }
 
@@ -2230,73 +2244,6 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     "--editor-font-family": editorFontFamily,
     "--reader-max-width": `${typography.maxWidth}px`,
   } as CSSProperties;
-  const handleOutlineKeyDown = (event: KeyboardEvent<HTMLUListElement>): void => {
-    if (event.nativeEvent.isComposing) return;
-    const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(".pg-outline-document")];
-    const current = event.target instanceof HTMLButtonElement && event.target.classList.contains("pg-outline-document") ? event.target : null;
-    if (!current) return;
-    const index = buttons.indexOf(current);
-    if (event.key === "Enter") { event.preventDefault(); current.click(); return; }
-    if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
-      event.preventDefault();
-      const next = event.key === "ArrowDown" ? index + 1 : event.key === "ArrowUp" ? index - 1 : event.key === "Home" ? 0 : buttons.length - 1;
-      buttons[Math.max(0, Math.min(buttons.length - 1, next))]?.focus();
-      return;
-    }
-    const item = current.closest<HTMLElement>(".pg-outline-item");
-    if (event.key === "ArrowRight" && item) {
-      event.preventDefault();
-      const toggle = item.querySelector<HTMLButtonElement>(":scope > .pg-outline-row > .pg-outline-toggle");
-      if (!toggle) return;
-      const focusChild = () => item.querySelector<HTMLButtonElement>(":scope > .pg-document-children > .pg-outline-item > .pg-outline-row > .pg-outline-document")?.focus();
-      if (toggle.getAttribute("aria-expanded") === "false") { toggle.click(); window.requestAnimationFrame(focusChild); }
-      else focusChild();
-      return;
-    }
-    if (event.key === "ArrowLeft" && item) {
-      event.preventDefault();
-      const toggle = item.querySelector<HTMLButtonElement>(":scope > .pg-outline-row > .pg-outline-toggle");
-      if (toggle?.getAttribute("aria-expanded") === "true") toggle.click();
-      else item.parentElement?.closest<HTMLElement>(".pg-outline-item")?.querySelector<HTMLButtonElement>(":scope > .pg-outline-row > .pg-outline-document")?.focus();
-      return;
-    }
-    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      const now = Date.now();
-      const typeahead = outlineTypeaheadRef.current;
-      typeahead.value = now - typeahead.at < 700 ? typeahead.value + event.key : event.key;
-      typeahead.at = now;
-      const match = buttons.find((button) => button.textContent?.trim().toLocaleLowerCase().startsWith(typeahead.value.toLocaleLowerCase()));
-      if (match) { event.preventDefault(); match.focus(); }
-    }
-  };
-  const renderOutline = (items: OutlineDocument[], forceExpanded = false): ReactNode => items.map((item) => {
-    const hasChildren = item.children.length > 0;
-    const collapsed = collapsedDocumentIds.has(item.id);
-    const expanded = forceExpanded || !collapsed;
-    return <li key={item.id} className="pg-outline-item" data-kind={item.kind} data-document-id={item.id}>
-      <div className="pg-outline-row">
-        {hasChildren ? <button type="button" className="pg-outline-toggle"
-          tabIndex={-1}
-          aria-label={expanded ? `${item.title}を折りたたむ` : `${item.title}を展開`}
-          aria-expanded={expanded}
-          onClick={() => setCollapsedDocumentIds((current) => {
-            const next = new Set(current);
-            if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
-            return next;
-          })}>{collapsed ? "›" : "⌄"}</button> : <span className="pg-outline-spacer" aria-hidden="true" />}
-        <button type="button" className={`pg-outline-document${item.id === documentId ? " is-selected" : ""}`}
-          tabIndex={item.id === outlineFocusId ? 0 : -1}
-          aria-current={item.id === documentId ? "page" : undefined}
-          onFocus={() => setOutlineFocusedId(item.id)}
-          onClick={() => void selectDocument(item.id)}>
-          <span>{item.title}</span>
-          <small>{item.misplaced ? `未配置 · ${documentKindLabel(item.kind)}` : documentKindLabel(item.kind)}</small>
-        </button>
-        {hasChildren && <button type="button" tabIndex={item.id === outlineFocusId ? 0 : -1} className="pg-outline-zoom" aria-label={`${item.title}を拡大`} onClick={() => setOutlineZoomRoot(item.id)}>拡大</button>}
-      </div>
-      {hasChildren && expanded ? <ul className="pg-document-children">{renderOutline(item.children, forceExpanded)}</ul> : null}
-    </li>;
-  });
   const library = (<aside className="pg-library" aria-label="作品と文書">
         <section>
           {(projects.length > 0 || projectId) && <label htmlFor="pg-project">作品</label>}
@@ -2362,7 +2309,27 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             {zoomAncestors.map((ancestor) => <span key={ancestor.id}><span aria-hidden="true"> › </span><button type="button" onClick={() => setOutlineZoomRoot(ancestor.id)}>{ancestor.title}</button></span>)}
             {zoomNode && <span><span aria-hidden="true"> › </span><strong>{zoomNode.title}</strong></span>}
           </nav>}
-          <ul className="pg-document-list" onKeyDown={handleOutlineKeyDown}>{renderOutline(visibleDocumentOutline, Boolean(outlineQuery || outlineZoomRoot))}</ul>
+          <DocumentOutlineTree
+            items={visibleDocumentOutline}
+            selectedId={documentId}
+            focusedId={outlineFocusId ?? ""}
+            onFocusedIdChange={setOutlineFocusedId}
+            collapsedIds={collapsedDocumentIds}
+            onCollapsedIdsChange={setCollapsedDocumentIds}
+            forceExpanded={Boolean(outlineQuery || outlineZoomRoot)}
+            busy={loading}
+            onSelect={(id) => { void selectDocument(id); }}
+            onZoom={setOutlineZoomRoot}
+            onRename={(id, title) => { void editStructure({ title }, false, id); }}
+            onMove={async (id, parentId) => {
+              const source = documents.find((item) => item.id === id && item.projectId === projectId);
+              if (!source || source.parentId === parentId) return;
+              const orderKey = nextOrderKey(documents.filter((item) =>
+                item.projectId === projectId && item.parentId === parentId && item.id !== id).map((item) => item.orderKey));
+              await editStructure({ parentId, orderKey }, false, id);
+            }}
+            kindLabel={documentKindLabel}
+          />
           {journal && active && <PersistenceLegacyDraftImport
             targetKey={JSON.stringify([authorScope, projectId, active.document.id, active.revision.id])}
             targetLabel={`${project.title} / ${active.document.title}`}

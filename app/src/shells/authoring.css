@@ -514,7 +514,7 @@
 .st-studio-shell .st-workspace-panel[data-workspace-panel="outline"] .pg-outline-item { min-width: 0; }
 .st-studio-shell .st-workspace-panel[data-workspace-panel="outline"] .pg-outline-row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
+  grid-template-columns: 24px minmax(0, 1fr) auto 28px;
   align-items: stretch;
   gap: 3px;
 }
@@ -575,6 +575,29 @@
   border-inline-start: 1px solid var(--st-folio-edge);
   list-style: none;
 }
+/* Headless Tree remains presentation-only; explicit handles keep editing and DnD separate. */
+.st-studio-shell .st-workspace-panel[data-workspace-panel="outline"] .pg-outline-drag {
+  min-inline-size: 28px;
+  padding-inline: 2px;
+  cursor: grab;
+  color: var(--muted);
+  touch-action: none;
+  user-select: none;
+}
+.st-studio-shell .st-workspace-panel[data-workspace-panel="outline"] .pg-outline-drag:active { cursor: grabbing; }
+.st-studio-shell .st-workspace-panel[data-workspace-panel="outline"] .pg-outline-rename {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 8px;
+  font: inherit;
+}
+.st-studio-shell .st-workspace-panel[data-workspace-panel="outline"] .pg-outline-item[data-drop-target="true"] > .pg-outline-row {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+
 .st-studio-shell .st-desktop-status {
   position: absolute;
   inset-inline: clamp(12px, 2vw, 28px);

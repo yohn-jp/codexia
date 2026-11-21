@@ -791,7 +791,7 @@ test("outline supports guarded keyboard navigation, search, zoom and mobile sizi
   await expect(rows.nth(1)).toBeFocused();
   await rows.nth(1).press("Home");
   await expect(rows.first()).toBeFocused();
-  const leaf = outline.getByRole("button", { name: `${nestedScene.title} シーン` });
+  const leaf = outline.getByRole("treeitem", { name: `${nestedScene.title} シーン` });
   await leaf.focus();
   await leaf.press("ArrowRight");
   await expect(leaf).toBeFocused();
@@ -813,6 +813,45 @@ test("outline supports guarded keyboard navigation, search, zoom and mobile sizi
   await expect(page.locator(".pg-outline-document").first()).toBeVisible();
   await page.evaluate(() => { document.body.style.zoom = "200%"; });
   await expect(page.locator(".pg-outline-document").first()).toBeVisible();
+});
+
+test("Headless Tree reparent drag moves an unselected document through the canonical API", async ({ page }) => {
+  expect(databaseUrl).toBeTruthy();
+  const { project, scene, second } = await createWritingFixture(page, "desktop", `Headless DnD ${crypto.randomUUID()}`);
+  const outline = page.locator('[data-workspace-panel="outline"]');
+  const source = outline.locator(`.pg-outline-item[data-document-id="${second.id}"] > .pg-outline-row > .pg-outline-drag`);
+  const target = outline.locator(`.pg-outline-item[data-document-id="${scene.id}"] > .pg-outline-row > .pg-outline-document`);
+  await expect(source).toBeVisible();
+  await source.dragTo(target);
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${second.id}`);
+    return response.ok() ? ((await response.json()) as { document: { parentId: string | null } }).document.parentId : null;
+  }).toBe(scene.id);
+  await expect(outline.locator(`.pg-outline-item[data-document-id="${scene.id}"] .pg-outline-item[data-document-id="${second.id}"]`)).toBeVisible();
+  await expect(target).toHaveAttribute("aria-current", "page");
+});
+
+test("Headless Tree renames an unselected document without replacing the active manuscript", async ({ page }) => {
+  expect(databaseUrl).toBeTruthy();
+  const { project, scene, second } = await createWritingFixture(page, "desktop", `Headless rename ${crypto.randomUUID()}`);
+  const outline = page.locator('[data-workspace-panel="outline"]');
+  await expect(outline.getByRole("tree", { name: "作品の構成" })).toBeVisible();
+  const row = outline.locator(`.pg-outline-item[data-document-id="${second.id}"] > .pg-outline-row`);
+  const item = row.getByRole("treeitem", { name: new RegExp(second.title, "u") });
+  await item.focus();
+  await item.press("F2");
+  const editor = row.getByRole("textbox", { name: `${second.title}の名前を変更` });
+  await expect(editor).toBeVisible();
+  const title = "アウトライン名称変更";
+  await editor.fill(title);
+  await editor.press("Enter");
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/v1/persistence/projects/${project.id}/documents/${second.id}`);
+    return response.ok() ? ((await response.json()) as { document: { title: string } }).document.title : "";
+  }).toBe(title);
+  await expect(row.getByRole("treeitem", { name: new RegExp(title, "u") })).toBeVisible();
+  await expect(page.getByRole("heading", { name: scene.title, exact: true })).toBeVisible();
+  await expect(outline.locator(`.pg-outline-item[data-document-id="${scene.id}"] .pg-outline-document`)).toHaveAttribute("aria-current", "page");
 });
 
 async function moveEditorIntoDesktopStack(page: Page): Promise<void> {
@@ -1478,7 +1517,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await otherPage.goto("/desktop/?store=postgres");
   await expect(otherPage.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await otherPage.getByLabel("作品", { exact: true }).selectOption({ label: projectTitle });
-  const otherDocument = otherPage.locator(".pg-document-list").getByRole("button", { name: new RegExp(documentTitle, "u") });
+  const otherDocument = otherPage.locator(".pg-document-list").getByRole("treeitem", { name: new RegExp(documentTitle, "u") });
   await expect(otherDocument).toBeVisible();
   await otherDocument.click();
   const otherEditor = otherPage.getByRole("textbox", { name: "本文", exact: true });
@@ -1509,8 +1548,8 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await otherPage.reload();
   await expect(otherPage.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await otherPage.getByLabel("作品", { exact: true }).selectOption({ label: projectTitle });
-  await expect(otherPage.locator(".pg-document-list").getByRole("button", { name: new RegExp(documentTitle, "u") })).toBeVisible();
-  await otherPage.locator(".pg-document-list").getByRole("button", { name: new RegExp(documentTitle, "u") }).click();
+  await expect(otherPage.locator(".pg-document-list").getByRole("treeitem", { name: new RegExp(documentTitle, "u") })).toBeVisible();
+  await otherPage.locator(".pg-document-list").getByRole("treeitem", { name: new RegExp(documentTitle, "u") }).click();
   const recoveredEditor = otherPage.getByRole("textbox", { name: "本文", exact: true });
   await expect(recoveredEditor).toContainText(interruptedDraft);
   await expectServerSaved(otherPage);
