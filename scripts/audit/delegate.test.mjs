@@ -53,7 +53,7 @@ if(a[1]==='preview'){
     writeFileSync(join(folder, 'manifest.json'), JSON.stringify({ sourceSha: sha, files: [{ path: 'src/alpha.ts' }] }));
   }
   writeFileSync(join(site, 'manifest.json'), JSON.stringify({ branches: [{ branch: 'feature', sha: feature }, { branch: 'main', sha: main }],
-    snapshots: { [feature]: { status: 'ready' }, [main]: { status: 'ready' } } }));
+    snapshots: { [feature]: { status: 'ready', outputs: [{ name: 'repomix.json', bytes: 1 }] }, [main]: { status: 'ready', outputs: [{ name: 'repomix.json', bytes: 1 }] } } }));
   return { base, root, site, bin, ancestor, feature, main };
 }
 
