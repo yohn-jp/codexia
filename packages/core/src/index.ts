@@ -653,8 +653,16 @@ export class CoreStore implements MutationCoordinator {
         if (!volume && !chapter && !scene) fail(422, "invalid_hierarchy_metadata", "Unknown hierarchy metadata path");
         const volumeId = chapter?.[1] ?? scene?.[1];
         const chapterId = scene?.[2];
-        const volumeDocument = volumeId ? logicalDocuments.get(volumeId) : undefined;
-        const chapterDocument = chapterId ? logicalDocuments.get(chapterId) : undefined;
+        const documentAtPath = (path: string) => {
+          const documentId = paths.get(path);
+          return documentId ? documents.find((document) => document.id === documentId) : undefined;
+        };
+        const volumeDocument = volumeId
+          ? logicalDocuments.get(volumeId) ?? documentAtPath(`plot/volumes/${volumeId}/volume.yaml`)
+          : undefined;
+        const chapterDocument = chapterId
+          ? logicalDocuments.get(chapterId) ?? documentAtPath(`plot/volumes/${scene![1]}/chapters/${chapterId}/chapter.yaml`)
+          : undefined;
         if (write.content === null) {
           if (existing) {
             await tx.deleteDocument({ projectId, documentId: existing.id, expectedVersion: existing.version });
