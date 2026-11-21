@@ -541,6 +541,39 @@ test("mobile reference sheet has a named dialog and excludes the background from
   await expect(inspectorTrigger).toBeFocused();
 });
 
+test("mobile Knowledge write failures stay visible in the global status after leaving the editor", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const { project } = await createWritingFixture(page, "mobile");
+  const failure = "Knowledge候補を保存できませんでした。";
+  await page.route(`**/api/v1/persistence/projects/${project.id}/nodes/*`, async (route) => {
+    if (route.request().method() === "PUT") {
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: failure }) });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.getByRole("button", { name: "知識・保存", exact: true }).click();
+  const sheet = page.locator("ion-modal.mobile-shell-reference-modal");
+  await expect(page.getByRole("dialog", { name: "原稿の参照", exact: true })).toBeVisible();
+  await sheet.locator(".pg-knowledge-tools > summary").click();
+  await sheet.getByLabel("Knowledge候補を追加").fill("失敗する候補");
+  await sheet.getByRole("button", { name: "候補を保存", exact: true }).click();
+  const status = sheet.getByRole("region", { name: "保存と回復の状態" });
+  await expect(status.getByRole("alert")).toHaveText(failure);
+  await expect(status.getByRole("alert")).toBeVisible();
+  await expect(status).toHaveCSS("position", "static");
+
+  await sheet.getByRole("button", { name: "閉じる", exact: true }).click();
+  await expect(sheet).toBeHidden();
+  await page.getByRole("button", { name: "設定を開く", exact: true }).click();
+  const globalStatus = page.locator(".mobile-shell-status").first();
+  await expect(globalStatus.getByRole("alert")).toHaveText(failure);
+  await expect(globalStatus.getByRole("alert")).toBeVisible();
+  await expect(page.locator(".pg-editor-column")).toBeHidden();
+  await expect(page.getByRole("alert")).toHaveCount(1);
+});
+
 test("desktop mode switch stays visible and operable at 320 CSS pixels", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 844 });
   const title = "320pxでも切れずに参照できる長い作品名".repeat(4);

@@ -538,10 +538,10 @@ export function MobileShell({ header, documentTitle, documentContext, library, e
 
         <IonFooter className="mobile-shell-footer">
           <div className="mobile-shell-status" role="region" aria-label="保存と回復の状態">
-            {renderStatus ? renderStatus(switchError) : <>
+            {!referenceSheet && (renderStatus ? renderStatus(switchError) : <>
               {switchError && <p className="mobile-shell-switch-error" role="alert">{switchError}</p>}
               {status}
-            </>}
+            </>)}
           </div>
           {activeView === "writing" ? (
             <div className="mobile-shell-writing-accessories" aria-label="執筆中の参照">
@@ -628,6 +628,9 @@ export function MobileShell({ header, documentTitle, documentContext, library, e
             role="tabpanel"
             aria-labelledby={referenceSheet ? "mobile-reference-tab-" + referenceSheet : undefined}
             data-mobile-reference-panel={referenceSheet ?? undefined}>
+            {referenceSheet && <div className="mobile-shell-status" role="region" aria-label="保存と回復の状態">
+              {renderStatus ? renderStatus(switchError) : status}
+            </div>}
             {referencePanel?.render() ?? <p>この情報は現在利用できません。</p>}
           </div>
           <p className="mobile-shell-reference-hint">上のハンドルを上下に動かすと、参照領域を広げたり閉じたりできます。</p>

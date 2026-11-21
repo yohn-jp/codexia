@@ -603,6 +603,17 @@
 .mobile-shell .mobile-shell-reference-top { padding: max(12px, env(safe-area-inset-top, 0px)) 16px 8px; }
 .mobile-shell .mobile-shell-reference-switch button { min-height: 44px; }
 .mobile-shell .mobile-shell-reference-pane { padding: 12px 16px max(24px, env(safe-area-inset-bottom, 0px)); }
+.mobile-shell .mobile-shell-reference-pane > .mobile-shell-status {
+  position: static;
+  inset: auto;
+  z-index: auto;
+  width: auto;
+  height: auto;
+  max-height: none;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  overflow: visible;
+}
 .mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-document-list,
 .mobile-shell .mobile-shell-reference-pane .pg-document-list {
   display: grid;

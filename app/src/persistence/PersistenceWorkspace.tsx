@@ -2091,7 +2091,6 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         </section>}
       </aside>);
   const editor = (<main className="pg-editor-column" aria-label="PostgreSQL原稿編集">
-        {pageError && <p className="pg-alert" role="alert">{pageError}</p>}
         {notice && <p className="pg-notice" role="status">{notice}</p>}
         {journalError && <p className="pg-alert" role="alert">{journalError}</p>}
         {!project && <section className="pg-empty">
@@ -2341,7 +2340,10 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       documentTitle={active?.document.title}
       documentContext={project?.title}
       library={library} editor={editor} tools={knowledge}
-      status={loading ? <p role="status">PostgreSQLの状態を読み込んでいます。</p> : null}
+      status={<>
+        {loading && <p role="status">PostgreSQLの状態を読み込んでいます。</p>}
+        {pageError && <p className="pg-alert" role="alert">{pageError}</p>}
+      </>}
       workspaceScope={`postgres:${authorScope}`}
       panels={panels}
       requestedPanel={requestedPanel}
