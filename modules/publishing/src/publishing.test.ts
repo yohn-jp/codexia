@@ -624,6 +624,25 @@ test("project-wide public shares include root scenes in their catalogue and scen
   assert.deepEqual(scopedCatalogue.rootScenes, [{ id: "root-scene", title: "作品直下のシーン" }]);
 });
 
+test("public share refuses a root scene that collides with an existing chapter scene ID", async () => {
+  const files = fixtureFiles();
+  files.set("plot/volumes/root/chapters/root/scenes/duplicate.yaml",
+    "kind: scene\\nid: sc-1\\ntitle: Conflicting root\\nmanuscript: documents/conflict.md\\n".replaceAll("\\n", "\n"));
+  files.set("documents/conflict.md", "A distinct manuscript must not be exposed.\n");
+  const token = "share_" + "d".repeat(43);
+  files.set(SHARE_GRANTS_PATH, JSON.stringify({
+    version: 1, grantVersion: 1, revocationVersion: 0, id: "conflict-share",
+    tokenHash: hashShareToken(token), scope: { kind: "scene", id: "sc-1" }, label: "Collision",
+    createdAt: "2026-01-01T00:00:00.000Z", expiresAt: "2030-01-01T00:00:00.000Z",
+  }) + "\n");
+  const reader = new MemoryReader(files);
+  const [publicBase, publicScene] = createPublishingHttpContributions();
+  const context = actionContext(reader, []);
+  const url = `https://codexia.invalid/share/${token}`;
+  assert.equal((await publicBase!.handle(new Request(url), context)).status, 404);
+  assert.equal((await publicScene!.handle(new Request(`${url}/scenes/sc-1`), context)).status, 404);
+});
+
 test("publishing migration hook validates the exact-byte episode map and selected hashed share records without duplicate writes", async () => {
   const map = "episodes:\n  - id: ep-old\n    number: 3\n    title: 古い話\n    publishedAt: 2024-02-03\n    scope: chapter\n    scopeId: ch-1\n    legacyNote: keep-me\n";
   const workspace = JSON.stringify([
