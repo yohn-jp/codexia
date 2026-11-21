@@ -1,17 +1,23 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { validateWebBundle } from "./validate-web-bundle.mjs";
 
-async function fixture(html) {
+async function fixture(html, bundle = "void 0;") {
   const directory = await mkdtemp(path.join(os.tmpdir(), "codexia-ios-web-"));
   await mkdir(path.join(directory, "assets"));
-  await writeFile(path.join(directory, "assets", "app.js"), "void 0;");
+  await writeFile(path.join(directory, "assets", "app.js"), bundle);
   await writeFile(path.join(directory, "index.html"), html);
   return directory;
 }
+
+const nativeEnvironment = {
+  VITE_CODEXIA_API_ORIGIN: "https://api.example.test",
+  VITE_CODEXIA_OAUTH_IOS_CLIENT_ID: "codexia-ios-test-public",
+  VITE_CODEXIA_API_AUDIENCE: "https://api.example.test/api",
+};
 
 test("accepts a self-contained relative asset bundle", async () => {
   const directory = await fixture('<!doctype html><script type="module" src="./assets/app.js"></script>');
@@ -86,4 +92,81 @@ test("rejects remote production server configuration in the document", async () 
   const directory = await fixture('<!doctype html><script src="./assets/app.js"></script><meta content="https://example.test">');
   try { await assert.rejects(validateWebBundle(directory), /remote server URL/u); }
   finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("native bundle validation requires its bridge and embedded public iOS configuration", async () => {
+  const directory = await fixture(
+    '<!doctype html><script type="module" src="./assets/app.js"></script>',
+    ["mobile-shell", "CodexiaAuth", "https://api.example.test/", "codexia-ios-test-public", "https://api.example.test/api"].join(" "),
+  );
+  try {
+    await validateWebBundle(directory, { mode: "native", env: nativeEnvironment });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("native bundle validation rejects a browser Mobile entry even when public config is present", async () => {
+  const directory = await fixture(
+    '<!doctype html><script type="module" src="./assets/app.js"></script>',
+    ["mobile-shell", "https://api.example.test/", "codexia-ios-test-public", "https://api.example.test/api"].join(" "),
+  );
+  try {
+    await assert.rejects(validateWebBundle(directory, { mode: "native", env: nativeEnvironment }), /native API bridge/u);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("native bundle validation rejects missing public distribution configuration", async () => {
+  const directory = await fixture(
+    '<!doctype html><script type="module" src="./assets/app.js"></script>',
+    "mobile-shell CodexiaAuth https://api.example.test/ codexia-ios-test-public https://api.example.test/api",
+  );
+  try {
+    await assert.rejects(
+      validateWebBundle(directory, { mode: "native", env: { VITE_CODEXIA_API_ORIGIN: nativeEnvironment.VITE_CODEXIA_API_ORIGIN } }),
+      /iOS public client ID is not configured/u,
+    );
+    await assert.rejects(
+      validateWebBundle(directory, { mode: "native", env: { VITE_CODEXIA_OAUTH_IOS_CLIENT_ID: nativeEnvironment.VITE_CODEXIA_OAUTH_IOS_CLIENT_ID } }),
+      /API origin is not configured/u,
+    );
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("browser Mobile bundle validation rejects the native API bridge", async () => {
+  const directory = await fixture(
+    '<!doctype html><script type="module" src="./assets/app.js"></script>',
+    "mobile-shell CodexiaAuth browser bundle",
+  );
+  try {
+    await assert.rejects(validateWebBundle(directory, { mode: "web" }), /unexpected native API bridge/u);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("browser Mobile validation resolves assets under its /mobile/ Vite base path", async () => {
+  const directory = await fixture('<!doctype html><script type="module" src="/mobile/assets/app.js"></script>', "mobile-shell browser bundle");
+  try {
+    await validateWebBundle(directory, { mode: "web" });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("native bundle validation rejects public settings omitted from the compiled JavaScript", async () => {
+  const directory = await fixture(
+    '<!doctype html><script type="module" src="./assets/app.js"></script>',
+    "mobile-shell CodexiaAuth https://api.example.test/ codexia-ios-test-public",
+  );
+  try {
+    await assert.rejects(
+      validateWebBundle(directory, { mode: "native", env: nativeEnvironment }),
+      /missing configured API audience/u,
+    );
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("Mobile entry config changes run Core and Full artifact validation in pull request CI", async () => {
+  const workflow = await readFile(new URL("../../.github/workflows/ios-unsigned-ipa.yml", import.meta.url), "utf8");
+  assert.match(workflow, /^      - app\/vite\.config\.ts$/mu);
+  assert.match(workflow, /^      - app\/vite\.native\.config\.ts$/mu);
+  assert.match(workflow, /^      - app\/src\/entries\/mobile\.tsx$/mu);
+  assert.match(workflow, /fromJSON\('\["core","full"\]'\)/u);
+  assert.match(workflow, /validate-web-bundle\.mjs app\/dist\/mobile web/u);
+  assert.match(workflow, /validate-web-bundle\.mjs app\/dist\/ios-web native/u);
 });

@@ -5,6 +5,9 @@ on:
     paths:
       - .github/workflows/ios-unsigned-ipa.yml
       - app/native/**
+      - app/vite.config.ts
+      - app/vite.native.config.ts
+      - app/src/entries/mobile.tsx
       - scripts/ios/**
       - app/src/entries/mobile-native.tsx
       - app/src/oauth.ts
@@ -21,6 +24,18 @@ on:
           - core
           - full
         default: core
+      api_origin:
+        description: Explicit HTTPS API origin for this native bundle. Public configuration only; no credentials or path.
+        required: true
+        type: string
+      ios_client_id:
+        description: Registered public iOS OAuth client ID. Do not enter a client secret.
+        required: true
+        type: string
+      api_audience:
+        description: Optional HTTPS API audience; defaults to the API origin plus /api.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -31,9 +46,13 @@ concurrency:
 
 jobs:
   build:
-    name: Build unsigned iOS IPA
+    name: Build unsigned iOS IPA (${{ matrix.profile }})
     runs-on: xcode-27
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', inputs.profile)) || fromJSON('["core","full"]') }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -56,18 +75,46 @@ jobs:
       - name: Install isolated Capacitor toolchain
         working-directory: app/native
         run: npm ci
-      - name: Build the selected browser profile and native Mobile bundle
+      - name: Build the selected browser profile
         env:
-          CODEXIA_PROFILE: ${{ inputs.profile || 'core' }}
+          CODEXIA_PROFILE: ${{ matrix.profile }}
         run: |
           node scripts/ci-workspace.mjs build-workspace
           node scripts/profile-build.mjs --profile "$CODEXIA_PROFILE"
           pnpm --filter @codexia/app build
-          CODEXIA_UI=mobile pnpm --filter @codexia/app exec vite build --config vite.native.config.ts
-      - name: Validate native web bundle
+
+      - name: Build native Mobile bundle
+        env:
+          CODEXIA_PROFILE: ${{ matrix.profile }}
+          CODEXIA_UI: mobile
+          VITE_CODEXIA_API_ORIGIN: ${{ inputs.api_origin }}
+          VITE_CODEXIA_OAUTH_IOS_CLIENT_ID: ${{ inputs.ios_client_id }}
+          VITE_CODEXIA_API_AUDIENCE: ${{ inputs.api_audience }}
         run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ -z "$VITE_CODEXIA_API_ORIGIN" ]; then echo "A public HTTPS API origin is required for distribution." >&2; exit 1; fi
+            if [ -z "$VITE_CODEXIA_OAUTH_IOS_CLIENT_ID" ]; then echo "A registered public iOS client ID is required for distribution." >&2; exit 1; fi
+          else
+            export VITE_CODEXIA_API_ORIGIN=https://api.example.test
+            export VITE_CODEXIA_OAUTH_IOS_CLIENT_ID=codexia-ios-build-test-public
+            export VITE_CODEXIA_API_AUDIENCE=https://api.example.test/api
+          fi
+          CODEXIA_UI=mobile pnpm --filter @codexia/app exec vite build --config vite.native.config.ts
+
+      - name: Validate Mobile Web and native web bundles
+        env:
+          VITE_CODEXIA_API_ORIGIN: ${{ inputs.api_origin }}
+          VITE_CODEXIA_OAUTH_IOS_CLIENT_ID: ${{ inputs.ios_client_id }}
+          VITE_CODEXIA_API_AUDIENCE: ${{ inputs.api_audience }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then
+            export VITE_CODEXIA_API_ORIGIN=https://api.example.test
+            export VITE_CODEXIA_OAUTH_IOS_CLIENT_ID=codexia-ios-build-test-public
+            export VITE_CODEXIA_API_AUDIENCE=https://api.example.test/api
+          fi
           node --test scripts/ios/*.test.mjs
-          node scripts/ios/validate-web-bundle.mjs app/dist/ios-web
+          node scripts/ios/validate-web-bundle.mjs app/dist/mobile web
+          node scripts/ios/validate-web-bundle.mjs app/dist/ios-web native
       - name: Generate bundled iOS project
         working-directory: app/native
         run: |
@@ -91,7 +138,7 @@ jobs:
           build
       - name: Package and validate unsigned IPA
         env:
-          CODEXIA_PROFILE: ${{ inputs.profile || 'core' }}
+          CODEXIA_PROFILE: ${{ matrix.profile }}
         run: |
           node scripts/ios/package-unsigned-ipa.mjs \
             --app app/native/build/DerivedData/Build/Products/Release-iphoneos/App.app \
@@ -100,7 +147,7 @@ jobs:
             --profile "$CODEXIA_PROFILE"
       - uses: actions/upload-artifact@v7.0.2
         with:
-          name: codexia-ios-unsigned-${{ github.event.pull_request.head.sha || github.sha }}
+          name: codexia-ios-unsigned-${{ matrix.profile }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/codexia-ios-artifact/
           if-no-files-found: error
           retention-days: 7
