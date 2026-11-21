@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -10,6 +11,12 @@ test('Phase F VM fixture requires a real guest reboot and durable PostgreSQL evi
   const workflow = await readFile(path.join(root, '.github/workflows/phase-f-push-vm-reboot.yml'), 'utf8');
   const fixture = await readFile(path.join(root, 'deploy/ansible/test-phase-f-push-vm-reboot.sh'), 'utf8');
   const doc = await readFile(path.join(root, 'docs/deployment/PHASE-F-PUSH-VM-REBOOT-CI.md'), 'utf8');
+  const inventoryBuilder = fixture.match(/python3 - "\$inventory" "\$private_key" "\$known_hosts" <<'PY'\n([\s\S]*?)\nPY/u)?.[1];
+  assert.ok(inventoryBuilder, 'Missing guest inventory builder');
+  const inventorySyntax = spawnSync('python3', ['-c', 'import sys; compile(sys.stdin.read(), "<guest-inventory>", "exec")'], {
+    input: inventoryBuilder, encoding: 'utf8',
+  });
+  assert.equal(inventorySyntax.status, 0, inventorySyntax.stderr);
 
   assert.match(workflow, /^on:\n  workflow_dispatch:\n  pull_request:/mu);
   assert.doesNotMatch(workflow, /^  (?:push|schedule|workflow_run):/mu);

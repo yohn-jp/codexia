@@ -138,13 +138,20 @@ inventory="$tmp/guest-inventory.json"
 python3 - "$inventory" "$private_key" "$known_hosts" <<'PY'
 import json, sys
 path, key_file, known_hosts = sys.argv[1:]
-inventory = {"all":{"children":{"codexia":{"hosts":{"phase-f-guest":{
-  "ansible_host":"127.0.0.1", "ansible_port":2222, "ansible_user":"codexia-bootstrap", "ansible_connection":"ssh",
-  "ansible_become":True, "ansible_python_interpreter":"/usr/bin/python3", "ansible_ssh_private_key_file":key_file,
-  "ansible_ssh_common_args":f"-o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile={known_hosts}"
-}},"vars":{"codexia_stage":"host","codexia_host_approved":True,"codexia_create_service_account":True,
-  "codexia_service_user":"codexia","codexia_service_group":"codexia","codexia_service_uid":22001,
-  "codexia_service_gid":22001,"codexia_service_home":"/home/codexia"}}}}}}
+host = {
+    "ansible_host": "127.0.0.1", "ansible_port": 2222,
+    "ansible_user": "codexia-bootstrap", "ansible_connection": "ssh",
+    "ansible_become": True, "ansible_python_interpreter": "/usr/bin/python3",
+    "ansible_ssh_private_key_file": key_file,
+    "ansible_ssh_common_args": f"-o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile={known_hosts}",
+}
+group_vars = {
+    "codexia_stage": "host", "codexia_host_approved": True,
+    "codexia_create_service_account": True, "codexia_service_user": "codexia",
+    "codexia_service_group": "codexia", "codexia_service_uid": 22001,
+    "codexia_service_gid": 22001, "codexia_service_home": "/home/codexia",
+}
+inventory = {"all": {"children": {"codexia": {"hosts": {"phase-f-guest": host}, "vars": group_vars}}}}
 with open(path,"w",encoding="utf-8") as output: json.dump(inventory,output)
 PY
 if [[ -n "${CODEXIA_HOST_CONVERGENCE:-}" ]]; then
