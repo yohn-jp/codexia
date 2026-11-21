@@ -1,6 +1,6 @@
 # iOS client and personal-device distribution
 
-> **Accepted design target; iOS packaging, unsigned IPA delivery, login, installation and on-device acceptance are not implemented or verified by this document.**
+> **Accepted architecture with native client and unsigned IPA CI under development. The Xcode 27 build, signed installation and physical-device acceptance require independent execution evidence.**
 > Authentication and resource permissions are defined by [API authentication and authorization](../architecture/API-AUTHN-AUTHZ.md). Presentation remains governed by the [Design and UX contract](../design/UX-CONTRACT.md), [Mobile interactions](../architecture/MOBILE-INTERACTION-UX.md) and [Core architecture](../architecture/CORE.md).
 
 ## Purpose and non-goals
@@ -27,7 +27,7 @@ The browser and native clients use separate public clients of Codexia's embedded
 
 ## Client implementation
 
-- **Capacitor** is the first-choice native shell; use existing React, Ionic React, CodeMirror and `app/src/entries/mobile.tsx` instead of recreating the editor in SwiftUI or introducing a second authoring coordinator. Keep the browser Mobile build operational.
+- **React 19 + Ionic React 9 + Capacitor 8** remain the client stack. Swift/SwiftUI is not a second authoring UI; native Swift is reserved for narrowly required bridges (system authentication, Keychain and OS APIs). **Capacitor** is the first-choice native shell; use existing React, Ionic React, CodeMirror and `app/src/entries/mobile.tsx` instead of recreating the editor in SwiftUI or introducing a second authoring coordinator. Keep the browser Mobile build operational.
 - Bundle a dedicated production Mobile Vite build as Capacitor `webDir`; do not load the live Web UI through Capacitor `server.url` in a production package. Its existing `/mobile/` Vite asset base and `BrowserRouter` expect an HTTP path and must be adapted for the bundled `capacitor://localhost`/local WebView origin without changing browser deployment semantics. Resolve deep links, asset loading, refresh/navigation and CSP under WKWebView.
 - Configure the API endpoint as a **nonsecret** build/deployment setting, constrained to an HTTPS allowlist. No `CODEXIA_AUTH_TOKEN`, client secret, Cloudflare service token or author JWT is ever placed in the app, JavaScript assets, logs or GitHub build artifacts.
 - Register a separate iOS public client with Codexia's Better Auth OAuth Provider; use the platform system authentication session, provider metadata discovery, OAuth Authorization Code + PKCE (S256), an exact app redirect, state/nonce handling, cancellation, reauthentication, and token expiry. Better Auth performs upstream OIDC federation and issues the Codexia API access token. Send only that access token to API routes; never send the upstream ID token as an API bearer.
@@ -37,7 +37,7 @@ The browser and native clients use separate public clients of Codexia's embedded
 
 ## Build and delivery
 
-Build the native iOS project on an ephemeral **GitHub Actions macOS runner** with a pinned supported Xcode toolchain; use existing pinned pnpm and profile/build inputs. Keep the iOS packaging job isolated from ordinary frontend, backend and PR verification. Trigger it explicitly (`workflow_dispatch`) or from an intentional app release; do not run macOS packaging for every main push or unrelated pull request. Preserve source identity and the frontend/API compatibility contract.
+The minimum supported iOS deployment target is **iOS 27.0** (independent of the Web/PWA), with **GitHub Actions `xcode-27` ARM64** as the iOS packaging runner. Require Xcode major 27 and the iOS 27 SDK at build time, explicitly set `IPHONEOS_DEPLOYMENT_TARGET=27.0`, and reject IPA artifacts with another minimum OS. Build the native iOS project on an ephemeral **GitHub Actions macOS runner** with the selected Xcode 27 toolchain; use existing pinned pnpm and profile/build inputs. Keep iOS packaging separate from ordinary frontend and backend verification; the existing workflow runs for iOS-related PR changes and manual dispatch, not every PR or main push. Preserve source identity and the frontend/API compatibility contract.
 
 Package the unsigned `.app` into an **unsigned, structurally valid IPA** (including `Payload/<AppName>.app` and required metadata). Validate Xcode build exit status, bundle ID, supported architectures, entitlements, IPA archive structure and asset inclusion. The repository/CI must never store Apple Account credentials, development signing identities or personal provisioning profiles. Publish only the nonsecret unsigned artifact to a restricted-retention Actions artifact; distribution/public GitHub Releases are not assumed necessary.
 

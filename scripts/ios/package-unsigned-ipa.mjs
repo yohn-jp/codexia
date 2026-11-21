@@ -46,6 +46,8 @@ async function main() {
   const infoPlist = path.join(app, "Info.plist");
   const bundleId = run("/usr/libexec/PlistBuddy", ["-c", "Print :CFBundleIdentifier", infoPlist]);
   if (bundleId !== "jp.yohn.codexia") throw new Error(`Unexpected bundle identifier: ${bundleId}`);
+  const minimumOSVersion = run("/usr/libexec/PlistBuddy", ["-c", "Print :MinimumOSVersion", infoPlist]);
+  if (minimumOSVersion !== "27.0") throw new Error(`Expected minimum iOS 27.0, got ${minimumOSVersion}`);
   if (await exists(path.join(app, "embedded.mobileprovision"))) throw new Error("Unsigned artifact must not contain a provisioning profile");
   if (await exists(path.join(app, "_CodeSignature"))) throw new Error("Unsigned artifact must not contain an app code signature");
   const executable = run("/usr/libexec/PlistBuddy", ["-c", "Print :CFBundleExecutable", infoPlist]);
@@ -67,6 +69,7 @@ async function main() {
   if (entries.some((entry) => entry.endsWith("embedded.mobileprovision"))) throw new Error("IPA archive contains a provisioning profile");
 
   const xcode = run("/usr/bin/xcodebuild", ["-version"]).replace(/\n/gu, " ");
+  if (!/^Xcode 27\./u.test(xcode)) throw new Error(`Expected Xcode 27 toolchain: ${xcode}`);
   const nativeLock = JSON.parse(await readFile(new URL("../../app/native/package-lock.json", import.meta.url), "utf8"));
   const rootPackage = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));
   const capacitorIos = nativeLock.packages["node_modules/@capacitor/ios"].version;
@@ -76,6 +79,7 @@ async function main() {
     format: "codexia-unsigned-ios-ipa/v1",
     sourceSha,
     bundleId,
+    minimumOSVersion,
     appName,
     profile,
     architectures,
