@@ -203,6 +203,175 @@ function delay(milliseconds) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 }
 
+test("direct-root Story scenes keep PostgreSQL positions and context through Actions and MCP", {
+  timeout: 120_000,
+}, async (t) => {
+  const rootDir = await mkdtemp(resolve(tmpdir(), "codexia-story-root-scene-pg-"));
+  const persistence = createPostgresPersistence(DATABASE_URL);
+  let host;
+  let stdio;
+  let http;
+  t.after(async () => {
+    await closeMcpClient(http, true);
+    await closeMcpClient(stdio);
+    await host?.close().catch(() => undefined);
+    await persistence.close();
+    await rm(rootDir, { recursive: true, force: true });
+  });
+
+  host = await startAdmissionHost({ cacheDirectory: resolve(rootDir, "module-cache"), usageDirectory: resolve(rootDir, "host-history") });
+  const cookie = await login(host);
+  const directProject = await ownerJson(host, cookie, "/api/v1/persistence/projects", {
+    method: "POST", status: 201, body: { title: `Root scene only ${randomUUID()}` },
+  });
+  const mixedProject = await ownerJson(host, cookie, "/api/v1/persistence/projects", {
+    method: "POST", status: 201, body: { title: `Mixed root and volume scenes ${randomUUID()}` },
+  });
+  const makeScene = async (transaction, projectId, { parentId = null, id = randomUUID(), title, orderKey, markdown, stateEvents = [] }) => {
+    await transaction.createDocument({
+      projectId, documentId: id, ...(parentId ? { parentId } : {}), kind: "scene", title,
+      orderKey, markdown, authorId: "story-root-scene-acceptance", idempotencyKey: randomUUID(),
+    });
+    if (stateEvents.length) {
+      await transaction.saveModuleRecord({
+        projectId, moduleId: "core.document-paths", key: id, expectedVersion: null,
+        value: { metadata: { state_events: stateEvents } },
+      });
+    }
+    return id;
+  };
+  const addCharacterArtifacts = async (transaction, projectId) => {
+    for (const [id, name] of [["char-uma", "Uma"], ["char-other", "Other"]]) {
+      await transaction.saveModuleRecord({
+        projectId, moduleId: "core.artifacts", key: `bible/characters/${id}/profile.yaml`, expectedVersion: null,
+        value: { content: `id: ${id}\ntype: character\nname: ${name}\n` },
+      });
+    }
+  };
+  const disclosure = (sceneId, eventId, object) => ({
+    sceneId, eventId, kind: "knowledge", subject: "char-uma", object,
+    payload: { layer: "reader-knowledge" }, status: "confirmed",
+  });
+  const belief = (sceneId, eventId, subject) => ({
+    sceneId, eventId, kind: "attribute", subject, object: "secret-id",
+    payload: { layer: "character-belief", predicate: "knows" }, status: "confirmed",
+  });
+
+  const direct = { projectId: directProject.project.id };
+  await persistence.transaction(async (transaction) => {
+    await addCharacterArtifacts(transaction, direct.projectId);
+    direct.firstSceneId = randomUUID();
+    await makeScene(transaction, direct.projectId, {
+      id: direct.firstSceneId, title: "Root scene one", orderKey: "0001", markdown: "Direct-only first scene.\n",
+      stateEvents: [disclosure(direct.firstSceneId, "direct-reader-disclosure", "direct-secret")],
+    });
+    direct.targetSceneId = await makeScene(transaction, direct.projectId, {
+      title: "Root scene two", orderKey: "0002", markdown: "Direct-only saved body.\n",
+    });
+  });
+
+  const mixed = { projectId: mixedProject.project.id };
+  await persistence.transaction(async (transaction) => {
+    await addCharacterArtifacts(transaction, mixed.projectId);
+    mixed.firstSceneId = randomUUID();
+    await makeScene(transaction, mixed.projectId, {
+      id: mixed.firstSceneId, title: "Mixed root one", orderKey: "0001", markdown: "Mixed root first.\n",
+      stateEvents: [disclosure(mixed.firstSceneId, "reader-root", "root-secret")],
+    });
+    mixed.volumeId = randomUUID();
+    await transaction.createDocument({
+      projectId: mixed.projectId, documentId: mixed.volumeId, kind: "volume", title: "Volume",
+      orderKey: "0002", markdown: "", authorId: "story-root-scene-acceptance", idempotencyKey: randomUUID(),
+    });
+    mixed.chapterId = randomUUID();
+    await transaction.createDocument({
+      projectId: mixed.projectId, documentId: mixed.chapterId, parentId: mixed.volumeId, kind: "chapter", title: "Chapter",
+      orderKey: "0001", markdown: "", authorId: "story-root-scene-acceptance", idempotencyKey: randomUUID(),
+    });
+    mixed.nestedSceneId = randomUUID();
+    await makeScene(transaction, mixed.projectId, {
+      id: mixed.nestedSceneId, parentId: mixed.chapterId, title: "Nested scene", orderKey: "0001", markdown: "Nested saved body.\n",
+      stateEvents: [disclosure(mixed.nestedSceneId, "reader-nested", "nested-secret")],
+    });
+    mixed.targetSceneId = randomUUID();
+    await makeScene(transaction, mixed.projectId, {
+      id: mixed.targetSceneId, title: "Mixed root target", orderKey: "0003", markdown: "Fixed mixed-hierarchy body.\n",
+      stateEvents: [belief(mixed.targetSceneId, "belief-uma", "char-uma"), belief(mixed.targetSceneId, "belief-other", "char-other")],
+    });
+    mixed.laterSceneId = randomUUID();
+    await makeScene(transaction, mixed.projectId, {
+      id: mixed.laterSceneId, title: "Mixed root later", orderKey: "0004", markdown: "Future scene.\n",
+      stateEvents: [disclosure(mixed.laterSceneId, "reader-later", "future-secret")],
+    });
+  });
+
+  for (const fixture of [
+    { ...direct, expectedOrder: 2, expectedDisclosures: ["direct-reader-disclosure"], expectedBody: "Direct-only saved body.\n" },
+    { ...mixed, expectedOrder: 3, expectedDisclosures: ["reader-root", "reader-nested"], expectedBody: "Fixed mixed-hierarchy body.\n" },
+  ]) {
+    const actionTemporal = await ownerAction(host, cookie, fixture.projectId, "story.world-state.temporal", { sceneId: fixture.targetSceneId });
+    assert.equal(actionTemporal.data.narrativeOrder, fixture.expectedOrder);
+    assert.equal(actionTemporal.data.worldTime, null);
+    assert.deepEqual(actionTemporal.data.disclosed.map((fact) => fact.eventId), fixture.expectedDisclosures);
+
+    const actionAuthor = await ownerAction(host, cookie, fixture.projectId, "story.context.package", {
+      sceneId: fixture.targetSceneId, scope: "author", budget: 200_000,
+    });
+    const authorManuscript = actionAuthor.data.parts.find((part) => part.kind === "manuscript");
+    assert.equal(authorManuscript.value.text, fixture.expectedBody);
+    assert.equal(authorManuscript.value.path, `documents/${fixture.targetSceneId}.md`);
+    assert.match(authorManuscript.value.revision, /^[a-f0-9]{64}$/u);
+    const pinnedReader = await host.store.reader(fixture.projectId);
+    const pinnedManuscript = await pinnedReader.read(`documents/${fixture.targetSceneId}.md`);
+    assert.deepEqual(actionAuthor.snapshot, pinnedReader.snapshot);
+    assert.equal(authorManuscript.value.revision, pinnedManuscript.revision, "author context is bound to the saved PostgreSQL body revision");
+
+    const actionReader = await ownerAction(host, cookie, fixture.projectId, "story.context.package", {
+      sceneId: fixture.targetSceneId, scope: "reader", budget: 200_000,
+    });
+    assert.deepEqual(actionReader.data.parts.map((part) => [part.kind, part.value.eventId]),
+      fixture.expectedDisclosures.map((eventId) => ["reader-disclosure", eventId]));
+    assert.doesNotMatch(JSON.stringify(actionReader.data), /future-secret|Fixed mixed-hierarchy body|Direct-only saved body/);
+    const actionCharacter = await ownerAction(host, cookie, fixture.projectId, "story.context.package", {
+      sceneId: fixture.targetSceneId, scope: "character", characterId: "char-uma", budget: 200_000,
+    });
+    assert.equal(actionCharacter.data.parts.some((part) => part.kind === "reader-disclosure" || part.kind === "manuscript"), false);
+    if (fixture.projectId === mixed.projectId) {
+      assert.deepEqual(actionCharacter.data.parts.map((part) => part.value.eventId), ["belief-uma"]);
+      assert.doesNotMatch(JSON.stringify(actionCharacter.data), /belief-other/);
+    }
+
+    stdio = await startStdioClient(host, fixture.projectId);
+    http = await startHttpClient(host, fixture.projectId);
+    try {
+      for (const [name, connection] of [["stdio", stdio], ["Streamable HTTP", http]]) {
+        const scoped = { project_id: fixture.projectId, scene_id: fixture.targetSceneId };
+        const temporal = success(await connection.client.callTool({ name: "story.world-state.temporal", arguments: scoped }), `${name} Story temporal`);
+        assert.deepEqual(temporal, { snapshot: actionTemporal.snapshot, data: actionTemporal.data });
+        const author = success(await connection.client.callTool({
+          name: "story.context.package", arguments: { ...scoped, scope: "author", budget: 200_000 },
+        }), `${name} Story author context`);
+        assert.deepEqual(author, { snapshot: actionAuthor.snapshot, data: actionAuthor.data });
+        const reader = success(await connection.client.callTool({
+          name: "story.context.package", arguments: { ...scoped, scope: "reader", budget: 200_000 },
+        }), `${name} Story reader context`);
+        assert.deepEqual(reader.data.parts.map((part) => [part.kind, part.value.eventId]),
+          fixture.expectedDisclosures.map((eventId) => ["reader-disclosure", eventId]));
+        const character = success(await connection.client.callTool({
+          name: "story.context.package", arguments: { ...scoped, scope: "character", character_id: "char-uma", budget: 200_000 },
+        }), `${name} Story character context`);
+        assert.deepEqual(character.data.parts, actionCharacter.data.parts);
+        assert.equal(character.snapshot.projectId, fixture.projectId);
+      }
+    } finally {
+      await closeMcpClient(http, true);
+      await closeMcpClient(stdio);
+      http = undefined;
+      stdio = undefined;
+    }
+  }
+});
+
 test("native Knowledge MCP tools preserve PostgreSQL scope, proposal, replay, review and receipt over both transports", {
   timeout: 120_000,
 }, async (t) => {

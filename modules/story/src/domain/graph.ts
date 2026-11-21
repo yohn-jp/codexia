@@ -310,22 +310,47 @@ export function buildSceneLocationInfos(
 ): StorySnapshotResult<SceneLocationInfo[]> {
   const infos: SceneLocationInfo[] = [];
   let globalOrder = 0;
-  for (const { chapters } of getVolumeTreeData(input.entities)) {
-    for (const { chapter, scenes } of chapters) {
-      for (const scene of scenes) {
-        globalOrder += 1;
-        const context = buildSceneContextData(input.entities, input.links, scene.id);
-        const characterIds =
-          context?.appears.filter((entity) => entity.type === "character").map((entity) => entity.id) ??
-          [];
-        infos.push({
-          sceneId: scene.id,
-          order: globalOrder,
-          locationId: context?.location?.id,
-          characterIds,
-          chapterId: typeof chapter.id === "string" ? chapter.id : undefined,
-        });
-      }
+  const volumes = getVolumeTreeData(input.entities);
+  const directRootScenes = listByTypeData(input.entities, "scene").filter((scene) =>
+    !(typeof scene.raw.volume === "string" && scene.raw.volume.length > 0) &&
+    !(typeof scene.raw.chapter === "string" && scene.raw.chapter.length > 0));
+  const topLevel = [
+    ...volumes.map((tree) => ({
+      kind: "volume" as const,
+      order: Number(tree.volume.raw.order ?? 0),
+      name: tree.volume.name ?? tree.volume.id,
+      tree,
+    })),
+    ...directRootScenes.map((scene) => ({
+      kind: "scene" as const,
+      order: Number(scene.raw.order ?? 0),
+      name: scene.name ?? scene.id,
+      scene,
+    })),
+  ].sort((a, b) => a.order - b.order ||
+    (a.kind === b.kind ? a.name.localeCompare(b.name, "ja") : a.kind === "volume" ? -1 : 1));
+
+  const appendScene = (scene: StoryEntity, chapterId?: string) => {
+    globalOrder += 1;
+    const context = buildSceneContextData(input.entities, input.links, scene.id);
+    const characterIds =
+      context?.appears.filter((entity) => entity.type === "character").map((entity) => entity.id) ?? [];
+    infos.push({
+      sceneId: scene.id,
+      order: globalOrder,
+      locationId: context?.location?.id,
+      characterIds,
+      ...(chapterId ? { chapterId } : {}),
+    });
+  };
+
+  for (const entry of topLevel) {
+    if (entry.kind === "scene") {
+      appendScene(entry.scene);
+      continue;
+    }
+    for (const { chapter, scenes } of entry.tree.chapters) {
+      for (const scene of scenes) appendScene(scene, chapter.id);
     }
   }
   return snapshotResult(input.snapshot, infos);
