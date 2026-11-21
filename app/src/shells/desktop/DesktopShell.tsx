@@ -1,16 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import * as Separator from "@radix-ui/react-separator";
 import * as Tabs from "@radix-ui/react-tabs";
-import { Panel, PanelGroup, PanelResizeHandle, setNonce } from "react-resizable-panels";
+import { Group, Panel, Separator as PanelSeparator } from "react-resizable-panels";
 import type { ApplicationShellProps, WorkspacePanelRequest } from "../../application/contracts";
 import { Workspace } from "../../workspace/Workspace";
 import "./desktop.css";
 import "../editorial.css";
 import "./studio.css";
 import "../authoring.css";
-
-const styleNonce = document.querySelector<HTMLMetaElement>('meta[name="codexia-style-nonce"]')?.content;
-if (styleNonce) setNonce(styleNonce);
 
 function describeFailure(reason: unknown): string {
   return reason instanceof Error && reason.message.trim()
@@ -72,9 +69,9 @@ export function DesktopShell({
         {workspaceScope && panels?.length ? (
           <Workspace scope={workspaceScope} mode="desktop" panels={panels}
             beforeLayoutChange={beforeLayoutChange} requestedPanel={effectiveRequest} />
-        ) : <PanelGroup className="st-desktop-workbench" direction="horizontal" id="codexia-desktop-workbench">
-          <Panel className="st-desktop-navigation-panel" defaultSize={28} minSize={18} maxSize={46}
-            id="codexia-desktop-navigation" order={1}>
+        ) : <Group className="st-desktop-workbench" orientation="horizontal" id="codexia-desktop-workbench">
+          <Panel className="st-desktop-navigation-panel" defaultSize="28%" minSize="18%" maxSize="46%"
+            id="codexia-desktop-navigation">
             <Tabs.Root className="st-desktop-navigation" defaultValue="library" orientation="horizontal">
               <Tabs.List className="st-desktop-panel-tabs" aria-label="ナビゲーションとツール">
                 <Tabs.Trigger className="st-desktop-panel-tab" value="library">作品ライブラリ</Tabs.Trigger>
@@ -88,15 +85,15 @@ export function DesktopShell({
               </Tabs.Content>
             </Tabs.Root>
           </Panel>
-          <PanelResizeHandle className="st-desktop-resize-handle" aria-label="作品パネルと原稿パネルの幅を変更"
+          <PanelSeparator className="st-desktop-resize-handle" aria-label="作品パネルと原稿パネルの幅を変更"
             aria-describedby="st-desktop-resize-help">
             <Separator.Root className="st-desktop-resize-line" decorative orientation="vertical" />
-          </PanelResizeHandle>
-          <Panel className="st-desktop-editor-panel" defaultSize={72} minSize={42}
-            id="codexia-desktop-editor" order={2}>
+          </PanelSeparator>
+          <Panel className="st-desktop-editor-panel" defaultSize="72%" minSize="42%"
+            id="codexia-desktop-editor">
             <main className="st-desktop-editor-slot" aria-label="原稿の編集と読書" tabIndex={-1}>{editor}</main>
           </Panel>
-        </PanelGroup>}
+        </Group>}
         <span className="st-desktop-visually-hidden" id="st-desktop-resize-help">
           左右矢印キーでパネル幅を変更できます。
         </span>
