@@ -1,0 +1,7 @@
+# Default ownership for all repository changes.
+* @yohnark
+
+# Explicit ownership for security-sensitive configuration.
+/.github/ @yohnark
+/infra/ @yohnark
+/scripts/ @yohnark
