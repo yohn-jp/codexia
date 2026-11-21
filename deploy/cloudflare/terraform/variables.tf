@@ -56,11 +56,11 @@ variable "allowed_idps" {
 
 variable "origin_service" {
   type        = string
-  description = "Private Podman network address for the legacy API or standalone updater proxy."
+  description = "Canonical API on the private Podman network."
   default     = "http://codexia-api:3000"
   validation {
-    condition     = contains(["http://codexia-api:3000", "http://codexia-api-proxy:3000"], var.origin_service)
-    error_message = "Tunnel ingress must target the private codexia-api or codexia-api-proxy container."
+    condition     = var.origin_service == "http://codexia-api:3000"
+    error_message = "Tunnel ingress must target only the canonical private codexia-api container."
   }
 }
 
