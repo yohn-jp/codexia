@@ -2075,7 +2075,7 @@ export class PodmanStandaloneHost{
       'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia'],input);
     const login=runWithSensitiveInput('podman',['exec','-i','codexia-db','sh','-ec',
       'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia_preflight -d codexia -c "SELECT current_user || chr(58) || current_setting(\'transaction_read_only\')"'],
-    credential.password);
+    credential.password.replace(/\n$/u,'')+'\n');
     assert.equal(login.trim(),'codexia_preflight:on','Canonical preflight credential is not an effective read-only TCP login');
   }
   async prepare(slot,release,owner){
