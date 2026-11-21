@@ -51,7 +51,7 @@ SELECT (EXISTS (SELECT 1 FROM pg_roles WHERE rolname='codexia_auth_runtime'))::t
        (EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='codexia_auth'))::text;
 SQL
 )
-test "$auth_state" = 'f|f'
+test "$auth_state" = 'false|false'
 
 umask 077
 printf '%s' 'postgresql://codexia_auth_runtime:Auth%40fixture%3Asecret-3981@codexia-db:5432/codexia' > "$tmp/database-url"
@@ -107,7 +107,7 @@ test "$(admin_psql <<'SQL'
 SELECT (EXISTS (SELECT 1 FROM pg_roles WHERE rolname='codexia_auth_runtime'))::text || '|' ||
        (EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='codexia_auth'))::text;
 SQL
-)" = 'f|f'
+)" = 'false|false'
 
 # Seed a partial exact secret set to exercise retry-safe first convergence.
 for index in 0 1; do
@@ -130,7 +130,7 @@ FROM pg_roles r CROSS JOIN pg_namespace n
 WHERE r.rolname='codexia_auth_runtime' AND n.nspname='codexia_auth';
 SQL
 )
-test "$role_state" = 't|codexia_auth_runtime|f|f|f'
+test "$role_state" = 'true|codexia_auth_runtime|false|false|false'
 
 runtime_identity=$(runtime_psql "$tmp/runtime-password" <<'SQL'
 SELECT current_user || '|' || current_schema();
