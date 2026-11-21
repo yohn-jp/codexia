@@ -45,6 +45,7 @@ jobs:
         env:
           CODEXIA_PROFILE: ${{ inputs.profile }}
         run: |
+          node scripts/ci-workspace.mjs build-workspace
           node scripts/profile-build.mjs --profile "$CODEXIA_PROFILE"
           pnpm --filter @codexia/app build
           CODEXIA_UI=mobile pnpm --filter @codexia/app exec vite build --config vite.native.config.ts
