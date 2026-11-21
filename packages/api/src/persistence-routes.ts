@@ -509,8 +509,8 @@ export async function handlePersistenceRoute(input: PersistenceRouteInput): Prom
             if (anchor.status !== "confirmed" || anchor.version !== expectedAnchorVersion || anchor.revisionId !== revisionId || document.headRevisionId !== revisionId || anchor.fromUtf16 >= anchor.toUtf16) {
               failure(409, "ANCHOR_REQUIRES_AUTHOR_CONFIRMATION", "Use the current confirmed Text Anchor");
             }
-            const mentions = await transaction.listMentionLinks(projectId, evidenceId);
-            if (!mentions.some((link) => link.nodeId === nodeId && link.status !== "rejected")) failure(409, "KNOWLEDGE_LINK_REQUIRED", "Link the Text Anchor to this Knowledge node before proposing an assertion");
+            const mention = await transaction.getMentionLink(projectId, evidenceId, nodeId);
+            if (!mention || mention.status === "rejected") failure(409, "KNOWLEDGE_LINK_REQUIRED", "Link the Text Anchor to this Knowledge node before proposing an assertion");
             const created = await transaction.saveAssertion({
               projectId, id: assertionId, proposition: { kind: "knowledge-statement/v1", nodeId, statement },
               modality, perspective, narrativeTime: {}, confidence: null, status: "proposed", expectedVersion: null,
