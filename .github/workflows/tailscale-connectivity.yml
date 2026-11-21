@@ -12,7 +12,7 @@ jobs:
     name: Verify Tailnet SSH reachability
     runs-on: ubuntu-latest
     timeout-minutes: 8
-    environment: production
+    environment: codexia-production
 
     steps:
       - name: Connect to Tailscale using GitHub OIDC
