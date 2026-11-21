@@ -20,6 +20,8 @@ Static response headers are defined in `edge/frontend/static/_headers`. Script e
 
 ## Authentication, API URL, and CORS
 
+This section documents the **current same-origin standalone deployment**. The separately addressable, provider-neutral API and Web/iOS OAuth target is specified in [API authentication and authorization](../architecture/API-AUTHN-AUTHZ.md) and [iOS client](IOS-CLIENT.md); those are not live routing or authentication instructions until implemented and accepted.
+
 Cloudflare Access applies an explicit identity allowlist to the application hostname. The Tunnel origin also requires the Access application audience. Access is the outer identity gate; the Codexia API keeps its authorization boundary. Dedicated deployments may opt into browser SSO without an additional token prompt.
 
 By default the standalone API accepts `CODEXIA_AUTH_TOKEN` at `POST /api/login`, issues an HttpOnly SameSite=Strict session cookie (Secure on HTTPS), and applies same-origin checks to browser writes. The token must never be placed in a Worker variable, Vite build argument, browser bundle, or repository file.
