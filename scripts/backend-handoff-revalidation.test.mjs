@@ -15,8 +15,8 @@ const workflow = parse(await readFile(new URL('../.github/workflows/backend-hand
 const sha = char => char.repeat(40);
 const run = () => ({
   id: 44878012473,
-  run_number: 773,
   run_attempt: 1,
+  run_number: 773,
   path: '.github/workflows/backend-release.yml',
   event: 'workflow_run',
   head_branch: 'main',

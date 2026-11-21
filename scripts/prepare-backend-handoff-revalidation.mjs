@@ -30,11 +30,11 @@ export async function resolveManualPublisherRun({ env, checkoutSha, fetchImpl = 
   const token = env.GH_TOKEN || env.GITHUB_TOKEN;
   assert.ok(typeof token === 'string' && token.length > 0, 'Actions read token is required');
   const run = await readPublisherRun(id, token, fetchImpl);
-  assertTrustedBackendPublicationRun(run, { id, runNumber: run.run_number, attempt: run.run_attempt, headSha: run.head_sha });
+  assertTrustedBackendPublicationRun(run, { id, attempt: run.run_attempt, runNumber: run.run_number, headSha: run.head_sha });
   return {
     id: run.id,
-    run_number: run.run_number,
     run_attempt: run.run_attempt,
+    run_number: run.run_number,
     path: run.path,
     event: run.event,
     head_branch: run.head_branch,

@@ -32,7 +32,12 @@ test('production deployment consumes the verified Full digest and provenance cer
   assert.match(deploy.if, /needs\.verify-handoff\.result == 'success'/u);
   assert.match(deploy.if, /needs\.verify-handoff\.outputs\.certified-full-image != ''/u);
   assert.match(deploy.if, /needs\.verify-handoff\.outputs\.deployment-certificate != ''/u);
-  assert.match(deploy.if, /vars\.CODEXIA_PUSH_DEPLOYMENT_ENABLED == 'true'/u);
+  assert.doesNotMatch(deploy.if, /CODEXIA_PUSH_DEPLOYMENT_ENABLED/u);
+  const deploymentGate = deploy.steps.find(step => step.id === 'deployment-gate');
+  assert.ok(deploymentGate);
+  assert.equal(deploymentGate.env.CODEXIA_PUSH_DEPLOYMENT_ENABLED, '${{ vars.CODEXIA_PUSH_DEPLOYMENT_ENABLED }}');
+  assert.ok(deploy.steps.slice(deploy.steps.indexOf(deploymentGate) + 1).every(step =>
+    step.if === "steps.deployment-gate.outputs.enabled == 'true'"));
   assert.equal(deploy.environment.name, 'codexia-production');
   assert.equal(deploy.concurrency.group, 'codexia-production');
   assert.equal(deploy.concurrency['cancel-in-progress'], false);
@@ -48,9 +53,11 @@ test('production deployment consumes the verified Full digest and provenance cer
   assert.equal(ssh.env.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS, '${{ vars.CODEXIA_DEPLOY_SSH_KNOWN_HOSTS }}');
   assert.match(ssh.run, /StrictHostKeyChecking=yes/u);
 
-  const liveUi = deploy.steps.find(step => step.name === 'Verify live application identities and Access boundary for release admission');
-  assert.ok(liveUi, 'the job must admit the current frontend epoch before deployment');
+  const liveUi = deploy.steps.find(step => step.name === 'Verify deployed frontend epoch and Access boundary for certified backend recovery');
+  assert.ok(liveUi, 'the job must admit the deployed frontend against the verified backend epoch before deployment');
   assert.equal(liveUi.env.CODEXIA_ACCESS_CLIENT_ID, '${{ secrets.CODEXIA_ACCESS_CLIENT_ID }}');
+  assert.equal(liveUi.env.CODEXIA_EXPECTED_BACKEND_API_EPOCH, '${{ needs.verify-handoff.outputs.certified-full-api-epoch }}');
+  assert.equal(liveUi.run, 'node scripts/verify-frontend-compatibility.mjs backend-preflight');
   const verify = handoff.jobs['verify-handoff'];
   assert.equal(verify.outputs['certified-full-image'], '${{ steps.verify.outputs.full-image }}');
   assert.equal(verify.outputs['deployment-certificate'], '${{ steps.verify.outputs.full-certificate }}');
