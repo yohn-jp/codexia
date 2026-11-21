@@ -103,7 +103,7 @@ function errorMessage(error: unknown): string {
  * Ionic page navigation for the shared application controller.
  * The mobile entry supplies the React Router browser context around the controller.
  */
-export function MobileShell({ header, documentTitle, documentContext, desktopDurability, desktopDurabilityDetail, desktopDurabilityLabel, library, editor, tools, status, renderStatus, onSwitchMode, workspaceScope, panels, beforeLayoutChange, requestedPanel }: ApplicationShellProps) {
+export function MobileShell({ header, documentTitle, documentContext, library, editor, tools, status, renderStatus, onSwitchMode, workspaceScope, panels, beforeLayoutChange, requestedPanel }: ApplicationShellProps) {
   const location = useLocation();
   const navigateRoute = useNavigate();
   const activeView = readViewFromSearch(location.search);
@@ -460,10 +460,6 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
               </span>
               <span className="mobile-shell-settings-label">{activeView === "settings" ? "執筆" : "設定"}</span>
             </IonButton>
-            {activeView === "writing" && desktopDurability ? <span className="mobile-shell-protection" data-state={desktopDurability} aria-label="原稿のPostgreSQL保存状態">
-              <span aria-hidden="true" />
-              {desktopDurabilityLabel ?? ({ draft: "未保存", saving: "保存中", uncertain: "要確認", saved: "保存済" }[desktopDurability])}
-            </span> : null}
           </div>
           <div className="mobile-shell-shared-header" data-active-view={activeView} aria-label="作業領域とアカウント設定">{header}</div>
         </IonHeader>
@@ -542,10 +538,10 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
 
         <IonFooter className="mobile-shell-footer">
           <div className="mobile-shell-status" role="region" aria-label="保存と回復の状態">
-            {renderStatus ? renderStatus(switchError) : <>
+            {!referenceSheet && (renderStatus ? renderStatus(switchError) : <>
               {switchError && <p className="mobile-shell-switch-error" role="alert">{switchError}</p>}
               {status}
-            </>}
+            </>)}
           </div>
           {activeView === "writing" ? (
             <div className="mobile-shell-writing-accessories" aria-label="執筆中の参照">
@@ -606,7 +602,7 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
           <div className="mobile-shell-reference-switch" role="tablist" aria-label="参照する情報">
             {([
               { id: "outline", label: "構成" },
-              { id: "inspector", label: "保存状態" },
+              { id: "inspector", label: "知識・根拠" },
             ] as const).map((choice) => (
               <button type="button" role="tab" key={choice.id}
                 id={"mobile-reference-tab-" + choice.id}
@@ -632,22 +628,9 @@ export function MobileShell({ header, documentTitle, documentContext, desktopDur
             role="tabpanel"
             aria-labelledby={referenceSheet ? "mobile-reference-tab-" + referenceSheet : undefined}
             data-mobile-reference-panel={referenceSheet ?? undefined}>
-            {referenceSheet === "inspector" && desktopDurability ? (
-              <div className="mobile-shell-reference-durability" role="status" aria-label="原稿のPostgreSQL保存状態" data-state={desktopDurability}>
-                <strong>{desktopDurabilityLabel ?? ({
-                  draft: "PostgreSQL未保存",
-                  saving: "PostgreSQLへ保存中",
-                  uncertain: "保存状態を要確認",
-                  saved: "PostgreSQL保存済み",
-                }[desktopDurability])}</strong>
-                <span>{desktopDurabilityDetail ?? ({
-                  draft: "下書きはブラウザーに保持されています。PostgreSQLへの保存は未完了です。",
-                  saving: "PostgreSQLへの保存を確認しています。",
-                  uncertain: "PostgreSQLまたは回復Journalの状態を再確認してください。",
-                  saved: "PostgreSQLへの保存を確認しました。",
-                }[desktopDurability])}</span>
-              </div>
-            ) : null}
+            {referenceSheet && <div className="mobile-shell-status" role="region" aria-label="保存と回復の状態">
+              {renderStatus ? renderStatus(switchError) : status}
+            </div>}
             {referencePanel?.render() ?? <p>この情報は現在利用できません。</p>}
           </div>
           <p className="mobile-shell-reference-hint">上のハンドルを上下に動かすと、参照領域を広げたり閉じたりできます。</p>
