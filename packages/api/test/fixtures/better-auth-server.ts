@@ -1,4 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createServer } from "../../src/server.js";
 import { createBetterAuthRuntime, CODEXIA_OWNER_SCOPE } from "../../src/better-auth.js";
@@ -139,6 +142,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
   let idpServer: Server | undefined;
   let runtime: ReturnType<typeof createBetterAuthRuntime> | undefined;
   let bootstrapPool: Pool | undefined;
+  let usageDirectory: string | undefined;
   let domainPersistence: ApiServerOptions["persistence"] | undefined;
   let domainStore: CoreStore | undefined;
   try {
@@ -228,6 +232,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       mcpClientIds: [],
       allowInsecureLoopbackForTests: true,
     };
+    usageDirectory = await mkdtemp(join(tmpdir(), "codexia-auth-fixture-history-"));
     runtime = createBetterAuthRuntime(runtimeConfig);
     await (await runtime.auth.$context).runMigrations();
     await migrateJwtAccessTokenRevocationSchema(runtime.pool);
@@ -246,7 +251,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
       persistence: withPostgresPersistence ? domainPersistence! : persistenceForAuthFixture(),
       authToken: "codexia-test-api-token-with-32-characters",
       staticDir: options.staticDirectory ?? process.cwd(),
-      usageDirectory: process.cwd(),
+      usageDirectory: usageDirectory!,
       betterAuth: runtime!,
       ...(withOwner ? { oauthOwner: {
         issuer,
@@ -378,6 +383,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
         if (runtime) await runtime.pool.end();
         if (domainPersistence) await domainPersistence.close();
         if (bootstrapPool) await bootstrapPool.end();
+        if (usageDirectory) await rm(usageDirectory, { recursive: true, force: true });
         process.env.NODE_ENV = previousNodeEnv;
       },
     };
@@ -388,6 +394,7 @@ export async function startBetterAuthFixture(options: BetterAuthFixtureOptions):
     if (runtime) await runtime.pool.end().catch(() => undefined);
     if (domainPersistence) await domainPersistence.close().catch(() => undefined);
     if (bootstrapPool) await bootstrapPool.end().catch(() => undefined);
+    if (usageDirectory) await rm(usageDirectory, { recursive: true, force: true });
     process.env.NODE_ENV = previousNodeEnv;
     throw error;
   }
