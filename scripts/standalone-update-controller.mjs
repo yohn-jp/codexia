@@ -916,7 +916,11 @@ export class StandaloneController {
         await this.host.route(active.slot);
       }
       await this.assertServing(state,active.slot,state.installed);
-      return state;
+      // A prior signed-channel polling error is transient. Once boot has
+      // restored and verified the installed writer and route, it must not
+      // make the updater unit fail before its next timer poll.
+      return boot&&state.lastError?.startsWith(pollingChannelErrorPrefix)
+        ? this.save({...state,lastError:null}) : state;
     }catch(error){
       await this.host.route('blocked').catch(()=>undefined);
       return this.save({...state,paused:true,lastError:'Topology reconciliation blocked: '+safeError(error)});
@@ -934,6 +938,8 @@ export class StandaloneController {
     try{
       const channel=await this.channel(state);state=channel.state;
       checkingChannel=false;
+      const advertisedCurrent=channel.verified.payload.releases.find(release=>release.image===state.installed.image&&release.state==='published');
+      assert.deepEqual(advertisedCurrent,state.installed,'Installed release absent or withdrawn from fresh signed channel');
       const epoch=await this.uiEpoch(state.installed);
       if(manualRollback){
         if(!state.previous)throw new Error('No previous release recorded');
@@ -958,6 +964,8 @@ export class StandaloneController {
       const fresh=await this.channel(state);state=fresh.state;
       const stillPublished=fresh.verified.payload.releases.find(release=>release.image===candidate.image&&release.state==='published');
       assert.deepEqual(stillPublished,candidate,'Candidate withdrawn or changed before cutover');
+      const currentStillPublished=fresh.verified.payload.releases.find(release=>release.image===state.installed.image&&release.state==='published');
+      assert.deepEqual(currentStillPublished,state.installed,'Installed release absent or withdrawn before cutover');
       const currentEpoch=await this.uiEpoch(state.installed);
       if(!manualRollback)assert.deepEqual(selectUpdateCandidate(fresh.verified,state.installed,currentEpoch),candidate,'A different candidate became current');
       else assertRollbackCompatible(state.installed,candidate,currentEpoch);
