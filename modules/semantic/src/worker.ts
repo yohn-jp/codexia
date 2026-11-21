@@ -438,12 +438,27 @@ async function getReranker(cacheDirectory: string): Promise<ScorePipeline> {
     rerankerPromise = (async () => {
       try {
         const transformers = await import("@huggingface/transformers");
-        transformers.env.cacheDir = path.join(path.resolve(cacheDirectory), "semantic", "models");
+        const modelCache = path.join(path.resolve(cacheDirectory), "semantic", "models");
+        transformers.env.cacheDir = modelCache;
         transformers.env.allowLocalModels = true;
+        // Acceptance is isolated from the network: surface exact missing model artifacts.
+        if (process.env.CODEXIA_MODEL_ACCEPTANCE_DIAGNOSTICS === "1") transformers.env.allowRemoteModels = false;
+        // Transformers.js v4 probes tokenizer metadata without forwarding the pinned
+        // revision. A complete cached snapshot must therefore be opened by its
+        // exact local path, not by a model ID that may query the moving Hub HEAD.
+        const pinnedDirectory = path.join(modelCache, RERANKER_MODEL_ID, RERANKER_MODEL_VERSION);
+        const requiredFiles = ["config.json", "tokenizer_config.json", "tokenizer.json", "onnx/model.onnx", "onnx/model.onnx_data"];
+        const availability = await Promise.all(requiredFiles.map(async (filename) => {
+          try { await access(path.join(pinnedDirectory, filename)); return true; }
+          catch { return false; }
+        }));
+        const cachedSnapshotReady = availability.every(Boolean);
+        const modelSource = cachedSnapshotReady ? pinnedDirectory : RERANKER_MODEL_ID;
+        const sourceOptions = cachedSnapshotReady ? { local_files_only: true } : { revision: RERANKER_MODEL_VERSION };
         const [tokenizer, model] = await Promise.all([
-          transformers.AutoTokenizer.from_pretrained(RERANKER_MODEL_ID, { revision: RERANKER_MODEL_VERSION }),
-          transformers.AutoModelForSequenceClassification.from_pretrained(RERANKER_MODEL_ID, {
-            revision: RERANKER_MODEL_VERSION,
+          transformers.AutoTokenizer.from_pretrained(modelSource, sourceOptions),
+          transformers.AutoModelForSequenceClassification.from_pretrained(modelSource, {
+            ...sourceOptions,
             dtype: "fp32",
             use_external_data_format: true,
           }),
@@ -451,6 +466,9 @@ async function getReranker(cacheDirectory: string): Promise<ScorePipeline> {
         tokenizerPromise = Promise.resolve(tokenizer as unknown as (text: string[], options: unknown) => unknown);
         return async (input) => await model(input as never) as unknown as { logits: { data: ArrayLike<number> } };
       } catch (error) {
+        if (process.env.CODEXIA_MODEL_ACCEPTANCE_DIAGNOSTICS === "1") {
+          console.error("[model-acceptance] BGE model load:", error instanceof Error ? error.stack ?? error.message : String(error));
+        }
         rerankerPromise = null;
         throw errorWithCode("semantic_reranker_unavailable", `Could not load ${RERANKER_MODEL_ID}@${RERANKER_MODEL_VERSION}: ${error instanceof Error ? error.message : String(error)}`, error);
       }

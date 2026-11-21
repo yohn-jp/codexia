@@ -235,7 +235,7 @@ async function applyRerank(
   snapshot: SnapshotId,
   signal: AbortSignal,
   moduleContext: ModuleContext,
-): Promise<{ hits: SemanticSearchHit[]; warning?: string }> {
+): Promise<{ hits: SemanticSearchHit[]; warning?: string; diagnostic?: string }> {
   const pool = hits.slice(0, 30);
   const rest = hits.slice(30);
   const withText = pool.filter((hit) => (hit.snippet ?? hit.text)?.trim());
@@ -250,7 +250,12 @@ async function applyRerank(
     };
   } catch (error) {
     if (signal.aborted) throw error;
-    return { hits: [...pool.map((hit) => ({ ...hit, scores: { ...hit.scores, rerank: 0 } })), ...rest], warning: "semantic_reranker_unavailable" };
+    if (process.env.CODEXIA_MODEL_ACCEPTANCE_DIAGNOSTICS === "1") {
+      console.error("[model-acceptance] BGE rerank:", error instanceof Error ? error.stack ?? error.message : String(error));
+    }
+    return { hits: [...pool.map((hit) => ({ ...hit, scores: { ...hit.scores, rerank: 0 } })), ...rest], warning: "semantic_reranker_unavailable",
+      ...(process.env.CODEXIA_MODEL_ACCEPTANCE_DIAGNOSTICS === "1" ? { diagnostic: error instanceof Error ? error.message : String(error) } : {}),
+    };
   }
 }
 
@@ -393,15 +398,17 @@ export function createSemanticActions(moduleContext: ModuleContext): ModuleActio
         const { settings } = await readSettings(context);
         const shouldRerank = input.rerank ?? settings.rerankerEnabled;
         let rerankWarning: string | undefined;
+        let rerankDiagnostic: string | undefined;
         if (shouldRerank && input.mode !== "expression" && results.length > 0) {
           task.update("reranking", 0, Math.min(30, results.length));
           const reranked = await applyRerank(input.query, results, context.reader.snapshot, task.signal, moduleContext);
           results = reranked.hits;
           rerankWarning = reranked.warning;
+          rerankDiagnostic = reranked.diagnostic;
         }
         return { ok: true, snapshot: context.reader.snapshot, data: { query: input.query, mode: input.mode, results, model: EMBEDDING_MODEL_ID, modelVersion: EMBEDDING_MODEL_VERSION,
           reranker: shouldRerank && input.mode !== "expression" ? { id: RERANKER_MODEL_ID, version: RERANKER_MODEL_VERSION } : null,
-          ...(vectorUnavailable ? { warning: "semantic_index_missing_or_model_unavailable" } : {}), ...(rerankWarning ? { rerankWarning } : {}), taskId } } as ActionResult;
+          ...(vectorUnavailable ? { warning: "semantic_index_missing_or_model_unavailable" } : {}), ...(rerankWarning ? { rerankWarning } : {}), ...(rerankDiagnostic ? { rerankDiagnostic } : {}), taskId } } as ActionResult;
       } finally { task.finish(); }
     }),
     action("semantic.expressions.search", "compute", (value) => {
