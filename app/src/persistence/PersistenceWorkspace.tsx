@@ -1645,9 +1645,12 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         : null;
       const nextProjectId = target?.projectId ?? "";
       const nextDocumentId = target?.documentId ?? "";
+      const intent = ++selectionIntentRef.current;
       if (nextProjectId === projectId && nextDocumentId === documentId) return;
       void (async () => {
-        if (!await protectTransition()) {
+        const allowed = await protectTransition();
+        if (intent !== selectionIntentRef.current) return;
+        if (!allowed) {
           updateRouteSelection(projectId ? { projectId, documentId } : null, true);
           return;
         }
@@ -2144,8 +2147,9 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   }, [publishEditor]);
 
   const selectProject = async (nextProjectId: string): Promise<void> => {
-    if (nextProjectId === projectId || !await protectTransition()) return;
-    selectionIntentRef.current += 1;
+    if (nextProjectId === projectId) return;
+    const intent = ++selectionIntentRef.current;
+    if (!await protectTransition() || intent !== selectionIntentRef.current) return;
     continueRequestRef.current = undefined;
     openSequenceRef.current += 1;
     publishEditor(null);
