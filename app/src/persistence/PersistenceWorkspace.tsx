@@ -85,6 +85,12 @@ interface EvidenceLoadIssue {
   retrying: boolean;
 }
 
+interface EvidenceLoadPending {
+  projectId: string;
+  documentId: string;
+  revisionId: string;
+}
+
 interface OutlineDocument extends PersistenceDocument {
   children: OutlineDocument[];
   misplaced?: boolean;
@@ -394,6 +400,9 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const revisionPageSequenceRef = useRef(0);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
   const [evidenceLoadIssue, setEvidenceLoadIssue] = useState<EvidenceLoadIssue | null>(null);
+  const [evidenceLoadPending, setEvidenceLoadPending] = useState<EvidenceLoadPending | null>(null);
+  const evidenceReadSequenceRef = useRef(0);
+  const evidenceReadControllerRef = useRef<AbortController | null>(null);
   const [requestedPanel, setRequestedPanel] = useState<WorkspacePanelRequest>();
   const [creationIntent, setCreationIntent] = useState<"project" | "document">();
 
@@ -786,6 +795,64 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       setModules(statuses); setContributions(catalog); setModuleSnapshot(read.snapshot); setModuleError("");
     } catch (error) { if (sequence !== moduleSequenceRef.current) return; setModuleError(error instanceof Error ? error.message : "モジュールを読み込めませんでした。"); }
   }, [projectId, authorScope]);
+  useEffect(() => { void refreshModules(); }, [refreshModules, journal, active?.revision.id, resumeEpoch, sessionBlocked]);
+
+  const loadOpenEvidence = useCallback(async function loadOpenEvidence(
+    identity: { projectId: string; documentId: string; revisionId: string; markdown: string },
+    requestSequence: number,
+  ): Promise<void> {
+    evidenceReadControllerRef.current?.abort();
+    const controller = new AbortController();
+    evidenceReadControllerRef.current = controller;
+    setEvidenceLoadPending({ projectId: identity.projectId, documentId: identity.documentId, revisionId: identity.revisionId });
+    try {
+      const snapshot = await editorAdapter.read(identity, controller.signal);
+      if (controller.signal.aborted || requestSequence !== evidenceReadSequenceRef.current || sessionBlockedRef.current) return;
+      const latest = activeRef.current;
+      if (!latest || latest.document.projectId !== identity.projectId || latest.document.id !== identity.documentId) return;
+      if (latest.revision.id !== identity.revisionId) {
+        const nextSequence = ++evidenceReadSequenceRef.current;
+        return loadOpenEvidence({
+          projectId: latest.document.projectId,
+          documentId: latest.document.id,
+          revisionId: latest.revision.id,
+          markdown: latest.revision.markdown,
+        }, nextSequence);
+      }
+      const evidence = initializeDocumentEvidence(identity.markdown, identity.revisionId, snapshot);
+      publishEditor({
+        ...latest,
+        evidence: latest.dirty || latest.remoteConflict ? markEvidenceNeedsReview(evidence) : evidence,
+        evidenceLoadKey: latest.evidenceLoadKey + 1,
+      });
+      setEvidenceLoadPending(null);
+      setEvidenceLoadIssue(null);
+    } catch (error) {
+      if (controller.signal.aborted || requestSequence !== evidenceReadSequenceRef.current || sessionBlockedRef.current) return;
+      const latest = activeRef.current;
+      if (!latest || latest.document.projectId !== identity.projectId || latest.document.id !== identity.documentId) return;
+      if (latest.revision.id !== identity.revisionId) {
+        const nextSequence = ++evidenceReadSequenceRef.current;
+        return loadOpenEvidence({
+          projectId: latest.document.projectId,
+          documentId: latest.document.id,
+          revisionId: latest.revision.id,
+          markdown: latest.revision.markdown,
+        }, nextSequence);
+      }
+      setEvidenceLoadPending(null);
+      setEvidenceLoadIssue({
+        projectId: identity.projectId,
+        documentId: identity.documentId,
+        revisionId: identity.revisionId,
+        message: error instanceof Error ? error.message : "根拠を読み込めませんでした。",
+        retrying: false,
+      });
+    } finally {
+      if (evidenceReadControllerRef.current === controller) evidenceReadControllerRef.current = null;
+    }
+  }, [publishEditor]);
+
   const refreshAfterNativeApply = useCallback(() => {
     const appliedProjectId = projectId;
     if (projectIdRef.current !== appliedProjectId) return;
@@ -794,12 +861,13 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     void refreshModules();
     const captured = activeRef.current;
     if (captured?.document.projectId === appliedProjectId) {
-      void editorAdapter.read({ projectId: appliedProjectId, documentId: captured.document.id, revisionId: captured.revision.id, markdown: captured.revision.markdown }, new AbortController().signal).then(snapshot => {
-        const latest = activeRef.current;
-        if (projectIdRef.current !== appliedProjectId || latest?.document.id !== captured.document.id || latest.revision.id !== captured.revision.id) return;
-        const evidence = initializeDocumentEvidence(captured.revision.markdown, captured.revision.id, snapshot);
-        publishEditor({ ...latest, evidence: latest.dirty || latest.remoteConflict ? markEvidenceNeedsReview(evidence) : evidence, evidenceLoadKey: latest.evidenceLoadKey + 1 });
-      }).catch((error: unknown) => { if (projectIdRef.current === appliedProjectId) setNotice(error instanceof Error ? `適用後の根拠を再読み込みできませんでした。${error.message}` : "適用後の根拠を再読み込みできませんでした。"); });
+      const evidenceRequestSequence = ++evidenceReadSequenceRef.current;
+      void loadOpenEvidence({
+        projectId: appliedProjectId,
+        documentId: captured.document.id,
+        revisionId: captured.revision.id,
+        markdown: captured.revision.markdown,
+      }, evidenceRequestSequence);
     }
     void api.persistenceProject(appliedProjectId).then(({ project: projectResult }) => {
       if (projectIdRef.current !== appliedProjectId) return;
@@ -807,14 +875,16 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     }).catch((error: unknown) => {
       if (projectIdRef.current === appliedProjectId) setNotice(error instanceof Error ? `適用後の作品状態を再読み込みできませんでした。${error.message}` : "適用後の作品状態を再読み込みできませんでした。");
     });
-  }, [projectId, refreshModules, publishEditor, refreshKnowledgeBrowse]);
-  useEffect(() => { void refreshModules(); }, [refreshModules, journal, active?.revision.id, resumeEpoch, sessionBlocked]);
+  }, [loadOpenEvidence, projectId, refreshModules, refreshKnowledgeBrowse]);
 
   const openDocument = useCallback(async (nextDocumentId: string): Promise<void> => {
     const currentProject = projects.find((item) => item.id === projectId);
     const currentJournal = journalRef.current;
     if (sessionBlockedRef.current || !currentProject || !currentJournal || !nextDocumentId) return;
     const openSequence = ++openSequenceRef.current;
+    evidenceReadSequenceRef.current++;
+    evidenceReadControllerRef.current?.abort();
+    evidenceReadControllerRef.current = null;
     revisionPageSequenceRef.current += 1;
     setShowRevisions(false);
     setRevisions([]);
@@ -825,6 +895,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     setPageError("");
     setNotice("");
     setEvidenceLoadIssue(null);
+    setEvidenceLoadPending(null);
     publishEditor(null);
     try {
       const [read, draft] = await Promise.all([
@@ -833,20 +904,6 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
       ]);
       if (!read.revision) throw new Error("この文書にRevisionがありません。");
       const revision = read.revision;
-      let evidence: DocumentEvidenceState;
-      let evidenceLoadFailure: string | null = null;
-      try {
-        const snapshot = await editorAdapter.read({
-          projectId: currentProject.id,
-          documentId: nextDocumentId,
-          revisionId: revision.id,
-          markdown: revision.markdown,
-        }, new AbortController().signal);
-        evidence = initializeDocumentEvidence(revision.markdown, revision.id, snapshot);
-      } catch (error) {
-        evidence = { ...emptyDocumentEvidence(revision.markdown, revision.id), positionsTrusted: false };
-        evidenceLoadFailure = error instanceof Error ? error.message : "根拠を読み込めませんでした。";
-      }
       if (sessionBlockedRef.current || openSequence !== openSequenceRef.current) return;
       selectionRef.current = { projectId: currentProject.id, documentId: nextDocumentId };
       persistSelectionSafely(authorScope, selectionRef.current);
@@ -883,10 +940,9 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         save: dirty ? "idle" : "saved",
         error: "",
         remoteConflict: staleDraft && !recoverablePending ? revision : null,
-        evidence,
+        evidence: { ...emptyDocumentEvidence(revision.markdown, revision.id), positionsTrusted: false },
         evidenceLoadKey: 1,
       });
-      if (evidenceLoadFailure) setEvidenceLoadIssue({ projectId: currentProject.id, documentId: nextDocumentId, revisionId: revision.id, message: evidenceLoadFailure, retrying: false });
       if (draft && staleDraft && !recoverablePending) setNotice("ブラウザーに保存された下書きのbase Revisionが変わっています。比較してから、どちらを使うか選んでください。");
       if (recoverablePending) setNotice("応答が失われた可能性のある保存操作を照合しています。");
       const requested = continueRequestRef.current;
@@ -1007,6 +1063,36 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     }
     return () => controller.abort();
   }, [documentId, explicitRouteDocumentUnavailable, journal, openDocument, projectId, revalidateActiveDocument, resumeEpoch, sessionBlocked]);
+
+  useEffect(() => {
+    if (!active || sessionBlocked) {
+      evidenceReadSequenceRef.current++;
+      evidenceReadControllerRef.current?.abort();
+      evidenceReadControllerRef.current = null;
+      setEvidenceLoadPending(null);
+      return;
+    }
+    const requestSequence = ++evidenceReadSequenceRef.current;
+    void loadOpenEvidence({
+      projectId: active.document.projectId,
+      documentId: active.document.id,
+      revisionId: active.revision.id,
+      markdown: active.revision.markdown,
+    }, requestSequence);
+    return () => {
+      if (evidenceReadSequenceRef.current === requestSequence) {
+        evidenceReadSequenceRef.current++;
+        evidenceReadControllerRef.current?.abort();
+        evidenceReadControllerRef.current = null;
+      }
+    };
+  }, [active?.document.projectId, active?.document.id, authorScope, loadOpenEvidence, sessionBlocked]);
+
+  useEffect(() => () => {
+    evidenceReadSequenceRef.current++;
+    evidenceReadControllerRef.current?.abort();
+    evidenceReadControllerRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (!journal || !active || active.generation < 1) return;
@@ -1746,16 +1832,58 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   async function refreshEvidence(value = activeRef.current): Promise<void> {
     const currentProject = projects.find((item) => item.id === projectId);
     if (!currentProject || !value) return;
-    const snapshot = await editorAdapter.read({
-      projectId: currentProject.id,
-      documentId: value.document.id,
-      revisionId: value.revision.id,
-      markdown: value.revision.markdown,
-    }, new AbortController().signal);
-    const evidence = initializeDocumentEvidence(value.revision.markdown, value.revision.id, snapshot);
-    const latest = activeRef.current;
-    if (latest?.document.id === value.document.id && latest.revision.id === value.revision.id) {
-      publishEditor({ ...latest, evidence, evidenceLoadKey: latest.evidenceLoadKey + 1 });
+    const requestSequence = ++evidenceReadSequenceRef.current;
+    evidenceReadControllerRef.current?.abort();
+    const controller = new AbortController();
+    evidenceReadControllerRef.current = controller;
+    setEvidenceLoadPending({ projectId: currentProject.id, documentId: value.document.id, revisionId: value.revision.id });
+    try {
+      const snapshot = await editorAdapter.read({
+        projectId: currentProject.id,
+        documentId: value.document.id,
+        revisionId: value.revision.id,
+        markdown: value.revision.markdown,
+      }, controller.signal);
+      const latest = activeRef.current;
+      if (controller.signal.aborted || requestSequence !== evidenceReadSequenceRef.current || sessionBlockedRef.current ||
+          latest?.document.projectId !== currentProject.id || latest.document.id !== value.document.id) return;
+      if (latest.revision.id !== value.revision.id) {
+        const nextSequence = ++evidenceReadSequenceRef.current;
+        void loadOpenEvidence({
+          projectId: latest.document.projectId,
+          documentId: latest.document.id,
+          revisionId: latest.revision.id,
+          markdown: latest.revision.markdown,
+        }, nextSequence);
+        return;
+      }
+      const evidence = initializeDocumentEvidence(value.revision.markdown, value.revision.id, snapshot);
+      publishEditor({ ...latest, evidence: latest.dirty || latest.remoteConflict ? markEvidenceNeedsReview(evidence) : evidence, evidenceLoadKey: latest.evidenceLoadKey + 1 });
+      setEvidenceLoadPending(null);
+      setEvidenceLoadIssue(null);
+    } catch (error) {
+      if (controller.signal.aborted || requestSequence !== evidenceReadSequenceRef.current || sessionBlockedRef.current) return;
+      const latest = activeRef.current;
+      if (latest?.document.projectId === currentProject.id && latest.document.id === value.document.id && latest.revision.id !== value.revision.id) {
+        const nextSequence = ++evidenceReadSequenceRef.current;
+        void loadOpenEvidence({
+          projectId: latest.document.projectId,
+          documentId: latest.document.id,
+          revisionId: latest.revision.id,
+          markdown: latest.revision.markdown,
+        }, nextSequence);
+        return;
+      }
+      setEvidenceLoadPending(null);
+      setEvidenceLoadIssue({
+        projectId: currentProject.id,
+        documentId: value.document.id,
+        revisionId: value.revision.id,
+        message: error instanceof Error ? error.message : "根拠を読み込めませんでした。",
+        retrying: false,
+      });
+    } finally {
+      if (evidenceReadControllerRef.current === controller) evidenceReadControllerRef.current = null;
     }
   }
 
@@ -1764,34 +1892,15 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
     const value = activeRef.current;
     if (!issue || !value || issue.retrying || sessionBlockedRef.current ||
         value.document.projectId !== issue.projectId || value.document.id !== issue.documentId) return;
-    const navigationSequence = openSequenceRef.current;
     const requestedRevisionId = value.revision.id;
     setEvidenceLoadIssue({ ...issue, revisionId: requestedRevisionId, retrying: true });
-    try {
-      const snapshot = await editorAdapter.read({
-        projectId: issue.projectId,
-        documentId: issue.documentId,
-        revisionId: requestedRevisionId,
-        markdown: value.revision.markdown,
-      }, new AbortController().signal);
-      const latest = activeRef.current;
-      if (navigationSequence !== openSequenceRef.current || latest?.document.projectId !== issue.projectId || latest.document.id !== issue.documentId) return;
-      if (latest.revision.id !== requestedRevisionId) {
-        setEvidenceLoadIssue({ ...issue, revisionId: latest.revision.id, retrying: false, message: "原稿のRevisionが更新されました。現在のRevisionの根拠を再取得してください。" });
-        return;
-      }
-      if (sessionBlockedRef.current) {
-        setEvidenceLoadIssue({ ...issue, revisionId: latest.revision.id, retrying: false });
-        return;
-      }
-      const evidence = initializeDocumentEvidence(latest.revision.markdown, latest.revision.id, snapshot);
-      publishEditor({ ...latest, evidence: latest.dirty || latest.remoteConflict ? markEvidenceNeedsReview(evidence) : evidence, evidenceLoadKey: latest.evidenceLoadKey + 1 });
-      setEvidenceLoadIssue(null);
-    } catch (error) {
-      const latest = activeRef.current;
-      if (navigationSequence !== openSequenceRef.current || latest?.document.projectId !== issue.projectId || latest.document.id !== issue.documentId) return;
-      setEvidenceLoadIssue({ ...issue, revisionId: latest.revision.id, retrying: false, message: error instanceof Error ? error.message : "根拠を読み込めませんでした。" });
-    }
+    const requestSequence = ++evidenceReadSequenceRef.current;
+    void loadOpenEvidence({
+      projectId: value.document.projectId,
+      documentId: value.document.id,
+      revisionId: requestedRevisionId,
+      markdown: value.revision.markdown,
+    }, requestSequence);
   }
 
   async function createAnchor(): Promise<void> {
@@ -2373,6 +2482,8 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
   const pendingSaveForDisplay = active
     ? pendingSaveRef.current.get(JSON.stringify([active.document.projectId, active.document.id]))
     : undefined;
+  const evidencePendingForActive = Boolean(active && evidenceLoadPending &&
+    evidenceLoadPending.projectId === active.document.projectId && evidenceLoadPending.documentId === active.document.id);
   const editor = (<main className="pg-editor-column" aria-label="PostgreSQL原稿編集">
         {mode === "desktop" && pageError && <p className="pg-alert" role="alert">{pageError}</p>}
         {notice && <p className="pg-notice" role="status">{notice}</p>}
@@ -2429,6 +2540,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
             <p>このRevisionの根拠を取得できませんでした。登録状況は未確認です。{evidenceLoadIssue.message}</p>
             <button type="button" disabled={evidenceLoadIssue.retrying || sessionBlocked} onClick={() => void retryEvidence()}>{evidenceLoadIssue.retrying ? "根拠を再読み込みしています…" : "根拠を再試行"}</button>
           </div>}
+          {evidencePendingForActive && <p role="status">この原稿の根拠を確認しています。</p>}
           <div className="pg-editor-actions" role="group" aria-label="原稿の操作">
             <button type="button" onClick={() => void saveDocument()} disabled={!active.dirty || active.recovery !== "stored" || Boolean(active.remoteConflict) || active.save === "saving"}>
               {active.save === "failed" ? "PostgreSQLへ再試行" : "今すぐ保存"}
@@ -2448,7 +2560,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
                   }
                 }}>印刷</button>
                 <button type="button" onClick={() => void loadRevisions()} disabled={active.dirty || Boolean(active.remoteConflict)}>Revision履歴</button>
-                <button type="button" onClick={() => void createAnchor()} disabled={active.dirty || Boolean(active.remoteConflict) || active.save !== "saved" || Boolean(evidenceLoadIssue && evidenceLoadIssue.projectId === active.document.projectId && evidenceLoadIssue.documentId === active.document.id)}>選択範囲をText Anchorにする</button>
+                <button type="button" onClick={() => void createAnchor()} disabled={active.dirty || Boolean(active.remoteConflict) || active.save !== "saved" || evidencePendingForActive || Boolean(evidenceLoadIssue && evidenceLoadIssue.projectId === active.document.projectId && evidenceLoadIssue.documentId === active.document.id)}>選択範囲をText Anchorにする</button>
               </div>
             </details>
             <details className="pg-editor-display-menu">

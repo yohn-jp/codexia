@@ -77,6 +77,72 @@ test("an anchor read failure leaves the confirmed manuscript readable and can be
   }
 });
 
+test("the manuscript opens and remains editable while its anchor read is pending", async ({ page }) => {
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  for (const mode of ["desktop", "mobile"] as const) {
+    const fixture = await createWritingFixture(page, mode, `Pending anchor read ${mode} ${crypto.randomUUID()}`, "Readable while anchors are pending.");
+    let releaseAnchors!: () => void;
+    let reportAnchorRequest!: () => void;
+    const anchorsReleased = new Promise<void>((resolve) => { releaseAnchors = resolve; });
+    const anchorRequestStarted = new Promise<void>((resolve) => { reportAnchorRequest = resolve; });
+    const anchorUrl = new URL(`/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.id}/anchors*`, page.url()).toString();
+    await page.route(anchorUrl, async (route) => {
+      const response = await route.fetch();
+      reportAnchorRequest();
+      await anchorsReleased;
+      await route.fulfill({ response });
+    });
+
+    try {
+      const query = mode === "mobile" ? "?view=writing" : "";
+      await page.goto(new URL(`/${mode}/projects/${fixture.project.id}/scenes/${fixture.scene.id}${query}`, page.url()).toString());
+      await anchorRequestStarted;
+      await expect(manuscriptEditor(page)).toBeVisible();
+      await expect(manuscriptEditor(page)).toContainText("Readable while anchors are pending.");
+      await expect(page.locator(".pg-editor-column").getByRole("status").filter({ hasText: "根拠を確認しています" })).toBeVisible();
+      const commands = page.locator(".pg-editor-command-menu");
+      if (!await commands.evaluate((element) => (element as HTMLDetailsElement).open)) await commands.locator("summary").click();
+      await expect(commands.getByRole("button", { name: "選択範囲をText Anchorにする" })).toBeDisabled();
+      await fillDraft(page, "Typed while anchors are pending.");
+      releaseAnchors();
+      await expect(page.locator(".pg-editor-column").getByRole("status").filter({ hasText: "根拠を確認しています" })).toHaveCount(0);
+      await expect(manuscriptEditor(page)).toHaveText("Typed while anchors are pending.");
+    } finally {
+      releaseAnchors();
+    }
+  }
+});
+
+test("a pending anchor read from the previous scene cannot replace the selected manuscript", async ({ page }) => {
+  expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
+  const fixture = await createWritingFixture(page, "desktop", `Stale anchor read ${crypto.randomUUID()}`, "First scene manuscript.");
+  let releaseAnchors!: () => void;
+  let reportAnchorRequest!: () => void;
+  const anchorsReleased = new Promise<void>((resolve) => { releaseAnchors = resolve; });
+  const anchorRequestStarted = new Promise<void>((resolve) => { reportAnchorRequest = resolve; });
+  const anchorUrl = new URL(`/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.id}/anchors*`, page.url()).toString();
+  await page.route(anchorUrl, async (route) => {
+    const response = await route.fetch();
+    reportAnchorRequest();
+    await anchorsReleased;
+    await route.fulfill({ response }).catch(() => undefined);
+  });
+
+  try {
+    await page.goto(new URL(`/desktop/projects/${fixture.project.id}/scenes/${fixture.scene.id}`, page.url()).toString());
+    await anchorRequestStarted;
+    const secondScene = page.locator(`.pg-document-list .pg-outline-item[data-document-id="${fixture.second.id}"] > .pg-outline-row > .pg-outline-document`);
+    await secondScene.click();
+    await expect(manuscriptEditor(page)).toContainText("最初の本文。");
+    await expect(page.getByRole("heading", { name: fixture.second.title, exact: true })).toBeVisible();
+    releaseAnchors();
+    await expect(manuscriptEditor(page)).toContainText("最初の本文。");
+    await expect(page.getByRole("heading", { name: fixture.second.title, exact: true })).toBeVisible();
+  } finally {
+    releaseAnchors();
+  }
+});
+
 test("Knowledge browse searches literal aliases and pages the same project on Desktop and Mobile", async ({ page }) => {
   expect(databaseUrl, "the browser acceptance server must use a disposable PostgreSQL database").toBeTruthy();
   const fixture = await createWritingFixture(page, "desktop", `Knowledge browse ${crypto.randomUUID()}`);
