@@ -18,8 +18,12 @@ if [[ "$action" == cleanup ]]; then
     exit 0
   fi
   if [[ -f "$root/sshd.pid" ]]; then
-    sudo kill "$(cat "$root/sshd.pid")" 2>/dev/null || true
+    sudo kill "$(sudo cat "$root/sshd.pid")" 2>/dev/null || true
   fi
+  # GitHub may cancel a running playbook before its SSH sessions exit.
+  # Both accounts were newly created under this workflow-owned marker.
+  sudo pkill -KILL -u "$ssh_user" 2>/dev/null || true
+  sudo pkill -KILL -u "$service_user" 2>/dev/null || true
   sudo rm -f -- "$sudoers"
   for account in "$ssh_user" "$service_user"; do
     if getent passwd "$account" >/dev/null; then
