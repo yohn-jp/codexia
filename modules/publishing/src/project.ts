@@ -255,7 +255,7 @@ export async function readPublishingProject(reader: SnapshotReader): Promise<Pub
     ? projectMetadata.subtitle.trim()
     : undefined;
   const files = await reader.list("plot/volumes");
-  const volumesByPath = new Map<string, PublishingVolume>();
+  const volumes: PublishingVolume[] = [];
   const volumesById = new Map<string, PublishingVolume>();
   const chaptersById = new Map<string, PublishingChapter>();
   const chapterVolumeIds = new Map<PublishingChapter, string>();
@@ -271,27 +271,27 @@ export async function readPublishingProject(reader: SnapshotReader): Promise<Pub
       ...(volumeOrder === undefined ? {} : { order: volumeOrder }),
       chapters: [],
     };
-    volumesByPath.set(volumePathId, volume);
+    volumes.push(volume);
     volumesById.set(volumeId, volume);
-    const chapterPrefix = `plot/volumes/${volumePathId}/chapters/`;
-    for (const chapterFile of files.filter((path) => path.startsWith(chapterPrefix) && /^plot\/volumes\/[^/]+\/chapters\/[^/]+\/chapter\.yaml$/u.test(path))) {
-      const chapterPathId = chapterFile.split("/")[4]!;
-      const chapterData = await readYaml(reader, chapterFile);
-      if (!chapterData || chapterData.kind !== "chapter") continue;
-      const chapterId = nodeId(chapterData, chapterPathId);
-      const chapterOrder = nodeOrder(chapterData);
-      const parentVolume = typeof chapterData.volume === "string" ? volumesById.get(chapterData.volume) : undefined;
-      if (!parentVolume) continue;
-      const chapter: PublishingChapter = {
-        id: chapterId,
-        title: nodeTitle(chapterData, chapterId),
-        ...(chapterOrder === undefined ? {} : { order: chapterOrder }),
-        scenes: [],
-      };
-      parentVolume.chapters.push(chapter);
-      chaptersById.set(chapterId, chapter);
-      chapterVolumeIds.set(chapter, parentVolume.id);
-    }
+  }
+  // A moved chapter retains its storage path and names its current parent in the snapshot.
+  for (const chapterFile of files.filter((path) => /^plot\/volumes\/[^/]+\/chapters\/[^/]+\/chapter\.yaml$/u.test(path))) {
+    const chapterPathId = chapterFile.split("/")[4]!;
+    const chapterData = await readYaml(reader, chapterFile);
+    if (!chapterData || chapterData.kind !== "chapter") continue;
+    const chapterId = nodeId(chapterData, chapterPathId);
+    const chapterOrder = nodeOrder(chapterData);
+    const parentVolume = typeof chapterData.volume === "string" ? volumesById.get(chapterData.volume) : undefined;
+    if (!parentVolume) continue;
+    const chapter: PublishingChapter = {
+      id: chapterId,
+      title: nodeTitle(chapterData, chapterId),
+      ...(chapterOrder === undefined ? {} : { order: chapterOrder }),
+      scenes: [],
+    };
+    parentVolume.chapters.push(chapter);
+    chaptersById.set(chapterId, chapter);
+    chapterVolumeIds.set(chapter, parentVolume.id);
   }
 
   for (const sceneFile of files.filter((path) => /^plot\/volumes\/[^/]+\/chapters\/[^/]+\/scenes\/[^/]+\.yaml$/u.test(path))) {
@@ -317,11 +317,11 @@ export async function readPublishingProject(reader: SnapshotReader): Promise<Pub
     });
   }
 
-  for (const volume of volumesByPath.values()) {
+  for (const volume of volumes) {
     volume.chapters.sort(compareOrdered);
     for (const chapter of volume.chapters) chapter.scenes.sort(compareOrdered);
   }
-  return { title, ...(subtitle ? { subtitle } : {}), volumes: [...volumesByPath.values()].sort(compareOrdered) };
+  return { title, ...(subtitle ? { subtitle } : {}), volumes: volumes.sort(compareOrdered) };
 }
 
 export function collectPublishingScenes(

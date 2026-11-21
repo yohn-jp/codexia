@@ -579,7 +579,7 @@ done
 # reject drift before invoking an installed updater, even before a journal exists.
 guard="$tmp/guard"
 mkdir -p "$guard/source/deploy/updater" "$guard/source/scripts" "$guard/quadlet"
-for file in deploy/updater/{codexia-updater,standalone-updater.mjs,standalone-host.mjs,standalone-maintenance.mjs,proxy.mjs,standalone-backup.sh} scripts/{standalone-update-controller.mjs,update-host-state.mjs,update-channel.mjs,update-release-policy.mjs}; do
+for file in deploy/updater/{codexia-updater,standalone-updater.mjs,standalone-host.mjs,standalone-maintenance.mjs,proxy.mjs,provision-preflight-role.sql,standalone-backup.sh} scripts/{standalone-update-controller.mjs,standalone-schema-maintenance.mjs,update-host-state.mjs,update-channel.mjs,update-release-policy.mjs}; do
   install -m 0600 "$root/$file" "$guard/source/$file"
 done
 printf 'fixture proxy\n' > "$guard/quadlet/codexia-api-proxy.container"

@@ -15,6 +15,7 @@ const channelUrl='https://api.github.com/repos/yohn-jp/codexia/contents/stable-c
 const modelCacheRoot='/var/cache/codexia/models';
 const fingerprintCode='import { packagedMigrationFingerprint } from "@codexia/api"; console.log(await packagedMigrationFingerprint());';
 const initializeSchemaCode=`import {readFileSync} from 'node:fs'; import {inspectFreshPostgresSchema,initializeFreshPostgresSchema,verifyPostgresSchema} from '@codexia/api'; const password=readFileSync('/run/secrets/app-password','utf8').replace(/\\n+$/u,''); if(!/^[a-fA-F0-9]+$/u.test(password))throw Error('Invalid database secret'); const url='postgres://codexia:'+password+'@codexia-db:5432/codexia'; if(process.argv[1]==='inspect'){console.log(JSON.stringify(await inspectFreshPostgresSchema(url)));}else{const applied=await initializeFreshPostgresSchema(url); console.log(JSON.stringify({applied,fingerprint:await verifyPostgresSchema(url)}));}`;
+const additiveSchemaCode=`import {readFileSync} from 'node:fs'; import {migratePostgresAdditiveSchema,verifyPostgresSchema} from '@codexia/api'; const password=readFileSync('/run/secrets/app-password','utf8').replace(/\\n+$/u,''); if(!/^[a-fA-F0-9]+$/u.test(password))throw Error('Invalid database secret'); const url='postgres://codexia:'+password+'@codexia-db:5432/codexia'; const applied=await migratePostgresAdditiveSchema(url,process.argv[1],process.argv[2]); console.log(JSON.stringify({applied,fingerprint:await verifyPostgresSchema(url)}));`;
 const readyCode=`const health=await fetch("http://127.0.0.1:3000/health/ready",{signal:AbortSignal.timeout(5000)});if(!health.ok)process.exit(1);const version=await fetch("http://127.0.0.1:3000/api/version",{signal:AbortSignal.timeout(5000)});if(!version.ok)process.exit(1);console.log(JSON.stringify(await version.json()));`;
 const proxyProbeCode=`const r=await fetch("http://127.0.0.1:3000/api/version",{signal:AbortSignal.timeout(5000)});if(!r.ok)process.exit(1);console.log(JSON.stringify({slot:r.headers.get("x-codexia-upstream-slot"),version:await r.json()}));`;
 const authProbeCode=`import {readFileSync} from "node:fs";const token=readFileSync("/run/secrets/codexia-auth-token","utf8").trim();const r=await fetch("http://codexia-api-proxy:3000/api/v1/persistence/status",{headers:{Authorization:"Bearer "+token},signal:AbortSignal.timeout(5000)});if(!r.ok)process.exit(1);const body=await r.json();if(body.available!==true)process.exit(1);`;
@@ -2071,6 +2072,29 @@ export class PodmanStandaloneHost{
     assert.ok(Array.isArray(result.applied)&&result.applied.every(item=>typeof item==='string'),'Invalid migration result');
     return result;
   }
+  async applyAdditiveSchema(release,expectedPriorFingerprint,expectedTargetFingerprint){
+    assert.equal(release.migrationFingerprint,expectedTargetFingerprint,'Additive schema target fingerprint differs from release');
+    const result=JSON.parse(run('podman',['run','--rm','--name','codexia-schema-maintainer','--network','codexia-data',
+      '--read-only','--image-volume=ignore','--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=64m',
+      '--cap-drop','all','--security-opt','no-new-privileges',
+      '--secret','codexia-postgres-app-password,type=mount,target=/run/secrets/app-password',
+      '--entrypoint','node',release.image,'--input-type=module','-e',additiveSchemaCode,
+      expectedPriorFingerprint,expectedTargetFingerprint],{timeout:300000}));
+    assert.ok(Array.isArray(result.applied)&&result.applied.every(item=>typeof item==='string'),'Invalid additive migration result');
+    assert.equal(result.fingerprint,expectedTargetFingerprint,'Additive migration fingerprint mismatch');
+    return result;
+  }
+  async schemaFingerprint(release){
+    assert.equal(release.profile,this.runtime?.profile,'Schema verification release profile differs from runtime contract');
+    const result=run('podman',['run','--rm','--name','codexia-schema-verifier','--network','codexia-data',
+      '--read-only','--image-volume=ignore','--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=64m',
+      '--cap-drop','all','--security-opt','no-new-privileges',
+      '--secret','codexia-postgres-app-password,type=mount,target=/run/secrets/app-password',
+      '--entrypoint','node',release.image,'--input-type=module','-e',
+      "import {readFileSync} from 'node:fs'; import {verifyPostgresSchema} from '@codexia/api'; const password=readFileSync('/run/secrets/app-password','utf8').replace(/\\n+$/u,''); console.log(await verifyPostgresSchema('postgres://codexia:'+password+'@codexia-db:5432/codexia'));"],{timeout:300000});
+    assert.match(result,/^sha256:[a-f0-9]{64}$/u,'Schema fingerprint is unobservable');
+    return result;
+  }
   async assertLegacyRelease(value,{allowUnadvertisedEpoch=false}={}){
     const release=validateUpdateRelease(value);
     const legacy=inspect('codexia-api');
@@ -2152,12 +2176,25 @@ export class PodmanStandaloneHost{
       await delay(1000);
     }
   }
+  async convergePreflightSchemaGrants(){
+    const credential=readRotationSecret('codexia-postgres-preflight-password');
+    assert.ok(credential,'Canonical read-only PostgreSQL preflight secret is missing');
+    const script=await readFile(fileURLToPath(new URL('./provision-preflight-role.sql',import.meta.url)),'utf8');
+    const input='\\set preflight_password '+credential.password.replace(/\n$/u,'')+'\n'+script;
+    runWithSensitiveInput('podman',['exec','-i','codexia-db','sh','-ec',
+      'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia'],input);
+    const login=runWithSensitiveInput('podman',['exec','-i','codexia-db','sh','-ec',
+      'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia_preflight -d codexia -c "SELECT current_user || chr(58) || current_setting(\'transaction_read_only\')"'],
+    credential.password.replace(/\n$/u,'')+'\n');
+    assert.equal(login.trim(),'codexia_preflight:on','Canonical preflight credential is not an effective read-only TCP login');
+  }
   async prepare(slot,release,owner){
     validateUpdateRelease(release);
     if(owner){
       assert.deepEqual(owner.release,release,'Initial preflight release differs from operation owner');
       await this.stopInitialPreflight(slot,owner);
     }else await this.stopPreflight(slot,release.image);
+    await this.convergePreflightSchemaGrants();
     // Only the preflight password is available; the real writer credential and shared volumes are absent.
     const auth=randomBytes(32).toString('hex');
     const runtimeArgs=this.runtime?runtimeContainerArgs(this.runtime):['--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=64m'];

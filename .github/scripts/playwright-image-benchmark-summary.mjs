@@ -48,7 +48,8 @@ async function jobLog(jobId) {
 }
 
 function pullDuration(log, source, browser) {
-  const repository = source === 'MCR official' ? 'mcr.microsoft.com/playwright' : `ghcr.io/${GITHUB_REPOSITORY.toLowerCase()}/playwright-${browser}`;
+  const suffix = source === 'GHCR mirror' ? 'mirror-all' : source === 'GHCR Ubuntu' ? `ubuntu-${browser}` : browser;
+  const repository = source === 'MCR official' ? 'mcr.microsoft.com/playwright' : `ghcr.io/${GITHUB_REPOSITORY.toLowerCase()}/playwright-${suffix}`;
   let startTime;
   let image;
   for (const line of log.split('\n')) {
@@ -63,10 +64,10 @@ function pullDuration(log, source, browser) {
   return null;
 }
 
-const selected = (await listRunJobs()).filter(j => /^(MCR official|GHCR minimal) \/ (chromium|webkit)$/u.test(j.name));
+const selected = (await listRunJobs()).filter(j => /^(MCR official|GHCR minimal|GHCR mirror|GHCR Ubuntu) \/ (chromium|webkit)$/u.test(j.name));
 const result = [];
 for (const job of selected) {
-  const [, source, browser] = /^(MCR official|GHCR minimal) \/ (chromium|webkit)$/u.exec(job.name);
+  const [, source, browser] = /^(MCR official|GHCR minimal|GHCR mirror|GHCR Ubuntu) \/ (chromium|webkit)$/u.exec(job.name);
   const init = job.steps?.find(s => s.name === 'Initialize containers');
   const test = job.steps?.find(s => s.name === 'Run real browser acceptance');
   let pull = null;
@@ -76,7 +77,7 @@ for (const job of selected) {
   result.push({ source, browser, conclusion: job.conclusion, pull, init: elapsed(init?.started_at, init?.completed_at), test: elapsed(test?.started_at, test?.completed_at), total: elapsed(job.started_at, job.completed_at), error });
 }
 
-const expected = ['chromium', 'webkit'].flatMap(browser => ['MCR official', 'GHCR minimal'].map(source => ({ browser, source })));
+const expected = ['chromium', 'webkit'].flatMap(browser => ['MCR official', 'GHCR mirror', 'GHCR minimal', 'GHCR Ubuntu'].map(source => ({ browser, source })));
 const lines = [
   '### Playwright image A/B (fresh ubuntu-24.04 runners)', '',
   '| Browser | Image | Pull | Initialize containers | Browser test | Job elapsed | Conclusion |',
