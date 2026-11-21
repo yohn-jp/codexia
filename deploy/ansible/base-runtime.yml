@@ -45,6 +45,7 @@
         codexia-postgres-admin-password codexia-postgres-app-password; do
           podman secret exists "$secret";
         done
+    expand_argument_vars: false
   register: base_runtime_secrets
   changed_when: false
   failed_when: base_runtime_secrets.rc != 0
