@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 
 const requiredSettings = Object.freeze([
   ['VITE_CODEXIA_OAUTH_ISSUER', 'OAuth issuer'],
@@ -69,10 +69,10 @@ export function readFrontendOAuthConfig(env = process.env) {
 /** Stable identity for the public OAuth configuration embedded in a static bundle. */
 export function frontendOAuthConfigHash(env = process.env) {
   const config = readFrontendOAuthConfig(env);
-  // This fingerprints public OAuth client metadata, not passwords or secrets.
-  const fingerprint = createHash('sha256');
-  fingerprint.write(JSON.stringify({ format: configFormat, settings: config }));
-  return fingerprint.digest('hex');
+  // Domain-separated fingerprint of public metadata; the key is public, not an authentication secret.
+  return createHmac('sha256', configFormat)
+    .update(JSON.stringify({ format: configFormat, settings: config }))
+    .digest('hex');
 }
 
 /** Reject promotion or release artifacts that were built with different public OAuth settings. */
