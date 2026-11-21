@@ -1733,10 +1733,7 @@ function PersistenceWorkspaceController({ mode, hosted, authorScope, onSignOut, 
         if (committed) {
           setOutlineReadyProject("");
           setOutlineError((remove ? "文書は削除済みですが、目次を再取得できませんでした。" : "構成は変更済みですが、目次を再取得できませんでした。") + message);
-        } else {
-          setPageError(message);
-          setOutlineError(message);
-        }
+        } else setPageError(message);
       }
     } finally {
       structureMutationRef.current = false;
