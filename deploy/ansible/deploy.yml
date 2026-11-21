@@ -431,11 +431,27 @@
       echo 'Could not stop the active API and Tunnel; deployment transaction remains pending for recovery' >&2
       exit 1
     fi
-    if [[ -n "$current_image" ]]; then
-      if ! "$backup_program" backup-locked "$backup_destination" "$backup_recipient" \
-        --approved --lock-file "$lock_file" --lock-fd 9; then
-        restore_previous || echo 'Previous API recovery failed after backup failure' >&2
-        echo 'Encrypted off-VM backup failed; candidate was not applied' >&2
+    if ! "$backup_program" backup-locked "$backup_destination" "$backup_recipient" \
+      --approved --lock-file "$lock_file" --lock-fd 9; then
+      restore_previous || echo 'Previous API recovery failed after backup failure' >&2
+      echo 'Encrypted off-VM backup failed; candidate was not applied' >&2
+      exit 1
+    fi
+    if [[ "$had_unit" != true ]]; then
+      if ! podman run --rm --network codexia-data \
+        --secret=codexia-postgres-app-password,type=mount,target=/run/secrets/app-password \
+        --env CODEXIA_DATABASE_PASSWORD_FILE=/run/secrets/app-password \
+        --entrypoint=node "$candidate_image" --input-type=module -e '
+          import { readFileSync } from "node:fs";
+          import { initializeFreshPostgresSchema } from "@codexia/persistence-postgres";
+          const password = readFileSync(process.env.CODEXIA_DATABASE_PASSWORD_FILE, "utf8").trim();
+          if (!/^[a-fA-F0-9]{64}$/u.test(password)) throw new Error("Database application secret is invalid");
+          const connectionString = `postgres://codexia:${password}@codexia-db:5432/codexia`;
+          const applied = await initializeFreshPostgresSchema(connectionString);
+          console.log(applied.length ? `INITIALIZED_FRESH_SCHEMA ${applied.join(",")}` : "VERIFIED_EXACT_SCHEMA");
+        '; then
+        restore_previous || echo 'First activation rollback failed after schema initialization error' >&2
+        echo 'Fresh database initialization failed; no API was activated' >&2
         exit 1
       fi
     fi
