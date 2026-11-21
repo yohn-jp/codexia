@@ -2066,12 +2066,25 @@ export class PodmanStandaloneHost{
       await delay(1000);
     }
   }
+  async convergePreflightSchemaGrants(){
+    const credential=readRotationSecret('codexia-postgres-preflight-password');
+    assert.ok(credential,'Canonical read-only PostgreSQL preflight secret is missing');
+    const script=await readFile(fileURLToPath(new URL('./provision-preflight-role.sql',import.meta.url)),'utf8');
+    const input='\\set preflight_password '+credential.password.replace(/\n$/u,'')+'\n'+script;
+    runWithSensitiveInput('podman',['exec','-i','codexia-db','sh','-ec',
+      'export PGPASSWORD="$(cat /run/secrets/admin-password)"; exec psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia'],input);
+    const login=runWithSensitiveInput('podman',['exec','-i','codexia-db','sh','-ec',
+      'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia_preflight -d codexia -c "SELECT current_user || chr(58) || current_setting(\'transaction_read_only\')"'],
+    credential.password);
+    assert.equal(login.trim(),'codexia_preflight:on','Canonical preflight credential is not an effective read-only TCP login');
+  }
   async prepare(slot,release,owner){
     validateUpdateRelease(release);
     if(owner){
       assert.deepEqual(owner.release,release,'Initial preflight release differs from operation owner');
       await this.stopInitialPreflight(slot,owner);
     }else await this.stopPreflight(slot,release.image);
+    await this.convergePreflightSchemaGrants();
     // Only the preflight password is available; the real writer credential and shared volumes are absent.
     const auth=randomBytes(32).toString('hex');
     const runtimeArgs=this.runtime?runtimeContainerArgs(this.runtime):['--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=64m'];

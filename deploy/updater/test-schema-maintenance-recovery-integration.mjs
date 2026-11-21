@@ -70,7 +70,9 @@ async function adapters(fixture) {
     await writeFile(keyFile, privateKeyPem, { mode: 0o600, flag: 'wx' });
     await writeFile(publicKeyFile, publicKeyPem, { mode: 0o644, flag: 'wx' });
   }
-  const routeFile = path.join(fixture.root, 'route');
+  const routeDirectory = path.join(fixture.root, 'proxy-state');
+  await mkdir(routeDirectory, { recursive: true, mode: 0o700 });
+  const routeFile = path.join(routeDirectory, 'route');
   const stateFile = path.join(fixture.root, 'controller.json');
   const markerFile = path.join(fixture.root, 'maintenance', 'in-progress.json');
   const config = { browserAuth: { mode: 'token' }, frontendIdentityUrl: 'https://codexia.invalid/desktop/update-identity.json',
@@ -141,6 +143,13 @@ async function adapters(fixture) {
     assert.deepEqual(owner.release, item);
     assert.deepEqual((await host.observe()).writers, []);
     assert.equal(await host.routeState(), 'blocked', 'Recovery preflight requires the route held closed');
+    await host.convergePreflightSchemaGrants();
+    const preflightPassword = (await readFile(path.join(fixture.workDir, 'postgres-preflight-password'), 'utf8')).trim();
+    assert.match(preflightPassword, /^[a-fA-F0-9]{64}$/u);
+    const preflightRead = run('podman', ['exec', '-i', 'codexia-db', 'sh', '-ec',
+      'IFS= read -r PGPASSWORD; export PGPASSWORD; psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U codexia_preflight -d codexia -c "SELECT count(*) FROM public.codexia_schema_maintenance_ci"'],
+    { input: preflightPassword + '\n' });
+    assert.equal(preflightRead, '0', 'Canonical read-only preflight did not receive SELECT on the new migration table');
     const auth = randomBytes(32).toString('hex');
     const label = 'io.codexia.initial-activation=' + owner.operationId;
     run('podman', ['run', '--detach', '--name', 'codexia-preflight-blue', '--label', label,
@@ -236,7 +245,7 @@ async function startProxy(fixture, host) {
   run('systemd-run', ['--user', '--unit=codexia-api-proxy.service', '--collect', '--property=Restart=on-failure',
     '/usr/bin/podman', 'run', '--rm', '--name', 'codexia-api-proxy', '--network', 'codexia',
     '--label', `codexia.runtime-contract-test=${fixture.nonce}`, '--user', '0', '--read-only', '--cap-drop', 'all',
-    '--security-opt', 'no-new-privileges', '--volume', `${host.config.routeFile}:/config/state/route:ro`,
+    '--security-opt', 'no-new-privileges', '--volume', `${path.dirname(host.config.routeFile)}:/config/state:ro`,
     '--volume', `${proxySource}:/config/proxy.mjs:ro`, '--entrypoint', 'node', fixture.images.baseId, '/config/proxy.mjs']);
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
@@ -247,23 +256,11 @@ async function startProxy(fixture, host) {
 
 async function resetSchema(host, release) {
   run('podman', ['exec', 'codexia-db', 'sh', '-ec',
-    'export PGPASSWORD="$(cat /run/secrets/admin-password)"; psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO codexia; GRANT ALL ON SCHEMA public TO public"']);
+    'export PGPASSWORD="$(cat /run/secrets/admin-password)"; psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public AUTHORIZATION pg_database_owner; GRANT USAGE ON SCHEMA public TO PUBLIC"']);
   const initialized = await host.initializeFreshSchema(release);
   assert.equal(initialized.fingerprint, release.migrationFingerprint);
   run('podman', ['exec', 'codexia-db', 'sh', '-ec',
     'export PGPASSWORD="$(cat /run/secrets/admin-password)"; psql -X -qAt -v ON_ERROR_STOP=1 -U codexia_admin -d codexia -c "CREATE TABLE public.codexia_schema_maintenance_seed (id text PRIMARY KEY, value text NOT NULL); INSERT INTO public.codexia_schema_maintenance_seed VALUES (\'fixture-seed\', \'preserve-me\')"']);
-  const password = (await readFile(path.join(path.dirname(host.config.stateFile), '..', '..', 'postgres-preflight-password'), 'utf8')).trim();
-  assert.match(password, /^[a-fA-F0-9]{64}$/u);
-  const sql = `IFS= read -r PREFLIGHT_PASSWORD; export PREFLIGHT_PASSWORD; export PGPASSWORD="$(cat /run/secrets/admin-password)"; psql -X -v ON_ERROR_STOP=1 -U codexia_admin -d codexia <<'SQL'\n` +
-    `\\getenv preflight_password PREFLIGHT_PASSWORD\n` +
-    `SELECT format('CREATE ROLE codexia_preflight LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD %L', :'preflight_password') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='codexia_preflight') \\gexec\n` +
-    `ALTER ROLE codexia_preflight WITH PASSWORD :'preflight_password';\n` +
-    `ALTER ROLE codexia_preflight SET default_transaction_read_only = on;\n` +
-    `GRANT CONNECT ON DATABASE codexia TO codexia_preflight;\n` +
-    `GRANT USAGE ON SCHEMA public TO codexia_preflight;\n` +
-    `GRANT SELECT ON ALL TABLES IN SCHEMA public TO codexia_preflight;\n` +
-    `ALTER DEFAULT PRIVILEGES FOR ROLE codexia IN SCHEMA public GRANT SELECT ON TABLES TO codexia_preflight;\nSQL`;
-  execFileSync('podman', ['exec', '-i', 'codexia-db', 'sh', '-ec', sql], { input: password + '\n', stdio: ['pipe', 'ignore', 'pipe'], encoding: 'utf8' });
 }
 
 async function launch(fixture, mode, scenario) {

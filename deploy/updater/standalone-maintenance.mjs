@@ -17,6 +17,7 @@ export const MAINTENANCE_SOURCE_FILES = Object.freeze([
   'deploy/updater/standalone-host.mjs',
   'deploy/updater/standalone-maintenance.mjs',
   'deploy/updater/proxy.mjs',
+  'deploy/updater/provision-preflight-role.sql',
   'deploy/updater/standalone-backup.sh',
   'scripts/standalone-schema-maintenance.mjs',
   'scripts/standalone-update-controller.mjs',

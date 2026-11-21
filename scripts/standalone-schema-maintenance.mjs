@@ -56,10 +56,10 @@ async function assertWriter(controller, state, slot, release, route) {
   await controller.host.probe(slot, release);
 }
 
-async function ensureWriter(controller, state, slot, release) {
+async function ensureWriter(controller, state, slot, release, operationId) {
   const observed = await controller.host.observe();
   if (observed.writers.length === 0) {
-    const owner = { operationId: randomUUID(), release };
+    const owner = { operationId, release };
     try { await controller.host.prepare(slot, release, owner); }
     finally { await controller.host.stopInitialPreflight(slot, owner); }
     await controller.host.startWriter(slot, release);
@@ -104,7 +104,7 @@ export async function runSchemaMaintenance({ controller, state: stateValue, targ
     state = targetState(state, target, channel.checkpoint, intent.priorSlot);
     await markerStore.save({ ...intent, phase: 'committed' });
     await controller.save(state);
-    await ensureWriter(controller, state, intent.priorSlot, target);
+    await ensureWriter(controller, state, intent.priorSlot, target, intent.operationId);
     const route = intent.priorSlot;
     await controller.host.route(route);
     await assertWriter(controller, state, intent.priorSlot, target, route);
@@ -139,13 +139,18 @@ export async function recoverSchemaMaintenance({ controller, state: stateValue, 
   if (targetCommitted === priorIntact) throw new Error('Schema maintenance recovery cannot classify database state');
   const release = targetCommitted ? marker.targetRelease : marker.priorRelease;
   const slot = marker.priorSlot;
-  state = targetCommitted ? targetState(state, release, state.journal.checkpoint, slot) : state;
   const recoveredPaused = marker.priorPaused;
   const channel = verifyUpdateChannel(await controller.host.fetchChannel(), controller.publicKey, state.journal.checkpoint, controller.now());
-  const recoveredState = targetCommitted && !targetStatePersisted ? targetState(state, release, channel.checkpoint, slot) : { ...state, journal: { ...state.journal, checkpoint: channel.checkpoint }, paused: recoveredPaused, lastError: null };
+  assert.ok(channel.payload.releases.some(item => item.state === 'published' && JSON.stringify(item) === JSON.stringify(release)),
+    'Recovered schema release is absent from the authenticated channel');
+  await controller.uiEpoch(release);
+  const recoveredState = targetCommitted && !targetStatePersisted
+    ? targetState(state, release, channel.checkpoint, slot)
+    : { ...state, journal: { ...state.journal, checkpoint: channel.checkpoint }, paused: recoveredPaused, lastError: null };
   await controller.save(recoveredState);
   state = recoveredState;
-  await ensureWriter(controller, state, slot, release);
+  await ensureWriter(controller, state, slot, release, marker.operationId);
+  await assertWriter(controller, state, slot, release, 'blocked');
   // Paused preserves serving traffic; only the polling timer remains stopped.
   const servingRoute = slot;
   await controller.host.route(servingRoute);
