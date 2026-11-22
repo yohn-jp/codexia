@@ -31,7 +31,7 @@ async function emitJobEvent(page: Page, event: Record<string, unknown>): Promise
   }, event);
 }
 
-test("authenticated inbox preserves owner job history and updates it from SSE", async ({ page }) => {
+test("the authenticated inbox UI retains terminal jobs and marks notifications read", async ({ page }) => {
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   const jobs = [
     fixtureJob({ id: "job-running-1" }),
@@ -85,6 +85,7 @@ test("authenticated inbox preserves owner job history and updates it from SSE", 
     },
   ];
   const apiRequestsBeforeLogin: string[] = [];
+  const readRequests: string[] = [];
   let gateNextJobsRead = false;
   let terminalEventSent = false;
   let releaseQueuedRead!: () => void;
@@ -197,6 +198,7 @@ test("authenticated inbox preserves owner job history and updates it from SSE", 
       await route.fulfill({ json: { items, unreadCount: inboxItems.filter((item) => !item.read).length } });
       return;
     }
+    readRequests.push(`${route.request().method()} ${path}`);
     if (path === "/api/inbox/read-all") {
       const marked = inboxItems.filter((item) => !item.read).length;
       inboxItems = inboxItems.map((item) => ({ ...item, read: true }));
@@ -274,11 +276,14 @@ test("authenticated inbox preserves owner job history and updates it from SSE", 
   const racedJob = dialog.getByRole("listitem").filter({ hasText: "speaker-evaluation-race" });
   await expect(racedJob).toContainText("完了");
   await expect(notifications).toContainText("Completion after queued snapshot");
-  await expect(inboxButton).toContainText("3");
+  await expect(inboxButton).toHaveAccessibleName("受信箱（未読 3）");
 
-  await notifications.getByRole("button", { name: "既読" }).first().click();
+  const completedNotification = notifications.getByRole("listitem").filter({ hasText: "Synthetic completion message" });
+  await completedNotification.getByRole("button", { name: "既読", exact: true }).click();
+  await expect(completedNotification.getByRole("button", { name: "既読", exact: true })).toHaveCount(0);
   await expect(notifications).toContainText("未読 2 件");
   await dialog.getByRole("button", { name: "すべて既読" }).click();
   await expect(notifications).toContainText("未読 0 件");
-  await expect(inboxButton).not.toContainText("2");
+  await expect(inboxButton).toHaveAccessibleName("受信箱");
+  expect(readRequests).toEqual(["POST /api/inbox/inbox-done-1/read", "POST /api/inbox/read-all"]);
 });
