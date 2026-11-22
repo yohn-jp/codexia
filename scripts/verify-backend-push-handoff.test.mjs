@@ -1,11 +1,18 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
+import { REQUIRED_VERIFICATION_JOBS } from './ci-contract.mjs';
 import * as handoff from './verify-backend-push-handoff.mjs';
 import {
   assertTrustedBackendPublicationRun,
   createHandoffDeploymentOutputs,
   selectPushDeploymentCertificateArtifact,
   validatePushDeploymentCertificatePair,
+  verifyBackendPushHandoff,
 } from './verify-backend-push-handoff.mjs';
 
 const sha = char => char.repeat(40);
@@ -76,7 +83,9 @@ test('binds promotion artifact name to its source SHA and workflow association t
     name: `codexia-backend-deployment-certificate-${promotedSourceSha}-run-${publicationRun.id}-attempt-${publicationRun.run_attempt}`,
   };
   assert.equal(selectPushDeploymentCertificateArtifact([promotedArtifact], publicationRun, { sourceSha: promotedSourceSha }).id, 303);
-  assert.throws(() => selectPushDeploymentCertificateArtifact([promotedArtifact], publicationRun), /one/u);
+  assert.equal(selectPushDeploymentCertificateArtifact([promotedArtifact], publicationRun).id, 303);
+  assert.throws(() => selectPushDeploymentCertificateArtifact([promotedArtifact], publicationRun, { sourceSha: mainSha }), /source/u);
+  assert.throws(() => selectPushDeploymentCertificateArtifact([promotedArtifact, artifact(publicationRun)], publicationRun), /one/u);
   assert.throws(() => selectPushDeploymentCertificateArtifact([
     { ...promotedArtifact, workflow_run: { ...promotedArtifact.workflow_run, head_sha: promotedSourceSha } },
   ], publicationRun, { sourceSha: promotedSourceSha }), /workflow head/u);
@@ -102,10 +111,103 @@ test('exposes only a validated Full digest and certificate as bounded job output
   assert.equal(outputs.fullImage, full.image);
   assert.equal(outputs.producerSha, sourceSha);
   assert.equal(outputs.fullApiEpoch, '1');
+  assert.equal(outputs.verifiedMainSha, mainSha);
   assert.deepEqual(JSON.parse(Buffer.from(outputs.fullCertificate, 'base64').toString('utf8')), full);
   assert.throws(() => createHandoffDeploymentOutputs({
     fullImage: `ghcr.io/yohn-jp/codexia-backend@${digest('1')}`,
     producerSha: full.producer.sourceSha,
     fullCertificate: full,
   }));
+});
+
+test('handoff validates the certified ancestor and its own Verify run in a historical publication', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codexia-handoff-history-'));
+  const caller = process.cwd();
+  t.after(async () => {
+    process.chdir(caller);
+    await rm(root, { recursive: true, force: true });
+  });
+  const repository = path.join(root, 'repo');
+  const assets = path.join(root, 'certificates');
+  await mkdir(repository);
+  await mkdir(assets);
+  const git = (...args) => execFileSync('git', args, { cwd: repository, encoding: 'utf8' }).trim();
+  git('init', '-q');
+  git('config', 'user.name', 'Handoff Test');
+  git('config', 'user.email', 'handoff@example.invalid');
+  const commit = async (file, content) => {
+    await mkdir(path.dirname(path.join(repository, file)), { recursive: true });
+    await writeFile(path.join(repository, file), content);
+    git('add', '--', file);
+    git('commit', '-qm', file);
+    return git('rev-parse', 'HEAD');
+  };
+  const certifiedSha = await commit('README.md', 'certified revision');
+  const certifiedTree = git('rev-parse', 'HEAD^{tree}');
+  const workflowSha = await commit('docs/notes.md', 'unrelated documentation change');
+  for (const profile of ['core', 'full']) {
+    const value = cert(profile);
+    value.verifiedMainSha = certifiedSha;
+    value.verifiedMainTree = certifiedTree;
+    value.verifyRun.headSha = certifiedSha;
+    value.producer.sourceTree = certifiedTree;
+    value.producer.receipt.sourceTree = certifiedTree;
+    await writeFile(path.join(assets, profile + '.json'), JSON.stringify(value));
+  }
+  execFileSync('zip', ['-q', 'certificates.zip', 'core.json', 'full.json'], { cwd: assets });
+  const bytes = await readFile(path.join(assets, 'certificates.zip'));
+  const publisher = { name: 'Publish immutable GHCR image', status: 'completed', conclusion: 'success' };
+  const jobs = [
+    { name: 'Resolve verified backend promotion', status: 'completed', conclusion: 'success' },
+    { name: 'Build and test backend OCI image (core)', status: 'completed', conclusion: 'success' },
+    { name: 'Build and test backend OCI image (full)', status: 'completed', conclusion: 'success' },
+    publisher,
+  ];
+  const verify = { ...buildRun(), id: 90, run_attempt: 1, path: '.github/workflows/verify.yml',
+    event: 'push', head_sha: certifiedSha };
+  const env = { GITHUB_REPOSITORY: 'yohn-jp/codexia', GITHUB_EVENT_NAME: 'workflow_run',
+    GITHUB_REF: 'refs/heads/main', CODEXIA_PUBLISHER_RUN_ID: '100', GH_TOKEN: 'fixture-read', RUNNER_TEMP: root };
+  const run = async (head, verifySha, verifyJobs = []) => {
+    const publicationRun = { ...buildRun(), head_sha: head };
+    const artifactMetadata = {
+      ...artifact(publicationRun),
+      name: `codexia-backend-deployment-certificate-${certifiedSha}-run-100-attempt-2`,
+      digest: 'sha256:' + createHash('sha256').update(bytes).digest('hex'),
+      size_in_bytes: bytes.length,
+    };
+    const fetchImpl = async input => {
+      const url = new URL(input);
+      if (url.hostname === 'artifact.example.invalid') return new Response(bytes);
+      switch (url.pathname) {
+        case '/repos/yohn-jp/codexia/actions/runs/100':
+          return Response.json(publicationRun);
+        case '/repos/yohn-jp/codexia/actions/runs/100/jobs':
+          return Response.json({ total_count: jobs.length, jobs });
+        case '/repos/yohn-jp/codexia/actions/runs/100/artifacts':
+          return Response.json({ total_count: 1, artifacts: [artifactMetadata] });
+        case '/repos/yohn-jp/codexia/actions/artifacts/303/zip':
+          return new Response(null, { status: 302, headers: { location: 'https://artifact.example.invalid/certificates.zip' } });
+        case '/repos/yohn-jp/codexia/actions/runs/90':
+          return Response.json({ ...verify, head_sha: verifySha });
+        case '/repos/yohn-jp/codexia/actions/runs/90/jobs':
+          return Response.json({ total_count: verifyJobs.length, jobs: verifyJobs });
+        default:
+          assert.fail('Unexpected external I/O: ' + url.pathname);
+      }
+    };
+    return verifyBackendPushHandoff({ env, payload: { workflow_run: publicationRun }, fetchImpl });
+  };
+
+  process.chdir(repository);
+  await assert.rejects(run(workflowSha, workflowSha), /Certificate Verify source SHA mismatch/u);
+  await assert.rejects(run(workflowSha, certifiedSha), /exact required job set/u);
+  const completedJobs = REQUIRED_VERIFICATION_JOBS.map(name => ({ name, status: 'completed', conclusion: 'success' }));
+  const releaseRead = t.mock.method(globalThis, 'fetch', async input => {
+    assert.equal(new URL(input).pathname, '/repos/yohn-jp/codexia/releases');
+    return Response.json([]);
+  });
+  await assert.rejects(run(workflowSha, certifiedSha, completedJobs), /Expected one exact backend release record/u);
+  assert.equal(releaseRead.mock.callCount(), 1);
+  const changed = await commit('packages/api/src/server.ts', 'newer backend change');
+  await assert.rejects(run(changed, certifiedSha), /newer backend change superseded/u);
 });

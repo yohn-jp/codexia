@@ -22,6 +22,7 @@ test('handoff consumer verifies successful same-repository main publication befo
   assert.deepEqual(job.permissions, { contents: 'read', actions: 'read', packages: 'read' });
   assert.equal(job.outputs['certified-full-image'], '${{ steps.verify.outputs.full-image }}');
   assert.equal(job.outputs['certified-full-api-epoch'], '${{ steps.verify.outputs.full-api-epoch }}');
+  assert.equal(job.outputs['verified-main-sha'], '${{ steps.verify.outputs.verified-main-sha }}');
   assert.equal(job.outputs['producer-sha'], '${{ steps.verify.outputs.producer-sha }}');
   assert.equal(job.outputs['deployment-certificate'], '${{ steps.verify.outputs.full-certificate }}');
   assert.equal(handoff.jobs['verify-handoff'].steps[0].with.ref, '${{ github.event.workflow_run.head_sha }}');
@@ -39,6 +40,11 @@ test('handoff consumer verifies successful same-repository main publication befo
   assert.equal(deploy.concurrency.group, 'codexia-production');
   assert.equal(deploy.concurrency['cancel-in-progress'], false);
   assert.match(deploy.if, /needs\.verify-handoff\.result == 'success'/u);
+  assert.match(deploy.if, /needs\.verify-handoff\.outputs\.verified-main-sha != ''/u);
+  const deployCheckout = deploy.steps.find(step => step.uses?.startsWith('actions/checkout@'));
+  assert.equal(deployCheckout.with.ref, '${{ needs.verify-handoff.outputs.verified-main-sha }}');
+  const converge = deploy.steps.find(step => step.name === 'Converge certified backend digest');
+  assert.equal(converge.env.CODEXIA_VERIFIED_MAIN_SHA, deployCheckout.with.ref);
   assert.doesNotMatch(deploy.if, /CODEXIA_PUSH_DEPLOYMENT_ENABLED/u,
     'Environment-scoped variables must not be evaluated before Environment attachment');
   const deploymentGate = deploy.steps.find(step => step.id === 'deployment-gate');
