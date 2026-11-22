@@ -236,13 +236,23 @@ async function prepareImages() {
   await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
   const head = await loadExactSourceFullCandidate();
   const compatible = await certifiedCompatibleCandidate(head);
+  // Reject malformed remote artifact/release metadata before writing private CI evidence.
+  validateImageIdentity(head.identity, sourceSha);
+  validateImageIdentity(compatible.identity, compatible.sourceSha);
+  check(shaPattern.test(compatible.sourceSha || ''), 'Compatible candidate must bind a source SHA');
+  check(digestPattern.test(head.artifactDigest || ''), 'Head candidate must bind an immutable artifact digest');
+  check(digestPattern.test(compatible.certificateArtifactDigest || ''), 'Compatible certificate must bind an immutable artifact digest');
+  check(/^backend-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(compatible.releaseTag || ''),
+    'Compatible release must use a canonical version tag');
   const prepared = { format: 'codexia-push-app-lifecycle-prepared/v1', sourceSha, runId, runAttempt: attempt, head, compatible };
+  // codeql[js/http-to-file-access] Only verified immutable GitHub artifact identities are persisted to this private runner file.
   await writeFile(preparedPath, JSON.stringify(prepared, null, 2) + '\n', { mode: 0o600 });
   report.images = [
     { role: 'head', sourceSha: head.identity.sourceSha, identity: head.identity, producerRunId: head.producerRunId, artifactId: head.artifactId, artifactDigest: head.artifactDigest, certificateResult: 'NOT_USED_SOURCE_ARTIFACT_IDENTITY_VERIFIED' },
     { role: 'compatible', sourceSha: compatible.identity.sourceSha, identity: compatible.identity, releaseTag: compatible.releaseTag, certificateArtifactId: compatible.certificateArtifactId, certificateArtifactDigest: compatible.certificateArtifactDigest, certificateResult: 'PRODUCTION_CERTIFICATE_VERIFIED_FOR_TEST_USE_ONLY' },
   ];
   report.status = 'IMAGES_VERIFIED_WAITING_FOR_DISPOSABLE_REGISTRY';
+  // codeql[js/http-to-file-access] Verified source metadata is recorded as inert 0600 JSON, never executed.
   await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
   console.log(JSON.stringify({ preparedPath, reportPath, compatibleRelease: compatible.releaseTag }, null, 2));
 }

@@ -1,0 +1,8 @@
+# AVD-DS-0026 applies to long-running services, not browser-toolchain CI images.
+# These images have no daemon to probe; production API images carry a real readiness HEALTHCHECK.
+misconfigurations:
+  - id: AVD-DS-0026
+    paths:
+      - ".github/docker/playwright-minimal.Dockerfile"
+      - ".github/docker/playwright-ubuntu-minimal.Dockerfile"
+    statement: "CI browser tool images run on demand and do not serve long-lived requests."

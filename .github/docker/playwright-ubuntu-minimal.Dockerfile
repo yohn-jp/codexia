@@ -22,4 +22,8 @@ RUN set -eux; \
     git --version; \
     BROWSER="$BROWSER" node -e 'const pw=require("/tmp/pw-install/node_modules/playwright"); (async()=>{const b=await pw[process.env.BROWSER].launch({headless:true});const p=await b.newPage();await p.setContent("<title>smoke</title>");if(await p.title()!=="smoke")throw Error("smoke failed");await b.close()})().catch(e=>{console.error(e);process.exitCode=1})'; \
     rm -rf /tmp/pw-install /root/.npm /root/.cache /var/lib/apt/lists/*
+# Runtime tools and installed browsers must execute without root privileges.
+RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin codexia-browser
+ENV HOME=/home/codexia-browser
+USER codexia-browser
 LABEL org.opencontainers.image.source="https://github.com/yohn-jp/codexia"

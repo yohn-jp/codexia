@@ -48,7 +48,7 @@ jobs:
           observed="$(docker run --rm -v "$PWD:/work:ro" -w /work "$image" \
             git -c safe.directory=/work rev-parse HEAD)"
           test "$observed" = "$SOURCE_SHA"
-          docker run --rm "$image" sh -ec 'test "$(node --version)" = v24.22.3; corepack pnpm@12.21.0 --version; git --version'
+          docker run --rm "$image" sh -ec 'test "$(id -u)" -ne 0; test -w "$HOME"; test "$(node --version)" = v24.22.3; corepack pnpm@12.21.0 --version; git --version'
           docker image inspect --format 'Uncompressed size: {{.Size}} bytes' "$image" >> "$GITHUB_STEP_SUMMARY"
 
   publish:

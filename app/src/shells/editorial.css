@@ -515,7 +515,8 @@
 }
 .mobile-shell .mobile-shell-slot .manuscript-column {
   gap: 0.6rem;
-  border-top: 3px solid var(--accent);
+  /* An inset rule respects the rounded container without a clipped accent border. */
+  box-shadow: inset 0 3px 0 var(--accent), var(--st-folio-shadow);
 }
 .mobile-shell .mobile-shell-slot .manuscript-column > label,
 .mobile-shell .mobile-shell-slot .preview-column h2 {

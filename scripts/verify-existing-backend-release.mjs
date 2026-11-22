@@ -38,6 +38,7 @@ export function assertExistingBackendReleaseBinding(release,tagRef,expected){
 }
 
 async function request(resource,token){
+  // codeql[js/file-access-to-http] Only the GitHub API receives the read-scoped token and validated release identifiers.
   const response=await fetch('https://api.github.com/repos/'+REPOSITORY+'/'+resource,{headers:{Authorization:'Bearer '+token,
     Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'},redirect:'error',signal:AbortSignal.timeout(20_000)});
   if(!response.ok)throw new Error('Existing backend release proof lookup failed (HTTP '+response.status+')');
