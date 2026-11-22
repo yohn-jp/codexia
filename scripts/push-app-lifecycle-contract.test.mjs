@@ -12,13 +12,14 @@ const site = parse(readFileSync(new URL('../deploy/ansible/site.yml', import.met
 const deploy = parse(readFileSync(new URL('../deploy/ansible/deploy.yml', import.meta.url), 'utf8'));
 
 test('includes bounded command stderr in sanitized lifecycle failure evidence', () => {
-  const error = Object.assign(new Error('Command failed: podman push'), {
+  const error = Object.assign(new Error(`Command failed: ${'podman-argument '.repeat(100)}`), {
     stderr: Buffer.from(`registry refused request\ntoken=ghp_${'a'.repeat(24)}\n`),
   });
   const detail = publicError(error);
   assert.match(detail, /registry refused request/u);
   assert.match(detail, /token=\[REDACTED\]/u);
   assert.doesNotMatch(detail, /ghp_[a-z]+/u);
+  assert.ok(detail.length <= 1200);
 });
 
 test('app lifecycle CI is isolated, path limited, manually runnable, and has no production credentials', () => {
