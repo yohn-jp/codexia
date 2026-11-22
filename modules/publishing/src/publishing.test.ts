@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import JSZip from "jszip";
 import YAML from "yaml";
-import { convertPublishingShareGrantJsonl, type ChangeProposal, type ModuleActionContext, type ModuleContext, type NativeStoryDocument, type OwnModuleRecordProposal, type SnapshotId, type SnapshotReader } from "@codexia/contracts";
+import { convertPublishingEpisodesYaml, convertPublishingShareGrantJsonl, type ModuleActionContext, type ModuleContext, type NativeStoryDocument, type OwnModuleRecord, type OwnModuleRecordProposal, type SnapshotId, type SnapshotReader } from "@codexia/contracts";
 import { createModule } from "./index.js";
 import { readEpubBibleEntries } from "./bible.js";
 import { buildEpubExport, manuscriptBodyToXhtml } from "./epub.js";
@@ -11,7 +11,6 @@ import { buildPlaintextExport, stripManuscriptMarkup, toNarouDialect } from "./p
 import { composeVerticalPrintText } from "./verticalPrint.js";
 import type { ShareGrant } from "./grants.js";
 import { createPublishingHttpContributions } from "./http.js";
-import { EPISODES_PATH } from "./episodes.js";
 import { readPublishingProject, readPublishingProjectFromCore, type PublishingProject } from "./project.js";
 
 const BASE_VERSION = 1;
@@ -28,7 +27,7 @@ function makeSnapshot(projectVersion = BASE_VERSION, updatedVersion?: number): S
 
 class MemoryReader implements SnapshotReader {
   readonly files: Map<string, Buffer>;
-  constructor(files: Map<string, Buffer | string>, public snapshot: SnapshotId = makeSnapshot(), readonly documentKinds = new Map<string, string>(), readonly shareRecord?: ShareRecord) {
+  constructor(files: Map<string, Buffer | string>, public snapshot: SnapshotId = makeSnapshot(), readonly documentKinds = new Map<string, string>(), readonly shareRecord?: ShareRecord, readonly episodeRecord?: OwnModuleRecord) {
     this.files = new Map([...files].map(([path, content]) => [path, Buffer.isBuffer(content) ? Buffer.from(content) : Buffer.from(content, "utf8")]));
   }
   get nativeStoryDocuments(): NativeStoryDocument[] {
@@ -79,7 +78,7 @@ const project: PublishingProject = {
   }],
 };
 
-function actionContext(reader: SnapshotReader, proposals: ChangeProposal[], shareProposals: ShareProposal[] = []): ModuleActionContext {
+function actionContext(reader: SnapshotReader, proposals: OwnModuleRecordProposal[] = []): ModuleActionContext {
   const context = {
     projectId: "module-project-1",
     reader,
@@ -107,19 +106,16 @@ function actionContext(reader: SnapshotReader, proposals: ChangeProposal[], shar
     listActions: async () => [],
     linkedReader: async () => reader,
     signal: new AbortController().signal,
-    propose: async (operations, evidence) => {
-      const proposal = { id: "proposal-" + (proposals.length + 1), snapshot: reader.snapshot, operations, source: "module" as const, ...(evidence ? { evidence } : {}) };
-      proposals.push(proposal);
-      return proposal;
-    },
+    propose: async () => assert.fail("Publishing must use native module records"),
     runJob: async () => ({ ok: false, id: "unused", snapshot: reader.snapshot, error: { code: "unused", message: "unused", retryable: false } }),
     readOwnModuleRecord: async (key: string) => {
-      assert.equal(key, "share-grants");
-      return reader instanceof MemoryReader ? reader.shareRecord : undefined;
+      assert.ok(key === "share-grants" || key === "episodes");
+      if (!(reader instanceof MemoryReader)) return undefined;
+      return key === "share-grants" ? reader.shareRecord : reader.episodeRecord;
     },
     proposeOwnModuleRecord: async (input: OwnModuleRecordProposal) => {
-      shareProposals.push({ ...input, value: input.value as ShareRecordValue });
-      return { id: "native-share-" + shareProposals.length, projectId: reader.snapshot.projectId };
+      proposals.push(input);
+      return { id: `native-${input.key}-${proposals.length}`, projectId: reader.snapshot.projectId };
     },
   } satisfies ModuleActionContext & Record<string, unknown>;
   return context;
@@ -551,38 +547,38 @@ test("EPUB bible reader keeps source flat character entities and typed lore/loca
   assert.equal(entries.find((entry) => entry.id === "char-flat")!.name, "古い人物");
 });
 
-test("episode edits propose metadata operations and preserve unknown YAML and publication dates", async () => {
-  const existingMap = YAML.stringify({
+test("episode edits propose a record update and preserve unknown fields and publication dates", async () => {
+  const existingMap = {
     episodes: [{
       id: "ep-1", number: 1, title: "第一話", scope: "chapter", scopeId: "ch-1",
       publishedAt: "2025-05-04T03:02:01Z", sceneIds: ["sc-1"], futureEpisodeField: { retain: "yes" },
     }],
     futureMapField: { provider: "legacy", revision: 3 },
-  });
-  const reader = new MemoryReader(new Map([...fixtureFiles(), [EPISODES_PATH, existingMap]]));
+  };
+  const reader = new MemoryReader(fixtureFiles(), makeSnapshot(), undefined, undefined,
+    { value: { version: 1, document: existingMap }, version: 7 });
   const definition = await createPublishing();
-  const proposals: ChangeProposal[] = [];
+  const proposals: OwnModuleRecordProposal[] = [];
   const context = actionContext(reader, proposals);
-  const episodes = (await invokeAction(definition, "publishing.episodes.read", {}, context)).episodes as Array<Record<string, unknown>>;
+  const episodes = (await invokeAction(definition, "publishing.episodes.read", {}, context)).episodes;
+  assert.deepEqual(episodes, existingMap.episodes);
+
   const proposalData = await invokeAction(definition, "publishing.episodes.propose", {
     episodes: [{ id: "ep-1", number: 2, title: "改題", scope: "chapter", scopeId: "ch-1" }],
   }, context);
   assert.equal(proposals.length, 1);
-  const operation = proposals[0]!.operations[0]!;
-  assert.equal(operation.effect, "metadata");
-  const originalRevision = (await reader.read(EPISODES_PATH))!.revision;
-  assert.deepEqual(operation.reads, [{ path: EPISODES_PATH, revision: originalRevision }]);
-  assert.equal(operation.writes.length, 1);
-  assert.equal(operation.writes[0]!.path, EPISODES_PATH);
-  assert.equal(operation.writes[0]!.revision, originalRevision);
-  const written = YAML.parse(operation.writes[0]!.content!);
-  assert.deepEqual(written.futureMapField, { provider: "legacy", revision: 3 });
-  assert.deepEqual(written.episodes[0].futureEpisodeField, { retain: "yes" });
-  assert.equal(written.episodes[0].publishedAt, "2025-05-04T03:02:01Z");
-  assert.deepEqual(written.episodes[0].sceneIds, ["sc-1"]);
-  assert.equal((proposalData.episodes as unknown[]).length, 1);
-  assert.equal(episodes.length, 1);
-  assert.equal((await reader.read(EPISODES_PATH))!.content, existingMap, "actions never write source files");
+  const operation = proposals[0]!;
+  assert.equal(operation.key, "episodes");
+  assert.equal(operation.expectedVersion, 7);
+  const document = operation.value.document as typeof existingMap;
+  assert.deepEqual(document.futureMapField, { provider: "legacy", revision: 3 });
+  assert.deepEqual(document.episodes[0]!.futureEpisodeField, { retain: "yes" });
+  assert.equal(document.episodes[0]!.publishedAt, "2025-05-04T03:02:01Z");
+  assert.deepEqual(document.episodes[0]!.sceneIds, ["sc-1"]);
+  assert.equal(document.episodes[0]!.title, "改題");
+  assert.deepEqual(proposalData.changeSet, { id: "native-episodes-1", projectId: repository });
+  assert.deepEqual((await invokeAction(definition, "publishing.episodes.read", {}, context)).episodes, existingMap.episodes,
+    "an unapplied proposal does not change the selected record");
 
   const cleared = await invokeAction(definition, "publishing.episodes.propose", {
     episodes: [{
@@ -591,12 +587,30 @@ test("episode edits propose metadata operations and preserve unknown YAML and pu
     }],
   }, context);
   const clearedEpisode = (cleared.episodes as Array<Record<string, unknown>>)[0]!;
-  const clearedYaml = YAML.parse(proposals.at(-1)!.operations[0]!.writes[0]!.content!);
+  const proposedEpisode = (proposals[1]!.value.document as typeof existingMap).episodes[0]!;
   assert.ok(!Object.hasOwn(clearedEpisode, "publishedAt"), "explicit null clears the date from the action result");
   assert.ok(!Object.hasOwn(clearedEpisode, "sceneIds"), "explicit null clears scene annotations from the action result");
-  assert.ok(!Object.hasOwn(clearedYaml.episodes[0], "publishedAt"), "explicit null clears the persisted date");
-  assert.ok(!Object.hasOwn(clearedYaml.episodes[0], "sceneIds"), "explicit null clears persisted scene annotations");
-  assert.deepEqual(clearedYaml.episodes[0].futureEpisodeField, { retain: "yes" }, "unknown episode fields remain preserved on clear");
+  assert.ok(!Object.hasOwn(proposedEpisode, "publishedAt"), "explicit null clears the persisted date");
+  assert.ok(!Object.hasOwn(proposedEpisode, "sceneIds"), "explicit null clears persisted scene annotations");
+  assert.deepEqual(proposedEpisode.futureEpisodeField, { retain: "yes" }, "unknown episode fields remain preserved on clear");
+});
+
+test("episode maintenance conversion preserves the document extension namespace and rejects unsupported YAML values", () => {
+  const source = `version: early-draft
+episodes:
+  - id: pilot
+    number: 1
+    title: 第一話
+    scope: chapter
+    scopeId: ch-1
+    publishedAt: 2026-01-01
+    annotations: { language: ja }
+`;
+  assert.deepEqual(convertPublishingEpisodesYaml(source), { version: 1, document: { version: "early-draft", episodes: [{
+    id: "pilot", number: 1, title: "第一話", scope: "chapter", scopeId: "ch-1", publishedAt: "2026-01-01",
+    annotations: { language: "ja" },
+  }] } });
+  assert.throws(() => convertPublishingEpisodesYaml(source + "extension: !!timestamp 2026-01-01\n"), /non-JSON data/);
 });
 
 test("public read uses only the applied snapshot and rechecks grant revocation", async () => {
@@ -607,7 +621,7 @@ test("public read uses only the applied snapshot and rechecks grant revocation",
   files.set(notePath, "id: note-1\ntitle: Private Author Note\nvolume: vol-1\nchapter: ch-1\nmanuscript: documents/note-1.md\n");
   files.set("documents/note-1.md", "Private note body must not appear.");
   let remote = new MemoryReader(files, makeSnapshot(), new Map([[notePath, "note"]]));
-  const context = actionContext(remote, [], proposals);
+  const context = actionContext(remote, proposals);
   const created = await invokeAction(definition, "publishing.shares.create", {
     kind: "chapter", id: "ch-1", label: "校正用", expiresInHours: 24,
   }, context);
@@ -616,7 +630,7 @@ test("public read uses only the applied snapshot and rechecks grant revocation",
   assert.ok(createOperation, "the action proposes one native share record update");
   assert.equal(createOperation.key, "share-grants");
   assert.equal(createOperation.expectedVersion, null);
-  assert.deepEqual(created.changeSet, { id: "native-share-1", projectId: repository });
+  assert.deepEqual(created.changeSet, { id: "native-share-grants-1", projectId: repository });
   assert.ok(!JSON.stringify(createOperation).includes(token), "raw bearer is never committed");
   assert.equal(createOperation.value.grants[0]!.tokenHash, fixtureTokenDigest(token));
 
@@ -660,7 +674,7 @@ test("public read uses only the applied snapshot and rechecks grant revocation",
   assert.ok(!JSON.stringify(safeList).includes(token));
   assert.ok(!JSON.stringify(safeList).includes(fixtureTokenDigest(token)));
 
-  const revoked = await invokeAction(definition, "publishing.shares.revoke", { id: String((created.share as Record<string, unknown>).id) }, actionContext(remote, [], proposals));
+  const revoked = await invokeAction(definition, "publishing.shares.revoke", { id: String((created.share as Record<string, unknown>).id) }, actionContext(remote, proposals));
   const revokeOperation = proposals[1]!;
   assert.equal(revokeOperation.expectedVersion, 1);
   assert.equal(revokeOperation.value.grants[0]!.grantVersion, 2);
@@ -696,6 +710,7 @@ test("the one-time share conversion preserves existing link identity, revocation
     revokedAt: "2026-03-01T00:00:00.000Z", grantVersion: 3, revocationVersion: 1, futurePolicy: { retention: "manual" },
   }] });
   assert.throws(() => convertPublishingShareGrantJsonl(`${legacy}\n${legacy}`), /Duplicate share grant ID/);
+  assert.throws(() => convertPublishingShareGrantJsonl(legacy.replace('"manual"', '1e999')), /Invalid share grant JSONL/);
 
   const files = fixtureFiles();
   files.set("meta/scriptorium/modules/publishing/share-grants.jsonl", JSON.stringify({ ...JSON.parse(legacy), revokedAt: undefined }));
@@ -760,7 +775,7 @@ test("a proposed root-scene share publishes only the selected same-title manuscr
   const proposals: ShareProposal[] = [];
   const created = await invokeAction(definition, "publishing.shares.create", {
     kind: "scene", id: "root-scene", label: "直下シーンの確認", expiresInHours: 24,
-  }, actionContext(remote, [], proposals));
+  }, actionContext(remote, proposals));
   const token = String(created.token);
   const createOperation = proposals[0]!;
   assert.deepEqual(createOperation.value.grants[0]!.scope, { kind: "scene", id: "root-scene" });

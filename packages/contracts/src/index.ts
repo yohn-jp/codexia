@@ -1,4 +1,7 @@
 /** Public, transport-neutral campaign contract v1. No platform or domain dependencies. */
+import { PUBLISHING_EPISODES_KEY } from "./publishing-episodes.js";
+import { PUBLISHING_SHARE_GRANTS_KEY } from "./publishing-share-grants.js";
+
 export const CONTRACT_VERSION = 1 as const;
 export const MAX_JOB_INPUT_BYTES = 8 * 1024 * 1024;
 export const MAX_JOB_OUTPUT_BYTES = 8 * 1024 * 1024;
@@ -230,6 +233,11 @@ export interface OwnModuleRecordProposal {
 }
 export interface NativeChangeSetReference { id: string; projectId: string }
 export { PUBLISHING_SHARE_GRANTS_KEY, parsePublishingShareGrantIndex, convertPublishingShareGrantJsonl, type PublishingShareGrant } from "./publishing-share-grants.js";
+export { PUBLISHING_EPISODES_KEY, parsePublishingEpisodesRecord, parsePublishingEpisodeUpdate, convertPublishingEpisodesYaml, type PublishingEpisodeDocument, type PublishingEpisode } from "./publishing-episodes.js";
+export const PUBLISHING_RECORD_KEYS = [PUBLISHING_EPISODES_KEY, PUBLISHING_SHARE_GRANTS_KEY] as const;
+export function isPublishingRecordKey(key: string): key is (typeof PUBLISHING_RECORD_KEYS)[number] {
+  return PUBLISHING_RECORD_KEYS.some(candidate => candidate === key);
+}
 export interface ModuleActionContext {
   projectId: string;
   reader: SnapshotReader;

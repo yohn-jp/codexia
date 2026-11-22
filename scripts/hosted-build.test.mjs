@@ -262,8 +262,10 @@ test('composition persistence declares base and selected module readers/writers 
   assert.deepEqual(readable.get('scriptorium.browser-recovery-indexeddb'), [3]);
   assert.deepEqual(readable.get('scriptorium.module-story.series'), [1]);
   assert.deepEqual(readable.get('scriptorium.module-publishing.cover'), [1]);
-  assert.deepEqual(readable.get('scriptorium.module-publishing.share-grants'), [1]);
-  assert.equal(writable.has('scriptorium.module-publishing.share-grants@1'), true);
+  assert.equal(readable.has('scriptorium.module-publishing.episodes'), false);
+  assert.equal(writable.has('scriptorium.module-publishing.episodes@1'), false);
+  assert.equal(readable.has('scriptorium.module-publishing.share-grants'), false);
+  assert.equal(writable.has('scriptorium.module-publishing.share-grants@1'), false);
   assert.equal(readable.has('scriptorium.module-publishing.legacy-share-grants'), false);
   assert.equal(writable.has('scriptorium.module-publishing.legacy-share-grants@1'), false);
   assert.equal(readable.has('scriptorium.module-story.change-sets'), false);

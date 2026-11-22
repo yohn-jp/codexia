@@ -73,8 +73,6 @@ export const MODULE_PERSISTENCE_FORMATS: readonly ModulePersistenceFormat[] = [
   format("nlp", "feature-settings", "meta/scriptorium/modules/nlp/feature-settings.json", "json", true, true),
   preserved("nlp", "legacy-files", "meta/scriptorium/modules/nlp/legacy/files/"),
 
-  format("publishing", "episodes", "meta/scriptorium/modules/publishing/episodes.yaml", "text", true, true),
-  format("publishing", "share-grants", "meta/scriptorium/modules/publishing/share-grants.jsonl", "jsonl", true, true),
   format("publishing", "cover", "meta/scriptorium/modules/publishing/assets/cover.jpg", "binary", true, false),
   preserved("publishing", "legacy-files", "meta/scriptorium/modules/publishing/legacy/files/"),
 

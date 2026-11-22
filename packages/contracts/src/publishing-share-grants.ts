@@ -93,7 +93,12 @@ export function convertPublishingShareGrantJsonl(content: string): ShareGrantInd
   for (const [index, line] of content.split(/\r?\n/).entries()) {
     if (!line.trim()) continue;
     let parsed: ModuleRecordJsonValue;
-    try { parsed = JSON.parse(line); } catch { throw new Error(`Invalid share grant JSONL at line ${index + 1}`); }
+    try {
+      parsed = JSON.parse(line, (_key, value: unknown) => {
+        if (typeof value === "number" && !Number.isFinite(value)) throw new Error("Unrepresentable JSON number");
+        return value;
+      });
+    } catch { throw new Error(`Invalid share grant JSONL at line ${index + 1}`); }
     grants.push(shareGrant(parsed, true, `at line ${index + 1}`));
   }
   return shareIndex(grants);

@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { PUBLISHING_SHARE_GRANTS_KEY } from "@codexia/contracts";
-import type { ActionResult, ChangeOperation, ModuleAction, ModuleActionContext, ValueSchema } from "@codexia/contracts";
+import { PUBLISHING_EPISODES_KEY, PUBLISHING_SHARE_GRANTS_KEY } from "@codexia/contracts";
+import type { ActionResult, ModuleAction, ModuleActionContext, ValueSchema } from "@codexia/contracts";
 import { readEpubBibleEntries } from "./bible.js";
 import { buildEpubExport, type EpubExportOptions } from "./epub.js";
-import { readEpisodeMap, mergeEpisodeMap, EPISODES_PATH } from "./episodes.js";
+import { readEpisodeMap, mergeEpisodeMap } from "./episodes.js";
 import {
   createShareGrant,
   readShareGrants,
@@ -122,20 +122,6 @@ function parseShareRevokeInput(value: unknown): { id: string } {
   return { id };
 }
 
-function makeMetadataOperation(context: ModuleActionContext, path: string, revision: string | null, content: string, message: string): ChangeOperation {
-  const snapshot = context.reader.snapshot;
-  return {
-    id: randomUUID().replaceAll("-", ""),
-    generation: 0,
-    projectId: snapshot.projectId,
-    baseProjectVersion: snapshot.projectVersion,
-    effect: "metadata",
-    reads: [{ path, revision }],
-    writes: [{ path, revision, content }],
-    message,
-  };
-}
-
 async function proposeShareGrants(context: ModuleActionContext, grants: ShareGrant[], expectedVersion: number | null) {
   if (!context.proposeOwnModuleRecord) throw new Error("Publishing share proposals are unavailable");
   return context.proposeOwnModuleRecord({
@@ -188,16 +174,18 @@ export function createPublishingActions(): ModuleAction[] {
   }));
 
   actions.push(defineAction(valueSchema((value) => object(value)), "publishing.episodes.read", "read", async (_input, context) => {
-    const map = await readEpisodeMap(context.reader);
-    return { episodes: map.episodes };
+    const { document } = await readEpisodeMap(context);
+    return { episodes: document.episodes };
   }));
 
   actions.push(defineAction(valueSchema(parseEpisodeInput), "publishing.episodes.propose", "propose", async (input, context) => {
-    const existing = await readEpisodeMap(context.reader);
-    const merged = mergeEpisodeMap(existing, input.episodes);
-    const operation = makeMetadataOperation(context, EPISODES_PATH, existing.revision, merged.content, "Update publication episode mapping");
-    const proposal = await context.propose([operation]);
-    return { episodes: merged.episodes, proposalId: proposal.id, activation: "requires author approval and PostgreSQL apply" };
+    if (!context.proposeOwnModuleRecord) throw new Error("Publishing episode proposals are unavailable");
+    const existing = await readEpisodeMap(context);
+    const document = mergeEpisodeMap(existing.document, input.episodes);
+    const changeSet = await context.proposeOwnModuleRecord({
+      key: PUBLISHING_EPISODES_KEY, value: { version: 1, document }, expectedVersion: existing.version, idempotencyKey: randomUUID(),
+    });
+    return { episodes: document.episodes, proposalId: changeSet.id, changeSet, activation: "requires author approval and PostgreSQL apply" };
   }));
 
   actions.push(defineAction(valueSchema((value) => object(value)), "publishing.shares.list", "read", async (_input, context) => {
