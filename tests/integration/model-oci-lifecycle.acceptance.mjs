@@ -56,7 +56,7 @@ async function choosePort() {
 
 async function createFixture(sceneCount = 240) {
   const seed = {};
-  await writeYaml(seed, "meta/project.yaml", { id: "p13-oci-synthetic", title: "Synthetic OCI model lifecycle work" });
+  const projectTitle = "Synthetic OCI model lifecycle work";
   await writeYaml(seed, "plot/volumes/v1/volume.yaml", { id: "vol-one", type: "volume", name: "第一巻", order: 1 });
   await writeYaml(seed, "plot/volumes/v1/chapters/c1/chapter.yaml", { id: "ch-one", type: "chapter", title: "第一章", volume: "vol-one", order: 1 });
   await writeText(seed, "bible/characters/hero/profile.yaml", [
@@ -97,17 +97,13 @@ async function createFixture(sceneCount = 240) {
     ].join("\n"));
   }
 
-  const nlpSettings = JSON.stringify({
-    externalEnabled: { "setting-qa": false, rewrite: false },
-    ownerNote: "preserve-local-consent",
-  }, null, 2) + "\n";
+  const nlpSettings = { externalEnabled: { "setting-qa": false, rewrite: false } };
   const semanticSettings = JSON.stringify({ schemaVersion: 1, rerankerEnabled: false }, null, 2) + "\n";
   const dismissals = JSON.stringify({ candidateId: "author-dismissed-p13-oci-fixture", timestamp: "2026-10-17T00:00:00.000Z" }) + "\n";
-  await writeText(seed, "meta/scriptorium/modules/nlp/feature-settings.json", nlpSettings);
   await writeText(seed, "meta/scriptorium/modules/semantic/settings.json", semanticSettings);
   await writeText(seed, "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl", dismissals);
 
-  return { files: seed, nlpSettings, semanticSettings, dismissals };
+  return { projectTitle, files: seed, nlpSettings, semanticSettings, dismissals };
 }
 
 function safeBuildEnvironment() {
@@ -201,7 +197,9 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
     await mkdir(outputDirectory, { recursive: true, mode: 0o700 });
     await mkdir(authDirectory, { mode: 0o700 });
     const fixture = await createFixture();
-    await writeFile(join(outputDirectory, "fixture.json"), JSON.stringify(fixture.files), {mode:0o600});
+    await writeFile(join(outputDirectory, "fixture.json"), JSON.stringify({
+      projectTitle: fixture.projectTitle, files: fixture.files, nlpSettings: fixture.nlpSettings,
+    }), { mode: 0o600 });
     // Private disposable DB; neither inference container nor database has public network egress.
     await run(podman, ["network", "create", "--internal", network]);
     networkCreated = true;
@@ -325,12 +323,13 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
     assert.equal(lifecyclePhases.get("shared-diagnostics-semantic-real-inference").peakSemantic.semanticWorkerCount, 1);
 
     const preserved = {
-      "meta/scriptorium/modules/nlp/feature-settings.json": fixture.nlpSettings,
       "meta/scriptorium/modules/semantic/settings.json": fixture.semanticSettings,
       "meta/scriptorium/modules/semantic/contradiction-dismissals.jsonl": fixture.dismissals,
     };
     const expectedHashes = Object.entries(preserved).map(([path, content]) => ({path, sha256:createHash("sha256").update(content).digest("hex")}));
     assert.deepEqual(lifecycle.preservedFiles, expectedHashes, "model lifecycle must preserve canonical author records");
+    assert.deepEqual(lifecycle.nlpConsent.value, fixture.nlpSettings);
+    assert.ok(Number.isSafeInteger(lifecycle.nlpConsent.version) && lifecycle.nlpConsent.version > 0);
 
     // Remove the first API's network endpoint before the canonical launcher takes over its exact origin.
     await run(podman, ["rm", "--volumes", customName], { timeout: 30_000 });
@@ -352,6 +351,7 @@ test("full OCI runs actual tokenizer, speaker, E5 and BGE lifecycle and survives
     assert.equal(replacement.assertions.noWorkerAtReplacementIdle, true);
     assert.equal(replacement.assertions.persistedDerivedIndex, true);
     assert.deepEqual(replacement.preservedFiles, expectedHashes, "replacement must read the same canonical author records");
+    assert.deepEqual(replacement.nlpConsent, lifecycle.nlpConsent, "replacement must read the same applied NLP consent record");
     assert.equal(replacement.snapshot.projectId, projectId);
     assert.deepEqual(replacement.snapshot, lifecycle.snapshot);
     assert.equal(replacement.assertions.realReplacementInference.reranker.revision, modelRefs.reranker.revision);
