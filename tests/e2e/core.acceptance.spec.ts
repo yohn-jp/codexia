@@ -1,15 +1,17 @@
-import { expect, request, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import type { ChangeOperation } from "@codexia/contracts";
+import { createPostgresPersistence } from "@codexia/persistence-postgres";
+import { expect, test, type AuthorApiFetch, type AuthorizeAuthor } from "./author-oauth-fixture";
 import { createHash, randomUUID } from "node:crypto";
 import { text as readStreamText } from "node:stream/consumers";
-import { appBaseURL, authToken, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaved, ownerLogin, manuscriptEditor as editor, readManuscriptMarkdown, openRevisionHistory } from "./postgres-fixture";
+import { CoreStore } from "../../packages/core/src/index.js";
+import { expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaved, manuscriptEditor as editor, readManuscriptMarkdown, openRevisionHistory } from "./postgres-fixture";
 
 const rootPath = "/api/v1/persistence/projects";
-const appOrigin = new URL(appBaseURL).origin;
 interface Draft { key: string; projectId: string; documentId: string; authorScope: string; markdown: string; generation: number; baseRevisionId: string; baseMarkdown: string; pendingSave?: { markdown: string }; version: number; updatedAt: number }
 interface Read { document: { id: string; title: string; headRevisionId: string }; revision: { id: string; markdown: string } }
-interface Fixture { projectId: string; one: Read; two: Read }
+interface Fixture { projectId: string; one: Read; two: Read; fetch: AuthorApiFetch; authorizeAuthor: AuthorizeAuthor }
 const documentPath = (fixture: Fixture, documentId = fixture.one.document.id) => `${rootPath}/${fixture.projectId}/documents/${documentId}`;
-const mutationHeaders = (headers: Record<string, string> = {}): Record<string, string> => ({ Origin: appOrigin, ...headers });
 async function editorMarkdown(page: Page): Promise<string> {
   return (await readManuscriptMarkdown(page)).replace(/\n+$/u, "");
 }
@@ -29,34 +31,33 @@ async function replaceEditor(page: Page, markdown: string): Promise<void> {
   await page.keyboard.insertText(markdown);
 }
 
-async function fixture(page: Page): Promise<Fixture> {
-  const login = await page.request.post("/api/login", { headers: mutationHeaders(), data: { token: authToken } });
-  expect(login.ok()).toBe(true);
-  const projectResponse = await page.request.post(rootPath, { headers: mutationHeaders(), data: { title: `Core acceptance ${randomUUID()}` } });
+async function fixture(page: Page, authorizeAuthor: AuthorizeAuthor): Promise<Fixture> {
+  const author = await authorizeAuthor("desktop");
+  const projectResponse = await author.fetch(rootPath, { method: "POST", data: { title: `Core acceptance ${randomUUID()}` } });
   expect(projectResponse.status()).toBe(201);
   const { project } = await projectResponse.json() as { project: { id: string } };
   const createDocument = async (title: string, orderKey: string): Promise<Read> => {
-    const response = await page.request.post(`${rootPath}/${project.id}/documents`, { headers: mutationHeaders({ "Idempotency-Key": randomUUID() }), data: { title, kind: "scene", orderKey, markdown: `# ${title}\n\nInitial ${title} text.\n` } });
+    const response = await author.fetch(`${rootPath}/${project.id}/documents`, { method: "POST", headers: { "Idempotency-Key": randomUUID() }, data: { title, kind: "scene", orderKey, markdown: `# ${title}\n\nInitial ${title} text.\n` } });
     expect(response.status()).toBe(201);
     return response.json() as Promise<Read>;
   };
   const one = await createDocument("Scene One", "a");
   const two = await createDocument("Scene Two", "b");
-  await page.goto(`/desktop/projects/${project.id}/scenes/${one.document.id}`);
+  await authorizeAuthor("desktop", page, { path: `/desktop/projects/${project.id}/scenes/${one.document.id}` });
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`/desktop/projects/${project.id}/scenes/${one.document.id}`));
   await expectEditor(page, one.revision.markdown);
-  return { projectId: project.id, one, two };
+  return { projectId: project.id, one, two, fetch: author.fetch, authorizeAuthor };
 }
 
-async function read(page: Page, f: Fixture, documentId = f.one.document.id): Promise<Read> {
-  const response = await page.request.get(documentPath(f, documentId));
+async function read(f: Fixture, documentId = f.one.document.id): Promise<Read> {
+  const response = await f.fetch(documentPath(f, documentId));
   expect(response.ok()).toBe(true);
   return response.json() as Promise<Read>;
 }
-async function replace(page: Page, f: Fixture, markdown: string, base?: Read): Promise<Read> {
-  const current = base ?? await read(page, f);
-  const response = await page.request.patch(documentPath(f), { headers: mutationHeaders({ "Idempotency-Key": randomUUID(), "X-Client-Id": "acceptance-external" }), data: { baseRevisionId: current.revision.id, changes: [{ fromUtf16: 0, toUtf16: current.revision.markdown.length, insert: markdown }], resultingSha256: createHash("sha256").update(markdown).digest("hex"), clientId: "acceptance-external" } });
+async function replace(f: Fixture, markdown: string, base?: Read): Promise<Read> {
+  const current = base ?? await read(f);
+  const response = await f.fetch(documentPath(f), { method: "PATCH", headers: { "Idempotency-Key": randomUUID(), "X-Client-Id": "acceptance-external" }, data: { baseRevisionId: current.revision.id, changes: [{ fromUtf16: 0, toUtf16: current.revision.markdown.length, insert: markdown }], resultingSha256: createHash("sha256").update(markdown).digest("hex"), clientId: "acceptance-external" } });
   expect(response.status()).toBe(200);
   return response.json() as Promise<Read>;
 }
@@ -75,17 +76,13 @@ async function writeRecords(page: Page, records: unknown[], store = "persistence
   }, { records, store });
 }
 async function saved(page: Page, f: Fixture, text: string): Promise<void> {
-  await expect.poll(async () => (await read(page, f)).revision.markdown).toBe(text);
+  await expect.poll(async () => (await read(f)).revision.markdown).toBe(text);
   await expectServerSaved(page);
 }
 async function reopen(page: Page, f: Fixture): Promise<void> {
-  await page.goto(`/desktop/projects/${f.projectId}/scenes/${f.one.document.id}`);
+  await f.authorizeAuthor("desktop", page, { path: `/desktop/projects/${f.projectId}/scenes/${f.one.document.id}` });
   await expect(page).toHaveURL(new RegExp(`/desktop/projects/${f.projectId}/scenes/${f.one.document.id}`));
   await expect(editor(page)).toBeVisible();
-}
-async function restart(page: Page): Promise<void> {
-  const control = new URL(page.url()); control.port = String(Number(control.port) + 1); control.pathname = "/__e2e/restart-api";
-  const response = await fetch(control, { method: "POST" }); expect(response.status).toBe(204);
 }
 async function holdSaves(page: Page, f: Fixture): Promise<{ seen: Promise<void>; release(): void }> {
   let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -103,12 +100,12 @@ async function scratchRecords(page: Page): Promise<Array<{ key: string; text: st
 // revision, browser recovery, or explicit removal boundary. No Git fixture is created.
 
 for (const recoverPendingSave of [false, true]) {
-  test(`a save protects a confirmed quote between separate editor changes${recoverPendingSave ? " after recovering a lost save response" : ""}`, async ({ page }) => {
-    const f = await fixture(page);
-    const { revision } = await replace(page, f, "A引用Z");
+  test(`a save protects a confirmed quote between separate editor changes${recoverPendingSave ? " after recovering a lost save response" : ""}`, async ({ page, authorizeAuthor }) => {
+    const f = await fixture(page, authorizeAuthor);
+    const { revision } = await replace(f, "A引用Z");
     const anchorPath = `${documentPath(f)}/anchors`;
-    const anchor = await page.request.post(anchorPath, {
-      headers: mutationHeaders(),
+    const anchor = await f.fetch(anchorPath, {
+      method: "POST",
       data: { revisionId: revision.id, fromUtf16: 1, toUtf16: 3, status: "confirmed" },
     });
     expect(anchor.status()).toBe(201);
@@ -145,11 +142,11 @@ for (const recoverPendingSave of [false, true]) {
       releaseResponse();
       await expect(page.getByText("応答を受信できませんでした", { exact: true }).first()).toBeVisible();
       await page.unroute(`**${documentPath(f)}`);
-      await page.reload();
+      await page.reload(); await authorizeAuthor("desktop", page, { continueCurrentPage: true });
     }
     await saved(page, f, "X引用Y");
 
-    const response = await page.request.get(anchorPath);
+    const response = await f.fetch(anchorPath);
     expect(response.ok()).toBe(true);
     expect((await response.json()).anchors).toMatchObject([
       { anchor: { fromUtf16: 1, toUtf16: 3, status: "confirmed" }, quote: "引用" },
@@ -157,18 +154,18 @@ for (const recoverPendingSave of [false, true]) {
   });
 }
 
-test("appearance modes follow system preference initially and persist explicit light, dark, and paper choices", async ({ page }) => {
-  await page.emulateMedia({ colorScheme: "light" }); await ownerLogin(page);
+test("appearance modes follow system preference initially and persist explicit light, dark, and paper choices", async ({ page, authorizeAuthor }) => {
+  await page.emulateMedia({ colorScheme: "light" }); await authorizeAuthor("desktop");
   await expect(page.locator("html")).toHaveAttribute("data-zp-theme", "light");
   for (const theme of ["dark", "paper", "light"]) {
     await page.getByLabel("外観").selectOption(theme);
     await expect(page.locator("html")).toHaveAttribute("data-zp-theme", theme);
-    await page.reload(); await expect(page.getByLabel("外観")).toHaveValue(theme);
+    await page.reload(); await authorizeAuthor("desktop", page, { continueCurrentPage: true }); await expect(page.getByLabel("外観")).toHaveValue(theme);
   }
 });
 
-test("revision history keeps immutable content through a foreground refresh", async ({ page }) => {
-  const f = await fixture(page); const text = "Saved immutable version.";
+test("revision history keeps immutable content through a foreground refresh", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor); const text = "Saved immutable version.";
   await editor(page).click();
   await editor(page).press("ControlOrMeta+a");
   await page.keyboard.insertText(text);
@@ -177,24 +174,25 @@ test("revision history keeps immutable content through a foreground refresh", as
   await expect(page.getByRole("region", { name: "Revision履歴" })).toContainText(f.one.revision.markdown.trim());
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect(page.getByRole("region", { name: "Revision履歴" })).toContainText(text);
-  expect((await page.request.get(`${documentPath(f)}?revision=${f.one.revision.id}`)).ok()).toBe(true);
+  expect((await f.fetch(`${documentPath(f)}?revision=${f.one.revision.id}`)).ok()).toBe(true);
 });
 
-test("same-origin stale tabs cannot replace an equal-generation journal draft", async ({ page, context }) => {
-  const f = await fixture(page); const gate = await holdSaves(page, f);
-  const second = await context.newPage(); await second.goto(page.url());
-  await second.getByLabel("作品", { exact: true }).selectOption(f.projectId); await second.locator(".pg-document-list").getByRole("treeitem", { name: "Scene One シーン", exact: true }).click();
+test("same-origin stale tabs cannot replace an equal-generation journal draft", async ({ page, context, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor); const gate = await holdSaves(page, f);
+  const second = await context.newPage();
+  await authorizeAuthor("desktop", second, { path: new URL(page.url()).pathname });
+  await expectEditor(second, f.one.revision.markdown);
   try {
-    await editor(page).fill("First tab protected draft.");
+    await replaceEditor(page, "First tab protected draft.");
     await expect.poll(async () => (await drafts(page)).some((d) => d.markdown === "First tab protected draft.")).toBe(true);
-    await editor(second).fill("Stale tab different draft.");
+    await replaceEditor(second, "Stale tab different draft.");
     await expect(second.getByRole("alert")).toContainText("別タブ");
     expect((await drafts(page)).find((d) => d.documentId === f.one.document.id)?.markdown).toBe("First tab protected draft.");
   } finally { gate.release(); await second.close(); }
 });
 
-test("IME composition blocks navigation while coalesced editor state stays current for print and history", async ({ page }) => {
-  const f = await fixture(page);
+test("IME composition blocks navigation while coalesced editor state stays current for print and history", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
   await page.evaluate(() => {
     window.print = () => {
       document.documentElement.dataset.printedManuscript = document.querySelector(".pg-print-manuscript")?.textContent ?? "";
@@ -223,8 +221,8 @@ test("IME composition blocks navigation while coalesced editor state stays curre
   await expect(page.getByRole("region", { name: "Revision履歴" })).toContainText(composedText);
 });
 
-test("exact revision acknowledgement removes its draft without reviving deleted recovery on reload", async ({ page }) => {
-  const f = await fixture(page); const text = "Acknowledged durable draft.";
+test("exact revision acknowledgement removes its draft without reviving deleted recovery on reload", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor); const text = "Acknowledged durable draft.";
   await replaceEditor(page, text);
   await expectEditor(page, text);
   await saved(page, f, text);
@@ -233,10 +231,10 @@ test("exact revision acknowledgement removes its draft without reviving deleted 
   expect((await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
 });
 
-test("a committed save with a lost response is reconciled after reload with the same operation identity", async ({ page }) => {
-  const f = await fixture(page);
+test("a committed save with a lost response is reconciled after reload with the same operation identity", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
   const text = "Committed before its response was lost.";
-  const before = await read(page, f);
+  const before = await read(f);
   let resolveLost!: () => void;
   const lost = new Promise<void>((resolve) => { resolveLost = resolve; });
   const requests: Array<{ idempotencyKey: string | undefined; clientId: string | undefined; body: string | null }> = [];
@@ -260,18 +258,18 @@ test("a committed save with a lost response is reconciled after reload with the 
   await replaceEditor(page, text);
   await lost;
   await expect.poll(async () => (await drafts(page)).find((draft) => draft.documentId === f.one.document.id)?.pendingSave).toMatchObject({ markdown: text });
-  await page.reload();
+  await page.reload(); await authorizeAuthor("desktop", page, { continueCurrentPage: true });
   await expectEditor(page, text);
   await expect.poll(() => requests.length).toBe(2);
   await saved(page, f, text);
   expect(requests[1]).toEqual(requests[0]);
-  const after = await read(page, f);
+  const after = await read(f);
   expect(after.revision.id).not.toBe(before.revision.id);
   expect((await drafts(page)).filter((draft) => draft.documentId === f.one.document.id)).toEqual([]);
 });
 
-test("replaying a saved operation after a newer remote revision shows the current head", async ({ page }) => {
-  const f = await fixture(page);
+test("replaying a saved operation after a newer remote revision shows the current head", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
   const submitted = "B committed before its response was lost.";
   const remote = "Remote D became the current head.";
   const requests: Array<{ idempotencyKey: string | undefined; clientId: string | undefined; body: string | null }> = [];
@@ -295,22 +293,22 @@ test("replaying a saved operation after a newer remote revision shows the curren
 
   await replaceEditor(page, submitted);
   await lost;
-  await replace(page, f, remote);
-  await page.reload();
+  await replace(f, remote);
+  await page.reload(); await authorizeAuthor("desktop", page, { continueCurrentPage: true });
   await expectEditor(page, remote);
   await expectServerSaved(page);
   expect(requests).toHaveLength(2);
   expect(requests[1]).toEqual(requests[0]);
-  const latest = await read(page, f);
+  const latest = await read(f);
   expect(latest.revision.markdown).toBe(remote);
   expect((await drafts(page)).filter((draft) => draft.documentId === f.one.document.id)).toEqual([]);
 });
 
-test("a lost save response survives newer input, reloads, and rebases the newer draft after acknowledgement", async ({ page }) => {
-  const f = await fixture(page);
+test("a lost save response survives newer input, reloads, and rebases the newer draft after acknowledgement", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
   const submitted = "Submitted B before newer input.";
   const newer = "Newer C entered while B was saving.";
-  const before = await read(page, f);
+  const before = await read(f);
   let committed!: () => void;
   let release!: () => void;
   let lost!: () => void;
@@ -346,16 +344,16 @@ test("a lost save response survives newer input, reloads, and rebases the newer 
   }).toEqual({ markdown: newer, pending: submitted });
   release();
   await lostPromise;
-  await page.reload();
+  await page.reload(); await authorizeAuthor("desktop", page, { continueCurrentPage: true });
   await expectEditor(page, newer);
   await saved(page, f, newer);
   expect(requests).toHaveLength(3);
   expect(requests[1]).toEqual(requests[0]);
   expect(requests[2]?.idempotencyKey).not.toBe(requests[0]?.idempotencyKey);
   expect(requests[2]?.body).not.toBe(requests[0]?.body);
-  const after = await read(page, f);
+  const after = await read(f);
   expect(after.revision.markdown).toBe(newer);
-  const revisionResponse = await page.request.get(`${documentPath(f)}/revisions?limit=50`);
+  const revisionResponse = await f.fetch(`${documentPath(f)}/revisions?limit=50`);
   expect(revisionResponse.ok()).toBe(true);
   const revisionPage = await revisionResponse.json() as { revisions: Array<{ id: string; markdown: string }> };
   expect(revisionPage.revisions).toHaveLength(3);
@@ -365,8 +363,8 @@ test("a lost save response survives newer input, reloads, and rebases the newer 
   expect(after.revision.id).not.toBe(before.revision.id);
 });
 
-test("a newer draft stays protected when a replayed save is already superseded remotely", async ({ page }) => {
-  const f = await fixture(page);
+test("a newer draft stays protected when a replayed save is already superseded remotely", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
   const submitted = "B committed before its response was lost.";
   const newer = "Newer local C stays recoverable.";
   const remote = "Remote D became the current head.";
@@ -402,22 +400,22 @@ test("a newer draft stays protected when a replayed save is already superseded r
     const draft = (await drafts(page)).find((entry) => entry.documentId === f.one.document.id);
     return { markdown: draft?.markdown, pending: draft?.pendingSave?.markdown };
   }).toEqual({ markdown: newer, pending: submitted });
-  await replace(page, f, remote);
+  await replace(f, remote);
   release();
   await lostPromise;
-  await page.reload();
+  await page.reload(); await authorizeAuthor("desktop", page, { continueCurrentPage: true });
   await expect(page.getByRole("heading", { name: "Revision競合" })).toBeVisible();
   await expectEditor(page, newer);
   await expect.poll(async () => (await drafts(page)).find((draft) => draft.documentId === f.one.document.id)?.pendingSave).toBeUndefined();
   expect(requests).toHaveLength(2);
   expect(requests[1]).toEqual(requests[0]);
-  expect((await read(page, f)).revision.markdown).toBe(remote);
+  expect((await read(f)).revision.markdown).toBe(remote);
   const draft = (await drafts(page)).find((entry) => entry.documentId === f.one.document.id);
   expect(draft).toMatchObject({ markdown: newer, baseRevisionId: f.one.revision.id, baseMarkdown: f.one.revision.markdown });
 });
 
-test("undoing an autosave draft back to the saved revision removes only that draft and never sends it", async ({ page }) => {
-  const f = await fixture(page);
+test("undoing an autosave draft back to the saved revision removes only that draft and never sends it", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
   await pauseAutosaveClock(page);
   const savedMarkdown = f.one.revision.markdown;
   const patchBodies: string[] = [];
@@ -444,16 +442,16 @@ test("undoing an autosave draft back to the saved revision removes only that dra
   await expect.poll(async () => (await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
   await page.clock.fastForward(1_100);
   expect(patchBodies).toEqual([]);
-  await page.reload();
+  await page.reload(); await authorizeAuthor("desktop", page, { continueCurrentPage: true });
   await expectEditor(page, savedMarkdown);
   expect((await drafts(page)).filter((d) => d.documentId === f.one.document.id)).toEqual([]);
   await page.clock.fastForward(1_100);
   expect(patchBodies).toEqual([]);
-  expect((await read(page, f)).revision).toEqual(f.one.revision);
+  expect((await read(f)).revision).toEqual(f.one.revision);
 });
 
-test("undo cleanup cannot remove a higher-generation draft written by another tab", async ({ page, context }) => {
-  const f = await fixture(page);
+test("undo cleanup cannot remove a higher-generation draft written by another tab", async ({ page, context, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
   await pauseAutosaveClock(page);
   const savedMarkdown = f.one.revision.markdown;
   await replaceEditor(page, "First tab temporary draft.");
@@ -462,7 +460,7 @@ test("undo cleanup cannot remove a higher-generation draft written by another ta
   // The Playwright clock belongs to the browser context, so the second
   // tab inherits it without advancing the first tab's pending autosave.
   const second = await context.newPage();
-  await second.goto(page.url());
+  await authorizeAuthor("desktop", second, { path: new URL(page.url()).pathname });
   await expectEditor(second, "First tab temporary draft.");
   await replaceEditor(second, "Newer second-tab draft.");
   await expect.poll(async () => (await drafts(second)).find((d) => d.documentId === f.one.document.id)?.markdown).toBe("Newer second-tab draft.");
@@ -474,8 +472,8 @@ test("undo cleanup cannot remove a higher-generation draft written by another ta
   await second.close();
 });
 
-test("undo during an in-flight save preserves the request and saves the restored text afterward", async ({ page }) => {
-  const f = await fixture(page);
+test("undo during an in-flight save preserves the request and saves the restored text afterward", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
   const savedMarkdown = f.one.revision.markdown;
   const gate = await holdSaves(page, f);
   try {
@@ -490,8 +488,8 @@ test("undo during an in-flight save preserves the request and saves the restored
   } finally { gate.release(); }
 });
 
-test("writing UI protects multiple document drafts separately from PostgreSQL revision durability", async ({ page }) => {
-  const f = await fixture(page); const gate = await holdSaves(page, f);
+test("writing UI protects multiple document drafts separately from PostgreSQL revision durability", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor); const gate = await holdSaves(page, f);
   try {
     await replaceEditor(page, "Scene One protected draft.");
     await expectEditor(page, "Scene One protected draft.");
@@ -515,8 +513,8 @@ test("writing UI protects multiple document drafts separately from PostgreSQL re
   } finally { gate.release(); }
 });
 
-test("new typing survives an older in-flight PostgreSQL save and exact acknowledgement", async ({ page }) => {
-  const f = await fixture(page); const gate = await holdSaves(page, f);
+test("new typing survives an older in-flight PostgreSQL save and exact acknowledgement", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor); const gate = await holdSaves(page, f);
   try {
     expect((await drafts(page)).filter(draft => draft.documentId === f.one.document.id)).toEqual([]);
     await expectNoUnsavedDeviceChanges(page);
@@ -531,19 +529,19 @@ test("new typing survives an older in-flight PostgreSQL save and exact acknowled
   } finally { gate.release(); }
 });
 
-test("new typing survives recovery against a newer PostgreSQL base revision", async ({ page }) => {
-  const f = await fixture(page); const gate = await holdSaves(page, f);
+test("new typing survives recovery against a newer PostgreSQL base revision", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor); const gate = await holdSaves(page, f);
   const writes: string[] = [];
   page.on("request", (request) => { if (request.method() === "PATCH" && request.url().includes(documentPath(f))) writes.push(request.url()); });
   try {
     await editor(page).fill("Recovered draft before competing revision."); await gate.seen;
-    await replace(page, f, "Competing PostgreSQL revision.");
+    await replace(f, "Competing PostgreSQL revision.");
     await editor(page).fill("Newest input before conflict arrives."); gate.release();
     await expect(page.getByRole("heading", { name: "Revision競合" })).toBeVisible();
     await expectEditor(page, "Newest input before conflict arrives.");
     await expect.poll(async () => (await drafts(page)).find((draft) => draft.documentId === f.one.document.id)?.pendingSave).toBeUndefined();
     const writesBeforeReload = writes.length;
-    await page.reload();
+    await page.reload(); await authorizeAuthor("desktop", page, { continueCurrentPage: true });
     await expect(page.getByRole("heading", { name: "Revision競合" })).toBeVisible();
     await expectEditor(page, "Newest input before conflict arrives.");
     expect(writes).toHaveLength(writesBeforeReload);
@@ -552,15 +550,15 @@ test("new typing survives recovery against a newer PostgreSQL base revision", as
   } finally { gate.release(); }
 });
 
-test("browser recovery is author-scoped and foreign records remain untouched", async ({ page }) => {
-  const f = await fixture(page); const foreign: Draft = { version: 1, key: JSON.stringify(["foreign-author", f.projectId, f.one.document.id]), projectId: f.projectId, documentId: f.one.document.id, authorScope: "foreign-author", baseRevisionId: f.one.revision.id, baseMarkdown: f.one.revision.markdown, markdown: "Foreign private draft.", generation: 100, updatedAt: Date.now() };
+test("browser recovery is author-scoped and foreign records remain untouched", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor); const foreign: Draft = { version: 1, key: JSON.stringify(["foreign-author", f.projectId, f.one.document.id]), projectId: f.projectId, documentId: f.one.document.id, authorScope: "foreign-author", baseRevisionId: f.one.revision.id, baseMarkdown: f.one.revision.markdown, markdown: "Foreign private draft.", generation: 100, updatedAt: Date.now() };
   await writeRecords(page, [foreign]); await reopen(page, f);
   await expect(editor(page)).not.toHaveText(foreign.markdown);
   expect((await drafts(page)).find((d) => d.key === foreign.key)).toEqual(foreign);
 });
 
-test("one malformed legacy key does not hide later recoverable PostgreSQL drafts", async ({ page }) => {
-  const f = await fixture(page); const gate = await holdSaves(page, f);
+test("one malformed legacy key does not hide later recoverable PostgreSQL drafts", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor); const gate = await holdSaves(page, f);
   try {
     await editor(page).fill("Valid protected draft after malformed entry.");
     await expect.poll(async () => (await drafts(page)).some((d) => d.markdown === "Valid protected draft after malformed entry.")).toBe(true);
@@ -570,65 +568,65 @@ test("one malformed legacy key does not hide later recoverable PostgreSQL drafts
   } finally { gate.release(); }
 });
 
-async function submitProposal(page: Page, f: Fixture): Promise<{ id: string; operation: Record<string, unknown>; generated: string }> {
-  const snapshotResponse = await page.request.get(`/api/projects/${f.projectId}/snapshot`); expect(snapshotResponse.ok()).toBe(true);
+async function submitProposal(f: Fixture): Promise<{ id: string; operation: ChangeOperation; generated: string }> {
+  const snapshotResponse = await f.fetch(`/api/projects/${f.projectId}/snapshot`); expect(snapshotResponse.ok()).toBe(true);
   const { snapshot, files } = await snapshotResponse.json() as { snapshot: { projectId: string; projectVersion: number }; files: Array<{ path: string; revision: string; content: string }> };
   const path = `documents/${f.one.document.id}.md`;
   const current = files.find((file) => file.path === path);
   if (!current) throw new Error(`PostgreSQL snapshot omitted the document path ${path}`);
   const generated = `${current.content}\nMCP proposal requires explicit author approval.\n`;
-  const operation = { id: `mcp-op-${randomUUID()}`, generation: 1, projectId: f.projectId, baseProjectVersion: snapshot.projectVersion, effect: "manuscript", reads: [{ path, revision: current.revision }], writes: [{ path, revision: current.revision, content: generated }], message: "MCP acceptance proposal" };
+  const operation: ChangeOperation = { id: `mcp-op-${randomUUID()}`, generation: 1, projectId: f.projectId, baseProjectVersion: snapshot.projectVersion, effect: "manuscript", reads: [{ path, revision: current.revision }], writes: [{ path, revision: current.revision, content: generated }], message: "MCP acceptance proposal" };
   const id = `mcp-${randomUUID()}`;
-  const external = await request.newContext({ baseURL: appBaseURL });
-  let responseBody: unknown;
-  let status: number;
+  const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
+  if (!databaseUrl) throw new Error("Browser acceptance requires its disposable PostgreSQL database");
+  const persistence = createPostgresPersistence(databaseUrl);
   try {
-    const response = await external.post(`/api/projects/${f.projectId}/proposals`, { headers: mutationHeaders({ Authorization: `Bearer ${authToken}` }), data: { id, snapshot, operations: [operation] } });
-    status = response.status(); responseBody = await response.json();
-  } finally { await external.dispose(); }
-  expect(status!, JSON.stringify(responseBody)).toBe(201); expect(responseBody).toMatchObject({ id, source: "mcp" });
+    // Seed a real pending MCP proposal for author review. The OAuth MCP transport has separate API coverage.
+    const stored = await new CoreStore({ persistence }).propose(f.projectId, { id, snapshot, operations: [operation], source: "mcp" });
+    expect(stored).toMatchObject({ id, source: "mcp" });
+  } finally { await persistence.close(); }
   return { id, operation, generated };
 }
 
-test("external MCP proposals require owner approval before PostgreSQL application", async ({ page }) => {
-  const f = await fixture(page); const proposal = await submitProposal(page, f);
-  const before = await page.request.get(`/api/projects/${f.projectId}/proposals/${proposal.id}`);
+test("external MCP proposals require owner approval before PostgreSQL application", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor); const proposal = await submitProposal(f);
+  const before = await f.fetch(`/api/projects/${f.projectId}/proposals/${proposal.id}`);
   expect(await before.json()).toMatchObject({ state: "proposed", approvedOperationIds: [] });
-  const denied = await page.request.post(`/api/projects/${f.projectId}/apply`, { headers: mutationHeaders(), data: proposal.operation }); expect(denied.ok()).toBe(false);
-  expect((await read(page, f)).revision.id).toBe(f.one.revision.id);
-  const approval = await page.request.post(`/api/projects/${f.projectId}/approvals`, { headers: mutationHeaders(), data: { proposalId: proposal.id, operationIds: [proposal.operation.id] } }); expect(approval.status()).toBe(204);
-  const applied = await page.request.post(`/api/projects/${f.projectId}/apply`, { headers: mutationHeaders(), data: proposal.operation }); expect(applied.status()).toBe(201);
-  expect((await read(page, f)).revision.markdown).toBe(proposal.generated);
+  const denied = await f.fetch(`/api/projects/${f.projectId}/apply`, { method: "POST", data: proposal.operation }); expect(denied.ok()).toBe(false);
+  expect((await read(f)).revision.id).toBe(f.one.revision.id);
+  const approval = await f.fetch(`/api/projects/${f.projectId}/approvals`, { method: "POST", data: { proposalId: proposal.id, operationIds: [proposal.operation.id] } }); expect(approval.status()).toBe(204);
+  const applied = await f.fetch(`/api/projects/${f.projectId}/apply`, { method: "POST", data: proposal.operation }); expect(applied.status()).toBe(201);
+  expect((await read(f)).revision.markdown).toBe(proposal.generated);
   await reopen(page, f); await expectEditor(page, proposal.generated);
 });
 
-test("full MCP proposal payload and approval state survive Core process and cache loss", async ({ page }) => {
-  const f = await fixture(page); const proposal = await submitProposal(page, f);
+test("full MCP proposal payload and approval state survive Core process and cache loss", async ({ page, authorizeAuthor, authorServer }) => {
+  const f = await fixture(page, authorizeAuthor); const proposal = await submitProposal(f);
   const path = `/api/projects/${f.projectId}/proposals/${proposal.id}`;
-  const approval = await page.request.post(`/api/projects/${f.projectId}/approvals`, { headers: mutationHeaders(), data: { proposalId: proposal.id, operationIds: [proposal.operation.id] } });
+  const approval = await f.fetch(`/api/projects/${f.projectId}/approvals`, { method: "POST", data: { proposalId: proposal.id, operationIds: [proposal.operation.id] } });
   expect(approval.status()).toBe(204);
-  const before = await (await page.request.get(path)).json();
+  const before = await (await f.fetch(path)).json();
   expect(before).toMatchObject({ state: "approved", approvedOperationIds: [proposal.operation.id] });
-  await restart(page); await ownerLogin(page);
-  const after = await page.request.get(path); expect(after.ok()).toBe(true); expect(await after.json()).toEqual(before);
-  expect((await read(page, f)).revision.id).toBe(f.one.revision.id);
+  await authorServer.restartApi();
+  const after = await f.fetch(path); expect(after.ok()).toBe(true); expect(await after.json()).toEqual(before);
+  expect((await read(f)).revision.id).toBe(f.one.revision.id);
   await reopen(page, f); await expectEditor(page, f.one.revision.markdown);
 });
 
-test("a PostgreSQL update during author approval keeps the conflicting editor draft visible", async ({ page }) => {
-  const f = await fixture(page); const proposal = await submitProposal(page, f); const gate = await holdSaves(page, f);
+test("a PostgreSQL update during author approval keeps the conflicting editor draft visible", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor); const proposal = await submitProposal(f); const gate = await holdSaves(page, f);
   try {
     await replaceEditor(page, "Author input must survive rejected approval."); await gate.seen;
-    await replace(page, f, "Another writer advanced the project.");
-    const approval = await page.request.post(`/api/projects/${f.projectId}/approvals`, { headers: mutationHeaders(), data: { proposalId: proposal.id, operationIds: [proposal.operation.id] } }); expect(approval.status()).toBe(204);
-    const applied = await page.request.post(`/api/projects/${f.projectId}/apply`, { headers: mutationHeaders(), data: proposal.operation }); expect(applied.status()).toBe(409);
+    await replace(f, "Another writer advanced the project.");
+    const approval = await f.fetch(`/api/projects/${f.projectId}/approvals`, { method: "POST", data: { proposalId: proposal.id, operationIds: [proposal.operation.id] } }); expect(approval.status()).toBe(204);
+    const applied = await f.fetch(`/api/projects/${f.projectId}/apply`, { method: "POST", data: proposal.operation }); expect(applied.status()).toBe(409);
     gate.release(); await expect(page.getByRole("heading", { name: "Revision競合" })).toBeVisible();
     await expectEditor(page, "Author input must survive rejected approval.");
-    expect((await read(page, f)).revision.markdown).toBe("Another writer advanced the project.");
+    expect((await read(f)).revision.markdown).toBe("Another writer advanced the project.");
   } finally { gate.release(); }
 });
 
-test("IndexedDB quota failures remain visible and block PostgreSQL writes", async ({ page }) => {
+test("IndexedDB quota failures remain visible and block PostgreSQL writes", async ({ page, authorizeAuthor }) => {
   await page.addInitScript(() => {
     const put = IDBObjectStore.prototype.put;
     IDBObjectStore.prototype.put = function (this: IDBObjectStore, value: unknown, key?: IDBValidKey) {
@@ -636,30 +634,30 @@ test("IndexedDB quota failures remain visible and block PostgreSQL writes", asyn
       return key === undefined ? put.call(this, value) : put.call(this, value, key);
     };
   });
-  const f = await fixture(page); let remoteWrites = 0;
+  const f = await fixture(page, authorizeAuthor); let remoteWrites = 0;
   page.on("request", (request) => { if (request.method() === "PATCH" && new URL(request.url()).pathname === documentPath(f)) remoteWrites += 1; });
   await editor(page).fill("Unsaved text must remain visible after quota failure.");
   await expect(page.getByRole("alert")).toContainText(/quota|容量|保存|database draft/i);
   await expect(page.getByRole("button", { name: /今すぐ保存|保存結果を確認して再試行|作品への保存を再試行/ })).toBeDisabled();
-  expect(remoteWrites).toBe(0); expect((await read(page, f)).revision.id).toBe(f.one.revision.id);
+  expect(remoteWrites).toBe(0); expect((await read(f)).revision.id).toBe(f.one.revision.id);
   await expectEditor(page, "Unsaved text must remain visible after quota failure.");
 });
 
-test("project reconstruction retains PostgreSQL revisions and removed Git lifecycle has no fallback", async ({ page }) => {
-  const f = await fixture(page); const text = "Survives process reconstruction.";
-  await editor(page).fill(text); await saved(page, f, text); const revision = (await read(page, f)).revision.id;
-  await restart(page); await ownerLogin(page); await reopen(page, f); await expectEditor(page, text);
-  expect((await read(page, f)).revision.id).toBe(revision);
+test("project reconstruction retains PostgreSQL revisions and removed Git lifecycle has no fallback", async ({ page, authorizeAuthor, authorServer }) => {
+  const f = await fixture(page, authorizeAuthor); const text = "Survives process reconstruction.";
+  await editor(page).fill(text); await saved(page, f, text); const revision = (await read(f)).revision.id;
+  await authorServer.restartApi(); await reopen(page, f); await expectEditor(page, text);
+  expect((await read(f)).revision.id).toBe(revision);
   for (const suffix of ["publish", "reconcile", "checkpoints"]) {
-    const result = await page.request.post(`/api/projects/${f.projectId}/${suffix}`, { headers: mutationHeaders(), data: {} }); expect(result.ok()).toBe(false);
+    const result = await f.fetch(`/api/projects/${f.projectId}/${suffix}`, { method: "POST", data: {} }); expect(result.ok()).toBe(false);
   }
   await expect(page.getByRole("button", { name: "Save to GitHub" })).toHaveCount(0);
   await expect(page.getByLabel("GitHub リポジトリ URL")).toHaveCount(0);
 });
 
-test("unmounting a contribution aborts its in-flight action request", async ({ page }) => {
+test("unmounting a contribution aborts its in-flight action request", async ({ page, authorizeAuthor }) => {
   test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing contribution is selected by the full profile.");
-  const f = await fixture(page); let observed!: (request: import("@playwright/test").Request) => void;
+  const f = await fixture(page, authorizeAuthor); let observed!: (request: import("@playwright/test").Request) => void;
   const seen = new Promise<import("@playwright/test").Request>((resolve) => { observed = resolve; });
   let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/api/projects/*/actions/publishing.project.tree", async (route) => { observed(route.request()); await gate; try { await route.abort(); } catch { /* already cancelled on unmount */ } });
@@ -673,7 +671,7 @@ test("unmounting a contribution aborts its in-flight action request", async ({ p
     const request = await seen;
     const failed = page.waitForEvent("requestfailed", (candidate) => candidate === request);
     await page.getByRole("button", { name: "ログアウト" }).click();
-    await expect(page.getByRole("heading", { name: "作品を開く" })).toBeVisible(); expect((await failed).failure()).not.toBeNull();
+    await expect(page.getByRole("button", { name: "OAuthでサインイン" })).toBeVisible(); expect((await failed).failure()).not.toBeNull();
   } finally { release(); }
 });
 
@@ -690,8 +688,8 @@ async function delayImages(page: Page): Promise<void> {
   });
 }
 
-test("a pending scratch image read is flushed to its captured document before navigation", async ({ page }) => {
-  await delayImages(page); const f = await fixture(page); await scratch(page);
+test("a pending scratch image read is flushed to its captured document before navigation", async ({ page, authorizeAuthor }) => {
+  await delayImages(page); const f = await fixture(page, authorizeAuthor); await scratch(page);
   await memo(page).fill("Attachment belongs to Scene One."); await image(page).setInputFiles(png);
   await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
@@ -699,8 +697,8 @@ test("a pending scratch image read is flushed to its captured document before na
   expect((await scratchRecords(page)).some((r) => r.key.includes(f.two.document.id) && r.text.includes("Attachment belongs to Scene One."))).toBe(false);
 });
 
-test("saving a scratch note replays the same request after its committed response is lost", async ({ page }) => {
-  const f = await fixture(page);
+test("saving a scratch note replays the same request after its committed response is lost", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
   await scratch(page);
   await memo(page).fill("Scratch text survives an ambiguous note save.");
   await image(page).setInputFiles(png);
@@ -739,13 +737,13 @@ test("saving a scratch note replays the same request after its committed respons
   expect(requests[2]?.key).not.toBe(requests[0]?.key);
   expect((requests[2]?.body as { markdown: string }).markdown).toContain("A newer scratch draft stays separate from the pending note.");
 
-  const documents = await page.request.get(`${documentPath(f).slice(0, documentPath(f).lastIndexOf("/"))}?limit=1000&parentId=${f.one.document.id}`);
+  const documents = await f.fetch(`${documentPath(f).slice(0, documentPath(f).lastIndexOf("/"))}?limit=1000&parentId=${f.one.document.id}`);
   expect(documents.ok()).toBe(true);
   const children = await documents.json() as { documents: Array<{ id: string; kind: string; title: string }> };
   const notes = children.documents.filter((document) => document.kind === "note" && document.title === "スクラッチ");
   expect(notes).toHaveLength(2);
   const noteBodies = await Promise.all(notes.map(async (item) => {
-    const note = await page.request.get(`${documentPath(f).slice(0, documentPath(f).lastIndexOf("/"))}/${item.id}`);
+    const note = await f.fetch(`${documentPath(f).slice(0, documentPath(f).lastIndexOf("/"))}/${item.id}`);
     expect(note.ok()).toBe(true);
     const noteRead = await note.json() as { revision: { markdown: string } };
     return noteRead.revision.markdown;
@@ -754,8 +752,8 @@ test("saving a scratch note replays the same request after its committed respons
   expect(noteBodies.some((markdown) => markdown.includes("A newer scratch draft stays separate from the pending note."))).toBe(true);
 });
 
-test("a pending scratch note remains reconcilable after its editable draft is cleared", async ({ page }) => {
-  const f = await fixture(page);
+test("a pending scratch note remains reconcilable after its editable draft is cleared", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
   await scratch(page);
   await memo(page).fill("The pending note payload remains durable after editing the scratch.");
   let attempts = 0;
@@ -786,13 +784,13 @@ test("a pending scratch note remains reconcilable after its editable draft is cl
   expect(requests[1]).toEqual(requests[0]);
   await expect(memo(page)).toHaveValue("");
 
-  const documents = await page.request.get(`${collectionPath}?limit=1000&parentId=${f.one.document.id}`);
+  const documents = await f.fetch(`${collectionPath}?limit=1000&parentId=${f.one.document.id}`);
   const children = await documents.json() as { documents: Array<{ kind: string; title: string }> };
   expect(children.documents.filter((document) => document.kind === "note" && document.title === "スクラッチ")).toHaveLength(1);
 });
 
-test("scratch still protects text and accepts a new image after an oversized attachment", async ({ page }) => {
-  const f = await fixture(page);
+test("scratch still protects text and accepts a new image after an oversized attachment", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
   await scratch(page);
   await image(page).setInputFiles(png);
   const attachment = page.locator(".scratch-panel").getByRole("img", { name: png.name });
@@ -812,11 +810,11 @@ test("scratch still protects text and accepts a new image after an oversized att
   await expect.poll(async () => (await scratchRecords(page)).find((r) => r.key.includes(f.one.document.id))?.text).toContain("replacement.png");
 });
 
-test("an untouched or stale tab cannot overwrite protected scratch text and images", async ({ page, context }) => {
-  const f = await fixture(page);
+test("an untouched or stale tab cannot overwrite protected scratch text and images", async ({ page, context, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
   const second = await context.newPage();
   try {
-    await second.goto(page.url());
+    await authorizeAuthor("desktop", second, { path: new URL(page.url()).pathname });
     await expectEditor(second, f.one.revision.markdown);
     await scratch(second);
     await expect(memo(second)).toBeEnabled();
@@ -826,7 +824,7 @@ test("an untouched or stale tab cannot overwrite protected scratch text and imag
     await expect.poll(async () => (await scratchRecords(page)).find((r) => r.key.includes(f.one.document.id))?.text).toContain(png.name);
     await second.getByRole("button", { name: "読む", exact: true }).click();
     await expect(second.getByRole("region", { name: "原稿の閲覧" })).toBeVisible();
-    await second.reload();
+    await second.reload(); await authorizeAuthor("desktop", second, { continueCurrentPage: true });
     await expectEditor(second, f.one.revision.markdown);
     await scratch(second);
     await expect(memo(second)).toHaveValue("First tab's protected text.");
@@ -837,7 +835,7 @@ test("an untouched or stale tab cannot overwrite protected scratch text and imag
     await memo(second).fill("Second tab's stale edit.");
     await expect(second.locator(".scratch-panel").getByRole("alert")).toContainText("別タブ");
     await expect(memo(second)).toHaveValue("Second tab's stale edit.");
-    await page.reload();
+    await page.reload(); await authorizeAuthor("desktop", page, { continueCurrentPage: true });
     await expectEditor(page, f.one.revision.markdown);
     await scratch(page);
     await expect(memo(page)).toHaveValue("First tab's newer protected text.");
@@ -847,8 +845,8 @@ test("an untouched or stale tab cannot overwrite protected scratch text and imag
   }
 });
 
-test("an unprotected scratch warns before reload and the protected other-tab value remains recoverable", async ({ page, context }) => {
-  const f = await fixture(page);
+test("an unprotected scratch warns before reload and the protected other-tab value remains recoverable", async ({ page, context, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
   const second = await context.newPage();
   let pageDialogs = 0;
   let secondDialogs = 0;
@@ -865,14 +863,14 @@ test("an unprotected scratch warns before reload and the protected other-tab val
     else await dialog.accept();
   });
   try {
-    await second.goto(page.url());
+    await authorizeAuthor("desktop", second, { path: new URL(page.url()).pathname });
     await expectEditor(second, f.one.revision.markdown);
     await scratch(page);
     await scratch(second);
     await memo(page).fill("Tab A protected scratch.");
     await expect.poll(async () => (await scratchRecords(page)).find((record) => record.key.includes(f.one.document.id))?.text).toContain("Tab A protected scratch.");
 
-    await page.reload();
+    await page.reload(); await authorizeAuthor("desktop", page, { continueCurrentPage: true });
     expect(pageDialogs).toBe(0);
     await scratch(page);
     await expect(memo(page)).toHaveValue("Tab A protected scratch.");
@@ -889,9 +887,10 @@ test("an unprotected scratch warns before reload and the protected other-tab val
     secondDialogAction = "accept";
     await second.reload({ timeout: 5_000 }).catch(() => undefined);
     expect(secondDialogs).toBe(2);
+    await authorizeAuthor("desktop", second, { continueCurrentPage: true });
     await scratch(second);
     await expect(memo(second)).toHaveValue("Tab A protected scratch.");
-    await second.reload();
+    await second.reload(); await authorizeAuthor("desktop", second, { continueCurrentPage: true });
     expect(secondDialogs).toBe(2);
     await scratch(second);
     await expect(memo(second)).toHaveValue("Tab A protected scratch.");
@@ -900,8 +899,8 @@ test("an unprotected scratch warns before reload and the protected other-tab val
   }
 });
 
-test("scratch storage failure warns before reload and keeps the last protected record", async ({ page }) => {
-  const f = await fixture(page);
+test("scratch storage failure warns before reload and keeps the last protected record", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
   await scratch(page);
   await memo(page).fill("Last protected scratch.");
   await expect.poll(async () => (await scratchRecords(page)).find((record) => record.key.includes(f.one.document.id))?.text).toContain("Last protected scratch.");
@@ -927,8 +926,8 @@ test("scratch storage failure warns before reload and keeps the last protected r
   expect((await scratchRecords(page)).find((record) => record.key.includes(f.one.document.id))?.text).toContain("Last protected scratch.");
 });
 
-test("navigation does not replace a scratch record while it is loading or unreadable", async ({ page }) => {
-  const f = await fixture(page);
+test("navigation does not replace a scratch record while it is loading or unreadable", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
   await scratch(page);
   await memo(page).fill("Protected scratch before simulating read failure.");
   const record = () => scratchRecords(page).then((records) => records.find((item) => item.key.includes(f.one.document.id)));
@@ -944,7 +943,7 @@ test("navigation does not replace a scratch record while it is loading or unread
     };
   });
   await page.evaluate(() => sessionStorage.setItem("hold-scratch-read", "1"));
-  await page.reload();
+  await page.reload(); await authorizeAuthor("desktop", page, { continueCurrentPage: true });
   await expectEditor(page, f.one.revision.markdown);
   await scratch(page);
   await expect(memo(page)).toBeDisabled();
@@ -954,7 +953,7 @@ test("navigation does not replace a scratch record while it is loading or unread
   await page.evaluate(() => sessionStorage.removeItem("hold-scratch-read"));
   const unreadable = { ...original, text: "Malformed original recovery bytes" };
   await writeRecords(page, [unreadable], "pgScratch");
-  await page.goto(`/desktop/projects/${f.projectId}/scenes/${f.one.document.id}`);
+  await f.authorizeAuthor("desktop", page, { path: `/desktop/projects/${f.projectId}/scenes/${f.one.document.id}` });
   await expectEditor(page, f.one.revision.markdown);
   await scratch(page);
   await expect(page.locator(".scratch-panel").getByRole("alert")).toBeVisible();
@@ -963,8 +962,8 @@ test("navigation does not replace a scratch record while it is loading or unread
   expect(await record()).toMatchObject(unreadable);
 });
 
-test("resuming an older scratch generation cannot replace newer unprotected input", async ({ page }) => {
-  await fixture(page); await scratch(page); await memo(page).fill("Protected older scratch generation.");
+test("resuming an older scratch generation cannot replace newer unprotected input", async ({ page, authorizeAuthor }) => {
+  await fixture(page, authorizeAuthor); await scratch(page); await memo(page).fill("Protected older scratch generation.");
   await editor(page).click(); await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Protected older scratch generation."))).toBe(true);
   await memo(page).fill("Newer scratch input still inside debounce.");
   await page.locator(".scratch-panel").getByRole("button", { name: "続ける", exact: true }).click();
@@ -972,8 +971,8 @@ test("resuming an older scratch generation cannot replace newer unprotected inpu
   await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Newer scratch input still inside debounce."))).toBe(true);
 });
 
-test("failed scratch protection refuses recovery selection and keeps the current error visible", async ({ page }) => {
-  await fixture(page); await scratch(page); await memo(page).fill("Older protected scratch."); await editor(page).click();
+test("failed scratch protection refuses recovery selection and keeps the current error visible", async ({ page, authorizeAuthor }) => {
+  await fixture(page, authorizeAuthor); await scratch(page); await memo(page).fill("Older protected scratch."); await editor(page).click();
   await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Older protected scratch."))).toBe(true);
   await page.evaluate(() => {
     const original = IDBObjectStore.prototype.put;
@@ -985,8 +984,8 @@ test("failed scratch protection refuses recovery selection and keeps the current
   expect((await scratchRecords(page)).some((r) => r.text.includes("Older protected scratch."))).toBe(true);
 });
 
-test("resuming an older scratch entry waits for its pending image read and keeps the latest draft", async ({ page }) => {
-  await delayImages(page); await fixture(page); await scratch(page);
+test("resuming an older scratch entry waits for its pending image read and keeps the latest draft", async ({ page, authorizeAuthor }) => {
+  await delayImages(page); await fixture(page, authorizeAuthor); await scratch(page);
   await memo(page).fill("Protected scratch before attachment."); await editor(page).click();
   await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Protected scratch before attachment."))).toBe(true);
   await memo(page).fill("Latest scratch with attachment."); await image(page).setInputFiles(png);
@@ -995,7 +994,7 @@ test("resuming an older scratch entry waits for its pending image read and keeps
   await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Latest scratch with attachment.") && r.text.includes("data:image/png;base64"))).toBe(true);
 });
 
-test("scratch text and image input survive while navigation waits for protection", async ({ page }) => {
+test("scratch text and image input survive while navigation waits for protection", async ({ page, authorizeAuthor }) => {
   await delayImages(page);
   await page.addInitScript(() => {
     type Gate = { armed: boolean; started: boolean; target?: IDBTransaction; release?: () => void };
@@ -1032,7 +1031,7 @@ test("scratch text and image input survive while navigation waits for protection
       return key === undefined ? originalPut.call(this, value) : originalPut.call(this, value, key);
     };
   });
-  await fixture(page); await scratch(page);
+  await fixture(page, authorizeAuthor); await scratch(page);
   await memo(page).fill("Previously protected scratch."); await editor(page).click();
   await expect.poll(async () => (await scratchRecords(page)).some((r) => r.text.includes("Previously protected scratch."))).toBe(true);
   await page.evaluate(() => { (window as Window & { __scratchProtectionGate?: { armed: boolean } }).__scratchProtectionGate!.armed = true; });
@@ -1051,17 +1050,17 @@ test("scratch text and image input survive while navigation waits for protection
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
 });
 
-test("public publishing route mounts its source reader without an owner session", async ({ page }) => {
+test("public publishing route mounts its source reader without an owner session", async ({ page, authorServer }) => {
   test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing browser module is selected by the full profile.");
   const ownerSessionRequests: string[] = []; const publicReadRequests: string[] = [];
   page.on("request", (request) => { const pathname = new URL(request.url()).pathname; if (pathname === "/api/session") ownerSessionRequests.push(pathname); if (pathname.startsWith("/api/public/projects/")) publicReadRequests.push(pathname); });
-  const projectId = randomUUID(); await page.goto(`/r/publishing/${projectId}/e2e-invalid-token`);
+  const projectId = randomUUID(); await page.goto(new URL(`/r/publishing/${projectId}/e2e-invalid-token`, authorServer.apiOrigin).href);
   await expect(page.getByRole("heading", { name: "共有された原稿" })).toBeVisible();
   await expect(page.getByRole("alert")).toContainText("共有リンクは無効か、期限切れです。"); expect(ownerSessionRequests).toEqual([]);
   expect(publicReadRequests).toEqual([`/api/public/projects/${projectId}/modules/publishing/share/e2e-invalid-token`]);
 });
 
-test("a root-only public share renders selectable scenes without an owner session", async ({ page }) => {
+test("a root-only public share renders selectable scenes without an owner session", async ({ page, authorServer }) => {
   test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing browser module is selected by the full profile.");
   const projectId = randomUUID();
   const token = "share_" + "r".repeat(43);
@@ -1088,7 +1087,7 @@ test("a root-only public share renders selectable scenes without an owner sessio
       await route.fulfill({ status: 404, json: { error: "Share link is unavailable" } });
     }
   });
-  await page.goto(`/r/publishing/${projectId}/${token}`);
+  await page.goto(new URL(`/r/publishing/${projectId}/${token}`, authorServer.apiOrigin).href);
   await expect(page.getByRole("heading", { name: "Root scene preview" })).toBeVisible();
   await expect(page.getByRole("button", { name: "作品直下のシーン" })).toBeVisible();
   await page.getByRole("button", { name: "作品直下のシーン" }).click();
@@ -1097,8 +1096,8 @@ test("a root-only public share renders selectable scenes without an owner sessio
   expect(ownerSessionRequests).toEqual([]);
 });
 
-test("late document activation cannot replace explicit scene navigation", async ({ page }) => {
-  const f = await fixture(page); let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; }); let observed!: () => void; const seen = new Promise<void>((resolve) => { observed = resolve; });
+test("late document activation cannot replace explicit scene navigation", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor); let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; }); let observed!: () => void; const seen = new Promise<void>((resolve) => { observed = resolve; });
   await page.route(`**${documentPath(f)}`, async (route) => { if (route.request().method() !== "GET") return route.continue(); const response = await route.fetch(); observed(); await gate; await route.fulfill({ response }); });
   try {
     await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
@@ -1112,10 +1111,10 @@ test("late document activation cannot replace explicit scene navigation", async 
   } finally { release(); }
 });
 
-test("Issue 42: an updated PostgreSQL revision cannot supersede explicit navigation during draft flush", async ({ page }) => {
-  const f = await fixture(page); const gate = await holdSaves(page, f);
+test("Issue 42: an updated PostgreSQL revision cannot supersede explicit navigation during draft flush", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor); const gate = await holdSaves(page, f);
   try {
-    await editor(page).fill("Pending Scene One draft before explicit navigation."); await gate.seen; await replace(page, f, "External PostgreSQL version.");
+    await editor(page).fill("Pending Scene One draft before explicit navigation."); await gate.seen; await replace(f, "External PostgreSQL version.");
     await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
     await expectEditor(page, f.two.revision.markdown); gate.release();
     await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
@@ -1123,29 +1122,30 @@ test("Issue 42: an updated PostgreSQL revision cannot supersede explicit navigat
   } finally { gate.release(); }
 });
 
-test("Issue 42: an unchanged PostgreSQL observation leaves explicit scene selection alone", async ({ page }) => {
-  const f = await fixture(page);
+test("Issue 42: an unchanged PostgreSQL observation leaves explicit scene selection alone", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor);
   await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene Two シーン", exact: true }).click();
   for (const name of ["online", "focus", "visibilitychange"]) await page.evaluate((event) => window.dispatchEvent(new Event(event)), name);
   await expect(page.getByRole("heading", { name: "Scene Two", exact: true })).toBeVisible();
   await expectEditor(page, f.two.revision.markdown);
-  expect((await read(page, f)).revision.id).toBe(f.one.revision.id);
+  expect((await read(f)).revision.id).toBe(f.one.revision.id);
 });
 
-test("Issue 42: failed PostgreSQL availability preserves the author session and offers explicit retry", async ({ page }) => {
-  const f = await fixture(page); let unavailable = true; let reauthCalls = 0;
+test("Issue 42: failed PostgreSQL availability preserves the author session and offers explicit retry", async ({ page, authorizeAuthor }) => {
+  const f = await fixture(page, authorizeAuthor); let unavailable = true; let reauthCalls = 0;
   await page.route("**/api/v1/persistence/status", (route) => unavailable ? route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "PostgreSQL unavailable" }) }) : route.continue());
   await page.route("**/_platform/reauth", (route) => { reauthCalls += 1; return route.abort(); });
-  await page.reload(); await expect(page.getByRole("heading", { name: "PostgreSQLへ接続できません" })).toBeVisible();
-  expect((await page.request.get("/api/session")).status()).toBe(200); expect(reauthCalls).toBe(0);
+  await page.reload();
+  const author = await authorizeAuthor("desktop", page, { continueCurrentPage: true, expectedView: page.getByRole("heading", { name: "PostgreSQLへ接続できません" }) });
+  expect((await author.fetch("/api/session")).status()).toBe(200); expect(reauthCalls).toBe(0);
   unavailable = false; await page.getByRole("button", { name: "再試行" }).click();
-  await page.getByLabel("作品", { exact: true }).selectOption(f.projectId); await page.locator(".pg-document-list").getByRole("treeitem", { name: "Scene One シーン", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/desktop/projects/${f.projectId}/scenes/${f.one.document.id}`));
   await expectEditor(page, f.one.revision.markdown);
 });
 
-test("a project containing only root scenes can export its full text from the publishing panel", async ({ page }) => {
+test("a project containing only root scenes can export its full text from the publishing panel", async ({ page, authorizeAuthor }) => {
   test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing contribution is selected by the full profile.");
-  const { one, two } = await fixture(page);
+  const { one, two } = await fixture(page, authorizeAuthor);
   const menu = page.locator(".st-workspace-panel-menu");
   await menu.locator("summary").click();
   await menu.getByRole("button", { name: "プレーンテキスト書き出しを表示", exact: true }).click();
@@ -1166,12 +1166,12 @@ test("a project containing only root scenes can export its full text from the pu
   for (const scene of [one, two]) expect(text).toContain(scene.revision.markdown.trim());
 });
 
-test("native publishing does not create a distributable link without a public reader origin", async ({ page }) => {
+test("native publishing does not create a distributable link without a public reader origin", async ({ page, authorizeAuthor }) => {
   test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing contribution is selected by the full profile.");
   await page.addInitScript(() => {
     (window as Window & { __CODEXIA_NATIVE_CONFIG__?: { publicReaderOrigin: string | null } }).__CODEXIA_NATIVE_CONFIG__ = { publicReaderOrigin: null };
   });
-  const f = await fixture(page);
+  const f = await fixture(page, authorizeAuthor);
   const menu = page.locator(".st-workspace-panel-menu");
   await menu.locator("summary").click();
   await menu.getByRole("button", { name: "読み取り専用共有リンクを表示", exact: true }).click();
@@ -1183,29 +1183,29 @@ test("native publishing does not create a distributable link without a public re
   await expect(panel.locator("code")).toHaveCount(0);
 });
 
-test("native publishing uses the external reader origin and preserves proposal, scope, expiration, and revocation", async ({ page, browser }) => {
+test("native publishing uses the external reader origin and preserves proposal, scope, expiration, and revocation", async ({ page, browser, authorizeAuthor, authorServer }) => {
   test.skip(process.env.CODEXIA_PROFILE !== "full", "The publishing contribution is selected by the full profile.");
-  const webViewOrigin = new URL(appBaseURL).origin;
+  const webViewOrigin = authorServer.apiOrigin;
   const publicReaderOrigin = new URL(webViewOrigin);
   publicReaderOrigin.protocol = "https:";
   publicReaderOrigin.hostname = "reader.example.test";
   await page.addInitScript((readerOrigin) => {
     (window as Window & { __CODEXIA_NATIVE_CONFIG__?: { publicReaderOrigin: string | null } }).__CODEXIA_NATIVE_CONFIG__ = { publicReaderOrigin: readerOrigin };
   }, publicReaderOrigin.origin);
-  await ownerLogin(page);
+  const author = await authorizeAuthor("desktop");
   const origin = new URL(page.url()).origin;
   expect(origin).toBe(webViewOrigin);
   expect(origin).not.toBe(publicReaderOrigin.origin);
-  const projectResponse = await page.request.post(`${origin}${rootPath}`, {
-    headers: mutationHeaders(),
+  const projectResponse = await author.fetch(`${origin}${rootPath}`, {
+    method: "POST",
     data: { title: `Publishing root share ${randomUUID()}` },
   });
   expect(projectResponse.status(), await projectResponse.text()).toBe(201);
   const { project } = await projectResponse.json() as { project: { id: string } };
   const projectId = project.id;
   const createDocument = async (input: { kind: string; title: string; orderKey: string; markdown: string; parentId?: string | null }) => {
-    const response = await page.request.post(`${origin}${rootPath}/${projectId}/documents`, {
-      headers: mutationHeaders({ "Idempotency-Key": randomUUID() }),
+    const response = await author.fetch(`${origin}${rootPath}/${projectId}/documents`, {
+      method: "POST", headers: { "Idempotency-Key": randomUUID() },
       data: input,
     });
     expect(response.status(), await response.text()).toBe(201);
@@ -1219,7 +1219,7 @@ test("native publishing uses the external reader origin and preserves proposal, 
   const otherChapterScene = await createDocument({ kind: "scene", title: "別の節", orderKey: "b", markdown: "ANOTHER CHAPTER BODY\n", parentId: chapter.document.id });
   const rootScene = await createDocument({ kind: "scene", title: "同じタイトル", orderKey: "a", markdown: "ROOT-ONLY BODY\n", parentId: null });
   await createDocument({ kind: "note", title: "PRIVATE NOTE", orderKey: "b", markdown: "PRIVATE NOTE BODY\n", parentId: null });
-  await page.goto(`/desktop/projects/${projectId}/scenes/${chapterScene.document.id}`);
+  await authorizeAuthor("desktop", page, { path: `/desktop/projects/${projectId}/scenes/${chapterScene.document.id}` });
   await expect(editor(page)).toBeVisible();
 
   const menu = page.locator(".st-workspace-panel-menu");
@@ -1229,21 +1229,21 @@ test("native publishing uses the external reader origin and preserves proposal, 
   const scope = panel.getByRole("combobox", { name: "範囲", exact: true });
   const target = panel.getByRole("combobox", { name: "対象", exact: true });
   const approveAndApply = async (proposalId: string) => {
-    const proposalResponse = await page.request.get(`${origin}/api/projects/${projectId}/proposals/${encodeURIComponent(proposalId)}`);
+    const proposalResponse = await author.fetch(`${origin}/api/projects/${projectId}/proposals/${encodeURIComponent(proposalId)}`);
     expect(proposalResponse.ok(), await proposalResponse.text()).toBe(true);
     const proposalStatus = await proposalResponse.json() as {
       proposal: { operations: Array<{ id: string }> };
     };
     const operations = proposalStatus.proposal.operations;
     expect(operations.length).toBeGreaterThan(0);
-    const approval = await page.request.post(`${origin}/api/projects/${projectId}/approvals`, {
-      headers: mutationHeaders(),
+    const approval = await author.fetch(`${origin}/api/projects/${projectId}/approvals`, {
+      method: "POST",
       data: { proposalId, operationIds: operations.map((operation) => operation.id) },
     });
     expect(approval.status(), await approval.text()).toBe(204);
     for (const operation of operations) {
-      const applied = await page.request.post(`${origin}/api/projects/${projectId}/apply`, {
-        headers: mutationHeaders(),
+      const applied = await author.fetch(`${origin}/api/projects/${projectId}/apply`, {
+        method: "POST",
         data: operation,
       });
       expect(applied.status(), await applied.text()).toBe(201);
@@ -1329,8 +1329,8 @@ test("native publishing uses the external reader origin and preserves proposal, 
     await expect(readerPage.getByText("ROOT-ONLY BODY")).toBeVisible();
     await expect(readerPage.getByText("CHAPTER-ONLY BODY")).toHaveCount(0);
 
-    const shortExpiryResponse = await page.request.post(`${origin}/api/projects/${projectId}/actions/publishing.shares.create`, {
-      headers: mutationHeaders(),
+    const shortExpiryResponse = await author.fetch(`${origin}/api/projects/${projectId}/actions/publishing.shares.create`, {
+      method: "POST",
       data: { input: { kind: "scene", id: rootScene.document.id, label: "短時間リンク", expiresInHours: 0.005 } },
     });
     expect(shortExpiryResponse.ok(), await shortExpiryResponse.text()).toBe(true);
@@ -1344,15 +1344,15 @@ test("native publishing uses the external reader origin and preserves proposal, 
     await page.waitForTimeout(Math.max(0, Date.parse(shortExpiryAction.data.share.expiresAt) - Date.now() + 100));
     await readerPage.goto(shortExpiryUrl.toString());
     await expect(readerPage.getByRole("alert")).toContainText("共有リンクは無効か、期限切れです。");
-    const expiredListResponse = await page.request.post(`${origin}/api/projects/${projectId}/actions/publishing.shares.list`, {
-      headers: mutationHeaders(), data: { input: {} },
+    const expiredListResponse = await author.fetch(`${origin}/api/projects/${projectId}/actions/publishing.shares.list`, {
+      method: "POST", data: { input: {} },
     });
     expect(expiredListResponse.ok(), await expiredListResponse.text()).toBe(true);
     const expiredList = await expiredListResponse.json() as { data: { shares: Array<{ id: string; active: boolean }> } };
     expect(expiredList.data.shares.find((share) => share.id === shortExpiryAction.data.share.id)?.active).toBe(false);
 
-    const revokeResponse = await page.request.post(`${origin}/api/projects/${projectId}/actions/publishing.shares.revoke`, {
-      headers: mutationHeaders(), data: { input: { id: actionBody.data.share.id } },
+    const revokeResponse = await author.fetch(`${origin}/api/projects/${projectId}/actions/publishing.shares.revoke`, {
+      method: "POST", data: { input: { id: actionBody.data.share.id } },
     });
     expect(revokeResponse.ok(), await revokeResponse.text()).toBe(true);
     const revokeAction = await revokeResponse.json() as { data: { proposalId: string } };
@@ -1360,8 +1360,8 @@ test("native publishing uses the external reader origin and preserves proposal, 
     await approveAndApply(revokeAction.data.proposalId);
     await readerPage.goto(issuedUrl.toString());
     await expect(readerPage.getByRole("alert")).toContainText("共有リンクは無効か、期限切れです。");
-    const revokedListResponse = await page.request.post(`${origin}/api/projects/${projectId}/actions/publishing.shares.list`, {
-      headers: mutationHeaders(), data: { input: {} },
+    const revokedListResponse = await author.fetch(`${origin}/api/projects/${projectId}/actions/publishing.shares.list`, {
+      method: "POST", data: { input: {} },
     });
     expect(revokedListResponse.ok(), await revokedListResponse.text()).toBe(true);
     const revokedList = await revokedListResponse.json() as { data: { shares: Array<{ id: string; active: boolean; revokedAt?: string }> } };
