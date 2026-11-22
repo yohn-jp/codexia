@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isPrivatePublishingPath, parsePublishingEpisodesRecord, PRIVATE_PUBLISHING_PATHS, PUBLISHING_EPISODES_KEY } from "@codexia/contracts";
 import { z } from "zod";
 import {
   PersistenceError,
@@ -56,6 +57,7 @@ const unresolvedSchema = z.object({
   assertionEvidence: bounded(assertionEvidenceSchema, 40000),
 }).strict();
 const moduleRecordSchema = z.object({ moduleId: nonEmpty, key: nonEmpty, value: jsonObject }).strict();
+const [legacyEpisodesPath] = PRIVATE_PUBLISHING_PATHS;
 
 export const workArchiveSchema = z.object({
   format: z.literal(WORK_ARCHIVE_FORMAT),
@@ -119,6 +121,9 @@ function excludedRecord(moduleId: string, key: string, value: unknown): boolean 
   return moduleId.startsWith("core.authority.") ||
     moduleId === "core.portable.archive" ||
     sensitiveKey(key) || sensitiveKey(moduleId) || containsSensitiveObjectKeys(value);
+}
+function isRetiredPublishingRecord(moduleId: string, key: string): boolean {
+  return moduleId === "core.artifacts" && isPrivatePublishingPath(key);
 }
 function safeSettingsValue(value: unknown, omitted: string[], path: string): unknown {
   if (Array.isArray(value)) return value.map((item, index) => safeSettingsValue(item, omitted, path + "[" + index + "]"));
@@ -196,8 +201,17 @@ function validateGraph(archive: WorkArchive): void {
     }
   }
   for (const record of archive.moduleRecords) {
+    if (isRetiredPublishingRecord(record.moduleId, record.key)) {
+      fail(400, "RETIRED_PUBLISHING_ARCHIVE_FORMAT", "Archive contains a retired Publishing file record");
+    }
     if (excludedRecord(record.moduleId, record.key, record.value)) {
       fail(400, "INVALID_WORK_ARCHIVE", "Archive contains reserved or sensitive module records");
+    }
+    if (record.moduleId === "publishing" && record.key === PUBLISHING_EPISODES_KEY) {
+      try {
+        if (Object.keys(record.value).some(key => key !== "version" && key !== "document")) throw new Error();
+        parsePublishingEpisodesRecord(record.value as JsonObject);
+      } catch { fail(400, "INVALID_WORK_ARCHIVE", "Archive contains an invalid Publishing episodes record"); }
     }
   }
 }
@@ -298,6 +312,13 @@ export async function exportWorkArchive(persistence: Persistence, projectId: Pro
         narrativeTime: item.narrativeTime, confidence: item.confidence, status: item.status }));
     const moduleRecords: WorkArchive["moduleRecords"] = [];
     for (const item of modules) {
+      if (isRetiredPublishingRecord(item.moduleId, item.key)) {
+        if (item.key === legacyEpisodesPath && item.value.deleted !== true) {
+          fail(409, "PUBLISHING_MAINTENANCE_REQUIRED", "Publishing episodes require maintenance before portable export");
+        }
+        omittedRecords.push(item.moduleId + ":" + item.key);
+        continue;
+      }
       if (excludedRecord(item.moduleId, item.key, item.value)) {
         if (!(item.moduleId === "core.portable.archive")) omittedRecords.push(item.moduleId + ":" + item.key);
         continue;
