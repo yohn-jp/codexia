@@ -9,10 +9,10 @@ const require = createRequire(new URL('../packages/core/package.json', import.me
 const { parse } = require('yaml');
 const workflow = parse(readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8'));
 const fullModelWorkflow = parse(readFileSync(new URL('../.github/workflows/full-model-oci-acceptance.yml', import.meta.url), 'utf8'));
-test('the certified twenty-job inventory retains all sixty-three obligations beside one supplemental model call', () => {
+test('the certified twenty-job inventory includes the Passkey browser checks and one supplemental model call', () => {
   assert.equal(REQUIRED_VERIFICATION_JOBS.length, 20);
   assert.equal(VERIFICATION_LEAF_JOBS.length, 19);
-  assert.equal(VERIFICATION_TASKS.length, 63);
+  assert.equal(VERIFICATION_TASKS.length, 65);
   assert.deepEqual(Object.keys(workflow.jobs), ['plan', 'full_model_oci', 'unit', 'types', 'build', 'oci', 'browser', 'hosted_catalog', 'hosted', 'certification']);
   const tasks = Object.values(VERIFICATION_GROUPS).flat();
   assert.equal(new Set(tasks).size, tasks.length);

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { BROWSER_SHARDS, VERIFICATION_GROUPS, requiredBuildProfile } from './ci-contract.mjs';
+import { VERIFICATION_GROUPS, requiredBuildProfile } from './ci-contract.mjs';
 
 const sha256 = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const testFilePattern = /\.(?:test|spec)\.(?:mjs|cjs|js|mts|cts|ts|tsx|jsx)$/u;
@@ -97,10 +97,8 @@ function taskEnvironment(task, runtime) {
     CODEXIA_AUTH_TEST_DISPOSABLE: '1',
   });
   if (task.startsWith('browser-')) {
-    const shard = BROWSER_SHARDS.find(({ id }) => task.endsWith(`-${id}`));
-    assert.ok(shard, `Unknown browser task ${task}`);
     Object.assign(env, { CODEXIA_E2E_DATABASE_URL: 'postgres://codexia:codexia@postgres:5432/codexia_test',
-      CODEXIA_PLAYWRIGHT_IMAGE_DIGEST: shard.project === 'webkit'
+      CODEXIA_PLAYWRIGHT_IMAGE_DIGEST: taskGroup(task).endsWith('-webkit')
         ? 'sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579'
         : 'sha256:d11b4fa1128d937fcda9dd0106d138b65c3e72cbad07d4801547aa66fc1c4725' });
     if (task.endsWith('-passkey-bootstrap')) env.CODEXIA_PASSKEY_ACCEPTANCE = '1';
