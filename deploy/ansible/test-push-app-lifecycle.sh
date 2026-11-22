@@ -420,16 +420,16 @@ CAPABILITIES
 rootless_podman network create codexia-lifecycle-backup >/dev/null
 ssh-keygen -q -t ed25519 -N '' -f "$tmp/backup_key"
 build_context="$fixture_home/.local/state/codexia-lifecycle-build"
-rootless_podman pull docker.io/library/ubuntu:26.04 >/dev/null
-ubuntu_image_digest=$(rootless_podman image inspect --format '{{json .RepoDigests}}' docker.io/library/ubuntu:26.04 | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const a=JSON.parse(s);const v=a.find(x=>/^docker\.io\/library\/ubuntu@sha256:[a-f0-9]{64}$/.test(x));if(!v)process.exit(1);console.log(v)})')
+rootless_podman pull docker.io/library/debian:stable-slim >/dev/null
+debian_image_digest=$(rootless_podman image inspect --format '{{json .RepoDigests}}' docker.io/library/debian:stable-slim | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const a=JSON.parse(s);const v=a.find(x=>/^docker\.io\/library\/debian@sha256:[a-f0-9]{64}$/.test(x));if(!v)process.exit(1);console.log(v)})')
 rootless mkdir -p "$build_context/sshfs"
 sudo install -o codexia -g codexia -m 0600 "$tmp/backup_key.pub" "$build_context/sshfs/authorized_keys"
 cat > "$tmp/sshfs.Dockerfile" <<'DOCKERFILE'
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
-RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/* && useradd --create-home --shell /bin/bash backup && mkdir -p /home/backup/.ssh /backups && chown -R backup:backup /home/backup/.ssh /backups && chmod 0700 /home/backup/.ssh
-COPY --chown=backup:backup authorized_keys /home/backup/.ssh/authorized_keys
-RUN chmod 0600 /home/backup/.ssh/authorized_keys
+RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/* && useradd --create-home --shell /bin/bash codexia-backup && mkdir -p /home/codexia-backup/.ssh /backups && chown -R codexia-backup:codexia-backup /home/codexia-backup/.ssh /backups && chmod 0700 /home/codexia-backup/.ssh
+COPY --chown=codexia-backup:codexia-backup authorized_keys /home/codexia-backup/.ssh/authorized_keys
+RUN chmod 0600 /home/codexia-backup/.ssh/authorized_keys
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod 0755 /entrypoint.sh
 EXPOSE 22
@@ -440,12 +440,12 @@ cat > "$tmp/sshfs.entrypoint.sh" <<'ENTRYPOINT'
 set -eu
 mkdir -p /run/sshd
 ssh-keygen -A
-chown -R backup:backup /backups
-exec /usr/sbin/sshd -D -e -p 22 -o PermitRootLogin=no -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o AllowUsers=backup
+chown -R codexia-backup:codexia-backup /backups
+exec /usr/sbin/sshd -D -e -p 22 -o PermitRootLogin=no -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o AllowUsers=codexia-backup
 ENTRYPOINT
 sudo install -o codexia -g codexia -m 0644 "$tmp/sshfs.Dockerfile" "$build_context/sshfs/Dockerfile"
 sudo install -o codexia -g codexia -m 0755 "$tmp/sshfs.entrypoint.sh" "$build_context/sshfs/entrypoint.sh"
-if rootless_podman build --build-arg "BASE_IMAGE=$ubuntu_image_digest" -t codexia-sshfs-fixture -f "$build_context/sshfs/Dockerfile" "$build_context/sshfs" >"$tmp/sshfs-build.log" 2>&1; then
+if rootless_podman build --build-arg "BASE_IMAGE=$debian_image_digest" -t codexia-sshfs-fixture -f "$build_context/sshfs/Dockerfile" "$build_context/sshfs" >"$tmp/sshfs-build.log" 2>&1; then
   :
 else
   build_status=$?
@@ -463,7 +463,7 @@ cat > "$tmp/ssh-config" <<'SSH_CONFIG'
 Host codexia-backup-fixture
   HostName 127.0.0.1
   Port 2222
-  User backup
+  User codexia-backup
   IdentityFile /home/codexia/.ssh/codexia-backup-key
   IdentitiesOnly yes
   HostKeyAlias codexia-backup-fixture
@@ -478,7 +478,7 @@ if ! rootless ssh -F "$fixture_home/.ssh/config" -o BatchMode=yes codexia-backup
   echo 'The isolated SSHFS endpoint failed its pinned-key SSH capability check' >&2
   exit 1
 fi
-if ! rootless sshfs backup@codexia-backup-fixture:/backups "$fixture_home/.local/state/codexia-backup-mount" -o reconnect -o ServerAliveInterval=15 -o ServerAliveCountMax=3 2>"$tmp/sshfs.log"; then
+if ! rootless sshfs codexia-backup@codexia-backup-fixture:/backups "$fixture_home/.local/state/codexia-backup-mount" -o reconnect -o ServerAliveInterval=15 -o ServerAliveCountMax=3 2>"$tmp/sshfs.log"; then
   redact_log "$tmp/sshfs.log" "$RUNNER_TEMP/codexia-push-app-lifecycle/sshfs-bounded.log"
   if grep -Eqi 'fuse|operation not permitted|permission denied' "$tmp/sshfs.log"; then
     mark_fixture_unavailable 'SSHFS mount capability is unavailable on this hosted runner'
@@ -523,8 +523,8 @@ database_repo_digests=$(rootless_podman image inspect --format '{{json .RepoDige
 sshfs_image_id=$(rootless_podman image inspect --format '{{.Id}}' codexia-sshfs-fixture)
 registry_image_id=$(rootless_podman image inspect --format '{{.Id}}' "$registry_image_digest")
 sshfs_context_sha=$(rootless cat "$build_context/sshfs/Dockerfile" "$build_context/sshfs/entrypoint.sh" "$build_context/sshfs/authorized_keys" | sha256sum | cut -d' ' -f1)
-node - "$report" "$database_image_name" "$database_image_id" "$database_repo_digests" "$ubuntu_image_digest" "$sshfs_image_id" "$sshfs_context_sha" "$registry_image_digest" "$registry_image_id" <<'IMAGE_INVENTORY'
-const fs=require('node:fs');const [path,dbName,dbId,dbDigests,ubuntu,sshfsId,sshfsSourceSha,registry,registryId]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.infrastructureImages=[{role:'postgres',image:dbName,imageId:dbId,repoDigests:JSON.parse(dbDigests),sourceIdentity:'deploy/quadlet/codexia-db.container pinned upstream OCI reference'},{role:'backup-sshfs-server',imageId:sshfsId,sourceIdentity:{kind:'run-local fixture build',contextSha256:sshfsSourceSha,baseImage:ubuntu}},{role:'disposable-registry',image:registry,imageId:registryId,sourceIdentity:'upstream OCI immutable digest'}];r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
+node - "$report" "$database_image_name" "$database_image_id" "$database_repo_digests" "$debian_image_digest" "$sshfs_image_id" "$sshfs_context_sha" "$registry_image_digest" "$registry_image_id" <<'IMAGE_INVENTORY'
+const fs=require('node:fs');const [path,dbName,dbId,dbDigests,debian,sshfsId,sshfsSourceSha,registry,registryId]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(path,'utf8'));r.infrastructureImages=[{role:'postgres',image:dbName,imageId:dbId,repoDigests:JSON.parse(dbDigests),sourceIdentity:'deploy/quadlet/codexia-db.container pinned upstream OCI reference'},{role:'backup-sshfs-server',imageId:sshfsId,sourceIdentity:{kind:'run-local fixture build',contextSha256:sshfsSourceSha,baseImage:debian}},{role:'disposable-registry',image:registry,imageId:registryId,sourceIdentity:'upstream OCI immutable digest'}];r.updatedAt=new Date().toISOString();fs.writeFileSync(path,JSON.stringify(r,null,2)+'\n',{mode:0o600});
 IMAGE_INVENTORY
 
 # Exercise only the canonical production transaction code, with its separate

@@ -60,8 +60,9 @@ test('image selection binds the PR Full artifact and fails closed without a comp
   assert.match(fixture, /Last Ansible log .* redacted tail/u);
   assert.match(fixture, /Cloudflare Tunnel unit/u);
   assert.ok(/DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server/u.test(fixture),
-    'the isolated SSHFS image must install packages without an interactive debconf frontend');
-  assert.ok(/if rootless_podman build --build-arg "BASE_IMAGE=\$ubuntu_image_digest" -t codexia-sshfs-fixture -f "\$build_context\/sshfs\/Dockerfile" "\$build_context\/sshfs" >"\$tmp\/sshfs-build\.log" 2>&1; then\n  :\nelse\n  build_status=\$\?\n  record_failure "\$build_status" "\$LINENO" 'SSHFS fixture image build'/u.test(fixture),
+    'the SSHFS image must use a base without Ubuntu 26.04 container ACL failures');
+  assert.ok(/rootless_podman pull docker\.io\/library\/debian:stable-slim/u.test(fixture));
+  assert.ok(/if rootless_podman build --build-arg "BASE_IMAGE=\$debian_image_digest" -t codexia-sshfs-fixture -f "\$build_context\/sshfs\/Dockerfile" "\$build_context\/sshfs" >"\$tmp\/sshfs-build\.log" 2>&1; then\n  :\nelse\n  build_status=\$\?\n  record_failure "\$build_status" "\$LINENO" 'SSHFS fixture image build'/u.test(fixture),
     'a failed SSHFS image build must report the redacted build log before stopping');
   assert.match(fixture, /cloudflareTunnel:\{status:'NOT_STARTED'/u);
   assert.match(fixture, /apiContainer!==previous\.apiContainer/u);
