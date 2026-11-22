@@ -775,6 +775,112 @@ test("desktop workspace presets, arbitrary docking, panel visibility and layout 
   await expect.poll(async () => (await workspaceStorage(page, "desktop")).raw).toBe(persisted.raw);
 });
 
+test("desktop preset sizing updates the live split without replacing the editor or overwriting a saved layout", async ({ page }) => {
+  expect(authToken.length).toBeGreaterThanOrEqual(32);
+  await signIn(page, "desktop");
+  await openFixtureScene(page, "desktop");
+
+  const workspace = page.locator(".st-workspace");
+  const toolbar = workspaceToolbar(page);
+  const editorPanel = workspace.locator('[data-workspace-panel="editor"]');
+  const editorShare = async (): Promise<number> => editorPanel.evaluate((element) => {
+    const group = element.closest<HTMLElement>("[data-group]");
+    if (!group) throw new Error("Editor panel is missing its resizable group");
+    return element.getBoundingClientRect().width / group.getBoundingClientRect().width;
+  });
+  await expect(editorPanel).toBeVisible();
+  await page.evaluate(() => {
+    (window as Window & { __presetEditorNode?: Element }).__presetEditorNode = document.querySelector(".cm-editor") ?? undefined;
+  });
+
+  // Save a user-sized Writing layout first. Choosing a preset is an in-memory
+  // arrangement until the author explicitly saves it again.
+  const resizeHandle = page.getByRole("separator", { name: "Resize horizontal workspace panels" });
+  await expect(resizeHandle).toBeVisible();
+  await resizeHandle.focus();
+  await resizeHandle.press("ArrowRight");
+  const savedLayout = await saveWorkspace(page);
+  expect(savedLayout.preset).toBe("custom");
+  const persistedBeforePreset = await workspaceStorage(page, "desktop");
+  expect(persistedBeforePreset.raw).not.toBeNull();
+  const savedEditorShare = await editorShare();
+
+  const layoutMenu = workspace.locator(".st-workspace-move-menu");
+  const editorPanelTop = await editorPanel.evaluate((element) => element.getBoundingClientRect().top);
+  await layoutMenu.locator("summary").click();
+  await expect(layoutMenu.locator(".st-workspace-move-controls")).toBeVisible();
+  expect(await editorPanel.evaluate((element) => element.getBoundingClientRect().top)).toBe(editorPanelTop);
+  await layoutMenu.locator("summary").click();
+
+  await toolbar.getByRole("button", { name: "調査", exact: true }).click();
+  await expect(workspace).toHaveAttribute("data-preset", "research");
+  await expect(workspace.locator('[data-workspace-panel="inspector"]')).toBeVisible();
+  await expect.poll(editorShare).toBeGreaterThan(0.6);
+  await expect.poll(editorShare).toBeLessThan(0.74);
+  expect(await page.evaluate(() =>
+    (window as Window & { __presetEditorNode?: Element }).__presetEditorNode === document.querySelector(".cm-editor"),
+  )).toBe(true);
+  expect((await workspaceStorage(page, "desktop")).raw).toBe(persistedBeforePreset.raw);
+
+  await page.reload();
+  await expect(page.locator(".st-workspace")).toHaveAttribute("data-preset", "custom");
+  await expect.poll(async () => Math.abs(await editorShare() - savedEditorShare)).toBeLessThan(0.02);
+  expect((await workspaceStorage(page, "desktop")).raw).toBe(persistedBeforePreset.raw);
+});
+
+test("narrow Desktop keeps the manuscript internally scrollable while shell and workspace controls stay reachable", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 760 });
+  await signIn(page, "desktop");
+  await openFixtureScene(page, "desktop");
+
+  const workspace = page.locator(".st-workspace");
+  const toolbar = workspaceToolbar(page);
+  const editor = manuscriptEditor(page);
+  const manuscript = Array.from({ length: 48 }, (_, index) =>
+    `第${index + 1}段落。　灯台の下に古い書庫があり、海図の端にはまだ知られていない港の名前が小さく記されていた。`,
+  ).join("\n\n");
+  await editor.fill(manuscript);
+  await expect(editor).toContainText("第48段落");
+
+  const scrollState = await editor.evaluate((content) => {
+    let ancestor = content.parentElement;
+    let scrollArea: HTMLElement | null = null;
+    while (ancestor && ancestor !== document.body) {
+      const overflowY = getComputedStyle(ancestor).overflowY;
+      if (ancestor.scrollHeight > ancestor.clientHeight + 1 && (overflowY === "auto" || overflowY === "scroll")) {
+        scrollArea = ancestor;
+        break;
+      }
+      ancestor = ancestor.parentElement;
+    }
+    if (!scrollArea) throw new Error("The manuscript has no internal vertical scroll area");
+    scrollArea.scrollTop = 0;
+    const before = scrollArea.scrollTop;
+    const documentScrollBefore = window.scrollY;
+    scrollArea.scrollTop = scrollArea.scrollHeight;
+    const line = content.querySelectorAll<HTMLElement>(".cm-line").item(content.querySelectorAll(".cm-line").length - 1);
+    if (!line) throw new Error("The final manuscript line is missing");
+    const areaBounds = scrollArea.getBoundingClientRect();
+    const lineBounds = line.getBoundingClientRect();
+    return {
+      before,
+      after: scrollArea.scrollTop,
+      documentScrollBefore,
+      documentScrollAfter: window.scrollY,
+      lastLineVisible: lineBounds.top >= areaBounds.top && lineBounds.bottom <= areaBounds.bottom,
+    };
+  });
+  expect(scrollState.after).toBeGreaterThan(scrollState.before);
+  expect(scrollState.documentScrollAfter).toBe(scrollState.documentScrollBefore);
+  expect(scrollState.lastLineVisible).toBe(true);
+
+  await expect(toolbar.getByRole("button", { name: "執筆", exact: true })).toBeInViewport();
+  const shellSwitch = page.getByRole("button", { name: "モバイル ↗", exact: true });
+  await expect(shellSwitch).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+  await expect(page).toHaveURL(/\/desktop\//u);
+});
+
 test("malformed workspace settings are retained until the owner explicitly saves a replacement", async ({ page }) => {
   expect(authToken.length).toBeGreaterThanOrEqual(32);
   await signIn(page, "desktop");
