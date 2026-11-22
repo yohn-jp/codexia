@@ -8,13 +8,22 @@ import { PersistenceEntry } from "../persistence/PersistenceEntry";
 import { applyThemeMode, loadThemeMode } from "../theme";
 import { configureNativeApiSession } from "../api";
 import { createNativeApiTransport, createNativeAuth } from "../../native/plugins/codexia-auth/src/index.mjs";
-import { nativeApiOrigin, nativeOAuthConfig } from "../../native/plugins/codexia-auth/src/native-config.mjs";
+import { nativeApiOrigin, nativeOAuthConfig, nativeReaderOrigin } from "../../native/plugins/codexia-auth/src/native-config.mjs";
+
+declare global {
+  interface Window {
+    __CODEXIA_NATIVE_CONFIG__?: { publicReaderOrigin: string | null };
+  }
+}
 
 const nativeEnv = import.meta.env as Record<string, string | undefined>;
 const apiOrigin = nativeApiOrigin(nativeEnv);
+const publicReaderOrigin = nativeReaderOrigin(nativeEnv);
 const oauthConfig = nativeOAuthConfig(nativeEnv);
 const nativeAuthClient = oauthConfig ? createNativeAuth(oauthConfig) : null;
 const nativeApiTransport = apiOrigin ? createNativeApiTransport(apiOrigin) : null;
+
+window.__CODEXIA_NATIVE_CONFIG__ = Object.freeze({ publicReaderOrigin });
 
 configureNativeApiSession({
   apiOrigin,

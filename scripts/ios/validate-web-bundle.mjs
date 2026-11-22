@@ -4,7 +4,7 @@ import { lstat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { nativeApiOrigin, nativeOAuthConfig } from "../../app/native/plugins/codexia-auth/src/native-config.mjs";
+import { nativeApiOrigin, nativeOAuthConfig, nativeReaderOrigin } from "../../app/native/plugins/codexia-auth/src/native-config.mjs";
 import { inspectHtml } from "../html-document.mjs";
 import { readRegularFile } from "../read-regular-file.mjs";
 
@@ -52,6 +52,7 @@ export async function validateWebBundle(directory, { mode, env = process.env } =
       if (!hasNativeBridge) throw new Error("Native mobile entry is missing the CodexiaAuth native API bridge");
       const apiOrigin = nativeApiOrigin(env);
       if (!apiOrigin) throw new Error("Native API origin is not configured for distribution");
+      const readerOrigin = nativeReaderOrigin(env);
       const oauth = nativeOAuthConfig(env);
       if (!oauth) throw new Error("Native iOS public client ID is not configured for distribution");
       for (const [label, expected] of [
@@ -60,6 +61,10 @@ export async function validateWebBundle(directory, { mode, env = process.env } =
         ["API audience", oauth.apiAudience],
       ]) {
         if (!bundle.includes(expected)) throw new Error(`Native web bundle is missing configured ${label}`);
+      }
+      const configuredReaderOrigin = env.VITE_CODEXIA_PUBLIC_READER_ORIGIN?.trim();
+      if (readerOrigin && configuredReaderOrigin && !bundle.includes(configuredReaderOrigin) && !bundle.includes(readerOrigin)) {
+        throw new Error("Native web bundle is missing configured public reader origin");
       }
     } else if (hasNativeBridge) {
       throw new Error("Mobile Web bundle contains an unexpected native API bridge");

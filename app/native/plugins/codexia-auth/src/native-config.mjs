@@ -7,6 +7,11 @@ export function nativeApiOrigin(env) {
   return parseApiOrigin(env.VITE_CODEXIA_API_ORIGIN);
 }
 
+export function nativeReaderOrigin(env) {
+  if (env.VITE_CODEXIA_PUBLIC_READER_ORIGIN === undefined || env.VITE_CODEXIA_PUBLIC_READER_ORIGIN === "") return null;
+  return parseReaderOrigin(env.VITE_CODEXIA_PUBLIC_READER_ORIGIN);
+}
+
 export function nativeOAuthConfig(env) {
   const clientId = env.VITE_CODEXIA_OAUTH_IOS_CLIENT_ID;
   if (clientId === undefined || clientId === "") return null;
@@ -34,6 +39,15 @@ function parseApiOrigin(value) {
   const parsed = new URL(url);
   if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
     throw new TypeError("Native API origin must be an HTTPS origin without path, query, or fragment.");
+  }
+  return parsed.toString();
+}
+
+function parseReaderOrigin(value) {
+  const url = requireHttpsUrl(value, "public HTTPS reader origin");
+  const parsed = new URL(url);
+  if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
+    throw new TypeError("Native public reader origin must be an HTTPS origin without path, query, or fragment.");
   }
   return parsed.toString();
 }
