@@ -17,6 +17,7 @@ export const PROFILES = ['core', 'full'];
 export const BROWSER_SHARDS = [
   { id: 'auth-recovery', project: 'chromium', file: 'auth-recovery.acceptance.spec.ts' },
   { id: 'oauth-web', project: 'chromium', file: 'oauth-web.acceptance.spec.ts' },
+  { id: 'passkey-bootstrap', project: 'chromium', file: 'passkey-bootstrap.acceptance.spec.ts' },
   ...['core', 'outline-headings', 'job-inbox', 'modular-workspace', 'native-review', 'persistence-database', 'recent-activity', 'redesign-visual', 'review-contributions', 'ui-v1'].map(id => ({ id, project: 'chromium', file: `${id}.acceptance.spec.ts` })),
   { id: 'webkit', project: 'webkit', file: 'ui-v1.acceptance.spec.ts' },
 ];
@@ -49,7 +50,7 @@ export const VERIFICATION_GROUPS = {
     // Run the performance-sensitive visual shard only after the shorter
     // reference tasks, avoiding an exclusive tail on the critical writing lane.
     [`browser-${profile}-reference`, ['recent-activity', 'modular-workspace', 'review-contributions', 'job-inbox', 'redesign-visual'].map(id => `browser-${profile}-${id}`)],
-    [`browser-${profile}-webkit`, ['auth-recovery', 'oauth-web', 'ui-v1', 'webkit'].map(id => `browser-${profile}-${id}`)],
+    [`browser-${profile}-webkit`, ['auth-recovery', 'oauth-web', 'passkey-bootstrap', 'ui-v1', 'webkit'].map(id => `browser-${profile}-${id}`)],
   ])),
   ...Object.fromEntries(NATIVE_SELECTIONS.map(id => [`hosted-native-${id}`, [`hosted-native-${id}`]])),
 };

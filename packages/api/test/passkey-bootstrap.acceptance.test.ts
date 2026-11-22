@@ -31,6 +31,8 @@ interface RegistrationAttempt {
   readonly response?: Record<string, unknown>;
 }
 
+const virtualAuthenticators = new WeakMap<Page, { readonly session: CDPSession; readonly authenticatorId: string }>();
+
 function listen(server: HttpServer, port = 0): Promise<number> {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -136,7 +138,7 @@ async function newPasskeyPage(browser: Browser, contexts: BrowserContext[], orig
   contexts.push(context);
   const page = await context.newPage();
   await page.goto(origin);
-  await attachVirtualAuthenticator(context, page);
+  virtualAuthenticators.set(page, await attachVirtualAuthenticator(context, page));
   return page;
 }
 
@@ -220,14 +222,33 @@ async function registerPasskey(
   }, { token, createSession: options.createSession, tamper: options.tamper, rpId: options.rpId, context: grantContext });
 }
 
-async function authenticatePasskey(page: Page): Promise<{ readonly optionsStatus: number; readonly verifyStatus?: number }> {
-  return page.evaluate(async () => {
+async function authenticatePasskey(page: Page, persistedCredentialId: string): Promise<{
+  readonly optionsStatus: number;
+  readonly verifyStatus?: number;
+  readonly verifyCode?: string;
+  readonly credentialId?: string;
+  readonly allowedCredentialIds?: readonly string[];
+}> {
+  return page.evaluate(async ({ persistedCredentialId }) => {
     const optionsResponse = await fetch("/api/auth/passkey/generate-authenticate-options", {
       credentials: "same-origin",
     });
     if (!optionsResponse.ok) return { optionsStatus: optionsResponse.status };
     const options = await optionsResponse.json();
     const publicKey = PublicKeyCredential.parseRequestOptionsFromJSON(options);
+    const binaryId = atob(persistedCredentialId.replaceAll("-", "+").replaceAll("_", "/"));
+    publicKey.allowCredentials = [{
+      type: "public-key",
+      id: Uint8Array.from(binaryId, (character) => character.charCodeAt(0)).buffer,
+    }];
+    const allowedCredentialIds = publicKey.allowCredentials?.map(({ id }) => {
+      let binary = "";
+      const bytes = id instanceof ArrayBuffer
+        ? new Uint8Array(id)
+        : new Uint8Array(id.buffer, id.byteOffset, id.byteLength);
+      for (const byte of bytes) binary += String.fromCharCode(byte);
+      return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+    }) ?? [];
     const credential = await navigator.credentials.get({ publicKey });
     if (!(credential instanceof PublicKeyCredential)) throw new Error("Virtual authenticator did not return a credential");
     const response = await fetch("/api/auth/passkey/verify-authentication", {
@@ -236,8 +257,11 @@ async function authenticatePasskey(page: Page): Promise<{ readonly optionsStatus
       credentials: "same-origin",
       body: JSON.stringify({ response: credential.toJSON() }),
     });
-    return { optionsStatus: optionsResponse.status, verifyStatus: response.status };
-  });
+    const result = await response.json().catch(() => ({})) as { code?: unknown; status?: unknown };
+    const verifyCode = [result.code, result.status].filter((value): value is string => typeof value === "string").join(":");
+    return { optionsStatus: optionsResponse.status, verifyStatus: response.status,
+      ...(verifyCode ? { verifyCode } : {}), credentialId: credential.id, allowedCredentialIds };
+  }, { persistedCredentialId });
 }
 
 function cliEnv(databaseUrl: string, publicOrigin: string, authSecret: string, owner: { id: string; email: string; name: string }): NodeJS.ProcessEnv {
@@ -261,7 +285,7 @@ function cliEnv(databaseUrl: string, publicOrigin: string, authSecret: string, o
   return environment;
 }
 
-function runPackageCli(command: "migrate-auth" | "grant-passkey-owner", args: readonly string[], env: NodeJS.ProcessEnv): {
+function runPackageCli(command: "migrate-auth" | "grant-passkey-owner" | "grant-passkey-owner-recovery", args: readonly string[], env: NodeJS.ProcessEnv): {
   readonly status: number | null;
   readonly stdout: string;
   readonly stderr: string;
@@ -285,7 +309,12 @@ function parseGrant(stdout: string): { readonly enrollmentToken: string; readonl
   catch { throw new Error("Passkey grant CLI did not return its documented JSON result"); }
 }
 
-test("Better Auth 1.7.26 accepts only one operator-granted first owner and preserves the owner through restart", { timeout: 120_000 }, async (t) => {
+test("Better Auth 1.7.26 accepts only one operator-granted first owner and preserves the owner through restart", {
+  timeout: 240_000,
+  skip: process.env.CODEXIA_PASSKEY_ACCEPTANCE === "1"
+    ? false
+    : "Requires the dedicated Chromium + disposable PostgreSQL acceptance lane; run test:passkey-acceptance.",
+}, async (t) => {
   const databaseUrl = process.env.CODEXIA_AUTH_TEST_DATABASE_URL;
   assert.equal(process.env.CODEXIA_AUTH_TEST_DISPOSABLE, "1", "virtual WebAuthn acceptance needs an explicitly disposable auth database");
   assert.ok(databaseUrl, "CODEXIA_AUTH_TEST_DATABASE_URL must name a disposable PostgreSQL database");
@@ -395,7 +424,7 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
   contexts.push(browserContext);
   const page = await browserContext.newPage();
   await page.goto(apiOrigin);
-  await attachVirtualAuthenticator(browserContext, page);
+  virtualAuthenticators.set(page, await attachVirtualAuthenticator(browserContext, page));
 
   const noGrant = await page.evaluate(async () => {
     const response = await fetch(`/api/auth/passkey/generate-register-options?context=${encodeURIComponent("codexia-first-owner-v1")}`);
@@ -476,16 +505,19 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
   assert.equal((await context.adapter.findMany({ model: "user", limit: 1 })).length, 0);
   assert.equal((await context.adapter.findMany({ model: "passkey" })).length, 0);
 
+  // Keep rejected attestations out of the authenticators participating in the
+  // race: WebAuthn creates a local credential before the server accepts it.
+  const raceFirstPage = await newPasskeyPage(browser!, contexts, apiOrigin);
   const secondPage = await newPasskeyPage(browser!, contexts, apiOrigin);
   const race = await Promise.all([
-    registerPasskey(page, replacementGrant.enrollmentToken),
+    registerPasskey(raceFirstPage, replacementGrant.enrollmentToken),
     registerPasskey(secondPage, replacementGrant.enrollmentToken),
   ]);
   assert.deepEqual(race.map((attempt) => attempt.optionsStatus), [200, 200]);
   const winners = race.filter((attempt) => attempt.verifyStatus === 200);
   assert.equal(winners.length, 1, "only one concurrent attestation may consume the owner grant");
   const winnerIndex = race.findIndex((attempt) => attempt.verifyStatus === 200);
-  const winnerPage = winnerIndex === 0 ? page : secondPage;
+  const winnerPage = winnerIndex === 0 ? raceFirstPage : secondPage;
   const winnerResponse = winners[0]!.response;
   assert.ok(winnerResponse);
   assert.ok(race.some((attempt) => (attempt.verifyStatus ?? 0) >= 400), "the losing attestation must fail closed");
@@ -496,6 +528,9 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
   assert.equal((users[0] as { id?: string }).id, owner.id, "the passkey must create the operator-selected internal owner ID");
   assert.equal(passkeys.length, 1);
   assert.equal((passkeys[0] as { userId?: string }).userId, owner.id, "the passkey must attach to the canonical owner");
+  const persistedCredentialId = (passkeys[0] as { credentialID?: string }).credentialID;
+  assert.equal(persistedCredentialId, (winnerResponse as { id?: string }).id,
+    "the single persisted passkey must be the credential returned by the winning virtual authenticator");
 
   const replay = await winnerPage.evaluate(async ({ token, response }) => {
     const result = await fetch("/api/auth/passkey/verify-registration", {
@@ -702,9 +737,23 @@ test("Better Auth 1.7.26 accepts only one operator-granted first owner and prese
   assert.equal(signout, 200);
   const signedOut = await winnerPage.evaluate(async () => (await fetch("/api/auth/get-session", { credentials: "same-origin" })).status);
   assert.equal(signedOut, 200);
-  const signin = await authenticatePasskey(winnerPage);
+  assert.ok(persistedCredentialId);
+  const signin = await authenticatePasskey(winnerPage, persistedCredentialId);
   assert.equal(signin.optionsStatus, 200);
-  assert.equal(signin.verifyStatus, 200, "the enrolled owner must sign in with the same passkey after restart");
+  const winnerAuthenticator = virtualAuthenticators.get(winnerPage);
+  assert.ok(winnerAuthenticator, "the winning page must retain its virtual authenticator across the runtime restart");
+  const winnerCredentials = await winnerAuthenticator.session.send("WebAuthn.getCredentials", {
+    authenticatorId: winnerAuthenticator.authenticatorId,
+  });
+  assert.equal(winnerCredentials.credentials.length, 1, "the winning authenticator must contain exactly the credential persisted by the concurrent registration race");
+  assert.equal(signin.credentialId, persistedCredentialId,
+    "authentication must select the persisted credential from the winning authenticator");
+  if (signin.allowedCredentialIds?.length) {
+    assert.ok(signin.allowedCredentialIds.includes(persistedCredentialId),
+      "the server-supplied allow list must include the persisted winning credential");
+  }
+  assert.equal(signin.verifyStatus, 200,
+    `the enrolled owner must sign in with the winning passkey after restart (verification code: ${signin.verifyCode ?? "none"})`);
   const signedIn = await winnerPage.evaluate(async () => {
     const response = await fetch("/api/auth/get-session", { credentials: "same-origin" });
     const result = await response.json() as { user?: { id?: string } };

@@ -83,4 +83,11 @@ test('task invocations describe only canonical executable work with secret value
     environmentKeys: ['CODEXIA_CI_REPORT_DIR', 'CODEXIA_E2E_ADMIN_DATABASE_URL', 'CODEXIA_E2E_DATABASE_URL', 'CODEXIA_E2E_OUTPUT_DIR',
       'CODEXIA_E2E_PORT', 'CODEXIA_E2E_PROJECT_TITLE', 'CODEXIA_E2E_STATE_DIR'],
   });
+  assert.deepEqual(taskInvocation('browser-core-passkey-bootstrap', '/opt/node/bin/node'), {
+    executable: '/opt/node/bin/node',
+    arguments: ['scripts/run-browser-shard.mjs', '--profile', 'core', '--suite', 'passkey-bootstrap', '--prebuilt'],
+    environmentKeys: ['CODEXIA_CI_REPORT_DIR', 'CODEXIA_E2E_ADMIN_DATABASE_URL', 'CODEXIA_E2E_DATABASE_URL',
+      'CODEXIA_E2E_OUTPUT_DIR', 'CODEXIA_E2E_PORT', 'CODEXIA_E2E_PROJECT_TITLE', 'CODEXIA_E2E_STATE_DIR',
+      'CODEXIA_PASSKEY_ACCEPTANCE'],
+  });
 });

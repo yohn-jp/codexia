@@ -168,6 +168,11 @@ export function createVerificationPlan({ files, event, sha, base = null, forceFu
     }
     // API client source is read by the canonical deployment route assertion.
     if (file === 'app/src/api.ts') add('unit-root');
+    if (file === 'packages/api/test/passkey-bootstrap.acceptance.test.ts' ||
+        file === 'packages/api/scripts/run-passkey-acceptance.mjs') {
+      add('unit-api', 'typecheck-core-api', 'test-types-packages', 'build-core', 'browser-core-passkey-bootstrap');
+      continue;
+    }
     if (file === 'AGENTS.md' || file === 'CONTRIBUTING.md' || file === 'LICENSE' || /^docs\/.*\.md$/u.test(file) || /^README(?:\.[a-z-]+)?\.md$/iu.test(file)) continue;
     // Workspace manifests/configuration, shared contracts and unknown files are global inputs.
     const owner = WORKSPACES.find(item => file.startsWith(`${item.path}/src/`));

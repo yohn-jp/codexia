@@ -3,11 +3,12 @@ import assert from "node:assert/strict";
 import { BROWSER_SHARDS, PROFILES } from "./ci-contract.mjs";
 import { buildBrowserTestArguments, resolveBrowserShard, summarizeBrowserCoverage } from "./browser-shards.mjs";
 
-test("the browser matrix resolves all twelve Chromium specs and the WebKit UI spec for both profiles", () => {
+test("the browser matrix resolves all thirteen Chromium specs and the WebKit UI spec for both profiles", () => {
   assert.deepEqual(PROFILES, ["core", "full"]);
   assert.deepEqual(BROWSER_SHARDS, [
     { id: "auth-recovery", project: "chromium", file: "auth-recovery.acceptance.spec.ts" },
     { id: "oauth-web", project: "chromium", file: "oauth-web.acceptance.spec.ts" },
+    { id: "passkey-bootstrap", project: "chromium", file: "passkey-bootstrap.acceptance.spec.ts" },
     { id: "core", project: "chromium", file: "core.acceptance.spec.ts" },
     { id: "outline-headings", project: "chromium", file: "outline-headings.acceptance.spec.ts" },
     { id: "job-inbox", project: "chromium", file: "job-inbox.acceptance.spec.ts" },
