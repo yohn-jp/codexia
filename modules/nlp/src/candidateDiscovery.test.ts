@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readCanonicalSnapshotEntities } from "./canonicalSnapshot.js";
 import { aggregateCandidateTerms, extractCompoundNounsWithReading } from "./candidateDiscovery.js";
 import { expandSearchTerms, suggestTermVariants } from "./termVariants.js";
 import type { Token } from "./tokenizer/types.js";
@@ -19,6 +20,30 @@ test("candidate aggregation preserves source reading, per-entity occurrence coun
     { id: "scene-1", tokenizedTexts: [firstText] },
   ], new Set(["大河"]));
   assert.deepEqual(candidates, [{ term: "銀河", reading: "ギンカワ", sourceEntityIds: ["character-1", "scene-1"], occurrenceCount: 3 }]);
+});
+
+test("candidate discovery only reads native manuscript bodies linked by the pinned hierarchy", async () => {
+  const metadataPath = "plot/volumes/root/scenes/scene-a.yaml";
+  const manuscriptPath = "documents/native-a.md";
+  const privateNotePath = "documents/private-note.md";
+  const entities = await readCanonicalSnapshotEntities({
+    snapshot: { projectId: "project-a", projectVersion: 8 },
+    nativeStoryDocuments: [{
+      id: "scene-a", kind: "scene", title: "夜更け", orderKey: "01", documentOrder: 0,
+      metadataPath, metadataRevision: "scene-v8", metadataContent: "manuscript: documents/native-a.md\n",
+      metadata: { manuscript: manuscriptPath },
+    }],
+    async list(prefix) { return prefix === "documents" ? [manuscriptPath, privateNotePath] : []; },
+    async read(path) {
+      assert.notEqual(path, privateNotePath, "the candidate scanner must not open an unlinked note");
+      return path === manuscriptPath ? { content: "銀河が見える。", revision: "manuscript-v8", documentKind: "scene" } : null;
+    },
+  }, new AbortController().signal);
+
+  assert.deepEqual(entities.map(({ id, type, filePath, body }) => ({ id, type, filePath, body })), [
+    { id: "doc-native-a", type: "scene", filePath: manuscriptPath, body: "銀河が見える。" },
+    { id: "scene-a", type: "scene", filePath: metadataPath, body: undefined },
+  ]);
 });
 
 test("term variants prefer a known canonical term even when an unknown variant is more frequent", () => {

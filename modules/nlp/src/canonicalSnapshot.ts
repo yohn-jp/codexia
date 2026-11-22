@@ -12,7 +12,7 @@ export interface CanonicalSnapshotEntity {
   body?: string;
 }
 
-const ENTITY_PREFIXES = ["bible", "plot", "meta", "manuscript", "documents"] as const;
+const ENTITY_PREFIXES = ["bible", "plot", "meta", "manuscript"] as const;
 const PRESERVATION_ARCHIVE_PATH = /^meta\/scriptorium\/modules\/[^/]+\/legacy(?:\/|$)/u;
 const MAX_ENTITY_FILES = 20_000;
 const FRONT_MATTER_RE = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
@@ -69,20 +69,22 @@ export async function readCanonicalSnapshotEntities(
   reader: SnapshotReader,
   signal: AbortSignal,
 ): Promise<CanonicalSnapshotEntity[]> {
-  const hierarchy = new Map((reader.nativeStoryDocuments ?? [])
+  const nativeStoryDocuments = reader.nativeStoryDocuments;
+  const hierarchy = new Map((nativeStoryDocuments ?? [])
     .filter((document) => !PRESERVATION_ARCHIVE_PATH.test(document.metadataPath))
     .map((document) => [document.metadataPath, document]));
-  const listedPaths = (await Promise.all(ENTITY_PREFIXES.map((prefix) => reader.list(prefix)))).flat();
-  const listedEntities = listedPaths.filter((path) => !PRESERVATION_ARCHIVE_PATH.test(path) && /\.(?:ya?ml|md)$/i.test(path));
-  const paths = [...new Set([...listedEntities, ...hierarchy.keys()])].sort();
-  if (paths.length > MAX_ENTITY_FILES) throw new TypeError(`Project analysis exceeds ${MAX_ENTITY_FILES} canonical entity files`);
-
   const nativeSceneBodyPaths = new Set<string>();
   for (const document of hierarchy.values()) {
     if (document.kind !== "scene") continue;
     const path = nativeSceneBodyPath(document.metadata.manuscript);
     if (path) nativeSceneBodyPaths.add(path);
   }
+  const prefixes = nativeStoryDocuments ? ENTITY_PREFIXES : [...ENTITY_PREFIXES, "documents"];
+  const listedPaths = (await Promise.all(prefixes.map((prefix) => reader.list(prefix)))).flat();
+  const listedEntities = listedPaths.filter((path) => !PRESERVATION_ARCHIVE_PATH.test(path) && /\.(?:ya?ml|md)$/i.test(path));
+  const paths = [...new Set([...listedEntities, ...hierarchy.keys(), ...nativeSceneBodyPaths])].sort();
+  if (paths.length > MAX_ENTITY_FILES) throw new TypeError(`Project analysis exceeds ${MAX_ENTITY_FILES} canonical entity files`);
+
   const orderedPaths = [
     ...paths.filter((path) => !path.startsWith("documents/")),
     ...paths.filter((path) => path.startsWith("documents/")),
@@ -120,7 +122,7 @@ export async function readCanonicalSnapshotEntities(
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
       raw = parsed as Record<string, unknown>;
       if (typeof raw.id !== "string") continue;
-      if (file.documentKind === "scene") {
+      if (!nativeStoryDocuments && file.documentKind === "scene") {
         const manuscriptPath = nativeSceneBodyPath(raw.manuscript);
         if (manuscriptPath) nativeSceneBodyPaths.add(manuscriptPath);
       }
