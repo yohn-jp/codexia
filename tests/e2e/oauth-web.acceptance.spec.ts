@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Request, type Route } from "@playwright/test";
 import { expectServerSaved, manuscriptEditor } from "./postgres-fixture";
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
@@ -24,7 +24,7 @@ interface SeenRequest {
   body: string | null;
 }
 
-test("signed-out Web OAuth preserves the signed request through consent, PKCE, and protected owner API lists", async ({ browser }) => {
+test("Web OAuth preserves consent, owner persistence, and drafts during reauthentication", async ({ browser }) => {
   assert.ok(fixtureDatabaseUrl, "Set CODEXIA_WEB_OAUTH_TEST_DATABASE_URL or the isolated CI database for Web OAuth acceptance");
   const database = new URL(fixtureDatabaseUrl);
   const databaseName = decodeURIComponent(database.pathname.slice(1));
@@ -99,16 +99,7 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
 
     context = await browser.newContext();
     const seen: SeenRequest[] = [];
-    const responseStatuses = new Map<string, number[]>();
-    const applyResponseStatuses = () => {
-      const positions = new Map<string, number>();
-      for (const request of seen) {
-        const key = `${request.method} ${request.pathname}`;
-        const position = positions.get(key) ?? 0;
-        request.status = responseStatuses.get(key)?.[position] ?? 0;
-        positions.set(key, position + 1);
-      }
-    };
+    const observedRequests = new Map<Request, SeenRequest>();
     const responseTasks: Promise<void>[] = [];
     const tokenResponses: Record<string, unknown>[] = [];
     let upstreamCallbackLocation: string | null = null;
@@ -122,19 +113,20 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     page.on("request", (request) => {
       const url = new URL(request.url());
       if (!url.pathname.startsWith("/api/")) return;
-      seen.push({
-          pathname: url.pathname,
-          url: request.url(),
-          method: request.method(),
-          status: 0,
-          headers: Object.fromEntries(Object.entries(request.headers()).map(([name, value]) => [name.toLowerCase(), value])),
-          body: request.postData(),
-        });
+      const observation = {
+        pathname: url.pathname,
+        url: request.url(),
+        method: request.method(),
+        status: 0,
+        headers: Object.fromEntries(Object.entries(request.headers()).map(([name, value]) => [name.toLowerCase(), value])),
+        body: request.postData(),
+      };
+      seen.push(observation);
+      observedRequests.set(request, observation);
     });
     page.on("response", (response) => {
-      const responseRequest = response.request();
-      const responseKey = `${responseRequest.method()} ${new URL(response.url()).pathname}`;
-      responseStatuses.set(responseKey, [...(responseStatuses.get(responseKey) ?? []), response.status()]);
+      const request = observedRequests.get(response.request());
+      if (request) request.status = response.status();
       if (new URL(response.url()).pathname.endsWith("/api/auth/callback/workspace-oidc")) {
         responseTasks.push((async () => { upstreamCallbackLocation = await response.headerValue("location"); })());
       }
@@ -169,7 +161,6 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     assert.equal(consentPrompt.getAll("sig").length, 1, "the consent route must carry one server-signed query");
     await page.getByText("Codexia Web", { exact: false }).waitFor();
     await Promise.all(responseTasks);
-    applyResponseStatuses();
     assert.ok(seen.some((request) => request.pathname === "/api/auth/oauth2/consent-context" && request.status === 200), `the server must verify the signed prompt before consent display; observed ${JSON.stringify(seen.map(({ pathname, method, status }) => ({ pathname, method, status })))}`);
     // Register both response observers before triggering the OAuth callback.
     // Session and jobs can complete before sequential waitForResponse calls attach.
@@ -178,7 +169,7 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     const jobsResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/jobs" && response.request().method() === "GET" && response.status() === 200);
     await page.getByRole("button", { name: "許可して続ける" }).click();
     await Promise.all([sessionResponse, jobsResponse, projectListResponse]);
-    applyResponseStatuses();
+    await Promise.all(responseTasks);
     const callbackUrl = webCallbackUrls.at(-1);
     assert.ok(callbackUrl, "the authorization response must return to the registered app callback");
 
@@ -267,7 +258,6 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
       await persisted.close();
     }
 
-    applyResponseStatuses();
     const projectCreateRequest = seen.find((request) => request.pathname === "/api/v1/persistence/projects" && request.method === "POST");
     const documentCreateRequest = seen.find((request) => request.pathname === `/api/v1/persistence/projects/${createdProject.id}/documents` && request.method === "POST");
     const manuscriptSaveRequest = seen.find((request) => request.pathname === `/api/v1/persistence/projects/${createdProject.id}/documents/${scene.id}` && request.method === "PATCH");
@@ -277,6 +267,41 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
       assert.equal(Boolean(request.headers.cookie), false, "author mutation requests must omit ambient cookies");
       assert.equal(request.status, request.method === "PATCH" ? 200 : 201);
     }
+
+    await test.step("an unprotected draft blocks OAuth reauthentication", async () => {
+      const documentPath = new URL(page.url()).pathname;
+      const authorizePath = `${new URL(fixture.issuer).pathname}/oauth2/authorize`;
+      const countAuthorizations = () => seen.filter((request) => request.pathname === authorizePath).length;
+      const authorizationsBeforeRecovery = countAuthorizations();
+      await page.evaluate(() => {
+        const put = IDBObjectStore.prototype.put;
+        IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore["put"]>) {
+          if (this.name === "persistenceDrafts") throw new DOMException("Browser draft unavailable", "QuotaExceededError");
+          return put.apply(this, args);
+        };
+      });
+      const unsaved = "Editing without device storage must survive session recovery.";
+      await manuscriptEditor(page).fill(unsaved);
+      await expect(manuscriptEditor(page)).toHaveText(unsaved);
+
+      const unavailableSession = (route: Route) =>
+        route.fulfill({ status: 503, json: { error: "Session check unavailable" } });
+      await page.route("**/api/session", unavailableSession);
+      await page.evaluate(() => {
+        window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+        window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      });
+      await expect(page.getByRole("heading", { name: "認証・接続を再確認してください" })).toBeVisible();
+      await page.getByRole("button", { name: "OAuthで再認証" }).click();
+      await expect(page.getByRole("alert")).toContainText("保護できないためOAuth認証への移動を停止しました");
+      expect(countAuthorizations()).toBe(authorizationsBeforeRecovery);
+      expect(new URL(page.url()).pathname).toBe(documentPath);
+
+      await page.unroute("**/api/session", unavailableSession);
+      await page.getByRole("button", { name: "再試行", exact: true }).click();
+      await expect(manuscriptEditor(page)).toHaveText(unsaved);
+      await expect(page.getByRole("heading", { name: "OAuth Scene", exact: true })).toBeVisible();
+    });
   } finally {
     if (context) await context.close();
     await fixture.close();
