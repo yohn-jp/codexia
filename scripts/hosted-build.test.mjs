@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, rm, readFile, readdir, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, readFile, readdir, rename, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
@@ -74,13 +74,21 @@ test('provenance upload sends and reads back only the exact verified bundle byte
 });
 
 
-test('hosted source inventory excludes developer performance symlinks without disabling source validation', async () => {
-  // scripts/performance/podman is a tracked development-only symlink.
-  // The hosted source digest must not traverse that unrelated directory.
+test('hosted source inventory excludes developer performance symlinks without disabling source validation', async t => {
   const digests = await calculateBuildDigests();
   assert.match(digests.sourceDigest, /^sha256:[a-f0-9]{64}$/u);
   assert.match(digests.recipeDigest, /^sha256:[a-f0-9]{64}$/u);
   assert.match(digests.lockDigest, /^sha256:[a-f0-9]{64}$/u);
+  const excluded = await mkdtemp(path.join(root, 'scripts/performance/hosted-inventory-'));
+  t.after(() => rm(excluded, { recursive: true, force: true }));
+  const link = path.join(excluded, 'probe');
+  await symlink('unavailable-local-perf-engine', link);
+  assert.deepEqual(await calculateBuildDigests(), digests);
+
+  const included = await mkdtemp(path.join(root, 'scripts/hosted-inventory-'));
+  t.after(() => rm(included, { recursive: true, force: true }));
+  await rename(link, path.join(included, 'probe'));
+  await assert.rejects(calculateBuildDigests(), /Source tree contains an untrusted symlink: scripts\/hosted-inventory-.*\/probe/u);
 });
 
 test('hosted browser artifact binding follows hashed Vite entry and stylesheet files', () => {
