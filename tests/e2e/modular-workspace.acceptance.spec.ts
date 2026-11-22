@@ -1013,6 +1013,11 @@ test("editor remains unavailable until delayed browser recovery completes, then 
 test("failed IndexedDB open blocks editing and preserves the PostgreSQL manuscript and recovery record", async ({ page, authorizeAuthor }) => {
   const fixture = await openFixtureScene(page, authorizeAuthor, "desktop");
 
+  const documentUrl = `/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.document.id}`;
+  await page.route(`**${documentUrl}`, (route) => route.request().method() === "PATCH"
+    ? route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Synthetic save interruption" }) })
+    : route.continue());
+
   const draft = "Existing recovery record survives an unavailable browser journal.";
   const editor = manuscriptEditor(page);
   await editor.click();
@@ -1020,6 +1025,7 @@ test("failed IndexedDB open blocks editing and preserves the PostgreSQL manuscri
   await page.keyboard.insertText(draft);
   await expect(editor).toHaveText(draft);
   await expectDraft(page, fixture.scene.document.id, draft);
+  await expectServerSaveFailure(page);
   const beforeFailure = await readJournal(page);
   expect(beforeFailure.some((entry) => entry.documentId === fixture.scene.document.id && entry.markdown === draft)).toBe(true);
 
