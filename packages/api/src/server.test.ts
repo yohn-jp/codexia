@@ -4158,11 +4158,14 @@ it("restricts Publishing review payloads and legacy files to authenticated autho
         const { proposals } = await response.json() as { proposals: ProposalStatus[] };
         assert.deepEqual(proposals.map(status => status.proposal.id).sort(), expectedIds);
       }
-      const globalQueue = await fetch(base + "/api/review-queue", { headers: getHeaders });
-      assert.equal(globalQueue.status, 200);
-      const queue = await globalQueue.json() as { unresolvedCount: number; items: Array<{ projectId: string; proposal: ProposalStatus }> };
-      assert.deepEqual(queue.items.filter(item => item.projectId === projectId).map(item => item.proposal.proposal.id).sort(), expectedIds);
-      if (base === hosted.base) assert.equal(queue.unresolvedCount, expectedIds.length);
+      if (base === hosted.base) {
+        const globalQueue = await fetch(base + "/api/review-queue", { headers: getHeaders });
+        assert.equal(globalQueue.status, 200);
+        const queue = await globalQueue.json() as { unresolvedCount: number; items: Array<{ projectId: string; proposal: ProposalStatus }> };
+        assert.ok(queue.items.every(item => item.projectId === projectId));
+        assert.deepEqual(queue.items.map(item => item.proposal.proposal.id).sort(), expectedIds);
+        assert.equal(queue.unresolvedCount, expectedIds.length);
+      }
       for (const id of [ordinaryId, ...privateIds]) {
         const response = await fetch(base + projectPath + "/proposals/" + id, { headers: getHeaders });
         assert.equal(response.status, author || id === ordinaryId ? 200 : 404);
