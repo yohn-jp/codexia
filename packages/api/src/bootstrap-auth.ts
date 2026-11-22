@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import type { RequestListener } from "node:http";
 import { createServer } from "node:https";
@@ -10,7 +10,7 @@ import { migrateBetterAuth, readBetterAuthMigrationConfig } from "./migrate-auth
 const IOS_REDIRECT_URI = "jp.yohn.codexia:/oauth2redirect";
 
 interface BootstrapOptions {
-  readonly ownerOidcSubject: string;
+  readonly ownerOidcSubject?: string;
   readonly webRedirectUris: readonly string[];
 }
 
@@ -38,7 +38,9 @@ export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, optio
   if (origin.origin === audience.origin || (!disposableLoopback && origin.hostname === audience.hostname) ||
       config.ownerClientIds.length !== 2 ||
       new Set([webClientId, iosClientId, introspectionClientId]).size !== 3 ||
-      !/^[!-~]+$/u.test(options.ownerOidcSubject) || config.oauthIntrospectionClientSecret.length < 32 ||
+      (config.oidcIssuer && !options.ownerOidcSubject) ||
+      (options.ownerOidcSubject !== undefined && !/^[!-~]+$/u.test(options.ownerOidcSubject)) ||
+      config.oauthIntrospectionClientSecret.length < 32 ||
       options.webRedirectUris.length === 0 || new Set(options.webRedirectUris).size !== options.webRedirectUris.length ||
       options.webRedirectUris.some((uri) => {
         const redirect = new URL(uri);
@@ -52,7 +54,7 @@ export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, optio
     ...config,
     authSecret: createHmac("sha256", config.authSecret).update("codexia-auth-bootstrap:" + origin.origin).digest("hex"),
   }, {
-    ownerOidcSubject: options.ownerOidcSubject,
+    ...(options.ownerOidcSubject ? { ownerOidcSubject: options.ownerOidcSubject } : {}),
     nextClientId() {
       const id = registrationId.getStore();
       if (!id) throw new Error("Bootstrap registration must select an approved client");
@@ -65,11 +67,17 @@ export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, optio
     const session = await runtime.auth.api.getSession({ headers });
     if (!session) return new Response("An IdP session is required", { status: 401 });
     const context = await runtime.auth.$context;
-    const owner = await context.internalAdapter.findAccountByKey({
-      providerId: OIDC_PROVIDER_ID,
-      accountId: options.ownerOidcSubject,
-    });
-    if (owner?.userId !== session.user.id) return new Response("The IdP session does not identify the approved owner", { status: 403 });
+    const oidcOwner = options.ownerOidcSubject
+      ? await context.internalAdapter.findAccountByKey({ providerId: OIDC_PROVIDER_ID, accountId: options.ownerOidcSubject })
+      : null;
+    const passkeys = config.passkeyBootstrap && session.user.id === config.passkeyBootstrap.ownerId
+      ? await context.adapter.findMany({ model: "passkey", where: [{ field: "userId", value: session.user.id }] })
+      : [];
+    const approvedPasskeyOwner = passkeys.length > 0;
+    if (oidcOwner?.userId !== session.user.id && !approvedPasskeyOwner) {
+      return new Response("The session does not identify the approved OIDC or Passkey owner", { status: 403 });
+    }
+    const ownerSubject = session.user.id;
     if (registering) return new Response("Registration is already in progress", { status: 409 });
 
     registering = true;
@@ -83,7 +91,7 @@ export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, optio
           model: "oauthClient", where: [{ field: "clientId", value: id }],
         });
         if (current) {
-          if (current.userId !== owner!.userId || current.name !== name ||
+          if (current.userId !== ownerSubject || current.name !== name ||
               !sameValues(current.redirectUris, redirectUris) || !sameValues(current.scopes, scopes) ||
               !sameValues(current.grantTypes, grantTypes) || current.skipConsent !== confidential ||
               current.tokenEndpointAuthMethod !== tokenEndpointAuthMethod || current.applicationType !== applicationType) {
@@ -106,28 +114,74 @@ export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, optio
       await ensureClient(webClientId!, "Codexia Web", options.webRedirectUris, webType);
       await ensureClient(iosClientId!, "Codexia iOS", [IOS_REDIRECT_URI], "native");
       await ensureClient(introspectionClientId, "Codexia API introspection", [audience.origin + "/oauth/introspection"], webType, true);
-      await runtime.assertRegisteredClients(session.user.id);
+      await runtime.assertRegisteredClients(ownerSubject);
       // Verify the stored secret through Better Auth's own authenticated client boundary.
       await runtime.verifyIntrospectionCredentials();
-      return Response.json({ ownerSubject: session.user.id, webClientId, iosClientId, introspectionClientId });
+      return Response.json({ ownerSubject, webClientId, iosClientId, introspectionClientId });
     } finally {
       registering = false;
     }
   }
 
-  async function handle(method: string, url: URL, headers: Headers): Promise<Response> {
+  async function handle(method: string, url: URL, headers: Headers, body?: Buffer): Promise<Response> {
+    if (method === "GET" && url.pathname === "/passkey" && config.passkeyBootstrap) {
+      const nonce = randomBytes(18).toString("base64");
+      const page = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Codexia Passkey owner enrollment</title><main><h1>Register the first owner Passkey</h1>
+<p>Enter the one-time operator grant. It expires after ten minutes and is not saved in this browser.</p>
+<label for="grant">Enrollment grant</label> <input id="grant" type="password" autocomplete="off" required>
+<button id="enroll" type="button">Create Passkey</button><form method="post" action="/register"><button type="submit">Register OAuth clients</button></form>
+<output id="status" aria-live="polite"></output></main><script nonce="${nonce}">
+const button=document.querySelector("#enroll"),out=document.querySelector("#status"),grant=document.querySelector("#grant");
+if(!window.isSecureContext||typeof PublicKeyCredential!=="function"||typeof PublicKeyCredential.parseCreationOptionsFromJSON!=="function"){
+  button.disabled=true;out.textContent="This browser does not support secure Passkey registration. Use a current browser on this HTTPS setup page.";
+}
+button.addEventListener("click",async()=>{const token=grant.value;button.disabled=true;out.textContent="Waiting for the authenticator…";
+let publicKey,encoded;
+try{
+  const headers={"x-codexia-owner-enrollment":token};
+  const optionsResponse=await fetch("/api/auth/passkey/generate-register-options?context=codexia-first-owner-v1",{headers,credentials:"same-origin"});
+  if(!optionsResponse.ok)throw new Error("The enrollment grant is invalid, expired, or already used.");
+  const options=await optionsResponse.json();publicKey=PublicKeyCredential.parseCreationOptionsFromJSON(options);
+  const credential=await navigator.credentials.create({publicKey});if(!credential)throw new Error("Passkey creation was cancelled.");
+  encoded=credential.toJSON();
+}catch(error){
+  out.textContent=error instanceof DOMException&&error.name==="NotAllowedError"?"Passkey creation was cancelled or timed out. You can retry before the grant expires.":error instanceof Error?error.message:"Passkey registration failed.";
+  button.disabled=false;return;
+}
+try{
+  const verified=await fetch("/api/auth/passkey/verify-registration",{method:"POST",headers:{"x-codexia-owner-enrollment":token,"content-type":"application/json"},credentials:"same-origin",body:JSON.stringify({response:encoded,createSession:true})});
+  if(!verified.ok){if(PublicKeyCredential.signalUnknownCredential)await PublicKeyCredential.signalUnknownCredential({rpId:publicKey.rp.id,credentialId:encoded.id});throw new Error("The server did not accept this Passkey. The enrollment state may need operator recovery.");}
+  grant.value="";out.textContent="Passkey registered. Continue to register OAuth clients.";
+}catch(error){
+  if(PublicKeyCredential.signalUnknownCredential)await PublicKeyCredential.signalUnknownCredential({rpId:publicKey.rp.id,credentialId:encoded.id}).catch(()=>{});
+  out.textContent=error instanceof Error?error.message:"Passkey verification could not be confirmed. Check again before retrying.";button.disabled=false;
+}
+});</script></html>`;
+      return new Response(page, { headers: {
+        "content-type": "text/html; charset=utf-8",
+        "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
+        "referrer-policy": "no-referrer",
+      } });
+    }
     if (method === "GET" && url.pathname === "/") {
-      const page = '<!doctype html><html lang="en"><meta charset="utf-8"><title>Codexia OAuth registration</title>' +
-        '<h1>Codexia OAuth registration</h1><form method="post" action="/login"><button>Sign in to the identity provider</button></form>' +
-        '<form method="post" action="/register"><button>Register the approved clients</button></form></html>';
+      const passkey = config.passkeyBootstrap ? '<p><a href="/passkey">Register the first owner Passkey</a></p>' : "";
+      const oidcLogin = config.oidcIssuer ? '<form method="post" action="/login"><button>Sign in to the identity provider</button></form>' : "";
+      const page = '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia authentication setup</title>' +
+        '<main><h1>Codexia authentication setup</h1>' + passkey + oidcLogin +
+        '<form method="post" action="/register"><button type="submit">Register the approved OAuth clients</button></form></main></html>';
       return new Response(page, { headers: { "content-type": "text/html; charset=utf-8" } });
     }
-    if (method === "GET" && url.pathname === "/api/auth/callback/" + OIDC_PROVIDER_ID) {
+    if (method === "GET" && config.oidcIssuer && url.pathname === "/api/auth/callback/" + OIDC_PROVIDER_ID) {
       return runtime.handler(new Request(url, { headers }));
+    }
+    if ((method === "GET" || method === "POST") && url.pathname.startsWith("/api/auth/passkey/")) {
+      return runtime.handler(new Request(url, { method, headers, ...(body ? { body: new Uint8Array(body) } : {}) }));
     }
     if (method === "POST" && (url.pathname === "/login" || url.pathname === "/register")) {
       if (headers.get("origin") !== origin.origin) return new Response("Origin is not authorized", { status: 403 });
       if (url.pathname === "/register") return register(headers);
+      if (!config.oidcIssuer || !config.oidcClientId || !config.oidcClientSecret) return new Response("OIDC is not configured", { status: 404 });
       const result = await runtime.auth.api.signInSocial({
         headers, asResponse: true,
         body: { provider: OIDC_PROVIDER_ID, callbackURL: origin.origin + "/", requestSignUp: true },
@@ -150,11 +204,22 @@ export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, optio
   }
 
   const listener: RequestListener = (request, response) => {
-    request.resume();
     void (async () => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      for await (const chunk of request) {
+        const part = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        size += part.byteLength;
+        if (size > 1024 * 1024) {
+          response.writeHead(413, { "cache-control": "no-store" });
+          response.end("Request body is too large");
+          return;
+        }
+        chunks.push(part);
+      }
       const url = new URL(request.url ?? "/", origin);
       const result = request.headers.host === origin.host && url.origin === origin.origin
-        ? await handle(request.method ?? "", url, runtime.toHeaders(request.headers))
+        ? await handle(request.method ?? "", url, runtime.toHeaders(request.headers), chunks.length ? Buffer.concat(chunks) : undefined)
         : new Response("Host is not authorized", { status: 403 });
       const headers: Record<string, string | string[]> = Object.fromEntries(result.headers);
       const cookies = result.headers.getSetCookie();
@@ -162,8 +227,8 @@ export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, optio
       response.writeHead(result.status, {
         ...headers,
         "cache-control": "no-store",
-        "content-security-policy": "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
-        "referrer-policy": "same-origin",
+        "content-security-policy": result.headers.get("content-security-policy") ?? "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+        "referrer-policy": result.headers.get("referrer-policy") ?? "same-origin",
         "x-content-type-options": "nosniff",
       });
       response.end(Buffer.from(await result.arrayBuffer()));
@@ -182,7 +247,7 @@ async function main(): Promise<void> {
   const config = { ...staged, publicOrigin: origin, apiAudience: staged.apiAudience ?? new URL("/api", staged.publicOrigin).href };
   const tls = { cert: readFileSync("/run/codexia-bootstrap/tls.crt"), key: readFileSync("/run/codexia-bootstrap/tls.key"), minVersion: "TLSv1.2" as const };
   const bootstrap = createBetterAuthBootstrap(config, {
-    ownerOidcSubject: process.env.CODEXIA_AUTH_BOOTSTRAP_OWNER_OIDC_SUBJECT ?? "",
+    ...(process.env.CODEXIA_AUTH_BOOTSTRAP_OWNER_OIDC_SUBJECT ? { ownerOidcSubject: process.env.CODEXIA_AUTH_BOOTSTRAP_OWNER_OIDC_SUBJECT } : {}),
     webRedirectUris: (process.env.CODEXIA_AUTH_BOOTSTRAP_WEB_REDIRECT_URIS ?? "").split(",").filter(Boolean),
   });
   const server = createServer(tls, bootstrap.listener);

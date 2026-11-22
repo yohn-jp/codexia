@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { Pool } from "pg";
 import { betterAuth } from "better-auth";
 import { fromNodeHeaders } from "better-auth/node";
-import { createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
+import { createAuthEndpoint, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { genericOAuth, jwt } from "better-auth/plugins";
 import { passkey } from "@better-auth/passkey";
 import {
@@ -54,14 +54,40 @@ export interface OAuthConsentContext {
 const SUPPORTED_OAUTH_SCOPES = ["openid", "email", "profile", "offline_access", CODEXIA_OWNER_SCOPE, ...CODEXIA_MCP_SCOPES] as const;
 const OWNER_PUBLIC_SCOPES = ["openid", "email", "profile", "offline_access", CODEXIA_OWNER_SCOPE] as const;
 const CONFIDENTIAL_TOKEN_AUTH_METHODS = ["client_secret_basic", "client_secret_post", "private_key_jwt"] as const;
+
+function codexiaAuthMethodsPlugin(oidcConfigured: boolean) {
+  return {
+    id: "codexia-auth-methods",
+    endpoints: {
+      authMethods: createAuthEndpoint("/codexia/auth-methods", { method: "GET" }, async (ctx) => {
+        return ctx.json({ passkey: true, upstreamOidc: oidcConfigured });
+      }),
+    },
+  };
+}
 const PASSKEY_BOOTSTRAP_VERIFICATION_ID = "codexia:first-owner-passkey:v1";
 const PASSKEY_BOOTSTRAP_CONTEXT = "codexia-first-owner-v1";
 const PASSKEY_BOOTSTRAP_GRANT_TTL_MS = 10 * 60 * 1000;
+const passkeyDeletionQueues = new Map<string, Promise<void>>();
 
 function constantTimeEqual(actual: string, expected: string): boolean {
   const actualBytes = Buffer.from(actual);
   const expectedBytes = Buffer.from(expected);
   return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
+}
+
+async function withPasskeyDeletionLock<T>(ownerId: string, action: () => Promise<T>): Promise<T> {
+  const previous = passkeyDeletionQueues.get(ownerId) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  passkeyDeletionQueues.set(ownerId, current);
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release();
+    if (passkeyDeletionQueues.get(ownerId) === current) passkeyDeletionQueues.delete(ownerId);
+  }
 }
 
 export interface BetterAuthClientRegistry {
@@ -271,22 +297,22 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
         }
         if (path === "/passkey/delete-passkey") {
           const passkeys = await ctx.context.adapter.findMany({ model: "passkey", where: [{ field: "userId", value: session.user.id }] });
-          const accounts = await ctx.context.internalAdapter.findAccountByUserId(session.user.id);
-          if (passkeys.length <= 1 && accounts.length === 0) {
-            return new Response("The last usable authentication method cannot be removed", { status: 403 });
+          if (passkeys.length <= 1) {
+            return new Response("The last Passkey cannot be removed", { status: 403 });
           }
         }
       }),
     },
     plugins: [
+      codexiaAuthMethodsPlugin(Boolean(oidcIssuer)),
       passkey({
         rpID: publicOrigin.hostname,
         rpName: "Codexia",
         origin: publicOrigin.origin,
         authenticatorSelection: { residentKey: "required", requireResidentKey: true, userVerification: "required" },
-        ...(config.passkeyBootstrap ? {
-          registration: {
-            requireSession: false,
+        registration: {
+          requireSession: !config.passkeyBootstrap,
+          ...(config.passkeyBootstrap ? {
             async resolveUser({ ctx, context }) {
               const suppliedToken = ctx.request?.headers.get("x-codexia-owner-enrollment") ?? "";
               if (context !== PASSKEY_BOOTSTRAP_CONTEXT || !suppliedToken) {
@@ -303,15 +329,10 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
                 displayName: config.passkeyBootstrap!.ownerName,
               };
             },
-            async afterVerification({ ctx, user, context }) {
-              if (!config.passkeyBootstrap) {
-                const session = ctx.context.session;
-                if (!session || !config.ownerSubject || user.id !== config.ownerSubject || session.user.id !== config.ownerSubject) {
-                  throw new Error("Passkey registration is restricted to the configured owner");
-                }
-                return;
-              }
-              if (context !== PASSKEY_BOOTSTRAP_CONTEXT) return;
+          } : {}),
+          async afterVerification({ ctx, user, context }) {
+            if (config.passkeyBootstrap) {
+              if (context !== PASSKEY_BOOTSTRAP_CONTEXT) throw new Error("Owner enrollment context is invalid");
               // The plugin accepts createSession=false, which skips its PostgreSQL transaction.
               // Refuse that request before claiming the one-time grant or creating the owner.
               if (ctx.body.createSession !== true || user.id !== config.passkeyBootstrap!.ownerId) {
@@ -335,9 +356,15 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
               if (createdOwner.id !== config.passkeyBootstrap!.ownerId) {
                 throw new Error("The owner ID could not be preserved during Passkey enrollment");
               }
-            },
+              return;
+            }
+            const session = ctx.context.session;
+            if (!session || !config.ownerSubject || user.id !== config.ownerSubject || session.user.id !== config.ownerSubject ||
+                Date.now() - new Date(session.session.createdAt).getTime() >= 5 * 60 * 1000) {
+              throw new Error("Passkey registration requires the configured owner and a fresh session");
+            }
           },
-        } : {}),
+        },
       }),
       ...(oidcIssuer ? [genericOAuth({ config: [{
         providerId: OIDC_PROVIDER_ID,
@@ -473,7 +500,14 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
     audience,
     toHeaders: fromNodeHeaders,
     advertisePublicClientTokenAuth,
-    handler: (request: Request) => accessTokenRevocation.handle(request, auth.handler),
+    async handler(request: Request): Promise<Response> {
+      const pathname = new URL(request.url).pathname;
+      if (pathname.endsWith("/passkey/delete-passkey")) {
+        const session = await auth.api.getSession({ headers: request.headers });
+        if (session) return withPasskeyDeletionLock(session.user.id, () => accessTokenRevocation.handle(request, auth.handler));
+      }
+      return accessTokenRevocation.handle(request, auth.handler);
+    },
     authorizationServerMetadata: oauthProviderAuthServerMetadata(auth),
     openIdConfigMetadata: oauthProviderOpenIdConfigMetadata(auth),
     async getConsentContext(headers: Headers, oauthQuery: string): Promise<OAuthConsentContext> {
