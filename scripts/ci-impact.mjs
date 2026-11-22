@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BROWSER_SHARDS, PROFILES, TYPECHECK_TARGETS, VERIFICATION_GROUPS, VERIFICATION_TASKS, WORKSPACES } from './ci-contract.mjs';
-import { taskGroup, taskWorkflowJob } from './ci-task-inputs.mjs';
+import { ROOT_VERIFICATION_DOCUMENTS, isNonExecutableDocumentation, taskGroup, taskWorkflowJob } from './ci-task-inputs.mjs';
 
 export const FULL_MODEL_OCI_PATHS = Object.freeze([
   '.dockerignore',
@@ -113,11 +113,7 @@ export const OPERATIONAL_ROOT_PATHS = Object.freeze([
   'deploy/quadlet/codexia-postgres.volume',
   'deploy/quadlet/codexia-tunnel.container',
   'deploy/quadlet/codexia.network',
-  'docs/deployment/BACKUP.md',
-  'docs/deployment/IAC.md',
-  'docs/deployment/PUSH-DEPLOYMENT.md',
-  'docs/deployment/PUSH-HOST-CI.md',
-  'docs/deployment/README.md',
+  ...ROOT_VERIFICATION_DOCUMENTS,
   'edge/frontend/package-lock.json',
   'edge/frontend/package.json',
   'edge/frontend/static/_headers',
@@ -163,7 +159,7 @@ export function createVerificationPlan({ files, event, sha, base = null, forceFu
     }
     // API client source is read by the canonical deployment route assertion.
     if (file === 'app/src/api.ts') add('unit-root');
-    if (file === 'AGENTS.md' || file === 'CONTRIBUTING.md' || file === 'LICENSE' || /^docs\/.*\.md$/u.test(file) || /^README(?:\.[a-z-]+)?\.md$/iu.test(file)) continue;
+    if (isNonExecutableDocumentation(file)) continue;
     // Workspace manifests/configuration, shared contracts and unknown files are global inputs.
     const owner = WORKSPACES.find(item => file.startsWith(`${item.path}/src/`));
     if (!owner || ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'migration', 'core', 'api'].includes(owner.id)) {

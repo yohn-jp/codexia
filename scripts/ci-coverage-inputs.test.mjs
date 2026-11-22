@@ -17,7 +17,7 @@ test('coverage closure changes when a declared test input changes and is stable 
   for (const directory of ['scripts', 'app', 'packages/core', 'modules/story', '.github/workflows']) await mkdir(path.join(root, directory), { recursive: true });
   for (const file of ['scripts/ci-workspace.mjs', 'scripts/ci-contract.mjs', 'scripts/ci-parallel.mjs', 'scripts/ci-impact.mjs',
     'scripts/ci-group.mjs', 'scripts/ci-profile-artifact.mjs', 'scripts/ci-native-producer.mjs', 'scripts/ci-browser-fixture.mjs',
-    'scripts/ci-task-input-proof.mjs', 'scripts/ci-coverage-inputs.mjs', '.github/workflows/verify.yml',
+    'scripts/ci-task-input-proof.mjs', 'scripts/ci-task-inputs.mjs', 'scripts/ci-coverage-inputs.mjs', '.github/workflows/verify.yml',
     'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'app/package.json', 'packages/core/package.json', 'modules/story/package.json',
     'scripts/coverage.test.mjs', 'app/app.test.ts', 'packages/core/core.spec.ts', 'modules/story/story.test.mjs']) {
     await writeFile(path.join(root, file), file + '\n');
@@ -35,7 +35,10 @@ test('coverage closure changes when a declared test input changes and is stable 
   await writeFile(path.join(root, 'scripts/ci-workspace.mjs'), 'changed coverage implementation\n');
   const changedSource = await captureCoverageInputClosure(input);
   assert.notEqual(changedSource.source, changedTest.source, 'changed coverage implementation must invalidate coverage proof');
+  await writeFile(path.join(root, 'scripts/ci-task-inputs.mjs'), 'changed proof input classification\n');
+  const changedClassification = await captureCoverageInputClosure(input);
+  assert.notEqual(changedClassification.source, changedSource.source, 'changed proof input classification must invalidate coverage proof');
   await writeFile(path.join(root, 'pnpm-lock.yaml'), 'changed dependency lock\n');
   const changedDependencies = await captureCoverageInputClosure(input);
-  assert.notEqual(changedDependencies.dependencies, changedSource.dependencies, 'changed lockfile must invalidate coverage proof');
+  assert.notEqual(changedDependencies.dependencies, changedClassification.dependencies, 'changed lockfile must invalidate coverage proof');
 });

@@ -84,6 +84,11 @@ const plan = async (files, event = 'pull_request') => {
   return createVerificationPlan({ files, event, sha: 'a'.repeat(40), base: 'b'.repeat(40) });
 };
 
+test('iOS deployment documentation selects the root tests that assert its contents', async () => {
+  const selection = await plan(['docs/deployment/IOS-CLIENT.md']);
+  assert.deepEqual(selection.tasks, ['unit-root', 'coverage']);
+});
+
 test('Full-model OCI impact matches the standalone push paths and the Verify caller', async () => {
   const { FULL_MODEL_OCI_PATHS, matchesFullModelOciPath } = await import('./ci-impact.mjs');
   const standalone = parse(readFileSync(new URL('../.github/workflows/full-model-oci-acceptance.yml', import.meta.url), 'utf8'));
