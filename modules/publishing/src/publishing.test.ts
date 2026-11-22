@@ -27,6 +27,8 @@ function makeSnapshot(projectVersion = BASE_VERSION, updatedVersion?: number): S
 
 class MemoryReader implements SnapshotReader {
   readonly files: Map<string, Buffer>;
+  readonly batches: string[][] = [];
+  readonly scalarManuscriptReads: string[] = [];
   constructor(files: Map<string, Buffer | string>, public snapshot: SnapshotId = makeSnapshot(), readonly documentKinds = new Map<string, string>(), readonly shareRecord?: ShareRecord, readonly episodeRecord?: OwnModuleRecord) {
     this.files = new Map([...files].map(([path, content]) => [path, Buffer.isBuffer(content) ? Buffer.from(content) : Buffer.from(content, "utf8")]));
   }
@@ -44,11 +46,19 @@ class MemoryReader implements SnapshotReader {
       }];
     });
   }
-  async read(path: string, encoding: "utf8" | "base64" = "utf8") {
+  private file(path: string, encoding: "utf8" | "base64") {
     const bytes = this.files.get(path);
     if (!bytes) return null;
     const documentKind = this.documentKinds.get(path);
     return { content: encoding === "base64" ? bytes.toString("base64") : bytes.toString("utf8"), revision: createHash("sha256").update(bytes).digest("hex"), ...(documentKind ? { documentKind } : {}) };
+  }
+  async read(path: string, encoding: "utf8" | "base64" = "utf8") {
+    if (path.endsWith(".md")) this.scalarManuscriptReads.push(path);
+    return this.file(path, encoding);
+  }
+  async readMany(paths: readonly string[], encoding: "utf8" | "base64" = "utf8") {
+    this.batches.push([...paths]);
+    return paths.map(path => this.file(path, encoding));
   }
   async list(prefix: string) { return [...this.files.keys()].filter((path) => path.startsWith(prefix)).sort(); }
 }
@@ -318,6 +328,7 @@ test("the publishing tree exposes titled root scenes without leaking notes or re
   };
   const tree = await invokeAction(await createPublishing(), "publishing.project.tree", {}, actionContext(reader, []));
   assert.deepEqual(bodyReads, []);
+  assert.deepEqual(reader.batches, []);
   assert.deepEqual(tree, {
     title: project.title, rootSceneCount: 1, rootScenes: [{ id: "root", title: "夜の駅" }], volumes: [{ id: "vol-1", title: "第一巻", chapters: [{
       id: "ch-1", title: "はじまり", scenes: [{ id: "sc-1", title: "夜の駅" }, { id: "sc-2", title: "朝の港" }],
@@ -428,6 +439,13 @@ test("publishing keeps Core's string order-key sequence in volume, chapter, text
   const alphaSceneSpine = opf.indexOf('idref="item-sc-alpha"');
   const alphaVolumeSpine = opf.indexOf('idref="item-sc-a"');
   assert.ok(zuluSpine >= 0 && zuluSpine < alphaSceneSpine && alphaSceneSpine < alphaVolumeSpine);
+
+  reader.batches.length = 0;
+  reader.read = async path => assert.fail(`scoped EPUB must not issue a scalar body read for ${path}`);
+  const scoped = await invokeAction(await createPublishing(), "publishing.export.epub", { scope: "chapter", id: "ch-z" }, contextWithCoreTree(reader, tree));
+  const scopedZip = await JSZip.loadAsync(Buffer.from(String(scoped.contentBase64), "base64"));
+  assert.deepEqual(reader.batches, [["manuscript/vol-z/ch-z/sc-zulu.md", "manuscript/vol-z/ch-z/sc-alpha.md"]]);
+  assert.doesNotMatch(await scopedZip.file("OEBPS/content.opf")!.async("string"), /item-sc-a"/u);
 });
 
 test("EPUB keeps distinct scene bodies reachable from the table of contents and spine", async () => {
@@ -547,6 +565,28 @@ test("EPUB bible reader keeps source flat character entities and typed lore/loca
   assert.equal(entries.find((entry) => entry.id === "char-flat")!.name, "古い人物");
 });
 
+test("wide plaintext export reads a selected chapter in bounded manuscript batches", async () => {
+  const files = fixtureFiles();
+  const sceneOrder = Array.from({ length: 33 }, (_, index) => 33 - index);
+  const scenes = sceneOrder.map(number => ({ id: `wide-${number}`, title: `Section ${number}` }));
+  for (const number of [...sceneOrder].reverse()) {
+    const id = `wide-${number}`;
+    files.set(`plot/volumes/vol-1/chapters/ch-1/scenes/${id}.yaml`,
+      `kind: scene\nid: ${id}\ntitle: Section ${number}\nvolume: vol-1\nchapter: ch-1\nmanuscript: documents/${id}.md\n`);
+    files.set(`documents/${id}.md`, `BODY-${number}\n`);
+  }
+  const reader = new MemoryReader(files);
+  reader.read = async path => assert.fail(`wide chapter must use batches for ${path}`);
+  const context = contextWithCoreTree(reader, { title: "Wide export", volumes: [
+    { id: "vol-1", title: "Volume", chapters: [{ id: "ch-1", title: "Chapter", scenes }] },
+  ] });
+  const result = await invokeAction(await createPublishing(), "publishing.export.plaintext", { scope: "chapter", id: "ch-1" }, context);
+  const exported = Buffer.from(String(result.contentBase64), "base64").toString("utf8");
+  assert.deepEqual(reader.batches.map(batch => batch.length), [32, 1]);
+  assert.deepEqual(reader.batches.flat(), sceneOrder.map(number => `documents/wide-${number}.md`));
+  assert.deepEqual(exported.match(/BODY-\d+/gu), sceneOrder.map(number => `BODY-${number}`));
+});
+
 test("episode edits propose a record update and preserve unknown fields and publication dates", async () => {
   const existingMap = {
     episodes: [{
@@ -626,6 +666,8 @@ test("public read uses only the applied snapshot and rechecks grant revocation",
     kind: "chapter", id: "ch-1", label: "校正用", expiresInHours: 24,
   }, context);
   const token = String(created.token);
+  assert.deepEqual(remote.batches, [], "validating a prospective share only needs hierarchy metadata");
+  assert.deepEqual(remote.scalarManuscriptReads, []);
   const createOperation = proposals[0];
   assert.ok(createOperation, "the action proposes one native share record update");
   assert.equal(createOperation.key, "share-grants");
@@ -646,6 +688,7 @@ test("public read uses only the applied snapshot and rechecks grant revocation",
   const url = "https://codexia.invalid/api/public/projects/local-publishing-7/modules/publishing/share/" + encodeURIComponent(token);
   const beforePublish = await publicBase.handle(new Request(url), publicContext(remote));
   assert.equal(beforePublish.status, 404, "proposing a share does not apply it");
+  assert.deepEqual(remote.batches, []);
 
   remote = appliedShare(remote, createOperation, NEXT_VERSION);
   const metadataResponse = await publicBase.handle(new Request(url), publicContext(remote));
@@ -656,9 +699,19 @@ test("public read uses only the applied snapshot and rechecks grant revocation",
   assert.equal(metadata.sceneCount, 2);
   assert.deepEqual(metadata.tree[0]!.chapters[0]!.scenes.map((scene) => scene.id), ["sc-1", "sc-2"]);
   assert.doesNotMatch(JSON.stringify(metadata), /Private Author Note|Private note body/u);
+  assert.deepEqual(remote.batches, [], "a public catalogue returns metadata without loading bodies");
   const sceneUrl = url + "/scenes/sc-1";
   assert.equal((await publicScene.handle(new Request(sceneUrl), publicContext(remote))).status, 200);
   assert.equal((await publicScene.handle(new Request(url + "/scenes/out-of-scope"), publicContext(remote))).status, 404);
+  assert.deepEqual(remote.batches, [["manuscript/vol-1/ch-1/sc-1.md"]]);
+  assert.deepEqual(remote.scalarManuscriptReads, []);
+
+  const missingScope = new MemoryReader(files, makeSnapshot(NEXT_VERSION), remote.documentKinds, { version: 1, value: {
+    version: 1, grants: [{ ...createOperation.value.grants[0]!, scope: { kind: "chapter", id: "missing-chapter" } }],
+  } });
+  assert.equal((await publicScene.handle(new Request(sceneUrl), publicContext(missingScope))).status, 404);
+  assert.deepEqual(missingScope.batches, []);
+  assert.deepEqual(missingScope.scalarManuscriptReads, []);
 
   const updatedFiles = new Map<string, Buffer | string>(remote.files);
   updatedFiles.set("manuscript/vol-1/ch-1/sc-1.md", "次の保存版の本文。\n");
@@ -683,6 +736,8 @@ test("public read uses only the applied snapshot and rechecks grant revocation",
   assert.equal((await publicBase.handle(new Request(url), publicContext(remote))).status, 200, "a proposed revocation does not alter the selected snapshot");
   remote = appliedShare(remote, revokeOperation, 4);
   assert.equal((await publicBase.handle(new Request(url), publicContext(remote))).status, 404, "an applied revocation blocks the next read");
+  assert.deepEqual(remote.batches, []);
+  assert.deepEqual(remote.scalarManuscriptReads, []);
 
   const expiredToken = "share_" + "x".repeat(43);
   const expired: ShareGrant = {
@@ -693,6 +748,8 @@ test("public read uses only the applied snapshot and rechecks grant revocation",
   const expiredReader = new MemoryReader(remote.files, remote.snapshot, remote.documentKinds, { version: 3, value: { version: 1, grants: [expired] } });
   const expiredUrl = url.slice(0, url.lastIndexOf("/") + 1) + expiredToken;
   assert.equal((await publicBase.handle(new Request(expiredUrl), publicContext(expiredReader))).status, 404);
+  assert.deepEqual(expiredReader.batches, []);
+  assert.deepEqual(expiredReader.scalarManuscriptReads, []);
 });
 
 test("the one-time share conversion preserves existing link identity, revocation, and extension data", async () => {

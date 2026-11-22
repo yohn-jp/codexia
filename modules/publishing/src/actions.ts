@@ -136,20 +136,20 @@ export function createPublishingActions(): ModuleAction[] {
   const actions: ModuleAction[] = [];
 
   actions.push(defineAction(valueSchema(parsePlaintextInput), "publishing.export.plaintext", "compute", async (input, context) => {
-    const project = await readPublishingProjectFromCore(context);
+    const project = await readPublishingProjectFromCore(context, input);
     const exported = buildPlaintextExport(project, input);
     return { filename: exported.filename, mediaType: "text/plain; charset=utf-8", contentBase64: Buffer.from(exported.text, "utf8").toString("base64") };
   }));
 
   actions.push(defineAction(valueSchema(parseEpubInput), "publishing.export.epub", "compute", async (input, context) => {
-    const project = await readPublishingProjectFromCore(context);
+    const project = await readPublishingProjectFromCore(context, input);
     const bibleEntries = input.includeBibleAppendix ? await readEpubBibleEntries(context.reader) : [];
     const exported = await buildEpubExport(project, input, context.reader, bibleEntries);
     return { filename: exported.filename, mediaType: "application/epub+zip", contentBase64: exported.buffer.toString("base64") };
   }));
 
   actions.push(defineAction(valueSchema(parseVerticalInput), "publishing.export.vertical-print", "compute", async (input, context) => {
-    const project = await readPublishingProjectFromCore(context);
+    const project = await readPublishingProjectFromCore(context, input);
     const scenes = collectScenesForVerticalPrint(project, input.scope, input.id);
     const text = composeVerticalPrintText(scenes.map((scene) => ({ id: scene.id, title: scene.title, body: scene.body })));
     return { text, sectionCount: scenes.length };
@@ -195,7 +195,7 @@ export function createPublishingActions(): ModuleAction[] {
   }));
 
   actions.push(defineAction(valueSchema(parseShareCreateInput), "publishing.shares.create", "propose", async (input, context) => {
-    const project = await readPublishingProjectFromCore(context);
+    const project = await readPublishingProjectFromCore(context, { includeManuscripts: false });
     resolveShareScope(project, input.scope);
     const { grants, version } = await readShareGrants(context);
     const { grant, rawToken } = createShareGrant(input);

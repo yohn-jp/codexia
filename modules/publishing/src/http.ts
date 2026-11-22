@@ -1,6 +1,6 @@
 import type { HttpContribution, ModuleActionContext } from "@codexia/contracts";
 import { grantIsActive, hashShareToken, constantTimeHashMatches, readShareGrants } from "./grants.js";
-import { readPublishingProject, resolveShareScope, type PublishingScene } from "./project.js";
+import { loadPublishingSceneBodies, readPublishingProject, resolveShareScope, type PublishingScene } from "./project.js";
 
 const NOT_FOUND = { error: "Share link is unavailable" };
 
@@ -66,7 +66,7 @@ async function readPublicShare(request: Request, context: ModuleActionContext): 
   let project;
   let scopedScenes: PublishingScene[];
   try {
-    project = await readPublishingProject(context.reader);
+    project = await readPublishingProject(context.reader, { includeManuscripts: false });
     scopedScenes = resolveShareScope(project, scope);
   } catch {
     return json(NOT_FOUND, 404);
@@ -75,6 +75,11 @@ async function readPublicShare(request: Request, context: ModuleActionContext): 
   if (parts.sceneId) {
     const scene = scopedScenes.find((item) => item.id === parts.sceneId);
     if (!scene) return json(NOT_FOUND, 404);
+    try {
+      await loadPublishingSceneBodies(context.reader, [scene]);
+    } catch {
+      return json(NOT_FOUND, 404);
+    }
     return json({
       snapshot: { projectId: context.reader.snapshot.projectId, projectVersion: context.reader.snapshot.projectVersion },
       id: scene.id,

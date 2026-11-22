@@ -1,5 +1,5 @@
 import { splitManuscriptMarkdown } from "@codexia/contracts/manuscript";
-import { assertProjectPath, type ModuleActionContext, type NativeStoryDocument, type SnapshotId, type SnapshotReader } from "@codexia/contracts";
+import { assertProjectPath, SNAPSHOT_READ_MANY_LIMIT, type ModuleActionContext, type NativeStoryDocument, type SnapshotId, type SnapshotReader } from "@codexia/contracts";
 
 export type PublishingScope = "all" | "volume" | "chapter";
 export type ShareScopeKind = "project" | "volume" | "chapter" | "scene";
@@ -107,13 +107,27 @@ function isRootScene(document: NativeStoryDocument): boolean {
   return !Object.hasOwn(document.metadata, "volume") && !Object.hasOwn(document.metadata, "chapter");
 }
 
-async function readPublishingScene(reader: SnapshotReader, document: NativeStoryDocument, includeManuscript = true) {
+function publishingScene(document: NativeStoryDocument) {
   const source = document.metadata.manuscript;
   const path = typeof source === "string" ? source : "";
   assertProjectPath(path);
   if (!path.toLowerCase().endsWith(".md")) throw new Error("Scene manuscript must be a Markdown file");
-  const manuscript = includeManuscript ? await reader.read(path) : null;
-  return { ...publishingNode(document), path, body: manuscript ? splitManuscriptMarkdown(manuscript.content).body : "" };
+  return { ...publishingNode(document), path, body: "" };
+}
+
+/** Populate the selected scenes from the same immutable snapshot as their metadata. */
+export async function loadPublishingSceneBodies(reader: SnapshotReader, scenes: readonly PublishingScene[]): Promise<void> {
+  if (!scenes.length) return;
+  if (!reader.readMany) throw new Error("Publishing manuscript batch reads are unavailable");
+  for (let start = 0; start < scenes.length; start += SNAPSHOT_READ_MANY_LIMIT) {
+    const batch = scenes.slice(start, start + SNAPSHOT_READ_MANY_LIMIT);
+    const manuscripts = await reader.readMany(batch.map(scene => scene.path));
+    if (manuscripts.length !== batch.length) throw new Error("Publishing manuscript batch did not match its requested paths");
+    for (const [index, scene] of batch.entries()) {
+      const manuscript = manuscripts[index];
+      scene.body = manuscript ? splitManuscriptMarkdown(manuscript.content).body : "";
+    }
+  }
 }
 
 function coreTree(value: unknown): CoreTree {
@@ -147,7 +161,7 @@ function sameSnapshot(left: unknown, right: SnapshotId): boolean {
 
 export async function readPublishingProjectFromCore(
   context: ModuleActionContext,
-  { includeManuscripts = true }: { includeManuscripts?: boolean } = {},
+  { includeManuscripts = true, scope = "all", id }: { includeManuscripts?: boolean; scope?: PublishingScope; id?: string } = {},
 ): Promise<PublishingProject> {
   const { reader } = context;
   const coreResult = await context.invoke("core.tree", {}, context.signal);
@@ -164,10 +178,7 @@ export async function readPublishingProjectFromCore(
   const { volumes: volumeDocuments, chapters: chapterDocuments, scenes: sceneDocuments } = readPublishingHierarchy(reader);
   const volumeMetadata = new Map(volumeDocuments.map((document) => [document.id, publishingNode(document)]));
   const chapterMetadata = new Map(chapterDocuments.map((document) => [document.id, publishingNode(document)]));
-  const sceneMetadata = new Map<string, Awaited<ReturnType<typeof readPublishingScene>>>();
-  for (const document of sceneDocuments.values()) {
-    sceneMetadata.set(document.id, await readPublishingScene(reader, document, includeManuscripts));
-  }
+  const sceneMetadata = new Map([...sceneDocuments.values()].map(document => [document.id, publishingScene(document)]));
 
   const seenSceneIds = new Set<string>();
   const volumes: PublishingVolume[] = hierarchy.volumes.map((volume) => ({
@@ -192,11 +203,13 @@ export async function readPublishingProjectFromCore(
     if (seenSceneIds.has(document.id) || !isRootScene(document)) continue;
     rootScenes.push({ ...sceneMetadata.get(document.id)!, volumeId: "", chapterId: "" });
   }
-  return { title: hierarchy.title, ...(subtitle ? { subtitle } : {}), volumes, rootScenes: rootScenes.sort(compareOrdered) };
+  const project = { title: hierarchy.title, ...(subtitle ? { subtitle } : {}), volumes, rootScenes: rootScenes.sort(compareOrdered) };
+  if (includeManuscripts) await loadPublishingSceneBodies(reader, collectPublishingScenes(project, scope, id));
+  return project;
 }
 
 /** Read a public snapshot projection without composing actions or crossing its authorization boundary. */
-export async function readPublishingProject(reader: SnapshotReader): Promise<PublishingProject> {
+export async function readPublishingProject(reader: SnapshotReader, { includeManuscripts = true } = {}): Promise<PublishingProject> {
   const { title = "Project", subtitle } = reader.projectPresentation ?? {};
   const { volumes: volumeDocuments, chapters: chapterDocuments, scenes: sceneDocuments } = readPublishingHierarchy(reader);
   const volumes: PublishingVolume[] = volumeDocuments.map((document) => ({ ...publishingNode(document), chapters: [] }));
@@ -214,19 +227,21 @@ export async function readPublishingProject(reader: SnapshotReader): Promise<Pub
   const rootScenes: PublishingScene[] = [];
   for (const document of sceneDocuments.values()) {
     if (isRootScene(document)) {
-      rootScenes.push({ ...await readPublishingScene(reader, document), volumeId: "", chapterId: "" });
+      rootScenes.push({ ...publishingScene(document), volumeId: "", chapterId: "" });
       continue;
     }
     const chapterId = document.metadata.chapter;
     const parent = typeof chapterId === "string" ? chaptersById.get(chapterId) : undefined;
     if (!parent) continue;
-    parent.chapter.scenes.push({ ...await readPublishingScene(reader, document), volumeId: parent.volumeId, chapterId: parent.chapter.id });
+    parent.chapter.scenes.push({ ...publishingScene(document), volumeId: parent.volumeId, chapterId: parent.chapter.id });
   }
   for (const volume of volumes) {
     volume.chapters.sort(compareOrdered);
     for (const chapter of volume.chapters) chapter.scenes.sort(compareOrdered);
   }
-  return { title, ...(subtitle ? { subtitle } : {}), volumes: volumes.sort(compareOrdered), rootScenes: rootScenes.sort(compareOrdered) };
+  const project = { title, ...(subtitle ? { subtitle } : {}), volumes: volumes.sort(compareOrdered), rootScenes: rootScenes.sort(compareOrdered) };
+  if (includeManuscripts) await loadPublishingSceneBodies(reader, collectPublishingScenes(project, "all"));
+  return project;
 }
 
 export function collectPublishingScenes(
