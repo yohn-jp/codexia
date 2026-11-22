@@ -1,6 +1,5 @@
 import { splitManuscriptMarkdown } from "@codexia/contracts/manuscript";
 import { assertProjectPath, type ModuleActionContext, type NativeStoryDocument, type SnapshotId, type SnapshotReader } from "@codexia/contracts";
-import YAML from "yaml";
 
 export type PublishingScope = "all" | "volume" | "chapter";
 export type ShareScopeKind = "project" | "volume" | "chapter" | "scene";
@@ -84,21 +83,6 @@ function compareOrdered(left: { id: string; title: string; order?: PublishingOrd
   return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
 }
 
-async function readProjectMetadata(reader: SnapshotReader): Promise<Record<string, unknown> | null> {
-  const path = "meta/project.yaml";
-  const file = await reader.read(path);
-  if (!file) return null;
-  let parsed: unknown;
-  try {
-    parsed = YAML.parse(file.content);
-  } catch {
-    throw new Error("Invalid YAML in " + path);
-  }
-  const result = record(parsed);
-  if (!result) throw new Error("Expected a YAML mapping in " + path);
-  return result;
-}
-
 function publishingNode(document: NativeStoryDocument) {
   const order = nodeOrder(document.metadata);
   return { id: document.id, title: nodeTitle(document.metadata, document.id), ...(order === undefined ? {} : { order }) };
@@ -176,10 +160,7 @@ export async function readPublishingProjectFromCore(
     throw new Error("Core hierarchy belongs to another snapshot");
   }
   const hierarchy = coreTree(coreData.tree);
-  const projectMetadata = await readProjectMetadata(reader);
-  const subtitle = typeof projectMetadata?.subtitle === "string" && projectMetadata.subtitle.trim()
-    ? projectMetadata.subtitle.trim()
-    : undefined;
+  const subtitle = reader.projectPresentation?.subtitle;
   const { volumes: volumeDocuments, chapters: chapterDocuments, scenes: sceneDocuments } = readPublishingHierarchy(reader);
   const volumeMetadata = new Map(volumeDocuments.map((document) => [document.id, publishingNode(document)]));
   const chapterMetadata = new Map(chapterDocuments.map((document) => [document.id, publishingNode(document)]));
@@ -216,11 +197,7 @@ export async function readPublishingProjectFromCore(
 
 /** Read a public snapshot projection without composing actions or crossing its authorization boundary. */
 export async function readPublishingProject(reader: SnapshotReader): Promise<PublishingProject> {
-  const projectMetadata = await readProjectMetadata(reader);
-  const title = projectMetadata ? nodeTitle(projectMetadata, "Project") : "Project";
-  const subtitle = typeof projectMetadata?.subtitle === "string" && projectMetadata.subtitle.trim()
-    ? projectMetadata.subtitle.trim()
-    : undefined;
+  const { title = "Project", subtitle } = reader.projectPresentation ?? {};
   const { volumes: volumeDocuments, chapters: chapterDocuments, scenes: sceneDocuments } = readPublishingHierarchy(reader);
   const volumes: PublishingVolume[] = volumeDocuments.map((document) => ({ ...publishingNode(document), chapters: [] }));
   const volumesById = new Map(volumes.map((volume) => [volume.id, volume]));

@@ -53,7 +53,6 @@ class MemoryReader implements SnapshotReader {
 
 function fixtureFiles(): Map<string, Buffer | string> {
   return new Map([
-    ["meta/project.yaml", "title: 星の図書館\nsubtitle: 第二巻\n"],
     ["plot/volumes/vol-1/volume.yaml", "kind: volume\nid: vol-1\ntitle: 第一巻\norder: 1\n"],
     ["plot/volumes/vol-1/chapters/ch-1/chapter.yaml", "kind: chapter\nid: ch-1\ntitle: はじまり\nvolume: vol-1\norder: 1\n"],
     ["plot/volumes/vol-1/chapters/ch-1/scenes/sc-1.yaml", "kind: scene\nid: sc-1\ntitle: 夜の駅\nvolume: vol-1\nchapter: ch-1\norder: 1\nmanuscript: manuscript/vol-1/ch-1/sc-1.md\n"],
@@ -166,7 +165,6 @@ test("source plaintext conversion and vertical print keep Japanese text and scen
 
 test("publishing follows Core hierarchy after a scene moves while retaining its manuscript path", async () => {
   const reader = new MemoryReader(new Map([
-    ["meta/project.yaml", "title: 移動する作品\n"],
     ["plot/volumes/vol-a/volume.yaml", "kind: volume\nid: vol-a\ntitle: 章Aの巻\norder: 0000000001\n"],
     ["plot/volumes/vol-a/chapters/ch-a/chapter.yaml", "kind: chapter\nid: ch-a\ntitle: 章A\nvolume: vol-a\norder: 0000000001\n"],
     ["plot/imported/sc-moving.metadata", "kind: scene\nid: sc-moving\ntitle: 移動した場面\nvolume: vol-b\nchapter: ch-b\norder: 0000000001\nmanuscript: manuscript/vol-a/ch-a/sc-moving.md\n"],
@@ -256,7 +254,6 @@ test("the canonical full plaintext export includes project root scenes once in s
   assert.equal(chapterZip.file("OEBPS/scene-root-a.xhtml"), null, "chapter scope must omit project root scenes");
 
   const rootOnlyReader = new MemoryReader(new Map([
-    ["meta/project.yaml", "title: Root only\n"],
     ["plot/volumes/root/chapters/root/scenes/only.yaml", "kind: scene\nid: only\ntitle: Only scene\norder: 1\nmanuscript: documents/only.md\n"],
     ["documents/only.md", "ONLY ROOT BODY\n"],
   ]));
@@ -281,6 +278,24 @@ test("plaintext export and public reader preserve manuscript horizontal rules", 
   assert.ok(text.includes(second));
   const shared = await readPublishingProject(reader);
   assert.deepEqual(shared.volumes[0]?.chapters[0]?.scenes.map(({ body }) => body), [first, second]);
+});
+
+test("Publishing reads the pinned subtitle and keeps distinct author and reader titles", async () => {
+  const files = fixtureFiles();
+  files.set("meta/project.yaml", "[not the project source]");
+  const reader = Object.assign(new MemoryReader(files, makeSnapshot(48)), {
+    projectPresentation: { title: "読者向けの作品名", subtitle: "公開された副題" },
+  });
+  const context = contextWithCoreTree(reader, { title: "作者向けの作品名", volumes: [] });
+
+  const exported = await invokeAction(await createPublishing(), "publishing.export.epub", { scope: "all" }, context);
+  const epub = await JSZip.loadAsync(Buffer.from(String(exported.contentBase64), "base64"));
+  const titlePage = await epub.file("OEBPS/title.xhtml")!.async("string");
+  assert.match(titlePage, /<h1>作者向けの作品名<\/h1>/u);
+  assert.match(titlePage, /<p>公開された副題<\/p>/u);
+  const publicProject = await readPublishingProject(reader);
+  assert.equal(publicProject.title, "読者向けの作品名");
+  assert.equal(publicProject.subtitle, "公開された副題");
 });
 
 test("the publishing tree exposes titled root scenes without leaking notes or reading manuscript bodies", async () => {
@@ -358,7 +373,6 @@ test("public scene and volume shares follow a chapter moved to a later volume", 
 
 test("publishing keeps Core's string order-key sequence in volume, chapter, text, and EPUB output", async () => {
   const reader = new MemoryReader(new Map([
-    ["meta/project.yaml", "title: 順序の作品\n"],
     ["plot/volumes/vol-a/volume.yaml", "kind: volume\nid: vol-a\ntitle: Alpha volume\norder: 2\n"],
     ["plot/volumes/vol-a/chapters/ch-alpha/chapter.yaml", "kind: chapter\nid: ch-alpha\ntitle: Alpha chapter\nvolume: vol-a\norder: 2\n"],
     ["plot/volumes/vol-a/chapters/ch-alpha/scenes/sc-a.yaml", "kind: scene\nid: sc-a\ntitle: Alpha scene\nvolume: vol-a\nchapter: ch-alpha\norder: 2\nmanuscript: manuscript/vol-a/ch-alpha/sc-a.md\n"],
