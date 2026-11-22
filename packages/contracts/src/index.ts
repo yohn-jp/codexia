@@ -46,6 +46,13 @@ export interface ModelUsageStore {
   }>;
 }
 export interface FileRevision { path: string; revision: string | null }
+export const PRIVATE_PUBLISHING_PATHS = Object.freeze([
+  "meta/scriptorium/modules/publishing/episodes.yaml",
+  "meta/scriptorium/modules/publishing/share-grants.jsonl",
+]);
+export function isPrivatePublishingPath(path: string): boolean {
+  return PRIVATE_PUBLISHING_PATHS.includes(path);
+}
 /** Binds a directory membership and every listed file revision, including absent members. */
 export interface ScopeRevision { prefix: string; revision: string }
 /** Return a decimal order key after every existing text-ordered key without rewriting them. */

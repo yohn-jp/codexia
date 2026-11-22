@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { assertProjectPath, nextOrderKey } from "@codexia/contracts";
+import { assertProjectPath, nextOrderKey, PRIVATE_PUBLISHING_PATHS } from "@codexia/contracts";
 import {
   CORE_DOCUMENT_PATHS,
   HIERARCHY_CREATE_SOURCE,
@@ -50,6 +50,7 @@ import {
   type Project,
   type ProjectPageCursor,
   type ProjectId,
+  type ProposalReviewQueueOptions,
   type RevisionId,
   type RestoreDocumentRevisionCommand,
   type SaveAssertionCommand,
@@ -1094,7 +1095,9 @@ class PostgresTransaction implements PersistenceTransaction {
     return result.rows.map((row) => this.mapModuleRecord(row));
   }
 
-  async listProposalReviewQueue(projectIds: readonly ProjectId[] | null, moduleId: string, limit: number): Promise<{
+  async listProposalReviewQueue(
+    projectIds: readonly ProjectId[] | null, moduleId: string, limit: number, { excludePrivateProposals }: ProposalReviewQueueOptions = {},
+  ): Promise<{
     unresolvedCount: number; records: readonly { record: ModuleRecord; projectVersion: number }[];
   }> {
     if ((projectIds !== null && (projectIds.length > 200 || new Set(projectIds).size !== projectIds.length)) ||
@@ -1104,12 +1107,17 @@ class PostgresTransaction implements PersistenceTransaction {
       JOIN module_record m ON m.project_id = p.id AND m.module_id = $2
       LEFT JOIN unnest($1::uuid[]) WITH ORDINALITY AS scope(project_id, position) ON p.id = scope.project_id
       WHERE ($1::uuid[] IS NULL OR scope.project_id IS NOT NULL)
-        AND m.key LIKE 'proposal:%' AND (m.value->>'state') IS DISTINCT FROM 'applied'`;
-    const args = [projectIds, moduleId];
+        AND m.key LIKE 'proposal:%' AND (m.value->>'state') IS DISTINCT FROM 'applied'
+        AND (cardinality($3::text[]) = 0 OR NOT EXISTS (
+          SELECT 1
+          FROM jsonb_path_query(m.value, '$.proposal.operations[*].writes[*].path') AS write_path(value)
+          WHERE write_path.value #>> '{}' = ANY($3::text[])
+        ))`;
+    const args = [projectIds, moduleId, excludePrivateProposals ? PRIVATE_PUBLISHING_PATHS : []];
     const count = await this.query(`SELECT count(*) AS count ${scope}`, args);
     const unresolvedCount = asNumber(count.rows[0]?.count);
     const page = await this.query(`SELECT m.*, p.version AS project_version ${scope}
-      ORDER BY scope.position, p.updated_at DESC, p.id, m.key LIMIT $3`, [...args, limit]);
+      ORDER BY scope.position, p.updated_at DESC, p.id, m.key LIMIT $4`, [...args, limit]);
     return { unresolvedCount, records: page.rows.map(row => ({
       record: this.mapModuleRecord(row), projectVersion: asNumber(row.project_version),
     })) };

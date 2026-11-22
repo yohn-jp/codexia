@@ -1260,6 +1260,28 @@ test("proposal review queue counts unresolved records without returning the unbo
     assert.equal(standalone.records.length,1000);
     assert.ok(standalone.records.some(({record})=>record.projectId===outside.id));
 
+    await directPool.query(`INSERT INTO module_record(project_id,module_id,key,value)
+      SELECT $1,$2,'proposal:' || item.key,
+        jsonb_build_object('state', 'approved', 'proposal', jsonb_build_object('operations', jsonb_build_array(
+          jsonb_build_object('writes', jsonb_build_array(
+            jsonb_build_object('path', 'bible/public.yaml'),
+            jsonb_build_object('path', item.path, 'content', 'synthetic review content')
+          ))
+        )))
+      FROM (VALUES
+        ('0000-episodes', 'meta/scriptorium/modules/publishing/episodes.yaml'),
+        ('0000-grants', 'meta/scriptorium/modules/publishing/share-grants.jsonl'),
+        ('0000-visible', 'meta/scriptorium/modules/publishing/share-grants.jsonl.example')
+      ) AS item(key,path)`, [second.id, moduleId]);
+    const visible = await persistence.read(reader => reader.listProposalReviewQueue([second.id,first.id], moduleId, 2, {
+      excludePrivateProposals: true,
+    }));
+    assert.equal(visible.unresolvedCount, 1004);
+    assert.deepEqual(visible.records.map(({record}) => record.key), ["proposal:0000-visible", "proposal:0001"]);
+    const author = await persistence.read(reader => reader.listProposalReviewQueue([second.id,first.id], moduleId, 2));
+    assert.equal(author.unresolvedCount, 1006);
+    assert.deepEqual(author.records.map(({record}) => record.key), ["proposal:0000-episodes", "proposal:0000-grants"]);
+
   } finally {
     await directPool.query("DELETE FROM module_record WHERE project_id = ANY($1::uuid[])", [[first.id,second.id,outside.id]]);
   }

@@ -547,11 +547,16 @@ export interface KnowledgeProjectionBatch {
   assertions: readonly Assertion[];
 }
 
+export interface ProposalReviewQueueOptions {
+  /** Omit proposals whose write payload is only visible to an author. */
+  excludePrivateProposals?: boolean;
+}
+
 export interface PersistenceReader {
   getModuleRecord(projectId: ProjectId, moduleId: string, key: string): Promise<ModuleRecord | undefined>;
   listModuleRecords(projectId: ProjectId, moduleId?: string): Promise<readonly ModuleRecord[]>;
   /** Count unresolved proposals in explicit project order, or all standalone projects in recent-project order when null; return only the bounded prefix. */
-  listProposalReviewQueue(projectIds: readonly ProjectId[] | null, moduleId: string, limit: number): Promise<{
+  listProposalReviewQueue(projectIds: readonly ProjectId[] | null, moduleId: string, limit: number, options?: ProposalReviewQueueOptions): Promise<{
     unresolvedCount: number;
     records: readonly { record: ModuleRecord; projectVersion: number }[];
   }>;

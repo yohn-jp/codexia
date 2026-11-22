@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { KNOWLEDGE_CONTEXT_PATH, projectKnowledgeContext } from "./knowledge-context.js";
 import YAML from "yaml";
 import { assertChangeOperation, assertProjectPath, nextOrderKey, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type MutationCoordinator } from "@codexia/contracts";
-import { CORE_DOCUMENT_PATHS as PATHS, HIERARCHY_CREATE_SOURCE, HIERARCHY_DELETE_SOURCE, HIERARCHY_REORDER_SOURCE, hierarchyDocumentPaths, PersistenceError, type HierarchyDocumentCreate, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
+import { CORE_DOCUMENT_PATHS as PATHS, HIERARCHY_CREATE_SOURCE, HIERARCHY_DELETE_SOURCE, HIERARCHY_REORDER_SOURCE, hierarchyDocumentPaths, PersistenceError, type HierarchyDocumentCreate, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type ProposalReviewQueueOptions, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
 import type { ChangeSet, ChangeSetApplicationResult, ChangeSetResult, RestoreDocumentRevisionCommand } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
 import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, type SnapshotIndex } from "./snapshot-index.js";
@@ -632,9 +632,9 @@ export class CoreStore implements MutationCoordinator {
       return {snapshot:{projectId,projectVersion:project.version},proposals};
     }); }
   async listProposals(projectId:string):Promise<ProposalStatus[]> { return (await this.listProposalsSnapshot(projectId)).proposals; }
-  async reviewQueue(projectIds: readonly string[] | null): Promise<{ unresolvedCount: number; items: Array<{ projectId: string; proposal: ProposalStatus }> }> {
+  async reviewQueue(projectIds: readonly string[] | null, options?: ProposalReviewQueueOptions): Promise<{ unresolvedCount: number; items: Array<{ projectId: string; proposal: ProposalStatus }> }> {
     return this.persistence.read(async reader => {
-      const { unresolvedCount, records } = await reader.listProposalReviewQueue(projectIds === null ? null : projectIds.map(pid), AUTHORITY, 1000);
+      const { unresolvedCount, records } = await reader.listProposalReviewQueue(projectIds === null ? null : projectIds.map(pid), AUTHORITY, 1000, options);
       return { unresolvedCount, items: records.map(({ record, projectVersion }) => {
         const status = record.value as unknown as ProposalStatus;
         return { projectId: record.projectId, proposal: { ...status, stale: status.proposal.snapshot.projectVersion !== projectVersion } };
