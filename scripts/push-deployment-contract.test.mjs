@@ -143,6 +143,7 @@ test('deployment requires the rootless base runtime under the lock before activa
   const preflight = shell.slice(start, end).replaceAll('{% raw %}', '').replaceAll('{% endraw %}', '');
   const fixtureCommands = `
     set -eu -o pipefail
+    unit_dir=/tmp/codexia-quadlets
     podman() {
       case "$1" in
         volume) [[ "$*" == 'volume exists codexia-history' && "$missing" != history ]];;
@@ -154,6 +155,8 @@ test('deployment requires the rootless base runtime under the lock before activa
       case "$*" in
         '--user is-active --quiet codexia-db.service') [[ "$missing" != db ]];;
         '--user cat codexia-tunnel.service') [[ "$missing" != tunnel ]];;
+        '--user show --property=SourcePath --value codexia-db.service') [[ "$missing" != db-source ]] && printf '%s\\n' "$unit_dir/codexia-db.container";;
+        '--user show --property=SourcePath --value codexia-tunnel.service') [[ "$missing" != tunnel-source ]] && printf '%s\\n' "$unit_dir/codexia-tunnel.container";;
         *) return 99;;
       esac
     }
@@ -164,6 +167,8 @@ test('deployment requires the rootless base runtime under the lock before activa
     ['db', 'healthy', 'true', 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet'],
     ['', 'unhealthy', 'true', 'Deployment base runtime requires a healthy rootless PostgreSQL Quadlet'],
     ['tunnel', 'healthy', 'true', 'Deployment base runtime requires the rootless Tunnel Quadlet'],
+    ['db-source', 'healthy', 'true', 'Deployment base runtime requires canonical generated PostgreSQL and Tunnel units'],
+    ['tunnel-source', 'healthy', 'true', 'Deployment base runtime requires canonical generated PostgreSQL and Tunnel units'],
     ['tunnel', 'healthy', 'false', ''],
     ['', 'healthy', 'true', ''],
   ]) {
@@ -178,6 +183,35 @@ test('deployment requires the rootless base runtime under the lock before activa
   }
   assert.match(safeFailure['ansible.builtin.fail'].msg,
     /'encrypted backup' if 'Encrypted backup failed; candidate was not applied'/u);
+});
+
+test('production admission reuses canonical runtime validators and checks exact generated Quadlets', () => {
+  const transactionStages = transactionTasks;
+  const preflightTask = transactionStages.find(task => task.name ===
+    'Reuse the canonical rootless base admission before production activation');
+  assert.equal(preflightTask['ansible.builtin.include_tasks'], 'verify-deploy-base-runtime.yml');
+  assert.equal(preflightTask.when, 'not (codexia_lifecycle_fixture | default(false) | bool)');
+  const checks = parse(readFileSync(new URL('../deploy/ansible/verify-deploy-base-runtime.yml', import.meta.url), 'utf8'));
+  const quadlets = checks.find(task => task.name === 'Inspect every canonical base Quadlet without following links');
+  assert.deepEqual(quadlets.loop, [
+    'codexia.network', 'codexia-data.network', 'codexia-postgres.volume', 'codexia-data.volume',
+    'codexia-history.volume', 'codexia-db.container', 'codexia-tunnel.container',
+  ]);
+  const fileAdmission = checks.find(task => task.name ===
+    'Require every base Quadlet to match the reviewed repository source');
+  assert.ok(fileAdmission['ansible.builtin.assert'].that.some(clause =>
+    clause.includes("hash('sha256')")));
+  const generatedOrigins = checks.find(task => task.name === 'Require base services to originate from canonical rootless Quadlets');
+  assert.ok(generatedOrigins['ansible.builtin.assert'].that.some(clause =>
+    clause.includes("item.stdout == quadlet_dir + '/'")));
+  const includes = checks.filter(task => task['ansible.builtin.include_tasks'])
+    .map(task => task['ansible.builtin.include_tasks']);
+  assert.deepEqual(includes, ['verify-base-db-container.yml', 'verify-base-tunnel-container.yml']);
+  const networks = checks.find(task => task.name === 'Verify the canonical private network isolation before deployment');
+  assert.deepEqual(networks.loop.map(value => value.expected), ['codexia|bridge|false', 'codexia-data|bridge|true']);
+  const shell = transactionStages.find(task => task.name === 'Apply or recover the API Quadlet under the host lock')['ansible.builtin.shell'].cmd;
+  assert.match(shell, /systemctl --user show --property=SourcePath --value codexia-db\.service/u);
+  assert.match(shell, /systemctl --user show --property=SourcePath --value codexia-tunnel\.service/u);
 });
 
 test('the production Quadlet binds an immutable image and disables startup schema mutation', () => {
