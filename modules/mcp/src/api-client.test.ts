@@ -92,6 +92,16 @@ test("stdio API client follows bounded project pages and accepts the legacy arra
   assert.deepEqual(await legacy.listProjectPage(), { projects: [{ id: "project-one", title: "One" }], nextCursor: null });
 });
 
+test("project discovery rejects an empty continuation emitted by the host", async () => {
+  const client = new ApiClient({
+    baseUrl: "https://codexia.test",
+    token: "test-token",
+    fetch: async () => Response.json({ projects: [{ id: "project-one", title: "One" }], nextCursor: "" }),
+  });
+
+  await assert.rejects(client.listProjectPage(1), { code: "INVALID_RESPONSE", status: 502 });
+});
+
 test("stdio API client cancels in-flight discovery and invocation requests", { timeout: 2_000 }, async () => {
   const fetcher: typeof fetch = async (_input, init = {}) => {
     const signal = init.signal;

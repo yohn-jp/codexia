@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  MAX_TOKEN_COUNT_BATCH_BYTES,
-  MAX_TOKEN_COUNT_TEXT_BYTES,
-  MAX_TOKEN_COUNT_TEXTS,
   isSafeHuggingFaceModelId,
   resolveTokenCountConfiguration,
   sourceApproxTokenCount,
@@ -36,13 +33,18 @@ test("standalone runtime can select a mounted read-only tokenizer cache", () => 
   assert.equal(resolveTokenCountConfiguration({ CODEXIA_TOKENIZER_MODELS_DIR: "/models", ARCADIA_TOKENIZER_MODEL: "env/tokenizer" }).modelId, "env/tokenizer");
 });
 
-test("token count batches enforce per-text, aggregate byte, and item bounds", () => {
-  assert.deepEqual(validateTokenCountTexts(["駅abc", "abcdef"]), ["駅abc", "abcdef"]);
+test("token count batches accept their resource limits and reject the first excess input", () => {
+  const perTextLimit = "é".repeat(32_768);
+  assert.deepEqual(validateTokenCountTexts([perTextLimit]), [perTextLimit]);
+  assert.throws(() => validateTokenCountTexts([perTextLimit + "x"]), /UTF-8 bytes/);
+
+  const halfSizePassage = "x".repeat(32_768);
+  const batchLimit = Array.from({ length: 32 }, () => halfSizePassage);
+  assert.equal(validateTokenCountTexts(batchLimit).length, 32);
+  assert.throws(() => validateTokenCountTexts([...batchLimit, "x"]), /total at most/);
+
+  const itemLimit = Array.from({ length: 128 }, () => "駅");
+  assert.equal(validateTokenCountTexts(itemLimit).length, 128);
+  assert.throws(() => validateTokenCountTexts([...itemLimit, "駅"]), /between 1 and/);
   assert.throws(() => validateTokenCountTexts([]), /between 1 and/);
-  assert.throws(() => validateTokenCountTexts(["x".repeat(MAX_TOKEN_COUNT_TEXT_BYTES + 1)]), /UTF-8 bytes/);
-  assert.throws(() => validateTokenCountTexts([
-    ...Array.from({ length: MAX_TOKEN_COUNT_BATCH_BYTES / MAX_TOKEN_COUNT_TEXT_BYTES }, () => "x".repeat(MAX_TOKEN_COUNT_TEXT_BYTES)),
-    "x",
-  ]), /total at most/);
-  assert.throws(() => validateTokenCountTexts(Array.from({ length: MAX_TOKEN_COUNT_TEXTS + 1 }, () => "x")), /between 1 and/);
 });

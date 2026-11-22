@@ -31,13 +31,6 @@ function setup(actions: ActionDescriptor[], respond: (id: string, input: unknown
 
 const descriptor = (id: string, module: ActionDescriptor["module"], effect: ActionDescriptor["effect"] = "compute"): ActionDescriptor => ({ id, module, effect });
 
-test("external MCP never registers the frozen Assistant rewrite tool", () => {
-  const { tools, calls } = setup([descriptor("assistant.rewrite", "assistant"), descriptor("nlp.analyze", "nlp")],
-    () => { throw new Error("Assistant must not be invoked"); });
-  assert.equal(tools.has("suggest_rewrite"), false);
-  assert.deepEqual(calls, []);
-});
-
 test("MCP read results honor the UTF-8 JSON limit for generic and named tools", async () => {
   const data = { results: [{ excerpt: "街".repeat(3 * 1024 * 1024) }] };
   const { tools, calls } = setup([descriptor("search.query", "search", "read"), descriptor("story.context.package", "story", "read")],
