@@ -1,10 +1,9 @@
 import { expect, request, test, type Page } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
 import { text as readStreamText } from "node:stream/consumers";
-import { authToken, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaved, ownerLogin, manuscriptEditor as editor, readManuscriptMarkdown, openRevisionHistory } from "./postgres-fixture";
+import { appBaseURL, authToken, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaved, ownerLogin, manuscriptEditor as editor, readManuscriptMarkdown, openRevisionHistory } from "./postgres-fixture";
 
 const rootPath = "/api/v1/persistence/projects";
-const appBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
 const appOrigin = new URL(appBaseURL).origin;
 interface Draft { key: string; projectId: string; documentId: string; authorScope: string; markdown: string; generation: number; baseRevisionId: string; baseMarkdown: string; pendingSave?: { markdown: string }; version: number; updatedAt: number }
 interface Read { document: { id: string; title: string; headRevisionId: string }; revision: { id: string; markdown: string } }
@@ -43,8 +42,8 @@ async function fixture(page: Page): Promise<Fixture> {
   };
   const one = await createDocument("Scene One", "a");
   const two = await createDocument("Scene Two", "b");
-  await ownerLogin(page);
   await page.goto(`/desktop/projects/${project.id}/scenes/${one.document.id}`);
+  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`/desktop/projects/${project.id}/scenes/${one.document.id}`));
   await expectEditor(page, one.revision.markdown);
   return { projectId: project.id, one, two };

@@ -187,7 +187,7 @@ function assertSuccessfulStep(job, name) {
 }
 
 /** Recheck the actual merged tree and the existing canonical PR evidence, using read-only API data. */
-export async function verifyReusableMainProof({ sourceSha, before, repository, currentRun, git, request, readArtifact, checkoutSha = sourceSha }) {
+export async function readReusableMainEvidence({ sourceSha, before, repository, currentRun, git, request, readArtifact, checkoutSha = sourceSha }) {
   const context = mainContext(repository, currentRun, sourceSha, WORKFLOW);
   const candidate = mergeCandidate(sourceSha, before, git, checkoutSha);
   const { run, jobs, prNumber, mergedAt, headRef } = await mergedPrRun({ context, candidate, request });
@@ -212,12 +212,17 @@ export async function verifyReusableMainProof({ sourceSha, before, repository, c
   for (const job of jobs.filter(job => job.conclusion === 'skipped')) {
     assert.ok(REUSED_MAIN_SKIPPED_JOBS.includes(job.name), 'Unexpected skipped PR job');
   }
-  return {
+  const receipt = {
     version: 1, sourceSha, tree: candidate.tree, baseSha: candidate.base, headSha: candidate.head,
     prNumber, runId: run.id, attempt: run.run_attempt, mergedAt: new Date(mergedAt).toISOString(), headRef, planDigest: planDigest(plan), mode: plan.mode,
     planArtifact: { id: selectedPlan.id, digest: selectedPlan.digest },
     evidence: selected.map(item => ({ id: item.id, digest: item.digest })),
   };
+  return { receipt, plan, reports };
+}
+
+export async function verifyReusableMainProof(options) {
+  return (await readReusableMainEvidence(options)).receipt;
 }
 
 // The exact job and positive verification steps are the proof boundary for each

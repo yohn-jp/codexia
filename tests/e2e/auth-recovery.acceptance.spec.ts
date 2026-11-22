@@ -486,11 +486,11 @@ test("direct-link, active scene, and project activation resume after persisted p
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
   release();
-  await expect(page.getByRole("textbox", { name: "本文", exact: true })).toContainText("The first line of the story.");
+  await expect(manuscriptEditor(page)).toContainText("The first line of the story.");
   expect(reads).toBeGreaterThanOrEqual(2);
   await page.locator(".pg-document-list").getByRole("treeitem", { name: new RegExp(scenes[1]!.title) }).click();
-  await expect(page.getByRole("textbox", { name: "本文", exact: true })).toContainText("The second line of the story.");
+  await expect(manuscriptEditor(page)).toContainText("The second line of the story.");
   await page.goBack();
-  await expect(page.getByRole("textbox", { name: "本文", exact: true })).toContainText("The first line of the story.");
+  await expect(manuscriptEditor(page)).toContainText("The first line of the story.");
   await expect(page.getByRole("alert")).toHaveCount(0);
 });

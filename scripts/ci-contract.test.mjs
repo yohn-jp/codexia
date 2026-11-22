@@ -222,16 +222,19 @@ test('Hosted Native keeps one verified producer and three independent compositio
   assert.doesNotMatch(runner,/build:workspace/);
 });
 
-test('balanced browser lanes retain all independent spec and browser combinations',()=>{
-  for(const profile of PROFILES){
-    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-writing'],['core','outline-headings','native-review','persistence-database'].map(id=>'browser-'+profile+'-'+id));
-    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-reference'],['recent-activity','modular-workspace','review-contributions','job-inbox','redesign-visual'].map(id=>'browser-'+profile+'-'+id));
-    assert.deepEqual(VERIFICATION_GROUPS['browser-'+profile+'-webkit'],['auth-recovery','oauth-web','ui-v1','webkit'].map(id=>'browser-'+profile+'-'+id));
-    const writing = VERIFICATION_GROUPS['browser-'+profile+'-writing'];
-    const reference = VERIFICATION_GROUPS['browser-'+profile+'-reference'];
-    const webkit = VERIFICATION_GROUPS['browser-'+profile+'-webkit'];
-    assert.equal(reference.at(-1), 'browser-'+profile+'-redesign-visual', 'Exclusive visual measurement must run last');
-    assert.equal(new Set([...writing, ...reference, ...webkit]).size, BROWSER_SHARDS.length, 'Every browser obligation is scheduled exactly once');
+test('browser lanes cover each profile and use compatible browser images', () => {
+  for (const profile of PROFILES) {
+    const prefix = `browser-${profile}-`;
+    const writing = VERIFICATION_GROUPS[prefix + 'writing'];
+    const reference = VERIFICATION_GROUPS[prefix + 'reference'];
+    const webkit = VERIFICATION_GROUPS[prefix + 'webkit'];
+    const tasks = [...writing, ...reference, ...webkit];
+    assert.deepEqual(tasks.toSorted(), BROWSER_SHARDS.map(shard => prefix + shard.id).toSorted());
+    for (const shard of BROWSER_SHARDS.filter(shard => shard.project === 'webkit')) {
+      assert.ok(webkit.includes(prefix + shard.id), 'WebKit must run on the multi-browser image');
+    }
+    assert.ok(BROWSER_SHARDS.some(shard => shard.project === 'chromium' && webkit.includes(prefix + shard.id)));
+    assert.equal(reference.at(-1), prefix + 'redesign-visual', 'Keep visual measurements after the parallel shards');
   }
 });
 

@@ -1,6 +1,7 @@
 import { expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 
 export const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
+export const appBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
 export interface FixtureProject { id: string; title: string }
 export interface FixtureDocument { id: string; title: string; kind: string; headRevisionId: string | null }
 
@@ -20,7 +21,7 @@ export async function expectNoUnsavedDeviceChanges(page: Page): Promise<void> {
   await expect(details).toContainText("この端末: この原稿に未保存の変更はありません");
 }
 export async function expectServerSaved(page: Page): Promise<void> {
-  await expect(page.locator(".pg-save-state summary")).toHaveText("保存済み", { timeout: 15_000 });
+  await expect(page.locator(".pg-save-state")).toHaveAttribute("data-state", "saved", { timeout: 15_000 });
 }
 export async function expectServerSaveFailure(page: Page): Promise<void> {
   const details = await openProtectionDetails(page);
@@ -37,7 +38,7 @@ export async function readManuscriptMarkdown(page: Page): Promise<string> {
 }
 
 export async function ownerLogin(page: Page, path = "/desktop/"): Promise<void> {
-  await page.goto(new URL(path, process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`).toString());
+  await page.goto(new URL(path, appBaseURL).toString());
   await expect(page.getByLabel("アクセス・トークン").or(page.getByRole("heading", { name: "Database workspace" }))).toBeVisible();
   if (await page.getByLabel("アクセス・トークン").isVisible()) {
     await page.getByLabel("アクセス・トークン").fill(authToken);
@@ -91,13 +92,19 @@ export async function fillDraft(page: Page, text: string): Promise<void> {
 }
 
 export async function createWritingFixture(page: Page, mode: "desktop" | "mobile" = "desktop", title = "日本語の原稿", manuscript = "最初の本文。\n次の文章です。"): Promise<{ project: FixtureProject; scene: FixtureDocument; second: FixtureDocument }> {
-  await ownerLogin(page, `/${mode}/`);
-  const headers = { Origin: new URL(page.url()).origin };
-  const createdProject = await page.request.post(new URL("/api/v1/persistence/projects", page.url()).toString(), { headers, data: { title: `Writing ${crypto.randomUUID()}` } });
+  const headers = { Origin: new URL(appBaseURL).origin };
+  const session = await page.request.get(new URL("/api/session", appBaseURL).href);
+  if (session.status() === 401) {
+    const login = await page.request.post(new URL("/api/login", appBaseURL).href, { headers, data: { token: authToken } });
+    expect(login.status()).toBe(200);
+  } else {
+    expect(session.status()).toBe(200);
+  }
+  const createdProject = await page.request.post(new URL("/api/v1/persistence/projects", appBaseURL).toString(), { headers, data: { title: `Writing ${crypto.randomUUID()}` } });
   expect(createdProject.status()).toBe(201);
   const { project } = await createdProject.json() as { project: FixtureProject };
   async function create(title: string, orderKey: string, markdown: string): Promise<FixtureDocument> {
-    const response = await page.request.post(new URL(`/api/v1/persistence/projects/${project.id}/documents`, page.url()).toString(), { headers: { ...headers, "Idempotency-Key": crypto.randomUUID() }, data: { kind: "scene", title, orderKey, markdown } });
+    const response = await page.request.post(new URL(`/api/v1/persistence/projects/${project.id}/documents`, appBaseURL).toString(), { headers: { ...headers, "Idempotency-Key": crypto.randomUUID() }, data: { kind: "scene", title, orderKey, markdown } });
     expect(response.status()).toBe(201);
     return (await response.json() as { document: FixtureDocument }).document;
   }
@@ -106,7 +113,7 @@ export async function createWritingFixture(page: Page, mode: "desktop" | "mobile
   // Fixture setup must not race an unrelated prior project's guarded selector.
   // Exercise the supported canonical deep link instead of mutating UI selection.
   const writingRoute = `/${mode}/projects/${project.id}/scenes/${scene.id}${mode === "mobile" ? "?view=writing" : ""}`;
-  await page.goto(new URL(writingRoute, page.url()).toString());
+  await page.goto(new URL(writingRoute, appBaseURL).toString());
   await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await expect(manuscriptEditor(page)).toBeVisible();
   await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();

@@ -33,8 +33,7 @@ export const VERIFICATION_TASKS = [
 // Execution groups batch work without removing any validation obligation.
 // Browser lanes retain their stable job names; the WebKit lane also runs Chromium UI/auth specs.
 // Group measured longer specs across the three existing lanes, never share mutable fixtures.
-// Start the longest independent reference shards first under the existing
-// two-worker limit; keep visual measurement last and exclusive.
+// Start the two long-running specs together in each browser lane.
 export const VERIFICATION_GROUPS = {
   'unit-core': ['contracts', 'persistence-contracts', 'persistence-postgres', 'module-runtime', 'migration', 'core', 'api', 'root'].map(id => `unit-${id}`),
   'unit-modules': ['app', ...WORKSPACES.filter(item => item.path.startsWith('modules/')).map(item => item.id)].map(id => `unit-${id}`),
@@ -45,11 +44,11 @@ export const VERIFICATION_GROUPS = {
   'oci-core': ['oci-core'],
   'oci-full': ['oci-full'],
   ...Object.fromEntries(PROFILES.flatMap(profile => [
-    [`browser-${profile}-writing`, ['core', 'outline-headings', 'native-review', 'persistence-database'].map(id => `browser-${profile}-${id}`)],
+    [`browser-${profile}-writing`, ['core', 'persistence-database', 'outline-headings', 'native-review'].map(id => `browser-${profile}-${id}`)],
     // Run the performance-sensitive visual shard only after the shorter
     // reference tasks, avoiding an exclusive tail on the critical writing lane.
     [`browser-${profile}-reference`, ['recent-activity', 'modular-workspace', 'review-contributions', 'job-inbox', 'redesign-visual'].map(id => `browser-${profile}-${id}`)],
-    [`browser-${profile}-webkit`, ['auth-recovery', 'oauth-web', 'ui-v1', 'webkit'].map(id => `browser-${profile}-${id}`)],
+    [`browser-${profile}-webkit`, ['webkit', 'ui-v1', 'auth-recovery', 'oauth-web'].map(id => `browser-${profile}-${id}`)],
   ])),
   ...Object.fromEntries(NATIVE_SELECTIONS.map(id => [`hosted-native-${id}`, [`hosted-native-${id}`]])),
 };

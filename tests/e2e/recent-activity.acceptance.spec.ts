@@ -138,7 +138,7 @@ async function remotePosition(page: Page, projectId: string, sceneId: string, se
 }
 async function longFixture(page: Page) {
   const f = await createWritingFixture(page);
-  const editor = page.getByRole("textbox", { name: "本文", exact: true });
+  const editor = manuscriptEditor(page);
   await editor.fill("読書位置を別の端末へ引き継ぐための文章です。\n\n".repeat(100));
   await expectServerSaved(page);
   return f;
@@ -228,7 +228,7 @@ test("recent activity hands off only numeric positions across devices, projects,
   const f = await longFixture(page);
   const writes: Record<string, unknown>[] = [];
   page.on("request", (request) => { if (request.method() === "PUT" && request.url().endsWith("/recent-activity")) writes.push(request.postDataJSON()); });
-  await page.getByRole("textbox", { name: "本文", exact: true }).press("Control+End");
+  await manuscriptEditor(page).press("Control+End");
   await expect.poll(async () => (await activity(page, f.project.id)).items.some((item) => item.sceneId === f.scene.id && typeof item.sentenceOffset === "number")).toBe(true);
   for (const write of writes) expect(Object.keys(write).every((key) => ["sceneId", "sentenceOffset", "pageIndex", "deviceType"].includes(key))).toBe(true);
   await remotePosition(page, f.project.id, f.scene.id);
@@ -236,7 +236,7 @@ test("recent activity hands off only numeric positions across devices, projects,
   const secondPage = await mobile.newPage();
   try {
     await ownerLogin(secondPage, `/mobile/projects/${f.project.id}/scenes/${f.scene.id}?view=writing`);
-    await expect(secondPage.getByRole("textbox", { name: "本文", exact: true })).toContainText("読書位置");
+    await expect(manuscriptEditor(secondPage)).toContainText("読書位置");
     const before = await activity(page, f.project.id);
     expect(before.items.some((item) => item.deviceType === "mobile" && item.pageIndex === 2)).toBe(true);
     const another = await page.request.post("/api/v1/persistence/projects", { headers: { Origin: new URL(page.url()).origin }, data: { title: `Isolated cursor ${crypto.randomUUID()}` } });
@@ -289,14 +289,14 @@ test("recent activity ignores a refresh response invalidated by natural hide", a
     release(); await page.waitForTimeout(100);
     await page.bringToFront(); await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("visible");
     await expect(page.locator(".continue-panel")).not.toContainText("999");
-    await expect(page.getByRole("textbox", { name: "本文", exact: true })).toContainText("読書位置");
+    await expect(manuscriptEditor(page)).toContainText("読書位置");
   } finally { release?.(); await background?.close(); await native.close(); }
 });
 
 test("recent activity coalesces repeated positions and records 50 input reports", async ({ page }) => {
   const f = await longFixture(page); const writes: Record<string, unknown>[] = [];
   page.on("request", (request) => { if (request.method() === "PUT" && request.url().endsWith("/recent-activity")) writes.push(request.postDataJSON()); });
-  const editor = page.getByRole("textbox", { name: "本文", exact: true }); await editor.press("Control+End");
+  const editor = manuscriptEditor(page); await editor.press("Control+End");
   await expect.poll(() => writes.length, { timeout: 6_000 }).toBeGreaterThan(0);
   await page.waitForTimeout(2_100); const count = writes.length;
   await page.locator(".cm-scroller").evaluate((element) => { for (let n = 0; n < 50; n += 1) element.dispatchEvent(new Event("scroll")); });
@@ -310,7 +310,7 @@ test("recent activity coalesces repeated positions and records 50 input reports"
 for (const departure of [false, true]) {
   test(`recent activity rejects reversed PUT delivery${departure ? " during pagehide keepalive" : ""}`, async ({ browser, page }) => {
     const f = await longFixture(page);
-    const editor = page.getByRole("textbox", { name: "本文", exact: true });
+    const editor = manuscriptEditor(page);
     await editor.press("Control+End");
     await expect.poll(async () => (await activity(page, f.project.id)).items.some((item) => item.sceneId === f.scene.id && item.deviceType === "desktop" && (item.sentenceOffset ?? 0) > 1)).toBe(true);
     let release!: () => void;
