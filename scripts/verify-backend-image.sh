@@ -96,7 +96,7 @@ fingerprint="$("$engine" exec "$container_name" node --input-type=module -e 'imp
 node scripts/backend-update-identity.mjs verify "$identity" "$api_version" "$platform" "$revision_label" "$fingerprint" "$expected_source" "$expected_profile"
 
 # Execute the packaged entry points under their same symlink paths as push deployment.
-for command in bootstrap-auth grant-passkey-owner migrate-auth verify-auth-clients; do
+for command in bootstrap-auth grant-passkey-owner grant-passkey-owner-recovery migrate-auth verify-auth-clients; do
   status=0
   message=$("$engine" exec "$container_name" node "/app/node_modules/@codexia/api/dist/$command.js" 2>&1) || status=$?
   [[ "$status" == 1 && "$message" == "Better Auth "* ]] || {

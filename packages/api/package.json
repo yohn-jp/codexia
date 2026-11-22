@@ -26,10 +26,12 @@
     "start": "node dist/server.js",
     "migrate:auth": "node dist/migrate-auth.js",
     "grant:passkey-owner": "node dist/grant-passkey-owner.js",
+    "grant:passkey-owner-recovery": "node dist/grant-passkey-owner-recovery.js",
     "verify:auth-clients": "node dist/verify-auth-clients.js",
     "prune:auth-revocations": "node dist/prune-auth-revocations.js"
   },
   "dependencies": {
+    "@better-auth/core": "1.7.26",
     "@better-auth/oauth-provider": "1.7.26",
     "@better-auth/passkey": "1.7.26",
     "@codexia/contracts": "workspace:*",

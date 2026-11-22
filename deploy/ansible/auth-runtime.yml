@@ -284,6 +284,22 @@
     - codexia_auth_registration_pending | default(false)
     - codexia_auth_passkey_bootstrap_owner_id is defined
 
+- name: Install the operator-mediated Passkey recovery grant launcher
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/ansible/grant-passkey-owner-recovery.sh"
+    dest: "{{ home }}/.local/bin/codexia-grant-passkey-recovery"
+    owner: "{{ codexia_service_user }}"
+    group: "{{ codexia_service_group | default(codexia_service_user) }}"
+    mode: '0700'
+
+- name: Install the isolated Passkey recovery listener launcher
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/deploy/ansible/recover-passkey-owner.sh"
+    dest: "{{ home }}/.local/bin/codexia-recover-passkey"
+    owner: "{{ codexia_service_user }}"
+    group: "{{ codexia_service_group | default(codexia_service_user) }}"
+    mode: '0700'
+
 - name: Report staged auth role, schema and environment without enabling runtime
   ansible.builtin.debug:
     msg: Better Auth role and owned schema are verified; secret identities are provisioned without rotation; nonsecret runtime settings are staged. No service was restarted and no migration was run.

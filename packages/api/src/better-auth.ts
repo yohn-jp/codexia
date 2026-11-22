@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { Pool } from "pg";
 import { betterAuth } from "better-auth";
 import { fromNodeHeaders } from "better-auth/node";
+import { getCurrentAdapter, runWithTransaction } from "@better-auth/core/context";
 import { createAuthEndpoint, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { genericOAuth, jwt } from "better-auth/plugins";
 import { passkey } from "@better-auth/passkey";
@@ -67,6 +68,7 @@ function codexiaAuthMethodsPlugin(oidcConfigured: boolean) {
 }
 const PASSKEY_BOOTSTRAP_VERIFICATION_ID = "codexia:first-owner-passkey:v1";
 const PASSKEY_BOOTSTRAP_CONTEXT = "codexia-first-owner-v1";
+const PASSKEY_OWNER_RECOVERY_CONTEXT = "codexia-owner-recovery-v1";
 const PASSKEY_BOOTSTRAP_GRANT_TTL_MS = 10 * 60 * 1000;
 const passkeyDeletionQueues = new Map<string, Promise<void>>();
 
@@ -233,7 +235,12 @@ function signedQueryParam(params: URLSearchParams, name: string): string {
 
 interface BetterAuthBootstrapRegistration {
   readonly ownerOidcSubject?: string;
+  readonly passkeyRecoveryOwnerId?: string;
   readonly nextClientId: () => string;
+}
+
+function passkeyOwnerRecoveryVerificationId(ownerId: string): string {
+  return `codexia:owner-passkey-recovery:v1:${ownerId}`;
 }
 
 export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstrap?: BetterAuthBootstrapRegistration) {
@@ -311,7 +318,7 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
         origin: publicOrigin.origin,
         authenticatorSelection: { residentKey: "required", requireResidentKey: true, userVerification: "required" },
         registration: {
-          requireSession: !config.passkeyBootstrap,
+          requireSession: !config.passkeyBootstrap && !bootstrap?.passkeyRecoveryOwnerId,
           ...(config.passkeyBootstrap ? {
             async resolveUser({ ctx, context }) {
               const suppliedToken = ctx.request?.headers.get("x-codexia-owner-enrollment") ?? "";
@@ -328,6 +335,23 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
                 name: config.passkeyBootstrap!.ownerName,
                 displayName: config.passkeyBootstrap!.ownerName,
               };
+            },
+          } : bootstrap?.passkeyRecoveryOwnerId ? {
+            async resolveUser({ ctx, context }) {
+              const ownerId = bootstrap.passkeyRecoveryOwnerId!;
+              const token = ctx.request?.headers.get("x-codexia-owner-recovery") ?? "";
+              if (context !== PASSKEY_OWNER_RECOVERY_CONTEXT || !token || ownerId !== config.ownerSubject) {
+                throw new Error("An operator-granted owner recovery is required");
+              }
+              const verificationId = passkeyOwnerRecoveryVerificationId(ownerId);
+              const grant = await ctx.context.internalAdapter.findVerificationValue(verificationId);
+              if (!grant || grant.expiresAt.getTime() <= Date.now() ||
+                  !constantTimeEqual(grant.value, createHash("sha256").update(token).digest("hex"))) {
+                throw new Error("The owner recovery grant is unavailable or expired");
+              }
+              const owner = await ctx.context.internalAdapter.findUserById(ownerId);
+              if (!owner) throw new Error("The configured owner is unavailable");
+              return { id: owner.id, name: owner.name, displayName: owner.name };
             },
           } : {}),
           async afterVerification({ ctx, user, context }) {
@@ -357,6 +381,19 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
                 throw new Error("The owner ID could not be preserved during Passkey enrollment");
               }
               return;
+            }
+            if (bootstrap?.passkeyRecoveryOwnerId) {
+              const ownerId = bootstrap.passkeyRecoveryOwnerId;
+              if (context !== PASSKEY_OWNER_RECOVERY_CONTEXT || ctx.body.createSession !== true ||
+                  ownerId !== config.ownerSubject || user.id !== ownerId) {
+                throw new Error("Owner recovery requires the configured owner and an atomic session-creating registration");
+              }
+              const token = ctx.request?.headers.get("x-codexia-owner-recovery") ?? "";
+              const grant = await ctx.context.internalAdapter.consumeVerificationValue(passkeyOwnerRecoveryVerificationId(ownerId));
+              if (!grant || !token || !constantTimeEqual(grant.value, createHash("sha256").update(token).digest("hex"))) {
+                throw new Error("The owner recovery grant was already used or expired");
+              }
+              return { userId: ownerId };
             }
             const session = ctx.context.session;
             if (!session || !config.ownerSubject || user.id !== config.ownerSubject || session.user.id !== config.ownerSubject ||
@@ -465,6 +502,82 @@ export function createBetterAuthRuntime(config: BetterAuthRuntimeConfig, bootstr
       });
       if (!reserved) throw new Error("Unable to reserve a single-use first-owner Passkey grant");
       return token;
+    },
+    async createPasskeyOwnerRecoveryGrant(): Promise<{
+      token: string;
+      ownerId: string;
+      expiresInSeconds: number;
+      sessionsRevoked: number;
+      accessGrantsRevoked: number;
+      refreshGrantsRevoked: number;
+    }> {
+      const ownerId = config.ownerSubject;
+      if (!ownerId || config.passkeyBootstrap) throw new Error("Recovery requires the configured existing owner");
+      const context = await auth.$context;
+      if (context.options.database !== pool) {
+        throw new Error("Owner recovery requires the configured PostgreSQL database");
+      }
+      const token = randomBytes(32).toString("base64url");
+      const verificationId = passkeyOwnerRecoveryVerificationId(ownerId);
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + PASSKEY_BOOTSTRAP_GRANT_TTL_MS);
+      let sessionsRevoked = 0;
+      let accessGrantsRevoked = 0;
+      let refreshGrantsRevoked = 0;
+
+      await runWithTransaction(context.adapter, async () => {
+        const adapter = await getCurrentAdapter(context.adapter);
+        const owner = await adapter.findOne<{ id: string; updatedAt?: Date }>({
+          model: "user",
+          where: [{ field: "id", value: ownerId }],
+        });
+        if (!owner || owner.id !== ownerId) throw new Error("The configured owner does not exist");
+
+        // Serialize operator grant issuance by taking a write lock on the configured owner row.
+        if (await adapter.updateMany({
+          model: "user",
+          where: [{ field: "id", value: ownerId }],
+          update: { updatedAt: owner.updatedAt ?? now },
+        }) !== 1) throw new Error("The configured owner could not be locked for recovery");
+
+        const activeGrants = await adapter.count({
+          model: "verification",
+          where: [
+            { field: "identifier", value: verificationId },
+            { field: "expiresAt", value: now, operator: "gt" },
+          ],
+        });
+        if (activeGrants > 0) {
+          throw new Error("An owner recovery grant is already active; wait for expiry before requesting another");
+        }
+
+        // Better Auth's session-delete hook intentionally preserves offline_access refresh rows.
+        // Recovery revokes all OAuth grants for this owner, including those rows, before deleting sessions.
+        accessGrantsRevoked = await adapter.updateMany({
+          model: "oauthAccessToken",
+          where: [{ field: "userId", value: ownerId }],
+          update: { revoked: now },
+        });
+        refreshGrantsRevoked = await adapter.updateMany({
+          model: "oauthRefreshToken",
+          where: [{ field: "userId", value: ownerId }],
+          update: { revoked: now },
+        });
+        sessionsRevoked = await adapter.count({
+          model: "session",
+          where: [{ field: "userId", value: ownerId }],
+        });
+        await context.internalAdapter.deleteUserSessions(ownerId);
+        await context.internalAdapter.deleteVerificationByIdentifier(verificationId);
+        await context.internalAdapter.createVerificationValue({
+          identifier: verificationId,
+          value: createHash("sha256").update(token).digest("hex"),
+          expiresAt,
+        });
+      });
+
+      return { token, ownerId, expiresInSeconds: PASSKEY_BOOTSTRAP_GRANT_TTL_MS / 1000,
+        sessionsRevoked, accessGrantsRevoked, refreshGrantsRevoked };
     },
     async assertRegisteredClients(ownerSubject = config.ownerSubject ?? ""): Promise<void> {
       const context = await auth.$context;

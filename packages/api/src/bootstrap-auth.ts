@@ -11,6 +11,7 @@ const IOS_REDIRECT_URI = "jp.yohn.codexia:/oauth2redirect";
 
 interface BootstrapOptions {
   readonly ownerOidcSubject?: string;
+  readonly passkeyRecoveryOwnerId?: string;
   readonly webRedirectUris: readonly string[];
 }
 
@@ -38,10 +39,12 @@ export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, optio
   if (origin.origin === audience.origin || (!disposableLoopback && origin.hostname === audience.hostname) ||
       config.ownerClientIds.length !== 2 ||
       new Set([webClientId, iosClientId, introspectionClientId]).size !== 3 ||
-      (config.oidcIssuer && !options.ownerOidcSubject) ||
+      (config.oidcIssuer && !options.ownerOidcSubject && !options.passkeyRecoveryOwnerId) ||
+      (options.passkeyRecoveryOwnerId && (config.passkeyBootstrap || options.passkeyRecoveryOwnerId !== config.ownerSubject)) ||
       (options.ownerOidcSubject !== undefined && !/^[!-~]+$/u.test(options.ownerOidcSubject)) ||
       config.oauthIntrospectionClientSecret.length < 32 ||
-      options.webRedirectUris.length === 0 || new Set(options.webRedirectUris).size !== options.webRedirectUris.length ||
+      (!options.passkeyRecoveryOwnerId && options.webRedirectUris.length === 0) ||
+      new Set(options.webRedirectUris).size !== options.webRedirectUris.length ||
       options.webRedirectUris.some((uri) => {
         const redirect = new URL(uri);
         return redirect.origin !== audience.origin || Boolean(redirect.username || redirect.password || redirect.search || redirect.hash);
@@ -55,6 +58,7 @@ export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, optio
     authSecret: createHmac("sha256", config.authSecret).update("codexia-auth-bootstrap:" + origin.origin).digest("hex"),
   }, {
     ...(options.ownerOidcSubject ? { ownerOidcSubject: options.ownerOidcSubject } : {}),
+    ...(options.passkeyRecoveryOwnerId ? { passkeyRecoveryOwnerId: options.passkeyRecoveryOwnerId } : {}),
     nextClientId() {
       const id = registrationId.getStore();
       if (!id) throw new Error("Bootstrap registration must select an approved client");
@@ -64,6 +68,7 @@ export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, optio
 
   let registering = false;
   async function register(headers: Headers): Promise<Response> {
+    if (options.passkeyRecoveryOwnerId) return new Response("OAuth client registration is unavailable during Passkey recovery", { status: 403 });
     const session = await runtime.auth.api.getSession({ headers });
     if (!session) return new Response("An IdP session is required", { status: 401 });
     const context = await runtime.auth.$context;
@@ -124,22 +129,32 @@ export function createBetterAuthBootstrap(config: BetterAuthRuntimeConfig, optio
   }
 
   async function handle(method: string, url: URL, headers: Headers, body?: Buffer): Promise<Response> {
-    if (method === "GET" && url.pathname === "/passkey" && config.passkeyBootstrap) {
+    if (method === "GET" && url.pathname === "/passkey" && (config.passkeyBootstrap || options.passkeyRecoveryOwnerId)) {
+      const isRecovery = Boolean(options.passkeyRecoveryOwnerId);
+      const title = isRecovery ? "Add a replacement owner Passkey" : "Register the first owner Passkey";
+      const instructions = isRecovery
+        ? "Enter the one-time operator recovery grant. Existing owner identity and project data are preserved. The grant expires after ten minutes and is not saved in this browser."
+        : "Enter the one-time operator grant. It expires after ten minutes and is not saved in this browser.";
+      const success = isRecovery
+        ? "Replacement Passkey registered. Close this setup page and sign in again at the Codexia login page."
+        : "Passkey registered. Continue to register OAuth clients.";
+      const recoveryHeader = isRecovery ? "x-codexia-owner-recovery" : "x-codexia-owner-enrollment";
+      const registrationForm = isRecovery ? "" : '<form method="post" action="/register"><button type="submit">Register OAuth clients</button></form>';
       const nonce = randomBytes(18).toString("base64");
       const page = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Codexia Passkey owner enrollment</title><main><h1>Register the first owner Passkey</h1>
-<p>Enter the one-time operator grant. It expires after ten minutes and is not saved in this browser.</p>
+<title>Codexia Passkey owner setup</title><main><h1>${title}</h1>
+<p>${instructions}</p>
 <label for="grant">Enrollment grant</label> <input id="grant" type="password" autocomplete="off" required>
-<button id="enroll" type="button">Create Passkey</button><form method="post" action="/register"><button type="submit">Register OAuth clients</button></form>
+<button id="enroll" type="button">Create Passkey</button>${registrationForm}
 <output id="status" aria-live="polite"></output></main><script nonce="${nonce}">
-const button=document.querySelector("#enroll"),out=document.querySelector("#status"),grant=document.querySelector("#grant");
+const button=document.querySelector("#enroll"),out=document.querySelector("#status"),grant=document.querySelector("#grant"),grantHeader=${JSON.stringify(recoveryHeader)},successMessage=${JSON.stringify(success)};
 if(!window.isSecureContext||typeof PublicKeyCredential!=="function"||typeof PublicKeyCredential.parseCreationOptionsFromJSON!=="function"){
   button.disabled=true;out.textContent="This browser does not support secure Passkey registration. Use a current browser on this HTTPS setup page.";
 }
 button.addEventListener("click",async()=>{const token=grant.value;button.disabled=true;out.textContent="Waiting for the authenticator…";
 let publicKey,encoded;
 try{
-  const headers={"x-codexia-owner-enrollment":token};
+  const headers={[grantHeader]:token};
   const optionsResponse=await fetch("/api/auth/passkey/generate-register-options?context=codexia-first-owner-v1",{headers,credentials:"same-origin"});
   if(!optionsResponse.ok)throw new Error("The enrollment grant is invalid, expired, or already used.");
   const options=await optionsResponse.json();publicKey=PublicKeyCredential.parseCreationOptionsFromJSON(options);
@@ -150,9 +165,9 @@ try{
   button.disabled=false;return;
 }
 try{
-  const verified=await fetch("/api/auth/passkey/verify-registration",{method:"POST",headers:{"x-codexia-owner-enrollment":token,"content-type":"application/json"},credentials:"same-origin",body:JSON.stringify({response:encoded,createSession:true})});
+  const verified=await fetch("/api/auth/passkey/verify-registration",{method:"POST",headers:{[grantHeader]:token,"content-type":"application/json"},credentials:"same-origin",body:JSON.stringify({response:encoded,createSession:true})});
   if(!verified.ok){if(PublicKeyCredential.signalUnknownCredential)await PublicKeyCredential.signalUnknownCredential({rpId:publicKey.rp.id,credentialId:encoded.id});throw new Error("The server did not accept this Passkey. The enrollment state may need operator recovery.");}
-  grant.value="";out.textContent="Passkey registered. Continue to register OAuth clients.";
+  grant.value="";out.textContent=successMessage;
 }catch(error){
   if(PublicKeyCredential.signalUnknownCredential)await PublicKeyCredential.signalUnknownCredential({rpId:publicKey.rp.id,credentialId:encoded.id}).catch(()=>{});
   out.textContent=error instanceof Error?error.message:"Passkey verification could not be confirmed. Check again before retrying.";button.disabled=false;
@@ -165,14 +180,16 @@ try{
       } });
     }
     if (method === "GET" && url.pathname === "/") {
-      const passkey = config.passkeyBootstrap ? '<p><a href="/passkey">Register the first owner Passkey</a></p>' : "";
-      const oidcLogin = config.oidcIssuer ? '<form method="post" action="/login"><button>Sign in to the identity provider</button></form>' : "";
+      const passkey = config.passkeyBootstrap || options.passkeyRecoveryOwnerId
+        ? '<p><a href="/passkey">' + (options.passkeyRecoveryOwnerId ? 'Add a replacement owner Passkey' : 'Register the first owner Passkey') + '</a></p>' : "";
+      const oidcLogin = config.oidcIssuer && !options.passkeyRecoveryOwnerId
+        ? '<form method="post" action="/login"><button>Sign in to the identity provider</button></form>' : "";
       const page = '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia authentication setup</title>' +
         '<main><h1>Codexia authentication setup</h1>' + passkey + oidcLogin +
         '<form method="post" action="/register"><button type="submit">Register the approved OAuth clients</button></form></main></html>';
       return new Response(page, { headers: { "content-type": "text/html; charset=utf-8" } });
     }
-    if (method === "GET" && config.oidcIssuer && url.pathname === "/api/auth/callback/" + OIDC_PROVIDER_ID) {
+    if (method === "GET" && !options.passkeyRecoveryOwnerId && config.oidcIssuer && url.pathname === "/api/auth/callback/" + OIDC_PROVIDER_ID) {
       return runtime.handler(new Request(url, { headers }));
     }
     if ((method === "GET" || method === "POST") && url.pathname.startsWith("/api/auth/passkey/")) {
@@ -181,6 +198,7 @@ try{
     if (method === "POST" && (url.pathname === "/login" || url.pathname === "/register")) {
       if (headers.get("origin") !== origin.origin) return new Response("Origin is not authorized", { status: 403 });
       if (url.pathname === "/register") return register(headers);
+      if (options.passkeyRecoveryOwnerId) return new Response("Identity-provider sign-in is unavailable during Passkey recovery", { status: 403 });
       if (!config.oidcIssuer || !config.oidcClientId || !config.oidcClientSecret) return new Response("OIDC is not configured", { status: 404 });
       const result = await runtime.auth.api.signInSocial({
         headers, asResponse: true,
@@ -241,21 +259,33 @@ try{
 }
 
 async function main(): Promise<void> {
-  if (process.argv.length !== 3 || process.argv[2] !== "--apply") throw new Error("Explicit --apply is required");
-  const staged = readBetterAuthMigrationConfig(false);
+  const args = process.argv.slice(2);
+  const recoveryMode = args.length === 2 && args[0] === "--recover" && args[1] === "--apply";
+  const enrollmentMode = args.length === 1 && args[0] === "--apply";
+  if (!recoveryMode && !enrollmentMode) throw new Error("Explicit --apply is required");
+  const staged = readBetterAuthMigrationConfig(recoveryMode);
+  if (recoveryMode && (!staged.ownerSubject || staged.passkeyBootstrap)) {
+    throw new Error("Passkey recovery requires the configured existing owner");
+  }
+  if (enrollmentMode && !staged.passkeyBootstrap) {
+    throw new Error("Passkey first-owner bootstrap settings are required");
+  }
   const origin = process.env.CODEXIA_AUTH_BOOTSTRAP_ORIGIN!;
   const config = { ...staged, publicOrigin: origin, apiAudience: staged.apiAudience ?? new URL("/api", staged.publicOrigin).href };
   const tls = { cert: readFileSync("/run/codexia-bootstrap/tls.crt"), key: readFileSync("/run/codexia-bootstrap/tls.key"), minVersion: "TLSv1.2" as const };
   const bootstrap = createBetterAuthBootstrap(config, {
     ...(process.env.CODEXIA_AUTH_BOOTSTRAP_OWNER_OIDC_SUBJECT ? { ownerOidcSubject: process.env.CODEXIA_AUTH_BOOTSTRAP_OWNER_OIDC_SUBJECT } : {}),
+    ...(recoveryMode && staged.ownerSubject ? { passkeyRecoveryOwnerId: staged.ownerSubject } : {}),
     webRedirectUris: (process.env.CODEXIA_AUTH_BOOTSTRAP_WEB_REDIRECT_URIS ?? "").split(",").filter(Boolean),
   });
   const server = createServer(tls, bootstrap.listener);
-  try {
-    await migrateBetterAuth(staged);
-  } catch (error) {
-    await bootstrap.close();
-    throw error;
+  if (enrollmentMode) {
+    try {
+      await migrateBetterAuth(staged);
+    } catch (error) {
+      await bootstrap.close();
+      throw error;
+    }
   }
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
