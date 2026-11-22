@@ -33,7 +33,7 @@ export function assertIsolatedEnvironment(env) {
   for (const name of ['CODEXIA_E2E_BASE_URL', 'CODEXIA_BASE_URL', 'CODEXIA_E2E_EXTERNAL_DATABASE',
     'CODEXIA_E2E_TEST_FILE', 'CODEXIA_E2E_STATE_DIR', 'CODEXIA_E2E_COVERAGE_FILE',
     'CODEXIA_E2E_COMPAT_FRONTEND_DIR', 'CODEXIA_E2E_COMPAT_FRONTEND_SOURCE', 'CODEXIA_E2E_PROJECT_TITLE',
-    'CODEXIA_BROWSER_MODULE_PROFILE_PATH', 'SCRIPTORIUM_BROWSER_MODULE_PROFILE_PATH',
+    'CODEXIA_BROWSER_MODULE_PROFILE_PATH',
     'CODEXIA_STANDALONE_IDENTITY']) {
     assert.ok(!env[name], 'Unset ' + name + ' for isolated mixed-version verification');
   }
@@ -74,7 +74,9 @@ function main() {
     console.error(`API epoch ${priorEpoch} → ${apiEpoch} requires coordinated manual acceptance`);
     return 78;
   }
-  const env = { ...process.env, CODEXIA_PROFILE: profile };
+  // A historical checkout may still honor a retired override from this shell.
+  const inheritedEnvironment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^SCRIPTORIUM_/iu.test(name)));
+  const env = { ...inheritedEnvironment, CODEXIA_PROFILE: profile };
   run(previous, ['install', '--frozen-lockfile'], env);
   run(root, ['install', '--frozen-lockfile'], env);
   run(root, ['build'], env);

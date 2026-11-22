@@ -268,7 +268,6 @@ function cliEnv(databaseUrl: string, publicOrigin: string, authSecret: string, o
   const environment = { ...process.env };
   for (const suffix of ["ISSUER", "CLIENT_ID", "CLIENT_SECRET"]) {
     delete environment[`CODEXIA_OIDC_${suffix}`];
-    delete environment[`SCRIPTORIUM_OIDC_${suffix}`];
   }
   Object.assign(environment, {
     CODEXIA_AUTH_DATABASE_URL: databaseUrl,

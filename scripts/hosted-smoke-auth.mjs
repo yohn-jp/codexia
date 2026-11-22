@@ -119,7 +119,7 @@ export async function setupHostedSmokeAuth({ packageDirectory, dataDirectory, da
     return {
       env: {
         ...Object.fromEntries(Object.entries(process.env).filter(([name]) =>
-          !/^(?:CODEXIA|SCRIPTORIUM)_(?:AUTH(?:_|$)|ACCESS(?:_|$)|OIDC(?:_|$)|OAUTH(?:_|$)|BROWSER_AUTH$|PUBLIC_ORIGIN$|TRUST_PROXY$|API_AUDIENCE$)/u.test(name))),
+          !/^CODEXIA_(?:AUTH(?:_|$)|ACCESS(?:_|$)|OIDC(?:_|$)|OAUTH(?:_|$)|BROWSER_AUTH$|PUBLIC_ORIGIN$|TRUST_PROXY$|API_AUDIENCE$)/u.test(name))),
         CODEXIA_AUTH_MODE: 'better-auth',
         CODEXIA_AUTH_DATABASE_URL: config.databaseUrl,
         CODEXIA_PUBLIC_ORIGIN: config.publicOrigin,

@@ -231,7 +231,7 @@ async function main() {
   const options = parsePreviewArgs(process.argv.slice(2));
   // Keep the disposable preview isolated from operator API and frontend settings.
   for (const key of Object.keys(process.env)) {
-    if (/^(?:CODEXIA|SCRIPTORIUM|VITE)_/iu.test(key)) delete process.env[key];
+    if (/^(?:CODEXIA|VITE)_/iu.test(key)) delete process.env[key];
   }
   const engine = await engineFor(options.engine);
   const container = `codexia-ui-preview-${randomUUID().slice(0, 12)}`;
