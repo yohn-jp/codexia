@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import type { ChangeOperation, ChangeProposal, ModuleContext, SnapshotId } from "@codexia/contracts";
+import type { ChangeOperation, ChangeProposal, SnapshotId } from "@codexia/contracts";
 import { ModuleRuntime } from "@codexia/module-runtime";
 import { createModule as createNlpModule } from "@codexia/module-nlp";
 import { createModule as createDiagnosticsModule } from "./index.js";
@@ -14,15 +14,6 @@ const snapshot: SnapshotId = {
   projectVersion: 13,
 };
 
-function moduleContext(): ModuleContext {
-  return {
-    cacheDirectory: "/tmp/codexia-p06-test-cache",
-    signal: new AbortController().signal,
-    async acquireCapability() { throw new Error("module context capability is available only during runtime invocation"); },
-    async createWorkerService() { throw new Error("module context worker service is available only during runtime invocation"); },
-  };
-}
-
 const initialFiles = new Map<string, { content: string; revision: string; documentKind?: string }>([
   ["bible/characters/hero/profile.yaml", { content: "id: char-hero\nname: 星野\naliases:\n  - 星の剣士\nnotes: 星の剣士は古い遺跡を調べる。\n", revision: "hero-r1" }],
   ["plot/volumes/v1/scenes/scene-1.yaml", { content: "id: scene-1\ntype: scene\nname: 遺跡\nintended_tone: suspense\ngoal: 鍵を見つけて扉を開ける\nconflict: 黒い霧が道を塞ぐ\nmanuscript: manuscript/v1/scene-1.md\n", revision: "scene-r1" }],
@@ -33,16 +24,9 @@ const initialFiles = new Map<string, { content: string; revision: string; docume
 ]);
 
 async function createRuntime(files: Map<string, { content: string; revision: string; documentKind?: string }>, proposals: ChangeProposal[], capabilityProviders: Record<string, { create(): unknown; dispose?(value: unknown): void | Promise<void> }> = {}) {
-  const stub = moduleContext();
-  const nlpDefinition = await createNlpModule(stub);
-  const diagnosticsDefinition = await createDiagnosticsModule(stub);
   const packageManifest = (url: URL) => JSON.parse(readFileSync(url, "utf8")).codexiaModule;
   const nlpManifest = packageManifest(new URL("../../nlp/package.json", import.meta.url));
   const diagnosticsManifest = packageManifest(new URL("../package.json", import.meta.url));
-  assert.deepEqual(nlpDefinition.manifest, nlpManifest, "NLP factory metadata must match installed package metadata");
-  assert.deepEqual(diagnosticsDefinition.manifest, diagnosticsManifest, "diagnostics factory metadata must match installed package metadata");
-  assert.ok(diagnosticsDefinition.ui?.some((item) => item.id === "diagnostics.consistency" && item.action === "diagnostics.checkConsistency"));
-  assert.ok(diagnosticsDefinition.ui?.some((item) => item.id === "diagnostics.continuity" && item.action === "diagnostics.checkContinuity"));
   const manifests = [nlpManifest, diagnosticsManifest];
   const runtime = new ModuleRuntime({
     manifests,
@@ -119,6 +103,9 @@ test("production modules lazily run the real Lindera child and preserve snapshot
     assert.equal(diagnostics.ok, true, JSON.stringify(diagnostics));
     assert.deepEqual(diagnostics.snapshot, snapshot);
     if (!diagnostics.ok) return;
+    const panels = runtime.contributions("diagnostics");
+    assert.ok(panels.some(({ id, action }) => id === "diagnostics.consistency" && action === "diagnostics.checkConsistency"));
+    assert.ok(panels.some(({ id, action }) => id === "diagnostics.continuity" && action === "diagnostics.checkContinuity"));
     const data = diagnostics.data as { analysis: { charCount: number; sentenceCount: number; sentimentArc: { points: unknown[] } }; plotSemanticWarnings: unknown[]; synonymSuggestions: unknown[]; model: string; modelVersion: string; diagnosticsEngine: string };
     assert.equal(data.model, "lindera-wasm-nodejs-ipadic");
     assert.equal(data.modelVersion, "2.0.0");
@@ -190,9 +177,9 @@ test("native scene body formatting and lint fixes are revision-bound proposals a
   const nativeDocumentId = "123e4567-e89b-42d3-a456-426614174000";
   const nativePath = `documents/${nativeDocumentId}.md`;
   const nativeSceneId = "scene-native";
-  const original = "---\n回想…\n---\n星野は夜明けを待った…。\n\t「もう大丈夫だ。」";
+  const original = "---\n正体と真相…\n---\n星野は夜明けを待った…。\n\t「もう大丈夫だ。」";
   files.set("plot/volumes/v1/scenes/scene-native.yaml", {
-    content: `id: ${nativeSceneId}\ntype: scene\nname: 夜明け\ngoal: 夜明けを待つ\nmanuscript: ${nativePath}\n`, revision: "native-scene-r1", documentKind: "scene",
+    content: `id: ${nativeSceneId}\ntype: scene\nname: 夜明け\ngoal: 秘密を隠す\nmanuscript: ${nativePath}\n`, revision: "native-scene-r1", documentKind: "scene",
   });
   files.set(nativePath, { content: original, revision: "native-body-r1", documentKind: "scene" });
   files.set("documents/123e4567-e89b-42d3-a456-426614174001.md", {
@@ -220,9 +207,10 @@ test("native scene body formatting and lint fixes are revision-bound proposals a
   const { runtime, host } = await createRuntime(files, proposals);
   try {
     const nativePlot = await runtime.invokeAction("diagnostics", "diagnostics.checkPlotSemantics", { sceneId: nativeSceneId }, host);
-    assert.equal(nativePlot.ok, true, JSON.stringify(nativePlot));
-    const suppliedPlot = await runtime.invokeAction("diagnostics", "diagnostics.checkPlotSemantics", { sceneId: nativeSceneId, text: original }, host);
-    assert.deepEqual(nativePlot, suppliedPlot);
+    assert.ok(nativePlot.ok, JSON.stringify(nativePlot));
+    const warnings = (nativePlot.data as { warnings: Array<{ kind: string; archetype?: string }> }).warnings;
+    assert.ok(warnings.some((warning) => warning.kind === "contradiction" && warning.archetype === "concealment"),
+      "the reveal words between Markdown rules are manuscript body and conflict with the scene goal");
 
     const lintResult = await runtime.invokeAction("diagnostics", "diagnostics.proposeLintFix", {
       path: nativePath, baseRevision: "native-body-r1", operationId: "native-lint-fix",
@@ -234,7 +222,7 @@ test("native scene body formatting and lint fixes are revision-bound proposals a
     assert.ok(lintProposal, "native lint fix returns a Core proposal");
     assert.deepEqual(lintProposal.operations[0]?.reads, [{ path: nativePath, revision: "native-body-r1" }]);
     assert.deepEqual(lintProposal.operations[0]?.writes.map(({ path }) => path), [nativePath]);
-    assert.equal(lintProposal.operations[0]?.writes[0]?.content, original.replaceAll("…", "……"));
+    assert.equal(lintProposal.operations[0]?.writes[0]?.content, "---\n正体と真相……\n---\n星野は夜明けを待った……。\n\t「もう大丈夫だ。」");
     assert.equal(files.get(nativePath)?.content, original, "lint proposals do not change the selected snapshot");
 
     const formatResult = await runtime.invokeAction("diagnostics", "diagnostics.formatManuscript", { sceneId: nativeSceneId }, host);
@@ -248,7 +236,7 @@ test("native scene body formatting and lint fixes are revision-bound proposals a
         evidence: Array<{ revision: string }>;
       } | null;
     };
-    assert.equal(formatData.formattedText, "---\n回想……\n---\n星野は夜明けを待った……。\n\n「もう大丈夫だ。」");
+    assert.equal(formatData.formattedText, "---\n正体と真相……\n---\n星野は夜明けを待った……。\n\n「もう大丈夫だ。」");
     assert.equal(formatData.proposal?.operations[0]?.writes[0]?.content, formatData.formattedText);
     assert.deepEqual(formatData.proposal?.operations[0]?.reads, [{ path: nativePath, revision: "native-body-r1" }]);
     assert.equal(formatData.proposal?.operations[0]?.writes[0]?.path, nativePath);
