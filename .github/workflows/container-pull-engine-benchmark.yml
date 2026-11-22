@@ -6,6 +6,7 @@ on:
       - .github/workflows/container-pull-engine-benchmark.yml
       - .github/docker/playwright-ubuntu-dual-benchmark.Dockerfile
       - scripts/ci-playwright-engine-benchmark.sh
+      - scripts/ci-playwright-benchmark-db.mjs
   workflow_dispatch:
 
 permissions:
@@ -217,7 +218,7 @@ jobs:
           --health-retries 10
     env:
       CI: 'true'
-      CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@127.0.0.1:5432/codexia_test
+      CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@postgres:5432/codexia_test
       CODEXIA_PROFILE: ${{ matrix.profile }}
     steps:
       - uses: actions/checkout@v7.0.1
@@ -327,7 +328,7 @@ jobs:
           --health-retries 10
     env:
       CI: 'true'
-      CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@127.0.0.1:5432/codexia_test
+      CODEXIA_E2E_DATABASE_URL: postgres://codexia:codexia@postgres:5432/codexia_test
       CODEXIA_PROFILE: ${{ matrix.profile }}
     steps:
       - uses: actions/checkout@v7.0.1
