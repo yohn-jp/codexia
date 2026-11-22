@@ -16,6 +16,10 @@ export interface OutlineTreeDocument {
   kind: string;
   children: OutlineTreeDocument[];
   misplaced?: boolean;
+  headingDocumentId?: string;
+  headingOffset?: number;
+  headingLevel?: number;
+  headingLine?: number;
 }
 
 interface Props {
@@ -28,6 +32,7 @@ interface Props {
   forceExpanded: boolean;
   busy: boolean;
   onSelect: (id: string) => void;
+  onSelectHeading: (documentId: string, offset: number) => void;
   onZoom: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onMove: (id: string, parentId: string | null) => Promise<void>;
@@ -37,7 +42,7 @@ interface Props {
 /** A projection of PostgreSQL's document hierarchy. Headless Tree never owns the data. */
 export function DocumentOutlineTree({
   items, selectedId, focusedId, onFocusedIdChange, collapsedIds, onCollapsedIdsChange,
-  forceExpanded, busy, onSelect, onZoom, onRename, onMove, kindLabel,
+  forceExpanded, busy, onSelect, onSelectHeading, onZoom, onRename, onMove, kindLabel,
 }: Props) {
   const index = useMemo(() => {
     const byId = new Map<string, OutlineTreeDocument>();
@@ -88,28 +93,34 @@ export function DocumentOutlineTree({
       });
     },
     onPrimaryAction: (item) => {
-      if (item.getId() !== ROOT_ID) onSelect(item.getId());
+      if (item.getId() === ROOT_ID) return;
+      const node = item.getItemData();
+      if (node.headingOffset !== undefined && node.headingDocumentId) onSelectHeading(node.headingDocumentId, node.headingOffset);
+      else onSelect(item.getId());
     },
     onRename: (item, title) => {
       const normalized = title.trim();
       if (normalized && normalized !== item.getItemData().title && !busy) onRename(item.getId(), normalized);
     },
-    canRename: (item) => !busy && item.getId() !== ROOT_ID,
+    canRename: (item) => !busy && item.getId() !== ROOT_ID && item.getItemData().headingOffset === undefined,
     indent: 20,
     canReorder: false, // A sibling reorder needs a canonical atomic server operation.
     seperateDragHandle: true,
-    canDrag: (dragged) => !busy && dragged.length === 1 && dragged[0]?.getId() !== ROOT_ID,
+    canDrag: (dragged) => !busy && dragged.length === 1 && dragged[0]?.getId() !== ROOT_ID &&
+      dragged[0]?.getItemData().headingOffset === undefined,
     canDrop: (dragged, target) => {
       // Only reparenting is safe through the current single-document metadata API.
       if (busy || dragged.length !== 1 || "childIndex" in target) return false;
       const source = dragged[0]!;
+      if (source.getItemData().headingOffset !== undefined || target.item.getItemData().headingOffset !== undefined) return false;
       const parentId = target.item.getId();
       return parentId !== source.getId() &&
         (parentId === ROOT_ID || index.byId.has(parentId)) &&
         !target.item.isDescendentOf(source.getId());
     },
     onDrop: async (dragged, target) => {
-      if (dragged.length !== 1 || "childIndex" in target) return;
+      if (dragged.length !== 1 || "childIndex" in target || dragged[0]!.getItemData().headingOffset !== undefined ||
+          target.item.getItemData().headingOffset !== undefined) return;
       const targetParentId = target.item.getId();
       await onMove(dragged[0]!.getId(), targetParentId === ROOT_ID ? null : targetParentId);
     },
@@ -127,11 +138,15 @@ export function DocumentOutlineTree({
     const item = tree.getItemInstance(id);
     const node = index.byId.get(id);
     if (!node) return null;
+    const isHeading = node.headingOffset !== undefined;
     const hasChildren = node.children.length > 0;
     const expanded = item.isExpanded();
     return <li key={id} role="none" className="pg-outline-item"
-      data-kind={node.kind} data-document-id={id} data-drop-target={item.isUnorderedDragTarget() ? "true" : undefined}>
-      <div className="pg-outline-row">
+      data-kind={node.kind} data-document-id={!isHeading ? id : undefined}
+      data-heading-offset={isHeading ? node.headingOffset : undefined}
+      data-outline-node-kind={isHeading ? "heading" : "document"}
+      data-drop-target={!isHeading && item.isUnorderedDragTarget() ? "true" : undefined}>
+      <div className={`pg-outline-row${isHeading ? " is-heading" : ""}`}>
         {hasChildren ? <button type="button" className="pg-outline-toggle" tabIndex={-1}
           aria-label={expanded ? `${node.title}を折りたたむ` : `${node.title}を展開`}
           aria-expanded={expanded}
@@ -141,10 +156,12 @@ export function DocumentOutlineTree({
         {item.isRenaming()
           ? <input {...item.getRenameInputProps()} className="pg-outline-rename" aria-label={`${node.title}の名前を変更`} maxLength={256} />
           : <button {...item.getProps()} type="button"
-              className={`pg-outline-document${id === selectedId ? " is-selected" : ""}`}
-              aria-current={id === selectedId ? "page" : undefined}
-              aria-selected={id === selectedId}
-              aria-label={`${node.title} ${node.misplaced ? `未配置 · ${kindLabel(node.kind)}` : kindLabel(node.kind)}`}
+              className={`pg-outline-document${isHeading ? " pg-outline-heading" : ""}${!isHeading && id === selectedId ? " is-selected" : ""}`}
+              aria-current={!isHeading && id === selectedId ? "page" : undefined}
+              aria-selected={!isHeading && id === selectedId}
+              aria-label={isHeading
+                ? `${node.title || "見出しなし"}、見出しレベル${node.headingLevel}、${node.headingLine}行目`
+                : `${node.title} ${node.misplaced ? `未配置 · ${kindLabel(node.kind)}` : kindLabel(node.kind)}`}
               onFocus={() => item.setFocused()}
               onKeyDownCapture={(event) => {
                 // WAI-ARIA tree: ArrowRight on a leaf is a no-op. Headless Tree's
@@ -156,13 +173,14 @@ export function DocumentOutlineTree({
                 }
               }}
               onClick={() => { item.setFocused(); item.primaryAction(); }}>
-              <span>{node.title}</span>
-              <small>{node.misplaced ? `未配置 · ${kindLabel(node.kind)}` : kindLabel(node.kind)}</small>
+              <span>{isHeading && !node.title ? `見出し H${node.headingLevel}` : node.title}</span>
+              <small>{isHeading ? `見出し H${node.headingLevel} · ${node.headingLine}行目`
+                : node.misplaced ? `未配置 · ${kindLabel(node.kind)}` : kindLabel(node.kind)}</small>
             </button>}
-        {hasChildren && <button type="button" tabIndex={id === focusedId ? 0 : -1} className="pg-outline-zoom"
+        {!isHeading && hasChildren && <button type="button" tabIndex={id === focusedId ? 0 : -1} className="pg-outline-zoom"
           aria-label={`${node.title}を拡大`} onClick={() => onZoom(id)}>拡大</button>}
-        <button {...item.getDragHandleProps()} type="button" className="pg-outline-drag"
-          tabIndex={id === focusedId ? 0 : -1} aria-label={`${node.title}を移動`} disabled={busy}>⋮⋮</button>
+        {!isHeading && <button {...item.getDragHandleProps()} type="button" className="pg-outline-drag"
+          tabIndex={id === focusedId ? 0 : -1} aria-label={`${node.title}を移動`} disabled={busy}>⋮⋮</button>}
       </div>
       {hasChildren && expanded &&
         <ul role="group" className="pg-document-children">{renderBranch(node.children.map((child) => child.id))}</ul>}

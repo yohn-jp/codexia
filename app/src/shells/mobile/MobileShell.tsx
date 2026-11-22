@@ -103,7 +103,7 @@ function errorMessage(error: unknown): string {
  * Ionic page navigation for the shared application controller.
  * The mobile entry supplies the React Router browser context around the controller.
  */
-export function MobileShell({ header, documentTitle, documentContext, library, editor, tools, status, renderStatus, onSwitchMode, workspaceScope, panels, beforeLayoutChange, requestedPanel }: ApplicationShellProps) {
+export function MobileShell({ header, documentTitle, documentContext, library, editor, tools, status, renderStatus, onSwitchMode, workspaceScope, panels, beforeLayoutChange, requestedPanel, onReferenceSheetDismissed }: ApplicationShellProps) {
   const location = useLocation();
   const navigateRoute = useNavigate();
   const activeView = readViewFromSearch(location.search);
@@ -411,6 +411,7 @@ export function MobileShell({ header, documentTitle, documentContext, library, e
   const closeReferenceSheet = useCallback(() => setReferenceSheet(null), []);
   const onReferenceDismissed = useCallback(() => {
     setReferenceSheet(null);
+    const editorHandledDismiss = onReferenceSheetDismissed?.() ?? false;
     // Return to the invoking control, not to a contenteditable element:
     // restoring input focus would unexpectedly reopen the soft keyboard.
     const trigger = referenceTriggerRef.current;
@@ -418,12 +419,12 @@ export function MobileShell({ header, documentTitle, documentContext, library, e
     referenceTriggerRef.current = null;
     referenceOriginRef.current = "";
     window.requestAnimationFrame(() => {
-      if (trigger?.isConnected && routeIdentityRef.current === origin &&
+      if (!editorHandledDismiss && trigger?.isConnected && routeIdentityRef.current === origin &&
           readViewFromSearch(window.location.search) === "writing") {
         trigger.focus({ preventScroll: true });
       }
     });
-  }, []);
+  }, [onReferenceSheetDismissed]);
 
   const referencePanel = referenceSheet ? panels?.find((panel) => panel.id === referenceSheet) : undefined;
   const hasWritingContext = activeView === "writing" && Boolean(documentTitle) && Boolean(workspaceScope)

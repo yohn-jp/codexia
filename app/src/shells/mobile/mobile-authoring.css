@@ -629,6 +629,10 @@
   align-items: stretch;
   gap: 2px;
 }
+.mobile-shell .mobile-shell-workspace-view:not([data-active-view="writing"]) .pg-outline-row.is-heading,
+.mobile-shell .mobile-shell-reference-pane .pg-outline-row.is-heading {
+  grid-template-columns: 44px minmax(0, 1fr);
+}
 .mobile-shell .pg-outline-zoom { min-height: 44px; padding: 6px; color: var(--mobile-muted); font-size: 10px; }
 .mobile-shell .pg-outline-drag {
   width: 44px;
