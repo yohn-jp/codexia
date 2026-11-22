@@ -89,7 +89,10 @@ fi
 : > "$INSPECT_TEST_LOG"
 INSPECT_TEST_ACCOUNT_ABSENT=1 run_inspect "$tmp/inspect.yml" > "$tmp/absent.log" || { cat "$tmp/absent.log"; exit 1; }
 grep -q 'changed=0' "$tmp/absent.log"
-grep -q 'NOT_CHECKED' "$tmp/absent.log"
+grep -Fq '"service_account_present": false' "$tmp/absent.log"
+if grep -Fq '"existing_images"' "$tmp/absent.log"; then
+  echo 'Inspect reported topology for a missing runtime account' >&2; exit 1
+fi
 test ! -s "$INSPECT_TEST_LOG"
 # Unsupported input must fail before any Podman operation.
 : > "$INSPECT_TEST_LOG"
