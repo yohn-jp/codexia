@@ -15,7 +15,7 @@ test("browser quota failure blocks remote writes until explicit draft re-protect
   const draft = "Before. After local quota failure.";
   await manuscriptEditor(page).fill(draft);
   await expect(page.locator(".pg-save-state summary")).toHaveText("この入力はまだ保護されていません");
-  await expect(page.locator(".pg-editor").getByRole("alert")).toContainText("現在の原稿の下書きを記録できませんでした");
+  await expect(page.locator(".pg-editor").getByRole("alert")).toContainText("復旧用の記録を作れていません");
   await expect(page.getByRole("button", { name: "下書きを再保護" })).toBeEnabled();
   expect(remoteWrites).toBe(0);
   expect((await readPersistenceDrafts(page)).some((item) => item.documentId === fixture.scene.id && item.markdown === draft)).toBe(false);

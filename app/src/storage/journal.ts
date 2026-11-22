@@ -229,20 +229,24 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 
 function storageMessage(error: unknown, operation: string): JournalError {
   const name = error instanceof DOMException ? error.name : "";
-  // Only a manuscript database draft has the editor's explicit "下書きを再保護"
-  // action. The same journal also stores proposals, scratch notes and receipts.
-  const context = operation === "database draft" ? "現在の原稿の下書き"
+  // A draft write is distinct from reading/reconciling an existing record.
+  // Only an unconfirmed manuscript write has the editor's re-protection action.
+  const manuscriptWrite = operation === "manuscript draft write";
+  const context = operation === "database draft" || manuscriptWrite ? "原稿の復旧記録"
     : operation === "module proposal" ? "変更提案の復旧記録"
     : operation === "scratch note" ? "スクラッチメモ"
     : operation === "application receipt" ? "適用結果の復旧記録"
     : operation === "draft state" ? "下書きの状態"
     : operation === "draft" ? "下書きの復旧記録"
     : "ブラウザーの復旧記録";
-  const action = operation === "database draft"
+  const action = manuscriptWrite
     ? "入力はこのタブに残っています。タブを閉じずに下書きを再保護してください。"
     : "作業を中断せず、復旧記録の状態を確認してから再試行してください。";
   if (name === "QuotaExceededError") {
-    return new JournalError(`ブラウザーの保存領域がいっぱいです。${context}を記録できませんでした。空き容量を確保してください。${action}`, error);
+    if (manuscriptWrite) {
+      return new JournalError("ブラウザーの保存領域がいっぱいです。入力はこのタブに残っていますが、復旧用の記録を作れていません。空き容量を確保し、下書きを再保護してください。", error);
+    }
+    return new JournalError(`ブラウザーの保存領域がいっぱいです。${context}を記録・確認できませんでした。空き容量を確保してください。${action}`, error);
   }
   if (name === "SecurityError" || name === "NotAllowedError") {
     return new JournalError(`ブラウザーの保存領域を利用できません。${context}を記録・確認できませんでした。保存設定を確認してください。${action}`, error);
@@ -329,7 +333,7 @@ export class BrowserJournal {
       return true;
     } catch (error) {
       if (error instanceof JournalError) throw error;
-      throw storageMessage(error, "database draft");
+      throw storageMessage(error, "manuscript draft write");
     }
   }
 
