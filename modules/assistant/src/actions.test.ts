@@ -7,6 +7,7 @@ import {
   type BrowserEditorDocument,
   type ChangeOperation,
   type ChangeProposal,
+  type KnowledgeProjectionRef,
   type ModelUsageEvent,
   type ModelUsageStore,
   type ModuleActionContext,
@@ -1081,4 +1082,67 @@ test("context preview delegates to the shared Story action without provider acqu
     async invoke() { return { ok: true, snapshot: { ...snapshot, projectVersion: snapshot.projectVersion + 1 }, data }; },
   }));
   assert.equal(stale.ok, false);
+});
+
+test("prompt preview binds file evidence and the native Knowledge revision to the same pin", async (t) => {
+  const priorProvider = process.env.ARCADIA_LLM_PROVIDER;
+  process.env.ARCADIA_LLM_PROVIDER = "openai-compatible";
+  t.after(() => {
+    if (priorProvider === undefined) delete process.env.ARCADIA_LLM_PROVIDER;
+    else process.env.ARCADIA_LLM_PROVIDER = priorProvider;
+  });
+  const actions = createAssistantActions(moduleContext(undefined, () => assert.fail("preview must not acquire a provider")));
+  const preview = getAction(actions, "assistant.context.prompt.preview");
+  const generate = getAction(actions, "assistant.context.generate");
+  const input = { sceneId: "sc-a", scope: "author", purpose: "setting-qa", question: "Where is the station?" };
+  const selected: KnowledgeProjectionRef = { kind: "knowledge-projection", snapshot, revision: "1".repeat(64) };
+  const changed = { ...selected, revision: "2".repeat(64) };
+  const documentPath = "documents/station.md";
+  let tokenCalls = 0;
+  function boundContext(source?: KnowledgeProjectionRef, expected = selected) {
+    const base = context({
+      files: {
+        [documentPath]: "The station is next to the sea.",
+        [assistantSettingsPath]: JSON.stringify({
+          defaultPresetId: "local",
+          featurePresetIds: { "setting-qa": "local" },
+          presets: [{ id: "local", label: "Local", model: "local-model" }],
+        }),
+      },
+      async invoke(id) {
+        if (id === "story.context.package") {
+          return { ok: true, snapshot, data: { parts: [
+            { kind: "manuscript", value: { path: documentPath, revision, body: "The station is next to the sea." } },
+            { kind: "native-knowledge", value: { source } },
+          ] } };
+        }
+        assert.equal(id, "nlp.countTokens");
+        tokenCalls++;
+        return { ok: true, snapshot, data: { snapshot, counts: [10, 20], counter: { exact: false } } };
+      },
+    });
+    return { ...base, reader: { ...base.reader, knowledge: { source: expected, entries: [], documentMappings: [], nodeLimitReached: false } } };
+  }
+  const accepted = await preview.invoke(input, boundContext(selected));
+  assert.equal(accepted.ok, true, accepted.ok ? undefined : accepted.error.message);
+  const { previewDigest, sourceRevisions, knowledgeSource } = accepted.data as {
+    previewDigest: string; sourceRevisions: unknown; knowledgeSource: unknown;
+  };
+  assert.deepEqual(sourceRevisions, [{ path: documentPath, revision }]);
+  assert.deepEqual(knowledgeSource, selected);
+  for (const invalid of [
+    undefined,
+    changed,
+    { ...selected, snapshot: { ...snapshot, projectId: "another-project" } },
+    { ...selected, snapshot: { ...snapshot, projectVersion: snapshot.projectVersion - 1 } },
+  ]) {
+    const stale = await preview.invoke(input, boundContext(invalid));
+    assert.equal(stale.ok, false);
+    assert.equal(stale.error.code, "stale_source");
+  }
+  assert.equal(tokenCalls, 1);
+  const denied = await generate.invoke({ ...input, previewDigest, externalConsent: true }, boundContext(changed, changed));
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error.code, "stale_source");
+  assert.equal(tokenCalls, 2);
 });
