@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, useLocation, useNavigate } from "../../../app/test-support/router";
 import type { ChangeOperation } from "@codexia/contracts";
 import { MobileShell } from "../../../app/src/shells/mobile/MobileShell";
 import type { WorkspacePanel } from "../../../app/src/application/contracts";
