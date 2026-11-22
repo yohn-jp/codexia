@@ -157,8 +157,8 @@ GRANT CONNECT ON DATABASE codexia_verify TO codexia_preflight;
 GRANT USAGE ON SCHEMA public TO codexia_preflight;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO codexia_preflight;
 DELETE FROM module_record WHERE project_id IN (:'legacy', :'incompatible') AND module_id='core.authority.snapshots' AND key LIKE 'proof:projection:%';
-UPDATE module_record SET value=jsonb_set(value,'{files}',(value->'files') - 'meta/scriptorium/knowledge-context/v1.json')
- WHERE project_id=:'incompatible' AND module_id='core.authority.snapshots' AND key LIKE 'snapshot:%';
+UPDATE module_record SET value=value - 'knowledge'
+ WHERE project_id=:'incompatible' AND module_id='core.authority.snapshots' AND key LIKE 'snapshot:%' AND value ? 'knowledge';
 INSERT INTO project(id, title) VALUES (:'publishing', 'Publishing without a saved snapshot');
 INSERT INTO module_record(project_id, module_id, key, value) VALUES (:'publishing', 'core.artifacts',
  'meta/scriptorium/modules/publishing/share-grants.jsonl',
