@@ -5,9 +5,6 @@ on:
     branches: [main]
   push:
     branches: [main]
-  schedule:
-    - cron: '43 18 * * 2'
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,27 +15,29 @@ concurrency:
 
 jobs:
   trivy:
-    name: Trivy (filesystem, IaC and dependencies)
+    name: Trivy (dependencies and IaC)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Scan repository
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
-          scanners: vuln,misconfig,secret
+          version: v0.76.2
+          scanners: vuln,misconfig
           format: sarif
           output: trivy.sarif
           exit-code: '0'
-          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          hide-progress: true
       - name: Upload Trivy SARIF
+        if: ${{ !cancelled() && hashFiles('trivy.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy.sarif
@@ -52,19 +51,22 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Scan complete Git history
+      - name: Scan Git history
         run: |
-          docker run --rm \
-            --volume "$PWD:/repo" \
+          docker run --rm --network none \
+            --user "$(id -u):$(id -g)" \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/repo,readonly" \
+            --mount "type=bind,src=$RUNNER_TEMP,dst=/reports" \
             --workdir /repo \
-            ghcr.io/gitleaks/gitleaks:v8.28.0 \
-            git --report-format sarif --report-path /repo/gitleaks.sarif --exit-code 0 /repo
+            ghcr.io/gitleaks/gitleaks:v8.28.0@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854 \
+            git --redact=100 --report-format sarif \
+              --report-path /reports/gitleaks.sarif --exit-code 0 /repo
       - name: Upload Gitleaks SARIF
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: gitleaks.sarif
+          sarif_file: ${{ runner.temp }}/gitleaks.sarif
           category: gitleaks-history
