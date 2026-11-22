@@ -2,6 +2,7 @@
 
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { setupHostedSmokeAuth } from './hosted-smoke-auth.mjs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -44,16 +45,13 @@ const launcherDigest = `sha256:${createHash('sha256').update(launcherBytes).dige
 if (buildReport.browserEntryPath !== `/app/app/dist/${launcherFiles.entryFile}` || buildReport.browserBundleDigest !== launcherDigest) {
   throw new Error('Build report does not bind the browser entry digest to the packaged Vite asset');
 }
-const token = process.env.CODEXIA_AUTH_TOKEN;
-if (typeof token !== 'string' || !/^[a-f0-9]{64}$/u.test(token)) {
-  throw new Error('Runtime smoke requires a fresh ephemeral token');
-}
 const dataDirectory = await mkdtemp(path.join(os.tmpdir(), 'codexia-runtime-smoke-'));
 const port = 34117;
 const postgresBin = '/usr/lib/postgresql/17/bin';
 const databaseDirectory = path.join(dataDirectory, 'postgres');
 let databaseStarted = false;
 let child;
+let auth;
 let output = '';
 
 async function request(url, options) {
@@ -80,15 +78,16 @@ try {
   execFileSync(path.join(postgresBin, 'initdb'), ['-D', databaseDirectory, '--no-locale', '--encoding=UTF8', '--auth=trust'], { stdio: 'pipe', timeout: 30_000 });
   execFileSync(path.join(postgresBin, 'pg_ctl'), ['-D', databaseDirectory, '-l', path.join(dataDirectory, 'postgres.log'), '-w', '-t', '30', '-o', `-h 127.0.0.1 -k ${dataDirectory} -p 34118`, 'start'], { stdio: 'pipe', timeout: 35_000 });
   databaseStarted = true;
+  const databaseUrl = 'postgres://node@127.0.0.1:34118/postgres';
+  auth = await setupHostedSmokeAuth({ packageDirectory: '/app', dataDirectory, databaseUrl });
   child = spawn(process.execPath, ['/app/launch.mjs'], {
     cwd: '/app',
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
-      ...process.env,
+      ...auth.env,
       HOST: '127.0.0.1',
       PORT: String(port),
-      CODEXIA_AUTH_TOKEN: token,
-      CODEXIA_DATABASE_URL: 'postgres://node@127.0.0.1:34118/postgres',
+      CODEXIA_DATABASE_URL: databaseUrl,
       CODEXIA_DATABASE_MIGRATE_ON_START: '1',
       CODEXIA_HOSTED_MODE: '0',
       CODEXIA_PROFILE: 'hosted',
@@ -180,6 +179,10 @@ try {
     await Promise.race([new Promise((resolve) => child.once('exit', resolve)), delay(5_000)]);
     if (child.exitCode === null) child.kill('SIGKILL');
   }
-  if (databaseStarted) execFileSync(path.join(postgresBin, 'pg_ctl'), ['-D', databaseDirectory, '-m', 'immediate', '-w', 'stop'], { stdio: 'pipe', timeout: 10_000 });
-  await rm(dataDirectory, { recursive: true, force: true });
+  try {
+    await auth?.close();
+  } finally {
+    if (databaseStarted) execFileSync(path.join(postgresBin, 'pg_ctl'), ['-D', databaseDirectory, '-m', 'immediate', '-w', 'stop'], { stdio: 'pipe', timeout: 10_000 });
+    await rm(dataDirectory, { recursive: true, force: true });
+  }
 }

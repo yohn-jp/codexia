@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { inspectHtml } from './html-document.mjs';
-import { randomBytes } from 'node:crypto';
+import { setupHostedSmokeAuth } from './hosted-smoke-auth.mjs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -90,31 +90,11 @@ async function main() {
   await readFile(path.join(distributionRoot, 'index.html'));
   for (const ui of ['desktop', 'mobile']) await readFile(path.join(distributionRoot, ui, 'index.html'));
 
-  const token = randomBytes(32).toString('hex');
   const dataDirectory = await mkdtemp(path.join(os.tmpdir(), 'codexia-ui-hosted-acceptance-'));
   const baseUrl = new URL('http://127.0.0.1:' + port);
-  const child = spawn(process.execPath, [launchPath], {
-    cwd: packageDirectory,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      HOST: '127.0.0.1',
-      PORT: String(port),
-      CODEXIA_AUTH_TOKEN: token,
-      CODEXIA_DATABASE_URL: databaseUrl,
-      CODEXIA_DATABASE_MIGRATE_ON_START: '1',
-      CODEXIA_HOSTED_MODE: '0',
-      CODEXIA_PROFILE: 'hosted',
-      CODEXIA_DATA_DIR: path.join(dataDirectory, 'data'),
-      CODEXIA_USAGE_DIR: path.join(dataDirectory, 'history'),
-      CODEXIA_MODULE_CACHE_DIR: path.join(dataDirectory, 'module-cache'),
-      CODEXIA_MODULE_PROFILE_PATH: path.join(packageDirectory, 'generated/server.mjs'),
-    },
-  });
-
+  let child;
+  let auth;
   let output = '';
-  child.stdout.setEncoding('utf8').on('data', (chunk) => { output += chunk; });
-  child.stderr.setEncoding('utf8').on('data', (chunk) => { output += chunk; });
 
   async function get(pathname) {
     const response = await fetch(new URL(pathname, baseUrl), {
@@ -144,6 +124,28 @@ async function main() {
   ]);
 
   try {
+    auth = await setupHostedSmokeAuth({ packageDirectory, dataDirectory, databaseUrl });
+    child = spawn(process.execPath, [launchPath], {
+      cwd: packageDirectory,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...auth.env,
+        HOST: '127.0.0.1',
+        PORT: String(port),
+        CODEXIA_DATABASE_URL: databaseUrl,
+        CODEXIA_DATABASE_MIGRATE_ON_START: '1',
+        CODEXIA_HOSTED_MODE: '0',
+        CODEXIA_PROFILE: 'hosted',
+        CODEXIA_DATA_DIR: path.join(dataDirectory, 'data'),
+        CODEXIA_USAGE_DIR: path.join(dataDirectory, 'history'),
+        CODEXIA_MODULE_CACHE_DIR: path.join(dataDirectory, 'module-cache'),
+        CODEXIA_MODULE_PROFILE_PATH: path.join(packageDirectory, 'generated/server.mjs'),
+      },
+    });
+
+    child.stdout.setEncoding('utf8').on('data', (chunk) => { output += chunk; });
+    child.stderr.setEncoding('utf8').on('data', (chunk) => { output += chunk; });
+
     let ready;
     for (let attempt = 0; attempt < 60; attempt += 1) {
       if (child.exitCode !== null) throw new Error('Hosted package exited before readiness: ' + output);
@@ -214,13 +216,16 @@ async function main() {
     }
     console.log('Hosted production smoke passed (' + profile + '): modules [' + (expectedModules.join(',') || 'none') + '], server loaders [' + (expectedServer.join(',') || 'none') + '], browser loaders [' + (expectedBrowser.join(',') || 'none') + '], launcher/Desktop/Mobile CSP and ' + checkedAssets.size + ' exact assets.');
   } finally {
-    child.kill('SIGTERM');
-    await Promise.race([new Promise((resolve) => child.once('exit', resolve)), delay(5_000)]);
-    if (child.exitCode === null) {
-      child.kill('SIGKILL');
-      await Promise.race([new Promise((resolve) => child.once('exit', resolve)), delay(1_000)]);
+    if (child?.exitCode === null) {
+      child.kill('SIGTERM');
+      await Promise.race([new Promise((resolve) => child.once('exit', resolve)), delay(5_000)]);
+      if (child.exitCode === null) {
+        child.kill('SIGKILL');
+        await Promise.race([new Promise((resolve) => child.once('exit', resolve)), delay(1_000)]);
+      }
     }
-    await rm(dataDirectory, { recursive: true, force: true });
+    try { await auth?.close(); }
+    finally { await rm(dataDirectory, { recursive: true, force: true }); }
   }
 
   assert.equal(child.exitCode, 0, 'Hosted production package exited unsuccessfully: ' + output);

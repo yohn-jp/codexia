@@ -55,6 +55,8 @@ const recipeFiles = [
   'scripts/hosted-build.mjs',
   'scripts/composition-persistence.mjs',
   'scripts/hosted-smoke.mjs',
+  'scripts/hosted-smoke-auth.mjs',
+  'scripts/push-auth-lifecycle-oidc.mjs',
   'scripts/runtime-package-closure.mjs',
   'app/vite.config.ts',
   'packages/module-runtime/src/module-plan.ts',

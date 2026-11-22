@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -176,16 +174,13 @@ func build(ctx context.Context, gateway client.Client) (*client.Result, error) {
 		return nil, fmt.Errorf("read hosted runtime result: %w", err)
 	}
 
-	smokeTokenBytes := make([]byte, 32)
-	if _, err := rand.Read(smokeTokenBytes); err != nil {
-		return nil, fmt.Errorf("generate ephemeral startup smoke token: %w", err)
-	}
 	smoke := runtime.File(llb.Copy(*frontend, "/opt/codexia-smoke-postgres/root/", "/", &llb.CopyInfo{CopyDirContentsOnly: true})).
 		File(llb.Copy(*frontend, "/opt/codexia/scripts/hosted-smoke.mjs", "/usr/share/codexia/hosted-smoke.mjs", &llb.CopyInfo{CreateDestPath: true, ChownOpt: &owner})).
+		File(llb.Copy(*frontend, "/opt/codexia/scripts/hosted-smoke-auth.mjs", "/usr/share/codexia/hosted-smoke-auth.mjs", &llb.CopyInfo{CreateDestPath: true, ChownOpt: &owner})).
+		File(llb.Copy(*frontend, "/opt/codexia/scripts/push-auth-lifecycle-oidc.mjs", "/usr/share/codexia/push-auth-lifecycle-oidc.mjs", &llb.CopyInfo{CreateDestPath: true, ChownOpt: &owner})).
 		AddEnv("HOST", "127.0.0.1").
 		AddEnv("PORT", "34117").
 		AddEnv("CODEXIA_HOSTED_MODE", "0").
-		AddEnv("CODEXIA_AUTH_TOKEN", hex.EncodeToString(smokeTokenBytes)).
 		AddEnv("CODEXIA_DATA_DIR", "/tmp/codexia-hosted-smoke/data").
 		AddEnv("CODEXIA_USAGE_DIR", "/tmp/codexia-hosted-smoke/history").
 		AddEnv("CODEXIA_MODULE_CACHE_DIR", "/tmp/codexia-hosted-smoke/module-cache").

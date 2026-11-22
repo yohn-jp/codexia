@@ -1,24 +1,24 @@
 // Disposable OIDC peer and browser-flow driver for the push deployment lifecycle.
 import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { request as requestHttp } from "node:http";
 import { createServer, request as requestHttps } from "node:https";
+import { fileURLToPath } from "node:url";
 
 const apiOrigin = "https://codexia-lifecycle-proxy:4443";
 const registrationOrigin = "https://codexia-auth-registration:8443";
-const idpIssuer = apiOrigin + "/idp";
 const apiIssuer = apiOrigin + "/api/auth";
 const apiAudience = apiOrigin + "/api";
 const callbackPath = "/api/auth/callback/workspace-oidc";
-const clientId = "codexia-fixture-client";
-const clientSecret = "codexia-fixture-oidc-secret-32-characters";
-const identity = {
+export const clientId = "codexia-fixture-client";
+export const clientSecret = "codexia-fixture-oidc-secret-32-characters";
+export const identity = {
   sub: "codexia-fixture-owner",
   email: "codexia-fixture-owner@example.test",
   email_verified: true,
   name: "Codexia Fixture Owner",
 };
-const cert = readFileSync("/fixture/tls.crt");
+const readFixtureCert = () => readFileSync("/fixture/tls.crt");
 
 function requireCondition(condition, message) {
   if (!condition) throw new Error(message);
@@ -47,12 +47,13 @@ function encodeJwtPart(value) {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
 }
 
-function createIdp() {
+export function createIdp({ appOrigin = apiOrigin, setupOrigin = registrationOrigin } = {}) {
+  const issuer = appOrigin + "/idp";
   const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   const key = { ...publicKey.export({ format: "jwk" }), kid: "codexia-fixture-idp-key", use: "sig", alg: "RS256" };
   const codes = new Map();
   const accessTokens = new Map();
-  const callbacks = new Set([apiOrigin + callbackPath, registrationOrigin + callbackPath]);
+  const callbacks = new Set([appOrigin + callbackPath, setupOrigin + callbackPath]);
 
   return async (request, response, url) => {
     const now = Math.floor(Date.now() / 1000);
@@ -61,11 +62,11 @@ function createIdp() {
 
     if (request.method === "GET" && url.pathname === "/idp/.well-known/openid-configuration") {
       return sendJson(response, {
-        issuer: idpIssuer,
-        authorization_endpoint: idpIssuer + "/authorize",
-        token_endpoint: idpIssuer + "/token",
-        userinfo_endpoint: idpIssuer + "/userinfo",
-        jwks_uri: idpIssuer + "/jwks",
+        issuer,
+        authorization_endpoint: issuer + "/authorize",
+        token_endpoint: issuer + "/token",
+        userinfo_endpoint: issuer + "/userinfo",
+        jwks_uri: issuer + "/jwks",
         response_types_supported: ["code"],
         subject_types_supported: ["public"],
         id_token_signing_alg_values_supported: ["RS256"],
@@ -112,7 +113,7 @@ function createIdp() {
 
       const exp = now + 300;
       const header = encodeJwtPart({ alg: key.alg, kid: key.kid });
-      const claims = encodeJwtPart({ ...identity, nonce: pending.nonce, iss: idpIssuer, aud: clientId, iat: now, exp });
+      const claims = encodeJwtPart({ ...identity, nonce: pending.nonce, iss: issuer, aud: clientId, iat: now, exp });
       const payload = header + "." + claims;
       const signature = sign("RSA-SHA256", Buffer.from(payload), privateKey).toString("base64url");
       const accessToken = randomValue();
@@ -165,7 +166,7 @@ function proxyToApi(request, response) {
 function serve() {
   const idp = createIdp();
   const apiHost = new URL(apiOrigin).host;
-  const server = createServer({ cert, key: readFileSync("/fixture/tls.key") }, (request, response) => {
+  const server = createServer({ cert: readFixtureCert(), key: readFileSync("/fixture/tls.key") }, (request, response) => {
     const url = new URL(request.url ?? "/", apiOrigin);
     if (request.headers.host !== apiHost || url.origin !== apiOrigin) {
       return sendJson(response, { error: "invalid_host" }, 403);
@@ -182,10 +183,10 @@ function serve() {
   server.listen(4443, "0.0.0.0");
 }
 
-function httpsRequest(url, { method = "GET", headers = {}, body } = {}) {
+function httpsRequest(url, { method = "GET", headers = {}, body, ca = readFixtureCert() } = {}) {
   return new Promise((resolve, reject) => {
     const request = requestHttps(url, {
-      ca: cert,
+      ca,
       method,
       headers: { ...headers, ...(body === undefined ? {} : { "content-length": Buffer.byteLength(body) }) },
       signal: AbortSignal.timeout(10_000),
@@ -224,13 +225,13 @@ function assertUrl(value, origin, path, step) {
   return url;
 }
 
-function sessionClient(origin) {
+function sessionClient(origin, send = httpsRequest) {
   const cookies = new Map();
   return async (path, options = {}) => {
     const url = new URL(path, origin);
     requireCondition(url.origin === origin, "Session request left its origin");
     const cookie = [...cookies.values()].join("; ");
-    const result = await httpsRequest(url, {
+    const result = await send(url, {
       ...options,
       headers: { ...(cookie ? { cookie } : {}), ...options.headers },
     });
@@ -246,11 +247,11 @@ function sessionClient(origin) {
   };
 }
 
-async function idpCallback(link, origin) {
-  const authorizeUrl = assertUrl(link, apiOrigin, "/idp/authorize", "OIDC sign-in");
+async function idpCallback(link, origin, appOrigin = apiOrigin, send = httpsRequest) {
+  const authorizeUrl = assertUrl(link, appOrigin, "/idp/authorize", "OIDC sign-in");
   requireCondition(authorizeUrl.searchParams.get("redirect_uri") === origin + callbackPath,
     "OIDC sign-in did not bind the expected callback");
-  const authorized = expectStatus(await httpsRequest(authorizeUrl), 302, "Fixture IdP authorization");
+  const authorized = expectStatus(await send(authorizeUrl), 302, "Fixture IdP authorization");
   const callback = assertUrl(authorized.headers.location, origin, callbackPath, "Fixture IdP authorization");
   requireCondition(callback.searchParams.has("code") &&
     callback.searchParams.get("state") === authorizeUrl.searchParams.get("state"),
@@ -258,16 +259,17 @@ async function idpCallback(link, origin) {
   return callback;
 }
 
-async function register() {
-  const request = sessionClient(registrationOrigin);
-  const post = (path) => request(path, { method: "POST", headers: { origin: registrationOrigin } });
+export async function register({ appOrigin = apiOrigin, setupOrigin = registrationOrigin, ca } = {}) {
+  const send = (url, options) => httpsRequest(url, { ...options, ca });
+  const request = sessionClient(setupOrigin, send);
+  const post = (path) => request(path, { method: "POST", headers: { origin: setupOrigin } });
   expectStatus(await post("/register"), 401, "Registration before OIDC sign-in");
   const login = expectStatus(await post("/login"), 200, "Protected registration login");
   const link = login.body.match(/href="([^"]+)"/u)?.[1];
   requireCondition(link, "Protected registration login did not return its IdP link");
-  const callback = await idpCallback(link.replaceAll("&amp;", "&"), registrationOrigin);
+  const callback = await idpCallback(link.replaceAll("&amp;", "&"), setupOrigin, appOrigin, send);
   const finished = expectStatus(await request(callback), 302, "Registration OIDC callback");
-  assertUrl(finished.headers.location, registrationOrigin, "/", "Registration OIDC callback");
+  assertUrl(finished.headers.location, setupOrigin, "/", "Registration OIDC callback");
 
   const { ownerSubject, webClientId, iosClientId, introspectionClientId } =
     jsonResponse(await post("/register"), "Protected OAuth registration");
@@ -439,7 +441,9 @@ async function main() {
   process.stdout.write(JSON.stringify(result) + "\n");
 }
 
-main().catch((error) => {
-  process.stderr.write("Auth lifecycle fixture: " + error.message + "\n");
-  process.exitCode = 1;
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
+  main().catch((error) => {
+    process.stderr.write("Auth lifecycle fixture: " + error.message + "\n");
+    process.exitCode = 1;
+  });
+}
