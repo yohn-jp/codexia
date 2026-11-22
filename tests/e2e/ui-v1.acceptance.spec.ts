@@ -901,7 +901,7 @@ test("UX canon preserves focus and recovery when journal storage fails and retur
   const text = "保存領域が戻るまで失わない原稿。";
   await editor(page).click(); await editor(page).press("ControlOrMeta+a"); await page.keyboard.insertText(text); await expect(page.getByRole("alert").first()).toBeVisible(); await expectMarkdown(page, text);
   await denyWrites(page, false); await editor(page).press("End"); await editor(page).press("!");
-  await expect.poll(async () => (await readPersistenceDrafts(page)).some((draft) => draft.documentId === scene.id && draft.markdown.includes(text)) || (await page.locator(".pg-save-state summary").textContent()) === "保存済み").toBeTruthy();
+  await expect.poll(async () => (await readPersistenceDrafts(page)).some((draft) => draft.documentId === scene.id && draft.markdown.includes(text)) || (await page.locator(".pg-save-state summary").textContent()) === "作品に保存済み").toBeTruthy();
   await expect(editor(page)).toContainText(text);
 });
 
@@ -1108,7 +1108,7 @@ test("journal writes do not spam live save status while a server receipt remains
   expect(changes.length).toBeLessThanOrEqual(3);
   expect(changes).not.toContain("この端末に下書きがあります");
   await expect(details).toContainText("サーバー: PostgreSQLへの保存を確認しました");
-  await expect(details.locator("summary")).toHaveText("保存済み");
+  await expect(details.locator("summary")).toHaveText("作品に保存済み");
 });
 
 test("save details keep the confirmed work version separate from later device input", async ({ page }) => {
@@ -1145,11 +1145,11 @@ test("save details keep the confirmed work version separate from later device in
     releaseFirst();
     await expect.poll(() => persistedMarkdown(page, project.id, scene.id)).toBe(initial + firstAddition);
     await expect(details).toContainText("直前に確認した版は作品に保存されています");
-    await expect(details.locator("summary")).not.toHaveText("保存済み");
+    await expect(details.locator("summary")).not.toHaveText("作品に保存済み");
 
     releaseSecond();
     await expect.poll(() => persistedMarkdown(page, project.id, scene.id)).toBe(initial + firstAddition + secondAddition);
-    await expect(details.locator("summary")).toHaveText("保存済み");
+    await expect(details.locator("summary")).toHaveText("作品に保存済み");
   } finally {
     releaseFirst();
     releaseSecond();
