@@ -342,7 +342,7 @@ test("every persisted snapshot dependency advances the project version, while au
   assert.equal((await persistence.read((reader) => reader.getProject(project.id as ProjectId)))?.version, beforeAuthority);
 });
 
-test("startup certifies equivalent legacy snapshots and transitions only incompatible current projections", async () => {
+test("explicit maintenance certifies equivalent legacy snapshots and transitions only incompatible current projections", async () => {
   const legacyModule = "core.authority.snapshots";
   async function seedLegacy(compatible: boolean) {
     const project = await createProject();
@@ -371,14 +371,20 @@ test("startup certifies equivalent legacy snapshots and transitions only incompa
       assert.equal(await persistence.read(reader=>reader.getModuleRecord(item.project.id as ProjectId,legacyModule,`proof:projection:1:snapshot:${item.project.version}`)),undefined);
     }
   } finally { await readOnly.close(); }
-  await assert.rejects(store.reader(incompatible.project.id), {code:"snapshot_unavailable"});
-  assert.equal((await store.observe(incompatible.project.id)).snapshot.projectVersion, incompatible.project.version);
+  for (const item of [compatible, incompatible]) {
+    await assert.rejects(store.reader(item.project.id), { code: "snapshot_unavailable" });
+    assert.equal((await store.observe(item.project.id)).snapshot.projectVersion, item.project.version);
+    assert.equal(await persistence.read(reader =>
+      reader.getModuleRecord(item.project.id, legacyModule, `proof:projection:1:snapshot:${item.project.version}`)), undefined);
+  }
   const exactFiles = async (reader: SnapshotReader) => Promise.all((await reader.list("")).map(async path => ({path, file:await reader.read(path,"base64")})));
+  const compatibleFiles = await exactFiles(await store.reader(compatible.project.id, compatible.snapshot));
   const oldPinned = await store.reader(incompatible.project.id,incompatible.snapshot);
   const oldFiles = await exactFiles(oldPinned);
   assert.equal(await oldPinned.read(incompatible.knowledgePath), null);
   await store.prepareSnapshotReuse(compatible.project.id);
   assert.deepEqual((await store.reader(compatible.project.id)).snapshot, compatible.snapshot);
+  assert.deepEqual(await exactFiles(await store.reader(compatible.project.id)), compatibleFiles);
   assert.equal((await store.observe(incompatible.project.id)).snapshot.projectVersion, incompatible.project.version);
   let release!: () => void;
   const both = new Promise<void>(resolve => { release = resolve; });
@@ -400,9 +406,6 @@ test("startup certifies equivalent legacy snapshots and transitions only incompa
   const restarted = new CoreStore({persistence});
   assert.deepEqual((await restarted.reader(incompatible.project.id)).snapshot,current.snapshot);
   assert.deepEqual(await exactFiles(await restarted.reader(incompatible.project.id,incompatible.snapshot)),oldFiles);
-  const lazyCompatible = await seedLegacy(true);
-  assert.deepEqual((await restarted.reader(lazyCompatible.project.id)).snapshot,lazyCompatible.snapshot);
-  assert.equal((await restarted.observe(lazyCompatible.project.id)).snapshot.projectVersion,lazyCompatible.project.version);
 });
 
 test("writing statistics include root scenes once without changing chapter and volume subtotals", async () => {

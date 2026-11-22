@@ -406,12 +406,10 @@ export class CoreStore implements MutationCoordinator {
         if (saved) {
           const manifest = storedManifest(saved.value, projectId, project.version);
           const proof = await reader.getModuleRecord(pid(projectId), SNAPSHOTS, projectionProofKey(project.version));
-          if (proof?.value.snapshotRecordVersion === saved.version) return { manifest, needsPersistence: false };
-          const fresh = await this.currentManifest(reader, projectId, project);
-          if (manifestFingerprint(manifest) !== manifestFingerprint(fresh)) {
-            fail(409, "snapshot_unavailable", "Current snapshot requires the projection compatibility transition before reuse");
+          if (proof?.value.snapshotRecordVersion !== saved.version) {
+            fail(409, "snapshot_unavailable", "Current snapshot requires explicit projection maintenance before reuse");
           }
-          return { manifest: fresh, needsPersistence: true };
+          return { manifest, needsPersistence: false };
         }
       }
       return { manifest: await this.currentManifest(reader,projectId,project), needsPersistence: true };
