@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { assertChangeOperation, type ChangeOperation, type ModuleAction, type ModuleActionContext, type ModuleContext, type SnapshotId, type SnapshotReader } from "@codexia/contracts";
+import { assertChangeOperation, type ChangeOperation, type KnowledgeProjectionEntry, type ModuleAction, type ModuleActionContext, type ModuleContext, type SnapshotId, type SnapshotReader } from "@codexia/contracts";
 import { createSearchDefinition, createSearchActions } from "./actions.js";
 import { SnapshotIndexCache } from "./index-cache.js";
 import { TERM_REGISTRY_PATH } from "./terminology.js";
@@ -143,16 +143,31 @@ test("module disposal aborts and invalidates active index work", async () => {
   await assert.rejects(pending, (error: unknown) => (error as { code?: string }).code === "job_cancelled");
 });
 
+function knowledgeEntry(id: string, name: string, status = "confirmed", aliases: Array<{ surface: string; status: string; scope: string | null }> = [], aliasLimitReached = false): KnowledgeProjectionEntry {
+  return {
+    node: { id, name, status, deletedAt: null, type: "lore", attributes: {} },
+    aliases: aliases.map(alias => ({ ...alias, nodeId: id })), aliasLimitReached,
+    relations: [], evidence: [], relationLimitReached: false, evidenceLimitReached: false,
+  };
+}
+
+function withKnowledge(reader: SnapshotReader, entries: readonly KnowledgeProjectionEntry[], digest: string): SnapshotReader {
+  return {
+    ...reader,
+    knowledge: { source: { kind: "knowledge-projection", snapshot: reader.snapshot, revision: digest }, entries, documentMappings: [], nodeLimitReached: false },
+  };
+}
+
 test("native Knowledge references store only identity and path, resolve aliases from pinned snapshot, and retain ambiguity",async()=>{
   const a="11111111-1111-4111-8111-111111111111",b="22222222-2222-4222-8222-222222222222",retired="33333333-3333-4333-8333-333333333333";
-  const path="documents/scene.md",projection="meta/scriptorium/knowledge-context/v1.json";
-  const node=(id:string,name:string,status="confirmed",aliases:Array<{surface:string;status:string;scope:null|string}>=[])=>({node:{id,name,status,deletedAt:null},aliases:aliases.map(alias=>({...alias,nodeId:id}))});
-  const entries=[node(a,"青い塔","confirmed",[{surface:"塔",status:"confirmed",scope:null},{surface:"北塔",status:"ambiguous",scope:null},{surface:"司令塔",status:"confirmed",scope:"chapter"}]),node(b,"赤い塔","confirmed",[{surface:"塔",status:"confirmed",scope:null}]),node(retired,"退役","retired")];
+  const path = "documents/scene.md";
+  const entries=[knowledgeEntry(a,"青い塔","confirmed",[{surface:"塔",status:"confirmed",scope:null},{surface:"北塔",status:"ambiguous",scope:null},{surface:"司令塔",status:"confirmed",scope:"chapter"}]),knowledgeEntry(b,"赤い塔","confirmed",[{surface:"塔",status:"confirmed",scope:null}]),knowledgeEntry(retired,"退役","retired")];
   const registry={schemaVersion:1,terms:[],knowledgeReferences:[{knowledgeId:a,targetPath:path}]};
-  const values={[path]:"青い塔", [TERM_REGISTRY_PATH]:JSON.stringify(registry),[projection]:JSON.stringify({version:1,projectId:snapshot.projectId,entries,nodeLimitReached:false})};
+  const values = { [path]: "青い塔", [TERM_REGISTRY_PATH]: JSON.stringify(registry) };
+  const knowledgeRevision = "a".repeat(64);
   const actions=createSearchActions(moduleContext(async()=>{throw Error("unused")}),new SnapshotIndexCache());
   let proposed:ChangeOperation[]=[];
-  const reader=makeReader(values);
+  const reader = withKnowledge(makeReader(values), entries, knowledgeRevision);
   const context=actionContext(reader,{async propose(operations){proposed=operations;return {id:"link",snapshot,operations,source:"module"}}});
   const resolve=findAction(actions,"search.terms.resolve");
   const out=await resolve.invoke(resolve.inputSchema.parse({text:"😀青い塔、塔、北塔、司令塔、赤い塔、退役"}),context);
@@ -172,20 +187,13 @@ test("native Knowledge references store only identity and path, resolve aliases 
   const stored=JSON.parse(proposed[0]!.writes[0]!.content!);
   assert.deepEqual(stored.knowledgeReferences,[{knowledgeId:a,targetPath:path},{knowledgeId:b,targetPath:path}]);
   assert.doesNotMatch(JSON.stringify(stored),/青い塔|赤い塔|aliases/);
-  assert.ok(proposed[0]!.reads.some(read=>read.path===projection&&read.revision===revision(values[projection]!)));
+  assert.equal(proposed[0]!.readKnowledgeRevision, knowledgeRevision);
+  assert.deepEqual(proposed[0]!.reads.map(({ path }) => path), [TERM_REGISTRY_PATH, path]);
   assert.doesNotThrow(()=>assertChangeOperation(proposed[0]));
   await assert.rejects(()=>link.invoke(link.inputSchema.parse({knowledgeId:retired,targetPath:path}),context),/Confirmed Knowledge unavailable/);
   // New snapshot changes the authoritative aliases; the reference stays unchanged.
   const nextSnapshot = { ...snapshot, projectVersion: 12 };
-  const changed = makeReader({
-    ...values,
-    [projection]: JSON.stringify({
-      version: 1,
-      projectId: nextSnapshot.projectId,
-      entries: [node(a, "新しい塔"), entries[1]],
-      nodeLimitReached: false,
-    }),
-  }, nextSnapshot);
+  const changed = withKnowledge(makeReader(values, nextSnapshot), [knowledgeEntry(a, "新しい塔"), entries[1]!], "b".repeat(64));
   const text = "青い塔、新しい塔";
   const result = await resolve.invoke(resolve.inputSchema.parse({ text }), actionContext(changed));
   assert.ok(result.ok);
@@ -196,17 +204,13 @@ test("native Knowledge references store only identity and path, resolve aliases 
 
 test("incomplete bounded alias inventory fails closed for automatic Knowledge links", async () => {
   const a="11111111-1111-4111-8111-111111111111",b="22222222-2222-4222-8222-222222222222";
-  const path="documents/scene.md",projection="meta/scriptorium/knowledge-context/v1.json";
-  const entry=(id:string,name:string,aliases:Array<{surface:string;status:string;scope:null|string}>,aliasLimitReached=false)=>({
-    node:{id,name,status:"confirmed",deletedAt:null},aliases:aliases.map(alias=>({...alias,nodeId:id})),aliasLimitReached,
-  });
-  // The bounded read of B stopped at 500 aliases; its next alias is "塔", which collides with A.
-  const values={[path]:"塔",[TERM_REGISTRY_PATH]:JSON.stringify({schemaVersion:1,terms:[],knowledgeReferences:[{knowledgeId:a,targetPath:path}]}),
-    [projection]:JSON.stringify({version:1,projectId:snapshot.projectId,entries:[entry(a,"青い塔",[{surface:"塔",status:"confirmed",scope:null}]),entry(b,"赤い塔",[],true)],nodeLimitReached:false})};
+  const path = "documents/scene.md";
+  const values = { [path]: "塔", [TERM_REGISTRY_PATH]: JSON.stringify({ schemaVersion: 1, terms: [], knowledgeReferences: [{ knowledgeId: a, targetPath: path }] }) };
+  const entries = [knowledgeEntry(a, "青い塔", "confirmed", [{surface: "塔", status: "confirmed", scope: null}]), knowledgeEntry(b, "赤い塔", "confirmed", [], true)];
   const actions=createSearchActions(moduleContext(async()=>{throw Error("unused")}),new SnapshotIndexCache());
   const resolve=findAction(actions,"search.terms.resolve");
   let proposed:ChangeOperation[]=[];
-  const context=actionContext(makeReader(values),{async propose(operations){proposed=operations;return {id:"link",snapshot,operations,source:"module"};}});
+  const context=actionContext(withKnowledge(makeReader(values), entries, "c".repeat(64)),{async propose(operations){proposed=operations;return {id:"link",snapshot,operations,source:"module"};}});
   const out=await resolve.invoke(resolve.inputSchema.parse({text:"塔"}),context);
   assert.equal(out.ok,true);
   if(out.ok){
@@ -220,27 +224,25 @@ test("incomplete bounded alias inventory fails closed for automatic Knowledge li
   assert.equal(proposed.length,1);
 });
 
-test("legacy v1 Knowledge snapshots fail closed at the original alias cap", async () => {
-  const a="11111111-1111-4111-8111-111111111111",b="22222222-2222-4222-8222-222222222222";
-  const path="documents/scene.md",projection="meta/scriptorium/knowledge-context/v1.json";
-  const entry=(id:string,name:string,aliases:string[])=>({
-    node:{id,name,status:"confirmed",deletedAt:null},
-    aliases:aliases.map(surface=>({nodeId:id,surface,status:"confirmed",scope:null})),
-  });
-  const actions=createSearchActions(moduleContext(async()=>{throw Error("unused")}),new SnapshotIndexCache());
-  const resolve=findAction(actions,"search.terms.resolve");
-  for(const count of [499,500]){
-    const values={[path]:"塔",[TERM_REGISTRY_PATH]:JSON.stringify({schemaVersion:1,terms:[],knowledgeReferences:[{knowledgeId:a,targetPath:path}]}),
-      [projection]:JSON.stringify({version:1,projectId:snapshot.projectId,entries:[entry(a,"青い塔",["塔"]),entry(b,"赤い塔",Array.from({length:count},(_,i)=>"別名"+i))],nodeLimitReached:false})};
-    const out=await resolve.invoke(resolve.inputSchema.parse({text:"塔"}),actionContext(makeReader(values)));
-    assert.equal(out.ok,true);
-    if(out.ok){
-      const result=out.data as {spans:unknown[];candidates?:Array<{termId:string}>;warning?:string};
-      assert.equal(result.spans.length,count===499?1:0);
-      if(count===500){
-        assert.deepEqual(result.candidates?.map(term=>term.termId),["knowledge-"+a]);
-        assert.equal(result.warning,"knowledge_inventory_truncated");
-      }
-    }
+test("a Knowledge projection from another project or snapshot cannot resolve aliases or bind a proposal", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const path = "documents/scene.md";
+  const reader = withKnowledge(makeReader({
+    [path]: "塔", [TERM_REGISTRY_PATH]: JSON.stringify({ schemaVersion: 1, terms: [], knowledgeReferences: [{ knowledgeId: id, targetPath: path }] }),
+  }), [knowledgeEntry(id, "青い塔", "confirmed", [{ surface: "塔", status: "confirmed", scope: null }])], "d".repeat(64));
+  const actions = createSearchActions(moduleContext(async () => { throw Error("unused"); }), new SnapshotIndexCache());
+  const resolve = findAction(actions, "search.terms.resolve");
+  const link = findAction(actions, "search.terms.linkKnowledge");
+  for (const selected of [{ ...snapshot, projectId: "different-project" }, { ...snapshot, projectVersion: 12 }]) {
+    const context = actionContext({ ...reader, snapshot: selected });
+    const result = await resolve.invoke(resolve.inputSchema.parse({ text: "塔" }), context);
+    assert.ok(result.ok);
+    const data = result.data as { spans: unknown[]; warning?: string };
+    assert.deepEqual(data.spans, []);
+    assert.equal(data.warning, "knowledge_terminology_unavailable");
+    await assert.rejects(() => link.invoke(link.inputSchema.parse({ knowledgeId: id, targetPath: path }), context), /Invalid native Knowledge snapshot/u);
   }
+  const unavailable = await link.invoke(link.inputSchema.parse({ knowledgeId: id, targetPath: path }), actionContext(makeReader({ [path]: "塔" })));
+  assert.equal(unavailable.ok, false);
+  assert.equal(unavailable.error.code, "snapshot_unavailable");
 });

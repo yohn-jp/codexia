@@ -1386,6 +1386,9 @@ function makeActions(moduleContext: StoryCapabilityContext): ModuleAction[] {
     }),
     action("story.world-state.temporal", read, fieldSchema(["sceneId"], ["sceneId"]), async (input, context) => temporalScene(await readStorySnapshot(context.reader), stringValue(input.sceneId, "sceneId"))),
     action("story.knowledge.links",read,fieldSchema([],["sceneId"]),async(input,context)=>{
+      if (!context.reader.knowledge) {
+        throw Object.assign(new Error("Knowledge links are unavailable for this snapshot"), { code: "snapshot_unavailable" });
+      }
       const story=await readStorySnapshot(context.reader,{includeManuscripts:false});
       return nativeKnowledge(context.reader,story,input.sceneId as string|undefined);
     }),
