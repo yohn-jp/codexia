@@ -76,7 +76,7 @@ jobs:
         env:
           GRAPHIFY_BACKEND: none
         run: |
-          python -m pip install --disable-pip-version-check --no-cache-dir graphifyy==0.9.115
+          python -m pip install --disable-pip-version-check --no-cache-dir 'graphifyy[sql,terraform]==0.9.115'
           timeout 600s graphify extract . --code-only \
             --out "$RUNNER_TEMP/graphify-out" \
             --max-workers 2 \
@@ -86,8 +86,9 @@ jobs:
             --exclude 'docs/**' \
             --exclude '**/*.test.*' \
             --exclude '**/*.spec.*'
+          timeout 120s graphify cluster-only "$RUNNER_TEMP/graphify-out" --no-label
           node scripts/graphify-pages/pack.mjs \
-            "$RUNNER_TEMP/graphify-out" "$RUNNER_TEMP/audit-site" "$(git rev-parse HEAD)"
+            "$RUNNER_TEMP/graphify-out/graphify-out" "$RUNNER_TEMP/audit-site" "$(git rev-parse HEAD)"
       - name: Require current PR's review materials
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         env:
