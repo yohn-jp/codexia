@@ -543,6 +543,10 @@ unqualified-search-registries = ["docker.io"]
 prefix = "ghcr.io/yohn-jp/codexia-backend"
 location = "localhost:5000/yohn-jp/codexia-backend"
 insecure = true
+[[registry]]
+prefix = "localhost:5000"
+location = "localhost:5000"
+insecure = true
 REGISTRY
 registry_configured=true
 sudo install -o codexia -g codexia -m 0600 "$tmp/registries.conf" "$fixture_home/.config/containers/registries.conf"
