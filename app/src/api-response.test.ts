@@ -81,6 +81,39 @@ test("unified author review guard preserves the two receipt and approval models"
     approvalModel: "per-operation", applicationModel: "per-operation", status, receipts: [], stale: false,
   };
   assert.equal(responseContracts.authorReviewFeed({ items: [core, native] }), true);
+  const projectId = "project-1";
+  const operations = [
+    { type: "document.update", command: { projectId, documentId: "doc-1", expectedVersion: 4, orderKey: "2000" } },
+    { type: "document.delete", command: { projectId, documentId: "doc-1", expectedVersion: 4 } },
+    { type: "document.create", command: {
+      projectId, documentId: "doc-2", parentId: "chapter-1", kind: "scene", title: "Opening", orderKey: "0001",
+      appendToEnd: true, markdown: "Opening body", authorId: "author-1", idempotencyKey: "create-opening",
+    }, hierarchy: { kind: "scene", logicalId: "opening",
+      volume: { documentId: "volume-1", lookupId: "volume-one" }, chapter: { documentId: "chapter-1", lookupId: "chapter-one" } } },
+    { type: "document.save", command: {
+      projectId, documentId: "doc-1", baseRevisionId: "revision-4", changes: [{ fromUtf16: 0, toUtf16: 5, insert: "New" }],
+      resultingSha256: "a".repeat(64), authorId: "author-1", clientId: "editor", idempotencyKey: "update-opening",
+    } },
+    { type: "document.restore", command: {
+      projectId, documentId: "doc-1", baseRevisionId: "revision-4", sourceRevisionId: "revision-1",
+      authorId: "author-1", idempotencyKey: "restore-opening",
+    } },
+  ];
+  const documentReviews = operations.map((operation, index) => ({
+    ...native, id: "document-change-" + index,
+    changeSet: { ...native.changeSet, id: "document-change-" + index, operations: [operation] },
+  }));
+  assert.equal(responseContracts.authorReviewFeed({ items: [core, native, ...documentReviews] }), true);
+  const malformedRestore = { type: "document.restore", command: {
+    projectId, documentId: "doc-1", baseRevisionId: "revision-4", authorId: "author-1", idempotencyKey: "restore-opening",
+  } };
+  assert.equal(responseContracts.authorReviewFeed({ items: [{
+    ...native, changeSet: { ...native.changeSet, operations: [malformedRestore] },
+  }] }), false);
+  const foreignDelete = { type: "document.delete", command: { projectId: "other-project", documentId: "doc-1", expectedVersion: 4 } };
+  assert.equal(responseContracts.authorReviewFeed({ items: [{
+    ...native, changeSet: { ...native.changeSet, operations: [foreignDelete] },
+  }] }), false);
   assert.equal(responseContracts.authorReviewFeed({ items: [{ ...native, changeSet: { ...native.changeSet, operations: [{ type: "knowledge.future", command: {} }] } }] }), false);
   assert.equal(responseContracts.authorReviewFeed({ items: [{ ...native, approvalModel: "per-operation" }] }), false);
   assert.equal(responseContracts.authorReviewFeed({ items: [{ ...core, status: { ...status, proposal: { ...status.proposal, source: "future" } } }] }), false);

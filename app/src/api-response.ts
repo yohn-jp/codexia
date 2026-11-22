@@ -51,12 +51,29 @@ const contribution: ResponseGuard<UiContribution> = (v): v is UiContribution => 
 const jsonValue = (v: unknown): boolean => v === null || text(v) || typeof v === "number" && Number.isFinite(v) || bool(v) || Array.isArray(v) && v.every(jsonValue) || record(v) && Object.values(v).every(jsonValue);
 const jsonObject = (v: unknown): v is Record<string, unknown> => record(v) && Object.values(v).every(jsonValue);
 const persistenceProject: ResponseGuard<PersistenceProject> = (v): v is PersistenceProject => record(v) && text(v.id) && text(v.title) && jsonObject(v.settings) && integer(v.version) && v.version > 0 && text(v.createdAt) && text(v.updatedAt);
-const nativeOperationTypes = ["knowledge.node.save", "knowledge.alias.save", "knowledge.relation.save", "evidence.anchor.save", "evidence.mention.save", "evidence.assertion.save", "evidence.assertion.link", "knowledge.merge"] as const;
+const nativeOperationTypes = ["document.create", "document.update", "document.delete", "document.save", "document.restore", "knowledge.node.save", "knowledge.alias.save", "knowledge.relation.save", "evidence.anchor.save", "evidence.mention.save", "evidence.assertion.save", "evidence.assertion.link", "knowledge.merge"] as const;
 const nullablePositiveVersion = (v: unknown): boolean => v === null || integer(v) && v > 0;
+const hierarchyParent = (value: unknown): boolean => record(value) && text(value.documentId) && text(value.lookupId);
+const hierarchyDocument = (value: unknown): boolean => record(value) && text(value.logicalId) && (
+  value.kind === "volume" ||
+  value.kind === "chapter" && hierarchyParent(value.volume) ||
+  value.kind === "scene" && hierarchyParent(value.volume) && hierarchyParent(value.chapter)
+);
+const textChange = (value: unknown): boolean => record(value) && integer(value.fromUtf16) && integer(value.toUtf16) &&
+  value.toUtf16 >= value.fromUtf16 && text(value.insert);
 const nativeOperation: ResponseGuard<ChangeSetOperation> = (v): v is ChangeSetOperation => {
   if (!record(v) || !oneOf(v.type, nativeOperationTypes) || !record(v.command)) return false;
   const c = v.command;
   switch (v.type) {
+    case "document.create": return [c.projectId, c.kind, c.title, c.orderKey, c.markdown, c.authorId, c.idempotencyKey].every(text)
+      && optional(c.documentId, text) && optional(c.parentId, nullableText) && optional(c.appendToEnd, bool)
+      && (v.hierarchy === undefined || hierarchyDocument(v.hierarchy));
+    case "document.update": return text(c.projectId) && text(c.documentId) && integer(c.expectedVersion) && c.expectedVersion > 0
+      && optional(c.parentId, nullableText) && optional(c.title, text) && optional(c.orderKey, text);
+    case "document.delete": return text(c.projectId) && text(c.documentId) && integer(c.expectedVersion) && c.expectedVersion > 0;
+    case "document.save": return [c.projectId, c.documentId, c.baseRevisionId, c.authorId, c.clientId, c.idempotencyKey].every(text)
+      && text(c.resultingSha256) && /^[0-9a-f]{64}$/u.test(c.resultingSha256) && Array.isArray(c.changes) && c.changes.every(textChange);
+    case "document.restore": return [c.projectId, c.documentId, c.baseRevisionId, c.sourceRevisionId, c.authorId, c.idempotencyKey].every(text);
     case "knowledge.node.save": return [c.projectId, c.id, c.type, c.name].every(text) && jsonObject(c.attributes) && oneOf(c.status, ["proposed", "confirmed", "retired"]) && nullablePositiveVersion(c.expectedVersion);
     case "knowledge.alias.save": return [c.projectId, c.id, c.nodeId, c.surface, c.normalized].every(text) && nullableText(c.scope) && oneOf(c.status, ["proposed", "confirmed", "ambiguous", "retired"]);
     case "knowledge.relation.save": return [c.projectId, c.id, c.sourceId, c.targetId, c.type].every(text) && jsonObject(c.attributes) && jsonObject(c.validity) && oneOf(c.status, ["proposed", "confirmed", "rejected", "retired"]) && nullablePositiveVersion(c.expectedVersion);
