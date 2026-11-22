@@ -119,6 +119,9 @@ async function hasPasskeyAuthRuntime(): Promise<boolean> {
       credentials: "same-origin",
       cache: "no-store",
       redirect: "error",
+      // Standalone token-mode and degraded auth runtimes must not leave an
+      // optional capability probe in flight for the lifetime of the workspace.
+      signal: AbortSignal.timeout(5_000),
     });
     if (!response.ok) return false;
     const body: unknown = await response.json();
