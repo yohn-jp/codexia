@@ -433,6 +433,21 @@ test('the disposable entry point defaults to token and shares the same auth tran
   assert.doesNotMatch(noOp, /migrate-auth|backup-locked|systemctl --user stop/u);
 });
 
+test('the isolated registration launcher admits only complete OIDC or Passkey bootstrap tuples', () => {
+  const launcher = readFileSync(new URL('../deploy/ansible/bootstrap-auth-registration.sh', import.meta.url), 'utf8');
+  const validTuple = launcher.match(/^\s*!\s*\{\s*(\[\[[\s\S]*?\]\]\s*\|\|\s*\[\[[\s\S]*?\]\])\s*;\s*\}; then$/m);
+  assert.ok(validTuple, 'the launcher must reject the valid-tuple predicate, not reject valid settings');
+  const check = (runtimeOidc, bootstrapSubject, passkeyFields) => spawnSync('bash', ['-euc',
+    `runtime_oidc=${runtimeOidc}; bootstrap_subject=${bootstrapSubject}; passkey_fields=${passkeyFields}; if { ${validTuple[1]}; }; then exit 0; else exit 1; fi`,
+  ], { encoding: 'utf8' });
+  for (const tuple of [['true', 'true', 0], ['false', 'false', 3]]) {
+    assert.equal(check(...tuple).status, 0, `valid registration tuple was rejected: ${tuple.join('/')}`);
+  }
+  for (const tuple of [['true', 'false', 0], ['false', 'false', 2], ['true', 'true', 3]]) {
+    assert.equal(check(...tuple).status, 1, `invalid registration tuple was accepted: ${tuple.join('/')}`);
+  }
+});
+
 test('main-only manual Tailnet diagnostic verifies pinned SSH as codexia without joining PR validation or deployment', () => {
   assert.deepEqual(Object.keys(tailscale.on), ['workflow_dispatch']);
   const job = tailscale.jobs.connectivity;

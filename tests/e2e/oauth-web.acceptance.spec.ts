@@ -48,7 +48,7 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
         await page.getByRole("link", { name: "Continue to the identity provider" }).click();
         await expect(page).toHaveURL(origin + "/");
         const response = page.waitForResponse(origin + "/register");
-        await page.getByRole("button", { name: "Register the approved clients" }).click();
+        await page.getByRole("button", { name: "Register the approved OAuth clients" }).click();
         const registration = await response;
         assert.equal(registration.status(), 200, await registration.text());
         return await registration.json() as BootstrapRegistration;
@@ -72,7 +72,7 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     };
     // Never mutate app/dist: other Playwright shards concurrently serve its
     // standard (non-OAuth) shells from the same checkout.
-    for (const ui of ["launcher", "desktop", "mobile"]) {
+    for (const ui of ["launcher", "desktop", "mobile", "oauth"]) {
       const build = spawnSync("pnpm", ["--filter", "@codexia/app", "exec", "vite", "build"], {
         cwd: resolve("."),
         encoding: "utf8",

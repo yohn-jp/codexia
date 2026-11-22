@@ -42,7 +42,7 @@ bootstrap_subject=false
 if grep -q '^CODEXIA_AUTH_BOOTSTRAP_OWNER_OIDC_SUBJECT=' "$auth_dir/bootstrap.env"; then bootstrap_subject=true; fi
 if grep -q '^CODEXIA_OAUTH_OWNER_SUBJECT=' "$auth_dir/runtime.env" ||
    ! awk '/^(#|$)/ {next} /^CODEXIA_AUTH_BOOTSTRAP_(ORIGIN|OWNER_OIDC_SUBJECT|WEB_REDIRECT_URIS)=[!-~]+$/ {split($0,a,"="); if (seen[a[1]]++) exit 1; next} {exit 1} END {if (!seen["CODEXIA_AUTH_BOOTSTRAP_ORIGIN"] || !seen["CODEXIA_AUTH_BOOTSTRAP_WEB_REDIRECT_URIS"]) exit 1}' "$auth_dir/bootstrap.env" ||
-   { [[ "$runtime_oidc" == true && "$bootstrap_subject" == true && "$passkey_fields" == 0 ]] ||
+   ! { [[ "$runtime_oidc" == true && "$bootstrap_subject" == true && "$passkey_fields" == 0 ]] ||
      [[ "$runtime_oidc" == false && "$bootstrap_subject" == false && "$passkey_fields" == 3 ]]; }; then
   echo 'Registration requires pending runtime settings and approved bootstrap inputs' >&2
   exit 1
