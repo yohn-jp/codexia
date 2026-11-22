@@ -158,7 +158,6 @@ DELETE FROM module_record WHERE project_id IN (:'legacy', :'incompatible') AND m
 UPDATE module_record SET value=jsonb_set(value,'{files}',(value->'files') - 'meta/scriptorium/knowledge-context/v1.json')
  WHERE project_id=:'incompatible' AND module_id='core.authority.snapshots' AND key LIKE 'snapshot:%';
 SQL
-unset preflight_password
 db_state() {
   "$engine" exec "$database_container" psql -X -A -t -v ON_ERROR_STOP=1 -U codexia -d codexia_verify \
     -c "SELECT id,version FROM project ORDER BY id; SELECT project_id,module_id,key,version,md5(value::text) FROM module_record ORDER BY project_id,module_id,key;"
@@ -166,37 +165,90 @@ db_state() {
 before_preflight="$(db_state)"
 [[ "$(printf '%s\n' "$before_preflight" | grep -c '|core.authority.snapshots|snapshot:')" == 2 ]]
 [[ "$before_preflight" != *'|proof:projection:'* ]]
-"$engine" run --detach --name "$preflight_container" --network "$verification_network" \
-  --publish 127.0.0.1::3000 --read-only \
-  --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m \
-  --tmpfs /data:rw,nosuid,nodev,noexec,size=128m,mode=1777 \
-  --tmpfs /history:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
-  --cap-drop ALL --security-opt no-new-privileges \
-  --volume "$secret_directory/preflight-password:/run/secrets/app-password:ro" \
-  "${oci_auth_runtime_args[@]}" \
-  --env CODEXIA_DATA_DIR=/data --env CODEXIA_USAGE_DIR=/history \
-  --env CODEXIA_DATABASE_PASSWORD_FILE=/run/secrets/app-password \
-  --env CODEXIA_DATABASE_USER=codexia_preflight --env CODEXIA_DATABASE_NAME=codexia_verify \
-  --env "CODEXIA_DATABASE_HOST=$database_container" --env CODEXIA_DATABASE_MIGRATE_ON_START=0 \
-  --env 'PGOPTIONS=-c default_transaction_read_only=on' \
-  "$image" >/dev/null
-preflight_port="$("$engine" port "$preflight_container" 3000/tcp | sed -n 's/.*://p')"
-[[ -n "$preflight_port" ]]
-preflight_ready=0
+start_snapshot_preflight() {
+  "$engine" run --detach --name "$preflight_container" --network "$verification_network" \
+    --publish 127.0.0.1::3000 --read-only \
+    --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m \
+    --tmpfs /data:rw,nosuid,nodev,noexec,size=128m,mode=1777 \
+    --tmpfs /history:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
+    --cap-drop ALL --security-opt no-new-privileges \
+    --volume "$secret_directory/preflight-password:/run/secrets/app-password:ro" \
+    "${oci_auth_runtime_args[@]}" \
+    --env CODEXIA_DATA_DIR=/data --env CODEXIA_USAGE_DIR=/history \
+    --env CODEXIA_DATABASE_PASSWORD_FILE=/run/secrets/app-password \
+    --env CODEXIA_DATABASE_USER=codexia_preflight --env CODEXIA_DATABASE_NAME=codexia_verify \
+    --env "CODEXIA_DATABASE_HOST=$database_container" --env CODEXIA_DATABASE_MIGRATE_ON_START=0 \
+    --env 'PGOPTIONS=-c default_transaction_read_only=on' \
+    "$image" >/dev/null
+}
+snapshot_maintenance() {
+  local role="$1" password="$2"
+  shift 2
+  CODEXIA_DATABASE_URL="postgres://$role:$password@$database_container:5432/codexia_verify" \
+    "$engine" run --rm --network "$verification_network" --read-only \
+    --cap-drop ALL --security-opt no-new-privileges --env CODEXIA_DATABASE_URL \
+    --entrypoint=node "$image" /app/node_modules/@codexia/api/dist/maintain-snapshot-projections.js "$@"
+}
+wait_for_snapshot_readiness() {
+  local container="$1" port attempt
+  port="$("$engine" port "$container" 3000/tcp | sed -n 's/.*://p')"
+  [[ -n "$port" ]]
+  for attempt in $(seq 1 60); do
+    if curl --fail --silent "http://127.0.0.1:$port/health/ready" >/dev/null; then return; fi
+    if [[ "$("$engine" inspect --format '{{.State.Running}}' "$container")" != true ]]; then break; fi
+    sleep 1
+  done
+  "$engine" logs "$container" >&2 || true
+  echo "Backend did not become ready after snapshot projection maintenance." >&2
+  return 1
+}
+
+start_snapshot_preflight
 for attempt in $(seq 1 60); do
-  if curl --fail --silent "http://127.0.0.1:$preflight_port/health/ready" >/dev/null; then
-    preflight_ready=1
-    break
-  fi
-  if [[ "$("$engine" inspect --format '{{.State.Running}}' "$preflight_container")" != true ]]; then break; fi
+  [[ "$("$engine" inspect --format '{{.State.Running}}' "$preflight_container")" != true ]] && break
   sleep 1
 done
-if [[ "$preflight_ready" != 1 ]]; then
-  "$engine" logs "$preflight_container" >&2 || true
-  echo "Read-only legacy Snapshot preflight did not become ready." >&2
+[[ "$("$engine" inspect --format '{{.State.Running}} {{.State.ExitCode}}' "$preflight_container")" == 'false 1' ]]
+refusal="$("$engine" logs "$preflight_container" 2>&1)"
+[[ "$refusal" == *SNAPSHOT_PROJECTION_MAINTENANCE_REQUIRED* && "$refusal" == *"$legacy_project"* && "$refusal" == *"$incompatible_project"* ]]
+"$engine" rm --volumes "$preflight_container" >/dev/null
+check_status=0
+check_result="$(snapshot_maintenance codexia_preflight "$preflight_password" --check)" || check_status=$?
+[[ "$check_status" == 2 && "$check_result" == *'"status":"maintenance_required"'* && "$check_result" == *"$legacy_project"* && "$check_result" == *"$incompatible_project"* ]]
+if snapshot_maintenance codexia_preflight "$preflight_password" --apply >"$secret_directory/preflight-apply.log" 2>&1; then
+  echo 'Read-only PostgreSQL role unexpectedly applied the projection transition.' >&2
   exit 1
 fi
+grep -Fxq 'Snapshot projection maintenance requires the writable PostgreSQL role' "$secret_directory/preflight-apply.log"
 [[ "$(db_state)" == "$before_preflight" ]] || { echo "Read-only preflight changed PostgreSQL state." >&2; exit 1; }
+
+snapshot_maintenance codexia "$database_password" --apply --project "$legacy_project" | grep -Fxq '{"status":"ready","projectsProcessed":1}'
+check_status=0
+check_result="$(snapshot_maintenance codexia_preflight "$preflight_password" --check)" || check_status=$?
+[[ "$check_status" == 2 && "$check_result" == *"$incompatible_project"* && "$check_result" != *"$legacy_project"* ]]
+snapshot_maintenance codexia "$database_password" --apply | grep -Fxq '{"status":"ready","projectsProcessed":1}'
+after_maintenance="$(db_state)"
+state_version() { awk -F'|' -v id="$1" '$1 == id && NF == 2 { print $2 }'; }
+legacy_version="$(state_version "$legacy_project" <<<"$before_preflight")"
+incompatible_version="$(state_version "$incompatible_project" <<<"$before_preflight")"
+[[ "$(state_version "$legacy_project" <<<"$after_maintenance")" == "$legacy_version" ]]
+[[ "$(state_version "$incompatible_project" <<<"$after_maintenance")" == "$((incompatible_version + 1))" ]]
+[[ "$(grep -F '|core.authority.snapshots|snapshot:' <<<"$after_maintenance")" == "$(grep -F '|core.authority.snapshots|snapshot:' <<<"$before_preflight")" ]]
+snapshot_maintenance codexia "$database_password" --apply | grep -Fxq '{"status":"ready","projectsProcessed":0}'
+snapshot_maintenance codexia_preflight "$preflight_password" --check | grep -Fxq '{"status":"ready","pendingProjectIds":[]}'
+[[ "$(db_state)" == "$after_maintenance" ]]
+unset preflight_password
+
+start_snapshot_preflight
+wait_for_snapshot_readiness "$preflight_container"
+[[ "$(db_state)" == "$after_maintenance" ]]
 "$engine" kill --signal TERM "$preflight_container" >/dev/null
 [[ "$("$engine" wait "$preflight_container")" == 0 ]]
-echo "Backend read-only Snapshot preflight passed: equivalent and incompatible legacy projections, unchanged PostgreSQL state."
+"$engine" exec "$database_container" psql -X -q -v ON_ERROR_STOP=1 -U codexia -d codexia_verify \
+  -c 'ALTER ROLE codexia_auth_runtime IN DATABASE codexia_verify RESET default_transaction_read_only;'
+"$engine" start "$container_name" >/dev/null
+wait_for_snapshot_readiness "$container_name"
+[[ "$(db_state)" == "$after_maintenance" ]]
+"$engine" kill --signal TERM "$container_name" >/dev/null
+[[ "$("$engine" wait "$container_name")" == 0 ]]
+echo "Explicit Snapshot maintenance verified: startup refusal, read-only check, one-way transition, pinned state retention, and reader/writer restarts."

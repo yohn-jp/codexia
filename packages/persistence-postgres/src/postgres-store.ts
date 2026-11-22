@@ -2280,6 +2280,35 @@ export class PostgresPersistence implements Persistence {
     await this.pool.query("SELECT 1");
   }
 
+  async findUnprovenCurrentSnapshotProjectIds(
+    projectionEpoch: number,
+    options: { projectId?: ProjectId; after?: ProjectId; limit?: number } = {},
+  ): Promise<readonly ProjectId[]> {
+    const { projectId = null, after = null, limit = 100 } = options;
+    if (!Number.isSafeInteger(projectionEpoch) || projectionEpoch < 1 ||
+        !Number.isInteger(limit) || limit < 1 || limit > 200) {
+      throw validationError("Invalid snapshot projection epoch or project page size");
+    }
+    const result = await this.pool.query<{ id: ProjectId }>(
+      `SELECT p.id
+       FROM project p
+       JOIN module_record snapshot ON snapshot.project_id = p.id
+         AND snapshot.module_id = 'core.authority.snapshots'
+         AND snapshot.key = 'snapshot:' || p.version
+       WHERE ($2::uuid IS NULL OR p.id = $2)
+         AND ($3::uuid IS NULL OR p.id > $3)
+         AND NOT EXISTS (
+           SELECT 1 FROM module_record proof
+           WHERE proof.project_id = snapshot.project_id AND proof.module_id = snapshot.module_id
+             AND proof.key = 'proof:projection:' || $1::text || ':' || snapshot.key
+             AND proof.value->'snapshotRecordVersion' = to_jsonb(snapshot.version)
+         )
+       ORDER BY p.id LIMIT $4`,
+      [projectionEpoch, projectId, after, limit],
+    );
+    return result.rows.map(row => row.id);
+  }
+
   /** Recognize the existing dedicated updater reader from the actual DB session, not a client flag. */
   async snapshotStartupMode(): Promise<"transition" | "validate"> {
     const result = await this.pool.query("SELECT current_user AS role_name, current_setting('default_transaction_read_only') AS read_only");
