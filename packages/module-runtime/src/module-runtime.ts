@@ -1,5 +1,5 @@
 import path from "node:path";
-import { snapshotKey, type ActionDescriptor, type ActionResult, type CapabilityDefinition, type ChangeOperation, type ChangeProposal, type HttpContribution, type JobOutcome, type JobRequest, type MachineError, type ModuleAction, type ModuleActionContext, type ModuleAvailability, type ModuleContext, type ModuleDefinition, type ModuleId, type ModuleManifest, type ModuleStatus, type SnapshotId, type WorkerService } from "@codexia/contracts";
+import { snapshotKey, type ActionDescriptor, type ActionResult, type CapabilityDefinition, type ChangeOperation, type ChangeProposal, type HttpContribution, type JobOutcome, type JobRequest, type MachineError, type ModuleAction, type ModuleActionContext, type ModuleAvailability, type ModuleContext, type ModuleDefinition, type ModuleId, type ModuleManifest, type ModuleStatus, type NativeChangeSetReference, type OwnModuleRecord, type OwnModuleRecordProposal, type SnapshotId, type WorkerService } from "@codexia/contracts";
 import { CapabilityProvider, SharedCapabilityPool } from "./capability-pool.js";
 import { resolveModulePlan, type ResolvedModulePlan } from "./module-plan.js";
 import { isModuleId, MODULE_IDS, ModuleRuntimeError } from "./runtime-error.js";
@@ -26,6 +26,14 @@ export interface ModuleRuntimeOptions {
   moduleDrainTimeoutMs?: number;
 }
 
+interface OwnModuleRecordScope {
+  readonly moduleId: ModuleId;
+  readonly snapshot: Readonly<SnapshotId>;
+  readonly access: "owner" | "public";
+  readonly caller?: "author" | "external-agent";
+  readonly effect: ModuleAction["effect"];
+}
+
 export interface ActionHostContext {
   projectId: string;
   reader: ModuleActionContext["reader"];
@@ -42,6 +50,9 @@ export interface ActionHostContext {
   mcpSessionIdentity?: string;
   /** Optional host capability ceiling for nested action discovery and invocation. */
   allowedEffects?: readonly ActionDescriptor["effect"][];
+  /** Host policies receive the executing module and the snapshot already admitted by the API. */
+  readOwnModuleRecord?(scope: OwnModuleRecordScope, key: string, signal: AbortSignal): Promise<OwnModuleRecord | undefined>;
+  proposeOwnModuleRecord?(scope: OwnModuleRecordScope, input: OwnModuleRecordProposal, signal: AbortSignal): Promise<NativeChangeSetReference>;
   /** Host-owned durable tracking around a declared module action. `execute` is safe to call once. */
   trackDomainJob?(
     descriptor: ActionDescriptor & { job: NonNullable<ActionDescriptor["job"]> },
@@ -496,7 +507,7 @@ export class ModuleRuntime {
     const signal = AbortSignal.any([session.controller.signal, host.signal, request.signal, requestController.signal]);
     const proposals: ChangeProposal[] = [];
     try {
-      const context = this.createActionContext(manifest.id, contribution.effect, contribution.effect, host, signal, proposals, 0, false);
+      const context = this.createActionContext(manifest.id, contribution.effect, contribution.effect, host, signal, proposals, 0, false, undefined, contribution.access === "public");
       if (manifest.id === "mcp" && host.mcpSessionIdentity !== undefined) context.mcpSessionIdentity = host.mcpSessionIdentity;
       const response = await contribution.handle(request, context);
       if (signal.aborted) return httpFailure(499, "request_cancelled", "HTTP request was cancelled");
@@ -720,6 +731,47 @@ export class ModuleRuntime {
     return true;
   }
 
+  private ownModuleRecordPorts(
+    moduleId: ModuleId | "core",
+    effect: ModuleAction["effect"],
+    inheritedEffect: ModuleAction["effect"],
+    host: ActionHostContext,
+    signal: AbortSignal,
+    publicContribution: boolean,
+  ): Pick<ModuleActionContext, "readOwnModuleRecord" | "proposeOwnModuleRecord"> {
+    const admitted = host.access === "owner" || (publicContribution && host.access === "public");
+    if (moduleId === "core" || !admitted || (!host.readOwnModuleRecord && !host.proposeOwnModuleRecord)) return {};
+    const snapshot = Object.freeze({ projectId: host.reader.snapshot.projectId, projectVersion: host.reader.snapshot.projectVersion });
+    const access = publicContribution ? "public" : "owner";
+    const caller = publicContribution ? "external-agent" : host.caller;
+    const scope: OwnModuleRecordScope = Object.freeze({ moduleId, snapshot, access, effect, ...(caller ? { caller } : {}) });
+    const assertActive = () => {
+      if (signal.aborted) throw new ModuleRuntimeError("action_cancelled", "Action was cancelled");
+      if (snapshot.projectId !== host.projectId || !sameSnapshot(snapshot, host.reader.snapshot)) {
+        throw new ModuleRuntimeError("action_snapshot_mismatch", "Module record access does not belong to the action snapshot");
+      }
+    };
+    const canPropose = access === "owner" && caller !== "external-agent" && effect === "propose" && inheritedEffect === "propose" &&
+      (!host.allowedEffects || host.allowedEffects.includes("propose"));
+    return {
+      ...(host.readOwnModuleRecord ? { readOwnModuleRecord: async (key) => {
+        assertActive();
+        const record = await host.readOwnModuleRecord!(scope, key, signal);
+        assertActive();
+        return record && { value: record.value, version: record.version };
+      } } : {}),
+      ...(canPropose && host.proposeOwnModuleRecord ? { proposeOwnModuleRecord: async ({ key, value, expectedVersion, idempotencyKey }) => {
+        assertActive();
+        const reference = await host.proposeOwnModuleRecord!(scope, { key, value, expectedVersion, idempotencyKey }, signal);
+        assertActive();
+        if (reference.projectId !== snapshot.projectId) {
+          throw new ModuleRuntimeError("action_snapshot_mismatch", "Module record proposal belongs to another project");
+        }
+        return { id: reference.id, projectId: reference.projectId };
+      } } : {}),
+    };
+  }
+
   private createActionContext(
     moduleId: ModuleId | "core",
     effect: ModuleAction["effect"],
@@ -730,11 +782,13 @@ export class ModuleRuntime {
     depth: number,
     domainJobTracked: boolean,
     progressSink?: DomainJobProgressSink,
+    publicContribution = false,
   ): ModuleActionContext {
     return {
       projectId: host.projectId,
       reader: host.reader,
       signal,
+      ...this.ownModuleRecordPorts(moduleId, effect, inheritedEffect, host, signal, publicContribution),
       ...(progressSink ? { reportProgress: async (progress: number) => {
         if (!Number.isFinite(progress)) throw new ModuleRuntimeError("invalid_job_progress", "Domain job progress must be finite");
         if (signal.aborted) throw new ModuleRuntimeError("action_cancelled", "Action was cancelled");
