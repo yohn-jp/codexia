@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { KNOWLEDGE_CONTEXT_PATH, projectKnowledgeContext } from "./knowledge-context.js";
 import YAML from "yaml";
-import { assertChangeOperation, assertProjectPath, nextOrderKey, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type FileChange, type MutationCoordinator } from "@codexia/contracts";
+import { assertChangeOperation, assertProjectPath, nextOrderKey, snapshotScopeRevision, type SnapshotId, type SnapshotReader, type NativeStoryDocument, type ChangeOperation, type ChangeProposal, type Approval, type ApplyReceipt, type ProposalStatus, type ProjectObservation, type FileChange, type MutationCoordinator } from "@codexia/contracts";
 import { PersistenceError, type Persistence, type PersistenceReader, type PersistenceTransaction, type Project, type ProjectId, type ProjectPageCursor, type Document, type DocumentId, type RevisionId, type JsonObject } from "@codexia/persistence-contracts";
+import type { ChangeSet, ChangeSetApplicationResult } from "@codexia/persistence-contracts";
 import { assertPersistedProposal, assertUserOperationPaths, operationDigest, proposalDigest, isJsonValue } from "./operation-records.js";
 import { createSnapshotIndex, estimateSnapshotIndexBytes, manuscriptBody, type SnapshotIndex } from "./snapshot-index.js";
 export type { Project } from "@codexia/persistence-contracts";
@@ -128,9 +129,39 @@ export class CoreError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); this.name = "CoreError"; }
 }
 export interface CoreStoreOptions { persistence: Persistence }
+/**
+ * A review-feed projection over the two durable proposal authorities.
+ * The discriminant and protocol fields intentionally preserve their distinct
+ * approval granularity and receipt semantics.
+ */
+export type AuthorReviewItem =
+  | {
+      kind: "core-proposal";
+      id: string;
+      projectId: string;
+      createdAt: string;
+      state: ProposalStatus["state"];
+      approvalModel: "per-operation";
+      applicationModel: "per-operation";
+      status: ProposalStatus;
+      receipts: ProposalStatus["applications"];
+      stale: boolean;
+    }
+  | {
+      kind: "native-change-set";
+      id: string;
+      projectId: string;
+      createdAt: string;
+      state: ChangeSet["status"];
+      approvalModel: "whole-change-set";
+      applicationModel: "transaction";
+      changeSet: ChangeSet;
+      receipt: ChangeSetApplicationResult | null;
+    };
 type StoredFile = { content: string; encoding: "utf8" | "base64"; revision: string; documentId?: string; metadata?: boolean };
 type Manifest = { snapshot: SnapshotId; files: Record<string, StoredFile>; documents: Document[]; project: Project };
 type SnapshotIndexEntry = { index: SnapshotIndex; bytes: number };
+type StoryProjectionEntry = { documents: NativeStoryDocument[]; fingerprint: string; bytes: number };
 const AUTHORITY = "core.authority.proposals";
 const SNAPSHOTS = "core.authority.snapshots";
 // Increment this proof epoch when the canonical projected bytes change. Older
@@ -170,10 +201,13 @@ function manifestFingerprint(manifest: Manifest): string { return hash(canonical
 function stableId(projectId: string, key: string): DocumentId {
   const value = hash(`${projectId}\0${key}`); return `${value.slice(0,8)}-${value.slice(8,12)}-5${value.slice(13,16)}-a${value.slice(17,20)}-${value.slice(20,32)}` as DocumentId;
 }
-function makeReader(manifest: Manifest): SnapshotReader {
+function makeReader(manifest: Manifest, nativeStoryDocuments?: () => readonly NativeStoryDocument[]): SnapshotReader {
   const documentKinds = new Map<string, string>(manifest.documents.map((document) => [String(document.id), document.kind]));
   const documentOrder = new Map(manifest.documents.map((document, index) => [String(document.id), index]));
-  return { snapshot: structuredClone(manifest.snapshot),
+  return { snapshot: structuredClone(manifest.snapshot), get nativeStoryDocuments() {
+      const documents = nativeStoryDocuments?.() ?? [];
+      return documents.length ? structuredClone(documents) : undefined;
+    },
     async read(filePath, encoding = "utf8") { safePath(filePath); const file = manifest.files[filePath]; if (!file) return null;
       const bytes = Buffer.from(file.content, file.encoding);
       const documentKind = file.documentId ? documentKinds.get(file.documentId) : undefined;
@@ -207,6 +241,8 @@ export class CoreStore implements MutationCoordinator {
   readonly persistence: Persistence;
   private readonly snapshotIndexes = new Map<string, SnapshotIndexEntry>();
   private snapshotIndexBytes = 0;
+  private readonly storyProjectionCache = new Map<string, StoryProjectionEntry>();
+  private storyProjectionBytes = 0;
   constructor(options: CoreStoreOptions) { this.persistence = options.persistence; }
   async listProjects(): Promise<Project[]> { return [...await this.persistence.read((reader) => reader.listProjects(200))]; }
   async listProjectsPage(limit = 100, after?: ProjectPageCursor): Promise<{ projects: Project[]; nextCursor: ProjectPageCursor | null }> {
@@ -221,6 +257,55 @@ export class CoreStore implements MutationCoordinator {
     return { projects, nextCursor: hasMore && last ? { updatedAt: last.updatedAt, id: last.id } : null };
   }
   async createProject(input: {title: string; settings?: JsonObject}): Promise<Project> { return this.persistence.transaction((tx) => tx.createProject(input)); }
+  private nativeStoryProjection(manifest: Manifest): NativeStoryDocument[] {
+    const key = snapshotKey(manifest.snapshot.projectId, manifest.snapshot.projectVersion);
+    const filesByDocument = new Map(Object.entries(manifest.files).filter(([, file]) => file.metadata && file.documentId).map(([path, file]) => [file.documentId!, { path, file }]));
+    const sources = manifest.documents.flatMap((document, documentOrder) => {
+      if (document.kind !== "volume" && document.kind !== "chapter" && document.kind !== "scene") return [];
+      const source = filesByDocument.get(document.id);
+      if (!source) fail(409, "snapshot_unavailable", "Native Story document metadata is missing from its immutable snapshot");
+      return [{ document, documentOrder, ...source }];
+    });
+    for (const {file} of sources) {
+      if (hash(Buffer.from(file.content, file.encoding)) !== file.revision) fail(409, "snapshot_unavailable", "Native Story metadata does not match its immutable revision");
+    }
+    const fingerprint = hash(JSON.stringify(sources.map(({document,documentOrder,path,file}) =>
+      [document.id,document.kind,document.title,document.orderKey,path,file.revision,documentOrder])));
+    const cached = this.storyProjectionCache.get(key);
+    if (cached?.fingerprint === fingerprint) {
+      this.storyProjectionCache.delete(key);
+      this.storyProjectionCache.set(key, cached);
+      return cached.documents;
+    }
+    const documents = sources.map(({document,documentOrder,path:metadataPath,file}) => {
+      let value: unknown;
+      try { value = YAML.parse(Buffer.from(file.content, file.encoding).toString("utf8")); }
+      catch { fail(409, "snapshot_unavailable", "Native Story metadata is invalid"); }
+      if (!value || typeof value !== "object" || Array.isArray(value) ||
+          typeof (value as Record<string, unknown>).id !== "string" ||
+          (value as Record<string, unknown>).title !== document.title ||
+          (value as Record<string, unknown>).order !== document.orderKey) {
+        fail(409, "snapshot_unavailable", "Native Story metadata does not match its canonical document identity");
+      }
+      return { id: (value as Record<string, unknown>).id as string, kind: document.kind, title: document.title,
+        orderKey: document.orderKey, metadataPath, metadataRevision: file.revision, documentOrder,
+        metadata: value as Record<string, unknown> };
+    });
+    const bytes = Buffer.byteLength(JSON.stringify(documents), "utf8");
+    if (bytes <= MAX_SNAPSHOT_INDEX_BYTES) {
+      if (cached) this.storyProjectionBytes -= cached.bytes;
+      this.storyProjectionCache.delete(key);
+      this.storyProjectionCache.set(key, { documents, fingerprint, bytes });
+      this.storyProjectionBytes += bytes;
+      while (this.storyProjectionCache.size > MAX_SNAPSHOT_INDEX_ENTRIES || this.storyProjectionBytes > MAX_SNAPSHOT_INDEX_BYTES) {
+        const oldest = this.storyProjectionCache.entries().next().value as [string, StoryProjectionEntry] | undefined;
+        if (!oldest) break;
+        this.storyProjectionCache.delete(oldest[0]);
+        this.storyProjectionBytes -= oldest[1].bytes;
+      }
+    }
+    return documents;
+  }
   private async currentManifest(reader: PersistenceReader, projectId: string, knownProject?: Project): Promise<Manifest> {
     const project = knownProject ?? await reader.getProject(pid(projectId));
     if (!project) fail(404,"project_not_found","Project not found");
@@ -232,7 +317,9 @@ export class CoreStore implements MutationCoordinator {
     const records = (await Promise.all([reader.listModuleRecords(pid(projectId),PATHS),reader.listModuleRecords(pid(projectId),ARTIFACTS)])).flat(); const files: Record<string,StoredFile> = {};
     const add = (key: string, content: string, encoding: "utf8"|"base64" = "utf8", documentId?: string, metadata?: boolean) => {
       safePath(key); if (files[key]) fail(409,"duplicate_document_path","Project contains duplicate document paths");
-      files[key] = {content,encoding,revision:hash(Buffer.from(content,encoding)),...(documentId ? {documentId}:{}),...(metadata ? {metadata:true}:{})};
+      const file = {content,encoding,revision:hash(Buffer.from(content,encoding)),...(documentId ? {documentId}:{}),...(metadata ? {metadata:true}:{})};
+      files[key] = file;
+      return file;
     };
     add("meta/project.yaml", YAML.stringify({title:project.title,...project.settings}));
     const byId = new Map(documents.map((document) => [document.id,document]));
@@ -245,7 +332,7 @@ export class CoreStore implements MutationCoordinator {
       const id = metadataFor(document).id;
       return typeof id === "string" ? id : document.id;
     };
-    for (const document of documents) {
+    for (const [documentOrder, document] of documents.entries()) {
       const mapping = mappings.get(document.id);
       const parent = document.parentId ? byId.get(document.parentId) : undefined;
       const grandparent = parent?.parentId ? byId.get(parent.parentId) : undefined;
@@ -265,7 +352,8 @@ export class CoreStore implements MutationCoordinator {
           if (grandparent?.kind === "volume") metadata.volume = projectedId(grandparent);
         }
       }
-      add(metadataPath,YAML.stringify({...metadata,id:projectedId(document),title:document.title,order:document.orderKey,...(document.kind === "scene" ? {manuscript:manuscriptPath}:{})}),"utf8",document.id,true);
+      const projectedMetadata = {...metadata,id:projectedId(document),title:document.title,order:document.orderKey,...(document.kind === "scene" ? {manuscript:manuscriptPath}:{})};
+      add(metadataPath,YAML.stringify(projectedMetadata),"utf8",document.id,true);
       if (document.headRevisionId) {
         const revision = revisionsByHead.get(JSON.stringify([document.id, document.headRevisionId]));
         if (!revision) fail(409,"missing_revision","Document head revision is missing");
@@ -428,7 +516,10 @@ export class CoreStore implements MutationCoordinator {
     }
     fail(409, "snapshot_unavailable", "Project changed repeatedly during the projection compatibility transition");
   }
-  async reader(projectId: string,pinned?: SnapshotId): Promise<SnapshotReader> { return makeReader(await this.manifest(projectId,pinned)); }
+  async reader(projectId: string,pinned?: SnapshotId): Promise<SnapshotReader> {
+    const manifest = await this.manifest(projectId,pinned);
+    return makeReader(manifest,() => this.nativeStoryProjection(manifest));
+  }
   async observe(projectId: string): Promise<ProjectObservation> { const project = await this.persistence.read((reader)=>reader.getProject(pid(projectId))); if (!project) fail(404,"project_not_found","Project not found"); return {snapshot:{projectId,projectVersion:project.version},observedAt:new Date().toISOString(),state:"fresh"}; }
   private logicalId(index: SnapshotIndex, document: Document): string { return index.logicalIdByDocumentId.get(document.id) ?? document.id; }
   private treeFor(manifest: Manifest, index = this.snapshotIndex(manifest)): Tree {
@@ -526,6 +617,54 @@ export class CoreStore implements MutationCoordinator {
         const status = record.value as unknown as ProposalStatus;
         return { projectId: record.projectId, proposal: { ...status, stale: status.proposal.snapshot.projectVersion !== projectVersion } };
       }) };
+    });
+  }
+  /**
+   * Read both durable review authorities into one author-facing feed. This is
+   * a projection only: Core proposals keep per-operation approval/application,
+   * while native ChangeSets keep their single transactional receipt.
+   */
+  async listAuthorReviews(projectId: string, limit = 50): Promise<AuthorReviewItem[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new RangeError("Author review page size must be between 1 and 200");
+    return this.persistence.read(async (reader) => {
+      const project = await reader.getProject(pid(projectId));
+      if (!project) fail(404, "project_not_found", "Project not found");
+      const [proposalQueue, changeSets] = await Promise.all([
+        reader.listProposalReviewQueue([pid(projectId)], AUTHORITY, limit),
+        reader.listChangeSets(pid(projectId), limit),
+      ]);
+      const coreItems: AuthorReviewItem[] = proposalQueue.records
+        .filter(({ record }) => record.key.startsWith("proposal:"))
+        .map(({ record, projectVersion }) => {
+          const status = record.value as unknown as ProposalStatus;
+          return {
+            kind: "core-proposal",
+            id: status.proposal.id,
+            projectId,
+            createdAt: record.createdAt,
+            state: status.state,
+            approvalModel: "per-operation",
+            applicationModel: "per-operation",
+            status,
+            receipts: status.applications,
+            stale: status.proposal.snapshot.projectVersion !== projectVersion,
+          };
+        });
+      const nativeItems: AuthorReviewItem[] = await Promise.all(changeSets.map(async (changeSet) => ({
+        kind: "native-change-set",
+        id: changeSet.id,
+        projectId,
+        createdAt: changeSet.createdAt,
+        state: changeSet.status,
+        approvalModel: "whole-change-set",
+        applicationModel: "transaction",
+        changeSet,
+        receipt: changeSet.status === "applied"
+          ? await reader.getChangeSetReceipt(pid(projectId), changeSet.id) ?? null
+          : null,
+      })));
+      return [...coreItems, ...nativeItems]
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id));
     });
   }
   async getProposal(projectId:string,proposalId:string):Promise<ProposalStatus|null> { return this.persistence.read(async reader => {

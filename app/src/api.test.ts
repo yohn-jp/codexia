@@ -316,11 +316,41 @@ test("Hosted mutation retries only after an explicit admission denial, never aft
   }
 });
 
-test("module snapshot reads one PostgreSQL project revision", async () => {
+test("module snapshot requests only the active document revision", async () => {
   const originalFetch = globalThis.fetch;
   const snapshot = { projectId: "project-1", projectVersion: 12 };
-  globalThis.fetch = async (input) => { assert.equal(String(input), "/api/projects/project-1/snapshot"); return Response.json({ snapshot, files: [] }); };
-  try { assert.deepEqual((await api.moduleSnapshot("project-1")).snapshot, snapshot); } finally { globalThis.fetch = originalFetch; }
+  const documentId = "00000000-0000-4000-8000-000000000001";
+  const document = { path: `documents/${documentId}.md`, revision: "1".repeat(64) };
+  try {
+    globalThis.fetch = async (input) => {
+      assert.equal(String(input), `/api/projects/project-1/snapshot?projection=editor&documentId=${documentId}`);
+      return Response.json({ snapshot, document });
+    };
+    assert.deepEqual(await api.moduleSnapshot("project-1", documentId), { snapshot, document });
+    globalThis.fetch = async () => Response.json({ snapshot, document: { ...document, revision: "invalid" } });
+    await assert.rejects(api.moduleSnapshot("project-1", documentId), { code: "INVALID_RESPONSE" });
+    globalThis.fetch = async () => Response.json({ snapshot, document: { ...document, path: "documents/another.md" } });
+    await assert.rejects(api.moduleSnapshot("project-1", documentId), { code: "INVALID_RESPONSE" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("module snapshot selects the exact document from an older backend response", async () => {
+  const originalFetch = globalThis.fetch;
+  const snapshot = { projectId: "project-1", projectVersion: 12 };
+  const documentId = "00000000-0000-4000-8000-000000000002";
+  const document = { path: `documents/${documentId}.md`, revision: "2".repeat(64) };
+  globalThis.fetch = async () => Response.json({ snapshot, files: [
+    { path: "meta/project.yaml", revision: "3".repeat(64), content: "title: Work" },
+    { ...document, content: "Manuscript" },
+  ] });
+  try {
+    assert.deepEqual(await api.moduleSnapshot("project-1", documentId), { snapshot, document });
+    assert.deepEqual(await api.moduleSnapshot("project-1"), { snapshot, document: null });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("module invocations bind the exact PostgreSQL project revision", async () => {

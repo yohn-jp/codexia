@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import { expectServerSaved, manuscriptEditor } from "./postgres-fixture";
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { createPostgresPersistence } from "@codexia/persistence-postgres";
@@ -244,10 +245,10 @@ test("signed-out Web OAuth preserves the signed request through consent, PKCE, a
     const scene = await createDocument("scene", "OAuth Scene", chapter.title);
     await page.getByRole("heading", { name: scene.title, exact: true }).waitFor();
     const manuscript = "Bearer-authenticated manuscript text survives PostgreSQL revision storage.";
-    await page.getByRole("textbox", { name: "本文", exact: true }).fill(manuscript);
+    await manuscriptEditor(page).fill(manuscript);
     const savePromise = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/v1/persistence/projects/${createdProject.id}/documents/${scene.id}` && response.request().method() === "PATCH" && response.status() === 200);
     await savePromise;
-    await expect(page.locator(".pg-save-state summary")).toHaveText("保存済み", { timeout: 15_000 });
+    await expectServerSaved(page);
 
     const persisted = createPostgresPersistence(fixtureDatabaseUrl);
     try {

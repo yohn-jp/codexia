@@ -32,7 +32,7 @@ async function walkTestFiles(root, directory) {
 export async function captureCoverageInputClosure({ root, runtime, invocation, workflowJob }) {
   const sourcePaths = ['scripts/ci-workspace.mjs', 'scripts/ci-contract.mjs', 'scripts/ci-parallel.mjs',
     'scripts/ci-impact.mjs', 'scripts/ci-group.mjs', 'scripts/ci-profile-artifact.mjs', 'scripts/ci-native-producer.mjs',
-    'scripts/ci-browser-fixture.mjs', 'scripts/ci-task-input-proof.mjs', 'scripts/ci-coverage-inputs.mjs', '.github/workflows/verify.yml'];
+    'scripts/ci-browser-fixture.mjs', 'scripts/ci-task-input-proof.mjs', 'scripts/ci-task-inputs.mjs', 'scripts/ci-coverage-inputs.mjs', '.github/workflows/verify.yml'];
   const packageManifests = (await readdir(path.join(root, 'packages'), { withFileTypes: true }))
     .filter(entry => entry.isDirectory()).map(entry => `packages/${entry.name}/package.json`);
   const moduleManifests = (await readdir(path.join(root, 'modules'), { withFileTypes: true }))

@@ -117,3 +117,37 @@ test("authenticated persistence routes expose the native ChangeSet review lifecy
   const fetched = await handlePersistenceRoute({ ...base, method: "GET", url: `/api/v1/persistence/projects/${p.id}/changesets/${changeSet.id}`, body: null });
   assert.equal((fetched?.body as { receipt: { results: readonly unknown[] } }).receipt.results.length, 1);
 });
+
+test("author review feed joins both durable proposal authorities and keeps their receipts distinct", async () => {
+  const p = await project("author-review-feed");
+  const legacyReceipt = { operationId: "legacy-op", generation: 0, projectVersion: p.version, revisions: [] };
+  await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: p.id, moduleId: "core.authority.proposals", key: "proposal:legacy",
+    value: {
+      proposal: { id: "legacy", snapshot: { projectId: p.id, projectVersion: p.version }, operations: [], source: "module" },
+      state: "partially_approved", approvedOperationIds: ["legacy-op"], applications: [legacyReceipt], appliedOperationIds: [], stale: false,
+    },
+    expectedVersion: null,
+  }));
+  const created = await proposeNativeKnowledgeChange({
+    persistence, projectId: p.id, projectVersion: p.version, actorId: "author", idempotencyKey: "feed-native",
+    operations: [nodeOperation(p.id, "Feed node")],
+  });
+  const authCalls: string[] = [];
+  const response = await handlePersistenceRoute({
+    persistence, method: "GET", url: `/api/v1/persistence/projects/${p.id}/review-feed?limit=20`, body: null,
+    requestHeaders: {}, async requireAuthor() { authCalls.push("author"); return "author"; },
+  });
+  assert.deepEqual(authCalls, ["author"], "the unified feed is restricted to authenticated authors");
+  const items = (response?.body as { items: Array<Record<string, unknown>> }).items;
+  assert.deepEqual(items.map(item => item.kind).sort(), ["core-proposal", "native-change-set"]);
+  const legacy = items.find(item => item.kind === "core-proposal")!;
+  assert.equal(legacy.state, "partially_approved");
+  assert.equal((legacy.receipts as unknown[]).length, 1);
+  const native = items.find(item => item.kind === "native-change-set")!;
+  assert.equal(native.state, "proposed");
+  assert.equal(native.approvalModel, "whole-change-set");
+  assert.equal(native.applicationModel, "transaction");
+  assert.equal(native.receipt, null);
+  assert.equal((native.changeSet as { id: string }).id, created.changeSet.id);
+});

@@ -4,6 +4,29 @@ import { createPostgresPersistence } from "@codexia/persistence-postgres";
 import type { KnowledgeAliasId, KnowledgeNodeId, ProjectId } from "@codexia/persistence-contracts";
 import { createWritingFixture, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaveFailure, expectServerSaved, fillDraft, openManuscriptScene, openProtectionDetails, openRevisionHistory, ownerLogin, readManuscriptMarkdown, readPersistenceDrafts, manuscriptEditor } from "./postgres-fixture";
 
+test("browser quota failure blocks remote writes until explicit draft re-protection succeeds", async ({ page }) => {
+  const fixture = await createWritingFixture(page, "desktop", `Draft re-protection ${crypto.randomUUID()}`, "Before.");
+  let remoteWrites = 0;
+  const documentPath = `/api/v1/persistence/projects/${fixture.project.id}/documents/${fixture.scene.id}`;
+  page.on("request", (request) => {
+    if (request.method() === "PATCH" && new URL(request.url()).pathname === documentPath) remoteWrites += 1;
+  });
+  await setPersistenceDraftWritesFailing(page, true);
+  const draft = "Before. After local quota failure.";
+  await manuscriptEditor(page).fill(draft);
+  await expect(page.locator(".pg-save-state summary")).toHaveText("この入力はまだ保護されていません");
+  await expect(page.locator(".pg-editor").getByRole("alert")).toContainText("復旧用の記録を作れていません");
+  await expect(page.getByRole("button", { name: "下書きを再保護" })).toBeEnabled();
+  expect(remoteWrites).toBe(0);
+  expect((await readPersistenceDrafts(page)).some((item) => item.documentId === fixture.scene.id && item.markdown === draft)).toBe(false);
+
+  await setPersistenceDraftWritesFailing(page, false);
+  await page.getByRole("button", { name: "下書きを再保護" }).click();
+  await expectServerSaved(page);
+  expect(remoteWrites).toBeGreaterThan(0);
+  expect(await readManuscriptMarkdown(page)).toBe(draft);
+});
+
 const authToken = process.env.CODEXIA_E2E_AUTH_TOKEN ?? "";
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
 
@@ -390,7 +413,7 @@ test("a committed delete response for B preserves edited C, its selection, route
     expect.soft(await readManuscriptMarkdown(page)).toBe(expectedMarkdown);
     expect.soft(await editor.evaluate(() => window.getSelection()?.toString() ?? "")).toBe(selectionBefore);
     const protection = await openProtectionDetails(page);
-    await expect.soft(protection.locator("summary")).toHaveText("要確認");
+    await expect.soft(protection.locator("summary")).toHaveText("この入力はまだ保護されていません");
     await expect.soft(protection).toContainText("現在の編集の回復記録を確認できません");
     expect.soft((await storedDocumentMarkdown(page, a.project.id, c.id)).markdown).toBe("C manuscript.");
   } finally {
@@ -537,7 +560,7 @@ test("input added to B while deletion is pending stays visible when IndexedDB pr
     expect.soft(new URL(page.url()).pathname).toContain(`/projects/${fixture.project.id}/scenes/${fixture.second.id}`);
     expect.soft(await readManuscriptMarkdown(page)).toBe(expectedMarkdown);
     const protection = await openProtectionDetails(page);
-    await expect.soft(protection.locator("summary")).toHaveText("要確認");
+    await expect.soft(protection.locator("summary")).toHaveText("この入力はまだ保護されていません");
     await expect.soft(protection).toContainText("現在の編集の回復記録を確認できません");
     expect.soft((await readProjectDocuments(page, fixture.project.id)).some((document) => document.id === fixture.second.id)).toBe(false);
   } finally {
@@ -1542,7 +1565,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await createDocument.getByLabel("文書名").fill(documentTitle);
   await createDocument.getByRole("button", { name: "作成", exact: true }).click();
 
-  const editor = page.getByRole("textbox", { name: "本文", exact: true });
+  const editor = manuscriptEditor(page);
   await expect(editor).toBeVisible();
   await editor.fill(firstDraft);
   await expectServerSaved(page);
@@ -1616,7 +1639,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   const otherDocument = otherPage.locator(".pg-document-list").getByRole("treeitem", { name: new RegExp(documentTitle, "u") });
   await expect(otherDocument).toBeVisible();
   await otherDocument.click();
-  const otherEditor = otherPage.getByRole("textbox", { name: "本文", exact: true });
+  const otherEditor = manuscriptEditor(otherPage);
   await expect(otherEditor).toBeVisible();
   await expect(otherEditor).not.toContainText(firstDraft);
 
@@ -1646,7 +1669,7 @@ test("PostgreSQL workspace saves, recovers, detects conflicts, and links Knowled
   await otherPage.getByLabel("作品", { exact: true }).selectOption({ label: projectTitle });
   await expect(otherPage.locator(".pg-document-list").getByRole("treeitem", { name: new RegExp(documentTitle, "u") })).toBeVisible();
   await otherPage.locator(".pg-document-list").getByRole("treeitem", { name: new RegExp(documentTitle, "u") }).click();
-  const recoveredEditor = otherPage.getByRole("textbox", { name: "本文", exact: true });
+  const recoveredEditor = manuscriptEditor(otherPage);
   await expect(recoveredEditor).toContainText(interruptedDraft);
   await expectServerSaved(otherPage);
   await otherPage.close();

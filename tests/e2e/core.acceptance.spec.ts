@@ -1,10 +1,9 @@
 import { expect, request, test, type Page } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
 import { text as readStreamText } from "node:stream/consumers";
-import { authToken, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaved, ownerLogin, manuscriptEditor as editor, readManuscriptMarkdown, openRevisionHistory } from "./postgres-fixture";
+import { appBaseURL, authToken, expectDeviceDraft, expectNoUnsavedDeviceChanges, expectServerSaved, ownerLogin, manuscriptEditor as editor, readManuscriptMarkdown, openRevisionHistory } from "./postgres-fixture";
 
 const rootPath = "/api/v1/persistence/projects";
-const appBaseURL = process.env.CODEXIA_E2E_BASE_URL ?? process.env.CODEXIA_BASE_URL ?? `http://127.0.0.1:${process.env.CODEXIA_E2E_PORT ?? "4173"}`;
 const appOrigin = new URL(appBaseURL).origin;
 interface Draft { key: string; projectId: string; documentId: string; authorScope: string; markdown: string; generation: number; baseRevisionId: string; baseMarkdown: string; pendingSave?: { markdown: string }; version: number; updatedAt: number }
 interface Read { document: { id: string; title: string; headRevisionId: string }; revision: { id: string; markdown: string } }
@@ -43,8 +42,8 @@ async function fixture(page: Page): Promise<Fixture> {
   };
   const one = await createDocument("Scene One", "a");
   const two = await createDocument("Scene Two", "b");
-  await ownerLogin(page);
   await page.goto(`/desktop/projects/${project.id}/scenes/${one.document.id}`);
+  await expect(page.getByRole("heading", { name: "Database workspace" })).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`/desktop/projects/${project.id}/scenes/${one.document.id}`));
   await expectEditor(page, one.revision.markdown);
   return { projectId: project.id, one, two };
@@ -641,7 +640,7 @@ test("IndexedDB quota failures remain visible and block PostgreSQL writes", asyn
   page.on("request", (request) => { if (request.method() === "PATCH" && new URL(request.url()).pathname === documentPath(f)) remoteWrites += 1; });
   await editor(page).fill("Unsaved text must remain visible after quota failure.");
   await expect(page.getByRole("alert")).toContainText(/quota|容量|保存|database draft/i);
-  await expect(page.getByRole("button", { name: /今すぐ保存|PostgreSQLへ再試行/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /今すぐ保存|保存結果を確認して再試行|作品への保存を再試行/ })).toBeDisabled();
   expect(remoteWrites).toBe(0); expect((await read(page, f)).revision.id).toBe(f.one.revision.id);
   await expectEditor(page, "Unsaved text must remain visible after quota failure.");
 });
@@ -1153,6 +1152,9 @@ test("a project containing only root scenes can export its full text from the pu
   const panel = page.locator('[data-workspace-panel="module:publishing.export.plaintext"]');
   const download = panel.getByRole("button", { name: "テキストをダウンロード" });
   await expect(download).toBeEnabled();
+  const scopeRadio = panel.getByRole("radio", { name: "章", exact: true });
+  expect(await scopeRadio.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThan(28);
+  await expect(panel.getByRole("status")).toContainText("保存済みの本文");
   await panel.getByRole("radio", { name: "章", exact: true }).check();
   await expect(download).toBeDisabled();
   await panel.getByRole("radio", { name: "全文", exact: true }).check();
@@ -1176,7 +1178,7 @@ test("native publishing does not create a distributable link without a public re
   const panel = page.locator('[data-workspace-panel="module:publishing.share-links"]');
   await panel.getByRole("combobox", { name: "範囲", exact: true }).selectOption("scene");
   await expect(panel.getByRole("combobox", { name: "対象", exact: true })).toHaveValue(f.one.document.id);
-  await expect(panel.getByRole("status")).toContainText("公開読者サイトのHTTPS URLが未設定");
+  await expect(panel.getByRole("status").filter({ hasText: "公開読者サイトのHTTPS URLが未設定" })).toBeVisible();
   await expect(panel.getByRole("button", { name: "リンク発行の提案を作成" })).toBeDisabled();
   await expect(panel.locator("code")).toHaveCount(0);
 });
@@ -1273,7 +1275,8 @@ test("native publishing uses the external reader origin and preserves proposal, 
   };
   expect(actionBody.ok).toBe(true);
   expect(actionResponse.request().postDataJSON()).toMatchObject({ input: { kind: "scene", id: rootScene.document.id } });
-  await expect(panel).toContainText("発行提案中 作品直下 / 同じタイトル");
+  await expect(panel).toContainText("発行提案中：作品直下 / 同じタイトル");
+  await expect(panel).toContainText("提案作成時点では読者はまだ開けません");
   await expect(panel).toContainText(`提案 ${actionBody.data.proposalId}`);
 
   const issuedUrl = new URL(await panel.locator("code").innerText());

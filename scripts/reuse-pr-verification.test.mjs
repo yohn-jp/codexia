@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mergeCandidate, assertCandidatePlan, assertCompactNeeds, verifyReusableMainProof, verifyReusableDedicatedProof, DEDICATED_PROOFS } from './reuse-pr-verification.mjs';
+import { mergeCandidate, assertCandidatePlan, assertCompactNeeds, readReusableMainEvidence, verifyReusableMainProof, verifyReusableDedicatedProof, DEDICATED_PROOFS } from './reuse-pr-verification.mjs';
 import { createVerificationPlan, planDigest } from './ci-impact.mjs';
 import { VERIFICATION_GROUPS, requiredBuildProfile } from './ci-contract.mjs';
 
@@ -81,9 +81,14 @@ function fixture(files = ['package.json']) {
   return { state, args, plan, git };
 }
 
-test('same-tree complete PR proof certifies the merged source with exact artifact identities', async () => {
-  const { args, plan } = fixture();
-  const receipt = await verifyReusableMainProof(args);
+test('same-tree certification returns the exact plan and reports it verified alongside the compact receipt', async t => {
+  const { args, plan, state } = fixture();
+  const readArtifact = t.mock.fn(args.readArtifact);
+  const { receipt, plan: verifiedPlan, reports } = await readReusableMainEvidence({ ...args, readArtifact });
+  assert.deepEqual(verifiedPlan, plan);
+  assert.deepEqual(reports, [...state.reports.values()]);
+  assert.deepEqual(readArtifact.mock.calls.map(call => call.arguments[0].id),
+    [receipt.planArtifact.id, ...receipt.evidence.map(item => item.id)]);
   assert.equal(receipt.mode, 'full');
   assert.equal(receipt.sourceSha, sourceSha);
   assert.equal(receipt.evidence.length, plan.groups.length);

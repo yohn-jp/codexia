@@ -84,19 +84,19 @@ function buildDependencies(ids) {
 
 function buildTargets(ids) {
   const targets = buildDependencies(ids);
-  buildWorkspaceTargets(targets);
+  runWorkspaceScript(targets, 'build');
   return targets;
 }
 
-function buildWorkspaceTargets(targets) {
+function runWorkspaceScript(targets, script) {
   for (const id of targets) {
     const manifest = packageManifests.get(id);
-    if (!manifest.scripts?.build) fail(`Workspace dependency ${manifest.name} has no build script`);
+    if (!manifest.scripts?.[script]) fail(`Workspace ${manifest.name} has no ${script} script`);
   }
   if (targets.length === 0) return;
   // pnpm schedules only the selected closure, respecting workspace dependency edges.
   run('pnpm', ['--recursive', '--sort', '--workspace-concurrency=2',
-    ...targets.flatMap(id => ['--filter', packageManifests.get(id).name]), 'run', 'build']);
+    ...targets.flatMap(id => ['--filter', packageManifests.get(id).name]), 'run', script]);
 }
 
 function getUnitTarget(targetId) {
@@ -152,7 +152,7 @@ async function prepareUnitGroup(targets) {
   if (ids.includes('root')) workspaceIds.push('api');
   const dependencies = buildDependencies(workspaceIds);
   if (ids.includes('root') && !dependencies.includes('api')) dependencies.push('api');
-  buildWorkspaceTargets(dependencies);
+  runWorkspaceScript(dependencies, 'build');
 }
 
 function typecheckWorkspaceIds(targetId) {
@@ -208,7 +208,22 @@ async function runTestTypecheck(scope) {
 
 function buildWorkspace() {
   // Build the same 15 pre-profile packages as build:workspace, not profiles or the UI.
-  buildWorkspaceTargets(WORKSPACES.filter(({ id }) => id !== 'app' && id !== 'api').map(({ id }) => id));
+  const targets = WORKSPACES.filter(({ id }) => id !== 'app' && id !== 'api').map(({ id }) => id);
+  runWorkspaceScript(targets, 'build');
+  return targets;
+}
+
+function typecheckWorkspace() {
+  const built = new Set(buildWorkspace());
+  const remaining = WORKSPACES.filter(({ id }) => {
+    const { scripts } = packageManifests.get(id);
+    // Only a successful plain tsc invocation covers the same project checked with --noEmit.
+    const checkedByBuild = built.has(id) && scripts.build === 'tsc -p tsconfig.json' &&
+      scripts.typecheck === 'tsc -p tsconfig.json --noEmit' &&
+      !scripts.postbuild && !scripts.pretypecheck && !scripts.posttypecheck;
+    return !checkedByBuild;
+  });
+  runWorkspaceScript(remaining.map(({ id }) => id), 'typecheck');
 }
 
 function prerequisiteIds(task) {
@@ -387,6 +402,7 @@ else if (command === 'prepare' && targetId === 'unit-group' && scopeOrTarget) aw
 else if (command === 'prepare' && targetId === 'typecheck' && scopeOrTarget) await prepareTypecheck(scopeOrTarget);
 else if (command === 'prepare' && targetId === 'test-types' && scopeOrTarget) await prepareTestTypecheck(scopeOrTarget);
 else if (command === 'unit' && targetId && !scopeOrTarget) await runUnit(targetId);
+else if (command === 'typecheck' && !targetId) typecheckWorkspace();
 else if (command === 'typecheck' && targetId && !scopeOrTarget) await runTypecheck(targetId);
 else if (command === 'test-types' && targetId && !scopeOrTarget) await runTestTypecheck(targetId);
 else if (command === 'coverage' && !targetId && !scopeOrTarget) await checkCoverage();

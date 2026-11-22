@@ -11,7 +11,7 @@ import { runBounded } from './ci-parallel.mjs';
 import { withBrowserFixture } from './ci-browser-fixture.mjs';
 import { assertTaskProducerInventory, sanitizeProducerArguments, selectEquivalentTaskProofs } from './ci-task-input-proof.mjs';
 import { captureCoverageInputClosure, coverageInputProof, coverageInvocation, coverageRuntime } from './ci-coverage-inputs.mjs';
-import { captureTaskInputClosure, taskInputProof } from './ci-task-inputs.mjs';
+import { captureTaskInputSource, taskInputProof } from './ci-task-inputs.mjs';
 
 const group = process.argv[2];
 const plan = validateVerificationPlan(JSON.parse(readFileSync(process.env.CODEXIA_CI_PLAN_PATH ?? 'ci-plan.json', 'utf8')));
@@ -27,6 +27,7 @@ const groupPreparation = new Map();
 const taskInvocationContext = new AsyncLocalStorage();
 const groupInvocations = [];
 let groupPreparationError;
+let taskProofClosureFor;
 const reportDirectory = process.env.CODEXIA_CI_REPORT_DIR ?? path.resolve('ci-results', group);
 mkdirSync(reportDirectory, { recursive: true });
 const run = (command, args, extraEnv = {}) => new Promise((resolve, reject) => {
@@ -162,7 +163,8 @@ async function executeTaskInContext(task, index, scope) {
     const workflowJob = process.env.GITHUB_JOB;
     try {
       const runtime = coverageRuntime();
-      const closure = await captureTaskInputClosure({ root: process.cwd(), sha, task, runtime, invocations: scope.invocations });
+      taskProofClosureFor ??= captureTaskInputSource({ root: process.cwd(), sha, runtime });
+      const closure = taskProofClosureFor(task, scope.invocations);
       inputProof = taskInputProof({ task, closure, sourceSha: sha, planDigest: planDigest(plan),
         workflowRunId, workflowAttempt, workflowJob, runtime });
     } catch (caught) {

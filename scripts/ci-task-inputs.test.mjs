@@ -4,7 +4,11 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { captureTaskInputClosure, taskInvocation } from './ci-task-inputs.mjs';
+import { captureTaskInputSource, taskInvocation } from './ci-task-inputs.mjs';
+
+function captureTaskInputClosure({ root, sha, task, runtime }) {
+  return captureTaskInputSource({ root, sha, runtime })(task);
+}
 
 async function git(root, ...args) {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
@@ -38,12 +42,12 @@ const runtime = { platform: 'linux', arch: 'x64', nodeVersion: 'v24.22.3', execP
 test('task input closure is stable for an unchanged tree and ignores only impact-excluded documentation', async t => {
   const root = await fixture(t);
   const input = { root, sha: await git(root, 'rev-parse', 'HEAD'), task: 'unit-core', runtime };
-  const first = await captureTaskInputClosure(input);
-  assert.deepEqual(await captureTaskInputClosure(input), first);
+  const first = captureTaskInputClosure(input);
+  assert.deepEqual(captureTaskInputClosure(input), first);
   await writeFile(path.join(root, 'docs/README.md'), 'documentation changed\n');
   await git(root, 'add', '.');
   await git(root, 'commit', '-qm', 'docs only');
-  const docsOnly = await captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
+  const docsOnly = captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
   assert.deepEqual(docsOnly, first, 'documentation excluded by the canonical impact rules does not change task inputs');
 });
 
@@ -51,7 +55,7 @@ test('task input closure binds source, test, dependency, environment, toolchain,
   const root = await fixture(t);
   const sha = await git(root, 'rev-parse', 'HEAD');
   const input = { root, sha, task: 'unit-core', runtime };
-  const original = await captureTaskInputClosure(input);
+  const original = captureTaskInputClosure(input);
   for (const [file, nextSha, dimension] of [
     ['packages/core/src/index.ts', 'source change\n', 'source'],
     ['packages/core/index.test.mjs', 'test change\n', 'tests'],
@@ -60,17 +64,54 @@ test('task input closure binds source, test, dependency, environment, toolchain,
     await writeFile(path.join(root, file), nextSha);
     await git(root, 'add', '.');
     await git(root, 'commit', '-qm', 'change ' + dimension);
-    const changed = await captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
+    const changed = captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
     assert.notEqual(changed[dimension], original[dimension], `${dimension} change must invalidate the proof`);
     await git(root, 'reset', '--hard', sha);
   }
-  const changedRuntime = await captureTaskInputClosure({ ...input,
+  const changedRuntime = captureTaskInputClosure({ ...input,
     runtime: { ...runtime, imageVersion: '20261123.1' } });
   assert.notEqual(changedRuntime.environment, original.environment);
   assert.notEqual(changedRuntime.toolchain, original.toolchain);
-  const changedRecipe = await captureTaskInputClosure({ ...input, task: 'unit-app' });
+  const changedRecipe = captureTaskInputClosure({ ...input, task: 'unit-app' });
   assert.notEqual(changedRecipe.recipe, original.recipe);
   assert.notEqual(changedRecipe.producers, original.producers);
+});
+
+test('a historical task closure uses the package manager from its requested Git tree', async t => {
+  const root = await fixture(t);
+  const input = { root, sha: await git(root, 'rev-parse', 'HEAD'), task: 'unit-core', runtime };
+  const historical = captureTaskInputClosure(input);
+  await writeFile(path.join(root, 'package.json'), JSON.stringify({ packageManager: 'pnpm@12.22.0' }));
+  await git(root, 'add', 'package.json');
+  await git(root, 'commit', '-qm', 'new toolchain');
+  assert.deepEqual(captureTaskInputClosure(input), historical);
+  const current = captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
+  assert.notEqual(current.toolchain, historical.toolchain);
+});
+
+test('a deployment document checked by root tests is included in the task source closure', async t => {
+  const root = await fixture(t);
+  const input = { root, sha: await git(root, 'rev-parse', 'HEAD'), task: 'unit-root', runtime };
+  const original = captureTaskInputClosure(input);
+  await mkdir(path.join(root, 'docs/deployment'), { recursive: true });
+  await writeFile(path.join(root, 'docs/deployment/IOS-CLIENT.md'), 'asserted deployment contract\n');
+  await git(root, 'add', '.');
+  await git(root, 'commit', '-qm', 'add executable documentation input');
+  const changed = captureTaskInputClosure({ ...input, sha: await git(root, 'rev-parse', 'HEAD') });
+  assert.notEqual(changed.source, original.source);
+});
+
+test('one source capture preserves independent task recipes and executed invocations', async t => {
+  const root = await fixture(t);
+  const input = { root, sha: await git(root, 'rev-parse', 'HEAD'), runtime };
+  const closureFor = captureTaskInputSource(input);
+  for (const task of ['unit-core', 'unit-app', 'browser-full-ui-v1']) {
+    assert.deepEqual(closureFor(task), captureTaskInputClosure({ ...input, task }));
+  }
+  const configured = closureFor('unit-app');
+  const execution = closureFor('unit-app', { ...taskInvocation('unit-app', runtime.execPath), environmentKeys: ['CUSTOM'] });
+  assert.deepEqual({ ...execution, recipe: configured.recipe }, configured);
+  assert.notEqual(execution.recipe, configured.recipe);
 });
 
 test('task invocations describe only canonical executable work with secret values redacted elsewhere', () => {

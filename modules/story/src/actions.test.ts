@@ -96,6 +96,32 @@ test("scene lists exclude native notes while retaining native and mapped scenes"
   assert.equal(snapshot.files.get(scenePath)?.documentKind, "scene");
 });
 
+test("Story consumes the pinned typed native hierarchy while preserving its file adapter metadata", async () => {
+  const metadataPath = "plot/volumes/v1/chapters/c1/scenes/s1.yaml";
+  const bodyPath = "documents/11111111-1111-4111-8111-111111111111.md";
+  const metadata = { id: "s1", title: "Typed scene", order: "0001", chapter: "c1", volume: "v1", manuscript: bodyPath };
+  const reader: SnapshotReader = {
+    snapshot: { projectId: "native-story", projectVersion: 17 },
+    nativeStoryDocuments: [{ id: "s1", kind: "scene", title: "Typed scene", orderKey: "0001", metadataPath,
+      metadataRevision: revision(yaml(metadata)), documentOrder: 2, metadata }],
+    async read(path) {
+      if (path === metadataPath) return { content: yaml(metadata), revision: revision(yaml(metadata)), documentKind: "scene", documentOrder: 2 };
+      if (path === bodyPath) return { content: "Scene body", revision: revision("Scene body"), documentKind: "scene", documentOrder: 2 };
+      return null;
+    },
+    async list(prefix) { return prefix === "plot" ? [metadataPath] : prefix === "documents" ? [bodyPath] : []; },
+  };
+  const story = await readStorySnapshot(reader);
+  assert.equal(story.snapshot, reader.snapshot);
+  assert.equal(story.entities.get("s1")?.name, undefined, "native and YAML readers preserve the same optional name field");
+  assert.equal(story.entities.get("s1")?.raw.title, "Typed scene");
+  assert.equal(story.entities.get("s1")?.raw.chapter, "c1");
+  assert.equal(story.files.get(metadataPath)?.revision, revision(yaml(metadata)));
+  assert.equal(story.files.get(metadataPath)?.content, yaml(metadata), "the adapter retains exact file bytes for existing Story change-set consumers");
+  assert.equal(story.files.get(metadataPath)?.documentOrder, 2);
+  assert.equal(story.entities.get("doc-ms-11111111-1111-4111-8111-111111111111")?.body, "Scene body");
+});
+
 function makeModuleContext(): ModuleContext {
   return {
     cacheDirectory: "/unused/story-cache",
@@ -1498,6 +1524,27 @@ test("native Knowledge uses explicit ID, not matching names, and keeps unconfirm
   }
   const wrong=makeActionContext(makeReader(files,"another-project"));
   assert.equal((await actionById("story.knowledge.links").invoke({},wrong)).ok,false);
+});
+
+test("Story context is a snapshot-bound action with no Assistant/provider dependency", async () => {
+  const reader = makeReader(fixtureFiles());
+  const context = makeActionContext(reader);
+  let delegated = 0;
+  context.invoke = async () => {
+    delegated++;
+    return { ok: false, snapshot: reader.snapshot, error: { code: "missing_action", message: "not wired", retryable: false } };
+  };
+  const storyActions = createStoryActions(makeModuleContext());
+  assert.ok(storyActions.some((candidate) => candidate.id === "story.context.package"));
+  assert.equal(storyActions.some((candidate) => candidate.id.startsWith("assistant.")), false);
+
+  const result = await invoke<{ sceneId: string; scope: string; parts: Array<{ kind: string }> }>(
+    "story.context.package", { sceneId: "sc-1", scope: "reader" }, context,
+  );
+  assert.deepEqual(result.snapshot, reader.snapshot);
+  assert.equal(result.data.sceneId, "sc-1");
+  assert.equal(result.data.scope, "reader");
+  assert.equal(delegated, 0);
 });
 
 test("author context maps thread relations to the target scene and matches the overview snapshot", async () => {

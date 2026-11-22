@@ -1,15 +1,27 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { BROWSER_SHARDS, VERIFICATION_GROUPS, requiredBuildProfile } from './ci-contract.mjs';
 
 const sha256 = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const testFilePattern = /\.(?:test|spec)\.(?:mjs|cjs|js|mts|cts|ts|tsx|jsx)$/u;
 const dependencyPath = file => /(?:^|\/)(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|\.node-version|\.nvmrc)$/u.test(file);
-const docsOnlyPath = file => file === 'AGENTS.md' || file === 'CONTRIBUTING.md' || file === 'LICENSE' ||
-  /^docs\/.*\.md$/u.test(file) || /^README(?:\.[a-z-]+)?\.md$/iu.test(file);
+export const ROOT_VERIFICATION_DOCUMENTS = Object.freeze([
+  'docs/deployment/BACKUP.md',
+  'docs/deployment/IAC.md',
+  'docs/deployment/IOS-CLIENT.md',
+  'docs/deployment/PUSH-DEPLOYMENT.md',
+  'docs/deployment/PUSH-HOST-CI.md',
+  'docs/deployment/README.md',
+]);
+const rootVerificationDocuments = new Set(ROOT_VERIFICATION_DOCUMENTS);
+
+export function isNonExecutableDocumentation(file) {
+  if (rootVerificationDocuments.has(file)) return false;
+  return file === 'AGENTS.md' || file === 'CONTRIBUTING.md' || file === 'LICENSE' ||
+    /^docs\/.*\.md$/u.test(file) || /^README(?:\.[a-z-]+)?\.md$/iu.test(file);
+}
 const POSTGRES_CI_IMAGE = 'docker.io/library/postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536';
 
 export function taskGroup(task) {
@@ -117,10 +129,14 @@ function taskProducerRecipe(task) {
     runnerClass: group.startsWith('browser-') ? 'pinned-playwright-container' : 'ubuntu-24.04' };
 }
 
-async function treeEntries(root, sha) {
-  const raw = execFileSync('git', ['-c', `safe.directory=${root}`, 'ls-tree', '-r', '-z', '--full-tree', sha], {
+function readGit(root, ...args) {
+  return execFileSync('git', ['-c', `safe.directory=${root}`, ...args], {
     cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
   });
+}
+
+function treeEntries(root, sha) {
+  const raw = readGit(root, 'ls-tree', '-r', '-z', '--full-tree', sha);
   return raw.split('\0').filter(Boolean).map(record => {
     const tab = record.indexOf('\t');
     assert.ok(tab > 0, 'Malformed Git tree record');
@@ -131,32 +147,33 @@ async function treeEntries(root, sha) {
   });
 }
 
-/** Conservative source closure for an exact Git tree; docs excluded by the canonical PR impact selector are non-executable inputs. */
-export async function captureTaskInputClosure({ root, sha, task, runtime, invocations = taskInvocation(task, runtime.execPath) }) {
+/** Capture the immutable inputs shared by all task proofs for one source and runner. */
+export function captureTaskInputSource({ root, sha, runtime }) {
   assert.match(sha ?? '', /^[a-f0-9]{40}$/u, 'Invalid task proof source SHA');
   assert.ok(runtime && typeof runtime === 'object', 'Task proof runtime is required');
-  const group = taskGroup(task);
-  const all = await treeEntries(root, sha);
-  const executable = all.filter(({ file }) => !docsOnlyPath(file));
-  const tests = executable.filter(({ file }) => testFilePattern.test(file));
-  const dependencies = executable.filter(({ file }) => dependencyPath(file));
-  const rootPackage = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
-  const normalizedInvocations = Array.isArray(invocations) ? invocations : [invocations];
-  const canonicalInvocations = normalizedInvocations.map(invocation => ({ ...invocation,
-    executable: invocation.executable === runtime.execPath ? 'node' : invocation.executable }));
-  const closure = {
-    source: sha256(executable.map(({ mode, file, oid }) => [mode, file, oid])),
-    tests: sha256(tests.map(({ mode, file, oid }) => [mode, file, oid])),
-    dependencies: sha256(dependencies.map(({ mode, file, oid }) => [mode, file, oid])),
-    environment: sha256(taskEnvironment(task, runtime)),
-    toolchain: sha256({ nodeVersion: runtime.nodeVersion,
-      platform: runtime.platform, arch: runtime.arch, imageOS: runtime.imageOS ?? null,
-      imageVersion: runtime.imageVersion ?? null, packageManager: rootPackage.packageManager ?? null }),
-    recipe: sha256({ task, group, workflowJob: taskWorkflowJob(task), invocation: canonicalInvocations,
-      groupPreparation: 'scripts/ci-workspace.mjs prepare selected-group', concurrencyLimit: 2 }),
-    producers: sha256(taskProducerRecipe(task)),
+  const executable = treeEntries(root, sha).filter(({ file }) => !isNonExecutableDocumentation(file));
+  const manifest = executable.find(({ file }) => file === 'package.json');
+  assert.ok(manifest?.mode === '100644' || manifest?.mode === '100755', 'Task proof requires a regular root package.json');
+  const { packageManager } = JSON.parse(readGit(root, 'cat-file', 'blob', manifest.oid));
+  const entries = rows => rows.map(({ mode, file, oid }) => [mode, file, oid]);
+  const source = sha256(entries(executable));
+  const tests = sha256(entries(executable.filter(({ file }) => testFilePattern.test(file))));
+  const dependencies = sha256(entries(executable.filter(({ file }) => dependencyPath(file))));
+  const toolchain = sha256({ nodeVersion: runtime.nodeVersion, platform: runtime.platform, arch: runtime.arch,
+    imageOS: runtime.imageOS ?? null, imageVersion: runtime.imageVersion ?? null, packageManager: packageManager ?? null });
+
+  return (task, invocations = taskInvocation(task, runtime.execPath)) => {
+    const group = taskGroup(task);
+    const normalizedInvocations = Array.isArray(invocations) ? invocations : [invocations];
+    const canonicalInvocations = normalizedInvocations.map(invocation => ({ ...invocation,
+      executable: invocation.executable === runtime.execPath ? 'node' : invocation.executable }));
+    return {
+      source, tests, dependencies, environment: sha256(taskEnvironment(task, runtime)), toolchain,
+      recipe: sha256({ task, group, workflowJob: taskWorkflowJob(task), invocation: canonicalInvocations,
+        groupPreparation: 'scripts/ci-workspace.mjs prepare selected-group', concurrencyLimit: 2 }),
+      producers: sha256(taskProducerRecipe(task)),
+    };
   };
-  return closure;
 }
 
 export function taskInputProof({ task, closure, sourceSha, planDigest, workflowRunId, workflowAttempt, workflowJob, runtime, reusedFrom }) {

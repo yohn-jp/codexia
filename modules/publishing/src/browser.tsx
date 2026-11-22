@@ -83,6 +83,15 @@ function scopeCount(tree: ProjectTree | null, scope: "all" | "volume" | "chapter
   return tree.volumes.flatMap((volume) => volume.chapters).find((item) => item.id === id)?.scenes.length ?? 0;
 }
 
+function scopeLabel(tree: ProjectTree | null, scope: "all" | "volume" | "chapter", volumeId: string, chapterId: string): string {
+  if (!tree) return "作品を確認中";
+  if (scope === "all") return `${tree.title}／全文`;
+  const volume = tree.volumes.find((item) => item.id === volumeId);
+  if (scope === "volume") return `${tree.title}／${volume?.title ?? "巻未選択"}`;
+  const chapter = volume?.chapters.find((item) => item.id === chapterId);
+  return `${tree.title}／${volume?.title ?? "巻未選択"}／${chapter?.title ?? "章未選択"}`;
+}
+
 function ScopeFields({
   tree, scope, setScope, volumeId, setVolumeId, chapterId, setChapterId, disabled, radioName,
 }: {
@@ -103,7 +112,7 @@ function ScopeFields({
     <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
       <legend>範囲</legend>
       {(["all", "volume", "chapter"] as const).map((value) => (
-        <label key={value} style={{ marginRight: 12 }}>
+        <label key={value} style={{ display: "inline-flex", alignItems: "center", gap: 8, minHeight: 44, marginRight: 12, paddingInline: 4, cursor: "pointer" }}>
           <input type="radio" name={radioName} checked={scope === value} onChange={() => setScope(value)} disabled={disabled} />
           {value === "all" ? "全文" : value === "volume" ? "巻" : "章"}
         </label>
@@ -121,6 +130,7 @@ function ScopeFields({
         {chapters.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
       </select>
     </label>}
+    <p style={{ margin: 0 }} role="status">書き出す範囲：{scopeLabel(tree, scope, volumeId, chapterId)}。生成時点で保存済みの本文が対象です。未保存の入力と{scope === "all" ? "作者用ノート" : "選択範囲外の章・作者用ノート"}は含まれません。</p>
   </div>;
 }
 
@@ -287,12 +297,13 @@ function EpubPanel({ context, tree, treeError }: { context: BrowserModuleContext
     <p style={{ margin: 0 }}>選択した範囲の保存済み本文を、目次・ルビ・傍点を含む EPUB3 ファイルに書き出します。読者への受け渡しはファイルを取得した後に行います。</p>
     <ScopeFields tree={tree} scope={scope} setScope={setScope} volumeId={volumeId} setVolumeId={setVolumeId}
       chapterId={chapterId} setChapterId={setChapterId} disabled={busy} radioName="publishing-epub-scope" />
-    <label><input type="checkbox" checked={cover} onChange={(event) => setCover(event.target.checked)} />表紙を含める</label>
+    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, minHeight: 44 }}><input type="checkbox" checked={cover} onChange={(event) => setCover(event.target.checked)} />表紙を含める</label>
     {cover && <label style={{ display: "grid", gap: 4 }}>表紙パス
       <input style={fieldStyle()} value={coverPath} onChange={(event) => setCoverPath(event.target.value)} spellCheck={false} />
       <small>プロジェクトルート相対です。ファイルが無ければ表紙なしで出力します。</small>
     </label>}
-    <label><input type="checkbox" checked={appendix} onChange={(event) => setAppendix(event.target.checked)} />図鑑付録（登場人物・設定・場所）を含める</label>
+    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, minHeight: 44 }}><input type="checkbox" checked={appendix} onChange={(event) => setAppendix(event.target.checked)} />図鑑付録（登場人物・設定・場所）を含める</label>
+    {appendix && <p role="status" style={{ margin: 0 }}>図鑑付録を含める設定です。本文とは別に付録の内容も確認してから渡してください。</p>}
     <button type="button" style={buttonStyle()} disabled={busy || empty} onClick={() => void download()}>{busy ? "書き出し中…" : "EPUB をダウンロード"}</button>
     <Status error={error || treeError} status={status} />
   </Panel>;
@@ -483,8 +494,9 @@ function ShareLinksPanel({ context, tree }: { context: BrowserModuleContext; tre
     <p style={{ margin: 0 }}>リンクが失効すると、以後のリンク経由の閲覧が止まります。読者がすでに保存したコピーは手元に残ります。</p>
     {!readerOrigin && <p role="status">公開読者サイトのHTTPS URLが未設定のため、配布用リンクを作成できません。</p>}
     {revealed && <div style={{ border: "1px solid #547a40", padding: 10, overflowWrap: "anywhere" }}>
-      <p>発行提案中 {revealed.target}</p>
-      <p>URLは今回だけ表示されます。控えておき、提案 {revealed.proposalId} を承認して適用した後に読者へ渡してください。</p>
+      <p><strong>発行提案中：{revealed.target}</strong></p>
+      <p>提案作成時点では読者はまだ開けません。「レビュー」作業面で提案 {revealed.proposalId} を承認・適用し、共有リンク一覧が「公開済み」になったことを確認してから渡してください。</p>
+      <p>URLは今回だけ表示されます。閉じる前に控えてください。</p>
       <code>{revealed.url}</code>
       <button type="button" style={buttonStyle()} onClick={() => setRevealed(null)}>閉じる</button>
     </div>}
@@ -502,6 +514,7 @@ function ShareLinksPanel({ context, tree }: { context: BrowserModuleContext; tre
       </label>
       <label>表示名 <input style={fieldStyle()} value={label} onChange={(event) => setLabel(event.target.value)} maxLength={120} /></label>
       <label>提案作成からの有効時間（時間） <input style={fieldStyle()} type="number" min={1} max={87600} value={hours} onChange={(event) => setHours(event.target.value)} /></label>
+      <p role="status" style={{ margin: 0 }}>発行予定：{tree?.title ?? "作品を確認中"}／{options.find((item) => item.id === scopeId)?.title ?? "範囲未選択"}。有効時間は提案作成時点から{hours || "未設定"}時間です。承認・適用するまで読者は開けません。公開後は作品に保存した本文の更新が閲覧に反映されます。作者用ノートと選択範囲外の本文は公開されません。</p>
       <button type="submit" style={buttonStyle()} disabled={busy || !readerOrigin || !options.some((item) => item.id === scopeId)}>{busy ? "準備中…" : "リンク発行の提案を作成"}</button>
     </form>
     <ul style={{ listStyle: "none", padding: 0, display: "grid", gap: 8 }}>

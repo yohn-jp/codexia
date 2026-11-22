@@ -50,3 +50,32 @@ test("native ChangeSet guards accept the seven ordinary operations and the typed
   assert.equal(responseContracts.nativeChangeSets({ changeSets: [{ ...changeSet, operations: [{ type: "knowledge.future", command: {} }] }] }), false);
   assert.equal(responseContracts.nativeChangeSets({ changeSets: [{ ...changeSet, readSet: [{ resource: "knowledge_node", id: "node-1", expectedVersion: "1" }] }] }), false);
 });
+
+test("unified author review guard preserves the two receipt and approval models", () => {
+  const reviewSnapshot = { projectId: "project-1", projectVersion: 1 };
+  const status = {
+    proposal: { id: "legacy-1", snapshot: reviewSnapshot, source: "module", operations: [] },
+    state: "partially_approved", approvedOperationIds: ["op-1"], applications: [], appliedOperationIds: [], stale: false,
+  };
+  const native = {
+    kind: "native-change-set",
+    id: "change-1", projectId: "project-1", createdAt: "2026-01-01T00:00:00.000Z", state: "proposed",
+    approvalModel: "whole-change-set", applicationModel: "transaction",
+    changeSet: {
+      id: "change-1", projectId: "project-1", authorId: "author-1", status: "proposed", version: 1,
+      idempotencyKey: "request-1", operations: [], readSet: [], writeSet: [],
+      provenance: { source: "native-knowledge-service", actorId: "author-1", details: {} },
+      createdAt: "2026-01-01T00:00:00.000Z", approvedAt: null, approvedBy: null, appliedAt: null, rejectedAt: null, rejectedBy: null,
+    },
+    receipt: null,
+  };
+  const core = {
+    kind: "core-proposal",
+    id: "legacy-1", projectId: "project-1", createdAt: "2026-01-01T00:00:00.000Z", state: "partially_approved",
+    approvalModel: "per-operation", applicationModel: "per-operation", status, receipts: [], stale: false,
+  };
+  assert.equal(responseContracts.authorReviewFeed({ items: [core, native] }), true);
+  assert.equal(responseContracts.authorReviewFeed({ items: [{ ...native, changeSet: { ...native.changeSet, operations: [{ type: "knowledge.future", command: {} }] } }] }), false);
+  assert.equal(responseContracts.authorReviewFeed({ items: [{ ...native, approvalModel: "per-operation" }] }), false);
+  assert.equal(responseContracts.authorReviewFeed({ items: [{ ...core, status: { ...status, proposal: { ...status.proposal, source: "future" } } }] }), false);
+});

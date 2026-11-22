@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { createWritingFixture, expectDeviceDraft } from "./postgres-fixture";
+import { createWritingFixture, expectDeviceDraft, manuscriptEditor } from "./postgres-fixture";
 
 const databaseUrl = process.env.CODEXIA_E2E_DATABASE_URL;
 
@@ -19,6 +19,22 @@ async function proposeNode(page: Page, projectId: string, label: string, id = cr
   expect(response.status(), await response.text()).toBe(201);
   const result = await response.json() as { changeSet: { id: string } };
   return { id, changeSetId: result.changeSet.id };
+}
+
+async function proposeCoreMetadata(page: Page, projectId: string, message: string) {
+  const snapshotResponse = await page.request.get(`/api/projects/${projectId}/snapshot`);
+  expect(snapshotResponse.ok(), await snapshotResponse.text()).toBe(true);
+  const { snapshot } = await snapshotResponse.json() as { snapshot: { projectId: string; projectVersion: number } };
+  const id = crypto.randomUUID();
+  const operation = {
+    id: crypto.randomUUID(), generation: 0, projectId, baseProjectVersion: snapshot.projectVersion,
+    effect: "metadata", reads: [], writes: [{ path: `meta/review-feed/${id}.yaml`, revision: null, content: "status: proposed\n" }], message,
+  };
+  const response = await page.request.post(`/api/projects/${projectId}/proposals`, {
+    headers: { Origin: new URL(page.url()).origin }, data: { id, snapshot, operations: [operation] },
+  });
+  expect(response.status(), await response.text()).toBe(201);
+  return id;
 }
 
 async function proposeMerge(page: Page, projectId: string) {
@@ -88,7 +104,7 @@ for (const mode of ["desktop", "mobile"] as const) {
       if (route.request().method() === "PATCH") await route.abort();
       else await route.continue();
     });
-    const editor = page.getByRole("textbox", { name: "本文", exact: true });
+    const editor = manuscriptEditor(page);
     const draft = "提案レビュー中も保持する未保存の原稿😀";
     await editor.fill(draft);
     await expectDeviceDraft(page);
@@ -157,6 +173,58 @@ test("native rejection leaves canonical Knowledge unchanged and stale applicatio
   await expect(page.getByRole("button", { name: "承認済み提案を適用" })).toBeEnabled();
 });
 
+test("author review reads native ChangeSets from the unified feed and keeps one actionable Core card", async ({ page }) => {
+  expect(databaseUrl).toBeTruthy();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { project } = await createWritingFixture(page, "desktop", "Unified author review feed");
+  const coreProposalId = await proposeCoreMetadata(page, project.id, "Core feed proposal");
+  const native = await proposeNode(page, project.id, "Native feed proposal");
+  let feedReads = 0;
+  let nativeListReads = 0;
+  page.on("request", request => {
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith("/review-feed")) feedReads += 1;
+    if (/\/changesets$/u.test(path)) nativeListReads += 1;
+  });
+  await openReview(page, "desktop");
+  await expect(page.getByRole("region", { name: "Core提案の承認と適用状況" })).toHaveCount(0);
+  expect(coreProposalId).toMatch(/^[0-9a-f-]{36}$/u);
+  const nativeCard = page.locator(".native-changeset-card");
+  await expect(nativeCard).toContainText(native.changeSetId);
+  await expect(nativeCard).toContainText("提案");
+  await expect(page.getByRole("button", { name: "承認する" })).toBeEnabled();
+  expect(feedReads).toBe(1);
+  expect(nativeListReads).toBe(0);
+});
+
+test("author review shows durable Core status once when IndexedDB journal is unavailable", async ({ page }) => {
+  expect(databaseUrl).toBeTruthy();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { project } = await createWritingFixture(page, "desktop", "Unavailable review journal");
+  const coreProposalId = await proposeCoreMetadata(page, project.id, "Server-only Core review");
+  await page.addInitScript(() => Object.defineProperty(window, "indexedDB", { configurable: true, get() { throw new Error("IndexedDB unavailable in acceptance test"); } }));
+  await page.reload();
+  await openReview(page, "desktop");
+  const feed = page.getByRole("region", { name: "Core提案の承認と適用状況" });
+  await expect(feed).toContainText("Server-only Core review");
+  await expect(feed).toContainText(coreProposalId);
+  expect(await page.locator(".proposal-card").filter({ hasText: coreProposalId }).count()).toBe(1);
+});
+
+test("author review falls back to the native ChangeSet list when an older backend lacks the feed route", async ({ page }) => {
+  expect(databaseUrl).toBeTruthy();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { project } = await createWritingFixture(page, "desktop", "Legacy author review route");
+  const native = await proposeNode(page, project.id, "Legacy native proposal");
+  let listReads = 0;
+  await page.route(`**/api/v1/persistence/projects/${project.id}/review-feed**`, route => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Not found", code: "NOT_FOUND" }) }));
+  page.on("request", request => { if (/\/changesets$/u.test(new URL(request.url()).pathname)) listReads += 1; });
+  await openReview(page, "desktop");
+  await expect(page.locator(".native-changeset-card")).toContainText(native.changeSetId);
+  await expect(page.locator(".native-review-message")).toContainText("ネイティブChangeSet一覧");
+  expect(listReads).toBe(1);
+});
+
 for (const mode of ["desktop", "mobile"] as const) {
   test(`${mode} author review presents exact native merge effects and refreshes canonical state after approved apply`, async ({ page }) => {
     expect(databaseUrl, "native merge review browser checks require the disposable PostgreSQL fixture").toBeTruthy();
@@ -202,20 +270,20 @@ for (const mode of ["desktop", "mobile"] as const) {
   });
 }
 
-test("project switch fences a late native list response and read-only sessions expose no author controls", async ({ page, browser }) => {
+test("project switch fences a late unified-feed response and read-only sessions expose no author controls", async ({ page, browser }) => {
   expect(databaseUrl).toBeTruthy();
   await page.setViewportSize({ width: 1440, height: 900 });
   const { project } = await createWritingFixture(page, "desktop", "Native review response fence");
   const proposal = await proposeNode(page, project.id, "旧作品だけの候補");
-  const oldListResponse = await page.request.get(`/api/v1/persistence/projects/${project.id}/changesets?limit=100`);
-  const oldList = await oldListResponse.json();
+  const oldFeedResponse = await page.request.get(`/api/v1/persistence/projects/${project.id}/review-feed?limit=100`);
+  const oldFeed = await oldFeedResponse.json();
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   let held = false;
-  await page.route(new RegExp(`/api/v1/persistence/projects/${project.id}/changesets\\?limit=100$`), async (route) => {
+  await page.route(new RegExp(`/api/v1/persistence/projects/${project.id}/review-feed\\?limit=100$`), async (route) => {
     held = true;
     await gate;
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(oldList) }).catch(() => undefined);
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(oldFeed) }).catch(() => undefined);
   });
   await openReview(page, "desktop");
   await expect.poll(() => held).toBe(true);

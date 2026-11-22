@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { randomUUID,createHash } from "node:crypto";
 import { before,after,test } from "node:test";
 import { createPostgresPersistence,migratePostgresDatabase } from "@codexia/persistence-postgres";
+import { CoreStore } from "./index.js";
 const connectionString=process.env.CODEXIA_TEST_DATABASE_URL;if(!connectionString)throw new Error("CODEXIA_TEST_DATABASE_URL is required for Core PostgreSQL integration tests");
 const persistence=createPostgresPersistence(connectionString);before(()=>migratePostgresDatabase(connectionString));after(()=>persistence.close());
+const core = new CoreStore({ persistence });
 async function project(){return persistence.transaction(tx=>tx.createProject({title:randomUUID()}));}
 async function doc(projectId:Awaited<ReturnType<typeof project>>["id"],title="Document"){return persistence.transaction(tx=>tx.createDocument({projectId,kind:"scene",title,orderKey:"1",markdown:"Text 😀",authorId:"owner",idempotencyKey:randomUUID()}));}
 test("metadata CAS rejects stale clients and parent cycles",async()=>{const p=await project(),a=await doc(p.id,"A"),b=await doc(p.id,"B");await persistence.transaction(tx=>tx.updateDocument({projectId:p.id,documentId:b.document.id,parentId:a.document.id,expectedVersion:b.document.version}));await assert.rejects(persistence.transaction(tx=>tx.updateDocument({projectId:p.id,documentId:a.document.id,parentId:b.document.id,expectedVersion:a.document.version})),/cycle/);await persistence.transaction(tx=>tx.updateDocument({projectId:p.id,documentId:a.document.id,title:"Renamed",expectedVersion:a.document.version}));await assert.rejects(persistence.transaction(tx=>tx.updateDocument({projectId:p.id,documentId:a.document.id,title:"Stale",expectedVersion:a.document.version})));});
@@ -95,4 +97,41 @@ test("ChangeSet transition graph preserves approval, version and durable receipt
       }
     }
   }
+});
+
+test("Core author review feed presents durable proposal and ChangeSet lifecycles without flattening their receipts", async () => {
+  const p = await project();
+  const a = await doc(p.id);
+  const coreReceipt = { operationId: "historic-op", generation: 0, projectVersion: p.version, revisions: [] };
+  await persistence.transaction(tx => tx.saveModuleRecord({
+    projectId: p.id, moduleId: "core.authority.proposals", key: "proposal:historic-proposal",
+    value: {
+      proposal: { id: "historic-proposal", snapshot: { projectId: p.id, projectVersion: p.version }, operations: [], source: "module" },
+      state: "partially_approved", approvedOperationIds: ["historic-op"], applications: [coreReceipt], appliedOperationIds: [], stale: false,
+    },
+    expectedVersion: null,
+  }));
+  const created = await persistence.transaction(tx => tx.createChangeSet({
+    projectId: p.id, authorId: "owner", idempotencyKey: randomUUID(),
+    operations: [{ type: "document.update", command: { projectId: p.id, documentId: a.document.id, title: "Reviewed", expectedVersion: a.document.version } }],
+    readSet: [{ resource: "document", id: a.document.id, expectedVersion: a.document.version, expectedRevisionId: a.revision.id }],
+    writeSet: [{ resource: "document", id: a.document.id }], provenance: { source: "author", actorId: "owner", details: {} },
+  }));
+  const approved = await persistence.transaction(tx => tx.approveChangeSet({
+    projectId: p.id, changeSetId: created.changeSet.id, expectedVersion: created.changeSet.version, approvedBy: "owner",
+  }));
+  await persistence.transaction(tx => tx.applyChangeSet({ projectId: p.id, changeSetId: approved.id, expectedVersion: approved.version }));
+
+  const feed = await core.listAuthorReviews(p.id);
+  assert.deepEqual(feed.map(item => item.kind).sort(), ["core-proposal", "native-change-set"]);
+  assert.deepEqual((await core.listAuthorReviews(p.id, 1)).map(item => item.kind).sort(), ["core-proposal", "native-change-set"], "the limit applies to each bounded authority inventory, so neither proposal family is hidden");
+  const legacy = feed.find(item => item.kind === "core-proposal");
+  assert.ok(legacy?.kind === "core-proposal");
+  assert.equal(legacy.status.state, "partially_approved");
+  assert.deepEqual(legacy.receipts, [coreReceipt]);
+  const native = feed.find(item => item.kind === "native-change-set");
+  assert.ok(native?.kind === "native-change-set");
+  assert.equal(native.changeSet.status, "applied");
+  assert.equal(native.receipt?.replayed, false);
+  assert.equal(native.receipt?.results.length, 1);
 });

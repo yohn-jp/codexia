@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeSet, ChangeSetApplicationResult, ChangeSetOperation, SaveEvidenceAnchorCommand } from "@codexia/persistence-contracts";
 import { ApiError } from "../api-error";
-import { api } from "../api";
+import { api, type AuthorReviewFeedItem } from "../api";
 import "./NativeChangeSetReview.css";
 
 type Detail = { changeSet: ChangeSet; receipt?: ChangeSetApplicationResult };
@@ -19,6 +19,10 @@ function sourceProjectVersion(changeSet: ChangeSet): string {
 
 function statusLabel(status: ChangeSet["status"]): string {
   return ({ proposed: "提案", approved: "承認済み・未適用", applied: "適用済み", rejected: "却下" })[status];
+}
+
+function coreProposalStateLabel(state: Extract<AuthorReviewFeedItem, { kind: "core-proposal" }>["state"]): string {
+  return ({ proposed: "承認待ち", partially_approved: "一部承認済み", approved: "承認済み・適用待ち", applied: "適用済み" })[state];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -311,13 +315,15 @@ function DocumentBodyReview({ projectId, operation }: { projectId: string; opera
   return null;
 }
 
-export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, onOpenSource }: {
+export function NativeChangeSetReview({ projectId, canWrite = true, showCoreReviews = false, onApplied, onOpenSource }: {
   projectId: string;
   canWrite?: boolean;
+  showCoreReviews?: boolean;
   onApplied: () => void;
   onOpenSource?: (anchor: SaveEvidenceAnchorCommand, quote: string) => Promise<void>;
 }) {
   const [changeSets, setChangeSets] = useState<ChangeSet[]>([]);
+  const [coreReviews, setCoreReviews] = useState<Array<Extract<AuthorReviewFeedItem, { kind: "core-proposal" }>>>([]);
   const [selectedId, setSelectedId] = useState("");
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -340,13 +346,29 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, o
     setDetail(null);
     setSourceQuote(null);
     try {
-      const result = await api.nativeChangeSets(projectId, 100, signal);
+      let reviewFeed: Awaited<ReturnType<typeof api.authorReviewFeed>> | null = null;
+      let legacyList: Awaited<ReturnType<typeof api.nativeChangeSets>> | null = null;
+      if (canWrite) {
+        try {
+          reviewFeed = await api.authorReviewFeed(projectId, 100, signal);
+        } catch (error) {
+          if (!(error instanceof ApiError) || error.status !== 404) throw error;
+          legacyList = await api.nativeChangeSets(projectId, 100, signal);
+        }
+      } else {
+        legacyList = await api.nativeChangeSets(projectId, 100, signal);
+      }
+      const changeSets = reviewFeed
+        ? reviewFeed.items.filter((item): item is Extract<AuthorReviewFeedItem, { kind: "native-change-set" }> => item.kind === "native-change-set").map(item => item.changeSet)
+        : legacyList!.changeSets;
       if (signal?.aborted || sequence.current !== currentSequence) return;
-      if (result.changeSets.some((item) => item.projectId !== projectId)) throw new Error("ChangeSetの作品スコープが一致しません。");
-      setChangeSets(result.changeSets);
-      const nextId = requestedId && result.changeSets.some((item) => item.id === requestedId)
+      if (changeSets.some((item) => item.projectId !== projectId) || reviewFeed?.items.some((item) => item.projectId !== projectId)) throw new Error("提案の作品スコープが一致しません。");
+      setChangeSets(changeSets);
+      setCoreReviews(showCoreReviews ? reviewFeed?.items.filter((item): item is Extract<AuthorReviewFeedItem, { kind: "core-proposal" }> => item.kind === "core-proposal") ?? [] : []);
+      if (!reviewFeed && canWrite) setMessage("統合レビューfeedは利用できないため、ネイティブChangeSet一覧を既存APIから読み込みました。");
+      const nextId = requestedId && changeSets.some((item) => item.id === requestedId)
         ? requestedId
-        : result.changeSets.some((item) => item.id === selectedIdRef.current) ? selectedIdRef.current : result.changeSets[0]?.id ?? "";
+        : changeSets.some((item) => item.id === selectedIdRef.current) ? selectedIdRef.current : changeSets[0]?.id ?? "";
       setSelectedId(nextId);
       if (!nextId) setDetail(null);
       else {
@@ -360,11 +382,12 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, o
     } finally {
       if (!signal?.aborted && sequence.current === currentSequence) setLoading(false);
     }
-  }, [projectId]);
+  }, [canWrite, projectId, showCoreReviews]);
 
   useEffect(() => {
     if (!projectId) {
       setChangeSets([]);
+      setCoreReviews([]);
       setSelectedId("");
       setDetail(null);
       setLoading(false);
@@ -372,6 +395,7 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, o
     }
     const controller = new AbortController();
     setChangeSets([]);
+    setCoreReviews([]);
     setSelectedId("");
     setDetail(null);
     void load(controller.signal);
@@ -487,6 +511,31 @@ export function NativeChangeSetReview({ projectId, canWrite = true, onApplied, o
       {loading && <span role="status">提案を読み込んでいます。</span>}
     </div>
     {message && <p className="native-review-message" role="alert">{message}</p>}
+    {coreReviews.length > 0 && <section className="native-review-core-feed" aria-label="Core提案の承認と適用状況">
+      <div className="native-review-queue-heading"><h3>操作単位の提案記録</h3><span>{coreReviews.length}件</span></div>
+      <p>保存済みのCore提案状態とPostgreSQL適用receiptを表示します。元の変更内容は、下の「確認待ちの提案」でブラウザー回復記録と照合して確認します。</p>
+      <ul className="proposal-list">
+        {coreReviews.map(item => {
+          const operationCount = item.status.proposal.operations.length;
+          const title = item.status.proposal.operations[0]?.message ?? "元の変更内容をこのブラウザーで確認できません";
+          return <li key={item.id}>
+            <article className="proposal-card">
+              <header className="native-review-detail-meta"><strong>{title}</strong><span>{coreProposalStateLabel(item.state)}</span></header>
+              <p>{item.status.proposal.source} · {operationCount}件の操作 · {item.receipts.length}件の適用receipt</p>
+              {item.status.payloadComplete === false && <p role="status">PostgreSQL記録には承認済み操作だけがあります。元の提案内容は完全ではないため、回復記録との照合前に表示・承認できません。</p>}
+              {item.stale && <p role="status">基準snapshotより作品versionが進んでいます。適用時に前提条件を再確認します。</p>}
+              <details><summary>保存済みの承認状態とreceipt</summary><pre role="region" aria-label="Core提案の承認状態とreceipt" tabIndex={0}>{JSON.stringify({
+                proposalId: item.id,
+                approvedOperationIds: item.status.approvedOperationIds,
+                appliedOperationIds: item.status.appliedOperationIds,
+                receipts: item.receipts,
+                payloadComplete: item.status.payloadComplete ?? true,
+              }, null, 2)}</pre></details>
+            </article>
+          </li>;
+        })}
+      </ul>
+    </section>}
     {changeSets.length === 0 && !loading
       ? <div className="native-review-empty"><span aria-hidden="true">—</span><h3>この作品にネイティブ提案はありません。</h3><p>承認待ちや適用済みの変更が届くと、ここに表示されます。</p></div>
       : <div className="native-review-layout">
