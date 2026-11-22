@@ -20,6 +20,16 @@ Collector: [collect.mjs](../../scripts/ci-dashboard/collect.mjs); analyzer: [ana
 3. Fetch attempt-scoped job inventories and recorded step timestamps. Fail the view on incomplete job pagination; never infer skipped or cancelled work as successful validation.
 4. Only public run/job/step metadata is held in the browser for display. No downloaded logs, tokens, artifacts or executable PR code.
 
+## Bottleneck attribution (first-attempt successful Verify only)
+
+- The **last canonical validation leaf** is the latest finished required validation job preceding successful `certification`. Its observed dependency ancestry is derived from the exact published Verify needs graph, not inferred from bar lengths alone.
+- **Runner queue** is the recorded job creation-to-start interval. **Before validation** is the job start to `Run selected validations` step start; it may include VM/container provisioning, checkout, dependency installation, artifact restoration and runtime checks. It is **not** a pure image pull or startup measurement.
+- **Container initialization** is the `Initialize containers` step duration when GitHub provides it. **Validation** is only the duration of `Run selected validations`; it includes all tasks scheduled by `ci-group.mjs` and is not a sum of per-task execution times. **After validation** is the interval from that step's end to the job's end.
+- **Runner-up gap** is the observed finish-time difference between the last canonical validation leaf and the second-latest one. **Near finish** lists other leaves within 15 seconds of that finish. The gap is not guaranteed time saved by optimizing one job: shared resource contention and reruns can alter the result.
+- **Certification tail** is last-leaf completion to certification completion, including dependency/job scheduling and the certification steps.
+- Missing, cancelled, failed, carried or subsequent-attempt evidence yields an unavailable attribution, not a successful claim. Missing step timestamps render individual phase values unknown, not zero.
+- Individual tasks already report timing in the `ci-group.mjs` logs and `ci-evidence-*/report.json` artifacts. The public, no-token dashboard deliberately does not download job logs or authenticated artifacts, and therefore **cannot identify the slowest Playwright task**. Use the exact run's logs or evidence artifact for task-level attribution; a future telemetry export must be independently reviewed for permissions, privacy and source identity.
+
 ## Metrics and limitations
 
 | Metric | Definition |

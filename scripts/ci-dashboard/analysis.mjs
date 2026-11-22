@@ -1,5 +1,6 @@
 // Read-only CI observability. Neither a verification gate nor release authority.
 import { summarizeCiTiming, seconds } from '../ci-timing.mjs';
+import { VERIFICATION_LEAF_JOBS } from '../ci-contract.mjs';
 
 const stamp = input => { const n = Date.parse(input ?? ''); return Number.isFinite(n) ? n : null; };
 const value = input => String(input ?? '').slice(0, 180);
@@ -78,11 +79,57 @@ export function blockingChain(run, jobs, workflowSource) {
   }
 }
 
+// Attribute the observed certification tail, not a counterfactual speedup.
+export function diagnoseVerifyBottleneck(run, jobs, chain) {
+  const unavailable = reason => ({ available: false, reason });
+  if (run.name !== 'Verify Codexia' || run.status !== 'completed' ||
+      run.conclusion !== 'success' || Number(run.run_attempt) !== 1 || !chain?.verified) {
+    return unavailable('A completed, successful first-attempt Verify chain is required');
+  }
+  const certification = jobs.find(job => current(run, job) && job.name === 'certification' &&
+    job.conclusion === 'success');
+  const leafName = chain.names.at(-2);
+  const leaf = jobs.find(job => current(run, job) && job.name === leafName && job.conclusion === 'success');
+  if (!certification || !leaf || stamp(certification.started_at) === null ||
+      stamp(certification.completed_at) === null || stamp(leaf.completed_at) === null ||
+      stamp(leaf.started_at) === null) return unavailable('Certification or leaf timestamps unavailable');
+
+  // Only jobs eligible to gate certification may compete for the last leaf.
+  const candidates = jobs.filter(job => current(run, job) && job.name !== 'certification' &&
+    VERIFICATION_LEAF_JOBS.includes(job.name) && job.conclusion === 'success' &&
+    stamp(job.completed_at) !== null &&
+    stamp(job.completed_at) <= stamp(certification.started_at))
+    .sort((a, b) => stamp(b.completed_at) - stamp(a.completed_at));
+  if (!candidates.length || candidates[0].name !== leaf.name) {
+    return unavailable('Last canonical leaf does not match the observed dependency chain');
+  }
+  const runnerUp = candidates.find(job => job.id !== leaf.id);
+  const validation = (leaf.steps ?? []).find(step => step.name === 'Run selected validations' &&
+    step.started_at && step.completed_at);
+  const container = (leaf.steps ?? []).find(step => step.name === 'Initialize containers' &&
+    step.started_at && step.completed_at);
+  return {
+    available: true, leafName: leaf.name, leafSeconds: elapsed(leaf.started_at, leaf.completed_at),
+    leafQueueSeconds: elapsed(leaf.created_at, leaf.started_at),
+    beforeValidationSeconds: validation ? elapsed(leaf.started_at, validation.started_at) : null,
+    validationSeconds: validation ? elapsed(validation.started_at, validation.completed_at) : null,
+    afterValidationSeconds: validation ? elapsed(validation.completed_at, leaf.completed_at) : null,
+    containerSeconds: container ? elapsed(container.started_at, container.completed_at) : null,
+    certificationTailSeconds: elapsed(leaf.completed_at, certification.completed_at),
+    runnerUpName: runnerUp?.name ?? null,
+    runnerUpGapSeconds: runnerUp ? elapsed(runnerUp.completed_at, leaf.completed_at) : null,
+    nearFinish: candidates.filter(job => elapsed(job.completed_at, leaf.completed_at) <= 15)
+      .slice(0, 8).map(job => ({
+        name: job.name, behindSeconds: elapsed(job.completed_at, leaf.completed_at),
+      })),
+  };
+}
+
 function phase(name) {
   if (/Set up job|Initialize containers|checkout|setup-node/iu.test(name)) return 'Setup';
   if (/cache|pnpm|Install frozen|Install workspace|Prepare exact/iu.test(name)) return 'Dependencies';
-  if (/build|profile|pack|image/iu.test(name)) return 'Build';
   if (/upload-artifact|download-artifact|Restore exact/iu.test(name)) return 'Artifacts';
+  if (/build|profile|pack|image/iu.test(name)) return 'Build';
   if (/test|validat|typecheck|lint|certif|Run selected/iu.test(name)) return 'Validation';
   return 'Other';
 }
@@ -115,7 +162,9 @@ export function observeRun(run, jobs, verifySource) {
       carriedJobCount: timing.carriedJobCount, skippedJobCount: timing.skippedJobCount,
       comparable: run.status === 'completed' && run.run_attempt === 1 && timing.carriedJobCount === 0,
     },
-    chain, jobs: observedJobs,
+    chain, bottleneck: run.name === 'Verify Codexia'
+      ? diagnoseVerifyBottleneck(run, jobs, chain) : null,
+    jobs: observedJobs,
   };
 }
 

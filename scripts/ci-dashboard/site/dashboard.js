@@ -61,6 +61,22 @@ function renderContext(pr) {
     contextRow('観測期間', formatTime(pr.createdAt)),
     contextRow('収集時刻', formatTime(coverage.observedAt)),
   );
+  const bottleneck = verify?.bottleneck;
+  if (bottleneck?.available) {
+    out.append(
+      contextRow('最後の必須検証', bottleneck.leafName),
+      contextRow('検証ジョブ所要時間', duration(bottleneck.leafSeconds)),
+      contextRow('検証開始前（ジョブ内）', duration(bottleneck.beforeValidationSeconds)),
+      contextRow('うちコンテナ初期化', duration(bottleneck.containerSeconds)),
+      contextRow('検証ステップ', duration(bottleneck.validationSeconds)),
+      contextRow('検証後〜ジョブ終了', duration(bottleneck.afterValidationSeconds)),
+      contextRow('次点ジョブとの差', bottleneck.runnerUpName
+        ? duration(bottleneck.runnerUpGapSeconds) + ' / ' + bottleneck.runnerUpName : '—'),
+      contextRow('認証処理を含む残り', duration(bottleneck.certificationTailSeconds)),
+    );
+  } else {
+    out.append(contextRow('ボトルネック判定', bottleneck?.reason ?? '未計測'));
+  }
   if (verify?.url) {
     const a = link('GitHubでVerifyを開く', verify.url);
     a.className = 'context-row';
@@ -76,9 +92,18 @@ function renderChain(pr) {
     el('chain-note').textContent = chain?.reason ?? 'Verifyジョブの実測がありません。';
     return;
   }
-  for (const name of chain.names) list.append(node('li', '', name));
+  for (const name of chain.names) {
+    const job = verify.jobs.find(item => item.name === name);
+    list.append(node('li', '', name + (job ? ' · ' + duration(job.durationSeconds) : '')));
+  }
+  const bottleneck = verify.bottleneck;
+  const near = bottleneck?.available
+    ? bottleneck.nearFinish.filter(item => item.name !== bottleneck.leafName) : [];
   el('chain-note').textContent = chain.reason +
-    '。共有Runnerの競合・未記録の外部Workflow依存はこのチェーンに含まれません。';
+    '。共有Runnerの競合・未記録の外部Workflow依存はこのチェーンに含まれません。' +
+    (near.length ? ' 最終ジョブの15秒以内に終了した別ジョブ: ' +
+      near.map(item => item.name + ' (' + duration(item.behindSeconds) + '差)').join('、') + '。' : '') +
+    ' 個別タスク時間はActionsのステップAPIだけでは取得できません。';
 }
 function renderSteps(pr) {
   const target = el('steps'); clear(target);
